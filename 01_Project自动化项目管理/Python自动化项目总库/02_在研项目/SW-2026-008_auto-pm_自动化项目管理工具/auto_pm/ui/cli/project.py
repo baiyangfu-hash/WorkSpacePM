@@ -1,18 +1,19 @@
-"""PLC-HMI 概念映射：CLI 命令行入口（项目命令组（create/list/edit/delete））
+"""PLC-HMI 概念映射：CLI 命令行入口（项目命令组）
 
 像 PLC 的调试终端/工程师站，通过命令行直接操作功能块。
 不经过 HMI 画面，直接调用 FB 或 SFB。
 
 --- 原始注释 ---
 
-project 子命令组 - 项目 CRUD
+project 子命令组 - 项目生命周期管理
 
 Commands:
     list                          列出工作空间内所有项目
     create --stack --id --name    创建新项目（调用 Copier 模板）
     show <ID> [--json]            查看项目详情
     edit <ID> [--phase] [--desc]  编辑项目元数据
-    delete <ID> --confirm         删除项目
+    archive / restore             可恢复的项目归档与恢复
+    archive-list                  只读查看归档台账
     retrofit <ID>                 补全 .copier-answers.yml 元数据文件
     import <PATH> [--move]        导入外部项目目录到工作空间
     snapshot <ID> [--dry-run]     刷新 PM_SESSION 的 Spec Snapshot 版本号
@@ -22,7 +23,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 
 import click
 from rich.console import Console
@@ -30,6 +30,8 @@ from rich.table import Table
 from yaml import dump as yaml_dump
 
 from auto_pm.app_context import AppContext
+from auto_pm.change.change_service import ChangeService
+from auto_pm.change.decision_service import DecisionService
 from auto_pm.core.constants import (
     EQUIPMENT_TYPE_CODES,
     PLC_VENDOR_CODES,
@@ -39,10 +41,140 @@ from auto_pm.core.constants import (
     get_template_name,
 )
 from auto_pm.core.paths import WORKSPACE_PROJECTS_SUBDIR
+from auto_pm.core.project_archive_service import ArchiveResult, ProjectArchiveService
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.template_service import TemplateService
+from auto_pm.domain.project.archive_contracts import (
+    ArchiveAuthorization,
+    ArchiveContractError,
+    ArchiveErrorCode,
+    ArchiveOperation,
+    ArchiveRequest,
+    canonical_project_path,
+)
 
 console = Console()
+
+_AUTHORIZING_CHANGE_STATES = frozenset(
+    {"approved", "conditionally_approved", "implementing"}
+)
+_TERMINAL_CHANGE_STATES = frozenset({"completed", "closed", "archived", "rejected"})
+
+
+def archive_authority_conditions(request: ArchiveRequest) -> tuple[str, ...]:
+    """Return the complete immutable condition set required from the decision."""
+    source = canonical_project_path(request.source_path)
+    destination = canonical_project_path(request.destination_path)
+    return (
+        f"archive.operation={request.operation.value}",
+        f"archive.request_id={request.request_id}",
+        f"archive.project_id={request.project_id}",
+        f"archive.source_path={source}",
+        f"archive.destination_path={destination}",
+    )
+
+
+class ProjectArchivePolicyAdapter:
+    """Read real DEC and CHG facts for one exact archive request."""
+
+    def __init__(self, workspace_root: str) -> None:
+        self._decision_service = DecisionService(workspace_root)
+        self._change_service = ChangeService(workspace_root)
+        self._authorized_request: ArchiveRequest | None = None
+
+    def authorization_for(self, request: ArchiveRequest) -> ArchiveAuthorization:
+        source = canonical_project_path(request.source_path)
+        destination = canonical_project_path(request.destination_path)
+        decision = self._decision_service.get_decision(
+            request.decision_id,
+            target_files=(source, destination),
+        )
+        if decision.decision_id != request.decision_id:
+            raise ValueError("决策标识与请求不一致")
+        if decision.project_id != request.project_id:
+            raise ValueError("决策项目与请求不一致")
+        if decision.change_id != request.change_id:
+            raise ValueError("决策变更单与请求不一致")
+        if decision.approved_files != [source, destination]:
+            raise ValueError("决策文件清单必须与请求路径完全一致且顺序固定")
+        if decision.conditions != list(archive_authority_conditions(request)):
+            raise ValueError("决策运行条件与请求不完全一致")
+
+        change = self._change_service.get_change_request(
+            request.change_id,
+            project_id=request.project_id,
+        )
+        if change is None:
+            raise ValueError("授权变更单不存在")
+        if change.change_number != decision.change_id or change.project_id != decision.project_id:
+            raise ValueError("授权变更单无法绑定决策")
+        if change.status not in _AUTHORIZING_CHANGE_STATES:
+            raise ValueError(f"授权变更单状态不允许执行: {change.status}")
+
+        self._authorized_request = request
+        return ArchiveAuthorization(
+            query_succeeded=True,
+            decision_id=decision.decision_id,
+            approved_operation=request.operation,
+            approved_project_id=decision.project_id,
+            approved_paths=(source, destination),
+        )
+
+    def open_change_ids(self, project_id: str) -> tuple[str, ...]:
+        request = self._authorized_request
+        if request is None or request.project_id != project_id:
+            raise ValueError("尚未验证本项目的授权变更单")
+        self.authorization_for(request)
+        changes = self._change_service.list_change_requests(project_id)
+        return tuple(
+            sorted(
+                change.change_number
+                for change in changes
+                if change.change_number != request.change_id
+                and change.status not in _TERMINAL_CHANGE_STATES
+            )
+        )
+
+
+def _build_archive_project_service(workspace_root: str) -> ProjectService:
+    policy = ProjectArchivePolicyAdapter(workspace_root)
+    archive_service = ProjectArchiveService(workspace_root, policy)
+    project_service = ProjectService(workspace_root)
+    project_service.configure_archive_service(archive_service)
+    return project_service
+
+
+def _archive_result_payload(result: ArchiveResult) -> dict[str, object]:
+    return {
+        "success": True,
+        "request_id": result.request_id,
+        "project_id": result.project_id,
+        "operation": result.operation.value,
+        "archive_code": result.archive_code,
+        "source_path": result.source_path,
+        "destination_path": result.destination_path,
+        "idempotent_replay": result.idempotent_replay,
+    }
+
+
+def _archive_error_payload(exc: Exception) -> dict[str, object]:
+    code = (
+        exc.code.value
+        if isinstance(exc, ArchiveContractError)
+        else ArchiveErrorCode.EXECUTION_FAILED.value
+    )
+    return {"success": False, "error": {"code": code, "message": str(exc)}}
+
+
+def _emit_archive_failure(ctx: click.Context, exc: Exception, output_json: bool) -> None:
+    payload = _archive_error_payload(exc)
+    if output_json:
+        click.echo(json.dumps(payload, ensure_ascii=False))
+    else:
+        error = payload["error"]
+        assert isinstance(error, dict)
+        console.print(f"[red]归档操作失败 [{error['code']}]: {error['message']}[/red]")
+    ctx.exit(2)
 
 
 def _format_asset_summary_status(status: str) -> str:
@@ -286,6 +418,7 @@ def cmd_create(
     if not project_id:
         console.print("[red]错误: 必须提供 --id 或 --auto-id[/red]")
         ctx.exit(1)
+    assert project_id is not None
 
     # 业务线推断：未指定时从项目编号前缀提取
     if business_line is None:
@@ -516,39 +649,162 @@ def cmd_edit(
         ctx.exit(1)
 
 
-@project_group.command(name="delete")
-@click.argument("project_id")
-@click.option("--confirm", is_flag=True, help="确认删除（破坏性操作）")
-@click.pass_context
-def cmd_delete(ctx: click.Context, project_id: str, confirm: bool) -> None:
-    """删除项目（破坏性操作，需 --confirm）"""
+def _run_archive_command(
+    ctx: click.Context,
+    *,
+    operation: ArchiveOperation,
+    request_id: str,
+    project_id: str,
+    change_id: str,
+    decision_id: str,
+    source_path: str,
+    destination_path: str,
+    actor: str,
+    archive_code: str,
+    output_json: bool,
+) -> None:
     app_ctx: AppContext = ctx.obj
-    svc = ProjectService(app_ctx.workspace_root)
-    proj = svc.get_project(project_id)
-
-    if proj is None:
-        console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
-        ctx.exit(1)
-
-    if not confirm:
-        console.print(f"[yellow]警告: 即将删除项目: {proj.path}[/yellow]")
-        console.print("[yellow]请使用 --confirm 确认删除[/yellow]")
-        ctx.exit(1)
-
+    request = ArchiveRequest(
+        request_id=request_id,
+        project_id=project_id,
+        change_id=change_id,
+        decision_id=decision_id,
+        operation=operation,
+        source_path=source_path,
+        destination_path=destination_path,
+        actor=actor,
+        archive_code=archive_code,
+    )
     try:
-        shutil.rmtree(proj.path)
-        # 审计日志：记录项目删除操作（破坏性操作必须审计）
-        from auto_pm.logging.audit import audit_log
-        audit_log(
-            "project_delete",
-            project_id=project_id,
-            project_name=proj.name,
-            path=proj.path,
+        service = _build_archive_project_service(app_ctx.workspace_root)
+        result = (
+            service.archive_project(request)
+            if operation is ArchiveOperation.ARCHIVE
+            else service.restore_project(request)
         )
-        console.print(f"[green]项目已删除: {proj.path}[/green]")
-    except OSError as e:
-        console.print(f"[red]删除失败: {e}[/red]")
-        ctx.exit(1)
+    except Exception as exc:
+        _emit_archive_failure(ctx, exc, output_json)
+        return
+
+    payload = _archive_result_payload(result)
+    if output_json:
+        click.echo(json.dumps(payload, ensure_ascii=False))
+    else:
+        replay = "（幂等重放）" if result.idempotent_replay else ""
+        console.print(
+            f"[green]{operation.value} 完成{replay}: "
+            f"{result.source_path} -> {result.destination_path} "
+            f"[{result.archive_code}][/green]"
+        )
+
+
+@project_group.command(name="archive")
+@click.option("--request-id", required=True, help="不可变请求标识")
+@click.option("--project-id", required=True, help="项目编号")
+@click.option("--change-id", required=True, help="授权变更单编号")
+@click.option("--decision-id", required=True, help="不可变决策编号")
+@click.option("--source", "source_path", required=True, help="规范工作区相对源路径")
+@click.option("--destination", "destination_path", required=True, help="规范工作区相对归档路径")
+@click.option("--actor", required=True, help="执行主体")
+@click.option("--json", "output_json", is_flag=True, help="输出机器可读 JSON")
+@click.pass_context
+def cmd_archive(
+    ctx: click.Context,
+    request_id: str,
+    project_id: str,
+    change_id: str,
+    decision_id: str,
+    source_path: str,
+    destination_path: str,
+    actor: str,
+    output_json: bool,
+) -> None:
+    """通过安全应用服务归档项目，不提供强制或删除能力。"""
+    _run_archive_command(
+        ctx,
+        operation=ArchiveOperation.ARCHIVE,
+        request_id=request_id,
+        project_id=project_id,
+        change_id=change_id,
+        decision_id=decision_id,
+        source_path=source_path,
+        destination_path=destination_path,
+        actor=actor,
+        archive_code="",
+        output_json=output_json,
+    )
+
+
+@project_group.command(name="restore")
+@click.option("--request-id", required=True, help="不可变请求标识")
+@click.option("--project-id", required=True, help="项目编号")
+@click.option("--change-id", required=True, help="授权变更单编号")
+@click.option("--decision-id", required=True, help="不可变决策编号")
+@click.option("--source", "source_path", required=True, help="规范工作区相对归档源路径")
+@click.option("--destination", "destination_path", required=True, help="规范工作区相对恢复路径")
+@click.option("--archive-code", required=True, help="原归档记录编号")
+@click.option("--actor", required=True, help="执行主体")
+@click.option("--json", "output_json", is_flag=True, help="输出机器可读 JSON")
+@click.pass_context
+def cmd_restore(
+    ctx: click.Context,
+    request_id: str,
+    project_id: str,
+    change_id: str,
+    decision_id: str,
+    source_path: str,
+    destination_path: str,
+    archive_code: str,
+    actor: str,
+    output_json: bool,
+) -> None:
+    """通过安全应用服务恢复项目。"""
+    _run_archive_command(
+        ctx,
+        operation=ArchiveOperation.RESTORE,
+        request_id=request_id,
+        project_id=project_id,
+        change_id=change_id,
+        decision_id=decision_id,
+        source_path=source_path,
+        destination_path=destination_path,
+        actor=actor,
+        archive_code=archive_code,
+        output_json=output_json,
+    )
+
+
+@project_group.command(name="archive-list")
+@click.option("--json", "output_json", is_flag=True, help="输出机器可读 JSON")
+@click.pass_context
+def cmd_archive_list(ctx: click.Context, output_json: bool) -> None:
+    """只读列出安全归档台账视图。"""
+    app_ctx: AppContext = ctx.obj
+    try:
+        rows = _build_archive_project_service(app_ctx.workspace_root).list_archived_projects()
+    except Exception as exc:
+        _emit_archive_failure(ctx, exc, output_json)
+        return
+
+    if output_json:
+        click.echo(json.dumps({"success": True, "archives": rows}, ensure_ascii=False))
+        return
+    if not rows:
+        console.print("[yellow]无已归档项目[/yellow]")
+        return
+    table = Table(title=f"项目归档列表 ({len(rows)} 个)")
+    table.add_column("归档编号", style="cyan")
+    table.add_column("项目ID")
+    table.add_column("源路径")
+    table.add_column("归档路径")
+    for row in rows:
+        table.add_row(
+            row.get("archive_code", ""),
+            row.get("project_id", ""),
+            row.get("source_path", ""),
+            row.get("destination_path", ""),
+        )
+    console.print(table)
 
 
 @project_group.command(name="retrofit")
@@ -760,7 +1016,6 @@ _PROJECTS_SUBDIR = WORKSPACE_PROJECTS_SUBDIR  # M3-Iter6: 从 core.paths 读取
 @project_group.command(name="import")
 @click.argument("path", type=click.Path(exists=True, file_okay=False))
 @click.option("--move", is_flag=True, help="移动而非复制（默认复制）")
-@click.option("--force", is_flag=True, help="强制覆盖已存在的目标目录")
 @click.option(
     "--business-line",
     "-bl",
@@ -773,44 +1028,23 @@ def cmd_import(
     ctx: click.Context,
     path: str,
     move: bool,
-    force: bool,
     business_line: str | None,
 ) -> None:
     """导入外部项目目录到工作空间的 02_在研项目/ 下"""
     app_ctx: AppContext = ctx.obj
-    source_path = os.path.abspath(path)
-    dirname = os.path.basename(source_path)
-    dest_path = os.path.join(app_ctx.workspace_root, _PROJECTS_SUBDIR, dirname)
-
-    if os.path.exists(dest_path):
-        if not force:
-            console.print(f"[red]错误: 目标路径已存在: {dest_path}（使用 --force 覆盖）[/red]")
-            ctx.exit(1)
-        console.print(f"[yellow]强制覆盖: {dest_path}[/yellow]")
-        shutil.rmtree(dest_path, ignore_errors=True)
-
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-
-    try:
-        if move:
-            shutil.move(source_path, dest_path)
-            console.print(f"[green]项目已移动: {dest_path}[/green]")
-        else:
-            shutil.copytree(source_path, dest_path)
-            console.print(f"[green]项目已复制: {dest_path}[/green]")
-    except OSError as e:
-        console.print(f"[red]导入失败: {e}[/red]")
-        ctx.exit(1)
-
-    # 导入后补全 .copier-answers.yml（如果仍缺少）
     svc = ProjectService(app_ctx.workspace_root)
     try:
-        svc.retrofit_project_by_path(dest_path)
-        console.print("[green].copier-answers.yml 已补全[/green]")
-    except FileExistsError:
-        pass  # 已有 .copier-answers.yml，正常
-    except Exception as e:
-        console.print(f"[yellow]补全元数据失败: {e}[/yellow]")
+        dest_path = svc.import_project(
+            path,
+            business_line=business_line,
+            move=move,
+            force=False,
+        )
+        action = "移动" if move else "复制"
+        console.print(f"[green]项目已{action}: {dest_path}[/green]")
+    except (OSError, ValueError) as e:
+        console.print(f"[red]导入失败: {e}[/red]")
+        ctx.exit(1)
 
     project_id = ProjectService._extract_id_from_dirname(dest_path)
     if business_line is not None:
