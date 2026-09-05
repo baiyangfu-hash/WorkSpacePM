@@ -7,13 +7,13 @@
       而非中文标签。测试中使用 DOCU（工程文档）和 PLC（PLC程序）。
     - 状态筛选使用 STATUS_FLOW 中定义的英文状态码。
 """
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
@@ -106,11 +106,11 @@ def _create_chg_file(workspace: str, change_number: str, domain: str, content: s
     project_path = os.path.join(workspace, "TEST-2026-001")
     # 创建项目标志文件，使 ChangeFileLocator._is_project_dir 识别为项目目录
     os.makedirs(project_path, exist_ok=True)
-    with open(os.path.join(project_path, "PM_SESSION_TEST-2026-001.md"), "w", encoding="utf-8") as f:
+    with open(
+        os.path.join(project_path, "PM_SESSION_TEST-2026-001.md"), "w", encoding="utf-8"
+    ) as f:
         f.write("# PM_SESSION\n")
-    chg_dir = os.path.join(
-        project_path, "04_监控", "01_变更管理", "01_变更单", f"CHG-{domain}"
-    )
+    chg_dir = os.path.join(project_path, "04_监控", "01_变更管理", "01_变更单", f"CHG-{domain}")
     os.makedirs(chg_dir, exist_ok=True)
     file_path = os.path.join(chg_dir, f"{change_number}.md")
     with open(file_path, "w", encoding="utf-8") as f:
@@ -173,9 +173,7 @@ def workspace_and_db(tmp_path: Path) -> tuple[str, DatabaseManager, str]:
     Returns:
         (workspace_root, db, chg_file_path)
     """
-    chg_file = _create_chg_file(
-        str(tmp_path), "CHG-DOCU-2026-001", "DOCU", _SAMPLE_CHG_CONTENT
-    )
+    chg_file = _create_chg_file(str(tmp_path), "CHG-DOCU-2026-001", "DOCU", _SAMPLE_CHG_CONTENT)
 
     db = DatabaseManager(str(tmp_path))
     db.init_schema()
@@ -250,9 +248,7 @@ class TestListAllChanges:
         for c in result:
             assert c.domain == "PLC"
 
-    def test_combined_filter_status_and_domain(
-        self, db_with_changes: DatabaseManager
-    ) -> None:
+    def test_combined_filter_status_and_domain(self, db_with_changes: DatabaseManager) -> None:
         """status='draft' + domain='DOCU' 联合筛选 → 1 条"""
         svc = ChangeService(db_with_changes.workspace_root, db=db_with_changes)
         result = svc.list_all_changes(status="draft", domain="DOCU")
@@ -276,9 +272,7 @@ class TestListAllChanges:
         assert len(result) == 1
         assert result[0].change_number == "CHG-DOCU-2026-001"
 
-    def test_fallback_file_scan_with_status_filter(
-        self, workspace_with_chg: str
-    ) -> None:
+    def test_fallback_file_scan_with_status_filter(self, workspace_with_chg: str) -> None:
         """无 DB 时文件扫描 + 状态筛选"""
         svc = ChangeService(workspace_with_chg)
         result = svc.list_all_changes(status="draft")
@@ -297,9 +291,7 @@ class TestUpdateChangeRequest:
     def test_update_background(self, workspace_with_chg: str) -> None:
         """修改背景字段"""
         svc = ChangeService(workspace_with_chg)
-        updated = svc.update_change_request(
-            "CHG-DOCU-2026-001", background="全新的变更背景内容"
-        )
+        updated = svc.update_change_request("CHG-DOCU-2026-001", background="全新的变更背景内容")
 
         assert updated is not None
         assert updated.background == "全新的变更背景内容"
@@ -309,9 +301,7 @@ class TestUpdateChangeRequest:
     def test_update_necessity(self, workspace_with_chg: str) -> None:
         """修改必要性字段"""
         svc = ChangeService(workspace_with_chg)
-        updated = svc.update_change_request(
-            "CHG-DOCU-2026-001", necessity="紧急的变更必要性"
-        )
+        updated = svc.update_change_request("CHG-DOCU-2026-001", necessity="紧急的变更必要性")
 
         assert updated is not None
         assert updated.necessity == "紧急的变更必要性"
@@ -321,9 +311,7 @@ class TestUpdateChangeRequest:
     def test_update_references(self, workspace_with_chg: str) -> None:
         """修改参考依据字段"""
         svc = ChangeService(workspace_with_chg)
-        updated = svc.update_change_request(
-            "CHG-DOCU-2026-001", references="新的参考依据文档"
-        )
+        updated = svc.update_change_request("CHG-DOCU-2026-001", references="新的参考依据文档")
 
         assert updated is not None
         assert updated.references == "新的参考依据文档"
@@ -331,9 +319,7 @@ class TestUpdateChangeRequest:
     def test_update_planned_date(self, workspace_with_chg: str) -> None:
         """修改预计实施日期"""
         svc = ChangeService(workspace_with_chg)
-        updated = svc.update_change_request(
-            "CHG-DOCU-2026-001", planned_date="2026-03-01"
-        )
+        updated = svc.update_change_request("CHG-DOCU-2026-001", planned_date="2026-03-01")
 
         assert updated is not None
         assert updated.planned_date == "2026-03-01"
@@ -341,9 +327,7 @@ class TestUpdateChangeRequest:
     def test_update_urgency(self, workspace_with_chg: str) -> None:
         """修改紧急程度"""
         svc = ChangeService(workspace_with_chg)
-        updated = svc.update_change_request(
-            "CHG-DOCU-2026-001", urgency="urgent"
-        )
+        updated = svc.update_change_request("CHG-DOCU-2026-001", urgency="urgent")
 
         assert updated is not None
         assert updated.urgency == "urgent"
@@ -363,41 +347,32 @@ class TestUpdateChangeRequest:
         assert updated.necessity == "多字段必要性"
         assert updated.planned_date == "2026-04-01"
 
-    def test_update_protected_change_number_raises(
-        self, workspace_with_chg: str
-    ) -> None:
+    def test_update_protected_change_number_raises(self, workspace_with_chg: str) -> None:
         """不允许修改 change_number → Python 参数绑定拒绝（TypeError）"""
         svc = ChangeService(workspace_with_chg)
         # change_number 是位置参数，通过 kwargs 传入会触发 TypeError
         with pytest.raises(TypeError, match="multiple values"):
             svc.update_change_request(
-                "CHG-DOCU-2026-001", change_number="CHG-DOCU-2026-999"  # type: ignore[misc]
+                "CHG-DOCU-2026-001",
+                change_number="CHG-DOCU-2026-999",  # type: ignore[misc]
             )
 
-    def test_update_protected_project_id_raises(
-        self, workspace_with_chg: str
-    ) -> None:
+    def test_update_protected_project_id_raises(self, workspace_with_chg: str) -> None:
         """不允许修改 project_id → 抛 ValueError"""
         svc = ChangeService(workspace_with_chg)
         with pytest.raises(ValueError, match="不允许修改"):
-            svc.update_change_request(
-                "CHG-DOCU-2026-001", project_id="OTHER-2026-001"
-            )
+            svc.update_change_request("CHG-DOCU-2026-001", project_id="OTHER-2026-001")
 
     def test_update_protected_status_raises(self, workspace_with_chg: str) -> None:
         """不允许修改 status → 抛 ValueError（提示用 transition_status）"""
         svc = ChangeService(workspace_with_chg)
         with pytest.raises(ValueError, match="transition_status"):
-            svc.update_change_request(
-                "CHG-DOCU-2026-001", status="approved"
-            )
+            svc.update_change_request("CHG-DOCU-2026-001", status="approved")
 
     def test_update_nonexistent_returns_none(self, workspace_with_chg: str) -> None:
         """修改不存在的变更单 → 返回 None"""
         svc = ChangeService(workspace_with_chg)
-        result = svc.update_change_request(
-            "CHG-DOCU-9999-999", background="不存在"
-        )
+        result = svc.update_change_request("CHG-DOCU-9999-999", background="不存在")
         assert result is None
 
     def test_update_invalid_urgency_raises(self, workspace_with_chg: str) -> None:
@@ -406,16 +381,12 @@ class TestUpdateChangeRequest:
 
         svc = ChangeService(workspace_with_chg)
         with pytest.raises(SpecViolationError, match="紧急程度"):
-            svc.update_change_request(
-                "CHG-DOCU-2026-001", urgency="invalid_level"
-            )
+            svc.update_change_request("CHG-DOCU-2026-001", urgency="invalid_level")
 
     def test_update_preserves_file_structure(self, workspace_with_chg: str) -> None:
         """修改后文件章节结构完整保留"""
         svc = ChangeService(workspace_with_chg)
-        svc.update_change_request(
-            "CHG-DOCU-2026-001", background="结构保留测试"
-        )
+        svc.update_change_request("CHG-DOCU-2026-001", background="结构保留测试")
 
         # 重新解析验证完整性
         cr = svc.get_change_request("CHG-DOCU-2026-001")
@@ -427,14 +398,14 @@ class TestUpdateChangeRequest:
         # 必要性未被破坏
         assert cr.necessity == "测试变更必要性描述"
 
-    def test_update_syncs_db_cache(self, workspace_and_db: tuple[str, DatabaseManager, str]) -> None:
+    def test_update_syncs_db_cache(
+        self, workspace_and_db: tuple[str, DatabaseManager, str]
+    ) -> None:
         """修改后 DB 缓存同步更新"""
         workspace, db, _ = workspace_and_db
         svc = ChangeService(workspace, db=db)
 
-        updated = svc.update_change_request(
-            "CHG-DOCU-2026-001", background="DB同步测试背景"
-        )
+        updated = svc.update_change_request("CHG-DOCU-2026-001", background="DB同步测试背景")
         assert updated is not None
 
         # 从 DB 查询验证缓存已更新
@@ -472,7 +443,9 @@ class TestDeleteChangeRequest:
         result = svc.delete_change_request("CHG-DOCU-9999-999")
         assert result is False
 
-    def test_delete_removes_db_cache(self, workspace_and_db: tuple[str, DatabaseManager, str]) -> None:
+    def test_delete_removes_db_cache(
+        self, workspace_and_db: tuple[str, DatabaseManager, str]
+    ) -> None:
         """删除后 DB 缓存也清除"""
         workspace, db, chg_file = workspace_and_db
         svc = ChangeService(workspace, db=db)
@@ -533,9 +506,7 @@ def _create_chg_file_for_project(
         encoding="utf-8",
     ) as f:
         f.write("# PM_SESSION\n")
-    chg_dir = os.path.join(
-        project_path, "04_监控", "01_变更管理", "01_变更单", f"CHG-{domain}"
-    )
+    chg_dir = os.path.join(project_path, "04_监控", "01_变更管理", "01_变更单", f"CHG-{domain}")
     os.makedirs(chg_dir, exist_ok=True)
     file_path = os.path.join(chg_dir, f"{change_number}.md")
     with open(file_path, "w", encoding="utf-8") as f:
@@ -543,9 +514,7 @@ def _create_chg_file_for_project(
     return file_path
 
 
-_SAMPLE_CHG_CONTENT_PROJECT_B = _SAMPLE_CHG_CONTENT.replace(
-    "TEST-2026-001", "TEST-2026-002"
-)
+_SAMPLE_CHG_CONTENT_PROJECT_B = _SAMPLE_CHG_CONTENT.replace("TEST-2026-001", "TEST-2026-002")
 
 
 @pytest.fixture
@@ -582,9 +551,7 @@ class TestCrossProjectFilter:
         from auto_pm.change.parser import ChgParser
 
         locator = ChangeFileLocator(workspace, ChgParser())
-        result = locator.find_change_file(
-            "CHG-DOCU-2026-001", project_id="TEST-2026-001"
-        )
+        result = locator.find_change_file("CHG-DOCU-2026-001", project_id="TEST-2026-001")
         assert result == file_a
 
     def test_find_with_project_id_b(
@@ -597,9 +564,7 @@ class TestCrossProjectFilter:
         from auto_pm.change.parser import ChgParser
 
         locator = ChangeFileLocator(workspace, ChgParser())
-        result = locator.find_change_file(
-            "CHG-DOCU-2026-001", project_id="TEST-2026-002"
-        )
+        result = locator.find_change_file("CHG-DOCU-2026-001", project_id="TEST-2026-002")
         assert result == file_b
 
     def test_find_without_project_id_backward_compat(
@@ -657,9 +622,7 @@ class TestCrossProjectFilter:
         """delete_change_request 提供 project_id=TEST-2026-001 → 删除项目 A 的文件"""
         workspace, file_a, file_b = workspace_with_cross_project_chg
         svc = ChangeService(workspace)
-        result = svc.delete_change_request(
-            "CHG-DOCU-2026-001", project_id="TEST-2026-001"
-        )
+        result = svc.delete_change_request("CHG-DOCU-2026-001", project_id="TEST-2026-001")
         assert result is True
         assert not os.path.isfile(file_a)
         # 项目 B 的文件应保留
@@ -675,8 +638,6 @@ class TestCrossProjectFilter:
         from auto_pm.change.parser import ChgParser
 
         locator = ChangeFileLocator(workspace, ChgParser())
-        result = locator.find_change_file(
-            "CHG-DOCU-2026-001", project_id="NONEXISTENT-2026-999"
-        )
+        result = locator.find_change_file("CHG-DOCU-2026-001", project_id="NONEXISTENT-2026-999")
         # project_id 定位失败时回退递归搜索
         assert result is not None

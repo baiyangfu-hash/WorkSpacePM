@@ -164,9 +164,7 @@ class AssetSummaryViewDTO(BaseModel):
             )
 
         status = str(asset_summary.get("status", "unknown"))
-        badge_label, badge_bg, badge_fg = status_badges.get(
-            status, ("未知", "#95a5a6", "#ffffff")
-        )
+        badge_label, badge_bg, badge_fg = status_badges.get(status, ("未知", "#95a5a6", "#ffffff"))
         issue_messages = cls._normalize_issue_messages(asset_summary.get("issue_messages"))
 
         return cls(

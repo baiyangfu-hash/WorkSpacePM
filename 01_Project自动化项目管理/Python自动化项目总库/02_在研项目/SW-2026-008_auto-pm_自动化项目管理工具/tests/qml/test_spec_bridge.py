@@ -182,14 +182,10 @@ def test_spec_bridge_list_entries(qapp) -> None:  # type: ignore[no-untyped-def]
 
     entries = [
         _make_entry_dto(spec_id="SW-2026-006", domain="python"),
-        _make_entry_dto(
-            spec_id="SW-2026-008", domain="python", title="auto-pm 项目管理"
-        ),
+        _make_entry_dto(spec_id="SW-2026-008", domain="python", title="auto-pm 项目管理"),
     ]
     mock_facade = _MockSpecFacade(
-        list_entries_result=QueryResult(
-            success=True, message="OK", payload=entries
-        )
+        list_entries_result=QueryResult(success=True, message="OK", payload=entries)
     )
     bridge = SpecBridge(facade=mock_facade)  # type: ignore[arg-type]
     result = bridge.listSpecEntries("python")
@@ -232,9 +228,7 @@ def test_spec_bridge_run_check_failure(qapp) -> None:  # type: ignore[no-untyped
     from auto_pm.ui.qml.bridges.spec_bridge import SpecBridge
 
     mock_facade = _MockSpecFacade(
-        run_check_result=CommandResult(
-            success=False, message="Spec check failed", payload=None
-        )
+        run_check_result=CommandResult(success=False, message="Spec check failed", payload=None)
     )
     bridge = SpecBridge(facade=mock_facade)  # type: ignore[arg-type]
 
@@ -286,9 +280,7 @@ def test_spec_bridge_generate_spec_index_error(qapp) -> None:  # type: ignore[no
     from auto_pm.ui.qml.bridges.spec_bridge import SpecBridge
 
     mock_facade = _MockSpecFacade(
-        generate_index_result=CommandResult(
-            success=False, message="No index_service", payload=None
-        )
+        generate_index_result=CommandResult(success=False, message="No index_service", payload=None)
     )
     bridge = SpecBridge(facade=mock_facade)  # type: ignore[arg-type]
 
@@ -439,7 +431,9 @@ def test_spec_bridge_repair_spec(qapp) -> None:  # type: ignore[no-untyped-def]
     from auto_pm.ui.qml.bridges.spec_bridge import SpecBridge
 
     mock_facade = _MockSpecFacade(
-        repair_result=CommandResult(success=True, message="修复成功", payload={"repaired_items": []})
+        repair_result=CommandResult(
+            success=True, message="修复成功", payload={"repaired_items": []}
+        )
     )
     bridge = SpecBridge(facade=mock_facade)  # type: ignore[arg-type]
 
@@ -448,4 +442,3 @@ def test_spec_bridge_repair_spec(qapp) -> None:  # type: ignore[no-untyped-def]
     assert result["success"] is True
     assert result["message"] == "修复成功"
     assert mock_facade.repair_calls == ["SW-2026-PYT"]
-

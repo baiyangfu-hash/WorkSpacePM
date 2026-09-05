@@ -1,4 +1,5 @@
 """QML 单元测试：DocBrowserView.qml 分类筛选与大纲导航联动 (CHG-SCPT-2026-130)"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,19 +12,19 @@ from PySide6.QtWidgets import QApplication
 _QML_DIR = Path(__file__).resolve().parents[2] / "auto_pm" / "ui" / "qml"
 _VIEWS_DIR = _QML_DIR / "views"
 
+
 @pytest.fixture
 def qml_engine(qapp: QApplication) -> QQmlEngine:
     """提供带有 Theme 引用路径的 QML 引擎"""
     import PySide6
+
     engine = QQmlEngine()
-    sys_qml = Path(r"C:\Users\fubai\AppData\Local\Programs\Python\Python311\Lib\site-packages\PySide6\qml")
-    if sys_qml.exists():
-        engine.addImportPath(str(sys_qml))
     pyside6_qml = Path(PySide6.__file__).parent / "qml"
     if pyside6_qml.exists():
         engine.addImportPath(str(pyside6_qml))
     engine.addImportPath(str(_QML_DIR))
     return engine
+
 
 def _load_qml(engine: QQmlEngine, path: Path) -> object:
     url = QUrl.fromLocalFile(str(path))
@@ -36,10 +37,12 @@ def _load_qml(engine: QQmlEngine, path: Path) -> object:
     obj._component_ref = component
     return obj
 
+
 def _to_variant(value: object) -> object:
     if hasattr(value, "toVariant"):
         return value.toVariant()
     return value
+
 
 def test_doc_browser_view_generic_categories(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """测试 DocBrowserView 的项目文档分类筛选过滤逻辑"""
@@ -75,6 +78,7 @@ def test_doc_browser_view_generic_categories(qapp: QApplication, qml_engine: QQm
     assert len(filtered) == 1  # type: ignore[arg-type]
     assert filtered[0]["name"] == "01_技术文档/01_Architecture.md"  # type: ignore[index]
 
+
 def test_doc_browser_view_outline_extraction(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """测试 DocBrowserView 自动从 blocks 中提取 h1, h2 级别的大纲模型"""
     view = _load_qml(qml_engine, _VIEWS_DIR / "DocBrowserView.qml")
@@ -84,7 +88,7 @@ def test_doc_browser_view_outline_extraction(qapp: QApplication, qml_engine: QQm
         {"type": "paragraph", "html": "<p>some text</p>"},
         {"type": "h2", "text": "Sub Heading Two"},
         {"type": "code", "code": "print(1)", "lang": "python"},
-        {"type": "h3", "text": "Sub Sub Heading Three"}, # 不提取 h3 保持清爽
+        {"type": "h3", "text": "Sub Sub Heading Three"},  # 不提取 h3 保持清爽
     ]
     view.setProperty("docBlocks", blocks)  # type: ignore[attr-defined]
     qapp.processEvents()

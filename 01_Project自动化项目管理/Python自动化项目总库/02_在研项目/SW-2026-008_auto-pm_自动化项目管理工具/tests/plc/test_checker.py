@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from auto_pm.plc.checker import PlcChecker
 from auto_pm.plc.models import STD_DIRS
 
@@ -43,15 +42,28 @@ def full_project(tmp_path: Path) -> Path:
     # PRD 目录 + 标准文档
     prd_dir = project_dir / "PRD"
     prd_dir.mkdir()
-    for doc in ["需求分析文档_REQ.md", "接口文档_INT.md", "详细设计说明书_DSN.md", "技术方案文档_TEC.md"]:
+    for doc in [
+        "需求分析文档_REQ.md",
+        "接口文档_INT.md",
+        "详细设计说明书_DSN.md",
+        "技术方案文档_TEC.md",
+    ]:
         (prd_dir / doc).write_text(f"# {doc}\n", encoding="utf-8")
 
     # 标准目录（LSP-907 §3.1，12 个）
     for d in [
-        "01_启动", "02_PLC程序", "03_HMI设计",
-        "04_现场调试", "05_测试与验证", "06_文档与交付",
-        "07_技术支持", "08_备件管理", "09_项目总结", "10_知识库",
-        "11_监控", "12_驱动器与设备",
+        "01_启动",
+        "02_PLC程序",
+        "03_HMI设计",
+        "04_现场调试",
+        "05_测试与验证",
+        "06_文档与交付",
+        "07_技术支持",
+        "08_备件管理",
+        "09_项目总结",
+        "10_知识库",
+        "11_监控",
+        "12_驱动器与设备",
     ]:
         (project_dir / d).mkdir()
 
@@ -59,11 +71,17 @@ def full_project(tmp_path: Path) -> Path:
     chg_dir = project_dir / "11_监控" / "01_变更管理"
     (chg_dir / "01_变更单").mkdir(parents=True, exist_ok=True)
     (chg_dir / "02_变更记录").mkdir(parents=True, exist_ok=True)
-    (chg_dir / "02_变更记录" / "01_版本变更台帐.md").write_text("# 版本变更台帐\n", encoding="utf-8")
+    (chg_dir / "02_变更记录" / "01_版本变更台帐.md").write_text(
+        "# 版本变更台帐\n", encoding="utf-8"
+    )
 
     # 交付文档实质化
-    (project_dir / "04_现场调试" / "现场调试计划.md").write_text("# 现场调试计划\n", encoding="utf-8")
-    (project_dir / "06_文档与交付" / "验收交付清单.md").write_text("# 验收交付清单\n", encoding="utf-8")
+    (project_dir / "04_现场调试" / "现场调试计划.md").write_text(
+        "# 现场调试计划\n", encoding="utf-8"
+    )
+    (project_dir / "06_文档与交付" / "验收交付清单.md").write_text(
+        "# 验收交付清单\n", encoding="utf-8"
+    )
 
     return tmp_path
 
@@ -85,9 +103,7 @@ def missing_prd_dir_project(tmp_path: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    (project_dir / "PM_SESSION_DJ-2026-NOPRD.md").write_text(
-        "# PM_SESSION\n", encoding="utf-8"
-    )
+    (project_dir / "PM_SESSION_DJ-2026-NOPRD.md").write_text("# PM_SESSION\n", encoding="utf-8")
 
     return tmp_path
 
@@ -109,9 +125,7 @@ def missing_std_dirs_project(tmp_path: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    (project_dir / "PM_SESSION_DJ-2026-NODIR.md").write_text(
-        "# PM_SESSION\n", encoding="utf-8"
-    )
+    (project_dir / "PM_SESSION_DJ-2026-NODIR.md").write_text("# PM_SESSION\n", encoding="utf-8")
     # 有 PRD 但无标准目录
     (project_dir / "PRD").mkdir()
 
@@ -135,9 +149,7 @@ def nonstandard_prd_project(tmp_path: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    (project_dir / "PM_SESSION_DJ-2026-NSPRD.md").write_text(
-        "# PM_SESSION\n", encoding="utf-8"
-    )
+    (project_dir / "PM_SESSION_DJ-2026-NSPRD.md").write_text("# PM_SESSION\n", encoding="utf-8")
 
     prd_dir = project_dir / "PRD"
     prd_dir.mkdir()
@@ -162,9 +174,7 @@ def invalid_plc_json_project(tmp_path: Path) -> Path:
         json.dumps({"name": "DJ-2026-INV"}, ensure_ascii=False),
         encoding="utf-8",
     )
-    (project_dir / "PM_SESSION_DJ-2026-INV.md").write_text(
-        "# PM_SESSION\n", encoding="utf-8"
-    )
+    (project_dir / "PM_SESSION_DJ-2026-INV.md").write_text("# PM_SESSION\n", encoding="utf-8")
 
     return tmp_path
 
@@ -204,9 +214,7 @@ class TestCheckProject:
         result = checker.check_project(str(project_dir))
 
         # 缺少 .plc.json 应该 fail
-        assert any(
-            item.item == ".plc.json" and item.status == "fail" for item in result.items
-        )
+        assert any(item.item == ".plc.json" and item.status == "fail" for item in result.items)
 
     def test_check_all_pass(self, full_project: Path) -> None:
         """检查完整项目应全部通过"""
@@ -224,9 +232,7 @@ class TestCheckProject:
         checker = PlcChecker(str(missing_prd_dir_project))
         result = checker.check_project(project_path)
 
-        assert any(
-            item.item == "PRD 目录" and item.status == "fail" for item in result.items
-        )
+        assert any(item.item == "PRD 目录" and item.status == "fail" for item in result.items)
 
     def test_check_missing_std_dirs(self, missing_std_dirs_project: Path) -> None:
         """检查缺少标准目录的项目"""
@@ -235,8 +241,7 @@ class TestCheckProject:
         result = checker.check_project(project_path)
 
         fail_dirs = [
-            item for item in result.items
-            if item.item.startswith("目录 ") and item.status == "fail"
+            item for item in result.items if item.item.startswith("目录 ") and item.status == "fail"
         ]
         assert len(fail_dirs) >= 1
 
@@ -247,8 +252,7 @@ class TestCheckProject:
         result = checker.check_project(project_path)
 
         warn_items = [
-            item for item in result.items
-            if item.item.startswith("PRD/") and item.status == "warn"
+            item for item in result.items if item.item.startswith("PRD/") and item.status == "warn"
         ]
         assert len(warn_items) >= 1
 
@@ -293,11 +297,7 @@ class TestCheckProject:
         checker = PlcChecker(str(tmp_path))
         result = checker.check_project(str(project_dir))
 
-        prd_items = {
-            item.item: item
-            for item in result.items
-            if item.item.startswith("PRD/")
-        }
+        prd_items = {item.item: item for item in result.items if item.item.startswith("PRD/")}
         assert result.fail_count == 0
         assert result.warn_count >= 4
         for doc in [
@@ -353,15 +353,11 @@ class TestCheckProject:
         checker = PlcChecker(str(invalid_plc_json_project))
         result = checker.check_project(project_path)
 
-        assert any(
-            item.item == ".plc.json" and item.status == "fail" for item in result.items
-        )
+        assert any(item.item == ".plc.json" and item.status == "fail" for item in result.items)
 
     def test_check_syslib_fb_project(self, syslib_fb_project: Path) -> None:
         """检查 SysLib FB 项目类型"""
-        fb_path = str(
-            syslib_fb_project / "01_SharedLibraries" / "SysLib" / "FB_1011_测试功能块"
-        )
+        fb_path = str(syslib_fb_project / "01_SharedLibraries" / "SysLib" / "FB_1011_测试功能块")
         checker = PlcChecker(str(syslib_fb_project))
         result = checker.check_project(fb_path)
 
@@ -392,7 +388,10 @@ class TestCheckWorkspace:
         p1 = tmp_path / "DJ-2026-001_项目一"
         p1.mkdir()
         (p1 / ".plc.json").write_text(
-            json.dumps({"name": "DJ-2026-001", "version": "V1.0.0", "description": "项目一"}, ensure_ascii=False),
+            json.dumps(
+                {"name": "DJ-2026-001", "version": "V1.0.0", "description": "项目一"},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
 
@@ -400,7 +399,10 @@ class TestCheckWorkspace:
         p2 = tmp_path / "DJ-2026-002_项目二"
         p2.mkdir()
         (p2 / ".plc.json").write_text(
-            json.dumps({"name": "DJ-2026-002", "version": "V1.0.0", "description": "项目二"}, ensure_ascii=False),
+            json.dumps(
+                {"name": "DJ-2026-002", "version": "V1.0.0", "description": "项目二"},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
 
@@ -428,22 +430,21 @@ class TestEdgeCases:
         checker = PlcChecker(str(tmp_path))
         result = checker.check_project(str(project_dir))
 
-        assert any(
-            item.item == ".plc.json" and item.status == "fail" for item in result.items
-        )
+        assert any(item.item == ".plc.json" and item.status == "fail" for item in result.items)
 
     def test_check_pm_session_name_mismatch(self, tmp_path: Path) -> None:
         """PM_SESSION 文件名不匹配时应产生警告"""
         project_dir = tmp_path / "DJ-2026-MM_名称不匹配"
         project_dir.mkdir()
         (project_dir / ".plc.json").write_text(
-            json.dumps({"name": "DJ-2026-MM", "version": "V1.0.0", "description": "名称不匹配"}, ensure_ascii=False),
+            json.dumps(
+                {"name": "DJ-2026-MM", "version": "V1.0.0", "description": "名称不匹配"},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
         # PM_SESSION 文件名与项目编号不匹配
-        (project_dir / "PM_SESSION_WRONG-ID.md").write_text(
-            "# PM_SESSION\n", encoding="utf-8"
-        )
+        (project_dir / "PM_SESSION_WRONG-ID.md").write_text("# PM_SESSION\n", encoding="utf-8")
 
         checker = PlcChecker(str(tmp_path))
         result = checker.check_project(str(project_dir))
@@ -514,9 +515,7 @@ class TestPythonProjectNotApplicable:
         """not_applicable 时不跑任何检查（pass/warn/fail 计数全为 0）"""
         project_dir = tmp_path / "SW-2026-002_测试项目"
         project_dir.mkdir()
-        (project_dir / "pyproject.toml").write_text(
-            '[project]\nname = "test2"\n', encoding="utf-8"
-        )
+        (project_dir / "pyproject.toml").write_text('[project]\nname = "test2"\n', encoding="utf-8")
         # 故意不创建 PM_SESSION/PRD/标准目录，验证不会触发 fail
         # （如果跑了检查这些应该全 fail）
 
@@ -534,9 +533,7 @@ class TestPythonProjectNotApplicable:
         project_dir = tmp_path / "SW-2026-003_混合项目"
         project_dir.mkdir()
         # 同时有 .plc.json 和 pyproject.toml（混合项目）
-        (project_dir / "pyproject.toml").write_text(
-            '[project]\nname = "test3"\n', encoding="utf-8"
-        )
+        (project_dir / "pyproject.toml").write_text('[project]\nname = "test3"\n', encoding="utf-8")
         (project_dir / ".plc.json").write_text(
             json.dumps(
                 {"name": "SW-2026-003", "version": "V1.0.0", "description": "混合"},
@@ -544,9 +541,7 @@ class TestPythonProjectNotApplicable:
             ),
             encoding="utf-8",
         )
-        (project_dir / "PM_SESSION_SW-2026-003.md").write_text(
-            "# PM_SESSION\n", encoding="utf-8"
-        )
+        (project_dir / "PM_SESSION_SW-2026-003.md").write_text("# PM_SESSION\n", encoding="utf-8")
 
         checker = PlcChecker(str(tmp_path))
         result = checker.check_project(str(project_dir))
@@ -556,9 +551,7 @@ class TestPythonProjectNotApplicable:
         # 应该跑了 .plc.json 检查
         assert any(item.item == ".plc.json" for item in result.items)
 
-    def test_python_project_no_pyproject_no_plc_json_runs_checks(
-        self, tmp_path: Path
-    ) -> None:
+    def test_python_project_no_pyproject_no_plc_json_runs_checks(self, tmp_path: Path) -> None:
         """既无 pyproject.toml 也无 .plc.json → 跑检查（不适用条件不满足）"""
         project_dir = tmp_path / "DJ-2026-BARE_裸项目"
         project_dir.mkdir()
@@ -576,9 +569,7 @@ class TestPythonProjectNotApplicable:
         """not_applicable_reason 字符串包含 Python 项目说明"""
         project_dir = tmp_path / "SW-2026-004_Python工具"
         project_dir.mkdir()
-        (project_dir / "pyproject.toml").write_text(
-            '[project]\nname = "test4"\n', encoding="utf-8"
-        )
+        (project_dir / "pyproject.toml").write_text('[project]\nname = "test4"\n', encoding="utf-8")
 
         checker = PlcChecker(str(tmp_path))
         result = checker.check_project(str(project_dir))
@@ -618,9 +609,8 @@ class TestCheckItemsList:
 
     def test_plc_check_list_cli(self, tmp_path: Path) -> None:
         """plc check --list 应输出检查项清单表格"""
-        from click.testing import CliRunner
-
         from auto_pm.cli.__main__ import cli
+        from click.testing import CliRunner
 
         runner = CliRunner()
         result = runner.invoke(

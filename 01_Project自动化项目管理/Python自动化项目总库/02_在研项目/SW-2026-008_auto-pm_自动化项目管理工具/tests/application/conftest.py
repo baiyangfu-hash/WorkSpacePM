@@ -19,7 +19,6 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
 from auto_pm.models.change import ChangeSummary

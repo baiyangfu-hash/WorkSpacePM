@@ -210,7 +210,9 @@ class TestChgGenerator:
 
         # §10.1 验证项清单
         assert "### 10.1 验证项清单" in content
-        assert "| # | 验证项 | 验证标准 | 预期结果 | 实际结果 | 状态 | 验证人 | 验证日期 |" in content
+        assert (
+            "| # | 验证项 | 验证标准 | 预期结果 | 实际结果 | 状态 | 验证人 | 验证日期 |" in content
+        )
 
         # §10.2 跨领域联动验证（M1-2 新增）
         assert "### 10.2 跨领域联动验证" in content

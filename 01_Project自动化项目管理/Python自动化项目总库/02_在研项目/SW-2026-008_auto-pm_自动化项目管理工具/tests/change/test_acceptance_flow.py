@@ -16,7 +16,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import (
     SpecViolationError,
@@ -118,7 +117,7 @@ def _build_chg_without_section9() -> str:
 | 2026-01-20 | 张三 | 修改文档 | 完成 | 进行中 | |""",
         """## 9. 实施记录
 
-（暂无实施记录）"""
+（暂无实施记录）""",
     )
     return content
 
@@ -133,9 +132,7 @@ def acceptance_workspace(tmp_path: Path) -> str:
     project_path = tmp_path / project_id
     project_path.mkdir(parents=True, exist_ok=True)
     # 创建项目标志文件，使 ChangeFileLocator._is_project_dir 识别为项目目录
-    (project_path / f"PM_SESSION_{project_id}.md").write_text(
-        "# PM_SESSION\n", encoding="utf-8"
-    )
+    (project_path / f"PM_SESSION_{project_id}.md").write_text("# PM_SESSION\n", encoding="utf-8")
     chg_dir = project_path / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-DOCU"
     chg_dir.mkdir(parents=True, exist_ok=True)
     chg_file = chg_dir / "CHG-DOCU-2026-001.md"
@@ -158,9 +155,7 @@ def acceptance_workspace_no_sec9(tmp_path: Path) -> str:
     project_path = tmp_path / project_id
     project_path.mkdir(parents=True, exist_ok=True)
     # 创建项目标志文件，使 ChangeFileLocator._is_project_dir 识别为项目目录
-    (project_path / f"PM_SESSION_{project_id}.md").write_text(
-        "# PM_SESSION\n", encoding="utf-8"
-    )
+    (project_path / f"PM_SESSION_{project_id}.md").write_text("# PM_SESSION\n", encoding="utf-8")
     chg_dir = project_path / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-DOCU"
     chg_dir.mkdir(parents=True, exist_ok=True)
     chg_file = chg_dir / "CHG-DOCU-2026-001.md"
@@ -242,16 +237,15 @@ class TestFullAcceptanceFlow:
 
         # Step 3: accepting → completed
         cr = svc.transition_status(
-            chg_number, "completed",
+            chg_number,
+            "completed",
             approver="李四",
             verification_conclusion="全部通过",
         )
         assert cr is not None
         assert cr.status == "completed"
 
-    def test_submit_acceptance_requires_section9(
-        self, acceptance_workspace_no_sec9: str
-    ) -> None:
+    def test_submit_acceptance_requires_section9(self, acceptance_workspace_no_sec9: str) -> None:
         """提交验收时 §9 实施记录为空应抛门禁错误"""
         svc = ChangeService(acceptance_workspace_no_sec9)
         chg_number = "CHG-DOCU-2026-001"
@@ -275,7 +269,8 @@ class TestFullAcceptanceFlow:
         # 尝试用「部分通过」完成验收（应失败）
         with pytest.raises(TransitionGuardError, match="验证结论"):
             svc.transition_status(
-                chg_number, "completed",
+                chg_number,
+                "completed",
                 approver="李四",
                 verification_conclusion="部分通过",
             )
@@ -300,7 +295,8 @@ class TestReworkFlow:
 
         # 验收不通过，返工
         cr = svc.transition_status(
-            chg_number, "implementing",
+            chg_number,
+            "implementing",
             approver="李四",
             comment="验证不通过，需修改文档格式",
         )
@@ -319,7 +315,8 @@ class TestReworkFlow:
 
         # 验收通过
         cr = svc.transition_status(
-            chg_number, "completed",
+            chg_number,
+            "completed",
             approver="李四",
             verification_conclusion="全部通过",
         )
@@ -337,7 +334,8 @@ class TestReworkFlow:
 
         # 返工
         svc.transition_status(
-            chg_number, "implementing",
+            chg_number,
+            "implementing",
             approver="李四",
             comment="文档格式不符合规范",
         )
@@ -354,9 +352,7 @@ class TestReworkFlow:
 class TestAcceptanceGuards:
     """验收流程门禁校验测试"""
 
-    def test_pending_acceptance_guard_passes_with_section9(
-        self, acceptance_workspace: str
-    ) -> None:
+    def test_pending_acceptance_guard_passes_with_section9(self, acceptance_workspace: str) -> None:
         """§9 有实施记录时，pending_acceptance 门禁通过"""
         svc = ChangeService(acceptance_workspace)
         chg_number = "CHG-DOCU-2026-001"
@@ -375,9 +371,7 @@ class TestAcceptanceGuards:
         with pytest.raises(TransitionGuardError, match="§9"):
             svc.transition_status(chg_number, "pending_acceptance", approver="张三")
 
-    def test_accepting_has_no_extra_guards(
-        self, acceptance_workspace: str
-    ) -> None:
+    def test_accepting_has_no_extra_guards(self, acceptance_workspace: str) -> None:
         """pending_acceptance → accepting 无额外门禁"""
         svc = ChangeService(acceptance_workspace)
         chg_number = "CHG-DOCU-2026-001"
@@ -388,9 +382,7 @@ class TestAcceptanceGuards:
         assert cr is not None
         assert cr.status == "accepting"
 
-    def test_completed_guard_requires_all_pass(
-        self, acceptance_workspace: str
-    ) -> None:
+    def test_completed_guard_requires_all_pass(self, acceptance_workspace: str) -> None:
         """accepting → completed 必须 verification_conclusion 通过规则校验（V0.3.0-M0.5-Phase1）
 
         规则：包含"通过"且不包含"不通过"/"部分通过"/"未通过"。
@@ -405,14 +397,13 @@ class TestAcceptanceGuards:
         # 部分通过应失败
         with pytest.raises(TransitionGuardError):
             svc.transition_status(
-                chg_number, "completed",
+                chg_number,
+                "completed",
                 approver="李四",
                 verification_conclusion="部分通过",
             )
 
-    def test_rework_has_no_extra_guards(
-        self, acceptance_workspace: str
-    ) -> None:
+    def test_rework_has_no_extra_guards(self, acceptance_workspace: str) -> None:
         """accepting → implementing（返工）无额外门禁"""
         svc = ChangeService(acceptance_workspace)
         chg_number = "CHG-DOCU-2026-001"

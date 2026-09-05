@@ -77,7 +77,9 @@ def _is_non_spec_artifact(md_file: Path) -> bool:
 def _should_skip_schema_mismatch(spec: dict[str, object]) -> bool:
     lifecycle = str(spec.get("lifecycle", "")).lower()
     canonical_path = str(spec.get("canonical_path", "")).replace("\\", "/")
-    return lifecycle in {"deprecated", "archived", "history"} or "/_archive/" in f"/{canonical_path}"
+    return (
+        lifecycle in {"deprecated", "archived", "history"} or "/_archive/" in f"/{canonical_path}"
+    )
 
 
 def _is_allowed_duplicate_dir(prefix: str, dirs: list[str]) -> bool:
@@ -129,7 +131,9 @@ def spec_group() -> None:
 @click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
 @click.option("--fix", "auto_fix", is_flag=True, help="自动修复可修复的问题（SHC-002/007）")
 @click.option("--dry-run", is_flag=True, help="仅预览修复操作，不实际修改文件")
-@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table", help="输出格式")
+@click.option(
+    "--format", "fmt", type=click.Choice(["table", "json"]), default="table", help="输出格式"
+)
 @click.option("--check-id", "-c", multiple=True, help="只运行指定检查项（如 -c SHC-001）")
 @click.option(
     "--severity",
@@ -252,19 +256,20 @@ def _output_check_table(
     verbose: bool = False,
 ) -> None:
     unicode_output = _supports_unicode_output()
-    severity_icons = (
-        _SEVERITY_ICONS if unicode_output else _ASCII_SEVERITY_ICONS
-    )
+    severity_icons = _SEVERITY_ICONS if unicode_output else _ASCII_SEVERITY_ICONS
     summary_icons = ("🔴", "🟡", "🟢") if unicode_output else ("E", "W", "I")
     status_icons = ("✅", "⏭️") if unicode_output else ("OK", "SKIP")
 
     if not results:
-        console.print("[green]✅ 所有检查通过！[/green]" if unicode_output else "[green]所有检查通过[/green]")
+        console.print(
+            "[green]✅ 所有检查通过！[/green]" if unicode_output else "[green]所有检查通过[/green]"
+        )
         return
 
     # verbose 模式：按 check_id 分组显示
     if verbose:
         from collections import defaultdict
+
         grouped: dict[str, list[CheckResult]] = defaultdict(list)
         for r in results:
             grouped[r.check_id].append(r)
@@ -454,9 +459,7 @@ def cmd_frontmatter(
         errors = sum(1 for i in items if i.status == "error")
         console.print("-" * 50)
         console.print(
-            f"[cyan]预览完成！待修改: {pending_count}, "
-            f"跳过: {skipped}, "
-            f"错误: {errors}[/cyan]"
+            f"[cyan]预览完成！待修改: {pending_count}, 跳过: {skipped}, 错误: {errors}[/cyan]"
         )
 
 
@@ -508,11 +511,15 @@ def cmd_report(
     "--rule",
     "-r",
     multiple=True,
-    type=click.Choice(["orphan_file", "path_drift", "schema_mismatch", "duplicate_dir", "stale_root", "all"]),
+    type=click.Choice(
+        ["orphan_file", "path_drift", "schema_mismatch", "duplicate_dir", "stale_root", "all"]
+    ),
     default=("all",),
     help="指定检查规则（默认 all）",
 )
-@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table", help="输出格式")
+@click.option(
+    "--format", "fmt", type=click.Choice(["table", "json"]), default="table", help="输出格式"
+)
 @click.option(
     "--config",
     "config_path",
@@ -550,22 +557,24 @@ def cmd_lint(
         console.print(f"[red]错误: 找不到 spec_registry.json: {registry_path}[/red]")
         raise SystemExit(1)
 
-    registry: dict = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry: dict[str, object] = json.loads(registry_path.read_text(encoding="utf-8"))
     run_all = "all" in rule
     issues: list[dict[str, str]] = []
 
     # ── LINT-001: stale_root ──────────────────────────────────────────────
     if run_all or "stale_root" in rule:
         stored_root = registry.get("workspace_root", "")
-        stored_path = Path(stored_root)
+        stored_path = Path(str(stored_root))
         if stored_path != ws:
-            issues.append({
-                "rule": "LINT-001/stale_root",
-                "severity": "ERROR",
-                "message": "workspace_root 路径过期",
-                "detail": f"registry 中: {stored_root!r} | 实际应为: {ws}",
-                "suggestion": f'将 spec_registry.json 中 workspace_root 改为 "{ws}"',
-            })
+            issues.append(
+                {
+                    "rule": "LINT-001/stale_root",
+                    "severity": "ERROR",
+                    "message": "workspace_root 路径过期",
+                    "detail": f"registry 中: {stored_root!r} | 实际应为: {ws}",
+                    "suggestion": f'将 spec_registry.json 中 workspace_root 改为 "{ws}"',
+                }
+            )
 
     # ── LINT-002: orphan_file ─────────────────────────────────────────────
     if run_all or "orphan_file" in rule:
@@ -580,7 +589,7 @@ def cmd_lint(
         for _spec_id, spec in _iter_registry_specs(registry):
             cp = spec.get("canonical_path", "")
             if cp:
-                registered_paths.add((ws / cp).resolve())
+                registered_paths.add((ws / str(cp)).resolve())
 
         for spec_dir in spec_dirs:
             if not spec_dir.exists():
@@ -592,13 +601,15 @@ def cmd_lint(
                     continue
                 resolved = md_file.resolve()
                 if resolved not in registered_paths:
-                    issues.append({
-                        "rule": "LINT-002/orphan_file",
-                        "severity": "WARNING",
-                        "message": "孤立规范文件（未在 registry 注册）",
-                        "detail": str(md_file.relative_to(ws)),
-                        "suggestion": "在 spec_registry.json 中添加对应注册条目，或移入 _archive/",
-                    })
+                    issues.append(
+                        {
+                            "rule": "LINT-002/orphan_file",
+                            "severity": "WARNING",
+                            "message": "孤立规范文件（未在 registry 注册）",
+                            "detail": str(md_file.relative_to(ws)),
+                            "suggestion": "在 spec_registry.json 中添加对应注册条目，或移入 _archive/",
+                        }
+                    )
 
     # ── LINT-003: path_drift ──────────────────────────────────────────────
     if run_all or "path_drift" in rule:
@@ -606,15 +617,17 @@ def cmd_lint(
             cp = spec.get("canonical_path", "")
             if not cp:
                 continue
-            full_path = (ws / cp).resolve()
+            full_path = (ws / str(cp)).resolve()
             if not full_path.exists():
-                issues.append({
-                    "rule": "LINT-003/path_drift",
-                    "severity": "ERROR",
-                    "message": f"[{spec_id}] canonical_path 对应文件不存在（路径漂移）",
-                    "detail": str(cp),
-                    "suggestion": "更新 canonical_path 到文件实际位置，或恢复文件",
-                })
+                issues.append(
+                    {
+                        "rule": "LINT-003/path_drift",
+                        "severity": "ERROR",
+                        "message": f"[{spec_id}] canonical_path 对应文件不存在（路径漂移）",
+                        "detail": str(cp),
+                        "suggestion": "更新 canonical_path 到文件实际位置，或恢复文件",
+                    }
+                )
 
     # ── LINT-004: schema_mismatch ─────────────────────────────────────────
     if run_all or "schema_mismatch" in rule:
@@ -622,7 +635,11 @@ def cmd_lint(
 
         required_fields = {"spec_id", "title", "lifecycle"}
         # 同时接受新旧字段名
-        field_aliases = {"spec_id": {"spec_id", "id"}, "title": {"title", "name"}, "lifecycle": {"lifecycle", "status"}}
+        field_aliases = {
+            "spec_id": {"spec_id", "id"},
+            "title": {"title", "name"},
+            "lifecycle": {"lifecycle", "status"},
+        }
 
         for spec_id, spec in _iter_registry_specs(registry):
             cp = spec.get("canonical_path", "")
@@ -630,18 +647,20 @@ def cmd_lint(
                 continue
             if _should_skip_schema_mismatch(spec):
                 continue
-            full_path = (ws / cp).resolve()
+            full_path = (ws / str(cp)).resolve()
             if not full_path.exists():
                 continue
             text = full_path.read_text(encoding="utf-8", errors="ignore")
             if not text.startswith("---"):
-                issues.append({
-                    "rule": "LINT-004/schema_mismatch",
-                    "severity": "WARNING",
-                    "message": f"[{spec_id}] 缺少 YAML frontmatter",
-                    "detail": str(cp),
-                    "suggestion": "运行 `auto-pm spec frontmatter --fix` 自动添加",
-                })
+                issues.append(
+                    {
+                        "rule": "LINT-004/schema_mismatch",
+                        "severity": "WARNING",
+                        "message": f"[{spec_id}] 缺少 YAML frontmatter",
+                        "detail": str(cp),
+                        "suggestion": "运行 `auto-pm spec frontmatter --fix` 自动添加",
+                    }
+                )
                 continue
             fm_end = text.find("---", 3)
             if fm_end == -1:
@@ -649,15 +668,19 @@ def cmd_lint(
             fm_text = text[3:fm_end]
             for field in required_fields:
                 aliases = field_aliases[field]
-                found = any(re.search(rf"^\s*{alias}\s*:", fm_text, re.MULTILINE) for alias in aliases)
+                found = any(
+                    re.search(rf"^\s*{alias}\s*:", fm_text, re.MULTILINE) for alias in aliases
+                )
                 if not found:
-                    issues.append({
-                        "rule": "LINT-004/schema_mismatch",
-                        "severity": "WARNING",
-                        "message": f"[{spec_id}] frontmatter 缺少必要字段: {field}（或其别名 {aliases}）",
-                        "detail": str(cp),
-                        "suggestion": f"在 frontmatter 中添加 {field}: 字段",
-                    })
+                    issues.append(
+                        {
+                            "rule": "LINT-004/schema_mismatch",
+                            "severity": "WARNING",
+                            "message": f"[{spec_id}] frontmatter 缺少必要字段: {field}（或其别名 {aliases}）",
+                            "detail": str(cp),
+                            "suggestion": f"在 frontmatter 中添加 {field}: 字段",
+                        }
+                    )
 
     # ── LINT-005: duplicate_dir ───────────────────────────────────────────
     if run_all or "duplicate_dir" in rule:
@@ -682,27 +705,36 @@ def cmd_lint(
                         prefix_counter.setdefault(prefix, []).append(sub.name)
                 for prefix, dirs in prefix_counter.items():
                     if len(dirs) > 1 and not _is_allowed_duplicate_dir(prefix, dirs):
-                        issues.append({
-                            "rule": "LINT-005/duplicate_dir",
-                            "severity": "WARNING",
-                            "message": f"[{project_dir.name}] 目录编号 {prefix}_ 重复",
-                            "detail": "重复目录: " + ", ".join(dirs),
-                            "suggestion": "参照 PROJ-016 规范，将重复目录重命名为唯一编号",
-                        })
+                        issues.append(
+                            {
+                                "rule": "LINT-005/duplicate_dir",
+                                "severity": "WARNING",
+                                "message": f"[{project_dir.name}] 目录编号 {prefix}_ 重复",
+                                "detail": "重复目录: " + ", ".join(dirs),
+                                "suggestion": "参照 PROJ-016 规范，将重复目录重命名为唯一编号",
+                            }
+                        )
 
     # ── 输出 ──────────────────────────────────────────────────────────────
     unicode_output = _supports_unicode_output()
-    severity_icons = {"ERROR": ("🔴" if unicode_output else "[ERR]"), "WARNING": ("🟡" if unicode_output else "[WARN]")}
+    severity_icons = {
+        "ERROR": ("🔴" if unicode_output else "[ERR]"),
+        "WARNING": ("🟡" if unicode_output else "[WARN]"),
+    }
     severity_colors = {"ERROR": "red", "WARNING": "yellow"}
 
     if fmt == "json":
-        click.echo(json.dumps({"lint_results": issues, "total": len(issues)}, ensure_ascii=False, indent=2))
+        click.echo(
+            json.dumps({"lint_results": issues, "total": len(issues)}, ensure_ascii=False, indent=2)
+        )
     else:
         if not issues:
             ok_icon = "✅" if unicode_output else "[OK]"
             console.print(f"[green]{ok_icon} 所有 lint 规则通过！[/green]")
         else:
-            console.print(f"\n[bold]规范注册表 Lint 报告[/bold] — 共发现 [bold red]{len(issues)}[/bold red] 个问题\n")
+            console.print(
+                f"\n[bold]规范注册表 Lint 报告[/bold] — 共发现 [bold red]{len(issues)}[/bold red] 个问题\n"
+            )
             console.print("─" * 70)
             for issue in issues:
                 sev = issue["severity"]
@@ -718,7 +750,9 @@ def cmd_lint(
         error_count = sum(1 for i in issues if i["severity"] == "ERROR")
         warning_count = sum(1 for i in issues if i["severity"] == "WARNING")
         console.print("─" * 70)
-        console.print(f"  汇总: 🔴 ERROR {error_count} | 🟡 WARNING {warning_count} | 共 {len(issues)} 项")
+        console.print(
+            f"  汇总: 🔴 ERROR {error_count} | 🟡 WARNING {warning_count} | 共 {len(issues)} 项"
+        )
 
     raise SystemExit(1 if any(i["severity"] == "ERROR" for i in issues) else 0)
 
@@ -728,7 +762,9 @@ def cmd_lint(
 
 @spec_group.command("sync")
 @click.option("-w", "--workspace", default=None, help="工作空间根目录（未指定时回退全局 -w）")
-@click.option("--config", "config_path", default=None, type=click.Path(), help="工作空间配置文件路径")
+@click.option(
+    "--config", "config_path", default=None, type=click.Path(), help="工作空间配置文件路径"
+)
 @click.pass_context
 def sync(ctx: click.Context, workspace: str | None, config_path: str | None) -> None:
     """一键全量同步与重构 Obsidian 全局规范仓库 (DEV-030 V2.2.0)
@@ -768,10 +804,13 @@ def sync(ctx: click.Context, workspace: str | None, config_path: str | None) -> 
 
     if chk_output.error_count == 0 and not idx_output.errors:
         ok_icon = "✅" if unicode_output else "[OK]"
-        console.print(f"[bold green]{ok_icon} Obsidian 规范知识库与索引已成功同步且 100% 健康！[/bold green]")
+        console.print(
+            f"[bold green]{ok_icon} Obsidian 规范知识库与索引已成功同步且 100% 健康！[/bold green]"
+        )
         raise SystemExit(0)
     else:
         warn_icon = "⚠️" if unicode_output else "[WARN]"
-        console.print(f"[bold yellow]{warn_icon} 同步已完成，但存在部分需要整改的规范项。[/bold yellow]")
+        console.print(
+            f"[bold yellow]{warn_icon} 同步已完成，但存在部分需要整改的规范项。[/bold yellow]"
+        )
         raise SystemExit(1 if chk_output.error_count > 0 else 0)
-

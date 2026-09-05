@@ -15,8 +15,7 @@ class TestAutoshopParserDetectFormat:
         """detect_format 对 .asc 文件返回 True"""
         f = tmp_path / "var.asc"
         f.write_text(
-            "变量名,数据类型,地址,注释,作用域\n"
-            "i_bStart,BOOL,X0,启动,VAR_INPUT\n",
+            "变量名,数据类型,地址,注释,作用域\ni_bStart,BOOL,X0,启动,VAR_INPUT\n",
             encoding="utf-8",
         )
         assert AutoshopParser().detect_format(f) is True
@@ -32,9 +31,7 @@ class TestAutoshopParserDetectFormat:
 
 
 class TestAutoshopParserFieldExtraction:
-    def test_autoshop_parse_multiline_with_chinese_columns(
-        self, tmp_path: Path
-    ) -> None:
+    def test_autoshop_parse_multiline_with_chinese_columns(self, tmp_path: Path) -> None:
         """解析多行含中文列名 CSV，验证字段提取正确性"""
         f = tmp_path / "var.asc"
         f.write_text(
@@ -66,10 +63,7 @@ class TestAutoshopParserFieldExtraction:
     def test_autoshop_parse_gbk_encoding(self, tmp_path: Path) -> None:
         """GBK 编码的 Autoshop 文件能正确解析（detect_encoding 兼容）"""
         f = tmp_path / "var_gbk.asc"
-        content = (
-            "变量名,数据类型,地址,注释,作用域\n"
-            "i_bStart,BOOL,X0,启动按钮,VAR_INPUT\n"
-        )
+        content = "变量名,数据类型,地址,注释,作用域\ni_bStart,BOOL,X0,启动按钮,VAR_INPUT\n"
         f.write_bytes(content.encode("gbk"))
         result = AutoshopParser().parse(f)
         assert result.success
@@ -103,9 +97,7 @@ class TestAutoshopParserErrorHandling:
 
 
 # 真实样例 fixture 路径（tests/vartable/samples/Autoshop-FB变量表导出.csv）
-_AUTOSHOP_REAL_SAMPLE = (
-    Path(__file__).parent / "samples" / "Autoshop-FB变量表导出.csv"
-)
+_AUTOSHOP_REAL_SAMPLE = Path(__file__).parent / "samples" / "Autoshop-FB变量表导出.csv"
 
 
 class TestAutoshopParserRealSample:
@@ -178,9 +170,7 @@ class TestAutoshopParserRealSample:
         second = result.var_table.entries[1]
         assert second.comment == "停止按钮信号"
         # 按 tag 查找 i_DriveAlarm 的注释
-        alarm_entry = next(
-            e for e in result.var_table.entries if e.tag == "i_DriveAlarm"
-        )
+        alarm_entry = next(e for e in result.var_table.entries if e.tag == "i_DriveAlarm")
         assert alarm_entry.comment == "驱动器报警信号"
 
     def test_autoshop_parse_real_sample_data_types(self) -> None:
@@ -198,7 +188,5 @@ class TestAutoshopParserRealSample:
         assert "BOOL[10]" in types
         assert "DINT[10]" in types
         # i_SpeedFrequency 是 REAL 类型
-        speed_entry = next(
-            e for e in result.var_table.entries if e.tag == "i_SpeedFrequency"
-        )
+        speed_entry = next(e for e in result.var_table.entries if e.tag == "i_SpeedFrequency")
         assert speed_entry.signal_type == "REAL"

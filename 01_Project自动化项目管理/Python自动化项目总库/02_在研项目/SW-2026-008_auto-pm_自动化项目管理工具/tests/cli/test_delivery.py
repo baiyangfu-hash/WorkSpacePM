@@ -1,18 +1,19 @@
 """CLI delivery tests"""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
 from auto_pm.delivery.constants import MB
+from click.testing import CliRunner
 
 
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()
+
 
 @pytest.fixture
 def proj(tmp_path: Path) -> Path:
@@ -27,9 +28,12 @@ def proj(tmp_path: Path) -> Path:
         (di / f"f_{i}.dll").write_text(f"d{i}", encoding="utf-8")
     return p
 
+
 class TestDeliveryCLI:
     def test_build(self, runner: CliRunner, proj: Path) -> None:
-        r = runner.invoke(cli, ["-w", str(proj), "delivery", "build", "--version", "V1.0.1", "--summary", "test"])
+        r = runner.invoke(
+            cli, ["-w", str(proj), "delivery", "build", "--version", "V1.0.1", "--summary", "test"]
+        )
         assert r.exit_code == 0
 
     def test_status(self, runner: CliRunner, tmp_path: Path) -> None:

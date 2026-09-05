@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.path_resolver import (
     PathTraversalError,
     extract_domain_from_change_number,

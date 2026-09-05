@@ -60,6 +60,9 @@ output/
 # 本地工作空间根配置（每台机器路径不同，禁止入库；测试须 monkeypatch 隔离）
 .auto-pm-workspace
 06_交付物/
+!06_交付物/
+06_交付物/*
+!06_交付物/001_用户操作指南与排障手册_USER_GUIDE.md
 
 # Python
 __pycache__/
@@ -87,4 +90,3 @@ test_screenshots/
 # 测试报告与输出（临时产物，不入库）
 test_reports/
 test_output/
-

@@ -71,9 +71,7 @@ def _create_project(
     )
 
     # PM_SESSION
-    (project_dir / f"PM_SESSION_{project_id}.md").write_text(
-        pm_session_content, encoding="utf-8"
-    )
+    (project_dir / f"PM_SESSION_{project_id}.md").write_text(pm_session_content, encoding="utf-8")
 
     return project_dir
 

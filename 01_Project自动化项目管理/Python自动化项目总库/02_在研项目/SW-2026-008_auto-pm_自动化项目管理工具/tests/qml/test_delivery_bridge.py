@@ -179,7 +179,9 @@ def test_delivery_bridge_refresh_project_docs(qapp) -> None:  # type: ignore[no-
         project_id="PROJ-001",
         dry_run=True,
         updated=True,
-        refreshed_files=[{"file_path": "/docs/readme.md", "block_keys": ["plc-io-overview"], "changed": True}],
+        refreshed_files=[
+            {"file_path": "/docs/readme.md", "block_keys": ["plc-io-overview"], "changed": True}
+        ],
         issues=[],
     )
     mock_facade = _MockDeliveryFacade(
@@ -301,5 +303,3 @@ def test_delivery_bridge_export_doc_to_pdf(qapp, tmp_path: Path) -> None:  # typ
     assert res["success"] is True
     assert pdf_file.exists()
     assert pdf_file.stat().st_size > 0
-
-

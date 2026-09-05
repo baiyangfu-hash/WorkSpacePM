@@ -6,24 +6,27 @@
 由于端到端测试不依赖 copier，手动创建最小项目结构，
 重点验证 PlcService 的 check → repair → check 流程。
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 import pytest
-
 from auto_pm.plc.service import PlcService
 
 
 class TestE2ePlcWorkflow:
     """端到端 PLC 工作流测试"""
 
-    @pytest.mark.parametrize("mode,template_name", [
-        ("shared-library", "plc-shared-library"),
-        ("test-suite", "plc-test-suite"),
-        ("standard-project", "plc-standard-project"),
-    ])
+    @pytest.mark.parametrize(
+        "mode,template_name",
+        [
+            ("shared-library", "plc-shared-library"),
+            ("test-suite", "plc-test-suite"),
+            ("standard-project", "plc-standard-project"),
+        ],
+    )
     def test_init_check_repair_check_workflow(
         self, tmp_path: Path, mode: str, template_name: str
     ) -> None:

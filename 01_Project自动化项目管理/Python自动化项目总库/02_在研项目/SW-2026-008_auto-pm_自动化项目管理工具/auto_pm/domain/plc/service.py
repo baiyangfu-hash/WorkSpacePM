@@ -82,7 +82,9 @@ class PlcService:
         """
         log.info(
             "修复 PLC 项目: %s (dry_run=%s, rename_confirm=%s)",
-            project_path, dry_run, rename_confirm,
+            project_path,
+            dry_run,
+            rename_confirm,
         )
         return self._repairer.repair_project(
             project_path,
@@ -105,9 +107,7 @@ class PlcService:
             StandardizeResult: 标准化结果
         """
         log.info("标准化 PLC 项目文档: %s (dry_run=%s)", project_path, dry_run)
-        return self._repairer.standardize_docs(
-            project_path, apply=not dry_run
-        )
+        return self._repairer.standardize_docs(project_path, apply=not dry_run)
 
     def check_substance(self, project_path: str) -> CheckResult:
         """文档实质化检查（V2.0.1-B）
@@ -131,4 +131,4 @@ class PlcService:
             所有 PLC 项目的检查结果列表
         """
         log.info("检查工作空间所有 PLC 项目: %s", self.workspace_root)
-        return self._checker.check_workspace()
+        return list(self._checker.check_workspace())

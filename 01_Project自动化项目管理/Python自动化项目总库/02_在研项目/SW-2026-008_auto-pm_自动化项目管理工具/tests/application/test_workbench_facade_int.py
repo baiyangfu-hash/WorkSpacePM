@@ -5,10 +5,10 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-
-from auto_pm.application.workbench_facade import WorkbenchFacade
 from auto_pm.core.project_service import ProjectService
 from auto_pm.db.connection import DatabaseManager
+
+from auto_pm.application.workbench_facade import WorkbenchFacade
 
 
 @pytest.fixture
@@ -19,10 +19,13 @@ def temp_workspace(tmp_path: Path) -> Generator[str, None, None]:
     # Create a mock project
     proj_dir = ws_dir / "02_在研项目" / "SW-2026-001_Test"
     proj_dir.mkdir(parents=True)
-    (proj_dir / ".copier-answers.yml").write_text("project_id: SW-2026-001\nproject_name: Test Project", encoding="utf-8")
+    (proj_dir / ".copier-answers.yml").write_text(
+        "project_id: SW-2026-001\nproject_name: Test Project", encoding="utf-8"
+    )
 
     yield str(ws_dir)
     shutil.rmtree(ws_dir, ignore_errors=True)
+
 
 @pytest.fixture
 def workbench_facade(temp_workspace: str) -> WorkbenchFacade:
@@ -38,6 +41,7 @@ def workbench_facade(temp_workspace: str) -> WorkbenchFacade:
         project_service=project_service,
         asset_summary_service=None,
     )
+
 
 def test_workbench_facade_rebuild_index_and_stats(workbench_facade: WorkbenchFacade) -> None:
     # 1. Test rebuild index

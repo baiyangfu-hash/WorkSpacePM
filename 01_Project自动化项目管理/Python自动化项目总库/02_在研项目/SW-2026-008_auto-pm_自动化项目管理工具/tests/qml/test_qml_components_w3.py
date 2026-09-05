@@ -27,12 +27,7 @@ if TYPE_CHECKING:
 
 # ── 路径常量 ───────────────────────────────────────────────
 
-_QML_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "auto_pm"
-    / "ui"
-    / "qml"
-)
+_QML_DIR = Path(__file__).resolve().parents[2] / "auto_pm" / "ui" / "qml"
 _COMPONENTS_DIR = _QML_DIR / "components"
 
 
@@ -43,10 +38,8 @@ _COMPONENTS_DIR = _QML_DIR / "components"
 def qml_engine(qapp: QApplication) -> QQmlEngine:
     """QQmlEngine（含 Theme.qml 及系统完整 PySide6 qml 路径）"""
     import PySide6
+
     engine = QQmlEngine()
-    sys_qml = Path(r"C:\Users\fubai\AppData\Local\Programs\Python\Python311\Lib\site-packages\PySide6\qml")
-    if sys_qml.exists():
-        engine.addImportPath(str(sys_qml))
     pyside6_qml = Path(PySide6.__file__).parent / "qml"
     if pyside6_qml.exists():
         engine.addImportPath(str(pyside6_qml))
@@ -77,9 +70,7 @@ def _to_variant(value: object) -> object:
 # ── ApprovalTimeline.qml (W3-S1) ─────────────────────────
 
 
-def test_approval_timeline_default_properties(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_approval_timeline_default_properties(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """ApprovalTimeline 默认 approvals 为空数组，emptyText 默认值正确"""
     timeline = _load_component(qml_engine, _COMPONENTS_DIR / "ApprovalTimeline.qml")
     approvals = _to_variant(timeline.property("approvals"))  # type: ignore[attr-defined]
@@ -87,9 +78,7 @@ def test_approval_timeline_default_properties(
     assert timeline.property("emptyText") == "暂无审批记录"  # type: ignore[attr-defined]
 
 
-def test_approval_timeline_set_approvals(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_approval_timeline_set_approvals(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """ApprovalTimeline 设置 approvals 数组后应正确读取"""
     timeline = _load_component(qml_engine, _COMPONENTS_DIR / "ApprovalTimeline.qml")
     test_data = [
@@ -116,9 +105,7 @@ def test_approval_timeline_conclusion_color_mapping(
     assert color_approved is not None or color_approved is None  # 函数引用返回 None 或对象
 
 
-def test_approval_timeline_conclusion_label(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_approval_timeline_conclusion_label(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """ApprovalTimeline _conclusionLabel 函数应支持 4 种结论"""
     timeline = _load_component(qml_engine, _COMPONENTS_DIR / "ApprovalTimeline.qml")
     # 加载成功即说明函数已定义
@@ -128,9 +115,7 @@ def test_approval_timeline_conclusion_label(
 # ── PropagationView.qml (W3-S2) ───────────────────────────
 
 
-def test_propagation_view_default_properties(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_propagation_view_default_properties(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PropagationView 默认 nodes 为空数组，emptyText 默认值正确"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "PropagationView.qml")
     nodes = _to_variant(view.property("nodes"))  # type: ignore[attr-defined]
@@ -138,9 +123,7 @@ def test_propagation_view_default_properties(
     assert view.property("emptyText") == "无传播链数据"  # type: ignore[attr-defined]
 
 
-def test_propagation_view_set_nodes(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_propagation_view_set_nodes(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PropagationView 设置 nodes 数组后应正确读取"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "PropagationView.qml")
     test_data = [
@@ -156,9 +139,7 @@ def test_propagation_view_set_nodes(
     assert len(nodes) == 3  # type: ignore[arg-type]
 
 
-def test_propagation_view_implicit_dimensions(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_propagation_view_implicit_dimensions(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PropagationView 默认尺寸应为 700×80"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "PropagationView.qml")
     assert view.property("implicitWidth") == 700  # type: ignore[attr-defined]
@@ -168,9 +149,7 @@ def test_propagation_view_implicit_dimensions(
 # ── StatusMachineView.qml (W3-S3) ─────────────────────────
 
 
-def test_status_machine_view_default_status(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_status_machine_view_default_status(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """StatusMachineView 默认 currentStatus 应为 'draft'"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "StatusMachineView.qml")
     assert view.property("currentStatus") == "draft"  # type: ignore[attr-defined]
@@ -188,9 +167,7 @@ def test_status_machine_view_default_status_order(
     assert order[6] == "closed"  # type: ignore[index]
 
 
-def test_status_machine_view_status_labels(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_status_machine_view_status_labels(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """StatusMachineView statusLabels 应包含 9 种状态（含 rejected/refused）"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "StatusMachineView.qml")
     labels = _to_variant(view.property("statusLabels"))  # type: ignore[attr-defined]
@@ -208,9 +185,7 @@ def test_status_machine_view_status_labels(
     assert labels["closed"] == "已关闭"  # type: ignore[index]
 
 
-def test_status_machine_view_set_current_status(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_status_machine_view_set_current_status(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """StatusMachineView 设置 currentStatus 后应正确读取"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "StatusMachineView.qml")
     view.setProperty("currentStatus", "implementing")  # type: ignore[attr-defined]
@@ -230,17 +205,13 @@ def test_status_machine_view_implicit_dimensions(
 # ── PhaseProgress.qml (W3-S4) ─────────────────────────────
 
 
-def test_phase_progress_default_phase(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_phase_progress_default_phase(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PhaseProgress 默认 currentPhase 应为 'developing'"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "PhaseProgress.qml")
     assert view.property("currentPhase") == "developing"  # type: ignore[attr-defined]
 
 
-def test_phase_progress_default_phases(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_phase_progress_default_phases(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PhaseProgress 默认 phases 应为 4 阶段"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "PhaseProgress.qml")
     phases = _to_variant(view.property("phases"))  # type: ignore[attr-defined]
@@ -250,9 +221,7 @@ def test_phase_progress_default_phases(
     assert phases[3] == "archived"  # type: ignore[index]
 
 
-def test_phase_progress_phase_labels(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_phase_progress_phase_labels(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PhaseProgress phaseLabels 应包含 4 个阶段中文标签"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "PhaseProgress.qml")
     labels = _to_variant(view.property("phaseLabels"))  # type: ignore[attr-defined]
@@ -263,9 +232,7 @@ def test_phase_progress_phase_labels(
     assert labels["archived"] == "已归档"  # type: ignore[index]
 
 
-def test_phase_progress_set_current_phase(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_phase_progress_set_current_phase(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PhaseProgress 设置 currentPhase 后应正确读取"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "PhaseProgress.qml")
     view.setProperty("currentPhase", "production")  # type: ignore[attr-defined]
@@ -273,9 +240,7 @@ def test_phase_progress_set_current_phase(
     assert view.property("currentPhase") == "production"  # type: ignore[attr-defined]
 
 
-def test_phase_progress_implicit_dimensions(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_phase_progress_implicit_dimensions(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PhaseProgress 默认尺寸应为 600×70"""
     view = _load_component(qml_engine, _COMPONENTS_DIR / "PhaseProgress.qml")
     assert view.property("implicitWidth") == 600  # type: ignore[attr-defined]

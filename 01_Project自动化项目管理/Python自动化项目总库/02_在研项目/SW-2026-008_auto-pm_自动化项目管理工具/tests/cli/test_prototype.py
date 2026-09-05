@@ -1,7 +1,8 @@
-import os
 import tempfile
-from click.testing import CliRunner
+
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
+
 
 def test_cli_prototype_flow():
     runner = CliRunner()
@@ -17,6 +18,8 @@ def test_cli_prototype_flow():
         assert "原型检查" in res_check.output
 
         # Test prototype bundle CLI
-        res_bundle = runner.invoke(cli, ["-w", tmp_dir, "prototype", "bundle", "--pid", "TEST-001", "--version", "V1.0.0"])
+        res_bundle = runner.invoke(
+            cli, ["-w", tmp_dir, "prototype", "bundle", "--pid", "TEST-001", "--version", "V1.0.0"]
+        )
         assert res_bundle.exit_code == 0
         assert "原型打包成功" in res_bundle.output

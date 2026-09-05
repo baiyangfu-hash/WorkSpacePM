@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
 
 
 def test_project_list_via_main(cli_runner: CliRunner, tmp_workspace: Path) -> None:
@@ -553,7 +552,9 @@ class TestProjectRetrofit:
     def test_retrofit_populates_copier_answers_and_spec_snapshot(
         self, cli_runner: CliRunner, tmp_path: Path
     ) -> None:
-        workspace = _setup_retrofit_workspace(tmp_path, _PM_SESSION_NO_TABLE.replace("SW-2026-TEST", "DJ-2026-TEST"))
+        workspace = _setup_retrofit_workspace(
+            tmp_path, _PM_SESSION_NO_TABLE.replace("SW-2026-TEST", "DJ-2026-TEST")
+        )
 
         result = cli_runner.invoke(
             cli,
@@ -615,7 +616,9 @@ def _setup_doc_refresh_workspace(tmp_path: Path) -> Path:
         '    notes: "补齐映射"\n',
         encoding="utf-8",
     )
-    (project_dir / "02_PLC程序" / "程序文档" / "016_DJ-2026-041_PLC程序设计总文档_PLC.md").write_text(
+    (
+        project_dir / "02_PLC程序" / "程序文档" / "016_DJ-2026-041_PLC程序设计总文档_PLC.md"
+    ).write_text(
         "\n".join(
             [
                 "# PLC程序设计总文档",
@@ -659,7 +662,9 @@ def _setup_doc_refresh_workspace(tmp_path: Path) -> Path:
 class TestDocRefresh:
     """doc refresh 命令测试"""
 
-    def test_doc_refresh_dry_run_does_not_modify(self, cli_runner: CliRunner, tmp_path: Path) -> None:
+    def test_doc_refresh_dry_run_does_not_modify(
+        self, cli_runner: CliRunner, tmp_path: Path
+    ) -> None:
         workspace = _setup_doc_refresh_workspace(tmp_path)
         target_doc = (
             workspace

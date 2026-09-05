@@ -94,9 +94,7 @@ def _setup_workspace(tmp_path: Path, pm_session_content: str) -> Path:
     project_dir.mkdir()
 
     # 写入 PM_SESSION
-    (project_dir / "PM_SESSION_SW-2026-TEST.md").write_text(
-        pm_session_content, encoding="utf-8"
-    )
+    (project_dir / "PM_SESSION_SW-2026-TEST.md").write_text(pm_session_content, encoding="utf-8")
 
     # 写入 spec_registry.json
     registry_dir = tmp_path / "00_Obsidian_Base全局规范文件仓库"

@@ -28,12 +28,7 @@ if TYPE_CHECKING:
 
 # ── 路径常量 ───────────────────────────────────────────────
 
-_QML_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "auto_pm"
-    / "ui"
-    / "qml"
-)
+_QML_DIR = Path(__file__).resolve().parents[2] / "auto_pm" / "ui" / "qml"
 _COMPONENTS_DIR = _QML_DIR / "components"
 _THEME_DIR = _QML_DIR / "theme"
 
@@ -45,10 +40,8 @@ _THEME_DIR = _QML_DIR / "theme"
 def qml_engine(qapp: QApplication) -> QQmlEngine:
     """QQmlEngine（含 Theme.qml 及系统完整 PySide6 qml 路径）"""
     import PySide6
+
     engine = QQmlEngine()
-    sys_qml = Path(r"C:\Users\fubai\AppData\Local\Programs\Python\Python311\Lib\site-packages\PySide6\qml")
-    if sys_qml.exists():
-        engine.addImportPath(str(sys_qml))
     pyside6_qml = Path(PySide6.__file__).parent / "qml"
     if pyside6_qml.exists():
         engine.addImportPath(str(pyside6_qml))
@@ -56,9 +49,7 @@ def qml_engine(qapp: QApplication) -> QQmlEngine:
     return engine
 
 
-def _load_component(
-    engine: QQmlEngine, qml_file: Path
-) -> object:
+def _load_component(engine: QQmlEngine, qml_file: Path) -> object:
     """加载 QML 组件并返回根对象实例
 
     用 QQmlComponent.loadUrl 加载文件，create 创建实例。
@@ -67,9 +58,7 @@ def _load_component(
     url = QUrl.fromLocalFile(str(qml_file))
     component = QQmlComponent(engine, url)
     if component.isError():
-        errors = "\n".join(
-            f"  - {e.toString()}" for e in component.errors()
-        )
+        errors = "\n".join(f"  - {e.toString()}" for e in component.errors())
         raise AssertionError(f"加载 QML 组件失败 {qml_file.name}:\n{errors}")
     obj = component.create()
     assert obj is not None, f"创建 QML 组件实例失败: {qml_file.name}"
@@ -165,9 +154,7 @@ def test_tabbar_set_currentTabIndex(qapp: QApplication, qml_engine: QQmlEngine) 
 # ── PrimaryButton.qml ─────────────────────────────────────
 
 
-def test_primaryButton_default_properties(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_primaryButton_default_properties(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PrimaryButton 默认 text 为空，type 为 'primary'，enabled 为 True"""
     btn = _load_component(qml_engine, _COMPONENTS_DIR / "PrimaryButton.qml")
     assert btn.property("text") == ""  # type: ignore[attr-defined]
@@ -175,9 +162,7 @@ def test_primaryButton_default_properties(
     assert btn.property("enabled") is True  # type: ignore[attr-defined]
 
 
-def test_primaryButton_set_properties(
-    qapp: QApplication, qml_engine: QQmlEngine
-) -> None:
+def test_primaryButton_set_properties(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """PrimaryButton 设置 text/type/enabled 后应正确读取"""
     btn = _load_component(qml_engine, _COMPONENTS_DIR / "PrimaryButton.qml")
     btn.setProperty("text", "删除")  # type: ignore[attr-defined]

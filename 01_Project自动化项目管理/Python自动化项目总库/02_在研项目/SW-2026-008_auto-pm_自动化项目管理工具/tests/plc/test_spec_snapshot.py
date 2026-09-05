@@ -200,9 +200,7 @@ class TestLoadSpecRegistry:
         """JSON 格式错误返回 None"""
         registry_dir = tmp_path / "00_Obsidian_Base全局规范文件仓库"
         registry_dir.mkdir(parents=True, exist_ok=True)
-        (registry_dir / "spec_registry.json").write_text(
-            "{invalid json content", encoding="utf-8"
-        )
+        (registry_dir / "spec_registry.json").write_text("{invalid json content", encoding="utf-8")
 
         result = load_spec_registry(str(tmp_path))
 

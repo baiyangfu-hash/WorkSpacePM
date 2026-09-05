@@ -16,7 +16,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import (
     SpecViolationError,
@@ -123,9 +122,7 @@ def archive_workspace(tmp_path: Path) -> str:
     project_path = tmp_path / project_id
     project_path.mkdir(parents=True, exist_ok=True)
     # 创建项目标志文件，使 ChangeFileLocator._is_project_dir 识别为项目目录
-    (project_path / f"PM_SESSION_{project_id}.md").write_text(
-        "# PM_SESSION\n", encoding="utf-8"
-    )
+    (project_path / f"PM_SESSION_{project_id}.md").write_text("# PM_SESSION\n", encoding="utf-8")
     chg_dir = project_path / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-DOCU"
     chg_dir.mkdir(parents=True, exist_ok=True)
     chg_file = chg_dir / "CHG-DOCU-2026-001.md"
@@ -148,9 +145,7 @@ def implementing_workspace(tmp_path: Path) -> str:
     project_path = tmp_path / project_id
     project_path.mkdir(parents=True, exist_ok=True)
     # 创建项目标志文件，使 ChangeFileLocator._is_project_dir 识别为项目目录
-    (project_path / f"PM_SESSION_{project_id}.md").write_text(
-        "# PM_SESSION\n", encoding="utf-8"
-    )
+    (project_path / f"PM_SESSION_{project_id}.md").write_text("# PM_SESSION\n", encoding="utf-8")
     chg_dir = project_path / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-DOCU"
     chg_dir.mkdir(parents=True, exist_ok=True)
     chg_file = chg_dir / "CHG-DOCU-2026-001.md"
@@ -183,11 +178,13 @@ class TestArchiveStatusFlow:
     def test_archived_is_terminal_state(self) -> None:
         """archived 是终态，无合法的下一状态"""
         from auto_pm.change.constants import STATUS_FLOW
+
         assert STATUS_FLOW["archived"] == set()
 
     def test_closed_is_terminal_state(self) -> None:
         """closed 是终态，无合法的下一状态"""
         from auto_pm.change.constants import STATUS_FLOW
+
         assert STATUS_FLOW["closed"] == set()
 
     def test_archived_to_any_invalid(self) -> None:
@@ -229,9 +226,7 @@ class TestArchiveFlow:
         assert cr is not None
         assert cr.status == "archived"
 
-    def test_archive_from_implementing_fails(
-        self, implementing_workspace: str
-    ) -> None:
+    def test_archive_from_implementing_fails(self, implementing_workspace: str) -> None:
         """implementing 状态不能直接归档"""
         svc = ChangeService(implementing_workspace)
         chg_number = "CHG-DOCU-2026-001"
@@ -261,9 +256,7 @@ class TestArchiveFlow:
 class TestArchiveGuards:
     """归档门禁校验测试"""
 
-    def test_archive_guard_passes_for_completed(
-        self, archive_workspace: str
-    ) -> None:
+    def test_archive_guard_passes_for_completed(self, archive_workspace: str) -> None:
         """completed 状态归档门禁通过"""
         svc = ChangeService(archive_workspace)
         chg_number = "CHG-DOCU-2026-001"
@@ -272,9 +265,7 @@ class TestArchiveGuards:
         assert cr is not None
         assert cr.status == "archived"
 
-    def test_archive_from_implementing_fails(
-        self, implementing_workspace: str
-    ) -> None:
+    def test_archive_from_implementing_fails(self, implementing_workspace: str) -> None:
         """非 completed 状态归档门禁失败"""
         svc = ChangeService(implementing_workspace)
         chg_number = "CHG-DOCU-2026-001"
@@ -290,9 +281,7 @@ class TestArchiveGuards:
 class TestFullFlowToArchive:
     """完整流程测试：implementing → pending_acceptance → accepting → completed → archived"""
 
-    def test_full_flow_to_archive(
-        self, implementing_workspace: str
-    ) -> None:
+    def test_full_flow_to_archive(self, implementing_workspace: str) -> None:
         """从实施到归档的完整流程"""
         svc = ChangeService(implementing_workspace)
         chg_number = "CHG-DOCU-2026-001"
@@ -314,7 +303,8 @@ class TestFullFlowToArchive:
 
         # Step 3: accepting → completed
         cr = svc.transition_status(
-            chg_number, "completed",
+            chg_number,
+            "completed",
             approver="李四",
             verification_conclusion="全部通过",
         )
@@ -351,4 +341,4 @@ class TestArchiveStatusLabels:
         assert "archived" in STATUS_FLOW["completed"]
         assert "closed" in STATUS_FLOW["completed"]
         assert STATUS_FLOW["archived"] == set()  # 终态
-        assert STATUS_FLOW["closed"] == set()    # 终态
+        assert STATUS_FLOW["closed"] == set()  # 终态

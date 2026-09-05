@@ -180,7 +180,9 @@ def test_change_bridge_get_timeline(qapp) -> None:  # type: ignore[no-untyped-de
         message="Success",
         payload=[
             _make_timeline_dto(from_status="draft", to_status="submitted"),
-            _make_timeline_dto(from_status="submitted", to_status="approved", transition_date="2026-07-08T11:00:00"),
+            _make_timeline_dto(
+                from_status="submitted", to_status="approved", transition_date="2026-07-08T11:00:00"
+            ),
         ],
     )
     bridge = ChangeBridge(facade=mock_facade)

@@ -20,7 +20,12 @@ class TestSpecScannerScanAll:
         assert len(result) == 0
 
     def test_scan_ignores_non_spec_files(self, populated_workspace: Path) -> None:
-        non_spec = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "01_项目管理域" / "random_notes.md"
+        non_spec = (
+            populated_workspace
+            / "00_Obsidian_Base全局规范文件仓库"
+            / "01_项目管理域"
+            / "random_notes.md"
+        )
         non_spec.write_text("# Random Notes", encoding="utf-8")
         scanner = SpecScanner(populated_workspace)
         result = scanner.scan_all()
@@ -30,7 +35,12 @@ class TestSpecScannerScanAll:
 class TestSpecScannerExtractVersion:
     def test_extract_version_chinese(self, populated_workspace: Path) -> None:
         scanner = SpecScanner(populated_workspace)
-        spec_path = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "01_项目管理域" / "PM-2026-001_项目管理规范_DEV.md"
+        spec_path = (
+            populated_workspace
+            / "00_Obsidian_Base全局规范文件仓库"
+            / "01_项目管理域"
+            / "PM-2026-001_项目管理规范_DEV.md"
+        )
         version = scanner.extract_version(spec_path)
         assert version is not None
         assert "1.0.0" in version
@@ -47,7 +57,12 @@ class TestSpecScannerExtractVersion:
 class TestSpecScannerExtractFrontmatter:
     def test_extract_existing_frontmatter(self, populated_workspace: Path) -> None:
         scanner = SpecScanner(populated_workspace)
-        spec_path = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "01_项目管理域" / "PM-2026-001_项目管理规范_DEV.md"
+        spec_path = (
+            populated_workspace
+            / "00_Obsidian_Base全局规范文件仓库"
+            / "01_项目管理域"
+            / "PM-2026-001_项目管理规范_DEV.md"
+        )
         fm = scanner.extract_frontmatter(spec_path)
         assert fm is not None
         assert isinstance(fm, dict)

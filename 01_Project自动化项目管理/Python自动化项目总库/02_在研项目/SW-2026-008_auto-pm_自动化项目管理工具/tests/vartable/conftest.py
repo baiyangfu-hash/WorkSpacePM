@@ -69,7 +69,7 @@ def missing_columns_csv(tmp_path: Path) -> Path:
     """缺列 CSV 文件"""
     file_path = tmp_path / "missing.csv"
     file_path.write_text(
-        "station,signal_type,address\n" "cpu,DI,X0\n",
+        "station,signal_type,address\ncpu,DI,X0\n",
         encoding="utf-8",
     )
     return file_path

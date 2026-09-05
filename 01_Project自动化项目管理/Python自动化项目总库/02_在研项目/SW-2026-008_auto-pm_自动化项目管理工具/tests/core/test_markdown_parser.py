@@ -1,4 +1,5 @@
 """单元测试：Markdown 结构化解析器 (markdown_parser)"""
+
 from __future__ import annotations
 
 from auto_pm.utils.markdown_parser import parse_markdown_to_blocks
@@ -16,6 +17,7 @@ def test_parse_headers() -> None:
     assert blocks[1] == {"type": "h2", "text": "Heading 2", "anchor": "heading-2"}
     assert blocks[2] == {"type": "h3", "text": "Heading 3", "anchor": "heading-3"}
 
+
 def test_parse_paragraphs() -> None:
     content = """
 Hello World.
@@ -30,6 +32,7 @@ Another paragraph.
     assert blocks[1]["type"] == "paragraph"
     assert "<p>Another paragraph.</p>" in blocks[1]["html"]
 
+
 def test_parse_code_blocks() -> None:
     content = """
 ```python
@@ -39,11 +42,8 @@ def test() -> None:
     """
     blocks = parse_markdown_to_blocks(content)
     assert len(blocks) == 1
-    assert blocks[0] == {
-        "type": "code",
-        "lang": "python",
-        "code": "def test() -> None:\n    pass"
-    }
+    assert blocks[0] == {"type": "code", "lang": "python", "code": "def test() -> None:\n    pass"}
+
 
 def test_parse_alerts() -> None:
     content = """
@@ -62,6 +62,7 @@ def test_parse_alerts() -> None:
     assert blocks[1]["type"] == "alert"
     assert blocks[1]["alert_type"] == "warning"
     assert "Warning content." in blocks[1]["html"]
+
 
 def test_parse_tables() -> None:
     content = """

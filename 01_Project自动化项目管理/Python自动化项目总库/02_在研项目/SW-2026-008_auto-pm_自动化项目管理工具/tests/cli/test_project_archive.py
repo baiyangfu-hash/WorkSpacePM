@@ -346,9 +346,7 @@ def test_real_policy_adapter_fails_closed_on_corrupt_decision_and_chg_status(
         errors="replace",
     )
     with pytest.raises(ValueError, match="状态不允许"):
-        project_cli.ProjectArchivePolicyAdapter(str(tmp_path / "second")).authorization_for(
-            request
-        )
+        project_cli.ProjectArchivePolicyAdapter(str(tmp_path / "second")).authorization_for(request)
 
 
 def test_real_policy_adapter_fails_closed_on_missing_and_blocked_decision(

@@ -68,9 +68,11 @@ def _test_contains_none_compare(node: ast.expr) -> bool:
     if isinstance(node, ast.Compare):
         has_none_check = False
         for op, comparator in zip(node.ops, node.comparators, strict=False):
-            if isinstance(op, (ast.Is, ast.IsNot)) and isinstance(
-                comparator, ast.Constant
-            ) and comparator.value is None:
+            if (
+                isinstance(op, (ast.Is, ast.IsNot))
+                and isinstance(comparator, ast.Constant)
+                and comparator.value is None
+            ):
                 has_none_check = True
         return has_none_check
     if isinstance(node, ast.BoolOp):
@@ -122,8 +124,10 @@ def _extract_fixtures(source: str) -> list[tuple[str, ast.FunctionDef]]:
             continue
         # 检查是否是 fixture（有 @pytest.fixture 装饰器）
         is_fixture = any(
-            isinstance(d, ast.Attribute) and d.attr == "fixture"
-            or isinstance(d, ast.Name) and d.id == "fixture"
+            isinstance(d, ast.Attribute)
+            and d.attr == "fixture"
+            or isinstance(d, ast.Name)
+            and d.id == "fixture"
             for d in node.decorator_list
         )
         # 也检查辅助函数（非 fixture 但创建工作空间/项目）
@@ -290,15 +294,11 @@ class TestFixtureHealth:
 
             for func_name, func_node in fixtures:
                 # 递归检查：是否创建目录且创建标志文件
-                creates_dir, has_marker = _fixture_creates_dir_with_marker(
-                    func_node, all_funcs
-                )
+                creates_dir, has_marker = _fixture_creates_dir_with_marker(func_node, all_funcs)
 
                 # 只报告"创建目录但缺标志文件"的 fixture
                 if creates_dir and not has_marker:
-                    violations.append(
-                        f"  - {rel_path}::{func_name}"
-                    )
+                    violations.append(f"  - {rel_path}::{func_name}")
 
         if violations:
             msg = "\n".join(violations)

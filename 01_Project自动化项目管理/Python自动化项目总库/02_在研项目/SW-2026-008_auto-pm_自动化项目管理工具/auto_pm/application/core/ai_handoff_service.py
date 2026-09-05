@@ -88,7 +88,9 @@ class AiHandoffService:
         normalized["read_first"] = self._normalize_list(payload.get("read_first"))
         normalized["artifacts"] = self._normalize_list(payload.get("artifacts"))
         normalized["chg_updates"] = self._normalize_list(payload.get("chg_updates"))
-        normalized["verification"] = self._normalize_mapping(payload.get("verification"), self.DEFAULT_VERIFICATION)
+        normalized["verification"] = self._normalize_mapping(
+            payload.get("verification"), self.DEFAULT_VERIFICATION
+        )
 
         pi = self._normalize_mapping(payload.get("product_impact"), self.DEFAULT_PRODUCT_IMPACT)
         # Bidirectional sync for backward compatibility
@@ -102,7 +104,9 @@ class AiHandoffService:
             pi["observable_signal"] = pi["engineering_signal"]
 
         normalized["product_impact"] = pi
-        normalized["pm_closure"] = self._normalize_mapping(payload.get("pm_closure"), self.DEFAULT_PM_CLOSURE)
+        normalized["pm_closure"] = self._normalize_mapping(
+            payload.get("pm_closure"), self.DEFAULT_PM_CLOSURE
+        )
         return normalized
 
     def validate_product_impact(self, product_impact: dict[str, Any]) -> dict[str, Any]:
@@ -115,7 +119,9 @@ class AiHandoffService:
             warnings.append("缺少 hypothesis_id（未关联产品假设）")
         if not signal:
             warnings.append("缺少 engineering_signal（未描述具体工程/物理可观测信号）")
-        elif len(signal) < 8 and any(kw in signal for kw in ("优化", "完成", "修改", "修复", "改进")):
+        elif len(signal) < 8 and any(
+            kw in signal for kw in ("优化", "完成", "修改", "修复", "改进")
+        ):
             warnings.append("engineering_signal 过于泛化（缺乏具体物理量/交互量）")
 
         return {

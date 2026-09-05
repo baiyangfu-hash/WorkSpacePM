@@ -51,7 +51,9 @@ def _archive_request(operation: ArchiveOperation) -> ArchiveRequest:
     )
 
 
-def test_archive_boundary_requires_explicit_configuration_and_exact_operation(tmp_path: Path) -> None:
+def test_archive_boundary_requires_explicit_configuration_and_exact_operation(
+    tmp_path: Path,
+) -> None:
     service = ProjectService(str(tmp_path))
     with pytest.raises(RuntimeError, match="未配置安全归档服务"):
         service.archive_project(_archive_request(ArchiveOperation.ARCHIVE))

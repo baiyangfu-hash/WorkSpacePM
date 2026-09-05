@@ -78,14 +78,9 @@ class TestSkillContractDriftChecker:
     def test_detects_value_drift(self, populated_workspace: Path) -> None:
         """篡改阈值真源值（150 → 999），应报 C1 漂移且 severity=ERROR。"""
         _write_correct_skill_docs(populated_workspace)
-        guide = (
-            populated_workspace
-            / ".trae/skills/pm-workflow/refs/pm_session_guide.md"
-        )
+        guide = populated_workspace / ".trae/skills/pm-workflow/refs/pm_session_guide.md"
         guide.write_text(
-            "# PM_SESSION 指南\n\n"
-            "阈值: 999KB / 300行\n"
-            "归档目录: PM_SESSION归档 (位于 05_收尾)\n",
+            "# PM_SESSION 指南\n\n阈值: 999KB / 300行\n归档目录: PM_SESSION归档 (位于 05_收尾)\n",
             encoding="utf-8",
         )
         reg = SpecRegistry(populated_workspace)
@@ -106,10 +101,7 @@ class TestSkillContractDriftChecker:
 
         states = sorted(STATUS_FLOW.keys())
         removed = states[-1]
-        gates = (
-            populated_workspace
-            / ".trae/skills/pm-workflow/refs/process_gates.md"
-        )
+        gates = populated_workspace / ".trae/skills/pm-workflow/refs/process_gates.md"
         gates.write_text(
             "# 状态机\n\n"
             f"{' '.join(states[:-1])}\n\n"

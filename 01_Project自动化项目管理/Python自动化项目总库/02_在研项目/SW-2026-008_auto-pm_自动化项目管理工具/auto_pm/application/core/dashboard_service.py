@@ -1,4 +1,4 @@
-﻿"""PLC-HMI 概念映射：SFB 库函数（驾驶舱数据聚合（项目统计/变更统计/健康度计算））
+"""PLC-HMI 概念映射：SFB 库函数（驾驶舱数据聚合（项目统计/变更统计/健康度计算））
 
 像 PLC 的 SFB/SFC 系统函数，被 FB 功能块（application/*_facade.py）调用，
 不直接暴露给 HMI 画面。
@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from auto_pm.models import DashboardSummaryDTO
@@ -66,9 +66,7 @@ class DashboardService:
         open_changes = [change for change in changes if change.status != "closed"]
         failed_project_ids, not_applicable_ids = self._collect_plc_check_stats(projects)
         recent_activities = self._collect_recent_activities(projects, changes)
-        risk_hints = self._collect_risk_hints(
-            open_changes, failed_project_ids, not_applicable_ids
-        )
+        risk_hints = self._collect_risk_hints(open_changes, failed_project_ids, not_applicable_ids)
         test_pass_rate, test_total = self._collect_test_summary()
 
         summary = DashboardSummaryDTO(
@@ -115,9 +113,7 @@ class DashboardService:
             log.warning("查询项目活跃变更失败 %s: %s", project_id, exc)
             return None
 
-        active_changes = [
-            c for c in changes if c.status not in ("completed", "closed")
-        ]
+        active_changes = [c for c in changes if c.status not in ("completed", "closed")]
         if not active_changes:
             return None
 
@@ -208,8 +204,15 @@ class DashboardService:
         latest = sorted_changes[0]
 
         status_order = [
-            "draft", "submitted", "under_review", "approved", "implementing",
-            "pending_acceptance", "accepting", "completed", "closed"
+            "draft",
+            "submitted",
+            "under_review",
+            "approved",
+            "implementing",
+            "pending_acceptance",
+            "accepting",
+            "completed",
+            "closed",
         ]
         status_names = {
             "draft": "草稿",
@@ -228,12 +231,14 @@ class DashboardService:
         for status in status_order:
             idx = status_order.index(status)
             latest_idx = status_order.index(latest_status) if latest_status in status_order else -1
-            nodes.append({
-                "name": status_names[status],
-                "status": status,
-                "active": status == latest_status,
-                "completed": idx <= latest_idx,
-            })
+            nodes.append(
+                {
+                    "name": status_names[status],
+                    "status": status,
+                    "active": status == latest_status,
+                    "completed": idx <= latest_idx,
+                }
+            )
 
         current_idx = status_order.index(latest_status) if latest_status in status_order else -1
 
@@ -250,12 +255,14 @@ class DashboardService:
         activities = []
         for c in changes:
             apply_date = getattr(c, "apply_date", "")
-            activities.append({
-                "time": apply_date,
-                "title": getattr(c, "change_number", ""),
-                "subtitle": getattr(c, "title", ""),
-                "type": str(getattr(c, "status", "default")),
-            })
+            activities.append(
+                {
+                    "time": apply_date,
+                    "title": getattr(c, "change_number", ""),
+                    "subtitle": getattr(c, "title", ""),
+                    "type": str(getattr(c, "status", "default")),
+                }
+            )
         activities.sort(key=lambda a: (a.get("time") or "", a.get("title") or ""), reverse=True)
         return activities[:10]
 
@@ -304,9 +311,7 @@ class DashboardService:
         activities.sort(key=lambda item: item[0], reverse=True)
         return [item[1] for item in activities[:limit]]
 
-    def _collect_plc_check_stats(
-        self, projects: list[Any]
-    ) -> tuple[list[str], list[str]]:
+    def _collect_plc_check_stats(self, projects: list[Any]) -> tuple[list[str], list[str]]:
         """一次遍历收集 PLC 检查统计
 
         V0.4.1 Step 3: 合并 failed + not_applicable 收集，避免重复跑 PlcChecker.check。
@@ -400,9 +405,7 @@ class DashboardService:
             hints.append(f"PLC 检查失败项目: {joined_ids}{suffix}")
         if not_applicable_project_ids:
             count = len(not_applicable_project_ids)
-            hints.append(
-                f"PLC 检查不适用项目: {count} 个（Python 项目，已跳过 PLC 检查）"
-            )
+            hints.append(f"PLC 检查不适用项目: {count} 个（Python 项目，已跳过 PLC 检查）")
         if not hints:
             hints.append("当前未发现高优先级风险")
         return hints
@@ -420,7 +423,7 @@ class DashboardService:
         normalized = value.strip().replace("T", " ")
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
             try:
-                return datetime.strptime(normalized, fmt).timestamp()
+                return datetime.strptime(normalized, fmt).replace(tzinfo=UTC).timestamp()
             except ValueError:
                 continue
         return 0.0

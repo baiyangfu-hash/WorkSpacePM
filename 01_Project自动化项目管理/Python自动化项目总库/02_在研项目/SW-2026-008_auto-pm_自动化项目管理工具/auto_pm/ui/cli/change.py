@@ -51,6 +51,7 @@ _STATUS_CHOICES = sorted(ALL_STATUSES)
 #  M3.5-6: Markdown 表格解析辅助函数（供 cmd_show 渲染 §6/§8/§9/§10）
 # ════════════════════════════════════════════════════════════
 
+
 def _parse_md_table(text: str) -> tuple[list[str], list[list[str]]]:
     """解析 Markdown 表格为表头+数据行
 
@@ -112,12 +113,13 @@ def _truncate(text: str, max_len: int = 60) -> str:
     text = text.strip()
     if len(text) <= max_len:
         return text
-    return text[:max_len - 3] + "..."
+    return text[: max_len - 3] + "..."
 
 
 # ════════════════════════════════════════════════════════════
 #  §6/§8/§9/§10 显示函数
 # ════════════════════════════════════════════════════════════
+
 
 def _display_section_6(cr: ChangeRequest) -> None:
     """显示 §6 变更影响分析"""
@@ -149,14 +151,16 @@ def _display_section_6(cr: ChangeRequest) -> None:
                     # 补齐列数
                     while len(row) < len(header):
                         row.append("")
-                    table.add_row(*[_truncate(c, 50) for c in row[:len(header)]])
+                    table.add_row(*[_truncate(c, 50) for c in row[: len(header)]])
                 console.print(table)
 
     # §6.1 风险评估（独立于约束表，CLI edit 可单独设置）
     if has_risk:
         if cr.risk_level:
             risk_labels = {"none": "无", "low": "低", "medium": "中", "high": "高"}
-            console.print(f"  [cyan]风险等级:[/cyan] {risk_labels.get(cr.risk_level, cr.risk_level)}")
+            console.print(
+                f"  [cyan]风险等级:[/cyan] {risk_labels.get(cr.risk_level, cr.risk_level)}"
+            )
         if cr.mitigation:
             console.print(f"  [cyan]缓解措施:[/cyan] {_truncate(cr.mitigation, 100)}")
 
@@ -172,7 +176,7 @@ def _display_section_6(cr: ChangeRequest) -> None:
                 for row in rows:
                     while len(row) < len(header):
                         row.append("")
-                    table.add_row(*[_truncate(c, 50) for c in row[:len(header)]])
+                    table.add_row(*[_truncate(c, 50) for c in row[: len(header)]])
                 console.print(table)
 
     # §6.3 变更传播链
@@ -204,7 +208,7 @@ def _display_section_8(cr: ChangeRequest) -> None:
             for row in rows:
                 while len(row) < len(header):
                     row.append("")
-                table.add_row(*[_truncate(c, 50) for c in row[:len(header)]])
+                table.add_row(*[_truncate(c, 50) for c in row[: len(header)]])
             console.print(table)
 
     # §8.2 审批结论
@@ -236,7 +240,7 @@ def _display_section_9(cr: ChangeRequest) -> None:
     for row in rows:
         while len(row) < len(header):
             row.append("")
-        table.add_row(*[_truncate(c, 50) for c in row[:len(header)]])
+        table.add_row(*[_truncate(c, 50) for c in row[: len(header)]])
     console.print(table)
 
 
@@ -266,7 +270,7 @@ def _display_section_10(cr: ChangeRequest) -> None:
                 for row in rows:
                     while len(row) < len(header):
                         row.append("")
-                    table.add_row(*[_truncate(c, 50) for c in row[:len(header)]])
+                    table.add_row(*[_truncate(c, 50) for c in row[: len(header)]])
                 console.print(table)
 
     # §10.2 跨领域联动验证
@@ -280,7 +284,7 @@ def _display_section_10(cr: ChangeRequest) -> None:
             for row in rows:
                 while len(row) < len(header):
                     row.append("")
-                table.add_row(*[_truncate(c, 50) for c in row[:len(header)]])
+                table.add_row(*[_truncate(c, 50) for c in row[: len(header)]])
             console.print(table)
 
     # §10.3 验证结论
@@ -292,7 +296,9 @@ def _display_section_10(cr: ChangeRequest) -> None:
                 for row in rows:
                     cells = [c for c in row if c]
                     if cells:
-                        console.print(f"  [cyan]验证结论:[/cyan] {_truncate(' | '.join(cells), 120)}")
+                        console.print(
+                            f"  [cyan]验证结论:[/cyan] {_truncate(' | '.join(cells), 120)}"
+                        )
             else:
                 console.print(f"  [cyan]验证结论:[/cyan] {cr.section_10_conclusion}")
 
@@ -307,7 +313,13 @@ def change_group(ctx: click.Context) -> None:
 @click.argument("project_id")
 @click.option("--status", type=click.Choice(_STATUS_CHOICES), default=None, help="按状态筛选")
 @click.option("--domain", type=click.Choice(_DOMAIN_CHOICES), default=None, help="按领域筛选")
-@click.option("--full", "full_mode", is_flag=True, default=False, help="完整模式：标题列自动换行不截断（适合详细查看）")
+@click.option(
+    "--full",
+    "full_mode",
+    is_flag=True,
+    default=False,
+    help="完整模式：标题列自动换行不截断（适合详细查看）",
+)
 @click.pass_context
 def cmd_list(
     ctx: click.Context,
@@ -380,7 +392,9 @@ def cmd_show(ctx: click.Context, change_number: str, pid: str | None) -> None:
     console.print(f"[cyan]项目编号:[/cyan] {cr.project_id}")
     console.print(f"[cyan]项目名称:[/cyan] {cr.project_name}")
     console.print(f"[cyan]技术领域:[/cyan] {cr.domain} ({DOMAINS.get(cr.domain, '?')})")
-    console.print(f"[cyan]业务性质:[/cyan] {cr.business_nature} ({BUSINESS_NATURES.get(cr.business_nature, '?')})")
+    console.print(
+        f"[cyan]业务性质:[/cyan] {cr.business_nature} ({BUSINESS_NATURES.get(cr.business_nature, '?')})"
+    )
     console.print(f"[cyan]影响范围:[/cyan] {','.join(cr.impact_scope)}")
     console.print(f"[cyan]紧急程度:[/cyan] {cr.urgency} ({URGENCY_LEVELS.get(cr.urgency, '?')})")
     console.print(f"[cyan]当前状态:[/cyan] {STATUS_LABELS.get(cr.status, cr.status)}")
@@ -412,16 +426,34 @@ def cmd_show(ctx: click.Context, change_number: str, pid: str | None) -> None:
 @change_group.command(name="create")
 @click.option("--pid", "project_id", required=True, help="项目编号")
 @click.option("--domain", type=click.Choice(_DOMAIN_CHOICES), required=True, help="技术领域")
-@click.option("--nature", "business_nature", type=click.Choice(_NATURE_CHOICES), required=True, help="业务性质")
-@click.option("--scope", "impact_scope", multiple=True, type=click.Choice(_SCOPE_CHOICES), required=True, help="影响范围（可多次指定）")
+@click.option(
+    "--nature",
+    "business_nature",
+    type=click.Choice(_NATURE_CHOICES),
+    required=True,
+    help="业务性质",
+)
+@click.option(
+    "--scope",
+    "impact_scope",
+    multiple=True,
+    type=click.Choice(_SCOPE_CHOICES),
+    required=True,
+    help="影响范围（可多次指定）",
+)
 @click.option("--applicant", required=True, help="变更申请人")
 @click.option("--background", required=True, help="变更背景")
 @click.option("--necessity", required=True, help="变更必要性")
 @click.option("--references", "references", default="", help="参考依据")
 @click.option("--planned-date", default=None, help="预计实施日期（YYYY-MM-DD，默认今天）")
 @click.option("--urgency", type=click.Choice(_URGENCY_CHOICES), default="normal", help="紧急程度")
-@click.option("--retrofit", "retrofit", is_flag=True, default=False,
-              help="CHG-108 缺陷3: 先实施后补模式——直接创建 closed 状态变更单（跳过状态流转）")
+@click.option(
+    "--retrofit",
+    "retrofit",
+    is_flag=True,
+    default=False,
+    help="CHG-108 缺陷3: 先实施后补模式——直接创建 closed 状态变更单（跳过状态流转）",
+)
 @click.pass_context
 def cmd_create(
     ctx: click.Context,
@@ -462,9 +494,13 @@ def cmd_create(
         )
         console.print(f"[green]变更单创建成功: {cr.change_number}[/green]")
         if track == ChangeTrack.QUICK:
-            console.print("  [cyan]通道: Quick Track (轻量通道) ⚡ - 局部改动，推荐简化审批/先实施后补[/cyan]")
+            console.print(
+                "  [cyan]通道: Quick Track (轻量通道) ⚡ - 局部改动，推荐简化审批/先实施后补[/cyan]"
+            )
         else:
-            console.print("  [blue]通道: Full Track (完整通道) 🛡️ - 架构/全局改动，需走完整 12 态门禁流转[/blue]")
+            console.print(
+                "  [blue]通道: Full Track (完整通道) 🛡️ - 架构/全局改动，需走完整 12 态门禁流转[/blue]"
+            )
         if retrofit:
             console.print("  [yellow]模式: retrofit（先实施后补，直接 closed）[/yellow]")
         console.print(f"  领域: {domain} ({DOMAINS[domain]})")
@@ -483,8 +519,13 @@ def cmd_create(
 
 @change_group.command(name="verify")
 @click.argument("project_id")
-@click.option("--ledger-check", "ledger_check", is_flag=True, default=False,
-              help="CHG-108 缺陷3: 对账门禁——校验变更单文件 vs 台账记录一致性，差异时报错退出")
+@click.option(
+    "--ledger-check",
+    "ledger_check",
+    is_flag=True,
+    default=False,
+    help="CHG-108 缺陷3: 对账门禁——校验变更单文件 vs 台账记录一致性，差异时报错退出",
+)
 @click.pass_context
 def cmd_verify(
     ctx: click.Context,
@@ -526,21 +567,31 @@ def cmd_verify(
     else:
         console.print("[red]❌ 门禁失败: 检测到差异[/red]")
         if diff.missing_in_ledger:
-            console.print(f"  [red]台账缺失 {len(diff.missing_in_ledger)} 条: {', '.join(diff.missing_in_ledger)}[/red]")
+            console.print(
+                f"  [red]台账缺失 {len(diff.missing_in_ledger)} 条: {', '.join(diff.missing_in_ledger)}[/red]"
+            )
         if diff.orphan_in_ledger:
-            console.print(f"  [yellow]台账孤儿 {len(diff.orphan_in_ledger)} 条: {', '.join(diff.orphan_in_ledger)}[/yellow]")
+            console.print(
+                f"  [yellow]台账孤儿 {len(diff.orphan_in_ledger)} 条: {', '.join(diff.orphan_in_ledger)}[/yellow]"
+            )
         if diff.status_mismatches:
             console.print(f"  [red]状态不一致 {len(diff.status_mismatches)} 条[/red]")
-        console.print("[dim]提示: 运行 `auto-pm ledger reconcile <PID> --fix` 自动修复缺失行和状态不一致[/dim]")
+        console.print(
+            "[dim]提示: 运行 `auto-pm ledger reconcile <PID> --fix` 自动修复缺失行和状态不一致[/dim]"
+        )
         ctx.exit(2)
 
 
 @change_group.command(name="transition")
 @click.argument("change_number")
-@click.option("--to", "new_status", type=click.Choice(_STATUS_CHOICES), required=True, help="目标状态")
+@click.option(
+    "--to", "new_status", type=click.Choice(_STATUS_CHOICES), required=True, help="目标状态"
+)
 @click.option("--approver", default="", help="审批人/实施人")
 @click.option("--comment", default="", help="审批意见/返工原因")
-@click.option("--verification-conclusion", default="全部通过", help="验证结论（completed 状态必填）")
+@click.option(
+    "--verification-conclusion", default="全部通过", help="验证结论（completed 状态必填）"
+)
 @click.option(
     "--allow-partial-verification",
     is_flag=True,
@@ -578,6 +629,7 @@ def cmd_transition(
             ctx.exit(1)
         # 审计日志：记录变更单状态流转（关键流程操作追溯）
         from auto_pm.logging.audit import audit_log
+
         audit_log(
             "change_transition",
             change_number=change_number,
@@ -607,7 +659,9 @@ _RISK_LEVEL_CHOICES = ["none", "low", "medium", "high"]
 @click.option("--references", default=None, help="§4 参考依据")
 @click.option("--planned-date", default=None, help="§3.4 预计实施日期（YYYY-MM-DD）")
 @click.option("--urgency", type=click.Choice(_URGENCY_CHOICES), default=None, help="§3.4 紧急程度")
-@click.option("--risk-level", type=click.Choice(_RISK_LEVEL_CHOICES), default=None, help="§6.1 风险等级")
+@click.option(
+    "--risk-level", type=click.Choice(_RISK_LEVEL_CHOICES), default=None, help="§6.1 风险等级"
+)
 @click.option("--mitigation", default=None, help="§6.1 缓解措施")
 @click.option("--propagation-chain", default=None, help="§6.3 变更传播链")
 @click.option("--pid", default=None, help="项目编号（跨项目单号冲突时必填，TD-A04 修复）")

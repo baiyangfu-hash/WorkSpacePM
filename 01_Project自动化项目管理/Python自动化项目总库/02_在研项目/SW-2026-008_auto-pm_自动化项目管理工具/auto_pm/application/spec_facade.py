@@ -17,6 +17,7 @@ from auto_pm.core.protocols import (
     SpecCenterServiceProtocol,
     SpecCheckServiceProtocol,
 )
+
 from auto_pm.ui.contracts.dto.spec_dto import (
     SpecCenterEntryDTO,
     SpecCenterOverviewDTO,
@@ -61,6 +62,7 @@ class SpecFacade:
                 proj = self._project_service.get_project(project_id)
                 if proj and proj.stack == "python":
                     from auto_pm.core.python_service import PythonProjectService
+
                     py_svc = PythonProjectService(self._project_service.workspace_root)
                     check_res = py_svc.check_project_spec(proj.path, project_id)
                     results = [
@@ -83,15 +85,20 @@ class SpecFacade:
                     return CommandResult(success=True, message="Success", payload=dto)
                 elif proj and proj.stack == "plc":
                     from auto_pm.plc.checker import PlcChecker
+
                     plc_checker = PlcChecker(self._project_service.workspace_root)
                     plc_check_res = plc_checker.check_project(proj.path)
                     results = [
                         {
                             "check_id": item.item,
-                            "severity": "ERROR" if item.status == "fail" else ("WARNING" if item.status == "warn" else "INFO"),
+                            "severity": "ERROR"
+                            if item.status == "fail"
+                            else ("WARNING" if item.status == "warn" else "INFO"),
                             "message": f"{item.item}: {item.message}",
                             "details": item.message,
-                            "fix_suggestion": "查看 PLC 规范要求或进行一键修复" if item.status != "pass" else "",
+                            "fix_suggestion": "查看 PLC 规范要求或进行一键修复"
+                            if item.status != "pass"
+                            else "",
                         }
                         for item in plc_check_res.items
                     ]
@@ -133,24 +140,32 @@ class SpecFacade:
     def run_spec_repair(self, project_id: str) -> CommandResult[dict[str, Any] | None]:
         try:
             if not project_id or not self._project_service:
-                return CommandResult(success=False, message="Missing project_service or project_id", payload=None)
+                return CommandResult(
+                    success=False, message="Missing project_service or project_id", payload=None
+                )
             proj = self._project_service.get_project(project_id)
             if not proj:
-                return CommandResult(success=False, message=f"Project {project_id} not found", payload=None)
+                return CommandResult(
+                    success=False, message=f"Project {project_id} not found", payload=None
+                )
 
             if proj.stack == "python":
                 from auto_pm.core.python_service import PythonProjectService
+
                 py_svc = PythonProjectService(self._project_service.workspace_root)
                 repaired_items = py_svc.repair_project_spec(proj.path, project_id, dry_run=False)
                 return CommandResult(
                     success=True,
                     message=f"成功修复 {len(repaired_items)} 项",
-                    payload={"repaired_items": repaired_items}
+                    payload={"repaired_items": repaired_items},
                 )
             elif proj.stack == "plc":
                 if not self._spec_check_service:
-                    return CommandResult(success=False, message="No spec_check_service", payload=None)
+                    return CommandResult(
+                        success=False, message="No spec_check_service", payload=None
+                    )
                 from pathlib import Path
+
                 output = self._spec_check_service.run(
                     auto_fix=True,
                     scope="project",
@@ -160,9 +175,13 @@ class SpecFacade:
                 return CommandResult(
                     success=True,
                     message=f"成功自动修复 {len(repaired)} 项 PLC 规范",
-                    payload={"repaired_items": repaired}
+                    payload={"repaired_items": repaired},
                 )
-            return CommandResult(success=False, message=f"Project stack {proj.stack} not supported for repair", payload=None)
+            return CommandResult(
+                success=False,
+                message=f"Project stack {proj.stack} not supported for repair",
+                payload=None,
+            )
         except Exception as e:
             return CommandResult(success=False, message=str(e), payload=None)
 
@@ -187,7 +206,9 @@ class SpecFacade:
         except Exception as e:
             return QueryResult(success=False, message=str(e), payload=None)
 
-    def list_spec_center_entries(self, filter_domain: str | None = None) -> QueryResult[list[SpecCenterEntryDTO]]:
+    def list_spec_center_entries(
+        self, filter_domain: str | None = None
+    ) -> QueryResult[list[SpecCenterEntryDTO]]:
         try:
             if not self._spec_center_service:
                 return QueryResult(success=False, message="No spec_center_service", payload=[])
@@ -231,7 +252,9 @@ class SpecFacade:
         except Exception as e:
             return CommandResult(success=False, message=str(e), payload=None)
 
-    def generate_spec_report(self, fmt: str = "markdown") -> CommandResult[SpecReportResultDTO | None]:
+    def generate_spec_report(
+        self, fmt: str = "markdown"
+    ) -> CommandResult[SpecReportResultDTO | None]:
         """生成规范报告（M5 CHG-120 新增）
 
         Args:
@@ -253,7 +276,9 @@ class SpecFacade:
         except Exception as e:
             return CommandResult(success=False, message=str(e), payload=None)
 
-    def check_spec_frontmatter(self, auto_fix: bool = False) -> CommandResult[SpecFrontmatterResultDTO | None]:
+    def check_spec_frontmatter(
+        self, auto_fix: bool = False
+    ) -> CommandResult[SpecFrontmatterResultDTO | None]:
         """检查/修复规范 Frontmatter（M5 CHG-121 新增）
 
         Args:
@@ -300,7 +325,9 @@ class SpecFacade:
         except Exception as e:
             return CommandResult(success=False, message=str(e), payload=None)
 
-    def sync_obsidian_repository(self, workspace_root: str = "") -> CommandResult[dict[str, Any] | None]:
+    def sync_obsidian_repository(
+        self, workspace_root: str = ""
+    ) -> CommandResult[dict[str, Any] | None]:
         """一键全量同步与重构 Obsidian 全局规范仓库 (DEV-030 V2.2.0)
 
         原子操作流水线：
@@ -342,8 +369,11 @@ class SpecFacade:
                 "spec_count": spec_count,
             }
             success = len(errors) == 0 and check_summary.get("error_count", 0) == 0
-            msg = f"Obsidian 规范仓库同步成功（已生成 {len(generated_files)} 个索引，共 {spec_count} 项规范）" if success else "同步完成但存在警告或错误"
+            msg = (
+                f"Obsidian 规范仓库同步成功（已生成 {len(generated_files)} 个索引，共 {spec_count} 项规范）"
+                if success
+                else "同步完成但存在警告或错误"
+            )
             return CommandResult(success=success, message=msg, payload=payload)
         except Exception as e:
             return CommandResult(success=False, message=f"Obsidian 同步失败: {e}", payload=None)
-

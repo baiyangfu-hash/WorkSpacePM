@@ -13,9 +13,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
 
 
 def _setup_legacy_doc_workspace(tmp_path: Path) -> Path:
@@ -69,7 +68,9 @@ def _setup_legacy_doc_workspace(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     # 历史文档：无 marker，仅锚点标题 + 手工内容
-    (project_dir / "02_PLC程序" / "程序文档" / "016_DJ-2026-051_PLC程序设计总文档_PLC.md").write_text(
+    (
+        project_dir / "02_PLC程序" / "程序文档" / "016_DJ-2026-051_PLC程序设计总文档_PLC.md"
+    ).write_text(
         "\n".join(
             [
                 "# PLC程序设计总文档",
@@ -157,9 +158,7 @@ class TestDocInject:
         assert "手工组件清单内容" in program_content
         assert "手工IO总览内容" in io_content
 
-    def test_doc_inject_writes_markers(
-        self, cli_runner: CliRunner, tmp_path: Path
-    ) -> None:
+    def test_doc_inject_writes_markers(self, cli_runner: CliRunner, tmp_path: Path) -> None:
         """场景2：实际写入，文件被修改，marker 存在"""
         workspace = _setup_legacy_doc_workspace(tmp_path)
         program_doc = _program_doc_path(workspace)
@@ -297,9 +296,7 @@ class TestDocInject:
         # 存在锚点的 marker 仍被注入
         assert "AUTO_PM:BEGIN plc-asset-index -->" in program_content
 
-    def test_doc_inject_json_output(
-        self, cli_runner: CliRunner, tmp_path: Path
-    ) -> None:
+    def test_doc_inject_json_output(self, cli_runner: CliRunner, tmp_path: Path) -> None:
         """场景5：--json 返回正确结构"""
         workspace = _setup_legacy_doc_workspace(tmp_path)
 
@@ -344,9 +341,7 @@ class TestDocInject:
         assert "plc-io-overview" in io_item["injected_keys"]
         assert io_item["changed"] is True
 
-    def test_doc_inject_project_not_found(
-        self, cli_runner: CliRunner, tmp_path: Path
-    ) -> None:
+    def test_doc_inject_project_not_found(self, cli_runner: CliRunner, tmp_path: Path) -> None:
         """边界：项目不存在时报错"""
         workspace = _setup_legacy_doc_workspace(tmp_path)
 
@@ -358,9 +353,7 @@ class TestDocInject:
         assert result.exit_code == 1
         assert "项目不存在" in result.output
 
-    def test_doc_inject_skip_existing_marker(
-        self, cli_runner: CliRunner, tmp_path: Path
-    ) -> None:
+    def test_doc_inject_skip_existing_marker(self, cli_runner: CliRunner, tmp_path: Path) -> None:
         """边界：已存在 marker 时跳过并报告"""
         workspace = _setup_legacy_doc_workspace(tmp_path)
         program_doc = _program_doc_path(workspace)

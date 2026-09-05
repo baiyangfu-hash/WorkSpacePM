@@ -3,10 +3,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
-from auto_pm.application.change_facade import ChangeFacade
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.ledger_reconciler import ReconcileDiff
+
+from auto_pm.application.change_facade import ChangeFacade
 from auto_pm.ui.contracts.commands.change_commands import (
     CreateChangeCommand,
     TransitionChangeCommand,
@@ -18,9 +18,11 @@ from auto_pm.ui.contracts.dto.change_dto import LedgerReconcileResultDTO
 def mock_change_service() -> None:
     return MagicMock(spec=ChangeService)  # type: ignore[return-value]
 
+
 @pytest.fixture
 def change_facade(mock_change_service) -> None:  # type: ignore[no-untyped-def]
     return ChangeFacade(mock_change_service)  # type: ignore[return-value]
+
 
 def _make_summary(**overrides) -> Any:  # type: ignore[name-defined, no-untyped-def]
     """构造 ChangeSummary mock"""
@@ -37,6 +39,7 @@ def _make_summary(**overrides) -> Any:  # type: ignore[name-defined, no-untyped-
     mock.title = overrides.get("title", "Title")
     mock.urgency = overrides.get("urgency", "normal")
     return mock
+
 
 def _make_request(**overrides) -> Any:  # type: ignore[name-defined, no-untyped-def]
     """构造 ChangeRequest mock（含详情字段）"""
@@ -62,6 +65,7 @@ def _make_request(**overrides) -> Any:  # type: ignore[name-defined, no-untyped-
     mock.sections = overrides.get("sections", {})
     return mock
 
+
 def _make_approval(**overrides) -> Any:  # type: ignore[name-defined, no-untyped-def]
     """构造 ApprovalRecord mock"""
     mock = MagicMock()
@@ -71,6 +75,7 @@ def _make_approval(**overrides) -> Any:  # type: ignore[name-defined, no-untyped
     mock.comment = overrides.get("comment", "approve")
     mock.transition_date = overrides.get("transition_date", "2026-07-07T10:00:00")
     return mock
+
 
 def _make_impact(**overrides) -> Any:  # type: ignore[name-defined, no-untyped-def]
     """构造 ImpactAnalysis mock"""
@@ -87,6 +92,7 @@ def _make_impact(**overrides) -> Any:  # type: ignore[name-defined, no-untyped-d
 
 # ── 已有 3 个测试（保留并补充 impact_scope 断言） ────────────────
 
+
 def test_list_change_requests(change_facade, mock_change_service) -> None:  # type: ignore[no-untyped-def]
     mock_change_service.list_all_changes.return_value = [_make_summary()]
     result = change_facade.list_change_requests()
@@ -94,11 +100,13 @@ def test_list_change_requests(change_facade, mock_change_service) -> None:  # ty
     assert len(result.payload) == 1
     assert result.payload[0].change_number == "CHG-123"
 
+
 def test_get_change_detail(change_facade, mock_change_service) -> None:  # type: ignore[no-untyped-def]
     mock_change_service.get_change_request.return_value = _make_request()
     result = change_facade.get_change_detail("CHG-123")
     assert result.success is True
     assert result.payload.change_number == "CHG-123"
+
 
 def test_create_change_request(change_facade, mock_change_service) -> None:  # type: ignore[no-untyped-def]
     cmd = CreateChangeCommand(
@@ -122,6 +130,7 @@ def test_create_change_request(change_facade, mock_change_service) -> None:  # t
 
 # ── M3 新增测试 ──────────────────────────────────────────
 
+
 def test_create_change_request_with_impact_scope(change_facade, mock_change_service) -> None:  # type: ignore[no-untyped-def]
     """M3: impact_scope 从 command 透传到 Service"""
     cmd = CreateChangeCommand(
@@ -134,7 +143,9 @@ def test_create_change_request_with_impact_scope(change_facade, mock_change_serv
         applicant="user",
         impact_scope=["约束A", "约束B"],
     )
-    mock_change_service.create_change_request.return_value = _make_request(impact_scope=["约束A", "约束B"])
+    mock_change_service.create_change_request.return_value = _make_request(
+        impact_scope=["约束A", "约束B"]
+    )
     result = change_facade.create_change_request(cmd)
     assert result.success is True
     _, kwargs = mock_change_service.create_change_request.call_args
@@ -186,8 +197,12 @@ def test_get_change_timeline_empty(change_facade, mock_change_service) -> None: 
 def test_get_change_timeline_normal(change_facade, mock_change_service) -> None:  # type: ignore[no-untyped-def]
     """多条审批记录按时间顺序返回"""
     mock_change_service.list_approval_history.return_value = [
-        _make_approval(from_status="draft", to_status="submitted", transition_date="2026-07-07T10:00:00"),
-        _make_approval(from_status="submitted", to_status="approved", transition_date="2026-07-08T11:00:00"),
+        _make_approval(
+            from_status="draft", to_status="submitted", transition_date="2026-07-07T10:00:00"
+        ),
+        _make_approval(
+            from_status="submitted", to_status="approved", transition_date="2026-07-08T11:00:00"
+        ),
     ]
     result = change_facade.get_change_timeline("CHG-123")
     assert result.success is True
@@ -254,7 +269,9 @@ def test_get_change_validation_summary_not_found(change_facade, mock_change_serv
     assert "not found" in result.message
 
 
-def test_get_change_validation_summary_service_exception(change_facade, mock_change_service) -> None:  # type: ignore[no-untyped-def]
+def test_get_change_validation_summary_service_exception(
+    change_facade, mock_change_service
+) -> None:  # type: ignore[no-untyped-def]
     """Service 抛异常时返回 success=False"""
     mock_change_service.get_change_request.side_effect = Exception("DB Error")
     result = change_facade.get_change_validation_summary("CHG-123")
@@ -263,6 +280,7 @@ def test_get_change_validation_summary_service_exception(change_facade, mock_cha
 
 
 # ── service=None 降级测试 ──────────────────────────────
+
 
 def test_list_change_requests_no_service() -> None:
     """facade=None 时 list 返回 success=False + 空列表"""

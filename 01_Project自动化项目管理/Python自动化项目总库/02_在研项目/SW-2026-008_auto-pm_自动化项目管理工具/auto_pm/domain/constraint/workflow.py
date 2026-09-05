@@ -105,7 +105,7 @@ class WorkflowEngine:
         success = True
 
         for idx, step in enumerate(wf.steps):
-            step_log = f"Step {idx+1}/{len(wf.steps)}: {step.name} [{step.action}]"
+            step_log = f"Step {idx + 1}/{len(wf.steps)}: {step.name} [{step.action}]"
             try:
                 self._execute_step(step, file_path, params)
                 step_log += " -> PASS"
@@ -161,26 +161,24 @@ class WorkflowEngine:
                 )
                 if completed.returncode != 0:
                     stderr_msg = completed.stderr.decode("utf-8", errors="replace")
-                    raise RuntimeError(
-                        f"命令执行失败 exit={completed.returncode}: {stderr_msg}"
-                    )
+                    raise RuntimeError(f"命令执行失败 exit={completed.returncode}: {stderr_msg}")
 
     def _save_run(self, run_record: WorkflowRun) -> None:
         runs = self.list_runs()
-        runs.append({
-            "run_id": run_record.run_id,
-            "workflow_name": run_record.workflow_name,
-            "status": run_record.status,
-            "started_at": run_record.started_at.isoformat(),
-            "completed_at": (
-                run_record.completed_at.isoformat() if run_record.completed_at else None
-            ),
-            "steps_completed": run_record.steps_completed,
-            "step_logs": run_record.step_logs,
-        })
-        self._runs_file.write_text(
-            json.dumps(runs, ensure_ascii=False, indent=2), encoding="utf-8"
+        runs.append(
+            {
+                "run_id": run_record.run_id,
+                "workflow_name": run_record.workflow_name,
+                "status": run_record.status,
+                "started_at": run_record.started_at.isoformat(),
+                "completed_at": (
+                    run_record.completed_at.isoformat() if run_record.completed_at else None
+                ),
+                "steps_completed": run_record.steps_completed,
+                "step_logs": run_record.step_logs,
+            }
         )
+        self._runs_file.write_text(json.dumps(runs, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def list_runs(self) -> list[dict[str, Any]]:
         if not self._runs_file.is_file():

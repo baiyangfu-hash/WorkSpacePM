@@ -137,9 +137,7 @@ class ChangeTransaction(AbstractContextManager["ChangeTransaction"]):
             errors=errors,
             backup_dir=str(self.backup_dir),
         )
-        raise TransactionFileError(
-            "事务回滚未完成，快照已保留以供人工恢复: " + "; ".join(errors)
-        )
+        raise TransactionFileError("事务回滚未完成，快照已保留以供人工恢复: " + "; ".join(errors))
 
     def backup_file(self, path: str | Path) -> Path:
         """Create the initial snapshot of an existing regular workspace file."""

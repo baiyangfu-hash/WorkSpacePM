@@ -56,17 +56,13 @@ class TestDetectFormatByExtension:
     def test_detect_scl_by_extension(self, tmp_path: Path) -> None:
         """.scl 扩展名 → SCL"""
         f = tmp_path / "fb.scl"
-        f.write_text(
-            "FUNCTION_BLOCK FB_Test\nEND_FUNCTION_BLOCK\n", encoding="utf-8"
-        )
+        f.write_text("FUNCTION_BLOCK FB_Test\nEND_FUNCTION_BLOCK\n", encoding="utf-8")
         assert detect_format(f) == FormatType.SCL
 
     def test_detect_awl_by_extension(self, tmp_path: Path) -> None:
         """.awl 扩展名 → SCL"""
         f = tmp_path / "fb.awl"
-        f.write_text(
-            "FUNCTION_BLOCK FB_Test\nEND_FUNCTION_BLOCK\n", encoding="utf-8"
-        )
+        f.write_text("FUNCTION_BLOCK FB_Test\nEND_FUNCTION_BLOCK\n", encoding="utf-8")
         assert detect_format(f) == FormatType.SCL
 
     def test_detect_autoshop_by_extension(self, tmp_path: Path) -> None:
@@ -79,7 +75,7 @@ class TestDetectFormatByExtension:
         """.wr3 扩展名 → WORK3"""
         f = tmp_path / "var.wr3"
         f.write_text(
-            "Name\tType\tAddr\tDesc\n" "Name\tType\tAddr\tDesc\n",
+            "Name\tType\tAddr\tDesc\nName\tType\tAddr\tDesc\n",
             encoding="utf-8",
         )
         assert detect_format(f) == FormatType.WORK3
@@ -90,11 +86,7 @@ class TestDetectFormatByContent:
         """无 .scl 扩展名但内容含 FUNCTION_BLOCK → SCL"""
         f = tmp_path / "fb.txt"
         f.write_text(
-            "FUNCTION_BLOCK FB_Test\n"
-            "VAR_INPUT\n"
-            "  i_bStart : BOOL;\n"
-            "END_VAR\n"
-            "END_FUNCTION_BLOCK\n",
+            "FUNCTION_BLOCK FB_Test\nVAR_INPUT\n  i_bStart : BOOL;\nEND_VAR\nEND_FUNCTION_BLOCK\n",
             encoding="utf-8",
         )
         assert detect_format(f) == FormatType.SCL
@@ -134,14 +126,8 @@ class TestGetParserForFormat:
         assert get_parser_for_format(FormatType.SCL) is SclParser
         assert get_parser_for_format(FormatType.INTDOC) is IntDocParser
         assert get_parser_for_format(FormatType.IO_POINTS_CSV) is IoPointsParser
-        assert (
-            get_parser_for_format(FormatType.PROGRAM_BLOCKS_YML)
-            is ProgramBlocksParser
-        )
-        assert (
-            get_parser_for_format(FormatType.COMMUNICATIONS_YML)
-            is CommunicationsParser
-        )
+        assert get_parser_for_format(FormatType.PROGRAM_BLOCKS_YML) is ProgramBlocksParser
+        assert get_parser_for_format(FormatType.COMMUNICATIONS_YML) is CommunicationsParser
 
     def test_get_parser_unknown_returns_none(self) -> None:
         """UNKNOWN 格式无 parser → None"""
@@ -213,9 +199,7 @@ class TestDetectFormatRealSamples:
         )
         assert detect_format(f) == FormatType.WORK3
 
-    def test_detect_format_autoshop_not_misidentify_work3(
-        self, tmp_path: Path
-    ) -> None:
+    def test_detect_format_autoshop_not_misidentify_work3(self, tmp_path: Path) -> None:
         """回归 W1-S02：Work3 中文表头（含"类"+"数据类型"但无"类别"/"名称"）不误判为 AUTOSHOP
 
         原 OR 逻辑 `变量名|数据类型|作用域|类别` 因含"数据类型"把 Work3 误判为 Autoshop；

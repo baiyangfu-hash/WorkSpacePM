@@ -1,11 +1,9 @@
 """Unit tests for PlcIngestService in auto_pm (SW-2026-008)."""
 
 import csv
-import os
 import tempfile
 from pathlib import Path
 
-import pytest
 from auto_pm.application.plc.ingest_service import PlcIngestService
 
 
@@ -23,7 +21,6 @@ def test_plc_ingest_service_basic():
             writer.writerow(["Name", "Type", "Address", "Comment"])
             writer.writerow(["g_bEStopAlarm", "BOOL", "M100.0", "急停报警触发"])
             writer.writerow(["g_rXPosActual", "REAL", "D1000", "移载X轴实际坐标"])
-
 
         target_proj = ws / "0100_PLC自动化" / "DJ-TEST-001"
         target_proj.mkdir(parents=True, exist_ok=True)

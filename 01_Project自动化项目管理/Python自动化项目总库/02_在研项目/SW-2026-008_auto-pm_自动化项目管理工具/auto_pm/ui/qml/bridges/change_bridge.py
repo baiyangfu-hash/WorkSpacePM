@@ -6,6 +6,7 @@
 
 --- 原始注释 ---
 Change Bridge (QML)"""
+
 import dataclasses
 import logging
 from typing import Any
@@ -186,7 +187,9 @@ class ChangeBridge(QObject):
 
     @Slot(str, str, result="QVariant")
     @Slot(str, result="QVariant")
-    def getChangeValidationSummary(self, change_number: str, project_id: str = "") -> dict[str, Any]:
+    def getChangeValidationSummary(
+        self, change_number: str, project_id: str = ""
+    ) -> dict[str, Any]:
         """获取变更验证摘要（M3 新增）
 
         Args:
@@ -198,13 +201,17 @@ class ChangeBridge(QObject):
             approval_count/last_approval_date/domain_impacts/related_changes
         """
         if self._facade:
-            res = self._facade.get_change_validation_summary(change_number, project_id=project_id or None)
+            res = self._facade.get_change_validation_summary(
+                change_number, project_id=project_id or None
+            )
             if res.success and res.payload is not None:
                 return dataclasses.asdict(res.payload)
         return {}
 
     @Slot(str, "QVariant", str, result="QVariant")
-    def updateChange(self, change_id: str, command_dict: dict[str, Any], project_id: str | None = None) -> dict[str, Any]:
+    def updateChange(
+        self, change_id: str, command_dict: dict[str, Any], project_id: str | None = None
+    ) -> dict[str, Any]:
         """更新变更单（GUI 编辑支持）"""
         if self._facade:
             try:

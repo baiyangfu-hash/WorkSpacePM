@@ -110,8 +110,13 @@ class ChgParser:
                 proj_prefix = f"{cr.project_id} | " if cr.project_id else ""
                 log.warning("规范校验违规 [%s%s]: %s", proj_prefix, cr.change_number, v)
 
-        log.info("解析变更单完成: %s, domain=%s, nature=%s, status=%s",
-                 cr.change_number, cr.domain, cr.business_nature, cr.status)
+        log.info(
+            "解析变更单完成: %s, domain=%s, nature=%s, status=%s",
+            cr.change_number,
+            cr.domain,
+            cr.business_nature,
+            cr.status,
+        )
         return cr
 
     def to_summary(self, cr: ChangeRequest) -> ChangeSummary:
@@ -207,7 +212,9 @@ class ChgParser:
         # §3.2 业务性质
         s32 = self._find_subsection(text, "3.2")
         if s32:
-            cr.business_nature = cast(BusinessNature, self._extract_selected_option(s32) or cr.business_nature)
+            cr.business_nature = cast(
+                BusinessNature, self._extract_selected_option(s32) or cr.business_nature
+            )
 
         # §3.3 影响范围
         s33 = self._find_subsection(text, "3.3")
@@ -440,9 +447,7 @@ class ChgParser:
 
         # 判断 §6 是否有实质内容
         has_constraint = bool(cr.constraint_impacts)
-        has_domain = any(
-            info.get("affected") for info in cr.domain_impacts.values()
-        )
+        has_domain = any(info.get("affected") for info in cr.domain_impacts.values())
         has_propagation = bool(cr.related_changes)
         cr.has_section_6 = has_constraint or has_domain or has_propagation
 
@@ -704,7 +709,9 @@ class ChgParser:
                 return conclusion
 
         # 格式2: 原始模板含 ☑ 标记（仅在结论区域内）
-        match = re.search(r"\|[^|\n]*结论[^|\n]*\|[^|\n]*☑\s*(\S+?)(?:\s*[,，□\|\n]|$)", section_text)
+        match = re.search(
+            r"\|[^|\n]*结论[^|\n]*\|[^|\n]*☑\s*(\S+?)(?:\s*[,，□\|\n]|$)", section_text
+        )
         if match:
             return match.group(1).strip()
 
@@ -791,13 +798,15 @@ class ChgParser:
             elif "☑不通过" in cells[2] or "☑ 不通过" in cells[2]:
                 result = "不通过"
 
-            records.append({
-                "propagation": cells[0],
-                "related_chg": cells[1],
-                "result": result,
-                "verifier": cells[3],
-                "date": cells[4],
-            })
+            records.append(
+                {
+                    "propagation": cells[0],
+                    "related_chg": cells[1],
+                    "result": result,
+                    "verifier": cells[3],
+                    "date": cells[4],
+                }
+            )
 
         return records
 
@@ -831,10 +840,14 @@ class ChgParser:
         if cr.domain and cr.domain not in DOMAINS:
             violations.append(f"领域 '{cr.domain}' 不在规范允许值 {list(DOMAINS.keys())} 中")
         if cr.business_nature and cr.business_nature not in BUSINESS_NATURES:
-            violations.append(f"业务性质 '{cr.business_nature}' 不在规范允许值 {list(BUSINESS_NATURES.keys())} 中")
+            violations.append(
+                f"业务性质 '{cr.business_nature}' 不在规范允许值 {list(BUSINESS_NATURES.keys())} 中"
+            )
         for scope in cr.impact_scope:
             if scope and scope not in IMPACT_SCOPES:
-                violations.append(f"影响范围 '{scope}' 不在规范允许值 {list(IMPACT_SCOPES.keys())} 中")
+                violations.append(
+                    f"影响范围 '{scope}' 不在规范允许值 {list(IMPACT_SCOPES.keys())} 中"
+                )
 
         # 5. 必填字段校验
         if not cr.change_number:

@@ -21,6 +21,7 @@ from auto_pm.core.protocols import (
     ReportServiceProtocol,
 )
 from auto_pm.models import ProjectInfo
+
 from auto_pm.ui.contracts.dto.delivery_dto import (
     AssetSummaryDTO,
     ChangeReportDTO,
@@ -70,7 +71,9 @@ class DeliveryFacade:
             return None
         return self._project_service.get_project(project_id)
 
-    def refresh_project_docs(self, project_id: str, dry_run: bool = False) -> CommandResult[RefreshProjectDocsResultDTO | None]:
+    def refresh_project_docs(
+        self, project_id: str, dry_run: bool = False
+    ) -> CommandResult[RefreshProjectDocsResultDTO | None]:
         try:
             if not self._doc_refresh_service:
                 return CommandResult(success=False, message="No doc_refresh_service", payload=None)
@@ -82,10 +85,14 @@ class DeliveryFacade:
                     message=f"项目不存在或未注入 project_service: {project_id}",
                     payload=None,
                 )
-            result = self._doc_refresh_service.refresh_project_documents(project_info, dry_run=dry_run)
+            result = self._doc_refresh_service.refresh_project_documents(
+                project_info, dry_run=dry_run
+            )
             # DocRefreshResult dataclass 有 to_dict() 方法
-            result_dict = result.to_dict() if hasattr(result, "to_dict") else (
-                result if isinstance(result, dict) else {"raw": result}
+            result_dict = (
+                result.to_dict()
+                if hasattr(result, "to_dict")
+                else (result if isinstance(result, dict) else {"raw": result})
             )
             dto = RefreshProjectDocsResultDTO(
                 project_id=result_dict.get("project_id", project_id),
@@ -157,10 +164,14 @@ class DeliveryFacade:
         except Exception as e:
             return QueryResult(success=False, message=str(e), payload=None)
 
-    def refresh_asset_summary(self, project_id: str = "") -> CommandResult[RefreshAssetSummaryResultDTO | None]:
+    def refresh_asset_summary(
+        self, project_id: str = ""
+    ) -> CommandResult[RefreshAssetSummaryResultDTO | None]:
         try:
             if not self._asset_summary_service:
-                return CommandResult(success=False, message="No asset_summary_service", payload=None)
+                return CommandResult(
+                    success=False, message="No asset_summary_service", payload=None
+                )
             # Bug #2 修复：调 build_summary(project_path, stack, project_type) 而非 refresh_all()
             if not project_id:
                 return CommandResult(

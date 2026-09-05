@@ -29,10 +29,9 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
 
 logger = logging.getLogger(__name__)
 
@@ -108,15 +107,24 @@ def _create_change_via_cli(
     result = runner.invoke(
         cli,
         [
-            "-w", str(workspace),
-            "change", "create",
-            "--pid", project_id,
-            "--domain", "PLC",
-            "--nature", "DEF",
-            "--scope", "LOCAL",
-            "--applicant", "cli_test",
-            "--background", "CLI 测试变更背景",
-            "--necessity", "CLI 测试变更必要性",
+            "-w",
+            str(workspace),
+            "change",
+            "create",
+            "--pid",
+            project_id,
+            "--domain",
+            "PLC",
+            "--nature",
+            "DEF",
+            "--scope",
+            "LOCAL",
+            "--applicant",
+            "cli_test",
+            "--background",
+            "CLI 测试变更背景",
+            "--necessity",
+            "CLI 测试变更必要性",
         ],
         catch_exceptions=False,
     )
@@ -172,9 +180,13 @@ def test_change_list_filter_by_status(cli_runner: CliRunner, tmp_path: Path) -> 
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "list", "DJ-2026-CHG",
-            "--status", "draft",
+            "-w",
+            str(tmp_path),
+            "change",
+            "list",
+            "DJ-2026-CHG",
+            "--status",
+            "draft",
         ],
         catch_exceptions=False,
     )
@@ -191,9 +203,13 @@ def test_change_list_filter_by_domain(cli_runner: CliRunner, tmp_path: Path) -> 
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "list", "DJ-2026-CHG",
-            "--domain", "PLC",
+            "-w",
+            str(tmp_path),
+            "change",
+            "list",
+            "DJ-2026-CHG",
+            "--domain",
+            "PLC",
         ],
         catch_exceptions=False,
     )
@@ -204,9 +220,13 @@ def test_change_list_filter_by_domain(cli_runner: CliRunner, tmp_path: Path) -> 
     result_other = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "list", "DJ-2026-CHG",
-            "--domain", "SCPT",
+            "-w",
+            str(tmp_path),
+            "change",
+            "list",
+            "DJ-2026-CHG",
+            "--domain",
+            "SCPT",
         ],
         catch_exceptions=False,
     )
@@ -274,17 +294,28 @@ def test_change_create_normal(cli_runner: CliRunner, tmp_path: Path) -> None:
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "create",
-            "--pid", "DJ-2026-CHG",
-            "--domain", "PLC",
-            "--nature", "DEF",
-            "--scope", "LOCAL",
-            "--scope", "SYSTEM",
-            "--applicant", "cli_test",
-            "--background", "测试背景",
-            "--necessity", "测试必要性",
-            "--urgency", "urgent",
+            "-w",
+            str(tmp_path),
+            "change",
+            "create",
+            "--pid",
+            "DJ-2026-CHG",
+            "--domain",
+            "PLC",
+            "--nature",
+            "DEF",
+            "--scope",
+            "LOCAL",
+            "--scope",
+            "SYSTEM",
+            "--applicant",
+            "cli_test",
+            "--background",
+            "测试背景",
+            "--necessity",
+            "测试必要性",
+            "--urgency",
+            "urgent",
         ],
         catch_exceptions=False,
     )
@@ -307,15 +338,23 @@ def test_change_create_missing_required_option(cli_runner: CliRunner, tmp_path: 
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "create",
-            "--pid", "DJ-2026-CHG",
-            "--domain", "PLC",
+            "-w",
+            str(tmp_path),
+            "change",
+            "create",
+            "--pid",
+            "DJ-2026-CHG",
+            "--domain",
+            "PLC",
             # --nature 缺失
-            "--scope", "LOCAL",
-            "--applicant", "cli_test",
-            "--background", "测试",
-            "--necessity", "测试",
+            "--scope",
+            "LOCAL",
+            "--applicant",
+            "cli_test",
+            "--background",
+            "测试",
+            "--necessity",
+            "测试",
         ],
     )
     assert result.exit_code != 0
@@ -329,15 +368,24 @@ def test_change_create_nonexistent_project(cli_runner: CliRunner, tmp_path: Path
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "create",
-            "--pid", "DJ-2026-NOTEXIST",
-            "--domain", "PLC",
-            "--nature", "DEF",
-            "--scope", "LOCAL",
-            "--applicant", "cli_test",
-            "--background", "测试",
-            "--necessity", "测试",
+            "-w",
+            str(tmp_path),
+            "change",
+            "create",
+            "--pid",
+            "DJ-2026-NOTEXIST",
+            "--domain",
+            "PLC",
+            "--nature",
+            "DEF",
+            "--scope",
+            "LOCAL",
+            "--applicant",
+            "cli_test",
+            "--background",
+            "测试",
+            "--necessity",
+            "测试",
         ],
     )
     assert result.exit_code == 1
@@ -355,11 +403,17 @@ def test_change_transition_draft_to_submitted(cli_runner: CliRunner, tmp_path: P
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "transition", change_number,
-            "--to", "submitted",
-            "--approver", "approver_test",
-            "--comment", "CLI 流转测试",
+            "-w",
+            str(tmp_path),
+            "change",
+            "transition",
+            change_number,
+            "--to",
+            "submitted",
+            "--approver",
+            "approver_test",
+            "--comment",
+            "CLI 流转测试",
         ],
         catch_exceptions=False,
     )
@@ -377,9 +431,13 @@ def test_change_transition_invalid_status(cli_runner: CliRunner, tmp_path: Path)
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "transition", change_number,
-            "--to", "invalid-status",
+            "-w",
+            str(tmp_path),
+            "change",
+            "transition",
+            change_number,
+            "--to",
+            "invalid-status",
         ],
     )
     assert result.exit_code != 0
@@ -392,9 +450,13 @@ def test_change_transition_nonexistent_change(cli_runner: CliRunner, tmp_path: P
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "transition", "CHG-PLC-2026-NOTEXIST",
-            "--to", "submitted",
+            "-w",
+            str(tmp_path),
+            "change",
+            "transition",
+            "CHG-PLC-2026-NOTEXIST",
+            "--to",
+            "submitted",
         ],
     )
     assert result.exit_code == 1
@@ -413,9 +475,13 @@ def test_change_transition_unreachable_status(cli_runner: CliRunner, tmp_path: P
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "transition", change_number,
-            "--to", "completed",
+            "-w",
+            str(tmp_path),
+            "change",
+            "transition",
+            change_number,
+            "--to",
+            "completed",
         ],
     )
     assert result.exit_code == 1
@@ -434,11 +500,17 @@ def test_change_edit_normal(cli_runner: CliRunner, tmp_path: Path) -> None:
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "edit", change_number,
-            "--background", "更新后的背景",
-            "--risk-level", "medium",
-            "--mitigation", "缓解措施",
+            "-w",
+            str(tmp_path),
+            "change",
+            "edit",
+            change_number,
+            "--background",
+            "更新后的背景",
+            "--risk-level",
+            "medium",
+            "--mitigation",
+            "缓解措施",
         ],
         catch_exceptions=False,
     )
@@ -463,9 +535,13 @@ def test_change_edit_nonexistent_change(cli_runner: CliRunner, tmp_path: Path) -
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "change", "edit", "CHG-PLC-2026-NOTEXIST",
-            "--background", "测试",
+            "-w",
+            str(tmp_path),
+            "change",
+            "edit",
+            "CHG-PLC-2026-NOTEXIST",
+            "--background",
+            "测试",
         ],
     )
     assert result.exit_code == 1

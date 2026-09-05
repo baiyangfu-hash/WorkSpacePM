@@ -20,9 +20,8 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
 
 
 def _make_python_project(
@@ -63,9 +62,7 @@ def _make_python_project(
         (project_dir / "tests" / "conftest.py").write_text("# conftest\n", encoding="utf-8")
         (project_dir / "01_启动").mkdir(exist_ok=True)
         # PM_SESSION 文件
-        (project_dir / f"PM_SESSION_{project_id}.md").write_text(
-            "# PM_SESSION\n", encoding="utf-8"
-        )
+        (project_dir / f"PM_SESSION_{project_id}.md").write_text("# PM_SESSION\n", encoding="utf-8")
     return project_dir
 
 
@@ -78,9 +75,13 @@ def test_python_init_dry_run(cli_runner: CliRunner, tmp_path: Path) -> None:
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "python", "init", "SW-2026-INIT",
-            "--name", "初始化测试",
+            "-w",
+            str(tmp_path),
+            "python",
+            "init",
+            "SW-2026-INIT",
+            "--name",
+            "初始化测试",
             "--dry-run",
         ],
         catch_exceptions=False,
@@ -108,9 +109,13 @@ def test_python_init_actual_create(cli_runner: CliRunner, tmp_path: Path) -> Non
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "python", "init", "SW-2026-INIT",
-            "--name", "初始化测试",
+            "-w",
+            str(tmp_path),
+            "python",
+            "init",
+            "SW-2026-INIT",
+            "--name",
+            "初始化测试",
         ],
         catch_exceptions=False,
     )
@@ -129,9 +134,13 @@ def test_python_init_existing_path(cli_runner: CliRunner, tmp_path: Path) -> Non
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "python", "init", "SW-2026-EXISTS",
-            "--name", "已存在",
+            "-w",
+            str(tmp_path),
+            "python",
+            "init",
+            "SW-2026-EXISTS",
+            "--name",
+            "已存在",
         ],
     )
     assert result.exit_code == 1
@@ -256,8 +265,11 @@ def test_python_repair_dry_run(cli_runner: CliRunner, tmp_path: Path) -> None:
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "python", "repair", "SW-2026-PYT",
+            "-w",
+            str(tmp_path),
+            "python",
+            "repair",
+            "SW-2026-PYT",
             "--dry-run",
         ],
         catch_exceptions=False,
@@ -282,12 +294,14 @@ def test_python_repair_actual(cli_runner: CliRunner, tmp_path: Path) -> None:
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "python", "repair", "SW-2026-PYT",
+            "-w",
+            str(tmp_path),
+            "python",
+            "repair",
+            "SW-2026-PYT",
         ],
         catch_exceptions=False,
     )
     assert result.exit_code == 0
     proj_dir = tmp_path / "SW-2026-PYT_Python工具"
     assert (proj_dir / ".pre-commit-config.yaml").is_file()
-

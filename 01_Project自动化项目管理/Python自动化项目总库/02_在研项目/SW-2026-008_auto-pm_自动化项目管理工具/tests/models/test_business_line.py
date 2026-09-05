@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import ProjectRepository
 from auto_pm.models import Project, ProjectRecord, extract_business_line
@@ -155,9 +154,7 @@ class TestBusinessLineDbRoundtrip:
         assert result is not None
         assert result.business_line == "SW"
 
-    def test_business_line_roundtrip_all_values(
-        self, repo: ProjectRepository
-    ) -> None:
+    def test_business_line_roundtrip_all_values(self, repo: ProjectRepository) -> None:
         """所有业务线值 DB 往返保持一致"""
         cases = [
             ("SW-2026-001", "SW"),
@@ -260,9 +257,7 @@ class TestListByBusinessLine:
         assert len(results) == 1
         assert results[0].business_line == ""
 
-    def test_list_by_nonexistent_business_line(
-        self, repo: ProjectRepository
-    ) -> None:
+    def test_list_by_nonexistent_business_line(self, repo: ProjectRepository) -> None:
         """查询不存在的业务线应返回空列表"""
         self._seed_projects(repo)
         results = repo.list_by_business_line("XX")

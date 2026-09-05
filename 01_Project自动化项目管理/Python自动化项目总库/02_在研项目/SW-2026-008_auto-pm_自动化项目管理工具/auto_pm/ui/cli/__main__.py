@@ -40,14 +40,15 @@ def _fix_windows_encoding() -> None:
         # pytest capture（StringIO 无 reconfigure）或旧 Python，静默跳过
         pass
 
+
 _fix_windows_encoding()
 
 
 import click  # noqa: E402
 from rich.console import Console  # noqa: E402
 
-from auto_pm.app_context import AppContext  # noqa: E402
 from auto_pm import __version__  # noqa: E402
+from auto_pm.app_context import AppContext  # noqa: E402
 from auto_pm.cli.change import change_group  # noqa: E402
 from auto_pm.cli.clean import clean_cmd  # noqa: E402
 from auto_pm.cli.constraint import constraint_group  # noqa: E402
@@ -71,7 +72,9 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 console = Console()
 
 
-@click.version_option(version=__version__, package_name="auto_pm", message="auto-pm, version %(version)s")
+@click.version_option(
+    version=__version__, package_name="auto_pm", message="auto-pm, version %(version)s"
+)
 @click.group(context_settings=CONTEXT_SETTINGS)
 @click.option(
     "--workspace",

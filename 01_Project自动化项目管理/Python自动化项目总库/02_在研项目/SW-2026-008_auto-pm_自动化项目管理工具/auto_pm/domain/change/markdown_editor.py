@@ -43,7 +43,7 @@ class ChangeMarkdownEditor:
         )
         match = pattern.search(content)
         if match:
-            return content[:match.end()] + row + content[match.end():]
+            return content[: match.end()] + row + content[match.end() :]
         # 兜底：在 §8 章节末尾追加
         return content + "\n" + row
 
@@ -55,7 +55,7 @@ class ChangeMarkdownEditor:
         )
         match = pattern.search(content)
         if match:
-            return content[:match.end()] + row + content[match.end():]
+            return content[: match.end()] + row + content[match.end() :]
         return content + "\n" + row
 
     def append_to_verification_table(self, content: str, row: str) -> str:
@@ -70,7 +70,7 @@ class ChangeMarkdownEditor:
             return content + "\n" + row
 
         # 定位 §10.2 节标题，在其前插入
-        remainder = content[sec_10_1.end():]
+        remainder = content[sec_10_1.end() :]
         next_section = re.search(r"^###\s*10\.2", remainder, re.MULTILINE)
         if next_section:
             insert_pos = sec_10_1.end() + next_section.start()
@@ -92,7 +92,9 @@ class ChangeMarkdownEditor:
         urgency_pattern = re.compile(r"(\|\s*紧急程度\s*\|.*?\|)\n")
         match = urgency_pattern.search(content)
         if match:
-            return content[:match.end()] + f"| 变更状态 | {new_status} |\n" + content[match.end():]
+            return (
+                content[: match.end()] + f"| 变更状态 | {new_status} |\n" + content[match.end() :]
+            )
         # 兜底：在 §3.4 末尾追加
         return content + f"\n| 变更状态 | {new_status} |\n"
 
@@ -176,9 +178,7 @@ class ChangeMarkdownEditor:
         if field == "planned_date":
             return self._update_table_field(content, "预计实施日期", value)
         if field == "urgency":
-            return self._update_table_field(
-                content, "紧急程度", self.render_urgency_value(value)
-            )
+            return self._update_table_field(content, "紧急程度", self.render_urgency_value(value))
         # §6 影响分析字段（M3-1 新增）
         if field == "risk_level":
             return self.update_risk_level(content, value)
@@ -214,14 +214,10 @@ class ChangeMarkdownEditor:
 
         仅替换值单元格，保留字段名和表格结构。
         """
-        pattern = re.compile(
-            rf"(\|\s*{re.escape(field_name)}\s*\|\s*)[^|]*(\s*\|)"
-        )
+        pattern = re.compile(rf"(\|\s*{re.escape(field_name)}\s*\|\s*)[^|]*(\s*\|)")
         match = pattern.search(content)
         if match:
-            return pattern.sub(
-                lambda m: m.group(1) + value + m.group(2), content, count=1
-            )
+            return pattern.sub(lambda m: m.group(1) + value + m.group(2), content, count=1)
         log.warning("更新表格字段: 未找到字段 '%s'，跳过", field_name)
         return content
 
@@ -263,9 +259,7 @@ class ChangeMarkdownEditor:
             re.DOTALL,
         )
         if pattern.search(content):
-            return pattern.sub(
-                lambda m: m.group(1) + mitigation + "\n", content, count=1
-            )
+            return pattern.sub(lambda m: m.group(1) + mitigation + "\n", content, count=1)
         log.warning("更新缓解措施: 未找到 **缓解措施** 标记，跳过")
         return content
 
@@ -283,15 +277,11 @@ class ChangeMarkdownEditor:
             re.DOTALL,
         )
         if pattern.search(content):
-            return pattern.sub(
-                lambda m: m.group(1) + chain + m.group(3), content, count=1
-            )
+            return pattern.sub(lambda m: m.group(1) + chain + m.group(3), content, count=1)
         log.warning("更新传播链: 未找到 **本次变更传播链:** 代码块，跳过")
         return content
 
-    def update_constraint_impacts(
-        self, content: str, impacts: dict[str, str]
-    ) -> str:
+    def update_constraint_impacts(self, content: str, impacts: dict[str, str]) -> str:
         """更新 §6.1 项目约束影响表格中每个维度的影响程度
 
         逐行扫描表格，匹配包含 **{维度}** 的行，替换影响程度列的 ☑ 标记。
@@ -316,9 +306,7 @@ class ChangeMarkdownEditor:
             result.append(line)
         return "\n".join(result)
 
-    def update_domain_impacts(
-        self, content: str, impacts: dict[str, dict[str, Any]]
-    ) -> str:
+    def update_domain_impacts(self, content: str, impacts: dict[str, dict[str, Any]]) -> str:
         """更新 §6.2 技术领域影响表格中每个领域的是否受影响和影响内容
 
         逐行扫描表格，匹配包含 **{领域代码}** 的行，替换：

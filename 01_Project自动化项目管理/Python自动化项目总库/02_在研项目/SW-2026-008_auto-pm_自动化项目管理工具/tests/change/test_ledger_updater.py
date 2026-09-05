@@ -122,12 +122,7 @@ class TestInsertRowToIndexTable:
     def test_insert_after_separator(self) -> None:
         """在分隔行后插入新行"""
         updater = LedgerUpdater()
-        content = (
-            "# 台帐\n\n"
-            "## 变更单索引\n\n"
-            "| 序号 | 变更编号 |\n"
-            "|------|----------|\n"
-        )
+        content = "# 台帐\n\n## 变更单索引\n\n| 序号 | 变更编号 |\n|------|----------|\n"
         new_row = "| 001 | CHG-001 | 测试 |\n"
         result = updater._insert_row_to_index_table(content, new_row)
         assert "CHG-001" in result

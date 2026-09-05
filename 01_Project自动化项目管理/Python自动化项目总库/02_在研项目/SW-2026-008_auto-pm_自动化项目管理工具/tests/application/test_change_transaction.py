@@ -61,7 +61,9 @@ class TestChangeTransactionContainment:
         with pytest.raises(TransactionFileError, match="禁止包含"):
             manager.begin("PROJ", "CHG").track_created_file(path)
 
-    def test_symlink_component_is_rejected(self, manager: ChangeTransactionManager, workspace: Path, tmp_path: Path) -> None:
+    def test_symlink_component_is_rejected(
+        self, manager: ChangeTransactionManager, workspace: Path, tmp_path: Path
+    ) -> None:
         outside = tmp_path / "outside"
         _write(outside / "secret.txt", "secret")
         link = workspace / "linked"
@@ -72,7 +74,9 @@ class TestChangeTransactionContainment:
             # the same fail-closed branch through a controlled reparse-point
             # fault injection so this safety gate remains covered everywhere.
             link.mkdir()
-            with patch.object(Path, "is_symlink", autospec=True, side_effect=lambda item: item == link):
+            with patch.object(
+                Path, "is_symlink", autospec=True, side_effect=lambda item: item == link
+            ):
                 with pytest.raises(TransactionFileError, match="symlink/reparse"):
                     manager.begin("PROJ", "CHG").track_created_file(link / "secret.txt")
             return
@@ -122,12 +126,17 @@ class TestChangeTransactionBackup:
             tx.backup_file("missing.txt")
 
         target = _write(workspace / "target.txt", "content")
-        with patch("auto_pm.application.core.change_transaction.shutil.copy2", side_effect=OSError("disk full")):
+        with patch(
+            "auto_pm.application.core.change_transaction.shutil.copy2",
+            side_effect=OSError("disk full"),
+        ):
             with pytest.raises(TransactionFileError, match="创建文件快照失败"):
                 tx.backup_file(target)
         assert tx.backups == {}
 
-    def test_track_created_is_idempotent(self, manager: ChangeTransactionManager, workspace: Path) -> None:
+    def test_track_created_is_idempotent(
+        self, manager: ChangeTransactionManager, workspace: Path
+    ) -> None:
         tx = manager.begin("PROJ", "CHG")
 
         tx.track_created_file("docs/readme.md")
@@ -164,7 +173,10 @@ class TestChangeTransactionRollback:
         tx.backup_file(original)
         original.write_text("after", encoding="utf-8")
 
-        with patch("auto_pm.application.core.change_transaction.shutil.copy2", side_effect=OSError("denied")):
+        with patch(
+            "auto_pm.application.core.change_transaction.shutil.copy2",
+            side_effect=OSError("denied"),
+        ):
             with pytest.raises(TransactionFileError, match="回滚未完成"):
                 tx.rollback("restore failure")
 
@@ -210,7 +222,10 @@ class TestChangeTransactionRollback:
         tx = manager.begin("PROJ", "CHG")
         tx.backup_file(original)
 
-        with patch("auto_pm.application.core.change_transaction.shutil.rmtree", side_effect=OSError("locked")):
+        with patch(
+            "auto_pm.application.core.change_transaction.shutil.rmtree",
+            side_effect=OSError("locked"),
+        ):
             with pytest.raises(TransactionFileError, match="清理备份目录失败"):
                 tx.rollback("backup cleanup failure")
 
@@ -224,7 +239,10 @@ class TestChangeTransactionRollback:
         tx = manager.begin("PROJ", "CHG")
         tx.backup_file(original)
         original.write_text("after", encoding="utf-8")
-        with patch("auto_pm.application.core.change_transaction.shutil.copy2", side_effect=OSError("denied")):
+        with patch(
+            "auto_pm.application.core.change_transaction.shutil.copy2",
+            side_effect=OSError("denied"),
+        ):
             with pytest.raises(TransactionFileError, match="回滚未完成"):
                 with tx:
                     raise RuntimeError("workflow failure")
@@ -234,7 +252,9 @@ class TestChangeTransactionRollback:
 
 
 class TestChangeTransactionCompletion:
-    def test_commit_keeps_changes_and_cleans_backup(self, manager: ChangeTransactionManager, workspace: Path) -> None:
+    def test_commit_keeps_changes_and_cleans_backup(
+        self, manager: ChangeTransactionManager, workspace: Path
+    ) -> None:
         original = _write(workspace / "source.txt", "before")
         tx = manager.begin("PROJ", "CHG")
         tx.backup_file(original)
@@ -253,7 +273,10 @@ class TestChangeTransactionCompletion:
         tx = manager.begin("PROJ", "CHG")
         tx.backup_file(original)
 
-        with patch("auto_pm.application.core.change_transaction.shutil.rmtree", side_effect=OSError("locked")):
+        with patch(
+            "auto_pm.application.core.change_transaction.shutil.rmtree",
+            side_effect=OSError("locked"),
+        ):
             with pytest.raises(TransactionFileError, match="快照已保留"):
                 tx.commit()
 
@@ -268,7 +291,10 @@ class TestChangeTransactionCompletion:
         committed.commit()
         failed = manager.begin("PROJ", "CHG")
         failed.backup_file(target)
-        with patch("auto_pm.application.core.change_transaction.shutil.rmtree", side_effect=OSError("locked")):
+        with patch(
+            "auto_pm.application.core.change_transaction.shutil.rmtree",
+            side_effect=OSError("locked"),
+        ):
             with pytest.raises(TransactionFileError):
                 failed.commit()
 

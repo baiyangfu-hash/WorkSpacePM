@@ -48,7 +48,9 @@ class Policy:
 
 
 class Projection:
-    def __init__(self, name: str, events: list[str], fail_apply: bool = False, fail_undo: bool = False) -> None:
+    def __init__(
+        self, name: str, events: list[str], fail_apply: bool = False, fail_undo: bool = False
+    ) -> None:
         self.name = name
         self.events = events
         self.fail_apply = fail_apply
@@ -88,7 +90,9 @@ def _workspace(tmp_path: Path) -> tuple[Path, Path]:
     return workspace, source
 
 
-def _request(operation: ArchiveOperation = ArchiveOperation.ARCHIVE, request_id: str = "REQ-001") -> ArchiveRequest:
+def _request(
+    operation: ArchiveOperation = ArchiveOperation.ARCHIVE, request_id: str = "REQ-001"
+) -> ArchiveRequest:
     if operation is ArchiveOperation.ARCHIVE:
         source = "projects/active/SW-2026-099"
         destination = "projects/archive/SW-2026-099"
@@ -124,7 +128,9 @@ def test_archive_executes_real_move_phase_ledger_and_projections(tmp_path: Path)
 
     destination = workspace / "projects" / "archive" / "SW-2026-099"
     assert not source.exists()
-    assert "phase: archived" in (destination / "PM_SESSION_SW-2026-099.md").read_text(encoding="utf-8")
+    assert "phase: archived" in (destination / "PM_SESSION_SW-2026-099.md").read_text(
+        encoding="utf-8"
+    )
     assert result.archive_code.startswith("ARC-")
     assert events == ["database:apply", "scanner:apply"]
     assert service.list_archived()[0]["archive_code"] == result.archive_code
@@ -137,7 +143,9 @@ def test_restore_requires_and_uses_exact_archive_record(tmp_path: Path) -> None:
     archived = service.execute(_request())
     _git(workspace, "add", "-A")
     _git(workspace, "commit", "-m", "archive")
-    restore = replace(_request(ArchiveOperation.RESTORE, "REQ-RESTORE"), archive_code=archived.archive_code)
+    restore = replace(
+        _request(ArchiveOperation.RESTORE, "REQ-RESTORE"), archive_code=archived.archive_code
+    )
 
     restored = service.execute(restore)
 

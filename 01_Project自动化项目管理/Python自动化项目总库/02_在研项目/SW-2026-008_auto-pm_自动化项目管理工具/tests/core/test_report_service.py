@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.report_service import ReportService
@@ -115,7 +114,11 @@ class TestGetProjectOverview:
             "archived": 0,
         }
         assert result["by_business_line"] == {
-            "SW": 0, "DJ": 0, "ZD": 0, "XT": 0, "WX": 0,
+            "SW": 0,
+            "DJ": 0,
+            "ZD": 0,
+            "XT": 0,
+            "WX": 0,
         }
 
     def test_single_project(
@@ -188,19 +191,18 @@ class TestGetProjectOverview:
         assert result["by_phase"]["developing"] == 0
         assert result["by_business_line"]["SW"] == 0
 
-    def test_return_structure_keys(
-        self, report_service: ReportService
-    ) -> None:
+    def test_return_structure_keys(self, report_service: ReportService) -> None:
         """返回结构包含所有必需 key"""
         result = report_service.get_project_overview()
-        assert set(result.keys()) == {
-            "total", "by_stack", "by_phase", "by_business_line"
-        }
+        assert set(result.keys()) == {"total", "by_stack", "by_phase", "by_business_line"}
         # by_stack 固定 key
         assert set(result["by_stack"].keys()) == {"plc", "python", "unknown"}
         # by_phase 固定 key
         assert set(result["by_phase"].keys()) == {
-            "developing", "commissioning", "production", "archived"
+            "developing",
+            "commissioning",
+            "production",
+            "archived",
         }
         # by_business_line 固定 key
         assert set(result["by_business_line"].keys()) == {"SW", "DJ", "ZD", "XT", "WX"}
@@ -420,11 +422,11 @@ def _create_spec_registry(workspace: Path, specs: list[dict[str, Any]] | None = 
             "deprecated": "已废弃",
             "archived": "已归档",
         },
-        "specs": {s["spec_id"]: {k: v for k, v in s.items() if k != "spec_id"} for s in specs_to_write},
+        "specs": {
+            s["spec_id"]: {k: v for k, v in s.items() if k != "spec_id"} for s in specs_to_write
+        },
     }
-    registry_path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    registry_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return registry_path
 
 
@@ -439,9 +441,7 @@ def _create_spec_file_at(workspace: Path, canonical_path: str, content: str = ""
 class TestGetSpecReport:
     """get_spec_report() 测试（V2.2 Week3：基于 spec_registry.json）"""
 
-    def test_raises_without_workspace_root(
-        self, tmp_path: Path, db: DatabaseManager
-    ) -> None:
+    def test_raises_without_workspace_root(self, tmp_path: Path, db: DatabaseManager) -> None:
         """未注入 workspace_root 时抛 RuntimeError"""
         ps = ProjectService(str(tmp_path), db=db)
         cs = ChangeService(str(tmp_path), db=db)
@@ -514,7 +514,9 @@ class TestGetSpecReport:
         _create_spec_registry(tmp_path)
         # 仅创建 LSP-905 和 CODE-210
         _create_spec_file_at(tmp_path, "0100_PLC自动化/00_通用规范/PLC编程/905_SCL编程规范_LSP.md")
-        _create_spec_file_at(tmp_path, "01_Project自动化项目管理/00_通用规范/Python开发/210_Python编程规范_DEV.md")
+        _create_spec_file_at(
+            tmp_path, "01_Project自动化项目管理/00_通用规范/Python开发/210_Python编程规范_DEV.md"
+        )
 
         ps = ProjectService(str(tmp_path), db=db)
         cs = ChangeService(str(tmp_path), db=db)
@@ -538,9 +540,7 @@ class TestGetSpecReport:
         svc = ReportService(ps, cs, workspace_root=str(tmp_path), db=db)
 
         result = svc.get_spec_report()
-        assert set(result.keys()) == {
-            "total", "found", "missing", "by_stack", "missing_codes"
-        }
+        assert set(result.keys()) == {"total", "found", "missing", "by_stack", "missing_codes"}
         for stack_data in result["by_stack"].values():
             assert set(stack_data.keys()) == {"total", "found", "missing"}
 
@@ -570,9 +570,7 @@ class TestGetScanReport:
         assert result["last_sync_time"] == "—"
         assert result["is_cache_available"] is True
 
-    def test_with_scan_log(
-        self, tmp_path: Path, db: DatabaseManager
-    ) -> None:
+    def test_with_scan_log(self, tmp_path: Path, db: DatabaseManager) -> None:
         """有扫描日志时返回最近一条"""
         from auto_pm.db.repository import ScanLogRepository
 
@@ -601,9 +599,7 @@ class TestGetScanReport:
         assert len(result["last_sync_time"]) == 16
         assert result["is_cache_available"] is True
 
-    def test_return_structure_keys(
-        self, tmp_path: Path, db: DatabaseManager
-    ) -> None:
+    def test_return_structure_keys(self, tmp_path: Path, db: DatabaseManager) -> None:
         """返回结构包含所有必需 key"""
         ps = ProjectService(str(tmp_path), db=db)
         cs = ChangeService(str(tmp_path), db=db)
@@ -619,25 +615,19 @@ class TestGetScanReport:
 class TestGetReportDispatch:
     """get_report() 统一入口测试"""
 
-    def test_dispatch_project(
-        self, report_service: ReportService
-    ) -> None:
+    def test_dispatch_project(self, report_service: ReportService) -> None:
         """project 类型分发到 get_project_overview"""
         result = report_service.get_report("project")
         assert "total" in result
         assert "by_stack" in result
 
-    def test_dispatch_change(
-        self, report_service: ReportService
-    ) -> None:
+    def test_dispatch_change(self, report_service: ReportService) -> None:
         """change 类型分发到 get_change_overview"""
         result = report_service.get_report("change")
         assert "total" in result
         assert "by_status" in result
 
-    def test_dispatch_spec(
-        self, tmp_path: Path, db: DatabaseManager
-    ) -> None:
+    def test_dispatch_spec(self, tmp_path: Path, db: DatabaseManager) -> None:
         """spec 类型分发到 get_spec_report"""
         ps = ProjectService(str(tmp_path), db=db)
         cs = ChangeService(str(tmp_path), db=db)
@@ -646,9 +636,7 @@ class TestGetReportDispatch:
         assert "total" in result
         assert "found" in result
 
-    def test_dispatch_scan(
-        self, tmp_path: Path, db: DatabaseManager
-    ) -> None:
+    def test_dispatch_scan(self, tmp_path: Path, db: DatabaseManager) -> None:
         """scan 类型分发到 get_scan_report"""
         ps = ProjectService(str(tmp_path), db=db)
         cs = ChangeService(str(tmp_path), db=db)
@@ -656,9 +644,7 @@ class TestGetReportDispatch:
         result = svc.get_report("scan")
         assert "latest" in result
 
-    def test_unknown_type_raises(
-        self, report_service: ReportService
-    ) -> None:
+    def test_unknown_type_raises(self, report_service: ReportService) -> None:
         """未知类型抛 ValueError"""
         with pytest.raises(ValueError, match="未知报告类型"):
             report_service.get_report("unknown_type")

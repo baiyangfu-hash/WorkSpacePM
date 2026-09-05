@@ -28,6 +28,7 @@ os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 if sys.platform == "win32" and sys.stdout is not None:
     try:
         import ctypes
+
         ctypes.windll.kernel32.SetConsoleOutputCP(65001)  # UTF-8
         if hasattr(sys.stdout, "reconfigure"):
             sys.stdout.reconfigure(encoding="utf-8")

@@ -6,9 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
 
 
 def _make_plc_project(
@@ -43,16 +42,23 @@ def _make_plc_project(
         encoding="utf-8",
     )
     if with_pm_session:
-        (project_dir / f"PM_SESSION_{project_id}.md").write_text(
-            "# PM_SESSION\n", encoding="utf-8"
-        )
+        (project_dir / f"PM_SESSION_{project_id}.md").write_text("# PM_SESSION\n", encoding="utf-8")
     if with_prd:
         (project_dir / "PRD").mkdir()
     if with_std_dirs:
         for d in [
-            "00_项目管理", "01_需求与设计", "02_PLC程序", "03_HMI设计",
-            "04_现场调试", "12_驱动器与设备", "05_测试与验证", "06_文档与交付",
-            "07_技术支持", "08_备件管理", "09_项目总结", "10_知识库",
+            "00_项目管理",
+            "01_需求与设计",
+            "02_PLC程序",
+            "03_HMI设计",
+            "04_现场调试",
+            "12_驱动器与设备",
+            "05_测试与验证",
+            "06_文档与交付",
+            "07_技术支持",
+            "08_备件管理",
+            "09_项目总结",
+            "10_知识库",
         ]:
             (project_dir / d).mkdir()
     return project_dir
@@ -104,9 +110,7 @@ def test_plc_check_substance(cli_runner: CliRunner, tmp_path: Path) -> None:
     # 创建 PRD 目录 + 空壳文档（含占位符）
     prd_dir = project_dir / "PRD"
     prd_dir.mkdir()
-    (prd_dir / "需求分析文档_REQ.md").write_text(
-        "# 需求分析\n\n待补充", encoding="utf-8"
-    )
+    (prd_dir / "需求分析文档_REQ.md").write_text("# 需求分析\n\n待补充", encoding="utf-8")
 
     result = cli_runner.invoke(
         cli,
@@ -166,9 +170,7 @@ def _make_python_project(
     return project_dir
 
 
-def test_plc_check_python_project_friendly_output(
-    cli_runner: CliRunner, tmp_path: Path
-) -> None:
+def test_plc_check_python_project_friendly_output(cli_runner: CliRunner, tmp_path: Path) -> None:
     """V0.4.1 Step 3: plc check <Python 项目> 输出友好提示"""
     project_id = "SW-2026-PYT"
     _make_python_project(tmp_path, project_id)
@@ -189,9 +191,7 @@ def test_plc_check_python_project_friendly_output(
     assert "FAIL" not in result.output
 
 
-def test_plc_check_python_project_json(
-    cli_runner: CliRunner, tmp_path: Path
-) -> None:
+def test_plc_check_python_project_json(cli_runner: CliRunner, tmp_path: Path) -> None:
     """V0.4.1 Step 3: plc check <Python 项目> --json 输出 not_applicable=True"""
     project_id = "SW-2026-PYJ"
     _make_python_project(tmp_path, project_id)
@@ -210,9 +210,7 @@ def test_plc_check_python_project_json(
     assert len(data["items"]) == 0
 
 
-def test_plc_check_all_skips_python_project(
-    cli_runner: CliRunner, tmp_path: Path
-) -> None:
+def test_plc_check_all_skips_python_project(cli_runner: CliRunner, tmp_path: Path) -> None:
     """V0.4.1 Step 3: plc check --all 不应将 Python 项目误报为 FAIL
 
     场景：工作空间同时有 PLC 项目和 Python 项目
@@ -277,10 +275,15 @@ def test_plc_init(cli_runner: CliRunner, tmp_path: Path, mode: str) -> None:
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "plc", "init", project_id,
-            "--name", "初始化项目",
-            "--mode", mode,
+            "-w",
+            str(tmp_path),
+            "plc",
+            "init",
+            project_id,
+            "--name",
+            "初始化项目",
+            "--mode",
+            mode,
         ],
         catch_exceptions=False,
     )
@@ -297,9 +300,13 @@ def test_plc_init_default_mode(cli_runner: CliRunner, tmp_path: Path) -> None:
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "plc", "init", project_id,
-            "--name", "默认模式项目",
+            "-w",
+            str(tmp_path),
+            "plc",
+            "init",
+            project_id,
+            "--name",
+            "默认模式项目",
         ],
         catch_exceptions=False,
     )
@@ -312,9 +319,7 @@ def test_plc_init_default_mode(cli_runner: CliRunner, tmp_path: Path) -> None:
     assert (project_dir / "02_PLC程序").is_dir()
 
 
-def test_plc_init_shared_library_fails(
-    cli_runner: CliRunner, tmp_path: Path
-) -> None:
+def test_plc_init_shared_library_fails(cli_runner: CliRunner, tmp_path: Path) -> None:
     """测试 plc init --mode shared-library 因模板变量不匹配而失败
 
     shared-library 模板期望 library_name 变量，但 CLI 传入 project_id/project_name，
@@ -324,34 +329,40 @@ def test_plc_init_shared_library_fails(
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "plc", "init", project_id,
-            "--name", "共享库项目",
-            "--mode", "shared-library",
+            "-w",
+            str(tmp_path),
+            "plc",
+            "init",
+            project_id,
+            "--name",
+            "共享库项目",
+            "--mode",
+            "shared-library",
         ],
     )
     assert result.exit_code == 1
 
 
-def test_plc_init_invalid_mode(
-    cli_runner: CliRunner, tmp_path: Path
-) -> None:
+def test_plc_init_invalid_mode(cli_runner: CliRunner, tmp_path: Path) -> None:
     """测试 plc init --mode 无效值被 click Choice 拒绝"""
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "plc", "init", "DJ-2026-BAD",
-            "--name", "无效模式",
-            "--mode", "invalid-mode",
+            "-w",
+            str(tmp_path),
+            "plc",
+            "init",
+            "DJ-2026-BAD",
+            "--name",
+            "无效模式",
+            "--mode",
+            "invalid-mode",
         ],
     )
     assert result.exit_code != 0
 
 
-def test_plc_init_existing_path(
-    cli_runner: CliRunner, tmp_path: Path
-) -> None:
+def test_plc_init_existing_path(cli_runner: CliRunner, tmp_path: Path) -> None:
     """测试 plc init 目标路径已存在时退出码 1"""
     project_id = "DJ-2026-EXISTS"
     # 预先创建同名目录
@@ -359,9 +370,13 @@ def test_plc_init_existing_path(
     result = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path),
-            "plc", "init", project_id,
-            "--name", "已存在项目",
+            "-w",
+            str(tmp_path),
+            "plc",
+            "init",
+            project_id,
+            "--name",
+            "已存在项目",
         ],
     )
     assert result.exit_code == 1

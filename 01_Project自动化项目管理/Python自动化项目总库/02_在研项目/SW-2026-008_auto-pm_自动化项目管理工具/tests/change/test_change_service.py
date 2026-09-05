@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import (
     SpecViolationError,
@@ -119,7 +118,9 @@ class TestChangeService:
                 necessity="必要性",
             )
 
-    def test_create_change_request_invalid_domain(self, workspace_root: str, project_id: str) -> None:
+    def test_create_change_request_invalid_domain(
+        self, workspace_root: str, project_id: str
+    ) -> None:
         """创建变更单时非法领域抛 SpecViolationError"""
         svc = ChangeService(workspace_root)
         with pytest.raises(SpecViolationError, match="技术领域"):
@@ -173,9 +174,13 @@ class TestChangeService:
 
         # 把已有的 CHG-DOCU-2026-001.md 状态改为 closed
         chg_path = os.path.join(
-            workspace_root, project_id,
-            "04_监控", "01_变更管理", "01_变更单",
-            "CHG-DOCU", "CHG-DOCU-2026-001.md",
+            workspace_root,
+            project_id,
+            "04_监控",
+            "01_变更管理",
+            "01_变更单",
+            "CHG-DOCU",
+            "CHG-DOCU-2026-001.md",
         )
         with open(chg_path, encoding="utf-8") as f:
             content = f.read()
@@ -189,7 +194,8 @@ class TestChangeService:
 
         # mock 编号生成器返回已存在的编号
         monkeypatch.setattr(
-            svc._locator, "generate_change_number",
+            svc._locator,
+            "generate_change_number",
             lambda *args: "CHG-DOCU-2026-001",
         )
 
@@ -220,7 +226,9 @@ class TestChangeService:
         project_path = os.path.join(workspace_root, project_id)
         # 项目标志文件
         os.makedirs(project_path, exist_ok=True)
-        with open(os.path.join(project_path, f"PM_SESSION_{project_id}.md"), "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(project_path, f"PM_SESSION_{project_id}.md"), "w", encoding="utf-8"
+        ) as f:
             f.write("# PM_SESSION\n")
         # 完整台账骨架（含 ## 变更单索引 标题 + 8列结构）
         ledger_dir = os.path.join(project_path, "04_监控", "01_变更管理", "02_变更记录")
@@ -359,22 +367,26 @@ class TestChg085VerificationGate:
     def test_all_passed_returns_empty(self, tmp_path: Path) -> None:
         """§10.1 全部通过时返回空列表"""
         svc = self._make_service(tmp_path)
-        content = self._make_content([
-            (1, "☑通过"),
-            (2, "☑通过"),
-            (3, "☑全部通过"),
-        ])
+        content = self._make_content(
+            [
+                (1, "☑通过"),
+                (2, "☑通过"),
+                (3, "☑全部通过"),
+            ]
+        )
         assert svc._check_all_verification_items_passed(content) == []
 
     def test_has_pending_returns_pending_items(self, tmp_path: Path) -> None:
         """§10.1 存在未通过项时返回未通过项序号列表"""
         svc = self._make_service(tmp_path)
-        content = self._make_content([
-            (1, "☑通过"),
-            (2, "□待验证"),   # 状态为"待验证"→ 未通过
-            (3, "不通过"),     # 明确不通过
-            (4, ""),           # 空状态 → 未通过
-        ])
+        content = self._make_content(
+            [
+                (1, "☑通过"),
+                (2, "□待验证"),  # 状态为"待验证"→ 未通过
+                (3, "不通过"),  # 明确不通过
+                (4, ""),  # 空状态 → 未通过
+            ]
+        )
         pending = svc._check_all_verification_items_passed(content)
         assert pending == [2, 3, 4]
 
@@ -449,8 +461,19 @@ class TestChapterCompleteness:
         """13 章节编号正确"""
         nums = [num for num, _name, _pattern in ChangeService._REQUIRED_CHAPTERS]
         assert nums == [
-            "5", "6.1", "6.2", "6.3", "7",
-            "8.1", "8.2", "9", "10.1", "10.2", "10.3", "11", "12",
+            "5",
+            "6.1",
+            "6.2",
+            "6.3",
+            "7",
+            "8.1",
+            "8.2",
+            "9",
+            "10.1",
+            "10.2",
+            "10.3",
+            "11",
+            "12",
         ]
 
     def test_check_chapter_completeness_all_present(self, tmp_path: Path) -> None:
@@ -464,9 +487,7 @@ class TestChapterCompleteness:
         """缺失 §11/§12 时返回对应章节名"""
         svc = self._make_service(tmp_path)
         content = self._build_full_chapters_content()
-        content = content.replace(
-            "### §11 版本详细变更说明\n版本变更说明内容\n\n", ""
-        )
+        content = content.replace("### §11 版本详细变更说明\n版本变更说明内容\n\n", "")
         content = content.replace("### §12 附录\n附录内容\n", "")
         missing = svc._check_chapter_completeness(content)
         assert "§11 版本详细变更说明" in missing
@@ -483,9 +504,7 @@ class TestChapterCompleteness:
         missing = svc._check_chapter_completeness(content)
         assert "§11 版本详细变更说明" in missing
 
-    def test_check_chapter_completeness_legacy_format_no_section_sign(
-        self, tmp_path: Path
-    ) -> None:
+    def test_check_chapter_completeness_legacy_format_no_section_sign(self, tmp_path: Path) -> None:
         """旧格式 `### 10.1`（不带 §）能被匹配（§? 可选匹配兼容性）"""
         svc = self._make_service(tmp_path)
         content = """# 变更单
@@ -542,9 +561,7 @@ class TestChapterCompleteness:
         (project_path / f"PM_SESSION_{project_id}.md").write_text(
             "# PM_SESSION\n", encoding="utf-8"
         )
-        chg_dir = (
-            project_path / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-DOCU"
-        )
+        chg_dir = project_path / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-DOCU"
         chg_dir.mkdir(parents=True, exist_ok=True)
         # completed 状态但无 §5-§12 三级标题章节
         (chg_dir / "CHG-DOCU-2026-001.md").write_text(
@@ -552,9 +569,7 @@ class TestChapterCompleteness:
             "| 字段 | 内容 |\n|------|------|\n| 变更状态 | completed |\n",
             encoding="utf-8",
         )
-        ledger_dir = (
-            project_path / "04_监控" / "01_变更管理" / "02_变更记录"
-        )
+        ledger_dir = project_path / "04_监控" / "01_变更管理" / "02_变更记录"
         ledger_dir.mkdir(parents=True, exist_ok=True)
         (ledger_dir / "01_版本变更台帐.md").write_text(
             "# 版本变更台帐\n\n| 序号 | 变更编号 | 描述 |\n|------|----------|------|\n",
@@ -563,9 +578,7 @@ class TestChapterCompleteness:
 
         svc = ChangeService(str(tmp_path))
         with pytest.raises(TransitionGuardError, match="章节不完整"):
-            svc.transition_status(
-                "CHG-DOCU-2026-001", "closed", approver="管理员"
-            )
+            svc.transition_status("CHG-DOCU-2026-001", "closed", approver="管理员")
 
     def test_transition_to_closed_allowed_when_complete(self, tmp_path: Path) -> None:
         """13 章节齐全时流转 closed 成功"""
@@ -575,17 +588,13 @@ class TestChapterCompleteness:
         (project_path / f"PM_SESSION_{project_id}.md").write_text(
             "# PM_SESSION\n", encoding="utf-8"
         )
-        chg_dir = (
-            project_path / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-DOCU"
-        )
+        chg_dir = project_path / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-DOCU"
         chg_dir.mkdir(parents=True, exist_ok=True)
         # completed 状态 + 全部 13 章节
         (chg_dir / "CHG-DOCU-2026-001.md").write_text(
             self._build_full_chapters_content(), encoding="utf-8"
         )
-        ledger_dir = (
-            project_path / "04_监控" / "01_变更管理" / "02_变更记录"
-        )
+        ledger_dir = project_path / "04_监控" / "01_变更管理" / "02_变更记录"
         ledger_dir.mkdir(parents=True, exist_ok=True)
         (ledger_dir / "01_版本变更台帐.md").write_text(
             "# 版本变更台帐\n\n| 序号 | 变更编号 | 描述 |\n|------|----------|------|\n",
@@ -593,8 +602,6 @@ class TestChapterCompleteness:
         )
 
         svc = ChangeService(str(tmp_path))
-        cr = svc.transition_status(
-            "CHG-DOCU-2026-001", "closed", approver="管理员"
-        )
+        cr = svc.transition_status("CHG-DOCU-2026-001", "closed", approver="管理员")
         assert cr is not None
         assert cr.status == "closed"

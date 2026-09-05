@@ -77,13 +77,14 @@ class ChangeFileLocator:
             # Check if PM_SESSION_*.md exists in workspace_root and matches project_id
             for entry in os.listdir(self.workspace_root):
                 if entry.startswith("PM_SESSION_") and entry.endswith(".md"):
-                    pid = entry[len("PM_SESSION_"):-len(".md")]
+                    pid = entry[len("PM_SESSION_") : -len(".md")]
                     if pid == project_id:
                         return self.workspace_root
             # Or if .copier-answers.yml in workspace_root has project_id
             answers_path = os.path.join(self.workspace_root, ".copier-answers.yml")
             if os.path.isfile(answers_path):
                 import yaml
+
                 with open(answers_path, encoding="utf-8") as f:
                     answers = yaml.safe_load(f) or {}
                 if answers.get("project_id") == project_id:
@@ -140,10 +141,7 @@ class ChangeFileLocator:
             return None
 
         # 跳过隐藏目录和 Python 缓存目录
-        filtered = [
-            e for e in entries
-            if not e.startswith(".") and not e.startswith("__")
-        ]
+        filtered = [e for e in entries if not e.startswith(".") and not e.startswith("__")]
 
         for entry in filtered:
             entry_path = os.path.join(current_dir, entry)
@@ -179,7 +177,7 @@ class ChangeFileLocator:
         for cf in change_files:
             basename = os.path.splitext(os.path.basename(cf))[0]
             if basename.startswith(prefix):
-                seq_str = basename[len(prefix):]
+                seq_str = basename[len(prefix) :]
                 try:
                     seq = int(seq_str)
                     max_seq = max(max_seq, seq)
@@ -240,9 +238,7 @@ class ChangeFileLocator:
             f"{change_number}.md",
         )
 
-    def find_change_file(
-        self, change_number: str, project_id: str | None = None
-    ) -> str | None:
+    def find_change_file(self, change_number: str, project_id: str | None = None) -> str | None:
         """根据变更编号查找文件
 
         递归遍历工作空间下的项目目录，按 PLC / Python 两套路径约定搜索。
@@ -279,7 +275,8 @@ class ChangeFileLocator:
                     return result
                 log.debug(
                     "查找变更单: project_id=%s 定位到项目目录但未找到变更单 %s，回退递归搜索",
-                    project_id, change_number,
+                    project_id,
+                    change_number,
                 )
             else:
                 log.warning(
@@ -300,9 +297,7 @@ class ChangeFileLocator:
         TD-A04 修复新增：提供 project_id 时走此方法，避免递归全工作空间。
         """
         for rel_path in self.CHANGE_FILE_SEARCH_PATHS:
-            candidate = os.path.join(
-                project_path, rel_path, f"CHG-{domain}", f"{change_number}.md"
-            )
+            candidate = os.path.join(project_path, rel_path, f"CHG-{domain}", f"{change_number}.md")
             if os.path.isfile(candidate):
                 return candidate
         return None
@@ -351,10 +346,7 @@ class ChangeFileLocator:
             return None
 
         # 跳过隐藏目录和 Python 缓存目录
-        filtered_entries = [
-            e for e in entries
-            if not e.startswith(".") and not e.startswith("__")
-        ]
+        filtered_entries = [e for e in entries if not e.startswith(".") and not e.startswith("__")]
 
         # 若是项目目录，按路径约定搜索变更单文件
         if self._is_project_dir(current_dir):
@@ -415,10 +407,7 @@ class ChangeFileLocator:
         except OSError:
             return
 
-        filtered_entries = [
-            e for e in entries
-            if not e.startswith(".") and not e.startswith("__")
-        ]
+        filtered_entries = [e for e in entries if not e.startswith(".") and not e.startswith("__")]
 
         # 若是项目目录，扫描其变更单文件
         if self._is_project_dir(current_dir):

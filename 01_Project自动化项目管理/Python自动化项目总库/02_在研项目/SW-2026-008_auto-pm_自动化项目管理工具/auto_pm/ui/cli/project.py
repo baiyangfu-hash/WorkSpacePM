@@ -55,9 +55,7 @@ from auto_pm.domain.project.archive_contracts import (
 
 console = Console()
 
-_AUTHORIZING_CHANGE_STATES = frozenset(
-    {"approved", "conditionally_approved", "implementing"}
-)
+_AUTHORIZING_CHANGE_STATES = frozenset({"approved", "conditionally_approved", "implementing"})
 _TERMINAL_CHANGE_STATES = frozenset({"completed", "closed", "archived", "rejected"})
 
 
@@ -329,8 +327,19 @@ def cmd_list(
 
 @project_group.command(name="create")
 @click.option("--stack", type=click.Choice(["plc", "python"]), required=True, help="技术栈")
-@click.option("--id", "project_id", required=False, default=None, help="项目编号（如 DJ-2026-010），与 --auto-id 互斥")
-@click.option("--auto-id", is_flag=True, default=False, help="自动生成项目编号（{业务线}-{年份}-{序号:03d}），与 --id 互斥")
+@click.option(
+    "--id",
+    "project_id",
+    required=False,
+    default=None,
+    help="项目编号（如 DJ-2026-010），与 --auto-id 互斥",
+)
+@click.option(
+    "--auto-id",
+    is_flag=True,
+    default=False,
+    help="自动生成项目编号（{业务线}-{年份}-{序号:03d}），与 --id 互斥",
+)
 @click.option("--name", "project_name", required=True, help="项目名称")
 @click.option("--desc", "description", default="", help="项目描述")
 @click.option(
@@ -371,8 +380,15 @@ def cmd_list(
     help="PLC 品牌（如 Siemens/Mitsubishi）",
 )
 @click.option("--plc-model", default=None, help="PLC 型号（如 S7-1200）")
-@click.option("--dest-dir", "dest_dir", default=None, help="项目存放目录（默认: 动态解析到工作区分类目录）")
-@click.option("--base-project", "base_project", default=None, help="溯源父项目（例如用于改造类项目时传入原项目编号）")
+@click.option(
+    "--dest-dir", "dest_dir", default=None, help="项目存放目录（默认: 动态解析到工作区分类目录）"
+)
+@click.option(
+    "--base-project",
+    "base_project",
+    default=None,
+    help="溯源父项目（例如用于改造类项目时传入原项目编号）",
+)
 @click.option("--dry-run", is_flag=True, help="仅预览，不实际创建")
 @click.pass_context
 def cmd_create(
@@ -523,6 +539,7 @@ def cmd_create(
         tpl_svc.copy_template(template_name, dest_path, data)
         # 审计日志：记录项目创建操作（电气部门试用期间操作追溯）
         from auto_pm.logging.audit import audit_log
+
         audit_log(
             "project_create",
             project_id=project_id,
@@ -590,6 +607,7 @@ def cmd_show(ctx: click.Context, project_id: str, output_json: bool) -> None:
 
     # P3-8: 自动生成 ai_context.json 供 cockpit/AI 技能恢复上下文
     from auto_pm.cli import write_ai_context
+
     write_ai_context(
         workspace_root=app_ctx.workspace_root,
         project_id=proj.project_id,
@@ -838,7 +856,11 @@ def cmd_retrofit(ctx: click.Context, project_id: str) -> None:
         }
         try:
             from auto_pm.utils.file_utils import write_file
-            write_file(copier_answers_path, yaml_dump(content, default_flow_style=False, allow_unicode=True))
+
+            write_file(
+                copier_answers_path,
+                yaml_dump(content, default_flow_style=False, allow_unicode=True),
+            )
             console.print(f"[green].copier-answers.yml 已创建: {copier_answers_path}[/green]")
         except Exception as e:
             console.print(f"[red]创建 .copier-answers.yml 失败: {e}[/red]")

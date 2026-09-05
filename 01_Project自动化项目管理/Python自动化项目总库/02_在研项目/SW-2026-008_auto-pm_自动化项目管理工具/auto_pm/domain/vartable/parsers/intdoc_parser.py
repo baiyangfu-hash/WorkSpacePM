@@ -25,9 +25,14 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from auto_pm.vartable.models import ParseResult, VarEntry, VarTable
-from auto_pm.vartable.parsers.base_parser import BaseParser
+
+if TYPE_CHECKING:
+    from auto_pm.domain.vartable.parsers.base_parser import BaseParser
+else:
+    from auto_pm.vartable.parsers.base_parser import BaseParser
 
 SOURCE_FORMAT = "intdoc"
 
@@ -68,7 +73,7 @@ class IntDocParser(BaseParser):
         from auto_pm.vartable.models import FormatType
         from auto_pm.vartable.parsers.format_detector import detect_format
 
-        return detect_format(file_path) == FormatType.INTDOC
+        return bool(detect_format(file_path) == FormatType.INTDOC)
 
     def parse(self, file_path: str | Path) -> ParseResult:
         """解析 Markdown 接口文档
@@ -90,7 +95,7 @@ class IntDocParser(BaseParser):
         content, encoding = read_result
 
         if not content.strip():
-            return self._empty_content_error(file_path, SOURCE_FORMAT)
+            return cast(ParseResult, self._empty_content_error(file_path, SOURCE_FORMAT))
 
         lines = content.splitlines()
         entries: list[VarEntry] = []
@@ -107,9 +112,7 @@ class IntDocParser(BaseParser):
             # 检测 VAR 区段标题
             section_match = _SECTION_RE.match(line)
             if section_match:
-                current_scope = section_match.group(1).upper().replace(
-                    " CONSTANT", ""
-                )
+                current_scope = section_match.group(1).upper().replace(" CONSTANT", "")
                 in_section = True
                 in_table = False
                 table_columns = []
@@ -203,13 +206,9 @@ class IntDocParser(BaseParser):
             value = cols[idx].strip()
             if not name and any(k in col_lower for k in ("变量名", "名称", "name")):
                 name = value
-            elif not var_type and any(
-                k in col_lower for k in ("类型", "type", "数据类型")
-            ):
+            elif not var_type and any(k in col_lower for k in ("类型", "type", "数据类型")):
                 var_type = value
-            elif not comment and any(
-                k in col_lower for k in ("注释", "说明", "comment", "备注")
-            ):
+            elif not comment and any(k in col_lower for k in ("注释", "说明", "comment", "备注")):
                 comment = value
 
         # 兜底：若列名未识别，按位置取前 2 列

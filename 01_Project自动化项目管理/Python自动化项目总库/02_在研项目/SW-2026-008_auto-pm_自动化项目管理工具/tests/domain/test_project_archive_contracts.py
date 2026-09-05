@@ -65,7 +65,9 @@ def _facts(request: ArchiveRequest | None = None) -> ArchivePreflightFacts:
     )
 
 
-def _assert_code(code: ArchiveErrorCode, request: ArchiveRequest, facts: ArchivePreflightFacts) -> None:
+def _assert_code(
+    code: ArchiveErrorCode, request: ArchiveRequest, facts: ArchivePreflightFacts
+) -> None:
     with pytest.raises(ArchiveContractError) as caught:
         build_archive_plan(request, facts)
     assert caught.value.code is code
@@ -114,9 +116,7 @@ def test_happy_path_has_locked_order_and_reverse_compensation() -> None:
         ArchiveStep.MOVE_DIRECTORY,
     )
     assert plan.compensation_order == ARCHIVE_COMPENSATION_ORDER
-    assert plan.compensation_order == tuple(
-        reversed(plan.steps[2:])
-    )
+    assert plan.compensation_order == tuple(reversed(plan.steps[2:]))
     assert plan.idempotent_replay is False
 
 
@@ -136,16 +136,25 @@ def test_restore_uses_same_transactional_effect_order() -> None:
 @pytest.mark.parametrize(
     ("update", "code"),
     [
-        (lambda facts: replace(facts, chg_query_succeeded=False), ArchiveErrorCode.CHG_QUERY_FAILED),
+        (
+            lambda facts: replace(facts, chg_query_succeeded=False),
+            ArchiveErrorCode.CHG_QUERY_FAILED,
+        ),
         (lambda facts: replace(facts, git_available=False), ArchiveErrorCode.GIT_UNAVAILABLE),
         (lambda facts: replace(facts, git_returncode=128), ArchiveErrorCode.GIT_NON_ZERO),
         (lambda facts: replace(facts, git_clean=False), ArchiveErrorCode.GIT_DIRTY),
         (lambda facts: replace(facts, ledger_readable=False), ArchiveErrorCode.LEDGER_DAMAGED),
         (lambda facts: replace(facts, ledger_valid=False), ArchiveErrorCode.LEDGER_DAMAGED),
         (lambda facts: replace(facts, source_link_anomaly=True), ArchiveErrorCode.LINK_ANOMALY),
-        (lambda facts: replace(facts, destination_link_anomaly=True), ArchiveErrorCode.LINK_ANOMALY),
+        (
+            lambda facts: replace(facts, destination_link_anomaly=True),
+            ArchiveErrorCode.LINK_ANOMALY,
+        ),
         (lambda facts: replace(facts, source_exists=False), ArchiveErrorCode.SOURCE_MISSING),
-        (lambda facts: replace(facts, destination_exists=True), ArchiveErrorCode.DESTINATION_CONFLICT),
+        (
+            lambda facts: replace(facts, destination_exists=True),
+            ArchiveErrorCode.DESTINATION_CONFLICT,
+        ),
         (lambda facts: replace(facts, lock_acquired=False), ArchiveErrorCode.CONCURRENCY_CONFLICT),
     ],
 )
@@ -163,9 +172,7 @@ def test_chg_open_items_fail_closed() -> None:
 
 
 def test_authorization_query_failure_is_not_treated_as_no_restriction() -> None:
-    facts = replace(
-        _facts(), authorization=replace(_facts().authorization, query_succeeded=False)
-    )
+    facts = replace(_facts(), authorization=replace(_facts().authorization, query_succeeded=False))
     _assert_code(ArchiveErrorCode.AUTHORIZATION_QUERY_FAILED, _request(), facts)
 
 
@@ -224,8 +231,14 @@ def test_state_machine_allows_normal_execution_and_compensation() -> None:
     for target in normal[1:]:
         current = transition_archive_state(current, target)
     assert current is ArchiveState.COMPLETED
-    assert transition_archive_state(ArchiveState.MOVED, ArchiveState.COMPENSATING) is ArchiveState.COMPENSATING
-    assert transition_archive_state(ArchiveState.COMPENSATING, ArchiveState.ROLLED_BACK) is ArchiveState.ROLLED_BACK
+    assert (
+        transition_archive_state(ArchiveState.MOVED, ArchiveState.COMPENSATING)
+        is ArchiveState.COMPENSATING
+    )
+    assert (
+        transition_archive_state(ArchiveState.COMPENSATING, ArchiveState.ROLLED_BACK)
+        is ArchiveState.ROLLED_BACK
+    )
 
 
 @pytest.mark.parametrize(

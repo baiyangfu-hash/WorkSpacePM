@@ -9,9 +9,8 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.cli.vartable import vartable_group
+from click.testing import CliRunner
 
 SAMPLE_IO_POINTS_CSV = """station,signal_type,address,tag,signal_name,device,comment
 cpu,DI,X0,Z_Home_Sensor,Z轴原点传感器,Z轴伺服原点开关 B16,P35/EFS1/16.7
@@ -41,9 +40,7 @@ def gbk_csv_file(tmp_path: Path) -> Path:
 
 
 class TestVartableParseCommand:
-    def test_parse_json_format(
-        self, cli_runner: CliRunner, sample_csv: Path
-    ) -> None:
+    def test_parse_json_format(self, cli_runner: CliRunner, sample_csv: Path) -> None:
         """vartable parse --output-format json 输出有效 JSON"""
         result = cli_runner.invoke(
             vartable_group,
@@ -55,9 +52,7 @@ class TestVartableParseCommand:
         assert data["entry_count"] == 3
         assert data["error_count"] == 0
 
-    def test_parse_table_format(
-        self, cli_runner: CliRunner, sample_csv: Path
-    ) -> None:
+    def test_parse_table_format(self, cli_runner: CliRunner, sample_csv: Path) -> None:
         """vartable parse --output-format table 输出表格
 
         注意: Rich Table 在 CliRunner 默认 80 列宽度下会截断长 Tag,
@@ -86,9 +81,7 @@ class TestVartableParseCommand:
 
 
 class TestVartableDetectEncodingCommand:
-    def test_detect_encoding_text(
-        self, cli_runner: CliRunner, sample_csv: Path
-    ) -> None:
+    def test_detect_encoding_text(self, cli_runner: CliRunner, sample_csv: Path) -> None:
         """vartable detect-encoding --format text"""
         result = cli_runner.invoke(
             vartable_group,
@@ -97,9 +90,7 @@ class TestVartableDetectEncodingCommand:
         assert result.exit_code == 0
         assert "utf-8" in result.output
 
-    def test_detect_encoding_json(
-        self, cli_runner: CliRunner, gbk_csv_file: Path
-    ) -> None:
+    def test_detect_encoding_json(self, cli_runner: CliRunner, gbk_csv_file: Path) -> None:
         """vartable detect-encoding --format json 输出 GBK"""
         result = cli_runner.invoke(
             vartable_group,

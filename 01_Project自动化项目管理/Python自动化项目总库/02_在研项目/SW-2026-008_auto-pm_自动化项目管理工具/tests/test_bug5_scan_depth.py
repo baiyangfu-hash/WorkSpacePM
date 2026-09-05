@@ -54,12 +54,8 @@ class TestScanDepthConsistency:
 
     def test_both_use_same_default_depth(self) -> None:
         """两个 Service 的默认扫描深度应一致（均为 4）"""
-        ps_depth = inspect.signature(ProjectService.list_projects).parameters[
-            "scan_depth"
-        ].default
-        plc_depth = inspect.signature(PlcChecker.check_workspace).parameters[
-            "scan_depth"
-        ].default
+        ps_depth = inspect.signature(ProjectService.list_projects).parameters["scan_depth"].default
+        plc_depth = inspect.signature(PlcChecker.check_workspace).parameters["scan_depth"].default
         assert ps_depth == plc_depth == 4
 
 

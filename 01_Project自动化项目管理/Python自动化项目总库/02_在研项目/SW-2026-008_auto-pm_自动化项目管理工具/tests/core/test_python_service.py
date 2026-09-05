@@ -28,11 +28,20 @@ def test_python_project_check_and_repair(tmp_path: Path) -> None:
     # 写入一些模拟模板文件
     (tpl_path / ".pre-commit-config.yaml").write_text("pre-commit content\n", encoding="utf-8")
     (tpl_path / ".ruff.toml").write_text("ruff content\n", encoding="utf-8")
-    (tpl_path / ".copier-answers.yml.jinja").write_text("project_id: {{ project_id }}\n", encoding="utf-8")
-    (tpl_path / "Taskfile.yml.jinja").write_text("taskfile for {{ project_name }}\n", encoding="utf-8")
+    (tpl_path / ".copier-answers.yml.jinja").write_text(
+        "project_id: {{ project_id }}\n", encoding="utf-8"
+    )
+    (tpl_path / "Taskfile.yml.jinja").write_text(
+        "taskfile for {{ project_name }}\n", encoding="utf-8"
+    )
     (tpl_path / "README.md.jinja").write_text("# {{ project_name }}\n", encoding="utf-8")
-    (tpl_path / "pyproject.toml.jinja").write_text("[project]\nname = \"{{ package_name }}\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\n", encoding="utf-8")
-    (tpl_path / "PM_SESSION_{{ project_id }}.md.jinja").write_text("# PM SESSION {{ project_id }}\n", encoding="utf-8")
+    (tpl_path / "pyproject.toml.jinja").write_text(
+        '[project]\nname = "{{ package_name }}"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n',
+        encoding="utf-8",
+    )
+    (tpl_path / "PM_SESSION_{{ project_id }}.md.jinja").write_text(
+        "# PM SESSION {{ project_id }}\n", encoding="utf-8"
+    )
 
     # 创建要修复的项目
     svc = PythonProjectService(str(tmp_path), templates_dir=str(templates_dir))

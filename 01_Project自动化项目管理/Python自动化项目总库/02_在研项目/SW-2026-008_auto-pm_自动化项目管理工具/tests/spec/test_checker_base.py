@@ -57,7 +57,12 @@ class TestVersionMismatchChecker:
         assert len(shc002) == 0
 
     def test_mismatched_versions(self, populated_workspace: Path) -> None:
-        spec_path = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "01_项目管理域" / "PM-2026-001_项目管理规范_DEV.md"
+        spec_path = (
+            populated_workspace
+            / "00_Obsidian_Base全局规范文件仓库"
+            / "01_项目管理域"
+            / "PM-2026-001_项目管理规范_DEV.md"
+        )
         spec_path.write_text("# PM Spec\n\n版本: V9.9.9\n", encoding="utf-8")
         reg = SpecRegistry(populated_workspace)
         reg.load()
@@ -79,7 +84,12 @@ class TestFrontmatterChecker:
         assert all(r.severity == Severity.INFO for r in shc007)
 
     def test_missing_frontmatter(self, populated_workspace: Path) -> None:
-        spec_path = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "01_项目管理域" / "PM-2026-001_项目管理规范_DEV.md"
+        spec_path = (
+            populated_workspace
+            / "00_Obsidian_Base全局规范文件仓库"
+            / "01_项目管理域"
+            / "PM-2026-001_项目管理规范_DEV.md"
+        )
         spec_path.write_text("# PM Spec without frontmatter\n\n版本: V1.0.0\n", encoding="utf-8")
         reg = SpecRegistry(populated_workspace)
         reg.load()
@@ -158,7 +168,12 @@ class TestObsidianLinkChecker:
         assert len(shc006) == 0
 
     def test_broken_wikilink(self, populated_workspace: Path) -> None:
-        spec_path = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "01_项目管理域" / "PM-2026-001_项目管理规范_DEV.md"
+        spec_path = (
+            populated_workspace
+            / "00_Obsidian_Base全局规范文件仓库"
+            / "01_项目管理域"
+            / "PM-2026-001_项目管理规范_DEV.md"
+        )
         spec_path.write_text(
             "---\nspec_id: PM-2026-001\n---\n\n# Title\n\nSee [[PM-9999-888_nonexistent]]\n",
             encoding="utf-8",
@@ -272,8 +287,13 @@ class TestNumberConflictChecker:
         reg.load()
         # 人工注入跨前缀冲突：TOOL-906 与 LSP-906 共享编号 906
         from auto_pm.spec.core.registry import SpecInfo
-        reg._specs["TOOL-906"] = SpecInfo(spec_id="TOOL-906", number="906", type_prefix="TOOL", title="Mermaid规范")
-        reg._specs["LSP-906"] = SpecInfo(spec_id="LSP-906", number="906", type_prefix="LSP", title="PLC错误预防")
+
+        reg._specs["TOOL-906"] = SpecInfo(
+            spec_id="TOOL-906", number="906", type_prefix="TOOL", title="Mermaid规范"
+        )
+        reg._specs["LSP-906"] = SpecInfo(
+            spec_id="LSP-906", number="906", type_prefix="LSP", title="PLC错误预防"
+        )
         scanner = SpecScanner(populated_workspace)
         checker = NumberConflictChecker()
         results = checker.check(reg, scanner)
@@ -288,8 +308,13 @@ class TestNumberConflictChecker:
         reg = SpecRegistry(populated_workspace)
         reg.load()
         from auto_pm.spec.core.registry import SpecInfo
-        reg._specs["LSP-901"] = SpecInfo(spec_id="LSP-901", number="901", type_prefix="LSP", title="A")
-        reg._specs["LSP-902"] = SpecInfo(spec_id="LSP-902", number="902", type_prefix="LSP", title="B")
+
+        reg._specs["LSP-901"] = SpecInfo(
+            spec_id="LSP-901", number="901", type_prefix="LSP", title="A"
+        )
+        reg._specs["LSP-902"] = SpecInfo(
+            spec_id="LSP-902", number="902", type_prefix="LSP", title="B"
+        )
         scanner = SpecScanner(populated_workspace)
         checker = NumberConflictChecker()
         results = checker.check(reg, scanner)

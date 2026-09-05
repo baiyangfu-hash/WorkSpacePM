@@ -45,9 +45,7 @@ class TestPathConstants:
         assert PG_EXECUTING_DIR == "03_执行"
         assert PG_MONITORING_DIR == "04_监控"
         assert PG_CLOSING_DIR == "05_收尾"
-        assert PROCESS_GROUP_DIRS == [
-            "01_启动", "02_规划", "03_执行", "04_监控", "05_收尾"
-        ]
+        assert PROCESS_GROUP_DIRS == ["01_启动", "02_规划", "03_执行", "04_监控", "05_收尾"]
 
     def test_plc_std_dirs(self) -> None:
         """PLC 标准目录列表"""

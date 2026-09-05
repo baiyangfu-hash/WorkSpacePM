@@ -199,7 +199,9 @@ def make_pm_session_service(workspace_root: str) -> Any | None:
                     "is_healthy": result.is_healthy,
                 }
 
-            def archive(self, section: str, keep_recent: int = 0, dry_run: bool = False) -> dict[str, Any]:
+            def archive(
+                self, section: str, keep_recent: int = 0, dry_run: bool = False
+            ) -> dict[str, Any]:
                 """归档指定章节的早期内容（M5 CHG-117 新增）
 
                 Args:
@@ -222,7 +224,9 @@ def make_pm_session_service(workspace_root: str) -> Any | None:
                 # 构造归档文件路径
                 archive_dir = file_path.parent / ARCHIVE_DIR_PARENT / ARCHIVE_DIR_NAME
                 stem = file_path.stem
-                pid = stem.replace("PM_SESSION_", "") if stem.startswith("PM_SESSION_") else "PROJECT"
+                pid = (
+                    stem.replace("PM_SESSION_", "") if stem.startswith("PM_SESSION_") else "PROJECT"
+                )
                 archive_file = archive_dir / f"PM_SESSION_{pid}_archive_auto.md"
 
                 if dry_run:

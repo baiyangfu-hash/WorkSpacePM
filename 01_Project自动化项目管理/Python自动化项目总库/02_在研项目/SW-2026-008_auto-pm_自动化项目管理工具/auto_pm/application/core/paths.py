@@ -82,19 +82,13 @@ PRD_DIR_CANDIDATES: Final[list[str]] = ["PRD", "00_程序方案"]
 # ── 变更管理目录（CHG-SCPT-2026-146 5大过程组统一） ────────
 
 #: 变更单存放目录（5大过程组统一路径，不再区分 PLC/Python）
-CHANGE_REQUESTS_PATH: Final[list[str]] = [
-    PG_MONITORING_DIR, "01_变更管理", "01_变更单"
-]
+CHANGE_REQUESTS_PATH: Final[list[str]] = [PG_MONITORING_DIR, "01_变更管理", "01_变更单"]
 
 #: 变更记录存放目录（5大过程组统一路径）
-CHANGE_RECORDS_PATH: Final[list[str]] = [
-    PG_MONITORING_DIR, "01_变更管理", "02_变更记录"
-]
+CHANGE_RECORDS_PATH: Final[list[str]] = [PG_MONITORING_DIR, "01_变更管理", "02_变更记录"]
 
 #: 变更单扫描路径（不含最后的 01_变更单，用于递归扫描）
-CHANGE_SCAN_PATH: Final[list[str]] = [
-    PG_MONITORING_DIR, "01_变更管理"
-]
+CHANGE_SCAN_PATH: Final[list[str]] = [PG_MONITORING_DIR, "01_变更管理"]
 
 #: 立项表搜索路径（5大过程组统一路径）
 PROJECT_INIT_PATH: Final[list[str]] = [PG_INITIATING_DIR]
@@ -121,6 +115,7 @@ DEFAULT_PROJECTS_DIRNAME: Final[str] = "0100_项目"
 
 
 # ── 便捷函数 ───────────────────────────────────────────────
+
 
 def join_path(*parts: str) -> str:
     """跨平台拼接路径（os.path.join 的语义化包装）"""
@@ -188,8 +183,8 @@ def get_prd_dir(project_path: str) -> str:
 #: PRD 目录搜索路径（相对于项目根目录，按优先级排序）
 #: 空字符串 "" 表示项目根目录本身
 _PRD_SEARCH_PATHS: Final[list[str]] = [
-    "",                         # 项目根目录（Python/非PLC项目）
-    "02_PLC程序/PLC_ST",        # 标准PLC项目嵌套路径
+    "",  # 项目根目录（Python/非PLC项目）
+    "02_PLC程序/PLC_ST",  # 标准PLC项目嵌套路径
 ]
 
 

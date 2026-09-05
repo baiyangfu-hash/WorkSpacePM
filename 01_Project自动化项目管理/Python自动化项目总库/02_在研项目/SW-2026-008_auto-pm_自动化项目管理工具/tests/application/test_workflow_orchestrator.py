@@ -125,9 +125,7 @@ class TestWorkflowOrchestratorPlan:
         assert "新增用户认证模块" in pm_content
         assert "src/auth.py" in pm_content
 
-    def test_plan_reuses_existing_draft(
-        self, orchestrator: WorkflowOrchestrator
-    ) -> None:
+    def test_plan_reuses_existing_draft(self, orchestrator: WorkflowOrchestrator) -> None:
         # 先以无审批人模式生成一个草稿
         req1 = WorkflowPlanRequestDTO(
             project_id="SW-2026-001",
@@ -204,7 +202,9 @@ class TestWorkflowOrchestratorPlan:
     def test_specs_filtered_by_spec_registry(self, workspace: Path) -> None:
         mock_registry = MagicMock()
         mock_registry.raw = {"specs": {"PM-042": {}, "DEV-210": {}}}
-        mock_registry.get_spec.side_effect = lambda s: MagicMock() if s in ("PM-042", "DEV-210") else None
+        mock_registry.get_spec.side_effect = lambda s: (
+            MagicMock() if s in ("PM-042", "DEV-210") else None
+        )
 
         orch = WorkflowOrchestrator(workspace_root=workspace, spec_registry=mock_registry)
         req = WorkflowPlanRequestDTO(
@@ -305,7 +305,11 @@ class TestWorkflowOrchestratorExecute:
             cr.change_number, "under_review", approver="tester", project_id="SW-2026-001"
         )
         orchestrator.change_service.transition_status(
-            cr.change_number, "rejected", approver="lead", comment="门禁未通过驳回", project_id="SW-2026-001"
+            cr.change_number,
+            "rejected",
+            approver="lead",
+            comment="门禁未通过驳回",
+            project_id="SW-2026-001",
         )
 
         req_rej = WorkflowExecuteRequestDTO(
@@ -474,7 +478,11 @@ class TestWorkflowOrchestratorExecute:
             ["git", "rev-parse", "HEAD"], cwd=workspace, check=True, capture_output=True, text=True
         ).stdout.strip()
         status_before = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=workspace, check=True, capture_output=True, text=True
+            ["git", "status", "--porcelain"],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout
 
         result = orchestrator.execute(
@@ -487,7 +495,11 @@ class TestWorkflowOrchestratorExecute:
             ["git", "rev-parse", "HEAD"], cwd=workspace, check=True, capture_output=True, text=True
         ).stdout.strip()
         status_after = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=workspace, check=True, capture_output=True, text=True
+            ["git", "status", "--porcelain"],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout
         assert result.success is True
         assert head_after == head_before
@@ -584,12 +596,13 @@ class TestWorkflowOrchestratorEdgeCases:
         mock_info.project_id = "SW-2026-001"
         mock_info.path = proj_dir
 
-        with patch.object(
-            orchestrator.change_service._locator,
-            "get_project_path",
-            side_effect=[None, proj_dir, proj_dir, proj_dir],
-        ), patch.object(
-            orchestrator.project_service, "list_projects", return_value=[mock_info]
+        with (
+            patch.object(
+                orchestrator.change_service._locator,
+                "get_project_path",
+                side_effect=[None, proj_dir, proj_dir, proj_dir],
+            ),
+            patch.object(orchestrator.project_service, "list_projects", return_value=[mock_info]),
         ):
             req = WorkflowPlanRequestDTO(
                 project_id="SW-2026-001",
@@ -617,9 +630,7 @@ class TestWorkflowOrchestratorEdgeCases:
     def test_pm_session_creation_when_missing(
         self, orchestrator: WorkflowOrchestrator, workspace: Path
     ) -> None:
-        pm_file = (
-            workspace / "02_在研项目" / "SW-2026-001_测试项目" / "PM_SESSION_SW-2026-001.md"
-        )
+        pm_file = workspace / "02_在研项目" / "SW-2026-001_测试项目" / "PM_SESSION_SW-2026-001.md"
         if pm_file.exists():
             pm_file.unlink()
 
@@ -636,10 +647,10 @@ class TestWorkflowOrchestratorEdgeCases:
     def test_pm_session_logs_heading_insertion(
         self, orchestrator: WorkflowOrchestrator, workspace: Path
     ) -> None:
-        pm_file = (
-            workspace / "02_在研项目" / "SW-2026-001_测试项目" / "PM_SESSION_SW-2026-001.md"
+        pm_file = workspace / "02_在研项目" / "SW-2026-001_测试项目" / "PM_SESSION_SW-2026-001.md"
+        pm_file.write_text(
+            "# PM_SESSION_SW-2026-001\n\n## 5. Logs\n\n- other_log:\n", encoding="utf-8"
         )
-        pm_file.write_text("# PM_SESSION_SW-2026-001\n\n## 5. Logs\n\n- other_log:\n", encoding="utf-8")
 
         req = WorkflowPlanRequestDTO(
             project_id="SW-2026-001",
@@ -663,7 +674,9 @@ class TestWorkflowOrchestratorEdgeCases:
         cid = res1.change_id
 
         # 手动将该单推进到 submitted
-        orchestrator.change_service.transition_status(cid, "submitted", approver="dev", project_id="SW-2026-001")
+        orchestrator.change_service.transition_status(
+            cid, "submitted", approver="dev", project_id="SW-2026-001"
+        )
         # 再次调用 plan(approver="lead")，验证从 submitted 推进到 approved
         with patch.object(orchestrator.change_service, "list_change_requests", return_value=[]):
             with patch.object(orchestrator.change_service, "create_change_request") as mock_create:
@@ -693,8 +706,12 @@ class TestWorkflowOrchestratorEdgeCases:
             background="under_review测试",
             necessity="测试",
         )
-        orchestrator.change_service.transition_status(cr_new.change_number, "submitted", approver="dev", project_id="SW-2026-001")
-        orchestrator.change_service.transition_status(cr_new.change_number, "under_review", approver="dev", project_id="SW-2026-001")
+        orchestrator.change_service.transition_status(
+            cr_new.change_number, "submitted", approver="dev", project_id="SW-2026-001"
+        )
+        orchestrator.change_service.transition_status(
+            cr_new.change_number, "under_review", approver="dev", project_id="SW-2026-001"
+        )
 
         with patch.object(orchestrator.change_service, "list_change_requests", return_value=[]):
             with patch.object(orchestrator.change_service, "create_change_request") as mock_create:

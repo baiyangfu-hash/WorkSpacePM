@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from auto_pm.plc.repairer import PlcRepairer
 
 # ── Fixtures ──────────────────────────────────────────
@@ -82,9 +81,18 @@ def project_with_nonstandard_prd(tmp_path: Path) -> Path:
 
     # 标准目录（LSP-907 §3.1，12 个）
     for d in [
-        "00_项目管理", "01_需求与设计", "02_PLC程序", "03_HMI设计",
-        "04_现场调试", "12_驱动器与设备", "05_测试与验证", "06_文档与交付",
-        "07_技术支持", "08_备件管理", "09_项目总结", "10_知识库",
+        "00_项目管理",
+        "01_需求与设计",
+        "02_PLC程序",
+        "03_HMI设计",
+        "04_现场调试",
+        "12_驱动器与设备",
+        "05_测试与验证",
+        "06_文档与交付",
+        "07_技术支持",
+        "08_备件管理",
+        "09_项目总结",
+        "10_知识库",
     ]:
         (project_dir / d).mkdir()
 
@@ -119,15 +127,28 @@ def complete_project(tmp_path: Path) -> Path:
     # PRD 目录 + 标准命名文档
     prd_dir = project_dir / "PRD"
     prd_dir.mkdir()
-    for doc in ["需求分析文档_REQ.md", "接口文档_INT.md", "详细设计说明书_DSN.md", "技术方案文档_TEC.md"]:
+    for doc in [
+        "需求分析文档_REQ.md",
+        "接口文档_INT.md",
+        "详细设计说明书_DSN.md",
+        "技术方案文档_TEC.md",
+    ]:
         (prd_dir / doc).write_text(f"# {doc}\n", encoding="utf-8")
 
     # 标准目录（LSP-907 §3.1，12 个）
     for d in [
-        "01_启动", "02_PLC程序", "03_HMI设计",
-        "04_现场调试", "05_测试与验证", "06_文档与交付",
-        "07_技术支持", "08_备件管理", "09_项目总结", "10_知识库",
-        "11_监控", "12_驱动器与设备",
+        "01_启动",
+        "02_PLC程序",
+        "03_HMI设计",
+        "04_现场调试",
+        "05_测试与验证",
+        "06_文档与交付",
+        "07_技术支持",
+        "08_备件管理",
+        "09_项目总结",
+        "10_知识库",
+        "11_监控",
+        "12_驱动器与设备",
     ]:
         (project_dir / d).mkdir()
 
@@ -135,11 +156,17 @@ def complete_project(tmp_path: Path) -> Path:
     chg_dir = project_dir / "11_监控" / "01_变更管理"
     (chg_dir / "01_变更单").mkdir(parents=True, exist_ok=True)
     (chg_dir / "02_变更记录").mkdir(parents=True, exist_ok=True)
-    (chg_dir / "02_变更记录" / "01_版本变更台帐.md").write_text("# 版本变更台帐\n", encoding="utf-8")
+    (chg_dir / "02_变更记录" / "01_版本变更台帐.md").write_text(
+        "# 版本变更台帐\n", encoding="utf-8"
+    )
 
     # 交付文档实质化
-    (project_dir / "04_现场调试" / "现场调试计划.md").write_text("# 现场调试计划\n", encoding="utf-8")
-    (project_dir / "06_文档与交付" / "验收交付清单.md").write_text("# 验收交付清单\n", encoding="utf-8")
+    (project_dir / "04_现场调试" / "现场调试计划.md").write_text(
+        "# 现场调试计划\n", encoding="utf-8"
+    )
+    (project_dir / "06_文档与交付" / "验收交付清单.md").write_text(
+        "# 验收交付清单\n", encoding="utf-8"
+    )
 
     return tmp_path
 
@@ -157,9 +184,7 @@ class TestRepairProject:
         result = repairer.repair_project(str(project_dir))
 
         assert result.fixed_count >= 1
-        assert any(
-            a.item == ".plc.json" and a.status == "fixed" for a in result.actions
-        )
+        assert any(a.item == ".plc.json" and a.status == "fixed" for a in result.actions)
         # 验证文件已创建
         assert (project_dir / ".plc.json").exists()
 
@@ -179,9 +204,7 @@ class TestRepairProject:
         repairer = PlcRepairer(str(tmp_path))
         result = repairer.repair_project(str(project_dir))
 
-        assert any(
-            a.item == "PM_SESSION" and a.status == "fixed" for a in result.actions
-        )
+        assert any(a.item == "PM_SESSION" and a.status == "fixed" for a in result.actions)
         # 验证文件已创建
         project_id = "DJ-2026-NOPM"
         assert (project_dir / f"PM_SESSION_{project_id}.md").exists()
@@ -192,9 +215,7 @@ class TestRepairProject:
         repairer = PlcRepairer(str(broken_project))
         result = repairer.repair_project(str(project_dir))
 
-        assert any(
-            a.item == "PRD 目录" and a.status == "fixed" for a in result.actions
-        )
+        assert any(a.item == "PRD 目录" and a.status == "fixed" for a in result.actions)
         assert (project_dir / "PRD").is_dir()
 
     def test_repair_missing_std_dirs(self, broken_project: Path) -> None:
@@ -220,17 +241,16 @@ class TestRepairProject:
         # 但 before_check 和 after_check 应该相同
         assert result.after_check == result.before_check
 
-    def test_repair_rename_confirm_skipped_without_flag(self, project_with_nonstandard_prd: Path) -> None:
+    def test_repair_rename_confirm_skipped_without_flag(
+        self, project_with_nonstandard_prd: Path
+    ) -> None:
         """未确认重命名时，命名不匹配项应跳过"""
         project_dir = project_with_nonstandard_prd / "DJ-2026-NSPRD_非标准PRD"
         repairer = PlcRepairer(str(project_with_nonstandard_prd))
         result = repairer.repair_project(str(project_dir), rename_confirm=False)
 
         # 命名不匹配项应标记为 skipped
-        rename_skipped = [
-            a for a in result.actions
-            if a.destructive and a.status == "skipped"
-        ]
+        rename_skipped = [a for a in result.actions if a.destructive and a.status == "skipped"]
         assert len(rename_skipped) >= 1
 
     def test_repair_rename_confirm_with_flag(self, project_with_nonstandard_prd: Path) -> None:
@@ -240,10 +260,7 @@ class TestRepairProject:
         result = repairer.repair_project(str(project_dir), rename_confirm=True)
 
         # 命名不匹配项应被重命名
-        rename_fixed = [
-            a for a in result.actions
-            if a.destructive and a.status == "fixed"
-        ]
+        rename_fixed = [a for a in result.actions if a.destructive and a.status == "fixed"]
         assert len(rename_fixed) >= 1
 
     def test_repair_complete_project_no_fixes(self, complete_project: Path) -> None:
@@ -268,16 +285,16 @@ class TestRepairProject:
         repairer = PlcRepairer(str(tmp_path))
         result = repairer.repair_project(str(project_dir))
 
-        assert any(
-            a.item == ".plc.json" and a.status == "fixed" for a in result.actions
-        )
+        assert any(a.item == ".plc.json" and a.status == "fixed" for a in result.actions)
         # 验证字段已补全
         with open(project_dir / ".plc.json", encoding="utf-8") as f:
             cfg = json.load(f)
         assert "description" in cfg
         assert "version" in cfg
 
-    def test_repair_creates_plc_json_under_plc_st_when_directory_exists(self, tmp_path: Path) -> None:
+    def test_repair_creates_plc_json_under_plc_st_when_directory_exists(
+        self, tmp_path: Path
+    ) -> None:
         """标准项目存在 PLC_ST 时，repair 应在该目录创建 .plc.json"""
         project_dir = tmp_path / "DJ-2026-PLCST_标准项目"
         (project_dir / "02_PLC程序" / "PLC_ST").mkdir(parents=True)
@@ -288,9 +305,7 @@ class TestRepairProject:
         repairer = PlcRepairer(str(tmp_path))
         result = repairer.repair_project(str(project_dir))
 
-        assert any(
-            a.item == ".plc.json" and a.status == "fixed" for a in result.actions
-        )
+        assert any(a.item == ".plc.json" and a.status == "fixed" for a in result.actions)
         plc_json_path = project_dir / "02_PLC程序" / "PLC_ST" / ".plc.json"
         assert plc_json_path.exists()
         cfg = json.loads(plc_json_path.read_text(encoding="utf-8"))
@@ -356,7 +371,10 @@ class TestStandardizeDocs:
         project_dir = tmp_path / "DJ-2026-NOPRD_无PRD"
         project_dir.mkdir()
         (project_dir / ".plc.json").write_text(
-            json.dumps({"name": "DJ-2026-NOPRD", "version": "V1.0.0", "description": "无PRD"}, ensure_ascii=False),
+            json.dumps(
+                {"name": "DJ-2026-NOPRD", "version": "V1.0.0", "description": "无PRD"},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
 

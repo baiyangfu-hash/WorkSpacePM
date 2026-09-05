@@ -74,67 +74,79 @@ class FrontmatterService:
             file_exists = file_path.exists()
 
             if is_deprecated:
-                items.append(FrontmatterItem(
-                    spec_id=sid,
-                    file_path=file_path,
-                    has_frontmatter=False,
-                    is_deprecated=True,
-                    file_exists=file_exists,
-                    new_frontmatter="",
-                    status="skipped",
-                ))
+                items.append(
+                    FrontmatterItem(
+                        spec_id=sid,
+                        file_path=file_path,
+                        has_frontmatter=False,
+                        is_deprecated=True,
+                        file_exists=file_exists,
+                        new_frontmatter="",
+                        status="skipped",
+                    )
+                )
                 continue
 
             if not file_exists:
-                items.append(FrontmatterItem(
-                    spec_id=sid,
-                    file_path=file_path,
-                    has_frontmatter=False,
-                    is_deprecated=False,
-                    file_exists=False,
-                    new_frontmatter="",
-                    status="error",
-                ))
+                items.append(
+                    FrontmatterItem(
+                        spec_id=sid,
+                        file_path=file_path,
+                        has_frontmatter=False,
+                        is_deprecated=False,
+                        file_exists=False,
+                        new_frontmatter="",
+                        status="error",
+                    )
+                )
                 continue
 
             try:
                 content = file_path.read_text(encoding="utf-8")
             except Exception as e:
-                log.warning("读取规范文件 frontmatter 失败: %s, 错误: %s", file_path, e, exc_info=True)
-                items.append(FrontmatterItem(
+                log.warning(
+                    "读取规范文件 frontmatter 失败: %s, 错误: %s", file_path, e, exc_info=True
+                )
+                items.append(
+                    FrontmatterItem(
+                        spec_id=sid,
+                        file_path=file_path,
+                        has_frontmatter=False,
+                        is_deprecated=False,
+                        file_exists=True,
+                        new_frontmatter="",
+                        status="error",
+                    )
+                )
+                continue
+
+            has_frontmatter = content.startswith("---")
+            if has_frontmatter:
+                items.append(
+                    FrontmatterItem(
+                        spec_id=sid,
+                        file_path=file_path,
+                        has_frontmatter=True,
+                        is_deprecated=False,
+                        file_exists=True,
+                        new_frontmatter="",
+                        status="skipped",
+                    )
+                )
+                continue
+
+            fm = self._generate_frontmatter(sid, spec)
+            items.append(
+                FrontmatterItem(
                     spec_id=sid,
                     file_path=file_path,
                     has_frontmatter=False,
                     is_deprecated=False,
                     file_exists=True,
-                    new_frontmatter="",
-                    status="error",
-                ))
-                continue
-
-            has_frontmatter = content.startswith("---")
-            if has_frontmatter:
-                items.append(FrontmatterItem(
-                    spec_id=sid,
-                    file_path=file_path,
-                    has_frontmatter=True,
-                    is_deprecated=False,
-                    file_exists=True,
-                    new_frontmatter="",
-                    status="skipped",
-                ))
-                continue
-
-            fm = self._generate_frontmatter(sid, spec)
-            items.append(FrontmatterItem(
-                spec_id=sid,
-                file_path=file_path,
-                has_frontmatter=False,
-                is_deprecated=False,
-                file_exists=True,
-                new_frontmatter=fm,
-                status="pending",
-            ))
+                    new_frontmatter=fm,
+                    status="pending",
+                )
+            )
 
         return items
 

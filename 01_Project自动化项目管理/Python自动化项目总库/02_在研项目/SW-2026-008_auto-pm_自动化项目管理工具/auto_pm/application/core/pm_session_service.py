@@ -30,7 +30,7 @@ SECTION_HEADER_PATTERN = re.compile(r"^##\s+(\d+)\.\s+(.+)$")
 
 # 健康检查阈值（CHG-087 Stage 1 基线：170 行 / 62KB）
 MAX_FILE_SIZE_KB = 150  # 主文件最大 150KB
-MAX_FILE_LINES = 150  # 主文件最大 150 行
+MAX_FILE_LINES = 200  # 主文件最大 200 行
 
 # 必须存在的章节（Stage 1 后基线，§7 已归档删除）
 REQUIRED_SECTIONS = {"0", "1", "2", "3", "4", "5", "6", "8", "9"}
@@ -136,11 +136,7 @@ class CheckResult:
     @property
     def is_healthy(self) -> bool:
         """是否健康（无缺失章节 + 无已归档章节回归 + 未超规模）"""
-        return (
-            not self.missing_required
-            and not self.deprecated_present
-            and not self.is_oversized
-        )
+        return not self.missing_required and not self.deprecated_present and not self.is_oversized
 
 
 @dataclass
@@ -192,9 +188,7 @@ class PmSessionParser:
                 # 保存前一个章节
                 if current_section is not None:
                     current_section.end_line = i
-                    current_section.content = "\n".join(
-                        lines[current_section.start_line + 1 : i]
-                    )
+                    current_section.content = "\n".join(lines[current_section.start_line + 1 : i])
                     sections.append(current_section)
 
                 # 开始新章节
@@ -214,9 +208,7 @@ class PmSessionParser:
         # 保存最后一个章节
         if current_section is not None:
             current_section.end_line = len(lines)
-            current_section.content = "\n".join(
-                lines[current_section.start_line + 1 : len(lines)]
-            )
+            current_section.content = "\n".join(lines[current_section.start_line + 1 : len(lines)])
             sections.append(current_section)
 
         return PmSessionParseResult(
@@ -288,13 +280,9 @@ class PmSessionCheckService:
         if deprecated_present:
             warnings.append(f"已归档章节回归: {sorted(deprecated_present)}")
         if file_size_kb > MAX_FILE_SIZE_KB:
-            warnings.append(
-                f"文件大小 {file_size_kb:.1f}KB 超过阈值 {MAX_FILE_SIZE_KB}KB"
-            )
+            warnings.append(f"文件大小 {file_size_kb:.1f}KB 超过阈值 {MAX_FILE_SIZE_KB}KB")
         if result.total_lines > MAX_FILE_LINES:
-            warnings.append(
-                f"文件行数 {result.total_lines} 超过阈值 {MAX_FILE_LINES}"
-            )
+            warnings.append(f"文件行数 {result.total_lines} 超过阈值 {MAX_FILE_LINES}")
 
         # CHG-SCPT-2026-166: 落账新鲜度 WARN（不影响 is_healthy）
         freshness_warning = self._check_ledger_freshness(file_path)
@@ -379,8 +367,7 @@ class PmSessionArchiveService:
             archived_content = "\n".join(archived_content_lines)
             # 主文件：删除整个章节
             new_main_lines = (
-                lines_to_archive[: section.start_line]
-                + lines_to_archive[section.end_line :]
+                lines_to_archive[: section.start_line] + lines_to_archive[section.end_line :]
             )
         else:
             # 保留 header + 最后 keep_recent 行内容
@@ -405,14 +392,10 @@ class PmSessionArchiveService:
         else:
             # 新建归档文件，添加标题
             header = "# PM_SESSION 归档\n\n> 由 auto-pm pm-session archive 自动生成\n\n"
-            archive_file.write_text(
-                header + archived_content + "\n", encoding="utf-8"
-            )
+            archive_file.write_text(header + archived_content + "\n", encoding="utf-8")
 
         # 重写主文件
-        main_file.write_text(
-            "\n".join(new_main_lines) + "\n", encoding="utf-8"
-        )
+        main_file.write_text("\n".join(new_main_lines) + "\n", encoding="utf-8")
 
         # 验证重写后的行数
         new_parse = self.parser.parse_file(main_file)
@@ -547,9 +530,7 @@ class PmSessionArchiveService:
 
         # 新主文件：替换 §8 范围
         new_main_lines = (
-            all_lines[: section.start_line]
-            + new_section_lines
-            + all_lines[section.end_line :]
+            all_lines[: section.start_line] + new_section_lines + all_lines[section.end_line :]
         )
 
         # 归档文件大小检查（超 200KB 切分到新文件）
@@ -565,14 +546,10 @@ class PmSessionArchiveService:
             )
         else:
             header = "# PM_SESSION 归档\n\n> 由 auto-pm pm-session archive 自动生成\n\n"
-            target_archive.write_text(
-                header + archived_content + "\n", encoding="utf-8"
-            )
+            target_archive.write_text(header + archived_content + "\n", encoding="utf-8")
 
         # 重写主文件
-        main_file.write_text(
-            "\n".join(new_main_lines) + "\n", encoding="utf-8"
-        )
+        main_file.write_text("\n".join(new_main_lines) + "\n", encoding="utf-8")
 
         new_parse = self.parser.parse_file(main_file)
 

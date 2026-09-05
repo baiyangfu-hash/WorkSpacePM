@@ -16,10 +16,9 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from click.testing import CliRunner
-
 from auto_pm.cli import write_ai_context
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
 
 
 class TestWriteAiContext:
@@ -27,18 +26,14 @@ class TestWriteAiContext:
 
     def test_write_ai_context_creates_file(self, tmp_path: Path) -> None:
         """调用后应生成 .auto-pm/ai_context.json 文件"""
-        result = write_ai_context(
-            str(tmp_path), "DJ-2026-005", "输送线", "plc", "commissioning"
-        )
+        result = write_ai_context(str(tmp_path), "DJ-2026-005", "输送线", "plc", "commissioning")
         assert result is True
         ctx_file = tmp_path / ".auto-pm" / "ai_context.json"
         assert ctx_file.exists()
 
     def test_write_ai_context_content_structure(self, tmp_path: Path) -> None:
         """生成的 JSON 应包含完整字段结构"""
-        write_ai_context(
-            str(tmp_path), "DJ-2026-005", "输送线", "plc", "commissioning"
-        )
+        write_ai_context(str(tmp_path), "DJ-2026-005", "输送线", "plc", "commissioning")
         ctx_file = tmp_path / ".auto-pm" / "ai_context.json"
         content = json.loads(ctx_file.read_text(encoding="utf-8"))
 
@@ -59,7 +54,10 @@ class TestWriteAiContext:
         assert content["active_change"] is None
         assert content["active_page"] == "workspace"
         assert content["product_context"]["goal_ref"] == "PM_SESSION_DJ-2026-005.md#product-goal"
-        assert content["product_context"]["hypothesis_ref"] == "PM_SESSION_DJ-2026-005.md#hypothesis-ledger"
+        assert (
+            content["product_context"]["hypothesis_ref"]
+            == "PM_SESSION_DJ-2026-005.md#hypothesis-ledger"
+        )
         assert content["product_context"]["active_hypothesis"] == {}
 
     def test_write_ai_context_silent_degradation(self, tmp_path: Path) -> None:

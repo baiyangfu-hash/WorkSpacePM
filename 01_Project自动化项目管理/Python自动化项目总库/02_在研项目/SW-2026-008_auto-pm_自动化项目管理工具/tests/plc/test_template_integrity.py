@@ -6,21 +6,16 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-import pytest
-
 from auto_pm.core.template_service import TemplateService
+
 from auto_pm.domain.plc.checker import PlcChecker
 
 
 def test_plc_standard_template_render_and_check(tmp_path: Path) -> None:
     """测试标准 PLC 模板渲染出的项目能够 100% 通过 PlcChecker 门禁"""
-    templates_dir = (
-        Path(__file__).resolve().parent.parent.parent
-        / "templates"
-    )
+    templates_dir = Path(__file__).resolve().parent.parent.parent / "templates"
     assert templates_dir.exists(), f"模板目录不存在: {templates_dir}"
 
     target_proj = tmp_path / "DJ-2026-999_TestMachine"
@@ -40,13 +35,20 @@ def test_plc_standard_template_render_and_check(tmp_path: Path) -> None:
     # 1. 断言关键基础设施文件已渲染
     assert (target_proj / ".plc.json").exists(), "根目录缺少 .plc.json"
     assert (
-        (target_proj / "11_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台帐.md").exists()
-        or (target_proj / "04_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台帐.md").exists()
-    ), "缺少变更台帐"
+        target_proj / "11_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台帐.md"
+    ).exists() or (
+        target_proj / "04_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台帐.md"
+    ).exists(), "缺少变更台帐"
     assert (target_proj / "04_现场调试" / "现场调试计划.md").exists(), "现场调试计划未实质化"
-    assert (target_proj / "06_文档与交付" / "验收交付清单" / "验收交付清单.md").exists(), "验收交付清单未实质化"
-    assert (target_proj / "03_HMI设计" / "HMI详细设计说明书.md").exists(), "HMI详细设计说明书未实质化"
-    assert (target_proj / "02_PLC程序" / "PLC_ST" / "Test" / "interlock_test.scltest").exists(), "缺少安全联锁测试套件"
+    assert (target_proj / "06_文档与交付" / "验收交付清单" / "验收交付清单.md").exists(), (
+        "验收交付清单未实质化"
+    )
+    assert (target_proj / "03_HMI设计" / "HMI详细设计说明书.md").exists(), (
+        "HMI详细设计说明书未实质化"
+    )
+    assert (target_proj / "02_PLC程序" / "PLC_ST" / "Test" / "interlock_test.scltest").exists(), (
+        "缺少安全联锁测试套件"
+    )
 
     # 2. 断言执行 PlcChecker 零 Fail
     checker = PlcChecker(workspace_root=str(tmp_path))

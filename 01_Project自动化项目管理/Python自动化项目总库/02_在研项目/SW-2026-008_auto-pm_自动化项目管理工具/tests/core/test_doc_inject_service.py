@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-
 from auto_pm.core.doc_inject_service import DocInjectService
 from auto_pm.models import ProjectInfo
 
@@ -232,9 +231,7 @@ def test_inject_markers_skip_existing_marker(tmp_path: Path) -> None:
     assert "<!-- AUTO_PM:BEGIN plc-asset-index -->" in program_content
 
     # 验证注入文件结构
-    program_item = next(
-        item for item in result.injected_files if item.file_path.endswith("PLC.md")
-    )
+    program_item = next(item for item in result.injected_files if item.file_path.endswith("PLC.md"))
     assert "plc-program-components" in program_item.skipped_keys
     assert "plc-asset-index" in program_item.injected_keys
 
@@ -265,9 +262,7 @@ def test_inject_markers_missing_anchor_reports_issue(tmp_path: Path) -> None:
     # 应有 issue 报告锚点缺失
     assert any("plc-program-components" in issue and "锚点" in issue for issue in result.issues)
 
-    program_item = next(
-        item for item in result.injected_files if item.file_path.endswith("PLC.md")
-    )
+    program_item = next(item for item in result.injected_files if item.file_path.endswith("PLC.md"))
     assert "plc-program-components" in program_item.missing_anchors
     # plc-asset-index 锚点存在 → 仍注入
     assert "plc-asset-index" in program_item.injected_keys

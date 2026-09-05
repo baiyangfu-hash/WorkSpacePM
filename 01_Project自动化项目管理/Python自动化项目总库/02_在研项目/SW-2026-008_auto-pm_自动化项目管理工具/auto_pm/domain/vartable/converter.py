@@ -28,7 +28,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -65,10 +65,7 @@ class VariableConverter:
             ValueError: output_format 不支持，或 ParseResult 无任何 table
         """
         if output_format not in SUPPORTED_OUTPUT_FORMATS:
-            raise ValueError(
-                f"不支持的输出格式: {output_format}，"
-                f"支持 {SUPPORTED_OUTPUT_FORMATS}"
-            )
+            raise ValueError(f"不支持的输出格式: {output_format}，支持 {SUPPORTED_OUTPUT_FORMATS}")
 
         if output_format == "csv":
             return self.convert_to_csv(parse_result)
@@ -139,11 +136,11 @@ class VariableConverter:
             ValueError: 无任何 table
         """
         if parse_result.var_table is not None:
-            return parse_result.var_table.to_dict()
+            return cast(dict[str, Any], parse_result.var_table.to_dict())
         if parse_result.block_table is not None:
-            return parse_result.block_table.to_dict()
+            return cast(dict[str, Any], parse_result.block_table.to_dict())
         if parse_result.channel_table is not None:
-            return parse_result.channel_table.to_dict()
+            return cast(dict[str, Any], parse_result.channel_table.to_dict())
         raise ValueError("ParseResult 无任何 table（var/block/channel 均为 None）")
 
     @staticmethod

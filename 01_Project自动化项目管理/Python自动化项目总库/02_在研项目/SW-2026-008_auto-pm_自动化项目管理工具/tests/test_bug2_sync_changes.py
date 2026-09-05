@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.core.project_service import ProjectService
 from auto_pm.db.connection import DatabaseManager

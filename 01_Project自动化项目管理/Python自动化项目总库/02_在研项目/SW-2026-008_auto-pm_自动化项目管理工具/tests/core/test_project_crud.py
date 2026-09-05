@@ -14,10 +14,9 @@ from pathlib import Path
 
 import pytest
 import yaml
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
 from auto_pm.core.project_service import ProjectService
+from click.testing import CliRunner
 
 # ── retrofit_project_by_path 测试 ────────────────────────
 
@@ -45,9 +44,7 @@ class TestRetrofitProjectByPath:
         result_path = svc.retrofit_project_by_path(str(project_dir))
 
         assert os.path.isfile(result_path)
-        answers = yaml.safe_load(
-            (project_dir / ".copier-answers.yml").read_text(encoding="utf-8")
-        )
+        answers = yaml.safe_load((project_dir / ".copier-answers.yml").read_text(encoding="utf-8"))
         # 应从 .plc.json 提取元数据
         assert answers["project_id"] == "DJ-2026-001"
         assert answers["project_name"] == "DJ-2026-001"
@@ -65,9 +62,7 @@ class TestRetrofitProjectByPath:
         result_path = svc.retrofit_project_by_path(str(project_dir))
 
         assert os.path.isfile(result_path)
-        answers = yaml.safe_load(
-            (project_dir / ".copier-answers.yml").read_text(encoding="utf-8")
-        )
+        answers = yaml.safe_load((project_dir / ".copier-answers.yml").read_text(encoding="utf-8"))
         # 无 .plc.json 时从目录名提取 project_id
         assert answers["project_id"] == "SW-2026-010"
         assert answers["project_name"] == "SW-2026-010_测试Python项目"
@@ -78,16 +73,12 @@ class TestRetrofitProjectByPath:
         """含 PM_SESSION_*.md 的项目补全时从文件名提取 project_id"""
         project_dir = tmp_path / "自定义目录名"
         project_dir.mkdir()
-        (project_dir / "PM_SESSION_ZD-2026-005.md").write_text(
-            "# 会话\n", encoding="utf-8"
-        )
+        (project_dir / "PM_SESSION_ZD-2026-005.md").write_text("# 会话\n", encoding="utf-8")
 
         svc = ProjectService(str(tmp_path))
         svc.retrofit_project_by_path(str(project_dir))
 
-        answers = yaml.safe_load(
-            (project_dir / ".copier-answers.yml").read_text(encoding="utf-8")
-        )
+        answers = yaml.safe_load((project_dir / ".copier-answers.yml").read_text(encoding="utf-8"))
         # 应从 PM_SESSION 文件名提取 project_id
         assert answers["project_id"] == "ZD-2026-005"
 
@@ -96,19 +87,14 @@ class TestRetrofitProjectByPath:
         project_dir = tmp_path / "DJ-2026-002_已有项目"
         project_dir.mkdir()
         existing_content = "_src_path: templates/existing\nproject_id: DJ-2026-002\n"
-        (project_dir / ".copier-answers.yml").write_text(
-            existing_content, encoding="utf-8"
-        )
+        (project_dir / ".copier-answers.yml").write_text(existing_content, encoding="utf-8")
 
         svc = ProjectService(str(tmp_path))
         with pytest.raises(FileExistsError, match="已存在"):
             svc.retrofit_project_by_path(str(project_dir))
 
         # 原文件不应被覆盖
-        assert (
-            (project_dir / ".copier-answers.yml").read_text(encoding="utf-8")
-            == existing_content
-        )
+        assert (project_dir / ".copier-answers.yml").read_text(encoding="utf-8") == existing_content
 
     def test_retrofit_invalid_path_raises(self, tmp_path: Path) -> None:
         """无效路径应抛 FileNotFoundError"""
@@ -116,9 +102,7 @@ class TestRetrofitProjectByPath:
         with pytest.raises(FileNotFoundError, match="项目目录不存在"):
             svc.retrofit_project_by_path(str(tmp_path / "nonexistent"))
 
-    def test_retrofit_appends_shc014_index_for_nested_plc_json(
-        self, tmp_path: Path
-    ) -> None:
+    def test_retrofit_appends_shc014_index_for_nested_plc_json(self, tmp_path: Path) -> None:
         """C Fix: 嵌套 .plc.json + PM_SESSION §4 时，retrofit 自动追加 SHC-014 兼容索引
 
         验证：存量 PLC 项目（.plc.json 在子目录）接管后，PM_SESSION §4 被注入
@@ -174,9 +158,7 @@ class TestRetrofitProjectByPath:
         assert sec4_pos < req_pos < sec5_pos
 
         # 同时验证 .copier-answers.yml stack=plc
-        answers = yaml.safe_load(
-            (project_dir / ".copier-answers.yml").read_text(encoding="utf-8")
-        )
+        answers = yaml.safe_load((project_dir / ".copier-answers.yml").read_text(encoding="utf-8"))
         assert answers["_src_path"] == "templates/plc-standard-project"
 
     def test_retrofit_shc014_index_is_idempotent(self, tmp_path: Path) -> None:
@@ -197,9 +179,7 @@ class TestRetrofitProjectByPath:
         svc = ProjectService(str(tmp_path))
         svc.retrofit_project_by_path(str(project_dir))
 
-        pm_after_first = (project_dir / "PM_SESSION_DJ-2026-IDEM.md").read_text(
-            encoding="utf-8"
-        )
+        pm_after_first = (project_dir / "PM_SESSION_DJ-2026-IDEM.md").read_text(encoding="utf-8")
         req_count_first = pm_after_first.count("- req:")
 
         # 删除 .copier-answers.yml 再次 retrofit（模拟重复操作）
@@ -207,9 +187,7 @@ class TestRetrofitProjectByPath:
         svc2 = ProjectService(str(tmp_path))
         svc2.retrofit_project_by_path(str(project_dir))
 
-        pm_after_second = (project_dir / "PM_SESSION_DJ-2026-IDEM.md").read_text(
-            encoding="utf-8"
-        )
+        pm_after_second = (project_dir / "PM_SESSION_DJ-2026-IDEM.md").read_text(encoding="utf-8")
         req_count_second = pm_after_second.count("- req:")
 
         # 条目数量不应增加
@@ -219,8 +197,9 @@ class TestRetrofitProjectByPath:
 class TestInitProjectPmFramework:
     """ProjectService.init_project_pm_framework 测试"""
 
-    def test_init_pm_plc(self, tmp_path: Path) -> None:
+    def test_init_pm_plc(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """初始化 PLC 项目的 PM 框架"""
+        monkeypatch.setenv("AUTO_PM_AUTHOR", "test-author")
         project_dir = tmp_path / "DJ-2026-000_测试项目"
         project_dir.mkdir()
         (project_dir / ".plc.json").write_text(
@@ -260,8 +239,8 @@ class TestInitProjectPmFramework:
         assert "技术栈 | plc" in session_content
         assert "## 7. Risk & Decision Log" in session_content
 
-        # 4. 验证立项表中主设计人为默认值 fubai
-        assert "**主设计人**：fubai" in content
+        # 4. 验证立项表使用显式可移植身份解析结果
+        assert "**主设计人**：test-author" in content
 
     def test_init_pm_python(self, tmp_path: Path) -> None:
         """初始化 Python 项目的 PM 框架"""

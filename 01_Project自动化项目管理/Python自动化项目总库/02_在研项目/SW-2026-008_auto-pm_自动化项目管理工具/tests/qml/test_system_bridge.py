@@ -86,7 +86,9 @@ def test_system_bridge_list_templates(qapp) -> None:  # type: ignore[no-untyped-
     from auto_pm.ui.qml.bridges.system_bridge import SystemBridge
 
     mock_facade = _MockSystemFacade(
-        list_templates_result=QueryResult(success=True, message="OK", payload=["python-tpl", "plc-tpl"])
+        list_templates_result=QueryResult(
+            success=True, message="OK", payload=["python-tpl", "plc-tpl"]
+        )
     )
     bridge = SystemBridge(facade=mock_facade)  # type: ignore[arg-type]
 
@@ -101,7 +103,9 @@ def test_system_bridge_get_template_path(qapp) -> None:  # type: ignore[no-untyp
     from auto_pm.ui.qml.bridges.system_bridge import SystemBridge
 
     mock_facade = _MockSystemFacade(
-        get_template_path_result=QueryResult(success=True, message="OK", payload="/templates/python-tpl")
+        get_template_path_result=QueryResult(
+            success=True, message="OK", payload="/templates/python-tpl"
+        )
     )
     bridge = SystemBridge(facade=mock_facade)  # type: ignore[arg-type]
 
@@ -237,7 +241,9 @@ def test_system_bridge_archive_pm_session_error(qapp) -> None:  # type: ignore[n
     from auto_pm.ui.qml.bridges.system_bridge import SystemBridge
 
     mock_facade = _MockSystemFacade(
-        archive_pm_session_result=CommandResult(success=False, message="章节 §99 不存在", payload=None)
+        archive_pm_session_result=CommandResult(
+            success=False, message="章节 §99 不存在", payload=None
+        )
     )
     bridge = SystemBridge(facade=mock_facade)  # type: ignore[arg-type]
 
@@ -265,6 +271,9 @@ def test_system_bridge_no_facade(qapp) -> None:  # type: ignore[no-untyped-def]
     # runPmSessionCheck 降级为 {"success": False, "message": "未初始化"}
     assert bridge.runPmSessionCheck() == {"success": False, "message": "未初始化"}
     # applyTemplate 降级为 {"success": False, "message": "未初始化"}
-    assert bridge.applyTemplate("PROJ-001", "python-tpl") == {"success": False, "message": "未初始化"}
+    assert bridge.applyTemplate("PROJ-001", "python-tpl") == {
+        "success": False,
+        "message": "未初始化",
+    }
     # archivePmSession 降级为 {"success": False, "message": "未初始化"}（M5 CHG-117）
     assert bridge.archivePmSession("6", 20, True) == {"success": False, "message": "未初始化"}

@@ -146,9 +146,7 @@ class IoPointsParser:
         signal_type_counts: dict[str, int] = {}
         for entry in entries:
             station_counts[entry.station] = station_counts.get(entry.station, 0) + 1
-            signal_type_counts[entry.signal_type] = (
-                signal_type_counts.get(entry.signal_type, 0) + 1
-            )
+            signal_type_counts[entry.signal_type] = signal_type_counts.get(entry.signal_type, 0) + 1
 
         metadata = {
             "station_counts": station_counts,

@@ -25,9 +25,7 @@ class TestPlcServiceProtocolConformance:
         svc = PlcService(str(tmp_path))
         required_methods = ["check", "repair", "standardize"]
         for method_name in required_methods:
-            assert callable(getattr(svc, method_name, None)), (
-                f"PlcService 缺少方法: {method_name}"
-            )
+            assert callable(getattr(svc, method_name, None)), f"PlcService 缺少方法: {method_name}"
 
 
 class TestPlcServiceCheck:

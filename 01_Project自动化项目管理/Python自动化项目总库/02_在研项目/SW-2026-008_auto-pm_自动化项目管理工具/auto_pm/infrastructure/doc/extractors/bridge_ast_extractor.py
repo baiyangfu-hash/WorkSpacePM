@@ -1,4 +1,5 @@
 """Static AST extractor for QML QObject Bridges."""
+
 import ast
 from pathlib import Path
 
@@ -39,18 +40,29 @@ class BridgeAstExtractor:
                             elif "Signal" in dec_id or "pyqtSignal" in dec_id:
                                 is_signal = True
 
-                        if is_slot or is_signal or node.name.startswith("on_") or node.name.startswith("get_"):
+                        if (
+                            is_slot
+                            or is_signal
+                            or node.name.startswith("on_")
+                            or node.name.startswith("get_")
+                        ):
                             doc = ast.get_docstring(node) or ""
-                            first_line_doc = doc.strip().split("\n")[0] if doc else f"{node.name} API"
-                            args = [arg.arg for arg in node.args.args if arg.arg not in ("self", "cls")]
-                            methods.append(BridgeMethodDTO(
-                                bridge_name=bridge_name,
-                                method_name=node.name,
-                                args=args,
-                                is_slot=is_slot or not is_signal,
-                                is_signal=is_signal,
-                                doc=first_line_doc
-                            ))
+                            first_line_doc = (
+                                doc.strip().split("\n")[0] if doc else f"{node.name} API"
+                            )
+                            args = [
+                                arg.arg for arg in node.args.args if arg.arg not in ("self", "cls")
+                            ]
+                            methods.append(
+                                BridgeMethodDTO(
+                                    bridge_name=bridge_name,
+                                    method_name=node.name,
+                                    args=args,
+                                    is_slot=is_slot or not is_signal,
+                                    is_signal=is_signal,
+                                    doc=first_line_doc,
+                                )
+                            )
             except Exception:
                 continue
         return methods

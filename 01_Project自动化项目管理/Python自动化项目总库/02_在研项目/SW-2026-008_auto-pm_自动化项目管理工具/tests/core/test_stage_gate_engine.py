@@ -3,9 +3,9 @@
 from pathlib import Path
 
 import pytest
+from auto_pm.core.gates import StageGateEngine
 
 from auto_pm.contracts.gate_dtos import StageGateResultDTO
-from auto_pm.core.gates import StageGateEngine
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def temp_project(tmp_path: Path) -> Path:
         "## 8. Handoff Notes\n"
         "- current_state: 执行完成，待监控\n"
         "- skill_handoff_001: 主 Agent 已完成执行阶段交付\n",
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
     # 2. 规划阶段要素 (G2)
@@ -44,8 +44,7 @@ def temp_project(tmp_path: Path) -> Path:
     chg_dir = proj / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-PLC"
     chg_dir.mkdir(parents=True)
     (chg_dir / "CHG-PLC-2026-001.md").write_text(
-        "# CHG-001\n- status: closed\n- 状态: closed\n",
-        encoding="utf-8"
+        "# CHG-001\n- status: closed\n- 状态: closed\n", encoding="utf-8"
     )
 
     # 台账文件（LedgerReconciler 对账用，含 CHG-PLC-2026-001 记录行）
@@ -58,7 +57,7 @@ def temp_project(tmp_path: Path) -> Path:
         "|------|----------|------|--------|----------|----------|----------|------|\n"
         "| 001 | [→ CHG-PLC-2026-001](./01_变更单/CHG-PLC/CHG-PLC-2026-001.md) "
         "| PLC | fubai | 2026-07-09 | CHG-PLC-2026-001 | 2026-07-09 | ✅已关闭 |\n",
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
     return proj

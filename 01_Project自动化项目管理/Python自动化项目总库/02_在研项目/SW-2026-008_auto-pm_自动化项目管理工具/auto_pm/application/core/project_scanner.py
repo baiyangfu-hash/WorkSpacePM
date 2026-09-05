@@ -84,7 +84,8 @@ class ProjectScanner:
         results.sort(key=lambda p: p.project_id)
         log.info(
             "扫描完成: 发现 %d 个项目（去重前 %d）",
-            len(results), len(raw_results),
+            len(results),
+            len(raw_results),
         )
         return results
 
@@ -158,9 +159,7 @@ class ProjectScanner:
             else:
                 self._scan_archive(entry_path, results, depth + 1, max_depth)
 
-    def _deduplicate_projects(
-        self, projects: list[ProjectInfo]
-    ) -> list[ProjectInfo]:
+    def _deduplicate_projects(self, projects: list[ProjectInfo]) -> list[ProjectInfo]:
         """按项目根目录 + project_id 双重去重，合并多来源元数据
 
         策略：
@@ -177,9 +176,7 @@ class ProjectScanner:
         path_deduped: list[ProjectInfo] = []
         for _path, group in by_path.items():
             # 按来源优先级排序
-            group.sort(
-                key=lambda p: self._SOURCE_PRIORITY.get(p.source, 99)
-            )
+            group.sort(key=lambda p: self._SOURCE_PRIORITY.get(p.source, 99))
             primary = group[0]
             # 合并其他来源的非空字段（仅当 primary 字段为空时）
             for other in group[1:]:
@@ -215,15 +212,21 @@ class ProjectScanner:
                 if current_pri < existing_pri:
                     log.debug(
                         "项目重复（按 project_id=%s）: 保留 %s@%s, 跳过 %s@%s",
-                        p.project_id, p.source, p.path,
-                        existing.source, existing.path,
+                        p.project_id,
+                        p.source,
+                        p.path,
+                        existing.source,
+                        existing.path,
                     )
                     by_id[p.project_id] = p
                 else:
                     log.debug(
                         "项目重复（按 project_id=%s）: 保留 %s@%s, 跳过 %s@%s",
-                        p.project_id, existing.source, existing.path,
-                        p.source, p.path,
+                        p.project_id,
+                        existing.source,
+                        existing.path,
+                        p.source,
+                        p.path,
                     )
             else:
                 by_id[p.project_id] = p
@@ -407,7 +410,7 @@ class ProjectScanner:
             try:
                 for name in os.listdir(project_path):
                     if name.startswith(self.PM_SESSION_PREFIX) and name.endswith(".md"):
-                        project_id = name[len(self.PM_SESSION_PREFIX):-len(".md")]
+                        project_id = name[len(self.PM_SESSION_PREFIX) : -len(".md")]
                         break
             except OSError:
                 return ""
@@ -443,7 +446,7 @@ class ProjectScanner:
         texts: list[str] = []
         for field in ("current_focus", "current_state"):
             match = re.search(
-                rf'^-\s*{field}:\s*(.+)$',
+                rf"^-\s*{field}:\s*(.+)$",
                 content,
                 re.MULTILINE,
             )

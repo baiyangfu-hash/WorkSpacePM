@@ -219,7 +219,9 @@ class SclLinter:
                     var_name = var_match.group(1)
                     var_type = var_match.group(2).upper()
 
-                    if current_block == "VAR_INPUT" and not (var_name.startswith("i_") or var_name.startswith("I_")):
+                    if current_block == "VAR_INPUT" and not (
+                        var_name.startswith("i_") or var_name.startswith("I_")
+                    ):
                         report.violations.append(
                             SclViolation(
                                 line_number=line_idx,
@@ -294,7 +296,9 @@ class SclLinter:
                             )
                         )
 
-                    if var_type == "ARRAY" and not cls._has_array_type_prefix(current_block, var_name):
+                    if var_type == "ARRAY" and not cls._has_array_type_prefix(
+                        current_block, var_name
+                    ):
                         expected_prefixes = cls.ARRAY_PREFIX_MAP.get(current_block, ("arr",))
                         expected_text = " / ".join(expected_prefixes)
                         report.violations.append(
@@ -355,7 +359,9 @@ class SclLinter:
         if not path.exists():
             return SclLintReport(file_path=str(path))
         try:
-            content = path.write_text(encoding="utf-8") if False else path.read_text(encoding="utf-8")
+            content = (
+                path.write_text(encoding="utf-8") if False else path.read_text(encoding="utf-8")
+            )
             return cls.lint_text(content, file_path=str(path))
         except Exception as exc:
             rep = SclLintReport(file_path=str(path))

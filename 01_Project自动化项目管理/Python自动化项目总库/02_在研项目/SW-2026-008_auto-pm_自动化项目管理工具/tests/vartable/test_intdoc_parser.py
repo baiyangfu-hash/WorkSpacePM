@@ -35,9 +35,7 @@ class TestIntDocParserDetectFormat:
 
 
 class TestIntDocParserTableExtraction:
-    def test_intdoc_parse_table_with_column_name_identification(
-        self, tmp_path: Path
-    ) -> None:
+    def test_intdoc_parse_table_with_column_name_identification(self, tmp_path: Path) -> None:
         """解析 Markdown 表格，验证表头列名识别 + 字段提取"""
         f = tmp_path / "接口文档.md"
         f.write_text(
@@ -62,9 +60,7 @@ class TestIntDocParserTableExtraction:
         assert result.var_table.total_count == 5
 
         # 验证 VAR_INPUT 区段变量
-        input_entries = [
-            e for e in result.var_table.entries if e.station == "VAR_INPUT"
-        ]
+        input_entries = [e for e in result.var_table.entries if e.station == "VAR_INPUT"]
         assert len(input_entries) == 3
         assert input_entries[0].tag == "i_bStart"
         assert input_entries[0].signal_type == "BOOL"
@@ -72,9 +68,7 @@ class TestIntDocParserTableExtraction:
         assert input_entries[0].source_format == "intdoc"
 
         # 验证 VAR_OUTPUT 区段变量
-        output_entries = [
-            e for e in result.var_table.entries if e.station == "VAR_OUTPUT"
-        ]
+        output_entries = [e for e in result.var_table.entries if e.station == "VAR_OUTPUT"]
         assert len(output_entries) == 2
         assert output_entries[1].tag == "q_iAlarmCode"
         assert output_entries[1].signal_type == "INT"
@@ -85,9 +79,7 @@ class TestIntDocParserTableExtraction:
 
 
 class TestIntDocParserEdgeCases:
-    def test_intdoc_parse_no_var_section_emits_warning(
-        self, tmp_path: Path
-    ) -> None:
+    def test_intdoc_parse_no_var_section_emits_warning(self, tmp_path: Path) -> None:
         """无 VAR 区段的 Markdown：success=True + warnings 提示"""
         f = tmp_path / "无变量文档.md"
         f.write_text(

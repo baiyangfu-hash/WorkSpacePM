@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.vartable.batch_parser import BatchParser
 
 
@@ -16,11 +15,7 @@ def _create_scl_file(dir_path: Path, name: str = "fb.scl") -> Path:
     """在指定目录创建 SCL 测试文件"""
     f = dir_path / name
     f.write_text(
-        "FUNCTION_BLOCK FB_Test\n"
-        "VAR_INPUT\n"
-        "  i_bStart : BOOL;\n"
-        "END_VAR\n"
-        "END_FUNCTION_BLOCK\n",
+        "FUNCTION_BLOCK FB_Test\nVAR_INPUT\n  i_bStart : BOOL;\nEND_VAR\nEND_FUNCTION_BLOCK\n",
         encoding="utf-8",
     )
     return f
@@ -116,9 +111,7 @@ class TestBatchParserParseDirectory:
         with pytest.raises(FileNotFoundError):
             BatchParser().parse_directory(tmp_path / "not_exist")
 
-    def test_batch_parse_directory_not_a_directory_raises(
-        self, tmp_path: Path
-    ) -> None:
+    def test_batch_parse_directory_not_a_directory_raises(self, tmp_path: Path) -> None:
         """parse_directory 路径是文件而非目录抛 NotADirectoryError"""
         file_path = tmp_path / "file.txt"
         file_path.write_text("content", encoding="utf-8")

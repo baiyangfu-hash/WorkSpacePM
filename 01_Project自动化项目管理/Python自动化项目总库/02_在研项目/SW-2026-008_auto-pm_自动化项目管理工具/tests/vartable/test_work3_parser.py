@@ -34,9 +34,7 @@ class TestWork3ParserDetectFormat:
 
 
 class TestWork3ParserFieldExtraction:
-    def test_work3_parse_address_and_description_extraction(
-        self, tmp_path: Path
-    ) -> None:
+    def test_work3_parse_address_and_description_extraction(self, tmp_path: Path) -> None:
         """解析 Work3 文件，验证 scope/name/type/address/description 字段提取"""
         f = tmp_path / "var.wr3"
         f.write_text(
@@ -74,9 +72,7 @@ class TestWork3ParserFieldExtraction:
 
 
 class TestWork3ParserErrorHandling:
-    def test_work3_parse_insufficient_fields_records_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_work3_parse_insufficient_fields_records_error(self, tmp_path: Path) -> None:
         """字段数不足 8 列的行计入 errors，不中断整体解析"""
         f = tmp_path / "var.wr3"
         f.write_text(

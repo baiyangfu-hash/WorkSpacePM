@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from auto_pm.spec.services.check_svc import CheckService
 from auto_pm.spec.services.frontmatter_svc import FrontmatterService
 from auto_pm.spec.services.index_svc import IndexService
@@ -134,15 +133,25 @@ class TestIndexService:
         # 修改注册表使 PLC-2026-001 进入 CORE_IDS（实际 CORE_IDS=['LSP-905','LSP-907']，
         # 这里测试 CORE_IDS 机制本身：将 PLC-2026-001 改为 LSP-905 验证标记）
         import json
+
         reg_path = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
         data = json.loads(reg_path.read_text(encoding="utf-8"))
         data["specs"]["LSP-905"] = data["specs"].pop("PLC-2026-001")
         data["specs"]["LSP-905"]["spec_id"] = "LSP-905"
-        data["specs"]["LSP-905"]["canonical_path"] = "0100_PLC自动化/00_通用规范/LSP-905_PLC编程规范_DEV.md"
+        data["specs"]["LSP-905"]["canonical_path"] = (
+            "0100_PLC自动化/00_通用规范/LSP-905_PLC编程规范_DEV.md"
+        )
         reg_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         # 重命名规范文件
-        old_file = populated_workspace / "0100_PLC自动化" / "00_通用规范" / "PLC-2026-001_PLC编程规范_DEV.md"
-        new_file = populated_workspace / "0100_PLC自动化" / "00_通用规范" / "LSP-905_PLC编程规范_DEV.md"
+        old_file = (
+            populated_workspace
+            / "0100_PLC自动化"
+            / "00_通用规范"
+            / "PLC-2026-001_PLC编程规范_DEV.md"
+        )
+        new_file = (
+            populated_workspace / "0100_PLC自动化" / "00_通用规范" / "LSP-905_PLC编程规范_DEV.md"
+        )
         old_file.rename(new_file)
 
         svc = IndexService(populated_workspace)
@@ -163,6 +172,7 @@ class TestIndexService:
     def test_run_empty_specs_registry(self, workspace: Path, registry_dir: Path) -> None:
         """注册表 specs 为空时不应报错（生成空索引）"""
         import json
+
         empty_reg = {
             "version": "1.0.0",
             "domains": {"pm": "项目管理域", "plc": "PLC域", "python": "Python域"},
@@ -228,7 +238,12 @@ class TestFrontmatterService:
     def test_preview_missing_file_returns_error(self, populated_workspace: Path) -> None:
         """规范文件不存在时应返回 status=error"""
         # 删除 PLC-2026-001 文件
-        plc_file = populated_workspace / "0100_PLC自动化" / "00_通用规范" / "PLC-2026-001_PLC编程规范_DEV.md"
+        plc_file = (
+            populated_workspace
+            / "0100_PLC自动化"
+            / "00_通用规范"
+            / "PLC-2026-001_PLC编程规范_DEV.md"
+        )
         plc_file.unlink()
 
         svc = FrontmatterService(populated_workspace)
@@ -240,7 +255,12 @@ class TestFrontmatterService:
     def test_preview_no_frontmatter_returns_pending(self, populated_workspace: Path) -> None:
         """无 frontmatter 的规范文件应返回 status=pending + new_frontmatter 非空"""
         # 重写 PM-2026-001 文件,去掉 frontmatter
-        pm_file = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "01_项目管理域" / "PM-2026-001_项目管理规范_DEV.md"
+        pm_file = (
+            populated_workspace
+            / "00_Obsidian_Base全局规范文件仓库"
+            / "01_项目管理域"
+            / "PM-2026-001_项目管理规范_DEV.md"
+        )
         pm_file.write_text("# 项目管理规范\n\n无 frontmatter 内容\n", encoding="utf-8")
 
         svc = FrontmatterService(populated_workspace)
@@ -255,7 +275,12 @@ class TestFrontmatterService:
     def test_apply_writes_frontmatter_to_file(self, populated_workspace: Path) -> None:
         """apply 应将 frontmatter 写入文件,文件以 --- 开头"""
         # 重写 PM-2026-001 文件,去掉 frontmatter
-        pm_file = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "01_项目管理域" / "PM-2026-001_项目管理规范_DEV.md"
+        pm_file = (
+            populated_workspace
+            / "00_Obsidian_Base全局规范文件仓库"
+            / "01_项目管理域"
+            / "PM-2026-001_项目管理规范_DEV.md"
+        )
         original_content = "# 项目管理规范\n\n无 frontmatter 内容\n"
         pm_file.write_text(original_content, encoding="utf-8")
 
@@ -296,7 +321,7 @@ class TestFrontmatterYamlGeneration:
 
         reg_path = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
         data = json.loads(reg_path.read_text(encoding="utf-8"))
-        data["specs"]["PM-2026-001"]["title"] = "规范：编程#标准 \"引用\""
+        data["specs"]["PM-2026-001"]["title"] = '规范：编程#标准 "引用"'
         reg_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
         svc = FrontmatterService(populated_workspace)
@@ -390,7 +415,9 @@ class TestReportService:
         """默认输出路径应为 workspace/00_Obsidian_Base全局规范文件仓库/规范元数据汇总报告.md"""
         svc = ReportService(populated_workspace)
         result = svc.generate(fmt="markdown")
-        expected = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "规范元数据汇总报告.md"
+        expected = (
+            populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "规范元数据汇总报告.md"
+        )
         assert result.output_path == expected
 
     def test_generate_default_output_path_json(self, populated_workspace: Path) -> None:

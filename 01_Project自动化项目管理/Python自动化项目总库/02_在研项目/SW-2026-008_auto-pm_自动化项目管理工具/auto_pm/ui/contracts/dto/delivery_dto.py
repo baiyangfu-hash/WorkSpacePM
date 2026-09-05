@@ -21,6 +21,7 @@ class RefreshProjectDocsResultDTO:
     对应 DocRefreshResult dataclass 的 to_dict() 输出。
     TODO: Service 调用参数待修复（DocRefreshService.refresh_project_documents 需要 ProjectInfo 非 project_id）。
     """
+
     project_id: str
     dry_run: bool
     updated: bool
@@ -34,6 +35,7 @@ class ProjectReportDTO:
 
     对应 ReportService.get_project_overview() 返回。
     """
+
     total: int
     by_stack: dict[str, int]  # {"plc": int, "python": int, "unknown": int}
     by_phase: dict[str, int]  # {"developing": int, "commissioning": int, ...}
@@ -46,6 +48,7 @@ class ChangeReportDTO:
 
     对应 ReportService.get_change_overview() 返回。
     """
+
     total: int
     by_status: dict[str, int]  # 动态键（status 值）
     by_domain: dict[str, int]  # 动态键（domain 值）
@@ -57,10 +60,13 @@ class SpecReportDTO:
 
     对应 ReportService.get_spec_report() 返回。
     """
+
     total: int
     found: int
     missing: int
-    by_stack: dict[str, dict[str, Any]]  # 动态键（domain），值是 {"total": int, "found": int, "missing": list[str]}
+    by_stack: dict[
+        str, dict[str, Any]
+    ]  # 动态键（domain），值是 {"total": int, "found": int, "missing": list[str]}
     missing_codes: list[str]
 
 
@@ -70,6 +76,7 @@ class ScanReportDTO:
 
     对应 ReportService.get_scan_report() 返回。
     """
+
     latest: dict[str, Any] | None  # 最近一次扫描日志
     last_sync_time: str  # "YYYY-MM-DD HH:MM" 或 "—"
     is_cache_available: bool
@@ -78,10 +85,12 @@ class ScanReportDTO:
 @dataclass(frozen=True)
 class RefreshAssetSummaryResultDTO:
     """资产汇总刷新结果（对应 refresh_asset_summary 返回，M4 第 2 批新增）"""
+
     result: dict[str, Any]  # asset_summary_service.refresh_all 返回
 
 
 @dataclass(frozen=True)
 class AssetSummaryDTO:
     """资产汇总（对应 get_asset_summary 返回，M4 第 2 批新增）"""
+
     data: dict[str, Any]  # asset_summary_service.get_summary 返回

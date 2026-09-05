@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-
 from auto_pm.core.doc_refresh_service import DocRefreshService
 from auto_pm.models import ProjectInfo
 

@@ -22,6 +22,7 @@ def resolve_workspace(workspace_root: str | None = None) -> str:
     if workspace_root:
         return os.path.abspath(workspace_root)
     from auto_pm.app_context import AppContext
+
     return AppContext().workspace_root
 
 
@@ -38,7 +39,17 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
     py_ok = sys.version_info >= (3, 11)
 
     # 2. 核心依赖检查
-    dependencies = ["rich", "click", "pydantic", "PySide6", "copier", "yaml", "ruff", "pytest", "mypy"]
+    dependencies = [
+        "rich",
+        "click",
+        "pydantic",
+        "PySide6",
+        "copier",
+        "yaml",
+        "ruff",
+        "pytest",
+        "mypy",
+    ]
     dep_results: dict[str, bool] = {}
     for dep in dependencies:
         spec = importlib.util.find_spec(dep)
@@ -86,7 +97,9 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
 @click.option("-w", "--workspace", type=click.Path(exists=True), help="工作空间根目录")
 def doctor_command(workspace: str | None) -> None:
     """执行 auto-pm 环境与依赖健康诊断"""
-    console.print(Panel.fit("[bold blue]auto-pm 环境与依赖健康诊断[/bold blue]", border_style="blue"))
+    console.print(
+        Panel.fit("[bold blue]auto-pm 环境与依赖健康诊断[/bold blue]", border_style="blue")
+    )
 
     res = run_doctor_check(workspace)
 
@@ -100,7 +113,9 @@ def doctor_command(workspace: str | None) -> None:
     table.add_row("Python 版本", py_status, f"{res['python_version']} (要求 >= 3.11)")
 
     # 版本
-    table.add_row("源码版本号", "[blue]ℹ INFO[/blue]", f"pyproject.toml version: {res['project_version']}")
+    table.add_row(
+        "源码版本号", "[blue]ℹ INFO[/blue]", f"pyproject.toml version: {res['project_version']}"
+    )
 
     # 依赖项
     for dep, ok in res["dependencies"].items():
@@ -113,13 +128,25 @@ def doctor_command(workspace: str | None) -> None:
     table.add_row("Git 仓库", git_status, "已检测到 .git" if res["git_found"] else "未检测到 .git")
 
     # 根目录纯净度守卫
-    sani_status = "[green]✅ 根目录纯净[/green]" if res["sanitation_pure"] else f"[bold yellow]⚠️ 存在 {res['sanitation_issues']} 个游离文件[/bold yellow]"
-    sani_msg = "符合根目录白名单规范" if res["sanitation_pure"] else "建议运行 'auto-pm clean' 进行自动清扫"
+    sani_status = (
+        "[green]✅ 根目录纯净[/green]"
+        if res["sanitation_pure"]
+        else f"[bold yellow]⚠️ 存在 {res['sanitation_issues']} 个游离文件[/bold yellow]"
+    )
+    sani_msg = (
+        "符合根目录白名单规范"
+        if res["sanitation_pure"]
+        else "建议运行 'auto-pm clean' 进行自动清扫"
+    )
     table.add_row("工作空间纯净度守卫", sani_status, sani_msg)
 
     console.print(table)
 
     if res["all_passed"]:
-        console.print("\n[bold green]🎉 恭喜！当前环境一切正常，可顺畅运行与开发 auto-pm！[/bold green]\n")
+        console.print(
+            "\n[bold green]🎉 恭喜！当前环境一切正常，可顺畅运行与开发 auto-pm！[/bold green]\n"
+        )
     else:
-        console.print("\n[bold yellow]⚠️ 注意：存在非标准或缺失依赖，请参考表项修复建议。[/bold yellow]\n")
+        console.print(
+            "\n[bold yellow]⚠️ 注意：存在非标准或缺失依赖，请参考表项修复建议。[/bold yellow]\n"
+        )

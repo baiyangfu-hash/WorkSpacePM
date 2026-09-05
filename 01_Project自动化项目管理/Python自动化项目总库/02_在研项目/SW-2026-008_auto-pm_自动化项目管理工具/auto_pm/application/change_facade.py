@@ -12,6 +12,7 @@ from typing import Any
 from auto_pm.change.ledger_reconciler import LedgerReconciler, ReconcileDiff
 from auto_pm.core.protocols import ChangeServiceProtocol, ProjectServiceProtocol
 from auto_pm.models import ChangeRequest, ChangeSummary
+
 from auto_pm.ui.contracts.commands.change_commands import (
     CreateChangeCommand,
     TransitionChangeCommand,
@@ -82,7 +83,9 @@ class ChangeFacade:
             sections=sections,
         )
 
-    def list_change_requests(self, project_id: str | None = None) -> QueryResult[list[ChangeSummaryDTO]]:
+    def list_change_requests(
+        self, project_id: str | None = None
+    ) -> QueryResult[list[ChangeSummaryDTO]]:
         try:
             if not self._change_service:
                 return QueryResult(success=False, message="No change_service", payload=[])
@@ -103,12 +106,16 @@ class ChangeFacade:
                 return QueryResult(success=False, message="No change_service", payload=None)
             cr = self._change_service.get_change_request(change_id, project_id=project_id)
             if cr is None:
-                return QueryResult(success=False, message=f"Change {change_id} not found", payload=None)
+                return QueryResult(
+                    success=False, message=f"Change {change_id} not found", payload=None
+                )
             return QueryResult(success=True, message="Success", payload=self._request_to_dto(cr))
         except Exception as e:
             return QueryResult(success=False, message=str(e), payload=None)
 
-    def create_change_request(self, command: CreateChangeCommand) -> CommandResult[ChangeRequestDTO | None]:
+    def create_change_request(
+        self, command: CreateChangeCommand
+    ) -> CommandResult[ChangeRequestDTO | None]:
         try:
             if not self._change_service:
                 return CommandResult(success=False, message="No change_service", payload=None)
@@ -124,11 +131,15 @@ class ChangeFacade:
                 background=command.background,
                 necessity=command.necessity,
             )
-            return CommandResult(success=True, message="Created successfully", payload=self._request_to_dto(cr))
+            return CommandResult(
+                success=True, message="Created successfully", payload=self._request_to_dto(cr)
+            )
         except Exception as e:
             return CommandResult(success=False, message=str(e), payload=None)
 
-    def transition_change(self, command: TransitionChangeCommand) -> CommandResult[ChangeRequestDTO | None]:
+    def transition_change(
+        self, command: TransitionChangeCommand
+    ) -> CommandResult[ChangeRequestDTO | None]:
         try:
             if not self._change_service:
                 return CommandResult(success=False, message="No change_service", payload=None)
@@ -145,12 +156,18 @@ class ChangeFacade:
                 command.change_id, project_id=command.project_id
             )
             if cr is None:
-                return CommandResult(success=False, message="Transitioned but could not fetch", payload=None)
-            return CommandResult(success=True, message="Transitioned successfully", payload=self._request_to_dto(cr))
+                return CommandResult(
+                    success=False, message="Transitioned but could not fetch", payload=None
+                )
+            return CommandResult(
+                success=True, message="Transitioned successfully", payload=self._request_to_dto(cr)
+            )
         except Exception as e:
             return CommandResult(success=False, message=str(e), payload=None)
 
-    def get_change_timeline(self, change_id: str, project_id: str | None = None) -> QueryResult[list[ChangeTimelineItemDTO]]:
+    def get_change_timeline(
+        self, change_id: str, project_id: str | None = None
+    ) -> QueryResult[list[ChangeTimelineItemDTO]]:
         """获取变更单审批时间线（M3 新增）
 
         数据流：ChangeService.list_approval_history() → list[ApprovalRecord]
@@ -201,9 +218,9 @@ class ChangeFacade:
             last_approval_date: str | None = None
             if approvals:
                 # list_approval_history 按 id 升序（时间顺序），最后一条为最新
-                last_approval_date = str(
-                    getattr(approvals[-1], "transition_date", "") or ""
-                ) or None
+                last_approval_date = (
+                    str(getattr(approvals[-1], "transition_date", "") or "") or None
+                )
 
             dto = ChangeValidationSummaryDTO(
                 change_number=change_id,
@@ -214,7 +231,9 @@ class ChangeFacade:
                 approval_count=approval_count,
                 last_approval_date=last_approval_date,
                 domain_impacts=dict(getattr(impact, "domain_impacts", {}) or {}) if impact else {},
-                related_changes=list(getattr(impact, "related_changes", []) or []) if impact else [],
+                related_changes=list(getattr(impact, "related_changes", []) or [])
+                if impact
+                else [],
             )
             return QueryResult(success=True, message="Success", payload=dto)
         except Exception as e:
@@ -232,7 +251,9 @@ class ChangeFacade:
                 change_id, lookup_project_id=project_id, **updates
             )
             if cr is None:
-                return CommandResult(success=False, message=f"变更单不存在: {change_id}", payload=None)
+                return CommandResult(
+                    success=False, message=f"变更单不存在: {change_id}", payload=None
+                )
 
             dto = self._request_to_dto(cr)
             return CommandResult(success=True, message="Success", payload=dto)

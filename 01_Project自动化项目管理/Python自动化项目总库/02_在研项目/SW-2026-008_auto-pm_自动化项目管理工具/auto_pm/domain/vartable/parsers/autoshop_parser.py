@@ -26,9 +26,14 @@ import csv
 import io
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from auto_pm.vartable.models import ParseError, ParseResult, VarEntry, VarTable
-from auto_pm.vartable.parsers.base_parser import BaseParser
+
+if TYPE_CHECKING:
+    from auto_pm.domain.vartable.parsers.base_parser import BaseParser
+else:
+    from auto_pm.vartable.parsers.base_parser import BaseParser
 
 SOURCE_FORMAT = "autoshop"
 
@@ -72,7 +77,7 @@ class AutoshopParser(BaseParser):
         from auto_pm.vartable.models import FormatType
         from auto_pm.vartable.parsers.format_detector import detect_format
 
-        return detect_format(file_path) == FormatType.AUTOSHOP
+        return bool(detect_format(file_path) == FormatType.AUTOSHOP)
 
     def parse(self, file_path: str | Path) -> ParseResult:
         """解析 Autoshop 格式变量表
@@ -94,7 +99,7 @@ class AutoshopParser(BaseParser):
         content, encoding = read_result
 
         if not content.strip():
-            return self._empty_content_error(file_path, SOURCE_FORMAT)
+            return cast(ParseResult, self._empty_content_error(file_path, SOURCE_FORMAT))
 
         entries: list[VarEntry] = []
         errors: list[ParseError] = []

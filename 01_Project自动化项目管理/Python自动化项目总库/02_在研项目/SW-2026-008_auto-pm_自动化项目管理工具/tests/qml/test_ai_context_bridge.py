@@ -119,7 +119,9 @@ def test_ai_context_bridge_write_pm_closure_context_uses_pending_handoff(tmp_pat
             "success_metric_ref": "",
         },
     }
-    (handoff_dir / "AI-20260813-000001.json").write_text(json.dumps(handoff, ensure_ascii=False), encoding="utf-8")
+    (handoff_dir / "AI-20260813-000001.json").write_text(
+        json.dumps(handoff, ensure_ascii=False), encoding="utf-8"
+    )
     bridge = AiContextBridge(str(workspace))
 
     result = bridge.writePmClosureContext(
@@ -170,10 +172,9 @@ def test_ai_context_bridge_extracts_active_hypothesis_from_pm_session(tmp_path) 
     assert res["success"] is True
     ctx_file = workspace / ".auto-pm" / "ai_context.json"
     ctx = json.loads(ctx_file.read_text(encoding="utf-8"))
-    
+
     prod_ctx = ctx["product_context"]
     assert "active_hypothesis" in prod_ctx
     assert prod_ctx["active_hypothesis"]["id"] == "HYP-DJ009-001"
     assert prod_ctx["active_hypothesis"]["statement"] == "在移载状态机引入安全区互锁"
     assert prod_ctx["active_hypothesis"]["expected_signal"] == "未达安全高度禁止推料"
-

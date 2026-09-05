@@ -8,9 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.cli.session import pm_session_group
+from click.testing import CliRunner
 
 SAMPLE_PM_SESSION = """# PM_SESSION_TEST
 
@@ -75,7 +74,9 @@ class TestPmSessionCheck:
         assert result.exit_code == 0
         assert "健康" in result.output or "✅" in result.output
 
-    def test_check_with_project_id(self, runner: CliRunner, workspace_with_pm_session: Path) -> None:
+    def test_check_with_project_id(
+        self, runner: CliRunner, workspace_with_pm_session: Path
+    ) -> None:
         result = runner.invoke(
             pm_session_group,
             ["check", "-w", str(workspace_with_pm_session), "--project-id", "TEST-001"],
@@ -118,9 +119,7 @@ class TestPmSessionArchive:
         assert result.exit_code == 0
         assert "DRY-RUN" in result.output
         # 主文件未被修改
-        content = (workspace_with_pm_session / "PM_SESSION_TEST-001.md").read_text(
-            encoding="utf-8"
-        )
+        content = (workspace_with_pm_session / "PM_SESSION_TEST-001.md").read_text(encoding="utf-8")
         assert "## 6. Implementation Log" in content
 
     def test_archive_actual_run(self, runner: CliRunner, workspace_with_pm_session: Path) -> None:
@@ -138,9 +137,7 @@ class TestPmSessionArchive:
         assert result.exit_code == 0
         assert "归档完成" in result.output or "✅" in result.output
         # 主文件 §6 已被归档
-        content = (workspace_with_pm_session / "PM_SESSION_TEST-001.md").read_text(
-            encoding="utf-8"
-        )
+        content = (workspace_with_pm_session / "PM_SESSION_TEST-001.md").read_text(encoding="utf-8")
         assert "## 6. Implementation Log" not in content
         # 归档文件已创建
         archive_files = list(

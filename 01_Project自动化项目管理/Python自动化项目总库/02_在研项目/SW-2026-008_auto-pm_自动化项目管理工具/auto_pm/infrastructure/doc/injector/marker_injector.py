@@ -1,4 +1,5 @@
 """Non-destructive marker-based Markdown injector."""
+
 import re
 from pathlib import Path
 

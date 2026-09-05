@@ -176,9 +176,7 @@ class _LegacyPlcCheckerCore:
             # V0.5.4: 位于 Python 项目管理区域且无 .plc.json 的遗留项目，PLC 检查不适用
             if self._is_in_python_area(project_path):
                 result.not_applicable = True
-                result.not_applicable_reason = (
-                    "Python 区域遗留项目（无 .plc.json），PLC 检查不适用"
-                )
+                result.not_applicable_reason = "Python 区域遗留项目（无 .plc.json），PLC 检查不适用"
                 log.info(
                     "Python 区域遗留项目跳过 PLC 检查（not_applicable=True）: %s",
                     os.path.basename(project_path),
@@ -258,9 +256,15 @@ class _LegacyPlcCheckerCore:
                 msg += f"（如: {'; '.join(error_messages)}）"
             result.add("SCL 代码规范", "fail", msg)
         elif total_warnings > 0:
-            result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议")
+            result.add(
+                "SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议"
+            )
         else:
-            result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl 文件 100% 遵从 LSP-905 命名与安全闭环规范")
+            result.add(
+                "SCL 代码规范",
+                "pass",
+                f"全量 {len(scl_files)} 个 .scl 文件 100% 遵从 LSP-905 命名与安全闭环规范",
+            )
 
     # ── 工作空间批量检查 ──────────────────────────────────
 
@@ -662,9 +666,7 @@ class _LegacyPlcCheckerCore:
                             + f"，建议后续收口到 {prd_display_name}/",
                         )
                     else:
-                        result.add(
-                            f"{prd_display_name}/{doc}", "fail", f"缺少 {doc}"
-                        )
+                        result.add(f"{prd_display_name}/{doc}", "fail", f"缺少 {doc}")
 
         # 深度校验各 FB 模块 PRD 内容质量（关联源码路径有效性与版本滞后）
         self._check_sub_prd_substance(project_path, result)
@@ -712,7 +714,11 @@ class _LegacyPlcCheckerCore:
                             with open(plc_json_path, encoding="utf-8") as jf:
                                 cfg = json.load(jf)
                                 main_version = cfg.get("version", "")
-                                if main_version and main_version.startswith("V") and doc_version.startswith("V"):
+                                if (
+                                    main_version
+                                    and main_version.startswith("V")
+                                    and doc_version.startswith("V")
+                                ):
                                     main_major = int(main_version[1:].split(".")[0])
                                     doc_major = int(doc_version[1:].split(".")[0])
                                     if main_major - doc_major >= 2:
@@ -740,7 +746,8 @@ class _LegacyPlcCheckerCore:
 
         try:
             fb_dirs = sorted(
-                d for d in os.listdir(plc_st_path)
+                d
+                for d in os.listdir(plc_st_path)
                 if os.path.isdir(os.path.join(plc_st_path, d))
                 and d not in FB_PRD_SKIP_DIRS
                 and not d.startswith(".")
@@ -862,13 +869,11 @@ class _LegacyPlcCheckerCore:
                 result.add(f"目录 {d}", "pass", "存在")
             # 项目管理目录：接受任一候选（01_启动 或 00_项目管理）
             elif d in PM_DIR_CANDIDATES and any(
-                os.path.isdir(os.path.join(project_path, c))
-                for c in PM_DIR_CANDIDATES
+                os.path.isdir(os.path.join(project_path, c)) for c in PM_DIR_CANDIDATES
             ):
                 # 找到实际存在的候选目录名用于报告
                 actual = next(
-                    c for c in PM_DIR_CANDIDATES
-                    if os.path.isdir(os.path.join(project_path, c))
+                    c for c in PM_DIR_CANDIDATES if os.path.isdir(os.path.join(project_path, c))
                 )
                 result.add(f"目录 {actual}", "pass", "存在（5大过程组兼容）")
             else:
@@ -894,7 +899,9 @@ class _LegacyPlcCheckerCore:
             if len(dirs) > 1 and not self._is_allowed_stage_prefix_overlap(p, dirs)
         }
         if duplicate_prefixes:
-            conflict_descs = [f"序号 {p}: {', '.join(dirs)}" for p, dirs in duplicate_prefixes.items()]
+            conflict_descs = [
+                f"序号 {p}: {', '.join(dirs)}" for p, dirs in duplicate_prefixes.items()
+            ]
             result.add(
                 "目录唯一性与冲突排查",
                 "fail",
@@ -921,7 +928,9 @@ class _LegacyPlcCheckerCore:
             try:
                 files = [f for f in os.listdir(doc_dir) if f.endswith(".md")]
                 # 检查带版本号文件名 (如 -V1.0.0.md, _V1.0.md)
-                versioned_files = [f for f in files if re.search(r"[-_]V\d+(\.\d+)*\.md$", f, re.IGNORECASE)]
+                versioned_files = [
+                    f for f in files if re.search(r"[-_]V\d+(\.\d+)*\.md$", f, re.IGNORECASE)
+                ]
                 if versioned_files:
                     result.add(
                         "文档命名版本号约束 (DEV-001)",
@@ -929,7 +938,9 @@ class _LegacyPlcCheckerCore:
                         f"基准文档严禁携带版本号后缀: {', '.join(versioned_files)}",
                     )
                 else:
-                    result.add("文档命名版本号约束 (DEV-001)", "pass", "基准文档文件名均未包含版本号后缀")
+                    result.add(
+                        "文档命名版本号约束 (DEV-001)", "pass", "基准文档文件名均未包含版本号后缀"
+                    )
 
                 # 检查同类文档镜像重复 (例如 015_... 与 015_PID_... 同时存在)
                 prefixes: dict[str, list[str]] = {}
@@ -962,7 +973,9 @@ class _LegacyPlcCheckerCore:
             return False
         return set(dirs).issubset(allowed_dirs)
 
-    def _check_change_management_and_governance(self, project_path: str, result: CheckResult) -> None:
+    def _check_change_management_and_governance(
+        self, project_path: str, result: CheckResult
+    ) -> None:
         """检查变更管理体系与版本变更台帐 (PM-042 / PM-043 / PROJ-016)"""
         # 1. 检查变更管理根目录 (支持 04_监控/01_变更管理 或 11_监控/01_变更管理)
         chg_candidates = [
@@ -976,7 +989,9 @@ class _LegacyPlcCheckerCore:
         active_chg_dir = None
         for d in chg_candidates:
             if os.path.isdir(d):
-                if os.path.isdir(os.path.join(d, "01_变更单")) or os.path.isdir(os.path.join(d, "02_变更记录")):
+                if os.path.isdir(os.path.join(d, "01_变更单")) or os.path.isdir(
+                    os.path.join(d, "02_变更记录")
+                ):
                     active_chg_dir = d
                     break
         if not active_chg_dir:
@@ -1005,7 +1020,9 @@ class _LegacyPlcCheckerCore:
             if has_ledger:
                 result.add("版本变更台帐", "pass", "02_变更记录/版本变更台帐 存在")
             else:
-                result.add("版本变更台帐", "fail", f"缺少 {rel_path}/02_变更记录/01_版本变更台帐.md")
+                result.add(
+                    "版本变更台帐", "fail", f"缺少 {rel_path}/02_变更记录/01_版本变更台帐.md"
+                )
         else:
             result.add(
                 "变更管理目录",
@@ -1022,7 +1039,11 @@ class _LegacyPlcCheckerCore:
             if files:
                 result.add("现场调试方案与跟踪", "pass", f"存在 {len(files)} 份调试文档")
             else:
-                result.add("现场调试方案与跟踪", "fail", "04_现场调试 仅为空目录，缺少调试计划/问题跟踪模板")
+                result.add(
+                    "现场调试方案与跟踪",
+                    "fail",
+                    "04_现场调试 仅为空目录，缺少调试计划/问题跟踪模板",
+                )
 
         # 2. 检查 06_文档与交付
         deliv_dir = os.path.join(project_path, "06_文档与交付")
@@ -1035,7 +1056,9 @@ class _LegacyPlcCheckerCore:
             if has_md:
                 result.add("交付与维护手册", "pass", "交付与维护手册模板就绪")
             else:
-                result.add("交付与维护手册", "fail", "06_文档与交付 缺少维护手册/验收交付清单等模板")
+                result.add(
+                    "交付与维护手册", "fail", "06_文档与交付 缺少维护手册/验收交付清单等模板"
+                )
 
     def _scan_and_check(
         self, path: str, results: list[CheckResult], depth: int, max_depth: int
@@ -1130,7 +1153,11 @@ class _LegacyPlcCheckerCore:
         has_mapping = os.path.isfile(mapping_path)
 
         if not has_html:
-            result.add("HMI 交互原型", "warn", "未检测到 HMI 原型 HTML 文件 (建议添加 03_HMI设计/原型/files/HMI原型设计.html)")
+            result.add(
+                "HMI 交互原型",
+                "warn",
+                "未检测到 HMI 原型 HTML 文件 (建议添加 03_HMI设计/原型/files/HMI原型设计.html)",
+            )
         elif not has_mapping:
             result.add("HMI 交互原型", "warn", "缺少 hmi_tag_mapping.json 点表映射文件")
         else:
@@ -1162,7 +1189,9 @@ class _LegacyPlcCheckerCore:
                     has_flow_chart = True
 
         if not has_req_spec:
-            result.add("需求规格说明书", "fail", "缺少需求规格说明书 (01_需求与设计/13_软件方案/ 或 PRD/)")
+            result.add(
+                "需求规格说明书", "fail", "缺少需求规格说明书 (01_需求与设计/13_软件方案/ 或 PRD/)"
+            )
         else:
             result.add("需求规格说明书", "pass", "需求规格说明书就绪")
 
@@ -1214,7 +1243,9 @@ class _PlcConfigChecks(_CheckGroupBase):
 class _PlcStructChecks(_CheckGroupBase):
     _check_directory_structure = _LegacyPlcCheckerCore._check_directory_structure
     _check_naming_and_shadow_duplicates = _LegacyPlcCheckerCore._check_naming_and_shadow_duplicates
-    _check_change_management_and_governance = _LegacyPlcCheckerCore._check_change_management_and_governance
+    _check_change_management_and_governance = (
+        _LegacyPlcCheckerCore._check_change_management_and_governance
+    )
     _check_lifecycle_delivery_templates = _LegacyPlcCheckerCore._check_lifecycle_delivery_templates
     _check_hmi_prototype = _LegacyPlcCheckerCore._check_hmi_prototype
     _check_software_scheme = _LegacyPlcCheckerCore._check_software_scheme

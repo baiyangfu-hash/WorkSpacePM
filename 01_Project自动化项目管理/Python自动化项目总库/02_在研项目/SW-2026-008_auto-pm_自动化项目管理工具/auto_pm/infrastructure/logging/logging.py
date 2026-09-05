@@ -1,3 +1,4 @@
+# ruff: noqa: N802
 """PLC-HMI 概念映射：SFB 库函数（日志系统（统一日志配置/输出））
 
 像 PLC 的 SFB/SFC 系统函数，被 FB 功能块（application/*_facade.py）调用，

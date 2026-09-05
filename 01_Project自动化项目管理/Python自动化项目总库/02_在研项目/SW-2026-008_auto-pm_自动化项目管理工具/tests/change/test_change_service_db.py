@@ -13,14 +13,15 @@ import os
 from collections.abc import Generator
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import ChangeRequestRepository
 
 
 @pytest.fixture
-def svc_with_db(workspace_root: str) -> Generator[tuple[ChangeService, DatabaseManager], None, None]:
+def svc_with_db(
+    workspace_root: str,
+) -> Generator[tuple[ChangeService, DatabaseManager], None, None]:
     """创建带 DB 的 ChangeService
 
     依赖 conftest.py 的 workspace_root fixture（创建 TEST-2026-001 项目结构）。
@@ -84,8 +85,9 @@ class TestChangeServiceDBIntegration:
         # 验证 change_requests 表有记录
         repo = ChangeRequestRepository(db)
         changes = repo.list_all()
-        assert any(c.change_number == change_number for c in changes), \
+        assert any(c.change_number == change_number for c in changes), (
             f"change_requests 表中应有 {change_number} 记录"
+        )
 
         # 验证 impact_analysis 表有记录
         analysis = repo.get_impact_analysis(change_number)
@@ -155,9 +157,7 @@ class TestChangeServiceDBIntegration:
         change_number, svc, db = created_change
 
         # 修改变更单字段（background 是可修改字段）
-        updated = svc.update_change_request(
-            change_number, background="修改后的变更背景描述"
-        )
+        updated = svc.update_change_request(change_number, background="修改后的变更背景描述")
         assert updated is not None
 
         # 验证 impact_analysis 记录仍存在（update 不应删除）
@@ -205,6 +205,7 @@ class TestChangeServiceDBIntegration:
         repo = ChangeRequestRepository(db)
         from auto_pm.db.repository import ProjectRepository
         from auto_pm.models import ChangeSummary, ProjectRecord
+
         # 插入项目记录以满足外键约束
         ProjectRepository(db).upsert(
             ProjectRecord(
@@ -274,8 +275,13 @@ class TestChangeServiceDBIntegration:
 
         # 验证 get_impact_analysis 隔离性
         from auto_pm.models import ImpactAnalysis
-        ia1 = ImpactAnalysis(project_id="TEST-2026-001", change_number="CHG-PLC-2026-999", risk_level="low")
-        ia2 = ImpactAnalysis(project_id="TEST-2026-002", change_number="CHG-PLC-2026-999", risk_level="high")
+
+        ia1 = ImpactAnalysis(
+            project_id="TEST-2026-001", change_number="CHG-PLC-2026-999", risk_level="low"
+        )
+        ia2 = ImpactAnalysis(
+            project_id="TEST-2026-002", change_number="CHG-PLC-2026-999", risk_level="high"
+        )
         repo.save_impact_analysis(ia1)
         repo.save_impact_analysis(ia2)
 
@@ -291,13 +297,13 @@ class TestChangeServiceDBIntegration:
             change_number="CHG-PLC-2026-999",
             to_status="submitted",
             approver="张三",
-            project_id="TEST-2026-001"
+            project_id="TEST-2026-001",
         )
         repo.save_approval_record(
             change_number="CHG-PLC-2026-999",
             to_status="closed",
             approver="李四",
-            project_id="TEST-2026-002"
+            project_id="TEST-2026-002",
         )
         h1 = repo.list_approval_history("CHG-PLC-2026-999", project_id="TEST-2026-001")
         h2 = repo.list_approval_history("CHG-PLC-2026-999", project_id="TEST-2026-002")
@@ -305,4 +311,3 @@ class TestChangeServiceDBIntegration:
         assert h1[0].to_status == "submitted"
         assert len(h2) == 1
         assert h2[0].to_status == "closed"
-

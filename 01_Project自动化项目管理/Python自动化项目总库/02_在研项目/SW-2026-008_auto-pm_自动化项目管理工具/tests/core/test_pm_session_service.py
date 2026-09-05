@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from auto_pm.core.pm_session_service import (
     DEPRECATED_SECTIONS,
     MAX_FILE_LINES,
@@ -520,7 +519,9 @@ def sample_pm_session_with_handoffs(tmp_path: Path) -> Path:
 class TestArchiveSection8:
     """§8 条目级归档测试（CHG-109）"""
 
-    def test_keeps_latest_n_skill_handoffs(self, sample_pm_session_with_handoffs: Path, tmp_path: Path) -> None:
+    def test_keeps_latest_n_skill_handoffs(
+        self, sample_pm_session_with_handoffs: Path, tmp_path: Path
+    ) -> None:
         """保留最新 N 条 skill_handoff，归档其余"""
         archive_file = tmp_path / "archive.md"
         svc = PmSessionArchiveService()
@@ -544,7 +545,9 @@ class TestArchiveSection8:
         assert "skill_handoff_004" not in new_content
         assert "skill_handoff_005" not in new_content
 
-    def test_preserves_current_state(self, sample_pm_session_with_handoffs: Path, tmp_path: Path) -> None:
+    def test_preserves_current_state(
+        self, sample_pm_session_with_handoffs: Path, tmp_path: Path
+    ) -> None:
         """current_state* 条目始终保留"""
         archive_file = tmp_path / "archive.md"
         svc = PmSessionArchiveService()
@@ -559,7 +562,9 @@ class TestArchiveSection8:
         assert "current_state: 最新状态" in new_content
         assert "current_state_gui_test" in new_content
 
-    def test_preserves_archive_note(self, sample_pm_session_with_handoffs: Path, tmp_path: Path) -> None:
+    def test_preserves_archive_note(
+        self, sample_pm_session_with_handoffs: Path, tmp_path: Path
+    ) -> None:
         """归档说明（> 开头）始终保留"""
         archive_file = tmp_path / "archive.md"
         svc = PmSessionArchiveService()
@@ -573,7 +578,9 @@ class TestArchiveSection8:
         new_content = sample_pm_session_with_handoffs.read_text(encoding="utf-8")
         assert "归档说明" in new_content
 
-    def test_no_archive_when_keep_entries_ge_total(self, sample_pm_session_with_handoffs: Path, tmp_path: Path) -> None:
+    def test_no_archive_when_keep_entries_ge_total(
+        self, sample_pm_session_with_handoffs: Path, tmp_path: Path
+    ) -> None:
         """keep_entries >= skill_handoff 总数时不归档"""
         archive_file = tmp_path / "archive.md"
         svc = PmSessionArchiveService()
@@ -587,7 +594,9 @@ class TestArchiveSection8:
         assert result.archived_line_count == 0
         assert result.main_file_lines_after == result.main_file_lines_before
 
-    def test_appends_to_archive_file(self, sample_pm_session_with_handoffs: Path, tmp_path: Path) -> None:
+    def test_appends_to_archive_file(
+        self, sample_pm_session_with_handoffs: Path, tmp_path: Path
+    ) -> None:
         """归档内容追加到归档文件"""
         archive_file = tmp_path / "archive.md"
         archive_file.write_text("# 已有归档\n\n## old\n- old content\n", encoding="utf-8")

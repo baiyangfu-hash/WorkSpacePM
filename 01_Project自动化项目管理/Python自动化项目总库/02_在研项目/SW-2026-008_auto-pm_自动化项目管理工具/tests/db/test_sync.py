@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from auto_pm.core.project_service import ProjectService
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.sync import SyncService
@@ -116,6 +115,7 @@ class TestSyncProjects:
 
         # 删除项目目录
         import shutil
+
         project_dir = workspace_with_project / "DJ-2026-001_测试项目"
         shutil.rmtree(project_dir)
 
@@ -125,9 +125,7 @@ class TestSyncProjects:
         records = sync.project_repo.list_all()
         assert all(r.project_id != "DJ-2026-001" for r in records)
 
-    def test_incremental_skip_unchanged(
-        self, sync_service: SyncService
-    ) -> None:
+    def test_incremental_skip_unchanged(self, sync_service: SyncService) -> None:
         """增量同步跳过无变化的项目"""
         # 全量同步
         sync_service._sync_projects(force_full=True)
@@ -261,9 +259,7 @@ class TestScannerVersionChg085:
     修复：DB 增加 scanner_version 列，版本不匹配时强制重扫。
     """
 
-    def test_scanner_version_persisted_after_full_sync(
-        self, sync_service: SyncService
-    ) -> None:
+    def test_scanner_version_persisted_after_full_sync(self, sync_service: SyncService) -> None:
         """全量同步后 DB 记录的 scanner_version 应等于当前 scanner 版本"""
         sync_service._sync_projects(force_full=True)
 
@@ -299,9 +295,7 @@ class TestScannerVersionChg085:
         assert record is not None
         assert record.scanner_version == SCANNER_VERSION
 
-    def test_incremental_skip_when_scanner_version_match(
-        self, sync_service: SyncService
-    ) -> None:
+    def test_incremental_skip_when_scanner_version_match(self, sync_service: SyncService) -> None:
         """DB 中 scanner_version 匹配且 mtime 无变化时增量同步跳过"""
         # 全量同步
         sync_service._sync_projects(force_full=True)

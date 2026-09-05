@@ -84,9 +84,7 @@ class TestScan:
         """扫描能识别 PM_SESSION_*.md 项目"""
         project_dir = tmp_path / "某目录"
         project_dir.mkdir()
-        (project_dir / "PM_SESSION_ZD-2026-003.md").write_text(
-            "# 会话记录", encoding="utf-8"
-        )
+        (project_dir / "PM_SESSION_ZD-2026-003.md").write_text("# 会话记录", encoding="utf-8")
 
         scanner = ProjectScanner(str(tmp_path))
         results = scanner.scan(scan_depth=2)
@@ -124,7 +122,9 @@ class TestScan:
         deep_dir = tmp_path / "level1" / "level2" / "level3"
         deep_dir.mkdir(parents=True)
         (deep_dir / ".copier-answers.yml").write_text(
-            yaml.safe_dump({"project_id": "SW-2026-999", "project_name": "深项目"}, allow_unicode=True),
+            yaml.safe_dump(
+                {"project_id": "SW-2026-999", "project_name": "深项目"}, allow_unicode=True
+            ),
             encoding="utf-8",
         )
 
@@ -202,7 +202,11 @@ class TestTryIdentifyProject:
         project_dir.mkdir()
         (project_dir / ".copier-answers.yml").write_text(
             yaml.safe_dump(
-                {"project_id": "DJ-2026-010", "project_name": "Copier来源", "_src_path": "templates/plc-standard"},
+                {
+                    "project_id": "DJ-2026-010",
+                    "project_name": "Copier来源",
+                    "_src_path": "templates/plc-standard",
+                },
                 allow_unicode=True,
             ),
             encoding="utf-8",
@@ -416,10 +420,7 @@ class TestStaticMethods:
             == "DJ-2026-010"
         )
         # 无项目编号格式 → 返回目录名
-        assert (
-            ProjectScanner.extract_id_from_dirname(str(tmp_path / "普通目录"))
-            == "普通目录"
-        )
+        assert ProjectScanner.extract_id_from_dirname(str(tmp_path / "普通目录")) == "普通目录"
 
     def test_infer_stack(self) -> None:
         """根据模板源路径推断技术栈"""
@@ -526,9 +527,7 @@ class TestStackFallback:
         path = "C:/workspace/01_Project自动化项目管理/Python自动化项目总库/SW-2026-001"
         assert scanner._infer_stack_from_path(path) == "python"
 
-    def test_apply_stack_fallback_skips_when_already_set(
-        self, tmp_path: Path
-    ) -> None:
+    def test_apply_stack_fallback_skips_when_already_set(self, tmp_path: Path) -> None:
         """stack 已为 plc/python 时不应被路径推断覆盖"""
         from auto_pm.models import ProjectInfo
 
@@ -543,9 +542,7 @@ class TestStackFallback:
         scanner._apply_stack_fallback(info)
         assert info.stack == "python"  # 不被覆盖
 
-    def test_apply_stack_fallback_infers_when_unknown(
-        self, tmp_path: Path
-    ) -> None:
+    def test_apply_stack_fallback_infers_when_unknown(self, tmp_path: Path) -> None:
         """stack=unknown 时应按路径推断"""
         from auto_pm.models import ProjectInfo
 
@@ -576,9 +573,7 @@ class TestPhaseDerivationV053:
         # Fix 3: 字段存在但关键词不匹配任何标准阶段 → 默认 developing
         assert scanner._derive_phase_from_pm_session_content(content) == "developing"
 
-    def test_derive_phase_returns_empty_when_no_fields(
-        self, tmp_path: Path
-    ) -> None:
+    def test_derive_phase_returns_empty_when_no_fields(self, tmp_path: Path) -> None:
         """V0.5.3 Fix 3: 无 current_focus/current_state 字段 → 空字符串"""
         scanner = ProjectScanner(str(tmp_path))
         content = """
@@ -590,9 +585,7 @@ class TestPhaseDerivationV053:
         # 无字段 → 返回空字符串（不假设在研）
         assert scanner._derive_phase_from_pm_session_content(content) == ""
 
-    def test_read_pm_session_populates_phase(
-        self, tmp_path: Path
-    ) -> None:
+    def test_read_pm_session_populates_phase(self, tmp_path: Path) -> None:
         """V0.5.3 Fix 3.5: read_pm_session 应调用 _read_phase_from_pm_session 填充 phase"""
         project_dir = tmp_path / "SW-2026-001_项目"
         project_dir.mkdir()
@@ -615,9 +608,7 @@ class TestPhaseDerivationV053:
         # Fix 3.5: phase 应被填充为 developing（而非默认空字符串）
         assert info.phase == "developing"
 
-    def test_read_pm_session_phase_empty_when_no_derivation_fields(
-        self, tmp_path: Path
-    ) -> None:
+    def test_read_pm_session_phase_empty_when_no_derivation_fields(self, tmp_path: Path) -> None:
         """V0.5.3 Fix 3.5: PM_SESSION 无推导字段时 phase 为空"""
         project_dir = tmp_path / "DJ-2026-099_项目"
         project_dir.mkdir()
@@ -634,9 +625,7 @@ class TestPhaseDerivationV053:
         # 无 current_focus/current_state → phase 为空
         assert info.phase == ""
 
-    def test_scan_pm_session_project_has_phase(
-        self, tmp_path: Path
-    ) -> None:
+    def test_scan_pm_session_project_has_phase(self, tmp_path: Path) -> None:
         """V0.5.3 Fix 3.5: 完整扫描流程下 PM_SESSION 项目 phase 不丢失"""
         project_dir = tmp_path / "SW-2026-001_项目"
         project_dir.mkdir()

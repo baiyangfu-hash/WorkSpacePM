@@ -13,10 +13,10 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
 from auto_pm.cli.spec import spec_group
+from click.testing import CliRunner
+
 from auto_pm import __version__
 
 
@@ -68,8 +68,7 @@ class TestSpecCLIBoundary:
                     "specs": {
                         "DEV-001": {
                             "canonical_path": (
-                                "00_Obsidian_Base全局规范文件仓库/"
-                                "01_项目管理域/001_测试规范_DEV.md"
+                                "00_Obsidian_Base全局规范文件仓库/01_项目管理域/001_测试规范_DEV.md"
                             )
                         },
                         "_governance_note": "not-a-spec-entry",
@@ -171,9 +170,7 @@ class TestSpecCLIBoundary:
         archived_spec = archive_dir / "802_PLC工作流命名规范_DEV.md"
         archived_spec.write_text("# archived\n", encoding="utf-8")
 
-        change_dir = (
-            spec_root / "01_项目管理域" / "04_变更管理" / "01_变更单" / "CHG-PLC"
-        )
+        change_dir = spec_root / "01_项目管理域" / "04_变更管理" / "01_变更单" / "CHG-PLC"
         change_dir.mkdir(parents=True, exist_ok=True)
         (change_dir / "CHG-PLC-2026-001.md").write_text("# change ticket\n", encoding="utf-8")
 

@@ -52,9 +52,7 @@ from auto_pm.vartable.utils.encoding import SUPPORTED_ENCODINGS, detect_encoding
 console = Console()
 
 # CLI --format 选项可选值（不含 UNKNOWN）
-_FORMAT_CHOICES = [
-    fmt.value for fmt in FormatType if fmt != FormatType.UNKNOWN
-]
+_FORMAT_CHOICES = [fmt.value for fmt in FormatType if fmt != FormatType.UNKNOWN]
 
 
 def _supports_unicode_output() -> bool:
@@ -328,7 +326,9 @@ def _print_channel_table_detail(result: ParseResult) -> None:
 
 
 @vartable_group.command(name="detect-encoding")
-@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text", help="输出格式")
+@click.option(
+    "--format", "fmt", type=click.Choice(["text", "json"]), default="text", help="输出格式"
+)
 @click.argument("file_path", type=click.Path(exists=True, dir_okay=False, resolve_path=True))
 def detect_encoding_command(file_path: str, fmt: str) -> None:
     """检测文件编码。
@@ -373,7 +373,9 @@ def list_encodings_command() -> None:
 
 
 @vartable_group.command(name="list-formats")
-@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text", help="输出格式")
+@click.option(
+    "--format", "fmt", type=click.Choice(["text", "json"]), default="text", help="输出格式"
+)
 def list_formats_command(fmt: str) -> None:
     """列出支持的解析格式。
 
@@ -408,7 +410,9 @@ def list_formats_command(fmt: str) -> None:
 
 
 @vartable_group.command(name="detect-format")
-@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text", help="输出格式")
+@click.option(
+    "--format", "fmt", type=click.Choice(["text", "json"]), default="text", help="输出格式"
+)
 @click.argument("file_path", type=click.Path(exists=True, dir_okay=False, resolve_path=True))
 def detect_format_command(file_path: str, fmt: str) -> None:
     """识别文件格式。
@@ -559,7 +563,9 @@ def batch_parse_command(dir_path: str, recursive: bool, output_fmt: str) -> None
     icon = "✅" if _supports_unicode_output() else "[OK]"
     success_count = sum(1 for r in results if r.success)
     failure_count = len(results) - success_count
-    console.print(f"{icon} 批量解析完成: {len(results)} 个文件（成功 {success_count} / 失败 {failure_count}）")
+    console.print(
+        f"{icon} 批量解析完成: {len(results)} 个文件（成功 {success_count} / 失败 {failure_count}）"
+    )
     console.print(f"   目录: {escape(dir_path)}")
     console.print(f"   递归: {'是' if recursive else '否'}")
 

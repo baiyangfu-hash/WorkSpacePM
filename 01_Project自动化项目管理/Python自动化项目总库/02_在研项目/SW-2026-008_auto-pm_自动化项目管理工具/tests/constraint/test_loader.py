@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-
 from auto_pm.constraint.loader import ConstraintLoader, ConstraintLoadError
 
 if TYPE_CHECKING:
@@ -90,7 +89,9 @@ class TestConstraintLoader:
         assert definitions_dir.is_dir()
         assert definitions_dir.name == "definitions"
 
-    def test_constraint_load_error_raised_for_bad_path(self, tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    def test_constraint_load_error_raised_for_bad_path(
+        self, tmp_path: Path, monkeypatch: MonkeyPatch
+    ) -> None:
         """无效工作空间且包路径不存在时抛出 ConstraintLoadError"""
         import auto_pm.constraint.loader as loader_module
 
@@ -98,6 +99,7 @@ class TestConstraintLoader:
         def _mock_find(self: ConstraintLoader) -> Path:
             # 跳过包路径，直接走降级搜索
             import os
+
             for root_str, dirs, _files in os.walk(str(self._workspace_root)):
                 root = Path(root_str)
                 if "definitions" in dirs and root.name == "constraint":

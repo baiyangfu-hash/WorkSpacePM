@@ -55,7 +55,7 @@ class PlcRepairer:
         for candidate in PRD_DIR_CANDIDATES:
             prefix = candidate + "/"
             if item_name.startswith(prefix):
-                return item_name[len(prefix):]
+                return item_name[len(prefix) :]
         return None
 
     @staticmethod
@@ -63,7 +63,7 @@ class PlcRepairer:
         """解析实际存在的 PRD 目录路径，若都不存在则返回默认 PRD_DIR 路径"""
         found = find_prd_dir(project_path)
         if found is not None:
-            return found[0]
+            return str(found[0])
         return os.path.join(project_path, PRD_DIR)
 
     # ── 单项目修复 ────────────────────────────────────────
@@ -120,7 +120,9 @@ class PlcRepairer:
                     project_path, project_id, project_name, doc_name, result, dry_run
                 )
             elif item.item.startswith("FB PRD "):
-                self._repair_fb_prd_doc(project_path, project_id, project_name, item, result, dry_run)
+                self._repair_fb_prd_doc(
+                    project_path, project_id, project_name, item, result, dry_run
+                )
             elif item.item == "HMI 交互原型" or "hmi_tag_mapping.json" in item.message:
                 self._repair_hmi_mapping(project_path, project_id, project_name, result, dry_run)
             elif item.item.startswith("目录 "):
@@ -314,6 +316,7 @@ class PlcRepairer:
             if changed:
                 if not dry_run:
                     from auto_pm.utils.file_utils import write_file
+
                     write_file(plc_json_path, json.dumps(cfg, indent=2, ensure_ascii=False))
                 result.add(
                     item=".plc.json",
@@ -350,6 +353,7 @@ class PlcRepairer:
         )
         if not dry_run:
             from auto_pm.utils.file_utils import write_file
+
             write_file(plc_json_path, content)
             result.add(
                 item=".plc.json",
@@ -422,6 +426,7 @@ class PlcRepairer:
 
         if not dry_run:
             from auto_pm.utils.file_utils import write_file
+
             write_file(pm_session_path, content)
         result.add(
             item="PM_SESSION",
@@ -612,6 +617,7 @@ class PlcRepairer:
 
         if not dry_run:
             from auto_pm.utils.file_utils import write_file
+
             write_file(doc_path, content)
         # 使用实际目录名构造 item 名，兼容 PRD 和 00_程序方案 等命名
         prd_dir_name = os.path.basename(prd_path)
@@ -677,7 +683,9 @@ class PlcRepairer:
             "UM": f"使用说明_UM-{fb_identifier}.md",
         }
 
-        types_to_create = [doc_type] if doc_type in type_to_filename else list(type_to_filename.keys())
+        types_to_create = (
+            [doc_type] if doc_type in type_to_filename else list(type_to_filename.keys())
+        )
 
         for dt in types_to_create:
             fn = type_to_filename[dt]
@@ -686,6 +694,7 @@ class PlcRepairer:
                 content = f"# {dt} - {fb_identifier}\n\n> 项目编号: {project_id}\n> 模块: {fb_dir_name}\n\n## 1. 概述\n待补充\n"
                 if not dry_run:
                     from auto_pm.utils.file_utils import write_file
+
                     write_file(target_path, content)
                 result.add(
                     item=f"FB PRD [{fb_dir_name}]/{dt}",
@@ -717,13 +726,34 @@ class PlcRepairer:
                 "project_name": project_name,
                 "version": "V1.0.0",
                 "mappings": {
-                    "D100": {"name": "GlobalStatusWord", "type": "WORD", "block": "GlobalVars.stGlobal.iStep", "description": "全局状态字"},
-                    "D110": {"name": "ActiveAlarmCode", "type": "DINT", "block": "GlobalVars.stGlobal.iAlarmCode", "description": "当前首出报警代码"},
-                    "M100": {"name": "AutoRunStart", "type": "BOOL", "block": "GlobalVars.stGlobal.bAutoRunning", "description": "自动运行启动"},
-                    "M102": {"name": "SystemReset", "type": "BOOL", "block": "GlobalVars.stGlobal.bReset", "description": "系统故障复位"},
+                    "D100": {
+                        "name": "GlobalStatusWord",
+                        "type": "WORD",
+                        "block": "GlobalVars.stGlobal.iStep",
+                        "description": "全局状态字",
+                    },
+                    "D110": {
+                        "name": "ActiveAlarmCode",
+                        "type": "DINT",
+                        "block": "GlobalVars.stGlobal.iAlarmCode",
+                        "description": "当前首出报警代码",
+                    },
+                    "M100": {
+                        "name": "AutoRunStart",
+                        "type": "BOOL",
+                        "block": "GlobalVars.stGlobal.bAutoRunning",
+                        "description": "自动运行启动",
+                    },
+                    "M102": {
+                        "name": "SystemReset",
+                        "type": "BOOL",
+                        "block": "GlobalVars.stGlobal.bReset",
+                        "description": "系统故障复位",
+                    },
                 },
             }
             from auto_pm.utils.file_utils import write_file
+
             write_file(target_path, json.dumps(mapping_data, indent=2, ensure_ascii=False) + "\n")
 
         result.add(
@@ -822,6 +852,7 @@ class PlcRepairer:
                     if old_name in content:
                         new_content = content.replace(old_name, new_name)
                         from auto_pm.utils.file_utils import write_file
+
                         write_file(fpath, new_content)
                         updates.append(f"{f}: {old_name} → {new_name}")
                 except OSError:

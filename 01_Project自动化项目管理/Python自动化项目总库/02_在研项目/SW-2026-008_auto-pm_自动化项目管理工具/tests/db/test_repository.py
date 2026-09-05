@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import (
     ApprovalHistoryRepository,
@@ -77,7 +76,9 @@ class TestImpactAnalysisRepository:
         return ImpactAnalysisRepository(db)
 
     @staticmethod
-    def _make_analysis(change_number: str = "CHG-PLC-2026-001", project_id: str = "SW-2026-001") -> ImpactAnalysis:
+    def _make_analysis(
+        change_number: str = "CHG-PLC-2026-001", project_id: str = "SW-2026-001"
+    ) -> ImpactAnalysis:
         return ImpactAnalysis(
             project_id=project_id,
             change_number=change_number,
@@ -301,10 +302,14 @@ class TestChangeRequestRepositoryExtension:
     def test_save_impact_analysis_overwrite(self, repo: ChangeRequestRepository) -> None:
         """重复保存影响分析应覆盖"""
         repo.save_impact_analysis(
-            ImpactAnalysis(project_id="SW-2026-001", change_number="CHG-PLC-2026-001", risk_level="low")
+            ImpactAnalysis(
+                project_id="SW-2026-001", change_number="CHG-PLC-2026-001", risk_level="low"
+            )
         )
         repo.save_impact_analysis(
-            ImpactAnalysis(project_id="SW-2026-001", change_number="CHG-PLC-2026-001", risk_level="high")
+            ImpactAnalysis(
+                project_id="SW-2026-001", change_number="CHG-PLC-2026-001", risk_level="high"
+            )
         )
 
         result = repo.get_impact_analysis("CHG-PLC-2026-001")
@@ -337,13 +342,28 @@ class TestChangeRequestRepositoryExtension:
     def test_save_multiple_approval_records_ordered(self, repo: ChangeRequestRepository) -> None:
         """多条审批记录应按 id 升序返回"""
         repo.save_approval_record(
-            "CHG-PLC-2026-001", "submitted", "张三", "提交", from_status="draft", project_id="SW-2026-001"
+            "CHG-PLC-2026-001",
+            "submitted",
+            "张三",
+            "提交",
+            from_status="draft",
+            project_id="SW-2026-001",
         )
         repo.save_approval_record(
-            "CHG-PLC-2026-001", "approved", "李四", "同意", from_status="submitted", project_id="SW-2026-001"
+            "CHG-PLC-2026-001",
+            "approved",
+            "李四",
+            "同意",
+            from_status="submitted",
+            project_id="SW-2026-001",
         )
         repo.save_approval_record(
-            "CHG-PLC-2026-001", "implementing", "王五", "开始实施", from_status="approved", project_id="SW-2026-001"
+            "CHG-PLC-2026-001",
+            "implementing",
+            "王五",
+            "开始实施",
+            from_status="approved",
+            project_id="SW-2026-001",
         )
 
         history = repo.list_approval_history("CHG-PLC-2026-001")

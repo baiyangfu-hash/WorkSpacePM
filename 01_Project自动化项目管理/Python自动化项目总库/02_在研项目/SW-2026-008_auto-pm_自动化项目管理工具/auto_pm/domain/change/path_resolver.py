@@ -38,6 +38,7 @@ _CHANGE_NUMBER_PATTERN = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3}$")
 
 class PathTraversalError(ValueError):
     """路径遍历攻击检测异常"""
+
     pass
 
 
@@ -62,13 +63,10 @@ def validate_project_id(project_id: str) -> str:
         raise PathTraversalError("项目编号不能为空")
     if not _PROJECT_ID_PATTERN.match(project_id):
         raise PathTraversalError(
-            f"项目编号包含非法字符: '{project_id}'，"
-            "仅允许字母、数字、连字符、下划线"
+            f"项目编号包含非法字符: '{project_id}'，仅允许字母、数字、连字符、下划线"
         )
     if ".." in project_id or "/" in project_id or "\\" in project_id:
-        raise PathTraversalError(
-            f"项目编号包含路径遍历字符: '{project_id}'"
-        )
+        raise PathTraversalError(f"项目编号包含路径遍历字符: '{project_id}'")
     return project_id
 
 
@@ -114,9 +112,7 @@ def validate_path_within_workspace(path: str, workspace_root: str) -> str:
     real_workspace = os.path.realpath(workspace_root)
     real_path = os.path.realpath(path)
     if not real_path.startswith(real_workspace + os.sep) and real_path != real_workspace:
-        raise PathTraversalError(
-            f"路径超出工作空间范围: '{path}' 不在 '{workspace_root}' 内"
-        )
+        raise PathTraversalError(f"路径超出工作空间范围: '{path}' 不在 '{workspace_root}' 内")
     return real_path
 
 
@@ -274,6 +270,7 @@ def get_or_create_ledger_file(project_path: str) -> str | None:
             "|------|----------|------|--------|----------|----------|----------|------|\n"
         )
         from auto_pm.utils.file_utils import write_file
+
         write_file(ledger_path, skeleton)
         return ledger_path
     except OSError:

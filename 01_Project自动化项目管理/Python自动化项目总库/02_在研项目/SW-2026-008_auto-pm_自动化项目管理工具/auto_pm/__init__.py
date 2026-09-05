@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """auto-pm 自动化项目管理工具 - 工业级 Clean Architecture 顶层导出
 
 5 大标准分层：

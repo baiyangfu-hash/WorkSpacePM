@@ -183,10 +183,24 @@ def test_var_table_model_set_entries_dict(qapp: QApplication) -> None:
     """setEntries 接受 dict 形式，行数应正确"""
     model = VarTableModel()
     entries = [
-        {"station": "cpu0", "signal_type": "DI", "address": "Y0",
-         "tag": "tag0", "signal_name": "信号0", "device": "dev0", "comment": "注释0"},
-        {"station": "cpu1", "signal_type": "DO", "address": "Y1",
-         "tag": "tag1", "signal_name": "信号1", "device": "dev1", "comment": "注释1"},
+        {
+            "station": "cpu0",
+            "signal_type": "DI",
+            "address": "Y0",
+            "tag": "tag0",
+            "signal_name": "信号0",
+            "device": "dev0",
+            "comment": "注释0",
+        },
+        {
+            "station": "cpu1",
+            "signal_type": "DO",
+            "address": "Y1",
+            "tag": "tag1",
+            "signal_name": "信号1",
+            "device": "dev1",
+            "comment": "注释1",
+        },
     ]
     model.setEntries(entries)
     qapp.processEvents()
@@ -224,10 +238,12 @@ def test_var_table_model_clear(qapp: QApplication) -> None:
 def test_var_table_model_data_index_column(qapp: QApplication) -> None:
     """data() 在 # 列应返回 1-based 索引"""
     model = VarTableModel()
-    model.setEntries([
-        {"station": "cpu0", "address": "Y0"},
-        {"station": "cpu1", "address": "Y1"},
-    ])
+    model.setEntries(
+        [
+            {"station": "cpu0", "address": "Y0"},
+            {"station": "cpu1", "address": "Y1"},
+        ]
+    )
     qapp.processEvents()
 
     idx0 = model.index(0, COL_INDEX)
@@ -298,11 +314,13 @@ def test_var_table_model_set_cell_pushes_undo(qapp: QApplication) -> None:
 def test_var_table_model_batch_update(qapp: QApplication) -> None:
     """batchUpdate 应批量更新多行同列"""
     model = VarTableModel()
-    model.setEntries([
-        {"station": "cpu0", "signal_type": "DI"},
-        {"station": "cpu1", "signal_type": "DO"},
-        {"station": "cpu2", "signal_type": "AI"},
-    ])
+    model.setEntries(
+        [
+            {"station": "cpu0", "signal_type": "DI"},
+            {"station": "cpu1", "signal_type": "DO"},
+            {"station": "cpu2", "signal_type": "AI"},
+        ]
+    )
 
     count = model.batchUpdate([0, 2], COL_SIGNAL_TYPE, "AO")
     assert count == 2
@@ -316,10 +334,12 @@ def test_var_table_model_batch_update_skips_same_value(
 ) -> None:
     """batchUpdate 对相同值不计数"""
     model = VarTableModel()
-    model.setEntries([
-        {"station": "cpu0", "signal_type": "DI"},
-        {"station": "cpu1", "signal_type": "DI"},
-    ])
+    model.setEntries(
+        [
+            {"station": "cpu0", "signal_type": "DI"},
+            {"station": "cpu1", "signal_type": "DI"},
+        ]
+    )
 
     count = model.batchUpdate([0, 1], COL_SIGNAL_TYPE, "DI")
     assert count == 0
@@ -350,11 +370,13 @@ def test_var_table_model_batch_update_pushes_undo_per_row(
 ) -> None:
     """batchUpdate 每行变更应独立推入 undo 栈"""
     model = VarTableModel()
-    model.setEntries([
-        {"station": "cpu0", "signal_type": "DI"},
-        {"station": "cpu1", "signal_type": "DO"},
-        {"station": "cpu2", "signal_type": "AI"},
-    ])
+    model.setEntries(
+        [
+            {"station": "cpu0", "signal_type": "DI"},
+            {"station": "cpu1", "signal_type": "DO"},
+            {"station": "cpu2", "signal_type": "AI"},
+        ]
+    )
 
     model.batchUpdate([0, 1, 2], COL_SIGNAL_TYPE, "AO")
     assert model.undoStackSize() == 3
@@ -471,11 +493,13 @@ def test_var_table_model_get_cell_index_returns_row_plus_1(
 ) -> None:
     """getCell 在 # 列应返回 1-based 行号"""
     model = VarTableModel()
-    model.setEntries([
-        {"station": "cpu0"},
-        {"station": "cpu1"},
-        {"station": "cpu2"},
-    ])
+    model.setEntries(
+        [
+            {"station": "cpu0"},
+            {"station": "cpu1"},
+            {"station": "cpu2"},
+        ]
+    )
 
     assert model.getCell(0, COL_INDEX) == "1"
     assert model.getCell(1, COL_INDEX) == "2"

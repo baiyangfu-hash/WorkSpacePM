@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from auto_pm.change.ledger_reconciler import LedgerReconciler
+
 from auto_pm.contracts.gate_dtos import (
     GateCheckItemDTO,
     ProcessGroupStage,
@@ -89,7 +90,9 @@ class StageGateEngine:
                 name="PM_SESSION 单一真源就绪",
                 passed=has_pm_session,
                 severity="BLOCKER",
-                message="PM_SESSION 文件已就绪" if has_pm_session else "缺少根目录 PM_SESSION_<ID>.md",
+                message="PM_SESSION 文件已就绪"
+                if has_pm_session
+                else "缺少根目录 PM_SESSION_<ID>.md",
                 fix_suggestion="运行 auto-pm project retrofit 补齐单一真源",
             )
         )
@@ -107,7 +110,9 @@ class StageGateEngine:
                 name="项目边界与 Non-Goals 定义",
                 passed=has_nongoals,
                 severity="BLOCKER",
-                message="已定义项目定位与明确边界" if has_nongoals else "PM_SESSION 缺少 non_goals 边界定义",
+                message="已定义项目定位与明确边界"
+                if has_nongoals
+                else "PM_SESSION 缺少 non_goals 边界定义",
                 fix_suggestion="在 PM_SESSION §1 中明确 non_goals 清单",
             )
         )
@@ -144,14 +149,20 @@ class StageGateEngine:
             p / "02_PLC程序" / "程序文档" / "015_IO分配表_IO.md",
             p / "02_PLC程序" / "PLC_ST" / "00_程序方案" / "接口文档_INT.md",
         ]
-        has_int = any(f.exists() for f in int_candidates) or any(p.glob("**/*INT*.md")) or any(p.glob("**/*IO*.md"))
+        has_int = (
+            any(f.exists() for f in int_candidates)
+            or any(p.glob("**/*INT*.md"))
+            or any(p.glob("**/*IO*.md"))
+        )
         items.append(
             GateCheckItemDTO(
                 id="G2-INT-FROZEN",
                 name="接口与变量表契约冻结",
                 passed=has_int,
                 severity="BLOCKER",
-                message="接口/IO变量表契约已存在" if has_int else "未找到接口文档 (002_INT.md 或 IO分配表)",
+                message="接口/IO变量表契约已存在"
+                if has_int
+                else "未找到接口文档 (002_INT.md 或 IO分配表)",
                 fix_suggestion="输出并冻结接口/IO变量分配表",
             )
         )
@@ -165,7 +176,9 @@ class StageGateEngine:
                 name="HMI/UI 交互原型就绪",
                 passed=has_hmi,
                 severity="WARNING",  # 警告级，提示完善
-                message="已包含 HMI 原型或 DESIGN.md" if has_hmi else "未找到 HMI 交互原型 (.html 或 DESIGN.md)",
+                message="已包含 HMI 原型或 DESIGN.md"
+                if has_hmi
+                else "未找到 HMI 交互原型 (.html 或 DESIGN.md)",
                 fix_suggestion="使用 auto-pm prototype init 生成可交互原型",
             )
         )
@@ -202,7 +215,9 @@ class StageGateEngine:
                 name="P0 阻断性缺陷清零",
                 passed=not has_blocker_defects,
                 severity="BLOCKER",
-                message="无未决 P0 阻断性缺陷" if not has_blocker_defects else "存在未修复的 P0 阻断性缺陷",
+                message="无未决 P0 阻断性缺陷"
+                if not has_blocker_defects
+                else "存在未修复的 P0 阻断性缺陷",
                 fix_suggestion="优先修复 P0 缺陷并走变更闭环",
             )
         )
@@ -225,8 +240,7 @@ class StageGateEngine:
             closure_reasons: list[str] = []
             if ledger_missing:
                 closure_reasons.append(
-                    f"台账缺失 {len(ledger_missing)} 条变更记录: "
-                    f"{', '.join(ledger_missing[:3])}"
+                    f"台账缺失 {len(ledger_missing)} 条变更记录: {', '.join(ledger_missing[:3])}"
                 )
             if not has_handoff:
                 closure_reasons.append("PM_SESSION §8 缺少 skill_handoff 回写")
@@ -254,7 +268,11 @@ class StageGateEngine:
         unclosed_chgs: list[str] = []
         for cf in chg_files:
             txt = cf.read_text(encoding="utf-8", errors="ignore")
-            if "status: closed" not in txt and "状态: closed" not in txt and "状态: 已关闭" not in txt:
+            if (
+                "status: closed" not in txt
+                and "状态: closed" not in txt
+                and "状态: 已关闭" not in txt
+            ):
                 unclosed_chgs.append(cf.name)
 
         all_chgs_closed = len(unclosed_chgs) == 0
@@ -264,7 +282,9 @@ class StageGateEngine:
                 name="现场变更单全闭环 (Dogfooding)",
                 passed=all_chgs_closed,
                 severity="BLOCKER",
-                message="所有 CHG 变更单均已闭环" if all_chgs_closed else f"存在未闭环变更单: {', '.join(unclosed_chgs[:3])}",
+                message="所有 CHG 变更单均已闭环"
+                if all_chgs_closed
+                else f"存在未闭环变更单: {', '.join(unclosed_chgs[:3])}",
                 fix_suggestion="完成变更验证并流转到 closed 状态",
             )
         )

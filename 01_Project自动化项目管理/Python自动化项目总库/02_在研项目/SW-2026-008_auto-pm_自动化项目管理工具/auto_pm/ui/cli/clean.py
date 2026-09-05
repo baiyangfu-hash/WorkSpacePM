@@ -28,7 +28,12 @@ def clean_cmd(ctx: click.Context, cache: bool, dry_run: bool) -> None:
     report = service.inspect_sanitation()
 
     if report.is_pure and not cache:
-        console.print(Panel("[bold green]✨ 工作区状态极佳！根目录纯净，无可清理的游离临时文件。[/bold green]", title="Clean 结果"))
+        console.print(
+            Panel(
+                "[bold green]✨ 工作区状态极佳！根目录纯净，无可清理的游离临时文件。[/bold green]",
+                title="Clean 结果",
+            )
+        )
         return
 
     table = Table(title="待清理文件清单", show_header=True, header_style="bold cyan")
@@ -40,7 +45,9 @@ def clean_cmd(ctx: click.Context, cache: bool, dry_run: bool) -> None:
         table.add_row(issue.relative_path, issue.issue_type, issue.description)
 
     for issue in report.unauthorized_files:
-        table.add_row(issue.relative_path, f"[bold red]{issue.issue_type}[/bold red]", issue.description)
+        table.add_row(
+            issue.relative_path, f"[bold red]{issue.issue_type}[/bold red]", issue.description
+        )
 
     console.print(table)
 
@@ -49,4 +56,9 @@ def clean_cmd(ctx: click.Context, cache: bool, dry_run: bool) -> None:
         return
 
     cleaned = service.clean_workspace(clean_cache=cache)
-    console.print(Panel(f"[bold green]✅ 清理完成！已清除 {len(cleaned)} 个游离临时文件与缓存。[/bold green]", title="Clean 完成"))
+    console.print(
+        Panel(
+            f"[bold green]✅ 清理完成！已清除 {len(cleaned)} 个游离临时文件与缓存。[/bold green]",
+            title="Clean 完成",
+        )
+    )

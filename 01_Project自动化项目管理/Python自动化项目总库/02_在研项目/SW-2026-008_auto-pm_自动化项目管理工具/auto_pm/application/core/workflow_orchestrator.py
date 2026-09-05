@@ -127,9 +127,7 @@ class WorkflowOrchestrator:
         today = datetime.now().strftime("%Y-%m-%d")
         files_str = ", ".join(target_files) if target_files else "无"
         specs_str = ", ".join(specs_bound) if specs_bound else "无"
-        log_entry = (
-            f"  - {today} [规划中] {change_id} {title}：目标文件 [{files_str}]，绑定规范 [{specs_str}]"
-        )
+        log_entry = f"  - {today} [规划中] {change_id} {title}：目标文件 [{files_str}]，绑定规范 [{specs_str}]"
 
         try:
             if pm_path.exists():
@@ -295,26 +293,19 @@ class WorkflowOrchestrator:
             )
 
     def _get_decision_for_change(self, change_id: str, decision_id: str = "") -> Any | None:
-        """获取变更单关联的决策包，优先使用 get_decision(change_id=...)，并支持回退"""
-        try:
-            return self.decision_service.get_decision(change_id=change_id)
-        except TypeError:
-            pass
-        except Exception as exc:
-            logger.debug("get_decision(change_id=...) 查询失败: %s", exc)
-
-        if decision_id:
-            try:
-                return self.decision_service.get_decision(decision_id)
-            except Exception:
-                pass
-
+        """获取变更单关联的决策包，优先按 change_id 查询并支持精确回退。"""
         try:
             decisions = self.decision_service.list_decisions(change_id=change_id)
             if decisions:
                 return decisions[-1]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("按变更单查询决策包失败: %s", exc)
+
+        if decision_id:
+            try:
+                return self.decision_service.get_decision(decision_id)
+            except Exception as exc:
+                logger.debug("按决策标识查询决策包失败: %s", exc)
 
         return None
 
@@ -331,8 +322,10 @@ class WorkflowOrchestrator:
         if not isinstance(path, str) or not path or "\\" in path:
             return None
         candidate = PurePosixPath(path)
-        if candidate.is_absolute() or candidate.anchor or any(
-            part in ("", ".", "..") for part in candidate.parts
+        if (
+            candidate.is_absolute()
+            or candidate.anchor
+            or any(part in ("", ".", "..") for part in candidate.parts)
         ):
             return None
         if any(char in path for char in "*?[]"):
@@ -510,12 +503,18 @@ class WorkflowOrchestrator:
                 if target_status == "completed":
                     if curr_st == "implementing":
                         self.change_service.transition_status(
-                            req.change_id, "pending_acceptance", approver=req.actor, project_id=req.project_id
+                            req.change_id,
+                            "pending_acceptance",
+                            approver=req.actor,
+                            project_id=req.project_id,
                         )
                         curr_st = "pending_acceptance"
                     if curr_st == "pending_acceptance":
                         self.change_service.transition_status(
-                            req.change_id, "accepting", approver=req.actor, project_id=req.project_id
+                            req.change_id,
+                            "accepting",
+                            approver=req.actor,
+                            project_id=req.project_id,
                         )
                         curr_st = "accepting"
                     if curr_st == "accepting":
@@ -524,7 +523,9 @@ class WorkflowOrchestrator:
                             "completed",
                             approver=req.actor,
                             comment=req.metadata.get("comment", "实施完成验收通过"),
-                            verification_conclusion=req.metadata.get("verification_conclusion", "全部通过"),
+                            verification_conclusion=req.metadata.get(
+                                "verification_conclusion", "全部通过"
+                            ),
                             allow_partial_verification=False,
                             project_id=req.project_id,
                         )
@@ -534,7 +535,10 @@ class WorkflowOrchestrator:
                 elif target_status == "pending_acceptance":
                     if curr_st == "implementing":
                         self.change_service.transition_status(
-                            req.change_id, "pending_acceptance", approver=req.actor, project_id=req.project_id
+                            req.change_id,
+                            "pending_acceptance",
+                            approver=req.actor,
+                            project_id=req.project_id,
                         )
                         final_status = "pending_acceptance"
                     else:

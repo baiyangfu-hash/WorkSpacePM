@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.vartable.parsers.communications_parser import CommunicationsParser
 
 # 真实 DJ-2026-005 communications.yml 路径（只读，不修改）
@@ -68,9 +67,7 @@ class TestCommunicationsParserBasic:
     def test_parse_empty_channels(self, tmp_path: Path) -> None:
         """channels 为空列表"""
         file_path = tmp_path / "communications.yml"
-        file_path.write_text(
-            'project_id: "X"\nchannels: []\n', encoding="utf-8"
-        )
+        file_path.write_text('project_id: "X"\nchannels: []\n', encoding="utf-8")
         result = CommunicationsParser().parse(file_path)
         assert result.success
         assert result.channel_table is not None
@@ -80,9 +77,7 @@ class TestCommunicationsParserBasic:
     def test_parse_missing_channels_key(self, tmp_path: Path) -> None:
         """缺 channels 键 → 失败"""
         file_path = tmp_path / "communications.yml"
-        file_path.write_text(
-            'project_id: "X"\nproject_type: "Y"\n', encoding="utf-8"
-        )
+        file_path.write_text('project_id: "X"\nproject_type: "Y"\n', encoding="utf-8")
         result = CommunicationsParser().parse(file_path)
         assert not result.success
         assert result.channel_table is None
@@ -120,9 +115,7 @@ class TestCommunicationsParserFieldValidation:
         assert result.channel_table.total_count == 1  # 仅 RemoteIO 有效
         assert result.error_count == 1  # HMI 缺字段
 
-    def test_entry_fields_correctness(
-        self, sample_communications_yml: Path
-    ) -> None:
+    def test_entry_fields_correctness(self, sample_communications_yml: Path) -> None:
         """解析后的 ChannelEntry 字段值正确"""
         result = CommunicationsParser().parse(sample_communications_yml)
         assert result.channel_table is not None
@@ -140,9 +133,7 @@ class TestCommunicationsParserFieldValidation:
         assert entries[1].protocol == "fieldbus"
         assert entries[1].index == 2
 
-    def test_metadata_protocol_counts(
-        self, sample_communications_yml: Path
-    ) -> None:
+    def test_metadata_protocol_counts(self, sample_communications_yml: Path) -> None:
         """元数据 protocol_counts + project_id 正确"""
         result = CommunicationsParser().parse(sample_communications_yml)
         assert result.channel_table is not None
@@ -150,17 +141,13 @@ class TestCommunicationsParserFieldValidation:
         assert counts["ethernet"] == 1
         assert counts["fieldbus"] == 1
         assert result.channel_table.metadata["project_id"] == "DJ-2026-005"
-        assert (
-            result.channel_table.metadata["project_type"] == "single_machine"
-        )
+        assert result.channel_table.metadata["project_type"] == "single_machine"
         # protocols 去重属性
         assert result.channel_table.protocols == ("ethernet", "fieldbus")
 
 
 class TestCommunicationsParserReal:
-    def test_parse_real_dj_2026_005(
-        self, real_dj_2026_005_communications: Path
-    ) -> None:
+    def test_parse_real_dj_2026_005(self, real_dj_2026_005_communications: Path) -> None:
         """解析真实 DJ-2026-005 communications.yml（5 个 channel）"""
         result = CommunicationsParser().parse(real_dj_2026_005_communications)
         assert result.success

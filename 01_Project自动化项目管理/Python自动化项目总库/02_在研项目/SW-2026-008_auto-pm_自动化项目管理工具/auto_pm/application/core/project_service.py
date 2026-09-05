@@ -18,6 +18,7 @@ M3-Iter1 重构：扫描/识别逻辑提取到 ProjectScanner，本类通过组�
 
 from __future__ import annotations
 
+import getpass
 import json
 import logging
 import os
@@ -430,7 +431,8 @@ class ProjectService:
         except RuntimeError:
             all_projects = self.list_projects()
         return [
-            p for p in all_projects
+            p
+            for p in all_projects
             if keyword_lower in p.project_id.lower()
             or keyword_lower in p.name.lower()
             or keyword_lower in p.description.lower()
@@ -725,13 +727,9 @@ class ProjectService:
 
         # 定位插入点：§4 结束处（下一个 ## N 章节之前，或文件末尾）
         sec4_start = m4.start()
-        rest_after_sec4 = raw[sec4_start + len(m4.group(0)):]
+        rest_after_sec4 = raw[sec4_start + len(m4.group(0)) :]
         nm = _SHC014_NEXT_SEC_RE.search(rest_after_sec4)
-        insert_pos = (
-            sec4_start + len(m4.group(0)) + nm.start()
-            if nm
-            else len(raw)
-        )
+        insert_pos = sec4_start + len(m4.group(0)) + nm.start() if nm else len(raw)
 
         # 构建追加块
         lines = [f"\n{_SHC014_MARKER}\n"]
@@ -767,7 +765,12 @@ class ProjectService:
             author: 主设计人/申请人名称（如果为 None 则动态获取）
         """
         if author is None:
-            author = os.getenv("AUTO_PM_AUTHOR") or (os.getlogin() if hasattr(os, "getlogin") else "fubai")
+            author = (
+                os.getenv("AUTO_PM_AUTHOR")
+                or os.getenv("USERNAME")
+                or os.getenv("USER")
+                or getpass.getuser()
+            )
 
         if not os.path.isdir(project_path):
             raise FileNotFoundError(f"项目目录不存在: {project_path}")
@@ -975,7 +978,6 @@ class ProjectService:
 
         log.info("DB 缓存已清除: %s (%s)", db_path, msg)
         return {"success": True, "message": msg}
-
 
     def _upsert_to_cache(self, proj: ProjectInfo) -> None:
         """将单个项目 UPSERT 到 DB 缓存"""
@@ -1193,7 +1195,11 @@ exit 0
             # 设置可执行权限
             try:
                 import stat
-                os.chmod(hook_path, os.stat(hook_path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+                os.chmod(
+                    hook_path,
+                    os.stat(hook_path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH,
+                )
             except Exception as e:
                 log.warning("设置钩子可执行权限失败: %s", e)
 
@@ -1218,7 +1224,10 @@ exit 0
                 log.info("项目已卸载 Git 提交门禁钩子: %s", hook_path)
                 return {"success": True, "message": "Git 提交门禁钩子卸载成功"}
             else:
-                return {"success": False, "message": "检测到非 auto-pm 拥有的 pre-commit 钩子，已安全跳过以防覆盖"}
+                return {
+                    "success": False,
+                    "message": "检测到非 auto-pm 拥有的 pre-commit 钩子，已安全跳过以防覆盖",
+                }
         except Exception as e:
             log.error("卸载 Git 提交门禁钩子失败: %s", e)
             return {"success": False, "message": f"卸载钩子失败: {e}"}

@@ -30,7 +30,11 @@ class IndustrialErrorMapper:
             err_cls_name = type(e).__name__
 
         # 1. 连接被拒绝（WinError 10061 / ConnectionRefusedError / ECONNREFUSED）
-        if isinstance(e, ConnectionRefusedError) or "10061" in err_msg or "refused" in err_msg.lower():
+        if (
+            isinstance(e, ConnectionRefusedError)
+            or "10061" in err_msg
+            or "refused" in err_msg.lower()
+        ):
             return "【通信拒绝】目标 PLC/设备未启动 Modbus TCP 监听服务或 502 端口被占用。"
 
         # 2. 通信超时（TimeoutError / socket.timeout / timed out）
@@ -46,11 +50,21 @@ class IndustrialErrorMapper:
             return "【网卡不可用】指定的源网卡 IP 地址不存在或网络已断开，请重新选择物理网卡。"
 
         # 4. 连接被远端重置 / 断开（WinError 10054 / ConnectionResetError / ECONNRESET）
-        if isinstance(e, (ConnectionResetError, ConnectionAbortedError)) or "10054" in err_msg or "reset by peer" in err_msg.lower():
-            return "【连接中断】PLC/远端设备主动重置或关闭了连接，可能由于超出最大连接数或设备重启。"
+        if (
+            isinstance(e, (ConnectionResetError, ConnectionAbortedError))
+            or "10054" in err_msg
+            or "reset by peer" in err_msg.lower()
+        ):
+            return (
+                "【连接中断】PLC/远端设备主动重置或关闭了连接，可能由于超出最大连接数或设备重启。"
+            )
 
         # 5. 主机/网络不可达（WinError 10065 / EHOSTUNREACH）
-        if "10065" in err_msg or "no route to host" in err_msg.lower() or "unreachable" in err_msg.lower():
+        if (
+            "10065" in err_msg
+            or "no route to host" in err_msg.lower()
+            or "unreachable" in err_msg.lower()
+        ):
             return "【网络不可达】无法路由至目标设备，请确认本机 IP 与 PLC 处于同一局域网/网关。"
 
         # 6. 数据解析与解包错误（struct.error / ValueError）
@@ -62,7 +76,9 @@ class IndustrialErrorMapper:
             return f"【文件不存在】未能定位到目标路径：{err_msg}"
 
         if isinstance(e, PermissionError):
-            return f"【权限不足】无法访问或修改指定文件，请检查文件是否被占用或需管理员权限：{err_msg}"
+            return (
+                f"【权限不足】无法访问或修改指定文件，请检查文件是否被占用或需管理员权限：{err_msg}"
+            )
 
         # 8. 配置缺失
         if isinstance(e, KeyError):

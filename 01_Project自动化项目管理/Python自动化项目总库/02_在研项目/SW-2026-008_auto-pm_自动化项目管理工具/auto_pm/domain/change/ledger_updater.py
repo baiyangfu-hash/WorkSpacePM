@@ -116,9 +116,7 @@ class LedgerUpdater:
                     # CHG-085：closed/archived 时回写完成日期列（parts[-3]）
                     if complete_date and status in ("✅已关闭", "✅已归档"):
                         parts[-3] = f" {complete_date} "
-                        log.info(
-                            "台帐完成日期已回写: %s → %s", change_number, complete_date
-                        )
+                        log.info("台帐完成日期已回写: %s → %s", change_number, complete_date)
                     lines[i] = "|".join(parts)
                     updated = True
                     log.info("台帐状态已更新: %s → %s", change_number, status)
@@ -148,13 +146,9 @@ class LedgerUpdater:
             updated_content = self._insert_row_to_index_table(content, new_row)
             if updated_content != content:
                 write_file(ledger_path, updated_content)
-                log.info(
-                    "台帐自愈补建: %s (序号%03d, 状态=%s)", change_number, seq, status
-                )
+                log.info("台帐自愈补建: %s (序号%03d, 状态=%s)", change_number, seq, status)
             else:
-                log.error(
-                    "台帐自愈补建失败: 未找到变更单索引表格 %s", ledger_path
-                )
+                log.error("台帐自愈补建失败: 未找到变更单索引表格 %s", ledger_path)
 
     def remove(self, ledger_path: str, change_number: str) -> None:
         """从台帐中删除指定变更单的行（TD-T10 修复，供测试 fixture 清理用）

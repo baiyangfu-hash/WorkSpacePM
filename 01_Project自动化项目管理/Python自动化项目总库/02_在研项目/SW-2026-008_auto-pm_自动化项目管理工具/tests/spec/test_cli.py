@@ -10,9 +10,8 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.cli.spec import spec_group
+from click.testing import CliRunner
 
 
 class TestCLIGroup:
@@ -127,7 +126,9 @@ class TestIndexCommand:
             ["index", "-w", str(populated_workspace), "--domain", "pm"],
         )
         assert result.exit_code == 0
-        pm_index = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "00_INDEX_全局规范索引.md"
+        pm_index = (
+            populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "00_INDEX_全局规范索引.md"
+        )
         assert pm_index.exists()
         content = pm_index.read_text(encoding="utf-8")
         assert "全局规范索引" in content
@@ -140,13 +141,17 @@ class TestIndexCommand:
             ["index", "-w", str(populated_workspace), "--domain", "python"],
         )
         assert result.exit_code == 0
-        python_readme = populated_workspace / "01_Project自动化项目管理" / "00_通用规范" / "README.md"
+        python_readme = (
+            populated_workspace / "01_Project自动化项目管理" / "00_通用规范" / "README.md"
+        )
         assert python_readme.exists()
 
     def test_index_idempotent(self, populated_workspace: Path) -> None:
         """重复调用应生成相同内容（幂等性）"""
         runner = CliRunner()
-        pm_index = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "00_INDEX_全局规范索引.md"
+        pm_index = (
+            populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "00_INDEX_全局规范索引.md"
+        )
 
         runner.invoke(
             spec_group,
@@ -210,7 +215,12 @@ class TestFrontmatterCommand:
     def test_frontmatter_apply_with_fix(self, populated_workspace: Path) -> None:
         """--fix 应实际写入 frontmatter 到无 frontmatter 的文件"""
         # 重写 PM-2026-001 文件,去掉 frontmatter
-        pm_file = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "01_项目管理域" / "PM-2026-001_项目管理规范_DEV.md"
+        pm_file = (
+            populated_workspace
+            / "00_Obsidian_Base全局规范文件仓库"
+            / "01_项目管理域"
+            / "PM-2026-001_项目管理规范_DEV.md"
+        )
         pm_file.write_text("# 项目管理规范\n\n无 frontmatter 内容\n", encoding="utf-8")
 
         runner = CliRunner()
@@ -268,7 +278,9 @@ class TestReportCommand:
         result = runner.invoke(spec_group, ["report", "-w", str(populated_workspace)])
         assert result.exit_code == 0
         # 默认输出路径应为 规范元数据汇总报告.md
-        default_path = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "规范元数据汇总报告.md"
+        default_path = (
+            populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "规范元数据汇总报告.md"
+        )
         assert default_path.exists()
         content = default_path.read_text(encoding="utf-8")
         assert "规范元数据汇总报告" in content
@@ -350,10 +362,20 @@ class TestConfigQuietCommand:
         runner = CliRunner()
         result = runner.invoke(
             spec_group,
-            ["index", "-w", str(populated_workspace), "--domain", "pm", "--config", str(config_file)],
+            [
+                "index",
+                "-w",
+                str(populated_workspace),
+                "--domain",
+                "pm",
+                "--config",
+                str(config_file),
+            ],
         )
         assert result.exit_code == 0
-        pm_index = populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "00_INDEX_全局规范索引.md"
+        pm_index = (
+            populated_workspace / "00_Obsidian_Base全局规范文件仓库" / "00_INDEX_全局规范索引.md"
+        )
         assert pm_index.exists()
 
     def test_frontmatter_quiet_silent(self, populated_workspace: Path) -> None:
@@ -408,6 +430,7 @@ class TestConfigQuietCommand:
         assert result.exit_code == 0
         # quiet + json 模式下,输出应为 JSON(可能为空数组)
         import json
+
         data = json.loads(result.output)
         assert "check_results" in data
 
@@ -453,9 +476,7 @@ class TestVerboseOption:
         assert "info" in summary
         assert summary["total"] >= 1, "应至少有 1 个检查结果"
 
-    def test_spec_check_json_without_verbose_no_summary(
-        self, workspace: Path
-    ) -> None:
+    def test_spec_check_json_without_verbose_no_summary(self, workspace: Path) -> None:
         """不带 --verbose 的 JSON 模式不应含 summary 字段"""
         runner = CliRunner()
         result = runner.invoke(

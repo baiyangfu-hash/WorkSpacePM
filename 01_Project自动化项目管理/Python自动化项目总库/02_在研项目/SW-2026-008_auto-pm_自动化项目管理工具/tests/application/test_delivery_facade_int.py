@@ -22,13 +22,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from auto_pm.application.delivery_facade import DeliveryFacade
 from auto_pm.change.change_service import ChangeService
 from auto_pm.core.asset_summary_service import AssetSummaryService
 from auto_pm.core.doc_refresh_service import DocRefreshService
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.report_service import ReportService
+
+from auto_pm.application.delivery_facade import DeliveryFacade
 from auto_pm.ui.contracts.dto.delivery_dto import (
     AssetSummaryDTO,
     ChangeReportDTO,

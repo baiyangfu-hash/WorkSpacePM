@@ -27,7 +27,7 @@ def test_get_dashboard_snapshot_success() -> None:
     facade = WorkbenchFacade(
         dashboard_service=mock_dashboard_service,
         project_service=MagicMock(),
-        asset_summary_service=MagicMock()
+        asset_summary_service=MagicMock(),
     )
     # Act
     result = facade.get_dashboard_snapshot()
@@ -42,6 +42,7 @@ def test_get_dashboard_snapshot_success() -> None:
     assert result.payload.recent_activities == [{"action": "test"}]
     assert result.payload.risk_hints == [{"risk": "high"}]
 
+
 def test_get_dashboard_snapshot_failure() -> None:
     """验证服务抛出异常时能被 QueryResult 正确捕获"""
     # Arrange
@@ -51,7 +52,7 @@ def test_get_dashboard_snapshot_failure() -> None:
     facade = WorkbenchFacade(
         dashboard_service=mock_dashboard_service,
         project_service=MagicMock(),
-        asset_summary_service=MagicMock()
+        asset_summary_service=MagicMock(),
     )
     # Act
     result = facade.get_dashboard_snapshot()
@@ -158,6 +159,7 @@ def test_get_active_change_status_no_dashboard_service() -> None:
 
 # ── list_project_cards 测试 ──────────────────────────────
 
+
 def test_list_project_cards_empty() -> None:
     """空列表时返回 success + []"""
     mock_project_service = MagicMock()
@@ -239,7 +241,9 @@ def test_list_project_cards_no_db_fallback() -> None:
 
     mock_project_service = MagicMock()
     # list_projects_with_change_count 抛 RuntimeError（无 DB）
-    mock_project_service.list_projects_with_change_count.side_effect = RuntimeError("未注入 DatabaseManager")
+    mock_project_service.list_projects_with_change_count.side_effect = RuntimeError(
+        "未注入 DatabaseManager"
+    )
     mock_project_service.list_projects.return_value = [mock_project]
 
     facade = WorkbenchFacade(
@@ -258,6 +262,7 @@ def test_list_project_cards_no_db_fallback() -> None:
 
 
 # ── get_project_workspace 测试 ──────────────────────────────
+
 
 def test_get_project_workspace_not_found() -> None:
     """项目不存在时返回 success=False"""
@@ -339,6 +344,7 @@ def test_get_project_workspace_python_project() -> None:
 
 # ── get_settings_summary 测试 ──────────────────────────────
 
+
 def test_get_settings_summary_no_db() -> None:
     """无 DB 时 db_available=False"""
     mock_project_service = MagicMock()
@@ -405,6 +411,7 @@ def test_get_settings_summary_exception() -> None:
 
 # ── clear_cache 测试 ──────────────────────────────
 
+
 def test_clear_cache_no_db() -> None:
     """无 DB 时 success=False"""
     mock_project_service = MagicMock()
@@ -446,6 +453,7 @@ def test_clear_cache_success() -> None:
 
 
 # ── rebuild_index 测试 ──────────────────────────────
+
 
 def test_rebuild_index_no_db() -> None:
     """无 DB 时 success=False"""
@@ -639,7 +647,9 @@ def test_save_workspace_root_success_with_runtime_reload(tmp_path, monkeypatch) 
     assert "运行态已重载" in result.message
 
 
-def test_save_workspace_root_partial_success_when_runtime_reload_fails(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_save_workspace_root_partial_success_when_runtime_reload_fails(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
     """配置已保存但运行态重载失败时，必须保留部分成功语义。"""
     # 隔离配置文件路径，避免污染真实的 .auto-pm-workspace
     # 回归修复：测试残留导致 GUI 启动读到空 pytest 临时目录，整个界面变空架子
@@ -656,7 +666,11 @@ def test_save_workspace_root_partial_success_when_runtime_reload_fails(tmp_path,
     )
 
     def _reload_callback(path: str) -> dict[str, object]:
-        return {"success": False, "message": f"重载失败: {path}", "workspace_root": "/old/workspace"}
+        return {
+            "success": False,
+            "message": f"重载失败: {path}",
+            "workspace_root": "/old/workspace",
+        }
 
     facade._reload_callback = _reload_callback
 

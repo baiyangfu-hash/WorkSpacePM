@@ -88,7 +88,9 @@ def _make_doc_refresh_result(**overrides: Any) -> SimpleNamespace:
         "project_id": "PROJ-001",
         "dry_run": False,
         "updated": True,
-        "refreshed_files": [{"file_path": "/docs/readme.md", "block_keys": ["plc-io-overview"], "changed": True}],
+        "refreshed_files": [
+            {"file_path": "/docs/readme.md", "block_keys": ["plc-io-overview"], "changed": True}
+        ],
         "issues": [],
     }
     data.update(overrides)
@@ -127,19 +129,38 @@ def _make_report_service(**overrides: Any) -> SimpleNamespace:
     return SimpleNamespace(
         get_project_overview=overrides.get(
             "get_project_overview",
-            lambda: {"total": 5, "by_stack": {"plc": 3, "python": 2}, "by_phase": {"developing": 5}, "by_business_line": {"SW": 5}},
+            lambda: {
+                "total": 5,
+                "by_stack": {"plc": 3, "python": 2},
+                "by_phase": {"developing": 5},
+                "by_business_line": {"SW": 5},
+            },
         ),
         get_change_overview=overrides.get(
             "get_change_overview",
-            lambda: {"total": 10, "by_status": {"draft": 5, "closed": 5}, "by_domain": {"ELEC": 10}},
+            lambda: {
+                "total": 10,
+                "by_status": {"draft": 5, "closed": 5},
+                "by_domain": {"ELEC": 10},
+            },
         ),
         get_spec_report=overrides.get(
             "get_spec_report",
-            lambda: {"total": 2, "found": 1, "missing": 1, "by_stack": {"plc": {"total": 1, "found": 1, "missing": []}}, "missing_codes": ["LSP-001"]},
+            lambda: {
+                "total": 2,
+                "found": 1,
+                "missing": 1,
+                "by_stack": {"plc": {"total": 1, "found": 1, "missing": []}},
+                "missing_codes": ["LSP-001"],
+            },
         ),
         get_scan_report=overrides.get(
             "get_scan_report",
-            lambda: {"latest": {"timestamp": "2026-07-07T10:00"}, "last_sync_time": "2026-07-07 10:00", "is_cache_available": True},
+            lambda: {
+                "latest": {"timestamp": "2026-07-07T10:00"},
+                "last_sync_time": "2026-07-07 10:00",
+                "is_cache_available": True,
+            },
         ),
     )
 
@@ -254,7 +275,12 @@ def test_refresh_project_docs_exception() -> None:
 def test_get_project_report_success() -> None:
     """正常调用返回 ProjectReportDTO 且字段正确（细化字段）"""
     svc = _make_report_service(
-        get_project_overview=lambda: {"total": 5, "by_stack": {"plc": 3, "python": 2}, "by_phase": {"developing": 5}, "by_business_line": {"SW": 5}},
+        get_project_overview=lambda: {
+            "total": 5,
+            "by_stack": {"plc": 3, "python": 2},
+            "by_phase": {"developing": 5},
+            "by_business_line": {"SW": 5},
+        },
     )
     facade = DeliveryFacade(report_service=svc)
 
@@ -285,7 +311,11 @@ def test_get_project_report_no_service() -> None:
 def test_get_change_report_success() -> None:
     """正常调用返回 ChangeReportDTO 且字段正确（细化字段）"""
     svc = _make_report_service(
-        get_change_overview=lambda: {"total": 10, "by_status": {"draft": 5, "closed": 5}, "by_domain": {"ELEC": 10}},
+        get_change_overview=lambda: {
+            "total": 10,
+            "by_status": {"draft": 5, "closed": 5},
+            "by_domain": {"ELEC": 10},
+        },
     )
     facade = DeliveryFacade(report_service=svc)
 
@@ -301,7 +331,13 @@ def test_get_change_report_success() -> None:
 def test_get_spec_report_success() -> None:
     """正常调用返回 SpecReportDTO 且字段正确（细化字段）"""
     svc = _make_report_service(
-        get_spec_report=lambda: {"total": 2, "found": 1, "missing": 1, "by_stack": {"plc": {"total": 1, "found": 1, "missing": []}}, "missing_codes": ["LSP-001"]},
+        get_spec_report=lambda: {
+            "total": 2,
+            "found": 1,
+            "missing": 1,
+            "by_stack": {"plc": {"total": 1, "found": 1, "missing": []}},
+            "missing_codes": ["LSP-001"],
+        },
     )
     facade = DeliveryFacade(report_service=svc)
 
@@ -318,7 +354,11 @@ def test_get_spec_report_success() -> None:
 def test_get_scan_report_success() -> None:
     """正常调用返回 ScanReportDTO 且字段正确（细化字段）"""
     svc = _make_report_service(
-        get_scan_report=lambda: {"latest": {"timestamp": "2026-07-07T10:00"}, "last_sync_time": "2026-07-07 10:00", "is_cache_available": True},
+        get_scan_report=lambda: {
+            "latest": {"timestamp": "2026-07-07T10:00"},
+            "last_sync_time": "2026-07-07 10:00",
+            "is_cache_available": True,
+        },
     )
     facade = DeliveryFacade(report_service=svc)
 

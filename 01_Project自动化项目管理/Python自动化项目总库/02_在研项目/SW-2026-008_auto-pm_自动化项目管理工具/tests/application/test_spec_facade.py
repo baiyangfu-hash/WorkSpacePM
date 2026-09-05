@@ -422,7 +422,9 @@ def test_generate_spec_report_success() -> None:
 def test_generate_spec_report_fmt_json() -> None:
     """fmt='json' 时 service.generate(fmt='json') 透传验证"""
     captured: dict[str, Any] = {}
-    output = _make_report_output(fmt="json", content='{"specs": {}}', output_path=Path("/tmp/report.json"))
+    output = _make_report_output(
+        fmt="json", content='{"specs": {}}', output_path=Path("/tmp/report.json")
+    )
 
     def _generate(fmt="markdown", output_path=None) -> Any:  # type: ignore[no-untyped-def]
         captured["fmt"] = fmt
@@ -539,7 +541,9 @@ def test_check_spec_frontmatter_auto_fix_no_pending() -> None:
     apply_calls: list = []  # type: ignore[type-arg]
     service = SimpleNamespace(
         preview=lambda: items,
-        apply=lambda pending: apply_calls.append(pending) or _make_frontmatter_output(modified_count=0),  # type: ignore[func-returns-value]
+        apply=lambda pending: (
+            apply_calls.append(pending) or _make_frontmatter_output(modified_count=0)
+        ),  # type: ignore[func-returns-value]
     )
     facade = SpecFacade(frontmatter_service=service)
 
@@ -576,7 +580,9 @@ def test_check_spec_frontmatter_exception() -> None:
 
 def test_run_spec_check_python_project(tmp_path: Path) -> None:
     """测试通过 SpecFacade 路由 Python 项目规范检查"""
-    proj = SimpleNamespace(project_id="SW-2026-PYT", name="Python项目", stack="python", path=str(tmp_path))
+    proj = SimpleNamespace(
+        project_id="SW-2026-PYT", name="Python项目", stack="python", path=str(tmp_path)
+    )
     proj_service = SimpleNamespace(
         get_project=lambda pid: proj if pid == "SW-2026-PYT" else None,
         workspace_root=str(tmp_path),
@@ -586,7 +592,10 @@ def test_run_spec_check_python_project(tmp_path: Path) -> None:
 
     # 模拟 templates/python-tool/template 目录结构，用于 check
     (tmp_path / ".copier-answers.yml").write_text("stack: python\n", encoding="utf-8")
-    (tmp_path / "pyproject.toml").write_text("[project]\nname = \"test\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n',
+        encoding="utf-8",
+    )
 
     result = facade.run_spec_check(project_id="SW-2026-PYT")
     assert result.success is True
@@ -597,7 +606,9 @@ def test_run_spec_check_python_project(tmp_path: Path) -> None:
 
 def test_run_spec_repair_python_project(tmp_path: Path) -> None:
     """测试通过 SpecFacade 路由 Python 项目一键修复"""
-    proj = SimpleNamespace(project_id="SW-2026-PYT", name="Python项目", stack="python", path=str(tmp_path))
+    proj = SimpleNamespace(
+        project_id="SW-2026-PYT", name="Python项目", stack="python", path=str(tmp_path)
+    )
     proj_service = SimpleNamespace(
         get_project=lambda pid: proj if pid == "SW-2026-PYT" else None,
         workspace_root=str(tmp_path),
@@ -616,4 +627,3 @@ def test_run_spec_repair_python_project(tmp_path: Path) -> None:
     # 即使修复项为 0（因缺少模板文件），也应该成功执行返回 success=True
     assert result.success is True
     assert "success" in result.message or "修复" in result.message
-

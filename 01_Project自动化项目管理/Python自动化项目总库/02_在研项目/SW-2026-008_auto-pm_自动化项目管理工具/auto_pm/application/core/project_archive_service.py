@@ -117,12 +117,16 @@ class ProjectArchiveService:
         for part in Path(canonical).parts:
             current /= part
             if current.exists() and self._is_link_or_reparse(current):
-                raise ArchiveContractError(ArchiveErrorCode.LINK_ANOMALY, f"路径含链接: {canonical}")
+                raise ArchiveContractError(
+                    ArchiveErrorCode.LINK_ANOMALY, f"路径含链接: {canonical}"
+                )
         resolved = target.resolve()
         try:
             resolved.relative_to(self.workspace_root)
         except ValueError as exc:
-            raise ArchiveContractError(ArchiveErrorCode.PATH_ESCAPE, f"路径越界: {canonical}") from exc
+            raise ArchiveContractError(
+                ArchiveErrorCode.PATH_ESCAPE, f"路径越界: {canonical}"
+            ) from exc
         return Path(resolved)
 
     def _read_ledger(self) -> list[dict[str, str]]:
@@ -134,7 +138,8 @@ class ProjectArchiveService:
         except (OSError, json.JSONDecodeError) as exc:
             raise ArchiveContractError(ArchiveErrorCode.LEDGER_DAMAGED, "归档台账损坏") from exc
         if not isinstance(value, list) or not all(
-            isinstance(row, dict) and all(isinstance(key, str) and isinstance(item, str) for key, item in row.items())
+            isinstance(row, dict)
+            and all(isinstance(key, str) and isinstance(item, str) for key, item in row.items())
             for row in value
         ):
             raise ArchiveContractError(ArchiveErrorCode.LEDGER_DAMAGED, "归档台账结构非法")
@@ -152,12 +157,24 @@ class ProjectArchiveService:
         os.replace(temporary, path)
 
     @staticmethod
-    def _duplicate_state(rows: list[dict[str, str]], request: ArchiveRequest) -> DuplicateRequestState:
+    def _duplicate_state(
+        rows: list[dict[str, str]], request: ArchiveRequest
+    ) -> DuplicateRequestState:
         for row in rows:
             if row.get("request_id") != request.request_id:
                 continue
-            identity = (row.get("project_id"), row.get("operation"), row.get("source_path"), row.get("destination_path"))
-            requested = (request.project_id, request.operation.value, request.source_path, request.destination_path)
+            identity = (
+                row.get("project_id"),
+                row.get("operation"),
+                row.get("source_path"),
+                row.get("destination_path"),
+            )
+            requested = (
+                request.project_id,
+                request.operation.value,
+                request.source_path,
+                request.destination_path,
+            )
             if identity == requested and row.get("result") == "completed":
                 return DuplicateRequestState.SAME_COMPLETED
             return DuplicateRequestState.CONFLICT
@@ -192,7 +209,9 @@ class ProjectArchiveService:
     def _phase_file(project_path: Path, project_id: str) -> Path:
         path = project_path / f"PM_SESSION_{project_id}.md"
         if not path.is_file():
-            raise ArchiveContractError(ArchiveErrorCode.INVALID_REQUEST, f"缺少 PM_SESSION: {project_id}")
+            raise ArchiveContractError(
+                ArchiveErrorCode.INVALID_REQUEST, f"缺少 PM_SESSION: {project_id}"
+            )
         return path
 
     @staticmethod
@@ -219,10 +238,17 @@ class ProjectArchiveService:
             and row.get("status") == "archived"
         ]
         if len(matches) != 1:
-            raise ArchiveContractError(ArchiveErrorCode.ARCHIVE_CODE_INVALID, "归档编号不存在或不唯一")
+            raise ArchiveContractError(
+                ArchiveErrorCode.ARCHIVE_CODE_INVALID, "归档编号不存在或不唯一"
+            )
         row = matches[0]
-        if row.get("destination_path") != request.source_path or row.get("source_path") != request.destination_path:
-            raise ArchiveContractError(ArchiveErrorCode.NOT_AUTHORIZED, "恢复路径与归档记录不精确匹配")
+        if (
+            row.get("destination_path") != request.source_path
+            or row.get("source_path") != request.destination_path
+        ):
+            raise ArchiveContractError(
+                ArchiveErrorCode.NOT_AUTHORIZED, "恢复路径与归档记录不精确匹配"
+            )
         return row
 
     def _facts(
@@ -248,7 +274,9 @@ class ProjectArchiveService:
             source_exists=source.is_dir(),
             destination_exists=destination.exists(),
             source_link_anomaly=self._is_link_or_reparse(source),
-            destination_link_anomaly=(destination.exists() and self._is_link_or_reparse(destination)),
+            destination_link_anomaly=(
+                destination.exists() and self._is_link_or_reparse(destination)
+            ),
             lock_acquired=lock_acquired,
             duplicate_request=self._duplicate_state(rows, request),
         )
@@ -280,7 +308,9 @@ class ProjectArchiveService:
         try:
             authorization = self.policy.authorization_for(request)
         except Exception as exc:
-            raise ArchiveContractError(ArchiveErrorCode.AUTHORIZATION_QUERY_FAILED, "授权查询失败") from exc
+            raise ArchiveContractError(
+                ArchiveErrorCode.AUTHORIZATION_QUERY_FAILED, "授权查询失败"
+            ) from exc
         try:
             approved_paths = {canonical_project_path(path) for path in authorization.approved_paths}
         except ArchiveContractError as exc:
@@ -312,7 +342,9 @@ class ProjectArchiveService:
         except Exception as exc:
             raise ArchiveContractError(ArchiveErrorCode.CHG_QUERY_FAILED, "变更单查询失败") from exc
 
-        preliminary = self._facts(request, source, destination, rows, authorization, open_changes, False)
+        preliminary = self._facts(
+            request, source, destination, rows, authorization, open_changes, False
+        )
         try:
             build_archive_plan(request, preliminary)
         except ArchiveContractError as exc:
@@ -326,9 +358,7 @@ class ProjectArchiveService:
             source = self._resolve(request.source_path)
             destination = self._resolve(request.destination_path)
             if not destination.parent.is_dir() or self._is_link_or_reparse(destination.parent):
-                raise ArchiveContractError(
-                    ArchiveErrorCode.LINK_ANOMALY, "锁后目标父目录复核失败"
-                )
+                raise ArchiveContractError(ArchiveErrorCode.LINK_ANOMALY, "锁后目标父目录复核失败")
             rows = self._read_ledger()
             try:
                 authorization = self.policy.authorization_for(request)
@@ -339,7 +369,9 @@ class ProjectArchiveService:
             try:
                 open_changes = self.policy.open_change_ids(request.project_id)
             except Exception as exc:
-                raise ArchiveContractError(ArchiveErrorCode.CHG_QUERY_FAILED, "锁后变更复核失败") from exc
+                raise ArchiveContractError(
+                    ArchiveErrorCode.CHG_QUERY_FAILED, "锁后变更复核失败"
+                ) from exc
             plan = build_archive_plan(
                 request,
                 self._facts(request, source, destination, rows, authorization, open_changes, True),

@@ -51,7 +51,9 @@ class AiContextBridge(QObject):
             return "fullstack-engineer"
         return "pm-workflow"
 
-    def _infer_intent(self, current_page: str, stack: str, change_number: str, phase: str = "") -> str:
+    def _infer_intent(
+        self, current_page: str, stack: str, change_number: str, phase: str = ""
+    ) -> str:
         if phase == "initiating":
             return "initiate_project"
         if phase == "planning":
@@ -64,7 +66,9 @@ class AiContextBridge(QObject):
             return "plc_review"
         return "project_followup"
 
-    def _extract_active_hypothesis(self, project_id: str, change_number: str = "") -> dict[str, str]:
+    def _extract_active_hypothesis(
+        self, project_id: str, change_number: str = ""
+    ) -> dict[str, str]:
         hyp_id = ""
         statement = ""
         expected_signal = ""
@@ -110,11 +114,18 @@ class AiContextBridge(QObject):
             active_hyp = self._extract_active_hypothesis(project_id, change_number)
             return {
                 "goal_ref": f"{session_ref}#product-goal",
-                "hypothesis_ref": f"{session_ref}#hypothesis-ledger" if active_hyp.get("id") else "",
+                "hypothesis_ref": f"{session_ref}#hypothesis-ledger"
+                if active_hyp.get("id")
+                else "",
                 "success_metric_ref": active_hyp.get("success_metric", ""),
                 "active_hypothesis": active_hyp,
             }
-        return {"goal_ref": "", "hypothesis_ref": "", "success_metric_ref": "", "active_hypothesis": {}}
+        return {
+            "goal_ref": "",
+            "hypothesis_ref": "",
+            "success_metric_ref": "",
+            "active_hypothesis": {},
+        }
 
     def _fallback_feedback(self, status: str, summary: str) -> dict[str, Any]:
         return {
@@ -239,7 +250,7 @@ class AiContextBridge(QObject):
     @Slot(str, result="QVariant")
     def listPendingHandoffs(self, project_id: str = "") -> list[dict[str, Any]]:
         """Expose pending executor handoffs for the cockpit work queue."""
-        return self._handoff_service().list_pending(project_id)
+        return list(self._handoff_service().list_pending(project_id))
 
     @Slot(str, str, str, str, str, str, str, str, result="QVariant")
     def writePmClosureContext(
@@ -288,7 +299,9 @@ class AiContextBridge(QObject):
             },
             "active_page": current_page,
             "product_context": handoff.get("product_context")
-            or self._build_product_context(project_id or str(handoff.get("project_id", "")), change_number_value),
+            or self._build_product_context(
+                project_id or str(handoff.get("project_id", "")), change_number_value
+            ),
         }
         try:
             ai_dir = self._workspace_root / ".auto-pm"

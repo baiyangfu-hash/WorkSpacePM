@@ -1,4 +1,5 @@
 """QML 单元测试：DocBrowserView.qml 及其委托组件渲染 (CHG-SCPT-2026-129)"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,19 +13,19 @@ _QML_DIR = Path(__file__).resolve().parents[2] / "auto_pm" / "ui" / "qml"
 _VIEWS_DIR = _QML_DIR / "views"
 _COMPONENTS_DOC_DIR = _QML_DIR / "components" / "doc"
 
+
 @pytest.fixture
 def qml_engine(qapp: QApplication) -> QQmlEngine:
     """提供带有 Theme 引用路径的 QML 引擎"""
     import PySide6
+
     engine = QQmlEngine()
-    sys_qml = Path(r"C:\Users\fubai\AppData\Local\Programs\Python\Python311\Lib\site-packages\PySide6\qml")
-    if sys_qml.exists():
-        engine.addImportPath(str(sys_qml))
     pyside6_qml = Path(PySide6.__file__).parent / "qml"
     if pyside6_qml.exists():
         engine.addImportPath(str(pyside6_qml))
     engine.addImportPath(str(_QML_DIR))
     return engine
+
 
 def _load_qml(engine: QQmlEngine, path: Path) -> object:
     url = QUrl.fromLocalFile(str(path))
@@ -37,10 +38,12 @@ def _load_qml(engine: QQmlEngine, path: Path) -> object:
     obj._component_ref = component
     return obj
 
+
 def _to_variant(value: object) -> object:
     if hasattr(value, "toVariant"):
         return value.toVariant()
     return value
+
 
 def test_doc_browser_view_instantiation(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """测试 DocBrowserView 默认属性与初始化成功"""
@@ -48,6 +51,7 @@ def test_doc_browser_view_instantiation(qapp: QApplication, qml_engine: QQmlEngi
     assert view.property("projectId") == ""  # type: ignore[attr-defined]
     assert view.property("selectedIndex") == -1  # type: ignore[attr-defined]
     assert view.property("statusMessage") == ""  # type: ignore[attr-defined]
+
 
 def test_doc_browser_view_filter_logic(qapp: QApplication, qml_engine: QQmlEngine) -> None:
     """测试 DocBrowserView 的目录搜索过滤逻辑"""

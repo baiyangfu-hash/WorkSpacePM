@@ -10,10 +10,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.cli.constraint import constraint_group
 from auto_pm.constraint.guard import BOM
+from click.testing import CliRunner
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -38,7 +37,9 @@ class TestConstraintCLI:
         assert "verify" in result.output
         assert "heal" in result.output
 
-    def test_list_constraints(self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch) -> None:
+    def test_list_constraints(
+        self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch
+    ) -> None:
         """constraint list 正确列出已加载的约束"""
         monkeypatch.setattr("auto_pm.cli.constraint._resolve_workspace", lambda ctx: temp_workspace)
 
@@ -48,7 +49,9 @@ class TestConstraintCLI:
         assert "CST-FILE-002" in result.output
         assert "共 10 个约束定义" in result.output
 
-    def test_check_clean(self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch) -> None:
+    def test_check_clean(
+        self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch
+    ) -> None:
         """constraint check 没有违规"""
         monkeypatch.setattr("auto_pm.cli.constraint._resolve_workspace", lambda ctx: temp_workspace)
 
@@ -60,7 +63,9 @@ class TestConstraintCLI:
         assert result.exit_code == 0
         assert "所有约束检查通过" in result.output
 
-    def test_check_violations(self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch) -> None:
+    def test_check_violations(
+        self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch
+    ) -> None:
         """constraint check 检测到违规"""
         monkeypatch.setattr("auto_pm.cli.constraint._resolve_workspace", lambda ctx: temp_workspace)
 
@@ -78,7 +83,9 @@ class TestConstraintCLI:
         result_gate = cli_runner.invoke(constraint_group, ["check", "--gate"])
         assert result_gate.exit_code != 0
 
-    def test_check_json_output(self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch) -> None:
+    def test_check_json_output(
+        self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch
+    ) -> None:
         """constraint check --json 格式化输出"""
         monkeypatch.setattr("auto_pm.cli.constraint._resolve_workspace", lambda ctx: temp_workspace)
 
@@ -91,7 +98,9 @@ class TestConstraintCLI:
         assert data["violations_count"] == 1
         assert data["violations"][0]["constraint_id"] == "CST-FILE-002"
 
-    def test_guard_and_verify(self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch) -> None:
+    def test_guard_and_verify(
+        self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch
+    ) -> None:
         """constraint guard 登记快照 + verify 校验"""
         monkeypatch.setattr("auto_pm.cli.constraint._resolve_workspace", lambda ctx: temp_workspace)
 
@@ -114,7 +123,9 @@ class TestConstraintCLI:
         assert result_verify_fail.exit_code != 0
         assert "文件已被修改" in result_verify_fail.output
 
-    def test_heal_command(self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch) -> None:
+    def test_heal_command(
+        self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch
+    ) -> None:
         """constraint heal 自愈命令"""
         monkeypatch.setattr("auto_pm.cli.constraint._resolve_workspace", lambda ctx: temp_workspace)
 

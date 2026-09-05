@@ -1,4 +1,5 @@
 """Domain services for doc sync and consistency auditing."""
+
 from pathlib import Path
 
 from auto_pm.domain.doc.models import DocCheckResult
@@ -13,7 +14,13 @@ class DocSyncService:
 
     def __init__(self, workspace_root: Path):
         self.ws = workspace_root
-        self.app_root = workspace_root / "01_Project自动化项目管理" / "Python自动化项目总库" / "02_在研项目" / "SW-2026-008_auto-pm_自动化项目管理工具"
+        self.app_root = (
+            workspace_root
+            / "01_Project自动化项目管理"
+            / "Python自动化项目总库"
+            / "02_在研项目"
+            / "SW-2026-008_auto-pm_自动化项目管理工具"
+        )
 
     def sync_all(self) -> list[str]:
         logs: list[str] = []
@@ -29,7 +36,9 @@ class DocSyncService:
         # 2. Extract QML Bridges
         bridges_dir = self.app_root / "auto_pm" / "ui" / "qml" / "bridges"
         bridge_methods = BridgeAstExtractor.extract_from_directory(bridges_dir)
-        bridge_table = "| Bridge 模块 | 导出方法 / 信号 | 参数列表 | 说明 |\n|:---|:---|:---|:---|\n"
+        bridge_table = (
+            "| Bridge 模块 | 导出方法 / 信号 | 参数列表 | 说明 |\n|:---|:---|:---|:---|\n"
+        )
         for m in sorted(bridge_methods, key=lambda x: (x.bridge_name, x.method_name)):
             args_str = ", ".join(m.args) if m.args else "无"
             bridge_table += f"| `{m.bridge_name}` | `{m.method_name}` | `{args_str}` | {m.doc} |\n"
@@ -61,12 +70,19 @@ class DocSyncService:
 
         return logs
 
+
 class DocCheckService:
     """Audits doc-code consistency and version lock."""
 
     def __init__(self, workspace_root: Path):
         self.ws = workspace_root
-        self.app_root = workspace_root / "01_Project自动化项目管理" / "Python自动化项目总库" / "02_在研项目" / "SW-2026-008_auto-pm_自动化项目管理工具"
+        self.app_root = (
+            workspace_root
+            / "01_Project自动化项目管理"
+            / "Python自动化项目总库"
+            / "02_在研项目"
+            / "SW-2026-008_auto-pm_自动化项目管理工具"
+        )
 
     def check_all(self) -> list[DocCheckResult]:
         results: list[DocCheckResult] = []
@@ -79,19 +95,23 @@ class DocCheckService:
             text = user_guide.read_text(encoding="utf-8")
             missing_groups = [cmd.group for cmd in cli_commands if cmd.group not in text]
             if missing_groups:
-                results.append(DocCheckResult(
-                    check_id="DOC-001",
-                    name="CLI 命令与用户指南同步",
-                    passed=False,
-                    message=f"USER_GUIDE 缺少以下 CLI 分组说明: {', '.join(set(missing_groups))}"
-                ))
+                results.append(
+                    DocCheckResult(
+                        check_id="DOC-001",
+                        name="CLI 命令与用户指南同步",
+                        passed=False,
+                        message=f"USER_GUIDE 缺少以下 CLI 分组说明: {', '.join(set(missing_groups))}",
+                    )
+                )
             else:
-                results.append(DocCheckResult(
-                    check_id="DOC-001",
-                    name="CLI 命令与用户指南同步",
-                    passed=True,
-                    message=f"已覆盖全量 {len(cli_commands)} 组 CLI 命令"
-                ))
+                results.append(
+                    DocCheckResult(
+                        check_id="DOC-001",
+                        name="CLI 命令与用户指南同步",
+                        passed=True,
+                        message=f"已覆盖全量 {len(cli_commands)} 组 CLI 命令",
+                    )
+                )
 
         # Check 2: Version lock consistency
         pyproject = self.app_root / "pyproject.toml"
@@ -108,11 +128,13 @@ class DocCheckService:
                     ver_pm = line.split(":")[-1].strip().strip('"').replace("V", "")
 
         passed_ver = bool(ver_pyproject and ver_pm and ver_pyproject in ver_pm)
-        results.append(DocCheckResult(
-            check_id="DOC-004",
-            name="全系统版本锁一致性",
-            passed=passed_ver or True,
-            message=f"pyproject={ver_pyproject or 'V1.0.0'}, PM_SESSION={ver_pm or 'V1.0.0'}"
-        ))
+        results.append(
+            DocCheckResult(
+                check_id="DOC-004",
+                name="全系统版本锁一致性",
+                passed=passed_ver or True,
+                message=f"pyproject={ver_pyproject or 'V1.0.0'}, PM_SESSION={ver_pm or 'V1.0.0'}",
+            )
+        )
 
         return results

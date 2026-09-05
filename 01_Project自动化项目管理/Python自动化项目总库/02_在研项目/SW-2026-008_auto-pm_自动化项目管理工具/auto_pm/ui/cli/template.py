@@ -59,9 +59,7 @@ def cmd_list(ctx: click.Context) -> None:
 @click.argument("project_id")
 @click.option("--overwrite", is_flag=True, help="覆盖冲突文件")
 @click.pass_context
-def cmd_update(
-    ctx: click.Context, project_id: str, overwrite: bool
-) -> None:
+def cmd_update(ctx: click.Context, project_id: str, overwrite: bool) -> None:
     """对已有项目执行 Copier 模板增量更新"""
     app_ctx: AppContext = ctx.obj
 

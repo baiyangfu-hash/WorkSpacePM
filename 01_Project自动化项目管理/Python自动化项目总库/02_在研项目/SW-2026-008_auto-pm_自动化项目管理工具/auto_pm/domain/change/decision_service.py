@@ -99,7 +99,9 @@ class DecisionService:
 
     def _enforce_disposition(self, decision_id: str, decision_bytes: bytes) -> None:
         matches = [
-            record for record in self._load_dispositions() if record.target_decision_id == decision_id
+            record
+            for record in self._load_dispositions()
+            if record.target_decision_id == decision_id
         ]
         if not matches:
             return
@@ -213,7 +215,11 @@ class DecisionService:
             )
 
         scope_raw = cr.impact_scope
-        resolved_scope = "/".join(str(item) for item in scope_raw) if isinstance(scope_raw, list) else str(scope_raw or "MODULE")
+        resolved_scope = (
+            "/".join(str(item) for item in scope_raw)
+            if isinstance(scope_raw, list)
+            else str(scope_raw or "MODULE")
+        )
         effective_files = [str(path).strip() for path in approved_files or [] if str(path).strip()]
         if not effective_files:
             raise DecisionValidationError("必须提供非空的精确 approved_files 白名单")
@@ -239,7 +245,9 @@ class DecisionService:
         self.decisions_dir.mkdir(parents=True, exist_ok=True)
         target_file = self._decision_path(dto.decision_id)
         try:
-            target_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            target_file.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except OSError as exc:
             raise DecisionValidationError(f"决策包写入失败: {target_file}") from exc
         log.info("决策包已成功固化: %s", target_file)

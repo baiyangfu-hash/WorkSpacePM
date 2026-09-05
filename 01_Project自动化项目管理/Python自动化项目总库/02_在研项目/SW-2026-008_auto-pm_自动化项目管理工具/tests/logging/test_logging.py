@@ -5,7 +5,6 @@ from io import StringIO
 from unittest.mock import Mock
 
 import pytest
-
 from auto_pm.logging.logging import setup_logger
 
 
@@ -48,7 +47,9 @@ def test_setup_logger_info_level() -> None:
 
 def test_setup_logger_warning_level() -> None:
     """Log warning message"""
-    output = _capture_logger_output(_mock_app_name(), "WARNING", "This is a warning message", "warning")
+    output = _capture_logger_output(
+        _mock_app_name(), "WARNING", "This is a warning message", "warning"
+    )
     assert "WARNING" in output
     assert "This is a warning message" in output
 
@@ -62,7 +63,9 @@ def test_setup_logger_error_level() -> None:
 
 def test_setup_logger_critical_level() -> None:
     """Log critical message"""
-    output = _capture_logger_output(_mock_app_name(), "CRITICAL", "This is a critical message", "critical")
+    output = _capture_logger_output(
+        _mock_app_name(), "CRITICAL", "This is a critical message", "critical"
+    )
     assert "CRITICAL" in output
     assert "This is a critical message" in output
 

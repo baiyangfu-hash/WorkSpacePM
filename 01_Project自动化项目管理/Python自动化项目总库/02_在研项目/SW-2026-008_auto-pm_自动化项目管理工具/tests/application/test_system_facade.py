@@ -41,17 +41,20 @@ def _make_pm_service(**overrides: Any) -> SimpleNamespace:
     return SimpleNamespace(
         generate_view=overrides.get("generate_view", lambda: {"status": "ok"}),
         check=overrides.get("check", lambda: {"errors": 0, "warnings": 2}),
-        archive=overrides.get("archive", lambda section, keep_recent, dry_run: {
-            "archive_file": "/tmp/archive.md",
-            "archived_sections": [section],
-            "archived_line_count": 10,
-            "main_file_lines_before": 300,
-            "main_file_lines_after": 290,
-            "is_dry_run": dry_run,
-            "section_title": "Implementation Log",
-            "section_total_lines": 50,
-            "keep_recent": keep_recent,
-        }),
+        archive=overrides.get(
+            "archive",
+            lambda section, keep_recent, dry_run: {
+                "archive_file": "/tmp/archive.md",
+                "archived_sections": [section],
+                "archived_line_count": 10,
+                "main_file_lines_before": 300,
+                "main_file_lines_after": 290,
+                "is_dry_run": dry_run,
+                "section_title": "Implementation Log",
+                "section_total_lines": 50,
+                "keep_recent": keep_recent,
+            },
+        ),
     )
 
 
@@ -254,13 +257,21 @@ def test_get_template_detail_success(tmp_path: Path) -> None:  # type: ignore[na
     """正常调用返回 TemplateDetailDTO 且 6 个字段正确（含 copier.yml 解析 + stack 推断 + usage_count 统计）"""
     # 创建 copier.yml
     copier_yml = tmp_path / "copier.yml"
-    copier_yml.write_text("_commit: v1.2.3\n_description: Python project template\n", encoding="utf-8")
+    copier_yml.write_text(
+        "_commit: v1.2.3\n_description: Python project template\n", encoding="utf-8"
+    )
 
     template_svc = _make_template_service(get_template_path=lambda name: str(tmp_path))
     project_svc = SimpleNamespace(
-        list_projects=lambda: [_make_project("python"), _make_project("python"), _make_project("plc")],
+        list_projects=lambda: [
+            _make_project("python"),
+            _make_project("python"),
+            _make_project("plc"),
+        ],
     )
-    facade = SystemFacade(pm_session_service=None, template_service=template_svc, project_service=project_svc)
+    facade = SystemFacade(
+        pm_session_service=None, template_service=template_svc, project_service=project_svc
+    )
 
     res = facade.get_template_detail("python-tpl")
 
@@ -277,7 +288,9 @@ def test_get_template_detail_success(tmp_path: Path) -> None:  # type: ignore[na
 def test_get_template_detail_no_copier_yml(tmp_path: Path) -> None:  # type: ignore[name-defined]
     """copier.yml 不存在时使用默认值 version=unknown + description=暂无描述"""
     template_svc = _make_template_service(get_template_path=lambda name: str(tmp_path))
-    facade = SystemFacade(pm_session_service=None, template_service=template_svc, project_service=None)
+    facade = SystemFacade(
+        pm_session_service=None, template_service=template_svc, project_service=None
+    )
 
     res = facade.get_template_detail("plc-tpl")
 
@@ -329,7 +342,9 @@ def test_apply_template_success() -> None:
         }
     )
     project_svc = _make_project_service()
-    facade = SystemFacade(pm_session_service=None, template_service=svc, project_service=project_svc)
+    facade = SystemFacade(
+        pm_session_service=None, template_service=svc, project_service=project_svc
+    )
 
     res = facade.apply_template("PROJ-001", "python-tpl")
 
@@ -370,7 +385,9 @@ def test_apply_template_project_not_found() -> None:
     """project_service 未找到项目时返回 success=False"""
     svc = _make_template_service()
     project_svc = _make_project_service()  # 默认含 PROJ-001
-    facade = SystemFacade(pm_session_service=None, template_service=svc, project_service=project_svc)
+    facade = SystemFacade(
+        pm_session_service=None, template_service=svc, project_service=project_svc
+    )
 
     res = facade.apply_template("NOT-EXIST", "python-tpl")
 
@@ -387,7 +404,9 @@ def test_apply_template_exception() -> None:
         copy_template=_raise(Exception("apply boom")),
     )
     project_svc = _make_project_service()
-    facade = SystemFacade(pm_session_service=None, template_service=svc, project_service=project_svc)
+    facade = SystemFacade(
+        pm_session_service=None, template_service=svc, project_service=project_svc
+    )
 
     res = facade.apply_template("PROJ-001", "python-tpl")
 
@@ -432,7 +451,9 @@ def test_archive_pm_session_no_service() -> None:
 
 def test_archive_pm_session_error_response() -> None:
     """service.archive() 返回 error 字段时返回 success=False"""
-    svc = _make_pm_service(archive=lambda section, keep_recent, dry_run: {"error": f"章节 §{section} 不存在"})
+    svc = _make_pm_service(
+        archive=lambda section, keep_recent, dry_run: {"error": f"章节 §{section} 不存在"}
+    )
     facade = SystemFacade(pm_session_service=svc)
 
     res = facade.archive_pm_session("99", 0, True)

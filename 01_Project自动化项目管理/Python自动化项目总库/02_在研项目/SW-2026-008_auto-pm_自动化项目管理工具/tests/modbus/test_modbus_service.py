@@ -11,18 +11,19 @@
 
 测试策略：纯单元测试，无 PySide6/QML 依赖，无外部网络。
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 import pytest
-
 from auto_pm.modbus.modbus_service import ModbusService
 
 # ─────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────
+
 
 @pytest.fixture()
 def svc() -> ModbusService:
@@ -41,6 +42,7 @@ def svc_disconnected() -> ModbusService:
 # ─────────────────────────────────────────────
 # 1. Ping 诊断
 # ─────────────────────────────────────────────
+
 
 class TestPing:
     def test_ping_sim_returns_ok(self, svc: ModbusService) -> None:
@@ -65,6 +67,7 @@ class TestPing:
 # 2. 连接管理
 # ─────────────────────────────────────────────
 
+
 class TestConnect:
     def test_connect_sim_mode_returns_ok(self) -> None:
         """仿真模式连接应返回 True 并更新连接状态。"""
@@ -84,6 +87,7 @@ class TestConnect:
 # ─────────────────────────────────────────────
 # 3. 寄存器读取
 # ─────────────────────────────────────────────
+
 
 class TestReadRegisters:
     def test_read_disconnected_returns_failure(self, svc_disconnected: ModbusService) -> None:
@@ -145,6 +149,7 @@ class TestReadRegisters:
 # 4. 寄存器写入
 # ─────────────────────────────────────────────
 
+
 class TestWriteRegister:
     def test_write_disconnected_returns_failure(self, svc_disconnected: ModbusService) -> None:
         """未连接时写入应失败。"""
@@ -178,6 +183,7 @@ class TestWriteRegister:
 # 5. 浮点解码
 # ─────────────────────────────────────────────
 
+
 class TestFloatDecode:
     def test_float_decode_cdab(self, svc: ModbusService) -> None:
         """FC03 读 2 个连续寄存器后第一条应有浮点解码值（非 '—'）。"""
@@ -190,6 +196,7 @@ class TestFloatDecode:
 # ─────────────────────────────────────────────
 # 6. 寄存器扫描
 # ─────────────────────────────────────────────
+
 
 class TestScanRegisters:
     def test_scan_disconnected_returns_empty(self, svc_disconnected: ModbusService) -> None:
@@ -214,6 +221,7 @@ class TestScanRegisters:
 # ─────────────────────────────────────────────
 # 7. JSON 配置导入导出
 # ─────────────────────────────────────────────
+
 
 class TestJsonConfig:
     def test_export_creates_file(self, svc: ModbusService, tmp_path: Path) -> None:
@@ -248,6 +256,7 @@ class TestJsonConfig:
 # 8. 新增读取功能码（CHG-133 补齐，CHG-136 测试覆盖）
 #    FC02/07/20/22/23/24/43
 # ─────────────────────────────────────────────
+
 
 class TestReadNewFunctionCodes:
     """测试 CHG-133 新增的 7 个读取功能码。"""
@@ -321,6 +330,7 @@ class TestReadNewFunctionCodes:
 # 9. 新增写入功能码（CHG-133 补齐，CHG-136 测试覆盖）
 #    FC21/22
 # ─────────────────────────────────────────────
+
 
 class TestWriteNewFunctionCodes:
     """测试 CHG-133 新增的 2 个写入功能码。"""

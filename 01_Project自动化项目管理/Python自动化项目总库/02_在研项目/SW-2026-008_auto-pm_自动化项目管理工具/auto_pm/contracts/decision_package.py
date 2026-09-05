@@ -63,8 +63,10 @@ def normalize_approved_path(value: object) -> str:
     if "\\" in path or any(token in path for token in ("*", "?", "[", "]")):
         raise DecisionPackageValidationError(f"approved_files 条目不是精确路径: {path}")
     candidate = PurePosixPath(path)
-    if candidate.is_absolute() or not candidate.parts or any(
-        part in {"", ".", ".."} for part in candidate.parts
+    if (
+        candidate.is_absolute()
+        or not candidate.parts
+        or any(part in {"", ".", ".."} for part in candidate.parts)
     ):
         raise DecisionPackageValidationError(f"approved_files 条目必须是安全相对路径: {path}")
     normalized = candidate.as_posix()
@@ -103,9 +105,7 @@ class DecisionPackageDTO:
     def validate(self) -> None:
         """Validate every authority-bearing field before serialisation or use."""
         if self.schema_version != SCHEMA_VERSION:
-            raise DecisionPackageValidationError(
-                f"decision schema 不兼容: {self.schema_version!r}"
-            )
+            raise DecisionPackageValidationError(f"decision schema 不兼容: {self.schema_version!r}")
         _validate_identifier(self.decision_id, "decision_id", _DECISION_ID)
         _require_string(self.project_id, "project_id")
         _require_string(self.change_id, "change_id")
@@ -200,7 +200,10 @@ class DecisionDispositionDTO:
             raise DecisionPackageValidationError("处置记录根节点必须是 JSON 对象")
         if data.get("schema_version") != DISPOSITION_SCHEMA_VERSION:
             raise DecisionPackageValidationError("处置记录 schema 不兼容")
-        if data.get("preserves_original") is not True or data.get("retroactive_mutation") is not False:
+        if (
+            data.get("preserves_original") is not True
+            or data.get("retroactive_mutation") is not False
+        ):
             raise DecisionPackageValidationError("处置记录不得改写历史决策")
 
         semantics = data.get("authority_semantics")

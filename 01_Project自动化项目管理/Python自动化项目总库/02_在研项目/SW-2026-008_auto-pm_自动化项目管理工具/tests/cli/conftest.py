@@ -63,18 +63,32 @@ def plc_project_factory(tmp_path: Path) -> Callable[..., Path]:
             )
         if with_std_dirs:
             for d in [
-                "01_启动", "02_PLC程序", "03_HMI设计",
-                "04_现场调试", "05_测试与验证", "06_文档与交付",
-                "07_技术支持", "08_备件管理", "09_项目总结", "10_知识库",
-                "11_监控", "12_驱动器与设备",
+                "01_启动",
+                "02_PLC程序",
+                "03_HMI设计",
+                "04_现场调试",
+                "05_测试与验证",
+                "06_文档与交付",
+                "07_技术支持",
+                "08_备件管理",
+                "09_项目总结",
+                "10_知识库",
+                "11_监控",
+                "12_驱动器与设备",
             ]:
                 (project_dir / d).mkdir(exist_ok=True)
             chg_dir = project_dir / "11_监控" / "01_变更管理"
             (chg_dir / "01_变更单").mkdir(parents=True, exist_ok=True)
             (chg_dir / "02_变更记录").mkdir(parents=True, exist_ok=True)
-            (chg_dir / "02_变更记录" / "01_版本变更台帐.md").write_text("# 台账\n", encoding="utf-8")
-            (project_dir / "04_现场调试" / "现场调试计划.md").write_text("# 调试计划\n", encoding="utf-8")
-            (project_dir / "06_文档与交付" / "验收交付清单.md").write_text("# 验收\n", encoding="utf-8")
+            (chg_dir / "02_变更记录" / "01_版本变更台帐.md").write_text(
+                "# 台账\n", encoding="utf-8"
+            )
+            (project_dir / "04_现场调试" / "现场调试计划.md").write_text(
+                "# 调试计划\n", encoding="utf-8"
+            )
+            (project_dir / "06_文档与交付" / "验收交付清单.md").write_text(
+                "# 验收\n", encoding="utf-8"
+            )
         return project_dir
 
     return _create

@@ -7,13 +7,13 @@
 
 不依赖 copier 实际渲染，仅验证模板文件结构。
 """
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
 import pytest
-
 from auto_pm.core.template_service import TemplateService
 
 
@@ -36,9 +36,7 @@ class TestTemplateGeneration:
         assert "plc-test-suite" in templates
         assert "plc-standard-project" in templates
 
-    def test_plc_shared_library_template_structure(
-        self, template_service: TemplateService
-    ) -> None:
+    def test_plc_shared_library_template_structure(self, template_service: TemplateService) -> None:
         """plc-shared-library 模板结构正确"""
         path = template_service.get_template_path("plc-shared-library")
         # 验证 copier.yml 存在
@@ -48,9 +46,7 @@ class TestTemplateGeneration:
         # 验证 .plc.json.jinja 存在（根级）
         assert os.path.isfile(os.path.join(path, "template", ".plc.json.jinja"))
 
-    def test_plc_test_suite_template_structure(
-        self, template_service: TemplateService
-    ) -> None:
+    def test_plc_test_suite_template_structure(self, template_service: TemplateService) -> None:
         """plc-test-suite 模板结构正确"""
         path = template_service.get_template_path("plc-test-suite")
         assert os.path.isfile(os.path.join(path, "copier.yml"))
@@ -69,14 +65,10 @@ class TestTemplateGeneration:
         # 验证根级 .plc.json.jinja
         assert os.path.isfile(os.path.join(path, "template", ".plc.json.jinja"))
         # 验证 .plc.json.jinja 在 02_PLC程序/PLC_ST/ 下
-        plc_json_jinja = os.path.join(
-            path, "template", "02_PLC程序", "PLC_ST", ".plc.json.jinja"
-        )
+        plc_json_jinja = os.path.join(path, "template", "02_PLC程序", "PLC_ST", ".plc.json.jinja")
         assert os.path.isfile(plc_json_jinja)
 
-    def test_plc_standard_project_has_12_std_dirs(
-        self, template_service: TemplateService
-    ) -> None:
+    def test_plc_standard_project_has_12_std_dirs(self, template_service: TemplateService) -> None:
         """plc-standard-project 模板含 12 个标准目录（CHG-SCPT-2026-146: 01_启动 替代 00_项目管理）"""
         from auto_pm.plc.models import PM_DIR_CANDIDATES, STD_DIRS
 
@@ -86,8 +78,7 @@ class TestTemplateGeneration:
             # 项目管理目录：接受任一候选（01_启动 或 00_项目管理）
             if d in PM_DIR_CANDIDATES or d in ("00_项目管理", "01_启动"):
                 assert any(
-                    os.path.isdir(os.path.join(template_dir, c))
-                    for c in PM_DIR_CANDIDATES
+                    os.path.isdir(os.path.join(template_dir, c)) for c in PM_DIR_CANDIDATES
                 ), f"缺少项目管理目录（候选: {PM_DIR_CANDIDATES}）"
             else:
                 assert os.path.isdir(os.path.join(template_dir, d)), f"缺少标准目录: {d}"
@@ -100,12 +91,13 @@ class TestTemplateGeneration:
         template_dir = os.path.join(path, "template")
 
         has_proj_file = os.path.isfile(
-            os.path.join(
-                template_dir, "01_启动", "003_{{ project_id }}_项目立项表_PROJ.md.jinja"
-            )
+            os.path.join(template_dir, "01_启动", "003_{{ project_id }}_项目立项表_PROJ.md.jinja")
         ) or os.path.isfile(
             os.path.join(
-                template_dir, "00_项目管理", "01_立项与需求", "003_{{ project_id }}_项目立项表_PROJ.md.jinja"
+                template_dir,
+                "00_项目管理",
+                "01_立项与需求",
+                "003_{{ project_id }}_项目立项表_PROJ.md.jinja",
             )
         )
         assert has_proj_file, "缺少项目立项表模板文件"

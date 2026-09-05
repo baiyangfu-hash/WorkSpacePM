@@ -92,21 +92,19 @@ def workspace_root(tmp_dir: str) -> str:
     # 创建项目目录
     os.makedirs(project_path, exist_ok=True)
     # 创建项目标志文件，使 ChangeFileLocator._is_project_dir 识别为项目目录
-    with open(os.path.join(project_path, f"PM_SESSION_{project_id}.md"), "w", encoding="utf-8") as f:
+    with open(
+        os.path.join(project_path, f"PM_SESSION_{project_id}.md"), "w", encoding="utf-8"
+    ) as f:
         f.write("# PM_SESSION\n")
     # 创建变更单目录
-    chg_dir = os.path.join(
-        project_path, "04_监控", "01_变更管理", "01_变更单", "CHG-DOCU"
-    )
+    chg_dir = os.path.join(project_path, "04_监控", "01_变更管理", "01_变更单", "CHG-DOCU")
     os.makedirs(chg_dir, exist_ok=True)
     # 写入一个样例变更单
     chg_file = os.path.join(chg_dir, "CHG-DOCU-2026-001.md")
     with open(chg_file, "w", encoding="utf-8") as f:
         f.write(_build_sample_chg_for_workspace())
     # 创建台帐目录和文件
-    ledger_dir = os.path.join(
-        project_path, "04_监控", "01_变更管理", "02_变更记录"
-    )
+    ledger_dir = os.path.join(project_path, "04_监控", "01_变更管理", "02_变更记录")
     os.makedirs(ledger_dir, exist_ok=True)
     ledger_file = os.path.join(ledger_dir, "01_版本变更台帐.md")
     with open(ledger_file, "w", encoding="utf-8") as f:
@@ -124,9 +122,13 @@ def project_id() -> str:
 def chg_file(workspace_root: str) -> str:
     """变更单文件路径"""
     return os.path.join(
-        workspace_root, "TEST-2026-001",
-        "04_监控", "01_变更管理", "01_变更单",
-        "CHG-DOCU", "CHG-DOCU-2026-001.md",
+        workspace_root,
+        "TEST-2026-001",
+        "04_监控",
+        "01_变更管理",
+        "01_变更单",
+        "CHG-DOCU",
+        "CHG-DOCU-2026-001.md",
     )
 
 

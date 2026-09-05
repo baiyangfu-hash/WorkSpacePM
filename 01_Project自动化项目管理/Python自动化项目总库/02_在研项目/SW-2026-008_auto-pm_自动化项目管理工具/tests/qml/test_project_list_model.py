@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from auto_pm.models import ProjectInfo
+
 from auto_pm.ui.qml.models.project_list_model import ProjectListModel
 
 if TYPE_CHECKING:
@@ -172,9 +173,7 @@ def test_data_out_of_bounds_returns_none(
 # ── clear() ────────────────────────────────────────────────
 
 
-def test_clear_resets_model(
-    qapp: QApplication, sample_projects: list[ProjectInfo]
-) -> None:
+def test_clear_resets_model(qapp: QApplication, sample_projects: list[ProjectInfo]) -> None:
     """clear() 应清空模型"""
     model = ProjectListModel()
     model.setProjects(sample_projects)

@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.vartable.parsers.autoshop_parser import AutoshopParser
 from auto_pm.vartable.parsers.base_parser import BaseParser
 from auto_pm.vartable.parsers.codesys_parser import CodesysParser
@@ -60,8 +59,7 @@ class TestFormatParserInterfaces:
         """CodesysParser 解析 .csv 基本流程（英文列名 CSV）"""
         f = tmp_path / "var.csv"
         f.write_text(
-            "Name,Type,Address,Comment,Scope\n"
-            "i_bStart,BOOL,X0,Start,VAR_INPUT\n",
+            "Name,Type,Address,Comment,Scope\ni_bStart,BOOL,X0,Start,VAR_INPUT\n",
             encoding="utf-8",
         )
         result = CodesysParser().parse(f)

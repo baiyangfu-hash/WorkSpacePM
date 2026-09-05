@@ -122,7 +122,14 @@ class TestPhaseOptions:
 
     def test_phase_codes(self) -> None:
         """项目阶段编码列表"""
-        assert PHASE_CODES == ["initiating", "planning", "developing", "commissioning", "production", "archived"]
+        assert PHASE_CODES == [
+            "initiating",
+            "planning",
+            "developing",
+            "commissioning",
+            "production",
+            "archived",
+        ]
 
     def test_phase_labels(self) -> None:
         """项目阶段编码到标签的映射"""

@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-
 from auto_pm.models import ProjectInfo
 
 if TYPE_CHECKING:
@@ -70,6 +69,7 @@ def mock_project_service(sample_projects: list[ProjectInfo]) -> MagicMock:
     用于 QmlBridge 测试，避免依赖真实文件系统扫描。
     """
     from auto_pm.application.common import FacadeResult
+
     service = MagicMock()
     # 兼容老的 list_projects 接口，为了某些测试不报错
     service.list_projects.return_value = sample_projects

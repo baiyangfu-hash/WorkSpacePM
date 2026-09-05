@@ -45,9 +45,7 @@ class TestIoPointsParserBasic:
 
 
 class TestIoPointsParserFieldValidation:
-    def test_row_with_empty_required_fields(
-        self, row_with_empty_required_csv: Path
-    ) -> None:
+    def test_row_with_empty_required_fields(self, row_with_empty_required_csv: Path) -> None:
         """含空必需字段行（容错模式）"""
         result = IoPointsParser().parse(row_with_empty_required_csv)
         # 1 行有效 + 1 行 Valid_Tag + 3 行错误（station/address/tag 空）
@@ -81,9 +79,7 @@ class TestIoPointsParserFieldValidation:
         result = IoPointsParser().parse(sample_io_points_csv)
         assert result.var_table is not None
         # 第 2 行 comment 含分号
-        rear_door = next(
-            e for e in result.var_table.entries if e.tag == "Rear_Door_Lock"
-        )
+        rear_door = next(e for e in result.var_table.entries if e.tag == "Rear_Door_Lock")
         assert ";" in rear_door.comment
         assert "源程序用途" in rear_door.comment
 

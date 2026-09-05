@@ -46,7 +46,9 @@ class ProjectModel(QAbstractListModel):
             return 0
         return len(self._projects)
 
-    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+    def data(
+        self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole
+    ) -> Any:
         if not index.isValid() or not (0 <= index.row() < len(self._projects)):
             return None
         proj = self._projects[index.row()]

@@ -11,14 +11,11 @@ from auto_pm.vartable.parsers.codesys_parser import CodesysParser
 
 
 class TestCodesysParserDetectFormat:
-    def test_codesys_detect_format_csv_with_english_columns(
-        self, tmp_path: Path
-    ) -> None:
+    def test_codesys_detect_format_csv_with_english_columns(self, tmp_path: Path) -> None:
         """detect_format 对含 Name+Type 列的 CSV 返回 True"""
         f = tmp_path / "var.csv"
         f.write_text(
-            "Name,Type,Address,Comment,Scope\n"
-            "i_bStart,BOOL,X0,Start,VAR_INPUT\n",
+            "Name,Type,Address,Comment,Scope\ni_bStart,BOOL,X0,Start,VAR_INPUT\n",
             encoding="utf-8",
         )
         assert CodesysParser().detect_format(f) is True

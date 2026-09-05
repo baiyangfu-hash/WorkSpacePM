@@ -258,9 +258,7 @@ _ALLOWED_TRANSITIONS: dict[ArchiveState, frozenset[ArchiveState]] = {
     ArchiveState.DATABASE_UPDATED: frozenset(
         {ArchiveState.SCANNER_REFRESHED, ArchiveState.COMPENSATING}
     ),
-    ArchiveState.SCANNER_REFRESHED: frozenset(
-        {ArchiveState.COMPLETED, ArchiveState.COMPENSATING}
-    ),
+    ArchiveState.SCANNER_REFRESHED: frozenset({ArchiveState.COMPLETED, ArchiveState.COMPENSATING}),
     ArchiveState.COMPENSATING: frozenset({ArchiveState.ROLLED_BACK, ArchiveState.FAILED}),
     ArchiveState.COMPLETED: frozenset(),
     ArchiveState.ROLLED_BACK: frozenset(),
@@ -273,8 +271,10 @@ def canonical_project_path(path: str) -> str:
     if not path or "\\" in path or any(character in path for character in "*?[]"):
         raise ArchiveContractError(ArchiveErrorCode.PATH_ESCAPE, f"非法项目路径: {path!r}")
     candidate = PurePosixPath(path)
-    if candidate.is_absolute() or candidate.anchor or any(
-        part in {"", ".", ".."} for part in candidate.parts
+    if (
+        candidate.is_absolute()
+        or candidate.anchor
+        or any(part in {"", ".", ".."} for part in candidate.parts)
     ):
         raise ArchiveContractError(ArchiveErrorCode.PATH_ESCAPE, f"非法项目路径: {path!r}")
     canonical = candidate.as_posix()
@@ -341,7 +341,9 @@ def build_archive_plan(
         raise ArchiveContractError(ArchiveErrorCode.PROTECTED_PROJECT, "受保护项目禁止归档或恢复")
     if request.operation is ArchiveOperation.RESTORE:
         if not _ARCHIVE_CODE.fullmatch(request.archive_code):
-            raise ArchiveContractError(ArchiveErrorCode.ARCHIVE_CODE_INVALID, "恢复必须引用有效归档编号")
+            raise ArchiveContractError(
+                ArchiveErrorCode.ARCHIVE_CODE_INVALID, "恢复必须引用有效归档编号"
+            )
     elif request.archive_code and not _ARCHIVE_CODE.fullmatch(request.archive_code):
         raise ArchiveContractError(ArchiveErrorCode.ARCHIVE_CODE_INVALID, "预分配归档编号格式非法")
 
@@ -389,29 +391,56 @@ def build_archive_plan(
 
 
 ARCHIVE_FAILURE_MATRIX: tuple[ArchiveFailureCase, ...] = (
-    ArchiveFailureCase("authorization query error", ArchiveErrorCode.AUTHORIZATION_QUERY_FAILED, False, ArchiveState.FAILED),
-    ArchiveFailureCase("CHG query error", ArchiveErrorCode.CHG_QUERY_FAILED, False, ArchiveState.FAILED),
+    ArchiveFailureCase(
+        "authorization query error",
+        ArchiveErrorCode.AUTHORIZATION_QUERY_FAILED,
+        False,
+        ArchiveState.FAILED,
+    ),
+    ArchiveFailureCase(
+        "CHG query error", ArchiveErrorCode.CHG_QUERY_FAILED, False, ArchiveState.FAILED
+    ),
     ArchiveFailureCase("Git missing", ArchiveErrorCode.GIT_UNAVAILABLE, False, ArchiveState.FAILED),
     ArchiveFailureCase("Git non-zero", ArchiveErrorCode.GIT_NON_ZERO, False, ArchiveState.FAILED),
-    ArchiveFailureCase("ledger damaged", ArchiveErrorCode.LEDGER_DAMAGED, False, ArchiveState.FAILED),
+    ArchiveFailureCase(
+        "ledger damaged", ArchiveErrorCode.LEDGER_DAMAGED, False, ArchiveState.FAILED
+    ),
     ArchiveFailureCase("path escape", ArchiveErrorCode.PATH_ESCAPE, False, ArchiveState.FAILED),
     ArchiveFailureCase("link anomaly", ArchiveErrorCode.LINK_ANOMALY, False, ArchiveState.FAILED),
-    ArchiveFailureCase("concurrency conflict", ArchiveErrorCode.CONCURRENCY_CONFLICT, False, ArchiveState.FAILED),
-    ArchiveFailureCase("effect failure", ArchiveErrorCode.EXECUTION_FAILED, True, ArchiveState.COMPENSATING),
-    ArchiveFailureCase("compensation failure", ArchiveErrorCode.COMPENSATION_FAILED, True, ArchiveState.FAILED),
+    ArchiveFailureCase(
+        "concurrency conflict", ArchiveErrorCode.CONCURRENCY_CONFLICT, False, ArchiveState.FAILED
+    ),
+    ArchiveFailureCase(
+        "effect failure", ArchiveErrorCode.EXECUTION_FAILED, True, ArchiveState.COMPENSATING
+    ),
+    ArchiveFailureCase(
+        "compensation failure", ArchiveErrorCode.COMPENSATION_FAILED, True, ArchiveState.FAILED
+    ),
 )
 
 ARCHIVE_TEST_MATRIX: tuple[ArchiveTestCase, ...] = (
-    ArchiveTestCase("ARC-001", "archive and restore are the only capabilities", ArchiveErrorCode.HARD_DELETE_FORBIDDEN),
+    ArchiveTestCase(
+        "ARC-001",
+        "archive and restore are the only capabilities",
+        ArchiveErrorCode.HARD_DELETE_FORBIDDEN,
+    ),
     ArchiveTestCase("ARC-002", "protected project rejection", ArchiveErrorCode.PROTECTED_PROJECT),
     ArchiveTestCase("ARC-003", "immutable decision scope", ArchiveErrorCode.NOT_AUTHORIZED),
     ArchiveTestCase("ARC-004", "CHG query failure is closed", ArchiveErrorCode.CHG_QUERY_FAILED),
-    ArchiveTestCase("ARC-005", "Git missing and non-zero are closed", ArchiveErrorCode.GIT_UNAVAILABLE),
+    ArchiveTestCase(
+        "ARC-005", "Git missing and non-zero are closed", ArchiveErrorCode.GIT_UNAVAILABLE
+    ),
     ArchiveTestCase("ARC-006", "damaged ledger is closed", ArchiveErrorCode.LEDGER_DAMAGED),
     ArchiveTestCase("ARC-007", "path and link containment", ArchiveErrorCode.PATH_ESCAPE),
     ArchiveTestCase("ARC-008", "duplicate request semantics", ArchiveErrorCode.DUPLICATE_REQUEST),
-    ArchiveTestCase("ARC-009", "lock precedes code allocation and move", ArchiveErrorCode.CONCURRENCY_CONFLICT),
+    ArchiveTestCase(
+        "ARC-009", "lock precedes code allocation and move", ArchiveErrorCode.CONCURRENCY_CONFLICT
+    ),
     ArchiveTestCase("ARC-010", "effects compensate in reverse order", None),
-    ArchiveTestCase("ARC-011", "restore requires exact archive code", ArchiveErrorCode.ARCHIVE_CODE_INVALID),
-    ArchiveTestCase("ARC-012", "state machine rejects shortcuts", ArchiveErrorCode.INVALID_STATE_TRANSITION),
+    ArchiveTestCase(
+        "ARC-011", "restore requires exact archive code", ArchiveErrorCode.ARCHIVE_CODE_INVALID
+    ),
+    ArchiveTestCase(
+        "ARC-012", "state machine rejects shortcuts", ArchiveErrorCode.INVALID_STATE_TRANSITION
+    ),
 )

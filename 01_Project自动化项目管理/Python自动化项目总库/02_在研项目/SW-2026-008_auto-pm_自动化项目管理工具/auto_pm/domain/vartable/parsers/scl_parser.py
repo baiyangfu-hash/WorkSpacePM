@@ -27,9 +27,14 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from auto_pm.vartable.models import ParseResult, VarEntry, VarTable
-from auto_pm.vartable.parsers.base_parser import BaseParser
+
+if TYPE_CHECKING:
+    from auto_pm.domain.vartable.parsers.base_parser import BaseParser
+else:
+    from auto_pm.vartable.parsers.base_parser import BaseParser
 
 SOURCE_FORMAT = "scl"
 
@@ -91,7 +96,7 @@ class SclParser(BaseParser):
         from auto_pm.vartable.models import FormatType
         from auto_pm.vartable.parsers.format_detector import detect_format
 
-        return detect_format(file_path) == FormatType.SCL
+        return bool(detect_format(file_path) == FormatType.SCL)
 
     def parse(self, file_path: str | Path) -> ParseResult:
         """解析 SCL 源文件变量声明
@@ -113,7 +118,7 @@ class SclParser(BaseParser):
         content, encoding = read_result
 
         if not content.strip():
-            return self._empty_content_error(file_path, SOURCE_FORMAT)
+            return cast(ParseResult, self._empty_content_error(file_path, SOURCE_FORMAT))
 
         # 提取 FB 名称（用于 station 元数据）
         fb_name = ""

@@ -89,6 +89,7 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
 
     # 1.8 初始化 DatabaseManager 并注入
     from auto_pm.db.connection import DatabaseManager
+
     db = DatabaseManager(workspace_root)
 
     # 2. 初始化后端 Service（后端零改动约束：直接复用现有 Service）
@@ -104,6 +105,7 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
     # 2.2 启动时自动执行项目台账对账自愈（自愈机制）
     try:
         from auto_pm.change.ledger_reconciler import LedgerReconciler
+
         reconciler = LedgerReconciler()
         for proj in project_service.list_projects():
             try:
@@ -141,21 +143,23 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
 
     # M1 阶段：初始化 FacadeRegistry
     registry = FacadeRegistry()
-    registry.initialize({
-        "project_service": project_service,
-        "change_service": change_service,
-        "spec_check_service": spec_check_service,
-        "report_service": report_service,
-        "template_service": template_service,
-        "pm_session_service": pm_session_service,
-        "dashboard_service": dashboard_service,
-        "asset_summary_service": asset_summary_service,
-        "doc_refresh_service": doc_refresh_service,
-        "spec_center_service": spec_center_service,
-        "index_service": spec_index_service,
-        "spec_report_service": spec_report_service,
-        "frontmatter_service": frontmatter_service,
-    })
+    registry.initialize(
+        {
+            "project_service": project_service,
+            "change_service": change_service,
+            "spec_check_service": spec_check_service,
+            "report_service": report_service,
+            "template_service": template_service,
+            "pm_session_service": pm_session_service,
+            "dashboard_service": dashboard_service,
+            "asset_summary_service": asset_summary_service,
+            "doc_refresh_service": doc_refresh_service,
+            "spec_center_service": spec_center_service,
+            "index_service": spec_index_service,
+            "spec_report_service": spec_report_service,
+            "frontmatter_service": frontmatter_service,
+        }
+    )
 
     if debug:
         sys.stderr.write(
@@ -191,11 +195,16 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
     # 3.5 注册运行时工作空间切换重载回调
     def reload_workspace(new_path: str) -> dict[str, object]:
         nonlocal db
-        old_workspace_root = registry.workbench_facade._project_service.workspace_root if registry.workbench_facade else workspace_root
+        old_workspace_root = (
+            registry.workbench_facade._project_service.workspace_root
+            if registry.workbench_facade
+            else workspace_root
+        )
         new_db = None
         try:
             # 1. 先在旁路构建新运行态，成功后再切换，避免旧运行态半失效
             from auto_pm.db.connection import DatabaseManager
+
             new_db = DatabaseManager(new_path)
             new_db.init_schema()
 
@@ -211,12 +220,15 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
             # 自动对账自愈
             try:
                 from auto_pm.change.ledger_reconciler import LedgerReconciler
+
                 reconciler = LedgerReconciler()
                 for proj in new_project_service.list_projects():
                     try:
                         reconciler.auto_fix(proj.path)
                     except Exception as e:
-                        sys.stderr.write(f"[WARNING] 项目 {proj.project_id} 切换自动对账失败: {e}\n")
+                        sys.stderr.write(
+                            f"[WARNING] 项目 {proj.project_id} 切换自动对账失败: {e}\n"
+                        )
             except Exception as exc:
                 sys.stderr.write(f"[WARNING] 切换时自动对账失败: {exc}\n")
 
@@ -247,21 +259,23 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
             db = new_db
 
             # 4. 重建 Facades 并更新 registry
-            registry.initialize({
-                "project_service": new_project_service,
-                "change_service": new_change_service,
-                "spec_check_service": new_spec_check_service,
-                "report_service": new_report_service,
-                "template_service": new_template_service,
-                "pm_session_service": new_pm_session_service,
-                "dashboard_service": new_dashboard_service,
-                "asset_summary_service": new_asset_summary_service,
-                "doc_refresh_service": new_doc_refresh_service,
-                "spec_center_service": new_spec_center_service,
-                "index_service": new_spec_index_service,
-                "spec_report_service": new_spec_report_service,
-                "frontmatter_service": new_frontmatter_service,
-            })
+            registry.initialize(
+                {
+                    "project_service": new_project_service,
+                    "change_service": new_change_service,
+                    "spec_check_service": new_spec_check_service,
+                    "report_service": new_report_service,
+                    "template_service": new_template_service,
+                    "pm_session_service": new_pm_session_service,
+                    "dashboard_service": new_dashboard_service,
+                    "asset_summary_service": new_asset_summary_service,
+                    "doc_refresh_service": new_doc_refresh_service,
+                    "spec_center_service": new_spec_center_service,
+                    "index_service": new_spec_index_service,
+                    "spec_report_service": new_spec_report_service,
+                    "frontmatter_service": new_frontmatter_service,
+                }
+            )
 
             # 5. 更新所有 Bridges 的 Facade 引用并通知刷新
             workbench_bridge.set_facade(registry.workbench_facade)
@@ -317,7 +331,9 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
     engine.rootContext().setContextProperty("varTableModel", var_table_model)
     engine.rootContext().setContextProperty("modbusBridge", modbus_bridge)  # Modbus 联调工坊
     engine.rootContext().setContextProperty("aiContextBridge", ai_context_bridge)  # AI 上下文桥接
-    engine.rootContext().setContextProperty("fileWatcherBridge", file_watcher_bridge)  # 文件监听同步
+    engine.rootContext().setContextProperty(
+        "fileWatcherBridge", file_watcher_bridge
+    )  # 文件监听同步
 
     # 6. 加载 QML 文件
     qml_url = QUrl.fromLocalFile(str(main_qml_path))
@@ -338,8 +354,7 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
     file_watcher_bridge.toggleWatcher(True)
     if debug:
         sys.stderr.write(
-            f"[DEBUG] 文件监听已启用，监听目录数: "
-            f"{file_watcher_bridge.watchedDirectoryCount()}\n"
+            f"[DEBUG] 文件监听已启用，监听目录数: {file_watcher_bridge.watchedDirectoryCount()}\n"
         )
 
     # 8. 启动事件循环

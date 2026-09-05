@@ -33,14 +33,14 @@ from PySide6.QtCore import (
 
 # ── 8 列定义 ──────────────────────────────────────────────
 COLUMNS: tuple[str, ...] = (
-    "#",              # 0: 行号（只读）
-    "station",        # 1: 站点
-    "signal_type",    # 2: 信号类型
-    "address",        # 3: 地址
-    "tag",            # 4: 标签
-    "signal_name",    # 5: 信号名
-    "device",         # 6: 设备
-    "comment",        # 7: 注释
+    "#",  # 0: 行号（只读）
+    "station",  # 1: 站点
+    "signal_type",  # 2: 信号类型
+    "address",  # 3: 地址
+    "tag",  # 4: 标签
+    "signal_name",  # 5: 信号名
+    "device",  # 6: 设备
+    "comment",  # 7: 注释
 )
 
 # 列索引常量
@@ -213,11 +213,7 @@ class VarTableModel(QAbstractTableModel):
             return Qt.ItemFlag.NoItemFlags
         if index.column() == COL_INDEX:
             return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-        return (
-            Qt.ItemFlag.ItemIsEnabled
-            | Qt.ItemFlag.ItemIsSelectable
-            | Qt.ItemFlag.ItemIsEditable
-        )
+        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable
 
     def headerData(
         self,
@@ -398,15 +394,17 @@ class VarTableModel(QAbstractTableModel):
         """返回当前变量表中的全部条目"""
         result = []
         for row in self._rows:
-            result.append({
-                "station": row[COL_STATION],
-                "signal_type": row[COL_SIGNAL_TYPE],
-                "address": row[COL_ADDRESS],
-                "tag": row[COL_TAG],
-                "signal_name": row[COL_SIGNAL_NAME],
-                "device": row[COL_DEVICE],
-                "comment": row[COL_COMMENT],
-            })
+            result.append(
+                {
+                    "station": row[COL_STATION],
+                    "signal_type": row[COL_SIGNAL_TYPE],
+                    "address": row[COL_ADDRESS],
+                    "tag": row[COL_TAG],
+                    "signal_name": row[COL_SIGNAL_NAME],
+                    "device": row[COL_DEVICE],
+                    "comment": row[COL_COMMENT],
+                }
+            )
         return result
 
     # ── Python 端测试辅助 ─────────────────────────────────
@@ -414,4 +412,3 @@ class VarTableModel(QAbstractTableModel):
     def to_rows(self) -> list[list[str]]:
         """返回内部行数据（Python 端测试用）"""
         return [list(row) for row in self._rows]
-

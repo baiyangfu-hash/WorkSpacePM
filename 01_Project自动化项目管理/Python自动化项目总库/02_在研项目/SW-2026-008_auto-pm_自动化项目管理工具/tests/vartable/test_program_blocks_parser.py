@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.vartable.parsers.program_blocks_parser import ProgramBlocksParser
 
 # 真实 DJ-2026-005 program_blocks.yml 路径（只读，不修改）
@@ -77,9 +76,7 @@ class TestProgramBlocksParserBasic:
     def test_parse_missing_blocks_key(self, tmp_path: Path) -> None:
         """缺 blocks 键 → 失败"""
         file_path = tmp_path / "program_blocks.yml"
-        file_path.write_text(
-            'project_id: "X"\nproject_name: "Y"\n', encoding="utf-8"
-        )
+        file_path.write_text('project_id: "X"\nproject_name: "Y"\n', encoding="utf-8")
         result = ProgramBlocksParser().parse(file_path)
         assert not result.success
         assert result.block_table is None
@@ -116,9 +113,7 @@ class TestProgramBlocksParserFieldValidation:
         assert result.block_table.total_count == 1  # 仅 GlobalVars 有效
         assert result.error_count == 1  # OB1 缺 path/responsibility
 
-    def test_entry_fields_correctness(
-        self, sample_program_blocks_yml: Path
-    ) -> None:
+    def test_entry_fields_correctness(self, sample_program_blocks_yml: Path) -> None:
         """解析后的 BlockEntry 字段值正确"""
         result = ProgramBlocksParser().parse(sample_program_blocks_yml)
         assert result.block_table is not None
@@ -135,9 +130,7 @@ class TestProgramBlocksParserFieldValidation:
         assert entries[1].block_type == "DB"
         assert entries[1].index == 2
 
-    def test_metadata_block_type_counts(
-        self, sample_program_blocks_yml: Path
-    ) -> None:
+    def test_metadata_block_type_counts(self, sample_program_blocks_yml: Path) -> None:
         """元数据 block_type_counts + project_id 正确"""
         result = ProgramBlocksParser().parse(sample_program_blocks_yml)
         assert result.block_table is not None
@@ -145,18 +138,13 @@ class TestProgramBlocksParserFieldValidation:
         assert counts["OB"] == 1
         assert counts["DB"] == 1
         assert result.block_table.metadata["project_id"] == "DJ-2026-005"
-        assert (
-            result.block_table.metadata["project_name"]
-            == "边框缓存机 PLC 控制系统"
-        )
+        assert result.block_table.metadata["project_name"] == "边框缓存机 PLC 控制系统"
         # block_types 去重属性
         assert result.block_table.block_types == ("DB", "OB")
 
 
 class TestProgramBlocksParserReal:
-    def test_parse_real_dj_2026_005(
-        self, real_dj_2026_005_program_blocks: Path
-    ) -> None:
+    def test_parse_real_dj_2026_005(self, real_dj_2026_005_program_blocks: Path) -> None:
         """解析真实 DJ-2026-005 program_blocks.yml（7 个 block）"""
         result = ProgramBlocksParser().parse(real_dj_2026_005_program_blocks)
         assert result.success

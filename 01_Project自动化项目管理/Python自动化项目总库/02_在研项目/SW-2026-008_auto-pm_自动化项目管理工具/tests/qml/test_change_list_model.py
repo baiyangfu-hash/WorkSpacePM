@@ -227,9 +227,7 @@ def test_data_out_of_bounds_returns_none(
 # ── clear() ────────────────────────────────────────────────
 
 
-def test_clear_resets_model(
-    qapp: QApplication, sample_changes: list[dict[str, Any]]
-) -> None:
+def test_clear_resets_model(qapp: QApplication, sample_changes: list[dict[str, Any]]) -> None:
     """clear() 应清空模型"""
     model = ChangeListModel()
     model.setChanges(sample_changes)

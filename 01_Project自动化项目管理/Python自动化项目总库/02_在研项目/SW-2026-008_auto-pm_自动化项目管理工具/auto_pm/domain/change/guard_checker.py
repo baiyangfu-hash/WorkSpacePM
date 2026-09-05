@@ -135,9 +135,8 @@ class TransitionGuardChecker:
         # 不在此处重复检查，避免与参数级校验逻辑冲突。
 
         if violations:
-            msg = (
-                f"变更单 {cr.change_number} 不满足 '{target_status}' 的门禁条件:\n"
-                + "\n".join(f"  - {v}" for v in violations)
+            msg = f"变更单 {cr.change_number} 不满足 '{target_status}' 的门禁条件:\n" + "\n".join(
+                f"  - {v}" for v in violations
             )
             log.error("门禁校验失败: %s", msg)
             raise TransitionGuardError(msg)

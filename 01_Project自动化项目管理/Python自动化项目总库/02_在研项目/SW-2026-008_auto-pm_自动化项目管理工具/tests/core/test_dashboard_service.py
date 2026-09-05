@@ -12,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.core.dashboard_service import DashboardService
 from auto_pm.core.project_service import ProjectService
@@ -139,10 +138,18 @@ class TestDashboardService:
         db: DatabaseManager,
     ) -> None:
         projects = [
-            _make_project_record("DJ-2026-001", "PLC单机A", "plc", "developing", "DJ", file_mtime=1751000000.0),
-            _make_project_record("DJ-2026-002", "PLC单机B", "plc", "commissioning", "DJ", file_mtime=1750900000.0),
-            _make_project_record("SW-2026-003", "软件A", "python", "developing", "SW", file_mtime=1782535000.0),
-            _make_project_record("SW-2026-004", "软件B", "python", "archived", "SW", file_mtime=1750800000.0),
+            _make_project_record(
+                "DJ-2026-001", "PLC单机A", "plc", "developing", "DJ", file_mtime=1751000000.0
+            ),
+            _make_project_record(
+                "DJ-2026-002", "PLC单机B", "plc", "commissioning", "DJ", file_mtime=1750900000.0
+            ),
+            _make_project_record(
+                "SW-2026-003", "软件A", "python", "developing", "SW", file_mtime=1782535000.0
+            ),
+            _make_project_record(
+                "SW-2026-004", "软件B", "python", "archived", "SW", file_mtime=1750800000.0
+            ),
         ]
         assert project_service._repo is not None
         for record in projects:
@@ -195,10 +202,7 @@ class TestDashboardService:
         # CHG-106: recent_activities 格式从 list[str] 改为 list[dict[str, Any]]
         # 每项结构: {"type": "default"|"success", "title": "...", "desc": "...", "time": "..."}
         assert result.recent_activities[0]["title"].startswith("项目更新 SW-2026-003")
-        assert any(
-            "CHG-PLC-2026-002" in item["title"]
-            for item in result.recent_activities
-        )
+        assert any("CHG-PLC-2026-002" in item["title"] for item in result.recent_activities)
         assert result.risk_hints[0] == "存在 2 条未关闭变更，建议优先清理实施中和待验收项"
         assert result.risk_hints[1] == "PLC 检查失败项目: DJ-2026-001"
 
@@ -216,20 +220,14 @@ class TestDashboardService:
         """
         # SW-2026-003 stack='plc' 但实际是 Python 项目（误标或扫描器误判）
         records = [
-            _make_project_record(
-                "SW-2026-003", "Python工具", "plc", "developing", "SW"
-            ),
+            _make_project_record("SW-2026-003", "Python工具", "plc", "developing", "SW"),
         ]
         assert project_service._repo is not None
         for r in records:
             project_service._repo.upsert(r)
 
-        fake_plc_service = _FakePlcService(
-            not_applicable_paths={"/tmp/SW-2026-003"}
-        )
-        service = DashboardService(
-            project_service, change_service, plc_service=fake_plc_service
-        )
+        fake_plc_service = _FakePlcService(not_applicable_paths={"/tmp/SW-2026-003"})
+        service = DashboardService(project_service, change_service, plc_service=fake_plc_service)
 
         result = service.get_summary()
 
@@ -251,12 +249,8 @@ class TestDashboardService:
         应该：failed_check_project_count=1, not_applicable_project_count=1
         """
         records = [
-            _make_project_record(
-                "DJ-2026-001", "PLC单机A", "plc", "developing", "DJ"
-            ),
-            _make_project_record(
-                "SW-2026-003", "Python工具", "plc", "developing", "SW"
-            ),
+            _make_project_record("DJ-2026-001", "PLC单机A", "plc", "developing", "DJ"),
+            _make_project_record("SW-2026-003", "Python工具", "plc", "developing", "SW"),
         ]
         assert project_service._repo is not None
         for r in records:
@@ -266,9 +260,7 @@ class TestDashboardService:
             fail_counts={"/tmp/DJ-2026-001": 2},
             not_applicable_paths={"/tmp/SW-2026-003"},
         )
-        service = DashboardService(
-            project_service, change_service, plc_service=fake_plc_service
-        )
+        service = DashboardService(project_service, change_service, plc_service=fake_plc_service)
 
         result = service.get_summary()
 
@@ -285,20 +277,14 @@ class TestDashboardService:
     ) -> None:
         """V0.4.1 Step 3: 仅有 not_applicable 没 failed 时给出信息提示"""
         records = [
-            _make_project_record(
-                "SW-2026-003", "Python工具", "plc", "developing", "SW"
-            ),
+            _make_project_record("SW-2026-003", "Python工具", "plc", "developing", "SW"),
         ]
         assert project_service._repo is not None
         for r in records:
             project_service._repo.upsert(r)
 
-        fake_plc_service = _FakePlcService(
-            not_applicable_paths={"/tmp/SW-2026-003"}
-        )
-        service = DashboardService(
-            project_service, change_service, plc_service=fake_plc_service
-        )
+        fake_plc_service = _FakePlcService(not_applicable_paths={"/tmp/SW-2026-003"})
+        service = DashboardService(project_service, change_service, plc_service=fake_plc_service)
 
         result = service.get_summary()
 
@@ -321,12 +307,8 @@ class TestDashboardService:
         相互独立。始终展示 not_applicable 提示，让用户清楚看到 Python 项目口径。
         """
         records = [
-            _make_project_record(
-                "DJ-2026-001", "PLC单机A", "plc", "developing", "DJ"
-            ),
-            _make_project_record(
-                "SW-2026-003", "Python工具", "plc", "developing", "SW"
-            ),
+            _make_project_record("DJ-2026-001", "PLC单机A", "plc", "developing", "DJ"),
+            _make_project_record("SW-2026-003", "Python工具", "plc", "developing", "SW"),
         ]
         assert project_service._repo is not None
         for r in records:
@@ -336,21 +318,15 @@ class TestDashboardService:
             fail_counts={"/tmp/DJ-2026-001": 2},
             not_applicable_paths={"/tmp/SW-2026-003"},
         )
-        service = DashboardService(
-            project_service, change_service, plc_service=fake_plc_service
-        )
+        service = DashboardService(project_service, change_service, plc_service=fake_plc_service)
 
         result = service.get_summary()
 
         # failed 与 not_applicable 应同时展示（口径独立）
-        not_applicable_hints = [
-            h for h in result.risk_hints if "PLC 检查不适用项目" in h
-        ]
+        not_applicable_hints = [h for h in result.risk_hints if "PLC 检查不适用项目" in h]
         assert len(not_applicable_hints) == 1
         assert "1" in not_applicable_hints[0]
-        failed_hints = [
-            h for h in result.risk_hints if "PLC 检查失败项目" in h
-        ]
+        failed_hints = [h for h in result.risk_hints if "PLC 检查失败项目" in h]
         assert len(failed_hints) == 1
 
     # ── P3 根源修复：stack="python" 正常项目 not_applicable 统计 ──────────────
@@ -367,20 +343,14 @@ class TestDashboardService:
         基于文件特征（无 .plc.json + 有 pyproject.toml）返回 not_applicable=True。
         """
         records = [
-            _make_project_record(
-                "SW-2026-003", "Python工具", "python", "developing", "SW"
-            ),
+            _make_project_record("SW-2026-003", "Python工具", "python", "developing", "SW"),
         ]
         assert project_service._repo is not None
         for r in records:
             project_service._repo.upsert(r)
 
-        fake_plc_service = _FakePlcService(
-            not_applicable_paths={"/tmp/SW-2026-003"}
-        )
-        service = DashboardService(
-            project_service, change_service, plc_service=fake_plc_service
-        )
+        fake_plc_service = _FakePlcService(not_applicable_paths={"/tmp/SW-2026-003"})
+        service = DashboardService(project_service, change_service, plc_service=fake_plc_service)
 
         result = service.get_summary()
 
@@ -411,9 +381,7 @@ class TestDashboardService:
             fail_counts={"/tmp/DJ-2026-001": 2},
             not_applicable_paths={"/tmp/SW-2026-003"},
         )
-        service = DashboardService(
-            project_service, change_service, plc_service=fake_plc_service
-        )
+        service = DashboardService(project_service, change_service, plc_service=fake_plc_service)
 
         result = service.get_summary()
 

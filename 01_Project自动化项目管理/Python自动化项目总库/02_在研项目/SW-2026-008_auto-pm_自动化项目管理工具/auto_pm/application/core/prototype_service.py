@@ -15,6 +15,7 @@ class CheckResult:
     warnings: list[str] = field(default_factory=list)
     info: list[str] = field(default_factory=list)
 
+
 @dataclass
 class PrototypeBundleResult:
     success: bool
@@ -22,11 +23,14 @@ class PrototypeBundleResult:
     message: str
     bundled_files: list[str] = field(default_factory=list)
 
+
 class PrototypeService:
     def __init__(self, workspace_root: str):
         self.workspace_root = os.path.abspath(workspace_root)
 
-    def locate_prototype_sources(self, project_path: str) -> tuple[str | None, str | None, str | None]:
+    def locate_prototype_sources(
+        self, project_path: str
+    ) -> tuple[str | None, str | None, str | None]:
         """
         Locates the main HTML, CSS, and JS prototype files inside a project.
         Returns (html_path, css_path, js_path).
@@ -50,7 +54,11 @@ class PrototypeService:
             # Find main HTML file
             html_file = None
             for item in os.listdir(cand):
-                if item.endswith(".html") and "历史备份" not in item and "archive" not in item.lower():
+                if (
+                    item.endswith(".html")
+                    and "历史备份" not in item
+                    and "archive" not in item.lower()
+                ):
                     html_file = os.path.join(cand, item)
                     break
 
@@ -92,9 +100,14 @@ class PrototypeService:
             with open(css_path, encoding="utf-8") as f:
                 css_code = f.read()
 
-            css_placeholder_pattern = re.compile(r'<link\s+rel=["\']stylesheet["\']\s+href=["\']styles\.css["\']\s*/?>', re.IGNORECASE)
+            css_placeholder_pattern = re.compile(
+                r'<link\s+rel=["\']stylesheet["\']\s+href=["\']styles\.css["\']\s*/?>',
+                re.IGNORECASE,
+            )
             if css_placeholder_pattern.search(content):
-                content = css_placeholder_pattern.sub(f"<style>\n/* Inlined styles.css */\n{css_code}\n</style>", content)
+                content = css_placeholder_pattern.sub(
+                    f"<style>\n/* Inlined styles.css */\n{css_code}\n</style>", content
+                )
             bundled_files.append(css_path)
 
         # Inline JS if external script exists
@@ -102,9 +115,13 @@ class PrototypeService:
             with open(js_path, encoding="utf-8") as f:
                 js_code = f.read()
 
-            js_placeholder_pattern = re.compile(r'<script\s+src=["\']script\.js["\']\s*></script>', re.IGNORECASE)
+            js_placeholder_pattern = re.compile(
+                r'<script\s+src=["\']script\.js["\']\s*></script>', re.IGNORECASE
+            )
             if js_placeholder_pattern.search(content):
-                content = js_placeholder_pattern.sub(f"<script>\n/* Inlined script.js */\n{js_code}\n</script>", content)
+                content = js_placeholder_pattern.sub(
+                    f"<script>\n/* Inlined script.js */\n{js_code}\n</script>", content
+                )
             bundled_files.append(js_path)
 
         # Determine target output path
@@ -163,9 +180,11 @@ class PrototypeService:
                 warnings.append("文件包含 UTF-8 BOM，建议剥离 BOM")
 
         # Extract PLC registers for validation if PLC project
-        registers = set(re.findall(r'\b([DXYRM]\d+)\b', content))
+        registers = set(re.findall(r"\b([DXYRM]\d+)\b", content))
         if registers:
-            info.append(f"检测到 {len(registers)} 个 PLC 寄存器标记: {', '.join(sorted(registers)[:10])}...")
+            info.append(
+                f"检测到 {len(registers)} 个 PLC 寄存器标记: {', '.join(sorted(registers)[:10])}..."
+            )
 
         # Check basic syntax / tags
         if "<!DOCTYPE html>" not in content and "<html" not in content.lower():
@@ -182,7 +201,9 @@ class PrototypeService:
 
         for target in page_targets:
             if target not in existing_pages:
-                errors.append(f"检测到导航死链: goPage('{target}') 对应的页面容器 'page-{target}' 不存在")
+                errors.append(
+                    f"检测到导航死链: goPage('{target}') 对应的页面容器 'page-{target}' 不存在"
+                )
 
         # --------------------------------------------------------------
         # 2. 内联 JS 函数完整性检查
@@ -192,7 +213,11 @@ class PrototypeService:
                 js_content = f.read()
             defined_funcs = set(re.findall(r"function\s+([a-zA-Z0-9_$]+)\s*\(", js_content))
             # 也支持 const func = () => / let func = function
-            defined_funcs.update(re.findall(r"(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:function|\()", js_content))
+            defined_funcs.update(
+                re.findall(
+                    r"(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:function|\()", js_content
+                )
+            )
             defined_funcs.add("goPage")  # built-in standard
 
             # 提取 HTML 中的 onclick 函数调用
@@ -201,7 +226,9 @@ class PrototypeService:
 
             for func in called_funcs:
                 if func not in defined_funcs and func not in builtin_funcs:
-                    errors.append(f"检测到未定义函数调用: onclick 调用的 '{func}' 未在 script.js 中声明")
+                    errors.append(
+                        f"检测到未定义函数调用: onclick 调用的 '{func}' 未在 script.js 中声明"
+                    )
 
         # --------------------------------------------------------------
         # 3. 点表映射字典校验 (hmi_tag_mapping.json)
@@ -213,6 +240,7 @@ class PrototypeService:
         if os.path.exists(hmi_mapping_path):
             try:
                 import json
+
                 with open(hmi_mapping_path, encoding="utf-8") as mf:
                     mapping_json = json.load(mf)
                 mapped_tags = mapping_json.get("mappings", {})
@@ -220,7 +248,9 @@ class PrototypeService:
                 # 检查 HTML 寄存器在映射字典中的覆盖情况
                 unmapped_regs = [r for r in registers if r not in mapped_tags]
                 if unmapped_regs:
-                    warnings.append(f"发现 {len(unmapped_regs)} 个原型寄存器未在 hmi_tag_mapping.json 中定义: {', '.join(sorted(unmapped_regs)[:5])}...")
+                    warnings.append(
+                        f"发现 {len(unmapped_regs)} 个原型寄存器未在 hmi_tag_mapping.json 中定义: {', '.join(sorted(unmapped_regs)[:5])}..."
+                    )
             except Exception as e:
                 errors.append(f"hmi_tag_mapping.json 解析失败: {e}")
 
@@ -245,12 +275,18 @@ class PrototypeService:
         topology: 'both' (上游+下游), 'infeed' (仅上游/末端码垛), 'outfeed' (仅下游/首端上料)
         """
         import shutil
+
         abs_proj = os.path.abspath(project_path)
         current_dir = os.path.dirname(os.path.abspath(__file__))
 
-
         bundled_files = []
-        is_python_tpl = template.lower() in ("python-cockpit", "python", "desktop", "cockpit", "web")
+        is_python_tpl = template.lower() in (
+            "python-cockpit",
+            "python",
+            "desktop",
+            "cockpit",
+            "web",
+        )
 
         if is_python_tpl:
             target_dir = os.path.join(abs_proj, "02_规划", "Html原型预览")
@@ -316,16 +352,16 @@ class PrototypeService:
                     if topology == "infeed":
                         # 末端设备：移除下游交互页面
                         html_content = re.sub(
-                            r'<!-- 10 下游设备交互.*?</div>\s*</div>\s*</div>',
-                            '',
+                            r"<!-- 10 下游设备交互.*?</div>\s*</div>\s*</div>",
+                            "",
                             html_content,
                             flags=re.DOTALL,
                         )
                     elif topology == "outfeed":
                         # 首端设备：移除上游交互页面
                         html_content = re.sub(
-                            r'<!-- 09 上游设备交互.*?</div>\s*</div>\s*</div>',
-                            '',
+                            r"<!-- 09 上游设备交互.*?</div>\s*</div>\s*</div>",
+                            "",
                             html_content,
                             flags=re.DOTALL,
                         )
@@ -340,9 +376,13 @@ class PrototypeService:
                 if os.path.exists(src_js):
                     js_content = open(src_js, encoding="utf-8").read()
                     if topology == "infeed":
-                        js_content = js_content.replace("{ id: 'downstream', name: '04 下游交互' },\n", "")
+                        js_content = js_content.replace(
+                            "{ id: 'downstream', name: '04 下游交互' },\n", ""
+                        )
                     elif topology == "outfeed":
-                        js_content = js_content.replace("{ id: 'upstream',   name: '03 上游交互' },\n", "")
+                        js_content = js_content.replace(
+                            "{ id: 'upstream',   name: '03 上游交互' },\n", ""
+                        )
                     with open(target_js, "w", encoding="utf-8") as f:
                         f.write(js_content)
                     bundled_files.append(target_js)

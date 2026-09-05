@@ -122,13 +122,13 @@ STATUS_FLOW: dict[str, set[str]] = {
     "under_review": {"approved", "conditionally_approved", "rejected", "submitted"},
     "approved": {"implementing"},
     "conditionally_approved": {"implementing"},
-    "implementing": {"pending_acceptance", "approved"},       # 实施完成→待验收；或退回已批准
-    "pending_acceptance": {"accepting"},                     # 开始验收
-    "accepting": {"completed", "implementing"},              # 验证通过→完成；验证不通过→返工重做
+    "implementing": {"pending_acceptance", "approved"},  # 实施完成→待验收；或退回已批准
+    "pending_acceptance": {"accepting"},  # 开始验收
+    "accepting": {"completed", "implementing"},  # 验证通过→完成；验证不通过→返工重做
     "completed": {"closed", "archived"},
     "rejected": {"draft"},
-    "closed": set(),      # 终态
-    "archived": set(),    # 终态（已归档，不可再流转）
+    "closed": set(),  # 终态
+    "archived": set(),  # 终态（已归档，不可再流转）
 }
 
 # 所有合法状态
@@ -189,6 +189,7 @@ REQUIRED_3_4_FIELDS: set[str] = {"变更申请人", "申请日期"}
 #  异常类
 # ════════════════════════════════════════════════════════════
 
+
 class SpecViolationError(ValueError):
     """变更单不符合 CHG-040 规范"""
 
@@ -201,12 +202,11 @@ class TransitionGuardError(ValueError):
 #  校验函数
 # ════════════════════════════════════════════════════════════
 
+
 def validate_domain(domain: str) -> None:
     """校验技术领域"""
     if domain not in DOMAINS:
-        raise SpecViolationError(
-            f"技术领域 '{domain}' 不合法，允许值: {list(DOMAINS.keys())}"
-        )
+        raise SpecViolationError(f"技术领域 '{domain}' 不合法，允许值: {list(DOMAINS.keys())}")
 
 
 def validate_business_nature(nature: str) -> None:
@@ -221,9 +221,7 @@ def validate_impact_scope(scopes: list[str]) -> None:
     """校验影响范围"""
     invalid = [s for s in scopes if s not in IMPACT_SCOPES]
     if invalid:
-        raise SpecViolationError(
-            f"影响范围 {invalid} 不合法，允许值: {list(IMPACT_SCOPES.keys())}"
-        )
+        raise SpecViolationError(f"影响范围 {invalid} 不合法，允许值: {list(IMPACT_SCOPES.keys())}")
 
 
 def validate_urgency(urgency: str) -> None:
@@ -237,9 +235,7 @@ def validate_urgency(urgency: str) -> None:
 def validate_status_transition(current: str, target: str) -> None:
     """校验状态流转是否合法"""
     if current not in STATUS_FLOW:
-        raise SpecViolationError(
-            f"当前状态 '{current}' 不合法，允许值: {ALL_STATUSES}"
-        )
+        raise SpecViolationError(f"当前状态 '{current}' 不合法，允许值: {ALL_STATUSES}")
     if target not in STATUS_FLOW[current]:
         raise SpecViolationError(
             f"状态流转 '{current}' → '{target}' 不合法，"

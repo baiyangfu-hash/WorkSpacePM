@@ -12,14 +12,14 @@ from __future__ import annotations
 import shutil
 
 import pytest
-
-from auto_pm.application.change_facade import ChangeFacade
 from auto_pm.change.change_service import ChangeService
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
 from auto_pm.models import ApprovalRecord
 from auto_pm.models.change import ChangeSummary, ImpactAnalysis
 from auto_pm.models.project import ProjectRecord
+
+from auto_pm.application.change_facade import ChangeFacade
 
 
 @pytest.fixture
@@ -146,12 +146,15 @@ def change_facade_with_db(temp_workspace) -> None:  # type: ignore[misc, no-unty
         title="测试变更单",
         urgency="normal",
     )
-    change_service.get_change_request = lambda cn, project_id=None: mock_cr if cn == "CHG-2026-001" else None  # type: ignore[assignment, method-assign]
+    change_service.get_change_request = lambda cn, project_id=None: (
+        mock_cr if cn == "CHG-2026-001" else None
+    )  # type: ignore[assignment, method-assign]
 
     facade = ChangeFacade(change_service=change_service)
     yield facade
     # 清理（tmp_path 自动清理，但显式关闭 DB 连接避免 Windows 文件锁）
     import gc
+
     gc.collect()
 
 
