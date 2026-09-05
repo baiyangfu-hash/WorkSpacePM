@@ -59,7 +59,7 @@ if __name__ == "__main__":
         print(f"main: auto_pm provenance: {Path(auto_pm.__file__).resolve()}")
         sys.exit(0)
 
-    from auto_pm.ui.qml_main_window import run_qml_app
+    from auto_pm.ui.qml_main_window import run_qml_gui
 
     # 启动桌面驾驶舱
-    sys.exit(run_qml_app(workspace_root=str(WORKSPACE_ROOT)))
+    sys.exit(run_qml_gui(workspace_root=str(WORKSPACE_ROOT)))
