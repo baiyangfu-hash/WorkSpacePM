@@ -28,7 +28,13 @@ from auto_pm.models import ProjectInfo
 from auto_pm.models.enums import Stack
 from auto_pm.models.project import extract_business_line
 
+from auto_pm.domain.project.archive_contracts import canonical_project_path
+
 log = logging.getLogger(__name__)
+
+
+class DuplicateProjectIdError(ValueError):
+    """Raised when archive roots contain ambiguous physical projects."""
 
 
 class ProjectScanner:
@@ -41,6 +47,7 @@ class ProjectScanner:
 
     # 项目编号正则：SW-2026-001, DJ-2026-010 等格式（前缀 2-4 位大写字母）
     _PROJECT_ID_RE = re.compile(r"^([A-Z]{2,4}-\d{4}-\d{3})")
+    _ARCHIVE_CONTAINER_NAMES = frozenset({"_archive", "archive", "trash", "03_归档"})
 
     def __init__(self, workspace_root: str) -> None:
         self.workspace_root = os.path.abspath(workspace_root)
@@ -80,6 +87,76 @@ class ProjectScanner:
             len(results), len(raw_results),
         )
         return results
+
+    def scan_archived(
+        self, archive_roots: tuple[str, ...], scan_depth: int = 4
+    ) -> list[ProjectInfo]:
+        """Scan only explicit contained archive roots and reject duplicate IDs."""
+        workspace = os.path.realpath(self.workspace_root)
+        results: list[ProjectInfo] = []
+        seen: dict[str, str] = {}
+        for root_value in sorted(set(archive_roots)):
+            relative = canonical_project_path(root_value)
+            root = os.path.abspath(os.path.join(workspace, relative))
+            try:
+                if os.path.commonpath((workspace, os.path.realpath(root))) != workspace:
+                    raise ValueError(f"归档扫描路径越界: {root_value}")
+            except ValueError as exc:
+                raise ValueError(f"归档扫描路径越界: {root_value}") from exc
+            if not os.path.isdir(root):
+                raise FileNotFoundError(f"归档扫描根不存在: {root_value}")
+            current = workspace
+            for part in relative.split("/"):
+                current = os.path.join(current, part)
+                if self._is_link_or_reparse(current):
+                    raise ValueError(f"归档扫描路径包含链接或 reparse: {root_value}")
+            if self._is_link_or_reparse(root):
+                raise ValueError(f"归档扫描路径包含链接或 reparse: {root_value}")
+            found: list[ProjectInfo] = []
+            self._scan_archive(root, found, depth=0, max_depth=scan_depth)
+            for project in found:
+                existing = seen.get(project.project_id)
+                canonical = os.path.realpath(project.path)
+                if existing is not None and existing != canonical:
+                    raise DuplicateProjectIdError(
+                        f"归档项目编号重复: {project.project_id}: {existing}, {canonical}"
+                    )
+                if existing is None:
+                    seen[project.project_id] = canonical
+                    results.append(project)
+        results.sort(key=lambda project: project.project_id)
+        return results
+
+    @staticmethod
+    def _is_link_or_reparse(path: str) -> bool:
+        try:
+            stat = os.lstat(path)
+        except OSError:
+            return False
+        return os.path.islink(path) or bool(getattr(stat, "st_file_attributes", 0) & 0x0400)
+
+    def _scan_archive(
+        self,
+        path: str,
+        results: list[ProjectInfo],
+        depth: int,
+        max_depth: int,
+    ) -> None:
+        if depth > max_depth:
+            return
+        try:
+            entries = sorted(os.listdir(path))
+        except OSError:
+            return
+        for entry in entries:
+            entry_path = os.path.join(path, entry)
+            if not os.path.isdir(entry_path) or self._is_link_or_reparse(entry_path):
+                continue
+            info = self.try_identify_project(entry_path)
+            if info is not None:
+                results.append(info)
+            else:
+                self._scan_archive(entry_path, results, depth + 1, max_depth)
 
     def _deduplicate_projects(
         self, projects: list[ProjectInfo]
@@ -618,11 +695,11 @@ class ProjectScanner:
 
         for entry in entries:
             entry_path = os.path.join(path, entry)
-            if not os.path.isdir(entry_path):
+            if not os.path.isdir(entry_path) or self._is_link_or_reparse(entry_path):
                 continue
             if entry.startswith(".") or entry.startswith("__") or entry.startswith("_"):
                 continue
-            if "归档" in entry or "archive" in entry.lower() or "trash" in entry.lower():
+            if entry.casefold() in self._ARCHIVE_CONTAINER_NAMES:
                 continue
 
             # 判断是否是项目目录

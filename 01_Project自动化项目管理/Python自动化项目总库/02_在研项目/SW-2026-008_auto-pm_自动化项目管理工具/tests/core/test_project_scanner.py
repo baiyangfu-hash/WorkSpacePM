@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
-
-from auto_pm.core.project_scanner import ProjectScanner
+from auto_pm.core.project_scanner import DuplicateProjectIdError, ProjectScanner
 
 
 class TestScan:
@@ -135,6 +135,62 @@ class TestScan:
         # depth=2 能到达 level3
         deep = scanner.scan(scan_depth=2)
         assert any(p.project_id == "SW-2026-999" for p in deep)
+
+    def test_active_scan_does_not_misclassify_archive_substring(self, tmp_path: Path) -> None:
+        project = tmp_path / "archive-tools" / "SW-2026-050_tool"
+        project.mkdir(parents=True)
+        (project / "PM_SESSION_SW-2026-050.md").write_text("# active", encoding="utf-8")
+        assert [item.project_id for item in ProjectScanner(str(tmp_path)).scan(2)] == [
+            "SW-2026-050"
+        ]
+
+
+class TestArchiveScan:
+    def _project(self, root: Path, project_id: str) -> Path:
+        project = root / f"{project_id}_archived"
+        project.mkdir(parents=True)
+        (project / f"PM_SESSION_{project_id}.md").write_text(
+            "---\nphase: archived\n---\n", encoding="utf-8"
+        )
+        return project
+
+    def test_scans_only_explicit_root_and_respects_depth(self, tmp_path: Path) -> None:
+        archive = tmp_path / "projects" / "archive"
+        shallow = self._project(archive, "SW-2026-051")
+        deep = self._project(archive / "one" / "two", "SW-2026-052")
+        results = ProjectScanner(str(tmp_path)).scan_archived(("projects/archive",), 0)
+        assert [item.project_id for item in results] == ["SW-2026-051"]
+        assert shallow.exists() and deep.exists()
+
+    def test_duplicate_ids_at_different_paths_fail_deterministically(self, tmp_path: Path) -> None:
+        self._project(tmp_path / "a", "SW-2026-053")
+        self._project(tmp_path / "b", "SW-2026-053")
+        scanner = ProjectScanner(str(tmp_path))
+        with pytest.raises(DuplicateProjectIdError, match="SW-2026-053"):
+            scanner.scan_archived(("a", "b"), 1)
+
+    def test_repeated_same_root_is_deduplicated(self, tmp_path: Path) -> None:
+        self._project(tmp_path / "archive", "SW-2026-054")
+        results = ProjectScanner(str(tmp_path)).scan_archived(("archive", "archive"), 1)
+        assert [item.project_id for item in results] == ["SW-2026-054"]
+
+    @pytest.mark.parametrize("root", ["../outside", "/absolute", "missing"])
+    def test_invalid_or_missing_roots_fail_closed(self, tmp_path: Path, root: str) -> None:
+        scanner = ProjectScanner(str(tmp_path))
+        with pytest.raises((ValueError, FileNotFoundError)):
+            scanner.scan_archived((root,), 1)
+
+    def test_does_not_follow_real_symlink_when_supported(self, tmp_path: Path) -> None:
+        archive = tmp_path / "archive"
+        archive.mkdir()
+        external = tmp_path / "external"
+        self._project(external, "SW-2026-055")
+        link = archive / "linked"
+        try:
+            link.symlink_to(external, target_is_directory=True)
+        except OSError:
+            pytest.skip("symlink creation is unavailable")
+        assert ProjectScanner(str(tmp_path)).scan_archived(("archive",), 2) == []
 
 
 class TestTryIdentifyProject:

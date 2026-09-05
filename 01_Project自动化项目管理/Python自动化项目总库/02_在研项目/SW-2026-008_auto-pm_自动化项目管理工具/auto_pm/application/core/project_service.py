@@ -23,7 +23,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 from auto_pm.core.constants import get_template_name
@@ -34,6 +34,11 @@ from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
 from auto_pm.models import ProjectInfo, ProjectListItem, ProjectRecord
 from auto_pm.models.project import extract_business_line
 from auto_pm.utils.file_utils import StaleFileError, get_mtime, write_file
+
+if TYPE_CHECKING:
+    from auto_pm.core.project_archive_service import ArchiveResult, ProjectArchiveService
+
+    from auto_pm.domain.project.archive_contracts import ArchiveRequest
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +78,7 @@ class ProjectService:
         )
         # M3-Iter1: 组合 ProjectScanner，委托扫描/识别逻辑
         self._scanner = ProjectScanner(self.workspace_root)
+        self._archive_service: ProjectArchiveService | None = None
 
     def inject_db(self, db: DatabaseManager) -> None:
         """运行时注入 DatabaseManager 并重建 Repository
@@ -97,7 +103,41 @@ class ProjectService:
         Returns:
             项目列表，按 project_id 排序
         """
-        return self._scanner.scan(scan_depth=scan_depth)
+        return cast(list[ProjectInfo], self._scanner.scan(scan_depth=scan_depth))
+
+    def configure_archive_service(self, service: ProjectArchiveService) -> None:
+        """Inject the authorized archive boundary explicitly."""
+        service_root = os.path.normcase(os.path.realpath(service.workspace_root))
+        own_root = os.path.normcase(os.path.realpath(self.workspace_root))
+        if service_root != own_root:
+            raise ValueError("归档服务工作区与项目服务不一致")
+        self._archive_service = service
+
+    def archive_project(self, request: ArchiveRequest) -> ArchiveResult:
+        """Delegate an exact archive request; no force or delete path exists."""
+        from auto_pm.domain.project.archive_contracts import ArchiveOperation
+
+        if request.operation is not ArchiveOperation.ARCHIVE:
+            raise ValueError("archive_project 仅接受 archive 请求")
+        if self._archive_service is None:
+            raise RuntimeError("未配置安全归档服务")
+        return self._archive_service.execute(request)
+
+    def restore_project(self, request: ArchiveRequest) -> ArchiveResult:
+        """Delegate an exact restore request after checking its typed operation."""
+        from auto_pm.domain.project.archive_contracts import ArchiveOperation
+
+        if request.operation is not ArchiveOperation.RESTORE:
+            raise ValueError("restore_project 仅接受 restore 请求")
+        if self._archive_service is None:
+            raise RuntimeError("未配置安全归档服务")
+        return self._archive_service.execute(request)
+
+    def list_archived_projects(self) -> tuple[dict[str, str], ...]:
+        """Read archived records only through the configured safe service."""
+        if self._archive_service is None:
+            raise RuntimeError("未配置安全归档服务")
+        return cast(tuple[dict[str, str], ...], self._archive_service.list_archived())
 
     def list_projects_cached(self) -> list[ProjectInfo]:
         """从 DB 缓存读取项目列表（不扫描文件系统）
@@ -839,7 +879,7 @@ class ProjectService:
 
         change_service = ChangeService(workspace_root=self.workspace_root, db=self.db)
         sync = SyncService(self.db, self, change_service=change_service)
-        return sync.sync(force_full=force_full)
+        return cast(dict[str, Any], sync.sync(force_full=force_full))
 
     def get_last_sync_time(self) -> str:
         """获取上次同步时间（M3-Iter5：UI 层不再直接访问 Repository）
@@ -1015,17 +1055,17 @@ class ProjectService:
     @staticmethod
     def _extract_id_from_dirname(project_path: str) -> str:
         """[已委托] 从目录名提取项目编号（向后兼容包装）"""
-        return ProjectScanner.extract_id_from_dirname(project_path)
+        return cast(str, ProjectScanner.extract_id_from_dirname(project_path))
 
     @staticmethod
     def _infer_stack(src_path: str) -> str:
         """[已委托] 根据模板源路径推断技术栈（向后兼容包装）"""
-        return ProjectScanner.infer_stack(src_path)
+        return cast(str, ProjectScanner.infer_stack(src_path))
 
     @staticmethod
     def _get_project_mtime(project_path: str) -> float:
         """[已委托] 获取项目标志文件的 mtime（向后兼容包装）"""
-        return ProjectScanner.get_project_mtime(project_path)
+        return cast(float, ProjectScanner.get_project_mtime(project_path))
 
     def is_git_hooks_installed(self, project_path: str) -> bool:
         """检查指定项目是否已安装 auto-pm Git 提交门禁钩子"""

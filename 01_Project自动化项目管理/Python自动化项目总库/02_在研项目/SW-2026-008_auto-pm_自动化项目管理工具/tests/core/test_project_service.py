@@ -2,14 +2,73 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
+from typing import cast
 
 import pytest
-
+from auto_pm.core.project_archive_service import ArchiveResult, ProjectArchiveService
 from auto_pm.core.project_service import ProjectService
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import ChangeRequestRepository
 from auto_pm.models import ChangeSummary, ProjectInfo, ProjectRecord
+
+from auto_pm.domain.project.archive_contracts import ArchiveOperation, ArchiveRequest
+
+
+class _ArchiveServiceStub:
+    def __init__(self, workspace_root: Path) -> None:
+        self.workspace_root = workspace_root
+        self.requests: list[ArchiveRequest] = []
+
+    def execute(self, request: ArchiveRequest) -> ArchiveResult:
+        self.requests.append(request)
+        return ArchiveResult(
+            request.request_id,
+            request.project_id,
+            request.operation,
+            request.archive_code or "ARC-20260905-001",
+            request.source_path,
+            request.destination_path,
+            False,
+        )
+
+    def list_archived(self) -> tuple[dict[str, str], ...]:
+        return ({"project_id": "SW-2026-099", "status": "archived"},)
+
+
+def _archive_request(operation: ArchiveOperation) -> ArchiveRequest:
+    return ArchiveRequest(
+        "REQ-001",
+        "SW-2026-099",
+        "CHG-SCPT-2026-099",
+        "DEC-20260905-00000001",
+        operation,
+        "projects/active/SW-2026-099",
+        "projects/archive/SW-2026-099",
+        "tester",
+        "ARC-20260905-001" if operation is ArchiveOperation.RESTORE else "",
+    )
+
+
+def test_archive_boundary_requires_explicit_configuration_and_exact_operation(tmp_path: Path) -> None:
+    service = ProjectService(str(tmp_path))
+    with pytest.raises(RuntimeError, match="未配置安全归档服务"):
+        service.archive_project(_archive_request(ArchiveOperation.ARCHIVE))
+    stub = _ArchiveServiceStub(tmp_path.resolve())
+    service.configure_archive_service(cast(ProjectArchiveService, stub))
+    archive = service.archive_project(_archive_request(ArchiveOperation.ARCHIVE))
+    assert archive.operation is ArchiveOperation.ARCHIVE
+    with pytest.raises(ValueError, match="仅接受 archive"):
+        service.archive_project(_archive_request(ArchiveOperation.RESTORE))
+    with pytest.raises(ValueError, match="仅接受 restore"):
+        service.restore_project(_archive_request(ArchiveOperation.ARCHIVE))
+    assert service.list_archived_projects()[0]["status"] == "archived"
+
+
+def test_project_service_has_no_delete_or_force_archive_capability() -> None:
+    assert not hasattr(ProjectService, "delete_project")
+    assert "force" not in inspect.signature(ProjectService.archive_project).parameters
 
 
 def test_list_projects(tmp_workspace: Path) -> None:
