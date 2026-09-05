@@ -60,7 +60,15 @@ def cmd_install(ctx: click.Context) -> None:
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
     pre_commit_script = """#!/bin/sh
-PROJECT_ROOT=$(git rev-parse --show-toplevel)
+# Resolve the PRIMARY worktree (main workspace) so linked worktrees reuse the
+# main .venv, and inject the container path per invocation (no editable/.pth).
+GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
+case "$GIT_COMMON_DIR" in
+    /*) ;;
+    *) GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) ;;
+esac
+PROJECT_ROOT=$(dirname "$GIT_COMMON_DIR")
+CONTAINER="$PROJECT_ROOT/00_Infrastructure/auto_pm"
 PYTHON_EXE="python"
 if [ -f "$PROJECT_ROOT/.venv/Scripts/python.exe" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/Scripts/python.exe"
@@ -68,12 +76,20 @@ elif [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python"
 fi
 
-"$PYTHON_EXE" -m auto_pm -w "$PROJECT_ROOT" git-hook pre-commit
+PYTHONPATH="$CONTAINER" "$PYTHON_EXE" -m auto_pm -w "$PROJECT_ROOT" git-hook pre-commit
 exit $?
 """
 
     commit_msg_script = """#!/bin/sh
-PROJECT_ROOT=$(git rev-parse --show-toplevel)
+# Resolve the PRIMARY worktree (main workspace) so linked worktrees reuse the
+# main .venv, and inject the container path per invocation (no editable/.pth).
+GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
+case "$GIT_COMMON_DIR" in
+    /*) ;;
+    *) GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) ;;
+esac
+PROJECT_ROOT=$(dirname "$GIT_COMMON_DIR")
+CONTAINER="$PROJECT_ROOT/00_Infrastructure/auto_pm"
 PYTHON_EXE="python"
 if [ -f "$PROJECT_ROOT/.venv/Scripts/python.exe" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/Scripts/python.exe"
@@ -81,7 +97,7 @@ elif [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python"
 fi
 
-"$PYTHON_EXE" -m auto_pm -w "$PROJECT_ROOT" git-hook commit-msg "$1"
+PYTHONPATH="$CONTAINER" "$PYTHON_EXE" -m auto_pm -w "$PROJECT_ROOT" git-hook commit-msg "$1"
 exit $?
 """
 

@@ -42,16 +42,9 @@ if exist "requirements.txt" (
     pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 )
 
-:: 4. 安装 auto-pm 本地开发包（优先工作空间基础设施运行位，旧项目路径回退）
-set "CORE_PATH=00_Infrastructure\auto_pm"
-set "LEGACY_CORE_PATH=01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-008_auto-pm_自动化项目管理工具"
-if not exist "%CORE_PATH%" (
-    set "CORE_PATH=%LEGACY_CORE_PATH%"
-)
-if exist "%CORE_PATH%" (
-    echo [4/4] 正在挂接 auto-pm 核心模块: %CORE_PATH%
-    pip install -e "%CORE_PATH%" --no-deps
-)
+:: 4. auto-pm 核心模块由稳定部署容器双槽指针按需加载（NG-WP-13）
+::    不再执行 editable/.pth 安装，也不回退旧母体路径；main.py 启动时自动解析
+::    00_Infrastructure/auto_pm/active_release.json 指向的 release。
 
 echo.
 echo ==============================================================================
@@ -59,7 +52,6 @@ echo  [成功] Auto-PM 工作台环境已成功就绪！
 echo.
 echo  • 启动桌面驾驶舱：双击运行 "双击启动驾驶舱.bat" 或执行 "python main.py"
 echo  • 运行全量单测：pytest
-echo  • 运行规范体检：python -m auto_pm spec sync
 echo ==============================================================================
 echo.
 pause
