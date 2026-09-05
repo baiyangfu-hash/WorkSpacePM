@@ -163,7 +163,16 @@ def test_bootstrap_module_never_imports_auto_pm(bs: ModuleType) -> None:
     assert "from auto_pm" not in source
 
 
-def test_real_container_pointers_stay_uninitialized(bs: ModuleType) -> None:
-    """The real container must stay un-deployed until NG-WP-15 flips pointers."""
-    assert bs._read_pointer_release_id(_CONTAINER, "active_release.json") is None
-    assert bs._read_pointer_release_id(_CONTAINER, "previous_release.json") is None
+def test_real_container_pointer_state_is_coherent(bs: ModuleType) -> None:
+    """Checkout-agnostic container coherence contract.
+
+    An undeployed checkout may have both pointers null (candidate worktrees).
+    Once deployed, active must be a legal release-id and previous must never
+    exist without an active deployment; slots must never alias each other.
+    """
+    active = bs._read_pointer_release_id(_CONTAINER, "active_release.json")
+    previous = bs._read_pointer_release_id(_CONTAINER, "previous_release.json")
+    assert active is not None or previous is None, "previous set without active deployment"
+    if active:
+        assert bs.RELEASE_ID_PATTERN.fullmatch(active), active
+        assert previous != active, "active and previous must not alias"
