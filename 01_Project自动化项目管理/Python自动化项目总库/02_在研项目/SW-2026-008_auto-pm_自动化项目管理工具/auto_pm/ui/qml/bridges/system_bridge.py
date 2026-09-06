@@ -12,7 +12,6 @@ listTemplates 返回 list[str]、getTemplatePath 返回 str，保持基础类型
 新增 1 个 Slot：applyTemplate（QML 端尚未接入，TODO M5）。
 M5 CHG-117 新增 1 个 Slot：archivePmSession（PM_SESSION 归档对话框接入）。
 """
-
 import logging
 import os
 from dataclasses import asdict
@@ -27,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class SystemBridge(QObject):
+
     def __init__(self, facade: SystemFacade | None = None, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._facade = facade
@@ -105,7 +105,6 @@ class SystemBridge(QObject):
     def runDoctorCheck(self) -> dict[str, Any]:
         """执行 GUI 一键环境健康自检"""
         from auto_pm.cli.doctor import run_doctor_check
-
         try:
             return dict(run_doctor_check())
         except Exception as e:
@@ -117,7 +116,6 @@ class SystemBridge(QObject):
         """执行 Doc-as-Code 文档自省自动同步"""
         try:
             from auto_pm.domain.doc.services import DocSyncService
-
             ws = Path(os.getcwd())
             svc = DocSyncService(ws)
             logs = svc.sync_all()
@@ -131,23 +129,14 @@ class SystemBridge(QObject):
         """执行 Doc-as-Code 文档一致性门禁检查"""
         try:
             from auto_pm.domain.doc.services import DocCheckService
-
             ws = Path(os.getcwd())
             svc = DocCheckService(ws)
             results = svc.check_all()
             all_passed = all(r.passed for r in results)
             return {
                 "success": all_passed,
-                "items": [
-                    {
-                        "check_id": r.check_id,
-                        "name": r.name,
-                        "passed": r.passed,
-                        "message": r.message,
-                    }
-                    for r in results
-                ],
-                "message": "所有文档门禁通过" if all_passed else "存在文档未同步滞后项",
+                "items": [{"check_id": r.check_id, "name": r.name, "passed": r.passed, "message": r.message} for r in results],
+                "message": "所有文档门禁通过" if all_passed else "存在文档未同步滞后项"
             }
         except Exception as e:
             logger.warning("checkDocs failed: %s", e, exc_info=True)

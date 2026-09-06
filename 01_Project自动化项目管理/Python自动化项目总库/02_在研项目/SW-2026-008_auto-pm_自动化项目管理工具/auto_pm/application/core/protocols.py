@@ -28,7 +28,6 @@ from auto_pm.models import (
 
 # ── Project 域 ────────────────────────────────────────────
 
-
 @runtime_checkable
 class ProjectServiceProtocol(Protocol):
     """项目服务接口契约
@@ -153,7 +152,6 @@ class ProjectScannerProtocol(Protocol):
 
 # ── Change 域 ─────────────────────────────────────────────
 
-
 @runtime_checkable
 class ChangeServiceProtocol(Protocol):
     """变更管理服务接口契约
@@ -225,7 +223,9 @@ class ChangeServiceProtocol(Protocol):
         """修改变更单字段"""
         ...
 
-    def delete_change_request(self, change_number: str, project_id: str | None = None) -> bool:
+    def delete_change_request(
+        self, change_number: str, project_id: str | None = None
+    ) -> bool:
         """删除变更单"""
         ...
 
@@ -239,7 +239,6 @@ class ChangeServiceProtocol(Protocol):
 
 
 # ── PLC 域 ────────────────────────────────────────────────
-
 
 @runtime_checkable
 class PlcServiceProtocol(Protocol):
@@ -262,7 +261,6 @@ class PlcServiceProtocol(Protocol):
 
 
 # ── Dashboard / Asset 域 ─────────────────────────────────
-
 
 @runtime_checkable
 class DashboardServiceProtocol(Protocol):
@@ -304,7 +302,6 @@ class AssetSummaryServiceProtocol(Protocol):
 
 
 # ── PmSession / Template 域 ──────────────────────────────
-
 
 @runtime_checkable
 class PmSessionServiceProtocol(Protocol):
@@ -361,7 +358,6 @@ class TemplateServiceProtocol(Protocol):
 
 # ── Spec 域（Check/Center）──────────────────────────────
 
-
 @runtime_checkable
 class SpecCheckServiceProtocol(Protocol):
     """规范检查服务接口契约（M4-1 T8 新增）
@@ -398,7 +394,6 @@ class SpecCenterServiceProtocol(Protocol):
 
 
 # ── Delivery 域（DocRefresh/Report）─────────────────────
-
 
 @runtime_checkable
 class DocRefreshServiceProtocol(Protocol):
@@ -442,7 +437,6 @@ class ReportServiceProtocol(Protocol):
 
 
 # ── 通用 ──────────────────────────────────────────────────
-
 
 @runtime_checkable
 class ServiceProtocol(Protocol):

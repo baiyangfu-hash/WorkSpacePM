@@ -9,7 +9,6 @@ Spec Bridge (QML)
 
 M4 第 1 批重构：3 个 Slot 改用 dataclasses.asdict() 转换 DTO 为 dict 给 QML。
 """
-
 import logging
 from dataclasses import asdict
 from typing import Any
@@ -188,3 +187,5 @@ class SpecBridge(QObject):
             res = self._facade.sync_obsidian_repository()
             return {"success": res.success, "message": res.message, "payload": res.payload}
         return {"success": False, "message": "SpecFacade 未初始化"}
+
+

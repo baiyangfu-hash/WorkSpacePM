@@ -77,7 +77,10 @@ def _find_pm_session_files(root: Path) -> list[Path]:
     """递归查找所有 PM_SESSION 文件（排除 backup 和 archive）"""
     candidates = list(root.rglob("PM_SESSION_*.md"))
     # 排除备份文件和归档文件
-    candidates = [c for c in candidates if ".bak" not in c.name and "archive" not in c.name.lower()]
+    candidates = [
+        c for c in candidates
+        if ".bak" not in c.name and "archive" not in c.name.lower()
+    ]
     return sorted(candidates)
 
 
@@ -92,10 +95,13 @@ def _find_pm_session_file(project_root: Path, project_id: str | None = None) -> 
     # 排除备份文件
     candidates = [c for c in candidates if ".bak" not in c.name and "archive" not in c.name]
     if not candidates:
-        raise FileNotFoundError(f"在 {project_root} 下未找到 PM_SESSION_*.md 文件")
+        raise FileNotFoundError(
+            f"在 {project_root} 下未找到 PM_SESSION_*.md 文件"
+        )
     if len(candidates) > 1:
         raise ValueError(
-            f"在 {project_root} 下找到多个 PM_SESSION 文件: {candidates}，请通过 --project-id 指定"
+            f"在 {project_root} 下找到多个 PM_SESSION 文件: {candidates}，"
+            f"请通过 --project-id 指定"
         )
     return candidates[0]
 
@@ -137,7 +143,9 @@ def cmd_check(
     if project_root is None:
         pm_files = _find_pm_session_files(ws)
         if not pm_files:
-            console.print(f"[red]错误: 在 {ws} 及子目录中未找到 PM_SESSION_*.md 文件[/red]")
+            console.print(
+                f"[red]错误: 在 {ws} 及子目录中未找到 PM_SESSION_*.md 文件[/red]"
+            )
             raise SystemExit(2)
         # 检查所有文件
         svc = PmSessionCheckService()
@@ -287,7 +295,9 @@ def cmd_archive(
     parse_result = parser.parse_file(pm_file)
     section = parse_result.get_section(section_number)
     if section is None:
-        console.print(f"[red]错误: 章节 §{section_number} 不存在于 {pm_file.name}[/red]")
+        console.print(
+            f"[red]错误: 章节 §{section_number} 不存在于 {pm_file.name}[/red]"
+        )
         raise SystemExit(2)
 
     section_lines = section.end_line - section.start_line
@@ -424,7 +434,9 @@ def _cmd_archive_auto(
                         keep_recent=keep,
                         create_backup=create_backup,
                     )
-                console.print(f"    [green]§{sec}: {result.archived_line_count} 行已归档[/green]")
+                console.print(
+                    f"    [green]§{sec}: {result.archived_line_count} 行已归档[/green]"
+                )
                 file_archived += result.archived_line_count
             except Exception as e:
                 console.print(f"    [red]§{sec}: 归档失败 - {e}[/red]")

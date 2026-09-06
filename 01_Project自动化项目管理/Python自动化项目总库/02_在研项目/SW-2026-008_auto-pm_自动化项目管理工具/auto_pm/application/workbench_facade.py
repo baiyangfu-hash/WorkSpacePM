@@ -77,28 +77,20 @@ class WorkbenchFacade:
     @_reload_callback.setter
     def _reload_callback(self, callback: Any) -> None:
         self._use_cases.reload_callback = callback
-
     def get_dashboard_snapshot(self) -> QueryResult[DashboardSnapshotDTO]:
         return self._to_query_result(self._use_cases.get_dashboard_snapshot())
-
     def get_active_change_status(self, project_id: str) -> QueryResult[dict[str, Any]]:
         return self._to_query_result(self._use_cases.get_active_change_status(project_id))
-
     def get_project_change_summary(self, project_id: str) -> QueryResult[dict[str, Any]]:
         return self._to_query_result(self._use_cases.get_project_change_summary(project_id))
-
     def list_project_cards(self) -> QueryResult[list[ProjectCardDTO]]:
         return self._to_query_result(self._use_cases.list_project_cards())
-
     def get_project_workspace(self, project_id: str) -> QueryResult[ProjectWorkspaceDTO]:
         return self._to_query_result(self._use_cases.get_project_workspace(project_id))
-
     def get_settings_summary(self) -> QueryResult[SettingsSummaryDTO]:
         return self._to_query_result(self._use_cases.get_settings_summary())
-
     def clear_cache(self) -> CommandResult[ClearCacheResultDTO]:
         return self._to_command_result(self._use_cases.clear_cache())
-
     def rebuild_index(self) -> CommandResult[RebuildIndexResultDTO]:
         return self._to_command_result(self._use_cases.rebuild_index())
 
@@ -121,37 +113,26 @@ class WorkbenchFacade:
                 dest_dir=dest_dir,
             )
         )
-
     def generate_project_code(self, business_line: str) -> CommandResult[str]:
         return self._to_command_result(self._use_cases.generate_project_code(business_line))
-
     def detect_project(self, path: str) -> CommandResult[dict[str, Any] | None]:
         return self._to_command_result(self._use_cases.detect_project(path))
-
     def import_project(self, src_path: str) -> CommandResult[dict[str, Any] | None]:
         return self._to_command_result(self._use_cases.import_project(src_path))
-
     def edit_project(self, project_id: str, **kwargs: str) -> CommandResult[dict[str, Any] | None]:
         return self._to_command_result(self._use_cases.edit_project(project_id, **kwargs))
-
     def delete_project(self, project_id: str) -> CommandResult[dict[str, Any] | None]:
         return self._to_command_result(self._use_cases.delete_project(project_id))
-
     def save_workspace_root(self, workspace_root: str) -> CommandResult[dict[str, Any]]:
         return self._to_command_result(self._use_cases.save_workspace_root(workspace_root))
-
     def initialize_project_pm(self, project_id: str) -> CommandResult[dict[str, Any]]:
         return self._to_command_result(self._use_cases.initialize_project_pm(project_id))
-
     def is_git_hooks_installed(self, project_id: str) -> CommandResult[bool]:
         return self._to_command_result(self._use_cases.is_git_hooks_installed(project_id))
-
     def install_git_hooks(self, project_id: str) -> CommandResult[dict[str, Any]]:
         return self._to_command_result(self._use_cases.install_git_hooks(project_id))
-
     def uninstall_git_hooks(self, project_id: str) -> CommandResult[dict[str, Any]]:
         return self._to_command_result(self._use_cases.uninstall_git_hooks(project_id))
-
     def evaluate_stage_gate(
         self,
         project_id: str,
@@ -161,7 +142,6 @@ class WorkbenchFacade:
         return self._to_command_result(
             self._use_cases.evaluate_stage_gate(project_id, current_stage, target_stage)
         )
-
     @staticmethod
     def _to_query_result(outcome: QueryOutcome[T]) -> QueryResult[T]:
         return QueryResult(
@@ -170,7 +150,6 @@ class WorkbenchFacade:
             payload=outcome.payload,
             errors=outcome.errors or [],
         )
-
     @staticmethod
     def _to_command_result(outcome: CommandOutcome[T]) -> CommandResult[T]:
         return CommandResult(

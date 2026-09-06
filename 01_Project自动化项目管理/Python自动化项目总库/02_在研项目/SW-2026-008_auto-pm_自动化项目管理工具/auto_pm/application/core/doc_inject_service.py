@@ -200,7 +200,9 @@ class DocInjectService:
         <!-- AUTO_PM:BEGIN {key} -->{generated_body}<!-- AUTO_PM:END {key} -->\\n
         """
         return (
-            f"<!-- AUTO_PM:BEGIN {block_key} -->{generated_body}<!-- AUTO_PM:END {block_key} -->\n"
+            f"<!-- AUTO_PM:BEGIN {block_key} -->"
+            f"{generated_body}"
+            f"<!-- AUTO_PM:END {block_key} -->\n"
         )
 
     @staticmethod

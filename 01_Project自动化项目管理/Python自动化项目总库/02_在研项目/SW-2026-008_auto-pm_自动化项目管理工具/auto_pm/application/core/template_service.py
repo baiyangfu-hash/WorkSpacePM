@@ -149,14 +149,14 @@ class TemplateService:
         """
         answers_path = os.path.join(project_path, ".copier-answers.yml")
         if not os.path.isfile(answers_path):
-            raise FileNotFoundError(f"项目缺少 .copier-answers.yml，无法更新: {project_path}")
+            raise FileNotFoundError(
+                f"项目缺少 .copier-answers.yml，无法更新: {project_path}"
+            )
 
         # 预览模式：仅读取模板信息，不实际执行更新
         if dry_run:
             info = self._read_template_info(project_path)
-            log.info(
-                "Copier update 预览: project=%s, template=%s", project_path, info.get("template")
-            )
+            log.info("Copier update 预览: project=%s, template=%s", project_path, info.get("template"))
             return {"project_path": project_path, "updated": False, "dry_run": True, "info": info}
 
         import copier

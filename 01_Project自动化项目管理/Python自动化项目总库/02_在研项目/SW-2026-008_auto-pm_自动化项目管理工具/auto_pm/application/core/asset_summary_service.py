@@ -41,9 +41,7 @@ class AssetSummaryService:
     _CHANNEL_REQUIRED_KEYS = ("name", "protocol", "role", "endpoint", "notes")
     _NOT_APPLICABLE_TYPES = {"shared_library", "test_suite"}
 
-    def build_summary(
-        self, project_path: str, stack: str, project_type: str = ""
-    ) -> dict[str, Any]:
+    def build_summary(self, project_path: str, stack: str, project_type: str = "") -> dict[str, Any]:
         """构建项目工程资产摘要"""
         if stack != "plc":
             return self._not_applicable_summary("仅 PLC 项目支持工程资产摘要")
@@ -71,7 +69,9 @@ class AssetSummaryService:
         block_summary = self._read_program_blocks(asset_dir)
         comm_summary = self._read_communications(asset_dir)
         total_issues = (
-            len(io_summary["issues"]) + len(block_summary["issues"]) + len(comm_summary["issues"])
+            len(io_summary["issues"])
+            + len(block_summary["issues"])
+            + len(comm_summary["issues"])
         )
         issue_messages = [
             *io_summary["issues"],
@@ -142,7 +142,9 @@ class AssetSummaryService:
                     col for col in self._IO_REQUIRED_COLUMNS if col not in fieldnames
                 ]
                 if missing_columns:
-                    issues.append(f"{self.IO_POINTS_FILE} 缺少列: {', '.join(missing_columns)}")
+                    issues.append(
+                        f"{self.IO_POINTS_FILE} 缺少列: {', '.join(missing_columns)}"
+                    )
                 for row in reader:
                     if not self._row_has_data(row):
                         continue
@@ -174,12 +176,12 @@ class AssetSummaryService:
                 count = len(blocks)
                 for index, block in enumerate(blocks, start=1):
                     if not isinstance(block, dict):
-                        issues.append(f"{self.PROGRAM_BLOCKS_FILE} 第 {index} 项必须为对象")
+                        issues.append(
+                            f"{self.PROGRAM_BLOCKS_FILE} 第 {index} 项必须为对象"
+                        )
                         continue
                     missing_keys = [
-                        key
-                        for key in self._BLOCK_REQUIRED_KEYS
-                        if not str(block.get(key, "")).strip()
+                        key for key in self._BLOCK_REQUIRED_KEYS if not str(block.get(key, "")).strip()
                     ]
                     if missing_keys:
                         issues.append(
@@ -212,12 +214,12 @@ class AssetSummaryService:
                 count = len(channels)
                 for index, channel in enumerate(channels, start=1):
                     if not isinstance(channel, dict):
-                        issues.append(f"{self.COMMUNICATIONS_FILE} 第 {index} 项必须为对象")
+                        issues.append(
+                            f"{self.COMMUNICATIONS_FILE} 第 {index} 项必须为对象"
+                        )
                         continue
                     missing_keys = [
-                        key
-                        for key in self._CHANNEL_REQUIRED_KEYS
-                        if not str(channel.get(key, "")).strip()
+                        key for key in self._CHANNEL_REQUIRED_KEYS if not str(channel.get(key, "")).strip()
                     ]
                     if missing_keys:
                         issues.append(

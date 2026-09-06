@@ -26,14 +26,9 @@ import csv
 import io
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
 
 from auto_pm.vartable.models import ParseError, ParseResult, VarEntry, VarTable
-
-if TYPE_CHECKING:
-    from auto_pm.domain.vartable.parsers.base_parser import BaseParser
-else:
-    from auto_pm.vartable.parsers.base_parser import BaseParser
+from auto_pm.vartable.parsers.base_parser import BaseParser
 
 SOURCE_FORMAT = "autoshop"
 
@@ -54,7 +49,7 @@ def _pick(row: dict[str, str], keys: tuple[str, ...]) -> str:
     return ""
 
 
-class AutoshopParser(BaseParser):
+class AutoshopParser(BaseParser):  # type: ignore[misc]  # CHG-SCPT-2026-021: 稳定版 verbatim 回收，基类经命名空间 shim 解析为 Any
     """Autoshop 格式解析器
 
     用法：
@@ -99,7 +94,7 @@ class AutoshopParser(BaseParser):
         content, encoding = read_result
 
         if not content.strip():
-            return cast(ParseResult, self._empty_content_error(file_path, SOURCE_FORMAT))
+            return self._empty_content_error(file_path, SOURCE_FORMAT)
 
         entries: list[VarEntry] = []
         errors: list[ParseError] = []

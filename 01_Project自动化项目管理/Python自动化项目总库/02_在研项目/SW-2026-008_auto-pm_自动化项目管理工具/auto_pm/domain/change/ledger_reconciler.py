@@ -58,7 +58,9 @@ class ReconcileDiff:
     def is_clean(self) -> bool:
         """对账无差异"""
         return (
-            not self.missing_in_ledger and not self.orphan_in_ledger and not self.status_mismatches
+            not self.missing_in_ledger
+            and not self.orphan_in_ledger
+            and not self.status_mismatches
         )
 
     def summary(self) -> str:

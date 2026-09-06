@@ -26,9 +26,7 @@ def read_file(file_path: str, encoding: str = "utf-8") -> str:
         return ""
 
 
-def read_file_snapshot(
-    file_path: str, encoding: str = "utf-8", max_attempts: int = 3
-) -> tuple[str, float]:
+def read_file_snapshot(file_path: str, encoding: str = "utf-8", max_attempts: int = 3) -> tuple[str, float]:
     """读取稳定文件快照，返回内容和 mtime
 
     通过"读前/读后 mtime 一致"近似保证内容与 mtime 来自同一版本，

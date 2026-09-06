@@ -1,5 +1,4 @@
 """Static AST extractor for PLC gatekeeper checker methods."""
-
 import ast
 from pathlib import Path
 
@@ -23,14 +22,12 @@ class GateAstExtractor:
                     rule_name = node.name.replace("check_", "")
                     doc = ast.get_docstring(node) or f"Check {rule_name}"
                     first_line_doc = doc.strip().split("\n")[0]
-                    rules.append(
-                        GateRuleDTO(
-                            rule_id=f"GATE-{rule_name.upper()}",
-                            rule_name=rule_name,
-                            category="PLC_GATE",
-                            doc=first_line_doc,
-                        )
-                    )
+                    rules.append(GateRuleDTO(
+                        rule_id=f"GATE-{rule_name.upper()}",
+                        rule_name=rule_name,
+                        category="PLC_GATE",
+                        doc=first_line_doc
+                    ))
         except Exception:
             pass
         return rules

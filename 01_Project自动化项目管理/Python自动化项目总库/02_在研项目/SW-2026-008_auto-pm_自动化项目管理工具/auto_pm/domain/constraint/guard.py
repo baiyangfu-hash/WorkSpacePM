@@ -185,7 +185,7 @@ class FileGuard:
         """统计文件开头的连续 BOM 数量"""
         count = 0
         i = 0
-        while i + 3 <= len(raw) and raw[i : i + 3] == BOM:
+        while i + 3 <= len(raw) and raw[i:i + 3] == BOM:
             count += 1
             i += 3
         return count

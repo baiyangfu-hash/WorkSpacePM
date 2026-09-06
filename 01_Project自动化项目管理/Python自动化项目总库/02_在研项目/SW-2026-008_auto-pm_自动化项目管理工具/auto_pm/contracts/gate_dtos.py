@@ -9,7 +9,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 SeverityType = Literal["BLOCKER", "WARNING", "INFO"]
-ProcessGroupStage = Literal["initiating", "planning", "executing", "monitoring", "closing"]
+ProcessGroupStage = Literal[
+    "initiating", "planning", "executing", "monitoring", "closing"
+]
 
 
 @dataclass

@@ -15,7 +15,6 @@ from auto_pm.core.prototype_service import PrototypeService
 
 console = Console()
 
-
 def _resolve_project_dir(workspace_root: str, pid: str) -> str:
     """Find project folder by PID or name"""
     ws = Path(workspace_root)
@@ -25,12 +24,10 @@ def _resolve_project_dir(workspace_root: str, pid: str) -> str:
             return str(item)
     return str(ws)
 
-
 @click.group(name="prototype", help="通用原型管理命令组 (pm-workflow 专属)")
 def prototype_cmd() -> None:
     """Prototype command group."""
     pass
-
 
 @prototype_cmd.command(name="bundle", help="合并打包 HTML/CSS/JS 原型为单文件离线发布包")
 @click.option("--pid", "-p", required=True, help="项目 ID (如 DJ-2026-005 或 SW-2026-008)")
@@ -50,7 +47,6 @@ def bundle_cmd(ctx: click.Context, pid: str, version: str | None, output: str | 
         console.print(f"[green]✓ 原型打包成功: {res.output_path}[/green]")
     else:
         console.print(f"[red]✗ 原型打包失败: {res.message}[/red]")
-
 
 @prototype_cmd.command(name="check", help="校验原型完整性、BOM 及 PLC 变量映射")
 @click.option("--pid", "-p", required=True, help="项目 ID (如 DJ-2026-005)")
@@ -75,7 +71,7 @@ def check_cmd(ctx: click.Context, pid: str) -> None:
         console.print("[green]✓ 原型检查全部通过[/green]")
     else:
         console.print("[red]✗ 原型检查发现未通过项[/red]")
-
+        raise click.exceptions.Exit(1)
 
 @prototype_cmd.command(name="archive", help="快照归档当前原型")
 @click.option("--pid", "-p", required=True, help="项目 ID")
@@ -94,7 +90,6 @@ def archive_cmd(ctx: click.Context, pid: str, version: str) -> None:
         console.print(f"[green]✓ 原型版本 {version} 归档成功: {res.output_path}[/green]")
     else:
         console.print(f"[red]✗ 原型归档失败: {res.message}[/red]")
-
 
 @prototype_cmd.command(name="init", help="初始化全新的原型脚手架骨架")
 @click.option("--pid", "-p", required=True, help="项目 ID")

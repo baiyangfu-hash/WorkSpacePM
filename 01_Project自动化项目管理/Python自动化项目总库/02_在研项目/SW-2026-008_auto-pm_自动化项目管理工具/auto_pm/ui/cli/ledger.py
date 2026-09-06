@@ -106,11 +106,7 @@ def cmd_reconcile(
             ctx.exit(0)
         else:
             # 孤儿记录需人工处理
-            if (
-                new_diff.orphan_in_ledger
-                and not new_diff.missing_in_ledger
-                and not new_diff.status_mismatches
-            ):
+            if new_diff.orphan_in_ledger and not new_diff.missing_in_ledger and not new_diff.status_mismatches:
                 console.print(
                     "[yellow]⚠ 仅有孤儿记录（台账多余但无对应 CHG 文件），需人工审核后用 ledger remove 清理[/yellow]"
                 )
@@ -128,7 +124,5 @@ def cmd_reconcile(
             f"孤儿 {len(diff.orphan_in_ledger)} / "
             f"状态不一致 {len(diff.status_mismatches)}）[/yellow]"
         )
-        console.print(
-            "[dim]提示: 使用 --fix 自动补建缺失行和修复状态不一致（孤儿记录需人工处理）[/dim]"
-        )
+        console.print("[dim]提示: 使用 --fix 自动补建缺失行和修复状态不一致（孤儿记录需人工处理）[/dim]")
         ctx.exit(2)

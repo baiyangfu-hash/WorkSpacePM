@@ -1,4 +1,4 @@
-# ruff: noqa: N802
+# ruff: noqa: N802  # CHG-SCPT-2026-021: Qt 桥接服务沿用 Qt camelCase 命名惯例
 """PLC-HMI 概念映射：Modbus TCP 联调测试服务（ModbusService）
 
 像 PLC 功能块 FB_Modbus_Master，封装所有 Modbus TCP 通信和仿真逻辑：
@@ -14,9 +14,8 @@ V1.0.0（仿真模式优先）：
 - 仿真模式下生成正弦/余弦波形数据模拟真实 PLC 变量
 - 真实 pymodbus 连接路径已预留注释，后续版本接入
 
-设计参考：02_设计/Html原型预览/018_UI架构原型_V13.html
+设计参考：02_规划/Html原型预览/020_UI架构原型_V15_Modbus工坊专项.html
 """
-
 from __future__ import annotations
 
 import json
@@ -33,24 +32,21 @@ from typing import Any
 # 数据结构定义
 # ─────────────────────────────────────────────
 
-
 @dataclass
 class RegisterEntry:
-    """单条寄存器数据（对齐 V13 监测表的一行）"""
-
-    address: int  # 物理地址偏移（如：0 → 40001）
-    physical: str  # 物理地址显示字符串（如：40001）
-    tag: str  # 绑定符号注释（如：DB10.DBW0）
-    dec: int  # 十进制值
-    hex: str  # 十六进制字符串（如：0x04D2）
-    float_decoded: str  # 32位浮点解码结果（如：3.14）
-    is_coil: bool = False  # 是否为线圈类型（FC01/FC02）
+    """单条寄存器数据（对齐 V15 监测表的一行）"""
+    address: int          # 物理地址偏移（如：0 → 40001）
+    physical: str         # 物理地址显示字符串（如：40001）
+    tag: str              # 绑定符号注释（如：DB10.DBW0）
+    dec: int              # 十进制值
+    hex: str              # 十六进制字符串（如：0x04D2）
+    float_decoded: str    # 32位浮点解码结果（如：3.14）
+    is_coil: bool = False # 是否为线圈类型（FC01/FC02）
 
 
 @dataclass
 class PingResult:
     """Ping 探测结果"""
-
     success: bool
     message: str
     latency_ms: float = 0.0
@@ -59,7 +55,6 @@ class PingResult:
 @dataclass
 class ModbusReadResult:
     """读取操作结果"""
-
     success: bool
     message: str
     registers: list[RegisterEntry] = field(default_factory=list)
@@ -70,7 +65,6 @@ class ModbusReadResult:
 @dataclass
 class ModbusWriteResult:
     """写入操作结果"""
-
     success: bool
     message: str
     tx_hex: str = ""
@@ -80,8 +74,7 @@ class ModbusWriteResult:
 @dataclass
 class ScanCell:
     """扫描探测器单格结果"""
-
-    offset: int  # 相对起始地址的偏移
+    offset: int    # 相对起始地址的偏移
     is_active: bool
 
 
@@ -89,7 +82,7 @@ class ScanCell:
 # 仿真信号发生器
 # ─────────────────────────────────────────────
 
-# 预置标签字典（对齐 V13 原型 siemens_fan / temp_monitor 预设）
+# 预置标签字典（对齐 V15 原型 siemens_fan / temp_monitor 预设）
 _PRESET_TAGS: dict[str, list[dict[str, Any]]] = {
     "siemens_fan": [
         {"tag": "Fan_Start_CMD (启动给定)", "val": 1},
@@ -145,7 +138,6 @@ def _sim_val(index: int, preset: str, ts: float) -> tuple[int, str]:
 def _decode_float_cdab(high: int, low: int) -> str:
     """CDAB（西门子 Word Swap）32位浮点解码。"""
     import struct
-
     try:
         # CDAB: bytes = [C, D, A, B] → swap words
         raw = (high << 16) | low
@@ -159,14 +151,16 @@ def _decode_float_cdab(high: int, low: int) -> str:
         return "N/A"
 
 
-def _build_hex_frame(transaction_id: int, slave: int, fc: int, start: int, count: int) -> str:
+def _build_hex_frame(transaction_id: int, slave: int, fc: int,
+                     start: int, count: int) -> str:
     """构建 Modbus TCP 请求帧的 Hex 字符串。"""
     mbap = f"{transaction_id:04X} 0000 0006"
     pdu = f"0{slave:X} {fc:02X} {start:04X} {count:04X}"
     return f"{mbap} {pdu}".upper()
 
 
-def _build_write_hex_frame(transaction_id: int, slave: int, fc: int, addr: int, value: int) -> str:
+def _build_write_hex_frame(transaction_id: int, slave: int, fc: int,
+                            addr: int, value: int) -> str:
     """构建写入请求帧 Hex 字符串。"""
     if fc in (15, 16):
         # 多写：附加字节计数（简化：假设单个值）
@@ -182,15 +176,9 @@ def _build_write_hex_frame(transaction_id: int, slave: int, fc: int, addr: int, 
 # 单元测试专用 Mock 客户端（保障测试在无外部 PLC 时仍可运行）
 # ─────────────────────────────────────────────
 
-
 class _MockModbusResponse:
-    def __init__(
-        self,
-        is_error: bool = False,
-        bits: list[bool] | None = None,
-        registers: list[int] | None = None,
-        message: str = "",
-    ) -> None:
+    def __init__(self, is_error: bool = False, bits: list[bool] | None = None,
+                 registers: list[int] | None = None, message: str = "") -> None:
         self._is_error = is_error
         self.bits = bits or []
         self.registers = registers or []
@@ -223,21 +211,15 @@ class _MockModbusClient:
         return _MockModbusResponse(bits=[(i % 2 == 0) for i in range(count)])
 
     # ── FC03: 读保持寄存器 ────────────────────────────────
-    def read_holding_registers(
-        self, address: int, count: int, device_id: int
-    ) -> _MockModbusResponse:
+    def read_holding_registers(self, address: int, count: int, device_id: int) -> _MockModbusResponse:
         active_offsets = {0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 42, 43}
         if address in active_offsets:
-            return _MockModbusResponse(
-                registers=[int(1800 + math.sin(address + i) * 120) for i in range(count)]
-            )
+            return _MockModbusResponse(registers=[int(1800 + math.sin(address + i) * 120) for i in range(count)])
         return _MockModbusResponse(is_error=True)
 
     # ── FC04: 读输入寄存器 ────────────────────────────────
     def read_input_registers(self, address: int, count: int, device_id: int) -> _MockModbusResponse:
-        return _MockModbusResponse(
-            registers=[int(1800 + math.sin(address + i) * 120) for i in range(count)]
-        )
+        return _MockModbusResponse(registers=[int(1800 + math.sin(address + i) * 120) for i in range(count)])
 
     # ── FC05: 写单个线圈 ──────────────────────────────────
     def write_coil(self, address: int, value: bool, device_id: int) -> _MockModbusResponse:
@@ -256,9 +238,7 @@ class _MockModbusClient:
         return _MockModbusResponse()
 
     # ── FC16: 写多个寄存器 ────────────────────────────────
-    def write_registers(
-        self, address: int, values: list[int], device_id: int
-    ) -> _MockModbusResponse:
+    def write_registers(self, address: int, values: list[int], device_id: int) -> _MockModbusResponse:
         return _MockModbusResponse()
 
     # ── FC17: 报告从站 ID ─────────────────────────────────
@@ -274,39 +254,26 @@ class _MockModbusClient:
         return _MockModbusResponse()
 
     # ── FC22: 掩码写寄存器 ────────────────────────────────
-    def mask_write_register(
-        self, address: int, and_mask: int, or_mask: int, device_id: int
-    ) -> _MockModbusResponse:
+    def mask_write_register(self, address: int, and_mask: int, or_mask: int, device_id: int) -> _MockModbusResponse:
         return _MockModbusResponse()
 
     # ── FC23: 读/写多个寄存器 ─────────────────────────────
-    def readwrite_registers(
-        self,
-        read_address: int,
-        read_count: int,
-        write_address: int,
-        values: list[int],
-        device_id: int,
-    ) -> _MockModbusResponse:
-        return _MockModbusResponse(
-            registers=[int(1800 + math.sin(read_address + i) * 120) for i in range(read_count)]
-        )
+    def readwrite_registers(self, read_address: int, read_count: int,
+                            write_address: int, values: list[int], device_id: int) -> _MockModbusResponse:
+        return _MockModbusResponse(registers=[int(1800 + math.sin(read_address + i) * 120) for i in range(read_count)])
 
     # ── FC24: 读 FIFO 队列 ────────────────────────────────
     def read_fifo_queue(self, address: int, device_id: int) -> _MockModbusResponse:
         return _MockModbusResponse(registers=[3, 100, 200, 300])
 
     # ── FC43/2B: 读设备标识 ───────────────────────────────
-    def read_device_information(
-        self, read_code: int = 1, object_id: int = 0, device_id: int = 1
-    ) -> _MockModbusResponse:
+    def read_device_information(self, read_code: int = 1, object_id: int = 0, device_id: int = 1) -> _MockModbusResponse:
         return _MockModbusResponse(message="Device: auto-pm Modbus Simulator v1.0")
 
 
 # ─────────────────────────────────────────────
 # 核心服务
 # ─────────────────────────────────────────────
-
 
 class ModbusService:
     """Modbus TCP 联调测试核心服务。
@@ -442,11 +409,8 @@ class ModbusService:
 
         # 真实物理连接：通过 pymodbus 连接
         from pymodbus.client import ModbusTcpClient
-
         if source_ip and source_ip.strip():
-            self._client = ModbusTcpClient(
-                host=ip, port=port, timeout=3, source_address=(source_ip.strip(), 0)
-            )
+            self._client = ModbusTcpClient(host=ip, port=port, timeout=3, source_address=(source_ip.strip(), 0))
         else:
             self._client = ModbusTcpClient(host=ip, port=port, timeout=3)
         try:
@@ -512,17 +476,11 @@ class ModbusService:
             if fc_int == 1:
                 resp = self._client.read_coils(address=start, count=count, device_id=self._slave_id)
             elif fc_int == 2:
-                resp = self._client.read_discrete_inputs(
-                    address=start, count=count, device_id=self._slave_id
-                )
+                resp = self._client.read_discrete_inputs(address=start, count=count, device_id=self._slave_id)
             elif fc_int == 3:
-                resp = self._client.read_holding_registers(
-                    address=start, count=count, device_id=self._slave_id
-                )
+                resp = self._client.read_holding_registers(address=start, count=count, device_id=self._slave_id)
             elif fc_int == 4:
-                resp = self._client.read_input_registers(
-                    address=start, count=count, device_id=self._slave_id
-                )
+                resp = self._client.read_input_registers(address=start, count=count, device_id=self._slave_id)
             elif fc_int == 7:
                 resp = self._client.read_exception_status(device_id=self._slave_id)
             elif fc_int == 17:
@@ -531,26 +489,17 @@ class ModbusService:
                 resp = self._client.read_file_record(records=[], device_id=self._slave_id)
             elif fc_int == 22:
                 resp = self._client.mask_write_register(
-                    address=start, and_mask=0x0000, or_mask=0x0000, device_id=self._slave_id
-                )
+                    address=start, and_mask=0x0000, or_mask=0x0000, device_id=self._slave_id)
             elif fc_int == 23:
                 resp = self._client.readwrite_registers(
-                    read_address=start,
-                    read_count=count,
-                    write_address=start,
-                    values=[],
-                    device_id=self._slave_id,
-                )
+                    read_address=start, read_count=count,
+                    write_address=start, values=[], device_id=self._slave_id)
             elif fc_int == 24:
                 resp = self._client.read_fifo_queue(address=start, device_id=self._slave_id)
             elif fc_int == 43:
-                resp = self._client.read_device_information(
-                    read_code=1, object_id=0, device_id=self._slave_id
-                )
+                resp = self._client.read_device_information(read_code=1, object_id=0, device_id=self._slave_id)
             else:
-                return ModbusReadResult(
-                    success=False, message=f"不支持的读取功能码: FC{fc_int:02d}"
-                )
+                return ModbusReadResult(success=False, message=f"不支持的读取功能码: FC{fc_int:02d}")
 
             if resp.isError():
                 return ModbusReadResult(success=False, message=f"Modbus 物理读取错误: {resp}")
@@ -562,7 +511,7 @@ class ModbusService:
                 bits = resp.bits[:count]
                 data_bytes = bytearray()
                 for i in range(0, len(bits), 8):
-                    chunk = bits[i : i + 8]
+                    chunk = bits[i:i+8]
                     byte_val = sum((1 << j) if b else 0 for j, b in enumerate(chunk))
                     data_bytes.append(byte_val)
 
@@ -578,17 +527,15 @@ class ModbusService:
                     addr_prefix = {1: 1, 2: 10001}.get(fc_int, 1)
                     physical = str(addr_prefix + start + i)
 
-                    entries.append(
-                        RegisterEntry(
-                            address=start + i,
-                            physical=physical,
-                            tag=tag,
-                            dec=val,
-                            hex=hex_str,
-                            float_decoded=float_str,
-                            is_coil=True,
-                        )
-                    )
+                    entries.append(RegisterEntry(
+                        address=start + i,
+                        physical=physical,
+                        tag=tag,
+                        dec=val,
+                        hex=hex_str,
+                        float_decoded=float_str,
+                        is_coil=True,
+                    ))
             elif fc_int in (3, 4, 20, 23, 24):
                 regs = resp.registers[:count] if resp.registers else []
                 data_bytes = bytearray()
@@ -603,7 +550,7 @@ class ModbusService:
                     hex_str = f"0x{val:04X}"
 
                     if i % 2 == 0 and i + 1 < len(regs):
-                        float_str = _decode_float_cdab(val, regs[i + 1])
+                        float_str = _decode_float_cdab(val, regs[i+1])
                     else:
                         float_str = "—"
 
@@ -611,77 +558,65 @@ class ModbusService:
                     if preset == "custom":
                         tag = f"DB10.DBW{i * 2}"
 
-                    addr_prefix = {3: 40001, 4: 30001, 20: 40001, 23: 40001, 24: 40001}.get(
-                        fc_int, 40001
-                    )
+                    addr_prefix = {3: 40001, 4: 30001, 20: 40001, 23: 40001, 24: 40001}.get(fc_int, 40001)
                     physical = str(addr_prefix + start + i)
 
-                    entries.append(
-                        RegisterEntry(
-                            address=start + i,
-                            physical=physical,
-                            tag=tag,
-                            dec=val,
-                            hex=hex_str,
-                            float_decoded=float_str,
-                            is_coil=False,
-                        )
-                    )
+                    entries.append(RegisterEntry(
+                        address=start + i,
+                        physical=physical,
+                        tag=tag,
+                        dec=val,
+                        hex=hex_str,
+                        float_decoded=float_str,
+                        is_coil=False,
+                    ))
             elif fc_int == 7:
                 # FC07 读异常状态 — 单个字节
                 rx_hex = f"{txn:04X} 0000 0004 0{self._slave_id:X} 07 00".upper()
-                entries.append(
-                    RegisterEntry(
-                        address=0,
-                        physical="Exception",
-                        tag="Exception Status (FC07)",
-                        dec=0,
-                        hex="0x00",
-                        float_decoded="正常（无异常）",
-                        is_coil=False,
-                    )
-                )
+                entries.append(RegisterEntry(
+                    address=0,
+                    physical="Exception",
+                    tag="Exception Status (FC07)",
+                    dec=0,
+                    hex="0x00",
+                    float_decoded="正常（无异常）",
+                    is_coil=False,
+                ))
             elif fc_int == 17:
                 rx_hex = f"{txn:04X} 0000 0005 0{self._slave_id:X} 11 02 FF 00".upper()
-                entries.append(
-                    RegisterEntry(
-                        address=0,
-                        physical="Slave ID",
-                        tag="Report Slave ID (FC17) — 设备描述字",
-                        dec=255,
-                        hex="0xFF",
-                        float_decoded=f"Pymodbus | Slave ID: {self._slave_id}",
-                        is_coil=False,
-                    )
-                )
+                entries.append(RegisterEntry(
+                    address=0,
+                    physical="Slave ID",
+                    tag="Report Slave ID (FC17) — 设备描述字",
+                    dec=255,
+                    hex="0xFF",
+                    float_decoded=f"Pymodbus | Slave ID: {self._slave_id}",
+                    is_coil=False,
+                ))
             elif fc_int == 22:
                 # FC22 掩码写寄存器 — 读回当前值
                 rx_hex = f"{txn:04X} 0000 0008 0{self._slave_id:X} 16 {start:04X} 0000 0000".upper()
-                entries.append(
-                    RegisterEntry(
-                        address=start,
-                        physical=str(40001 + start),
-                        tag=f"Mask Write (FC22) @ {40001 + start}",
-                        dec=0,
-                        hex="0x0000",
-                        float_decoded="AND=0x0000 OR=0x0000",
-                        is_coil=False,
-                    )
-                )
+                entries.append(RegisterEntry(
+                    address=start,
+                    physical=str(40001 + start),
+                    tag=f"Mask Write (FC22) @ {40001 + start}",
+                    dec=0,
+                    hex="0x0000",
+                    float_decoded="AND=0x0000 OR=0x0000",
+                    is_coil=False,
+                ))
             elif fc_int == 43:
                 # FC43 读设备标识
                 rx_hex = f"{txn:04X} 0000 0005 0{self._slave_id:X} 2B 0E 01 01".upper()
-                entries.append(
-                    RegisterEntry(
-                        address=0,
-                        physical="Device ID",
-                        tag="Read Device Identification (FC43/2B)",
-                        dec=0,
-                        hex="0x0000",
-                        float_decoded=getattr(resp, "message", "auto-pm Modbus Simulator"),
-                        is_coil=False,
-                    )
-                )
+                entries.append(RegisterEntry(
+                    address=0,
+                    physical="Device ID",
+                    tag="Read Device Identification (FC43/2B)",
+                    dec=0,
+                    hex="0x0000",
+                    float_decoded=getattr(resp, "message", "auto-pm Modbus Simulator"),
+                    is_coil=False,
+                ))
 
             return ModbusReadResult(
                 success=True,
@@ -722,31 +657,20 @@ class ModbusService:
 
         try:
             if fc_int == 5:
-                resp = self._client.write_coil(
-                    address=addr, value=bool(value), device_id=self._slave_id
-                )
+                resp = self._client.write_coil(address=addr, value=bool(value), device_id=self._slave_id)
             elif fc_int == 6:
-                resp = self._client.write_register(
-                    address=addr, value=value, device_id=self._slave_id
-                )
+                resp = self._client.write_register(address=addr, value=value, device_id=self._slave_id)
             elif fc_int == 15:
-                resp = self._client.write_coils(
-                    address=addr, values=[bool(value)], device_id=self._slave_id
-                )
+                resp = self._client.write_coils(address=addr, values=[bool(value)], device_id=self._slave_id)
             elif fc_int == 16:
-                resp = self._client.write_registers(
-                    address=addr, values=[value], device_id=self._slave_id
-                )
+                resp = self._client.write_registers(address=addr, values=[value], device_id=self._slave_id)
             elif fc_int == 21:
                 resp = self._client.write_file_record(records=[], device_id=self._slave_id)
             elif fc_int == 22:
                 resp = self._client.mask_write_register(
-                    address=addr, and_mask=0x0000, or_mask=value, device_id=self._slave_id
-                )
+                    address=addr, and_mask=0x0000, or_mask=value, device_id=self._slave_id)
             else:
-                return ModbusWriteResult(
-                    success=False, message=f"不支持的写入功能码: FC{fc_int:02d}"
-                )
+                return ModbusWriteResult(success=False, message=f"不支持的写入功能码: FC{fc_int:02d}")
 
             if resp.isError():
                 return ModbusWriteResult(success=False, message=f"Modbus 物理写入错误: {resp}")
@@ -791,9 +715,7 @@ class ModbusService:
         cells: list[ScanCell] = []
         for offset in range(start_offset, end_offset + 1):
             try:
-                resp = self._client.read_holding_registers(
-                    address=offset, count=1, device_id=self._slave_id
-                )
+                resp = self._client.read_holding_registers(address=offset, count=1, device_id=self._slave_id)
                 is_active = not resp.isError()
             except Exception:
                 is_active = False
@@ -812,9 +734,7 @@ class ModbusService:
             "version": "1.0",
         }
         try:
-            Path(path).write_text(
-                json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            Path(path).write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
             return True, f"配置已导出至 {path}"
         except Exception as e:
             return False, f"导出失败: {e}"

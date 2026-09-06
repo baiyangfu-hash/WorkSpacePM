@@ -68,7 +68,9 @@ def run_workflow(ctx: click.Context, name: str, file_path: str | None) -> None:
                 f"[green]✅ 工作流 '{name}' 执行成功 (run_id: {run_record.run_id})[/green]"
             )
         else:
-            console.print(f"[red]❌ 工作流 '{name}' 执行失败 (run_id: {run_record.run_id})[/red]")
+            console.print(
+                f"[red]❌ 工作流 '{name}' 执行失败 (run_id: {run_record.run_id})[/red]"
+            )
             click.get_current_context().exit(1)
     except Exception as e:
         console.print(f"[bold red]错误:[/bold red] {e}")

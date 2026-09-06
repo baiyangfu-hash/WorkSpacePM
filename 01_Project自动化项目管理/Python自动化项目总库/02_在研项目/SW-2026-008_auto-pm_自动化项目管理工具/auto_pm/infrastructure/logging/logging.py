@@ -1,4 +1,3 @@
-# ruff: noqa: N802
 """PLC-HMI 概念映射：SFB 库函数（日志系统（统一日志配置/输出））
 
 像 PLC 的 SFB/SFC 系统函数，被 FB 功能块（application/*_facade.py）调用，
@@ -20,7 +19,7 @@ class _SilentTimedRotatingFileHandler(TimedRotatingFileHandler):
     （测试环境中 Trae Sandbox 可能限制 ~/.auto-pm/ 写入，实际使用环境不受影响）。
     """
 
-    def handleError(self, record: logging.LogRecord) -> None:
+    def handleError(self, record: logging.LogRecord) -> None:  # noqa: N802  # CHG-SCPT-2026-021: Qt handler 惯例覆写 handleError
         # 静默处理 emit 失败（如文件权限不足、沙箱限制）。
         # 默认 Handler.handleError 会输出到 sys.stderr，污染 Click 测试的 result.output。
         # 首次失败后从所有 logger 中移除自身，避免后续每次 emit 都触发失败处理。

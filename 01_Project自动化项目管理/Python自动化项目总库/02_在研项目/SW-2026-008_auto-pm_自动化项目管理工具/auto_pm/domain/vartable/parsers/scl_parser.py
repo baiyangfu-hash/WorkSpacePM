@@ -27,14 +27,9 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
 
 from auto_pm.vartable.models import ParseResult, VarEntry, VarTable
-
-if TYPE_CHECKING:
-    from auto_pm.domain.vartable.parsers.base_parser import BaseParser
-else:
-    from auto_pm.vartable.parsers.base_parser import BaseParser
+from auto_pm.vartable.parsers.base_parser import BaseParser
 
 SOURCE_FORMAT = "scl"
 
@@ -73,7 +68,7 @@ _FB_NAME_RE = re.compile(
 )
 
 
-class SclParser(BaseParser):
+class SclParser(BaseParser):  # type: ignore[misc]  # CHG-SCPT-2026-021: 稳定版 verbatim 回收，基类经命名空间 shim 解析为 Any
     """SCL 格式解析器
 
     用法：
@@ -118,7 +113,7 @@ class SclParser(BaseParser):
         content, encoding = read_result
 
         if not content.strip():
-            return cast(ParseResult, self._empty_content_error(file_path, SOURCE_FORMAT))
+            return self._empty_content_error(file_path, SOURCE_FORMAT)
 
         # 提取 FB 名称（用于 station 元数据）
         fb_name = ""

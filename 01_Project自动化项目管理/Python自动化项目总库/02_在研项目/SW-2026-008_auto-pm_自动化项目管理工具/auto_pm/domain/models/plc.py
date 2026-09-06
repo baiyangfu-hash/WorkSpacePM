@@ -84,7 +84,9 @@ class RepairResult(BaseModel):
 
     model_config = ConfigDict()
 
-    def add(self, item: str, action: str, destructive: bool, status: str, detail: str) -> None:
+    def add(
+        self, item: str, action: str, destructive: bool, status: str, detail: str
+    ) -> None:
         """添加一条修复动作并更新计数"""
         self.actions.append(
             RepairAction(

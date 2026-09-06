@@ -70,7 +70,6 @@ def _supports_unicode() -> bool:
 
 # ── constraint 命令组 ──
 
-
 @click.group(name="constraint")
 def constraint_group() -> None:
     """约束管理：检查/守护/自愈项目文件约束合规性
@@ -282,16 +281,12 @@ def heal_files(
 
         encoding_result = guard.check_encoding(fp)
         if encoding_result["is_healthy"]:
-            console.print(
-                f"[green]{_icon(True)} 文件编码正常 (BOM: {encoding_result['bom_count']})[/green]"
-            )
+            console.print(f"[green]{_icon(True)} 文件编码正常 (BOM: {encoding_result['bom_count']})[/green]")
             return
 
         if dry_run:
             console.print(f"[yellow]🔍 预览: {fp}[/yellow]")
-            console.print(
-                f"   BOM 数量: {encoding_result['bom_count']} → 将剥离 {encoding_result['bom_count']} 个"
-            )
+            console.print(f"   BOM 数量: {encoding_result['bom_count']} → 将剥离 {encoding_result['bom_count']} 个")
             return
 
         result = guard.heal_bom(fp)
@@ -372,7 +367,6 @@ def heal_files(
 
 # ── 内部检查函数 ──
 
-
 def _check_file_encoding(
     fp: Path, guard: FileGuard, constraints: list[Constraint]
 ) -> list[Violation]:
@@ -383,20 +377,20 @@ def _check_file_encoding(
             continue
         result = guard.check_encoding(fp)
         if not result["is_healthy"]:
-            violations.append(
-                Violation(
-                    constraint_id=cst.id,
-                    file_path=str(fp),
-                    rule_type="bom_count",
-                    message=f"文件包含 {result['bom_count']} 个 BOM（正常为 0-1）",
-                    severity=cst.severity,
-                    evidence=result,
-                )
-            )
+            violations.append(Violation(
+                constraint_id=cst.id,
+                file_path=str(fp),
+                rule_type="bom_count",
+                message=f"文件包含 {result['bom_count']} 个 BOM（正常为 0-1）",
+                severity=cst.severity,
+                evidence=result,
+            ))
     return violations
 
 
-def _check_file_guard(fp: Path, guard: FileGuard, constraints: list[Constraint]) -> list[Violation]:
+def _check_file_guard(
+    fp: Path, guard: FileGuard, constraints: list[Constraint]
+) -> list[Violation]:
     """检查单个文件是否有未登记的修改"""
     violations: list[Violation] = []
     for cst in constraints:
@@ -405,20 +399,20 @@ def _check_file_guard(fp: Path, guard: FileGuard, constraints: list[Constraint])
         if guard.has_snapshot(fp):
             result = guard.verify_snapshot(fp)
             if not result["verified"]:
-                violations.append(
-                    Violation(
-                        constraint_id=cst.id,
-                        file_path=str(fp),
-                        rule_type="no_external_write",
-                        message=f"文件哈希不匹配，可能被外部修改: {result.get('message', '')}",
-                        severity=cst.severity,
-                        evidence=result,
-                    )
-                )
+                violations.append(Violation(
+                    constraint_id=cst.id,
+                    file_path=str(fp),
+                    rule_type="no_external_write",
+                    message=f"文件哈希不匹配，可能被外部修改: {result.get('message', '')}",
+                    severity=cst.severity,
+                    evidence=result,
+                ))
     return violations
 
 
-def _check_encoding_scope(cst: Constraint, workspace: Path, guard: FileGuard) -> list[Violation]:
+def _check_encoding_scope(
+    cst: Constraint, workspace: Path, guard: FileGuard
+) -> list[Violation]:
     """扫描约束作用域内所有文件的编码完整性"""
     violations: list[Violation] = []
     for pattern in cst.scope.patterns:
@@ -430,20 +424,20 @@ def _check_encoding_scope(cst: Constraint, workspace: Path, guard: FileGuard) ->
                 continue
             result = guard.check_encoding(fp)
             if not result["is_healthy"]:
-                violations.append(
-                    Violation(
-                        constraint_id=cst.id,
-                        file_path=str(fp),
-                        rule_type="bom_count",
-                        message=f"文件包含 {result['bom_count']} 个 BOM（正常为 0-1）",
-                        severity=cst.severity,
-                        evidence=result,
-                    )
-                )
+                violations.append(Violation(
+                    constraint_id=cst.id,
+                    file_path=str(fp),
+                    rule_type="bom_count",
+                    message=f"文件包含 {result['bom_count']} 个 BOM（正常为 0-1）",
+                    severity=cst.severity,
+                    evidence=result,
+                ))
     return violations
 
 
-def _check_guard_scope(cst: Constraint, workspace: Path, guard: FileGuard) -> list[Violation]:
+def _check_guard_scope(
+    cst: Constraint, workspace: Path, guard: FileGuard
+) -> list[Violation]:
     """扫描约束作用域内所有文件的守护状态"""
     violations: list[Violation] = []
     for pattern in cst.scope.patterns:
@@ -456,14 +450,12 @@ def _check_guard_scope(cst: Constraint, workspace: Path, guard: FileGuard) -> li
             if guard.has_snapshot(fp):
                 result = guard.verify_snapshot(fp)
                 if not result["verified"]:
-                    violations.append(
-                        Violation(
-                            constraint_id=cst.id,
-                            file_path=str(fp),
-                            rule_type="no_external_write",
-                            message=f"文件哈希不匹配: {result.get('message', '')}",
-                            severity=cst.severity,
-                            evidence=result,
-                        )
-                    )
+                    violations.append(Violation(
+                        constraint_id=cst.id,
+                        file_path=str(fp),
+                        rule_type="no_external_write",
+                        message=f"文件哈希不匹配: {result.get('message', '')}",
+                        severity=cst.severity,
+                        evidence=result,
+                    ))
     return violations

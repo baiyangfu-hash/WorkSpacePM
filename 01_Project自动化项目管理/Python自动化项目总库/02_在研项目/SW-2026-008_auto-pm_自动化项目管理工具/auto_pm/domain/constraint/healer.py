@@ -30,32 +30,28 @@ class ConstraintHealer:
         encoding_res = self._guard.check_encoding(file_path)
         if encoding_res["bom_count"] > 1:
             if dry_run:
-                results.append(
-                    {
-                        "constraint_id": "CST-FILE-002",
-                        "file_path": str(file_path),
-                        "action": "strip_bom",
-                        "dry_run": True,
-                        "bom_before": encoding_res["bom_count"],
-                        "bom_after": 1,
-                        "message": f"将剥离 {encoding_res['bom_count'] - 1} 个多余 BOM",
-                    }
-                )
+                results.append({
+                    "constraint_id": "CST-FILE-002",
+                    "file_path": str(file_path),
+                    "action": "strip_bom",
+                    "dry_run": True,
+                    "bom_before": encoding_res["bom_count"],
+                    "bom_after": 1,
+                    "message": f"将剥离 {encoding_res['bom_count'] - 1} 个多余 BOM",
+                })
             else:
                 heal_res = self._guard.heal_bom(file_path)
                 if heal_res.get("healed"):
-                    results.append(
-                        {
-                            "constraint_id": "CST-FILE-002",
-                            "file_path": str(file_path),
-                            "action": "strip_bom",
-                            "dry_run": False,
-                            "bom_before": heal_res["bom_before"],
-                            "bom_after": heal_res["bom_after"],
-                            "bytes_removed": heal_res["bytes_removed"],
-                            "message": f"已剥离 {heal_res['bom_before'] - heal_res['bom_after']} 个多余 BOM",
-                        }
-                    )
+                    results.append({
+                        "constraint_id": "CST-FILE-002",
+                        "file_path": str(file_path),
+                        "action": "strip_bom",
+                        "dry_run": False,
+                        "bom_before": heal_res["bom_before"],
+                        "bom_after": heal_res["bom_after"],
+                        "bytes_removed": heal_res["bytes_removed"],
+                        "message": f"已剥离 {heal_res['bom_before'] - heal_res['bom_after']} 个多余 BOM",
+                    })
 
         return results
 

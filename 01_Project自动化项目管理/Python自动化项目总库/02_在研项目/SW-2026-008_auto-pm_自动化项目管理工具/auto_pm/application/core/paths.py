@@ -82,13 +82,19 @@ PRD_DIR_CANDIDATES: Final[list[str]] = ["PRD", "00_程序方案"]
 # ── 变更管理目录（CHG-SCPT-2026-146 5大过程组统一） ────────
 
 #: 变更单存放目录（5大过程组统一路径，不再区分 PLC/Python）
-CHANGE_REQUESTS_PATH: Final[list[str]] = [PG_MONITORING_DIR, "01_变更管理", "01_变更单"]
+CHANGE_REQUESTS_PATH: Final[list[str]] = [
+    PG_MONITORING_DIR, "01_变更管理", "01_变更单"
+]
 
 #: 变更记录存放目录（5大过程组统一路径）
-CHANGE_RECORDS_PATH: Final[list[str]] = [PG_MONITORING_DIR, "01_变更管理", "02_变更记录"]
+CHANGE_RECORDS_PATH: Final[list[str]] = [
+    PG_MONITORING_DIR, "01_变更管理", "02_变更记录"
+]
 
 #: 变更单扫描路径（不含最后的 01_变更单，用于递归扫描）
-CHANGE_SCAN_PATH: Final[list[str]] = [PG_MONITORING_DIR, "01_变更管理"]
+CHANGE_SCAN_PATH: Final[list[str]] = [
+    PG_MONITORING_DIR, "01_变更管理"
+]
 
 #: 立项表搜索路径（5大过程组统一路径）
 PROJECT_INIT_PATH: Final[list[str]] = [PG_INITIATING_DIR]
@@ -116,7 +122,6 @@ DEFAULT_PROJECTS_DIRNAME: Final[str] = "0100_项目"
 
 # ── 便捷函数 ───────────────────────────────────────────────
 
-
 def join_path(*parts: str) -> str:
     """跨平台拼接路径（os.path.join 的语义化包装）"""
     return os.path.join(*parts)
@@ -125,8 +130,29 @@ def join_path(*parts: str) -> str:
 def get_config_file_path() -> str:
     """获取全局配置文件 (.auto-pm-workspace) 的路径
 
-    统一位于工具根目录下。
+    统一位于工作空间运行态目录 .auto-pm/ 下。
     """
+    env_workspace = os.environ.get("AUTO_PM_WORKSPACE", "").strip()
+    if env_workspace:
+        return os.path.join(env_workspace, ".auto-pm", ".auto-pm-workspace")
+
+    anchors = (
+        "AGENTS.md",
+        "00_Obsidian_Base全局规范文件仓库",
+        "0100_PLC自动化",
+        "01_Project自动化项目管理",
+    )
+    tool_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    for start in (os.getcwd(), tool_dir):
+        curr = os.path.abspath(start)
+        while True:
+            if any(os.path.exists(os.path.join(curr, anchor)) for anchor in anchors):
+                return os.path.join(curr, ".auto-pm", ".auto-pm-workspace")
+            parent = os.path.dirname(curr)
+            if parent == curr:
+                break
+            curr = parent
+
     tool_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     return os.path.join(tool_dir, ".auto-pm-workspace")
 
@@ -183,8 +209,8 @@ def get_prd_dir(project_path: str) -> str:
 #: PRD 目录搜索路径（相对于项目根目录，按优先级排序）
 #: 空字符串 "" 表示项目根目录本身
 _PRD_SEARCH_PATHS: Final[list[str]] = [
-    "",  # 项目根目录（Python/非PLC项目）
-    "02_PLC程序/PLC_ST",  # 标准PLC项目嵌套路径
+    "",                         # 项目根目录（Python/非PLC项目）
+    "02_PLC程序/PLC_ST",        # 标准PLC项目嵌套路径
 ]
 
 

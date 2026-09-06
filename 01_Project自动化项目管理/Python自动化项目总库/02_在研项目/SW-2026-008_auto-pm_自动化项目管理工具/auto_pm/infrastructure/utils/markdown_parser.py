@@ -2,7 +2,6 @@
 
 将 Markdown 文本解析为结构化的 JSON Block 块，用于 QML 端的动态委托渲染。
 """
-
 from typing import Any
 
 import markdown
@@ -34,7 +33,7 @@ def parse_markdown_to_blocks(content: str) -> list[dict[str, Any]]:
             text = "\n".join(current_paragraph).strip()
             if text:
                 # 将段落内部 Markdown 转换为 HTML 富文本，以便 QML 渲染链接、粗体、小列表等
-                html = markdown.markdown(text, extensions=["extra"])
+                html = markdown.markdown(text, extensions=['extra'])
                 blocks.append({"type": "paragraph", "html": html})
             current_paragraph = []
 
@@ -42,7 +41,7 @@ def parse_markdown_to_blocks(content: str) -> list[dict[str, Any]]:
         nonlocal in_table, table_lines
         if in_table and table_lines:
             table_md = "\n".join(table_lines)
-            html = markdown.markdown(table_md, extensions=["extra"])
+            html = markdown.markdown(table_md, extensions=['extra'])
             blocks.append({"type": "table", "html": html})
             table_lines = []
             in_table = False
@@ -52,11 +51,19 @@ def parse_markdown_to_blocks(content: str) -> list[dict[str, Any]]:
         if in_quote and quote_lines:
             text = "\n".join(quote_lines).strip()
             if text:
-                html = markdown.markdown(text, extensions=["extra"])
+                html = markdown.markdown(text, extensions=['extra'])
                 if quote_type != "quote":
-                    blocks.append({"type": "alert", "alert_type": quote_type, "html": html})
+
+                    blocks.append({
+                        "type": "alert",
+                        "alert_type": quote_type,
+                        "html": html
+                    })
                 else:
-                    blocks.append({"type": "blockquote", "html": html})
+                    blocks.append({
+                        "type": "blockquote",
+                        "html": html
+                    })
             quote_lines = []
             in_quote = False
             quote_type = "quote"
@@ -70,7 +77,11 @@ def parse_markdown_to_blocks(content: str) -> list[dict[str, Any]]:
         if line.strip().startswith("```"):
             if in_code_block:
                 code_text = "\n".join(code_lines)
-                blocks.append({"type": "code", "lang": code_lang or "text", "code": code_text})
+                blocks.append({
+                    "type": "code",
+                    "lang": code_lang or "text",
+                    "code": code_text
+                })
                 code_lines = []
                 in_code_block = False
             else:
@@ -88,11 +99,7 @@ def parse_markdown_to_blocks(content: str) -> list[dict[str, Any]]:
             continue
 
         # 2. Table handling
-        is_table_line = line.strip().startswith("|") or (
-            line.strip()
-            and "|" in line
-            and (i + 1 < n and ("---" in lines[i + 1] or ":" in lines[i + 1]))
-        )
+        is_table_line = line.strip().startswith("|") or (line.strip() and "|" in line and (i+1 < n and ("---" in lines[i+1] or ":" in lines[i+1])))
         if is_table_line:
             if not in_table:
                 flush_paragraph()
@@ -141,17 +148,11 @@ def parse_markdown_to_blocks(content: str) -> list[dict[str, Any]]:
 
             title_text = stripped[level:].strip()
             if 1 <= level <= 6:
-                blocks.append(
-                    {
-                        "type": f"h{level}",
-                        "text": title_text,
-                        "anchor": title_text.lower()
-                        .replace(" ", "-")
-                        .replace("/", "")
-                        .replace("(", "")
-                        .replace(")", ""),
-                    }
-                )
+                blocks.append({
+                    "type": f"h{level}",
+                    "text": title_text,
+                    "anchor": title_text.lower().replace(" ", "-").replace("/", "").replace("(", "").replace(")", "")
+                })
             else:
                 current_paragraph.append(line)
             i += 1

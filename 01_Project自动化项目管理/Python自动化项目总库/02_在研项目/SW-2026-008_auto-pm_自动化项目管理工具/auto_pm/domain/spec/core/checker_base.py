@@ -39,7 +39,8 @@ class BaseChecker(ABC):
         self,
         registry: SpecRegistry,
         scanner: SpecScanner,
-    ) -> list[CheckResult]: ...
+    ) -> list[CheckResult]:
+        ...
 
 
 class DuplicateChecker(BaseChecker):
@@ -103,8 +104,12 @@ class VersionMismatchChecker(BaseChecker):
 
 
 class DeprecatedRefChecker(BaseChecker):
-    _ACTIVE_REF_PATTERNS = re.compile(r"(遵循|参照|引用|参考|依据|按照|遵守)\s*[:：]?\s*.*?")
-    _DEPRECATED_CONTEXT_PATTERNS = re.compile(r"(已废弃|替代|deprecated|取代|替换为|替代为)")
+    _ACTIVE_REF_PATTERNS = re.compile(
+        r"(遵循|参照|引用|参考|依据|按照|遵守)\s*[:：]?\s*.*?"
+    )
+    _DEPRECATED_CONTEXT_PATTERNS = re.compile(
+        r"(已废弃|替代|deprecated|取代|替换为|替代为)"
+    )
     _SPEC_ID_RE = re.compile(r"(?:SW|PM|PLC|PY|CODE|LSP|INT)-\d{3,4}(?:-\d{3})?")
 
     def check(
@@ -432,7 +437,9 @@ class RulesPathChecker(BaseChecker):
         return results
 
     def _find_ref_path(self, workspace: Path, ref_id: str, content: str) -> Path | None:
-        path_pattern = re.compile(rf"{re.escape(ref_id)}[^\s]*?[:\s]+([^\s]+\.(?:md|yaml|yml))")
+        path_pattern = re.compile(
+            rf"{re.escape(ref_id)}[^\s]*?[:\s]+([^\s]+\.(?:md|yaml|yml))"
+        )
         match = path_pattern.search(content)
         if match:
             return workspace / match.group(1)
@@ -456,7 +463,7 @@ class PMSessionRefChecker(BaseChecker):
         if not m:
             return content
         start = m.start()
-        rest = content[start + len(m.group(0)) :]
+        rest = content[start + len(m.group(0)):]
         nm = self._NEXT_SECTION_RE.search(rest)
         if nm:
             return content[start : start + len(m.group(0)) + nm.start()]
@@ -558,9 +565,7 @@ class SpecCrossRefChecker(BaseChecker):
                         if link_target.startswith(("http:", "https:", "#", "./")):
                             continue
 
-                        if not self._SPEC_ID_RE.search(link_text) and not self._SPEC_ID_RE.search(
-                            link_target
-                        ):
+                        if not self._SPEC_ID_RE.search(link_text) and not self._SPEC_ID_RE.search(link_target):
                             continue
 
                         target_path = base_dir / link_target
@@ -585,22 +590,28 @@ class VersionConsistencyChecker(BaseChecker):
     四处版本号是否一致。基于 project-rule.md "迭代文档同步规则（强制）"。
     """
 
-    _PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
-    _CHANGELOG_VERSION_RE = re.compile(r"^##\s*\[(?!Unreleased)([^\]]+)\]", re.MULTILINE)
-    _PM_VERSION_RE = re.compile(r"(?:代码基线|版本基线|基线)\s*\*{0,2}V?(\d+(?:\.\d+)+)\*{0,2}")
-    _NEXT_SECTION_RE = re.compile(r"^##\s*\d", re.MULTILINE)
+    _PYPROJECT_VERSION_RE = re.compile(
+        r'^version\s*=\s*["\']([^"\']+)["\']', re.MULTILINE
+    )
+    _CHANGELOG_VERSION_RE = re.compile(
+        r'^##\s*\[(?!Unreleased)([^\]]+)\]', re.MULTILINE
+    )
+    _PM_VERSION_RE = re.compile(
+        r'(?:代码基线|版本基线|基线)\s*\*{0,2}V?(\d+(?:\.\d+)+)\*{0,2}'
+    )
+    _NEXT_SECTION_RE = re.compile(r'^##\s*\d', re.MULTILINE)
 
     @staticmethod
     def _normalize_version(v: str) -> str:
         return v.lstrip("Vv")
 
     def _extract_section(self, content: str, section_num: int) -> str:
-        pattern = re.compile(rf"^##\s*{section_num}\.?\s", re.MULTILINE)
+        pattern = re.compile(rf'^##\s*{section_num}\.?\s', re.MULTILINE)
         m = pattern.search(content)
         if not m:
             return ""
         start = m.start()
-        rest = content[start + len(m.group(0)) :]
+        rest = content[start + len(m.group(0)):]
         nm = self._NEXT_SECTION_RE.search(rest)
         if nm:
             return content[start : start + len(m.group(0)) + nm.start()]
@@ -701,9 +712,9 @@ class TestCountConsistencyChecker(BaseChecker):
     依赖 pytest 配置 --junitxml=coverage/junit/test-results.xml。
     """
 
-    _PASSED_RE = re.compile(r"pytest\s+(\d+)\s+passed")
-    _SECTION_3_RE = re.compile(r"^##\s*3\.?\s", re.MULTILINE)
-    _NEXT_SECTION_RE = re.compile(r"^##\s*\d", re.MULTILINE)
+    _PASSED_RE = re.compile(r'pytest\s+(\d+)\s+passed')
+    _SECTION_3_RE = re.compile(r'^##\s*3\.?\s', re.MULTILINE)
+    _NEXT_SECTION_RE = re.compile(r'^##\s*\d', re.MULTILINE)
     _JUNIT_CANDIDATES = [
         "coverage/junit/test-results.xml",
         "test_reports/junit.xml",
@@ -715,7 +726,7 @@ class TestCountConsistencyChecker(BaseChecker):
         if not m:
             return ""
         start = m.start()
-        rest = content[start + len(m.group(0)) :]
+        rest = content[start + len(m.group(0)):]
         nm = self._NEXT_SECTION_RE.search(rest)
         if nm:
             return content[start : start + len(m.group(0)) + nm.start()]
@@ -800,16 +811,16 @@ class VerificationStatusChecker(BaseChecker):
     基于 project_memory "未验证禁止回写" 约束。
     """
 
-    _SECTION_8_RE = re.compile(r"^##\s*8\.?\s", re.MULTILINE)
-    _NEXT_SECTION_RE = re.compile(r"^##\s*\d", re.MULTILINE)
-    _VERIFIED_RE = re.compile(r"\[已验证\]|\[待验证\]")
+    _SECTION_8_RE = re.compile(r'^##\s*8\.?\s', re.MULTILINE)
+    _NEXT_SECTION_RE = re.compile(r'^##\s*\d', re.MULTILINE)
+    _VERIFIED_RE = re.compile(r'\[已验证\]|\[待验证\]')
 
     def _extract_section_8(self, content: str) -> str:
         m = self._SECTION_8_RE.search(content)
         if not m:
             return ""
         start = m.start()
-        rest = content[start + len(m.group(0)) :]
+        rest = content[start + len(m.group(0)):]
         nm = self._NEXT_SECTION_RE.search(rest)
         if nm:
             return content[start : start + len(m.group(0)) + nm.start()]
@@ -841,7 +852,10 @@ class VerificationStatusChecker(BaseChecker):
                         check_id="SHC-013",
                         severity=Severity.WARNING,
                         message="PM_SESSION §8 缺少验证状态标注",
-                        details=(f"PM文件: {pm_file.name}, §8 中未发现 [已验证] 或 [待验证] 标注"),
+                        details=(
+                            f"PM文件: {pm_file.name}, "
+                            f"§8 中未发现 [已验证] 或 [待验证] 标注"
+                        ),
                         fix_suggestion=(
                             "在 §8 的结论性条目后标注 [已验证] 或 [待验证]，"
                             "确保未验证结论不作为决策依据"
@@ -862,10 +876,10 @@ class DocIndexValidityChecker(BaseChecker):
     CHG-SCPT-2026-153: P1-2 修复 — 排除模板文件、占位符路径和忽略清单。
     """
 
-    _SECTION_4_RE = re.compile(r"^##\s*4\.?\s*(?:(?:Artifacts?|File)\s+)?(?:Index)?", re.MULTILINE)
-    _NEXT_SECTION_RE = re.compile(r"^##\s*\d", re.MULTILINE)
+    _SECTION_4_RE = re.compile(r'^##\s*4\.?\s*(?:(?:Artifacts?|File)\s+)?(?:Index)?', re.MULTILINE)
+    _NEXT_SECTION_RE = re.compile(r'^##\s*\d', re.MULTILINE)
     _DOC_ENTRY_RE = re.compile(
-        r"^-\s*(prd|req|int|dsn|tec)\s*:\s*(.+)$", re.MULTILINE | re.IGNORECASE
+        r'^-\s*(prd|req|int|dsn|tec)\s*:\s*(.+)$', re.MULTILINE | re.IGNORECASE
     )
     _COMPONENT_PM_SESSION_RE = re.compile(
         r"^PM_SESSION_(?:FB|FC|DB|OB|UDT)[A-Za-z0-9_-]*\.md$",
@@ -937,7 +951,7 @@ class DocIndexValidityChecker(BaseChecker):
         if not m:
             return ""
         start = m.start()
-        rest = content[start + len(m.group(0)) :]
+        rest = content[start + len(m.group(0)):]
         nm = self._NEXT_SECTION_RE.search(rest)
         if nm:
             return content[start : start + len(m.group(0)) + nm.start()]
@@ -1004,7 +1018,8 @@ class DocIndexValidityChecker(BaseChecker):
                         message=f"PM_SESSION §4 缺少必需文档索引: {', '.join(sorted(missing))}",
                         details=f"PM文件: {pm_file.name}",
                         fix_suggestion=(
-                            f"在 §4 Artifacts Index 中补充 {', '.join(sorted(missing))} 文档路径"
+                            f"在 §4 Artifacts Index 中补充 "
+                            f"{', '.join(sorted(missing))} 文档路径"
                         ),
                     )
                 )
@@ -1022,11 +1037,13 @@ class DocIndexValidityChecker(BaseChecker):
                             message=f"§4 文档索引路径无效: {doc_type} → {doc_path_str}",
                             details=f"PM文件: {pm_file.name}, 完整路径: {doc_path}",
                             fix_suggestion=(
-                                f"确认 {doc_path_str} 文件是否存在，或更新 §4 中的路径"
+                                f"确认 {doc_path_str} 文件是否存在，"
+                                f"或更新 §4 中的路径"
                             ),
                         )
                     )
         return results
+
 
 
 class NumberConflictChecker(BaseChecker):
@@ -1093,7 +1110,8 @@ class DriftWarningChecker(BaseChecker):
                         message=f"{spec_id} 存在规范漂移警告",
                         details=str(drift),
                         fix_suggestion=(
-                            "同步项目副本版本至真源版本，或移除已解决的 drift_warning 字段"
+                            "同步项目副本版本至真源版本，或移除已解决的 "
+                            "drift_warning 字段"
                         ),
                     )
                 )
@@ -1153,7 +1171,9 @@ class SkillContractDriftChecker(BaseChecker):
                                     f"文档缺失真源值 {value}"
                                 ),
                                 details=f"文档: {relpath}",
-                                fix_suggestion=(f"同步 {relpath}，使其包含代码真源值 {value}"),
+                                fix_suggestion=(
+                                    f"同步 {relpath}，使其包含代码真源值 {value}"
+                                ),
                             )
                         )
         return results
@@ -1180,9 +1200,12 @@ _CHECKER_MAP: dict[str, type[BaseChecker]] = {
 }
 
 
+
 class HealthChecker:
     def __init__(self) -> None:
-        self._checkers: list[BaseChecker] = [cls() for cls in _CHECKER_MAP.values()]
+        self._checkers: list[BaseChecker] = [
+            cls() for cls in _CHECKER_MAP.values()
+        ]
 
     def run_all(
         self,

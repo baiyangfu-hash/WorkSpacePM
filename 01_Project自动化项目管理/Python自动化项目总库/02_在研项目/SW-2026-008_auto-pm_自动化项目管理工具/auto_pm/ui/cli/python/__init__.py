@@ -164,9 +164,7 @@ def cmd_check(
                 f"[yellow]警告: 项目 {project_id} 缺少 pyproject.toml 且 .copier-answers.yml 中无 python stack，"
                 f"可能不是 Python 项目[/yellow]"
             )
-            console.print(
-                "[dim]仍将执行检查，但结果可能不准确。建议使用 --all 模式自动过滤。[/dim]"
-            )
+            console.print("[dim]仍将执行检查，但结果可能不准确。建议使用 --all 模式自动过滤。[/dim]")
         targets = [proj]
     else:
         console.print("[red]错误: 请指定项目编号或使用 --all[/red]")
@@ -213,14 +211,13 @@ def cmd_repair(
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
     if proj.stack != "python":
-        console.print(f"[red]错误: 项目 {project_id} 不是 Python 项目（stack={proj.stack}）[/red]")
+        console.print(
+            f"[red]错误: 项目 {project_id} 不是 Python 项目（stack={proj.stack}）[/red]"
+        )
         ctx.exit(1)
 
     from auto_pm.core.python_service import PythonProjectService
-
-    package_dir = os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    )
+    package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     templates_dir = os.path.join(package_dir, "templates")
     py_svc = PythonProjectService(app_ctx.workspace_root, templates_dir=templates_dir)
 
@@ -238,10 +235,7 @@ def cmd_repair(
 def _check_python_project(project_path: str, project_id: str) -> dict[str, Any]:
     """检查单个 Python 项目规范"""
     from auto_pm.core.python_service import PythonProjectService
-
-    package_dir = os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    )
+    package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     templates_dir = os.path.join(package_dir, "templates")
     svc = PythonProjectService(os.path.dirname(project_path), templates_dir=templates_dir)
     return dict(svc.check_project_spec(project_path, project_id))
@@ -264,7 +258,6 @@ def _is_python_project(project_path: str) -> bool:
     if os.path.isfile(copier_path):
         try:
             import yaml
-
             with open(copier_path, encoding="utf-8") as f:
                 answers = yaml.safe_load(f) or {}
             src_path = answers.get("_src_path", "")

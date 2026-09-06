@@ -46,9 +46,7 @@ def _get_audit_dir() -> Path | None:
     if audit_dir_env is not None and audit_dir_env.strip().lower() in _AUDIT_DISABLED_VALUES:
         return None
 
-    audit_dir = (
-        Path(audit_dir_env).expanduser() if audit_dir_env else Path.home() / ".auto-pm" / "audit"
-    )
+    audit_dir = Path(audit_dir_env).expanduser() if audit_dir_env else Path.home() / ".auto-pm" / "audit"
     try:
         audit_dir.mkdir(parents=True, exist_ok=True)
     except (OSError, PermissionError):

@@ -71,9 +71,7 @@ class ProjectListModel(QAbstractListModel):
             return 0
         return len(self._projects)
 
-    def data(
-        self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole
-    ) -> Any:
+    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         """返回指定 index + role 的数据"""
         if not index.isValid() or not (0 <= index.row() < len(self._projects)):
             return None
@@ -136,7 +134,6 @@ class ProjectListModel(QAbstractListModel):
         """返回指定行的 ProjectInfo（Python 端测试用）"""
         if 0 <= row < len(self._projects):
             from typing import cast
-
             return cast(ProjectInfo, self._projects[row])
         return None
 

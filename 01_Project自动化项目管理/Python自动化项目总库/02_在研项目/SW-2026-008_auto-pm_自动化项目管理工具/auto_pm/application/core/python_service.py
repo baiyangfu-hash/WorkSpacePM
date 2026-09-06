@@ -53,12 +53,7 @@ class PythonProjectService:
                 if tpl_candidate.is_dir() and (tpl_candidate / "python-tool").is_dir():
                     found_tpl = str(tpl_candidate)
                     break
-            self.templates_dir = found_tpl or os.path.join(
-                os.path.dirname(
-                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                ),
-                "templates",
-            )
+            self.templates_dir = found_tpl or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "templates")
 
     def check_project_spec(self, project_path: str, project_id: str) -> dict[str, Any]:
         """检查单个 Python 项目规范 (CODE-210/211/220)"""
@@ -68,25 +63,21 @@ class PythonProjectService:
         for fname in _REQUIRED_FILES:
             fpath = os.path.join(project_path, fname)
             ok = os.path.isfile(fpath)
-            checks.append(
-                {
-                    "name": f"文件: {fname}",
-                    "ok": ok,
-                    "detail": "" if ok else "文件不存在",
-                }
-            )
+            checks.append({
+                "name": f"文件: {fname}",
+                "ok": ok,
+                "detail": "" if ok else "文件不存在",
+            })
 
         # 2. 必需目录检查
         for dname in _REQUIRED_DIRS:
             dpath = os.path.join(project_path, dname)
             ok = os.path.isdir(dpath)
-            checks.append(
-                {
-                    "name": f"目录: {dname}",
-                    "ok": ok,
-                    "detail": "" if ok else "目录不存在",
-                }
-            )
+            checks.append({
+                "name": f"目录: {dname}",
+                "ok": ok,
+                "detail": "" if ok else "目录不存在",
+            })
 
         # 3. pyproject.toml 基本字段检查
         pyproject_path = os.path.join(project_path, "pyproject.toml")
@@ -97,47 +88,37 @@ class PythonProjectService:
                 has_name = "name" in content
                 has_version = "version" in content
                 has_python = "requires-python" in content
-                checks.append(
-                    {
-                        "name": "pyproject.toml: name 字段",
-                        "ok": has_name,
-                        "detail": "" if has_name else "缺少 name 字段",
-                    }
-                )
-                checks.append(
-                    {
-                        "name": "pyproject.toml: version 字段",
-                        "ok": has_version,
-                        "detail": "" if has_version else "缺少 version 字段",
-                    }
-                )
-                checks.append(
-                    {
-                        "name": "pyproject.toml: requires-python 字段",
-                        "ok": has_python,
-                        "detail": "" if has_python else "缺少 requires-python 字段",
-                    }
-                )
+                checks.append({
+                    "name": "pyproject.toml: name 字段",
+                    "ok": has_name,
+                    "detail": "" if has_name else "缺少 name 字段",
+                })
+                checks.append({
+                    "name": "pyproject.toml: version 字段",
+                    "ok": has_version,
+                    "detail": "" if has_version else "缺少 version 字段",
+                })
+                checks.append({
+                    "name": "pyproject.toml: requires-python 字段",
+                    "ok": has_python,
+                    "detail": "" if has_python else "缺少 requires-python 字段",
+                })
             except OSError:
-                checks.append(
-                    {
-                        "name": "pyproject.toml 读取",
-                        "ok": False,
-                        "detail": "读取失败",
-                    }
-                )
+                checks.append({
+                    "name": "pyproject.toml 读取",
+                    "ok": False,
+                    "detail": "读取失败",
+                })
 
         # 4. tests/conftest.py 检查
         tests_dir = os.path.join(project_path, "tests")
         if os.path.isdir(tests_dir):
             has_conftest = os.path.isfile(os.path.join(tests_dir, "conftest.py"))
-            checks.append(
-                {
-                    "name": "tests/conftest.py",
-                    "ok": has_conftest,
-                    "detail": "" if has_conftest else "缺少 conftest.py",
-                }
-            )
+            checks.append({
+                "name": "tests/conftest.py",
+                "ok": has_conftest,
+                "detail": "" if has_conftest else "缺少 conftest.py",
+            })
 
         # 5. PM_SESSION 文件检查
         pm_session_found = False
@@ -148,13 +129,11 @@ class PythonProjectService:
                     break
         except OSError:
             pass
-        checks.append(
-            {
-                "name": "PM_SESSION 文件",
-                "ok": pm_session_found,
-                "detail": "" if pm_session_found else "缺少 PM_SESSION_*.md",
-            }
-        )
+        checks.append({
+            "name": "PM_SESSION 文件",
+            "ok": pm_session_found,
+            "detail": "" if pm_session_found else "缺少 PM_SESSION_*.md",
+        })
 
         passed = sum(1 for c in checks if c["ok"])
         total = len(checks)
@@ -168,9 +147,7 @@ class PythonProjectService:
             "checks": checks,
         }
 
-    def repair_project_spec(
-        self, project_path: str, project_id: str, dry_run: bool = False
-    ) -> list[str]:
+    def repair_project_spec(self, project_path: str, project_id: str, dry_run: bool = False) -> list[str]:
         """修复单个 Python 项目规范问题"""
         repaired_items: list[str] = []
         tpl_path = os.path.join(self.templates_dir, "python-tool", "template")
@@ -208,6 +185,7 @@ class PythonProjectService:
         if not os.path.exists(tpl_path):
             log.warning("Python 模板不存在，跳过物理修复: %s", tpl_path)
             return repaired_items
+
 
         # 修复逻辑
         def copy_static_file(src_name: str, dst_name: str) -> None:
@@ -278,6 +256,9 @@ class PythonProjectService:
         except OSError:
             pass
         if not pm_session_found:
-            render_jinja_file("PM_SESSION_{{ project_id }}.md.jinja", f"PM_SESSION_{project_id}.md")
+            render_jinja_file(
+                "PM_SESSION_{{ project_id }}.md.jinja",
+                f"PM_SESSION_{project_id}.md"
+            )
 
         return repaired_items

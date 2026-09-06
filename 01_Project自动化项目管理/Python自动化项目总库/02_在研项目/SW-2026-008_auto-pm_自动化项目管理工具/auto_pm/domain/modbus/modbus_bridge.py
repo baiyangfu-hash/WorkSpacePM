@@ -1,4 +1,4 @@
-# ruff: noqa: N802, N815
+# ruff: noqa: N802, N815  # CHG-SCPT-2026-021: Qt 桥接沿用 Qt camelCase 命名惯例
 """PLC-HMI 概念映射：HMI 变量表（Modbus 域）
 
 像 HMI 触摸屏的变量表，定义了 QML 画面能访问的所有 Modbus 联调相关变量和方法：
@@ -10,9 +10,8 @@ V1.0.0 接口设计原则：
 - 耗时操作（scan）在 QThread 中执行并通过 Signal 异步回传进度
 - 轮询模式使用 QTimer 定时触发（频率：1000ms，由 QML 控制开关）
 
-设计参考：02_设计/Html原型预览/018_UI架构原型_V13.html
+设计参考：02_规划/Html原型预览/020_UI架构原型_V15_Modbus工坊专项.html
 """
-
 from __future__ import annotations
 
 import logging
@@ -31,11 +30,9 @@ log = logging.getLogger(__name__)
 # 后台扫描任务（QRunnable → QThreadPool）
 # ─────────────────────────────────────────────
 
-
 class _ScanWorkerSignals(QObject):
     """扫描任务信号容器（QRunnable 不能继承 QObject，故独立）"""
-
-    cellResult = Signal(int, bool)  # (offset, is_active)
+    cellResult = Signal(int, bool)   # (offset, is_active)
     finished = Signal()
 
 
@@ -51,7 +48,6 @@ class _ScanWorker(QRunnable):
 
     def run(self) -> None:
         import time as _time
-
         cells = self.service.scan_registers(self.start_offset, self.end_offset)
         for cell in cells:
             self.signals.cellResult.emit(cell.offset, cell.is_active)
@@ -61,7 +57,6 @@ class _ScanWorker(QRunnable):
 
 class _PingWorkerSignals(QObject):
     """Ping 任务信号容器"""
-
     finished = Signal(bool, str)
 
 
@@ -84,7 +79,6 @@ class _PingWorker(QRunnable):
 # QML Bridge
 # ─────────────────────────────────────────────
 
-
 class ModbusBridge(QObject):
     """Modbus TCP 联调工坊 QML 桥接层。
 
@@ -102,11 +96,11 @@ class ModbusBridge(QObject):
 
     # ── Signals ──────────────────────────────────────────
     registerDataReceived = Signal(list)
-    consoleLogAppended = Signal(str, str)
+    consoleLogAppended   = Signal(str, str)
     connectionStateChanged = Signal(bool)
-    pingResultReceived = Signal(bool, str)
-    scanCellUpdated = Signal(int, bool)
-    scanFinished = Signal()
+    pingResultReceived   = Signal(bool, str)
+    scanCellUpdated      = Signal(int, bool)
+    scanFinished         = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -131,10 +125,7 @@ class ModbusBridge(QObject):
             ip: 目标 PLC IP 地址
             source_ip: 本地网卡 IP
         """
-        self._log(
-            "PING",
-            f"发起 ICMP PING 探测 → {ip} (网卡绑定: {source_ip if source_ip else '自动'})...",
-        )
+        self._log("PING", f"发起 ICMP PING 探测 → {ip} (网卡绑定: {source_ip if source_ip else '自动'})...")
         worker = _PingWorker(self._service, ip, source_ip)
         worker.signals.finished.connect(self._on_ping_finished)
         self._pool.start(worker)
@@ -155,7 +146,6 @@ class ModbusBridge(QObject):
         interfaces.append({"name": "自动选择 (Auto Default)", "ip": ""})
         try:
             import psutil
-
             for name, addrs in psutil.net_if_addrs().items():
                 for addr in addrs:
                     if addr.family == socket.AF_INET:
@@ -183,9 +173,7 @@ class ModbusBridge(QObject):
     # ── 连接管理 ─────────────────────────────────────────
 
     @Slot(str, int, int, bool, str)
-    def connectDevice(
-        self, ip: str, port: int, slave_id: int, sim_mode: bool, source_ip: str
-    ) -> None:
+    def connectDevice(self, ip: str, port: int, slave_id: int, sim_mode: bool, source_ip: str) -> None:
         """建立 Modbus TCP 连接。
 
         Args:
@@ -196,10 +184,7 @@ class ModbusBridge(QObject):
             source_ip: 本地绑定网卡 IP
         """
         try:
-            self._log(
-                "SYS",
-                f"发起 TCP Socket 握手 → {ip}:{port} Unit={slave_id} sim={sim_mode} bind={source_ip if source_ip else 'Auto'}",
-            )
+            self._log("SYS", f"发起 TCP Socket 握手 → {ip}:{port} Unit={slave_id} sim={sim_mode} bind={source_ip if source_ip else 'Auto'}")
             ok, msg = self._service.connect(ip, port, slave_id, sim_mode, source_ip)
             if not ok:
                 msg = IndustrialErrorMapper.format_exception(msg)
@@ -268,9 +253,7 @@ class ModbusBridge(QObject):
         try:
             value = int(float(value_str))
         except ValueError:
-            self._log(
-                "ERR", IndustrialErrorMapper.format_exception(f"写入数值格式错误: '{value_str}'")
-            )
+            self._log("ERR", IndustrialErrorMapper.format_exception(f"写入数值格式错误: '{value_str}'"))
             return
 
         try:
@@ -340,19 +323,15 @@ class ModbusBridge(QObject):
             self._log("ERR", "请先连接 Modbus TCP 设备再执行扫描！")
             return
 
-        self._log(
-            "SYS",
-            f"[扫描开始] 并发探测保持寄存器 [{40001 + start_offset} - {40001 + end_offset}]...",
-        )
+        self._log("SYS", f"[扫描开始] 并发探测保持寄存器 [{40001 + start_offset} - {40001 + end_offset}]...")
         worker = _ScanWorker(self._service, start_offset, end_offset)
         worker.signals.cellResult.connect(self.scanCellUpdated)
         worker.signals.finished.connect(self.scanFinished)
         worker.signals.finished.connect(
-            lambda: self._log(
-                "SYS", "[扫描完成] 活跃物理通道已用绿色标出，不可达通道已用红色标出。"
-            )
+            lambda: self._log("SYS", "[扫描完成] 活跃物理通道已用绿色标出，不可达通道已用红色标出。")
         )
         self._pool.start(worker)
+
 
     # ── JSON 配置 ─────────────────────────────────────────
 

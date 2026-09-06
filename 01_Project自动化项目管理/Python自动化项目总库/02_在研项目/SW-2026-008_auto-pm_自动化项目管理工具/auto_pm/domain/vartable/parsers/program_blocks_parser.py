@@ -176,7 +176,9 @@ class ProgramBlocksParser:
         # 构建元数据
         block_type_counts: dict[str, int] = {}
         for entry in entries:
-            block_type_counts[entry.block_type] = block_type_counts.get(entry.block_type, 0) + 1
+            block_type_counts[entry.block_type] = (
+                block_type_counts.get(entry.block_type, 0) + 1
+            )
 
         # 提取顶层元数据（可选字段，不强制）
         metadata: dict[str, Any] = {

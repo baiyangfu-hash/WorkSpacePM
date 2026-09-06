@@ -10,10 +10,9 @@ Delivery Bridge (QML)
 M4 第 2 批重构：5 个 Slot 改用 dataclasses.asdict() 转换 DTO 为 dict 给 QML。
 M5 CHG-116：refreshAssetSummary / getAssetSummary Slot 已接入 WorkspaceView.qml 资产汇总 Card。
 """
-
 import logging
 from dataclasses import asdict
-from typing import Any
+from typing import Any, cast
 
 from PySide6.QtCore import Property, QObject, Slot
 
@@ -23,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class DeliveryBridge(QObject):
+
     def __init__(self, facade: DeliveryFacade | None = None, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._facade = facade
@@ -96,11 +96,7 @@ class DeliveryBridge(QObject):
 
     @Slot(str, QObject, result=bool)
     def loadVarTable(self, project_id: str, var_model: Any) -> bool:
-        if (
-            not self._facade
-            or not self._facade.has_project_service
-            or self._facade._project_service is None
-        ):
+        if not self._facade or not self._facade.has_project_service or self._facade._project_service is None:
             return False
         proj = self._facade._project_service.get_project(project_id)
         if proj is None:
@@ -120,28 +116,22 @@ class DeliveryBridge(QObject):
         if result.success and result.var_table:
             entries = []
             for entry in result.var_table.entries:
-                entries.append(
-                    {
-                        "station": entry.station,
-                        "signal_type": entry.signal_type,
-                        "address": entry.address,
-                        "tag": entry.tag,
-                        "signal_name": entry.signal_name,
-                        "device": entry.device,
-                        "comment": entry.comment,
-                    }
-                )
+                entries.append({
+                    "station": entry.station,
+                    "signal_type": entry.signal_type,
+                    "address": entry.address,
+                    "tag": entry.tag,
+                    "signal_name": entry.signal_name,
+                    "device": entry.device,
+                    "comment": entry.comment,
+                })
             var_model.setEntries(entries)
             return True
         return False
 
     @Slot(str, QObject, result=bool)
     def saveVarTable(self, project_id: str, var_model: Any) -> bool:
-        if (
-            not self._facade
-            or not self._facade.has_project_service
-            or self._facade._project_service is None
-        ):
+        if not self._facade or not self._facade.has_project_service or self._facade._project_service is None:
             return False
         proj = self._facade._project_service.get_project(project_id)
         if proj is None:
@@ -154,15 +144,7 @@ class DeliveryBridge(QObject):
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         entries = var_model.getEntries()
-        fieldnames = [
-            "station",
-            "signal_type",
-            "address",
-            "tag",
-            "signal_name",
-            "device",
-            "comment",
-        ]
+        fieldnames = ["station", "signal_type", "address", "tag", "signal_name", "device", "comment"]
 
         try:
             with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
@@ -176,11 +158,7 @@ class DeliveryBridge(QObject):
 
     @Slot(str, result=list)
     def listProjectDocs(self, project_id: str) -> list[dict[str, Any]]:
-        if (
-            not self._facade
-            or not self._facade.has_project_service
-            or self._facade._project_service is None
-        ):
+        if not self._facade or not self._facade.has_project_service or self._facade._project_service is None:
             return []
         proj = self._facade._project_service.get_project(project_id)
         if proj is None:
@@ -207,41 +185,26 @@ class DeliveryBridge(QObject):
                     # Determine category: pm, tech, spec, log, other
                     category = "other"
                     name_lower = rel_path.lower()
-                    if (
-                        name_lower.startswith("00_")
-                        or "变更管理" in rel_path
-                        or "chg-" in name_lower
-                    ):
+                    if name_lower.startswith("00_") or "变更管理" in rel_path or "chg-" in name_lower:
                         category = "pm"
-                    elif (
-                        name_lower.startswith("01_")
-                        or name_lower.startswith("02_")
-                        or "设计" in rel_path
-                        or "prd" in name_lower
-                    ):
+                    elif name_lower.startswith("01_") or name_lower.startswith("02_") or "设计" in rel_path or "prd" in name_lower:
                         category = "tech"
-                    elif (
-                        ".trae/specs" in name_lower
-                        or "spec" in name_lower
-                        or "rules" in name_lower
-                        or "guideline" in name_lower
-                    ):
+                    elif ".trae/specs" in name_lower or "spec" in name_lower or "rules" in name_lower or "guideline" in name_lower:
                         category = "spec"
                     elif "pm_session" in name_lower:
                         category = "log"
 
-                    docs.append(
-                        {
-                            "name": rel_path,
-                            "path": abs_path.replace("\\", "/"),
-                            "size_kb": size_kb,
-                            "last_modified": mtime,
-                            "category": category,
-                        }
-                    )
+                    docs.append({
+                        "name": rel_path,
+                        "path": abs_path.replace("\\", "/"),
+                        "size_kb": size_kb,
+                        "last_modified": mtime,
+                        "category": category
+                    })
         # Sort documents by name
         docs.sort(key=lambda d: str(d["name"]))
         return docs
+
 
     @Slot(str, result=str)
     def renderMarkdown(self, file_path: str) -> str:
@@ -256,7 +219,7 @@ class DeliveryBridge(QObject):
             with open(file_path, encoding="utf-8") as f:
                 content = f.read()
             # Convert markdown to html
-            html = markdown.markdown(content, extensions=["extra", "codehilite", "toc"])
+            html = markdown.markdown(content, extensions=['extra', 'codehilite', 'toc'])
             # Wrap with basic CSS to look nice in QML Text (rich text)
             styled_html = f"""
             <html>
@@ -298,15 +261,10 @@ class DeliveryBridge(QObject):
         try:
             with open(file_path, encoding="utf-8") as f:
                 content = f.read()
-            return list(parse_markdown_to_blocks(content))
+            return cast(list[dict[str, Any]], parse_markdown_to_blocks(content))
         except Exception as e:
             logger.warning("parseMarkdownToBlocks failed: %s", e, exc_info=True)
-            return [
-                {
-                    "type": "paragraph",
-                    "html": f"<p style='color: red;'>解析 Markdown 失败: {str(e)}</p>",
-                }
-            ]
+            return [{"type": "paragraph", "html": f"<p style='color: red;'>解析 Markdown 失败: {str(e)}</p>"}]
 
     @Slot(str, str, result="QVariantMap")
     def exportDocToPdf(self, file_path: str, save_path: str) -> dict[str, Any]:
@@ -369,12 +327,12 @@ class DeliveryBridge(QObject):
             if dir_name and not os.path.exists(dir_name):
                 os.makedirs(dir_name, exist_ok=True)
 
-            from PySide6.QtPrintSupport import QPrinter
+            # QPdfWriter writes directly to a file and does not require a Windows
+            # print spooler or an Office/COM integration in headless execution.
+            from PySide6.QtGui import QPdfWriter
 
-            printer = QPrinter()
-            printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
-            printer.setOutputFileName(save_path)
-            doc.print_(printer)
+            writer = QPdfWriter(save_path)
+            doc.print_(writer)
 
             return {"success": True, "message": f"成功导出 PDF 至 {save_path}"}
         except Exception as e:

@@ -21,13 +21,14 @@ class AppContext:
 
     def __init__(self, workspace_root: str = "") -> None:
         self.app_config = AutoPmConfig(app_name=__app_name__)
-        self.logger = setup_logger(log_level=self.app_config.log_level, app_name=__app_name__)
+        self.logger = setup_logger(
+            log_level=self.app_config.log_level, app_name=__app_name__
+        )
         # 工作空间根目录（项目库所在目录）
         if not workspace_root:
             workspace_root = os.environ.get("AUTO_PM_WORKSPACE", "")
         if not workspace_root:
             from auto_pm.core.paths import get_config_file_path
-
             cfg_file = get_config_file_path()
             if os.path.isfile(cfg_file):
                 try:

@@ -276,13 +276,7 @@ class DocRefreshService:
         match = pattern.search(content)
         if not match:
             return None
-        return (
-            content[: match.start()]
-            + match.group(1)
-            + generated_body
-            + match.group(3)
-            + content[match.end() :]
-        )
+        return content[: match.start()] + match.group(1) + generated_body + match.group(3) + content[match.end() :]
 
     @staticmethod
     def _load_io_points(file_path: str) -> list[dict[str, str]]:

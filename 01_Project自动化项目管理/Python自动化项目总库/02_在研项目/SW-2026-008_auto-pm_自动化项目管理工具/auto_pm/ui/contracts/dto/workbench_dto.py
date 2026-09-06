@@ -27,7 +27,6 @@ class DashboardSnapshotDTO:
     test_pass_rate: float = 0.0
     test_total: int = 0
 
-
 @dataclass(frozen=True)
 class ProjectCardDTO:
     project_id: str
@@ -40,7 +39,6 @@ class ProjectCardDTO:
     last_activity_at: str | None
     path: str
     business_line: str
-
 
 @dataclass(frozen=True)
 class ProjectWorkspaceDTO:

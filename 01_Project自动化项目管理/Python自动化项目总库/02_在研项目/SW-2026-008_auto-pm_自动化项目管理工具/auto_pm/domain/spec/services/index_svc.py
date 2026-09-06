@@ -88,9 +88,7 @@ class IndexService:
         specs.sort(key=lambda s: s.get("number", "999"))
         return specs
 
-    def _get_deprecated_specs(
-        self, raw: dict[str, Any], domain: str, lifecycles: list[str] | None = None
-    ) -> list[dict[str, Any]]:
+    def _get_deprecated_specs(self, raw: dict[str, Any], domain: str, lifecycles: list[str] | None = None) -> list[dict[str, Any]]:
         if lifecycles is None:
             lifecycles = ["deprecated", "archived"]
         specs = []
@@ -139,9 +137,7 @@ class IndexService:
             for spec in group_specs:
                 fname = Path(spec["canonical_path"]).name
                 rel = spec["canonical_path"].replace("00_Obsidian_Base全局规范文件仓库/", "")
-                lines.append(
-                    f"| {spec['spec_id']} | [{fname}]({rel}) | {spec['version']} | {spec['title']} |"
-                )
+                lines.append(f"| {spec['spec_id']} | [{fname}]({rel}) | {spec['version']} | {spec['title']} |")
             lines.append("")
 
         lines.append("---")
@@ -150,16 +146,10 @@ class IndexService:
         lines.append("")
         lines.append("| 技术栈 | 规范位置 | 包含内容 |")
         lines.append("|--------|----------|----------|")
-        lines.append(
-            "| **PLC** | `00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/` | LSP-903~907、STD-820/830/840/850/860 等 PLC 真源规范 |"
-        )
-        lines.append(
-            "| **Python** | `00_Obsidian_Base全局规范文件仓库/02_Python开发域/` | DEV-210/211/216/217/218/220 等 Python 真源规范 |"
-        )
+        lines.append("| **PLC** | `00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/` | LSP-903~907、STD-820/830/840/850/860 等 PLC 真源规范 |")
+        lines.append("| **Python** | `00_Obsidian_Base全局规范文件仓库/02_Python开发域/` | DEV-210/211/216/217/218/220 等 Python 真源规范 |")
         lines.append("")
-        lines.append(
-            "**冲突处理**: 当全局PM规范与技术栈编码/架构规范冲突时，以本索引列出的技术栈真源目录为准"
-        )
+        lines.append("**冲突处理**: 当全局PM规范与技术栈编码/架构规范冲突时，以本索引列出的技术栈真源目录为准")
         lines.append("")
         lines.append("---")
         lines.append("")
@@ -173,13 +163,9 @@ class IndexService:
             lines.append("|---------|------|---------|---------|")
             for spec in deprecated:
                 replaced_by = spec.get("replaced_by", [])
-                replaced_str = (
-                    ", ".join(replaced_by) if isinstance(replaced_by, list) else str(replaced_by)
-                )
+                replaced_str = ", ".join(replaced_by) if isinstance(replaced_by, list) else str(replaced_by)
                 deprecated_date = spec.get("deprecated_date", "未知")
-                lines.append(
-                    f"| {spec['spec_id']} | {spec['title']} | {replaced_str or '无'} | {deprecated_date} |"
-                )
+                lines.append(f"| {spec['spec_id']} | {spec['title']} | {replaced_str or '无'} | {deprecated_date} |")
         else:
             lines.append("暂无")
         lines.append("")
@@ -194,9 +180,7 @@ class IndexService:
             for spec in archived:
                 canonical_path = spec.get("canonical_path", "")
                 archived_date = spec.get("archived_date", "未知")
-                lines.append(
-                    f"| {spec['spec_id']} | {spec['title']} | {canonical_path} | {archived_date} |"
-                )
+                lines.append(f"| {spec['spec_id']} | {spec['title']} | {canonical_path} | {archived_date} |")
         else:
             lines.append("暂无")
         lines.append("")
@@ -219,9 +203,7 @@ class IndexService:
     def _generate_tech_stack_index(self, raw: dict[str, Any], domain: str) -> str:
         cfg = DOMAIN_CONFIG[domain]
         specs = self._get_specs_by_domain(raw, domain)
-        cross_domain_specs = (
-            self._get_specs_by_domain(raw, "cross-domain") if domain == "plc" else []
-        )
+        cross_domain_specs = self._get_specs_by_domain(raw, "cross-domain") if domain == "plc" else []
         deprecated = self._get_deprecated_specs(raw, domain, ["deprecated"])
         archived = self._get_deprecated_specs(raw, domain, ["archived"])
         now = datetime.now().strftime("%Y-%m-%d")
@@ -248,9 +230,7 @@ class IndexService:
             for spec in sub_specs:
                 fname = Path(spec["canonical_path"]).name
                 priority = "🔴必读" if spec["spec_id"] in core_ids else "🟡配套"
-                lines.append(
-                    f"| {spec['spec_id']} | {fname} | {spec['version']} | {spec['title']} | {priority} |"
-                )
+                lines.append(f"| {spec['spec_id']} | {fname} | {spec['version']} | {spec['title']} | {priority} |")
             lines.append("")
 
         if cross_domain_specs and domain == "plc":
@@ -260,9 +240,7 @@ class IndexService:
             lines.append("|--------|--------|------|------|")
             for spec in cross_domain_specs:
                 fname = Path(spec["canonical_path"]).name
-                lines.append(
-                    f"| {spec['spec_id']} | {fname} | {spec['version']} | {spec['title']} |"
-                )
+                lines.append(f"| {spec['spec_id']} | {fname} | {spec['version']} | {spec['title']} |")
             lines.append("")
 
         lines.append("## 已废弃规范（Deprecated）")
@@ -274,13 +252,9 @@ class IndexService:
             lines.append("|---------|------|---------|---------|")
             for spec in deprecated:
                 replaced_by = spec.get("replaced_by", [])
-                replaced_str = (
-                    ", ".join(replaced_by) if isinstance(replaced_by, list) else str(replaced_by)
-                )
+                replaced_str = ", ".join(replaced_by) if isinstance(replaced_by, list) else str(replaced_by)
                 deprecated_date = spec.get("deprecated_date", "未知")
-                lines.append(
-                    f"| {spec['spec_id']} | {spec['title']} | {replaced_str or '无'} | {deprecated_date} |"
-                )
+                lines.append(f"| {spec['spec_id']} | {spec['title']} | {replaced_str or '无'} | {deprecated_date} |")
         else:
             lines.append("暂无")
         lines.append("")
@@ -295,9 +269,7 @@ class IndexService:
             for spec in archived:
                 canonical_path = spec.get("canonical_path", "")
                 archived_date = spec.get("archived_date", "未知")
-                lines.append(
-                    f"| {spec['spec_id']} | {spec['title']} | {canonical_path} | {archived_date} |"
-                )
+                lines.append(f"| {spec['spec_id']} | {spec['title']} | {canonical_path} | {archived_date} |")
         else:
             lines.append("暂无")
         lines.append("")

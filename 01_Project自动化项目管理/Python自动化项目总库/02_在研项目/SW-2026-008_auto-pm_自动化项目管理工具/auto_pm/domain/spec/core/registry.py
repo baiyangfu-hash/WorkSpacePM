@@ -41,7 +41,6 @@ class SpecRegistry:
         if self._registry_path is not None:
             return self.workspace / self._registry_path
         from .config import DEFAULT_REGISTRY_PATH
-
         return self.workspace / DEFAULT_REGISTRY_PATH
 
     @property
@@ -61,19 +60,11 @@ class SpecRegistry:
                 if not isinstance(info, dict):
                     continue
                 clean = dict(info)
-                for key in (
-                    "drift_warning",
-                    "classification_issue",
-                    "project_local_copy",
-                    "project",
-                    "note",
-                ):
+                for key in ("drift_warning", "classification_issue", "project_local_copy", "project", "note"):
                     clean.pop(key, None)
                 for list_key in ("replaces", "replaced_by", "tags", "aliases"):
                     if list_key in clean and isinstance(clean[list_key], str):
-                        clean[list_key] = [
-                            s.strip() for s in clean[list_key].split(",") if s.strip()
-                        ]
+                        clean[list_key] = [s.strip() for s in clean[list_key].split(",") if s.strip()]
                 if "spec_id" not in clean:
                     clean["spec_id"] = spec_id
                 self._specs[spec_id] = SpecInfo(

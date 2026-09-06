@@ -67,7 +67,6 @@ def cmd_init(
         ctx.exit(1)
 
     from auto_pm.core.constants import get_template_name
-
     template_name = get_template_name("plc", mode)
 
     tpl_svc = TemplateService(app_ctx.templates_dir)
@@ -84,9 +83,7 @@ def cmd_init(
         console.print(f"[dim]模式: {mode} | 模板: {template_name}[/dim]")
     except FileNotFoundError as e:
         console.print(f"[red]错误: 模板不存在 - {e}[/red]")
-        console.print(
-            f"[yellow]提示: 模板 {template_name} 可能尚未创建，请检查 templates/ 目录[/yellow]"
-        )
+        console.print(f"[yellow]提示: 模板 {template_name} 可能尚未创建，请检查 templates/ 目录[/yellow]")
         ctx.exit(1)
     except Exception as e:
         console.print(f"[red]创建失败: {e}[/red]")
@@ -154,7 +151,9 @@ def cmd_check(
         if output_json:
             print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))  # noqa: T201
         else:
-            console.print(f"[blue]PLC 检查不适用: {project_id}[/blue]")
+            console.print(
+                f"[blue]PLC 检查不适用: {project_id}[/blue]"
+            )
             console.print(f"[dim]{result.not_applicable_reason}[/dim]")
             console.print(
                 "[dim]提示: Python 项目（无 .plc.json + 有 pyproject.toml）"
@@ -170,7 +169,6 @@ def cmd_check(
     # P3-8: 自动生成 ai_context.json 供 cockpit/AI 技能恢复上下文
     if not result.not_applicable:
         from auto_pm.cli import write_ai_context
-
         write_ai_context(
             workspace_root=app_ctx.workspace_root,
             project_id=project_id,
@@ -185,7 +183,9 @@ def cmd_check(
 @click.option("--rename", "rename_confirm", is_flag=True, help="确认文件重命名（破坏性操作）")
 @click.option("--dry-run", is_flag=True, help="仅预览不执行")
 @click.pass_context
-def cmd_repair(ctx: click.Context, project_id: str, rename_confirm: bool, dry_run: bool) -> None:
+def cmd_repair(
+    ctx: click.Context, project_id: str, rename_confirm: bool, dry_run: bool
+) -> None:
     """自动修复项目结构问题"""
     app_ctx: AppContext = ctx.obj
 
@@ -196,7 +196,9 @@ def cmd_repair(ctx: click.Context, project_id: str, rename_confirm: bool, dry_ru
         ctx.exit(1)
 
     svc = PlcService(app_ctx.workspace_root)
-    result = svc.repair(proj.path, dry_run=dry_run, rename_confirm=rename_confirm)
+    result = svc.repair(
+        proj.path, dry_run=dry_run, rename_confirm=rename_confirm
+    )
 
     _print_repair_result(result)
 
@@ -222,9 +224,7 @@ def cmd_ingest(ctx: click.Context, source_dir: str, project_id: str, stage_only:
     console.print("[bold cyan]正在启动 PLC 逆向摄取流水线 (ETL)...[/bold cyan]")
     console.print(f"  • 源工程: {source_dir}")
     console.print(f"  • 目标工程: {target_path}")
-    console.print(
-        f"  • 模式: {'[yellow]暂存隔离提取 (--stage-only)[/yellow]' if stage_only else '[green]全量提取并投影[/green]'}"
-    )
+    console.print(f"  • 模式: {'[yellow]暂存隔离提取 (--stage-only)[/yellow]' if stage_only else '[green]全量提取并投影[/green]'}")
 
     ingest_svc = PlcIngestService(workspace_root=ws)
     try:
@@ -235,17 +235,13 @@ def cmd_ingest(ctx: click.Context, source_dir: str, project_id: str, stage_only:
                 project_id=project_id,
                 project_name="工业设备",
             )
-            console.print(
-                "\n[bold green]✓ 逆向数据已安全提取至 .ingest_staging/ 暂存区！[/bold green]"
-            )
+            console.print("\n[bold green]✓ 逆向数据已安全提取至 .ingest_staging/ 暂存区！[/bold green]")
             console.print(f"  • 提取变量总数: [bold yellow]{res.total_variables}[/bold yellow] 个")
             console.print(f"  • 报警矩阵点位: [bold red]{res.total_alarms}[/bold red] 个")
             console.print(f"  • 伺服轴控点位: [bold cyan]{res.total_servos}[/bold cyan] 个")
             console.print(f"  • 硬件 IO 点位: [bold magenta]{res.total_ios}[/bold magenta] 个")
             console.print(f"  • 暂存报告: {target_path}/.ingest_staging/staging_report.md")
-            console.print(
-                f"[dim]提示: 请在驾驶舱审核点表后，执行 auto-pm plc promote {project_id} 投影到正式工程[/dim]"
-            )
+            console.print(f"[dim]提示: 请在驾驶舱审核点表后，执行 auto-pm plc promote {project_id} 投影到正式工程[/dim]")
         else:
             res = ingest_svc.ingest_autoshop_project(
                 source_dir=source_dir,
@@ -293,11 +289,14 @@ def cmd_promote(ctx: click.Context, project_id: str) -> None:
         raise click.Abort()
 
 
+
 @plc_group.command(name="standardize")
 @click.argument("project_id")
 @click.option("--apply", is_flag=True, help="执行重命名（默认仅预览）")
 @click.pass_context
-def cmd_standardize(ctx: click.Context, project_id: str, apply: bool) -> None:
+def cmd_standardize(
+    ctx: click.Context, project_id: str, apply: bool
+) -> None:
     """检测并修正 PRD 文档命名"""
     app_ctx: AppContext = ctx.obj
 
@@ -336,7 +335,6 @@ def cmd_standardize(ctx: click.Context, project_id: str, apply: bool) -> None:
 
 # ── 输出辅助 ──────────────────────────────────────────────
 
-
 def _print_check_items() -> None:
     """打印所有检查项清单（--list 模式）"""
     from auto_pm.plc.checker import PlcChecker
@@ -370,9 +368,7 @@ def _print_check_items() -> None:
             )
 
     console.print(table)
-    console.print(
-        f"\n[dim]共 {len(PlcChecker.CHECK_ITEMS)} 项检查，覆盖 4 个分类（配置/文档/结构/规范）[/dim]"
-    )
+    console.print(f"\n[dim]共 {len(PlcChecker.CHECK_ITEMS)} 项检查，覆盖 4 个分类（配置/文档/结构/规范）[/dim]")
     console.print("[dim]使用: auto-pm -w <工作空间根> plc check <项目ID> 执行检查[/dim]")
 
 
@@ -477,11 +473,15 @@ def _print_repair_result(result: RepairResult) -> None:
         else:
             status_str = "[red]FAILED[/red]"
         destructive = "是" if action.destructive else "否"
-        table.add_row(action.item, action.action, destructive, status_str, action.detail)
+        table.add_row(
+            action.item, action.action, destructive, status_str, action.detail
+        )
 
     console.print(table)
     console.print(
-        f"\nFixed={result.fixed_count} Skipped={result.skipped_count} Failed={result.failed_count}"
+        f"\nFixed={result.fixed_count} "
+        f"Skipped={result.skipped_count} "
+        f"Failed={result.failed_count}"
     )
 
     if result.after_check is not None:

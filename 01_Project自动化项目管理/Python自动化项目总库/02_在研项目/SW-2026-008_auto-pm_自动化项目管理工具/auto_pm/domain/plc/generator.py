@@ -25,8 +25,8 @@ def _get_plc_template_dir() -> Path:
             return tpl2
     return Path(__file__).resolve().parents[3] / "auto_pm" / "templates" / "plc"
 
-
 TEMPLATE_DIR = _get_plc_template_dir()
+
 
 
 @dataclass
@@ -79,9 +79,7 @@ class ProcessMatrixParser:
 
         # 2. 解析 Markdown 工艺表格
         # 表格格式预期: | 步骤ID | 步骤名称 | 触发条件 | 动作输出 | 联锁/安全 | 下一步骤 |
-        table_lines = [
-            line.strip() for line in md_text.splitlines() if line.strip().startswith("|")
-        ]
+        table_lines = [line.strip() for line in md_text.splitlines() if line.strip().startswith("|")]
 
         if len(table_lines) >= 3:
             # 过滤表头和分隔线 |---|---|
@@ -92,15 +90,9 @@ class ProcessMatrixParser:
                     try:
                         raw_id = cols[0]
                         step_id_match = re.search(r"\d+", raw_id)
-                        step_id = (
-                            int(step_id_match.group(0))
-                            if step_id_match
-                            else (len(matrix.steps) + 1) * 10
-                        )
+                        step_id = int(step_id_match.group(0)) if step_id_match else (len(matrix.steps) + 1) * 10
                         step_name = cols[1] if len(cols) > 1 else f"Step_{step_id}"
-                        trigger = (
-                            cols[2] if len(cols) > 2 and cols[2] and cols[2] != "-" else "TRUE"
-                        )
+                        trigger = cols[2] if len(cols) > 2 and cols[2] and cols[2] != "-" else "TRUE"
 
                         actions_raw = cols[3] if len(cols) > 3 and cols[3] != "-" else ""
                         actions = [a.strip() for a in actions_raw.split(";") if a.strip()]
@@ -202,7 +194,9 @@ class SclGenerator:
         out_file.write_text(content, encoding="utf-8")
         return out_file
 
-    def generate_module(self, matrix: ProcessMatrix, output_dir: Path | str) -> tuple[Path, Path]:
+    def generate_module(
+        self, matrix: ProcessMatrix, output_dir: Path | str
+    ) -> tuple[Path, Path]:
         """一键同时生成 FB 代码文件与 ST UDT 结构体文件"""
         target_dir = Path(output_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -214,3 +208,4 @@ class SclGenerator:
         udt_file.write_text(self.render_udt(matrix), encoding="utf-8")
 
         return fb_file, udt_file
+

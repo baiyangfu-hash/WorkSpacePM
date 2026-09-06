@@ -67,7 +67,9 @@ _INTDOC_SECTION = re.compile(
 #   - SW-2026-001 合成样例：表头含"变量名" → 第 1 分支匹配
 #   - 真实 Autoshop 样例：表头 `序号,类别,名称,数据类型,...` → 第 2 分支匹配
 #   - Work3 真实样例：表头 `"类"\t"标签名"\t"数据类型"` 含"类"但不含"类别"也不含"名称" → 不匹配
-_AUTOSHOP_HEADER = re.compile(r"变量名|(?=.*类别)(?=.*名称)(?=.*数据类型)", re.IGNORECASE)
+_AUTOSHOP_HEADER = re.compile(
+    r"变量名|(?=.*类别)(?=.*名称)(?=.*数据类型)", re.IGNORECASE
+)
 
 # Codesys CSV 英文列名特征（必须有 Name + Type 同时出现）
 _CODESYS_HEADER = re.compile(r"Name.*Type|Type.*Name", re.IGNORECASE)

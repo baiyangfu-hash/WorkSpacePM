@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -42,6 +43,7 @@ from auto_pm.core.constants import (
 )
 from auto_pm.core.paths import WORKSPACE_PROJECTS_SUBDIR
 from auto_pm.core.project_archive_service import ArchiveResult, ProjectArchiveService
+from auto_pm.core.project_fact_service import ProjectFactError, ProjectFactService
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.template_service import TemplateService
 from auto_pm.domain.project.archive_contracts import (
@@ -1160,3 +1162,92 @@ def cmd_hooks_status(ctx: click.Context, project_id: str) -> None:
         console.print("[green]🟢 已激活 (auto-pm Pre-commit 提交门禁已装配)[/green]")
     else:
         console.print("[yellow]🟡 未激活 (未装配 Git 提交门禁)[/yellow]")
+
+
+# ── 只读预检与事实包（CHG-SCPT-2026-021 自稳定平铺源码合并）──
+
+
+@project_group.command(name="preflight")
+@click.argument("project_id")
+@click.option(
+    "--ttl-seconds",
+    type=click.IntRange(60, 86_400),
+    default=ProjectFactService.DEFAULT_TTL_SECONDS,
+    show_default=True,
+    help="事实包有效期；超时后必须重新采集",
+)
+@click.option("--json", "output_json", is_flag=True, help="以 JSON 输出事实包")
+@click.pass_context
+def cmd_preflight(
+    ctx: click.Context,
+    project_id: str,
+    ttl_seconds: int,
+    output_json: bool,
+) -> None:
+    """只读采集项目事实包，供 PM 决策与后续派发门禁使用。"""
+    app_ctx: AppContext = ctx.obj
+    service = ProjectFactService(app_ctx.workspace_root)
+    try:
+        snapshot = service.collect(project_id, ttl_seconds=ttl_seconds)
+    except ProjectFactError as error:
+        console.print(f"[red]预检失败: {error}[/red]")
+        ctx.exit(1)
+
+    if output_json:
+        click.echo(snapshot.model_dump_json(indent=2))
+        return
+
+    table = Table(title="项目事实包（只读预检）")
+    table.add_column("事实项", style="cyan")
+    table.add_column("证据")
+    table.add_row("evidence_id", snapshot.evidence_id)
+    table.add_row("项目", snapshot.project_id)
+    table.add_row("Git SHA", snapshot.git.head[:12])
+    table.add_row("Git 状态", "clean" if not snapshot.git.status else f"{len(snapshot.git.status)} 项变更")
+    table.add_row("PM_SESSION", snapshot.pm_session.sha256[:16])
+    table.add_row("开放 CHG", str(len(snapshot.open_changes)))
+    table.add_row("规范条目", str(len(snapshot.spec_snapshot.registry_versions)))
+    table.add_row("Python 文件", str(snapshot.code_structure.python_file_count))
+    table.add_row("有效至", snapshot.expires_at.isoformat())
+    console.print(table)
+
+
+@project_group.group(name="fact")
+def fact_group() -> None:
+    """项目事实包的只读验证命令。"""
+
+
+@fact_group.command(name="validate")
+@click.argument("fact_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--pid", "expected_project_id", required=True, help="预期项目编号")
+@click.option("--json", "output_json", is_flag=True, help="以 JSON 输出验证结果")
+@click.pass_context
+def cmd_fact_validate(
+    ctx: click.Context,
+    fact_file: Path,
+    expected_project_id: str,
+    output_json: bool,
+) -> None:
+    """硬拒绝缺失、过期、篡改或与当前项目不一致的事实包。"""
+    app_ctx: AppContext = ctx.obj
+    service = ProjectFactService(app_ctx.workspace_root)
+    try:
+        snapshot = service.load_snapshot(fact_file)
+        result = service.validate(snapshot, expected_project_id)
+    except ProjectFactError as error:
+        console.print(f"[red]事实包无效: {error}[/red]")
+        ctx.exit(1)
+
+    if output_json:
+        click.echo(result.model_dump_json(indent=2))
+    elif result.valid:
+        console.print(f"[green]事实包有效: {result.evidence_id}[/green]")
+    else:
+        console.print(f"[red]事实包拒绝: {result.evidence_id or '-'}[/red]")
+        for failure in result.failures:
+            console.print(f"  - {failure}")
+
+    if not result.valid:
+        ctx.exit(1)
+
+

@@ -66,9 +66,7 @@ class WorkbenchUseCases:
 
     def get_dashboard_snapshot(self) -> QueryOutcome[DashboardSnapshotDTO]:
         if not self.dashboard_service:
-            return QueryOutcome(
-                False, "DashboardService 未启用", errors=["DashboardService 未启用"]
-            )
+            return QueryOutcome(False, "DashboardService 未启用", errors=["DashboardService 未启用"])
         try:
             summary = self.dashboard_service.get_summary()
             return QueryOutcome(
@@ -95,9 +93,7 @@ class WorkbenchUseCases:
 
     def get_active_change_status(self, project_id: str) -> QueryOutcome[dict[str, Any]]:
         if not self.dashboard_service:
-            return QueryOutcome(
-                False, "DashboardService 未启用", errors=["DashboardService 未启用"]
-            )
+            return QueryOutcome(False, "DashboardService 未启用", errors=["DashboardService 未启用"])
         try:
             change = self.dashboard_service.get_active_change_for_project(project_id)
             if change is None:
@@ -130,9 +126,7 @@ class WorkbenchUseCases:
 
     def get_project_change_summary(self, project_id: str) -> QueryOutcome[dict[str, Any]]:
         if not self.dashboard_service:
-            return QueryOutcome(
-                False, "DashboardService 未启用", errors=["DashboardService 未启用"]
-            )
+            return QueryOutcome(False, "DashboardService 未启用", errors=["DashboardService 未启用"])
         try:
             payload = self.dashboard_service.get_change_summary_for_project(project_id)
             return QueryOutcome(True, "Success", payload)
@@ -353,9 +347,7 @@ class WorkbenchUseCases:
 
     def generate_project_code(self, business_line: str) -> CommandOutcome[str]:
         try:
-            return CommandOutcome(
-                True, "", self.project_service.generate_project_code(business_line)
-            )
+            return CommandOutcome(True, "", self.project_service.generate_project_code(business_line))
         except Exception as exc:
             return CommandOutcome(False, str(exc))
 
@@ -450,7 +442,9 @@ class WorkbenchUseCases:
                         "workspace_root": workspace_root,
                     },
                 )
-            with open(get_config_file_path(), "w", encoding="utf-8") as file:
+            config_file = get_config_file_path()
+            os.makedirs(os.path.dirname(config_file), exist_ok=True)
+            with open(config_file, "w", encoding="utf-8") as file:
                 file.write(workspace_root)
             payload: dict[str, Any] = {
                 "config_saved": True,
@@ -466,7 +460,9 @@ class WorkbenchUseCases:
             reload_result = self.reload_callback(workspace_root)
             payload["runtime_reloaded"] = bool(reload_result.get("success"))
             payload["reload_message"] = reload_result.get("message", "")
-            payload["reloaded_workspace_root"] = reload_result.get("workspace_root", workspace_root)
+            payload["reloaded_workspace_root"] = reload_result.get(
+                "workspace_root", workspace_root
+            )
             if payload["runtime_reloaded"]:
                 return CommandOutcome(
                     True,

@@ -24,14 +24,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from auto_pm.vartable.models import ParseError, ParseResult, VarEntry, VarTable
-
-if TYPE_CHECKING:
-    from auto_pm.domain.vartable.parsers.base_parser import BaseParser
-else:
-    from auto_pm.vartable.parsers.base_parser import BaseParser
+from auto_pm.vartable.parsers.base_parser import BaseParser
 
 SOURCE_FORMAT = "work3"
 
@@ -45,7 +40,7 @@ _ADDRESS_IDX = 6
 _DESC_IDX = 7
 
 
-class Work3Parser(BaseParser):
+class Work3Parser(BaseParser):  # type: ignore[misc]  # CHG-SCPT-2026-021: 稳定版 verbatim 回收，基类经命名空间 shim 解析为 Any
     """Work3 格式解析器
 
     用法：

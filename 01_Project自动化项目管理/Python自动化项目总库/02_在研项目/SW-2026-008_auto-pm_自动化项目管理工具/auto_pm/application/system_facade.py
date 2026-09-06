@@ -44,7 +44,7 @@ class SystemFacade:
         self,
         pm_session_service: PmSessionServiceProtocol | None = None,
         template_service: TemplateServiceProtocol | None = None,
-        project_service: ProjectServiceProtocol | None = None,
+        project_service: ProjectServiceProtocol | None = None
     ):
         self._pm_session_service = pm_session_service
         self._template_service = template_service
@@ -115,9 +115,7 @@ class SystemFacade:
 
             path = self._template_service.get_template_path(template_name)
             if not path:
-                return QueryResult(
-                    success=False, message=f"模板路径不存在: {template_name}", payload=None
-                )
+                return QueryResult(success=False, message=f"模板路径不存在: {template_name}", payload=None)
 
             # Read version and description
             copier_yml = Path(path) / "copier.yml"
@@ -128,9 +126,7 @@ class SystemFacade:
                     with open(copier_yml, encoding="utf-8") as f:
                         data = yaml.safe_load(f)
                         if data and isinstance(data, dict):
-                            version = str(
-                                data.get("_commit", data.get("_min_copier_version", "unknown"))
-                            )
+                            version = str(data.get("_commit", data.get("_min_copier_version", "unknown")))
                             description = str(data.get("_description", description))
                 except Exception as e:
                     log.warning("读取 copier.yml 失败: %s", e, exc_info=True)
@@ -166,9 +162,7 @@ class SystemFacade:
         except Exception as e:
             return QueryResult(success=False, message=str(e), payload=None)
 
-    def apply_template(
-        self, project_id: str, template_name: str
-    ) -> CommandResult[ApplyTemplateResultDTO | None]:
+    def apply_template(self, project_id: str, template_name: str) -> CommandResult[ApplyTemplateResultDTO | None]:
         try:
             if not self._template_service:
                 return CommandResult(success=False, message="No template_service", payload=None)

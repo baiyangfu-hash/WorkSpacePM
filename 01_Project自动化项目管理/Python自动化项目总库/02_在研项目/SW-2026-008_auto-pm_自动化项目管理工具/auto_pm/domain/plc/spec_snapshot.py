@@ -305,12 +305,10 @@ def update_spec_snapshot(
             + r"(\s*\|)",
             re.MULTILINE,
         )
-
         def _repl(m: re.Match[str], d: DriftItem = drift) -> str:
             g1 = m.group(1) or ""
             g2 = m.group(2) or ""
             return str(g1) + str(d.registry_version) + str(g2)
-
         new_content = pattern.sub(_repl, new_content)
 
     if new_content == content:

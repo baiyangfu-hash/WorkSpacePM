@@ -33,9 +33,8 @@ class ChgGenerator:
 
     def render(self, cr: ChangeRequest) -> str:
         """渲染变更单 Markdown 内容"""
-        log.info(
-            "渲染变更单: %s, domain=%s, nature=%s", cr.change_number, cr.domain, cr.business_nature
-        )
+        log.info("渲染变更单: %s, domain=%s, nature=%s",
+                 cr.change_number, cr.domain, cr.business_nature)
         today = datetime.date.today().isoformat()
 
         # 影响范围选择行

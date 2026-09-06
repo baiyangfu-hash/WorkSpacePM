@@ -52,9 +52,7 @@ class ReportService:
         if output_path:
             final_path = output_path
         else:
-            default_name = (
-                "规范元数据汇总报告.md" if fmt == "markdown" else "规范元数据汇总报告.json"
-            )
+            default_name = "规范元数据汇总报告.md" if fmt == "markdown" else "规范元数据汇总报告.json"
             final_path = self.workspace / "00_Obsidian_Base全局规范文件仓库" / default_name
 
         final_path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,7 +178,8 @@ class ReportService:
 
         for domain_key in DOMAIN_ORDER:
             domain_specs = {
-                sid: sinfo for sid, sinfo in specs.items() if sinfo.get("domain") == domain_key
+                sid: sinfo for sid, sinfo in specs.items()
+                if sinfo.get("domain") == domain_key
             }
             if not domain_specs:
                 continue
@@ -219,9 +218,7 @@ class ReportService:
         lines.append("以下为每个活跃规范的frontmatter原始数据：")
         lines.append("")
 
-        for sid, sinfo in sorted(
-            specs.items(), key=lambda x: (x[1].get("domain", "z"), x[1].get("number", "999"))
-        ):
+        for sid, sinfo in sorted(specs.items(), key=lambda x: (x[1].get("domain", "z"), x[1].get("number", "999"))):
             lifecycle = sinfo.get("lifecycle", "")
             if lifecycle in ("deprecated", "archived"):
                 continue
@@ -229,15 +226,15 @@ class ReportService:
             lines.append("")
             lines.append("```yaml")
             lines.append(f"spec_id: {sid}")
-            lines.append(f'title: "{sinfo.get("title", "")}"')
-            lines.append(f'version: "{sinfo.get("version", "")}"')
+            lines.append(f"title: \"{sinfo.get('title', '')}\"")
+            lines.append(f"version: \"{sinfo.get('version', '')}\"")
             lines.append(f"domain: {sinfo.get('domain', '')}")
             lines.append(f"lifecycle: {lifecycle}")
-            lines.append(f'canonical_path: "{sinfo.get("canonical_path", "")}"')
+            lines.append(f"canonical_path: \"{sinfo.get('canonical_path', '')}\"")
             if sinfo.get("type_prefix"):
                 lines.append(f"type_prefix: {sinfo['type_prefix']}")
             if sinfo.get("number"):
-                lines.append(f'number: "{sinfo["number"]}"')
+                lines.append(f"number: \"{sinfo['number']}\"")
             if sinfo.get("sub_domain"):
                 lines.append(f"sub_domain: {sinfo['sub_domain']}")
             replaces = sinfo.get("replaces", [])

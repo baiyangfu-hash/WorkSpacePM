@@ -33,7 +33,6 @@ from auto_pm.delivery.constants import (
 @dataclass
 class CheckResult:
     """单个检查项结果"""
-
     code: str
     description: str
     passed: bool
@@ -44,7 +43,6 @@ class CheckResult:
 @dataclass
 class VerificationReport:
     """验证报告"""
-
     checks: list[CheckResult] = field(default_factory=list)
     passed: int = 0
     warn: int = 0
@@ -125,9 +123,7 @@ class DeliveryVerifier:
             size_mb = exe_path.stat().st_size / MB
             min_mb = self._get("exe_min_mb", DCHECK_EXE_MIN_MB)
             if size_mb >= min_mb:
-                report.add(
-                    CheckResult("D1", "exe 存在且大小正常", True, f"{size_mb:.2f} MB", "pass")
-                )
+                report.add(CheckResult("D1", "exe 存在且大小正常", True, f"{size_mb:.2f} MB", "pass"))
             else:
                 report.add(CheckResult("D1", "exe 过小", False, f"{size_mb:.2f} MB < {min_mb} MB"))
         else:
@@ -140,15 +136,9 @@ class DeliveryVerifier:
             icount = sum(len(files) for _, _, files in os.walk(internal_dir))
             min_files = self._get("internal_min_files", DCHECK_INTERNAL_MIN_FILES)
             if icount >= min_files:
-                report.add(
-                    CheckResult("D2", "_internal 文件数正常", True, f"{icount} files", "pass")
-                )
+                report.add(CheckResult("D2", "_internal 文件数正常", True, f"{icount} files", "pass"))
             else:
-                report.add(
-                    CheckResult(
-                        "D2", "_internal 文件数过少", True, f"{icount} < {min_files}", "warn"
-                    )
-                )
+                report.add(CheckResult("D2", "_internal 文件数过少", True, f"{icount} < {min_files}", "warn"))
         else:
             report.add(CheckResult("D2", "_internal 目录缺失", True, "可能为 onefile 模式", "warn"))
 
@@ -209,19 +199,13 @@ class DeliveryVerifier:
                 z_norm_min = self._get("zip_normal_min_mb", CHK_ZIP_NORMAL_MIN_MB)
                 z_norm_max = self._get("zip_normal_max_mb", CHK_ZIP_NORMAL_MAX_MB)
                 if zip_size < z_min:
-                    report.add(
-                        CheckResult("CHK-002", "ZIP 过小", False, f"{zip_size:.2f} MB < {z_min} MB")
-                    )
+                    report.add(CheckResult("CHK-002", "ZIP 过小", False, f"{zip_size:.2f} MB < {z_min} MB"))
                 elif zip_size > z_max:
-                    report.add(
-                        CheckResult("CHK-002", "ZIP 过大", False, f"{zip_size:.2f} MB > {z_max} MB")
-                    )
+                    report.add(CheckResult("CHK-002", "ZIP 过大", False, f"{zip_size:.2f} MB > {z_max} MB"))
                 elif z_norm_min <= zip_size <= z_norm_max:
                     report.add(CheckResult("CHK-002", "ZIP 大小正常", True, f"{zip_size:.2f} MB"))
                 else:
-                    report.add(
-                        CheckResult("CHK-002", "ZIP 大小可接受", True, f"{zip_size:.2f} MB", "warn")
-                    )
+                    report.add(CheckResult("CHK-002", "ZIP 大小可接受", True, f"{zip_size:.2f} MB", "warn"))
 
                 # CHK-003: exe 存在且大小正常
                 exe_names = [n for n in names if n.endswith(".exe") and "可执行文件" in n]
@@ -231,21 +215,9 @@ class DeliveryVerifier:
                     exe_min = self._get("exe_min_mb", CHK_EXE_MIN_MB)
                     exe_max = self._get("exe_max_mb", CHK_EXE_MAX_MB)
                     if exe_mb < exe_min:
-                        report.add(
-                            CheckResult(
-                                "CHK-003", "exe 过小", False, f"{exe_mb:.2f} MB < {exe_min} MB"
-                            )
-                        )
+                        report.add(CheckResult("CHK-003", "exe 过小", False, f"{exe_mb:.2f} MB < {exe_min} MB"))
                     elif exe_mb > exe_max:
-                        report.add(
-                            CheckResult(
-                                "CHK-003",
-                                "exe 过大",
-                                True,
-                                f"{exe_mb:.2f} MB > {exe_max} MB",
-                                "warn",
-                            )
-                        )
+                        report.add(CheckResult("CHK-003", "exe 过大", True, f"{exe_mb:.2f} MB > {exe_max} MB", "warn"))
                     else:
                         report.add(CheckResult("CHK-003", "exe 大小正常", True, f"{exe_mb:.2f} MB"))
                 else:
@@ -254,15 +226,9 @@ class DeliveryVerifier:
                 # CHK-004: _internal 文件数
                 internal_count = len([n for n in names if "_internal/" in n])
                 if internal_count > 0:
-                    report.add(
-                        CheckResult("CHK-004", "_internal 文件数", True, f"{internal_count} files")
-                    )
+                    report.add(CheckResult("CHK-004", "_internal 文件数", True, f"{internal_count} files"))
                 else:
-                    report.add(
-                        CheckResult(
-                            "CHK-004", "_internal 缺失", True, "可能为 onefile 模式", "warn"
-                        )
-                    )
+                    report.add(CheckResult("CHK-004", "_internal 缺失", True, "可能为 onefile 模式", "warn"))
 
                 # CHK-005: 关键文档
                 doc_count = len([n for n in names if n.endswith(".md")])
@@ -270,11 +236,7 @@ class DeliveryVerifier:
                 if doc_count >= doc_min:
                     report.add(CheckResult("CHK-005", "文档文件数正常", True, f"{doc_count} files"))
                 else:
-                    report.add(
-                        CheckResult(
-                            "CHK-005", "文档文件数过少", True, f"{doc_count} < {doc_min}", "warn"
-                        )
-                    )
+                    report.add(CheckResult("CHK-005", "文档文件数过少", True, f"{doc_count} < {doc_min}", "warn"))
 
                 # CHK-006: 一级目录完整性
                 top_dirs = set()
@@ -284,9 +246,7 @@ class DeliveryVerifier:
                         top_dirs.add(parts[0])
                 expected = {"01_可执行文件"}
                 if expected.issubset(top_dirs):
-                    report.add(
-                        CheckResult("CHK-006", "一级目录完整", True, ", ".join(sorted(top_dirs)))
-                    )
+                    report.add(CheckResult("CHK-006", "一级目录完整", True, ", ".join(sorted(top_dirs))))
                 else:
                     missing = expected - top_dirs
                     report.add(CheckResult("CHK-006", "一级目录不完整", False, f"缺失: {missing}"))

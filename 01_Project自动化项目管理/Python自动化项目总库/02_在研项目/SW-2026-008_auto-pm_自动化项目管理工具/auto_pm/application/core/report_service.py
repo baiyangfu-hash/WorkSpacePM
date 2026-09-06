@@ -52,10 +52,7 @@ class ReportService:
     REPORT_SPEC: str = "spec"
     REPORT_SCAN: str = "scan"
     _REPORT_TYPES: tuple[str, ...] = (
-        REPORT_PROJECT,
-        REPORT_CHANGE,
-        REPORT_SPEC,
-        REPORT_SCAN,
+        REPORT_PROJECT, REPORT_CHANGE, REPORT_SPEC, REPORT_SCAN,
     )
 
     def __init__(
@@ -108,10 +105,7 @@ class ReportService:
 
         log.info(
             "项目概览统计: total=%d, stack=%s, phase=%s, bl=%s",
-            len(projects),
-            by_stack,
-            by_phase,
-            by_business_line,
+            len(projects), by_stack, by_phase, by_business_line,
         )
         return {
             "total": len(projects),
@@ -146,9 +140,7 @@ class ReportService:
 
         log.info(
             "变更统计: total=%d, status=%s, domain=%s",
-            len(changes),
-            by_status,
-            by_domain,
+            len(changes), by_status, by_domain,
         )
         return {
             "total": len(changes),
@@ -215,7 +207,9 @@ class ReportService:
             total += 1
 
             canonical = spec_info.canonical_path or ""
-            file_exists = bool(canonical) and (Path(self._workspace_root) / canonical).exists()
+            file_exists = bool(canonical) and (
+                Path(self._workspace_root) / canonical
+            ).exists()
             if file_exists:
                 found += 1
                 by_stack[domain]["found"] += 1
@@ -226,10 +220,7 @@ class ReportService:
 
         log.info(
             "规范覆盖统计: total=%d, found=%d, missing=%d, missing_codes=%s",
-            total,
-            found,
-            missing,
-            all_missing_codes,
+            total, found, missing, all_missing_codes,
         )
         return {
             "total": total,
@@ -273,8 +264,7 @@ class ReportService:
 
         log.info(
             "扫描日志报告: latest=%s, last_sync_time=%s",
-            latest,
-            last_sync_time,
+            latest, last_sync_time,
         )
         return {
             "latest": latest,
@@ -309,7 +299,9 @@ class ReportService:
             return self.get_spec_report()
         if report_type == self.REPORT_SCAN:
             return self.get_scan_report()
-        raise ValueError(f"未知报告类型: {report_type}，支持: {self._REPORT_TYPES}")
+        raise ValueError(
+            f"未知报告类型: {report_type}，支持: {self._REPORT_TYPES}"
+        )
 
     def list_report_types(self) -> tuple[str, ...]:
         """列出支持的报告类型"""

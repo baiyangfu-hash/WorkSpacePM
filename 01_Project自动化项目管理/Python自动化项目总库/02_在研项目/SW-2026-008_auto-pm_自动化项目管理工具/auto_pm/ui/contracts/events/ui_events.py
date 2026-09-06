@@ -13,7 +13,6 @@ from typing import Any, Literal
 @dataclass(frozen=True)
 class UiEvent:
     """发往前端的统一事件对象"""
-
     event_name: str
     level: Literal["info", "warning", "error", "success"]
     source: str

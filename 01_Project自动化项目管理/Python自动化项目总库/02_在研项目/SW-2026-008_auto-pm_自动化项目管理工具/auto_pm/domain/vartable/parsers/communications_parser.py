@@ -176,7 +176,9 @@ class CommunicationsParser:
         # 构建元数据
         protocol_counts: dict[str, int] = {}
         for entry in entries:
-            protocol_counts[entry.protocol] = protocol_counts.get(entry.protocol, 0) + 1
+            protocol_counts[entry.protocol] = (
+                protocol_counts.get(entry.protocol, 0) + 1
+            )
 
         # 提取顶层元数据（可选字段，不强制）
         metadata: dict[str, Any] = {
@@ -209,7 +211,9 @@ class CommunicationsParser:
         )
 
     @staticmethod
-    def _parse_channel(channel: dict[str, Any], index: int) -> ChannelEntry | ParseError:
+    def _parse_channel(
+        channel: dict[str, Any], index: int
+    ) -> ChannelEntry | ParseError:
         """解析单个 channel 项
 
         Returns:

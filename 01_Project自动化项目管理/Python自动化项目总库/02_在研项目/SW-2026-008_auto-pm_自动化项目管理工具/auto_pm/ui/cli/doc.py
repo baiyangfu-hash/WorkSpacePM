@@ -34,9 +34,7 @@ def doc_sync_cmd(ctx: click.Context) -> None:
     service = DocSyncService(workspace_root=workspace_root)
     logs = service.sync_all()
 
-    console.print(
-        Panel("[bold green]✨ Doc-as-Code 自动同步完成！[/bold green]", title="Doc Sync 结果")
-    )
+    console.print(Panel("[bold green]✨ Doc-as-Code 自动同步完成！[/bold green]", title="Doc Sync 结果"))
     table = Table(title="注入记录", show_header=True, header_style="bold cyan")
     table.add_column("状态", style="green")
     table.add_column("详细信息")
@@ -71,19 +69,9 @@ def doc_check_cmd(ctx: click.Context) -> None:
 
     console.print(table)
     if all_passed:
-        console.print(
-            Panel(
-                "[bold green]🎉 所有文档一致性门禁检查 100% 通过！[/bold green]",
-                title="Doc Check 结果",
-            )
-        )
+        console.print(Panel("[bold green]🎉 所有文档一致性门禁检查 100% 通过！[/bold green]", title="Doc Check 结果"))
     else:
-        console.print(
-            Panel(
-                "[bold red]❌ 存在未同步的文档滞后项，请先执行 auto-pm doc sync 修复！[/bold red]",
-                title="Doc Check 结果",
-            )
-        )
+        console.print(Panel("[bold red]❌ 存在未同步的文档滞后项，请先执行 auto-pm doc sync 修复！[/bold red]", title="Doc Check 结果"))
         raise click.exceptions.Exit(1)
 
 
@@ -162,3 +150,4 @@ def doc_refresh_cmd(ctx: click.Context, project_id: str, dry_run: bool, json_out
 
     for issue in result.issues:
         console.print(f"  [yellow]⚠️ 提示:[/yellow] {escape(issue)}")
+

@@ -24,7 +24,6 @@ class ChangeSummaryDTO:
     title: str
     urgency: str
 
-
 @dataclass(frozen=True)
 class ChangeRequestDTO:
     change_number: str

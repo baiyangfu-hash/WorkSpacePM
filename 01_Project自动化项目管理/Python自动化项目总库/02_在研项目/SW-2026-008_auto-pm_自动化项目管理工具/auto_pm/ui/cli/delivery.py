@@ -44,9 +44,7 @@ def delivery_group(ctx: click.Context) -> None:
 
 @delivery_group.command(name="build")
 @click.option("--version", required=True, help="目标版本号（如 V1.0.1）")
-@click.option(
-    "--skip-pyinstaller", is_flag=True, default=True, help="跳过 PyInstaller 编译（默认跳过）"
-)
+@click.option("--skip-pyinstaller", is_flag=True, default=True, help="跳过 PyInstaller 编译（默认跳过）")
 @click.option("--auto-package", is_flag=True, default=False, help="构建后自动打包 ZIP")
 @click.option("--dist-dir", default=None, help="PyInstaller 输出目录（默认 dist/{product_name}）")
 @click.option("--product-name", default=DEFAULT_PRODUCT_NAME, help="产品名称")
@@ -111,9 +109,7 @@ def cmd_build(
         if pkg.get("success"):
             console.print(f"[green]✓ 自动打包完成: {pkg.get('zip_path', '')}[/green]")
             if pkg.get("size_mb"):
-                console.print(
-                    f"[dim]  大小: {pkg['size_mb']} MB, 文件数: {pkg.get('file_count', 0)}[/dim]"
-                )
+                console.print(f"[dim]  大小: {pkg['size_mb']} MB, 文件数: {pkg.get('file_count', 0)}[/dim]")
         else:
             console.print(f"[red]✗ 自动打包失败: {pkg.get('message', '')}[/red]")
             ctx.exit(1)
@@ -176,9 +172,7 @@ def cmd_package(
 
     console.print(f"[green]✓ 打包完成: {result.get('zip_path', '')}[/green]")
     if result.get("size_mb"):
-        console.print(
-            f"[dim]  大小: {result['size_mb']} MB, 文件数: {result.get('file_count', 0)}[/dim]"
-        )
+        console.print(f"[dim]  大小: {result['size_mb']} MB, 文件数: {result.get('file_count', 0)}[/dim]")
 
     if result.get("report"):
         console.print(result["report"])
@@ -196,13 +190,8 @@ def archive_group(ctx: click.Context) -> None:
 
 
 @archive_group.command(name="list")
-@click.option(
-    "--type",
-    "archive_type",
-    type=click.Choice(["delivery", "package"]),
-    default="delivery",
-    help="归档类型",
-)
+@click.option("--type", "archive_type", type=click.Choice(["delivery", "package"]),
+              default="delivery", help="归档类型")
 @click.option("--project-root", "-p", default=None, help="项目根目录（默认自动检测）")
 @click.pass_context
 def cmd_archive_list(
@@ -251,19 +240,9 @@ def cmd_archive_list(
 
 
 @archive_group.command(name="clean")
-@click.option(
-    "--type",
-    "archive_type",
-    type=click.Choice(["delivery", "package"]),
-    default="delivery",
-    help="归档类型",
-)
-@click.option(
-    "--keep",
-    type=int,
-    default=DEFAULT_ARCHIVE_KEEP,
-    help=f"保留最近 N 个（默认 {DEFAULT_ARCHIVE_KEEP}）",
-)
+@click.option("--type", "archive_type", type=click.Choice(["delivery", "package"]),
+              default="delivery", help="归档类型")
+@click.option("--keep", type=int, default=DEFAULT_ARCHIVE_KEEP, help=f"保留最近 N 个（默认 {DEFAULT_ARCHIVE_KEEP}）")
 @click.option("--dry-run", is_flag=True, default=False, help="预览模式，不实际删除")
 @click.option("--project-root", "-p", default=None, help="项目根目录（默认自动检测）")
 @click.pass_context

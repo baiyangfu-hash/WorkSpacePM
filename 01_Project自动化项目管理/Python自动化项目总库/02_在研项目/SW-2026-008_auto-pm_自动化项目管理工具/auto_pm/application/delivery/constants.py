@@ -7,9 +7,7 @@ from __future__ import annotations
 
 # 目录名
 DIR_DELIVERY = "06_交付物"
-DIR_PACKAGE = (
-    "06_交付物"  # CHG-SCPT-2026-145: 合并06_交付物打包到06_交付物，ZIP直接存放于06_交付物/根目录
-)
+DIR_PACKAGE = "06_交付物"  # CHG-SCPT-2026-145: 合并06_交付物打包到06_交付物，ZIP直接存放于06_交付物/根目录
 DIR_ARCHIVE = "archive"
 DIR_EXECUTABLE = "01_可执行文件"
 DIR_RELEASE_NOTES = "02_发布说明"

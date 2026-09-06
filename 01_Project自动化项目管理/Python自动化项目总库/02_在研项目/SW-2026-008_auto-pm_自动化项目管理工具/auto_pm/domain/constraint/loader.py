@@ -148,16 +148,14 @@ class ConstraintLoader:
         rules: list[ConstraintRule] = []
         for rule_raw in raw.get("rules", []):
             if isinstance(rule_raw, dict):
-                rules.append(
-                    ConstraintRule(
-                        type=rule_raw.get("type", ""),
-                        description=rule_raw.get("description", ""),
-                        check=rule_raw.get("check"),
-                        pattern=rule_raw.get("pattern"),
-                        cli_command=rule_raw.get("cli_command"),
-                        max_count=rule_raw.get("max_count"),
-                    )
-                )
+                rules.append(ConstraintRule(
+                    type=rule_raw.get("type", ""),
+                    description=rule_raw.get("description", ""),
+                    check=rule_raw.get("check"),
+                    pattern=rule_raw.get("pattern"),
+                    cli_command=rule_raw.get("cli_command"),
+                    max_count=rule_raw.get("max_count"),
+                ))
 
         return Constraint(
             id=cst_id,

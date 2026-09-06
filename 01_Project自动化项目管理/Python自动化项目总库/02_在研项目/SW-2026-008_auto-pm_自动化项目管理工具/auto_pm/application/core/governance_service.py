@@ -163,7 +163,6 @@ class GovernanceService:
                         p = Path(root) / d
                         try:
                             import shutil
-
                             shutil.rmtree(p, ignore_errors=True)
                             cleaned_paths.append(str(p.relative_to(self.workspace_root)))
                         except Exception:

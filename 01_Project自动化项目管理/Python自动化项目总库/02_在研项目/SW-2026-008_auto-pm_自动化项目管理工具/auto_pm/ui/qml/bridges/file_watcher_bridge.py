@@ -14,7 +14,6 @@ CHG-SCPT-2026-141：消除 CLI 与 GUI 缓存鸿沟。
 
 设计参考：modbus_bridge.py（QRunnable+QThreadPool 模式）
 """
-
 from __future__ import annotations
 
 import logging
@@ -396,7 +395,9 @@ class FileWatcherBridge(QObject):
             projects, changes, ms, error_msg = result
             self._on_sync_finished(projects, changes, ms, error_msg)
 
-    def _on_sync_finished(self, projects: int, changes: int, ms: int, error_msg: str) -> None:
+    def _on_sync_finished(
+        self, projects: int, changes: int, ms: int, error_msg: str
+    ) -> None:
         """sync 完成（主线程，QThreadPool 信号回调）"""
         self._sync_in_progress = False
         self._current_worker = None  # 释放 worker 引用

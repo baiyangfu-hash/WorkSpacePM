@@ -55,8 +55,7 @@ class ArchiveManager:
         # 收集要归档的项（排除 archive/ 子目录本身和 ZIP 文件）
         # CHG-SCPT-2026-145: ZIP 文件由 archive_package 独立归档，不随 delivery 归档移动
         items = [
-            p
-            for p in self._delivery_dir.iterdir()
+            p for p in self._delivery_dir.iterdir()
             if p.name != DIR_ARCHIVE and p.suffix.lower() != ".zip"
         ]
         if not items:
@@ -85,7 +84,9 @@ class ArchiveManager:
 
         return Path(archive_dest)
 
-    def archive_package(self, old_version: str, new_version: str, summary: str = "") -> Path | None:
+    def archive_package(
+        self, old_version: str, new_version: str, summary: str = ""
+    ) -> Path | None:
         """将当前 06_交付物/ 根目录 ZIP 归档到 archive/ 子目录。
 
         Args:
@@ -101,8 +102,7 @@ class ArchiveManager:
 
         # 找到根目录下的 ZIP 文件（排除 archive/ 子目录）
         zip_files = [
-            p
-            for p in self._package_dir.iterdir()
+            p for p in self._package_dir.iterdir()
             if p.suffix.lower() == ".zip" and p.name != DIR_ARCHIVE
         ]
         if not zip_files:
@@ -211,10 +211,7 @@ class ArchiveManager:
         return True
 
     def clean_archives(
-        self,
-        archive_type: str = "delivery",
-        keep: int = DEFAULT_ARCHIVE_KEEP,
-        dry_run: bool = False,
+        self, archive_type: str = "delivery", keep: int = DEFAULT_ARCHIVE_KEEP, dry_run: bool = False
     ) -> list[Path]:
         """清理旧归档，保留最近 N 个。
 
@@ -262,8 +259,7 @@ class ArchiveManager:
             return None
 
         zip_files = [
-            p
-            for p in self._package_dir.iterdir()
+            p for p in self._package_dir.iterdir()
             if p.suffix.lower() == ".zip" and p.name != DIR_ARCHIVE
         ]
         if not zip_files:
@@ -350,10 +346,7 @@ class ArchiveManager:
         if filepath.exists():
             existing = filepath.read_text(encoding="utf-8")
         else:
-            existing = (
-                header
-                + "| 文件名 | 版本 | 归档日期 | 大小 | 替代版本 | 摘要 |\n|------|------|------|------|------|------|\n"
-            )
+            existing = header + "| 文件名 | 版本 | 归档日期 | 大小 | 替代版本 | 摘要 |\n|------|------|------|------|------|------|\n"
 
         new_line = f"| {filename} | {old_version} | {date_str} | {size_mb} MB | {new_version} | {summary or '—'} |\n"
         existing = existing.rstrip() + "\n" + new_line + "\n"
@@ -375,13 +368,11 @@ class ArchiveManager:
                 "version": entry.name,
                 "date": datetime.fromtimestamp(entry.stat().st_mtime).strftime("%Y-%m-%d"),
                 "size_mb": round(
-                    (
-                        sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
-                        if entry.is_dir()
-                        else entry.stat().st_size
-                    )
-                    / MB,
-                    2,
+                    (sum(
+                        f.stat().st_size
+                        for f in entry.rglob("*")
+                        if f.is_file()
+                    ) if entry.is_dir() else entry.stat().st_size) / MB, 2
                 ),
                 "summary": "",
                 "replaced_by": "",
@@ -402,4 +393,8 @@ class ArchiveManager:
         """计算目录总大小（字节）。"""
         if path.is_file():
             return path.stat().st_size
-        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+        return sum(
+            f.stat().st_size
+            for f in path.rglob("*")
+            if f.is_file()
+        )

@@ -246,7 +246,9 @@ def build_overview_dto(
             exit_code=health.exit_code,
         )
     else:
-        hs = HealthSummaryDTO(error_count=0, warning_count=0, info_count=0, exit_code=0)
+        hs = HealthSummaryDTO(
+            error_count=0, warning_count=0, info_count=0, exit_code=0
+        )
 
     return SpecOverviewDTO(
         spec_count=len(specs),
@@ -464,7 +466,9 @@ class SpecCenterAdapter:
         items = self.frontmatter_service.preview(spec_id=spec_id)
         return [to_frontmatter_preview_dto(i) for i in items]
 
-    def apply_frontmatter(self, items: list[FrontmatterPreviewDTO]) -> tuple[int, int, int]:
+    def apply_frontmatter(
+        self, items: list[FrontmatterPreviewDTO]
+    ) -> tuple[int, int, int]:
         """应用 Frontmatter（实际写入）
 
         Args:
@@ -480,17 +484,15 @@ class SpecCenterAdapter:
         for dto in items:
             if dto.status != "pending":
                 continue
-            raw_items.append(
-                FrontmatterItem(
-                    spec_id=dto.spec_id,
-                    file_path=dto.file_path,
-                    has_frontmatter=dto.has_frontmatter,
-                    is_deprecated=dto.is_deprecated,
-                    file_exists=dto.file_exists,
-                    new_frontmatter=dto.new_frontmatter,
-                    status=dto.status,
-                )
-            )
+            raw_items.append(FrontmatterItem(
+                spec_id=dto.spec_id,
+                file_path=dto.file_path,
+                has_frontmatter=dto.has_frontmatter,
+                is_deprecated=dto.is_deprecated,
+                file_exists=dto.file_exists,
+                new_frontmatter=dto.new_frontmatter,
+                status=dto.status,
+            ))
         if not raw_items:
             return (0, 0, 0)
         result = self.frontmatter_service.apply(raw_items)

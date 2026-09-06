@@ -15,36 +15,22 @@ import yaml
 from .config import WorkspaceConfig
 
 _KNOWN_PREFIXES = (
-    "SW",
-    "PM",
-    "PLC",
-    "PY",
-    "CODE",
-    "LSP",
-    "INT",
-    "DEV",
-    "TOOL",
-    "CHK",
-    "OPS",
-    "CHG",
-    "BUG",
-    "TEST",
-    "REQ",
-    "DES",
-    "SUM",
-    "PROJ",
-    "TECH",
-    "TASK",
-    "PRD",
+    "SW", "PM", "PLC", "PY", "CODE", "LSP", "INT", "DEV",
+    "TOOL", "CHK", "OPS", "CHG", "BUG", "TEST", "REQ",
+    "DES", "SUM", "PROJ", "TECH", "TASK", "PRD",
 )
 
 _PREFIXES_PATTERN = "|".join(_KNOWN_PREFIXES)
 
-_SPEC_ID_HEAD_RE = re.compile(rf"^(?:{_PREFIXES_PATTERN})-\d{{3,4}}(?:-\d{{3}})?")
+_SPEC_ID_HEAD_RE = re.compile(
+    rf"^(?:{_PREFIXES_PATTERN})-\d{{3,4}}(?:-\d{{3}})?"
+)
 
 _NUM_HEAD_RE = re.compile(r"^(\d{3,4})_")
 
-_PREFIX_SUFFIX_RE = re.compile(rf"_({_PREFIXES_PATTERN})$")
+_PREFIX_SUFFIX_RE = re.compile(
+    rf"_({_PREFIXES_PATTERN})$"
+)
 
 
 class SpecScanner:
@@ -80,8 +66,7 @@ class SpecScanner:
         # Windows 文件系统大小写不敏感，glob/rglob 会把 pm_session_guide.md
         # 之类的说明文档也卷进来；这里再做一次严格文件名过滤。
         return [
-            path
-            for path in candidates
+            path for path in candidates
             if (
                 path.name.startswith("PM_SESSION_")
                 and path.suffix == ".md"

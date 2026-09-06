@@ -323,7 +323,9 @@ class ParseResult:
             "success": self.success,
             "var_table": self.var_table.to_dict() if self.var_table else None,
             "block_table": self.block_table.to_dict() if self.block_table else None,
-            "channel_table": (self.channel_table.to_dict() if self.channel_table else None),
+            "channel_table": (
+                self.channel_table.to_dict() if self.channel_table else None
+            ),
             "errors": [
                 {
                     "line_number": err.line_number,

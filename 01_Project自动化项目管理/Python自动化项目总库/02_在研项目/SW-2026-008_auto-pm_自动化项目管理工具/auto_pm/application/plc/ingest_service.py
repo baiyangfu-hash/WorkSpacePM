@@ -36,6 +36,7 @@ class IngestionResult:
     generated_files: list[str] = field(default_factory=list)
 
 
+
 class PlcIngestService:
     """PLC 逆向摄取与资产标准化管道"""
 
@@ -111,12 +112,8 @@ class PlcIngestService:
             f.write(f"- **硬件 IO**: {result.total_ios} 个\n")
             f.write(f"- **源表数量**: {len(result.extracted_tables)} 个\n\n")
             f.write("## 下一步提示\n\n")
-            f.write(
-                "1. 在驾驶舱【逆向资产走查】页面或查看 `.ingest_staging/draft/io_points.draft.csv` 复核点位；\n"
-            )
-            f.write(
-                f"2. 确认无误后执行 `auto-pm plc promote {project_id}` 将点表投影到生产目录。\n"
-            )
+            f.write("1. 在驾驶舱【逆向资产走查】页面或查看 `.ingest_staging/draft/io_points.draft.csv` 复核点位；\n")
+            f.write(f"2. 确认无误后执行 `auto-pm plc promote {project_id}` 将点表投影到生产目录。\n")
         result.generated_files.append(str(report_path))
 
         return result
@@ -131,9 +128,7 @@ class PlcIngestService:
         raw_json = staging_dir / "raw" / "raw_variables.json"
 
         if not staging_dir.exists() or (not draft_csv.exists() and not raw_json.exists()):
-            raise FileNotFoundError(
-                f"未检测到暂存数据，请先执行 auto-pm plc ingest --src <源> --pid {project_id}"
-            )
+            raise FileNotFoundError(f"未检测到暂存数据，请先执行 auto-pm plc ingest --src <源> --pid {project_id}")
 
         all_variables: list[VariableItem] = []
         if raw_json.exists():
@@ -166,7 +161,6 @@ class PlcIngestService:
         io_csv_path = assets_dir / "io_points.csv"
         if draft_csv.exists():
             import shutil
-
             shutil.copy2(draft_csv, io_csv_path)
         else:
             self._generate_io_csv(all_variables, io_csv_path)
@@ -264,35 +258,23 @@ class PlcIngestService:
     def _generate_io_csv(self, variables: list[VariableItem], out_path: Path) -> None:
         """生成标准 io_points.csv"""
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        io_vars = [
-            v
-            for v in variables
-            if v.domain_category == "IO" or v.address.startswith("X") or v.address.startswith("Y")
-        ]
+        io_vars = [v for v in variables if v.domain_category == "IO" or v.address.startswith("X") or v.address.startswith("Y")]
 
         with open(out_path, "w", encoding="utf-8", newline="") as fp:
             writer = csv.writer(fp)
-            writer.writerow(
-                ["station", "signal_type", "address", "tag", "signal_name", "device", "comment"]
-            )
+            writer.writerow(["station", "signal_type", "address", "tag", "signal_name", "device", "comment"])
 
             for v in io_vars:
-                sig_type = (
-                    "DI"
-                    if v.address.startswith("X")
-                    else ("DO" if v.address.startswith("Y") else "INTERNAL")
-                )
-                writer.writerow(
-                    [
-                        "cpu",
-                        sig_type,
-                        v.address,
-                        v.name,
-                        v.comment or v.name,
-                        "Inovance GL20",
-                        f"源表: {v.source_table}",
-                    ]
-                )
+                sig_type = "DI" if v.address.startswith("X") else ("DO" if v.address.startswith("Y") else "INTERNAL")
+                writer.writerow([
+                    "cpu",
+                    sig_type,
+                    v.address,
+                    v.name,
+                    v.comment or v.name,
+                    "Inovance GL20",
+                    f"源表: {v.source_table}"
+                ])
 
     def _generate_comm_yml(self, project_id: str, out_path: Path) -> None:
         """生成 communications.yml"""
@@ -342,7 +324,8 @@ project_id: "{project_id}"
 
 # PLC变量定义文档 (VAR) - {project_id} {project_name}
 
-> **摄取来源**：AutoShop 源工程逆向全量摄取\n> **数据总规模**：累计 `{len(variables)}` 个变量点位
+> **摄取来源**：AutoShop 源工程逆向全量摄取{"  "}
+> **数据总规模**：累计 `{len(variables)}` 个变量点位
 
 ---
 
@@ -350,12 +333,12 @@ project_id: "{project_id}"
 
 | 领域分类 | 点位数量 | 典型应用与映射说明 |
 | :--- | :---: | :--- |
-| **Alarm (报警矩阵)** | **{sum(1 for v in variables if v.domain_category == "Alarm")}** | 全机光幕、急停、伺服过载、气缸超时报警 |
-| **Servo (多轴伺服)** | **{sum(1 for v in variables if v.domain_category == "Servo")}** | EtherCAT X/Y/Z 多轴坐标、速度、转矩控制 |
-| **Process (自动工序)** | **{sum(1 for v in variables if v.domain_category == "Process")}** | 步序标志、抓取完成、隔纸放置、满垛信号 |
-| **Recipe (配方参数)** | **{sum(1 for v in variables if v.domain_category == "Recipe")}** | 规格尺寸、码垛层数、排布点阵坐标 |
-| **IO (硬件输入输出)** | **{sum(1 for v in variables if v.domain_category == "IO")}** | 传感器检测、电磁阀驱动、真空发生器 |
-| **General (公共控制)** | **{sum(1 for v in variables if v.domain_category == "General")}** | 全局控制字、状态字、中间逻辑辅助位 |
+| **Alarm (报警矩阵)** | **{sum(1 for v in variables if v.domain_category == 'Alarm')}** | 全机光幕、急停、伺服过载、气缸超时报警 |
+| **Servo (多轴伺服)** | **{sum(1 for v in variables if v.domain_category == 'Servo')}** | EtherCAT X/Y/Z 多轴坐标、速度、转矩控制 |
+| **Process (自动工序)** | **{sum(1 for v in variables if v.domain_category == 'Process')}** | 步序标志、抓取完成、隔纸放置、满垛信号 |
+| **Recipe (配方参数)** | **{sum(1 for v in variables if v.domain_category == 'Recipe')}** | 规格尺寸、码垛层数、排布点阵坐标 |
+| **IO (硬件输入输出)** | **{sum(1 for v in variables if v.domain_category == 'IO')}** | 传感器检测、电磁阀驱动、真空发生器 |
+| **General (公共控制)** | **{sum(1 for v in variables if v.domain_category == 'General')}** | 全局控制字、状态字、中间逻辑辅助位 |
 | **总计** | **{len(variables)}** | **工业控制数据字典全景** |
 
 ---
