@@ -218,10 +218,13 @@ class DeploymentContainer(AbstractContextManager["DeploymentContainer"]):
         return parsed
 
     def verify_release(self, release_id: str) -> int:
-        """Verify every manifest file of *release_id* by SHA-256; return count.
+        """Verify the exact manifest tree of *release_id*; return file count.
 
-        Any missing file, digest mismatch, forbidden path or malformed manifest
-        raises before returning; nothing is partially trusted.
+        Every payload node must be accounted for: registered paths must be
+        regular files with matching SHA-256 digests, while directories are
+        allowed only when they are parents of registered files.  Any extra
+        regular file, directory, link/reparse point, or non-regular node
+        fails closed before the release can be trusted.
         """
         validated = self.validate_release_id(release_id)
         manifest = self.read_manifest()
@@ -230,9 +233,11 @@ class DeploymentContainer(AbstractContextManager["DeploymentContainer"]):
             raise DeploymentStateError(f"manifest 中不存在 release: {validated}")
         release_path = self.release_dir(validated, must_exist=True)
         offenders: list[str] = []
+        expected_files: set[str] = set()
+        expected_directories: set[str] = set()
         for rel_path, digest in entry["files"].items():
             requested = Path(rel_path)
-            if requested.is_absolute() or ".." in requested.parts:
+            if requested.is_absolute() or requested == Path(".") or ".." in requested.parts:
                 offenders.append(f"{rel_path}（路径越界）")
                 continue
             target = release_path / requested
@@ -241,12 +246,42 @@ class DeploymentContainer(AbstractContextManager["DeploymentContainer"]):
             except ValueError:
                 offenders.append(f"{rel_path}（路径越界）")
                 continue
+            normalized = requested.as_posix()
+            expected_files.add(normalized)
+            parent = requested.parent
+            while parent != Path("."):
+                expected_directories.add(parent.as_posix())
+                parent = parent.parent
+            if target.is_symlink() or _is_reparse_point(target):
+                offenders.append(f"{rel_path}（不允许链接或重解析点）")
+                continue
             if not target.is_file():
                 offenders.append(f"{rel_path}（文件缺失）")
                 continue
             actual = hashlib.sha256(target.read_bytes()).hexdigest()
             if actual != digest:
                 offenders.append(f"{rel_path}（SHA-256 不匹配）")
+        pending: list[Path] = [release_path]
+        while pending:
+            current = pending.pop()
+            try:
+                children = list(current.iterdir())
+            except OSError as exc:
+                offenders.append(f"{current.relative_to(release_path).as_posix()}（无法枚举: {exc}）")
+                continue
+            for child in children:
+                relative = child.relative_to(release_path).as_posix()
+                if child.is_symlink() or _is_reparse_point(child):
+                    offenders.append(f"{relative}（不允许链接或重解析点）")
+                elif child.is_dir():
+                    if relative not in expected_directories:
+                        offenders.append(f"{relative}（未注册目录）")
+                    pending.append(child)
+                elif child.is_file():
+                    if relative not in expected_files:
+                        offenders.append(f"{relative}（未注册文件）")
+                else:
+                    offenders.append(f"{relative}（不支持的有效载荷节点）")
         if offenders:
             raise DeploymentFileError(
                 f"release {validated} manifest 核验失败: " + "; ".join(offenders)

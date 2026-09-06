@@ -219,6 +219,35 @@ class TestManifestVerification:
         with pytest.raises(DeploymentFileError, match="SHA-256 不匹配"):
             container.verify_release("r1")
 
+    def test_unregistered_regular_file_fails_closed(self, tmp_path: Path) -> None:
+        root = _make_container(tmp_path)
+        release_dir = _make_release(root, "r1")
+        _register_release(root, "r1")
+        (release_dir / "unexpected.txt").write_text("extra", encoding="utf-8")
+        with pytest.raises(DeploymentFileError, match="未注册文件"):
+            DeploymentContainer(root).verify_release("r1")
+
+    def test_unregistered_directory_fails_closed(self, tmp_path: Path) -> None:
+        root = _make_container(tmp_path)
+        release_dir = _make_release(root, "r1")
+        _register_release(root, "r1")
+        (release_dir / "unexpected").mkdir()
+        with pytest.raises(DeploymentFileError, match="未注册目录"):
+            DeploymentContainer(root).verify_release("r1")
+
+    def test_symlinked_payload_file_fails_closed(self, tmp_path: Path) -> None:
+        root = _make_container(tmp_path)
+        release_dir = _make_release(root, "r1")
+        _register_release(root, "r1")
+        target = release_dir / "artifact.bin"
+        target.unlink()
+        try:
+            target.symlink_to(release_dir / "linked.bin")
+        except OSError as exc:
+            pytest.skip(f"无法创建 symlink: {exc}")
+        with pytest.raises(DeploymentFileError, match="不允许链接或重解析点"):
+            DeploymentContainer(root).verify_release("r1")
+
     def test_missing_file_fails_closed(self, tmp_path: Path) -> None:
         root = _make_container(tmp_path)
         (root / RELEASES_DIR / "r1").mkdir()
