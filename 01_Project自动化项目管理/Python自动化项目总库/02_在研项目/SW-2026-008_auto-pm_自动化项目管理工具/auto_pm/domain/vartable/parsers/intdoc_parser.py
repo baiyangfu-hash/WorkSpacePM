@@ -107,9 +107,7 @@ class IntDocParser(BaseParser):  # type: ignore[misc]  # CHG-SCPT-2026-021: 稳�
             # 检测 VAR 区段标题
             section_match = _SECTION_RE.match(line)
             if section_match:
-                current_scope = section_match.group(1).upper().replace(
-                    " CONSTANT", ""
-                )
+                current_scope = section_match.group(1).upper().replace(" CONSTANT", "")
                 in_section = True
                 in_table = False
                 table_columns = []
@@ -203,13 +201,9 @@ class IntDocParser(BaseParser):  # type: ignore[misc]  # CHG-SCPT-2026-021: 稳�
             value = cols[idx].strip()
             if not name and any(k in col_lower for k in ("变量名", "名称", "name")):
                 name = value
-            elif not var_type and any(
-                k in col_lower for k in ("类型", "type", "数据类型")
-            ):
+            elif not var_type and any(k in col_lower for k in ("类型", "type", "数据类型")):
                 var_type = value
-            elif not comment and any(
-                k in col_lower for k in ("注释", "说明", "comment", "备注")
-            ):
+            elif not comment and any(k in col_lower for k in ("注释", "说明", "comment", "备注")):
                 comment = value
 
         # 兜底：若列名未识别，按位置取前 2 列
