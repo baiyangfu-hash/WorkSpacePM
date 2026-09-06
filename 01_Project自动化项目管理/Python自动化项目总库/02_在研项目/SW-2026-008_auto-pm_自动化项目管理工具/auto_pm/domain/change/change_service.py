@@ -129,9 +129,13 @@ class ChangeService:
         self._ledger_updater: LedgerUpdater | None = None
         # DB 缓存（可选，传入后 list_all_changes/update/delete 会同步缓存）
         self.db = db
-        self._repo: ChangeRequestRepository | None = ChangeRequestRepository(db) if db else None
+        self._repo: ChangeRequestRepository | None = (
+            ChangeRequestRepository(db) if db else None
+        )
         # M2-3 T55: 项目表 Repository（用于满足 change_requests 外键约束）
-        self._project_repo: ProjectRepository | None = ProjectRepository(db) if db else None
+        self._project_repo: ProjectRepository | None = (
+            ProjectRepository(db) if db else None
+        )
         # M3-Iter2: 组合职责单一的辅助类
         self._locator = ChangeFileLocator(workspace_root, self._parser)
         self._editor = ChangeMarkdownEditor()
@@ -140,14 +144,12 @@ class ChangeService:
     def _get_generator(self) -> ChgGenerator:
         if self._generator is None:
             from auto_pm.change.generator import ChgGenerator
-
             self._generator = ChgGenerator()
         return self._generator
 
     def _get_ledger_updater(self) -> LedgerUpdater:
         if self._ledger_updater is None:
             from auto_pm.change.ledger_updater import LedgerUpdater
-
             self._ledger_updater = LedgerUpdater()
         return self._ledger_updater
 
@@ -211,15 +213,8 @@ class ChangeService:
 
         # 生成变更编号
         change_number = self._locator.generate_change_number(project_path, domain)
-        log.info(
-            "创建变更单: %s, 项目=%s, 领域=%s, 性质=%s, 范围=%s, retrofit=%s",
-            change_number,
-            project_id,
-            domain,
-            business_nature,
-            impact_scope,
-            retrofit,
-        )
+        log.info("创建变更单: %s, 项目=%s, 领域=%s, 性质=%s, 范围=%s, retrofit=%s",
+                 change_number, project_id, domain, business_nature, impact_scope, retrofit)
 
         # 构造 ChangeRequest（CHG-108 缺陷 3：retrofit 模式直接 closed）
         today = datetime.date.today().isoformat()
@@ -254,8 +249,7 @@ class ChangeService:
                     )
                 log.warning(
                     "变更单文件已存在，将覆盖: %s (当前状态=%s)",
-                    file_path,
-                    existing_cr.status,
+                    file_path, existing_cr.status,
                 )
             except ValueError:
                 raise
@@ -265,8 +259,7 @@ class ChangeService:
                 # 保留覆盖行为：文件解析失败可能为损坏，用户显式创建新变更单时应允许覆盖。
                 log.error(
                     "变更单文件已存在但解析失败，将覆盖: %s: %s",
-                    file_path,
-                    exc,
+                    file_path, exc,
                     exc_info=True,
                 )
 
@@ -309,14 +302,12 @@ class ChangeService:
         if self._repo is not None:
             # T55: 先确保 projects 表有记录（change_requests.project_id 外键约束）
             if self._project_repo and self._project_repo.get_by_id(project_id) is None:
-                self._project_repo.upsert(
-                    ProjectRecord(
-                        project_id=project_id,
-                        name=project_id,
-                        path=project_path,
-                        stack="unknown",
-                    )
-                )
+                self._project_repo.upsert(ProjectRecord(
+                    project_id=project_id,
+                    name=project_id,
+                    path=project_path,
+                    stack="unknown",
+                ))
             # 然后写 change_requests + impact_analysis
             summary = self._parser.to_summary(cr)
             self._repo.upsert(summary, file_path, get_mtime(file_path))
@@ -339,19 +330,17 @@ class ChangeService:
             return []
 
         from auto_pm.change.path_resolver import scan_change_files
-
         change_files = scan_change_files(project_path)
-        log.info(
-            "列出变更单: %s, 共%d个文件, 筛选status=%s domain=%s",
-            project_id,
-            len(change_files),
-            status,
-            domain,
-        )
+        log.info("列出变更单: %s, 共%d个文件, 筛选status=%s domain=%s",
+                 project_id, len(change_files), status, domain)
         summaries: list[ChangeSummary] = []
         for cf in change_files:
             cr = self._parser.parse(cf)
+            if not cr.project_id:
+                cr.project_id = project_id
             summary = self._parser.to_summary(cr)
+            if not summary.project_id:
+                summary.project_id = project_id
             # 筛选
             if status and summary.status != status:
                 continue
@@ -360,14 +349,12 @@ class ChangeService:
             summaries.append(summary)
 
         log.info("筛选结果: %d 条变更单", len(summaries))
-
         # V9: 按照时间倒序显示（若时间相同或无效，按变更编号倒序），确保最近的变更单在最上面
         def sort_key(s: ChangeSummary) -> tuple[str, str]:
             d = s.apply_date or ""
             if d == "待补充":
                 d = ""
             return (d, s.change_number or "")
-
         summaries.sort(key=sort_key, reverse=True)
         return summaries
 
@@ -462,19 +449,19 @@ class ChangeService:
     # CHG 章节完整性要求（12 章节需非空才能流转到 closed）
     # 格式: (章节号, 章节名称, 检测正则)
     _REQUIRED_CHAPTERS: list[tuple[str, str, str]] = [
-        ("5", "§5 变更前后", r"^###\s*§?\s*5\b"),
-        ("6.1", "§6.1 五大约束影响", r"^###\s*§?\s*6\.1\b"),
-        ("6.2", "§6.2 跨领域影响", r"^###\s*§?\s*6\.2\b"),
-        ("6.3", "§6.3 变更传播链", r"^###\s*§?\s*6\.3\b"),
-        ("7", "§7 实施计划", r"^###\s*§?\s*7\b"),
-        ("8.1", "§8.1 审批流程", r"^###\s*§?\s*8\.1\b"),
-        ("8.2", "§8.2 审批结论", r"^###\s*§?\s*8\.2\b"),
-        ("9", "§9 变更实施记录", r"^###\s*§?\s*9\b"),
-        ("10.1", "§10.1 验证项清单", r"^###\s*§?\s*10\.1\b"),
-        ("10.2", "§10.2 跨领域联动验证", r"^###\s*§?\s*10\.2\b"),
-        ("10.3", "§10.3 验证结论", r"^###\s*§?\s*10\.3\b"),
-        ("11", "§11 版本详细变更说明", r"^###\s*§?\s*11\b"),
-        ("12", "§12 附录", r"^###\s*§?\s*12\b"),
+        ("5", "§5 变更前后", r"^#{2,3}\s*§?\s*5\b"),
+        ("6.1", "§6.1 五大约束影响", r"^#{2,3}\s*§?\s*6\.1\b"),
+        ("6.2", "§6.2 跨领域影响", r"^#{2,3}\s*§?\s*6\.2\b"),
+        ("6.3", "§6.3 变更传播链", r"^#{2,3}\s*§?\s*6\.3\b"),
+        ("7", "§7 实施计划", r"^#{2,3}\s*§?\s*7\b"),
+        ("8.1", "§8.1 审批流程", r"^#{2,3}\s*§?\s*8\.1\b"),
+        ("8.2", "§8.2 审批结论", r"^#{2,3}\s*§?\s*8\.2\b"),
+        ("9", "§9 变更实施记录", r"^#{2,3}\s*§?\s*9\b"),
+        ("10.1", "§10.1 验证项清单", r"^#{2,3}\s*§?\s*10\.1\b"),
+        ("10.2", "§10.2 跨领域联动验证", r"^#{2,3}\s*§?\s*10\.2\b"),
+        ("10.3", "§10.3 验证结论", r"^#{2,3}\s*§?\s*10\.3\b"),
+        ("11", "§11 版本详细变更说明", r"^#{2,3}\s*§?\s*11\b"),
+        ("12", "§12 附录", r"^#{2,3}\s*§?\s*12\b"),
     ]
 
     def _check_chapter_completeness(self, content: str) -> list[str]:
@@ -502,8 +489,12 @@ class ChangeService:
             line_end = content.find("\n", start)
             if line_end != -1:
                 start = line_end + 1
-            # 找到下一个 ## 或 ### 标题
-            next_sec = re.search(r"^#{2,3}\s", content[start:], re.MULTILINE)
+            # Only a heading at this level or above ends the current section.
+            # A generated H2 section may legitimately contain H3 subsections.
+            heading_level = len(match.group(0)) - len(match.group(0).lstrip("#"))
+            next_sec = re.search(
+                rf"^#{{1,{heading_level}}}\s", content[start:], re.MULTILINE
+            )
             end = start + next_sec.start() if next_sec else len(content)
             section_content = content[start:end].strip()
             # 如果章节内容为空（只有标题），视为缺失
@@ -547,17 +538,15 @@ class ChangeService:
         target_pm = pm_files[0]
         for f in pm_files:
             p = f.parent
-            if (
-                (p / ".copier-answers.yml").exists()
-                or (p / ".plc.json").exists()
-                or (p / "pyproject.toml").exists()
-            ):
+            if (p / ".copier-answers.yml").exists() or (p / ".plc.json").exists() or (p / "pyproject.toml").exists():
                 target_pm = f
                 break
 
         project_root = target_pm.parent
         config = WorkspaceConfig(workspace=workspace)
-        scanner = SpecScanner(workspace=workspace, config=config, project_root=project_root)
+        scanner = SpecScanner(
+            workspace=workspace, config=config, project_root=project_root
+        )
         registry = SpecRegistry(workspace)
         registry.load()  # 显式加载，确保依赖 registry 数据的检查器可正常工作
 
@@ -596,10 +585,7 @@ class ChangeService:
 
         log.info(
             "状态流转: %s → %s, 审批人=%s, 验证结论=%s",
-            change_number,
-            new_status,
-            approver,
-            verification_conclusion,
+            change_number, new_status, approver, verification_conclusion,
         )
 
         # 读取当前内容，获取当前状态
@@ -712,7 +698,6 @@ class ChangeService:
         if new_status in ("approved", "conditionally_approved", "rejected"):
             # 审批环节名称使用中文语义化标签（对齐 STATUS_LABELS）
             from auto_pm.change.constants import STATUS_LABELS
-
             status_label = STATUS_LABELS.get(new_status, new_status)
             approval_row = f"| **{status_label}** | {approver} | {comment or '同意'} | {today} | {approver} |\n"
             content = self._editor.append_to_approval_table(content, approval_row)
@@ -770,9 +755,7 @@ class ChangeService:
         log.info("状态流转完成: %s, 新状态=%s", change_number, result.status)
         return result
 
-    def list_approval_history(
-        self, change_number: str, project_id: str | None = None
-    ) -> list[ApprovalRecord]:
+    def list_approval_history(self, change_number: str, project_id: str | None = None) -> list[ApprovalRecord]:
         """查询变更单审批流转历史（供 GUI 审批时间线使用，M3-3 T73）
 
         Args:
@@ -784,14 +767,9 @@ class ChangeService:
         """
         if self._repo is None:
             return []
-        return cast(
-            list[ApprovalRecord],
-            self._repo.list_approval_history(change_number, project_id=project_id),
-        )
+        return cast(list[ApprovalRecord], self._repo.list_approval_history(change_number, project_id=project_id))
 
-    def get_impact_analysis(
-        self, change_number: str, project_id: str | None = None
-    ) -> ImpactAnalysis | None:
+    def get_impact_analysis(self, change_number: str, project_id: str | None = None) -> ImpactAnalysis | None:
         """查询变更单的影响分析记录（供 GUI 验证摘要使用，M3）
 
         Args:
@@ -844,11 +822,7 @@ class ChangeService:
 
         log.info(
             "跨项目查询变更单: status=%s domain=%s urgency=%s project_id=%s → %d 条",
-            status,
-            domain,
-            urgency,
-            project_id,
-            len(changes),
+            status, domain, urgency, project_id, len(changes),
         )
         return sorted(changes, key=lambda c: c.change_number)
 
@@ -887,7 +861,9 @@ class ChangeService:
                 )
 
         # 2. 获取变更单文件
-        file_path = self._locator.find_change_file(change_number, project_id=lookup_project_id)
+        file_path = self._locator.find_change_file(
+            change_number, project_id=lookup_project_id
+        )
         if not file_path:
             log.warning("修改变更单: 文件未找到 %s", change_number)
             return None
@@ -939,7 +915,9 @@ class ChangeService:
 
         return updated
 
-    def delete_change_request(self, change_number: str, project_id: str | None = None) -> bool:
+    def delete_change_request(
+        self, change_number: str, project_id: str | None = None
+    ) -> bool:
         """删除变更单（文件 + DB 缓存）
 
         Args:
@@ -987,11 +965,11 @@ class ChangeService:
         """[已委托] 根据变更编号获取文件路径（向后兼容包装）"""
         return cast(str, self._locator.get_change_file_path(project_path, change_number))
 
-    def _find_change_file(self, change_number: str, project_id: str | None = None) -> str | None:
+    def _find_change_file(
+        self, change_number: str, project_id: str | None = None
+    ) -> str | None:
         """[已委托] 根据变更编号查找文件（向后兼容包装）"""
-        return cast(
-            str | None, self._locator.find_change_file(change_number, project_id=project_id)
-        )
+        return cast(str | None, self._locator.find_change_file(change_number, project_id=project_id))
 
     def _scan_all_change_files(self) -> list[ChangeSummary]:
         """[已委托] 扫描工作空间所有项目的变更单文件（向后兼容包装）"""

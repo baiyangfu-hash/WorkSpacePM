@@ -45,10 +45,19 @@ class ChgParser:
             file_mtime=get_mtime(file_path),
         )
 
+        # 解析开头的 YAML frontmatter（如 id: ..., project_id: ...）
+        frontmatter = self._parse_frontmatter(content)
+        if frontmatter.get("project_id"):
+            cr.project_id = frontmatter["project_id"]
+        if frontmatter.get("id"):
+            cr.change_number = frontmatter["id"]
+
         # 从文件路径提取 domain
         cr.domain = cast(Domain, self._extract_domain_from_path(file_path))
-        # 从文件名提取 change_number
-        cr.change_number = self._extract_change_number(file_path)
+        # 从文件名提取 change_number（若文件名符合规范，优先级高于 frontmatter）
+        extracted_num = self._extract_change_number(file_path)
+        if extracted_num:
+            cr.change_number = extracted_num
 
         # 按章节拆分
         sections = self._split_sections(content)
@@ -92,10 +101,14 @@ class ChgParser:
         # 如果 change_number 未从文件提取到，尝试从内容提取
         if not cr.change_number:
             cr.change_number = self._extract_change_number_from_content(content)
+        if not cr.change_number and frontmatter.get("id"):
+            cr.change_number = frontmatter["id"]
 
-        # 如果 project_id 未从 §3 提取到，从 change_number 推断
+        # 如果 project_id 未从 §3 提取到，从正文提取或回退到 frontmatter
         if not cr.project_id:
             cr.project_id = self._extract_project_id_from_content(content)
+        if not cr.project_id and frontmatter.get("project_id"):
+            cr.project_id = frontmatter["project_id"]
 
         # 填充章节内容标志（门禁校验用）
         self._fill_section_flags(cr, sections)
@@ -110,13 +123,8 @@ class ChgParser:
                 proj_prefix = f"{cr.project_id} | " if cr.project_id else ""
                 log.warning("规范校验违规 [%s%s]: %s", proj_prefix, cr.change_number, v)
 
-        log.info(
-            "解析变更单完成: %s, domain=%s, nature=%s, status=%s",
-            cr.change_number,
-            cr.domain,
-            cr.business_nature,
-            cr.status,
-        )
+        log.info("解析变更单完成: %s, domain=%s, nature=%s, status=%s",
+                 cr.change_number, cr.domain, cr.business_nature, cr.status)
         return cr
 
     def to_summary(self, cr: ChangeRequest) -> ChangeSummary:
@@ -200,9 +208,13 @@ class ChgParser:
         s30 = self._find_subsection(text, "3.0")
         if s30:
             table = self._parse_table(s30)
-            cr.change_number = table.get("变更编号", cr.change_number)
-            cr.project_name = table.get("项目名称", cr.project_name)
-            cr.project_id = table.get("项目编号", cr.project_id)
+            if table.get("变更编号"):
+                cr.change_number = table["变更编号"].strip().strip("`")
+            if table.get("项目名称"):
+                cr.project_name = table["项目名称"].strip().strip("`")
+            raw_pid = table.get("项目编号")
+            if raw_pid and raw_pid.strip().strip("`"):
+                cr.project_id = raw_pid.strip().strip("`")
 
         # §3.1 技术领域
         s31 = self._find_subsection(text, "3.1")
@@ -212,9 +224,7 @@ class ChgParser:
         # §3.2 业务性质
         s32 = self._find_subsection(text, "3.2")
         if s32:
-            cr.business_nature = cast(
-                BusinessNature, self._extract_selected_option(s32) or cr.business_nature
-            )
+            cr.business_nature = cast(BusinessNature, self._extract_selected_option(s32) or cr.business_nature)
 
         # §3.3 影响范围
         s33 = self._find_subsection(text, "3.3")
@@ -405,9 +415,24 @@ class ChgParser:
         match = re.search(r"CHG-[A-Z]+-\d{4}-\d{3}", content)
         return match.group(0) if match else ""
 
+    def _parse_frontmatter(self, content: str) -> dict[str, str]:
+        """解析开头的 YAML frontmatter (--- ... ---)"""
+        match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|$)", content, re.DOTALL)
+        if not match:
+            return {}
+        result: dict[str, str] = {}
+        for line in match.group(1).splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if ":" in line:
+                key, val = line.split(":", 1)
+                result[key.strip()] = val.strip().strip("'\"`")
+        return result
+
     def _extract_project_id_from_content(self, content: str) -> str:
-        """从内容中提取项目编号（从§3.0编号与项目表格）"""
-        match = re.search(r"项目编号[|：:]\s*([A-Z]+-\d{4}-\d{3})", content)
+        """从内容中提取项目编号（从§3.0编号与项目表格或正文提取，兼容反引号与加粗标记）"""
+        match = re.search(r"项目编号\*{0,2}[|：:]\s*[`]?([A-Z]+-\d{4}-\d{3})[`]?", content)
         return match.group(1) if match else ""
 
     def _read_explicit_status(self, section3_text: str) -> str:
@@ -447,7 +472,9 @@ class ChgParser:
 
         # 判断 §6 是否有实质内容
         has_constraint = bool(cr.constraint_impacts)
-        has_domain = any(info.get("affected") for info in cr.domain_impacts.values())
+        has_domain = any(
+            info.get("affected") for info in cr.domain_impacts.values()
+        )
         has_propagation = bool(cr.related_changes)
         cr.has_section_6 = has_constraint or has_domain or has_propagation
 
@@ -709,9 +736,7 @@ class ChgParser:
                 return conclusion
 
         # 格式2: 原始模板含 ☑ 标记（仅在结论区域内）
-        match = re.search(
-            r"\|[^|\n]*结论[^|\n]*\|[^|\n]*☑\s*(\S+?)(?:\s*[,，□\|\n]|$)", section_text
-        )
+        match = re.search(r"\|[^|\n]*结论[^|\n]*\|[^|\n]*☑\s*(\S+?)(?:\s*[,，□\|\n]|$)", section_text)
         if match:
             return match.group(1).strip()
 
@@ -798,15 +823,13 @@ class ChgParser:
             elif "☑不通过" in cells[2] or "☑ 不通过" in cells[2]:
                 result = "不通过"
 
-            records.append(
-                {
-                    "propagation": cells[0],
-                    "related_chg": cells[1],
-                    "result": result,
-                    "verifier": cells[3],
-                    "date": cells[4],
-                }
-            )
+            records.append({
+                "propagation": cells[0],
+                "related_chg": cells[1],
+                "result": result,
+                "verifier": cells[3],
+                "date": cells[4],
+            })
 
         return records
 
@@ -840,14 +863,10 @@ class ChgParser:
         if cr.domain and cr.domain not in DOMAINS:
             violations.append(f"领域 '{cr.domain}' 不在规范允许值 {list(DOMAINS.keys())} 中")
         if cr.business_nature and cr.business_nature not in BUSINESS_NATURES:
-            violations.append(
-                f"业务性质 '{cr.business_nature}' 不在规范允许值 {list(BUSINESS_NATURES.keys())} 中"
-            )
+            violations.append(f"业务性质 '{cr.business_nature}' 不在规范允许值 {list(BUSINESS_NATURES.keys())} 中")
         for scope in cr.impact_scope:
             if scope and scope not in IMPACT_SCOPES:
-                violations.append(
-                    f"影响范围 '{scope}' 不在规范允许值 {list(IMPACT_SCOPES.keys())} 中"
-                )
+                violations.append(f"影响范围 '{scope}' 不在规范允许值 {list(IMPACT_SCOPES.keys())} 中")
 
         # 5. 必填字段校验
         if not cr.change_number:

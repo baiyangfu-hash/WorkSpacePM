@@ -120,13 +120,32 @@ class SyncService:
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)
             error_msg = str(e)
+
+            # 诊断 observability: 自动执行 PRAGMA foreign_key_check 捕获外键违规证据
+            fk_violations = []
+            try:
+                with self.db.get_connection() as conn:
+                    fk_violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+            except Exception as fk_err:
+                log.debug("执行 PRAGMA foreign_key_check 异常: %s", fk_err)
+
+            if fk_violations:
+                log.error(
+                    "同步失败且检测到 PRAGMA foreign_key_check 违规 (%d 项): %s",
+                    len(fk_violations),
+                    [tuple(r) for r in fk_violations],
+                )
+                error_detail = f"{error_msg} | FK violations: {len(fk_violations)}"
+            else:
+                error_detail = error_msg
+
             result = {
                 "scan_type": scan_type,
                 "projects_found": 0,
                 "changes_found": 0,
                 "duration_ms": duration_ms,
                 "status": "failed",
-                "message": error_msg,
+                "message": error_detail,
             }
             self.scan_log_repo.insert(
                 scan_type=scan_type,
@@ -134,9 +153,9 @@ class SyncService:
                 changes_found=0,
                 duration_ms=duration_ms,
                 status="failed",
-                message=error_msg,
+                message=error_detail,
             )
-            log.error("同步失败: %s", error_msg)
+            log.error("同步失败: %s", error_detail)
             return result
 
     def _sync_projects(self, force_full: bool) -> int:
@@ -197,12 +216,12 @@ class SyncService:
             self.project_repo.upsert(record)
             synced += 1
 
-        # 删除文件系统中已不存在的项目
+        # 删除文件系统中已不存在的项目（拓扑逆序：先删子表变更单，后删父表项目）
         stale_ids = db_ids - fs_ids
         for stale_id in stale_ids:
-            self.project_repo.delete(stale_id)
             self.change_repo.delete_by_project(stale_id)
-            log.info("已删除过期项目: %s", stale_id)
+            self.project_repo.delete(stale_id)
+            log.info("已删除过期项目及关联变更单: %s", stale_id)
 
         return synced
 
@@ -238,12 +257,41 @@ class SyncService:
                 continue
 
             for summary in summaries:
-                # 获取变更单文件 mtime
-                chg_path = self._find_change_file(change_dir, summary.change_number)
-                chg_mtime = os.path.getmtime(chg_path) if chg_path else 0
+                try:
+                    # Tier 1 物理目录归属兜底：若 project_id 为空，回退到当前扫描项目 ID
+                    target_pid = (summary.project_id or "").strip()
+                    if not target_pid:
+                        target_pid = proj.project_id
+                        summary.project_id = target_pid
 
-                self.change_repo.upsert(summary, chg_path or "", chg_mtime)
-                synced += 1
+                    # Tier 2 存根补偿：若目标 project_id 在 projects 表中不存在，自动插入存根
+                    if self.project_repo.get_by_id(target_pid) is None:
+                        log.warning("FK补偿防御: 项目 %s 在 projects 表中不存在，创建自动存根", target_pid)
+                        stub = ProjectRecord(
+                            project_id=target_pid,
+                            name=f"{target_pid} (自动补偿存根)",
+                            path=proj.path,
+                            stack="unknown",
+                            description="由外键同步防御机制自动创建的存根项目",
+                            extra={"is_stub": True, "created_by": "sync_fk_compensation"},
+                        )
+                        self.project_repo.upsert(stub)
+
+                    # 获取变更单文件 mtime
+                    chg_path = self._find_change_file(change_dir, summary.change_number)
+                    chg_mtime = os.path.getmtime(chg_path) if chg_path else 0
+
+                    self.change_repo.upsert(summary, chg_path or "", chg_mtime)
+                    synced += 1
+                except Exception as e:
+                    # 故障隔离：单个变更单异常不中断该项目其他变更单及后续项目的同步
+                    log.warning(
+                        "同步单个变更单失败 [%s | %s]: %s",
+                        proj.project_id,
+                        getattr(summary, "change_number", "unknown"),
+                        e,
+                    )
+                    continue
 
         return synced
 

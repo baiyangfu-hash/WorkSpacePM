@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import datetime
 from typing import Any
@@ -26,6 +27,8 @@ from auto_pm.models import (
     ProjectRecord,
 )
 
+log = logging.getLogger(__name__)
+
 
 class ProjectRepository:
     """项目索引缓存 CRUD"""
@@ -35,45 +38,45 @@ class ProjectRepository:
 
     def upsert(self, project: ProjectRecord) -> None:
         """插入或更新项目记录（UPSERT）"""
+        sql = """
+            INSERT INTO projects
+                (project_id, name, path, stack, version, description,
+                 source, phase, business_line, extra, file_mtime, last_scanned,
+                 scanner_version)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                name=excluded.name,
+                path=excluded.path,
+                stack=excluded.stack,
+                version=excluded.version,
+                description=excluded.description,
+                source=excluded.source,
+                phase=excluded.phase,
+                business_line=excluded.business_line,
+                extra=excluded.extra,
+                file_mtime=excluded.file_mtime,
+                last_scanned=excluded.last_scanned,
+                scanner_version=excluded.scanner_version
+        """
+        params = (
+            project.project_id,
+            project.name,
+            project.path,
+            project.stack,
+            project.version,
+            project.description,
+            project.source,
+            project.phase,
+            project.business_line,
+            json.dumps(project.extra, ensure_ascii=False),
+            project.file_mtime,
+            project.last_scanned,
+            project.scanner_version,
+        )
         with self.db.get_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO projects
-                    (project_id, name, path, stack, version, description,
-                     source, phase, business_line, extra, file_mtime, last_scanned,
-                     scanner_version)
-                VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(project_id) DO UPDATE SET
-                    name=excluded.name,
-                    path=excluded.path,
-                    stack=excluded.stack,
-                    version=excluded.version,
-                    description=excluded.description,
-                    source=excluded.source,
-                    phase=excluded.phase,
-                    business_line=excluded.business_line,
-                    extra=excluded.extra,
-                    file_mtime=excluded.file_mtime,
-                    last_scanned=excluded.last_scanned,
-                    scanner_version=excluded.scanner_version
-                """,
-                (
-                    project.project_id,
-                    project.name,
-                    project.path,
-                    project.stack,
-                    project.version,
-                    project.description,
-                    project.source,
-                    project.phase,
-                    project.business_line,
-                    json.dumps(project.extra, ensure_ascii=False),
-                    project.file_mtime,
-                    project.last_scanned,
-                    project.scanner_version,
-                ),
-            )
+            log.debug("DB Executing SQL: %s | Params: %s", sql.strip(), params)
+            conn.execute(sql, params)
             conn.commit()
 
     def get_by_id(self, project_id: str) -> ProjectRecord | None:
@@ -137,8 +140,11 @@ class ProjectRepository:
         Returns:
             True 如果删除了记录，False 如果记录不存在
         """
+        sql = "DELETE FROM projects WHERE project_id = ?"
+        params = (project_id,)
         with self.db.get_connection() as conn:
-            cursor = conn.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
+            log.debug("DB Executing SQL: %s | Params: %s", sql, params)
+            cursor = conn.execute(sql, params)
             conn.commit()
             return int(cursor.rowcount) > 0
 
@@ -195,43 +201,59 @@ class ChangeRequestRepository:
 
     def upsert(self, change: ChangeSummary, file_path: str = "", file_mtime: float = 0) -> None:
         """插入或更新变更单记录"""
-        with self.db.get_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO change_requests
-                    (project_id, change_number, project_name, domain,
-                     business_nature, impact_scope, status, applicant,
-                     apply_date, title, file_path, file_mtime)
-                VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(project_id, change_number) DO UPDATE SET
-                    project_name=excluded.project_name,
-                    domain=excluded.domain,
-                    business_nature=excluded.business_nature,
-                    impact_scope=excluded.impact_scope,
-                    status=excluded.status,
-                    applicant=excluded.applicant,
-                    apply_date=excluded.apply_date,
-                    title=excluded.title,
-                    file_path=excluded.file_path,
-                    file_mtime=excluded.file_mtime
-                """,
-                (
-                    change.project_id,
-                    change.change_number,
-                    change.project_name,
-                    change.domain,
-                    change.business_nature,
-                    json.dumps(change.impact_scope, ensure_ascii=False),
-                    change.status,
-                    change.applicant,
-                    change.apply_date,
-                    change.title,
-                    file_path,
-                    file_mtime,
-                ),
+        sql = """
+            INSERT INTO change_requests
+                (project_id, change_number, project_name, domain,
+                 business_nature, impact_scope, status, applicant,
+                 apply_date, title, file_path, file_mtime)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, change_number) DO UPDATE SET
+                project_name=excluded.project_name,
+                domain=excluded.domain,
+                business_nature=excluded.business_nature,
+                impact_scope=excluded.impact_scope,
+                status=excluded.status,
+                applicant=excluded.applicant,
+                apply_date=excluded.apply_date,
+                title=excluded.title,
+                file_path=excluded.file_path,
+                file_mtime=excluded.file_mtime
+        """
+        params = (
+            change.project_id,
+            change.change_number,
+            change.project_name,
+            change.domain,
+            change.business_nature,
+            json.dumps(change.impact_scope, ensure_ascii=False),
+            change.status,
+            change.applicant,
+            change.apply_date,
+            change.title,
+            file_path,
+            file_mtime,
+        )
+        try:
+            with self.db.get_connection() as conn:
+                log.debug("DB Executing SQL: %s | Params: %s", sql.strip(), params)
+                conn.execute(sql, params)
+                conn.commit()
+        except sqlite3.IntegrityError as e:
+            with self.db.get_connection() as conn:
+                row = conn.execute("SELECT 1 FROM projects WHERE project_id = ?", (change.project_id,)).fetchone()
+                parent_exists = row is not None
+                fk_check = conn.execute("PRAGMA foreign_key_check").fetchall()
+            log.error(
+                "外键约束失败: 表 change_requests 引用父表 projects(project_id=%r, 存在=%s) 异常! 变更单=%s, PRAGMA check=%s, 触发 SQL: %s, 错误: %s",
+                change.project_id,
+                parent_exists,
+                change.change_number,
+                [tuple(r) for r in fk_check],
+                sql.strip(),
+                e,
             )
-            conn.commit()
+            raise
 
     def list_by_project(self, project_id: str) -> list[ChangeSummary]:
         """按项目 ID 查询变更单列表"""
@@ -260,15 +282,15 @@ class ChangeRequestRepository:
     def delete(self, change_number: str, project_id: str | None = None) -> bool:
         """删除变更单记录"""
         with self.db.get_connection() as conn:
+            params: tuple[str, ...]
             if project_id:
-                cursor = conn.execute(
-                    "DELETE FROM change_requests WHERE project_id = ? AND change_number = ?",
-                    (project_id, change_number),
-                )
+                sql = "DELETE FROM change_requests WHERE project_id = ? AND change_number = ?"
+                params = (project_id, change_number)
             else:
-                cursor = conn.execute(
-                    "DELETE FROM change_requests WHERE change_number = ?", (change_number,)
-                )
+                sql = "DELETE FROM change_requests WHERE change_number = ?"
+                params = (change_number,)
+            log.debug("DB Executing SQL: %s | Params: %s", sql, params)
+            cursor = conn.execute(sql, params)
             conn.commit()
             return int(cursor.rowcount) > 0
 
@@ -278,8 +300,11 @@ class ChangeRequestRepository:
         Returns:
             删除的记录数
         """
+        sql = "DELETE FROM change_requests WHERE project_id = ?"
+        params = (project_id,)
         with self.db.get_connection() as conn:
-            cursor = conn.execute("DELETE FROM change_requests WHERE project_id = ?", (project_id,))
+            log.debug("DB Executing SQL: %s | Params: %s", sql, params)
+            cursor = conn.execute(sql, params)
             conn.commit()
             return int(cursor.rowcount)
 
@@ -312,9 +337,7 @@ class ChangeRequestRepository:
         """
         self._impact_repo.upsert(analysis)
 
-    def get_impact_analysis(
-        self, change_number: str, project_id: str | None = None
-    ) -> ImpactAnalysis | None:
+    def get_impact_analysis(self, change_number: str, project_id: str | None = None) -> ImpactAnalysis | None:
         """查询变更影响分析（M2-2 T48）
 
         委托给 ImpactAnalysisRepository.get_by_change_number。
@@ -359,9 +382,7 @@ class ChangeRequestRepository:
         )
         return self._approval_repo.insert(record)
 
-    def list_approval_history(
-        self, change_number: str, project_id: str | None = None
-    ) -> list[ApprovalRecord]:
+    def list_approval_history(self, change_number: str, project_id: str | None = None) -> list[ApprovalRecord]:
         """查询审批流转历史（M2-2 T50）
 
         委托给 ApprovalHistoryRepository.list_by_change，按 id 升序（时间顺序）返回。
@@ -388,40 +409,57 @@ class ImpactAnalysisRepository:
         Args:
             analysis: 影响分析模型，change_number 为主键
         """
-        with self.db.get_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO impact_analysis
-                    (project_id, change_number, risk_level, mitigation, constraint_impacts,
-                     domain_impacts, propagation_chain, related_changes, updated_at)
-                VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(project_id, change_number) DO UPDATE SET
-                    risk_level=excluded.risk_level,
-                    mitigation=excluded.mitigation,
-                    constraint_impacts=excluded.constraint_impacts,
-                    domain_impacts=excluded.domain_impacts,
-                    propagation_chain=excluded.propagation_chain,
-                    related_changes=excluded.related_changes,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    analysis.project_id,
-                    analysis.change_number,
-                    analysis.risk_level,
-                    analysis.mitigation,
-                    json.dumps(analysis.constraint_impacts, ensure_ascii=False),
-                    json.dumps(analysis.domain_impacts, ensure_ascii=False),
-                    analysis.propagation_chain,
-                    json.dumps(analysis.related_changes, ensure_ascii=False),
-                    analysis.updated_at or datetime.now().isoformat(),
-                ),
+        sql = """
+            INSERT INTO impact_analysis
+                (project_id, change_number, risk_level, mitigation, constraint_impacts,
+                 domain_impacts, propagation_chain, related_changes, updated_at)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, change_number) DO UPDATE SET
+                risk_level=excluded.risk_level,
+                mitigation=excluded.mitigation,
+                constraint_impacts=excluded.constraint_impacts,
+                domain_impacts=excluded.domain_impacts,
+                propagation_chain=excluded.propagation_chain,
+                related_changes=excluded.related_changes,
+                updated_at=excluded.updated_at
+        """
+        params = (
+            analysis.project_id,
+            analysis.change_number,
+            analysis.risk_level,
+            analysis.mitigation,
+            json.dumps(analysis.constraint_impacts, ensure_ascii=False),
+            json.dumps(analysis.domain_impacts, ensure_ascii=False),
+            analysis.propagation_chain,
+            json.dumps(analysis.related_changes, ensure_ascii=False),
+            analysis.updated_at or datetime.now().isoformat(),
+        )
+        try:
+            with self.db.get_connection() as conn:
+                log.debug("DB Executing SQL: %s | Params: %s", sql.strip(), params)
+                conn.execute(sql, params)
+                conn.commit()
+        except sqlite3.IntegrityError as e:
+            with self.db.get_connection() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM change_requests WHERE project_id = ? AND change_number = ?",
+                    (analysis.project_id, analysis.change_number),
+                ).fetchone()
+                parent_exists = row is not None
+                fk_check = conn.execute("PRAGMA foreign_key_check").fetchall()
+            log.error(
+                "外键约束失败: 表 impact_analysis 引用父表 change_requests(project_id=%r, change_number=%r, 存在=%s) 异常! PRAGMA check=%s, 触发 SQL: %s, 错误: %s",
+                analysis.project_id,
+                analysis.change_number,
+                parent_exists,
+                [tuple(r) for r in fk_check],
+                sql.strip(),
+                e,
             )
-            conn.commit()
+            raise
 
-    def get_by_change_number(
-        self, change_number: str, project_id: str | None = None
-    ) -> ImpactAnalysis | None:
+    def get_by_change_number(self, change_number: str, project_id: str | None = None) -> ImpactAnalysis | None:
         """按变更编号查询影响分析
 
         Returns:
@@ -458,7 +496,7 @@ class ImpactAnalysisRepository:
                     (change_number,),
                 )
             conn.commit()
-            return int(cursor.rowcount) > 0
+            return bool(cursor.rowcount > 0)
 
     @staticmethod
     def _row_to_analysis(row: sqlite3.Row) -> ImpactAnalysis:
@@ -507,30 +545,47 @@ class ApprovalHistoryRepository:
             记录 ID
         """
         transition_date = record.transition_date or datetime.now().isoformat()
-        with self.db.get_connection() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO approval_history
-                    (project_id, change_number, from_status, to_status, approver,
-                     comment, transition_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    record.project_id,
-                    record.change_number,
-                    record.from_status,
-                    record.to_status,
-                    record.approver,
-                    record.comment,
-                    transition_date,
-                ),
+        sql = """
+            INSERT INTO approval_history
+                (project_id, change_number, from_status, to_status, approver,
+                 comment, transition_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            record.project_id,
+            record.change_number,
+            record.from_status,
+            record.to_status,
+            record.approver,
+            record.comment,
+            transition_date,
+        )
+        try:
+            with self.db.get_connection() as conn:
+                log.debug("DB Executing SQL: %s | Params: %s", sql.strip(), params)
+                cursor = conn.execute(sql, params)
+                conn.commit()
+                return cursor.lastrowid or 0
+        except sqlite3.IntegrityError as e:
+            with self.db.get_connection() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM change_requests WHERE project_id = ? AND change_number = ?",
+                    (record.project_id, record.change_number),
+                ).fetchone()
+                parent_exists = row is not None
+                fk_check = conn.execute("PRAGMA foreign_key_check").fetchall()
+            log.error(
+                "外键约束失败: 表 approval_history 引用父表 change_requests(project_id=%r, change_number=%r, 存在=%s) 异常! PRAGMA check=%s, 触发 SQL: %s, 错误: %s",
+                record.project_id,
+                record.change_number,
+                parent_exists,
+                [tuple(r) for r in fk_check],
+                sql.strip(),
+                e,
             )
-            conn.commit()
-            return cursor.lastrowid or 0
+            raise
 
-    def list_by_change(
-        self, change_number: str, project_id: str | None = None
-    ) -> list[ApprovalRecord]:
+    def list_by_change(self, change_number: str, project_id: str | None = None) -> list[ApprovalRecord]:
         """按变更编号查询审批历史（按 id 升序，即时间顺序）
 
         Returns:
@@ -607,16 +662,16 @@ class ScanLogRepository:
             日志 ID
         """
         timestamp = datetime.now().isoformat()
+        sql = """
+            INSERT INTO scan_log
+                (scan_type, projects_found, changes_found, duration_ms,
+                 status, message, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (scan_type, projects_found, changes_found, duration_ms, status, message, timestamp)
         with self.db.get_connection() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO scan_log
-                    (scan_type, projects_found, changes_found, duration_ms,
-                     status, message, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (scan_type, projects_found, changes_found, duration_ms, status, message, timestamp),
-            )
+            log.debug("DB Executing SQL: %s | Params: %s", sql.strip(), params)
+            cursor = conn.execute(sql, params)
             conn.commit()
             return cursor.lastrowid or 0
 
