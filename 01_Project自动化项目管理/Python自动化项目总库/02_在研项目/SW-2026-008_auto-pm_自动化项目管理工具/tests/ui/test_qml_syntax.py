@@ -11,17 +11,20 @@ import os
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QUrl
+from PySide6.QtCore import QUrl
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 @pytest.fixture(scope="module")
-def qml_engine() -> QQmlEngine:
-    app = QCoreApplication.instance()
-    if app is None:
-        app = QCoreApplication([])
+def qml_engine(qapp) -> QQmlEngine:
+    """复用根 conftest 的 session 级 qapp（QApplication）。
+
+    CHG-SCPT-2026-019：原先在此创建裸 QCoreApplication 单例，会使其后执行的
+    tests/qml 全部在根 qapp 断言处假失败（Qt 全局单例不可替换，且目录枚举序
+    导致本模块与 tests/qml 的先后顺序非确定）。QApplication 兼容 QML 加载。
+    """
     engine = QQmlEngine()
     qml_dir = Path(__file__).parent.parent.parent / "auto_pm" / "ui" / "qml"
     engine.addImportPath(str(qml_dir))

@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 TEST_AWS_REGION = "us-east-1"
 TEST_S3_BUCKET = "test-bucket"
 
-
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Randomise the order of tests to avoid flakiness.
 
@@ -30,7 +29,6 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """
     rng = random.Random(20260627)
     rng.shuffle(items)
-
 
 @pytest.fixture(scope="session")
 def qapp() -> Generator[QApplication, None, None]:
@@ -52,12 +50,10 @@ def qapp() -> Generator[QApplication, None, None]:
     assert isinstance(app, QApplication)
     yield app
 
-
 @pytest.fixture
 def tests_dir() -> Path:
     """返回 tests/ 目录路径（供元测试扫描测试文件用）。"""
     return Path(__file__).parent
-
 
 @pytest.fixture
 def tmp_workspace(tmp_path: Path) -> Path:
