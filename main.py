@@ -17,6 +17,7 @@
 
 import os
 import sys
+import traceback
 from pathlib import Path
 
 WORKSPACE_ROOT = Path(__file__).parent.resolve()
@@ -43,15 +44,31 @@ sys.path.insert(0, str(release_dir))
 os.environ["AUTO_PM_WORKSPACE"] = str(WORKSPACE_ROOT)
 
 if __name__ == "__main__":
+    from auto_pm.infrastructure.startup_guard import (
+        EXIT_CRASH,
+        EXIT_DB_LOCKED,
+        EXIT_INSTANCE_LOCKED,
+        DatabaseLockConflictError,
+        InstanceLockError,
+        acquire_instance_lock,
+        install_crash_handler,
+        probe_database_locks,
+        write_crash_log,
+    )
+
+    crash_log_path = WORKSPACE_ROOT / ".auto-pm" / "logs" / "startup_crash.log"
+    install_crash_handler(crash_log_path)
+
     import auto_pm
 
     # provenance 硬断言：auto_pm 必须来自 release，禁止任何母体/平铺/持久安装泄漏
     if not Path(auto_pm.__file__).resolve().is_relative_to(release_dir):
-        print(
-            f"main: provenance 断言失败: auto_pm 来自 {auto_pm.__file__}，"
-            f"而非 release {release_dir}",
-            file=sys.stderr,
+        msg = (
+            f"provenance 断言失败: auto_pm 来自 {auto_pm.__file__}，"
+            f"而非 release {release_dir}"
         )
+        print(f"main: {msg}", file=sys.stderr)
+        write_crash_log(crash_log_path, "PROVENANCE_FAILED", msg)
         sys.exit(5)
 
     if RESOLVE_ONLY:
@@ -59,7 +76,31 @@ if __name__ == "__main__":
         print(f"main: auto_pm provenance: {Path(auto_pm.__file__).resolve()}")
         sys.exit(0)
 
-    from auto_pm.ui.qml_main_window import run_qml_gui
+    lock = None
+    try:
+        try:
+            lock = acquire_instance_lock(WORKSPACE_ROOT)
+        except InstanceLockError:
+            sys.exit(EXIT_INSTANCE_LOCKED)
 
-    # 启动桌面驾驶舱
-    sys.exit(run_qml_gui(workspace_root=str(WORKSPACE_ROOT)))
+        try:
+            probe_database_locks(WORKSPACE_ROOT / ".auto-pm" / "index.db")
+        except DatabaseLockConflictError:
+            sys.exit(EXIT_DB_LOCKED)
+
+        from auto_pm.ui.qml_main_window import run_qml_gui
+
+        # 启动桌面驾驶舱
+        exit_code = run_qml_gui(workspace_root=str(WORKSPACE_ROOT))
+        if exit_code != 0:
+            write_crash_log(crash_log_path, "QML_EXIT_NON_ZERO", f"驾驶舱异常退出，Exit Code={exit_code}")
+        sys.exit(exit_code)
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        write_crash_log(crash_log_path, "UNHANDLED_EXCEPTION", str(exc), exc_info=sys.exc_info())
+        traceback.print_exc()
+        sys.exit(EXIT_CRASH)
+    finally:
+        if lock is not None:
+            lock.release()
