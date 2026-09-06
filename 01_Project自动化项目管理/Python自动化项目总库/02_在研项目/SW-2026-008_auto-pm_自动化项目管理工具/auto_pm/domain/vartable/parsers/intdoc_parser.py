@@ -45,7 +45,7 @@ _TABLE_ROW_RE = re.compile(r"^\s*\|(?P<cols>[^|]+(?:\|[^|]+)+)\|\s*$")
 _TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
 
-class IntDocParser(BaseParser):  # type: ignore[misc]  # CHG-SCPT-2026-021: 稳定版 verbatim 回收，基类经命名空间 shim 解析为 Any
+class IntDocParser(BaseParser):
     """INT doc 接口文档解析器
 
     用法：

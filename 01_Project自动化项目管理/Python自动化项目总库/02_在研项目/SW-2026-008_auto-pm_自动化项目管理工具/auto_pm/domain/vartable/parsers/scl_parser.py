@@ -68,7 +68,7 @@ _FB_NAME_RE = re.compile(
 )
 
 
-class SclParser(BaseParser):  # type: ignore[misc]  # CHG-SCPT-2026-021: 稳定版 verbatim 回收，基类经命名空间 shim 解析为 Any
+class SclParser(BaseParser):
     """SCL 格式解析器
 
     用法：

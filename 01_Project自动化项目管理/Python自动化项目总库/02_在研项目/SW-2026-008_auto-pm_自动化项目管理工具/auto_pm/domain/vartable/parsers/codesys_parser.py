@@ -48,7 +48,7 @@ def _pick(row: dict[str, str], keys: tuple[str, ...]) -> str:
     return ""
 
 
-class CodesysParser(BaseParser):  # type: ignore[misc]  # CHG-SCPT-2026-021: 稳定版 verbatim 回收，基类经命名空间 shim 解析为 Any
+class CodesysParser(BaseParser):
     """Codesys 格式解析器
 
     用法：
