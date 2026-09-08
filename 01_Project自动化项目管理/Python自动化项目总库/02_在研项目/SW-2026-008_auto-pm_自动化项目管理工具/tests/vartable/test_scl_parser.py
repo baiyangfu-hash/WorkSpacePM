@@ -12,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.vartable.parsers.scl_parser import SclParser
 
 # 工作空间根目录（从 tests/vartable 推导：7 级父目录）

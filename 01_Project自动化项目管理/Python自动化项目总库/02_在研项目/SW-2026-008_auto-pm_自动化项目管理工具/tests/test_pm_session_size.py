@@ -14,7 +14,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.core.pm_session_service import (
     MAX_FILE_LINES,
     MAX_FILE_SIZE_KB,

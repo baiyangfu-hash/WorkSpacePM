@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260908-21B46741",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-189",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "auto_pm/application/core/pm_session_service.py",
+    "tests/core/test_pm_session_service.py",
+    "tests/test_pm_session_size.py",
+    "tests/change/test_ledger_reconciler.py",
+    "tests/plc/test_template_integrity.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-08T16:13:51.610326+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "只恢复 CHG-SCPT-2026-087 的 150KB/300行口径；不得通过删除有效记录或抬高阈值规避检查。",
+    "台账测试必须以新规范台账为主，同时保留旧台帐存量发现兼容性验证。",
+    "不得修改原 WBS、CHG-SCPT-2026-188 状态、release 槽位、active/previous 指针或其他路径。"
+  ],
+  "metadata": {}
+}

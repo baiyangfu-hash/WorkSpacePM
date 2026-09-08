@@ -170,7 +170,7 @@ def test_ai_context_bridge_extracts_active_hypothesis_from_pm_session(tmp_path) 
     assert res["success"] is True
     ctx_file = workspace / ".auto-pm" / "ai_context.json"
     ctx = json.loads(ctx_file.read_text(encoding="utf-8"))
-    
+
     prod_ctx = ctx["product_context"]
     assert "active_hypothesis" in prod_ctx
     assert prod_ctx["active_hypothesis"]["id"] == "HYP-DJ009-001"

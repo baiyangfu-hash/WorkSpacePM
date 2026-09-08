@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 
 

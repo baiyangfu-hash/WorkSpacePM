@@ -3,9 +3,9 @@
 from pathlib import Path
 
 import pytest
+from auto_pm.core.gates import StageGateEngine
 
 from auto_pm.contracts.gate_dtos import StageGateResultDTO
-from auto_pm.core.gates import StageGateEngine
 
 
 @pytest.fixture

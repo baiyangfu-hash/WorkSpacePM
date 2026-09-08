@@ -254,9 +254,8 @@ class TestCLIEntry:
 
     def test_cli_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         """CLI --help 正常工作"""
-        from click.testing import CliRunner
-
         from auto_pm.cli.__main__ import cli
+        from click.testing import CliRunner
         runner = CliRunner()
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0

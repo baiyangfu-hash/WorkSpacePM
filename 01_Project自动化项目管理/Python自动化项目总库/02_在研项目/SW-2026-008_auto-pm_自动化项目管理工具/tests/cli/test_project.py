@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
 
 
 def test_project_list_via_main(cli_runner: CliRunner, tmp_workspace: Path) -> None:

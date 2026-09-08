@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.spec.core.checker_base import (
     DocIndexValidityChecker,
     Severity,

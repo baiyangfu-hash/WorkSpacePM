@@ -17,6 +17,7 @@ from auto_pm.core.protocols import (
     SpecCenterServiceProtocol,
     SpecCheckServiceProtocol,
 )
+
 from auto_pm.ui.contracts.dto.spec_dto import (
     SpecCenterEntryDTO,
     SpecCenterOverviewDTO,

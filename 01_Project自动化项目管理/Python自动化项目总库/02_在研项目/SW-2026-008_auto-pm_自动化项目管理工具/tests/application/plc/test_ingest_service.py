@@ -1,11 +1,9 @@
 """Unit tests for PlcIngestService in auto_pm (SW-2026-008)."""
 
 import csv
-import os
 import tempfile
 from pathlib import Path
 
-import pytest
 from auto_pm.application.plc.ingest_service import PlcIngestService
 
 

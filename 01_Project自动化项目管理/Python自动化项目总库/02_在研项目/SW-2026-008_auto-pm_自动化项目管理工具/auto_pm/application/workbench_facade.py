@@ -2,17 +2,19 @@ from __future__ import annotations
 
 from typing import Any, TypeVar
 
-from auto_pm.application.workbench_use_cases import (
-    CommandOutcome,
-    QueryOutcome,
-    WorkbenchUseCases,
-)
 from auto_pm.core.protocols import (
     AssetSummaryServiceProtocol,
     DashboardServiceProtocol,
     ProjectServiceProtocol,
     TemplateServiceProtocol,
 )
+
+from auto_pm.application.workbench_use_cases import (
+    CommandOutcome,
+    QueryOutcome,
+    WorkbenchUseCases,
+)
+from auto_pm.contracts.gate_dtos import ProcessGroupStage
 from auto_pm.ui.contracts.dto.workbench_dto import (
     ClearCacheResultDTO,
     DashboardSnapshotDTO,
@@ -122,7 +124,7 @@ class WorkbenchFacade:
         return self._to_command_result(self._use_cases.edit_project(project_id, **kwargs))
     def delete_project(self, project_id: str) -> CommandResult[dict[str, Any] | None]:
         return self._to_command_result(self._use_cases.delete_project(project_id))
-    def save_workspace_root(self, workspace_root: str) -> CommandResult[dict[str, Any] | None]:
+    def save_workspace_root(self, workspace_root: str) -> CommandResult[dict[str, Any]]:
         return self._to_command_result(self._use_cases.save_workspace_root(workspace_root))
     def initialize_project_pm(self, project_id: str) -> CommandResult[dict[str, Any]]:
         return self._to_command_result(self._use_cases.initialize_project_pm(project_id))
@@ -135,8 +137,8 @@ class WorkbenchFacade:
     def evaluate_stage_gate(
         self,
         project_id: str,
-        current_stage: str = "initiating",
-        target_stage: str = "planning",
+        current_stage: ProcessGroupStage = "initiating",
+        target_stage: ProcessGroupStage = "planning",
     ) -> CommandResult[dict[str, Any] | None]:
         return self._to_command_result(
             self._use_cases.evaluate_stage_gate(project_id, current_stage, target_stage)

@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from auto_pm.core.project_service import ProjectService
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.sync import SyncService

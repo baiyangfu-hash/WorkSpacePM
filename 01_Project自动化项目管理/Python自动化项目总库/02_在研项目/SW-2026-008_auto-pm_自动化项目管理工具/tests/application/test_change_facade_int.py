@@ -12,14 +12,14 @@ from __future__ import annotations
 import shutil
 
 import pytest
-
-from auto_pm.application.change_facade import ChangeFacade
 from auto_pm.change.change_service import ChangeService
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
 from auto_pm.models import ApprovalRecord
 from auto_pm.models.change import ChangeSummary, ImpactAnalysis
 from auto_pm.models.project import ProjectRecord
+
+from auto_pm.application.change_facade import ChangeFacade
 
 
 @pytest.fixture

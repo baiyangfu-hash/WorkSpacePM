@@ -14,6 +14,8 @@ from auto_pm.core.protocols import (
     ProjectServiceProtocol,
     TemplateServiceProtocol,
 )
+
+from auto_pm.contracts.gate_dtos import ProcessGroupStage
 from auto_pm.domain.project.state_machine import build_change_state_machine
 from auto_pm.ui.contracts.dto.workbench_dto import (
     ClearCacheResultDTO,
@@ -554,8 +556,8 @@ class WorkbenchUseCases:
     def evaluate_stage_gate(
         self,
         project_id: str,
-        current_stage: str = "initiating",
-        target_stage: str = "planning",
+        current_stage: ProcessGroupStage = "initiating",
+        target_stage: ProcessGroupStage = "planning",
     ) -> CommandOutcome[dict[str, Any] | None]:
         try:
             from auto_pm.core.gates import StageGateEngine
@@ -566,8 +568,8 @@ class WorkbenchUseCases:
             engine = StageGateEngine(workspace_root=self.project_service.workspace_root)
             gate_result = engine.evaluate_stage_transition(
                 project_path=project.path,
-                current_stage=current_stage,  # type: ignore[arg-type]
-                target_stage=target_stage,  # type: ignore[arg-type]
+                current_stage=current_stage,
+                target_stage=target_stage,
             )
             return CommandOutcome(
                 True,

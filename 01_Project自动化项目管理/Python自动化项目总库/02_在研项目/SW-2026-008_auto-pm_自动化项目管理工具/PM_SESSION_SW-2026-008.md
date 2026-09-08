@@ -22,7 +22,7 @@
 
 ## 2. Current Focus（当前焦点）
 
-- current_focus: **NG-WP-15 真实切流已执行，active=1.2.3-f950525、previous=null；NG-WP-17 已可逆归档四个历史规划文件。CHG-SCPT-2026-184、CHG-DOCU-2026-005、CHG-SCPT-2026-188、CHG-SCPT-2026-189 与 CHG-SCPT-2026-190 均待验收；CHG-188 的 W0 依赖闭包已完成母库隔离验证，CHG-189 Batch A 与 CHG-190 Batch B 已完成定向门禁；全量 pytest 已恢复为 1792 passed/14 skipped，但仍输出范围外 delivery_bridge.py 的 Windows COM 0x80040155 原生异常栈，该风险另立事实包，不扩入 CHG-190；stable flat 源归档须先解除 setup_env.bat 依赖。**
+- current_focus: **NG-WP-15 真实切流已执行，active=1.2.3-f950525、previous=null；NG-WP-17 已可逆归档四个历史规划文件。CHG-SCPT-2026-188/189/190/191 已完成用户验收并 closed；CHG-SCPT-2026-192 已登记并 closed，用于修正 CHG 关闭门禁与现行标题格式的兼容缺陷。最新全量 pytest 为 1794 passed/14 skipped，但仍输出范围外 delivery_bridge.py 的 Windows COM 0x80040155 原生异常栈，该风险另立事实包；全仓 Mypy 42 条既有类型债务只读登记，不扩入回归批次；原 WBS 已解冻，NG-WP-24～48 恢复逐包报批，stable flat 源归档仍须先解除 setup_env.bat 依赖。**
 - risks_dependencies:
   - Ruff 静态代码检查已实现 100% Clean Exit (0 告警)
   - IndustrialErrorMapper 统一异常转译上线并补充 10 项单测
@@ -111,15 +111,19 @@
   - 2026-09-07 [已闭环] CHG-SCPT-2026-187 A3-3 Release 1.2.4-6699a5b 重切与全链台账改名：完成活体项目（DJ-2026-005/008/009、SW-2026-009）与 041 模板、jinja 模板全链改名为 `01_版本变更台账.md`；spec_registry.json 与 00_INDEX 完成规范索引更新；构建不可变 release `1.2.4-6699a5b` 槽位，携带 plc check Exit Code 退出码修复进入生产；DeploymentContainer 验证 465/465 文件 exact-tree 全绿，双指针原子切流（previous=1.2.3-f950525, active=1.2.4-6699a5b）；SW 与 SYS 生产对账全部 0 缺失 0 孤儿 0 差异。
   - 2026-09-07 [已闭环] CHG-DOCU-2026-006 文档体系治理第二批：更新 7 项活文档（INT/DSN/009_CLI/SUM/PM/TEST_PLAN/RELEASE_NOTES）对齐 1.2.4 基线；可逆归档旧路线图、发布说明、学习资料、M7 试用与 spec；DEV-TMP-001 产物清理；.gitignore 豁免交付物 .md；doc check --strict 全绿，ledger reconcile 0 差异闭环。
   - 2026-09-07 [已闭环] CHG-DOCU-2026-007 《新版4周上手指南》重构专项：全面重塑工控实战教程为 V2.0.0，在学习资料/活跃区生成 19 篇 Markdown（README 导航 + W1~W4 18 篇教程），涵盖双槽部署、Cockpit OS 编排、多 Agent 协作与 40 组 CLI 实战，doc check --strict 与台账对账均 Exit 0。
-  - 2026-09-08 [已执行待验收] CHG-SCPT-2026-189 回归缺陷修正 Batch A：DecisionPackage `DEC-20260908-21B46741` 绑定 5 个精确路径，handoff `AI-20260908-161404-DAD82120` 已 completed/consumed；REG-WP-02～04 定向测试 72 passed，W0 原 45 项 45 passed，Ruff/Mypy/CLI/台账/实质内容门禁均 Exit 0；未修改原 WBS、CHG-188、release 或指针，full regression 遗留 2 failed/54 QML errors 继续由未批准批次承接。
-  - 2026-09-08 [已执行待验收] CHG-SCPT-2026-190 回归缺陷修正 Batch B：DecisionPackage `DEC-20260908-6446DB06` 绑定 10 个精确路径，handoff `AI-20260908-163553-E64722EE` 已 completed/consumed；REG-WP-05～08 批次定向 84 passed，Batch B+W0 为 129 passed，全量 pytest 为 1792 passed/14 skipped、Exit 0，Ruff/Mypy/git diff --check/ledger-check 均 Exit 0；未修改原 WBS、CHG-188、release 或指针。全量测试另输出越界 `tests/qml/test_delivery_bridge.py` 的 Windows COM `0x80040155` 原生异常栈，未修改，待独立事实包。
+  - 2026-09-08 [已验收关闭] CHG-SCPT-2026-189 回归缺陷修正 Batch A：DecisionPackage `DEC-20260908-21B46741` 绑定 5 个精确路径，handoff `AI-20260908-161404-DAD82120` 已 completed/consumed；REG-WP-02～04 定向测试 72 passed，W0 原 45 项 45 passed，Ruff/Mypy/CLI/台账/实质内容门禁均 Exit 0；用户验收后 CHG-189 closed，未修改 release 或指针。
+  - 2026-09-08 [已验收关闭] CHG-SCPT-2026-190 回归缺陷修正 Batch B：DecisionPackage `DEC-20260908-6446DB06` 绑定 10 个精确路径，handoff `AI-20260908-163553-E64722EE` 已 completed/consumed；REG-WP-05～08 批次定向 84 passed，Batch B+W0 为 129 passed，全量 pytest 为 1792 passed/14 skipped、Exit 0，Ruff/Mypy/git diff --check/ledger-check 均 Exit 0；用户验收后 CHG-190 closed。全量测试另输出越界 `tests/qml/test_delivery_bridge.py` 的 Windows COM `0x80040155` 原生异常栈，未修改，待独立事实包。
+  - 2026-09-08 [已验收关闭] CHG-SCPT-2026-191 回归缺陷修正 Batch C：DecisionPackage `DEC-20260908-09EB0220` 绑定 Ruff 点名活动文件及 `.ruff.toml`，handoff `AI-20260908-REG-WP09-13` 已 consumed；Ruff Exit 0、批准源码清单 Mypy 14 files Exit 0、W0 关联定向 72 passed、全量 pytest 1792 passed/14 skipped、CLI help/ledger-check/git diff --check 均 Exit 0；用户验收后 CHG-191 closed。范围外 COM 原生异常栈与全仓 Mypy 42 条既有类型债务继续单独登记。
+  - 2026-09-08 [已验收关闭] CHG-SCPT-2026-192 Retrofit：修正 CHG 关闭门禁对二级标题及嵌套子章节的误判；`tests/change/test_change_service.py` 39 passed，CHG-192 closed。
 
 ## 6. Execution Log Summary
 
 - 2026-09-04：[已验证] 实施并闭环 CHG-SCPT-2026-171~177（Cockpit OS Phase 0~3 WBS 契约/事务沙箱/编排执行/生命周期归档引擎，单测与门禁全绿）。
 - 2026-08-27：[已验证] 实施并闭环 CHG-SCPT-2026-167，新增 SHC-017 SkillContractDriftChecker 契约对账器，tests/spec 回归 174 passed。
-- 2026-09-08：[已执行待验收] CHG-SCPT-2026-189 Batch A：72 项定向回归通过，W0 原 45 项保持通过；目标文件精确 diff、Ruff、Mypy、CLI 冒烟、ledger reconcile 与 substance check 均通过；CHG 保持 pending_acceptance，未提交、未发布、未切流。
-- 2026-09-08：[已执行待验收] CHG-SCPT-2026-190 Batch B：批准域+W0 129 passed，全量 pytest 1792 passed/14 skipped、Exit 0；Ruff/Mypy/git diff --check/ledger-check 均通过；handoff 已 consumed，CHG 保持 pending_acceptance，未提交、未发布、未切流。
+- 2026-09-08：[已验收关闭] CHG-SCPT-2026-189 Batch A：72 项定向回归通过，W0 原 45 项保持通过；目标文件精确 diff、Ruff、Mypy、CLI 冒烟、ledger reconcile 与 substance check 均通过；用户验收后 CHG closed。
+- 2026-09-08：[已验收关闭] CHG-SCPT-2026-190 Batch B：批准域+W0 129 passed，全量 pytest 1792 passed/14 skipped、Exit 0；Ruff/Mypy/git diff --check/ledger-check 均通过；handoff 已 consumed；用户验收后 CHG closed。
+- 2026-09-08：[已验收关闭] CHG-SCPT-2026-191 Batch C：Ruff Exit 0、批准源码清单 Mypy 14 files Exit 0、W0 关联定向 72 passed、全量 pytest 1792 passed/14 skipped、CLI help 5 项、ledger-check 0 差异、git diff --check 均通过；handoff 已 consumed；用户验收后 CHG closed；COM 与全仓 Mypy 债务另登记。
+- 2026-09-08：[已验收关闭] CHG-SCPT-2026-192 Retrofit：关闭门禁兼容修复，39 项 change service 回归通过，CHG closed。
 
 ## 8. Handoff Notes
 
@@ -138,14 +142,18 @@
   - current_state: [已闭环] SW-2026-008 文档体系治理第二批全部验收闭环。7 项活文档对齐 1.2.4-6699a5b 基线；历史资料可逆归档；DEV-TMP-001 清理；doc check --strict 100% 全绿，台账 0 差异。
 - 2026-09-07 | from=Antigravity | mode=CHG-DOCU-2026-007 闭环
   - current_state: [已闭环] 《新版4周上手指南》重构专项验收闭环。19 篇实战指南就位活跃区，doc check --strict 100% 全绿，台账 0 差异。
-- 2026-09-08 | from=pm-workflow | mode=CHG-SCPT-2026-189 Batch A | request_id=AI-20260908-161404-DAD82120 | status=consumed | decision=DEC-20260908-21B46741 | change=CHG-SCPT-2026-189-pending_acceptance
-  - current_state: [已执行待验收] REG-WP-02～04 已按批准路径完成；定向门禁全绿，full regression 遗留问题未越界修复，原 WBS/CHG-188 继续冻结。
-- 2026-09-08 | from=pm-workflow | mode=CHG-SCPT-2026-190 Batch B | request_id=AI-20260908-163553-E64722EE | status=consumed | decision=DEC-20260908-6446DB06 | change=CHG-SCPT-2026-190-pending_acceptance
-  - current_state: [已执行待验收] REG-WP-05～08 已按 10 个批准路径完成；定向与全量门禁通过；越界 delivery_bridge COM 风险已登记为后续独立事实包，原 WBS/CHG-188/Wave B 继续冻结。
+- 2026-09-08 | from=pm-workflow | mode=CHG-SCPT-2026-189 Batch A | request_id=AI-20260908-161404-DAD82120 | status=consumed | decision=DEC-20260908-21B46741 | change=CHG-SCPT-2026-189-closed
+  - current_state: [已验收关闭] REG-WP-02～04 已按批准路径完成；用户验收后 CHG-189 closed，原 WBS 已解冻。
+- 2026-09-08 | from=pm-workflow | mode=CHG-SCPT-2026-190 Batch B | request_id=AI-20260908-163553-E64722EE | status=consumed | decision=DEC-20260908-6446DB06 | change=CHG-SCPT-2026-190-closed
+  - current_state: [已验收关闭] REG-WP-05～08 已按 10 个批准路径完成；用户验收后 CHG-190 closed；越界 delivery_bridge COM 风险保持事实登记。
+- 2026-09-08 | from=pm-workflow | mode=CHG-SCPT-2026-191 Batch C | request_id=AI-20260908-REG-WP09-13 | status=consumed | decision=DEC-20260908-09EB0220 | change=CHG-SCPT-2026-191-closed
+  - current_state: [已验收关闭] REG-WP-09～13 已按批准范围完成；用户验收后 CHG-191 closed；越界 delivery_bridge COM 与全仓 Mypy 类型债务保持事实登记。
 ## 9. Next Actions
-- [用户指令冻结] Cockpit OS 原 WBS/Wave A 验收关闭/Wave B 全部暂停 | trigger=全量回归 `1728 passed, 7 failed, 14 skipped, 54 errors`；W0 窄域仍为 45 passed；CHG-SCPT-2026-188 保持 `accepting`；next=`02_规划/011_回归缺陷根因与修正WBS_PM.md` 单独报批，修正门禁全绿并经用户明确解冻前不得恢复。
-- [待用户验收] CHG-SCPT-2026-189 回归缺陷修正 Batch A | result=REG-WP-02～04 定向 72 passed、W0 45 passed、Ruff/Mypy/CLI/ledger/substance 全部 Exit 0；handoff 已 consumed；gate=CHG 保持 pending_acceptance，REG-WP-05～13 未批准，原 WBS/CHG-188/Wave B 继续冻结。
-- [待用户验收] CHG-SCPT-2026-190 回归缺陷修正 Batch B | result=REG-WP-05～08 定向 84 passed、Batch B+W0 129 passed、全量 1792 passed/14 skipped；Ruff/Mypy/git diff --check/ledger-check 全部 Exit 0；handoff 已 consumed；gate=CHG 保持 pending_acceptance，未提交、未发布、未切流。
+- [已解冻] Cockpit OS 原 WBS/Wave A/Wave B | 用户于 2026-09-08 明确授权最终验收并解冻；CHG-SCPT-2026-188～191 已 closed；后续按 `02_规划/010_Cockpit_OS_后续原子迭代WBS_PM.md` 逐包报批。
+- [已验收关闭] CHG-SCPT-2026-189 回归缺陷修正 Batch A | result=REG-WP-02～04 定向 72 passed、W0 45 passed、Ruff/Mypy/CLI/ledger/substance 全部 Exit 0；handoff 已 consumed；CHG closed。
+- [已验收关闭] CHG-SCPT-2026-190 回归缺陷修正 Batch B | result=REG-WP-05～08 定向 84 passed、Batch B+W0 129 passed、全量 1792 passed/14 skipped；Ruff/Mypy/git diff --check/ledger-check 全部 Exit 0；handoff 已 consumed；CHG closed。
+- [已验收关闭] CHG-SCPT-2026-191 回归缺陷修正 Batch C | result=REG-WP-09～13：Ruff Exit 0、批准源码清单 Mypy 14 files Exit 0、W0 关联定向 72 passed、全量 1792 passed/14 skipped、CLI help 5 项、ledger-check 0 差异；handoff 已 consumed；CHG closed。
+- [已验收关闭] CHG-SCPT-2026-192 Retrofit | result=关闭门禁章节格式兼容修复，39 项 change service 测试通过；CHG closed。
 - [待独立事实包] 越界 Windows COM 风险 | source=`tests/qml/test_delivery_bridge.py` / `auto_pm/ui/qml/bridges/delivery_bridge.py:331`；observed=`0x80040155` 原生异常栈但 pytest Exit 0；scope=不属于 CHG-SCPT-2026-190，不得在本批修复。
 - [待验收] CHG-DOCU-2026-005 NG-WP-17 历史规划归档 | result=4/4 SHA-256 匹配、git diff --check Exit 0、handoff 已 consumed；gate=CHG 保持 pending_acceptance，stable flat auto_pm 因 setup_env.bat 依赖延期，未移动研发母体源码、templates 或 release。
 - [待验收] CHG-SCPT-2026-185 NG-WP-17 入口脱钩 | result=setup_env 不再绑定 stable flat source、verify_release 465/465 与 resolve-only/--help Exit 0；blocker=完整 startup guard 仍有 1 项 Windows cmd.exe timeout（Exit 1）；gate=stable flat archive 延期。

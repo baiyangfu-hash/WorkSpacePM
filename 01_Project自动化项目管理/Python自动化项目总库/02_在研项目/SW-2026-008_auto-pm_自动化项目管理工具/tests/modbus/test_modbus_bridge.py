@@ -2,6 +2,7 @@
 
 import pytest
 from PySide6.QtCore import QCoreApplication
+
 from auto_pm.domain.modbus.modbus_bridge import ModbusBridge
 
 
@@ -49,11 +50,11 @@ def test_modbus_bridge_read_and_write(qapp):
     bridge.readRegisters(fc="03", start=0, count=4, endian="CDAB", preset="siemens_fan")
     assert len(received_data) == 1
     assert len(received_data[0]) == 4
-    assert any(l[0] == "TX" for l in logs)
-    assert any(l[0] == "RX" for l in logs)
+    assert any(log_entry[0] == "TX" for log_entry in logs)
+    assert any(log_entry[0] == "RX" for log_entry in logs)
 
     bridge.writeRegister(write_fc="06", addr=0, value_str="1500")
-    assert any("40001" in l[1] or "06" in l[1] for l in logs)
+    assert any("40001" in log_entry[1] or "06" in log_entry[1] for log_entry in logs)
 
     bridge.disconnectDevice()
 

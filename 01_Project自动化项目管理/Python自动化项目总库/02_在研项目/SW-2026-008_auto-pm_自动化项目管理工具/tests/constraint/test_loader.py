@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-
 from auto_pm.constraint.loader import ConstraintLoader, ConstraintLoadError
 
 if TYPE_CHECKING:

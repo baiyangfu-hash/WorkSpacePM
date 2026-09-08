@@ -9,7 +9,6 @@ import json
 from pathlib import Path
 
 import yaml
-
 from auto_pm.core.project_scanner import ProjectScanner
 
 

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from auto_pm.plc.generator import ProcessMatrix, ProcessMatrixParser, ProcessMatrixStep, SclGenerator
+from auto_pm.plc.generator import (
+    ProcessMatrix,
+    ProcessMatrixParser,
+    ProcessMatrixStep,
+    SclGenerator,
+)
 
 
 def test_process_matrix_parser_extracts_metadata() -> None:

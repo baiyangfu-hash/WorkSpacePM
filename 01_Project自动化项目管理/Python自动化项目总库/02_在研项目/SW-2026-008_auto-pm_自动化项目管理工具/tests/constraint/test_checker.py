@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.constraint.checker import ConstraintChecker
 from auto_pm.constraint.guard import BOM
 

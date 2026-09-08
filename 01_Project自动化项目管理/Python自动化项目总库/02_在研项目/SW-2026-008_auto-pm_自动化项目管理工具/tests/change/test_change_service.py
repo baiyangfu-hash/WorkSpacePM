@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import (
     SpecViolationError,
@@ -459,6 +458,32 @@ class TestChapterCompleteness:
         content = self._build_full_chapters_content()
         missing = svc._check_chapter_completeness(content)
         assert missing == [], f"应无缺失章节，实际缺失: {missing}"
+
+    def test_check_chapter_completeness_generated_h2_format(
+        self, tmp_path: Path
+    ) -> None:
+        """生成器使用的二级章节标题也应通过关闭前完整性检查"""
+        svc = self._make_service(tmp_path)
+        content = self._build_full_chapters_content().replace("### ", "## ")
+        missing = svc._check_chapter_completeness(content)
+        assert missing == [], f"二级标题格式不应被误判为缺失: {missing}"
+
+    def test_check_chapter_completeness_nested_h2_sections(
+        self, tmp_path: Path
+    ) -> None:
+        """带二级主标题和三级子标题的生成式章节应保留正文"""
+        svc = self._make_service(tmp_path)
+        content = self._build_full_chapters_content()
+        content = content.replace(
+            "### §5 变更前后\n变更前内容描述\n变更后内容描述",
+            "## 5. 变更内容\n\n### 5.1 变更前\n变更前内容描述\n\n### 5.2 变更后\n变更后内容描述",
+        )
+        content = content.replace(
+            "### §12 附录\n附录内容",
+            "## 12. 附录\n\n### 12.1 填写指南\n附录内容",
+        )
+        missing = svc._check_chapter_completeness(content)
+        assert missing == [], f"嵌套子标题不应导致章节被误判为空: {missing}"
 
     def test_check_chapter_completeness_missing(self, tmp_path: Path) -> None:
         """缺失 §11/§12 时返回对应章节名"""

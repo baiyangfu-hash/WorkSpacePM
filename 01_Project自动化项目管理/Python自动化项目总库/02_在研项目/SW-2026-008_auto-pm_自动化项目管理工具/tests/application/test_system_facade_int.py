@@ -23,10 +23,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
-from auto_pm.application.system_facade import SystemFacade
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.template_service import TemplateService
+
+from auto_pm.application.system_facade import SystemFacade
 from auto_pm.ui.contracts.dto.system_dto import (
     ApplyTemplateResultDTO,
     PmSessionCheckResultDTO,

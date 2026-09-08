@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.vartable.parsers.program_blocks_parser import ProgramBlocksParser
 
 # 真实 DJ-2026-005 program_blocks.yml 路径（只读，不修改）

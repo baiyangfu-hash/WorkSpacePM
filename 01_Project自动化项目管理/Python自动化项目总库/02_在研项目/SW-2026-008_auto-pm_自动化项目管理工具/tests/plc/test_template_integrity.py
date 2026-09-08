@@ -6,12 +6,10 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-import pytest
-
 from auto_pm.core.template_service import TemplateService
+
 from auto_pm.domain.plc.checker import PlcChecker
 
 
@@ -39,10 +37,16 @@ def test_plc_standard_template_render_and_check(tmp_path: Path) -> None:
 
     # 1. 断言关键基础设施文件已渲染
     assert (target_proj / ".plc.json").exists(), "根目录缺少 .plc.json"
-    assert (
-        (target_proj / "11_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台帐.md").exists()
-        or (target_proj / "04_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台帐.md").exists()
-    ), "缺少变更台帐"
+    ledger_paths = (
+        target_proj / "11_监控" / "01_变更管理" / "02_变更记录",
+        target_proj / "04_监控" / "01_变更管理" / "02_变更记录",
+    )
+    assert any((path / "01_版本变更台账.md").exists() for path in ledger_paths), (
+        "缺少变更台账"
+    )
+    assert not any((path / "01_版本变更台帐.md").exists() for path in ledger_paths), (
+        "新模板不得生成旧字形台帐"
+    )
     assert (target_proj / "04_现场调试" / "现场调试计划.md").exists(), "现场调试计划未实质化"
     assert (target_proj / "06_文档与交付" / "验收交付清单" / "验收交付清单.md").exists(), "验收交付清单未实质化"
     assert (target_proj / "03_HMI设计" / "HMI详细设计说明书.md").exists(), "HMI详细设计说明书未实质化"

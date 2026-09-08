@@ -1,11 +1,8 @@
-import pytest
-from pathlib import Path
-from auto_pm.domain.doc.models import CliCommandDTO, BridgeMethodDTO, GateRuleDTO
-from auto_pm.infrastructure.doc.extractors.cli_ast_extractor import CliAstExtractor
 from auto_pm.infrastructure.doc.extractors.bridge_ast_extractor import BridgeAstExtractor
+from auto_pm.infrastructure.doc.extractors.cli_ast_extractor import CliAstExtractor
 from auto_pm.infrastructure.doc.extractors.gate_ast_extractor import GateAstExtractor
 from auto_pm.infrastructure.doc.injector.marker_injector import MarkdownMarkerInjector
-from auto_pm.domain.doc.services import DocSyncService, DocCheckService
+
 
 def test_cli_ast_extractor(tmp_path):
     cli_file = tmp_path / "test_cmd.py"

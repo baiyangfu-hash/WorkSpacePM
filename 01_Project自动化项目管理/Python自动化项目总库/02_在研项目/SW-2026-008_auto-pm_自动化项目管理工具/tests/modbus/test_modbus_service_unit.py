@@ -1,12 +1,12 @@
 """Unit tests for ModbusService and Modbus helper algorithms (CHG-SCPT-2026-162)."""
 
 import pytest
+
 from auto_pm.domain.modbus.modbus_service import (
     ModbusService,
-    RegisterEntry,
-    _decode_float_cdab,
     _build_hex_frame,
     _build_write_hex_frame,
+    _decode_float_cdab,
     _sim_val,
 )
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
-from auto_pm.application.change_facade import ChangeFacade
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.ledger_reconciler import ReconcileDiff
+
+from auto_pm.application.change_facade import ChangeFacade
 from auto_pm.ui.contracts.commands.change_commands import (
     CreateChangeCommand,
     TransitionChangeCommand,

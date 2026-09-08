@@ -5,7 +5,6 @@ from io import StringIO
 from unittest.mock import Mock
 
 import pytest
-
 from auto_pm.logging.logging import setup_logger
 
 

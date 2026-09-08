@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from auto_pm.change.ledger_reconciler import LedgerReconciler
+
 from auto_pm.contracts.gate_dtos import (
     GateCheckItemDTO,
     ProcessGroupStage,

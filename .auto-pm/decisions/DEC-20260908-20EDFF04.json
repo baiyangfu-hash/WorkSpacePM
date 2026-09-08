@@ -1,0 +1,36 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260908-20EDFF04",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-188",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "auto_pm/application/core/ai_handoff_service.py",
+    "auto_pm/application/core/pm_saga_service.py",
+    "auto_pm/contracts/decision_package.py",
+    "auto_pm/domain/change/decision_service.py",
+    "auto_pm/domain/change/substance_injector.py",
+    "auto_pm/ui/cli/handoff.py",
+    "auto_pm/ui/cli/decision.py",
+    "auto_pm/ui/cli/__main__.py",
+    "tests/contracts/test_decision_package.py",
+    "tests/core/test_decision_handoff_binding.py",
+    "tests/core/test_ai_handoff_service.py",
+    "tests/core/test_pm_closure_saga.py",
+    "tests/cli/test_handoff.py",
+    "tests/change/test_substance_control.py",
+    "auto_pm/__init__.py",
+    "auto_pm/ui/cli/dogfood.py",
+    "auto_pm/ui/cli/git_hook.py",
+    "auto_pm/ui/cli/pm.py",
+    "auto_pm/domain/change/substance_checker.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-08T14:35:35.440348+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "execution handoff 必须绑定本次有效 decision_id；缺失或不匹配时 fail-closed。",
+    "仅允许 19 个批准路径；禁止候选容器、发布物、指针、模板、Obsidian、其他项目、提交、切流与清理。"
+  ],
+  "metadata": {}
+}

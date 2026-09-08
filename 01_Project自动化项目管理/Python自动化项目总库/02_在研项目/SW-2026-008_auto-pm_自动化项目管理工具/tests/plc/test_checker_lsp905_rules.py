@@ -1,6 +1,5 @@
 """Unit tests for PLC SCL LSP-905 rule checker (CHG-SCPT-2026-162)."""
 
-import pytest
 from auto_pm.domain.plc.scl_linter import SclLinter
 
 

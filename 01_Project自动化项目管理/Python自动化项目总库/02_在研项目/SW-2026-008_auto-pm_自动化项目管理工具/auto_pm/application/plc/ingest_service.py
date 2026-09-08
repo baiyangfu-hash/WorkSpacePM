@@ -324,7 +324,7 @@ project_id: "{project_id}"
 
 # PLC变量定义文档 (VAR) - {project_id} {project_name}
 
-> **摄取来源**：AutoShop 源工程逆向全量摄取  
+> **摄取来源**：AutoShop 源工程逆向全量摄取
 > **数据总规模**：累计 `{len(variables)}` 个变量点位
 
 ---

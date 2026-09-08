@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from auto_pm.core.pm_session_service import (
     DEPRECATED_SECTIONS,
     MAX_FILE_LINES,
@@ -448,8 +447,8 @@ class TestConstants:
     def test_thresholds_reasonable(self) -> None:
         assert MAX_FILE_SIZE_KB > 0
         assert MAX_FILE_LINES > 0
-        assert MAX_FILE_SIZE_KB >= 100  # 至少 100KB
-        assert MAX_FILE_LINES >= 200  # 至少 200 行
+        assert MAX_FILE_SIZE_KB == 150  # CHG-087 权威上限
+        assert MAX_FILE_LINES == 300  # CHG-087 权威上限
 
 
 # ---------- archive_section_8 测试（CHG-109）----------

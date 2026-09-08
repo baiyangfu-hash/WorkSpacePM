@@ -5,10 +5,10 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-
-from auto_pm.application.workbench_facade import WorkbenchFacade
 from auto_pm.core.project_service import ProjectService
 from auto_pm.db.connection import DatabaseManager
+
+from auto_pm.application.workbench_facade import WorkbenchFacade
 
 
 @pytest.fixture

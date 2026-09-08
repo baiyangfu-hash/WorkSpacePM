@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.report_service import ReportService

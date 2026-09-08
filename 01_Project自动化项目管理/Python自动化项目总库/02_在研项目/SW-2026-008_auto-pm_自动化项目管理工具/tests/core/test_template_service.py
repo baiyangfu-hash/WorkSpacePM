@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.core.template_service import TemplateService
 
 

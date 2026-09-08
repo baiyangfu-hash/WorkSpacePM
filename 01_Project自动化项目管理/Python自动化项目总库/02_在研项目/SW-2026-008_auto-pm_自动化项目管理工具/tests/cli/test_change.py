@@ -29,10 +29,9 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,8 @@
 ﻿"""GovernanceService 单元测试 (CHG-SCPT-2026-155)"""
 
 from pathlib import Path
-from auto_pm.core.governance_service import GovernanceService, ROOT_WHITELIST
+
+from auto_pm.core.governance_service import GovernanceService
 
 
 def test_governance_service_init(tmp_path: Path) -> None:

@@ -1,6 +1,5 @@
 """Unit tests for IndustrialErrorMapper."""
 
-import socket
 import struct
 
 from auto_pm.infrastructure.error_handling.error_mapper import IndustrialErrorMapper
@@ -19,7 +18,7 @@ def test_format_timeout():
     assert "【通信超时】" in msg
     assert "物理网线" in msg
 
-    sock_err = socket.timeout("timed out")
+    sock_err = TimeoutError("timed out")
     msg_sock = IndustrialErrorMapper.format_exception(sock_err)
     assert "【通信超时】" in msg_sock
 

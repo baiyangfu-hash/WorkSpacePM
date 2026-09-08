@@ -1,9 +1,7 @@
 """Matrix unit tests for PlcChecker (LSP-907 / PM-042 / CHG-SCPT-2026-163)."""
 
 import json
-import os
-import pytest
-from pathlib import Path
+
 from auto_pm.domain.plc.checker import PlcChecker
 
 

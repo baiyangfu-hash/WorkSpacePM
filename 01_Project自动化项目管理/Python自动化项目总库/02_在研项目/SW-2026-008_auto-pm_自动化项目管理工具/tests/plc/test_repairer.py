@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from auto_pm.plc.repairer import PlcRepairer
 
 # ── Fixtures ──────────────────────────────────────────

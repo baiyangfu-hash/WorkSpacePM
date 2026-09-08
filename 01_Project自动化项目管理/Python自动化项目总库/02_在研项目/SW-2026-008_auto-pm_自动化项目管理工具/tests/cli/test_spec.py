@@ -13,10 +13,10 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
 from auto_pm.cli.spec import spec_group
+from click.testing import CliRunner
+
 from auto_pm import __version__
 
 

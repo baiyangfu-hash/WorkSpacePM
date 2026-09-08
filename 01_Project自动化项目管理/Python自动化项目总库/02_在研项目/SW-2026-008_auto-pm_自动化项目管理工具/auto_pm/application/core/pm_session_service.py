@@ -28,9 +28,9 @@ from auto_pm.core.paths import PG_CLOSING_DIR
 # 章节标题正则：## N. Title（N 为数字）
 SECTION_HEADER_PATTERN = re.compile(r"^##\s+(\d+)\.\s+(.+)$")
 
-# 健康检查阈值（CHG-087 Stage 1 基线：170 行 / 62KB）
+# 健康检查阈值（CHG-087 权威基线：150KB / 300 行）
 MAX_FILE_SIZE_KB = 150  # 主文件最大 150KB
-MAX_FILE_LINES = 150  # 主文件最大 150 行
+MAX_FILE_LINES = 300  # 主文件最大 300 行
 
 # 必须存在的章节（Stage 1 后基线，§7 已归档删除）
 REQUIRED_SECTIONS = {"0", "1", "2", "3", "4", "5", "6", "8", "9"}

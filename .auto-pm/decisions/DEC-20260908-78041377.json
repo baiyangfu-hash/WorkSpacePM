@@ -1,0 +1,31 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260908-78041377",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-188",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/ai_handoff_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_saga_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/decision_package.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/decision_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/substance_injector.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/handoff.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/decision.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/__main__.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_decision_package.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_decision_handoff_binding.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_ai_handoff_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_closure_saga.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_handoff.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/change/test_substance_control.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-08T14:24:17.664191+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅允许在隔离副本回收候选实现到研发母体；execution handoff 必须绑定有效 decision_id；无决策包、跨项目、变更单不匹配或超 approved_files 必须 fail-closed。",
+    "禁止修改 00_Infrastructure/auto_pm 候选容器、releases、active/previous 指针、模板、Obsidian、其他项目；禁止提交、发布、切流、清理或扩展白名单。"
+  ],
+  "metadata": {}
+}

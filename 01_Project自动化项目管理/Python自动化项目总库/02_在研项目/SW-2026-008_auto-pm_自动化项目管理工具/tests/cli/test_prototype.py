@@ -1,7 +1,8 @@
-import os
 import tempfile
-from click.testing import CliRunner
+
 from auto_pm.cli.__main__ import cli
+from click.testing import CliRunner
+
 
 def test_cli_prototype_flow():
     runner = CliRunner()

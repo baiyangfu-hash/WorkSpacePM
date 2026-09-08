@@ -21,6 +21,7 @@ from auto_pm.core.protocols import (
     ReportServiceProtocol,
 )
 from auto_pm.models import ProjectInfo
+
 from auto_pm.ui.contracts.dto.delivery_dto import (
     AssetSummaryDTO,
     ChangeReportDTO,

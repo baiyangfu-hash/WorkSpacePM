@@ -1,11 +1,11 @@
 # SW-2026-008 回归缺陷根因与修正 WBS（PM）
 
-> 文档状态：BATCH_B_EXECUTED / WAITING_ACCEPTANCE
+> 文档状态：ACCEPTED / CLOSED / READY_FOR_NEXT_WBS
 > 编制日期：2026-09-08
-> 当前 Git HEAD：`0119fda2`
+> 收尾提交前 Git HEAD：`a5d3166a`（Batch C 与本次 PM 收尾待提交）
 > 触发回归：pytest `1728 passed, 7 failed, 14 skipped, 54 errors`
-> 冻结对象：原 Cockpit OS WBS、`010_Cockpit_OS_后续原子迭代WBS_PM.md`、CHG-SCPT-2026-188 最终验收关闭及 NG-WP-24～48
-> 权限边界：Batch A 已执行待验收；Batch B（REG-WP-05～08）已由用户批准并绑定 CHG-SCPT-2026-190 / DEC-20260908-6446DB06，仅允许其 10 个批准路径；REG-WP-09～13 仍未授权，不授权后续源码修改、提交、发布、切流、删除或清理。
+> 已解冻对象：原 Cockpit OS WBS、`010_Cockpit_OS_后续原子迭代WBS_PM.md`、CHG-SCPT-2026-188～191 已完成用户验收并关闭；NG-WP-24～48 恢复逐包报批。
+> 权限边界：Batch A、Batch B、Batch C 已按各自 DecisionPackage 完成并验收；本次 PM 收尾另以 CHG-SCPT-2026-192 登记关闭门禁兼容修复，仅涉及 `change_service.py` 与对应单测；不包含发布资产、active/previous 指针、delivery_bridge COM 风险或全仓 Mypy 债务修复。
 
 ## 1. 根因结论
 
@@ -39,11 +39,11 @@
 | REG-WP-06 | 消除项目作者环境耦合 | `auto_pm/application/core/project_service.py`、`tests/core/test_project_crud.py` | REG-WP-01 + Batch B 批准 | 测试显式控制 author；无 `fubai`/`CodexSandboxOffline` 环境依赖；PLC/Python 初始化测试全绿 | COMPLETED |
 | REG-WP-07 | 集中 QML 测试运行时发现 | 复用 `tests/qml/conftest.py`；修改 5 个硬编码 fixture 文件 | REG-WP-01 + Batch B 批准 | 仓内 `rg` 不再命中用户绝对 PySide6 路径；54 项不再 setup error | COMPLETED |
 | REG-WP-08 | 复跑 QML 并二次裁决 | 仅 QML 测试及当前虚拟环境 | REG-WP-07 | 指定 QML 分域 54 passed；范围外 `test_delivery_bridge.py` 输出 COM `0x80040155`，未纳入本批修复 | COMPLETED_WITH_OUT_OF_SCOPE_RISK |
-| REG-WP-09 | 收敛 Ruff 基线 | 仅 Ruff 报告点名的活动母体文件与 `.ruff.toml` 精确例外 | REG-WP-02～08 | Ruff Exit 0；Qt/QML 公共名称不被重命名；无 broad-format | NOT_APPROVED |
-| REG-WP-10 | 分域回归 | 上述每包对应测试 + W0 原 45 项 | REG-WP-02～09 | 所有分域测试 Exit 0；W0 保持 45 passed | NOT_APPROVED |
-| REG-WP-11 | 全量回归 | `tests/`，禁用覆盖率副产物或输出至 `.auto-pm/reports/` | REG-WP-10 | 0 failed、0 errors；skip 逐项有既有理由；不得因跳过新增问题变绿 | NOT_APPROVED |
-| REG-WP-12 | 静态与治理总门禁 | Ruff、Mypy、CLI 冒烟、`ledger reconcile SW-2026-008`、精确 Git diff | REG-WP-11 | 全部 Exit 0；台账 0 差异；无 release/active/previous 指针变化 | NOT_APPROVED |
-| REG-WP-13 | PM 收尾与解冻报批 | 修正 CHG、PM_SESSION、台账、验收矩阵 | REG-WP-12 | 先呈报用户；未获明确“验收并解冻”前保持 CHG-188 accepting、原 WBS frozen | NOT_APPROVED |
+| REG-WP-09 | 收敛 Ruff 基线 | 仅 Ruff 报告点名的活动母体文件与 `.ruff.toml` 精确例外 | REG-WP-02～08 | Ruff Exit 0；Qt/QML 公共名称不被重命名；无 broad-format | COMPLETED |
+| REG-WP-10 | 分域回归 | 上述每包对应测试 + W0 原 45 项 | REG-WP-02～09 | 所有分域测试 Exit 0；W0 保持 45 passed | COMPLETED |
+| REG-WP-11 | 全量回归 | `tests/`，禁用覆盖率副产物或输出至 `.auto-pm/reports/` | REG-WP-10 | 0 failed、0 errors；skip 逐项有既有理由；不得因跳过新增问题变绿 | COMPLETED_WITH_OUT_OF_SCOPE_RISK |
+| REG-WP-12 | 静态与治理总门禁 | Ruff、批准源码清单 Mypy、CLI 冒烟、`ledger reconcile SW-2026-008`、精确 Git diff | REG-WP-11 | 全部批准范围门禁 Exit 0；台账 0 差异；无 release/active/previous 指针变化 | COMPLETED_WITH_BASELINE_DEBT |
+| REG-WP-13 | PM 收尾与解冻报批 | 修正 CHG、PM_SESSION、台账、验收矩阵 | REG-WP-12 | 用户已明确验收并解冻；CHG-188～191 closed，原 WBS/后续 WBS 恢复逐包报批 | COMPLETED |
 
 ## 4. 执行批次建议
 
@@ -61,8 +61,8 @@
 3. Ruff、Mypy、CLI 冒烟及 SW-2026-008 台账对账全部 Exit 0。
 4. QML 测试只使用当前虚拟环境，不访问用户级 Python311 绝对路径。
 5. 精确 diff 不包含 release 槽位、active/previous 指针、Obsidian 法典或未批准路径。
-6. 修正 CHG 完成 PM 收尾后，由用户明确批准验收并解冻。
+6. 修正 CHG 已完成 PM 收尾，用户已明确批准验收并解冻；CHG-188～191 closed。
 
 ## 6. 当前停止点
 
-Batch A（REG-WP-01～04）已按 `CHG-SCPT-2026-189` / `DEC-20260908-21B46741` 执行完成；定向 72 passed，W0 原 45 项保持通过，CHG-189 当前为 `pending_acceptance`。Batch B（REG-WP-05～08）已按 `CHG-SCPT-2026-190` / `DEC-20260908-6446DB06` 执行完成；定向 84 passed、Batch B+W0 129 passed、全量 1792 passed/14 skipped，CHG-190 当前为 `pending_acceptance`。范围外 delivery_bridge COM 风险已单独登记，未越界修复；REG-WP-09～13 尚未批准。下一停止点是用户验收 Batch B；在用户明确验收并解冻前，原 WBS、CHG-188 与 Wave B 继续冻结。
+Batch A（REG-WP-01～04）已按 `CHG-SCPT-2026-189` / `DEC-20260908-21B46741` 执行并验收完成；定向 72 passed，W0 原 45 项保持通过，CHG-189 已 closed。Batch B（REG-WP-05～08）已按 `CHG-SCPT-2026-190` / `DEC-20260908-6446DB06` 执行并验收完成；定向 84 passed、Batch B+W0 129 passed、全量 1792 passed/14 skipped，CHG-190 已 closed。Batch C（REG-WP-09～13）已按 `CHG-SCPT-2026-191` / `DEC-20260908-09EB0220` 执行并验收完成；Ruff Exit 0、批准源码清单 Mypy 14 files Exit 0、CLI help 5 项 Exit 0、ledger-check 0 差异、W0 关联定向 72 passed、全量 1792 passed/14 skipped，handoff `AI-20260908-REG-WP09-13` 已 consumed，CHG-191 已 closed。PM 收尾门禁兼容修复已按 CHG-192 Retrofit 登记，change service 回归 39 passed。范围外 `delivery_bridge.py:331` 的 Windows COM `0x80040155` 原生栈另登记；全仓 Mypy 42 条既有类型债务只读记录，均未越界修复。原 Cockpit WBS 与 Wave B 已解冻，NG-WP-24～48 恢复为逐包报批的下一主线。

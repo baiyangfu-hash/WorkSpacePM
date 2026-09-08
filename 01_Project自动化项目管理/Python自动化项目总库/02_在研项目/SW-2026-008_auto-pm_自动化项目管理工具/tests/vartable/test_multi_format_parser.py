@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from auto_pm.vartable.parsers.autoshop_parser import AutoshopParser
 from auto_pm.vartable.parsers.base_parser import BaseParser
 from auto_pm.vartable.parsers.codesys_parser import CodesysParser
