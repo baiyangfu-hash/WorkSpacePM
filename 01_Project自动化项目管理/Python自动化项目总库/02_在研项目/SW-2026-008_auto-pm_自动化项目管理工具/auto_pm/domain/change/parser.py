@@ -19,9 +19,12 @@ from auto_pm.change.constants import (
     BUSINESS_NATURES,
     DOMAINS,
     IMPACT_SCOPES,
-    REQUIRED_SUBSECTIONS,
     ChangeRequest,
     ChangeSummary,
+)
+from auto_pm.change.document_contract import (
+    REQUIRED_SECTION_3_SUBSECTIONS,
+    subsection_pattern,
 )
 from auto_pm.models import ImpactAnalysis
 from auto_pm.models.enums import BusinessNature, ChangeStatus, Domain, ImpactScope
@@ -244,10 +247,7 @@ class ChgParser:
 
     def _find_subsection(self, text: str, subsection_num: str) -> str | None:
         """查找子章节（如 ### 3.0 编号与项目）"""
-        pattern = re.compile(
-            rf"###\s*{re.escape(subsection_num)}\s*[.、：:]*(.*?)(?=\n###|\n##|\Z)",
-            re.DOTALL,
-        )
+        pattern = re.compile(subsection_pattern(subsection_num), re.DOTALL)
         match = pattern.search(text)
         if match:
             return match.group(0)
@@ -815,7 +815,7 @@ class ChgParser:
         else:
             # §3 必须包含 3.0~3.4 子章节
             s3_text = sections["3"]
-            for sub in REQUIRED_SUBSECTIONS:
+            for sub in REQUIRED_SECTION_3_SUBSECTIONS:
                 if not re.search(rf"###\s*{re.escape(sub)}", s3_text):
                     violations.append(f"§3 缺少子章节 §{sub}")
 

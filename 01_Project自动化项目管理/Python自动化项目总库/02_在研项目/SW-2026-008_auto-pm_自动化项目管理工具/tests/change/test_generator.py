@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 
 from auto_pm.change.constants import ChangeRequest
+from auto_pm.change.document_contract import CLOSURE_REQUIRED_SECTIONS
 from auto_pm.change.generator import ChgGenerator
 
 
@@ -40,6 +42,31 @@ class TestChgGenerator:
         assert "☑ **DEF**" in content
         assert "☑ **LOCAL**" in content
         assert "☑ **MODULE**" in content
+
+    def test_render_satisfies_shared_document_contract(self) -> None:
+        """生成器输出必须覆盖关闭门禁消费的全部章节契约。"""
+        content = ChgGenerator().render(
+            ChangeRequest(
+                change_number="CHG-PLC-2026-001",
+                project_id="TEST-2026-001",
+                project_name="测试项目",
+                domain="PLC",
+                business_nature="DEF",
+                impact_scope=["LOCAL"],
+                applicant="张三",
+                apply_date="2026-01-15",
+                planned_date="2026-01-20",
+                urgency="normal",
+                background="测试变更背景",
+                necessity="测试变更必要性",
+                references="测试参考依据",
+            )
+        )
+
+        assert all(
+            re.search(section.heading_pattern(), content, re.MULTILINE)
+            for section in CLOSURE_REQUIRED_SECTIONS
+        )
 
     def test_render_urgency_critical(self) -> None:
         """测试紧急程度渲染"""

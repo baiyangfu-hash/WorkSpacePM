@@ -36,6 +36,7 @@ from auto_pm.change.constants import (
     validate_status_transition,
     validate_urgency,
 )
+from auto_pm.change.document_contract import CLOSURE_REQUIRED_SECTIONS
 from auto_pm.change.file_locator import ChangeFileLocator
 from auto_pm.change.guard_checker import TransitionGuardChecker
 from auto_pm.change.markdown_editor import ChangeMarkdownEditor
@@ -446,19 +447,8 @@ class ChangeService:
     # 兼容生成器当前使用的二级标题与历史三级标题格式。
     # 格式: (章节号, 章节名称, 检测正则)
     _REQUIRED_CHAPTERS: list[tuple[str, str, str]] = [
-        ("5", "§5 变更前后", r"^#{2,3}\s*§?\s*5\b"),
-        ("6.1", "§6.1 五大约束影响", r"^#{2,3}\s*§?\s*6\.1\b"),
-        ("6.2", "§6.2 跨领域影响", r"^#{2,3}\s*§?\s*6\.2\b"),
-        ("6.3", "§6.3 变更传播链", r"^#{2,3}\s*§?\s*6\.3\b"),
-        ("7", "§7 实施计划", r"^#{2,3}\s*§?\s*7\b"),
-        ("8.1", "§8.1 审批流程", r"^#{2,3}\s*§?\s*8\.1\b"),
-        ("8.2", "§8.2 审批结论", r"^#{2,3}\s*§?\s*8\.2\b"),
-        ("9", "§9 变更实施记录", r"^#{2,3}\s*§?\s*9\b"),
-        ("10.1", "§10.1 验证项清单", r"^#{2,3}\s*§?\s*10\.1\b"),
-        ("10.2", "§10.2 跨领域联动验证", r"^#{2,3}\s*§?\s*10\.2\b"),
-        ("10.3", "§10.3 验证结论", r"^#{2,3}\s*§?\s*10\.3\b"),
-        ("11", "§11 版本详细变更说明", r"^#{2,3}\s*§?\s*11\b"),
-        ("12", "§12 附录", r"^#{2,3}\s*§?\s*12\b"),
+        (section.number, section.name, section.heading_pattern())
+        for section in CLOSURE_REQUIRED_SECTIONS
     ]
 
     def _check_chapter_completeness(self, content: str) -> list[str]:

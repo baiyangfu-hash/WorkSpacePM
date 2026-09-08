@@ -23,6 +23,7 @@ import re
 from typing import Any
 
 from auto_pm.change.constants import URGENCY_LEVELS
+from auto_pm.change.document_contract import heading_pattern
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +72,9 @@ class ChangeMarkdownEditor:
 
         # 定位 §10.2 节标题，在其前插入
         remainder = content[sec_10_1.end():]
-        next_section = re.search(r"^###\s*10\.2", remainder, re.MULTILINE)
+        next_section = re.search(
+            heading_pattern("10.2", levels=(3,)), remainder, re.MULTILINE
+        )
         if next_section:
             insert_pos = sec_10_1.end() + next_section.start()
             return content[:insert_pos].rstrip() + "\n" + row + content[insert_pos:]
@@ -109,11 +112,13 @@ class ChangeMarkdownEditor:
         3. § 符号变体:    ### §10.3 或 ### 10.3
         """
         # 先扫描判断结构：优先 §10.3，无 §10.3 时回退到 §10.2
-        has_section_10_3 = bool(re.search(r"^###\s*§?\s*10\.3\b", content, re.MULTILINE))
+        has_section_10_3 = bool(
+            re.search(heading_pattern("10.3", levels=(3,)), content, re.MULTILINE)
+        )
         if has_section_10_3:
-            target_pattern = re.compile(r"^###\s*§?\s*10\.3\b")
+            target_pattern = re.compile(heading_pattern("10.3", levels=(3,)))
         else:
-            target_pattern = re.compile(r"^###\s*§?\s*10\.2\b")
+            target_pattern = re.compile(heading_pattern("10.2", levels=(3,)))
 
         lines = content.splitlines()
         in_conclusion_section = False

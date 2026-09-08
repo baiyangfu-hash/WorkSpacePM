@@ -15,6 +15,7 @@ from auto_pm.change.constants import (
     validate_status_transition,
     validate_urgency,
 )
+from auto_pm.change.document_contract import CLOSURE_REQUIRED_SECTIONS
 
 
 class TestChangeService:
@@ -447,10 +448,7 @@ class TestChapterCompleteness:
     def test_required_chapters_keys(self) -> None:
         """13 章节编号正确"""
         nums = [num for num, _name, _pattern in ChangeService._REQUIRED_CHAPTERS]
-        assert nums == [
-            "5", "6.1", "6.2", "6.3", "7",
-            "8.1", "8.2", "9", "10.1", "10.2", "10.3", "11", "12",
-        ]
+        assert nums == [section.number for section in CLOSURE_REQUIRED_SECTIONS]
 
     def test_check_chapter_completeness_all_present(self, tmp_path: Path) -> None:
         """13 章节齐全且非空时返回空列表"""
