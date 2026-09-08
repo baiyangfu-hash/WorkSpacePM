@@ -21,7 +21,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 
@@ -38,24 +37,6 @@ _QML_DIR = (
     / "qml"
 )
 _DIALOGS_DIR = _QML_DIR / "dialogs"
-
-
-# ── 共享 fixture ──────────────────────────────────────────
-
-
-@pytest.fixture
-def qml_engine(qapp: QApplication) -> QQmlEngine:
-    """QQmlEngine（含 Theme.qml 及系统完整 PySide6 qml 路径）"""
-    import PySide6
-    engine = QQmlEngine()
-    sys_qml = Path(r"C:\Users\fubai\AppData\Local\Programs\Python\Python311\Lib\site-packages\PySide6\qml")
-    if sys_qml.exists():
-        engine.addImportPath(str(sys_qml))
-    pyside6_qml = Path(PySide6.__file__).parent / "qml"
-    if pyside6_qml.exists():
-        engine.addImportPath(str(pyside6_qml))
-    engine.addImportPath(str(_QML_DIR))
-    return engine
 
 
 def _load_component(engine: QQmlEngine, qml_file: Path) -> object:

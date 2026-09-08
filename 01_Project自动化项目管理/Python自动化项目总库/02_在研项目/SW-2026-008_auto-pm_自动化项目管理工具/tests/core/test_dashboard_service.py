@@ -9,10 +9,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-
 from auto_pm.change.change_service import ChangeService
 from auto_pm.core.dashboard_service import DashboardService
 from auto_pm.core.project_service import ProjectService
@@ -113,6 +113,26 @@ def _make_change_summary(
 
 
 class TestDashboardService:
+    @pytest.mark.parametrize(
+        ("timezone_value", "expected_timestamp"),
+        [
+            (
+                "2026-06-27T00:00:00+00:00",
+                datetime(2026, 6, 27, tzinfo=timezone.utc).timestamp(),
+            ),
+            (
+                "2026-06-26T17:00:00-07:00",
+                datetime(2026, 6, 27, tzinfo=timezone.utc).timestamp(),
+            ),
+        ],
+        ids=["UTC", "America-Phoenix"],
+    )
+    def test_parse_date_to_timestamp_is_timezone_deterministic(
+        self, timezone_value: str, expected_timestamp: float
+    ) -> None:
+        """带时区日期在 UTC 与 America/Phoenix 表示下保持同一排序瞬间。"""
+        assert DashboardService._parse_date_to_timestamp(timezone_value) == expected_timestamp
+
     def test_get_summary_empty_data(
         self, project_service: ProjectService, change_service: ChangeService
     ) -> None:

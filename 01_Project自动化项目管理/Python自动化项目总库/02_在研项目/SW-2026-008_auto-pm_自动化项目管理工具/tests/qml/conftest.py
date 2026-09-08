@@ -12,15 +12,31 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-
 from auto_pm.models import ProjectInfo
+from PySide6.QtQml import QQmlEngine
+from PySide6.QtWidgets import QApplication
 
 if TYPE_CHECKING:
     pass
+
+
+@pytest.fixture
+def qml_engine(qapp: QApplication) -> QQmlEngine:
+    """提供当前 Python 环境的 QML 引擎与项目 QML import path。"""
+    import PySide6
+
+    engine = QQmlEngine()
+    pyside6_qml = Path(PySide6.__file__).resolve().parent / "qml"
+    if pyside6_qml.is_dir():
+        engine.addImportPath(str(pyside6_qml))
+    project_qml = Path(__file__).resolve().parents[2] / "auto_pm" / "ui" / "qml"
+    engine.addImportPath(str(project_qml))
+    return engine
 
 
 @pytest.fixture

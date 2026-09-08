@@ -3,27 +3,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtWidgets import QApplication
 
 _QML_DIR = Path(__file__).resolve().parents[2] / "auto_pm" / "ui" / "qml"
 _VIEWS_DIR = _QML_DIR / "views"
-
-@pytest.fixture
-def qml_engine(qapp: QApplication) -> QQmlEngine:
-    """提供带有 Theme 引用路径的 QML 引擎"""
-    import PySide6
-    engine = QQmlEngine()
-    sys_qml = Path(r"C:\Users\fubai\AppData\Local\Programs\Python\Python311\Lib\site-packages\PySide6\qml")
-    if sys_qml.exists():
-        engine.addImportPath(str(sys_qml))
-    pyside6_qml = Path(PySide6.__file__).parent / "qml"
-    if pyside6_qml.exists():
-        engine.addImportPath(str(pyside6_qml))
-    engine.addImportPath(str(_QML_DIR))
-    return engine
 
 def _load_qml(engine: QQmlEngine, path: Path) -> object:
     url = QUrl.fromLocalFile(str(path))

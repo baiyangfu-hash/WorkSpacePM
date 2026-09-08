@@ -14,10 +14,9 @@ from pathlib import Path
 
 import pytest
 import yaml
-from click.testing import CliRunner
-
 from auto_pm.cli.__main__ import cli
 from auto_pm.core.project_service import ProjectService
+from click.testing import CliRunner
 
 # ── retrofit_project_by_path 测试 ────────────────────────
 
@@ -241,6 +240,7 @@ class TestInitProjectPmFramework:
             project_id="DJ-2026-000",
             project_name="测试项目",
             stack_type="plc",
+            author="plc_test_author",
         )
 
         # 1. 验证 .copier-answers.yml 补齐
@@ -260,8 +260,8 @@ class TestInitProjectPmFramework:
         assert "技术栈 | plc" in session_content
         assert "## 7. Risk & Decision Log" in session_content
 
-        # 4. 验证立项表中主设计人为默认值 fubai
-        assert "**主设计人**：fubai" in content
+        # 4. 测试显式控制主设计人，避免依赖执行环境身份
+        assert "**主设计人**：plc_test_author" in content
 
     def test_init_pm_python(self, tmp_path: Path) -> None:
         """初始化 Python 项目的 PM 框架"""
@@ -274,6 +274,7 @@ class TestInitProjectPmFramework:
             project_id="SW-2026-001",
             project_name="测试项目",
             stack_type="python",
+            author="python_test_author",
         )
 
         # 1. 验证 .copier-answers.yml 补齐
@@ -284,6 +285,7 @@ class TestInitProjectPmFramework:
         assert proj_doc.exists()
         content = proj_doc.read_text(encoding="utf-8")
         assert "Westwell Python 项目立项表" in content
+        assert "**主设计人**：python_test_author" in content
 
         # 3. 验证 PM_SESSION 生成
         session_file = project_dir / "PM_SESSION_SW-2026-001.md"

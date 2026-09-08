@@ -18,6 +18,7 @@ M3-Iter1 重构：扫描/识别逻辑提取到 ProjectScanner，本类通过组�
 
 from __future__ import annotations
 
+import getpass
 import json
 import logging
 import os
@@ -97,7 +98,7 @@ class ProjectService:
         Returns:
             项目列表，按 project_id 排序
         """
-        return self._scanner.scan(scan_depth=scan_depth)
+        return cast(list[ProjectInfo], self._scanner.scan(scan_depth=scan_depth))
 
     def list_projects_cached(self) -> list[ProjectInfo]:
         """从 DB 缓存读取项目列表（不扫描文件系统）
@@ -727,7 +728,17 @@ class ProjectService:
             author: 主设计人/申请人名称（如果为 None 则动态获取）
         """
         if author is None:
-            author = os.getenv("AUTO_PM_AUTHOR") or (os.getlogin() if hasattr(os, "getlogin") else "fubai")
+            candidates = [os.getenv("AUTO_PM_AUTHOR")]
+            try:
+                candidates.append(getpass.getuser())
+            except (KeyError, OSError):
+                pass
+            if hasattr(os, "getlogin"):
+                try:
+                    candidates.append(os.getlogin())
+                except OSError:
+                    pass
+            author = next((value.strip() for value in candidates if value and value.strip()), "unknown")
 
         if not os.path.isdir(project_path):
             raise FileNotFoundError(f"项目目录不存在: {project_path}")
@@ -839,7 +850,7 @@ class ProjectService:
 
         change_service = ChangeService(workspace_root=self.workspace_root, db=self.db)
         sync = SyncService(self.db, self, change_service=change_service)
-        return sync.sync(force_full=force_full)
+        return cast(dict[str, Any], sync.sync(force_full=force_full))
 
     def get_last_sync_time(self) -> str:
         """获取上次同步时间（M3-Iter5：UI 层不再直接访问 Repository）
@@ -1015,17 +1026,17 @@ class ProjectService:
     @staticmethod
     def _extract_id_from_dirname(project_path: str) -> str:
         """[已委托] 从目录名提取项目编号（向后兼容包装）"""
-        return ProjectScanner.extract_id_from_dirname(project_path)
+        return cast(str, ProjectScanner.extract_id_from_dirname(project_path))
 
     @staticmethod
     def _infer_stack(src_path: str) -> str:
         """[已委托] 根据模板源路径推断技术栈（向后兼容包装）"""
-        return ProjectScanner.infer_stack(src_path)
+        return cast(str, ProjectScanner.infer_stack(src_path))
 
     @staticmethod
     def _get_project_mtime(project_path: str) -> float:
         """[已委托] 获取项目标志文件的 mtime（向后兼容包装）"""
-        return ProjectScanner.get_project_mtime(project_path)
+        return cast(float, ProjectScanner.get_project_mtime(project_path))
 
     def is_git_hooks_installed(self, project_path: str) -> bool:
         """检查指定项目是否已安装 auto-pm Git 提交门禁钩子"""

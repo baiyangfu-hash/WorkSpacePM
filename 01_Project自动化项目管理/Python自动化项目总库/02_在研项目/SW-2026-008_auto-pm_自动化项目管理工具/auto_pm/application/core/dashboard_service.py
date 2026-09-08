@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from auto_pm.models import DashboardSummaryDTO
@@ -410,17 +410,18 @@ class DashboardService:
     @staticmethod
     def _format_timestamp(timestamp: float) -> str:
         """格式化时间戳为 YYYY-MM-DD HH:MM"""
-        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+        return datetime.fromtimestamp(timestamp, tz=UTC).strftime("%Y-%m-%d %H:%M")
 
     @staticmethod
     def _parse_date_to_timestamp(value: str) -> float:
         """解析 YYYY-MM-DD / YYYY-MM-DD HH:MM[:SS] 日期字符串"""
         if not value or value == "待补充":
             return 0.0
-        normalized = value.strip().replace("T", " ")
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-            try:
-                return datetime.strptime(normalized, fmt).timestamp()
-            except ValueError:
-                continue
-        return 0.0
+        normalized = value.strip().replace("T", " ").replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return 0.0
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC).timestamp()
