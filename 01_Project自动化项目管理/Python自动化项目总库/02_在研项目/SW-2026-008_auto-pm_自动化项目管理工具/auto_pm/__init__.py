@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 
 __app_name__ = "auto-pm"
-__version__ = "1.2.3"
+__version__ = "1.2.4"
 __author__ = "auto-pm team"
 
 # ── PEP 420 标准包路径扩展：将 Clean Architecture 分层子目录加入 auto_pm 包查找链 ──
@@ -24,11 +24,11 @@ for _sub in ("domain", "infrastructure", "application", "ui"):
         __path__.append(_sub_path)
 
 # 导入 5 大标准分层
-import auto_pm.application as application
-import auto_pm.contracts as contracts
-import auto_pm.domain as domain
-import auto_pm.infrastructure as infrastructure
-import auto_pm.ui as ui
+import auto_pm.application as application  # noqa: E402 - requires __path__ extension above
+import auto_pm.contracts as contracts  # noqa: E402 - requires __path__ extension above
+import auto_pm.domain as domain  # noqa: E402 - requires __path__ extension above
+import auto_pm.infrastructure as infrastructure  # noqa: E402 - requires __path__ extension above
+import auto_pm.ui as ui  # noqa: E402 - requires __path__ extension above
 
 __all__ = [
     "__app_name__",
@@ -40,3 +40,4 @@ __all__ = [
     "application",
     "ui",
 ]
+

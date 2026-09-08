@@ -134,6 +134,12 @@ class TransitionGuardChecker:
         # completed 的门禁已提升至 transition_status 方法中作为参数级前置校验，
         # 不在此处重复检查，避免与参数级校验逻辑冲突。
 
+        # 深度实质内容门禁（杜绝空壳变更单 Phantom Ticket）
+        from auto_pm.domain.change.substance_checker import SubstanceChecker
+        substance_violations = SubstanceChecker.check_substance(cr, target_status=target_status)
+        if substance_violations:
+            violations.extend(substance_violations)
+
         if violations:
             msg = (
                 f"变更单 {cr.change_number} 不满足 '{target_status}' 的门禁条件:\n"
@@ -141,3 +147,4 @@ class TransitionGuardChecker:
             )
             log.error("门禁校验失败: %s", msg)
             raise TransitionGuardError(msg)
+

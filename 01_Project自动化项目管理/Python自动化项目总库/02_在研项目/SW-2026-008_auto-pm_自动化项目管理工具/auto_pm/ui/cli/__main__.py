@@ -46,17 +46,22 @@ _fix_windows_encoding()
 import click  # noqa: E402
 from rich.console import Console  # noqa: E402
 
-from auto_pm.app_context import AppContext  # noqa: E402
 from auto_pm import __version__  # noqa: E402
+from auto_pm.app_context import AppContext  # noqa: E402
 from auto_pm.cli.change import change_group  # noqa: E402
 from auto_pm.cli.clean import clean_cmd  # noqa: E402
 from auto_pm.cli.constraint import constraint_group  # noqa: E402
+from auto_pm.cli.decision import decision_group  # noqa: E402
 from auto_pm.cli.delivery import delivery_group  # noqa: E402
 from auto_pm.cli.doc import doc_group  # noqa: E402
 from auto_pm.cli.doctor import doctor_command  # noqa: E402
+from auto_pm.cli.dogfood import dogfood_group  # noqa: E402
+from auto_pm.cli.git_hook import git_hook_group  # noqa: E402
 from auto_pm.cli.gui import gui_command  # noqa: E402
+from auto_pm.cli.handoff import handoff_group  # noqa: E402
 from auto_pm.cli.ledger import ledger_group  # noqa: E402
 from auto_pm.cli.plc import plc_group  # noqa: E402
+from auto_pm.cli.pm import pm_group  # noqa: E402
 from auto_pm.cli.project import project_group  # noqa: E402
 from auto_pm.cli.prototype import prototype_cmd  # noqa: E402
 from auto_pm.cli.python import python_group  # noqa: E402
@@ -103,15 +108,21 @@ cli.add_command(spec_group)
 cli.add_command(template_group)
 cli.add_command(vartable_group)
 cli.add_command(gui_command)
+cli.add_command(handoff_group)
+cli.add_command(decision_group)
+cli.add_command(git_hook_group)
+cli.add_command(pm_group)
 cli.add_command(pm_session_group)
 cli.add_command(ledger_group)
 cli.add_command(constraint_group)
 cli.add_command(workflow_group)
 cli.add_command(prototype_cmd)
 cli.add_command(doctor_command)
+cli.add_command(dogfood_group)
 cli.add_command(clean_cmd)
 
 
 if __name__ == "__main__":
     _fix_windows_encoding()
     cli()
+

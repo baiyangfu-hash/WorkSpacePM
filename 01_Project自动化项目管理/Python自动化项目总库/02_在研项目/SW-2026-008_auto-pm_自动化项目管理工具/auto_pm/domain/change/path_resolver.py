@@ -10,7 +10,7 @@
 CHG-SCPT-2026-146 5大过程组重组后统一目录约定：
   - 所有项目：04_监控/01_变更管理/01_变更单/CHG-*.md
   - 立项表：01_启动/*_PROJ.md 或 *_PM.md
-  - 台帐：04_监控/01_变更管理/02_变更记录/01_版本变更台帐.md
+  - 台账：04_监控/01_变更管理/02_变更记录/01_版本变更台账.md
 
 破坏性切换：不再区分 PLC / Python 两套路径，默认统一使用 5大过程组路径；
 旧路径（11_监控 / 00_项目管理）保留为过渡兼容，待历史项目迁移后逐步下线。
@@ -206,7 +206,7 @@ def _scan_change_dir(base_dir: str, results: list[str], depth: int = 0, max_dept
             results.append(full_path)
 
 
-# 台帐搜索路径（按优先级排列）
+# 台账搜索路径（按优先级排列）
 # CHG-SCPT-2026-146: 5大过程组统一路径，并兼容 11_监控 及历史目录
 _LEDGER_SEARCH_PATHS = [
     # 5大过程组统一路径：04_监控/01_变更管理/02_变更记录/
@@ -216,17 +216,17 @@ _LEDGER_SEARCH_PATHS = [
     os.path.join("11_监控", "02_变更记录"),
 ]
 
-# 台帐文件名匹配模式
+# 台账文件名匹配模式（兼容新标准"台账"与历史存量"台帐"）
 _LEDGER_FILE_PATTERNS = [
-    re.compile(r"版本变更台帐.*\.md$", re.IGNORECASE),
-    re.compile(r"变更台帐.*\.md$", re.IGNORECASE),
+    re.compile(r"版本变更台[账帐].*\.md$", re.IGNORECASE),
+    re.compile(r"变更台[账帐].*\.md$", re.IGNORECASE),
 ]
 
 
 def find_ledger_file(project_path: str) -> str | None:
-    """查找版本变更台帐文件
+    """查找版本变更台账文件
 
-    CHG-SCPT-2026-146: 5大过程组统一路径，搜索 04_监控/01_变更管理/02_变更记录/ 下的台帐文件。
+    CHG-SCPT-2026-146: 5大过程组统一路径，搜索 04_监控/01_变更管理/02_变更记录/ 下的台账文件。
     """
     for rel_path in _LEDGER_SEARCH_PATHS:
         search_dir = os.path.join(project_path, rel_path)
@@ -242,32 +242,32 @@ def find_ledger_file(project_path: str) -> str | None:
 
 
 def get_or_create_ledger_file(project_path: str) -> str | None:
-    """查找或创建版本变更台帐文件
+    """查找或创建版本变更台账文件
 
     CHG-SCPT-2026-146: 5大过程组统一路径，破坏性切换后不再区分 PLC / Python。
-    若台帐文件不存在，按统一路径自动创建（04_监控/01_变更管理/02_变更记录/01_版本变更台帐.md），
+    若台账文件不存在，按统一路径自动创建（04_监控/01_变更管理/02_变更记录/01_版本变更台账.md），
     含「变更单索引」表格骨架，供 LedgerUpdater 追加记录。
 
     Args:
         project_path: 项目根目录
 
     Returns:
-        台帐文件路径，失败返回 None
+        台账文件路径，失败返回 None
     """
-    # 1. 先查找已有台帐
+    # 1. 先查找已有台账
     existing = find_ledger_file(project_path)
     if existing:
         return existing
 
     # 2. 未找到 → 按统一路径创建
     ledger_dir = os.path.join(project_path, _LEDGER_SEARCH_PATHS[0])
-    ledger_path = os.path.join(ledger_dir, "01_版本变更台帐.md")
+    ledger_path = os.path.join(ledger_dir, "01_版本变更台账.md")
 
     try:
         os.makedirs(ledger_dir, exist_ok=True)
-        # 写入台帐骨架（含变更单索引表格，与 LedgerUpdater 期望的结构对齐）
+        # 写入台账骨架（含变更单索引表格，与 LedgerUpdater 期望的结构对齐）
         skeleton = (
-            "# 版本变更台帐\n\n"
+            "# 版本变更台账\n\n"
             "> 记录项目所有变更单的索引与状态\n\n"
             "## 变更单索引\n\n"
             "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |\n"
@@ -297,3 +297,4 @@ def extract_domain_from_change_number(change_number: str) -> str:
     if len(parts) >= 2:
         return parts[1]
     return ""
+
