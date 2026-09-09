@@ -446,6 +446,37 @@ class ContinuityStore:
             conn.row_factory = sqlite3.Row
             return self._get_handoff(conn, handoff_id)
 
+    def list_works(self, subject_project_id: str) -> tuple[WorkItem, ...]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT work_id FROM work_items WHERE subject_project_id=?
+                AND state NOT IN ('CLOSED', 'CANCELLED') ORDER BY updated_at DESC, work_id""",
+                (subject_project_id,),
+            ).fetchall()
+            return tuple(self._get_work(conn, str(row["work_id"])) for row in rows)
+
+    def list_runs(self, work_id: str) -> tuple[RunItem, ...]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT run_id FROM run_items WHERE work_id=?
+                AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+                ORDER BY updated_at DESC, run_id""",
+                (work_id,),
+            ).fetchall()
+            return tuple(self._get_run(conn, str(row["run_id"])) for row in rows)
+
+    def latest_checkpoint(self, run_id: str) -> CheckpointItem | None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """SELECT checkpoint_id FROM checkpoints WHERE run_id=?
+                ORDER BY sequence DESC LIMIT 1""",
+                (run_id,),
+            ).fetchone()
+            return self._get_checkpoint(conn, str(row["checkpoint_id"])) if row else None
+
     @staticmethod
     def _event_by_key(conn: sqlite3.Connection, key: str) -> sqlite3.Row | None:
         row = conn.execute("SELECT * FROM events WHERE idempotency_key=?", (key,)).fetchone()
