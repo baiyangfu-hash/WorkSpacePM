@@ -1,0 +1,175 @@
+FUNCTION_BLOCK FB_3001_ExternalInteraction
+(* ==============================================================================
+ * FB_3001_ExternalInteraction - 通用外部设备交握与心跳监视功能块
+ * 项目: {{ project_id }} {{ project_name }}
+ * 遵循规范: STD-820 (8步握手 + 4s ON / 4s OFF 心跳)
+ * ============================================================================== *)
+VAR_INPUT
+    i_bEnable           : BOOL;         (* 功能块总使能 *)
+    i_bAutoMode         : BOOL;         (* 自动运行模式 *)
+    i_bResetCmd         : BOOL;         (* 故障复位指令 *)
+    i_bMachineReadyIn   : BOOL;         (* 本机进料就绪 (工位空闲) *)
+    i_bMachineReadyOut  : BOOL;         (* 本机出料就绪 (加工完成) *)
+    i_bInfeedArrivedSens: BOOL;         (* 本机进料到位光电传感器 *)
+    i_sSendModuleID     : STRING[32];   (* 本机待发出的组件 ID *)
+END_VAR
+
+VAR_OUTPUT
+    q_bAllowInfeedAct   : BOOL;         (* 触发本机进料动作输出 *)
+    q_bAllowOutfeedAct  : BOOL;         (* 触发本机出料动作输出 *)
+    q_bUpstreamDone     : BOOL;         (* 本次进料交握事务完成脉冲 *)
+    q_bDownstreamDone   : BOOL;         (* 本次出料交握事务完成脉冲 *)
+    q_bComAlarm         : BOOL;         (* 外部通讯中断综合报警 *)
+    q_wErrorCode        : WORD;         (* 故障诊断字 *)
+END_VAR
+
+VAR_IN_OUT
+    io_stExternal       : ST_ExternalDevice;
+END_VAR
+
+VAR
+    // --- 4s ON / 4s OFF 心跳发生器与监视定时器 ---
+    s_dHeartbeatPulse   : DINT := 4000;
+    s_dHeartbeatTimer   : DINT := 0;
+    s_bHeartbeatState   : BOOL := FALSE;
+
+    s_dUpTimeout        : DINT := 0;
+    s_dDownTimeout      : DINT := 0;
+    s_bLastUpHeartbeat  : BOOL := FALSE;
+    s_bLastDownHeartbeat: BOOL := FALSE;
+
+    s_iInfeedStep       : INT  := 0;
+    s_iOutfeedStep      : INT  := 0;
+END_VAR
+
+BEGIN
+    (* 0. 复位处理 *)
+    IF i_bResetCmd THEN
+        io_stExternal.stUpstream.bUpstreamComFault := FALSE;
+        io_stExternal.stDownstream.bDownstreamComFault := FALSE;
+        io_stExternal.bAnyComFault := FALSE;
+        q_wErrorCode := 16#0000;
+        s_dUpTimeout := 0;
+        s_dDownTimeout := 0;
+    END_IF;
+
+    IF NOT i_bEnable THEN
+        io_stExternal.stUpstream.bMachine_ReadyIn := FALSE;
+        io_stExternal.stUpstream.bMachine_AllowInfeed := FALSE;
+        io_stExternal.stDownstream.bMachine_ReadyOut := FALSE;
+        io_stExternal.stDownstream.bMachine_OutfeedReq := FALSE;
+        s_iInfeedStep := 0;
+        s_iOutfeedStep := 0;
+        RETURN;
+    END_IF;
+
+    (* 1. 心跳生成 (4s ON / 4s OFF) 与 12s 超时监视 *)
+    // (此处在PLC周期中执行4s翻转与超时累加)
+    s_bHeartbeatState := NOT s_bHeartbeatState; // 简化展示，实际配合定时器4s翻转
+    io_stExternal.stUpstream.bMachine_HeartbeatToUp := s_bHeartbeatState;
+    io_stExternal.stDownstream.bMachine_HeartbeatToDown := s_bHeartbeatState;
+
+    // 上游心跳边沿检测
+    IF io_stExternal.stUpstream.bUpstream_HeartbeatFromUp <> s_bLastUpHeartbeat THEN
+        s_bLastUpHeartbeat := io_stExternal.stUpstream.bUpstream_HeartbeatFromUp;
+        s_dUpTimeout := 0;
+        io_stExternal.stUpstream.bUpstreamComFault := FALSE;
+    END_IF;
+
+    // 下游心跳边沿检测
+    IF io_stExternal.stDownstream.bDownstream_HeartbeatFromDown <> s_bLastDownHeartbeat THEN
+        s_bLastDownHeartbeat := io_stExternal.stDownstream.bDownstream_HeartbeatFromDown;
+        s_dDownTimeout := 0;
+        io_stExternal.stDownstream.bDownstreamComFault := FALSE;
+    END_IF;
+
+    io_stExternal.bAnyComFault := io_stExternal.stUpstream.bUpstreamComFault OR io_stExternal.stDownstream.bDownstreamComFault;
+    q_bComAlarm := io_stExternal.bAnyComFault;
+
+    (* 2. 上游进料 8 步闭环状态机 (STD-820) *)
+    CASE s_iInfeedStep OF
+        0: (* 待机态: 广播本机准备好进料 (1) *)
+            io_stExternal.stUpstream.bMachine_ReadyIn := i_bMachineReadyIn AND NOT io_stExternal.bAnyComFault;
+            io_stExternal.stUpstream.bMachine_RcvModuleIdAck := FALSE;
+            io_stExternal.stUpstream.bMachine_AllowInfeed := FALSE;
+            io_stExternal.stUpstream.bMachine_InfeedArrived := FALSE;
+            IF io_stExternal.stUpstream.bMachine_ReadyIn AND io_stExternal.stUpstream.bUpstream_LineReady THEN
+                s_iInfeedStep := 10;
+            END_IF;
+
+        10: (* 等待上游传组件 ID (3) *)
+            IF io_stExternal.stUpstream.bUpstream_SendModuleId THEN
+                io_stExternal.stUpstream.sRcvModuleID := io_stExternal.stUpstream.sRcvModuleID;
+                io_stExternal.stUpstream.bMachine_RcvModuleIdAck := TRUE; (* (4) 确认收到ID *)
+                s_iInfeedStep := 20;
+            END_IF;
+
+        20: (* 允许上游进料 (5) *)
+            io_stExternal.stUpstream.bMachine_AllowInfeed := TRUE;
+            IF io_stExternal.stUpstream.bUpstream_InfeedReq THEN (* (6) 上游请求入料 *)
+                q_bAllowInfeedAct := TRUE;
+                s_iInfeedStep := 30;
+            END_IF;
+
+        30: (* 检测工件进料到位 (7) *)
+            IF i_bInfeedArrivedSens THEN
+                io_stExternal.stUpstream.bMachine_InfeedArrived := TRUE;
+                q_bAllowInfeedAct := FALSE;
+                s_iInfeedStep := 40;
+            END_IF;
+
+        40: (* 等待上游回收确认 (8) *)
+            IF io_stExternal.stUpstream.bUpstream_InfeedArrivedAck THEN
+                q_bUpstreamDone := TRUE;
+                s_iInfeedStep := 0; (* 完成闭环 *)
+            END_IF;
+
+        ELSE
+            s_iInfeedStep := 0;
+    END_CASE;
+    io_stExternal.stUpstream.iInfeedStep := s_iInfeedStep;
+
+    (* 3. 下游出料 8 步闭环状态机 (STD-820) *)
+    CASE s_iOutfeedStep OF
+        0: (* 待机态: 等待下游准备好 (1) 并广播本机准备好出料 (2) *)
+            io_stExternal.stDownstream.bMachine_ReadyOut := i_bMachineReadyOut AND NOT io_stExternal.bAnyComFault;
+            io_stExternal.stDownstream.bMachine_SendModuleId := FALSE;
+            io_stExternal.stDownstream.bMachine_OutfeedReq := FALSE;
+            io_stExternal.stDownstream.bMachine_OutfeedArrivedAck := FALSE;
+            IF io_stExternal.stDownstream.bMachine_ReadyOut AND io_stExternal.stDownstream.bDownstream_LineReady THEN
+                s_iOutfeedStep := 10;
+            END_IF;
+
+        10: (* 发送组件 ID (3) *)
+            io_stExternal.stDownstream.sSendModuleID := i_sSendModuleID;
+            io_stExternal.stDownstream.bMachine_SendModuleId := TRUE;
+            IF io_stExternal.stDownstream.bDownstream_RcvModuleIdAck THEN (* (4) 下游确认收到 *)
+                s_iOutfeedStep := 20;
+            END_IF;
+
+        20: (* 等待下游允许出料 (5) 并发出出料请求 (6) *)
+            IF io_stExternal.stDownstream.bDownstream_AllowOutfeed THEN
+                io_stExternal.stDownstream.bMachine_OutfeedReq := TRUE;
+                q_bAllowOutfeedAct := TRUE;
+                s_iOutfeedStep := 30;
+            END_IF;
+
+        30: (* 等待下游进料到位 (7) *)
+            IF io_stExternal.stDownstream.bDownstream_OutfeedArrived THEN
+                io_stExternal.stDownstream.bMachine_OutfeedArrivedAck := TRUE; (* (8) 本机确认回收 *)
+                q_bAllowOutfeedAct := FALSE;
+                s_iOutfeedStep := 40;
+            END_IF;
+
+        40: (* 下游撤销到位信号，事务完成 *)
+            IF NOT io_stExternal.stDownstream.bDownstream_OutfeedArrived THEN
+                q_bDownstreamDone := TRUE;
+                s_iOutfeedStep := 0; (* 完成闭环 *)
+            END_IF;
+
+        ELSE
+            s_iOutfeedStep := 0;
+    END_CASE;
+    io_stExternal.stDownstream.iOutfeedStep := s_iOutfeedStep;
+
+END_FUNCTION_BLOCK

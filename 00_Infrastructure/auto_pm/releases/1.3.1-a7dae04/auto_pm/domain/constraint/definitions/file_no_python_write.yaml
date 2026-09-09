@@ -1,0 +1,26 @@
+# CST-FILE-001: 文件守护（禁止外部写入）
+#
+# 项目文件必须通过 Edit/Write 工具修改，禁止 Python Path.write_text()
+# 直接写磁盘。Python 脚本写磁盘会导致 VS Code 缓冲区陈旧，用户保存时冲突。
+
+id: "CST-FILE-001"
+name: "禁止 Python 脚本直接写磁盘"
+description: "项目文件必须通过 Edit/Write 工具修改，禁止 Python Path.write_text() 直接写磁盘"
+type: file_guard
+severity: error
+scope:
+  patterns:
+    - "**/PM_SESSION_*.md"
+    - "**/CHG-*.md"
+    - "**/*.py"
+    - "**/*.qml"
+  exclude:
+    - "**/__pycache__/**"
+    - "**/.git/**"
+    - "**/coverage/**"
+    - "**/node_modules/**"
+rules:
+  - type: "no_external_write"
+    description: "文件修改必须通过 auto-pm constraint guard 预检"
+    check: "hash_mismatch"
+auto_fix: false

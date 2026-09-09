@@ -1,0 +1,31 @@
+# FB_1001_Station1 使用说明书
+
+> **项目编号**: {{ project_id }}  
+> **功能块**: `FB_1001_Station1`  
+> **模块名称**: 工位1 动作机构控制  
+> **版本号**: {{ version }}  
+> **编制人**: {{ author }}  
+> **更新日期**: {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }}  
+> **规范依据**: DEV-001 / LSP-905 / LSP-907  
+
+---
+
+## 1. 实例化与调用方法
+
+在 `GlobalVars.db` 中声明实例：
+```scl
+fbStation1 : FB_1001_Station1;
+```
+
+在 `OB1.scl` 中进行周期调度：
+```scl
+GlobalVars.fbStation1(io_stStation := GlobalVars.stStation1);
+GlobalVars.stStation1 := GlobalVars.fbStation1.io_stStation;
+```
+
+---
+
+## 2. 调试与操作注意事项
+
+1. 在手动调试前，务必确认急停按钮复位且主气压在 0.5MPa 以上；
+2. 若触发报警，先在 HMI 点击复位，并将 `io_stStation.stControl.bReset` 置位 1 个扫描周期。

@@ -1,0 +1,30 @@
+# {{ project_name }} 接口设计文档
+
+> **项目编号**: {{ project_id }}  
+> **项目名称**: {{ project_name }}  
+> **版本号**: {{ version }}  
+> **编制人**: {{ author }}  
+> **更新日期**: {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }}  
+> **规范依据**: DEV-001 / LSP-907 / PROJ-016  
+
+---
+
+## 1. 全局数据交互总线 (GlobalVars.db)
+
+| 变量名 | 数据类型 | 访问属性 | 功能描述 |
+| :--- | :--- | :---: | :--- |
+| `stGlobal` | `ST_CommonAlarm` | 读写 | 全局控制、系统工作模式与首出报警字 |
+| `stExternal` | `ST_ExternalDevice` | 读写 | 外部机器人、上游/下游总线握手与安全门互锁 |
+| `stStation1` | `ST_Station1` | 读写 | 工位1 动作机构控制、状态、气缸与定时器结构体 |
+| `astServoAxis` | `ARRAY[1..4] OF ST_ServoAxis` | 读写 | PLCopen MC Part 1 伺服轴状态与控制总线 |
+
+---
+
+## 2. 功能块调度接口规范
+
+所有工站 FB 严格遵循单一 `VAR_IN_OUT` 结构体参数调用规范：
+```scl
+// OB1.scl 调度调用范例
+GlobalVars.fbStation1(io_stStation := GlobalVars.stStation1);
+GlobalVars.stStation1 := GlobalVars.fbStation1.io_stStation;
+```

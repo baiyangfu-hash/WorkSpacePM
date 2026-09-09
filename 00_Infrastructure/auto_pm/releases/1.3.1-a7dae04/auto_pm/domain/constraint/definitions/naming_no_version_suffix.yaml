@@ -1,0 +1,16 @@
+id: "CST-NAME-001"
+name: "文件命名禁止版本号后缀"
+description: "项目文档文件名禁止追加版本号后缀（如 -V2.0, _V2.1）"
+type: naming
+severity: error
+scope:
+  patterns:
+    - "00_项目管理/**/*.md"
+    - "00_项目基础信息/**/*.md"
+  exclude:
+    - "**/03_执行过程/**"
+rules:
+  - type: "regex_blacklist"
+    pattern: '.*[-_][vV]\d+\.\d+.*\.(md|html)$'
+    description: "文件名不得包含版本号后缀"
+auto_fix: false

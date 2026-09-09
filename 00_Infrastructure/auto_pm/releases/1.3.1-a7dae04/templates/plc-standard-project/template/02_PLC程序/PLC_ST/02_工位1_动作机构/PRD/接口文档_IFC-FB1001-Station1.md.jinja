@@ -1,0 +1,43 @@
+# FB_1001_Station1 接口设计说明书
+
+> **项目编号**: {{ project_id }}  
+> **功能块**: `FB_1001_Station1`  
+> **模块名称**: 工位1 动作机构控制  
+> **版本号**: {{ version }}  
+> **编制人**: {{ author }}  
+> **更新日期**: {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }}  
+> **规范依据**: DEV-001 / LSP-905 / LSP-907  
+
+---
+
+## 1. 功能块概述
+
+`FB_1001_Station1` 负责 {{ project_name }} 工位1 进料、定位、夹紧顶升、加工延时与出料输送控制。
+
+---
+
+## 2. 接口参数定义 (VAR_IN_OUT)
+
+| 参数名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `io_stStation` | `ST_Station1` | 工位1 全局交互结构体 (包含 Control, Status, Config, Sensors, Actuators) |
+
+### 2.1 控制指令子结构 (`stControl`)
+
+| 字段名 | 类型 | 说明 |
+| :--- | :---: | :--- |
+| `bAutoEnable` | BOOL | 自动运行使能 (1=使能) |
+| `bManualStart` | BOOL | 手动单步启动 |
+| `bReset` | BOOL | 故障复位指令 |
+| `bPause` | BOOL | 暂停运行 |
+| `bSingleStepMode` | BOOL | 单步运行模式 |
+
+### 2.2 状态反馈子结构 (`stStatus`)
+
+| 字段名 | 类型 | 说明 |
+| :--- | :---: | :--- |
+| `iStep` | DINT | 当前工步号 (0=待机, 1=等料, 2=进料, 10=夹紧, 20=加工, 30=出料) |
+| `bRunning` | BOOL | 运行中标志 |
+| `bDone` | BOOL | 周期完成标志 |
+| `bAlarm` | BOOL | 站级报警标志 |
+| `iAlarmCode` | DINT | 报警代码 (101=进料超时, 102=夹紧超时, 103=松开超时) |
