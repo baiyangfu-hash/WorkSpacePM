@@ -1,16 +1,21 @@
-"""Resolve per-invocation project context from workspace evidence."""
+"""Resolve bounded workspace identity from explicit topology evidence."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import re
 from pathlib import Path
 from typing import Any, Literal
 
 from auto_pm.core.project_scanner import ProjectScanner
 
-from auto_pm.contracts.workspace_context import ContextEvidence, ContextProject, WorkspaceContext
+from auto_pm.contracts.workspace_context import (
+    ContextEvidence,
+    ContextProject,
+    WorkspaceContext,
+    WorkspaceProjectMapping,
+    WorkspaceRegistry,
+)
 
 
 class WorkspaceContextError(RuntimeError):
@@ -18,14 +23,20 @@ class WorkspaceContextError(RuntimeError):
 
 
 class WorkspaceContextService:
-    """Resolve context without consulting or changing global active-project state."""
+    """Resolve context without global scans, session text inference, or latest state."""
 
-    _RUNTIME_ROOT_RE = re.compile(r"^-\s*runtime_root:\s*`?([^`\r\n]+)`?\s*$", re.MULTILINE)
-    _CONTROL_ID_RE = re.compile(r"^-\s*control_project_id:\s*([A-Z]{2,4}-\d{4}-\d{3})\s*$", re.MULTILINE)
-    _CONTROL_SESSION_RE = re.compile(r"^-\s*control_pm_session:\s*`?([^`\r\n]+)`?\s*$", re.MULTILINE)
+    _DEFAULT_REGISTRY = Path(
+        "SYS-2026-001_WorkspaceGovernance",
+        "workspace_registry.json",
+    )
 
-    def __init__(self, workspace_root: str) -> None:
+    def __init__(self, workspace_root: str, registry_path: str | Path | None = None) -> None:
         self._workspace_root = Path(workspace_root).resolve()
+        selected = Path(registry_path) if registry_path is not None else self._DEFAULT_REGISTRY
+        self._registry_path = (
+            selected.resolve() if selected.is_absolute() else (self._workspace_root / selected).resolve()
+        )
+        self._require_workspace_path(self._registry_path, "Workspace Registry")
         self._scanner = ProjectScanner(str(self._workspace_root))
 
     def resolve(
@@ -33,32 +44,46 @@ class WorkspaceContextService:
         project_id: str = "",
         start_path: str | Path | None = None,
     ) -> WorkspaceContext:
-        """Return a project card from explicit identity or a directory ancestor.
-
-        A stale UI selection is deliberately not a fallback: it belongs to a
-        previous invocation and cannot prove the identity of this one.
-        """
+        """Return a context.v2 identity card from the registry and a local anchor."""
         candidate_path = Path(start_path) if start_path is not None else Path.cwd()
         candidate_path = candidate_path.resolve()
         self._require_workspace_path(candidate_path, "调用目录")
+        _, mappings = self._load_registry()
+
         if project_id.strip():
-            project = self._project_for_explicit_id(project_id.strip(), candidate_path)
+            mapping = self._mapping_for_id(project_id.strip(), mappings)
+            project_path, project = self._project_from_mapping(mapping)
             source: Literal["explicit", "directory"] = "explicit"
         else:
-            project = self._project_for_directory(candidate_path)
+            project_path, project = self._project_for_directory(candidate_path)
+            mapping = self._mapping_for_id(project.project_id, mappings)
+            registered_path = self._mapped_directory(mapping.project_root, "project_root")
+            if registered_path != project_path:
+                raise WorkspaceContextError(
+                    f"目录锚点与 Workspace Registry 冲突: {self._relative(project_path)}"
+                )
             source = "directory"
 
-        project_path = Path(project.path).resolve()
-        self._require_workspace_path(project_path, "项目路径")
-        session = self._find_subject_session(project_path, project.project_id)
-        runtime_root = self._runtime_root(session)
-        control_id, control_session = self._find_control(session)
+        development_root = self._mapped_directory(mapping.development_root, "development_root")
+        if development_root != project_path:
+            raise WorkspaceContextError("development_root 必须与已验证项目根一致")
+        control_id, control_session = self._control_mapping(mapping, mappings)
+        runtime_root = self._optional_mapped_directory(mapping.runtime_root, "runtime_root")
         release_id, release_pointer = self._release_pointer(runtime_root)
-        read_set = self._read_set(project_path, session, release_pointer)
-        evidence_id = self._evidence_id(project.project_id, read_set, control_id, runtime_root, release_id)
+        anchor = self._anchor_file(project_path)
+        read_set = self._read_set(self._registry_path, anchor, release_pointer)
+        runtime_relative = self._relative(runtime_root) if runtime_root else ""
+        evidence_id = self._evidence_id(
+            project.project_id,
+            read_set,
+            control_id,
+            runtime_relative,
+            release_id,
+        )
         return WorkspaceContext(
             workspace_root=str(self._workspace_root),
             resolution_source=source,
+            subject_project_id=project.project_id,
             subject=ContextProject(
                 project_id=project.project_id,
                 name=project.name,
@@ -69,49 +94,60 @@ class WorkspaceContextService:
             ),
             control_project_id=control_id,
             control_pm_session=self._relative(control_session) if control_session else "",
-            development_root=self._relative(project_path),
-            runtime_root=self._relative(Path(runtime_root)) if runtime_root else "",
+            development_root=self._relative(development_root),
+            runtime_root=runtime_relative,
             release_id=release_id,
             read_set=tuple(read_set),
             evidence_id=evidence_id,
         )
 
-    def _project_for_directory(self, start_path: Path) -> Any:
-        anchors = self._ancestor_anchors(start_path)
-        if not anchors:
-            raise WorkspaceContextError("调用目录未解析到项目；请提供项目编号或从项目目录执行命令")
-        return anchors[0][1]
-
-    def _project_for_explicit_id(self, project_id: str, start_path: Path) -> Any:
-        matches = [(path, project) for path, project in self._candidate_anchors(start_path) if project.project_id == project_id]
-        unique = dict(matches)
-        if len(unique) != 1:
-            if not unique:
+    def _load_registry(
+        self,
+    ) -> tuple[WorkspaceRegistry, dict[str, WorkspaceProjectMapping]]:
+        if not self._registry_path.is_file():
+            raise WorkspaceContextError(
+                f"Workspace Registry 不存在: {self._relative(self._registry_path)}"
+            )
+        try:
+            registry = WorkspaceRegistry.model_validate_json(self._read_text(self._registry_path))
+        except ValueError as error:
+            raise WorkspaceContextError("Workspace Registry schema 无效") from error
+        mappings: dict[str, WorkspaceProjectMapping] = {}
+        for mapping in registry.projects:
+            if mapping.project_id in mappings:
                 raise WorkspaceContextError(
-                    f"显式项目未在调用目录的局部锚点中解析: {project_id}；请使用该项目目录的 --path"
+                    f"Workspace Registry 存在重复项目: {mapping.project_id}"
                 )
-            choices = ", ".join(sorted(self._relative(path) for path in unique))
-            raise WorkspaceContextError(f"显式项目存在多个局部锚点: {project_id}: {choices}")
-        return next(iter(unique.values()))
+            mappings[mapping.project_id] = mapping
+        return registry, mappings
 
-    def _ancestor_anchors(self, start_path: Path) -> list[tuple[Path, Any]]:
-        anchors: list[tuple[Path, Any]] = []
+    @staticmethod
+    def _mapping_for_id(
+        project_id: str,
+        mappings: dict[str, WorkspaceProjectMapping],
+    ) -> WorkspaceProjectMapping:
+        mapping = mappings.get(project_id)
+        if mapping is None:
+            raise WorkspaceContextError(f"项目未登记到 Workspace Registry: {project_id}")
+        return mapping
+
+    def _project_from_mapping(self, mapping: WorkspaceProjectMapping) -> tuple[Path, Any]:
+        project_path = self._mapped_directory(mapping.project_root, "project_root")
+        project = self._scanner.try_identify_project(str(project_path))
+        if project is None:
+            raise WorkspaceContextError(f"登记路径缺少项目锚点: {self._relative(project_path)}")
+        if project.project_id != mapping.project_id:
+            raise WorkspaceContextError(
+                f"登记项目与目录锚点不一致: {mapping.project_id} != {project.project_id}"
+            )
+        return project_path, project
+
+    def _project_for_directory(self, start_path: Path) -> tuple[Path, Any]:
         for path in self._ancestors_within_workspace(start_path):
             project = self._scanner.try_identify_project(str(path))
             if project is not None:
-                anchors.append((path, project))
-        return anchors
-
-    def _candidate_anchors(self, start_path: Path) -> list[tuple[Path, Any]]:
-        candidates = self._ancestor_anchors(start_path)
-        for parent in self._ancestors_within_workspace(start_path):
-            for child in sorted(parent.iterdir()):
-                if not child.is_dir() or self._is_archived(child):
-                    continue
-                project = self._scanner.try_identify_project(str(child))
-                if project is not None:
-                    candidates.append((child.resolve(), project))
-        return candidates
+                return path, project
+        raise WorkspaceContextError("调用目录未解析到项目；请提供项目编号或从项目目录执行命令")
 
     def _ancestors_within_workspace(self, start_path: Path) -> list[Path]:
         paths: list[Path] = []
@@ -122,73 +158,78 @@ class WorkspaceContextService:
                 return paths
             current = current.parent
 
-    def _find_control(self, subject_session: Path | None) -> tuple[str, Path | None]:
-        if subject_session is None:
-            return "", None
-        content = self._read_text(subject_session)
-        control_id = self._single_match(self._CONTROL_ID_RE, content, "control_project_id")
-        control_session_value = self._single_match(
-            self._CONTROL_SESSION_RE, content, "control_pm_session"
-        )
+    def _control_mapping(
+        self,
+        mapping: WorkspaceProjectMapping,
+        mappings: dict[str, WorkspaceProjectMapping],
+    ) -> tuple[str, Path | None]:
+        control_id = mapping.control_project_id.strip()
+        control_session_value = mapping.control_pm_session.strip()
         if not control_id and not control_session_value:
             return "", None
         if not control_id or not control_session_value:
-            raise WorkspaceContextError("治理映射必须同时声明 control_project_id 与 control_pm_session")
-        candidate = Path(control_session_value)
-        control_session = candidate if candidate.is_absolute() else self._workspace_root / candidate
-        control_session = control_session.resolve()
-        self._require_workspace_path(control_session, "control_pm_session")
-        if not control_session.is_file():
-            raise WorkspaceContextError(f"control_pm_session 不存在: {self._relative(control_session)}")
+            raise WorkspaceContextError(
+                "Workspace Registry 必须同时声明 control_project_id 与 control_pm_session"
+            )
+        if control_id not in mappings:
+            raise WorkspaceContextError(f"控制项目未登记到 Workspace Registry: {control_id}")
+        control_session = self._mapped_file(control_session_value, "control_pm_session")
         if control_session.stem != f"PM_SESSION_{control_id}":
             raise WorkspaceContextError("control_project_id 与 control_pm_session 不一致")
         return control_id, control_session
 
-    def _find_subject_session(self, project_path: Path, project_id: str) -> Path | None:
-        expected = project_path / f"PM_SESSION_{project_id}.md"
-        if expected.is_file():
-            return expected
-        candidates = sorted(project_path.glob("PM_SESSION_*.md"))
-        return candidates[0] if len(candidates) == 1 else None
+    def _mapped_directory(self, value: str, label: str) -> Path:
+        path = self._mapped_path(value, label)
+        if not path.is_dir():
+            raise WorkspaceContextError(f"{label} 不存在或不是目录: {self._relative(path)}")
+        return path
 
-    def _runtime_root(self, session: Path | None) -> str:
-        if session is None:
-            return ""
-        match = self._RUNTIME_ROOT_RE.search(self._read_text(session))
-        if not match:
-            return ""
-        candidate = Path(match.group(1).strip())
-        resolved = candidate if candidate.is_absolute() else self._workspace_root / candidate
-        if not resolved.is_dir():
-            return ""
-        resolved = resolved.resolve()
-        self._require_workspace_path(resolved, "runtime_root")
-        return str(resolved)
+    def _optional_mapped_directory(self, value: str, label: str) -> Path | None:
+        return self._mapped_directory(value, label) if value.strip() else None
 
-    def _release_pointer(self, runtime_root: str) -> tuple[str, Path | None]:
-        if not runtime_root:
+    def _mapped_file(self, value: str, label: str) -> Path:
+        path = self._mapped_path(value, label)
+        if not path.is_file():
+            raise WorkspaceContextError(f"{label} 不存在或不是文件: {self._relative(path)}")
+        return path
+
+    def _mapped_path(self, value: str, label: str) -> Path:
+        candidate = Path(value.strip())
+        if not value.strip() or candidate.is_absolute():
+            raise WorkspaceContextError(f"{label} 必须是非空工作区相对路径")
+        path = (self._workspace_root / candidate).resolve()
+        self._require_workspace_path(path, label)
+        return path
+
+    def _release_pointer(self, runtime_root: Path | None) -> tuple[str, Path | None]:
+        if runtime_root is None:
             return "", None
-        pointer = Path(runtime_root) / "active_release.json"
+        pointer = runtime_root / "active_release.json"
         if not pointer.is_file():
-            return "", None
+            raise WorkspaceContextError(
+                f"runtime_root 缺少 active_release.json: {self._relative(runtime_root)}"
+            )
         try:
             data = json.loads(self._read_text(pointer))
         except json.JSONDecodeError as error:
-            raise WorkspaceContextError(f"active_release.json 不是有效 JSON: {pointer}") from error
+            raise WorkspaceContextError("active_release.json 不是有效 JSON") from error
         release_id = data.get("release_id", "")
-        if not isinstance(release_id, str):
-            raise WorkspaceContextError("active_release.json 缺少字符串 release_id")
+        if not isinstance(release_id, str) or not release_id.strip():
+            raise WorkspaceContextError("active_release.json 缺少非空字符串 release_id")
+        release_root = runtime_root / "releases" / release_id
+        if not release_root.is_dir():
+            raise WorkspaceContextError(f"active release 不存在: {self._relative(release_root)}")
         return release_id, pointer
 
-    def _read_set(
-        self, project_path: Path, session: Path | None, release_pointer: Path | None
-    ) -> list[ContextEvidence]:
-        anchor = self._anchor_file(project_path)
-        paths: list[Path] = []
-        for path in (anchor, session, release_pointer):
-            if path is not None and path not in paths:
-                paths.append(path)
-        return [ContextEvidence(path=self._relative(path), sha256=self._sha256(path)) for path in paths]
+    def _read_set(self, *paths: Path | None) -> list[ContextEvidence]:
+        unique: list[Path] = []
+        for path in paths:
+            if path is not None and path not in unique:
+                unique.append(path)
+        return [
+            ContextEvidence(path=self._relative(path), sha256=self._sha256(path))
+            for path in unique
+        ]
 
     def _anchor_file(self, project_path: Path) -> Path:
         for name in (".copier-answers.yml", ".plc.json"):
@@ -198,14 +239,7 @@ class WorkspaceContextService:
         sessions = sorted(project_path.glob("PM_SESSION_*.md"))
         if len(sessions) == 1:
             return sessions[0]
-        raise WorkspaceContextError(f"项目缺少可验证锚点: {self._relative(project_path)}")
-
-    @staticmethod
-    def _single_match(pattern: re.Pattern[str], content: str, label: str) -> str:
-        values = {value.strip() for value in pattern.findall(content) if value.strip()}
-        if len(values) > 1:
-            raise WorkspaceContextError(f"{label} 存在冲突声明")
-        return next(iter(values), "")
+        raise WorkspaceContextError(f"项目缺少唯一可验证锚点: {self._relative(project_path)}")
 
     @staticmethod
     def _sha256(path: Path) -> str:
@@ -230,15 +264,11 @@ class WorkspaceContextService:
         return f"CTX-{digest.upper()}"
 
     @staticmethod
-    def _is_archived(path: Path) -> bool:
-        return any(part.lower() == "archive" or "归档" in part for part in path.parts)
-
-    @staticmethod
     def _read_text(path: Path) -> str:
         try:
             return path.read_text(encoding="utf-8", errors="replace")
         except OSError as error:
-            raise WorkspaceContextError(f"无法读取 PM_SESSION: {path}") from error
+            raise WorkspaceContextError(f"无法读取文件: {path}") from error
 
     def _require_workspace_path(self, path: Path, label: str) -> None:
         try:

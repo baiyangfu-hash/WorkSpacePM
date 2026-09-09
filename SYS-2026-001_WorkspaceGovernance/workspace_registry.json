@@ -1,0 +1,21 @@
+{
+  "schema_version": "workspace-registry.v1",
+  "projects": [
+    {
+      "project_id": "SYS-2026-001",
+      "project_root": "SYS-2026-001_WorkspaceGovernance",
+      "development_root": "SYS-2026-001_WorkspaceGovernance",
+      "control_project_id": "",
+      "control_pm_session": "",
+      "runtime_root": ""
+    },
+    {
+      "project_id": "SW-2026-008",
+      "project_root": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "development_root": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "control_project_id": "SYS-2026-001",
+      "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
+      "runtime_root": "00_Infrastructure/auto_pm"
+    }
+  ]
+}
