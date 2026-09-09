@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-2839D951",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-007",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "AGENTS.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/01_变更单/CHG-DOCU/CHG-DOCU-2026-007.md"
+  ],
+  "approver": "User/Architect (standing governance authorization)",
+  "approved_at": "2026-09-09T23:29:10.645345+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅生成工作区操作手册并添加入口链接；不修改 Obsidian、技能或运行时代码。"
+  ],
+  "metadata": {}
+}
