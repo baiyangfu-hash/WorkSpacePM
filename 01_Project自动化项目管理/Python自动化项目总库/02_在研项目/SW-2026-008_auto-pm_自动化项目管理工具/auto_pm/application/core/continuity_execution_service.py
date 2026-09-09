@@ -59,19 +59,23 @@ class ContinuityExecutionService:
         now = self._utc_now()
         if not all(value.strip() for value in (run_id, work_id, executor_id, adapter, git_head)):
             raise ContinuityExecutionError("Run 身份、Work、executor、adapter 与 Git HEAD 不能为空")
+        if not lease_token.strip():
+            raise ContinuityExecutionError("lease_token 不能为空")
         if lease_seconds < 60 or lease_seconds > 86_400:
             raise ContinuityExecutionError("lease_seconds 必须在 60 到 86400 之间")
         owned = self._normalize_paths(owned_paths)
         declared = self._normalize_paths(declared_dirty_paths, allow_empty=True)
         observed = self._normalize_paths(observed_dirty_paths, allow_empty=True)
-        if not set(observed).issubset(declared):
+        if not self._paths_covered(observed, declared):
             raise ContinuityExecutionError("存在未声明的 dirty path")
         try:
             work = self._store.get_work(work_id)
             if work.state.value not in {"READY", "IN_PROGRESS"}:
                 raise ContinuityExecutionError("只有 READY/IN_PROGRESS Work 可以创建 Run")
-            if not set(owned).issubset(set(work.scope_paths)):
+            if not self._paths_covered(owned, work.scope_paths):
                 raise ContinuityExecutionError("owned_paths 超出 Work scope")
+            if not self._paths_covered(declared, owned):
+                raise ContinuityExecutionError("declared_dirty_paths 超出 owned_paths")
             values = {
                 "run_id": run_id,
                 "work_id": work_id,
@@ -145,7 +149,7 @@ class ContinuityExecutionService:
             if run.git_head != git_head:
                 raise ContinuityExecutionError("Git baseline drift")
             dirty = self._normalize_paths(dirty_paths, allow_empty=True)
-            if not set(dirty).issubset(set(run.declared_dirty_paths)):
+            if not self._paths_covered(dirty, run.declared_dirty_paths):
                 raise ContinuityExecutionError("Checkpoint 包含未声明的 dirty path")
             clean_evidence = tuple(item.strip() for item in evidence if item.strip())
             if not summary.strip() or not clean_evidence:
@@ -274,6 +278,13 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def get_run(self, run_id: str) -> RunItem:
+        """Return one Run for CLI-side physical Git verification."""
+        try:
+            return self._store.get_run(run_id)
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
     @staticmethod
     def _require_active_lease(
         lease: LeaseItem, owner_id: str, lease_token: str, now: datetime
@@ -303,3 +314,10 @@ class ContinuityExecutionService:
         if not result and not allow_empty:
             raise ContinuityExecutionError("paths 不能为空")
         return tuple(result)
+
+    @staticmethod
+    def _paths_covered(paths: tuple[str, ...], roots: tuple[str, ...]) -> bool:
+        return all(
+            any(path == root or path.startswith(f"{root.rstrip('/')}/") for root in roots)
+            for path in paths
+        )
