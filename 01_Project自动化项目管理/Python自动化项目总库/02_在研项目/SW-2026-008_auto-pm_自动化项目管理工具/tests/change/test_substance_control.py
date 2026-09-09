@@ -17,6 +17,7 @@ def test_substance_checker_catches_placeholders() -> None:
         project_id="DJ-2026-005",
         status="completed",
         has_section_7=True,
+        has_section_8_approval=True,
         has_section_9=True,
         has_section_10_verify=True,
         section_10_conclusion="全部通过",
@@ -39,6 +40,7 @@ def test_substance_checker_passes_on_full_substance() -> None:
         project_id="DJ-2026-005",
         status="completed",
         has_section_7=True,
+        has_section_8_approval=True,
         has_section_9=True,
         has_section_10_verify=True,
         section_10_conclusion="全部验证通过，门禁全绿",
@@ -51,6 +53,37 @@ def test_substance_checker_passes_on_full_substance() -> None:
     }
     violations = SubstanceChecker.check_substance(cr)
     assert violations == []
+
+
+def test_substance_checker_blocks_empty_closure_evidence() -> None:
+    """完成或关闭不能以空审批、实施、验证或结论伪造证据。"""
+    cr = ChangeRequest(
+        change_number="CHG-PLC-2026-998",
+        status="completed",
+        section_10_conclusion="",
+    )
+    cr.sections = {"5": "已实施", "7": "计划", "8": "审批", "9": "", "10": ""}
+    cr.has_section_8_approval = False
+    cr.has_section_9 = False
+    cr.has_section_10_verify = False
+
+    violations = SubstanceChecker.check_substance(cr)
+
+    assert "§8.1 审批记录为空" in violations
+    assert "§9 实施记录为空" in violations
+    assert "§10.1 验证项清单为空" in violations
+    assert "§10.3 验证结论为空" in violations
+
+
+def test_substance_checker_blocks_example_change_numbers() -> None:
+    """示例传播链中的 CHG-xxx/yyy 不得进入完成态。"""
+    cr = ChangeRequest(change_number="CHG-PLC-2026-997", status="closed")
+    cr.sections = {"5": "CHG-xxx → CHG-yyy"}
+
+    violations = SubstanceChecker.check_substance(cr)
+
+    assert "包含未替换占位符: 'CHG-xxx'" in violations
+    assert "包含未替换占位符: 'CHG-yyy'" in violations
 
 
 def test_transition_guard_blocks_empty_substance() -> None:

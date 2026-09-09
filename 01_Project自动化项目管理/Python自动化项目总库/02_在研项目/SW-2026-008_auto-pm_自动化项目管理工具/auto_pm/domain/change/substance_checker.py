@@ -35,14 +35,25 @@ class SubstanceChecker:
         "(待填写)",
         "待补充",
         "CHG-______",
+        "CHG-xxx",
+        "CHG-yyy",
         "[在此填写",
+        "[___________]",
     )
 
     @classmethod
     def check_placeholders(cls, text: str) -> list[str]:
         """检查文本中是否存在未替换的占位符"""
         violations: list[str] = []
-        for p in ("（待填写）", "(待填写)", "待补充", "[在此填写"):
+        for p in (
+            "（待填写）",
+            "(待填写)",
+            "待补充",
+            "CHG-xxx",
+            "CHG-yyy",
+            "[在此填写",
+            "[___________]",
+        ):
             if p in text:
                 violations.append(f"包含未替换占位符: '{p}'")
 
@@ -104,9 +115,19 @@ class SubstanceChecker:
                         violations.append("§5 变更内容表格无有效数据行")
 
             # 3. 完成状态下如果有 §10，严禁结论为“不通过”
-            if "10" in sections and cr.section_10_conclusion:
-                if "不通过" in cr.section_10_conclusion:
-                    violations.append("§10.3 验证结论包含'不通过'")
+            if not getattr(cr, "has_section_8_approval", False):
+                violations.append("§8.1 审批记录为空")
+            if not getattr(cr, "has_section_9", False):
+                violations.append("§9 实施记录为空")
+            if not getattr(cr, "has_section_10_verify", False):
+                violations.append("§10.1 验证项清单为空")
+            conclusion = (cr.section_10_conclusion or "").strip()
+            if not conclusion:
+                violations.append("§10.3 验证结论为空")
+            elif "不通过" in conclusion or "需补充" in conclusion:
+                violations.append("§10.3 验证结论不允许关闭")
+            elif "通过" not in conclusion:
+                violations.append("§10.3 验证结论未声明通过")
 
             # 4. 跨领域受影响声明穿透校验
             cross_violations = cls.check_cross_domain_links(cr, workspace_root=workspace_root)
@@ -182,4 +203,3 @@ class SubstanceChecker:
             if "5" not in sections or not sections["5"].strip():
                 violations.append("§5 变更内容章节缺失或为空")
         return violations
-

@@ -68,6 +68,30 @@ class TestChgGenerator:
             for section in CLOSURE_REQUIRED_SECTIONS
         )
 
+    def test_render_local_change_has_no_cross_domain_placeholders(self) -> None:
+        """LOCAL 单域变更使用明确的不适用语义，而不是关闭占位符。"""
+        content = ChgGenerator().render(
+            ChangeRequest(
+                change_number="CHG-PLC-2026-011",
+                project_id="TEST-2026-001",
+                project_name="测试项目",
+                domain="PLC",
+                business_nature="DEF",
+                impact_scope=["LOCAL"],
+                applicant="张三",
+                apply_date="2026-01-15",
+                planned_date="2026-01-20",
+                urgency="normal",
+                background="测试变更背景",
+                necessity="测试变更必要性",
+                references="测试参考依据",
+            )
+        )
+
+        assert "无跨领域影响（LOCAL 单域变更）" in content
+        assert "CHG-______" not in content
+        assert "[___________]" not in content
+
     def test_render_urgency_critical(self) -> None:
         """测试紧急程度渲染"""
         cr = ChangeRequest(
