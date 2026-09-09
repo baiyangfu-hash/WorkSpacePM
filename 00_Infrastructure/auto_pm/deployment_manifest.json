@@ -3156,7 +3156,7 @@
         "auto_pm/ui/qml/views/workspace/WsVarTableTab.qml": "3c5a1502f5088990d0f6bc7a3601f5f9c63dcf0d24bf93db53241b138c5288b3",
         "auto_pm/ui/qml/views/WorkspaceView.qml": "5ac815343e738113d35145c4c5a121b4eb74eb20e50419badc364b3bdcdb52e1",
         "auto_pm/ui/registry.py": "55fac941bb259d7d33705205a9d10a5ff4d83a049699d61421769938869963f6",
-        "release_meta.json": "7dc72b01fbc0824d89715d7eedfbc50799449286b9a5b46fca04c7a238cd1bde",
+        "release_meta.json": "f50f03e95210015f0b72fb0d9ef8dc59185d993fafcac5bdc16c9aa7de3f6fa5",
         "templates/plc-shared-library/copier.yml": "7ad0cf28c6607391d83395ae25df7d0da974a4a901105e6b2df03cdb04bdebf2",
         "templates/plc-shared-library/template/.copier-answers.yml.jinja": "86a144306ab470a9e23e43b11ea0033896ae7b5bf79abaee197275615c026736",
         "templates/plc-shared-library/template/.gitignore": "9eb666b86785d6fe396e4ddde49af032e52db1bd82b2eda6ea1f61e8ac734887",
