@@ -19,14 +19,15 @@ _UNSAFE_PYTHON_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBA
 _RESOLVE_ONLY_ARGUMENT = "--resolve-only"
 
 
-def _child_environment(cache_root: Path) -> dict[str, str]:
-    """Return an isolated child environment with runtime caches outside releases."""
+def _child_environment(cache_root: Path, workspace_root: Path) -> dict[str, str]:
+    """Return an isolated child environment pinned to the owning workspace."""
     env = dict(os.environ)
     for name in _UNSAFE_PYTHON_ENV:
         env.pop(name, None)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONNOUSERSITE"] = "1"
     env["RUFF_CACHE_DIR"] = str(cache_root)
+    env["AUTO_PM_WORKSPACE"] = str(workspace_root)
     return env
 
 
@@ -47,10 +48,11 @@ def main(argv: list[str] | None = None, *, container: Path | None = None) -> int
     command = [sys.executable, "-B", "-I", "-c", _RELEASE_CHILD, str(release_dir)]
     command.extend(release_args)
     cache_root = resolved_container / ".auto-pm" / "runtime-cache" / "ruff"
+    workspace_root = resolved_container.parent.parent
     return subprocess.run(
         command,
         cwd=release_dir,
-        env=_child_environment(cache_root),
+        env=_child_environment(cache_root, workspace_root),
         check=False,
     ).returncode
 

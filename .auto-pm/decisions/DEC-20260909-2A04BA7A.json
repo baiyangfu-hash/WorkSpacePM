@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-2A04BA7A",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-SCPT-2026-028",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/launcher/launch.py",
+    "00_Infrastructure/auto_pm/tests/launcher/test_launch.py",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-028.md"
+  ],
+  "approver": "User（架构师）",
+  "approved_at": "2026-09-09T22:05:36.354264+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "不得修改 Obsidian 法典、active release 内容、两个业务项目源码或其他既有 dirty 文件。"
+  ],
+  "metadata": {}
+}

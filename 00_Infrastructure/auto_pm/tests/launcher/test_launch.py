@@ -74,7 +74,34 @@ def test_child_environment_routes_ruff_cache_outside_release(
     monkeypatch.setenv("RUFF_CACHE_DIR", "unsafe")
 
     cache_root = Path("C:/container/.auto-pm/runtime-cache/ruff")
-    environment = launcher._child_environment(cache_root)
+    workspace_root = Path("C:/workspace")
+    environment = launcher._child_environment(cache_root, workspace_root)
 
     assert "PYTHONPATH" not in environment
     assert environment["RUFF_CACHE_DIR"] == str(cache_root)
+    assert environment["AUTO_PM_WORKSPACE"] == str(workspace_root)
+
+
+def test_main_pins_child_to_workspace_owning_container(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = _load_launcher()
+    workspace_root = tmp_path / "workspace"
+    container = _write_valid_container(
+        workspace_root / "00_Infrastructure" / "auto_pm"
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> object:
+        captured["command"] = command
+        captured.update(kwargs)
+        return type("Completed", (), {"returncode": 0})()
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+
+    assert launcher.main(["pm", "resume", "SW-2026-008"], container=container) == 0
+    environment = captured["env"]
+    assert isinstance(environment, dict)
+    assert environment["AUTO_PM_WORKSPACE"] == str(workspace_root)
+    assert captured["cwd"] == container / "releases" / "1.2.4-test"
