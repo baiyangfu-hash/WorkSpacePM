@@ -1,0 +1,29 @@
+// ============================================================================
+// OB1.scl - {{ project_name }} 主组织块 (全工站结构体整块传递架构)
+// ============================================================================
+// 描述:
+//   {{ project_id }} {{ project_name }} PLC 控制系统主循环调度程序.
+//   全工站通过 VAR_IN_OUT 结构体整块传递 (Struct Chunk Passing), 遵循 LSP-905 规范.
+// ============================================================================
+ORGANIZATION_BLOCK OB1
+
+BEGIN
+    // ============================================================================
+    // 第1部分：外部设备交互 (ST_ExternalDevice)
+    // ============================================================================
+    GlobalVars.fbExternalDevice(io_stExternal := GlobalVars.stExternal);
+    GlobalVars.stExternal := GlobalVars.fbExternalDevice.io_stExternal;
+
+    // ============================================================================
+    // 第2部分：工位1 动作机构 (ST_Station1)
+    // ============================================================================
+    GlobalVars.fbStation1(io_stStation := GlobalVars.stStation1);
+    GlobalVars.stStation1 := GlobalVars.fbStation1.io_stStation;
+
+    // ============================================================================
+    // 第3部分：公共报警与 OMAC 状态机 (ST_CommonAlarm)
+    // ============================================================================
+    GlobalVars.fbCommonAlarm(io_stGlobal := GlobalVars.stGlobal);
+    GlobalVars.stGlobal := GlobalVars.fbCommonAlarm.io_stGlobal;
+
+END_ORGANIZATION_BLOCK

@@ -1,0 +1,12 @@
+id: "CST-QUAL-001"
+name: "提交前强制通过静态门禁"
+description: "提交代码前必须通过 ruff 与 mypy 检查"
+type: pre_commit
+severity: error
+scope:
+  patterns:
+    - "auto_pm/**/*.py"
+rules:
+  - type: "gate_check"
+    description: "确保无 ruff 和 mypy 阻断性错误"
+auto_fix: false

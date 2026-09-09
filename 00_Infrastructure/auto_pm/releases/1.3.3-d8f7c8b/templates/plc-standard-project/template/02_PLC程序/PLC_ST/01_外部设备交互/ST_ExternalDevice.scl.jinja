@@ -1,0 +1,66 @@
+// ============================================================================
+// ST_ExternalDevice.scl - 通用外部设备交互数据总线 (STD-820)
+// ============================================================================
+// 项目: {{ project_id }} {{ project_name }}
+// 遵循规范: STD-820 设备间信号交握与外部对接规范
+// 特性:
+//   - 上游 8 步进料闭环握手 (Infeed Handshake)
+//   - 下游 8 步出料闭环握手 (Outfeed Handshake)
+//   - 4.0s ON / 4.0s OFF 双向心跳翻转与 12.0s 超时监视
+// ============================================================================
+
+TYPE ST_UpstreamDocking :
+STRUCT
+    // --- 本机 -> 上游流水线 (Machine Output / Upstream Input) ---
+    bMachine_ReadyIn            : BOOL;     (* (1) 机器准备好进料信号 *)
+    bMachine_RcvModuleIdAck     : BOOL;     (* (4) 机器收到组件ID信号 *)
+    bMachine_AllowInfeed        : BOOL;     (* (5) 机器允许上游进料信号 *)
+    bMachine_InfeedArrived      : BOOL;     (* (7) 机器给上游组件进料到位信号 *)
+    bMachine_HeartbeatToUp      : BOOL;     (* [心跳] 本机向上游心跳 (4s ON / 4s OFF) *)
+
+    // --- 上游流水线 -> 本机 (Upstream Output / Machine Input) ---
+    bUpstream_LineReady         : BOOL;     (* (2) 上游流水线准备好信号 *)
+    bUpstream_SendModuleId      : BOOL;     (* (3) 上游流水线传组件ID信号 *)
+    bUpstream_InfeedReq         : BOOL;     (* (6) 上游流水线入料请求信号 *)
+    bUpstream_InfeedArrivedAck  : BOOL;     (* (8) 上游回收收到进料到位信号 *)
+    bUpstream_HeartbeatFromUp   : BOOL;     (* [心跳] 上游输入心跳 *)
+
+    // --- 数据与诊断 ---
+    sRcvModuleID                : STRING[32]; (* 接收的组件 ID *)
+    bUpstreamComFault           : BOOL;     (* 上游通讯心跳超时故障 (12s) *)
+    iInfeedStep                 : INT;      (* 进料握手当前步序 0~8 *)
+END_STRUCT
+END_TYPE
+
+TYPE ST_DownstreamDocking :
+STRUCT
+    // --- 本机 -> 下游流水线 (Machine Output / Downstream Input) ---
+    bMachine_ReadyOut           : BOOL;     (* (2) 机器准备好出料信号 *)
+    bMachine_SendModuleId       : BOOL;     (* (3) 机器传组件ID信号 *)
+    bMachine_OutfeedReq         : BOOL;     (* (6) 机器给下游出料请求信号 *)
+    bMachine_OutfeedArrivedAck  : BOOL;     (* (8) 机器回收收到进料到位信号 *)
+    bMachine_HeartbeatToDown    : BOOL;     (* [心跳] 本机向下游心跳 (4s ON / 4s OFF) *)
+
+    // --- 下游流水线 -> 本机 (Downstream Output / Machine Input) ---
+    bDownstream_LineReady       : BOOL;     (* (1) 下游流水线准备好信号 *)
+    bDownstream_RcvModuleIdAck  : BOOL;     (* (4) 下游流水线收到组件ID信号 *)
+    bDownstream_AllowOutfeed    : BOOL;     (* (5) 下游流水线允许机器出料信号 *)
+    bDownstream_OutfeedArrived  : BOOL;     (* (7) 下游流水线给机器进料到位信号 *)
+    bDownstream_HeartbeatFromDown: BOOL;    (* [心跳] 下游输入心跳 *)
+
+    // --- 数据与诊断 ---
+    sSendModuleID               : STRING[32]; (* 发送给下游的组件 ID *)
+    bDownstreamComFault         : BOOL;     (* 下游通讯心跳超时故障 (12s) *)
+    iOutfeedStep                : INT;      (* 出料握手当前步序 0~8 *)
+END_STRUCT
+END_TYPE
+
+TYPE ST_ExternalDevice :
+STRUCT
+    stUpstream      : ST_UpstreamDocking;
+    stDownstream    : ST_DownstreamDocking;
+    bEmergencyStop  : BOOL;                 (* 外部总线急停 (1=正常, 0=急停) *)
+    bSafetyDoorOK   : BOOL;                 (* 外部安全门锁信号 *)
+    bAnyComFault    : BOOL;                 (* 外部通讯综合故障 *)
+END_STRUCT
+END_TYPE

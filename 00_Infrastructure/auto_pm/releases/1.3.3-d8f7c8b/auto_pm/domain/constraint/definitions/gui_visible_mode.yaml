@@ -1,0 +1,13 @@
+id: "CST-TEST-001"
+name: "GUI 测试强制默认可见模式"
+description: "GUI 自动化测试默认需以可见窗口模式运行，禁止默认 offscreen"
+type: pre_commit
+severity: warning
+scope:
+  patterns:
+    - "tests/qml/**/*.py"
+    - "tests/ui/**/*.py"
+rules:
+  - type: "no_offscreen_default"
+    description: "GUI 测试用例不得默认硬编码 OFFSCREEN 模式"
+auto_fix: false

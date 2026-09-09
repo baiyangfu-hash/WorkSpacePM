@@ -1,0 +1,197 @@
+// ============================================================================
+// FB_1001_Station1.scl - {{ project_name }} 工位1 动作机构控制功能块
+// ============================================================================
+// 描述:
+//   实现 {{ project_id }} {{ project_name }} 工位1 进料、定位、夹紧、加工与出料控制.
+//   严格遵循 LSP-905 语法白名单、DINT 毫秒定时器三段式、CASE 防死锁 ELSE 与结构体整块传递.
+// ============================================================================
+
+FUNCTION_BLOCK FB_1001_Station1
+
+VAR_IN_OUT
+    io_stStation    : ST_Station1;      // 工位1 全局交互结构体 (整块传递)
+END_VAR
+
+VAR
+    // 局部状态变量
+    s_iStep         : DINT;             // 内部工步号
+    s_bRunning      : BOOL;             // 运行中状态
+    s_bDone         : BOOL;             // 本周期完成脉冲
+    s_bAlarm        : BOOL;             // 站级报警
+    s_iAlarmCode    : DINT;             // 报警代码
+
+    // 局部执行器指令
+    s_bMotorFwd     : BOOL;             // 进料电机
+    s_bCyl1Extend   : BOOL;             // 夹紧伸出
+    s_bCyl1Retract  : BOOL;             // 夹紧缩回
+    s_bCyl2Extend   : BOOL;             // 顶升伸出
+    s_bCyl2Retract  : BOOL;             // 顶升缩回
+
+    // 定时器实例 (DINT 毫秒三段式)
+    s_dStepTimer    : DINT;             // 工步计时累加器 (ms)
+    s_dDebounceTimer: DINT;             // 光电消抖计时器 (ms)
+END_VAR
+
+VAR_TEMP
+    t_bAutoEnable   : BOOL;
+    t_bReset        : BOOL;
+    t_bInPos        : BOOL;
+    t_bWorkPos      : BOOL;
+    t_bCyl1Ext      : BOOL;
+    t_bCyl1Ret      : BOOL;
+    t_bCyl2Ext      : BOOL;
+    t_bCyl2Ret      : BOOL;
+    t_dCylTimeout   : DINT;
+    t_dProcessTime  : DINT;
+END_VAR
+
+CONST
+    STEP_IDLE           : DINT := 0;    // 待机就绪
+    STEP_WAIT_MATERIAL  : DINT := 1;    // 等待来料
+    STEP_FEEDING        : DINT := 2;    // 进料输送
+    STEP_CLAMP          : DINT := 10;   // 夹紧顶升
+    STEP_PROCESS        : DINT := 20;   // 工艺加工
+    STEP_RELEASE_UNLOAD : DINT := 30;   // 松开出料
+END_CONST
+
+BEGIN
+    // 1. 解包临时变量
+    t_bAutoEnable  := io_stStation.stControl.bAutoEnable;
+    t_bReset       := io_stStation.stControl.bReset;
+    t_bInPos       := io_stStation.stSensors.bInPosSensor;
+    t_bWorkPos     := io_stStation.stSensors.bWorkPosSensor;
+    t_bCyl1Ext     := io_stStation.stSensors.bCyl1Extended;
+    t_bCyl1Ret     := io_stStation.stSensors.bCyl1Retracted;
+    t_bCyl2Ext     := io_stStation.stSensors.bCyl2Extended;
+    t_bCyl2Ret     := io_stStation.stSensors.bCyl2Retracted;
+
+    t_dCylTimeout  := io_stStation.stConfig.dCylTimeoutMs;
+    IF t_dCylTimeout <= 0 THEN
+        t_dCylTimeout := 5000; // 默认 5000ms
+    END_IF;
+
+    t_dProcessTime := io_stStation.stConfig.dProcessTimeMs;
+    IF t_dProcessTime <= 0 THEN
+        t_dProcessTime := 2000; // 默认 2000ms
+    END_IF;
+
+    // 2. 故障复位
+    IF t_bReset THEN
+        s_bAlarm := FALSE;
+        s_iAlarmCode := 0;
+        IF s_iStep <> STEP_IDLE AND NOT t_bAutoEnable THEN
+            s_iStep := STEP_IDLE;
+        END_IF;
+    END_IF;
+
+    // 3. 主工步状态机
+    IF NOT t_bAutoEnable OR s_bAlarm THEN
+        // 非使能或报警模式下，安全保持
+        s_bMotorFwd    := FALSE;
+        s_bCyl1Extend  := FALSE;
+        s_bCyl1Retract := TRUE;
+        s_bCyl2Extend  := FALSE;
+        s_bCyl2Retract := TRUE;
+        s_bRunning     := FALSE;
+        s_bDone        := FALSE;
+    ELSE
+        s_bRunning := TRUE;
+
+        CASE s_iStep OF
+            STEP_IDLE:
+                s_bDone := FALSE;
+                s_bMotorFwd := FALSE;
+                s_bCyl1Extend := FALSE;
+                s_bCyl1Retract := TRUE;
+                s_bCyl2Extend := FALSE;
+                s_bCyl2Retract := TRUE;
+                IF t_bCyl1Ret AND t_bCyl2Ret THEN
+                    s_iStep := STEP_WAIT_MATERIAL;
+                    s_dStepTimer := 0;
+                END_IF;
+
+            STEP_WAIT_MATERIAL:
+                IF t_bInPos THEN
+                    s_iStep := STEP_FEEDING;
+                    s_dStepTimer := 0;
+                END_IF;
+
+            STEP_FEEDING:
+                s_bMotorFwd := TRUE;
+                s_dStepTimer := s_dStepTimer + 10;
+                IF t_bWorkPos THEN
+                    s_bMotorFwd := FALSE;
+                    s_iStep := STEP_CLAMP;
+                    s_dStepTimer := 0;
+                ELSIF s_dStepTimer > 10000 THEN
+                    // 进料超时报警
+                    s_bAlarm := TRUE;
+                    s_iAlarmCode := 101;
+                    s_bMotorFwd := FALSE;
+                END_IF;
+
+            STEP_CLAMP:
+                s_bCyl1Extend := TRUE;
+                s_bCyl1Retract := FALSE;
+                s_bCyl2Extend := TRUE;
+                s_bCyl2Retract := FALSE;
+                s_dStepTimer := s_dStepTimer + 10;
+                IF t_bCyl1Ext AND t_bCyl2Ext THEN
+                    s_iStep := STEP_PROCESS;
+                    s_dStepTimer := 0;
+                ELSIF s_dStepTimer > t_dCylTimeout THEN
+                    // 夹紧/顶升超时报警
+                    s_bAlarm := TRUE;
+                    s_iAlarmCode := 102;
+                END_IF;
+
+            STEP_PROCESS:
+                s_dStepTimer := s_dStepTimer + 10;
+                IF s_dStepTimer >= t_dProcessTime THEN
+                    s_iStep := STEP_RELEASE_UNLOAD;
+                    s_dStepTimer := 0;
+                END_IF;
+
+            STEP_RELEASE_UNLOAD:
+                s_bCyl1Extend := FALSE;
+                s_bCyl1Retract := TRUE;
+                s_bCyl2Extend := FALSE;
+                s_bCyl2Retract := TRUE;
+                s_dStepTimer := s_dStepTimer + 10;
+                IF t_bCyl1Ret AND t_bCyl2Ret THEN
+                    s_bMotorFwd := TRUE;
+                    IF NOT t_bWorkPos THEN
+                        s_bMotorFwd := FALSE;
+                        s_bDone := TRUE;
+                        s_iStep := STEP_IDLE;
+                        s_dStepTimer := 0;
+                    END_IF;
+                ELSIF s_dStepTimer > t_dCylTimeout THEN
+                    // 松开/下降超时报警
+                    s_bAlarm := TRUE;
+                    s_iAlarmCode := 103;
+                END_IF;
+
+            ELSE
+                // 防死锁安全分支
+                s_iStep := STEP_IDLE;
+                s_dStepTimer := 0;
+        END_CASE;
+    END_IF;
+
+    // 4. 统一末尾封包与回写
+    io_stStation.stStatus.iStep       := s_iStep;
+    io_stStation.stStatus.bRunning     := s_bRunning;
+    io_stStation.stStatus.bDone        := s_bDone;
+    io_stStation.stStatus.bAlarm       := s_bAlarm;
+    io_stStation.stStatus.iAlarmCode   := s_iAlarmCode;
+    io_stStation.stStatus.bWaitMaterial:= (s_iStep = STEP_WAIT_MATERIAL);
+    io_stStation.stStatus.bProcessing  := (s_iStep = STEP_PROCESS);
+
+    io_stStation.stActuators.bMotorFwd   := s_bMotorFwd;
+    io_stStation.stActuators.bCyl1Extend := s_bCyl1Extend;
+    io_stStation.stActuators.bCyl1Retract:= s_bCyl1Retract;
+    io_stStation.stActuators.bCyl2Extend := s_bCyl2Extend;
+    io_stStation.stActuators.bCyl2Retract:= s_bCyl2Retract;
+
+END_FUNCTION_BLOCK

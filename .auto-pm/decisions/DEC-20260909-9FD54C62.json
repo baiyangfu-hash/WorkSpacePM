@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-9FD54C62",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-SCPT-2026-031",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/",
+    "00_Infrastructure/auto_pm/deployment_manifest.json",
+    "00_Infrastructure/auto_pm/active_release.json",
+    "00_Infrastructure/auto_pm/previous_release.json",
+    ".auto-pm/reports/CHG-SCPT-2026-031_release_validation.md",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-031.md"
+  ],
+  "approver": "User/Architect",
+  "approved_at": "2026-09-09T23:03:35.765444+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅允许从提交 d8f7c8b8 导出不可变发布物；先验证哈希和隔离运行，再切换 active/previous 指针。"
+  ],
+  "metadata": {}
+}

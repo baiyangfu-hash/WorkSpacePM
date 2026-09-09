@@ -1,0 +1,21 @@
+TYPE ST_CommonAlarm :
+STRUCT
+    // === 输入变量 ===
+    i_bReset                    : BOOL := FALSE;   // 系统复位
+    i_iConveyorAlarm            : INT := 0;        // 输送机报警码
+    i_iPickPlaceAlarm           : INT := 0;        // 取放料机构报警码
+    i_iFeederAlarm              : INT := 0;        // 打胶送料机构报警码
+
+    // === 输出变量 ===
+    o_wGlobalAlarmWord          : WORD := 16#0;    // 全局报警字
+    o_iCurrentAlarmCode         : INT := 0;        // 当前最高优先级报警码
+    o_bAnyAlarmActive           : BOOL := FALSE;   // 任意报警激活
+    o_iMESAlarmCount            : INT := 0;        // MES报警计数
+    o_iMESAlarmQueue            : INT := 0;        // MES报警队列
+    o_bNewAlarmFlag             : BOOL := FALSE;   // 新报警标志
+    o_iStationAlarmStatus       : INT := 0;        // 工站报警汇总状态
+    o_bConveyorAlarmActive      : BOOL := FALSE;   // 输送机报警激活
+    o_bPickPlaceAlarmActive     : BOOL := FALSE;   // 取放料报警激活
+    o_bFeederAlarmActive        : BOOL := FALSE;   // 打胶送料报警激活
+END_STRUCT;
+END_TYPE

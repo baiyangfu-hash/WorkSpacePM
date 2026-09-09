@@ -1,0 +1,11 @@
+{
+  "schema_version": "release_metadata.v1",
+  "release_id": "1.3.3-d8f7c8b",
+  "source_commit": "d8f7c8b8",
+  "version": "1.3.3",
+  "built_at": "2026-09-09T23:01:28Z",
+  "builder": {
+    "interpreter": "3.12.14",
+    "description": "Continuity v2 control-plane release from committed Git tree"
+  }
+}

@@ -1,0 +1,20 @@
+// ============================================================================
+// basic_test.scltest - {{ project_name }} OB1主程序集成测试
+// ============================================================================
+// 项目: {{ project_id }} {{ project_name }}
+// ============================================================================
+
+TEST_CASE "TC01_Global_EmergencyStop"
+    SET GlobalVars.stGlobal.bPowerOn := TRUE;
+    SET GlobalVars.stGlobal.bEmergencyStop := FALSE;
+    WAIT_CYCLES 3;
+    ASSERT GlobalVars.stGlobal.bEmergencyStop = FALSE;
+END_TEST_CASE
+
+TEST_CASE "TC02_AutoRunning_Start"
+    SET GlobalVars.stGlobal.bPowerOn := TRUE;
+    SET GlobalVars.stGlobal.bEmergencyStop := TRUE;
+    SET GlobalVars.stGlobal.bAutoRunning := TRUE;
+    WAIT_CYCLES 3;
+    ASSERT GlobalVars.stGlobal.bAutoRunning = TRUE;
+END_TEST_CASE
