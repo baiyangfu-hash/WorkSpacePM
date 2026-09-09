@@ -22,7 +22,7 @@
 
 ## 2. Current Focus（当前焦点）
 
-- current_focus: **CHG-DOCU-2026-008 已完成验收并关闭，当前待精确提交。当前研发母体 HEAD 为 153c7d23；CHG-SCPT-2026-193 与 CHG-SCPT-2026-194 已提交并通过各自回归。活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移和 CHG-SCPT-2026-197 上下文包；CHG-SCPT-2026-195/196/197 按用户指令暂停，不得执行。**
+- current_focus: **CHG-DOCU-2026-008 已完成验收、关闭并提交于 `88d06e74`。当前研发母体 HEAD 为 `88d06e74`；CHG-SCPT-2026-193 与 CHG-SCPT-2026-194 已提交并通过各自回归。活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移和 CHG-SCPT-2026-197 上下文包；CHG-SCPT-2026-195/196/197 按用户指令暂停，不得执行。**
 - risks_dependencies:
   - Ruff 静态代码检查已实现 100% Clean Exit (0 告警)
   - IndustrialErrorMapper 统一异常转译上线并补充 10 项单测
@@ -119,7 +119,7 @@
   - 2026-09-08 [已验收关闭] CHG-SCPT-2026-192 Retrofit：修正 CHG 关闭门禁对二级标题及嵌套子章节的误判；`tests/change/test_change_service.py` 39 passed，CHG-192 closed。
   - 2026-09-09 [已实施] CHG-SCPT-2026-193：项目内 CHG 结构共享契约已提交于 `08f9c7a7`；生成、解析、编辑与关闭章节集合统一消费项目代码契约。
   - 2026-09-09 [已实施] CHG-SCPT-2026-194：关闭前占位符、空审批/实施/验证证据和非通过结论门禁已提交于 `153c7d23`；LOCAL 单域生成件使用明确不适用语义。
-  - 2026-09-09 [已实施] CHG-DOCU-2026-008：建立活动技术债台账与历史 CHG 兼容清单，校准本 PM_SESSION 当前焦点、暂停范围和后续 WBS；决策包 `DEC-20260909-A23ED6B8`，handoff `AI-20260909-CHG-DOCU-008`。
+  - 2026-09-09 [已关闭] CHG-DOCU-2026-008：建立活动技术债台账与历史 CHG 兼容清单，校准本 PM_SESSION 当前焦点、暂停范围和后续 WBS；决策包 `DEC-20260909-A23ED6B8`，handoff `AI-20260909-CHG-DOCU-008` 已 consumed，精确提交 `88d06e74`。
 
 ## 6. Execution Log Summary
 
@@ -157,7 +157,7 @@
   - current_state: [已关闭] 当前仅治理项目文档；CHG-195/196/197 暂停，历史 CHG 原文只读保留；handoff 已由 PM 消费。
   - read_first: 活动技术债台账、历史 CHG 兼容清单、本 PM_SESSION、CHG-DOCU-2026-008。
 ## 9. Next Actions
-- [已关闭待提交] CHG-DOCU-2026-008 | 项目级技术债与历史 CHG 兼容登记已完成；doc check、项目级 PM_SESSION check、台账对账和全量回归均通过，待精确提交。
+- [已关闭] CHG-DOCU-2026-008 | 项目级技术债与历史 CHG 兼容登记已完成；doc check、项目级 PM_SESSION check、台账对账和全量回归均通过；commit=`88d06e74`。
 - [暂停] CHG-SCPT-2026-195/196/197 | precondition=用户重新授权；done_when=分别建立新的决策包与执行回执，不得由本包隐式启动。
 - [待讨论] 新发现的问题 | precondition=CHG-DOCU-2026-008 完成验收；done_when=逐项确认是否并入现有债务、建立新 CHG 或形成不处理裁决。
 - [已解冻] Cockpit OS 原 WBS/Wave A/Wave B | 用户于 2026-09-08 明确授权最终验收并解冻；CHG-SCPT-2026-188～191 已 closed；后续按 `02_规划/010_Cockpit_OS_后续原子迭代WBS_PM.md` 逐包报批。
