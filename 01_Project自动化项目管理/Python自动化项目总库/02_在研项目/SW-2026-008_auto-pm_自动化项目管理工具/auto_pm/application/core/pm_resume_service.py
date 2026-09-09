@@ -92,36 +92,9 @@ class PmResumeService:
         subject_session: Path,
         control_project_id: str,
     ) -> Path:
-        candidates = [
-            path
-            for path in sorted(self._workspace_root.rglob("PM_SESSION_*.md"))
-            if not any(
-                "archive" in part.lower() or "归档" in part or part == ".auto-pm"
-                for part in path.parts
-            )
-        ]
         if control_project_id:
-            matches = [path for path in candidates if self._project_id_from_session(path) == control_project_id]
-            if len(matches) != 1:
-                raise PmResumeError(f"control_project_id 未唯一解析到 PM_SESSION: {control_project_id}")
-            return matches[0]
-        referenced = [
-            path
-            for path in candidates
-            if path != subject_session and project_id in self._read_text(path)
-        ]
-        if len(referenced) == 1:
-            return referenced[0]
-        if len(referenced) > 1:
-            system_control = [
-                path for path in referenced if self._project_id_from_session(path).startswith("SYS-")
-            ]
-            if len(system_control) == 1:
-                return system_control[0]
-            current = [path for path in referenced if "current_focus" in self._read_text(path)]
-            if len(current) == 1:
-                return current[0]
-            raise PmResumeError("检测到多个治理 PM_SESSION；请显式提供 --control-pid")
+            control_fact = self._facts.collect(control_project_id)
+            return Path(control_fact.pm_session.path)
         return subject_session
 
     @staticmethod
@@ -191,4 +164,3 @@ class PmResumeService:
         if "stale" in states:
             return "执行端失联：审查 expired 请求后由 PM 重派或关闭。"
         return "阶段 0：基于事实包完成影响分析，再进入阶段 1 报批。"
-
