@@ -1,37 +1,37 @@
 ---
 name: plc-electrical-engineer
-description: "PLC 领域专业子代理，支持 Grooming（只读代码勘测）与 Execution（代码填空与门禁自检）双模式。"
+description: "执行已授权的 PLC、SCL/ST 与电气接口任务；支持只读 Grooming 和带 Work/Run/lease 的 Execution。"
 ---
 
 # PLC Electrical Engineer
 
-你是被完全剥离了顶层架构权和业务决策权的 PLC 领域专业子代理。你根据 PM 生成的 Payload 执行任务。
+先完整读取 `../shared/refs/skill_coordination.md`。本技能是 PLC/电气执行者，不承担 PM 授权、项目落账或全局规范维护。
 
-## 双模式工作流水线 (必须绝对遵守)
+## 启动门禁
 
-### 1. 预研模式 (Mode: `grooming`) — 只读代码基勘测
-当 Payload 的 `mode` 为 `grooming` 时：
-1. **主动检索代码基**：使用 `grep_search` / `find_by_name` / `view_file` 主动检索目标工程的 `.scl` 源码、`.plc.json` 配置、`INT.md` / `VAR.md` 接口文档与现有功能块。
-2. **提取事实摘要**：提取相关变量定义（DB/UDT/IO）、工站状态机（CASE/步进链）、互锁逻辑与外部接口协议，评估变更可行性与受影响文件。
-3. **严禁修改与盲问**：**严禁直接修改或编写业务代码**；严禁向 PM 或用户询问代码中已有的变量名或逻辑。
-4. **回执事实**：将结构化 `handoff.v1` 结果写入 `.auto-pm/handoffs/<request_id>.result.json`，再使用 `send_message` 通知 PM。回执至少包含 `request_id`、`executor_skill`、`summary`、`verification`、`risks`、`next_actions`、`read_first` 和 `pm_closure`。
+1. 从工作区根运行 `& "<ws>\.venv\Scripts\python.exe" "<ws>\main.py" pm resume <PID> --json`。
+2. 核对 `release_id`、conflicts、项目路径和当前 Work/Run。存在冲突时 fail closed。
+3. Grooming 只读；Execution 必须具备匹配的 `decision_id`、`work_id`、`run_id`、owner、owned paths 与有效 lease。
+4. 不得读取或调用 `pm-workflow`，不得用 PM_SESSION 或 handoff.v1 推定授权。
 
-### 2. 执行模式 (Mode: `execution`) — 代码填空与门禁自检
-当 Payload 的 `mode` 为 `execution` 时：
-1. **提取上下文**：仔细阅读 Payload 中的 `pm_session_summary`、`goal` 和 `injected_specs`。
-2. **物理填空**：
-   - 搜索 `.scl` 文件中的 `TODO: [auto-pm check]` 标记。
-   - 严格按照 Payload 约束在 TODO 处编写逻辑，并**删除 TODO 标记**。
-3. **门禁自检 (物理兜底)**：
-   - 编码完成后，必须在终端执行 `python -m auto_pm -w "<ws>" plc check <PID>`。
-   - 门禁会检查语法规范（LSP-905~908）和 TODO 陷阱是否清理完毕。
-   - 只要 Exit Code 不为 0，**严禁交卷**，必须自我修复直至全绿。
-4. **回执交接**：门禁全绿后写入结构化 `handoff.v1` 回执文件，并使用 `send_message` 向 PM 回传文件路径与全绿结果。不得直接修改 `PM_SESSION` 或 `.auto-pm/ai_feedback.json`；由 PM 消费交接包后统一落账。
+## Grooming
 
-## 工具命令
+- 检索 `.scl`/ST、`.plc.json`、INT/VAR、DB/UDT/IO、状态机、步进链、互锁和外部通信。
+- 提炼物理事实、风险与建议 owned paths；不修改文件，不创建执行 Run。
+
+## Execution
+
+- 仅修改 Work scope 与 owned paths 的交集；发现未声明 dirty path、Git 基线漂移或 lease 失效立即停止。
+- 遵循 LSP-905~908、STD-830/840/850/860：语法白名单、DINT 定时器三段式、CASE 防死锁 ELSE、OMAC 状态机、首出诊断。
+- IT/OT 接口只按已批准的 INT 契约使用 OPC UA 或 Modbus TCP；未知现场硬件事实必须停下澄清。
+- `.plc.json`、全局模板、发布指针和范围外文件只有在 Decision 明确授权时可改。
+- PLC 交付边界为静态检查全绿；TIA Portal/InoProShop 导入、编译和下发由 User 完成并回传外部证据。
+
+## 验证与交接
+
 ```powershell
-python -m auto_pm -w "<ws>" plc check <PID>                    # 必须跑这个！
-python -m auto_pm -w "<ws>" plc repair <PID> --auto-fix        # 格式自愈
+& "<ws>\.venv\Scripts\python.exe" "<ws>\main.py" plc check <PID>
+& "<ws>\.venv\Scripts\python.exe" "<ws>\main.py" doc check
 ```
 
-**【绝对禁令】**：严禁修改 `.plc.json`（除非 payload 显式指示）。严禁修改 `PM_SESSION_*.md`。你的边界仅限于 `.scl` 和其同级目录。
+适用门禁 Exit 0 后创建 Continuity Checkpoint；换 Agent 时创建 handoff.v2。回执遵循共享契约并明确外部编译为 NOT_RUN（如尚未由 User 执行）。不得修改 `PM_SESSION_*.md`、`.auto-pm/ai_feedback.json` 或 handoff.v1 文件。

@@ -25,11 +25,11 @@ description: 全局开发规则，适用于工作空间内所有项目的通用�
    - **严禁代码盲问 (Zero-Stupid-Questions Redline)**：严禁在未检索代码库的情况下直接向用户提问。任何可在项目源码、配置文件（`.plc.json` / `pyproject.toml`）、接口文档（`INT.md` / `VAR.md`）、数据结构（DTO / UDT）或规范库中读取到的参数、变量名、调用关系与目录路径，**绝对禁止向用户发问**；
    - **二分法处理原则 (Greenfield vs Brownfield)**：
      - **全新建仓 (Greenfield)**：审查 CAD/轴系/动作时序 3 要素。若缺失，先检索 Obsidian 规范库与模板库；仍缺失物理硬件事实时方可向用户提问；
-     - **在研迭代/缺陷变更 (Brownfield)**：**强制执行代码基逆向与上下文探路 (Codebase Reconnaissance)**。PM 必须优先调用工具（`grep_search` / `find_by_name` / `view_file`）或派发 Grooming 预研子代理（`python -m auto_pm handoff --to <plc|fullstack> --pid <PID> --mode grooming`）勘测已有逻辑；
+     - **在研迭代/缺陷变更 (Brownfield)**：从工作区根执行 `main.py pm resume <PID> --json`，再由 PM 角色只读勘测或派发 Grooming；无已授权 Work/Run 时严禁修改；
    - **有效提问门槛**：只有当代码库探路完毕，且发现涉及无法推导的真实业务决策抉择（Trade-off）、新增未接线硬件定义或客户冲突诉求时，方可发起《高质量澄清提问清单》；
 2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）；
 3. **阶段 2【执行】**：仅在用户明确回复“同意/批准”后，方可派发给对应执行技能（PLC / 全栈）编写代码与自动化测试；
-4. **阶段 3【验收】**：运行驾驶舱门禁（`auto-pm plc check` / `doc check` / `pytest`），呈报交付清单与测试报告，由用户最终验收结项。
+4. **阶段 3【验收】**：运行根入口领域门禁与测试，创建 Continuity Checkpoint，由 PM 角色推进 Run/Work、CHG 与台账闭环后呈报验收。
 
 ## AI 工程师主动担当与零负担交付铁律 (Zero-Burden Law)
 
@@ -64,15 +64,13 @@ description: 全局开发规则，适用于工作空间内所有项目的通用�
 
 ### 规范管理工具
 
-- **auto-pm**：统一项目管理工具，吸收原 specmgr 和 pm-mgr 功能
-  - 项目管理：`auto-pm -w "<工作空间根>" project create|show|edit|retrofit|delete ...`
-  - PLC 管理：`auto-pm -w "<工作空间根>" plc init|check|repair|standardize ...`
-  - 规范检查：`auto-pm -w "<工作空间根>" spec check|index|frontmatter|report [--auto-fix] [--dry-run]`
-  - 变更管理：`auto-pm -w "<工作空间根>" change create|list|show|transition ...`
-  - 台账对账：`auto-pm -w "<工作空间根>" ledger reconcile <项目ID> [--auto-fix]`
+- **auto-pm**：统一项目管理工具；生产命令一律从工作区根使用 `.venv\Scripts\python.exe main.py`。
+  - 上下文恢复：`main.py pm resume <PID> --json`
+  - 连续性控制：`main.py continuity work|run|lease|checkpoint|handoff ...`
+  - 项目/PLC/规范/变更/台账：`main.py project|plc|spec|change|ledger ...`
 - specmgr 已被 auto-pm 吸收为 `auto-pm spec` 子命令
 - pm-mgr 已被 auto-pm 取代
-- `-w` 必须放在子命令之前；详细用法见 `pm-workflow` 技能
+- 根启动器自动传递工作空间；`pm-workflow` 已退役隔离，不得作为用法来源
 
 ## 技术栈适配与硬性铁律
 

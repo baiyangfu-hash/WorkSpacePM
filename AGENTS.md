@@ -2,7 +2,7 @@
 
 本仓库由多个 AI 共用（Trae、Cursor、Codex、Antigravity 等）。**规则真源不重复维护**，各工具读取同一路径。
 
-> **治理冻结（2026-09-09 起）**：`pm-workflow` 已进入 `QUARANTINED`，任何 Agent 不得调用、读取其内容作为当前指令、引用其结论或据其执行 PM 落账。治理期间的唯一计划入口为 `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md`。旧 C/NG-WP/P/REG-WP 计划仅作历史证据，不构成开工授权。解除冻结必须由 User 明示批准并满足该总计划的退出门禁。
+> **退役隔离（2026-09-09 起）**：`pm-workflow` 为 `QUARANTINED / DECOMMISSIONED`，未注册为可用技能。任何 Agent 不得调用、读取其内容作为当前指令、引用其结论或据其执行 PM 落账。PM 作为主 Agent 的治理角色保留，通过 CHG、Decision 与 Continuity v2 工作，不再由技能独占。旧 C/NG-WP/P/REG-WP 计划、PM_SESSION 和 handoff.v1 仅作历史证据。
 
 ## 真源索引
 
@@ -13,7 +13,7 @@
 | 技能注册表 | `.agents/skills.json` |
 | 全局开发规则 | `.trae/rules/project-rule.md` |
 | 跨技能公共契约 | `.trae/skills/shared/refs/skill_coordination.md` |
-| 治理冻结期主入口 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
+| 治理基线 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
 | 隔离对象（禁止使用） | `.trae/skills/pm-workflow/SKILL.md` |
 | 全栈执行 | `.trae/skills/fullstack-engineer/SKILL.md` |
 | PLC 执行 | `.trae/skills/plc-electrical-engineer/SKILL.md` |
@@ -22,7 +22,7 @@
 
 ## 默认分工与技术栈标准
 
-- **治理协调者**：冻结期只按 `26_...总计划` 做事实核验、范围报批与验收；不得使用 `pm-workflow`，不得把 PM_SESSION、handoff 或 `pm resume` 单独视为执行真源。
+- **PM 治理角色**：负责事实核验、CHG、Decision、Work 授权与验收；不得使用 `pm-workflow`，不得把 PM_SESSION、handoff.v1 或聊天文字视为执行真源。
 - **plc-electrical-engineer**：PLC 工程执行主力，全面遵循 Siemens LSP 扩展生态及 LSP-905~908 规范（语法白名单、DINT 定时器三段式、CASE 防死锁 ELSE、.plc.json 依赖）与汽车制造级标准（STD-830 OMAC 状态机、STD-840 典型设备块、STD-850 步进链、STD-860 首出诊断）
 - **fullstack-engineer**：Python/高级语言全栈执行主力，全面遵循 DEV-300（Google SRE 零崩溃/白盒日志/黄金信号）与 DEV-210/DEV-216/DEV-218（PySide6+QML 5 层整洁架构、Bridge/DTO、QRunnable 线程模型、Ruff+Mypy）
 - **基础设施**：`.trae/` 由 Trae 生态维护；其他 AI 只读，除非用户明确要求修改
@@ -34,11 +34,11 @@
    - **严禁代码盲问 (Zero-Stupid-Questions Redline)**：严禁在未检索代码库的情况下直接向用户提问。任何可在项目源码、配置文件（`.plc.json` / `pyproject.toml`）、接口文档（`INT.md` / `VAR.md`）、数据结构（DTO / UDT）或规范库中读取到的参数、变量名、调用关系与目录路径，**绝对禁止向用户发问**；
    - **二分法处理原则 (Greenfield vs Brownfield)**：
      - **全新建仓 (Greenfield)**：审查 CAD/轴系/动作时序 3 要素。若缺失，先检索 Obsidian 规范库与模板库；仍缺失物理硬件事实时方可向用户提问；
-     - **在研迭代/缺陷变更 (Brownfield)**：**强制执行代码基逆向与上下文探路 (Codebase Reconnaissance)**。PM 必须优先调用工具（`grep_search` / `find_by_name` / `view_file`）或派发 Grooming 预研子代理（`python -m auto_pm handoff --to <plc|fullstack> --pid <PID> --mode grooming`）勘测已有逻辑；
+     - **在研迭代/缺陷变更 (Brownfield)**：从工作区根执行 `main.py pm resume <PID> --json`，再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
    - **有效提问门槛**：只有当代码库探路完毕，且发现涉及无法推导的真实业务决策抉择（Trade-off）、新增未接线硬件定义或客户冲突诉求时，方可发起《高质量澄清提问清单》；
 2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）；
 3. **阶段 2【执行】**：仅在用户明确回复“同意/批准”后，方可派发给对应执行技能（PLC / 全栈）编写代码与自动化测试。严禁在对话框要求或输出长篇说明书草稿，文档骨架由 Copier 脚手架生成并填空；
-4. **阶段 3【验收】**：执行端回执后，主 Agent 必须先完成 **PM 收尾落账**（`change create` 变更单 → 回写 PM_SESSION §8/§3 → `ledger reconcile` 对账），再运行驾驶舱门禁（`auto-pm plc check` / `auto-pm doc check [--strict]` / `pytest`），呈报交付清单与测试报告，由用户最终验收结项。**PM 落账未完成前，严禁宣布收口或结项。**
+4. **阶段 3【验收】**：执行端创建 Checkpoint 并回执后，主 Agent 核验 Git/门禁证据，推进 Run/Work 与 CHG 状态并执行 `main.py ledger reconcile <PID>`。PM_SESSION 仅按需刷新项目摘要。闭环未完成前不得宣布结项。
 
 ## 子代理物理隔离法则（执行权剥离）
 
@@ -46,7 +46,7 @@
 2. **预研与执行分流**：
    - **阶段 0 预研模式（`--mode grooming`）**：PM 调度领域子代理执行只读探路与代码上下文勘测，子代理以 `handoff_result` 回传事实摘要；
    - **阶段 2 执行模式（`--mode execution`）**：用户审批后，PM 褫夺编码权，派发执行子代理进行代码填空、门禁自检与测试验证。
-3. **强制契约化交接**：派发前必须生成结构化 `skill_context`（含 baseline_documents、goal、strict_constraints）；执行端以 `handoff_result` 回执，严禁口头转述需求。主 Agent 收到回执后，必须执行 `handoff_result.pm_closure` 指定的收尾落账（变更单 + PM_SESSION 回写 + 台账对账），不得跳过。
+3. **强制契约化交接**：派发前必须建立并授权 Work、启动带 lease 的 Run，声明 Decision 与 owned paths；执行端创建 Checkpoint，并在换 Agent 时使用 handoff.v2。主 Agent 收到回执后完成 Run/Work、CHG 与台账闭环。
 
 ## AI 工程师主动担当与零负担交付铁律 (Zero-Burden Law)
 
@@ -57,8 +57,8 @@
    - **严禁借“主动提问”推卸代码调研责任**：专业系统工程师的第一职责是**自己阅读代码与工程资产**。严禁借“主动提问”之名掩盖偷懒不读代码的行为。只有在彻底查阅代码库后仍存在不可推断的物理/业务边界时，向用户发起的提问才具有专业担当！
 2. **【严禁半成品外溢】**：呈报给用户验收的内容，必须是 100% 经过严格走查、无死链、无运行时报错、全量门禁全绿的最终成果。严禁像“挤牙膏”一样等待用户发现低级破绽。
 3. **【交卷前极限自我施压】**：在向用户报告“已完成”前，AI 必须先扮演最严苛的测试专家，主动完成：
-   - SCL 代码：通过 Linter 语法白名单与全参数调用检查 (`auto-pm plc check`)；
-   - 文档与注释：通过 `auto-pm doc check` 静态扫描（AST 源码注释覆盖率 ≥10%、`TEC.md`/`USAGE.md` 存在且非空）；
+   - SCL 代码：通过根入口 `main.py plc check <PID>` 执行 Linter 语法白名单与全参数调用检查；
+   - 文档与注释：通过根入口 `main.py doc check` 执行静态扫描；
    - HMI 原型：通过导航死链静态扫描（所有按钮均有对应页面，所有 JS 函数均有显式定义）；
    - Python 上位机：通过 pytest 全量测试（100% 绿门禁）与类型检查 (`ruff/mypy`)。
 4. **【绝不就事论事，根治源头产线】**：只要发现一处缺陷，AI 的第一反应必须是**溯源驾驶舱脚手架模板（`templates/`）、代码生成器（`Service`）与门禁规则（`Linter`）**，从源头彻底消缺，并补充自动化防御单测，确保未来生成的项目 100% 不复发。

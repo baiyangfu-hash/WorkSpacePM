@@ -1,0 +1,26 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-B846ED57",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-SCPT-2026-032",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "AGENTS.md",
+    ".agents/skills.json",
+    ".trae/skills/shared/refs/skill_coordination.md",
+    ".trae/skills/fullstack-engineer/SKILL.md",
+    ".trae/skills/plc-electrical-engineer/SKILL.md",
+    ".trae/rules/project-rule.md",
+    ".cursor/rules/workspace-ai-coexistence.mdc",
+    ".agent/rules/project-rule.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-032.md"
+  ],
+  "approver": "User/Architect (standing governance authorization)",
+  "approved_at": "2026-09-09T23:14:48.990703+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "pm-workflow 目录保持原样且继续 QUARANTINED；不得修改 Obsidian；适配层不得持有核心状态；只使用根 main.py 与 continuity.v2。"
+  ],
+  "metadata": {}
+}

@@ -1,7 +1,10 @@
 {
   "entries": [
     {
-      "path": "../.trae/skills"
+      "path": "../.trae/skills/fullstack-engineer"
+    },
+    {
+      "path": "../.trae/skills/plc-electrical-engineer"
     }
   ]
 }
