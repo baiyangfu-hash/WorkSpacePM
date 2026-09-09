@@ -81,7 +81,7 @@ __pycache__/
 *.bak_*
 pytest_*.txt
 mypy_output*.txt
-fix_*.py
+/fix_*.py
 *_tmp.*
 claude_plan
 test_screenshots/
