@@ -1,0 +1,18 @@
+---
+spec_id: INT-800
+title: "{{ project_id }} GlobalVars 全局数据块接口文档 (IFC)"
+version: "V1.0.0"
+status: "正式"
+created: "2026-08-23"
+domain: plc
+---
+
+# 接口文档 (IFC) - {{ project_id }} {{ project_name }} GlobalVars
+
+## 1. 模块定位
+遵循 `STD-901` 与 `LSP-905` 规范，作为全机 OB1 与各工位功能块之间的数据交换总线，实施结构体整块传递。
+
+## 2. 结构体定义
+- `stGlobal`: 全局系统控制与报警 (ST_CommonAlarm)
+- `stExternal`: 外部交互总线 (ST_ExternalDevice)
+- `astServoAxis`: 伺服驱动轴数组 (ST_AxisPos)

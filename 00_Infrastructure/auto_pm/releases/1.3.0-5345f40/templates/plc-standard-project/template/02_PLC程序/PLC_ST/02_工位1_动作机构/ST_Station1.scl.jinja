@@ -1,0 +1,68 @@
+// ============================================================================
+// ST_Station1.scl - {{ project_name }} 工位1 动作机构数据类型定义
+// ============================================================================
+// 描述:
+//   定义 {{ project_id }} {{ project_name }} 工位1 的控制、状态、配置、传感器与执行器结构体.
+//   遵循 LSP-905 命名与结构化规范, 支持结构体整块传递 (Struct Chunk Passing).
+// ============================================================================
+
+TYPE ST_Station1_Control :
+STRUCT
+    bAutoEnable     : BOOL;     // 自动运行使能
+    bManualStart    : BOOL;     // 手动单步启动
+    bReset          : BOOL;     // 故障复位
+    bPause          : BOOL;     // 暂停
+    bSingleStepMode : BOOL;     // 单步模式
+END_STRUCT;
+END_TYPE
+
+TYPE ST_Station1_Status :
+STRUCT
+    iStep           : DINT;     // 当前工步号
+    bRunning        : BOOL;     // 运行中
+    bDone           : BOOL;     // 本周期动作完成
+    bAlarm          : BOOL;     // 站级报警
+    iAlarmCode      : DINT;     // 报警代码 (101~199)
+    bWaitMaterial   : BOOL;     // 等待来料
+    bProcessing     : BOOL;     // 加工中
+END_STRUCT;
+END_TYPE
+
+TYPE ST_Station1_Config :
+STRUCT
+    dDebounceMs     : DINT;     // 光电消抖时间 (ms, 默认 100)
+    dCylTimeoutMs   : DINT;     // 气缸动作超时时间 (ms, 默认 5000)
+    dProcessTimeMs  : DINT;     // 工艺加工延时时间 (ms, 默认 2000)
+END_STRUCT;
+END_TYPE
+
+TYPE ST_Station1_Sensors :
+STRUCT
+    bInPosSensor    : BOOL;     // 入料到位光电
+    bWorkPosSensor  : BOOL;     // 加工到位光电
+    bCyl1Retracted  : BOOL;     // 夹紧气缸缩回到位
+    bCyl1Extended   : BOOL;     // 夹紧气缸伸出到位
+    bCyl2Retracted  : BOOL;     // 顶升气缸缩回到位
+    bCyl2Extended   : BOOL;     // 顶升气缸伸出到位
+END_STRUCT;
+END_TYPE
+
+TYPE ST_Station1_Actuators :
+STRUCT
+    bMotorFwd       : BOOL;     // 进料输送电机正转
+    bCyl1Extend     : BOOL;     // 夹紧气缸伸出
+    bCyl1Retract    : BOOL;     // 夹紧气缸缩回
+    bCyl2Extend     : BOOL;     // 顶升气缸伸出
+    bCyl2Retract    : BOOL;     // 顶升气缸缩回
+END_STRUCT;
+END_TYPE
+
+TYPE ST_Station1 :
+STRUCT
+    stControl       : ST_Station1_Control;
+    stStatus        : ST_Station1_Status;
+    stConfig        : ST_Station1_Config;
+    stSensors       : ST_Station1_Sensors;
+    stActuators     : ST_Station1_Actuators;
+END_STRUCT;
+END_TYPE

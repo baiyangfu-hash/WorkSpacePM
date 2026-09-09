@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工业自动化 HMI 控制系统原型 (STD-910 / CP-301)</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app-scale-outer">
+<div class="app-scale-inner" id="appScaleInner">
+
+<!-- 顶部状态栏 -->
+<div class="toolbar">
+  <div class="toolbar-left">
+    <span class="logo-badge">SCADA</span>
+    <h1>工业自动化控制系统 · HMI 触摸屏原型 (11页标准 CP-301)</h1>
+  </div>
+  <div class="toolbar-right">
+    <div class="meta" id="clockMain">2026-08-22 08:30:00</div>
+    <div class="user-badge" id="currentUserBadge">操作员 (Operator)</div>
+  </div>
+</div>
+
+<!-- 顶部 11 页标准导航 Tab -->
+<div class="nav-tabs" id="navTabs"></div>
+
+<div class="hmi-frame">
+
+  <!-- P01 登录画面 -->
+  <div class="page active" id="page-login">
+    <div class="login-bg">
+      <div class="login-box">
+        <div class="login-logo">
+          <div class="logo-icon">PLC</div>
+          <h2>工业自动化控制系统</h2>
+          <p>Industrial Machine Control & SCADA System</p>
+        </div>
+        <div class="login-field">
+          <label>用户账号</label>
+          <input type="text" id="loginUser" value="operator" placeholder="请输入账号">
+        </div>
+        <div class="login-field">
+          <label>登录密码</label>
+          <input type="password" id="loginPass" value="••••••" placeholder="请输入密码">
+        </div>
+        <button class="login-btn" onclick="doLogin()">登 录 系 统</button>
+        <div class="login-hint">操作员: operator/1234 &nbsp;|&nbsp; 工程师: engineer/123456 &nbsp;|&nbsp; 管理员: admin/admin888</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P02 系统总览画面 -->
+  <div class="page" id="page-main">
+    <div class="page-header">
+      <div class="page-title">▣ P02 系统总览 · 全景监控</div>
+      <div class="page-status">
+        <div class="status-item"><span class="led green" id="ledSysRunning"></span>系统运行</div>
+        <div class="status-item"><span class="led yellow" id="ledAutoMode"></span>自动模式</div>
+        <div class="status-item"><span class="led green" id="ledSafetyOk"></span>安全回路闭合</div>
+      </div>
+    </div>
+    <div class="page-body">
+      <div class="sidebar">
+        <button class="side-btn" onclick="goPage('process')">自动流程</button>
+        <button class="side-btn" onclick="goPage('manual')">手动控制</button>
+        <button class="side-btn" onclick="goPage('axis')">伺服点动</button>
+        <button class="side-btn" onclick="goPage('io')">IO 监控</button>
+        <button class="side-btn" onclick="goPage('recipe')">配方管理</button>
+        <button class="side-btn danger" onclick="triggerAlarm()">模拟报警</button>
+      </div>
+      <div class="main-content">
+        <div class="kpi-row">
+          <div class="kpi-card"><div class="label">班次生产总数</div><div class="val" id="kpiTotal">1,280 件</div></div>
+          <div class="kpi-card"><div class="label">当前运行工步</div><div class="val highlight" id="kpiStep">10_工位动作执行</div></div>
+          <div class="kpi-card"><div class="label">平均生产节拍</div><div class="val" id="kpiCycle">5.8 s</div></div>
+          <div class="kpi-card"><div class="label">综合设备稼动率(OEE)</div><div class="val" style="color:#22c55e;">94.6 %</div></div>
+        </div>
+        <div class="panel-box">
+          <div class="panel-title">核心伺服轴实时坐标与状态 (EtherCAT 总线)</div>
+          <div class="axis-grid">
+            <div class="axis-cell"><span class="axis-name">1# 水平主轴 (X)</span><span class="axis-val" id="posAxisX">1250.5 mm</span><span class="axis-tag">定位中</span></div>
+            <div class="axis-cell"><span class="axis-name">2# 升降主轴 (Z)</span><span class="axis-val" id="posAxisZ">420.0 mm</span><span class="axis-tag">减速区</span></div>
+            <div class="axis-cell"><span class="axis-name">3# 辅助送料轴 (A)</span><span class="axis-val" id="posAxisA">180.0 mm</span><span class="axis-tag">就绪点</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P03 自动工艺流程 -->
+  <div class="page" id="page-process">
+    <div class="page-header">
+      <div class="page-title">⚙ P03 自动工艺顺控流程 (SFC 状态机)</div>
+      <div class="page-status"><span class="led green"></span>顺控执行中</div>
+    </div>
+    <div class="page-body">
+      <div class="panel-box full-w">
+        <div class="panel-title">自动运行 8 步工艺节拍状态机图谱</div>
+        <div class="sfc-flow">
+          <div class="sfc-node active" id="sfc-0">00_待机等待启动</div>
+          <div class="sfc-arrow">➔</div>
+          <div class="sfc-node" id="sfc-10">10_来料感应与交握</div>
+          <div class="sfc-arrow">➔</div>
+          <div class="sfc-node" id="sfc-20">20_工件归正定位</div>
+          <div class="sfc-arrow">➔</div>
+          <div class="sfc-node" id="sfc-30">30_伺服多轴取料</div>
+          <div class="sfc-arrow">➔</div>
+          <div class="sfc-node" id="sfc-40">40_加工/移载搬运</div>
+          <div class="sfc-arrow">➔</div>
+          <div class="sfc-node" id="sfc-50">50_放料就位与压紧</div>
+          <div class="sfc-arrow">➔</div>
+          <div class="sfc-node" id="sfc-60">60_辅料/隔纸铺设</div>
+          <div class="sfc-arrow">➔</div>
+          <div class="sfc-node" id="sfc-70">70_周期完成与出料</div>
+        </div>
+        <div class="btn-group-row">
+          <button class="action-btn primary" onclick="stepProcess()">单步执行 (Next Step)</button>
+          <button class="action-btn" onclick="resetProcess()">复位流程 (Reset)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P04 机构手动控制 -->
+  <div class="page" id="page-manual">
+    <div class="page-header">
+      <div class="page-title">✋ P04 机构手动控制与气缸点动</div>
+      <div class="page-status"><span class="led yellow"></span>手动模式</div>
+    </div>
+    <div class="page-body">
+      <div class="manual-grid">
+        <div class="manual-card">
+          <h4>1# 入料机构气动控制</h4>
+          <div class="ctrl-row"><span>定位阻挡气缸</span><button class="ctrl-btn" id="cyl-1" onclick="toggleCylinder('cyl-1')">伸出 (Work)</button></div>
+          <div class="ctrl-row"><span>进料推料气缸</span><button class="ctrl-btn" id="cyl-2" onclick="toggleCylinder('cyl-2')">退回 (Home)</button></div>
+          <div class="ctrl-row"><span>输送皮带电机</span><button class="ctrl-btn" id="mot-1" onclick="toggleCylinder('mot-1')">正转点动</button></div>
+        </div>
+        <div class="manual-card">
+          <h4>2# 搬运机械手与夹爪</h4>
+          <div class="ctrl-row"><span>真空吸盘电磁阀</span><button class="ctrl-btn" id="cyl-3" onclick="toggleCylinder('cyl-3')">吸真空 (ON)</button></div>
+          <div class="ctrl-row"><span>机械手夹紧气缸</span><button class="ctrl-btn" id="cyl-4" onclick="toggleCylinder('cyl-4')">夹紧 (Clamp)</button></div>
+          <div class="ctrl-row"><span>破真空吹气阀</span><button class="ctrl-btn" id="cyl-5" onclick="toggleCylinder('cyl-5')">吹气 (Blow)</button></div>
+        </div>
+        <div class="manual-card">
+          <h4>3# 辅助工位与裁切</h4>
+          <div class="ctrl-row"><span>自动裁切气刀</span><button class="ctrl-btn" id="cyl-6" onclick="toggleCylinder('cyl-6')">切断动作</button></div>
+          <div class="ctrl-row"><span>压纸定位气缸</span><button class="ctrl-btn" id="cyl-7" onclick="toggleCylinder('cyl-7')">压紧到位</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P05 伺服轴点动与调试 -->
+  <div class="page" id="page-axis">
+    <div class="page-header">
+      <div class="page-title">🕹 P05 伺服轴点动与坐标调试 (PLCopen JOG)</div>
+      <div class="page-status"><span class="led green"></span>驱动器无故障</div>
+    </div>
+    <div class="page-body">
+      <div class="axis-debug-grid">
+        <div class="axis-debug-card">
+          <h4>移载 X 轴 (水平主轴)</h4>
+          <div class="pos-display" id="axisXDisplay">1250.50 mm</div>
+          <div class="jog-btns">
+            <button class="jog-btn" onclick="jogAxis('X', -10)">JOG -</button>
+            <button class="jog-btn" onclick="jogAxis('X', 10)">JOG +</button>
+          </div>
+          <div class="step-select">寸动步长: 10.0 mm | 速度: 150 mm/s</div>
+        </div>
+        <div class="axis-debug-card">
+          <h4>移载 Z 轴 (垂直升降轴)</h4>
+          <div class="pos-display" id="axisZDisplay">420.00 mm</div>
+          <div class="jog-btns">
+            <button class="jog-btn" onclick="jogAxis('Z', -5)">JOG - (降)</button>
+            <button class="jog-btn" onclick="jogAxis('Z', 5)">JOG + (升)</button>
+          </div>
+          <div class="step-select">寸动步长: 5.0 mm | 速度: 80 mm/s</div>
+        </div>
+        <div class="axis-debug-card">
+          <h4>辅助 A 轴 (隔纸/送料轴)</h4>
+          <div class="pos-display" id="axisADisplay">180.00 mm</div>
+          <div class="jog-btns">
+            <button class="jog-btn" onclick="jogAxis('A', -1)">JOG -</button>
+            <button class="jog-btn" onclick="jogAxis('A', 1)">JOG +</button>
+          </div>
+          <div class="step-select">寸动步长: 1.0 mm | 速度: 50 mm/s</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P06 IO 实时监控 -->
+  <div class="page" id="page-io">
+    <div class="page-header">
+      <div class="page-title">🔌 P06 IO 实时监控点阵与信号强制</div>
+      <div class="page-status"><span class="led green"></span>总线扫描周期: 2ms</div>
+    </div>
+    <div class="page-body">
+      <div class="io-section">
+        <h3>数字量输入点阵 (Inputs - X)</h3>
+        <div class="io-grid">
+          <div class="io-cell active" id="io-X0_0" onclick="toggleIO('X0_0')"><span>X0.0</span>急停按钮(NC)</div>
+          <div class="io-cell active" id="io-X0_1" onclick="toggleIO('X0_1')"><span>X0.1</span>安全门闭合</div>
+          <div class="io-cell active" id="io-X0_2" onclick="toggleIO('X0_2')"><span>X0.2</span>1#来料光电</div>
+          <div class="io-cell" id="io-X0_3" onclick="toggleIO('X0_3')"><span>X0.3</span>2#来料光电</div>
+          <div class="io-cell active" id="io-X0_4" onclick="toggleIO('X0_4')"><span>X0.4</span>气压正常传感器</div>
+          <div class="io-cell" id="io-X0_5" onclick="toggleIO('X0_5')"><span>X0.5</span>吸盘真空负压到位</div>
+          <div class="io-cell active" id="io-X0_6" onclick="toggleIO('X0_6')"><span>X0.6</span>X轴原点传感器</div>
+          <div class="io-cell active" id="io-X0_7" onclick="toggleIO('X0_7')"><span>X0.7</span>Z轴上限位开关</div>
+        </div>
+      </div>
+      <div class="io-section">
+        <h3>数字量输出点阵 (Outputs - Y)</h3>
+        <div class="io-grid">
+          <div class="io-cell active" id="io-Y0_0" onclick="toggleIO('Y0_0')"><span>Y0.0</span>三色灯绿灯</div>
+          <div class="io-cell" id="io-Y0_1" onclick="toggleIO('Y0_1')"><span>Y0.1</span>三色灯红灯</div>
+          <div class="io-cell active" id="io-Y0_2" onclick="toggleIO('Y0_2')"><span>Y0.2</span>允许上游送料</div>
+          <div class="io-cell" id="io-Y0_3" onclick="toggleIO('Y0_3')"><span>Y0.3</span>请求下游接料</div>
+          <div class="io-cell active" id="io-Y0_4" onclick="toggleIO('Y0_4')"><span>Y0.4</span>1#皮带电机运行</div>
+          <div class="io-cell" id="io-Y0_5" onclick="toggleIO('Y0_5')"><span>Y0.5</span>吸盘破真空阀</div>
+          <div class="io-cell active" id="io-Y0_6" onclick="toggleIO('Y0_6')"><span>Y0.6</span>伺服主使能接触器</div>
+          <div class="io-cell" id="io-Y0_7" onclick="toggleIO('Y0_7')"><span>Y0.7</span>蜂鸣器报警输出</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P07 配方管理 -->
+  <div class="page" id="page-recipe">
+    <div class="page-header">
+      <div class="page-title">📋 P07 工艺配方与参数管理</div>
+      <div class="page-status"><span class="led green"></span>配方同步完成</div>
+    </div>
+    <div class="page-body">
+      <div class="recipe-grid">
+        <div class="recipe-card">
+          <h4>产品几何尺寸规格</h4>
+          <div class="param-row"><label>工件宽度 (Width)</label><input type="text" id="rcpW" value="35.0 mm"></div>
+          <div class="param-row"><label>工件层高 (Height)</label><input type="text" id="rcpH" value="28.5 mm"></div>
+          <div class="param-row"><label>槽壁厚度 (Thick)</label><input type="text" id="rcpT" value="1.3 mm"></div>
+        </div>
+        <div class="recipe-card">
+          <h4>码垛层数与抓取参数</h4>
+          <div class="param-row"><label>单次抓取对数</label><input type="text" id="rcpPairs" value="2 对"></div>
+          <div class="param-row"><label>整层摆放对数</label><input type="text" id="rcpRow" value="12 对"></div>
+          <div class="param-row"><label>最大码垛层数</label><input type="text" id="rcpMaxLayer" value="24 层"></div>
+        </div>
+        <div class="recipe-card">
+          <h4>辅助补偿与裁切参数</h4>
+          <div class="param-row"><label>隔纸厚度补偿</label><input type="text" id="rcpPaper" value="0.8 mm"></div>
+          <div class="param-row"><label>拉纸裁切补偿</label><input type="text" id="rcpCut" value="15.0 mm"></div>
+          <div class="param-row"><label>预埋塑钢带层</label><input type="text" id="rcpBand" value="6, 12, 18 层"></div>
+        </div>
+      </div>
+      <div class="btn-group-row">
+        <button class="action-btn primary" onclick="saveRecipe()">保存并下发至 PLC (Save & Apply)</button>
+        <button class="action-btn" onclick="reloadRecipe()">重新读取配方 (Reload)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- P08 报警管理 -->
+  <div class="page" id="page-alarm">
+    <div class="page-header">
+      <div class="page-title">⚠ P08 报警管理与故障诊断矩阵 (803 报警码)</div>
+      <div class="page-status" id="alarmStatusBadge"><span class="led green"></span>无活动报警</div>
+    </div>
+    <div class="page-body">
+      <div class="btn-group-row">
+        <button class="action-btn danger" onclick="triggerAlarm()">产生模拟报警 (Simulate Fault)</button>
+        <button class="action-btn primary" onclick="resetAlarm()">一键故障复位 (Reset All)</button>
+      </div>
+      <table class="alarm-table">
+        <thead><tr><th>报警编号</th><th>发生时间</th><th>机构工位</th><th>报警描述</th><th>级别</th></tr></thead>
+        <tbody id="alarmTbody">
+          <tr><td>E-1001</td><td>2026-08-22 08:15:22</td><td>叠垛移载机械手</td><td>移载 X 轴正向软限位超出报警</td><td><span class="badge red">严重</span></td></tr>
+          <tr><td>E-2004</td><td>2026-08-22 08:10:05</td><td>隔纸放料架</td><td>隔纸料仓缺料预警 (光电 X0.4)</td><td><span class="badge yellow">提示</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- P09 外部交互与拓扑握手 -->
+  <div class="page" id="page-comm">
+    <div class="page-header">
+      <div class="page-title">⇄ P09 外部设备信号交握与拓扑 (STD-820)</div>
+      <div class="page-status"><span class="led green"></span>握手链路正常</div>
+    </div>
+    <div class="page-body">
+      <div class="panel-box full-w">
+        <div class="panel-title">上游输送机 ↔ 码垛机 闭环交互时序</div>
+        <div class="handshake-grid">
+          <div class="hs-col">
+            <h3>▲ 码垛机 (本机) ──► 上游输送机</h3>
+            <div class="signal-row"><span class="sig-tag">Y0.2</span><span class="sig-name">允许上游 1# 皮带送料</span><span class="led green"></span></div>
+            <div class="signal-row"><span class="sig-tag">Y0.3</span><span class="sig-name">允许上游 2# 皮带送料</span><span class="led green"></span></div>
+            <div class="signal-row"><span class="sig-tag">Y0.4</span><span class="sig-name">码垛机就绪 (无故障/非满垛)</span><span class="led green"></span></div>
+          </div>
+          <div class="hs-col">
+            <h3>▼ 上游输送机 ──► 码垛机 (本机)</h3>
+            <div class="signal-row"><span class="sig-tag">X0.2</span><span class="sig-name">1# 边框来料到位</span><span class="led green"></span></div>
+            <div class="signal-row"><span class="sig-tag">X0.3</span><span class="sig-name">2# 边框来料到位</span><span class="led green"></span></div>
+            <div class="signal-row"><span class="sig-tag">X0.0</span><span class="sig-name">上游急停安全连锁</span><span class="led green"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P10 实时趋势与诊断 -->
+  <div class="page" id="page-trend">
+    <div class="page-header">
+      <div class="page-title">📈 P10 实时趋势与离线诊断 (Trend & Diagnostics)</div>
+      <div class="page-status"><span class="led green"></span>采样率: 50ms</div>
+    </div>
+    <div class="page-body">
+      <div class="panel-box full-w">
+        <div class="panel-title">主轴电流负载与速度动态曲线</div>
+        <div class="trend-canvas-placeholder">
+          <div class="trend-bar" style="height: 45%;"><span>X轴 4.5A</span></div>
+          <div class="trend-bar" style="height: 65%;"><span>Z轴 6.8A</span></div>
+          <div class="trend-bar" style="height: 30%;"><span>A轴 2.1A</span></div>
+          <div class="trend-bar" style="height: 80%;"><span>主气压 0.65MPa</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P11 系统设置 -->
+  <div class="page" id="page-settings">
+    <div class="page-header">
+      <div class="page-title">🔧 P11 系统设置与参数配置</div>
+    </div>
+    <div class="page-body">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h4>界面与显示设置</h4>
+          <div class="setting-row"><span>触摸屏分辨率</span><b>1280 × 800 (16:10)</b></div>
+          <div class="setting-row"><span>深色科技主题</span><b>Dark Glassmorphism (STD-910)</b></div>
+          <div class="setting-row"><span>背光节能休眠</span><b>15 分钟</b></div>
+        </div>
+        <div class="settings-card">
+          <h4>通信与总线设置</h4>
+          <div class="setting-row"><span>PLC IP 地址</span><b>192.168.1.10</b></div>
+          <div class="setting-row"><span>Modbus TCP 端口</span><b>502</b></div>
+          <div class="setting-row"><span>EtherCAT 站号</span><b>Station 1~4</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+// ============================================================================
+// interlock_test.scltest - {{ project_name }} 安全联锁集成测试
+// ============================================================================
+// 项目: {{ project_id }} {{ project_name }}
+// ============================================================================
+
+TEST_CASE "TC_Interlock_SafetyDoor"
+    SET GlobalVars.stGlobal.bPowerOn := TRUE;
+    SET GlobalVars.stGlobal.bSafetyLight := FALSE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stGlobal.bSafetyLight = FALSE;
+END_TEST_CASE

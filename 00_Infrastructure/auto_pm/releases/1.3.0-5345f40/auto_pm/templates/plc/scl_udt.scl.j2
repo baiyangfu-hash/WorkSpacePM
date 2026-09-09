@@ -1,0 +1,63 @@
+// ==============================================================================
+// 数据类型: ST_{{ station_name }}
+// 遵守规范: Siemens LSP 编程规范 (LSP-905 V1.1.0 / DJ-2026-005 标杆)
+// 自动生成: 008 驾驶舱离线工艺矩阵代码生成器
+// 生成时间: {{ generated_at }}
+// ==============================================================================
+
+TYPE ST_{{ station_name }}_Control :
+STRUCT
+    bAutoEnable     : BOOL;     // 自动运行使能
+    bManualStart    : BOOL;     // 手动单步启动
+    bReset          : BOOL;     // 故障复位指令
+    bPause          : BOOL;     // 暂停运行
+    bSingleStepMode : BOOL;     // 单步运行模式
+END_STRUCT;
+END_TYPE
+
+TYPE ST_{{ station_name }}_Status :
+STRUCT
+    iStep           : DINT;     // 当前工步号
+    bRunning        : BOOL;     // 运行中
+    bDone           : BOOL;     // 动作完成脉冲
+    bAlarm          : BOOL;     // 站级报警
+    iAlarmCode      : DINT;     // 报警代码
+    bWaitMaterial   : BOOL;     // 等待来料
+    bProcessing     : BOOL;     // 加工中
+END_STRUCT;
+END_TYPE
+
+TYPE ST_{{ station_name }}_Config :
+STRUCT
+    dDebounceMs     : DINT;     // 光电消抖时间 (ms, 默认 100)
+    dCylTimeoutMs   : DINT;     // 动作超时时间 (ms, 默认 5000)
+    dProcessTimeMs  : DINT;     // 工艺延时时间 (ms, 默认 2000)
+END_STRUCT;
+END_TYPE
+
+TYPE ST_{{ station_name }}_Sensors :
+STRUCT
+    bInPosSensor    : BOOL;     // 入料到位传感器
+    bWorkPosSensor  : BOOL;     // 工作到位传感器
+    bCylRetracted   : BOOL;     // 气缸缩回到位
+    bCylExtended    : BOOL;     // 气缸伸出到位
+END_STRUCT;
+END_TYPE
+
+TYPE ST_{{ station_name }}_Actuators :
+STRUCT
+    bMotorFwd       : BOOL;     // 电机正转输出
+    bCylExtend      : BOOL;     // 气缸伸出指令
+    bCylRetract     : BOOL;     // 气缸缩回指令
+END_STRUCT;
+END_TYPE
+
+TYPE ST_{{ station_name }} :
+STRUCT
+    stControl       : ST_{{ station_name }}_Control;
+    stStatus        : ST_{{ station_name }}_Status;
+    stConfig        : ST_{{ station_name }}_Config;
+    stSensors       : ST_{{ station_name }}_Sensors;
+    stActuators     : ST_{{ station_name }}_Actuators;
+END_STRUCT;
+END_TYPE
