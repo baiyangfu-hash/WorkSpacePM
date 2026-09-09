@@ -104,3 +104,58 @@ def test_create_decision_success_from_approved_change(tmp_path: Path) -> None:
     all_decisions = service.list_decisions(change_id="CHG-SCPT-2026-001")
     assert len(all_decisions) == 1
     assert all_decisions[0].decision_id == dto.decision_id
+
+
+def test_create_decision_uses_project_id_to_disambiguate_duplicate_change_id(
+    tmp_path: Path,
+) -> None:
+    """跨项目同号变更必须按项目绑定，禁止命中全局扫描首项。"""
+    change_id = "CHG-DOCU-2026-006"
+    for project_id, scope in (("PROJ-A", "MODULE"), ("PROJ-B", "SYSTEM")):
+        chg_dir = tmp_path / project_id / "04_监控" / "01_变更管理" / "01_变更单"
+        chg_dir.mkdir(parents=True)
+        (chg_dir / f"{change_id}.md").write_text(
+            f"""# {change_id}
+## 3. 变更基本信息
+### 3.0 编号与项目
+| 项目编号 | {project_id} |
+### 3.3 影响范围
+| ☑ **{scope}** 范围 | **选中** |
+### 3.4 申请信息
+| 变更状态 | approved |
+""",
+            encoding="utf-8",
+        )
+
+    service = DecisionService(tmp_path)
+    dto = service.create_decision(
+        change_id=change_id,
+        approver="fubai",
+        project_id="PROJ-B",
+    )
+    assert dto.project_id == "PROJ-B"
+    assert dto.approved_scope == "SYSTEM"
+
+
+def test_create_decision_rejects_ambiguous_duplicate_change_id(tmp_path: Path) -> None:
+    """未提供项目时，跨项目重号必须 fail-closed。"""
+    change_id = "CHG-DOCU-2026-006"
+    for project_id in ("PROJ-A", "PROJ-B"):
+        chg_dir = tmp_path / project_id / "04_监控" / "01_变更管理" / "01_变更单"
+        chg_dir.mkdir(parents=True)
+        (chg_dir / f"{change_id}.md").write_text(
+            f"""# {change_id}
+## 3. 变更基本信息
+### 3.0 编号与项目
+| 项目编号 | {project_id} |
+### 3.3 影响范围
+| ☑ **SYSTEM** 范围 | **选中** |
+### 3.4 申请信息
+| 变更状态 | approved |
+""",
+            encoding="utf-8",
+        )
+
+    service = DecisionService(tmp_path)
+    with pytest.raises(DecisionValidationError, match="跨项目重号"):
+        service.create_decision(change_id=change_id, approver="fubai")

@@ -37,7 +37,7 @@ class ChangeRequest(BaseModel):
     project_name: str = Field("", description="项目名称")
 
     # §3.1 技术领域
-    domain: Domain = Field("", description="技术领域: ELEC/MECH/PLC/HMI/SCPT/DOCU/SAFE")
+    domain: Domain = Field("", description="技术领域: ELEC/MECH/PLC/HMI/SCPT/DOCU/SAFE/SPEC")
 
     # §3.2 业务性质
     business_nature: BusinessNature = Field("", description="业务性质: REQ/DEF/OPT/CFG/EMRG")

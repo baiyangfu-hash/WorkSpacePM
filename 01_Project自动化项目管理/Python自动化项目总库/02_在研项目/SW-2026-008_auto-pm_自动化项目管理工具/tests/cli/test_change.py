@@ -299,6 +299,44 @@ def test_change_create_normal(cli_runner: CliRunner, tmp_path: Path) -> None:
 
 
 @pytest.mark.cli
+def test_change_create_accepts_spec_domain(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """规范治理单使用 SPEC 领域时可创建并被读取。"""
+    _make_plc_project_for_change(tmp_path, "SYS-2026-SPEC")
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w", str(tmp_path),
+            "change", "create",
+            "--pid", "SYS-2026-SPEC",
+            "--domain", "SPEC",
+            "--nature", "DEF",
+            "--scope", "SYSTEM",
+            "--applicant", "cli_test",
+            "--background", "规范治理兼容测试",
+            "--necessity", "确保历史规范变更可读",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert "CHG-SPEC-" in result.output
+
+    import re
+
+    match = re.search(r"变更单创建成功:\s*(CHG-\S+)", result.output)
+    assert match
+    change_number = match.group(1)
+    _created_change_numbers.append(change_number)
+
+    listed = cli_runner.invoke(
+        cli,
+        ["-w", str(tmp_path), "change", "list", "SYS-2026-SPEC", "--domain", "SPEC"],
+        catch_exceptions=False,
+    )
+    assert listed.exit_code == 0
+    assert change_number in listed.output
+
+
+@pytest.mark.cli
 def test_change_create_missing_required_option(cli_runner: CliRunner, tmp_path: Path) -> None:
     """create 缺少必填选项时 click 报错 exit_code != 0"""
     _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")

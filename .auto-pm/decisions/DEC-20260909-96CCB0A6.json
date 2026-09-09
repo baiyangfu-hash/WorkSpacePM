@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-96CCB0A6",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-006",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/workspace_registry.json",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/PM_SESSION_SW-2026-009.md",
+    "0100_PLC自动化/DJ-2026-005/PM_SESSION_DJ-2026-005.md",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/01_变更单/CHG-DOCU/CHG-DOCU-2026-006.md"
+  ],
+  "approver": "User（架构师）",
+  "approved_at": "2026-09-09T22:32:39.319633+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "替代误绑定的 DEC-20260909-B6AAFA5B；后者因跨项目重号缺陷不得作为授权依据。"
+  ],
+  "metadata": {}
+}

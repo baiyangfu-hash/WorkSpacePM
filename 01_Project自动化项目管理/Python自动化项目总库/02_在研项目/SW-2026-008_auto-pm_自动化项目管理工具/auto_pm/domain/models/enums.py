@@ -44,7 +44,7 @@ ChangeStatus = Literal[
 ]
 
 # 技术领域（§3.1，"" 表示未设置）
-Domain = Literal["ELEC", "MECH", "PLC", "HMI", "SCPT", "DOCU", "SAFE", ""]
+Domain = Literal["ELEC", "MECH", "PLC", "HMI", "SCPT", "DOCU", "SAFE", "SPEC", ""]
 
 # 业务性质（§3.2，"" 表示未设置）
 BusinessNature = Literal["REQ", "DEF", "OPT", "CFG", "EMRG", ""]

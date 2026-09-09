@@ -45,6 +45,7 @@ DOMAINS: dict[str, str] = {
     "SCPT": "Python脚本",
     "DOCU": "工程文档",
     "SAFE": "安全功能",
+    "SPEC": "规范法典",
 }
 
 # §3.1 技术领域描述（用于模板渲染）
@@ -56,6 +57,7 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
     "SCPT": "数据采集/MES接口/上位机应用",
     "DOCU": "设计说明书/操作手册/验收报告",
     "SAFE": "急停回路/安全矩阵/SIL评估",
+    "SPEC": "Obsidian 规范库/frontmatter/registry/INDEX/死链治理",
 }
 
 # §3.2 业务性质（必选，单选）

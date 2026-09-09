@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-7D638569",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-SCPT-2026-029",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/models/enums.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/models/change.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/constants.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/decision_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_change.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_decision_package.py",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-029.md"
+  ],
+  "approver": "User（架构师）",
+  "approved_at": "2026-09-09T22:28:27.690768+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "不得修改 Obsidian 法典、pm-workflow、业务项目或其他 dirty 文件。"
+  ],
+  "metadata": {}
+}

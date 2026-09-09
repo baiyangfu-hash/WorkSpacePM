@@ -13,6 +13,7 @@ from pathlib import Path
 
 from auto_pm.change.parser import ChgParser
 from auto_pm.contracts.decision_package import SCHEMA_VERSION, DecisionPackageDTO
+from auto_pm.models import ChangeRequest
 
 log = logging.getLogger(__name__)
 
@@ -58,21 +59,32 @@ class DecisionService:
         if not approver.strip():
             raise DecisionValidationError("必须指定 approver (审批人)")
 
-        # 查找变更单文件
-        chg_file: Path | None = None
-        for path in self.workspace_root.glob(f"**/{change_id}.md"):
-            if path.is_file():
-                chg_file = path
-                break
-
-        if chg_file is None:
-            raise DecisionNotFoundError(f"未找到变更单文件: {change_id}.md")
-
+        # 变更编号只在项目账内唯一。跨项目可能存在同号单据，因此决策包必须
+        # 使用 project_id 消歧；未限定项目且命中多个单据时必须 fail-closed。
         parser = ChgParser()
-        try:
-            cr = parser.parse(str(chg_file))
-        except Exception as e:
-            raise DecisionValidationError(f"变更单解析失败: {e}") from e
+        candidates: list[tuple[Path, ChangeRequest]] = []
+        for path in sorted(self.workspace_root.glob(f"**/{change_id}.md")):
+            if not path.is_file():
+                continue
+            try:
+                parsed = parser.parse(str(path))
+            except Exception as e:
+                log.warning("变更单候选解析失败 %s: %s", path, e)
+                continue
+            if project_id and parsed.project_id != project_id:
+                continue
+            candidates.append((path, parsed))
+
+        if not candidates:
+            suffix = f"（项目 {project_id}）" if project_id else ""
+            raise DecisionNotFoundError(f"未找到变更单文件: {change_id}.md{suffix}")
+        if len(candidates) > 1:
+            projects = sorted({str(item.project_id) for _, item in candidates})
+            raise DecisionValidationError(
+                f"变更单编号跨项目重号: {change_id}，请通过 --pid 指定项目；"
+                f"候选项目: {', '.join(projects)}"
+            )
+        _, cr = candidates[0]
 
         valid_statuses = (
             "approved",
@@ -166,4 +178,3 @@ class DecisionService:
             except Exception as e:
                 log.warning("解析决策包文件失败 %s: %e", file, e)
         return results
-
