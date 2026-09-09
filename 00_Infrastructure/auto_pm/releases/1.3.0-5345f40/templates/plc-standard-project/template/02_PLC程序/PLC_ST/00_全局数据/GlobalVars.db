@@ -1,0 +1,141 @@
+// ============================================================================
+// GlobalVars.db - 边框缓存机全局变量数据块
+// ============================================================================
+// 功能说明:
+//   定义 DJ-2026-005 边框缓存机 PLC 控制系统的所有全局变量.
+//   作为 OB1 主程序与各功能块之间的数据交换中心, 实现统一的数据管理.
+//
+// 数据组织:
+//   采用结构化分组方式, 按功能模块划分变量区域:
+//   - stGlobal:    全局控制信号和系统状态 (来自FB_2001_CommonAlarm)
+//   - stExternal:  外部设备交互信号 (组框机/打胶机/机器人)
+//   - stConveyor:  四层输送机系统信号 (含4层数组, ARRAY[1..4])
+//   - stPickPlace: 取放料机构信号 (V6.0.0版本, 55输入/30输出)
+//   - stFeeder:    打胶机送料机构信号 (17输入/14输出)
+//
+// 设计原则:
+//   1. 所有 I/O 映射集中在此数据块, 功能块不直接访问物理地址
+//   2. 使用 STRUCT 类型实现逻辑分组, 提高可读性
+//   3. 变量命名遵循 LSP-905_SCL编程规范
+//   4. 初始值设置为安全状态 (FALSE/0), 防止上电误动作
+//   5. 完全基于实际FB定义生成, 与OB1调用100%同步
+//
+// 变更记录:
+//   V7.1.1 (2026-05-20): 修复TC11 i_iPickLayer输入源问题
+//          - stPickPlace新增 i_iPickLayer_Input: INT (外部指定取料层号1~4)
+//          - 断开 o_iCurrentPickLayer(输出)→i_iPickLayer(输入) 反馈回路
+//          - 接口统计: stPickPlace 输入 55→56 (+1层号输入)
+//   V7.1.0 (2026-05-20): FB_1003 V7.0.0集成ST_ServoAxis V3.0
+//          - 新增 astServoAxis[1..3]: ST_ServoAxis 伺服轴数组(Z/X1/X2)
+//          - stPickPlace: 删除悬空的6个轴请求字段(原V6.0未使用)
+//          - FB_1003接口变更: VAR_IN_OUT io_stZAxis/io_stX1Axis 直连轴结构体
+//          - 轴索引: [1]=Z轴(升降) [2]=X1轴(取放料横移) [3]=X2轴(打胶机送料)
+//   V7.0.0 (2026-05-18): Conveyor子系统V7.0.0重构对齐
+//          - stConveyor结构完全重写: FB_1001容器取消, 适配FB_1002 V7.0.0编排器接口
+//          - 变量命名: 逐层数组加_a前缀(i_a/q_a), 汇总变量用q_b/q_i前缀
+//          - FB实例: fbConveyor4Layer(FB_1001) → 4×fbConveyor_L1~L4(FB_1002)
+//          - 新增汇总字段: q_bRunning(OR), q_bFault(OR), q_iAlarmCode(MIN)
+//   V6.0.0 (2026-05-04): 同步FB_1003 V6.0.0接口重命名
+//          - stPickPlace变量重命名47处, 匹配FB_1003 V6.0.0新接口
+//          - Grip→Clamp/Unclamp语义统一 (夹爪→夹紧/松开)
+//          - HomePoint→HomePos, WorkPoint→Closed/Opened (位置状态语义)
+//          - Forward/Reverse→Fwd/Rev缩写统一
+//          - 定时器调试输出TIME→DINT (8处, 便于HMI数值显示)
+//          - 删除死代码TON1: FB_TON
+//          - 修复中文标点符号为英文标点
+//   V3.0.0 (2026-05-03): V5.0.0全面重写 - 变量名100%英文化
+//          - 替换所有220+处中文变量名为英文(符合801规范V1.0.5)
+//          - 统一命名语义: 设备名_功能描述 格式(如FrameMachine_AutoRunning)
+//          - 解决OB1↔FB接口不匹配问题, 消除TC001/TC002编译错误
+//          - 与OB1.scl V5.0.0 100%同步, 支持VS Code PLC调试器验证
+//   V2.0.0 (2026-05-03): 基于OB1 V2.0.0完全重写
+//          - 修正所有146处接口不匹配问题
+//          - 精确匹配6个功能块的所有输入/输出引脚
+//          - 支持V4.2.0版本的FB_1003_PickPlace新接口 (14手动操作+26传感器)
+//          - 支持FB_1001_Conveyor4Layer的完整容器接口 (7类传感器)
+//          - 新增MES报警队列、定时器调试输出等高级功能变量
+//   V1.0.0 (2026-05-02): 初始版本
+//          - 配合 OB1 V1.0.0 标准化主程序创建
+// ============================================================================
+
+DATA_BLOCK GlobalVars
+
+VAR
+    // =========================================================================
+    // 第一部分: 全局控制信号与系统状态 (FB_2001_CommonAlarm 输出)
+    // =========================================================================
+    // 说明: 存储公共报警管理功能块的输出信号
+    //       包括全局报警字、优先级报警、互锁信号、MES数据接口等
+    //       接口统计: 0输入 + 16输出 (HMI显示2 + 全局互锁1 + MES数据3 + 多报警9)
+    // =========================================================================
+    stGlobal   : ST_CommonAlarm;
+
+    // =========================================================================
+    // 第二部分: 外部设备交互信号 (ST_ExternalDevice)
+    // =========================================================================
+    stExternal : ST_ExternalDevice;
+
+    // =========================================================================
+    // 第三部分: 四层输送机系统信号 (ST_SingleLayerConveyor 结构体整块传递模式)
+    // =========================================================================
+    stConveyor : STRUCT
+        // === 结构体整块传递数组 (V11.0.0 ST_SingleLayerConveyor 结构体模式) ===
+        astLayer                 : ARRAY[1..4] OF ST_SingleLayerConveyor;
+
+        // === 共享通用参数与配置 ===
+        i_bAutoMode              : BOOL := FALSE;    // 自动运行模式
+        i_bManualMode            : BOOL := FALSE;    // 手动调试模式
+        i_bStart                 : BOOL := FALSE;    // 自动循环启动
+        i_bStop                  : BOOL := FALSE;    // 停止
+        i_dSeparateTimeoutMs     : DINT := 5000;     // 分料超时时间(ms)
+        i_dDebounceMs            : DINT := 0;        // 传感器消抖(ms)
+        i_bSafetyDoorOk          : BOOL := TRUE;     // 安全门OK
+        i_bVfdFault              : BOOL := FALSE;    // 变频器故障
+
+        // === 4层汇总变量 (OB1汇总计算) ===
+        q_bRunning               : BOOL := FALSE;    // 4层 OR → HMI "输送机运行中"
+        q_bFault                 : BOOL := FALSE;    // 4层 OR → HMI + 全局互锁
+        q_iAlarmCode             : INT := 0;         // 4层报警码优先级 MIN → HMI + FB_2001
+    END_STRUCT;
+
+    // =========================================================================
+    // 第四部分: 取放料机构信号 (ST_PickPlace)
+    // =========================================================================
+    stPickPlace : ST_PickPlace;
+
+    // =========================================================================
+    // 第五部分: 打胶机送料机构信号 (ST_GlueFeeder)
+    // =========================================================================
+    stFeeder : ST_GlueFeeder;
+    // =========================================================================
+    // 第五部分B: 伺服轴数组 (ST_ServoAxis V3.0, PLCopen MC Part 1)
+    // =========================================================================
+    // 说明: 3轴伺服控制系统, 按SV功能块分组嵌套结构体
+    //       轴索引: [1]=Z轴(升降) [2]=X1轴(取放料横移) [3]=X2轴(打胶机送料)
+    //       子结构体: stPower(使能)/stHome(回原点)/stAbs(绝对定位)
+    //                 stJog(点动)/stStop(急停)/stHalt(减速暂停)
+    //                 stRel(相对定位)/stReset(错误复位)
+    //                 stSensor(传感器)/rCurrentPos(位置反馈)
+    //       用途: FB_1003通过VAR_IN_OUT直连io_stZAxis/io_stX1Axis
+    //             FB_1004后续迭代可直连io_stX2Axis
+    // =========================================================================
+    astServoAxis : ARRAY[1..3] OF ST_ServoAxis;
+
+    // =========================================================================
+    // 第六部分: 功能块实例
+    // =========================================================================
+    // 说明: 所有功能块实例必须定义在此处, 以便测试框架和HMI能够正确识别
+    //       V7.0.0: fbConveyor4Layer (FB_1001) 取消, 改为4×FB_1002 展开实例
+    //       V7.1.0: FB_1003 V7.0.0 新增VAR_IN_OUT轴引用接口
+    // =========================================================================
+    fbExternalDevice      : FB_ExternalDeviceInteraction;
+    fbConveyor_L1         : FB_1002_SingleLayerConveyor_BufferFraming;
+    fbConveyor_L2         : FB_1002_SingleLayerConveyor_BufferFraming;
+    fbConveyor_L3         : FB_1002_SingleLayerConveyor_BufferFraming;
+    fbConveyor_L4         : FB_1002_SingleLayerConveyor_BufferFraming;
+    fbPickPlace           : FB_1003_PickPlace_BufferFraming;
+    fbGlueFeeder          : FB_1004_GlueMachineFeeder_BufferFraming;
+    fbCommonAlarm         : FB_2001_CommonAlarm_AllStation;
+END_VAR
+
+END_DATA_BLOCK
