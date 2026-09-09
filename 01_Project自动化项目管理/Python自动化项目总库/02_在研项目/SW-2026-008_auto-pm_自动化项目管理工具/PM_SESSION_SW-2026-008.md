@@ -24,7 +24,7 @@
 
 ## 2. Current Focus（当前焦点）
 
-- current_focus: **CHG-DOCU-2026-008 已完成验收、关闭并提交；活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移。CHG-SCPT-2026-197 P2 连续性整改、CHG-SCPT-2026-193 共享 CHG 契约证据回收及 CHG-SCPT-2026-194 实质内容门禁均已验收关闭，均未发布、未切流。CHG-SCPT-2026-195 Windows COM 隔离已完成交接和全量验证，现待用户验收；CHG-SCPT-2026-196 仍暂停。**
+- current_focus: **CHG-DOCU-2026-008 已完成验收、关闭并提交；活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移。CHG-SCPT-2026-197 P2 连续性整改、CHG-SCPT-2026-193 共享 CHG 契约证据回收、CHG-SCPT-2026-194 实质内容门禁及 CHG-SCPT-2026-195 Windows COM 隔离均已验收关闭，均未发布、未切流。下一包为 CHG-SCPT-2026-196 全仓 Mypy 基线债务；须重新完成阶段 0/1。**
 - risks_dependencies:
   - Ruff 静态代码检查已实现 100% Clean Exit (0 告警)
   - IndustrialErrorMapper 统一异常转译上线并补充 10 项单测
@@ -122,7 +122,7 @@
   - 2026-09-08 [已验收关闭] CHG-SCPT-2026-192 Retrofit：修正 CHG 关闭门禁对二级标题及嵌套子章节的误判；`tests/change/test_change_service.py` 39 passed，CHG-192 closed。
   - 2026-09-09 [已验收关闭] CHG-SCPT-2026-193：项目内 CHG 结构共享契约已提交于 `08f9c7a7`；本轮通过 `DEC-20260909-B2B69DA9` 与 handoff `AI-20260909-CHG193-CONTRACT-EXEC` 回收真实实施证据，生成、解析、编辑与关闭章节集合统一消费项目代码契约。定向 pytest 50 passed、Ruff Exit 0；Mypy 15 项为 CHG-196 已登记基线，未扩修；用户验收后已 closed，未发布、未切流。
   - 2026-09-09 [已验收关闭] CHG-SCPT-2026-194：关闭前占位符、空审批/实施/验证证据和非通过结论门禁已提交于 `153c7d23`；本轮以 `DEC-20260909-AB7042C6` 和 handoff `AI-20260909-CHG194-SUBSTANCE-EXEC` 回收实施证据，56 项定向 pytest 通过、Ruff Exit 0，handoff 已 consumed。用户验收后已 closed；Mypy 15 项仅为 CHG-SCPT-2026-196 已登记基线，未扩修；LOCAL 单域生成件使用明确不适用语义。
-  - 2026-09-09 [待验收] CHG-SCPT-2026-195：`DEC-20260909-9EC6C89F` 和 handoff `AI-20260909-CHG195-COM-EXEC` 已完成。新增真实子进程 PDF 隔离测试，创建 `QApplication` 后实际导出 `%PDF-` 文件且诊断无 `0x80040155`；定向 pytest 11 passed、Ruff/Mypy 通过，完整 pytest 为 1809 passed、14 skipped、60 warnings，65.68s。既有 `QPdfWriter`、旧测试及 fixture 工作树改动未由本包暂存或提交，现待用户验收。
+  - 2026-09-09 [已验收关闭] CHG-SCPT-2026-195：`DEC-20260909-9EC6C89F` 和 handoff `AI-20260909-CHG195-COM-EXEC` 已完成。新增真实子进程 PDF 隔离测试，创建 `QApplication` 后实际导出 `%PDF-` 文件且诊断无 `0x80040155`；定向 pytest 11 passed、Ruff/Mypy 通过，完整 pytest 为 1809 passed、14 skipped、60 warnings，65.68s。既有 `QPdfWriter`、旧测试及 fixture 工作树改动未由本包暂存或提交；用户验收后已 closed。
   - 2026-09-09 [已关闭] CHG-DOCU-2026-008：建立活动技术债台账与历史 CHG 兼容清单，校准本 PM_SESSION 当前焦点、暂停范围和后续 WBS；决策包 `DEC-20260909-A23ED6B8`，handoff `AI-20260909-CHG-DOCU-008` 已 consumed，精确提交 `88d06e74`。
 
 ## 6. Execution Log Summary
@@ -164,12 +164,12 @@
   - current_state: [已关闭] 用户重新授权、批准并验收；基础实现提交 `4d02488c`，结构化 SW→SYS 映射提交 `c22ac646` 并 dogfood 验证。定向测试、Ruff、Mypy 通过；完整 pytest Exit 0（1808 passed、14 skipped、60 warnings）；CHG-SCPT-2026-197 已 closed，未发布、未切流。
 - 2026-09-09 | from=Codex-fullstack-194 | mode=CHG-SCPT-2026-194 Substance Gate | request_id=AI-20260909-CHG194-SUBSTANCE-EXEC | status=consumed | decision=DEC-20260909-AB7042C6 | change=CHG-SCPT-2026-194-closed
   - current_state: [已验收关闭] 既有 `153c7d23` 实现已复核；定向 pytest 56 passed、Ruff Exit 0，用户验收后 closed。Mypy 15 项为 CHG-SCPT-2026-196 已登记基线，未扩修；未修改 Obsidian 正式规范库、spec_registry、release 或其他 CHG。
-- 2026-09-09 | from=Codex-fullstack-195 | mode=CHG-SCPT-2026-195 COM Isolation | request_id=AI-20260909-CHG195-COM-EXEC | status=consumed | decision=DEC-20260909-9EC6C89F | change=CHG-SCPT-2026-195-pending_acceptance
-  - current_state: [待验收] 新增独立子进程 PDF 测试；真实 `QApplication` 下 PDF 签名有效且无 `0x80040155`。定向 pytest 11 passed、Ruff/Mypy 通过；完整 pytest 1809 passed、14 skipped、60 warnings，65.68s。既有未提交源/测试/fixture 改动未被本包接管。
+- 2026-09-09 | from=Codex-fullstack-195 | mode=CHG-SCPT-2026-195 COM Isolation | request_id=AI-20260909-CHG195-COM-EXEC | status=consumed | decision=DEC-20260909-9EC6C89F | change=CHG-SCPT-2026-195-closed
+  - current_state: [已验收关闭] 新增独立子进程 PDF 测试；真实 `QApplication` 下 PDF 签名有效且无 `0x80040155`。定向 pytest 11 passed、Ruff/Mypy 通过；完整 pytest 1809 passed、14 skipped、60 warnings，65.68s。既有未提交源/测试/fixture 改动未被本包接管。
 ## 9. Next Actions
 - [已关闭] CHG-DOCU-2026-008 | 项目级技术债与历史 CHG 兼容登记已完成；doc check、项目级 PM_SESSION check、台账对账和全量回归均通过；commit=`88d06e74`。
-- [待用户验收] CHG-SCPT-2026-195 | result=handoff 已 consumed；独立 PDF 子进程无 COM HRESULT；定向 pytest 11 passed、Ruff/Mypy 通过、完整 pytest 1809 passed/14 skipped；done_when=用户验收后执行 completed→closed 与最终对账。
-- [暂停] CHG-SCPT-2026-196 | precondition=用户重新授权；done_when=建立独立决策包与执行回执，不得由 CHG-195 隐式启动。
+- [已验收关闭] CHG-SCPT-2026-195 | result=handoff 已 consumed；独立 PDF 子进程无 COM HRESULT；定向 pytest 11 passed、Ruff/Mypy 通过、完整 pytest 1809 passed/14 skipped；用户验收后已 closed，台账对账 0 差异。
+- [待阶段 0/1] CHG-SCPT-2026-196 | precondition=基于当前 42/18 Mypy 基线债务探路，划分可修复文件、外部/类型存根边界与分包计划；done_when=提交证据、影响范围和实施计划，等待用户明确批准。
 - [已验收关闭] CHG-SCPT-2026-197 | result=完整 pytest Exit 0，PM_SESSION check 与台账对账通过；用户验收后已 closed，未发布、未切流。
 - [已验收关闭] CHG-SCPT-2026-193 | result=结构化 handoff 已 consumed；定向 pytest 50 passed、Ruff Exit 0；Mypy 15 项保持 CHG-196 基线债务；用户验收后已 closed，未发布、未切流。
 - [已验收关闭] CHG-SCPT-2026-194 | result=handoff 已 consumed；定向 pytest 56 passed、Ruff Exit 0；Mypy 15 项保持 CHG-196 基线债务；用户验收后已 closed，台账对账 0 差异。
