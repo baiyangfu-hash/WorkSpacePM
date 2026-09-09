@@ -22,7 +22,7 @@
 
 ## 2. Current Focus（当前焦点）
 
-- current_focus: **CHG-DOCU-2026-008 已完成验收、关闭并提交于 `88d06e74`。当前研发母体 HEAD 为 `88d06e74`；CHG-SCPT-2026-193 与 CHG-SCPT-2026-194 已提交并通过各自回归。活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移和 CHG-SCPT-2026-197 上下文包；CHG-SCPT-2026-195/196/197 按用户指令暂停，不得执行。**
+- current_focus: **CHG-DOCU-2026-008 已完成验收、关闭并提交；本次治理提交链为四文档提交 `88d06e74` 与 PM_SESSION 收口提交 `78f4634f`。CHG-SCPT-2026-193 与 CHG-SCPT-2026-194 已提交并通过各自回归。活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移和 CHG-SCPT-2026-197 上下文包；CHG-SCPT-2026-195/196/197 按用户指令暂停，不得执行。**
 - risks_dependencies:
   - Ruff 静态代码检查已实现 100% Clean Exit (0 告警)
   - IndustrialErrorMapper 统一异常转译上线并补充 10 项单测
