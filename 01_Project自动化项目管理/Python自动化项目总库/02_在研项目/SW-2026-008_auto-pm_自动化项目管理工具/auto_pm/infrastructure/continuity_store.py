@@ -10,7 +10,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
-from auto_pm.contracts.continuity import WorkItem
+from auto_pm.contracts.continuity import (
+    CheckpointItem,
+    HandoffV2,
+    LeaseItem,
+    RunItem,
+    WorkItem,
+)
 
 
 class ContinuityStoreError(RuntimeError):
@@ -46,6 +52,53 @@ CREATE TABLE IF NOT EXISTS work_relations (
     created_event_id TEXT NOT NULL,
     PRIMARY KEY (from_work_id, to_work_id, relation)
 );
+CREATE TABLE IF NOT EXISTS run_items (
+    run_id TEXT PRIMARY KEY,
+    work_id TEXT NOT NULL REFERENCES work_items(work_id),
+    state TEXT NOT NULL,
+    executor_id TEXT NOT NULL,
+    adapter TEXT NOT NULL,
+    owned_paths_json TEXT NOT NULL,
+    declared_dirty_paths_json TEXT NOT NULL,
+    git_head TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS execution_leases (
+    run_id TEXT PRIMARY KEY REFERENCES run_items(run_id),
+    owner_id TEXT NOT NULL,
+    lease_token TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS checkpoints (
+    checkpoint_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES run_items(run_id),
+    sequence INTEGER NOT NULL,
+    summary TEXT NOT NULL,
+    git_head TEXT NOT NULL,
+    dirty_paths_json TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (run_id, sequence)
+);
+CREATE TABLE IF NOT EXISTS handoffs_v2 (
+    handoff_id TEXT PRIMARY KEY,
+    work_id TEXT NOT NULL REFERENCES work_items(work_id),
+    run_id TEXT NOT NULL REFERENCES run_items(run_id),
+    checkpoint_id TEXT NOT NULL REFERENCES checkpoints(checkpoint_id),
+    from_owner TEXT NOT NULL,
+    to_owner TEXT NOT NULL,
+    owned_paths_json TEXT NOT NULL,
+    git_head TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    lease_expires_at TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,
     aggregate_type TEXT NOT NULL,
@@ -61,6 +114,8 @@ CREATE INDEX IF NOT EXISTS idx_work_project_state
 ON work_items(subject_project_id, state);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate
 ON events(aggregate_type, aggregate_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_runs_work_state ON run_items(work_id, state);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_run ON checkpoints(run_id, sequence);
 """
 
 
@@ -81,7 +136,7 @@ class ContinuityStore:
         with self._transaction() as conn:
             conn.executescript(_DDL)
             conn.execute(
-                "INSERT OR IGNORE INTO schema_meta VALUES ('continuity-store.v1', ?, ?)",
+                "INSERT OR IGNORE INTO schema_meta VALUES ('continuity-store.v2', ?, ?)",
                 (now, tool_version),
             )
 
@@ -180,6 +235,217 @@ class ContinuityStore:
             conn.row_factory = sqlite3.Row
             return self._get_work(conn, work_id)
 
+    def create_run(
+        self,
+        values: dict[str, Any],
+        lease: dict[str, Any],
+        idempotency_key: str,
+        now: str,
+    ) -> RunItem:
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_id"] != values["run_id"]:
+                    raise ContinuityStoreError("idempotency_key 已用于其他 Run")
+                return self._get_run(conn, values["run_id"])
+            self._get_work(conn, values["work_id"])
+            self._insert_mapping(conn, "run_items", values)
+            self._insert_mapping(conn, "execution_leases", lease)
+            self._append_event(
+                conn,
+                values["run_id"],
+                "RUN_CREATED",
+                values,
+                idempotency_key,
+                now,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, values["run_id"])
+
+    def transition_run(
+        self,
+        run_id: str,
+        expected_version: int,
+        new_state: str,
+        idempotency_key: str,
+        now: str,
+    ) -> RunItem:
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_id"] != run_id:
+                    raise ContinuityStoreError("idempotency_key 已用于其他 Run")
+                return self._get_run(conn, run_id)
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND version=?""",
+                (new_state, now, run_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Run 不存在或版本冲突")
+            self._append_event(
+                conn,
+                run_id,
+                "RUN_TRANSITIONED",
+                {"state": new_state},
+                idempotency_key,
+                now,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, run_id)
+
+    def renew_lease(
+        self,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        expected_version: int,
+        expires_at: str,
+        idempotency_key: str,
+        now: str,
+    ) -> LeaseItem:
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_id"] != run_id:
+                    raise ContinuityStoreError("idempotency_key 已用于其他 Run")
+                return self._get_lease(conn, run_id)
+            cursor = conn.execute(
+                """UPDATE execution_leases SET expires_at=?, version=version+1, updated_at=?
+                WHERE run_id=? AND owner_id=? AND lease_token=? AND version=?""",
+                (expires_at, now, run_id, owner_id, lease_token, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("lease owner、token 或版本冲突")
+            self._append_event(
+                conn,
+                run_id,
+                "LEASE_RENEWED",
+                {"owner_id": owner_id, "expires_at": expires_at},
+                idempotency_key,
+                now,
+                aggregate_type="run",
+            )
+            return self._get_lease(conn, run_id)
+
+    def transfer_lease(
+        self,
+        run_id: str,
+        expected_owner: str,
+        new_owner: str,
+        new_token: str,
+        expected_version: int,
+        expires_at: str,
+        idempotency_key: str,
+        now: str,
+    ) -> LeaseItem:
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_id"] != run_id:
+                    raise ContinuityStoreError("idempotency_key 已用于其他 Run")
+                return self._get_lease(conn, run_id)
+            cursor = conn.execute(
+                """UPDATE execution_leases
+                SET owner_id=?, lease_token=?, expires_at=?, version=version+1, updated_at=?
+                WHERE run_id=? AND owner_id=? AND version=?""",
+                (
+                    new_owner,
+                    new_token,
+                    expires_at,
+                    now,
+                    run_id,
+                    expected_owner,
+                    expected_version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("lease transfer owner 或版本冲突")
+            self._append_event(
+                conn,
+                run_id,
+                "LEASE_TRANSFERRED",
+                {"from_owner": expected_owner, "to_owner": new_owner, "expires_at": expires_at},
+                idempotency_key,
+                now,
+                aggregate_type="run",
+            )
+            return self._get_lease(conn, run_id)
+
+    def create_checkpoint(
+        self, values: dict[str, Any], idempotency_key: str, now: str
+    ) -> CheckpointItem:
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_id"] != values["run_id"]:
+                    raise ContinuityStoreError("idempotency_key 已用于其他 Run")
+                return self._get_checkpoint(conn, values["checkpoint_id"])
+            self._get_run(conn, values["run_id"])
+            stored = dict(values)
+            row = conn.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM checkpoints WHERE run_id=?",
+                (values["run_id"],),
+            ).fetchone()
+            stored["sequence"] = int(row[0])
+            self._insert_mapping(conn, "checkpoints", stored)
+            self._append_event(
+                conn,
+                values["run_id"],
+                "CHECKPOINT_CREATED",
+                stored,
+                idempotency_key,
+                now,
+                event_id=values["checkpoint_id"],
+                aggregate_type="run",
+            )
+            return self._get_checkpoint(conn, values["checkpoint_id"])
+
+    def create_handoff(
+        self, values: dict[str, Any], idempotency_key: str, now: str
+    ) -> HandoffV2:
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_id"] != values["run_id"]:
+                    raise ContinuityStoreError("idempotency_key 已用于其他 Run")
+                return self._get_handoff(conn, values["handoff_id"])
+            checkpoint = self._get_checkpoint(conn, values["checkpoint_id"])
+            if checkpoint.run_id != values["run_id"]:
+                raise ContinuityStoreError("Checkpoint 不属于目标 Run")
+            self._insert_mapping(conn, "handoffs_v2", values)
+            self._append_event(
+                conn,
+                values["run_id"],
+                "HANDOFF_CREATED",
+                values,
+                idempotency_key,
+                now,
+                event_id=values["handoff_id"],
+                aggregate_type="run",
+            )
+            return self._get_handoff(conn, values["handoff_id"])
+
+    def get_run(self, run_id: str) -> RunItem:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return self._get_run(conn, run_id)
+
+    def get_lease(self, run_id: str) -> LeaseItem:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return self._get_lease(conn, run_id)
+
+    def get_checkpoint(self, checkpoint_id: str) -> CheckpointItem:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return self._get_checkpoint(conn, checkpoint_id)
+
+    def get_handoff(self, handoff_id: str) -> HandoffV2:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return self._get_handoff(conn, handoff_id)
+
     @staticmethod
     def _event_by_key(conn: sqlite3.Connection, key: str) -> sqlite3.Row | None:
         row = conn.execute("SELECT * FROM events WHERE idempotency_key=?", (key,)).fetchone()
@@ -196,6 +462,52 @@ class ContinuityStore:
         return WorkItem.model_validate(data)
 
     @staticmethod
+    def _get_run(conn: sqlite3.Connection, run_id: str) -> RunItem:
+        row = conn.execute("SELECT * FROM run_items WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Run 不存在: {run_id}")
+        data = dict(row)
+        data["owned_paths"] = tuple(json.loads(data.pop("owned_paths_json")))
+        data["declared_dirty_paths"] = tuple(json.loads(data.pop("declared_dirty_paths_json")))
+        return RunItem.model_validate(data)
+
+    @staticmethod
+    def _get_lease(conn: sqlite3.Connection, run_id: str) -> LeaseItem:
+        row = conn.execute("SELECT * FROM execution_leases WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Run lease 不存在: {run_id}")
+        return LeaseItem.model_validate(dict(row))
+
+    @staticmethod
+    def _get_checkpoint(conn: sqlite3.Connection, checkpoint_id: str) -> CheckpointItem:
+        row = conn.execute(
+            "SELECT * FROM checkpoints WHERE checkpoint_id=?", (checkpoint_id,)
+        ).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Checkpoint 不存在: {checkpoint_id}")
+        data = dict(row)
+        data["dirty_paths"] = tuple(json.loads(data.pop("dirty_paths_json")))
+        data["evidence"] = tuple(json.loads(data.pop("evidence_json")))
+        return CheckpointItem.model_validate(data)
+
+    @staticmethod
+    def _get_handoff(conn: sqlite3.Connection, handoff_id: str) -> HandoffV2:
+        row = conn.execute("SELECT * FROM handoffs_v2 WHERE handoff_id=?", (handoff_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Handoff 不存在: {handoff_id}")
+        data = dict(row)
+        data["owned_paths"] = tuple(json.loads(data.pop("owned_paths_json")))
+        return HandoffV2.model_validate(data)
+
+    @staticmethod
+    def _insert_mapping(conn: sqlite3.Connection, table: str, values: dict[str, Any]) -> None:
+        columns = ",".join(values)
+        placeholders = ",".join("?" for _ in values)
+        conn.execute(
+            f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(values.values())
+        )
+
+    @staticmethod
     def _append_event(
         conn: sqlite3.Connection,
         aggregate_id: str,
@@ -204,6 +516,7 @@ class ContinuityStore:
         idempotency_key: str,
         now: str,
         event_id: str = "",
+        aggregate_type: str = "work",
     ) -> None:
         previous = conn.execute("SELECT event_hash FROM events ORDER BY rowid DESC LIMIT 1").fetchone()
         previous_hash = str(previous[0]) if previous else ""
@@ -213,9 +526,10 @@ class ContinuityStore:
         ).hexdigest()
         resolved_event_id = event_id or f"EVT-{event_hash[:16].upper()}"
         conn.execute(
-            "INSERT INTO events VALUES (?, 'work', ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 resolved_event_id,
+                aggregate_type,
                 aggregate_id,
                 event_type,
                 canonical,
