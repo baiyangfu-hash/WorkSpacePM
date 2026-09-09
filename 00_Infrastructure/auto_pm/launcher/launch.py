@@ -16,31 +16,43 @@ _RELEASE_CHILD = (
     "sys.path.insert(0, release_dir); runpy.run_module('auto_pm', run_name='__main__')"
 )
 _UNSAFE_PYTHON_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE")
+_RESOLVE_ONLY_ARGUMENT = "--resolve-only"
 
 
-def _child_environment() -> dict[str, str]:
+def _child_environment(cache_root: Path) -> dict[str, str]:
+    """Return an isolated child environment with runtime caches outside releases."""
     env = dict(os.environ)
     for name in _UNSAFE_PYTHON_ENV:
         env.pop(name, None)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONNOUSERSITE"] = "1"
+    env["RUFF_CACHE_DIR"] = str(cache_root)
     return env
 
 
 def main(argv: list[str] | None = None, *, container: Path | None = None) -> int:
     """Resolve and execute a release, or only resolve for isolation testing."""
     resolved_container = container or Path(__file__).resolve().parent.parent
+    release_args = list(sys.argv[1:] if argv is None else argv)
     try:
         release_dir, slot = resolve_with_fallback(resolved_container)
     except BootstrapError as exc:
         print(f"launcher: {exc}", file=sys.stderr)
         return exc.exit_code
     print(f"launcher: release verified via {slot}: {release_dir}")
-    if os.environ.get("AUTO_PM_ENTRY_RESOLVE_ONLY") == "1":
+    if os.environ.get("AUTO_PM_ENTRY_RESOLVE_ONLY") == "1" or release_args == [
+        _RESOLVE_ONLY_ARGUMENT
+    ]:
         return 0
     command = [sys.executable, "-B", "-I", "-c", _RELEASE_CHILD, str(release_dir)]
-    command.extend(sys.argv[1:] if argv is None else argv)
-    return subprocess.run(command, cwd=release_dir, env=_child_environment(), check=False).returncode
+    command.extend(release_args)
+    cache_root = resolved_container / ".auto-pm" / "runtime-cache" / "ruff"
+    return subprocess.run(
+        command,
+        cwd=release_dir,
+        env=_child_environment(cache_root),
+        check=False,
+    ).returncode
 
 
 if __name__ == "__main__":
