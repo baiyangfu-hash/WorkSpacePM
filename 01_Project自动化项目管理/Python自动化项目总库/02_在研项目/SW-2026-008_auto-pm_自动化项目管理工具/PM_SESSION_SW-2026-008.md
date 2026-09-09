@@ -24,7 +24,7 @@
 
 ## 2. Current Focus（当前焦点）
 
-- current_focus: **CHG-DOCU-2026-008 已完成验收、关闭并提交；活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移。CHG-SCPT-2026-197 P2 连续性整改及 CHG-SCPT-2026-193 共享 CHG 契约证据回收均已验收关闭，均未发布、未切流。下一依赖单为 CHG-SCPT-2026-194，须重新完成阶段 0/1。CHG-SCPT-2026-195/196 仍暂停。**
+- current_focus: **CHG-DOCU-2026-008 已完成验收、关闭并提交；活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移。CHG-SCPT-2026-197 P2 连续性整改及 CHG-SCPT-2026-193 共享 CHG 契约证据回收均已验收关闭，均未发布、未切流。CHG-SCPT-2026-194 实质内容门禁已完成证据回收、交接 consumed，现待用户验收；CHG-SCPT-2026-195/196 仍暂停。**
 - risks_dependencies:
   - Ruff 静态代码检查已实现 100% Clean Exit (0 告警)
   - IndustrialErrorMapper 统一异常转译上线并补充 10 项单测
@@ -121,7 +121,7 @@
   - 2026-09-08 [已验收关闭] CHG-SCPT-2026-191 回归缺陷修正 Batch C：DecisionPackage `DEC-20260908-09EB0220` 绑定 Ruff 点名活动文件及 `.ruff.toml`，handoff `AI-20260908-REG-WP09-13` 已 consumed；Ruff Exit 0、批准源码清单 Mypy 14 files Exit 0、W0 关联定向 72 passed、全量 pytest 1792 passed/14 skipped、CLI help/ledger-check/git diff --check 均 Exit 0；用户验收后 CHG-191 closed。范围外 COM 原生异常栈与全仓 Mypy 42 条既有类型债务继续单独登记。
   - 2026-09-08 [已验收关闭] CHG-SCPT-2026-192 Retrofit：修正 CHG 关闭门禁对二级标题及嵌套子章节的误判；`tests/change/test_change_service.py` 39 passed，CHG-192 closed。
   - 2026-09-09 [已验收关闭] CHG-SCPT-2026-193：项目内 CHG 结构共享契约已提交于 `08f9c7a7`；本轮通过 `DEC-20260909-B2B69DA9` 与 handoff `AI-20260909-CHG193-CONTRACT-EXEC` 回收真实实施证据，生成、解析、编辑与关闭章节集合统一消费项目代码契约。定向 pytest 50 passed、Ruff Exit 0；Mypy 15 项为 CHG-196 已登记基线，未扩修；用户验收后已 closed，未发布、未切流。
-  - 2026-09-09 [已实施] CHG-SCPT-2026-194：关闭前占位符、空审批/实施/验证证据和非通过结论门禁已提交于 `153c7d23`；LOCAL 单域生成件使用明确不适用语义。
+  - 2026-09-09 [待验收] CHG-SCPT-2026-194：关闭前占位符、空审批/实施/验证证据和非通过结论门禁已提交于 `153c7d23`；本轮以 `DEC-20260909-AB7042C6` 和 handoff `AI-20260909-CHG194-SUBSTANCE-EXEC` 回收实施证据，56 项定向 pytest 通过、Ruff Exit 0，handoff 已 consumed。Mypy 15 项仅为 CHG-SCPT-2026-196 已登记基线，未扩修；LOCAL 单域生成件使用明确不适用语义。
   - 2026-09-09 [已关闭] CHG-DOCU-2026-008：建立活动技术债台账与历史 CHG 兼容清单，校准本 PM_SESSION 当前焦点、暂停范围和后续 WBS；决策包 `DEC-20260909-A23ED6B8`，handoff `AI-20260909-CHG-DOCU-008` 已 consumed，精确提交 `88d06e74`。
 
 ## 6. Execution Log Summary
@@ -161,12 +161,14 @@
   - read_first: 活动技术债台账、历史 CHG 兼容清单、本 PM_SESSION、CHG-DOCU-2026-008。
 - 2026-09-09 | from=Codex-fullstack-P2 | mode=CHG-SCPT-2026-197 P2 Context/Resume | request_id=AI-20260909-P2-CONTEXT-EXEC | status=consumed
   - current_state: [已关闭] 用户重新授权、批准并验收；基础实现提交 `4d02488c`，结构化 SW→SYS 映射提交 `c22ac646` 并 dogfood 验证。定向测试、Ruff、Mypy 通过；完整 pytest Exit 0（1808 passed、14 skipped、60 warnings）；CHG-SCPT-2026-197 已 closed，未发布、未切流。
+- 2026-09-09 | from=Codex-fullstack-194 | mode=CHG-SCPT-2026-194 Substance Gate | request_id=AI-20260909-CHG194-SUBSTANCE-EXEC | status=consumed | decision=DEC-20260909-AB7042C6 | change=CHG-SCPT-2026-194-pending_acceptance
+  - current_state: [待验收] 既有 `153c7d23` 实现已复核；定向 pytest 56 passed、Ruff Exit 0。Mypy 15 项为 CHG-SCPT-2026-196 已登记基线，未扩修；未修改 Obsidian 正式规范库、spec_registry、release 或其他 CHG。
 ## 9. Next Actions
 - [已关闭] CHG-DOCU-2026-008 | 项目级技术债与历史 CHG 兼容登记已完成；doc check、项目级 PM_SESSION check、台账对账和全量回归均通过；commit=`88d06e74`。
 - [暂停] CHG-SCPT-2026-195/196 | precondition=用户重新授权；done_when=分别建立新的决策包与执行回执，不得由本包隐式启动。
 - [已验收关闭] CHG-SCPT-2026-197 | result=完整 pytest Exit 0，PM_SESSION check 与台账对账通过；用户验收后已 closed，未发布、未切流。
 - [已验收关闭] CHG-SCPT-2026-193 | result=结构化 handoff 已 consumed；定向 pytest 50 passed、Ruff Exit 0；Mypy 15 项保持 CHG-196 基线债务；用户验收后已 closed，未发布、未切流。
-- [待阶段 0/1] CHG-SCPT-2026-194 | precondition=基于 193 契约与 197 上下文读取现有关闭实质内容门禁及测试事实；done_when=提交受影响范围、门禁和执行计划，等待用户明确批准。
+- [待用户验收] CHG-SCPT-2026-194 | result=handoff 已 consumed；定向 pytest 56 passed、Ruff Exit 0；Mypy 15 项保持 CHG-196 基线债务；done_when=用户验收后执行 completed→closed 与最终对账。
 - [待讨论] 新发现的问题 | precondition=CHG-DOCU-2026-008 完成验收；done_when=逐项确认是否并入现有债务、建立新 CHG 或形成不处理裁决。
 - [已解冻] Cockpit OS 原 WBS/Wave A/Wave B | 用户于 2026-09-08 明确授权最终验收并解冻；CHG-SCPT-2026-188～191 已 closed；后续按 `02_规划/010_Cockpit_OS_后续原子迭代WBS_PM.md` 逐包报批。
 - [已验收关闭] CHG-SCPT-2026-189 回归缺陷修正 Batch A | result=REG-WP-02～04 定向 72 passed、W0 45 passed、Ruff/Mypy/CLI/ledger/substance 全部 Exit 0；handoff 已 consumed；CHG closed。
