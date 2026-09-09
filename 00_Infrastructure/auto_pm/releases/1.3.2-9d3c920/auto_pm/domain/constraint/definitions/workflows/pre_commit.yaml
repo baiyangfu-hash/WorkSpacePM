@@ -1,0 +1,12 @@
+name: "pre-commit"
+description: "提交前全量质量检查工作流"
+steps:
+  - name: "Ruff 静态检查"
+    action: "run_cmd"
+    command: "python -m ruff check ."
+  - name: "Mypy 类型检查"
+    action: "run_cmd"
+    command: "python -m mypy auto_pm/"
+  - name: "约束完整性检查"
+    action: "run_cmd"
+    command: "python -m auto_pm constraint check --gate"

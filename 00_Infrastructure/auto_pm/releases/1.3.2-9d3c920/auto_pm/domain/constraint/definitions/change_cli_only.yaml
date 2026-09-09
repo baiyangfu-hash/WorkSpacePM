@@ -1,0 +1,13 @@
+id: "CST-CHG-001"
+name: "变更单必须通过 CLI 创建"
+description: "禁止用 Write 工具手工创建 CHG-*.md 文件"
+type: workflow
+severity: error
+scope:
+  patterns:
+    - "**/CHG-*/CHG-*.md"
+rules:
+  - type: "cli_only_create"
+    cli_command: "auto-pm change create"
+    description: "变更单必须通过 CLI 创建以确保台账自动更新"
+auto_fix: false

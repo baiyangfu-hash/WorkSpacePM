@@ -1,0 +1,47 @@
+# {{ project_name }} I/O 分配表
+
+> **项目编号**: {{ project_id }}  
+> **项目名称**: {{ project_name }}  
+> **版本号**: {{ version }}  
+> **编制人**: {{ author }}  
+> **更新日期**: {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }}  
+> **规范依据**: DEV-001 / LSP-907 / PROJ-016  
+
+---
+
+## 1. 概述
+
+本文档定义 {{ project_id }} {{ project_name }} PLC 控制系统的数字量输入 (DI)、数字量输出 (DO)、模拟量输入 (AI)、模拟量输出 (AO) 及通信变量分配映射关系。
+
+---
+
+## 2. 数字量输入清单 (DI)
+
+| 序号 | 物理地址 | 信号名称 | 信号类型 | 作用对象 | 描述 | 常开/常闭 | 备注 |
+| :---: | :---: | :--- | :---: | :--- | :--- | :---: | :--- |
+| 1 | X0 | DI_EmergencyStop | BOOL | 安全回路 | 紧急停止按钮 | NC | 0=急停动作 |
+| 2 | X1 | DI_SafetyDoor_Front | BOOL | 安全回路 | 前安全防护门检测 | NC | 1=关闭到位 |
+| 3 | X2 | DI_SafetyDoor_Rear | BOOL | 安全回路 | 后安全防护门检测 | NC | 1=关闭到位 |
+| 4 | X3 | DI_AirPressure_OK | BOOL | 气动源 | 主供气气压正常检测 | NO | 1=气压正常(>0.5MPa) |
+| 5 | X10 | DI_Station1_InPos | BOOL | 工位1 | 入料到位光电传感器 | NO | 1=工件到达入料位 |
+| 6 | X11 | DI_Station1_WorkPos | BOOL | 工位1 | 加工到位光电传感器 | NO | 1=工件到达工作位 |
+| 7 | X12 | DI_Station1_Cyl1_Retracted | BOOL | 气缸1 | 夹紧气缸缩回到位磁性开关 | NO | 1=已缩回原位 |
+| 8 | X13 | DI_Station1_Cyl1_Extended | BOOL | 气缸1 | 夹紧气缸伸出到位磁性开关 | NO | 1=已伸出夹紧 |
+| 9 | X14 | DI_Station1_Cyl2_Retracted | BOOL | 气缸2 | 顶升气缸缩回到位磁性开关 | NO | 1=已缩回下限位 |
+| 10 | X15 | DI_Station1_Cyl2_Extended | BOOL | 气缸2 | 顶升气缸伸出到位磁性开关 | NO | 1=已伸出上限位 |
+
+---
+
+## 3. 数字量输出清单 (DO)
+
+| 序号 | 物理地址 | 信号名称 | 信号类型 | 控制对象 | 描述 | 驱动类型 | 备注 |
+| :---: | :---: | :--- | :---: | :--- | :--- | :---: | :--- |
+| 1 | Y0 | DO_TowerLight_Red | BOOL | 三色灯 | 红色指示灯 (故障报警) | 24V DC | 1=亮灯 |
+| 2 | Y1 | DO_TowerLight_Yellow | BOOL | 三色灯 | 黄色指示灯 (待机/警告) | 24V DC | 1=亮灯 |
+| 3 | Y2 | DO_TowerLight_Green | BOOL | 三色灯 | 绿色指示灯 (自动运行) | 24V DC | 1=亮灯 |
+| 4 | Y3 | DO_Buzzer | BOOL | 蜂鸣器 | 报警蜂鸣器 | 24V DC | 1=鸣叫 |
+| 5 | Y10 | DO_Station1_Motor_Fwd | BOOL | 电机驱动 | 工位1 进料输送电机正转 | 继电器输出 | 1=电机启动 |
+| 6 | Y11 | DO_Station1_Cyl1_Extend | BOOL | 电磁阀1 | 夹紧气缸伸出电磁阀 | 24V DC | 1=通电伸出 |
+| 7 | Y12 | DO_Station1_Cyl1_Retract | BOOL | 电磁阀1 | 夹紧气缸缩回电磁阀 | 24V DC | 1=通电缩回 |
+| 8 | Y13 | DO_Station1_Cyl2_Extend | BOOL | 电磁阀2 | 顶升气缸伸出电磁阀 | 24V DC | 1=通电顶升 |
+| 9 | Y14 | DO_Station1_Cyl2_Retract | BOOL | 电磁阀2 | 顶升气缸缩回电磁阀 | 24V DC | 1=通电下降 |
