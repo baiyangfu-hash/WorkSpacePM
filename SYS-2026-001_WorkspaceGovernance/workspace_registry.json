@@ -16,6 +16,22 @@
       "control_project_id": "SYS-2026-001",
       "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
       "runtime_root": "00_Infrastructure/auto_pm"
+    },
+    {
+      "project_id": "SW-2026-009",
+      "project_root": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手",
+      "development_root": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手",
+      "control_project_id": "SYS-2026-001",
+      "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
+      "runtime_root": "00_Infrastructure/auto_pm"
+    },
+    {
+      "project_id": "DJ-2026-005",
+      "project_root": "0100_PLC自动化/DJ-2026-005",
+      "development_root": "0100_PLC自动化/DJ-2026-005",
+      "control_project_id": "SYS-2026-001",
+      "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
+      "runtime_root": "00_Infrastructure/auto_pm"
     }
   ]
 }

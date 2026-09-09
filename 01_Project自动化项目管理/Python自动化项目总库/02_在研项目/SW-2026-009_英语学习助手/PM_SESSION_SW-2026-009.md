@@ -3,11 +3,11 @@
 ## 0. Meta
 - project_id: SW-2026-009
 - project_name: 英语学习助手
-- project_root: c:\Users\fubai\Desktop\My_Workspace\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-009_英语学习助手
-- version: 1.6.0
-- last_updated: 2026-08-06 06:48:00
+- project_root: C:\Users\fubai\Documents\My_Workspace\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-009_英语学习助手
+- version: 0.1.0
+- last_updated: 2026-09-09
 - owners: fubai
-- cockpit_status: 🟢 TAKEN OVER BY 008 AUTO-PM (5大过程组完整挂载)
+- cockpit_status: 已登记到 Workspace Registry；由 PM-056、Continuity Store 与稳定驾驶舱运行时治理
 
 ## 1. Positioning（项目定位）
 - one_liner: 专为美国出差场景设计的纯本地运行 Windows 桌面英语学习应用（对标 Busuu）
@@ -15,26 +15,22 @@
 - non_goals: 云端多人对练、付费订阅系统、B2/C1/C2 高阶学术英语
 
 ## 2. Current Focus（当前焦点）
-- current_focus: v1.6.0 008驾驶舱5大过程组治理与 QML 深色玻璃拟物界面重构
-- milestone: v1.6.0 (正式版发布 & QML UI 重构)
+- current_focus: 治理接管完成；当前无活动 Work/Run，下一业务迭代须从 Resume v2 建立
+- milestone: 代码基线 V0.1.0；历史 v1.6.0 UI 展示口径不再作为软件包版本真源
 - 代码基线 V0.1.0
-- acceptance: 14 项自动化测试 100% 通过，5大过程组 (00~06) 规范挂载，QML 界面运行良好
+- acceptance: Workspace Registry 映射、项目锚点、控制面和稳定运行时可由 Context/Resume v2 验证
 
 ## 3. Status Summary（当前状态摘要）
-- in_progress:
-  - 008 Auto-PM 5大过程组 (00_项目基础信息 ~ 06_交付物) 目录挂载
-  - HTML 原型设计与 PySide6 QML 主界面重构
-- next_up:
-  - 自动化打包流程 (PyInstaller exe 生成)
-  - 词汇/对话扩展包自定义导入监控
+- in_progress: 无已登记 Work/Run；历史任务仅作项目背景，不构成当前执行授权
+- next_up: `pm resume SW-2026-009 --json` → 代码基探路 → 独立 CHG/Decision → 批准后创建 Work/Run
 - open_questions:
   - 无
 - risks_dependencies:
   - 可选依赖 `cefrpy` 与 `vosk` 未安装时平滑降级（已验证）
   - Windows 控制台 Unicode 输出编码防护（已脚本层挂载 UTF-8 解决）
 - spec_compliance:
-  - last_check: 2026-08-06 06:48:00
-  - result: 🟢 100% 规则达标 (S 级)
+  - last_check: 2026-09-09
+  - result: 治理接管已验证；业务代码质量门禁须在下一 Work 中重新实测
 
 ## 4. Artifacts Index（文档索引）
 - project_init: 00_项目基础信息/001_项目基础信息.md

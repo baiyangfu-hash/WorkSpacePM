@@ -4,8 +4,9 @@
 - project_id: DJ-2026-005
 - project_name: 边框缓存机
 - project_root: c:\Users\fubai\Documents\My_Workspace\0100_PLC自动化\DJ-2026-005
-- last_updated: 2026-08-26
+- last_updated: 2026-09-09
 - owners: fubai / PM & PLC协作团队
+- cockpit_status: 已登记到 Workspace Registry；由 PM-056、Continuity Store 与稳定驾驶舱运行时治理
 
 ## 1. Positioning（项目定位）
 - one_liner: 边框缓存机 PLC/HMI 软件工程交付与维护
@@ -22,8 +23,8 @@
   - ✅ 重构 FB_1004：X2 台车三点位移动、STD-820 打胶机安全区与抓料可交握
 
 ## 3. Status Summary（当前状态摘要）
-- in_progress: G3 工艺对齐验收完成，准备进入发布归档
-- next_up: TIA Portal 编译验证与 GP-Pro EX 触摸屏点表同步 (P0)
+- in_progress: 当前无活动 Work/Run；G3 工艺对齐验收作为历史项目状态保留
+- next_up: `pm resume DJ-2026-005 --json` 后建立独立 Work/Run；现场侧仍为 TIA Portal 编译验证与 GP-Pro EX 点表同步
 - open_questions: 无
 - risks_dependencies: 需现场 TIA Portal 环境进行实机编译下装
 
