@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.3] - 2026-09-09
+
+### Added
+
+- **CHG-SCPT-2026-030** 新增平台中立 `continuity` CLI，公开 Work、Run、Lease、Checkpoint 与 Handoff v2 的事务操作入口；Git HEAD 与 owned-path dirty 状态由 CLI 独立采集。
+
+### Fixed
+
+- **CHG-SCPT-2026-028** 根启动器向 release 进程传递所属工作空间，使 `pm resume` 与 `context resolve` 无需额外 `-w` 也能读取 Workspace Registry。
+- **CHG-SCPT-2026-029** 增加 SPEC 变更领域兼容；Decision Package 按项目编号消歧，跨项目同号且未指定项目时 fail-closed。
+
 ## [Unreleased] - 后 1.2.3 批次（CHG-165~186 补录）
 
 > **说明**：本段补录 2026-08-27 起至 2026-09-06 间已执行但未入账的 22 张变更单，

@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-471D62B0",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-SCPT-2026-031",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/pyproject.toml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/__init__.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/CHANGELOG.md",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-031.md"
+  ],
+  "approver": "User（架构师）",
+  "approved_at": "2026-09-09T22:55:09.886497+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "第一阶段仅批准母体版本元数据；release 制品和指针须在 source commit 形成后另建精确决策包。"
+  ],
+  "metadata": {}
+}
