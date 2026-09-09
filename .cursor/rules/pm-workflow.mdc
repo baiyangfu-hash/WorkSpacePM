@@ -1,29 +1,30 @@
 ---
-description: PM 工作流与变更管理（对齐 pm-workflow 技能）
+description: PM 工作流隔离守卫（治理冻结期）
 globs: **/PM_SESSION*.md,**/CHG-*.md,**/.auto-pm/**,**/00_项目管理/**
 alwaysApply: false
 ---
 
-# PM Workflow（Cursor）
+# PM Workflow 隔离守卫（Cursor）
 
-处理 PM_SESSION、变更单、迭代推进时，读取 `.trae/skills/pm-workflow/SKILL.md`。
+`pm-workflow` 当前处于 `QUARANTINED`。处理 PM_SESSION、变更单、迭代或发布时，不得读取或调用该技能；先读取 `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md`。
 
-## 落账模式（按用户指示）
+## 冻结期模式
 
 | 模式 | 行为 |
 |------|------|
-| **执行者**（默认） | 只读 PM_SESSION；产出 handoff，由 Trae pm-workflow 落账 |
-| **PM owner**（用户明确要求） | 可回写 PM_SESSION §6–§9 与 `ai_feedback.json`，仍遵循 skill_coordination |
+| **审计者**（默认） | PM_SESSION、CHG、handoff、数据库和 release 指针只读；输出带来源的事实裁决 |
+| **治理实施者**（User 明确批准） | 仅修改获批治理文件；不得修改产品源码、运行状态、发布指针或 Obsidian 正式规范 |
 
 ## 强制流程
 
-1. `python -m auto_pm -w "<工作空间根>" project show <项目ID>`
-2. 变更闭环前校验 CHG 12 章节完整性
-3. CHG closed 后：`ledger reconcile <项目ID>`
-4. 版本升级前：`spec check --check-id SHC-011,SHC-012,SHC-013,SHC-014`
+1. 以 Git 实物、显式路径和文件指纹核验事实；`pm resume` 仅作诊断输入，不能作单一真源。
+2. 任何工程动作必须对应新总计划中的唯一 G 工作包和 User 明示批准。
+3. 一个工作包只允许一个 owner、一个精确 pathspec、一个验收结论；禁止跨包顺手整改。
+4. 解除隔离前不得恢复自动 PM 落账。
 
 ## 禁止
 
 - 文件名追加版本号后缀（如 `PRD_V0.5.0.md`）
 - 用 Python 脚本直接写项目文件绕过编辑器（见 skill_coordination §9）
 - 默认 GUI offscreen 测试（须可见窗口，除非用户要求）
+- 调用、引用或根据 `.trae/skills/pm-workflow/SKILL.md` 推导当前动作
