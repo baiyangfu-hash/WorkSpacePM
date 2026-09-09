@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "last_updated": "2026-09-06",
+  "version": "1.2.0",
+  "last_updated": "2026-09-09",
   "workspace_root": "c:\\Users\\fubai\\Documents\\My_Workspace",
   "domains": {
     "pm": "项目管理域 - 与技术栈无关的通用PM流程规范",
@@ -81,10 +81,10 @@
       "title": "PM_WORKFLOW总控Skill使用说明",
       "number": "004",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/004_PM_WORKFLOW总控Skill使用说明_PM.md",
-      "version": "V1.4.0",
+      "version": "V1.5.0",
       "type_prefix": "PM",
       "domain": "pm",
-      "lifecycle": "stable",
+      "lifecycle": "deprecated",
       "sub_domain": "00_元规则与治理",
       "tags": [
         "PM_WORKFLOW",
@@ -92,7 +92,9 @@
         "总控"
       ],
       "replaces": [],
-      "replaced_by": [],
+      "replaced_by": [
+        "PM-056"
+      ],
       "aliases": [
         "RULE-004"
       ]
@@ -444,7 +446,7 @@
       "title": "通用变更管理流程规范",
       "number": "042",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/04_变更管理/042_通用变更管理流程规范_PM.md",
-      "version": "V2.4.0",
+      "version": "V2.5.0",
       "type_prefix": "PM",
       "domain": "pm",
       "lifecycle": "stable",
@@ -492,7 +494,7 @@
       "title": "通用任务派发契约模板",
       "number": "046",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/04_变更管理/046_通用任务派发契约模板_PM.md",
-      "version": "V1.0.0",
+      "version": "V2.0.0",
       "type_prefix": "PM",
       "domain": "pm",
       "lifecycle": "stable",
@@ -562,7 +564,7 @@
       "title": "功能模块迭代流程标准",
       "number": "033",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/02_规划阶段/033_功能模块迭代流程标准_PM.md",
-      "version": "V1.0.0",
+      "version": "V2.0.0",
       "type_prefix": "PM",
       "domain": "pm",
       "lifecycle": "stable",
@@ -1232,6 +1234,30 @@
       ],
       "replaces": [],
       "replaced_by": []
+    },
+    "PM-056": {
+      "title": "跨 Agent 工作连续性与恢复协议",
+      "number": "056",
+      "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/056_跨Agent工作连续性与恢复协议_PM.md",
+      "version": "V1.0.0",
+      "type_prefix": "PM",
+      "domain": "pm",
+      "lifecycle": "stable",
+      "sub_domain": "00_元规则与治理",
+      "tags": [
+        "连续性",
+        "Resume",
+        "Handoff",
+        "Work",
+        "Run",
+        "Checkpoint",
+        "Agent"
+      ],
+      "replaces": [
+        "PM-004"
+      ],
+      "replaced_by": [],
+      "aliases": []
     }
   },
   "project_copies": []

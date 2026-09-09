@@ -1,15 +1,18 @@
 ---
 spec_id: PM-004
 title: PM_WORKFLOW总控Skill使用说明
-version: V1.4.0
+version: V1.5.0
 domain: pm
-lifecycle: stable
+lifecycle: deprecated
 type: PM_WORKFLOW
-status: active
+status: deprecated
 canonical_path: "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/004_PM_WORKFLOW总控Skill使用说明_PM.md"
 ---
 
 # PM_WORKFLOW 总控Skill 使用说明（PM_SESSION 驱动）
+
+> [!WARNING] 已弃用（2026-09-09）
+> 本规范依赖的 `pm-workflow` 已停止作为 PM owner、路由入口和规范生命周期 owner。PM_SESSION 也不再是执行状态真源。新工作必须遵循 [[056_跨Agent工作连续性与恢复协议_PM|PM-056]]、PM-033、PM-042 与 PM-046；本文仅保留历史解释，不得用于授权或执行。
 
 ## 1. 目标
 - 把“需求澄清 → PRD/REQ/DES → 任务拆解 → 变更/迭代/缺陷/交付”固化为可重复流程
