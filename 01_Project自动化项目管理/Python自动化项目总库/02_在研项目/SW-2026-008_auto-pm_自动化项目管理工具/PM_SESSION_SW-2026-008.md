@@ -24,7 +24,7 @@
 
 ## 2. Current Focus（当前焦点）
 
-- current_focus: **CHG-DOCU-2026-008 已完成验收、关闭并提交；活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移。用户已批准 CHG-SCPT-2026-197 P2 连续性整改：候选规范与 fail-closed context/resume 基础包已提交 `4d02488c`，显式控制映射正在完成验证；不得切流、发布或宣布关闭。CHG-SCPT-2026-195/196 仍暂停。**
+- current_focus: **CHG-DOCU-2026-008 已完成验收、关闭并提交；活动技术债台账已登记 Windows COM 0x80040155、全仓 Mypy 基线 42/18、历史 CHG 结构告警、PM_SESSION 状态漂移。CHG-SCPT-2026-197 P2 连续性整改已完成实现与验证、状态为待验收：候选规范与 fail-closed context/resume 基础包已提交 `4d02488c`，映射接入提交 `c22ac646`，完整 pytest 1808 passed/14 skipped/60 warnings、Exit 0；等待用户验收，严禁切流、发布或关闭。CHG-SCPT-2026-195/196 仍暂停。**
 - risks_dependencies:
   - Ruff 静态代码检查已实现 100% Clean Exit (0 告警)
   - IndustrialErrorMapper 统一异常转译上线并补充 10 项单测
@@ -44,7 +44,7 @@
 - 2026-09-05 [已验证] NG-WP-03 至 NG-WP-10：在 detached candidate 完成契约、事务、决策、编排器与归档的逐包回收加固，Gate 1 整改复跑 10 项门禁全绿（pytest 1900 passed/16 skipped），candidate 变更 100% 位于批准白名单。
 - current_status: **[SUPERSEDED by NG-WP-15, 2026-09-06]** ~~[架构迁移冻结] 目标真源已裁决为 SW-2026-008 母体；detached candidate 已通过全量 Gate 1（NG-WP-03 至 NG-WP-10 逐包收口）；稳定部署 `00_Infrastructure/auto_pm` 保持只读，在 Gate 2 与首个稳定发布完成前不得切换或清理。~~ → 当前状态以 NG-WP-15 切流执行记录（active=1.2.3-f950525）为准
 - in_progress: CHG-SCPT-2026-185 已完成 setup_env 入口脱钩；verify_release 465/465 与 resolve-only/--help Exit 0。完整 startup guard 仍有 1 项 Windows cmd.exe timeout（13 passed，Exit 1），stable flat archive 延期；拓扑报告已登记。
-- 2026-09-09 [实施中] CHG-SCPT-2026-197 P2：候选连续性协议及 PM-033/042/046、PM_SESSION 差异包均已批准但尚未进入 Obsidian 正式规范；`context resolve` 与 `pm resume` 均通过显式 `control_project_id/control_pm_session` 解析 SW→SYS，且拒绝不完整、越界或不匹配映射。定向 10 passed、Ruff、Mypy 通过；完整 pytest 已跑至 100% 但未取得可信 Exit Code，故本单保持 implementing。
+- 2026-09-09 [待验收] CHG-SCPT-2026-197 P2：候选连续性协议及 PM-033/042/046、PM_SESSION 差异包均已批准但尚未进入 Obsidian 正式规范；`context resolve` 与 `pm resume` 均通过显式 `control_project_id/control_pm_session` 解析 SW→SYS，且拒绝不完整、越界或不匹配映射。定向 10 passed、Ruff、Mypy 通过；完整 `pytest -q --no-cov` 为 1808 passed、14 skipped、60 warnings，Exit 0，66.56s；仅等待用户验收，不得切流、发布或关闭。
 - completed_milestones:
   - 2026-09-07 [已验证] CHG-SCPT-2026-186 驾驶舱 CHG-SPEC 批次拆单整合（9 项拆单积压全闭环）：#8 spec check 编号唯一性 9060 豁免、#1 change 域原生放行 SPEC、#6 ledger 手工户籍回写、#4 doc check --strict 门禁与死链/INDEX 覆盖率下沉、#9 io_points 三安全列解析与 plc check 对接 STD-816、#2 spec index 五域支持与手工区保护（收敛 00_INDEX 唯一合法写入目标）、#3 冷区汇总报告无消费依赖、#5 PATH 与 release 槽位对齐核验、#7 全链台账改名核验。全量门禁通过。
   - 2026-09-04 [已验证] CHG-SCPT-2026-177 Cockpit OS Phase 3 WBS 3.1 项目全生命周期归档与恢复引擎：实现 ProjectArchiveService 核心引擎、领域就近路由、三道硬门禁、归档台账自动化（ARC-YYYYMMDD-XXX流水号）与逆向恢复，扩展 ProjectScanner.scan_archived 与 CLI archive/restore/list/delete 命令，单测 45 passed 全绿。
@@ -160,11 +160,11 @@
   - current_state: [已关闭] 当前仅治理项目文档；CHG-195/196/197 暂停，历史 CHG 原文只读保留；handoff 已由 PM 消费。
   - read_first: 活动技术债台账、历史 CHG 兼容清单、本 PM_SESSION、CHG-DOCU-2026-008。
 - 2026-09-09 | from=Codex-fullstack-P2 | mode=CHG-SCPT-2026-197 P2 Context/Resume | request_id=AI-20260909-P2-CONTEXT-EXEC | status=consumed
-  - current_state: [实施中] 用户重新授权并批准；基础实现提交 `4d02488c`，结构化 SW→SYS 映射已接入并 dogfood 验证。定向测试、Ruff、Mypy 通过；完整 pytest 的最终 Exit Code 未可信采集，禁止关闭或切流。
+  - current_state: [待验收] 用户重新授权并批准；基础实现提交 `4d02488c`，结构化 SW→SYS 映射提交 `c22ac646` 并 dogfood 验证。定向测试、Ruff、Mypy 通过；完整 pytest Exit 0（1808 passed、14 skipped、60 warnings）；禁止关闭、发布或切流，等待用户验收。
 ## 9. Next Actions
 - [已关闭] CHG-DOCU-2026-008 | 项目级技术债与历史 CHG 兼容登记已完成；doc check、项目级 PM_SESSION check、台账对账和全量回归均通过；commit=`88d06e74`。
 - [暂停] CHG-SCPT-2026-195/196 | precondition=用户重新授权；done_when=分别建立新的决策包与执行回执，不得由本包隐式启动。
-- [实施中] CHG-SCPT-2026-197 | precondition=完整 pytest 必须取得可信 Exit 0，且 PM 台账与验收证据齐备；done_when=再报用户验收，未经明确批准不得关闭、发布或切流。
+- [待验收] CHG-SCPT-2026-197 | result=完整 pytest Exit 0，PM_SESSION check 与台账对账通过；done_when=用户验收后才可继续 accepting/closed，未经明确批准不得关闭、发布或切流。
 - [待讨论] 新发现的问题 | precondition=CHG-DOCU-2026-008 完成验收；done_when=逐项确认是否并入现有债务、建立新 CHG 或形成不处理裁决。
 - [已解冻] Cockpit OS 原 WBS/Wave A/Wave B | 用户于 2026-09-08 明确授权最终验收并解冻；CHG-SCPT-2026-188～191 已 closed；后续按 `02_规划/010_Cockpit_OS_后续原子迭代WBS_PM.md` 逐包报批。
 - [已验收关闭] CHG-SCPT-2026-189 回归缺陷修正 Batch A | result=REG-WP-02～04 定向 72 passed、W0 45 passed、Ruff/Mypy/CLI/ledger/substance 全部 Exit 0；handoff 已 consumed；CHG closed。
