@@ -29,11 +29,11 @@ G8 在 G7 真实 Dogfood 与运行时生效之后发布正式法典，满足“�
 
 ## 4. 非目标债务隔离
 
-完整 `spec check` 仍报告 4 项非本法典内容错误：3 项 SHC-011 来自既有 CHANGELOG/PM_SESSION 投影版本漂移；1 项 SHC-017 来自检查器仍硬编码被冻结的 `.trae/skills/pm-workflow` 文档。G8 不修改 PM_SESSION 或 `.trae` 来制造绿灯。SHC-017 必须以独立 CHG-SCPT 修改检查器并重新发布；SHC-011 保持显式债务，待其 owner 在独立变更中处理。
+G8 验收时完整 `spec check` 报告 4 项非本法典内容错误：3 项 SHC-011 来自既有 CHANGELOG/PM_SESSION 投影版本漂移；1 项 SHC-017 来自检查器仍硬编码被冻结的 `.trae/skills/pm-workflow` 文档。后者已由独立 `CHG-SCPT-2026-027` 消除并发布 1.3.2；现只剩 3 项 SHC-011 owner 债务。G8 未修改 PM_SESSION 或 `.trae` 制造绿灯。
 
 ## 5. 最终裁决
 
 - G8：`ACCEPTED / EFFECTIVE`。
 - `pm-workflow`：`QUARANTINED / DEPRECATED / DO_NOT_USE`。
 - PM 职责：保留，但不由单一 Agent 技能独占。
-- 下一合法动作：独立整改硬编码 skill contract 门禁；不得回到旧 P1～P7 或 NG-WP 执行线。
+- 后续动作：SHC-017 已由独立变更关闭；不得回到旧 P1～P7 或 NG-WP 执行线。
