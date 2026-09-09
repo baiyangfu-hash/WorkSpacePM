@@ -95,7 +95,47 @@ class PmResumeService:
         if control_project_id:
             control_fact = self._facts.collect(control_project_id)
             return Path(control_fact.pm_session.path)
+        mapped_project_id, mapped_session = self._control_mapping(subject_session)
+        if mapped_project_id:
+            return mapped_session
         return subject_session
+
+    def _control_mapping(self, subject_session: Path) -> tuple[str, Path]:
+        """Resolve an optional, project-local control declaration fail-closed."""
+        content = self._read_text(subject_session)
+        project_id = self._single_mapping_value(
+            r"^-\s*control_project_id:\s*(.+)$", content, "control_project_id"
+        )
+        session_path = self._single_mapping_value(
+            r"^-\s*control_pm_session:\s*(.+)$", content, "control_pm_session"
+        )
+        if not project_id and not session_path:
+            return "", subject_session
+        if not project_id or not session_path:
+            raise PmResumeError("控制项目映射必须同时声明 control_project_id 与 control_pm_session")
+        candidate = Path(session_path)
+        resolved = candidate if candidate.is_absolute() else self._workspace_root / candidate
+        try:
+            resolved = resolved.resolve()
+            resolved.relative_to(self._workspace_root)
+        except ValueError as error:
+            raise PmResumeError(f"control_pm_session 位于工作空间外: {session_path}") from error
+        if not resolved.is_file():
+            raise PmResumeError(f"control_pm_session 不存在: {session_path}")
+        if self._project_id_from_session(resolved) != project_id:
+            raise PmResumeError("control_project_id 与 control_pm_session 文件名不一致")
+        return project_id, resolved
+
+    @staticmethod
+    def _single_mapping_value(pattern: str, content: str, label: str) -> str:
+        values = {
+            value.strip()
+            for value in re.findall(pattern, content, re.MULTILINE)
+            if value.strip()
+        }
+        if len(values) > 1:
+            raise PmResumeError(f"{label} 存在冲突声明")
+        return next(iter(values), "")
 
     @staticmethod
     def _project_id_from_session(path: Path) -> str:

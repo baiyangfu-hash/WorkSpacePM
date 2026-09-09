@@ -145,3 +145,22 @@ def test_sys_resume_keeps_its_own_control_session(tmp_path: Path) -> None:
     )
 
     assert result == subject
+
+
+def test_resume_uses_structured_control_mapping(tmp_path: Path) -> None:
+    control = tmp_path / "SYS-2026-001" / "PM_SESSION_SYS-2026-001.md"
+    control.parent.mkdir()
+    control.write_text("# SYS\n", encoding="utf-8")
+    subject = tmp_path / "SW-2026-008" / "PM_SESSION_SW-2026-008.md"
+    subject.parent.mkdir()
+    subject.write_text(
+        "- control_project_id: SYS-2026-001\n"
+        "- control_pm_session: SYS-2026-001/PM_SESSION_SYS-2026-001.md\n",
+        encoding="utf-8",
+    )
+
+    result = PmResumeService(str(tmp_path))._find_control_session(
+        "SW-2026-008", subject, ""
+    )
+
+    assert result == control.resolve()
