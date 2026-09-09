@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from auto_pm.contracts.continuity import LeaseItem, RunState, WorkState
-from auto_pm.contracts.continuity_resume import ContinuityResume
+from auto_pm.contracts.continuity_resume import ContinuityResume, LeaseView
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 from .workspace_context_service import WorkspaceContextError, WorkspaceContextService
@@ -53,6 +53,7 @@ class ContinuityResumeService:
         run = None
         checkpoint = None
         lease: LeaseItem | None = None
+        lease_view: LeaseView | None = None
         db_exists = self._store.db_path.is_file()
         if db_exists:
             try:
@@ -81,6 +82,13 @@ class ContinuityResumeService:
                 if run is not None:
                     checkpoint = self._store.latest_checkpoint(run.run_id)
                     lease = self._store.get_lease(run.run_id)
+                    lease_view = LeaseView(
+                        run_id=lease.run_id,
+                        owner_id=lease.owner_id,
+                        expires_at=lease.expires_at,
+                        version=lease.version,
+                        updated_at=lease.updated_at,
+                    )
                     if datetime.fromisoformat(lease.expires_at) <= self._now().astimezone(UTC):
                         conflicts.append("LEASE_EXPIRED")
             except (ContinuityStoreError, sqlite3.Error) as error:
@@ -101,7 +109,7 @@ class ContinuityResumeService:
             "work": work.model_dump(mode="json") if work else None,
             "run": run.model_dump(mode="json") if run else None,
             "checkpoint": checkpoint.model_dump(mode="json") if checkpoint else None,
-            "lease": lease.model_dump(mode="json") if lease else None,
+            "lease": lease_view.model_dump(mode="json") if lease_view else None,
             "conflicts": conflicts,
         }
         digest = hashlib.sha256(
@@ -112,7 +120,7 @@ class ContinuityResumeService:
             work=work,
             run=run,
             checkpoint=checkpoint,
-            lease=lease,
+            lease=lease_view,
             conflicts=tuple(conflicts),
             next_legal_action=next_action,
             read_set=read_set,

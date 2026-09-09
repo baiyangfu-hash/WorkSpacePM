@@ -109,6 +109,8 @@ def test_resume_returns_one_unambiguous_work_and_run(tmp_path: Path) -> None:
     assert result.work and result.work.work_id == "WORK-001"
     assert result.run and result.run.run_id == "RUN-001"
     assert result.lease and result.lease.owner_id == "agent-a"
+    assert result.lease.schema_version == "lease-view.v1"
+    assert "lease_token" not in result.lease.model_dump(mode="json")
     assert result.checkpoint is None
     assert result.next_legal_action == "CONTINUE_RUN"
 

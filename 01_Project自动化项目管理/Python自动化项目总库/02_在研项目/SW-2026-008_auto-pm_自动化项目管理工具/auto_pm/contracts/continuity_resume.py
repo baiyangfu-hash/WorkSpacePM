@@ -6,8 +6,21 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from auto_pm.contracts.continuity import CheckpointItem, LeaseItem, RunItem, WorkItem
+from auto_pm.contracts.continuity import CheckpointItem, RunItem, WorkItem
 from auto_pm.contracts.workspace_context import WorkspaceContext
+
+
+class LeaseView(BaseModel):
+    """Read-only lease metadata without the execution capability token."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: Literal["lease-view.v1"] = "lease-view.v1"
+    run_id: str
+    owner_id: str
+    expires_at: str
+    version: int
+    updated_at: str
 
 
 class ContinuityResume(BaseModel):
@@ -20,7 +33,7 @@ class ContinuityResume(BaseModel):
     work: WorkItem | None = None
     run: RunItem | None = None
     checkpoint: CheckpointItem | None = None
-    lease: LeaseItem | None = None
+    lease: LeaseView | None = None
     conflicts: tuple[str, ...] = ()
     next_legal_action: str = ""
     read_set: tuple[str, ...] = ()

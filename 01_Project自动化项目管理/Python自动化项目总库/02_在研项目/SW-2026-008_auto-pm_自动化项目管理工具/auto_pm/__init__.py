@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 
 __app_name__ = "auto-pm"
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 __author__ = "auto-pm team"
 
 # ── PEP 420 标准包路径扩展：将 Clean Architecture 分层子目录加入 auto_pm 包查找链 ──
