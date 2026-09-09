@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "auto-pm"
-version = "1.3.1"
+version = "1.3.2"
 description = "自动化项目管理工具 - 统一CLI管理PLC/Python多技术栈项目"
 authors = [
     { name = "fubai", email = "gotofritz@users.noreply.github.com" }

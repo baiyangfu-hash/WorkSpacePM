@@ -5,11 +5,11 @@
 
 --- 原始注释 ---
 
-技能文档↔代码契约漂移对账器契约清单（CHG-SCPT-2026-167）。
+活动技能文档↔代码契约漂移对账器契约清单。
 
-以「代码为唯一真源」动态提取关键常量，校验技能文档（<workspace>/.trae/skills/**）
-是否仍包含这些值。本模块仅定义数据模型（CodeTruth / SkillContract）与契约清单
-（C1~C4），真源提取与文档校验逻辑位于 checker_base.SkillContractDriftChecker。
+仅对仍处于活动状态的技能文档校验必要工程门禁。已弃用或隔离的技能不得
+继续作为治理镜像源。本模块定义数据模型与活动契约清单，真源提取与文档校验
+逻辑位于 checker_base.SkillContractDriftChecker。
 """
 
 from __future__ import annotations
@@ -47,65 +47,11 @@ class SkillContract:
 
 SKILL_CONTRACTS: tuple[SkillContract, ...] = (
     SkillContract(
-        contract_id="C1",
-        title="PM_SESSION 阈值与归档路径",
-        severity=Severity.ERROR,
-        code_truths=(
-            CodeTruth(
-                module="auto_pm.application.core.pm_session_service",
-                attribute="MAX_FILE_SIZE_KB",
-                kind="value",
-            ),
-            CodeTruth(
-                module="auto_pm.application.core.pm_session_service",
-                attribute="MAX_FILE_LINES",
-                kind="value",
-            ),
-            CodeTruth(
-                module="auto_pm.application.core.pm_session_service",
-                attribute="ARCHIVE_DIR_NAME",
-                kind="value",
-            ),
-            CodeTruth(
-                module="auto_pm.application.core.paths",
-                attribute="PG_CLOSING_DIR",
-                kind="value",
-            ),
-        ),
-        literals=(),
-        doc_relpaths=(".trae/skills/pm-workflow/refs/pm_session_guide.md",),
-    ),
-    SkillContract(
-        contract_id="C2",
-        title="变更状态机 12 态",
-        severity=Severity.ERROR,
-        code_truths=(
-            CodeTruth(
-                module="auto_pm.domain.change.constants",
-                attribute="STATUS_FLOW",
-                kind="keys",
-            ),
-        ),
-        literals=(),
-        doc_relpaths=(".trae/skills/pm-workflow/refs/process_gates.md",),
-    ),
-    SkillContract(
-        contract_id="C3",
-        title="变更编号格式",
-        severity=Severity.ERROR,
-        code_truths=(),
-        literals=("CHG-{DOMAIN}-{YYYY}-{XXX}",),
-        doc_relpaths=(".trae/skills/pm-workflow/refs/handoff_schema.md",),
-    ),
-    SkillContract(
         contract_id="C4",
         title="门禁口径",
         severity=Severity.WARNING,
         code_truths=(),
         literals=("ruff check", "mypy", "pytest --no-cov -q", "改动文件"),
-        doc_relpaths=(
-            ".trae/skills/fullstack-engineer/SKILL.md",
-            ".trae/skills/pm-workflow/refs/process_gates.md",
-        ),
+        doc_relpaths=(".trae/skills/fullstack-engineer/SKILL.md",),
     ),
 )
