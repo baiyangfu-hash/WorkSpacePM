@@ -10,6 +10,7 @@ from typing import Literal, Self
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from auto_pm.contracts.continuity import WorkKind
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 
 
 class RestrictedAction(StrEnum):
@@ -72,6 +73,8 @@ class InternalRoutingPolicy(BaseModel):
     allow_reschedule: bool = False
     allow_execution_branch_changes: bool = False
     allow_business_line_reroute: bool = False
+    allowed_execution_adapters: frozenset[ExecutionAdapterKind] = Field(default_factory=frozenset)
+    max_parallel_runs: int = Field(default=1, ge=1, le=8)
     max_auto_repair_attempts: int = Field(default=0, ge=0, le=100)
     max_auto_repair_seconds: int = Field(default=0, ge=0, le=86_400)
     same_subject_project_only: Literal[True] = True

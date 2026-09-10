@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from auto_pm.contracts.continuity import WorkKind
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import (
     AuthorityAudit,
     AuthorityEnvelope,
@@ -68,6 +69,8 @@ def test_authority_envelope_defaults_fail_closed() -> None:
     assert envelope.authorization_source == "CHG_DECISION"
     assert envelope.routing.max_auto_repair_attempts == 0
     assert envelope.routing.max_auto_repair_seconds == 0
+    assert envelope.routing.allowed_execution_adapters == frozenset()
+    assert envelope.routing.max_parallel_runs == 1
     assert not envelope.routing.auto_repair_enabled
     assert "lease_token" not in envelope.model_dump(mode="json")
 
@@ -83,6 +86,8 @@ def test_authority_envelope_rejects_unsafe_or_ambiguous_boundaries() -> None:
         _envelope(routing=InternalRoutingPolicy(allow_business_line_reroute=True))
     with pytest.raises(ValidationError, match="enabled together"):
         InternalRoutingPolicy(max_auto_repair_attempts=1)
+    with pytest.raises(ValidationError, match="greater than or equal to 1"):
+        InternalRoutingPolicy(max_parallel_runs=0)
     with pytest.raises(ValidationError, match="auto repair requires BUG"):
         _envelope(
             allowed_child_work_kinds=frozenset({WorkKind.TEST}),
@@ -104,6 +109,10 @@ def test_authority_envelope_allows_only_explicit_internal_routing() -> None:
             allow_reschedule=True,
             allow_execution_branch_changes=True,
             allow_business_line_reroute=True,
+            allowed_execution_adapters=frozenset(
+                {ExecutionAdapterKind.CODEX, ExecutionAdapterKind.TRAE}
+            ),
+            max_parallel_runs=2,
             max_auto_repair_attempts=2,
             max_auto_repair_seconds=600,
         ),
@@ -112,6 +121,10 @@ def test_authority_envelope_allows_only_explicit_internal_routing() -> None:
     assert envelope.routing.same_subject_project_only is True
     assert envelope.routing.within_scope_paths_only is True
     assert envelope.routing.auto_repair_enabled
+    assert envelope.routing.allowed_execution_adapters == frozenset(
+        {ExecutionAdapterKind.CODEX, ExecutionAdapterKind.TRAE}
+    )
+    assert envelope.routing.max_parallel_runs == 2
     assert envelope.allowed_child_work_kinds == frozenset(WorkKind)
 
 

@@ -13,7 +13,13 @@ from auto_pm.core.work_registry_service import WorkRegistryService
 from click.testing import CliRunner, Result
 
 from auto_pm.contracts.continuity import WorkKind
-from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
+from auto_pm.contracts.mission import (
+    AuthorityAudit,
+    AuthorityEnvelope,
+    InternalRoutingPolicy,
+    MissionState,
+)
 
 
 def _git(root: Path, *args: str) -> None:
@@ -137,6 +143,72 @@ def _orchestration_ready(root: Path) -> None:
         new_state=MissionState.ACTIVE,
         root_work_id="WORK-CLI-A3-ROOT",
         idempotency_key="a3-mission-activate",
+    )
+
+
+def _dispatch_ready(root: Path) -> None:
+    _repository(root)
+    now = datetime.now(UTC)
+    works = WorkRegistryService(root)
+    works.initialize("test")
+    work = works.create_work(
+        work_id="WORK-CLI-DISPATCH",
+        subject_project_id="SW-TEST-001",
+        kind=WorkKind.WBS,
+        title="A5 CLI dispatch",
+        owner="codex:agent-a",
+        scope_paths=["README.md"],
+        source_fingerprint="sha256:dispatch",
+        idempotency_key="dispatch-work-create",
+        read_only=True,
+    )
+    authority = AuthorityEnvelope(
+        envelope_id="AUTH-CLI-A5-001",
+        subject_project_id="SW-TEST-001",
+        change_id="CHG-SCPT-2026-208",
+        decision_id="DEC-20260910-A5CLI001",
+        scope_paths=("README.md",),
+        allowed_child_work_kinds=frozenset({WorkKind.WBS}),
+        routing=InternalRoutingPolicy(
+            allow_execution_branch_changes=True,
+            allowed_execution_adapters=frozenset({ExecutionAdapterKind.CODEX}),
+        ),
+        valid_from=now - timedelta(minutes=1),
+        expires_at=now + timedelta(days=1),
+        audit=AuthorityAudit(
+            created_by="Codex PM",
+            created_at=now,
+            approved_by="fubai",
+            approved_at=now,
+            source_fingerprint=f"sha256:{'c' * 64}",
+        ),
+    )
+    missions = MissionService(root)
+    missions.initialize("test")
+    draft = missions.create(
+        mission_id="MISSION-CLI-A5-001",
+        subject_project_id="SW-TEST-001",
+        title="A5 CLI dispatch",
+        objective="Prepare a local package.",
+        acceptance_criteria=["Receipt is secret-free."],
+        authority=authority,
+        created_by="Codex PM",
+        idempotency_key="dispatch-mission-create",
+        root_work_id=work.work_id,
+    )
+    awaiting = missions.transition(
+        mission_id=draft.mission_id,
+        expected_version=draft.version,
+        new_state=MissionState.AWAITING_APPROVAL,
+        root_work_id=None,
+        idempotency_key="dispatch-mission-awaiting",
+    )
+    missions.transition(
+        mission_id=awaiting.mission_id,
+        expected_version=awaiting.version,
+        new_state=MissionState.ACTIVE,
+        root_work_id=awaiting.root_work_id,
+        idempotency_key="dispatch-mission-active",
     )
 
 
@@ -299,3 +371,42 @@ def test_orchestration_cli_routes_a_typed_bug_without_a_hidden_queue(
     payload = json.loads(result.output)
     assert payload["action"] == "BLOCKING"
     assert payload["child_work_id"] == "WORK-A3-CLI-A3-001"
+
+
+def test_dispatch_cli_emits_only_a_local_secret_free_preparation_receipt(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _dispatch_ready(tmp_path)
+
+    result = _invoke(
+        cli_runner,
+        tmp_path,
+        [
+            "dispatch",
+            "prepare",
+            "--mission-id",
+            "MISSION-CLI-A5-001",
+            "--work-id",
+            "WORK-CLI-DISPATCH",
+            "--run-id",
+            "RUN-CLI-A5-001",
+            "--adapter",
+            "codex",
+            "--executor",
+            "agent-a",
+            "--lease-token",
+            "must-not-leak",
+            "--stack",
+            "python",
+            "--force-isolation",
+            "--idempotency-key",
+            "dispatch-cli-prepare",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["status"] == "PREPARED"
+    assert payload["adapter"] == "codex"
+    assert payload["worktree_mode"] == "ISOLATED"
+    assert "must-not-leak" not in result.output

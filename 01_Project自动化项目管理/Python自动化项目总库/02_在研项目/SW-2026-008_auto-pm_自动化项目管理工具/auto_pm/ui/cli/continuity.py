@@ -12,11 +12,16 @@ from pydantic import BaseModel, ValidationError
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import AuthorityEnvelope, MissionState
 from auto_pm.contracts.orchestration import OrchestrationFinding, RepairAttempt
 from auto_pm.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
+)
+from auto_pm.core.execution_adapter_service import (
+    ExecutionDispatchError,
+    ExecutionDispatchService,
 )
 from auto_pm.core.mission_orchestrator import (
     MissionOrchestrator,
@@ -41,6 +46,12 @@ def _execution_service(ctx: click.Context) -> ContinuityExecutionService:
     root = _workspace(ctx)
     WorkRegistryService(root).initialize(__version__)
     return ContinuityExecutionService(root)
+
+
+def _dispatch_service(ctx: click.Context) -> ExecutionDispatchService:
+    root = _workspace(ctx)
+    WorkRegistryService(root).initialize(__version__)
+    return ExecutionDispatchService(root)
 
 
 def _mission_service(ctx: click.Context) -> MissionService:
@@ -445,6 +456,61 @@ def transition_run(
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
     _emit(item)
+
+
+@continuity_group.group(name="dispatch")
+def dispatch_group() -> None:
+    """Prepare local, secret-free execution packages without provider side effects."""
+
+
+@dispatch_group.command(name="prepare")
+@click.option("--mission-id", required=True)
+@click.option("--work-id", required=True)
+@click.option("--run-id", required=True)
+@click.option(
+    "--adapter",
+    type=click.Choice([item.value for item in ExecutionAdapterKind]),
+    required=True,
+)
+@click.option("--executor", "executor_id", required=True)
+@click.option("--lease-token", required=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 86_400), default=1800, show_default=True)
+@click.option("--stack", default=None, help="已验证项目技术栈；省略时从 Workspace Registry 读取。")
+@click.option("--force-isolation", is_flag=True, help="即使控制工作树干净也创建隔离分支。")
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def prepare_dispatch(
+    ctx: click.Context,
+    mission_id: str,
+    work_id: str,
+    run_id: str,
+    adapter: str,
+    executor_id: str,
+    lease_token: str,
+    lease_seconds: int,
+    stack: str | None,
+    force_isolation: bool,
+    idempotency_key: str,
+) -> None:
+    """Allocate a local Run and emit only a desensitized PREPARED receipt."""
+
+    try:
+        mission = _mission_service(ctx).get(mission_id)
+        result = _dispatch_service(ctx).prepare(
+            mission=mission,
+            work_id=work_id,
+            run_id=run_id,
+            adapter=ExecutionAdapterKind(adapter),
+            executor_id=executor_id,
+            lease_token=lease_token,
+            lease_seconds=lease_seconds,
+            stack=stack,
+            force_isolation=force_isolation,
+            idempotency_key=idempotency_key,
+        )
+    except (ExecutionDispatchError, MissionServiceError) as error:
+        raise click.ClickException(str(error)) from error
+    _emit(result.receipt)
 
 
 @continuity_group.group(name="lease")
