@@ -32,7 +32,7 @@
   - spec 检查器总量增至 SHC-001~017，tests/spec 回归 174 passed
 - spec_compliance:
   - last_check: 2026-08-23
-  - result: 代码基线 V1.2.3（CHG-SCPT-2026-164 落地完成，P2 质量收敛与友好排障全部闭环，全量单测全绿）。
+  - result: 当前代码基线 V1.3.3（与 pyproject.toml、CHANGELOG 及稳定发布指针 1.3.3-d8f7c8b 对齐；CHG-SCPT-2026-164 的 V1.2.3 描述保留为历史记录）。
 
 ## 3. Status Summary
 
@@ -141,7 +141,7 @@
 - 2026-09-01 | from=Codex | mode=SW-2026-008 文档资产评估与归档治理
 
 - 2026-09-06 [已验证] CHG-SCPT-2026-178 前向治理更正
-  - 版本基线 V1.2.3；此前 §8 中的 `1.2.3-d41eb38` 当前稳定发布陈述已被 supersede，历史证据保留但不构成 active/previous 指针或已切流证明。
+  - 当前版本基线 V1.3.3；此前 §8 中的 `1.2.3-d41eb38` 当前稳定发布陈述已被 supersede，历史证据保留但不构成 active/previous 指针或已切流证明。
   - current_state: 精确发布树核验与治理证据对账正在受控整改；未修改任何 stable release、release pointer、tag 或根入口。
 - 2026-09-06 | from=pm-workflow | mode=NG-WP-17 historical archive | request_id=AI-20260906-NGWP17-HISTORICAL-ARCHIVE | status=consumed | decision=DEC-20260906-C1CFB37C | change=CHG-DOCU-2026-005-pending_acceptance | result=4/4 SHA matched; git diff check Exit 0; stable flat source deferred for setup_env.bat dependency.
 - 2026-09-07 | from=Antigravity | mode=CHG-SCPT-2026-186 闭环
