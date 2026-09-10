@@ -82,7 +82,7 @@ class ArchiveManager:
             replaced_by=new_version,
         )
 
-        return archive_dest
+        return Path(archive_dest)
 
     def archive_package(
         self, old_version: str, new_version: str, summary: str = ""
@@ -126,7 +126,7 @@ class ArchiveManager:
                 zip_size,
             )
 
-            return dest
+            return Path(dest)
 
         return None
 

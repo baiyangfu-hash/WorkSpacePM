@@ -71,7 +71,7 @@ class CodesysParser(BaseParser):
         from auto_pm.vartable.models import FormatType
         from auto_pm.vartable.parsers.format_detector import detect_format
 
-        return detect_format(file_path) == FormatType.CODESYS
+        return bool(detect_format(file_path) == FormatType.CODESYS)
 
     def parse(self, file_path: str | Path) -> ParseResult:
         """解析 Codesys 格式变量表

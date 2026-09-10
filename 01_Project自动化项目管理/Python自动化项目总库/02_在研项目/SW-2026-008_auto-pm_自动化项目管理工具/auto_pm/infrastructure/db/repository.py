@@ -140,7 +140,7 @@ class ProjectRepository:
         with self.db.get_connection() as conn:
             cursor = conn.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
             conn.commit()
-            return cursor.rowcount > 0
+            return bool(cursor.rowcount > 0)
 
     def count(self) -> int:
         """项目总数"""
@@ -270,7 +270,7 @@ class ChangeRequestRepository:
                     "DELETE FROM change_requests WHERE change_number = ?", (change_number,)
                 )
             conn.commit()
-            return cursor.rowcount > 0
+            return bool(cursor.rowcount > 0)
 
     def delete_by_project(self, project_id: str) -> int:
         """删除项目的所有变更单记录
@@ -281,7 +281,7 @@ class ChangeRequestRepository:
         with self.db.get_connection() as conn:
             cursor = conn.execute("DELETE FROM change_requests WHERE project_id = ?", (project_id,))
             conn.commit()
-            return cursor.rowcount
+            return int(cursor.rowcount)
 
     @staticmethod
     def _row_to_summary(row: sqlite3.Row) -> ChangeSummary:
@@ -452,7 +452,7 @@ class ImpactAnalysisRepository:
                     (change_number,),
                 )
             conn.commit()
-            return cursor.rowcount > 0
+            return bool(cursor.rowcount > 0)
 
     @staticmethod
     def _row_to_analysis(row: sqlite3.Row) -> ImpactAnalysis:
@@ -559,7 +559,7 @@ class ApprovalHistoryRepository:
                     (change_number,),
                 )
             conn.commit()
-            return cursor.rowcount
+            return int(cursor.rowcount)
 
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> ApprovalRecord:

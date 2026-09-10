@@ -63,7 +63,7 @@ class PlcRepairer:
         """解析实际存在的 PRD 目录路径，若都不存在则返回默认 PRD_DIR 路径"""
         found = find_prd_dir(project_path)
         if found is not None:
-            return found[0]
+            return str(found[0])
         return os.path.join(project_path, PRD_DIR)
 
     # ── 单项目修复 ────────────────────────────────────────

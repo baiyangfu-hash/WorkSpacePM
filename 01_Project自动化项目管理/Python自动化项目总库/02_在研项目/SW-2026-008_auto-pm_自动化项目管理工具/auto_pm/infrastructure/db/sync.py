@@ -256,7 +256,7 @@ class SyncService:
         """
         from auto_pm.core.project_scanner import ProjectScanner
 
-        return ProjectScanner.get_project_mtime(project_path)
+        return float(ProjectScanner.get_project_mtime(project_path))
 
     @staticmethod
     def _find_change_file(change_dir: str, change_number: str) -> str | None:

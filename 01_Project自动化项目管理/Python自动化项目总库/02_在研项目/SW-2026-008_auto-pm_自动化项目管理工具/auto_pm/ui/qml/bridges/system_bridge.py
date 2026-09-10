@@ -16,7 +16,7 @@ import logging
 import os
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from PySide6.QtCore import Property, QObject, Slot
 
@@ -106,7 +106,7 @@ class SystemBridge(QObject):
         """执行 GUI 一键环境健康自检"""
         from auto_pm.cli.doctor import run_doctor_check
         try:
-            return run_doctor_check()
+            return cast(dict[str, Any], run_doctor_check())
         except Exception as e:
             logger.warning("runDoctorCheck failed: %s", e, exc_info=True)
             return {"all_passed": False, "message": str(e)}

@@ -550,13 +550,13 @@ def cmd_lint(
         console.print(f"[red]错误: 找不到 spec_registry.json: {registry_path}[/red]")
         raise SystemExit(1)
 
-    registry: dict = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry: dict[str, object] = json.loads(registry_path.read_text(encoding="utf-8"))
     run_all = "all" in rule
     issues: list[dict[str, str]] = []
 
     # ── LINT-001: stale_root ──────────────────────────────────────────────
     if run_all or "stale_root" in rule:
-        stored_root = registry.get("workspace_root", "")
+        stored_root = str(registry.get("workspace_root", ""))
         stored_path = Path(stored_root)
         if stored_path != ws:
             issues.append({
@@ -579,7 +579,7 @@ def cmd_lint(
         registered_paths: set[Path] = set()
         for _spec_id, spec in _iter_registry_specs(registry):
             cp = spec.get("canonical_path", "")
-            if cp:
+            if isinstance(cp, str) and cp:
                 registered_paths.add((ws / cp).resolve())
 
         for spec_dir in spec_dirs:
@@ -604,7 +604,7 @@ def cmd_lint(
     if run_all or "path_drift" in rule:
         for spec_id, spec in _iter_registry_specs(registry):
             cp = spec.get("canonical_path", "")
-            if not cp:
+            if not isinstance(cp, str) or not cp:
                 continue
             full_path = (ws / cp).resolve()
             if not full_path.exists():
@@ -626,7 +626,7 @@ def cmd_lint(
 
         for spec_id, spec in _iter_registry_specs(registry):
             cp = spec.get("canonical_path", "")
-            if not cp:
+            if not isinstance(cp, str) or not cp:
                 continue
             if _should_skip_schema_mismatch(spec):
                 continue
@@ -774,4 +774,3 @@ def sync(ctx: click.Context, workspace: str | None, config_path: str | None) -> 
         warn_icon = "⚠️" if unicode_output else "[WARN]"
         console.print(f"[bold yellow]{warn_icon} 同步已完成，但存在部分需要整改的规范项。[/bold yellow]")
         raise SystemExit(1 if chk_output.error_count > 0 else 0)
-

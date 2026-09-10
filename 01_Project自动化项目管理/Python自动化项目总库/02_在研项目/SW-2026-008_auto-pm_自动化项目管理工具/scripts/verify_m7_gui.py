@@ -24,14 +24,14 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 # 确保以无头 offscreen 渲染（适合 CI/自动控制）
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
+from auto_pm.change.change_service import ChangeService
+from auto_pm.core.project_service import ProjectService
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
 from auto_pm.application.change_facade import ChangeFacade
 from auto_pm.application.workbench_facade import WorkbenchFacade
-from auto_pm.change.change_service import ChangeService
-from auto_pm.core.project_service import ProjectService
 from auto_pm.ui.qml.bridges.change_bridge import ChangeBridge
 from auto_pm.ui.qml.bridges.workbench_bridge import WorkbenchBridge
 from auto_pm.ui.qml.models.project_list_model import ProjectListModel

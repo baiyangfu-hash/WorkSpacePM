@@ -431,7 +431,7 @@ class SpecCenterAdapter:
         path = self.workspace / info.canonical_path
         if not path.exists():
             raise FileNotFoundError(f"规范文件不存在: {path}")
-        return path.read_text(encoding="utf-8")
+        return str(path.read_text(encoding="utf-8"))
 
     # ── Tab3 健康检查 ────────────────────────────────────
 

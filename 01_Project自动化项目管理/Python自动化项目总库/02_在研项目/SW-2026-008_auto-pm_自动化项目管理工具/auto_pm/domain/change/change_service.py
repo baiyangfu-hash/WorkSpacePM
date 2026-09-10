@@ -22,7 +22,7 @@ import datetime
 import logging
 import os
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from auto_pm.change.constants import (
     LEDGER_STATUS_MAP,
@@ -753,7 +753,10 @@ class ChangeService:
         """
         if self._repo is None:
             return []
-        return self._repo.list_approval_history(change_number, project_id=project_id)
+        return cast(
+            list[ApprovalRecord],
+            self._repo.list_approval_history(change_number, project_id=project_id),
+        )
 
     def get_impact_analysis(self, change_number: str, project_id: str | None = None) -> ImpactAnalysis | None:
         """查询变更单的影响分析记录（供 GUI 验证摘要使用，M3）
@@ -941,57 +944,57 @@ class ChangeService:
 
     def _get_project_path(self, project_id: str) -> str | None:
         """[已委托] 根据项目编号获取项目路径（向后兼容包装）"""
-        return self._locator.get_project_path(project_id)
+        return cast(str | None, self._locator.get_project_path(project_id))
 
     def _generate_change_number(self, project_path: str, domain: str) -> str:
         """[已委托] 生成变更编号（向后兼容包装）"""
-        return self._locator.generate_change_number(project_path, domain)
+        return cast(str, self._locator.generate_change_number(project_path, domain))
 
     def _get_change_file_path(self, project_path: str, change_number: str) -> str:
         """[已委托] 根据变更编号获取文件路径（向后兼容包装）"""
-        return self._locator.get_change_file_path(project_path, change_number)
+        return cast(str, self._locator.get_change_file_path(project_path, change_number))
 
     def _find_change_file(
         self, change_number: str, project_id: str | None = None
     ) -> str | None:
         """[已委托] 根据变更编号查找文件（向后兼容包装）"""
-        return self._locator.find_change_file(change_number, project_id=project_id)
+        return cast(str | None, self._locator.find_change_file(change_number, project_id=project_id))
 
     def _scan_all_change_files(self) -> list[ChangeSummary]:
         """[已委托] 扫描工作空间所有项目的变更单文件（向后兼容包装）"""
-        return self._locator.scan_all_change_files()
+        return cast(list[ChangeSummary], self._locator.scan_all_change_files())
 
     def _append_to_approval_table(self, content: str, row: str) -> str:
         """[已委托] 在审批流程表格末尾追加一行（向后兼容包装）"""
-        return self._editor.append_to_approval_table(content, row)
+        return cast(str, self._editor.append_to_approval_table(content, row))
 
     def _append_to_implementation_table(self, content: str, row: str) -> str:
         """[已委托] 在实施记录表格末尾追加一行（向后兼容包装）"""
-        return self._editor.append_to_implementation_table(content, row)
+        return cast(str, self._editor.append_to_implementation_table(content, row))
 
     def _append_to_verification_table(self, content: str, row: str) -> str:
         """[已委托] 在验证表格末尾追加一行（向后兼容包装）"""
-        return self._editor.append_to_verification_table(content, row)
+        return cast(str, self._editor.append_to_verification_table(content, row))
 
     def _update_status_field(self, content: str, new_status: str) -> str:
         """[已委托] 更新 §3.4 变更状态字段（向后兼容包装）"""
-        return self._editor.update_status_field(content, new_status)
+        return cast(str, self._editor.update_status_field(content, new_status))
 
     def _update_verification_conclusion(self, content: str, conclusion: str) -> str:
         """[已委托] 更新 §10.2 验证结论（向后兼容包装）"""
-        return self._editor.update_verification_conclusion(content, conclusion)
+        return cast(str, self._editor.update_verification_conclusion(content, conclusion))
 
     def _update_field(self, content: str, field: str, value: str) -> str:
         """[已委托] 根据字段名分发到对应的章节更新逻辑（向后兼容包装）"""
-        return self._editor.update_field(content, field, value)
+        return cast(str, self._editor.update_field(content, field, value))
 
     def _update_text_block(self, content: str, label: str, value: str) -> str:
         """[已委托] 更新 §4 中的文本块（向后兼容包装）"""
-        return self._editor._update_text_block(content, label, value)
+        return cast(str, self._editor._update_text_block(content, label, value))
 
     def _update_table_field(self, content: str, field_name: str, value: str) -> str:
         """[已委托] 更新 §3.4 表格中的字段值（向后兼容包装）"""
-        return self._editor._update_table_field(content, field_name, value)
+        return cast(str, self._editor._update_table_field(content, field_name, value))
 
     def _check_transition_guards(
         self,
@@ -1006,7 +1009,7 @@ class ChangeService:
     @staticmethod
     def _render_urgency_value(urgency: str) -> str:
         """[已委托] 渲染紧急程度为 ☑/□ 格式（向后兼容包装）"""
-        return ChangeMarkdownEditor.render_urgency_value(urgency)
+        return cast(str, ChangeMarkdownEditor.render_urgency_value(urgency))
 
     # 保留旧类属性以兼容外部引用
     _CHANGE_FILE_SEARCH_PATHS = ChangeFileLocator.CHANGE_FILE_SEARCH_PATHS

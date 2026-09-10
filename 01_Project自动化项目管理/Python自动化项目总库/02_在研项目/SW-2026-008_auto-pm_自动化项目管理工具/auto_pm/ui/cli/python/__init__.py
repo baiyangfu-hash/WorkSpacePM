@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, cast
 
 import click
 from rich.console import Console
@@ -238,7 +238,7 @@ def _check_python_project(project_path: str, project_id: str) -> dict[str, Any]:
     package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     templates_dir = os.path.join(package_dir, "templates")
     svc = PythonProjectService(os.path.dirname(project_path), templates_dir=templates_dir)
-    return svc.check_project_spec(project_path, project_id)
+    return cast(dict[str, Any], svc.check_project_spec(project_path, project_id))
 
 
 def _is_python_project(project_path: str) -> bool:

@@ -131,4 +131,4 @@ class PlcService:
             所有 PLC 项目的检查结果列表
         """
         log.info("检查工作空间所有 PLC 项目: %s", self.workspace_root)
-        return self._checker.check_workspace()
+        return list(self._checker.check_workspace())

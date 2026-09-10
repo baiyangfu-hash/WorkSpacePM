@@ -8,13 +8,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
 # 自动将项目根目录加入 sys.path
 _repo_root = Path(__file__).resolve().parent.parent
@@ -26,9 +25,6 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
-
-if TYPE_CHECKING:
-    from auto_pm.ui.qml.bridges.file_watcher_bridge import FileWatcherBridge
 
 
 class GuiTestRunner(QObject):
@@ -555,6 +551,7 @@ def main() -> int:
     from auto_pm.change.change_service import ChangeService
     from auto_pm.core.project_service import ProjectService
     from auto_pm.db.connection import DatabaseManager
+
     from auto_pm.ui.factories import (
         make_asset_summary_service,
         make_dashboard_service,

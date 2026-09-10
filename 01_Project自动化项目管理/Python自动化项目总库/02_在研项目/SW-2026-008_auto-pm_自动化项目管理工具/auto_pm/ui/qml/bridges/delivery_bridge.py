@@ -12,7 +12,7 @@ M5 CHG-116：refreshAssetSummary / getAssetSummary Slot 已接入 WorkspaceView.
 """
 import logging
 from dataclasses import asdict
-from typing import Any
+from typing import Any, cast
 
 from PySide6.QtCore import Property, QObject, Slot
 
@@ -261,7 +261,7 @@ class DeliveryBridge(QObject):
         try:
             with open(file_path, encoding="utf-8") as f:
                 content = f.read()
-            return parse_markdown_to_blocks(content)
+            return cast(list[dict[str, Any]], parse_markdown_to_blocks(content))
         except Exception as e:
             logger.warning("parseMarkdownToBlocks failed: %s", e, exc_info=True)
             return [{"type": "paragraph", "html": f"<p style='color: red;'>解析 Markdown 失败: {str(e)}</p>"}]

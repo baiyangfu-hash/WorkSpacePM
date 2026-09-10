@@ -68,7 +68,7 @@ class IntDocParser(BaseParser):
         from auto_pm.vartable.models import FormatType
         from auto_pm.vartable.parsers.format_detector import detect_format
 
-        return detect_format(file_path) == FormatType.INTDOC
+        return bool(detect_format(file_path) == FormatType.INTDOC)
 
     def parse(self, file_path: str | Path) -> ParseResult:
         """解析 Markdown 接口文档

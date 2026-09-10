@@ -63,7 +63,7 @@ class Work3Parser(BaseParser):
         from auto_pm.vartable.models import FormatType
         from auto_pm.vartable.parsers.format_detector import detect_format
 
-        return detect_format(file_path) == FormatType.WORK3
+        return bool(detect_format(file_path) == FormatType.WORK3)
 
     def parse(self, file_path: str | Path) -> ParseResult:
         """解析 Work3 格式变量表

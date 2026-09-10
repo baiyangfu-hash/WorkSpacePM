@@ -289,8 +289,8 @@ Workspace
 |---|---|---|---|---|
 | A0 可信基座 | 固化总方案；建立 Mission/Envelope 契约；修 Resume 零写和 hook 统一入口 | 本文、契约、两项修复、单测 | 聚焦测试/Ruff/Mypy 通过；纯读取无文件副作用；hook 不再加载平铺包 | `ACCEPTED / NOT_DEPLOYED` |
 | A1 Mission 真源 | 在 Continuity Store 增加 Mission/Envelope/Event 持久化与迁移 | schema、repository、service、CLI、Resume 扩展 | 幂等、并发、迁移、损坏/未知版本均 fail closed | `ACCEPTED / NOT_DEPLOYED` |
-| A2 PM Facade | 建立 `plan/approve/execute/resume/accept` 高阶入口；兼容 `pm-workflow` 显示别名 | PM API/CLI、确认卡、验收包 | 别名无状态；一条 Mission 可完整恢复 | `BLOCKED / NOT_DEPLOYED` |
-| A3 编排引擎 | 自动分类、Work Graph、Bug/债务/测试转向、有界修复和升级 | Orchestrator、策略、事件和回放 | 不越 Envelope；异常可恢复、可解释 | `NOT_STARTED` |
+| A2 PM Facade | 建立 `plan/approve/execute/resume/accept` 高阶入口；兼容 `pm-workflow` 显示别名 | PM API/CLI、确认卡、验收包 | 别名无状态；一条 Mission 可完整恢复 | `ACCEPTED / NOT_DEPLOYED` |
+| A3 编排引擎 | 自动分类、Work Graph、Bug/债务/测试转向、有界修复和升级 | Orchestrator、策略、事件和回放 | 不越 Envelope；异常可恢复、可解释 | `NOT_STARTED / B0_REQUIRED` |
 | A4 友好驾驶舱 | 两次确认 UX、老板视图、Work Graph 和证据抽屉 | QML/UI、Bridge/DTO | 用户无需操作内部对象；无启动写副作用 | `NOT_STARTED` |
 | A5 执行适配 | Codex/Trae/手动适配器，隔离 worktree 和 lease 转移 | Adapter、branch/worktree policy | 两种独立 Agent 可精确续跑 | `NOT_STARTED` |
 | A6 双靶实弹 | SW-2026-009 与 DJ-2026-005 各完成一个真实 Mission | Python/PLC dogfood 报告 | Bug 转向、Checkpoint、恢复、联合验收全链通过 | `NOT_STARTED` |
@@ -372,15 +372,15 @@ A0 不允许：
 | 研发母体全量 pytest | `PASS` | JUnit：`1891 tests, 0 failures, 0 errors, 14 skipped`，83.446 秒 |
 | 发布与切流 | `NOT_RUN` | 不在 A1 授权范围；active release 仍为 `1.3.3-d8f7c8b` |
 
-## 17. A2 当前实施记录（2026-09-09）
+## 17. A2 已验收记录（2026-09-10）
 
-- 用户已批准 `CHG-SCPT-2026-201`；治理根 Mission 为 `MISSION-SW008-A2-201`，根 Work 为 `WORK-SW008-A2-201`，Run 为 `RUN-SW008-A2-201-01`；
-- 当前共享工作树存在与 A2 无关的未提交修改，严格 Run 门禁拒绝直接在其上启动。为保护既有工作，A2 在从 A1 基线 `e35aaabf` 派生的隔离工作树 `codex/a2-pm-facade` 中执行；
+- `CHG-SCPT-2026-201` 已关闭；治理根 Mission `MISSION-SW008-A2-201` 与接力根 Work `WORK-SW008-A2-201-R2` 均为 `ACCEPTED`，治理收口提交为 `dcc0d8f9`；
+- A2 始终在从 A1 基线 `e35aaabf` 派生的隔离工作树 `codex/a2-pm-facade` 中执行；稳定部署未改，active release 仍为 `1.3.3-d8f7c8b`，尚未合并或切流；
 - `pm plan` 只生成首次确认卡并合法推进 Draft，`pm approve` 只在已有授权根 Work 上激活 Mission，`pm execute` 只推进授权 Work，`pm resume` 严格只读，`pm accept` 只在验收门后记录最终确认；
 - `pm workflow` 仅输出迁移提示，不读取、注册、调用或恢复隔离的旧 `pm-workflow` 技能；PM Facade 本身不保存执行状态；
-- 首个 Checkpoint 为 `CP-SW008-A2-201-01`。聚焦 pytest（20 项）、Ruff、Mypy、文档门禁均通过；全量 pytest 在 A2 范围外的 QML `QCoreApplication/QApplication` 夹具冲突处失败，隔离分支台账还缺少历史 CHG 193–195、197；
-- 进一步发现首个 Run 的研发目录相对 owned paths 与 Git 仓库相对快照不一致，无法完整捕捉新建文件。路径规范化补充 Decision 被现有生成器的“同号 CHG 跨项目重号”判定阻断，未绕过该授权门禁。
+- A2 最终全量回归为 `1886 passed, 14 skipped, 0 failed`（2026-09-10）；`0f1ab30c` 已使研发母体 Resume 忽略到期 Run，防止历史租约妨碍后续接力；
+- 本次回归同时确认全局静态基线仍有 5 项 Ruff 与 42 项 Mypy 历史债务，已登记为 B0 `CHG-SCPT-2026-205`；该事实不倒灌篡改 A2 的已验收结论。
 
 ## 18. 当前下一合法动作
 
-A2 未通过全量验收，Mission、Work 与 Run 均已记录为 `BLOCKED`。下一合法动作是单独批准基线恢复包：修复 QML 测试夹具、补齐隔离分支缺失的历史台账记录，并修正跨工作树 CHG 决策的路径归一化；完成后才可重新启动 A2 Run、建立完整 Checkpoint、验收与提交。不得发布、切流或处理 A3 编排引擎范围。
+B0 已获用户开工授权：`CHG-DOCU-2026-010` 负责本路线图事实纠偏，`CHG-SCPT-2026-205` 负责恢复全局 Ruff/Mypy 静态绿灯。只有 B0 的文档、静态检查、全量回归与台账对账均通过，并由用户单独验收后，才能提交 A3 的实施计划并等待新的开工授权。不得发布、切流或处理 A3 编排引擎范围。
