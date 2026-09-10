@@ -34,6 +34,62 @@ def _invoke(runner: CliRunner, root: Path, args: list[str]) -> Result:
     return runner.invoke(cli, ["-w", str(root), "continuity", *args], catch_exceptions=False)
 
 
+def _authority_json() -> str:
+    return json.dumps(
+        {
+            "envelope_id": "AUTH-CLI-001",
+            "subject_project_id": "SW-TEST-001",
+            "change_id": "CHG-SCPT-2026-200",
+            "decision_id": "DEC-20260910-7421E80D",
+            "scope_paths": ["README.md"],
+            "valid_from": "2026-09-09T00:00:00+00:00",
+            "expires_at": "2026-09-11T00:00:00+00:00",
+            "audit": {
+                "created_by": "Codex PM",
+                "created_at": "2026-09-09T00:00:00+00:00",
+                "approved_by": "fubai",
+                "approved_at": "2026-09-09T00:00:00+00:00",
+                "source_fingerprint": f"sha256:{'a' * 64}",
+            },
+        }
+    )
+
+
+def test_mission_cli_creates_reads_and_transitions_explicit_authority(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _repository(tmp_path)
+    created = _invoke(
+        cli_runner,
+        tmp_path,
+        [
+            "mission", "create", "--mission-id", "MISSION-CLI-001", "--pid", "SW-TEST-001",
+            "--title", "CLI Mission", "--objective", "Persist exact authority.",
+            "--acceptance", "Mission can be read.", "--authority-json", _authority_json(),
+            "--created-by", "Codex PM", "--idempotency-key", "mission-create",
+        ],
+    )
+    assert created.exit_code == 0
+    assert json.loads(created.output)["state"] == "DRAFT"
+
+    shown = _invoke(
+        cli_runner, tmp_path, ["mission", "show", "--mission-id", "MISSION-CLI-001"]
+    )
+    assert shown.exit_code == 0
+    assert json.loads(shown.output)["authority"]["decision_id"] == "DEC-20260910-7421E80D"
+
+    submitted = _invoke(
+        cli_runner,
+        tmp_path,
+        [
+            "mission", "transition", "--mission-id", "MISSION-CLI-001", "--to",
+            "AWAITING_APPROVAL", "--expected-version", "1", "--idempotency-key", "mission-submit",
+        ],
+    )
+    assert submitted.exit_code == 0
+    assert json.loads(submitted.output)["state"] == "AWAITING_APPROVAL"
+
+
 def test_continuity_cli_runs_checkpoint_and_handoff_v2(
     cli_runner: CliRunner, tmp_path: Path
 ) -> None:

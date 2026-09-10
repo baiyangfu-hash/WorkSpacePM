@@ -11,6 +11,7 @@ from pathlib import Path
 
 from auto_pm.contracts.continuity import LeaseItem, RunState, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume, LeaseView
+from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 from .workspace_context_service import WorkspaceContextError, WorkspaceContextService
@@ -49,6 +50,7 @@ class ContinuityResumeService:
             raise ContinuityResumeError(str(error)) from error
 
         conflicts = list(context.conflicts)
+        mission: Mission | None = None
         work = None
         run = None
         checkpoint = None
@@ -57,8 +59,18 @@ class ContinuityResumeService:
         db_exists = self._store.db_path.is_file()
         if db_exists:
             try:
+                missions = self._store.list_active_missions(context.subject_project_id)
+                if len(missions) == 1:
+                    mission = missions[0]
+                elif len(missions) > 1:
+                    conflicts.append("MULTIPLE_ACTIVE_MISSIONS")
+
                 works = self._store.list_works(context.subject_project_id)
-                if work_id:
+                if mission and mission.root_work_id:
+                    if work_id and work_id != mission.root_work_id:
+                        raise ContinuityResumeError("指定 Work 与活动 Mission 的 root Work 不一致")
+                    work = self._store.get_work(mission.root_work_id)
+                elif work_id:
                     work = self._store.get_work(work_id)
                     if work.subject_project_id != context.subject_project_id:
                         raise ContinuityResumeError("Work 不属于当前 subject project")
@@ -95,6 +107,7 @@ class ContinuityResumeService:
                 raise ContinuityResumeError(f"Continuity Store 无法读取: {error}") from error
 
         next_action = self._next_action(
+            mission.state if mission else None,
             work.state if work else None,
             run.state if run else None,
             checkpoint is not None,
@@ -106,6 +119,7 @@ class ContinuityResumeService:
         )
         seed = {
             "context": context.evidence_id,
+            "mission": mission.model_dump(mode="json") if mission else None,
             "work": work.model_dump(mode="json") if work else None,
             "run": run.model_dump(mode="json") if run else None,
             "checkpoint": checkpoint.model_dump(mode="json") if checkpoint else None,
@@ -117,6 +131,7 @@ class ContinuityResumeService:
         ).hexdigest()
         return ContinuityResume(
             context=context,
+            mission=mission,
             work=work,
             run=run,
             checkpoint=checkpoint,
@@ -129,10 +144,20 @@ class ContinuityResumeService:
 
     @staticmethod
     def _next_action(
+        mission_state: MissionState | None,
         work_state: WorkState | None,
         run_state: RunState | None,
         has_checkpoint: bool,
     ) -> str:
+        if mission_state is not None:
+            mission_actions = {
+                MissionState.DRAFT: "SUBMIT_MISSION_FOR_APPROVAL",
+                MissionState.AWAITING_APPROVAL: "AWAIT_USER_APPROVAL",
+                MissionState.BLOCKED: "RESOLVE_MISSION_BLOCKER",
+                MissionState.ACCEPTANCE_PENDING: "AWAIT_USER_ACCEPTANCE",
+            }
+            if mission_state in mission_actions:
+                return mission_actions[mission_state]
         if work_state is None:
             return ""
         if run_state is None:

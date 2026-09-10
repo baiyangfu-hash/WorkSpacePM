@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from auto_pm.contracts.continuity import CheckpointItem, RunItem, WorkItem
+from auto_pm.contracts.mission import Mission
 from auto_pm.contracts.workspace_context import WorkspaceContext
 
 
@@ -30,6 +31,7 @@ class ContinuityResume(BaseModel):
 
     schema_version: Literal["continuity-resume.v2"] = "continuity-resume.v2"
     context: WorkspaceContext
+    mission: Mission | None = None
     work: WorkItem | None = None
     run: RunItem | None = None
     checkpoint: CheckpointItem | None = None

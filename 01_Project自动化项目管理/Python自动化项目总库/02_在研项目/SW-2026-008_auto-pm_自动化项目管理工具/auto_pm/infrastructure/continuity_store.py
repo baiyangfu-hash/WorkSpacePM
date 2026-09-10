@@ -17,6 +17,7 @@ from auto_pm.contracts.continuity import (
     RunItem,
     WorkItem,
 )
+from auto_pm.contracts.mission import Mission, MissionState
 
 
 class ContinuityStoreError(RuntimeError):
@@ -28,6 +29,13 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     schema_version TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
     tool_version TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    from_version TEXT NOT NULL,
+    to_version TEXT NOT NULL,
+    applied_at TEXT NOT NULL,
+    tool_version TEXT NOT NULL,
+    PRIMARY KEY (from_version, to_version)
 );
 CREATE TABLE IF NOT EXISTS work_items (
     work_id TEXT PRIMARY KEY,
@@ -110,13 +118,36 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TEXT NOT NULL,
     idempotency_key TEXT NOT NULL UNIQUE
 );
+CREATE TABLE IF NOT EXISTS mission_items (
+    mission_id TEXT PRIMARY KEY,
+    subject_project_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    state TEXT NOT NULL,
+    root_work_id TEXT,
+    acceptance_criteria_json TEXT NOT NULL,
+    authority_json TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_work_project_state
 ON work_items(subject_project_id, state);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate
 ON events(aggregate_type, aggregate_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_runs_work_state ON run_items(work_id, state);
 CREATE INDEX IF NOT EXISTS idx_checkpoints_run ON checkpoints(run_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_mission_project_state
+ON mission_items(subject_project_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_mission_per_project
+ON mission_items(subject_project_id)
+WHERE state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED');
 """
+
+_LEGACY_SCHEMA_VERSION = "continuity-store.v2"
+_CURRENT_SCHEMA_VERSION = "continuity-store.v3"
+_KNOWN_SCHEMA_VERSIONS = frozenset({_LEGACY_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION})
 
 
 class ContinuityStore:
@@ -133,12 +164,58 @@ class ContinuityStore:
 
     def initialize(self, now: str, tool_version: str) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        migrated = False
         with self._transaction() as conn:
+            versions = self._schema_versions(conn)
+            if versions and not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
+                rendered = ", ".join(sorted(versions))
+                raise ContinuityStoreError(f"未知或未来 Continuity Store schema: {rendered}")
             conn.executescript(_DDL)
-            conn.execute(
-                "INSERT OR IGNORE INTO schema_meta VALUES ('continuity-store.v2', ?, ?)",
-                (now, tool_version),
-            )
+            if not versions:
+                conn.execute(
+                    "INSERT INTO schema_meta VALUES (?, ?, ?)",
+                    (_CURRENT_SCHEMA_VERSION, now, tool_version),
+                )
+            elif versions == {_LEGACY_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_CURRENT_SCHEMA_VERSION, _LEGACY_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_LEGACY_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
+                )
+                migrated = True
+        if migrated:
+            self._checkpoint_completed_migration()
+
+    def _checkpoint_completed_migration(self) -> None:
+        """Make a completed migration visible to strict immutable readers before return."""
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
+        try:
+            result = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if result is None or int(result[0]) != 0:
+                raise ContinuityStoreError("Continuity Store 迁移后 WAL 无法安全合并")
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _schema_versions(conn: sqlite3.Connection) -> set[str]:
+        metadata = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'"
+        ).fetchone()
+        if metadata is None:
+            tables = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+            if tables:
+                raise ContinuityStoreError("Continuity Store 缺少 schema_meta，拒绝推断迁移")
+            return set()
+        rows = conn.execute("SELECT schema_version FROM schema_meta").fetchall()
+        versions = {str(row[0]) for row in rows}
+        if not versions:
+            raise ContinuityStoreError("Continuity Store schema_meta 为空，拒绝推断迁移")
+        return versions
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
@@ -189,6 +266,69 @@ class ContinuityStore:
             )
             self._append_event(conn, values["work_id"], "WORK_CREATED", values, idempotency_key, now)
             return self._get_work(conn, values["work_id"])
+
+    def create_mission(
+        self, values: dict[str, Any], idempotency_key: str, now: str
+    ) -> Mission:
+        """Persist one Mission and its append-only creation event atomically."""
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if (
+                    existing["aggregate_type"] != "mission"
+                    or existing["aggregate_id"] != values["mission_id"]
+                ):
+                    raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
+                return self._get_mission(conn, values["mission_id"])
+            try:
+                self._insert_mapping(conn, "mission_items", values)
+            except sqlite3.IntegrityError as error:
+                raise ContinuityStoreError("同一项目已有未终结 Mission，拒绝并发创建") from error
+            self._append_event(
+                conn,
+                values["mission_id"],
+                "MISSION_CREATED",
+                values,
+                idempotency_key,
+                now,
+                aggregate_type="mission",
+            )
+            return self._get_mission(conn, values["mission_id"])
+
+    def transition_mission(
+        self,
+        mission_id: str,
+        expected_version: int,
+        new_state: MissionState,
+        root_work_id: str | None,
+        idempotency_key: str,
+        now: str,
+    ) -> Mission:
+        """Advance a Mission with optimistic locking and an immutable event."""
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_type"] != "mission" or existing["aggregate_id"] != mission_id:
+                    raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
+                return self._get_mission(conn, mission_id)
+            cursor = conn.execute(
+                """UPDATE mission_items
+                SET state=?, root_work_id=?, version=version+1, updated_at=?
+                WHERE mission_id=? AND version=?""",
+                (new_state.value, root_work_id, now, mission_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            self._append_event(
+                conn,
+                mission_id,
+                "MISSION_TRANSITIONED",
+                {"state": new_state.value, "root_work_id": root_work_id},
+                idempotency_key,
+                now,
+                aggregate_type="mission",
+            )
+            return self._get_mission(conn, mission_id)
 
     def transition(
         self,
@@ -250,6 +390,10 @@ class ContinuityStore:
     def get_work(self, work_id: str) -> WorkItem:
         with self._read_connection() as conn:
             return self._get_work(conn, work_id)
+
+    def get_mission(self, mission_id: str) -> Mission:
+        with self._read_connection() as conn:
+            return self._get_mission(conn, mission_id)
 
     def create_run(
         self,
@@ -467,6 +611,23 @@ class ContinuityStore:
             ).fetchall()
             return tuple(self._get_work(conn, str(row["work_id"])) for row in rows)
 
+    def list_active_missions(self, subject_project_id: str) -> tuple[Mission, ...]:
+        with self._read_connection() as conn:
+            versions = self._schema_versions(conn)
+            if not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
+                rendered = ", ".join(sorted(versions))
+                raise ContinuityStoreError(f"未知或未来 Continuity Store schema: {rendered}")
+            if versions == {_LEGACY_SCHEMA_VERSION}:
+                # Strict reads must not upgrade a legacy store. It has no Mission table yet.
+                return ()
+            rows = conn.execute(
+                """SELECT mission_id FROM mission_items WHERE subject_project_id=?
+                AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
+                ORDER BY updated_at DESC, mission_id""",
+                (subject_project_id,),
+            ).fetchall()
+            return tuple(self._get_mission(conn, str(row["mission_id"])) for row in rows)
+
     def list_runs(self, work_id: str) -> tuple[RunItem, ...]:
         with self._read_connection() as conn:
             rows = conn.execute(
@@ -500,6 +661,16 @@ class ContinuityStore:
         data["read_only"] = bool(data["read_only"])
         data["scope_paths"] = tuple(json.loads(data.pop("scope_json")))
         return WorkItem.model_validate(data)
+
+    @staticmethod
+    def _get_mission(conn: sqlite3.Connection, mission_id: str) -> Mission:
+        row = conn.execute("SELECT * FROM mission_items WHERE mission_id=?", (mission_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Mission 不存在: {mission_id}")
+        data = dict(row)
+        data["acceptance_criteria"] = tuple(json.loads(data.pop("acceptance_criteria_json")))
+        data["authority"] = json.loads(data.pop("authority_json"))
+        return Mission.model_validate(data)
 
     @staticmethod
     def _get_run(conn: sqlite3.Connection, run_id: str) -> RunItem:

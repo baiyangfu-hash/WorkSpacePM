@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 import click
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.mission import AuthorityEnvelope, MissionState
 from auto_pm.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
+from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
 
@@ -33,6 +36,12 @@ def _execution_service(ctx: click.Context) -> ContinuityExecutionService:
     root = _workspace(ctx)
     WorkRegistryService(root).initialize(__version__)
     return ContinuityExecutionService(root)
+
+
+def _mission_service(ctx: click.Context) -> MissionService:
+    service = MissionService(_workspace(ctx))
+    service.initialize(__version__)
+    return service
 
 
 def _emit(item: BaseModel) -> None:
@@ -76,6 +85,91 @@ def _within(paths: tuple[str, ...], roots: tuple[str, ...]) -> list[str]:
 @click.group(name="continuity")
 def continuity_group() -> None:
     """Transactional continuity v2; legacy handoff remains read-only."""
+
+
+@continuity_group.group(name="mission")
+def mission_group() -> None:
+    """Low-level Mission truth commands; PM-friendly orchestration is a later phase."""
+
+
+@mission_group.command(name="create")
+@click.option("--mission-id", required=True)
+@click.option("--pid", "project_id", required=True)
+@click.option("--title", required=True)
+@click.option("--objective", required=True)
+@click.option("--acceptance", "acceptance_criteria", multiple=True, required=True)
+@click.option("--authority-json", required=True)
+@click.option("--created-by", required=True)
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def create_mission(
+    ctx: click.Context,
+    mission_id: str,
+    project_id: str,
+    title: str,
+    objective: str,
+    acceptance_criteria: tuple[str, ...],
+    authority_json: str,
+    created_by: str,
+    idempotency_key: str,
+) -> None:
+    """Create a DRAFT Mission from an explicit, validated authority envelope."""
+    try:
+        authority = AuthorityEnvelope.model_validate(json.loads(authority_json))
+        item = _mission_service(ctx).create(
+            mission_id=mission_id,
+            subject_project_id=project_id,
+            title=title,
+            objective=objective,
+            acceptance_criteria=list(acceptance_criteria),
+            authority=authority,
+            created_by=created_by,
+            idempotency_key=idempotency_key,
+        )
+    except (json.JSONDecodeError, ValidationError, MissionServiceError) as error:
+        raise click.ClickException(str(error)) from error
+    _emit(item)
+
+
+@mission_group.command(name="show")
+@click.option("--mission-id", required=True)
+@click.pass_context
+def show_mission(ctx: click.Context, mission_id: str) -> None:
+    """Read one persisted Mission without changing it."""
+    try:
+        item = _mission_service(ctx).get(mission_id)
+    except MissionServiceError as error:
+        raise click.ClickException(str(error)) from error
+    _emit(item)
+
+
+@mission_group.command(name="transition")
+@click.option("--mission-id", required=True)
+@click.option("--to", "new_state", type=click.Choice([item.value for item in MissionState]), required=True)
+@click.option("--expected-version", type=click.IntRange(1), required=True)
+@click.option("--root-work", "root_work_id")
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def transition_mission(
+    ctx: click.Context,
+    mission_id: str,
+    new_state: str,
+    expected_version: int,
+    root_work_id: str | None,
+    idempotency_key: str,
+) -> None:
+    """Apply one legal Mission transition using optimistic locking."""
+    try:
+        item = _mission_service(ctx).transition(
+            mission_id=mission_id,
+            expected_version=expected_version,
+            new_state=MissionState(new_state),
+            root_work_id=root_work_id,
+            idempotency_key=idempotency_key,
+        )
+    except MissionServiceError as error:
+        raise click.ClickException(str(error)) from error
+    _emit(item)
 
 
 @continuity_group.group(name="work")

@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from auto_pm.core.continuity_execution_service import ContinuityExecutionService
 from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
+from auto_pm.core.mission_service import MissionService
 from auto_pm.core.pm_session_projection_service import (
     PmSessionProjectionError,
     PmSessionProjectionService,
@@ -18,6 +19,7 @@ from auto_pm.core.pm_session_projection_service import (
 from auto_pm.core.work_registry_service import WorkRegistryService
 
 from auto_pm.contracts.continuity import WorkKind
+from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 
 
 def _workspace(root: Path) -> Path:
@@ -83,6 +85,45 @@ def _run(root: Path) -> None:
     )
 
 
+def _mission(root: Path, mission_id: str = "MISSION-001") -> None:
+    now = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
+    service = MissionService(root, now=lambda: now)
+    service.initialize("test")
+    authority = AuthorityEnvelope(
+        envelope_id=f"AUTH-{mission_id}",
+        subject_project_id="SW-2026-008",
+        change_id="CHG-SCPT-2026-200",
+        decision_id="DEC-20260910-7421E80D",
+        scope_paths=("auto_pm/a.py",),
+        valid_from=now - timedelta(hours=1),
+        expires_at=now + timedelta(days=1),
+        audit=AuthorityAudit(
+            created_by="Codex PM",
+            created_at=now,
+            approved_by="fubai",
+            approved_at=now,
+            source_fingerprint=f"sha256:{'a' * 64}",
+        ),
+    )
+    service.create(
+        mission_id=mission_id,
+        subject_project_id="SW-2026-008",
+        title="Resume mission",
+        objective="Recover a user-approved mission.",
+        acceptance_criteria=["Mission is visible on resume."],
+        authority=authority,
+        created_by="Codex PM",
+        idempotency_key=f"create-{mission_id}",
+    )
+    service.transition(
+        mission_id=mission_id,
+        expected_version=1,
+        new_state=MissionState.AWAITING_APPROVAL,
+        root_work_id=None,
+        idempotency_key=f"submit-{mission_id}",
+    )
+
+
 def test_empty_store_returns_explicitly_empty_execution_state(tmp_path: Path) -> None:
     _workspace(tmp_path)
 
@@ -91,6 +132,7 @@ def test_empty_store_returns_explicitly_empty_execution_state(tmp_path: Path) ->
     ).collect(project_id="SW-2026-008")
 
     assert result.schema_version == "continuity-resume.v2"
+    assert result.mission is None
     assert result.work is None
     assert result.run is None
     assert result.checkpoint is None
@@ -115,6 +157,41 @@ def test_resume_returns_one_unambiguous_work_and_run(tmp_path: Path) -> None:
     assert "lease_token" not in result.lease.model_dump(mode="json")
     assert result.checkpoint is None
     assert result.next_legal_action == "CONTINUE_RUN"
+
+
+def test_resume_projects_mission_and_user_approval_boundary(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _mission(tmp_path)
+
+    result = ContinuityResumeService(
+        tmp_path, now=lambda: datetime(2026, 9, 9, 12, 1, tzinfo=UTC)
+    ).collect(project_id="SW-2026-008")
+
+    assert result.mission and result.mission.mission_id == "MISSION-001"
+    assert result.work is None
+    assert result.next_legal_action == "AWAIT_USER_APPROVAL"
+
+
+def test_multiple_active_missions_fail_closed_without_guessing(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _mission(tmp_path, "MISSION-001")
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX idx_one_open_mission_per_project")
+        conn.execute(
+            """INSERT INTO mission_items
+            SELECT 'MISSION-002', subject_project_id, title, objective, state, root_work_id,
+                   acceptance_criteria_json, authority_json, version, created_by, created_at, updated_at
+            FROM mission_items WHERE mission_id='MISSION-001'"""
+        )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.mission is None
+    assert result.conflicts == ("MULTIPLE_ACTIVE_MISSIONS",)
+    assert result.next_legal_action == ""
 
 
 def test_expired_lease_is_a_conflict_and_suppresses_next_action(tmp_path: Path) -> None:
@@ -177,6 +254,19 @@ def test_corrupt_continuity_store_fails_closed(tmp_path: Path) -> None:
     path.write_text("not sqlite", encoding="utf-8")
 
     with pytest.raises(ContinuityResumeError, match="无法读取"):
+        ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+
+def test_future_continuity_schema_fails_closed_on_resume(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _mission(tmp_path)
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE schema_meta SET schema_version='continuity-store.v999'")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    with pytest.raises(ContinuityResumeError, match="未知或未来"):
         ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
 
 

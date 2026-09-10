@@ -288,7 +288,7 @@ Workspace
 | 阶段 | 目标 | 主要交付物 | 验收条件 | 状态 |
 |---|---|---|---|---|
 | A0 可信基座 | 固化总方案；建立 Mission/Envelope 契约；修 Resume 零写和 hook 统一入口 | 本文、契约、两项修复、单测 | 聚焦测试/Ruff/Mypy 通过；纯读取无文件副作用；hook 不再加载平铺包 | `ACCEPTED / NOT_DEPLOYED` |
-| A1 Mission 真源 | 在 Continuity Store 增加 Mission/Envelope/Event 持久化与迁移 | schema、repository、service、CLI、Resume 扩展 | 幂等、并发、迁移、损坏/未知版本均 fail closed | `NOT_STARTED` |
+| A1 Mission 真源 | 在 Continuity Store 增加 Mission/Envelope/Event 持久化与迁移 | schema、repository、service、CLI、Resume 扩展 | 幂等、并发、迁移、损坏/未知版本均 fail closed | `ACCEPTED / NOT_DEPLOYED` |
 | A2 PM Facade | 建立 `plan/approve/execute/resume/accept` 高阶入口；兼容 `pm-workflow` 显示别名 | PM API/CLI、确认卡、验收包 | 别名无状态；一条 Mission 可完整恢复 | `NOT_STARTED` |
 | A3 编排引擎 | 自动分类、Work Graph、Bug/债务/测试转向、有界修复和升级 | Orchestrator、策略、事件和回放 | 不越 Envelope；异常可恢复、可解释 | `NOT_STARTED` |
 | A4 友好驾驶舱 | 两次确认 UX、老板视图、Work Graph 和证据抽屉 | QML/UI、Bridge/DTO | 用户无需操作内部对象；无启动写副作用 | `NOT_STARTED` |
@@ -355,6 +355,23 @@ A0 不允许：
 
 首个执行 Run `RUN-SW008-A0-198-01` 在创建 Checkpoint 时被现行门禁拒绝，原因是门禁只允许启动前的 `declared_dirty_paths`，却不允许 Run 在 owned paths 内新产生的合法修改。该 Run 已如实标记 `FAILED`，缺陷登记为 `CHG-SCPT-2026-199`，未在 A0 越权修复。验证接管 Run `RUN-SW008-A0-198-02` 显式接管 6 个已修改路径后成功创建 Checkpoint；此处置保留了完整失败证据，没有绕过门禁。
 
-## 16. 当前下一合法动作
+## 16. A1 验证证据与续接点
 
-A0 与其衍生缺陷 `CHG-SCPT-2026-199` 均已由用户验收并关闭；`WORK-SW008-199` 和 `RUN-SW008-199-01` 的恢复证据为 `CP-SW008-199-01`。下一合法动作是 A1 Mission 真源的只读勘测和独立批准包；不得因本总方案、A0 或 CHG-199 已关闭而自动开工。当前 active release 未包含母体修改，仍为 `NOT_DEPLOYED`。
+`CHG-SCPT-2026-200` 已由用户验收并关闭；`DEC-20260910-7421E80D` 将修改范围限定为 Mission/Continuity 内核、低层 CLI、测试与治理记录；`WORK-SW008-A1-200` 和 `RUN-SW008-A1-200-01` 已关闭，恢复证据为 `CP-SW008-A1-200-01`。A1 实现以下边界：
+
+- Continuity Store 从 `continuity-store.v2` 加性迁移至 `continuity-store.v3`，创建 Mission 表、迁移台账和每项目最多一条未终结 Mission 的数据库约束；既有 Work 不重建、不删除。
+- Mission 创建与迁移均使用幂等事件链；状态变更使用版本比较，AuthorityEnvelope 到期、项目/Root Work 不一致、未来 schema、损坏库和多活动 Mission 均失败关闭。
+- 迁移的受控写入结束前合并其 WAL；Resume 严格只读，对遗留 v2 不暗中升级，对外部遗留的非空 WAL 继续拒绝读取。
+- `continuity mission create/show/transition` 是供后续 PM Facade 调用的低层入口，尚不是用户面对的 `plan/approve/execute/resume/accept` 工作流。
+
+| 门禁 | 结果 | 证据摘要 |
+|---|---|---|
+| A1 专属 pytest | `PASS` | `38 passed`；覆盖幂等、并发、乐观锁、迁移、损坏/未知 schema、Resume 与 CLI |
+| A1 Ruff | `PASS` | 8 个 A1 Python/测试文件无问题 |
+| A1 Mypy | `PASS` | `--no-incremental` 检查 5 个源文件无问题 |
+| 研发母体全量 pytest | `PASS` | JUnit：`1891 tests, 0 failures, 0 errors, 14 skipped`，83.446 秒 |
+| 发布与切流 | `NOT_RUN` | 不在 A1 授权范围；active release 仍为 `1.3.3-d8f7c8b` |
+
+## 17. 当前下一合法动作
+
+A1 已完成用户验收和治理闭环。下一合法动作仅是 A2 的只读勘测与独立批准包：设计面向用户的 `plan/approve/execute/resume/accept` PM Facade、两次确认卡与旧入口显示别名；不得因 A1 已关闭而自动开工，更不得发布或切流。
