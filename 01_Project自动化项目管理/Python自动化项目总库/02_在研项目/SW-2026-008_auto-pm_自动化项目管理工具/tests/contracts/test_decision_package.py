@@ -159,3 +159,60 @@ def test_create_decision_rejects_ambiguous_duplicate_change_id(tmp_path: Path) -
     service = DecisionService(tmp_path)
     with pytest.raises(DecisionValidationError, match="跨项目重号"):
         service.create_decision(change_id=change_id, approver="fubai")
+
+
+def test_create_decision_ignores_runtime_worktree_mirror(tmp_path: Path) -> None:
+    """运行态 worktree 的镜像变更单不得制造正式资产的重号假阳性。"""
+    change_id = "CHG-SCPT-2026-201"
+    for root in (
+        tmp_path / "SW-2026-008",
+        tmp_path / ".auto-pm" / "worktrees" / "isolated" / "SW-2026-008",
+    ):
+        chg_dir = root / "04_监控" / "01_变更管理" / "01_变更单"
+        chg_dir.mkdir(parents=True)
+        (chg_dir / f"{change_id}.md").write_text(
+            f"""# {change_id}
+## 3. 变更基本信息
+### 3.0 编号与项目
+| 项目编号 | SW-2026-008 |
+### 3.3 影响范围
+| 影响范围 | MODULE |
+### 3.4 申请信息
+| 变更状态 | approved |
+""",
+            encoding="utf-8",
+        )
+
+    dto = DecisionService(tmp_path).create_decision(
+        change_id=change_id,
+        approver="fubai",
+        project_id="SW-2026-008",
+    )
+    assert dto.project_id == "SW-2026-008"
+
+
+def test_create_decision_rejects_same_project_formal_duplicate(tmp_path: Path) -> None:
+    """正式项目目录中的同项目重号仍必须 fail-closed。"""
+    change_id = "CHG-SCPT-2026-202"
+    for source in ("SW-2026-008-A", "SW-2026-008-B"):
+        chg_dir = tmp_path / source / "04_监控" / "01_变更管理" / "01_变更单"
+        chg_dir.mkdir(parents=True)
+        (chg_dir / f"{change_id}.md").write_text(
+            f"""# {change_id}
+## 3. 变更基本信息
+### 3.0 编号与项目
+| 项目编号 | SW-2026-008 |
+### 3.3 影响范围
+| 影响范围 | MODULE |
+### 3.4 申请信息
+| 变更状态 | approved |
+""",
+            encoding="utf-8",
+        )
+
+    with pytest.raises(DecisionValidationError, match="跨项目重号"):
+        DecisionService(tmp_path).create_decision(
+            change_id=change_id,
+            approver="fubai",
+            project_id="SW-2026-008",
+        )

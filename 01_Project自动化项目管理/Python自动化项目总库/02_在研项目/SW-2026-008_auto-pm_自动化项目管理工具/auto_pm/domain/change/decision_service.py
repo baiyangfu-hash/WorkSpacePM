@@ -43,6 +43,15 @@ class DecisionService:
         token = uuid.uuid4().hex[:8].upper()
         return f"DEC-{date_str}-{token}"
 
+    def _is_runtime_worktree_candidate(self, path: Path) -> bool:
+        """判断候选是否来自本机运行态 worktree 镜像，而非正式项目资产。"""
+        try:
+            relative_path = path.resolve().relative_to(self.workspace_root.resolve())
+        except ValueError:
+            return False
+        parts = relative_path.parts
+        return len(parts) >= 2 and parts[:2] == (".auto-pm", "worktrees")
+
     def create_decision(
         self,
         change_id: str,
@@ -65,6 +74,8 @@ class DecisionService:
         candidates: list[tuple[Path, ChangeRequest]] = []
         for path in sorted(self.workspace_root.glob(f"**/{change_id}.md")):
             if not path.is_file():
+                continue
+            if self._is_runtime_worktree_candidate(path):
                 continue
             try:
                 parsed = parser.parse(str(path))

@@ -5,14 +5,77 @@ from __future__ import annotations
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
+from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.core.pm_resume_service import PmResumeError, PmResumeService
 from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
 
 
 @click.group(name="pm")
 def pm_group() -> None:
-    """PM control-plane commands that return bounded AI context."""
+    """面向用户的 PM 门面：计划、确认、执行、恢复与验收。"""
+
+
+def _facade(ctx: click.Context) -> PmFacadeService:
+    app_ctx: AppContext = ctx.find_root().obj
+    return PmFacadeService(app_ctx.workspace_root)
+
+
+def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: str = "") -> None:
+    facade = _facade(ctx)
+    try:
+        if action == "plan":
+            card = facade.plan(mission_id)
+        elif action == "approve":
+            card = facade.approve(mission_id, root_work_id)
+        elif action == "execute":
+            card = facade.execute(mission_id)
+        elif action == "accept":
+            card = facade.accept(mission_id)
+        else:  # pragma: no cover - static command wiring
+            raise RuntimeError(f"unknown PM action: {action}")
+    except PmFacadeError as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(card.model_dump_json(indent=2))
+
+
+@pm_group.command(name="plan")
+@click.option("--mission-id", required=True, help="由驾驶舱创建的 Mission 编号")
+@click.pass_context
+def plan_pm(ctx: click.Context, mission_id: str) -> None:
+    """展示开工确认卡；不读取旧技能，也不创建隐式执行状态。"""
+    _emit_card(ctx, "plan", mission_id)
+
+
+@pm_group.command(name="approve")
+@click.option("--mission-id", required=True)
+@click.option("--root-work-id", required=True, help="驾驶舱已授权的根 Work 编号")
+@click.pass_context
+def approve_pm(ctx: click.Context, mission_id: str, root_work_id: str) -> None:
+    """记录第一次用户确认，并允许驾驶舱在既定边界内执行。"""
+    _emit_card(ctx, "approve", mission_id, root_work_id)
+
+
+@pm_group.command(name="execute")
+@click.option("--mission-id", required=True)
+@click.pass_context
+def execute_pm(ctx: click.Context, mission_id: str) -> None:
+    """启动已授权根 Work；后续内部编排不再要求用户分发任务。"""
+    _emit_card(ctx, "execute", mission_id)
+
+
+@pm_group.command(name="accept")
+@click.option("--mission-id", required=True)
+@click.pass_context
+def accept_pm(ctx: click.Context, mission_id: str) -> None:
+    """记录最终用户验收；关闭动作仍受治理门禁约束。"""
+    _emit_card(ctx, "accept", mission_id)
+
+
+@pm_group.command(name="workflow")
+@click.pass_context
+def workflow_compat(ctx: click.Context) -> None:
+    """保留历史名称的可发现性，不加载已隔离的旧技能。"""
+    click.echo(_facade(ctx).compatibility_notice())
 
 
 @click.group(name="context")
@@ -70,13 +133,13 @@ def resume_pm(
     if control_pid:
         raise click.ClickException("--control-pid 仅适用于 --legacy-v1；v2 控制面来自 Registry")
     try:
-        payload = ContinuityResumeService(app_ctx.workspace_root).collect(
+        payload = PmFacadeService(app_ctx.workspace_root).resume(
             project_id=project_id,
             invocation_path=start_path,
             work_id=work_id,
             run_id=run_id,
         )
-    except ContinuityResumeError as error:
+    except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
     if as_json:
         click.echo(payload.model_dump_json(indent=2))

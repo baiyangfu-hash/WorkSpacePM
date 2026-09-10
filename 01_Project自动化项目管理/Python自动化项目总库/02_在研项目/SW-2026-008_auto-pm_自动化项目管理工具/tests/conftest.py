@@ -20,6 +20,21 @@ if TYPE_CHECKING:
 # botocore likes us-east-1
 TEST_AWS_REGION = "us-east-1"
 TEST_S3_BUCKET = "test-bucket"
+_TEST_QAPPLICATION: object | None = None
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """在模块级 fixture 创建 QCoreApplication 前固定唯一 QApplication。"""
+    del config
+    global _TEST_QAPPLICATION
+    pytest.importorskip("PySide6")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    if not isinstance(app, QApplication):
+        raise pytest.UsageError("测试进程已创建非 Widgets 的 Qt 应用实例")
+    _TEST_QAPPLICATION = app
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -43,11 +58,9 @@ def qapp() -> Generator[QApplication, None, None]:
     pytest 分别管理，放大 Qt 会话 teardown 的不确定性。
     """
     pytest.importorskip("PySide6")
-    import os
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
 
-    app = QApplication.instance() or QApplication([])
+    app = _TEST_QAPPLICATION
     assert isinstance(app, QApplication)
     yield app
 

@@ -7,6 +7,7 @@ reports/
 
 # Data
 *.csv*
+!*.csv.jinja
 *.dat*
 *.pickle*
 *.xls*
@@ -89,4 +90,3 @@ test_screenshots/
 # 测试报告与输出（临时产物，不入库）
 test_reports/
 test_output/
-
