@@ -314,6 +314,7 @@ def test_project_create_python_chinese_name_uses_id_package_in_research_director
     project_dir = research_dir / "SW-2026-010_驾驶舱A6Python验证工具"
     assert result.exit_code == 0
     assert (project_dir / "sw_2026_010" / "__init__.py").exists()
+    assert (project_dir / "README.md").is_file()
     answers = (project_dir / ".copier-answers.yml").read_text(encoding="utf-8")
     assert "package_name: sw_2026_010" in answers
 

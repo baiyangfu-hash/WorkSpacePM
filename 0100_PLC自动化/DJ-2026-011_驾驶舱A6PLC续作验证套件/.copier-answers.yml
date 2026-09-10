@@ -1,0 +1,8 @@
+# Copier answers - 请勿手动修改
+project_id: DJ-2026-011
+project_name: 驾驶舱A6PLC续作验证套件
+description: 驾驶舱A6PLC续作验证套件
+version: V1.0.0
+stack: plc
+mode: test-suite
+business_line: DJ

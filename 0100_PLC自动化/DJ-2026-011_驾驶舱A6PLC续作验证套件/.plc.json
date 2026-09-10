@@ -1,0 +1,8 @@
+{
+  "name": "DJ-2026-011",
+  "description": "驾驶舱A6PLC续作验证套件",
+  "version": "V1.0.0",
+  "libraries": [
+    "../01_SharedLibraries/SysLib"
+  ]
+}

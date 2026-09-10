@@ -1,0 +1,9 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_src_path: C:\Users\fubai\Documents\My_Workspace\.auto-pm\worktrees\a6-dual-target-continued\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-008_auto-pm_自动化项目管理工具\templates\python-tool
+author: fubai
+cli_command: sw-2026-010
+description: 驾驶舱A6Python验证套件
+package_name: sw_2026_010
+project_id: SW-2026-010
+project_name: 驾驶舱A6Python验证套件
+version: V1.0.0

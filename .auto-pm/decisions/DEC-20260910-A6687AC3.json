@@ -1,0 +1,24 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260910-A6687AC3",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-213",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/python-tool/copier.yml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_project.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/README.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-213.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    ".auto-pm/decisions"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-10T23:18:30.480614+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅移除 Python Copier 对 README 的错误排除规则，并新增正向回归断言。",
+    "仅通过受控 repair 向 SW-2026-010 新增缺失 README；不删除、不重建目录。",
+    "不修改靶子项目、PLC 模板、稳定部署、规范真源或外部系统。"
+  ],
+  "metadata": {}
+}
