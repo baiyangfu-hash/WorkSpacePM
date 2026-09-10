@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from auto_pm.cli.__main__ import cli
+from auto_pm.plc.spec_snapshot import parse_spec_snapshot
 from click.testing import CliRunner
 
 
@@ -228,11 +230,11 @@ def test_project_create_dry_run_displays_v040_metadata(
 
 
 def test_project_create_single_machine_generates_week2_template_assets(
-    cli_runner: CliRunner, tmp_path: Path
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """project create 真实生成 Week 2 单机模板差异"""
-    # V1.0.1: 默认项目存放目录改为 auto-pm 工具目录下 0100_项目/，
-    # 测试中显式指定 --dest-dir 以保持隔离（避免污染真实工具目录）
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    _write_spec_registry(tmp_path)
     dest_dir = tmp_path / "0100_项目"
     result = cli_runner.invoke(
         cli,
@@ -277,6 +279,158 @@ def test_project_create_single_machine_generates_week2_template_assets(
     assert plc_json["plc_vendor"] == "Siemens"
     assert plc_json["plc_model"] == "S7-1200"
     assert plc_json["libraries"] == ["../../../01_SharedLibraries/SysLib"]
+
+
+def test_project_create_python_chinese_name_uses_id_package_in_research_directory(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """中文业务名保留展示语义，包名和默认分类由创建器稳定推导。"""
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    research_dir = (
+        tmp_path
+        / "01_Project自动化项目管理"
+        / "Python自动化项目总库"
+        / "02_在研项目"
+    )
+    research_dir.mkdir(parents=True)
+
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "project",
+            "create",
+            "--stack",
+            "python",
+            "--id",
+            "SW-2026-010",
+            "--name",
+            "驾驶舱A6Python验证工具",
+        ],
+        catch_exceptions=False,
+    )
+
+    project_dir = research_dir / "SW-2026-010_驾驶舱A6Python验证工具"
+    assert result.exit_code == 0
+    assert (project_dir / "sw_2026_010" / "__init__.py").exists()
+    answers = (project_dir / ".copier-answers.yml").read_text(encoding="utf-8")
+    assert "package_name: sw_2026_010" in answers
+
+
+def test_project_create_python_falls_back_when_research_directory_is_absent(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """兼容没有统一在研分类目录的独立工作空间。"""
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "project",
+            "create",
+            "--stack",
+            "python",
+            "--id",
+            "SW-2026-011",
+            "--name",
+            "兼容目录验证工具",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert (
+        tmp_path
+        / "0100_项目"
+        / "SW-2026-011_兼容目录验证工具"
+        / "sw_2026_011"
+        / "__init__.py"
+    ).exists()
+
+
+def test_project_create_plc_initializes_dynamic_spec_snapshot(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PLC Copier 项目在首次检查前即携带当前规范快照。"""
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    _write_spec_registry(tmp_path)
+    _create_syslib(tmp_path)
+
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "project",
+            "create",
+            "--stack",
+            "plc",
+            "--mode",
+            "test-suite",
+            "--id",
+            "DJ-2026-023",
+            "--name",
+            "动态快照验证套件",
+        ],
+        catch_exceptions=False,
+    )
+
+    pm_session = (
+        tmp_path
+        / "0100_PLC自动化"
+        / "DJ-2026-023_动态快照验证套件"
+        / "PM_SESSION_DJ-2026-023.md"
+    )
+    assert result.exit_code == 0
+    assert parse_spec_snapshot(str(pm_session)) == {
+        "LSP-906": "V2.0.0",
+        "LSP-907": "V1.2.1",
+    }
+    check_result = cli_runner.invoke(
+        cli,
+        ["-w", str(tmp_path), "plc", "check", "DJ-2026-023", "--json"],
+        catch_exceptions=False,
+    )
+    check_payload = json.loads(check_result.output)
+    assert check_result.exit_code == 0
+    assert check_payload["warn_count"] == 0
+    assert {
+        item["status"] for item in check_payload["items"] if item["item"] == "Spec Snapshot"
+    } == {"pass"}
+
+
+def test_project_create_plc_requires_registry_before_generation(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """缺少规范真源时在 Copier 之前停止，避免留下首检告警项目。"""
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    dest_dir = tmp_path / "0100_PLC自动化"
+
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "project",
+            "create",
+            "--stack",
+            "plc",
+            "--id",
+            "DJ-2026-024",
+            "--name",
+            "无注册表阻断验证",
+            "--dest-dir",
+            str(dest_dir),
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    assert "spec_registry.json" in result.output
+    assert not (dest_dir / "DJ-2026-024_无注册表阻断验证").exists()
 
 
 # ── project snapshot 命令测试（V0.3.2 独立 Spec Snapshot 刷新） ──
@@ -339,6 +493,30 @@ _REGISTRY_JSON = {
 }
 
 
+def _write_spec_registry(workspace: Path) -> None:
+    registry_dir = workspace / "00_Obsidian_Base全局规范文件仓库"
+    registry_dir.mkdir(parents=True, exist_ok=True)
+    (registry_dir / "spec_registry.json").write_text(
+        json.dumps(_REGISTRY_JSON, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _create_syslib(workspace: Path) -> None:
+    """构造与 PLC 模板相同层级的共享库，避免测试拓扑引入伪告警。"""
+    syslib_root = workspace / "0100_PLC自动化" / "01_SharedLibraries" / "SysLib"
+    for relative_path in (
+        "timer/FB_TON.scl",
+        "counter/FB_CTD.scl",
+        "counter/FB_CTU.scl",
+        "edge/FB_R_TRIG.scl",
+        "edge/FB_F_TRIG.scl",
+    ):
+        library_file = syslib_root / relative_path
+        library_file.parent.mkdir(parents=True, exist_ok=True)
+        library_file.write_text("// Test SysLib asset\\n", encoding="utf-8")
+
+
 def _setup_snapshot_workspace(
     tmp_path: Path, pm_session_content: str, with_registry: bool = True
 ) -> Path:
@@ -365,11 +543,7 @@ def _setup_snapshot_workspace(
 
     # 写入 spec_registry.json
     if with_registry:
-        registry_dir = tmp_path / "00_Obsidian_Base全局规范文件仓库"
-        registry_dir.mkdir(parents=True, exist_ok=True)
-        (registry_dir / "spec_registry.json").write_text(
-            json.dumps(_REGISTRY_JSON, ensure_ascii=False), encoding="utf-8"
-        )
+        _write_spec_registry(tmp_path)
 
     return tmp_path
 
@@ -692,9 +866,14 @@ class TestDocRefresh:
         assert payload["dry_run"] is True
         assert len(payload["refreshed_files"]) == 2
 
-    def test_doc_refresh_after_project_create(self, cli_runner: CliRunner, tmp_path: Path) -> None:
-        # V1.0.1: 默认项目存放目录改为 auto-pm 工具目录下 0100_项目/，
-        # 测试中显式指定 --dest-dir 以保持隔离（避免污染真实工具目录）
+    def test_doc_refresh_after_project_create(
+        self,
+        cli_runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+        _write_spec_registry(tmp_path)
         dest_dir = tmp_path / "0100_项目"
         create_result = cli_runner.invoke(
             cli,

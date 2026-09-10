@@ -16,7 +16,7 @@ project_name:
 package_name:
   type: str
   help: Python 包名（小写+下划线，如 data_tool）
-  default: "{{ project_name | replace(' ', '_') | lower }}"
+  default: "{{ project_id | replace('-', '_') | lower }}"
   validator: >-
     {% if not (package_name | regex_search('^[a-z][a-z0-9_]*$')) %}
     package_name 必须以字母开头，仅含小写字母/数字/下划线

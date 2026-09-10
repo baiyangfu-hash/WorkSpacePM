@@ -1,0 +1,24 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260910-997EA35F",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-211",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/project.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/python-tool/copier.yml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_project.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-211.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    ".auto-pm/decisions"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-10T22:16:56.528658+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅修复项目创建源头；不得修改稳定部署、发布指针、真实靶子、硬件、凭据或外部系统。",
+    "PLC Snapshot 只能从现行 spec_registry.json 动态读取；不得硬编码或修改全局规范。",
+    "保留 A6-0 原始工作树和 CHG-SCPT-2026-210 的独立证据，不清理、不覆盖。"
+  ],
+  "metadata": {}
+}

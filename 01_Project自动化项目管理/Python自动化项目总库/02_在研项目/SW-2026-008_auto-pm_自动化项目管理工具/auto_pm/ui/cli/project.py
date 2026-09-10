@@ -44,6 +44,23 @@ from auto_pm.core.template_service import TemplateService
 
 console = Console()
 
+_PYTHON_RESEARCH_RELATIVE_PATH = (
+    "01_Project自动化项目管理",
+    "Python自动化项目总库",
+    "02_在研项目",
+)
+
+
+def _default_project_destination(workspace_root: str, stack: str) -> str:
+    """Resolve the user-facing default project category without hard-coding a host path."""
+    if stack == "plc":
+        return os.path.join(workspace_root, "0100_PLC自动化")
+
+    research_root = os.path.join(workspace_root, *_PYTHON_RESEARCH_RELATIVE_PATH)
+    if os.path.isdir(research_root):
+        return research_root
+    return os.path.join(workspace_root, "0100_项目")
+
 
 def _format_asset_summary_status(status: str) -> str:
     mapping = {
@@ -312,10 +329,7 @@ def cmd_create(
     if dest_dir:
         dest_root = os.path.abspath(dest_dir)
     else:
-        if stack == "plc":
-            dest_root = os.path.join(app_ctx.workspace_root, "0100_PLC自动化")
-        else:
-            dest_root = os.path.join(app_ctx.workspace_root, "0100_项目")
+        dest_root = _default_project_destination(app_ctx.workspace_root, stack)
 
     # 目标路径
     project_dir = f"{project_id}_{project_name}"
@@ -357,6 +371,18 @@ def cmd_create(
             console.print(f"  库名称: {library_name}")
         return
 
+    plc_spec_registry: dict[str, str] | None = None
+    if stack == "plc":
+        from auto_pm.plc.spec_snapshot import load_spec_registry
+
+        plc_spec_registry = load_spec_registry(app_ctx.workspace_root)
+        if not plc_spec_registry:
+            console.print(
+                "[red]错误: PLC 项目创建需要有效的 spec_registry.json；"
+                "已在生成前停止，以避免产生缺少 Spec Snapshot 的项目。[/red]"
+            )
+            ctx.exit(1)
+
     # 调用 Copier 模板
     tpl_svc = TemplateService(app_ctx.templates_dir)
     # V0.2.1-P1-3: data 字典增加 stack/mode/business_line 字段
@@ -388,6 +414,22 @@ def cmd_create(
         # 确保目标根目录存在
         os.makedirs(dest_root, exist_ok=True)
         tpl_svc.copy_template(template_name, dest_path, data)
+        if stack == "plc":
+            from auto_pm.plc.spec_snapshot import (
+                ensure_spec_snapshot_section,
+                parse_spec_snapshot,
+            )
+
+            pm_session_path = os.path.join(dest_path, f"PM_SESSION_{project_id}.md")
+            initialized = ensure_spec_snapshot_section(
+                pm_session_path,
+                plc_spec_registry or {},
+            )
+            if not initialized and not parse_spec_snapshot(pm_session_path):
+                raise RuntimeError(
+                    "PLC 项目已生成，但 Spec Snapshot 初始化失败；"
+                    "请保留该目录并检查 PM_SESSION 写入权限。"
+                )
         # 审计日志：记录项目创建操作（电气部门试用期间操作追溯）
         from auto_pm.logging.audit import audit_log
         audit_log(
