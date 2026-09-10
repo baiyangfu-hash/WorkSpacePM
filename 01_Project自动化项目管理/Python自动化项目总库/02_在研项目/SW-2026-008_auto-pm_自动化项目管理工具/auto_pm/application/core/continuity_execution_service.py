@@ -72,6 +72,7 @@ class ContinuityExecutionService:
             work = self._store.get_work(work_id)
             if work.state.value not in {"READY", "IN_PROGRESS"}:
                 raise ContinuityExecutionError("只有 READY/IN_PROGRESS Work 可以创建 Run")
+            self._reject_existing_active_run(work_id, run_id, now)
             if not self._paths_covered(owned, work.scope_paths):
                 raise ContinuityExecutionError("owned_paths 超出 Work scope")
             if not self._paths_covered(declared, owned):
@@ -300,6 +301,14 @@ class ContinuityExecutionService:
         if value.tzinfo is None:
             raise ContinuityExecutionError("now 必须是带时区时间")
         return value.astimezone(UTC)
+
+    def _reject_existing_active_run(self, work_id: str, run_id: str, now: datetime) -> None:
+        for candidate in self._store.list_runs(work_id):
+            if candidate.run_id == run_id:
+                continue
+            lease = self._store.get_lease(candidate.run_id)
+            if datetime.fromisoformat(lease.expires_at) > now:
+                raise ContinuityExecutionError("Work 已有未过期的活动 Run")
 
     @staticmethod
     def _normalize_paths(paths: list[str], *, allow_empty: bool = False) -> tuple[str, ...]:

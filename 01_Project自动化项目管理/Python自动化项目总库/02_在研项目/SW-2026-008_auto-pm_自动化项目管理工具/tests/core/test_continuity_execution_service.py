@@ -115,6 +115,20 @@ def test_run_rejects_undeclared_dirty_and_out_of_scope_paths(tmp_path: Path) -> 
         )
 
 
+def test_run_rejects_second_unexpired_active_run(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+
+    with pytest.raises(ContinuityExecutionError, match="未过期的活动 Run"):
+        _start(
+            service,
+            run_id="RUN-002",
+            lease_token="second-lease-secret",
+            idempotency_key="create-run-2",
+        )
+
+
 def test_expired_or_wrong_owner_lease_fails_closed(tmp_path: Path) -> None:
     clock = Clock()
     _, service = _services(tmp_path, clock)

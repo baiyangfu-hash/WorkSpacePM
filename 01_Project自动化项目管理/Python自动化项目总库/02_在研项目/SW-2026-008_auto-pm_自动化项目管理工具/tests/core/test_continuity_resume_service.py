@@ -194,7 +194,7 @@ def test_multiple_active_missions_fail_closed_without_guessing(tmp_path: Path) -
     assert result.next_legal_action == ""
 
 
-def test_expired_lease_is_a_conflict_and_suppresses_next_action(tmp_path: Path) -> None:
+def test_expired_lease_is_historical_and_allows_a_replacement_run(tmp_path: Path) -> None:
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     _run(tmp_path)
@@ -203,8 +203,40 @@ def test_expired_lease_is_a_conflict_and_suppresses_next_action(tmp_path: Path) 
         tmp_path, now=lambda: datetime(2026, 9, 9, 12, 16, tzinfo=UTC)
     ).collect(project_id="SW-2026-008")
 
-    assert "LEASE_EXPIRED" in result.conflicts
-    assert result.next_legal_action == ""
+    assert result.run is None
+    assert "LEASE_EXPIRED" not in result.conflicts
+    assert result.next_legal_action == "CREATE_RUN"
+
+
+def test_resume_ignores_expired_run_when_one_active_run_exists(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _run(tmp_path)
+
+    replacement = ContinuityExecutionService(
+        tmp_path, now=lambda: datetime(2026, 9, 9, 12, 16, tzinfo=UTC)
+    )
+    replacement.start_run(
+        run_id="RUN-002",
+        work_id="WORK-001",
+        executor_id="agent-b",
+        adapter="codex",
+        owned_paths=["auto_pm/a.py"],
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+        git_head="b" * 40,
+        worktree_path="C:/workspace",
+        lease_token="replacement-secret",
+        lease_seconds=900,
+        idempotency_key="create-replacement-run",
+    )
+
+    result = ContinuityResumeService(
+        tmp_path, now=lambda: datetime(2026, 9, 9, 12, 16, tzinfo=UTC)
+    ).collect(project_id="SW-2026-008")
+
+    assert result.run and result.run.run_id == "RUN-002"
+    assert result.conflicts == ()
 
 
 def test_multiple_active_works_fail_closed_without_guessing(tmp_path: Path) -> None:

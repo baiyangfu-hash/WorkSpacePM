@@ -87,10 +87,16 @@ class ContinuityResumeService:
                         run = self._store.get_run(run_id)
                         if run.work_id != work.work_id:
                             raise ContinuityResumeError("Run 不属于选定 Work")
-                    elif len(runs) == 1:
-                        run = runs[0]
-                    elif len(runs) > 1:
-                        conflicts.append("MULTIPLE_ACTIVE_RUNS")
+                    else:
+                        active_runs = tuple(
+                            candidate
+                            for candidate in runs
+                            if self._lease_is_active(self._store.get_lease(candidate.run_id))
+                        )
+                        if len(active_runs) == 1:
+                            run = active_runs[0]
+                        elif len(active_runs) > 1:
+                            conflicts.append("MULTIPLE_ACTIVE_RUNS")
                 if run is not None:
                     checkpoint = self._store.latest_checkpoint(run.run_id)
                     lease = self._store.get_lease(run.run_id)
@@ -141,6 +147,9 @@ class ContinuityResumeService:
             read_set=read_set,
             evidence_id=f"RESUME-{digest[:16].upper()}",
         )
+
+    def _lease_is_active(self, lease: LeaseItem) -> bool:
+        return datetime.fromisoformat(lease.expires_at) > self._now().astimezone(UTC)
 
     @staticmethod
     def _next_action(
