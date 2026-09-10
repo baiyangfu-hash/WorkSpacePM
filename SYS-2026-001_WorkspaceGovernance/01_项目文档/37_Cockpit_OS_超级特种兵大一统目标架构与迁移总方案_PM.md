@@ -1,6 +1,6 @@
 # Cockpit OS 超级特种兵大一统目标架构与迁移总方案
 
-> 文档状态：`TARGET_BASELINE / A0_ACCEPTED / NOT_DEPLOYED`
+> 文档状态：`TARGET_BASELINE / A0_ACCEPTED / CHG-199_CLOSED / NOT_DEPLOYED`
 > 编制日期：2026-09-09
 > 决策人：User（fubai）
 > 治理主线：`CHG-SCPT-2026-198`
@@ -357,4 +357,4 @@ A0 不允许：
 
 ## 16. 当前下一合法动作
 
-A0 已由用户验收，`CHG-SCPT-2026-198` 与 `WORK-SW008-A0-198` 均已关闭，验证 Run 为 `SUCCEEDED`。下一阶段建议先处理 `CHG-SCPT-2026-199`，再进入 A1 Mission 真源；二者必须重新呈交独立批准包，不能因本总方案存在而自动开工。当前 active release 未包含 A0 母体修改，仍为 `NOT_DEPLOYED`。
+A0 与其衍生缺陷 `CHG-SCPT-2026-199` 均已由用户验收并关闭；`WORK-SW008-199` 和 `RUN-SW008-199-01` 的恢复证据为 `CP-SW008-199-01`。下一合法动作是 A1 Mission 真源的只读勘测和独立批准包；不得因本总方案、A0 或 CHG-199 已关闭而自动开工。当前 active release 未包含母体修改，仍为 `NOT_DEPLOYED`。

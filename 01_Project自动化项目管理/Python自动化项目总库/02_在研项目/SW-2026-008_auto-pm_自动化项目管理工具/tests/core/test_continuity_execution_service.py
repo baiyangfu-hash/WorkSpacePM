@@ -150,6 +150,24 @@ def test_checkpoint_is_sequenced_and_rejects_baseline_drift(tmp_path: Path) -> N
         )
 
 
+def test_checkpoint_allows_new_owned_changes_and_rejects_foreign_paths(tmp_path: Path) -> None:
+    """A clean Run may create owned changes; foreign paths remain fail-closed."""
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, declared_dirty_paths=[], observed_dirty_paths=[])
+
+    checkpoint = _checkpoint(service)
+
+    assert checkpoint.dirty_paths == ("auto_pm/core/a.py",)
+    with pytest.raises(ContinuityExecutionError, match="owned_paths"):
+        _checkpoint(
+            service,
+            checkpoint_id="CP-002",
+            dirty_paths=["tests/test_a.py"],
+            idempotency_key="checkpoint-foreign-path",
+        )
+
+
 def test_handoff_v2_points_to_checkpoint_and_is_hash_signed(tmp_path: Path) -> None:
     clock = Clock()
     _, service = _services(tmp_path, clock)

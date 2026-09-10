@@ -149,8 +149,8 @@ class ContinuityExecutionService:
             if run.git_head != git_head:
                 raise ContinuityExecutionError("Git baseline drift")
             dirty = self._normalize_paths(dirty_paths, allow_empty=True)
-            if not self._paths_covered(dirty, run.declared_dirty_paths):
-                raise ContinuityExecutionError("Checkpoint 包含未声明的 dirty path")
+            if not self._paths_covered(dirty, run.owned_paths):
+                raise ContinuityExecutionError("Checkpoint 包含超出 owned_paths 的 dirty path")
             clean_evidence = tuple(item.strip() for item in evidence if item.strip())
             if not summary.strip() or not clean_evidence:
                 raise ContinuityExecutionError("Checkpoint 必须包含摘要和 evidence")
