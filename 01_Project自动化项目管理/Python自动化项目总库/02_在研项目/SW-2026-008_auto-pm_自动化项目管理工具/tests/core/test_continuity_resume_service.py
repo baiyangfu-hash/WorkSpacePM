@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -176,6 +178,76 @@ def test_corrupt_continuity_store_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(ContinuityResumeError, match="无法读取"):
         ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+
+def _store_snapshot(db_path: Path) -> tuple[tuple[str, ...], dict[str, tuple[int, int, str]]]:
+    tracked = tuple(
+        path
+        for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm"))
+        if path.exists()
+    )
+    entries = tuple(sorted(path.name for path in db_path.parent.iterdir()))
+    files = {
+        path.name: (
+            path.stat().st_size,
+            path.stat().st_mtime_ns,
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        for path in tracked
+    }
+    return entries, files
+
+
+def test_resume_succeeds_without_unmerged_wal_and_preserves_empty_sidecars(
+    tmp_path: Path,
+) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _run(tmp_path)
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    keeper = sqlite3.connect(db_path)
+    try:
+        keeper.execute("SELECT COUNT(*) FROM work_items").fetchone()
+        wal_path = Path(f"{db_path}-wal")
+        shm_path = Path(f"{db_path}-shm")
+        assert wal_path.is_file() and wal_path.stat().st_size == 0
+        assert shm_path.is_file()
+        before = _store_snapshot(db_path)
+
+        result = ContinuityResumeService(
+            tmp_path, now=lambda: datetime(2026, 9, 9, 12, 1, tzinfo=UTC)
+        ).collect(project_id="SW-2026-008")
+
+        assert result.run and result.run.run_id == "RUN-001"
+        assert _store_snapshot(db_path) == before
+    finally:
+        keeper.close()
+
+
+def test_resume_fails_closed_on_nonempty_wal_without_mutating_store(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    writer = sqlite3.connect(db_path)
+    try:
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute(
+            "UPDATE work_items SET title=? WHERE work_id=?", ("WAL pending", "WORK-001")
+        )
+        writer.commit()
+        wal_path = Path(f"{db_path}-wal")
+        shm_path = Path(f"{db_path}-shm")
+        assert wal_path.is_file() and wal_path.stat().st_size > 0
+        assert shm_path.is_file()
+        before = _store_snapshot(db_path)
+
+        with pytest.raises(ContinuityResumeError, match="未合并 WAL"):
+            ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+        assert _store_snapshot(db_path) == before
+    finally:
+        writer.close()
 
 
 def test_pm_session_projection_contains_no_execution_queue(tmp_path: Path) -> None:

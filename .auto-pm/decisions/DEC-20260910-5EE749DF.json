@@ -1,0 +1,25 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260910-5EE749DF",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-198",
+  "approved_scope": "SYSTEM/CROSS",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/37_Cockpit_OS_超级特种兵大一统目标架构与迁移总方案_PM.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/mission.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_mission.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-10T00:39:51.474653+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "A0 仅建立完整方案、Mission/AuthorityEnvelope 契约和两项入口基础修复；不实现自动拆分执行引擎。",
+    "不得修改稳定发布槽、active/previous 指针、靶子项目、Obsidian、.trae/skills/pm-workflow 或既有脏文件。",
+    "pm-workflow 仅保留为用户可理解的兼容名称；旧技能继续隔离，正式入口是根 main.py 的 PM Facade。"
+  ],
+  "metadata": {}
+}

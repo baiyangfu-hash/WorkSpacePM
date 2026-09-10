@@ -62,14 +62,13 @@ def cmd_install(ctx: click.Context) -> None:
 
     pre_commit_script = """#!/bin/sh
 # Resolve the PRIMARY worktree (main workspace) so linked worktrees reuse the
-# main .venv, and inject the container path per invocation (no editable/.pth).
+# main .venv and active-release launcher for every invocation.
 GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
 case "$GIT_COMMON_DIR" in
     /*) ;;
     *) GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) ;;
 esac
 PROJECT_ROOT=$(dirname "$GIT_COMMON_DIR")
-CONTAINER="$PROJECT_ROOT/00_Infrastructure/auto_pm"
 PYTHON_EXE="python"
 if [ -f "$PROJECT_ROOT/.venv/Scripts/python.exe" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/Scripts/python.exe"
@@ -77,20 +76,19 @@ elif [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python"
 fi
 
-PYTHONPATH="$CONTAINER" "$PYTHON_EXE" -m auto_pm -w "$PROJECT_ROOT" git-hook pre-commit
+"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$PROJECT_ROOT" git-hook pre-commit
 exit $?
 """
 
     commit_msg_script = """#!/bin/sh
 # Resolve the PRIMARY worktree (main workspace) so linked worktrees reuse the
-# main .venv, and inject the container path per invocation (no editable/.pth).
+# main .venv and active-release launcher for every invocation.
 GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
 case "$GIT_COMMON_DIR" in
     /*) ;;
     *) GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) ;;
 esac
 PROJECT_ROOT=$(dirname "$GIT_COMMON_DIR")
-CONTAINER="$PROJECT_ROOT/00_Infrastructure/auto_pm"
 PYTHON_EXE="python"
 if [ -f "$PROJECT_ROOT/.venv/Scripts/python.exe" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/Scripts/python.exe"
@@ -98,7 +96,7 @@ elif [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python"
 fi
 
-PYTHONPATH="$CONTAINER" "$PYTHON_EXE" -m auto_pm -w "$PROJECT_ROOT" git-hook commit-msg "$1"
+"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$PROJECT_ROOT" git-hook commit-msg "$1"
 exit $?
 """
 
@@ -111,4 +109,3 @@ exit $?
     console.print("[green]✅ Git 物理门禁硬锁已成功激活！[/green]")
     console.print(f"  - pre-commit: {pre_commit_file}")
     console.print(f"  - commit-msg: {commit_msg_file}")
-

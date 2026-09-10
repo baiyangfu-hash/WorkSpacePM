@@ -1,0 +1,165 @@
+"""Mission and AuthorityEnvelope contract tests."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from pydantic import ValidationError
+
+from auto_pm.contracts.continuity import WorkKind
+from auto_pm.contracts.mission import (
+    AuthorityAudit,
+    AuthorityEnvelope,
+    EscalationTrigger,
+    InternalRoutingPolicy,
+    Mission,
+    MissionState,
+    RestrictedAction,
+)
+
+NOW = datetime(2026, 9, 10, 1, 0, tzinfo=UTC)
+
+
+def _envelope(**overrides: object) -> AuthorityEnvelope:
+    values: dict[str, object] = {
+        "envelope_id": "AUTH-SW008-001",
+        "subject_project_id": "SW-2026-008",
+        "change_id": "CHG-SCPT-2026-198",
+        "decision_id": "DEC-20260910-5EE749DF",
+        "scope_paths": ("auto_pm/contracts/mission.py", "tests/contracts/test_mission.py"),
+        "valid_from": NOW,
+        "expires_at": NOW + timedelta(days=7),
+        "audit": AuthorityAudit(
+            created_by="Codex-PM",
+            created_at=NOW,
+            approved_by="fubai",
+            approved_at=NOW,
+            source_fingerprint=f"sha256:{'a' * 64}",
+        ),
+    }
+    values.update(overrides)
+    return AuthorityEnvelope.model_validate(values)
+
+
+def _mission(**overrides: object) -> Mission:
+    values: dict[str, object] = {
+        "mission_id": "MISSION-SW008-001",
+        "subject_project_id": "SW-2026-008",
+        "title": "Cockpit A0",
+        "objective": "Establish a bounded mission contract.",
+        "acceptance_criteria": ("Contract rejects undeclared authority.",),
+        "authority": _envelope(),
+        "created_by": "Codex-PM",
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    values.update(overrides)
+    return Mission.model_validate(values)
+
+
+def test_authority_envelope_defaults_fail_closed() -> None:
+    envelope = _envelope()
+
+    assert envelope.allowed_child_work_kinds == frozenset()
+    assert envelope.routing == InternalRoutingPolicy()
+    assert envelope.forbidden_actions == frozenset(RestrictedAction)
+    assert envelope.escalation_triggers == frozenset(EscalationTrigger)
+    assert envelope.authorization_source == "CHG_DECISION"
+    assert "lease_token" not in envelope.model_dump(mode="json")
+
+
+def test_authority_envelope_rejects_unsafe_or_ambiguous_boundaries() -> None:
+    with pytest.raises(ValidationError, match="scope_paths"):
+        _envelope(scope_paths=("../outside.py",))
+    with pytest.raises(ValidationError, match="external and irreversible"):
+        _envelope(forbidden_actions=frozenset({RestrictedAction.DATA_DELETION}))
+    with pytest.raises(ValidationError, match="escalation triggers"):
+        _envelope(escalation_triggers=frozenset({EscalationTrigger.SCOPE_EXIT}))
+    with pytest.raises(ValidationError, match="allowed child Work kinds"):
+        _envelope(routing=InternalRoutingPolicy(allow_business_line_reroute=True))
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        AuthorityEnvelope.model_validate({**_envelope().model_dump(), "lease_token": "secret"})
+
+
+def test_authority_envelope_allows_only_explicit_internal_routing() -> None:
+    envelope = _envelope(
+        allowed_child_work_kinds=frozenset(
+            {WorkKind.WBS, WorkKind.BUG, WorkKind.DEBT, WorkKind.TEST, WorkKind.GOVERNANCE}
+        ),
+        routing=InternalRoutingPolicy(
+            allow_reschedule=True,
+            allow_execution_branch_changes=True,
+            allow_business_line_reroute=True,
+        ),
+    )
+
+    assert envelope.routing.same_subject_project_only is True
+    assert envelope.routing.within_scope_paths_only is True
+    assert envelope.allowed_child_work_kinds == frozenset(WorkKind)
+
+
+def test_mission_is_frozen_and_bound_to_envelope_subject_and_validity() -> None:
+    mission = _mission()
+
+    assert mission.state == MissionState.DRAFT
+    assert mission.root_work_id is None
+    assert mission.version == 1
+    with pytest.raises(ValidationError, match="frozen"):
+        mission.__setattr__("title", "changed")
+    with pytest.raises(ValidationError, match="subject_project_id"):
+        _mission(subject_project_id="DJ-2026-005")
+    with pytest.raises(ValidationError, match="validity window"):
+        _mission(created_at=NOW + timedelta(days=8), updated_at=NOW + timedelta(days=8))
+    with pytest.raises(ValidationError, match="acceptance_criteria"):
+        _mission(acceptance_criteria=())
+
+
+@pytest.mark.parametrize(
+    ("state", "root_work_id"),
+    [
+        (MissionState.DRAFT, None),
+        (MissionState.AWAITING_APPROVAL, None),
+        (MissionState.ACTIVE, "WORK-SW008-001"),
+        (MissionState.BLOCKED, "WORK-SW008-001"),
+        (MissionState.ACCEPTANCE_PENDING, "WORK-SW008-001"),
+        (MissionState.ACCEPTED, "WORK-SW008-001"),
+        (MissionState.CLOSED, "WORK-SW008-001"),
+        (MissionState.CANCELLED, None),
+    ],
+)
+def test_mission_accepts_legal_lifecycle_state(
+    state: MissionState, root_work_id: str | None
+) -> None:
+    mission = _mission(state=state, root_work_id=root_work_id, version=2, updated_at=NOW)
+
+    assert mission.state == state
+    assert mission.root_work_id == root_work_id
+    assert mission.version == 2
+
+
+@pytest.mark.parametrize(
+    "state",
+    sorted(
+        state.value
+        for state in {
+            MissionState.ACTIVE,
+            MissionState.BLOCKED,
+            MissionState.ACCEPTANCE_PENDING,
+            MissionState.ACCEPTED,
+            MissionState.CLOSED,
+        }
+    ),
+)
+def test_mission_requires_root_work_for_active_and_later_states(state: str) -> None:
+    with pytest.raises(ValidationError, match="require root_work_id"):
+        _mission(state=state)
+
+
+def test_mission_rejects_invalid_version_or_timestamp_order() -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 1"):
+        _mission(version=0)
+    with pytest.raises(ValidationError, match="created_at"):
+        _mission(created_at=NOW + timedelta(hours=1), updated_at=NOW)
+    with pytest.raises(ValidationError, match="validity window"):
+        _mission(updated_at=NOW + timedelta(days=8))

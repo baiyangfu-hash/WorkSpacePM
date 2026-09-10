@@ -157,6 +157,23 @@ class ContinuityStore:
         finally:
             conn.close()
 
+    @contextmanager
+    def _read_connection(self) -> Iterator[sqlite3.Connection]:
+        """Open the existing store without creating or mutating database files."""
+        wal_path = Path(f"{self.db_path}-wal")
+        if wal_path.is_file() and wal_path.stat().st_size:
+            raise ContinuityStoreError("Continuity Store 存在未合并 WAL，拒绝非一致的严格只读读取")
+        conn = sqlite3.connect(
+            f"{self.db_path.as_uri()}?mode=ro&immutable=1", uri=True, timeout=5.0
+        )
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA query_only=ON")
+            conn.execute("PRAGMA busy_timeout=5000")
+            yield conn
+        finally:
+            conn.close()
+
     def create_work(self, values: dict[str, Any], idempotency_key: str, now: str) -> WorkItem:
         with self._transaction() as conn:
             existing = self._event_by_key(conn, idempotency_key)
@@ -231,8 +248,7 @@ class ContinuityStore:
             )
 
     def get_work(self, work_id: str) -> WorkItem:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._read_connection() as conn:
             return self._get_work(conn, work_id)
 
     def create_run(
@@ -427,28 +443,23 @@ class ContinuityStore:
             return self._get_handoff(conn, values["handoff_id"])
 
     def get_run(self, run_id: str) -> RunItem:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._read_connection() as conn:
             return self._get_run(conn, run_id)
 
     def get_lease(self, run_id: str) -> LeaseItem:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._read_connection() as conn:
             return self._get_lease(conn, run_id)
 
     def get_checkpoint(self, checkpoint_id: str) -> CheckpointItem:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._read_connection() as conn:
             return self._get_checkpoint(conn, checkpoint_id)
 
     def get_handoff(self, handoff_id: str) -> HandoffV2:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._read_connection() as conn:
             return self._get_handoff(conn, handoff_id)
 
     def list_works(self, subject_project_id: str) -> tuple[WorkItem, ...]:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._read_connection() as conn:
             rows = conn.execute(
                 """SELECT work_id FROM work_items WHERE subject_project_id=?
                 AND state NOT IN ('CLOSED', 'CANCELLED') ORDER BY updated_at DESC, work_id""",
@@ -457,8 +468,7 @@ class ContinuityStore:
             return tuple(self._get_work(conn, str(row["work_id"])) for row in rows)
 
     def list_runs(self, work_id: str) -> tuple[RunItem, ...]:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._read_connection() as conn:
             rows = conn.execute(
                 """SELECT run_id FROM run_items WHERE work_id=?
                 AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
@@ -468,8 +478,7 @@ class ContinuityStore:
             return tuple(self._get_run(conn, str(row["run_id"])) for row in rows)
 
     def latest_checkpoint(self, run_id: str) -> CheckpointItem | None:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._read_connection() as conn:
             row = conn.execute(
                 """SELECT checkpoint_id FROM checkpoints WHERE run_id=?
                 ORDER BY sequence DESC LIMIT 1""",
