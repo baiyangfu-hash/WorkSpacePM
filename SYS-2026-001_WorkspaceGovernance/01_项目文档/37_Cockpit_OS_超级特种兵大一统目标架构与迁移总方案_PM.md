@@ -292,7 +292,7 @@ Workspace
 | A2 PM Facade | 建立 `plan/approve/execute/resume/accept` 高阶入口；兼容 `pm-workflow` 显示别名 | PM API/CLI、确认卡、验收包 | 别名无状态；一条 Mission 可完整恢复 | `ACCEPTED / NOT_DEPLOYED` |
 | A3 编排引擎 | 自动分类、Work Graph、Bug/债务/测试转向、有界修复和升级 | Orchestrator、策略、事件和回放 | 不越 Envelope；异常可恢复、可解释 | `ACCEPTED / NOT_DEPLOYED` |
 | A4 友好驾驶舱 | 两次确认 UX、老板视图、Work Graph 和证据抽屉 | QML/UI、Bridge/DTO | 用户无需操作内部对象；无启动写副作用 | `ACCEPTED / NOT_DEPLOYED` |
-| A5 执行适配 | Codex/Trae/手动适配器，隔离 worktree 和 lease 转移 | Adapter、branch/worktree policy | 两种独立 Agent 可精确续跑 | `IMPLEMENTED / PENDING_ACCEPTANCE` |
+| A5 执行适配 | Codex/Trae/手动适配器，隔离 worktree 和 lease 转移 | Adapter、branch/worktree policy | 两种独立 Agent 可精确续跑 | `ACCEPTED / MERGED_TO_DEVELOPMENT_MOTHER / NOT_DEPLOYED` |
 | A6 双靶实弹 | SW-2026-009 与 DJ-2026-005 各完成一个真实 Mission | Python/PLC dogfood 报告 | Bug 转向、Checkpoint、恢复、联合验收全链通过 | `NOT_STARTED` |
 | A7 发布切流 | 从母体构建不可变 release，inactive 验证后切换 | manifest、回退演练、active/previous | 用户单独批准切流；发布可验证、可回退 | `NOT_STARTED` |
 
@@ -392,7 +392,7 @@ A0 不允许：
 
 ## 19. 当前下一合法动作
 
-A5 已在隔离工作树完成实施，当前合法动作是由用户验收 `CHG-SCPT-2026-208`。验收通过后仍须由用户分别批准提交隔离分支、合并研发母体和任何稳定部署切流；三者均不会被 A5 自动执行。变量表样本资产可移植性、Windows PDF/COM 环境告警、历史变更单格式警告，以及独立 Work/Run 的验收提示缺口继续作为独立债务，严禁借 A5 顺手处理。
+A5 已由用户验收、提交隔离分支并快进合并至研发母体 `feature/trae-pro-20260509` 的 `979b196b`；`CHG-SCPT-2026-208` 已关闭，稳定部署未变。当前合法动作是等待用户对 A6 双靶实弹计划或 A5.1 非技术化 GUI 迭代作出单独授权。变量表样本资产可移植性、Windows PDF/COM 环境告警、历史变更单格式警告，以及独立 Work/Run 的验收提示缺口继续作为独立债务，严禁借 A5 顺手处理。
 
 ## 20. A5 执行适配实施证据与边界（2026-09-10）
 
@@ -402,7 +402,7 @@ A5 已在隔离工作树完成实施，当前合法动作是由用户验收 `CHG
 - `continuity dispatch prepare` 在所有授权、范围、容量和 Git 基线检查通过后，建立本地 Run/lease 并返回脱敏 `PREPARED` 收据。收据不含 lease token；该命令不发送远程消息、不创建外部会话，也不声称外部 Agent 已启动。
 - 跨提供者恢复沿用 checkpoint-bound handoff.v2：定向测试验证 `codex:agent-a` 到 `trae:agent-b` 的精确 owner/lease 交接，而非虚构远程执行结果。
 - A5 专属验证为 `34 passed`，Ruff 与 Mypy 通过，CLI 帮助可达。全量回归为 `1918 passed, 14 failed, 14 skipped`；14 项均是缺失真实 CSV fixture，并已在未改研发母体以 `26 passed, 14 failed` 原样复现。PDF 导出路径观察到 `0x80040155` COM 环境告警；A5 未改该路径。
-- A5 仍为 `PENDING_ACCEPTANCE`，尚未提交、合并或部署。A5.1 的非技术化 GUI 迭代应在 A5 用户验收后另行规划，不与本期混合。
+- A5 已于 2026-09-10 验收通过：`WORK-SW008-A5-208` 为 `ACCEPTED`，`RUN-SW008-A5-208-01` 为 `SUCCEEDED`，检查点为 `CP-SW008-A5-208-01`；提交 `979b196b` 已快进合并至研发母体。`CHG-SCPT-2026-208` 已关闭，稳定部署仍未变更。A5.1 的非技术化 GUI 迭代必须另行规划和授权，不与本期混合。
 
 ## 20. A4 友好驾驶舱实施记录（2026-09-10，已验收、未提交）
 
