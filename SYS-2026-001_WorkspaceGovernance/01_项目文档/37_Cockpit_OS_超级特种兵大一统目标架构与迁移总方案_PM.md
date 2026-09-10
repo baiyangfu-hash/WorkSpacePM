@@ -291,7 +291,7 @@ Workspace
 | A1 Mission 真源 | 在 Continuity Store 增加 Mission/Envelope/Event 持久化与迁移 | schema、repository、service、CLI、Resume 扩展 | 幂等、并发、迁移、损坏/未知版本均 fail closed | `ACCEPTED / NOT_DEPLOYED` |
 | A2 PM Facade | 建立 `plan/approve/execute/resume/accept` 高阶入口；兼容 `pm-workflow` 显示别名 | PM API/CLI、确认卡、验收包 | 别名无状态；一条 Mission 可完整恢复 | `ACCEPTED / NOT_DEPLOYED` |
 | A3 编排引擎 | 自动分类、Work Graph、Bug/债务/测试转向、有界修复和升级 | Orchestrator、策略、事件和回放 | 不越 Envelope；异常可恢复、可解释 | `ACCEPTED / NOT_DEPLOYED` |
-| A4 友好驾驶舱 | 两次确认 UX、老板视图、Work Graph 和证据抽屉 | QML/UI、Bridge/DTO | 用户无需操作内部对象；无启动写副作用 | `NOT_STARTED` |
+| A4 友好驾驶舱 | 两次确认 UX、老板视图、Work Graph 和证据抽屉 | QML/UI、Bridge/DTO | 用户无需操作内部对象；无启动写副作用 | `ACCEPTED / NOT_DEPLOYED` |
 | A5 执行适配 | Codex/Trae/手动适配器，隔离 worktree 和 lease 转移 | Adapter、branch/worktree policy | 两种独立 Agent 可精确续跑 | `NOT_STARTED` |
 | A6 双靶实弹 | SW-2026-009 与 DJ-2026-005 各完成一个真实 Mission | Python/PLC dogfood 报告 | Bug 转向、Checkpoint、恢复、联合验收全链通过 | `NOT_STARTED` |
 | A7 发布切流 | 从母体构建不可变 release，inactive 验证后切换 | manifest、回退演练、active/previous | 用户单独批准切流；发布可验证、可回退 | `NOT_STARTED` |
@@ -392,4 +392,14 @@ A0 不允许：
 
 ## 19. 当前下一合法动作
 
-A3 已验收关闭。若继续主线，下一步必须由用户单独批准“将 A3 已声明路径提交到 `codex/a3-orchestration-engine` 隔离分支”；提交后，合并到研发母体仍需另一次明确批准。变量表样本资产可移植性、4 份历史变更单格式警告，以及独立 Work/Run 的验收提示缺口，均必须另立变更并获得单独授权后处理；不得自动发布或切流。
+A3 已验收、提交并合并到研发母体基线 `894cd47d`；A4 已验收并关闭：`CHG-SCPT-2026-207` → `DEC-20260910-1B4F38FD` → `WORK-SW008-A4-207 (ACCEPTED)` → `RUN-SW008-A4-207-01 (SUCCEEDED)`。稳定部署仍未变更。当前唯一合法动作是等待用户单独批准将 A4 提交到隔离分支；之后如需合并，仍须单独批准。变量表样本资产可移植性、4 份历史变更单格式警告，以及独立 Work/Run 的验收提示缺口仍为独立债务，必须另立变更；不得借 A4 自动处理。
+
+## 20. A4 友好驾驶舱实施记录（2026-09-10，已验收、未提交）
+
+- 默认 `auto-pm gui` 改为独立的老板驾驶舱；旧专业工作台保留在显式 `auto-pm gui --advanced`，未修改 `qml_main_window.py`、`main.qml` 或旧工作台功能。
+- 默认路径只读取 `workspace_registry.json` 和已经存在的 Continuity Store。它不会构造 `DatabaseManager`、执行缓存同步、台账自动修复、文件监听或启动时崩溃日志目录创建；缺失、损坏或有未合并 WAL 的记录只显示可解释状态，不自愈、不猜测、不写入。
+- 用户卡片只呈现项目、需求、里程碑、进展、阻塞、验证、风险、当前负责人和下一步操作。内部 Work/Run 标识不出现在普通卡片；只有证据抽屉按需显示 Work Graph、Decision、Checkpoint、验证证据和只读来源，并且不读取或显示 lease token。
+- Mission 可在创建时绑定已授权的根 Work；`confirm-start` 使用该绑定完成用户的一次开工确认并进入执行，兼容 CLI 的旧 `--root-work-id` 仅作为可选过渡入口。最终验收仍受既有验证门控制。
+- 实现级证据：新增/变更相关聚焦 pytest `37 passed`；Ruff 全量检查通过；Mypy `219` 个源文件通过；Doc Check 覆盖 36 组 CLI 命令并通过。真实只读冒烟确认 `DJ-2026-005`、`SW-2026-009` 能被展示为普通项目卡片，连续性库读取前后 SHA-256 一致。
+- 全量 pytest 结果为 `1906 passed, 14 failed, 14 skipped, 60 warnings`。14 项失败全部是未纳入仓库的 `Work-FB变量表导出.csv` 与 `Autoshop-FB变量表导出.csv` 真实样本夹具缺失；A4 未修改变量表模块、夹具或其测试，且隔离基线同样缺失该文件，因此该债务不属于 A4。Windows COM 导出测试另记录环境级 `0x80040155` 日志，未造成 A4 用例失败。
+- `ledger reconcile SW-2026-008` 已 Exit 0 且无 A4 条目差异；不可变检查点 `CP-SW008-A4-207-01` 与 `CP-SW008-A4-207-02` 已冻结当前受控范围与验收包。用户已验收通过 A4，Work=`ACCEPTED`、Run=`SUCCEEDED`、CHG=`closed`；A4 为 `ACCEPTED / NOT_DEPLOYED`，未提交、未合并、未部署、未切流。

@@ -27,6 +27,8 @@ def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: s
             card = facade.plan(mission_id)
         elif action == "approve":
             card = facade.approve(mission_id, root_work_id)
+        elif action == "confirm-start":
+            card = facade.confirm_start(mission_id)
         elif action == "execute":
             card = facade.execute(mission_id)
         elif action == "accept":
@@ -48,11 +50,23 @@ def plan_pm(ctx: click.Context, mission_id: str) -> None:
 
 @pm_group.command(name="approve")
 @click.option("--mission-id", required=True)
-@click.option("--root-work-id", required=True, help="驾驶舱已授权的根 Work 编号")
+@click.option(
+    "--root-work-id",
+    default="",
+    help="兼容旧入口；新 Mission 已在创建时绑定内部授权，无需填写。",
+)
 @click.pass_context
 def approve_pm(ctx: click.Context, mission_id: str, root_work_id: str) -> None:
     """记录第一次用户确认，并允许驾驶舱在既定边界内执行。"""
     _emit_card(ctx, "approve", mission_id, root_work_id)
+
+
+@pm_group.command(name="confirm-start")
+@click.option("--mission-id", required=True)
+@click.pass_context
+def confirm_start_pm(ctx: click.Context, mission_id: str) -> None:
+    """执行用户的唯一开工确认；内部授权编号不会暴露给用户。"""
+    _emit_card(ctx, "confirm-start", mission_id)
 
 
 @pm_group.command(name="execute")

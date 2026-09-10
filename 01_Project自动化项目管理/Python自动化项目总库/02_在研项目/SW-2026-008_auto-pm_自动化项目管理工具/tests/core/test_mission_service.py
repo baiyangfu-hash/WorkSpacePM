@@ -11,7 +11,7 @@ from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryService
 
 from auto_pm.contracts.continuity import WorkKind
-from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
+from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 
 NOW = datetime(2026, 9, 10, 3, 0, tzinfo=UTC)
@@ -42,8 +42,12 @@ def _service(root: Path, *, now: datetime = NOW) -> MissionService:
     return service
 
 
-def _create(service: MissionService, mission_id: str = "MISSION-SW008-A1") -> None:
-    service.create(
+def _create(
+    service: MissionService,
+    mission_id: str = "MISSION-SW008-A1",
+    root_work_id: str | None = None,
+) -> Mission:
+    return service.create(
         mission_id=mission_id,
         subject_project_id="SW-2026-008",
         title="Mission truth",
@@ -52,6 +56,7 @@ def _create(service: MissionService, mission_id: str = "MISSION-SW008-A1") -> No
         authority=_authority(),
         created_by="Codex PM",
         idempotency_key=f"create-{mission_id}",
+        root_work_id=root_work_id,
     )
 
 
@@ -88,6 +93,23 @@ def test_create_is_idempotent_and_rejects_another_open_mission(tmp_path: Path) -
     assert duplicate.mission_id == "MISSION-SW008-A1"
     with pytest.raises(MissionServiceError, match="未终结 Mission"):
         _create(service, "MISSION-SW008-SECOND")
+
+
+def test_create_can_bind_the_authorized_root_work_before_user_confirmation(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    _work(tmp_path)
+
+    created = _create(service, root_work_id="WORK-SW008-A1")
+    awaiting = service.transition(
+        mission_id=created.mission_id,
+        expected_version=created.version,
+        new_state=MissionState.AWAITING_APPROVAL,
+        root_work_id=None,
+        idempotency_key="submit-bound-root",
+    )
+
+    assert created.root_work_id == "WORK-SW008-A1"
+    assert awaiting.root_work_id == "WORK-SW008-A1"
 
 
 def test_transition_requires_current_authority_root_work_and_expected_version(tmp_path: Path) -> None:

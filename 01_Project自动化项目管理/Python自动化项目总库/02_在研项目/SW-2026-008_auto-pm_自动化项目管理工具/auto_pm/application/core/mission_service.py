@@ -57,12 +57,16 @@ class MissionService:
         authority: AuthorityEnvelope,
         created_by: str,
         idempotency_key: str,
+        root_work_id: str | None = None,
     ) -> Mission:
         instant = self._instant()
         now = instant.isoformat()
         self._assert_authority_is_current(authority, instant)
         if subject_project_id != authority.subject_project_id:
             raise MissionServiceError("Mission 与 AuthorityEnvelope subject project 不匹配")
+        resolved_root_work_id = root_work_id.strip() if root_work_id else None
+        if resolved_root_work_id:
+            self._assert_root_work_matches_project(subject_project_id, resolved_root_work_id)
         mission = Mission(
             mission_id=mission_id,
             subject_project_id=subject_project_id,
@@ -70,6 +74,7 @@ class MissionService:
             objective=objective,
             acceptance_criteria=tuple(acceptance_criteria),
             authority=authority,
+            root_work_id=resolved_root_work_id,
             created_by=created_by,
             created_at=instant,
             updated_at=instant,
@@ -133,6 +138,12 @@ class MissionService:
         requested_root_work_id: str | None,
     ) -> str | None:
         root_work_id = requested_root_work_id or mission.root_work_id
+        if (
+            requested_root_work_id
+            and mission.root_work_id
+            and requested_root_work_id != mission.root_work_id
+        ):
+            raise MissionServiceError("Mission 已绑定 root_work_id，拒绝在生命周期中更换")
         if new_state in {
             MissionState.ACTIVE,
             MissionState.BLOCKED,
@@ -142,12 +153,18 @@ class MissionService:
         }:
             if not root_work_id:
                 raise MissionServiceError("目标 Mission 状态必须绑定 root_work_id")
-            work = self._store.get_work(root_work_id)
-            if work.subject_project_id != mission.subject_project_id:
-                raise MissionServiceError("root Work 不属于当前 Mission 的 subject project")
+            self._assert_root_work_matches_project(mission.subject_project_id, root_work_id)
         elif requested_root_work_id is not None:
             raise MissionServiceError("DRAFT、AWAITING_APPROVAL 或 CANCELLED 不允许新增 root_work_id")
         return root_work_id
+
+    def _assert_root_work_matches_project(self, subject_project_id: str, root_work_id: str) -> None:
+        try:
+            work = self._store.get_work(root_work_id)
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+        if work.subject_project_id != subject_project_id:
+            raise MissionServiceError("root Work 不属于当前 Mission 的 subject project")
 
     @staticmethod
     def _assert_authority_is_current(

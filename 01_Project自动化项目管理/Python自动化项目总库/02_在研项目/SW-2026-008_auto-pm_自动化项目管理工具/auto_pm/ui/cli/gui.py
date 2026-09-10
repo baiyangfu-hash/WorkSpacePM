@@ -38,10 +38,6 @@ def _install_crash_handler() -> None:
     ``~/.auto-pm/logs/crash.log``，含时间戳 + 完整 traceback，便于问题追溯。
     """
     crash_log_path = Path.home() / ".auto-pm" / "logs" / "crash.log"
-    try:
-        crash_log_path.parent.mkdir(parents=True, exist_ok=True)
-    except (OSError, PermissionError):
-        return  # 目录创建失败时静默跳过，不阻断 GUI 启动
 
     def _crash_excepthook(
         exc_type: type[BaseException],
@@ -50,6 +46,7 @@ def _install_crash_handler() -> None:
     ) -> None:
         # 先写 crash.log
         try:
+            crash_log_path.parent.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().isoformat()
             tb_lines = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
             with open(crash_log_path, "a", encoding="utf-8") as f:
@@ -67,17 +64,35 @@ def _install_crash_handler() -> None:
 
 @click.command("gui")
 @click.option("--debug", is_flag=True, help="调试模式（开启 DevTools / 控制台输出）")
+@click.option("--advanced", is_flag=True, help="显式打开原专业工作台；默认使用老板驾驶舱。")
 @click.pass_context
-def gui_command(ctx: click.Context, debug: bool) -> None:
-    """启动 GUI 桌面应用（QML）"""
+def gui_command(ctx: click.Context, debug: bool, advanced: bool) -> None:
+    """启动 GUI 桌面应用；默认入口只读取项目与连续性证据。"""
     app_ctx: AppContext = ctx.obj
     workspace = app_ctx.workspace_root
 
     # 安装 GUI 崩溃捕获（电气部门试用期间问题追溯）
     _install_crash_handler()
 
-    console.print(f"[cyan]启动 QML GUI: {workspace}[/cyan]")
-    _run_qml_gui(workspace, debug)
+    if advanced:
+        console.print(f"[cyan]启动专业工作台: {workspace}[/cyan]")
+        _run_qml_gui(workspace, debug)
+        return
+
+    console.print(f"[cyan]启动老板驾驶舱（只读）: {workspace}[/cyan]")
+    _run_boss_cockpit(workspace, debug)
+
+
+def _run_boss_cockpit(workspace: str, debug: bool) -> None:
+    """Launch the safe default view without importing the legacy application stack."""
+    try:
+        from auto_pm.ui.boss_qml_window import run_boss_cockpit
+    except ImportError as error:
+        raise click.ClickException("老板驾驶舱模块加载失败") from error
+
+    exit_code = run_boss_cockpit(workspace_root=workspace, debug=debug)
+    if exit_code != 0:
+        raise click.ClickException(f"老板驾驶舱异常退出: exit_code={exit_code}")
 
 
 def _run_qml_gui(workspace: str, debug: bool) -> None:

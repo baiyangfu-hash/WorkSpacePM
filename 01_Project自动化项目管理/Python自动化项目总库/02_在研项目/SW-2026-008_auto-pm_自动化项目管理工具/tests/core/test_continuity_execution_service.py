@@ -99,6 +99,30 @@ def test_run_binds_work_owner_paths_git_and_lease(tmp_path: Path) -> None:
     assert datetime.fromisoformat(lease.expires_at) > clock()
 
 
+def test_terminal_runs_are_exposed_only_when_history_is_explicitly_requested(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    run = _start(service)
+    verifying = service.transition_run(
+        run.run_id,
+        RunState.VERIFYING,
+        "agent-a",
+        "lease-secret",
+        "verify-run",
+    )
+    service.transition_run(
+        verifying.run_id,
+        RunState.SUCCEEDED,
+        "agent-a",
+        "lease-secret",
+        "finish-run",
+    )
+
+    assert service._store.list_runs("WORK-001") == ()
+    history = service._store.list_runs("WORK-001", include_terminal=True)
+    assert history[0].state is RunState.SUCCEEDED
+
+
 def test_run_rejects_undeclared_dirty_and_out_of_scope_paths(tmp_path: Path) -> None:
     clock = Clock()
     _, service = _services(tmp_path, clock)

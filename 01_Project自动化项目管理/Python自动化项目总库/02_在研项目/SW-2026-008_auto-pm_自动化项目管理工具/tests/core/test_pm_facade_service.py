@@ -36,18 +36,6 @@ def _authority(now: datetime) -> AuthorityEnvelope:
 
 def _setup(root: Path) -> tuple[MissionService, PmFacadeService]:
     now = datetime.now(UTC)
-    missions = MissionService(root)
-    missions.initialize("test")
-    missions.create(
-        mission_id="MISSION-PM-001",
-        subject_project_id="SW-TEST-001",
-        title="Friendly PM",
-        objective="Hide internal task routing from the user.",
-        acceptance_criteria=["User sees only confirmation cards."],
-        authority=_authority(now),
-        created_by="Codex PM",
-        idempotency_key="mission-create",
-    )
     works = WorkRegistryService(root)
     works.initialize("test")
     works.create_work(
@@ -60,6 +48,19 @@ def _setup(root: Path) -> tuple[MissionService, PmFacadeService]:
         source_fingerprint="sha256:test",
         idempotency_key="work-create",
         read_only=True,
+    )
+    missions = MissionService(root)
+    missions.initialize("test")
+    missions.create(
+        mission_id="MISSION-PM-001",
+        subject_project_id="SW-TEST-001",
+        title="Friendly PM",
+        objective="Hide internal task routing from the user.",
+        acceptance_criteria=["User sees only confirmation cards."],
+        authority=_authority(now),
+        created_by="Codex PM",
+        idempotency_key="mission-create",
+        root_work_id="WORK-PM-001",
     )
     return missions, PmFacadeService(root)
 
@@ -98,6 +99,16 @@ def test_accept_requires_the_verification_gate(tmp_path: Path) -> None:
     card = facade.accept("MISSION-PM-001")
     assert card.kind is PmConfirmationKind.ACCEPTANCE
     assert card.mission_state is MissionState.ACCEPTED
+
+
+def test_confirm_start_uses_the_mission_bound_work_without_an_internal_id(tmp_path: Path) -> None:
+    _, facade = _setup(tmp_path)
+
+    facade.plan("MISSION-PM-001")
+    card = facade.confirm_start("MISSION-PM-001")
+
+    assert card.kind is PmConfirmationKind.EXECUTION
+    assert facade._work("WORK-PM-001").state is WorkState.IN_PROGRESS
 
 
 def test_facade_rejects_out_of_order_actions_and_keeps_legacy_isolated(tmp_path: Path) -> None:

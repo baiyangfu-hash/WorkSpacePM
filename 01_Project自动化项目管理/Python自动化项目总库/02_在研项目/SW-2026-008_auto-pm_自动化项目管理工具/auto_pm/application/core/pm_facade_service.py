@@ -48,17 +48,28 @@ class PmFacadeService:
             ("approve", "cancel"),
         )
 
-    def approve(self, mission_id: str, root_work_id: str) -> PmConfirmationCard:
-        """Apply the first user approval without exposing lower-level lifecycle commands."""
+    def approve(self, mission_id: str, root_work_id: str = "") -> PmConfirmationCard:
+        """Apply the first approval using the Mission-bound Work when available."""
         mission = self._mission(mission_id)
+        requested_root_work_id = root_work_id.strip()
+        bound_root_work_id = mission.root_work_id
+        if (
+            requested_root_work_id
+            and bound_root_work_id
+            and requested_root_work_id != bound_root_work_id
+        ):
+            raise PmFacadeError("该需求已绑定其他内部授权，拒绝切换执行范围")
+        effective_root_work_id = bound_root_work_id or requested_root_work_id
+        if not effective_root_work_id:
+            raise PmFacadeError("该需求尚未完成内部授权，暂时不能开始执行")
         if mission.state is MissionState.AWAITING_APPROVAL:
-            work = self._work(root_work_id)
+            work = self._work(effective_root_work_id)
             if work.state not in {WorkState.READY, WorkState.IN_PROGRESS}:
-                raise PmFacadeError("批准前 root Work 必须已获 Decision 授权")
+                raise PmFacadeError("需求尚未获得对应授权，不能开始执行")
             mission = self._transition(
                 mission,
                 MissionState.ACTIVE,
-                root_work_id=root_work_id,
+                root_work_id=effective_root_work_id,
                 action="approve",
             )
         if mission.state is not MissionState.ACTIVE:
@@ -69,6 +80,11 @@ class PmFacadeService:
             "已获批准；驾驶舱将在授权边界内安排执行、恢复与分流。",
             ("execute", "resume"),
         )
+
+    def confirm_start(self, mission_id: str) -> PmConfirmationCard:
+        """Perform the user's one start confirmation without requesting internal IDs."""
+        self.approve(mission_id)
+        return self.execute(mission_id)
 
     def execute(self, mission_id: str) -> PmConfirmationCard:
         """Start the Mission's authorized root Work, without creating hidden state."""

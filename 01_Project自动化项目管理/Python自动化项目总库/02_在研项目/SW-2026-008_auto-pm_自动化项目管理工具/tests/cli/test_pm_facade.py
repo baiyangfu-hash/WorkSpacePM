@@ -33,18 +33,6 @@ def _setup(root: Path) -> None:
             source_fingerprint=f"sha256:{'c' * 64}",
         ),
     )
-    missions = MissionService(root)
-    missions.initialize("test")
-    missions.create(
-        mission_id="MISSION-PM-CLI-001",
-        subject_project_id="SW-TEST-001",
-        title="PM CLI",
-        objective="Expose a friendly confirmation card.",
-        acceptance_criteria=["A card is emitted."],
-        authority=authority,
-        created_by="Codex PM",
-        idempotency_key="mission-create",
-    )
     works = WorkRegistryService(root)
     works.initialize("test")
     works.create_work(
@@ -57,6 +45,19 @@ def _setup(root: Path) -> None:
         source_fingerprint="sha256:test",
         idempotency_key="work-create",
         read_only=True,
+    )
+    missions = MissionService(root)
+    missions.initialize("test")
+    missions.create(
+        mission_id="MISSION-PM-CLI-001",
+        subject_project_id="SW-TEST-001",
+        title="PM CLI",
+        objective="Expose a friendly confirmation card.",
+        acceptance_criteria=["A card is emitted."],
+        authority=authority,
+        created_by="Codex PM",
+        idempotency_key="mission-create",
+        root_work_id="WORK-PM-CLI-001",
     )
 
 
@@ -78,6 +79,22 @@ def test_pm_plan_and_approve_emit_confirmation_cards(cli_runner: CliRunner, tmp_
     )
     assert approved.exit_code == 0
     assert json.loads(approved.output)["mission_state"] == "ACTIVE"
+
+
+def test_pm_confirm_start_hides_the_root_work_id(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _setup(tmp_path)
+    planned = cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "pm", "plan", "--mission-id", "MISSION-PM-CLI-001"]
+    )
+    assert planned.exit_code == 0
+
+    started = cli_runner.invoke(
+        cli,
+        ["-w", str(tmp_path), "pm", "confirm-start", "--mission-id", "MISSION-PM-CLI-001"],
+    )
+
+    assert started.exit_code == 0
+    assert json.loads(started.output)["mission_state"] == "ACTIVE"
 
 
 def test_pm_workflow_is_a_display_only_compatibility_alias(cli_runner: CliRunner, tmp_path: Path) -> None:

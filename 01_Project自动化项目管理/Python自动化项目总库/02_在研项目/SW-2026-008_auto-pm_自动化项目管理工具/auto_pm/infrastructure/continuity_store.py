@@ -676,16 +676,25 @@ class ContinuityStore:
         with self._read_connection() as conn:
             return self._get_handoff(conn, handoff_id)
 
-    def list_works(self, subject_project_id: str) -> tuple[WorkItem, ...]:
+    def list_works(
+        self, subject_project_id: str, *, include_terminal: bool = False
+    ) -> tuple[WorkItem, ...]:
+        """List project Work without changing the default active-work behaviour."""
         with self._read_connection() as conn:
-            rows = conn.execute(
+            query = (
                 """SELECT work_id FROM work_items WHERE subject_project_id=?
-                AND state NOT IN ('CLOSED', 'CANCELLED') ORDER BY updated_at DESC, work_id""",
-                (subject_project_id,),
-            ).fetchall()
+                ORDER BY updated_at DESC, work_id"""
+                if include_terminal
+                else """SELECT work_id FROM work_items WHERE subject_project_id=?
+                AND state NOT IN ('CLOSED', 'CANCELLED') ORDER BY updated_at DESC, work_id"""
+            )
+            rows = conn.execute(query, (subject_project_id,)).fetchall()
             return tuple(self._get_work(conn, str(row["work_id"])) for row in rows)
 
-    def list_active_missions(self, subject_project_id: str) -> tuple[Mission, ...]:
+    def list_missions(
+        self, subject_project_id: str, *, include_terminal: bool = False
+    ) -> tuple[Mission, ...]:
+        """List project Missions through the immutable reader, including history on request."""
         with self._read_connection() as conn:
             versions = self._schema_versions(conn)
             if not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
@@ -694,22 +703,33 @@ class ContinuityStore:
             if versions == {_LEGACY_SCHEMA_VERSION}:
                 # Strict reads must not upgrade a legacy store. It has no Mission table yet.
                 return ()
-            rows = conn.execute(
+            query = (
                 """SELECT mission_id FROM mission_items WHERE subject_project_id=?
+                ORDER BY updated_at DESC, mission_id"""
+                if include_terminal
+                else """SELECT mission_id FROM mission_items WHERE subject_project_id=?
                 AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
-                ORDER BY updated_at DESC, mission_id""",
-                (subject_project_id,),
-            ).fetchall()
+                ORDER BY updated_at DESC, mission_id"""
+            )
+            rows = conn.execute(query, (subject_project_id,)).fetchall()
             return tuple(self._get_mission(conn, str(row["mission_id"])) for row in rows)
 
-    def list_runs(self, work_id: str) -> tuple[RunItem, ...]:
+    def list_active_missions(self, subject_project_id: str) -> tuple[Mission, ...]:
+        """Compatibility view for callers that need only live Missions."""
+        return self.list_missions(subject_project_id)
+
+    def list_runs(self, work_id: str, *, include_terminal: bool = False) -> tuple[RunItem, ...]:
+        """List Work Runs without changing the default active-run behaviour."""
         with self._read_connection() as conn:
-            rows = conn.execute(
+            query = (
                 """SELECT run_id FROM run_items WHERE work_id=?
+                ORDER BY updated_at DESC, run_id"""
+                if include_terminal
+                else """SELECT run_id FROM run_items WHERE work_id=?
                 AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
-                ORDER BY updated_at DESC, run_id""",
-                (work_id,),
-            ).fetchall()
+                ORDER BY updated_at DESC, run_id"""
+            )
+            rows = conn.execute(query, (work_id,)).fetchall()
             return tuple(self._get_run(conn, str(row["run_id"])) for row in rows)
 
     def latest_checkpoint(self, run_id: str) -> CheckpointItem | None:
