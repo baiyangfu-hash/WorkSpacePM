@@ -90,15 +90,65 @@ class WorkRegistryService:
         work = self._store.get_work(work_id)
         if work.read_only or work.state != WorkState.PLANNED:
             raise WorkRegistryError("只有 PLANNED 写入型 Work 可以授权")
+        self.assert_authorized_scope(
+            subject_project_id=work.subject_project_id,
+            decision_id=decision_id,
+            scope_paths=work.scope_paths,
+        )
+        return self._transition(work, WorkState.READY, decision_id, idempotency_key)
+
+    def assert_authorized_scope(
+        self,
+        *,
+        subject_project_id: str,
+        decision_id: str,
+        scope_paths: tuple[str, ...] | list[str],
+    ) -> None:
+        """Preflight a child Work before creating any mutable partial state."""
         decision = self._load_decision(decision_id)
-        if decision.project_id != work.subject_project_id:
+        if decision.project_id != subject_project_id:
             raise WorkRegistryError("Decision 项目与 Work subject 不一致")
         if decision.decision_conclusion not in {"approved", "conditionally_approved"}:
             raise WorkRegistryError("Decision 未批准")
         approved = set(self._normalize_paths(decision.approved_files))
-        if not set(work.scope_paths).issubset(approved):
+        paths = self._normalize_paths(list(scope_paths))
+        if not set(paths).issubset(approved):
             raise WorkRegistryError("Work scope 超出 Decision approved_files")
-        return self._transition(work, WorkState.READY, decision_id, idempotency_key)
+
+    def get_work(self, work_id: str) -> WorkItem:
+        """Read one Work without exposing the persistence implementation."""
+        try:
+            return self._store.get_work(work_id)
+        except ContinuityStoreError as error:
+            raise WorkRegistryError(str(error)) from error
+
+    def list_relations(self) -> tuple[tuple[str, str, str], ...]:
+        """Read the directed Work Graph in insertion order."""
+        try:
+            return self._store.list_work_relations()
+        except ContinuityStoreError as error:
+            raise WorkRegistryError(str(error)) from error
+
+    def is_reachable(self, from_work_id: str, to_work_id: str) -> bool:
+        """Return whether a directed relation path already connects two same-project Works."""
+        source = self.get_work(from_work_id)
+        target = self.get_work(to_work_id)
+        if source.subject_project_id != target.subject_project_id:
+            raise WorkRegistryError("Work Graph 不允许跨项目关系")
+        adjacency: dict[str, set[str]] = {}
+        for source_id, target_id, _relation in self.list_relations():
+            adjacency.setdefault(source_id, set()).add(target_id)
+        pending = [from_work_id]
+        visited: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current == to_work_id:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            pending.extend(adjacency.get(current, ()))
+        return False
 
     def transition(
         self,
@@ -122,6 +172,21 @@ class WorkRegistryService:
             raise WorkRegistryError("Work 不得与自身建立关系")
         if relation not in _RELATIONS:
             raise WorkRegistryError(f"未知 Work relation: {relation}")
+        try:
+            existing = self._store.event_aggregate_for_key(idempotency_key)
+        except ContinuityStoreError as error:
+            raise WorkRegistryError(str(error)) from error
+        if existing is not None:
+            _aggregate_type, aggregate_id = existing
+            if aggregate_id != from_work_id:
+                raise WorkRegistryError("idempotency_key 已用于其他 Work")
+            return
+        source = self.get_work(from_work_id)
+        target = self.get_work(to_work_id)
+        if source.subject_project_id != target.subject_project_id:
+            raise WorkRegistryError("Work Graph 不允许跨项目关系")
+        if self.is_reachable(to_work_id, from_work_id):
+            raise WorkRegistryError("Work Graph 不允许循环关系")
         digest = hashlib.sha256(idempotency_key.encode()).hexdigest()[:16].upper()
         try:
             self._store.add_relation(

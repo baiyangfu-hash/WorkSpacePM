@@ -138,6 +138,47 @@ def test_expired_authority_fails_closed_before_any_mission_write(tmp_path: Path)
     assert ContinuityStore(tmp_path).list_active_missions("SW-2026-008") == ()
 
 
+def test_expired_authority_can_only_move_an_active_mission_to_safe_blocked(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path)
+    _create(service)
+    awaiting = service.transition(
+        mission_id="MISSION-SW008-A1",
+        expected_version=1,
+        new_state=MissionState.AWAITING_APPROVAL,
+        root_work_id=None,
+        idempotency_key="submit-expired-block",
+    )
+    _work(tmp_path)
+    active = service.transition(
+        mission_id="MISSION-SW008-A1",
+        expected_version=awaiting.version,
+        new_state=MissionState.ACTIVE,
+        root_work_id="WORK-SW008-A1",
+        idempotency_key="activate-expired-block",
+    )
+
+    expired = _service(tmp_path, now=NOW + timedelta(days=2))
+    blocked = expired.transition(
+        mission_id=active.mission_id,
+        expected_version=active.version,
+        new_state=MissionState.BLOCKED,
+        root_work_id=active.root_work_id,
+        idempotency_key="safe-block-expired",
+    )
+
+    assert blocked.state is MissionState.BLOCKED
+    with pytest.raises(MissionServiceError, match="已过期"):
+        expired.transition(
+            mission_id=blocked.mission_id,
+            expected_version=blocked.version,
+            new_state=MissionState.ACTIVE,
+            root_work_id=blocked.root_work_id,
+            idempotency_key="unsafe-resume-expired",
+        )
+
+
 def test_v2_store_migrates_additively_and_preserves_existing_work(tmp_path: Path) -> None:
     registry = WorkRegistryService(tmp_path, now=lambda: NOW.isoformat())
     registry.initialize("legacy")

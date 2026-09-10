@@ -105,11 +105,15 @@ class MissionService:
         try:
             current = self._store.get_mission(mission_id)
             instant = self._instant()
-            self._assert_authority_is_current(current.authority, instant)
             if new_state not in _TRANSITIONS[current.state]:
                 raise MissionServiceError(
                     f"Mission 不允许从 {current.state.value} 流转到 {new_state.value}"
                 )
+            self._assert_authority_is_current(
+                current.authority,
+                instant,
+                allow_safe_block=new_state is MissionState.BLOCKED,
+            )
             resolved_root_work_id = self._resolve_root_work(current, new_state, root_work_id)
             return self._store.transition_mission(
                 mission_id,
@@ -146,8 +150,15 @@ class MissionService:
         return root_work_id
 
     @staticmethod
-    def _assert_authority_is_current(authority: AuthorityEnvelope, instant: datetime) -> None:
-        if instant < authority.valid_from or instant > authority.expires_at:
+    def _assert_authority_is_current(
+        authority: AuthorityEnvelope,
+        instant: datetime,
+        *,
+        allow_safe_block: bool = False,
+    ) -> None:
+        if (
+            instant < authority.valid_from or instant > authority.expires_at
+        ) and not allow_safe_block:
             raise MissionServiceError("AuthorityEnvelope 已过期或尚未生效，拒绝 Mission 写入")
 
     def _timestamp(self) -> str:

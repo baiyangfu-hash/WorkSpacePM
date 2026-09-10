@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from auto_pm.cli.__main__ import cli
+from auto_pm.core.mission_service import MissionService
+from auto_pm.core.work_registry_service import WorkRegistryService
 from click.testing import CliRunner, Result
+
+from auto_pm.contracts.continuity import WorkKind
+from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 
 
 def _git(root: Path, *args: str) -> None:
@@ -52,6 +58,85 @@ def _authority_json() -> str:
                 "source_fingerprint": f"sha256:{'a' * 64}",
             },
         }
+    )
+
+
+def _orchestration_ready(root: Path) -> None:
+    now = datetime.now(UTC)
+    decision_id = "DEC-20260910-5786E126"
+    decision_path = root / ".auto-pm" / "decisions" / f"{decision_id}.json"
+    decision_path.parent.mkdir(parents=True, exist_ok=True)
+    decision_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "decision_package.v1",
+                "decision_id": decision_id,
+                "project_id": "SW-TEST-001",
+                "change_id": "CHG-SCPT-2026-206",
+                "approved_scope": "SYSTEM",
+                "approved_files": ["README.md"],
+                "approver": "fubai",
+                "approved_at": now.isoformat(),
+                "decision_conclusion": "approved",
+            }
+        ),
+        encoding="utf-8",
+    )
+    works = WorkRegistryService(root)
+    works.initialize("test")
+    works.create_work(
+        work_id="WORK-CLI-A3-ROOT",
+        subject_project_id="SW-TEST-001",
+        kind=WorkKind.WBS,
+        title="A3 CLI root",
+        owner="Codex",
+        scope_paths=["README.md"],
+        source_fingerprint="sha256:root",
+        idempotency_key="a3-root",
+        read_only=True,
+    )
+    authority = AuthorityEnvelope(
+        envelope_id="AUTH-CLI-A3-001",
+        subject_project_id="SW-TEST-001",
+        change_id="CHG-SCPT-2026-206",
+        decision_id=decision_id,
+        scope_paths=("README.md",),
+        allowed_child_work_kinds=frozenset({WorkKind.BUG}),
+        valid_from=now - timedelta(minutes=1),
+        expires_at=now + timedelta(days=1),
+        audit=AuthorityAudit(
+            created_by="Codex PM",
+            created_at=now,
+            approved_by="fubai",
+            approved_at=now,
+            source_fingerprint=f"sha256:{'a' * 64}",
+        ),
+    )
+    missions = MissionService(root)
+    missions.initialize("test")
+    created = missions.create(
+        mission_id="MISSION-CLI-A3-001",
+        subject_project_id="SW-TEST-001",
+        title="A3 CLI",
+        objective="Route a typed finding.",
+        acceptance_criteria=["One child Work is created."],
+        authority=authority,
+        created_by="Codex PM",
+        idempotency_key="a3-mission-create",
+    )
+    awaiting = missions.transition(
+        mission_id=created.mission_id,
+        expected_version=created.version,
+        new_state=MissionState.AWAITING_APPROVAL,
+        root_work_id=None,
+        idempotency_key="a3-mission-submit",
+    )
+    missions.transition(
+        mission_id=awaiting.mission_id,
+        expected_version=awaiting.version,
+        new_state=MissionState.ACTIVE,
+        root_work_id="WORK-CLI-A3-ROOT",
+        idempotency_key="a3-mission-activate",
     )
 
 
@@ -185,3 +270,32 @@ def test_run_start_rejects_physically_dirty_undeclared_owned_path(
     )
     assert started.exit_code == 1
     assert "未声明" in started.output
+
+
+def test_orchestration_cli_routes_a_typed_bug_without_a_hidden_queue(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _repository(tmp_path)
+    _orchestration_ready(tmp_path)
+
+    result = _invoke(
+        cli_runner,
+        tmp_path,
+        [
+            "orchestration", "report-finding",
+            "--finding-id", "FND-CLI-A3-001",
+            "--mission-id", "MISSION-CLI-A3-001",
+            "--parent-work-id", "WORK-CLI-A3-ROOT",
+            "--pid", "SW-TEST-001",
+            "--kind", "BUG",
+            "--title", "CLI bug",
+            "--summary", "A typed gate finding.",
+            "--scope", "README.md",
+            "--source-fingerprint", f"sha256:{'b' * 64}",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["action"] == "BLOCKING"
+    assert payload["child_work_id"] == "WORK-A3-CLI-A3-001"

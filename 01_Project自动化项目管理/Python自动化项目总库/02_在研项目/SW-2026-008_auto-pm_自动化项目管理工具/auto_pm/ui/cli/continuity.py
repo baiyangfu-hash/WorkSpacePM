@@ -13,9 +13,14 @@ from auto_pm import __version__
 from auto_pm.app_context import AppContext
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.mission import AuthorityEnvelope, MissionState
+from auto_pm.contracts.orchestration import OrchestrationFinding, RepairAttempt
 from auto_pm.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
+)
+from auto_pm.core.mission_orchestrator import (
+    MissionOrchestrator,
+    MissionOrchestratorError,
 )
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
@@ -40,6 +45,12 @@ def _execution_service(ctx: click.Context) -> ContinuityExecutionService:
 
 def _mission_service(ctx: click.Context) -> MissionService:
     service = MissionService(_workspace(ctx))
+    service.initialize(__version__)
+    return service
+
+
+def _orchestrator(ctx: click.Context) -> MissionOrchestrator:
+    service = MissionOrchestrator(_workspace(ctx))
     service.initialize(__version__)
     return service
 
@@ -267,6 +278,93 @@ def relate_work(
     except WorkRegistryError as error:
         raise click.ClickException(str(error)) from error
     click.echo('{"status":"ok"}')
+
+
+@continuity_group.group(name="orchestration")
+def orchestration_group() -> None:
+    """Internal A3 finding routing; future UI projects only its safe outcomes."""
+
+
+@orchestration_group.command(name="report-finding")
+@click.option("--finding-id", required=True)
+@click.option("--mission-id", required=True)
+@click.option("--parent-work-id", required=True)
+@click.option("--pid", "project_id", required=True)
+@click.option("--kind", type=click.Choice([item.value for item in WorkKind]), required=True)
+@click.option("--title", required=True)
+@click.option("--summary", required=True)
+@click.option("--scope", "scope_paths", multiple=True, required=True)
+@click.option("--source-fingerprint", required=True)
+@click.option("--business-line-reroute", is_flag=True)
+@click.option("--execution-branch-change", is_flag=True)
+@click.option("--physical-or-safety-decision", is_flag=True)
+@click.option("--external-action", is_flag=True)
+@click.pass_context
+def report_finding(
+    ctx: click.Context,
+    finding_id: str,
+    mission_id: str,
+    parent_work_id: str,
+    project_id: str,
+    kind: str,
+    title: str,
+    summary: str,
+    scope_paths: tuple[str, ...],
+    source_fingerprint: str,
+    business_line_reroute: bool,
+    execution_branch_change: bool,
+    physical_or_safety_decision: bool,
+    external_action: bool,
+) -> None:
+    """Route a typed internal finding without creating a hidden parallel queue."""
+    try:
+        finding = OrchestrationFinding(
+            finding_id=finding_id,
+            mission_id=mission_id,
+            parent_work_id=parent_work_id,
+            subject_project_id=project_id,
+            kind=WorkKind(kind),
+            title=title,
+            summary=summary,
+            scope_paths=scope_paths,
+            source_fingerprint=source_fingerprint,
+            requires_business_line_reroute=business_line_reroute,
+            requires_execution_branch_change=execution_branch_change,
+            requires_physical_or_safety_decision=physical_or_safety_decision,
+            requires_external_action=external_action,
+        )
+        _emit(_orchestrator(ctx).report_finding(finding))
+    except (MissionOrchestratorError, ValidationError) as error:
+        raise click.ClickException(str(error)) from error
+
+
+@orchestration_group.command(name="report-repair")
+@click.option("--attempt-id", required=True)
+@click.option("--mission-id", required=True)
+@click.option("--child-work-id", required=True)
+@click.option("--result", type=click.Choice(["succeeded", "failed"]), required=True)
+@click.option("--elapsed-seconds", type=click.IntRange(0), required=True)
+@click.pass_context
+def report_repair(
+    ctx: click.Context,
+    attempt_id: str,
+    mission_id: str,
+    child_work_id: str,
+    result: str,
+    elapsed_seconds: int,
+) -> None:
+    """Record an adapter-observed repair attempt against the explicit A3 budget."""
+    try:
+        attempt = RepairAttempt(
+            attempt_id=attempt_id,
+            mission_id=mission_id,
+            child_work_id=child_work_id,
+            succeeded=result == "succeeded",
+            elapsed_seconds=elapsed_seconds,
+        )
+        _emit(_orchestrator(ctx).report_repair_attempt(attempt))
+    except (MissionOrchestratorError, ValidationError) as error:
+        raise click.ClickException(str(error)) from error
 
 
 @continuity_group.group(name="run")

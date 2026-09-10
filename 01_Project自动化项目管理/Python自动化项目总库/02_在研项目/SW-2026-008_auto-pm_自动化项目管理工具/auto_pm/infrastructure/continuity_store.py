@@ -18,6 +18,7 @@ from auto_pm.contracts.continuity import (
     WorkItem,
 )
 from auto_pm.contracts.mission import Mission, MissionState
+from auto_pm.contracts.orchestration import OrchestrationOutcome
 
 
 class ContinuityStoreError(RuntimeError):
@@ -387,6 +388,79 @@ class ContinuityStore:
                 event_id,
             )
 
+    def list_work_relations(self) -> tuple[tuple[str, str, str], ...]:
+        """Return the persisted directed Work Graph without opening a write transaction."""
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                """SELECT from_work_id, to_work_id, relation
+                FROM work_relations ORDER BY rowid"""
+            ).fetchall()
+        return tuple((str(row[0]), str(row[1]), str(row[2])) for row in rows)
+
+    def event_aggregate_for_key(self, idempotency_key: str) -> tuple[str, str] | None:
+        """Read an idempotency binding before applying higher-level graph checks."""
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, idempotency_key)
+            if row is None:
+                return None
+            return str(row["aggregate_type"]), str(row["aggregate_id"])
+
+    def get_orchestration_outcome(
+        self, mission_id: str, idempotency_key: str
+    ) -> OrchestrationOutcome | None:
+        """Read a prior idempotent outcome when a caller retries the same command."""
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, idempotency_key)
+            if row is None:
+                return None
+            if row["aggregate_type"] != "mission" or row["aggregate_id"] != mission_id:
+                raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
+            if not str(row["event_type"]).startswith("ORCHESTRATION_"):
+                raise ContinuityStoreError("idempotency_key 不属于编排事件")
+            return self._decode_orchestration_outcome(row["payload_json"])
+
+    def list_orchestration_outcomes(self, mission_id: str) -> tuple[OrchestrationOutcome, ...]:
+        """Load append-only A3 outcomes in their original causal order."""
+        with self._read_connection() as conn:
+            self._get_mission(conn, mission_id)
+            rows = conn.execute(
+                """SELECT payload_json FROM events
+                WHERE aggregate_type='mission' AND aggregate_id=?
+                AND event_type LIKE 'ORCHESTRATION_%' ORDER BY rowid""",
+                (mission_id,),
+            ).fetchall()
+        return tuple(self._decode_orchestration_outcome(row[0]) for row in rows)
+
+    def record_orchestration_outcome(
+        self,
+        outcome: OrchestrationOutcome,
+        idempotency_key: str,
+        now: str,
+    ) -> OrchestrationOutcome:
+        """Append one replayable orchestration outcome on the owning Mission aggregate."""
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if (
+                    existing["aggregate_type"] != "mission"
+                    or existing["aggregate_id"] != outcome.mission_id
+                ):
+                    raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
+                if not str(existing["event_type"]).startswith("ORCHESTRATION_"):
+                    raise ContinuityStoreError("idempotency_key 不属于编排事件")
+                return self._decode_orchestration_outcome(existing["payload_json"])
+            self._get_mission(conn, outcome.mission_id)
+            self._append_event(
+                conn,
+                outcome.mission_id,
+                f"ORCHESTRATION_{outcome.action.value}",
+                outcome.model_dump(mode="json"),
+                idempotency_key,
+                now,
+                aggregate_type="mission",
+            )
+            return outcome
+
     def get_work(self, work_id: str) -> WorkItem:
         with self._read_connection() as conn:
             return self._get_work(conn, work_id)
@@ -709,6 +783,13 @@ class ContinuityStore:
         data = dict(row)
         data["owned_paths"] = tuple(json.loads(data.pop("owned_paths_json")))
         return HandoffV2.model_validate(data)
+
+    @staticmethod
+    def _decode_orchestration_outcome(payload_json: str) -> OrchestrationOutcome:
+        try:
+            return OrchestrationOutcome.model_validate(json.loads(payload_json))
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ContinuityStoreError("编排事件无法读取") from error
 
     @staticmethod
     def _insert_mapping(conn: sqlite3.Connection, table: str, values: dict[str, Any]) -> None:

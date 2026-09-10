@@ -185,6 +185,29 @@ def test_relation_idempotency_key_cannot_cross_work(tmp_path: Path) -> None:
         service.add_relation("WORK-002", "WORK-001", "blocks", "rel-1")
 
 
+def test_work_graph_rejects_cross_project_and_cycle_relations(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    _planned(service, "WORK-001")
+    _planned(service, "WORK-002")
+    service.add_relation("WORK-001", "WORK-002", "blocks", "rel-forward")
+
+    with pytest.raises(WorkRegistryError, match="循环"):
+        service.add_relation("WORK-002", "WORK-001", "blocks", "rel-cycle")
+
+    service.create_work(
+        work_id="WORK-OTHER",
+        subject_project_id="SYS-2026-001",
+        kind=WorkKind.GOVERNANCE,
+        title="Other project",
+        owner="agent-b",
+        scope_paths=["other.py"],
+        source_fingerprint="sha256:other",
+        idempotency_key="create-other",
+    )
+    with pytest.raises(WorkRegistryError, match="跨项目"):
+        service.add_relation("WORK-001", "WORK-OTHER", "blocks", "rel-cross-project")
+
+
 def test_scope_paths_must_be_relative_and_contained(tmp_path: Path) -> None:
     service = _service(tmp_path)
 

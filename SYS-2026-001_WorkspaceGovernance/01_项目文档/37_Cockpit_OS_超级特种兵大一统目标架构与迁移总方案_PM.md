@@ -290,7 +290,7 @@ Workspace
 | A0 可信基座 | 固化总方案；建立 Mission/Envelope 契约；修 Resume 零写和 hook 统一入口 | 本文、契约、两项修复、单测 | 聚焦测试/Ruff/Mypy 通过；纯读取无文件副作用；hook 不再加载平铺包 | `ACCEPTED / NOT_DEPLOYED` |
 | A1 Mission 真源 | 在 Continuity Store 增加 Mission/Envelope/Event 持久化与迁移 | schema、repository、service、CLI、Resume 扩展 | 幂等、并发、迁移、损坏/未知版本均 fail closed | `ACCEPTED / NOT_DEPLOYED` |
 | A2 PM Facade | 建立 `plan/approve/execute/resume/accept` 高阶入口；兼容 `pm-workflow` 显示别名 | PM API/CLI、确认卡、验收包 | 别名无状态；一条 Mission 可完整恢复 | `ACCEPTED / NOT_DEPLOYED` |
-| A3 编排引擎 | 自动分类、Work Graph、Bug/债务/测试转向、有界修复和升级 | Orchestrator、策略、事件和回放 | 不越 Envelope；异常可恢复、可解释 | `NOT_STARTED / B0_REQUIRED` |
+| A3 编排引擎 | 自动分类、Work Graph、Bug/债务/测试转向、有界修复和升级 | Orchestrator、策略、事件和回放 | 不越 Envelope；异常可恢复、可解释 | `ACCEPTED / NOT_DEPLOYED` |
 | A4 友好驾驶舱 | 两次确认 UX、老板视图、Work Graph 和证据抽屉 | QML/UI、Bridge/DTO | 用户无需操作内部对象；无启动写副作用 | `NOT_STARTED` |
 | A5 执行适配 | Codex/Trae/手动适配器，隔离 worktree 和 lease 转移 | Adapter、branch/worktree policy | 两种独立 Agent 可精确续跑 | `NOT_STARTED` |
 | A6 双靶实弹 | SW-2026-009 与 DJ-2026-005 各完成一个真实 Mission | Python/PLC dogfood 报告 | Bug 转向、Checkpoint、恢复、联合验收全链通过 | `NOT_STARTED` |
@@ -381,6 +381,15 @@ A0 不允许：
 - A2 最终全量回归为 `1886 passed, 14 skipped, 0 failed`（2026-09-10）；`0f1ab30c` 已使研发母体 Resume 忽略到期 Run，防止历史租约妨碍后续接力；
 - 本次回归同时确认全局静态基线仍有 5 项 Ruff 与 42 项 Mypy 历史债务，已登记为 B0 `CHG-SCPT-2026-205`；该事实不倒灌篡改 A2 的已验收结论。
 
-## 18. 当前下一合法动作
+## 18. A3 执行验证与续接点（2026-09-10）
 
-B0 已获用户开工授权：`CHG-DOCU-2026-010` 负责本路线图事实纠偏，`CHG-SCPT-2026-205` 负责恢复全局 Ruff/Mypy 静态绿灯。只有 B0 的文档、静态检查、全量回归与台账对账均通过，并由用户单独验收后，才能提交 A3 的实施计划并等待新的开工授权。不得发布、切流或处理 A3 编排引擎范围。
+- A3 已在从 B0 基线 `06782f4d` 派生的隔离工作树 `codex/a3-orchestration-engine` 中实施；授权链为 `CHG-SCPT-2026-206` → `DEC-20260910-5786E126` → `WORK-SW008-A3-206` → `RUN-SW008-A3-206-01`。
+- 新增的编排内核只接收类型化执行发现，并在 Mission、AuthorityEnvelope、Decision 路径白名单和 Work Graph 四层边界内工作：BUG/TEST 会阻塞父 Work，DEBT 仅记录并排队；越权、跨项目、循环、业务线/分支转向和修复预算耗尽一律升级，不会静默继续。
+- A3 代码不会创建真实 Agent、分支、工作树、发布、切流或外部动作；这些仍属于 A5/A7。稳定部署、release 指针和研发母体现存改动均未触碰。
+- 专属回归已通过 `51 passed`；全量回归在隔离工作树中以两份临时、只读的变量表样本输入完成，结果为 `1899 passed, 14 skipped, 60 warnings`。样本在测试结束后已删除且未纳入变更；这同时暴露出干净工作树缺少两份未跟踪样本资产的独立可移植性债务，不属于 A3 修复范围。
+- 用户已于 2026-09-10 验收通过 A3；`WORK-SW008-A3-206` 为 `ACCEPTED`，`CHG-SCPT-2026-206` 为 `closed`，恢复检查点为 `CP-SW008-A3-206-01`。未提交、未合并、未部署。
+- 发现一项后续连续性体验风险：未绑定 Mission 的独立 Work/Run 在 Run 终态后，`pm resume` 会显示 Work 但不显示“等待验收”的下一步提示；标准 Mission 流程不受影响。该问题必须单独登记变更后处理。
+
+## 19. 当前下一合法动作
+
+A3 已验收关闭。若继续主线，下一步必须由用户单独批准“将 A3 已声明路径提交到 `codex/a3-orchestration-engine` 隔离分支”；提交后，合并到研发母体仍需另一次明确批准。变量表样本资产可移植性、4 份历史变更单格式警告，以及独立 Work/Run 的验收提示缺口，均必须另立变更并获得单独授权后处理；不得自动发布或切流。

@@ -72,8 +72,21 @@ class InternalRoutingPolicy(BaseModel):
     allow_reschedule: bool = False
     allow_execution_branch_changes: bool = False
     allow_business_line_reroute: bool = False
+    max_auto_repair_attempts: int = Field(default=0, ge=0, le=100)
+    max_auto_repair_seconds: int = Field(default=0, ge=0, le=86_400)
     same_subject_project_only: Literal[True] = True
     within_scope_paths_only: Literal[True] = True
+
+    @property
+    def auto_repair_enabled(self) -> bool:
+        """Return true only for an explicitly bounded retry budget."""
+        return self.max_auto_repair_attempts > 0 and self.max_auto_repair_seconds > 0
+
+    @model_validator(mode="after")
+    def _validate_repair_budget(self) -> Self:
+        if bool(self.max_auto_repair_attempts) != bool(self.max_auto_repair_seconds):
+            raise ValueError("auto repair attempts and seconds must be enabled together")
+        return self
 
 
 class AuthorityAudit(BaseModel):
@@ -144,6 +157,8 @@ class AuthorityEnvelope(BaseModel):
             or self.routing.allow_business_line_reroute
         ) and not self.allowed_child_work_kinds:
             raise ValueError("branch changes and rerouting require allowed child Work kinds")
+        if self.routing.auto_repair_enabled and WorkKind.BUG not in self.allowed_child_work_kinds:
+            raise ValueError("auto repair requires BUG in allowed child Work kinds")
         return self
 
 
@@ -182,11 +197,10 @@ class Mission(BaseModel):
         updated_at = datetime.fromisoformat(self.updated_at.isoformat())
         if created_at > updated_at:
             raise ValueError("Mission created_at must not be later than updated_at")
-        if not (
-            self.authority.valid_from
-            <= created_at
-            <= updated_at
-            <= self.authority.expires_at
+        if created_at < self.authority.valid_from or created_at > self.authority.expires_at:
+            raise ValueError("Mission timestamps must be inside the authority validity window")
+        if updated_at < self.authority.valid_from or (
+            updated_at > self.authority.expires_at and self.state is not MissionState.BLOCKED
         ):
             raise ValueError("Mission timestamps must be inside the authority validity window")
         if self.state in _ROOT_WORK_REQUIRED_STATES and self.root_work_id is None:

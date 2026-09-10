@@ -66,6 +66,9 @@ def test_authority_envelope_defaults_fail_closed() -> None:
     assert envelope.forbidden_actions == frozenset(RestrictedAction)
     assert envelope.escalation_triggers == frozenset(EscalationTrigger)
     assert envelope.authorization_source == "CHG_DECISION"
+    assert envelope.routing.max_auto_repair_attempts == 0
+    assert envelope.routing.max_auto_repair_seconds == 0
+    assert not envelope.routing.auto_repair_enabled
     assert "lease_token" not in envelope.model_dump(mode="json")
 
 
@@ -78,6 +81,16 @@ def test_authority_envelope_rejects_unsafe_or_ambiguous_boundaries() -> None:
         _envelope(escalation_triggers=frozenset({EscalationTrigger.SCOPE_EXIT}))
     with pytest.raises(ValidationError, match="allowed child Work kinds"):
         _envelope(routing=InternalRoutingPolicy(allow_business_line_reroute=True))
+    with pytest.raises(ValidationError, match="enabled together"):
+        InternalRoutingPolicy(max_auto_repair_attempts=1)
+    with pytest.raises(ValidationError, match="auto repair requires BUG"):
+        _envelope(
+            allowed_child_work_kinds=frozenset({WorkKind.TEST}),
+            routing=InternalRoutingPolicy(
+                max_auto_repair_attempts=1,
+                max_auto_repair_seconds=60,
+            ),
+        )
     with pytest.raises(ValidationError, match="Extra inputs"):
         AuthorityEnvelope.model_validate({**_envelope().model_dump(), "lease_token": "secret"})
 
@@ -91,11 +104,14 @@ def test_authority_envelope_allows_only_explicit_internal_routing() -> None:
             allow_reschedule=True,
             allow_execution_branch_changes=True,
             allow_business_line_reroute=True,
+            max_auto_repair_attempts=2,
+            max_auto_repair_seconds=600,
         ),
     )
 
     assert envelope.routing.same_subject_project_only is True
     assert envelope.routing.within_scope_paths_only is True
+    assert envelope.routing.auto_repair_enabled
     assert envelope.allowed_child_work_kinds == frozenset(WorkKind)
 
 
