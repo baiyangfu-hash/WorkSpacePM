@@ -1,12 +1,13 @@
 # Cockpit OS 超级特种兵大一统目标架构与迁移总方案
 
-> 文档状态：`TARGET_BASELINE / A0_ACCEPTED / CHG-199_CLOSED / NOT_DEPLOYED`
+> 文档状态：`ACTIVE_PRODUCT_ROUTE / A6_ACCEPTED / A7-0.1_IN_PROGRESS / NOT_DEPLOYED`
 > 编制日期：2026-09-09
+> 最后真源校准：2026-09-10
 > 决策人：User（fubai）
-> 治理主线：`CHG-SCPT-2026-198`
-> 批准包：`DEC-20260910-5EE749DF`
-> 当前工作：`WORK-SW008-A0-198`
-> 当前运行：`RUN-SW008-A0-198-01`
+> 当前治理变更：`CHG-DOCU-2026-011`
+> 批准包：`DEC-20260911-0C6A74A0`
+> 当前工作：`WORK-SW008-A7-011`
+> 当前运行：`RUN-SW008-A7-011-01`
 > 研发母体：`SW-2026-008`
 > 稳定部署：`00_Infrastructure/auto_pm`
 > 运行状态：根目录 `.auto-pm`
@@ -293,8 +294,8 @@ Workspace
 | A3 编排引擎 | 自动分类、Work Graph、Bug/债务/测试转向、有界修复和升级 | Orchestrator、策略、事件和回放 | 不越 Envelope；异常可恢复、可解释 | `ACCEPTED / NOT_DEPLOYED` |
 | A4 友好驾驶舱 | 两次确认 UX、老板视图、Work Graph 和证据抽屉 | QML/UI、Bridge/DTO | 用户无需操作内部对象；无启动写副作用 | `ACCEPTED / NOT_DEPLOYED` |
 | A5 执行适配 | Codex/Trae/手动适配器，隔离 worktree 和 lease 转移 | Adapter、branch/worktree policy | 两种独立 Agent 可精确续跑 | `ACCEPTED / MERGED_TO_DEVELOPMENT_MOTHER / NOT_DEPLOYED` |
-| A6 双靶实弹 | SW-2026-009 与 DJ-2026-005 各完成一个真实 Mission | Python/PLC dogfood 报告 | Bug 转向、Checkpoint、恢复、联合验收全链通过 | `NOT_STARTED` |
-| A7 发布切流 | 从母体构建不可变 release，inactive 验证后切换 | manifest、回退演练、active/previous | 用户单独批准切流；发布可验证、可回退 | `NOT_STARTED` |
+| A6 双靶实弹 | SW-2026-009 与 DJ-2026-005 各完成一个真实 Mission | Python/PLC dogfood 报告 | Bug 转向、Checkpoint、恢复、联合验收全链通过 | `ACCEPTED / MERGED_TO_DEVELOPMENT_MOTHER / NOT_DEPLOYED` |
+| A7 发布切流 | 从母体构建不可变 release，inactive 验证后切换 | manifest、回退演练、active/previous | 用户单独批准切流；发布可验证、可回退 | `IN_PROGRESS (A7-0.1 文档真源对齐) / NOT_DEPLOYED` |
 
 ## 12. A0 精确边界
 
@@ -392,7 +393,7 @@ A0 不允许：
 
 ## 19. 当前下一合法动作
 
-A5 已由用户验收、提交隔离分支并快进合并至研发母体 `feature/trae-pro-20260509` 的 `979b196b`；`CHG-SCPT-2026-208` 已关闭，稳定部署未变。当前合法动作是等待用户对 A6 双靶实弹计划或 A5.1 非技术化 GUI 迭代作出单独授权。变量表样本资产可移植性、Windows PDF/COM 环境告警、历史变更单格式警告，以及独立 Work/Run 的验收提示缺口继续作为独立债务，严禁借 A5 顺手处理。
+A6 已由用户验收、提交隔离分支并合并至研发母体 `feature/trae-pro-20260509`：功能提交为 `266553e7`，治理收口为 `aa804d6b`，`CHG-SCPT-2026-212` 与 `CHG-SCPT-2026-213` 均已关闭，稳定部署未变。用户已批准 A7-0.1；当前仅执行 `CHG-DOCU-2026-011` 的文档真源对齐与分层归档。不可变 release 构建、inactive 验证、运行记录前向收口与 active/previous 切流均不在本 Work 范围，必须分别报批。
 
 ## 20. A5 执行适配实施证据与边界（2026-09-10）
 
@@ -413,3 +414,17 @@ A5 已由用户验收、提交隔离分支并快进合并至研发母体 `featur
 - 实现级证据：新增/变更相关聚焦 pytest `37 passed`；Ruff 全量检查通过；Mypy `219` 个源文件通过；Doc Check 覆盖 36 组 CLI 命令并通过。真实只读冒烟确认 `DJ-2026-005`、`SW-2026-009` 能被展示为普通项目卡片，连续性库读取前后 SHA-256 一致。
 - 全量 pytest 结果为 `1906 passed, 14 failed, 14 skipped, 60 warnings`。14 项失败全部是未纳入仓库的 `Work-FB变量表导出.csv` 与 `Autoshop-FB变量表导出.csv` 真实样本夹具缺失；A4 未修改变量表模块、夹具或其测试，且隔离基线同样缺失该文件，因此该债务不属于 A4。Windows COM 导出测试另记录环境级 `0x80040155` 日志，未造成 A4 用例失败。
 - `ledger reconcile SW-2026-008` 已 Exit 0 且无 A4 条目差异；不可变检查点 `CP-SW008-A4-207-01` 与 `CP-SW008-A4-207-02` 已冻结当前受控范围与验收包。用户已验收通过 A4，Work=`ACCEPTED`、Run=`SUCCEEDED`、CHG=`closed`；A4 为 `ACCEPTED / NOT_DEPLOYED`，未提交、未合并、未部署、未切流。
+
+## 21. A6 验收与 A7-0.1 当前状态校准（2026-09-10）
+
+本节是本文的当前状态读模型；第 17～20 节保留各阶段当时的验收快照，若其中“未提交、未合并、下一动作”等叙述与本节不一致，以本节和阶段总表为准。
+
+| 事项 | 已核验事实 | 当前含义 |
+|---|---|---|
+| 研发母体 | `feature/trae-pro-20260509` 位于 `aa804d6b`，工作树干净；A2～A6 的提交链均已合并 | 开发成果可作为 A7 候选源，但尚未进入稳定运行时 |
+| A6 | Python 靶 `SW-2026-010` 与 PLC 靶 `DJ-2026-011` 已完成验证；功能提交 `266553e7`、治理收口 `aa804d6b` | `ACCEPTED / MERGED_TO_DEVELOPMENT_MOTHER / NOT_DEPLOYED` |
+| 稳定运行 | `active_release.json` 仍指向 `1.3.3-d8f7c8b`，`previous_release.json` 指向 `1.3.2-9d3c920` | A1～A6 代码均未切流，现有回退位保持不变 |
+| 连续性运行态 | 根库仍保留 A2 的两条过期 lease 运行记录；旧 active release 会报多运行冲突，研发母体已具备到期租约过滤 | 本 Work 不改数据库；前向收口与发布验证须另立范围 |
+| 文档入口 | 26 为治理基线、36 为日常手册、本文为活动产品路线 | 日常对话只从这三份文件恢复，不从历史 WBS、候选规范或旧交接开工 |
+
+A7-0.1 只清理文档入口和可安全移动的历史资料：旧文件不会删除，所有物理移动均有源路径、目标路径、SHA-256、继任真源和 Git 逆向恢复说明，详见 `archive/A7-0.1-20260910/A7-0.1_文档真源对齐与归档台账_REP.md`。
