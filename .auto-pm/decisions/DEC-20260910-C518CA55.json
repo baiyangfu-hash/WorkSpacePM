@@ -1,0 +1,25 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260910-C518CA55",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-201",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "auto_pm/contracts/pm_facade.py",
+    "auto_pm/application/core/pm_facade_service.py",
+    "auto_pm/ui/cli/pm.py",
+    "tests/core/test_pm_facade_service.py",
+    "tests/cli/test_pm_facade.py",
+    "04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-201.md",
+    "04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/37_Cockpit_OS_超级特种兵大一统目标架构与迁移总方案_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-10T03:39:31.578964+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "只复用 Continuity Store 的 Mission 真源；不得读写 pm-workflow 技能、PM_SESSION 或 handoff.v1 作为执行真源。",
+    "执行前后均不得变更 00_Infrastructure/auto_pm/active_release.json 或任何 release 文件。"
+  ],
+  "metadata": {}
+}

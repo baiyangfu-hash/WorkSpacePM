@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260908-1338C700",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-194",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "auto_pm/domain/change/generator.py",
+    "auto_pm/domain/change/substance_checker.py",
+    "tests/change/test_generator.py",
+    "tests/change/test_substance_control.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-08T21:51:38.448040+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅限完成或关闭状态的实质内容门禁与 LOCAL 不适用呈现；不得修改 00_Obsidian_Base、历史 CHG 或 SYS。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-A23ED6B8",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-008",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "04_监控/01_变更管理/01_变更单/CHG-DOCU/CHG-DOCU-2026-008.md",
+    "04_监控/02_整改项/活动技术债台账.md",
+    "04_监控/01_变更管理/历史CHG兼容清单.md",
+    "PM_SESSION_SW-2026-008.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-09T01:55:53.192399+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅治理 SW-2026-008 项目文档；不得修改 SYS-2026-001 用户改动、00_Obsidian_Base、发布快照或其他暂停变更单。历史缺陷保留原始证据并绑定负责人、优先级、验收条件和后续 WBS。"
+  ],
+  "metadata": {}
+}

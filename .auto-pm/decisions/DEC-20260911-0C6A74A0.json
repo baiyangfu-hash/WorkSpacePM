@@ -1,0 +1,35 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260911-0C6A74A0",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-011",
+  "approved_scope": "CROSS",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-DOCU/CHG-DOCU-2026-011.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/37_Cockpit_OS_超级特种兵大一统目标架构与迁移总方案_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/19_SW-2026-008_驾驶舱问题报告_FOR_GPT_REVIEW.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/20_跨Agent工作连续性与恢复协议_候选规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/21_PM_SESSION项目状态边界_候选差异规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/22_PM-033平台中立迭代流程_候选差异规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/23_PM-042授权与执行状态边界_候选差异规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/24_PM-046工作交接契约V2_候选差异规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/A7-0.1-20260910/19_SW-2026-008_驾驶舱问题报告_FOR_GPT_REVIEW.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/A7-0.1-20260910/20_跨Agent工作连续性与恢复协议_候选规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/A7-0.1-20260910/21_PM_SESSION项目状态边界_候选差异规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/A7-0.1-20260910/22_PM-033平台中立迭代流程_候选差异规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/A7-0.1-20260910/23_PM-042授权与执行状态边界_候选差异规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/A7-0.1-20260910/24_PM-046工作交接契约V2_候选差异规范.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/A7-0.1-20260910/A7-0.1_文档真源对齐与归档台账_REP.md"
+  ],
+  "approver": "User",
+  "approved_at": "2026-09-11T00:30:31.372229+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅移动 Git 干净、SHA-256 已记录且引用图无断链的文件。",
+    "15 号 WBS、CHG、Decision、PM_SESSION、.auto-pm、release 指针、靶子项目和 Obsidian 不在本期变更范围。",
+    "稳定版切流、发布构建和旧运行记录前向收口需另行批准。"
+  ],
+  "metadata": {}
+}

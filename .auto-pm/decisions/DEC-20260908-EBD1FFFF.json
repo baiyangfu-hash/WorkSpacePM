@@ -1,0 +1,25 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260908-EBD1FFFF",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-193",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "auto_pm/domain/change/document_contract.py",
+    "auto_pm/domain/change/generator.py",
+    "auto_pm/domain/change/parser.py",
+    "auto_pm/domain/change/markdown_editor.py",
+    "auto_pm/domain/change/change_service.py",
+    "tests/change/test_generator.py",
+    "tests/change/test_parser.py",
+    "tests/change/test_markdown_editor.py",
+    "tests/change/test_change_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-08T20:51:05.936157+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅限项目内 CHG 文档结构契约；不得修改 00_Obsidian_Base、发布快照或 SYS-2026-001。"
+  ],
+  "metadata": {}
+}

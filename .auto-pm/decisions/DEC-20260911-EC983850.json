@@ -1,0 +1,31 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260911-EC983850",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SAFE-2026-001",
+  "approved_scope": "SYSTEM/CROSS",
+  "approved_files": [
+    ".auto-pm/backups",
+    ".auto-pm/reports",
+    ".auto-pm/decisions",
+    ".gitignore",
+    "00_Infrastructure/auto_pm/releases/1.2.3-d41eb38",
+    "00_Obsidian_Base全局规范文件仓库/00_INDEX_全局规范索引.md",
+    "0100_PLC自动化/DJ-2026-009_汇川换型改造",
+    "0100_PLC自动化/DJ-2026-010_驾驶舱A6PLC验证套件",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件",
+    "SYS-2026-001_WorkspaceGovernance"
+  ],
+  "approver": "User",
+  "approved_at": "2026-09-11T02:47:58.218442+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "只授权 REC-0 至 REC-3；A7-0.2 候选构建与 A7-1 发布切换不在本 Decision 内。",
+    "所有脏项、独有提交和待移除 worktree/branch 必须先生成 SHA-256、patch 或 git bundle 与恢复台账。",
+    "禁止直接修改 SQLite、禁止伪造旧 Run 终态、禁止修改 active_release.json/previous_release.json/deployment_manifest.json。",
+    "Obsidian 仅允许封存现有未授权差异并恢复到 Git 真源，不允许改变正式规范内容。",
+    "持久主线收敛为 main；临时执行分支在验收后删除。"
+  ],
+  "metadata": {}
+}

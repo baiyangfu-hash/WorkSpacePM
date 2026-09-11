@@ -1,0 +1,33 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260911-7733A527",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SAFE-2026-002",
+  "approved_scope": "SYSTEM/CROSS",
+  "approved_files": [
+    ".git/refs",
+    ".git/logs/refs",
+    ".git/worktrees",
+    ".git/config",
+    ".git/packed-refs",
+    ".auto-pm",
+    ".gitignore",
+    "00_Infrastructure",
+    "00_Obsidian_Base全局规范文件仓库",
+    "0100_PLC自动化",
+    "01_Project自动化项目管理",
+    "SYS-2026-001_WorkspaceGovernance"
+  ],
+  "approver": "User-Final-Decision",
+  "approved_at": "2026-09-11T03:10:47.444421+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅限 REC Git 外科治理：恢复根工作树、将本地 main 快进至已验真 b8276e157ac6d94920a2c18e1aef29250be7413b、清退已封存的本地旧分支和辅助 worktree。",
+    "删除或移动前必须存在 REC-SW008-20260911 完整 bundle、补丁、未跟踪资产包、数据库备份及 SHA-256 校验。",
+    "长期持久分支只保留 main，长期 worktree 只保留工作区根；临时 Work 分支后续按 Work 生命周期自动清退。",
+    "禁止 fetch、push、远端引用改写、强制 checkout、git reset、git clean；仅允许精确路径恢复、可恢复移动和非强制引用操作。",
+    "禁止修改 active_release.json、previous_release.json、稳定槽内容及任何发布指针；禁止直接修改 SQLite 或伪造历史 Run 完成记录。",
+    "本授权不包含 A7-0.2 候选构建、部署和 A7-1 正式切换；两者另行审批。"
+  ],
+  "metadata": {}
+}

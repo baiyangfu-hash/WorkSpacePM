@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-44250913",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-194",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "auto_pm/domain/change/generator.py",
+    "auto_pm/domain/change/substance_checker.py",
+    "tests/change/test_generator.py",
+    "tests/change/test_substance_control.py",
+    "tests/change/test_change_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-09T00:44:13.438972+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "合并原执行范围与完整关闭夹具补充范围；关闭语义保持 fail-closed，LOCAL 仅采用明确不适用语义。"
+  ],
+  "metadata": {}
+}

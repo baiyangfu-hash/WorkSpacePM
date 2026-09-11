@@ -1,0 +1,17 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260909-7FAD659F",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-194",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "tests/change/test_change_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-09T00:41:47.559575+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅补充完整关闭回归夹具；不得改变生产关闭规则或放宽 fail-closed 语义。"
+  ],
+  "metadata": {}
+}
