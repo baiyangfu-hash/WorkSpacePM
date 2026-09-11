@@ -37,3 +37,6 @@
 *.db binary
 *.sqlite binary
 *.sqlite3 binary
+
+# 5. 已发布槽：部署清单按原始字节校验，禁止 Git clean/smudge 改写
+00_Infrastructure/auto_pm/releases/** -text

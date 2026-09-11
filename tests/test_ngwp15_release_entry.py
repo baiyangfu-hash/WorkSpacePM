@@ -4,14 +4,17 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 LAUNCHER_DIR = Path(__file__).resolve().parents[1] / "00_Infrastructure" / "auto_pm" / "launcher"
+WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
+CONTAINER_ROOT = WORKSPACE_ROOT / "00_Infrastructure" / "auto_pm"
 sys.path.insert(0, str(LAUNCHER_DIR))
-from bootstrap import (
+from bootstrap import (  # type: ignore[import-not-found]
     ACTIVE_POINTER,
     EXIT_POINTER_INVALID,
     EXIT_RELEASE_INVALID,
@@ -23,7 +26,77 @@ from bootstrap import (
     BootstrapError,
     resolve_with_fallback,
 )
-from launch import main as launcher_main
+from launch import main as launcher_main  # type: ignore[import-not-found]
+
+
+def _git_bytes(*arguments: str, input_bytes: bytes | None = None) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(WORKSPACE_ROOT), *arguments],
+        input=input_bytes,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def _index_entries(release_root: str) -> dict[str, str]:
+    output = _git_bytes("ls-files", "--stage", "-z", "--", release_root)
+    entries: dict[str, str] = {}
+    for record in output.split(b"\0"):
+        if not record:
+            continue
+        metadata, raw_path = record.split(b"\t", 1)
+        _mode, raw_oid, raw_stage = metadata.split()
+        assert raw_stage == b"0"
+        path = raw_path.decode(encoding="utf-8", errors="replace")
+        entries[path] = raw_oid.decode(encoding="ascii")
+    return entries
+
+
+def _read_git_blobs(object_ids: set[str]) -> dict[str, bytes]:
+    ordered = sorted(object_ids)
+    output = _git_bytes(
+        "cat-file",
+        "--batch",
+        input_bytes=("\n".join(ordered) + "\n").encode(encoding="ascii"),
+    )
+    blobs: dict[str, bytes] = {}
+    cursor = 0
+    for requested_oid in ordered:
+        header_end = output.index(b"\n", cursor)
+        header = output[cursor:header_end].decode(encoding="ascii").split()
+        actual_oid, object_type, raw_size = header
+        assert actual_oid == requested_oid
+        assert object_type == "blob"
+        size = int(raw_size)
+        start = header_end + 1
+        end = start + size
+        blobs[requested_oid] = output[start:end]
+        assert output[end : end + 1] == b"\n"
+        cursor = end + 1
+    assert cursor == len(output)
+    return blobs
+
+
+def _operational_release_files() -> list[tuple[str, dict[str, str]]]:
+    manifest = json.loads(
+        (CONTAINER_ROOT / MANIFEST_FILE).read_text(
+            encoding="utf-8", errors="replace"
+        )
+    )
+    releases: list[tuple[str, dict[str, str]]] = []
+    for pointer_name in (ACTIVE_POINTER, PREVIOUS_POINTER):
+        pointer = json.loads(
+            (CONTAINER_ROOT / pointer_name).read_text(
+                encoding="utf-8", errors="replace"
+            )
+        )
+        release_id = pointer.get("release_id")
+        assert isinstance(release_id, str) and release_id
+        files = manifest["releases"][release_id]["files"]
+        assert isinstance(files, dict) and files
+        releases.append((release_id, files))
+    return releases
 
 
 def _pointer(release_id: str | None) -> dict[str, object]:
@@ -148,6 +221,48 @@ def test_payload_symlink_or_reparse_fails_closed(tmp_path: Path) -> None:
         pytest.skip(f"host disallows symlink creation: {exc}")
     with pytest.raises(BootstrapError, match="链接或重解析点"):
         resolve_with_fallback(root)
+
+
+def test_operational_release_payloads_are_git_byte_opaque() -> None:
+    paths = [
+        f"00_Infrastructure/auto_pm/releases/{release_id}/{relative}"
+        for release_id, files in _operational_release_files()
+        for relative in files
+    ]
+    output = _git_bytes(
+        "-c",
+        "core.quotePath=false",
+        "check-attr",
+        "--stdin",
+        "text",
+        input_bytes=("\n".join(paths) + "\n").encode(encoding="utf-8"),
+    ).decode(encoding="utf-8", errors="replace")
+    records = output.splitlines()
+
+    assert len(records) == len(paths)
+    for expected_path, record in zip(paths, records, strict=True):
+        actual_path, attribute, value = record.rsplit(": ", 2)
+        assert actual_path == expected_path
+        assert attribute == "text"
+        assert value == "unset", f"{actual_path}: release payload must be -text"
+
+
+def test_operational_release_worktree_and_index_blobs_match_manifest() -> None:
+    for release_id, files in _operational_release_files():
+        release_prefix = f"00_Infrastructure/auto_pm/releases/{release_id}"
+        expected_paths = {
+            f"{release_prefix}/{relative}": expected
+            for relative, expected in files.items()
+        }
+        index_entries = _index_entries(release_prefix)
+        assert set(index_entries) == set(expected_paths)
+        blobs = _read_git_blobs(set(index_entries.values()))
+
+        for relative_path, expected_sha256 in expected_paths.items():
+            worktree_bytes = (WORKSPACE_ROOT / relative_path).read_bytes()
+            index_bytes = blobs[index_entries[relative_path]]
+            assert hashlib.sha256(worktree_bytes).hexdigest() == expected_sha256
+            assert hashlib.sha256(index_bytes).hexdigest() == expected_sha256
 
 
 def test_root_entry_has_no_parent_auto_pm_import() -> None:

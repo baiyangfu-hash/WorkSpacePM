@@ -1,0 +1,28 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260911-533F43FA",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SAFE-2026-003",
+  "approved_scope": "SYSTEM/SAFE",
+  "approved_files": [
+    ".gitattributes",
+    "tests/test_ngwp15_release_entry.py",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b",
+    ".auto-pm/backups/REC-SW008-20260911",
+    ".auto-pm/reports/REC-SW008-20260911",
+    ".auto-pm/decisions",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SAFE/CHG-SAFE-2026-003.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "User-Authorized-Codex-PM",
+  "approved_at": "2026-09-11T03:51:52.049056+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "只允许把活动槽恢复并持久化为 deployment_manifest.json 已登记的精确字节；任何其他内容差异失败关闭。",
+    "active_release.json、previous_release.json、deployment_manifest.json 均禁止修改；不得构建、登记或切换 release。",
+    "历史 1.2.x 槽只登记独立债务，不得在本 Decision 下修改。",
+    "必须保留写前 ZIP/SHA-256，提交后同时验证工作树哈希、Git index/blob 哈希和 git check-attr 字节保真属性。",
+    "A7-0.2、A7-1、A8 均不在本 Decision 授权范围。"
+  ],
+  "metadata": {}
+}
