@@ -8,6 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from auto_pm.contracts.execution_adapter import WorktreeMode
+from auto_pm.infrastructure.control_root_guard import (
+    ControlRootGuardError,
+    clean_git_environment,
+    require_control_root,
+    require_git_worktree_root,
+    require_safe_workspace_path,
+)
 
 
 class WorktreePolicyError(RuntimeError):
@@ -77,7 +84,7 @@ class WorktreePolicyService:
     def materialize(self, plan: WorktreePlan) -> WorktreePlan:
         """Create an authorized isolated worktree without cleaning or reusing anything."""
 
-        self._require_root_git_worktree()
+        self.require_control_root()
         if plan.worktree_mode is WorktreeMode.CURRENT:
             if plan.worktree_path != self._root:
                 raise WorktreePolicyError("CURRENT worktree plan 与控制工作树不一致")
@@ -94,14 +101,18 @@ class WorktreePolicyService:
         if self._git_output("rev-parse", "HEAD") != plan.git_head:
             raise WorktreePolicyError("Git baseline drift，拒绝创建隔离工作树")
         self._require_branch_absent(plan.branch_name)
+        self._validate_target_path(plan.worktree_path)
         plan.worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        self._validate_target_path(plan.worktree_path)
         result = self._run_git(
             "worktree", "add", "-b", plan.branch_name, str(plan.worktree_path), plan.git_head
         )
         if result.returncode != 0:
             details = result.stderr.strip() or result.stdout.strip() or "unknown git error"
             raise WorktreePolicyError(f"创建隔离工作树失败: {details}")
-        child_root = Path(self._git_output("rev-parse", "--show-toplevel", cwd=plan.worktree_path)).resolve()
+        child_root = Path(
+            self._git_output("rev-parse", "--show-toplevel", cwd=plan.worktree_path)
+        ).resolve()
         if child_root != plan.worktree_path.resolve():
             raise WorktreePolicyError("新工作树 Git 根目录不匹配，保留现场并拒绝继续")
         if self._git_output("rev-parse", "HEAD", cwd=plan.worktree_path) != plan.git_head:
@@ -120,25 +131,44 @@ class WorktreePolicyService:
             raise WorktreePolicyError("隔离工作树必须位于已命名分支，拒绝 detached HEAD")
         return branch_name
 
+    def require_control_root(self) -> None:
+        """Reject linked worktrees before any control-plane mutation is initialized."""
+
+        try:
+            require_control_root(self._root)
+        except ControlRootGuardError as error:
+            raise WorktreePolicyError(str(error)) from error
+
     def _require_root_git_worktree(self) -> None:
-        if not self._root.is_dir():
-            raise WorktreePolicyError(f"workspace_root 不存在或不是目录: {self._root}")
-        git_root = Path(self._git_output("rev-parse", "--show-toplevel")).resolve()
-        if git_root != self._root:
-            raise WorktreePolicyError("workspace_root 必须是 Git worktree 顶层目录")
+        try:
+            require_git_worktree_root(self._root)
+        except ControlRootGuardError as error:
+            raise WorktreePolicyError(str(error)) from error
 
     def _target_path(self, run_id: str) -> Path:
-        target = (self._worktree_root() / self._slug(run_id)).resolve()
+        target = self._worktree_root() / self._slug(run_id)
         self._validate_target_path(target)
         return target
 
     def _worktree_root(self) -> Path:
-        return (self._root / ".auto-pm" / "worktrees").resolve()
+        try:
+            return require_safe_workspace_path(
+                self._root,
+                self._root / ".auto-pm" / "worktrees",
+                label="Git worktree 目录",
+            )
+        except ControlRootGuardError as error:
+            raise WorktreePolicyError(str(error)) from error
 
     def _validate_target_path(self, target: Path) -> None:
         try:
-            target.resolve().relative_to(self._worktree_root())
-        except ValueError as error:
+            safe_target = require_safe_workspace_path(
+                self._root,
+                target,
+                label="Git worktree target",
+            )
+            safe_target.relative_to(self._worktree_root())
+        except (ControlRootGuardError, ValueError) as error:
             raise WorktreePolicyError("隔离工作树必须位于 .auto-pm/worktrees 内") from error
 
     def _branch_name(self, run_id: str) -> str:
@@ -178,6 +208,8 @@ class WorktreePolicyService:
         if result.returncode != 0:
             details = result.stderr.strip() or result.stdout.strip() or "unknown git error"
             raise WorktreePolicyError(f"Git 事实采集失败: {details}")
+        if result.stderr.strip():
+            raise WorktreePolicyError(f"Git 事实采集包含诊断: {result.stderr.strip()}")
         return result.stdout.strip()
 
     def _run_git(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -188,6 +220,7 @@ class WorktreePolicyService:
             encoding="utf-8",
             errors="replace",
             check=False,
+            env=clean_git_environment(),
         )
 
 

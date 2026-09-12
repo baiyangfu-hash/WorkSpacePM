@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +14,17 @@ from auto_pm.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind, WorkState
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 from auto_pm.contracts.pm_facade import PmConfirmationKind
+
+
+def _git_root(root: Path) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), "init"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def _authority(now: datetime) -> AuthorityEnvelope:
@@ -35,6 +47,7 @@ def _authority(now: datetime) -> AuthorityEnvelope:
 
 
 def _setup(root: Path) -> tuple[MissionService, PmFacadeService]:
+    _git_root(root)
     now = datetime.now(UTC)
     works = WorkRegistryService(root)
     works.initialize("test")

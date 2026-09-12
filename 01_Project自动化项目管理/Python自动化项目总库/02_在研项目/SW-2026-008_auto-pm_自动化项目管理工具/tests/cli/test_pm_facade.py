@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -15,7 +16,28 @@ from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope
 
 
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+
+def _repository(root: Path) -> None:
+    _git(root, "init")
+    (root / "README.md").write_text("baseline\n", encoding="utf-8", errors="replace")
+    _git(root, "add", "README.md")
+    _git(
+        root,
+        "-c",
+        "user.name=PM Test",
+        "-c",
+        "user.email=pm@example.invalid",
+        "commit",
+        "-m",
+        "baseline",
+    )
+
+
 def _setup(root: Path) -> None:
+    _repository(root)
     now = datetime.now(UTC)
     authority = AuthorityEnvelope(
         envelope_id="AUTH-PM-CLI-001",
@@ -73,8 +95,14 @@ def test_pm_plan_and_approve_emit_confirmation_cards(cli_runner: CliRunner, tmp_
     approved = cli_runner.invoke(
         cli,
         [
-            "-w", str(tmp_path), "pm", "approve", "--mission-id", "MISSION-PM-CLI-001",
-            "--root-work-id", "WORK-PM-CLI-001",
+            "-w",
+            str(tmp_path),
+            "pm",
+            "approve",
+            "--mission-id",
+            "MISSION-PM-CLI-001",
+            "--root-work-id",
+            "WORK-PM-CLI-001",
         ],
     )
     assert approved.exit_code == 0
@@ -97,8 +125,31 @@ def test_pm_confirm_start_hides_the_root_work_id(cli_runner: CliRunner, tmp_path
     assert json.loads(started.output)["mission_state"] == "ACTIVE"
 
 
-def test_pm_workflow_is_a_display_only_compatibility_alias(cli_runner: CliRunner, tmp_path: Path) -> None:
+def test_pm_workflow_is_a_display_only_compatibility_alias(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
     result = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "workflow"])
 
     assert result.exit_code == 0
     assert "pm-workflow 已退役隔离" in result.output
+
+
+def test_pm_mutation_rejects_linked_worktree_before_runtime_initialization(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _setup(tmp_path)
+    linked = tmp_path.parent / f"{tmp_path.name}-linked"
+    _git(tmp_path, "worktree", "add", "--detach", str(linked), "HEAD")
+
+    result = cli_runner.invoke(
+        cli,
+        ["-w", str(linked), "pm", "plan", "--mission-id", "MISSION-PM-CLI-001"],
+    )
+
+    assert result.exit_code == 1
+    assert "linked worktree" in result.output
+    assert not (linked / ".auto-pm").exists()
+
+    display_only = cli_runner.invoke(cli, ["-w", str(linked), "pm", "workflow"])
+    assert display_only.exit_code == 0
+    assert not (linked / ".auto-pm").exists()

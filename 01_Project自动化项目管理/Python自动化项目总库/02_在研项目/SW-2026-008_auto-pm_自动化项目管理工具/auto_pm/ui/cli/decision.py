@@ -10,6 +10,12 @@ from rich.console import Console
 from rich.table import Table
 
 from auto_pm.app_context import AppContext
+from auto_pm.contracts.decision_package import (
+    RuntimeDecisionAction,
+    RuntimeDecisionCapability,
+    RuntimeDecisionOutcome,
+)
+from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.domain.change.decision_service import (
     DecisionError,
     DecisionService,
@@ -33,7 +39,23 @@ def decision_group() -> None:
 @click.option("--approver", required=True, help="审批人（PM / 架构师）")
 @click.option("--pid", "project_id", default="", help="可选的项目编号")
 @click.option("--file", "approved_files", multiple=True, help="允许修改的文件相对路径，可重复指定")
-@click.option("--condition", "conditions", multiple=True, help="有条件批准的附加条件说明，可重复指定")
+@click.option(
+    "--condition", "conditions", multiple=True, help="有条件批准的附加条件说明，可重复指定"
+)
+@click.option("--decision-id", default="", help="显式 Decision ID；runtime capability 必填")
+@click.option(
+    "--allow-runtime-action",
+    "runtime_actions",
+    multiple=True,
+    type=click.Choice([item.value for item in RuntimeDecisionAction]),
+)
+@click.option("--target-run-id", "target_run_ids", multiple=True)
+@click.option(
+    "--allow-outcome",
+    "runtime_outcomes",
+    multiple=True,
+    type=click.Choice([item.value for item in RuntimeDecisionOutcome]),
+)
 @click.option("--json-output", "as_json", is_flag=True, help="以 JSON 输出")
 @click.pass_context
 def create_decision(
@@ -43,19 +65,39 @@ def create_decision(
     project_id: str,
     approved_files: tuple[str, ...],
     conditions: tuple[str, ...],
+    decision_id: str,
+    runtime_actions: tuple[str, ...],
+    target_run_ids: tuple[str, ...],
+    runtime_outcomes: tuple[str, ...],
     as_json: bool,
 ) -> None:
     """从已批准的变更单创建结构化决策包。"""
-    service = DecisionService(_workspace(ctx))
     try:
+        root = _workspace(ctx)
+        WorktreePolicyService(root).require_control_root()
+        supplied_capability = any((runtime_actions, target_run_ids, runtime_outcomes))
+        runtime_capability = None
+        if supplied_capability:
+            if not all((runtime_actions, target_run_ids, runtime_outcomes)):
+                raise ValueError("runtime capability 的 action、target Run 与 outcome 必须同时提供")
+            runtime_capability = RuntimeDecisionCapability(
+                allowed_runtime_actions=tuple(
+                    RuntimeDecisionAction(item) for item in runtime_actions
+                ),
+                target_run_ids=target_run_ids,
+                allowed_outcomes=tuple(RuntimeDecisionOutcome(item) for item in runtime_outcomes),
+            )
+        service = DecisionService(root)
         dto = service.create_decision(
             change_id=change_id,
             approver=approver,
             project_id=project_id,
             approved_files=list(approved_files) if approved_files else None,
             conditions=list(conditions) if conditions else None,
+            decision_id=decision_id,
+            runtime_capability=runtime_capability,
         )
-    except DecisionError as e:
+    except (DecisionError, WorktreePolicyError, ValueError) as e:
         console.print(f"[red]错误: {e}[/red]")
         ctx.exit(1)
 
@@ -66,7 +108,9 @@ def create_decision(
         console.print(f"  [cyan]关联变更单:[/cyan] {dto.change_id}")
         console.print(f"  [cyan]审批结论:[/cyan] {dto.decision_conclusion}")
         console.print(f"  [cyan]批准范围:[/cyan] {dto.approved_scope}")
-        console.print(f"  [cyan]批准文件清单:[/cyan] {', '.join(dto.approved_files) or '无特异性限定'}")
+        console.print(
+            f"  [cyan]批准文件清单:[/cyan] {', '.join(dto.approved_files) or '无特异性限定'}"
+        )
 
 
 @decision_group.command(name="show")
@@ -112,7 +156,11 @@ def list_decisions(
 ) -> None:
     """列出工作空间内的所有决策包。"""
     service = DecisionService(_workspace(ctx))
-    dtos = service.list_decisions(project_id=project_id, change_id=change_id)
+    try:
+        dtos = service.list_decisions(project_id=project_id, change_id=change_id)
+    except DecisionError as e:
+        console.print(f"[red]错误: {e}[/red]")
+        ctx.exit(1)
     if not dtos:
         console.print("[dim]未找到匹配的决策包[/dim]")
         return
@@ -136,4 +184,3 @@ def list_decisions(
         )
 
     console.print(table)
-

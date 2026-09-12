@@ -5,11 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import subprocess
+import sys
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.core.continuity_execution_service import (
+    ContinuityExecutionError,
+    ContinuityExecutionService,
+)
 from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
 from auto_pm.core.mission_service import MissionService
 from auto_pm.core.pm_session_projection_service import (
@@ -18,11 +24,44 @@ from auto_pm.core.pm_session_projection_service import (
 )
 from auto_pm.core.work_registry_service import WorkRegistryService
 
-from auto_pm.contracts.continuity import WorkKind
+import auto_pm.infrastructure.continuity_store as continuity_store_module
+from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.decision_package import (
+    RUNTIME_CAPABILITY_KEY,
+    DecisionPackageDTO,
+    RuntimeDecisionAction,
+    RuntimeDecisionCapability,
+    RuntimeDecisionOutcome,
+)
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
+from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
 def _workspace(root: Path) -> Path:
+    subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True)
+    (root / "README.md").write_text("baseline\n", encoding="utf-8", errors="replace")
+    (root / ".gitignore").write_text(".auto-pm/\n", encoding="utf-8", errors="replace")
+    subprocess.run(
+        ["git", "-C", str(root), "add", "README.md", ".gitignore"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Resume Test",
+            "-c",
+            "user.email=resume@example.invalid",
+            "commit",
+            "-m",
+            "baseline",
+        ],
+        check=True,
+        capture_output=True,
+    )
     project = root / "SW-2026-008"
     project.mkdir()
     (project / ".copier-answers.yml").write_text(
@@ -49,6 +88,17 @@ def _workspace(root: Path) -> Path:
     return project
 
 
+def _git_head(root: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
+
+
 def _work(root: Path, work_id: str) -> None:
     service = WorkRegistryService(root, now=lambda: "2026-09-09T12:00:00+00:00")
     service.initialize("test")
@@ -65,9 +115,41 @@ def _work(root: Path, work_id: str) -> None:
     )
 
 
+def _authorized_target_work(root: Path, work_id: str) -> None:
+    service = WorkRegistryService(root, now=lambda: "2026-09-09T12:00:00+00:00")
+    service.initialize("test")
+    decision_id = "DEC-20260909-A2TARGT1"
+    decision = DecisionPackageDTO(
+        decision_id=decision_id,
+        project_id="SW-2026-008",
+        change_id="CHG-SCPT-2026-213",
+        approved_scope="MODULE",
+        approved_files=["auto_pm/a.py"],
+        approver="fubai",
+        approved_at="2026-09-09T12:00:00+00:00",
+    )
+    path = root / ".auto-pm" / "decisions" / f"{decision_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(json.dumps(decision.to_dict(), ensure_ascii=False, indent=2).encode("utf-8"))
+    service.create_work(
+        work_id=work_id,
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.GOVERNANCE,
+        title=work_id,
+        owner="architect",
+        scope_paths=["auto_pm/a.py"],
+        source_fingerprint="sha256:abc",
+        idempotency_key=f"create-{work_id}",
+    )
+    service.authorize(work_id, decision_id, f"authorize-{work_id}")
+
+
 def _run(root: Path) -> None:
+    now = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
     execution = ContinuityExecutionService(
-        root, now=lambda: datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
+        root,
+        store=ContinuityStore(root, _clock=lambda: now),
+        now=lambda: now,
     )
     execution.start_run(
         run_id="RUN-001",
@@ -77,8 +159,8 @@ def _run(root: Path) -> None:
         owned_paths=["auto_pm/a.py"],
         declared_dirty_paths=[],
         observed_dirty_paths=[],
-        git_head="a" * 40,
-        worktree_path="C:/workspace",
+        git_head=_git_head(root),
+        worktree_path=str(root),
         lease_token="lease-secret",
         lease_seconds=900,
         idempotency_key="create-run",
@@ -176,7 +258,7 @@ def test_multiple_active_missions_fail_closed_without_guessing(tmp_path: Path) -
     _workspace(tmp_path)
     _mission(tmp_path, "MISSION-001")
     db_path = tmp_path / ".auto-pm" / "continuity.db"
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute("DROP INDEX idx_one_open_mission_per_project")
         conn.execute(
             """INSERT INTO mission_items
@@ -184,9 +266,6 @@ def test_multiple_active_missions_fail_closed_without_guessing(tmp_path: Path) -
                    acceptance_criteria_json, authority_json, version, created_by, created_at, updated_at
             FROM mission_items WHERE mission_id='MISSION-001'"""
         )
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-
     result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
 
     assert result.mission is None
@@ -194,7 +273,16 @@ def test_multiple_active_missions_fail_closed_without_guessing(tmp_path: Path) -
     assert result.next_legal_action == ""
 
 
-def test_expired_lease_is_historical_and_allows_a_replacement_run(tmp_path: Path) -> None:
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "OPEN-R4: resume must surface an expired nonterminal Run and governed "
+        "forward-settlement action"
+    ),
+)
+def test_resume_must_not_recommend_replacement_for_expired_nonterminal_run(
+    tmp_path: Path,
+) -> None:
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     _run(tmp_path)
@@ -203,12 +291,13 @@ def test_expired_lease_is_historical_and_allows_a_replacement_run(tmp_path: Path
         tmp_path, now=lambda: datetime(2026, 9, 9, 12, 16, tzinfo=UTC)
     ).collect(project_id="SW-2026-008")
 
-    assert result.run is None
-    assert "LEASE_EXPIRED" not in result.conflicts
-    assert result.next_legal_action == "CREATE_RUN"
+    assert result.run is not None
+    assert result.run.run_id == "RUN-001"
+    assert "LEASE_EXPIRED" in result.conflicts
+    assert result.next_legal_action != "CREATE_RUN"
 
 
-def test_resume_ignores_expired_run_when_one_active_run_exists(tmp_path: Path) -> None:
+def test_expired_nonterminal_run_blocks_replacement(tmp_path: Path) -> None:
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     _run(tmp_path)
@@ -216,27 +305,154 @@ def test_resume_ignores_expired_run_when_one_active_run_exists(tmp_path: Path) -
     replacement = ContinuityExecutionService(
         tmp_path, now=lambda: datetime(2026, 9, 9, 12, 16, tzinfo=UTC)
     )
-    replacement.start_run(
-        run_id="RUN-002",
-        work_id="WORK-001",
+    with pytest.raises(ContinuityExecutionError, match="非终态 Run"):
+        replacement.start_run(
+            run_id="RUN-002",
+            work_id="WORK-001",
+            executor_id="agent-b",
+            adapter="codex",
+            owned_paths=["auto_pm/a.py"],
+            declared_dirty_paths=[],
+            observed_dirty_paths=[],
+            git_head=_git_head(tmp_path),
+            worktree_path=str(tmp_path),
+            lease_token="replacement-secret",
+            lease_seconds=900,
+            idempotency_key="create-replacement-run",
+        )
+    assert len(replacement._store.list_runs("WORK-001")) == 1
+
+
+def test_resume_uses_recovery_run_after_expired_target_is_settled(tmp_path: Path) -> None:
+    project = _workspace(tmp_path)
+    _authorized_target_work(tmp_path, "WORK-001")
+    _run(tmp_path)
+    change_path = (
+        project / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT" / "CHG-SCPT-2026-214.md"
+    )
+    change_path.parent.mkdir(parents=True, exist_ok=True)
+    change_path.write_text(
+        """# CHG-SCPT-2026-214
+## 3. 变更基本信息
+### 3.0 编号与项目
+| 变更编号 | CHG-SCPT-2026-214 |
+| 项目编号 | SW-2026-008 |
+### 3.3 影响范围
+| 影响范围 | MODULE |
+### 3.4 申请信息
+| 变更状态 | approved |
+""",
+        encoding="utf-8",
+    )
+    decision_id = "DEC-20260911-5C37A985"
+    decision = DecisionPackageDTO(
+        decision_id=decision_id,
+        project_id="SW-2026-008",
+        change_id="CHG-SCPT-2026-214",
+        approved_scope="MODULE",
+        approved_files=["auto_pm/a.py", ".auto-pm/continuity.db"],
+        approver="fubai",
+        approved_at="2026-09-09T12:16:00+00:00",
+        metadata={
+            RUNTIME_CAPABILITY_KEY: RuntimeDecisionCapability(
+                allowed_runtime_actions=(RuntimeDecisionAction.SETTLE_EXPIRED_RUN,),
+                target_run_ids=("RUN-001",),
+                allowed_outcomes=(RuntimeDecisionOutcome.CANCELLED,),
+            )
+        },
+    )
+    decision_path = tmp_path / ".auto-pm" / "decisions" / f"{decision_id}.json"
+    decision_path.parent.mkdir(parents=True, exist_ok=True)
+    decision_path.write_bytes(
+        json.dumps(decision.to_dict(), ensure_ascii=False, indent=2).encode("utf-8")
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "add",
+            "-f",
+            "--",
+            ".auto-pm/decisions/DEC-20260909-A2TARGT1.json",
+            f".auto-pm/decisions/{decision_id}.json",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Resume Test",
+            "-c",
+            "user.email=resume@example.invalid",
+            "commit",
+            "-m",
+            "bind runtime decisions",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    works = WorkRegistryService(tmp_path, now=lambda: "2026-09-09T12:16:00+00:00")
+    works.create_work(
+        work_id="WORK-RECOVERY",
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.GOVERNANCE,
+        title="Recovery",
+        owner="agent-b",
+        scope_paths=["auto_pm/a.py", ".auto-pm/continuity.db"],
+        source_fingerprint="sha256:recovery",
+        idempotency_key="create-recovery-work",
+    )
+    works.authorize("WORK-RECOVERY", decision_id, "authorize-recovery-work")
+    works.transition("WORK-RECOVERY", WorkState.IN_PROGRESS, "start-recovery-work")
+    now = datetime(2026, 9, 9, 12, 16, tzinfo=UTC)
+    execution = ContinuityExecutionService(
+        tmp_path,
+        store=ContinuityStore(tmp_path, _clock=lambda: now),
+        now=lambda: now,
+    )
+    execution.start_run(
+        run_id="RUN-RECOVERY",
+        work_id="WORK-RECOVERY",
         executor_id="agent-b",
         adapter="codex",
-        owned_paths=["auto_pm/a.py"],
+        owned_paths=["auto_pm/a.py", ".auto-pm/continuity.db"],
         declared_dirty_paths=[],
         observed_dirty_paths=[],
-        git_head="b" * 40,
-        worktree_path="C:/workspace",
-        lease_token="replacement-secret",
+        git_head=_git_head(tmp_path),
+        worktree_path=str(tmp_path),
+        lease_token="recovery-secret",
         lease_seconds=900,
-        idempotency_key="create-replacement-run",
+        idempotency_key="create-recovery-run",
+    )
+    execution.settle_expired_run(
+        target_run_id="RUN-001",
+        recovery_run_id="RUN-RECOVERY",
+        recovery_owner_id="agent-b",
+        recovery_lease_token="recovery-secret",
+        decision_id=decision_id,
+        outcome=RunState.CANCELLED,
+        reason="Close the historical expired Run forward.",
+        idempotency_key="settle-expired-run",
     )
 
-    result = ContinuityResumeService(
-        tmp_path, now=lambda: datetime(2026, 9, 9, 12, 16, tzinfo=UTC)
-    ).collect(project_id="SW-2026-008")
+    result = ContinuityResumeService(tmp_path, now=lambda: now).collect(
+        project_id="SW-2026-008", work_id="WORK-RECOVERY"
+    )
 
-    assert result.run and result.run.run_id == "RUN-002"
-    assert result.conflicts == ()
+    assert result.run and result.run.run_id == "RUN-RECOVERY"
+    assert result.lease and result.lease.owner_id == "agent-b"
+    assert "lease_token" not in result.lease.model_dump(mode="json")
+    assert result.next_legal_action == "CONTINUE_RUN"
+    assert execution._store.list_runs("WORK-001") == ()
+    target_history = execution._store.list_runs("WORK-001", include_terminal=True)
+    assert target_history[0].state is RunState.CANCELLED
+    ambiguous = ContinuityResumeService(tmp_path, now=lambda: now).collect(project_id="SW-2026-008")
+    assert ambiguous.conflicts == ("MULTIPLE_ACTIVE_WORKS",)
 
 
 def test_multiple_active_works_fail_closed_without_guessing(tmp_path: Path) -> None:
@@ -256,9 +472,7 @@ def test_explicit_work_disambiguates_but_cross_project_fails(tmp_path: Path) -> 
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     _work(tmp_path, "WORK-002")
-    result = ContinuityResumeService(tmp_path).collect(
-        project_id="SW-2026-008", work_id="WORK-002"
-    )
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008", work_id="WORK-002")
     assert result.work and result.work.work_id == "WORK-002"
 
     service = WorkRegistryService(tmp_path, now=lambda: "2026-09-09T12:00:00+00:00")
@@ -274,9 +488,7 @@ def test_explicit_work_disambiguates_but_cross_project_fails(tmp_path: Path) -> 
         read_only=True,
     )
     with pytest.raises(ContinuityResumeError, match="subject project"):
-        ContinuityResumeService(tmp_path).collect(
-            project_id="SW-2026-008", work_id="WORK-OTHER"
-        )
+        ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008", work_id="WORK-OTHER")
 
 
 def test_corrupt_continuity_store_fails_closed(tmp_path: Path) -> None:
@@ -293,10 +505,8 @@ def test_future_continuity_schema_fails_closed_on_resume(tmp_path: Path) -> None
     _workspace(tmp_path)
     _mission(tmp_path)
     db_path = tmp_path / ".auto-pm" / "continuity.db"
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute("UPDATE schema_meta SET schema_version='continuity-store.v999'")
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     with pytest.raises(ContinuityResumeError, match="未知或未来"):
         ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
@@ -305,7 +515,12 @@ def test_future_continuity_schema_fails_closed_on_resume(tmp_path: Path) -> None
 def _store_snapshot(db_path: Path) -> tuple[tuple[str, ...], dict[str, tuple[int, int, str]]]:
     tracked = tuple(
         path
-        for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm"))
+        for path in (
+            db_path,
+            Path(f"{db_path}-wal"),
+            Path(f"{db_path}-shm"),
+            Path(f"{db_path}-journal"),
+        )
         if path.exists()
     )
     entries = tuple(sorted(path.name for path in db_path.parent.iterdir()))
@@ -327,49 +542,123 @@ def test_resume_succeeds_without_unmerged_wal_and_preserves_empty_sidecars(
     _work(tmp_path, "WORK-001")
     _run(tmp_path)
     db_path = tmp_path / ".auto-pm" / "continuity.db"
-    keeper = sqlite3.connect(db_path)
-    try:
-        keeper.execute("SELECT COUNT(*) FROM work_items").fetchone()
-        wal_path = Path(f"{db_path}-wal")
-        shm_path = Path(f"{db_path}-shm")
-        assert wal_path.is_file() and wal_path.stat().st_size == 0
-        assert shm_path.is_file()
-        before = _store_snapshot(db_path)
+    wal_path = Path(f"{db_path}-wal")
+    shm_path = Path(f"{db_path}-shm")
+    wal_path.touch()
+    shm_path.touch()
+    before = _store_snapshot(db_path)
 
-        result = ContinuityResumeService(
-            tmp_path, now=lambda: datetime(2026, 9, 9, 12, 1, tzinfo=UTC)
-        ).collect(project_id="SW-2026-008")
+    result = ContinuityResumeService(
+        tmp_path, now=lambda: datetime(2026, 9, 9, 12, 1, tzinfo=UTC)
+    ).collect(project_id="SW-2026-008")
 
-        assert result.run and result.run.run_id == "RUN-001"
-        assert _store_snapshot(db_path) == before
-    finally:
-        keeper.close()
+    assert result.run and result.run.run_id == "RUN-001"
+    assert _store_snapshot(db_path) == before
 
 
-def test_resume_fails_closed_on_nonempty_wal_without_mutating_store(tmp_path: Path) -> None:
+def test_resume_reads_latest_committed_wal_without_mutating_source(tmp_path: Path) -> None:
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     db_path = tmp_path / ".auto-pm" / "continuity.db"
-    writer = sqlite3.connect(db_path)
-    try:
-        writer.execute("PRAGMA journal_mode=WAL")
-        writer.execute("PRAGMA wal_autocheckpoint=0")
-        writer.execute(
-            "UPDATE work_items SET title=? WHERE work_id=?", ("WAL pending", "WORK-001")
+    script = (
+        "import os, sqlite3, sys; "
+        "conn=sqlite3.connect(sys.argv[1]); "
+        "conn.execute('PRAGMA journal_mode=WAL'); "
+        "conn.execute('PRAGMA wal_autocheckpoint=0'); "
+        "conn.execute(\"UPDATE work_items SET title='WAL committed' "
+        "WHERE work_id='WORK-001'\"); "
+        "conn.commit(); os._exit(0)"
+    )
+    subprocess.run([sys.executable, "-c", script, str(db_path)], check=True)
+    wal_path = Path(f"{db_path}-wal")
+    assert wal_path.is_file() and wal_path.stat().st_size > 0
+    before = _store_snapshot(db_path)
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.work is not None
+    assert result.work.title == "WAL committed"
+    assert _store_snapshot(db_path) == before
+
+
+def test_strict_read_rejects_hot_rollback_journal_without_mutating_source(
+    tmp_path: Path,
+) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    journal = Path(f"{db_path}-journal")
+    journal.write_bytes(b"hot rollback journal sentinel")
+    before = _store_snapshot(db_path)
+
+    with pytest.raises(ContinuityStoreError, match="rollback journal"):
+        ContinuityStore(tmp_path).get_work("WORK-001")
+
+    assert _store_snapshot(db_path) == before
+
+
+def test_strict_read_retries_drift_then_fails_busy_without_temp_residue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    store = ContinuityStore(tmp_path)
+    snapshot_parent = tmp_path.parent / f"{tmp_path.name}-snapshot-temp"
+    snapshot_parent.mkdir()
+    original_inventory = ContinuityStore._source_inventory.__func__
+    calls = 0
+
+    def drifting_inventory(cls, db_path):
+        nonlocal calls
+        calls += 1
+        inventory = original_inventory(cls, db_path)
+        if calls % 3 != 0:
+            return inventory
+        database = inventory[0]
+        drifted_database = (
+            database[0],
+            database[1],
+            database[2] + 1,
+            database[3],
+            database[4],
+            database[5],
         )
-        writer.commit()
-        wal_path = Path(f"{db_path}-wal")
-        shm_path = Path(f"{db_path}-shm")
-        assert wal_path.is_file() and wal_path.stat().st_size > 0
-        assert shm_path.is_file()
-        before = _store_snapshot(db_path)
+        return (drifted_database, *inventory[1:])
 
-        with pytest.raises(ContinuityResumeError, match="未合并 WAL"):
-            ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+    monkeypatch.setattr(
+        continuity_store_module.tempfile,
+        "tempdir",
+        str(snapshot_parent),
+    )
+    monkeypatch.setattr(
+        ContinuityStore,
+        "_source_inventory",
+        classmethod(drifting_inventory),
+    )
 
-        assert _store_snapshot(db_path) == before
-    finally:
-        writer.close()
+    with pytest.raises(ContinuityStoreError, match="BUSY"):
+        store.get_work("WORK-001")
+    assert list(snapshot_parent.iterdir()) == []
+
+
+def test_strict_read_rejects_temp_root_inside_workspace_before_creating_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    in_workspace_temp = tmp_path / "caller-temp"
+    in_workspace_temp.mkdir()
+    monkeypatch.setattr(
+        continuity_store_module.tempfile,
+        "tempdir",
+        str(in_workspace_temp),
+    )
+
+    with pytest.raises(ContinuityStoreError, match="workspace 外"):
+        ContinuityStore(tmp_path).get_work("WORK-001")
+    assert list(in_workspace_temp.iterdir()) == []
 
 
 def test_pm_session_projection_contains_no_execution_queue(tmp_path: Path) -> None:

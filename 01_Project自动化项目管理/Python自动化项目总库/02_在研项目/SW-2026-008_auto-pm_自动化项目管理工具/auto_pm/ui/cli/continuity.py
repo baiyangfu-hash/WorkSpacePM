@@ -29,6 +29,13 @@ from auto_pm.core.mission_orchestrator import (
 )
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
+from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
+from auto_pm.infrastructure.control_root_guard import (
+    ControlRootGuardError,
+    authority_path_parts,
+    clean_git_environment,
+    require_governed_worktree,
+)
 
 
 def _workspace(ctx: click.Context) -> Path:
@@ -36,31 +43,51 @@ def _workspace(ctx: click.Context) -> Path:
     return Path(app_ctx.workspace_root).resolve()
 
 
+def _require_mutation_root(ctx: click.Context) -> None:
+    try:
+        WorktreePolicyService(_workspace(ctx)).require_control_root()
+    except WorktreePolicyError as error:
+        raise click.ClickException(str(error)) from error
+
+
+def _governed_worktree(ctx: click.Context, path: Path) -> Path:
+    try:
+        return require_governed_worktree(_workspace(ctx), path)
+    except ControlRootGuardError as error:
+        raise click.ClickException(str(error)) from error
+
+
 def _work_service(ctx: click.Context) -> WorkRegistryService:
+    _require_mutation_root(ctx)
     service = WorkRegistryService(_workspace(ctx))
     service.initialize(__version__)
     return service
 
 
 def _execution_service(ctx: click.Context) -> ContinuityExecutionService:
+    _require_mutation_root(ctx)
     root = _workspace(ctx)
     WorkRegistryService(root).initialize(__version__)
     return ContinuityExecutionService(root)
 
 
 def _dispatch_service(ctx: click.Context) -> ExecutionDispatchService:
+    _require_mutation_root(ctx)
     root = _workspace(ctx)
     WorkRegistryService(root).initialize(__version__)
     return ExecutionDispatchService(root)
 
 
-def _mission_service(ctx: click.Context) -> MissionService:
+def _mission_service(ctx: click.Context, *, mutating: bool) -> MissionService:
     service = MissionService(_workspace(ctx))
-    service.initialize(__version__)
+    if mutating:
+        _require_mutation_root(ctx)
+        service.initialize(__version__)
     return service
 
 
 def _orchestrator(ctx: click.Context) -> MissionOrchestrator:
+    _require_mutation_root(ctx)
     service = MissionOrchestrator(_workspace(ctx))
     service.initialize(__version__)
     return service
@@ -75,10 +102,14 @@ def _git(root: Path, *args: str) -> bytes:
         ["git", "-C", str(root), *args],
         capture_output=True,
         check=False,
+        env=clean_git_environment(),
     )
     if result.returncode != 0:
         message = result.stderr.decode("utf-8", errors="replace").strip()
         raise click.ClickException(f"Git 事实采集失败: {message or 'unknown error'}")
+    diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+    if diagnostic:
+        raise click.ClickException(f"Git 事实采集包含诊断: {diagnostic}")
     return result.stdout
 
 
@@ -100,7 +131,11 @@ def _within(paths: tuple[str, ...], roots: tuple[str, ...]) -> list[str]:
     return [
         path
         for path in paths
-        if any(path == root or path.startswith(f"{root.rstrip('/')}/") for root in roots)
+        if any(
+            authority_path_parts(path)[: len(authority_path_parts(root))]
+            == authority_path_parts(root)
+            for root in roots
+        )
     ]
 
 
@@ -138,7 +173,7 @@ def create_mission(
     """Create a DRAFT Mission from an explicit, validated authority envelope."""
     try:
         authority = AuthorityEnvelope.model_validate(json.loads(authority_json))
-        item = _mission_service(ctx).create(
+        item = _mission_service(ctx, mutating=True).create(
             mission_id=mission_id,
             subject_project_id=project_id,
             title=title,
@@ -159,7 +194,7 @@ def create_mission(
 def show_mission(ctx: click.Context, mission_id: str) -> None:
     """Read one persisted Mission without changing it."""
     try:
-        item = _mission_service(ctx).get(mission_id)
+        item = _mission_service(ctx, mutating=False).get(mission_id)
     except MissionServiceError as error:
         raise click.ClickException(str(error)) from error
     _emit(item)
@@ -167,7 +202,9 @@ def show_mission(ctx: click.Context, mission_id: str) -> None:
 
 @mission_group.command(name="transition")
 @click.option("--mission-id", required=True)
-@click.option("--to", "new_state", type=click.Choice([item.value for item in MissionState]), required=True)
+@click.option(
+    "--to", "new_state", type=click.Choice([item.value for item in MissionState]), required=True
+)
 @click.option("--expected-version", type=click.IntRange(1), required=True)
 @click.option("--root-work", "root_work_id")
 @click.option("--idempotency-key", required=True)
@@ -182,7 +219,7 @@ def transition_mission(
 ) -> None:
     """Apply one legal Mission transition using optimistic locking."""
     try:
-        item = _mission_service(ctx).transition(
+        item = _mission_service(ctx, mutating=True).transition(
             mission_id=mission_id,
             expected_version=expected_version,
             new_state=MissionState(new_state),
@@ -224,6 +261,7 @@ def create_work(
 ) -> None:
     """Create one logical Work item; write Work remains PLANNED until authorized."""
     try:
+        _require_mutation_root(ctx)
         if not source_fingerprint:
             source_fingerprint = f"git:{_git_snapshot(_workspace(ctx))[0]}"
         item = _work_service(ctx).create_work(
@@ -247,7 +285,9 @@ def create_work(
 @click.option("--decision-id", required=True)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
-def authorize_work(ctx: click.Context, work_id: str, decision_id: str, idempotency_key: str) -> None:
+def authorize_work(
+    ctx: click.Context, work_id: str, decision_id: str, idempotency_key: str
+) -> None:
     """Authorize PLANNED Work with a matching Decision package."""
     try:
         item = _work_service(ctx).authorize(work_id, decision_id, idempotency_key)
@@ -258,7 +298,9 @@ def authorize_work(ctx: click.Context, work_id: str, decision_id: str, idempoten
 
 @work_group.command(name="transition")
 @click.option("--work-id", required=True)
-@click.option("--to", "new_state", type=click.Choice([item.value for item in WorkState]), required=True)
+@click.option(
+    "--to", "new_state", type=click.Choice([item.value for item in WorkState]), required=True
+)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def transition_work(ctx: click.Context, work_id: str, new_state: str, idempotency_key: str) -> None:
@@ -390,7 +432,9 @@ def run_group() -> None:
 @click.option("--adapter", required=True)
 @click.option("--owned", "owned_paths", multiple=True, required=True)
 @click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
-@click.option("--worktree", type=click.Path(exists=True, file_okay=False, path_type=Path), default=None)
+@click.option(
+    "--worktree", type=click.Path(exists=True, file_okay=False, path_type=Path), default=None
+)
 @click.option("--lease-token", required=True)
 @click.option("--lease-seconds", type=click.IntRange(60, 86_400), default=1800, show_default=True)
 @click.option("--idempotency-key", required=True)
@@ -409,9 +453,30 @@ def start_run(
     idempotency_key: str,
 ) -> None:
     """Start a Run after independently observing Git HEAD and owned-path dirtiness."""
-    root = (worktree or _workspace(ctx)).resolve()
-    git_head, all_dirty = _git_snapshot(root)
+    _require_mutation_root(ctx)
     owned = tuple(path.replace("\\", "/") for path in owned_paths)
+    declared = tuple(path.replace("\\", "/") for path in declared_dirty_paths)
+    requested_worktree = worktree or _workspace(ctx)
+    try:
+        replay = ContinuityExecutionService(_workspace(ctx)).replay_run_start(
+            run_id=run_id,
+            work_id=work_id,
+            executor_id=executor_id,
+            adapter=adapter,
+            owned_paths=list(owned),
+            declared_dirty_paths=list(declared),
+            worktree_path=str(requested_worktree),
+            lease_token=lease_token,
+            lease_seconds=lease_seconds,
+            idempotency_key=idempotency_key,
+        )
+    except ContinuityExecutionError as error:
+        raise click.ClickException(str(error)) from error
+    if replay is not None:
+        _emit(replay)
+        return
+    root = _governed_worktree(ctx, requested_worktree)
+    git_head, all_dirty = _git_snapshot(root)
     observed = _within(all_dirty, owned)
     try:
         item = _execution_service(ctx).start_run(
@@ -420,7 +485,7 @@ def start_run(
             executor_id=executor_id,
             adapter=adapter,
             owned_paths=list(owned),
-            declared_dirty_paths=list(declared_dirty_paths),
+            declared_dirty_paths=list(declared),
             observed_dirty_paths=observed,
             git_head=git_head,
             worktree_path=str(root),
@@ -435,7 +500,9 @@ def start_run(
 
 @run_group.command(name="transition")
 @click.option("--run-id", required=True)
-@click.option("--to", "new_state", type=click.Choice([item.value for item in RunState]), required=True)
+@click.option(
+    "--to", "new_state", type=click.Choice([item.value for item in RunState]), required=True
+)
 @click.option("--owner", "owner_id", required=True)
 @click.option("--lease-token", required=True)
 @click.option("--idempotency-key", required=True)
@@ -452,6 +519,49 @@ def transition_run(
     try:
         item = _execution_service(ctx).transition_run(
             run_id, RunState(new_state), owner_id, lease_token, idempotency_key
+        )
+    except ContinuityExecutionError as error:
+        raise click.ClickException(str(error)) from error
+    _emit(item)
+
+
+@run_group.command(name="settle-expired")
+@click.option("--target-run-id", required=True)
+@click.option("--recovery-run-id", required=True)
+@click.option("--recovery-owner", "recovery_owner_id", required=True)
+@click.option("--recovery-lease-token", required=True)
+@click.option("--decision-id", required=True)
+@click.option(
+    "--outcome",
+    type=click.Choice([RunState.CANCELLED.value]),
+    required=True,
+)
+@click.option("--reason", required=True)
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def settle_expired_run(
+    ctx: click.Context,
+    target_run_id: str,
+    recovery_run_id: str,
+    recovery_owner_id: str,
+    recovery_lease_token: str,
+    decision_id: str,
+    outcome: str,
+    reason: str,
+    idempotency_key: str,
+) -> None:
+    """Settle one abandoned Run through an explicit live recovery authority."""
+
+    try:
+        item = _execution_service(ctx).settle_expired_run(
+            target_run_id=target_run_id,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            outcome=RunState(outcome),
+            reason=reason,
+            idempotency_key=idempotency_key,
         )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
@@ -495,7 +605,7 @@ def prepare_dispatch(
     """Allocate a local Run and emit only a desensitized PREPARED receipt."""
 
     try:
-        mission = _mission_service(ctx).get(mission_id)
+        mission = _mission_service(ctx, mutating=False).get(mission_id)
         result = _dispatch_service(ctx).prepare(
             mission=mission,
             work_id=work_id,
@@ -571,7 +681,8 @@ def create_checkpoint(
     service = _execution_service(ctx)
     try:
         run = service.get_run(run_id)
-        git_head, all_dirty = _git_snapshot(Path(run.worktree_path))
+        run_worktree = _governed_worktree(ctx, Path(run.worktree_path))
+        git_head, all_dirty = _git_snapshot(run_worktree)
         item = service.checkpoint(
             checkpoint_id=checkpoint_id,
             run_id=run_id,

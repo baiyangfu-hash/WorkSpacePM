@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -15,6 +17,33 @@ from auto_pm.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 from auto_pm.contracts.pm_cockpit import CockpitUserAction
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def _git_root(root: Path) -> None:
+    _git(root, "init")
+    (root / "README.md").write_text("baseline\n", encoding="utf-8", errors="replace")
+    _git(root, "add", "README.md")
+    _git(
+        root,
+        "-c",
+        "user.name=Cockpit Test",
+        "-c",
+        "user.email=cockpit@example.invalid",
+        "commit",
+        "-m",
+        "baseline",
+    )
 
 
 def _registry(root: Path) -> None:
@@ -59,11 +88,12 @@ def _authority(now: datetime) -> AuthorityEnvelope:
 
 def _flush_continuity_wal(root: Path) -> None:
     db_path = root / ".auto-pm" / "continuity.db"
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection, connection:
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
 
 def _seed_authorized_mission(root: Path) -> None:
+    _git_root(root)
     now = datetime.now(UTC)
     works = WorkRegistryService(root)
     works.initialize("test")
@@ -100,6 +130,7 @@ def _seed_authorized_mission(root: Path) -> None:
         idempotency_key="await-approval",
     )
     execution = ContinuityExecutionService(root)
+    git_head = _git(root, "rev-parse", "HEAD").stdout.strip()
     run = execution.start_run(
         run_id="RUN-COCKPIT-001",
         work_id="WORK-COCKPIT-001",
@@ -108,7 +139,7 @@ def _seed_authorized_mission(root: Path) -> None:
         owned_paths=["auto_pm/core/pm_cockpit_service.py"],
         declared_dirty_paths=[],
         observed_dirty_paths=[],
-        git_head="a" * 40,
+        git_head=git_head,
         worktree_path=str(root),
         lease_token="must-not-leak",
         lease_seconds=900,
@@ -120,7 +151,7 @@ def _seed_authorized_mission(root: Path) -> None:
         owner_id="Codex fullstack-engineer",
         lease_token="must-not-leak",
         summary="已建立只读证据投影。",
-        git_head="a" * 40,
+        git_head=git_head,
         dirty_paths=[],
         evidence=["pytest: focused pass"],
         idempotency_key="checkpoint",
@@ -159,3 +190,37 @@ def test_cockpit_reads_evidence_without_lease_or_write_side_effects(tmp_path: Pa
     assert "must-not-leak" not in rendered
     assert "lease" not in rendered
     assert db_path.read_bytes() == baseline
+
+
+def test_cockpit_snapshot_reads_linked_worktree_without_side_effects(tmp_path: Path) -> None:
+    _registry(tmp_path)
+    _seed_authorized_mission(tmp_path)
+    _git(tmp_path, "add", ".")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=Cockpit Test",
+        "-c",
+        "user.email=cockpit@example.invalid",
+        "commit",
+        "-m",
+        "cockpit snapshot",
+    )
+    linked = tmp_path.parent / f"{tmp_path.name}-cockpit-linked"
+    _git(tmp_path, "worktree", "add", "--detach", str(linked), "HEAD")
+    before = {
+        path.relative_to(linked).as_posix(): path.read_bytes()
+        for path in linked.rglob("*")
+        if path.is_file() and path.name != ".git"
+    }
+
+    snapshot = PmCockpitService(linked).snapshot()
+
+    after = {
+        path.relative_to(linked).as_posix(): path.read_bytes()
+        for path in linked.rglob("*")
+        if path.is_file() and path.name != ".git"
+    }
+    assert snapshot.projects[0].project_id == "SW-2026-008"
+    assert after == before
+    assert not _git(linked, "status", "--porcelain").stdout.strip()

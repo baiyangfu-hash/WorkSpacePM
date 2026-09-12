@@ -22,6 +22,7 @@ from auto_pm.contracts.mission import (
     InternalRoutingPolicy,
     MissionState,
 )
+from auto_pm.infrastructure.continuity_store import ContinuityStore
 
 PROJECT_ID = "SW-TEST-001"
 PROJECT_PATH = f"{PROJECT_ID}/README.md"
@@ -311,3 +312,28 @@ def test_dispatch_rejects_unapproved_adapter_and_implicit_parallel_run(tmp_path:
             stack="python",
             force_isolation=True,
         )
+
+
+def test_dispatch_from_linked_worktree_fails_before_any_mutation(tmp_path: Path) -> None:
+    missions, _, _ = _ready(tmp_path)
+    linked = tmp_path.parent / f"{tmp_path.name}-dispatch-linked"
+    _git(tmp_path, "worktree", "add", "--detach", str(linked), "HEAD")
+    shared_store = ContinuityStore(tmp_path)
+    dispatch = ExecutionDispatchService(linked, store=shared_store)
+
+    with pytest.raises(ExecutionDispatchError, match="linked worktree"):
+        dispatch.prepare(
+            mission=missions.get("MISSION-A5-001"),
+            work_id="WORK-A5-001",
+            run_id="RUN-A5-LINKED-REJECT",
+            adapter=ExecutionAdapterKind.CODEX,
+            executor_id="agent-linked",
+            lease_token="linked-secret",
+            lease_seconds=900,
+            idempotency_key="dispatch-linked-reject",
+            stack="python",
+            force_isolation=True,
+        )
+
+    assert not (linked / ".auto-pm").exists()
+    assert shared_store.list_runs("WORK-A5-001", include_terminal=True) == ()

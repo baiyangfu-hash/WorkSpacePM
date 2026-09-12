@@ -31,6 +31,7 @@ def mock_decision(tmp_path: Path) -> DecisionPackageDTO:
         decision_conclusion="approved",
     )
     dec_file = service.decisions_dir / f"{dto.decision_id}.json"
+    dec_file.parent.mkdir(parents=True, exist_ok=True)
     dec_file.write_text(
         json.dumps(dto.to_dict(), ensure_ascii=False),
         encoding="utf-8",
@@ -39,7 +40,9 @@ def mock_decision(tmp_path: Path) -> DecisionPackageDTO:
     return dto
 
 
-def test_handoff_create_with_valid_decision(tmp_path: Path, mock_decision: DecisionPackageDTO) -> None:
+def test_handoff_create_with_valid_decision(
+    tmp_path: Path, mock_decision: DecisionPackageDTO
+) -> None:
     """测试携带合法决策包创建 handoff 成功并注入白名单"""
     service = AiHandoffService(tmp_path)
     payload = service.create_request(
@@ -71,7 +74,9 @@ def test_handoff_create_rejects_nonexistent_decision(tmp_path: Path) -> None:
     assert "决策包验证失败" in str(exc_info.value)
 
 
-def test_handoff_create_rejects_mismatched_project(tmp_path: Path, mock_decision: DecisionPackageDTO) -> None:
+def test_handoff_create_rejects_mismatched_project(
+    tmp_path: Path, mock_decision: DecisionPackageDTO
+) -> None:
     """测试决策包项目编号与 handoff project_id 不匹配时阻断"""
     service = AiHandoffService(tmp_path)
     with pytest.raises(HandoffValidationError) as exc_info:
@@ -84,7 +89,9 @@ def test_handoff_create_rejects_mismatched_project(tmp_path: Path, mock_decision
     assert "决策包项目编号不匹配" in str(exc_info.value)
 
 
-def test_handoff_create_rejects_mismatched_change_id(tmp_path: Path, mock_decision: DecisionPackageDTO) -> None:
+def test_handoff_create_rejects_mismatched_change_id(
+    tmp_path: Path, mock_decision: DecisionPackageDTO
+) -> None:
     """测试决策包关联变更单与 handoff change_id 不匹配时阻断"""
     service = AiHandoffService(tmp_path)
     with pytest.raises(HandoffValidationError) as exc_info:
@@ -98,7 +105,9 @@ def test_handoff_create_rejects_mismatched_change_id(tmp_path: Path, mock_decisi
     assert "决策包关联变更单不匹配" in str(exc_info.value)
 
 
-def test_closure_with_valid_decision_and_files_passes(tmp_path: Path, mock_decision: DecisionPackageDTO) -> None:
+def test_closure_with_valid_decision_and_files_passes(
+    tmp_path: Path, mock_decision: DecisionPackageDTO
+) -> None:
     """测试携带合法决策包、批准范围内修改文件、物理存在的变更单与真实交付物正常闭环"""
     service = AiHandoffService(tmp_path)
     # 创建物理存在的变更单文件
@@ -175,7 +184,9 @@ def test_closure_rejects_changed_files_out_of_approved_scope(
     assert "src/controllers/unauthorized_controller.py" in str(exc_info.value)
 
 
-def test_closure_rejects_nonexistent_change_ticket(tmp_path: Path, mock_decision: DecisionPackageDTO) -> None:
+def test_closure_rejects_nonexistent_change_ticket(
+    tmp_path: Path, mock_decision: DecisionPackageDTO
+) -> None:
     """测试关联虚构或物理不存在的变更单时被硬门禁阻断"""
     service = AiHandoffService(tmp_path)
     # 注意：不创建物理变更单文件
@@ -299,4 +310,3 @@ def test_closure_rejects_failed_verification_result(
     with pytest.raises(HandoffValidationError) as exc_info:
         service.close_request(request_id, result=result_lint_error)
     assert "验证结果显示失败，禁止收口" in str(exc_info.value)
-

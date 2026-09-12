@@ -51,6 +51,7 @@ def project_setup(tmp_path: Path) -> dict[str, Any]:
         decision_conclusion="approved",
     )
     dec_file = dec_service.decisions_dir / f"{decision_id}.json"
+    dec_file.parent.mkdir(parents=True, exist_ok=True)
     dec_file.write_text(
         json.dumps(dec_dto.to_dict(), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -557,4 +558,3 @@ def test_cli_saga_commands(project_setup: Mapping[str, Any]) -> None:
     assert res_comp.exit_code == 0
     comp_json = json.loads(res_comp.output)
     assert comp_json["status"] == "compensated"
-

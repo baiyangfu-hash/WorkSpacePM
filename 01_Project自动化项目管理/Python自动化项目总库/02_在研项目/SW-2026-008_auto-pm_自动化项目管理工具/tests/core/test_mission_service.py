@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -15,6 +17,17 @@ from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 
 NOW = datetime(2026, 9, 10, 3, 0, tzinfo=UTC)
+
+
+def _git_root(root: Path) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), "init"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def _authority(*, expires_at: datetime = NOW + timedelta(days=1)) -> AuthorityEnvelope:
@@ -37,6 +50,7 @@ def _authority(*, expires_at: datetime = NOW + timedelta(days=1)) -> AuthorityEn
 
 
 def _service(root: Path, *, now: datetime = NOW) -> MissionService:
+    _git_root(root)
     service = MissionService(root, now=lambda: now)
     service.initialize("test")
     return service
@@ -61,6 +75,7 @@ def _create(
 
 
 def _work(root: Path) -> None:
+    _git_root(root)
     service = WorkRegistryService(root, now=lambda: NOW.isoformat())
     service.initialize("test")
     service.create_work(
@@ -112,7 +127,9 @@ def test_create_can_bind_the_authorized_root_work_before_user_confirmation(tmp_p
     assert awaiting.root_work_id == "WORK-SW008-A1"
 
 
-def test_transition_requires_current_authority_root_work_and_expected_version(tmp_path: Path) -> None:
+def test_transition_requires_current_authority_root_work_and_expected_version(
+    tmp_path: Path,
+) -> None:
     service = _service(tmp_path)
     _create(service)
     awaiting = service.transition(
@@ -202,6 +219,7 @@ def test_expired_authority_can_only_move_an_active_mission_to_safe_blocked(
 
 
 def test_v2_store_migrates_additively_and_preserves_existing_work(tmp_path: Path) -> None:
+    _git_root(tmp_path)
     registry = WorkRegistryService(tmp_path, now=lambda: NOW.isoformat())
     registry.initialize("legacy")
     registry.create_work(
@@ -215,19 +233,17 @@ def test_v2_store_migrates_additively_and_preserves_existing_work(tmp_path: Path
         idempotency_key="legacy-work",
     )
     db_path = tmp_path / ".auto-pm" / "continuity.db"
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute("DROP TABLE mission_items")
         conn.execute("DELETE FROM schema_migrations")
-        conn.execute(
-            "UPDATE schema_meta SET schema_version='continuity-store.v2'"
-        )
-    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE schema_meta SET schema_version='continuity-store.v2'")
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     service = _service(tmp_path)
 
     assert ContinuityStore(tmp_path).get_work("WORK-LEGACY-001").title == "Legacy work"
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         version = conn.execute("SELECT schema_version FROM schema_meta").fetchone()[0]
         migration = conn.execute(
             "SELECT from_version, to_version FROM schema_migrations"
@@ -240,7 +256,7 @@ def test_v2_store_migrates_additively_and_preserves_existing_work(tmp_path: Path
 def test_unknown_schema_fails_closed(tmp_path: Path) -> None:
     _service(tmp_path)
     db_path = tmp_path / ".auto-pm" / "continuity.db"
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute("UPDATE schema_meta SET schema_version='continuity-store.v999'")
 
     with pytest.raises(MissionServiceError, match="未知或未来"):

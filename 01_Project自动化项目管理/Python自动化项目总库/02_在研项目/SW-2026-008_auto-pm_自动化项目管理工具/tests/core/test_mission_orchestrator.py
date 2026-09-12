@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -29,6 +30,17 @@ NOW = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
 MISSION_ID = "MISSION-A3-001"
 ROOT_WORK_ID = "WORK-A3-ROOT"
 DECISION_ID = "DEC-20260910-5786E126"
+
+
+def _git_root(root: Path) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), "init"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def _decision(root: Path, files: list[str]) -> None:
@@ -58,6 +70,7 @@ def _setup(
     now: datetime = NOW,
     decision_files: list[str] | None = None,
 ) -> MissionOrchestrator:
+    _git_root(root)
     files = decision_files or ["auto_pm/root.py", "auto_pm/bug.py", "auto_pm/debt.py"]
     _decision(root, files)
     works = WorkRegistryService(root, now=lambda: NOW.isoformat())

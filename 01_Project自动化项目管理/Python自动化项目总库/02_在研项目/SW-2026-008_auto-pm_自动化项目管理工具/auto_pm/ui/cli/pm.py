@@ -8,6 +8,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.core.pm_resume_service import PmResumeError, PmResumeService
 from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
+from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 
 
 @click.group(name="pm")
@@ -21,8 +22,10 @@ def _facade(ctx: click.Context) -> PmFacadeService:
 
 
 def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: str = "") -> None:
-    facade = _facade(ctx)
     try:
+        app_ctx: AppContext = ctx.find_root().obj
+        WorktreePolicyService(app_ctx.workspace_root).require_control_root()
+        facade = _facade(ctx)
         if action == "plan":
             card = facade.plan(mission_id)
         elif action == "approve":
@@ -35,7 +38,7 @@ def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: s
             card = facade.accept(mission_id)
         else:  # pragma: no cover - static command wiring
             raise RuntimeError(f"unknown PM action: {action}")
-    except PmFacadeError as error:
+    except (PmFacadeError, WorktreePolicyError) as error:
         raise click.ClickException(str(error)) from error
     click.echo(card.model_dump_json(indent=2))
 
@@ -127,9 +130,11 @@ def resume_pm(
     if legacy_v1:
         if not project_id:
             try:
-                project_id = WorkspaceContextService(app_ctx.workspace_root).resolve(
-                    start_path=start_path
-                ).subject.project_id
+                project_id = (
+                    WorkspaceContextService(app_ctx.workspace_root)
+                    .resolve(start_path=start_path)
+                    .subject.project_id
+                )
             except WorkspaceContextError as error:
                 raise click.ClickException(str(error)) from error
         service = PmResumeService(app_ctx.workspace_root)
