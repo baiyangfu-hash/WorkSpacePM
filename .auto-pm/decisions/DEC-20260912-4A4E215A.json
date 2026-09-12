@@ -1,0 +1,27 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260912-4A4E215A",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SAFE-2026-006",
+  "approved_scope": "SYSTEM/SAFE",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "User授权 / Codex Architect-PM",
+  "approved_at": "2026-09-12T21:12:38.436036+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "settle_expired_run"
+      ],
+      "target_run_ids": [
+        "RUN-SW008-R4-215-IMPL-01"
+      ],
+      "allowed_outcomes": [
+        "CANCELLED"
+      ]
+    }
+  }
+}

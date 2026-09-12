@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260912-A13ADFAC",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SAFE-2026-004",
+  "approved_scope": "SYSTEM/SAFE",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/releases/1.2.3-d41eb38",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SAFE/CHG-SAFE-2026-004.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "User授权 / Codex Architect-PM",
+  "approved_at": "2026-09-12T17:39:48.748667+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅对历史release 1.2.3-d41eb38授予当前用户及子对象RX；不得授予W、M、F、D、WDAC、WO或所有权。",
+    "不得修改release文件字节、目录结构、Git跟踪内容、active_release.json、previous_release.json或deployment_manifest.json。",
+    "执行前后必须证明物理文件和目录计数不变、Git对该槽无内容差异、活动和前序指针哈希不变；失败则回滚新增ACE。"
+  ],
+  "metadata": {}
+}
