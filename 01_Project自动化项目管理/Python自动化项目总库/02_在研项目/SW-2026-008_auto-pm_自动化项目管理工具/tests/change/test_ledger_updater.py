@@ -75,6 +75,24 @@ class TestLedgerUpdaterUpdate:
         assert "002" in content
         assert "CHG-DOCU-2026-002" in content
 
+    def test_update_description_reference_is_not_duplicate(self, tmp_path: Path) -> None:
+        """描述列引用目标编号时，update 仍应新增目标行。"""
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(
+            "# 版本变更台帐\n\n"
+            "## 变更单索引\n\n"
+            "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |\n"
+            "|------|----------|------|--------|----------|----------|----------|------|\n"
+            "| 008 | [→ CHG-SAFE-2026-008](./01_变更单/CHG-SAFE/CHG-SAFE-2026-008.md) | SAFE | fubai | 2026-09-12 | 依赖 CHG-SAFE-2026-007 收尾 | | 🔄待验收 |\n",
+            encoding="utf-8",
+        )
+
+        LedgerUpdater().update(str(ledger), "CHG-SAFE-2026-007", "active release 修复")
+
+        content = ledger.read_text(encoding="utf-8")
+        assert "[→ CHG-SAFE-2026-008]" in content
+        assert "[→ CHG-SAFE-2026-007]" in content
+
 
 class TestGetNextSequence:
     """LedgerUpdater._get_next_sequence 测试"""
@@ -238,6 +256,53 @@ class TestLedgerUpdaterUpdateStatus:
         # 非目标行保持不变
         assert "CHG-SCPT-2026-001 | 🔄待处理" in content
 
+    def test_update_status_ignores_change_number_in_other_row_description(
+        self, tmp_path: Path
+    ) -> None:
+        """描述列引用目标编号时，不能抢先命中并更新非目标行。"""
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(
+            "# 版本变更台帐\n\n"
+            "## 变更单索引\n\n"
+            "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |\n"
+            "|------|----------|------|--------|----------|----------|----------|------|\n"
+            "| 008 | [→ CHG-SAFE-2026-008](./01_变更单/CHG-SAFE/CHG-SAFE-2026-008.md) | SAFE | fubai | 2026-09-12 | 依赖 CHG-SAFE-2026-007 收尾 | | 🔄待验收 |\n"
+            "| 007 | [→ CHG-SAFE-2026-007](./01_变更单/CHG-SAFE/CHG-SAFE-2026-007.md) | SAFE | fubai | 2026-09-12 | active release 修复 | | 🔄实施中 |\n",
+            encoding="utf-8",
+        )
+
+        LedgerUpdater().update_status(str(ledger), "CHG-SAFE-2026-007", "🔄待验收")
+
+        rows = [line.strip() for line in ledger.read_text(encoding="utf-8").splitlines()]
+        row_008 = next(row for row in rows if "[→ CHG-SAFE-2026-008]" in row)
+        row_007 = next(row for row in rows if "[→ CHG-SAFE-2026-007]" in row)
+        assert row_008.endswith("| 🔄待验收 |")
+        assert row_007.endswith("| 🔄待验收 |")
+
+    def test_update_status_requires_exact_change_number_cell(self, tmp_path: Path) -> None:
+        """编号列的相邻编号或前后缀不能替代目标编号。"""
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(
+            "# 版本变更台帐\n\n"
+            "## 变更单索引\n\n"
+            "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |\n"
+            "|------|----------|------|--------|----------|----------|----------|------|\n"
+            "| 001 | [→ CHG-SAFE-2026-0070](./01_变更单/CHG-SAFE/CHG-SAFE-2026-0070.md) | SAFE | fubai | 2026-09-12 | 相邻编号 | | 🔄实施中 |\n"
+            "| 002 | legacy-CHG-SAFE-2026-007 | SAFE | fubai | 2026-09-12 | 前缀编号 | | 🔄实施中 |\n"
+            "| 003 | CHG-SAFE-2026-007-legacy | SAFE | fubai | 2026-09-12 | 后缀编号 | | 🔄实施中 |\n"
+            "| 004 | [→ CHG-SAFE-2026-007](./01_变更单/CHG-SAFE/CHG-SAFE-2026-007.md) | SAFE | fubai | 2026-09-12 | 目标编号 | | 🔄实施中 |\n",
+            encoding="utf-8",
+        )
+
+        LedgerUpdater().update_status(str(ledger), "CHG-SAFE-2026-007", "✅已关闭")
+
+        rows = [line.strip() for line in ledger.read_text(encoding="utf-8").splitlines()]
+        target_row = next(row for row in rows if "[→ CHG-SAFE-2026-007]" in row)
+        assert target_row.endswith("| ✅已关闭 |")
+        for non_target in rows:
+            if "[→ CHG-SAFE-2026-007]" not in non_target and "CHG-SAFE-2026-007" in non_target:
+                assert non_target.endswith("| 🔄实施中 |")
+
 
 class TestLedgerUpdaterRemove:
     """LedgerUpdater.remove 测试（TD-T10 修复）"""
@@ -261,6 +326,27 @@ class TestLedgerUpdaterRemove:
         content = ledger.read_text(encoding="utf-8")
         assert "CHG-SCPT-2026-001" not in content
         assert "CHG-SCPT-2026-002" in content
+
+    def test_remove_ignores_change_number_in_other_row_description(
+        self, tmp_path: Path
+    ) -> None:
+        """remove 不得删除描述列仅引用目标编号的非目标行。"""
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(
+            "# 版本变更台帐\n\n"
+            "## 变更单索引\n\n"
+            "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |\n"
+            "|------|----------|------|--------|----------|----------|----------|------|\n"
+            "| 008 | [→ CHG-SAFE-2026-008](./01_变更单/CHG-SAFE/CHG-SAFE-2026-008.md) | SAFE | fubai | 2026-09-12 | 依赖 CHG-SAFE-2026-007 收尾 | | 🔄待验收 |\n"
+            "| 007 | [→ CHG-SAFE-2026-007](./01_变更单/CHG-SAFE/CHG-SAFE-2026-007.md) | SAFE | fubai | 2026-09-12 | active release 修复 | | 🔄实施中 |\n",
+            encoding="utf-8",
+        )
+
+        LedgerUpdater().remove(str(ledger), "CHG-SAFE-2026-007")
+
+        content = ledger.read_text(encoding="utf-8")
+        assert "[→ CHG-SAFE-2026-008]" in content
+        assert "[→ CHG-SAFE-2026-007]" not in content
 
     def test_remove_not_found(self, tmp_path: Path) -> None:
         """remove 未找到 change_number 时不修改内容"""

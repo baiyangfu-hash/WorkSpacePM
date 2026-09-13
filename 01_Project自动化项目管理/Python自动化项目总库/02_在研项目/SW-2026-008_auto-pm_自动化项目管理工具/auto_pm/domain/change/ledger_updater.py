@@ -42,8 +42,11 @@ class LedgerUpdater:
             log.warning("台帐文件为空或读取失败: %s", ledger_path)
             return
 
-        # 去重检查：变更编号已存在于台帐中则跳过追加
-        if change_number in content:
+        # 去重检查：仅变更编号列中的精确编号可阻止追加。
+        if any(
+            self._matches_change_number_row(line, change_number)
+            for line in content.split("\n")
+        ):
             log.info("台帐中已存在 %s，跳过追加", change_number)
             return
 
@@ -105,24 +108,24 @@ class LedgerUpdater:
         lines = content.split("\n")
         updated = False
         for i, line in enumerate(lines):
-            if change_number in line and line.strip().startswith("|"):
-                parts = line.split("|")
-                # 列结构：| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |
-                # split 后：['', ' 序号 ', ' 变更编号 ', ..., ' 状态 ', '']
-                # 状态列 = parts[-2]，完成日期列 = parts[-3]
-                if len(parts) >= 4:  # 至少有内容列（首尾空字符串 + 至少 2 列）
-                    # 状态列是最后一个内容列 = parts[-2]（parts[-1] 是行尾空字符串）
-                    parts[-2] = f" {status} "
-                    # CHG-085：closed/archived 时回写完成日期列（parts[-3]）
-                    if complete_date and status in ("✅已关闭", "✅已归档"):
-                        parts[-3] = f" {complete_date} "
-                        log.info(
-                            "台帐完成日期已回写: %s → %s", change_number, complete_date
-                        )
-                    lines[i] = "|".join(parts)
-                    updated = True
-                    log.info("台帐状态已更新: %s → %s", change_number, status)
-                    break
+            if not self._matches_change_number_row(line, change_number):
+                continue
+
+            parts = line.split("|")
+            # 列结构：| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |
+            # split 后：['', ' 序号 ', ' 变更编号 ', ..., ' 状态 ', '']
+            # 状态列 = parts[-2]，完成日期列 = parts[-3]
+            if len(parts) >= 4:  # 至少有内容列（首尾空字符串 + 至少 2 列）
+                # 状态列是最后一个内容列 = parts[-2]（parts[-1] 是行尾空字符串）
+                parts[-2] = f" {status} "
+                # CHG-085：closed/archived 时回写完成日期列（parts[-3]）
+                if complete_date and status in ("✅已关闭", "✅已归档"):
+                    parts[-3] = f" {complete_date} "
+                    log.info("台帐完成日期已回写: %s → %s", change_number, complete_date)
+                lines[i] = "|".join(parts)
+                updated = True
+                log.info("台帐状态已更新: %s → %s", change_number, status)
+                break
 
         if updated:
             write_file(ledger_path, "\n".join(lines))
@@ -156,6 +159,36 @@ class LedgerUpdater:
                     "台帐自愈补建失败: 未找到变更单索引表格 %s", ledger_path
                 )
 
+    @classmethod
+    def _matches_change_number_row(cls, line: str, change_number: str) -> bool:
+        """仅当 Markdown 表格的变更编号列精确匹配时返回 True。"""
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            return False
+
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 2:
+            return False
+
+        # 标准台账的变更编号在第 2 列；两列表格则以第 1 列为编号。
+        change_cell_index = 1 if len(cells) > 2 else 0
+        return cls._matches_change_number_cell(cells[change_cell_index], change_number)
+
+    @staticmethod
+    def _matches_change_number_cell(cell: str, change_number: str) -> bool:
+        """仅接受变更编号单元格中的精确文本或精确 Markdown 链接。"""
+        normalized = cell.strip()
+        if normalized == change_number:
+            return True
+
+        link_match = re.fullmatch(r"\[(?P<label>[^\]]+)\]\((?P<target>[^)]+)\)", normalized)
+        if link_match is None:
+            return False
+
+        label = link_match.group("label").strip().removeprefix("→").strip()
+        target_name = link_match.group("target").rsplit("/", maxsplit=1)[-1]
+        return label == change_number or target_name == f"{change_number}.md"
+
     def remove(self, ledger_path: str, change_number: str) -> None:
         """从台帐中删除指定变更单的行（TD-T10 修复，供测试 fixture 清理用）
 
@@ -171,7 +204,7 @@ class LedgerUpdater:
         new_lines: list[str] = []
         removed = False
         for line in lines:
-            if change_number in line and line.strip().startswith("|"):
+            if self._matches_change_number_row(line, change_number):
                 removed = True
                 log.info("台帐条目已删除: %s", change_number)
                 continue  # 跳过该行（删除）
