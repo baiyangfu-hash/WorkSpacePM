@@ -24,6 +24,15 @@ class LeaseView(BaseModel):
     updated_at: str
 
 
+class ResumeRunCandidate(BaseModel):
+    """A nonterminal Run with token-free lease metadata for safe disambiguation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    run: RunItem
+    lease: LeaseView
+
+
 class ContinuityResume(BaseModel):
     """Identity plus an optional, unambiguous execution chain."""
 
@@ -33,7 +42,9 @@ class ContinuityResume(BaseModel):
     context: WorkspaceContext
     mission: Mission | None = None
     work: WorkItem | None = None
+    work_candidates: tuple[WorkItem, ...] = ()
     run: RunItem | None = None
+    run_candidates: tuple[ResumeRunCandidate, ...] = ()
     checkpoint: CheckpointItem | None = None
     lease: LeaseView | None = None
     conflicts: tuple[str, ...] = ()
