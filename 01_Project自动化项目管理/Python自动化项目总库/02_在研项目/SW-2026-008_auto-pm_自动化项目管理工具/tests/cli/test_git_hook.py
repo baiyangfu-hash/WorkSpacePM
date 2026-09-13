@@ -36,8 +36,59 @@ def test_git_hook_install_uses_root_active_release_launcher(tmp_path: Path) -> N
         assert "CONTAINER=" not in script
 
 
-def _production_staged_files(_: Path) -> list[str]:
-    return ["auto_pm/core/service.py"]
+def test_git_hook_preflight_passes_one_snapshot_to_both_shared_checks(
+    tmp_path: Path, monkeypatch
+) -> None:
+    message_file = tmp_path / "COMMIT_EDITMSG"
+    message_file.write_text("test message", encoding="utf-8")
+    snapshot = git_hook_enforcer.StagedSnapshot(())
+    captured_workspaces: list[Path] = []
+    pre_commit_snapshots: list[git_hook_enforcer.StagedSnapshot] = []
+    commit_msg_paths: list[Path] = []
+    commit_msg_snapshots: list[git_hook_enforcer.StagedSnapshot] = []
+
+    def capture_snapshot(workspace_root: Path) -> git_hook_enforcer.StagedSnapshot:
+        captured_workspaces.append(workspace_root)
+        return snapshot
+
+    def run_pre_commit(
+        _workspace_root: Path, supplied_snapshot: git_hook_enforcer.StagedSnapshot
+    ) -> int:
+        pre_commit_snapshots.append(supplied_snapshot)
+        return 0
+
+    def run_commit_msg(
+        _workspace_root: Path,
+        supplied_message_file: Path,
+        supplied_snapshot: git_hook_enforcer.StagedSnapshot,
+    ) -> int:
+        commit_msg_paths.append(supplied_message_file)
+        commit_msg_snapshots.append(supplied_snapshot)
+        return 0
+
+    monkeypatch.setattr("auto_pm.cli.git_hook.get_staged_snapshot", capture_snapshot)
+    monkeypatch.setattr("auto_pm.cli.git_hook.enforce_pre_commit", run_pre_commit)
+    monkeypatch.setattr("auto_pm.cli.git_hook.enforce_commit_msg", run_commit_msg)
+
+    result = CliRunner().invoke(
+        cli, ["-w", str(tmp_path), "git-hook", "preflight", str(message_file)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_workspaces == [tmp_path]
+    assert pre_commit_snapshots == [snapshot]
+    assert commit_msg_paths == [message_file]
+    assert commit_msg_snapshots == [snapshot]
+
+
+def _staged_snapshot(*paths: str) -> git_hook_enforcer.StagedSnapshot:
+    return git_hook_enforcer.StagedSnapshot(
+        tuple(git_hook_enforcer.StagedIndexEntry(path, "a" * 40) for path in paths)
+    )
+
+
+def _production_staged_snapshot(_: Path) -> git_hook_enforcer.StagedSnapshot:
+    return _staged_snapshot("auto_pm/core/service.py")
 
 
 def _write_project_ledger(project_root: Path) -> None:
@@ -202,7 +253,9 @@ def test_enforce_pre_commit_rejects_project_service_error(
         def __init__(self, _: str) -> None:
             raise RuntimeError("project service unavailable")
 
-    monkeypatch.setattr(git_hook_enforcer, "get_staged_files", _production_staged_files)
+    monkeypatch.setattr(
+        git_hook_enforcer, "get_staged_snapshot", _production_staged_snapshot
+    )
     monkeypatch.setattr(
         "auto_pm.core.project_service.ProjectService",
         FailingProjectService,
@@ -231,8 +284,8 @@ def test_enforce_pre_commit_rejects_ledger_error(tmp_path: Path, monkeypatch, ca
 
     monkeypatch.setattr(
         git_hook_enforcer,
-        "get_staged_files",
-        lambda _: ["SW-TEST/auto_pm/core/service.py"],
+        "get_staged_snapshot",
+        lambda _: _staged_snapshot("SW-TEST/auto_pm/core/service.py"),
     )
     monkeypatch.setattr("auto_pm.core.project_service.ProjectService", ProjectService)
     monkeypatch.setattr(
@@ -282,8 +335,8 @@ def test_enforce_pre_commit_reports_unrelated_ledger_error_without_blocking(
 
     monkeypatch.setattr(
         git_hook_enforcer,
-        "get_staged_files",
-        lambda _: ["SW-RELATED/auto_pm/core/service.py"],
+        "get_staged_snapshot",
+        lambda _: _staged_snapshot("SW-RELATED/auto_pm/core/service.py"),
     )
     monkeypatch.setattr("auto_pm.core.project_service.ProjectService", ProjectService)
     monkeypatch.setattr(
@@ -313,8 +366,8 @@ def test_enforce_pre_commit_rejects_missing_related_ledger(
 
     monkeypatch.setattr(
         git_hook_enforcer,
-        "get_staged_files",
-        lambda _: ["SW-RELATED/auto_pm/core/service.py"],
+        "get_staged_snapshot",
+        lambda _: _staged_snapshot("SW-RELATED/auto_pm/core/service.py"),
     )
     monkeypatch.setattr("auto_pm.core.project_service.ProjectService", ProjectService)
 
@@ -338,8 +391,8 @@ def test_enforce_pre_commit_rejects_unknown_production_owner(
 
     monkeypatch.setattr(
         git_hook_enforcer,
-        "get_staged_files",
-        lambda _: ["unknown/service.py"],
+        "get_staged_snapshot",
+        lambda _: _staged_snapshot("unknown/service.py"),
     )
     monkeypatch.setattr("auto_pm.core.project_service.ProjectService", ProjectService)
 
@@ -438,6 +491,20 @@ def test_enforce_commit_msg_passes_valid_closed_chg(tmp_path: Path, capsys) -> N
 
     assert enforce_commit_msg(repo, msg_file) == 0
     assert "强校验绑定通过" in capsys.readouterr().out
+
+
+def test_enforce_commit_msg_uses_supplied_snapshot_without_recapturing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo, msg_file = _staged_snapshot_fixture(tmp_path)
+    snapshot = git_hook_enforcer.get_staged_snapshot(repo)
+
+    def reject_recapture(_: Path) -> git_hook_enforcer.StagedSnapshot:
+        raise AssertionError("the supplied snapshot must be reused")
+
+    monkeypatch.setattr(git_hook_enforcer, "get_staged_snapshot", reject_recapture)
+
+    assert enforce_commit_msg(repo, msg_file, snapshot) == 0
 
 
 def test_enforce_commit_msg_rejects_missing_staged_chg(tmp_path: Path, capsys) -> None:

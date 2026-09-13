@@ -9,9 +9,11 @@ from rich.console import Console
 
 from auto_pm.app_context import AppContext
 from auto_pm.infrastructure.git_hook_enforcer import (
+    StagedSnapshotError,
     enforce_commit_msg,
     enforce_pre_commit,
     enforce_release_ledger_gate,
+    get_staged_snapshot,
 )
 
 console = Console()
@@ -56,6 +58,26 @@ def cmd_commit_msg(ctx: click.Context, msg_file: str) -> None:
     code = enforce_commit_msg(ws, Path(msg_file))
     if code != 0:
         ctx.exit(code)
+
+
+@git_hook_group.command(name="preflight")
+@click.argument("msg_file", type=click.Path(exists=True, path_type=Path))
+@click.pass_context
+def cmd_preflight(ctx: click.Context, msg_file: Path) -> None:
+    """以同一个不可变暂存快照执行提交前只读预检。"""
+    ws = _workspace(ctx)
+    try:
+        staged_snapshot = get_staged_snapshot(ws)
+    except StagedSnapshotError as error:
+        console.print(f"[red]错误: 无法读取 Git 暂存区: {error}[/red]")
+        ctx.exit(1)
+
+    pre_commit_code = enforce_pre_commit(ws, staged_snapshot)
+    commit_msg_code = enforce_commit_msg(ws, msg_file, staged_snapshot)
+    if pre_commit_code != 0:
+        ctx.exit(pre_commit_code)
+    if commit_msg_code != 0:
+        ctx.exit(commit_msg_code)
 
 
 @git_hook_group.command(name="install")

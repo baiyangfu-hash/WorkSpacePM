@@ -457,14 +457,24 @@ def _validate_staged_change_evidence(
     return change_path
 
 
-def enforce_pre_commit(workspace_root: Path) -> int:
+def enforce_pre_commit(
+    workspace_root: Path, staged_snapshot: StagedSnapshot | None = None
+) -> int:
     """pre-commit 阶段拦截检查：
     1. 只阻断暂存生产代码所归属项目的版本变更台账一致性；
     2. 无关项目既存差异仅报告，完整全局检查留给发布门。
+
+    ``staged_snapshot`` 由提交前预检调用方一次捕获后直接注入，确保
+    pre-commit 与 commit-msg 对同一份不可变 index 证据作出判断。
     """
-    staged = _get_staged_files_or_reject(workspace_root, "pre-commit")
-    if staged is None:
+    snapshot = (
+        staged_snapshot
+        if staged_snapshot is not None
+        else _get_staged_snapshot_or_reject(workspace_root, "pre-commit")
+    )
+    if snapshot is None:
         return 1
+    staged = list(snapshot.paths)
     if not staged:
         return 0
 
@@ -517,12 +527,23 @@ def enforce_release_ledger_gate(workspace_root: Path) -> int:
     return 0
 
 
-def enforce_commit_msg(workspace_root: Path, commit_msg_file: Path) -> int:
+def enforce_commit_msg(
+    workspace_root: Path,
+    commit_msg_file: Path,
+    staged_snapshot: StagedSnapshot | None = None,
+) -> int:
     """commit-msg 阶段拦截检查：
     1. 若暂存区包含生产代码（.py, .scl 等），强制 Commit Message 必须注明关联单号；
     2. 在同一 index 快照内校验 CHG、PID、项目台账及其合法执行态。
+
+    ``staged_snapshot`` 由提交前预检调用方一次捕获后直接注入，确保
+    pre-commit 与 commit-msg 对同一份不可变 index 证据作出判断。
     """
-    snapshot = _get_staged_snapshot_or_reject(workspace_root, "commit-msg")
+    snapshot = (
+        staged_snapshot
+        if staged_snapshot is not None
+        else _get_staged_snapshot_or_reject(workspace_root, "commit-msg")
+    )
     if snapshot is None:
         return 1
     staged = list(snapshot.paths)
