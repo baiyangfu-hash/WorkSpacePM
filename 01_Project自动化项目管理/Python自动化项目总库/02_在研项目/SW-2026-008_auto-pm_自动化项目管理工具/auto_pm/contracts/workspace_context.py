@@ -65,7 +65,12 @@ class WorkspaceContext(BaseModel):
     control_pm_session: str = ""
     development_root: str
     runtime_root: str = ""
+    # Backward-compatible alias for the configured active-release pointer.
     release_id: str = ""
+    configured_release_id: str = ""
+    effective_release_id: str = ""
+    runtime_load_path: str = ""
+    runtime_fallback_reason: str = ""
     read_set: tuple[ContextEvidence, ...]
     evidence_id: str
     conflicts: tuple[str, ...] = ()
