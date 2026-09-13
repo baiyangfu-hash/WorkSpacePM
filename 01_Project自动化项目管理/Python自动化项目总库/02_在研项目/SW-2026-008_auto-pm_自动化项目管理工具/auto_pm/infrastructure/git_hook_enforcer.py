@@ -39,12 +39,26 @@ def get_staged_files(workspace_root: Path) -> list[str]:
             cwd=str(workspace_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
         )
         return [line.strip() for line in res.stdout.splitlines() if line.strip()]
-    except Exception as e:
-        log.warning("获取暂存区文件失败: %s", e)
-        return []
+    except Exception as exc:
+        log.error("获取暂存区文件失败: %s", exc)
+        raise RuntimeError(f"获取暂存区文件失败: {exc}") from exc
+
+
+def _get_staged_files_or_reject(workspace_root: Path, hook_name: str) -> list[str] | None:
+    """读取暂存区；读取失败时拒绝提交，避免将故障误判为无变更。"""
+    try:
+        return get_staged_files(workspace_root)
+    except Exception as exc:
+        print(
+            f"❌ [auto-pm {hook_name}] 物理拦截：无法读取 Git 暂存区，"
+            f"为防止绕过门禁已拒绝提交: {exc}"
+        )
+        return None
 
 
 def filter_production_files(files: list[str]) -> list[str]:
@@ -65,7 +79,9 @@ def enforce_pre_commit(workspace_root: Path) -> int:
     1. 扫描暂存区关联项目的版本变更台账一致性；
     2. 若全仓台账存在缺失/孤儿/不一致，直接 exit 1 阻断。
     """
-    staged = get_staged_files(workspace_root)
+    staged = _get_staged_files_or_reject(workspace_root, "pre-commit")
+    if staged is None:
+        return 1
     if not staged:
         return 0
 
@@ -105,8 +121,12 @@ def enforce_pre_commit(workspace_root: Path) -> int:
             print("🚨 [auto-pm pre-commit] 物理阻断：台账未闭环，严禁直接 Commit！请先运行 auto-pm ledger reconcile <PID> --fix")
             return 1
 
-    except Exception as e:
-        print(f"⚠️ [auto-pm pre-commit] 台账检查异常: {e}")
+    except Exception as exc:
+        print(
+            "❌ [auto-pm pre-commit] 物理拦截：台账检查异常，"
+            f"为防止绕过门禁已拒绝提交: {exc}"
+        )
+        return 1
 
     print("✅ [auto-pm pre-commit] 全仓台账门禁校验通过。")
     return 0
@@ -117,21 +137,31 @@ def enforce_commit_msg(workspace_root: Path, commit_msg_file: Path) -> int:
     1. 若暂存区包含生产代码（.py, .scl 等），强制 Commit Message 必须注明关联单号；
     2. 校验引用的变更单在工作空间中真实存在且处于合法执行态。
     """
-    staged = get_staged_files(workspace_root)
+    staged = _get_staged_files_or_reject(workspace_root, "commit-msg")
+    if staged is None:
+        return 1
     prod_files = filter_production_files(staged)
 
     if not prod_files:
         # 纯文档/治理/会话提交，豁免变更单号要求
         return 0
 
-    if not commit_msg_file.is_file():
-        print(f"❌ [auto-pm commit-msg] 未找到提交信息文件: {commit_msg_file}")
+    try:
+        if not commit_msg_file.is_file():
+            print(f"❌ [auto-pm commit-msg] 未找到提交信息文件: {commit_msg_file}")
+            return 1
+
+        msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()
+
+        # 匹配变更单号，如 CHG-SCPT-2026-170, CHG-PLC-2026-012
+        chg_matches = re.findall(r"CHG-[A-Z0-9]+-\d{4}-\d+", msg_content)
+    except Exception as exc:
+        print(
+            "❌ [auto-pm commit-msg] 物理拦截：无法读取或解析提交信息，"
+            f"为防止绕过门禁已拒绝提交: {exc}"
+        )
         return 1
 
-    msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()
-
-    # 匹配变更单号，如 CHG-SCPT-2026-170, CHG-PLC-2026-012
-    chg_matches = re.findall(r"CHG-[A-Z0-9]+-\d{4}-\d+", msg_content)
     if not chg_matches:
         print("=" * 70)
         print("❌ [auto-pm commit-msg] 物理拦截：检测到暂存区包含生产代码变更，但 Commit Message 未绑定变更单！")
@@ -147,7 +177,14 @@ def enforce_commit_msg(workspace_root: Path, commit_msg_file: Path) -> int:
 
     chg_id = chg_matches[0]
     # 检查变更单文件是否存在
-    matched_tickets = list(workspace_root.glob(f"**/{chg_id}.md"))
+    try:
+        matched_tickets = list(workspace_root.glob(f"**/{chg_id}.md"))
+    except Exception as exc:
+        print(
+            "❌ [auto-pm commit-msg] 物理拦截：无法查找关联变更单，"
+            f"为防止绕过门禁已拒绝提交: {exc}"
+        )
+        return 1
     if not matched_tickets:
         print(f"❌ [auto-pm commit-msg] 物理拦截：引用的变更单在工作空间中不存在: {chg_id}.md")
         return 1
@@ -171,9 +208,12 @@ def enforce_commit_msg(workspace_root: Path, commit_msg_file: Path) -> int:
                 "尚未获得审批批准，严禁提交代码！"
             )
             return 1
-    except Exception as e:
-        print(f"⚠️ [auto-pm commit-msg] 解析变更单状态失败: {e}")
+    except Exception as exc:
+        print(
+            "❌ [auto-pm commit-msg] 物理拦截：解析关联变更单状态失败，"
+            f"为防止绕过门禁已拒绝提交: {exc}"
+        )
+        return 1
 
     print(f"✅ [auto-pm commit-msg] 生产代码与变更单 {chg_id} 强校验绑定通过！")
     return 0
-
