@@ -237,6 +237,111 @@ def _production_project_ids(
     return tuple(sorted(project_ids))
 
 
+def _production_project_ids_from_paths(
+    paths: list[str], bindings: tuple[ProjectBinding, ...]
+) -> tuple[str, ...]:
+    """从暂存路径计算生产代码归属 PID；未知归属必须拒绝。"""
+    project_ids = {
+        _binding_for_staged_file(_normalise_git_path(path), bindings).project_id
+        for path in filter_production_files(paths)
+    }
+    return tuple(sorted(project_ids))
+
+
+def _project_id(project: object) -> str:
+    return str(getattr(project, "project_id", getattr(project, "id", ""))).strip()
+
+
+def _project_root(project: object) -> Path | None:
+    project_path = getattr(project, "path", None)
+    if not project_path:
+        return None
+    return Path(project_path)
+
+
+def _project_ledger_file(project_root: Path) -> Path | None:
+    ledger_candidates = (
+        project_root
+        / "04_监控"
+        / "01_变更管理"
+        / "02_变更记录"
+        / "01_版本变更台账.md",
+        project_root
+        / "11_监控"
+        / "01_变更管理"
+        / "02_变更记录"
+        / "01_版本变更台账.md",
+    )
+    for ledger_file in ledger_candidates:
+        if ledger_file.is_file():
+            return ledger_file
+    return None
+
+
+def _run_ledger_gate(
+    workspace_root: Path, related_project_ids: tuple[str, ...] | None
+) -> int:
+    """执行台账门禁；related 为 None 时代表全局发布门。"""
+    from auto_pm.core.project_service import ProjectService
+    from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
+
+    ps = ProjectService(str(workspace_root))
+    projects = ps.list_projects()
+    related = set(related_project_ids or ())
+    global_gate = related_project_ids is None
+    reconciler = LedgerReconciler()
+    has_blocking_error = False
+
+    for project in projects:
+        pid = _project_id(project)
+        project_root = _project_root(project)
+        if not pid or project_root is None:
+            continue
+        is_related = global_gate or pid in related
+        ledger_file = _project_ledger_file(project_root)
+        if ledger_file is None:
+            if is_related:
+                print(
+                    "❌ [auto-pm ledger gate] 关联项目缺少版本变更台账，"
+                    f"拒绝通过: {pid}"
+                )
+                has_blocking_error = True
+            continue
+
+        try:
+            report = reconciler.reconcile(str(project_root))
+        except Exception as exc:
+            if is_related:
+                print(
+                    "❌ [auto-pm ledger gate] 关联项目台账检查异常，"
+                    f"拒绝通过: {pid}: {exc}"
+                )
+                has_blocking_error = True
+            else:
+                print(
+                    "⚠️ [auto-pm pre-commit] 无关项目台账检查异常，仅报告不阻断: "
+                    f"{pid}: {exc}"
+                )
+            continue
+
+        if report.is_clean:
+            continue
+
+        message = (
+            f"项目 [{pid}] 台账对账不一致: "
+            f"缺失 {len(report.missing_in_ledger)} 条, "
+            f"孤儿 {len(report.orphan_in_ledger)} 条, "
+            f"状态差异 {len(report.status_mismatches)} 条"
+        )
+        if is_related:
+            print(f"❌ [auto-pm ledger gate] {message}")
+            has_blocking_error = True
+        else:
+            print(f"⚠️ [auto-pm pre-commit] 无关{message}，仅报告不阻断")
+
+    return 1 if has_blocking_error else 0
+
+
 def _path_is_in_project(path: str, binding: ProjectBinding) -> bool:
     return path == binding.relative_root or path.startswith(f"{binding.relative_root}/")
 
@@ -354,8 +459,8 @@ def _validate_staged_change_evidence(
 
 def enforce_pre_commit(workspace_root: Path) -> int:
     """pre-commit 阶段拦截检查：
-    1. 扫描暂存区关联项目的版本变更台账一致性；
-    2. 若全仓台账存在缺失/孤儿/不一致，直接 exit 1 阻断。
+    1. 只阻断暂存生产代码所归属项目的版本变更台账一致性；
+    2. 无关项目既存差异仅报告，完整全局检查留给发布门。
     """
     staged = _get_staged_files_or_reject(workspace_root, "pre-commit")
     if staged is None:
@@ -363,40 +468,24 @@ def enforce_pre_commit(workspace_root: Path) -> int:
     if not staged:
         return 0
 
-    print("🔍 [auto-pm pre-commit] 正在执行全仓台账一致性物理门禁预检...")
+    prod_files = filter_production_files(staged)
+    if not prod_files:
+        return 0
+
+    print("🔍 [auto-pm pre-commit] 正在执行相关项目台账一致性物理门禁预检...")
     try:
-        # 调用 auto-pm change verify 验证台账
         from auto_pm.core.project_service import ProjectService
-        from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 
-        ps = ProjectService(str(workspace_root))
-        projects = ps.list_projects()
-        reconciler = LedgerReconciler()
-
-        has_ledger_error = False
-        for p in projects:
-            p_root = getattr(p, "path", None)
-            pid = getattr(p, "id", "")
-            if not p_root:
-                continue
-            ledger_file = Path(p_root) / "04_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台账.md"
-            if not ledger_file.is_file():
-                ledger_file = Path(p_root) / "11_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台账.md"
-            if not ledger_file.is_file():
-                continue
-
-            report = reconciler.reconcile(str(p_root))
-            if not report.is_clean:
-                print(
-                    f"❌ [auto-pm pre-commit] 项目 [{pid}] 台账对账不一致: "
-                    f"缺失 {len(report.missing_in_ledger)} 条, "
-                    f"孤儿 {len(report.orphan_in_ledger)} 条, "
-                    f"状态差异 {len(report.status_mismatches)} 条！"
-                )
-                has_ledger_error = True
-
-        if has_ledger_error:
-            print("🚨 [auto-pm pre-commit] 物理阻断：台账未闭环，严禁直接 Commit！请先运行 auto-pm ledger reconcile <PID> --fix")
+        projects = ProjectService(str(workspace_root)).list_projects()
+        bindings = _project_bindings(workspace_root, projects)
+        related_project_ids = _production_project_ids_from_paths(prod_files, bindings)
+        if not related_project_ids:
+            return 0
+        if _run_ledger_gate(workspace_root, related_project_ids) != 0:
+            print(
+                "🚨 [auto-pm pre-commit] 物理阻断：关联项目台账未闭环，"
+                "严禁直接 Commit！请先运行 auto-pm ledger reconcile <PID> --fix"
+            )
             return 1
 
     except Exception as exc:
@@ -406,7 +495,25 @@ def enforce_pre_commit(workspace_root: Path) -> int:
         )
         return 1
 
-    print("✅ [auto-pm pre-commit] 全仓台账门禁校验通过。")
+    print("✅ [auto-pm pre-commit] 相关项目台账门禁校验通过。")
+    return 0
+
+
+def enforce_release_ledger_gate(workspace_root: Path) -> int:
+    """发布门：对全部注册项目执行版本变更台账一致性检查。"""
+    print("🔍 [auto-pm release-gate] 正在执行全局台账一致性物理门禁预检...")
+    try:
+        code = _run_ledger_gate(workspace_root, None)
+    except Exception as exc:
+        print(
+            "❌ [auto-pm release-gate] 物理拦截：全局台账检查异常，"
+            f"为防止绕过门禁已拒绝发布: {exc}"
+        )
+        return 1
+    if code != 0:
+        print("🚨 [auto-pm release-gate] 物理阻断：全局台账未闭环，严禁发布！")
+        return 1
+    print("✅ [auto-pm release-gate] 全局台账门禁校验通过。")
     return 0
 
 

@@ -10,7 +10,11 @@ from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.infrastructure import git_hook_enforcer
-from auto_pm.infrastructure.git_hook_enforcer import enforce_commit_msg, enforce_pre_commit
+from auto_pm.infrastructure.git_hook_enforcer import (
+    enforce_commit_msg,
+    enforce_pre_commit,
+    enforce_release_ledger_gate,
+)
 
 
 def test_git_hook_install_uses_root_active_release_launcher(tmp_path: Path) -> None:
@@ -225,7 +229,11 @@ def test_enforce_pre_commit_rejects_ledger_error(tmp_path: Path, monkeypatch, ca
         def reconcile(self, _: str) -> None:
             raise RuntimeError("ledger unavailable")
 
-    monkeypatch.setattr(git_hook_enforcer, "get_staged_files", _production_staged_files)
+    monkeypatch.setattr(
+        git_hook_enforcer,
+        "get_staged_files",
+        lambda _: ["SW-TEST/auto_pm/core/service.py"],
+    )
     monkeypatch.setattr("auto_pm.core.project_service.ProjectService", ProjectService)
     monkeypatch.setattr(
         "auto_pm.domain.change.ledger_reconciler.LedgerReconciler",
@@ -235,7 +243,166 @@ def test_enforce_pre_commit_rejects_ledger_error(tmp_path: Path, monkeypatch, ca
     assert enforce_pre_commit(tmp_path) == 1
     output = capsys.readouterr().out
     assert "台账检查异常" in output
-    assert "拒绝提交" in output
+    assert "拒绝通过" in output
+
+
+def test_enforce_pre_commit_reports_unrelated_ledger_error_without_blocking(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    related_root = tmp_path / "SW-RELATED"
+    unrelated_root = tmp_path / "SW-UNRELATED"
+    _write_project_ledger(related_root)
+    _write_project_ledger(unrelated_root)
+
+    class ProjectService:
+        def __init__(self, _: str) -> None:
+            pass
+
+        def list_projects(self) -> list[SimpleNamespace]:
+            return [
+                SimpleNamespace(id="SW-RELATED", path=related_root),
+                SimpleNamespace(id="SW-UNRELATED", path=unrelated_root),
+            ]
+
+    class LedgerReconciler:
+        def reconcile(self, project_root: str) -> SimpleNamespace:
+            if Path(project_root) == unrelated_root:
+                return SimpleNamespace(
+                    is_clean=False,
+                    missing_in_ledger=["CHG-SCPT-2026-999"],
+                    orphan_in_ledger=[],
+                    status_mismatches=[],
+                )
+            return SimpleNamespace(
+                is_clean=True,
+                missing_in_ledger=[],
+                orphan_in_ledger=[],
+                status_mismatches=[],
+            )
+
+    monkeypatch.setattr(
+        git_hook_enforcer,
+        "get_staged_files",
+        lambda _: ["SW-RELATED/auto_pm/core/service.py"],
+    )
+    monkeypatch.setattr("auto_pm.core.project_service.ProjectService", ProjectService)
+    monkeypatch.setattr(
+        "auto_pm.domain.change.ledger_reconciler.LedgerReconciler",
+        LedgerReconciler,
+    )
+
+    assert enforce_pre_commit(tmp_path) == 0
+    output = capsys.readouterr().out
+    assert "SW-UNRELATED" in output
+    assert "仅报告不阻断" in output
+    assert "相关项目台账门禁校验通过" in output
+
+
+def test_enforce_pre_commit_rejects_missing_related_ledger(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    related_root = tmp_path / "SW-RELATED"
+    related_root.mkdir()
+
+    class ProjectService:
+        def __init__(self, _: str) -> None:
+            pass
+
+        def list_projects(self) -> list[SimpleNamespace]:
+            return [SimpleNamespace(id="SW-RELATED", path=related_root)]
+
+    monkeypatch.setattr(
+        git_hook_enforcer,
+        "get_staged_files",
+        lambda _: ["SW-RELATED/auto_pm/core/service.py"],
+    )
+    monkeypatch.setattr("auto_pm.core.project_service.ProjectService", ProjectService)
+
+    assert enforce_pre_commit(tmp_path) == 1
+    output = capsys.readouterr().out
+    assert "关联项目缺少版本变更台账" in output
+
+
+def test_enforce_pre_commit_rejects_unknown_production_owner(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    project_root = tmp_path / "SW-RELATED"
+    _write_project_ledger(project_root)
+
+    class ProjectService:
+        def __init__(self, _: str) -> None:
+            pass
+
+        def list_projects(self) -> list[SimpleNamespace]:
+            return [SimpleNamespace(id="SW-RELATED", path=project_root)]
+
+    monkeypatch.setattr(
+        git_hook_enforcer,
+        "get_staged_files",
+        lambda _: ["unknown/service.py"],
+    )
+    monkeypatch.setattr("auto_pm.core.project_service.ProjectService", ProjectService)
+
+    assert enforce_pre_commit(tmp_path) == 1
+    output = capsys.readouterr().out
+    assert "暂存生产文件归属未知或不唯一" in output
+
+
+def test_enforce_release_ledger_gate_blocks_any_registered_project_error(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    related_root = tmp_path / "SW-RELATED"
+    unrelated_root = tmp_path / "SW-UNRELATED"
+    _write_project_ledger(related_root)
+    _write_project_ledger(unrelated_root)
+
+    class ProjectService:
+        def __init__(self, _: str) -> None:
+            pass
+
+        def list_projects(self) -> list[SimpleNamespace]:
+            return [
+                SimpleNamespace(id="SW-RELATED", path=related_root),
+                SimpleNamespace(id="SW-UNRELATED", path=unrelated_root),
+            ]
+
+    class LedgerReconciler:
+        def reconcile(self, project_root: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                is_clean=Path(project_root) != unrelated_root,
+                missing_in_ledger=["CHG-SCPT-2026-999"],
+                orphan_in_ledger=[],
+                status_mismatches=[],
+            )
+
+    monkeypatch.setattr("auto_pm.core.project_service.ProjectService", ProjectService)
+    monkeypatch.setattr(
+        "auto_pm.domain.change.ledger_reconciler.LedgerReconciler",
+        LedgerReconciler,
+    )
+
+    assert enforce_release_ledger_gate(tmp_path) == 1
+    output = capsys.readouterr().out
+    assert "SW-UNRELATED" in output
+    assert "全局台账未闭环" in output
+
+
+def test_git_hook_release_gate_cli_uses_global_gate(tmp_path: Path, monkeypatch) -> None:
+    called: dict[str, Path] = {}
+
+    def fake_gate(workspace_root: Path) -> int:
+        called["workspace_root"] = workspace_root
+        return 0
+
+    monkeypatch.setattr(
+        "auto_pm.cli.git_hook.enforce_release_ledger_gate",
+        fake_gate,
+    )
+
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "git-hook", "release-gate"])
+
+    assert result.exit_code == 0, result.output
+    assert called["workspace_root"] == tmp_path
 
 
 def test_enforce_commit_msg_rejects_message_read_error(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -271,6 +438,15 @@ def test_enforce_commit_msg_passes_valid_closed_chg(tmp_path: Path, capsys) -> N
 
     assert enforce_commit_msg(repo, msg_file) == 0
     assert "强校验绑定通过" in capsys.readouterr().out
+
+
+def test_enforce_commit_msg_rejects_missing_staged_chg(tmp_path: Path, capsys) -> None:
+    repo, msg_file = _staged_snapshot_fixture(tmp_path)
+    change_file = repo / f"{_FIXTURE_PROJECT_ID}_fixture" / "01_变更单" / f"{_FIXTURE_CHG_ID}.md"
+    _git(repo, "restore", "--staged", str(change_file.relative_to(repo)))
+
+    assert enforce_commit_msg(repo, msg_file) == 1
+    assert "暂存快照缺少或重复关联变更单" in capsys.readouterr().out
 
 
 def test_enforce_commit_msg_rejects_staged_pid_mismatch(tmp_path: Path, capsys) -> None:

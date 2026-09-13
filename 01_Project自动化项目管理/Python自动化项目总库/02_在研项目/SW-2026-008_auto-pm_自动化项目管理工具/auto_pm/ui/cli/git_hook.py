@@ -11,6 +11,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.infrastructure.git_hook_enforcer import (
     enforce_commit_msg,
     enforce_pre_commit,
+    enforce_release_ledger_gate,
 )
 
 console = Console()
@@ -32,6 +33,16 @@ def cmd_pre_commit(ctx: click.Context) -> None:
     """执行 pre-commit 台账一致性校验。"""
     ws = _workspace(ctx)
     code = enforce_pre_commit(ws)
+    if code != 0:
+        ctx.exit(code)
+
+
+@git_hook_group.command(name="release-gate")
+@click.pass_context
+def cmd_release_gate(ctx: click.Context) -> None:
+    """执行发布前全局台账一致性校验。"""
+    ws = _workspace(ctx)
+    code = enforce_release_ledger_gate(ws)
     if code != 0:
         ctx.exit(code)
 
