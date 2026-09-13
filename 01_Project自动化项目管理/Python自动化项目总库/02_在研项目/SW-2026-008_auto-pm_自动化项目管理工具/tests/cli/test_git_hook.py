@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,19 +36,6 @@ def _production_staged_files(_: Path) -> list[str]:
     return ["auto_pm/core/service.py"]
 
 
-def _write_closed_chg(workspace_root: Path, chg_id: str) -> None:
-    chg_file = workspace_root / "01_变更单" / f"{chg_id}.md"
-    chg_file.parent.mkdir(parents=True)
-    chg_file.write_text(
-        f"""# {chg_id}
-## 3. 变更基本信息
-### 3.4 申请信息
-| 变更状态 | closed |
-""",
-        encoding="utf-8",
-    )
-
-
 def _write_project_ledger(project_root: Path) -> None:
     ledger_file = (
         project_root
@@ -58,6 +46,118 @@ def _write_project_ledger(project_root: Path) -> None:
     )
     ledger_file.parent.mkdir(parents=True)
     ledger_file.write_text("# 台账\n", encoding="utf-8")
+
+
+_FIXTURE_PROJECT_ID = "SW-2026-901"
+_FIXTURE_CHG_ID = "CHG-SCPT-2026-170"
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def _fixture_chg_content(chg_id: str, project_id: str) -> str:
+    return f"""# {chg_id}
+
+## 3. 变更基本信息
+
+### 3.0 编号与项目
+
+| 字段 | 内容 |
+| --- | --- |
+| 变更编号 | {chg_id} |
+| 项目名称 | staged snapshot fixture |
+| 项目编号 | {project_id} |
+
+### 3.4 申请信息
+
+| 字段 | 内容 |
+| --- | --- |
+| 变更状态 | closed |
+"""
+
+
+def _fixture_ledger_content(chg_id: str | None) -> str:
+    entry = f"| {chg_id} | closed |\n" if chg_id else "| baseline | closed |\n"
+    return f"# 版本变更台账\n\n| 变更编号 | 状态 |\n| --- | --- |\n{entry}"
+
+
+def _staged_snapshot_fixture(
+    tmp_path: Path,
+    *,
+    staged_project_id: str = _FIXTURE_PROJECT_ID,
+    working_project_id: str | None = None,
+    staged_ledger_has_chg: bool = True,
+    working_ledger_has_chg: bool | None = None,
+    add_unknown_production_file: bool = False,
+) -> tuple[Path, Path]:
+    """建立真实 Git index，避免由 mock 掩盖 staged/working-tree 差异。"""
+    repo = tmp_path / "snapshot-repo"
+    project = repo / f"{_FIXTURE_PROJECT_ID}_fixture"
+    change_file = project / "01_变更单" / f"{_FIXTURE_CHG_ID}.md"
+    ledger_file = (
+        project
+        / "04_监控"
+        / "01_变更管理"
+        / "02_变更记录"
+        / "01_版本变更台账.md"
+    )
+    code_file = project / "src" / "service.py"
+    code_file.parent.mkdir(parents=True)
+    change_file.parent.mkdir(parents=True)
+    ledger_file.parent.mkdir(parents=True)
+    (project / ".copier-answers.yml").write_text(
+        f"project_id: {_FIXTURE_PROJECT_ID}\nproject_name: snapshot fixture\nstack: python\n",
+        encoding="utf-8",
+    )
+    code_file.write_text("VALUE = 1\n", encoding="utf-8")
+    change_file.write_text("# fixture baseline\n", encoding="utf-8")
+    ledger_file.write_text("# fixture baseline\n", encoding="utf-8")
+
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "fixture@example.invalid")
+    _git(repo, "config", "user.name", "snapshot fixture")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "fixture baseline")
+
+    code_file.write_text("VALUE = 2\n", encoding="utf-8")
+    change_file.write_text(
+        _fixture_chg_content(_FIXTURE_CHG_ID, staged_project_id), encoding="utf-8"
+    )
+    ledger_file.write_text(
+        _fixture_ledger_content(_FIXTURE_CHG_ID if staged_ledger_has_chg else None),
+        encoding="utf-8",
+    )
+    _git(repo, "add", str(code_file.relative_to(repo)))
+    _git(repo, "add", str(change_file.relative_to(repo)))
+    _git(repo, "add", str(ledger_file.relative_to(repo)))
+
+    if working_project_id is not None:
+        change_file.write_text(
+            _fixture_chg_content(_FIXTURE_CHG_ID, working_project_id), encoding="utf-8"
+        )
+    if working_ledger_has_chg is not None:
+        ledger_file.write_text(
+            _fixture_ledger_content(_FIXTURE_CHG_ID if working_ledger_has_chg else None),
+            encoding="utf-8",
+        )
+    if add_unknown_production_file:
+        unknown_file = repo / "unregistered" / "service.py"
+        unknown_file.parent.mkdir()
+        unknown_file.write_text("VALUE = 3\n", encoding="utf-8")
+        _git(repo, "add", str(unknown_file.relative_to(repo)))
+
+    message_file = repo / "COMMIT_EDITMSG"
+    message_file.write_text(f"feat: [{_FIXTURE_CHG_ID}] snapshot test\n", encoding="utf-8")
+    return repo, message_file
 
 
 def test_enforce_pre_commit_rejects_staged_files_lookup_error(
@@ -139,46 +239,87 @@ def test_enforce_pre_commit_rejects_ledger_error(tmp_path: Path, monkeypatch, ca
 
 
 def test_enforce_commit_msg_rejects_message_read_error(tmp_path: Path, monkeypatch, capsys) -> None:
-    msg_file = tmp_path / "COMMIT_EDITMSG"
-    msg_file.write_text("feat: [CHG-SCPT-2026-170] test", encoding="utf-8")
+    repo, msg_file = _staged_snapshot_fixture(tmp_path)
 
     def raise_message_read_error(*_args: object, **_kwargs: object) -> str:
         raise OSError("message unavailable")
 
-    monkeypatch.setattr(git_hook_enforcer, "get_staged_files", _production_staged_files)
     monkeypatch.setattr(Path, "read_text", raise_message_read_error)
 
-    assert enforce_commit_msg(tmp_path, msg_file) == 1
+    assert enforce_commit_msg(repo, msg_file) == 1
     output = capsys.readouterr().out
     assert "无法读取或解析提交信息" in output
     assert "拒绝提交" in output
 
 
 def test_enforce_commit_msg_rejects_chg_parser_error(tmp_path: Path, monkeypatch, capsys) -> None:
-    chg_id = "CHG-SCPT-2026-170"
-    _write_closed_chg(tmp_path, chg_id)
-    msg_file = tmp_path / "COMMIT_EDITMSG"
-    msg_file.write_text(f"feat: [{chg_id}] test", encoding="utf-8")
+    repo, msg_file = _staged_snapshot_fixture(tmp_path)
 
     def raise_parser_error(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("parser unavailable")
 
-    monkeypatch.setattr(git_hook_enforcer, "get_staged_files", _production_staged_files)
     monkeypatch.setattr(git_hook_enforcer.ChgParser, "parse", raise_parser_error)
 
-    assert enforce_commit_msg(tmp_path, msg_file) == 1
+    assert enforce_commit_msg(repo, msg_file) == 1
     output = capsys.readouterr().out
     assert "解析关联变更单状态失败" in output
     assert "拒绝提交" in output
 
 
-def test_enforce_commit_msg_passes_valid_closed_chg(tmp_path: Path, monkeypatch, capsys) -> None:
-    chg_id = "CHG-SCPT-2026-170"
-    _write_closed_chg(tmp_path, chg_id)
-    msg_file = tmp_path / "COMMIT_EDITMSG"
-    msg_file.write_text(f"feat: [{chg_id}] test", encoding="utf-8")
+def test_enforce_commit_msg_passes_valid_closed_chg(tmp_path: Path, capsys) -> None:
+    repo, msg_file = _staged_snapshot_fixture(tmp_path)
 
-    monkeypatch.setattr(git_hook_enforcer, "get_staged_files", _production_staged_files)
-
-    assert enforce_commit_msg(tmp_path, msg_file) == 0
+    assert enforce_commit_msg(repo, msg_file) == 0
     assert "强校验绑定通过" in capsys.readouterr().out
+
+
+def test_enforce_commit_msg_rejects_staged_pid_mismatch(tmp_path: Path, capsys) -> None:
+    repo, msg_file = _staged_snapshot_fixture(tmp_path, staged_project_id="SW-2026-902")
+
+    assert enforce_commit_msg(repo, msg_file) == 1
+    assert "暂存变更单 PID 与生产代码归属不一致" in capsys.readouterr().out
+
+
+def test_enforce_commit_msg_rejects_unstaged_chg_repair(tmp_path: Path, capsys) -> None:
+    repo, msg_file = _staged_snapshot_fixture(
+        tmp_path,
+        staged_project_id="SW-2026-902",
+        working_project_id=_FIXTURE_PROJECT_ID,
+    )
+
+    assert enforce_commit_msg(repo, msg_file) == 1
+    assert "工作区证据与暂存快照不一致" in capsys.readouterr().out
+
+
+def test_enforce_commit_msg_rejects_unstaged_ledger_repair(tmp_path: Path, capsys) -> None:
+    repo, msg_file = _staged_snapshot_fixture(
+        tmp_path,
+        staged_ledger_has_chg=False,
+        working_ledger_has_chg=True,
+    )
+
+    assert enforce_commit_msg(repo, msg_file) == 1
+    assert "工作区证据与暂存快照不一致" in capsys.readouterr().out
+
+
+def test_enforce_commit_msg_rejects_unknown_staged_production_project(tmp_path: Path, capsys) -> None:
+    repo, msg_file = _staged_snapshot_fixture(tmp_path, add_unknown_production_file=True)
+
+    assert enforce_commit_msg(repo, msg_file) == 1
+    assert "暂存生产文件归属未知或不唯一" in capsys.readouterr().out
+
+
+def test_enforce_commit_msg_rejects_staged_blob_read_error(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo, msg_file = _staged_snapshot_fixture(tmp_path)
+
+    def raise_blob_error(*_args: object, **_kwargs: object) -> bytes:
+        raise git_hook_enforcer.StagedSnapshotError("blob unavailable")
+
+    monkeypatch.setattr(git_hook_enforcer, "_read_staged_blob", raise_blob_error)
+
+    assert enforce_commit_msg(repo, msg_file) == 1
+    output = capsys.readouterr().out
+    assert "暂存快照的 CHG/PID/台账证据" in output
+    assert "blob unavailable" in output
