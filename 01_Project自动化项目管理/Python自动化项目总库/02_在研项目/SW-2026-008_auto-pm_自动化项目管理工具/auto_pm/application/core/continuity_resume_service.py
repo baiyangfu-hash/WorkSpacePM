@@ -9,8 +9,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from auto_pm.contracts.continuity import LeaseItem, RunState, WorkState
-from auto_pm.contracts.continuity_resume import ContinuityResume, LeaseView
+from auto_pm.contracts.continuity import LeaseItem, RunState, WorkItem, WorkState
+from auto_pm.contracts.continuity_resume import (
+    ContinuityResume,
+    LeaseView,
+    ResumeRunCandidate,
+)
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -19,6 +23,16 @@ from .workspace_context_service import WorkspaceContextError, WorkspaceContextSe
 
 class ContinuityResumeError(RuntimeError):
     """Raised when Resume cannot establish a single trustworthy chain."""
+
+
+_SELECTABLE_WORK_STATES = frozenset(
+    {
+        WorkState.READY,
+        WorkState.IN_PROGRESS,
+        WorkState.BLOCKED,
+        WorkState.VERIFYING,
+    }
+)
 
 
 class ContinuityResumeService:
@@ -54,8 +68,9 @@ class ContinuityResumeService:
         work = None
         run = None
         checkpoint = None
-        lease: LeaseItem | None = None
         lease_view: LeaseView | None = None
+        work_candidates: tuple[WorkItem, ...] = ()
+        run_candidates: tuple[ResumeRunCandidate, ...] = ()
         db_exists = self._store.db_path.is_file()
         if db_exists:
             try:
@@ -65,7 +80,19 @@ class ContinuityResumeService:
                 elif len(missions) > 1:
                     conflicts.append("MULTIPLE_ACTIVE_MISSIONS")
 
-                works = self._store.list_works(context.subject_project_id)
+                works = tuple(
+                    sorted(
+                        (
+                            candidate
+                            for candidate in self._store.list_works(
+                                context.subject_project_id
+                            )
+                            if candidate.state in _SELECTABLE_WORK_STATES
+                        ),
+                        key=lambda candidate: candidate.work_id,
+                    )
+                )
+                work_candidates = works
                 if mission and mission.root_work_id:
                     if work_id and work_id != mission.root_work_id:
                         raise ContinuityResumeError("指定 Work 与活动 Mission 的 root Work 不一致")
@@ -82,32 +109,41 @@ class ContinuityResumeService:
                 if run_id and work is None:
                     raise ContinuityResumeError("指定 run_id 时必须能确定 Work")
                 if work is not None:
-                    runs = self._store.list_runs(work.work_id)
+                    runs = tuple(
+                        sorted(
+                            self._store.list_runs(work.work_id),
+                            key=lambda candidate: candidate.run_id,
+                        )
+                    )
+                    run_candidates = tuple(
+                        ResumeRunCandidate(
+                            run=candidate,
+                            lease=self._lease_view(self._store.get_lease(candidate.run_id)),
+                        )
+                        for candidate in runs
+                    )
                     if run_id:
                         run = self._store.get_run(run_id)
                         if run.work_id != work.work_id:
                             raise ContinuityResumeError("Run 不属于选定 Work")
                     else:
-                        active_runs = tuple(
-                            candidate
-                            for candidate in runs
-                            if self._lease_is_active(self._store.get_lease(candidate.run_id))
-                        )
-                        if len(active_runs) == 1:
-                            run = active_runs[0]
-                        elif len(active_runs) > 1:
+                        if len(runs) == 1:
+                            run = runs[0]
+                        elif len(runs) > 1:
                             conflicts.append("MULTIPLE_ACTIVE_RUNS")
                 if run is not None:
                     checkpoint = self._store.latest_checkpoint(run.run_id)
-                    lease = self._store.get_lease(run.run_id)
-                    lease_view = LeaseView(
-                        run_id=lease.run_id,
-                        owner_id=lease.owner_id,
-                        expires_at=lease.expires_at,
-                        version=lease.version,
-                        updated_at=lease.updated_at,
-                    )
-                    if datetime.fromisoformat(lease.expires_at) <= self._now().astimezone(UTC):
+                    candidate_leases = {
+                        candidate.run.run_id: candidate.lease for candidate in run_candidates
+                    }
+                    lease_view = candidate_leases.get(run.run_id)
+                    if lease_view is None:
+                        lease_view = self._lease_view(self._store.get_lease(run.run_id))
+                    if (
+                        run.run_id in candidate_leases
+                        and datetime.fromisoformat(lease_view.expires_at)
+                        <= self._now().astimezone(UTC)
+                    ):
                         conflicts.append("LEASE_EXPIRED")
             except (ContinuityStoreError, sqlite3.Error) as error:
                 raise ContinuityResumeError(f"Continuity Store 无法读取: {error}") from error
@@ -127,7 +163,13 @@ class ContinuityResumeService:
             "context": context.evidence_id,
             "mission": mission.model_dump(mode="json") if mission else None,
             "work": work.model_dump(mode="json") if work else None,
+            "work_candidates": [
+                candidate.model_dump(mode="json") for candidate in work_candidates
+            ],
             "run": run.model_dump(mode="json") if run else None,
+            "run_candidates": [
+                candidate.model_dump(mode="json") for candidate in run_candidates
+            ],
             "checkpoint": checkpoint.model_dump(mode="json") if checkpoint else None,
             "lease": lease_view.model_dump(mode="json") if lease_view else None,
             "conflicts": conflicts,
@@ -139,7 +181,9 @@ class ContinuityResumeService:
             context=context,
             mission=mission,
             work=work,
+            work_candidates=work_candidates,
             run=run,
+            run_candidates=run_candidates,
             checkpoint=checkpoint,
             lease=lease_view,
             conflicts=tuple(conflicts),
@@ -148,8 +192,15 @@ class ContinuityResumeService:
             evidence_id=f"RESUME-{digest[:16].upper()}",
         )
 
-    def _lease_is_active(self, lease: LeaseItem) -> bool:
-        return datetime.fromisoformat(lease.expires_at) > self._now().astimezone(UTC)
+    @staticmethod
+    def _lease_view(lease: LeaseItem) -> LeaseView:
+        return LeaseView(
+            run_id=lease.run_id,
+            owner_id=lease.owner_id,
+            expires_at=lease.expires_at,
+            version=lease.version,
+            updated_at=lease.updated_at,
+        )
 
     @staticmethod
     def _next_action(
