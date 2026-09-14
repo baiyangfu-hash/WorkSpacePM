@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
 from auto_pm.contracts.pm_facade import PlanningDraft
@@ -152,6 +153,7 @@ class MissionService:
             decision_id=decision.decision_id,
             authorization_source="CHG_DECISION",
             scope_paths=tuple(decision.approved_files),
+            allowed_child_work_kinds=frozenset({WorkKind.WBS}),
             valid_from=approved_at,
             expires_at=instant + timedelta(days=30),
             audit=AuthorityAudit(

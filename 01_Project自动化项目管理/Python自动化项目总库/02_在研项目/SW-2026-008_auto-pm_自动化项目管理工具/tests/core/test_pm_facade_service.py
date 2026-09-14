@@ -484,6 +484,11 @@ def test_planning_approval_materializes_one_exact_authorized_mission(
     assert mission.authority.change_id == card.change_id
     assert mission.authority.decision_id == approved.decision_id
     assert mission.authority.scope_paths == card.scope_paths
+    assert mission.authority.allowed_child_work_kinds == frozenset({WorkKind.WBS})
+    assert WorkKind.BUG not in mission.authority.allowed_child_work_kinds
+    assert WorkKind.TEST not in mission.authority.allowed_child_work_kinds
+    assert WorkKind.DEBT not in mission.authority.allowed_child_work_kinds
+    assert WorkKind.GOVERNANCE not in mission.authority.allowed_child_work_kinds
     assert mission.authority.audit.approved_by == "fubai"
     assert mission.authority.audit.source_fingerprint.startswith("sha256:")
     with pytest.raises(PmFacadeError, match="plan_hash 已过期或内容发生漂移"):
