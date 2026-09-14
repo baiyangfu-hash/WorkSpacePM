@@ -48,9 +48,9 @@ class PmFacadeService:
         decision_service: DecisionService | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root)
-        self._missions = MissionService(self._workspace_root)
-        self._works = WorkRegistryService(self._workspace_root)
         self._store = store or ContinuityStore(self._workspace_root)
+        self._missions = MissionService(self._workspace_root, store=self._store)
+        self._works = WorkRegistryService(self._workspace_root)
         self._changes = change_service or ChangeService(str(self._workspace_root))
         self._decisions = decision_service or DecisionService(self._workspace_root)
 
@@ -183,6 +183,66 @@ class PmFacadeService:
             )
             return decision
         except (ContinuityStoreError, DecisionError) as error:
+            raise PmFacadeError(str(error)) from error
+
+    def materialize_planning_mission(
+        self,
+        card: PlanningScopeCard,
+        *,
+        created_by: str = "PM Facade",
+    ) -> Mission:
+        """Materialize one Mission only from the card's persisted approval chain."""
+
+        actual_hash = self._planning_scope_card_hash(card)
+        if not hmac.compare_digest(actual_hash, card.plan_hash):
+            raise PmFacadeError("PlanningScopeCard plan_hash 已过期或内容发生漂移")
+        try:
+            decision_id = self._store.get_planning_draft_decision_id(
+                card.request_id, card.change_id, actual_hash
+            )
+            decision = self._decisions.get_decision(decision_id)
+            approval = decision.metadata.get("planning_approval")
+            if not isinstance(approval, dict):
+                raise PmFacadeError("Decision 缺少 PlanningScopeCard 批准证据")
+            evidence_ref = approval.get("approval_evidence_ref")
+            if not isinstance(evidence_ref, str) or not evidence_ref:
+                raise PmFacadeError("Decision 缺少非模型自签的批准证据")
+            self._validate_planning_decision(
+                decision,
+                card=card,
+                approver=decision.approver,
+                approval_evidence_ref=evidence_ref,
+            )
+            change = self._changes.get_change_request(
+                card.change_id, project_id=card.subject_project_id
+            )
+            if change is None or change.change_number != card.change_id:
+                raise PmFacadeError("PlanningScopeCard 未绑定可读取的真实 CHG")
+            if change.status not in {"approved", "implementing", "pending_acceptance", "accepting", "completed"}:
+                raise PmFacadeError("PlanningScopeCard 绑定的 CHG 尚未批准")
+            draft = self._store.get_planning_draft(card.request_id)
+            if (
+                draft.subject_project_id != card.subject_project_id
+                or draft.acceptance_criteria != card.acceptance_criteria
+            ):
+                raise PmFacadeError("PlanningDraft 与批准范围卡不一致")
+            mission_id = self._store.resolve_planning_draft_mission_id(
+                card.request_id,
+                decision.decision_id,
+                decision.change_id,
+                actual_hash,
+            )
+            return cast(
+                Mission,
+                self._missions.create_from_planning_approval(
+                    mission_id=mission_id,
+                    draft=draft,
+                    decision=decision,
+                    plan_hash=actual_hash,
+                    created_by=created_by,
+                ),
+            )
+        except (ContinuityStoreError, DecisionError, MissionServiceError) as error:
             raise PmFacadeError(str(error)) from error
 
     @staticmethod

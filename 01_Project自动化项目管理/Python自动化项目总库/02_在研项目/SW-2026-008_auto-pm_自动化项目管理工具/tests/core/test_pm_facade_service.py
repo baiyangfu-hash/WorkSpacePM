@@ -347,7 +347,7 @@ def test_planning_scope_card_is_deterministic_and_never_creates_execution(tmp_pa
         facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/*",), risks=("scope drift",), non_goals=("no execution",))
 
 
-def test_planning_scope_card_approval_is_human_bound_hash_exact_and_idempotent(
+def test_planning_approval_materializes_one_exact_authorized_mission(
     tmp_path: Path,
 ) -> None:
     _git_root(tmp_path)
@@ -420,6 +420,8 @@ def test_planning_scope_card_approval_is_human_bound_hash_exact_and_idempotent(
             project_id="SW-TEST-001",
         )
 
+    with pytest.raises(PmFacadeError, match="尚未绑定用户批准的 Decision"):
+        facade.materialize_planning_mission(card)
     with pytest.raises(PmFacadeError, match="过期或内容发生漂移"):
         facade.approve_planning_scope_card(
             card,
@@ -470,10 +472,26 @@ def test_planning_scope_card_approval_is_human_bound_hash_exact_and_idempotent(
         "plan_hash": card.plan_hash,
         "approval_evidence_ref": "user-confirmation:P07-TEST-001",
     }
+    mission = facade.materialize_planning_mission(card, created_by="PM Facade")
+    replayed_mission = facade.materialize_planning_mission(card, created_by="PM Facade")
+    assert replayed_mission == mission
+    assert mission.state is MissionState.DRAFT
+    assert mission.subject_project_id == card.subject_project_id
+    assert mission.acceptance_criteria == card.acceptance_criteria
+    assert mission.mission_id.startswith("MISSION-") and "PLACEHOLDER" not in mission.mission_id
+    assert mission.authority.envelope_id.startswith("AUTH-")
+    assert mission.authority.authorization_source == "CHG_DECISION"
+    assert mission.authority.change_id == card.change_id
+    assert mission.authority.decision_id == approved.decision_id
+    assert mission.authority.scope_paths == card.scope_paths
+    assert mission.authority.audit.approved_by == "fubai"
+    assert mission.authority.audit.source_fingerprint.startswith("sha256:")
+    with pytest.raises(PmFacadeError, match="plan_hash 已过期或内容发生漂移"):
+        facade.materialize_planning_mission(card.model_copy(update={"plan_hash": "0" * 64}))
     assert len(list((tmp_path / ".auto-pm" / "decisions").glob("DEC-*.json"))) == 1
     with sqlite3.connect(database) as conn:
         assert conn.execute("SELECT COUNT(*) FROM planning_draft_decision_bindings").fetchone()[0] == 1
         assert {
             table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             for table in ("mission_items", "work_items", "run_items")
-        } == {"mission_items": 0, "work_items": 0, "run_items": 0}
+        } == {"mission_items": 1, "work_items": 0, "run_items": 0}

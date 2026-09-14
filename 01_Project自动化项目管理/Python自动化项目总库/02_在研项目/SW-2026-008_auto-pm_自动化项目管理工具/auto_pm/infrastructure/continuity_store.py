@@ -1182,6 +1182,64 @@ class ContinuityStore:
             )
             return decision_id
 
+    def get_planning_draft(self, request_id: str) -> PlanningDraft:
+        """Read one persisted pre-authorization draft without changing store state."""
+
+        with self._read_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM planning_drafts WHERE request_id=?", (request_id,)
+            ).fetchone()
+            if row is None:
+                raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+            return self._get_planning_draft(row)
+
+    def get_planning_draft_decision_id(
+        self, request_id: str, change_id: str, plan_hash: str
+    ) -> str:
+        """Return the Decision bound to this exact draft, CHG, and plan hash."""
+
+        with self._read_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM planning_draft_decision_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                raise ContinuityStoreError("PlanningDraft 尚未绑定用户批准的 Decision")
+            if str(row["change_id"]) != change_id or not hmac.compare_digest(
+                str(row["plan_hash"]), plan_hash
+            ):
+                raise ContinuityStoreError("PlanningDraft 的 CHG 或 plan_hash 与批准事实不一致")
+            return str(row["decision_id"])
+
+    def resolve_planning_draft_mission_id(
+        self,
+        request_id: str,
+        decision_id: str,
+        change_id: str,
+        plan_hash: str,
+    ) -> str:
+        """Resolve one deterministic Mission identity from an exact approved chain."""
+
+        if re.fullmatch(r"[0-9a-f]{64}", plan_hash) is None:
+            raise ContinuityStoreError("PlanningScopeCard plan_hash 必须是 64 位小写 SHA256")
+        values = (decision_id, change_id, plan_hash)
+        with self._read_connection() as conn:
+            approved = conn.execute(
+                "SELECT * FROM planning_draft_decision_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if approved is None:
+                raise ContinuityStoreError("PlanningDraft 尚未绑定用户批准的 Decision")
+            persisted_approval = (
+                str(approved["decision_id"]),
+                str(approved["change_id"]),
+                str(approved["plan_hash"]),
+            )
+            if persisted_approval != values:
+                raise ContinuityStoreError("Mission 输入与 PlanningDraft 批准链不一致")
+            identity = "\n".join((request_id, *values)).encode("utf-8")
+            return f"MISSION-{hashlib.sha256(identity).hexdigest()[:16].upper()}"
+
     def create_mission(self, values: dict[str, Any], idempotency_key: str, now: str) -> Mission:
         """Persist one Mission and its append-only creation event atomically."""
         with self._transaction() as conn:
