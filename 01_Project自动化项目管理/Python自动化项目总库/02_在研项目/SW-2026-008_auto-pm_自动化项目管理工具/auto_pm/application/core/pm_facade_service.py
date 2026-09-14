@@ -50,7 +50,7 @@ class PmFacadeService:
         self._workspace_root = Path(workspace_root)
         self._store = store or ContinuityStore(self._workspace_root)
         self._missions = MissionService(self._workspace_root, store=self._store)
-        self._works = WorkRegistryService(self._workspace_root)
+        self._works = WorkRegistryService(self._workspace_root, store=self._store)
         self._changes = change_service or ChangeService(str(self._workspace_root))
         self._decisions = decision_service or DecisionService(self._workspace_root)
 

@@ -7,17 +7,19 @@ import sqlite3
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from auto_pm.change.change_service import ChangeService
-from auto_pm.core.mission_service import MissionService
+from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.work_registry_service import WorkRegistryService
+from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
 from auto_pm.contracts.continuity import WorkKind, WorkState
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
-from auto_pm.contracts.pm_facade import PmConfirmationKind, PmIntent
-from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.contracts.pm_facade import PlanningScopeCard, PmConfirmationKind, PmIntent
+from auto_pm.domain.change.decision_service import DecisionError
+from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
 def _git_root(root: Path) -> None:
@@ -97,6 +99,170 @@ def _planning_intent(*, objective: str = "Persist a pre-authorization plan.") ->
         objective=objective,
         acceptance_criteria=("Replay must be idempotent.",),
     )
+
+
+def _p10_facade(root: Path) -> tuple[PmFacadeService, Path, ChangeService]:
+    """Build one isolated planning facade without creating authority objects."""
+    _git_root(root)
+    project = root / "SW-TEST-001"
+    (project / "04_监控" / "01_变更管理" / "01_变更单").mkdir(parents=True)
+    (project / "04_监控" / "01_变更管理" / "01_版本变更台帐.md").write_text(
+        "# 台帐\n\n| 序号 | 变更编号 | 描述 |\n|---|---|---|\n", encoding="utf-8"
+    )
+    (root / "specs").mkdir()
+    (root / "specs" / "python.md").write_text("python", encoding="utf-8")
+    (root / "specs" / "plc.md").write_text("plc", encoding="utf-8")
+    registry = root / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(json.dumps({"specs": {
+        "DEV-TEST": {"domain": "python", "lifecycle": "stable", "canonical_path": "specs/python.md", "version": "V1"},
+        "LSP-TEST": {"domain": "plc", "lifecycle": "active", "canonical_path": "specs/plc.md", "version": "V1"},
+    }}), encoding="utf-8")
+    workspace = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
+    workspace.parent.mkdir(parents=True)
+    workspace.write_text(json.dumps({"schema_version": "workspace-registry.v1", "projects": [{"project_id": "SW-TEST-001", "project_root": "SW-TEST-001", "development_root": "SW-TEST-001"}]}), encoding="utf-8")
+    database = root / ".auto-pm" / "p10-test.db"
+    store = ContinuityStore(root, database)
+    store.initialize("2026-09-14T00:00:00+00:00", "test")
+    changes = ChangeService(str(root))
+    facade = PmFacadeService(root, store=store, change_service=changes)
+    return facade, database, changes
+
+
+def _p10_card(root: Path) -> tuple[PmFacadeService, PlanningScopeCard, Path]:
+    """Build one approved, isolated PlanningScopeCard for fault-retry checks."""
+    facade, database, changes = _p10_facade(root)
+    card = facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/example.py",), risks=("retry",), non_goals=("no execution",))
+    for state in ("submitted", "under_review", "approved"):
+        changes.transition_status(card.change_id, state, approver="fubai", comment="human", project_id="SW-TEST-001")
+    return facade, card, database
+
+
+def test_p10_retries_draft_and_chg_after_post_write_interruptions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facade, database, _changes = _p10_facade(tmp_path)
+    original_draft = facade._store.create_planning_draft
+    draft_fired = False
+
+    def fail_after_draft(*args: Any, **kwargs: Any) -> Any:
+        nonlocal draft_fired
+        result = original_draft(*args, **kwargs)
+        if not draft_fired:
+            draft_fired = True
+            raise ContinuityStoreError("injected after Draft persistence")
+        return result
+
+    monkeypatch.setattr(facade._store, "create_planning_draft", fail_after_draft)
+    with pytest.raises(PmFacadeError, match="injected"):
+        facade.create_planning_draft(_planning_intent())
+    draft = facade.create_planning_draft(_planning_intent())
+
+    original_change = facade._changes.create_change_request
+    change_fired = False
+
+    def fail_after_change(*args: Any, **kwargs: Any) -> Any:
+        nonlocal change_fired
+        result = original_change(*args, **kwargs)
+        if not change_fired:
+            change_fired = True
+            raise ValueError("injected after CHG persistence")
+        return result
+
+    monkeypatch.setattr(facade._changes, "create_change_request", fail_after_change)
+    with pytest.raises(PmFacadeError, match="injected"):
+        facade.create_planning_draft_change(_planning_intent())
+    change_id = facade.create_planning_draft_change(_planning_intent())
+
+    assert draft.request_id == "REQ-P03-001" and change_id.startswith("CHG-")
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM planning_drafts").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM planning_draft_chg_bindings").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM mission_items").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM work_items").fetchone()[0] == 0
+
+
+def test_p10_retries_decision_after_post_write_interruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facade, card, database = _p10_card(tmp_path)
+    original = facade._decisions.create_decision
+    fired = False
+
+    def fail_after_decision(*args: Any, **kwargs: Any) -> Any:
+        nonlocal fired
+        result = original(*args, **kwargs)
+        if not fired:
+            fired = True
+            raise DecisionError("injected after Decision persistence")
+        return result
+
+    monkeypatch.setattr(facade._decisions, "create_decision", fail_after_decision)
+    approval = {
+        "expected_plan_hash": card.plan_hash,
+        "approver": "fubai",
+        "approval_evidence_ref": "user-confirmation:P10-TEST-002",
+    }
+    with pytest.raises(PmFacadeError, match="injected"):
+        facade.approve_planning_scope_card(card, **approval)
+    decision = facade.approve_planning_scope_card(card, **approval)
+
+    assert decision.change_id == card.change_id
+    assert len(list((tmp_path / ".auto-pm" / "decisions").glob("DEC-*.json"))) == 1
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM planning_draft_decision_bindings").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM mission_items").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM work_items").fetchone()[0] == 0
+
+
+def test_p10_retries_each_persisted_authority_boundary_without_duplicate_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A post-write interruption must replay one chain, never a phantom authority."""
+    facade, card, database = _p10_card(tmp_path)
+    approved = facade.approve_planning_scope_card(card, expected_plan_hash=card.plan_hash, approver="fubai", approval_evidence_ref="user-confirmation:P10-TEST-001")
+
+    original_mission = facade._missions.create_from_planning_approval
+    fired = False
+    def fail_after_mission(*args: Any, **kwargs: Any) -> Any:
+        nonlocal fired
+        result = original_mission(*args, **kwargs)
+        if not fired:
+            fired = True
+            raise MissionServiceError("injected after Mission persistence")
+        return result
+    monkeypatch.setattr(facade._missions, "create_from_planning_approval", fail_after_mission)
+    with pytest.raises(PmFacadeError, match="injected"):
+        facade.materialize_planning_mission(card)
+    mission = facade.materialize_planning_mission(card)
+
+    original_authorize = facade._works.authorize
+    fired = False
+    observed_pre_authorize: list[tuple[WorkState, str]] = []
+
+    def fail_before_work_authorization(*args: Any, **kwargs: Any) -> Any:
+        nonlocal fired
+        if not fired:
+            fired = True
+            pending = facade._works.get_work(str(args[0]))
+            observed_pre_authorize.append((pending.state, pending.authorization_ref))
+            raise WorkRegistryError("injected before Work authorization")
+        return original_authorize(*args, **kwargs)
+
+    monkeypatch.setattr(facade._works, "authorize", fail_before_work_authorization)
+    with pytest.raises(PmFacadeError, match="injected"):
+        facade.create_planning_work(card)
+    assert observed_pre_authorize == [(WorkState.PLANNED, "")]
+    work = facade.create_planning_work(card)
+
+    assert mission.authority.decision_id == approved.decision_id
+    assert work.authorization_ref == approved.decision_id and work.state is WorkState.READY
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM planning_drafts").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM planning_draft_chg_bindings").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM planning_draft_decision_bindings").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM mission_items").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM work_items").fetchone()[0] == 1
 
 
 def test_plan_approve_and_execute_are_bounded_and_idempotent(tmp_path: Path) -> None:
