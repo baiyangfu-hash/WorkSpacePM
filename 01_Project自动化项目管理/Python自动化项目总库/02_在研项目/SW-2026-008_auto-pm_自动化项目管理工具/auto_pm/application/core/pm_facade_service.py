@@ -245,6 +245,28 @@ class PmFacadeService:
         except (ContinuityStoreError, DecisionError, MissionServiceError) as error:
             raise PmFacadeError(str(error)) from error
 
+    def create_planning_work(self, card: PlanningScopeCard, *, owner: str = "PM Facade") -> WorkItem:
+        """Derive Work only from the already-materialized Mission for this exact card."""
+        actual_hash = self._planning_scope_card_hash(card)
+        if not hmac.compare_digest(actual_hash, card.plan_hash):
+            raise PmFacadeError("PlanningScopeCard plan_hash 已过期或内容发生漂移")
+        try:
+            decision_id = self._store.get_planning_draft_decision_id(
+                card.request_id, card.change_id, actual_hash
+            )
+            mission_id = self._store.resolve_planning_draft_mission_id(
+                card.request_id, decision_id, card.change_id, actual_hash
+            )
+            self._missions.get(mission_id)
+            return cast(
+                WorkItem,
+                self._works.create_from_mission(
+                    mission_id=mission_id, owner=owner, scope_paths=list(card.scope_paths)
+                ),
+            )
+        except (ContinuityStoreError, MissionServiceError, WorkRegistryError) as error:
+            raise PmFacadeError(str(error)) from error
+
     @staticmethod
     def _planning_scope_card_hash(card: PlanningScopeCard) -> str:
         payload = {
