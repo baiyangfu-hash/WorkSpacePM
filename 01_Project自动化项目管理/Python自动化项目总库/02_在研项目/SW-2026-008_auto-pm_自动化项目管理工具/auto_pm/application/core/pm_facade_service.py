@@ -12,7 +12,12 @@ from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistrySe
 from auto_pm.contracts.continuity import WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume
 from auto_pm.contracts.mission import Mission, MissionState
-from auto_pm.contracts.pm_facade import PmConfirmationCard, PmConfirmationKind
+from auto_pm.contracts.pm_facade import (
+    PlanningDraft,
+    PmConfirmationCard,
+    PmConfirmationKind,
+    PmIntent,
+)
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
@@ -23,11 +28,24 @@ class PmFacadeError(RuntimeError):
 class PmFacadeService:
     """Stateless orchestrating facade for a single approved Mission."""
 
-    def __init__(self, workspace_root: str | Path) -> None:
+    def __init__(
+        self,
+        workspace_root: str | Path,
+        *,
+        store: ContinuityStore | None = None,
+    ) -> None:
         self._workspace_root = Path(workspace_root)
         self._missions = MissionService(self._workspace_root)
         self._works = WorkRegistryService(self._workspace_root)
-        self._store = ContinuityStore(self._workspace_root)
+        self._store = store or ContinuityStore(self._workspace_root)
+
+    def create_planning_draft(self, intent: PmIntent) -> PlanningDraft:
+        """Persist a pre-authorization draft without creating executable state."""
+
+        try:
+            return self._store.create_planning_draft(PlanningDraft.from_intent(intent))
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
 
     def plan(self, mission_id: str) -> PmConfirmationCard:
         """Present the first confirmation card and persist only its legal state change."""

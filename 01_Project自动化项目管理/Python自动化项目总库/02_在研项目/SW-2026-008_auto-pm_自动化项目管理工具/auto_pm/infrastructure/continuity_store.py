@@ -36,6 +36,7 @@ from auto_pm.contracts.decision_package import (
 )
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.orchestration import OrchestrationOutcome
+from auto_pm.contracts.pm_facade import PlanningDraft
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
     authority_path_parts,
@@ -167,6 +168,16 @@ CREATE TABLE IF NOT EXISTS mission_items (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS planning_drafts (
+    request_id TEXT PRIMARY KEY,
+    subject_project_id TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    acceptance_criteria_json TEXT NOT NULL,
+    input_fingerprint TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_work_project_state
 ON work_items(subject_project_id, state);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate
@@ -175,14 +186,19 @@ CREATE INDEX IF NOT EXISTS idx_runs_work_state ON run_items(work_id, state);
 CREATE INDEX IF NOT EXISTS idx_checkpoints_run ON checkpoints(run_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_mission_project_state
 ON mission_items(subject_project_id, state);
+CREATE INDEX IF NOT EXISTS idx_planning_drafts_project_state
+ON planning_drafts(subject_project_id, state);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_mission_per_project
 ON mission_items(subject_project_id)
 WHERE state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED');
 """
 
 _LEGACY_SCHEMA_VERSION = "continuity-store.v2"
-_CURRENT_SCHEMA_VERSION = "continuity-store.v3"
-_KNOWN_SCHEMA_VERSIONS = frozenset({_LEGACY_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION})
+_PREVIOUS_SCHEMA_VERSION = "continuity-store.v3"
+_CURRENT_SCHEMA_VERSION = "continuity-store.v4"
+_KNOWN_SCHEMA_VERSIONS = frozenset(
+    {_LEGACY_SCHEMA_VERSION, _PREVIOUS_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION}
+)
 _CANONICAL_RUNTIME_DB = ".auto-pm/continuity.db"
 _FULL_GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
 _RUN_CREATION_REQUEST_FIELDS = frozenset(
@@ -589,11 +605,29 @@ class ContinuityStore:
             elif versions == {_LEGACY_SCHEMA_VERSION}:
                 conn.execute(
                     "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
-                    (_CURRENT_SCHEMA_VERSION, _LEGACY_SCHEMA_VERSION),
+                    (_PREVIOUS_SCHEMA_VERSION, _LEGACY_SCHEMA_VERSION),
                 )
                 conn.execute(
                     "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
-                    (_LEGACY_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
+                    (_LEGACY_SCHEMA_VERSION, _PREVIOUS_SCHEMA_VERSION, now, tool_version),
+                )
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_CURRENT_SCHEMA_VERSION, _PREVIOUS_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_PREVIOUS_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
+                )
+                migrated = True
+            elif versions == {_PREVIOUS_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_CURRENT_SCHEMA_VERSION, _PREVIOUS_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_PREVIOUS_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
                 )
                 migrated = True
         if migrated:
@@ -902,6 +936,46 @@ class ContinuityStore:
                 conn, values["work_id"], "WORK_CREATED", values, idempotency_key, now
             )
             return self._get_work(conn, values["work_id"])
+
+    def create_planning_draft(self, draft: PlanningDraft) -> PlanningDraft:
+        """Persist one pre-authorization draft with request-keyed replay protection."""
+
+        now = self._utc_now().isoformat()
+        with self._transaction() as conn:
+            existing = conn.execute(
+                "SELECT * FROM planning_drafts WHERE request_id=?", (draft.request_id,)
+            ).fetchone()
+            if existing is not None:
+                persisted = self._get_planning_draft(existing)
+                if not hmac.compare_digest(persisted.input_fingerprint, draft.input_fingerprint):
+                    raise ContinuityStoreError(
+                        "request_id 已绑定不同输入，拒绝覆盖既有 PlanningDraft"
+                    )
+                return persisted
+
+            values = {
+                "request_id": draft.request_id,
+                "subject_project_id": draft.subject_project_id,
+                "objective": draft.objective,
+                "acceptance_criteria_json": json.dumps(
+                    draft.acceptance_criteria, ensure_ascii=False, separators=(",", ":")
+                ),
+                "input_fingerprint": draft.input_fingerprint,
+                "state": draft.state,
+                "created_at": now,
+                "updated_at": now,
+            }
+            self._insert_mapping(conn, "planning_drafts", values)
+            self._append_event(
+                conn,
+                draft.request_id,
+                "PLANNING_DRAFT_CREATED",
+                draft.model_dump(mode="json"),
+                f"planning-draft-create:{draft.request_id}:{draft.input_fingerprint}",
+                now,
+                aggregate_type="planning_draft",
+            )
+            return draft
 
     def create_mission(self, values: dict[str, Any], idempotency_key: str, now: str) -> Mission:
         """Persist one Mission and its append-only creation event atomically."""
@@ -3061,6 +3135,14 @@ class ContinuityStore:
         data["acceptance_criteria"] = tuple(json.loads(data.pop("acceptance_criteria_json")))
         data["authority"] = json.loads(data.pop("authority_json"))
         return Mission.model_validate(data)
+
+    @staticmethod
+    def _get_planning_draft(row: sqlite3.Row) -> PlanningDraft:
+        data = dict(row)
+        data["acceptance_criteria"] = tuple(json.loads(data.pop("acceptance_criteria_json")))
+        data.pop("created_at")
+        data.pop("updated_at")
+        return PlanningDraft.model_validate(data)
 
     @staticmethod
     def _get_run(conn: sqlite3.Connection, run_id: str) -> RunItem:

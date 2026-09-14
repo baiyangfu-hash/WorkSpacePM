@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,7 +14,8 @@ from auto_pm.core.work_registry_service import WorkRegistryService
 
 from auto_pm.contracts.continuity import WorkKind, WorkState
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
-from auto_pm.contracts.pm_facade import PmConfirmationKind
+from auto_pm.contracts.pm_facade import PmConfirmationKind, PmIntent
+from auto_pm.infrastructure.continuity_store import ContinuityStore
 
 
 def _git_root(root: Path) -> None:
@@ -78,6 +80,23 @@ def _setup(root: Path) -> tuple[MissionService, PmFacadeService]:
     return missions, PmFacadeService(root)
 
 
+def _planning_facade(root: Path) -> tuple[PmFacadeService, Path]:
+    _git_root(root)
+    database = root / ".auto-pm" / "p03-planning-draft-test.db"
+    store = ContinuityStore(root, database)
+    store.initialize("2026-09-14T00:00:00+00:00", "test")
+    return PmFacadeService(root, store=store), database
+
+
+def _planning_intent(*, objective: str = "Persist a pre-authorization plan.") -> PmIntent:
+    return PmIntent(
+        request_id="REQ-P03-001",
+        subject_project_id="SW-TEST-001",
+        objective=objective,
+        acceptance_criteria=("Replay must be idempotent.",),
+    )
+
+
 def test_plan_approve_and_execute_are_bounded_and_idempotent(tmp_path: Path) -> None:
     _, facade = _setup(tmp_path)
 
@@ -130,3 +149,61 @@ def test_facade_rejects_out_of_order_actions_and_keeps_legacy_isolated(tmp_path:
     with pytest.raises(PmFacadeError, match="可执行状态"):
         facade.execute("MISSION-PM-001")
     assert "pm-workflow 已退役隔离" in facade.compatibility_notice()
+
+
+def test_planning_draft_replays_the_same_request_and_payload(tmp_path: Path) -> None:
+    facade, database = _planning_facade(tmp_path)
+
+    created = facade.create_planning_draft(_planning_intent())
+    replayed = PmFacadeService(
+        tmp_path, store=ContinuityStore(tmp_path, database)
+    ).create_planning_draft(_planning_intent())
+
+    assert replayed == created
+    assert database.is_file()
+    assert not (tmp_path / ".auto-pm" / "continuity.db").exists()
+    assert {"mission_id", "work_id", "run_id"}.isdisjoint(created.model_dump())
+
+
+def test_planning_draft_migrates_a_v3_store_in_the_isolated_database(tmp_path: Path) -> None:
+    _, database = _planning_facade(tmp_path)
+    with sqlite3.connect(database) as conn:
+        conn.execute("DROP INDEX idx_planning_drafts_project_state")
+        conn.execute("DROP TABLE planning_drafts")
+        conn.execute("UPDATE schema_meta SET schema_version='continuity-store.v3'")
+
+    store = ContinuityStore(tmp_path, database)
+    store.initialize("2026-09-14T00:01:00+00:00", "test")
+
+    with sqlite3.connect(database) as conn:
+        schema_version = conn.execute("SELECT schema_version FROM schema_meta").fetchone()[0]
+        planning_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='planning_drafts'"
+        ).fetchone()
+
+    assert schema_version == "continuity-store.v4"
+    assert planning_table == ("planning_drafts",)
+
+
+def test_planning_draft_rejects_a_changed_payload_for_the_same_request_id(tmp_path: Path) -> None:
+    facade, _ = _planning_facade(tmp_path)
+    original = _planning_intent()
+    facade.create_planning_draft(original)
+
+    with pytest.raises(PmFacadeError, match="request_id 已绑定不同输入"):
+        facade.create_planning_draft(_planning_intent(objective="A different plan."))
+
+    assert facade.create_planning_draft(original).input_fingerprint
+
+
+def test_planning_draft_does_not_create_mission_work_or_run(tmp_path: Path) -> None:
+    facade, database = _planning_facade(tmp_path)
+    facade.create_planning_draft(_planning_intent())
+
+    with sqlite3.connect(database) as conn:
+        counts = {
+            table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("mission_items", "work_items", "run_items")
+        }
+
+    assert counts == {"mission_items": 0, "work_items": 0, "run_items": 0}
