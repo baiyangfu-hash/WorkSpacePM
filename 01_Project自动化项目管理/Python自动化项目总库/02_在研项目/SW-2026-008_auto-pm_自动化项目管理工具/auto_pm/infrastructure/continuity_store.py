@@ -191,6 +191,15 @@ CREATE TABLE IF NOT EXISTS planning_draft_spec_bindings (
     created_at TEXT NOT NULL,
     PRIMARY KEY (request_id, spec_id)
 );
+CREATE TABLE IF NOT EXISTS planning_draft_decision_bindings (
+    request_id TEXT PRIMARY KEY REFERENCES planning_drafts(request_id),
+    decision_id TEXT NOT NULL UNIQUE,
+    change_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    approver TEXT NOT NULL,
+    approval_evidence_ref TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_work_project_state
 ON work_items(subject_project_id, state);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate
@@ -210,13 +219,15 @@ _LEGACY_SCHEMA_VERSION = "continuity-store.v2"
 _V3_SCHEMA_VERSION = "continuity-store.v3"
 _V4_SCHEMA_VERSION = "continuity-store.v4"
 _V5_SCHEMA_VERSION = "continuity-store.v5"
-_CURRENT_SCHEMA_VERSION = "continuity-store.v6"
+_V6_SCHEMA_VERSION = "continuity-store.v6"
+_CURRENT_SCHEMA_VERSION = "continuity-store.v7"
 _KNOWN_SCHEMA_VERSIONS = frozenset(
     {
         _LEGACY_SCHEMA_VERSION,
         _V3_SCHEMA_VERSION,
         _V4_SCHEMA_VERSION,
         _V5_SCHEMA_VERSION,
+        _V6_SCHEMA_VERSION,
         _CURRENT_SCHEMA_VERSION,
     }
 )
@@ -664,11 +675,21 @@ class ContinuityStore:
             if versions == {_V5_SCHEMA_VERSION}:
                 conn.execute(
                     "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
-                    (_CURRENT_SCHEMA_VERSION, _V5_SCHEMA_VERSION),
+                    (_V6_SCHEMA_VERSION, _V5_SCHEMA_VERSION),
                 )
                 conn.execute(
                     "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
-                    (_V5_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
+                    (_V5_SCHEMA_VERSION, _V6_SCHEMA_VERSION, now, tool_version),
+                )
+                versions = {_V6_SCHEMA_VERSION}
+            if versions == {_V6_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_CURRENT_SCHEMA_VERSION, _V6_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V6_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
                 )
                 migrated = True
         if migrated:
@@ -1093,6 +1114,73 @@ class ContinuityStore:
                 aggregate_type="planning_draft",
             )
             return specs
+
+    def reserve_planning_draft_decision(
+        self,
+        request_id: str,
+        change_id: str,
+        plan_hash: str,
+        approver: str,
+        approval_evidence_ref: str,
+    ) -> str:
+        """Reserve one immutable Decision identity for one exact human approval."""
+
+        if re.fullmatch(r"[0-9a-f]{64}", plan_hash) is None:
+            raise ContinuityStoreError("PlanningScopeCard plan_hash 必须是 64 位小写 SHA256")
+        values = (change_id, plan_hash, approver, approval_evidence_ref)
+        if any(not value or value != value.strip() for value in values):
+            raise ContinuityStoreError("Planning Decision 绑定字段必须是规范非空字符串")
+        now = self._utc_now()
+        with self._transaction() as conn:
+            bound_change = conn.execute(
+                "SELECT change_id FROM planning_draft_chg_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if bound_change is None or str(bound_change["change_id"]) != change_id:
+                raise ContinuityStoreError("PlanningDraft 未绑定指定真实 CHG")
+            spec_count = conn.execute(
+                "SELECT COUNT(*) FROM planning_draft_spec_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()[0]
+            if int(spec_count) == 0:
+                raise ContinuityStoreError("PlanningDraft 尚未绑定真实规范版本")
+            existing = conn.execute(
+                "SELECT * FROM planning_draft_decision_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if existing is not None:
+                persisted = (
+                    str(existing["change_id"]),
+                    str(existing["plan_hash"]),
+                    str(existing["approver"]),
+                    str(existing["approval_evidence_ref"]),
+                )
+                if persisted != values:
+                    raise ContinuityStoreError("PlanningDraft 已绑定不同批准，拒绝覆盖")
+                return str(existing["decision_id"])
+            identity = "\n".join((request_id, *values)).encode("utf-8")
+            decision_id = f"DEC-{now:%Y%m%d}-{hashlib.sha256(identity).hexdigest()[:8].upper()}"
+            conn.execute(
+                "INSERT INTO planning_draft_decision_bindings VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (request_id, decision_id, *values, now.isoformat()),
+            )
+            self._append_event(
+                conn,
+                request_id,
+                "PLANNING_DECISION_RESERVED",
+                {
+                    "request_id": request_id,
+                    "decision_id": decision_id,
+                    "change_id": change_id,
+                    "plan_hash": plan_hash,
+                    "approver": approver,
+                    "approval_evidence_ref": approval_evidence_ref,
+                },
+                f"planning-decision-reserve:{request_id}",
+                now.isoformat(),
+                aggregate_type="planning_draft",
+            )
+            return decision_id
 
     def create_mission(self, values: dict[str, Any], idempotency_key: str, now: str) -> Mission:
         """Persist one Mission and its append-only creation event atomically."""

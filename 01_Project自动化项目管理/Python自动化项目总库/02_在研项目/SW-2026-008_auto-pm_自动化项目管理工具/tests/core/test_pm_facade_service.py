@@ -183,7 +183,7 @@ def test_planning_draft_migrates_a_v3_store_in_the_isolated_database(tmp_path: P
             "SELECT name FROM sqlite_master WHERE type='table' AND name='planning_drafts'"
         ).fetchone()
 
-    assert schema_version == "continuity-store.v6"
+    assert schema_version == "continuity-store.v7"
     assert planning_table == ("planning_drafts",)
 
 
@@ -345,3 +345,135 @@ def test_planning_scope_card_is_deterministic_and_never_creates_execution(tmp_pa
         assert {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("mission_items", "work_items", "run_items")} == {"mission_items": 0, "work_items": 0, "run_items": 0}
     with pytest.raises(PmFacadeError, match="wildcards"):
         facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/*",), risks=("scope drift",), non_goals=("no execution",))
+
+
+def test_planning_scope_card_approval_is_human_bound_hash_exact_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    _git_root(tmp_path)
+    project = tmp_path / "SW-TEST-001"
+    (project / "04_监控" / "01_变更管理" / "01_变更单").mkdir(parents=True)
+    (project / "04_监控" / "01_变更管理" / "01_版本变更台帐.md").write_text(
+        "# 台帐\n\n| 序号 | 变更编号 | 描述 |\n|---|---|---|\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
+    (tmp_path / "specs").mkdir()
+    (tmp_path / "specs" / "python.md").write_text("python", encoding="utf-8")
+    (tmp_path / "specs" / "plc.md").write_text("plc", encoding="utf-8")
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "specs": {
+                    "DEV-TEST": {
+                        "domain": "python",
+                        "lifecycle": "stable",
+                        "canonical_path": "specs/python.md",
+                        "version": "V1",
+                    },
+                    "LSP-TEST": {
+                        "domain": "plc",
+                        "lifecycle": "active",
+                        "canonical_path": "specs/plc.md",
+                        "version": "V1",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    workspace_registry = tmp_path / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
+    workspace_registry.parent.mkdir(parents=True)
+    workspace_registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "workspace-registry.v1",
+                "projects": [
+                    {
+                        "project_id": "SW-TEST-001",
+                        "project_root": "SW-TEST-001",
+                        "development_root": "SW-TEST-001",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    database = tmp_path / ".auto-pm" / "p07-test.db"
+    store = ContinuityStore(tmp_path, database)
+    store.initialize("2026-09-14T00:00:00+00:00", "test")
+    changes = ChangeService(str(tmp_path))
+    facade = PmFacadeService(tmp_path, store=store, change_service=changes)
+    card = facade.create_planning_scope_card(
+        _planning_intent(),
+        scope_paths=("auto_pm/example.py",),
+        risks=("scope drift",),
+        non_goals=("no execution",),
+    )
+    for state in ("submitted", "under_review", "approved"):
+        changes.transition_status(
+            card.change_id,
+            state,
+            approver="fubai",
+            comment="human review",
+            project_id="SW-TEST-001",
+        )
+
+    with pytest.raises(PmFacadeError, match="过期或内容发生漂移"):
+        facade.approve_planning_scope_card(
+            card,
+            expected_plan_hash="0" * 64,
+            approver="fubai",
+            approval_evidence_ref="user-confirmation:P07-TEST-001",
+        )
+    with pytest.raises(PmFacadeError, match="模型或 Agent 自签"):
+        facade.approve_planning_scope_card(
+            card,
+            expected_plan_hash=card.plan_hash,
+            approver="codex-gpt-5",
+            approval_evidence_ref="user-confirmation:P07-TEST-001",
+        )
+    with pytest.raises(PmFacadeError, match="user-confirmation"):
+        facade.approve_planning_scope_card(
+            card,
+            expected_plan_hash=card.plan_hash,
+            approver="fubai",
+            approval_evidence_ref="model-confirmation:P07-TEST-001",
+        )
+
+    approved = facade.approve_planning_scope_card(
+        card,
+        expected_plan_hash=card.plan_hash,
+        approver="fubai",
+        approval_evidence_ref="user-confirmation:P07-TEST-001",
+    )
+    replayed = facade.approve_planning_scope_card(
+        card,
+        expected_plan_hash=card.plan_hash,
+        approver="fubai",
+        approval_evidence_ref="user-confirmation:P07-TEST-001",
+    )
+    with pytest.raises(PmFacadeError, match="已绑定不同批准"):
+        facade.approve_planning_scope_card(
+            card,
+            expected_plan_hash=card.plan_hash,
+            approver="fubai",
+            approval_evidence_ref="user-confirmation:P07-TEST-002",
+        )
+
+    assert replayed.to_dict() == approved.to_dict()
+    assert approved.change_id == card.change_id
+    assert approved.approved_files == list(card.scope_paths)
+    assert approved.metadata["planning_approval"] == {
+        "schema_version": "planning-approval.v1",
+        "plan_hash": card.plan_hash,
+        "approval_evidence_ref": "user-confirmation:P07-TEST-001",
+    }
+    assert len(list((tmp_path / ".auto-pm" / "decisions").glob("DEC-*.json"))) == 1
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM planning_draft_decision_bindings").fetchone()[0] == 1
+        assert {
+            table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("mission_items", "work_items", "run_items")
+        } == {"mission_items": 0, "work_items": 0, "run_items": 0}

@@ -6,8 +6,11 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
+
+from auto_pm.domain.change.decision_service import DecisionService, DecisionValidationError
 
 
 def _git(root: Path, *args: str) -> None:
@@ -137,6 +140,48 @@ def test_decision_cli_capability_is_all_or_none(cli_runner: CliRunner, tmp_path:
 
     assert result.exit_code == 1
     assert "必须同时提供" in result.output
+
+
+def test_planning_decision_requires_external_human_evidence(tmp_path: Path) -> None:
+    _approved_repository(tmp_path)
+    service = DecisionService(tmp_path)
+
+    with pytest.raises(DecisionValidationError, match="user-confirmation"):
+        service.create_decision(
+            "CHG-SCPT-2026-214",
+            "fubai",
+            project_id="SW-2026-008",
+            approved_files=["auto_pm/core/a.py"],
+            decision_id="DEC-20260914-A1B2C3D4",
+            planning_plan_hash="a" * 64,
+            approval_evidence_ref="model-confirmation:P07-TEST-001",
+        )
+    with pytest.raises(DecisionValidationError, match="模型或 Agent 自签"):
+        service.create_decision(
+            "CHG-SCPT-2026-214",
+            "codex-gpt-5",
+            project_id="SW-2026-008",
+            approved_files=["auto_pm/core/a.py"],
+            decision_id="DEC-20260914-A1B2C3D4",
+            planning_plan_hash="a" * 64,
+            approval_evidence_ref="user-confirmation:P07-TEST-001",
+        )
+
+    decision = service.create_decision(
+        "CHG-SCPT-2026-214",
+        "fubai",
+        project_id="SW-2026-008",
+        approved_files=["auto_pm/core/a.py"],
+        decision_id="DEC-20260914-A1B2C3D4",
+        planning_plan_hash="a" * 64,
+        approval_evidence_ref="user-confirmation:P07-TEST-001",
+    )
+
+    assert decision.metadata["planning_approval"] == {
+        "schema_version": "planning-approval.v1",
+        "plan_hash": "a" * 64,
+        "approval_evidence_ref": "user-confirmation:P07-TEST-001",
+    }
 
 
 def test_decision_cli_rejects_linked_worktree_before_runtime_directory_creation(

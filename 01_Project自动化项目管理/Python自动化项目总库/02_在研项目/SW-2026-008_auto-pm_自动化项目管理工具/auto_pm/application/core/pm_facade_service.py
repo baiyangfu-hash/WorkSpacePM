@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -13,6 +15,7 @@ from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistrySe
 
 from auto_pm.contracts.continuity import WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume
+from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_facade import (
     PlanningDraft,
@@ -20,6 +23,11 @@ from auto_pm.contracts.pm_facade import (
     PmConfirmationCard,
     PmConfirmationKind,
     PmIntent,
+)
+from auto_pm.domain.change.decision_service import (
+    DecisionError,
+    DecisionService,
+    DecisionValidationError,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -37,12 +45,14 @@ class PmFacadeService:
         *,
         store: ContinuityStore | None = None,
         change_service: ChangeService | None = None,
+        decision_service: DecisionService | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root)
         self._missions = MissionService(self._workspace_root)
         self._works = WorkRegistryService(self._workspace_root)
         self._store = store or ContinuityStore(self._workspace_root)
         self._changes = change_service or ChangeService(str(self._workspace_root))
+        self._decisions = decision_service or DecisionService(self._workspace_root)
 
     def create_planning_draft(self, intent: PmIntent) -> PlanningDraft:
         """Persist a pre-authorization draft without creating executable state."""
@@ -116,6 +126,106 @@ class PmFacadeService:
             )
         except ValueError as error:
             raise PmFacadeError(str(error)) from error
+
+    def approve_planning_scope_card(
+        self,
+        card: PlanningScopeCard,
+        *,
+        expected_plan_hash: str,
+        approver: str,
+        approval_evidence_ref: str,
+    ) -> DecisionPackageDTO:
+        """Bind one exact human approval to one real, immutable Decision."""
+
+        actual_hash = self._planning_scope_card_hash(card)
+        if not hmac.compare_digest(actual_hash, card.plan_hash) or not hmac.compare_digest(
+            actual_hash, expected_plan_hash
+        ):
+            raise PmFacadeError("PlanningScopeCard plan_hash 已过期或内容发生漂移")
+        try:
+            self._decisions.validate_planning_approval(
+                approver,
+                actual_hash,
+                approval_evidence_ref,
+            )
+            decision_id = self._store.reserve_planning_draft_decision(
+                card.request_id,
+                card.change_id,
+                actual_hash,
+                approver,
+                approval_evidence_ref,
+            )
+            try:
+                decision = self._decisions.create_decision(
+                    card.change_id,
+                    approver,
+                    project_id=card.subject_project_id,
+                    approved_files=list(card.scope_paths),
+                    conditions=[
+                        *(f"acceptance: {item}" for item in card.acceptance_criteria),
+                        *(f"risk: {item}" for item in card.risks),
+                        *(f"non-goal: {item}" for item in card.non_goals),
+                    ],
+                    decision_id=decision_id,
+                    planning_plan_hash=actual_hash,
+                    approval_evidence_ref=approval_evidence_ref,
+                )
+            except DecisionValidationError as create_error:
+                try:
+                    decision = self._decisions.get_decision(decision_id)
+                except DecisionError:
+                    raise create_error
+            self._validate_planning_decision(
+                decision,
+                card=card,
+                approver=approver,
+                approval_evidence_ref=approval_evidence_ref,
+            )
+            return decision
+        except (ContinuityStoreError, DecisionError) as error:
+            raise PmFacadeError(str(error)) from error
+
+    @staticmethod
+    def _planning_scope_card_hash(card: PlanningScopeCard) -> str:
+        payload = {
+            "request_id": card.request_id,
+            "subject_project_id": card.subject_project_id,
+            "change_id": card.change_id,
+            "scope_paths": card.scope_paths,
+            "acceptance_criteria": card.acceptance_criteria,
+            "risks": card.risks,
+            "non_goals": card.non_goals,
+            "spec_sources": card.spec_sources,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+
+    @staticmethod
+    def _validate_planning_decision(
+        decision: DecisionPackageDTO,
+        *,
+        card: PlanningScopeCard,
+        approver: str,
+        approval_evidence_ref: str,
+    ) -> None:
+        metadata = decision.metadata.get("planning_approval")
+        expected_metadata = {
+            "schema_version": "planning-approval.v1",
+            "plan_hash": card.plan_hash,
+            "approval_evidence_ref": approval_evidence_ref,
+        }
+        if (
+            decision.project_id != card.subject_project_id
+            or decision.change_id != card.change_id
+            or decision.approved_files != list(card.scope_paths)
+            or decision.approver != approver
+            or decision.decision_conclusion not in {"approved", "conditionally_approved"}
+            or metadata != expected_metadata
+        ):
+            raise PmFacadeError("既有 Decision 与 PlanningScopeCard 批准事实不一致")
 
     def _effective_spec_sources(self) -> tuple[tuple[str, str, str], ...]:
         registry_path = self._workspace_root / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
