@@ -87,8 +87,21 @@ class PmFacadeService:
             )
         except (ContinuityStoreError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
-        if change.change_number != change_id or change.status != "draft":
-            raise PmFacadeError("PlanningDraft 绑定的 CHG 必须保持 DRAFT，不能进入执行")
+        replayable_states = {
+            "draft",
+            "submitted",
+            "under_review",
+            "approved",
+            "conditionally_approved",
+            "implementing",
+            "pending_acceptance",
+            "accepting",
+            "completed",
+        }
+        if change.change_number != change_id or change.status not in replayable_states:
+            raise PmFacadeError(
+                "PlanningDraft 绑定的 CHG 已被拒绝、关闭或归档，不能恢复范围卡"
+            )
         return change_id
 
     def bind_planning_draft_specs(self, intent: PmIntent) -> tuple[tuple[str, str, str], ...]:

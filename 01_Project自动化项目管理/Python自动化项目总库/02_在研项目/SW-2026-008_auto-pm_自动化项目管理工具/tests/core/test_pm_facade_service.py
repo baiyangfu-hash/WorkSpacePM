@@ -666,3 +666,36 @@ def test_planning_approval_materializes_one_exact_authorized_mission(
             table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             for table in ("mission_items", "work_items", "run_items")
         } == {"mission_items": 1, "work_items": 0, "run_items": 0}
+
+
+def test_planning_scope_card_cold_replay_survives_approved_change(tmp_path: Path) -> None:
+    facade, database, changes = _p10_facade(tmp_path)
+    intent = _planning_intent()
+    card = facade.create_planning_scope_card(
+        intent,
+        scope_paths=("auto_pm/example.py",),
+        risks=("scope drift",),
+        non_goals=("no execution",),
+    )
+    for state in ("submitted", "under_review", "approved"):
+        changes.transition_status(
+            card.change_id,
+            state,
+            approver="fubai",
+            comment="human review",
+            project_id="SW-TEST-001",
+        )
+
+    cold_facade = PmFacadeService(
+        tmp_path,
+        store=ContinuityStore(tmp_path, database),
+        change_service=ChangeService(str(tmp_path)),
+    )
+    replayed = cold_facade.create_planning_scope_card(
+        intent,
+        scope_paths=("auto_pm/example.py",),
+        risks=("scope drift",),
+        non_goals=("no execution",),
+    )
+
+    assert replayed == card

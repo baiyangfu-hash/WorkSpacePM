@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import json
+from typing import cast
+
 import click
 
 from auto_pm.app_context import AppContext
+from auto_pm.change.change_service import ChangeService
+from auto_pm.change.constants import TransitionGuardError
+from auto_pm.contracts.pm_facade import PlanningScopeCard, PmIntent
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.core.pm_resume_service import PmResumeError, PmResumeService
 from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
@@ -43,25 +49,226 @@ def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: s
     click.echo(card.model_dump_json(indent=2))
 
 
+def _planning_scope_card(
+    ctx: click.Context,
+    *,
+    project_id: str,
+    request_id: str,
+    objective: str,
+    acceptance: tuple[str, ...],
+    scope_paths: tuple[str, ...],
+    risks: tuple[str, ...],
+    non_goals: tuple[str, ...],
+) -> PlanningScopeCard:
+    missing = [
+        name
+        for name, value in (
+            ("--project-id", project_id),
+            ("--request-id", request_id),
+            ("--objective", objective),
+            ("--acceptance", acceptance),
+            ("--scope", scope_paths),
+            ("--risk", risks),
+            ("--non-goal", non_goals),
+        )
+        if not value
+    ]
+    if missing:
+        raise click.ClickException(
+            "新需求 plan 缺少必填参数: " + ", ".join(missing)
+        )
+    app_ctx: AppContext = ctx.find_root().obj
+    try:
+        WorktreePolicyService(app_ctx.workspace_root).require_control_root()
+        intent = PmIntent(
+            subject_project_id=project_id,
+            request_id=request_id,
+            objective=objective,
+            acceptance_criteria=acceptance,
+        )
+        return cast(
+            PlanningScopeCard,
+            _facade(ctx).create_planning_scope_card(
+                intent,
+                scope_paths=scope_paths,
+                risks=risks,
+                non_goals=non_goals,
+            ),
+        )
+    except (PmFacadeError, ValueError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+
+
+def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approver: str) -> None:
+    app_ctx: AppContext = ctx.find_root().obj
+    changes = ChangeService(str(app_ctx.workspace_root))
+    change = changes.get_change_request(card.change_id, project_id=card.subject_project_id)
+    if change is None:
+        raise click.ClickException("PlanningScopeCard 绑定的 CHG 不存在")
+    remaining = {
+        "draft": ("submitted", "under_review", "approved"),
+        "submitted": ("under_review", "approved"),
+        "under_review": ("approved",),
+    }
+    try:
+        for state in remaining.get(change.status, ()):
+            change = changes.transition_status(
+                card.change_id,
+                state,
+                approver=approver,
+                comment=f"user approved planning scope {card.plan_hash}",
+                project_id=card.subject_project_id,
+            )
+    except (TransitionGuardError, ValueError) as error:
+        raise click.ClickException(str(error)) from error
+    if change.status not in {
+        "approved",
+        "implementing",
+        "pending_acceptance",
+        "accepting",
+        "completed",
+    }:
+        raise click.ClickException(f"PlanningScopeCard 绑定的 CHG 不可批准: {change.status}")
+
+
 @pm_group.command(name="plan")
-@click.option("--mission-id", required=True, help="由驾驶舱创建的 Mission 编号")
+@click.option("--mission-id", default="", help="兼容旧入口：已有 Mission 编号")
+@click.option("--project-id", default="", help="新需求所属项目 PID")
+@click.option("--request-id", default="", help="用户请求幂等标识")
+@click.option("--objective", default="", help="新需求目标")
+@click.option("--acceptance", multiple=True, help="验收条件，可重复")
+@click.option("--scope", "scope_paths", multiple=True, help="精确文件范围，可重复")
+@click.option("--risk", "risks", multiple=True, help="明确风险，可重复")
+@click.option("--non-goal", "non_goals", multiple=True, help="非目标，可重复")
 @click.pass_context
-def plan_pm(ctx: click.Context, mission_id: str) -> None:
-    """展示开工确认卡；不读取旧技能，也不创建隐式执行状态。"""
-    _emit_card(ctx, "plan", mission_id)
+def plan_pm(
+    ctx: click.Context,
+    mission_id: str,
+    project_id: str,
+    request_id: str,
+    objective: str,
+    acceptance: tuple[str, ...],
+    scope_paths: tuple[str, ...],
+    risks: tuple[str, ...],
+    non_goals: tuple[str, ...],
+) -> None:
+    """创建/恢复新需求范围卡，或兼容已有 Mission 调用。"""
+    new_values = (project_id, request_id, objective, acceptance, scope_paths, risks, non_goals)
+    if mission_id:
+        if any(new_values):
+            raise click.ClickException("--mission-id 不能与新需求参数混用")
+        _emit_card(ctx, "plan", mission_id)
+        return
+    card = _planning_scope_card(
+        ctx,
+        project_id=project_id,
+        request_id=request_id,
+        objective=objective,
+        acceptance=acceptance,
+        scope_paths=scope_paths,
+        risks=risks,
+        non_goals=non_goals,
+    )
+    click.echo(card.model_dump_json(indent=2))
 
 
 @pm_group.command(name="approve")
-@click.option("--mission-id", required=True)
+@click.option("--mission-id", default="", help="兼容旧入口：已有 Mission 编号")
 @click.option(
     "--root-work-id",
     default="",
     help="兼容旧入口；新 Mission 已在创建时绑定内部授权，无需填写。",
 )
+@click.option("--project-id", default="", help="新需求所属项目 PID")
+@click.option("--request-id", default="", help="用户请求幂等标识")
+@click.option("--objective", default="", help="新需求目标")
+@click.option("--acceptance", multiple=True, help="验收条件，可重复")
+@click.option("--scope", "scope_paths", multiple=True, help="精确文件范围，可重复")
+@click.option("--risk", "risks", multiple=True, help="明确风险，可重复")
+@click.option("--non-goal", "non_goals", multiple=True, help="非目标，可重复")
+@click.option("--plan-hash", default="", help="plan 输出的不可变方案哈希")
+@click.option("--approver", default="", help="真实人类审批人")
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="非模型自签的 user-confirmation 证据引用",
+)
+@click.option("--owner", default="PM Facade", show_default=True, help="内部 Work owner")
 @click.pass_context
-def approve_pm(ctx: click.Context, mission_id: str, root_work_id: str) -> None:
-    """记录第一次用户确认，并允许驾驶舱在既定边界内执行。"""
-    _emit_card(ctx, "approve", mission_id, root_work_id)
+def approve_pm(
+    ctx: click.Context,
+    mission_id: str,
+    root_work_id: str,
+    project_id: str,
+    request_id: str,
+    objective: str,
+    acceptance: tuple[str, ...],
+    scope_paths: tuple[str, ...],
+    risks: tuple[str, ...],
+    non_goals: tuple[str, ...],
+    plan_hash: str,
+    approver: str,
+    approval_evidence_ref: str,
+    owner: str,
+) -> None:
+    """批准新需求并内部形成授权链，或兼容已有 Mission 调用。"""
+    new_values = (project_id, request_id, objective, acceptance, scope_paths, risks, non_goals)
+    if mission_id:
+        if any(new_values) or any((plan_hash, approver, approval_evidence_ref)):
+            raise click.ClickException("--mission-id 不能与新需求批准参数混用")
+        _emit_card(ctx, "approve", mission_id, root_work_id)
+        return
+    if root_work_id:
+        raise click.ClickException("新需求批准不允许手工传入 --root-work-id")
+    missing = [
+        name
+        for name, value in (
+            ("--plan-hash", plan_hash),
+            ("--approver", approver),
+            ("--approval-evidence-ref", approval_evidence_ref),
+        )
+        if not value
+    ]
+    if missing:
+        raise click.ClickException("新需求批准缺少必填参数: " + ", ".join(missing))
+    card = _planning_scope_card(
+        ctx,
+        project_id=project_id,
+        request_id=request_id,
+        objective=objective,
+        acceptance=acceptance,
+        scope_paths=scope_paths,
+        risks=risks,
+        non_goals=non_goals,
+    )
+    _approve_planning_change(ctx, card, approver)
+    facade = _facade(ctx)
+    try:
+        facade.approve_planning_scope_card(
+            card,
+            expected_plan_hash=plan_hash,
+            approver=approver,
+            approval_evidence_ref=approval_evidence_ref,
+        )
+        facade.materialize_planning_mission(card, created_by="PM Facade")
+        work = facade.create_planning_work(card, owner=owner)
+    except PmFacadeError as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(
+        json.dumps(
+            {
+                "schema_version": "pm-plan-approval.v1",
+                "request_id": card.request_id,
+                "subject_project_id": card.subject_project_id,
+                "change_id": card.change_id,
+                "plan_hash": card.plan_hash,
+                "authorization_status": "AUTHORIZED",
+                "work_state": work.state.value,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 @pm_group.command(name="confirm-start")
