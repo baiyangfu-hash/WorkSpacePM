@@ -183,6 +183,14 @@ CREATE TABLE IF NOT EXISTS planning_draft_chg_bindings (
     change_id TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS planning_draft_spec_bindings (
+    request_id TEXT NOT NULL REFERENCES planning_drafts(request_id),
+    spec_id TEXT NOT NULL,
+    canonical_path TEXT NOT NULL,
+    version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (request_id, spec_id)
+);
 CREATE INDEX IF NOT EXISTS idx_work_project_state
 ON work_items(subject_project_id, state);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate
@@ -201,12 +209,14 @@ WHERE state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED');
 _LEGACY_SCHEMA_VERSION = "continuity-store.v2"
 _V3_SCHEMA_VERSION = "continuity-store.v3"
 _V4_SCHEMA_VERSION = "continuity-store.v4"
-_CURRENT_SCHEMA_VERSION = "continuity-store.v5"
+_V5_SCHEMA_VERSION = "continuity-store.v5"
+_CURRENT_SCHEMA_VERSION = "continuity-store.v6"
 _KNOWN_SCHEMA_VERSIONS = frozenset(
     {
         _LEGACY_SCHEMA_VERSION,
         _V3_SCHEMA_VERSION,
         _V4_SCHEMA_VERSION,
+        _V5_SCHEMA_VERSION,
         _CURRENT_SCHEMA_VERSION,
     }
 )
@@ -644,11 +654,21 @@ class ContinuityStore:
             if versions == {_V4_SCHEMA_VERSION}:
                 conn.execute(
                     "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
-                    (_CURRENT_SCHEMA_VERSION, _V4_SCHEMA_VERSION),
+                    (_V5_SCHEMA_VERSION, _V4_SCHEMA_VERSION),
                 )
                 conn.execute(
                     "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
-                    (_V4_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
+                    (_V4_SCHEMA_VERSION, _V5_SCHEMA_VERSION, now, tool_version),
+                )
+                versions = {_V5_SCHEMA_VERSION}
+            if versions == {_V5_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_CURRENT_SCHEMA_VERSION, _V5_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V5_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
                 )
                 migrated = True
         if migrated:
@@ -1037,6 +1057,42 @@ class ContinuityStore:
                 aggregate_type="planning_draft",
             )
             return change_id
+
+    def bind_planning_draft_specs(
+        self, request_id: str, specs: tuple[tuple[str, str, str], ...]
+    ) -> tuple[tuple[str, str, str], ...]:
+        """Persist the effective spec sources for one pre-authorization draft."""
+
+        if not specs:
+            raise ContinuityStoreError("PlanningDraft 必须绑定至少一条有效规范")
+        now = self._utc_now().isoformat()
+        with self._transaction() as conn:
+            if conn.execute(
+                "SELECT 1 FROM planning_drafts WHERE request_id=?", (request_id,)
+            ).fetchone() is None:
+                raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+            existing = conn.execute(
+                """SELECT spec_id, canonical_path, version
+                FROM planning_draft_spec_bindings WHERE request_id=? ORDER BY spec_id""",
+                (request_id,),
+            ).fetchall()
+            if existing:
+                return tuple((str(row["spec_id"]), str(row["canonical_path"]), str(row["version"])) for row in existing)
+            for spec_id, canonical_path, version in specs:
+                conn.execute(
+                    "INSERT INTO planning_draft_spec_bindings VALUES (?, ?, ?, ?, ?)",
+                    (request_id, spec_id, canonical_path, version, now),
+                )
+            self._append_event(
+                conn,
+                request_id,
+                "PLANNING_DRAFT_SPECS_BOUND",
+                {"request_id": request_id, "specs": specs},
+                f"planning-draft-spec-bind:{request_id}",
+                now,
+                aggregate_type="planning_draft",
+            )
+            return specs
 
     def create_mission(self, values: dict[str, Any], idempotency_key: str, now: str) -> Mission:
         """Persist one Mission and its append-only creation event atomically."""

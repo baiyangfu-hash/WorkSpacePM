@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -182,7 +183,7 @@ def test_planning_draft_migrates_a_v3_store_in_the_isolated_database(tmp_path: P
             "SELECT name FROM sqlite_master WHERE type='table' AND name='planning_drafts'"
         ).fetchone()
 
-    assert schema_version == "continuity-store.v5"
+    assert schema_version == "continuity-store.v6"
     assert planning_table == ("planning_drafts",)
 
 
@@ -247,3 +248,66 @@ def test_planning_draft_binds_one_real_chg_and_replays_without_execution(tmp_pat
         }
     assert bindings == [("REQ-P04-001", change_id)]
     assert counts == {"mission_items": 0, "work_items": 0, "run_items": 0}
+
+
+def test_planning_draft_binds_effective_python_and_plc_specs_without_execution(
+    tmp_path: Path,
+) -> None:
+    _git_root(tmp_path)
+    registry = tmp_path / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
+    python_spec = tmp_path / "specs" / "python.md"
+    plc_spec = tmp_path / "specs" / "plc.md"
+    python_spec.parent.mkdir(parents=True)
+    python_spec.write_text("python", encoding="utf-8")
+    plc_spec.write_text("plc", encoding="utf-8")
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "specs": {
+                    "DEV-TEST": {
+                        "domain": "python",
+                        "lifecycle": "stable",
+                        "canonical_path": "specs/python.md",
+                        "version": "V1.0.0",
+                    },
+                    "LSP-TEST": {
+                        "domain": "plc",
+                        "lifecycle": "active",
+                        "canonical_path": "specs/plc.md",
+                        "version": "V2.0.0",
+                    },
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    database = tmp_path / ".auto-pm" / "p05-planning-draft-test.db"
+    store = ContinuityStore(tmp_path, database)
+    store.initialize("2026-09-14T00:00:00+00:00", "test")
+    facade = PmFacadeService(tmp_path, store=store)
+
+    sources = facade.bind_planning_draft_specs(_planning_intent())
+    assert facade.bind_planning_draft_specs(_planning_intent()) == sources
+    assert sources == (
+        ("DEV-TEST", "specs/python.md", "V1.0.0"),
+        ("LSP-TEST", "specs/plc.md", "V2.0.0"),
+    )
+    with sqlite3.connect(database) as conn:
+        bindings = conn.execute(
+            "SELECT spec_id, canonical_path, version FROM planning_draft_spec_bindings ORDER BY spec_id"
+        ).fetchall()
+        counts = {
+            table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("mission_items", "work_items", "run_items")
+        }
+    assert bindings == list(sources)
+    assert counts == {"mission_items": 0, "work_items": 0, "run_items": 0}
+
+
+def test_planning_draft_spec_binding_reports_the_missing_source(tmp_path: Path) -> None:
+    facade, _ = _planning_facade(tmp_path)
+
+    with pytest.raises(PmFacadeError, match="规范注册表不存在"):
+        facade.bind_planning_draft_specs(_planning_intent())

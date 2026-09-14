@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from auto_pm.change.change_service import ChangeService
 from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
@@ -78,6 +79,58 @@ class PmFacadeService:
         if change.change_number != change_id or change.status != "draft":
             raise PmFacadeError("PlanningDraft 绑定的 CHG 必须保持 DRAFT，不能进入执行")
         return change_id
+
+    def bind_planning_draft_specs(self, intent: PmIntent) -> tuple[tuple[str, str, str], ...]:
+        """Bind a PlanningDraft to the effective Python and PLC spec sources."""
+
+        draft = self.create_planning_draft(intent)
+        try:
+            return self._store.bind_planning_draft_specs(
+                draft.request_id, self._effective_spec_sources()
+            )
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+
+    def _effective_spec_sources(self) -> tuple[tuple[str, str, str], ...]:
+        registry_path = self._workspace_root / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
+        try:
+            payload = json.loads(registry_path.read_text(encoding="utf-8", errors="replace"))
+        except FileNotFoundError as error:
+            raise PmFacadeError(f"规范注册表不存在: {registry_path}") from error
+        except json.JSONDecodeError as error:
+            raise PmFacadeError(f"规范注册表 JSON 无效: {error.msg}") from error
+        specs = payload.get("specs") if isinstance(payload, dict) else None
+        if not isinstance(specs, dict):
+            raise PmFacadeError("规范注册表缺少 specs 对象")
+        sources: list[tuple[str, str, str]] = []
+        covered_domains: set[str] = set()
+        for spec_id, raw in specs.items():
+            if not isinstance(spec_id, str) or not isinstance(raw, dict):
+                raise PmFacadeError("规范注册表含无效条目")
+            entry = cast(dict[str, Any], raw)
+            domain = entry.get("domain")
+            lifecycle = entry.get("lifecycle")
+            if domain not in {"python", "plc"} or lifecycle not in {"stable", "active"}:
+                continue
+            canonical_path = entry.get("canonical_path")
+            version = entry.get("version")
+            if not isinstance(canonical_path, str) or not canonical_path.strip():
+                raise PmFacadeError(f"规范 {spec_id} 缺少 canonical_path")
+            if not isinstance(version, str) or not version.strip():
+                raise PmFacadeError(f"规范 {spec_id} 缺少 version")
+            resolved = (self._workspace_root / canonical_path).resolve()
+            try:
+                resolved.relative_to(self._workspace_root.resolve())
+            except ValueError as error:
+                raise PmFacadeError(f"规范 {spec_id} 路径越出工作区: {canonical_path}") from error
+            if not resolved.is_file():
+                raise PmFacadeError(f"规范文件不存在: {spec_id} -> {canonical_path}")
+            covered_domains.add(domain)
+            sources.append((spec_id, canonical_path, version))
+        missing = {"python", "plc"} - covered_domains
+        if missing:
+            raise PmFacadeError(f"规范注册表缺少有效领域: {', '.join(sorted(missing))}")
+        return tuple(sorted(sources))
 
     def plan(self, mission_id: str) -> PmConfirmationCard:
         """Present the first confirmation card and persist only its legal state change."""
