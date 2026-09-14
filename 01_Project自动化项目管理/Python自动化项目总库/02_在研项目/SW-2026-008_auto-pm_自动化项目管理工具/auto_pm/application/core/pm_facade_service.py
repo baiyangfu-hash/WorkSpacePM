@@ -16,6 +16,7 @@ from auto_pm.contracts.continuity_resume import ContinuityResume
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_facade import (
     PlanningDraft,
+    PlanningScopeCard,
     PmConfirmationCard,
     PmConfirmationKind,
     PmIntent,
@@ -89,6 +90,31 @@ class PmFacadeService:
                 draft.request_id, self._effective_spec_sources()
             )
         except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+
+    def create_planning_scope_card(
+        self,
+        intent: PmIntent,
+        *,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        non_goals: tuple[str, ...],
+    ) -> PlanningScopeCard:
+        """Create a deterministic, non-executable scope card for later approval."""
+
+        draft = self.create_planning_draft(intent)
+        change_id = self.create_planning_draft_change(intent)
+        spec_sources = self.bind_planning_draft_specs(intent)
+        try:
+            return PlanningScopeCard.from_draft(
+                draft,
+                change_id=change_id,
+                scope_paths=scope_paths,
+                risks=risks,
+                non_goals=non_goals,
+                spec_sources=spec_sources,
+            )
+        except ValueError as error:
             raise PmFacadeError(str(error)) from error
 
     def _effective_spec_sources(self) -> tuple[tuple[str, str, str], ...]:

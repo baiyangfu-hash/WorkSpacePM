@@ -311,3 +311,37 @@ def test_planning_draft_spec_binding_reports_the_missing_source(tmp_path: Path) 
 
     with pytest.raises(PmFacadeError, match="规范注册表不存在"):
         facade.bind_planning_draft_specs(_planning_intent())
+
+
+def test_planning_scope_card_is_deterministic_and_never_creates_execution(tmp_path: Path) -> None:
+    _git_root(tmp_path)
+    project = tmp_path / "SW-TEST-001"
+    (project / "04_监控" / "01_变更管理" / "01_变更单").mkdir(parents=True)
+    (project / "04_监控" / "01_变更管理" / "01_版本变更台帐.md").write_text(
+        "# 台帐\n\n| 序号 | 变更编号 | 描述 |\n|---|---|---|\n", encoding="utf-8"
+    )
+    registry = tmp_path / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
+    (tmp_path / "specs").mkdir()
+    (tmp_path / "specs" / "python.md").write_text("python", encoding="utf-8")
+    (tmp_path / "specs" / "plc.md").write_text("plc", encoding="utf-8")
+    registry.parent.mkdir(parents=True)
+    registry.write_text(json.dumps({"specs": {
+        "DEV-TEST": {"domain": "python", "lifecycle": "stable", "canonical_path": "specs/python.md", "version": "V1"},
+        "LSP-TEST": {"domain": "plc", "lifecycle": "active", "canonical_path": "specs/plc.md", "version": "V1"},
+    }}), encoding="utf-8")
+    database = tmp_path / ".auto-pm" / "p06-test.db"
+    store = ContinuityStore(tmp_path, database)
+    store.initialize("2026-09-14T00:00:00+00:00", "test")
+    facade = PmFacadeService(tmp_path, store=store, change_service=ChangeService(str(tmp_path)))
+
+    card = facade.create_planning_scope_card(
+        _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("scope drift",), non_goals=("no execution",)
+    )
+    assert facade.create_planning_scope_card(
+        _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("scope drift",), non_goals=("no execution",)
+    ) == card
+    assert card.executable is False and len(card.plan_hash) == 64
+    with sqlite3.connect(database) as conn:
+        assert {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("mission_items", "work_items", "run_items")} == {"mission_items": 0, "work_items": 0, "run_items": 0}
+    with pytest.raises(PmFacadeError, match="wildcards"):
+        facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/*",), risks=("scope drift",), non_goals=("no execution",))

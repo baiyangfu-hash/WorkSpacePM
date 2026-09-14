@@ -100,6 +100,59 @@ class PlanningDraft(BaseModel):
         return self
 
 
+class PlanningScopeCard(BaseModel):
+    """Immutable, pre-authorization scope ready for a later human Decision."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["planning-scope-card.v1"] = "planning-scope-card.v1"
+    request_id: str
+    subject_project_id: str
+    change_id: str
+    scope_paths: tuple[str, ...]
+    acceptance_criteria: tuple[str, ...]
+    risks: tuple[str, ...]
+    non_goals: tuple[str, ...]
+    spec_sources: tuple[tuple[str, str, str], ...]
+    plan_hash: str
+    executable: Literal[False] = False
+
+    @classmethod
+    def from_draft(
+        cls,
+        draft: PlanningDraft,
+        *,
+        change_id: str,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        non_goals: tuple[str, ...],
+        spec_sources: tuple[tuple[str, str, str], ...],
+    ) -> PlanningScopeCard:
+        cleaned_paths = tuple(path.strip() for path in scope_paths)
+        if not cleaned_paths or any(not path or "*" in path for path in cleaned_paths):
+            raise ValueError("scope_paths must be explicit and must not contain wildcards")
+        if len(set(cleaned_paths)) != len(cleaned_paths):
+            raise ValueError("scope_paths must be unique")
+        cleaned_risks = tuple(item.strip() for item in risks)
+        cleaned_non_goals = tuple(item.strip() for item in non_goals)
+        if not cleaned_risks or not cleaned_non_goals or any(not item for item in cleaned_risks + cleaned_non_goals):
+            raise ValueError("risks and non_goals must be explicit")
+        payload = {
+            "request_id": draft.request_id,
+            "subject_project_id": draft.subject_project_id,
+            "change_id": change_id,
+            "scope_paths": cleaned_paths,
+            "acceptance_criteria": draft.acceptance_criteria,
+            "risks": cleaned_risks,
+            "non_goals": cleaned_non_goals,
+            "spec_sources": spec_sources,
+        }
+        plan_hash = hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        return cls(plan_hash=plan_hash, **payload)
+
+
 class PmConfirmationKind(StrEnum):
     """The only two human confirmation moments plus the safe execution handoff."""
 
