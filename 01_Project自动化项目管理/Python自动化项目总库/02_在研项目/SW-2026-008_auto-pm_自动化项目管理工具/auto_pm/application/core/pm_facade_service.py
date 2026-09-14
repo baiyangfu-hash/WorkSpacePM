@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+from auto_pm.change.change_service import ChangeService
 from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
@@ -33,11 +34,13 @@ class PmFacadeService:
         workspace_root: str | Path,
         *,
         store: ContinuityStore | None = None,
+        change_service: ChangeService | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root)
         self._missions = MissionService(self._workspace_root)
         self._works = WorkRegistryService(self._workspace_root)
         self._store = store or ContinuityStore(self._workspace_root)
+        self._changes = change_service or ChangeService(str(self._workspace_root))
 
     def create_planning_draft(self, intent: PmIntent) -> PlanningDraft:
         """Persist a pre-authorization draft without creating executable state."""
@@ -46,6 +49,35 @@ class PmFacadeService:
             return self._store.create_planning_draft(PlanningDraft.from_intent(intent))
         except ContinuityStoreError as error:
             raise PmFacadeError(str(error)) from error
+
+    def create_planning_draft_change(self, intent: PmIntent) -> str:
+        """Create or replay the one pre-authorization CHG for a PlanningDraft."""
+
+        draft = self.create_planning_draft(intent)
+        try:
+            candidate_change_id = self._changes.next_change_number(
+                draft.subject_project_id, "SCPT"
+            )
+            change_id = self._store.reserve_planning_draft_change(
+                draft.request_id, candidate_change_id
+            )
+            change = self._changes.create_change_request(
+                project_id=draft.subject_project_id,
+                domain="SCPT",
+                business_nature="DEF",
+                impact_scope=["MODULE"],
+                applicant="PM Facade",
+                background=draft.objective,
+                necessity="PlanningDraft 需生成可审查的真实 CHG 草稿。",
+                references=f"PlanningDraft request_id={draft.request_id}; "
+                f"input_fingerprint={draft.input_fingerprint}",
+                change_number=change_id,
+            )
+        except (ContinuityStoreError, ValueError) as error:
+            raise PmFacadeError(str(error)) from error
+        if change.change_number != change_id or change.status != "draft":
+            raise PmFacadeError("PlanningDraft 绑定的 CHG 必须保持 DRAFT，不能进入执行")
+        return change_id
 
     def plan(self, mission_id: str) -> PmConfirmationCard:
         """Present the first confirmation card and persist only its legal state change."""

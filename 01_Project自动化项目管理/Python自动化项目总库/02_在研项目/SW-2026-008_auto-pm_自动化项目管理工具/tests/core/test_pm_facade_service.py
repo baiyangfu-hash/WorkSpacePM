@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from auto_pm.change.change_service import ChangeService
 from auto_pm.core.mission_service import MissionService
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.core.work_registry_service import WorkRegistryService
@@ -181,7 +182,7 @@ def test_planning_draft_migrates_a_v3_store_in_the_isolated_database(tmp_path: P
             "SELECT name FROM sqlite_master WHERE type='table' AND name='planning_drafts'"
         ).fetchone()
 
-    assert schema_version == "continuity-store.v4"
+    assert schema_version == "continuity-store.v5"
     assert planning_table == ("planning_drafts",)
 
 
@@ -206,4 +207,43 @@ def test_planning_draft_does_not_create_mission_work_or_run(tmp_path: Path) -> N
             for table in ("mission_items", "work_items", "run_items")
         }
 
+    assert counts == {"mission_items": 0, "work_items": 0, "run_items": 0}
+
+
+def test_planning_draft_binds_one_real_chg_and_replays_without_execution(tmp_path: Path) -> None:
+    project = tmp_path / "SW-TEST-001"
+    (project / "04_监控" / "01_变更管理" / "01_变更单").mkdir(parents=True)
+    ledger = project / "04_监控" / "01_变更管理" / "01_版本变更台帐.md"
+    ledger.write_text(
+        "# 版本变更台帐\n\n| 序号 | 变更编号 | 描述 |\n|---|---|---|\n",
+        encoding="utf-8",
+    )
+    _git_root(tmp_path)
+    database = tmp_path / ".auto-pm" / "p04-planning-draft-test.db"
+    store = ContinuityStore(tmp_path, database)
+    store.initialize("2026-09-14T00:00:00+00:00", "test")
+    facade = PmFacadeService(
+        tmp_path,
+        store=store,
+        change_service=ChangeService(str(tmp_path)),
+    )
+
+    intent = PmIntent(
+        request_id="REQ-P04-001",
+        subject_project_id="SW-TEST-001",
+        objective="Bind one reviewable change draft.",
+        acceptance_criteria=("The CHG must replay exactly once.",),
+    )
+    change_id = facade.create_planning_draft_change(intent)
+    replayed_change_id = facade.create_planning_draft_change(intent)
+
+    assert replayed_change_id == change_id
+    assert ChangeService(str(tmp_path)).get_change_request(change_id, "SW-TEST-001")
+    with sqlite3.connect(database) as conn:
+        bindings = conn.execute("SELECT request_id, change_id FROM planning_draft_chg_bindings").fetchall()
+        counts = {
+            table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("mission_items", "work_items", "run_items")
+        }
+    assert bindings == [("REQ-P04-001", change_id)]
     assert counts == {"mission_items": 0, "work_items": 0, "run_items": 0}

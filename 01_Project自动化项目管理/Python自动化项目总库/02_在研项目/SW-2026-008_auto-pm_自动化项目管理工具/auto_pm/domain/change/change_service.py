@@ -154,6 +154,15 @@ class ChangeService:
             self._ledger_updater = LedgerUpdater()
         return self._ledger_updater
 
+    def next_change_number(self, project_id: str, domain: str) -> str:
+        """Read the next usable CHG identifier without writing a change document."""
+
+        project_path = self._locator.get_project_path(project_id)
+        if not project_path:
+            raise ValueError(f"项目不存在: {project_id}")
+        validate_domain(domain)
+        return cast(str, self._locator.generate_change_number(project_path, domain))
+
     @staticmethod
     def _find_project_root_from_path(file_path: str) -> str | None:
         """从文件路径向上查找项目根目录（TD-T10 修复）
@@ -187,6 +196,7 @@ class ChangeService:
         planned_date: str | None = None,
         urgency: str = "normal",
         retrofit: bool = False,
+        change_number: str | None = None,
     ) -> ChangeRequest:
         """创建变更单
 
@@ -212,16 +222,19 @@ class ChangeService:
         validate_impact_scope(impact_scope)
         validate_urgency(urgency)
 
-        # 生成变更编号
-        change_number = self._locator.generate_change_number(project_path, domain)
+        # P04 may reserve a durable identifier before filesystem creation so a
+        # failed write can retry without allocating another CHG.
+        resolved_change_number = change_number or self._locator.generate_change_number(
+            project_path, domain
+        )
         log.info("创建变更单: %s, 项目=%s, 领域=%s, 性质=%s, 范围=%s, retrofit=%s",
-                 change_number, project_id, domain, business_nature, impact_scope, retrofit)
+                 resolved_change_number, project_id, domain, business_nature, impact_scope, retrofit)
 
         # 构造 ChangeRequest（CHG-108 缺陷 3：retrofit 模式直接 closed）
         today = datetime.date.today().isoformat()
         initial_status = "closed" if retrofit else "draft"
         cr = ChangeRequest(
-            change_number=change_number,
+            change_number=resolved_change_number,
             project_id=project_id,
             project_name=project_id,
             domain=domain,
@@ -238,12 +251,15 @@ class ChangeService:
         )
 
         # 生成文件路径
-        file_path = self._locator.get_change_file_path(project_path, change_number)
+        file_path = self._locator.get_change_file_path(project_path, resolved_change_number)
 
         # 防护：禁止覆盖已存在且状态为终态的变更单
         if os.path.isfile(file_path):
             try:
                 existing_cr = self._parser.parse(file_path)
+                if change_number and existing_cr.project_id == project_id:
+                    existing_cr.file_path = file_path
+                    return existing_cr
                 if existing_cr.status in ("closed", "archived"):
                     raise ValueError(
                         f"变更单文件已存在且状态为 {existing_cr.status}（终态），禁止覆盖: {file_path}"
@@ -279,7 +295,7 @@ class ChangeService:
             apply_date = planned_date or datetime.date.today().isoformat()
             self._get_ledger_updater().update(
                 ledger_path,
-                change_number,
+                resolved_change_number,
                 background[:50],
                 applicant=applicant,
                 apply_date=apply_date,
@@ -288,13 +304,13 @@ class ChangeService:
                 # retrofit 模式：台账状态直接写 ✅已关闭 + 完成日期
                 self._get_ledger_updater().update_status(
                     ledger_path,
-                    change_number,
+                    resolved_change_number,
                     "✅已关闭",
                     complete_date=today,
                     applicant=applicant,
                     apply_date=apply_date,
                 )
-                log.info("retrofit 模式: 台账状态直接置为 ✅已关闭: %s", change_number)
+                log.info("retrofit 模式: 台账状态直接置为 ✅已关闭: %s", resolved_change_number)
             log.info("台帐已更新: %s", ledger_path)
         else:
             log.warning("台帐文件创建失败，跳过更新: %s", project_path)
@@ -314,7 +330,7 @@ class ChangeService:
             self._repo.upsert(summary, file_path, get_mtime(file_path))
             analysis = self._parser.to_impact_analysis(cr)
             self._repo.save_impact_analysis(analysis)
-            log.debug("DB 缓存和影响分析已写入: %s", change_number)
+            log.debug("DB 缓存和影响分析已写入: %s", resolved_change_number)
 
         return cr
 

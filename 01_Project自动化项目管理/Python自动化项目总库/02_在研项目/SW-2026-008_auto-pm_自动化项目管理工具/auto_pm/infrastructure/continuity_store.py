@@ -178,6 +178,11 @@ CREATE TABLE IF NOT EXISTS planning_drafts (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS planning_draft_chg_bindings (
+    request_id TEXT PRIMARY KEY REFERENCES planning_drafts(request_id),
+    change_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_work_project_state
 ON work_items(subject_project_id, state);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate
@@ -194,10 +199,16 @@ WHERE state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED');
 """
 
 _LEGACY_SCHEMA_VERSION = "continuity-store.v2"
-_PREVIOUS_SCHEMA_VERSION = "continuity-store.v3"
-_CURRENT_SCHEMA_VERSION = "continuity-store.v4"
+_V3_SCHEMA_VERSION = "continuity-store.v3"
+_V4_SCHEMA_VERSION = "continuity-store.v4"
+_CURRENT_SCHEMA_VERSION = "continuity-store.v5"
 _KNOWN_SCHEMA_VERSIONS = frozenset(
-    {_LEGACY_SCHEMA_VERSION, _PREVIOUS_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION}
+    {
+        _LEGACY_SCHEMA_VERSION,
+        _V3_SCHEMA_VERSION,
+        _V4_SCHEMA_VERSION,
+        _CURRENT_SCHEMA_VERSION,
+    }
 )
 _CANONICAL_RUNTIME_DB = ".auto-pm/continuity.db"
 _FULL_GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
@@ -605,29 +616,39 @@ class ContinuityStore:
             elif versions == {_LEGACY_SCHEMA_VERSION}:
                 conn.execute(
                     "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
-                    (_PREVIOUS_SCHEMA_VERSION, _LEGACY_SCHEMA_VERSION),
+                    (_V3_SCHEMA_VERSION, _LEGACY_SCHEMA_VERSION),
                 )
                 conn.execute(
                     "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
-                    (_LEGACY_SCHEMA_VERSION, _PREVIOUS_SCHEMA_VERSION, now, tool_version),
+                    (_LEGACY_SCHEMA_VERSION, _V3_SCHEMA_VERSION, now, tool_version),
                 )
                 conn.execute(
                     "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
-                    (_CURRENT_SCHEMA_VERSION, _PREVIOUS_SCHEMA_VERSION),
+                    (_V4_SCHEMA_VERSION, _V3_SCHEMA_VERSION),
                 )
                 conn.execute(
                     "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
-                    (_PREVIOUS_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
+                    (_V3_SCHEMA_VERSION, _V4_SCHEMA_VERSION, now, tool_version),
                 )
-                migrated = True
-            elif versions == {_PREVIOUS_SCHEMA_VERSION}:
+                versions = {_V4_SCHEMA_VERSION}
+            if versions == {_V3_SCHEMA_VERSION}:
                 conn.execute(
                     "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
-                    (_CURRENT_SCHEMA_VERSION, _PREVIOUS_SCHEMA_VERSION),
+                    (_V4_SCHEMA_VERSION, _V3_SCHEMA_VERSION),
                 )
                 conn.execute(
                     "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
-                    (_PREVIOUS_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
+                    (_V3_SCHEMA_VERSION, _V4_SCHEMA_VERSION, now, tool_version),
+                )
+                versions = {_V4_SCHEMA_VERSION}
+            if versions == {_V4_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_CURRENT_SCHEMA_VERSION, _V4_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V4_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
                 )
                 migrated = True
         if migrated:
@@ -976,6 +997,46 @@ class ContinuityStore:
                 aggregate_type="planning_draft",
             )
             return draft
+
+    def reserve_planning_draft_change(self, request_id: str, change_id: str) -> str:
+        """Bind one draft to exactly one CHG identifier before its file is created.
+
+        The durable reservation makes a failed file write safely retryable: later
+        calls receive the original identifier instead of allocating a second CHG.
+        """
+
+        now = self._utc_now().isoformat()
+        with self._transaction() as conn:
+            if conn.execute(
+                "SELECT 1 FROM planning_drafts WHERE request_id=?", (request_id,)
+            ).fetchone() is None:
+                raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+            existing = conn.execute(
+                "SELECT change_id FROM planning_draft_chg_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if existing is not None:
+                return str(existing["change_id"])
+            conflicting = conn.execute(
+                "SELECT request_id FROM planning_draft_chg_bindings WHERE change_id=?",
+                (change_id,),
+            ).fetchone()
+            if conflicting is not None:
+                raise ContinuityStoreError("候选 CHG 已绑定其他 PlanningDraft")
+            conn.execute(
+                "INSERT INTO planning_draft_chg_bindings VALUES (?, ?, ?)",
+                (request_id, change_id, now),
+            )
+            self._append_event(
+                conn,
+                request_id,
+                "PLANNING_DRAFT_CHG_RESERVED",
+                {"request_id": request_id, "change_id": change_id},
+                f"planning-draft-chg-reserve:{request_id}",
+                now,
+                aggregate_type="planning_draft",
+            )
+            return change_id
 
     def create_mission(self, values: dict[str, Any], idempotency_key: str, now: str) -> Mission:
         """Persist one Mission and its append-only creation event atomically."""
