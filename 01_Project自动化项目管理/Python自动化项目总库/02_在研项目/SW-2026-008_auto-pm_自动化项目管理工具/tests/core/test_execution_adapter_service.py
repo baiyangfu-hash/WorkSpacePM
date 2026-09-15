@@ -25,7 +25,12 @@ from auto_pm.core.work_registry_service import WorkRegistryService
 from auto_pm.core.worktree_policy_service import WorktreePlan, WorktreePolicyService
 
 from auto_pm.contracts.continuity import WorkKind
-from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, ExecutionRole, WorktreeMode
+from auto_pm.contracts.execution_adapter import (
+    ExecutionAdapterKind,
+    ExecutionRole,
+    ExecutionStartEvidence,
+    WorktreeMode,
+)
 from auto_pm.contracts.mission import (
     AuthorityAudit,
     AuthorityEnvelope,
@@ -227,6 +232,18 @@ def test_codex_preparation_hands_the_same_run_to_trae_and_resume_is_exact(tmp_pa
 
     execution = ContinuityExecutionService(tmp_path)
     run = execution.get_run("RUN-A5-001")
+    assert run.state.value == "READY"
+    run = execution.record_start_evidence(
+        run_id=run.run_id,
+        owner_id="codex:agent-a",
+        lease_token="codex-lease-secret",
+        evidence=ExecutionStartEvidence(
+            process_id=4321,
+            session_id="thread-a5-test",
+            started_at=datetime.now(UTC),
+        ),
+        idempotency_key="record-start-evidence-1",
+    )
     child_readme = Path(run.worktree_path) / PROJECT_PATH
     child_readme.write_text("changed\n", encoding="utf-8")
     checkpoint = execution.checkpoint(

@@ -28,6 +28,7 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionCapability,
     RuntimeDecisionOutcome,
 )
+from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.domain.change.decision_service import DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -139,6 +140,22 @@ def _start(service: ContinuityExecutionService, **changes):
     }
     values.update(changes)
     return service.start_run(**values)
+
+
+def _start_evidence(service: ContinuityExecutionService, **changes):
+    values = {
+        "run_id": "RUN-001",
+        "owner_id": "agent-a",
+        "lease_token": "lease-secret",
+        "evidence": ExecutionStartEvidence(
+            process_id=1234,
+            session_id="thread-e03b-test",
+            started_at=service._utc_now(),
+        ),
+        "idempotency_key": "record-start-evidence",
+    }
+    values.update(changes)
+    return service.record_start_evidence(**values)
 
 
 def _checkpoint(service: ContinuityExecutionService, **changes):
@@ -262,6 +279,13 @@ def _settlement_ready(
         lease_seconds=60,
         idempotency_key="create-target-run",
     )
+    _start_evidence(
+        service,
+        run_id="RUN-TARGET",
+        owner_id="legacy-agent",
+        lease_token="target-secret",
+        idempotency_key="record-target-start-evidence",
+    )
     service.checkpoint(
         checkpoint_id="CP-TARGET",
         run_id="RUN-TARGET",
@@ -297,6 +321,13 @@ def _settlement_ready(
         lease_seconds=900,
         idempotency_key="create-recovery-run",
         owned_paths=recovery_owned,
+    )
+    _start_evidence(
+        service,
+        run_id="RUN-RECOVERY",
+        owner_id="recovery-agent",
+        lease_token="recovery-secret",
+        idempotency_key="record-recovery-start-evidence",
     )
     return service
 
@@ -424,10 +455,41 @@ def test_run_binds_work_owner_paths_git_and_lease(tmp_path: Path) -> None:
     run = _start(service)
     lease = service._store.get_lease(run.run_id)
 
-    assert run.state == RunState.RUNNING
+    assert run.state == RunState.READY
     assert run.owned_paths == ("auto_pm/core/a.py",)
     assert lease.owner_id == "agent-a"
     assert datetime.fromisoformat(lease.expires_at) > clock()
+
+
+def test_start_evidence_is_lease_bound_cas_and_idempotent(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    ready = _start(service)
+
+    started = _start_evidence(service)
+    replay = _start_evidence(service)
+
+    assert ready.state is RunState.READY
+    assert started.state is RunState.RUNNING
+    assert started.version == ready.version + 1
+    assert replay == started
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        payload = conn.execute(
+            "SELECT payload_json FROM events WHERE event_type='RUN_STARTED'"
+        ).fetchone()[0]
+    assert "lease-secret" not in payload
+
+
+def test_start_evidence_rejects_expired_or_wrong_lease_without_state_change(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=60)
+    clock.value += timedelta(seconds=61)
+
+    with pytest.raises(ContinuityExecutionError, match="lease"):
+        _start_evidence(service)
+
+    assert service.get_run("RUN-001").state is RunState.READY
 
 
 def test_terminal_runs_are_exposed_only_when_history_is_explicitly_requested(
@@ -436,6 +498,7 @@ def test_terminal_runs_are_exposed_only_when_history_is_explicitly_requested(
     clock = Clock()
     _, service = _services(tmp_path, clock)
     run = _start(service)
+    run = _start_evidence(service)
     verifying = service.transition_run(
         run.run_id,
         RunState.VERIFYING,
@@ -1310,6 +1373,7 @@ def test_run_state_machine_rejects_terminal_reopen(tmp_path: Path) -> None:
     clock = Clock()
     _, service = _services(tmp_path, clock)
     _start(service)
+    _start_evidence(service)
     service.transition_run("RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "verify")
     service.transition_run("RUN-001", RunState.SUCCEEDED, "agent-a", "lease-secret", "succeed")
 

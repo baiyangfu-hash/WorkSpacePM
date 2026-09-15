@@ -20,6 +20,7 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionOutcome,
     is_canonical_decision_id,
 )
+from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.control_root_guard import (
@@ -34,7 +35,7 @@ class ContinuityExecutionError(RuntimeError):
 
 
 _RUN_TRANSITIONS = {
-    RunState.READY: {RunState.RUNNING, RunState.CANCELLED},
+    RunState.READY: {RunState.RUNNING, RunState.BLOCKED, RunState.CANCELLED},
     RunState.RUNNING: {RunState.BLOCKED, RunState.VERIFYING, RunState.FAILED},
     RunState.BLOCKED: {RunState.RUNNING, RunState.CANCELLED},
     RunState.VERIFYING: {RunState.RUNNING, RunState.SUCCEEDED, RunState.FAILED},
@@ -206,7 +207,7 @@ class ContinuityExecutionService:
             values = {
                 "run_id": run_id,
                 "work_id": work_id,
-                "state": RunState.RUNNING.value,
+                "state": RunState.READY.value,
                 "executor_id": executor_id,
                 "adapter": adapter,
                 "owned_paths_json": json.dumps(owned, ensure_ascii=False),
@@ -375,6 +376,35 @@ class ContinuityExecutionService:
                 raise ContinuityExecutionError(f"非法 Run 状态迁移: {run.state} -> {new_state}")
             return self._store.transition_run(
                 run_id, run.version, new_state.value, idempotency_key, self._utc_now().isoformat()
+            )
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def record_start_evidence(
+        self,
+        *,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        evidence: ExecutionStartEvidence,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Atomically persist trusted evidence and move exactly READY -> RUNNING."""
+
+        now = self._utc_now()
+        try:
+            run = self._store.get_run(run_id)
+            lease = self._store.get_lease(run_id)
+            self._require_active_lease(lease, owner_id, lease_token, now)
+            if run.executor_id != owner_id:
+                raise ContinuityExecutionError("启动证据 owner 与 Run executor 不一致")
+            return self._store.record_run_started(
+                run_id=run_id,
+                expected_version=run.version,
+                owner_id=owner_id,
+                lease_token=lease_token,
+                evidence=evidence,
+                idempotency_key=idempotency_key,
             )
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error

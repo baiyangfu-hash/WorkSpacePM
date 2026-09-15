@@ -34,7 +34,7 @@ from auto_pm.contracts.decision_package import (
     is_canonical_decision_id,
     is_canonical_runtime_change_id,
 )
-from auto_pm.contracts.execution_adapter import ExecutionIntent
+from auto_pm.contracts.execution_adapter import ExecutionIntent, ExecutionStartEvidence
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.orchestration import OrchestrationOutcome
 from auto_pm.contracts.pm_facade import PlanningDraft
@@ -277,7 +277,7 @@ _SETTLEMENT_REQUEST_FIELDS = frozenset(
     }
 )
 _STORE_RUN_TRANSITIONS = {
-    RunState.READY: {RunState.RUNNING, RunState.CANCELLED},
+    RunState.READY: {RunState.RUNNING, RunState.BLOCKED, RunState.CANCELLED},
     RunState.RUNNING: {RunState.BLOCKED, RunState.VERIFYING, RunState.FAILED},
     RunState.BLOCKED: {RunState.RUNNING, RunState.CANCELLED},
     RunState.VERIFYING: {RunState.RUNNING, RunState.SUCCEEDED, RunState.FAILED},
@@ -1955,8 +1955,8 @@ class ContinuityStore:
             )
             if str(final_worktree) != stored_values["worktree_path"]:
                 raise ContinuityStoreError("Run worktree canonical identity 发生漂移")
-            if stored_values.get("state") != RunState.RUNNING.value:
-                raise ContinuityStoreError("新 Run 初始状态必须是 RUNNING")
+            if stored_values.get("state") != RunState.READY.value:
+                raise ContinuityStoreError("新 Run 初始状态必须是 READY")
             if stored_values.get("version") != 1:
                 raise ContinuityStoreError("新 Run 初始版本必须是 1")
             existing_run = conn.execute(
@@ -2085,6 +2085,86 @@ class ContinuityStore:
                     "new_state": destination.value,
                     "result_version": expected_version + 1,
                 },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, run_id)
+
+    def record_run_started(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        owner_id: str,
+        lease_token: str,
+        evidence: ExecutionStartEvidence,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Append safe startup evidence and CAS-transition one READY Run to RUNNING."""
+
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        run_id = self._validated_run_text(run_id, label="run_id")
+        if type(expected_version) is not int or expected_version < 1:
+            raise ContinuityStoreError("Run expected_version 必须是正整数")
+        if not isinstance(owner_id, str) or not owner_id or owner_id != owner_id.strip():
+            raise ContinuityStoreError("启动证据 owner 必须是 canonical 非空文本")
+        if not isinstance(lease_token, str) or not lease_token or lease_token != lease_token.strip():
+            raise ContinuityStoreError("启动证据 lease_token 必须是 canonical 非空文本")
+        request = {
+            "schema_version": "run-started.v1",
+            "owner_id": owner_id,
+            "evidence": evidence.model_dump(mode="json"),
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                existing_payload = json.loads(str(existing["payload_json"]))
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["aggregate_id"] != run_id
+                    or existing["event_type"] != "RUN_STARTED"
+                    or {
+                        "schema_version": existing_payload.get("schema_version"),
+                        "owner_id": existing_payload.get("owner_id"),
+                        "evidence": existing_payload.get("evidence"),
+                    }
+                    != request
+                ):
+                    raise ContinuityStoreError("idempotency_key 的启动证据语义不一致")
+                return self._get_run(conn, run_id)
+            payload = {
+                **request,
+                "expected_version": expected_version,
+                "result_version": expected_version + 1,
+            }
+            current = self._get_run(conn, run_id)
+            if current.version != expected_version or current.state is not RunState.READY:
+                raise ContinuityStoreError("Run 不存在、非 READY 或版本冲突")
+            if current.executor_id != owner_id:
+                raise ContinuityStoreError("启动证据 owner 与 Run executor 不一致")
+            lease = self._get_lease(conn, run_id)
+            if lease.owner_id != owner_id or lease.lease_token != lease_token:
+                raise ContinuityStoreError("启动证据 lease ownership 不匹配")
+            try:
+                expires_at = datetime.fromisoformat(lease.expires_at)
+            except ValueError as error:
+                raise ContinuityStoreError("启动证据 lease 到期时间非法") from error
+            if expires_at.tzinfo is None or expires_at.astimezone(UTC) <= self._utc_now():
+                raise ContinuityStoreError("启动证据 lease 已过期")
+            event_time = self._utc_now().isoformat()
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND version=? AND state=?""",
+                (RunState.RUNNING.value, event_time, run_id, expected_version, RunState.READY.value),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Run READY 到 RUNNING CAS 失败")
+            self._append_event(
+                conn,
+                run_id,
+                "RUN_STARTED",
+                payload,
                 idempotency_key,
                 event_time,
                 aggregate_type="run",

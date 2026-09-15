@@ -219,6 +219,8 @@ class ExecutionDispatchService:
             # reserve_execution_intent returns only after the transaction commits.
             # No worktree, Run, or provider may be created before this boundary.
             plan = self._worktrees.materialize(plan)
+            # E03B deliberately leaves this lease-bound Run in READY.  Only trusted
+            # executor-control evidence may later move it to RUNNING.
             self._execution.start_run(
                 run_id=run_id,
                 work_id=work_id,
