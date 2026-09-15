@@ -12,6 +12,7 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionDispatchReceipt,
     ExecutionIntent,
     ExecutionRole,
+    ExecutionStartEvidence,
     WorktreeMode,
     execution_role_for_stack,
 )
@@ -95,6 +96,28 @@ def test_execution_intent_is_immutable_and_explicitly_unstarted() -> None:
     )
     with pytest.raises(ValidationError, match="frozen"):
         intent.operation_id = "another-operation"
+
+
+def test_start_evidence_requires_canonical_executor_control_facts() -> None:
+    evidence = ExecutionStartEvidence(
+        process_id=4321,
+        session_id="thread-4321",
+        started_at=datetime.now(UTC),
+    )
+
+    assert evidence.source == "executor-control"
+    assert evidence.event_type == "thread.started"
+    assert ExecutionStartEvidence.model_validate_json(evidence.model_dump_json()) == evidence
+    with pytest.raises(ValidationError):
+        ExecutionStartEvidence(
+            process_id=4321,
+            session_id=" thread-4321 ",
+            started_at=datetime.now(UTC),
+        )
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        ExecutionStartEvidence.model_validate(
+            {**evidence.model_dump(mode="json"), "lease_token": "must-not-leak"}
+        )
 
 
 @pytest.mark.parametrize("value", ["", " ", " leading", "trailing ", "line\nbreak", "a" * 256])

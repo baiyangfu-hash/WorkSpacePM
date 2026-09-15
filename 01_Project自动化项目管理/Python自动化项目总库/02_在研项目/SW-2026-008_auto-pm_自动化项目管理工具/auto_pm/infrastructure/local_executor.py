@@ -10,14 +10,19 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import re
 import subprocess
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import IO, Any
+
+from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 
 ISOLATION_MARKER = ".codex-microtask.json"
 ISOLATION_SCHEMA_VERSION = "local-codex-microtask.v1"
@@ -55,6 +60,15 @@ class LocalExecutionStatus(StrEnum):
     SCOPE_VIOLATION = "SCOPE_VIOLATION"
 
 
+class LocalHandshakeStatus(StrEnum):
+    """Truthful outcome of the executor-control startup handshake."""
+
+    STARTED = "STARTED"
+    INVALID = "INVALID"
+    TIMED_OUT = "TIMED_OUT"
+    PROCESS_EXITED = "PROCESS_EXITED"
+
+
 @dataclass(frozen=True)
 class LocalExecutionRequest:
     """The bounded, file-level authority for a single local Codex invocation."""
@@ -79,6 +93,7 @@ class LocalExecutionResult:
     started: bool
     process_id: int | None
     session_id: str | None
+    started_at: datetime | None
     exit_code: int | None
     timed_out: bool
     stdout: str = field(repr=False)
@@ -94,6 +109,40 @@ class LocalExecutionResult:
         """Return true only for a completed, in-scope, zero-exit process."""
 
         return self.status is LocalExecutionStatus.SUCCEEDED
+
+
+@dataclass(frozen=True)
+class LocalExecutionHandshake:
+    """A trusted start receipt, or a fail-closed reason with no receipt."""
+
+    status: LocalHandshakeStatus
+    process_id: int
+    evidence: ExecutionStartEvidence | None = None
+    error: str | None = None
+
+
+@dataclass
+class _ActiveExecution:
+    request: LocalExecutionRequest
+    validated: _ValidatedRequest
+    before: dict[str, str]
+    process: subprocess.Popen[bytes]
+    stdout_capture: _BoundedCapture
+    stderr_capture: _BoundedCapture
+    control_events: queue.Queue[dict[str, object] | None]
+    stdout_thread: threading.Thread
+    stderr_thread: threading.Thread
+
+
+@dataclass(frozen=True)
+class LocalExecutionHandle:
+    """Opaque ownership of one current Popen process between start and wait."""
+
+    _active: _ActiveExecution = field(repr=False)
+
+    @property
+    def process_id(self) -> int:
+        return self._active.process.pid
 
 
 @dataclass(frozen=True)
@@ -148,19 +197,36 @@ class LocalCodexExecutor:
         self._command_prefix = prefix
 
     def execute(self, request: LocalExecutionRequest) -> LocalExecutionResult:
-        """Start a bounded process and return truthful, redacted, post-run evidence.
+        """Compatibility wrapper for the explicit ``start/handshake/wait`` lifecycle."""
 
-        Invalid repository or scope input raises :class:`LocalExecutionError` before
-        process creation.  An executable that cannot be started instead returns a
-        ``NOT_STARTED`` result, so callers cannot mistake attempted dispatch for a
-        real process.
+        started = self.start(request)
+        if isinstance(started, LocalExecutionResult):
+            return started
+        handshake = self.handshake(started, timeout_seconds=request.timeout_seconds)
+        if handshake.status is LocalHandshakeStatus.STARTED:
+            return self.wait(started, evidence=handshake.evidence)
+        return self.wait(
+            started,
+            force_status=(
+                LocalExecutionStatus.TIMED_OUT
+                if handshake.status is LocalHandshakeStatus.TIMED_OUT
+                else LocalExecutionStatus.FAILED
+            ),
+            error=handshake.error,
+        )
+
+    def start(self, request: LocalExecutionRequest) -> LocalExecutionHandle | LocalExecutionResult:
+        """Launch a process without claiming a session or execution state.
+
+        The returned handle represents only a successful ``Popen``.  Consumers must
+        call :meth:`handshake` and receive canonical evidence before they may treat
+        the process as started work.
         """
 
         validated = self._validate_request(request)
         before = self._snapshot_tree(validated.repository)
         stdout_capture = _BoundedCapture(request.output_limit_bytes)
         stderr_capture = _BoundedCapture(request.output_limit_bytes)
-
         try:
             process = subprocess.Popen(
                 validated.command,
@@ -172,68 +238,186 @@ class LocalCodexExecutor:
         except (OSError, ValueError) as error:
             return self._not_started_result(request, validated, error)
 
-        stdout_thread = self._drain_pipe(process.stdout, stdout_capture)
+        control_events: queue.Queue[dict[str, object] | None] = queue.Queue()
+        stdout_thread = self._drain_control_pipe(process.stdout, stdout_capture, control_events)
         stderr_thread = self._drain_pipe(process.stderr, stderr_capture)
-        timed_out = False
-        try:
-            process.wait(timeout=request.timeout_seconds)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            self._stop_process(process)
-        finally:
-            stdout_thread.join()
-            stderr_thread.join()
+        return LocalExecutionHandle(
+            _ActiveExecution(
+                request=request,
+                validated=validated,
+                before=before,
+                process=process,
+                stdout_capture=stdout_capture,
+                stderr_capture=stderr_capture,
+                control_events=control_events,
+                stdout_thread=stdout_thread,
+                stderr_thread=stderr_thread,
+            )
+        )
 
-        stdout = self._redact(stdout_capture.text(), request.sensitive_values)
-        stderr = self._redact(stderr_capture.text(), request.sensitive_values)
+    def handshake(
+        self,
+        handle: LocalExecutionHandle,
+        *,
+        timeout_seconds: float,
+    ) -> LocalExecutionHandshake:
+        """Accept only the current process's canonical ``thread.started`` event.
+
+        A malformed canonical event or timeout is fail-closed: this method stops and
+        reaps the exact child represented by ``handle`` before returning no evidence.
+        """
+
+        if not 0 < timeout_seconds <= MAX_TIMEOUT_SECONDS:
+            raise LocalExecutionError("handshake timeout must be within executor bounds")
+        active = handle._active
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._stop_and_join(active)
+                return LocalExecutionHandshake(
+                    status=LocalHandshakeStatus.TIMED_OUT,
+                    process_id=active.process.pid,
+                    error="startup handshake timed out; child process was reaped",
+                )
+            try:
+                event = active.control_events.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if event is None:
+                self._stop_and_join(active)
+                return LocalExecutionHandshake(
+                    status=LocalHandshakeStatus.PROCESS_EXITED,
+                    process_id=active.process.pid,
+                    error="process exited before canonical startup evidence",
+                )
+            if event.get("type") != "thread.started":
+                continue
+            session_id = event.get("thread_id")
+            if set(event) != {"type", "thread_id"} or not isinstance(session_id, str):
+                self._stop_and_join(active)
+                return LocalExecutionHandshake(
+                    status=LocalHandshakeStatus.INVALID,
+                    process_id=active.process.pid,
+                    error="invalid canonical startup event; child process was reaped",
+                )
+            try:
+                evidence = ExecutionStartEvidence(
+                    process_id=active.process.pid,
+                    session_id=session_id,
+                    started_at=datetime.now(UTC),
+                )
+            except ValueError:
+                self._stop_and_join(active)
+                return LocalExecutionHandshake(
+                    status=LocalHandshakeStatus.INVALID,
+                    process_id=active.process.pid,
+                    error="invalid startup session identity; child process was reaped",
+                )
+            return LocalExecutionHandshake(
+                status=LocalHandshakeStatus.STARTED,
+                process_id=active.process.pid,
+                evidence=evidence,
+            )
+
+    def wait(
+        self,
+        handle: LocalExecutionHandle,
+        *,
+        evidence: ExecutionStartEvidence | None = None,
+        timeout_seconds: float | None = None,
+        force_status: LocalExecutionStatus | None = None,
+        error: str | None = None,
+    ) -> LocalExecutionResult:
+        """Collect final process and scope evidence after handshake or fail-closed stop."""
+
+        active = handle._active
+        timeout = active.request.timeout_seconds if timeout_seconds is None else timeout_seconds
+        if not 0 < timeout <= MAX_TIMEOUT_SECONDS:
+            raise LocalExecutionError("wait timeout must be within executor bounds")
+        timed_out = False
+        if active.process.poll() is None:
+            try:
+                active.process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                self._stop_process(active.process)
+        active.stdout_thread.join()
+        active.stderr_thread.join()
+        return self._finalize(
+            active,
+            evidence=evidence,
+            timed_out=timed_out,
+            force_status=force_status,
+            error=error,
+        )
+
+    def _finalize(
+        self,
+        active: _ActiveExecution,
+        *,
+        evidence: ExecutionStartEvidence | None,
+        timed_out: bool,
+        force_status: LocalExecutionStatus | None,
+        error: str | None,
+    ) -> LocalExecutionResult:
+        request = active.request
+        stdout = self._redact(active.stdout_capture.text(), request.sensitive_values)
+        stderr = self._redact(active.stderr_capture.text(), request.sensitive_values)
         try:
-            after = self._snapshot_tree(validated.repository)
-        except LocalExecutionError as error:
+            after = self._snapshot_tree(active.validated.repository)
+        except LocalExecutionError as snapshot_error:
             return LocalExecutionResult(
                 status=LocalExecutionStatus.SCOPE_VIOLATION,
                 requested_model=request.model,
-                repository=str(validated.repository),
-                command=validated.safe_command,
+                repository=str(active.validated.repository),
+                command=active.validated.safe_command,
                 started=True,
-                process_id=process.pid,
-                session_id=self._session_id(stdout),
-                exit_code=process.returncode,
+                process_id=active.process.pid,
+                session_id=evidence.session_id if evidence else None,
+                started_at=evidence.started_at if evidence else None,
+                exit_code=active.process.returncode,
                 timed_out=timed_out,
                 stdout=stdout,
                 stderr=stderr,
-                stdout_truncated=stdout_capture.truncated,
-                stderr_truncated=stderr_capture.truncated,
+                stdout_truncated=active.stdout_capture.truncated,
+                stderr_truncated=active.stderr_capture.truncated,
                 scope_violations=("<scope-verification-failed>",),
-                error=self._redact(str(error), request.sensitive_values),
+                error=self._redact(str(snapshot_error), request.sensitive_values),
             )
-
         changed_paths = tuple(
             sorted(
                 path
-                for path in before.keys() | after.keys()
-                if before.get(path) != after.get(path)
+                for path in active.before.keys() | after.keys()
+                if active.before.get(path) != after.get(path)
             )
         )
         scope_violations = tuple(
-            path for path in changed_paths if path not in validated.allowed_paths
+            path for path in changed_paths if path not in active.validated.allowed_paths
         )
-        status = self._status_for(process.returncode, timed_out, scope_violations)
+        status = force_status or self._status_for(
+            active.process.returncode,
+            timed_out,
+            scope_violations,
+        )
         return LocalExecutionResult(
             status=status,
             requested_model=request.model,
-            repository=str(validated.repository),
-            command=validated.safe_command,
+            repository=str(active.validated.repository),
+            command=active.validated.safe_command,
             started=True,
-            process_id=process.pid,
-            session_id=self._session_id(stdout),
-            exit_code=process.returncode,
-            timed_out=timed_out,
+            process_id=active.process.pid,
+            session_id=evidence.session_id if evidence else None,
+            started_at=evidence.started_at if evidence else None,
+            exit_code=active.process.returncode,
+            timed_out=timed_out or status is LocalExecutionStatus.TIMED_OUT,
             stdout=stdout,
             stderr=stderr,
-            stdout_truncated=stdout_capture.truncated,
-            stderr_truncated=stderr_capture.truncated,
+            stdout_truncated=active.stdout_capture.truncated,
+            stderr_truncated=active.stderr_capture.truncated,
             changed_paths=changed_paths,
             scope_violations=scope_violations,
+            error=self._redact(error, request.sensitive_values) if error else None,
         )
 
     def _validate_request(self, request: LocalExecutionRequest) -> _ValidatedRequest:
@@ -437,6 +621,35 @@ class LocalCodexExecutor:
         return thread
 
     @staticmethod
+    def _drain_control_pipe(
+        stream: IO[Any] | None,
+        capture: _BoundedCapture,
+        events: queue.Queue[dict[str, object] | None],
+    ) -> threading.Thread:
+        """Drain the ``--json`` control stream while exposing parsed event envelopes."""
+
+        if stream is None:
+            raise LocalExecutionError("subprocess did not provide the requested output pipe")
+
+        def drain() -> None:
+            try:
+                while line := stream.readline():
+                    capture.append(line)
+                    try:
+                        parsed = json.loads(line.decode("utf-8", errors="replace"))
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(parsed, dict):
+                        events.put(parsed)
+            finally:
+                stream.close()
+                events.put(None)
+
+        thread = threading.Thread(target=drain, daemon=True)
+        thread.start()
+        return thread
+
+    @staticmethod
     def _stop_process(process: subprocess.Popen[bytes]) -> None:
         try:
             process.terminate()
@@ -447,6 +660,14 @@ class LocalCodexExecutor:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=_TERMINATE_GRACE_SECONDS)
+
+    def _stop_and_join(self, active: _ActiveExecution) -> None:
+        """Reap only the Popen process held by this handle and drain both pipes."""
+
+        if active.process.poll() is None:
+            self._stop_process(active.process)
+        active.stdout_thread.join()
+        active.stderr_thread.join()
 
     def _not_started_result(
         self,
@@ -462,6 +683,7 @@ class LocalCodexExecutor:
             started=False,
             process_id=None,
             session_id=None,
+            started_at=None,
             exit_code=None,
             timed_out=False,
             stdout="",
@@ -482,21 +704,6 @@ class LocalCodexExecutor:
         if exit_code == 0:
             return LocalExecutionStatus.SUCCEEDED
         return LocalExecutionStatus.FAILED
-
-    @staticmethod
-    def _session_id(stdout: str) -> str | None:
-        for line in stdout.splitlines():
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(event, dict):
-                continue
-            for key in ("thread_id", "session_id", "conversation_id"):
-                value = event.get(key)
-                if isinstance(value, str) and value:
-                    return value
-        return None
 
     @staticmethod
     def _redact(value: str, sensitive_values: tuple[str, ...]) -> str:

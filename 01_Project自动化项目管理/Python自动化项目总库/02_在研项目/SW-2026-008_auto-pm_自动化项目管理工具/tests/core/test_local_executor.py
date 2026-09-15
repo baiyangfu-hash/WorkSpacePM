@@ -14,8 +14,10 @@ from auto_pm.infrastructure.local_executor import (
     ISOLATION_SCHEMA_VERSION,
     LocalCodexExecutor,
     LocalExecutionError,
+    LocalExecutionHandle,
     LocalExecutionRequest,
     LocalExecutionStatus,
+    LocalHandshakeStatus,
 )
 
 SECRET = "unit-secret-value"
@@ -83,11 +85,20 @@ if "timeout" in prompt:
 (repository / "allowed.txt").write_text("changed\\n", encoding="utf-8")
 if "scope" in prompt:
     (repository / "outside.txt").write_text("outside\\n", encoding="utf-8")
+if "invalid" in prompt:
+    print('{"type":"thread.started","session_id":"forged-session"}')
+    time.sleep(5)
+    raise SystemExit(0)
+if "controlless" in prompt:
+    print('{"thread_id":"model-like-json"}')
+    raise SystemExit(0)
 if "secret" in prompt:
     print("token=unit-secret-value")
     print('"secret": "unit-secret-value"', file=sys.stderr)
     print("Authorization: Bearer unit-secret-value", file=sys.stderr)
 print('{"type":"thread.started","thread_id":"helper-session-1"}')
+if "after-start" in prompt:
+    time.sleep(0.5)
 if "nonzero" in prompt:
     raise SystemExit(7)
 """,
@@ -120,6 +131,7 @@ def test_executes_real_helper_with_safe_command_identity_and_redacted_output(tmp
     assert result.succeeded is True
     assert result.started is True
     assert result.process_id is not None
+    assert result.started_at is not None
     assert result.exit_code == 0
     assert result.requested_model == "gpt-5.6-terra"
     assert result.session_id == "helper-session-1"
@@ -141,6 +153,50 @@ def test_executes_real_helper_with_safe_command_identity_and_redacted_output(tmp
     assert SECRET not in result.stdout
     assert SECRET not in result.stderr
     assert SECRET not in repr(result)
+
+
+def test_start_handshake_wait_is_nonblocking_and_binds_current_process(tmp_path: Path) -> None:
+    repository = _microtask_repository(tmp_path)
+    helper = _helper(tmp_path)
+    executor = LocalCodexExecutor(command_prefix=(sys.executable, str(helper)))
+
+    handle = executor.start(_request(repository, "write allowed after-start"))
+
+    assert isinstance(handle, LocalExecutionHandle)
+    handshake = executor.handshake(handle, timeout_seconds=1)
+    assert handshake.status is LocalHandshakeStatus.STARTED
+    assert handshake.evidence is not None
+    assert handshake.evidence.process_id == handle.process_id
+    assert handshake.evidence.session_id == "helper-session-1"
+    assert handshake.evidence.started_at.tzinfo is not None
+
+    result = executor.wait(handle, evidence=handshake.evidence)
+    assert result.status is LocalExecutionStatus.SUCCEEDED
+    assert result.session_id == handshake.evidence.session_id
+    assert result.started_at == handshake.evidence.started_at
+
+
+@pytest.mark.parametrize("prompt", ["write allowed invalid", "write allowed controlless"])
+def test_invalid_or_noncanonical_startup_events_reap_the_current_child(
+    tmp_path: Path,
+    prompt: str,
+) -> None:
+    repository = _microtask_repository(tmp_path)
+    helper = _helper(tmp_path)
+    executor = LocalCodexExecutor(command_prefix=(sys.executable, str(helper)))
+
+    handle = executor.start(_request(repository, prompt))
+
+    assert isinstance(handle, LocalExecutionHandle)
+    handshake = executor.handshake(handle, timeout_seconds=0.2)
+    assert handshake.status in {LocalHandshakeStatus.INVALID, LocalHandshakeStatus.PROCESS_EXITED, LocalHandshakeStatus.TIMED_OUT}
+    assert handshake.evidence is None
+    assert handle._active.process.poll() is not None
+
+    result = executor.wait(handle, force_status=LocalExecutionStatus.FAILED, error=handshake.error)
+    assert result.status is LocalExecutionStatus.FAILED
+    assert result.session_id is None
+    assert result.started_at is None
 
 
 def test_reports_real_scope_violation_without_erasing_process_facts(tmp_path: Path) -> None:

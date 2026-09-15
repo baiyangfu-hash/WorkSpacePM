@@ -31,6 +31,32 @@ class WorktreeMode(StrEnum):
     ISOLATED = "ISOLATED"
 
 
+class ExecutionStartEvidence(BaseModel):
+    """Canonical start evidence emitted by the executor control channel only.
+
+    This is intentionally distinct from ``ExecutionIntent`` and its PREPARED
+    receipt: it exists only after the current executor process has emitted the
+    canonical ``thread.started`` event.  A later Continuity mapping owns the
+    READY-to-RUNNING transition and therefore is not part of this contract.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["execution-start-evidence.v1"] = "execution-start-evidence.v1"
+    event_type: Literal["thread.started"] = "thread.started"
+    source: Literal["executor-control"] = "executor-control"
+    process_id: int = Field(gt=0)
+    session_id: str = Field(min_length=1, max_length=255)
+    started_at: AwareDatetime
+
+    @field_validator("session_id")
+    @classmethod
+    def _validate_session_id(cls, value: str) -> str:
+        if value != value.strip() or any(not character.isprintable() for character in value):
+            raise ValueError("session_id must be canonical printable text")
+        return value
+
+
 def execution_role_for_stack(stack: str) -> ExecutionRole:
     """Resolve the only two registered execution roles without inferring from chat text."""
 
@@ -127,6 +153,7 @@ __all__ = [
     "ExecutionDispatchReceipt",
     "ExecutionIntent",
     "ExecutionRole",
+    "ExecutionStartEvidence",
     "WorktreeMode",
     "execution_role_for_stack",
 ]
