@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import ValidationError
 
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ExecutionDispatchReceipt,
+    ExecutionIntent,
     ExecutionRole,
     WorktreeMode,
     execution_role_for_stack,
@@ -70,3 +73,50 @@ def test_receipt_rejects_ambiguous_owner_or_worktree() -> None:
         _receipt(worktree_mode=WorktreeMode.CURRENT)
     with pytest.raises(ValidationError, match="ISOLATED"):
         _receipt(branch_name="")
+
+
+def _intent(**overrides: object) -> ExecutionIntent:
+    values: dict[str, object] = {
+        "operation_id": "OP-E02-001",
+        "request_sha256": "a" * 64,
+        "receipt": _receipt(),
+        "created_at": datetime.now(UTC),
+    }
+    values.update(overrides)
+    return ExecutionIntent.model_validate(values)
+
+
+def test_execution_intent_is_immutable_and_explicitly_unstarted() -> None:
+    intent = _intent()
+    assert ExecutionIntent.model_validate_json(intent.model_dump_json()) == intent
+    assert intent.status == intent.receipt.status == "PREPARED"
+    assert {"pid", "session_id", "started_at", "lease_token"}.isdisjoint(
+        intent.model_dump()
+    )
+    with pytest.raises(ValidationError, match="frozen"):
+        intent.operation_id = "another-operation"
+
+
+@pytest.mark.parametrize("value", ["", " ", " leading", "trailing ", "line\nbreak", "a" * 256])
+def test_execution_intent_rejects_ambiguous_operation_id(value: str) -> None:
+    with pytest.raises(ValidationError):
+        _intent(operation_id=value)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"status": "RUNNING"},
+        {"pid": 123},
+        {"session_id": "unconfirmed"},
+        {"started_at": "2026-09-15T00:00:00Z"},
+        {"lease_token": "secret"},
+        {"request_sha256": "not-a-digest"},
+        {"created_at": "2026-09-15T00:00:00"},
+    ],
+)
+def test_execution_intent_rejects_started_claims_and_invalid_evidence(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _intent(**overrides)

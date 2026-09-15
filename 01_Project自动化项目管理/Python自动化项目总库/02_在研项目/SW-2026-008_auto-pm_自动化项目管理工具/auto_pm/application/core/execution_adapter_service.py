@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -18,12 +20,11 @@ from auto_pm.core.worktree_policy_service import (
     WorktreePolicyService,
 )
 
-from auto_pm.contracts.continuity import RunItem
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ExecutionDispatchReceipt,
+    ExecutionIntent,
     ExecutionRole,
-    WorktreeMode,
     execution_role_for_stack,
 )
 from auto_pm.contracts.mission import Mission
@@ -47,6 +48,7 @@ class ExecutionDispatchResult:
     """Keep the safe receipt separate from the one-time lease capability."""
 
     receipt: ExecutionDispatchReceipt
+    intent: ExecutionIntent
     lease: LeaseCapability = field(repr=False)
 
 
@@ -60,15 +62,17 @@ class _LocalExecutionAdapter:
         self,
         *,
         mission: Mission,
-        run: RunItem,
+        work_id: str,
+        run_id: str,
+        owned_paths: tuple[str, ...],
         executor_id: str,
         role: ExecutionRole,
         plan: WorktreePlan,
     ) -> ExecutionDispatchReceipt:
         return ExecutionDispatchReceipt(
             mission_id=mission.mission_id,
-            work_id=run.work_id,
-            run_id=run.run_id,
+            work_id=work_id,
+            run_id=run_id,
             subject_project_id=mission.subject_project_id,
             adapter=self.kind,
             executor_id=executor_id,
@@ -77,8 +81,8 @@ class _LocalExecutionAdapter:
             worktree_mode=plan.worktree_mode,
             worktree_path=str(plan.worktree_path),
             branch_name=plan.branch_name,
-            git_head=run.git_head,
-            owned_paths=run.owned_paths,
+            git_head=plan.git_head,
+            owned_paths=owned_paths,
         )
 
 
@@ -127,32 +131,55 @@ class ExecutionDispatchService:
         lease_token: str,
         lease_seconds: int,
         idempotency_key: str,
+        operation_id: str | None = None,
         stack: str | None = None,
         force_isolation: bool = False,
     ) -> ExecutionDispatchResult:
-        """Allocate a local Run and a secret-free receipt after all fail-closed checks.
+        """Persist an intent before allocating a local worktree and Run lease.
 
-        ``PREPARED`` means only that a local execution package and Run lease exist.
-        It never claims that Codex, Trae, or a human received or started remote work.
+        Replays return the original unstarted intent without repeating side effects,
+        including after a crash between reservation and Run creation. Reconciliation
+        and real provider startup belong to the subsequent supervision phase.
+        Legacy callers use idempotency_key as their operation_id.
         """
 
         now = self._utc_now()
         kind = self._adapter_kind(adapter)
+        owner_id = self._owner_id(kind, executor_id)
+        self._assert_lease_request(lease_token, lease_seconds)
+        role = execution_role_for_stack(stack or self._project_stack(mission.subject_project_id))
+        operation = operation_id if operation_id is not None else idempotency_key
+        request_sha256 = self._request_fingerprint(
+            {
+                "mission": mission.model_dump(mode="python"),
+                "work_id": work_id,
+                "run_id": run_id,
+                "adapter": kind,
+                "executor_id": executor_id,
+                "lease_token": lease_token,
+                "lease_seconds": lease_seconds,
+                "role": role,
+                "force_isolation": force_isolation,
+            }
+        )
+        try:
+            self._worktrees.require_control_root()
+            if self._store.workspace_root != self._root:
+                raise ExecutionDispatchError("ExecutionIntent Store 与控制工作树不一致")
+            existing = self._store.get_execution_intent(operation)
+            if existing is not None:
+                return self._existing_result(existing, request_sha256, lease_token)
+            work = self._store.get_work(work_id)
+        except (ContinuityStoreError, WorktreePolicyError) as error:
+            raise ExecutionDispatchError(str(error)) from error
         self._assert_authority(mission, now)
         self._assert_adapter_authorized(mission, kind)
-        owner_id = self._owner_id(kind, executor_id)
-        try:
-            work = self._store.get_work(work_id)
-        except ContinuityStoreError as error:
-            raise ExecutionDispatchError(str(error)) from error
         if work.subject_project_id != mission.subject_project_id:
             raise ExecutionDispatchError("Work 与 Mission subject project 不一致")
         if not self._paths_covered(work.scope_paths, mission.authority.scope_paths):
             raise ExecutionDispatchError("Work scope 超出 Mission AuthorityEnvelope")
-        role = execution_role_for_stack(stack or self._project_stack(mission.subject_project_id))
-        existing = self._existing_run(work_id, run_id)
-        if existing is not None:
-            return self._existing_result(existing, mission, kind, executor_id, lease_token, role)
+        if work.authorization_ref != mission.authority.decision_id:
+            raise ExecutionDispatchError("Work 与 Mission Decision 不一致")
         self._assert_parallel_capacity(mission, run_id, now)
         try:
             plan = self._worktrees.select(
@@ -160,8 +187,39 @@ class ExecutionDispatchService:
                 allow_branch_creation=mission.authority.routing.allow_execution_branch_changes,
                 force_isolation=force_isolation,
             )
+        except WorktreePolicyError as error:
+            # A competing caller may have committed and materialized while select
+            # sampled Git. Re-read the durable reservation before reporting failure.
+            try:
+                existing = self._store.get_execution_intent(operation)
+            except ContinuityStoreError as store_error:
+                raise ExecutionDispatchError(str(store_error)) from store_error
+            if existing is not None:
+                return self._existing_result(existing, request_sha256, lease_token)
+            raise ExecutionDispatchError(str(error)) from error
+        receipt = self._adapters.resolve(kind).prepare_receipt(
+            mission=mission,
+            work_id=work_id,
+            run_id=run_id,
+            owned_paths=work.scope_paths,
+            executor_id=executor_id,
+            role=role,
+            plan=plan,
+        )
+        intent = ExecutionIntent(
+            operation_id=operation,
+            request_sha256=request_sha256,
+            receipt=receipt,
+            created_at=now,
+        )
+        try:
+            intent, created = self._store.reserve_execution_intent(intent)
+            if not created:
+                return self._existing_result(intent, request_sha256, lease_token)
+            # reserve_execution_intent returns only after the transaction commits.
+            # No worktree, Run, or provider may be created before this boundary.
             plan = self._worktrees.materialize(plan)
-            run = self._execution.start_run(
+            self._execution.start_run(
                 run_id=run_id,
                 work_id=work_id,
                 executor_id=owner_id,
@@ -173,61 +231,56 @@ class ExecutionDispatchService:
                 worktree_path=str(plan.worktree_path),
                 lease_token=lease_token,
                 lease_seconds=lease_seconds,
-                idempotency_key=idempotency_key,
+                idempotency_key=f"execution-run:{hashlib.sha256(operation.encode('utf-8')).hexdigest()}",
             )
-        except (ContinuityExecutionError, WorktreePolicyError) as error:
+        except (ContinuityStoreError, ContinuityExecutionError, WorktreePolicyError) as error:
             raise ExecutionDispatchError(str(error)) from error
-        receipt = self._adapters.resolve(kind).prepare_receipt(
-            mission=mission,
-            run=run,
-            executor_id=executor_id,
-            role=role,
-            plan=plan,
+        return ExecutionDispatchResult(
+            receipt=intent.receipt,
+            intent=intent,
+            lease=LeaseCapability(owner_id, lease_token),
         )
-        return ExecutionDispatchResult(receipt=receipt, lease=LeaseCapability(owner_id, lease_token))
 
+    @staticmethod
     def _existing_result(
-        self,
-        run: RunItem,
-        mission: Mission,
-        adapter: ExecutionAdapterKind,
-        executor_id: str,
+        intent: ExecutionIntent,
+        request_sha256: str,
         lease_token: str,
-        role: ExecutionRole,
     ) -> ExecutionDispatchResult:
-        owner_id = self._owner_id(adapter, executor_id)
-        if run.adapter != adapter.value or run.executor_id != owner_id:
-            raise ExecutionDispatchError("run_id 已绑定其他执行适配器或 owner")
-        try:
-            lease = self._store.get_lease(run.run_id)
-        except ContinuityStoreError as error:
-            raise ExecutionDispatchError(str(error)) from error
-        if lease.owner_id != owner_id or lease.lease_token != lease_token:
-            raise ExecutionDispatchError("run_id 已存在，但 lease capability 不匹配")
-        worktree_path = Path(run.worktree_path).resolve()
-        mode = WorktreeMode.CURRENT if worktree_path == self._root else WorktreeMode.ISOLATED
-        try:
-            branch_name = "" if mode is WorktreeMode.CURRENT else self._worktrees.branch_name_for(worktree_path)
-            plan = WorktreePlan(mode, worktree_path, run.git_head, branch_name, ())
-        except WorktreePolicyError as error:
-            raise ExecutionDispatchError(str(error)) from error
-        receipt = self._adapters.resolve(adapter).prepare_receipt(
-            mission=mission,
-            run=run,
-            executor_id=executor_id,
-            role=role,
-            plan=plan,
+        if intent.request_sha256 != request_sha256:
+            raise ExecutionDispatchError("operation_id 已绑定不同载荷")
+        return ExecutionDispatchResult(
+            receipt=intent.receipt,
+            intent=intent,
+            lease=LeaseCapability(intent.receipt.owner_id, lease_token),
         )
-        return ExecutionDispatchResult(receipt=receipt, lease=LeaseCapability(owner_id, lease_token))
 
-    def _existing_run(self, work_id: str, run_id: str) -> RunItem | None:
-        try:
-            return next(
-                (item for item in self._store.list_runs(work_id, include_terminal=True) if item.run_id == run_id),
-                None,
-            )
-        except ContinuityStoreError as error:
-            raise ExecutionDispatchError(str(error)) from error
+    @staticmethod
+    def _assert_lease_request(lease_token: str, lease_seconds: int) -> None:
+        if (
+            not isinstance(lease_token, str)
+            or not lease_token
+            or lease_token != lease_token.strip()
+            or any(not character.isprintable() for character in lease_token)
+        ):
+            raise ExecutionDispatchError("lease_token 必须是 canonical 非空可打印文本")
+        if type(lease_seconds) is not int or not 60 <= lease_seconds <= 86400:
+            raise ExecutionDispatchError("lease_seconds 必须在 60 到 86400 之间")
+
+    @staticmethod
+    def _request_fingerprint(payload: dict[str, object]) -> str:
+        """Include immutable authority and every caller-controlled dispatch input."""
+        def encode(value: object) -> object:
+            if isinstance(value, datetime):
+                return value.isoformat()
+            if isinstance(value, (set, frozenset)):
+                return sorted(value)
+            raise TypeError(f"Unsupported dispatch value: {type(value).__name__}")
+
+        canonical = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=encode
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _assert_parallel_capacity(self, mission: Mission, run_id: str, now: datetime) -> None:
         active = 0

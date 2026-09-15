@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ExecutionAdapterKind(StrEnum):
@@ -43,7 +43,7 @@ def execution_role_for_stack(stack: str) -> ExecutionRole:
 
 
 class ExecutionDispatchReceipt(BaseModel):
-    """A local preparation receipt that deliberately excludes the lease capability."""
+    """Unstarted execution targets; neither a provider session nor a live process."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -98,9 +98,34 @@ class ExecutionDispatchReceipt(BaseModel):
         return self
 
 
+class ExecutionIntent(BaseModel):
+    """Immutable Continuity reservation persisted before any dispatch side effect.
+
+    The receipt names the intended Run and worktree. PREPARED never asserts that
+    either resource exists or that execution started; recovery must inspect them.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["execution-intent.v1"] = "execution-intent.v1"
+    operation_id: str = Field(min_length=1, max_length=255)
+    status: Literal["PREPARED"] = "PREPARED"
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    receipt: ExecutionDispatchReceipt
+    created_at: AwareDatetime
+
+    @field_validator("operation_id")
+    @classmethod
+    def _validate_operation_id(cls, value: str) -> str:
+        if value != value.strip() or any(not character.isprintable() for character in value):
+            raise ValueError("operation_id must be canonical printable text")
+        return value
+
+
 __all__ = [
     "ExecutionAdapterKind",
     "ExecutionDispatchReceipt",
+    "ExecutionIntent",
     "ExecutionRole",
     "WorktreeMode",
     "execution_role_for_stack",

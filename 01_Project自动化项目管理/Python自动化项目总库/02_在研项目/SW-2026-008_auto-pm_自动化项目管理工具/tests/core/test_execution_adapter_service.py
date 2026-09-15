@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from auto_pm.core.continuity_execution_service import ContinuityExecutionService
 from auto_pm.core.continuity_resume_service import ContinuityResumeService
-from auto_pm.core.execution_adapter_service import ExecutionDispatchError, ExecutionDispatchService
+from auto_pm.core.execution_adapter_service import (
+    ExecutionDispatchError,
+    ExecutionDispatchResult,
+    ExecutionDispatchService,
+)
 from auto_pm.core.mission_service import MissionService
 from auto_pm.core.work_registry_service import WorkRegistryService
+from auto_pm.core.worktree_policy_service import WorktreePlan, WorktreePolicyService
 
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, ExecutionRole, WorktreeMode
@@ -22,7 +32,7 @@ from auto_pm.contracts.mission import (
     InternalRoutingPolicy,
     MissionState,
 )
-from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 PROJECT_ID = "SW-TEST-001"
 PROJECT_PATH = f"{PROJECT_ID}/README.md"
@@ -337,3 +347,213 @@ def test_dispatch_from_linked_worktree_fails_before_any_mutation(tmp_path: Path)
 
     assert not (linked / ".auto-pm").exists()
     assert shared_store.list_runs("WORK-A5-001", include_terminal=True) == ()
+
+
+def _prepare(root: Path, **overrides: Any) -> ExecutionDispatchResult:
+    values: dict[str, Any] = {
+        "mission": MissionService(root).get("MISSION-A5-001"),
+        "work_id": "WORK-A5-001",
+        "run_id": "RUN-E02-001",
+        "adapter": ExecutionAdapterKind.CODEX,
+        "executor_id": "agent-a",
+        "lease_token": "e02-test-capability",
+        "lease_seconds": 900,
+        "idempotency_key": "dispatch-e02",
+        "operation_id": "OP-E02-001",
+        "stack": "python",
+        "force_isolation": True,
+    }
+    dispatch = overrides.pop("dispatch", ExecutionDispatchService(root))
+    values.update(overrides)
+    return dispatch.prepare(**values)
+
+
+def _counts(root: Path) -> tuple[int, int, int]:
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        return tuple(
+            conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("events", "run_items", "execution_leases")
+        )
+
+
+def test_execution_intent_survives_cold_process_replay(tmp_path: Path) -> None:
+    _ready(tmp_path)
+    prepared = _prepare(tmp_path)
+    before = _counts(tmp_path)
+    script = (
+        "import sys\n"
+        "from auto_pm.core.execution_adapter_service import ExecutionDispatchService\n"
+        "from auto_pm.core.mission_service import MissionService\n"
+        "root = sys.argv[1]\n"
+        "result = ExecutionDispatchService(root).prepare("
+        "mission=MissionService(root).get('MISSION-A5-001'),"
+        "work_id='WORK-A5-001', run_id='RUN-E02-001', adapter='codex',"
+        "executor_id='agent-a', lease_token='e02-test-capability', lease_seconds=900,"
+        "idempotency_key='transport-retry', operation_id='OP-E02-001',"
+        "stack='python', force_isolation=True)\n"
+        "print(result.intent.model_dump_json())\n"
+    )
+    replay = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert json.loads(replay.stdout) == prepared.intent.model_dump(mode="json")
+    assert _counts(tmp_path) == before
+    store = ContinuityStore(tmp_path)
+    assert store.get_execution_intent("OP-E02-001") == prepared.intent
+    with closing(sqlite3.connect(store.db_path)) as conn:
+        rows = conn.execute(
+            "SELECT event_type, payload_json FROM events "
+            "WHERE event_type IN ('EXECUTION_INTENT_PREPARED', 'RUN_CREATED') ORDER BY rowid"
+        ).fetchall()
+    assert [row[0] for row in rows] == ["EXECUTION_INTENT_PREPARED", "RUN_CREATED"]
+    assert "e02-test-capability" not in rows[0][1]
+    assert not list(tmp_path.rglob("*intent*.json"))
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"run_id": "RUN-E02-OTHER"},
+        {"work_id": "WORK-OTHER"},
+        {"adapter": ExecutionAdapterKind.TRAE},
+        {"executor_id": "agent-b"},
+        {"lease_token": "different-capability"},
+        {"lease_seconds": 1200},
+        {"force_isolation": False},
+        {"stack": "plc"},
+    ],
+)
+def test_execution_operation_rejects_changed_payload_before_effects(
+    tmp_path: Path, overrides: dict[str, object]
+) -> None:
+    _ready(tmp_path)
+    prepared = _prepare(tmp_path)
+    before = _counts(tmp_path)
+    with pytest.raises(ExecutionDispatchError, match="operation_id.*不同载荷"):
+        _prepare(tmp_path, **overrides)
+    assert _counts(tmp_path) == before
+    assert ContinuityStore(tmp_path).get_execution_intent("OP-E02-001") == prepared.intent
+
+
+def test_execution_operation_binds_full_mission_authority(tmp_path: Path) -> None:
+    missions, _, _ = _ready(tmp_path)
+    mission = missions.get("MISSION-A5-001")
+    _prepare(tmp_path, mission=mission)
+    changed = mission.model_copy(update={"objective": "Another objective"})
+    before = _counts(tmp_path)
+    with pytest.raises(ExecutionDispatchError, match="operation_id.*不同载荷"):
+        _prepare(tmp_path, mission=changed)
+    assert _counts(tmp_path) == before
+
+
+def test_intent_persistence_failure_rolls_back_before_git_or_run_effects(tmp_path: Path) -> None:
+    _ready(tmp_path)
+    database = tmp_path / ".auto-pm" / "continuity.db"
+    with closing(sqlite3.connect(database)) as conn:
+        conn.execute(
+            "CREATE TRIGGER reject_execution_intent BEFORE INSERT ON events "
+            "WHEN NEW.event_type='EXECUTION_INTENT_PREPARED' "
+            "BEGIN SELECT RAISE(ABORT, 'injected disk write failure'); END"
+        )
+        conn.commit()
+    before = _counts(tmp_path)
+    with pytest.raises(ExecutionDispatchError, match="持久化失败"):
+        _prepare(tmp_path)
+    assert _counts(tmp_path) == before
+    assert ContinuityStore(tmp_path).get_execution_intent("OP-E02-001") is None
+    assert not (tmp_path / ".auto-pm" / "worktrees").exists()
+    branches = subprocess.run(
+        ["git", "-C", str(tmp_path), "branch", "--list", "codex/*"],
+        check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    assert not branches.stdout.strip()
+
+
+class _CrashAtMaterialization(WorktreePolicyService):
+    """Observe a real committed DB, then simulate process loss at an I/O boundary."""
+
+    def __init__(self, root: Path, *, after: bool) -> None:
+        super().__init__(root)
+        self.root = root
+        self.after = after
+
+    def materialize(self, plan: WorktreePlan) -> WorktreePlan:
+        intent = ContinuityStore(self.root).get_execution_intent("OP-E02-001")
+        assert intent is not None
+        assert not plan.worktree_path.exists()
+        assert intent.receipt.worktree_path == str(plan.worktree_path)
+        assert _counts(self.root)[1:] == (0, 0)
+        if self.after:
+            super().materialize(plan)
+        raise SystemExit("simulated process loss")
+
+
+@pytest.mark.parametrize("after", [False, True])
+def test_crash_replay_preserves_intent_without_repeating_dispatch(
+    tmp_path: Path, after: bool
+) -> None:
+    _ready(tmp_path)
+    dispatch = ExecutionDispatchService(
+        tmp_path, worktrees=_CrashAtMaterialization(tmp_path, after=after)
+    )
+    with pytest.raises(SystemExit, match="process loss"):
+        _prepare(tmp_path, dispatch=dispatch)
+    store = ContinuityStore(tmp_path)
+    intent = store.get_execution_intent("OP-E02-001")
+    assert intent is not None
+    target = Path(intent.receipt.worktree_path)
+    assert target.exists() is after
+    before = _counts(tmp_path)
+    replay = _prepare(tmp_path)
+    assert replay.intent == intent
+    assert replay.receipt.status == "PREPARED"
+    assert target.exists() is after
+    assert _counts(tmp_path) == before
+    assert store.list_runs("WORK-A5-001", include_terminal=True) == ()
+
+
+def test_concurrent_operation_has_one_durable_winner(tmp_path: Path) -> None:
+    _ready(tmp_path)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [workers.submit(_prepare, tmp_path) for _ in range(2)]
+        results = [future.result(timeout=45) for future in futures]
+    assert results[0].intent == results[1].intent
+    assert results[0].receipt == results[1].receipt
+    assert _counts(tmp_path)[1:] == (1, 1)
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM events WHERE aggregate_type='execution_intent'"
+        ).fetchone()[0] == 1
+
+
+def test_store_refuses_same_id_changed_receipt_and_same_run_other_operation(tmp_path: Path) -> None:
+    _ready(tmp_path)
+    prepared = _prepare(tmp_path)
+    store = ContinuityStore(tmp_path)
+    changed = prepared.intent.model_copy(
+        update={"receipt": prepared.receipt.model_copy(update={"run_id": "RUN-OTHER"})}
+    )
+    with pytest.raises(ContinuityStoreError, match="不同载荷"):
+        store.reserve_execution_intent(changed)
+    with pytest.raises(ContinuityStoreError, match="run_id 已存在"):
+        store.reserve_execution_intent(
+            prepared.intent.model_copy(update={"operation_id": "OP-OTHER"})
+        )
+
+
+def test_replay_after_authority_expiry_is_read_only(tmp_path: Path) -> None:
+    missions, _, _ = _ready(tmp_path)
+    mission = missions.get("MISSION-A5-001")
+    prepared = _prepare(tmp_path, mission=mission)
+    before = _counts(tmp_path)
+    later = ExecutionDispatchService(
+        tmp_path, now=lambda: mission.authority.expires_at + timedelta(days=1)
+    )
+    replay = _prepare(tmp_path, mission=mission, dispatch=later)
+    assert replay.intent == prepared.intent
+    assert _counts(tmp_path) == before

@@ -34,6 +34,7 @@ from auto_pm.contracts.decision_package import (
     is_canonical_decision_id,
     is_canonical_runtime_change_id,
 )
+from auto_pm.contracts.execution_adapter import ExecutionIntent
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.orchestration import OrchestrationOutcome
 from auto_pm.contracts.pm_facade import PlanningDraft
@@ -1377,6 +1378,96 @@ class ContinuityStore:
             if row is None:
                 return None
             return str(row["aggregate_type"]), str(row["aggregate_id"])
+
+    @classmethod
+    def _execution_intent_key(cls, operation_id: str) -> str:
+        """Reserve a separate namespace in the existing unique event-key index."""
+        operation_id = cls._validated_idempotency_key(operation_id)
+        digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        return f"execution-intent:{digest}"
+
+    @classmethod
+    def _execution_intent_from_event(
+        cls, row: sqlite3.Row, operation_id: str
+    ) -> ExecutionIntent:
+        """Reject malformed or substituted reservations before returning a receipt."""
+        try:
+            intent = ExecutionIntent.model_validate_json(str(row["payload_json"]))
+        except ValueError as error:
+            raise ContinuityStoreError("ExecutionIntent payload 无法读取") from error
+        if (
+            row["aggregate_type"] != "execution_intent"
+            or row["event_type"] != "EXECUTION_INTENT_PREPARED"
+            or row["aggregate_id"] != operation_id
+            or intent.operation_id != operation_id
+            or row["idempotency_key"] != cls._execution_intent_key(operation_id)
+        ):
+            raise ContinuityStoreError("ExecutionIntent 事件身份不一致")
+        return intent
+
+    def get_execution_intent(self, operation_id: str) -> ExecutionIntent | None:
+        """Read the durable intent without deriving state from a Run or worktree."""
+        key = self._execution_intent_key(operation_id)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, key)
+            return None if row is None else self._execution_intent_from_event(row, operation_id)
+
+    def reserve_execution_intent(
+        self, intent: ExecutionIntent
+    ) -> tuple[ExecutionIntent, bool]:
+        """Atomically claim one operation; only the committed winner may dispatch.
+
+        Existing append-only Continuity events are the single source of truth.
+        Their UNIQUE idempotency key is the operation reservation, so no auxiliary
+        file, in-memory registry, or schema migration is needed.
+        """
+        intent = ExecutionIntent.model_validate(intent.model_dump())
+        key = self._execution_intent_key(intent.operation_id)
+        try:
+            with self._transaction() as conn:
+                row = self._event_by_key(conn, key)
+                if row is not None:
+                    existing = self._execution_intent_from_event(row, intent.operation_id)
+                    if (
+                        existing.request_sha256 != intent.request_sha256
+                        or existing.receipt != intent.receipt
+                    ):
+                        raise ContinuityStoreError("operation_id 已绑定不同载荷")
+                    return existing, False
+                receipt = intent.receipt
+                work = self._get_work(conn, receipt.work_id)
+                if work.state not in {WorkState.READY, WorkState.IN_PROGRESS}:
+                    raise ContinuityStoreError("只有 READY/IN_PROGRESS Work 可以准备执行")
+                if work.subject_project_id != receipt.subject_project_id or not all(
+                    self._authority_path_covered(path, work.scope_paths)
+                    for path in receipt.owned_paths
+                ):
+                    raise ContinuityStoreError("ExecutionIntent 超出 Work 授权")
+                if conn.execute(
+                    "SELECT 1 FROM run_items WHERE run_id=?", (receipt.run_id,)
+                ).fetchone() is not None:
+                    raise ContinuityStoreError("run_id 已存在，拒绝建立无原始 intent 的派发")
+                rows = conn.execute(
+                    "SELECT * FROM events WHERE aggregate_type='execution_intent'"
+                ).fetchall()
+                for other_row in rows:
+                    other = self._execution_intent_from_event(
+                        other_row, str(other_row["aggregate_id"])
+                    )
+                    if other.receipt.run_id == receipt.run_id:
+                        raise ContinuityStoreError("run_id 已绑定其他 operation_id")
+                self._append_event(
+                    conn,
+                    intent.operation_id,
+                    "EXECUTION_INTENT_PREPARED",
+                    intent.model_dump(mode="json"),
+                    key,
+                    intent.created_at.isoformat(),
+                    aggregate_type="execution_intent",
+                )
+            return intent, True
+        except sqlite3.Error as error:
+            raise ContinuityStoreError("ExecutionIntent 持久化失败") from error
 
     def get_orchestration_outcome(
         self, mission_id: str, idempotency_key: str
