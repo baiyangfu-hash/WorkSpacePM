@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
+from auto_pm.application.core.evidence_collection_service import (
+    EvidenceCollection,
+    EvidenceCollectionError,
+    EvidenceCollectionService,
+)
 from auto_pm.contracts.continuity import (
     CheckpointItem,
     HandoffV2,
@@ -306,6 +312,207 @@ class ContinuityExecutionService:
             return self._store.create_checkpoint(values, idempotency_key, now.isoformat())
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
+
+    def append_verified_checkpoint(
+        self,
+        *,
+        checkpoint_id: str,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        project_root: str | Path,
+    ) -> CheckpointItem:
+        """Append one system-generated, content-bound checkpoint for a Run.
+
+        No caller-supplied result document, summary, dirty path, Git baseline,
+        or evidence is accepted.  The service derives all of those values from
+        fresh Run-scoped Git evidence and the real C02 Python quality receipt.
+        Existing identities replay only when their canonical stored payload is
+        still intact and proves the current evidence.
+        """
+
+        now = self._utc_now()
+        try:
+            run = self._store.get_run(run_id)
+            lease = self._store.get_lease(run_id)
+            self._require_active_lease(lease, owner_id, lease_token, now)
+            existing = self._existing_checkpoint(checkpoint_id)
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+        collector = EvidenceCollectionService(self._root)
+        summary = self._auto_checkpoint_summary(run)
+        try:
+            collector.validate_c03_checkpoint_project_root(run, project_root)
+        except EvidenceCollectionError as error:
+            raise ContinuityExecutionError(
+                f"自动 Checkpoint C03 profile 无法验证: {error}"
+            ) from error
+        if existing is not None:
+            try:
+                collection = collector.collect(run)
+            except EvidenceCollectionError as error:
+                raise ContinuityExecutionError(
+                    f"自动 Checkpoint 无法复核当前 evidence: {error}"
+                ) from error
+            dirty_paths = self._checkpoint_dirty_paths(collection)
+            if (
+                existing.run_id != run.run_id
+                or existing.summary != summary
+                or existing.git_head != run.git_head
+                or existing.dirty_paths != tuple(dirty_paths)
+                or len(existing.evidence) != 1
+                or not collector.checkpoint_evidence_is_current(
+                    existing.evidence[0], collection, run, project_root
+                )
+            ):
+                raise ContinuityExecutionError(
+                    "Checkpoint identity 已存在，但自动证据或当前 Run 内容不一致"
+                )
+            replay = self.checkpoint(
+                checkpoint_id=checkpoint_id,
+                run_id=run_id,
+                owner_id=owner_id,
+                lease_token=lease_token,
+                summary=summary,
+                git_head=collection.git_head,
+                dirty_paths=dirty_paths,
+                evidence=list(existing.evidence),
+                idempotency_key=self._c03_checkpoint_idempotency_key(
+                    run, checkpoint_id, collection.content_hash
+                ),
+            )
+            return self._require_matching_c03_checkpoint(
+                replay,
+                checkpoint_id=checkpoint_id,
+                run_id=run_id,
+                summary=summary,
+                collection=collection,
+                evidence=existing.evidence[0],
+            )
+
+        try:
+            receipt = collector.run_c03_checkpoint_quality_gates(run, project_root)
+            if receipt.status != "PASS":
+                raise ContinuityExecutionError("自动 Checkpoint 要求 Python 质量收据为 PASS")
+            if not collector.c03_checkpoint_receipt_matches_profile(receipt):
+                raise ContinuityExecutionError(
+                    "自动 Checkpoint 要求固定 C03 pytest profile 与收据 hash"
+                )
+            if not collector.quality_receipt_is_current(run, project_root, receipt):
+                raise ContinuityExecutionError("自动 Checkpoint 的 Python 质量收据已失效")
+            collection = collector.collect(run)
+            evidence = collector.build_checkpoint_evidence(collection, receipt)
+        except EvidenceCollectionError as error:
+            raise ContinuityExecutionError(
+                f"自动 Checkpoint evidence 或质量门无法验证: {error}"
+            ) from error
+
+        checkpoint = self.checkpoint(
+            checkpoint_id=checkpoint_id,
+            run_id=run_id,
+            owner_id=owner_id,
+            lease_token=lease_token,
+            summary=summary,
+            git_head=collection.git_head,
+            dirty_paths=self._checkpoint_dirty_paths(collection),
+            evidence=[evidence],
+            idempotency_key=self._c03_checkpoint_idempotency_key(
+                run, checkpoint_id, collection.content_hash
+            ),
+        )
+        return self._require_matching_c03_checkpoint(
+            checkpoint,
+            checkpoint_id=checkpoint_id,
+            run_id=run_id,
+            summary=summary,
+            collection=collection,
+            evidence=evidence,
+        )
+
+    def _existing_checkpoint(self, checkpoint_id: str) -> CheckpointItem | None:
+        """Load an existing identity without conflating corruption with absence."""
+
+        try:
+            return self._store.get_checkpoint(checkpoint_id)
+        except ContinuityStoreError as error:
+            if str(error).startswith("Checkpoint 不存在:"):
+                return None
+            raise
+
+    @staticmethod
+    def _checkpoint_dirty_paths(collection: EvidenceCollection) -> list[str]:
+        """Derive the immutable checkpoint path set from all Git dirty classes."""
+
+        return sorted(
+            {
+                *collection.staged_paths,
+                *collection.unstaged_paths,
+                *collection.untracked_paths,
+            }
+        )
+
+    @staticmethod
+    def _auto_checkpoint_summary(run: RunItem) -> str:
+        """Return a fixed, non-user-controlled summary suitable for replay checks."""
+
+        return f"System-generated content-bound checkpoint for Run {run.run_id}"
+
+    @staticmethod
+    def _c03_checkpoint_idempotency_key(
+        run: RunItem, checkpoint_id: str, collection_hash: str
+    ) -> str:
+        """Derive C03's immutable idempotency identity after fresh collection.
+
+        A caller cannot select this key.  Its stable C03 schema identity, Run,
+        checkpoint id, and exact collection content hash make replay possible
+        only for the same persisted C03 checkpoint evidence.
+        """
+
+        payload = {
+            "schema_version": "c03-auto-checkpoint-key.v1",
+            "run_id": run.run_id,
+            "checkpoint_id": checkpoint_id,
+            "collection_hash": collection_hash,
+        }
+        canonical = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return "c03-auto-checkpoint:" + hashlib.sha256(
+            canonical.encode("utf-8")
+        ).hexdigest()
+
+    @classmethod
+    def _require_matching_c03_checkpoint(
+        cls,
+        checkpoint: CheckpointItem,
+        *,
+        checkpoint_id: str,
+        run_id: str,
+        summary: str,
+        collection: EvidenceCollection,
+        evidence: str,
+    ) -> CheckpointItem:
+        """Fail closed if Store replay does not return C03's exact constructed CP.
+
+        The generic Store owns its idempotency index and can only return a
+        checkpoint object through its public API.  C03 therefore treats every
+        return as untrusted until all immutable fields derived above match the
+        current content-bound construction exactly.
+        """
+
+        if (
+            checkpoint.checkpoint_id != checkpoint_id
+            or checkpoint.run_id != run_id
+            or checkpoint.summary != summary
+            or checkpoint.git_head != collection.git_head
+            or checkpoint.dirty_paths != tuple(cls._checkpoint_dirty_paths(collection))
+            or checkpoint.evidence != (evidence,)
+        ):
+            raise ContinuityExecutionError(
+                "持久化 Checkpoint 与 C03 自动构造的 identity 或 evidence 不一致"
+            )
+        return checkpoint
 
     def create_handoff(
         self,
