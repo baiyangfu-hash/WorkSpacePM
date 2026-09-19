@@ -305,3 +305,28 @@ def test_supervisor_does_not_verify_when_collect_or_renew_fails(tmp_path) -> Non
             idempotency_key="e05-collect-failure",
         )
     execution.transition_run.assert_not_called()
+
+
+def test_supervisor_recovers_only_the_full_started_identity(tmp_path) -> None:
+    execution = Mock()
+    evidence = _evidence()
+    execution.resolve_started_run.return_value = (Mock(), Mock(), evidence)
+    supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
+
+    recovered = supervisor.recover_started_session(
+        "operation-e06-1",
+        observed_process_id=evidence.process_id,
+        observed_session_id=evidence.session_id,
+        observed_started_at=evidence.started_at,
+        is_process_alive=lambda process_id: process_id == evidence.process_id,
+    )
+
+    assert recovered is evidence
+    with pytest.raises(ExecutionSupervisorError, match="BLOCKED"):
+        supervisor.recover_started_session(
+            "operation-e06-1",
+            observed_process_id=evidence.process_id,
+            observed_session_id="reused-pid-different-session",
+            observed_started_at=evidence.started_at,
+            is_process_alive=lambda _: True,
+        )

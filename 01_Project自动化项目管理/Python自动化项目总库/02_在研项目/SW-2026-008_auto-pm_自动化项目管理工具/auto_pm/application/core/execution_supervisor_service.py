@@ -216,6 +216,36 @@ class ExecutionSupervisorService:
             disposition=disposition,
         )
 
+    def recover_started_session(
+        self,
+        operation_id: str,
+        *,
+        observed_process_id: int,
+        observed_session_id: str,
+        observed_started_at: datetime,
+        is_process_alive: Callable[[int], bool],
+    ) -> ExecutionStartEvidence:
+        """Return a prior session only after complete Continuity identity matching.
+
+        This intentionally has no start side effect.  A mismatch is a recovery
+        boundary, never a licence to guess from a reused PID or launch again.
+        """
+
+        if observed_started_at.tzinfo is None:
+            raise ExecutionSupervisorError("观察到的 started_at 必须包含时区")
+        try:
+            _, _, evidence = self._execution.resolve_started_run(operation_id)
+        except ContinuityExecutionError as error:
+            raise ExecutionSupervisorError("运行身份不可恢复，必须 BLOCKED/待恢复") from error
+        if (
+            not is_process_alive(evidence.process_id)
+            or observed_process_id != evidence.process_id
+            or observed_session_id != evidence.session_id
+            or observed_started_at != evidence.started_at
+        ):
+            raise ExecutionSupervisorError("运行身份不可恢复，必须 BLOCKED/待恢复")
+        return cast(ExecutionStartEvidence, evidence)
+
     @staticmethod
     def _completion_disposition(result: LocalExecutionResult) -> str:
         """Classify exit truth without trusting model text or a claimed status."""

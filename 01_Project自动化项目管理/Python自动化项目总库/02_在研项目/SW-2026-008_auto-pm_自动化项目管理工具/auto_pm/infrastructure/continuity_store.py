@@ -3000,6 +3000,34 @@ class ContinuityStore:
         with self._read_connection() as conn:
             return self._get_lease(conn, run_id)
 
+    def get_run_started_evidence(self, run_id: str) -> tuple[str, ExecutionStartEvidence]:
+        """Read exactly one trusted startup record for one Run from Continuity."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                """SELECT payload_json FROM events
+                WHERE aggregate_type='run' AND aggregate_id=? AND event_type='RUN_STARTED'
+                ORDER BY created_at, event_id""",
+                (run_id,),
+            ).fetchall()
+        if len(rows) != 1:
+            raise ContinuityStoreError("RUN_STARTED 证据缺失或不唯一")
+        try:
+            payload = json.loads(str(rows[0]["payload_json"]))
+            owner_id = payload["owner_id"]
+            evidence = ExecutionStartEvidence.model_validate(payload["evidence"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ContinuityStoreError("RUN_STARTED 证据损坏") from error
+        if (
+            payload.get("schema_version") != "run-started.v1"
+            or not isinstance(owner_id, str)
+            or not owner_id
+            or owner_id != owner_id.strip()
+        ):
+            raise ContinuityStoreError("RUN_STARTED 证据身份不合法")
+        return owner_id, evidence
+
     def get_checkpoint(self, checkpoint_id: str) -> CheckpointItem:
         with self._read_connection() as conn:
             return self._get_checkpoint(conn, checkpoint_id)

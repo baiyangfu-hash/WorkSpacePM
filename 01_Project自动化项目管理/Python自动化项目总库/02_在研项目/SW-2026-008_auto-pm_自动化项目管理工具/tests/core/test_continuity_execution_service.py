@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from auto_pm.core.continuity_execution_service import (
@@ -2334,3 +2336,45 @@ def test_concurrent_different_keys_allow_exactly_one_settlement(
             "SELECT COUNT(*) FROM events WHERE event_type='RUN_EXPIRED_SETTLED'"
         ).fetchone()[0]
     assert count == 1
+
+
+def test_store_reads_exactly_one_structured_run_started_evidence(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    _start_evidence(service)
+
+    owner_id, evidence = service._store.get_run_started_evidence("RUN-001")
+
+    assert owner_id == "agent-a"
+    assert evidence.process_id == 1234
+    assert evidence.session_id == "thread-e03b-test"
+
+
+def test_service_reconciles_operation_receipt_run_and_started_identity(tmp_path: Path) -> None:
+    evidence = ExecutionStartEvidence(
+        process_id=4321,
+        session_id="session-e06",
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+    receipt = SimpleNamespace(
+        run_id="RUN-001", work_id="WORK-001", executor_id="agent-a", owner_id="agent-a"
+    )
+    store = Mock()
+    store.get_execution_intent.return_value = SimpleNamespace(receipt=receipt)
+    store.get_run.return_value = SimpleNamespace(
+        work_id="WORK-001", executor_id="agent-a", state=RunState.RUNNING
+    )
+    store.get_run_started_evidence.return_value = ("agent-a", evidence)
+    service = ContinuityExecutionService(tmp_path, store=store)
+
+    actual_receipt, run, actual_evidence = service.resolve_started_run("operation-e06-1")
+
+    assert actual_receipt is receipt
+    assert run is store.get_run.return_value
+    assert actual_evidence is evidence
+    store.get_run_started_evidence.assert_called_once_with("RUN-001")
+
+    store.get_run_started_evidence.return_value = ("other-owner", evidence)
+    with pytest.raises(ContinuityExecutionError, match="owner"):
+        service.resolve_started_run("operation-e06-1")

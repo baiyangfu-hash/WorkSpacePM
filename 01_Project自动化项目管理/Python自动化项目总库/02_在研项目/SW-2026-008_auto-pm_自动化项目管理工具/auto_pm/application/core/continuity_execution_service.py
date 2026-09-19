@@ -21,7 +21,7 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionOutcome,
     is_canonical_decision_id,
 )
-from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
+from auto_pm.contracts.execution_adapter import ExecutionDispatchReceipt, ExecutionStartEvidence
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.control_root_guard import (
@@ -417,6 +417,30 @@ class ContinuityExecutionService:
                 evidence=evidence,
                 idempotency_key=idempotency_key,
             )
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def resolve_started_run(
+        self, operation_id: str
+    ) -> tuple[ExecutionDispatchReceipt, RunItem, ExecutionStartEvidence]:
+        """Reconcile one durable operation with its only trusted started Run."""
+
+        try:
+            intent = self._store.get_execution_intent(operation_id)
+            if intent is None:
+                raise ContinuityExecutionError("ExecutionIntent 不存在")
+            receipt = intent.receipt
+            run = self._store.get_run(receipt.run_id)
+            if (
+                run.work_id != receipt.work_id
+                or run.executor_id != receipt.executor_id
+                or run.state not in {RunState.RUNNING, RunState.VERIFYING}
+            ):
+                raise ContinuityExecutionError("ExecutionIntent 与活动 Run 身份不一致")
+            owner_id, evidence = self._store.get_run_started_evidence(receipt.run_id)
+            if owner_id != receipt.owner_id:
+                raise ContinuityExecutionError("RUN_STARTED owner 与派发回执不一致")
+            return receipt, run, evidence
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
