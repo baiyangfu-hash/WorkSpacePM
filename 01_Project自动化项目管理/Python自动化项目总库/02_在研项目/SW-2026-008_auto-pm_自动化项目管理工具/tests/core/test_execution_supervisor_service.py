@@ -11,10 +11,15 @@ from auto_pm.core.execution_supervisor_service import (
     ExecutionSupervisorError,
     ExecutionSupervisorService,
     LeaseCapability,
+    LeaseRenewalOutcome,
 )
 
 from auto_pm.contracts.continuity import LeaseRenewalReceipt, RunState
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
+from auto_pm.infrastructure.local_executor import (
+    LocalExecutionResult,
+    LocalExecutionStatus,
+)
 
 
 def _evidence() -> ExecutionStartEvidence:
@@ -22,6 +27,39 @@ def _evidence() -> ExecutionStartEvidence:
         process_id=1234,
         session_id="thread-supervisor-test",
         started_at=datetime.now(UTC),
+    )
+
+
+def _result(
+    *,
+    status: LocalExecutionStatus,
+    exit_code: int | None,
+    timed_out: bool = False,
+    stdout: str = "",
+) -> LocalExecutionResult:
+    return LocalExecutionResult(
+        status=status,
+        requested_model="gpt-5.6-terra",
+        repository="C:/isolated/microtask",
+        command=("codex", "exec"),
+        started=True,
+        process_id=4321,
+        session_id="session-e05",
+        started_at=datetime.now(UTC),
+        exit_code=exit_code,
+        timed_out=timed_out,
+        stdout=stdout,
+        stderr="",
+    )
+
+
+def _capability() -> LeaseCapability:
+    return LeaseCapability(
+        run_id="RUN-E05-001",
+        owner_id="codex:agent-a",
+        version=7,
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+        token="must-not-leak",
     )
 
 
@@ -196,3 +234,74 @@ def test_supervisor_blocks_when_current_child_cannot_be_reaped(tmp_path) -> None
         "execution-start-blocked:4dd5e426e5e434186aa3dca46edec73cb6420feb874d0ad3a70fce972653e876",
     )
     assert "secret-token" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("result", "expected_state", "expected_disposition"),
+    [
+        (_result(status=LocalExecutionStatus.SUCCEEDED, exit_code=0), RunState.VERIFYING, "ZERO_EXIT"),
+        (_result(status=LocalExecutionStatus.FAILED, exit_code=17, stdout="success"), RunState.FAILED, "NONZERO_EXIT"),
+        (_result(status=LocalExecutionStatus.TIMED_OUT, exit_code=None, timed_out=True), RunState.FAILED, "TERMINATED"),
+    ],
+)
+def test_supervisor_uses_exit_truth_and_renews_at_wait_boundaries(
+    tmp_path,
+    result: LocalExecutionResult,
+    expected_state: RunState,
+    expected_disposition: str,
+) -> None:
+    execution = Mock()
+    supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
+    capability = _capability()
+    supervisor.renew_if_due = Mock(
+        side_effect=[
+            LeaseRenewalOutcome(capability=capability, receipt=None),
+            LeaseRenewalOutcome(capability=capability, receipt=None),
+        ]
+    )
+    collect = Mock(return_value=result)
+
+    outcome = supervisor.wait_for_completion(
+        capability,
+        wait_and_collect=collect,
+        lease_seconds=900,
+        renew_before_seconds=30,
+        idempotency_key="e05-completion-1",
+    )
+
+    assert outcome.run_state is expected_state
+    assert outcome.disposition == expected_disposition
+    collect.assert_called_once()
+    assert supervisor.renew_if_due.call_count == 2
+    execution.transition_run.assert_called_once()
+    transition_args = execution.transition_run.call_args.args
+    assert transition_args[:3] == (capability.run_id, expected_state, capability.owner_id)
+    assert "must-not-leak" not in repr(outcome)
+
+
+def test_supervisor_does_not_verify_when_collect_or_renew_fails(tmp_path) -> None:
+    execution = Mock()
+    supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
+    capability = _capability()
+    supervisor.renew_if_due = Mock(side_effect=ExecutionSupervisorError("lease 自动续租失败"))
+
+    with pytest.raises(ExecutionSupervisorError, match="自动续租失败"):
+        supervisor.wait_for_completion(
+            capability,
+            wait_and_collect=Mock(),
+            lease_seconds=900,
+            renew_before_seconds=30,
+            idempotency_key="e05-renew-failure",
+        )
+    execution.transition_run.assert_not_called()
+
+    supervisor.renew_if_due = Mock(return_value=LeaseRenewalOutcome(capability, None))
+    with pytest.raises(ExecutionSupervisorError, match="collect 失败"):
+        supervisor.wait_for_completion(
+            capability,
+            wait_and_collect=Mock(side_effect=RuntimeError("collector failed")),
+            lease_seconds=900,
+            renew_before_seconds=30,
+            idempotency_key="e05-collect-failure",
+        )
+    execution.transition_run.assert_not_called()

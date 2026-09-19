@@ -16,6 +16,10 @@ from auto_pm.core.continuity_execution_service import (
 
 from auto_pm.contracts.continuity import LeaseRenewalReceipt, RunItem, RunState
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
+from auto_pm.infrastructure.local_executor import (
+    LocalExecutionResult,
+    LocalExecutionStatus,
+)
 
 
 class ExecutionSupervisorError(RuntimeError):
@@ -39,6 +43,16 @@ class LeaseRenewalOutcome:
 
     capability: LeaseCapability
     receipt: LeaseRenewalReceipt | None
+
+
+@dataclass(frozen=True)
+class ExecutionCompletionOutcome:
+    """A collected executor result and the truthful Continuity disposition."""
+
+    result: LocalExecutionResult
+    capability: LeaseCapability
+    run_state: RunState
+    disposition: str
 
 
 class ExecutionSupervisorService:
@@ -149,15 +163,86 @@ class ExecutionSupervisorService:
         )
         return LeaseRenewalOutcome(capability=next_capability, receipt=receipt)
 
+    def wait_for_completion(
+        self,
+        capability: LeaseCapability,
+        *,
+        wait_and_collect: Callable[[], LocalExecutionResult],
+        lease_seconds: int,
+        renew_before_seconds: int,
+        idempotency_key: str,
+    ) -> ExecutionCompletionOutcome:
+        """Collect one E03A process only while its E04 lease remains current.
+
+        The executor is the sole source of process completion.  In particular,
+        model stdout is deliberately never inspected when deciding whether a
+        completed process may enter ``VERIFYING``.
+        """
+
+        before_wait = self.renew_if_due(
+            capability,
+            lease_seconds=lease_seconds,
+            renew_before_seconds=renew_before_seconds,
+            idempotency_key=self._completion_key(idempotency_key, "before-wait"),
+        )
+        try:
+            result = wait_and_collect()
+        except Exception as error:
+            raise ExecutionSupervisorError("执行结果 collect 失败") from error
+        after_wait = self.renew_if_due(
+            before_wait.capability,
+            lease_seconds=lease_seconds,
+            renew_before_seconds=renew_before_seconds,
+            idempotency_key=self._completion_key(idempotency_key, "after-wait"),
+        )
+        disposition = self._completion_disposition(result)
+        target_state = (
+            RunState.VERIFYING if disposition == "ZERO_EXIT" else RunState.FAILED
+        )
+        try:
+            self._execution.transition_run(
+                after_wait.capability.run_id,
+                target_state,
+                after_wait.capability.owner_id,
+                after_wait.capability.token,
+                self._completion_key(idempotency_key, disposition.lower()),
+            )
+        except ContinuityExecutionError as error:
+            raise ExecutionSupervisorError("执行结束状态无法安全落账") from error
+        return ExecutionCompletionOutcome(
+            result=result,
+            capability=after_wait.capability,
+            run_state=target_state,
+            disposition=disposition,
+        )
+
+    @staticmethod
+    def _completion_disposition(result: LocalExecutionResult) -> str:
+        """Classify exit truth without trusting model text or a claimed status."""
+
+        if result.timed_out or result.exit_code is None or result.exit_code < 0:
+            return "TERMINATED"
+        if result.exit_code != 0:
+            return "NONZERO_EXIT"
+        if result.status is not LocalExecutionStatus.SUCCEEDED:
+            return "EXECUTOR_FAILED"
+        return "ZERO_EXIT"
+
     @staticmethod
     def _blocked_key(idempotency_key: str) -> str:
         digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
         return f"execution-start-blocked:{digest}"
 
+    @staticmethod
+    def _completion_key(idempotency_key: str, phase: str) -> str:
+        digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+        return f"execution-completion-{phase}:{digest}"
+
 
 __all__ = [
     "ExecutionSupervisorError",
     "ExecutionSupervisorService",
+    "ExecutionCompletionOutcome",
     "LeaseCapability",
     "LeaseRenewalOutcome",
 ]
