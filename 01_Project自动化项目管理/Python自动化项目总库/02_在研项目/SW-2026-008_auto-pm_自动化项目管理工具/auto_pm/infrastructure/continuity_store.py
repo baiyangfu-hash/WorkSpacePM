@@ -2655,6 +2655,8 @@ class ContinuityStore:
         lease_token: str,
         lease_seconds: int,
         idempotency_key: str,
+        *,
+        expected_version: int | None = None,
     ) -> LeaseItem:
         run_id = self._validated_run_text(run_id, label="run_id")
         owner_id = self._validated_run_text(owner_id, label="lease owner")
@@ -2662,12 +2664,21 @@ class ContinuityStore:
         idempotency_key = self._validated_idempotency_key(idempotency_key)
         if type(lease_seconds) is not int or not 60 <= lease_seconds <= 86_400:
             raise ContinuityStoreError("lease_seconds 必须在 60 到 86400 之间")
-        request = {
+        if expected_version is not None and (
+            type(expected_version) is not int or expected_version < 1
+        ):
+            raise ContinuityStoreError("expected_version 必须是正整数")
+        legacy_request = {
             "schema_version": "lease-renew-request.v2",
             "run_id": run_id,
             "owner_id": owner_id,
             "lease_seconds": lease_seconds,
             "lease_token_sha256": self._lease_token_fingerprint(lease_token),
+        }
+        request = {
+            **legacy_request,
+            "schema_version": "lease-renew-request.v3",
+            "expected_version": expected_version,
         }
         with self._transaction() as conn:
             existing = self._event_by_key(conn, idempotency_key)
@@ -2677,19 +2688,57 @@ class ContinuityStore:
                     existing["aggregate_type"] != "run"
                     or existing["aggregate_id"] != run_id
                     or existing["event_type"] != "LEASE_RENEWED"
-                    or not isinstance(payload, dict)
-                    or set(payload) != {"schema_version", "request", "expires_at", "version"}
-                    or payload.get("schema_version") != "lease-renewed.v2"
-                    or payload.get("request") != request
                 ):
                     raise ContinuityStoreError("idempotency_key 的 lease 续租语义不一致")
-                return self._get_lease(conn, run_id)
+                schema_version = payload.get("schema_version")
+                if schema_version == "lease-renewed.v3":
+                    if (
+                        set(payload)
+                        != {
+                            "schema_version",
+                            "request",
+                            "expires_at",
+                            "version",
+                            "updated_at",
+                        }
+                        or payload.get("request") != request
+                    ):
+                        raise ContinuityStoreError(
+                            "idempotency_key 的 lease 续租语义不一致"
+                        )
+                    updated_at = str(payload["updated_at"])
+                elif schema_version == "lease-renewed.v2":
+                    if (
+                        expected_version is not None
+                        or set(payload)
+                        != {"schema_version", "request", "expires_at", "version"}
+                        or payload.get("request") != legacy_request
+                    ):
+                        raise ContinuityStoreError(
+                            "idempotency_key 的 lease 续租语义不一致"
+                        )
+                    updated_at = str(existing["created_at"])
+                else:
+                    raise ContinuityStoreError("idempotency_key 的 lease 续租语义不一致")
+                return LeaseItem(
+                    run_id=run_id,
+                    owner_id=owner_id,
+                    lease_token=lease_token,
+                    expires_at=str(payload["expires_at"]),
+                    version=cast(int, payload["version"]),
+                    updated_at=updated_at,
+                )
             observed_at = self._utc_now()
+            run = self._get_run(conn, run_id)
+            if run.state not in {RunState.READY, RunState.RUNNING}:
+                raise ContinuityStoreError("只有 READY 或 RUNNING Run 可以续租")
             current = self._get_lease(conn, run_id)
             if current.owner_id != owner_id or current.lease_token != lease_token:
                 raise ContinuityStoreError("lease ownership 不匹配")
             if self._aware_timestamp(current.expires_at, "lease") <= observed_at:
                 raise ContinuityStoreError("lease 已过期")
+            if expected_version is not None and current.version != expected_version:
+                raise ContinuityStoreError("lease version 冲突")
             expires_at = (observed_at + timedelta(seconds=lease_seconds)).isoformat()
             event_time = observed_at.isoformat()
             cursor = conn.execute(
@@ -2711,10 +2760,11 @@ class ContinuityStore:
                 run_id,
                 "LEASE_RENEWED",
                 {
-                    "schema_version": "lease-renewed.v2",
+                    "schema_version": "lease-renewed.v3",
                     "request": request,
                     "expires_at": expires_at,
                     "version": current.version + 1,
+                    "updated_at": event_time,
                 },
                 idempotency_key,
                 event_time,

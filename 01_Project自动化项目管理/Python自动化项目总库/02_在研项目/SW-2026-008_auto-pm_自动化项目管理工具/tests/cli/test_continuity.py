@@ -108,6 +108,104 @@ def _invoke(runner: CliRunner, root: Path, args: list[str]) -> Result:
     return runner.invoke(cli, ["-w", str(root), "continuity", *args], catch_exceptions=False)
 
 
+def test_lease_renew_cli_reads_secret_from_environment_and_emits_no_secret(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _repository(tmp_path)
+    works = WorkRegistryService(tmp_path)
+    works.initialize("test")
+    works.create_work(
+        work_id="WORK-CLI-E04",
+        subject_project_id="SW-TEST-001",
+        kind=WorkKind.GOVERNANCE,
+        title="E04",
+        owner="architect",
+        scope_paths=["README.md"],
+        source_fingerprint="sha256:e04",
+        idempotency_key="e04-work",
+        read_only=True,
+    )
+    service = ContinuityExecutionService(tmp_path)
+    service.start_run(
+        run_id="RUN-CLI-E04",
+        work_id="WORK-CLI-E04",
+        executor_id="agent-a",
+        adapter="codex",
+        owned_paths=["README.md"],
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+        git_head=_head(tmp_path),
+        worktree_path=str(tmp_path),
+        lease_token="must-not-leak",
+        lease_seconds=900,
+        idempotency_key="e04-run",
+    )
+
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "continuity",
+            "lease",
+            "renew",
+            "--run-id",
+            "RUN-CLI-E04",
+            "--owner",
+            "agent-a",
+            "--lease-token-env",
+            "AUTO_PM_E04_TOKEN",
+            "--expected-version",
+            "1",
+            "--lease-seconds",
+            "900",
+            "--idempotency-key",
+            "e04-cli-renew",
+        ],
+        env={"AUTO_PM_E04_TOKEN": "must-not-leak"},
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["schema_version"] == "lease-renewal-receipt.v1"
+    assert payload["version"] == 2
+    assert "lease_token" not in payload
+    assert "must-not-leak" not in result.output
+
+
+def test_lease_renew_cli_rejects_plaintext_token_option_without_echoing_it(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    result = _invoke(
+        cli_runner,
+        tmp_path,
+        [
+            "lease",
+            "renew",
+            "--run-id",
+            "RUN-CLI-E04",
+            "--owner",
+            "agent-a",
+            "--lease-token",
+            "must-not-leak",
+            "--expected-version",
+            "1",
+            "--idempotency-key",
+            "e04-cli-plaintext",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "must-not-leak" not in result.output
+
+
+def test_lease_secret_source_is_consumed_before_child_execution(monkeypatch) -> None:
+    monkeypatch.setenv("AUTO_PM_E04_ONE_SHOT", "must-not-leak")
+
+    assert continuity_cli._secret_from_environment("AUTO_PM_E04_ONE_SHOT") == "must-not-leak"
+    assert "AUTO_PM_E04_ONE_SHOT" not in os.environ
+
+
 def _authority_json() -> str:
     now = datetime.now(UTC)
     return json.dumps(

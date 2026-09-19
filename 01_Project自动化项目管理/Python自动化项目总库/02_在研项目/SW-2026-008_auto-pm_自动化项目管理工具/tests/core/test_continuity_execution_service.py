@@ -968,7 +968,13 @@ def test_start_run_exact_replay_survives_transition_renewal_and_handoff(
     )
 
     assert _start(service) == created
-    assert service._store.get_lease(created.run_id) == renewed
+    persisted_lease = service._store.get_lease(created.run_id)
+    assert persisted_lease.run_id == renewed.run_id
+    assert persisted_lease.owner_id == renewed.owner_id
+    assert persisted_lease.expires_at == renewed.expires_at
+    assert persisted_lease.version == renewed.version
+    assert persisted_lease.updated_at == renewed.updated_at
+    _start_evidence(service, idempotency_key="record-start-before-replay")
     verifying = service.transition_run(
         created.run_id,
         RunState.VERIFYING,
@@ -1279,6 +1285,42 @@ def test_store_lease_renewal_uses_trusted_time_and_cannot_revive_expired_lease(
         ).fetchone()[0]
     assert "lease-secret" not in payload
     assert count == 1
+
+
+def test_lease_renewal_receipt_is_exact_secret_free_and_version_bound(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+
+    first = service.renew_lease(
+        "RUN-001",
+        "agent-a",
+        "lease-secret",
+        900,
+        "e04-exact-renew",
+        expected_version=1,
+    )
+    replay = service.renew_lease(
+        "RUN-001",
+        "agent-a",
+        "lease-secret",
+        900,
+        "e04-exact-renew",
+        expected_version=1,
+    )
+
+    assert replay == first
+    assert first.schema_version == "lease-renewal-receipt.v1"
+    assert "lease-secret" not in first.model_dump_json()
+    with pytest.raises(ContinuityExecutionError, match="version"):
+        service.renew_lease(
+            "RUN-001",
+            "agent-a",
+            "lease-secret",
+            900,
+            "e04-stale-version",
+            expected_version=1,
+        )
 
 
 def test_checkpoint_is_sequenced_and_rejects_baseline_drift(tmp_path: Path) -> None:

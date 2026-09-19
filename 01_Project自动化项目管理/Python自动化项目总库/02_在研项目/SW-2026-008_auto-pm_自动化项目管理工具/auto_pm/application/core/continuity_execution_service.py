@@ -11,6 +11,7 @@ from auto_pm.contracts.continuity import (
     CheckpointItem,
     HandoffV2,
     LeaseItem,
+    LeaseRenewalReceipt,
     RunItem,
     RunState,
     WorkState,
@@ -243,16 +244,26 @@ class ContinuityExecutionService:
         lease_token: str,
         lease_seconds: int,
         idempotency_key: str,
-    ) -> LeaseItem:
+        *,
+        expected_version: int | None = None,
+    ) -> LeaseRenewalReceipt:
         if type(lease_seconds) is not int or not 60 <= lease_seconds <= 86_400:
             raise ContinuityExecutionError("lease_seconds 必须在 60 到 86400 之间")
         try:
-            return self._store.renew_lease(
+            lease = self._store.renew_lease(
                 run_id,
                 owner_id,
                 lease_token,
                 lease_seconds,
                 idempotency_key,
+                expected_version=expected_version,
+            )
+            return LeaseRenewalReceipt(
+                run_id=lease.run_id,
+                owner_id=lease.owner_id,
+                expires_at=lease.expires_at,
+                version=lease.version,
+                updated_at=lease.updated_at,
             )
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
