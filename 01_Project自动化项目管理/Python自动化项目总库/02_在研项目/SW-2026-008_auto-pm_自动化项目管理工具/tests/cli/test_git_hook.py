@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,13 +31,148 @@ def test_git_hook_install_uses_root_active_release_launcher(tmp_path: Path) -> N
     commit_msg = (tmp_path / ".git" / "hooks" / "commit-msg").read_text(encoding="utf-8")
     for script, command in (
         (pre_commit, "git-hook pre-commit"),
-        (commit_msg, 'git-hook commit-msg "$1"'),
+        (commit_msg, 'git-hook commit-msg "$MSG_FILE"'),
     ):
         assert '"$PYTHON_EXE" "$PROJECT_ROOT/main.py"' in script
         assert f'-w "$PROJECT_ROOT" {command}' in script
         assert "PYTHONPATH" not in script
         assert "python -m auto_pm" not in script
         assert "CONTAINER=" not in script
+    assert 'MSG_FILE_DIR=$(dirname -- "$1")' in commit_msg
+    assert 'MSG_FILE_DIR_ABS=$(cd -- "$MSG_FILE_DIR"' in commit_msg
+    assert 'if [ ! -r "$MSG_FILE" ]' in commit_msg
+    assert '"$GIT_COMMON_DIR"/worktrees/*/COMMIT_EDITMSG' in commit_msg
+
+
+def _write_hook_probe_launcher(repo: Path) -> None:
+    """Write a tiny launcher used only by real Git hook fixtures."""
+    (repo / "main.py").write_text(
+        """from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+if args[-2:-1] == ["commit-msg"]:
+    message_file = Path(args[-1])
+    if not message_file.is_absolute() or not message_file.is_file():
+        raise SystemExit(19)
+    trace_file = Path(args[1]) / "hook-path-trace.jsonl"
+    with trace_file.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({"path": str(message_file)}) + "\\n")
+""",
+        encoding="utf-8",
+    )
+
+
+def _commit_with_real_hooks(repo: Path, message: str) -> None:
+    tracked = repo / "tracked.txt"
+    tracked.write_text(message + "\n", encoding="utf-8")
+    _git(repo, "add", "tracked.txt")
+    environment = os.environ.copy()
+    environment["PATH"] = (
+        str(Path(sys.executable).parent)
+        + os.pathsep
+        + environment.get("PATH", "")
+    )
+    subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=environment,
+    )
+
+
+def test_installed_commit_msg_hook_resolves_primary_and_linked_worktree_paths(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "primary repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "fixture@example.invalid")
+    _git(repo, "config", "user.name", "hook fixture")
+    (repo / "tracked.txt").write_text("baseline\n", encoding="utf-8")
+    _write_hook_probe_launcher(repo)
+    _git(repo, "add", "tracked.txt")
+    _git(repo, "commit", "-m", "fixture baseline")
+
+    result = CliRunner().invoke(cli, ["-w", str(repo), "git-hook", "install"])
+    assert result.exit_code == 0, result.output
+    for hook_name in ("pre-commit", "commit-msg"):
+        (repo / ".git" / "hooks" / hook_name).chmod(0o755)
+
+    _commit_with_real_hooks(repo, "primary worktree")
+
+    linked = tmp_path / "linked worktree"
+    _git(repo, "worktree", "add", "-b", "fixture-linked", str(linked))
+    _commit_with_real_hooks(linked, "linked worktree")
+
+    trace_lines = (repo / "hook-path-trace.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(trace_lines) == 2
+    traced_paths = [Path(json.loads(line)["path"]) for line in trace_lines]
+    assert all(path.is_absolute() for path in traced_paths)
+    assert traced_paths[0].name == "COMMIT_EDITMSG"
+    assert traced_paths[1].name == "COMMIT_EDITMSG"
+    assert traced_paths[0] != traced_paths[1]
+
+
+def _git_hook_shell() -> str:
+    if os.name == "nt":
+        git_executable = shutil.which("git")
+        assert git_executable is not None
+        shell = Path(git_executable).parent.parent / "bin" / "sh.exe"
+        assert shell.is_file()
+        return str(shell)
+    shell = shutil.which("sh")
+    assert shell is not None
+    return shell
+
+
+def test_installed_commit_msg_hook_rejects_missing_or_external_message_file(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "missing message repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _write_hook_probe_launcher(repo)
+
+    result = CliRunner().invoke(cli, ["-w", str(repo), "git-hook", "install"])
+    assert result.exit_code == 0, result.output
+    hook = repo / ".git" / "hooks" / "commit-msg"
+    hook.chmod(0o755)
+
+    missing = subprocess.run(
+        [_git_hook_shell(), "--login", str(hook), ".git/missing"],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert missing.returncode != 0
+    assert "message file" in missing.stderr or "message directory" in missing.stderr
+
+    external_message = tmp_path / "COMMIT_EDITMSG"
+    external_message.write_text("external\n", encoding="utf-8")
+    external = subprocess.run(
+        [_git_hook_shell(), "--login", str(hook), str(external_message)],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert external.returncode != 0
+    assert "outside Git metadata" in external.stderr
 
 
 def test_git_hook_preflight_passes_one_snapshot_to_both_shared_checks(

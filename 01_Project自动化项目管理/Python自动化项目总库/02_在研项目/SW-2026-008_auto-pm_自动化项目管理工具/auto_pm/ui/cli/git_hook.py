@@ -121,6 +121,7 @@ case "$GIT_COMMON_DIR" in
     /*) ;;
     *) GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) ;;
 esac
+GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) || exit 1
 PROJECT_ROOT=$(dirname "$GIT_COMMON_DIR")
 PYTHON_EXE="python"
 if [ -f "$PROJECT_ROOT/.venv/Scripts/python.exe" ]; then
@@ -129,7 +130,29 @@ elif [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python"
 fi
 
-"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$PROJECT_ROOT" git-hook commit-msg "$1"
+# Git may pass .git/COMMIT_EDITMSG in the primary worktree and an absolute
+# common-git-dir path in a linked worktree.  Resolve the path before the
+# launcher can switch runtime context, and fail closed when it is unreadable.
+MSG_FILE_DIR=$(dirname -- "$1") || exit 1
+MSG_FILE_NAME=$(basename -- "$1") || exit 1
+MSG_FILE_DIR_ABS=$(cd -- "$MSG_FILE_DIR" 2>/dev/null && pwd) || {
+    echo "[auto-pm commit-msg] cannot resolve message directory: $MSG_FILE_DIR" >&2
+    exit 1
+}
+MSG_FILE="$MSG_FILE_DIR_ABS/$MSG_FILE_NAME"
+if [ ! -r "$MSG_FILE" ]; then
+    echo "[auto-pm commit-msg] message file is not readable: $MSG_FILE" >&2
+    exit 1
+fi
+case "$MSG_FILE" in
+    "$GIT_COMMON_DIR/COMMIT_EDITMSG"|"$GIT_COMMON_DIR"/worktrees/*/COMMIT_EDITMSG) ;;
+    *)
+        echo "[auto-pm commit-msg] message file is outside Git metadata: $MSG_FILE" >&2
+        exit 1
+        ;;
+esac
+
+"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$PROJECT_ROOT" git-hook commit-msg "$MSG_FILE"
 exit $?
 """
 
