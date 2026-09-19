@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-C03C0258",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-258",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/evidence_collection_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_execution_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-19T18:41:41.383494+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基线必须精确为 C02 不可变提交 38c4130ee04b55ef6001dc399d73e4f08b02db3b。",
+    "系统自动构造完整内容绑定 Checkpoint；不得接受用户 result.json 或手填证据。",
+    "仅在隔离临时数据库或工作树测试；通过定向 pytest、三路径 Ruff、两生产路径 Mypy、真实双 Hook 与 diff --check 后停在 VERIFYING。",
+    "不提交、不合并、不部署、不切换 release，不启动 C04。"
+  ],
+  "metadata": {}
+}
