@@ -13,7 +13,12 @@ from auto_pm.core.continuity_resume_service import ContinuityResumeError, Contin
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
-from auto_pm.contracts.continuity import WorkItem, WorkState
+from auto_pm.application.core.evidence_collection_service import (
+    EvidenceCollection,
+    EvidenceCollectionError,
+    EvidenceCollectionService,
+)
+from auto_pm.contracts.continuity import RunState, WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.mission import Mission, MissionState
@@ -470,6 +475,7 @@ class PmFacadeService:
         """Record only the final user acceptance after verification has reached its gate."""
         mission = self._mission(mission_id)
         if mission.state is MissionState.ACCEPTANCE_PENDING:
+            self._require_current_acceptance_checkpoint(mission)
             mission = self._transition(
                 mission,
                 MissionState.ACCEPTED,
@@ -484,6 +490,164 @@ class PmFacadeService:
             "请确认最终验收；确认后驾驶舱才会执行关闭和台账闭环。",
             ("close",),
         )
+
+    def _require_current_acceptance_checkpoint(self, mission: Mission) -> None:
+        """Require the newest Run to carry current, passing quality evidence.
+
+        Mission state is only the user-facing phase marker.  It cannot replace
+        the immutable Run/Checkpoint evidence chain that proves the approved
+        work was actually verified.
+        """
+
+        if not mission.root_work_id:
+            raise PmFacadeError("Mission 缺少根 Work，不能执行验收")
+        work = self._work(mission.root_work_id)
+        runs = self._store.list_runs(work.work_id, include_terminal=True)
+        if not runs:
+            raise PmFacadeError("根 Work 尚无可验收的 Run")
+        run = runs[0]
+        if run.state is not RunState.VERIFYING:
+            raise PmFacadeError("最新 Run 未处于 VERIFYING，不能使用旧成功或失败证据验收")
+        checkpoint = self._store.latest_checkpoint(run.run_id)
+        if checkpoint is None:
+            raise PmFacadeError("最新 VERIFYING Run 缺少 Checkpoint")
+        if checkpoint.git_head != run.git_head:
+            raise PmFacadeError("Checkpoint 与最新 Run 基线不一致")
+        if checkpoint.dirty_paths != run.declared_dirty_paths:
+            raise PmFacadeError("Checkpoint 与最新 Run 声明差异不一致")
+        if len(checkpoint.evidence) != 1:
+            raise PmFacadeError("Checkpoint 必须包含唯一的自动质量证据")
+
+        try:
+            envelope = json.loads(checkpoint.evidence[0])
+            receipt = envelope["quality_receipt"]
+            project_root = receipt["project_root"]
+            if not isinstance(project_root, str) or not project_root:
+                raise ValueError("project_root")
+            collector = EvidenceCollectionService(self._workspace_root)
+            collection = collector.collect(run)
+        except (EvidenceCollectionError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise PmFacadeError("最新 Checkpoint 证据无效或已过期") from error
+        if not self._acceptance_evidence_is_current(
+            checkpoint.evidence[0], collection, run, project_root
+        ):
+            raise PmFacadeError("最新 Checkpoint 未证明当前通过的质量证据")
+
+    @staticmethod
+    def _acceptance_evidence_is_current(
+        serialized: str,
+        collection: EvidenceCollection,
+        run: Any,
+        project_root: str,
+    ) -> bool:
+        """Validate a generic content-bound quality receipt without C03 coupling."""
+
+        try:
+            envelope = json.loads(serialized)
+            expected_keys = {
+                "schema_version", "collection", "collection_hash", "quality_receipt",
+                "receipt_hash", "envelope_hash",
+            }
+            if not isinstance(envelope, dict) or set(envelope) != expected_keys:
+                return False
+            unsigned = {key: value for key, value in envelope.items() if key != "envelope_hash"}
+            if (
+                serialized != PmFacadeService._canonical_json(envelope)
+                or not isinstance(envelope["envelope_hash"], str)
+                or not hmac.compare_digest(
+                    envelope["envelope_hash"], PmFacadeService._evidence_hash(unsigned)
+                )
+                or envelope["schema_version"] != "checkpoint-evidence.v1"
+                or envelope["collection"] != PmFacadeService._collection_payload(collection)
+                or not isinstance(envelope["collection_hash"], str)
+                or not hmac.compare_digest(envelope["collection_hash"], collection.content_hash)
+            ):
+                return False
+            receipt = envelope["quality_receipt"]
+            if not isinstance(receipt, dict):
+                return False
+            receipt_keys = {
+                "run_id", "baseline_git_head", "candidate_path", "project_root",
+                "evidence_hash", "gates", "evidence_current", "evidence_error", "status",
+            }
+            if set(receipt) != receipt_keys:
+                return False
+            candidate = Path(collection.worktree_path).resolve()
+            resolved_project_root = Path(project_root).resolve()
+            resolved_project_root.relative_to(candidate)
+            if not (resolved_project_root / "pyproject.toml").is_file():
+                return False
+            receipt_payload = {key: value for key, value in receipt.items() if key != "status"}
+            gates = receipt["gates"]
+            gate_keys = {
+                "name", "command", "cwd", "exit_code", "output_digest", "output_summary",
+            }
+            if (
+                not isinstance(envelope["receipt_hash"], str)
+                or not hmac.compare_digest(
+                    envelope["receipt_hash"], PmFacadeService._evidence_hash(receipt_payload)
+                )
+                or receipt["status"] != "PASS"
+                or receipt["run_id"] != run.run_id
+                or receipt["baseline_git_head"] != run.git_head
+                or receipt["candidate_path"] != collection.worktree_path
+                or receipt["project_root"] != str(resolved_project_root)
+                or receipt["evidence_hash"] != collection.content_hash
+                or receipt["evidence_current"] is not True
+                or receipt["evidence_error"] is not None
+                or not isinstance(gates, list)
+                or tuple(gate.get("name") for gate in gates if isinstance(gate, dict))
+                != ("pytest", "ruff", "mypy")
+                or not all(
+                    isinstance(gate, dict)
+                    and set(gate) == gate_keys
+                    and isinstance(gate["command"], list)
+                    and all(isinstance(item, str) for item in gate["command"])
+                    and isinstance(gate["cwd"], str)
+                    and gate["exit_code"] == 0
+                    and isinstance(gate["output_digest"], str)
+                    and bool(gate["output_digest"])
+                    and isinstance(gate["output_summary"], str)
+                    for gate in gates
+                )
+            ):
+                return False
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+        return True
+
+    @staticmethod
+    def _collection_payload(collection: EvidenceCollection) -> dict[str, object]:
+        """Render the immutable collection payload protected by the envelope."""
+
+        return {
+            "run_id": collection.run_id,
+            "baseline_git_head": collection.baseline_git_head,
+            "worktree_path": collection.worktree_path,
+            "staged_paths": list(collection.staged_paths),
+            "unstaged_paths": list(collection.unstaged_paths),
+            "untracked_paths": list(collection.untracked_paths),
+            "untracked_content_hashes": [
+                {"path": path, "sha256": digest}
+                for path, digest in collection.untracked_content_hashes
+            ],
+            "staged_diff": collection.staged_diff,
+            "staged_diff_sha256": hashlib.sha256(
+                collection.staged_diff.encode("utf-8")
+            ).hexdigest(),
+            "unstaged_diff": collection.unstaged_diff,
+            "unstaged_diff_sha256": hashlib.sha256(
+                collection.unstaged_diff.encode("utf-8")
+            ).hexdigest(),
+        }
+
+    @staticmethod
+    def _canonical_json(payload: object) -> str:
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _evidence_hash(payload: object) -> str:
+        return hashlib.sha256(PmFacadeService._canonical_json(payload).encode("utf-8")).hexdigest()
 
     @staticmethod
     def compatibility_notice() -> str:

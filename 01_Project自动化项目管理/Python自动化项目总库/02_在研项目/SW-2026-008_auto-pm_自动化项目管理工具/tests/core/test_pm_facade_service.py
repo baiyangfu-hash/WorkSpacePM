@@ -5,17 +5,25 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from auto_pm.change.change_service import ChangeService
+from auto_pm.core.continuity_execution_service import ContinuityExecutionService
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
-from auto_pm.contracts.continuity import WorkKind, WorkState
+from auto_pm.application.core.evidence_collection_service import (
+    EvidenceCollectionService,
+    PythonQualityGate,
+    PythonQualityReceipt,
+    _quality_receipt_hash,
+)
+from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 from auto_pm.contracts.pm_facade import PlanningScopeCard, PmConfirmationKind, PmIntent
 from auto_pm.domain.change.decision_service import DecisionError
@@ -82,6 +90,203 @@ def _setup(root: Path) -> tuple[MissionService, PmFacadeService]:
         root_work_id="WORK-PM-001",
     )
     return missions, PmFacadeService(root)
+
+
+def _commit_baseline(root: Path) -> str:
+    subprocess.run(
+        ["git", "-C", str(root), "add", "."],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=C04 Test",
+            "-c",
+            "user.email=c04@example.invalid",
+            "commit",
+            "-m",
+            "C04 baseline",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
+
+
+def _verified_acceptance_ready(
+    root: Path,
+) -> tuple[MissionService, PmFacadeService, ContinuityExecutionService]:
+    """Build one latest, content-bound C03 checkpoint using real quality gates."""
+
+    missions, facade = _setup(root)
+    (root / ".gitignore").write_text(
+        ".auto-pm/\n__pycache__/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n",
+        encoding="utf-8",
+    )
+    project = root / "project"
+    source = project / "auto_pm" / "core" / "target.py"
+    source.parent.mkdir(parents=True)
+    (project / "auto_pm" / "__init__.py").write_text("", encoding="utf-8")
+    (project / "auto_pm" / "core" / "__init__.py").write_text("", encoding="utf-8")
+    source.write_text("def value() -> int:\n    return 1\n", encoding="utf-8")
+    test_path = project / "tests" / "core" / "test_continuity_execution_service.py"
+    test_path.parent.mkdir(parents=True)
+    test_path.write_text(
+        "from auto_pm.core.target import value\n\n\n"
+        "def test_append_verified_checkpoint_profile_target() -> None:\n"
+        "    assert value() == 1\n",
+        encoding="utf-8",
+    )
+    (project / "pyproject.toml").write_text(
+        "[tool.ruff]\nline-length = 88\n\n[tool.mypy]\nfiles = [\"auto_pm\"]\n",
+        encoding="utf-8",
+    )
+    git_head = _commit_baseline(root)
+    scope_paths = [
+        "project/auto_pm/core/target.py",
+        "project/tests/core/test_continuity_execution_service.py",
+    ]
+    works = WorkRegistryService(root)
+    works.create_work(
+        work_id="WORK-C04-001",
+        subject_project_id="SW-C04-001",
+        kind=WorkKind.TEST,
+        title="C04 verified acceptance root work",
+        owner="Codex",
+        scope_paths=scope_paths,
+        source_fingerprint="sha256:c04",
+        idempotency_key="c04-work-create",
+        read_only=True,
+    )
+    now = datetime.now(UTC)
+    missions.create(
+        mission_id="MISSION-C04-001",
+        subject_project_id="SW-C04-001",
+        title="C04 verified acceptance",
+        objective="Bind acceptance to a current verified checkpoint.",
+        acceptance_criteria=["Only the latest passing checkpoint can be accepted."],
+        authority=_authority(now).model_copy(
+            update={
+                "subject_project_id": "SW-C04-001",
+                "scope_paths": tuple(scope_paths),
+            }
+        ),
+        created_by="Codex PM",
+        idempotency_key="c04-mission-create",
+        root_work_id="WORK-C04-001",
+    )
+    facade.plan("MISSION-C04-001")
+    facade.approve("MISSION-C04-001", "WORK-C04-001")
+    execution = ContinuityExecutionService(root, store=facade._store)
+    execution.start_run(
+        run_id="RUN-C04-001",
+        work_id="WORK-C04-001",
+        executor_id="c04-test",
+        adapter="test",
+        owned_paths=scope_paths,
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+        git_head=git_head,
+        worktree_path=str(root),
+        lease_token="c04-test-lease",
+        lease_seconds=900,
+        idempotency_key="c04-run-create",
+    )
+    execution.transition_run(
+        "RUN-C04-001",
+        RunState.RUNNING,
+        "c04-test",
+        "c04-test-lease",
+        "c04-run-start",
+    )
+    run = facade._store.get_run("RUN-C04-001")
+    collector = EvidenceCollectionService(root)
+    collection = collector.collect(run)
+    gates = (
+        PythonQualityGate(
+            "pytest",
+            (
+                sys.executable,
+                "-m",
+                "pytest",
+                "-o",
+                "addopts=",
+                "-p",
+                "no:cacheprovider",
+                "-k",
+                "append_verified_checkpoint",
+                "tests/core/test_continuity_execution_service.py",
+            ),
+            str(project.resolve()),
+            0,
+            "c04-test-pytest",
+            "verified by the C03 checkpoint contract suite",
+        ),
+        PythonQualityGate(
+            "ruff", (sys.executable, "-m", "ruff", "check"), str(project.resolve()), 0,
+            "c04-test-ruff", "verified by the C03 checkpoint contract suite",
+        ),
+        PythonQualityGate(
+            "mypy", (sys.executable, "-m", "mypy"), str(project.resolve()), 0,
+            "c04-test-mypy", "verified by the C03 checkpoint contract suite",
+        ),
+    )
+    receipt = PythonQualityReceipt(
+        run_id=run.run_id,
+        baseline_git_head=run.git_head,
+        candidate_path=collection.worktree_path,
+        project_root=str(project.resolve()),
+        evidence_hash=collection.content_hash,
+        gates=gates,
+        evidence_current=True,
+        evidence_error=None,
+        content_hash=_quality_receipt_hash(
+            run_id=run.run_id,
+            baseline_git_head=run.git_head,
+            candidate_path=collection.worktree_path,
+            project_root=str(project.resolve()),
+            evidence_hash=collection.content_hash,
+            gates=gates,
+            evidence_current=True,
+            evidence_error=None,
+        ),
+    )
+    execution.checkpoint(
+        checkpoint_id="CP-C04-001",
+        run_id="RUN-C04-001",
+        owner_id="c04-test",
+        lease_token="c04-test-lease",
+        summary="verified C03 checkpoint evidence",
+        git_head=collection.git_head,
+        dirty_paths=[],
+        evidence=[collector.build_checkpoint_evidence(collection, receipt)],
+        idempotency_key="c04-checkpoint",
+    )
+    execution.transition_run(
+        "RUN-C04-001",
+        RunState.VERIFYING,
+        "c04-test",
+        "c04-test-lease",
+        "c04-run-verifying",
+    )
+    return missions, facade, execution
 
 
 def _planning_facade(root: Path) -> tuple[PmFacadeService, Path]:
@@ -296,9 +501,65 @@ def test_accept_requires_the_verification_gate(tmp_path: Path) -> None:
         idempotency_key="verification-complete",
     )
 
-    card = facade.accept("MISSION-PM-001")
+    with pytest.raises(PmFacadeError, match="Run"):
+        facade.accept("MISSION-PM-001")
+
+
+def test_accept_binds_to_the_latest_passing_checkpoint(tmp_path: Path) -> None:
+    missions, facade, _ = _verified_acceptance_ready(tmp_path)
+    pending = missions.get("MISSION-C04-001")
+    missions.transition(
+        mission_id=pending.mission_id,
+        expected_version=pending.version,
+        new_state=MissionState.ACCEPTANCE_PENDING,
+        root_work_id=pending.root_work_id,
+        idempotency_key="c04-verification-complete",
+    )
+
+    card = facade.accept("MISSION-C04-001")
     assert card.kind is PmConfirmationKind.ACCEPTANCE
     assert card.mission_state is MissionState.ACCEPTED
+    assert facade.accept("MISSION-C04-001") == card
+
+
+def test_accept_rejects_a_checkpoint_after_owned_content_changes(tmp_path: Path) -> None:
+    missions, facade, _ = _verified_acceptance_ready(tmp_path)
+    (tmp_path / "project" / "auto_pm" / "core" / "target.py").write_text(
+        "def value() -> int:\n    return 2\n", encoding="utf-8"
+    )
+    pending = missions.get("MISSION-C04-001")
+    missions.transition(
+        mission_id=pending.mission_id,
+        expected_version=pending.version,
+        new_state=MissionState.ACCEPTANCE_PENDING,
+        root_work_id=pending.root_work_id,
+        idempotency_key="c04-stale-evidence",
+    )
+
+    with pytest.raises(PmFacadeError, match="证据"):
+        facade.accept("MISSION-C04-001")
+
+
+def test_accept_rejects_when_the_latest_run_failed(tmp_path: Path) -> None:
+    missions, facade, execution = _verified_acceptance_ready(tmp_path)
+    execution.transition_run(
+        "RUN-C04-001",
+        RunState.FAILED,
+        "c04-test",
+        "c04-test-lease",
+        "c04-run-failed",
+    )
+    pending = missions.get("MISSION-C04-001")
+    missions.transition(
+        mission_id=pending.mission_id,
+        expected_version=pending.version,
+        new_state=MissionState.ACCEPTANCE_PENDING,
+        root_work_id=pending.root_work_id,
+        idempotency_key="c04-failed-evidence",
+    )
+
+    with pytest.raises(PmFacadeError, match="Run"):
+        facade.accept("MISSION-C04-001")
 
 
 def test_confirm_start_uses_the_mission_bound_work_without_an_internal_id(tmp_path: Path) -> None:
