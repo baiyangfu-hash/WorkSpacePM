@@ -1,0 +1,29 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-A6C06003",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-284",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T18:08:21.196473+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "settle_expired_run"
+      ],
+      "target_run_ids": [
+        "RUN-SW008-PMF-C06-001",
+        "RUN-SW008-PMF-C06R-001",
+        "RUN-SW008-PMF-C06R3-001"
+      ],
+      "allowed_outcomes": [
+        "CANCELLED"
+      ]
+    }
+  }
+}
