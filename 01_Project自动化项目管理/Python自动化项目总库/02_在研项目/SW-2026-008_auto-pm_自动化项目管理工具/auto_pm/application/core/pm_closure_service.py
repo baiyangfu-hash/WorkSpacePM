@@ -6,11 +6,13 @@ import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from auto_pm.domain.change.substance_injector import SubstanceInjector
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
@@ -107,6 +109,7 @@ class PmClosureService:
         *,
         store: ContinuityStore | None = None,
     ) -> None:
+        self._workspace_root = Path(workspace_root)
         self._store = store or ContinuityStore(workspace_root)
         self._now = now or (lambda: datetime.now(UTC))
 
@@ -144,6 +147,26 @@ class PmClosureService:
         except (ContinuityStoreError, ValueError, TypeError, json.JSONDecodeError) as error:
             raise PmClosureError(str(error)) from error
 
+    def inject_prepared_change_substance(self, closure_id: str) -> Path:
+        """Write only the verified C06 CHG evidence for a prepared closure.
+
+        This does not publish the outbox, advance the closure step, transition a
+        CHG, project ledger, Work, Run, or Mission.  Those transitions belong to
+        later governed stages.
+        """
+
+        preparation = self.get(closure_id)
+        try:
+            evidence = self._change_substance_evidence(preparation)
+            return SubstanceInjector.inject_closure_evidence(
+                self._workspace_root,
+                change_number=preparation.closure.change_id,
+                target_path=preparation.outbox.target_path,
+                evidence=evidence,
+            )
+        except (ValueError, TypeError) as error:
+            raise PmClosureError(str(error)) from error
+
     @staticmethod
     def _decode(payload: Mapping[str, Mapping[str, Any]]) -> ClosurePreparation:
         closure_values = dict(payload["closure"])
@@ -166,6 +189,52 @@ class PmClosureService:
         ):
             raise PmClosureError("Closure state、step 与 outbox identity 不一致")
         return result
+
+    @staticmethod
+    def _change_substance_evidence(preparation: ClosurePreparation) -> dict[str, str]:
+        closure = preparation.closure
+        step = preparation.step
+        outbox = preparation.outbox
+        expected_payload = {
+            "schema_version": "closure-outbox.v1",
+            "closure_id": closure.closure_id,
+            "step_id": step.step_id,
+            "mission_id": closure.mission_id,
+            "change_id": closure.change_id,
+            "checkpoint_id": closure.checkpoint_id,
+            "operation": ClosureStepKind.CHANGE_SUBSTANCE.value,
+        }
+        canonical_payload = json.dumps(
+            expected_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if (
+            closure.state is not ClosureState.PREPARED
+            or step.step_kind is not ClosureStepKind.CHANGE_SUBSTANCE
+            or step.state is not ClosureStepState.PENDING
+            or step.attempt_count != 0
+            or outbox.artifact_kind is not ClosureStepKind.CHANGE_SUBSTANCE
+            or outbox.published_at is not None
+            or outbox.target_path != f"change://{closure.change_id}"
+            or outbox.payload != expected_payload
+            or outbox.payload_hash != sha256(canonical_payload.encode("utf-8")).hexdigest()
+        ):
+            raise PmClosureError("Closure 未处于可验证的 C06 CHANGE_SUBSTANCE 准备状态")
+        return {
+            "closure_id": closure.closure_id,
+            "work_id": closure.work_id,
+            "run_id": closure.run_id,
+            "checkpoint_id": closure.checkpoint_id,
+            "change_id": closure.change_id,
+            "decision_id": closure.decision_id,
+            "step_id": step.step_id,
+            "outbox_id": outbox.outbox_id,
+            "request_hash": closure.request_hash,
+            "payload_hash": outbox.payload_hash,
+            "prepared_on": closure.created_at.date().isoformat(),
+        }
 
     def _timestamp(self) -> str:
         current = self._now()
