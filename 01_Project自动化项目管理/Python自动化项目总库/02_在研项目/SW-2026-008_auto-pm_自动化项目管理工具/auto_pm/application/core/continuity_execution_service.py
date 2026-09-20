@@ -563,6 +563,47 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def create_checkpoint_bound_handoff(
+        self,
+        *,
+        checkpoint_id: str,
+        from_owner: str,
+        to_owner: str,
+        lease_token: str,
+        new_lease_token: str,
+        lease_seconds: int,
+        idempotency_key: str,
+    ) -> tuple[HandoffV2, LeaseItem]:
+        """Create and accept one deterministic v2 handoff from a Checkpoint.
+
+        The durable handoff snapshot is created by the Store from the referenced
+        Checkpoint, so its Work scope, Git baseline and worktree are never
+        caller-provided.  The previous lease token is consumed only by the
+        creation call and is not returned or persisted in the Handoff payload.
+        """
+
+        if not checkpoint_id.strip() or not idempotency_key.strip():
+            raise ContinuityExecutionError("Checkpoint 与幂等键均为必填")
+        digest = hashlib.sha256(
+            f"{checkpoint_id}\x00{to_owner}".encode()
+        ).hexdigest()[:24].upper()
+        handoff = self.create_handoff(
+            handoff_id=f"HO-{digest}",
+            checkpoint_id=checkpoint_id,
+            from_owner=from_owner,
+            to_owner=to_owner,
+            lease_token=lease_token,
+            idempotency_key=f"{idempotency_key}:create",
+        )
+        lease = self.accept_handoff(
+            handoff_id=handoff.handoff_id,
+            receiver_id=to_owner,
+            new_lease_token=new_lease_token,
+            lease_seconds=lease_seconds,
+            idempotency_key=f"{idempotency_key}:accept",
+        )
+        return handoff, lease
+
     def load_legacy_handoff(self, path: str | Path) -> dict[str, object]:
         """Read legacy v1 evidence without importing it into mutable continuity state."""
         candidate = Path(path).resolve()

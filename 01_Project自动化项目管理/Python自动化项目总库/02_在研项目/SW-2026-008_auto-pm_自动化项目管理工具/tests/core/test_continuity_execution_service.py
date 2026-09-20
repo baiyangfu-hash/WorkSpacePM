@@ -2000,6 +2000,31 @@ def test_handoff_v2_points_to_checkpoint_and_is_hash_signed(tmp_path: Path) -> N
         idempotency_key="accept-1",
     )
     assert lease.owner_id == "agent-b"
+
+
+def test_checkpoint_bound_handoff_creates_a_new_receiver_lease(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    checkpoint = _checkpoint(service)
+
+    handoff, receiver_lease = service.create_checkpoint_bound_handoff(
+        checkpoint_id=checkpoint.checkpoint_id,
+        from_owner="agent-a",
+        to_owner="agent-b",
+        lease_token="lease-secret",
+        new_lease_token="receiver-secret",
+        lease_seconds=900,
+        idempotency_key="checkpoint-bound-handoff",
+    )
+
+    assert handoff.schema_version == "handoff.v2"
+    assert handoff.checkpoint_id == checkpoint.checkpoint_id
+    assert handoff.work_id == "WORK-001"
+    assert handoff.git_head == checkpoint.git_head
+    assert receiver_lease.run_id == "RUN-001"
+    assert receiver_lease.owner_id == "agent-b"
+    assert "lease-secret" not in handoff.model_dump_json()
     with pytest.raises(ContinuityExecutionError, match="ownership"):
         service.renew_lease("RUN-001", "agent-a", "lease-secret", 900, "old-owner")
 
