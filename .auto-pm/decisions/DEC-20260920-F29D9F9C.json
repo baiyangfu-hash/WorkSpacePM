@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-F29D9F9C",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-281",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/substance_injector.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/change/test_substance_control.py"
+  ],
+  "approver": "User/Architect",
+  "approved_at": "2026-09-20T16:41:38.143724+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only verified closure evidence may populate implementation and verification fields of the single target CHG.",
+    "Reject placeholder or shell substance and any attempt to modify a non-target CHG.",
+    "Do not implement C07 ledger projection, C08 terminal closure, merge, deployment, or release switching."
+  ],
+  "metadata": {}
+}

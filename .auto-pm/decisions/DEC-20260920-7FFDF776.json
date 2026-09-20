@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-7FFDF776",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-282",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/substance_injector.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/change/test_substance_control.py"
+  ],
+  "approver": "User/Architect",
+  "approved_at": "2026-09-20T17:28:09.702900+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Settle only the expired RUN-SW008-PMF-C06-001 through the governed settle-expired command with CANCELLED outcome.",
+    "Create only a C06 retry Run with the same three owned and declared dirty paths; do not add code changes beyond the existing C06 diff.",
+    "Do not implement C07, merge, deploy, or switch release."
+  ],
+  "metadata": {}
+}
