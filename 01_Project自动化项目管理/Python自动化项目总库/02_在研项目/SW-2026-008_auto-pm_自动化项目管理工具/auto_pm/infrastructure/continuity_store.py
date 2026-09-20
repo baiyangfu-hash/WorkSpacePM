@@ -1314,20 +1314,28 @@ class ContinuityStore:
         idempotency_key: str,
         now: str,
     ) -> WorkItem:
+        try:
+            destination = WorkState(new_state)
+        except (TypeError, ValueError) as error:
+            raise ContinuityStoreError("Work 目标状态非法") from error
         with self._transaction() as conn:
             existing = self._event_by_key(conn, idempotency_key)
             if existing is not None:
-                if existing["aggregate_id"] != work_id:
-                    raise ContinuityStoreError("idempotency_key 已用于其他 Work")
+                if self._work_transition_from_event(existing) != (
+                    work_id,
+                    destination,
+                    authorization_ref,
+                ):
+                    raise ContinuityStoreError("idempotency_key 已绑定不同 Work 状态迁移")
                 return self._get_work(conn, work_id)
             cursor = conn.execute(
                 """UPDATE work_items SET state=?, authorization_ref=?, version=version+1,
                 updated_at=? WHERE work_id=? AND version=?""",
-                (new_state, authorization_ref, now, work_id, expected_version),
+                (destination.value, authorization_ref, now, work_id, expected_version),
             )
             if cursor.rowcount != 1:
                 raise ContinuityStoreError("Work 不存在或版本冲突")
-            payload = {"state": new_state, "authorization_ref": authorization_ref}
+            payload = {"state": destination.value, "authorization_ref": authorization_ref}
             self._append_event(conn, work_id, "WORK_TRANSITIONED", payload, idempotency_key, now)
             return self._get_work(conn, work_id)
 
@@ -1378,6 +1386,16 @@ class ContinuityStore:
             if row is None:
                 return None
             return str(row["aggregate_type"]), str(row["aggregate_id"])
+
+    def work_transition_for_key(
+        self, idempotency_key: str
+    ) -> tuple[str, WorkState, str] | None:
+        """Read the exact semantic binding of an existing Work transition key."""
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, idempotency_key)
+            if row is None:
+                return None
+            return self._work_transition_from_event(row)
 
     @classmethod
     def _execution_intent_key(cls, operation_id: str) -> str:
@@ -3105,6 +3123,25 @@ class ContinuityStore:
     def _event_by_key(conn: sqlite3.Connection, key: str) -> sqlite3.Row | None:
         row = conn.execute("SELECT * FROM events WHERE idempotency_key=?", (key,)).fetchone()
         return cast(sqlite3.Row | None, row)
+
+    @classmethod
+    def _work_transition_from_event(
+        cls, row: sqlite3.Row
+    ) -> tuple[str, WorkState, str]:
+        if row["aggregate_type"] != "work" or row["event_type"] != "WORK_TRANSITIONED":
+            raise ContinuityStoreError("idempotency_key 不属于 Work 状态迁移")
+        payload = cls._validated_event_payload(row, label="Work 迁移")
+        if set(payload) != {"state", "authorization_ref"}:
+            raise ContinuityStoreError("Work 迁移事件 payload 语义不完整")
+        state = payload["state"]
+        authorization_ref = payload["authorization_ref"]
+        if not isinstance(state, str) or not isinstance(authorization_ref, str):
+            raise ContinuityStoreError("Work 迁移事件 payload 字段类型非法")
+        try:
+            destination = WorkState(state)
+        except ValueError as error:
+            raise ContinuityStoreError("Work 迁移事件 payload 状态非法") from error
+        return str(row["aggregate_id"]), destination, authorization_ref
 
     @staticmethod
     def _validated_event_payload(row: sqlite3.Row, *, label: str) -> dict[str, object]:

@@ -214,7 +214,22 @@ class WorkRegistryService:
         new_state: WorkState,
         idempotency_key: str,
     ) -> WorkItem:
-        work = self._store.get_work(work_id)
+        try:
+            existing = self._store.work_transition_for_key(idempotency_key)
+            work = self._store.get_work(work_id)
+        except ContinuityStoreError as error:
+            raise WorkRegistryError(str(error)) from error
+        if existing is not None:
+            aggregate_id, recorded_state, recorded_authorization_ref = existing
+            if aggregate_id != work_id:
+                raise WorkRegistryError("idempotency_key 已用于其他 Work")
+            if (
+                recorded_state is not new_state
+                or recorded_authorization_ref != work.authorization_ref
+                or work.state is not new_state
+            ):
+                raise WorkRegistryError("idempotency_key 已绑定不同 Work 状态迁移")
+            return work
         if new_state not in _TRANSITIONS[work.state]:
             raise WorkRegistryError(f"非法 Work 状态迁移: {work.state} -> {new_state}")
         return self._transition(work, new_state, work.authorization_ref, idempotency_key)
@@ -266,7 +281,7 @@ class WorkRegistryService:
         idempotency_key: str,
     ) -> WorkItem:
         try:
-            return self._store.transition(
+            transitioned = self._store.transition(
                 work.work_id,
                 work.version,
                 new_state.value,
@@ -276,6 +291,9 @@ class WorkRegistryService:
             )
         except ContinuityStoreError as error:
             raise WorkRegistryError(str(error)) from error
+        if transitioned.state is not new_state:
+            raise WorkRegistryError("idempotency_key 已绑定不同 Work 状态迁移")
+        return transitioned
 
     def _load_decision(self, decision_id: str) -> DecisionPackageDTO:
         path = self._root / ".auto-pm" / "decisions" / f"{decision_id}.json"
