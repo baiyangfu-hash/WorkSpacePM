@@ -207,6 +207,45 @@ CREATE TABLE IF NOT EXISTS planning_draft_decision_bindings (
     approval_evidence_ref TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS closure_items (
+    closure_id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL UNIQUE REFERENCES mission_items(mission_id),
+    work_id TEXT NOT NULL REFERENCES work_items(work_id),
+    run_id TEXT NOT NULL REFERENCES run_items(run_id),
+    checkpoint_id TEXT NOT NULL REFERENCES checkpoints(checkpoint_id),
+    change_id TEXT NOT NULL,
+    decision_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS closure_steps (
+    step_id TEXT PRIMARY KEY,
+    closure_id TEXT NOT NULL REFERENCES closure_items(closure_id),
+    sequence INTEGER NOT NULL,
+    step_kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    attempt_count INTEGER NOT NULL,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (closure_id, sequence),
+    UNIQUE (closure_id, step_kind)
+);
+CREATE TABLE IF NOT EXISTS closure_outbox (
+    outbox_id TEXT PRIMARY KEY,
+    closure_id TEXT NOT NULL REFERENCES closure_items(closure_id),
+    step_id TEXT NOT NULL REFERENCES closure_steps(step_id),
+    artifact_kind TEXT NOT NULL,
+    target_path TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    published_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (closure_id, step_id, artifact_kind)
+);
 CREATE INDEX IF NOT EXISTS idx_work_project_state
 ON work_items(subject_project_id, state);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate
@@ -217,6 +256,10 @@ CREATE INDEX IF NOT EXISTS idx_mission_project_state
 ON mission_items(subject_project_id, state);
 CREATE INDEX IF NOT EXISTS idx_planning_drafts_project_state
 ON planning_drafts(subject_project_id, state);
+CREATE INDEX IF NOT EXISTS idx_closure_state ON closure_items(state);
+CREATE INDEX IF NOT EXISTS idx_closure_steps_state ON closure_steps(closure_id, state, sequence);
+CREATE INDEX IF NOT EXISTS idx_closure_outbox_pending
+ON closure_outbox(published_at, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_mission_per_project
 ON mission_items(subject_project_id)
 WHERE state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED');
@@ -1967,6 +2010,186 @@ class ContinuityStore:
     def get_mission(self, mission_id: str) -> Mission:
         with self._read_connection() as conn:
             return self._get_mission(conn, mission_id)
+
+    def prepare_closure(
+        self,
+        mission_id: str,
+        idempotency_key: str,
+        now: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Atomically bind one accepted Mission to its first recoverable closure step.
+
+        C05 only prepares durable state.  The queued CHANGE_SUBSTANCE artifact is
+        intentionally not published here; C06 and later stages own all external
+        mutations and terminal lifecycle transitions.
+        """
+
+        mission_id = self._validated_run_text(mission_id, label="mission_id")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        event_time = self._aware_timestamp(now, "closure prepare").isoformat()
+        request = {
+            "schema_version": "closure-prepare-request.v1",
+            "mission_id": mission_id,
+        }
+        canonical_request = json.dumps(
+            request,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+
+        try:
+            with self._transaction() as conn:
+                existing = self._event_by_key(conn, idempotency_key)
+                if existing is not None:
+                    return self._closure_preparation_from_event(
+                        conn,
+                        existing,
+                        request=request,
+                        request_hash=request_hash,
+                    )
+
+                mission = self._get_mission(conn, mission_id)
+                if mission.state is not MissionState.ACCEPTED:
+                    raise ContinuityStoreError("只有已验收 Mission 可以准备 v2 收口")
+                if mission.root_work_id is None:
+                    raise ContinuityStoreError("已验收 Mission 缺少根 Work")
+                work = self._get_work(conn, mission.root_work_id)
+                if work.subject_project_id != mission.subject_project_id:
+                    raise ContinuityStoreError("Mission 与根 Work subject project 不一致")
+                if work.state is not WorkState.IN_PROGRESS:
+                    raise ContinuityStoreError("C05 只能绑定尚未由 C08 收口的 IN_PROGRESS Work")
+                if work.authorization_ref != mission.authority.decision_id:
+                    raise ContinuityStoreError("根 Work 与 Mission Decision 授权不一致")
+
+                run_row = conn.execute(
+                    """SELECT run_id FROM run_items WHERE work_id=?
+                    ORDER BY updated_at DESC, run_id DESC LIMIT 1""",
+                    (work.work_id,),
+                ).fetchone()
+                if run_row is None:
+                    raise ContinuityStoreError("已验收 Mission 的根 Work 缺少 Run")
+                run = self._get_run(conn, str(run_row["run_id"]))
+                if run.state is not RunState.VERIFYING:
+                    raise ContinuityStoreError("C05 要求最新 Run 仍处于 VERIFYING")
+
+                checkpoint_row = conn.execute(
+                    """SELECT checkpoint_id FROM checkpoints WHERE run_id=?
+                    ORDER BY sequence DESC LIMIT 1""",
+                    (run.run_id,),
+                ).fetchone()
+                if checkpoint_row is None:
+                    raise ContinuityStoreError("已验收 Run 缺少 Checkpoint")
+                checkpoint = self._get_checkpoint(conn, str(checkpoint_row["checkpoint_id"]))
+                if (
+                    checkpoint.git_head != run.git_head
+                    or checkpoint.dirty_paths != run.declared_dirty_paths
+                    or not checkpoint.evidence
+                ):
+                    raise ContinuityStoreError("最新 Checkpoint 未绑定 Run 当前验证证据")
+
+                identity = {
+                    "mission_id": mission.mission_id,
+                    "work_id": work.work_id,
+                    "run_id": run.run_id,
+                    "checkpoint_id": checkpoint.checkpoint_id,
+                    "change_id": mission.authority.change_id,
+                    "decision_id": mission.authority.decision_id,
+                }
+                identity_text = json.dumps(
+                    identity,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                identity_hash = hashlib.sha256(identity_text.encode("utf-8")).hexdigest()
+                closure_id = f"CLOSURE-{identity_hash[:24].upper()}"
+                step_id = f"CSTEP-{identity_hash[8:32].upper()}"
+                outbox_id = f"OUTBOX-{identity_hash[16:40].upper()}"
+                closure = {
+                    "closure_id": closure_id,
+                    **identity,
+                    "state": "PREPARED",
+                    "request_hash": request_hash,
+                    "version": 1,
+                    "created_at": event_time,
+                    "updated_at": event_time,
+                }
+                step = {
+                    "step_id": step_id,
+                    "closure_id": closure_id,
+                    "sequence": 1,
+                    "step_kind": "CHANGE_SUBSTANCE",
+                    "state": "PENDING",
+                    "attempt_count": 0,
+                    "last_error": None,
+                    "created_at": event_time,
+                    "updated_at": event_time,
+                }
+                outbox_payload = {
+                    "schema_version": "closure-outbox.v1",
+                    "closure_id": closure_id,
+                    "step_id": step_id,
+                    "mission_id": mission.mission_id,
+                    "change_id": mission.authority.change_id,
+                    "checkpoint_id": checkpoint.checkpoint_id,
+                    "operation": "CHANGE_SUBSTANCE",
+                }
+                canonical_outbox_payload = json.dumps(
+                    outbox_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                outbox = {
+                    "outbox_id": outbox_id,
+                    "closure_id": closure_id,
+                    "step_id": step_id,
+                    "artifact_kind": "CHANGE_SUBSTANCE",
+                    "target_path": f"change://{mission.authority.change_id}",
+                    "payload_json": canonical_outbox_payload,
+                    "payload_hash": hashlib.sha256(
+                        canonical_outbox_payload.encode("utf-8")
+                    ).hexdigest(),
+                    "published_at": None,
+                    "created_at": event_time,
+                }
+                event_payload = {
+                    "schema_version": "closure-prepared.v1",
+                    "request": request,
+                    "request_hash": request_hash,
+                    "closure": closure,
+                    "step": step,
+                    "outbox": outbox,
+                }
+                self._insert_mapping(conn, "closure_items", closure)
+                self._insert_mapping(conn, "closure_steps", step)
+                self._insert_mapping(conn, "closure_outbox", outbox)
+                self._append_event(
+                    conn,
+                    closure_id,
+                    "CLOSURE_PREPARED",
+                    event_payload,
+                    idempotency_key,
+                    event_time,
+                    aggregate_type="closure",
+                )
+                return self._closure_preparation_from_event(
+                    conn,
+                    self._event_by_key(conn, idempotency_key),
+                    request=request,
+                    request_hash=request_hash,
+                )
+        except sqlite3.IntegrityError as error:
+            raise ContinuityStoreError("收口准备身份已被不同请求占用") from error
+
+    def get_closure_preparation(self, closure_id: str) -> dict[str, dict[str, Any]]:
+        """Read one closure preparation without publishing its pending outbox."""
+
+        closure_id = self._validated_run_text(closure_id, label="closure_id")
+        with self._read_connection() as conn:
+            return self._get_closure_preparation(conn, closure_id)
 
     @staticmethod
     def _lexical_run_worktree(raw: object, *, base: Path | None = None) -> str:
@@ -4079,6 +4302,104 @@ class ContinuityStore:
         if value.tzinfo is None:
             raise ContinuityStoreError(f"{label} 时间戳必须包含时区")
         return value.astimezone(UTC)
+
+    @classmethod
+    def _closure_preparation_from_event(
+        cls,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row | None,
+        *,
+        request: dict[str, str],
+        request_hash: str,
+    ) -> dict[str, dict[str, Any]]:
+        if row is None:
+            raise ContinuityStoreError("收口准备事件未能原子落库")
+        payload = cls._validated_event_payload(row, label="收口准备")
+        if (
+            row["aggregate_type"] != "closure"
+            or row["event_type"] != "CLOSURE_PREPARED"
+            or set(payload)
+            != {"schema_version", "request", "request_hash", "closure", "step", "outbox"}
+            or payload.get("schema_version") != "closure-prepared.v1"
+            or payload.get("request") != request
+            or not hmac.compare_digest(str(payload.get("request_hash")), request_hash)
+        ):
+            raise ContinuityStoreError("idempotency_key 的收口准备语义不一致")
+        closure = payload.get("closure")
+        step = payload.get("step")
+        outbox = payload.get("outbox")
+        if not all(isinstance(item, dict) for item in (closure, step, outbox)):
+            raise ContinuityStoreError("收口准备事件载荷损坏")
+        closure_id = str(cast(dict[str, Any], closure).get("closure_id", ""))
+        if row["aggregate_id"] != closure_id:
+            raise ContinuityStoreError("收口准备事件聚合身份不一致")
+        persisted = cls._get_closure_preparation(conn, closure_id)
+        expected = {
+            "closure": cast(dict[str, Any], closure),
+            "step": cast(dict[str, Any], step),
+            "outbox": cast(dict[str, Any], outbox),
+        }
+        if persisted != expected:
+            raise ContinuityStoreError("收口准备事件与原子状态不一致")
+        return persisted
+
+    @staticmethod
+    def _get_closure_preparation(
+        conn: sqlite3.Connection,
+        closure_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        closure_row = conn.execute(
+            "SELECT * FROM closure_items WHERE closure_id=?",
+            (closure_id,),
+        ).fetchone()
+        if closure_row is None:
+            raise ContinuityStoreError(f"Closure 不存在: {closure_id}")
+        step_rows = conn.execute(
+            "SELECT * FROM closure_steps WHERE closure_id=? ORDER BY sequence",
+            (closure_id,),
+        ).fetchall()
+        outbox_rows = conn.execute(
+            "SELECT * FROM closure_outbox WHERE closure_id=? ORDER BY created_at, outbox_id",
+            (closure_id,),
+        ).fetchall()
+        if len(step_rows) != 1 or len(outbox_rows) != 1:
+            raise ContinuityStoreError("C05 Closure 必须精确包含一个准备步骤和一个 outbox")
+        closure = dict(closure_row)
+        step = dict(step_rows[0])
+        outbox = dict(outbox_rows[0])
+        if (
+            closure["state"] != "PREPARED"
+            or closure["version"] != 1
+            or step["closure_id"] != closure_id
+            or step["sequence"] != 1
+            or step["step_kind"] != "CHANGE_SUBSTANCE"
+            or step["state"] != "PENDING"
+            or step["attempt_count"] != 0
+            or outbox["closure_id"] != closure_id
+            or outbox["step_id"] != step["step_id"]
+            or outbox["artifact_kind"] != "CHANGE_SUBSTANCE"
+            or outbox["published_at"] is not None
+        ):
+            raise ContinuityStoreError("C05 Closure 准备状态损坏或已越过后续阶段")
+        try:
+            decoded_payload = json.loads(str(outbox["payload_json"]))
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ContinuityStoreError("Closure outbox payload 无法读取") from error
+        canonical_payload = json.dumps(
+            decoded_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if (
+            canonical_payload != outbox["payload_json"]
+            or not hmac.compare_digest(
+                hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest(),
+                str(outbox["payload_hash"]),
+            )
+        ):
+            raise ContinuityStoreError("Closure outbox payload hash 不一致")
+        return {"closure": closure, "step": step, "outbox": outbox}
 
     @staticmethod
     def _get_work(conn: sqlite3.Connection, work_id: str) -> WorkItem:
