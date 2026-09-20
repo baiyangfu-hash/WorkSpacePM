@@ -1,0 +1,27 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-H12REC01",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-272",
+  "approved_scope": "SAFE",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T04:50:42.383954+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "settle_expired_run"
+      ],
+      "target_run_ids": [
+        "RUN-SW008-PMF-H12-001"
+      ],
+      "allowed_outcomes": [
+        "CANCELLED"
+      ]
+    }
+  }
+}
