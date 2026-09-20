@@ -511,11 +511,12 @@ class ContinuityStore:
             raise ContinuityStoreError("恢复 Run git_head 必须是完整小写 Git commit OID")
         return git_head
 
-    def _git_bytes(self, *args: str) -> bytes:
+    def _git_bytes(self, *args: str, input_bytes: bytes | None = None) -> bytes:
         try:
             result = subprocess.run(
                 ["git", "-C", str(self.workspace_root), *args],
-                stdin=subprocess.DEVNULL,
+                input=input_bytes,
+                stdin=subprocess.DEVNULL if input_bytes is None else None,
                 capture_output=True,
                 check=False,
                 shell=False,
@@ -530,6 +531,50 @@ class ContinuityStore:
         if diagnostic:
             raise ContinuityStoreError(f"Decision Git 事实包含诊断: {diagnostic[:1000]}")
         return result.stdout
+
+    @staticmethod
+    def _git_object_id(raw: bytes, *, label: str) -> str:
+        try:
+            object_id = raw.decode("ascii", errors="strict").strip()
+        except UnicodeDecodeError as error:
+            raise ContinuityStoreError(f"{label} 不是规范 ASCII Git object OID") from error
+        if _FULL_GIT_COMMIT.fullmatch(object_id) is None:
+            raise ContinuityStoreError(f"{label} 不是完整小写 Git object OID")
+        return object_id
+
+    def _require_paths_clean_at_head(self, *paths: str) -> None:
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(self.workspace_root),
+                    "diff",
+                    "--quiet",
+                    "HEAD",
+                    "--",
+                    *paths,
+                ],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                check=False,
+                shell=False,
+                env=clean_git_environment(),
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ContinuityStoreError("Decision Git clean 事实无法复核") from error
+        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+        if result.returncode == 1:
+            raise ContinuityStoreError(
+                "Decision immutable snapshot 未跟踪或相对恢复 Run git_head 存在脏改漂移"
+            )
+        if result.returncode != 0:
+            raise ContinuityStoreError(
+                f"Decision Git clean 事实无法复核: {diagnostic[:1000]}"
+            )
+        if diagnostic:
+            raise ContinuityStoreError(f"Decision Git clean 事实包含诊断: {diagnostic[:1000]}")
 
     def _decision_git_snapshots(
         self,
@@ -573,18 +618,7 @@ class ContinuityStore:
             tracked = self._git_bytes("ls-files", "--error-unmatch", "--", path)
             if tracked.decode("utf-8", errors="replace").strip() != path:
                 raise ContinuityStoreError("Decision 文件必须在当前 Git index 中精确跟踪")
-        dirty = self._git_bytes(
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=all",
-            "--",
-            target_path,
-            recovery_path,
-        )
-        if dirty:
-            raise ContinuityStoreError(
-                "Decision immutable snapshot 未跟踪或相对恢复 Run git_head 存在脏改漂移"
-            )
+        self._require_paths_clean_at_head(target_path, recovery_path)
 
         target_before, target_before_sha256 = self._decision_snapshot(target_decision_id)
         recovery_before, recovery_before_sha256 = self._decision_snapshot(recovery_decision_id)
@@ -592,9 +626,26 @@ class ContinuityStore:
             (target_path, target_decision_sha256, target_before_sha256),
             (recovery_path, recovery_decision_sha256, recovery_before_sha256),
         ):
-            blob = self._git_bytes("cat-file", "blob", f"{head}:{path}")
-            blob_sha256 = hashlib.sha256(blob).hexdigest()
-            if blob_sha256 != expected_sha256 or current_sha256 != expected_sha256:
+            try:
+                current_bytes = (self.workspace_root / path).read_bytes()
+            except OSError as error:
+                raise ContinuityStoreError("Decision 当前工作树字节无法读取") from error
+            if hashlib.sha256(current_bytes).hexdigest() != current_sha256:
+                raise ContinuityStoreError("Decision 文件在 Git 映射期间发生漂移")
+            head_blob_oid = self._git_object_id(
+                self._git_bytes("rev-parse", "--verify", f"{head}:{path}"),
+                label="Decision HEAD blob",
+            )
+            current_blob_oid = self._git_object_id(
+                self._git_bytes(
+                    "hash-object",
+                    "--stdin",
+                    f"--path={path}",
+                    input_bytes=current_bytes,
+                ),
+                label="Decision 当前工作树 clean blob",
+            )
+            if current_blob_oid != head_blob_oid or current_sha256 != expected_sha256:
                 raise ContinuityStoreError("Decision 字节未绑定恢复 Run git_head 的 immutable blob")
 
         target_after, target_after_sha256 = self._decision_snapshot(target_decision_id)

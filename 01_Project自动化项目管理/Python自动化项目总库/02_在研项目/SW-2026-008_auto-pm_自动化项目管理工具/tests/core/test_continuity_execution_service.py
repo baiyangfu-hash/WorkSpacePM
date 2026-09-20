@@ -423,8 +423,45 @@ def _settlement_ready(
     decision_conclusion: str = "approved",
     change_status: str = "approved",
     target_change_id: str = "CHG-SCPT-2026-213",
+    decision_attributes: str | None = None,
+    decision_filter_command: str | None = None,
+    decision_smudge_filter_command: str | None = None,
 ) -> ContinuityExecutionService:
     works, service = _services(root, clock)
+    if decision_filter_command is not None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "config",
+                "filter.decision.clean",
+                decision_filter_command,
+            ],
+            check=True,
+            capture_output=True,
+        )
+    if decision_smudge_filter_command is not None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "config",
+                "filter.decision.smudge",
+                decision_smudge_filter_command,
+            ],
+            check=True,
+            capture_output=True,
+        )
+    tracked_support: tuple[str, ...] = ()
+    if decision_attributes is not None:
+        (root / ".gitattributes").write_text(
+            decision_attributes,
+            encoding="utf-8",
+            errors="replace",
+        )
+        tracked_support = (".gitattributes",)
     _runtime_change(root, status=change_status)
     canonical_paths = ["auto_pm/core/a.py", ".auto-pm/continuity.db"]
     approved_paths = decision_paths or canonical_paths
@@ -475,7 +512,7 @@ def _settlement_ready(
         f".auto-pm/decisions/{decision_id}.json",
     )
     subprocess.run(
-        ["git", "-C", str(root), "add", "-f", "--", *decision_paths],
+        ["git", "-C", str(root), "add", "-f", "--", *decision_paths, *tracked_support],
         check=True,
         capture_output=True,
     )
@@ -2078,13 +2115,14 @@ def test_settle_expired_run_preserves_forensic_state_and_emits_secret_free_event
 ) -> None:
     clock = Clock()
     service = _settlement_ready(tmp_path, clock)
+    target_before = service._store.get_run("RUN-TARGET")
     target_lease = service._store.get_lease("RUN-TARGET")
     checkpoint = service._store.latest_checkpoint("RUN-TARGET")
 
     settled = _settle(service)
 
     assert settled.state is RunState.CANCELLED
-    assert settled.version == 2
+    assert settled.version == target_before.version + 1
     assert service._store.get_lease("RUN-TARGET") == target_lease
     assert service._store.latest_checkpoint("RUN-TARGET") == checkpoint
     assert service._store.get_run("RUN-RECOVERY").state is RunState.RUNNING
@@ -2110,6 +2148,159 @@ def test_direct_store_settlement_succeeds_without_caller_transaction_time(tmp_pa
 
     assert "now" not in ContinuityStore.settle_expired_run.__annotations__
     assert service._store.settle_expired_run(**values).state is RunState.CANCELLED
+
+
+def test_settlement_accepts_clean_crlf_decisions_bound_to_lf_head_blobs(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    service = _settlement_ready(
+        tmp_path,
+        clock,
+        decision_attributes=".auto-pm/decisions/*.json text eol=crlf\n",
+    )
+    decision_paths = (
+        ".auto-pm/decisions/DEC-20260910-A2TARGT1.json",
+        ".auto-pm/decisions/DEC-20260911-5C37A985.json",
+    )
+    for relative in decision_paths:
+        path = tmp_path / relative
+        path.unlink()
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "checkout-index", "--force", "--", relative],
+            check=True,
+            capture_output=True,
+        )
+        head_bytes = subprocess.run(
+            ["git", "-C", str(tmp_path), "show", f"HEAD:{relative}"],
+            check=True,
+            capture_output=True,
+        ).stdout
+        assert path.read_bytes() != head_bytes
+    diff = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--quiet", "HEAD", "--", *decision_paths],
+        check=False,
+        capture_output=True,
+    )
+    assert diff.returncode == 0
+
+    assert _settle(service).state is RunState.CANCELLED
+
+
+def test_settlement_rejects_real_decision_drift_under_crlf_attributes(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    service = _settlement_ready(
+        tmp_path,
+        clock,
+        decision_attributes=".auto-pm/decisions/*.json text eol=crlf\n",
+    )
+    relative = ".auto-pm/decisions/DEC-20260911-5C37A985.json"
+    decision_path = tmp_path / relative
+    decision_path.unlink()
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "checkout-index", "--force", "--", relative],
+        check=True,
+        capture_output=True,
+    )
+    drifted = decision_path.read_bytes().replace(
+        b'"approver": "fubai"',
+        b'"approver": "other"',
+    )
+    decision_path.write_bytes(drifted)
+    diff = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--quiet", "HEAD", "--", relative],
+        check=False,
+        capture_output=True,
+    )
+    assert diff.returncode == 1
+
+    with pytest.raises(ContinuityExecutionError, match="脏改漂移"):
+        _settle(service)
+
+    assert service._store.get_run("RUN-TARGET").state is RunState.RUNNING
+
+
+def test_settlement_uses_path_specific_custom_clean_filter(tmp_path: Path) -> None:
+    filter_script = tmp_path / "decision_clean_filter.py"
+    filter_script.write_text(
+        "import sys\n"
+        "raw = sys.stdin.buffer.read()\n"
+        "if sys.argv[1] == 'clean':\n"
+        "    raw = raw.replace(b'\\r\\n', b'\\n')\n"
+        "else:\n"
+        "    raw = raw.replace(b'\\n', b'\\r\\n')\n"
+        "sys.stdout.buffer.write(raw)\n",
+        encoding="utf-8",
+        errors="replace",
+    )
+    filter_base = f'"{Path(sys.executable).as_posix()}" "{filter_script.as_posix()}"'
+    clock = Clock()
+    service = _settlement_ready(
+        tmp_path,
+        clock,
+        decision_attributes=".auto-pm/decisions/*.json -text filter=decision\n",
+        decision_filter_command=f"{filter_base} clean",
+        decision_smudge_filter_command=f"{filter_base} smudge",
+    )
+    decision_paths = (
+        ".auto-pm/decisions/DEC-20260910-A2TARGT1.json",
+        ".auto-pm/decisions/DEC-20260911-5C37A985.json",
+    )
+    for relative in decision_paths:
+        path = tmp_path / relative
+        path.unlink()
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "checkout-index", "--force", "--", relative],
+            check=True,
+            capture_output=True,
+        )
+    diff = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--quiet", "HEAD", "--", *decision_paths],
+        check=False,
+        capture_output=True,
+    )
+    assert diff.returncode == 0
+
+    assert _settle(service).state is RunState.CANCELLED
+
+
+def test_settlement_rejects_invalid_path_aware_git_object_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    service = _settlement_ready(tmp_path, clock)
+    original = service._store._git_bytes
+
+    def invalid_hash(*args: str, input_bytes: bytes | None = None) -> bytes:
+        if args and args[0] == "hash-object":
+            return b"not-a-git-object-id\n"
+        return original(*args, input_bytes=input_bytes)
+
+    monkeypatch.setattr(service._store, "_git_bytes", invalid_hash)
+
+    with pytest.raises(ContinuityExecutionError, match="clean blob.*完整小写"):
+        _settle(service)
+
+    assert service._store.get_run("RUN-TARGET").state is RunState.RUNNING
+
+
+def test_decision_clean_gate_distinguishes_git_failure_from_dirty_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = ContinuityStore(tmp_path)
+
+    def git_failure(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(command, 2, stdout=b"", stderr=b"fatal: injected")
+
+    monkeypatch.setattr(
+        "auto_pm.infrastructure.continuity_store.subprocess.run",
+        git_failure,
+    )
+
+    with pytest.raises(ContinuityStoreError, match="clean 事实无法复核.*injected"):
+        store._require_paths_clean_at_head(".auto-pm/decisions/DEC-TEST.json")
 
 
 @pytest.mark.parametrize("fact", ["work_scope", "run_owned"])
