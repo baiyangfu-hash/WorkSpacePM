@@ -80,6 +80,9 @@ class DecisionService:
         approver: str,
         plan_hash: str,
         approval_evidence_ref: str,
+        *,
+        request_id: str = "",
+        execution_grant: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Validate externally supplied human approval without creating evidence."""
 
@@ -90,11 +93,36 @@ class DecisionService:
             raise DecisionValidationError("planning approval 必须引用 user-confirmation 外部证据")
         if _MODEL_APPROVER.search(resolved_approver):
             raise DecisionValidationError("planning approval 不允许模型或 Agent 自签")
-        return {
-            "planning_approval": {
-                "schema_version": "planning-approval.v1",
+        if bool(request_id) != (execution_grant is not None):
+            raise DecisionValidationError(
+                "planning request_id 与 execution_grant 必须同时提供"
+            )
+        if request_id and request_id != request_id.strip():
+            raise DecisionValidationError("planning request_id 必须是 canonical 文本")
+        approval: dict[str, object] = {
+            "schema_version": "planning-approval.v1",
+            "plan_hash": plan_hash,
+            "approval_evidence_ref": approval_evidence_ref,
+        }
+        if execution_grant is not None:
+            expected_grant_keys = {
+                "adapter",
+                "approved_model",
+                "required_worktree_mode",
+                "declared_dirty_paths",
+            }
+            if set(execution_grant) != expected_grant_keys:
+                raise DecisionValidationError("planning execution_grant schema 不精确")
+            approval = {
+                "schema_version": "planning-approval.v2",
                 "plan_hash": plan_hash,
                 "approval_evidence_ref": approval_evidence_ref,
+                "request_id": request_id,
+                "execution_grant": execution_grant,
+            }
+        return {
+            "planning_approval": {
+                **approval,
             }
         }
 
@@ -110,6 +138,8 @@ class DecisionService:
         runtime_capability: RuntimeDecisionCapability | None = None,
         planning_plan_hash: str = "",
         approval_evidence_ref: str = "",
+        planning_request_id: str = "",
+        planning_execution_grant: dict[str, object] | None = None,
     ) -> DecisionPackageDTO:
         """从已审批的变更单生成固化的结构化决策包"""
         resolved_approver = approver.strip()
@@ -129,6 +159,8 @@ class DecisionService:
                 resolved_approver,
                 planning_plan_hash,
                 approval_evidence_ref,
+                request_id=planning_request_id,
+                execution_grant=planning_execution_grant,
             )
         if runtime_capability is not None and not decision_id.strip():
             raise DecisionValidationError("runtime_capability 必须绑定显式 decision_id")

@@ -25,6 +25,7 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionDispatchReceipt,
     ExecutionIntent,
     ExecutionRole,
+    WorktreeMode,
     execution_role_for_stack,
 )
 from auto_pm.contracts.mission import Mission
@@ -147,6 +148,13 @@ class ExecutionDispatchService:
         kind = self._adapter_kind(adapter)
         owner_id = self._owner_id(kind, executor_id)
         self._assert_lease_request(lease_token, lease_seconds)
+        routing = mission.authority.routing
+        if routing.approved_model:
+            if executor_id != routing.approved_model:
+                raise ExecutionDispatchError("executor/model 与 AuthorityEnvelope 批准事实不一致")
+            if routing.required_worktree_mode is not WorktreeMode.ISOLATED:
+                raise ExecutionDispatchError("批准式执行必须绑定 ISOLATED worktree")
+            force_isolation = True
         role = execution_role_for_stack(stack or self._project_stack(mission.subject_project_id))
         operation = operation_id if operation_id is not None else idempotency_key
         request_sha256 = self._request_fingerprint(
@@ -156,7 +164,6 @@ class ExecutionDispatchService:
                 "run_id": run_id,
                 "adapter": kind,
                 "executor_id": executor_id,
-                "lease_token": lease_token,
                 "lease_seconds": lease_seconds,
                 "role": role,
                 "force_isolation": force_isolation,
@@ -187,6 +194,8 @@ class ExecutionDispatchService:
                 allow_branch_creation=mission.authority.routing.allow_execution_branch_changes,
                 force_isolation=force_isolation,
             )
+            if routing.approved_model and plan.worktree_mode is not routing.required_worktree_mode:
+                raise ExecutionDispatchError("工作树模式与 AuthorityEnvelope 批准事实不一致")
         except WorktreePolicyError as error:
             # A competing caller may have committed and materialized while select
             # sampled Git. Re-read the durable reservation before reporting failure.
@@ -227,7 +236,7 @@ class ExecutionDispatchService:
                 executor_id=owner_id,
                 adapter=kind.value,
                 owned_paths=list(work.scope_paths),
-                declared_dirty_paths=[],
+                declared_dirty_paths=list(routing.declared_dirty_paths),
                 observed_dirty_paths=[],
                 git_head=plan.git_head,
                 worktree_path=str(plan.worktree_path),

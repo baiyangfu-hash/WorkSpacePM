@@ -10,7 +10,14 @@ from pathlib import Path
 
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.decision_package import DecisionPackageDTO
-from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
+from auto_pm.contracts.mission import (
+    AuthorityAudit,
+    AuthorityEnvelope,
+    InternalRoutingPolicy,
+    Mission,
+    MissionState,
+)
 from auto_pm.contracts.pm_facade import PlanningDraft
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -112,6 +119,45 @@ class MissionService:
         approval = decision.metadata.get("planning_approval")
         if not isinstance(approval, dict) or approval.get("plan_hash") != plan_hash:
             raise MissionServiceError("Decision 未绑定指定 PlanningScopeCard plan_hash")
+        expected_approval_keys = {
+            "schema_version",
+            "plan_hash",
+            "approval_evidence_ref",
+            "request_id",
+            "execution_grant",
+        }
+        if set(approval) != expected_approval_keys or approval.get("schema_version") != "planning-approval.v2":
+            raise MissionServiceError("Decision planning metadata schema 不精确")
+        if approval.get("request_id") != draft.request_id:
+            raise MissionServiceError("Decision 与 PlanningDraft request_id 不一致")
+        grant = approval.get("execution_grant")
+        if not isinstance(grant, dict) or set(grant) != {
+            "adapter",
+            "approved_model",
+            "required_worktree_mode",
+            "declared_dirty_paths",
+        }:
+            raise MissionServiceError("Decision execution_grant schema 不精确")
+        try:
+            adapter_raw = grant["adapter"]
+            worktree_raw = grant["required_worktree_mode"]
+            approved_model = grant["approved_model"]
+            dirty_raw = grant["declared_dirty_paths"]
+            if (
+                not isinstance(adapter_raw, str)
+                or not isinstance(worktree_raw, str)
+                or not isinstance(approved_model, str)
+                or not isinstance(dirty_raw, list)
+                or any(not isinstance(path, str) for path in dirty_raw)
+            ):
+                raise TypeError("execution_grant")
+            adapter = ExecutionAdapterKind(adapter_raw)
+            worktree_mode = WorktreeMode(worktree_raw)
+            declared_dirty_paths = tuple(dirty_raw)
+        except (KeyError, TypeError, ValueError) as error:
+            raise MissionServiceError("Decision execution_grant 无法规范化") from error
+        if worktree_mode is not WorktreeMode.ISOLATED:
+            raise MissionServiceError("Planning approval 只允许 ISOLATED worktree")
         if (
             decision.project_id != draft.subject_project_id
             or decision.decision_conclusion not in {"approved", "conditionally_approved"}
@@ -154,6 +200,13 @@ class MissionService:
             authorization_source="CHG_DECISION",
             scope_paths=tuple(decision.approved_files),
             allowed_child_work_kinds=frozenset({WorkKind.WBS}),
+            routing=InternalRoutingPolicy(
+                allow_execution_branch_changes=True,
+                allowed_execution_adapters=frozenset({adapter}),
+                approved_model=approved_model,
+                required_worktree_mode=worktree_mode,
+                declared_dirty_paths=declared_dirty_paths,
+            ),
             valid_from=approved_at,
             expires_at=instant + timedelta(days=30),
             audit=AuthorityAudit(

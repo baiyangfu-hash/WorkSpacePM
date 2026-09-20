@@ -439,7 +439,6 @@ def test_execution_intent_survives_cold_process_replay(tmp_path: Path) -> None:
         {"work_id": "WORK-OTHER"},
         {"adapter": ExecutionAdapterKind.TRAE},
         {"executor_id": "agent-b"},
-        {"lease_token": "different-capability"},
         {"lease_seconds": 1200},
         {"force_isolation": False},
         {"stack": "plc"},
@@ -466,6 +465,73 @@ def test_execution_operation_binds_full_mission_authority(tmp_path: Path) -> Non
     with pytest.raises(ExecutionDispatchError, match="operation_id.*不同载荷"):
         _prepare(tmp_path, mission=changed)
     assert _counts(tmp_path) == before
+
+
+def test_approved_dispatch_enforces_model_isolation_and_exact_declared_dirty_paths(
+    tmp_path: Path,
+) -> None:
+    missions, _, dispatch = _ready(tmp_path)
+    mission = missions.get("MISSION-A5-001")
+    routing = mission.authority.routing.model_copy(
+        update={
+            "approved_model": "agent-a",
+            "required_worktree_mode": WorktreeMode.ISOLATED,
+            "declared_dirty_paths": (PROJECT_PATH,),
+        }
+    )
+    approved = mission.model_copy(
+        update={"authority": mission.authority.model_copy(update={"routing": routing})}
+    )
+    before = _counts(tmp_path)
+    with pytest.raises(ExecutionDispatchError, match="executor/model"):
+        dispatch.prepare(
+            mission=approved,
+            work_id="WORK-A5-001",
+            run_id="RUN-E08A-WRONG",
+            adapter=ExecutionAdapterKind.CODEX,
+            executor_id="agent-other",
+            lease_token="never-persist-this",
+            lease_seconds=900,
+            idempotency_key="dispatch-e08a-wrong",
+            operation_id="OP-E08A-WRONG",
+            stack="python",
+        )
+    assert _counts(tmp_path) == before
+
+    prepared = dispatch.prepare(
+        mission=approved,
+        work_id="WORK-A5-001",
+        run_id="RUN-E08A-001",
+        adapter=ExecutionAdapterKind.CODEX,
+        executor_id="agent-a",
+        lease_token="approved-secret",
+        lease_seconds=900,
+        idempotency_key="dispatch-e08a",
+        operation_id="OP-E08A-001",
+        stack="python",
+    )
+    run = ContinuityStore(tmp_path).get_run("RUN-E08A-001")
+    assert prepared.intent.status == "PREPARED"
+    assert prepared.receipt.worktree_mode is WorktreeMode.ISOLATED
+    assert run.state.value == "READY"
+    assert run.declared_dirty_paths == (PROJECT_PATH,)
+    assert "approved-secret" not in prepared.intent.model_dump_json()
+
+
+def test_lease_token_is_excluded_from_dispatch_fingerprint_and_persistence(
+    tmp_path: Path,
+) -> None:
+    _ready(tmp_path)
+    first = _prepare(tmp_path, lease_token="first-secret")
+    before = _counts(tmp_path)
+    replay = _prepare(tmp_path, lease_token="second-secret")
+
+    assert replay.intent == first.intent
+    assert replay.lease.token == "second-secret"
+    assert _counts(tmp_path) == before
+    serialized = first.intent.model_dump_json()
+    assert "first-secret" not in serialized
+    assert "second-secret" not in serialized
 
 
 def test_intent_persistence_failure_rolls_back_before_git_or_run_effects(tmp_path: Path) -> None:

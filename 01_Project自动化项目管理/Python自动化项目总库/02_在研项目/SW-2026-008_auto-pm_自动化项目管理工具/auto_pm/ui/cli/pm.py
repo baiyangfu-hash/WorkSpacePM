@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import cast
 
 import click
@@ -10,7 +11,8 @@ import click
 from auto_pm.app_context import AppContext
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import TransitionGuardError
-from auto_pm.contracts.pm_facade import PlanningScopeCard, PmIntent
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
+from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PlanningScopeCard, PmIntent
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.core.pm_resume_service import PmResumeError, PmResumeService
 from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
@@ -59,6 +61,9 @@ def _planning_scope_card(
     scope_paths: tuple[str, ...],
     risks: tuple[str, ...],
     non_goals: tuple[str, ...],
+    adapter: str | None,
+    approved_model: str,
+    declared_dirty_paths: tuple[str, ...],
 ) -> PlanningScopeCard:
     missing = [
         name
@@ -70,6 +75,8 @@ def _planning_scope_card(
             ("--scope", scope_paths),
             ("--risk", risks),
             ("--non-goal", non_goals),
+            ("--adapter", adapter),
+            ("--approved-model", approved_model),
         )
         if not value
     ]
@@ -93,6 +100,11 @@ def _planning_scope_card(
                 scope_paths=scope_paths,
                 risks=risks,
                 non_goals=non_goals,
+                execution_grant=PlanningExecutionGrant(
+                    adapter=ExecutionAdapterKind(cast(str, adapter)),
+                    approved_model=approved_model,
+                    declared_dirty_paths=declared_dirty_paths,
+                ),
             ),
         )
     except (PmFacadeError, ValueError, WorktreePolicyError) as error:
@@ -140,6 +152,13 @@ def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approv
 @click.option("--scope", "scope_paths", multiple=True, help="精确文件范围，可重复")
 @click.option("--risk", "risks", multiple=True, help="明确风险，可重复")
 @click.option("--non-goal", "non_goals", multiple=True, help="非目标，可重复")
+@click.option(
+    "--adapter",
+    type=click.Choice(tuple(item.value for item in ExecutionAdapterKind)),
+    default=None,
+)
+@click.option("--approved-model", default="")
+@click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
 @click.pass_context
 def plan_pm(
     ctx: click.Context,
@@ -151,9 +170,23 @@ def plan_pm(
     scope_paths: tuple[str, ...],
     risks: tuple[str, ...],
     non_goals: tuple[str, ...],
+    adapter: str | None,
+    approved_model: str,
+    declared_dirty_paths: tuple[str, ...],
 ) -> None:
     """创建/恢复新需求范围卡，或兼容已有 Mission 调用。"""
-    new_values = (project_id, request_id, objective, acceptance, scope_paths, risks, non_goals)
+    new_values = (
+        project_id,
+        request_id,
+        objective,
+        acceptance,
+        scope_paths,
+        risks,
+        non_goals,
+        adapter,
+        approved_model,
+        declared_dirty_paths,
+    )
     if mission_id:
         if any(new_values):
             raise click.ClickException("--mission-id 不能与新需求参数混用")
@@ -168,6 +201,9 @@ def plan_pm(
         scope_paths=scope_paths,
         risks=risks,
         non_goals=non_goals,
+        adapter=adapter,
+        approved_model=approved_model,
+        declared_dirty_paths=declared_dirty_paths,
     )
     click.echo(card.model_dump_json(indent=2))
 
@@ -186,6 +222,13 @@ def plan_pm(
 @click.option("--scope", "scope_paths", multiple=True, help="精确文件范围，可重复")
 @click.option("--risk", "risks", multiple=True, help="明确风险，可重复")
 @click.option("--non-goal", "non_goals", multiple=True, help="非目标，可重复")
+@click.option(
+    "--adapter",
+    type=click.Choice(tuple(item.value for item in ExecutionAdapterKind)),
+    default=None,
+)
+@click.option("--approved-model", default="")
+@click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
 @click.option("--plan-hash", default="", help="plan 输出的不可变方案哈希")
 @click.option("--approver", default="", help="真实人类审批人")
 @click.option(
@@ -206,13 +249,27 @@ def approve_pm(
     scope_paths: tuple[str, ...],
     risks: tuple[str, ...],
     non_goals: tuple[str, ...],
+    adapter: str | None,
+    approved_model: str,
+    declared_dirty_paths: tuple[str, ...],
     plan_hash: str,
     approver: str,
     approval_evidence_ref: str,
     owner: str,
 ) -> None:
     """批准新需求并内部形成授权链，或兼容已有 Mission 调用。"""
-    new_values = (project_id, request_id, objective, acceptance, scope_paths, risks, non_goals)
+    new_values = (
+        project_id,
+        request_id,
+        objective,
+        acceptance,
+        scope_paths,
+        risks,
+        non_goals,
+        adapter,
+        approved_model,
+        declared_dirty_paths,
+    )
     if mission_id:
         if any(new_values) or any((plan_hash, approver, approval_evidence_ref)):
             raise click.ClickException("--mission-id 不能与新需求批准参数混用")
@@ -240,6 +297,9 @@ def approve_pm(
         scope_paths=scope_paths,
         risks=risks,
         non_goals=non_goals,
+        adapter=adapter,
+        approved_model=approved_model,
+        declared_dirty_paths=declared_dirty_paths,
     )
     _approve_planning_change(ctx, card, approver)
     facade = _facade(ctx)
@@ -280,11 +340,61 @@ def confirm_start_pm(ctx: click.Context, mission_id: str) -> None:
 
 
 @pm_group.command(name="execute")
-@click.option("--mission-id", required=True)
+@click.option("--request-id", required=True, help="批准范围卡绑定的请求标识")
+@click.option(
+    "--card-json",
+    "card_json",
+    required=True,
+    help="plan 输出的完整 PlanningScopeCard JSON",
+)
+@click.option("--plan-hash", required=True, help="批准的不可变范围卡哈希")
+@click.option(
+    "--lease-token-env",
+    required=True,
+    metavar="ENV_NAME",
+    help="一次性 lease capability 所在环境变量；读取后立即删除",
+)
 @click.pass_context
-def execute_pm(ctx: click.Context, mission_id: str) -> None:
-    """启动已授权根 Work；后续内部编排不再要求用户分发任务。"""
-    _emit_card(ctx, "execute", mission_id)
+def execute_pm(
+    ctx: click.Context,
+    request_id: str,
+    card_json: str,
+    plan_hash: str,
+    lease_token_env: str,
+) -> None:
+    """从完整批准卡冷启动恢复，并仅准备 PREPARED intent / READY Run。"""
+
+    lease_token = os.environ.pop(lease_token_env, None)
+    if lease_token is None:
+        raise click.ClickException(f"环境变量不存在: {lease_token_env}")
+    try:
+        card = PlanningScopeCard.model_validate_json(card_json)
+    except ValueError as error:
+        raise click.ClickException("--card-json 不是有效的 PlanningScopeCard") from error
+    if request_id != card.request_id:
+        raise click.ClickException("--request-id 与 PlanningScopeCard 不一致")
+    try:
+        result = _facade(ctx).prepare_planning_execution(
+            card,
+            expected_plan_hash=plan_hash,
+            lease_token=lease_token,
+        )
+    except PmFacadeError as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(
+        json.dumps(
+            {
+                "schema_version": "pm-approved-dispatch.v1",
+                "request_id": request_id,
+                "plan_hash": plan_hash,
+                "status": result.intent.status,
+                "run_state": "READY",
+                "receipt": result.receipt.model_dump(mode="json"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 @pm_group.command(name="accept")

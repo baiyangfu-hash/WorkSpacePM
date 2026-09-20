@@ -10,7 +10,7 @@ from typing import Literal, Self
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from auto_pm.contracts.continuity import WorkKind
-from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 
 
 class RestrictedAction(StrEnum):
@@ -74,6 +74,9 @@ class InternalRoutingPolicy(BaseModel):
     allow_execution_branch_changes: bool = False
     allow_business_line_reroute: bool = False
     allowed_execution_adapters: frozenset[ExecutionAdapterKind] = Field(default_factory=frozenset)
+    approved_model: str = ""
+    required_worktree_mode: WorktreeMode = WorktreeMode.CURRENT
+    declared_dirty_paths: tuple[str, ...] = ()
     max_parallel_runs: int = Field(default=1, ge=1, le=8)
     max_auto_repair_attempts: int = Field(default=0, ge=0, le=100)
     max_auto_repair_seconds: int = Field(default=0, ge=0, le=86_400)
@@ -89,6 +92,24 @@ class InternalRoutingPolicy(BaseModel):
     def _validate_repair_budget(self) -> Self:
         if bool(self.max_auto_repair_attempts) != bool(self.max_auto_repair_seconds):
             raise ValueError("auto repair attempts and seconds must be enabled together")
+        if self.approved_model and (
+            self.approved_model != self.approved_model.strip()
+            or any(not character.isprintable() for character in self.approved_model)
+        ):
+            raise ValueError("approved_model must be canonical printable text")
+        normalized: list[str] = []
+        for raw in self.declared_dirty_paths:
+            if "\\" in raw:
+                raise ValueError("declared_dirty_paths must use forward slashes")
+            path = PurePosixPath(raw)
+            if path.is_absolute() or ".." in path.parts or str(path) in {"", "."}:
+                raise ValueError(f"invalid declared dirty path: {raw}")
+            value = path.as_posix()
+            if value in normalized:
+                raise ValueError(f"duplicate declared dirty path: {value}")
+            normalized.append(value)
+        if tuple(normalized) != self.declared_dirty_paths:
+            raise ValueError("declared_dirty_paths must be canonical")
         return self
 
 

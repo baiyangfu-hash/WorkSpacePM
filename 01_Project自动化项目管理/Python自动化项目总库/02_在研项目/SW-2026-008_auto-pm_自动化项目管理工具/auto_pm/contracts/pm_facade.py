@@ -9,6 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 from auto_pm.contracts.mission import MissionState
 
 
@@ -100,6 +101,37 @@ class PlanningDraft(BaseModel):
         return self
 
 
+class PlanningExecutionGrant(BaseModel):
+    """Exact provider-neutral grant approved as part of a planning card."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    adapter: ExecutionAdapterKind
+    approved_model: str
+    required_worktree_mode: Literal[WorktreeMode.ISOLATED] = WorktreeMode.ISOLATED
+    declared_dirty_paths: tuple[str, ...] = ()
+
+    @field_validator("approved_model")
+    @classmethod
+    def _validate_approved_model(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned or cleaned != value or any(not item.isprintable() for item in value):
+            raise ValueError("approved_model must be canonical printable text")
+        return cleaned
+
+    @field_validator("declared_dirty_paths")
+    @classmethod
+    def _validate_declared_dirty_paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if any("\\" in value for value in values):
+            raise ValueError("declared_dirty_paths must use forward slashes")
+        cleaned = tuple(value.strip() for value in values)
+        if any(not value or value.startswith("/") or ".." in value.split("/") for value in cleaned):
+            raise ValueError("declared_dirty_paths must be safe workspace-relative paths")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("declared_dirty_paths must be unique")
+        return cleaned
+
+
 class PlanningScopeCard(BaseModel):
     """Immutable, pre-authorization scope ready for a later human Decision."""
 
@@ -114,6 +146,7 @@ class PlanningScopeCard(BaseModel):
     risks: tuple[str, ...]
     non_goals: tuple[str, ...]
     spec_sources: tuple[tuple[str, str, str], ...]
+    execution_grant: PlanningExecutionGrant
     plan_hash: str
     executable: Literal[False] = False
 
@@ -127,6 +160,7 @@ class PlanningScopeCard(BaseModel):
         risks: tuple[str, ...],
         non_goals: tuple[str, ...],
         spec_sources: tuple[tuple[str, str, str], ...],
+        execution_grant: PlanningExecutionGrant | None = None,
     ) -> PlanningScopeCard:
         cleaned_paths = tuple(path.strip() for path in scope_paths)
         if not cleaned_paths or any(not path or "*" in path for path in cleaned_paths):
@@ -137,6 +171,12 @@ class PlanningScopeCard(BaseModel):
         cleaned_non_goals = tuple(item.strip() for item in non_goals)
         if not cleaned_risks or not cleaned_non_goals or any(not item for item in cleaned_risks + cleaned_non_goals):
             raise ValueError("risks and non_goals must be explicit")
+        grant = execution_grant or PlanningExecutionGrant(
+            adapter=ExecutionAdapterKind.MANUAL,
+            approved_model="manual",
+        )
+        if any(path not in cleaned_paths for path in grant.declared_dirty_paths):
+            raise ValueError("declared_dirty_paths must be an exact subset of scope_paths")
         payload = {
             "request_id": draft.request_id,
             "subject_project_id": draft.subject_project_id,
@@ -146,11 +186,23 @@ class PlanningScopeCard(BaseModel):
             "risks": cleaned_risks,
             "non_goals": cleaned_non_goals,
             "spec_sources": spec_sources,
+            "execution_grant": grant.model_dump(mode="json"),
         }
         plan_hash = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
         ).hexdigest()
-        return cls(plan_hash=plan_hash, **payload)
+        return cls(
+            request_id=draft.request_id,
+            subject_project_id=draft.subject_project_id,
+            change_id=change_id,
+            scope_paths=cleaned_paths,
+            acceptance_criteria=draft.acceptance_criteria,
+            risks=cleaned_risks,
+            non_goals=cleaned_non_goals,
+            spec_sources=spec_sources,
+            execution_grant=grant,
+            plan_hash=plan_hash,
+        )
 
 
 class PmConfirmationKind(StrEnum):

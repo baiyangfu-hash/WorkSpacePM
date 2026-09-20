@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from auto_pm.cli.__main__ import cli
 from auto_pm.core.mission_service import MissionService
@@ -151,6 +153,12 @@ def _planning_args() -> list[str]:
         "scope drift",
         "--non-goal",
         "no execution before approval",
+        "--adapter",
+        "codex",
+        "--approved-model",
+        "gpt-approved",
+        "--declared-dirty",
+        "auto_pm/example.py",
     ]
 
 
@@ -234,6 +242,106 @@ def test_pm_approve_materializes_one_authorized_chain_without_internal_ids(
     store = ContinuityStore(tmp_path)
     assert len(store.list_missions("SW-TEST-001", include_terminal=True)) == 1
     assert len(store.list_works("SW-TEST-001", include_terminal=True)) == 1
+
+
+def test_pm_execute_consumes_env_secret_and_emits_only_prepared_ready_receipt(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _setup_planning(tmp_path)
+    planned = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "plan", *_planning_args()])
+    card_payload = json.loads(planned.output)
+    captured: dict[str, object] = {}
+
+    class _Receipt:
+        @staticmethod
+        def model_dump(*, mode: str) -> dict[str, object]:
+            assert mode == "json"
+            return {"status": "PREPARED", "run_id": "RUN-PLAN-TEST"}
+
+    class _Facade:
+        @staticmethod
+        def prepare_planning_execution(card, *, expected_plan_hash: str, lease_token: str):
+            captured.update(
+                card=card,
+                expected_plan_hash=expected_plan_hash,
+                lease_token=lease_token,
+                env_present="E08A_TOKEN" in os.environ,
+            )
+            return SimpleNamespace(
+                intent=SimpleNamespace(status="PREPARED"),
+                receipt=_Receipt(),
+            )
+
+    monkeypatch.setattr("auto_pm.cli.pm._facade", lambda _ctx: _Facade())
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "pm",
+            "execute",
+            "--request-id",
+            card_payload["request_id"],
+            "--card-json",
+            json.dumps(card_payload),
+            "--plan-hash",
+            card_payload["plan_hash"],
+            "--lease-token-env",
+            "E08A_TOKEN",
+        ],
+        env={"E08A_TOKEN": "cli-super-secret"},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "PREPARED"
+    assert payload["run_state"] == "READY"
+    assert captured["lease_token"] == "cli-super-secret"
+    assert captured["env_present"] is False
+    assert "cli-super-secret" not in result.output
+    assert "cli-super-secret" not in repr(result.exception)
+
+
+def test_pm_execute_rejects_mismatched_request_before_dispatch(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _setup_planning(tmp_path)
+    planned = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "plan", *_planning_args()])
+    card_payload = json.loads(planned.output)
+    called = False
+
+    def fail_if_called(_ctx):
+        nonlocal called
+        called = True
+        raise AssertionError("dispatch must not be reached")
+
+    monkeypatch.setattr("auto_pm.cli.pm._facade", fail_if_called)
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "pm",
+            "execute",
+            "--request-id",
+            "REQ-OTHER",
+            "--card-json",
+            json.dumps(card_payload),
+            "--plan-hash",
+            card_payload["plan_hash"],
+            "--lease-token-env",
+            "E08A_TOKEN",
+        ],
+        env={"E08A_TOKEN": "cli-super-secret"},
+    )
+    assert result.exit_code == 1
+    assert "不一致" in result.output
+    assert "cli-super-secret" not in result.output
+    assert called is False
 
 
 def test_pm_confirm_start_hides_the_root_work_id(cli_runner: CliRunner, tmp_path: Path) -> None:

@@ -24,8 +24,14 @@ from auto_pm.application.core.evidence_collection_service import (
     _quality_receipt_hash,
 )
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
-from auto_pm.contracts.pm_facade import PlanningScopeCard, PmConfirmationKind, PmIntent
+from auto_pm.contracts.pm_facade import (
+    PlanningExecutionGrant,
+    PlanningScopeCard,
+    PmConfirmationKind,
+    PmIntent,
+)
 from auto_pm.domain.change.decision_service import DecisionError
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -341,6 +347,97 @@ def _p10_card(root: Path) -> tuple[PmFacadeService, PlanningScopeCard, Path]:
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(card.change_id, state, approver="fubai", comment="human", project_id="SW-TEST-001")
     return facade, card, database
+
+
+def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    facade, _database, changes = _p10_facade(tmp_path)
+    grant = PlanningExecutionGrant(
+        adapter=ExecutionAdapterKind.CODEX,
+        approved_model="gpt-approved",
+        required_worktree_mode=WorktreeMode.ISOLATED,
+        declared_dirty_paths=("auto_pm/example.py",),
+    )
+    card = facade.create_planning_scope_card(
+        _planning_intent(),
+        scope_paths=("auto_pm/example.py",),
+        risks=("dispatch drift",),
+        non_goals=("no model startup",),
+        execution_grant=grant,
+    )
+    for state in ("submitted", "under_review", "approved"):
+        changes.transition_status(
+            card.change_id,
+            state,
+            approver="fubai",
+            comment="human",
+            project_id="SW-TEST-001",
+        )
+    decision = facade.approve_planning_scope_card(
+        card,
+        expected_plan_hash=card.plan_hash,
+        approver="fubai",
+        approval_evidence_ref="user-confirmation:E08A-001",
+    )
+    first_mission = facade.materialize_planning_mission(card)
+    first_work = facade.create_planning_work(card)
+    second_mission = facade.materialize_planning_mission(card)
+    second_work = facade.create_planning_work(card)
+
+    assert first_mission == second_mission
+    assert first_work == second_work
+    assert decision.metadata == {
+        "planning_approval": {
+            "schema_version": "planning-approval.v2",
+            "plan_hash": card.plan_hash,
+            "approval_evidence_ref": "user-confirmation:E08A-001",
+            "request_id": card.request_id,
+            "execution_grant": grant.model_dump(mode="json"),
+        }
+    }
+    assert first_mission.authority.routing.allowed_execution_adapters == frozenset(
+        {ExecutionAdapterKind.CODEX}
+    )
+    assert first_mission.authority.routing.approved_model == "gpt-approved"
+    assert first_mission.authority.routing.required_worktree_mode is WorktreeMode.ISOLATED
+    assert first_mission.authority.routing.declared_dirty_paths == ("auto_pm/example.py",)
+
+    drifted = card.model_copy(
+        update={
+            "execution_grant": grant.model_copy(update={"approved_model": "gpt-drifted"})
+        }
+    )
+    with pytest.raises(PmFacadeError, match="plan_hash"):
+        facade.materialize_planning_mission(drifted)
+    assert facade._store.list_missions("SW-TEST-001", include_terminal=True) == (first_mission,)
+    assert facade._store.list_works("SW-TEST-001", include_terminal=True) == (first_work,)
+
+    captured: dict[str, Any] = {}
+    marker = object()
+
+    def fake_prepare(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return marker
+
+    monkeypatch.setattr(facade._execution, "prepare", fake_prepare)
+    assert (
+        facade.prepare_planning_execution(
+            card,
+            expected_plan_hash=card.plan_hash,
+            lease_token="one-time-secret",
+        )
+        is marker
+    )
+    active = facade._store.get_mission(first_mission.mission_id)
+    assert active.state is MissionState.ACTIVE
+    assert active.root_work_id == first_work.work_id
+    assert facade._store.get_work(first_work.work_id).state is WorkState.READY
+    assert captured["adapter"] is ExecutionAdapterKind.CODEX
+    assert captured["executor_id"] == "gpt-approved"
+    assert captured["force_isolation"] is True
+    assert captured["lease_token"] == "one-time-secret"
 
 
 def test_p10_retries_draft_and_chg_after_post_write_interruptions(
@@ -895,9 +992,11 @@ def test_planning_approval_materializes_one_exact_authorized_mission(
     assert approved.change_id == card.change_id
     assert approved.approved_files == list(card.scope_paths)
     assert approved.metadata["planning_approval"] == {
-        "schema_version": "planning-approval.v1",
+        "schema_version": "planning-approval.v2",
         "plan_hash": card.plan_hash,
         "approval_evidence_ref": "user-confirmation:P07-TEST-001",
+        "request_id": card.request_id,
+        "execution_grant": card.execution_grant.model_dump(mode="json"),
     }
     mission = facade.materialize_planning_mission(card, created_by="PM Facade")
     replayed_mission = facade.materialize_planning_mission(card, created_by="PM Facade")

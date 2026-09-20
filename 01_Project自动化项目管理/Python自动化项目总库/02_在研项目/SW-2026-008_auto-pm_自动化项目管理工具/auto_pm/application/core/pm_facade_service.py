@@ -10,6 +10,11 @@ from typing import Any, cast
 
 from auto_pm.change.change_service import ChangeService
 from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
+from auto_pm.core.execution_adapter_service import (
+    ExecutionDispatchError,
+    ExecutionDispatchResult,
+    ExecutionDispatchService,
+)
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
@@ -24,6 +29,7 @@ from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_facade import (
     PlanningDraft,
+    PlanningExecutionGrant,
     PlanningScopeCard,
     PmConfirmationCard,
     PmConfirmationKind,
@@ -51,6 +57,7 @@ class PmFacadeService:
         store: ContinuityStore | None = None,
         change_service: ChangeService | None = None,
         decision_service: DecisionService | None = None,
+        execution_service: ExecutionDispatchService | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root)
         self._store = store or ContinuityStore(self._workspace_root)
@@ -58,6 +65,9 @@ class PmFacadeService:
         self._works = WorkRegistryService(self._workspace_root, store=self._store)
         self._changes = change_service or ChangeService(str(self._workspace_root))
         self._decisions = decision_service or DecisionService(self._workspace_root)
+        self._execution = execution_service or ExecutionDispatchService(
+            self._workspace_root, store=self._store
+        )
 
     def create_planning_draft(self, intent: PmIntent) -> PlanningDraft:
         """Persist a pre-authorization draft without creating executable state."""
@@ -127,6 +137,7 @@ class PmFacadeService:
         scope_paths: tuple[str, ...],
         risks: tuple[str, ...],
         non_goals: tuple[str, ...],
+        execution_grant: PlanningExecutionGrant | None = None,
     ) -> PlanningScopeCard:
         """Create a deterministic, non-executable scope card for later approval."""
 
@@ -141,6 +152,7 @@ class PmFacadeService:
                 risks=risks,
                 non_goals=non_goals,
                 spec_sources=spec_sources,
+                execution_grant=execution_grant,
             )
         except ValueError as error:
             raise PmFacadeError(str(error)) from error
@@ -187,6 +199,8 @@ class PmFacadeService:
                     decision_id=decision_id,
                     planning_plan_hash=actual_hash,
                     approval_evidence_ref=approval_evidence_ref,
+                    planning_request_id=card.request_id,
+                    planning_execution_grant=card.execution_grant.model_dump(mode="json"),
                 )
             except DecisionValidationError as create_error:
                 try:
@@ -285,6 +299,51 @@ class PmFacadeService:
         except (ContinuityStoreError, MissionServiceError, WorkRegistryError) as error:
             raise PmFacadeError(str(error)) from error
 
+    def prepare_planning_execution(
+        self,
+        card: PlanningScopeCard,
+        *,
+        expected_plan_hash: str,
+        lease_token: str,
+    ) -> ExecutionDispatchResult:
+        """Recover the exact approval chain and prepare one isolated, unstarted Run."""
+
+        actual_hash = self._planning_scope_card_hash(card)
+        if not hmac.compare_digest(actual_hash, card.plan_hash) or not hmac.compare_digest(
+            actual_hash, expected_plan_hash
+        ):
+            raise PmFacadeError("PlanningScopeCard plan_hash 已过期或内容发生漂移")
+        if card.execution_grant.required_worktree_mode.value != "ISOLATED":
+            raise PmFacadeError("批准式执行必须使用 ISOLATED worktree")
+        mission = self.materialize_planning_mission(card)
+        work = self.create_planning_work(card)
+        if mission.state is MissionState.DRAFT:
+            self.plan(mission.mission_id)
+            mission = self._mission(mission.mission_id)
+        if mission.state is MissionState.AWAITING_APPROVAL:
+            self.approve(mission.mission_id, work.work_id)
+            mission = self._mission(mission.mission_id)
+        if mission.state is not MissionState.ACTIVE or mission.root_work_id != work.work_id:
+            raise PmFacadeError("批准请求未恢复为唯一 ACTIVE Mission/root Work")
+        suffix = hashlib.sha256(
+            f"{card.request_id}\n{actual_hash}".encode()
+        ).hexdigest().upper()
+        try:
+            return self._execution.prepare(
+                mission=mission,
+                work_id=work.work_id,
+                run_id=f"RUN-PLAN-{suffix[:16]}",
+                adapter=card.execution_grant.adapter,
+                executor_id=card.execution_grant.approved_model,
+                lease_token=lease_token,
+                lease_seconds=86_400,
+                idempotency_key=f"planning-execute:{card.request_id}:{actual_hash}",
+                operation_id=f"planning-execute:{card.request_id}:{actual_hash}",
+                force_isolation=True,
+            )
+        except ExecutionDispatchError as error:
+            raise PmFacadeError(str(error)) from error
+
     @staticmethod
     def _planning_scope_card_hash(card: PlanningScopeCard) -> str:
         payload = {
@@ -296,6 +355,7 @@ class PmFacadeService:
             "risks": card.risks,
             "non_goals": card.non_goals,
             "spec_sources": card.spec_sources,
+            "execution_grant": card.execution_grant.model_dump(mode="json"),
         }
         return hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
@@ -313,9 +373,11 @@ class PmFacadeService:
     ) -> None:
         metadata = decision.metadata.get("planning_approval")
         expected_metadata = {
-            "schema_version": "planning-approval.v1",
+            "schema_version": "planning-approval.v2",
             "plan_hash": card.plan_hash,
             "approval_evidence_ref": approval_evidence_ref,
+            "request_id": card.request_id,
+            "execution_grant": card.execution_grant.model_dump(mode="json"),
         }
         if (
             decision.project_id != card.subject_project_id
