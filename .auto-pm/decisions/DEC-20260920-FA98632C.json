@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-FA98632C",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-267",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T03:34:16.920486+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "治理依据固定为 WBS V2.13 不可变提交 6dd13dd346b420db61b46bcd5b58470a1d2b6329；控制根 Git HEAD 必须精确为 79ad6cb1e824f8b72ea5dff9bff0d0550ce10553。",
+    "唯一目标为 WORK-SW008-PMF-E08-001；执行前必须仍为 IN_PROGRESS、version=3、owner=codex-terra-high、authorization_ref=DEC-20260919-E08C0263、source_fingerprint=sha256:23ed893b8f7eed5d6f4efbd9ec5232b70c97739926f0545a5e50c49f76bebfe5。",
+    "DEC-20260919-E08C0263 的 SHA-256 必须匹配 23ED893B8F7EED5D6F4EFBD9EC5232B70C97739926F0545A5E50C49F76BEBFE5；RUN-SW008-PMF-E08-001 与 RUN-SW008-PMF-E08-002 必须均为 CANCELLED。",
+    "旧候选 e08-cli-supervisor 必须 clean 且 HEAD=986e62d6c17be3588ac2338a27d273e9fb96f140。",
+    "仅允许在 H12 控制根 Run 窗口调用 continuity work transition 将目标由 IN_PROGRESS 迁移至 CANCELLED；该普通状态机提供合法迁移、CAS 与幂等，不使用或宣称 runtime capability。",
+    "必须记录命令、前后 Work 快照、Decision 条件、H12 Work/Run/Checkpoint；任一预检不符即不调用 transition。不得改产品源码、旧 CHG/Decision/Run/候选，不提交、不合并、不部署、不切换 release、不创建 E08A Work/Run。"
+  ],
+  "metadata": {}
+}
