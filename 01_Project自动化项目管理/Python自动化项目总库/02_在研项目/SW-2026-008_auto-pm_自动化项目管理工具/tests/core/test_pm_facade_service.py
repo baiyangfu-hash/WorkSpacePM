@@ -8,6 +8,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -415,7 +416,7 @@ def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
     assert facade._store.list_works("SW-TEST-001", include_terminal=True) == (first_work,)
 
     captured: dict[str, Any] = {}
-    marker = object()
+    marker = SimpleNamespace(intent=SimpleNamespace(operation_id="planning-operation"))
 
     def fake_prepare(**kwargs: Any) -> Any:
         captured.update(kwargs)
@@ -438,6 +439,24 @@ def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
     assert captured["executor_id"] == "gpt-approved"
     assert captured["force_isolation"] is True
     assert captured["lease_token"] == "one-time-secret"
+
+    microtask = object()
+    saga_receipt = object()
+    monkeypatch.setattr(facade._execution, "prepare_microtask", lambda operation_id: microtask)
+    monkeypatch.setattr(
+        facade._local_orchestrator,
+        "execute",
+        lambda **kwargs: saga_receipt,
+    )
+    assert (
+        facade.execute_planning_foreground(
+            card,
+            expected_plan_hash=card.plan_hash,
+            lease_token="one-time-secret",
+            lease_token_environment="E08CD_TOKEN",
+        )
+        is saga_receipt
+    )
 
 
 def test_p10_retries_draft_and_chg_after_post_write_interruptions(

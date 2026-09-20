@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -15,7 +16,10 @@ from auto_pm.core.continuity_execution_service import (
 )
 
 from auto_pm.contracts.continuity import LeaseRenewalReceipt, RunItem, RunState
-from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
+from auto_pm.contracts.execution_adapter import (
+    ExecutionProjectionReceipt,
+    ExecutionStartEvidence,
+)
 from auto_pm.infrastructure.local_executor import (
     LocalExecutionResult,
     LocalExecutionStatus,
@@ -24,6 +28,10 @@ from auto_pm.infrastructure.local_executor import (
 
 class ExecutionSupervisorError(RuntimeError):
     """Raised when trusted startup evidence cannot safely become Run state."""
+
+
+class ExecutionCollectionPendingError(ExecutionSupervisorError):
+    """Raised after collection loses authority and must remain pending."""
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,15 @@ class ExecutionCompletionOutcome:
     result: LocalExecutionResult
     capability: LeaseCapability
     run_state: RunState
+    disposition: str
+
+
+@dataclass(frozen=True)
+class ExecutionCollectedOutcome:
+    """A collected child result with no Run finalization side effect."""
+
+    result: LocalExecutionResult
+    capability: LeaseCapability
     disposition: str
 
 
@@ -216,6 +233,161 @@ class ExecutionSupervisorService:
             disposition=disposition,
         )
 
+    def collect_completion(
+        self,
+        capability: LeaseCapability,
+        *,
+        wait_and_collect: Callable[[], LocalExecutionResult],
+        reap_current: Callable[[], None],
+        lease_seconds: int,
+        renew_before_seconds: int,
+        renewal_interval_seconds: float,
+        idempotency_key: str,
+    ) -> ExecutionCollectedOutcome:
+        """Collect in the foreground while periodically renewing; never finalize a Run."""
+
+        if not 0 < renewal_interval_seconds < lease_seconds:
+            raise ExecutionSupervisorError("periodic renewal interval 无效")
+        try:
+            current = self.renew_if_due(
+                capability,
+                lease_seconds=lease_seconds,
+                renew_before_seconds=renew_before_seconds,
+                idempotency_key=self._completion_key(idempotency_key, "before-collect"),
+            ).capability
+        except ExecutionSupervisorError as error:
+            self._abort_collection(reap_current, error=error)
+        results: list[LocalExecutionResult] = []
+        failures: list[Exception] = []
+
+        def collect() -> None:
+            try:
+                results.append(wait_and_collect())
+            except Exception as error:  # pragma: no cover - re-raised on caller thread
+                failures.append(error)
+
+        thread = threading.Thread(target=collect, daemon=True)
+        thread.start()
+        cycle = 0
+        try:
+            while thread.is_alive():
+                thread.join(timeout=renewal_interval_seconds)
+                if thread.is_alive():
+                    cycle += 1
+                    current = self.renew_if_due(
+                        current,
+                        lease_seconds=lease_seconds,
+                        renew_before_seconds=renew_before_seconds,
+                        idempotency_key=self._completion_key(
+                            idempotency_key, f"periodic-{cycle}"
+                        ),
+                    ).capability
+        except ExecutionSupervisorError as error:
+            self._abort_collection(reap_current, error=error, thread=thread)
+        thread.join()
+        if failures or len(results) != 1:
+            raise ExecutionSupervisorError("执行结果 collect 失败") from (
+                failures[0] if failures else None
+            )
+        current = self.renew_if_due(
+            current,
+            lease_seconds=lease_seconds,
+            renew_before_seconds=renew_before_seconds,
+            idempotency_key=self._completion_key(idempotency_key, "after-collect"),
+        ).capability
+        result = results[0]
+        return ExecutionCollectedOutcome(
+            result=result,
+            capability=current,
+            disposition=self._completion_disposition(result),
+        )
+
+    @staticmethod
+    def _abort_collection(
+        reap_current: Callable[[], None],
+        *,
+        error: ExecutionSupervisorError,
+        thread: threading.Thread | None = None,
+    ) -> None:
+        """Stop the owned child after authority loss, or surface a pending boundary."""
+
+        try:
+            reap_current()
+        except Exception as reap_error:
+            raise ExecutionCollectionPendingError(
+                "lease 续租失败且 child 无法证明已回收；保持 PENDING"
+            ) from reap_error
+        if thread is not None:
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                raise ExecutionCollectionPendingError(
+                    "lease 续租失败且 collector 无法证明已停止；保持 PENDING"
+                ) from error
+        raise ExecutionCollectionPendingError(
+            "lease 续租失败；child 已回收且 Run 保持 PENDING"
+        ) from error
+
+    def finalize_collected(
+        self,
+        collected: ExecutionCollectedOutcome,
+        *,
+        projection_receipt: ExecutionProjectionReceipt | None,
+        idempotency_key: str,
+    ) -> ExecutionCompletionOutcome:
+        """Finalize only zero-exit results with an exact append-only projection proof."""
+
+        projection_valid = (
+            projection_receipt is not None
+            and projection_receipt.run_id == collected.capability.run_id
+        )
+        if collected.disposition == "ZERO_EXIT" and projection_valid:
+            target_state = RunState.VERIFYING
+            disposition = "ZERO_EXIT_PROJECTED"
+        elif collected.disposition == "ZERO_EXIT":
+            target_state = RunState.FAILED
+            disposition = "PROJECTION_FAILED"
+        else:
+            target_state = RunState.FAILED
+            disposition = collected.disposition
+        try:
+            self._execution.transition_run(
+                collected.capability.run_id,
+                target_state,
+                collected.capability.owner_id,
+                collected.capability.token,
+                self._completion_key(idempotency_key, disposition.lower()),
+            )
+        except ContinuityExecutionError as error:
+            raise ExecutionSupervisorError("执行结束状态无法安全落账") from error
+        return ExecutionCompletionOutcome(
+            result=collected.result,
+            capability=collected.capability,
+            run_state=target_state,
+            disposition=disposition,
+        )
+
+    def fail_claimed_ready(
+        self,
+        capability: LeaseCapability,
+        *,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Record a pre-handshake local start failure without inventing RUN_STARTED."""
+
+        try:
+            return cast(
+                RunItem,
+                self._execution.transition_run(
+                    capability.run_id,
+                    RunState.FAILED,
+                    capability.owner_id,
+                    capability.token,
+                    self._completion_key(idempotency_key, "pre-handshake-failed"),
+                ),
+            )
+        except ContinuityExecutionError as error:
+            raise ExecutionSupervisorError("pre-handshake failure 无法安全落账") from error
+
     def recover_started_session(
         self,
         operation_id: str,
@@ -270,9 +442,11 @@ class ExecutionSupervisorService:
 
 
 __all__ = [
+    "ExecutionCollectionPendingError",
     "ExecutionSupervisorError",
     "ExecutionSupervisorService",
     "ExecutionCompletionOutcome",
+    "ExecutionCollectedOutcome",
     "LeaseCapability",
     "LeaseRenewalOutcome",
 ]

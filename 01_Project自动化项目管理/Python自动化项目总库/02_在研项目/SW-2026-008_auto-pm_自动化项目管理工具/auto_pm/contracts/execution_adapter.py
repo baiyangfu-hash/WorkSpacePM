@@ -328,6 +328,128 @@ class ExecutionMicrotaskMaterialization(BaseModel):
     commit: str = Field(pattern=r"^[0-9a-f]{40}$")
 
 
+class ExecutionStartClaim(BaseModel):
+    """Secret-free, append-only winner proof created before local process start."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["execution-start-claim.v1"] = "execution-start-claim.v1"
+    operation_id: str = Field(min_length=1, max_length=255)
+    run_id: str = Field(min_length=1)
+    expected_run_version: int = Field(ge=1)
+    owner_id: str = Field(min_length=1)
+    plan_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    marker_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    repository_path: str = Field(min_length=1)
+    microtask_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    claim_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    claimed_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def _validate_claim_hash(self) -> Self:
+        request = {
+            "operation_id": self.operation_id,
+            "run_id": self.run_id,
+            "expected_run_version": self.expected_run_version,
+            "owner_id": self.owner_id,
+            "plan_request_sha256": self.plan_request_sha256,
+            "marker_sha256": self.marker_sha256,
+            "repository_path": self.repository_path,
+            "microtask_commit": self.microtask_commit,
+        }
+        if self.claim_sha256 != ExecutionMicrotaskPlan._hash(request):
+            raise ValueError("claim_sha256 must bind the exact execution start claim")
+        return self
+
+
+class ExecutionProjectionFile(BaseModel):
+    """One approved file copied from the microtask repository to its candidate."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: str
+    baseline_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    projected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, value: str) -> str:
+        return ExecutionMicrotaskFile._validate_path(value)
+
+
+class ExecutionProjectionReceipt(BaseModel):
+    """Append-only, secret-free proof of an approved candidate projection."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["execution-projection-receipt.v1"] = (
+        "execution-projection-receipt.v1"
+    )
+    operation_id: str = Field(min_length=1, max_length=255)
+    run_id: str = Field(min_length=1)
+    source_repository: str = Field(min_length=1)
+    source_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    target_worktree: str = Field(min_length=1)
+    baseline_git_head: str = Field(pattern=r"^[0-9a-f]{40}$")
+    files: tuple[ExecutionProjectionFile, ...]
+    projection_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def _validate_projection_hash(self) -> Self:
+        paths = tuple(item.path for item in self.files)
+        if not paths or paths != tuple(sorted(paths)) or len(set(paths)) != len(paths):
+            raise ValueError("projection files must be non-empty, unique, and sorted")
+        request = {
+            "operation_id": self.operation_id,
+            "run_id": self.run_id,
+            "source_repository": self.source_repository,
+            "source_commit": self.source_commit,
+            "target_worktree": self.target_worktree,
+            "baseline_git_head": self.baseline_git_head,
+            "files": [item.model_dump(mode="json") for item in self.files],
+        }
+        if self.projection_sha256 != ExecutionMicrotaskPlan._hash(request):
+            raise ValueError("projection_sha256 must bind the exact projection receipt")
+        return self
+
+
+class ForegroundExecutionReceipt(BaseModel):
+    """Bounded public result for one foreground local execution Saga."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["foreground-execution-receipt.v1"] = (
+        "foreground-execution-receipt.v1"
+    )
+    operation_id: str = Field(min_length=1, max_length=255)
+    run_id: str = Field(min_length=1)
+    status: Literal["VERIFYING", "FAILED", "PENDING"]
+    claim_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    process_id: int | None = Field(default=None, gt=0)
+    session_id: str | None = None
+    exit_code: int | None = None
+    projection_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _validate_outcome(self) -> Self:
+        if self.status == "VERIFYING" and (
+            self.process_id is None
+            or not self.session_id
+            or self.exit_code != 0
+            or self.projection_sha256 is None
+        ):
+            raise ValueError("VERIFYING requires start, zero exit, and projection proof")
+        if self.status == "PENDING" and (
+            self.process_id is not None
+            or self.session_id is not None
+            or self.exit_code is not None
+            or self.projection_sha256 is not None
+        ):
+            raise ValueError("PENDING cannot claim process or projection evidence")
+        return self
+
+
 __all__ = [
     "ExecutionAdapterKind",
     "ExecutionDispatchReceipt",
@@ -335,8 +457,12 @@ __all__ = [
     "ExecutionMicrotaskFile",
     "ExecutionMicrotaskMaterialization",
     "ExecutionMicrotaskPlan",
+    "ExecutionProjectionFile",
+    "ExecutionProjectionReceipt",
     "ExecutionRole",
+    "ExecutionStartClaim",
     "ExecutionStartEvidence",
+    "ForegroundExecutionReceipt",
     "WorktreeMode",
     "execution_role_for_stack",
 ]

@@ -362,7 +362,7 @@ def execute_pm(
     plan_hash: str,
     lease_token_env: str,
 ) -> None:
-    """从完整批准卡冷启动恢复，并仅准备 PREPARED intent / READY Run。"""
+    """从完整批准卡冷启动并在前台阻塞执行唯一 local Saga。"""
 
     lease_token = os.environ.pop(lease_token_env, None)
     if lease_token is None:
@@ -374,22 +374,23 @@ def execute_pm(
     if request_id != card.request_id:
         raise click.ClickException("--request-id 与 PlanningScopeCard 不一致")
     try:
-        result = _facade(ctx).prepare_planning_execution(
+        result = _facade(ctx).execute_planning_foreground(
             card,
             expected_plan_hash=plan_hash,
             lease_token=lease_token,
+            lease_token_environment=lease_token_env,
         )
     except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
     click.echo(
         json.dumps(
             {
-                "schema_version": "pm-approved-dispatch.v1",
+                "schema_version": "pm-foreground-execution.v1",
                 "request_id": request_id,
                 "plan_hash": plan_hash,
-                "status": result.intent.status,
-                "run_state": "READY",
-                "receipt": result.receipt.model_dump(mode="json"),
+                "status": result.status,
+                "run_state": result.status,
+                "receipt": result.model_dump(mode="json"),
             },
             ensure_ascii=False,
             indent=2,

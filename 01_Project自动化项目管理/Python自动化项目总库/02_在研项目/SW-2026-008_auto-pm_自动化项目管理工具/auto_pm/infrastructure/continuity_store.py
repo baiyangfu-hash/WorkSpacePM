@@ -37,6 +37,8 @@ from auto_pm.contracts.decision_package import (
 from auto_pm.contracts.execution_adapter import (
     ExecutionIntent,
     ExecutionMicrotaskPlan,
+    ExecutionProjectionReceipt,
+    ExecutionStartClaim,
     ExecutionStartEvidence,
 )
 from auto_pm.contracts.mission import Mission, MissionState
@@ -1676,6 +1678,231 @@ class ContinuityStore:
             return plan, True
         except sqlite3.Error as error:
             raise ContinuityStoreError("ExecutionMicrotaskPlan 持久化失败") from error
+
+    @classmethod
+    def _execution_start_claim_key(cls, operation_id: str) -> str:
+        operation_id = cls._validated_idempotency_key(operation_id)
+        digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        return f"execution-start-claim:{digest}"
+
+    @classmethod
+    def _execution_start_claim_from_event(
+        cls, row: sqlite3.Row, operation_id: str
+    ) -> ExecutionStartClaim:
+        try:
+            claim = ExecutionStartClaim.model_validate_json(str(row["payload_json"]))
+        except ValueError as error:
+            raise ContinuityStoreError("ExecutionStartClaim payload 无法读取") from error
+        if (
+            row["aggregate_type"] != "execution_start_claim"
+            or row["aggregate_id"] != operation_id
+            or row["event_type"] != "EXECUTION_START_CLAIMED"
+            or row["idempotency_key"] != cls._execution_start_claim_key(operation_id)
+            or claim.operation_id != operation_id
+        ):
+            raise ContinuityStoreError("ExecutionStartClaim 事件身份不一致")
+        return claim
+
+    def get_execution_start_claim(self, operation_id: str) -> ExecutionStartClaim | None:
+        """Read the permanent start winner; its existence forbids another Popen."""
+
+        key = self._execution_start_claim_key(operation_id)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, key)
+            return (
+                None
+                if row is None
+                else self._execution_start_claim_from_event(row, operation_id)
+            )
+
+    def claim_execution_start(
+        self,
+        *,
+        operation_id: str,
+        run_id: str,
+        expected_run_version: int,
+        owner_id: str,
+        lease_token: str,
+        plan_request_sha256: str,
+        marker_sha256: str,
+        repository_path: str,
+        microtask_commit: str,
+    ) -> tuple[ExecutionStartClaim, bool]:
+        """Atomically choose the sole normal-path process starter before Popen."""
+
+        operation_id = self._validated_idempotency_key(operation_id)
+        run_id = self._validated_run_text(run_id, label="run_id")
+        owner_id = self._validated_run_text(owner_id, label="start claim owner")
+        lease_token = self._validated_run_text(lease_token, label="lease token")
+        if type(expected_run_version) is not int or expected_run_version < 1:
+            raise ContinuityStoreError("start claim expected_run_version 必须是正整数")
+        request = {
+            "operation_id": operation_id,
+            "run_id": run_id,
+            "expected_run_version": expected_run_version,
+            "owner_id": owner_id,
+            "plan_request_sha256": plan_request_sha256,
+            "marker_sha256": marker_sha256,
+            "repository_path": repository_path,
+            "microtask_commit": microtask_commit,
+        }
+        claim_hash = ExecutionMicrotaskPlan._hash(request)
+        key = self._execution_start_claim_key(operation_id)
+        with self._transaction() as conn:
+            existing_row = self._event_by_key(conn, key)
+            if existing_row is not None:
+                existing = self._execution_start_claim_from_event(
+                    existing_row, operation_id
+                )
+                existing_request = existing.model_dump(mode="json", exclude={"claimed_at"})
+                existing_request.pop("schema_version")
+                existing_request.pop("claim_sha256")
+                if existing_request != request or existing.claim_sha256 != claim_hash:
+                    raise ContinuityStoreError("operation_id 已绑定不同启动 claim")
+                return existing, False
+            plan_row = self._event_by_key(conn, self._execution_microtask_key(operation_id))
+            if plan_row is None:
+                raise ContinuityStoreError("启动 claim 缺少 ExecutionMicrotaskPlan")
+            plan = self._execution_microtask_from_event(plan_row, operation_id)
+            if (
+                plan.run_id != run_id
+                or plan.request_sha256 != plan_request_sha256
+                or plan.marker_sha256 != marker_sha256
+                or plan.repository_path != repository_path
+            ):
+                raise ContinuityStoreError("启动 claim 与 MicrotaskPlan 不一致")
+            intent_row = self._event_by_key(conn, self._execution_intent_key(operation_id))
+            if intent_row is None:
+                raise ContinuityStoreError("启动 claim 缺少 ExecutionIntent")
+            intent = self._execution_intent_from_event(intent_row, operation_id)
+            run = self._get_run(conn, run_id)
+            if (
+                run.state is not RunState.READY
+                or run.version != expected_run_version
+                or run.run_id != intent.receipt.run_id
+                or run.executor_id != owner_id
+                or intent.receipt.owner_id != owner_id
+            ):
+                raise ContinuityStoreError("启动 claim 的 READY Run/version/owner 不一致")
+            lease = self._get_lease(conn, run_id)
+            if lease.owner_id != owner_id or lease.lease_token != lease_token:
+                raise ContinuityStoreError("启动 claim lease ownership 不匹配")
+            if self._aware_timestamp(lease.expires_at, "lease") <= self._utc_now():
+                raise ContinuityStoreError("启动 claim lease 已过期")
+            claimed_at = self._utc_now()
+            claim = ExecutionStartClaim(
+                **request,
+                claim_sha256=claim_hash,
+                claimed_at=claimed_at,
+            )
+            self._append_event(
+                conn,
+                operation_id,
+                "EXECUTION_START_CLAIMED",
+                claim.model_dump(mode="json"),
+                key,
+                claimed_at.isoformat(),
+                aggregate_type="execution_start_claim",
+            )
+            return claim, True
+
+    @classmethod
+    def _execution_projection_key(cls, operation_id: str) -> str:
+        operation_id = cls._validated_idempotency_key(operation_id)
+        digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        return f"execution-projection:{digest}"
+
+    @classmethod
+    def _execution_projection_from_event(
+        cls, row: sqlite3.Row, operation_id: str
+    ) -> ExecutionProjectionReceipt:
+        try:
+            receipt = ExecutionProjectionReceipt.model_validate_json(
+                str(row["payload_json"])
+            )
+        except ValueError as error:
+            raise ContinuityStoreError("ExecutionProjectionReceipt 无法读取") from error
+        if (
+            row["aggregate_type"] != "execution_projection"
+            or row["aggregate_id"] != operation_id
+            or row["event_type"] != "EXECUTION_PROJECTED"
+            or row["idempotency_key"] != cls._execution_projection_key(operation_id)
+            or receipt.operation_id != operation_id
+        ):
+            raise ContinuityStoreError("ExecutionProjectionReceipt 事件身份不一致")
+        return receipt
+
+    def get_execution_projection(
+        self, operation_id: str
+    ) -> ExecutionProjectionReceipt | None:
+        """Read one append-only projection receipt."""
+
+        key = self._execution_projection_key(operation_id)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, key)
+            return (
+                None
+                if row is None
+                else self._execution_projection_from_event(row, operation_id)
+            )
+
+    def record_execution_projection(
+        self, receipt: ExecutionProjectionReceipt
+    ) -> tuple[ExecutionProjectionReceipt, bool]:
+        """Append the unique projection proof after all candidate writes verify."""
+
+        receipt = ExecutionProjectionReceipt.model_validate(receipt.model_dump())
+        key = self._execution_projection_key(receipt.operation_id)
+        with self._transaction() as conn:
+            existing_row = self._event_by_key(conn, key)
+            if existing_row is not None:
+                existing = self._execution_projection_from_event(
+                    existing_row, receipt.operation_id
+                )
+                if existing != receipt:
+                    raise ContinuityStoreError("operation_id 已绑定不同投影回执")
+                return existing, False
+            claim_row = self._event_by_key(
+                conn, self._execution_start_claim_key(receipt.operation_id)
+            )
+            plan_row = self._event_by_key(
+                conn, self._execution_microtask_key(receipt.operation_id)
+            )
+            if claim_row is None or plan_row is None:
+                raise ContinuityStoreError("投影回执缺少 start claim 或 MicrotaskPlan")
+            claim = self._execution_start_claim_from_event(
+                claim_row, receipt.operation_id
+            )
+            plan = self._execution_microtask_from_event(
+                plan_row, receipt.operation_id
+            )
+            run = self._get_run(conn, receipt.run_id)
+            if run.state is not RunState.RUNNING:
+                raise ContinuityStoreError("只有 RUNNING Run 可以登记投影回执")
+            if (
+                claim.run_id != receipt.run_id
+                or plan.run_id != receipt.run_id
+                or plan.repository_path != receipt.source_repository
+                or claim.microtask_commit != receipt.source_commit
+                or plan.source_worktree_path != receipt.target_worktree
+                or plan.baseline_git_head != receipt.baseline_git_head
+            ):
+                raise ContinuityStoreError("投影回执与 claim/Plan 不一致")
+            manifest = {item.path: item.content_sha256 for item in plan.manifest}
+            files = {item.path: item.baseline_sha256 for item in receipt.files}
+            if files != manifest:
+                raise ContinuityStoreError("投影回执文件集合或 baseline hash 不一致")
+            event_time = self._utc_now().isoformat()
+            self._append_event(
+                conn,
+                receipt.operation_id,
+                "EXECUTION_PROJECTED",
+                receipt.model_dump(mode="json"),
+                key,
+                event_time,
+                aggregate_type="execution_projection",
+            )
+            return receipt, True
 
     def get_orchestration_outcome(
         self, mission_id: str, idempotency_key: str

@@ -25,7 +25,7 @@ from typing import IO, Any
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 
 ISOLATION_MARKER = ".codex-microtask.json"
-ISOLATION_SCHEMA_VERSION = "local-codex-microtask.v1"
+ISOLATION_SCHEMA_VERSION = "codex-microtask.v1"
 DEFAULT_TIMEOUT_SECONDS = 300.0
 DEFAULT_OUTPUT_LIMIT_BYTES = 64 * 1024
 MAX_TIMEOUT_SECONDS = 600.0
@@ -80,6 +80,7 @@ class LocalExecutionRequest:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES
     sensitive_values: tuple[str, ...] = field(default_factory=tuple, repr=False)
+    excluded_environment_keys: tuple[str, ...] = field(default_factory=tuple, repr=False)
 
 
 @dataclass(frozen=True)
@@ -215,6 +216,12 @@ class LocalCodexExecutor:
             error=handshake.error,
         )
 
+    def validate(self, request: LocalExecutionRequest) -> None:
+        """Perform the complete no-process preflight used immediately before claiming start."""
+
+        self._validate_request(request)
+        self._snapshot_tree(Path(request.repository).resolve())
+
     def start(self, request: LocalExecutionRequest) -> LocalExecutionHandle | LocalExecutionResult:
         """Launch a process without claiming a session or execution state.
 
@@ -228,12 +235,16 @@ class LocalCodexExecutor:
         stdout_capture = _BoundedCapture(request.output_limit_bytes)
         stderr_capture = _BoundedCapture(request.output_limit_bytes)
         try:
+            child_environment = os.environ.copy()
+            for key in request.excluded_environment_keys:
+                child_environment.pop(key, None)
             process = subprocess.Popen(
                 validated.command,
                 cwd=validated.repository,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=child_environment,
             )
         except (OSError, ValueError) as error:
             return self._not_started_result(request, validated, error)
@@ -352,6 +363,11 @@ class LocalCodexExecutor:
             error=error,
         )
 
+    def reap(self, handle: LocalExecutionHandle) -> None:
+        """Stop and reap exactly the process owned by this in-memory handle."""
+
+        self._stop_and_join(handle._active)
+
     def _finalize(
         self,
         active: _ActiveExecution,
@@ -429,6 +445,15 @@ class LocalCodexExecutor:
         if not isinstance(request.prompt, str) or not request.prompt.strip() or "\0" in request.prompt:
             raise LocalExecutionError("prompt must be a non-empty string")
         self._validate_limits(request)
+        for key in request.excluded_environment_keys:
+            if (
+                not isinstance(key, str)
+                or not key
+                or key != key.strip()
+                or "=" in key
+                or "\0" in key
+            ):
+                raise LocalExecutionError("excluded environment key is invalid")
         allowed_paths = self._normalize_allowed_paths(request.allowed_paths)
         if ISOLATION_MARKER in allowed_paths:
             raise LocalExecutionError("the isolation marker can never be an allowed changed path")
@@ -723,7 +748,10 @@ __all__ = [
     "ISOLATION_SCHEMA_VERSION",
     "LocalCodexExecutor",
     "LocalExecutionError",
+    "LocalExecutionHandle",
+    "LocalExecutionHandshake",
     "LocalExecutionRequest",
     "LocalExecutionResult",
     "LocalExecutionStatus",
+    "LocalHandshakeStatus",
 ]

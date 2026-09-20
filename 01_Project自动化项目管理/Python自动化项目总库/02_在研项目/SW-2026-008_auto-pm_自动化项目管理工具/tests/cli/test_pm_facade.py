@@ -7,7 +7,6 @@ import os
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
 from auto_pm.cli.__main__ import cli
 from auto_pm.core.mission_service import MissionService
@@ -244,7 +243,7 @@ def test_pm_approve_materializes_one_authorized_chain_without_internal_ids(
     assert len(store.list_works("SW-TEST-001", include_terminal=True)) == 1
 
 
-def test_pm_execute_consumes_env_secret_and_emits_only_prepared_ready_receipt(
+def test_pm_execute_consumes_env_secret_and_emits_foreground_receipt(
     cli_runner: CliRunner,
     tmp_path: Path,
     monkeypatch,
@@ -255,24 +254,30 @@ def test_pm_execute_consumes_env_secret_and_emits_only_prepared_ready_receipt(
     captured: dict[str, object] = {}
 
     class _Receipt:
+        status = "VERIFYING"
+
         @staticmethod
         def model_dump(*, mode: str) -> dict[str, object]:
             assert mode == "json"
-            return {"status": "PREPARED", "run_id": "RUN-PLAN-TEST"}
+            return {"status": "VERIFYING", "run_id": "RUN-PLAN-TEST"}
 
     class _Facade:
         @staticmethod
-        def prepare_planning_execution(card, *, expected_plan_hash: str, lease_token: str):
+        def execute_planning_foreground(
+            card,
+            *,
+            expected_plan_hash: str,
+            lease_token: str,
+            lease_token_environment: str,
+        ):
             captured.update(
                 card=card,
                 expected_plan_hash=expected_plan_hash,
                 lease_token=lease_token,
+                lease_token_environment=lease_token_environment,
                 env_present="E08A_TOKEN" in os.environ,
             )
-            return SimpleNamespace(
-                intent=SimpleNamespace(status="PREPARED"),
-                receipt=_Receipt(),
-            )
+            return _Receipt()
 
     monkeypatch.setattr("auto_pm.cli.pm._facade", lambda _ctx: _Facade())
     result = cli_runner.invoke(
@@ -296,9 +301,11 @@ def test_pm_execute_consumes_env_secret_and_emits_only_prepared_ready_receipt(
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["status"] == "PREPARED"
-    assert payload["run_state"] == "READY"
+    assert payload["schema_version"] == "pm-foreground-execution.v1"
+    assert payload["status"] == "VERIFYING"
+    assert payload["run_state"] == "VERIFYING"
     assert captured["lease_token"] == "cli-super-secret"
+    assert captured["lease_token_environment"] == "E08A_TOKEN"
     assert captured["env_present"] is False
     assert "cli-super-secret" not in result.output
     assert "cli-super-secret" not in repr(result.exception)

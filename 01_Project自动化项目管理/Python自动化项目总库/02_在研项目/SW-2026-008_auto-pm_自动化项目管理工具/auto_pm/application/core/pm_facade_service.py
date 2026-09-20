@@ -15,6 +15,10 @@ from auto_pm.core.execution_adapter_service import (
     ExecutionDispatchResult,
     ExecutionDispatchService,
 )
+from auto_pm.core.local_execution_orchestrator import (
+    LocalExecutionOrchestrator,
+    LocalExecutionOrchestratorError,
+)
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
@@ -26,6 +30,7 @@ from auto_pm.application.core.evidence_collection_service import (
 from auto_pm.contracts.continuity import RunState, WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
+from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_facade import (
     PlanningDraft,
@@ -58,6 +63,7 @@ class PmFacadeService:
         change_service: ChangeService | None = None,
         decision_service: DecisionService | None = None,
         execution_service: ExecutionDispatchService | None = None,
+        local_orchestrator: LocalExecutionOrchestrator | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root)
         self._store = store or ContinuityStore(self._workspace_root)
@@ -66,6 +72,9 @@ class PmFacadeService:
         self._changes = change_service or ChangeService(str(self._workspace_root))
         self._decisions = decision_service or DecisionService(self._workspace_root)
         self._execution = execution_service or ExecutionDispatchService(
+            self._workspace_root, store=self._store
+        )
+        self._local_orchestrator = local_orchestrator or LocalExecutionOrchestrator(
             self._workspace_root, store=self._store
         )
 
@@ -342,6 +351,34 @@ class PmFacadeService:
                 force_isolation=True,
             )
         except ExecutionDispatchError as error:
+            raise PmFacadeError(str(error)) from error
+
+    def execute_planning_foreground(
+        self,
+        card: PlanningScopeCard,
+        *,
+        expected_plan_hash: str,
+        lease_token: str,
+        lease_token_environment: str,
+    ) -> ForegroundExecutionReceipt:
+        """Run the approved local Saga in this foreground process until final disposition."""
+
+        dispatch = self.prepare_planning_execution(
+            card,
+            expected_plan_hash=expected_plan_hash,
+            lease_token=lease_token,
+        )
+        try:
+            microtask = self._execution.prepare_microtask(dispatch.intent.operation_id)
+            return cast(
+                ForegroundExecutionReceipt,
+                self._local_orchestrator.execute(
+                    dispatch=dispatch,
+                    microtask=microtask,
+                    lease_token_environment=lease_token_environment,
+                ),
+            )
+        except (ExecutionDispatchError, LocalExecutionOrchestratorError) as error:
             raise PmFacadeError(str(error)) from error
 
     @staticmethod

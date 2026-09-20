@@ -16,7 +16,10 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionMicrotaskFile,
     ExecutionMicrotaskMaterialization,
     ExecutionMicrotaskPlan,
+    ExecutionProjectionFile,
+    ExecutionProjectionReceipt,
     ExecutionRole,
+    ExecutionStartClaim,
     ExecutionStartEvidence,
     WorktreeMode,
     execution_role_for_stack,
@@ -194,6 +197,58 @@ def test_microtask_plan_is_canonical_append_only_and_secret_free() -> None:
             ExecutionMicrotaskPlan.model_validate(
                 {**plan.model_dump(mode="json"), "objective": secret}
             )
+
+
+def test_start_claim_and_projection_receipt_bind_exact_secret_free_payloads() -> None:
+    claimed_at = datetime.now(UTC)
+    claim_request = {
+        "operation_id": "OP-E08CD-001",
+        "run_id": "RUN-E08CD-001",
+        "expected_run_version": 1,
+        "owner_id": "codex:agent-a",
+        "plan_request_sha256": "a" * 64,
+        "marker_sha256": "b" * 64,
+        "repository_path": "C:/workspace/.auto-pm/microtasks/e08cd",
+        "microtask_commit": "c" * 40,
+    }
+    claim = ExecutionStartClaim(
+        **claim_request,
+        claim_sha256=ExecutionMicrotaskPlan._hash(claim_request),
+        claimed_at=claimed_at,
+    )
+    file = ExecutionProjectionFile(
+        path="auto_pm/a.py",
+        baseline_sha256="d" * 64,
+        projected_sha256="e" * 64,
+    )
+    projection_request = {
+        "operation_id": claim.operation_id,
+        "run_id": claim.run_id,
+        "source_repository": claim.repository_path,
+        "source_commit": claim.microtask_commit,
+        "target_worktree": "C:/workspace/candidate",
+        "baseline_git_head": "f" * 40,
+        "files": [file.model_dump(mode="json")],
+    }
+    projection = ExecutionProjectionReceipt(
+        **projection_request,
+        projection_sha256=ExecutionMicrotaskPlan._hash(projection_request),
+        created_at=claimed_at,
+    )
+
+    assert "token" not in claim.model_dump_json().lower()
+    assert "token" not in projection.model_dump_json().lower()
+    with pytest.raises(ValidationError, match="claim_sha256"):
+        ExecutionStartClaim.model_validate(
+            {**claim.model_dump(mode="json"), "owner_id": "codex:agent-b"}
+        )
+    with pytest.raises(ValidationError, match="projection_sha256"):
+        ExecutionProjectionReceipt.model_validate(
+            {
+                **projection.model_dump(mode="json"),
+                "target_worktree": "C:/workspace/other",
+            }
+        )
 
 
 def test_start_evidence_requires_canonical_executor_control_facts() -> None:

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
 
 import pytest
 from auto_pm.core.continuity_execution_service import ContinuityExecutionError
 from auto_pm.core.execution_supervisor_service import (
+    ExecutionCollectedOutcome,
+    ExecutionCollectionPendingError,
     ExecutionSupervisorError,
     ExecutionSupervisorService,
     LeaseCapability,
@@ -15,7 +19,7 @@ from auto_pm.core.execution_supervisor_service import (
 )
 
 from auto_pm.contracts.continuity import LeaseRenewalReceipt, RunState
-from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
+from auto_pm.contracts.execution_adapter import ExecutionProjectionReceipt, ExecutionStartEvidence
 from auto_pm.infrastructure.local_executor import (
     LocalExecutionResult,
     LocalExecutionStatus,
@@ -306,6 +310,91 @@ def test_supervisor_does_not_verify_when_collect_or_renew_fails(tmp_path) -> Non
         )
     execution.transition_run.assert_not_called()
 
+
+def test_collect_only_never_transitions_and_finalize_requires_projection_receipt(
+    tmp_path,
+) -> None:
+    execution = Mock()
+    supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
+    capability = _capability()
+    supervisor.renew_if_due = Mock(
+        return_value=LeaseRenewalOutcome(capability=capability, receipt=None)
+    )
+    result = _result(status=LocalExecutionStatus.SUCCEEDED, exit_code=0)
+
+    collected = supervisor.collect_completion(
+        capability,
+        wait_and_collect=lambda: result,
+        reap_current=lambda: None,
+        lease_seconds=900,
+        renew_before_seconds=30,
+        renewal_interval_seconds=0.01,
+        idempotency_key="e08cd-collect-only",
+    )
+    assert collected.disposition == "ZERO_EXIT"
+    execution.transition_run.assert_not_called()
+
+    failed = supervisor.finalize_collected(
+        collected,
+        projection_receipt=None,
+        idempotency_key="e08cd-no-projection",
+    )
+    assert failed.run_state is RunState.FAILED
+    assert failed.disposition == "PROJECTION_FAILED"
+
+    execution.reset_mock()
+    projection = Mock(spec=ExecutionProjectionReceipt, run_id=capability.run_id)
+    verifying = supervisor.finalize_collected(
+        ExecutionCollectedOutcome(result, capability, "ZERO_EXIT"),
+        projection_receipt=projection,
+        idempotency_key="e08cd-with-projection",
+    )
+    assert verifying.run_state is RunState.VERIFYING
+    assert verifying.disposition == "ZERO_EXIT_PROJECTED"
+    execution.transition_run.assert_called_once()
+
+
+def test_periodic_renewal_failure_reaps_real_child_and_stays_pending(tmp_path) -> None:
+    execution = Mock()
+    supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
+    capability = _capability()
+    supervisor.renew_if_due = Mock(
+        side_effect=[
+            LeaseRenewalOutcome(capability=capability, receipt=None),
+            ExecutionSupervisorError("lease 自动续租失败"),
+        ]
+    )
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    reaped = False
+
+    def reap() -> None:
+        nonlocal reaped
+        process.terminate()
+        process.wait(timeout=5)
+        reaped = True
+
+    def collect() -> LocalExecutionResult:
+        process.wait(timeout=5)
+        return _result(status=LocalExecutionStatus.FAILED, exit_code=process.returncode)
+
+    try:
+        with pytest.raises(ExecutionCollectionPendingError, match="PENDING"):
+            supervisor.collect_completion(
+                capability,
+                wait_and_collect=collect,
+                reap_current=reap,
+                lease_seconds=900,
+                renew_before_seconds=30,
+                renewal_interval_seconds=0.01,
+                idempotency_key="e08cd-renewal-loss",
+            )
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+    assert reaped
+    assert process.poll() is not None
+    execution.transition_run.assert_not_called()
 
 def test_supervisor_recovers_only_the_full_started_identity(tmp_path) -> None:
     execution = Mock()

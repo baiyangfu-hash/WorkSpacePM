@@ -64,6 +64,7 @@ def _helper(tmp_path: Path) -> Path:
     path.write_text(
         """from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -80,6 +81,8 @@ if "--json" not in arguments:
 
 repository = Path(arguments[arguments.index("-C") + 1])
 prompt = arguments[-1]
+if "environment" in prompt and os.environ.get("AUTO_PM_TEST_LEASE"):
+    raise SystemExit(19)
 if "timeout" in prompt:
     time.sleep(5)
 (repository / "allowed.txt").write_text("changed\\n", encoding="utf-8")
@@ -153,6 +156,25 @@ def test_executes_real_helper_with_safe_command_identity_and_redacted_output(tmp
     assert SECRET not in result.stdout
     assert SECRET not in result.stderr
     assert SECRET not in repr(result)
+
+
+def test_child_environment_excludes_one_time_lease_capability(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository = _microtask_repository(tmp_path)
+    helper = _helper(tmp_path)
+    monkeypatch.setenv("AUTO_PM_TEST_LEASE", SECRET)
+    request = LocalExecutionRequest(
+        **{
+            **_request(repository, "write allowed environment").__dict__,
+            "excluded_environment_keys": ("AUTO_PM_TEST_LEASE",),
+        }
+    )
+
+    result = LocalCodexExecutor(command_prefix=(sys.executable, str(helper))).execute(request)
+
+    assert result.status is LocalExecutionStatus.SUCCEEDED
+    assert result.exit_code == 0
 
 
 def test_start_handshake_wait_is_nonblocking_and_binds_current_process(tmp_path: Path) -> None:
