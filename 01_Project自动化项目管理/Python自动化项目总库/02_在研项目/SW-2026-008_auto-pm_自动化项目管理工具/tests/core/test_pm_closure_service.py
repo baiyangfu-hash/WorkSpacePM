@@ -9,10 +9,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from auto_pm.change.ledger_reconciler import ReconcileDiff
 from auto_pm.core.pm_closure_service import (
     ClosureState,
     ClosureStepKind,
     ClosureStepState,
+    LedgerProjectionState,
     PmClosureError,
     PmClosureService,
 )
@@ -160,6 +162,18 @@ def _table_counts(database: Path) -> dict[str, int]:
         }
 
 
+class _ProjectionReconciler:
+    def __init__(self, result: ReconcileDiff | Exception) -> None:
+        self.result = result
+        self.calls: list[tuple[str, str]] = []
+
+    def project_change(self, project_path: str, change_number: str) -> ReconcileDiff:
+        self.calls.append((project_path, change_number))
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
 def test_prepare_closure_atomically_persists_state_step_outbox_and_event(tmp_path: Path) -> None:
     store, database = _accepted_lineage(tmp_path)
     service = PmClosureService(
@@ -290,3 +304,59 @@ def test_initialize_adds_closure_tables_to_an_existing_current_store(tmp_path: P
         version = str(conn.execute("SELECT schema_version FROM schema_meta").fetchone()[0])
     assert tables == {"closure_items", "closure_steps", "closure_outbox"}
     assert version == "continuity-store.v7"
+
+
+def test_project_prepared_ledger_is_idempotent_without_new_closure_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, database = _accepted_lineage(tmp_path)
+    reconciler = _ProjectionReconciler(ReconcileDiff())
+    service = PmClosureService(tmp_path, store=store, ledger_reconciler=reconciler)
+    preparation = service.prepare_closure(_MISSION_ID, idempotency_key="c07-project")
+    injected: list[str] = []
+
+    def record_substance(closure_id: str) -> Path:
+        injected.append(closure_id)
+        return tmp_path / "CHG.md"
+
+    monkeypatch.setattr(
+        service,
+        "inject_prepared_change_substance",
+        record_substance,
+    )
+    monkeypatch.setattr(service, "get", lambda closure_id: preparation)
+
+    first = service.project_prepared_ledger(preparation.closure.closure_id)
+    second = service.project_prepared_ledger(preparation.closure.closure_id)
+
+    assert first == second
+    assert first.state is LedgerProjectionState.PROJECTED
+    assert injected == [preparation.closure.closure_id, preparation.closure.closure_id]
+    assert reconciler.calls == [
+        (str(tmp_path), _CHANGE_ID),
+        (str(tmp_path), _CHANGE_ID),
+    ]
+    assert _table_counts(database)["closure_events"] == 1
+
+
+def test_project_prepared_ledger_keeps_projection_failure_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, database = _accepted_lineage(tmp_path)
+    reconciler = _ProjectionReconciler(OSError("ledger unavailable"))
+    service = PmClosureService(tmp_path, store=store, ledger_reconciler=reconciler)
+    preparation = service.prepare_closure(_MISSION_ID, idempotency_key="c07-pending")
+    monkeypatch.setattr(
+        service,
+        "inject_prepared_change_substance",
+        lambda closure_id: tmp_path / f"{closure_id}.md",
+    )
+    monkeypatch.setattr(service, "get", lambda closure_id: preparation)
+
+    receipt = service.project_prepared_ledger(preparation.closure.closure_id)
+
+    assert receipt.state is LedgerProjectionState.PENDING_SYNC
+    assert receipt.pending_reason == "ledger unavailable"
+    assert _table_counts(database)["closure_events"] == 1

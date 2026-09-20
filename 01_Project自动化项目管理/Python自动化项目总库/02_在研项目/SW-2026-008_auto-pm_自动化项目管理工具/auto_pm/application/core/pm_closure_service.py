@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 from auto_pm.domain.change.substance_injector import SubstanceInjector
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -36,6 +37,13 @@ class ClosureStepState(StrEnum):
     """C05 queues work but never advances a downstream step."""
 
     PENDING = "PENDING"
+
+
+class LedgerProjectionState(StrEnum):
+    """C07 result; C08 alone may advance closure lifecycle state."""
+
+    PROJECTED = "PROJECTED"
+    PENDING_SYNC = "PENDING_SYNC"
 
 
 class ClosureItem(BaseModel):
@@ -99,6 +107,17 @@ class ClosurePreparation(BaseModel):
     outbox: ClosureOutboxItem
 
 
+class LedgerProjectionReceipt(BaseModel):
+    """An idempotent projection result with no hidden lifecycle transition."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    closure_id: str
+    change_id: str
+    state: LedgerProjectionState
+    pending_reason: str | None = None
+
+
 class PmClosureService:
     """Prepare the accepted v2 lineage without performing external effects."""
 
@@ -108,9 +127,11 @@ class PmClosureService:
         now: Callable[[], datetime] | None = None,
         *,
         store: ContinuityStore | None = None,
+        ledger_reconciler: LedgerReconciler | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root)
         self._store = store or ContinuityStore(workspace_root)
+        self._ledger_reconciler = ledger_reconciler or LedgerReconciler()
         self._now = now or (lambda: datetime.now(UTC))
 
     def initialize(self, tool_version: str = "dev") -> None:
@@ -166,6 +187,36 @@ class PmClosureService:
             )
         except (ValueError, TypeError) as error:
             raise PmClosureError(str(error)) from error
+
+    def project_prepared_ledger(self, closure_id: str) -> LedgerProjectionReceipt:
+        """Project the prepared closure's one CHG, preserving pending failure."""
+
+        preparation = self.get(closure_id)
+        try:
+            self._change_substance_evidence(preparation)
+            self.inject_prepared_change_substance(closure_id)
+            remaining = self._ledger_reconciler.project_change(
+                str(self._workspace_root), preparation.closure.change_id
+            )
+        except (OSError, ValueError, TypeError, PmClosureError) as error:
+            return LedgerProjectionReceipt(
+                closure_id=closure_id,
+                change_id=preparation.closure.change_id,
+                state=LedgerProjectionState.PENDING_SYNC,
+                pending_reason=str(error),
+            )
+        if not remaining.is_clean:
+            return LedgerProjectionReceipt(
+                closure_id=closure_id,
+                change_id=preparation.closure.change_id,
+                state=LedgerProjectionState.PENDING_SYNC,
+                pending_reason=remaining.summary(),
+            )
+        return LedgerProjectionReceipt(
+            closure_id=closure_id,
+            change_id=preparation.closure.change_id,
+            state=LedgerProjectionState.PROJECTED,
+        )
 
     @staticmethod
     def _decode(payload: Mapping[str, Mapping[str, Any]]) -> ClosurePreparation:
@@ -251,6 +302,8 @@ __all__ = [
     "ClosureStep",
     "ClosureStepKind",
     "ClosureStepState",
+    "LedgerProjectionReceipt",
+    "LedgerProjectionState",
     "PmClosureError",
     "PmClosureService",
 ]

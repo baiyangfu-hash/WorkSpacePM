@@ -242,6 +242,28 @@ class LedgerReconciler:
         )
         return diff
 
+    def project_change(self, project_path: str, change_number: str) -> ReconcileDiff:
+        """Project only one CHG and never repair unrelated ledger drift."""
+
+        if not _CHANGE_NUMBER_RE.fullmatch(change_number):
+            raise ValueError(f"非法变更编号: {change_number}")
+        before = self._for_change(self.reconcile(project_path), change_number)
+        if before.is_clean:
+            return before
+        self.auto_fix(project_path, before)
+        return self._for_change(self.reconcile(project_path), change_number)
+
+    @staticmethod
+    def _for_change(diff: ReconcileDiff, change_number: str) -> ReconcileDiff:
+        """Keep only repairable drift for the requested CHG."""
+
+        return ReconcileDiff(
+            missing_in_ledger=[item for item in diff.missing_in_ledger if item == change_number],
+            status_mismatches=[
+                item for item in diff.status_mismatches if item[0] == change_number
+            ],
+        )
+
     def _parse_ledger_numbers(self, ledger_path: str) -> set[str]:
         """从台账解析所有变更编号集合"""
         content = read_file(ledger_path)
