@@ -8,10 +8,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from auto_pm.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
+)
+from auto_pm.core.execution_microtask_service import (
+    ExecutionMicrotaskError,
+    ExecutionMicrotaskService,
 )
 from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
 from auto_pm.core.worktree_policy_service import (
@@ -24,6 +29,7 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ExecutionDispatchReceipt,
     ExecutionIntent,
+    ExecutionMicrotaskMaterialization,
     ExecutionRole,
     WorktreeMode,
     execution_role_for_stack,
@@ -84,6 +90,7 @@ class _LocalExecutionAdapter:
             branch_name=plan.branch_name,
             git_head=plan.git_head,
             owned_paths=owned_paths,
+            declared_dirty_paths=mission.authority.routing.declared_dirty_paths,
         )
 
 
@@ -120,6 +127,18 @@ class ExecutionDispatchService:
         self._execution = ContinuityExecutionService(self._root, self._store, self._now)
         self._worktrees = worktrees or WorktreePolicyService(self._root)
         self._adapters = ExecutionAdapterRegistry()
+        self._microtasks = ExecutionMicrotaskService(self._root, store=self._store)
+
+    def prepare_microtask(self, operation_id: str) -> ExecutionMicrotaskMaterialization:
+        """Materialize an approved READY Run without starting a provider or model."""
+
+        try:
+            return cast(
+                ExecutionMicrotaskMaterialization,
+                self._microtasks.prepare(operation_id),
+            )
+        except ExecutionMicrotaskError as error:
+            raise ExecutionDispatchError(str(error)) from error
 
     def prepare(
         self,

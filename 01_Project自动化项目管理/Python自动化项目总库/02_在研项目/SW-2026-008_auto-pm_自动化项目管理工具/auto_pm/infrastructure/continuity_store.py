@@ -34,7 +34,11 @@ from auto_pm.contracts.decision_package import (
     is_canonical_decision_id,
     is_canonical_runtime_change_id,
 )
-from auto_pm.contracts.execution_adapter import ExecutionIntent, ExecutionStartEvidence
+from auto_pm.contracts.execution_adapter import (
+    ExecutionIntent,
+    ExecutionMicrotaskPlan,
+    ExecutionStartEvidence,
+)
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.orchestration import OrchestrationOutcome
 from auto_pm.contracts.pm_facade import PlanningDraft
@@ -1537,6 +1541,141 @@ class ContinuityStore:
             return intent, True
         except sqlite3.Error as error:
             raise ContinuityStoreError("ExecutionIntent 持久化失败") from error
+
+    @classmethod
+    def _execution_microtask_key(cls, operation_id: str) -> str:
+        operation_id = cls._validated_idempotency_key(operation_id)
+        digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        return f"execution-microtask-plan:{digest}"
+
+    @classmethod
+    def _execution_microtask_from_event(
+        cls, row: sqlite3.Row, operation_id: str
+    ) -> ExecutionMicrotaskPlan:
+        try:
+            plan = ExecutionMicrotaskPlan.model_validate_json(str(row["payload_json"]))
+        except ValueError as error:
+            raise ContinuityStoreError("ExecutionMicrotaskPlan payload 无法读取") from error
+        if (
+            row["aggregate_type"] != "execution_microtask_plan"
+            or row["event_type"] != "EXECUTION_MICROTASK_PLANNED"
+            or row["aggregate_id"] != operation_id
+            or plan.operation_id != operation_id
+            or row["idempotency_key"] != cls._execution_microtask_key(operation_id)
+        ):
+            raise ContinuityStoreError("ExecutionMicrotaskPlan 事件身份不一致")
+        return plan
+
+    def get_execution_microtask_plan(
+        self, operation_id: str
+    ) -> ExecutionMicrotaskPlan | None:
+        """Read one append-only microtask plan without consulting repository state."""
+
+        key = self._execution_microtask_key(operation_id)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, key)
+            return (
+                None
+                if row is None
+                else self._execution_microtask_from_event(row, operation_id)
+            )
+
+    def reserve_execution_microtask_plan(
+        self, plan: ExecutionMicrotaskPlan
+    ) -> tuple[ExecutionMicrotaskPlan, bool]:
+        """Commit the unique plan before any standalone repository side effect."""
+
+        plan = ExecutionMicrotaskPlan.model_validate(plan.model_dump())
+        key = self._execution_microtask_key(plan.operation_id)
+        try:
+            with self._transaction() as conn:
+                intent_row = self._event_by_key(
+                    conn, self._execution_intent_key(plan.operation_id)
+                )
+                if intent_row is None:
+                    raise ContinuityStoreError("ExecutionMicrotaskPlan 缺少 ExecutionIntent")
+                intent = self._execution_intent_from_event(intent_row, plan.operation_id)
+                receipt = intent.receipt
+                run = self._get_run(conn, plan.run_id)
+                mission = self._get_mission(conn, plan.mission_id)
+                routing = mission.authority.routing
+                if run.state is not RunState.READY:
+                    raise ContinuityStoreError("只有 READY Run 可以规划未启动微任务")
+                if (
+                    plan.mission_id != receipt.mission_id
+                    or plan.mission_id != mission.mission_id
+                    or mission.subject_project_id != receipt.subject_project_id
+                    or mission.root_work_id != receipt.work_id
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan Mission/Intent 身份不一致")
+                if (
+                    not routing.approved_model
+                    or plan.approved_model != routing.approved_model
+                    or plan.approved_model != receipt.executor_id
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan approved_model 授权不一致")
+                if plan.objective != mission.objective:
+                    raise ContinuityStoreError("MicrotaskPlan objective 与 Mission 不一致")
+                if not (
+                    plan.owned_paths
+                    == run.owned_paths
+                    == receipt.owned_paths
+                    == mission.authority.scope_paths
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan owned_paths 授权不一致")
+                if not (
+                    plan.declared_dirty_paths
+                    == run.declared_dirty_paths
+                    == receipt.declared_dirty_paths
+                    == routing.declared_dirty_paths
+                ):
+                    raise ContinuityStoreError(
+                        "MicrotaskPlan declared_dirty_paths 授权不一致"
+                    )
+                if (
+                    plan.run_id != receipt.run_id
+                    or run.run_id != receipt.run_id
+                    or run.work_id != receipt.work_id
+                    or run.executor_id != receipt.owner_id
+                    or run.adapter != receipt.adapter.value
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan ExecutionIntent/Run 身份不一致")
+                if (
+                    plan.baseline_git_head != run.git_head
+                    or plan.baseline_git_head != receipt.git_head
+                    or plan.source_worktree_path != run.worktree_path
+                    or plan.source_worktree_path != receipt.worktree_path
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan candidate 基线不一致")
+                manifest_paths = tuple(item.path for item in plan.manifest)
+                if manifest_paths != tuple(sorted(plan.declared_dirty_paths)):
+                    raise ContinuityStoreError(
+                        "MicrotaskPlan manifest 必须精确等于 declared_dirty_paths"
+                    )
+                row = self._event_by_key(conn, key)
+                if row is not None:
+                    existing = self._execution_microtask_from_event(row, plan.operation_id)
+                    if existing != plan:
+                        raise ContinuityStoreError("microtask operation_id 已绑定不同载荷")
+                    return existing, False
+                target = Path(plan.repository_path).resolve()
+                root = (self.workspace_root / ".auto-pm" / "microtasks").resolve()
+                try:
+                    target.relative_to(root)
+                except ValueError as error:
+                    raise ContinuityStoreError("MicrotaskPlan repository_path 越界") from error
+                self._append_event(
+                    conn,
+                    plan.operation_id,
+                    "EXECUTION_MICROTASK_PLANNED",
+                    plan.model_dump(mode="json"),
+                    key,
+                    plan.created_at.isoformat(),
+                    aggregate_type="execution_microtask_plan",
+                )
+            return plan, True
+        except sqlite3.Error as error:
+            raise ContinuityStoreError("ExecutionMicrotaskPlan 持久化失败") from error
 
     def get_orchestration_outcome(
         self, mission_id: str, idempotency_key: str

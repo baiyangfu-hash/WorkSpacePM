@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+
+_SECRET_ASSIGNMENT = re.compile(
+    r"\b(?:openai[\s_-]*api[\s_-]*key|api[\s_-]*key|access[\s_-]*token|"
+    r"refresh[\s_-]*token|token|password|passwd|pwd)\b\s*(?:=|:)\s*"
+    r"[\"']?[^\s,;\"']+",
+    re.IGNORECASE,
+)
+_BEARER_SECRET = re.compile(r"\bbearer\s+[^\s,;]+", re.IGNORECASE)
+_OPENAI_SECRET = re.compile(r"\bsk-(?:proj-|svcacct-)?[a-z0-9_-]{8,}\b", re.IGNORECASE)
 
 
 class ExecutionAdapterKind(StrEnum):
@@ -88,6 +100,7 @@ class ExecutionDispatchReceipt(BaseModel):
     branch_name: str = ""
     git_head: str = Field(pattern=r"^[0-9a-f]{40}$")
     owned_paths: tuple[str, ...]
+    declared_dirty_paths: tuple[str, ...]
 
     @field_validator("executor_id")
     @classmethod
@@ -111,6 +124,22 @@ class ExecutionDispatchReceipt(BaseModel):
             normalized.append(value)
         if not normalized:
             raise ValueError("owned_paths must not be empty")
+        return tuple(normalized)
+
+    @field_validator("declared_dirty_paths")
+    @classmethod
+    def _validate_declared_dirty_paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        normalized: list[str] = []
+        for raw in values:
+            if "\\" in raw:
+                raise ValueError("declared_dirty_paths must use forward slashes")
+            path = PurePosixPath(raw)
+            if path.is_absolute() or ".." in path.parts or str(path) in {"", "."}:
+                raise ValueError(f"invalid declared dirty path: {raw}")
+            value = path.as_posix()
+            if value in normalized:
+                raise ValueError(f"duplicate declared dirty path: {value}")
+            normalized.append(value)
         return tuple(normalized)
 
     @model_validator(mode="after")
@@ -148,10 +177,164 @@ class ExecutionIntent(BaseModel):
         return value
 
 
+class ExecutionMicrotaskFile(BaseModel):
+    """One regular baseline blob copied into a standalone microtask repository."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: str
+    git_mode: Literal["100644", "100755"]
+    blob_oid: str = Field(pattern=r"^[0-9a-f]{40}$")
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, value: str) -> str:
+        if "\\" in value:
+            raise ValueError("microtask paths must use forward slashes")
+        path = PurePosixPath(value)
+        if path.is_absolute() or ".." in path.parts or str(path) in {"", "."}:
+            raise ValueError("microtask path must be workspace-relative")
+        normalized = path.as_posix()
+        if normalized in {".codex-microtask.json", ".git"} or normalized.startswith(".git/"):
+            raise ValueError("microtask path is reserved")
+        return normalized
+
+
+class ExecutionMicrotaskPlan(BaseModel):
+    """Append-only reservation that must commit before repository materialization."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["execution-microtask-plan.v1"] = "execution-microtask-plan.v1"
+    operation_id: str = Field(min_length=1, max_length=255)
+    mission_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    approved_model: str = Field(min_length=1, max_length=255)
+    objective: str = Field(min_length=1, max_length=8192)
+    owned_paths: tuple[str, ...]
+    declared_dirty_paths: tuple[str, ...]
+    source_worktree_path: str = Field(min_length=1)
+    baseline_git_head: str = Field(pattern=r"^[0-9a-f]{40}$")
+    repository_path: str = Field(min_length=1)
+    manifest: tuple[ExecutionMicrotaskFile, ...]
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    marker_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: AwareDatetime
+
+    @field_validator("operation_id")
+    @classmethod
+    def _validate_operation_id(cls, value: str) -> str:
+        if value != value.strip() or any(not character.isprintable() for character in value):
+            raise ValueError("operation_id must be canonical printable text")
+        return value
+
+    @field_validator("approved_model")
+    @classmethod
+    def _validate_approved_model(cls, value: str) -> str:
+        if value != value.strip() or any(not character.isprintable() for character in value):
+            raise ValueError("approved_model must be canonical printable text")
+        return value
+
+    @field_validator("objective")
+    @classmethod
+    def _validate_secret_safe_objective(cls, value: str) -> str:
+        if value != value.strip() or any(not character.isprintable() for character in value):
+            raise ValueError("objective must be canonical printable text")
+        if any(
+            pattern.search(value)
+            for pattern in (_SECRET_ASSIGNMENT, _BEARER_SECRET, _OPENAI_SECRET)
+        ):
+            raise ValueError("objective contains a secret-shaped credential")
+        return value
+
+    @field_validator("owned_paths", "declared_dirty_paths")
+    @classmethod
+    def _validate_bound_paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        normalized: list[str] = []
+        for raw in values:
+            if "\\" in raw:
+                raise ValueError("bound paths must use forward slashes")
+            path = PurePosixPath(raw)
+            if path.is_absolute() or ".." in path.parts or str(path) in {"", "."}:
+                raise ValueError(f"invalid bound path: {raw}")
+            value = path.as_posix()
+            if value in normalized:
+                raise ValueError(f"duplicate bound path: {value}")
+            normalized.append(value)
+        if not normalized:
+            raise ValueError("bound paths must not be empty")
+        return tuple(normalized)
+
+    @field_validator("manifest")
+    @classmethod
+    def _validate_manifest(
+        cls, values: tuple[ExecutionMicrotaskFile, ...]
+    ) -> tuple[ExecutionMicrotaskFile, ...]:
+        paths = tuple(item.path for item in values)
+        if not paths or paths != tuple(sorted(paths)) or len(set(paths)) != len(paths):
+            raise ValueError("microtask manifest must be non-empty, unique, and sorted")
+        return values
+
+    @model_validator(mode="after")
+    def _validate_content_hashes(self) -> Self:
+        manifest = [item.model_dump(mode="json") for item in self.manifest]
+        if self.manifest_sha256 != self._hash(manifest):
+            raise ValueError("manifest_sha256 must bind the exact canonical manifest")
+        request = {
+            "operation_id": self.operation_id,
+            "mission_id": self.mission_id,
+            "run_id": self.run_id,
+            "approved_model": self.approved_model,
+            "objective": self.objective,
+            "owned_paths": list(self.owned_paths),
+            "declared_dirty_paths": list(self.declared_dirty_paths),
+            "source_worktree_path": self.source_worktree_path,
+            "baseline_git_head": self.baseline_git_head,
+            "repository_path": self.repository_path,
+            "manifest": manifest,
+            "manifest_sha256": self.manifest_sha256,
+        }
+        if self.request_sha256 != self._hash(request):
+            raise ValueError("request_sha256 must bind the exact microtask request")
+        marker = {
+            "schema_version": "codex-microtask.v1",
+            **request,
+            "request_sha256": self.request_sha256,
+        }
+        if self.marker_sha256 != self._hash(marker):
+            raise ValueError("marker_sha256 must bind the exact marker")
+        return self
+
+    @staticmethod
+    def _hash(payload: object) -> str:
+        canonical = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+
+class ExecutionMicrotaskMaterialization(BaseModel):
+    """Secret-free proof of one committed, unstarted standalone microtask repository."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["execution-microtask-materialization.v1"] = (
+        "execution-microtask-materialization.v1"
+    )
+    status: Literal["PREPARED"] = "PREPARED"
+    plan: ExecutionMicrotaskPlan
+    commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+
+
 __all__ = [
     "ExecutionAdapterKind",
     "ExecutionDispatchReceipt",
     "ExecutionIntent",
+    "ExecutionMicrotaskFile",
+    "ExecutionMicrotaskMaterialization",
+    "ExecutionMicrotaskPlan",
     "ExecutionRole",
     "ExecutionStartEvidence",
     "WorktreeMode",

@@ -158,7 +158,11 @@ def _write_decision(root: Path, now: datetime) -> None:
     )
 
 
-def _ready(root: Path) -> tuple[MissionService, WorkRegistryService, ExecutionDispatchService]:
+def _ready(
+    root: Path,
+    *,
+    routing: InternalRoutingPolicy | None = None,
+) -> tuple[MissionService, WorkRegistryService, ExecutionDispatchService]:
     _workspace(root)
     now = datetime.now(UTC)
     _write_decision(root, now)
@@ -177,13 +181,16 @@ def _ready(root: Path) -> tuple[MissionService, WorkRegistryService, ExecutionDi
     works.authorize(created.work_id, DECISION_ID, "work-authorize-1")
     missions = MissionService(root)
     missions.initialize("test")
+    authority = _authority(now)
+    if routing is not None:
+        authority = authority.model_copy(update={"routing": routing})
     draft = missions.create(
         mission_id="MISSION-A5-001",
         subject_project_id=PROJECT_ID,
         title="A5 adapter handoff",
         objective="Prepare a safe provider-neutral execution package.",
         acceptance_criteria=["Codex can hand off the same Run to Trae."],
-        authority=_authority(now),
+        authority=authority,
         created_by="Codex PM",
         idempotency_key="mission-create-1",
         root_work_id=created.work_id,
@@ -516,6 +523,8 @@ def test_approved_dispatch_enforces_model_isolation_and_exact_declared_dirty_pat
     assert run.state.value == "READY"
     assert run.declared_dirty_paths == (PROJECT_PATH,)
     assert "approved-secret" not in prepared.intent.model_dump_json()
+    assert ContinuityStore(tmp_path).get_execution_microtask_plan("OP-E08A-001") is None
+    assert not (tmp_path / ".auto-pm" / "microtasks").exists()
 
 
 def test_lease_token_is_excluded_from_dispatch_fingerprint_and_persistence(

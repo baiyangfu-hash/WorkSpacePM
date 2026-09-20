@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -11,6 +13,9 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ExecutionDispatchReceipt,
     ExecutionIntent,
+    ExecutionMicrotaskFile,
+    ExecutionMicrotaskMaterialization,
+    ExecutionMicrotaskPlan,
     ExecutionRole,
     ExecutionStartEvidence,
     WorktreeMode,
@@ -33,6 +38,7 @@ def _receipt(**overrides: object) -> ExecutionDispatchReceipt:
         "branch_name": "codex/run-sw008-a5-001",
         "git_head": "a" * 40,
         "owned_paths": ("README.md",),
+        "declared_dirty_paths": ("README.md",),
     }
     values.update(overrides)
     return ExecutionDispatchReceipt.model_validate(values)
@@ -96,6 +102,98 @@ def test_execution_intent_is_immutable_and_explicitly_unstarted() -> None:
     )
     with pytest.raises(ValidationError, match="frozen"):
         intent.operation_id = "another-operation"
+
+
+def test_microtask_plan_is_canonical_append_only_and_secret_free() -> None:
+    entry = ExecutionMicrotaskFile(
+        path="auto_pm/a.py",
+        git_mode="100644",
+        blob_oid="a" * 40,
+        content_sha256="b" * 64,
+    )
+    manifest = [entry.model_dump(mode="json")]
+    manifest_sha256 = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    request = {
+        "operation_id": "OP-E08B-001",
+        "mission_id": "MISSION-E08B-001",
+        "run_id": "RUN-E08B-001",
+        "approved_model": "agent-a",
+        "objective": "Prepare the approved standalone microtask repository.",
+        "owned_paths": ["auto_pm/a.py"],
+        "declared_dirty_paths": ["auto_pm/a.py"],
+        "source_worktree_path": "C:/workspace/candidate",
+        "baseline_git_head": "c" * 40,
+        "repository_path": "C:/workspace/.auto-pm/microtasks/abc",
+        "manifest": manifest,
+        "manifest_sha256": manifest_sha256,
+    }
+    request_sha256 = hashlib.sha256(
+        json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    marker = {
+        "schema_version": "codex-microtask.v1",
+        **request,
+        "request_sha256": request_sha256,
+    }
+    marker_sha256 = hashlib.sha256(
+        json.dumps(marker, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    plan = ExecutionMicrotaskPlan(
+        operation_id="OP-E08B-001",
+        mission_id="MISSION-E08B-001",
+        run_id="RUN-E08B-001",
+        approved_model="agent-a",
+        objective="Prepare the approved standalone microtask repository.",
+        owned_paths=("auto_pm/a.py",),
+        declared_dirty_paths=("auto_pm/a.py",),
+        source_worktree_path="C:/workspace/candidate",
+        baseline_git_head="c" * 40,
+        repository_path="C:/workspace/.auto-pm/microtasks/abc",
+        manifest=(entry,),
+        manifest_sha256=manifest_sha256,
+        marker_sha256=marker_sha256,
+        request_sha256=request_sha256,
+        created_at=datetime.now(UTC),
+    )
+    result = ExecutionMicrotaskMaterialization(plan=plan, commit="1" * 40)
+
+    assert result.status == "PREPARED"
+    assert ExecutionMicrotaskPlan.model_validate_json(plan.model_dump_json()) == plan
+    assert "lease_token" not in result.model_dump(mode="json")
+    with pytest.raises(ValidationError, match="reserved"):
+        ExecutionMicrotaskFile.model_validate(
+            {**entry.model_dump(), "path": ".codex-microtask.json"}
+        )
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        ExecutionMicrotaskPlan.model_validate(
+            {**plan.model_dump(mode="json"), "lease_token": "must-not-leak"}
+        )
+    for field in ("approved_model", "objective", "owned_paths", "declared_dirty_paths"):
+        missing = plan.model_dump(mode="json")
+        missing.pop(field)
+        with pytest.raises(ValidationError, match="Field required"):
+            ExecutionMicrotaskPlan.model_validate(missing)
+    for field, value in (
+        ("approved_model", "agent-b"),
+        ("objective", "Prepare a different microtask."),
+        ("owned_paths", ["auto_pm/other.py"]),
+        ("declared_dirty_paths", ["auto_pm/other.py"]),
+    ):
+        with pytest.raises(ValidationError, match="request_sha256"):
+            ExecutionMicrotaskPlan.model_validate(
+                {**plan.model_dump(mode="json"), field: value}
+            )
+    for secret in (
+        "Prepare with Authorization: Bearer secret-sentinel.",
+        "Prepare with password=hunter2.",
+        "Prepare with OPENAI_API_KEY=sk-proj-secretvalue.",
+    ):
+        with pytest.raises(ValidationError, match="secret-shaped"):
+            ExecutionMicrotaskPlan.model_validate(
+                {**plan.model_dump(mode="json"), "objective": secret}
+            )
 
 
 def test_start_evidence_requires_canonical_executor_control_facts() -> None:
