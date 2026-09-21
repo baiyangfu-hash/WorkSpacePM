@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -37,8 +38,12 @@ class WorkspaceContextService:
         workspace_root: str,
         registry_path: str | Path | None = None,
         package_file_provider: Callable[[], str | Path | None] | None = None,
+        execution_root: str | Path | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root).resolve()
+        self._execution_root = Path(execution_root or workspace_root).resolve()
+        if not self._execution_root.is_dir():
+            raise WorkspaceContextError("execution_root 不存在或不是目录")
         selected = Path(registry_path) if registry_path is not None else self._DEFAULT_REGISTRY
         self._registry_path = (
             selected.resolve() if selected.is_absolute() else (self._workspace_root / selected).resolve()
@@ -84,6 +89,7 @@ class WorkspaceContextService:
             runtime_fallback_reason,
             loaded_package_file,
         ) = self._runtime_identity(runtime_root, configured_release_id)
+        candidate_commit = self._candidate_commit() if self._execution_root != self._workspace_root else ""
         conflicts = self._runtime_conflicts(
             runtime_root,
             configured_release_id,
@@ -111,6 +117,9 @@ class WorkspaceContextService:
         )
         return WorkspaceContext(
             workspace_root=str(self._workspace_root),
+            control_root=str(self._workspace_root),
+            execution_root=str(self._execution_root),
+            candidate_commit=candidate_commit,
             resolution_source=source,
             subject_project_id=project.project_id,
             subject=ContextProject(
@@ -277,11 +286,13 @@ class WorkspaceContextService:
         if not package_file.is_file():
             return "", "", "loaded_package_file_unavailable", None
         try:
-            package_file.relative_to(self._workspace_root)
+            package_file.relative_to(self._execution_root)
         except ValueError:
             return "", "", "loaded_package_outside_workspace", None
 
-        load_path = self._relative(package_file)
+        load_path = self._execution_relative(package_file)
+        if self._execution_root != self._workspace_root:
+            return configured_release_id, load_path, "", package_file
         releases_root = (runtime_root / "releases").resolve()
         try:
             release_relative = package_file.relative_to(releases_root)
@@ -322,10 +333,41 @@ class WorkspaceContextService:
         for path in paths:
             if path is not None and path not in unique:
                 unique.append(path)
-        return [
-            ContextEvidence(path=self._relative(path), sha256=self._sha256(path))
-            for path in unique
-        ]
+        evidence: list[ContextEvidence] = []
+        for path in unique:
+            try:
+                display_path = self._relative(path)
+            except WorkspaceContextError:
+                try:
+                    display_path = "execution_root/" + path.resolve().relative_to(
+                        self._execution_root
+                    ).as_posix()
+                except ValueError as error:
+                    raise WorkspaceContextError("运行时证据不属于 control_root 或 execution_root") from error
+            evidence.append(ContextEvidence(path=display_path, sha256=self._sha256(path)))
+        return evidence
+
+    def _execution_relative(self, path: Path) -> str:
+        try:
+            return path.resolve().relative_to(self._execution_root).as_posix()
+        except ValueError:
+            return str(path.resolve())
+
+    def _candidate_commit(self) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(self._execution_root), "rev-parse", "--verify", "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise WorkspaceContextError("execution_root 不能证明 Git candidate commit")
+        value = result.stdout.strip()
+        if len(value) != 40 or any(character not in "0123456789abcdef" for character in value):
+            raise WorkspaceContextError("execution_root candidate commit 无效")
+        return value
 
     def _anchor_file(self, project_path: Path) -> Path:
         for name in (".copier-answers.yml", ".plc.json"):

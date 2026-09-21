@@ -59,23 +59,29 @@ class PmFacadeService:
         self,
         workspace_root: str | Path,
         *,
+        execution_root: str | Path | None = None,
         store: ContinuityStore | None = None,
         change_service: ChangeService | None = None,
         decision_service: DecisionService | None = None,
         execution_service: ExecutionDispatchService | None = None,
         local_orchestrator: LocalExecutionOrchestrator | None = None,
     ) -> None:
-        self._workspace_root = Path(workspace_root)
+        self._workspace_root = Path(workspace_root).resolve()
+        self._execution_root = Path(execution_root or workspace_root).resolve()
         self._store = store or ContinuityStore(self._workspace_root)
         self._missions = MissionService(self._workspace_root, store=self._store)
         self._works = WorkRegistryService(self._workspace_root, store=self._store)
         self._changes = change_service or ChangeService(str(self._workspace_root))
         self._decisions = decision_service or DecisionService(self._workspace_root)
         self._execution = execution_service or ExecutionDispatchService(
-            self._workspace_root, store=self._store
+            self._workspace_root,
+            execution_root=self._execution_root,
+            store=self._store,
         )
         self._local_orchestrator = local_orchestrator or LocalExecutionOrchestrator(
-            self._workspace_root, store=self._store
+            self._workspace_root,
+            execution_root=self._execution_root,
+            store=self._store,
         )
 
     def create_planning_draft(self, intent: PmIntent) -> PlanningDraft:

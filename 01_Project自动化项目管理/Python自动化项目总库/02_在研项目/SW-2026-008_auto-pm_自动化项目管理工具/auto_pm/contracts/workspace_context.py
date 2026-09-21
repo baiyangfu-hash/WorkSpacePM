@@ -58,6 +58,9 @@ class WorkspaceContext(BaseModel):
 
     schema_version: Literal["workspace-context.v2"] = "workspace-context.v2"
     workspace_root: str
+    control_root: str = ""
+    execution_root: str = ""
+    candidate_commit: str = ""
     resolution_source: Literal["explicit", "directory"]
     subject_project_id: str
     subject: ContextProject

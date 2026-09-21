@@ -65,6 +65,10 @@ class AppContext:
                     break
                 curr = parent
         self.workspace_root: str = workspace_root or os.getcwd()
+        # PM cold-start commands may execute from a linked candidate while every
+        # governed record remains in the primary control root.  The default keeps
+        # the historical single-root contract intact for all other commands.
+        self.control_root: str = self.workspace_root
 
     @property
     def templates_dir(self) -> str:

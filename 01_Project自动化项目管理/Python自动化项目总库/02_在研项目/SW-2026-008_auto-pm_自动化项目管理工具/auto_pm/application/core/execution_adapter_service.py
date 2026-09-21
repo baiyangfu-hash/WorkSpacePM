@@ -117,17 +117,23 @@ class ExecutionDispatchService:
         self,
         workspace_root: str | Path,
         *,
+        execution_root: str | Path | None = None,
         store: ContinuityStore | None = None,
         worktrees: WorktreePolicyService | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._root = Path(workspace_root).resolve()
+        self._execution_root = Path(execution_root or workspace_root).resolve()
         self._store = store or ContinuityStore(self._root)
         self._now = now or (lambda: datetime.now(UTC))
         self._execution = ContinuityExecutionService(self._root, self._store, self._now)
-        self._worktrees = worktrees or WorktreePolicyService(self._root)
+        self._worktrees = worktrees or WorktreePolicyService(
+            self._execution_root,
+            control_root=self._root,
+            reuse_isolated_root=self._execution_root != self._root,
+        )
         self._adapters = ExecutionAdapterRegistry()
-        self._microtasks = ExecutionMicrotaskService(self._root, store=self._store)
+        self._microtasks = ExecutionMicrotaskService(self._execution_root, store=self._store)
 
     def prepare_microtask(self, operation_id: str) -> ExecutionMicrotaskMaterialization:
         """Materialize an approved READY Run without starting a provider or model."""

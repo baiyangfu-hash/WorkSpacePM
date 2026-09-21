@@ -13,6 +13,7 @@ from auto_pm.infrastructure.control_root_guard import (
     clean_git_environment,
     require_control_root,
     require_git_worktree_root,
+    require_governed_worktree,
     require_safe_workspace_path,
 )
 
@@ -37,8 +38,18 @@ class WorktreePolicyService:
 
     _BRANCH_PREFIX = "codex/"
 
-    def __init__(self, workspace_root: str | Path) -> None:
+    def __init__(
+        self,
+        workspace_root: str | Path,
+        *,
+        control_root: str | Path | None = None,
+        reuse_isolated_root: bool = False,
+    ) -> None:
         self._root = Path(workspace_root).resolve()
+        self._control_root = Path(control_root or workspace_root).resolve()
+        self._reuse_isolated_root = reuse_isolated_root
+        if reuse_isolated_root and self._root == self._control_root:
+            raise WorktreePolicyError("复用隔离执行根要求 execution_root 与 control_root 不同")
 
     def select(
         self,
@@ -57,6 +68,17 @@ class WorktreePolicyService:
         self._require_root_git_worktree()
         git_head = self._git_output("rev-parse", "HEAD")
         dirty_paths = self._dirty_paths()
+        if self._reuse_isolated_root:
+            if dirty_paths:
+                raise WorktreePolicyError("既有隔离 execution_root 存在未声明改动")
+            self.require_control_root()
+            return WorktreePlan(
+                worktree_mode=WorktreeMode.ISOLATED,
+                worktree_path=self._root,
+                git_head=git_head,
+                branch_name=self.branch_name_for(self._root),
+                origin_dirty_paths=(),
+            )
         if not dirty_paths and not force_isolation:
             return WorktreePlan(
                 worktree_mode=WorktreeMode.CURRENT,
@@ -85,6 +107,14 @@ class WorktreePolicyService:
         """Create an authorized isolated worktree without cleaning or reusing anything."""
 
         self.require_control_root()
+        if self._reuse_isolated_root and plan.worktree_path == self._root:
+            if self._git_output("rev-parse", "HEAD") != plan.git_head:
+                raise WorktreePolicyError("既有隔离 execution_root Git baseline drift")
+            if self._dirty_paths():
+                raise WorktreePolicyError("既有隔离 execution_root 已变脏")
+            if self.branch_name_for(self._root) != plan.branch_name:
+                raise WorktreePolicyError("既有隔离 execution_root 分支漂移")
+            return plan
         if plan.worktree_mode is WorktreeMode.CURRENT:
             if plan.worktree_path != self._root:
                 raise WorktreePolicyError("CURRENT worktree plan 与控制工作树不一致")
@@ -135,7 +165,14 @@ class WorktreePolicyService:
         """Reject linked worktrees before any control-plane mutation is initialized."""
 
         try:
-            require_control_root(self._root)
+            if self._reuse_isolated_root:
+                require_governed_worktree(
+                    self._control_root,
+                    self._root,
+                    allow_external_linked=True,
+                )
+            else:
+                require_control_root(self._root)
         except ControlRootGuardError as error:
             raise WorktreePolicyError(str(error)) from error
 

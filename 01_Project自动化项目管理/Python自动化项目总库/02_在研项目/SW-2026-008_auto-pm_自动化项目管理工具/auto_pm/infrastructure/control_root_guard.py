@@ -126,6 +126,7 @@ def require_governed_worktree(
     worktree_path: str | Path,
     *,
     expected_head: str | None = None,
+    allow_external_linked: bool = False,
 ) -> Path:
     """Require the primary root or one governed linked worktree from the same repository."""
 
@@ -133,14 +134,19 @@ def require_governed_worktree(
     raw = Path(worktree_path)
     if not raw.is_absolute() or ".." in raw.parts:
         raise ControlRootGuardError("Run worktree_path 必须是无 traversal 的绝对路径")
-    candidate = require_safe_workspace_path(root, raw, label="Run worktree")
+    try:
+        candidate = require_safe_workspace_path(root, raw, label="Run worktree")
+    except ControlRootGuardError:
+        if not allow_external_linked:
+            raise
+        candidate = raw.resolve(strict=True)
     if not candidate.is_dir():
         raise ControlRootGuardError("Run worktree 不存在或不是目录")
 
     root_key = _canonical_key(root)
     candidate_key = _canonical_key(candidate)
     is_primary = candidate_key == root_key
-    if not is_primary:
+    if not is_primary and not allow_external_linked:
         try:
             relative = candidate.relative_to(root)
         except ValueError as error:  # pragma: no cover - safe-path guard already rejects this
@@ -196,7 +202,12 @@ def require_governed_worktree(
     if expected_head is not None and head != expected_head:
         raise ControlRootGuardError("Run git_head 与受管 worktree 当前 HEAD 不一致")
 
-    final_candidate = require_safe_workspace_path(root, raw, label="Run worktree")
+    try:
+        final_candidate = require_safe_workspace_path(root, raw, label="Run worktree")
+    except ControlRootGuardError:
+        if not allow_external_linked:
+            raise
+        final_candidate = raw.resolve(strict=True)
     if _canonical_key(final_candidate) != candidate_key or is_link_like(final_candidate / ".git"):
         raise ControlRootGuardError("Run worktree 在验证期间发生路径或 reparse 漂移")
     return final_candidate

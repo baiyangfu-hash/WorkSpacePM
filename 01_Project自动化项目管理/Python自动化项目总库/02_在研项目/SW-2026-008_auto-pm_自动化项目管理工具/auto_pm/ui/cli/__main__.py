@@ -86,8 +86,14 @@ console = Console()
     default=None,
     help="工作空间根目录（默认: 当前目录）",
 )
+@click.option(
+    "--control-root",
+    envvar="AUTO_PM_CONTROL_ROOT",
+    default=None,
+    help="PM 控制面根目录（默认与 --workspace 相同；候选执行时必须显式指定）",
+)
 @click.pass_context
-def cli(ctx: click.Context, workspace: str | None) -> None:
+def cli(ctx: click.Context, workspace: str | None, control_root: str | None) -> None:
     """auto-pm - 自动化项目管理工具
 
     统一 CLI 管理 PLC/Python 多技术栈项目。
@@ -96,6 +102,7 @@ def cli(ctx: click.Context, workspace: str | None) -> None:
     app_ctx: AppContext = ctx.obj
     if workspace:
         app_ctx.workspace_root = os.path.abspath(workspace)
+    app_ctx.control_root = os.path.abspath(control_root) if control_root else app_ctx.workspace_root
 
 
 # 挂载子命令组

@@ -26,13 +26,20 @@ def pm_group() -> None:
 
 def _facade(ctx: click.Context) -> PmFacadeService:
     app_ctx: AppContext = ctx.find_root().obj
-    return PmFacadeService(app_ctx.workspace_root)
+    return PmFacadeService(
+        app_ctx.control_root,
+        execution_root=app_ctx.workspace_root,
+    )
+
+
+def _require_control_root(ctx: click.Context) -> None:
+    app_ctx: AppContext = ctx.find_root().obj
+    WorktreePolicyService(app_ctx.control_root).require_control_root()
 
 
 def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: str = "") -> None:
     try:
-        app_ctx: AppContext = ctx.find_root().obj
-        WorktreePolicyService(app_ctx.workspace_root).require_control_root()
+        _require_control_root(ctx)
         facade = _facade(ctx)
         if action == "plan":
             card = facade.plan(mission_id)
@@ -84,9 +91,8 @@ def _planning_scope_card(
         raise click.ClickException(
             "新需求 plan 缺少必填参数: " + ", ".join(missing)
         )
-    app_ctx: AppContext = ctx.find_root().obj
     try:
-        WorktreePolicyService(app_ctx.workspace_root).require_control_root()
+        _require_control_root(ctx)
         intent = PmIntent(
             subject_project_id=project_id,
             request_id=request_id,
@@ -113,7 +119,7 @@ def _planning_scope_card(
 
 def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approver: str) -> None:
     app_ctx: AppContext = ctx.find_root().obj
-    changes = ChangeService(str(app_ctx.workspace_root))
+    changes = ChangeService(str(app_ctx.control_root))
     change = changes.get_change_request(card.change_id, project_id=card.subject_project_id)
     if change is None:
         raise click.ClickException("PlanningScopeCard 绑定的 CHG 不存在")
@@ -470,7 +476,10 @@ def resume_pm(
     if control_pid:
         raise click.ClickException("--control-pid 仅适用于 --legacy-v1；v2 控制面来自 Registry")
     try:
-        payload = PmFacadeService(app_ctx.workspace_root).resume(
+        payload = PmFacadeService(
+            app_ctx.control_root,
+            execution_root=app_ctx.workspace_root,
+        ).resume(
             project_id=project_id,
             invocation_path=start_path,
             work_id=work_id,
@@ -499,7 +508,10 @@ def resume_pm(
 def _emit_context(ctx: click.Context, project_id: str, start_path: str | None) -> None:
     app_ctx: AppContext = ctx.find_root().obj
     try:
-        payload = WorkspaceContextService(app_ctx.workspace_root).resolve(
+        payload = WorkspaceContextService(
+            app_ctx.control_root,
+            execution_root=app_ctx.workspace_root,
+        ).resolve(
             project_id=project_id,
             start_path=start_path,
         )

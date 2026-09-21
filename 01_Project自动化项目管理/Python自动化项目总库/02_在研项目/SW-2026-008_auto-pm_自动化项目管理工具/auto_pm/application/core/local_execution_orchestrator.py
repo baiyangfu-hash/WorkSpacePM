@@ -54,17 +54,19 @@ class LocalExecutionOrchestrator:
         self,
         workspace_root: str | Path,
         *,
+        execution_root: str | Path | None = None,
         store: ContinuityStore | None = None,
         executor: LocalCodexExecutor | None = None,
         supervisor: ExecutionSupervisorService | None = None,
         projection: MicrotaskProjectionService | None = None,
     ) -> None:
         self._root = Path(workspace_root).resolve()
+        self._execution_root = Path(execution_root or workspace_root).resolve()
         self._store = store or ContinuityStore(self._root)
         self._executor = executor or LocalCodexExecutor()
         self._supervisor = supervisor or ExecutionSupervisorService(self._root)
         self._projection = projection or MicrotaskProjectionService(
-            self._root, store=self._store
+            self._execution_root, store=self._store
         )
 
     def execute(

@@ -236,6 +236,37 @@ def test_runtime_identity_fails_closed_when_loaded_package_file_is_unavailable(t
     assert result.read_set[-1].path == "runtime/active_release.json"
 
 
+def test_candidate_execution_root_keeps_canonical_control_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _project(tmp_path, "SW-2026-008")
+    runtime = tmp_path / "runtime"
+    _runtime_package(runtime, "1.2.4-configured")
+    (runtime / "active_release.json").write_text(
+        json.dumps({"release_id": "1.2.4-configured"}), encoding="utf-8"
+    )
+    _registry(tmp_path, _mapping("SW-2026-008", runtime_root="runtime"))
+    candidate_package = tmp_path / "candidate" / "auto_pm" / "__init__.py"
+    candidate_package.parent.mkdir(parents=True)
+    candidate_package.write_text("# candidate\n", encoding="utf-8")
+    service = WorkspaceContextService(
+        str(tmp_path),
+        execution_root=candidate_package.parents[1],
+        package_file_provider=lambda: candidate_package,
+    )
+    monkeypatch.setattr(service, "_candidate_commit", lambda: "a" * 40)
+
+    result = service.resolve(start_path=project)
+
+    assert result.control_root == str(tmp_path.resolve())
+    assert result.execution_root == str(candidate_package.parents[1].resolve())
+    assert result.candidate_commit == "a" * 40
+    assert result.runtime_load_path == "auto_pm/__init__.py"
+    assert result.runtime_fallback_reason == ""
+    assert result.conflicts == ()
+    assert result.read_set[-1].path == "candidate/auto_pm/__init__.py"
+
+
 def test_duplicate_registry_identity_fails_closed(tmp_path: Path) -> None:
     project = _project(tmp_path, "SW-2026-008")
     _registry(tmp_path, _mapping("SW-2026-008"), _mapping("SW-2026-008"))
