@@ -76,7 +76,7 @@ class WorktreePolicyService:
                 worktree_mode=WorktreeMode.ISOLATED,
                 worktree_path=self._root,
                 git_head=git_head,
-                branch_name=self.branch_name_for(self._root),
+                branch_name=self._current_branch(),
                 origin_dirty_paths=(),
             )
         if not dirty_paths and not force_isolation:
@@ -112,7 +112,7 @@ class WorktreePolicyService:
                 raise WorktreePolicyError("既有隔离 execution_root Git baseline drift")
             if self._dirty_paths():
                 raise WorktreePolicyError("既有隔离 execution_root 已变脏")
-            if self.branch_name_for(self._root) != plan.branch_name:
+            if self._current_branch() != plan.branch_name:
                 raise WorktreePolicyError("既有隔离 execution_root 分支漂移")
             return plan
         if plan.worktree_mode is WorktreeMode.CURRENT:
@@ -159,6 +159,12 @@ class WorktreePolicyService:
         branch_name = self._git_output("branch", "--show-current", cwd=path)
         if not branch_name:
             raise WorktreePolicyError("隔离工作树必须位于已命名分支，拒绝 detached HEAD")
+        return branch_name
+
+    def _current_branch(self) -> str:
+        branch_name = self._git_output("branch", "--show-current")
+        if not branch_name:
+            raise WorktreePolicyError("既有隔离 execution_root 必须位于已命名分支")
         return branch_name
 
     def require_control_root(self) -> None:
