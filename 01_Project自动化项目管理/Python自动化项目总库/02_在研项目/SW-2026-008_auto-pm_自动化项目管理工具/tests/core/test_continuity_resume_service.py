@@ -33,6 +33,7 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionCapability,
     RuntimeDecisionOutcome,
 )
+from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -115,6 +116,14 @@ def _work(root: Path, work_id: str) -> None:
     )
 
 
+def _accept_read_only_work(root: Path, work_id: str) -> None:
+    _work(root, work_id)
+    service = WorkRegistryService(root, now=lambda: "2026-09-09T12:00:00+00:00")
+    service.transition(work_id, WorkState.IN_PROGRESS, f"start-{work_id}")
+    service.transition(work_id, WorkState.VERIFYING, f"verify-{work_id}")
+    service.transition(work_id, WorkState.ACCEPTED, f"accept-{work_id}")
+
+
 def _authorized_target_work(root: Path, work_id: str) -> None:
     service = WorkRegistryService(root, now=lambda: "2026-09-09T12:00:00+00:00")
     service.initialize("test")
@@ -170,6 +179,17 @@ def _run(
         lease_token=lease_token,
         lease_seconds=900,
         idempotency_key="create-run",
+    )
+    execution.record_start_evidence(
+        run_id=run_id,
+        owner_id="agent-a",
+        lease_token=lease_token,
+        evidence=ExecutionStartEvidence(
+            process_id=1001,
+            session_id=f"session-{run_id}",
+            started_at=now,
+        ),
+        idempotency_key=f"start-evidence-{run_id}",
     )
 
 
@@ -454,6 +474,17 @@ def test_resume_uses_recovery_run_after_expired_target_is_settled(tmp_path: Path
         lease_seconds=900,
         idempotency_key="create-recovery-run",
     )
+    execution.record_start_evidence(
+        run_id="RUN-RECOVERY",
+        owner_id="agent-b",
+        lease_token="recovery-secret",
+        evidence=ExecutionStartEvidence(
+            process_id=1002,
+            session_id="session-RUN-RECOVERY",
+            started_at=now,
+        ),
+        idempotency_key="start-evidence-recovery-run",
+    )
     execution.settle_expired_run(
         target_run_id="RUN-001",
         recovery_run_id="RUN-RECOVERY",
@@ -503,6 +534,17 @@ def test_multiple_active_works_fail_closed_without_guessing(tmp_path: Path) -> N
     assert result.run_candidates == ()
     assert result.conflicts == ("MULTIPLE_ACTIVE_WORKS",)
     assert result.next_legal_action == ""
+
+
+def test_accepted_works_are_terminal_for_resume_selection(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _accept_read_only_work(tmp_path, "WORK-001")
+    _accept_read_only_work(tmp_path, "WORK-002")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.work is None
+    assert result.conflicts == ()
 
 
 def test_explicit_work_disambiguates_but_cross_project_fails(tmp_path: Path) -> None:

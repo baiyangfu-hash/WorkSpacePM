@@ -2191,6 +2191,229 @@ class ContinuityStore:
         with self._read_connection() as conn:
             return self._get_closure_preparation(conn, closure_id)
 
+    def closure_completion_context(
+        self,
+        closure_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Resolve exact replay or prepared input in one stable execution transaction."""
+
+        closure_id = self._validated_run_text(closure_id, label="closure_id")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                return {
+                    "completion": self._closure_completion_from_event(
+                        conn,
+                        existing,
+                        closure_id=closure_id,
+                    )
+                }
+            return {"preparation": self._get_closure_preparation(conn, closure_id)}
+
+    def finalize_closure(
+        self,
+        closure_id: str,
+        projection_receipt: dict[str, Any],
+        idempotency_key: str,
+        now: str,
+    ) -> dict[str, Any]:
+        """Atomically close the accepted lineage after a successful required projection."""
+
+        closure_id = self._validated_run_text(closure_id, label="closure_id")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        event_time = self._aware_timestamp(now, "closure finalize").isoformat()
+        expected_projection_keys = {
+            "closure_id",
+            "change_id",
+            "state",
+            "pending_reason",
+        }
+        if (
+            not isinstance(projection_receipt, dict)
+            or set(projection_receipt) != expected_projection_keys
+            or projection_receipt.get("closure_id") != closure_id
+            or projection_receipt.get("state") != "PROJECTED"
+            or projection_receipt.get("pending_reason") is not None
+        ):
+            raise ContinuityStoreError("C08 仅接受当前 Closure 的成功必要投影回执")
+
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                return self._closure_completion_from_event(
+                    conn,
+                    existing,
+                    closure_id=closure_id,
+                    projection_receipt=projection_receipt,
+                )
+
+            preparation = self._get_closure_preparation(conn, closure_id)
+            closure = preparation["closure"]
+            step = preparation["step"]
+            outbox = preparation["outbox"]
+            if projection_receipt.get("change_id") != closure["change_id"]:
+                raise ContinuityStoreError("投影回执 change_id 与 Closure 授权链不一致")
+
+            run = self._get_run(conn, str(closure["run_id"]))
+            work = self._get_work(conn, str(closure["work_id"]))
+            mission = self._get_mission(conn, str(closure["mission_id"]))
+            if (
+                run.work_id != work.work_id
+                or mission.root_work_id != work.work_id
+                or work.subject_project_id != mission.subject_project_id
+                or work.authorization_ref != mission.authority.decision_id
+                or mission.authority.change_id != closure["change_id"]
+                or mission.authority.decision_id != closure["decision_id"]
+            ):
+                raise ContinuityStoreError("Closure 的 Run/Work/Mission 授权链已漂移")
+            if run.state is not RunState.VERIFYING:
+                raise ContinuityStoreError("C08 要求 Run 仍处于 VERIFYING")
+            if work.state is not WorkState.IN_PROGRESS:
+                raise ContinuityStoreError("C08 要求 Work 仍处于 IN_PROGRESS")
+            if mission.state is not MissionState.ACCEPTED:
+                raise ContinuityStoreError("C08 要求 Mission 已 ACCEPTED 且尚未关闭")
+
+            latest_run = conn.execute(
+                """SELECT run_id FROM run_items WHERE work_id=?
+                ORDER BY updated_at DESC, run_id DESC LIMIT 1""",
+                (work.work_id,),
+            ).fetchone()
+            latest_checkpoint = conn.execute(
+                """SELECT checkpoint_id FROM checkpoints WHERE run_id=?
+                ORDER BY sequence DESC LIMIT 1""",
+                (run.run_id,),
+            ).fetchone()
+            if latest_run is None or str(latest_run["run_id"]) != run.run_id:
+                raise ContinuityStoreError("Closure Run 已不是 Work 的最新 Run")
+            if (
+                latest_checkpoint is None
+                or str(latest_checkpoint["checkpoint_id"]) != closure["checkpoint_id"]
+            ):
+                raise ContinuityStoreError("Closure Checkpoint 已不是 Run 的最新证据")
+
+            run_result_version = run.version + 1
+            run_cursor = conn.execute(
+                """UPDATE run_items SET state='SUCCEEDED', version=version+1, updated_at=?
+                WHERE run_id=? AND state='VERIFYING' AND version=?""",
+                (event_time, run.run_id, run.version),
+            )
+            if run_cursor.rowcount != 1:
+                raise ContinuityStoreError("Run 收口出现版本冲突")
+            self._append_event(
+                conn,
+                run.run_id,
+                "RUN_TRANSITIONED",
+                {
+                    "schema_version": "run-transition.v2",
+                    "expected_version": run.version,
+                    "new_state": RunState.SUCCEEDED.value,
+                    "result_version": run_result_version,
+                },
+                f"{idempotency_key}:run-succeeded",
+                event_time,
+                aggregate_type="run",
+            )
+
+            work_version = work.version
+            for destination, suffix in (
+                (WorkState.VERIFYING, "work-verifying"),
+                (WorkState.ACCEPTED, "work-accepted"),
+                (WorkState.CLOSED, "work-closed"),
+            ):
+                cursor = conn.execute(
+                    """UPDATE work_items SET state=?, version=version+1, updated_at=?
+                    WHERE work_id=? AND version=?""",
+                    (destination.value, event_time, work.work_id, work_version),
+                )
+                if cursor.rowcount != 1:
+                    raise ContinuityStoreError("Work 收口出现版本冲突")
+                work_version += 1
+                self._append_event(
+                    conn,
+                    work.work_id,
+                    "WORK_TRANSITIONED",
+                    {
+                        "state": destination.value,
+                        "authorization_ref": work.authorization_ref,
+                    },
+                    f"{idempotency_key}:{suffix}",
+                    event_time,
+                )
+
+            mission_cursor = conn.execute(
+                """UPDATE mission_items SET state='CLOSED', version=version+1, updated_at=?
+                WHERE mission_id=? AND state='ACCEPTED' AND version=?""",
+                (event_time, mission.mission_id, mission.version),
+            )
+            if mission_cursor.rowcount != 1:
+                raise ContinuityStoreError("Mission 收口出现版本冲突")
+            self._append_event(
+                conn,
+                mission.mission_id,
+                "MISSION_TRANSITIONED",
+                {"state": MissionState.CLOSED.value, "root_work_id": work.work_id},
+                f"{idempotency_key}:mission-closed",
+                event_time,
+                aggregate_type="mission",
+            )
+
+            closure_cursor = conn.execute(
+                """UPDATE closure_items SET state='COMPLETED', version=version+1, updated_at=?
+                WHERE closure_id=? AND state='PREPARED' AND version=1""",
+                (event_time, closure_id),
+            )
+            step_cursor = conn.execute(
+                """UPDATE closure_steps
+                SET state='COMPLETED', attempt_count=attempt_count+1, updated_at=?
+                WHERE step_id=? AND state='PENDING' AND attempt_count=0""",
+                (event_time, step["step_id"]),
+            )
+            outbox_cursor = conn.execute(
+                """UPDATE closure_outbox SET published_at=?
+                WHERE outbox_id=? AND published_at IS NULL""",
+                (event_time, outbox["outbox_id"]),
+            )
+            if (
+                closure_cursor.rowcount != 1
+                or step_cursor.rowcount != 1
+                or outbox_cursor.rowcount != 1
+            ):
+                raise ContinuityStoreError("Closure 步骤或投影 outbox 收口出现版本冲突")
+
+            receipt = {
+                "closure_id": closure_id,
+                "state": "COMPLETED",
+                "projection_state": "PROJECTED",
+                "run_id": run.run_id,
+                "run_state": RunState.SUCCEEDED.value,
+                "work_id": work.work_id,
+                "work_state": WorkState.CLOSED.value,
+                "mission_id": mission.mission_id,
+                "mission_state": MissionState.CLOSED.value,
+                "pending_reason": None,
+            }
+            self._append_event(
+                conn,
+                closure_id,
+                "CLOSURE_COMPLETED",
+                {
+                    "schema_version": "closure-completed.v1",
+                    "projection_receipt": projection_receipt,
+                    "receipt": receipt,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="closure",
+            )
+            return self._closure_completion_from_event(
+                conn,
+                self._event_by_key(conn, idempotency_key),
+                closure_id=closure_id,
+                projection_receipt=projection_receipt,
+            )
+
     @staticmethod
     def _lexical_run_worktree(raw: object, *, base: Path | None = None) -> str:
         if not isinstance(raw, str) or raw != raw.strip() or not raw:
@@ -3704,7 +3927,8 @@ class ContinuityStore:
                 ORDER BY updated_at DESC, work_id"""
                 if include_terminal
                 else """SELECT work_id FROM work_items WHERE subject_project_id=?
-                AND state NOT IN ('CLOSED', 'CANCELLED') ORDER BY updated_at DESC, work_id"""
+                AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
+                ORDER BY updated_at DESC, work_id"""
             )
             rows = conn.execute(query, (subject_project_id,)).fetchall()
             return tuple(self._get_work(conn, str(row["work_id"])) for row in rows)
@@ -4302,6 +4526,98 @@ class ContinuityStore:
         if value.tzinfo is None:
             raise ContinuityStoreError(f"{label} 时间戳必须包含时区")
         return value.astimezone(UTC)
+
+    @classmethod
+    def _closure_completion_from_event(
+        cls,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row | None,
+        *,
+        closure_id: str,
+        projection_receipt: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if row is None:
+            raise ContinuityStoreError("C08 收口事件未能原子落库")
+        payload = cls._validated_event_payload(row, label="C08 收口")
+        if (
+            row["aggregate_type"] != "closure"
+            or row["aggregate_id"] != closure_id
+            or row["event_type"] != "CLOSURE_COMPLETED"
+            or set(payload) != {"schema_version", "projection_receipt", "receipt"}
+            or payload.get("schema_version") != "closure-completed.v1"
+        ):
+            raise ContinuityStoreError("idempotency_key 的 C08 收口语义不一致")
+        recorded_projection = payload.get("projection_receipt")
+        receipt = payload.get("receipt")
+        if not isinstance(recorded_projection, dict) or not isinstance(receipt, dict):
+            raise ContinuityStoreError("C08 收口事件载荷损坏")
+        if projection_receipt is not None and recorded_projection != projection_receipt:
+            raise ContinuityStoreError("idempotency_key 已绑定不同投影回执")
+        expected_receipt_keys = {
+            "closure_id",
+            "state",
+            "projection_state",
+            "run_id",
+            "run_state",
+            "work_id",
+            "work_state",
+            "mission_id",
+            "mission_state",
+            "pending_reason",
+        }
+        if (
+            set(receipt) != expected_receipt_keys
+            or receipt.get("closure_id") != closure_id
+            or receipt.get("state") != "COMPLETED"
+            or receipt.get("projection_state") != "PROJECTED"
+            or receipt.get("run_state") != RunState.SUCCEEDED.value
+            or receipt.get("work_state") != WorkState.CLOSED.value
+            or receipt.get("mission_state") != MissionState.CLOSED.value
+            or receipt.get("pending_reason") is not None
+            or recorded_projection.get("closure_id") != closure_id
+            or recorded_projection.get("state") != "PROJECTED"
+            or recorded_projection.get("pending_reason") is not None
+        ):
+            raise ContinuityStoreError("C08 收口事件终态不合法")
+
+        closure = conn.execute(
+            "SELECT * FROM closure_items WHERE closure_id=?",
+            (closure_id,),
+        ).fetchone()
+        step = conn.execute(
+            "SELECT * FROM closure_steps WHERE closure_id=?",
+            (closure_id,),
+        ).fetchone()
+        outbox = conn.execute(
+            "SELECT * FROM closure_outbox WHERE closure_id=?",
+            (closure_id,),
+        ).fetchone()
+        if (
+            closure is None
+            or step is None
+            or outbox is None
+            or closure["state"] != "COMPLETED"
+            or closure["version"] != 2
+            or step["state"] != "COMPLETED"
+            or step["attempt_count"] != 1
+            or outbox["published_at"] is None
+        ):
+            raise ContinuityStoreError("C08 收口事件与 Closure 当前状态不一致")
+
+        run = cls._get_run(conn, str(receipt["run_id"]))
+        work = cls._get_work(conn, str(receipt["work_id"]))
+        mission = cls._get_mission(conn, str(receipt["mission_id"]))
+        if (
+            run.state is not RunState.SUCCEEDED
+            or work.state is not WorkState.CLOSED
+            or mission.state is not MissionState.CLOSED
+            or closure["run_id"] != run.run_id
+            or closure["work_id"] != work.work_id
+            or closure["mission_id"] != mission.mission_id
+            or recorded_projection.get("change_id") != closure["change_id"]
+        ):
+            raise ContinuityStoreError("C08 收口事件与 Run/Work/Mission 当前终态不一致")
+        return cast(dict[str, Any], receipt)
 
     @classmethod
     def _closure_preparation_from_event(

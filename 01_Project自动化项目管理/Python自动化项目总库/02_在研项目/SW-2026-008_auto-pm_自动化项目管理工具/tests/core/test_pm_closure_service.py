@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from auto_pm.change.ledger_reconciler import ReconcileDiff
 from auto_pm.core.pm_closure_service import (
+    ClosureCompletionState,
     ClosureState,
     ClosureStepKind,
     ClosureStepState,
@@ -19,6 +20,7 @@ from auto_pm.core.pm_closure_service import (
     PmClosureService,
 )
 
+from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -160,6 +162,38 @@ def _table_counts(database: Path) -> dict[str, int]:
                 ).fetchone()[0]
             )
         }
+
+
+def _lineage_states(database: Path) -> tuple[str, str, str, str, int, str, int, bool]:
+    with sqlite3.connect(database) as conn:
+        run_state = str(
+            conn.execute("SELECT state FROM run_items WHERE run_id=?", (_RUN_ID,)).fetchone()[0]
+        )
+        work_state = str(
+            conn.execute("SELECT state FROM work_items WHERE work_id=?", (_WORK_ID,)).fetchone()[0]
+        )
+        mission_state = str(
+            conn.execute(
+                "SELECT state FROM mission_items WHERE mission_id=?", (_MISSION_ID,)
+            ).fetchone()[0]
+        )
+        closure_state, closure_version = conn.execute(
+            "SELECT state, version FROM closure_items"
+        ).fetchone()
+        step_state, attempt_count = conn.execute(
+            "SELECT state, attempt_count FROM closure_steps"
+        ).fetchone()
+        published_at = conn.execute("SELECT published_at FROM closure_outbox").fetchone()[0]
+    return (
+        run_state,
+        work_state,
+        mission_state,
+        str(closure_state),
+        int(closure_version),
+        str(step_state),
+        int(attempt_count),
+        published_at is not None,
+    )
 
 
 class _ProjectionReconciler:
@@ -312,7 +346,12 @@ def test_project_prepared_ledger_is_idempotent_without_new_closure_event(
 ) -> None:
     store, database = _accepted_lineage(tmp_path)
     reconciler = _ProjectionReconciler(ReconcileDiff())
-    service = PmClosureService(tmp_path, store=store, ledger_reconciler=reconciler)
+    service = PmClosureService(
+        tmp_path,
+        now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC),
+        store=store,
+        ledger_reconciler=reconciler,
+    )
     preparation = service.prepare_closure(_MISSION_ID, idempotency_key="c07-project")
     injected: list[str] = []
 
@@ -346,7 +385,12 @@ def test_project_prepared_ledger_keeps_projection_failure_pending(
 ) -> None:
     store, database = _accepted_lineage(tmp_path)
     reconciler = _ProjectionReconciler(OSError("ledger unavailable"))
-    service = PmClosureService(tmp_path, store=store, ledger_reconciler=reconciler)
+    service = PmClosureService(
+        tmp_path,
+        now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC),
+        store=store,
+        ledger_reconciler=reconciler,
+    )
     preparation = service.prepare_closure(_MISSION_ID, idempotency_key="c07-pending")
     monkeypatch.setattr(
         service,
@@ -360,3 +404,255 @@ def test_project_prepared_ledger_keeps_projection_failure_pending(
     assert receipt.state is LedgerProjectionState.PENDING_SYNC
     assert receipt.pending_reason == "ledger unavailable"
     assert _table_counts(database)["closure_events"] == 1
+
+
+def test_complete_closure_orders_terminal_states_after_successful_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, database = _accepted_lineage(tmp_path)
+    reconciler = _ProjectionReconciler(ReconcileDiff())
+    service = PmClosureService(
+        tmp_path,
+        now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC),
+        store=store,
+        ledger_reconciler=reconciler,
+    )
+    preparation = service.prepare_closure(_MISSION_ID, idempotency_key="c08-prepare")
+    injected: list[str] = []
+
+    def record_substance(closure_id: str) -> Path:
+        injected.append(closure_id)
+        return tmp_path / "CHG.md"
+
+    monkeypatch.setattr(service, "inject_prepared_change_substance", record_substance)
+
+    receipt = service.complete_closure(
+        preparation.closure.closure_id,
+        idempotency_key="c08-complete",
+    )
+
+    assert receipt.state is ClosureCompletionState.COMPLETED
+    assert receipt.projection_state is LedgerProjectionState.PROJECTED
+    assert receipt.run_state is RunState.SUCCEEDED
+    assert receipt.work_state is WorkState.CLOSED
+    assert receipt.mission_state is MissionState.CLOSED
+    assert injected == [preparation.closure.closure_id]
+    assert reconciler.calls == [(str(tmp_path), _CHANGE_ID)]
+    assert _lineage_states(database) == (
+        "SUCCEEDED",
+        "CLOSED",
+        "CLOSED",
+        "COMPLETED",
+        2,
+        "COMPLETED",
+        1,
+        True,
+    )
+
+    with sqlite3.connect(database) as conn:
+        closure = conn.execute(
+            "SELECT state, version FROM closure_items WHERE closure_id=?",
+            (preparation.closure.closure_id,),
+        ).fetchone()
+        step = conn.execute(
+            "SELECT state, attempt_count FROM closure_steps WHERE closure_id=?",
+            (preparation.closure.closure_id,),
+        ).fetchone()
+        outbox = conn.execute(
+            "SELECT published_at FROM closure_outbox WHERE closure_id=?",
+            (preparation.closure.closure_id,),
+        ).fetchone()
+        ordered_events = [
+            str(row[0])
+            for row in conn.execute(
+                "SELECT event_type FROM events WHERE idempotency_key LIKE 'c08-complete%' "
+                "ORDER BY rowid"
+            )
+        ]
+    assert closure == ("COMPLETED", 2)
+    assert step == ("COMPLETED", 1)
+    assert outbox is not None and outbox[0] is not None
+    assert ordered_events == [
+        "RUN_TRANSITIONED",
+        "WORK_TRANSITIONED",
+        "WORK_TRANSITIONED",
+        "WORK_TRANSITIONED",
+        "MISSION_TRANSITIONED",
+        "CLOSURE_COMPLETED",
+    ]
+
+
+def test_complete_closure_exact_replay_skips_projection_and_duplicate_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, database = _accepted_lineage(tmp_path)
+    reconciler = _ProjectionReconciler(ReconcileDiff())
+    service = PmClosureService(
+        tmp_path,
+        now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC),
+        store=store,
+        ledger_reconciler=reconciler,
+    )
+    preparation = service.prepare_closure(_MISSION_ID, idempotency_key="c08-replay-prepare")
+    injected: list[str] = []
+
+    def record_substance(closure_id: str) -> Path:
+        injected.append(closure_id)
+        return tmp_path / "CHG.md"
+
+    monkeypatch.setattr(service, "inject_prepared_change_substance", record_substance)
+
+    first = service.complete_closure(
+        preparation.closure.closure_id,
+        idempotency_key="c08-replay",
+    )
+    with sqlite3.connect(database) as conn:
+        event_count = int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+    second = service.complete_closure(
+        preparation.closure.closure_id,
+        idempotency_key="c08-replay",
+    )
+
+    assert second == first
+    assert injected == [preparation.closure.closure_id]
+    assert reconciler.calls == [(str(tmp_path), _CHANGE_ID)]
+    with sqlite3.connect(database) as conn:
+        assert int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]) == event_count
+        assert (
+            int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE event_type='CLOSURE_COMPLETED'"
+                ).fetchone()[0]
+            )
+            == 1
+        )
+
+
+def test_complete_closure_projection_failure_leaves_lineage_non_terminal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, database = _accepted_lineage(tmp_path)
+    reconciler = _ProjectionReconciler(OSError("ledger unavailable"))
+    service = PmClosureService(tmp_path, store=store, ledger_reconciler=reconciler)
+    preparation = service.prepare_closure(_MISSION_ID, idempotency_key="c08-pending-prepare")
+    monkeypatch.setattr(
+        service,
+        "inject_prepared_change_substance",
+        lambda closure_id: tmp_path / f"{closure_id}.md",
+    )
+
+    receipt = service.complete_closure(
+        preparation.closure.closure_id,
+        idempotency_key="c08-pending",
+    )
+
+    assert receipt.state is ClosureCompletionState.PENDING_SYNC
+    assert receipt.projection_state is LedgerProjectionState.PENDING_SYNC
+    assert receipt.pending_reason == "ledger unavailable"
+    assert _lineage_states(database) == (
+        "VERIFYING",
+        "IN_PROGRESS",
+        "ACCEPTED",
+        "PREPARED",
+        1,
+        "PENDING",
+        0,
+        False,
+    )
+    with sqlite3.connect(database) as conn:
+        assert (
+            int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE event_type='CLOSURE_COMPLETED'"
+                ).fetchone()[0]
+            )
+            == 0
+        )
+
+
+def test_finalize_closure_rejects_pending_projection_without_state_changes(tmp_path: Path) -> None:
+    store, database = _accepted_lineage(tmp_path)
+    preparation = PmClosureService(tmp_path, store=store).prepare_closure(
+        _MISSION_ID,
+        idempotency_key="c08-reject-prepare",
+    )
+
+    with pytest.raises(ContinuityStoreError, match="成功必要投影"):
+        store.finalize_closure(
+            preparation.closure.closure_id,
+            {
+                "closure_id": preparation.closure.closure_id,
+                "change_id": _CHANGE_ID,
+                "state": "PENDING_SYNC",
+                "pending_reason": "ledger unavailable",
+            },
+            "c08-reject-pending",
+            datetime(2026, 9, 20, 12, 10, tzinfo=UTC).isoformat(),
+        )
+
+    assert _lineage_states(database) == (
+        "VERIFYING",
+        "IN_PROGRESS",
+        "ACCEPTED",
+        "PREPARED",
+        1,
+        "PENDING",
+        0,
+        False,
+    )
+
+
+def test_complete_closure_failure_rolls_back_every_lifecycle_transition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, database = _accepted_lineage(tmp_path)
+    service = PmClosureService(
+        tmp_path,
+        now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC),
+        store=store,
+        ledger_reconciler=_ProjectionReconciler(ReconcileDiff()),
+    )
+    preparation = service.prepare_closure(_MISSION_ID, idempotency_key="c08-rollback-prepare")
+    monkeypatch.setattr(
+        service,
+        "inject_prepared_change_substance",
+        lambda closure_id: tmp_path / f"{closure_id}.md",
+    )
+    append_event = ContinuityStore._append_event
+
+    def fail_on_completion_event(*args: object, **kwargs: object) -> None:
+        append_event(*args, **kwargs)  # type: ignore[arg-type]
+        if len(args) > 2 and args[2] == "CLOSURE_COMPLETED":
+            raise ContinuityStoreError("injected before C08 commit")
+
+    monkeypatch.setattr(ContinuityStore, "_append_event", staticmethod(fail_on_completion_event))
+
+    with pytest.raises(PmClosureError, match="injected"):
+        service.complete_closure(
+            preparation.closure.closure_id,
+            idempotency_key="c08-rollback",
+        )
+
+    assert _lineage_states(database) == (
+        "VERIFYING",
+        "IN_PROGRESS",
+        "ACCEPTED",
+        "PREPARED",
+        1,
+        "PENDING",
+        0,
+        False,
+    )
+    with sqlite3.connect(database) as conn:
+        assert (
+            int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE idempotency_key LIKE 'c08-rollback%'"
+                ).fetchone()[0]
+            )
+            == 1
+        )

@@ -266,8 +266,13 @@ class PmCockpitService:
                 if work.work_id == mission.root_work_id:
                     return work
         return next(
-            (work for work in works if work.state not in {WorkState.CLOSED, WorkState.CANCELLED}),
-            works[0] if works else None,
+            (
+                work
+                for work in works
+                if work.state
+                not in {WorkState.ACCEPTED, WorkState.CLOSED, WorkState.CANCELLED}
+            ),
+            None,
         )
 
     @staticmethod

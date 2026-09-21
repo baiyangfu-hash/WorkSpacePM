@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from auto_pm.contracts.continuity import RunState, WorkState
+from auto_pm.contracts.mission import MissionState
 from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 from auto_pm.domain.change.substance_injector import SubstanceInjector
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
@@ -22,9 +24,10 @@ class PmClosureError(RuntimeError):
 
 
 class ClosureState(StrEnum):
-    """C05 exposes only the non-terminal state it owns."""
+    """Durable lifecycle of one evidence-bound closure."""
 
     PREPARED = "PREPARED"
+    COMPLETED = "COMPLETED"
 
 
 class ClosureStepKind(StrEnum):
@@ -34,9 +37,10 @@ class ClosureStepKind(StrEnum):
 
 
 class ClosureStepState(StrEnum):
-    """C05 queues work but never advances a downstream step."""
+    """Durable state of a closure side-effect step."""
 
     PENDING = "PENDING"
+    COMPLETED = "COMPLETED"
 
 
 class LedgerProjectionState(StrEnum):
@@ -118,6 +122,30 @@ class LedgerProjectionReceipt(BaseModel):
     pending_reason: str | None = None
 
 
+class ClosureCompletionState(StrEnum):
+    """Public C08 outcome; pending projection is explicitly non-terminal."""
+
+    COMPLETED = "COMPLETED"
+    PENDING_SYNC = "PENDING_SYNC"
+
+
+class ClosureCompletionReceipt(BaseModel):
+    """Secret-free proof of the exact terminal lineage reached by C08."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    closure_id: str = Field(pattern=r"^CLOSURE-[A-F0-9]{24}$")
+    state: ClosureCompletionState
+    projection_state: LedgerProjectionState
+    run_id: str = Field(min_length=1)
+    run_state: RunState
+    work_id: str = Field(min_length=1)
+    work_state: WorkState
+    mission_id: str = Field(min_length=1)
+    mission_state: MissionState
+    pending_reason: str | None = None
+
+
 class PmClosureService:
     """Prepare the accepted v2 lineage without performing external effects."""
 
@@ -192,31 +220,75 @@ class PmClosureService:
         """Project the prepared closure's one CHG, preserving pending failure."""
 
         preparation = self.get(closure_id)
+        return self._project_preparation(preparation)
+
+    def _project_preparation(
+        self,
+        preparation: ClosurePreparation,
+    ) -> LedgerProjectionReceipt:
         try:
             self._change_substance_evidence(preparation)
-            self.inject_prepared_change_substance(closure_id)
+            self.inject_prepared_change_substance(preparation.closure.closure_id)
             remaining = self._ledger_reconciler.project_change(
                 str(self._workspace_root), preparation.closure.change_id
             )
         except (OSError, ValueError, TypeError, PmClosureError) as error:
             return LedgerProjectionReceipt(
-                closure_id=closure_id,
+                closure_id=preparation.closure.closure_id,
                 change_id=preparation.closure.change_id,
                 state=LedgerProjectionState.PENDING_SYNC,
                 pending_reason=str(error),
             )
         if not remaining.is_clean:
             return LedgerProjectionReceipt(
-                closure_id=closure_id,
+                closure_id=preparation.closure.closure_id,
                 change_id=preparation.closure.change_id,
                 state=LedgerProjectionState.PENDING_SYNC,
                 pending_reason=remaining.summary(),
             )
         return LedgerProjectionReceipt(
-            closure_id=closure_id,
+            closure_id=preparation.closure.closure_id,
             change_id=preparation.closure.change_id,
             state=LedgerProjectionState.PROJECTED,
         )
+
+    def complete_closure(
+        self,
+        closure_id: str,
+        *,
+        idempotency_key: str,
+    ) -> ClosureCompletionReceipt:
+        """Project required artifacts, then atomically close Run, Work and Mission."""
+
+        try:
+            context = self._store.closure_completion_context(closure_id, idempotency_key)
+            if "completion" in context:
+                return ClosureCompletionReceipt.model_validate(context["completion"])
+
+            preparation = self._decode(context["preparation"])
+            projection = self._project_preparation(preparation)
+            if projection.state is LedgerProjectionState.PENDING_SYNC:
+                return ClosureCompletionReceipt(
+                    closure_id=closure_id,
+                    state=ClosureCompletionState.PENDING_SYNC,
+                    projection_state=projection.state,
+                    run_id=preparation.closure.run_id,
+                    run_state=RunState.VERIFYING,
+                    work_id=preparation.closure.work_id,
+                    work_state=WorkState.IN_PROGRESS,
+                    mission_id=preparation.closure.mission_id,
+                    mission_state=MissionState.ACCEPTED,
+                    pending_reason=projection.pending_reason,
+                )
+            payload = self._store.finalize_closure(
+                closure_id,
+                projection.model_dump(mode="json"),
+                idempotency_key,
+                self._timestamp(),
+            )
+            return ClosureCompletionReceipt.model_validate(payload)
+        except (ContinuityStoreError, ValueError, TypeError, json.JSONDecodeError) as error:
+            raise PmClosureError(str(error)) from error
 
     @staticmethod
     def _decode(payload: Mapping[str, Mapping[str, Any]]) -> ClosurePreparation:
@@ -296,6 +368,8 @@ class PmClosureService:
 
 __all__ = [
     "ClosureItem",
+    "ClosureCompletionReceipt",
+    "ClosureCompletionState",
     "ClosureOutboxItem",
     "ClosurePreparation",
     "ClosureState",
