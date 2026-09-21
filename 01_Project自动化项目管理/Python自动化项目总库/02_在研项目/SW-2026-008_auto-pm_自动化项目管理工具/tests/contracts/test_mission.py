@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from auto_pm.contracts.continuity import WorkKind
-from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 from auto_pm.contracts.mission import (
     AuthorityAudit,
     AuthorityEnvelope,
@@ -17,6 +17,12 @@ from auto_pm.contracts.mission import (
     Mission,
     MissionState,
     RestrictedAction,
+)
+from auto_pm.contracts.pm_facade import (
+    PlanningDraft,
+    PlanningExecutionGrant,
+    PlanningScopeCard,
+    PmIntent,
 )
 
 NOW = datetime(2026, 9, 10, 1, 0, tzinfo=UTC)
@@ -73,6 +79,46 @@ def test_authority_envelope_defaults_fail_closed() -> None:
     assert envelope.routing.max_parallel_runs == 1
     assert not envelope.routing.auto_repair_enabled
     assert "lease_token" not in envelope.model_dump(mode="json")
+
+
+def test_planning_scope_card_hash_binds_exact_execution_grant() -> None:
+    draft = PlanningDraft.from_intent(
+        PmIntent(
+            subject_project_id="SW-2026-008",
+            objective="Prepare one approved dispatch.",
+            acceptance_criteria=("Run remains READY.",),
+            request_id="REQ-E08A-001",
+        )
+    )
+    grant = PlanningExecutionGrant(
+        adapter=ExecutionAdapterKind.CODEX,
+        approved_model="gpt-approved",
+        required_worktree_mode=WorktreeMode.ISOLATED,
+        declared_dirty_paths=("auto_pm/a.py",),
+    )
+    card = PlanningScopeCard.from_draft(
+        draft,
+        change_id="CHG-SCPT-2026-276",
+        scope_paths=("auto_pm/a.py",),
+        risks=("dispatch drift",),
+        non_goals=("no model startup",),
+        spec_sources=(("DEV-300", "specs/dev-300.md", "V1"),),
+        execution_grant=grant,
+    )
+    changed = PlanningScopeCard.from_draft(
+        draft,
+        change_id=card.change_id,
+        scope_paths=card.scope_paths,
+        risks=card.risks,
+        non_goals=card.non_goals,
+        spec_sources=card.spec_sources,
+        execution_grant=grant.model_copy(update={"approved_model": "gpt-other"}),
+    )
+
+    assert card.execution_grant.required_worktree_mode is WorktreeMode.ISOLATED
+    assert card.plan_hash != changed.plan_hash
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        PlanningExecutionGrant.model_validate({**grant.model_dump(), "lease_token": "secret"})
 
 
 def test_authority_envelope_rejects_unsafe_or_ambiguous_boundaries() -> None:

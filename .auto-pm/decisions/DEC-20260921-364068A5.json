@@ -1,0 +1,28 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260921-364068A5",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-298",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/substance_injector.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/change/test_substance_control.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/ledger_reconciler.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-21T14:13:32.689207+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "候选基线必须以 C07 不可变提交 0d974bd7ad405b6d91387b70936ac084d7696e96 为起点，完整保留 E08 与 C05-C07 能力。",
+    "仅精确移植 05a75452d2a9679116e21f6a770a7eb3b1aa229e 的 ACCEPTED 终态语义；不得回退 Continuity schema 或丢失执行能力。",
+    "失败的 C08-002/C08-003 Run 保留审计；不得修改主工作区既有产品文件、远程、release 或部署。",
+    "C08 完成到用户验收边界；最终隔离提交、合并、推送、部署和 release 切换分别授权。"
+  ],
+  "metadata": {}
+}

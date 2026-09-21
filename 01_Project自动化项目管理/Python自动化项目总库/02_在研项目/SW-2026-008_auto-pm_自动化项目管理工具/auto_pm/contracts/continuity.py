@@ -109,6 +109,19 @@ class LeaseItem(BaseModel):
     updated_at: str
 
 
+class LeaseRenewalReceipt(BaseModel):
+    """Public, secret-free proof that one lease renewal committed."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: Literal["lease-renewal-receipt.v1"] = "lease-renewal-receipt.v1"
+    run_id: str
+    owner_id: str
+    expires_at: str
+    version: int
+    updated_at: str
+
+
 class HandoffV2(BaseModel):
     """Signed snapshot that points to transactional continuity state."""
 

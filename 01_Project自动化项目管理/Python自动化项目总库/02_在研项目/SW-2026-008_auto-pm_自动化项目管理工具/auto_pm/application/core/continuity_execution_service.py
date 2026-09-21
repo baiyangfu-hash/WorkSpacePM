@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
+from auto_pm.application.core.evidence_collection_service import (
+    EvidenceCollection,
+    EvidenceCollectionError,
+    EvidenceCollectionService,
+)
 from auto_pm.contracts.continuity import (
     CheckpointItem,
     HandoffV2,
     LeaseItem,
+    LeaseRenewalReceipt,
     RunItem,
     RunState,
     WorkState,
@@ -20,6 +27,7 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionOutcome,
     is_canonical_decision_id,
 )
+from auto_pm.contracts.execution_adapter import ExecutionDispatchReceipt, ExecutionStartEvidence
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.control_root_guard import (
@@ -34,7 +42,7 @@ class ContinuityExecutionError(RuntimeError):
 
 
 _RUN_TRANSITIONS = {
-    RunState.READY: {RunState.RUNNING, RunState.CANCELLED},
+    RunState.READY: {RunState.RUNNING, RunState.BLOCKED, RunState.CANCELLED},
     RunState.RUNNING: {RunState.BLOCKED, RunState.VERIFYING, RunState.FAILED},
     RunState.BLOCKED: {RunState.RUNNING, RunState.CANCELLED},
     RunState.VERIFYING: {RunState.RUNNING, RunState.SUCCEEDED, RunState.FAILED},
@@ -206,7 +214,7 @@ class ContinuityExecutionService:
             values = {
                 "run_id": run_id,
                 "work_id": work_id,
-                "state": RunState.RUNNING.value,
+                "state": RunState.READY.value,
                 "executor_id": executor_id,
                 "adapter": adapter,
                 "owned_paths_json": json.dumps(owned, ensure_ascii=False),
@@ -242,16 +250,26 @@ class ContinuityExecutionService:
         lease_token: str,
         lease_seconds: int,
         idempotency_key: str,
-    ) -> LeaseItem:
+        *,
+        expected_version: int | None = None,
+    ) -> LeaseRenewalReceipt:
         if type(lease_seconds) is not int or not 60 <= lease_seconds <= 86_400:
             raise ContinuityExecutionError("lease_seconds 必须在 60 到 86400 之间")
         try:
-            return self._store.renew_lease(
+            lease = self._store.renew_lease(
                 run_id,
                 owner_id,
                 lease_token,
                 lease_seconds,
                 idempotency_key,
+                expected_version=expected_version,
+            )
+            return LeaseRenewalReceipt(
+                run_id=lease.run_id,
+                owner_id=lease.owner_id,
+                expires_at=lease.expires_at,
+                version=lease.version,
+                updated_at=lease.updated_at,
             )
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
@@ -294,6 +312,207 @@ class ContinuityExecutionService:
             return self._store.create_checkpoint(values, idempotency_key, now.isoformat())
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
+
+    def append_verified_checkpoint(
+        self,
+        *,
+        checkpoint_id: str,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        project_root: str | Path,
+    ) -> CheckpointItem:
+        """Append one system-generated, content-bound checkpoint for a Run.
+
+        No caller-supplied result document, summary, dirty path, Git baseline,
+        or evidence is accepted.  The service derives all of those values from
+        fresh Run-scoped Git evidence and the real C02 Python quality receipt.
+        Existing identities replay only when their canonical stored payload is
+        still intact and proves the current evidence.
+        """
+
+        now = self._utc_now()
+        try:
+            run = self._store.get_run(run_id)
+            lease = self._store.get_lease(run_id)
+            self._require_active_lease(lease, owner_id, lease_token, now)
+            existing = self._existing_checkpoint(checkpoint_id)
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+        collector = EvidenceCollectionService(self._root)
+        summary = self._auto_checkpoint_summary(run)
+        try:
+            collector.validate_c03_checkpoint_project_root(run, project_root)
+        except EvidenceCollectionError as error:
+            raise ContinuityExecutionError(
+                f"自动 Checkpoint C03 profile 无法验证: {error}"
+            ) from error
+        if existing is not None:
+            try:
+                collection = collector.collect(run)
+            except EvidenceCollectionError as error:
+                raise ContinuityExecutionError(
+                    f"自动 Checkpoint 无法复核当前 evidence: {error}"
+                ) from error
+            dirty_paths = self._checkpoint_dirty_paths(collection)
+            if (
+                existing.run_id != run.run_id
+                or existing.summary != summary
+                or existing.git_head != run.git_head
+                or existing.dirty_paths != tuple(dirty_paths)
+                or len(existing.evidence) != 1
+                or not collector.checkpoint_evidence_is_current(
+                    existing.evidence[0], collection, run, project_root
+                )
+            ):
+                raise ContinuityExecutionError(
+                    "Checkpoint identity 已存在，但自动证据或当前 Run 内容不一致"
+                )
+            replay = self.checkpoint(
+                checkpoint_id=checkpoint_id,
+                run_id=run_id,
+                owner_id=owner_id,
+                lease_token=lease_token,
+                summary=summary,
+                git_head=collection.git_head,
+                dirty_paths=dirty_paths,
+                evidence=list(existing.evidence),
+                idempotency_key=self._c03_checkpoint_idempotency_key(
+                    run, checkpoint_id, collection.content_hash
+                ),
+            )
+            return self._require_matching_c03_checkpoint(
+                replay,
+                checkpoint_id=checkpoint_id,
+                run_id=run_id,
+                summary=summary,
+                collection=collection,
+                evidence=existing.evidence[0],
+            )
+
+        try:
+            receipt = collector.run_c03_checkpoint_quality_gates(run, project_root)
+            if receipt.status != "PASS":
+                raise ContinuityExecutionError("自动 Checkpoint 要求 Python 质量收据为 PASS")
+            if not collector.c03_checkpoint_receipt_matches_profile(receipt):
+                raise ContinuityExecutionError(
+                    "自动 Checkpoint 要求固定 C03 pytest profile 与收据 hash"
+                )
+            if not collector.quality_receipt_is_current(run, project_root, receipt):
+                raise ContinuityExecutionError("自动 Checkpoint 的 Python 质量收据已失效")
+            collection = collector.collect(run)
+            evidence = collector.build_checkpoint_evidence(collection, receipt)
+        except EvidenceCollectionError as error:
+            raise ContinuityExecutionError(
+                f"自动 Checkpoint evidence 或质量门无法验证: {error}"
+            ) from error
+
+        checkpoint = self.checkpoint(
+            checkpoint_id=checkpoint_id,
+            run_id=run_id,
+            owner_id=owner_id,
+            lease_token=lease_token,
+            summary=summary,
+            git_head=collection.git_head,
+            dirty_paths=self._checkpoint_dirty_paths(collection),
+            evidence=[evidence],
+            idempotency_key=self._c03_checkpoint_idempotency_key(
+                run, checkpoint_id, collection.content_hash
+            ),
+        )
+        return self._require_matching_c03_checkpoint(
+            checkpoint,
+            checkpoint_id=checkpoint_id,
+            run_id=run_id,
+            summary=summary,
+            collection=collection,
+            evidence=evidence,
+        )
+
+    def _existing_checkpoint(self, checkpoint_id: str) -> CheckpointItem | None:
+        """Load an existing identity without conflating corruption with absence."""
+
+        try:
+            return self._store.get_checkpoint(checkpoint_id)
+        except ContinuityStoreError as error:
+            if str(error).startswith("Checkpoint 不存在:"):
+                return None
+            raise
+
+    @staticmethod
+    def _checkpoint_dirty_paths(collection: EvidenceCollection) -> list[str]:
+        """Derive the immutable checkpoint path set from all Git dirty classes."""
+
+        return sorted(
+            {
+                *collection.staged_paths,
+                *collection.unstaged_paths,
+                *collection.untracked_paths,
+            }
+        )
+
+    @staticmethod
+    def _auto_checkpoint_summary(run: RunItem) -> str:
+        """Return a fixed, non-user-controlled summary suitable for replay checks."""
+
+        return f"System-generated content-bound checkpoint for Run {run.run_id}"
+
+    @staticmethod
+    def _c03_checkpoint_idempotency_key(
+        run: RunItem, checkpoint_id: str, collection_hash: str
+    ) -> str:
+        """Derive C03's immutable idempotency identity after fresh collection.
+
+        A caller cannot select this key.  Its stable C03 schema identity, Run,
+        checkpoint id, and exact collection content hash make replay possible
+        only for the same persisted C03 checkpoint evidence.
+        """
+
+        payload = {
+            "schema_version": "c03-auto-checkpoint-key.v1",
+            "run_id": run.run_id,
+            "checkpoint_id": checkpoint_id,
+            "collection_hash": collection_hash,
+        }
+        canonical = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return "c03-auto-checkpoint:" + hashlib.sha256(
+            canonical.encode("utf-8")
+        ).hexdigest()
+
+    @classmethod
+    def _require_matching_c03_checkpoint(
+        cls,
+        checkpoint: CheckpointItem,
+        *,
+        checkpoint_id: str,
+        run_id: str,
+        summary: str,
+        collection: EvidenceCollection,
+        evidence: str,
+    ) -> CheckpointItem:
+        """Fail closed if Store replay does not return C03's exact constructed CP.
+
+        The generic Store owns its idempotency index and can only return a
+        checkpoint object through its public API.  C03 therefore treats every
+        return as untrusted until all immutable fields derived above match the
+        current content-bound construction exactly.
+        """
+
+        if (
+            checkpoint.checkpoint_id != checkpoint_id
+            or checkpoint.run_id != run_id
+            or checkpoint.summary != summary
+            or checkpoint.git_head != collection.git_head
+            or checkpoint.dirty_paths != tuple(cls._checkpoint_dirty_paths(collection))
+            or checkpoint.evidence != (evidence,)
+        ):
+            raise ContinuityExecutionError(
+                "持久化 Checkpoint 与 C03 自动构造的 identity 或 evidence 不一致"
+            )
+        return checkpoint
 
     def create_handoff(
         self,
@@ -344,6 +563,47 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def create_checkpoint_bound_handoff(
+        self,
+        *,
+        checkpoint_id: str,
+        from_owner: str,
+        to_owner: str,
+        lease_token: str,
+        new_lease_token: str,
+        lease_seconds: int,
+        idempotency_key: str,
+    ) -> tuple[HandoffV2, LeaseItem]:
+        """Create and accept one deterministic v2 handoff from a Checkpoint.
+
+        The durable handoff snapshot is created by the Store from the referenced
+        Checkpoint, so its Work scope, Git baseline and worktree are never
+        caller-provided.  The previous lease token is consumed only by the
+        creation call and is not returned or persisted in the Handoff payload.
+        """
+
+        if not checkpoint_id.strip() or not idempotency_key.strip():
+            raise ContinuityExecutionError("Checkpoint 与幂等键均为必填")
+        digest = hashlib.sha256(
+            f"{checkpoint_id}\x00{to_owner}".encode()
+        ).hexdigest()[:24].upper()
+        handoff = self.create_handoff(
+            handoff_id=f"HO-{digest}",
+            checkpoint_id=checkpoint_id,
+            from_owner=from_owner,
+            to_owner=to_owner,
+            lease_token=lease_token,
+            idempotency_key=f"{idempotency_key}:create",
+        )
+        lease = self.accept_handoff(
+            handoff_id=handoff.handoff_id,
+            receiver_id=to_owner,
+            new_lease_token=new_lease_token,
+            lease_seconds=lease_seconds,
+            idempotency_key=f"{idempotency_key}:accept",
+        )
+        return handoff, lease
+
     def load_legacy_handoff(self, path: str | Path) -> dict[str, object]:
         """Read legacy v1 evidence without importing it into mutable continuity state."""
         candidate = Path(path).resolve()
@@ -376,6 +636,59 @@ class ContinuityExecutionService:
             return self._store.transition_run(
                 run_id, run.version, new_state.value, idempotency_key, self._utc_now().isoformat()
             )
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def record_start_evidence(
+        self,
+        *,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        evidence: ExecutionStartEvidence,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Atomically persist trusted evidence and move exactly READY -> RUNNING."""
+
+        now = self._utc_now()
+        try:
+            run = self._store.get_run(run_id)
+            lease = self._store.get_lease(run_id)
+            self._require_active_lease(lease, owner_id, lease_token, now)
+            if run.executor_id != owner_id:
+                raise ContinuityExecutionError("启动证据 owner 与 Run executor 不一致")
+            return self._store.record_run_started(
+                run_id=run_id,
+                expected_version=run.version,
+                owner_id=owner_id,
+                lease_token=lease_token,
+                evidence=evidence,
+                idempotency_key=idempotency_key,
+            )
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def resolve_started_run(
+        self, operation_id: str
+    ) -> tuple[ExecutionDispatchReceipt, RunItem, ExecutionStartEvidence]:
+        """Reconcile one durable operation with its only trusted started Run."""
+
+        try:
+            intent = self._store.get_execution_intent(operation_id)
+            if intent is None:
+                raise ContinuityExecutionError("ExecutionIntent 不存在")
+            receipt = intent.receipt
+            run = self._store.get_run(receipt.run_id)
+            if (
+                run.work_id != receipt.work_id
+                or run.executor_id != receipt.executor_id
+                or run.state not in {RunState.RUNNING, RunState.VERIFYING}
+            ):
+                raise ContinuityExecutionError("ExecutionIntent 与活动 Run 身份不一致")
+            owner_id, evidence = self._store.get_run_started_evidence(receipt.run_id)
+            if owner_id != receipt.owner_id:
+                raise ContinuityExecutionError("RUN_STARTED owner 与派发回执不一致")
+            return receipt, run, evidence
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 

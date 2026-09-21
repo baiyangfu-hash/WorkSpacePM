@@ -50,6 +50,14 @@ def _registry(root: Path, *projects: dict[str, str]) -> Path:
     return path
 
 
+def _runtime_package(runtime: Path, release_id: str) -> Path:
+    package = runtime / "releases" / release_id / "auto_pm"
+    package.mkdir(parents=True)
+    package_file = package / "__init__.py"
+    package_file.write_text("# test package\n", encoding="utf-8")
+    return package_file
+
+
 def test_resolves_registered_project_from_nested_directory(tmp_path: Path) -> None:
     project = _project(tmp_path, "SW-2026-008")
     _registry(tmp_path, _mapping("SW-2026-008"))
@@ -157,18 +165,74 @@ def test_partial_control_mapping_fails_closed(tmp_path: Path) -> None:
 def test_release_pointer_is_bounded_evidence(tmp_path: Path) -> None:
     project = _project(tmp_path, "SW-2026-008")
     runtime = tmp_path / "runtime"
-    (runtime / "releases" / "1.2.4-test").mkdir(parents=True)
+    package_file = _runtime_package(runtime, "1.2.4-test")
     (runtime / "active_release.json").write_text(
         json.dumps({"release_id": "1.2.4-test"}),
         encoding="utf-8",
     )
     _registry(tmp_path, _mapping("SW-2026-008", runtime_root="runtime"))
 
-    result = WorkspaceContextService(str(tmp_path)).resolve(start_path=project)
+    result = WorkspaceContextService(
+        str(tmp_path), package_file_provider=lambda: package_file
+    ).resolve(start_path=project)
 
     assert result.runtime_root == "runtime"
     assert result.release_id == "1.2.4-test"
-    assert len(result.read_set) == 3
+    assert result.configured_release_id == "1.2.4-test"
+    assert result.effective_release_id == "1.2.4-test"
+    assert result.runtime_load_path == "runtime/releases/1.2.4-test/auto_pm/__init__.py"
+    assert result.runtime_fallback_reason == ""
+    assert result.conflicts == ()
+    assert [item.path for item in result.read_set] == [
+        "SYS-2026-001_WorkspaceGovernance/workspace_registry.json",
+        "SW-2026-008/.copier-answers.yml",
+        "runtime/active_release.json",
+        "runtime/releases/1.2.4-test/auto_pm/__init__.py",
+    ]
+
+
+def test_runtime_identity_reports_loaded_release_divergence(tmp_path: Path) -> None:
+    project = _project(tmp_path, "SW-2026-008")
+    runtime = tmp_path / "runtime"
+    _runtime_package(runtime, "1.2.4-configured")
+    loaded_package_file = _runtime_package(runtime, "1.2.3-loaded")
+    (runtime / "active_release.json").write_text(
+        json.dumps({"release_id": "1.2.4-configured"}),
+        encoding="utf-8",
+    )
+    _registry(tmp_path, _mapping("SW-2026-008", runtime_root="runtime"))
+
+    result = WorkspaceContextService(
+        str(tmp_path), package_file_provider=lambda: loaded_package_file
+    ).resolve(start_path=project)
+
+    assert result.configured_release_id == "1.2.4-configured"
+    assert result.effective_release_id == "1.2.3-loaded"
+    assert result.runtime_load_path == "runtime/releases/1.2.3-loaded/auto_pm/__init__.py"
+    assert result.runtime_fallback_reason == ""
+    assert result.conflicts == ("RUNTIME_IDENTITY_DIVERGENCE",)
+
+
+def test_runtime_identity_fails_closed_when_loaded_package_file_is_unavailable(tmp_path: Path) -> None:
+    project = _project(tmp_path, "SW-2026-008")
+    runtime = tmp_path / "runtime"
+    _runtime_package(runtime, "1.2.4-configured")
+    (runtime / "active_release.json").write_text(
+        json.dumps({"release_id": "1.2.4-configured"}),
+        encoding="utf-8",
+    )
+    _registry(tmp_path, _mapping("SW-2026-008", runtime_root="runtime"))
+
+    result = WorkspaceContextService(
+        str(tmp_path), package_file_provider=lambda: None
+    ).resolve(start_path=project)
+
+    assert result.release_id == "1.2.4-configured"
+    assert result.configured_release_id == "1.2.4-configured"
+    assert result.effective_release_id == ""
+    assert result.runtime_load_path == ""
+    assert result.runtime_fallback_reason == "loaded_package_file_unavailable"
+    assert result.conflicts == ("RUNTIME_IDENTITY_UNVERIFIED",)
     assert result.read_set[-1].path == "runtime/active_release.json"
 
 

@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import ValidationError
 
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ExecutionDispatchReceipt,
+    ExecutionIntent,
+    ExecutionMicrotaskFile,
+    ExecutionMicrotaskMaterialization,
+    ExecutionMicrotaskPlan,
+    ExecutionProjectionFile,
+    ExecutionProjectionReceipt,
     ExecutionRole,
+    ExecutionStartClaim,
+    ExecutionStartEvidence,
     WorktreeMode,
     execution_role_for_stack,
 )
@@ -29,6 +41,7 @@ def _receipt(**overrides: object) -> ExecutionDispatchReceipt:
         "branch_name": "codex/run-sw008-a5-001",
         "git_head": "a" * 40,
         "owned_paths": ("README.md",),
+        "declared_dirty_paths": ("README.md",),
     }
     values.update(overrides)
     return ExecutionDispatchReceipt.model_validate(values)
@@ -70,3 +83,216 @@ def test_receipt_rejects_ambiguous_owner_or_worktree() -> None:
         _receipt(worktree_mode=WorktreeMode.CURRENT)
     with pytest.raises(ValidationError, match="ISOLATED"):
         _receipt(branch_name="")
+
+
+def _intent(**overrides: object) -> ExecutionIntent:
+    values: dict[str, object] = {
+        "operation_id": "OP-E02-001",
+        "request_sha256": "a" * 64,
+        "receipt": _receipt(),
+        "created_at": datetime.now(UTC),
+    }
+    values.update(overrides)
+    return ExecutionIntent.model_validate(values)
+
+
+def test_execution_intent_is_immutable_and_explicitly_unstarted() -> None:
+    intent = _intent()
+    assert ExecutionIntent.model_validate_json(intent.model_dump_json()) == intent
+    assert intent.status == intent.receipt.status == "PREPARED"
+    assert {"pid", "session_id", "started_at", "lease_token"}.isdisjoint(
+        intent.model_dump()
+    )
+    with pytest.raises(ValidationError, match="frozen"):
+        intent.operation_id = "another-operation"
+
+
+def test_microtask_plan_is_canonical_append_only_and_secret_free() -> None:
+    entry = ExecutionMicrotaskFile(
+        path="auto_pm/a.py",
+        git_mode="100644",
+        blob_oid="a" * 40,
+        content_sha256="b" * 64,
+    )
+    manifest = [entry.model_dump(mode="json")]
+    manifest_sha256 = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    request = {
+        "operation_id": "OP-E08B-001",
+        "mission_id": "MISSION-E08B-001",
+        "run_id": "RUN-E08B-001",
+        "approved_model": "agent-a",
+        "objective": "Prepare the approved standalone microtask repository.",
+        "owned_paths": ["auto_pm/a.py"],
+        "declared_dirty_paths": ["auto_pm/a.py"],
+        "source_worktree_path": "C:/workspace/candidate",
+        "baseline_git_head": "c" * 40,
+        "repository_path": "C:/workspace/.auto-pm/microtasks/abc",
+        "manifest": manifest,
+        "manifest_sha256": manifest_sha256,
+    }
+    request_sha256 = hashlib.sha256(
+        json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    marker = {
+        "schema_version": "codex-microtask.v1",
+        **request,
+        "request_sha256": request_sha256,
+    }
+    marker_sha256 = hashlib.sha256(
+        json.dumps(marker, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    plan = ExecutionMicrotaskPlan(
+        operation_id="OP-E08B-001",
+        mission_id="MISSION-E08B-001",
+        run_id="RUN-E08B-001",
+        approved_model="agent-a",
+        objective="Prepare the approved standalone microtask repository.",
+        owned_paths=("auto_pm/a.py",),
+        declared_dirty_paths=("auto_pm/a.py",),
+        source_worktree_path="C:/workspace/candidate",
+        baseline_git_head="c" * 40,
+        repository_path="C:/workspace/.auto-pm/microtasks/abc",
+        manifest=(entry,),
+        manifest_sha256=manifest_sha256,
+        marker_sha256=marker_sha256,
+        request_sha256=request_sha256,
+        created_at=datetime.now(UTC),
+    )
+    result = ExecutionMicrotaskMaterialization(plan=plan, commit="1" * 40)
+
+    assert result.status == "PREPARED"
+    assert ExecutionMicrotaskPlan.model_validate_json(plan.model_dump_json()) == plan
+    assert "lease_token" not in result.model_dump(mode="json")
+    with pytest.raises(ValidationError, match="reserved"):
+        ExecutionMicrotaskFile.model_validate(
+            {**entry.model_dump(), "path": ".codex-microtask.json"}
+        )
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        ExecutionMicrotaskPlan.model_validate(
+            {**plan.model_dump(mode="json"), "lease_token": "must-not-leak"}
+        )
+    for field in ("approved_model", "objective", "owned_paths", "declared_dirty_paths"):
+        missing = plan.model_dump(mode="json")
+        missing.pop(field)
+        with pytest.raises(ValidationError, match="Field required"):
+            ExecutionMicrotaskPlan.model_validate(missing)
+    for field, value in (
+        ("approved_model", "agent-b"),
+        ("objective", "Prepare a different microtask."),
+        ("owned_paths", ["auto_pm/other.py"]),
+        ("declared_dirty_paths", ["auto_pm/other.py"]),
+    ):
+        with pytest.raises(ValidationError, match="request_sha256"):
+            ExecutionMicrotaskPlan.model_validate(
+                {**plan.model_dump(mode="json"), field: value}
+            )
+    for secret in (
+        "Prepare with Authorization: Bearer secret-sentinel.",
+        "Prepare with password=hunter2.",
+        "Prepare with OPENAI_API_KEY=sk-proj-secretvalue.",
+    ):
+        with pytest.raises(ValidationError, match="secret-shaped"):
+            ExecutionMicrotaskPlan.model_validate(
+                {**plan.model_dump(mode="json"), "objective": secret}
+            )
+
+
+def test_start_claim_and_projection_receipt_bind_exact_secret_free_payloads() -> None:
+    claimed_at = datetime.now(UTC)
+    claim_request = {
+        "operation_id": "OP-E08CD-001",
+        "run_id": "RUN-E08CD-001",
+        "expected_run_version": 1,
+        "owner_id": "codex:agent-a",
+        "plan_request_sha256": "a" * 64,
+        "marker_sha256": "b" * 64,
+        "repository_path": "C:/workspace/.auto-pm/microtasks/e08cd",
+        "microtask_commit": "c" * 40,
+    }
+    claim = ExecutionStartClaim(
+        **claim_request,
+        claim_sha256=ExecutionMicrotaskPlan._hash(claim_request),
+        claimed_at=claimed_at,
+    )
+    file = ExecutionProjectionFile(
+        path="auto_pm/a.py",
+        baseline_sha256="d" * 64,
+        projected_sha256="e" * 64,
+    )
+    projection_request = {
+        "operation_id": claim.operation_id,
+        "run_id": claim.run_id,
+        "source_repository": claim.repository_path,
+        "source_commit": claim.microtask_commit,
+        "target_worktree": "C:/workspace/candidate",
+        "baseline_git_head": "f" * 40,
+        "files": [file.model_dump(mode="json")],
+    }
+    projection = ExecutionProjectionReceipt(
+        **projection_request,
+        projection_sha256=ExecutionMicrotaskPlan._hash(projection_request),
+        created_at=claimed_at,
+    )
+
+    assert "token" not in claim.model_dump_json().lower()
+    assert "token" not in projection.model_dump_json().lower()
+    with pytest.raises(ValidationError, match="claim_sha256"):
+        ExecutionStartClaim.model_validate(
+            {**claim.model_dump(mode="json"), "owner_id": "codex:agent-b"}
+        )
+    with pytest.raises(ValidationError, match="projection_sha256"):
+        ExecutionProjectionReceipt.model_validate(
+            {
+                **projection.model_dump(mode="json"),
+                "target_worktree": "C:/workspace/other",
+            }
+        )
+
+
+def test_start_evidence_requires_canonical_executor_control_facts() -> None:
+    evidence = ExecutionStartEvidence(
+        process_id=4321,
+        session_id="thread-4321",
+        started_at=datetime.now(UTC),
+    )
+
+    assert evidence.source == "executor-control"
+    assert evidence.event_type == "thread.started"
+    assert ExecutionStartEvidence.model_validate_json(evidence.model_dump_json()) == evidence
+    with pytest.raises(ValidationError):
+        ExecutionStartEvidence(
+            process_id=4321,
+            session_id=" thread-4321 ",
+            started_at=datetime.now(UTC),
+        )
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        ExecutionStartEvidence.model_validate(
+            {**evidence.model_dump(mode="json"), "lease_token": "must-not-leak"}
+        )
+
+
+@pytest.mark.parametrize("value", ["", " ", " leading", "trailing ", "line\nbreak", "a" * 256])
+def test_execution_intent_rejects_ambiguous_operation_id(value: str) -> None:
+    with pytest.raises(ValidationError):
+        _intent(operation_id=value)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"status": "RUNNING"},
+        {"pid": 123},
+        {"session_id": "unconfirmed"},
+        {"started_at": "2026-09-15T00:00:00Z"},
+        {"lease_token": "secret"},
+        {"request_sha256": "not-a-digest"},
+        {"created_at": "2026-09-15T00:00:00"},
+    ],
+)
+def test_execution_intent_rejects_started_claims_and_invalid_evidence(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _intent(**overrides)

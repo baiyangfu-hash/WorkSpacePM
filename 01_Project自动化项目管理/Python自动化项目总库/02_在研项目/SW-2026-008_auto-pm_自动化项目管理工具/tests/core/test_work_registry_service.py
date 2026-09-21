@@ -6,12 +6,17 @@ import json
 import os
 import sqlite3
 import subprocess
+from contextlib import closing
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
+from auto_pm.core.mission_service import MissionService
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
-from auto_pm.contracts.continuity import WorkKind, WorkState
+from auto_pm.contracts.continuity import WorkItem, WorkKind, WorkState
+from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
@@ -64,17 +69,85 @@ def _decision(root: Path, decision_id: str, project_id: str, files: list[str]) -
     )
 
 
-def _planned(service: WorkRegistryService, work_id: str = "WORK-001"):
-    return service.create_work(
-        work_id=work_id,
-        subject_project_id="SW-2026-008",
-        kind=WorkKind.WBS,
-        title="Context follow-up",
-        owner="agent-a",
-        scope_paths=["auto_pm/core/example.py"],
-        source_fingerprint="sha256:abc",
-        idempotency_key=f"create-{work_id}",
+def _planned(service: WorkRegistryService, work_id: str = "WORK-001") -> WorkItem:
+    return cast(
+        WorkItem,
+        service.create_work(
+            work_id=work_id,
+            subject_project_id="SW-2026-008",
+            kind=WorkKind.WBS,
+            title="Context follow-up",
+            owner="agent-a",
+            scope_paths=["auto_pm/core/example.py"],
+            source_fingerprint="sha256:abc",
+            idempotency_key=f"create-{work_id}",
+        ),
     )
+
+
+def _mission(
+    root: Path, *, decision_id: str = "DEC-MISSION", allowed: frozenset[WorkKind] | None = None
+) -> str:
+    files = ["auto_pm/core/example.py"]
+    _decision(root, decision_id, "SW-2026-008", files)
+    instant = datetime(2026, 9, 9, 12, tzinfo=UTC)
+    authority = AuthorityEnvelope(
+        envelope_id="AUTH-TEST",
+        subject_project_id="SW-2026-008",
+        change_id="CHG-SCPT-TEST",
+        decision_id=decision_id,
+        scope_paths=tuple(files),
+        allowed_child_work_kinds=allowed if allowed is not None else frozenset({WorkKind.WBS}),
+        valid_from=instant - timedelta(hours=1),
+        expires_at=instant + timedelta(hours=1),
+        audit=AuthorityAudit(
+            created_by="architect", created_at=instant, approved_by="architect",
+            approved_at=instant, source_fingerprint="sha256:" + "a" * 64,
+        ),
+    )
+    mission_id = f"MISSION-{decision_id.removeprefix('DEC-')}"
+    MissionService(root, now=lambda: instant).create(
+        mission_id=mission_id, subject_project_id="SW-2026-008", title="Test Mission",
+        objective="Test Mission", acceptance_criteria=["safe"], authority=authority,
+        created_by="architect", idempotency_key=f"mission-{decision_id}",
+    )
+    return mission_id
+
+
+def test_mission_derives_one_authorized_wbs_work_and_replays(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    mission_id = _mission(tmp_path)
+
+    first = service.create_from_mission(
+        mission_id=mission_id, owner="agent-a", scope_paths=["auto_pm/core/example.py"]
+    )
+    second = service.create_from_mission(
+        mission_id=mission_id, owner="agent-a", scope_paths=["auto_pm/core/example.py"]
+    )
+
+    assert first == second
+    assert first.kind is WorkKind.WBS
+    assert first.authorization_ref == "DEC-MISSION"
+
+
+def test_mission_derivation_rejects_missing_wbs_authority(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    mission_id = _mission(tmp_path, allowed=frozenset())
+
+    with pytest.raises(WorkRegistryError, match="WBS"):
+        service.create_from_mission(
+            mission_id=mission_id, owner="agent-a", scope_paths=["auto_pm/core/example.py"]
+        )
+    assert service._store.list_works("SW-2026-008") == ()
+
+def test_mission_derivation_rejects_other_owner_path_conflict(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    mission_id = _mission(tmp_path, decision_id="DEC-CONFLICT")
+    _planned(service, "WORK-OTHER")
+    with pytest.raises(WorkRegistryError, match="owner=agent-a"):
+        service.create_from_mission(
+            mission_id=mission_id, owner="agent-b", scope_paths=["auto_pm/core/example.py"]
+        )
 
 
 def test_initializes_separate_wal_database(tmp_path: Path) -> None:
@@ -160,6 +233,115 @@ def test_state_machine_rejects_skipping_verification(tmp_path: Path) -> None:
 
     with pytest.raises(WorkRegistryError, match="非法"):
         service.transition("WORK-001", WorkState.ACCEPTED, "skip")
+
+
+def test_terminal_transition_exact_replay_preserves_version_and_event_count(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path)
+    _planned(service)
+    _decision(tmp_path, "DEC-GOOD", "SW-2026-008", ["auto_pm/core/example.py"])
+    ready = service.authorize("WORK-001", "DEC-GOOD", "authorize")
+    in_progress = service.transition(ready.work_id, WorkState.IN_PROGRESS, "start")
+    cancelled = service.transition(in_progress.work_id, WorkState.CANCELLED, "cancel")
+
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        before = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE aggregate_id=? AND event_type='WORK_TRANSITIONED'",
+            (cancelled.work_id,),
+        ).fetchone()[0]
+
+    replayed = service.transition(cancelled.work_id, WorkState.CANCELLED, "cancel")
+
+    assert replayed == cancelled
+    assert replayed.version == cancelled.version
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        after = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE aggregate_id=? AND event_type='WORK_TRANSITIONED'",
+            (cancelled.work_id,),
+        ).fetchone()[0]
+    assert after == before
+
+
+def test_transition_idempotency_key_cannot_cross_work(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    first = _planned(service, "WORK-001")
+    second = _planned(service, "WORK-002")
+    service.transition(first.work_id, WorkState.CANCELLED, "cancel-first")
+    service.transition(second.work_id, WorkState.CANCELLED, "cancel-second")
+
+    with pytest.raises(WorkRegistryError, match="其他 Work"):
+        service.transition(second.work_id, WorkState.CANCELLED, "cancel-first")
+
+
+def test_terminal_transition_rejects_new_key_and_retargeted_replay(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    work = _planned(service)
+    cancelled = service.transition(work.work_id, WorkState.CANCELLED, "cancel")
+
+    with pytest.raises(WorkRegistryError, match="非法"):
+        service.transition(cancelled.work_id, WorkState.CANCELLED, "cancel-again")
+    with pytest.raises(WorkRegistryError, match="绑定不同"):
+        service.transition(cancelled.work_id, WorkState.CLOSED, "cancel")
+
+
+def test_transition_replay_rejects_old_target_even_when_current_state_matches_request(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path)
+    _planned(service)
+    _decision(tmp_path, "DEC-GOOD", "SW-2026-008", ["auto_pm/core/example.py"])
+    ready = service.authorize("WORK-001", "DEC-GOOD", "authorize")
+    in_progress = service.transition(ready.work_id, WorkState.IN_PROGRESS, "start")
+    cancelled = service.transition(in_progress.work_id, WorkState.CANCELLED, "cancel")
+
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        before = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+
+    with pytest.raises(WorkRegistryError, match="绑定不同"):
+        service.transition(cancelled.work_id, WorkState.CANCELLED, "start")
+
+    assert service.get_work(cancelled.work_id).version == cancelled.version
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == before
+
+
+def test_transition_replay_rejects_same_work_key_from_another_event_type(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path)
+    work = _planned(service)
+
+    with pytest.raises(WorkRegistryError, match="不属于 Work 状态迁移"):
+        service.transition(work.work_id, WorkState.PLANNED, "create-WORK-001")
+
+
+def test_store_transition_replay_requires_exact_persisted_payload(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    work = _planned(service)
+    cancelled = service.transition(work.work_id, WorkState.CANCELLED, "cancel")
+    store = ContinuityStore(tmp_path)
+
+    replayed = store.transition(
+        work.work_id,
+        work.version,
+        WorkState.CANCELLED.value,
+        work.authorization_ref,
+        "cancel",
+        "2026-09-11T01:00:00+00:00",
+    )
+
+    assert replayed == cancelled
+    with pytest.raises(ContinuityStoreError, match="绑定不同"):
+        store.transition(
+            work.work_id,
+            work.version,
+            WorkState.CANCELLED.value,
+            "DEC-DIFFERENT",
+            "cancel",
+            "2026-09-11T01:00:00+00:00",
+        )
+    assert store.get_work(work.work_id).version == cancelled.version
 
 
 def test_idempotent_create_does_not_duplicate_event(tmp_path: Path) -> None:
@@ -326,7 +508,7 @@ def test_store_strict_reads_do_not_invoke_mutation_guard(
     service = _service(tmp_path)
     expected = _planned(service)
 
-    def forbidden_guard(*_args, **_kwargs):
+    def forbidden_guard(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("read path invoked mutation guard")
 
     monkeypatch.setattr(

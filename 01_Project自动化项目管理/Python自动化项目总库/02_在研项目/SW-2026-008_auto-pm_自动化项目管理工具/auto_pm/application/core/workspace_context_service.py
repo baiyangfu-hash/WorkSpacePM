@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -30,7 +32,12 @@ class WorkspaceContextService:
         "workspace_registry.json",
     )
 
-    def __init__(self, workspace_root: str, registry_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        workspace_root: str,
+        registry_path: str | Path | None = None,
+        package_file_provider: Callable[[], str | Path | None] | None = None,
+    ) -> None:
         self._workspace_root = Path(workspace_root).resolve()
         selected = Path(registry_path) if registry_path is not None else self._DEFAULT_REGISTRY
         self._registry_path = (
@@ -38,6 +45,7 @@ class WorkspaceContextService:
         )
         self._require_workspace_path(self._registry_path, "Workspace Registry")
         self._scanner = ProjectScanner(str(self._workspace_root))
+        self._package_file_provider = package_file_provider or self._loaded_package_file
 
     def resolve(
         self,
@@ -69,16 +77,37 @@ class WorkspaceContextService:
             raise WorkspaceContextError("development_root 必须与已验证项目根一致")
         control_id, control_session = self._control_mapping(mapping, mappings)
         runtime_root = self._optional_mapped_directory(mapping.runtime_root, "runtime_root")
-        release_id, release_pointer = self._release_pointer(runtime_root)
+        configured_release_id, release_pointer = self._release_pointer(runtime_root)
+        (
+            effective_release_id,
+            runtime_load_path,
+            runtime_fallback_reason,
+            loaded_package_file,
+        ) = self._runtime_identity(runtime_root, configured_release_id)
+        conflicts = self._runtime_conflicts(
+            runtime_root,
+            configured_release_id,
+            effective_release_id,
+            runtime_fallback_reason,
+        )
         anchor = self._anchor_file(project_path)
-        read_set = self._read_set(self._registry_path, anchor, release_pointer)
+        read_set = self._read_set(
+            self._registry_path,
+            anchor,
+            release_pointer,
+            loaded_package_file,
+        )
         runtime_relative = self._relative(runtime_root) if runtime_root else ""
         evidence_id = self._evidence_id(
             project.project_id,
             read_set,
             control_id,
             runtime_relative,
-            release_id,
+            configured_release_id,
+            effective_release_id,
+            runtime_load_path,
+            runtime_fallback_reason,
+            conflicts,
         )
         return WorkspaceContext(
             workspace_root=str(self._workspace_root),
@@ -96,9 +125,14 @@ class WorkspaceContextService:
             control_pm_session=self._relative(control_session) if control_session else "",
             development_root=self._relative(development_root),
             runtime_root=runtime_relative,
-            release_id=release_id,
+            release_id=configured_release_id,
+            configured_release_id=configured_release_id,
+            effective_release_id=effective_release_id,
+            runtime_load_path=runtime_load_path,
+            runtime_fallback_reason=runtime_fallback_reason,
             read_set=tuple(read_set),
             evidence_id=evidence_id,
+            conflicts=conflicts,
         )
 
     def _load_registry(
@@ -221,6 +255,68 @@ class WorkspaceContextService:
             raise WorkspaceContextError(f"active release 不存在: {self._relative(release_root)}")
         return release_id, pointer
 
+    def _runtime_identity(
+        self,
+        runtime_root: Path | None,
+        configured_release_id: str,
+    ) -> tuple[str, str, str, Path | None]:
+        """Derive the active package identity from the module already loaded by Python."""
+        if runtime_root is None:
+            return "", "", "", None
+        try:
+            package_file_value = self._package_file_provider()
+        except Exception:
+            return "", "", "loaded_package_file_unavailable", None
+        if not isinstance(package_file_value, (str, Path)) or not str(package_file_value).strip():
+            return "", "", "loaded_package_file_unavailable", None
+
+        try:
+            package_file = Path(package_file_value).resolve()
+        except (OSError, ValueError):
+            return "", "", "loaded_package_file_unavailable", None
+        if not package_file.is_file():
+            return "", "", "loaded_package_file_unavailable", None
+        try:
+            package_file.relative_to(self._workspace_root)
+        except ValueError:
+            return "", "", "loaded_package_outside_workspace", None
+
+        load_path = self._relative(package_file)
+        releases_root = (runtime_root / "releases").resolve()
+        try:
+            release_relative = package_file.relative_to(releases_root)
+        except ValueError:
+            return "", load_path, "loaded_package_outside_runtime_releases", package_file
+
+        parts = release_relative.parts
+        if len(parts) != 3 or parts[1:] != ("auto_pm", "__init__.py"):
+            return "", load_path, "loaded_package_not_release_package", package_file
+        effective_release_id = parts[0]
+        if not effective_release_id:
+            return "", load_path, "loaded_package_release_id_unavailable", package_file
+        return effective_release_id, load_path, "", package_file
+
+    @staticmethod
+    def _runtime_conflicts(
+        runtime_root: Path | None,
+        configured_release_id: str,
+        effective_release_id: str,
+        runtime_fallback_reason: str,
+    ) -> tuple[str, ...]:
+        if runtime_root is None:
+            return ()
+        if runtime_fallback_reason:
+            return ("RUNTIME_IDENTITY_UNVERIFIED",)
+        if effective_release_id != configured_release_id:
+            return ("RUNTIME_IDENTITY_DIVERGENCE",)
+        return ()
+
+    @staticmethod
+    def _loaded_package_file() -> str | None:
+        package = sys.modules.get("auto_pm")
+        module_file = getattr(package, "__file__", None) if package is not None else None
+        return module_file if isinstance(module_file, str) else None
+
     def _read_set(self, *paths: Path | None) -> list[ContextEvidence]:
         unique: list[Path] = []
         for path in paths:
@@ -251,13 +347,21 @@ class WorkspaceContextService:
         read_set: list[ContextEvidence],
         control_id: str,
         runtime_root: str,
-        release_id: str,
+        configured_release_id: str,
+        effective_release_id: str,
+        runtime_load_path: str,
+        runtime_fallback_reason: str,
+        conflicts: tuple[str, ...],
     ) -> str:
         payload = {
             "project_id": project_id,
             "control_project_id": control_id,
             "runtime_root": runtime_root,
-            "release_id": release_id,
+            "configured_release_id": configured_release_id,
+            "effective_release_id": effective_release_id,
+            "runtime_load_path": runtime_load_path,
+            "runtime_fallback_reason": runtime_fallback_reason,
+            "conflicts": conflicts,
             "read_set": [entry.model_dump() for entry in read_set],
         }
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]

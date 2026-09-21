@@ -37,6 +37,9 @@ from auto_pm.models.enums import ChangeStatus
 log = logging.getLogger(__name__)
 
 _RUNTIME_CHANGE_STATUSES = frozenset({"approved", "implementing"})
+_PLAN_HASH = re.compile(r"[0-9a-f]{64}\Z")
+_USER_CONFIRMATION = re.compile(r"user-confirmation:[A-Za-z0-9][A-Za-z0-9._:/-]{7,}\Z")
+_MODEL_APPROVER = re.compile(r"(?:^|[-_. ])(?:ai|agent|codex|gpt|model)(?:$|[-_. ])", re.IGNORECASE)
 
 
 class DecisionError(Exception):
@@ -72,6 +75,57 @@ class DecisionService:
         parts = relative_path.parts
         return len(parts) >= 2 and parts[:2] == (".auto-pm", "worktrees")
 
+    @staticmethod
+    def validate_planning_approval(
+        approver: str,
+        plan_hash: str,
+        approval_evidence_ref: str,
+        *,
+        request_id: str = "",
+        execution_grant: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Validate externally supplied human approval without creating evidence."""
+
+        resolved_approver = approver.strip()
+        if _PLAN_HASH.fullmatch(plan_hash) is None:
+            raise DecisionValidationError("planning plan_hash 必须是 64 位小写 SHA256")
+        if _USER_CONFIRMATION.fullmatch(approval_evidence_ref) is None:
+            raise DecisionValidationError("planning approval 必须引用 user-confirmation 外部证据")
+        if _MODEL_APPROVER.search(resolved_approver):
+            raise DecisionValidationError("planning approval 不允许模型或 Agent 自签")
+        if bool(request_id) != (execution_grant is not None):
+            raise DecisionValidationError(
+                "planning request_id 与 execution_grant 必须同时提供"
+            )
+        if request_id and request_id != request_id.strip():
+            raise DecisionValidationError("planning request_id 必须是 canonical 文本")
+        approval: dict[str, object] = {
+            "schema_version": "planning-approval.v1",
+            "plan_hash": plan_hash,
+            "approval_evidence_ref": approval_evidence_ref,
+        }
+        if execution_grant is not None:
+            expected_grant_keys = {
+                "adapter",
+                "approved_model",
+                "required_worktree_mode",
+                "declared_dirty_paths",
+            }
+            if set(execution_grant) != expected_grant_keys:
+                raise DecisionValidationError("planning execution_grant schema 不精确")
+            approval = {
+                "schema_version": "planning-approval.v2",
+                "plan_hash": plan_hash,
+                "approval_evidence_ref": approval_evidence_ref,
+                "request_id": request_id,
+                "execution_grant": execution_grant,
+            }
+        return {
+            "planning_approval": {
+                **approval,
+            }
+        }
+
     def create_decision(
         self,
         change_id: str,
@@ -82,6 +136,10 @@ class DecisionService:
         conditions: list[str] | None = None,
         decision_id: str = "",
         runtime_capability: RuntimeDecisionCapability | None = None,
+        planning_plan_hash: str = "",
+        approval_evidence_ref: str = "",
+        planning_request_id: str = "",
+        planning_execution_grant: dict[str, object] | None = None,
     ) -> DecisionPackageDTO:
         """从已审批的变更单生成固化的结构化决策包"""
         resolved_approver = approver.strip()
@@ -89,6 +147,21 @@ class DecisionService:
             raise DecisionValidationError("必须指定 change_id")
         if not resolved_approver:
             raise DecisionValidationError("必须指定 approver (审批人)")
+        has_planning_hash = bool(planning_plan_hash)
+        has_approval_evidence = bool(approval_evidence_ref)
+        if has_planning_hash != has_approval_evidence:
+            raise DecisionValidationError("planning plan_hash 与 approval evidence 必须同时提供")
+        if runtime_capability is not None and has_planning_hash:
+            raise DecisionValidationError("planning approval 与 runtime_capability 不得混用")
+        planning_metadata: dict[str, object] = {}
+        if has_planning_hash:
+            planning_metadata = self.validate_planning_approval(
+                resolved_approver,
+                planning_plan_hash,
+                approval_evidence_ref,
+                request_id=planning_request_id,
+                execution_grant=planning_execution_grant,
+            )
         if runtime_capability is not None and not decision_id.strip():
             raise DecisionValidationError("runtime_capability 必须绑定显式 decision_id")
         if runtime_capability is not None:
@@ -104,18 +177,35 @@ class DecisionService:
 
         # 变更编号只在项目账内唯一。跨项目可能存在同号单据，因此决策包必须
         # 使用 project_id 消歧；未限定项目且命中多个单据时必须 fail-closed。
-        runtime_source: tuple[Path, str, str, str] | None = None
+        immutable_source: tuple[Path, str, str, str] | None = None
         if runtime_capability is not None:
+            self._validate_runtime_change_id(change_id)
+            if not project_id or project_id != project_id.strip():
+                raise DecisionValidationError("immutable Decision 必须绑定规范的 project_id")
             runtime_path, runtime_change, runtime_sha256 = self._runtime_change(
                 change_id,
                 project_id,
             )
             candidates = [(runtime_path, runtime_change)]
-            runtime_source = (
+            immutable_source = (
                 runtime_path,
                 runtime_sha256,
                 runtime_change.status,
                 self._runtime_authority_projection(runtime_change),
+            )
+        elif has_planning_hash:
+            if not project_id or project_id != project_id.strip():
+                raise DecisionValidationError("immutable Decision 必须绑定规范的 project_id")
+            planning_path, planning_change, planning_sha256 = self._planning_change(
+                change_id,
+                project_id,
+            )
+            candidates = [(planning_path, planning_change)]
+            immutable_source = (
+                planning_path,
+                planning_sha256,
+                planning_change.status,
+                self._runtime_authority_projection(planning_change),
             )
         else:
             candidates = self._legacy_change_candidates(change_id, project_id)
@@ -198,30 +288,36 @@ class DecisionService:
             metadata=(
                 {RUNTIME_CAPABILITY_KEY: runtime_capability.to_dict()}
                 if runtime_capability is not None
-                else {}
+                else planning_metadata
             ),
         )
 
         serialized = json.dumps(dto.to_dict(), ensure_ascii=False, indent=2) + "\n"
         self._require_control_root()
-        if runtime_source is not None:
-            current_path, current_change, current_sha256 = self._runtime_change(
-                change_id,
-                project_id,
-            )
+        if immutable_source is not None:
+            if has_planning_hash:
+                current_path, current_change, current_sha256 = self._planning_change(
+                    change_id,
+                    project_id,
+                )
+            else:
+                current_path, current_change, current_sha256 = self._runtime_change(
+                    change_id,
+                    project_id,
+                )
             (
                 expected_path,
                 expected_sha256,
                 expected_status,
                 expected_projection,
-            ) = runtime_source
+            ) = immutable_source
             if (
                 self._path_key(current_path) != self._path_key(expected_path)
                 or current_sha256 != expected_sha256
                 or current_change.status != expected_status
                 or self._runtime_authority_projection(current_change) != expected_projection
             ):
-                raise DecisionValidationError("运行态 CHG 真源在 Decision 签发前发生漂移，拒绝固化")
+                raise DecisionValidationError("CHG 真源在 Decision 签发前发生漂移，拒绝固化")
         self._decision_directory().mkdir(parents=True, exist_ok=True)
         target_file = self._decision_target(resolved_dec_id)
         try:
@@ -432,6 +528,60 @@ class DecisionService:
             raise DecisionValidationError(
                 f"运行态 Decision 仅接受 approved/implementing CHG，当前为: {change.status}"
             )
+        return path, change, hashlib.sha256(source_after).hexdigest()
+
+    def _planning_change(
+        self,
+        change_id: str,
+        project_id: str,
+    ) -> tuple[Path, ChangeRequest, str]:
+        """Read one ordinary planning CHG from its registered canonical project path."""
+
+        self._validate_runtime_change_id(change_id)
+        project_root = self._registered_project_root(project_id)
+        family = "-".join(change_id.split("-")[:2])
+        candidate = (
+            project_root / "04_监控" / "01_变更管理" / "01_变更单" / family / f"{change_id}.md"
+        )
+        try:
+            path = require_safe_workspace_path(
+                self.workspace_root,
+                candidate,
+                label="Planning CHG 真源",
+            )
+        except ControlRootGuardError as error:
+            raise DecisionValidationError(str(error)) from error
+        if not path.is_file():
+            raise DecisionValidationError(f"未找到指定项目的 Planning CHG 真源: {project_id}/{change_id}")
+        try:
+            identity_before = self._unique_regular_file_identity(path, label="Planning CHG 真源")
+            source_before = path.read_bytes()
+            source_before.decode("utf-8", errors="strict")
+            change = ChgParser().parse(str(path))
+            verified_path = require_safe_workspace_path(
+                self.workspace_root,
+                candidate,
+                label="Planning CHG 真源",
+            )
+            source_after = verified_path.read_bytes()
+            identity_after = self._unique_regular_file_identity(
+                verified_path,
+                label="Planning CHG 真源",
+            )
+        except UnicodeDecodeError as error:
+            raise DecisionValidationError(f"Planning CHG 真源不是有效 UTF-8: {change_id}") from error
+        except (ControlRootGuardError, OSError) as error:
+            raise DecisionValidationError(f"Planning CHG 真源无法读取或复核: {change_id}") from error
+        except Exception as error:
+            raise DecisionValidationError(f"Planning CHG 真源无法解析: {change_id}") from error
+        if (
+            self._path_key(verified_path) != self._path_key(path)
+            or identity_before != identity_after
+            or source_before != source_after
+        ):
+            raise DecisionValidationError("Planning CHG 真源读取期间发生漂移，拒绝签发")
+        if change.project_id != project_id or change.change_number != change_id:
+            raise DecisionValidationError("Planning CHG filename/request/payload identity 不一致")
         return path, change, hashlib.sha256(source_after).hexdigest()
 
     @staticmethod

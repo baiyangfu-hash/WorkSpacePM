@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -95,6 +97,19 @@ def _orchestrator(ctx: click.Context) -> MissionOrchestrator:
 
 def _emit(item: BaseModel) -> None:
     click.echo(item.model_dump_json(indent=2))
+
+
+def _secret_from_environment(variable_name: str) -> str:
+    """Resolve a secret by name without accepting its value in argv."""
+
+    if re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", variable_name) is None:
+        raise click.ClickException("lease token 环境变量名无效")
+    value = os.environ.pop(variable_name, None)
+    if value is None or value != value.strip() or not value:
+        raise click.ClickException("lease token 安全秘密源不可用")
+    if any(not character.isprintable() for character in value):
+        raise click.ClickException("lease token 安全秘密源无效")
+    return value
 
 
 def _git(root: Path, *args: str) -> bytes:
@@ -631,7 +646,8 @@ def lease_group() -> None:
 @lease_group.command(name="renew")
 @click.option("--run-id", required=True)
 @click.option("--owner", "owner_id", required=True)
-@click.option("--lease-token", required=True)
+@click.option("--lease-token-env", required=True, metavar="ENV_NAME")
+@click.option("--expected-version", type=click.IntRange(min=1), required=True)
 @click.option("--lease-seconds", type=click.IntRange(60, 86_400), default=1800, show_default=True)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
@@ -639,14 +655,21 @@ def renew_lease(
     ctx: click.Context,
     run_id: str,
     owner_id: str,
-    lease_token: str,
+    lease_token_env: str,
+    expected_version: int,
     lease_seconds: int,
     idempotency_key: str,
 ) -> None:
     """Renew a lease held by the same owner and token."""
+    lease_token = _secret_from_environment(lease_token_env)
     try:
         item = _execution_service(ctx).renew_lease(
-            run_id, owner_id, lease_token, lease_seconds, idempotency_key
+            run_id,
+            owner_id,
+            lease_token,
+            lease_seconds,
+            idempotency_key,
+            expected_version=expected_version,
         )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error

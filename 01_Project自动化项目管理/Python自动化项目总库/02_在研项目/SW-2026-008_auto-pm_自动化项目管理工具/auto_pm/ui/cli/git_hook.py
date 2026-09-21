@@ -9,8 +9,11 @@ from rich.console import Console
 
 from auto_pm.app_context import AppContext
 from auto_pm.infrastructure.git_hook_enforcer import (
+    StagedSnapshotError,
     enforce_commit_msg,
     enforce_pre_commit,
+    enforce_release_ledger_gate,
+    get_staged_snapshot,
 )
 
 console = Console()
@@ -36,6 +39,16 @@ def cmd_pre_commit(ctx: click.Context) -> None:
         ctx.exit(code)
 
 
+@git_hook_group.command(name="release-gate")
+@click.pass_context
+def cmd_release_gate(ctx: click.Context) -> None:
+    """执行发布前全局台账一致性校验。"""
+    ws = _workspace(ctx)
+    code = enforce_release_ledger_gate(ws)
+    if code != 0:
+        ctx.exit(code)
+
+
 @git_hook_group.command(name="commit-msg")
 @click.argument("msg_file", type=click.Path(exists=True))
 @click.pass_context
@@ -45,6 +58,26 @@ def cmd_commit_msg(ctx: click.Context, msg_file: str) -> None:
     code = enforce_commit_msg(ws, Path(msg_file))
     if code != 0:
         ctx.exit(code)
+
+
+@git_hook_group.command(name="preflight")
+@click.argument("msg_file", type=click.Path(exists=True, path_type=Path))
+@click.pass_context
+def cmd_preflight(ctx: click.Context, msg_file: Path) -> None:
+    """以同一个不可变暂存快照执行提交前只读预检。"""
+    ws = _workspace(ctx)
+    try:
+        staged_snapshot = get_staged_snapshot(ws)
+    except StagedSnapshotError as error:
+        console.print(f"[red]错误: 无法读取 Git 暂存区: {error}[/red]")
+        ctx.exit(1)
+
+    pre_commit_code = enforce_pre_commit(ws, staged_snapshot)
+    commit_msg_code = enforce_commit_msg(ws, msg_file, staged_snapshot)
+    if pre_commit_code != 0:
+        ctx.exit(pre_commit_code)
+    if commit_msg_code != 0:
+        ctx.exit(commit_msg_code)
 
 
 @git_hook_group.command(name="install")
@@ -88,6 +121,7 @@ case "$GIT_COMMON_DIR" in
     /*) ;;
     *) GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) ;;
 esac
+GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) || exit 1
 PROJECT_ROOT=$(dirname "$GIT_COMMON_DIR")
 PYTHON_EXE="python"
 if [ -f "$PROJECT_ROOT/.venv/Scripts/python.exe" ]; then
@@ -96,7 +130,29 @@ elif [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python"
 fi
 
-"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$PROJECT_ROOT" git-hook commit-msg "$1"
+# Git may pass .git/COMMIT_EDITMSG in the primary worktree and an absolute
+# common-git-dir path in a linked worktree.  Resolve the path before the
+# launcher can switch runtime context, and fail closed when it is unreadable.
+MSG_FILE_DIR=$(dirname -- "$1") || exit 1
+MSG_FILE_NAME=$(basename -- "$1") || exit 1
+MSG_FILE_DIR_ABS=$(cd -- "$MSG_FILE_DIR" 2>/dev/null && pwd) || {
+    echo "[auto-pm commit-msg] cannot resolve message directory: $MSG_FILE_DIR" >&2
+    exit 1
+}
+MSG_FILE="$MSG_FILE_DIR_ABS/$MSG_FILE_NAME"
+if [ ! -r "$MSG_FILE" ]; then
+    echo "[auto-pm commit-msg] message file is not readable: $MSG_FILE" >&2
+    exit 1
+fi
+case "$MSG_FILE" in
+    "$GIT_COMMON_DIR/COMMIT_EDITMSG"|"$GIT_COMMON_DIR"/worktrees/*/COMMIT_EDITMSG) ;;
+    *)
+        echo "[auto-pm commit-msg] message file is outside Git metadata: $MSG_FILE" >&2
+        exit 1
+        ;;
+esac
+
+"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$PROJECT_ROOT" git-hook commit-msg "$MSG_FILE"
 exit $?
 """
 

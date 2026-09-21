@@ -1,0 +1,27 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260921-0AE686EA",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-298",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/substance_injector.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/change/test_substance_control.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/ledger_reconciler.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-21T14:00:56.283274+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Base on accepted-terminal commit 05a75452, then cherry-pick C05 958e2760, C06 5f9ad8fc, and C07 0d974bd7 in order before C08 changes.",
+    "Preserve the failed C07-first attempt as audit evidence; no main, remote, release, deployment, or out-of-scope writes.",
+    "Stop at user acceptance boundary; final C08 isolated commit is separately authorized."
+  ],
+  "metadata": {}
+}

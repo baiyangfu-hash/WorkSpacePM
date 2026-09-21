@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 
 from auto_pm.contracts.continuity import WorkItem, WorkKind, WorkState
 from auto_pm.contracts.decision_package import DecisionPackageDTO
+from auto_pm.contracts.mission import Mission
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
@@ -97,6 +98,63 @@ class WorkRegistryService:
         )
         return self._transition(work, WorkState.READY, decision_id, idempotency_key)
 
+    def create_from_mission(
+        self, *, mission_id: str, owner: str, scope_paths: list[str]
+    ) -> WorkItem:
+        """Derive one replay-safe WBS Work from an existing strong-authority Mission."""
+        try:
+            mission = self._store.get_mission(mission_id)
+        except ContinuityStoreError as error:
+            raise WorkRegistryError(f"Mission 不存在: {mission_id}") from error
+        self._assert_mission_authority(mission, scope_paths)
+        paths = self._normalize_paths(scope_paths)
+        digest = hashlib.sha256(
+            f"{mission.mission_id}\n{mission.authority.decision_id}\n{self._scope_hash(paths)}".encode()
+        ).hexdigest()[:16].upper()
+        work_id = f"WORK-MSN-{digest}"
+        for existing in self._store.list_works(mission.subject_project_id):
+            overlap = sorted(set(existing.scope_paths).intersection(paths))
+            if overlap and existing.owner != owner and existing.work_id != work_id:
+                raise WorkRegistryError(
+                    "其他 owner 的 active Work 路径冲突: "
+                    f"owner={existing.owner}; paths={','.join(overlap)}"
+                )
+        work = self.create_work(
+            work_id=work_id,
+            subject_project_id=mission.subject_project_id,
+            kind=WorkKind.WBS,
+            title=mission.title,
+            owner=owner,
+            scope_paths=list(paths),
+            source_fingerprint=mission.authority.audit.source_fingerprint,
+            idempotency_key=f"mission-work-create:{mission.mission_id}:{digest}",
+        )
+        if work.state is WorkState.PLANNED:
+            return self.authorize(
+                work.work_id,
+                mission.authority.decision_id,
+                f"mission-work-authorize:{mission.mission_id}:{digest}",
+            )
+        return work
+
+    def _assert_mission_authority(self, mission: Mission, scope_paths: list[str]) -> None:
+        authority = mission.authority
+        if authority.authorization_source != "CHG_DECISION":
+            raise WorkRegistryError("Mission 不具备 CHG_DECISION 强授权")
+        if WorkKind.WBS not in authority.allowed_child_work_kinds:
+            raise WorkRegistryError("Mission 未授权 WBS 子 Work")
+        paths = self._normalize_paths(scope_paths)
+        if not set(paths).issubset(set(authority.scope_paths)):
+            raise WorkRegistryError("Work scope 超出 Mission authority")
+        decision = self._load_decision(authority.decision_id)
+        if decision.change_id != authority.change_id:
+            raise WorkRegistryError("Mission CHG 与 Decision 不一致")
+        self.assert_authorized_scope(
+            subject_project_id=mission.subject_project_id,
+            decision_id=authority.decision_id,
+            scope_paths=paths,
+        )
+
     def assert_authorized_scope(
         self,
         *,
@@ -156,7 +214,22 @@ class WorkRegistryService:
         new_state: WorkState,
         idempotency_key: str,
     ) -> WorkItem:
-        work = self._store.get_work(work_id)
+        try:
+            existing = self._store.work_transition_for_key(idempotency_key)
+            work = self._store.get_work(work_id)
+        except ContinuityStoreError as error:
+            raise WorkRegistryError(str(error)) from error
+        if existing is not None:
+            aggregate_id, recorded_state, recorded_authorization_ref = existing
+            if aggregate_id != work_id:
+                raise WorkRegistryError("idempotency_key 已用于其他 Work")
+            if (
+                recorded_state is not new_state
+                or recorded_authorization_ref != work.authorization_ref
+                or work.state is not new_state
+            ):
+                raise WorkRegistryError("idempotency_key 已绑定不同 Work 状态迁移")
+            return work
         if new_state not in _TRANSITIONS[work.state]:
             raise WorkRegistryError(f"非法 Work 状态迁移: {work.state} -> {new_state}")
         return self._transition(work, new_state, work.authorization_ref, idempotency_key)
@@ -208,7 +281,7 @@ class WorkRegistryService:
         idempotency_key: str,
     ) -> WorkItem:
         try:
-            return self._store.transition(
+            transitioned = self._store.transition(
                 work.work_id,
                 work.version,
                 new_state.value,
@@ -218,6 +291,9 @@ class WorkRegistryService:
             )
         except ContinuityStoreError as error:
             raise WorkRegistryError(str(error)) from error
+        if transitioned.state is not new_state:
+            raise WorkRegistryError("idempotency_key 已绑定不同 Work 状态迁移")
+        return transitioned
 
     def _load_decision(self, decision_id: str) -> DecisionPackageDTO:
         path = self._root / ".auto-pm" / "decisions" / f"{decision_id}.json"

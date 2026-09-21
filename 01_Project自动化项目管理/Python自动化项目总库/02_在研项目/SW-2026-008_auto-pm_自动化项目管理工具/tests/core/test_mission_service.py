@@ -245,11 +245,17 @@ def test_v2_store_migrates_additively_and_preserves_existing_work(tmp_path: Path
     assert ContinuityStore(tmp_path).get_work("WORK-LEGACY-001").title == "Legacy work"
     with closing(sqlite3.connect(db_path)) as conn, conn:
         version = conn.execute("SELECT schema_version FROM schema_meta").fetchone()[0]
-        migration = conn.execute(
-            "SELECT from_version, to_version FROM schema_migrations"
-        ).fetchone()
-    assert version == "continuity-store.v3"
-    assert migration == ("continuity-store.v2", "continuity-store.v3")
+        migrations = conn.execute(
+            "SELECT from_version, to_version FROM schema_migrations ORDER BY rowid"
+        ).fetchall()
+    assert version == "continuity-store.v7"
+    assert migrations == [
+        ("continuity-store.v2", "continuity-store.v3"),
+        ("continuity-store.v3", "continuity-store.v4"),
+        ("continuity-store.v4", "continuity-store.v5"),
+        ("continuity-store.v5", "continuity-store.v6"),
+        ("continuity-store.v6", "continuity-store.v7"),
+    ]
     _create(service)
 
 

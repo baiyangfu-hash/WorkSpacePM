@@ -14,7 +14,7 @@ from auto_pm.core.mission_service import MissionService
 from auto_pm.core.pm_cockpit_service import PmCockpitService
 from auto_pm.core.work_registry_service import WorkRegistryService
 
-from auto_pm.contracts.continuity import WorkKind
+from auto_pm.contracts.continuity import WorkKind, WorkState
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 from auto_pm.contracts.pm_cockpit import CockpitUserAction
 
@@ -224,3 +224,25 @@ def test_cockpit_snapshot_reads_linked_worktree_without_side_effects(tmp_path: P
     assert snapshot.projects[0].project_id == "SW-2026-008"
     assert after == before
     assert not _git(linked, "status", "--porcelain").stdout.strip()
+
+
+def test_primary_work_ignores_accepted_history(tmp_path: Path) -> None:
+    _git_root(tmp_path)
+    work = WorkRegistryService(tmp_path, now=lambda: "2026-09-09T12:00:00+00:00")
+    work.initialize("test")
+    work.create_work(
+        work_id="WORK-ACCEPTED",
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.GOVERNANCE,
+        title="Accepted history",
+        owner="Codex",
+        scope_paths=["auto_pm/example.py"],
+        source_fingerprint="sha256:test",
+        idempotency_key="create-accepted",
+        read_only=True,
+    )
+    work.transition("WORK-ACCEPTED", WorkState.IN_PROGRESS, "start-accepted")
+    work.transition("WORK-ACCEPTED", WorkState.VERIFYING, "verify-accepted")
+    accepted = work.transition("WORK-ACCEPTED", WorkState.ACCEPTED, "accept-accepted")
+
+    assert PmCockpitService._primary_work(None, (accepted,)) is None

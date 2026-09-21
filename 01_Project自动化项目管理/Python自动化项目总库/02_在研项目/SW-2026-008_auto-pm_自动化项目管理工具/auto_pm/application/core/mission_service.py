@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from auto_pm.contracts.mission import AuthorityEnvelope, Mission, MissionState
+from auto_pm.contracts.continuity import WorkKind
+from auto_pm.contracts.decision_package import DecisionPackageDTO
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
+from auto_pm.contracts.mission import (
+    AuthorityAudit,
+    AuthorityEnvelope,
+    InternalRoutingPolicy,
+    Mission,
+    MissionState,
+)
+from auto_pm.contracts.pm_facade import PlanningDraft
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
@@ -36,8 +47,10 @@ class MissionService:
         self,
         workspace_root: str | Path,
         now: Callable[[], datetime] | None = None,
+        *,
+        store: ContinuityStore | None = None,
     ) -> None:
-        self._store = ContinuityStore(workspace_root)
+        self._store = store or ContinuityStore(workspace_root)
         self._now = now or (lambda: datetime.now(UTC))
 
     def initialize(self, tool_version: str) -> None:
@@ -91,6 +104,129 @@ class MissionService:
             return self._store.create_mission(values, idempotency_key, now)
         except ContinuityStoreError as error:
             raise MissionServiceError(str(error)) from error
+
+    def create_from_planning_approval(
+        self,
+        *,
+        mission_id: str,
+        draft: PlanningDraft,
+        decision: DecisionPackageDTO,
+        plan_hash: str,
+        created_by: str,
+    ) -> Mission:
+        """Create a strong-authority Mission from one exact planning approval."""
+
+        approval = decision.metadata.get("planning_approval")
+        if not isinstance(approval, dict) or approval.get("plan_hash") != plan_hash:
+            raise MissionServiceError("Decision 未绑定指定 PlanningScopeCard plan_hash")
+        expected_approval_keys = {
+            "schema_version",
+            "plan_hash",
+            "approval_evidence_ref",
+            "request_id",
+            "execution_grant",
+        }
+        if set(approval) != expected_approval_keys or approval.get("schema_version") != "planning-approval.v2":
+            raise MissionServiceError("Decision planning metadata schema 不精确")
+        if approval.get("request_id") != draft.request_id:
+            raise MissionServiceError("Decision 与 PlanningDraft request_id 不一致")
+        grant = approval.get("execution_grant")
+        if not isinstance(grant, dict) or set(grant) != {
+            "adapter",
+            "approved_model",
+            "required_worktree_mode",
+            "declared_dirty_paths",
+        }:
+            raise MissionServiceError("Decision execution_grant schema 不精确")
+        try:
+            adapter_raw = grant["adapter"]
+            worktree_raw = grant["required_worktree_mode"]
+            approved_model = grant["approved_model"]
+            dirty_raw = grant["declared_dirty_paths"]
+            if (
+                not isinstance(adapter_raw, str)
+                or not isinstance(worktree_raw, str)
+                or not isinstance(approved_model, str)
+                or not isinstance(dirty_raw, list)
+                or any(not isinstance(path, str) for path in dirty_raw)
+            ):
+                raise TypeError("execution_grant")
+            adapter = ExecutionAdapterKind(adapter_raw)
+            worktree_mode = WorktreeMode(worktree_raw)
+            declared_dirty_paths = tuple(dirty_raw)
+        except (KeyError, TypeError, ValueError) as error:
+            raise MissionServiceError("Decision execution_grant 无法规范化") from error
+        if worktree_mode is not WorktreeMode.ISOLATED:
+            raise MissionServiceError("Planning approval 只允许 ISOLATED worktree")
+        if (
+            decision.project_id != draft.subject_project_id
+            or decision.decision_conclusion not in {"approved", "conditionally_approved"}
+            or not decision.change_id
+            or not decision.decision_id
+            or not decision.approver
+            or tuple(decision.approved_files) == ()
+        ):
+            raise MissionServiceError("Decision 不是可物化 Mission 的真实批准")
+        try:
+            parsed_approved_at = datetime.fromisoformat(decision.approved_at)
+        except (TypeError, ValueError) as error:
+            raise MissionServiceError("Decision approved_at 必须是带时区时间") from error
+        if parsed_approved_at.tzinfo is None:
+            raise MissionServiceError("Decision approved_at 必须是带时区时间")
+        approved_at = parsed_approved_at.astimezone(UTC)
+        instant = self._instant()
+        if approved_at > instant:
+            raise MissionServiceError("Decision approved_at 晚于当前时间，拒绝物化 Mission")
+        source_payload = {
+            "decision": decision.to_dict(),
+            "plan_hash": plan_hash,
+        }
+        source_hash = hashlib.sha256(
+            json.dumps(
+                source_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        envelope_hash = hashlib.sha256(
+            f"{draft.request_id}\n{decision.decision_id}\n{plan_hash}".encode()
+        ).hexdigest()
+        authority = AuthorityEnvelope(
+            envelope_id=f"AUTH-{envelope_hash[:16].upper()}",
+            subject_project_id=draft.subject_project_id,
+            change_id=decision.change_id,
+            decision_id=decision.decision_id,
+            authorization_source="CHG_DECISION",
+            scope_paths=tuple(decision.approved_files),
+            allowed_child_work_kinds=frozenset({WorkKind.WBS}),
+            routing=InternalRoutingPolicy(
+                allow_execution_branch_changes=True,
+                allowed_execution_adapters=frozenset({adapter}),
+                approved_model=approved_model,
+                required_worktree_mode=worktree_mode,
+                declared_dirty_paths=declared_dirty_paths,
+            ),
+            valid_from=approved_at,
+            expires_at=instant + timedelta(days=30),
+            audit=AuthorityAudit(
+                created_by=created_by,
+                created_at=instant,
+                approved_by=decision.approver,
+                approved_at=approved_at,
+                source_fingerprint=f"sha256:{source_hash}",
+            ),
+        )
+        return self.create(
+            mission_id=mission_id,
+            subject_project_id=draft.subject_project_id,
+            title=draft.objective,
+            objective=draft.objective,
+            acceptance_criteria=list(draft.acceptance_criteria),
+            authority=authority,
+            created_by=created_by,
+            idempotency_key=f"planning-mission-create:{draft.request_id}",
+        )
 
     def get(self, mission_id: str) -> Mission:
         try:

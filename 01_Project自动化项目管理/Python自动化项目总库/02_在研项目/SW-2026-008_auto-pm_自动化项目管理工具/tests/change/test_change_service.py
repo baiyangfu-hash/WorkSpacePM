@@ -46,6 +46,40 @@ class TestChangeService:
         if os.path.isfile(cr.file_path):
             os.remove(cr.file_path)
 
+    def test_create_change_request_replays_a_reserved_change_number(
+        self, workspace_root: str, project_id: str
+    ) -> None:
+        """A caller-owned reservation must not create a second CHG on retry."""
+
+        svc = ChangeService(workspace_root)
+        change_number = "CHG-SCPT-2026-999"
+        created = svc.create_change_request(
+            project_id=project_id,
+            domain="SCPT",
+            business_nature="DEF",
+            impact_scope=["MODULE"],
+            applicant="测试人员",
+            background="重放测试背景",
+            necessity="重放测试必要性",
+            change_number=change_number,
+        )
+        replayed = svc.create_change_request(
+            project_id=project_id,
+            domain="SCPT",
+            business_nature="DEF",
+            impact_scope=["MODULE"],
+            applicant="测试人员",
+            background="重放测试背景",
+            necessity="重放测试必要性",
+            change_number=change_number,
+        )
+
+        assert created.change_number == change_number
+        assert replayed.change_number == change_number
+        assert len(
+            [item for item in svc.list_change_requests(project_id) if item.change_number == change_number]
+        ) == 1
+
     def test_list_change_requests(self, workspace_root: str, project_id: str) -> None:
         """测试列出变更单"""
         if not os.path.isdir(workspace_root):

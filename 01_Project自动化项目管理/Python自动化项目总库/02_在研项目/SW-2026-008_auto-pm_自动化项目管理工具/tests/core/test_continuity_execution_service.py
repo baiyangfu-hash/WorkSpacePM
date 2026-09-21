@@ -7,11 +7,14 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from auto_pm.core.continuity_execution_service import (
@@ -20,7 +23,12 @@ from auto_pm.core.continuity_execution_service import (
 )
 from auto_pm.core.work_registry_service import WorkRegistryService
 
-from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.application.core.evidence_collection_service import (
+    EvidenceCollectionService,
+    PythonQualityGate,
+    PythonQualityReceipt,
+)
+from auto_pm.contracts.continuity import CheckpointItem, RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
     DecisionPackageDTO,
@@ -28,6 +36,7 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionCapability,
     RuntimeDecisionOutcome,
 )
+from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.domain.change.decision_service import DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -141,6 +150,22 @@ def _start(service: ContinuityExecutionService, **changes):
     return service.start_run(**values)
 
 
+def _start_evidence(service: ContinuityExecutionService, **changes):
+    values = {
+        "run_id": "RUN-001",
+        "owner_id": "agent-a",
+        "lease_token": "lease-secret",
+        "evidence": ExecutionStartEvidence(
+            process_id=1234,
+            session_id="thread-e03b-test",
+            started_at=service._utc_now(),
+        ),
+        "idempotency_key": "record-start-evidence",
+    }
+    values.update(changes)
+    return service.record_start_evidence(**values)
+
+
 def _checkpoint(service: ContinuityExecutionService, **changes):
     values = {
         "checkpoint_id": "CP-001",
@@ -157,6 +182,234 @@ def _checkpoint(service: ContinuityExecutionService, **changes):
     return service.checkpoint(**values)
 
 
+def _c03_auto_checkpoint_service(
+    tmp_path: Path,
+    *,
+    ruff_failure: bool = False,
+    include_production_target: bool = True,
+    include_untracked_target: bool = False,
+    c03_selector_match: bool = True,
+    project_name: str = "project",
+):
+    """Create a real nested project worktree plus isolated continuity database."""
+
+    clock = Clock()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    _git_root(workspace)
+    (workspace / ".gitignore").write_text(
+        ".auto-pm/\n__pycache__/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n",
+        encoding="utf-8",
+        errors="replace",
+    )
+    project = workspace / project_name
+    source = project / "auto_pm" / "core" / "target.py"
+    source.parent.mkdir(parents=True)
+    (project / "auto_pm" / "__init__.py").write_text(
+        "", encoding="utf-8", errors="replace"
+    )
+    (project / "auto_pm" / "core" / "__init__.py").write_text(
+        "", encoding="utf-8", errors="replace"
+    )
+    source.write_text(
+        "import os\n\n\ndef value() -> int:\n    return 1\n"
+        if ruff_failure
+        else "def value() -> int:\n    return 1\n",
+        encoding="utf-8",
+        errors="replace",
+    )
+    test_path = project / "tests" / "core" / "test_continuity_execution_service.py"
+    test_path.parent.mkdir(parents=True)
+    test_name = (
+        "test_append_verified_checkpoint_profile_target"
+        if c03_selector_match
+        else "test_other_quality_target"
+    )
+    test_path.write_text(
+        "from auto_pm.core.target import value\n\n\n"
+        f"def {test_name}() -> None:\n"
+        "    assert value() > 0\n",
+        encoding="utf-8",
+        errors="replace",
+    )
+    (project / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\ntestpaths = [\"tests\"]\n",
+        encoding="utf-8",
+        errors="replace",
+    )
+    subprocess.run(["git", "-C", str(workspace), "add", "."], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "-c",
+            "user.name=Continuity Test",
+            "-c",
+            "user.email=continuity@example.invalid",
+            "commit",
+            "-m",
+            "nested quality project",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    baseline = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
+    candidate = workspace / ".auto-pm" / "worktrees" / "c03-auto-checkpoint"
+    candidate.parent.mkdir(parents=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "worktree",
+            "add",
+            "-b",
+            "codex/c03-auto-checkpoint-test",
+            str(candidate),
+            baseline,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    owned_paths = [f"{project_name}/tests/core/test_continuity_execution_service.py"]
+    if include_production_target:
+        owned_paths.insert(0, f"{project_name}/auto_pm/core/target.py")
+    if include_untracked_target:
+        owned_paths.append(f"{project_name}/auto_pm/core/generated.py")
+    work = WorkRegistryService(workspace, now=lambda: clock().isoformat())
+    work.initialize("test")
+    work.create_work(
+        work_id="WORK-001",
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.GOVERNANCE,
+        title="C03 automatic checkpoint",
+        owner="architect",
+        scope_paths=owned_paths,
+        source_fingerprint="sha256:c03",
+        idempotency_key="create-c03-work",
+        read_only=True,
+    )
+    service = ContinuityExecutionService(workspace, store=ContinuityStore(workspace, _clock=clock), now=clock)
+    _start(
+        service,
+        owned_paths=owned_paths,
+        worktree_path=str(candidate),
+        git_head=baseline,
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+    )
+    return candidate, candidate / project_name, service
+
+
+def _append_auto_checkpoint(
+    service: ContinuityExecutionService, project_root: Path, **changes: object
+):
+    values: dict[str, object] = {
+        "checkpoint_id": "CP-AUTO-001",
+        "run_id": "RUN-001",
+        "owner_id": "agent-a",
+        "lease_token": "lease-secret",
+        "project_root": project_root,
+    }
+    values.update(changes)
+    return service.append_verified_checkpoint(**values)  # type: ignore[arg-type]
+
+
+def _quality_receipt_for_test(
+    collector: EvidenceCollectionService,
+    run,
+    project_root: Path,
+    *,
+    exit_code: int | None = 0,
+    output_summary: str = "injected C03 receipt",
+) -> PythonQualityReceipt:
+    """Return a content-bound receipt for negative C03 service-path tests.
+
+    One positive C03 test runs the real C02 subprocesses.  The remaining tests
+    deliberately inject a receipt so they exercise C03 rejection/replay logic
+    without repeating three expensive tools for each failure permutation.
+    """
+
+    evidence = collector.collect(run)
+    root = str(project_root.resolve())
+    commands = {
+        "pytest": (
+            sys.executable,
+            "-m",
+            "pytest",
+            "-o",
+            "addopts=",
+            "-p",
+            "no:cacheprovider",
+            "-k",
+            "append_verified_checkpoint",
+            "tests/core/test_continuity_execution_service.py",
+        ),
+        "ruff": (sys.executable, "-m", "ruff", "check", "--no-cache"),
+        "mypy": (sys.executable, "-m", "mypy", "--no-incremental"),
+    }
+    gates = tuple(
+        PythonQualityGate(
+            name=name,
+            command=commands[name],
+            cwd=root,
+            exit_code=exit_code,
+            output_digest=hashlib.sha256(
+                f"{name}:{output_summary}".encode()
+            ).hexdigest(),
+            output_summary=output_summary,
+        )
+        for name in ("pytest", "ruff", "mypy")
+    )
+    payload = {
+        "run_id": run.run_id,
+        "baseline_git_head": run.git_head,
+        "candidate_path": evidence.worktree_path,
+        "project_root": root,
+        "evidence_hash": evidence.content_hash,
+        "gates": [
+            {
+                "name": gate.name,
+                "command": list(gate.command),
+                "cwd": gate.cwd,
+                "exit_code": gate.exit_code,
+                "output_digest": gate.output_digest,
+                "output_summary": gate.output_summary,
+            }
+            for gate in gates
+        ],
+        "evidence_current": True,
+        "evidence_error": None,
+    }
+    content_hash = hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return PythonQualityReceipt(
+        run_id=run.run_id,
+        baseline_git_head=run.git_head,
+        candidate_path=evidence.worktree_path,
+        project_root=root,
+        evidence_hash=evidence.content_hash,
+        gates=gates,
+        evidence_current=True,
+        evidence_error=None,
+        content_hash=content_hash,
+    )
+
+
 def _settlement_ready(
     root: Path,
     clock: Clock,
@@ -170,8 +423,45 @@ def _settlement_ready(
     decision_conclusion: str = "approved",
     change_status: str = "approved",
     target_change_id: str = "CHG-SCPT-2026-213",
+    decision_attributes: str | None = None,
+    decision_filter_command: str | None = None,
+    decision_smudge_filter_command: str | None = None,
 ) -> ContinuityExecutionService:
     works, service = _services(root, clock)
+    if decision_filter_command is not None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "config",
+                "filter.decision.clean",
+                decision_filter_command,
+            ],
+            check=True,
+            capture_output=True,
+        )
+    if decision_smudge_filter_command is not None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "config",
+                "filter.decision.smudge",
+                decision_smudge_filter_command,
+            ],
+            check=True,
+            capture_output=True,
+        )
+    tracked_support: tuple[str, ...] = ()
+    if decision_attributes is not None:
+        (root / ".gitattributes").write_text(
+            decision_attributes,
+            encoding="utf-8",
+            errors="replace",
+        )
+        tracked_support = (".gitattributes",)
     _runtime_change(root, status=change_status)
     canonical_paths = ["auto_pm/core/a.py", ".auto-pm/continuity.db"]
     approved_paths = decision_paths or canonical_paths
@@ -222,7 +512,7 @@ def _settlement_ready(
         f".auto-pm/decisions/{decision_id}.json",
     )
     subprocess.run(
-        ["git", "-C", str(root), "add", "-f", "--", *decision_paths],
+        ["git", "-C", str(root), "add", "-f", "--", *decision_paths, *tracked_support],
         check=True,
         capture_output=True,
     )
@@ -262,6 +552,13 @@ def _settlement_ready(
         lease_seconds=60,
         idempotency_key="create-target-run",
     )
+    _start_evidence(
+        service,
+        run_id="RUN-TARGET",
+        owner_id="legacy-agent",
+        lease_token="target-secret",
+        idempotency_key="record-target-start-evidence",
+    )
     service.checkpoint(
         checkpoint_id="CP-TARGET",
         run_id="RUN-TARGET",
@@ -297,6 +594,13 @@ def _settlement_ready(
         lease_seconds=900,
         idempotency_key="create-recovery-run",
         owned_paths=recovery_owned,
+    )
+    _start_evidence(
+        service,
+        run_id="RUN-RECOVERY",
+        owner_id="recovery-agent",
+        lease_token="recovery-secret",
+        idempotency_key="record-recovery-start-evidence",
     )
     return service
 
@@ -382,6 +686,11 @@ def _replace_run_created_event_with_legacy_payload(root: Path, run_id: str) -> N
         ).fetchone()
         assert run is not None and event is not None
         payload = dict(run)
+        payload["state"] = RunState.RUNNING.value
+        conn.execute(
+            "UPDATE run_items SET state=? WHERE run_id=?",
+            (RunState.RUNNING.value, run_id),
+        )
         canonical = json.dumps(
             payload,
             ensure_ascii=False,
@@ -424,10 +733,41 @@ def test_run_binds_work_owner_paths_git_and_lease(tmp_path: Path) -> None:
     run = _start(service)
     lease = service._store.get_lease(run.run_id)
 
-    assert run.state == RunState.RUNNING
+    assert run.state == RunState.READY
     assert run.owned_paths == ("auto_pm/core/a.py",)
     assert lease.owner_id == "agent-a"
     assert datetime.fromisoformat(lease.expires_at) > clock()
+
+
+def test_start_evidence_is_lease_bound_cas_and_idempotent(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    ready = _start(service)
+
+    started = _start_evidence(service)
+    replay = _start_evidence(service)
+
+    assert ready.state is RunState.READY
+    assert started.state is RunState.RUNNING
+    assert started.version == ready.version + 1
+    assert replay == started
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        payload = conn.execute(
+            "SELECT payload_json FROM events WHERE event_type='RUN_STARTED'"
+        ).fetchone()[0]
+    assert "lease-secret" not in payload
+
+
+def test_start_evidence_rejects_expired_or_wrong_lease_without_state_change(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=60)
+    clock.value += timedelta(seconds=61)
+
+    with pytest.raises(ContinuityExecutionError, match="lease"):
+        _start_evidence(service)
+
+    assert service.get_run("RUN-001").state is RunState.READY
 
 
 def test_terminal_runs_are_exposed_only_when_history_is_explicitly_requested(
@@ -436,6 +776,7 @@ def test_terminal_runs_are_exposed_only_when_history_is_explicitly_requested(
     clock = Clock()
     _, service = _services(tmp_path, clock)
     run = _start(service)
+    run = _start_evidence(service)
     verifying = service.transition_run(
         run.run_id,
         RunState.VERIFYING,
@@ -646,7 +987,7 @@ def test_store_rechecks_work_state_inside_run_transaction(
 @pytest.mark.parametrize(
     ("target", "value"),
     [
-        ("run_state", RunState.READY.value),
+        ("run_state", RunState.RUNNING.value),
         ("run_version", 2),
         ("lease_run", "RUN-OTHER"),
         ("lease_owner", "agent-other"),
@@ -674,7 +1015,7 @@ def test_direct_store_rejects_forged_run_and_lease_invariants(
     values = {
         "run_id": "RUN-DIRECT",
         "work_id": "WORK-001",
-        "state": RunState.RUNNING.value,
+        "state": RunState.READY.value,
         "executor_id": "agent-a",
         "adapter": "codex",
         "owned_paths_json": json.dumps(["auto_pm/core/a.py"]),
@@ -736,7 +1077,7 @@ def test_store_overwrites_run_audit_time_and_derives_lease_expiry(tmp_path: Path
         {
             "run_id": "RUN-DIRECT-AUDIT",
             "work_id": "WORK-001",
-            "state": RunState.RUNNING.value,
+            "state": RunState.READY.value,
             "executor_id": "agent-a",
             "adapter": "codex",
             "owned_paths_json": json.dumps(["auto_pm/core/a.py"]),
@@ -905,7 +1246,13 @@ def test_start_run_exact_replay_survives_transition_renewal_and_handoff(
     )
 
     assert _start(service) == created
-    assert service._store.get_lease(created.run_id) == renewed
+    persisted_lease = service._store.get_lease(created.run_id)
+    assert persisted_lease.run_id == renewed.run_id
+    assert persisted_lease.owner_id == renewed.owner_id
+    assert persisted_lease.expires_at == renewed.expires_at
+    assert persisted_lease.version == renewed.version
+    assert persisted_lease.updated_at == renewed.updated_at
+    _start_evidence(service, idempotency_key="record-start-before-replay")
     verifying = service.transition_run(
         created.run_id,
         RunState.VERIFYING,
@@ -959,7 +1306,8 @@ def test_start_run_replays_provable_legacy_receipt_and_fails_after_lease_rotatio
     created = _start(service)
     _replace_run_created_event_with_legacy_payload(tmp_path, created.run_id)
 
-    assert _start(service) == created
+    legacy = service._store.get_run(created.run_id)
+    assert _start(service) == legacy
     with pytest.raises(ContinuityExecutionError, match="语义不一致"):
         _start(service, adapter="cursor")
     renewed = service.renew_lease(
@@ -970,7 +1318,21 @@ def test_start_run_replays_provable_legacy_receipt_and_fails_after_lease_rotatio
         "renew-legacy-run",
     )
     assert renewed.version == 2
-    assert service._store.get_lease(created.run_id) == renewed
+    stored_lease = service._store.get_lease(created.run_id)
+    assert (
+        stored_lease.run_id,
+        stored_lease.owner_id,
+        stored_lease.expires_at,
+        stored_lease.version,
+        stored_lease.updated_at,
+    ) == (
+        renewed.run_id,
+        renewed.owner_id,
+        renewed.expires_at,
+        renewed.version,
+        renewed.updated_at,
+    )
+    assert stored_lease.lease_token == "lease-secret"
     with pytest.raises(ContinuityExecutionError, match="LEGACY_REPLAY_UNPROVABLE"):
         _start(service)
 
@@ -1062,7 +1424,7 @@ def test_same_run_id_with_new_key_is_controlled_and_preserves_one_event(
     values = {
         "run_id": created.run_id,
         "work_id": created.work_id,
-        "state": RunState.RUNNING.value,
+        "state": RunState.READY.value,
         "executor_id": created.executor_id,
         "adapter": created.adapter,
         "owned_paths_json": json.dumps(created.owned_paths),
@@ -1127,8 +1489,9 @@ def test_terminal_sibling_with_future_lease_does_not_block_new_run(tmp_path: Pat
     clock = Clock()
     _, service = _services(tmp_path, clock)
     first = _start(service)
+    started = _start_evidence(service)
     verifying = service.transition_run(
-        first.run_id,
+        started.run_id,
         RunState.VERIFYING,
         "agent-a",
         "lease-secret",
@@ -1148,7 +1511,8 @@ def test_terminal_sibling_with_future_lease_does_not_block_new_run(tmp_path: Pat
         lease_token="second-secret",
         idempotency_key="create-second",
     )
-    assert second.state is RunState.RUNNING
+    assert first.state is RunState.READY
+    assert second.state is RunState.READY
     assert len(service._store.list_runs("WORK-001", include_terminal=True)) == 2
 
 
@@ -1218,6 +1582,42 @@ def test_store_lease_renewal_uses_trusted_time_and_cannot_revive_expired_lease(
     assert count == 1
 
 
+def test_lease_renewal_receipt_is_exact_secret_free_and_version_bound(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+
+    first = service.renew_lease(
+        "RUN-001",
+        "agent-a",
+        "lease-secret",
+        900,
+        "e04-exact-renew",
+        expected_version=1,
+    )
+    replay = service.renew_lease(
+        "RUN-001",
+        "agent-a",
+        "lease-secret",
+        900,
+        "e04-exact-renew",
+        expected_version=1,
+    )
+
+    assert replay == first
+    assert first.schema_version == "lease-renewal-receipt.v1"
+    assert "lease-secret" not in first.model_dump_json()
+    with pytest.raises(ContinuityExecutionError, match="version"):
+        service.renew_lease(
+            "RUN-001",
+            "agent-a",
+            "lease-secret",
+            900,
+            "e04-stale-version",
+            expected_version=1,
+        )
+
+
 def test_checkpoint_is_sequenced_and_rejects_baseline_drift(tmp_path: Path) -> None:
     clock = Clock()
     _, service = _services(tmp_path, clock)
@@ -1259,6 +1659,341 @@ def test_checkpoint_allows_new_owned_changes_and_rejects_foreign_paths(tmp_path:
         )
 
 
+def test_append_verified_checkpoint_builds_complete_evidence_and_replays(tmp_path: Path) -> None:
+    candidate, project_root, service = _c03_auto_checkpoint_service(
+        tmp_path, include_untracked_target=True
+    )
+    source = candidate / "project" / "auto_pm" / "core" / "target.py"
+    source.write_text("def value() -> int:\n    return 2\n", encoding="utf-8", errors="replace")
+    subprocess.run(
+        ["git", "-C", str(candidate), "add", "project/auto_pm/core/target.py"],
+        check=True,
+        capture_output=True,
+    )
+    source.write_text("def value() -> int:\n    return 3\n", encoding="utf-8", errors="replace")
+    generated = candidate / "project" / "auto_pm" / "core" / "generated.py"
+    generated.write_text(
+        "def generated() -> int:\n    return 7\n", encoding="utf-8", errors="replace"
+    )
+
+    checkpoint = _append_auto_checkpoint(service, project_root)
+
+    assert checkpoint.sequence == 1
+    assert checkpoint.summary == "System-generated content-bound checkpoint for Run RUN-001"
+    assert checkpoint.dirty_paths == (
+        "project/auto_pm/core/generated.py",
+        "project/auto_pm/core/target.py",
+    )
+    assert len(checkpoint.evidence) == 1
+    envelope = json.loads(checkpoint.evidence[0])
+    assert envelope["schema_version"] == "checkpoint-evidence.v1"
+    assert envelope["collection_hash"]
+    assert envelope["receipt_hash"]
+    assert envelope["envelope_hash"]
+    collection = envelope["collection"]
+    assert collection["baseline_git_head"] == checkpoint.git_head
+    assert collection["staged_paths"] == ["project/auto_pm/core/target.py"]
+    assert collection["unstaged_paths"] == ["project/auto_pm/core/target.py"]
+    assert collection["untracked_paths"] == ["project/auto_pm/core/generated.py"]
+    assert collection["untracked_content_hashes"][0]["path"] == "project/auto_pm/core/generated.py"
+    assert collection["untracked_content_hashes"][0]["sha256"]
+    assert collection["staged_diff_sha256"]
+    assert collection["unstaged_diff_sha256"]
+    receipt = envelope["quality_receipt"]
+    assert receipt["status"] == "PASS"
+    assert receipt["evidence_current"] is True
+    assert [gate["name"] for gate in receipt["gates"]] == ["pytest", "ruff", "mypy"]
+    assert all(gate["exit_code"] == 0 for gate in receipt["gates"])
+    assert all(gate["command"] and gate["cwd"] for gate in receipt["gates"])
+    assert all(gate["output_digest"] for gate in receipt["gates"])
+    assert receipt["gates"][0]["command"][-3:] == [
+        "-k",
+        "append_verified_checkpoint",
+        "tests/core/test_continuity_execution_service.py",
+    ]
+
+    run = service._store.get_run("RUN-001")
+    current = EvidenceCollectionService(service._root).collect(run)
+    internal_key = service._c03_checkpoint_idempotency_key(
+        run, checkpoint.checkpoint_id, current.content_hash
+    )
+    assert service._store.event_aggregate_for_key(internal_key) == ("run", "RUN-001")
+
+    replay = _append_auto_checkpoint(service, project_root)
+
+    assert replay == checkpoint
+    assert replay.sequence == 1
+
+
+def test_append_verified_checkpoint_replays_unicode_owned_paths_and_rejects_stale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, project_root, service = _c03_auto_checkpoint_service(
+        tmp_path, project_name="中文项目"
+    )
+    source = project_root / "auto_pm" / "core" / "target.py"
+    source.write_text(
+        "def value() -> int:\n    return 2\n", encoding="utf-8", errors="replace"
+    )
+    monkeypatch.setattr(
+        EvidenceCollectionService,
+        "run_c03_checkpoint_quality_gates",
+        _quality_receipt_for_test,
+    )
+
+    checkpoint = _append_auto_checkpoint(service, project_root)
+    collector = EvidenceCollectionService(service._root)
+    run = service._store.get_run("RUN-001")
+    current = collector.collect(run)
+
+    assert "中文项目" in checkpoint.evidence[0]
+    assert collector.checkpoint_evidence_is_current(
+        checkpoint.evidence[0], current, run, project_root
+    )
+    assert _append_auto_checkpoint(service, project_root) == checkpoint
+
+    source.write_text(
+        "def value() -> int:\n    return 3\n", encoding="utf-8", errors="replace"
+    )
+    stale = collector.collect(run)
+    assert not collector.checkpoint_evidence_is_current(
+        checkpoint.evidence[0], stale, run, project_root
+    )
+    with pytest.raises(ContinuityExecutionError, match="identity.*不一致"):
+        _append_auto_checkpoint(service, project_root)
+
+
+def test_append_verified_checkpoint_does_not_accept_caller_idempotency_key(
+    tmp_path: Path,
+) -> None:
+    _, project_root, service = _c03_auto_checkpoint_service(tmp_path)
+
+    with pytest.raises(TypeError, match="idempotency_key"):
+        _append_auto_checkpoint(
+            service, project_root, idempotency_key="caller-controlled-key"
+        )
+
+
+def test_append_verified_checkpoint_rejects_store_collision_return(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, project_root, service = _c03_auto_checkpoint_service(tmp_path)
+    monkeypatch.setattr(
+        EvidenceCollectionService,
+        "run_c03_checkpoint_quality_gates",
+        _quality_receipt_for_test,
+    )
+    checkpoint = _append_auto_checkpoint(service, project_root)
+    observed_keys: list[str] = []
+
+    def collision_return(
+        values: dict[str, object], idempotency_key: str, _now: str
+    ) -> CheckpointItem:
+        observed_keys.append(idempotency_key)
+        return CheckpointItem(
+            checkpoint_id="CP-COLLISION",
+            run_id=str(values["run_id"]),
+            sequence=checkpoint.sequence,
+            summary=str(values["summary"]),
+            git_head=str(values["git_head"]),
+            dirty_paths=tuple(json.loads(str(values["dirty_paths_json"]))),
+            evidence=("collision-evidence",),
+            created_at=str(values["created_at"]),
+        )
+
+    monkeypatch.setattr(service._store, "create_checkpoint", collision_return)
+
+    with pytest.raises(ContinuityExecutionError, match="identity.*evidence"):
+        _append_auto_checkpoint(service, project_root)
+    assert observed_keys and observed_keys[0].startswith("c03-auto-checkpoint:")
+
+
+@pytest.mark.parametrize("changed_path", ["target.py", "generated.py"])
+def test_append_verified_checkpoint_refuses_replay_after_owned_content_changes(
+    tmp_path: Path, changed_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate, project_root, service = _c03_auto_checkpoint_service(
+        tmp_path, include_untracked_target=True
+    )
+    generated = candidate / "project" / "auto_pm" / "core" / "generated.py"
+    generated.write_text(
+        "def generated() -> int:\n    return 7\n", encoding="utf-8", errors="replace"
+    )
+    monkeypatch.setattr(
+        EvidenceCollectionService,
+        "run_c03_checkpoint_quality_gates",
+        _quality_receipt_for_test,
+    )
+    checkpoint = _append_auto_checkpoint(service, project_root)
+    changed = candidate / "project" / "auto_pm" / "core" / changed_path
+    changed.write_text(
+        "def changed() -> int:\n    return 9\n", encoding="utf-8", errors="replace"
+    )
+
+    with pytest.raises(ContinuityExecutionError, match="identity.*不一致"):
+        _append_auto_checkpoint(service, project_root)
+
+    assert service._store.get_checkpoint(checkpoint.checkpoint_id) == checkpoint
+
+
+def test_append_verified_checkpoint_rejects_receipt_stale_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate, project_root, service = _c03_auto_checkpoint_service(tmp_path)
+    source = candidate / "project" / "auto_pm" / "core" / "target.py"
+
+    def run_then_change(
+        collector: EvidenceCollectionService, run, root: Path
+    ):
+        receipt = _quality_receipt_for_test(collector, run, root)
+        source.write_text(
+            "def value() -> int:\n    return 2\n", encoding="utf-8", errors="replace"
+        )
+        return receipt
+
+    monkeypatch.setattr(
+        EvidenceCollectionService, "run_c03_checkpoint_quality_gates", run_then_change
+    )
+
+    with pytest.raises(ContinuityExecutionError, match="质量收据已失效"):
+        _append_auto_checkpoint(service, project_root)
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        service._store.get_checkpoint("CP-AUTO-001")
+
+
+def test_append_verified_checkpoint_rejects_failed_or_missing_quality_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, project_root, failed_service = _c03_auto_checkpoint_service(tmp_path / "failed")
+    monkeypatch.setattr(
+        EvidenceCollectionService,
+        "run_c03_checkpoint_quality_gates",
+        lambda collector, run, root: _quality_receipt_for_test(
+            collector,
+            run,
+            root,
+            exit_code=1,
+            output_summary="injected failed quality gate",
+        ),
+    )
+    with pytest.raises(ContinuityExecutionError, match="质量收据"):
+        _append_auto_checkpoint(failed_service, project_root)
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        failed_service._store.get_checkpoint("CP-AUTO-001")
+
+    _, missing_project_root, missing_service = _c03_auto_checkpoint_service(tmp_path / "missing")
+    monkeypatch.setattr(
+        EvidenceCollectionService,
+        "run_c03_checkpoint_quality_gates",
+        lambda collector, run, root: _quality_receipt_for_test(
+            collector,
+            run,
+            root,
+            exit_code=None,
+            output_summary="missing approved quality target",
+        ),
+    )
+    with pytest.raises(ContinuityExecutionError, match="质量收据"):
+        _append_auto_checkpoint(missing_service, missing_project_root)
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        missing_service._store.get_checkpoint("CP-AUTO-001")
+
+
+def test_append_verified_checkpoint_rejects_quality_tool_launch_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, project_root, service = _c03_auto_checkpoint_service(tmp_path)
+    monkeypatch.setattr(
+        EvidenceCollectionService,
+        "run_c03_checkpoint_quality_gates",
+        lambda collector, run, root: _quality_receipt_for_test(
+            collector,
+            run,
+            root,
+            exit_code=None,
+            output_summary="launch error: injected tool unavailable",
+        ),
+    )
+
+    with pytest.raises(ContinuityExecutionError, match="质量收据"):
+        _append_auto_checkpoint(service, project_root)
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        service._store.get_checkpoint("CP-AUTO-001")
+
+
+def test_append_verified_checkpoint_rejects_narrow_project_root(tmp_path: Path) -> None:
+    candidate, project_root, service = _c03_auto_checkpoint_service(tmp_path)
+    narrow_root = project_root / "auto_pm"
+    (narrow_root / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\n", encoding="utf-8", errors="replace"
+    )
+
+    with pytest.raises(ContinuityExecutionError, match="未覆盖.*owned path"):
+        _append_auto_checkpoint(service, narrow_root)
+    assert candidate.exists()
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        service._store.get_checkpoint("CP-AUTO-001")
+
+
+def test_append_verified_checkpoint_rejects_project_root_without_pyproject(
+    tmp_path: Path,
+) -> None:
+    candidate, _, service = _c03_auto_checkpoint_service(tmp_path)
+
+    with pytest.raises(ContinuityExecutionError, match="pyproject.toml"):
+        _append_auto_checkpoint(service, candidate)
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        service._store.get_checkpoint("CP-AUTO-001")
+
+
+def test_append_verified_checkpoint_rejects_missing_fixed_c03_target(tmp_path: Path) -> None:
+    _, project_root, service = _c03_auto_checkpoint_service(tmp_path)
+    (project_root / "tests" / "core" / "test_continuity_execution_service.py").unlink()
+
+    with pytest.raises(ContinuityExecutionError, match="缺少固定 pytest target"):
+        _append_auto_checkpoint(service, project_root)
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        service._store.get_checkpoint("CP-AUTO-001")
+
+
+def test_append_verified_checkpoint_rejects_zero_fixed_c03_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, project_root, service = _c03_auto_checkpoint_service(
+        tmp_path, c03_selector_match=False
+    )
+    commands: list[tuple[str, ...]] = []
+
+    def zero_selection_gate(
+        name: str, command: tuple[str, ...], root: Path, target_error: str | None
+    ) -> PythonQualityGate:
+        assert target_error is None
+        if name == "pytest":
+            commands.append(command)
+        return PythonQualityGate(
+            name=name,
+            command=command,
+            cwd=str(root),
+            exit_code=5 if name == "pytest" else 0,
+            output_digest=f"{name}-digest",
+            output_summary="no C03 tests selected" if name == "pytest" else "passed",
+        )
+
+    monkeypatch.setattr(
+        EvidenceCollectionService, "_run_quality_gate", staticmethod(zero_selection_gate)
+    )
+
+    with pytest.raises(ContinuityExecutionError, match="质量收据为 PASS"):
+        _append_auto_checkpoint(service, project_root)
+    assert commands and commands[0][-3:] == (
+        "-k",
+        "append_verified_checkpoint",
+        "tests/core/test_continuity_execution_service.py",
+    )
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        service._store.get_checkpoint("CP-AUTO-001")
+
+
 def test_handoff_v2_points_to_checkpoint_and_is_hash_signed(tmp_path: Path) -> None:
     clock = Clock()
     _, service = _services(tmp_path, clock)
@@ -1287,6 +2022,31 @@ def test_handoff_v2_points_to_checkpoint_and_is_hash_signed(tmp_path: Path) -> N
         idempotency_key="accept-1",
     )
     assert lease.owner_id == "agent-b"
+
+
+def test_checkpoint_bound_handoff_creates_a_new_receiver_lease(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    checkpoint = _checkpoint(service)
+
+    handoff, receiver_lease = service.create_checkpoint_bound_handoff(
+        checkpoint_id=checkpoint.checkpoint_id,
+        from_owner="agent-a",
+        to_owner="agent-b",
+        lease_token="lease-secret",
+        new_lease_token="receiver-secret",
+        lease_seconds=900,
+        idempotency_key="checkpoint-bound-handoff",
+    )
+
+    assert handoff.schema_version == "handoff.v2"
+    assert handoff.checkpoint_id == checkpoint.checkpoint_id
+    assert handoff.work_id == "WORK-001"
+    assert handoff.git_head == checkpoint.git_head
+    assert receiver_lease.run_id == "RUN-001"
+    assert receiver_lease.owner_id == "agent-b"
+    assert "lease-secret" not in handoff.model_dump_json()
     with pytest.raises(ContinuityExecutionError, match="ownership"):
         service.renew_lease("RUN-001", "agent-a", "lease-secret", 900, "old-owner")
 
@@ -1310,6 +2070,7 @@ def test_run_state_machine_rejects_terminal_reopen(tmp_path: Path) -> None:
     clock = Clock()
     _, service = _services(tmp_path, clock)
     _start(service)
+    _start_evidence(service)
     service.transition_run("RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "verify")
     service.transition_run("RUN-001", RunState.SUCCEEDED, "agent-a", "lease-secret", "succeed")
 
@@ -1401,13 +2162,14 @@ def test_settle_expired_run_preserves_forensic_state_and_emits_secret_free_event
 ) -> None:
     clock = Clock()
     service = _settlement_ready(tmp_path, clock)
+    target_before = service._store.get_run("RUN-TARGET")
     target_lease = service._store.get_lease("RUN-TARGET")
     checkpoint = service._store.latest_checkpoint("RUN-TARGET")
 
     settled = _settle(service)
 
     assert settled.state is RunState.CANCELLED
-    assert settled.version == 2
+    assert settled.version == target_before.version + 1
     assert service._store.get_lease("RUN-TARGET") == target_lease
     assert service._store.latest_checkpoint("RUN-TARGET") == checkpoint
     assert service._store.get_run("RUN-RECOVERY").state is RunState.RUNNING
@@ -1433,6 +2195,159 @@ def test_direct_store_settlement_succeeds_without_caller_transaction_time(tmp_pa
 
     assert "now" not in ContinuityStore.settle_expired_run.__annotations__
     assert service._store.settle_expired_run(**values).state is RunState.CANCELLED
+
+
+def test_settlement_accepts_clean_crlf_decisions_bound_to_lf_head_blobs(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    service = _settlement_ready(
+        tmp_path,
+        clock,
+        decision_attributes=".auto-pm/decisions/*.json text eol=crlf\n",
+    )
+    decision_paths = (
+        ".auto-pm/decisions/DEC-20260910-A2TARGT1.json",
+        ".auto-pm/decisions/DEC-20260911-5C37A985.json",
+    )
+    for relative in decision_paths:
+        path = tmp_path / relative
+        path.unlink()
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "checkout-index", "--force", "--", relative],
+            check=True,
+            capture_output=True,
+        )
+        head_bytes = subprocess.run(
+            ["git", "-C", str(tmp_path), "show", f"HEAD:{relative}"],
+            check=True,
+            capture_output=True,
+        ).stdout
+        assert path.read_bytes() != head_bytes
+    diff = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--quiet", "HEAD", "--", *decision_paths],
+        check=False,
+        capture_output=True,
+    )
+    assert diff.returncode == 0
+
+    assert _settle(service).state is RunState.CANCELLED
+
+
+def test_settlement_rejects_real_decision_drift_under_crlf_attributes(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    service = _settlement_ready(
+        tmp_path,
+        clock,
+        decision_attributes=".auto-pm/decisions/*.json text eol=crlf\n",
+    )
+    relative = ".auto-pm/decisions/DEC-20260911-5C37A985.json"
+    decision_path = tmp_path / relative
+    decision_path.unlink()
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "checkout-index", "--force", "--", relative],
+        check=True,
+        capture_output=True,
+    )
+    drifted = decision_path.read_bytes().replace(
+        b'"approver": "fubai"',
+        b'"approver": "other"',
+    )
+    decision_path.write_bytes(drifted)
+    diff = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--quiet", "HEAD", "--", relative],
+        check=False,
+        capture_output=True,
+    )
+    assert diff.returncode == 1
+
+    with pytest.raises(ContinuityExecutionError, match="脏改漂移"):
+        _settle(service)
+
+    assert service._store.get_run("RUN-TARGET").state is RunState.RUNNING
+
+
+def test_settlement_uses_path_specific_custom_clean_filter(tmp_path: Path) -> None:
+    filter_script = tmp_path / "decision_clean_filter.py"
+    filter_script.write_text(
+        "import sys\n"
+        "raw = sys.stdin.buffer.read()\n"
+        "if sys.argv[1] == 'clean':\n"
+        "    raw = raw.replace(b'\\r\\n', b'\\n')\n"
+        "else:\n"
+        "    raw = raw.replace(b'\\n', b'\\r\\n')\n"
+        "sys.stdout.buffer.write(raw)\n",
+        encoding="utf-8",
+        errors="replace",
+    )
+    filter_base = f'"{Path(sys.executable).as_posix()}" "{filter_script.as_posix()}"'
+    clock = Clock()
+    service = _settlement_ready(
+        tmp_path,
+        clock,
+        decision_attributes=".auto-pm/decisions/*.json -text filter=decision\n",
+        decision_filter_command=f"{filter_base} clean",
+        decision_smudge_filter_command=f"{filter_base} smudge",
+    )
+    decision_paths = (
+        ".auto-pm/decisions/DEC-20260910-A2TARGT1.json",
+        ".auto-pm/decisions/DEC-20260911-5C37A985.json",
+    )
+    for relative in decision_paths:
+        path = tmp_path / relative
+        path.unlink()
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "checkout-index", "--force", "--", relative],
+            check=True,
+            capture_output=True,
+        )
+    diff = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--quiet", "HEAD", "--", *decision_paths],
+        check=False,
+        capture_output=True,
+    )
+    assert diff.returncode == 0
+
+    assert _settle(service).state is RunState.CANCELLED
+
+
+def test_settlement_rejects_invalid_path_aware_git_object_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    service = _settlement_ready(tmp_path, clock)
+    original = service._store._git_bytes
+
+    def invalid_hash(*args: str, input_bytes: bytes | None = None) -> bytes:
+        if args and args[0] == "hash-object":
+            return b"not-a-git-object-id\n"
+        return original(*args, input_bytes=input_bytes)
+
+    monkeypatch.setattr(service._store, "_git_bytes", invalid_hash)
+
+    with pytest.raises(ContinuityExecutionError, match="clean blob.*完整小写"):
+        _settle(service)
+
+    assert service._store.get_run("RUN-TARGET").state is RunState.RUNNING
+
+
+def test_decision_clean_gate_distinguishes_git_failure_from_dirty_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = ContinuityStore(tmp_path)
+
+    def git_failure(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(command, 2, stdout=b"", stderr=b"fatal: injected")
+
+    monkeypatch.setattr(
+        "auto_pm.infrastructure.continuity_store.subprocess.run",
+        git_failure,
+    )
+
+    with pytest.raises(ContinuityStoreError, match="clean 事实无法复核.*injected"):
+        store._require_paths_clean_at_head(".auto-pm/decisions/DEC-TEST.json")
 
 
 @pytest.mark.parametrize("fact", ["work_scope", "run_owned"])
@@ -2158,7 +3073,7 @@ def test_settlement_event_failure_rolls_back_run_update(
         _settle(service)
     target = service._store.get_run("RUN-TARGET")
     assert target.state is RunState.RUNNING
-    assert target.version == 1
+    assert target.version == 2
 
 
 def test_settlement_detects_target_version_cas_drift(
@@ -2228,3 +3143,45 @@ def test_concurrent_different_keys_allow_exactly_one_settlement(
             "SELECT COUNT(*) FROM events WHERE event_type='RUN_EXPIRED_SETTLED'"
         ).fetchone()[0]
     assert count == 1
+
+
+def test_store_reads_exactly_one_structured_run_started_evidence(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    _start_evidence(service)
+
+    owner_id, evidence = service._store.get_run_started_evidence("RUN-001")
+
+    assert owner_id == "agent-a"
+    assert evidence.process_id == 1234
+    assert evidence.session_id == "thread-e03b-test"
+
+
+def test_service_reconciles_operation_receipt_run_and_started_identity(tmp_path: Path) -> None:
+    evidence = ExecutionStartEvidence(
+        process_id=4321,
+        session_id="session-e06",
+        started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+    )
+    receipt = SimpleNamespace(
+        run_id="RUN-001", work_id="WORK-001", executor_id="agent-a", owner_id="agent-a"
+    )
+    store = Mock()
+    store.get_execution_intent.return_value = SimpleNamespace(receipt=receipt)
+    store.get_run.return_value = SimpleNamespace(
+        work_id="WORK-001", executor_id="agent-a", state=RunState.RUNNING
+    )
+    store.get_run_started_evidence.return_value = ("agent-a", evidence)
+    service = ContinuityExecutionService(tmp_path, store=store)
+
+    actual_receipt, run, actual_evidence = service.resolve_started_run("operation-e06-1")
+
+    assert actual_receipt is receipt
+    assert run is store.get_run.return_value
+    assert actual_evidence is evidence
+    store.get_run_started_evidence.assert_called_once_with("RUN-001")
+
+    store.get_run_started_evidence.return_value = ("other-owner", evidence)
+    with pytest.raises(ContinuityExecutionError, match="owner"):
+        service.resolve_started_run("operation-e06-1")

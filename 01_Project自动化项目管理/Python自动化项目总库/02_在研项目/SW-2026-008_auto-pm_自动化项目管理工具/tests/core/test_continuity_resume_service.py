@@ -33,6 +33,7 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionCapability,
     RuntimeDecisionOutcome,
 )
+from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -115,6 +116,14 @@ def _work(root: Path, work_id: str) -> None:
     )
 
 
+def _accept_read_only_work(root: Path, work_id: str) -> None:
+    _work(root, work_id)
+    service = WorkRegistryService(root, now=lambda: "2026-09-09T12:00:00+00:00")
+    service.transition(work_id, WorkState.IN_PROGRESS, f"start-{work_id}")
+    service.transition(work_id, WorkState.VERIFYING, f"verify-{work_id}")
+    service.transition(work_id, WorkState.ACCEPTED, f"accept-{work_id}")
+
+
 def _authorized_target_work(root: Path, work_id: str) -> None:
     service = WorkRegistryService(root, now=lambda: "2026-09-09T12:00:00+00:00")
     service.initialize("test")
@@ -144,7 +153,13 @@ def _authorized_target_work(root: Path, work_id: str) -> None:
     service.authorize(work_id, decision_id, f"authorize-{work_id}")
 
 
-def _run(root: Path) -> None:
+def _run(
+    root: Path,
+    *,
+    work_id: str = "WORK-001",
+    run_id: str = "RUN-001",
+    lease_token: str = "lease-secret",
+) -> None:
     now = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
     execution = ContinuityExecutionService(
         root,
@@ -152,8 +167,8 @@ def _run(root: Path) -> None:
         now=lambda: now,
     )
     execution.start_run(
-        run_id="RUN-001",
-        work_id="WORK-001",
+        run_id=run_id,
+        work_id=work_id,
         executor_id="agent-a",
         adapter="codex",
         owned_paths=["auto_pm/a.py"],
@@ -161,9 +176,20 @@ def _run(root: Path) -> None:
         observed_dirty_paths=[],
         git_head=_git_head(root),
         worktree_path=str(root),
-        lease_token="lease-secret",
+        lease_token=lease_token,
         lease_seconds=900,
         idempotency_key="create-run",
+    )
+    execution.record_start_evidence(
+        run_id=run_id,
+        owner_id="agent-a",
+        lease_token=lease_token,
+        evidence=ExecutionStartEvidence(
+            process_id=1001,
+            session_id=f"session-{run_id}",
+            started_at=now,
+        ),
+        idempotency_key=f"start-evidence-{run_id}",
     )
 
 
@@ -219,6 +245,8 @@ def test_empty_store_returns_explicitly_empty_execution_state(tmp_path: Path) ->
     assert result.run is None
     assert result.checkpoint is None
     assert result.lease is None
+    assert result.work_candidates == ()
+    assert result.run_candidates == ()
     assert result.next_legal_action == ""
     assert not (tmp_path / ".auto-pm" / "continuity.db").exists()
 
@@ -233,12 +261,34 @@ def test_resume_returns_one_unambiguous_work_and_run(tmp_path: Path) -> None:
     ).collect(project_id="SW-2026-008")
 
     assert result.work and result.work.work_id == "WORK-001"
+    assert tuple(candidate.work_id for candidate in result.work_candidates) == ("WORK-001",)
     assert result.run and result.run.run_id == "RUN-001"
+    assert tuple(candidate.run.run_id for candidate in result.run_candidates) == ("RUN-001",)
     assert result.lease and result.lease.owner_id == "agent-a"
     assert result.lease.schema_version == "lease-view.v1"
     assert "lease_token" not in result.lease.model_dump(mode="json")
+    payload = result.model_dump(mode="json")
+    assert "lease_token" not in payload
+    assert "lease-secret" not in json.dumps(payload, ensure_ascii=False)
     assert result.checkpoint is None
     assert result.next_legal_action == "CONTINUE_RUN"
+
+
+def test_accepted_work_is_not_a_default_resume_candidate(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-ACCEPTED")
+    registry = WorkRegistryService(tmp_path, now=lambda: "2026-09-09T12:00:00+00:00")
+    registry.transition("WORK-ACCEPTED", WorkState.IN_PROGRESS, "start-accepted")
+    registry.transition("WORK-ACCEPTED", WorkState.VERIFYING, "verify-accepted")
+    registry.transition("WORK-ACCEPTED", WorkState.ACCEPTED, "accept-accepted")
+    _work(tmp_path, "WORK-READY")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.work and result.work.work_id == "WORK-READY"
+    assert tuple(candidate.work_id for candidate in result.work_candidates) == ("WORK-READY",)
+    assert result.conflicts == ()
+    assert result.next_legal_action == "CREATE_RUN"
 
 
 def test_resume_projects_mission_and_user_approval_boundary(tmp_path: Path) -> None:
@@ -273,13 +323,6 @@ def test_multiple_active_missions_fail_closed_without_guessing(tmp_path: Path) -
     assert result.next_legal_action == ""
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "OPEN-R4: resume must surface an expired nonterminal Run and governed "
-        "forward-settlement action"
-    ),
-)
 def test_resume_must_not_recommend_replacement_for_expired_nonterminal_run(
     tmp_path: Path,
 ) -> None:
@@ -291,10 +334,12 @@ def test_resume_must_not_recommend_replacement_for_expired_nonterminal_run(
         tmp_path, now=lambda: datetime(2026, 9, 9, 12, 16, tzinfo=UTC)
     ).collect(project_id="SW-2026-008")
 
-    assert result.run is not None
-    assert result.run.run_id == "RUN-001"
-    assert "LEASE_EXPIRED" in result.conflicts
-    assert result.next_legal_action != "CREATE_RUN"
+    assert result.run and result.run.run_id == "RUN-001"
+    assert result.conflicts == ("LEASE_EXPIRED",)
+    assert result.next_legal_action == ""
+    payload = result.model_dump(mode="json")
+    assert "lease_token" not in payload
+    assert "lease-secret" not in json.dumps(payload, ensure_ascii=False)
 
 
 def test_expired_nonterminal_run_blocks_replacement(tmp_path: Path) -> None:
@@ -429,6 +474,17 @@ def test_resume_uses_recovery_run_after_expired_target_is_settled(tmp_path: Path
         lease_seconds=900,
         idempotency_key="create-recovery-run",
     )
+    execution.record_start_evidence(
+        run_id="RUN-RECOVERY",
+        owner_id="agent-b",
+        lease_token="recovery-secret",
+        evidence=ExecutionStartEvidence(
+            process_id=1002,
+            session_id="session-RUN-RECOVERY",
+            started_at=now,
+        ),
+        idempotency_key="start-evidence-recovery-run",
+    )
     execution.settle_expired_run(
         target_run_id="RUN-001",
         recovery_run_id="RUN-RECOVERY",
@@ -451,6 +507,13 @@ def test_resume_uses_recovery_run_after_expired_target_is_settled(tmp_path: Path
     assert execution._store.list_runs("WORK-001") == ()
     target_history = execution._store.list_runs("WORK-001", include_terminal=True)
     assert target_history[0].state is RunState.CANCELLED
+    historical = ContinuityResumeService(tmp_path, now=lambda: now).collect(
+        project_id="SW-2026-008", work_id="WORK-001", run_id="RUN-001"
+    )
+    assert historical.run and historical.run.run_id == "RUN-001"
+    assert "LEASE_EXPIRED" not in historical.conflicts
+    assert historical.next_legal_action == ""
+    assert historical.run_candidates == ()
     ambiguous = ContinuityResumeService(tmp_path, now=lambda: now).collect(project_id="SW-2026-008")
     assert ambiguous.conflicts == ("MULTIPLE_ACTIVE_WORKS",)
 
@@ -464,16 +527,38 @@ def test_multiple_active_works_fail_closed_without_guessing(tmp_path: Path) -> N
 
     assert result.work is None
     assert result.run is None
+    assert tuple(candidate.work_id for candidate in result.work_candidates) == (
+        "WORK-001",
+        "WORK-002",
+    )
+    assert result.run_candidates == ()
     assert result.conflicts == ("MULTIPLE_ACTIVE_WORKS",)
     assert result.next_legal_action == ""
+
+
+def test_accepted_works_are_terminal_for_resume_selection(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _accept_read_only_work(tmp_path, "WORK-001")
+    _accept_read_only_work(tmp_path, "WORK-002")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.work is None
+    assert result.conflicts == ()
 
 
 def test_explicit_work_disambiguates_but_cross_project_fails(tmp_path: Path) -> None:
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     _work(tmp_path, "WORK-002")
+    _run(tmp_path, work_id="WORK-002", run_id="RUN-002", lease_token="lease-secret-2")
     result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008", work_id="WORK-002")
     assert result.work and result.work.work_id == "WORK-002"
+
+    with pytest.raises(ContinuityResumeError, match="Run 不属于选定 Work"):
+        ContinuityResumeService(tmp_path).collect(
+            project_id="SW-2026-008", work_id="WORK-001", run_id="RUN-002"
+        )
 
     service = WorkRegistryService(tmp_path, now=lambda: "2026-09-09T12:00:00+00:00")
     service.create_work(
@@ -489,6 +574,47 @@ def test_explicit_work_disambiguates_but_cross_project_fails(tmp_path: Path) -> 
     )
     with pytest.raises(ContinuityResumeError, match="subject project"):
         ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008", work_id="WORK-OTHER")
+
+
+def test_multiple_nonterminal_runs_for_selected_work_fail_closed_without_guessing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _run(tmp_path)
+    service = ContinuityResumeService(
+        tmp_path, now=lambda: datetime(2026, 9, 9, 12, 1, tzinfo=UTC)
+    )
+    original_run = service._store.list_runs("WORK-001")[0]
+    synthetic_run = original_run.model_copy(update={"run_id": "RUN-002"})
+    original_get_lease = service._store.get_lease
+
+    monkeypatch.setattr(
+        service._store,
+        "list_runs",
+        lambda work_id: (original_run, synthetic_run),
+    )
+    monkeypatch.setattr(
+        service._store,
+        "get_lease",
+        lambda run_id: original_get_lease("RUN-001").model_copy(
+            update={"run_id": run_id}
+        ),
+    )
+
+    result = service.collect(project_id="SW-2026-008", work_id="WORK-001")
+
+    assert result.run is None
+    assert tuple(candidate.run.run_id for candidate in result.run_candidates) == (
+        "RUN-001",
+        "RUN-002",
+    )
+    assert result.conflicts == ("MULTIPLE_ACTIVE_RUNS",)
+    assert result.next_legal_action == ""
+    payload = result.model_dump(mode="json")
+    assert "lease_token" not in payload
+    assert "lease-secret" not in json.dumps(payload, ensure_ascii=False)
 
 
 def test_corrupt_continuity_store_fails_closed(tmp_path: Path) -> None:
