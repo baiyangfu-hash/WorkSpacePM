@@ -95,6 +95,7 @@ class WorkspaceContextService:
             configured_release_id,
             effective_release_id,
             runtime_fallback_reason,
+            candidate_commit,
         )
         anchor = self._anchor_file(project_path)
         read_set = self._read_set(
@@ -114,6 +115,9 @@ class WorkspaceContextService:
             runtime_load_path,
             runtime_fallback_reason,
             conflicts,
+            str(self._workspace_root),
+            str(self._execution_root),
+            candidate_commit,
         )
         return WorkspaceContext(
             workspace_root=str(self._workspace_root),
@@ -292,7 +296,7 @@ class WorkspaceContextService:
 
         load_path = self._execution_relative(package_file)
         if self._execution_root != self._workspace_root:
-            return configured_release_id, load_path, "", package_file
+            return "", load_path, "", package_file
         releases_root = (runtime_root / "releases").resolve()
         try:
             release_relative = package_file.relative_to(releases_root)
@@ -313,11 +317,14 @@ class WorkspaceContextService:
         configured_release_id: str,
         effective_release_id: str,
         runtime_fallback_reason: str,
+        candidate_commit: str = "",
     ) -> tuple[str, ...]:
         if runtime_root is None:
             return ()
         if runtime_fallback_reason:
             return ("RUNTIME_IDENTITY_UNVERIFIED",)
+        if candidate_commit:
+            return () if not effective_release_id else ("RUNTIME_IDENTITY_DIVERGENCE",)
         if effective_release_id != configured_release_id:
             return ("RUNTIME_IDENTITY_DIVERGENCE",)
         return ()
@@ -394,6 +401,9 @@ class WorkspaceContextService:
         runtime_load_path: str,
         runtime_fallback_reason: str,
         conflicts: tuple[str, ...],
+        control_root: str = "",
+        execution_root: str = "",
+        candidate_commit: str = "",
     ) -> str:
         payload = {
             "project_id": project_id,
@@ -404,6 +414,9 @@ class WorkspaceContextService:
             "runtime_load_path": runtime_load_path,
             "runtime_fallback_reason": runtime_fallback_reason,
             "conflicts": conflicts,
+            "control_root": control_root,
+            "execution_root": execution_root,
+            "candidate_commit": candidate_commit,
             "read_set": [entry.model_dump() for entry in read_set],
         }
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]

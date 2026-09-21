@@ -160,12 +160,13 @@ class ExecutionDispatchService:
         operation_id: str | None = None,
         stack: str | None = None,
         force_isolation: bool = False,
+        reconcile_incomplete: bool = False,
     ) -> ExecutionDispatchResult:
         """Persist an intent before allocating a local worktree and Run lease.
 
-        Replays return the original unstarted intent without repeating side effects,
-        including after a crash between reservation and Run creation. Reconciliation
-        and real provider startup belong to the subsequent supervision phase.
+        Ordinary replays return the original intent without repeating side effects.
+        Explicit reconciliation may complete a missing Run only on its original
+        clean, linked candidate; provider startup remains a separate phase.
         Legacy callers use idempotency_key as their operation_id.
         """
 
@@ -200,7 +201,12 @@ class ExecutionDispatchService:
                 raise ExecutionDispatchError("ExecutionIntent Store 与控制工作树不一致")
             existing = self._store.get_execution_intent(operation)
             if existing is not None:
-                return self._existing_result(existing, request_sha256, lease_token)
+                result = self._existing_result(existing, request_sha256, lease_token)
+                if reconcile_incomplete:
+                    self._reconcile_candidate_run(
+                        existing, mission, lease_token, lease_seconds
+                    )
+                return result
             work = self._store.get_work(work_id)
         except (ContinuityStoreError, WorktreePolicyError) as error:
             raise ExecutionDispatchError(str(error)) from error
@@ -290,6 +296,59 @@ class ExecutionDispatchService:
             intent=intent,
             lease=LeaseCapability(intent.receipt.owner_id, lease_token),
         )
+
+    def _reconcile_candidate_run(
+        self,
+        intent: ExecutionIntent,
+        mission: Mission,
+        lease_token: str,
+        lease_seconds: int,
+    ) -> None:
+        """Complete a committed intent only against its original clean candidate."""
+        receipt = intent.receipt
+        if self._execution_root == self._root or Path(receipt.worktree_path) != self._execution_root:
+            raise ExecutionDispatchError("仅可恢复绑定原隔离 execution_root 的未完成 Run")
+        self._assert_authority(mission, self._utc_now())
+        self._assert_adapter_authorized(mission, receipt.adapter)
+        try:
+            work = self._store.get_work(receipt.work_id)
+            if (
+                work.subject_project_id != receipt.subject_project_id
+                or work.authorization_ref != mission.authority.decision_id
+                or work.scope_paths != receipt.owned_paths
+            ):
+                raise ExecutionDispatchError("恢复时 Work 授权与原始 intent 不一致")
+            plan = self._worktrees.select(
+                run_id=receipt.run_id,
+                allow_branch_creation=mission.authority.routing.allow_execution_branch_changes,
+                force_isolation=True,
+            )
+            if (
+                plan.worktree_path != self._execution_root
+                or plan.git_head != receipt.git_head
+                or plan.branch_name != receipt.branch_name
+                or plan.worktree_mode != receipt.worktree_mode
+            ):
+                raise ExecutionDispatchError("恢复时 execution_root Git 基线与原始 intent 漂移")
+            self._execution.start_run(
+                run_id=receipt.run_id,
+                work_id=receipt.work_id,
+                executor_id=receipt.owner_id,
+                adapter=receipt.adapter.value,
+                owned_paths=list(receipt.owned_paths),
+                declared_dirty_paths=list(receipt.declared_dirty_paths),
+                observed_dirty_paths=[],
+                git_head=receipt.git_head,
+                worktree_path=receipt.worktree_path,
+                lease_token=lease_token,
+                lease_seconds=lease_seconds,
+                idempotency_key=(
+                    "execution-run:"
+                    + hashlib.sha256(intent.operation_id.encode("utf-8")).hexdigest()
+                ),
+            )
+        except (ContinuityStoreError, ContinuityExecutionError, WorktreePolicyError) as error:
+            raise ExecutionDispatchError(str(error)) from error
 
     @staticmethod
     def _assert_lease_request(lease_token: str, lease_seconds: int) -> None:

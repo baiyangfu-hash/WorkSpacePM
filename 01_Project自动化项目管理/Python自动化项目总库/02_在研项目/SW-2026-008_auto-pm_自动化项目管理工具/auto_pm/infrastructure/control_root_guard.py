@@ -216,10 +216,14 @@ def require_governed_worktree(
 def governed_worktree_snapshot(
     workspace_root: str | Path,
     worktree_path: str | Path,
+    *,
+    allow_external_linked: bool = False,
 ) -> tuple[Path, str, tuple[str, ...]]:
     """Collect one stable HEAD/full-dirty snapshot from a governed worktree."""
 
-    candidate = require_governed_worktree(workspace_root, worktree_path)
+    candidate = require_governed_worktree(
+        workspace_root, worktree_path, allow_external_linked=allow_external_linked
+    )
     head_before = _git_output(candidate, "rev-parse", "--verify", "HEAD")
 
     def dirty_paths() -> tuple[str, ...]:
@@ -241,6 +245,7 @@ def governed_worktree_snapshot(
         workspace_root,
         candidate,
         expected_head=head_before,
+        allow_external_linked=allow_external_linked,
     )
     if head_before != head_after or dirty_before != dirty_after:
         raise ControlRootGuardError("Run worktree Git snapshot 在采集期间发生漂移")

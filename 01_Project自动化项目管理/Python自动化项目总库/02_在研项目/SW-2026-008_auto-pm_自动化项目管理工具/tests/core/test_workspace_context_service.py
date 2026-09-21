@@ -261,6 +261,8 @@ def test_candidate_execution_root_keeps_canonical_control_identity(
     assert result.control_root == str(tmp_path.resolve())
     assert result.execution_root == str(candidate_package.parents[1].resolve())
     assert result.candidate_commit == "a" * 40
+    assert result.configured_release_id == "1.2.4-configured"
+    assert result.effective_release_id == ""
     assert result.runtime_load_path == "auto_pm/__init__.py"
     assert result.runtime_fallback_reason == ""
     assert result.conflicts == ()

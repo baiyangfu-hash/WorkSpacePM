@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.core.continuity_execution_service import (
+    ContinuityExecutionError,
+    ContinuityExecutionService,
+)
 from auto_pm.core.continuity_resume_service import ContinuityResumeService
 from auto_pm.core.execution_adapter_service import (
     ExecutionDispatchError,
@@ -24,7 +27,7 @@ from auto_pm.core.mission_service import MissionService
 from auto_pm.core.work_registry_service import WorkRegistryService
 from auto_pm.core.worktree_policy_service import WorktreePlan, WorktreePolicyService
 
-from auto_pm.contracts.continuity import WorkKind
+from auto_pm.contracts.continuity import RunState, WorkKind
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ExecutionRole,
@@ -110,13 +113,15 @@ def _workspace(root: Path) -> None:
     )
 
 
-def _authority(now: datetime) -> AuthorityEnvelope:
+def _authority(
+    now: datetime, scope_paths: tuple[str, ...] = (PROJECT_PATH,)
+) -> AuthorityEnvelope:
     return AuthorityEnvelope(
         envelope_id="AUTH-A5-001",
         subject_project_id=PROJECT_ID,
         change_id="CHG-SCPT-2026-208",
         decision_id=DECISION_ID,
-        scope_paths=(PROJECT_PATH,),
+        scope_paths=scope_paths,
         allowed_child_work_kinds=frozenset({WorkKind.WBS}),
         routing=InternalRoutingPolicy(
             allow_execution_branch_changes=True,
@@ -137,7 +142,9 @@ def _authority(now: datetime) -> AuthorityEnvelope:
     )
 
 
-def _write_decision(root: Path, now: datetime) -> None:
+def _write_decision(
+    root: Path, now: datetime, scope_paths: tuple[str, ...] = (PROJECT_PATH,)
+) -> None:
     path = root / ".auto-pm" / "decisions" / f"{DECISION_ID}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -148,7 +155,7 @@ def _write_decision(root: Path, now: datetime) -> None:
                 "project_id": PROJECT_ID,
                 "change_id": "CHG-SCPT-2026-208",
                 "approved_scope": "SYSTEM",
-                "approved_files": [PROJECT_PATH],
+                "approved_files": list(scope_paths),
                 "approver": "fubai",
                 "approved_at": now.isoformat(),
                 "decision_conclusion": "approved",
@@ -162,10 +169,11 @@ def _ready(
     root: Path,
     *,
     routing: InternalRoutingPolicy | None = None,
+    scope_paths: tuple[str, ...] = (PROJECT_PATH,),
 ) -> tuple[MissionService, WorkRegistryService, ExecutionDispatchService]:
     _workspace(root)
     now = datetime.now(UTC)
-    _write_decision(root, now)
+    _write_decision(root, now, scope_paths)
     works = WorkRegistryService(root)
     works.initialize("test")
     created = works.create_work(
@@ -174,14 +182,14 @@ def _ready(
         kind=WorkKind.WBS,
         title="A5 adapter dispatch",
         owner="codex:agent-a",
-        scope_paths=[PROJECT_PATH],
+        scope_paths=list(scope_paths),
         source_fingerprint="sha256:test",
         idempotency_key="work-create-1",
     )
     works.authorize(created.work_id, DECISION_ID, "work-authorize-1")
     missions = MissionService(root)
     missions.initialize("test")
-    authority = _authority(now)
+    authority = _authority(now, scope_paths)
     if routing is not None:
         authority = authority.model_copy(update={"routing": routing})
     draft = missions.create(
@@ -289,6 +297,102 @@ def test_codex_preparation_hands_the_same_run_to_trae_and_resume_is_exact(tmp_pa
     assert resumed.run is not None and resumed.run.run_id == "RUN-A5-001"
     assert resumed.checkpoint is not None and resumed.checkpoint.checkpoint_id == "CP-A5-001"
     assert resumed.lease is not None and resumed.lease.owner_id == "trae:agent-b"
+
+
+def test_dispatch_reuses_external_candidate_with_one_canonical_store(
+    tmp_path: Path,
+) -> None:
+    control = tmp_path / "control"
+    control.mkdir()
+    missions, _, _ = _ready(control)
+    candidate = tmp_path / "candidate"
+    subprocess.run(
+        [
+            "git", "-C", str(control), "worktree", "add",
+            "-b", "codex/test-external", str(candidate), "HEAD",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    dispatch = ExecutionDispatchService(control, execution_root=candidate)
+    prepared = dispatch.prepare(
+        mission=missions.get("MISSION-A5-001"),
+        work_id="WORK-A5-001",
+        run_id="RUN-A5-EXTERNAL",
+        adapter=ExecutionAdapterKind.CODEX,
+        executor_id="agent-a",
+        lease_token="external-lease",
+        lease_seconds=900,
+        idempotency_key="dispatch-external",
+        stack="python",
+        force_isolation=True,
+    )
+
+    assert prepared.receipt.worktree_path == str(candidate.resolve())
+    assert ContinuityStore(control).get_run("RUN-A5-EXTERNAL").state is RunState.READY
+    assert not (candidate / ".auto-pm" / "continuity.db").exists()
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_candidate_intent_replay_requires_original_clean_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: bool
+) -> None:
+    control = tmp_path / "control"
+    control.mkdir()
+    missions, _, _ = _ready(control)
+    candidate = tmp_path / "candidate"
+    subprocess.run(
+        [
+            "git", "-C", str(control), "worktree", "add",
+            "-b", "codex/test-reconcile", str(candidate), "HEAD",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    dispatch = ExecutionDispatchService(control, execution_root=candidate)
+    request = dict(
+        mission=missions.get("MISSION-A5-001"),
+        work_id="WORK-A5-001",
+        run_id="RUN-A5-RECONCILE",
+        adapter=ExecutionAdapterKind.CODEX,
+        executor_id="agent-a",
+        lease_token="reconcile-lease",
+        lease_seconds=900,
+        idempotency_key="dispatch-reconcile",
+        stack="python",
+        force_isolation=True,
+        reconcile_incomplete=True,
+    )
+
+    def fail_start(**_kwargs: object) -> None:
+        raise ContinuityExecutionError("injected before Run")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(dispatch._execution, "start_run", fail_start)
+        with pytest.raises(ExecutionDispatchError, match="injected"):
+            dispatch.prepare(**request)
+    store = ContinuityStore(control)
+    assert store.get_execution_intent("dispatch-reconcile") is not None
+    assert store.list_runs("WORK-A5-001", include_terminal=True) == ()
+
+    if drift:
+        (candidate / PROJECT_PATH).write_text("new candidate commit\n", encoding="utf-8")
+        _git(candidate, "add", PROJECT_PATH)
+        _git(
+            candidate, "-c", "user.name=Adapter Test",
+            "-c", "user.email=adapter@example.invalid",
+            "commit", "-m", "candidate drift",
+        )
+        with pytest.raises(ExecutionDispatchError, match="基线|drift"):
+            dispatch.prepare(**request)
+        assert store.list_runs("WORK-A5-001", include_terminal=True) == ()
+        return
+
+    first = dispatch.prepare(**request)
+    replay = dispatch.prepare(**request)
+    assert first.intent == replay.intent
+    assert len(store.list_runs("WORK-A5-001", include_terminal=True)) == 1
+    assert store.get_run("RUN-A5-RECONCILE").state is RunState.READY
 
 
 def test_dispatch_rejects_unapproved_adapter_and_implicit_parallel_run(tmp_path: Path) -> None:

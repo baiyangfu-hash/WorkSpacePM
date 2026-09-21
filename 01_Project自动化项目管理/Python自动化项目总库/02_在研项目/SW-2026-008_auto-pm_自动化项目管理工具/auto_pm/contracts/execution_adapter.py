@@ -178,7 +178,7 @@ class ExecutionIntent(BaseModel):
 
 
 class ExecutionMicrotaskFile(BaseModel):
-    """One regular baseline blob copied into a standalone microtask repository."""
+    """One authorized baseline file or proven absent path in a microtask."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -186,6 +186,17 @@ class ExecutionMicrotaskFile(BaseModel):
     git_mode: Literal["100644", "100755"]
     blob_oid: str = Field(pattern=r"^[0-9a-f]{40}$")
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    baseline_state: Literal["PRESENT", "ABSENT"] = "PRESENT"
+
+    @model_validator(mode="after")
+    def _validate_absent_baseline(self) -> Self:
+        if self.baseline_state == "ABSENT" and (
+            self.git_mode != "100644"
+            or self.blob_oid != "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+            or self.content_sha256 != hashlib.sha256(b"").hexdigest()
+        ):
+            raise ValueError("absent baseline must bind the canonical empty blob")
+        return self
 
     @field_validator("path")
     @classmethod
@@ -279,7 +290,9 @@ class ExecutionMicrotaskPlan(BaseModel):
 
     @model_validator(mode="after")
     def _validate_content_hashes(self) -> Self:
-        manifest = [item.model_dump(mode="json") for item in self.manifest]
+        manifest = [
+            item.model_dump(mode="json", exclude_defaults=True) for item in self.manifest
+        ]
         if self.manifest_sha256 != self._hash(manifest):
             raise ValueError("manifest_sha256 must bind the exact canonical manifest")
         request = {

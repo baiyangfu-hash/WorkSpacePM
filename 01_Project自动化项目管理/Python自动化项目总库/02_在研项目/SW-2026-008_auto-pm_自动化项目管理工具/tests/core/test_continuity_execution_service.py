@@ -832,7 +832,7 @@ def test_start_run_rejects_external_repository_and_direct_store_bypass(
         errors="replace",
     ).stdout.strip()
 
-    with pytest.raises(ContinuityExecutionError, match="workspace 外|受管"):
+    with pytest.raises(ContinuityExecutionError, match="workspace 外|受管|common-dir"):
         _start(
             service,
             worktree_path=str(foreign),
@@ -862,7 +862,7 @@ def test_start_run_rejects_external_repository_and_direct_store_bypass(
         "version": 1,
         "updated_at": now,
     }
-    with pytest.raises(ContinuityStoreError, match="workspace 外|受管"):
+    with pytest.raises(ContinuityStoreError, match="workspace 外|受管|common-dir"):
         service._store.create_run(values, lease, (), 900, "direct-bypass")
     assert service._store.list_runs("WORK-001") == ()
 
@@ -892,6 +892,34 @@ def test_start_run_accepts_governed_linked_worktree(tmp_path: Path) -> None:
     )
 
     assert Path(run.worktree_path) == linked.resolve()
+
+
+def test_start_run_accepts_external_linked_worktree_from_control_repo(
+    tmp_path: Path,
+) -> None:
+    control = tmp_path / "control"
+    control.mkdir()
+    clock = Clock()
+    _, service = _services(control, clock)
+    linked = tmp_path / "candidate"
+    subprocess.run(
+        ["git", "-C", str(control), "worktree", "add", "--detach", str(linked), "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(linked), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
+
+    run = _start(service, git_head=head, worktree_path=str(linked))
+
+    assert Path(run.worktree_path) == linked.resolve()
+    assert service._store.get_run(run.run_id).worktree_path == str(linked.resolve())
 
 
 def test_start_run_resamples_head_and_dirty_instead_of_trusting_request(

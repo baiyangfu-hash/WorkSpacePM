@@ -18,7 +18,7 @@ from auto_pm.contracts.execution_adapter import (
 )
 from auto_pm.contracts.mission import Mission
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
-from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from auto_pm.infrastructure.control_root_guard import clean_git_environment, is_link_like
 
 
 class ExecutionMicrotaskError(RuntimeError):
@@ -145,8 +145,15 @@ class ExecutionMicrotaskService:
             ):
                 raise ExecutionMicrotaskError("manifest 包含 marker、Git 或微任务仓自身路径")
             current = candidate.joinpath(*PurePosixPath(normalized).parts)
-            if current.is_symlink() or not current.is_file():
-                raise ExecutionMicrotaskError(f"manifest 不是常规文件: {normalized}")
+            parent = candidate
+            for part in PurePosixPath(normalized).parts[:-1]:
+                parent = parent / part
+                if is_link_like(parent):
+                    raise ExecutionMicrotaskError(f"manifest 父目录含链接: {normalized}")
+                if parent.exists() and not parent.is_dir():
+                    raise ExecutionMicrotaskError(f"manifest 父路径不是目录: {normalized}")
+            if is_link_like(current):
+                raise ExecutionMicrotaskError(f"manifest 含链接: {normalized}")
             entry = self._git_bytes(
                 candidate,
                 "ls-tree",
@@ -156,6 +163,19 @@ class ExecutionMicrotaskService:
                 normalized,
             )
             rows = tuple(item for item in entry.split(b"\0") if item)
+            if not current.exists() and not rows:
+                result.append(
+                    ExecutionMicrotaskFile(
+                        path=normalized,
+                        git_mode="100644",
+                        blob_oid="e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+                        content_sha256=hashlib.sha256(b"").hexdigest(),
+                        baseline_state="ABSENT",
+                    )
+                )
+                continue
+            if not current.is_file():
+                raise ExecutionMicrotaskError(f"manifest 不是常规文件: {normalized}")
             if len(rows) != 1:
                 raise ExecutionMicrotaskError(f"候选基线缺少唯一文件 blob: {normalized}")
             try:
@@ -189,7 +209,9 @@ class ExecutionMicrotaskService:
         repository = (
             self._root / ".auto-pm" / "microtasks" / operation_digest[:24]
         ).resolve()
-        manifest_payload = [item.model_dump(mode="json") for item in manifest]
+        manifest_payload = [
+            item.model_dump(mode="json", exclude_defaults=True) for item in manifest
+        ]
         manifest_sha256 = self._hash(manifest_payload)
         request_payload = {
             "operation_id": operation_id,
@@ -235,7 +257,10 @@ class ExecutionMicrotaskService:
         for item in plan.manifest:
             destination = target.joinpath(*PurePosixPath(item.path).parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            content = self._git_bytes(source, "cat-file", "blob", item.blob_oid)
+            content = (
+                b"" if item.baseline_state == "ABSENT"
+                else self._git_bytes(source, "cat-file", "blob", item.blob_oid)
+            )
             if hashlib.sha256(content).hexdigest() != item.content_sha256:
                 raise ExecutionMicrotaskError("候选 baseline blob 内容漂移")
             destination.write_bytes(content)
@@ -363,7 +388,10 @@ class ExecutionMicrotaskService:
             "source_worktree_path": plan.source_worktree_path,
             "baseline_git_head": plan.baseline_git_head,
             "repository_path": plan.repository_path,
-            "manifest": [item.model_dump(mode="json") for item in plan.manifest],
+            "manifest": [
+                item.model_dump(mode="json", exclude_defaults=True)
+                for item in plan.manifest
+            ],
             "manifest_sha256": plan.manifest_sha256,
             "request_sha256": plan.request_sha256,
         }

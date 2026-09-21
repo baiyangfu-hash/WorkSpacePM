@@ -42,9 +42,13 @@ class ContinuityResumeService:
         self,
         workspace_root: str | Path,
         now: Callable[[], datetime] | None = None,
+        *,
+        execution_root: str | Path | None = None,
     ) -> None:
         self._root = Path(workspace_root).resolve()
-        self._contexts = WorkspaceContextService(str(self._root))
+        self._contexts = WorkspaceContextService(
+            str(self._root), execution_root=execution_root
+        )
         self._store = ContinuityStore(self._root)
         self._now = now or (lambda: datetime.now(UTC))
 

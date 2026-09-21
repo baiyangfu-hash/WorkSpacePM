@@ -559,6 +559,7 @@ class EvidenceCollectionService:
             candidate, observed_head, _ = governed_worktree_snapshot(
                 self._workspace_root,
                 run.worktree_path,
+                allow_external_linked=True,
             )
         except ControlRootGuardError as error:
             raise EvidenceCollectionError(str(error)) from error

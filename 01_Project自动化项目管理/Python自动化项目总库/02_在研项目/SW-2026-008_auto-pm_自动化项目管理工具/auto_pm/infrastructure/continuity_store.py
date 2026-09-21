@@ -414,6 +414,7 @@ class ContinuityStore:
             worktree, actual_head, actual_dirty = governed_worktree_snapshot(
                 self.workspace_root,
                 path,
+                allow_external_linked=True,
             )
         except ControlRootGuardError as error:
             raise ContinuityStoreError(str(error)) from error
@@ -1931,7 +1932,14 @@ class ContinuityStore:
                 or plan.baseline_git_head != receipt.baseline_git_head
             ):
                 raise ContinuityStoreError("投影回执与 claim/Plan 不一致")
-            manifest = {item.path: item.content_sha256 for item in plan.manifest}
+            manifest = {
+                item.path: (
+                    "0" * 64
+                    if item.baseline_state == "ABSENT"
+                    else item.content_sha256
+                )
+                for item in plan.manifest
+            }
             files = {item.path: item.baseline_sha256 for item in receipt.files}
             if files != manifest:
                 raise ContinuityStoreError("投影回执文件集合或 baseline hash 不一致")

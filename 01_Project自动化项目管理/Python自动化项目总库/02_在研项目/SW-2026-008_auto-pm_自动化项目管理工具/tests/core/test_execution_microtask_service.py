@@ -37,7 +37,13 @@ def _git(root: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def _prepared(root: Path, *, operation_id: str = "OP-E08B-001") -> ExecutionDispatchService:
+def _prepared(
+    root: Path,
+    *,
+    operation_id: str = "OP-E08B-001",
+    additional_path: str = "",
+) -> ExecutionDispatchService:
+    paths = (PROJECT_PATH, additional_path) if additional_path else (PROJECT_PATH,)
     routing = InternalRoutingPolicy(
         allow_execution_branch_changes=True,
         allowed_execution_adapters=frozenset(
@@ -45,9 +51,9 @@ def _prepared(root: Path, *, operation_id: str = "OP-E08B-001") -> ExecutionDisp
         ),
         approved_model="agent-a",
         required_worktree_mode=WorktreeMode.ISOLATED,
-        declared_dirty_paths=(PROJECT_PATH,),
+        declared_dirty_paths=paths,
     )
-    missions, _, dispatch = _ready(root, routing=routing)
+    missions, _, dispatch = _ready(root, routing=routing, scope_paths=paths)
     mission = missions.get("MISSION-A5-001")
     dispatch.prepare(
         mission=mission,
@@ -74,6 +80,10 @@ def _rehash_plan(
 ) -> ExecutionMicrotaskPlan:
     values = plan.model_dump(mode="json")
     values.update(updates)
+    values["manifest"] = [
+        item.model_dump(mode="json", exclude_defaults=True)
+        for item in plan.manifest
+    ]
     request = {
         name: values[name]
         for name in (
@@ -144,6 +154,33 @@ def test_microtask_plan_precedes_repository_and_cold_replay_reuses_commit(
         ).fetchall()
     assert len(rows) == 1
     assert "must-never-persist" not in rows[0][1]
+
+
+def test_microtask_manifest_proves_new_file_absent_at_baseline(tmp_path: Path) -> None:
+    new_path = f"{Path(PROJECT_PATH).parent.as_posix()}/tests/e2e/test_pmf_python.py"
+    operation_id = "OP-E08B-NEW-FILE"
+    dispatch = _prepared(
+        tmp_path, operation_id=operation_id, additional_path=new_path
+    )
+
+    materialized = dispatch.prepare_microtask(operation_id)
+    new_item = next(item for item in materialized.plan.manifest if item.path == new_path)
+
+    assert new_item.baseline_state == "ABSENT"
+    assert not (Path(materialized.plan.source_worktree_path) / new_path).exists()
+    assert (Path(materialized.plan.repository_path) / new_path).read_bytes() == b""
+    assert dispatch.prepare_microtask(operation_id) == materialized
+
+
+def test_v1_manifest_without_baseline_state_remains_readable(tmp_path: Path) -> None:
+    operation_id = "OP-E08B-LEGACY-MANIFEST"
+    dispatch = _prepared(tmp_path, operation_id=operation_id)
+    plan = dispatch.prepare_microtask(operation_id).plan
+    historical_payload = plan.model_dump(mode="json")
+    for item in historical_payload["manifest"]:
+        item.pop("baseline_state")
+
+    assert ExecutionMicrotaskPlan.model_validate(historical_payload) == plan
 
 
 def test_candidate_drift_and_changed_plan_fail_without_repository_side_effect(

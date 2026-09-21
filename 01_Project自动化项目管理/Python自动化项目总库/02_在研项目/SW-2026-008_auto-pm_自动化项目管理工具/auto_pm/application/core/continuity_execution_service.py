@@ -193,6 +193,7 @@ class ContinuityExecutionService:
             governed_worktree, actual_head, actual_dirty = governed_worktree_snapshot(
                 self._root,
                 worktree_path,
+                allow_external_linked=True,
             )
             if actual_head != git_head:
                 raise ContinuityExecutionError("Run git_head 与受管 worktree 当前 HEAD 不一致")

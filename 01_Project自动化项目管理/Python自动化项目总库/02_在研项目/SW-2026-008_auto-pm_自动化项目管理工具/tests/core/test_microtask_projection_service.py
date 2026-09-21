@@ -25,8 +25,10 @@ from tests.core.test_execution_microtask_service import _prepared
 _LEASE_TOKEN = "must-never-persist"
 
 
-def _running_plan(root: Path, operation_id: str):
-    dispatch = _prepared(root, operation_id=operation_id)
+def _running_plan(root: Path, operation_id: str, *, additional_path: str = ""):
+    dispatch = _prepared(
+        root, operation_id=operation_id, additional_path=additional_path
+    )
     materialized = dispatch.prepare_microtask(operation_id)
     store = ContinuityStore(root)
     run = store.get_run(materialized.plan.run_id)
@@ -75,6 +77,85 @@ def test_projection_cas_receipt_and_cold_replay_are_exact(tmp_path: Path) -> Non
         operation_id, expected_source_commit=materialized.commit
     )
     assert cold == first
+
+
+def test_projection_creates_new_file_and_replays_without_second_write(
+    tmp_path: Path,
+) -> None:
+    new_path = f"{Path(PROJECT_PATH).parent.as_posix()}/tests/e2e/test_pmf_python.py"
+    operation_id = "OP-E08CD-NEW-FILE"
+    materialized, _claim = _running_plan(
+        tmp_path, operation_id, additional_path=new_path
+    )
+    source = Path(materialized.plan.repository_path) / new_path
+    existing_source = Path(materialized.plan.repository_path) / PROJECT_PATH
+    target = Path(materialized.plan.source_worktree_path) / new_path
+    assert not target.exists()
+    existing_source.write_text("changed baseline file\n", encoding="utf-8")
+    source.write_text("def test_c09(): assert True\n", encoding="utf-8")
+
+    service = MicrotaskProjectionService(tmp_path)
+    first = service.project(operation_id, expected_source_commit=materialized.commit)
+    replay = service.project(operation_id, expected_source_commit=materialized.commit)
+
+    assert target.read_bytes() == source.read_bytes()
+    assert first == replay
+    assert tuple(item.path for item in first.files) == (PROJECT_PATH, new_path)
+    assert service._dirty_paths(Path(materialized.plan.source_worktree_path)) == (
+        PROJECT_PATH,
+        new_path,
+    )
+
+
+def test_new_file_projection_failure_removes_file_and_created_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    operation_id = "OP-E08CD-NEW-FILE-ROLLBACK"
+    materialized, _claim = _running_plan(tmp_path, operation_id)
+    plan = materialized.plan
+    target = Path(plan.source_worktree_path)
+    new_path = f"{Path(PROJECT_PATH).parent.as_posix()}/tests/e2e/test_pmf_python.py"
+    destination = target / new_path
+    existing = target / PROJECT_PATH
+    baseline = existing.read_bytes()
+    prepared = [
+        (
+            destination, b"new test\n", None, 0o644,
+            ExecutionProjectionFile(
+                path=new_path,
+                baseline_sha256="0" * 64,
+                projected_sha256=hashlib.sha256(b"new test\n").hexdigest(),
+            ),
+        ),
+        (
+            existing, b"changed\n", baseline, existing.stat().st_mode,
+            ExecutionProjectionFile(
+                path=PROJECT_PATH,
+                baseline_sha256=hashlib.sha256(baseline).hexdigest(),
+                projected_sha256=hashlib.sha256(b"changed\n").hexdigest(),
+            ),
+        ),
+    ]
+    service = MicrotaskProjectionService(tmp_path)
+    real_replace = projection_module.os.replace
+    calls = 0
+
+    def fail_second_replace(source: Path, target_path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected second replace")
+        real_replace(source, target_path)
+
+    monkeypatch.setattr(projection_module.os, "replace", fail_second_replace)
+    with pytest.raises(MicrotaskProjectionError, match="clean baseline"):
+        service._apply_batch_with_rollback(
+            target, plan, prepared, tuple(item[4] for item in prepared)
+        )
+    assert not destination.exists()
+    assert not destination.parent.exists()
+    assert existing.read_bytes() == baseline
+    assert service._dirty_paths(target) == ()
 
 
 def test_mid_batch_replace_failure_rolls_back_and_proves_clean_baseline(

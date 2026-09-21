@@ -362,7 +362,10 @@ class LocalExecutionOrchestrator:
             "source_worktree_path": plan.source_worktree_path,
             "baseline_git_head": plan.baseline_git_head,
             "repository_path": plan.repository_path,
-            "manifest": [item.model_dump(mode="json") for item in plan.manifest],
+            "manifest": [
+                item.model_dump(mode="json", exclude_defaults=True)
+                for item in plan.manifest
+            ],
             "manifest_sha256": plan.manifest_sha256,
             "request_sha256": plan.request_sha256,
         }

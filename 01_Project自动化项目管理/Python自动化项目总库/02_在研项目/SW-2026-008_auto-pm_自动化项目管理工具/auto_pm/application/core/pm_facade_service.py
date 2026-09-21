@@ -355,6 +355,7 @@ class PmFacadeService:
                 idempotency_key=f"planning-execute:{card.request_id}:{actual_hash}",
                 operation_id=f"planning-execute:{card.request_id}:{actual_hash}",
                 force_isolation=True,
+                reconcile_incomplete=True,
             )
         except ExecutionDispatchError as error:
             raise PmFacadeError(str(error)) from error
@@ -566,7 +567,9 @@ class PmFacadeService:
         try:
             return cast(
                 ContinuityResume,
-                ContinuityResumeService(self._workspace_root).collect(
+                ContinuityResumeService(
+                    self._workspace_root, execution_root=self._execution_root
+                ).collect(
                     project_id=project_id,
                     invocation_path=invocation_path,
                     work_id=work_id,

@@ -78,26 +78,35 @@ class MicrotaskProjectionService:
         if tuple(sorted(manifest)) != tuple(sorted(plan.declared_dirty_paths)):
             raise MicrotaskProjectionError("Plan manifest 与 declared_dirty_paths 不一致")
 
-        prepared: list[tuple[Path, bytes, bytes, int, ExecutionProjectionFile]] = []
+        prepared: list[tuple[Path, bytes, bytes | None, int, ExecutionProjectionFile]] = []
         for relative in sorted(plan.declared_dirty_paths):
             item = manifest[relative]
             source_path = self._safe_regular_path(source, relative)
-            target_path = self._safe_regular_path(target, relative)
-            current_oid = self._git(
-                target, "hash-object", f"--path={relative}", "--", relative
-            )
-            if current_oid != item.blob_oid:
-                raise MicrotaskProjectionError(f"candidate baseline hash 漂移: {relative}")
+            if item.baseline_state == "ABSENT":
+                target_path = self._safe_absent_path(target, relative)
+                baseline = None
+                baseline_sha256 = "0" * 64
+                mode = 0o644
+            else:
+                target_path = self._safe_regular_path(target, relative)
+                current_oid = self._git(
+                    target, "hash-object", f"--path={relative}", "--", relative
+                )
+                if current_oid != item.blob_oid:
+                    raise MicrotaskProjectionError(f"candidate baseline hash 漂移: {relative}")
+                baseline = target_path.read_bytes()
+                baseline_sha256 = item.content_sha256
+                mode = target_path.stat().st_mode
             projected = source_path.read_bytes()
             prepared.append(
                 (
                     target_path,
                     projected,
-                    target_path.read_bytes(),
-                    target_path.stat().st_mode,
+                    baseline,
+                    mode,
                     ExecutionProjectionFile(
                         path=relative,
-                        baseline_sha256=item.content_sha256,
+                        baseline_sha256=baseline_sha256,
                         projected_sha256=hashlib.sha256(projected).hexdigest(),
                     ),
                 )
@@ -135,14 +144,23 @@ class MicrotaskProjectionService:
         self,
         target: Path,
         plan: ExecutionMicrotaskPlan,
-        prepared: list[tuple[Path, bytes, bytes, int, ExecutionProjectionFile]],
+        prepared: list[tuple[Path, bytes, bytes | None, int, ExecutionProjectionFile]],
         files: tuple[ExecutionProjectionFile, ...],
     ) -> None:
         """Apply the complete set or restore and prove the clean baseline."""
 
-        applied: list[tuple[Path, bytes, int]] = []
+        applied: list[tuple[Path, bytes | None, int]] = []
+        created_directories: set[Path] = set()
         try:
             for destination, projected, baseline, mode, _proof in prepared:
+                parent = destination.parent
+                missing: list[Path] = []
+                while not parent.exists():
+                    missing.append(parent)
+                    parent = parent.parent
+                if missing:
+                    destination.parent.mkdir(parents=True)
+                    created_directories.update(missing)
                 # Track before replace: even a wrapper that raises after replacement
                 # must cause this destination to be restored.
                 applied.append((destination, baseline, mode))
@@ -151,7 +169,14 @@ class MicrotaskProjectionService:
         except Exception as error:
             try:
                 for destination, baseline, mode in reversed(applied):
-                    self._atomic_replace(destination, baseline, mode)
+                    if baseline is None:
+                        destination.unlink(missing_ok=True)
+                    else:
+                        self._atomic_replace(destination, baseline, mode)
+                for directory in sorted(
+                    created_directories, key=lambda path: len(path.parts), reverse=True
+                ):
+                    directory.rmdir()
                 self._validate_clean_candidate(target, plan)
             except Exception as rollback_error:
                 raise MicrotaskProjectionIndeterminateError(
@@ -264,6 +289,23 @@ class MicrotaskProjectionService:
             raise MicrotaskProjectionError(f"projection path 不是常规文件: {relative}")
         return current
 
+    @classmethod
+    def _safe_absent_path(cls, root: Path, relative: str) -> Path:
+        current = root
+        parts = PurePosixPath(relative).parts
+        for part in parts[:-1]:
+            current = current / part
+            if cls._link_like(current):
+                raise MicrotaskProjectionError(f"projection path 含符号链接: {relative}")
+            if current.exists() and not current.is_dir():
+                raise MicrotaskProjectionError(f"projection 新文件父路径不是目录: {relative}")
+        current = current / parts[-1]
+        if cls._link_like(current):
+            raise MicrotaskProjectionError(f"projection path 含符号链接: {relative}")
+        if current.exists() or not current.resolve().is_relative_to(root.resolve()):
+            raise MicrotaskProjectionError(f"projection 新文件基线已存在或越界: {relative}")
+        return current
+
     @staticmethod
     def _link_like(path: Path) -> bool:
         try:
@@ -294,7 +336,10 @@ class MicrotaskProjectionService:
             "source_worktree_path": plan.source_worktree_path,
             "baseline_git_head": plan.baseline_git_head,
             "repository_path": plan.repository_path,
-            "manifest": [item.model_dump(mode="json") for item in plan.manifest],
+            "manifest": [
+                item.model_dump(mode="json", exclude_defaults=True)
+                for item in plan.manifest
+            ],
             "manifest_sha256": plan.manifest_sha256,
             "request_sha256": plan.request_sha256,
         }
