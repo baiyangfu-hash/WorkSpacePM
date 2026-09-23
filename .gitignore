@@ -124,6 +124,7 @@ gittoken.txt
 .auto-pm/cache/
 .auto-pm/logs/
 .auto-pm/handoffs/
+.auto-pm/microtasks/
 .auto-pm/worktrees/
 .auto-pm/reports/
 .auto-pm/app.instance.lock
