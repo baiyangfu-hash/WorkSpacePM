@@ -1,0 +1,27 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260923-C09R3AW1",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-306",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_microtask_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_microtask_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_local_execution_orchestrator.py",
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-23T02:07:31.045552+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "C09-R3A acceptance only: 26 Q01 RealSample cases excluded from the comprehensive gate; 14 fail from pre-existing missing real CSV fixtures, 2 pass, 10 skip. No fixture fabricated; original full suite is NOT green.",
+    "C09-R3A acceptance only: tests/contracts/test_execution_adapter.py::test_microtask_plan_is_canonical_append_only_and_secret_free excluded; identical manifest_sha256 validation failure reproduced on clean accepted C09-R2 HEAD 5b7d02d8acf08e03a88f6d34d458d077beca774e.",
+    "Accepted scope evidence is CP-SW008-PMF-C09R3A-001, directed 71 passed and remaining comprehensive suite 2348 passed/6 skipped, Ruff/Mypy/diff-check exit 0. Exception does not waive C09 end-to-end, full main integration, merge, push, deployment or release gates; unresolved baselines require separate governed repair."
+  ],
+  "metadata": {}
+}
