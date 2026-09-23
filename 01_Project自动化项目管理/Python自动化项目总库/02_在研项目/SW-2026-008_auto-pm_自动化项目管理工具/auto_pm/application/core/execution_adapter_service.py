@@ -136,7 +136,7 @@ class ExecutionDispatchService:
         self._microtasks = ExecutionMicrotaskService(self._execution_root, store=self._store)
 
     def prepare_microtask(self, operation_id: str) -> ExecutionMicrotaskMaterialization:
-        """Materialize an approved READY Run without starting a provider or model."""
+        """Validate the reserved intent's microtask without starting a provider."""
 
         try:
             return cast(
@@ -259,6 +259,8 @@ class ExecutionDispatchService:
             # reserve_execution_intent returns only after the transaction commits.
             # No worktree, Run, or provider may be created before this boundary.
             plan = self._worktrees.materialize(plan)
+            if routing.approved_model:
+                self.prepare_microtask(operation)
             # E03B deliberately leaves this lease-bound Run in READY.  Only trusted
             # executor-control evidence may later move it to RUNNING.
             self._execution.start_run(
@@ -275,7 +277,7 @@ class ExecutionDispatchService:
                 lease_seconds=lease_seconds,
                 idempotency_key=f"execution-run:{hashlib.sha256(operation.encode('utf-8')).hexdigest()}",
             )
-        except (ContinuityStoreError, ContinuityExecutionError, WorktreePolicyError) as error:
+        except (ContinuityStoreError, ContinuityExecutionError, WorktreePolicyError, ExecutionDispatchError) as error:
             raise ExecutionDispatchError(str(error)) from error
         return ExecutionDispatchResult(
             receipt=intent.receipt,
@@ -330,6 +332,8 @@ class ExecutionDispatchService:
                 or plan.worktree_mode != receipt.worktree_mode
             ):
                 raise ExecutionDispatchError("恢复时 execution_root Git 基线与原始 intent 漂移")
+            if mission.authority.routing.approved_model:
+                self.prepare_microtask(intent.operation_id)
             self._execution.start_run(
                 run_id=receipt.run_id,
                 work_id=receipt.work_id,

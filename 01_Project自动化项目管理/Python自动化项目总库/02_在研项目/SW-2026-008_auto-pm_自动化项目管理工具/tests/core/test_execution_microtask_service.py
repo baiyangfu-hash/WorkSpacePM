@@ -15,6 +15,10 @@ from auto_pm.core.execution_adapter_service import (
     ExecutionDispatchError,
     ExecutionDispatchService,
 )
+from auto_pm.core.execution_microtask_service import (
+    ExecutionMicrotaskError,
+    ExecutionMicrotaskService,
+)
 
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
@@ -156,6 +160,24 @@ def test_microtask_plan_precedes_repository_and_cold_replay_reuses_commit(
     assert "must-never-persist" not in rows[0][1]
 
 
+def test_foreign_repository_candidate_is_rejected(tmp_path: Path) -> None:
+    _prepared(tmp_path, operation_id="OP-R3A-FOREIGN")
+    intent = ContinuityStore(tmp_path).get_execution_intent("OP-R3A-FOREIGN")
+    assert intent is not None
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    _git(foreign, "init", "--initial-branch=main")
+    (foreign / "README.md").write_text("unrelated\n", encoding="utf-8")
+    _git(foreign, "add", "README.md")
+    _git(foreign, "-c", "user.name=Foreign Test", "-c", "user.email=foreign@example.invalid", "commit", "-m", "unrelated")
+    receipt = intent.receipt.model_copy(update={
+        "worktree_path": str(foreign.resolve()),
+        "git_head": _git(foreign, "rev-parse", "HEAD"),
+    })
+    with pytest.raises(ExecutionMicrotaskError, match="不属于控制根所在 Git 仓库"):
+        ExecutionMicrotaskService(tmp_path)._candidate(receipt)
+
+
 def test_microtask_manifest_proves_new_file_absent_at_baseline(tmp_path: Path) -> None:
     new_path = f"{Path(PROJECT_PATH).parent.as_posix()}/tests/e2e/test_pmf_python.py"
     operation_id = "OP-E08B-NEW-FILE"
@@ -196,8 +218,8 @@ def test_candidate_drift_and_changed_plan_fail_without_repository_side_effect(
     with pytest.raises(ExecutionDispatchError, match="candidate.*dirty|dirty.*漂移"):
         dispatch.prepare_microtask(operation_id)
     store = ContinuityStore(tmp_path)
-    assert store.get_execution_microtask_plan(operation_id) is None
-    assert not _target(tmp_path, operation_id).exists()
+    assert store.get_execution_microtask_plan(operation_id) is not None
+    assert _target(tmp_path, operation_id).exists()
     assert candidate_file.read_text(encoding="utf-8") == "drifted\n"
 
     clean_operation = "OP-E08B-PLAN-CONFLICT"
@@ -282,8 +304,8 @@ def test_mission_intent_run_mismatch_fails_before_plan_or_repository(
     with pytest.raises(ExecutionDispatchError, match="不一致"):
         dispatch.prepare_microtask(operation_id)
     store = ContinuityStore(tmp_path)
-    assert store.get_execution_microtask_plan(operation_id) is None
-    assert not _target(tmp_path, operation_id).exists()
+    assert store.get_execution_microtask_plan(operation_id) is not None
+    assert _target(tmp_path, operation_id).exists()
 
 
 def test_secret_shaped_mission_objective_fails_before_plan_or_repository(
@@ -302,8 +324,8 @@ def test_secret_shaped_mission_objective_fails_before_plan_or_repository(
     with pytest.raises(ExecutionDispatchError, match="契约"):
         dispatch.prepare_microtask(operation_id)
     store = ContinuityStore(tmp_path)
-    assert store.get_execution_microtask_plan(operation_id) is None
-    assert not _target(tmp_path, operation_id).exists()
+    assert store.get_execution_microtask_plan(operation_id) is not None
+    assert _target(tmp_path, operation_id).exists()
 
 
 @pytest.mark.parametrize("damage", ["partial", "dirty", "marker", "content"])
@@ -315,7 +337,7 @@ def test_partial_or_drifted_repository_is_preserved_and_rejected(
     dispatch = _prepared(tmp_path, operation_id=operation_id)
     target = _target(tmp_path, operation_id)
     if damage == "partial":
-        target.mkdir(parents=True)
+        (target / ".git").rename(target / ".git-preserved")
         sentinel = target / "keep.txt"
         sentinel.write_text("preserve me\n", encoding="utf-8")
         with pytest.raises(ExecutionDispatchError, match="standalone Git"):

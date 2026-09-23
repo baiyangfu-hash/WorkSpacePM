@@ -23,6 +23,7 @@ from auto_pm.core.execution_adapter_service import (
     ExecutionDispatchResult,
     ExecutionDispatchService,
 )
+from auto_pm.core.execution_microtask_service import ExecutionMicrotaskError
 from auto_pm.core.mission_service import MissionService
 from auto_pm.core.work_registry_service import WorkRegistryService
 from auto_pm.core.worktree_policy_service import WorktreePlan, WorktreePolicyService
@@ -333,6 +334,48 @@ def test_dispatch_reuses_external_candidate_with_one_canonical_store(
     assert not (candidate / ".auto-pm" / "continuity.db").exists()
 
 
+def test_approved_external_candidate_plans_before_run_in_same_repository(
+    tmp_path: Path,
+) -> None:
+    control = tmp_path / "control"
+    control.mkdir()
+    routing = InternalRoutingPolicy(
+        allow_execution_branch_changes=True,
+        allowed_execution_adapters=frozenset({ExecutionAdapterKind.CODEX}),
+        approved_model="agent-a",
+        required_worktree_mode=WorktreeMode.ISOLATED,
+        declared_dirty_paths=(PROJECT_PATH,),
+    )
+    missions, _, _ = _ready(
+        control, routing=routing, scope_paths=(PROJECT_PATH,)
+    )
+    candidate = tmp_path / "candidate"
+    subprocess.run(
+        ["git", "-C", str(control), "worktree", "add", "-b", "codex/r3a-external", str(candidate), "HEAD"],
+        check=True, capture_output=True,
+    )
+    dispatch = ExecutionDispatchService(control, execution_root=candidate)
+    result = dispatch.prepare(
+        mission=missions.get("MISSION-A5-001"),
+        work_id="WORK-A5-001",
+        run_id="RUN-R3A-EXTERNAL",
+        adapter=ExecutionAdapterKind.CODEX,
+        executor_id="agent-a",
+        lease_token="external-test-secret",
+        lease_seconds=300,
+        idempotency_key="dispatch-r3a-external",
+        operation_id="OP-R3A-EXTERNAL",
+        stack="python",
+    )
+    store = ContinuityStore(control)
+    plan = store.get_execution_microtask_plan(result.intent.operation_id)
+    assert plan is not None
+    assert Path(plan.source_worktree_path) == candidate.resolve()
+    assert Path(plan.repository_path).is_relative_to(candidate / ".auto-pm" / "microtasks")
+    assert store.get_run("RUN-R3A-EXTERNAL").state is RunState.READY
+    assert not (candidate / ".auto-pm" / "continuity.db").exists()
+
+
 @pytest.mark.parametrize("drift", [False, True])
 def test_candidate_intent_replay_requires_original_clean_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: bool
@@ -581,18 +624,17 @@ def test_execution_operation_binds_full_mission_authority(tmp_path: Path) -> Non
 def test_approved_dispatch_enforces_model_isolation_and_exact_declared_dirty_paths(
     tmp_path: Path,
 ) -> None:
-    missions, _, dispatch = _ready(tmp_path)
-    mission = missions.get("MISSION-A5-001")
-    routing = mission.authority.routing.model_copy(
-        update={
-            "approved_model": "agent-a",
-            "required_worktree_mode": WorktreeMode.ISOLATED,
-            "declared_dirty_paths": (PROJECT_PATH,),
-        }
+    routing = InternalRoutingPolicy(
+        allow_execution_branch_changes=True,
+        allowed_execution_adapters=frozenset({ExecutionAdapterKind.CODEX}),
+        approved_model="agent-a",
+        required_worktree_mode=WorktreeMode.ISOLATED,
+        declared_dirty_paths=(PROJECT_PATH,),
     )
-    approved = mission.model_copy(
-        update={"authority": mission.authority.model_copy(update={"routing": routing})}
+    missions, _, dispatch = _ready(
+        tmp_path, routing=routing, scope_paths=(PROJECT_PATH,)
     )
+    approved = missions.get("MISSION-A5-001")
     before = _counts(tmp_path)
     with pytest.raises(ExecutionDispatchError, match="executor/model"):
         dispatch.prepare(
@@ -627,8 +669,86 @@ def test_approved_dispatch_enforces_model_isolation_and_exact_declared_dirty_pat
     assert run.state.value == "READY"
     assert run.declared_dirty_paths == (PROJECT_PATH,)
     assert "approved-secret" not in prepared.intent.model_dump_json()
-    assert ContinuityStore(tmp_path).get_execution_microtask_plan("OP-E08A-001") is None
-    assert not (tmp_path / ".auto-pm" / "microtasks").exists()
+    microtask = ContinuityStore(tmp_path).get_execution_microtask_plan("OP-E08A-001")
+    assert microtask is not None
+    assert microtask.run_id == run.run_id
+    assert Path(microtask.repository_path).is_dir()
+
+
+def test_approved_microtask_failure_leaves_no_run_or_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    routing = InternalRoutingPolicy(
+        allow_execution_branch_changes=True,
+        allowed_execution_adapters=frozenset({ExecutionAdapterKind.CODEX}),
+        approved_model="agent-a",
+        required_worktree_mode=WorktreeMode.ISOLATED,
+        declared_dirty_paths=(PROJECT_PATH,),
+    )
+    missions, _, dispatch = _ready(
+        tmp_path, routing=routing, scope_paths=(PROJECT_PATH,)
+    )
+    def fail_plan(_operation_id: str) -> None:
+        raise ExecutionMicrotaskError("injected preparation failure")
+
+    monkeypatch.setattr(dispatch._microtasks, "prepare", fail_plan)
+    with pytest.raises(ExecutionDispatchError, match="injected preparation failure"):
+        dispatch.prepare(
+            mission=missions.get("MISSION-A5-001"),
+            work_id="WORK-A5-001",
+            run_id="RUN-R3A-FAIL",
+            adapter=ExecutionAdapterKind.CODEX,
+            executor_id="agent-a",
+            lease_token="test-only-secret",
+            lease_seconds=900,
+            idempotency_key="dispatch-r3a-fail",
+            operation_id="OP-R3A-FAIL",
+            stack="python",
+        )
+    store = ContinuityStore(tmp_path)
+    assert store.get_execution_intent("OP-R3A-FAIL") is not None
+    assert store.find_run("RUN-R3A-FAIL") is None
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        assert conn.execute(
+            "SELECT count(*) FROM execution_leases WHERE run_id=?", ("RUN-R3A-FAIL",)
+        ).fetchone()[0] == 0
+
+
+def test_approved_dispatch_commits_microtask_before_creating_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    routing = InternalRoutingPolicy(
+        allow_execution_branch_changes=True,
+        allowed_execution_adapters=frozenset({ExecutionAdapterKind.CODEX}),
+        approved_model="agent-a",
+        required_worktree_mode=WorktreeMode.ISOLATED,
+        declared_dirty_paths=(PROJECT_PATH,),
+    )
+    missions, _, dispatch = _ready(
+        tmp_path, routing=routing, scope_paths=(PROJECT_PATH,)
+    )
+    original = dispatch._execution.start_run
+    def checked_start(**kwargs: Any) -> Any:
+        store = ContinuityStore(tmp_path)
+        plan = store.get_execution_microtask_plan("OP-R3A-ORDER")
+        assert plan is not None
+        assert Path(plan.repository_path).is_dir()
+        assert store.find_run("RUN-R3A-ORDER") is None
+        return original(**kwargs)
+
+    monkeypatch.setattr(dispatch._execution, "start_run", checked_start)
+    dispatch.prepare(
+        mission=missions.get("MISSION-A5-001"),
+        work_id="WORK-A5-001",
+        run_id="RUN-R3A-ORDER",
+        adapter=ExecutionAdapterKind.CODEX,
+        executor_id="agent-a",
+        lease_token="test-only-secret",
+        lease_seconds=300,
+        idempotency_key="dispatch-r3a-order",
+        operation_id="OP-R3A-ORDER",
+        stack="python",
+    )
 
 
 def test_lease_token_is_excluded_from_dispatch_fingerprint_and_persistence(

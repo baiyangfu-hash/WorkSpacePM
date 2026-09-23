@@ -439,6 +439,7 @@ def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
     assert captured["executor_id"] == "gpt-approved"
     assert captured["force_isolation"] is True
     assert captured["lease_token"] == "one-time-secret"
+    assert captured["lease_seconds"] == 900
 
     microtask = object()
     saga_receipt = object()
@@ -860,6 +861,7 @@ def test_planning_scope_card_is_deterministic_and_never_creates_execution(tmp_pa
     _git_root(tmp_path)
     project = tmp_path / "SW-TEST-001"
     (project / "04_监控" / "01_变更管理" / "01_变更单").mkdir(parents=True)
+    (project / "PM_SESSION_SW-TEST-001.md").write_text("# Test project\n", encoding="utf-8")
     (project / "04_监控" / "01_变更管理" / "01_版本变更台帐.md").write_text(
         "# 台帐\n\n| 序号 | 变更编号 | 描述 |\n|---|---|---|\n", encoding="utf-8"
     )
@@ -1078,3 +1080,16 @@ def test_planning_scope_card_cold_replay_survives_approved_change(tmp_path: Path
     )
 
     assert replayed == card
+
+
+@pytest.mark.parametrize("seconds", [True, 59, 3601, 86_400])
+def test_planning_lease_configuration_rejects_unbounded_values(
+    tmp_path: Path, seconds: int
+) -> None:
+    with pytest.raises(PmFacadeError, match="planning_lease_seconds"):
+        PmFacadeService(tmp_path, planning_lease_seconds=seconds)
+
+
+def test_planning_lease_configuration_accepts_short_bounded_value(tmp_path: Path) -> None:
+    facade = PmFacadeService(tmp_path, planning_lease_seconds=300)
+    assert facade._planning_lease_seconds == 300

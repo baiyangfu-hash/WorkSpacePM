@@ -1642,11 +1642,21 @@ class ContinuityStore:
                     raise ContinuityStoreError("ExecutionMicrotaskPlan 缺少 ExecutionIntent")
                 intent = self._execution_intent_from_event(intent_row, plan.operation_id)
                 receipt = intent.receipt
-                run = self._get_run(conn, plan.run_id)
+                run_row = conn.execute(
+                    "SELECT run_id FROM run_items WHERE run_id=?", (plan.run_id,)
+                ).fetchone()
+                run = self._get_run(conn, plan.run_id) if run_row is not None else None
                 mission = self._get_mission(conn, plan.mission_id)
+                work = self._get_work(conn, receipt.work_id)
                 routing = mission.authority.routing
-                if run.state is not RunState.READY:
+                if run is not None and run.state is not RunState.READY:
                     raise ContinuityStoreError("只有 READY Run 可以规划未启动微任务")
+                if (
+                    work.subject_project_id != receipt.subject_project_id
+                    or work.authorization_ref != mission.authority.decision_id
+                    or work.scope_paths != receipt.owned_paths
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan Work 授权不一致")
                 if (
                     plan.mission_id != receipt.mission_id
                     or plan.mission_id != mission.mission_id
@@ -1662,35 +1672,33 @@ class ContinuityStore:
                     raise ContinuityStoreError("MicrotaskPlan approved_model 授权不一致")
                 if plan.objective != mission.objective:
                     raise ContinuityStoreError("MicrotaskPlan objective 与 Mission 不一致")
-                if not (
-                    plan.owned_paths
-                    == run.owned_paths
-                    == receipt.owned_paths
-                    == mission.authority.scope_paths
+                if plan.owned_paths != receipt.owned_paths or plan.owned_paths != mission.authority.scope_paths or (
+                    run is not None and run.owned_paths != plan.owned_paths
                 ):
                     raise ContinuityStoreError("MicrotaskPlan owned_paths 授权不一致")
-                if not (
-                    plan.declared_dirty_paths
-                    == run.declared_dirty_paths
-                    == receipt.declared_dirty_paths
-                    == routing.declared_dirty_paths
+                if plan.declared_dirty_paths != receipt.declared_dirty_paths or plan.declared_dirty_paths != routing.declared_dirty_paths or (
+                    run is not None and run.declared_dirty_paths != plan.declared_dirty_paths
                 ):
                     raise ContinuityStoreError(
                         "MicrotaskPlan declared_dirty_paths 授权不一致"
                     )
                 if (
                     plan.run_id != receipt.run_id
-                    or run.run_id != receipt.run_id
-                    or run.work_id != receipt.work_id
-                    or run.executor_id != receipt.owner_id
-                    or run.adapter != receipt.adapter.value
+                    or (run is not None and (
+                        run.run_id != receipt.run_id
+                        or run.work_id != receipt.work_id
+                        or run.executor_id != receipt.owner_id
+                        or run.adapter != receipt.adapter.value
+                    ))
                 ):
                     raise ContinuityStoreError("MicrotaskPlan ExecutionIntent/Run 身份不一致")
                 if (
-                    plan.baseline_git_head != run.git_head
-                    or plan.baseline_git_head != receipt.git_head
-                    or plan.source_worktree_path != run.worktree_path
+                    plan.baseline_git_head != receipt.git_head
                     or plan.source_worktree_path != receipt.worktree_path
+                    or (run is not None and (
+                        plan.baseline_git_head != run.git_head
+                        or plan.source_worktree_path != run.worktree_path
+                    ))
                 ):
                     raise ContinuityStoreError("MicrotaskPlan candidate 基线不一致")
                 manifest_paths = tuple(item.path for item in plan.manifest)
@@ -1705,11 +1713,15 @@ class ContinuityStore:
                         raise ContinuityStoreError("microtask operation_id 已绑定不同载荷")
                     return existing, False
                 target = Path(plan.repository_path).resolve()
-                root = (self.workspace_root / ".auto-pm" / "microtasks").resolve()
-                try:
-                    target.relative_to(root)
-                except ValueError as error:
-                    raise ContinuityStoreError("MicrotaskPlan repository_path 越界") from error
+                allowed_roots = (
+                    self.workspace_root,
+                    Path(receipt.worktree_path),
+                )
+                if not any(
+                    target.is_relative_to((base / ".auto-pm" / "microtasks").resolve())
+                    for base in allowed_roots
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan repository_path 越界")
                 self._append_event(
                     conn,
                     plan.operation_id,
@@ -3884,6 +3896,13 @@ class ContinuityStore:
     def get_run(self, run_id: str) -> RunItem:
         with self._read_connection() as conn:
             return self._get_run(conn, run_id)
+
+    def find_run(self, run_id: str) -> RunItem | None:
+        """Return a Run only when it exists; never hide a corrupt persisted Run."""
+
+        with self._read_connection() as conn:
+            row = conn.execute("SELECT run_id FROM run_items WHERE run_id=?", (run_id,)).fetchone()
+            return self._get_run(conn, run_id) if row is not None else None
 
     def get_lease(self, run_id: str) -> LeaseItem:
         with self._read_connection() as conn:

@@ -7,10 +7,12 @@ import json
 import os
 import subprocess
 from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 from auto_pm.contracts.continuity import RunItem, RunState
 from auto_pm.contracts.execution_adapter import (
+    ExecutionDispatchReceipt,
     ExecutionIntent,
     ExecutionMicrotaskFile,
     ExecutionMicrotaskMaterialization,
@@ -46,18 +48,22 @@ class ExecutionMicrotaskService:
             intent = self._store.get_execution_intent(operation_id)
             if intent is None:
                 raise ExecutionMicrotaskError("ExecutionIntent 不存在，拒绝规划微任务")
-            run = self._store.get_run(intent.receipt.run_id)
+            run = self._store.find_run(intent.receipt.run_id)
             mission = self._store.get_mission(intent.receipt.mission_id)
         except ContinuityStoreError as error:
             raise ExecutionMicrotaskError(str(error)) from error
-        if run.state is not RunState.READY:
+        if run is not None and run.state is not RunState.READY:
             raise ExecutionMicrotaskError("只有 READY Run 可以规划未启动微任务")
         self._assert_source_facts(intent, run, mission)
 
-        candidate = self._candidate(run)
-        manifest = self._manifest(candidate, run)
+        candidate = self._candidate(intent.receipt)
+        manifest = self._manifest(candidate, intent.receipt)
         try:
-            plan = self._plan(operation_id, run, manifest, intent, mission)
+            existing = self._store.get_execution_microtask_plan(operation_id)
+            created_at = existing.created_at if existing is not None else intent.created_at
+            plan = self._plan(
+                operation_id, intent.receipt, manifest, intent, mission, created_at
+            )
         except ValueError as error:
             raise ExecutionMicrotaskError("MicrotaskPlan 授权事实不满足契约") from error
         try:
@@ -70,7 +76,7 @@ class ExecutionMicrotaskService:
         return ExecutionMicrotaskMaterialization(plan=persisted, commit=commit)
 
     @staticmethod
-    def _assert_source_facts(intent: ExecutionIntent, run: RunItem, mission: Mission) -> None:
+    def _assert_source_facts(intent: ExecutionIntent, run: RunItem | None, mission: Mission) -> None:
         receipt = intent.receipt
         routing = mission.authority.routing
         if (
@@ -81,7 +87,7 @@ class ExecutionMicrotaskService:
             raise ExecutionMicrotaskError("persisted Mission 与 ExecutionIntent 不一致")
         if not routing.approved_model or routing.approved_model != receipt.executor_id:
             raise ExecutionMicrotaskError("approved_model 与 ExecutionIntent executor 不一致")
-        if (
+        if run is not None and (
             run.run_id != receipt.run_id
             or run.work_id != receipt.work_id
             or run.executor_id != receipt.owner_id
@@ -90,21 +96,19 @@ class ExecutionMicrotaskService:
             or run.worktree_path != receipt.worktree_path
         ):
             raise ExecutionMicrotaskError("ExecutionIntent 与 READY Run candidate 不一致")
-        if not (
-            run.owned_paths == receipt.owned_paths == mission.authority.scope_paths
+        if receipt.owned_paths != mission.authority.scope_paths or (
+            run is not None and run.owned_paths != receipt.owned_paths
         ):
             raise ExecutionMicrotaskError("Mission/ExecutionIntent/Run owned_paths 不一致")
-        if not (
-            run.declared_dirty_paths
-            == receipt.declared_dirty_paths
-            == routing.declared_dirty_paths
+        if receipt.declared_dirty_paths != routing.declared_dirty_paths or (
+            run is not None and run.declared_dirty_paths != receipt.declared_dirty_paths
         ):
             raise ExecutionMicrotaskError(
                 "Mission/ExecutionIntent/Run declared_dirty_paths 不一致"
             )
 
-    def _candidate(self, run: RunItem) -> Path:
-        raw = Path(run.worktree_path)
+    def _candidate(self, receipt: ExecutionDispatchReceipt) -> Path:
+        raw = Path(receipt.worktree_path)
         if raw.is_symlink():
             raise ExecutionMicrotaskError("Run candidate 不允许符号链接")
         try:
@@ -116,8 +120,16 @@ class ExecutionMicrotaskService:
         top = self._git_text(candidate, "rev-parse", "--show-toplevel")
         if self._path_key(Path(top)) != self._path_key(candidate):
             raise ExecutionMicrotaskError("Run candidate 不是 Git 根目录")
-        if self._git_text(candidate, "rev-parse", "HEAD") != run.git_head:
+        if self._git_text(candidate, "rev-parse", "HEAD") != receipt.git_head:
             raise ExecutionMicrotaskError("Run candidate HEAD 已漂移")
+        control_common = self._git_text(
+            self._store.workspace_root, "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+        candidate_common = self._git_text(
+            candidate, "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+        if self._path_key(Path(candidate_common)) != self._path_key(Path(control_common)):
+            raise ExecutionMicrotaskError("Run candidate 不属于控制根所在 Git 仓库")
         status = self._git_bytes(
             candidate, "status", "--porcelain=v1", "-z", "--untracked-files=all"
         )
@@ -126,12 +138,12 @@ class ExecutionMicrotaskService:
         return candidate
 
     def _manifest(
-        self, candidate: Path, run: RunItem
+        self, candidate: Path, receipt: ExecutionDispatchReceipt
     ) -> tuple[ExecutionMicrotaskFile, ...]:
-        declared = tuple(sorted(run.declared_dirty_paths))
+        declared = tuple(sorted(receipt.declared_dirty_paths))
         if not declared or len(set(declared)) != len(declared):
             raise ExecutionMicrotaskError("declared_dirty_paths 必须是非空精确文件集合")
-        if not self._paths_covered(declared, run.owned_paths):
+        if not self._paths_covered(declared, receipt.owned_paths):
             raise ExecutionMicrotaskError("declared_dirty_paths 超出 owned_paths")
         result: list[ExecutionMicrotaskFile] = []
         for raw in declared:
@@ -158,7 +170,7 @@ class ExecutionMicrotaskService:
                 candidate,
                 "ls-tree",
                 "-z",
-                run.git_head,
+                receipt.git_head,
                 "--",
                 normalized,
             )
@@ -200,10 +212,11 @@ class ExecutionMicrotaskService:
     def _plan(
         self,
         operation_id: str,
-        run: RunItem,
+        receipt: ExecutionDispatchReceipt,
         manifest: tuple[ExecutionMicrotaskFile, ...],
         intent: ExecutionIntent,
         mission: Mission,
+        created_at: datetime,
     ) -> ExecutionMicrotaskPlan:
         operation_digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
         repository = (
@@ -216,13 +229,13 @@ class ExecutionMicrotaskService:
         request_payload = {
             "operation_id": operation_id,
             "mission_id": mission.mission_id,
-            "run_id": run.run_id,
+            "run_id": receipt.run_id,
             "approved_model": mission.authority.routing.approved_model,
             "objective": mission.objective,
             "owned_paths": list(intent.receipt.owned_paths),
             "declared_dirty_paths": list(intent.receipt.declared_dirty_paths),
-            "source_worktree_path": str(Path(run.worktree_path).resolve()),
-            "baseline_git_head": run.git_head,
+            "source_worktree_path": str(Path(receipt.worktree_path).resolve()),
+            "baseline_git_head": receipt.git_head,
             "repository_path": str(repository),
             "manifest": manifest_payload,
             "manifest_sha256": manifest_sha256,
@@ -237,7 +250,7 @@ class ExecutionMicrotaskService:
             **request_payload,
             marker_sha256=hashlib.sha256(self._canonical(marker)).hexdigest(),
             request_sha256=request_sha256,
-            created_at=run.created_at,
+            created_at=created_at,
         )
 
     def _materialize_or_validate(self, plan: ExecutionMicrotaskPlan) -> str:

@@ -65,7 +65,11 @@ class PmFacadeService:
         decision_service: DecisionService | None = None,
         execution_service: ExecutionDispatchService | None = None,
         local_orchestrator: LocalExecutionOrchestrator | None = None,
+        planning_lease_seconds: int = 900,
     ) -> None:
+        if type(planning_lease_seconds) is not int or not 60 <= planning_lease_seconds <= 3600:
+            raise PmFacadeError("planning_lease_seconds 必须在 60 到 3600 之间")
+        self._planning_lease_seconds = planning_lease_seconds
         self._workspace_root = Path(workspace_root).resolve()
         self._execution_root = Path(execution_root or workspace_root).resolve()
         self._store = store or ContinuityStore(self._workspace_root)
@@ -351,7 +355,7 @@ class PmFacadeService:
                 adapter=card.execution_grant.adapter,
                 executor_id=card.execution_grant.approved_model,
                 lease_token=lease_token,
-                lease_seconds=86_400,
+                lease_seconds=self._planning_lease_seconds,
                 idempotency_key=f"planning-execute:{card.request_id}:{actual_hash}",
                 operation_id=f"planning-execute:{card.request_id}:{actual_hash}",
                 force_isolation=True,
