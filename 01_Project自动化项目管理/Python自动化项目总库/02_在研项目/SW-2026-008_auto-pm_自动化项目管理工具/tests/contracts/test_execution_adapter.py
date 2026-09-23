@@ -114,7 +114,7 @@ def test_microtask_plan_is_canonical_append_only_and_secret_free() -> None:
         blob_oid="a" * 40,
         content_sha256="b" * 64,
     )
-    manifest = [entry.model_dump(mode="json")]
+    manifest = [entry.model_dump(mode="json", exclude_defaults=True)]
     manifest_sha256 = hashlib.sha256(
         json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

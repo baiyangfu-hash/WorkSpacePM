@@ -30,6 +30,32 @@ from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityS
 from tests.core.test_execution_adapter_service import PROJECT_PATH, _ready
 
 
+def test_generated_microtask_directory_is_ignored_in_linked_candidate() -> None:
+    """Generated standalone repositories must not dirty their source worktree."""
+    source = Path(__file__).resolve().parent
+    root = Path(
+        subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=source,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    generated = subprocess.run(
+        ["git", "check-ignore", "--quiet", ".auto-pm/microtasks/example/.codex-microtask.json"],
+        cwd=root,
+        check=False,
+    )
+    assert generated.returncode == 0
+    product = subprocess.run(
+        ["git", "check-ignore", "--quiet", "src/services/dictionary_service.py"],
+        cwd=root,
+        check=False,
+    )
+    assert product.returncode == 1
+
+
 def _git(root: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(root), *args],
