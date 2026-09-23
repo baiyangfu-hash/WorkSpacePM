@@ -1,0 +1,43 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260921-D2DB1A6D",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-302",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/pyproject.toml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/__init__.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/python-tool/template/tests/__init__.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-21T23:16:34.970014+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: 固定工作目录下全量 Mypy 不再因 duplicate module discovery 提前中止。",
+    "acceptance: 不新增忽略目录或忽略规则来掩盖真实新代码。",
+    "acceptance: 定向测试、完整 pytest、Ruff、Mypy 与 git diff --check 均保留真实退出码。",
+    "risk: 测试包边界调整可能改变 pytest 与 Mypy 发现行为；必须以完整门禁验证。",
+    "risk: 不得把 Q03 的静态检查修复扩展为 C09、发布或全仓类型债治理。",
+    "non-goal: 不修改 C09 受控路径。",
+    "non-goal: 不合并、推送、部署或切换 release。",
+    "non-goal: 不通过扩大 ignore、删除断言或伪造样例获得通过。"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "c0d07ba90c0e7a9453654bbe1e21d5f8eaa14eebe98112c02fc7da562e23001e",
+      "approval_evidence_ref": "user-confirmation:2026-09-21-q03-authorized",
+      "request_id": "SW008-Q03-MYPY-MODULE-IDENTITY-20260921",
+      "execution_grant": {
+        "adapter": "codex",
+        "approved_model": "gpt-5.6-terra",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/pyproject.toml",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/__init__.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/python-tool/template/tests/__init__.py"
+        ]
+      }
+    }
+  }
+}
