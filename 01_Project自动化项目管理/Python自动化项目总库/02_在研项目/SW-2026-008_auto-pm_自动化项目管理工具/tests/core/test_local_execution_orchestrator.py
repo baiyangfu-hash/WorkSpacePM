@@ -72,6 +72,7 @@ def test_foreground_saga_uses_real_helper_strips_secret_and_replays_without_pope
     orchestrator = LocalExecutionOrchestrator(tmp_path, executor=executor)
     monkeypatch.setenv(_LEASE_ENV, _LEASE_TOKEN)
 
+    before_lease = orchestrator._store.get_lease(microtask.plan.run_id)
     first = orchestrator.execute(
         dispatch=dispatch,
         microtask=microtask,
@@ -81,6 +82,8 @@ def test_foreground_saga_uses_real_helper_strips_secret_and_replays_without_pope
     assert first.status == "VERIFYING"
     assert first.exit_code == 0
     assert executor.starts == 1
+    # A fresh 900-second lease must not trigger the old 3600/86400 renewal.
+    assert orchestrator._store.get_lease(microtask.plan.run_id) == before_lease
     assert "must-never-persist" not in first.model_dump_json()
     assert "hunter2" not in first.model_dump_json()
     assert (

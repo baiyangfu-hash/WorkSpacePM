@@ -9,13 +9,16 @@ ECDICT_URL = "https://github.com/skywind3000/ECDICT/raw/master/ecdict.db"
 DICT_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'ecdict.db')
 FULL_DICT_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'ecdict_full.db')
 
+DictionaryEntry = dict[str, object]
+DictionaryLookup = DictionaryEntry | list[DictionaryEntry] | None
+
 class Dictionary:
-    def __init__(self):
-        self.conn = None
+    def __init__(self) -> None:
+        self.conn: sqlite3.Connection | None = None
         self._ensure_dict()
         self._connect()
 
-    def _ensure_dict(self):
+    def _ensure_dict(self) -> None:
         """确保词典数据库存在，优先使用完整版"""
         os.makedirs(os.path.dirname(DICT_PATH), exist_ok=True)
         # 完整版或简化版存在即可
@@ -23,7 +26,7 @@ class Dictionary:
             return
         self._create_simple_dict()
 
-    def _create_simple_dict(self):
+    def _create_simple_dict(self) -> None:
         """创建简化版词典（用于演示）"""
         conn = sqlite3.connect(DICT_PATH)
         cursor = conn.cursor()
@@ -65,7 +68,7 @@ class Dictionary:
             ("happy", "happy", "ˈhæpi", "feeling pleasure and enjoyment", "快乐的；幸福的", "adj.", "1", "3000", "zk gk", "100", "100", "happier/happiest", "", ""),
         ]
         cursor.executemany('''
-            INSERT OR IGNORE INTO stardict 
+            INSERT OR IGNORE INTO stardict
             (word, sw, phonetic, definition, translation, pos, collins, oxford, tag, bnc, frq, exchange, detail, audio)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', sample_words)
@@ -73,14 +76,14 @@ class Dictionary:
         conn.close()
         print("已创建简化版词典（示例数据）")
 
-    def _connect(self):
+    def _connect(self) -> None:
         """连接词典数据库，优先完整版"""
         dict_path = FULL_DICT_PATH if os.path.exists(FULL_DICT_PATH) else DICT_PATH
         if os.path.exists(dict_path):
             self.conn = sqlite3.connect(dict_path)
             self.conn.row_factory = sqlite3.Row
 
-    def lookup(self, word):
+    def lookup(self, word: str) -> DictionaryLookup:
         """查询单词"""
         if not self.conn:
             return None
@@ -94,7 +97,7 @@ class Dictionary:
         rows = cursor.fetchall()
         return [dict(r) for r in rows] if rows else None
 
-    def search(self, keyword):
+    def search(self, keyword: str) -> list[DictionaryEntry]:
         """搜索单词"""
         if not self.conn:
             return []
@@ -105,7 +108,7 @@ class Dictionary:
         )
         return [dict(r) for r in cursor.fetchall()]
 
-    def get_random_words(self, count=10):
+    def get_random_words(self, count: int = 10) -> list[DictionaryEntry]:
         """获取随机单词"""
         if not self.conn:
             return []
@@ -116,6 +119,6 @@ class Dictionary:
         )
         return [dict(r) for r in cursor.fetchall()]
 
-    def close(self):
+    def close(self) -> None:
         if self.conn:
             self.conn.close()

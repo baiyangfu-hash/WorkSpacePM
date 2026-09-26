@@ -4,6 +4,19 @@
 import json
 import os
 import sqlite3
+from typing import TypedDict
+
+
+class GrammarLevel(TypedDict):
+    level: str
+    name: str
+    count: int
+
+
+class GrammarCategory(TypedDict):
+    name: str
+    count: int
+    points: list[dict[str, object]]
 
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'app.db')
 
@@ -194,10 +207,10 @@ GRAMMAR_POINTS = {
 class GrammarEngine:
     """语法课程引擎"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._ensure_db()
 
-    def _ensure_db(self):
+    def _ensure_db(self) -> None:
         """确保数据库表和语法数据已初始化"""
         if not os.path.exists(DB_PATH):
             return
@@ -233,7 +246,7 @@ class GrammarEngine:
         conn.commit()
         conn.close()
 
-    def _seed_grammar_data(self, cursor):
+    def _seed_grammar_data(self, cursor: sqlite3.Cursor) -> None:
         """播种语法数据"""
         for level, points in GRAMMAR_POINTS.items():
             for point in points:
@@ -243,7 +256,7 @@ class GrammarEngine:
                     (point['name'], level, point['category'], point['explanation'], examples_json, point['lesson_order'])
                 )
 
-    def get_all_levels(self):
+    def get_all_levels(self) -> list[GrammarLevel]:
         """获取所有 CEFR 等级"""
         return [
             {'level': 'A1', 'name': 'A1 入门', 'count': 34},
@@ -254,7 +267,7 @@ class GrammarEngine:
             {'level': 'C2', 'name': 'C2 精通', 'count': 3},
         ]
 
-    def get_points_by_level(self, level: str):
+    def get_points_by_level(self, level: str) -> list[dict[str, object]]:
         """获取指定等级的所有语法点"""
         if not os.path.exists(DB_PATH):
             return []
@@ -267,7 +280,7 @@ class GrammarEngine:
                 (level,)
             )
             rows = cursor.fetchall()
-            result = []
+            result: list[dict[str, object]] = []
             for row in rows:
                 d = dict(row)
                 try:
@@ -281,7 +294,7 @@ class GrammarEngine:
         finally:
             conn.close()
 
-    def get_point_by_id(self, point_id: int):
+    def get_point_by_id(self, point_id: int) -> dict[str, object] | None:
         """获取指定语法点"""
         if not os.path.exists(DB_PATH):
             return None
@@ -304,12 +317,13 @@ class GrammarEngine:
         finally:
             conn.close()
 
-    def get_categories_by_level(self, level: str):
+    def get_categories_by_level(self, level: str) -> list[GrammarCategory]:
         """获取指定等级的语法分类统计"""
         points = self.get_points_by_level(level)
-        categories = {}
+        categories: dict[str, GrammarCategory] = {}
         for p in points:
-            cat = p['category']
+            raw_category = p['category']
+            cat = str(raw_category) if raw_category is not None else ''
             if cat not in categories:
                 categories[cat] = {'name': cat, 'count': 0, 'points': []}
             categories[cat]['count'] += 1
@@ -321,10 +335,10 @@ class GrammarEngine:
         return sorted(categories.values(), key=lambda x: list(categories.keys()).index(x['name']))
 
 
-def get_all_grammar_points():
+def get_all_grammar_points() -> list[dict[str, object]]:
     """获取所有语法点（便捷函数）"""
     engine = GrammarEngine()
-    all_points = []
+    all_points: list[dict[str, object]] = []
     for level_info in engine.get_all_levels():
         points = engine.get_points_by_level(level_info['level'])
         all_points.extend(points)

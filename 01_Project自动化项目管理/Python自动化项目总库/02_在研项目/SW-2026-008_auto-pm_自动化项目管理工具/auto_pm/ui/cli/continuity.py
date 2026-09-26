@@ -451,7 +451,7 @@ def run_group() -> None:
     "--worktree", type=click.Path(exists=True, file_okay=False, path_type=Path), default=None
 )
 @click.option("--lease-token", required=True)
-@click.option("--lease-seconds", type=click.IntRange(60, 86_400), default=1800, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def start_run(
@@ -583,6 +583,98 @@ def settle_expired_run(
     _emit(item)
 
 
+@run_group.command(name="fence-terminal-lease")
+@click.option("--target-run-id", required=True)
+@click.option("--expected-settlement-event-id", required=True)
+@click.option("--expected-target-lease-version", type=click.IntRange(min=1), required=True)
+@click.option("--recovery-run-id", required=True)
+@click.option("--recovery-owner", "recovery_owner_id", required=True)
+@click.option(
+    "--recovery-lease-stdin",
+    is_flag=True,
+    required=True,
+    help="Read the recovery lease token from standard input; tokens are never CLI arguments.",
+)
+@click.option("--decision-id", required=True)
+@click.option("--reason", required=True)
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def fence_terminal_lease(
+    ctx: click.Context,
+    target_run_id: str,
+    expected_settlement_event_id: str,
+    expected_target_lease_version: int,
+    recovery_run_id: str,
+    recovery_owner_id: str,
+    recovery_lease_stdin: bool,
+    decision_id: str,
+    reason: str,
+    idempotency_key: str,
+) -> None:
+    """Fence one legacy terminal lease through an independently approved recovery Run."""
+
+    del recovery_lease_stdin
+    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    try:
+        item = _execution_service(ctx).fence_terminal_lease(
+            target_run_id=target_run_id,
+            expected_settlement_event_id=expected_settlement_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+    except ContinuityExecutionError as error:
+        raise click.ClickException(str(error)) from error
+    _emit(item)
+
+
+@run_group.command(name="revoke-unstarted")
+@click.option("--target-run-id", required=True)
+@click.option("--recovery-run-id", required=True)
+@click.option("--recovery-owner", "recovery_owner_id", required=True)
+@click.option(
+    "--recovery-lease-stdin",
+    is_flag=True,
+    required=True,
+    help="Read the recovery lease token from standard input; tokens are never CLI arguments.",
+)
+@click.option("--decision-id", required=True)
+@click.option("--reason", required=True)
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def revoke_unstarted_run(
+    ctx: click.Context,
+    target_run_id: str,
+    recovery_run_id: str,
+    recovery_owner_id: str,
+    recovery_lease_stdin: bool,
+    decision_id: str,
+    reason: str,
+    idempotency_key: str,
+) -> None:
+    """Revoke a live Run only when its durable record has no Popen evidence."""
+
+    del recovery_lease_stdin
+    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    try:
+        item = _execution_service(ctx).revoke_unstarted_run(
+            target_run_id=target_run_id,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+    except ContinuityExecutionError as error:
+        raise click.ClickException(str(error)) from error
+    _emit(item)
+
+
 @continuity_group.group(name="dispatch")
 def dispatch_group() -> None:
     """Prepare local, secret-free execution packages without provider side effects."""
@@ -599,7 +691,7 @@ def dispatch_group() -> None:
 )
 @click.option("--executor", "executor_id", required=True)
 @click.option("--lease-token", required=True)
-@click.option("--lease-seconds", type=click.IntRange(60, 86_400), default=1800, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
 @click.option("--stack", default=None, help="已验证项目技术栈；省略时从 Workspace Registry 读取。")
 @click.option("--force-isolation", is_flag=True, help="即使控制工作树干净也创建隔离分支。")
 @click.option("--idempotency-key", required=True)
@@ -648,7 +740,7 @@ def lease_group() -> None:
 @click.option("--owner", "owner_id", required=True)
 @click.option("--lease-token-env", required=True, metavar="ENV_NAME")
 @click.option("--expected-version", type=click.IntRange(min=1), required=True)
-@click.option("--lease-seconds", type=click.IntRange(60, 86_400), default=1800, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def renew_lease(
@@ -763,7 +855,7 @@ def create_handoff(
 @click.option("--handoff-id", required=True)
 @click.option("--receiver", "receiver_id", required=True)
 @click.option("--new-lease-token", required=True)
-@click.option("--lease-seconds", type=click.IntRange(60, 86_400), default=1800, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def accept_handoff(

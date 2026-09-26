@@ -4,23 +4,43 @@
 import os
 import sqlite3
 from datetime import datetime
+from typing import TypedDict
 
+import cefr_tagger
 from cefr_tagger import (
     CEFR_LEVELS,
-    DB_PATH,
     get_user_level_progress,
     get_vocab_count_by_level,
     get_words_by_level,
 )
 
+DB_PATH = cefr_tagger.DB_PATH
+
+class UserProgress(TypedDict):
+    current_level: str
+    target_level: str
+    vocab_mastered: int
+    grammar_completed: int
+    total_days: int
+    streak_days: int
+    vocab_target: int
+    vocab_percent: float
+    grammar_total: int
+    grammar_percent: float
+    start_date: str
+
+
+def _integer(value: object) -> int:
+    return value if isinstance(value, int) else 0
+
 
 class CourseManager:
     """课程管理器"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._ensure_db()
 
-    def _ensure_db(self):
+    def _ensure_db(self) -> None:
         """确保数据库表存在"""
         if not os.path.exists(DB_PATH):
             return
@@ -101,7 +121,7 @@ class CourseManager:
         conn.commit()
         conn.close()
 
-    def get_levels(self):
+    def get_levels(self) -> list[dict[str, object]]:
         """获取所有 CEFR 等级信息"""
         if not os.path.exists(DB_PATH):
             return []
@@ -116,7 +136,7 @@ class CourseManager:
         finally:
             conn.close()
 
-    def set_user_level(self, level: str):
+    def set_user_level(self, level: str) -> UserProgress:
         """设置当前用户 CEFR 等级 (A1, A2, B1, B2, C1, C2)"""
         level = level.upper().strip()
         if level not in CEFR_LEVELS:
@@ -139,7 +159,7 @@ class CourseManager:
                 conn.close()
         return self.get_user_progress()
 
-    def get_user_progress(self):
+    def get_user_progress(self) -> UserProgress:
         """获取用户等级进度"""
         progress = get_user_level_progress(DB_PATH)
         if not progress:
@@ -154,13 +174,15 @@ class CourseManager:
                 'vocab_percent': 0,
                 'grammar_total': 0,
                 'grammar_percent': 0,
+                'start_date': '',
             }
 
         # 计算百分比
-        level = progress.get('current_level', 'A1')
+        raw_level = progress.get('current_level', 'A1')
+        level = raw_level if isinstance(raw_level, str) else 'A1'
         level_info = CEFR_LEVELS.get(level, CEFR_LEVELS['A1'])
         vocab_target = level_info['word_target']
-        vocab_mastered = progress.get('vocab_mastered', 0)
+        vocab_mastered = _integer(progress.get('vocab_mastered', 0))
 
         # 语法完成数
         conn = sqlite3.connect(DB_PATH)
@@ -174,23 +196,23 @@ class CourseManager:
             pass
         conn.close()
 
-        grammar_completed = progress.get('grammar_completed', 0)
+        grammar_completed = _integer(progress.get('grammar_completed', 0))
 
         return {
             'current_level': level,
-            'target_level': progress.get('target_level', 'B1'),
+            'target_level': str(progress.get('target_level', 'B1')),
             'vocab_mastered': vocab_mastered,
             'grammar_completed': grammar_completed,
-            'total_days': progress.get('total_days', 0),
-            'streak_days': progress.get('streak_days', 0),
+            'total_days': _integer(progress.get('total_days', 0)),
+            'streak_days': _integer(progress.get('streak_days', 0)),
             'vocab_target': vocab_target,
             'vocab_percent': min(round(vocab_mastered / vocab_target * 100, 1) if vocab_target > 0 else 0, 100),
             'grammar_total': grammar_total,
             'grammar_percent': min(round(grammar_completed / grammar_total * 100, 1) if grammar_total > 0 else 0, 100),
-            'start_date': progress.get('start_date', ''),
+            'start_date': str(progress.get('start_date') or ''),
         }
 
-    def get_daily_plan(self):
+    def get_daily_plan(self) -> dict[str, object]:
         """生成每日学习计划"""
         progress = self.get_user_progress()
         level = progress['current_level']
@@ -199,7 +221,6 @@ class CourseManager:
 
         # 每日词汇目标：根据等级调整
         daily_new_words = 10  # 基础
-        daily_review = 20
 
         # 获取到期复习的单词
         conn = sqlite3.connect(DB_PATH)
@@ -219,7 +240,7 @@ class CourseManager:
         plan = {
             'date': datetime.now().strftime('%Y-%m-%d'),
             'level': level,
-            'level_label': CEFR_LEVELS.get(level, {}).get('label', level),
+            'level_label': CEFR_LEVELS[level]['label'] if level in CEFR_LEVELS else level,
             'tasks': [
                 {
                     'type': 'vocab_new',
@@ -260,7 +281,7 @@ class CourseManager:
             'estimated_minutes': 45,
             'vocab_progress': {
                 'mastered': vocab_done,
-                'target': CEFR_LEVELS.get(level, {}).get('word_target', 500),
+                'target': CEFR_LEVELS[level]['word_target'] if level in CEFR_LEVELS else 500,
             },
             'grammar_progress': {
                 'completed': grammar_done,
@@ -270,9 +291,9 @@ class CourseManager:
 
         return plan
 
-    def get_6month_roadmap(self):
+    def get_6month_roadmap(self) -> dict[str, object]:
         """获取 6 个月学习路线图"""
-        roadmap = {
+        roadmap: dict[str, object] = {
             'phase1': {
                 'title': '第一阶段：A1 巩固 + A2 冲刺',
                 'months': '第 1-3 个月',
@@ -336,7 +357,7 @@ class CourseManager:
         }
         return roadmap
 
-    def update_study_progress(self, vocab_count=0, grammar_count=0):
+    def update_study_progress(self, vocab_count: int = 0, grammar_count: int = 0) -> None:
         """更新学习进度"""
         if not os.path.exists(DB_PATH):
             return
@@ -350,7 +371,7 @@ class CourseManager:
             if row:
                 # 更新进度
                 cursor.execute('''
-                    UPDATE user_level_progress 
+                    UPDATE user_level_progress
                     SET vocab_mastered = vocab_mastered + ?,
                         grammar_completed = grammar_completed + ?,
                         total_days = total_days + 1,
@@ -369,16 +390,16 @@ class CourseManager:
         conn.commit()
         conn.close()
 
-    def get_vocab_stats_by_level(self):
+    def get_vocab_stats_by_level(self) -> dict[str, int]:
         """获取各等级词汇统计"""
         return get_vocab_count_by_level()
 
-    def get_words_for_study(self, level: str, count: int = 10):
+    def get_words_for_study(self, level: str, count: int = 10) -> list[dict[str, object]]:
         """获取指定等级的学习词汇"""
         return get_words_by_level(level, count)
 
 
-def init_course_system():
+def init_course_system() -> UserProgress:
     """初始化课程系统（首次使用）"""
     mgr = CourseManager()
     return mgr.get_user_progress()

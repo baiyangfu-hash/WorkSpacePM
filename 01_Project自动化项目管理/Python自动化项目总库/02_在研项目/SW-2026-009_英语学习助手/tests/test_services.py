@@ -3,10 +3,16 @@
 """
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import Mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+import cefr_tagger
+import course_manager
+import services.database_manager as database_manager
 from services import (
     CourseService,
     DatabaseManager,
@@ -18,10 +24,41 @@ from services import (
 
 
 class TestServiceLayer(unittest.TestCase):
-    def setUp(self):
+    _temporary_directory: tempfile.TemporaryDirectory[str]
+    _database_path: str
+    _original_database_path: str
+    _original_cefr_database_path: str
+    _original_course_database_path: str
+    _original_database_manager: DatabaseManager | None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._temporary_directory = tempfile.TemporaryDirectory()
+        cls._database_path = str(Path(cls._temporary_directory.name) / 'app.db')
+        cls._original_database_path = database_manager.DB_PATH
+        cls._original_cefr_database_path = cefr_tagger.DB_PATH
+        cls._original_course_database_path = course_manager.DB_PATH
+        cls._original_database_manager = database_manager._db_manager_instance
+        database_manager._db_manager_instance = None
+        database_manager.DB_PATH = cls._database_path
+        cefr_tagger.DB_PATH = cls._database_path
+        course_manager.DB_PATH = cls._database_path
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        manager = database_manager._db_manager_instance
+        if manager is not None:
+            manager.close()
+        database_manager._db_manager_instance = cls._original_database_manager
+        database_manager.DB_PATH = cls._original_database_path
+        cefr_tagger.DB_PATH = cls._original_cefr_database_path
+        course_manager.DB_PATH = cls._original_course_database_path
+        cls._temporary_directory.cleanup()
+
+    def setUp(self) -> None:
         self.db_manager = get_db()
 
-    def test_database_manager(self):
+    def test_database_manager(self) -> None:
         self.assertIsInstance(self.db_manager, DatabaseManager)
         with self.db_manager.session() as conn:
             cursor = conn.cursor()
@@ -31,17 +68,21 @@ class TestServiceLayer(unittest.TestCase):
             self.assertIn('study_records', tables)
             self.assertIn('daily_stats', tables)
 
-    def test_dictionary_service(self):
+    def test_dictionary_service(self) -> None:
         service = DictionaryService()
         res = service.lookup("apple")
-        self.assertIsNotNone(res)
+        self.assertIsInstance(res, dict)
+        if not isinstance(res, dict):
+            self.fail("apple lookup must return one dictionary entry")
         self.assertIn('cefr_level', res)
         self.assertEqual(res['cefr_level'], 'A1')
 
         # 边界与入参清洗测试（空格修剪、空字符串、None、非字符串等）
         # 1. 验证前后空格输入清洗 lookup('  apple  ')
         res_spaces = service.lookup("  apple  ")
-        self.assertIsNotNone(res_spaces)
+        self.assertIsInstance(res_spaces, dict)
+        if not isinstance(res_spaces, dict):
+            self.fail("trimmed apple lookup must return one dictionary entry")
         self.assertEqual(res_spaces['word'], 'apple')
         self.assertEqual(res_spaces['cefr_level'], 'A1')
 
@@ -53,7 +94,9 @@ class TestServiceLayer(unittest.TestCase):
 
         # 3. 验证 query_word 接口及参数清洗
         q_res = service.query_word("  apple  ")
-        self.assertIsNotNone(q_res)
+        self.assertIsInstance(q_res, dict)
+        if not isinstance(q_res, dict):
+            self.fail("apple query must return one dictionary entry")
         self.assertEqual(q_res['word'], 'apple')
         self.assertIsNone(service.query_word(""))
         self.assertIsNone(service.query_word("   "))
@@ -75,7 +118,7 @@ class TestServiceLayer(unittest.TestCase):
 
         service.close()
 
-    def test_study_service(self):
+    def test_study_service(self) -> None:
         import time
         test_word = f"service_test_word_{time.time_ns()}"
         service = StudyService(self.db_manager)
@@ -90,7 +133,7 @@ class TestServiceLayer(unittest.TestCase):
         stats = service.get_daily_stats()
         self.assertGreaterEqual(stats['study_minutes'], 5)
 
-    def test_grammar_service(self):
+    def test_grammar_service(self) -> None:
         service = GrammarService()
         points = service.get_points_by_level("A1")
         self.assertGreater(len(points), 0)
@@ -98,7 +141,7 @@ class TestServiceLayer(unittest.TestCase):
         practice = service.generate_practice(points[0])
         self.assertGreaterEqual(len(practice), 1)
 
-    def test_course_service(self):
+    def test_course_service(self) -> None:
         service = CourseService(self.db_manager)
         progress = service.get_user_progress()
         self.assertIn('current_level', progress)
@@ -145,7 +188,63 @@ class TestServiceLayer(unittest.TestCase):
         self.assertEqual(CourseService.sanitize_level([], default="B1"), "B1")
         self.assertEqual(CourseService.sanitize_level("unknown", default="B2"), "B2")
 
+    def test_course_roadmap_and_progress_wiring(self) -> None:
+        service = CourseService(self.db_manager)
+        roadmap = service.get_roadmap()
+        self.assertIn('phase1', roadmap)
+        self.assertIn('phase2', roadmap)
+        before = service.get_user_progress()
+        service.update_progress(vocab_count=2, grammar_count=1)
+        after = service.get_user_progress()
+        self.assertEqual(after['vocab_mastered'], before['vocab_mastered'] + 2)
+        self.assertEqual(after['grammar_completed'], before['grammar_completed'] + 1)
+
+
+class TestDictionarySearchLimits(unittest.TestCase):
+    def setUp(self) -> None:
+        self.service = DictionaryService.__new__(DictionaryService)
+        self.dictionary_mock = Mock()
+        self.cefr_mock = Mock()
+        self.service.dict_engine = self.dictionary_mock
+        self.service.cefr_tagger = self.cefr_mock
+        self.cefr_mock.get_level.return_value = 'A1'
+        self.dictionary_mock.search.side_effect = lambda prefix: [
+            {'word': f'{prefix}{index}'} for index in range(25)
+        ]
+
+    def test_search_normalizes_limit_to_one_through_twenty(self) -> None:
+        cases = (
+            (None, 20),
+            (0, 1),
+            (-5, 1),
+            (1, 1),
+            (20, 20),
+            (21, 20),
+            ('3', 3),
+            ('invalid', 20),
+            (True, 20),
+        )
+        for limit, expected_count in cases:
+            with self.subTest(limit=limit):
+                self.cefr_mock.get_level.reset_mock()
+                results = self.service.search('  app  ', limit=limit)
+                self.dictionary_mock.search.assert_called_with('app')
+                self.assertEqual(len(results), expected_count)
+                self.assertEqual(
+                    [item['word'] for item in results],
+                    [f'app{index}' for index in range(expected_count)],
+                )
+                self.assertTrue(all(item['cefr_level'] == 'A1' for item in results))
+                self.assertEqual(
+                    self.cefr_mock.get_level.call_count, expected_count
+                )
+
+    def test_search_default_limit_and_empty_prefix(self) -> None:
+        self.assertEqual(len(self.service.search('app')), 20)
+        self.dictionary_mock.search.reset_mock()
+        self.assertEqual(self.service.search('  ', limit=0), [])
+        self.dictionary_mock.search.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
-

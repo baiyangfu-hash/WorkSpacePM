@@ -12,6 +12,7 @@ from auto_pm.core.continuity_execution_service import ContinuityExecutionError
 from auto_pm.core.execution_supervisor_service import (
     ExecutionCollectedOutcome,
     ExecutionCollectionPendingError,
+    ExecutionLeasePolicy,
     ExecutionSupervisorError,
     ExecutionSupervisorService,
     LeaseCapability,
@@ -24,6 +25,43 @@ from auto_pm.infrastructure.local_executor import (
     LocalExecutionResult,
     LocalExecutionStatus,
 )
+from tests.core.test_continuity_execution_service import Clock, _services, _start
+
+
+@pytest.mark.parametrize("seconds", [60, 300, 900, 3600])
+def test_short_lease_policy_keeps_first_and_subsequent_real_renewals_bounded(tmp_path, seconds):
+    clock = Clock()
+    _, execution = _services(tmp_path, clock)
+    _start(execution, lease_seconds=seconds)
+    lease = execution._store.get_lease("RUN-001")
+    capability = LeaseCapability(
+        lease.run_id, lease.owner_id, lease.version,
+        datetime.fromisoformat(lease.expires_at), "lease-secret",
+    )
+    policy = ExecutionLeasePolicy(seconds)
+    supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
+    assert 0 < policy.renewal_interval_seconds < policy.renew_before_seconds < seconds
+    early = supervisor.renew_if_due(
+        capability, lease_seconds=seconds, renew_before_seconds=policy.renew_before_seconds,
+        idempotency_key="early", now=clock(),
+    )
+    assert early.receipt is None
+    for cycle in range(2):
+        clock.value = capability.expires_at - timedelta(seconds=policy.renew_before_seconds)
+        outcome = supervisor.renew_if_due(
+            capability, lease_seconds=seconds, renew_before_seconds=policy.renew_before_seconds,
+            idempotency_key=f"renew-{cycle}", now=clock(),
+        )
+        assert outcome.receipt is not None
+        assert outcome.capability.expires_at == clock() + timedelta(seconds=seconds)
+        assert outcome.capability.version == capability.version + 1
+        capability = outcome.capability
+
+
+@pytest.mark.parametrize("seconds,threshold", [(86400, 3600), (59, 20), (3601, 60), (900, 900), (900, 0)])
+def test_foreground_lease_policy_rejects_old_24h_configuration(seconds, threshold):
+    with pytest.raises(ExecutionSupervisorError):
+        ExecutionLeasePolicy(seconds, threshold)
 
 
 def _evidence() -> ExecutionStartEvidence:

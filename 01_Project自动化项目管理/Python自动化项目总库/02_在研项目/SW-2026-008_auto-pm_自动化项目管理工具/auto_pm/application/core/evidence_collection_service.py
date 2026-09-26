@@ -16,6 +16,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 
 from auto_pm.contracts.continuity import RunItem
 from auto_pm.infrastructure.control_root_guard import (
@@ -103,6 +104,8 @@ class PythonQualityReceipt:
     evidence_current: bool
     evidence_error: str | None
     content_hash: str
+    project_roots: tuple[str, ...] = ()
+    owned_python_paths: tuple[str, ...] = ()
 
     @property
     def status(self) -> str:
@@ -238,6 +241,102 @@ class EvidenceCollectionService:
         """
 
         return self._run_python_quality_gates(run, project_root, c03_profile=True)
+
+    def run_generic_checkpoint_quality_gates(
+        self, run: RunItem, project_root: str | Path
+    ) -> PythonQualityReceipt:
+        """Run all three real tools in every owned Python file's project root."""
+
+        candidate, anchor = self._quality_context(run, project_root)
+        projects, owned = self._generic_project_targets(run, candidate, anchor)
+        before = self.collect(run)
+        gates = tuple(
+            self._run_quality_gate(name, command, root, error)
+            for root, targets in projects
+            for name, command, error in self._generic_quality_commands(targets)
+        )
+        evidence_current = False
+        evidence_error: str | None = None
+        try:
+            evidence_current = hmac.compare_digest(before.content_hash, self.collect(run).content_hash)
+            if not evidence_current:
+                evidence_error = "质量门执行期间 Run evidence 已变化"
+        except EvidenceCollectionError as error:
+            evidence_error = f"质量门后 Run evidence 无法复核: {error}"
+        roots = tuple(str(root) for root, _ in projects)
+        return PythonQualityReceipt(
+            run_id=run.run_id,
+            baseline_git_head=run.git_head,
+            candidate_path=str(candidate),
+            project_root=str(anchor),
+            evidence_hash=before.content_hash,
+            gates=gates,
+            evidence_current=evidence_current,
+            evidence_error=evidence_error,
+            content_hash=_quality_receipt_hash(
+                run_id=run.run_id,
+                baseline_git_head=run.git_head,
+                candidate_path=str(candidate),
+                project_root=str(anchor),
+                evidence_hash=before.content_hash,
+                gates=gates,
+                evidence_current=evidence_current,
+                evidence_error=evidence_error,
+                project_roots=roots,
+                owned_python_paths=owned,
+            ),
+            project_roots=roots,
+            owned_python_paths=owned,
+        )
+
+    def validate_generic_checkpoint_project_root(
+        self, run: RunItem, project_root: str | Path
+    ) -> Path:
+        candidate, anchor = self._quality_context(run, project_root)
+        self._generic_project_targets(run, candidate, anchor)
+        return anchor
+
+    @staticmethod
+    def _generic_project_targets(
+        run: RunItem, candidate: Path, anchor: Path
+    ) -> tuple[tuple[tuple[Path, _QualityTargets], ...], tuple[str, ...]]:
+        """Assign every exact owned Python file to its nearest project config."""
+
+        groups: dict[Path, list[str]] = {}
+        owned: list[str] = []
+        normalized_paths = EvidenceCollectionService._normalize_owned_paths(run.owned_paths)
+        for raw_path, _ in zip(run.owned_paths, normalized_paths, strict=True):
+            relative = PurePosixPath(str(raw_path).replace("\\", "/"))
+            if relative.suffix != ".py":
+                continue
+            absolute = candidate.joinpath(*relative.parts).resolve()
+            if not absolute.is_file():
+                raise EvidenceCollectionError(f"Run owned Python path 不存在: {relative}")
+            try:
+                absolute.relative_to(anchor)
+            except ValueError as error:
+                raise EvidenceCollectionError(
+                    f"质量门 project_root 未覆盖 Run owned Python path: {relative}"
+                ) from error
+            root = absolute.parent
+            while root != anchor and not (root / "pyproject.toml").is_file():
+                root = root.parent
+            if not (root / "pyproject.toml").is_file():
+                raise EvidenceCollectionError(f"Run owned Python path 缺少 pyproject.toml: {relative}")
+            groups.setdefault(root, []).append(absolute.relative_to(root).as_posix())
+            owned.append(relative.as_posix())
+        if not owned:
+            raise EvidenceCollectionError("Run 缺少已批准的 owned Python path")
+        projects: list[tuple[Path, _QualityTargets]] = []
+        for root, paths in sorted(groups.items(), key=lambda item: str(item[0])):
+            python = tuple(sorted(set(paths)))
+            tests = tuple(path for path in python if Path(path).name.startswith("test_"))
+            production = tuple(
+                path for path in python if not Path(path).name.startswith("test_")
+                and "tests" not in PurePosixPath(path).parts
+            )
+            projects.append((root, _QualityTargets(tests, python, production)))
+        return tuple(projects), tuple(sorted(set(owned)))
 
     def validate_c03_checkpoint_project_root(
         self, run: RunItem, project_root: str | Path
@@ -391,11 +490,54 @@ class EvidenceCollectionService:
             or receipt.status != "PASS"
         ):
             return False
+        if receipt.project_roots:
+            try:
+                projects, owned = self._generic_project_targets(run, candidate, root)
+            except EvidenceCollectionError:
+                return False
+            if (
+                receipt.project_roots != tuple(str(project) for project, _ in projects)
+                or receipt.owned_python_paths != owned
+                or not self.generic_checkpoint_receipt_matches_profile(receipt, projects)
+            ):
+                return False
         try:
             current = self.collect(run)
         except EvidenceCollectionError:
             return False
         return hmac.compare_digest(receipt.evidence_hash, current.content_hash)
+
+    @staticmethod
+    def generic_checkpoint_receipt_matches_profile(
+        receipt: PythonQualityReceipt,
+        projects: tuple[tuple[Path, _QualityTargets], ...],
+    ) -> bool:
+        """Require exact per-project commands and complete owned-path binding."""
+
+        expected = tuple(
+            (name, command, str(root))
+            for root, targets in projects
+            for name, command, _ in EvidenceCollectionService._generic_quality_commands(targets)
+        )
+        return (
+            tuple((gate.name, gate.command, gate.cwd) for gate in receipt.gates) == expected
+            and receipt.project_roots == tuple(str(root) for root, _ in projects)
+            and hmac.compare_digest(
+                receipt.content_hash,
+                _quality_receipt_hash(
+                    run_id=receipt.run_id,
+                    baseline_git_head=receipt.baseline_git_head,
+                    candidate_path=receipt.candidate_path,
+                    project_root=receipt.project_root,
+                    evidence_hash=receipt.evidence_hash,
+                    gates=receipt.gates,
+                    evidence_current=receipt.evidence_current,
+                    evidence_error=receipt.evidence_error,
+                    project_roots=receipt.project_roots,
+                    owned_python_paths=receipt.owned_python_paths,
+                ),
+            )
+        )
 
     @staticmethod
     def build_checkpoint_evidence(
@@ -418,6 +560,8 @@ class EvidenceCollectionService:
             gates=receipt.gates,
             evidence_current=receipt.evidence_current,
             evidence_error=receipt.evidence_error,
+            project_roots=receipt.project_roots,
+            owned_python_paths=receipt.owned_python_paths,
         )
         if (
             receipt.status != "PASS"
@@ -430,7 +574,9 @@ class EvidenceCollectionService:
         ):
             raise EvidenceCollectionError("自动 Checkpoint 的质量收据与当前 evidence 不一致")
         unsigned = {
-            "schema_version": "checkpoint-evidence.v1",
+            "schema_version": (
+                "checkpoint-evidence.v2" if receipt.project_roots else "checkpoint-evidence.v1"
+            ),
             "collection": _collection_payload(collection),
             "collection_hash": collection.content_hash,
             "quality_receipt": {
@@ -464,6 +610,10 @@ class EvidenceCollectionService:
             envelope = json.loads(serialized)
         except (TypeError, json.JSONDecodeError):
             return False
+        if isinstance(envelope, dict) and envelope.get("schema_version") == "checkpoint-evidence.v2":
+            return EvidenceCollectionService._generic_checkpoint_evidence_is_current(
+                serialized, envelope, collection, run, project_root
+            )
         expected_keys = {
             "schema_version",
             "collection",
@@ -552,6 +702,88 @@ class EvidenceCollectionService:
             and bool(gate["output_digest"])
             and isinstance(gate["output_summary"], str)
             for gate in gates
+        )
+
+    @staticmethod
+    def _generic_checkpoint_evidence_is_current(
+        serialized: str,
+        envelope: dict[str, object],
+        collection: EvidenceCollection,
+        run: RunItem,
+        project_root: str | Path,
+    ) -> bool:
+        """Recompute generic coverage and commands before accepting replay."""
+
+        if set(envelope) != {
+            "schema_version", "collection", "collection_hash", "quality_receipt",
+            "receipt_hash", "envelope_hash",
+        }:
+            return False
+        unsigned = {key: value for key, value in envelope.items() if key != "envelope_hash"}
+        if (
+            serialized != _canonical_json_payload(envelope)
+            or not isinstance(envelope["envelope_hash"], str)
+            or envelope["envelope_hash"] != _sha256_payload(unsigned)
+            or envelope["collection"] != _collection_payload(collection)
+            or envelope["collection_hash"] != collection.content_hash
+        ):
+            return False
+        payload = envelope["quality_receipt"]
+        if not isinstance(payload, dict) or set(payload) != {
+            "run_id", "baseline_git_head", "candidate_path", "project_root",
+            "evidence_hash", "gates", "evidence_current", "evidence_error",
+            "project_roots", "owned_python_paths", "status",
+        }:
+            return False
+        candidate = Path(collection.worktree_path).resolve()
+        anchor = Path(project_root).resolve()
+        try:
+            anchor.relative_to(candidate)
+            projects, owned = EvidenceCollectionService._generic_project_targets(
+                run, candidate, anchor
+            )
+        except (EvidenceCollectionError, ValueError):
+            return False
+        roots = tuple(str(root) for root, _ in projects)
+        if (
+            payload["run_id"] != run.run_id
+            or payload["baseline_git_head"] != run.git_head
+            or payload["candidate_path"] != collection.worktree_path
+            or payload["project_root"] != str(anchor)
+            or payload["evidence_hash"] != collection.content_hash
+            or payload["project_roots"] != list(roots)
+            or payload["owned_python_paths"] != list(owned)
+            or payload["evidence_current"] is not True
+            or payload["evidence_error"] is not None
+            or payload["status"] != "PASS"
+        ):
+            return False
+        receipt_payload = {key: value for key, value in payload.items() if key != "status"}
+        if envelope["receipt_hash"] != _sha256_payload(receipt_payload):
+            return False
+        gates = payload["gates"]
+        expected = tuple(
+            (name, list(command), str(root))
+            for root, targets in projects
+            for name, command, _ in EvidenceCollectionService._generic_quality_commands(targets)
+        )
+        return (
+            isinstance(gates, list)
+            and len(gates) == len(expected)
+            and all(
+                isinstance(gate, dict)
+                and set(gate) == {
+                    "name", "command", "cwd", "exit_code",
+                    "output_digest", "output_summary",
+                }
+                and (gate["name"], gate["command"], gate["cwd"]) == expected[index]
+                and type(gate["exit_code"]) is int
+                and gate["exit_code"] == 0
+                and isinstance(gate["output_digest"], str)
+                and bool(gate["output_digest"])
+                and isinstance(gate["output_summary"], str)
+                for index, gate in enumerate(gates)
+            )
         )
 
     def _verified_candidate(self, run: RunItem) -> tuple[Path, str]:
@@ -762,6 +994,20 @@ class EvidenceCollectionService:
         )
 
     @staticmethod
+    def _generic_quality_commands(
+        targets: _QualityTargets,
+    ) -> tuple[tuple[str, tuple[str, ...], str | None], ...]:
+        """Check exact owned targets with normal per-project type resolution."""
+
+        commands = EvidenceCollectionService._python_quality_commands(targets)
+        mypy = (sys.executable, "-m", "mypy", "--no-incremental")
+        if targets.production:
+            return (*commands[:2], ("mypy", mypy + targets.production, None))
+        if targets.tests:
+            return (*commands[:2], ("mypy", mypy + targets.tests, None))
+        return commands
+
+    @staticmethod
     def _c03_checkpoint_quality_commands(
         targets: _QualityTargets,
     ) -> tuple[tuple[str, tuple[str, ...], str | None], ...]:
@@ -798,17 +1044,22 @@ class EvidenceCollectionService:
             )
         environment = os.environ.copy()
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        environment["PYTEST_ADDOPTS"] = ""
         try:
-            result = subprocess.run(
-                command,
-                cwd=str(project_root),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-                env=environment,
-            )
+            with TemporaryDirectory(prefix="auto-pm-quality-") as temporary:
+                environment["MYPY_CACHE_DIR"] = temporary
+                environment["TMP"] = temporary
+                environment["TEMP"] = temporary
+                result = subprocess.run(
+                    command,
+                    cwd=str(project_root),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    env=environment,
+                )
             output = f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
             exit_code: int | None = result.returncode
         except OSError as error:
@@ -894,10 +1145,12 @@ def _quality_receipt_payload_fields(
     gates: tuple[PythonQualityGate, ...],
     evidence_current: bool,
     evidence_error: str | None,
+    project_roots: tuple[str, ...] = (),
+    owned_python_paths: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """Keep receipt hashing and checkpoint serialization on one exact schema."""
 
-    return {
+    payload: dict[str, object] = {
         "run_id": run_id,
         "baseline_git_head": baseline_git_head,
         "candidate_path": candidate_path,
@@ -907,6 +1160,10 @@ def _quality_receipt_payload_fields(
         "evidence_current": evidence_current,
         "evidence_error": evidence_error,
     }
+    if project_roots:
+        payload["project_roots"] = list(project_roots)
+        payload["owned_python_paths"] = list(owned_python_paths)
+    return payload
 
 
 def _quality_receipt_payload(receipt: PythonQualityReceipt) -> dict[str, object]:
@@ -921,6 +1178,8 @@ def _quality_receipt_payload(receipt: PythonQualityReceipt) -> dict[str, object]
         gates=receipt.gates,
         evidence_current=receipt.evidence_current,
         evidence_error=receipt.evidence_error,
+        project_roots=receipt.project_roots,
+        owned_python_paths=receipt.owned_python_paths,
     )
 
 
@@ -934,6 +1193,8 @@ def _quality_receipt_hash(
     gates: tuple[PythonQualityGate, ...],
     evidence_current: bool,
     evidence_error: str | None,
+    project_roots: tuple[str, ...] = (),
+    owned_python_paths: tuple[str, ...] = (),
 ) -> str:
     """Hash the fixed receipt payload used by C02 and C03 evidence envelopes."""
 
@@ -947,6 +1208,8 @@ def _quality_receipt_hash(
             gates=gates,
             evidence_current=evidence_current,
             evidence_error=evidence_error,
+            project_roots=project_roots,
+            owned_python_paths=owned_python_paths,
         )
     )
 

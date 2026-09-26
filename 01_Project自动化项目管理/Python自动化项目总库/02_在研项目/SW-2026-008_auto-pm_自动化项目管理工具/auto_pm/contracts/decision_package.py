@@ -35,6 +35,8 @@ class RuntimeDecisionAction(StrEnum):
     """Exceptional runtime mutations that a Decision may explicitly authorize."""
 
     SETTLE_EXPIRED_RUN = "settle_expired_run"
+    REVOKE_UNSTARTED_RUN = "revoke_unstarted_run"
+    FENCE_TERMINAL_LEASE = "fence_terminal_lease"
 
 
 class RuntimeDecisionOutcome(StrEnum):

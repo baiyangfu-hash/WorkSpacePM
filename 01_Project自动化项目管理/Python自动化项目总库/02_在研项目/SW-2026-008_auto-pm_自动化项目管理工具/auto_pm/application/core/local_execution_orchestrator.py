@@ -11,6 +11,7 @@ from pathlib import Path
 from auto_pm.core.execution_adapter_service import ExecutionDispatchResult
 from auto_pm.core.execution_supervisor_service import (
     ExecutionCollectionPendingError,
+    ExecutionLeasePolicy,
     ExecutionSupervisorError,
     ExecutionSupervisorService,
     LeaseCapability,
@@ -75,13 +76,21 @@ class LocalExecutionOrchestrator:
         dispatch: ExecutionDispatchResult,
         microtask: ExecutionMicrotaskMaterialization,
         lease_token_environment: str,
-        lease_seconds: int = 86_400,
-        renew_before_seconds: int = 3_600,
-        renewal_interval_seconds: float = 30.0,
+        lease_seconds: int = 900,
+        renew_before_seconds: int | None = None,
+        renewal_interval_seconds: float | None = None,
         handshake_timeout_seconds: float = 60.0,
     ) -> ForegroundExecutionReceipt:
         """Block until projection-gated VERIFYING or truthful FAILED/PENDING."""
 
+        try:
+            policy = ExecutionLeasePolicy(
+                lease_seconds, renew_before_seconds, renewal_interval_seconds
+            )
+        except ExecutionSupervisorError as error:
+            raise LocalExecutionOrchestratorError(str(error)) from error
+        assert policy.renew_before_seconds is not None
+        assert policy.renewal_interval_seconds is not None
         plan = microtask.plan
         intent = dispatch.intent
         if (
@@ -189,9 +198,9 @@ class LocalExecutionOrchestrator:
                     handle, evidence=evidence
                 ),
                 reap_current=lambda: self._executor.reap(handle),
-                lease_seconds=lease_seconds,
-                renew_before_seconds=renew_before_seconds,
-                renewal_interval_seconds=renewal_interval_seconds,
+                lease_seconds=policy.seconds,
+                renew_before_seconds=policy.renew_before_seconds,
+                renewal_interval_seconds=policy.renewal_interval_seconds,
                 idempotency_key=f"{plan.operation_id}:collect",
             )
         except ExecutionCollectionPendingError:

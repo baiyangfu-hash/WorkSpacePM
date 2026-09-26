@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -115,7 +116,7 @@ def _accepted_lineage(root: Path) -> tuple[ContinuityStore, Path]:
     )
     store.create_mission(mission_values, "c05-mission-create", timestamp)
 
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute(
             """INSERT INTO run_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -135,6 +136,11 @@ def _accepted_lineage(root: Path) -> tuple[ContinuityStore, Path]:
             ),
         )
         conn.execute(
+            "INSERT INTO execution_leases VALUES (?, ?, ?, ?, ?, ?)",
+            (_RUN_ID, "c05-test", "closure-secret",
+             (now + timedelta(minutes=15)).isoformat(), 1, timestamp),
+        )
+        conn.execute(
             """INSERT INTO checkpoints VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 _CHECKPOINT_ID,
@@ -151,7 +157,7 @@ def _accepted_lineage(root: Path) -> tuple[ContinuityStore, Path]:
 
 
 def _table_counts(database: Path) -> dict[str, int]:
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         return {
             table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
             for table in ("closure_items", "closure_steps", "closure_outbox")
@@ -165,7 +171,7 @@ def _table_counts(database: Path) -> dict[str, int]:
 
 
 def _lineage_states(database: Path) -> tuple[str, str, str, str, int, str, int, bool]:
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         run_state = str(
             conn.execute("SELECT state FROM run_items WHERE run_id=?", (_RUN_ID,)).fetchone()[0]
         )
@@ -300,7 +306,7 @@ def test_prepare_closure_injected_failure_rolls_back_all_rows_and_event(
 
 def test_prepare_closure_requires_an_accepted_mission_and_writes_nothing(tmp_path: Path) -> None:
     store, database = _accepted_lineage(tmp_path)
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         conn.execute(
             "UPDATE mission_items SET state='ACCEPTANCE_PENDING' WHERE mission_id=?",
             (_MISSION_ID,),
@@ -320,14 +326,14 @@ def test_prepare_closure_requires_an_accepted_mission_and_writes_nothing(tmp_pat
 
 def test_initialize_adds_closure_tables_to_an_existing_current_store(tmp_path: Path) -> None:
     store, database = _accepted_lineage(tmp_path)
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         conn.execute("DROP TABLE closure_outbox")
         conn.execute("DROP TABLE closure_steps")
         conn.execute("DROP TABLE closure_items")
 
     PmClosureService(tmp_path, store=store).initialize("c05-test")
 
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         tables = {
             str(row[0])
             for row in conn.execute(
@@ -433,6 +439,11 @@ def test_complete_closure_orders_terminal_states_after_successful_projection(
     )
 
     assert receipt.state is ClosureCompletionState.COMPLETED
+    released = store.get_lease(_RUN_ID)
+    assert released.version == 2
+    assert released.lease_token.startswith("RELEASED:")
+    with pytest.raises(ContinuityStoreError):
+        store.renew_lease(_RUN_ID, "c05-test", "closure-secret", 900, "old-closure-owner")
     assert receipt.projection_state is LedgerProjectionState.PROJECTED
     assert receipt.run_state is RunState.SUCCEEDED
     assert receipt.work_state is WorkState.CLOSED
@@ -450,7 +461,7 @@ def test_complete_closure_orders_terminal_states_after_successful_projection(
         True,
     )
 
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         closure = conn.execute(
             "SELECT state, version FROM closure_items WHERE closure_id=?",
             (preparation.closure.closure_id,),
@@ -508,7 +519,7 @@ def test_complete_closure_exact_replay_skips_projection_and_duplicate_events(
         preparation.closure.closure_id,
         idempotency_key="c08-replay",
     )
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         event_count = int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])
     second = service.complete_closure(
         preparation.closure.closure_id,
@@ -516,9 +527,10 @@ def test_complete_closure_exact_replay_skips_projection_and_duplicate_events(
     )
 
     assert second == first
+    assert store.get_lease(_RUN_ID).version == 2
     assert injected == [preparation.closure.closure_id]
     assert reconciler.calls == [(str(tmp_path), _CHANGE_ID)]
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         assert int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]) == event_count
         assert (
             int(
@@ -562,7 +574,7 @@ def test_complete_closure_projection_failure_leaves_lineage_non_terminal(
         0,
         False,
     )
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         assert (
             int(
                 conn.execute(
@@ -617,6 +629,7 @@ def test_complete_closure_failure_rolls_back_every_lifecycle_transition(
         ledger_reconciler=_ProjectionReconciler(ReconcileDiff()),
     )
     preparation = service.prepare_closure(_MISSION_ID, idempotency_key="c08-rollback-prepare")
+    lease_before = store.get_lease(_RUN_ID)
     monkeypatch.setattr(
         service,
         "inject_prepared_change_substance",
@@ -637,6 +650,7 @@ def test_complete_closure_failure_rolls_back_every_lifecycle_transition(
             idempotency_key="c08-rollback",
         )
 
+    assert store.get_lease(_RUN_ID) == lease_before
     assert _lineage_states(database) == (
         "VERIFYING",
         "IN_PROGRESS",
@@ -647,7 +661,7 @@ def test_complete_closure_failure_rolls_back_every_lifecycle_transition(
         0,
         False,
     )
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         assert (
             int(
                 conn.execute(

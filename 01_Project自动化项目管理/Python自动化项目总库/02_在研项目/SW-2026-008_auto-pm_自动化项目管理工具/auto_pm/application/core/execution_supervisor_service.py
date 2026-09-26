@@ -35,6 +35,35 @@ class ExecutionCollectionPendingError(ExecutionSupervisorError):
 
 
 @dataclass(frozen=True)
+class ExecutionLeasePolicy:
+    """One bounded duration and safe renewal cadence for foreground execution."""
+
+    seconds: int = 900
+    renew_before_seconds: int | None = None
+    renewal_interval_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.seconds) is not int or not 60 <= self.seconds <= 3600:
+            raise ExecutionSupervisorError("lease_seconds 必须在 60 到 3600 之间")
+        threshold = self.renew_before_seconds
+        if threshold is None:
+            threshold = min(60, self.seconds // 3)
+        if type(threshold) is not int or not 0 < threshold < self.seconds:
+            raise ExecutionSupervisorError("续租安全窗口无效")
+        interval = self.renewal_interval_seconds
+        if interval is None:
+            interval = min(30.0, threshold / 2)
+        if (
+            isinstance(interval, bool)
+            or not isinstance(interval, (int, float))
+            or not 0 < interval < threshold
+        ):
+            raise ExecutionSupervisorError("periodic renewal interval 无效")
+        object.__setattr__(self, "renew_before_seconds", threshold)
+        object.__setattr__(self, "renewal_interval_seconds", interval)
+
+
+@dataclass(frozen=True)
 class LeaseCapability:
     """In-memory lease authority whose representation never reveals its secret."""
 
@@ -147,8 +176,7 @@ class ExecutionSupervisorService:
         observed_at = now or datetime.now(UTC)
         if observed_at.tzinfo is None or capability.expires_at.tzinfo is None:
             raise ExecutionSupervisorError("lease 时间必须包含时区")
-        if renew_before_seconds < 0 or renew_before_seconds >= lease_seconds:
-            raise ExecutionSupervisorError("续租安全窗口无效")
+        ExecutionLeasePolicy(lease_seconds, renew_before_seconds)
         if capability.expires_at - observed_at > timedelta(seconds=renew_before_seconds):
             return LeaseRenewalOutcome(capability=capability, receipt=None)
         try:
@@ -246,8 +274,7 @@ class ExecutionSupervisorService:
     ) -> ExecutionCollectedOutcome:
         """Collect in the foreground while periodically renewing; never finalize a Run."""
 
-        if not 0 < renewal_interval_seconds < lease_seconds:
-            raise ExecutionSupervisorError("periodic renewal interval 无效")
+        ExecutionLeasePolicy(lease_seconds, renew_before_seconds, renewal_interval_seconds)
         try:
             current = self.renew_if_due(
                 capability,

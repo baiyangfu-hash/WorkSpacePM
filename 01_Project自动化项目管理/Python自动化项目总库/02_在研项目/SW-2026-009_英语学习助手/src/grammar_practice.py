@@ -3,46 +3,59 @@
 高内聚低耦合：仅依赖 grammar_engine 的数据，不依赖 UI
 """
 import random
+from typing import TypedDict
 
-from grammar_engine import GrammarEngine
+from grammar_engine import GrammarCategory, GrammarEngine, GrammarLevel
+
+
+class GrammarExercise(TypedDict):
+    type: str
+    question: str
+    options: list[str]
+    answer: str
+    hint: str
 
 
 class GrammarPracticeEngine:
     """语法练习生成引擎"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.grammar_engine = GrammarEngine()
 
-    def get_levels(self):
+    def get_levels(self) -> list[GrammarLevel]:
         """获取可用等级"""
         return self.grammar_engine.get_all_levels()
 
-    def get_categories(self, level):
+    def get_categories(self, level: str) -> list[GrammarCategory]:
         """获取指定等级的语法分类"""
         return self.grammar_engine.get_categories_by_level(level)
 
-    def get_points(self, level):
+    def get_points(self, level: str) -> list[dict[str, object]]:
         """获取指定等级的所有语法点"""
         return self.grammar_engine.get_points_by_level(level)
 
-    def get_point(self, point_id):
+    def get_point(self, point_id: int) -> dict[str, object] | None:
         """获取指定语法点"""
         return self.grammar_engine.get_point_by_id(point_id)
 
-    def generate_exercises(self, point):
+    def generate_exercises(self, point: dict[str, object]) -> list[GrammarExercise]:
         """
         为语法点生成练习题
         返回列表，每项为 dict: {type, question, options, answer, hint}
         练习类型：fill(填空), choice(选择), correct(改错), order(排序)
         """
-        exercises = []
+        exercises: list[GrammarExercise] = []
         name = point.get('name', '')
-        examples = point.get('examples', [])
+        raw_examples = point.get('examples', [])
+        examples = [item for item in raw_examples if isinstance(item, str)] if isinstance(raw_examples, list) else []
         explanation = point.get('explanation', '')
         category = point.get('category', '')
+        name = name if isinstance(name, str) else ''
+        explanation = explanation if isinstance(explanation, str) else ''
+        category = category if isinstance(category, str) else ''
 
         # 根据语法点特征生成不同类型练习
-        generated = set()
+        generated: set[str] = set()
 
         # 1. 填空题（从例句生成）
         for ex in examples:
@@ -78,7 +91,7 @@ class GrammarPracticeEngine:
 
         return exercises[:5]  # 最多 5 题
 
-    def _make_fill_blank(self, sentence, grammar_name, explanation):
+    def _make_fill_blank(self, sentence: str, grammar_name: str, explanation: str) -> GrammarExercise | None:
         """生成填空题"""
         words = sentence.split()
         if len(words) < 4:
@@ -154,7 +167,7 @@ class GrammarPracticeEngine:
             blank_idx = min(2, len(words) - 2)
             blank_word = words[blank_idx].strip('.,!?;:')
 
-        if blank_word is None:
+        if blank_word is None or blank_idx is None:
             return None
 
         # 生成干扰项
@@ -169,7 +182,7 @@ class GrammarPracticeEngine:
             'hint': explanation,
         }
 
-    def _generate_fill_options(self, correct, grammar_name):
+    def _generate_fill_options(self, correct: str, grammar_name: str) -> list[str]:
         """生成填空题选项"""
         options = [correct]
         grammar_lower = grammar_name.lower()
@@ -208,7 +221,7 @@ class GrammarPracticeEngine:
         random.shuffle(options)
         return options[:4]
 
-    def _make_choice_question(self, grammar_name, explanation, category):
+    def _make_choice_question(self, grammar_name: str, explanation: str, category: str) -> GrammarExercise:
         """生成语法概念选择题"""
         question = f"关于「{grammar_name}」，以下哪个说法是正确的？"
 
@@ -235,7 +248,7 @@ class GrammarPracticeEngine:
             'hint': '',
         }
 
-    def _make_correct_question(self, sentence, grammar_name):
+    def _make_correct_question(self, sentence: str, grammar_name: str) -> GrammarExercise | None:
         """生成改错题"""
         words = sentence.split()
         if len(words) < 5:
@@ -267,10 +280,10 @@ class GrammarPracticeEngine:
 
         elif any(kw in grammar_lower for kw in ['past simple']):
             # yesterday + present tense -> past tense
-            for i, w in enumerate(words):
+            for w in words:
                 wl = w.strip('.,!?;:')
                 if wl in ['go', 'play', 'watch', 'work', 'come']:
-                    for j, ww in enumerate(words):
+                    for ww in words:
                         if ww.strip('.,!?;:').lower() == 'yesterday':
                             wrong_word = wl
                             correct_word = wl + 'ed'
@@ -314,7 +327,7 @@ class GrammarPracticeEngine:
             'hint': grammar_name,
         }
 
-    def _make_order_question(self, sentence):
+    def _make_order_question(self, sentence: str) -> GrammarExercise | None:
         """生成排序题"""
         words = sentence.split()
         if len(words) < 4 or len(words) > 10:
@@ -337,6 +350,6 @@ class GrammarPracticeEngine:
         }
 
 
-def get_practice_engine():
+def get_practice_engine() -> GrammarPracticeEngine:
     """获取练习引擎实例"""
     return GrammarPracticeEngine()

@@ -679,6 +679,31 @@ def test_accept_rejects_when_the_latest_run_failed(tmp_path: Path) -> None:
         facade.accept("MISSION-C04-001")
 
 
+def test_acceptance_rechecks_generic_owned_paths_after_rehash(tmp_path: Path) -> None:
+    _, facade, _ = _verified_acceptance_ready(tmp_path)
+    run = facade._store.get_run("RUN-C04-001")
+    collector = EvidenceCollectionService(tmp_path)
+    receipt = collector.run_generic_checkpoint_quality_gates(run, tmp_path)
+    assert receipt.status == "PASS"
+    collection = collector.collect(run)
+    serialized = collector.build_checkpoint_evidence(collection, receipt)
+    assert facade._acceptance_evidence_is_current(serialized, collection, run, tmp_path)
+
+    envelope = json.loads(serialized)
+    envelope["quality_receipt"]["owned_python_paths"] = [
+        "project/auto_pm/core/target.py"
+    ]
+    payload = {
+        key: value for key, value in envelope["quality_receipt"].items() if key != "status"
+    }
+    envelope["receipt_hash"] = facade._evidence_hash(payload)
+    envelope["envelope_hash"] = facade._evidence_hash(
+        {key: value for key, value in envelope.items() if key != "envelope_hash"}
+    )
+    forged = facade._canonical_json(envelope)
+    assert not facade._acceptance_evidence_is_current(forged, collection, run, tmp_path)
+
+
 def test_confirm_start_uses_the_mission_bound_work_without_an_internal_id(tmp_path: Path) -> None:
     _, facade = _setup(tmp_path)
 

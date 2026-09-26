@@ -43,8 +43,9 @@ class ContinuityExecutionError(RuntimeError):
 
 _RUN_TRANSITIONS = {
     RunState.READY: {RunState.RUNNING, RunState.BLOCKED, RunState.CANCELLED},
-    RunState.RUNNING: {RunState.BLOCKED, RunState.VERIFYING, RunState.FAILED},
+    RunState.RUNNING: {RunState.BLOCKED, RunState.PENDING, RunState.VERIFYING, RunState.FAILED},
     RunState.BLOCKED: {RunState.RUNNING, RunState.CANCELLED},
+    RunState.PENDING: {RunState.BLOCKED, RunState.FAILED, RunState.CANCELLED},
     RunState.VERIFYING: {RunState.RUNNING, RunState.SUCCEEDED, RunState.FAILED},
     RunState.SUCCEEDED: set(),
     RunState.FAILED: set(),
@@ -189,6 +190,8 @@ class ContinuityExecutionService:
             )
             if replay is not None:
                 return replay
+            if lease_seconds > 3_600:
+                raise ContinuityExecutionError("新 Run lease_seconds 必须在 60 到 3600 之间")
             now = self._utc_now()
             governed_worktree, actual_head, actual_dirty = governed_worktree_snapshot(
                 self._root,
@@ -322,6 +325,7 @@ class ContinuityExecutionService:
         owner_id: str,
         lease_token: str,
         project_root: str | Path,
+        profile: str = "c03",
     ) -> CheckpointItem:
         """Append one system-generated, content-bound checkpoint for a Run.
 
@@ -344,10 +348,15 @@ class ContinuityExecutionService:
         collector = EvidenceCollectionService(self._root)
         summary = self._auto_checkpoint_summary(run)
         try:
-            collector.validate_c03_checkpoint_project_root(run, project_root)
+            if profile == "c03":
+                collector.validate_c03_checkpoint_project_root(run, project_root)
+            elif profile == "generic":
+                collector.validate_generic_checkpoint_project_root(run, project_root)
+            else:
+                raise EvidenceCollectionError(f"未知自动 Checkpoint profile: {profile}")
         except EvidenceCollectionError as error:
             raise ContinuityExecutionError(
-                f"自动 Checkpoint C03 profile 无法验证: {error}"
+                f"自动 Checkpoint {profile} profile 无法验证: {error}"
             ) from error
         if existing is not None:
             try:
@@ -366,6 +375,8 @@ class ContinuityExecutionService:
                 or not collector.checkpoint_evidence_is_current(
                     existing.evidence[0], collection, run, project_root
                 )
+                or json.loads(existing.evidence[0]).get("schema_version")
+                != ("checkpoint-evidence.v1" if profile == "c03" else "checkpoint-evidence.v2")
             ):
                 raise ContinuityExecutionError(
                     "Checkpoint identity 已存在，但自动证据或当前 Run 内容不一致"
@@ -379,8 +390,8 @@ class ContinuityExecutionService:
                 git_head=collection.git_head,
                 dirty_paths=dirty_paths,
                 evidence=list(existing.evidence),
-                idempotency_key=self._c03_checkpoint_idempotency_key(
-                    run, checkpoint_id, collection.content_hash
+                idempotency_key=self._auto_checkpoint_idempotency_key(
+                    run, checkpoint_id, collection.content_hash, profile
                 ),
             )
             return self._require_matching_c03_checkpoint(
@@ -393,10 +404,14 @@ class ContinuityExecutionService:
             )
 
         try:
-            receipt = collector.run_c03_checkpoint_quality_gates(run, project_root)
+            receipt = (
+                collector.run_c03_checkpoint_quality_gates(run, project_root)
+                if profile == "c03"
+                else collector.run_generic_checkpoint_quality_gates(run, project_root)
+            )
             if receipt.status != "PASS":
                 raise ContinuityExecutionError("自动 Checkpoint 要求 Python 质量收据为 PASS")
-            if not collector.c03_checkpoint_receipt_matches_profile(receipt):
+            if profile == "c03" and not collector.c03_checkpoint_receipt_matches_profile(receipt):
                 raise ContinuityExecutionError(
                     "自动 Checkpoint 要求固定 C03 pytest profile 与收据 hash"
                 )
@@ -418,8 +433,8 @@ class ContinuityExecutionService:
             git_head=collection.git_head,
             dirty_paths=self._checkpoint_dirty_paths(collection),
             evidence=[evidence],
-            idempotency_key=self._c03_checkpoint_idempotency_key(
-                run, checkpoint_id, collection.content_hash
+            idempotency_key=self._auto_checkpoint_idempotency_key(
+                run, checkpoint_id, collection.content_hash, profile
             ),
         )
         return self._require_matching_c03_checkpoint(
@@ -482,6 +497,23 @@ class ContinuityExecutionService:
         return "c03-auto-checkpoint:" + hashlib.sha256(
             canonical.encode("utf-8")
         ).hexdigest()
+
+    @staticmethod
+    def _auto_checkpoint_idempotency_key(
+        run: RunItem, checkpoint_id: str, collection_hash: str, profile: str
+    ) -> str:
+        if profile == "c03":
+            return ContinuityExecutionService._c03_checkpoint_idempotency_key(
+                run, checkpoint_id, collection_hash
+            )
+        payload = {
+            "schema_version": "generic-auto-checkpoint-key.v1",
+            "run_id": run.run_id,
+            "checkpoint_id": checkpoint_id,
+            "collection_hash": collection_hash,
+        }
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return "generic-auto-checkpoint:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     @classmethod
     def _require_matching_c03_checkpoint(
@@ -693,6 +725,64 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def revoke_unstarted_run(
+        self,
+        *,
+        target_run_id: str,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Revoke one live Run only through a distinct, authorized recovery chain."""
+
+        try:
+            target = self._store.get_run(target_run_id)
+            recovery = self._store.get_run(recovery_run_id)
+            target_work = self._store.get_work(target.work_id)
+            recovery_work = self._store.get_work(recovery.work_id)
+            target_lease = self._store.get_lease(target_run_id)
+            decision = DecisionService(self._root).get_decision(decision_id)
+        except (ContinuityStoreError, DecisionError) as error:
+            raise ContinuityExecutionError(str(error)) from error
+        capability = decision.runtime_capability
+        if (
+            decision.decision_conclusion != "approved"
+            or decision.conditions
+            or capability is None
+            or RuntimeDecisionAction.REVOKE_UNSTARTED_RUN
+            not in capability.allowed_runtime_actions
+            or target_run_id not in capability.target_run_ids
+            or RuntimeDecisionOutcome.CANCELLED not in capability.allowed_outcomes
+        ):
+            raise ContinuityExecutionError("Decision 未提供有效的无条件未启动 Run 撤销 capability")
+        if (
+            target_work.subject_project_id != recovery_work.subject_project_id
+            or decision.project_id != target_work.subject_project_id
+            or recovery_work.authorization_ref != decision_id
+            or target_work.read_only
+            or recovery_work.read_only
+            or not is_canonical_decision_id(target_work.authorization_ref)
+        ):
+            raise ContinuityExecutionError("目标/恢复 Work 与撤销 Decision 项目事实不一致")
+        try:
+            return self._store.revoke_unstarted_run(
+                target_run_id=target_run_id,
+                expected_target_version=target.version,
+                expected_target_lease_version=target_lease.version,
+                recovery_run_id=recovery_run_id,
+                recovery_work_id=recovery.work_id,
+                recovery_owner_id=recovery_owner_id,
+                recovery_lease_token=recovery_lease_token,
+                decision_id=decision_id,
+                reason=reason,
+                idempotency_key=idempotency_key,
+            )
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
     def settle_expired_run(
         self,
         *,
@@ -866,6 +956,85 @@ class ContinuityExecutionService:
                 runtime_target_path=runtime_target_path,
                 outcome=outcome.value,
                 reason=normalized_reason,
+                idempotency_key=idempotency_key,
+            )
+        except (ContinuityStoreError, DecisionError) as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def fence_terminal_lease(
+        self,
+        *,
+        target_run_id: str,
+        expected_settlement_event_id: str,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Fence a legacy settlement's unreleased lease under separate recovery authority."""
+
+        try:
+            replay = self._store.terminal_lease_fence_replay(
+                target_run_id=target_run_id,
+                expected_settlement_event_id=expected_settlement_event_id,
+                expected_target_lease_version=expected_target_lease_version,
+                recovery_run_id=recovery_run_id,
+                recovery_owner_id=recovery_owner_id,
+                recovery_lease_token=recovery_lease_token,
+                decision_id=decision_id,
+                reason=reason,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                return replay
+            decisions = DecisionService(self._root)
+            decision, decision_sha256 = decisions.get_decision_with_sha256(decision_id)
+            capability = decision.runtime_capability
+            if (
+                decision.decision_conclusion != "approved"
+                or decision.conditions
+                or capability is None
+                or capability.allowed_runtime_actions
+                != (RuntimeDecisionAction.FENCE_TERMINAL_LEASE,)
+                or capability.target_run_ids != (target_run_id,)
+                or capability.allowed_outcomes != (RuntimeDecisionOutcome.CANCELLED,)
+            ):
+                raise ContinuityExecutionError(
+                    "补偿 Decision capability 必须精确绑定 fence_terminal_lease/目标/CANCELLED"
+                )
+            target = self._store.get_run(target_run_id)
+            target_lease = self._store.get_lease(target_run_id)
+            recovery = self._store.get_run(recovery_run_id)
+            recovery_lease = self._store.get_lease(recovery_run_id)
+            if target.state is not RunState.CANCELLED:
+                raise ContinuityExecutionError("补偿目标必须为 CANCELLED")
+            if target_lease.version != expected_target_lease_version:
+                raise ContinuityExecutionError("目标旧 lease version CAS 冲突")
+            if recovery.state is not RunState.RUNNING:
+                raise ContinuityExecutionError("恢复 Run 必须为 RUNNING")
+            self._require_active_lease(
+                recovery_lease, recovery_owner_id, recovery_lease_token, self._utc_now()
+            )
+            if recovery_lease_token in reason:
+                raise ContinuityExecutionError("补偿原因不得包含恢复 lease token")
+            return self._store.fence_terminal_lease(
+                target_run_id=target_run_id,
+                expected_target_run_version=target.version,
+                expected_target_lease_version=expected_target_lease_version,
+                expected_settlement_event_id=expected_settlement_event_id,
+                recovery_run_id=recovery_run_id,
+                expected_recovery_run_version=recovery.version,
+                expected_recovery_work_version=self._store.get_work(recovery.work_id).version,
+                expected_recovery_lease_version=recovery_lease.version,
+                expected_recovery_git_head=recovery.git_head,
+                recovery_owner_id=recovery_owner_id,
+                recovery_lease_token=recovery_lease_token,
+                decision_id=decision_id,
+                decision_sha256=decision_sha256,
+                reason=reason,
                 idempotency_key=idempotency_key,
             )
         except (ContinuityStoreError, DecisionError) as error:

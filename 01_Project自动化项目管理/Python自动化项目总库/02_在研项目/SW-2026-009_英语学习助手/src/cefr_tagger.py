@@ -3,6 +3,15 @@ CEFR 词汇标注模块 - 基于 cefrpy 为单词标注 CEFR 等级
 """
 import os
 import sqlite3
+from collections.abc import Callable
+from typing import TypedDict
+
+
+class CEFRLevelInfo(TypedDict):
+    order: int
+    label: str
+    word_target: int
+    description: str
 
 # 尝试导入 cefrpy
 try:
@@ -16,7 +25,7 @@ ECDICT_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'ecdict_full
 FALLBACK_DICT_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'ecdict.db')
 
 # CEFR 等级定义
-CEFR_LEVELS = {
+CEFR_LEVELS: dict[str, CEFRLevelInfo] = {
     'A1': {'order': 1, 'label': 'A1 入门', 'word_target': 500, 'description': '能理解和使用日常表达和基础短语'},
     'A2': {'order': 2, 'label': 'A2 基础', 'word_target': 1500, 'description': '能理解常见话题的句子和常用表达'},
     'B1': {'order': 3, 'label': 'B1 进阶', 'word_target': 3000, 'description': '能应对旅行和工作中的大部分场景'},
@@ -37,7 +46,7 @@ FALLBACK_CEFR_LEVELS = {
 class CEFRTagger:
     """CEFR 词汇标注器"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._analyzer = None
         if CEFRPY_AVAILABLE:
             try:
@@ -46,7 +55,7 @@ class CEFRTagger:
                 self._analyzer = None
 
     @property
-    def available(self):
+    def available(self) -> bool:
         return self._analyzer is not None
 
     def _fallback_get_level(self, word: str) -> str | None:
@@ -80,7 +89,7 @@ class CEFRTagger:
                 pass
         return self._fallback_get_level(word)
 
-    def get_level_with_pos(self, word: str, pos: str = None) -> str | None:
+    def get_level_with_pos(self, word: str, pos: str | None = None) -> str | None:
         """获取单词在特定词性下的 CEFR 等级"""
         if not self._analyzer:
             return None
@@ -95,8 +104,10 @@ class CEFRTagger:
                 }
                 tag = pos_map.get(pos.lower()[:3])
                 if tag:
-                    return self._analyzer.get_word_pos_level_CEFR(word, tag)
-            return self._analyzer.get_average_word_level_CEFR(word)
+                    value: object = self._analyzer.get_word_pos_level_CEFR(word, tag)
+                    return str(value) if value is not None else None
+            value = self._analyzer.get_average_word_level_CEFR(word)
+            return str(value) if value is not None else None
         except Exception:
             return None
 
@@ -105,11 +116,11 @@ class CEFRTagger:
         if not self._analyzer:
             return False
         try:
-            return self._analyzer.is_word_in_database(word)
+            return bool(self._analyzer.is_word_in_database(word))
         except Exception:
             return False
 
-    def get_all_vocab_by_level(self, level: str) -> list:
+    def get_all_vocab_by_level(self, level: str) -> list[dict[str, object]]:
         """获取指定 CEFR 等级的所有单词（从已标注的数据库）"""
         if not os.path.exists(DB_PATH):
             return []
@@ -128,7 +139,9 @@ class CEFRTagger:
             conn.close()
 
 
-def build_cefr_lexicon(limit: int = 5000, progress_callback=None):
+def build_cefr_lexicon(
+    limit: int = 5000, progress_callback: Callable[[int, int], None] | None = None
+) -> tuple[bool, str]:
     """
     从 ECDICT 构建 CEFR 词汇表
     使用 cefrpy 批量标注单词等级，存入 vocab_cefr 表
@@ -172,10 +185,10 @@ def build_cefr_lexicon(limit: int = 5000, progress_callback=None):
 
     try:
         dict_cursor.execute(
-            '''SELECT word, sw, pos, tag, collins, bnc, frq 
-               FROM stardict 
-               WHERE word IS NOT NULL AND word != '' 
-               ORDER BY 
+            '''SELECT word, sw, pos, tag, collins, bnc, frq
+               FROM stardict
+               WHERE word IS NOT NULL AND word != ''
+               ORDER BY
                    CASE collins WHEN '' THEN 99 ELSE CAST(collins AS INTEGER) END ASC,
                    CASE frq WHEN '' THEN 999999 ELSE CAST(frq AS INTEGER) END ASC
                LIMIT ?''',
@@ -188,7 +201,7 @@ def build_cefr_lexicon(limit: int = 5000, progress_callback=None):
         )
 
     tagged_count = 0
-    batch = []
+    batch: list[tuple[str, str, str, float, str]] = []
     batch_size = 100
 
     for row in dict_cursor:
@@ -199,7 +212,8 @@ def build_cefr_lexicon(limit: int = 5000, progress_callback=None):
 
         # 用 cefrpy 标注
         try:
-            level = str(analyzer.get_average_word_level_CEFR(word))
+            raw_level: object = analyzer.get_average_word_level_CEFR(word)
+            level = str(raw_level) if raw_level is not None else None
         except Exception:
             level = None
 
@@ -207,7 +221,7 @@ def build_cefr_lexicon(limit: int = 5000, progress_callback=None):
             pos_tag = row['pos'] or ''
             tag = row['tag'] or ''
             # 计算频率分数：collins 星数 + bnc/1000
-            freq_score = 0
+            freq_score = 0.0
             try:
                 collins_val = int(row['collins']) if row['collins'] else 0
                 freq_score = (6 - collins_val) * 10  # 5星=50分, 1星=10分
@@ -248,7 +262,7 @@ def build_cefr_lexicon(limit: int = 5000, progress_callback=None):
     return True, f"已标注 {tagged_count} 个单词的 CEFR 等级"
 
 
-def get_vocab_count_by_level():
+def get_vocab_count_by_level() -> dict[str, int]:
     """获取各 CEFR 等级的词汇数量"""
     if not os.path.exists(DB_PATH):
         return {}
@@ -265,7 +279,7 @@ def get_vocab_count_by_level():
         conn.close()
 
 
-def get_words_by_level(level: str, limit: int = 100):
+def get_words_by_level(level: str, limit: int = 100) -> list[dict[str, object]]:
     """获取指定等级的单词列表"""
     if not os.path.exists(DB_PATH):
         return []
@@ -284,7 +298,7 @@ def get_words_by_level(level: str, limit: int = 100):
         conn.close()
 
 
-def get_user_level_progress(db_path=None):
+def get_user_level_progress(db_path: str | None = None) -> dict[str, object] | None:
     """获取用户等级进度"""
     path = db_path or DB_PATH
     if not os.path.exists(path):

@@ -190,6 +190,7 @@ def _c03_auto_checkpoint_service(
     include_untracked_target: bool = False,
     c03_selector_match: bool = True,
     project_name: str = "project",
+    second_project: bool = False,
 ):
     """Create a real nested project worktree plus isolated continuity database."""
 
@@ -237,6 +238,19 @@ def _c03_auto_checkpoint_service(
         encoding="utf-8",
         errors="replace",
     )
+    if second_project:
+        other = workspace / "SW009"
+        (other / "tests").mkdir(parents=True)
+        (other / "pyproject.toml").write_text(
+            "[tool.mypy]\nstrict = true\n", encoding="utf-8", errors="replace"
+        )
+        (other / "owned.py").write_text(
+            "def value() -> int:\n    return 1\n", encoding="utf-8", errors="replace"
+        )
+        (other / "tests" / "test_owned.py").write_text(
+            "def test_owned() -> None:\n    assert True\n",
+            encoding="utf-8", errors="replace",
+        )
     subprocess.run(["git", "-C", str(workspace), "add", "."], check=True, capture_output=True)
     subprocess.run(
         [
@@ -284,6 +298,8 @@ def _c03_auto_checkpoint_service(
         owned_paths.insert(0, f"{project_name}/auto_pm/core/target.py")
     if include_untracked_target:
         owned_paths.append(f"{project_name}/auto_pm/core/generated.py")
+    if second_project:
+        owned_paths.extend(("SW009/owned.py", "SW009/tests/test_owned.py"))
     work = WorkRegistryService(workspace, now=lambda: clock().isoformat())
     work.initialize("test")
     work.create_work(
@@ -426,6 +442,9 @@ def _settlement_ready(
     decision_attributes: str | None = None,
     decision_filter_command: str | None = None,
     decision_smudge_filter_command: str | None = None,
+    runtime_action: RuntimeDecisionAction = RuntimeDecisionAction.SETTLE_EXPIRED_RUN,
+    record_target_start_evidence: bool = True,
+    advance_before_recovery: bool = True,
 ) -> ContinuityExecutionService:
     works, service = _services(root, clock)
     if decision_filter_command is not None:
@@ -497,7 +516,7 @@ def _settlement_ready(
         conditions=list(decision_conditions or []),
         metadata={
             RUNTIME_CAPABILITY_KEY: RuntimeDecisionCapability(
-                allowed_runtime_actions=(RuntimeDecisionAction.SETTLE_EXPIRED_RUN,),
+                allowed_runtime_actions=(runtime_action,),
                 target_run_ids=target_run_ids,
                 allowed_outcomes=allowed_outcomes,
             )
@@ -552,24 +571,25 @@ def _settlement_ready(
         lease_seconds=60,
         idempotency_key="create-target-run",
     )
-    _start_evidence(
-        service,
-        run_id="RUN-TARGET",
-        owner_id="legacy-agent",
-        lease_token="target-secret",
-        idempotency_key="record-target-start-evidence",
-    )
-    service.checkpoint(
-        checkpoint_id="CP-TARGET",
-        run_id="RUN-TARGET",
-        owner_id="legacy-agent",
-        lease_token="target-secret",
-        summary="historical evidence",
-        git_head=service._store.get_run("RUN-TARGET").git_head,
-        dirty_paths=["auto_pm/core/a.py"],
-        evidence=["historical checkpoint"],
-        idempotency_key="checkpoint-target",
-    )
+    if record_target_start_evidence:
+        _start_evidence(
+            service,
+            run_id="RUN-TARGET",
+            owner_id="legacy-agent",
+            lease_token="target-secret",
+            idempotency_key="record-target-start-evidence",
+        )
+        service.checkpoint(
+            checkpoint_id="CP-TARGET",
+            run_id="RUN-TARGET",
+            owner_id="legacy-agent",
+            lease_token="target-secret",
+            summary="historical evidence",
+            git_head=service._store.get_run("RUN-TARGET").git_head,
+            dirty_paths=["auto_pm/core/a.py"],
+            evidence=["historical checkpoint"],
+            idempotency_key="checkpoint-target",
+        )
 
     works.create_work(
         work_id="WORK-RECOVERY",
@@ -584,7 +604,8 @@ def _settlement_ready(
     works.authorize("WORK-RECOVERY", decision_id, "authorize-recovery-work")
     works.transition("WORK-RECOVERY", WorkState.IN_PROGRESS, "start-recovery-work")
 
-    clock.value += timedelta(seconds=61)
+    if advance_before_recovery:
+        clock.value += timedelta(seconds=61)
     _start(
         service,
         run_id="RUN-RECOVERY",
@@ -668,6 +689,150 @@ def _direct_settlement_values(service: ContinuityExecutionService, **changes):
     }
     values.update(changes)
     return values
+
+
+def _legacy_terminal_lease_ready(
+    root: Path, clock: Clock, *, target_start_claim: bool = False
+) -> tuple[ContinuityExecutionService, str, int]:
+    """Seed the exact pre-fix v2 settlement shape in a disposable test Store."""
+
+    service = _settlement_ready(
+        root, clock, record_target_start_evidence=False, advance_before_recovery=False
+    )
+    service.transition_run(
+        "RUN-TARGET", RunState.RUNNING, "legacy-agent", "target-secret", "target-running"
+    )
+    if target_start_claim:
+        with service._store._transaction() as conn:
+            service._store._append_event(
+                conn,
+                "RUN-TARGET",
+                "EXECUTION_START_CLAIMED",
+                {"schema_version": "injected-start-claim.v1"},
+                "injected-start-claim",
+                clock().isoformat(),
+                aggregate_type="run",
+            )
+    clock.value += timedelta(seconds=61)
+    old_lease = service._store.get_lease("RUN-TARGET")
+    _settle(service)
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM events WHERE aggregate_id='RUN-TARGET' "
+            "AND event_type='RUN_EXPIRED_SETTLED'"
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row["payload_json"])
+        assert payload.pop("lease_release")["lease_epoch"] == old_lease.version + 1
+        payload["schema_version"] = "expired-run-settlement.v2"
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        event_hash = hashlib.sha256(
+            (
+                f"{row['previous_hash']}|{row['aggregate_id']}|{row['event_type']}|"
+                f"{canonical}|{row['created_at']}"
+            ).encode()
+        ).hexdigest()
+        event_id = f"EVT-{event_hash[:16].upper()}"
+        conn.execute(
+            "UPDATE events SET event_id=?, event_hash=?, payload_json=? WHERE event_id=?",
+            (event_id, event_hash, canonical, row["event_id"]),
+        )
+        conn.execute(
+            "UPDATE execution_leases SET lease_token=?, version=?, updated_at=? WHERE run_id=?",
+            (old_lease.lease_token, old_lease.version, old_lease.updated_at, "RUN-TARGET"),
+        )
+    service.transition_run(
+        "RUN-RECOVERY", RunState.VERIFYING, "recovery-agent", "recovery-secret", "verify-old-recovery"
+    )
+    service.transition_run(
+        "RUN-RECOVERY", RunState.SUCCEEDED, "recovery-agent", "recovery-secret", "close-old-recovery"
+    )
+
+    new_decision_id = "DEC-20260924-FEACED01"
+    new_change_id = "CHG-SAFE-2026-012"
+    new_decision = DecisionPackageDTO(
+        decision_id=new_decision_id,
+        project_id="SW-2026-008",
+        change_id=new_change_id,
+        approved_scope="MODULE",
+        approved_files=[".auto-pm/continuity.db"],
+        approver="fubai",
+        approved_at=clock().isoformat(),
+        decision_conclusion="approved",
+        metadata={
+            RUNTIME_CAPABILITY_KEY: RuntimeDecisionCapability(
+                allowed_runtime_actions=(RuntimeDecisionAction.FENCE_TERMINAL_LEASE,),
+                target_run_ids=("RUN-TARGET",),
+                allowed_outcomes=(RuntimeDecisionOutcome.CANCELLED,),
+            )
+        },
+    )
+    decision_path = root / ".auto-pm" / "decisions" / f"{new_decision_id}.json"
+    decision_path.write_bytes(json.dumps(new_decision.to_dict(), ensure_ascii=False).encode())
+    decision_relative = f".auto-pm/decisions/{new_decision_id}.json"
+    subprocess.run(
+        ["git", "-C", str(root), "add", "-f", "--", decision_relative],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(root), "-c", "user.name=Continuity Test",
+            "-c", "user.email=continuity@example.invalid", "commit", "-m", "new recovery decision",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    works = WorkRegistryService(root, now=lambda: clock().isoformat())
+    works.create_work(
+        work_id="WORK-FENCE-RECOVERY",
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.GOVERNANCE,
+        title="Fence legacy terminal lease",
+        owner="fence-agent",
+        scope_paths=[".auto-pm/continuity.db"],
+        source_fingerprint="sha256:fence-recovery",
+        idempotency_key="create-fence-work",
+    )
+    works.authorize("WORK-FENCE-RECOVERY", new_decision_id, "authorize-fence-work")
+    works.transition("WORK-FENCE-RECOVERY", WorkState.IN_PROGRESS, "start-fence-work")
+    _start(
+        service,
+        run_id="RUN-FENCE-RECOVERY",
+        work_id="WORK-FENCE-RECOVERY",
+        executor_id="fence-agent",
+        lease_token="fence-secret",
+        lease_seconds=900,
+        owned_paths=[".auto-pm/continuity.db"],
+        idempotency_key="create-fence-run",
+    )
+    _start_evidence(
+        service,
+        run_id="RUN-FENCE-RECOVERY",
+        owner_id="fence-agent",
+        lease_token="fence-secret",
+        idempotency_key="start-fence-run",
+    )
+    return service, event_id, old_lease.version
+
+
+def _fence_terminal_lease(
+    service: ContinuityExecutionService, event_id: str, lease_version: int, **changes
+):
+    values = {
+        "target_run_id": "RUN-TARGET",
+        "expected_settlement_event_id": event_id,
+        "expected_target_lease_version": lease_version,
+        "recovery_run_id": "RUN-FENCE-RECOVERY",
+        "recovery_owner_id": "fence-agent",
+        "recovery_lease_token": "fence-secret",
+        "decision_id": "DEC-20260924-FEACED01",
+        "reason": "Legacy settlement left an expired lease token unfenced.",
+        "idempotency_key": "fence-terminal-target",
+    }
+    values.update(changes)
+    return service.fence_terminal_lease(**values)
 
 
 def _checkpoint_test_wal(root: Path) -> None:
@@ -1556,6 +1721,26 @@ def test_expired_or_wrong_owner_lease_fails_closed(tmp_path: Path) -> None:
         service.renew_lease("RUN-001", "agent-a", "lease-secret", 60, "expired")
 
 
+@pytest.mark.parametrize("seconds", [3_601, 86_400])
+def test_new_run_and_renewal_reject_old_unbounded_duration(
+    tmp_path: Path, seconds: int
+) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    with pytest.raises(ContinuityExecutionError, match="60 到 3600"):
+        _start(service, lease_seconds=seconds)
+    _start(service, lease_seconds=900)
+    before = service._store.get_lease("RUN-001")
+
+    with pytest.raises(ContinuityExecutionError, match="60 到 3600"):
+        service.renew_lease("RUN-001", "agent-a", "lease-secret", seconds, "wide-renew")
+    with pytest.raises(ContinuityStoreError, match="60 到 3600"):
+        service._store.renew_lease(
+            "RUN-001", "agent-a", "lease-secret", seconds, "wide-direct-renew"
+        )
+    assert service._store.get_lease("RUN-001") == before
+
+
 def test_store_lease_renewal_uses_trusted_time_and_cannot_revive_expired_lease(
     tmp_path: Path,
 ) -> None:
@@ -1789,6 +1974,55 @@ def test_append_verified_checkpoint_replays_unicode_owned_paths_and_rejects_stal
     )
     with pytest.raises(ContinuityExecutionError, match="identity.*不一致"):
         _append_auto_checkpoint(service, project_root)
+
+
+def test_generic_checkpoint_proves_both_projects_and_rejects_stale_replay(
+    tmp_path: Path,
+) -> None:
+    candidate, _, service = _c03_auto_checkpoint_service(tmp_path, second_project=True)
+    checkpoint = _append_auto_checkpoint(service, candidate, profile="generic")
+    envelope = json.loads(checkpoint.evidence[0])
+    assert envelope["schema_version"] == "checkpoint-evidence.v2"
+    receipt = envelope["quality_receipt"]
+    assert receipt["owned_python_paths"] == sorted(
+        path for path in service._store.get_run("RUN-001").owned_paths if path.endswith(".py")
+    )
+    assert [gate["cwd"] for gate in receipt["gates"]] == [
+        str(candidate / project) for project in ("SW009", "project") for _ in range(3)
+    ]
+    assert _append_auto_checkpoint(service, candidate, profile="generic") == checkpoint
+
+    (candidate / "SW009" / "owned.py").write_text(
+        "def value() -> int:\n    return 2\n", encoding="utf-8", errors="replace"
+    )
+    with pytest.raises(ContinuityExecutionError, match="identity.*不一致"):
+        _append_auto_checkpoint(service, candidate, profile="generic")
+
+
+@pytest.mark.parametrize("failing_gate", ["pytest", "ruff", "mypy"])
+def test_generic_checkpoint_rejects_each_real_second_project_gate_failure(
+    tmp_path: Path, failing_gate: str,
+) -> None:
+    candidate, _, service = _c03_auto_checkpoint_service(tmp_path, second_project=True)
+    if failing_gate == "pytest":
+        (candidate / "SW009" / "tests" / "test_owned.py").write_text(
+            "def test_owned() -> None:\n    assert False\n",
+            encoding="utf-8", errors="replace",
+        )
+    elif failing_gate == "ruff":
+        (candidate / "SW009" / "owned.py").write_text(
+            "import os\n\ndef value() -> int:\n    return 1\n",
+            encoding="utf-8", errors="replace",
+        )
+    else:
+        (candidate / "SW009" / "owned.py").write_text(
+            'def value() -> int:\n    return "wrong"\n',
+            encoding="utf-8", errors="replace",
+        )
+    with pytest.raises(ContinuityExecutionError, match="质量收据为 PASS"):
+        _append_auto_checkpoint(service, candidate, profile="generic")
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        service._store.get_checkpoint("CP-AUTO-001")
 
 
 def test_append_verified_checkpoint_does_not_accept_caller_idempotency_key(
@@ -2102,7 +2336,8 @@ def test_run_state_machine_rejects_terminal_reopen(tmp_path: Path) -> None:
     service.transition_run("RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "verify")
     service.transition_run("RUN-001", RunState.SUCCEEDED, "agent-a", "lease-secret", "succeed")
 
-    with pytest.raises(ContinuityExecutionError, match="非法"):
+    assert service._store.get_lease("RUN-001").lease_token.startswith("RELEASED:")
+    with pytest.raises(ContinuityExecutionError, match="lease ownership 不匹配"):
         service.transition_run("RUN-001", RunState.RUNNING, "agent-a", "lease-secret", "reopen")
     terminal = service._store.get_run("RUN-001")
     with pytest.raises(ContinuityStoreError, match="非法"):
@@ -2185,7 +2420,7 @@ def test_fake_handoff_row_cannot_seize_lease(tmp_path: Path) -> None:
     assert service._store.get_lease(run.run_id) == lease_before
 
 
-def test_settle_expired_run_preserves_forensic_state_and_emits_secret_free_event(
+def test_settle_expired_run_fences_lease_and_emits_secret_free_event(
     tmp_path: Path,
 ) -> None:
     clock = Clock()
@@ -2198,7 +2433,10 @@ def test_settle_expired_run_preserves_forensic_state_and_emits_secret_free_event
 
     assert settled.state is RunState.CANCELLED
     assert settled.version == target_before.version + 1
-    assert service._store.get_lease("RUN-TARGET") == target_lease
+    released = service._store.get_lease("RUN-TARGET")
+    assert released.version == target_lease.version + 1
+    assert released.expires_at == target_lease.expires_at
+    assert released.lease_token.startswith("RELEASED:")
     assert service._store.latest_checkpoint("RUN-TARGET") == checkpoint
     assert service._store.get_run("RUN-RECOVERY").state is RunState.RUNNING
     assert service._store.list_runs("WORK-TARGET") == ()
@@ -2211,9 +2449,271 @@ def test_settle_expired_run_preserves_forensic_state_and_emits_secret_free_event
     assert "target-secret" not in rows[0][0]
     assert "recovery-secret" not in rows[0][0]
     payload = json.loads(rows[0][0])
+    assert payload["schema_version"] == "expired-run-settlement.v3"
+    assert payload["lease_release"]["lease_epoch"] == released.version
     assert payload["runtime_target_path"] == ".auto-pm/continuity.db"
     assert len(payload["recovery"]["owned_paths_hash"]) == 64
     assert payload["recovery"]["git_head"] == service._store.get_run("RUN-RECOVERY").git_head
+
+
+def test_settlement_rolls_back_run_and_lease_when_event_append_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    service = _settlement_ready(tmp_path, clock)
+    before_run = service._store.get_run("RUN-TARGET")
+    before_lease = service._store.get_lease("RUN-TARGET")
+
+    def fail_append(*_args, **_kwargs):
+        raise ContinuityStoreError("injected event failure")
+
+    monkeypatch.setattr(service._store, "_append_event", fail_append)
+    with pytest.raises(ContinuityExecutionError, match="injected event failure"):
+        _settle(service)
+    assert service._store.get_run("RUN-TARGET") == before_run
+    assert service._store.get_lease("RUN-TARGET") == before_lease
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='RUN_EXPIRED_SETTLED'"
+        ).fetchone()[0] == 0
+
+
+def test_terminal_lease_fence_is_atomic_idempotent_and_rejects_old_token(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    service, event_id, old_lease_version = _legacy_terminal_lease_ready(tmp_path, clock)
+    before_run = service._store.get_run("RUN-TARGET")
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        original = conn.execute(
+            "SELECT payload_json, event_hash FROM events WHERE event_id=?", (event_id,)
+        ).fetchone()
+    assert original is not None
+
+    fenced = _fence_terminal_lease(service, event_id, old_lease_version)
+
+    assert fenced == before_run
+    released = service._store.get_lease("RUN-TARGET")
+    assert released.version == old_lease_version + 1
+    assert released.lease_token.startswith("RELEASED:")
+    with pytest.raises(ContinuityExecutionError):
+        service.renew_lease("RUN-TARGET", "legacy-agent", "target-secret", 900, "old-token")
+    clock.value += timedelta(seconds=901)
+    assert _fence_terminal_lease(service, event_id, old_lease_version) == fenced
+    assert _settle(service) == fenced
+    with pytest.raises(ContinuityExecutionError, match="token identity"):
+        _fence_terminal_lease(
+            service, event_id, old_lease_version, recovery_lease_token="wrong-secret"
+        )
+    with pytest.raises(ContinuityExecutionError, match="语义不一致"):
+        _fence_terminal_lease(
+            service, event_id, old_lease_version, reason="different reason"
+        )
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        assert conn.execute(
+            "SELECT payload_json, event_hash FROM events WHERE event_id=?", (event_id,)
+        ).fetchone() == original
+        rows = conn.execute(
+            "SELECT payload_json FROM events WHERE event_type='RUN_TERMINAL_LEASE_FENCED'"
+        ).fetchall()
+    assert len(rows) == 1
+    assert "target-secret" not in rows[0][0]
+    assert "fence-secret" not in rows[0][0]
+    payload = json.loads(rows[0][0])
+    assert payload["request"]["action"] == "fence_terminal_lease"
+    assert payload["target"]["settlement_event_id"] == event_id
+    assert payload["lease_release"]["lease_epoch"] == released.version
+
+
+def test_terminal_lease_fence_rolls_back_release_on_event_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    service, event_id, lease_version = _legacy_terminal_lease_ready(tmp_path, clock)
+    before = service._store.get_lease("RUN-TARGET")
+
+    def fail_append(*_args, **_kwargs):
+        raise ContinuityStoreError("injected event failure")
+
+    monkeypatch.setattr(service._store, "_append_event", fail_append)
+    with pytest.raises(ContinuityExecutionError, match="injected event failure"):
+        _fence_terminal_lease(service, event_id, lease_version)
+    assert service._store.get_lease("RUN-TARGET") == before
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='RUN_TERMINAL_LEASE_FENCED'"
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("fact", ["event_id", "lease_version", "target", "start_claim"])
+def test_terminal_lease_fence_rejects_wrong_target_or_uncertain_evidence(
+    tmp_path: Path, fact: str
+) -> None:
+    clock = Clock()
+    service, event_id, lease_version = _legacy_terminal_lease_ready(
+        tmp_path, clock, target_start_claim=fact == "start_claim"
+    )
+    changes: dict[str, object] = {}
+    if fact == "event_id":
+        changes["expected_settlement_event_id"] = "EVT-0000000000000000"
+    elif fact == "lease_version":
+        changes["expected_target_lease_version"] = lease_version + 1
+    elif fact == "target":
+        changes["target_run_id"] = "RUN-RECOVERY"
+    before = service._store.get_lease("RUN-TARGET")
+    with pytest.raises(ContinuityExecutionError):
+        _fence_terminal_lease(service, event_id, lease_version, **changes)
+    assert service._store.get_lease("RUN-TARGET") == before
+
+
+@pytest.mark.parametrize("terminal_state", [RunState.SUCCEEDED, RunState.FAILED])
+def test_terminal_run_releases_lease_epoch_without_exposing_token(
+    tmp_path: Path, terminal_state: RunState
+) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    _start_evidence(service)
+    service.transition_run("RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "verify")
+    before = service._store.get_lease("RUN-001")
+
+    service.transition_run("RUN-001", terminal_state, "agent-a", "lease-secret", "terminal")
+
+    released = service._store.get_lease("RUN-001")
+    assert released.version == before.version + 1
+    assert released.lease_token.startswith("RELEASED:")
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        payload = conn.execute(
+            "SELECT payload_json FROM events WHERE event_type='RUN_TRANSITIONED' "
+            "ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()[0]
+    assert "lease-secret" not in payload
+    assert json.loads(payload)["lease_release"]["lease_epoch"] == released.version
+
+
+def test_ready_cancel_releases_lease_and_fences_old_holder(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    before = service._store.get_lease("RUN-001")
+
+    cancelled = service.transition_run(
+        "RUN-001", RunState.CANCELLED, "agent-a", "lease-secret", "cancel-ready"
+    )
+
+    released = service._store.get_lease("RUN-001")
+    assert cancelled.state is RunState.CANCELLED
+    assert released.version == before.version + 1
+    assert released.lease_token.startswith("RELEASED:")
+    with pytest.raises(ContinuityExecutionError, match="lease ownership 不匹配"):
+        service.transition_run("RUN-001", RunState.RUNNING, "agent-a", "lease-secret", "old")
+
+
+def test_terminal_transition_event_failure_rolls_back_run_and_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    _start_evidence(service)
+    service.transition_run("RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "verify")
+    before_run = service._store.get_run("RUN-001")
+    before_lease = service._store.get_lease("RUN-001")
+
+    def fail_append(*_args, **_kwargs):
+        raise ContinuityStoreError("injected terminal event failure")
+
+    monkeypatch.setattr(service._store, "_append_event", fail_append)
+    with pytest.raises(ContinuityExecutionError, match="injected terminal event failure"):
+        service.transition_run(
+            "RUN-001", RunState.SUCCEEDED, "agent-a", "lease-secret", "terminal-fail"
+        )
+    assert service._store.get_run("RUN-001") == before_run
+    assert service._store.get_lease("RUN-001") == before_lease
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM events WHERE idempotency_key='terminal-fail'"
+        ).fetchone()[0] == 0
+
+
+def test_recovery_can_revoke_unstarted_live_run_and_fence_old_owner(tmp_path: Path) -> None:
+    clock = Clock()
+    service = _settlement_ready(
+        tmp_path,
+        clock,
+        runtime_action=RuntimeDecisionAction.REVOKE_UNSTARTED_RUN,
+        record_target_start_evidence=False,
+        advance_before_recovery=False,
+    )
+    before = service._store.get_lease("RUN-TARGET")
+
+    revoked = service.revoke_unstarted_run(
+        target_run_id="RUN-TARGET",
+        recovery_run_id="RUN-RECOVERY",
+        recovery_owner_id="recovery-agent",
+        recovery_lease_token="recovery-secret",
+        decision_id="DEC-20260911-5C37A985",
+        reason="Supervisor has no durable Popen evidence for the target Run.",
+        idempotency_key="revoke-unstarted-target",
+    )
+
+    assert revoked.state is RunState.CANCELLED
+    released = service._store.get_lease("RUN-TARGET")
+    assert released.version == before.version + 1
+    assert released.lease_token.startswith("RELEASED:")
+    with pytest.raises(ContinuityExecutionError, match="ownership"):
+        service.transition_run(
+            "RUN-TARGET", RunState.RUNNING, "legacy-agent", "target-secret", "old-owner-write"
+        )
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        payload = conn.execute(
+            "SELECT payload_json FROM events WHERE event_type='RUN_LEASE_REVOKED'"
+        ).fetchone()[0]
+    assert "recovery-secret" not in payload
+    assert "target-secret" not in payload
+
+
+def test_recovery_marks_pending_when_target_has_start_evidence(tmp_path: Path) -> None:
+    clock = Clock()
+    service = _settlement_ready(
+        tmp_path,
+        clock,
+        runtime_action=RuntimeDecisionAction.REVOKE_UNSTARTED_RUN,
+        advance_before_recovery=False,
+    )
+
+    before = service._store.get_lease("RUN-TARGET")
+    pending = service.revoke_unstarted_run(
+        target_run_id="RUN-TARGET",
+        recovery_run_id="RUN-RECOVERY",
+        recovery_owner_id="recovery-agent",
+        recovery_lease_token="recovery-secret",
+        decision_id="DEC-20260911-5C37A985",
+        reason="Supervisor cannot prove the started child has been reaped.",
+        idempotency_key="pending-started-target",
+    )
+
+    assert pending.state is RunState.PENDING
+    assert service._store.get_lease("RUN-TARGET") == before
+    replayed = service.revoke_unstarted_run(
+        target_run_id="RUN-TARGET",
+        recovery_run_id="RUN-RECOVERY",
+        recovery_owner_id="recovery-agent",
+        recovery_lease_token="recovery-secret",
+        decision_id="DEC-20260911-5C37A985",
+        reason="Supervisor cannot prove the started child has been reaped.",
+        idempotency_key="pending-started-target",
+    )
+    assert replayed == pending
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        rows = conn.execute(
+            "SELECT event_type, payload_json FROM events "
+            "WHERE aggregate_id='RUN-TARGET' AND event_type='RUN_REVOCATION_PENDING'"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "RUN_REVOCATION_PENDING"
+    assert "recovery-secret" not in rows[0][1]
+    assert "target-secret" not in rows[0][1]
 
 
 def test_direct_store_settlement_succeeds_without_caller_transaction_time(tmp_path: Path) -> None:

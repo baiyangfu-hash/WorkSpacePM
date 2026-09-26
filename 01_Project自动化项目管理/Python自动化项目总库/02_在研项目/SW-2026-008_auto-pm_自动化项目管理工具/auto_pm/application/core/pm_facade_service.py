@@ -656,6 +656,10 @@ class PmFacadeService:
 
         try:
             envelope = json.loads(serialized)
+            if isinstance(envelope, dict) and envelope.get("schema_version") == "checkpoint-evidence.v2":
+                return EvidenceCollectionService.checkpoint_evidence_is_current(
+                    serialized, collection, run, project_root
+                )
             expected_keys = {
                 "schema_version", "collection", "collection_hash", "quality_receipt",
                 "receipt_hash", "envelope_hash",

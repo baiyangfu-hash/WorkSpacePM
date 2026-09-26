@@ -292,3 +292,88 @@ def test_quality_gate_launch_failure_returns_failure_receipt(
     assert receipt.status == "FAIL"
     assert all(gate.exit_code is None for gate in receipt.gates)
     assert all("launch error" in gate.output_summary for gate in receipt.gates)
+
+
+def _two_project_quality_run(tmp_path: Path) -> tuple[Path, Path, RunItem]:
+    workspace, candidate, baseline = _workspace_with_candidate(tmp_path)
+    for name in ("SW008", "SW009"):
+        project = candidate / name
+        project.mkdir()
+        (project / "pyproject.toml").write_text(
+            "[tool.mypy]\nstrict = true\n", encoding="utf-8", errors="replace"
+        )
+        test = project / "tests" / ("e2e" if name == "SW008" else "core")
+        test.mkdir(parents=True)
+        (test / f"test_{name.lower()}.py").write_text(
+            "def test_owned() -> None:\n    assert True\n",
+            encoding="utf-8", errors="replace",
+        )
+        if name == "SW009":
+            (project / "owned.py").write_text(
+                "def value() -> int:\n    return 1\n",
+                encoding="utf-8", errors="replace",
+            )
+    owned = (
+        "SW008/pyproject.toml",
+        "SW008/tests/e2e/test_sw008.py",
+        "SW009/pyproject.toml",
+        "SW009/owned.py",
+        "SW009/tests/core/test_sw009.py",
+    )
+    return workspace, candidate, _run(candidate, baseline, owned)
+
+
+def test_generic_receipt_covers_two_real_projects_and_test_only_mypy(tmp_path: Path) -> None:
+    workspace, candidate, run = _two_project_quality_run(tmp_path)
+    service = EvidenceCollectionService(workspace)
+    receipt = service.run_generic_checkpoint_quality_gates(run, candidate)
+
+    assert receipt.status == "PASS"
+    assert receipt.owned_python_paths == tuple(
+        sorted(path for path in run.owned_paths if path.endswith(".py"))
+    )
+    assert receipt.project_roots == (str(candidate / "SW008"), str(candidate / "SW009"))
+    assert [(gate.name, gate.cwd, gate.exit_code) for gate in receipt.gates] == [
+        (tool, str(candidate / project), 0)
+        for project in ("SW008", "SW009") for tool in ("pytest", "ruff", "mypy")
+    ]
+    assert receipt.gates[2].command == (
+        sys.executable, "-m", "mypy", "--no-incremental", "tests/e2e/test_sw008.py",
+    )
+    assert receipt.gates[5].command == (
+        sys.executable, "-m", "mypy", "--no-incremental", "owned.py",
+    )
+    assert service.quality_receipt_is_current(run, candidate, receipt)
+
+
+def test_generic_receipt_fails_on_owned_second_project_type_error(tmp_path: Path) -> None:
+    workspace, candidate, run = _two_project_quality_run(tmp_path)
+    (candidate / "SW009" / "owned.py").write_text(
+        'def value() -> int:\n    return "bad"\n', encoding="utf-8", errors="replace"
+    )
+    receipt = EvidenceCollectionService(workspace).run_generic_checkpoint_quality_gates(
+        run, candidate
+    )
+    assert receipt.status == "FAIL"
+    assert receipt.gates[5].name == "mypy"
+    assert receipt.gates[5].exit_code not in (None, 0)
+
+
+def test_generic_quality_rejects_foreign_dirty_path_before_tools(tmp_path: Path) -> None:
+    workspace, candidate, run = _two_project_quality_run(tmp_path)
+    (candidate / "SW009" / "foreign.py").write_text(
+        "VALUE = 1\n", encoding="utf-8", errors="replace"
+    )
+
+    with pytest.raises(EvidenceCollectionError, match="untracked dirty path 超出 owned_paths"):
+        EvidenceCollectionService(workspace).run_generic_checkpoint_quality_gates(run, candidate)
+
+
+def test_generic_quality_rejects_candidate_head_drift_before_tools(tmp_path: Path) -> None:
+    workspace, candidate, run = _two_project_quality_run(tmp_path)
+    drifted = run.model_copy(update={"git_head": "0" * 40})
+
+    with pytest.raises(EvidenceCollectionError, match="git_head.*HEAD 不一致"):
+        EvidenceCollectionService(workspace).run_generic_checkpoint_quality_gates(
+            drifted, candidate
+        )
