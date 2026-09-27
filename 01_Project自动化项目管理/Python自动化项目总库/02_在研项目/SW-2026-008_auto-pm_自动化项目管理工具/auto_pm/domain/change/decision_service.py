@@ -873,6 +873,32 @@ class DecisionService:
 
         visible = cls._without_fenced_code_blocks(source)
         visible = re.sub(r"<!--.*?(?:-->|\Z)", mask, visible, flags=re.DOTALL)
+        # Legacy CHGs use one standalone version anchor immediately before its
+        # matching Markdown heading in §11. Mask only that exact shape; every
+        # other HTML tag still reaches the fail-closed scanner below.
+        anchor = re.compile(r'<a name="v(?P<version>[0-9]{3})"></a>')
+        lines = visible.splitlines(keepends=True)
+        section = ""
+        seen_versions: set[str] = set()
+        for index, line in enumerate(lines):
+            content = line.rstrip("\r\n")
+            if re.match(r"^#{1,2}(?!#)[ \t]+", content):
+                section = "11" if re.match(
+                    r"^##(?!#)[ \t]+11(?=[ \t、：:]|\.(?![0-9])|$)", content
+                ) else ""
+            match = anchor.fullmatch(content)
+            if match is None:
+                continue
+            version = match.group("version")
+            heading = rf"### V{version[0]}.{version[1]}.{version[2]}(?:[ \t]|$)"
+            next_line = lines[index + 1].rstrip("\r\n") if index + 1 < len(lines) else ""
+            if section != "11" or version in seen_versions or not re.match(heading, next_line):
+                raise DecisionValidationError("运行态 CHG 历史版本锚点位置、编号或标题非法")
+            seen_versions.add(version)
+            lines[index] = re.sub(r"[^\r\n]", " ", line)
+        if seen_versions:
+            cls._runtime_top_level_section(visible, "11", required=True)
+        visible = "".join(lines)
         # Runtime authority must stay visibly reviewable as Markdown. Raw HTML
         # can conceal authority through CSS, malformed markup, nested elements,
         # or terminator-looking attribute values, so signing fails closed on a

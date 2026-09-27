@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from auto_pm.models import ChangeRequest
 
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
@@ -770,6 +771,62 @@ def test_runtime_decision_rejects_authority_in_raw_html_blocks(
     assert not (tmp_path / ".auto-pm" / "decisions").exists()
 
 
+@pytest.mark.parametrize("version", ["100", "053", "111"])
+def test_runtime_decision_accepts_matching_legacy_version_anchor(
+    tmp_path: Path, version: str
+) -> None:
+    change_path = _approved_change(tmp_path)
+    change_path.write_text(
+        change_path.read_text(encoding="utf-8")
+        + f'\n## 11. 版本详细变更说明\n<a name="v{version}"></a>\n'
+        + f'### V{version[0]}.{version[1]}.{version[2]} 版本详细变更\n',
+        encoding="utf-8",
+    )
+
+    decision = DecisionService(tmp_path).create_decision(
+        change_id="CHG-SCPT-2026-214",
+        approver="fubai",
+        project_id="SW-2026-008",
+        decision_id="DEC-20260911-5C37A985",
+        runtime_capability=_runtime_capability(),
+    )
+    assert decision.change_id == "CHG-SCPT-2026-214"
+    assert (tmp_path / ".auto-pm" / "decisions" / f"{decision.decision_id}.json").is_file()
+
+
+@pytest.mark.parametrize(
+    "version_block",
+    [
+        '<a name="v100"></a>\n### V1.0.0 版本详细变更\n',
+        '## 11. 版本详细变更说明\n<a name="v100"></a>\n### V1.0.1 版本详细变更\n',
+        '## 11. 版本详细变更说明\n<a name="v100"></a>\n\n### V1.0.0 版本详细变更\n',
+        '## 11. 版本详细变更说明\n<a name="v100" id="v100"></a>\n### V1.0.0 版本详细变更\n',
+        '## 11. 版本详细变更说明\n<a name="v100"></a> suffix\n### V1.0.0 版本详细变更\n',
+        '## 11. 版本详细变更说明\n<a name="v100"></a>\n### V1.0.0 版本详细变更\n<a name="v100"></a>\n### V1.0.0 再次变更\n',
+        '## 11. 版本详细变更说明\n<a name="v100"></a>\n### V1.0.0 版本详细变更\n## 11. 重复章节\n',
+        '## 11. 版本详细变更说明\n<script>alert(1)</script>\n<a name="v100"></a>\n### V1.0.0 版本详细变更\n',
+    ],
+)
+def test_runtime_decision_rejects_nonstandard_version_html(
+    tmp_path: Path, version_block: str
+) -> None:
+    change_path = _approved_change(tmp_path)
+    change_path.write_text(
+        change_path.read_text(encoding="utf-8") + "\n" + version_block,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DecisionValidationError, match="锚点|HTML|§11"):
+        DecisionService(tmp_path).create_decision(
+            change_id="CHG-SCPT-2026-214",
+            approver="fubai",
+            project_id="SW-2026-008",
+            decision_id="DEC-20260911-5C37A985",
+            runtime_capability=_runtime_capability(),
+        )
+    assert not (tmp_path / ".auto-pm" / "decisions").exists()
+
+
 @pytest.mark.parametrize(
     "hidden",
     [
@@ -922,7 +979,7 @@ def test_runtime_decision_rechecks_complete_authority_projection(
     original_runtime_change = service._runtime_change
     calls = 0
 
-    def projection_drift(change_id: str, project_id: str):
+    def projection_drift(change_id: str, project_id: str) -> tuple[Path, ChangeRequest, str]:
         nonlocal calls
         calls += 1
         path, change, digest = original_runtime_change(change_id, project_id)

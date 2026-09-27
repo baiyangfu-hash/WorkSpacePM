@@ -304,6 +304,7 @@ class TestChgGenerator:
         # §11 版本详细变更说明（M1-3: 原 §11 附录改为版本详细变更说明）
         assert "## 11. 版本详细变更说明" in content
         assert "### V1.0.0 版本详细变更" in content
+        assert "<a name=" not in content
         assert "变更单创建" in content
 
         # §12 附录（M1-3: 新增 §12）
