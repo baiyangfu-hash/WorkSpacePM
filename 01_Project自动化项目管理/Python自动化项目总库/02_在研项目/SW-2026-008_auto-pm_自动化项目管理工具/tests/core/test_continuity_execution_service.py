@@ -14,6 +14,7 @@ from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -104,7 +105,7 @@ def _runtime_change(root: Path, *, status: str = "approved") -> Path:
     return path
 
 
-def _services(root: Path, clock: Clock):
+def _services(root: Path, clock: Clock) -> tuple[WorkRegistryService, ContinuityExecutionService]:
     _git_root(root)
     work = WorkRegistryService(root, now=lambda: clock().isoformat())
     work.initialize("test")
@@ -123,7 +124,7 @@ def _services(root: Path, clock: Clock):
     return work, ContinuityExecutionService(root, store=store, now=clock)
 
 
-def _start(service: ContinuityExecutionService, **changes):
+def _start(service: ContinuityExecutionService, **changes: Any) -> Any:
     git_head = subprocess.run(
         ["git", "-C", str(service._root), "rev-parse", "HEAD"],
         check=True,
@@ -150,7 +151,7 @@ def _start(service: ContinuityExecutionService, **changes):
     return service.start_run(**values)
 
 
-def _start_evidence(service: ContinuityExecutionService, **changes):
+def _start_evidence(service: ContinuityExecutionService, **changes: Any) -> Any:
     values = {
         "run_id": "RUN-001",
         "owner_id": "agent-a",
@@ -166,7 +167,7 @@ def _start_evidence(service: ContinuityExecutionService, **changes):
     return service.record_start_evidence(**values)
 
 
-def _checkpoint(service: ContinuityExecutionService, **changes):
+def _checkpoint(service: ContinuityExecutionService, **changes: Any) -> Any:
     values = {
         "checkpoint_id": "CP-001",
         "run_id": "RUN-001",
@@ -191,7 +192,7 @@ def _c03_auto_checkpoint_service(
     c03_selector_match: bool = True,
     project_name: str = "project",
     second_project: bool = False,
-):
+) -> tuple[Path, Path, ContinuityExecutionService]:
     """Create a real nested project worktree plus isolated continuity database."""
 
     clock = Clock()
@@ -326,8 +327,8 @@ def _c03_auto_checkpoint_service(
 
 
 def _append_auto_checkpoint(
-    service: ContinuityExecutionService, project_root: Path, **changes: object
-):
+    service: ContinuityExecutionService, project_root: Path, **changes: Any
+) -> Any:
     values: dict[str, object] = {
         "checkpoint_id": "CP-AUTO-001",
         "run_id": "RUN-001",
@@ -336,12 +337,12 @@ def _append_auto_checkpoint(
         "project_root": project_root,
     }
     values.update(changes)
-    return service.append_verified_checkpoint(**values)  # type: ignore[arg-type]
+    return service.append_verified_checkpoint(**values)
 
 
 def _quality_receipt_for_test(
     collector: EvidenceCollectionService,
-    run,
+    run: Any,
     project_root: Path,
     *,
     exit_code: int | None = 0,
@@ -526,12 +527,12 @@ def _settlement_ready(
     decision_path.write_bytes(
         json.dumps(decision.to_dict(), ensure_ascii=False, indent=2).encode("utf-8")
     )
-    decision_paths = (
+    dec_file_paths = (
         f".auto-pm/decisions/{target_decision_id}.json",
         f".auto-pm/decisions/{decision_id}.json",
     )
     subprocess.run(
-        ["git", "-C", str(root), "add", "-f", "--", *decision_paths, *tracked_support],
+        ["git", "-C", str(root), "add", "-f", "--", *dec_file_paths, *tracked_support],
         check=True,
         capture_output=True,
     )
@@ -626,7 +627,7 @@ def _settlement_ready(
     return service
 
 
-def _settle(service: ContinuityExecutionService, **changes):
+def _settle(service: ContinuityExecutionService, **changes: Any) -> Any:
     values = {
         "target_run_id": "RUN-TARGET",
         "recovery_run_id": "RUN-RECOVERY",
@@ -641,7 +642,7 @@ def _settle(service: ContinuityExecutionService, **changes):
     return service.settle_expired_run(**values)
 
 
-def _direct_settlement_values(service: ContinuityExecutionService, **changes):
+def _direct_settlement_values(service: ContinuityExecutionService, **changes: Any) -> dict[str, Any]:
     store = service._store
     target = store.get_run("RUN-TARGET")
     target_lease = store.get_lease("RUN-TARGET")
@@ -818,8 +819,8 @@ def _legacy_terminal_lease_ready(
 
 
 def _fence_terminal_lease(
-    service: ContinuityExecutionService, event_id: str, lease_version: int, **changes
-):
+    service: ContinuityExecutionService, event_id: str, lease_version: int, **changes: Any
+) -> Any:
     values = {
         "target_run_id": "RUN-TARGET",
         "expected_settlement_event_id": event_id,
@@ -1115,7 +1116,7 @@ def test_store_revalidates_git_snapshot_inside_transaction(
     original = service._store._validated_run_snapshot
     calls = 0
 
-    def drift_after_initial_snapshot(*args, **kwargs):
+    def drift_after_initial_snapshot(*args: Any, **kwargs: Any) -> Any:
         nonlocal calls
         calls += 1
         result = original(*args, **kwargs)
@@ -1164,7 +1165,7 @@ def test_store_rechecks_work_state_inside_run_transaction(
     _, service = _services(tmp_path, clock)
     original = service._store.create_run
 
-    def close_work_then_create(*args, **kwargs):
+    def close_work_then_create(*args: Any, **kwargs: Any) -> Any:
         with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
             conn.execute("UPDATE work_items SET state='CLOSED' WHERE work_id='WORK-001'")
         _checkpoint_test_wal(tmp_path)
@@ -1241,7 +1242,7 @@ def test_direct_store_rejects_forged_run_and_lease_invariants(
     elif target == "lease_token":
         lease["lease_token"] = value
     else:
-        lease_seconds = int(value)
+        lease_seconds = int(str(value))
 
     with pytest.raises(ContinuityStoreError):
         service._store.create_run(
@@ -1340,7 +1341,7 @@ def test_concurrent_distinct_run_creation_preserves_single_active_run(
     barrier = threading.Barrier(2)
     original = ContinuityStore.create_run
 
-    def synchronized_create_run(self, *args, **kwargs):
+    def synchronized_create_run(self: Any, *args: Any, **kwargs: Any) -> Any:
         barrier.wait(timeout=10)
         return original(self, *args, **kwargs)
 
@@ -1660,7 +1661,7 @@ def test_concurrent_same_run_and_key_returns_one_exact_replay(
     barrier = threading.Barrier(2)
     original = ContinuityStore.create_run
 
-    def synchronized_create_run(self, *args, **kwargs):
+    def synchronized_create_run(self: Any, *args: Any, **kwargs: Any) -> Any:
         barrier.wait(timeout=10)
         return original(self, *args, **kwargs)
 
@@ -2105,8 +2106,8 @@ def test_append_verified_checkpoint_rejects_receipt_stale_before_writing(
     source = candidate / "project" / "auto_pm" / "core" / "target.py"
 
     def run_then_change(
-        collector: EvidenceCollectionService, run, root: Path
-    ):
+        collector: EvidenceCollectionService, run: Any, root: Path
+    ) -> Any:
         receipt = _quality_receipt_for_test(collector, run, root)
         source.write_text(
             "def value() -> int:\n    return 2\n", encoding="utf-8", errors="replace"
@@ -2464,7 +2465,7 @@ def test_settlement_rolls_back_run_and_lease_when_event_append_fails(
     before_run = service._store.get_run("RUN-TARGET")
     before_lease = service._store.get_lease("RUN-TARGET")
 
-    def fail_append(*_args, **_kwargs):
+    def fail_append(*_args: Any, **_kwargs: Any) -> Any:
         raise ContinuityStoreError("injected event failure")
 
     monkeypatch.setattr(service._store, "_append_event", fail_append)
@@ -2532,7 +2533,7 @@ def test_terminal_lease_fence_rolls_back_release_on_event_failure(
     service, event_id, lease_version = _legacy_terminal_lease_ready(tmp_path, clock)
     before = service._store.get_lease("RUN-TARGET")
 
-    def fail_append(*_args, **_kwargs):
+    def fail_append(*_args: Any, **_kwargs: Any) -> Any:
         raise ContinuityStoreError("injected event failure")
 
     monkeypatch.setattr(service._store, "_append_event", fail_append)
@@ -2620,7 +2621,7 @@ def test_terminal_transition_event_failure_rolls_back_run_and_lease(
     before_run = service._store.get_run("RUN-001")
     before_lease = service._store.get_lease("RUN-001")
 
-    def fail_append(*_args, **_kwargs):
+    def fail_append(*_args: Any, **_kwargs: Any) -> Any:
         raise ContinuityStoreError("injected terminal event failure")
 
     monkeypatch.setattr(service._store, "_append_event", fail_append)
@@ -2851,7 +2852,7 @@ def test_settlement_rejects_invalid_path_aware_git_object_id(
     def invalid_hash(*args: str, input_bytes: bytes | None = None) -> bytes:
         if args and args[0] == "hash-object":
             return b"not-a-git-object-id\n"
-        return original(*args, input_bytes=input_bytes)
+        return bytes(original(*args, input_bytes=input_bytes))
 
     monkeypatch.setattr(service._store, "_git_bytes", invalid_hash)
 
@@ -3051,7 +3052,7 @@ def test_settlement_detects_transactional_recovery_authority_drift(
     service = _settlement_ready(tmp_path, clock)
     original = service._store.settle_expired_run
 
-    def drift_then_settle(**kwargs):
+    def drift_then_settle(**kwargs: Any) -> Any:
         with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
             if fact == "work_scope":
                 paths = ("auto_pm/core/a.py",)
@@ -3097,7 +3098,7 @@ def test_settlement_detects_each_recovery_cas_fact_drift_inside_transaction(
     service = _settlement_ready(tmp_path, clock)
     original = service._store.settle_expired_run
 
-    def drift_then_settle(**kwargs):
+    def drift_then_settle(**kwargs: Any) -> Any:
         with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
             if fact == "run_version":
                 conn.execute("UPDATE run_items SET version=version+1 WHERE run_id='RUN-RECOVERY'")
@@ -3223,7 +3224,7 @@ def test_settlement_rechecks_complete_authority_chain_inside_transaction(
     service = _settlement_ready(tmp_path, clock)
     original = service._store.settle_expired_run
 
-    def drift_then_settle(**kwargs):
+    def drift_then_settle(**kwargs: Any) -> Any:
         if fact.endswith("decision_bytes"):
             decision_id = (
                 "DEC-20260910-A2TARGT1"
@@ -3294,7 +3295,7 @@ def test_settlement_detects_same_work_drift_inside_transaction(
     service = _settlement_ready(tmp_path, clock)
     original = service._store.settle_expired_run
 
-    def drift_then_settle(**kwargs):
+    def drift_then_settle(**kwargs: Any) -> Any:
         with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
             conn.execute("UPDATE run_items SET work_id='WORK-RECOVERY' WHERE run_id='RUN-TARGET'")
         _checkpoint_test_wal(tmp_path)
@@ -3314,7 +3315,7 @@ def test_settlement_rechecks_recovery_lease_at_transaction_time(
     service = _settlement_ready(tmp_path, clock)
     original = service._store.settle_expired_run
 
-    def expire_then_settle(**kwargs):
+    def expire_then_settle(**kwargs: Any) -> Any:
         clock.value += timedelta(seconds=901)
         return original(**kwargs)
 
@@ -3589,7 +3590,7 @@ def test_settlement_event_failure_rolls_back_run_update(
     service = _settlement_ready(tmp_path, clock)
     original = ContinuityStore._append_event
 
-    def fail_settlement_event(*args, **kwargs):
+    def fail_settlement_event(*args: Any, **kwargs: Any) -> Any:
         event_type = args[2]
         if event_type == "RUN_EXPIRED_SETTLED":
             raise ContinuityStoreError("injected settlement event failure")
@@ -3611,7 +3612,7 @@ def test_settlement_detects_target_version_cas_drift(
     service = _settlement_ready(tmp_path, clock)
     original = service._store.settle_expired_run
 
-    def drift_then_settle(**kwargs):
+    def drift_then_settle(**kwargs: Any) -> Any:
         with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
             conn.execute("UPDATE run_items SET version=version+1 WHERE run_id='RUN-TARGET'")
         return original(**kwargs)
@@ -3640,13 +3641,13 @@ def test_concurrent_different_keys_allow_exactly_one_settlement(
     barrier = threading.Barrier(2)
     original = ContinuityStore.settle_expired_run
 
-    def synchronized_settle(store: ContinuityStore, **kwargs):
+    def synchronized_settle(store: ContinuityStore, **kwargs: Any) -> Any:
         barrier.wait(timeout=10)
         return original(store, **kwargs)
 
     monkeypatch.setattr(ContinuityStore, "settle_expired_run", synchronized_settle)
 
-    def invoke(service: ContinuityExecutionService, key: str):
+    def invoke(service: ContinuityExecutionService, key: str) -> Any:
         return _settle(service, idempotency_key=key)
 
     successes = []

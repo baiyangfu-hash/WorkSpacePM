@@ -1001,10 +1001,8 @@ class EvidenceCollectionService:
 
         commands = EvidenceCollectionService._python_quality_commands(targets)
         mypy = (sys.executable, "-m", "mypy", "--no-incremental")
-        if targets.production:
-            return (*commands[:2], ("mypy", mypy + targets.production, None))
-        if targets.tests:
-            return (*commands[:2], ("mypy", mypy + targets.tests, None))
+        if targets.python:
+            return (*commands[:2], ("mypy", mypy + targets.python, None))
         return commands
 
     @staticmethod

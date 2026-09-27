@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -276,11 +277,11 @@ def test_quality_gate_launch_failure_returns_failure_receipt(
     workspace, candidate, baseline = _workspace_with_candidate(tmp_path)
     original_run = subprocess.run
 
-    def fail_python_commands(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fail_python_commands(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         command = args[0]
         if isinstance(command, tuple) and command and command[0] == sys.executable:
             raise FileNotFoundError("simulated quality tool launch failure")
-        return original_run(*args, **kwargs)  # type: ignore[arg-type]
+        return original_run(*args, **kwargs)
 
     monkeypatch.setattr(
         "auto_pm.application.core.evidence_collection_service.subprocess.run", fail_python_commands
@@ -341,8 +342,10 @@ def test_generic_receipt_covers_two_real_projects_and_test_only_mypy(tmp_path: P
         sys.executable, "-m", "mypy", "--no-incremental", "tests/e2e/test_sw008.py",
     )
     assert receipt.gates[5].command == (
-        sys.executable, "-m", "mypy", "--no-incremental", "owned.py",
+        sys.executable, "-m", "mypy", "--no-incremental", "owned.py", "tests/core/test_sw009.py",
     )
+    for gate in (receipt.gates[2], receipt.gates[5]):
+        assert "--follow-imports=skip" not in gate.command
     assert service.quality_receipt_is_current(run, candidate, receipt)
 
 

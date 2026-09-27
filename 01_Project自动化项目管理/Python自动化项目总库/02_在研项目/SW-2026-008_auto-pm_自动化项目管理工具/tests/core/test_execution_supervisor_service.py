@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -29,7 +30,7 @@ from tests.core.test_continuity_execution_service import Clock, _services, _star
 
 
 @pytest.mark.parametrize("seconds", [60, 300, 900, 3600])
-def test_short_lease_policy_keeps_first_and_subsequent_real_renewals_bounded(tmp_path, seconds):
+def test_short_lease_policy_keeps_first_and_subsequent_real_renewals_bounded(tmp_path: Path, seconds: int) -> None:
     clock = Clock()
     _, execution = _services(tmp_path, clock)
     _start(execution, lease_seconds=seconds)
@@ -59,7 +60,7 @@ def test_short_lease_policy_keeps_first_and_subsequent_real_renewals_bounded(tmp
 
 
 @pytest.mark.parametrize("seconds,threshold", [(86400, 3600), (59, 20), (3601, 60), (900, 900), (900, 0)])
-def test_foreground_lease_policy_rejects_old_24h_configuration(seconds, threshold):
+def test_foreground_lease_policy_rejects_old_24h_configuration(seconds: int, threshold: int) -> None:
     with pytest.raises(ExecutionSupervisorError):
         ExecutionLeasePolicy(seconds, threshold)
 
@@ -105,7 +106,7 @@ def _capability() -> LeaseCapability:
     )
 
 
-def test_supervisor_maps_only_trusted_evidence_without_reaping(tmp_path) -> None:
+def test_supervisor_maps_only_trusted_evidence_without_reaping(tmp_path: Path) -> None:
     execution = Mock()
     expected = Mock()
     execution.record_start_evidence.return_value = expected
@@ -126,7 +127,7 @@ def test_supervisor_maps_only_trusted_evidence_without_reaping(tmp_path) -> None
     execution.record_start_evidence.assert_called_once()
 
 
-def test_supervisor_reaps_before_retry_when_evidence_persistence_fails(tmp_path) -> None:
+def test_supervisor_reaps_before_retry_when_evidence_persistence_fails(tmp_path: Path) -> None:
     execution = Mock()
     execution.record_start_evidence.side_effect = ContinuityExecutionError("disk failure")
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
@@ -147,7 +148,7 @@ def test_supervisor_reaps_before_retry_when_evidence_persistence_fails(tmp_path)
     assert "secret-token" not in str(raised.value)
 
 
-def test_supervisor_renews_due_capability_without_exposing_secret(tmp_path) -> None:
+def test_supervisor_renews_due_capability_without_exposing_secret(tmp_path: Path) -> None:
     execution = Mock()
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
     now = datetime.now(UTC)
@@ -211,7 +212,7 @@ def test_supervisor_renews_due_capability_without_exposing_secret(tmp_path) -> N
     assert "must-not-leak" not in repr(capability)
 
 
-def test_supervisor_skips_early_renewal_and_redacts_failures(tmp_path) -> None:
+def test_supervisor_skips_early_renewal_and_redacts_failures(tmp_path: Path) -> None:
     execution = Mock()
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
     now = datetime.now(UTC)
@@ -252,7 +253,7 @@ def test_supervisor_skips_early_renewal_and_redacts_failures(tmp_path) -> None:
     assert "must-not-leak" not in str(raised.value)
 
 
-def test_supervisor_blocks_when_current_child_cannot_be_reaped(tmp_path) -> None:
+def test_supervisor_blocks_when_current_child_cannot_be_reaped(tmp_path: Path) -> None:
     execution = Mock()
     execution.record_start_evidence.side_effect = ContinuityExecutionError("disk failure")
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
@@ -287,7 +288,7 @@ def test_supervisor_blocks_when_current_child_cannot_be_reaped(tmp_path) -> None
     ],
 )
 def test_supervisor_uses_exit_truth_and_renews_at_wait_boundaries(
-    tmp_path,
+    tmp_path: Path,
     result: LocalExecutionResult,
     expected_state: RunState,
     expected_disposition: str,
@@ -321,7 +322,7 @@ def test_supervisor_uses_exit_truth_and_renews_at_wait_boundaries(
     assert "must-not-leak" not in repr(outcome)
 
 
-def test_supervisor_does_not_verify_when_collect_or_renew_fails(tmp_path) -> None:
+def test_supervisor_does_not_verify_when_collect_or_renew_fails(tmp_path: Path) -> None:
     execution = Mock()
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
     capability = _capability()
@@ -350,7 +351,7 @@ def test_supervisor_does_not_verify_when_collect_or_renew_fails(tmp_path) -> Non
 
 
 def test_collect_only_never_transitions_and_finalize_requires_projection_receipt(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     execution = Mock()
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
@@ -392,7 +393,7 @@ def test_collect_only_never_transitions_and_finalize_requires_projection_receipt
     execution.transition_run.assert_called_once()
 
 
-def test_periodic_renewal_failure_reaps_real_child_and_stays_pending(tmp_path) -> None:
+def test_periodic_renewal_failure_reaps_real_child_and_stays_pending(tmp_path: Path) -> None:
     execution = Mock()
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
     capability = _capability()
@@ -434,7 +435,7 @@ def test_periodic_renewal_failure_reaps_real_child_and_stays_pending(tmp_path) -
     assert process.poll() is not None
     execution.transition_run.assert_not_called()
 
-def test_supervisor_recovers_only_the_full_started_identity(tmp_path) -> None:
+def test_supervisor_recovers_only_the_full_started_identity(tmp_path: Path) -> None:
     execution = Mock()
     evidence = _evidence()
     execution.resolve_started_run.return_value = (Mock(), Mock(), evidence)

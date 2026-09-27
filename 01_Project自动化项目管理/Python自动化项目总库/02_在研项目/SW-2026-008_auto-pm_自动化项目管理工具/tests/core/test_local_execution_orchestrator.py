@@ -6,7 +6,9 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
+import pytest
 from auto_pm.core.execution_adapter_service import (
     ExecutionDispatchResult,
 )
@@ -16,10 +18,15 @@ from auto_pm.core.execution_adapter_service import (
 from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
 
 from auto_pm.infrastructure.continuity_store import ContinuityStore
-from auto_pm.infrastructure.local_executor import LocalCodexExecutor
-from tests.core.test_execution_adapter_service import PROJECT_PATH
+from auto_pm.infrastructure.local_executor import (
+    LocalCodexExecutor,
+    LocalExecutionHandle,
+    LocalExecutionResult,
+)
 from tests.core.test_execution_microtask_service import _prepared
 
+# Keep this fixed fixture path local; importing another test module pulls in unrelated type errors.
+PROJECT_PATH = "SW-TEST-001/README.md"
 _LEASE_TOKEN = "must-never-persist"
 _LEASE_ENV = "AUTO_PM_E08CD_LEASE"
 
@@ -30,13 +37,15 @@ class _CountingExecutor(LocalCodexExecutor):
         self.starts = 0
         self._lock = threading.Lock()
 
-    def start(self, request):
+    def start(
+        self, request: Any
+    ) -> LocalExecutionHandle | LocalExecutionResult:
         with self._lock:
             self.starts += 1
         return super().start(request)
 
 
-def _inputs(root: Path, operation_id: str):
+def _inputs(root: Path, operation_id: str) -> tuple[ExecutionDispatchResult, Any]:
     dispatch_service = _prepared(root, operation_id=operation_id)
     store = ContinuityStore(root)
     intent = store.get_execution_intent(operation_id)
@@ -64,7 +73,7 @@ def _helper_code(content: str) -> str:
 
 def test_foreground_saga_uses_real_helper_strips_secret_and_replays_without_popen(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     operation_id = "OP-E08CD-REAL-HELPER"
     dispatch, microtask = _inputs(tmp_path, operation_id)
@@ -100,7 +109,9 @@ def test_foreground_saga_uses_real_helper_strips_secret_and_replays_without_pope
     assert executor.starts == 1
 
 
-def test_concurrent_claim_has_one_real_popen_winner(tmp_path: Path, monkeypatch) -> None:
+def test_concurrent_claim_has_one_real_popen_winner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     operation_id = "OP-E08CD-CONCURRENT"
     dispatch, microtask = _inputs(tmp_path, operation_id)
     executor = _CountingExecutor(_helper_code("concurrent winner\n"))
@@ -108,7 +119,7 @@ def test_concurrent_claim_has_one_real_popen_winner(tmp_path: Path, monkeypatch)
     monkeypatch.setenv(_LEASE_ENV, _LEASE_TOKEN)
     barrier = threading.Barrier(2)
 
-    def invoke():
+    def invoke() -> Any:
         barrier.wait()
         return orchestrator.execute(
             dispatch=dispatch,
