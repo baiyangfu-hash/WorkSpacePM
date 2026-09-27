@@ -1,0 +1,24 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260927-7B5C013A",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-013",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/wbs/__init__.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/wbs/projection_checker.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/wbs.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/__main__.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/domain/wbs/test_projection_checker.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_wbs.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/governance/wbs_current_projection.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-27T23:26:33.541865+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅在 8b02de55 派生隔离候选实施；不得合并、推送、部署或切换 release",
+    "WBS 历史通过 Git/归档指针保留，当前投影不得改写历史证据"
+  ],
+  "metadata": {}
+}
