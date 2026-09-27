@@ -1,6 +1,6 @@
 # PM-Flow 恢复与可用化总方案
 
-> 文档版本：V2.6.2；修订日期：2026-09-27；状态：M1 历史业务验收保留、统一不可变候选质量复验 PASS，正式治理验收仍受生命周期/稳定运行时门禁阻断；M0 历史完成保留、当前完整复验 UNVERIFIED。最新裁决见 §1.3 的 2026-09-27 表。
+> 文档版本：V2.6.3；修订日期：2026-09-27；状态：M1 已按当前不可变候选、治理证据链与稳定运行时入口完成验收；M0 历史完成保留、当前完整复验 UNVERIFIED；M2 尚未启动。最新裁决见 §1.3 的 2026-09-27 表。
 > 项目：SW-2026-008；治理：SYS-2026-001；规划标识：PMF-20260912。
 > 修订依据：用户要求“重新修订方案，原子级拆解，最终需求必须达成”。本轮直接修订既有计划；不再设置一个等待批准的“先盘点再规划”项目。
 > 本文件给出 4 个产品里程碑、95 个原子任务及 1 条主线；其中 Q01～Q03 是已冻结基线失败的独立收敛队列。任务属于批次内部步骤，不等于逐条重复用户审批。C09 的补强门槛不构成重新派发原业务的许可。
@@ -29,6 +29,7 @@
 > V2.6.0 依据 2026-09-25 独立执行与端到端闭环事实：签发专用 Decision DEC-20260925-C09R3C01 恢复原业务 Run 验收租约与状态；清洗 c09-final-e2e 候选至严格 3 owned paths，五项质量门全绿；自动生成并追加内容绑定 Checkpoint CP-SW009-PMF-C09-FINAL-001，获得用户显式报批；通过 PmFacadeService.accept 与 PmClosureService 闭环流程，完成 CHG-SCPT-2026-012 实质与证据注入；RUN-PLAN-F767C11087531180 终态 SUCCEEDED（租约 RELEASED），WORK-MSN-F0564CAF05D18E0B 与 MISSION-0648162FF0602FDD 终态 CLOSED；SW-2026-009 与 SW-2026-008 双项目台账对账 0 差异。里程碑 M1 正式达成并验收。
 > V2.6.1 是后续审计校准，不改写 V2.6.0 当时的状态机与用户验收事实。原 Checkpoint 的 SW009 Mypy 实际仅检查生产文件且使用 `--follow-imports=skip`；原候选对生产与测试两文件重跑 strict Mypy 为 172 errors / 12 files、Exit 1。因此“原候选五门完整全绿、M1 当前无保留通过”不成立。九条历史 `BLOCKED` Work 仍占用 P2 五文件路径，其中 NOSKIP Run 仍 `BLOCKED` 且旧租约未标记 RELEASED；本轮停在安全预检。证据见 `.auto-pm/reports/c09-p2/20260927-m0-m1-p2-independent-review.md`。
 > V2.6.2 记录从已验收 G10 隔离集成提交继续构造的唯一 M1 不可变候选：`codex/m1-final-candidate` 当前洁净 HEAD 为 `a1c5d94d5da1cec7fe2ec14ada6f440608443003`，父提交 `6327cbe18029b44a838c9f19892284fcb628785d`，相对基线 `41bd6204e708b2054fc514a5f3cf377bc02ec64f` 仅含 7 条明确差异。SW008 扩展核心套件 203 passed，6 个门禁/依赖文件 Ruff 与 normal-import strict Mypy 均 Exit 0；SW009 8 passed（9 subtests）、Ruff/Mypy Exit 0；C09 E2E pytest/Ruff/Mypy Exit 0。该结果修复 V2.6.1 的质量缺口，但尚未形成新的 Decision/Work/Run/Checkpoint、未被稳定运行时消费，也未合并、部署或切换 release。新增 G10-R1 固定“验收后 Work 生命周期与显式 Resume”合同；正式 M1 治理验收须待该门与稳定运行时入口可执行后另行完成。
+> V2.6.3 记录 G10-R1 与 M1 的正式收口：唯一候选沿 `a1c5d94d` 经门禁合同根治提交 `0fb0c6f3` 与生命周期提交 `8b02de55f011df31591601464e0eebf4db5e4f23` 形成洁净不可变 HEAD；`CP-SW008-PMF-G10R1-001` 绑定该提交前同一六路径当前字节，Run `RUN-SW008-PMF-G10R1-002` 为 `SUCCEEDED`、lease `RELEASED`、Work `WORK-SW008-PMF-G10R1-002` 为 `CLOSED`，CHG-328/329 均 `completed`。分支 `codex/g10-r1-lifecycle` 已推送，未合并 main。新 release `1.3.3-8b02de5` 由该精确提交可重复构建，active exact-tree 497 文件验证通过，previous `1.3.2-9d3c920` exact-tree 468 文件验证通过，隔离前切换/回退演练通过；根入口 configured/effective/load path 已一致指向新 release、无 fallback，SW008 台账 0 缺失/0 孤儿/0 不一致。原 C09 Checkpoint 局限、M0 当前未重验及 P2 阻断均保留，不因 M1 收口被改写。
 
 
 ## 1. 项目信息
@@ -130,10 +131,10 @@
 | M0 | B10 Work `ACCEPTED`、B218 汇总 Work `CLOSED`、G10 后续 Work `ACCEPTED`；已验收 G10 集成提交 `d87fd3d68222a27850530a14ec1ac452b467be87` 保留为 M1 重建起点。本轮未逐项重演 B/G 全部 Hook 与发布入口证据 | 历史完成记录保留；当前完整复验仍为 `UNVERIFIED`，不得由 M1 候选质量结果反推为重新验收 |
 | C09 业务状态 | 原 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，Closure `COMPLETED`，CHG-012 `completed`，SW008/SW009 对账均 0 差异；业务终态 `PASS` | 历史数据与批准事件保持不变 |
 | C09 原候选质量 | CP-SW009-PMF-C09-FINAL-001 的 SW009 Mypy 命令使用 `--follow-imports=skip`，仅含 `dictionary_service.py`，漏检 `tests/test_services.py`。同原候选以 `mypy --strict --no-incremental` 重跑两文件为 172 errors / 12 files、Exit 1 | 历史缺口与原 Checkpoint 永久保留，不以后续候选倒写 |
-| M1 统一不可变候选 | `codex/m1-final-candidate` 洁净 HEAD `a1c5d94d5da1cec7fe2ec14ada6f440608443003`；相对 `41bd6204` 仅 7 条差异。SW008 扩展核心 203 passed；6 文件 Ruff 与 normal-import strict Mypy Exit 0；SW009 8 passed（9 subtests）、Ruff/Mypy Exit 0；C09 E2E pytest/Ruff/Mypy Exit 0；缓存与覆盖率临时产物已清除 | 当前统一候选技术质量 `PASS`。它不替代原 Checkpoint，不自动构成新的 Run/Work/Mission/CHG 终态；正式 M1 治理验收仍须当前字节的合法 Checkpoint 与状态闭环 |
-| 生命周期/稳定入口 | 候选 `ContinuityStore.list_works()` 已排除 `ACCEPTED/CLOSED/CANCELLED`；研发母体和实际回退加载的 1.3.2 仍只排除 `CLOSED/CANCELLED`，导致验收后 Work 被误判为活动对象。当前 12 条真实 `BLOCKED` Work 仍须按证据显式选择和前向处置，不能靠默认 latest 或批量取消 | 先完成 G10-R1 的合同与回归；再以单独部署边界使稳定入口消费已验收实现。任何历史对象处置按清单逐项授权，不并入本任务 |
+| M1 统一不可变候选 | `codex/g10-r1-lifecycle` 洁净 HEAD `8b02de55f011df31591601464e0eebf4db5e4f23`，提交链为 `a1c5d94d → 0fb0c6f3 → 8b02de55`，已推送 origin、未合并 main。V2.6.2 的跨项目完整质量门保持 PASS；G10-R1 追加 138＋117＋58 项回归及六文件 Ruff/Mypy PASS | `CP-SW008-PMF-G10R1-001` 绑定提交前同一六路径字节；`RUN-SW008-PMF-G10R1-002` SUCCEEDED/lease RELEASED，`WORK-SW008-PMF-G10R1-002` CLOSED，CHG-328/329 completed。当前 M1 治理证据链 `PASS` |
+| 生命周期/稳定入口 | release `1.3.3-8b02de5` 由精确提交 `8b02de55` 可重复构建，aggregate manifest SHA-256 `940176be95603ba18fa1939361415aaffd7246cda2b193bc74153ca5b0d96050`；active exact-tree 497 文件、previous `1.3.2-9d3c920` exact-tree 468 文件均通过，隔离前切换/回退演练通过。根入口 configured/effective/load path 一致指向新 release、fallback 为空 | 稳定入口已消费验收实现。83 条 `ACCEPTED` Work 不再计入执行活动集合；12 条真实 `BLOCKED` Work 继续保留并占用自身路径，须显式选择或按各自证据前向处置，不批量取消 |
 | P2 / CHG-323 | 五文件代码存档存在；相关历史 `BLOCKED` Work 与本票路径重叠；NOSKIP Run `BLOCKED`、旧租约保留已过期 token，缺真实进程回收证明。CHG-323 仍 `implementing`，P2 `BLOCKED` | G10-R1 只根治活动状态判定与显式 Resume，不替代 NOSKIP 进程/租约证据；P2 在自身前置满足前不启动新 Run |
-| M2 | U01 的显式依赖为 P06/E03/C07，P2 不是其 WBS 明列前置；U/V 整体尚未验收 | U01 启动前按自身路径与活动 Work 预检；需要真实执行的任务逐项判定，D 阶段发布仍另行验收 |
+| M2 | U01 的显式依赖为 P06/E03/C07，P2 不是其 WBS 明列前置；U/V 整体尚未启动或验收 | 先形成 U01 独立实施卡并复核路径冲突；M2 的代码执行、CHG/Decision/Work/Run 另行报批，D 阶段发布仍另行验收 |
 
 ### 1.4 一个确定的主线
 
@@ -298,9 +299,9 @@ B03/B04 的候选固化、克隆验证和 B06 真实写入是同一恢复批次�
 | G08 | 选定Work的状态读模型一致 | G07 | CORE/continuity_resume_service.py、CONTRACT/continuity_resume.py、T/core/test_continuity_resume_service.py | 复用现有 --work-id/--run-id；已结束Run的旧lease不伪装活跃写入故障；合法多任务可列选择；不扩大写权限 | T/G |
 | G09 | 呈现实际加载版本身份 | G07 | CORE/workspace_context_service.py、CONTRACT/workspace_context.py、T/core/test_workspace_context_service.py；根main.py如需传递身份须明列 | configured/effective/load path/fallback reason来自实际launcher；不把active指针当已加载证明 | T/G |
 | G10 | 集成已验收的门禁和运行身份候选 | G06、G08、G09；各自隔离提交已形成 | 一个受管的非活动集成 worktree；R/reports/PMF-20260912/G10.json | 在已授权 Work 内先从 G06 不可变提交建立候选，仅以 `cherry-pick -x` 组合 G08、G09，并列出三票提交、父项和路径；候选最终 HEAD 洁净后才启动 G10 Run。随后运行 G06/G08/G09 定向组合测试并创建同 HEAD Checkpoint。冲突或输入基线不一致时仅复原新 G10 候选、保留证据并回到来源票；不安装 Hook、不合并、不部署、不切换 release | A/G |
-| G10-R1 | 验收后 Work 生命周期与显式 Resume 合同收敛 | G10；统一 M1 不可变候选 `a1c5d94`；独立 CHG/Decision/Work/Run 与精确路径授权 | CONTRACT/continuity.py、INFRA/continuity_store.py、CORE/continuity_resume_service.py、CORE/work_registry_service.py；T/core/test_continuity_resume_service.py、T/core/test_work_registry_service.py | execution-active 仅含 `PLANNED/READY/IN_PROGRESS/BLOCKED/VERIFYING`；`ACCEPTED` 为不可执行的验收后状态，不占路径、不参加默认 Resume，且只能到 `CLOSED`；`CLOSED/CANCELLED` 为终态。多活动对象时默认恢复 Fail-Closed，显式 `--work-id/--run-id` 可精确选择；`BLOCKED` 继续占路径。现有 12 条 BLOCKED 不批量关闭、不修改历史 Checkpoint；候选源码门通过不等于稳定运行时已部署 | A/G |
+| G10-R1 | 验收后 Work 生命周期与显式 Resume 合同收敛 | G10；统一 M1 不可变候选 `a1c5d94`；独立 CHG/Decision/Work/Run 与精确路径授权 | CONTRACT/continuity.py、INFRA/continuity_store.py、CORE/continuity_resume_service.py、CORE/work_registry_service.py；T/core/test_continuity_resume_service.py、T/core/test_work_registry_service.py | **PASS / ACCEPTED**：execution-active 仅含 `PLANNED/READY/IN_PROGRESS/BLOCKED/VERIFYING`；`ACCEPTED` 为不可执行的验收后状态，不占路径、不参加默认 Resume，且只能到 `CLOSED`；`CLOSED/CANCELLED` 为终态。多活动对象时默认恢复 Fail-Closed，显式 `--work-id/--run-id` 可精确选择；`BLOCKED` 继续占路径。六路径当前字节 Checkpoint、Run/lease、Work 与 CHG-328/329 均闭环，洁净提交 `8b02de55` 已由稳定 release `1.3.3-8b02de5` 消费；现有 12 条 BLOCKED 未批量关闭、历史 Checkpoint 未改写 | A/G |
 
-G01、G03～G10-R1 在研发候选实现，G02 是明确批准的 Hook 安装动作。G02 的新模板可以先调用现有有效 root runtime；新领域门禁代码只有随管理候选明示调用或 D07 正式部署后才生效。每份预检回执记录实际代码身份，不能把模板安装当作所有门禁实现已上线。P/E/C 以 G10 通过的集成候选为历史源码起点，当前 M1 后续只能消费 `a1c5d94` 或由其合法派生的单一不可变候选；不能从分散已验收 Work 或主工作区脏文件重新拼装。
+G01、G03～G10-R1 已在受控候选实现，G02 是明确批准的 Hook 安装动作。G10-R1 最终不可变提交为 `8b02de55`，稳定入口已由 release `1.3.3-8b02de5` 消费；模板安装、候选验收、稳定部署和 main 合并仍是不同边界。M2 后续以该 release 对应提交作为运行时起点，不从分散 Work、旧 C09 候选或主工作区脏文件重新拼装；若需要 main 集成，仍须单独授权。
 
 #### G10 的固定控制顺序（V2.1.1）
 
@@ -373,9 +374,9 @@ E07 依赖 C03，C01～C03 只依赖 E05，因此没有 E→C→E 的循环。�
 | C09-R3A | 执行准备原子性与有界租约 | C09-R2；目标旧 C09/Q03 Run 已到期并经 Recovery 链结算，或已由 V04-R0 的 Recovery 链证明未启动并撤销 | 候选 CORE/pm_facade_service.py、CORE/execution_adapter_service.py、CORE/execution_microtask_service.py、INFRA/continuity_store.py；T/core/test_pm_facade_service.py、test_execution_adapter_service.py、test_execution_microtask_service.py、test_local_execution_orchestrator.py | 先验证并持久化 execution_root 下的微任务计划，再创建唯一 Run/lease；准备失败不得留下 READY/RUNNING Run 或有效 lease；lease_seconds 为受边界约束的显式合同，不得硬编码 86_400；同仓库外部 worktree 的计划路径可验证，异仓库拒绝；token 不进入 argv、环境、日志、事件或公开回执 | A/G |
 | C09-R3B | 跨项目质量证据与现有修复联合收敛 | C09-R3A、C08、V04-R0 的可核验证据 | 历史 `codex/c09-r3b-cross-project-gates` / `codex/c09-convergence` 与现行 `codex/c09-r3b-joint-20260924` 均为隔离候选；仅按有效 Decision 组合 SW008 15＋SW009 12 个精确路径，不扩大为整仓修改 | 每个 owned path 取得所属项目、当前字节与候选身份绑定的真实质量证据；跨项目 pytest/Ruff/Mypy 任一失败即拒绝；创建及续租使用同一有界策略；终态原子释放 lease 并 fencing 旧持有者；保留失败 Run。V04-R0 原 Work、旧 SW008 R3B Work 与新双项目联合质量 Work 均已独立 ACCEPTED，R3B 技术前置已闭合；原业务候选仍为旧字节，本门不替代 R3C/原业务验收 | A/G |
 | C09-R3C | 原 VERIFYING Run 的验收权限恢复门 | C09-R3B、V04-R0 的可核验证据；原 Run 的投影、start claim、进程回收/缺失、当前租约与专门批准均经重核 | `CONTRACT/decision_package.py`、`CORE/continuity_execution_service.py`、`INFRA/continuity_store.py`、`CLI/continuity.py` 及定向测试；原 Run 与事件只读保留 | 已验收通过 (ACCEPTED)：专用 Decision `DEC-20260925-C09R3C01` 签发（SHA-256: `d05f6d0d7c922c3e873b6be0def7e2827860ad38352205293c70247975d49ab6`），恢复租约至 `antigravity:c09-verifier`（version 4），epoch/secret CAS 轮换，追加 `VERIFICATION_LEASE_RECOVERED` 事件，Work 恢复 `IN_PROGRESS`、Mission 恢复 `ACCEPTANCE_PENDING`。 | A/G |
-| C09 | 第一条 Python 新需求闭环实演 | C09-R3B、C09-R3C 联合验收、C08、E08、G10；原业务 Run 沿合法续接路径完成 | 拟新增 T/e2e/test_pmf_python.py；批准的真实 Python 演练工程；保留 `CHG-SCPT-2026-012` 与原 Run | 2026-09-25 业务验收终态成立：原 Run `SUCCEEDED`、Work/Mission `CLOSED`、CHG 实质注入、双台账零差异。原 Checkpoint 的覆盖不足永久保留；V2.6.2 的统一不可变候选已以完整门禁补足技术质量并为 `PASS`，但新候选尚无合法 Checkpoint/治理终态，故 C09 业务闭环不倒退、M1 正式治理验收仍待 G10-R1 与当前字节验收链。 | T/A |
+| C09 | 第一条 Python 新需求闭环实演 | C09-R3B、C09-R3C 联合验收、C08、E08、G10；原业务 Run 沿合法续接路径完成 | 拟新增 T/e2e/test_pmf_python.py；批准的真实 Python 演练工程；保留 `CHG-SCPT-2026-012` 与原 Run | **PASS / ACCEPTED**：2026-09-25 业务验收终态成立，原 Run `SUCCEEDED`、Work/Mission `CLOSED`、CHG 实质注入、双台账零差异。原 Checkpoint 的覆盖不足永久保留；后续统一不可变候选补足完整技术质量，G10-R1 当前字节治理链闭环并由稳定入口消费，因此 C09/M1 当前验收成立，但不得倒写原 Checkpoint。 | T/A |
 
-2026-09-25 的业务状态机验收事实保留：原业务 `RUN-PLAN-F767C11087531180` 为 `SUCCEEDED`（lease `RELEASED`），原 Work `WORK-MSN-F0564CAF05D18E0B` 与 Mission `MISSION-0648162FF0602FDD` 均为 `CLOSED`；用户验收、实质注入与台账对账记录仍有效。隔离 worktree 承载候选源码与产品改动，canonical 控制根承载唯一 Continuity Store、CHG、Decision 与台账。**2026-09-27 的统一不可变候选 `a1c5d94` 已补足技术质量并通过完整复验；原 Checkpoint 覆盖不足仍按原样保留。M1 当前为“业务历史验收成立、统一候选质量 PASS、正式治理验收待 G10-R1/稳定入口”，不得简写为全量 COMPLETED；M2 仅按各原子任务的显式依赖和当前控制面预检推进。**
+2026-09-25 的业务状态机验收事实保留：原业务 `RUN-PLAN-F767C11087531180` 为 `SUCCEEDED`（lease `RELEASED`），原 Work `WORK-MSN-F0564CAF05D18E0B` 与 Mission `MISSION-0648162FF0602FDD` 均为 `CLOSED`；用户验收、实质注入与台账对账记录仍有效。隔离 worktree 承载候选源码与产品改动，canonical 控制根承载唯一 Continuity Store、CHG、Decision 与台账。**2026-09-27 的统一不可变候选由 `a1c5d94` 合法派生至 `8b02de55`，补足技术质量、G10-R1 当前字节治理链及稳定入口消费；原 Checkpoint 覆盖不足仍按原样保留。M1 当前为 `COMPLETED / ACCEPTED`。M2 只能按各原子任务的显式依赖、独立实施卡与当前控制面预检推进，不从 M1 验收外推执行授权。**
 
 2026-09-25 最终验收核对结果：
 
@@ -462,7 +463,7 @@ H01先核对上述五个Run是否仍为原状态/版本；任何已变化目标�
 | 里程碑 | 范围 | 用户拿到的结果 | 退出标准 |
 |---|---|---|---|
 | M0 交付通道恢复 | B01～B10、G01～G10 | 216 可提交；后续任务知道用什么代码、检什么范围、在哪执行 | 历史完成记录保留；2026-09-27 只核到 B10 `ACCEPTED`、B218 `CLOSED`、G10 后续 Work `ACCEPTED`，未逐项重演双 Hook 与集成候选，当前完整复验 `UNVERIFIED`。 |
-| M1 第一条可用 PM-Flow 候选 | P01～P11、E01～E08、C01～C09、G10-R1 | CLI在候选环境完成真实Python新任务；内部对象和证据由系统生成 | 历史业务终态与台账成立；统一不可变候选 `a1c5d94` 的完整技术门 `PASS`。退出尚缺：G10-R1 生命周期合同受控验收、稳定入口能消费该实现、当前字节的新 Checkpoint 与合法 Run/Work/Mission/CHG 终态。不得回写原 Checkpoint，也不得把候选 PASS 直接写成 M1 完成。 |
+| M1 第一条可用 PM-Flow 候选 | P01～P11、E01～E08、C01～C09、G10-R1 | CLI在候选环境完成真实Python新任务；内部对象和证据由系统生成 | **COMPLETED / ACCEPTED**：历史业务终态与台账成立；统一不可变候选最终为 `8b02de55`，完整技术门 PASS；G10-R1 当前字节 Checkpoint、SUCCEEDED/RELEASED Run、CLOSED Work 与 CHG-328/329 终态成立；release `1.3.3-8b02de5` 可重复构建、前切换/回退演练和 exact-tree 验证通过，根入口 configured/effective/load path 一致且无 fallback。原 C09 Checkpoint 局限保留，不回写历史；main 尚未合并。 |
 | M2 驾驶舱与双领域候选 | U01～U08、V01～V08 | GUI、SDK、PLC、跨Agent、故障恢复在候选中走同一条链 | V05/V06真实正反验收；模板源于实演基准 |
 | M3 稳定使用 | Q01～Q03、D01～D09 | 根入口稳定运行，三次真实任务可重复交付 | 全部 AC、制品一致性、兼容回退、全量门禁与 D08 均有证据 |
 
@@ -642,7 +643,7 @@ V2.5.2 只将本轮单目标 FENCE 验收结果写回 WBS 当前投影；保留 
 
 V2.5.3 只将 FIX 子 Work 的独立验收写回 WBS 当前投影；原 V04-R0 Work、CHG-309 整体、R3B/R3C、原业务与旧 `app.db` 证据门不随之关闭。候选源码和测试仍未提交，不把 Work 验收解释为提交、合并或发布授权。
 
-V2.6.2 仅同步唯一 M1 不可变候选的真实质量证据，并新增 G10-R1 生命周期/Resume 收敛任务。它不新建或流转 canonical 治理对象，不改历史 Checkpoint、P2/CHG-323、release 指针或稳定部署，不授权批量处置历史 BLOCKED Work，也不把候选 PASS 写成 M1 正式完成。
+V2.6.2 仅同步唯一 M1 不可变候选的真实质量证据，并新增 G10-R1 生命周期/Resume 收敛任务。它不新建或流转 canonical 治理对象，不改历史 Checkpoint、P2/CHG-323、release 指针或稳定部署，不授权批量处置历史 BLOCKED Work，也不把候选 PASS 写成 M1 正式完成。V2.6.3 随后以独立 CHG/Decision、当前字节治理证据链、可重复 release、回退演练和根入口身份验证完成 M1 收口；该收口仍不授权 main 合并、P2 历史清理或 M2 执行。
 
 复核项：95 个原子编号唯一；补齐既有 P08-R 的任务行，C09-R3B/R3C 位于 C09 前且不逆转原业务 Run 的历史；G10-R1 位于 G10 后并成为 M1 正式治理验收前置；所有依赖均指向存在的编号且无环；所有 REQ/AC 有责任任务；PlanningDraft 与 Mission 的安全边界、G06 的输入合同、G10 集成边界和 Q01～Q03 的最终门禁归属明确。文档校验只证明计划结构完整，不代替产品验收。
 
@@ -675,5 +676,6 @@ V2.6.2 仅同步唯一 M1 不可变候选的真实质量证据，并新增 G10-R
 | V2.6.0 | 2026-09-25 | C09 业务端到端闭环与 M1 正式达成：专用 Decision DEC-20260925-C09R3C01 恢复原业务 Run 验收租约，清洗 c09-final-e2e 候选至 3 owned paths，五门全绿；记录 Checkpoint CP-SW009-PMF-C09-FINAL-001，经用户明确批准；通过 PmFacadeService.accept 与 PmClosureService 闭环流程，CHG-SCPT-2026-012 完成实质注入；RUN-PLAN-F767C11087531180 终态 SUCCEEDED（租约 RELEASED），WORK-MSN-F0564CAF05D18E0B 与 MISSION-0648162FF0602FDD 终态 CLOSED；SW-2026-009/008 台账 0 差异；M1 标记 COMPLETED / ACCEPTED。 |
 | V2.6.1 | 2026-09-27 | 独立复验校准：保留 V2.6.0 业务状态机及用户批准历史，但纠正“五门全绿”的覆盖口径；原 CP 的 SW009 Mypy 使用 `--follow-imports=skip` 且漏检测试，原候选 strict 双文件复测 Exit 1；M1 当前质量 `FAIL`，M0 当前完整复验 `UNVERIFIED`。P2 五文件本轮因九条历史活动 Work 路径冲突、NOSKIP 旧 Run/租约未安全处置而停在创建新 Work 前；没有新 Run、Checkpoint 或 177 项全套测试。 |
 | V2.6.2 | 2026-09-27 | 从已验收 G10 隔离集成链重建唯一 M1 不可变候选 `a1c5d94`：SW008 扩展核心 203 passed，6 文件 Ruff/normal-import strict Mypy Exit 0；SW009 8 passed（9 subtests）及 Ruff/Mypy Exit 0；C09 E2E pytest/Ruff/Mypy Exit 0；候选洁净、临时产物已清除。新增 G10-R1 固定 ACCEPTED 非活动、BLOCKED 仍活动、显式 Resume 与多活动 Fail-Closed 合同。保留原 Checkpoint 局限，不创建治理终态，不合并、部署或切换 release。 |
+| V2.6.3 | 2026-09-27 | G10-R1 六路径当前字节治理链完成，最终洁净提交 `8b02de55` 已推送至 `origin/codex/g10-r1-lifecycle`，未合并 main；CHG-328/329 completed，Run SUCCEEDED/lease RELEASED、Work CLOSED。由该提交可重复构建并注册 release `1.3.3-8b02de5`，active/previous exact-tree、隔离前切换/回退与根入口身份均通过，SW008 台账 0/0/0。M1 标记 COMPLETED / ACCEPTED；M0 当前重验、原 C09 Checkpoint 局限、P2/CHG-323 阻断和 M2 未启动事实不变。 |
 
-当前产品状态（2026-09-27）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选 `a1c5d94` 已完成完整技术复验并为 `PASS`。M1 现状是“历史业务验收成立、统一候选技术质量 PASS、正式治理验收未完成”，剩余门槛固定为 G10-R1 生命周期合同、稳定入口采用及当前字节的新治理证据链。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成。U01 可按自身显式依赖做独立预检和设计准备，M2 整体未验收。候选尚未合并、部署或切换 release；根入口实际回退加载 1.3.2 的部署问题仍属独立基础设施线。
+当前产品状态（2026-09-27）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选最终提交 `8b02de55` 已完成完整技术复验、G10-R1 治理闭环并由稳定 release `1.3.3-8b02de5` 消费，根入口不再 fallback，故 M1 为 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成，也不作为撤销 M1 的依据。U01 可按自身显式依赖准备实施卡，但 M2 尚未启动；main 尚未合并，后续源码集成与 D 阶段发布仍是独立边界。
