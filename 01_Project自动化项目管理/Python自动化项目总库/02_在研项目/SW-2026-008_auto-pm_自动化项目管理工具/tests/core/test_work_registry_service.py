@@ -15,7 +15,14 @@ import pytest
 from auto_pm.core.mission_service import MissionService
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
-from auto_pm.contracts.continuity import WorkItem, WorkKind, WorkState
+from auto_pm.contracts.continuity import (
+    EXECUTION_ACTIVE_WORK_STATES,
+    POST_ACCEPTANCE_WORK_STATES,
+    TERMINAL_WORK_STATES,
+    WorkItem,
+    WorkKind,
+    WorkState,
+)
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -150,6 +157,86 @@ def test_mission_derivation_rejects_other_owner_path_conflict(tmp_path: Path) ->
         )
 
 
+def test_work_lifecycle_state_classes_partition_the_enum() -> None:
+    groups = (
+        EXECUTION_ACTIVE_WORK_STATES,
+        POST_ACCEPTANCE_WORK_STATES,
+        TERMINAL_WORK_STATES,
+    )
+    assert set().union(*groups) == set(WorkState)
+    assert all(
+        not first.intersection(second)
+        for index, first in enumerate(groups)
+        for second in groups[index + 1 :]
+    )
+
+
+@pytest.mark.parametrize(
+    ("existing_state", "existing_path", "conflicts"),
+    [
+        (WorkState.ACCEPTED, "auto_pm/core/example.py", False),
+        (WorkState.BLOCKED, "auto_pm/core/example.py", True),
+        (WorkState.BLOCKED, "auto_pm/core/other.py", False),
+    ],
+)
+def test_scope_conflicts_only_consider_execution_active_overlaps(
+    tmp_path: Path, existing_state: WorkState, existing_path: str, conflicts: bool
+) -> None:
+    service = _service(tmp_path)
+    mission_id = _mission(tmp_path)
+    existing = service.create_work(
+        work_id="WORK-EXISTING",
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.GOVERNANCE,
+        title="Existing",
+        owner="agent-a",
+        scope_paths=[existing_path],
+        source_fingerprint="sha256:existing",
+        idempotency_key="create-existing",
+        read_only=True,
+    )
+    if existing_state is WorkState.ACCEPTED:
+        service.transition(existing.work_id, WorkState.IN_PROGRESS, "start-existing")
+        service.transition(existing.work_id, WorkState.VERIFYING, "verify-existing")
+    service.transition(existing.work_id, existing_state, "settle-existing")
+
+    def create_direct() -> WorkItem:
+        return cast(WorkItem, service.create_work(
+            work_id="WORK-DIRECT",
+            subject_project_id="SW-2026-008",
+            kind=WorkKind.GOVERNANCE,
+            title="Direct",
+            owner="agent-b",
+            scope_paths=["auto_pm/core/example.py"],
+            source_fingerprint="sha256:direct",
+            idempotency_key="create-direct",
+            read_only=True,
+        ))
+
+    # Direct Work creation remains available for governed recovery chains;
+    # scope exclusion belongs to Mission-derived child Work selection.
+    assert create_direct().state is WorkState.READY
+    if conflicts:
+        with pytest.raises(WorkRegistryError, match="active Work 路径冲突"):
+            service.create_from_mission(
+                mission_id=mission_id,
+                owner="agent-b",
+                scope_paths=["auto_pm/core/example.py"],
+            )
+    else:
+        created = service.create_from_mission(
+            mission_id=mission_id,
+            owner="agent-b",
+            scope_paths=["auto_pm/core/example.py"],
+        )
+        assert created.state is WorkState.READY
+    assert service.get_work(existing.work_id).state is existing_state
+    assert any(
+        work.work_id == existing.work_id
+        for work in service._store.list_works("SW-2026-008", include_terminal=True)
+    )
+
+
 def test_initializes_separate_wal_database(tmp_path: Path) -> None:
     _service(tmp_path)
 
@@ -233,6 +320,30 @@ def test_state_machine_rejects_skipping_verification(tmp_path: Path) -> None:
 
     with pytest.raises(WorkRegistryError, match="非法"):
         service.transition("WORK-001", WorkState.ACCEPTED, "skip")
+
+
+def test_accepted_work_only_allows_administrative_close(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    created = service.create_work(
+        work_id="WORK-ACCEPTED",
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.GOVERNANCE,
+        title="Accepted",
+        owner="architect",
+        scope_paths=["auto_pm/core/example.py"],
+        source_fingerprint="sha256:accepted",
+        idempotency_key="create-accepted",
+        read_only=True,
+    )
+    service.transition(created.work_id, WorkState.IN_PROGRESS, "start-accepted")
+    service.transition(created.work_id, WorkState.VERIFYING, "verify-accepted")
+    accepted = service.transition(created.work_id, WorkState.ACCEPTED, "accept-work")
+
+    with pytest.raises(WorkRegistryError, match="非法 Work 状态迁移"):
+        service.transition(accepted.work_id, WorkState.IN_PROGRESS, "reopen-accepted")
+    assert service.get_work(accepted.work_id) == accepted
+    closed = service.transition(accepted.work_id, WorkState.CLOSED, "close-accepted")
+    assert closed.state is WorkState.CLOSED
 
 
 def test_terminal_transition_exact_replay_preserves_version_and_event_count(

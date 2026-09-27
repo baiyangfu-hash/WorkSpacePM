@@ -8,7 +8,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from auto_pm.contracts.continuity import WorkItem, WorkKind, WorkState
+from auto_pm.contracts.continuity import (
+    EXECUTION_ACTIVE_WORK_STATES,
+    WorkItem,
+    WorkKind,
+    WorkState,
+)
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.mission import Mission
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
@@ -112,13 +117,7 @@ class WorkRegistryService:
             f"{mission.mission_id}\n{mission.authority.decision_id}\n{self._scope_hash(paths)}".encode()
         ).hexdigest()[:16].upper()
         work_id = f"WORK-MSN-{digest}"
-        for existing in self._store.list_works(mission.subject_project_id):
-            overlap = sorted(set(existing.scope_paths).intersection(paths))
-            if overlap and existing.owner != owner and existing.work_id != work_id:
-                raise WorkRegistryError(
-                    "其他 owner 的 active Work 路径冲突: "
-                    f"owner={existing.owner}; paths={','.join(overlap)}"
-                )
+        self._assert_no_active_scope_conflict(mission.subject_project_id, owner, work_id, paths)
         work = self.create_work(
             work_id=work_id,
             subject_project_id=mission.subject_project_id,
@@ -136,6 +135,23 @@ class WorkRegistryService:
                 f"mission-work-authorize:{mission.mission_id}:{digest}",
             )
         return work
+
+    def _assert_no_active_scope_conflict(
+        self, subject_project_id: str, owner: str, work_id: str, paths: tuple[str, ...]
+    ) -> None:
+        try:
+            existing_works = self._store.list_works(subject_project_id)
+        except ContinuityStoreError as error:
+            raise WorkRegistryError(str(error)) from error
+        for existing in existing_works:
+            if existing.state not in EXECUTION_ACTIVE_WORK_STATES:
+                raise WorkRegistryError("Store 返回了非执行活动态 Work")
+            overlap = sorted(set(existing.scope_paths).intersection(paths))
+            if overlap and existing.owner != owner and existing.work_id != work_id:
+                raise WorkRegistryError(
+                    "其他 owner 的 active Work 路径冲突: "
+                    f"owner={existing.owner}; paths={','.join(overlap)}"
+                )
 
     def _assert_mission_authority(self, mission: Mission, scope_paths: list[str]) -> None:
         authority = mission.authority

@@ -9,7 +9,15 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from auto_pm.contracts.continuity import LeaseItem, RunState, WorkItem, WorkState
+from auto_pm.contracts.continuity import (
+    EXECUTION_ACTIVE_WORK_STATES,
+    POST_ACCEPTANCE_WORK_STATES,
+    TERMINAL_WORK_STATES,
+    LeaseItem,
+    RunState,
+    WorkItem,
+    WorkState,
+)
 from auto_pm.contracts.continuity_resume import (
     ContinuityResume,
     LeaseView,
@@ -23,16 +31,6 @@ from .workspace_context_service import WorkspaceContextError, WorkspaceContextSe
 
 class ContinuityResumeError(RuntimeError):
     """Raised when Resume cannot establish a single trustworthy chain."""
-
-
-_SELECTABLE_WORK_STATES = frozenset(
-    {
-        WorkState.READY,
-        WorkState.IN_PROGRESS,
-        WorkState.BLOCKED,
-        WorkState.VERIFYING,
-    }
-)
 
 
 class ContinuityResumeService:
@@ -86,21 +84,21 @@ class ContinuityResumeService:
 
                 works = tuple(
                     sorted(
-                        (
-                            candidate
-                            for candidate in self._store.list_works(
-                                context.subject_project_id
-                            )
-                            if candidate.state in _SELECTABLE_WORK_STATES
-                        ),
+                        self._store.list_works(context.subject_project_id),
                         key=lambda candidate: candidate.work_id,
                     )
                 )
+                if any(candidate.state not in EXECUTION_ACTIVE_WORK_STATES for candidate in works):
+                    raise ContinuityResumeError("Store 返回了非执行活动态 Work")
                 work_candidates = works
-                if mission and mission.root_work_id:
+                if mission is not None and mission.root_work_id:
                     if work_id and work_id != mission.root_work_id:
                         raise ContinuityResumeError("指定 Work 与活动 Mission 的 root Work 不一致")
                     work = self._store.get_work(mission.root_work_id)
+                    if work.subject_project_id != context.subject_project_id:
+                        raise ContinuityResumeError("Mission root Work 不属于当前 subject project")
+                    if work.state not in EXECUTION_ACTIVE_WORK_STATES and works:
+                        conflicts.append("MISSION_ROOT_NOT_EXECUTION_ACTIVE")
                 elif work_id:
                     work = self._store.get_work(work_id)
                     if work.subject_project_id != context.subject_project_id:
@@ -113,29 +111,46 @@ class ContinuityResumeService:
                 if run_id and work is None:
                     raise ContinuityResumeError("指定 run_id 时必须能确定 Work")
                 if work is not None:
-                    runs = tuple(
-                        sorted(
-                            self._store.list_runs(work.work_id),
-                            key=lambda candidate: candidate.run_id,
+                    if work.state in POST_ACCEPTANCE_WORK_STATES | TERMINAL_WORK_STATES:
+                        # Historical selection never exposes a live Run or lease.
+                        if run_id:
+                            historical_run = self._store.get_run(run_id)
+                            if historical_run.work_id != work.work_id:
+                                raise ContinuityResumeError("Run 不属于选定 Work")
+                            if historical_run.state in {
+                                RunState.SUCCEEDED,
+                                RunState.FAILED,
+                                RunState.CANCELLED,
+                            }:
+                                run = historical_run
+                                checkpoint = self._store.latest_checkpoint(run.run_id)
+                            else:
+                                raise ContinuityResumeError("验收后 Work 不可恢复非终态 Run")
+                    elif work.state in EXECUTION_ACTIVE_WORK_STATES:
+                        runs = tuple(
+                            sorted(
+                                self._store.list_runs(work.work_id),
+                                key=lambda candidate: candidate.run_id,
+                            )
                         )
-                    )
-                    run_candidates = tuple(
-                        ResumeRunCandidate(
-                            run=candidate,
-                            lease=self._lease_view(self._store.get_lease(candidate.run_id)),
+                        run_candidates = tuple(
+                            ResumeRunCandidate(
+                                run=candidate,
+                                lease=self._lease_view(self._store.get_lease(candidate.run_id)),
+                            )
+                            for candidate in runs
                         )
-                        for candidate in runs
-                    )
-                    if run_id:
-                        run = self._store.get_run(run_id)
-                        if run.work_id != work.work_id:
-                            raise ContinuityResumeError("Run 不属于选定 Work")
-                    else:
-                        if len(runs) == 1:
+                        if run_id:
+                            run = self._store.get_run(run_id)
+                            if run.work_id != work.work_id:
+                                raise ContinuityResumeError("Run 不属于选定 Work")
+                        elif len(runs) == 1:
                             run = runs[0]
                         elif len(runs) > 1:
                             conflicts.append("MULTIPLE_ACTIVE_RUNS")
-                if run is not None:
+                    else:
+                        raise ContinuityResumeError("未知 Work 生命周期状态")
+                if run is not None and work is not None and work.state in EXECUTION_ACTIVE_WORK_STATES:
                     checkpoint = self._store.latest_checkpoint(run.run_id)
                     candidate_leases = {
                         candidate.run.run_id: candidate.lease for candidate in run_candidates
@@ -213,6 +228,10 @@ class ContinuityResumeService:
         run_state: RunState | None,
         has_checkpoint: bool,
     ) -> str:
+        if work_state in TERMINAL_WORK_STATES:
+            return ""
+        if work_state in POST_ACCEPTANCE_WORK_STATES:
+            return "ADMIN_REVIEW_OR_CLOSE"
         if mission_state is not None:
             mission_actions = {
                 MissionState.DRAFT: "SUBMIT_MISSION_FOR_APPROVAL",

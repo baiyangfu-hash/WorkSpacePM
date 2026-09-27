@@ -19,6 +19,21 @@ class WorkState(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+EXECUTION_ACTIVE_WORK_STATES: frozenset[WorkState] = frozenset(
+    {
+        WorkState.PLANNED,
+        WorkState.READY,
+        WorkState.IN_PROGRESS,
+        WorkState.BLOCKED,
+        WorkState.VERIFYING,
+    }
+)
+POST_ACCEPTANCE_WORK_STATES: frozenset[WorkState] = frozenset({WorkState.ACCEPTED})
+TERMINAL_WORK_STATES: frozenset[WorkState] = frozenset(
+    {WorkState.CLOSED, WorkState.CANCELLED}
+)
+
+
 class WorkKind(StrEnum):
     WBS = "WBS"
     BUG = "BUG"

@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from auto_pm.contracts.continuity import (
+    EXECUTION_ACTIVE_WORK_STATES,
     CheckpointItem,
     HandoffV2,
     LeaseItem,
@@ -4673,17 +4674,23 @@ class ContinuityStore:
     def list_works(
         self, subject_project_id: str, *, include_terminal: bool = False
     ) -> tuple[WorkItem, ...]:
-        """List project Work without changing the default active-work behaviour."""
+        """List execution-active Work by default, or complete history on request."""
         with self._read_connection() as conn:
-            query = (
-                """SELECT work_id FROM work_items WHERE subject_project_id=?
-                ORDER BY updated_at DESC, work_id"""
-                if include_terminal
-                else """SELECT work_id FROM work_items WHERE subject_project_id=?
-                AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
-                ORDER BY updated_at DESC, work_id"""
-            )
-            rows = conn.execute(query, (subject_project_id,)).fetchall()
+            if include_terminal:
+                rows = conn.execute(
+                    """SELECT work_id FROM work_items WHERE subject_project_id=?
+                    ORDER BY updated_at DESC, work_id""",
+                    (subject_project_id,),
+                ).fetchall()
+            else:
+                states = tuple(sorted(state.value for state in EXECUTION_ACTIVE_WORK_STATES))
+                placeholders = ",".join("?" for _ in states)
+                rows = conn.execute(
+                    f"""SELECT work_id FROM work_items WHERE subject_project_id=?
+                    AND state IN ({placeholders})
+                    ORDER BY updated_at DESC, work_id""",
+                    (subject_project_id, *states),
+                ).fetchall()
             return tuple(self._get_work(conn, str(row["work_id"])) for row in rows)
 
     def list_missions(

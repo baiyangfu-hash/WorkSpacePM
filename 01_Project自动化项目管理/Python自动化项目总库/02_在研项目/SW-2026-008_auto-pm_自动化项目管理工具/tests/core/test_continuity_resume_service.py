@@ -7,6 +7,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,7 +25,6 @@ from auto_pm.core.pm_session_projection_service import (
 )
 from auto_pm.core.work_registry_service import WorkRegistryService
 
-import auto_pm.infrastructure.continuity_store as continuity_store_module
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
@@ -35,7 +35,11 @@ from auto_pm.contracts.decision_package import (
 )
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
-from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.continuity_store import (
+    ContinuityStore,
+    ContinuityStoreError,
+    _StoreInventory,
+)
 
 
 def _workspace(root: Path) -> Path:
@@ -232,6 +236,17 @@ def _mission(root: Path, mission_id: str = "MISSION-001") -> None:
     )
 
 
+def _active_mission_with_root(root: Path, root_work_id: str) -> None:
+    _mission(root)
+    MissionService(root, now=lambda: datetime(2026, 9, 9, 12, 0, tzinfo=UTC)).transition(
+        mission_id="MISSION-001",
+        expected_version=2,
+        new_state=MissionState.ACTIVE,
+        root_work_id=root_work_id,
+        idempotency_key="activate-MISSION-001",
+    )
+
+
 def test_empty_store_returns_explicitly_empty_execution_state(tmp_path: Path) -> None:
     _workspace(tmp_path)
 
@@ -302,6 +317,45 @@ def test_resume_projects_mission_and_user_approval_boundary(tmp_path: Path) -> N
     assert result.mission and result.mission.mission_id == "MISSION-001"
     assert result.work is None
     assert result.next_legal_action == "AWAIT_USER_APPROVAL"
+
+
+def test_active_mission_selects_only_its_root_work(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-ROOT")
+    _work(tmp_path, "WORK-OTHER")
+    WorkRegistryService(tmp_path).transition("WORK-OTHER", WorkState.BLOCKED, "block-other")
+    _active_mission_with_root(tmp_path, "WORK-ROOT")
+
+    resume = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert resume.mission and resume.mission.root_work_id == "WORK-ROOT"
+    assert resume.work and resume.work.work_id == "WORK-ROOT"
+    assert resume.conflicts == ()
+    with pytest.raises(ContinuityResumeError, match="root Work 不一致"):
+        ContinuityResumeService(tmp_path).collect(
+            project_id="SW-2026-008", work_id="WORK-OTHER"
+        )
+
+
+def test_accepted_mission_root_does_not_splice_unrelated_blocked_work(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _accept_read_only_work(tmp_path, "WORK-ROOT")
+    _work(tmp_path, "WORK-OTHER")
+    WorkRegistryService(tmp_path).transition("WORK-OTHER", WorkState.BLOCKED, "block-other")
+    _active_mission_with_root(tmp_path, "WORK-ROOT")
+
+    resume = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert resume.mission and resume.mission.root_work_id == "WORK-ROOT"
+    assert resume.work and resume.work.work_id == "WORK-ROOT"
+    assert tuple(candidate.work_id for candidate in resume.work_candidates) == ("WORK-OTHER",)
+    assert resume.run is None and resume.lease is None
+    assert resume.conflicts == ("MISSION_ROOT_NOT_EXECUTION_ACTIVE",)
+    assert resume.next_legal_action == ""
+    with pytest.raises(ContinuityResumeError, match="root Work 不一致"):
+        ContinuityResumeService(tmp_path).collect(
+            project_id="SW-2026-008", work_id="WORK-OTHER"
+        )
 
 
 def test_multiple_active_missions_fail_closed_without_guessing(tmp_path: Path) -> None:
@@ -547,6 +601,69 @@ def test_accepted_works_are_terminal_for_resume_selection(tmp_path: Path) -> Non
     assert result.conflicts == ()
 
 
+@pytest.mark.parametrize("blocked_count", [1, 2])
+def test_accepted_history_does_not_mask_blocked_execution_candidates(
+    tmp_path: Path, blocked_count: int
+) -> None:
+    _workspace(tmp_path)
+    for index in range(83):
+        _accept_read_only_work(tmp_path, f"WORK-ACCEPTED-{index:03d}")
+    registry = WorkRegistryService(tmp_path, now=lambda: "2026-09-09T12:00:00+00:00")
+    for index in range(blocked_count):
+        work_id = f"WORK-BLOCKED-{index:03d}"
+        _work(tmp_path, work_id)
+        registry.transition(work_id, WorkState.BLOCKED, f"block-{work_id}")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert tuple((item.work_id, item.state) for item in result.work_candidates) == tuple(
+        (f"WORK-BLOCKED-{index:03d}", WorkState.BLOCKED)
+        for index in range(blocked_count)
+    )
+    assert (result.work.work_id if result.work else None) == (
+        "WORK-BLOCKED-000" if blocked_count == 1 else None
+    )
+    assert result.conflicts == (() if blocked_count == 1 else ("MULTIPLE_ACTIVE_WORKS",))
+    assert "lease_token" not in json.dumps(result.model_dump(mode="json"))
+
+
+def test_explicit_accepted_work_is_admin_only_even_with_a_live_run(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-ACCEPTED")
+    _run(tmp_path, work_id="WORK-ACCEPTED", run_id="RUN-ACCEPTED")
+    registry = WorkRegistryService(tmp_path, now=lambda: "2026-09-09T12:00:00+00:00")
+    registry.transition("WORK-ACCEPTED", WorkState.IN_PROGRESS, "start-accepted")
+    registry.transition("WORK-ACCEPTED", WorkState.VERIFYING, "verify-accepted")
+    registry.transition("WORK-ACCEPTED", WorkState.ACCEPTED, "accept-accepted")
+
+    resume = ContinuityResumeService(tmp_path).collect(
+        project_id="SW-2026-008", work_id="WORK-ACCEPTED"
+    )
+    assert resume.work and resume.work.state is WorkState.ACCEPTED
+    assert resume.run is None and resume.lease is None and resume.run_candidates == ()
+    assert resume.next_legal_action == "ADMIN_REVIEW_OR_CLOSE"
+    with pytest.raises(ContinuityResumeError, match="不可恢复非终态 Run"):
+        ContinuityResumeService(tmp_path).collect(
+            project_id="SW-2026-008", work_id="WORK-ACCEPTED", run_id="RUN-ACCEPTED"
+        )
+
+    registry.transition("WORK-ACCEPTED", WorkState.CLOSED, "close-accepted")
+    closed = ContinuityResumeService(tmp_path).collect(
+        project_id="SW-2026-008", work_id="WORK-ACCEPTED"
+    )
+    assert closed.work and closed.work.state is WorkState.CLOSED
+    assert closed.next_legal_action == "" and closed.run is None
+
+
+def test_explicit_unknown_work_fails_closed(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-KNOWN")
+    with pytest.raises(ContinuityResumeError, match="Work 不存在"):
+        ContinuityResumeService(tmp_path).collect(
+            project_id="SW-2026-008", work_id="WORK-UNKNOWN"
+        )
+
+
 def test_explicit_work_disambiguates_but_cross_project_fails(tmp_path: Path) -> None:
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
@@ -732,13 +849,13 @@ def test_strict_read_retries_drift_then_fails_busy_without_temp_residue(
     store = ContinuityStore(tmp_path)
     snapshot_parent = tmp_path.parent / f"{tmp_path.name}-snapshot-temp"
     snapshot_parent.mkdir()
-    original_inventory = ContinuityStore._source_inventory.__func__
+    original_inventory = ContinuityStore._source_inventory
     calls = 0
 
-    def drifting_inventory(cls, db_path):
+    def drifting_inventory(_cls: type[ContinuityStore], db_path: Path) -> _StoreInventory:
         nonlocal calls
         calls += 1
-        inventory = original_inventory(cls, db_path)
+        inventory = original_inventory(db_path)
         if calls % 3 != 0:
             return inventory
         database = inventory[0]
@@ -753,7 +870,7 @@ def test_strict_read_retries_drift_then_fails_busy_without_temp_residue(
         return (drifted_database, *inventory[1:])
 
     monkeypatch.setattr(
-        continuity_store_module.tempfile,
+        tempfile,
         "tempdir",
         str(snapshot_parent),
     )
@@ -777,7 +894,7 @@ def test_strict_read_rejects_temp_root_inside_workspace_before_creating_entry(
     in_workspace_temp = tmp_path / "caller-temp"
     in_workspace_temp.mkdir()
     monkeypatch.setattr(
-        continuity_store_module.tempfile,
+        tempfile,
         "tempdir",
         str(in_workspace_temp),
     )
