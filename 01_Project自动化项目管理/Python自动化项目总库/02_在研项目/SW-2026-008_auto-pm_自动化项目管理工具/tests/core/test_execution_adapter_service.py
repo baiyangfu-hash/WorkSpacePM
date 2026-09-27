@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from auto_pm.core.continuity_execution_service import (
@@ -26,7 +26,14 @@ from auto_pm.core.execution_adapter_service import (
 from auto_pm.core.execution_microtask_service import ExecutionMicrotaskError
 from auto_pm.core.mission_service import MissionService
 from auto_pm.core.work_registry_service import WorkRegistryService
-from auto_pm.core.worktree_policy_service import WorktreePlan, WorktreePolicyService
+
+if TYPE_CHECKING:
+    from auto_pm.application.core.worktree_policy_service import (
+        WorktreePlan,
+        WorktreePolicyService,
+    )
+else:
+    from auto_pm.core.worktree_policy_service import WorktreePlan, WorktreePolicyService
 
 from auto_pm.contracts.continuity import RunState, WorkKind
 from auto_pm.contracts.execution_adapter import (
