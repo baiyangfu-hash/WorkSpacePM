@@ -1,0 +1,29 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-M2IC0102",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-338",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/implementation_card.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/implementation_card_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/implementation_card.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/__main__.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/templates/governance/implementation_card.md.jinja",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_implementation_card.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_implementation_card_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_implementation_card.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-338.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T19:02:17.091368+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "base_commit=4851fce49739ec192acb7a62b48ab31df0961b57",
+    "owned_product_paths=8;commit_evidence_paths=2;union_scope=10",
+    "max_runs=1;max_healing_attempts=1;quota_remaining_stop=20_percent",
+    "forbid=eleventh_path,history_rewrite,no_verify,merge,push,deploy,release_switch"
+  ],
+  "metadata": {}
+}
