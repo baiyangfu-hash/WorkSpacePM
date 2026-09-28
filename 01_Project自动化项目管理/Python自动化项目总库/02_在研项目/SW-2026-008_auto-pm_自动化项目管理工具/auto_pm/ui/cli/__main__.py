@@ -71,6 +71,7 @@ from auto_pm.cli.spec import spec_group  # noqa: E402
 from auto_pm.cli.template import template_group  # noqa: E402
 from auto_pm.cli.vartable import vartable_group  # noqa: E402
 from auto_pm.cli.workflow import workflow_group  # noqa: E402
+from auto_pm.ui.cli.implementation_card import implementation_card_group  # noqa: E402
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 
@@ -117,6 +118,7 @@ cli.add_command(template_group)
 cli.add_command(vartable_group)
 cli.add_command(gui_command)
 cli.add_command(handoff_group)
+cli.add_command(implementation_card_group)
 cli.add_command(decision_group)
 cli.add_command(git_hook_group)
 cli.add_command(pm_group)
