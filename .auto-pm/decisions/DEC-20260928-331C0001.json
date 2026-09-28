@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-331C0001",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-331",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "main.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_root_entry_runtime_identity.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-331.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T04:25:06.617491+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Stage C execution supersedes planning-only DEC-20260928-9B2734D4; isolated internal candidate must start from CHG-332 commit 557f3ee0.",
+    "Only the four approved paths may be dirty; no merge, push, deploy, release switch, or historical rewrite."
+  ],
+  "metadata": {}
+}
