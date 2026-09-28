@@ -1,6 +1,6 @@
 # PM-Flow 恢复与可用化总方案
 
-> 文档版本：V3.0.11；修订日期：2026-09-28；状态：M0、M1 已验收；M2 进行中，U01、U02、U03A、统一集成基线 `M2-BL01` 与实施卡工作流 `M2-GOV-IC01` 均已验收闭环；下一项为 U03B。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
+> 文档版本：V3.0.12；修订日期：2026-09-28；状态：M0、M1 已验收；M2 进行中，U01、U02、U03A、U03B、统一集成基线 `M2-BL01` 与实施卡工作流 `M2-GOV-IC01` 均已验收闭环；下一项为 U04。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
 > 项目：SW-2026-008；治理：SYS-2026-001；规划标识：PMF-20260912。
 > 修订依据：用户要求“重新修订方案，原子级拆解，最终需求必须达成”。本轮直接修订既有计划；不再设置一个等待批准的“先盘点再规划”项目。
 > 本文件给出 4 个产品里程碑、97 个原子任务及 1 条主线；其中 Q01～Q03 是已冻结基线失败的独立收敛队列。任务属于批次内部步骤，不等于逐条重复用户审批。C09 的补强门槛不构成重新派发原业务的许可。
@@ -10,7 +10,7 @@
 |---|---|---|---|
 | M0 | ACCEPTED | 历史验收链；G10 集成锚点 `d87fd3d`；本轮未重跑但不撤销既有验收 | 保持冻结基线，仅在依赖漂移时复验 |
 | M1 | ACCEPTED | 不可变候选 `8b02de55`；`CP-SW008-PMF-G10R1-001`；Run SUCCEEDED/lease RELEASED/Work CLOSED；稳定运行时 `1.3.3-8b02de5` | 从 U01 启动 M2 |
-| M2 | IN_PROGRESS / U03A_ACCEPTED / U03B_READY | U01、U02、`M2-BL01`、`M2-GOV-IC01` 已闭环；U03A 隔离提交 `316ab46b`，`CP-SW008-M2-U03A-002` 绑定六路径且 dirty paths 为空，35 项测试、Ruff、Mypy 全绿，Run SUCCEEDED、Work CLOSED、CHG-340 completed，canonical 台账 0/0/0 | 从 `316ab46b` 建立 U03B 独立候选；不得把 U04 的持续进度功能提前混入 |
+| M2 | IN_PROGRESS / U03B_ACCEPTED / U04_READY | U01、U02、`M2-BL01`、`M2-GOV-IC01`、U03A 已闭环；U03B 隔离提交 `b8010027`，`CP-SW008-M2-U03B-001` 绑定五路径且 dirty paths 为空，11 项测试、Ruff、strict Mypy 全绿，Run 002 SUCCEEDED、Work/Mission CLOSED、CHG-341 completed | 从 `b8010027` 建立 U04 独立候选；不得把 U05 的证据抽屉提前混入 |
 | M3 | NOT_STARTED | WBS §4.9 | M2 验收后进入 D01 |
 
 | Blocker | Target | Blocking | Record | Disposition |
@@ -22,6 +22,7 @@
 | M2-GOV-IC01 首次执行提交合同冲突 | M2-GOV-IC01 | NO / RESOLVED | 首次失败历史保留；纠正链 `RUN-SW008-M2-GOV-IC01-002` SUCCEEDED；`CP-SW008-M2-GOV-IC01-003`；commit `b7bb9357`；CHG-SCPT-2026-338 completed | 八个产品路径与两个提交证据路径已分层建模并由正常 Git hook 验收；后续任务复用该合同 |
 <!-- AUTO_PM:END wbs-current-projection -->
 
+> V3.0.12 记录 U03B 独立验收：五路径候选正常 Hook 提交 `b8010027`；`CP-SW008-M2-U03B-001` 绑定当前洁净字节，11 项定向测试、Ruff、strict Mypy 与 diff-check 全部 Exit 0，Run 002 `SUCCEEDED`、Work/Mission `CLOSED`、CHG-341 completed。首次 Run 因行政命令缺失幂等参数停在 READY、无 Checkpoint/子进程，已通过独立恢复链前向撤销；历史保留且不参与通过判定。下一产品任务为 U04。
 > V3.0.11 记录 U03A 独立验收：六路径候选正常 Hook 提交 `316ab46b`；`CP-SW008-M2-U03A-002` 绑定当前洁净字节，35 项定向测试、Ruff、Mypy 全部 Exit 0，Run `SUCCEEDED`、Work `CLOSED`、CHG-340 completed。首次过早建立的 Run 已通过独立恢复 Decision/Work/Run 前向撤销，历史原样保留，不参与通过判定；下一产品任务为 U03B。
 > V3.0.10 依据 U03 当前调用链只读复核拆分 U03A/U03B：旧 `confirm_start` 只推进 Work 状态，不能证明真实 Run/session；Cockpit 旧投影会把状态变化误显示为“执行中”，并可能被无关历史 BLOCKED Run 污染。U03A 先恢复持久化批准链并接通 E08 真实启动证据，U03B 再完成 QML 异步一次确认；U04 保留持续进度/失败时间线职责。固定模型名不再作为未启动任务的执行合同，改由风险等级与独立复核级别路由，实际模型写入 Run。本修订不创建 U03A CHG/Decision/Work/Run，不修改源码。
 > V3.0.5 记录 `M2-GOV-IC01` 首次执行的真实结果：八个产品文件已通过 26 项定向测试、Ruff、strict Mypy 与 diff-check，并形成当前字节 Checkpoint；本地提交因稳定 commit-msg 合同要求 CHG 与项目台账同一暂存快照而被正确拒绝。旧 Run/Work/Mission 如实保持 FAILED/BLOCKED，未使用 `--no-verify`。后续唯一纠正链将产品路径与两个提交治理证据路径分层建模；不得增加第十一路径或重写历史。
@@ -422,14 +423,14 @@ E07 依赖 C03，C01～C03 只依赖 E05，因此没有 E→C→E 的循环。�
 | U01 | 五状态可点击界面原型 | P06、E03、C07 | 拟新增 S/01_项目文档/prototypes/pm-flow-v2.html | 新目标、确认、执行、失败/恢复、验收五场景可达；标明演示数据；按钮/函数/导航无死链 | T/G |
 | U02 | QML 输入目标生成真实草稿 | U01、P11 | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、QML/boss_main.qml、T/qml/test_pm_cockpit_bridge.py、T/qml/test_boss_cockpit_view.py | Bridge→Facade 实际持久化 `PRE_AUTH` PlanningDraft；显示项目、目标、验收与“范围待规划”，不让用户填内部 ID；未形成真实范围卡前不得虚构范围，批准前不得展示为 Mission；按实施卡 016 五产品路径及独立治理证据门禁验收 | ACCEPTED / `74493c37` / `CP-SW008-M2-U02-002` |
 | U03A | 批准链恢复与真实启动合同 | U02、E08 | INFRA/continuity_store.py、CORE/pm_facade_service.py、CORE/pm_cockpit_service.py；T/infrastructure/test_continuity_store.py、T/core/test_pm_facade_service.py、T/core/test_pm_cockpit_service.py | 从持久化批准链恢复精确 PlanningScopeCard；一次确认只形成一个 operation/Run；只有真实 RUN_STARTED、session/PID 后显示执行中；历史 BLOCKED Run 不污染当前 Mission；按实施卡 017 验收 | ACCEPTED / `316ab46b` / `CP-SW008-M2-U03A-002` |
-| U03B | QML 一次确认与异步启动接线 | U03A | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、QML/boss_main.qml；T/qml/test_pm_cockpit_bridge.py、T/qml/test_boss_cockpit_view.py | 后台调用不阻塞主线程；连点/信号重放只调用一次；busy 防重；失败解除 busy 且不显示伪接管；重载后以 canonical 快照为准；按实施卡 017 验收 | R1 / Terra 实施、Sol 验收 |
+| U03B | QML 一次确认与异步启动接线 | U03A | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、QML/boss_main.qml；T/qml/test_pm_cockpit_bridge.py、T/qml/test_boss_cockpit_view.py | 后台调用不阻塞主线程；连点/信号重放只调用一次；busy 防重；失败解除 busy 且不显示伪接管；重载后以 canonical 快照为准；按实施卡 017 验收 | ACCEPTED / `b8010027` / `CP-SW008-M2-U03B-001` |
 | U04 | QML 进度和失败来自真实事件 | U03B | CORE/pm_cockpit_service.py、QML/components/ActivityTimeline.qml、T/core/test_pm_cockpit_service.py | QRunnable/Signal 持续更新；无伪百分比，失败原因能定位步骤；不得重新实现 U03A 的首次真实启动判定 | R2 / Sol 实施、异模型复核 |
 | U05 | 恢复同一任务与证据抽屉 | U04、E06、C03 | QML/bridges/pm_cockpit_bridge.py、QML/components/EvidenceDrawer.qml、T/qml/test_pm_cockpit_bridge.py | 关闭重开后同 Work/Run；证据匹配当前内容；恢复动作受服务资格限制 | T/G |
 | U06 | GUI 验收与待同步状态 | U05、C07 | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、T/qml/test_boss_cockpit_view.py | 验收→投影失败→重试→完成可观测；缺必要证据不能点成“已完成” | T/G |
 | U07 | 薄 Cockpit SDK | C09 | 拟新增 D/auto_pm/api.py、T/core/test_cockpit_api.py；D/auto_pm/__init__.py | SDK经统一运行身份/Facade从新目标到批准、真实execute、验收落账完整实演；生产初始化不落到editable/母体；不只验import/查询 | T/G |
 | U08 | 旧 workflow 接口兼容 | U07 | CLI/workflow.py、拟新增 T/cli/test_workflow_compat.py | 现有命令保留；新 workflow 别名只委托 pm；不能恢复旧写入状态机；未知旧动作明确拒绝 | T/G |
 
-U01 已于 2026-09-27 独立验收：隔离候选提交 `d88eedd5` 仅含 `S/01_项目文档/prototypes/pm-flow-v2.html` 与其静态测试；`CP-SW008-U01-001` 绑定验收前候选字节，Run `SUCCEEDED`、lease `RELEASED`、Work `CLOSED`，`CHG-HMI-2026-001` 为 `completed`。U02 已以提交 `74493c37`、`CP-SW008-M2-U02-002` 和完整治理终态独立验收。U03A 已以提交 `316ab46b`、`CP-SW008-M2-U03A-002` 和完整 Run/Work 终态独立验收；下一项为 U03B。U04～U08 仍须逐项按实施卡和独立授权推进。
+U01 已于 2026-09-27 独立验收：隔离候选提交 `d88eedd5` 仅含 `S/01_项目文档/prototypes/pm-flow-v2.html` 与其静态测试；`CP-SW008-U01-001` 绑定验收前候选字节，Run `SUCCEEDED`、lease `RELEASED`、Work `CLOSED`，`CHG-HMI-2026-001` 为 `completed`。U02 已以提交 `74493c37`、`CP-SW008-M2-U02-002` 和完整治理终态独立验收。U03A 已以提交 `316ab46b`、`CP-SW008-M2-U03A-002` 验收；U03B 已以提交 `b8010027`、`CP-SW008-M2-U03B-001` 和完整 Run/Work/Mission 终态独立验收；下一项为 U04。U04～U08 仍须逐项按实施卡和独立授权推进。
 
 U01 是在现有 PySide6/QML 方案上的交互原型，不换 Web 技术栈。界面核心信息固定为：目标、当前阶段、实际执行器、下一可行动作、证据、验收；复杂内部对象默认折叠。
 
@@ -725,4 +726,4 @@ V2.6.2 仅同步唯一 M1 不可变候选的真实质量证据，并新增 G10-R
 | V3.0.8 | 2026-09-28 | U02 五产品路径已在 `m2-u02-planning-draft` 隔离候选实现，定向 QML/Cockpit 11 项、Facade 27 项、Ruff/Mypy/diff-check 均 Exit 0；`CP-SW008-M2-U02-001` 绑定 `b7bb9357` 与七条授权路径。正常 Git Hook 因候选旧基线 CHG 集合与现行台账不一致（120 孤儿、3 状态差异）拒绝提交；Run/Work 如实置 `BLOCKED`，CHG-339 保持 `implementing`。未提交、未验收，不改变 M0/M1 或 release。 |
 | V3.0.9 | 2026-09-28 | U02 有界纠正闭环：确认首次阻断源于把 canonical 294 条完整台账复制到历史候选；恢复 `b7bb9357` 的 173 条分支本地快照并仅增量加入 CHG-339 后，候选达到 174/174、0/0/0。完整复跑 38 项测试及 Ruff/Mypy/diff-check，`CP-SW008-M2-U02-002` 与正常 Hook 提交 `74493c37` 成立；Run SUCCEEDED、lease RELEASED、Work/Mission CLOSED、CHG-339 completed，canonical 台账 0/0/0。旧 `CP-SW008-M2-U02-001` 仅保留为失败尝试历史证据。 |
 
-当前产品状态（2026-09-28）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选最终提交 `8b02de55` 已完成完整技术复验、G10-R1 治理闭环并由稳定 release `1.3.3-8b02de5` 消费，根入口不再 fallback，故 M1 为 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成，也不作为撤销 M1 的依据。U01、U02 已按各自依赖独立验收，M2 为 `IN_PROGRESS`；下一产品任务为 U03A，U03A 验收后才进入 U03B。main 尚未合并，后续源码集成与 D 阶段发布仍是独立边界。
+当前产品状态（2026-09-28）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选最终提交 `8b02de55` 已完成完整技术复验、G10-R1 治理闭环并由稳定 release `1.3.3-8b02de5` 消费，根入口不再 fallback，故 M1 为 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成，也不作为撤销 M1 的依据。U01、U02、U03A、U03B 已按各自依赖独立验收，M2 为 `IN_PROGRESS`；下一产品任务为 U04。main 尚未合并，后续源码集成与 D 阶段发布仍是独立边界。
