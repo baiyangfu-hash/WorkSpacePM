@@ -18,6 +18,7 @@ ApplicationWindow {
     color: Theme.background
 
     property var snapshot: ({ projects: [], notices: [] })
+    property var planningDraft: null
     property string statusMessage: ""
 
     function refreshSnapshot() {
@@ -46,7 +47,16 @@ ApplicationWindow {
         anchors.fill: parent
         cards: root.snapshot.projects || []
         notices: root.snapshot.notices || []
+        planningDraft: root.planningDraft
         statusMessage: root.statusMessage
+        onDraftInputChanged: root.planningDraft = null
+        onPlanningDraftRequested: function(projectId, objective, acceptanceText) {
+            var response = pmCockpitBridge.createPlanningDraft(
+                projectId, objective, acceptanceText
+            )
+            root.statusMessage = response.message || "草稿未保存。"
+            root.planningDraft = response.success ? response.draft : null
+        }
         onEvidenceRequested: root.showEvidence(projectId)
         onStartConfirmed: function(missionId) {
             var response = pmCockpitBridge.confirmStart(missionId)

@@ -10,7 +10,10 @@ Item {
 
     property var cards: []
     property var notices: []
+    property var planningDraft: null
     property string statusMessage: ""
+    signal planningDraftRequested(string projectId, string objective, string acceptanceText)
+    signal draftInputChanged()
     signal evidenceRequested(string projectId)
     signal startConfirmed(string missionId)
     signal acceptanceConfirmed(string missionId)
@@ -40,6 +43,79 @@ Item {
                 font.pixelSize: Theme.fontSizeSm
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
+            }
+
+            GroupBox {
+                title: "提出新目标"
+                Layout.fillWidth: true
+
+                ColumnLayout {
+                    spacing: Theme.spacingSm
+
+                    ComboBox {
+                        id: planningProject
+                        objectName: "planningProject"
+                        Layout.fillWidth: true
+                        model: root.cards
+                        textRole: "project_name"
+                        valueRole: "project_id"
+                        onActivated: root.draftInputChanged()
+                    }
+                    TextField {
+                        id: planningObjective
+                        objectName: "planningObjective"
+                        Layout.fillWidth: true
+                        placeholderText: "要达成什么目标？"
+                        onTextEdited: root.draftInputChanged()
+                    }
+                    TextArea {
+                        id: planningAcceptance
+                        objectName: "planningAcceptance"
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 96
+                        placeholderText: "明确验收条件；每行一条"
+                        wrapMode: TextEdit.Wrap
+                        onTextChanged: root.draftInputChanged()
+                    }
+                    Button {
+                        objectName: "savePlanningDraft"
+                        text: "保存规划草稿"
+                        enabled: planningProject.currentIndex >= 0
+                        onClicked: root.planningDraftRequested(
+                            planningProject.currentValue || "",
+                            planningObjective.text,
+                            planningAcceptance.text
+                        )
+                    }
+                    ColumnLayout {
+                        visible: root.planningDraft !== null
+                        Layout.fillWidth: true
+                        Text {
+                            text: root.planningDraft
+                                  ? "项目：" + root.planningDraft.project_id : ""
+                            color: Theme.textPrimary
+                        }
+                        Text {
+                            text: root.planningDraft
+                                  ? "目标：" + root.planningDraft.objective : ""
+                            color: Theme.textPrimary
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: root.planningDraft
+                                  ? "验收：" + root.planningDraft.acceptance_criteria.join("；") : ""
+                            color: Theme.textPrimary
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: root.planningDraft
+                                  ? "PRE_AUTH · " + root.planningDraft.scope_status : ""
+                            color: Theme.textSecondary
+                        }
+                    }
+                }
             }
 
             Rectangle {
