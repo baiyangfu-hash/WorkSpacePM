@@ -1,6 +1,6 @@
 # PM-Flow 恢复与可用化总方案
 
-> 文档版本：V3.0.5；修订日期：2026-09-28；状态：M0、M1 已验收；M2 已由 U01 启动、尚未验收，统一集成基线 `M2-BL01` 已验收闭环。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
+> 文档版本：V3.0.6；修订日期：2026-09-28；状态：M0、M1 已验收；M2 已由 U01 启动、尚未验收，统一集成基线 `M2-BL01` 与实施卡工作流 `M2-GOV-IC01` 均已验收闭环。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
 > 项目：SW-2026-008；治理：SYS-2026-001；规划标识：PMF-20260912。
 > 修订依据：用户要求“重新修订方案，原子级拆解，最终需求必须达成”。本轮直接修订既有计划；不再设置一个等待批准的“先盘点再规划”项目。
 > 本文件给出 4 个产品里程碑、96 个原子任务及 1 条主线；其中 Q01～Q03 是已冻结基线失败的独立收敛队列。任务属于批次内部步骤，不等于逐条重复用户审批。C09 的补强门槛不构成重新派发原业务的许可。
@@ -10,7 +10,7 @@
 |---|---|---|---|
 | M0 | ACCEPTED | 历史验收链；G10 集成锚点 `d87fd3d`；本轮未重跑但不撤销既有验收 | 保持冻结基线，仅在依赖漂移时复验 |
 | M1 | ACCEPTED | 不可变候选 `8b02de55`；`CP-SW008-PMF-G10R1-001`；Run SUCCEEDED/lease RELEASED/Work CLOSED；稳定运行时 `1.3.3-8b02de5` | 从 U01 启动 M2 |
-| M2 | IN_PROGRESS / BASELINE_READY | U01 已验收；`M2-BL01` 候选 `4851fce4`、Checkpoint `CP-SW008-M2-BL01-001`、Run SUCCEEDED/lease RELEASED、Work CLOSED、CHG completed | 纠正并闭合 `M2-GOV-IC01`；完成后进入 U02 |
+| M2 | IN_PROGRESS / BASELINE_READY | U01 已验收；`M2-BL01` 候选 `4851fce4` 已闭环；`M2-GOV-IC01` 提交 `b7bb9357`、Checkpoint `CP-SW008-M2-GOV-IC01-003`、Run SUCCEEDED、Work/Mission CLOSED、CHG-338 completed | 从不可变后继 `b7bb9357` 对 U02 做只读预检并建立独立实施卡 |
 | M3 | NOT_STARTED | WBS §4.9 | M2 验收后进入 D01 |
 
 | Blocker | Target | Blocking | Record | Disposition |
@@ -19,10 +19,11 @@
 | P2 历史异常与旧 Checkpoint 局限 | M1,U01 | NO | TD-SW008-008；WBS V2.6.1～V2.6.3 | 历史原样保留，不反向撤销当前 M1 验收，不阻断 U01 |
 | main 尚未集成 M1 候选 | M2 | NO | 分支 `codex/g10-r1-lifecycle`；提交 `8b02de55` | 合并、推送、部署继续作为独立边界 |
 | U01 与 runtime-fix 尚无统一基线 | M2 后续执行 | NO / RESOLVED | `M2-BL01`；候选 `4851fce4`；`CP-SW008-M2-BL01-001`；Run SUCCEEDED/lease RELEASED；Work CLOSED；CHG-HMI-2026-002 completed | 统一基线固定；后续任务只能从该不可变提交或经独立验收的后继开始 |
-| M2-GOV-IC01 首次执行提交合同冲突 | M2-GOV-IC01 | YES / LOCAL | `RUN-SW008-M2-GOV-IC01-001` FAILED；`CP-SW008-M2-GOV-IC01-001`；CHG-SCPT-2026-338 implementing | 保留八文件成果；以八个产品路径加 CHG/台账两个提交证据路径建立唯一纠正链，不增加第十一路径 |
+| M2-GOV-IC01 首次执行提交合同冲突 | M2-GOV-IC01 | NO / RESOLVED | 首次失败历史保留；纠正链 `RUN-SW008-M2-GOV-IC01-002` SUCCEEDED；`CP-SW008-M2-GOV-IC01-003`；commit `b7bb9357`；CHG-SCPT-2026-338 completed | 八个产品路径与两个提交证据路径已分层建模并由正常 Git hook 验收；后续任务复用该合同 |
 <!-- AUTO_PM:END wbs-current-projection -->
 
 > V3.0.5 记录 `M2-GOV-IC01` 首次执行的真实结果：八个产品文件已通过 26 项定向测试、Ruff、strict Mypy 与 diff-check，并形成当前字节 Checkpoint；本地提交因稳定 commit-msg 合同要求 CHG 与项目台账同一暂存快照而被正确拒绝。旧 Run/Work/Mission 如实保持 FAILED/BLOCKED，未使用 `--no-verify`。后续唯一纠正链将产品路径与两个提交治理证据路径分层建模；不得增加第十一路径或重写历史。
+> V3.0.6 完成 `M2-GOV-IC01` 有界纠正：实施卡合同显式区分八个产品路径与两个提交证据路径；33 项定向测试、Ruff、strict Mypy、diff-check 全部 Exit 0；`CP-SW008-M2-GOV-IC01-003` 绑定当前十路径，正常 Git hook 生成不可变提交 `b7bb9357`；Run/Work/Mission 与 CHG-338 全部合法闭环。首次失败链及 `CP-...-001/002` 原样保留为历史，不参与当前通过判定。
 > V3.0.3 新增并启动原子任务 `M2-BL01`：从 `main@0d7071b7` 的运行身份修复基线机械引入 U01 提交 `d88eedd5` 的精确两文件，形成 M2 后续任务唯一集成基线。用户批准仅覆盖本卡；不授权合并、推送、部署或 release 切换。
 > V3.0.2 记录 Batch C 的准入裁决并新增 M2 原子任务 `M2-GOV-IC01`。该任务仅建立实施卡一等合同与自动化工作流，当前为 `PLANNED / NOT_AUTHORIZED / BLOCKED_BY_BASELINE`；本修订不执行源码、不创建治理运行链，也不授权合并、推送、部署或 release 切换。
 > V3.0.1 仅记录 U01 的独立验收：五状态演示原型在隔离候选 `d88eedd5` 固化，当前字节的 Checkpoint、Run、Work 与 CHG 闭环证据已齐备；M2 因而进入 `IN_PROGRESS`。本修订不启动 U02，不改变 P2 历史或其独立技术债处置，也不触及合并、推送、部署或 release 切换。
@@ -434,7 +435,7 @@ U01 是在现有 PySide6/QML 方案上的交互原型，不换 Web 技术栈。�
 | ID | 单一交付 | 依赖 | 精确产出/改动边界 | 验收与失败出口 | 状态 |
 |---|---|---|---|---|---|
 | M2-BL01 | runtime-fix 与 U01 两文件形成唯一不可变集成基线 | active runtime 源 `f4626947`；`main@0d7071b7`；U01 `d88eedd5` | `02_规划/016_M2统一集成基线实施卡_PM.md` 规定的两个 U01 owned paths；独立规划卡/WBS 不进入产品提交 | 候选 `4851fce4` 精确两文件、blob 等同 U01、pytest/Ruff/Mypy Exit 0、候选入口 fail-closed、canonical runtime 无 fallback、Checkpoint 当前；Run SUCCEEDED/lease RELEASED、Work CLOSED、CHG completed | ACCEPTED / CLOSED |
-| M2-GOV-IC01 | 实施卡一等合同、模板、校验与 dispatch/verify 工作流 | PM-033 V2.1；`M2-BL01` ACCEPTED | 实施卡 015 的八个产品路径；CHG-338 与 SW008 台账仅作为提交证据路径 | 产品门禁覆盖八路径；Checkpoint 与最终提交覆盖十路径；正常 Git Hook 通过；需要第十一路径立即停止 | IN_PROGRESS / CORRECTION_AUTHORIZED |
+| M2-GOV-IC01 | 实施卡一等合同、模板、校验与 dispatch/verify 工作流 | PM-033 V2.1；`M2-BL01` ACCEPTED | 实施卡 015 的八个产品路径；CHG-338 与 SW008 台账仅作为提交证据路径 | 33 passed；Ruff/Mypy/diff-check Exit 0；`CP-SW008-M2-GOV-IC01-003`；commit `b7bb9357` 恰含十路径；Run SUCCEEDED、Work/Mission CLOSED、CHG completed | ACCEPTED / CLOSED |
 
 产品代码范围与提交治理证据必须分层表达。实施卡建立本身不等于验收；最终仍须新的 Decision、有效 Work/Run、当前字节 Checkpoint、正常 Git Hook 本地提交及合法治理终态。
 
@@ -716,5 +717,6 @@ V2.6.2 仅同步唯一 M1 不可变候选的真实质量证据，并新增 G10-R
 | V3.0.3 | 2026-09-28 | 启动 `M2-BL01`，从运行身份修复基线机械引入 U01 两文件，形成 M2 唯一不可变集成基线。 |
 | V3.0.4 | 2026-09-28 | `M2-BL01` 验收闭环：候选 `4851fce4`、Checkpoint、Run/Work、CHG 与台账证据齐备。 |
 | V3.0.5 | 2026-09-28 | `M2-GOV-IC01` 八文件技术门禁通过并形成 Checkpoint，但首次提交因 CHG/台账未进入同一暂存快照而被正常门禁拒绝；历史如实保留，唯一纠正链改为八个产品路径加两个提交证据路径，禁止第十一路径。 |
+| V3.0.6 | 2026-09-28 | `M2-GOV-IC01` 有界纠正闭合：八产品路径与两提交证据路径分层建模，33 项测试及 Ruff/Mypy/diff-check 全绿，当前十路径 Checkpoint `CP-SW008-M2-GOV-IC01-003` 与正常 hook 提交 `b7bb9357` 成立，Run/Work/Mission/CHG 均达合法终态；下一项为 U02 只读预检。 |
 
 当前产品状态（2026-09-27）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选最终提交 `8b02de55` 已完成完整技术复验、G10-R1 治理闭环并由稳定 release `1.3.3-8b02de5` 消费，根入口不再 fallback，故 M1 为 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成，也不作为撤销 M1 的依据。U01 已按自身依赖独立验收，M2 为 `IN_PROGRESS`；U02 仍须独立预检、实施卡和授权。main 尚未合并，后续源码集成与 D 阶段发布仍是独立边界。
