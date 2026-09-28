@@ -1,6 +1,6 @@
 # PM-Flow 恢复与可用化总方案
 
-> 文档版本：V3.0.0；修订日期：2026-09-27；状态：M0、M1 已验收，M2 尚未启动。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
+> 文档版本：V3.0.1；修订日期：2026-09-27；状态：M0、M1 已验收；M2 已由 U01 启动、尚未验收。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
 > 项目：SW-2026-008；治理：SYS-2026-001；规划标识：PMF-20260912。
 > 修订依据：用户要求“重新修订方案，原子级拆解，最终需求必须达成”。本轮直接修订既有计划；不再设置一个等待批准的“先盘点再规划”项目。
 > 本文件给出 4 个产品里程碑、95 个原子任务及 1 条主线；其中 Q01～Q03 是已冻结基线失败的独立收敛队列。任务属于批次内部步骤，不等于逐条重复用户审批。C09 的补强门槛不构成重新派发原业务的许可。
@@ -10,7 +10,7 @@
 |---|---|---|---|
 | M0 | ACCEPTED | 历史验收链；G10 集成锚点 `d87fd3d`；本轮未重跑但不撤销既有验收 | 保持冻结基线，仅在依赖漂移时复验 |
 | M1 | ACCEPTED | 不可变候选 `8b02de55`；`CP-SW008-PMF-G10R1-001`；Run SUCCEEDED/lease RELEASED/Work CLOSED；稳定运行时 `1.3.3-8b02de5` | 从 U01 启动 M2 |
-| M2 | NOT_STARTED | WBS §4.7；U01 依赖 P06/E03/C07 已满足 | Terra 只读预检 U01，再单独报批实施 |
+| M2 | IN_PROGRESS | U01 已验收：`CHG-HMI-2026-001` completed；`CP-SW008-U01-001`；Run SUCCEEDED/lease RELEASED/Work CLOSED；隔离提交 `d88eedd5` | U02 须按自身依赖、实施卡与独立授权推进 |
 | M3 | NOT_STARTED | WBS §4.9 | M2 验收后进入 D01 |
 
 | Blocker | Target | Blocking | Record | Disposition |
@@ -20,6 +20,7 @@
 | main 尚未集成 M1 候选 | M2 | NO | 分支 `codex/g10-r1-lifecycle`；提交 `8b02de55` | 合并、推送、部署继续作为独立边界 |
 <!-- AUTO_PM:END wbs-current-projection -->
 
+> V3.0.1 仅记录 U01 的独立验收：五状态演示原型在隔离候选 `d88eedd5` 固化，当前字节的 Checkpoint、Run、Work 与 CHG 闭环证据已齐备；M2 因而进入 `IN_PROGRESS`。本修订不启动 U02，不改变 P2 历史或其独立技术债处置，也不触及合并、推送、部署或 release 切换。
 > V3.0.0 建立“当前投影 / 历史证据”分层：WBS 顶部只表达当前里程碑、阻断关系和下一步；CHG/台账保存变更史，Continuity 保存 Work/Run/Checkpoint/lease，事故与技术债使用各自登记。机器门禁候选 `aa72432f`（CHG-DOCU-2026-013、CP-SW008-WBSPROJ-002）拒绝用历史事故阻断已验收里程碑，并要求每个阻断项具有正式记录与处置。
 > V2.5.0 的授权仅涵盖 WBS 修订；既有 216 的历史实施、验收、隔离提交记录保留。当前获准核验 V04-R0/FIX/FENCE、失败 Recovery 和旧 `app.db` 处置证据，并同步 WBS 事实；C09 恢复写入、Hook 安装、合并、发布等均须各自有效范围和阶段门禁，不能从文档修订或旧 216 授权外推。
 > 沿用原文件已经生成的 PM-027 九节结构，直接修订正文。V1.0.0 留存在 archive/PMF-20260912，退出当前派工入口。
@@ -419,6 +420,8 @@ E07 依赖 C03，C01～C03 只依赖 E05，因此没有 E→C→E 的循环。�
 | U07 | 薄 Cockpit SDK | C09 | 拟新增 D/auto_pm/api.py、T/core/test_cockpit_api.py；D/auto_pm/__init__.py | SDK经统一运行身份/Facade从新目标到批准、真实execute、验收落账完整实演；生产初始化不落到editable/母体；不只验import/查询 | T/G |
 | U08 | 旧 workflow 接口兼容 | U07 | CLI/workflow.py、拟新增 T/cli/test_workflow_compat.py | 现有命令保留；新 workflow 别名只委托 pm；不能恢复旧写入状态机；未知旧动作明确拒绝 | T/G |
 
+U01 已于 2026-09-27 独立验收：隔离候选提交 `d88eedd5` 仅含 `S/01_项目文档/prototypes/pm-flow-v2.html` 与其静态测试；`CP-SW008-U01-001` 绑定验收前候选字节，Run `SUCCEEDED`、lease `RELEASED`、Work `CLOSED`，`CHG-HMI-2026-001` 为 `completed`。U02～U08 未启动，仍须逐项按实施卡和独立授权推进。
+
 U01 是在现有 PySide6/QML 方案上的交互原型，不换 Web 技术栈。界面核心信息固定为：目标、当前阶段、实际执行器、下一可行动作、证据、验收；复杂内部对象默认折叠。
 
 ### 4.8 V：双领域、恢复和模板（V01～V08）
@@ -694,5 +697,6 @@ V2.6.2 仅同步唯一 M1 不可变候选的真实质量证据，并新增 G10-R
 | V2.6.1 | 2026-09-27 | 独立复验校准：保留 V2.6.0 业务状态机及用户批准历史，但纠正“五门全绿”的覆盖口径；原 CP 的 SW009 Mypy 使用 `--follow-imports=skip` 且漏检测试，原候选 strict 双文件复测 Exit 1；M1 当前质量 `FAIL`，M0 当前完整复验 `UNVERIFIED`。P2 五文件本轮因九条历史活动 Work 路径冲突、NOSKIP 旧 Run/租约未安全处置而停在创建新 Work 前；没有新 Run、Checkpoint 或 177 项全套测试。 |
 | V2.6.2 | 2026-09-27 | 从已验收 G10 隔离集成链重建唯一 M1 不可变候选 `a1c5d94`：SW008 扩展核心 203 passed，6 文件 Ruff/normal-import strict Mypy Exit 0；SW009 8 passed（9 subtests）及 Ruff/Mypy Exit 0；C09 E2E pytest/Ruff/Mypy Exit 0；候选洁净、临时产物已清除。新增 G10-R1 固定 ACCEPTED 非活动、BLOCKED 仍活动、显式 Resume 与多活动 Fail-Closed 合同。保留原 Checkpoint 局限，不创建治理终态，不合并、部署或切换 release。 |
 | V2.6.3 | 2026-09-27 | G10-R1 六路径当前字节治理链完成，最终洁净提交 `8b02de55` 已推送至 `origin/codex/g10-r1-lifecycle`，未合并 main；CHG-328/329 completed，Run SUCCEEDED/lease RELEASED、Work CLOSED。由该提交可重复构建并注册 release `1.3.3-8b02de5`，active/previous exact-tree、隔离前切换/回退与根入口身份均通过，SW008 台账 0/0/0。M1 标记 COMPLETED / ACCEPTED；M0 当前重验、原 C09 Checkpoint 局限、P2/CHG-323 阻断和 M2 未启动事实不变。 |
+| V3.0.1 | 2026-09-27 | U01 五状态演示原型在独立隔离候选提交 `d88eedd5` 固化；静态原型测试 2 passed、Ruff/Mypy/diff-check 均为 Exit 0。`CP-SW008-U01-001`、Run SUCCEEDED/lease RELEASED、Work CLOSED 与 `CHG-HMI-2026-001` completed 形成当前验收链，SW008 台账 0/0/0。M2 标记 IN_PROGRESS；U02～U08、P2、合并、部署和 release 切换均未由此启动。 |
 
-当前产品状态（2026-09-27）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选最终提交 `8b02de55` 已完成完整技术复验、G10-R1 治理闭环并由稳定 release `1.3.3-8b02de5` 消费，根入口不再 fallback，故 M1 为 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成，也不作为撤销 M1 的依据。U01 可按自身显式依赖准备实施卡，但 M2 尚未启动；main 尚未合并，后续源码集成与 D 阶段发布仍是独立边界。
+当前产品状态（2026-09-27）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选最终提交 `8b02de55` 已完成完整技术复验、G10-R1 治理闭环并由稳定 release `1.3.3-8b02de5` 消费，根入口不再 fallback，故 M1 为 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成，也不作为撤销 M1 的依据。U01 已按自身依赖独立验收，M2 为 `IN_PROGRESS`；U02 仍须独立预检、实施卡和授权。main 尚未合并，后续源码集成与 D 阶段发布仍是独立边界。
