@@ -1,0 +1,29 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-13FA4027",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-014",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/README.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/PM_SESSION_SW-2026-008.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/01_启动/001_项目立项章程_CHARTER.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/01_启动/007_发布门禁规范_REL.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/01_启动/01_立项表_PROJ.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/03_执行/当前基线评估.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/001_项目总结报告_SUM.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/002_验收核验报告_PM.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/003_测试策略与验收规程_TEST_PLAN.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T15:57:58.477417+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only the nine matrix-selected paths are writable; the six KEEP_CURRENT documents remain byte-identical.",
+    "Historical closing documents may only receive an applicability banner; original conclusions and evidence remain unchanged.",
+    "Do not modify source code, WBS, canonical database, U01 worktree/commit, release pointers, or Batch C assets.",
+    "Stop on a tenth dirty path, baseline drift, runtime mismatch, nonzero new document gate, or quota remaining <=30%.",
+    "No merge, push, deploy, adoption, or release switch."
+  ],
+  "metadata": {}
+}
