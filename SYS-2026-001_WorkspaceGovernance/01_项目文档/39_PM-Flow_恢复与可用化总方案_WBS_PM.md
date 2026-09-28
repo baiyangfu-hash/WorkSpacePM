@@ -1,6 +1,6 @@
 # PM-Flow 恢复与可用化总方案
 
-> 文档版本：V3.0.8；修订日期：2026-09-28；状态：M0、M1 已验收；M2 已由 U01 启动、尚未验收，统一集成基线 `M2-BL01` 与实施卡工作流 `M2-GOV-IC01` 均已验收闭环；U02 产品实现与定向门禁已完成，但隔离提交钩子因旧候选与现行台账基线不一致而阻断，尚未验收。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
+> 文档版本：V3.0.9；修订日期：2026-09-28；状态：M0、M1 已验收；M2 进行中，U01、U02、统一集成基线 `M2-BL01` 与实施卡工作流 `M2-GOV-IC01` 均已验收闭环；下一项按依赖审查准备 U03。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
 > 项目：SW-2026-008；治理：SYS-2026-001；规划标识：PMF-20260912。
 > 修订依据：用户要求“重新修订方案，原子级拆解，最终需求必须达成”。本轮直接修订既有计划；不再设置一个等待批准的“先盘点再规划”项目。
 > 本文件给出 4 个产品里程碑、96 个原子任务及 1 条主线；其中 Q01～Q03 是已冻结基线失败的独立收敛队列。任务属于批次内部步骤，不等于逐条重复用户审批。C09 的补强门槛不构成重新派发原业务的许可。
@@ -10,7 +10,7 @@
 |---|---|---|---|
 | M0 | ACCEPTED | 历史验收链；G10 集成锚点 `d87fd3d`；本轮未重跑但不撤销既有验收 | 保持冻结基线，仅在依赖漂移时复验 |
 | M1 | ACCEPTED | 不可变候选 `8b02de55`；`CP-SW008-PMF-G10R1-001`；Run SUCCEEDED/lease RELEASED/Work CLOSED；稳定运行时 `1.3.3-8b02de5` | 从 U01 启动 M2 |
-| M2 | IN_PROGRESS / U02_BLOCKED | U01 已验收；`M2-BL01` 与 `M2-GOV-IC01` 已闭环。U02 五产品路径的定向 38 项测试、Ruff/Mypy 通过，`CP-SW008-M2-U02-001` 已绑定七路径；但旧基线 `b7bb9357` 候选的正常提交钩子报 120 条台账孤儿、3 条状态差异，Run/Work 均 `BLOCKED`，CHG-339 仍 `implementing` | 保留候选及历史回执；先核对现行台账与候选基线的提交合同，获准修订基线/授权后再完整复验、提交和验收，不运行 `--fix` 或绕过钩子 |
+| M2 | IN_PROGRESS / U02_ACCEPTED | U01、`M2-BL01`、`M2-GOV-IC01` 已闭环；U02 候选按分支本地治理快照纠正至 174/174、0/0/0，`CP-SW008-M2-U02-002` 绑定七路径，正常 Hook 提交 `74493c37`；Run SUCCEEDED、lease RELEASED、Work/Mission CLOSED、CHG-339 completed，canonical 台账 0/0/0 | 准备 U03 只读预检；候选治理快照防复发合同作为独立 M2 治理原子任务登记，不夹带 U03 |
 | M3 | NOT_STARTED | WBS §4.9 | M2 验收后进入 D01 |
 
 | Blocker | Target | Blocking | Record | Disposition |
@@ -418,7 +418,7 @@ E07 依赖 C03，C01～C03 只依赖 E05，因此没有 E→C→E 的循环。�
 | ID | 单一交付 | 依赖 | 精确产出/改动边界 | 验收与失败出口 | 模型 |
 |---|---|---|---|---|---|
 | U01 | 五状态可点击界面原型 | P06、E03、C07 | 拟新增 S/01_项目文档/prototypes/pm-flow-v2.html | 新目标、确认、执行、失败/恢复、验收五场景可达；标明演示数据；按钮/函数/导航无死链 | T/G |
-| U02 | QML 输入目标生成真实草稿 | U01、P11 | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、QML/boss_main.qml、T/qml/test_pm_cockpit_bridge.py、T/qml/test_boss_cockpit_view.py | Bridge→Facade 实际持久化 `PRE_AUTH` PlanningDraft；显示项目、目标、验收与“范围待规划”，不让用户填内部 ID；未形成真实范围卡前不得虚构范围，批准前不得展示为 Mission；按实施卡 016 五产品路径及独立治理证据门禁验收 | IMPLEMENTED / COMMIT_BLOCKED / NOT_ACCEPTED |
+| U02 | QML 输入目标生成真实草稿 | U01、P11 | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、QML/boss_main.qml、T/qml/test_pm_cockpit_bridge.py、T/qml/test_boss_cockpit_view.py | Bridge→Facade 实际持久化 `PRE_AUTH` PlanningDraft；显示项目、目标、验收与“范围待规划”，不让用户填内部 ID；未形成真实范围卡前不得虚构范围，批准前不得展示为 Mission；按实施卡 016 五产品路径及独立治理证据门禁验收 | ACCEPTED / `74493c37` / `CP-SW008-M2-U02-002` |
 | U03 | 一次确认启动真实任务 | U02、E08 | QML/bridges/pm_cockpit_bridge.py、QML/components/PmConfirmationCard.qml、T/qml/test_pm_cockpit_bridge.py | 连点只启动一次；实际 session 未确认时不显示执行中 | T/G |
 | U04 | QML 进度和失败来自真实事件 | U03 | CORE/pm_cockpit_service.py、QML/components/ActivityTimeline.qml、T/core/test_pm_cockpit_service.py | QRunnable/Signal 更新；主线程不阻塞；无伪百分比，失败原因能定位步骤 | T/G |
 | U05 | 恢复同一任务与证据抽屉 | U04、E06、C03 | QML/bridges/pm_cockpit_bridge.py、QML/components/EvidenceDrawer.qml、T/qml/test_pm_cockpit_bridge.py | 关闭重开后同 Work/Run；证据匹配当前内容；恢复动作受服务资格限制 | T/G |
@@ -720,5 +720,6 @@ V2.6.2 仅同步唯一 M1 不可变候选的真实质量证据，并新增 G10-R
 | V3.0.6 | 2026-09-28 | `M2-GOV-IC01` 有界纠正闭合：八产品路径与两提交证据路径分层建模，33 项测试及 Ruff/Mypy/diff-check 全绿，当前十路径 Checkpoint `CP-SW008-M2-GOV-IC01-003` 与正常 hook 提交 `b7bb9357` 成立，Run/Work/Mission/CHG 均达合法终态；下一项为 U02 只读预检。 |
 | V3.0.7 | 2026-09-28 | U02 开工前校准：确认现有 QML 接线与测试需要五条产品路径；`PlanningDraft` 无确定范围字段，界面只能如实标示“范围待规划”，不得提前创建 Mission。实施卡 016 已建，本次不宣称 U02 产品或治理验收。 |
 | V3.0.8 | 2026-09-28 | U02 五产品路径已在 `m2-u02-planning-draft` 隔离候选实现，定向 QML/Cockpit 11 项、Facade 27 项、Ruff/Mypy/diff-check 均 Exit 0；`CP-SW008-M2-U02-001` 绑定 `b7bb9357` 与七条授权路径。正常 Git Hook 因候选旧基线 CHG 集合与现行台账不一致（120 孤儿、3 状态差异）拒绝提交；Run/Work 如实置 `BLOCKED`，CHG-339 保持 `implementing`。未提交、未验收，不改变 M0/M1 或 release。 |
+| V3.0.9 | 2026-09-28 | U02 有界纠正闭环：确认首次阻断源于把 canonical 294 条完整台账复制到历史候选；恢复 `b7bb9357` 的 173 条分支本地快照并仅增量加入 CHG-339 后，候选达到 174/174、0/0/0。完整复跑 38 项测试及 Ruff/Mypy/diff-check，`CP-SW008-M2-U02-002` 与正常 Hook 提交 `74493c37` 成立；Run SUCCEEDED、lease RELEASED、Work/Mission CLOSED、CHG-339 completed，canonical 台账 0/0/0。旧 `CP-SW008-M2-U02-001` 仅保留为失败尝试历史证据。 |
 
-当前产品状态（2026-09-28）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选最终提交 `8b02de55` 已完成完整技术复验、G10-R1 治理闭环并由稳定 release `1.3.3-8b02de5` 消费，根入口不再 fallback，故 M1 为 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成，也不作为撤销 M1 的依据。U01 已按自身依赖独立验收，M2 为 `IN_PROGRESS`；U02 技术实现及定向门禁已完成但隔离提交被基线/台账钩子阻断，治理仍未验收。main 尚未合并，后续源码集成与 D 阶段发布仍是独立边界。
+当前产品状态（2026-09-28）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选最终提交 `8b02de55` 已完成完整技术复验、G10-R1 治理闭环并由稳定 release `1.3.3-8b02de5` 消费，根入口不再 fallback，故 M1 为 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成，也不作为撤销 M1 的依据。U01、U02 已按各自依赖独立验收，M2 为 `IN_PROGRESS`；下一产品任务为 U03，只读预检前仍须核对候选祖先链与路径占用。main 尚未合并，后续源码集成与 D 阶段发布仍是独立边界。
