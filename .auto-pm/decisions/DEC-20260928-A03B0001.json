@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-A03B0001",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-341",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/bridges/pm_cockpit_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/views/BossCockpitView.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/boss_main.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_pm_cockpit_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_boss_cockpit_view.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T22:20:10.384189+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only U03B one-shot async start wiring; no U04 progress timeline, merge, push, deploy, or release switch."
+  ],
+  "metadata": {}
+}
