@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-4B1DCC33",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-332",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/git_hook_enforcer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/infrastructure/test_git_hook_enforcer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-332.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T02:37:23.356233+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Stage A integrated isolated execution only at baseline 8b02de55; exact four owned paths; no main.py, C09, P2, database, or WBS path.",
+    "The candidate frozen index must contain and hook-verify its own CHG-332 and SW-2026-008 ledger blobs.",
+    "No release build, activation, deployment, merge, push, or release switching."
+  ],
+  "metadata": {}
+}
