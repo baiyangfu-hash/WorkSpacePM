@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PM-Flow 五状态原型</title>
+  <style>
+    :root { color-scheme: light; font-family: "Microsoft YaHei", sans-serif; }
+    body { margin: 0; background: #f3f6fb; color: #172033; }
+    main { max-width: 800px; margin: 40px auto; padding: 32px; background: #fff; border-radius: 16px; box-shadow: 0 8px 28px #24335a1f; }
+    .step { display: none; }
+    .step.active { display: block; }
+    .eyebrow { color: #4d63db; font-weight: 700; }
+    .demo { padding: 12px; border-radius: 8px; background: #fff8dc; }
+    button { margin: 8px 8px 0 0; padding: 10px 16px; border: 0; border-radius: 8px; background: #4056c7; color: #fff; cursor: pointer; }
+    button.secondary { background: #5d687e; }
+    .status { padding: 12px; border-left: 4px solid #4056c7; background: #eef1ff; }
+  </style>
+</head>
+<body data-demo="true">
+  <main>
+    <p class="eyebrow">PM-Flow / U01</p>
+    <h1>五状态可点击界面原型</h1>
+    <p class="demo">演示数据：SW-2026-008 · “为驾驶舱建立五状态导航原型”。本页面不创建 Mission、Work、Run 或任何真实治理记录。</p>
+
+    <section id="page-new-goal" class="step active" aria-labelledby="new-goal-title">
+      <h2 id="new-goal-title">1. 新目标</h2>
+      <p>用户输入可读目标、范围和验收说明，系统仅生成待确认的展示草稿。</p>
+      <button onclick="beginConfirmation()">查看确认草稿</button>
+    </section>
+
+    <section id="page-confirm" class="step" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">2. 确认</h2>
+      <p class="status">草稿：U01 五状态原型；范围：单一 HTML 和静态测试；验收：五场景可达且无死链。</p>
+      <button onclick="confirmTask()">确认并开始演示</button>
+      <button class="secondary" onclick="goPage('new-goal')">返回修改</button>
+    </section>
+
+    <section id="page-executing" class="step" aria-labelledby="executing-title">
+      <h2 id="executing-title">3. 执行</h2>
+      <p class="status">演示中：真实运行时会显示受控执行进度；本原型不显示伪造百分比。</p>
+      <button onclick="triggerFailure()">模拟可恢复失败</button>
+      <button onclick="acceptTask()">模拟验收完成</button>
+    </section>
+
+    <section id="page-recovery" class="step" aria-labelledby="recovery-title">
+      <h2 id="recovery-title">4. 失败 / 恢复</h2>
+      <p class="status">演示失败原因：等待外部证据。恢复操作须由后续真实服务资格决定。</p>
+      <button onclick="recoverTask()">恢复执行演示</button>
+      <button class="secondary" onclick="goPage('confirm')">返回确认</button>
+    </section>
+
+    <section id="page-acceptance" class="step" aria-labelledby="acceptance-title">
+      <h2 id="acceptance-title">5. 验收</h2>
+      <p class="status">演示验收：五个界面状态均可达。真实验收需后续 U06 的当前证据与服务状态。</p>
+      <button onclick="goPage('new-goal')">开始下一项演示</button>
+    </section>
+  </main>
+  <script>
+    function goPage(target) {
+      document.querySelectorAll('.step').forEach((page) => page.classList.remove('active'));
+      document.getElementById(`page-${target}`).classList.add('active');
+    }
+    function beginConfirmation() { goPage('confirm'); }
+    function confirmTask() { goPage('executing'); }
+    function triggerFailure() { goPage('recovery'); }
+    function recoverTask() { goPage('executing'); }
+    function acceptTask() { goPage('acceptance'); }
+  </script>
+</body>
+</html>
