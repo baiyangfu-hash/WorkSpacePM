@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-331AD001",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-331",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "main.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_root_entry_runtime_identity.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-331.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T14:14:02.531564+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Integration base must equal f46269475542d8407416fbec84c1b0b0b4542804; donor must equal 210db187fafe6135f6a68349f496e049d100025d.",
+    "Target development branch is main and its preflight HEAD must equal e83c117d6fba5a6beaaf6318a79eb4dc7f652979; adoption is ff-only.",
+    "Use one isolated candidate runtime-identity-adoption; allow exactly one normal-hook candidate commit and one local baseline adoption.",
+    "Only the four approved paths may enter the candidate; no push, deploy, release switch, history rewrite, C09/P2 merge, or cleanup."
+  ],
+  "metadata": {}
+}
