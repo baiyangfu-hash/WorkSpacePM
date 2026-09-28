@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-41F6DF6F",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-340",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/infrastructure/test_continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T21:40:08.701968+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅 U03A：恢复已批准 PlanningScopeCard、真实隔离启动及可信 RUN_STARTED 投影；不得修改第七文件。",
+    "禁止直接 SQL、历史改写、U03B、合并、推送、部署或 release 切换。"
+  ],
+  "metadata": {}
+}
