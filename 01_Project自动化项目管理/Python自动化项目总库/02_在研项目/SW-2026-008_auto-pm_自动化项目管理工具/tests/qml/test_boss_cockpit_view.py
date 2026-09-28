@@ -6,9 +6,9 @@ import json
 import sqlite3
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
-from PySide6.QtCore import QMetaObject, QObject, QUrl
+from PySide6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QUrl
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 
 from auto_pm.infrastructure.continuity_store import ContinuityStore
@@ -64,6 +64,64 @@ def test_boss_cockpit_components_load_without_the_legacy_workbench(
     )
     qapp.processEvents()
     assert view.property("cards") is not None  # type: ignore[attr-defined]
+
+
+def test_start_wiring_is_async_busy_guarded_and_refreshes_after_success() -> None:
+    view_source = (_QML / "views" / "BossCockpitView.qml").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    main_source = (_QML / "boss_main.qml").read_text(
+        encoding="utf-8", errors="replace"
+    )
+
+    assert "startBusyByMission" in view_source
+    assert "if (!missionId || isStartBusy(missionId))" in view_source
+    assert "busy: root.isStartBusy(modelData.mission_id)" in view_source
+    assert "pmCockpitBridge.startExecution(missionId)" in main_source
+    assert "pmCockpitBridge.confirmStart(missionId)" not in main_source
+    assert "function onStartFinished(missionId, success, message)" in main_source
+    assert "if (success)\n                root.refreshSnapshot()" in main_source
+
+
+def test_view_suppresses_start_replay_until_busy_is_cleared(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
+    view = cast(QObject, _load(qml_engine, _QML / "views" / "BossCockpitView.qml"))
+    missions: list[str] = []
+    qml_view = cast(Any, view)
+    start_signal = qml_view.startConfirmed
+    start_signal.connect(lambda mission_id: missions.append(str(mission_id)))
+
+    assert QMetaObject.invokeMethod(
+        view,
+        "requestStart",
+        Qt.ConnectionType.DirectConnection,
+        Q_ARG("QVariant", "MISSION-001"),
+    )
+    assert QMetaObject.invokeMethod(
+        view,
+        "requestStart",
+        Qt.ConnectionType.DirectConnection,
+        Q_ARG("QVariant", "MISSION-001"),
+    )
+    qapp.processEvents()
+    assert missions == ["MISSION-001"]
+
+    assert QMetaObject.invokeMethod(
+        view,
+        "setStartBusy",
+        Qt.ConnectionType.DirectConnection,
+        Q_ARG("QVariant", "MISSION-001"),
+        Q_ARG("QVariant", False),
+    )
+    assert QMetaObject.invokeMethod(
+        view,
+        "requestStart",
+        Qt.ConnectionType.DirectConnection,
+        Q_ARG("QVariant", "MISSION-001"),
+    )
+    qapp.processEvents()
+    assert missions == ["MISSION-001", "MISSION-001"]
 
 
 def test_boss_main_loads_through_the_read_only_bridge(

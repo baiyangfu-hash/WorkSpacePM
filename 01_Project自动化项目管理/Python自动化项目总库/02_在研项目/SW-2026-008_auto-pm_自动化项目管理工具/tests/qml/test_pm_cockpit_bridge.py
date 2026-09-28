@@ -6,9 +6,55 @@ import json
 import sqlite3
 import subprocess
 from pathlib import Path
+from typing import Literal, cast
 
+from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
+from PySide6.QtCore import QRunnable, QThreadPool
+
+from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
+
+
+class _HoldingThreadPool:
+    def __init__(self) -> None:
+        self.worker: QRunnable | None = None
+
+    def start(self, worker: QRunnable, priority: int = 0) -> None:
+        del priority
+        self.worker = worker
+
+
+class _StartService:
+    def __init__(self, outcomes: list[ForegroundExecutionReceipt | Exception]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[str] = []
+
+    def start_execution(self, mission_id: str) -> ForegroundExecutionReceipt:
+        self.calls.append(mission_id)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _receipt(
+    status: Literal["VERIFYING", "FAILED", "PENDING"],
+) -> ForegroundExecutionReceipt:
+    common: dict[str, object] = {
+        "operation_id": f"OP-{status}",
+        "run_id": f"RUN-{status}",
+        "status": status,
+        "claim_sha256": "a" * 64,
+    }
+    if status == "VERIFYING":
+        common.update({
+            "process_id": 1234,
+            "session_id": "SESSION-1",
+            "exit_code": 0,
+            "projection_sha256": "b" * 64,
+        })
+    return ForegroundExecutionReceipt.model_validate(common)
 
 
 def _registry(root: Path) -> None:
@@ -122,3 +168,71 @@ def test_bridge_rejects_incomplete_or_unknown_planning_input(tmp_path: Path) -> 
 
     with sqlite3.connect(store.db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM planning_drafts").fetchone()[0] == 0
+
+
+def test_start_execution_is_one_shot_until_worker_finishes(tmp_path: Path) -> None:
+    service = _StartService([_receipt("VERIFYING"), _receipt("VERIFYING")])
+    pool = _HoldingThreadPool()
+    bridge = PmCockpitBridge(
+        str(tmp_path),
+        service=cast(PmCockpitService, service),
+        thread_pool=cast(QThreadPool, pool),
+    )
+    finished: list[tuple[str, bool, str]] = []
+    bridge.startFinished.connect(
+        lambda mission_id, success, message: finished.append(
+            (mission_id, success, message)
+        )
+    )
+
+    first = bridge.startExecution(" MISSION-001 ")
+    replay = bridge.startExecution("MISSION-001")
+
+    assert first == {
+        "accepted": True,
+        "busy": True,
+        "message": "已提交启动请求，正在后台执行。",
+    }
+    assert replay["accepted"] is False
+    assert replay["busy"] is True
+    assert service.calls == []
+    assert pool.worker is not None
+
+    pool.worker.run()
+    bridge._poll_start_workers()
+
+    assert service.calls == ["MISSION-001"]
+    assert finished == [("MISSION-001", True, "任务已启动，正在验证。")]
+    assert bridge.startExecution("MISSION-001")["accepted"] is True
+
+
+def test_start_execution_failure_clears_busy_without_false_success(tmp_path: Path) -> None:
+    service = _StartService([PmCockpitError("授权已失效"), _receipt("PENDING")])
+    pool = _HoldingThreadPool()
+    bridge = PmCockpitBridge(
+        str(tmp_path),
+        service=cast(PmCockpitService, service),
+        thread_pool=cast(QThreadPool, pool),
+    )
+    finished: list[tuple[str, bool, str]] = []
+    bridge.startFinished.connect(
+        lambda mission_id, success, message: finished.append(
+            (mission_id, success, message)
+        )
+    )
+
+    assert bridge.startExecution("MISSION-FAIL")["accepted"] is True
+    assert pool.worker is not None
+    pool.worker.run()
+    bridge._poll_start_workers()
+
+    assert finished == [("MISSION-FAIL", False, "授权已失效")]
+    assert bridge.startExecution("MISSION-FAIL")["accepted"] is True
+    assert pool.worker is not None
+    pool.worker.run()
+    bridge._poll_start_workers()
+    assert finished[-1] == (
+        "MISSION-FAIL",
+        False,
+        "无法确认任务已启动，已保留待核验状态。",
+    )

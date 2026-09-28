@@ -44,6 +44,7 @@ ApplicationWindow {
     }
 
     Views.BossCockpitView {
+        id: cockpitView
         anchors.fill: parent
         cards: root.snapshot.projects || []
         notices: root.snapshot.notices || []
@@ -59,14 +60,25 @@ ApplicationWindow {
         }
         onEvidenceRequested: root.showEvidence(projectId)
         onStartConfirmed: function(missionId) {
-            var response = pmCockpitBridge.confirmStart(missionId)
-            root.statusMessage = response.message || "已记录开工确认。"
-            root.refreshSnapshot()
+            var response = pmCockpitBridge.startExecution(missionId)
+            root.statusMessage = response.message || "任务未能启动。"
+            if (!response.accepted)
+                cockpitView.setStartBusy(missionId, false)
         }
         onAcceptanceConfirmed: function(missionId) {
             var response = pmCockpitBridge.confirmAcceptance(missionId)
             root.statusMessage = response.message || "已记录最终验收。"
             root.refreshSnapshot()
+        }
+    }
+
+    Connections {
+        target: pmCockpitBridge
+        function onStartFinished(missionId, success, message) {
+            cockpitView.setStartBusy(missionId, false)
+            root.statusMessage = message || (success ? "任务已启动。" : "任务启动失败。")
+            if (success)
+                root.refreshSnapshot()
         }
     }
 

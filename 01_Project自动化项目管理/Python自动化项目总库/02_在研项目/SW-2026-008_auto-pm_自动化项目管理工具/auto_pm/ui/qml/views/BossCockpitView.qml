@@ -11,12 +11,35 @@ Item {
     property var cards: []
     property var notices: []
     property var planningDraft: null
+    property var startBusyByMission: ({})
     property string statusMessage: ""
     signal planningDraftRequested(string projectId, string objective, string acceptanceText)
     signal draftInputChanged()
     signal evidenceRequested(string projectId)
     signal startConfirmed(string missionId)
     signal acceptanceConfirmed(string missionId)
+
+    function isStartBusy(missionId) {
+        return missionId && startBusyByMission[missionId] === true
+    }
+
+    function setStartBusy(missionId, busy) {
+        if (!missionId)
+            return
+        var next = Object.assign({}, startBusyByMission)
+        if (busy)
+            next[missionId] = true
+        else
+            delete next[missionId]
+        startBusyByMission = next
+    }
+
+    function requestStart(missionId) {
+        if (!missionId || isStartBusy(missionId))
+            return
+        setStartBusy(missionId, true)
+        startConfirmed(missionId)
+    }
 
     Flickable {
         anchors.fill: parent
@@ -143,7 +166,8 @@ Item {
                     Components.PmConfirmationCard {
                         Layout.fillWidth: true
                         card: modelData
-                        onStartConfirmed: root.startConfirmed(modelData.mission_id)
+                        busy: root.isStartBusy(modelData.mission_id)
+                        onStartConfirmed: root.requestStart(modelData.mission_id)
                         onAcceptanceConfirmed: root.acceptanceConfirmed(modelData.mission_id)
                     }
                     Components.PrimaryButton {
