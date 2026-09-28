@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
@@ -34,7 +35,11 @@ def test_git_hook_install_uses_root_active_release_launcher(tmp_path: Path) -> N
         (commit_msg, 'git-hook commit-msg "$MSG_FILE"'),
     ):
         assert '"$PYTHON_EXE" "$PROJECT_ROOT/main.py"' in script
-        assert f'-w "$PROJECT_ROOT" {command}' in script
+        assert (
+            f'-w "$WORKTREE_ROOT" --control-root "$PROJECT_ROOT" {command}' in script
+        )
+        assert "git rev-parse --show-toplevel" in script
+        assert 'WORKTREE_ROOT=$(cd "$WORKTREE_ROOT" && pwd) || exit 1' in script
         assert "PYTHONPATH" not in script
         assert "python -m auto_pm" not in script
         assert "CONTAINER=" not in script
@@ -58,9 +63,20 @@ if args[-2:-1] == ["commit-msg"]:
     message_file = Path(args[-1])
     if not message_file.is_absolute() or not message_file.is_file():
         raise SystemExit(19)
-    trace_file = Path(args[1]) / "hook-path-trace.jsonl"
+    workspace = Path(args[1])
+    control_root = Path(args[args.index("--control-root") + 1])
+    trace_file = control_root / "hook-path-trace.jsonl"
     with trace_file.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps({"path": str(message_file)}) + "\\n")
+        stream.write(
+            json.dumps(
+                {
+                    "path": str(message_file),
+                    "workspace": str(workspace),
+                    "control_root": str(control_root),
+                }
+            )
+            + "\\n"
+        )
 """,
         encoding="utf-8",
     )
@@ -114,11 +130,14 @@ def test_installed_commit_msg_hook_resolves_primary_and_linked_worktree_paths(
 
     trace_lines = (repo / "hook-path-trace.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(trace_lines) == 2
-    traced_paths = [Path(json.loads(line)["path"]) for line in trace_lines]
+    traces = [json.loads(line) for line in trace_lines]
+    traced_paths = [Path(trace["path"]) for trace in traces]
     assert all(path.is_absolute() for path in traced_paths)
     assert traced_paths[0].name == "COMMIT_EDITMSG"
     assert traced_paths[1].name == "COMMIT_EDITMSG"
     assert traced_paths[0] != traced_paths[1]
+    assert [Path(trace["workspace"]) for trace in traces] == [repo, linked]
+    assert [Path(trace["control_root"]) for trace in traces] == [repo, repo]
 
 
 def _git_hook_shell() -> str:
@@ -128,9 +147,9 @@ def _git_hook_shell() -> str:
         shell = Path(git_executable).parent.parent / "bin" / "sh.exe"
         assert shell.is_file()
         return str(shell)
-    shell = shutil.which("sh")
-    assert shell is not None
-    return shell
+    shell_executable = shutil.which("sh")
+    assert shell_executable is not None
+    return shell_executable
 
 
 def test_installed_commit_msg_hook_rejects_missing_or_external_message_file(
@@ -176,7 +195,7 @@ def test_installed_commit_msg_hook_rejects_missing_or_external_message_file(
 
 
 def test_git_hook_preflight_passes_one_snapshot_to_both_shared_checks(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     message_file = tmp_path / "COMMIT_EDITMSG"
     message_file.write_text("test message", encoding="utf-8")
@@ -355,12 +374,16 @@ def _staged_snapshot_fixture(
 
 
 def test_enforce_pre_commit_rejects_staged_files_lookup_error(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     def raise_git_error(*_args: object, **_kwargs: object) -> None:
         raise OSError("git unavailable")
 
-    monkeypatch.setattr(git_hook_enforcer.subprocess, "run", raise_git_error)
+    monkeypatch.setattr(
+        "auto_pm.infrastructure.git_hook_enforcer.subprocess.run", raise_git_error
+    )
 
     assert enforce_pre_commit(tmp_path) == 1
     output = capsys.readouterr().out
@@ -369,7 +392,9 @@ def test_enforce_pre_commit_rejects_staged_files_lookup_error(
 
 
 def test_enforce_commit_msg_rejects_staged_files_lookup_error(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     msg_file = tmp_path / "COMMIT_EDITMSG"
     msg_file.write_text("feat: [CHG-SCPT-2026-170] test", encoding="utf-8")
@@ -377,7 +402,9 @@ def test_enforce_commit_msg_rejects_staged_files_lookup_error(
     def raise_git_error(*_args: object, **_kwargs: object) -> None:
         raise OSError("git unavailable")
 
-    monkeypatch.setattr(git_hook_enforcer.subprocess, "run", raise_git_error)
+    monkeypatch.setattr(
+        "auto_pm.infrastructure.git_hook_enforcer.subprocess.run", raise_git_error
+    )
 
     assert enforce_commit_msg(tmp_path, msg_file) == 1
     output = capsys.readouterr().out
@@ -386,7 +413,9 @@ def test_enforce_commit_msg_rejects_staged_files_lookup_error(
 
 
 def test_enforce_pre_commit_rejects_project_service_error(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     class FailingProjectService:
         def __init__(self, _: str) -> None:
@@ -406,7 +435,11 @@ def test_enforce_pre_commit_rejects_project_service_error(
     assert "拒绝提交" in output
 
 
-def test_enforce_pre_commit_rejects_ledger_error(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_enforce_pre_commit_rejects_ledger_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     project_root = tmp_path / "SW-TEST"
     _write_project_ledger(project_root)
 
@@ -439,7 +472,9 @@ def test_enforce_pre_commit_rejects_ledger_error(tmp_path: Path, monkeypatch, ca
 
 
 def test_enforce_pre_commit_reports_unrelated_ledger_error_without_blocking(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     related_root = tmp_path / "SW-RELATED"
     unrelated_root = tmp_path / "SW-UNRELATED"
@@ -491,7 +526,9 @@ def test_enforce_pre_commit_reports_unrelated_ledger_error_without_blocking(
 
 
 def test_enforce_pre_commit_rejects_missing_related_ledger(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     related_root = tmp_path / "SW-RELATED"
     related_root.mkdir()
@@ -516,7 +553,9 @@ def test_enforce_pre_commit_rejects_missing_related_ledger(
 
 
 def test_enforce_pre_commit_rejects_unknown_production_owner(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     project_root = tmp_path / "SW-RELATED"
     _write_project_ledger(project_root)
@@ -541,7 +580,9 @@ def test_enforce_pre_commit_rejects_unknown_production_owner(
 
 
 def test_enforce_release_ledger_gate_blocks_any_registered_project_error(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     related_root = tmp_path / "SW-RELATED"
     unrelated_root = tmp_path / "SW-UNRELATED"
@@ -579,7 +620,9 @@ def test_enforce_release_ledger_gate_blocks_any_registered_project_error(
     assert "全局台账未闭环" in output
 
 
-def test_git_hook_release_gate_cli_uses_global_gate(tmp_path: Path, monkeypatch) -> None:
+def test_git_hook_release_gate_cli_uses_global_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     called: dict[str, Path] = {}
 
     def fake_gate(workspace_root: Path) -> int:
@@ -597,7 +640,11 @@ def test_git_hook_release_gate_cli_uses_global_gate(tmp_path: Path, monkeypatch)
     assert called["workspace_root"] == tmp_path
 
 
-def test_enforce_commit_msg_rejects_message_read_error(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_enforce_commit_msg_rejects_message_read_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     repo, msg_file = _staged_snapshot_fixture(tmp_path)
 
     def raise_message_read_error(*_args: object, **_kwargs: object) -> str:
@@ -611,13 +658,19 @@ def test_enforce_commit_msg_rejects_message_read_error(tmp_path: Path, monkeypat
     assert "拒绝提交" in output
 
 
-def test_enforce_commit_msg_rejects_chg_parser_error(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_enforce_commit_msg_rejects_chg_parser_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     repo, msg_file = _staged_snapshot_fixture(tmp_path)
 
     def raise_parser_error(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("parser unavailable")
 
-    monkeypatch.setattr(git_hook_enforcer.ChgParser, "parse", raise_parser_error)
+    monkeypatch.setattr(
+        "auto_pm.infrastructure.git_hook_enforcer.ChgParser.parse", raise_parser_error
+    )
 
     assert enforce_commit_msg(repo, msg_file) == 1
     output = capsys.readouterr().out
@@ -625,7 +678,9 @@ def test_enforce_commit_msg_rejects_chg_parser_error(tmp_path: Path, monkeypatch
     assert "拒绝提交" in output
 
 
-def test_enforce_commit_msg_passes_valid_closed_chg(tmp_path: Path, capsys) -> None:
+def test_enforce_commit_msg_passes_valid_closed_chg(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo, msg_file = _staged_snapshot_fixture(tmp_path)
 
     assert enforce_commit_msg(repo, msg_file) == 0
@@ -633,7 +688,7 @@ def test_enforce_commit_msg_passes_valid_closed_chg(tmp_path: Path, capsys) -> N
 
 
 def test_enforce_commit_msg_uses_supplied_snapshot_without_recapturing(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, msg_file = _staged_snapshot_fixture(tmp_path)
     snapshot = git_hook_enforcer.get_staged_snapshot(repo)
@@ -646,7 +701,9 @@ def test_enforce_commit_msg_uses_supplied_snapshot_without_recapturing(
     assert enforce_commit_msg(repo, msg_file, snapshot) == 0
 
 
-def test_enforce_commit_msg_rejects_missing_staged_chg(tmp_path: Path, capsys) -> None:
+def test_enforce_commit_msg_rejects_missing_staged_chg(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo, msg_file = _staged_snapshot_fixture(tmp_path)
     change_file = repo / f"{_FIXTURE_PROJECT_ID}_fixture" / "01_变更单" / f"{_FIXTURE_CHG_ID}.md"
     _git(repo, "restore", "--staged", str(change_file.relative_to(repo)))
@@ -655,14 +712,18 @@ def test_enforce_commit_msg_rejects_missing_staged_chg(tmp_path: Path, capsys) -
     assert "暂存快照缺少或重复关联变更单" in capsys.readouterr().out
 
 
-def test_enforce_commit_msg_rejects_staged_pid_mismatch(tmp_path: Path, capsys) -> None:
+def test_enforce_commit_msg_rejects_staged_pid_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo, msg_file = _staged_snapshot_fixture(tmp_path, staged_project_id="SW-2026-902")
 
     assert enforce_commit_msg(repo, msg_file) == 1
     assert "暂存变更单 PID 与生产代码归属不一致" in capsys.readouterr().out
 
 
-def test_enforce_commit_msg_rejects_unstaged_chg_repair(tmp_path: Path, capsys) -> None:
+def test_enforce_commit_msg_rejects_unstaged_chg_repair(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo, msg_file = _staged_snapshot_fixture(
         tmp_path,
         staged_project_id="SW-2026-902",
@@ -673,7 +734,9 @@ def test_enforce_commit_msg_rejects_unstaged_chg_repair(tmp_path: Path, capsys) 
     assert "工作区证据与暂存快照不一致" in capsys.readouterr().out
 
 
-def test_enforce_commit_msg_rejects_unstaged_ledger_repair(tmp_path: Path, capsys) -> None:
+def test_enforce_commit_msg_rejects_unstaged_ledger_repair(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo, msg_file = _staged_snapshot_fixture(
         tmp_path,
         staged_ledger_has_chg=False,
@@ -684,7 +747,9 @@ def test_enforce_commit_msg_rejects_unstaged_ledger_repair(tmp_path: Path, capsy
     assert "工作区证据与暂存快照不一致" in capsys.readouterr().out
 
 
-def test_enforce_commit_msg_rejects_unknown_staged_production_project(tmp_path: Path, capsys) -> None:
+def test_enforce_commit_msg_rejects_unknown_staged_production_project(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo, msg_file = _staged_snapshot_fixture(tmp_path, add_unknown_production_file=True)
 
     assert enforce_commit_msg(repo, msg_file) == 1
@@ -692,7 +757,9 @@ def test_enforce_commit_msg_rejects_unknown_staged_production_project(tmp_path: 
 
 
 def test_enforce_commit_msg_rejects_staged_blob_read_error(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo, msg_file = _staged_snapshot_fixture(tmp_path)
 

@@ -94,8 +94,11 @@ def cmd_install(ctx: click.Context) -> None:
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
     pre_commit_script = """#!/bin/sh
-# Resolve the PRIMARY worktree (main workspace) so linked worktrees reuse the
-# main .venv and active-release launcher for every invocation.
+# Resolve the current worktree separately from the PRIMARY control root.  The
+# stable launcher/runtime comes from the primary root, while Git evidence must
+# be read from the worktree whose index triggered this hook.
+WORKTREE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+WORKTREE_ROOT=$(cd "$WORKTREE_ROOT" && pwd) || exit 1
 GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
 case "$GIT_COMMON_DIR" in
     /*) ;;
@@ -109,13 +112,16 @@ elif [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python"
 fi
 
-"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$PROJECT_ROOT" git-hook pre-commit
+"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$WORKTREE_ROOT" --control-root "$PROJECT_ROOT" git-hook pre-commit
 exit $?
 """
 
     commit_msg_script = """#!/bin/sh
-# Resolve the PRIMARY worktree (main workspace) so linked worktrees reuse the
-# main .venv and active-release launcher for every invocation.
+# Resolve the current worktree separately from the PRIMARY control root.  The
+# stable launcher/runtime comes from the primary root, while Git evidence must
+# be read from the worktree whose index triggered this hook.
+WORKTREE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+WORKTREE_ROOT=$(cd "$WORKTREE_ROOT" && pwd) || exit 1
 GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
 case "$GIT_COMMON_DIR" in
     /*) ;;
@@ -152,7 +158,7 @@ case "$MSG_FILE" in
         ;;
 esac
 
-"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$PROJECT_ROOT" git-hook commit-msg "$MSG_FILE"
+"$PYTHON_EXE" "$PROJECT_ROOT/main.py" -w "$WORKTREE_ROOT" --control-root "$PROJECT_ROOT" git-hook commit-msg "$MSG_FILE"
 exit $?
 """
 

@@ -44,6 +44,7 @@ _VALID_CHANGE_STATUSES = (
     "completed",
     "closed",
 )
+CONTROL_ROOT_FILE_BINDINGS = {"main.py": "SW-2026-008"}
 
 
 class StagedSnapshotError(RuntimeError):
@@ -215,15 +216,26 @@ def _project_bindings(workspace_root: Path, projects: list[object]) -> tuple[Pro
 def _binding_for_staged_file(
     path: str, bindings: tuple[ProjectBinding, ...]
 ) -> ProjectBinding:
-    """要求每一个生产文件恰好归属一个注册项目。"""
+    """Resolve one production path to exactly one registered project."""
     matches = [
         binding
         for binding in bindings
         if path == binding.relative_root or path.startswith(f"{binding.relative_root}/")
     ]
-    if len(matches) != 1:
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
         raise StagedSnapshotError(f"暂存生产文件归属未知或不唯一: {path}")
-    return matches[0]
+
+    control_root_project_id = CONTROL_ROOT_FILE_BINDINGS.get(path)
+    if control_root_project_id:
+        control_matches = [
+            binding for binding in bindings if binding.project_id == control_root_project_id
+        ]
+        if len(control_matches) == 1:
+            return control_matches[0]
+
+    raise StagedSnapshotError(f"暂存生产文件归属未知或不唯一: {path}")
 
 
 def _production_project_ids(
