@@ -1118,3 +1118,59 @@ def test_planning_lease_configuration_rejects_unbounded_values(
 def test_planning_lease_configuration_accepts_short_bounded_value(tmp_path: Path) -> None:
     facade = PmFacadeService(tmp_path, planning_lease_seconds=300)
     assert facade._planning_lease_seconds == 300
+
+
+def test_approved_planning_card_can_be_recovered_from_persisted_truth(tmp_path: Path) -> None:
+    facade, _database, changes = _p10_facade(tmp_path)
+    card = facade.create_planning_scope_card(
+        _planning_intent(),
+        scope_paths=("auto_pm/example.py",),
+        risks=("scope drift",),
+        non_goals=("no unrelated edits",),
+        execution_grant=PlanningExecutionGrant(
+            adapter=ExecutionAdapterKind.CODEX,
+            approved_model="gpt-5.6-sol",
+            declared_dirty_paths=("auto_pm/example.py",),
+        ),
+    )
+    for state in ("submitted", "under_review", "approved"):
+        changes.transition_status(
+            card.change_id,
+            state,
+            approver="fubai",
+            comment="human review",
+            project_id="SW-TEST-001",
+        )
+    facade.approve_planning_scope_card(
+        card,
+        expected_plan_hash=card.plan_hash,
+        approver="fubai",
+        approval_evidence_ref="user-confirmation:U03A-001",
+    )
+    mission = facade.materialize_planning_mission(card)
+
+    assert facade.recover_planning_scope_card(mission.mission_id) == card
+
+
+def test_start_approved_mission_keeps_generated_lease_inside_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facade = PmFacadeService(tmp_path)
+    card = SimpleNamespace(plan_hash="a" * 64)
+    receipt = object()
+    monkeypatch.setattr(facade, "approve", lambda mission_id: None)
+    monkeypatch.setattr(facade, "recover_planning_scope_card", lambda mission_id: card)
+    captured: dict[str, object] = {}
+
+    def execute(recovered: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        assert recovered is card
+        return receipt
+
+    monkeypatch.setattr(facade, "execute_planning_foreground", execute)
+
+    assert facade.start_approved_mission_foreground("MISSION-U03A") is receipt
+    assert captured["expected_plan_hash"] is card.plan_hash
+    assert isinstance(captured["lease_token"], str)
+    assert len(captured["lease_token"]) >= 32
+    assert captured["lease_token_environment"] == "AUTO_PM_EXECUTION_LEASE_TOKEN"

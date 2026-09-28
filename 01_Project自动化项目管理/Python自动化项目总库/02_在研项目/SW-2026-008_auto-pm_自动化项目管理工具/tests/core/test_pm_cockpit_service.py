@@ -14,7 +14,7 @@ from auto_pm.core.mission_service import MissionService
 from auto_pm.core.pm_cockpit_service import PmCockpitService
 from auto_pm.core.work_registry_service import WorkRegistryService
 
-from auto_pm.contracts.continuity import WorkKind, WorkState
+from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 from auto_pm.contracts.pm_cockpit import CockpitUserAction
 
@@ -246,3 +246,28 @@ def test_primary_work_ignores_accepted_history(tmp_path: Path) -> None:
     accepted = work.transition("WORK-ACCEPTED", WorkState.ACCEPTED, "accept-accepted")
 
     assert PmCockpitService._primary_work(None, (accepted,)) is None
+
+
+def test_progress_requires_trusted_started_evidence_and_ignores_unrelated_blocked_run(
+    tmp_path: Path,
+) -> None:
+    _registry(tmp_path)
+    _seed_authorized_mission(tmp_path)
+    store = PmCockpitService(tmp_path)._store
+    mission = MissionService(tmp_path).get("MISSION-COCKPIT-001").model_copy(
+        update={"state": MissionState.ACTIVE}
+    )
+    work = WorkRegistryService(tmp_path).get_work("WORK-COCKPIT-001").model_copy(
+        update={"state": WorkState.IN_PROGRESS}
+    )
+    run = store.get_run("RUN-COCKPIT-001")
+    runs = {work.work_id: (run,)}
+
+    assert PmCockpitService._progress(mission, work, runs, frozenset()) == "系统执行"
+    assert PmCockpitService._progress(
+        mission, work, runs, frozenset({run.run_id})
+    ) == "执行中"
+    unrelated = run.model_copy(update={"run_id": "RUN-HISTORY", "state": RunState.BLOCKED})
+    assert not PmCockpitService._is_blocked(
+        mission, work, {work.work_id: (run,), "WORK-HISTORY": (unrelated,)}
+    )

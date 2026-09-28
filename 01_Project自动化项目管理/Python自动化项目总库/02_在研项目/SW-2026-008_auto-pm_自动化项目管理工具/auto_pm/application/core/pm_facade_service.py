@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import secrets
 from pathlib import Path
 from typing import Any, cast
 
@@ -391,6 +392,66 @@ class PmFacadeService:
             )
         except (ExecutionDispatchError, LocalExecutionOrchestratorError) as error:
             raise PmFacadeError(str(error)) from error
+
+    def recover_planning_scope_card(self, mission_id: str) -> PlanningScopeCard:
+        """Rebuild the exact approved card from persisted, independently bound facts."""
+
+        try:
+            mission = self._missions.get(mission_id)
+            decision = self._decisions.get_decision(mission.authority.decision_id)
+            approval = decision.metadata.get("planning_approval")
+            if not isinstance(approval, dict):
+                raise PmFacadeError("Mission Decision 缺少 planning_approval")
+            request_id = approval.get("request_id")
+            plan_hash = approval.get("plan_hash")
+            raw_grant = approval.get("execution_grant")
+            if not isinstance(request_id, str) or not isinstance(plan_hash, str):
+                raise PmFacadeError("Mission Decision 的规划身份不完整")
+            grant = PlanningExecutionGrant.model_validate(raw_grant)
+            draft = self._store.get_planning_draft(request_id)
+            specs = self._store.get_planning_draft_specs(request_id)
+            risks = tuple(
+                item.removeprefix("risk: ")
+                for item in decision.conditions
+                if item.startswith("risk: ")
+            )
+            non_goals = tuple(
+                item.removeprefix("non-goal: ")
+                for item in decision.conditions
+                if item.startswith("non-goal: ")
+            )
+            card = PlanningScopeCard.from_draft(
+                draft,
+                change_id=decision.change_id,
+                scope_paths=tuple(decision.approved_files),
+                risks=risks,
+                non_goals=non_goals,
+                spec_sources=specs,
+                execution_grant=grant,
+            )
+            if (
+                mission.subject_project_id != card.subject_project_id
+                or mission.authority.change_id != card.change_id
+                or not hmac.compare_digest(card.plan_hash, plan_hash)
+            ):
+                raise PmFacadeError("Mission、Decision 与 PlanningScopeCard 身份不一致")
+            return card
+        except (ContinuityStoreError, DecisionError, MissionServiceError, ValueError) as error:
+            raise PmFacadeError(str(error)) from error
+
+    def start_approved_mission_foreground(
+        self, mission_id: str
+    ) -> ForegroundExecutionReceipt:
+        """Consume one user confirmation and start the approved isolated execution."""
+
+        self.approve(mission_id)
+        card = self.recover_planning_scope_card(mission_id)
+        return self.execute_planning_foreground(
+            card,
+            expected_plan_hash=card.plan_hash,
+            lease_token=secrets.token_urlsafe(32),
+            lease_token_environment="AUTO_PM_EXECUTION_LEASE_TOKEN",
+        )
 
     @staticmethod
     def _planning_scope_card_hash(card: PlanningScopeCard) -> str:

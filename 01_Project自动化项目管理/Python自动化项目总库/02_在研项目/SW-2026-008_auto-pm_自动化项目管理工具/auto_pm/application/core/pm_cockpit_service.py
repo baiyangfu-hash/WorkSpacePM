@@ -10,6 +10,7 @@ from typing import cast
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 
 from auto_pm.contracts.continuity import CheckpointItem, RunItem, WorkItem, WorkState
+from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_cockpit import (
     CockpitUserAction,
@@ -36,6 +37,7 @@ class _ProjectFacts:
     works: tuple[WorkItem, ...]
     runs_by_work: dict[str, tuple[RunItem, ...]]
     checkpoints: tuple[CheckpointItem, ...]
+    started_run_ids: frozenset[str]
 
 
 class PmCockpitService:
@@ -146,6 +148,19 @@ class PmCockpitService:
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
+    def start_execution(self, mission_id: str) -> ForegroundExecutionReceipt:
+        """Start genuine approved execution; callers must keep this off the UI thread."""
+
+        try:
+            return cast(
+                ForegroundExecutionReceipt,
+                PmFacadeService(self._workspace_root).start_approved_mission_foreground(
+                    mission_id
+                ),
+            )
+        except PmFacadeError as error:
+            raise PmCockpitError(str(error)) from error
+
     def confirm_acceptance(self, mission_id: str) -> PmConfirmationCard:
         """Apply final user acceptance after the existing verification gate has opened."""
         try:
@@ -192,11 +207,20 @@ class PmCockpitService:
             for run in runs
             if (checkpoint := self._store.latest_checkpoint(run.run_id)) is not None
         )
+        started_run_ids: set[str] = set()
+        for runs in runs_by_work.values():
+            for run in runs:
+                try:
+                    self._store.get_run_started_evidence(run.run_id)
+                except ContinuityStoreError:
+                    continue
+                started_run_ids.add(run.run_id)
         return _ProjectFacts(
             missions=missions,
             works=works,
             runs_by_work=runs_by_work,
             checkpoints=checkpoints,
+            started_run_ids=frozenset(started_run_ids),
         )
 
     def _card(
@@ -212,7 +236,9 @@ class PmCockpitService:
             mission=mission.title if mission else "暂无进行中的需求",
             mission_id=mission.mission_id if mission else "",
             milestone=self._milestone(mission),
-            progress=self._progress(mission, work),
+            progress=self._progress(
+                mission, work, facts.runs_by_work, facts.started_run_ids
+            ),
             blocked=blocked,
             verification=self._verification(mission, work, facts.runs_by_work),
             risk=self._risk(mission, blocked),
@@ -283,8 +309,12 @@ class PmCockpitService:
     ) -> bool:
         return bool(
             mission and mission.state is MissionState.BLOCKED
-        ) or bool(work and work.state is WorkState.BLOCKED) or any(
-            run.state.value == "BLOCKED" for runs in runs_by_work.values() for run in runs
+        ) or bool(work and work.state is WorkState.BLOCKED) or bool(
+            work
+            and any(
+                run.state.value == "BLOCKED"
+                for run in runs_by_work.get(work.work_id, ())
+            )
         )
 
     @staticmethod
@@ -304,10 +334,23 @@ class PmCockpitService:
         return labels[mission.state]
 
     @staticmethod
-    def _progress(mission: Mission | None, work: WorkItem | None) -> str:
+    def _progress(
+        mission: Mission | None,
+        work: WorkItem | None,
+        runs_by_work: dict[str, tuple[RunItem, ...]],
+        started_run_ids: frozenset[str],
+    ) -> str:
         if mission is None:
             return "未启动"
-        if mission.state is MissionState.ACTIVE and work and work.state is WorkState.IN_PROGRESS:
+        if (
+            mission.state is MissionState.ACTIVE
+            and work
+            and work.state is WorkState.IN_PROGRESS
+            and any(
+                run.run_id in started_run_ids
+                for run in runs_by_work.get(work.work_id, ())
+            )
+        ):
             return "执行中"
         if mission.state is MissionState.ACCEPTANCE_PENDING:
             return "等待验收"
@@ -325,7 +368,10 @@ class PmCockpitService:
             return "已保存验证证据"
         if work and work.state is WorkState.VERIFYING:
             return "正在验证"
-        if any(run.state.value == "VERIFYING" for runs in runs_by_work.values() for run in runs):
+        if work and any(
+            run.state.value == "VERIFYING"
+            for run in runs_by_work.get(work.work_id, ())
+        ):
             return "正在验证"
         return "尚无验证结论" if mission is None else "等待执行验证"
 

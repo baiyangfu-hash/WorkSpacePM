@@ -1297,6 +1297,28 @@ class ContinuityStore:
                 raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
             return self._get_planning_draft(row)
 
+    def get_planning_draft_specs(
+        self, request_id: str
+    ) -> tuple[tuple[str, str, str], ...]:
+        """Read the immutable spec bindings used to hash one planning card."""
+
+        with self._read_connection() as conn:
+            if conn.execute(
+                "SELECT 1 FROM planning_drafts WHERE request_id=?", (request_id,)
+            ).fetchone() is None:
+                raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+            rows = conn.execute(
+                """SELECT spec_id, canonical_path, version
+                FROM planning_draft_spec_bindings WHERE request_id=? ORDER BY spec_id""",
+                (request_id,),
+            ).fetchall()
+        if not rows:
+            raise ContinuityStoreError("PlanningDraft 尚未绑定真实规范版本")
+        return tuple(
+            (str(row["spec_id"]), str(row["canonical_path"]), str(row["version"]))
+            for row in rows
+        )
+
     def get_planning_draft_decision_id(
         self, request_id: str, change_id: str, plan_hash: str
     ) -> str:
