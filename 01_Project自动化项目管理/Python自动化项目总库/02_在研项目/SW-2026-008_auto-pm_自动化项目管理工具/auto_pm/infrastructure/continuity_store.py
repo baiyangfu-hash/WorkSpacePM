@@ -4337,6 +4337,448 @@ class ContinuityStore:
             )
             return self._get_run(conn, target_run_id)
 
+    @classmethod
+    def _terminal_lease_reconciliation_request(
+        cls,
+        *,
+        target_run_id: str,
+        expected_terminal_event_id: str,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        decision_id: str,
+        reason: str,
+    ) -> dict[str, object]:
+        return {
+            "schema_version": "terminal-lease-reconciliation-request.v1",
+            "action": RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE.value,
+            "target_run_id": target_run_id,
+            "expected_terminal_event_id": expected_terminal_event_id,
+            "expected_target_lease_version": expected_target_lease_version,
+            "recovery_run_id": recovery_run_id,
+            "recovery_owner_id": recovery_owner_id,
+            "decision_id": decision_id,
+            "outcome": RuntimeDecisionOutcome.RELEASED.value,
+            "reason": reason,
+        }
+
+    @classmethod
+    def _validated_terminal_lease_reconciliation_inputs(
+        cls,
+        *,
+        target_run_id: object,
+        expected_terminal_event_id: object,
+        expected_target_lease_version: object,
+        recovery_run_id: object,
+        recovery_owner_id: object,
+        recovery_lease_token: object,
+        decision_id: object,
+        reason: object,
+        idempotency_key: object,
+    ) -> dict[str, object]:
+        normalized_reason, _ = cls._validated_settlement_text(
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        labels = (
+            ("目标 Run", target_run_id),
+            ("恢复 Run", recovery_run_id),
+            ("恢复 owner", recovery_owner_id),
+            ("Decision", decision_id),
+        )
+        for label, value in labels:
+            if (
+                not isinstance(value, str)
+                or value != value.strip()
+                or not 1 <= len(value) <= 255
+                or any(not character.isprintable() for character in value)
+            ):
+                raise ContinuityStoreError(f"{label} 必须是 canonical 非空可打印文本")
+        if (
+            not isinstance(recovery_lease_token, str)
+            or recovery_lease_token != recovery_lease_token.strip()
+            or not 1 <= len(recovery_lease_token) <= 1000
+            or any(not character.isprintable() for character in recovery_lease_token)
+        ):
+            raise ContinuityStoreError("恢复 lease token 必须是 canonical 非空可打印文本")
+        if (
+            not isinstance(expected_terminal_event_id, str)
+            or re.fullmatch(r"EVT-[0-9A-F]{16}", expected_terminal_event_id) is None
+            or type(expected_target_lease_version) is not int
+            or expected_target_lease_version < 1
+        ):
+            raise ContinuityStoreError("原终态事件 ID 或目标 lease version 非法")
+        canonical_target_run_id = cast(str, target_run_id)
+        canonical_recovery_run_id = cast(str, recovery_run_id)
+        canonical_decision_id = cast(str, decision_id)
+        if canonical_target_run_id == canonical_recovery_run_id:
+            raise ContinuityStoreError("目标 Run 与恢复 Run 必须不同")
+        if not is_canonical_decision_id(canonical_decision_id):
+            raise ContinuityStoreError("运行态补偿 Decision ID 必须是 canonical")
+        if recovery_lease_token in normalized_reason:
+            raise ContinuityStoreError("补偿原因不得包含恢复 lease token")
+        return cls._terminal_lease_reconciliation_request(
+            target_run_id=canonical_target_run_id,
+            expected_terminal_event_id=expected_terminal_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=canonical_recovery_run_id,
+            recovery_owner_id=cast(str, recovery_owner_id),
+            decision_id=canonical_decision_id,
+            reason=normalized_reason,
+        )
+
+    @classmethod
+    def _terminal_lease_reconciliation_replay(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        request: dict[str, object],
+        recovery_lease_token: str,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        row = cls._event_by_key(conn, idempotency_key)
+        if row is None:
+            return None
+        payload = cls._validated_event_payload(row, label="终态 lease 对账")
+        target = payload.get("target")
+        release = payload.get("lease_release")
+        if (
+            row["aggregate_type"] != "run"
+            or row["aggregate_id"] != request["target_run_id"]
+            or row["event_type"] != "RUN_TERMINAL_LEASE_RECONCILED"
+            or set(payload)
+            != {
+                "schema_version",
+                "request_hash",
+                "request",
+                "recovery_token_sha256",
+                "terminal_event_hash",
+                "target",
+                "recovery",
+                "authority",
+                "lease_release",
+            }
+            or payload.get("schema_version") != "terminal-lease-reconciliation.v1"
+            or payload.get("request") != request
+            or payload.get("request_hash") != cls._settlement_request_hash(request)
+            or not isinstance(target, dict)
+            or not isinstance(release, dict)
+            or set(release) != {"reason", "released_at", "lease_epoch"}
+            or release.get("reason") != "recovery:terminal-transition-v2"
+            or release.get("released_at") != row["created_at"]
+            or release.get("lease_epoch")
+            != cast(int, request["expected_target_lease_version"]) + 1
+            or target.get("run_id") != request["target_run_id"]
+            or target.get("terminal_event_id") != request["expected_terminal_event_id"]
+            or target.get("previous_lease_version")
+            != request["expected_target_lease_version"]
+        ):
+            raise ContinuityStoreError("idempotency_key 的终态 lease 对账语义不一致")
+        if not hmac.compare_digest(
+            str(payload.get("recovery_token_sha256")),
+            cls._lease_token_fingerprint(recovery_lease_token),
+        ):
+            raise ContinuityStoreError("终态 lease 对账恢复 token identity 不匹配")
+        terminal_row = conn.execute(
+            "SELECT * FROM events WHERE event_id=?",
+            (request["expected_terminal_event_id"],),
+        ).fetchone()
+        if (
+            terminal_row is None
+            or terminal_row["aggregate_type"] != "run"
+            or terminal_row["aggregate_id"] != request["target_run_id"]
+            or terminal_row["event_type"] != "RUN_TRANSITIONED"
+            or terminal_row["event_hash"] != payload.get("terminal_event_hash")
+        ):
+            raise ContinuityStoreError("对账回执引用的原终态事件不存在或已漂移")
+        run = cls._get_run(conn, str(request["target_run_id"]))
+        lease = cls._get_lease(conn, run.run_id)
+        if (
+            run.work_id != target.get("work_id")
+            or run.state.value != target.get("state")
+            or run.version != target.get("run_version")
+            or lease.version != release["lease_epoch"]
+            or not lease.lease_token.startswith("RELEASED:")
+        ):
+            raise ContinuityStoreError("终态 lease 对账回执与当前 Run/lease 不一致")
+        return run
+
+    def terminal_lease_reconciliation_replay(
+        self,
+        *,
+        target_run_id: str,
+        expected_terminal_event_id: str,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        request = self._validated_terminal_lease_reconciliation_inputs(
+            target_run_id=target_run_id,
+            expected_terminal_event_id=expected_terminal_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        with self._read_connection() as conn:
+            return self._terminal_lease_reconciliation_replay(
+                conn,
+                request=request,
+                recovery_lease_token=recovery_lease_token,
+                idempotency_key=idempotency_key,
+            )
+
+    def reconcile_terminal_lease(
+        self,
+        *,
+        target_run_id: str,
+        expected_target_state: str,
+        expected_target_run_version: int,
+        expected_target_lease_version: int,
+        expected_terminal_event_id: str,
+        target_decision_id: str,
+        target_decision_sha256: str,
+        target_change_id: str,
+        recovery_run_id: str,
+        expected_recovery_run_version: int,
+        expected_recovery_work_version: int,
+        expected_recovery_lease_version: int,
+        expected_recovery_git_head: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        decision_sha256: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Release only the expired lease omitted by one exact legacy v2 transition."""
+
+        request = self._validated_terminal_lease_reconciliation_inputs(
+            target_run_id=target_run_id,
+            expected_terminal_event_id=expected_terminal_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        if expected_target_state not in {
+            RunState.SUCCEEDED.value,
+            RunState.FAILED.value,
+            RunState.CANCELLED.value,
+        }:
+            raise ContinuityStoreError("目标 Run 必须是明确终态")
+        for label, version in (
+            ("目标 Run", expected_target_run_version),
+            ("恢复 Run", expected_recovery_run_version),
+            ("恢复 Work", expected_recovery_work_version),
+            ("恢复 lease", expected_recovery_lease_version),
+        ):
+            if type(version) is not int or version < 1:
+                raise ContinuityStoreError(f"{label} version 必须是正整数")
+        self._validate_recovery_git_head(expected_recovery_git_head)
+        for digest in (target_decision_sha256, decision_sha256):
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ContinuityStoreError("Decision SHA-256 非法")
+
+        with self._transaction() as conn:
+            replay = self._terminal_lease_reconciliation_replay(
+                conn,
+                request=request,
+                recovery_lease_token=recovery_lease_token,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                return replay
+            observed_at = self._utc_now()
+            event_time = observed_at.isoformat()
+            target = self._get_run(conn, target_run_id)
+            target_lease = self._get_lease(conn, target_run_id)
+            target_work = self._get_work(conn, target.work_id)
+            recovery = self._get_run(conn, recovery_run_id)
+            recovery_lease = self._get_lease(conn, recovery_run_id)
+            recovery_work = self._get_work(conn, recovery.work_id)
+            if (
+                target.state.value != expected_target_state
+                or target.version != expected_target_run_version
+                or target_lease.version != expected_target_lease_version
+                or target_lease.lease_token.startswith("RELEASED:")
+                or self._aware_timestamp(target_lease.expires_at, "目标 Run lease") > observed_at
+                or target_lease.lease_token in reason
+            ):
+                raise ContinuityStoreError("目标终态 Run 或未释放过期 lease 事实发生漂移")
+            terminal_row = conn.execute(
+                "SELECT rowid, * FROM events WHERE event_id=?",
+                (expected_terminal_event_id,),
+            ).fetchone()
+            if (
+                terminal_row is None
+                or terminal_row["aggregate_type"] != "run"
+                or terminal_row["aggregate_id"] != target_run_id
+                or terminal_row["event_type"] != "RUN_TRANSITIONED"
+            ):
+                raise ContinuityStoreError("指定的原终态 RUN_TRANSITIONED 事件不存在")
+            preceding = conn.execute(
+                "SELECT event_hash FROM events WHERE rowid<? ORDER BY rowid DESC LIMIT 1",
+                (terminal_row["rowid"],),
+            ).fetchone()
+            later_target_event = conn.execute(
+                "SELECT 1 FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+                "AND rowid>? LIMIT 1",
+                (target_run_id, terminal_row["rowid"]),
+            ).fetchone()
+            terminal_payload = self._validated_event_payload(
+                terminal_row, label="原终态迁移"
+            )
+            if (
+                terminal_row["previous_hash"] != (str(preceding[0]) if preceding else "")
+                or later_target_event is not None
+                or set(terminal_payload)
+                != {"schema_version", "expected_version", "new_state", "result_version"}
+                or terminal_payload.get("schema_version") != "run-transition.v2"
+                or terminal_payload.get("expected_version") != target.version - 1
+                or terminal_payload.get("result_version") != target.version
+                or terminal_payload.get("new_state") != target.state.value
+            ):
+                raise ContinuityStoreError("原终态迁移不是唯一且可验证的 legacy v2 证据")
+            if (
+                recovery.state is not RunState.RUNNING
+                or recovery.version != expected_recovery_run_version
+                or recovery.git_head != expected_recovery_git_head
+                or recovery_work.version != expected_recovery_work_version
+                or recovery_work.state is not WorkState.IN_PROGRESS
+                or recovery_work.read_only
+                or recovery.work_id == target.work_id
+                or recovery.executor_id != recovery_owner_id
+            ):
+                raise ContinuityStoreError("独立恢复 Work/Run 状态或 CAS 事实不合法")
+            try:
+                recovery_worktree = Path(recovery.worktree_path).resolve(strict=True)
+            except OSError as error:
+                raise ContinuityStoreError("恢复 Run worktree_path 无法规范化") from error
+            if recovery_worktree != self.workspace_root:
+                raise ContinuityStoreError("租约对账的恢复 Run 必须位于控制根主工作树")
+            if (
+                recovery_lease.version != expected_recovery_lease_version
+                or recovery_lease.owner_id != recovery_owner_id
+                or recovery_lease.lease_token != recovery_lease_token
+                or self._aware_timestamp(recovery_lease.expires_at, "恢复 Run lease") <= observed_at
+            ):
+                raise ContinuityStoreError("恢复 Run 活租约 owner、token、epoch 或期限冲突")
+            if (
+                target_work.authorization_ref != target_decision_id
+                or recovery_work.authorization_ref != decision_id
+                or target_decision_id == decision_id
+            ):
+                raise ContinuityStoreError("目标与恢复 Work 的 Decision 绑定不合法")
+            target_decision, decision = self._decision_git_snapshots(
+                recovery_git_head=recovery.git_head,
+                target_decision_id=target_decision_id,
+                target_decision_sha256=target_decision_sha256,
+                recovery_decision_id=decision_id,
+                recovery_decision_sha256=decision_sha256,
+                require_current_head=True,
+            )
+            if (
+                target_decision.change_id != target_change_id
+                or decision.change_id == target_change_id
+                or not is_canonical_runtime_change_id(decision.change_id)
+                or decision.decision_conclusion != "approved"
+                or decision.conditions
+                or decision.project_id != target_work.subject_project_id
+                or decision.project_id != recovery_work.subject_project_id
+                or target_decision.project_id != decision.project_id
+            ):
+                raise ContinuityStoreError("恢复 Decision/CHG 必须独立、同项目且无条件批准")
+            capability = decision.runtime_capability
+            if (
+                capability is None
+                or capability.allowed_runtime_actions
+                != (RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE,)
+                or capability.target_run_ids != (target_run_id,)
+                or capability.allowed_outcomes != (RuntimeDecisionOutcome.RELEASED,)
+            ):
+                raise ContinuityStoreError("恢复 Decision capability 未精确绑定 action/target/outcome")
+            approved = tuple(
+                dict.fromkeys(
+                    self._normalize_authority_path(path) for path in decision.approved_files
+                )
+            )
+            runtime_target = self.runtime_target_path()
+            if (
+                not all(
+                    self._authority_path_covered(path, approved)
+                    for path in recovery_work.scope_paths
+                )
+                or not all(
+                    self._authority_path_covered(path, recovery_work.scope_paths)
+                    for path in recovery.owned_paths
+                )
+                or not self._authority_path_covered(runtime_target, approved)
+                or not self._authority_path_covered(runtime_target, recovery_work.scope_paths)
+                or not self._authority_path_covered(runtime_target, recovery.owned_paths)
+                or recovery_work.scope_hash
+                != self.authority_paths_hash(recovery_work.scope_paths)
+            ):
+                raise ContinuityStoreError("恢复 Decision/Work/Run 未覆盖 canonical continuity.db")
+            release = self._release_lease_in_transaction(
+                conn,
+                lease=target_lease,
+                event_time=event_time,
+                reason="recovery:terminal-transition-v2",
+            )
+            self._append_event(
+                conn,
+                target_run_id,
+                "RUN_TERMINAL_LEASE_RECONCILED",
+                {
+                    "schema_version": "terminal-lease-reconciliation.v1",
+                    "request_hash": self._settlement_request_hash(request),
+                    "request": request,
+                    "recovery_token_sha256": self._lease_token_fingerprint(
+                        recovery_lease_token
+                    ),
+                    "terminal_event_hash": terminal_row["event_hash"],
+                    "target": {
+                        "run_id": target_run_id,
+                        "work_id": target.work_id,
+                        "state": target.state.value,
+                        "run_version": target.version,
+                        "terminal_event_id": expected_terminal_event_id,
+                        "previous_lease_version": target_lease.version,
+                    },
+                    "recovery": {
+                        "run_id": recovery_run_id,
+                        "work_id": recovery.work_id,
+                        "run_version": recovery.version,
+                        "work_version": recovery_work.version,
+                        "lease_version": recovery_lease.version,
+                        "owner_id": recovery_owner_id,
+                        "git_head": recovery.git_head,
+                    },
+                    "authority": {
+                        "project_id": decision.project_id,
+                        "decision_id": decision_id,
+                        "decision_sha256": decision_sha256,
+                        "change_id": decision.change_id,
+                    },
+                    "lease_release": release,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, target_run_id)
+
     def renew_lease(
         self,
         run_id: str,

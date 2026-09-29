@@ -841,6 +841,83 @@ def _fence_terminal_lease(
     return service.fence_terminal_lease(**values)
 
 
+def _legacy_v2_terminal_transition_ready(
+    root: Path, clock: Clock
+) -> tuple[ContinuityExecutionService, str, int]:
+    """Seed a terminal Run whose legacy v2 transition omitted lease release."""
+
+    service = _settlement_ready(
+        root,
+        clock,
+        allowed_outcomes=(RuntimeDecisionOutcome.RELEASED,),
+        runtime_action=RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE,
+        advance_before_recovery=False,
+    )
+    service.transition_run(
+        "RUN-TARGET",
+        RunState.VERIFYING,
+        "legacy-agent",
+        "target-secret",
+        "target-verifying-v2",
+    )
+    old_lease = service._store.get_lease("RUN-TARGET")
+    service.transition_run(
+        "RUN-TARGET",
+        RunState.SUCCEEDED,
+        "legacy-agent",
+        "target-secret",
+        "target-succeeded-v2",
+    )
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM events WHERE aggregate_id='RUN-TARGET' "
+            "AND event_type='RUN_TRANSITIONED' ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row["payload_json"])
+        assert payload.pop("lease_release")["lease_epoch"] == old_lease.version + 1
+        payload["schema_version"] = "run-transition.v2"
+        canonical = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        event_hash = hashlib.sha256(
+            (
+                f"{row['previous_hash']}|{row['aggregate_id']}|{row['event_type']}|"
+                f"{canonical}|{row['created_at']}"
+            ).encode()
+        ).hexdigest()
+        event_id = f"EVT-{event_hash[:16].upper()}"
+        conn.execute(
+            "UPDATE events SET event_id=?, event_hash=?, payload_json=? WHERE event_id=?",
+            (event_id, event_hash, canonical, row["event_id"]),
+        )
+        conn.execute(
+            "UPDATE execution_leases SET lease_token=?, version=?, updated_at=? WHERE run_id=?",
+            (old_lease.lease_token, old_lease.version, old_lease.updated_at, "RUN-TARGET"),
+        )
+    clock.value += timedelta(seconds=61)
+    return service, event_id, old_lease.version
+
+
+def _reconcile_terminal_lease(
+    service: ContinuityExecutionService, event_id: str, lease_version: int, **changes: Any
+) -> Any:
+    values = {
+        "target_run_id": "RUN-TARGET",
+        "expected_terminal_event_id": event_id,
+        "expected_target_lease_version": lease_version,
+        "recovery_run_id": "RUN-RECOVERY",
+        "recovery_owner_id": "recovery-agent",
+        "recovery_lease_token": "recovery-secret",
+        "decision_id": "DEC-20260911-5C37A985",
+        "reason": "Legacy v2 terminal transition omitted atomic lease release.",
+        "idempotency_key": "reconcile-terminal-target",
+    }
+    values.update(changes)
+    return service.reconcile_terminal_lease(**values)
+
+
 def _checkpoint_test_wal(root: Path) -> None:
     with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -2657,6 +2734,59 @@ def test_terminal_lease_fence_is_atomic_idempotent_and_rejects_old_token(
     assert payload["request"]["action"] == "fence_terminal_lease"
     assert payload["target"]["settlement_event_id"] == event_id
     assert payload["lease_release"]["lease_epoch"] == released.version
+
+
+def test_terminal_lease_reconciliation_is_atomic_idempotent_and_state_preserving(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    service, event_id, old_lease_version = _legacy_v2_terminal_transition_ready(
+        tmp_path, clock
+    )
+    before_run = service._store.get_run("RUN-TARGET")
+
+    reconciled = _reconcile_terminal_lease(service, event_id, old_lease_version)
+
+    assert reconciled == before_run
+    released = service._store.get_lease("RUN-TARGET")
+    assert released.version == old_lease_version + 1
+    assert released.lease_token.startswith("RELEASED:")
+    assert _reconcile_terminal_lease(service, event_id, old_lease_version) == reconciled
+    with pytest.raises(ContinuityExecutionError, match="token identity"):
+        _reconcile_terminal_lease(
+            service,
+            event_id,
+            old_lease_version,
+            recovery_lease_token="wrong-secret",
+        )
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        rows = conn.execute(
+            "SELECT payload_json FROM events "
+            "WHERE event_type='RUN_TERMINAL_LEASE_RECONCILED'"
+        ).fetchall()
+    assert len(rows) == 1
+    assert "target-secret" not in rows[0][0]
+    assert "recovery-secret" not in rows[0][0]
+    payload = json.loads(rows[0][0])
+    assert payload["request"]["action"] == "reconcile_terminal_lease"
+    assert payload["target"]["terminal_event_id"] == event_id
+    assert payload["target"]["state"] == RunState.SUCCEEDED.value
+
+
+def test_terminal_lease_reconciliation_rolls_back_release_on_event_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    service, event_id, lease_version = _legacy_v2_terminal_transition_ready(tmp_path, clock)
+    before = service._store.get_lease("RUN-TARGET")
+
+    def fail_append(*_args: Any, **_kwargs: Any) -> Any:
+        raise ContinuityStoreError("injected reconciliation event failure")
+
+    monkeypatch.setattr(service._store, "_append_event", fail_append)
+    with pytest.raises(ContinuityExecutionError, match="injected reconciliation event failure"):
+        _reconcile_terminal_lease(service, event_id, lease_version)
+    assert service._store.get_lease("RUN-TARGET") == before
 
 
 def test_terminal_lease_fence_rolls_back_release_on_event_failure(

@@ -1059,6 +1059,95 @@ class ContinuityExecutionService:
         except (ContinuityStoreError, DecisionError) as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def reconcile_terminal_lease(
+        self,
+        *,
+        target_run_id: str,
+        expected_terminal_event_id: str,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Release a lease omitted by a verified legacy v2 terminal transition."""
+
+        try:
+            replay = self._store.terminal_lease_reconciliation_replay(
+                target_run_id=target_run_id,
+                expected_terminal_event_id=expected_terminal_event_id,
+                expected_target_lease_version=expected_target_lease_version,
+                recovery_run_id=recovery_run_id,
+                recovery_owner_id=recovery_owner_id,
+                recovery_lease_token=recovery_lease_token,
+                decision_id=decision_id,
+                reason=reason,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                return replay
+            decisions = DecisionService(self._root)
+            decision, decision_sha256 = decisions.get_decision_with_sha256(decision_id)
+            capability = decision.runtime_capability
+            if (
+                decision.decision_conclusion != "approved"
+                or decision.conditions
+                or capability is None
+                or capability.allowed_runtime_actions
+                != (RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE,)
+                or capability.target_run_ids != (target_run_id,)
+                or capability.allowed_outcomes != (RuntimeDecisionOutcome.RELEASED,)
+            ):
+                raise ContinuityExecutionError(
+                    "补偿 Decision capability 必须精确绑定 "
+                    "reconcile_terminal_lease/目标/RELEASED"
+                )
+            target = self._store.get_run(target_run_id)
+            target_lease = self._store.get_lease(target_run_id)
+            target_work = self._store.get_work(target.work_id)
+            target_decision, target_decision_sha256 = decisions.get_decision_with_sha256(
+                target_work.authorization_ref
+            )
+            recovery = self._store.get_run(recovery_run_id)
+            recovery_lease = self._store.get_lease(recovery_run_id)
+            recovery_work = self._store.get_work(recovery.work_id)
+            if target.state not in {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}:
+                raise ContinuityExecutionError("补偿目标必须已经处于 Run 终态")
+            if target_lease.version != expected_target_lease_version:
+                raise ContinuityExecutionError("目标旧 lease version CAS 冲突")
+            if recovery.state is not RunState.RUNNING:
+                raise ContinuityExecutionError("恢复 Run 必须为 RUNNING")
+            self._require_active_lease(
+                recovery_lease, recovery_owner_id, recovery_lease_token, self._utc_now()
+            )
+            if recovery_lease_token in reason:
+                raise ContinuityExecutionError("补偿原因不得包含恢复 lease token")
+            return self._store.reconcile_terminal_lease(
+                target_run_id=target_run_id,
+                expected_target_state=target.state.value,
+                expected_target_run_version=target.version,
+                expected_target_lease_version=expected_target_lease_version,
+                expected_terminal_event_id=expected_terminal_event_id,
+                target_decision_id=target_decision.decision_id,
+                target_decision_sha256=target_decision_sha256,
+                target_change_id=target_decision.change_id,
+                recovery_run_id=recovery_run_id,
+                expected_recovery_run_version=recovery.version,
+                expected_recovery_work_version=recovery_work.version,
+                expected_recovery_lease_version=recovery_lease.version,
+                expected_recovery_git_head=recovery.git_head,
+                recovery_owner_id=recovery_owner_id,
+                recovery_lease_token=recovery_lease_token,
+                decision_id=decision_id,
+                decision_sha256=decision_sha256,
+                reason=reason,
+                idempotency_key=idempotency_key,
+            )
+        except (ContinuityStoreError, DecisionError) as error:
+            raise ContinuityExecutionError(str(error)) from error
+
     def get_run(self, run_id: str) -> RunItem:
         """Return one Run for CLI-side physical Git verification."""
         try:

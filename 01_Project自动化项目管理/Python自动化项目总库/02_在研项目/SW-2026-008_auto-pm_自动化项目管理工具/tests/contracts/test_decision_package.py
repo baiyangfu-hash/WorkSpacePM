@@ -153,6 +153,18 @@ def test_runtime_capability_is_typed_and_legacy_metadata_remains_compatible() ->
     assert restored.metadata["legacy_note"] == "preserved"
 
 
+def test_terminal_lease_reconciliation_capability_round_trips() -> None:
+    capability = RuntimeDecisionCapability(
+        allowed_runtime_actions=(RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE,),
+        target_run_ids=("RUN-SW008-M2-U04B-001",),
+        allowed_outcomes=(RuntimeDecisionOutcome.RELEASED,),
+    )
+
+    restored = RuntimeDecisionCapability.from_dict(capability.to_dict())
+
+    assert restored == capability
+
+
 @pytest.mark.parametrize(
     "runtime_capability",
     [

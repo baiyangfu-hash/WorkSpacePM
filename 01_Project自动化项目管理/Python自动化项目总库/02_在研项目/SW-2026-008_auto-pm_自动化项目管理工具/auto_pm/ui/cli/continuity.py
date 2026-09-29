@@ -632,6 +632,55 @@ def fence_terminal_lease(
     _emit(item)
 
 
+@run_group.command(name="reconcile-terminal-lease")
+@click.option("--target-run-id", required=True)
+@click.option("--expected-terminal-event-id", required=True)
+@click.option("--expected-target-lease-version", type=click.IntRange(min=1), required=True)
+@click.option("--recovery-run-id", required=True)
+@click.option("--recovery-owner", "recovery_owner_id", required=True)
+@click.option(
+    "--recovery-lease-stdin",
+    is_flag=True,
+    required=True,
+    help="Read the recovery lease token from standard input; tokens are never CLI arguments.",
+)
+@click.option("--decision-id", required=True)
+@click.option("--reason", required=True)
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def reconcile_terminal_lease(
+    ctx: click.Context,
+    target_run_id: str,
+    expected_terminal_event_id: str,
+    expected_target_lease_version: int,
+    recovery_run_id: str,
+    recovery_owner_id: str,
+    recovery_lease_stdin: bool,
+    decision_id: str,
+    reason: str,
+    idempotency_key: str,
+) -> None:
+    """Release a lease omitted by an exact legacy v2 terminal transition."""
+
+    del recovery_lease_stdin
+    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    try:
+        item = _execution_service(ctx).reconcile_terminal_lease(
+            target_run_id=target_run_id,
+            expected_terminal_event_id=expected_terminal_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+    except ContinuityExecutionError as error:
+        raise click.ClickException(str(error)) from error
+    _emit(item)
+
+
 @run_group.command(name="revoke-unstarted")
 @click.option("--target-run-id", required=True)
 @click.option("--recovery-run-id", required=True)

@@ -37,12 +37,14 @@ class RuntimeDecisionAction(StrEnum):
     SETTLE_EXPIRED_RUN = "settle_expired_run"
     REVOKE_UNSTARTED_RUN = "revoke_unstarted_run"
     FENCE_TERMINAL_LEASE = "fence_terminal_lease"
+    RECONCILE_TERMINAL_LEASE = "reconcile_terminal_lease"
 
 
 class RuntimeDecisionOutcome(StrEnum):
     """Fail-closed outcomes allowed for administrative Run settlement."""
 
     CANCELLED = "CANCELLED"
+    RELEASED = "RELEASED"
 
 
 @dataclass(frozen=True)

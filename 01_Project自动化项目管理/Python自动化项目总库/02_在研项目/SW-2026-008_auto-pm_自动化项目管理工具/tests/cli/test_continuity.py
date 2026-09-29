@@ -20,7 +20,7 @@ from click import ClickException
 from click.testing import CliRunner, Result
 
 import auto_pm.ui.cli.continuity as continuity_cli
-from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.continuity import RunItem, RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
     DecisionPackageDTO,
@@ -204,7 +204,9 @@ def test_lease_renew_cli_rejects_plaintext_token_option_without_echoing_it(
     assert "must-not-leak" not in result.output
 
 
-def test_lease_secret_source_is_consumed_before_child_execution(monkeypatch) -> None:
+def test_lease_secret_source_is_consumed_before_child_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("AUTO_PM_E04_ONE_SHOT", "must-not-leak")
 
     assert continuity_cli._secret_from_environment("AUTO_PM_E04_ONE_SHOT") == "must-not-leak"
@@ -1004,7 +1006,7 @@ def test_cli_git_fact_read_rejects_success_with_stderr(
         stdout = b""
         stderr = b"warning: Permission denied\n"
 
-    monkeypatch.setattr(continuity_cli.subprocess, "run", lambda *args, **kwargs: Result())
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
 
     with pytest.raises(ClickException, match="Permission denied"):
         continuity_cli._git(tmp_path, "status", "--porcelain")
@@ -1187,6 +1189,68 @@ def test_settle_expired_cli_rejects_failed_outcome_without_mutation(
     assert "recovery-cli-secret" not in result.output
     state = ContinuityExecutionService(tmp_path).get_run("RUN-CLI-TARGET").state
     assert state is RunState.RUNNING
+
+
+def test_reconcile_terminal_lease_cli_reads_secret_only_from_stdin(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _repository(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_reconcile(
+        _self: ContinuityExecutionService, **values: object
+    ) -> RunItem:
+        captured.update(values)
+        return RunItem(
+            run_id="RUN-CLI-TARGET",
+            work_id="WORK-CLI-TARGET",
+            state=RunState.SUCCEEDED,
+            executor_id="legacy-agent",
+            adapter="codex",
+            owned_paths=("README.md",),
+            declared_dirty_paths=(),
+            git_head="a" * 40,
+            worktree_path=str(tmp_path),
+            version=3,
+            created_at="2026-09-28T00:00:00+00:00",
+            updated_at="2026-09-28T00:00:01+00:00",
+        )
+
+    monkeypatch.setattr(ContinuityExecutionService, "reconcile_terminal_lease", fake_reconcile)
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "continuity",
+            "run",
+            "reconcile-terminal-lease",
+            "--target-run-id",
+            "RUN-CLI-TARGET",
+            "--expected-terminal-event-id",
+            "EVT-0123456789ABCDEF",
+            "--expected-target-lease-version",
+            "1",
+            "--recovery-run-id",
+            "RUN-CLI-RECOVERY",
+            "--recovery-owner",
+            "recovery-agent",
+            "--recovery-lease-stdin",
+            "--decision-id",
+            "DEC-20260929-U04BR1R1",
+            "--reason",
+            "Release the omitted terminal lease.",
+            "--idempotency-key",
+            "cli-reconcile-terminal-lease",
+        ],
+        input="stdin-only-secret\n",
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["recovery_lease_token"] == "stdin-only-secret"
+    assert "stdin-only-secret" not in result.output
+    assert json.loads(result.output)["state"] == RunState.SUCCEEDED.value
 
 
 def test_continuity_mutation_rejects_linked_worktree_before_database_creation(
