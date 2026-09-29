@@ -24,6 +24,11 @@ def _workspace(ctx: click.Context) -> Path:
     return Path(app_ctx.workspace_root)
 
 
+def _control_root(ctx: click.Context) -> Path:
+    app_ctx: AppContext = ctx.obj
+    return Path(app_ctx.control_root)
+
+
 @click.group(name="git-hook")
 def git_hook_group() -> None:
     """Git 提交硬锁物理门禁 (Git Hook Enforcer)"""
@@ -34,7 +39,8 @@ def git_hook_group() -> None:
 def cmd_pre_commit(ctx: click.Context) -> None:
     """执行 pre-commit 台账一致性校验。"""
     ws = _workspace(ctx)
-    code = enforce_pre_commit(ws)
+    ctrl = _control_root(ctx)
+    code = enforce_pre_commit(ws, control_root=ctrl)
     if code != 0:
         ctx.exit(code)
 
@@ -43,8 +49,8 @@ def cmd_pre_commit(ctx: click.Context) -> None:
 @click.pass_context
 def cmd_release_gate(ctx: click.Context) -> None:
     """执行发布前全局台账一致性校验。"""
-    ws = _workspace(ctx)
-    code = enforce_release_ledger_gate(ws)
+    ctrl = _control_root(ctx)
+    code = enforce_release_ledger_gate(ctrl)
     if code != 0:
         ctx.exit(code)
 
@@ -55,7 +61,8 @@ def cmd_release_gate(ctx: click.Context) -> None:
 def cmd_commit_msg(ctx: click.Context, msg_file: str) -> None:
     """执行 commit-msg 生产代码关联单据强校验。"""
     ws = _workspace(ctx)
-    code = enforce_commit_msg(ws, Path(msg_file))
+    ctrl = _control_root(ctx)
+    code = enforce_commit_msg(ws, Path(msg_file), control_root=ctrl)
     if code != 0:
         ctx.exit(code)
 
@@ -66,14 +73,15 @@ def cmd_commit_msg(ctx: click.Context, msg_file: str) -> None:
 def cmd_preflight(ctx: click.Context, msg_file: Path) -> None:
     """以同一个不可变暂存快照执行提交前只读预检。"""
     ws = _workspace(ctx)
+    ctrl = _control_root(ctx)
     try:
         staged_snapshot = get_staged_snapshot(ws)
     except StagedSnapshotError as error:
         console.print(f"[red]错误: 无法读取 Git 暂存区: {error}[/red]")
         ctx.exit(1)
 
-    pre_commit_code = enforce_pre_commit(ws, staged_snapshot)
-    commit_msg_code = enforce_commit_msg(ws, msg_file, staged_snapshot)
+    pre_commit_code = enforce_pre_commit(ws, staged_snapshot, control_root=ctrl)
+    commit_msg_code = enforce_commit_msg(ws, msg_file, staged_snapshot, control_root=ctrl)
     if pre_commit_code != 0:
         ctx.exit(pre_commit_code)
     if commit_msg_code != 0:
