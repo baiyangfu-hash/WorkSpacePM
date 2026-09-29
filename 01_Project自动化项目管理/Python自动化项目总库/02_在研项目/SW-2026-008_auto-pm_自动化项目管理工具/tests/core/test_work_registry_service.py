@@ -653,3 +653,401 @@ def test_store_rejects_hardlinked_database_before_read_or_write(tmp_path: Path) 
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM work_items").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+
+
+# --- H11A: Work administrative adjudication (BLOCKED -> CANCELLED) -------------------------
+
+ADJ_TARGET_DECISION = "DEC-20260910-A2TARGT1"
+ADJ_DECISION = "DEC-20260911-5C37A985"
+ADJ_RECOVERY_TOKEN = "recovery-secret"
+
+
+def _adjudication_ready(
+    root: Path,
+    clock: Any,
+    *,
+    terminal_run: bool = True,
+    capability_targets: tuple[str, ...] = ("WORK-TARGET",),
+    decision_conditions: list[str] | None = None,
+    reuse_original_chain: bool = False,
+) -> tuple[WorkRegistryService, Any]:
+    """Build one historical BLOCKED Work plus an independent, live adjudication authority."""
+
+    from auto_pm.contracts.continuity import RunState
+    from auto_pm.contracts.decision_package import (
+        RUNTIME_CAPABILITY_KEY,
+        DecisionPackageDTO,
+        RuntimeDecisionAction,
+        RuntimeDecisionCapability,
+        RuntimeDecisionOutcome,
+    )
+    from tests.core.test_continuity_execution_service import (
+        _runtime_change,
+        _services,
+        _start,
+        _start_evidence,
+    )
+
+    _works, execution = _services(root, clock)
+    works = WorkRegistryService(root, store=execution._store, now=lambda: clock().isoformat())
+    _runtime_change(root)
+    canonical_paths = ["auto_pm/core/a.py", ".auto-pm/continuity.db"]
+    decisions = root / ".auto-pm" / "decisions"
+    decisions.mkdir(parents=True, exist_ok=True)
+    original = DecisionPackageDTO(
+        decision_id=ADJ_TARGET_DECISION,
+        project_id="SW-2026-008",
+        change_id="CHG-SCPT-2026-214" if reuse_original_chain else "CHG-SCPT-2026-213",
+        approved_scope="MODULE",
+        approved_files=["auto_pm/core/a.py"],
+        approver="fubai",
+        approved_at=clock().isoformat(),
+        decision_conclusion="approved",
+    )
+    adjudication = DecisionPackageDTO(
+        decision_id=ADJ_DECISION,
+        project_id="SW-2026-008",
+        change_id="CHG-SCPT-2026-214",
+        approved_scope="MODULE",
+        approved_files=canonical_paths,
+        approver="fubai",
+        approved_at=clock().isoformat(),
+        decision_conclusion="approved",
+        conditions=list(decision_conditions or []),
+        metadata={
+            RUNTIME_CAPABILITY_KEY: RuntimeDecisionCapability(
+                allowed_runtime_actions=(RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK,),
+                target_run_ids=(),
+                allowed_outcomes=(RuntimeDecisionOutcome.CANCELLED,),
+                target_work_ids=capability_targets,
+            )
+        },
+    )
+    for item in (original, adjudication):
+        (decisions / f"{item.decision_id}.json").write_bytes(
+            json.dumps(item.to_dict(), ensure_ascii=False, indent=2).encode("utf-8")
+        )
+    _git(root, "add", "-f", "--", f".auto-pm/decisions/{ADJ_TARGET_DECISION}.json")
+    _git(root, "add", "-f", "--", f".auto-pm/decisions/{ADJ_DECISION}.json")
+    _git(
+        root,
+        "-c",
+        "user.name=Continuity Test",
+        "-c",
+        "user.email=continuity@example.invalid",
+        "commit",
+        "-m",
+        "bind decisions",
+    )
+
+    works.create_work(
+        work_id="WORK-TARGET",
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.GOVERNANCE,
+        title="Historical target",
+        owner="legacy-agent",
+        scope_paths=["auto_pm/core/a.py"],
+        source_fingerprint="sha256:target",
+        idempotency_key="create-target-work",
+    )
+    works.authorize("WORK-TARGET", ADJ_TARGET_DECISION, "authorize-target-work")
+    _start(
+        execution,
+        run_id="RUN-TARGET",
+        work_id="WORK-TARGET",
+        executor_id="legacy-agent",
+        lease_token="target-secret",
+        lease_seconds=900,
+        idempotency_key="create-target-run",
+    )
+    _start_evidence(
+        execution,
+        run_id="RUN-TARGET",
+        owner_id="legacy-agent",
+        lease_token="target-secret",
+        idempotency_key="record-target-start",
+    )
+    if terminal_run:
+        execution.transition_run(
+            "RUN-TARGET", RunState.FAILED, "legacy-agent", "target-secret", "fail-target"
+        )
+    works.transition("WORK-TARGET", WorkState.IN_PROGRESS, "target-in-progress")
+    works.transition("WORK-TARGET", WorkState.BLOCKED, "target-blocked")
+
+    works.create_work(
+        work_id="WORK-RECOVERY",
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.GOVERNANCE,
+        title="Authorized adjudication",
+        owner="recovery-agent",
+        scope_paths=canonical_paths,
+        source_fingerprint="sha256:recovery",
+        idempotency_key="create-recovery-work",
+    )
+    works.authorize("WORK-RECOVERY", ADJ_DECISION, "authorize-recovery-work")
+    works.transition("WORK-RECOVERY", WorkState.IN_PROGRESS, "start-recovery-work")
+    _start(
+        execution,
+        run_id="RUN-RECOVERY",
+        work_id="WORK-RECOVERY",
+        executor_id="recovery-agent",
+        lease_token=ADJ_RECOVERY_TOKEN,
+        lease_seconds=900,
+        idempotency_key="create-recovery-run",
+        owned_paths=canonical_paths,
+    )
+    _start_evidence(
+        execution,
+        run_id="RUN-RECOVERY",
+        owner_id="recovery-agent",
+        lease_token=ADJ_RECOVERY_TOKEN,
+        idempotency_key="record-recovery-start",
+    )
+    return works, execution
+
+
+def _adjudicate(works: WorkRegistryService, **changes: Any) -> WorkItem:
+    evidence, original_sha = works.adjudication_evidence("WORK-TARGET")
+    values: dict[str, Any] = {
+        "target_work_id": "WORK-TARGET",
+        "expected_work_version": evidence.version,
+        "expected_original_decision_sha256": original_sha,
+        "expected_run_set_sha256": evidence.run_set_sha256,
+        "expected_lease_set_sha256": evidence.lease_set_sha256,
+        "recovery_run_id": "RUN-RECOVERY",
+        "recovery_owner_id": "recovery-agent",
+        "recovery_lease_token": ADJ_RECOVERY_TOKEN,
+        "decision_id": ADJ_DECISION,
+        "outcome": WorkState.CANCELLED,
+        "reason": "Superseded historical Work; preserve evidence and retire from active index.",
+        "idempotency_key": "adjudicate-target-work",
+    }
+    values.update(changes)
+    return cast(WorkItem, works.adjudicate_blocked_work(**values))
+
+
+def _history_snapshot(root: Path) -> dict[str, list[tuple[Any, ...]]]:
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        return {
+            "runs": conn.execute("SELECT * FROM run_items ORDER BY run_id").fetchall(),
+            "leases": conn.execute("SELECT * FROM execution_leases ORDER BY run_id").fetchall(),
+            "checkpoints": conn.execute("SELECT * FROM checkpoints ORDER BY rowid").fetchall(),
+            "events": conn.execute("SELECT * FROM events ORDER BY rowid").fetchall(),
+        }
+
+
+def test_adjudication_evidence_is_read_only_and_reports_exact_bindings(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(tmp_path, Clock())
+    before = _history_snapshot(tmp_path)
+
+    evidence, original_sha = works.adjudication_evidence("WORK-TARGET")
+
+    assert _history_snapshot(tmp_path) == before
+    assert evidence.adjudicable and evidence.blockers == ()
+    assert evidence.state == "BLOCKED" and evidence.authorization_ref == ADJ_TARGET_DECISION
+    assert evidence.run_states == (("RUN-TARGET", "FAILED", 3),)
+    assert evidence.lease_states[0][0] == "RUN-TARGET" and evidence.lease_states[0][2] is True
+    assert len(evidence.run_set_sha256) == 64 and len(evidence.lease_set_sha256) == 64
+    assert len(original_sha) == 64
+
+
+def test_adjudication_cancels_work_and_preserves_all_history(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(tmp_path, Clock())
+    before = _history_snapshot(tmp_path)
+    blocked = works.get_work("WORK-TARGET")
+
+    cancelled = _adjudicate(works)
+
+    after = _history_snapshot(tmp_path)
+    assert cancelled.state is WorkState.CANCELLED
+    assert cancelled.version == blocked.version + 1
+    assert cancelled.authorization_ref == ADJ_DECISION
+    # Runs, leases, checkpoints and every earlier event are byte-identical.
+    assert after["runs"] == before["runs"]
+    assert after["leases"] == before["leases"]
+    assert after["checkpoints"] == before["checkpoints"]
+    assert after["events"][: len(before["events"])] == before["events"]
+    appended = after["events"][len(before["events"]) :]
+    assert len(appended) == 1 and appended[0][3] == "WORK_ADJUDICATED"
+    payload = json.loads(appended[0][4])
+    assert payload["target"]["previous_authorization_ref"] == ADJ_TARGET_DECISION
+    assert payload["request"]["decision_id"] == ADJ_DECISION
+    assert ADJ_RECOVERY_TOKEN not in appended[0][4]
+    assert works.get_work("WORK-TARGET").state is WorkState.CANCELLED
+
+
+def test_adjudication_replay_is_idempotent_and_rejects_semantic_drift(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(tmp_path, Clock())
+    evidence, original_sha = works.adjudication_evidence("WORK-TARGET")
+    first = _adjudicate(works)
+    events_after_first = _history_snapshot(tmp_path)["events"]
+
+    replay = works.adjudicate_blocked_work(
+        target_work_id="WORK-TARGET",
+        expected_work_version=evidence.version,
+        expected_original_decision_sha256=original_sha,
+        expected_run_set_sha256=evidence.run_set_sha256,
+        expected_lease_set_sha256=evidence.lease_set_sha256,
+        recovery_run_id="RUN-RECOVERY",
+        recovery_owner_id="recovery-agent",
+        recovery_lease_token=ADJ_RECOVERY_TOKEN,
+        decision_id=ADJ_DECISION,
+        outcome=WorkState.CANCELLED,
+        reason="Superseded historical Work; preserve evidence and retire from active index.",
+        idempotency_key="adjudicate-target-work",
+    )
+
+    assert replay == first
+    assert _history_snapshot(tmp_path)["events"] == events_after_first
+    with pytest.raises(WorkRegistryError):
+        works.adjudicate_blocked_work(
+            target_work_id="WORK-TARGET",
+            expected_work_version=evidence.version,
+            expected_original_decision_sha256=original_sha,
+            expected_run_set_sha256=evidence.run_set_sha256,
+            expected_lease_set_sha256=evidence.lease_set_sha256,
+            recovery_run_id="RUN-RECOVERY",
+            recovery_owner_id="recovery-agent",
+            recovery_lease_token=ADJ_RECOVERY_TOKEN,
+            decision_id=ADJ_DECISION,
+            outcome=WorkState.CANCELLED,
+            reason="A different reason under the same idempotency key.",
+            idempotency_key="adjudicate-target-work",
+        )
+
+
+def test_adjudication_rejects_non_terminal_run_without_any_write(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(tmp_path, Clock(), terminal_run=False)
+    before = _history_snapshot(tmp_path)
+    evidence, _sha = works.adjudication_evidence("WORK-TARGET")
+    assert not evidence.adjudicable
+    assert any("非终态 Run" in item for item in evidence.blockers)
+
+    with pytest.raises(WorkRegistryError, match="非终态 Run"):
+        _adjudicate(works)
+
+    assert _history_snapshot(tmp_path) == before
+    assert works.get_work("WORK-TARGET").state is WorkState.BLOCKED
+
+
+def test_adjudication_rejects_unreleased_terminal_lease(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(tmp_path, Clock())
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        conn.execute(
+            "UPDATE execution_leases SET lease_token='legacy-token' WHERE run_id='RUN-TARGET'"
+        )
+        conn.commit()
+
+    evidence, _sha = works.adjudication_evidence("WORK-TARGET")
+    assert not evidence.adjudicable
+    with pytest.raises(WorkRegistryError, match="lease 未释放"):
+        _adjudicate(works)
+    assert works.get_work("WORK-TARGET").state is WorkState.BLOCKED
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"expected_work_version": 1}, "版本"),
+        ({"expected_run_set_sha256": "0" * 64}, "摘要"),
+        ({"expected_lease_set_sha256": "0" * 64}, "摘要"),
+        ({"expected_original_decision_sha256": "0" * 64}, "SHA-256"),
+        ({"recovery_lease_token": "wrong-token"}, "恢复"),
+        ({"recovery_owner_id": "someone-else"}, "恢复"),
+    ],
+)
+def test_adjudication_binds_version_digests_and_recovery_lease(
+    tmp_path: Path, change: dict[str, Any], message: str
+) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(tmp_path, Clock())
+    before = _history_snapshot(tmp_path)
+
+    with pytest.raises(WorkRegistryError, match=message):
+        _adjudicate(works, **change)
+
+    assert _history_snapshot(tmp_path) == before
+    assert works.get_work("WORK-TARGET").state is WorkState.BLOCKED
+
+
+def test_adjudication_requires_exact_decision_authority(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(
+        tmp_path, Clock(), capability_targets=("WORK-OTHER",)
+    )
+    with pytest.raises(WorkRegistryError, match="未授权目标 Work"):
+        _adjudicate(works)
+    assert works.get_work("WORK-TARGET").state is WorkState.BLOCKED
+
+
+def test_adjudication_rejects_conditional_decision(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(
+        tmp_path, Clock(), decision_conditions=["only if reviewed"]
+    )
+    with pytest.raises(WorkRegistryError, match="无条件"):
+        _adjudicate(works)
+
+
+def test_adjudication_requires_change_independent_of_original_chain(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(tmp_path, Clock(), reuse_original_chain=True)
+    with pytest.raises(WorkRegistryError, match="独立于目标 Work 的原 CHG"):
+        _adjudicate(works)
+
+
+def test_adjudication_rejects_expired_recovery_lease(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    clock = Clock()
+    works, _execution = _adjudication_ready(tmp_path, clock)
+    clock.value += timedelta(seconds=901)
+
+    with pytest.raises(WorkRegistryError, match="恢复"):
+        _adjudicate(works)
+    assert works.get_work("WORK-TARGET").state is WorkState.BLOCKED
+
+
+def test_adjudication_rejects_secret_in_reason_and_non_cancelled_outcome(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, _execution = _adjudication_ready(tmp_path, Clock())
+    with pytest.raises(WorkRegistryError, match="token"):
+        _adjudicate(works, reason=f"leaks {ADJ_RECOVERY_TOKEN}")
+    with pytest.raises(WorkRegistryError, match="CANCELLED"):
+        _adjudicate(works, outcome=WorkState.CLOSED)
+    assert works.get_work("WORK-TARGET").state is WorkState.BLOCKED
+
+
+def test_adjudication_rolls_back_work_when_event_append_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+
+    works, execution = _adjudication_ready(tmp_path, Clock())
+    before = _history_snapshot(tmp_path)
+
+    def broken(*_args: object, **_kwargs: object) -> None:
+        raise ContinuityStoreError("simulated event failure")
+
+    monkeypatch.setattr(execution._store, "_append_event", broken)
+    with pytest.raises(WorkRegistryError, match="simulated"):
+        _adjudicate(works)
+
+    monkeypatch.undo()
+    assert _history_snapshot(tmp_path) == before
+    assert works.get_work("WORK-TARGET").state is WorkState.BLOCKED

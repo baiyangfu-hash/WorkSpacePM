@@ -14,9 +14,19 @@ from auto_pm.contracts.continuity import (
     WorkKind,
     WorkState,
 )
-from auto_pm.contracts.decision_package import DecisionPackageDTO
+from auto_pm.contracts.decision_package import (
+    DecisionPackageDTO,
+    RuntimeDecisionAction,
+    RuntimeDecisionOutcome,
+    is_canonical_decision_id,
+)
 from auto_pm.contracts.mission import Mission
-from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.domain.change.decision_service import DecisionError, DecisionService
+from auto_pm.infrastructure.continuity_store import (
+    ContinuityStore,
+    ContinuityStoreError,
+    WorkAdjudicationEvidence,
+)
 
 
 class WorkRegistryError(RuntimeError):
@@ -249,6 +259,156 @@ class WorkRegistryService:
         if new_state not in _TRANSITIONS[work.state]:
             raise WorkRegistryError(f"非法 Work 状态迁移: {work.state} -> {new_state}")
         return self._transition(work, new_state, work.authorization_ref, idempotency_key)
+
+    def adjudication_evidence(self, work_id: str) -> tuple[WorkAdjudicationEvidence, str]:
+        """Read-only facts and the original Decision digest an adjudication must bind."""
+
+        try:
+            evidence = self._store.work_adjudication_evidence(work_id)
+            if not is_canonical_decision_id(evidence.authorization_ref):
+                return evidence, ""
+            _decision, sha256 = DecisionService(self._root).get_decision_with_sha256(
+                evidence.authorization_ref
+            )
+        except (ContinuityStoreError, DecisionError) as error:
+            raise WorkRegistryError(str(error)) from error
+        return evidence, sha256
+
+    def adjudicate_blocked_work(
+        self,
+        *,
+        target_work_id: str,
+        expected_work_version: int,
+        expected_original_decision_sha256: str,
+        expected_run_set_sha256: str,
+        expected_lease_set_sha256: str,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        outcome: WorkState,
+        reason: str,
+        idempotency_key: str,
+    ) -> WorkItem:
+        """Forward-cancel one historical BLOCKED Work under an exact, independent Decision.
+
+        History is preserved: Runs, leases, Checkpoints and earlier events are untouched.
+        """
+
+        normalized_reason = reason.strip()
+        if not all(
+            value.strip()
+            for value in (
+                target_work_id,
+                expected_original_decision_sha256,
+                expected_run_set_sha256,
+                expected_lease_set_sha256,
+                recovery_run_id,
+                recovery_owner_id,
+                recovery_lease_token,
+                decision_id,
+                idempotency_key,
+            )
+        ):
+            raise WorkRegistryError("裁决目标、绑定摘要、恢复 lease、Decision 与幂等键均不能为空")
+        if (
+            reason != normalized_reason
+            or not normalized_reason
+            or len(normalized_reason) > 1000
+            or any(not character.isprintable() for character in normalized_reason)
+        ):
+            raise WorkRegistryError("裁决原因必须为 1 到 1000 个字符")
+        if recovery_lease_token in normalized_reason:
+            raise WorkRegistryError("裁决原因不得包含恢复 lease token")
+        if outcome is not WorkState.CANCELLED:
+            raise WorkRegistryError("行政裁决只能前向结算为 CANCELLED")
+        try:
+            target = self._store.get_work(target_work_id)
+            recovery = self._store.get_run(recovery_run_id)
+            recovery_work = self._store.get_work(recovery.work_id)
+            recovery_lease = self._store.get_lease(recovery_run_id)
+            runtime_target_path = self._store.runtime_target_path()
+            decisions = DecisionService(self._root)
+            decision, decision_sha256 = decisions.get_decision_with_sha256(decision_id)
+            capability = decision.runtime_capability
+            if decision.decision_conclusion != "approved" or decision.conditions:
+                raise WorkRegistryError("运行态 Decision 必须是无条件 approved")
+            if capability is None:
+                raise WorkRegistryError("Decision 未声明 runtime_capability")
+            if RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK not in capability.allowed_runtime_actions:
+                raise WorkRegistryError("Decision 未授权 adjudicate_blocked_work")
+            if target_work_id not in capability.target_work_ids:
+                raise WorkRegistryError("Decision 未授权目标 Work")
+            if RuntimeDecisionOutcome(outcome.value) not in capability.allowed_outcomes:
+                raise WorkRegistryError("Decision 未授权目标裁决状态")
+            replay_original_id = self._store.adjudication_replay_original_id(
+                target_work_id=target_work_id, idempotency_key=idempotency_key
+            )
+            if replay_original_id is not None:
+                # 精确重放：Work 已被裁决，授权引用已是裁决 Decision；语义一致性由 Store 事件核验。
+                original_id = replay_original_id
+                original_sha256 = expected_original_decision_sha256
+            else:
+                if target.read_only or not is_canonical_decision_id(target.authorization_ref):
+                    raise WorkRegistryError("目标 Work 必须绑定 canonical immutable Decision")
+                original_id = target.authorization_ref
+                original, original_sha256 = decisions.get_decision_with_sha256(original_id)
+                if original_sha256 != expected_original_decision_sha256:
+                    raise WorkRegistryError("原 Decision SHA-256 与裁决绑定不一致")
+                if original_id == decision_id:
+                    raise WorkRegistryError("裁决 Decision 不得复用目标 Work 的原授权链")
+                if original.change_id == decision.change_id:
+                    raise WorkRegistryError("裁决 CHG 必须独立于目标 Work 的原 CHG")
+                if original.project_id != target.subject_project_id:
+                    raise WorkRegistryError("原 Decision 项目与目标 Work 不一致")
+            if target.subject_project_id != recovery_work.subject_project_id:
+                raise WorkRegistryError("裁决目标与恢复 Work 不属于同一项目")
+            if decision.project_id != recovery_work.subject_project_id:
+                raise WorkRegistryError("Decision 项目与恢复 Work 不一致")
+            if recovery_work.authorization_ref != decision_id:
+                raise WorkRegistryError("恢复 Work 未绑定指定 Decision")
+            if recovery_work.work_id == target.work_id:
+                raise WorkRegistryError("裁决目标与恢复 Work 必须不同")
+            approved = self._normalize_paths(decision.approved_files)
+            if not self._covers(runtime_target_path, approved):
+                raise WorkRegistryError("Decision 未覆盖 canonical continuity.db")
+            return self._store.adjudicate_blocked_work(
+                target_work_id=target_work_id,
+                expected_work_version=expected_work_version,
+                expected_original_decision_id=original_id,
+                original_decision_sha256=original_sha256,
+                expected_run_set_sha256=expected_run_set_sha256,
+                expected_lease_set_sha256=expected_lease_set_sha256,
+                recovery_run_id=recovery_run_id,
+                expected_recovery_run_version=recovery.version,
+                expected_recovery_lease_version=recovery_lease.version,
+                recovery_work_id=recovery_work.work_id,
+                expected_recovery_work_version=recovery_work.version,
+                expected_recovery_work_scope_hash=self._store.authority_paths_hash(
+                    recovery_work.scope_paths
+                ),
+                expected_recovery_owned_paths_hash=self._store.authority_paths_hash(
+                    recovery.owned_paths
+                ),
+                recovery_owner_id=recovery_owner_id,
+                recovery_lease_token=recovery_lease_token,
+                decision_id=decision_id,
+                decision_sha256=decision_sha256,
+                decision_change_id=decision.change_id,
+                decision_project_id=decision.project_id,
+                decision_approved_paths=approved,
+                runtime_target_path=runtime_target_path,
+                outcome=outcome.value,
+                reason=normalized_reason,
+                idempotency_key=idempotency_key,
+            )
+        except (ContinuityStoreError, DecisionError) as error:
+            raise WorkRegistryError(str(error)) from error
+
+    @staticmethod
+    def _covers(path: str, roots: tuple[str, ...]) -> bool:
+        target = PurePosixPath(path).parts
+        return any(target[: len(PurePosixPath(root).parts)] == PurePosixPath(root).parts for root in roots)
 
     def add_relation(
         self,
