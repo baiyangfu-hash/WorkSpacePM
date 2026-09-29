@@ -1,7 +1,7 @@
 # Git Hook 候选快照与控制根治理真源分离实施卡
 
 > 卡片编号：`SW008-M2-GOV-HOOKCTX-001`  
-> 状态：`PLANNED / NOT_AUTHORIZED`  
+> 状态：`IN_PROGRESS / CHG-SCPT-2026-347 纠正执行（CHG-346 失败历史保留）`  
 > 项目归属：`SW-2026-008_auto-pm_自动化项目管理工具`  
 > 变更类型：`BUG_FIX / GOVERNANCE_CONTRACT`  
 > 推荐执行模型：`Claude Sonnet 4.6 (Thinking)` 或同等级推理模型  
@@ -65,6 +65,17 @@
 4. `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/infrastructure/test_git_hook_enforcer.py`
 
 治理对象（CHG、Decision、Work、Run、Checkpoint、台账）按正常 PM 流程单独落账，不得计入上述四个产品代码路径，也不得把它们复制进候选以骗过 Hook。
+
+### 4.1 提交证据层修订（2026-09-29，用户批准方案 A）
+
+首次执行（CHG-346，Gemini）未走治理链且证据不足，其 `completed` 状态被状态机锁定，作为失败历史保留；纠正执行由 `CHG-SCPT-2026-347`、`DEC-20260929-HOOKCTX2`、`WORK/RUN-SW008-M2-HOOKCTX-002` 承载。
+
+已部署的稳定 Hook 仍是旧合同：commit-msg 要求关联 CHG 与项目台账位于同一暂存快照。修复本身尚未生效，因此本次本地隔离提交按 IC01 的分层做法允许两条**提交证据路径**（不属于产品 owned paths，不进入 Run owned_paths）：
+
+1. `04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-347.md`（自控制根原字节引入）；
+2. `04_监控/01_变更管理/02_变更记录/01_版本变更台账.md`（仅在候选分支本地快照上增量加入 CHG-347 一行，不复制 canonical 全量台账）。
+
+提交内容严格为四个产品路径加这两个证据路径，共六路径；出现第七路径即停止。
 
 ## 5. 必须实现的合同
 
