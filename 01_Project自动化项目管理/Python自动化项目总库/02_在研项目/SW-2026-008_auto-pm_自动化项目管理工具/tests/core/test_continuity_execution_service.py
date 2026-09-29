@@ -37,7 +37,12 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionCapability,
     RuntimeDecisionOutcome,
 )
-from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
+from auto_pm.contracts.execution_adapter import (
+    ExecutionActivityStage,
+    ExecutionFailure,
+    ExecutionFailureCode,
+    ExecutionStartEvidence,
+)
 from auto_pm.domain.change.decision_service import DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -961,6 +966,134 @@ def test_terminal_runs_are_exposed_only_when_history_is_explicitly_requested(
     assert service._store.list_runs("WORK-001") == ()
     history = service._store.list_runs("WORK-001", include_terminal=True)
     assert history[0].state is RunState.SUCCEEDED
+
+
+def test_run_activity_timeline_preserves_structured_and_legacy_failure_truth(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    _start_evidence(service)
+    failure = ExecutionFailure(
+        stage=ExecutionActivityStage.FAILED,
+        code=ExecutionFailureCode.NONZERO_EXIT,
+    )
+
+    failed = service.transition_run(
+        "RUN-001",
+        RunState.FAILED,
+        "agent-a",
+        "lease-secret",
+        "fail-with-structured-reason",
+        failure=failure,
+    )
+    replay = service._store.transition_run(
+        "RUN-001",
+        failed.version - 1,
+        RunState.FAILED.value,
+        "fail-with-structured-reason",
+        clock().isoformat(),
+        failure=failure,
+    )
+
+    assert replay == failed
+    activities = service._store.list_run_activities("RUN-001")
+    assert tuple(activity.stage for activity in activities) == (
+        ExecutionActivityStage.READY,
+        ExecutionActivityStage.RUNNING,
+        ExecutionActivityStage.FAILED,
+    )
+    assert activities[-1].failure == failure
+    assert "lease-secret" not in repr(activities)
+
+    with pytest.raises(ContinuityStoreError, match="idempotency_key"):
+        service._store.transition_run(
+            "RUN-001",
+            failed.version - 1,
+            RunState.FAILED.value,
+            "fail-with-structured-reason",
+            clock().isoformat(),
+            failure=ExecutionFailure(
+                stage=ExecutionActivityStage.FAILED,
+                code=ExecutionFailureCode.TERMINATED,
+            ),
+        )
+
+
+def test_run_activity_timeline_marks_legacy_failure_and_rejects_tampering(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    _start_evidence(service)
+    service.transition_run(
+        "RUN-001",
+        RunState.FAILED,
+        "agent-a",
+        "lease-secret",
+        "legacy-failure-without-code",
+    )
+
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT rowid, * FROM events
+            WHERE aggregate_id='RUN-001' AND event_type='RUN_TRANSITIONED'"""
+        ).fetchone()
+        assert row is not None
+        payload = {"state": "FAILED"}
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        event_hash = hashlib.sha256(
+            (
+                f"{row['previous_hash']}|{row['aggregate_id']}|{row['event_type']}|"
+                f"{canonical}|{row['created_at']}"
+            ).encode()
+        ).hexdigest()
+        conn.execute(
+            """UPDATE events SET payload_json=?, event_hash=?, event_id=?
+            WHERE rowid=?""",
+            (canonical, event_hash, f"EVT-{event_hash[:16].upper()}", row["rowid"]),
+        )
+
+    legacy = service._store.list_run_activities("RUN-001")[-1]
+    assert legacy.failure == ExecutionFailure(
+        stage=ExecutionActivityStage.FAILED,
+        code=ExecutionFailureCode.LEGACY_UNKNOWN,
+    )
+
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT rowid, * FROM events
+            WHERE aggregate_id='RUN-001' AND event_type='RUN_TRANSITIONED'"""
+        ).fetchone()
+        assert row is not None
+        payload = {"schema_version": "run-transition.v999", "new_state": "FAILED"}
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        event_hash = hashlib.sha256(
+            (
+                f"{row['previous_hash']}|{row['aggregate_id']}|{row['event_type']}|"
+                f"{canonical}|{row['created_at']}"
+            ).encode()
+        ).hexdigest()
+        conn.execute(
+            """UPDATE events SET payload_json=?, event_hash=?, event_id=?
+            WHERE rowid=?""",
+            (canonical, event_hash, f"EVT-{event_hash[:16].upper()}", row["rowid"]),
+        )
+    with pytest.raises(ContinuityStoreError, match="schema"):
+        service._store.list_run_activities("RUN-001")
+
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.execute(
+            """UPDATE events SET payload_json='{}'
+            WHERE aggregate_id='RUN-001' AND event_type='RUN_TRANSITIONED'"""
+        )
+    with pytest.raises(ContinuityStoreError, match="哈希链"):
+        service._store.list_run_activities("RUN-001")
 
 
 def test_run_rejects_undeclared_dirty_and_out_of_scope_paths(tmp_path: Path) -> None:

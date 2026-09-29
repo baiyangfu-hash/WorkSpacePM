@@ -17,6 +17,9 @@ from auto_pm.core.continuity_execution_service import (
 
 from auto_pm.contracts.continuity import LeaseRenewalReceipt, RunItem, RunState
 from auto_pm.contracts.execution_adapter import (
+    ExecutionActivityStage,
+    ExecutionFailure,
+    ExecutionFailureCode,
     ExecutionProjectionReceipt,
     ExecutionStartEvidence,
 )
@@ -152,6 +155,10 @@ class ExecutionSupervisorService:
                         owner_id,
                         lease_token,
                         blocked_key,
+                        failure=ExecutionFailure(
+                            stage=ExecutionActivityStage.BLOCKED,
+                            code=ExecutionFailureCode.CHILD_REAP_FAILED,
+                        ),
                     )
                 except ContinuityExecutionError as transition_error:
                     raise ExecutionSupervisorError(
@@ -251,6 +258,11 @@ class ExecutionSupervisorService:
                 after_wait.capability.owner_id,
                 after_wait.capability.token,
                 self._completion_key(idempotency_key, disposition.lower()),
+                failure=(
+                    self._failed_transition(disposition)
+                    if target_state is RunState.FAILED
+                    else None
+                ),
             )
         except ContinuityExecutionError as error:
             raise ExecutionSupervisorError("执行结束状态无法安全落账") from error
@@ -383,6 +395,11 @@ class ExecutionSupervisorService:
                 collected.capability.owner_id,
                 collected.capability.token,
                 self._completion_key(idempotency_key, disposition.lower()),
+                failure=(
+                    self._failed_transition(disposition)
+                    if target_state is RunState.FAILED
+                    else None
+                ),
             )
         except ContinuityExecutionError as error:
             raise ExecutionSupervisorError("执行结束状态无法安全落账") from error
@@ -398,6 +415,7 @@ class ExecutionSupervisorService:
         capability: LeaseCapability,
         *,
         idempotency_key: str,
+        failure_code: ExecutionFailureCode = ExecutionFailureCode.LOCAL_START_FAILED,
     ) -> RunItem:
         """Record a pre-handshake local start failure without inventing RUN_STARTED."""
 
@@ -410,6 +428,10 @@ class ExecutionSupervisorService:
                     capability.owner_id,
                     capability.token,
                     self._completion_key(idempotency_key, "pre-handshake-failed"),
+                    failure=ExecutionFailure(
+                        stage=ExecutionActivityStage.FAILED,
+                        code=failure_code,
+                    ),
                 ),
             )
         except ContinuityExecutionError as error:
@@ -456,6 +478,14 @@ class ExecutionSupervisorService:
         if result.status is not LocalExecutionStatus.SUCCEEDED:
             return "EXECUTOR_FAILED"
         return "ZERO_EXIT"
+
+    @staticmethod
+    def _failed_transition(disposition: str) -> ExecutionFailure:
+        try:
+            code = ExecutionFailureCode(disposition)
+        except ValueError as error:
+            raise ExecutionSupervisorError("执行失败分类不是安全白名单值") from error
+        return ExecutionFailure(stage=ExecutionActivityStage.FAILED, code=code)
 
     @staticmethod
     def _blocked_key(idempotency_key: str) -> str:

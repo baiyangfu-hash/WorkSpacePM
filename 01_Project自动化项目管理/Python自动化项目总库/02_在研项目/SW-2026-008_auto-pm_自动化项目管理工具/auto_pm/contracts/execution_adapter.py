@@ -43,6 +43,85 @@ class WorktreeMode(StrEnum):
     ISOLATED = "ISOLATED"
 
 
+class ExecutionActivityStage(StrEnum):
+    """Stable, user-facing stages derived only from canonical events."""
+
+    READY = "READY"
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+    PROJECTED = "PROJECTED"
+    VERIFYING = "VERIFYING"
+    CHECKPOINTED = "CHECKPOINTED"
+    BLOCKED = "BLOCKED"
+    PENDING = "PENDING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class ExecutionFailureCode(StrEnum):
+    """Secret-free failure categories that may be persisted and displayed."""
+
+    LOCAL_START_FAILED = "LOCAL_START_FAILED"
+    HANDSHAKE_FAILED = "HANDSHAKE_FAILED"
+    START_EVIDENCE_REJECTED = "START_EVIDENCE_REJECTED"
+    CHILD_REAP_FAILED = "CHILD_REAP_FAILED"
+    COLLECTION_PENDING = "COLLECTION_PENDING"
+    TERMINATED = "TERMINATED"
+    NONZERO_EXIT = "NONZERO_EXIT"
+    EXECUTOR_FAILED = "EXECUTOR_FAILED"
+    PROJECTION_FAILED = "PROJECTION_FAILED"
+    LEGACY_UNKNOWN = "LEGACY_UNKNOWN"
+
+
+class ExecutionFailure(BaseModel):
+    """Hash-safe failure fact; never carries model output, argv, env, or secrets."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["execution-failure.v1"] = "execution-failure.v1"
+    stage: ExecutionActivityStage
+    code: ExecutionFailureCode
+
+
+class ExecutionActivity(BaseModel):
+    """One redacted activity fact reconstructed from a verified canonical event."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["execution-activity.v1"] = "execution-activity.v1"
+    event_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    operation_id: str = Field(default="", max_length=255)
+    event_type: str = Field(min_length=1)
+    stage: ExecutionActivityStage
+    occurred_at: AwareDatetime
+    event_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    failure: ExecutionFailure | None = None
+
+    @field_validator("operation_id")
+    @classmethod
+    def _validate_optional_operation_id(cls, value: str) -> str:
+        if value != value.strip() or any(not character.isprintable() for character in value):
+            raise ValueError("operation_id must be canonical printable text")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_failure_stage(self) -> Self:
+        failure_stages = {
+            ExecutionActivityStage.BLOCKED,
+            ExecutionActivityStage.PENDING,
+            ExecutionActivityStage.FAILED,
+        }
+        if (self.failure is None) != (self.stage not in failure_stages):
+            raise ValueError(
+                "failure details are required exactly for non-success terminal stages"
+            )
+        if self.failure is not None and self.failure.stage is not self.stage:
+            raise ValueError("failure stage must match the activity stage")
+        return self
+
+
 class ExecutionStartEvidence(BaseModel):
     """Canonical start evidence emitted by the executor control channel only.
 
@@ -464,8 +543,12 @@ class ForegroundExecutionReceipt(BaseModel):
 
 
 __all__ = [
+    "ExecutionActivity",
+    "ExecutionActivityStage",
     "ExecutionAdapterKind",
     "ExecutionDispatchReceipt",
+    "ExecutionFailure",
+    "ExecutionFailureCode",
     "ExecutionIntent",
     "ExecutionMicrotaskFile",
     "ExecutionMicrotaskMaterialization",

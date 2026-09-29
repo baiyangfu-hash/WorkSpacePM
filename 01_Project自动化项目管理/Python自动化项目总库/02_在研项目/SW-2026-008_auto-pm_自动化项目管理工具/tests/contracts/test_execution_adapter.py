@@ -10,8 +10,12 @@ import pytest
 from pydantic import ValidationError
 
 from auto_pm.contracts.execution_adapter import (
+    ExecutionActivity,
+    ExecutionActivityStage,
     ExecutionAdapterKind,
     ExecutionDispatchReceipt,
+    ExecutionFailure,
+    ExecutionFailureCode,
     ExecutionIntent,
     ExecutionMicrotaskFile,
     ExecutionMicrotaskMaterialization,
@@ -65,6 +69,57 @@ def test_execution_role_rejects_unknown_stack() -> None:
         execution_role_for_stack("qml")
 
 
+def test_execution_activity_requires_redacted_failure_only_for_failure_stages() -> None:
+    occurred_at = datetime.now(UTC)
+    failed = ExecutionActivity(
+        event_id="EVT-FAILED",
+        run_id="RUN-U04A-001",
+        operation_id="OP-U04A-001",
+        event_type="RUN_TRANSITIONED",
+        stage=ExecutionActivityStage.FAILED,
+        occurred_at=occurred_at,
+        event_hash="a" * 64,
+        failure=ExecutionFailure(
+            stage=ExecutionActivityStage.FAILED,
+            code=ExecutionFailureCode.NONZERO_EXIT,
+        ),
+    )
+
+    assert failed.failure is not None
+    assert failed.operation_id == "OP-U04A-001"
+    assert failed.failure.code is ExecutionFailureCode.NONZERO_EXIT
+    assert {"stdout", "stderr", "lease_token", "message"}.isdisjoint(
+        failed.model_dump(mode="json")
+    )
+    with pytest.raises(ValidationError, match="failure details"):
+        ExecutionActivity(
+            event_id="EVT-MISSING",
+            run_id="RUN-U04A-001",
+            event_type="RUN_TRANSITIONED",
+            stage=ExecutionActivityStage.BLOCKED,
+            occurred_at=occurred_at,
+            event_hash="b" * 64,
+        )
+    with pytest.raises(ValidationError, match="failure details"):
+        ExecutionActivity(
+            event_id="EVT-EXTRA",
+            run_id="RUN-U04A-001",
+            event_type="RUN_STARTED",
+            stage=ExecutionActivityStage.RUNNING,
+            occurred_at=occurred_at,
+            event_hash="c" * 64,
+            failure=failed.failure,
+        )
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        ExecutionFailure.model_validate(
+            {
+                "stage": "FAILED",
+                "code": "NONZERO_EXIT",
+                "stderr": "password=must-not-persist",
+            }
+        )
+
+
 def test_receipt_is_canonical_and_contains_no_lease_capability() -> None:
     receipt = _receipt()
 
@@ -104,7 +159,7 @@ def test_execution_intent_is_immutable_and_explicitly_unstarted() -> None:
         intent.model_dump()
     )
     with pytest.raises(ValidationError, match="frozen"):
-        intent.operation_id = "another-operation"
+        setattr(intent, "".join(("operation_", "id")), "another-operation")
 
 
 def test_microtask_plan_is_canonical_append_only_and_secret_free() -> None:

@@ -36,6 +36,10 @@ from auto_pm.contracts.decision_package import (
     is_canonical_runtime_change_id,
 )
 from auto_pm.contracts.execution_adapter import (
+    ExecutionActivity,
+    ExecutionActivityStage,
+    ExecutionFailure,
+    ExecutionFailureCode,
     ExecutionIntent,
     ExecutionMicrotaskPlan,
     ExecutionProjectionReceipt,
@@ -327,7 +331,12 @@ _SETTLEMENT_REQUEST_FIELDS = frozenset(
     }
 )
 _STORE_RUN_TRANSITIONS = {
-    RunState.READY: {RunState.RUNNING, RunState.BLOCKED, RunState.CANCELLED},
+    RunState.READY: {
+        RunState.RUNNING,
+        RunState.BLOCKED,
+        RunState.FAILED,
+        RunState.CANCELLED,
+    },
     RunState.RUNNING: {RunState.BLOCKED, RunState.PENDING, RunState.VERIFYING, RunState.FAILED},
     RunState.BLOCKED: {RunState.RUNNING, RunState.CANCELLED},
     RunState.PENDING: {RunState.BLOCKED, RunState.FAILED, RunState.CANCELLED},
@@ -2955,6 +2964,8 @@ class ContinuityStore:
         new_state: str,
         idempotency_key: str,
         now: str,
+        *,
+        failure: ExecutionFailure | None = None,
     ) -> RunItem:
         del now
         idempotency_key = self._validated_idempotency_key(idempotency_key)
@@ -2965,6 +2976,10 @@ class ContinuityStore:
             raise ContinuityStoreError("Run 目标状态非法") from error
         if type(expected_version) is not int or expected_version < 1:
             raise ContinuityStoreError("Run expected_version 必须是正整数")
+        failure_states = {RunState.BLOCKED, RunState.PENDING, RunState.FAILED}
+        if failure is not None and destination not in failure_states:
+            raise ContinuityStoreError("结构化失败原因只能绑定 BLOCKED/PENDING/FAILED")
+        failure_payload = failure.model_dump(mode="json") if failure is not None else None
         with self._transaction() as conn:
             existing = self._event_by_key(conn, idempotency_key)
             if existing is not None:
@@ -2992,11 +3007,33 @@ class ContinuityStore:
                         "lease_release",
                     }
                 )
+                v4_expected_keys = {
+                    "schema_version",
+                    "expected_version",
+                    "new_state",
+                    "result_version",
+                    "failure",
+                }
+                if destination in {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}:
+                    v4_expected_keys.add("lease_release")
+                v4_is_valid = (
+                    failure_payload is not None
+                    and payload.get("schema_version") == "run-transition.v4"
+                    and payload.get("expected_version") == expected_version
+                    and payload.get("new_state") == destination.value
+                    and payload.get("result_version") == expected_version + 1
+                    and payload.get("failure") == failure_payload
+                    and set(payload) == v4_expected_keys
+                    and (
+                        "lease_release" not in v4_expected_keys
+                        or isinstance(payload.get("lease_release"), dict)
+                    )
+                )
                 if (
                     existing["aggregate_type"] != "run"
                     or existing["aggregate_id"] != run_id
                     or existing["event_type"] != "RUN_TRANSITIONED"
-                    or (payload != v2_payload and not v3_is_valid)
+                    or (payload != v2_payload and not v3_is_valid and not v4_is_valid)
                 ):
                     raise ContinuityStoreError("idempotency_key 的 Run 迁移语义不一致")
                 return self._get_run(conn, run_id)
@@ -3043,6 +3080,12 @@ class ContinuityStore:
                     "new_state": destination.value,
                     "result_version": expected_version + 1,
                     "lease_release": release,
+                }
+            if failure_payload is not None:
+                transition_payload = {
+                    **transition_payload,
+                    "schema_version": "run-transition.v4",
+                    "failure": failure_payload,
                 }
             self._append_event(
                 conn,
@@ -4684,6 +4727,143 @@ class ContinuityStore:
         ):
             raise ContinuityStoreError("RUN_STARTED 证据身份不合法")
         return owner_id, evidence
+
+    def list_run_activities(self, run_id: str) -> tuple[ExecutionActivity, ...]:
+        """Return redacted Run activity only after validating each event chain link."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        event_types = (
+            "RUN_CREATED",
+            "EXECUTION_START_CLAIMED",
+            "RUN_STARTED",
+            "EXECUTION_PROJECTED",
+            "CHECKPOINT_CREATED",
+            "RUN_TRANSITIONED",
+            "RUN_LEASE_REVOKED",
+        )
+        placeholders = ",".join("?" for _ in event_types)
+        activities: list[ExecutionActivity] = []
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                f"""SELECT rowid, * FROM events WHERE event_type IN ({placeholders})
+                ORDER BY rowid""",
+                event_types,
+            ).fetchall()
+            for row in rows:
+                try:
+                    payload = json.loads(str(row["payload_json"]))
+                except (TypeError, json.JSONDecodeError) as error:
+                    raise ContinuityStoreError("执行活动事件 payload 无法读取") from error
+                request = payload.get("request")
+                payload_run_id = payload.get("run_id")
+                request_run_id = request.get("run_id") if isinstance(request, dict) else None
+                belongs = (
+                    row["aggregate_type"] == "run" and row["aggregate_id"] == run_id
+                ) or payload_run_id == run_id or request_run_id == run_id
+                if not belongs:
+                    continue
+                previous = conn.execute(
+                    "SELECT event_hash FROM events WHERE rowid<? ORDER BY rowid DESC LIMIT 1",
+                    (row["rowid"],),
+                ).fetchone()
+                expected_previous = str(previous["event_hash"]) if previous else ""
+                canonical = json.dumps(
+                    payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                )
+                expected_hash = hashlib.sha256(
+                    (
+                        f"{expected_previous}|{row['aggregate_id']}|{row['event_type']}|"
+                        f"{canonical}|{row['created_at']}"
+                    ).encode()
+                ).hexdigest()
+                expected_event_id = f"EVT-{expected_hash[:16].upper()}"
+                event_identity_valid = (
+                    row["event_type"] == "CHECKPOINT_CREATED"
+                    or row["event_id"] == expected_event_id
+                )
+                if (
+                    row["previous_hash"] != expected_previous
+                    or row["event_hash"] != expected_hash
+                    or not event_identity_valid
+                ):
+                    raise ContinuityStoreError("执行活动事件哈希链不一致")
+                stage = self._activity_stage(str(row["event_type"]), payload)
+                if stage is None:
+                    continue
+                failure: ExecutionFailure | None = None
+                if stage in {
+                    ExecutionActivityStage.BLOCKED,
+                    ExecutionActivityStage.PENDING,
+                    ExecutionActivityStage.FAILED,
+                }:
+                    raw_failure = payload.get("failure")
+                    if raw_failure is None:
+                        failure = ExecutionFailure(
+                            stage=stage,
+                            code=ExecutionFailureCode.LEGACY_UNKNOWN,
+                        )
+                    else:
+                        try:
+                            failure = ExecutionFailure.model_validate(raw_failure)
+                        except (TypeError, ValueError) as error:
+                            raise ContinuityStoreError("结构化执行失败原因损坏") from error
+                        if failure.stage is not stage:
+                            raise ContinuityStoreError("结构化执行失败阶段与迁移状态不一致")
+                activities.append(
+                    ExecutionActivity(
+                        event_id=str(row["event_id"]),
+                        run_id=run_id,
+                        operation_id=(
+                            str(payload["operation_id"])
+                            if isinstance(payload.get("operation_id"), str)
+                            else ""
+                        ),
+                        event_type=str(row["event_type"]),
+                        stage=stage,
+                        occurred_at=datetime.fromisoformat(str(row["created_at"])),
+                        event_hash=str(row["event_hash"]),
+                        failure=failure,
+                    )
+                )
+        return tuple(activities)
+
+    @staticmethod
+    def _activity_stage(
+        event_type: str, payload: dict[str, object]
+    ) -> ExecutionActivityStage | None:
+        allowed_schemas: dict[str, set[object]] = {
+            "RUN_CREATED": {None, "run.v1", "run-created.v2"},
+            "EXECUTION_START_CLAIMED": {"execution-start-claim.v1"},
+            "RUN_STARTED": {"run-started.v1"},
+            "EXECUTION_PROJECTED": {"execution-projection-receipt.v1"},
+            "CHECKPOINT_CREATED": {None, "checkpoint.v1"},
+            "RUN_TRANSITIONED": {
+                None,
+                "run-transition.v2",
+                "run-transition.v3",
+                "run-transition.v4",
+            },
+            "RUN_LEASE_REVOKED": {"unstarted-run-revoked.v1"},
+        }
+        if payload.get("schema_version") not in allowed_schemas[event_type]:
+            raise ContinuityStoreError("执行活动事件 schema 版本未知")
+        direct = {
+            "RUN_CREATED": ExecutionActivityStage.READY,
+            "EXECUTION_START_CLAIMED": ExecutionActivityStage.STARTING,
+            "RUN_STARTED": ExecutionActivityStage.RUNNING,
+            "EXECUTION_PROJECTED": ExecutionActivityStage.PROJECTED,
+            "CHECKPOINT_CREATED": ExecutionActivityStage.CHECKPOINTED,
+            "RUN_LEASE_REVOKED": ExecutionActivityStage.CANCELLED,
+        }
+        if event_type in direct:
+            return direct[event_type]
+        if event_type != "RUN_TRANSITIONED":
+            return None
+        try:
+            state = payload.get("new_state", payload.get("state"))
+            return ExecutionActivityStage(str(state))
+        except (KeyError, ValueError) as error:
+            raise ContinuityStoreError("Run 迁移事件缺少可识别阶段") from error
 
     def get_checkpoint(self, checkpoint_id: str) -> CheckpointItem:
         with self._read_connection() as conn:

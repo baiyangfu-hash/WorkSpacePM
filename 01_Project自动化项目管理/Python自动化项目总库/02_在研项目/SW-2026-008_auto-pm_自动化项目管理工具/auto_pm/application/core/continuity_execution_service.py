@@ -27,7 +27,11 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionOutcome,
     is_canonical_decision_id,
 )
-from auto_pm.contracts.execution_adapter import ExecutionDispatchReceipt, ExecutionStartEvidence
+from auto_pm.contracts.execution_adapter import (
+    ExecutionDispatchReceipt,
+    ExecutionFailure,
+    ExecutionStartEvidence,
+)
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.control_root_guard import (
@@ -42,7 +46,12 @@ class ContinuityExecutionError(RuntimeError):
 
 
 _RUN_TRANSITIONS = {
-    RunState.READY: {RunState.RUNNING, RunState.BLOCKED, RunState.CANCELLED},
+    RunState.READY: {
+        RunState.RUNNING,
+        RunState.BLOCKED,
+        RunState.FAILED,
+        RunState.CANCELLED,
+    },
     RunState.RUNNING: {RunState.BLOCKED, RunState.PENDING, RunState.VERIFYING, RunState.FAILED},
     RunState.BLOCKED: {RunState.RUNNING, RunState.CANCELLED},
     RunState.PENDING: {RunState.BLOCKED, RunState.FAILED, RunState.CANCELLED},
@@ -659,6 +668,8 @@ class ContinuityExecutionService:
         owner_id: str,
         lease_token: str,
         idempotency_key: str,
+        *,
+        failure: ExecutionFailure | None = None,
     ) -> RunItem:
         try:
             run = self._store.get_run(run_id)
@@ -666,8 +677,16 @@ class ContinuityExecutionService:
             self._require_active_lease(lease, owner_id, lease_token, self._utc_now())
             if new_state not in _RUN_TRANSITIONS[run.state]:
                 raise ContinuityExecutionError(f"非法 Run 状态迁移: {run.state} -> {new_state}")
+            failure_states = {RunState.BLOCKED, RunState.PENDING, RunState.FAILED}
+            if failure is not None and new_state not in failure_states:
+                raise ContinuityExecutionError("结构化失败原因只能绑定 BLOCKED/PENDING/FAILED")
             return self._store.transition_run(
-                run_id, run.version, new_state.value, idempotency_key, self._utc_now().isoformat()
+                run_id,
+                run.version,
+                new_state.value,
+                idempotency_key,
+                self._utc_now().isoformat(),
+                failure=failure,
             )
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error

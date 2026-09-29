@@ -24,6 +24,7 @@ from auto_pm.core.microtask_projection_service import (
 
 from auto_pm.contracts.continuity import LeaseItem, RunState
 from auto_pm.contracts.execution_adapter import (
+    ExecutionFailureCode,
     ExecutionMicrotaskMaterialization,
     ExecutionMicrotaskPlan,
     ExecutionStartEvidence,
@@ -172,7 +173,9 @@ class LocalExecutionOrchestrator:
                 error=handshake.error,
             )
             self._supervisor.fail_claimed_ready(
-                capability, idempotency_key=f"{plan.operation_id}:handshake"
+                capability,
+                idempotency_key=f"{plan.operation_id}:handshake",
+                failure_code=ExecutionFailureCode.HANDSHAKE_FAILED,
             )
             return self._receipt(
                 plan.operation_id,

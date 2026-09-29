@@ -17,6 +17,10 @@ from auto_pm.core.execution_adapter_service import (
 )
 from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
 
+from auto_pm.contracts.execution_adapter import (
+    ExecutionActivityStage,
+    ExecutionFailureCode,
+)
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import (
     LocalCodexExecutor,
@@ -138,3 +142,31 @@ def test_concurrent_claim_has_one_real_popen_winner(
             "SELECT COUNT(*) FROM events WHERE event_type='EXECUTION_START_CLAIMED'"
         ).fetchone()[0]
     assert count == 1
+
+
+def test_failed_handshake_persists_only_the_redacted_failure_category(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    operation_id = "OP-U04A-HANDSHAKE-FAIL"
+    dispatch, microtask = _inputs(tmp_path, operation_id)
+    executor = _CountingExecutor(
+        "import sys; print('not-a-control-event', flush=True); sys.exit(19)"
+    )
+    orchestrator = LocalExecutionOrchestrator(tmp_path, executor=executor)
+    monkeypatch.setenv(_LEASE_ENV, _LEASE_TOKEN)
+
+    result = orchestrator.execute(
+        dispatch=dispatch,
+        microtask=microtask,
+        lease_token_environment=_LEASE_ENV,
+        handshake_timeout_seconds=2.0,
+    )
+
+    assert result.status == "FAILED"
+    activities = ContinuityStore(tmp_path).list_run_activities(microtask.plan.run_id)
+    assert any(activity.operation_id == operation_id for activity in activities)
+    failed = activities[-1]
+    assert failed.stage is ExecutionActivityStage.FAILED
+    assert failed.failure is not None
+    assert failed.failure.code is ExecutionFailureCode.HANDSHAKE_FAILED
+    assert _LEASE_TOKEN not in failed.model_dump_json()

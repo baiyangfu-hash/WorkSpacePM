@@ -21,7 +21,13 @@ from auto_pm.core.execution_supervisor_service import (
 )
 
 from auto_pm.contracts.continuity import LeaseRenewalReceipt, RunState
-from auto_pm.contracts.execution_adapter import ExecutionProjectionReceipt, ExecutionStartEvidence
+from auto_pm.contracts.execution_adapter import (
+    ExecutionActivityStage,
+    ExecutionFailure,
+    ExecutionFailureCode,
+    ExecutionProjectionReceipt,
+    ExecutionStartEvidence,
+)
 from auto_pm.infrastructure.local_executor import (
     LocalExecutionResult,
     LocalExecutionStatus,
@@ -275,6 +281,10 @@ def test_supervisor_blocks_when_current_child_cannot_be_reaped(tmp_path: Path) -
         "codex:agent-a",
         "secret-token",
         "execution-start-blocked:4dd5e426e5e434186aa3dca46edec73cb6420feb874d0ad3a70fce972653e876",
+        failure=ExecutionFailure(
+            stage=ExecutionActivityStage.BLOCKED,
+            code=ExecutionFailureCode.CHILD_REAP_FAILED,
+        ),
     )
     assert "secret-token" not in str(raised.value)
 
@@ -319,6 +329,14 @@ def test_supervisor_uses_exit_truth_and_renews_at_wait_boundaries(
     execution.transition_run.assert_called_once()
     transition_args = execution.transition_run.call_args.args
     assert transition_args[:3] == (capability.run_id, expected_state, capability.owner_id)
+    transition_failure = execution.transition_run.call_args.kwargs["failure"]
+    if expected_state is RunState.FAILED:
+        assert transition_failure == ExecutionFailure(
+            stage=ExecutionActivityStage.FAILED,
+            code=ExecutionFailureCode(expected_disposition),
+        )
+    else:
+        assert transition_failure is None
     assert "must-not-leak" not in repr(outcome)
 
 
@@ -380,6 +398,10 @@ def test_collect_only_never_transitions_and_finalize_requires_projection_receipt
     )
     assert failed.run_state is RunState.FAILED
     assert failed.disposition == "PROJECTION_FAILED"
+    assert execution.transition_run.call_args.kwargs["failure"] == ExecutionFailure(
+        stage=ExecutionActivityStage.FAILED,
+        code=ExecutionFailureCode.PROJECTION_FAILED,
+    )
 
     execution.reset_mock()
     projection = Mock(spec=ExecutionProjectionReceipt, run_id=capability.run_id)
@@ -391,6 +413,7 @@ def test_collect_only_never_transitions_and_finalize_requires_projection_receipt
     assert verifying.run_state is RunState.VERIFYING
     assert verifying.disposition == "ZERO_EXIT_PROJECTED"
     execution.transition_run.assert_called_once()
+    assert execution.transition_run.call_args.kwargs["failure"] is None
 
 
 def test_periodic_renewal_failure_reaps_real_child_and_stays_pending(tmp_path: Path) -> None:
