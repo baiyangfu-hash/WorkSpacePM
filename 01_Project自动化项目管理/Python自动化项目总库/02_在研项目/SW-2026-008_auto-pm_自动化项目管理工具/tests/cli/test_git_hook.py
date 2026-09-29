@@ -144,8 +144,14 @@ def _git_hook_shell() -> str:
     if os.name == "nt":
         git_executable = shutil.which("git")
         assert git_executable is not None
-        shell = Path(git_executable).parent.parent / "bin" / "sh.exe"
-        assert shell.is_file()
+        git_root = Path(git_executable).resolve().parent.parent
+        candidates = (
+            git_root / "bin" / "sh.exe",
+            git_root.parent / "bin" / "sh.exe",
+            git_root.parent / "usr" / "bin" / "sh.exe",
+        )
+        shell = next((path for path in candidates if path.is_file()), None)
+        assert shell is not None, f"未找到 Git for Windows 的 sh.exe: {candidates}"
         return str(shell)
     shell_executable = shutil.which("sh")
     assert shell_executable is not None
@@ -201,6 +207,7 @@ def test_git_hook_preflight_passes_one_snapshot_to_both_shared_checks(
     message_file.write_text("test message", encoding="utf-8")
     snapshot = git_hook_enforcer.StagedSnapshot(())
     captured_workspaces: list[Path] = []
+    captured_control_roots: list[Path] = []
     pre_commit_snapshots: list[git_hook_enforcer.StagedSnapshot] = []
     commit_msg_paths: list[Path] = []
     commit_msg_snapshots: list[git_hook_enforcer.StagedSnapshot] = []
@@ -210,8 +217,12 @@ def test_git_hook_preflight_passes_one_snapshot_to_both_shared_checks(
         return snapshot
 
     def run_pre_commit(
-        _workspace_root: Path, supplied_snapshot: git_hook_enforcer.StagedSnapshot
+        _workspace_root: Path,
+        supplied_snapshot: git_hook_enforcer.StagedSnapshot,
+        control_root: Path | None = None,
     ) -> int:
+        if control_root is not None:
+            captured_control_roots.append(control_root)
         pre_commit_snapshots.append(supplied_snapshot)
         return 0
 
@@ -219,6 +230,7 @@ def test_git_hook_preflight_passes_one_snapshot_to_both_shared_checks(
         _workspace_root: Path,
         supplied_message_file: Path,
         supplied_snapshot: git_hook_enforcer.StagedSnapshot,
+        control_root: Path | None = None,
     ) -> int:
         commit_msg_paths.append(supplied_message_file)
         commit_msg_snapshots.append(supplied_snapshot)
@@ -228,15 +240,31 @@ def test_git_hook_preflight_passes_one_snapshot_to_both_shared_checks(
     monkeypatch.setattr("auto_pm.cli.git_hook.enforce_pre_commit", run_pre_commit)
     monkeypatch.setattr("auto_pm.cli.git_hook.enforce_commit_msg", run_commit_msg)
 
+    fake_ctrl = tmp_path / "control-root"
     result = CliRunner().invoke(
-        cli, ["-w", str(tmp_path), "git-hook", "preflight", str(message_file)]
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "--control-root",
+            str(fake_ctrl),
+            "git-hook",
+            "preflight",
+            str(message_file),
+        ],
     )
 
     assert result.exit_code == 0, result.output
     assert captured_workspaces == [tmp_path]
-    assert pre_commit_snapshots == [snapshot]
+    assert captured_control_roots == [fake_ctrl]
+    # 场景 8：候选 index 只捕获一次，且同一对象（非仅相等）传给两个子门禁
+    assert len(captured_workspaces) == 1
+    assert len(pre_commit_snapshots) == 1
+    assert len(commit_msg_snapshots) == 1
+    assert pre_commit_snapshots[0] is snapshot
+    assert commit_msg_snapshots[0] is snapshot
     assert commit_msg_paths == [message_file]
-    assert commit_msg_snapshots == [snapshot]
+
 
 
 def _staged_snapshot(*paths: str) -> git_hook_enforcer.StagedSnapshot:
@@ -634,10 +662,23 @@ def test_git_hook_release_gate_cli_uses_global_gate(
         fake_gate,
     )
 
-    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "git-hook", "release-gate"])
+    fake_ctrl = tmp_path / "control-root"
+    result = CliRunner().invoke(
+        cli,
+        [
+            "-w",
+            str(tmp_path),
+            "--control-root",
+            str(fake_ctrl),
+            "git-hook",
+            "release-gate",
+        ],
+    )
 
     assert result.exit_code == 0, result.output
-    assert called["workspace_root"] == tmp_path
+    # 场景 9: release-gate 必须只对 control-root 治理状态判卷
+    assert called["workspace_root"] == fake_ctrl
+
 
 
 def test_enforce_commit_msg_rejects_message_read_error(

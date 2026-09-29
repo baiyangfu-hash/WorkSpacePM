@@ -108,6 +108,123 @@ def _parse_raw_index_entries(raw_output: str) -> tuple[StagedIndexEntry, ...]:
     return tuple(entries)
 
 
+def _resolve_git_common_dir(repo_path: Path) -> Path:
+    """解析 Git 仓库的 common-dir 绝对路径。"""
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return Path(res.stdout.strip()).resolve()
+        res2 = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        )
+        raw = res2.stdout.strip()
+        p = Path(raw)
+        if not p.is_absolute():
+            p = (repo_path / p).resolve()
+        return p.resolve()
+    except Exception as exc:
+        raise StagedSnapshotError(f"无法解析 Git common-dir ({repo_path}): {exc}") from exc
+
+
+def validate_repository_roots(
+    candidate_root: Path, control_root: Path | None
+) -> tuple[Path, Path]:
+    """验证 candidate_root 与 control_root 的有效性及同仓身份。
+
+    合同（实施卡 §5.2）：
+    1. 两个根都可解析为真实存在的绝对路径目录；
+    2. candidate_root 是 Git 工作树；
+    3. control_root 是该仓库的 primary control root (.git 必须是目录)；
+    4. 二者解析出的 git common-dir 完全一致；
+    5. 不接受外部路径、独立 .git 或伪造 control-root。
+    """
+    try:
+        cand = candidate_root.resolve()
+        if not cand.is_dir():
+            raise StagedSnapshotError(f"候选根目录不存在或不是目录: {candidate_root}")
+
+        if control_root is None:
+            ctrl = cand
+        else:
+            ctrl = control_root.resolve()
+            if not ctrl.is_dir():
+                raise StagedSnapshotError(f"控制根目录不存在或不是目录: {control_root}")
+
+        res_cand = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(cand),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if res_cand.returncode != 0 or not res_cand.stdout.strip():
+            raise StagedSnapshotError(f"候选根目录不是 Git 工作树: {cand}")
+        if Path(res_cand.stdout.strip()).resolve() != cand:
+            raise StagedSnapshotError(f"候选根目录不是该工作树的顶级根目录: {cand}")
+
+        ctrl_git = ctrl / ".git"
+        if not ctrl_git.is_dir():
+            raise StagedSnapshotError(f"控制根不是有效主仓库根目录 (.git 不是目录): {ctrl}")
+
+        res_ctrl = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(ctrl),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if res_ctrl.returncode != 0 or Path(res_ctrl.stdout.strip()).resolve() != ctrl:
+            raise StagedSnapshotError(f"控制根目录不是主仓库的顶级根目录: {ctrl}")
+
+        cand_common = _resolve_git_common_dir(cand)
+        ctrl_common = _resolve_git_common_dir(ctrl)
+        if cand_common != ctrl_common:
+            raise StagedSnapshotError(
+                f"候选工作树与控制根不属于同一 Git 仓库: {cand_common} != {ctrl_common}"
+            )
+        if ctrl_common != ctrl_git.resolve():
+            raise StagedSnapshotError(
+                f"控制根 common-dir 与其 .git 目录不一致: {ctrl_common} != {ctrl_git.resolve()}"
+            )
+
+        return cand, ctrl
+    except StagedSnapshotError:
+        raise
+    except Exception as exc:
+        raise StagedSnapshotError(f"同仓身份校验异常: {exc}") from exc
+
+
+def _resolve_governance_roots(
+    workspace_root: Path, control_root: Path | None
+) -> tuple[Path, Path]:
+    """统一解析候选工作树与治理控制根，未提供时对 linked worktree fail-closed。"""
+    if control_root is not None:
+        return validate_repository_roots(workspace_root, control_root)
+    # control_root 为 None 时的兼容逻辑：
+    # 若 workspace_root 是 linked worktree（.git 为文件），禁止单根调用，必须 fail-closed
+    cand = workspace_root.resolve()
+    if (cand / ".git").is_file():
+        raise StagedSnapshotError(
+            f"linked worktree 提交必须显式提供控制根: {workspace_root}"
+        )
+    return cand, cand
+
+
 def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
     """冻结当前 index 的 ACM 清单及 blob 标识，不读取工作区文件内容。"""
     try:
@@ -469,8 +586,85 @@ def _validate_staged_change_evidence(
     return change_path
 
 
+def _roots_or_reject(
+    workspace_root: Path, control_root: Path | None, hook_name: str
+) -> tuple[Path, Path] | None:
+    """在读取任何治理证据之前证明双根同仓身份；失败即拒绝，不做 fallback。"""
+    try:
+        return _resolve_governance_roots(workspace_root, control_root)
+    except Exception as exc:
+        print(
+            f"❌ [auto-pm {hook_name}] 物理拦截：候选工作树与控制根同仓身份校验失败，"
+            f"为防止绕过门禁已拒绝提交: {exc}"
+        )
+        return None
+
+
+def _find_change_in_control_root(
+    control_root: Path, binding: ProjectBinding, chg_id: str
+) -> Path | None:
+    """从控制根目录中检索项目下的指定变更单文件。"""
+    project_root = control_root / binding.relative_root
+    target_name = f"{chg_id}.md"
+    search_dirs = (
+        project_root / "04_监控" / "01_变更管理" / "01_变更单",
+        project_root / "11_监控" / "01_变更管理" / "01_变更单",
+    )
+    for sdir in search_dirs:
+        if sdir.is_dir():
+            for p in sdir.rglob(target_name):
+                if p.is_file():
+                    return p
+    return None
+
+
+def _validate_control_root_change_evidence(
+    control_root: Path,
+    binding: ProjectBinding,
+    chg_id: str,
+) -> Path:
+    """双根模式（linked worktree）：从 control_root 读取当前 CHG 与项目台账真源。
+
+    合同（实施卡 §5.4）：
+    - 变更单必须在 control_root 中存在；
+    - 变更单声明的 PID 必须与生产代码归属项目一致；
+    - control_root 下的项目台账必须包含该变更单；
+    - 候选工作树中的历史 CHG/台账陈旧或缺失不得造成假失败。
+    """
+    change_path = _find_change_in_control_root(control_root, binding, chg_id)
+    if change_path is None or not change_path.is_file():
+        raise StagedSnapshotError(f"控制根缺少关联变更单文件: {chg_id}.md (项目 {binding.project_id})")
+
+    try:
+        change_content = change_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise StagedSnapshotError(f"无法读取控制根变更单 {change_path}: {exc}") from exc
+
+    chg_pid = _staged_change_project_id(change_content, chg_id)
+    if chg_pid != binding.project_id:
+        raise StagedSnapshotError(
+            f"控制根变更单 PID 与生产代码归属不一致: {chg_pid} != {binding.project_id}"
+        )
+
+    ledger_path = _project_ledger_file(control_root / binding.relative_root)
+    if ledger_path is None or not ledger_path.is_file():
+        raise StagedSnapshotError(f"控制根缺少项目版本变更台账: {binding.project_id}")
+
+    try:
+        ledger_content = ledger_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise StagedSnapshotError(f"无法读取控制根项目台账 {ledger_path}: {exc}") from exc
+
+    if chg_id not in ledger_content:
+        raise StagedSnapshotError(f"控制根项目台账未包含关联变更单: {chg_id}")
+
+    return change_path
+
+
 def enforce_pre_commit(
-    workspace_root: Path, staged_snapshot: StagedSnapshot | None = None
+    workspace_root: Path,
+    staged_snapshot: StagedSnapshot | None = None,
+    control_root: Path | None = None,
 ) -> int:
     """pre-commit 阶段拦截检查：
     1. 只阻断暂存生产代码所归属项目的版本变更台账一致性；
@@ -486,6 +680,10 @@ def enforce_pre_commit(
     )
     if snapshot is None:
         return 1
+    roots = _roots_or_reject(workspace_root, control_root, "pre-commit")
+    if roots is None:
+        return 1
+    _cand_root, gov_root = roots
     staged = list(snapshot.paths)
     if not staged:
         return 0
@@ -498,12 +696,12 @@ def enforce_pre_commit(
     try:
         from auto_pm.core.project_service import ProjectService
 
-        projects = ProjectService(str(workspace_root)).list_projects()
-        bindings = _project_bindings(workspace_root, projects)
+        projects = ProjectService(str(gov_root)).list_projects()
+        bindings = _project_bindings(gov_root, projects)
         related_project_ids = _production_project_ids_from_paths(prod_files, bindings)
         if not related_project_ids:
             return 0
-        if _run_ledger_gate(workspace_root, related_project_ids) != 0:
+        if _run_ledger_gate(gov_root, related_project_ids) != 0:
             print(
                 "🚨 [auto-pm pre-commit] 物理阻断：关联项目台账未闭环，"
                 "严禁直接 Commit！请先运行 auto-pm ledger reconcile <PID> --fix"
@@ -543,6 +741,7 @@ def enforce_commit_msg(
     workspace_root: Path,
     commit_msg_file: Path,
     staged_snapshot: StagedSnapshot | None = None,
+    control_root: Path | None = None,
 ) -> int:
     """commit-msg 阶段拦截检查：
     1. 若暂存区包含生产代码（.py, .scl 等），强制 Commit Message 必须注明关联单号；
@@ -558,6 +757,10 @@ def enforce_commit_msg(
     )
     if snapshot is None:
         return 1
+    roots = _roots_or_reject(workspace_root, control_root, "commit-msg")
+    if roots is None:
+        return 1
+    cand_root, gov_root = roots
     staged = list(snapshot.paths)
     prod_files = filter_production_files(staged)
 
@@ -602,13 +805,12 @@ def enforce_commit_msg(
         return 1
 
     chg_id = chg_matches[0]
-    # 同一 index 快照内必须同时具备代码、CHG、PID 与项目台账证据。
     try:
         from auto_pm.core.project_service import ProjectService
 
         bindings = _project_bindings(
-            workspace_root,
-            list(ProjectService(str(workspace_root)).list_projects()),
+            gov_root,
+            list(ProjectService(str(gov_root)).list_projects()),
         )
         project_ids = _production_project_ids(snapshot, bindings)
         if len(project_ids) != 1:
@@ -620,9 +822,17 @@ def enforce_commit_msg(
         if len(matched_bindings) != 1:
             raise StagedSnapshotError(f"项目 PID 映射不唯一: {project_ids[0]}")
         binding = matched_bindings[0]
-        change_path = _validate_staged_change_evidence(
-            workspace_root, snapshot, binding, chg_id
-        )
+
+        if cand_root.resolve() == gov_root.resolve():
+            # 单根场景：校验暂存快照内的证据
+            change_path = _validate_staged_change_evidence(
+                cand_root, snapshot, binding, chg_id
+            )
+        else:
+            # 双根场景（linked worktree）：以 control_root 的当前真源判卷（实施卡 §5.4）
+            change_path = _validate_control_root_change_evidence(
+                gov_root, binding, chg_id
+            )
     except Exception as exc:
         print(
             "❌ [auto-pm commit-msg] 物理拦截：暂存快照的 CHG/PID/台账证据"
