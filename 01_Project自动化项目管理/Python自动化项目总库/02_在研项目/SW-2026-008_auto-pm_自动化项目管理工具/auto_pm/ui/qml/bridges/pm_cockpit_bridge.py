@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from pydantic import ValidationError
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
+from auto_pm.contracts.pm_cockpit import PmCockpitSnapshot
 from auto_pm.contracts.pm_facade import PmIntent
 from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
@@ -43,10 +44,32 @@ class _StartWorker(QRunnable):
             self.done = True
 
 
+class _SnapshotWorker(QRunnable):
+    """Read one immutable cockpit snapshot away from the QML main thread."""
+
+    def __init__(self, service: PmCockpitService) -> None:
+        super().__init__()
+        self._service = service
+        self.setAutoDelete(False)
+        self.result: PmCockpitSnapshot | None = None
+        self.error = ""
+        self.done = False
+
+    def run(self) -> None:
+        try:
+            self.result = self._service.snapshot()
+        except Exception as error:  # noqa: BLE001 - UI must retain its last verified snapshot
+            log.exception("Cockpit snapshot refresh failed")
+            self.error = str(error) or "无法读取驾驶舱状态。"
+        finally:
+            self.done = True
+
+
 class PmCockpitBridge(QObject):
     """Expose the planning draft and explicit user confirmations to QML."""
 
     startFinished = Signal(str, bool, str)
+    snapshotFinished = Signal(cast(type[object], "QVariant"))
 
     def __init__(
         self,
@@ -55,8 +78,11 @@ class PmCockpitBridge(QObject):
         service: PmCockpitService | None = None,
         facade: PmFacadeService | None = None,
         thread_pool: QThreadPool | None = None,
+        snapshot_interval_ms: int = 5_000,
         parent: QObject | None = None,
     ) -> None:
+        if type(snapshot_interval_ms) is not int or not 1_000 <= snapshot_interval_ms <= 60_000:
+            raise ValueError("snapshot_interval_ms 必须在 1000 到 60000 之间")
         super().__init__(parent)
         self._service = service or PmCockpitService(workspace_root)
         self._facade = facade or PmFacadeService(workspace_root)
@@ -67,12 +93,58 @@ class PmCockpitBridge(QObject):
         self._start_poll_timer = QTimer(self)
         self._start_poll_timer.setInterval(50)
         self._start_poll_timer.timeout.connect(self._poll_start_workers)
+        self._snapshot_worker: _SnapshotWorker | None = None
+        self._snapshot_delivery_enabled = True
+        self._snapshot_poll_timer = QTimer(self)
+        self._snapshot_poll_timer.setInterval(50)
+        self._snapshot_poll_timer.timeout.connect(self._poll_snapshot_worker)
+        self._snapshot_refresh_timer = QTimer(self)
+        self._snapshot_refresh_timer.setInterval(snapshot_interval_ms)
+        self._snapshot_refresh_timer.timeout.connect(self.requestSnapshot)
+        self.destroyed.connect(self._disable_snapshot_delivery)
 
     @Slot(result="QVariant")
     def loadSnapshot(self) -> dict[str, Any]:
         """Load the default screen without initializing any application state."""
         snapshot = self._service.snapshot()
         return {"success": True, "snapshot": snapshot.model_dump(mode="json")}
+
+    @Slot(result="QVariant")
+    def requestSnapshot(self) -> dict[str, Any]:
+        """Queue at most one read-only snapshot task."""
+        if not self._snapshot_delivery_enabled:
+            return {"accepted": False, "busy": False, "message": "驾驶舱正在关闭。"}
+        if self._snapshot_worker is not None:
+            return {"accepted": False, "busy": True, "message": "状态刷新正在进行。"}
+        worker = _SnapshotWorker(self._service)
+        self._snapshot_worker = worker
+        try:
+            self._thread_pool.start(worker)
+        except RuntimeError as error:
+            self._snapshot_worker = None
+            return {
+                "accepted": False,
+                "busy": False,
+                "message": f"状态刷新未能进入后台：{error}",
+            }
+        if not self._snapshot_poll_timer.isActive():
+            self._snapshot_poll_timer.start()
+        return {"accepted": True, "busy": True, "message": "正在刷新状态。"}
+
+    @Slot(result="QVariant")
+    def startSnapshotRefresh(self) -> dict[str, Any]:
+        """Start bounded periodic refresh and queue the first snapshot."""
+        self._snapshot_delivery_enabled = True
+        if not self._snapshot_refresh_timer.isActive():
+            self._snapshot_refresh_timer.start()
+        return self.requestSnapshot()
+
+    @Slot()
+    def stopSnapshotRefresh(self) -> None:
+        """Stop future refreshes and suppress any late worker result."""
+        self._snapshot_delivery_enabled = False
+        self._snapshot_refresh_timer.stop()
+        self._snapshot_poll_timer.stop()
 
     @Slot(str, result="QVariant")
     def loadEvidence(self, project_id: str) -> dict[str, Any]:
@@ -199,3 +271,27 @@ class PmCockpitBridge(QObject):
             self.startFinished.emit(mission_id, success, message)
         if not self._start_workers:
             self._start_poll_timer.stop()
+
+    def _poll_snapshot_worker(self) -> None:
+        worker = self._snapshot_worker
+        if worker is None or not worker.done:
+            return
+        self._snapshot_worker = None
+        self._snapshot_poll_timer.stop()
+        if not self._snapshot_delivery_enabled:
+            return
+        if worker.result is None:
+            self.snapshotFinished.emit({
+                "success": False,
+                "snapshot": {},
+                "message": worker.error or "无法读取驾驶舱状态。",
+            })
+            return
+        self.snapshotFinished.emit({
+            "success": True,
+            "snapshot": worker.result.model_dump(mode="json"),
+            "message": "",
+        })
+
+    def _disable_snapshot_delivery(self, *_args: object) -> None:
+        self.stopSnapshotRefresh()

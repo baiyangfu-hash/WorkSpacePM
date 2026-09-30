@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QUrl
 from PySide6.QtQml import QQmlComponent, QQmlEngine
+from PySide6.QtTest import QTest
 
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
@@ -37,6 +38,7 @@ def test_boss_cockpit_components_load_without_the_legacy_workbench(
         _QML / "components" / "PmConfirmationCard.qml",
         _QML / "components" / "WorkGraphView.qml",
         _QML / "components" / "EvidenceDrawer.qml",
+        _QML / "components" / "ActivityTimeline.qml",
         _QML / "views" / "BossCockpitView.qml",
     )
 
@@ -81,6 +83,31 @@ def test_start_wiring_is_async_busy_guarded_and_refreshes_after_success() -> Non
     assert "pmCockpitBridge.confirmStart(missionId)" not in main_source
     assert "function onStartFinished(missionId, success, message)" in main_source
     assert "if (success)\n                root.refreshSnapshot()" in main_source
+
+
+def test_snapshot_refresh_is_async_bounded_and_preserves_last_success() -> None:
+    main_source = (_QML / "boss_main.qml").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    view_source = (_QML / "views" / "BossCockpitView.qml").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    timeline_source = (_QML / "components" / "ActivityTimeline.qml").read_text(
+        encoding="utf-8", errors="replace"
+    )
+
+    assert "pmCockpitBridge.requestSnapshot()" in main_source
+    assert "pmCockpitBridge.loadSnapshot()" not in main_source
+    assert "pmCockpitBridge.startSnapshotRefresh()" in main_source
+    assert "Component.onDestruction: pmCockpitBridge.stopSnapshotRefresh()" in main_source
+    assert "function onSnapshotFinished(response)" in main_source
+    assert "root.snapshot = response.snapshot" in main_source
+    assert "activities: root.snapshot.activities || []" in main_source
+    assert "Components.ActivityTimeline" in view_source
+    assert "activities: root.activities" in view_source
+    assert "PM_SESSION" not in timeline_source
+    assert "modelData.description" in timeline_source
+    assert "modelData.occurred_at" in timeline_source
 
 
 def test_view_suppresses_start_replay_until_busy_is_cleared(
@@ -182,6 +209,24 @@ def test_boss_main_saves_planning_form_to_isolated_store(
     bridge = PmCockpitBridge(str(tmp_path))
     qml_engine.rootContext().setContextProperty("pmCockpitBridge", bridge)
     window = _load(qml_engine, _QML / "boss_main.qml")
+    refresh = bridge.startSnapshotRefresh()
+    assert refresh["accepted"] or refresh["busy"], refresh
+    assert bridge._thread_pool.waitForDone(5_000)
+    bridge._poll_snapshot_worker()
+    snapshot: dict[str, object] = {}
+    for _ in range(100):
+        qapp.processEvents()
+        bridge._poll_snapshot_worker()
+        raw_snapshot = cast(Any, cast(QObject, window).property("snapshot"))
+        snapshot = (
+            raw_snapshot.toVariant()
+            if hasattr(raw_snapshot, "toVariant")
+            else cast(dict[str, object], raw_snapshot)
+        )
+        if snapshot["projects"]:
+            break
+        QTest.qWait(10)
+    assert snapshot["projects"]
     objective = window.findChild(QObject, "planningObjective")  # type: ignore[attr-defined]
     acceptance = window.findChild(QObject, "planningAcceptance")  # type: ignore[attr-defined]
     save = window.findChild(QObject, "savePlanningDraft")  # type: ignore[attr-defined]

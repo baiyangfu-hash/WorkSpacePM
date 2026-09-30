@@ -17,7 +17,7 @@ ApplicationWindow {
     title: "我的驾驶舱"
     color: Theme.background
 
-    property var snapshot: ({ projects: [], notices: [] })
+    property var snapshot: ({ projects: [], activities: [], notices: [] })
     property var planningDraft: null
     property string statusMessage: ""
 
@@ -26,10 +26,8 @@ ApplicationWindow {
             statusMessage = "驾驶舱桥接尚未连接。"
             return
         }
-        var response = pmCockpitBridge.loadSnapshot()
-        if (response.success) {
-            snapshot = response.snapshot
-        } else {
+        var response = pmCockpitBridge.requestSnapshot()
+        if (!response.accepted && !response.busy) {
             statusMessage = response.message || "无法读取驾驶舱状态。"
         }
     }
@@ -47,6 +45,7 @@ ApplicationWindow {
         id: cockpitView
         anchors.fill: parent
         cards: root.snapshot.projects || []
+        activities: root.snapshot.activities || []
         notices: root.snapshot.notices || []
         planningDraft: root.planningDraft
         statusMessage: root.statusMessage
@@ -74,6 +73,14 @@ ApplicationWindow {
 
     Connections {
         target: pmCockpitBridge
+        function onSnapshotFinished(response) {
+            if (response.success) {
+                root.snapshot = response.snapshot
+                root.statusMessage = ""
+            } else {
+                root.statusMessage = response.message || "状态刷新失败；已保留上次可信结果。"
+            }
+        }
         function onStartFinished(missionId, success, message) {
             cockpitView.setStartBusy(missionId, false)
             root.statusMessage = message || (success ? "任务已启动。" : "任务启动失败。")
@@ -92,5 +99,6 @@ ApplicationWindow {
         onCloseRequested: opened = false
     }
 
-    Component.onCompleted: refreshSnapshot()
+    Component.onCompleted: pmCockpitBridge.startSnapshotRefresh()
+    Component.onDestruction: pmCockpitBridge.stopSnapshotRefresh()
 }

@@ -12,6 +12,7 @@ from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from PySide6.QtCore import QRunnable, QThreadPool
 
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
+from auto_pm.contracts.pm_cockpit import PmCockpitSnapshot
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
 
@@ -32,6 +33,19 @@ class _StartService:
 
     def start_execution(self, mission_id: str) -> ForegroundExecutionReceipt:
         self.calls.append(mission_id)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+class _SnapshotService:
+    def __init__(self, outcomes: list[PmCockpitSnapshot | Exception]) -> None:
+        self.outcomes = outcomes
+        self.calls = 0
+
+    def snapshot(self) -> PmCockpitSnapshot:
+        self.calls += 1
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -236,3 +250,59 @@ def test_start_execution_failure_clears_busy_without_false_success(tmp_path: Pat
         False,
         "无法确认任务已启动，已保留待核验状态。",
     )
+
+
+def test_snapshot_refresh_is_background_and_skips_overlapping_ticks(tmp_path: Path) -> None:
+    service = _SnapshotService([PmCockpitSnapshot(projects=())])
+    pool = _HoldingThreadPool()
+    bridge = PmCockpitBridge(
+        str(tmp_path),
+        service=cast(PmCockpitService, service),
+        thread_pool=cast(QThreadPool, pool),
+        snapshot_interval_ms=1_000,
+    )
+    finished: list[dict[str, object]] = []
+    bridge.snapshotFinished.connect(lambda response: finished.append(response))
+
+    first = bridge.requestSnapshot()
+    overlap = bridge.requestSnapshot()
+
+    assert first["accepted"] is True
+    assert overlap == {
+        "accepted": False,
+        "busy": True,
+        "message": "状态刷新正在进行。",
+    }
+    assert service.calls == 0
+    assert pool.worker is not None
+    pool.worker.run()
+    bridge._poll_snapshot_worker()
+    assert service.calls == 1
+    assert finished[0]["success"] is True
+    assert cast(dict[str, object], finished[0]["snapshot"])["activities"] == []
+
+
+def test_snapshot_failure_and_shutdown_never_publish_a_replacement(tmp_path: Path) -> None:
+    service = _SnapshotService([RuntimeError("read failed"), PmCockpitSnapshot(projects=())])
+    pool = _HoldingThreadPool()
+    bridge = PmCockpitBridge(
+        str(tmp_path),
+        service=cast(PmCockpitService, service),
+        thread_pool=cast(QThreadPool, pool),
+    )
+    finished: list[dict[str, object]] = []
+    bridge.snapshotFinished.connect(lambda response: finished.append(response))
+
+    assert bridge.requestSnapshot()["accepted"] is True
+    assert pool.worker is not None
+    pool.worker.run()
+    bridge._poll_snapshot_worker()
+    assert finished == [{"success": False, "snapshot": {}, "message": "read failed"}]
+
+    assert bridge.requestSnapshot()["accepted"] is True
+    assert pool.worker is not None
+    bridge.stopSnapshotRefresh()
+    pool.worker.run()
+    bridge._poll_snapshot_worker()
+    assert finished == [{"success": False, "snapshot": {}, "message": "read failed"}]
+    assert bridge.requestSnapshot()["accepted"] is False

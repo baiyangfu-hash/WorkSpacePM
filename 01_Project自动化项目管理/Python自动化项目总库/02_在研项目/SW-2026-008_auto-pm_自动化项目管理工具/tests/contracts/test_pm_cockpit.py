@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from auto_pm.contracts.execution_adapter import (
+    ExecutionActivityStage,
+    ExecutionFailureCode,
+)
 from auto_pm.contracts.pm_cockpit import (
     CockpitUserAction,
+    PmCockpitActivity,
     PmCockpitEvidence,
     PmCockpitProjectCard,
+    PmCockpitSnapshot,
 )
 
 
@@ -51,3 +57,28 @@ def test_evidence_contract_has_no_execution_lease_field() -> None:
     payload = evidence.model_dump_json().lower()
     assert "lease" not in payload
     assert "token" not in payload
+
+
+def test_snapshot_activity_is_canonical_and_secret_free() -> None:
+    activity = PmCockpitActivity(
+        project_id="SW-2026-008",
+        mission_id="MISSION-001",
+        work_id="WORK-001",
+        run_id="RUN-001",
+        operation_id="OP-001",
+        stage=ExecutionActivityStage.FAILED,
+        title="执行失败",
+        description="历史原因未记录",
+        occurred_at="2026-09-28T00:00:00+00:00",
+        tone="error",
+        failure_code=ExecutionFailureCode.LEGACY_UNKNOWN,
+    )
+    snapshot = PmCockpitSnapshot(projects=(), activities=(activity,))
+
+    payload = snapshot.model_dump(mode="json")
+    assert payload["activities"][0]["stage"] == "FAILED"
+    assert payload["activities"][0]["failure_code"] == "LEGACY_UNKNOWN"
+    serialized = snapshot.model_dump_json().lower()
+    assert "lease" not in serialized
+    assert "token" not in serialized
+    assert "stdout" not in serialized

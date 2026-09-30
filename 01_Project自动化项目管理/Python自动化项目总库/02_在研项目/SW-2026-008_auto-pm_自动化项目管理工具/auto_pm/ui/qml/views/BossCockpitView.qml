@@ -9,6 +9,7 @@ Item {
     id: root
 
     property var cards: []
+    property var activities: []
     property var notices: []
     property var planningDraft: null
     property var startBusyByMission: ({})
@@ -156,6 +157,11 @@ Item {
                     font.pixelSize: Theme.fontSizeSm
                     wrapMode: Text.WordWrap
                 }
+            }
+
+            Components.ActivityTimeline {
+                Layout.fillWidth: true
+                activities: root.activities
             }
 
             Repeater {

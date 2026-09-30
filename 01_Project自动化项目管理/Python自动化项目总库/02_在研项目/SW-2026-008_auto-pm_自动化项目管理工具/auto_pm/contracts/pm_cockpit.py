@@ -11,6 +11,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from auto_pm.contracts.execution_adapter import (
+    ExecutionActivityStage,
+    ExecutionFailureCode,
+)
+
 
 class CockpitUserAction(StrEnum):
     """The small, user-visible action set exposed by the boss cockpit."""
@@ -80,6 +85,25 @@ class PmCockpitEvidence(BaseModel):
     status_note: str
 
 
+class PmCockpitActivity(BaseModel):
+    """One secret-free canonical activity for the currently selected Mission."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["pm-cockpit-activity.v1"] = "pm-cockpit-activity.v1"
+    project_id: str = Field(min_length=1)
+    mission_id: str = Field(min_length=1)
+    work_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    operation_id: str = ""
+    stage: ExecutionActivityStage
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    occurred_at: str = Field(min_length=1)
+    tone: Literal["default", "success", "warning", "error"] = "default"
+    failure_code: ExecutionFailureCode | None = None
+
+
 class PmCockpitSnapshot(BaseModel):
     """A single immutable response for the safe default cockpit screen."""
 
@@ -87,4 +111,5 @@ class PmCockpitSnapshot(BaseModel):
 
     schema_version: Literal["pm-cockpit-snapshot.v1"] = "pm-cockpit-snapshot.v1"
     projects: tuple[PmCockpitProjectCard, ...]
+    activities: tuple[PmCockpitActivity, ...] = ()
     notices: tuple[str, ...] = ()

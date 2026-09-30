@@ -9,11 +9,23 @@ from typing import cast
 
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 
-from auto_pm.contracts.continuity import CheckpointItem, RunItem, WorkItem, WorkState
-from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
+from auto_pm.contracts.continuity import (
+    CheckpointItem,
+    RunItem,
+    RunState,
+    WorkItem,
+    WorkState,
+)
+from auto_pm.contracts.execution_adapter import (
+    ExecutionActivity,
+    ExecutionActivityStage,
+    ExecutionFailureCode,
+    ForegroundExecutionReceipt,
+)
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_cockpit import (
     CockpitUserAction,
+    PmCockpitActivity,
     PmCockpitCheckpointEvidence,
     PmCockpitEvidence,
     PmCockpitProjectCard,
@@ -72,18 +84,25 @@ class PmCockpitService:
 
         store_note = self._store_note()
         cards: list[PmCockpitProjectCard] = []
+        activities: list[PmCockpitActivity] = []
         notices: list[str] = [store_note] if store_note else []
         for mapping in mappings:
             if store_note:
                 cards.append(self._unavailable_card(mapping, store_note))
                 continue
             try:
-                cards.append(self._card(mapping, self._facts(mapping.project_id)))
+                facts = self._facts(mapping.project_id)
+                cards.append(self._card(mapping, facts))
+                activities.extend(self._activities(mapping.project_id, facts))
             except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
                 note = "连续性记录无法安全读取；驾驶舱没有尝试修复或重建它。"
                 notices.append(f"{mapping.project_id}: {note}")
                 cards.append(self._unavailable_card(mapping, note, error))
-        return PmCockpitSnapshot(projects=tuple(cards), notices=tuple(dict.fromkeys(notices)))
+        return PmCockpitSnapshot(
+            projects=tuple(cards),
+            activities=tuple(activities),
+            notices=tuple(dict.fromkeys(notices)),
+        )
 
     def evidence(self, project_id: str) -> PmCockpitEvidence:
         """Return bounded provenance for the evidence drawer, never execution credentials."""
@@ -266,6 +285,101 @@ class PmCockpitService:
             current_owner="驾驶舱待命",
             next_user_action="向 PM 描述需求；系统不会自动修复记录",
             user_action=CockpitUserAction.NONE,
+        )
+
+    def _activities(
+        self,
+        project_id: str,
+        facts: _ProjectFacts,
+    ) -> tuple[PmCockpitActivity, ...]:
+        mission = self._primary_mission(facts.missions)
+        if mission is None or not mission.root_work_id:
+            return ()
+        runs = facts.runs_by_work.get(mission.root_work_id, ())
+        run = self._primary_run(runs)
+        if run is None:
+            return ()
+        return tuple(
+            self._activity(project_id, mission, mission.root_work_id, activity)
+            for activity in self._store.list_run_activities(run.run_id)
+        )
+
+    @staticmethod
+    def _primary_run(runs: tuple[RunItem, ...]) -> RunItem | None:
+        terminal = {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}
+        return next((run for run in runs if run.state not in terminal), None) or (
+            runs[0] if runs else None
+        )
+
+    @staticmethod
+    def _activity(
+        project_id: str,
+        mission: Mission,
+        work_id: str,
+        activity: ExecutionActivity,
+    ) -> PmCockpitActivity:
+        titles = {
+            ExecutionActivityStage.READY: "执行已授权",
+            ExecutionActivityStage.STARTING: "正在启动",
+            ExecutionActivityStage.RUNNING: "执行进程已启动",
+            ExecutionActivityStage.PROJECTED: "执行结果已投影",
+            ExecutionActivityStage.VERIFYING: "正在验证",
+            ExecutionActivityStage.CHECKPOINTED: "验证证据已保存",
+            ExecutionActivityStage.BLOCKED: "执行被阻塞",
+            ExecutionActivityStage.PENDING: "执行状态待核验",
+            ExecutionActivityStage.SUCCEEDED: "执行已完成",
+            ExecutionActivityStage.FAILED: "执行失败",
+            ExecutionActivityStage.CANCELLED: "执行已取消",
+        }
+        failure_labels = {
+            ExecutionFailureCode.LOCAL_START_FAILED: "本地执行器启动失败",
+            ExecutionFailureCode.HANDSHAKE_FAILED: "执行握手失败",
+            ExecutionFailureCode.START_EVIDENCE_REJECTED: "启动证据未获接受",
+            ExecutionFailureCode.CHILD_REAP_FAILED: "子进程回收未能确认",
+            ExecutionFailureCode.COLLECTION_PENDING: "执行结果仍待收集",
+            ExecutionFailureCode.TERMINATED: "执行进程被终止",
+            ExecutionFailureCode.NONZERO_EXIT: "执行命令返回非零状态",
+            ExecutionFailureCode.EXECUTOR_FAILED: "执行器报告失败",
+            ExecutionFailureCode.PROJECTION_FAILED: "结果投影失败",
+            ExecutionFailureCode.LEGACY_UNKNOWN: "历史原因未记录",
+        }
+        success = {
+            ExecutionActivityStage.PROJECTED,
+            ExecutionActivityStage.CHECKPOINTED,
+            ExecutionActivityStage.SUCCEEDED,
+        }
+        warning = {
+            ExecutionActivityStage.BLOCKED,
+            ExecutionActivityStage.PENDING,
+            ExecutionActivityStage.CANCELLED,
+        }
+        failure_code = activity.failure.code if activity.failure else None
+        description = (
+            failure_labels[failure_code]
+            if failure_code is not None
+            else f"canonical 事件：{activity.event_type}"
+        )
+        tone = (
+            "error"
+            if activity.stage is ExecutionActivityStage.FAILED
+            else "warning"
+            if activity.stage in warning
+            else "success"
+            if activity.stage in success
+            else "default"
+        )
+        return PmCockpitActivity(
+            project_id=project_id,
+            mission_id=mission.mission_id,
+            work_id=work_id,
+            run_id=activity.run_id,
+            operation_id=activity.operation_id,
+            stage=activity.stage,
+            title=titles[activity.stage],
+            description=description,
+            occurred_at=activity.occurred_at.isoformat(),
+            tone=tone,
+            failure_code=failure_code,
         )
 
     def _empty_evidence(self, project_id: str, note: str) -> PmCockpitEvidence:

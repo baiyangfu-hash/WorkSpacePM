@@ -1,15 +1,4 @@
-// ActivityTimeline.qml - 活动时间线组件（CHG-106 T5）
-//
-// 对齐 V7 原型 .timeline-container（012_UI架构原型_V7.html L1069 + JS renderTimeline L1822）
-// 渲染 recent_activities 列表：彩色圆点 + 连接线 + 标题 + 描述 + 时间
-//
-// 数据格式（来自 DashboardSnapshotDTO.recent_activities）：
-//   [{"type": "default"|"success"|"warning", "title": "...", "desc": "...", "time": "..."}]
-//
-// 用法：
-//   ActivityTimeline {
-//       activities: snapshot.recent_activities
-//   }
+// Canonical activity timeline. U04B consumes only bridge snapshot facts.
 
 import QtQuick
 import QtQuick.Layouts
@@ -19,7 +8,7 @@ GlassPanel {
     id: root
 
     // ── 公开属性 ────────────────────────────────────────
-    property string title: "近期活动 (PM_SESSION)"  // 标题
+    property string title: "当前任务活动"
     property string titleIcon: "🔄"                  // 标题图标
     property var activities: []                      // 活动列表
 
@@ -111,7 +100,7 @@ GlassPanel {
                             width: 11
                             height: 11
                             radius: 5.5
-                            color: _typeColor(modelData.type || "default")
+                            color: _typeColor(modelData.tone || modelData.type || "default")
 
                             // 辉光效果
                             Rectangle {
@@ -144,7 +133,7 @@ GlassPanel {
                             }
 
                             Text {
-                                text: modelData.desc || ""
+                                text: modelData.description || modelData.desc || ""
                                 color: Theme.textMuted
                                 font.pixelSize: 13
                                 width: parent.width
@@ -153,7 +142,7 @@ GlassPanel {
                             }
 
                             Text {
-                                text: modelData.time || ""
+                                text: modelData.occurred_at || modelData.time || ""
                                 color: Theme.textMuted
                                 font.pixelSize: 11
                                 opacity: 0.6

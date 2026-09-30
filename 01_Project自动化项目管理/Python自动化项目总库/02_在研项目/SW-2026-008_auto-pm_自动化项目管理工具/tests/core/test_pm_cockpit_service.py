@@ -271,3 +271,47 @@ def test_progress_requires_trusted_started_evidence_and_ignores_unrelated_blocke
     assert not PmCockpitService._is_blocked(
         mission, work, {work.work_id: (run,), "WORK-HISTORY": (unrelated,)}
     )
+
+
+def test_activity_timeline_uses_only_current_mission_root_run(tmp_path: Path) -> None:
+    _registry(tmp_path)
+    _seed_authorized_mission(tmp_path)
+    works = WorkRegistryService(tmp_path)
+    works.create_work(
+        work_id="WORK-HISTORY-001",
+        subject_project_id="SW-2026-008",
+        kind=WorkKind.WBS,
+        title="历史辅助任务",
+        owner="historical",
+        scope_paths=["README.md"],
+        source_fingerprint="sha256:history",
+        idempotency_key="history-work",
+        read_only=True,
+    )
+    head = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    ContinuityExecutionService(tmp_path).start_run(
+        run_id="RUN-HISTORY-001",
+        work_id="WORK-HISTORY-001",
+        executor_id="historical",
+        adapter="codex",
+        owned_paths=["README.md"],
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+        git_head=head,
+        worktree_path=str(tmp_path),
+        lease_token="history-token",
+        lease_seconds=900,
+        idempotency_key="history-run",
+    )
+    _flush_continuity_wal(tmp_path)
+
+    snapshot = PmCockpitService(tmp_path).snapshot()
+
+    assert snapshot.activities
+    assert {item.mission_id for item in snapshot.activities} == {"MISSION-COCKPIT-001"}
+    assert {item.work_id for item in snapshot.activities} == {"WORK-COCKPIT-001"}
+    assert {item.run_id for item in snapshot.activities} == {"RUN-COCKPIT-001"}
+    assert {item.stage.value for item in snapshot.activities} >= {"READY", "CHECKPOINTED"}
+    serialized = snapshot.model_dump_json().lower()
+    assert "history-token" not in serialized
+    assert "must-not-leak" not in serialized
