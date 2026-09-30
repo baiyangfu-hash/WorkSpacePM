@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from collections.abc import Callable
@@ -1156,9 +1157,18 @@ class ContinuityExecutionService:
         """Read-only facts a Decision must bind before fencing one legacy terminal lease."""
 
         try:
-            return self._store.legacy_terminal_lease_evidence(run_id)
+            evidence = self._store.legacy_terminal_lease_evidence(run_id)
+            original_ref = self._store.get_work(evidence.work_id).authorization_ref
+            issues = (
+                self._store.decision_git_binding_issues(original_ref)
+                if is_canonical_decision_id(original_ref)
+                else ()
+            )
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
+        if issues:
+            evidence = dataclasses.replace(evidence, blockers=evidence.blockers + issues)
+        return evidence
 
     def fence_legacy_terminal_lease(
         self,
@@ -1229,7 +1239,7 @@ class ContinuityExecutionService:
             recovery_work = self._store.get_work(recovery.work_id)
             if target_work.read_only or not is_canonical_decision_id(target_work.authorization_ref):
                 raise ContinuityExecutionError("目标 Work 必须绑定 canonical immutable Decision")
-            original, _original_sha256 = decisions.get_decision_with_sha256(
+            original, original_sha256 = decisions.get_decision_with_sha256(
                 target_work.authorization_ref
             )
             if target_work.authorization_ref == decision_id:
@@ -1274,6 +1284,8 @@ class ContinuityExecutionService:
                 runtime_target_path=runtime_target_path,
                 reason=normalized_reason,
                 idempotency_key=idempotency_key,
+                original_decision_id=target_work.authorization_ref,
+                original_decision_sha256=original_sha256,
             )
         except (ContinuityStoreError, DecisionError) as error:
             raise ContinuityExecutionError(str(error)) from error

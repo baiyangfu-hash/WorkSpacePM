@@ -145,3 +145,21 @@ def test_source_refs_reject_duplicate_underlying_path() -> None:
     values["source_refs"] = ("WBS:plans/WBS.md", "FILE:plans/WBS.md")
     with pytest.raises(ValidationError, match="alias"):
         ImplementationCard.model_validate(values)
+
+
+def test_planned_new_paths_default_empty_unique_safe_and_owned() -> None:
+    """M2-GOV-IC02 (card 027 §4 #1): planned-new owned paths are explicit and bounded."""
+
+    assert ImplementationCard.model_validate(card_values()).planned_new_paths == ()
+    values = card_values()
+    values["planned_new_paths"] = ("project/src.py",)
+    assert ImplementationCard.model_validate(values).planned_new_paths == ("project/src.py",)
+    values["planned_new_paths"] = ("project/other.py",)
+    with pytest.raises(ValidationError, match="subset of owned_paths"):
+        ImplementationCard.model_validate(values)
+    values["planned_new_paths"] = ("project/src.py", "project/src.py")
+    with pytest.raises(ValidationError, match="unique"):
+        ImplementationCard.model_validate(values)
+    values["planned_new_paths"] = ("../src.py",)
+    with pytest.raises(ValidationError):
+        ImplementationCard.model_validate(values)

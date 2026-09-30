@@ -9,12 +9,19 @@ import re
 import stat
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from jinja2 import Environment, StrictUndefined
 from pydantic import ValidationError
 
+from auto_pm.application.core.implementation_card_precheck import (
+    CommandNode,
+    PrecheckReport,
+    format_findings,
+    precheck_structured_card,
+)
 from auto_pm.contracts.continuity import CheckpointItem, RunState, WorkState
 from auto_pm.contracts.implementation_card import CardState, ImplementationCard
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
@@ -69,8 +76,25 @@ class ImplementationCardService:
         """Read and parse without creating state or directories."""
         return self._read(card_id)[0]
 
-    def validate(self, card_id: str) -> ImplementationCard:
-        """Read-only contract, WBS, Git and governed candidate validation."""
+    def precheck(
+        self,
+        card: ImplementationCard,
+        *,
+        command_tree: Mapping[str, CommandNode] | None = None,
+    ) -> PrecheckReport:
+        """Card 027 §5.3: the same fail-closed precheck as Markdown cards; read-only."""
+        report = precheck_structured_card(card, workspace_root=self.root, command_tree=command_tree)
+        if not report.passed:
+            raise ImplementationCardError(f"implementation card precheck failed: {format_findings(report)}")
+        return report
+
+    def validate(
+        self,
+        card_id: str,
+        *,
+        command_tree: Mapping[str, CommandNode] | None = None,
+    ) -> ImplementationCard:
+        """Read-only contract, precheck, WBS, Git and governed candidate validation."""
         card = self.load(card_id)
         try:
             self._canonical(card, require_base_head=card.state in {
@@ -78,6 +102,7 @@ class ImplementationCardService:
             })
         except (DecisionError, ContinuityStoreError, ControlRootGuardError) as error:
             raise ImplementationCardError(f"canonical authority unavailable: {error}") from error
+        self.precheck(card, command_tree=command_tree)
         return card
 
     def _validate_external(self, card: ImplementationCard) -> Path:
@@ -224,7 +249,12 @@ class ImplementationCardService:
             raise ImplementationCardError("candidate has drifted from immutable base")
         return worktree, store
 
-    def dispatch(self, card_id: str) -> dict[str, object]:
+    def dispatch(
+        self,
+        card_id: str,
+        *,
+        command_tree: Mapping[str, CommandNode] | None = None,
+    ) -> dict[str, object]:
         """Emit a bounded package after exact checks; create no Work or Run."""
         card, raw = self._read(card_id)
         if card.state is not CardState.APPROVED or not card.approval_evidence:
@@ -247,6 +277,7 @@ class ImplementationCardService:
             raise ImplementationCardError("lease is expired or mismatched")
         if self._git(worktree, "status", "--porcelain"):
             raise ImplementationCardError("candidate has undeclared dirty files")
+        self.precheck(card, command_tree=command_tree)
         result = card.transition(CardState.DISPATCHED)
         self._write(result, raw)
         return {"schema_version": "implementation_dispatch.v1", "card_id": card_id,

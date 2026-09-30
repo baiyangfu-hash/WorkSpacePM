@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from collections.abc import Callable
@@ -270,8 +271,11 @@ class WorkRegistryService:
             _decision, sha256 = DecisionService(self._root).get_decision_with_sha256(
                 evidence.authorization_ref
             )
+            issues = self._store.decision_git_binding_issues(evidence.authorization_ref)
         except (ContinuityStoreError, DecisionError) as error:
             raise WorkRegistryError(str(error)) from error
+        if issues:
+            evidence = dataclasses.replace(evidence, blockers=evidence.blockers + issues)
         return evidence, sha256
 
     def adjudicate_blocked_work(

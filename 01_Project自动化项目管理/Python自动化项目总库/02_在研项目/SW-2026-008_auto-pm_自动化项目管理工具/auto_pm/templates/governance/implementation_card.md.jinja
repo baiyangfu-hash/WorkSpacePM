@@ -1,5 +1,8 @@
 # Implementation Card {{ card.card_id }}
 
+> 隔离基线：`{{ card.base_commit }}`
+> 路径根：`.`
+
 Schema: `{{ card.schema_version }}`
 Project: `{{ card.project_id }}`
 Intent: `{{ card.intent_type }}`
@@ -26,6 +29,13 @@ State: `{{ card.state }}`
 ### Product paths
 
 {% for path in card.owned_paths %}- Product: `{{ path }}`
+{% endfor %}
+
+### Path table (machine precheck)
+
+| # | 路径 | 基线状态 |
+|---|---|---|
+{% for path in card.owned_paths %}| {{ loop.index }} | `{{ path }}` | {{ '计划新增' if path in card.planned_new_paths else '存在' }} |
 {% endfor %}
 
 ### Commit evidence paths

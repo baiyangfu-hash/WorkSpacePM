@@ -774,6 +774,74 @@ class ContinuityStore:
                 raise ContinuityStoreError("首次结算复核期间 Git HEAD 发生漂移")
         return target_after, recovery_after
 
+    def _control_root_decision_binding(
+        self,
+        *,
+        recovery: RunItem,
+        original_decision_id: str,
+        original_decision_sha256: str,
+        decision_id: str,
+        decision_sha256: str,
+        label: str,
+    ) -> dict[str, str]:
+        """Bind the original and the runtime Decision bytes to the recovery Run's control-root commit.
+
+        Same strength as ``settle_expired_run``: the recovery Run must live in the control-root
+        main worktree, the current HEAD must equal its ``git_head`` on first execution, and both
+        Decision files must be tracked, clean and byte-identical to that commit's blobs.
+        """
+
+        try:
+            recovery_worktree = Path(recovery.worktree_path).resolve(strict=True)
+        except OSError as error:
+            raise ContinuityStoreError(f"{label}的恢复 Run worktree_path 无法规范化") from error
+        if recovery_worktree != self.workspace_root:
+            raise ContinuityStoreError(f"{label}的恢复 Run 必须位于控制根主工作树")
+        self._decision_git_snapshots(
+            recovery_git_head=recovery.git_head,
+            target_decision_id=original_decision_id,
+            target_decision_sha256=original_decision_sha256,
+            recovery_decision_id=decision_id,
+            recovery_decision_sha256=decision_sha256,
+            require_current_head=True,
+        )
+
+        def head_blob(decision: str) -> str:
+            return self._git_object_id(
+                self._git_bytes(
+                    "rev-parse",
+                    "--verify",
+                    f"{recovery.git_head}:.auto-pm/decisions/{decision}.json",
+                ),
+                label="Decision HEAD blob",
+            )
+
+        return {
+            "schema_version": "decision-git-binding.v1",
+            "git_head": recovery.git_head,
+            "original_decision_id": original_decision_id,
+            "original_decision_blob": head_blob(original_decision_id),
+            "decision_id": decision_id,
+            "decision_blob": head_blob(decision_id),
+        }
+
+    def decision_git_binding_issues(self, decision_id: str) -> tuple[str, ...]:
+        """Read-only diagnostic: is one Decision file tracked and clean at the control-root HEAD?"""
+
+        path = f".auto-pm/decisions/{decision_id}.json"
+        try:
+            self._require_control_root()
+            tracked = self._git_bytes("ls-files", "--error-unmatch", "--", path)
+            if tracked.decode("utf-8", errors="replace").strip() != path:
+                raise ContinuityStoreError("Decision 未被精确跟踪")
+            self._require_paths_clean_at_head(path)
+        except ContinuityStoreError:
+            return (
+                f"Decision {decision_id} 未被控制根 Git 跟踪或相对 HEAD 有改动；首次执行前须先提交原 "
+                "Decision 与本次运行态 Decision，再在该提交上创建恢复 Run，并在首次执行完成前保持 HEAD 不前移",
+            )
+        return ()
+
     def initialize(self, now: str, tool_version: str) -> None:
         self._require_control_root()
         db_path = self._validated_db_path()
@@ -1684,11 +1752,16 @@ class ContinuityStore:
         runtime_target_path: str,
         reason: str,
         idempotency_key: str,
+        original_decision_id: str,
+        original_decision_sha256: str,
     ) -> RunItem:
         """Invalidate one expired legacy terminal lease token without touching Run history.
 
         Only the lease row is fenced (RELEASED marker) and one audit event is appended; the
-        Run row, its Checkpoints and every earlier event stay byte-identical.
+        Run row, its Checkpoints and every earlier event stay byte-identical. On first execution
+        the target Work's original Decision and the fence Decision are bound to the recovery
+        Run's control-root commit; the binding is audited under ``authority`` and never enters
+        ``request``, so replays of events written before this binding remain equivalent.
         """
 
         texts = {
@@ -1820,6 +1893,18 @@ class ContinuityStore:
                 )
             ):
                 raise ContinuityStoreError("围栏权限链未覆盖 canonical continuity.db")
+            self._validated_run_text(original_decision_id, label="original_decision_id")
+            self._validated_run_text(original_decision_sha256, label="original_decision_sha256")
+            if target_work.authorization_ref != original_decision_id:
+                raise ContinuityStoreError("目标 Work 的原授权引用与围栏绑定不一致")
+            authority = self._control_root_decision_binding(
+                recovery=recovery,
+                original_decision_id=original_decision_id,
+                original_decision_sha256=original_decision_sha256,
+                decision_id=decision_id,
+                decision_sha256=decision_sha256,
+                label="旧终态 lease 围栏",
+            )
 
             release = self._release_lease_in_transaction(
                 conn,
@@ -1845,6 +1930,7 @@ class ContinuityStore:
                         "event_types": list(facts.event_types),
                     },
                     "lease_release": release,
+                    "authority": authority,
                 },
                 idempotency_key,
                 event_time,
@@ -1908,6 +1994,8 @@ class ContinuityStore:
 
         The Work row, its Runs, leases, Checkpoints and prior events are never rewritten:
         the only mutations are the Work CAS transition and one appended adjudication event.
+        On first execution the original and the adjudication Decision are bound to the recovery
+        Run's control-root commit (audited under ``authority``, never inside ``request``).
         """
 
         texts = {
@@ -2035,6 +2123,14 @@ class ContinuityStore:
                 )
             ):
                 raise ContinuityStoreError("裁决权限链未覆盖 canonical continuity.db")
+            authority = self._control_root_decision_binding(
+                recovery=recovery,
+                original_decision_id=expected_original_decision_id,
+                original_decision_sha256=original_decision_sha256,
+                decision_id=decision_id,
+                decision_sha256=decision_sha256,
+                label="行政裁决",
+            )
 
             cursor = conn.execute(
                 """UPDATE work_items SET state=?, authorization_ref=?, version=version+1,
@@ -2069,6 +2165,7 @@ class ContinuityStore:
                         "run_states": [list(item) for item in facts.run_states],
                         "lease_states": [list(item) for item in facts.lease_states],
                     },
+                    "authority": authority,
                 },
                 idempotency_key,
                 event_time,

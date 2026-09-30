@@ -14,6 +14,11 @@ from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.implementation_card_precheck import (
+    format_findings,
+    precheck_markdown_card,
+    scopes_outside_card,
+)
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import AuthorityEnvelope, MissionState
@@ -39,6 +44,7 @@ from auto_pm.infrastructure.control_root_guard import (
     clean_git_environment,
     require_governed_worktree,
 )
+from auto_pm.ui.cli.implementation_card import command_tree_from_click
 
 
 def _workspace(ctx: click.Context) -> Path:
@@ -262,6 +268,15 @@ def work_group() -> None:
 @click.option("--source-fingerprint", default="")
 @click.option("--idempotency-key", required=True)
 @click.option("--read-only", is_flag=True)
+@click.option(
+    "--card-file",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Implementation card that must pass the pre-start precheck; required for write Work. "
+        "Every --scope must lie inside the card's path table."
+    ),
+)
 @click.pass_context
 def create_work(
     ctx: click.Context,
@@ -274,10 +289,37 @@ def create_work(
     source_fingerprint: str,
     idempotency_key: str,
     read_only: bool,
+    card_file: Path | None,
 ) -> None:
-    """Create one logical Work item; write Work remains PLANNED until authorized."""
+    """Create one logical Work item; write Work remains PLANNED until authorized.
+
+    A write Work (no --read-only) must reference an implementation card that passes the
+    precheck in this very process (no receipt file is trusted, no bypass switch exists), and
+    its scope must stay inside the card's path table (card 027 §5.4).
+    """
     try:
         _require_mutation_root(ctx)
+        if not read_only:
+            if card_file is None:
+                raise click.ClickException(
+                    "写入型 Work 必须提供 --card-file：实施卡须先通过开工前预检（只读 Work 可用 --read-only）"
+                )
+            if not card_file.is_file():
+                raise click.ClickException(f"实施卡文件不存在: {card_file}")
+            report = precheck_markdown_card(
+                card_file,
+                workspace_root=_workspace(ctx),
+                command_tree=command_tree_from_click(ctx),
+            )
+            if not report.passed:
+                raise click.ClickException(f"实施卡开工前预检失败: {format_findings(report)}")
+            outside = scopes_outside_card(scope_paths, report)
+            if outside:
+                raise click.ClickException(
+                    "Work scope 超出实施卡路径表: " + ", ".join(outside)
+                )
+            if not source_fingerprint:
+                source_fingerprint = f"card:{report.card_sha256}"
         if not source_fingerprint:
             source_fingerprint = f"git:{_git_snapshot(_workspace(ctx))[0]}"
         item = _work_service(ctx).create_work(

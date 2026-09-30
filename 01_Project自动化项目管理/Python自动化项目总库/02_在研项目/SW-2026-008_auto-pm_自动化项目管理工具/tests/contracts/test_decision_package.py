@@ -1585,3 +1585,32 @@ def test_legacy_terminal_fence_capability_round_trips_and_is_exclusive() -> None
             allowed_outcomes=cancelled,
             target_work_ids=("WORK-A",),
         )
+
+
+@pytest.mark.parametrize(
+    ("actions", "runs", "works", "outcome"),
+    [
+        (("settle_expired_run",), ("RUN-A",), (), "CANCELLED"),
+        (("revoke_unstarted_run", "fence_terminal_lease"), ("RUN-A", "RUN-B"), (), "CANCELLED"),
+        (("fence_legacy_terminal_lease",), ("RUN-A",), (), "CANCELLED"),
+        (("reconcile_terminal_lease",), ("RUN-A",), (), "RELEASED"),
+        (("adjudicate_blocked_work",), (), ("WORK-A", "WORK-B"), "CANCELLED"),
+    ],
+    ids=["settle", "run-level-combined", "fence-legacy", "reconcile", "adjudicate"],
+)
+def test_every_cli_matrix_row_is_a_stable_persisted_capability(
+    actions: tuple[str, ...], runs: tuple[str, ...], works: tuple[str, ...], outcome: str
+) -> None:
+    """M2-GOV-ADJ C: each row `decision create` accepts is a valid DTO and round-trips unchanged."""
+
+    capability = RuntimeDecisionCapability(
+        allowed_runtime_actions=tuple(RuntimeDecisionAction(item) for item in actions),
+        target_run_ids=runs,
+        allowed_outcomes=(RuntimeDecisionOutcome(outcome),),
+        target_work_ids=works,
+    )
+    persisted = capability.to_dict()
+
+    assert RuntimeDecisionCapability.from_dict(persisted) == capability
+    assert ("target_work_ids" in persisted) is bool(works)
+    assert json.loads(json.dumps(persisted)) == persisted

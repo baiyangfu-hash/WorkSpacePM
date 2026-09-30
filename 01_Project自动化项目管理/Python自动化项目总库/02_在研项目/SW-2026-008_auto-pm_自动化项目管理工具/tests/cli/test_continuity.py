@@ -1586,3 +1586,165 @@ def test_fence_legacy_terminal_cli_reads_recovery_token_from_stdin_only(
     assert "stdin-secret" not in result.output
     rejected = CliRunner().invoke(cli, [*base, "--recovery-lease-token", "argv-secret"])
     assert rejected.exit_code != 0 and "argv-secret" not in rejected.output
+
+
+# M2-GOV-IC02 (card 027 §5.4, §6 G4): write Work creation is gated by an implementation card that
+# passes the precheck in the same process; no receipt is trusted and no bypass switch exists.
+
+
+def _write_card(root: Path, rows: list[tuple[str, str]], *, baseline: str | None = None) -> Path:
+    """Minimal card whose baseline is the test repository HEAD (card 027 §6 G6)."""
+
+    head = baseline or subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    table = "\n".join(f"| {index} | `{path}` | {state} |" for index, (path, state) in enumerate(rows, 1))
+    card = root / "work-card.md"
+    card.write_text(
+        f"# Work card\n\n> 隔离基线：`{head}`\n> 路径根：`.`\n\n"
+        f"| # | 路径 | 基线状态 |\n|---|---|---|\n{table}\n",
+        encoding="utf-8",
+    )
+    return card
+
+
+def _write_work_args(*extra: str) -> list[str]:
+    return [
+        "work",
+        "create",
+        "--work-id",
+        "WORK-CARD-001",
+        "--pid",
+        "SW-TEST-001",
+        "--kind",
+        "TEST",
+        "--title",
+        "Card gated",
+        "--owner",
+        "agent-a",
+        "--scope",
+        "README.md",
+        "--idempotency-key",
+        "work-card-create",
+        *extra,
+    ]
+
+
+def _work_rows(root: Path) -> list[tuple[str, str]]:
+    database = root / ".auto-pm" / "continuity.db"
+    if not database.exists():
+        return []
+    with closing(sqlite3.connect(database)) as conn:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "work_items" not in tables:
+            return []
+        return [(str(row[0]), str(row[1])) for row in conn.execute("SELECT work_id, source_fingerprint FROM work_items")]
+
+
+def test_write_work_without_card_file_is_rejected_without_writing(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _repository(tmp_path)
+
+    result = _invoke(cli_runner, tmp_path, _write_work_args())
+
+    assert result.exit_code != 0 and "--card-file" in result.output
+    assert _work_rows(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("rows", "baseline", "fragment"),
+    [
+        ([("README.md", "存在")], "<未回写>", "预检失败"),
+        ([("README.md", "计划新增")], None, "预检失败"),
+        ([("missing.md", "存在")], None, "预检失败"),
+    ],
+    ids=["placeholder-baseline", "existing-marked-planned", "missing-marked-existing"],
+)
+def test_write_work_with_failing_card_is_rejected_without_writing(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    rows: list[tuple[str, str]],
+    baseline: str | None,
+    fragment: str,
+) -> None:
+    _repository(tmp_path)
+    card = _write_card(tmp_path, rows, baseline=baseline)
+
+    result = _invoke(cli_runner, tmp_path, _write_work_args("--card-file", str(card)))
+
+    assert result.exit_code != 0 and fragment in result.output
+    assert _work_rows(tmp_path) == []
+
+
+def test_write_work_scope_outside_the_card_is_rejected(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _repository(tmp_path)
+    card = _write_card(tmp_path, [(".gitignore", "存在")])
+
+    result = _invoke(cli_runner, tmp_path, _write_work_args("--card-file", str(card)))
+
+    assert result.exit_code != 0 and "超出实施卡路径表" in result.output and "README.md" in result.output
+    assert _work_rows(tmp_path) == []
+
+
+def test_write_work_with_passing_card_records_card_fingerprint(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _repository(tmp_path)
+    card = _write_card(tmp_path, [("README.md", "存在")])
+
+    result = _invoke(cli_runner, tmp_path, _write_work_args("--card-file", str(card)))
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["state"] == "PLANNED"
+    expected = "card:" + hashlib.sha256(card.read_bytes()).hexdigest()
+    assert _work_rows(tmp_path) == [("WORK-CARD-001", expected)]
+
+
+def test_explicit_source_fingerprint_is_not_overwritten(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _repository(tmp_path)
+    card = _write_card(tmp_path, [("README.md", "存在")])
+
+    result = _invoke(
+        cli_runner,
+        tmp_path,
+        _write_work_args("--card-file", str(card), "--source-fingerprint", "sha256:explicit"),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _work_rows(tmp_path) == [("WORK-CARD-001", "sha256:explicit")]
+
+
+def test_read_only_work_is_exempt_from_the_card_requirement(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _repository(tmp_path)
+
+    result = _invoke(cli_runner, tmp_path, _write_work_args("--read-only"))
+
+    assert result.exit_code == 0, result.output
+    assert [row[0] for row in _work_rows(tmp_path)] == ["WORK-CARD-001"]
+
+
+def test_work_create_offers_no_precheck_bypass(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _repository(tmp_path)
+
+    result = _invoke(cli_runner, tmp_path, ["work", "create", "--help"])
+
+    import re
+
+    options = set(re.findall(r"--[a-z][a-z0-9-]*", result.output))
+    assert options == {
+        "--work-id",
+        "--pid",
+        "--kind",
+        "--title",
+        "--owner",
+        "--scope",
+        "--source-fingerprint",
+        "--idempotency-key",
+        "--read-only",
+        "--card-file",
+        "--help",
+    }
+    # The exact option set above is the proof that no skip/bypass/force switch exists.
