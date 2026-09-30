@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
@@ -62,6 +63,26 @@ from auto_pm.infrastructure.control_root_guard import (
 
 class ContinuityStoreError(RuntimeError):
     """Raised when a continuity transaction cannot be completed safely."""
+
+
+@dataclass(frozen=True)
+class WorkAdjudicationEvidence:
+    """Read-only facts a Decision must bind before one BLOCKED Work may be adjudicated."""
+
+    work_id: str
+    state: str
+    version: int
+    authorization_ref: str
+    run_states: tuple[tuple[str, str, int], ...]
+    lease_states: tuple[tuple[str, int, bool], ...]
+    run_set_sha256: str
+    lease_set_sha256: str
+    blockers: tuple[str, ...]
+
+    @property
+    def adjudicable(self) -> bool:
+        return not self.blockers
+
 
 
 class _ReadSnapshotDriftError(RuntimeError):
@@ -1472,6 +1493,285 @@ class ContinuityStore:
             payload = {"state": destination.value, "authorization_ref": authorization_ref}
             self._append_event(conn, work_id, "WORK_TRANSITIONED", payload, idempotency_key, now)
             return self._get_work(conn, work_id)
+
+    def work_adjudication_evidence(self, work_id: str) -> WorkAdjudicationEvidence:
+        """Read the exact adjudication facts of one Work without opening a write transaction."""
+
+        work_id = self._validated_run_text(work_id, label="work_id")
+        with self._read_connection() as conn:
+            return self._work_adjudication_facts(conn, work_id)
+
+    def _work_adjudication_facts(
+        self, conn: sqlite3.Connection, work_id: str
+    ) -> WorkAdjudicationEvidence:
+        work = self._get_work(conn, work_id)
+        run_rows = conn.execute(
+            "SELECT run_id, state, version FROM run_items WHERE work_id=? ORDER BY run_id",
+            (work_id,),
+        ).fetchall()
+        runs = tuple((str(row[0]), str(row[1]), int(row[2])) for row in run_rows)
+        leases: list[tuple[str, int, bool]] = []
+        for run_id, _state, _version in runs:
+            row = conn.execute(
+                "SELECT lease_token, version FROM execution_leases WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                leases.append((run_id, 0, False))
+            else:
+                leases.append((run_id, int(row[1]), str(row[0]).startswith("RELEASED:")))
+        blockers: list[str] = []
+        if work.state is not WorkState.BLOCKED:
+            blockers.append(f"Work 不是 BLOCKED: {work.state.value}")
+        if work.read_only:
+            blockers.append("只读 Work 不适用行政裁决")
+        terminal = {RunState.SUCCEEDED.value, RunState.FAILED.value, RunState.CANCELLED.value}
+        blockers.extend(
+            f"非终态 Run: {run_id}" for run_id, state, _version in runs if state not in terminal
+        )
+        blockers.extend(
+            f"lease 未释放或缺失: {run_id}" for run_id, _version, released in leases if not released
+        )
+
+        def digest(rows: list[list[object]]) -> str:
+            return hashlib.sha256(
+                json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode()
+            ).hexdigest()
+
+        return WorkAdjudicationEvidence(
+            work_id=work.work_id,
+            state=work.state.value,
+            version=work.version,
+            authorization_ref=work.authorization_ref,
+            run_states=runs,
+            lease_states=tuple(leases),
+            run_set_sha256=digest([list(item) for item in runs]),
+            lease_set_sha256=digest([list(item) for item in leases]),
+            blockers=tuple(blockers),
+        )
+
+    def adjudication_replay_original_id(
+        self, *, target_work_id: str, idempotency_key: str
+    ) -> str | None:
+        """Return the original Decision bound by an existing adjudication key, if any."""
+
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, idempotency_key)
+            if row is None:
+                return None
+            payload = self._validated_event_payload(row, label="Work 行政裁决")
+            request = payload.get("request")
+            original = request.get("expected_original_decision_id") if isinstance(
+                request, dict
+            ) else None
+            if (
+                row["aggregate_type"] != "work"
+                or row["aggregate_id"] != target_work_id
+                or row["event_type"] != "WORK_ADJUDICATED"
+                or not isinstance(original, str)
+            ):
+                raise ContinuityStoreError("idempotency_key 的 Work 行政裁决语义不一致")
+            return original
+
+    def adjudicate_blocked_work(
+        self,
+        *,
+        target_work_id: str,
+        expected_work_version: int,
+        expected_original_decision_id: str,
+        original_decision_sha256: str,
+        expected_run_set_sha256: str,
+        expected_lease_set_sha256: str,
+        recovery_run_id: str,
+        expected_recovery_run_version: int,
+        expected_recovery_lease_version: int,
+        recovery_work_id: str,
+        expected_recovery_work_version: int,
+        expected_recovery_work_scope_hash: str,
+        expected_recovery_owned_paths_hash: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        decision_sha256: str,
+        decision_change_id: str,
+        decision_project_id: str,
+        decision_approved_paths: tuple[str, ...],
+        runtime_target_path: str,
+        outcome: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> WorkItem:
+        """Forward-cancel one historical BLOCKED Work under a live, independent authority chain.
+
+        The Work row, its Runs, leases, Checkpoints and prior events are never rewritten:
+        the only mutations are the Work CAS transition and one appended adjudication event.
+        """
+
+        texts = {
+            "target_work_id": target_work_id,
+            "expected_original_decision_id": expected_original_decision_id,
+            "original_decision_sha256": original_decision_sha256,
+            "expected_run_set_sha256": expected_run_set_sha256,
+            "expected_lease_set_sha256": expected_lease_set_sha256,
+            "recovery_run_id": recovery_run_id,
+            "recovery_work_id": recovery_work_id,
+            "recovery_owner_id": recovery_owner_id,
+            "recovery_lease_token": recovery_lease_token,
+            "decision_id": decision_id,
+            "decision_sha256": decision_sha256,
+            "decision_change_id": decision_change_id,
+            "decision_project_id": decision_project_id,
+            "reason": reason,
+        }
+        for label, value in texts.items():
+            self._validated_run_text(value, label=label)
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        versions = (
+            expected_work_version,
+            expected_recovery_run_version,
+            expected_recovery_lease_version,
+            expected_recovery_work_version,
+        )
+        if any(type(version) is not int or version < 1 for version in versions):
+            raise ContinuityStoreError("裁决目标与恢复链版本必须是正整数")
+        if outcome != WorkState.CANCELLED.value:
+            raise ContinuityStoreError("Work 行政裁决只能前向结算为 CANCELLED")
+        if recovery_lease_token in reason:
+            raise ContinuityStoreError("裁决原因不得包含恢复 lease token")
+        request = {
+            "schema_version": "work-adjudication-request.v1",
+            "target_work_id": target_work_id,
+            "expected_work_version": expected_work_version,
+            "expected_original_decision_id": expected_original_decision_id,
+            "original_decision_sha256": original_decision_sha256,
+            "expected_run_set_sha256": expected_run_set_sha256,
+            "expected_lease_set_sha256": expected_lease_set_sha256,
+            "recovery_run_id": recovery_run_id,
+            "expected_recovery_run_version": expected_recovery_run_version,
+            "expected_recovery_lease_version": expected_recovery_lease_version,
+            "recovery_work_id": recovery_work_id,
+            "expected_recovery_work_version": expected_recovery_work_version,
+            "recovery_owner_id": recovery_owner_id,
+            "decision_id": decision_id,
+            "decision_sha256": decision_sha256,
+            "outcome": outcome,
+            "reason": reason,
+        }
+        token_fingerprint = self._lease_token_fingerprint(recovery_lease_token)
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="Work 行政裁决")
+                if (
+                    existing["aggregate_type"] != "work"
+                    or existing["aggregate_id"] != target_work_id
+                    or existing["event_type"] != "WORK_ADJUDICATED"
+                    or payload.get("schema_version") != "work-adjudication.v1"
+                    or payload.get("request") != request
+                    or payload.get("recovery_token_sha256") != token_fingerprint
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 Work 行政裁决语义不一致")
+                return self._get_work(conn, target_work_id)
+
+            if target_work_id == recovery_work_id:
+                raise ContinuityStoreError("裁决目标 Work 与恢复 Work 必须不同")
+            event_time = self._utc_now().isoformat()
+            facts = self._work_adjudication_facts(conn, target_work_id)
+            target = self._get_work(conn, target_work_id)
+            if facts.blockers:
+                raise ContinuityStoreError("Work 不满足行政裁决前置: " + "; ".join(facts.blockers))
+            if (
+                target.version != expected_work_version
+                or target.authorization_ref != expected_original_decision_id
+            ):
+                raise ContinuityStoreError("目标 Work 版本或原授权引用冲突")
+            if (
+                facts.run_set_sha256 != expected_run_set_sha256
+                or facts.lease_set_sha256 != expected_lease_set_sha256
+            ):
+                raise ContinuityStoreError("目标 Work 的 Run/lease 摘要与裁决绑定不一致")
+
+            recovery = self._get_run(conn, recovery_run_id)
+            recovery_lease = self._get_lease(conn, recovery_run_id)
+            recovery_work = self._get_work(conn, recovery_work_id)
+            if (
+                recovery.state is not RunState.RUNNING
+                or recovery.work_id != recovery_work_id
+                or recovery.version != expected_recovery_run_version
+                or recovery_lease.version != expected_recovery_lease_version
+                or recovery_lease.owner_id != recovery_owner_id
+                or not hmac.compare_digest(recovery_lease.lease_token, recovery_lease_token)
+                or self._aware_timestamp(recovery_lease.expires_at, "恢复 lease")
+                <= self._utc_now()
+            ):
+                raise ContinuityStoreError("恢复 Run/lease 不具备裁决权限")
+            if (
+                recovery_work.read_only
+                or recovery_work.state is not WorkState.IN_PROGRESS
+                or recovery_work.version != expected_recovery_work_version
+                or recovery_work.authorization_ref != decision_id
+                or self.authority_paths_hash(recovery_work.scope_paths)
+                != expected_recovery_work_scope_hash
+                or self.authority_paths_hash(recovery.owned_paths)
+                != expected_recovery_owned_paths_hash
+            ):
+                raise ContinuityStoreError("恢复 Work 不具备裁决权限或授权链已漂移")
+            if (
+                target.subject_project_id != recovery_work.subject_project_id
+                or target.subject_project_id != decision_project_id
+            ):
+                raise ContinuityStoreError("裁决目标、恢复 Work 与 Decision 必须属于同一项目")
+            approved = tuple(decision_approved_paths)
+            if (
+                not self._authority_path_covered(runtime_target_path, approved)
+                or not self._authority_path_covered(
+                    runtime_target_path, tuple(recovery_work.scope_paths)
+                )
+                or not self._authority_path_covered(
+                    runtime_target_path, tuple(recovery.owned_paths)
+                )
+            ):
+                raise ContinuityStoreError("裁决权限链未覆盖 canonical continuity.db")
+
+            cursor = conn.execute(
+                """UPDATE work_items SET state=?, authorization_ref=?, version=version+1,
+                updated_at=? WHERE work_id=? AND version=? AND state=?""",
+                (
+                    WorkState.CANCELLED.value,
+                    decision_id,
+                    event_time,
+                    target_work_id,
+                    expected_work_version,
+                    WorkState.BLOCKED.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("目标 Work 行政裁决 CAS 冲突")
+            self._append_event(
+                conn,
+                target_work_id,
+                "WORK_ADJUDICATED",
+                {
+                    "schema_version": "work-adjudication.v1",
+                    "request": request,
+                    "recovery_token_sha256": token_fingerprint,
+                    "decision_change_id": decision_change_id,
+                    "decision_project_id": decision_project_id,
+                    "original_decision_sha256": original_decision_sha256,
+                    "target": {
+                        "previous_state": WorkState.BLOCKED.value,
+                        "previous_version": expected_work_version,
+                        "previous_authorization_ref": expected_original_decision_id,
+                        "cancelled_version": expected_work_version + 1,
+                        "run_states": [list(item) for item in facts.run_states],
+                        "lease_states": [list(item) for item in facts.lease_states],
+                    },
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="work",
+            )
+            return self._get_work(conn, target_work_id)
 
     def add_relation(
         self,

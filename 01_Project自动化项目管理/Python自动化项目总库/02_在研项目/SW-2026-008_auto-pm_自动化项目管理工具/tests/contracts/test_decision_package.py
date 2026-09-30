@@ -1465,3 +1465,88 @@ def test_create_decision_rejects_same_project_formal_duplicate(tmp_path: Path) -
             approver="fubai",
             project_id="SW-2026-008",
         )
+
+
+def test_work_adjudication_capability_round_trips_and_keeps_run_capability_bytes() -> None:
+    from auto_pm.contracts.decision_package import (
+        RuntimeDecisionAction,
+        RuntimeDecisionCapability,
+        RuntimeDecisionOutcome,
+    )
+
+    work_capability = RuntimeDecisionCapability(
+        allowed_runtime_actions=(RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK,),
+        target_run_ids=(),
+        allowed_outcomes=(RuntimeDecisionOutcome.CANCELLED,),
+        target_work_ids=("WORK-A", "WORK-B", "WORK-A"),
+    )
+    encoded = work_capability.to_dict()
+    assert encoded == {
+        "allowed_runtime_actions": ["adjudicate_blocked_work"],
+        "target_run_ids": [],
+        "allowed_outcomes": ["CANCELLED"],
+        "target_work_ids": ["WORK-A", "WORK-B"],
+    }
+    assert RuntimeDecisionCapability.from_dict(encoded) == work_capability
+
+    run_capability = RuntimeDecisionCapability(
+        allowed_runtime_actions=(RuntimeDecisionAction.SETTLE_EXPIRED_RUN,),
+        target_run_ids=("RUN-A",),
+        allowed_outcomes=(RuntimeDecisionOutcome.CANCELLED,),
+    )
+    # 既有 Run 级 Decision 的持久化格式保持不变：不出现 target_work_ids 字段。
+    assert set(run_capability.to_dict()) == {
+        "allowed_runtime_actions",
+        "target_run_ids",
+        "allowed_outcomes",
+    }
+    assert RuntimeDecisionCapability.from_dict(run_capability.to_dict()) == run_capability
+
+
+def test_work_adjudication_capability_is_exclusive_and_fail_closed() -> None:
+    from auto_pm.contracts.decision_package import (
+        RuntimeDecisionAction,
+        RuntimeDecisionCapability,
+        RuntimeDecisionOutcome,
+    )
+
+    cancelled = (RuntimeDecisionOutcome.CANCELLED,)
+    adjudicate = RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK
+    settle = RuntimeDecisionAction.SETTLE_EXPIRED_RUN
+    with pytest.raises(ValueError, match="混用"):
+        RuntimeDecisionCapability(
+            allowed_runtime_actions=(adjudicate, settle),
+            target_run_ids=(),
+            allowed_outcomes=cancelled,
+            target_work_ids=("WORK-A",),
+        )
+    with pytest.raises(ValueError, match="target_work_ids"):
+        RuntimeDecisionCapability(
+            allowed_runtime_actions=(adjudicate,),
+            target_run_ids=(),
+            allowed_outcomes=cancelled,
+        )
+    with pytest.raises(ValueError, match="不得提供 target_run_ids"):
+        RuntimeDecisionCapability(
+            allowed_runtime_actions=(adjudicate,),
+            target_run_ids=("RUN-A",),
+            allowed_outcomes=cancelled,
+            target_work_ids=("WORK-A",),
+        )
+    with pytest.raises(ValueError, match="只提供 target_run_ids"):
+        RuntimeDecisionCapability(
+            allowed_runtime_actions=(settle,),
+            target_run_ids=("RUN-A",),
+            allowed_outcomes=cancelled,
+            target_work_ids=("WORK-A",),
+        )
+    with pytest.raises(ValueError, match="字段不完整或未知"):
+        RuntimeDecisionCapability.from_dict(
+            {
+                "allowed_runtime_actions": ["adjudicate_blocked_work"],
+                "target_run_ids": [],
+                "allowed_outcomes": ["CANCELLED"],
+                "target_work_ids": ["WORK-A"],
+                "extra": [],
+            }
+        )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -322,6 +323,82 @@ def transition_work(ctx: click.Context, work_id: str, new_state: str, idempotenc
     """Apply one legal Work state transition."""
     try:
         item = _work_service(ctx).transition(work_id, WorkState(new_state), idempotency_key)
+    except WorkRegistryError as error:
+        raise click.ClickException(str(error)) from error
+    _emit(item)
+
+
+@work_group.command(name="adjudication-evidence")
+@click.option("--work-id", required=True)
+@click.pass_context
+def adjudication_evidence(ctx: click.Context, work_id: str) -> None:
+    """Print the read-only facts a Decision must bind before adjudicating one BLOCKED Work."""
+
+    try:
+        evidence, original_sha256 = WorkRegistryService(_workspace(ctx)).adjudication_evidence(
+            work_id
+        )
+    except WorkRegistryError as error:
+        raise click.ClickException(str(error)) from error
+    payload = dataclasses.asdict(evidence)
+    payload["adjudicable"] = evidence.adjudicable
+    payload["original_decision_sha256"] = original_sha256
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+@work_group.command(name="adjudicate")
+@click.option("--work-id", required=True)
+@click.option("--expected-version", type=click.IntRange(min=1), required=True)
+@click.option("--original-decision-sha256", required=True)
+@click.option("--run-set-sha256", required=True)
+@click.option("--lease-set-sha256", required=True)
+@click.option("--recovery-run-id", required=True)
+@click.option("--recovery-owner", "recovery_owner_id", required=True)
+@click.option(
+    "--recovery-lease-stdin",
+    is_flag=True,
+    required=True,
+    help="Read the recovery lease token from standard input; tokens are never CLI arguments.",
+)
+@click.option("--decision-id", required=True)
+@click.option("--outcome", type=click.Choice([WorkState.CANCELLED.value]), required=True)
+@click.option("--reason", required=True)
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def adjudicate_blocked_work(
+    ctx: click.Context,
+    work_id: str,
+    expected_version: int,
+    original_decision_sha256: str,
+    run_set_sha256: str,
+    lease_set_sha256: str,
+    recovery_run_id: str,
+    recovery_owner_id: str,
+    recovery_lease_stdin: bool,
+    decision_id: str,
+    outcome: str,
+    reason: str,
+    idempotency_key: str,
+) -> None:
+    """Forward-cancel one historical BLOCKED Work under an exact adjudication Decision."""
+
+    del recovery_lease_stdin
+    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    try:
+        item = _work_service(ctx).adjudicate_blocked_work(
+            target_work_id=work_id,
+            expected_work_version=expected_version,
+            expected_original_decision_sha256=original_decision_sha256,
+            expected_run_set_sha256=run_set_sha256,
+            expected_lease_set_sha256=lease_set_sha256,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            outcome=WorkState(outcome),
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
     except WorkRegistryError as error:
         raise click.ClickException(str(error)) from error
     _emit(item)

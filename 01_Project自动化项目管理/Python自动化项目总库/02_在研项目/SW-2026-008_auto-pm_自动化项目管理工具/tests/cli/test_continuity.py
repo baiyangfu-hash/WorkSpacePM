@@ -1385,3 +1385,106 @@ def test_settle_expired_cli_never_accepts_succeeded_outcome(
 
     assert result.exit_code == 2
     assert "Invalid value for '--outcome'" in result.output
+
+
+def test_work_adjudication_evidence_cli_prints_bindings_without_mutation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from auto_pm.infrastructure.continuity_store import WorkAdjudicationEvidence
+
+    _repository(tmp_path)
+    WorkRegistryService(tmp_path).initialize("test")
+    evidence = WorkAdjudicationEvidence(
+        work_id="WORK-X",
+        state="BLOCKED",
+        version=4,
+        authorization_ref="DEC-20260101-AAAAAAAA",
+        run_states=(("RUN-X", "FAILED", 3),),
+        lease_states=(("RUN-X", 3, True),),
+        run_set_sha256="r" * 64,
+        lease_set_sha256="l" * 64,
+        blockers=(),
+    )
+
+    class _Service:
+        def __init__(self, _root: Path) -> None:
+            pass
+
+        def adjudication_evidence(self, work_id: str) -> tuple[WorkAdjudicationEvidence, str]:
+            assert work_id == "WORK-X"
+            return evidence, "o" * 64
+
+    monkeypatch.setattr("auto_pm.cli.continuity.WorkRegistryService", _Service)
+    result = CliRunner().invoke(
+        cli, ["-w", str(tmp_path), "continuity", "work", "adjudication-evidence", "--work-id", "WORK-X"]
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["adjudicable"] is True
+    assert payload["original_decision_sha256"] == "o" * 64
+    assert payload["run_set_sha256"] == "r" * 64 and payload["version"] == 4
+
+
+def test_work_adjudicate_cli_reads_recovery_token_from_stdin_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _repository(tmp_path)
+    WorkRegistryService(tmp_path).initialize("test")
+    captured: dict[str, object] = {}
+
+    class _Item:
+        def model_dump_json(self, indent: int = 0) -> str:
+            return json.dumps({"state": "CANCELLED"})
+
+    class _Service:
+        def adjudicate_blocked_work(self, **values: object) -> _Item:
+            captured.update(values)
+            return _Item()
+
+    service = _Service()
+    monkeypatch.setattr("auto_pm.cli.continuity._work_service", lambda _ctx: service)
+
+    base = [
+        "-w",
+        str(tmp_path),
+        "continuity",
+        "work",
+        "adjudicate",
+        "--work-id",
+        "WORK-X",
+        "--expected-version",
+        "4",
+        "--original-decision-sha256",
+        "o" * 64,
+        "--run-set-sha256",
+        "r" * 64,
+        "--lease-set-sha256",
+        "l" * 64,
+        "--recovery-run-id",
+        "RUN-R",
+        "--recovery-owner",
+        "owner",
+        "--decision-id",
+        "DEC-20260101-BBBBBBBB",
+        "--outcome",
+        "CANCELLED",
+        "--reason",
+        "retire historical work",
+        "--idempotency-key",
+        "adjudicate-x",
+    ]
+    result = CliRunner().invoke(
+        cli, [*base, "--recovery-lease-stdin"], input="stdin-secret\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["recovery_lease_token"] == "stdin-secret"
+    assert captured["target_work_id"] == "WORK-X" and captured["expected_work_version"] == 4
+    assert "stdin-secret" not in result.output
+    # 令牌不得作为命令行参数传入。
+    rejected = CliRunner().invoke(cli, [*base, "--recovery-lease-token", "argv-secret"])
+    assert rejected.exit_code != 0 and "argv-secret" not in rejected.output
+    # 结果只允许 CANCELLED。
+    wrong = [item if item != "CANCELLED" else "CLOSED" for item in base]
+    assert CliRunner().invoke(cli, [*wrong, "--recovery-lease-stdin"], input="x\n").exit_code != 0

@@ -38,6 +38,7 @@ class RuntimeDecisionAction(StrEnum):
     REVOKE_UNSTARTED_RUN = "revoke_unstarted_run"
     FENCE_TERMINAL_LEASE = "fence_terminal_lease"
     RECONCILE_TERMINAL_LEASE = "reconcile_terminal_lease"
+    ADJUDICATE_BLOCKED_WORK = "adjudicate_blocked_work"
 
 
 class RuntimeDecisionOutcome(StrEnum):
@@ -54,6 +55,7 @@ class RuntimeDecisionCapability:
     allowed_runtime_actions: tuple[RuntimeDecisionAction, ...]
     target_run_ids: tuple[str, ...]
     allowed_outcomes: tuple[RuntimeDecisionOutcome, ...]
+    target_work_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         try:
@@ -73,23 +75,46 @@ class RuntimeDecisionCapability:
         ):
             raise ValueError("runtime_capability.target_run_ids 必须是规范非空字符串")
         targets = tuple(dict.fromkeys(raw_targets))
-        if not actions or not outcomes or not targets:
-            raise ValueError("runtime_capability 的 action、target_run_ids 与 outcome 均不能为空")
+        raw_work_targets = tuple(self.target_work_ids)
+        if any(
+            not isinstance(item, str) or not item or item != item.strip()
+            for item in raw_work_targets
+        ):
+            raise ValueError("runtime_capability.target_work_ids 必须是规范非空字符串")
+        work_targets = tuple(dict.fromkeys(raw_work_targets))
+        if not actions or not outcomes:
+            raise ValueError("runtime_capability 的 action 与 outcome 均不能为空")
+        if RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK in actions:
+            # Work 行政裁决是独占权限：不得与 Run 级动作混用，也不得携带 Run 目标。
+            if actions != (RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK,):
+                raise ValueError("adjudicate_blocked_work 不得与其他 runtime action 混用")
+            if not work_targets or targets:
+                raise ValueError(
+                    "adjudicate_blocked_work 必须只提供 target_work_ids 且不得提供 target_run_ids"
+                )
+        elif not targets or work_targets:
+            raise ValueError("Run 级 runtime action 必须只提供 target_run_ids")
         object.__setattr__(self, "allowed_runtime_actions", actions)
         object.__setattr__(self, "target_run_ids", targets)
         object.__setattr__(self, "allowed_outcomes", outcomes)
+        object.__setattr__(self, "target_work_ids", work_targets)
 
     def to_dict(self) -> dict[str, list[str]]:
-        return {
+        result = {
             "allowed_runtime_actions": [item.value for item in self.allowed_runtime_actions],
             "target_run_ids": list(self.target_run_ids),
             "allowed_outcomes": [item.value for item in self.allowed_outcomes],
         }
+        if self.target_work_ids:
+            # 仅 Work 裁决权限携带该字段，保证既有 Run 级 Decision 字节格式不变。
+            result["target_work_ids"] = list(self.target_work_ids)
+        return result
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> RuntimeDecisionCapability:
-        expected = {"allowed_runtime_actions", "target_run_ids", "allowed_outcomes"}
+        base = {"allowed_runtime_actions", "target_run_ids", "allowed_outcomes"}
         supplied = set(data)
+        expected = base | ({"target_work_ids"} if "target_work_ids" in supplied else set())
         if supplied != expected:
             missing = ", ".join(sorted(expected - supplied)) or "-"
             unknown = ", ".join(sorted(supplied - expected)) or "-"
@@ -107,6 +132,9 @@ class RuntimeDecisionCapability:
             targets = values("target_run_ids")
             if any(not isinstance(item, str) for item in targets):
                 raise ValueError("runtime_capability.target_run_ids 必须是字符串数组")
+            work_targets = values("target_work_ids") if "target_work_ids" in data else ()
+            if any(not isinstance(item, str) for item in work_targets):
+                raise ValueError("runtime_capability.target_work_ids 必须是字符串数组")
             return cls(
                 allowed_runtime_actions=tuple(
                     RuntimeDecisionAction(str(item)) for item in values("allowed_runtime_actions")
@@ -115,6 +143,7 @@ class RuntimeDecisionCapability:
                 allowed_outcomes=tuple(
                     RuntimeDecisionOutcome(str(item)) for item in values("allowed_outcomes")
                 ),
+                target_work_ids=tuple(work_targets),
             )
         except ValueError as error:
             raise ValueError("runtime_capability 包含未知 action 或 outcome") from error
