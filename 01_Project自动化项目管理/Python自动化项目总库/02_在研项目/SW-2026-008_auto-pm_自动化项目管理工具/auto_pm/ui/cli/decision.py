@@ -29,6 +29,72 @@ def _workspace(ctx: click.Context) -> Path:
     return Path(app_ctx.workspace_root)
 
 
+# 独占动作：各自只能单独出现在一个 Decision 中（与 RuntimeDecisionCapability 合同一致）。
+_EXCLUSIVE_ACTIONS = frozenset(
+    {
+        RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK,
+        RuntimeDecisionAction.FENCE_LEGACY_TERMINAL_LEASE,
+        RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE,
+    }
+)
+
+
+def _runtime_capability(
+    runtime_actions: tuple[str, ...],
+    target_run_ids: tuple[str, ...],
+    target_work_ids: tuple[str, ...],
+    runtime_outcomes: tuple[str, ...],
+) -> RuntimeDecisionCapability:
+    """Apply the per-action target/outcome matrix before building the typed capability.
+
+    - settle_expired_run / revoke_unstarted_run / fence_terminal_lease (combinable):
+      --target-run-id required, --target-work-id forbidden, outcome CANCELLED.
+    - fence_legacy_terminal_lease (exclusive): Run targets required, outcome CANCELLED.
+    - reconcile_terminal_lease (exclusive): Run targets required, outcome RELEASED.
+    - adjudicate_blocked_work (exclusive): --target-work-id required, --target-run-id
+      forbidden, outcome CANCELLED.
+
+    Violations raise ValueError naming the broken rule; nothing is silently dropped.
+    """
+
+    actions = tuple(dict.fromkeys(RuntimeDecisionAction(item) for item in runtime_actions))
+    outcomes = tuple(dict.fromkeys(RuntimeDecisionOutcome(item) for item in runtime_outcomes))
+    if not actions or not outcomes:
+        raise ValueError(
+            "runtime capability 的 --allow-runtime-action、目标与 --allow-outcome 必须同时提供"
+        )
+    exclusive = [item for item in actions if item in _EXCLUSIVE_ACTIONS]
+    if exclusive and len(actions) != 1:
+        raise ValueError(f"{exclusive[0].value} 是独占 action，不得与其他 --allow-runtime-action 混用")
+    if actions == (RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK,):
+        if target_run_ids:
+            raise ValueError("adjudicate_blocked_work 禁止 --target-run-id，只接受精确 --target-work-id")
+        if not target_work_ids:
+            raise ValueError("adjudicate_blocked_work 必须同时提供至少一个 --target-work-id")
+    else:
+        if target_work_ids:
+            raise ValueError("--target-work-id 只适用于 adjudicate_blocked_work")
+        if not target_run_ids:
+            raise ValueError(
+                f"{actions[0].value} 等 Run 级 action 必须同时提供至少一个 --target-run-id"
+            )
+    expected_outcome = (
+        RuntimeDecisionOutcome.RELEASED
+        if actions == (RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE,)
+        else RuntimeDecisionOutcome.CANCELLED
+    )
+    if outcomes != (expected_outcome,):
+        raise ValueError(
+            f"{actions[0].value} 的 --allow-outcome 必须且只能是 {expected_outcome.value}"
+        )
+    return RuntimeDecisionCapability(
+        allowed_runtime_actions=actions,
+        target_run_ids=target_run_ids,
+        allowed_outcomes=outcomes,
+        target_work_ids=target_work_ids,
+    )
+
+
 @click.group(name="decision")
 def decision_group() -> None:
     """阶段 1 审批结构化决策包管理 (Decision Package)"""
@@ -49,7 +115,18 @@ def decision_group() -> None:
     multiple=True,
     type=click.Choice([item.value for item in RuntimeDecisionAction]),
 )
-@click.option("--target-run-id", "target_run_ids", multiple=True)
+@click.option(
+    "--target-run-id",
+    "target_run_ids",
+    multiple=True,
+    help="Run 级 runtime action 的精确目标 Run，可重复",
+)
+@click.option(
+    "--target-work-id",
+    "target_work_ids",
+    multiple=True,
+    help="adjudicate_blocked_work 的精确目标 Work，可重复；不得与 --target-run-id 混用",
+)
 @click.option(
     "--allow-outcome",
     "runtime_outcomes",
@@ -68,6 +145,7 @@ def create_decision(
     decision_id: str,
     runtime_actions: tuple[str, ...],
     target_run_ids: tuple[str, ...],
+    target_work_ids: tuple[str, ...],
     runtime_outcomes: tuple[str, ...],
     as_json: bool,
 ) -> None:
@@ -75,17 +153,13 @@ def create_decision(
     try:
         root = _workspace(ctx)
         WorktreePolicyService(root).require_control_root()
-        supplied_capability = any((runtime_actions, target_run_ids, runtime_outcomes))
+        supplied_capability = any(
+            (runtime_actions, target_run_ids, target_work_ids, runtime_outcomes)
+        )
         runtime_capability = None
         if supplied_capability:
-            if not all((runtime_actions, target_run_ids, runtime_outcomes)):
-                raise ValueError("runtime capability 的 action、target Run 与 outcome 必须同时提供")
-            runtime_capability = RuntimeDecisionCapability(
-                allowed_runtime_actions=tuple(
-                    RuntimeDecisionAction(item) for item in runtime_actions
-                ),
-                target_run_ids=target_run_ids,
-                allowed_outcomes=tuple(RuntimeDecisionOutcome(item) for item in runtime_outcomes),
+            runtime_capability = _runtime_capability(
+                runtime_actions, target_run_ids, target_work_ids, runtime_outcomes
             )
         service = DecisionService(root)
         dto = service.create_decision(
