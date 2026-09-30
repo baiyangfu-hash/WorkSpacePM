@@ -66,6 +66,28 @@ class ContinuityStoreError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class LegacyTerminalLeaseEvidence:
+    """Read-only facts a Decision must bind before one legacy terminal lease is fenced."""
+
+    run_id: str
+    work_id: str
+    state: str
+    version: int
+    lease_version: int
+    lease_expires_at: str
+    lease_released: bool
+    terminal_evidence_kind: str
+    event_types: tuple[str, ...]
+    event_set_sha256: str
+    checkpoint_set_sha256: str
+    blockers: tuple[str, ...]
+
+    @property
+    def fenceable(self) -> bool:
+        return not self.blockers
+
+
+@dataclass(frozen=True)
 class WorkAdjudicationEvidence:
     """Read-only facts a Decision must bind before one BLOCKED Work may be adjudicated."""
 
@@ -1548,6 +1570,287 @@ class ContinuityStore:
             lease_set_sha256=digest([list(item) for item in leases]),
             blockers=tuple(blockers),
         )
+
+    def legacy_terminal_lease_evidence(self, run_id: str) -> LegacyTerminalLeaseEvidence:
+        """Read the exact legacy-terminal facts of one Run without opening a write transaction."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            return self._legacy_terminal_lease_facts(conn, run_id)
+
+    def _legacy_terminal_lease_facts(
+        self, conn: sqlite3.Connection, run_id: str
+    ) -> LegacyTerminalLeaseEvidence:
+        run = self._get_run(conn, run_id)
+        lease = self._get_lease(conn, run_id)
+        event_rows = conn.execute(
+            "SELECT event_id, event_type, event_hash, payload_json FROM events "
+            "WHERE aggregate_type='run' AND aggregate_id=? ORDER BY rowid",
+            (run_id,),
+        ).fetchall()
+        checkpoint_rows = conn.execute(
+            "SELECT checkpoint_id, sequence, git_head, dirty_paths_json, evidence_json "
+            "FROM checkpoints WHERE run_id=? ORDER BY sequence",
+            (run_id,),
+        ).fetchall()
+
+        def digest(rows: list[list[object]]) -> str:
+            return hashlib.sha256(
+                json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode()
+            ).hexdigest()
+
+        kind = "NONE"
+        for row in event_rows:
+            event_type = str(row[1])
+            if event_type == "RUN_EXPIRED_SETTLED":
+                kind = "RUN_EXPIRED_SETTLED"
+                continue
+            if event_type != "RUN_TRANSITIONED":
+                continue
+            try:
+                payload = json.loads(str(row[3]))
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            reached = payload.get("new_state", payload.get("state"))
+            if reached == run.state.value:
+                kind = (
+                    "RUN_TRANSITIONED_V2"
+                    if payload.get("schema_version") == "run-transition.v2"
+                    else "RUN_TRANSITIONED_LEGACY"
+                )
+        terminal = {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}
+        released = lease.lease_token.startswith("RELEASED:")
+        blockers: list[str] = []
+        if run.state not in terminal:
+            blockers.append(f"Run 不是终态: {run.state.value}")
+        if released:
+            blockers.append("lease 已释放")
+        if self._aware_timestamp(lease.expires_at, "目标 Run lease") > self._utc_now():
+            blockers.append("lease 尚未过期")
+        if kind == "NONE":
+            blockers.append("缺少可绑定的终态证据事件")
+        return LegacyTerminalLeaseEvidence(
+            run_id=run.run_id,
+            work_id=run.work_id,
+            state=run.state.value,
+            version=run.version,
+            lease_version=lease.version,
+            lease_expires_at=lease.expires_at,
+            lease_released=released,
+            terminal_evidence_kind=kind,
+            event_types=tuple(str(row[1]) for row in event_rows),
+            event_set_sha256=digest([[str(row[0]), str(row[1]), str(row[2])] for row in event_rows]),
+            checkpoint_set_sha256=digest(
+                [
+                    [
+                        str(row[0]),
+                        int(row[1]),
+                        str(row[2]),
+                        hashlib.sha256(str(row[3]).encode()).hexdigest(),
+                        hashlib.sha256(str(row[4]).encode()).hexdigest(),
+                    ]
+                    for row in checkpoint_rows
+                ]
+            ),
+            blockers=tuple(blockers),
+        )
+
+    def fence_legacy_terminal_lease(
+        self,
+        *,
+        target_run_id: str,
+        expected_run_state: str,
+        expected_run_version: int,
+        expected_lease_version: int,
+        expected_terminal_evidence_kind: str,
+        expected_event_set_sha256: str,
+        expected_checkpoint_set_sha256: str,
+        recovery_run_id: str,
+        expected_recovery_run_version: int,
+        expected_recovery_lease_version: int,
+        recovery_work_id: str,
+        expected_recovery_work_version: int,
+        expected_recovery_work_scope_hash: str,
+        expected_recovery_owned_paths_hash: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        decision_sha256: str,
+        decision_change_id: str,
+        decision_project_id: str,
+        decision_approved_paths: tuple[str, ...],
+        runtime_target_path: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Invalidate one expired legacy terminal lease token without touching Run history.
+
+        Only the lease row is fenced (RELEASED marker) and one audit event is appended; the
+        Run row, its Checkpoints and every earlier event stay byte-identical.
+        """
+
+        texts = {
+            "target_run_id": target_run_id,
+            "expected_run_state": expected_run_state,
+            "expected_terminal_evidence_kind": expected_terminal_evidence_kind,
+            "expected_event_set_sha256": expected_event_set_sha256,
+            "expected_checkpoint_set_sha256": expected_checkpoint_set_sha256,
+            "recovery_run_id": recovery_run_id,
+            "recovery_work_id": recovery_work_id,
+            "recovery_owner_id": recovery_owner_id,
+            "recovery_lease_token": recovery_lease_token,
+            "decision_id": decision_id,
+            "decision_sha256": decision_sha256,
+            "decision_change_id": decision_change_id,
+            "decision_project_id": decision_project_id,
+            "reason": reason,
+        }
+        for label, value in texts.items():
+            self._validated_run_text(value, label=label)
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        versions = (
+            expected_run_version,
+            expected_lease_version,
+            expected_recovery_run_version,
+            expected_recovery_lease_version,
+            expected_recovery_work_version,
+        )
+        if any(type(version) is not int or version < 1 for version in versions):
+            raise ContinuityStoreError("围栏目标与恢复链版本必须是正整数")
+        if recovery_lease_token in reason:
+            raise ContinuityStoreError("围栏原因不得包含恢复 lease token")
+        request = {
+            "schema_version": "legacy-terminal-lease-fence-request.v1",
+            "target_run_id": target_run_id,
+            "expected_run_state": expected_run_state,
+            "expected_run_version": expected_run_version,
+            "expected_lease_version": expected_lease_version,
+            "expected_terminal_evidence_kind": expected_terminal_evidence_kind,
+            "expected_event_set_sha256": expected_event_set_sha256,
+            "expected_checkpoint_set_sha256": expected_checkpoint_set_sha256,
+            "recovery_run_id": recovery_run_id,
+            "expected_recovery_run_version": expected_recovery_run_version,
+            "expected_recovery_lease_version": expected_recovery_lease_version,
+            "recovery_work_id": recovery_work_id,
+            "expected_recovery_work_version": expected_recovery_work_version,
+            "recovery_owner_id": recovery_owner_id,
+            "decision_id": decision_id,
+            "decision_sha256": decision_sha256,
+            "reason": reason,
+        }
+        token_fingerprint = self._lease_token_fingerprint(recovery_lease_token)
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="旧终态 lease 围栏")
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["aggregate_id"] != target_run_id
+                    or existing["event_type"] != "RUN_LEGACY_LEASE_FENCED"
+                    or payload.get("schema_version") != "legacy-terminal-lease-fence.v1"
+                    or payload.get("request") != request
+                    or payload.get("recovery_token_sha256") != token_fingerprint
+                ):
+                    raise ContinuityStoreError("idempotency_key 的旧终态 lease 围栏语义不一致")
+                return self._get_run(conn, target_run_id)
+
+            if target_run_id == recovery_run_id:
+                raise ContinuityStoreError("围栏目标 Run 与恢复 Run 必须不同")
+            event_time = self._utc_now().isoformat()
+            facts = self._legacy_terminal_lease_facts(conn, target_run_id)
+            target = self._get_run(conn, target_run_id)
+            target_lease = self._get_lease(conn, target_run_id)
+            target_work = self._get_work(conn, target.work_id)
+            if facts.blockers:
+                raise ContinuityStoreError("Run 不满足旧终态 lease 围栏前置: " + "; ".join(facts.blockers))
+            if (
+                target.state.value != expected_run_state
+                or target.version != expected_run_version
+                or target_lease.version != expected_lease_version
+            ):
+                raise ContinuityStoreError("目标 Run 状态、版本或 lease epoch 冲突")
+            if (
+                facts.terminal_evidence_kind != expected_terminal_evidence_kind
+                or facts.event_set_sha256 != expected_event_set_sha256
+                or facts.checkpoint_set_sha256 != expected_checkpoint_set_sha256
+            ):
+                raise ContinuityStoreError("目标 Run 的事件/Checkpoint 摘要与围栏绑定不一致")
+
+            recovery = self._get_run(conn, recovery_run_id)
+            recovery_lease = self._get_lease(conn, recovery_run_id)
+            recovery_work = self._get_work(conn, recovery_work_id)
+            if (
+                recovery.state is not RunState.RUNNING
+                or recovery.work_id != recovery_work_id
+                or recovery.version != expected_recovery_run_version
+                or recovery_lease.version != expected_recovery_lease_version
+                or recovery_lease.owner_id != recovery_owner_id
+                or not hmac.compare_digest(recovery_lease.lease_token, recovery_lease_token)
+                or self._aware_timestamp(recovery_lease.expires_at, "恢复 lease")
+                <= self._utc_now()
+            ):
+                raise ContinuityStoreError("恢复 Run/lease 不具备围栏权限")
+            if (
+                recovery_work.read_only
+                or recovery_work.state is not WorkState.IN_PROGRESS
+                or recovery_work.version != expected_recovery_work_version
+                or recovery_work.authorization_ref != decision_id
+                or recovery_work.work_id == target_work.work_id
+                or self.authority_paths_hash(recovery_work.scope_paths)
+                != expected_recovery_work_scope_hash
+                or self.authority_paths_hash(recovery.owned_paths)
+                != expected_recovery_owned_paths_hash
+            ):
+                raise ContinuityStoreError("恢复 Work 不具备围栏权限或授权链已漂移")
+            if (
+                target_work.subject_project_id != recovery_work.subject_project_id
+                or target_work.subject_project_id != decision_project_id
+            ):
+                raise ContinuityStoreError("围栏目标、恢复 Work 与 Decision 必须属于同一项目")
+            approved = tuple(decision_approved_paths)
+            if (
+                not self._authority_path_covered(runtime_target_path, approved)
+                or not self._authority_path_covered(
+                    runtime_target_path, tuple(recovery_work.scope_paths)
+                )
+                or not self._authority_path_covered(
+                    runtime_target_path, tuple(recovery.owned_paths)
+                )
+            ):
+                raise ContinuityStoreError("围栏权限链未覆盖 canonical continuity.db")
+
+            release = self._release_lease_in_transaction(
+                conn,
+                lease=target_lease,
+                event_time=event_time,
+                reason="legacy-terminal-fence",
+            )
+            self._append_event(
+                conn,
+                target_run_id,
+                "RUN_LEGACY_LEASE_FENCED",
+                {
+                    "schema_version": "legacy-terminal-lease-fence.v1",
+                    "request": request,
+                    "recovery_token_sha256": token_fingerprint,
+                    "decision_change_id": decision_change_id,
+                    "decision_project_id": decision_project_id,
+                    "target": {
+                        "state": target.state.value,
+                        "version": target.version,
+                        "lease_epoch": release["lease_epoch"],
+                        "terminal_evidence_kind": facts.terminal_evidence_kind,
+                        "event_types": list(facts.event_types),
+                    },
+                    "lease_release": release,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, target_run_id)
 
     def adjudication_replay_original_id(
         self, *, target_work_id: str, idempotency_key: str

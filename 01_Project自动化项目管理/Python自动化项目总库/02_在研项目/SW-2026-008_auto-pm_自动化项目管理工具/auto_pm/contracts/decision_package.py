@@ -39,6 +39,7 @@ class RuntimeDecisionAction(StrEnum):
     FENCE_TERMINAL_LEASE = "fence_terminal_lease"
     RECONCILE_TERMINAL_LEASE = "reconcile_terminal_lease"
     ADJUDICATE_BLOCKED_WORK = "adjudicate_blocked_work"
+    FENCE_LEGACY_TERMINAL_LEASE = "fence_legacy_terminal_lease"
 
 
 class RuntimeDecisionOutcome(StrEnum):
@@ -94,6 +95,12 @@ class RuntimeDecisionCapability:
                 )
         elif not targets or work_targets:
             raise ValueError("Run 级 runtime action 必须只提供 target_run_ids")
+        if (
+            RuntimeDecisionAction.FENCE_LEGACY_TERMINAL_LEASE in actions
+            and actions != (RuntimeDecisionAction.FENCE_LEGACY_TERMINAL_LEASE,)
+        ):
+            # 旧终态 lease 兼容围栏同样是独占权限，不得与结算、撤销或其他围栏混用。
+            raise ValueError("fence_legacy_terminal_lease 不得与其他 runtime action 混用")
         object.__setattr__(self, "allowed_runtime_actions", actions)
         object.__setattr__(self, "target_run_ids", targets)
         object.__setattr__(self, "allowed_outcomes", outcomes)

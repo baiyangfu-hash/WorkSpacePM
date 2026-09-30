@@ -1550,3 +1550,38 @@ def test_work_adjudication_capability_is_exclusive_and_fail_closed() -> None:
                 "extra": [],
             }
         )
+
+
+def test_legacy_terminal_fence_capability_round_trips_and_is_exclusive() -> None:
+    from auto_pm.contracts.decision_package import (
+        RuntimeDecisionAction,
+        RuntimeDecisionCapability,
+        RuntimeDecisionOutcome,
+    )
+
+    cancelled = (RuntimeDecisionOutcome.CANCELLED,)
+    fence = RuntimeDecisionAction.FENCE_LEGACY_TERMINAL_LEASE
+    capability = RuntimeDecisionCapability(
+        allowed_runtime_actions=(fence,),
+        target_run_ids=("RUN-A", "RUN-B"),
+        allowed_outcomes=cancelled,
+    )
+    assert set(capability.to_dict()) == {
+        "allowed_runtime_actions",
+        "target_run_ids",
+        "allowed_outcomes",
+    }
+    assert RuntimeDecisionCapability.from_dict(capability.to_dict()) == capability
+    with pytest.raises(ValueError, match="混用"):
+        RuntimeDecisionCapability(
+            allowed_runtime_actions=(fence, RuntimeDecisionAction.FENCE_TERMINAL_LEASE),
+            target_run_ids=("RUN-A",),
+            allowed_outcomes=cancelled,
+        )
+    with pytest.raises(ValueError, match="只提供 target_run_ids"):
+        RuntimeDecisionCapability(
+            allowed_runtime_actions=(fence,),
+            target_run_ids=("RUN-A",),
+            allowed_outcomes=cancelled,
+            target_work_ids=("WORK-A",),
+        )

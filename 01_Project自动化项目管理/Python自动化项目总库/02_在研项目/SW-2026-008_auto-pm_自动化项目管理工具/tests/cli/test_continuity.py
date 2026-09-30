@@ -1488,3 +1488,101 @@ def test_work_adjudicate_cli_reads_recovery_token_from_stdin_only(
     # 结果只允许 CANCELLED。
     wrong = [item if item != "CANCELLED" else "CLOSED" for item in base]
     assert CliRunner().invoke(cli, [*wrong, "--recovery-lease-stdin"], input="x\n").exit_code != 0
+
+
+def test_legacy_terminal_evidence_cli_prints_bindings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from auto_pm.infrastructure.continuity_store import LegacyTerminalLeaseEvidence
+
+    _repository(tmp_path)
+    evidence = LegacyTerminalLeaseEvidence(
+        run_id="RUN-X",
+        work_id="WORK-X",
+        state="CANCELLED",
+        version=2,
+        lease_version=1,
+        lease_expires_at="2026-09-23T20:30:42+00:00",
+        lease_released=False,
+        terminal_evidence_kind="RUN_EXPIRED_SETTLED",
+        event_types=("RUN_CREATED", "RUN_EXPIRED_SETTLED"),
+        event_set_sha256="e" * 64,
+        checkpoint_set_sha256="c" * 64,
+        blockers=(),
+    )
+
+    class _Service:
+        def __init__(self, _root: Path) -> None:
+            pass
+
+        def legacy_terminal_lease_evidence(self, run_id: str) -> LegacyTerminalLeaseEvidence:
+            assert run_id == "RUN-X"
+            return evidence
+
+    monkeypatch.setattr("auto_pm.cli.continuity.ContinuityExecutionService", _Service)
+    result = CliRunner().invoke(
+        cli, ["-w", str(tmp_path), "continuity", "run", "legacy-terminal-evidence", "--run-id", "RUN-X"]
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["fenceable"] is True and payload["event_set_sha256"] == "e" * 64
+    assert payload["terminal_evidence_kind"] == "RUN_EXPIRED_SETTLED"
+
+
+def test_fence_legacy_terminal_cli_reads_recovery_token_from_stdin_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _repository(tmp_path)
+    captured: dict[str, object] = {}
+
+    class _Item:
+        def model_dump_json(self, indent: int = 0) -> str:
+            return json.dumps({"state": "CANCELLED"})
+
+    class _Service:
+        def fence_legacy_terminal_lease(self, **values: object) -> _Item:
+            captured.update(values)
+            return _Item()
+
+    service = _Service()
+    monkeypatch.setattr("auto_pm.cli.continuity._execution_service", lambda _ctx: service)
+    base = [
+        "-w",
+        str(tmp_path),
+        "continuity",
+        "run",
+        "fence-legacy-terminal",
+        "--target-run-id",
+        "RUN-X",
+        "--expected-state",
+        "CANCELLED",
+        "--expected-version",
+        "2",
+        "--expected-lease-version",
+        "1",
+        "--terminal-evidence-kind",
+        "RUN_EXPIRED_SETTLED",
+        "--event-set-sha256",
+        "e" * 64,
+        "--checkpoint-set-sha256",
+        "c" * 64,
+        "--recovery-run-id",
+        "RUN-R",
+        "--recovery-owner",
+        "owner",
+        "--decision-id",
+        "DEC-20260101-BBBBBBBB",
+        "--reason",
+        "fence legacy token",
+        "--idempotency-key",
+        "fence-x",
+    ]
+    result = CliRunner().invoke(cli, [*base, "--recovery-lease-stdin"], input="stdin-secret\n")
+
+    assert result.exit_code == 0, result.output
+    assert captured["recovery_lease_token"] == "stdin-secret"
+    assert captured["target_run_id"] == "RUN-X" and captured["expected_run_version"] == 2
+    assert "stdin-secret" not in result.output
+    rejected = CliRunner().invoke(cli, [*base, "--recovery-lease-token", "argv-secret"])
+    assert rejected.exit_code != 0 and "argv-secret" not in rejected.output

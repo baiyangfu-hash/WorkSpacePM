@@ -33,7 +33,11 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionStartEvidence,
 )
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
-from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.continuity_store import (
+    ContinuityStore,
+    ContinuityStoreError,
+    LegacyTerminalLeaseEvidence,
+)
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
     authority_path_parts,
@@ -1143,6 +1147,132 @@ class ContinuityExecutionService:
                 decision_id=decision_id,
                 decision_sha256=decision_sha256,
                 reason=reason,
+                idempotency_key=idempotency_key,
+            )
+        except (ContinuityStoreError, DecisionError) as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def legacy_terminal_lease_evidence(self, run_id: str) -> LegacyTerminalLeaseEvidence:
+        """Read-only facts a Decision must bind before fencing one legacy terminal lease."""
+
+        try:
+            return self._store.legacy_terminal_lease_evidence(run_id)
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def fence_legacy_terminal_lease(
+        self,
+        *,
+        target_run_id: str,
+        expected_run_state: str,
+        expected_run_version: int,
+        expected_lease_version: int,
+        expected_terminal_evidence_kind: str,
+        expected_event_set_sha256: str,
+        expected_checkpoint_set_sha256: str,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Invalidate one expired legacy terminal lease token; Run history is never rewritten."""
+
+        normalized_reason = reason.strip()
+        if not all(
+            value.strip()
+            for value in (
+                target_run_id,
+                expected_run_state,
+                expected_terminal_evidence_kind,
+                expected_event_set_sha256,
+                expected_checkpoint_set_sha256,
+                recovery_run_id,
+                recovery_owner_id,
+                recovery_lease_token,
+                decision_id,
+                idempotency_key,
+            )
+        ):
+            raise ContinuityExecutionError("围栏目标、绑定摘要、恢复 lease、Decision 与幂等键均不能为空")
+        if (
+            reason != normalized_reason
+            or not normalized_reason
+            or len(normalized_reason) > 1000
+            or any(not character.isprintable() for character in normalized_reason)
+        ):
+            raise ContinuityExecutionError("围栏原因必须为 1 到 1000 个字符")
+        if recovery_lease_token in normalized_reason:
+            raise ContinuityExecutionError("围栏原因不得包含恢复 lease token")
+        try:
+            runtime_target_path = self._store.runtime_target_path()
+            decisions = DecisionService(self._root)
+            decision, decision_sha256 = decisions.get_decision_with_sha256(decision_id)
+            capability = decision.runtime_capability
+            if decision.decision_conclusion != "approved" or decision.conditions:
+                raise ContinuityExecutionError("运行态 Decision 必须是无条件 approved")
+            if (
+                capability is None
+                or capability.allowed_runtime_actions
+                != (RuntimeDecisionAction.FENCE_LEGACY_TERMINAL_LEASE,)
+                or target_run_id not in capability.target_run_ids
+                or RuntimeDecisionOutcome.CANCELLED not in capability.allowed_outcomes
+            ):
+                raise ContinuityExecutionError(
+                    "Decision 未精确授权 fence_legacy_terminal_lease/目标 Run"
+                )
+            target = self._store.get_run(target_run_id)
+            target_work = self._store.get_work(target.work_id)
+            recovery = self._store.get_run(recovery_run_id)
+            recovery_lease = self._store.get_lease(recovery_run_id)
+            recovery_work = self._store.get_work(recovery.work_id)
+            if target_work.read_only or not is_canonical_decision_id(target_work.authorization_ref):
+                raise ContinuityExecutionError("目标 Work 必须绑定 canonical immutable Decision")
+            original, _original_sha256 = decisions.get_decision_with_sha256(
+                target_work.authorization_ref
+            )
+            if target_work.authorization_ref == decision_id:
+                raise ContinuityExecutionError("围栏 Decision 不得复用目标 Work 的原授权链")
+            if original.change_id == decision.change_id:
+                raise ContinuityExecutionError("围栏 CHG 必须独立于目标 Work 的原 CHG")
+            if target_work.subject_project_id != recovery_work.subject_project_id:
+                raise ContinuityExecutionError("围栏目标与恢复 Work 不属于同一项目")
+            if decision.project_id != recovery_work.subject_project_id:
+                raise ContinuityExecutionError("Decision 项目与恢复 Work 不一致")
+            if recovery_work.authorization_ref != decision_id:
+                raise ContinuityExecutionError("恢复 Work 未绑定指定 Decision")
+            approved = self._normalize_paths(decision.approved_files)
+            if not self._paths_covered((runtime_target_path,), approved):
+                raise ContinuityExecutionError("Decision 未覆盖 canonical continuity.db")
+            return self._store.fence_legacy_terminal_lease(
+                target_run_id=target_run_id,
+                expected_run_state=expected_run_state,
+                expected_run_version=expected_run_version,
+                expected_lease_version=expected_lease_version,
+                expected_terminal_evidence_kind=expected_terminal_evidence_kind,
+                expected_event_set_sha256=expected_event_set_sha256,
+                expected_checkpoint_set_sha256=expected_checkpoint_set_sha256,
+                recovery_run_id=recovery_run_id,
+                expected_recovery_run_version=recovery.version,
+                expected_recovery_lease_version=recovery_lease.version,
+                recovery_work_id=recovery_work.work_id,
+                expected_recovery_work_version=recovery_work.version,
+                expected_recovery_work_scope_hash=self._store.authority_paths_hash(
+                    recovery_work.scope_paths
+                ),
+                expected_recovery_owned_paths_hash=self._store.authority_paths_hash(
+                    recovery.owned_paths
+                ),
+                recovery_owner_id=recovery_owner_id,
+                recovery_lease_token=recovery_lease_token,
+                decision_id=decision_id,
+                decision_sha256=decision_sha256,
+                decision_change_id=decision.change_id,
+                decision_project_id=decision.project_id,
+                decision_approved_paths=approved,
+                runtime_target_path=runtime_target_path,
+                reason=normalized_reason,
                 idempotency_key=idempotency_key,
             )
         except (ContinuityStoreError, DecisionError) as error:

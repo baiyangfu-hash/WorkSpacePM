@@ -758,6 +758,82 @@ def reconcile_terminal_lease(
     _emit(item)
 
 
+@run_group.command(name="legacy-terminal-evidence")
+@click.option("--run-id", required=True)
+@click.pass_context
+def legacy_terminal_evidence(ctx: click.Context, run_id: str) -> None:
+    """Print the read-only facts a Decision must bind before fencing a legacy terminal lease."""
+
+    try:
+        evidence = ContinuityExecutionService(_workspace(ctx)).legacy_terminal_lease_evidence(run_id)
+    except ContinuityExecutionError as error:
+        raise click.ClickException(str(error)) from error
+    payload = dataclasses.asdict(evidence)
+    payload["fenceable"] = evidence.fenceable
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+@run_group.command(name="fence-legacy-terminal")
+@click.option("--target-run-id", required=True)
+@click.option("--expected-state", required=True)
+@click.option("--expected-version", type=click.IntRange(min=1), required=True)
+@click.option("--expected-lease-version", type=click.IntRange(min=1), required=True)
+@click.option("--terminal-evidence-kind", required=True)
+@click.option("--event-set-sha256", required=True)
+@click.option("--checkpoint-set-sha256", required=True)
+@click.option("--recovery-run-id", required=True)
+@click.option("--recovery-owner", "recovery_owner_id", required=True)
+@click.option(
+    "--recovery-lease-stdin",
+    is_flag=True,
+    required=True,
+    help="Read the recovery lease token from standard input; tokens are never CLI arguments.",
+)
+@click.option("--decision-id", required=True)
+@click.option("--reason", required=True)
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def fence_legacy_terminal(
+    ctx: click.Context,
+    target_run_id: str,
+    expected_state: str,
+    expected_version: int,
+    expected_lease_version: int,
+    terminal_evidence_kind: str,
+    event_set_sha256: str,
+    checkpoint_set_sha256: str,
+    recovery_run_id: str,
+    recovery_owner_id: str,
+    recovery_lease_stdin: bool,
+    decision_id: str,
+    reason: str,
+    idempotency_key: str,
+) -> None:
+    """Invalidate one expired legacy terminal lease token without rewriting Run history."""
+
+    del recovery_lease_stdin
+    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    try:
+        item = _execution_service(ctx).fence_legacy_terminal_lease(
+            target_run_id=target_run_id,
+            expected_run_state=expected_state,
+            expected_run_version=expected_version,
+            expected_lease_version=expected_lease_version,
+            expected_terminal_evidence_kind=terminal_evidence_kind,
+            expected_event_set_sha256=event_set_sha256,
+            expected_checkpoint_set_sha256=checkpoint_set_sha256,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+    except ContinuityExecutionError as error:
+        raise click.ClickException(str(error)) from error
+    _emit(item)
+
+
 @run_group.command(name="revoke-unstarted")
 @click.option("--target-run-id", required=True)
 @click.option("--recovery-run-id", required=True)

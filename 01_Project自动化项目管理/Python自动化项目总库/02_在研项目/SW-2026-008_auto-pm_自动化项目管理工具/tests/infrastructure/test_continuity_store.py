@@ -140,3 +140,62 @@ def test_store_rejects_non_cancelled_outcome_and_secret_reason(tmp_path: Path) -
     leaked["reason"] = f"contains {ADJ_RECOVERY_TOKEN}"
     with pytest.raises(ContinuityStoreError, match="token"):
         store.adjudicate_blocked_work(**leaked)
+
+
+def test_store_legacy_terminal_evidence_never_writes_and_lists_blockers(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+    from tests.core.test_legacy_terminal_lease_fence import _legacy_fence_ready, _snapshot
+
+    execution, _works = _legacy_fence_ready(tmp_path, Clock(), expired=False)
+    before = _snapshot(tmp_path)
+
+    evidence = execution._store.legacy_terminal_lease_evidence("RUN-TARGET")
+
+    assert _snapshot(tmp_path) == before
+    assert not evidence.fenceable
+    assert any("尚未过期" in item for item in evidence.blockers)
+
+
+def test_store_rejects_drifted_recovery_authority_for_legacy_fence(tmp_path: Path) -> None:
+    from tests.core.test_continuity_execution_service import Clock
+    from tests.core.test_legacy_terminal_lease_fence import (
+        FENCE_DECISION,
+        RECOVERY_TOKEN,
+        _legacy_fence_ready,
+    )
+
+    execution, _works = _legacy_fence_ready(tmp_path, Clock())
+    store = execution._store
+    evidence = store.legacy_terminal_lease_evidence("RUN-TARGET")
+    recovery = store.get_run("RUN-RECOVERY")
+    recovery_work = store.get_work("WORK-RECOVERY")
+    values: dict[str, Any] = {
+        "target_run_id": "RUN-TARGET",
+        "expected_run_state": evidence.state,
+        "expected_run_version": evidence.version,
+        "expected_lease_version": evidence.lease_version,
+        "expected_terminal_evidence_kind": evidence.terminal_evidence_kind,
+        "expected_event_set_sha256": evidence.event_set_sha256,
+        "expected_checkpoint_set_sha256": evidence.checkpoint_set_sha256,
+        "recovery_run_id": "RUN-RECOVERY",
+        "expected_recovery_run_version": recovery.version,
+        "expected_recovery_lease_version": store.get_lease("RUN-RECOVERY").version,
+        "recovery_work_id": "WORK-RECOVERY",
+        "expected_recovery_work_version": 999,
+        "expected_recovery_work_scope_hash": store.authority_paths_hash(recovery_work.scope_paths),
+        "expected_recovery_owned_paths_hash": store.authority_paths_hash(recovery.owned_paths),
+        "recovery_owner_id": "recovery-agent",
+        "recovery_lease_token": RECOVERY_TOKEN,
+        "decision_id": FENCE_DECISION,
+        "decision_sha256": "b" * 64,
+        "decision_change_id": "CHG-SCPT-2026-214",
+        "decision_project_id": "SW-2026-008",
+        "decision_approved_paths": ("auto_pm/core/a.py", ".auto-pm/continuity.db"),
+        "runtime_target_path": store.runtime_target_path(),
+        "reason": "store-level fence",
+        "idempotency_key": "store-fence",
+    }
+
+    with pytest.raises(ContinuityStoreError, match="授权链已漂移"):
+        store.fence_legacy_terminal_lease(**values)
+    assert not store.get_lease("RUN-TARGET").lease_token.startswith("RELEASED:")
