@@ -26,6 +26,44 @@ class CockpitUserAction(StrEnum):
     REVIEW_ESCALATION = "REVIEW_ESCALATION"
 
 
+class PmCockpitEvidenceCurrency(StrEnum):
+    """Whether the newest verification evidence still matches the current content."""
+
+    CURRENT = "CURRENT"
+    NOT_CURRENT = "NOT_CURRENT"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class PmCockpitResumeState(StrEnum):
+    """Where a re-opened cockpit finds the selected project's task."""
+
+    NO_ACTIVE_WORK = "NO_ACTIVE_WORK"
+    WAITING_FOR_USER = "WAITING_FOR_USER"
+    MONITORING = "MONITORING"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+
+
+class PmCockpitFocus(BaseModel):
+    """The one Mission, root Work and Run the cockpit currently points at."""
+
+    model_config = ConfigDict(frozen=True)
+
+    mission_id: str = ""
+    work_id: str = ""
+    run_id: str = ""
+    run_state: str = ""
+
+
+class PmCockpitResume(BaseModel):
+    """The only next step the service considers legal, with a fixed reason."""
+
+    model_config = ConfigDict(frozen=True)
+
+    state: PmCockpitResumeState = PmCockpitResumeState.NO_ACTIVE_WORK
+    user_action: CockpitUserAction = CockpitUserAction.NONE
+    reason: str = Field(default="", max_length=200)
+
+
 class PmCockpitProjectCard(BaseModel):
     """One concise project status card containing the nine requested fields."""
 
@@ -67,6 +105,8 @@ class PmCockpitCheckpointEvidence(BaseModel):
     summary: str = Field(min_length=1)
     evidence: tuple[str, ...]
     created_at: str = Field(min_length=1)
+    run_id: str = ""
+    is_current_run: bool = False
 
 
 class PmCockpitEvidence(BaseModel):
@@ -83,6 +123,10 @@ class PmCockpitEvidence(BaseModel):
     checkpoints: tuple[PmCockpitCheckpointEvidence, ...]
     verification_evidence: tuple[str, ...]
     status_note: str
+    focus: PmCockpitFocus = PmCockpitFocus()
+    evidence_currency: PmCockpitEvidenceCurrency = PmCockpitEvidenceCurrency.NOT_APPLICABLE
+    evidence_currency_reason: str = Field(default="", max_length=200)
+    resume: PmCockpitResume = PmCockpitResume()
 
 
 class PmCockpitActivity(BaseModel):

@@ -9,14 +9,27 @@ from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from auto_pm.core.continuity_execution_service import ContinuityExecutionService
 from auto_pm.core.mission_service import MissionService
-from auto_pm.core.pm_cockpit_service import PmCockpitService
+from auto_pm.core.pm_cockpit_service import PmCockpitService, _ProjectFacts
+from auto_pm.core.pm_facade_service import PmFacadeService
 from auto_pm.core.work_registry_service import WorkRegistryService
 
-from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
-from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
-from auto_pm.contracts.pm_cockpit import CockpitUserAction
+from auto_pm.contracts.continuity import RunItem, RunState, WorkItem, WorkKind, WorkState
+from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
+from auto_pm.contracts.pm_cockpit import (
+    CockpitUserAction,
+    PmCockpitEvidence,
+    PmCockpitEvidenceCurrency,
+    PmCockpitFocus,
+    PmCockpitResumeState,
+)
+from tests.core.test_pm_facade_service import (
+    _commit_baseline,
+    _setup,
+    _verified_acceptance_ready,
+)
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -315,3 +328,417 @@ def test_activity_timeline_uses_only_current_mission_root_run(tmp_path: Path) ->
     serialized = snapshot.model_dump_json().lower()
     assert "history-token" not in serialized
     assert "must-not-leak" not in serialized
+
+
+# --- U05: reopen the same task, evidence currency and the single legal next step -------------
+
+
+def _registry_for(root: Path, project_id: str) -> None:
+    path = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "workspace-registry.v1",
+                "projects": [
+                    {
+                        "project_id": project_id,
+                        "project_root": f"projects/{project_id}_cockpit",
+                        "development_root": f"projects/{project_id}_cockpit",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _event_count(root: Path) -> int:
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as connection:
+        return int(connection.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+
+
+def _new_fields_text(evidence: PmCockpitEvidence) -> str:
+    """Serialise only the U05 fields so privacy checks do not trip on legacy evidence text."""
+    return json.dumps(
+        [
+            evidence.focus.model_dump(mode="json"),
+            evidence.evidence_currency_reason,
+            evidence.resume.model_dump(mode="json"),
+        ],
+        ensure_ascii=False,
+    )
+
+
+def test_reopened_cockpit_points_at_the_same_mission_work_and_run(tmp_path: Path) -> None:
+    _registry(tmp_path)
+    _seed_authorized_mission(tmp_path)
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    baseline = db_path.read_bytes()
+    git_status = _git(tmp_path, "status", "--porcelain").stdout
+
+    first = PmCockpitService(tmp_path)
+    before_close = first.evidence("SW-2026-008")
+    snapshot = first.snapshot()
+    del first
+    after_reopen = PmCockpitService(tmp_path).evidence("SW-2026-008")
+
+    expected = PmCockpitFocus(
+        mission_id="MISSION-COCKPIT-001",
+        work_id="WORK-COCKPIT-001",
+        run_id="RUN-COCKPIT-001",
+        run_state="已授权",
+    )
+    assert before_close.focus == after_reopen.focus == expected
+    assert snapshot.projects[0].mission_id == expected.mission_id
+    assert {item.work_id for item in snapshot.activities} == {expected.work_id}
+    assert {item.run_id for item in snapshot.activities} == {expected.run_id}
+    checkpoint = after_reopen.checkpoints[0]
+    assert (checkpoint.run_id, checkpoint.is_current_run) == ("RUN-COCKPIT-001", True)
+    assert after_reopen.resume.user_action is CockpitUserAction.CONFIRM_START
+    assert after_reopen.evidence_currency is PmCockpitEvidenceCurrency.NOT_APPLICABLE
+    assert db_path.read_bytes() == baseline
+    assert _git(tmp_path, "status", "--porcelain").stdout == git_status
+
+
+def test_focus_follows_the_newest_non_terminal_run_and_is_empty_without_a_mission(
+    tmp_path: Path,
+) -> None:
+    _registry(tmp_path)
+    _seed_authorized_mission(tmp_path)
+    execution = ContinuityExecutionService(tmp_path)
+    execution.transition_run(
+        "RUN-COCKPIT-001",
+        RunState.CANCELLED,
+        "Codex fullstack-engineer",
+        "must-not-leak",
+        "cancel-first-run",
+    )
+    execution.start_run(
+        run_id="RUN-COCKPIT-002",
+        work_id="WORK-COCKPIT-001",
+        executor_id="Codex fullstack-engineer",
+        adapter="codex",
+        owned_paths=["auto_pm/core/pm_cockpit_service.py"],
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+        git_head=_git(tmp_path, "rev-parse", "HEAD").stdout.strip(),
+        worktree_path=str(tmp_path),
+        lease_token="must-not-leak-either",
+        lease_seconds=900,
+        idempotency_key="start-second-run",
+    )
+    _flush_continuity_wal(tmp_path)
+
+    focus = PmCockpitService(tmp_path).evidence("SW-2026-008").focus
+
+    assert (focus.mission_id, focus.work_id, focus.run_id) == (
+        "MISSION-COCKPIT-001",
+        "WORK-COCKPIT-001",
+        "RUN-COCKPIT-002",
+    )
+
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+    _registry(empty_root)
+    _git_root(empty_root)
+    WorkRegistryService(empty_root).initialize("test")
+    _flush_continuity_wal(empty_root)
+    evidence = PmCockpitService(empty_root).evidence("SW-2026-008")
+    assert evidence.focus == PmCockpitFocus()
+    assert evidence.resume.state is PmCockpitResumeState.NO_ACTIVE_WORK
+    assert evidence.checkpoints == ()
+
+
+def _resume_inputs(
+    root: Path,
+) -> tuple[PmCockpitService, Mission, WorkItem, RunItem]:
+    _registry(root)
+    _seed_authorized_mission(root)
+    service = PmCockpitService(root)
+    mission = MissionService(root).get("MISSION-COCKPIT-001")
+    work = WorkRegistryService(root).get_work("WORK-COCKPIT-001")
+    run = service._store.get_run("RUN-COCKPIT-001")
+    return service, mission, work, run
+
+
+_NO_ACTION = CockpitUserAction.NONE
+_REVIEW = CockpitUserAction.REVIEW_ESCALATION
+
+
+@pytest.mark.parametrize(
+    ("mission_state", "run_state", "started", "expected_state", "expected_action", "fragment"),
+    [
+        (MissionState.ACCEPTED, None, False, PmCockpitResumeState.NO_ACTIVE_WORK, _NO_ACTION, "暂无进行中"),
+        (MissionState.CLOSED, None, False, PmCockpitResumeState.NO_ACTIVE_WORK, _NO_ACTION, "暂无进行中"),
+        (MissionState.CANCELLED, None, False, PmCockpitResumeState.NO_ACTIVE_WORK, _NO_ACTION, "暂无进行中"),
+        (MissionState.BLOCKED, None, False, PmCockpitResumeState.NEEDS_REVIEW, _REVIEW, "阻塞"),
+        (MissionState.AWAITING_APPROVAL, None, False, PmCockpitResumeState.WAITING_FOR_USER, CockpitUserAction.CONFIRM_START, "确认前不会创建"),
+        (MissionState.DRAFT, None, False, PmCockpitResumeState.NO_ACTIVE_WORK, _NO_ACTION, "准备阶段"),
+        (MissionState.ACTIVE, RunState.READY, False, PmCockpitResumeState.MONITORING, _NO_ACTION, "正在启动"),
+        (MissionState.ACTIVE, RunState.PENDING, False, PmCockpitResumeState.NEEDS_REVIEW, _REVIEW, "待核验"),
+        (MissionState.ACTIVE, RunState.RUNNING, True, PmCockpitResumeState.MONITORING, _NO_ACTION, "已启动"),
+        (MissionState.ACTIVE, RunState.RUNNING, False, PmCockpitResumeState.NEEDS_REVIEW, _REVIEW, "无法证明进程已启动"),
+        (MissionState.ACTIVE, RunState.VERIFYING, False, PmCockpitResumeState.NEEDS_REVIEW, _REVIEW, "不会自动重启"),
+        (MissionState.ACTIVE, RunState.FAILED, True, PmCockpitResumeState.NEEDS_REVIEW, _REVIEW, "不会自动重试"),
+        (MissionState.ACTIVE, RunState.CANCELLED, True, PmCockpitResumeState.NEEDS_REVIEW, _REVIEW, "不会自动重试"),
+        (MissionState.ACTIVE, RunState.SUCCEEDED, True, PmCockpitResumeState.MONITORING, _NO_ACTION, "等待执行或验证流转"),
+        (MissionState.ACTIVE, None, False, PmCockpitResumeState.MONITORING, _NO_ACTION, "等待执行或验证流转"),
+    ],
+)
+def test_resume_table_gives_only_the_legal_next_step(
+    tmp_path: Path,
+    mission_state: MissionState,
+    run_state: RunState | None,
+    started: bool,
+    expected_state: PmCockpitResumeState,
+    expected_action: CockpitUserAction,
+    fragment: str,
+) -> None:
+    service, mission, work, run = _resume_inputs(tmp_path)
+    mission = mission.model_copy(update={"state": mission_state})
+    focus_run = run.model_copy(update={"state": run_state}) if run_state else None
+    facts = _ProjectFacts(
+        missions=(mission,),
+        works=(work,),
+        runs_by_work={work.work_id: (focus_run,) if focus_run else ()},
+        checkpoints=(),
+        started_run_ids=frozenset({run.run_id}) if started else frozenset(),
+    )
+
+    resume = service._resume(
+        mission, work, focus_run, facts, PmCockpitEvidenceCurrency.NOT_APPLICABLE, ""
+    )
+
+    assert (resume.state, resume.user_action) == (expected_state, expected_action)
+    assert fragment in resume.reason
+    assert len(resume.reason) <= 200
+
+
+def test_resume_never_offers_a_start_or_restart_for_an_unproven_run(tmp_path: Path) -> None:
+    service, mission, work, run = _resume_inputs(tmp_path)
+    mission = mission.model_copy(update={"state": MissionState.ACTIVE})
+    for state in (RunState.RUNNING, RunState.VERIFYING, RunState.FAILED, RunState.PENDING):
+        facts = _ProjectFacts(
+            missions=(mission,),
+            works=(work,),
+            runs_by_work={work.work_id: (run.model_copy(update={"state": state}),)},
+            checkpoints=(),
+            started_run_ids=frozenset(),
+        )
+        resume = service._resume(
+            mission,
+            work,
+            run.model_copy(update={"state": state}),
+            facts,
+            PmCockpitEvidenceCurrency.NOT_APPLICABLE,
+            "",
+        )
+        assert resume.user_action is not CockpitUserAction.CONFIRM_START
+        assert resume.user_action is CockpitUserAction.REVIEW_ESCALATION
+
+
+def test_resume_falls_back_to_review_for_an_unknown_mission_state(tmp_path: Path) -> None:
+    service, mission, work, run = _resume_inputs(tmp_path)
+    unknown = mission.model_copy(update={"state": "UNMAPPED"})
+    facts = _ProjectFacts(
+        missions=(unknown,),
+        works=(work,),
+        runs_by_work={work.work_id: (run,)},
+        checkpoints=(),
+        started_run_ids=frozenset(),
+    )
+
+    resume = service._resume(
+        unknown, work, run, facts, PmCockpitEvidenceCurrency.NOT_APPLICABLE, ""
+    )
+
+    assert resume.state is PmCockpitResumeState.NEEDS_REVIEW
+    assert resume.user_action is CockpitUserAction.REVIEW_ESCALATION
+    assert "已保留现场" in resume.reason
+
+
+def test_resume_reason_is_clipped_to_the_contract_limit(tmp_path: Path) -> None:
+    service, mission, work, run = _resume_inputs(tmp_path)
+    pending = mission.model_copy(update={"state": MissionState.ACCEPTANCE_PENDING})
+    facts = _ProjectFacts(
+        missions=(pending,),
+        works=(work,),
+        runs_by_work={work.work_id: (run,)},
+        checkpoints=(),
+        started_run_ids=frozenset(),
+    )
+
+    resume = service._resume(
+        pending, work, run, facts, PmCockpitEvidenceCurrency.NOT_CURRENT, "很长的原因" * 80
+    )
+
+    assert len(resume.reason) == 200
+    assert resume.reason.endswith("…")
+    assert resume.reason.startswith("验收证据不能确认：")
+
+
+def _accepting_cockpit(root: Path) -> tuple[MissionService, PmCockpitService, PmFacadeService]:
+    """Build a real, content-bound verified Run and register its project with the cockpit."""
+    _registry_for(root, "SW-C04-001")
+    missions, facade, _ = _verified_acceptance_ready(root)
+    return missions, PmCockpitService(root, store=facade._store), facade
+
+
+def _pending_acceptance(missions: MissionService, key: str) -> None:
+    pending = missions.get("MISSION-C04-001")
+    missions.transition(
+        mission_id=pending.mission_id,
+        expected_version=pending.version,
+        new_state=MissionState.ACCEPTANCE_PENDING,
+        root_work_id=pending.root_work_id,
+        idempotency_key=key,
+    )
+
+
+def test_current_checkpoint_makes_final_acceptance_the_legal_next_step(tmp_path: Path) -> None:
+    missions, service, _ = _accepting_cockpit(tmp_path)
+    _pending_acceptance(missions, "u05-current")
+    events_before = _event_count(tmp_path)
+    git_status = _git(tmp_path, "status", "--porcelain").stdout
+
+    evidence = service.evidence("SW-C04-001")
+
+    assert evidence.evidence_currency is PmCockpitEvidenceCurrency.CURRENT
+    assert evidence.evidence_currency_reason == ""
+    assert evidence.resume.state is PmCockpitResumeState.WAITING_FOR_USER
+    assert evidence.resume.user_action is CockpitUserAction.CONFIRM_ACCEPTANCE
+    assert (evidence.focus.mission_id, evidence.focus.work_id, evidence.focus.run_id) == (
+        "MISSION-C04-001",
+        "WORK-C04-001",
+        "RUN-C04-001",
+    )
+    assert [(item.checkpoint_id, item.is_current_run) for item in evidence.checkpoints] == [
+        ("CP-C04-001", True)
+    ]
+    assert _event_count(tmp_path) == events_before
+    assert _git(tmp_path, "status", "--porcelain").stdout == git_status
+    new_fields = _new_fields_text(evidence)
+    assert "lease" not in new_fields.lower()
+    assert "token" not in new_fields.lower()
+    assert str(tmp_path) not in new_fields
+
+
+def test_changed_content_makes_the_evidence_not_current_and_requires_review(
+    tmp_path: Path,
+) -> None:
+    missions, service, facade = _accepting_cockpit(tmp_path)
+    (tmp_path / "project" / "auto_pm" / "core" / "target.py").write_text(
+        "def value() -> int:\n    return 2\n", encoding="utf-8"
+    )
+    _pending_acceptance(missions, "u05-stale")
+
+    evidence = service.evidence("SW-C04-001")
+
+    assert evidence.evidence_currency is PmCockpitEvidenceCurrency.NOT_CURRENT
+    assert evidence.evidence_currency_reason == facade.acceptance_gate_reason("MISSION-C04-001")
+    assert evidence.resume.state is PmCockpitResumeState.NEEDS_REVIEW
+    assert evidence.resume.user_action is CockpitUserAction.REVIEW_ESCALATION
+    assert evidence.resume.reason.startswith("验收证据不能确认：")
+    new_fields = _new_fields_text(evidence)
+    assert str(tmp_path) not in new_fields
+    assert "Traceback" not in new_fields
+
+
+def test_failed_latest_run_makes_the_evidence_not_current(tmp_path: Path) -> None:
+    missions, service, facade = _accepting_cockpit(tmp_path)
+    ContinuityExecutionService(tmp_path, store=facade._store).transition_run(
+        "RUN-C04-001", RunState.FAILED, "c04-test", "c04-test-lease", "u05-failed"
+    )
+    _pending_acceptance(missions, "u05-failed-pending")
+
+    evidence = service.evidence("SW-C04-001")
+
+    assert evidence.evidence_currency is PmCockpitEvidenceCurrency.NOT_CURRENT
+    assert "Run" in evidence.evidence_currency_reason
+    assert evidence.resume.user_action is CockpitUserAction.REVIEW_ESCALATION
+
+
+def test_evidence_is_not_applicable_before_the_acceptance_gate(tmp_path: Path) -> None:
+    _, service, _ = _accepting_cockpit(tmp_path)
+
+    evidence = service.evidence("SW-C04-001")
+
+    assert evidence.evidence_currency is PmCockpitEvidenceCurrency.NOT_APPLICABLE
+    assert evidence.evidence_currency_reason == "尚未进入验收阶段，暂无需核验。"
+    assert evidence.resume.user_action is not CockpitUserAction.CONFIRM_ACCEPTANCE
+
+
+def test_verification_failure_gives_a_fixed_reason_without_exception_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missions, service, _ = _accepting_cockpit(tmp_path)
+    _pending_acceptance(missions, "u05-unreadable")
+
+    def unreadable(self: PmFacadeService, mission_id: str) -> str:
+        raise OSError(f"cannot read {tmp_path} secret-detail")
+
+    monkeypatch.setattr(PmFacadeService, "acceptance_gate_reason", unreadable)
+
+    evidence = service.evidence("SW-C04-001")
+
+    assert evidence.evidence_currency is PmCockpitEvidenceCurrency.NOT_CURRENT
+    assert evidence.evidence_currency_reason == "无法核验验收证据：读取失败，未做任何修复。"
+    new_fields = _new_fields_text(evidence)
+    assert "secret-detail" not in new_fields
+    assert str(tmp_path) not in new_fields
+    assert evidence.resume.user_action is CockpitUserAction.REVIEW_ESCALATION
+
+
+def test_unverifying_run_or_missing_checkpoint_makes_the_evidence_not_current(
+    tmp_path: Path,
+) -> None:
+    _registry_for(tmp_path, "SW-TEST-001")
+    missions, facade = _setup(tmp_path)
+    (tmp_path / ".gitignore").write_text(".auto-pm/\n__pycache__/\n", encoding="utf-8")
+    (tmp_path / "pm.py").write_text("VALUE = 1\n", encoding="utf-8")
+    facade.plan("MISSION-PM-001")
+    facade.approve("MISSION-PM-001", "WORK-PM-001")
+    head = _commit_baseline(tmp_path)
+    execution = ContinuityExecutionService(tmp_path, store=facade._store)
+    execution.start_run(
+        run_id="RUN-GATE-001",
+        work_id="WORK-PM-001",
+        executor_id="gate-test",
+        adapter="test",
+        owned_paths=["pm.py"],
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+        git_head=head,
+        worktree_path=str(tmp_path),
+        lease_token="gate-lease",
+        lease_seconds=900,
+        idempotency_key="gate-run-create",
+    )
+    execution.transition_run(
+        "RUN-GATE-001", RunState.RUNNING, "gate-test", "gate-lease", "gate-run-running"
+    )
+    active = missions.get("MISSION-PM-001")
+    missions.transition(
+        mission_id=active.mission_id,
+        expected_version=active.version,
+        new_state=MissionState.ACCEPTANCE_PENDING,
+        root_work_id=active.root_work_id,
+        idempotency_key="gate-pending",
+    )
+    service = PmCockpitService(tmp_path, store=facade._store)
+
+    running = service.evidence("SW-TEST-001")
+    execution.transition_run(
+        "RUN-GATE-001", RunState.VERIFYING, "gate-test", "gate-lease", "gate-run-verifying"
+    )
+    verifying = service.evidence("SW-TEST-001")
+
+    assert running.evidence_currency is PmCockpitEvidenceCurrency.NOT_CURRENT
+    assert "VERIFYING" in running.evidence_currency_reason
+    assert verifying.evidence_currency is PmCockpitEvidenceCurrency.NOT_CURRENT
+    assert "Checkpoint" in verifying.evidence_currency_reason
+    for evidence in (running, verifying):
+        assert evidence.resume.user_action is CockpitUserAction.REVIEW_ESCALATION
+        assert evidence.focus.run_id == "RUN-GATE-001"

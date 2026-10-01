@@ -8,12 +8,23 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from PySide6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QUrl
+from PySide6.QtCore import (
+    Q_ARG,
+    QMetaObject,
+    QObject,
+    Qt,
+    QtMsgType,
+    QUrl,
+    qInstallMessageHandler,
+)
 from PySide6.QtQml import QQmlComponent, QQmlEngine
+from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
+from tests.core.test_pm_cockpit_service import _registry as _core_registry
+from tests.core.test_pm_cockpit_service import _seed_authorized_mission
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
@@ -251,3 +262,230 @@ def test_boss_main_saves_planning_form_to_isolated_store(
     assert persisted == [
         ("SW-2026-008", "Improve release verification", '["All checks pass"]', "PRE_AUTH")
     ]
+
+
+# --- U05: evidence drawer shows the same task, evidence currency and the next legal step -----
+
+
+def _texts(item: QQuickItem) -> list[str]:
+    """Collect every visible Text value below an item, in tree order."""
+    found: list[str] = []
+    for child in item.childItems():
+        value = child.property("text")
+        if isinstance(value, str):
+            found.append(value)
+        found.extend(_texts(child))
+    return found
+
+
+class _QtMessages:
+    """Capture Qt/QML warnings raised while the drawer evaluates its bindings."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def __enter__(self) -> list[str]:
+        def handler(mode: QtMsgType, context: object, message: str) -> None:
+            del mode, context
+            self.messages.append(message)
+
+        self._previous = qInstallMessageHandler(handler)
+        return self.messages
+
+    def __exit__(self, *_exc: object) -> None:
+        qInstallMessageHandler(self._previous)
+
+
+def _evidence_payload(
+    currency: str | None, reason: str, action: str, resume_reason: str, state: str
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "project_id": "SW-2026-008",
+        "decision_id": "DEC-20260910-1B4F38FD",
+        "change_id": "CHG-SCPT-2026-207",
+        "read_set": ["SYS-2026-001_WorkspaceGovernance/workspace_registry.json"],
+        "work_graph": [],
+        "checkpoints": [],
+        "verification_evidence": [],
+        "status_note": "证据来自不可变只读连续性记录；未读取或展示执行租约。",
+        "focus": {
+            "mission_id": "MISSION-001",
+            "work_id": "WORK-001",
+            "run_id": "RUN-001",
+            "run_state": "验证中",
+        },
+        "resume": {"state": state, "user_action": action, "reason": resume_reason},
+    }
+    if currency is not None:
+        payload["evidence_currency"] = currency
+        payload["evidence_currency_reason"] = reason
+    return payload
+
+
+def _open_drawer(
+    engine: QQmlEngine, payload: dict[str, object]
+) -> tuple[QQuickItem, list[str]]:
+    drawer = cast(QQuickItem, _load(engine, _QML / "components" / "EvidenceDrawer.qml"))
+    with _QtMessages() as messages:
+        assert QMetaObject.invokeMethod(drawer, "openEvidence", Q_ARG("QVariant", payload))
+    return drawer, messages
+
+
+def test_drawer_states_the_same_task_and_a_current_evidence_verdict(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
+    payload = _evidence_payload(
+        "CURRENT", "", "CONFIRM_ACCEPTANCE", "验证证据与当前内容一致，可确认最终验收。", "WAITING_FOR_USER"
+    )
+
+    drawer, messages = _open_drawer(qml_engine, payload)
+    qapp.processEvents()
+
+    texts = "\n".join(_texts(drawer))
+    assert drawer.property("opened") is True
+    assert "需求：MISSION-001" in texts
+    assert "根工作：WORK-001" in texts
+    assert "运行：RUN-001（验证中）" in texts
+    assert "与当前内容一致" in texts
+    assert "验证证据与当前内容一致，可确认最终验收。  （确认最终验收）" in texts
+    assert not [m for m in messages if "Error" in m or "Unable" in m]
+    lowered = texts.lower()
+    assert "lease" not in lowered and "token" not in lowered and "%" not in texts
+
+
+def test_drawer_explains_why_evidence_is_not_current_and_offers_no_action_button(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
+    reason = "最新 Checkpoint 未证明当前通过的质量证据"
+    payload = _evidence_payload(
+        "NOT_CURRENT", reason, "REVIEW_ESCALATION", f"验收证据不能确认：{reason}", "NEEDS_REVIEW"
+    )
+
+    drawer, messages = _open_drawer(qml_engine, payload)
+    qapp.processEvents()
+
+    texts = "\n".join(_texts(drawer))
+    assert f"与当前内容不一致或无法核验：{reason}" in texts
+    assert f"验收证据不能确认：{reason}  （需要您查看并决策）" in texts
+    assert "与当前内容一致" not in texts
+    assert not [m for m in messages if "Error" in m or "Unable" in m]
+    action_texts = {"确认开工", "确认最终验收", "启动", "重试", "恢复"}
+    assert not (action_texts & set(_texts(drawer)))
+
+
+def test_drawer_marks_not_applicable_evidence_with_its_reason(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
+    payload = _evidence_payload(
+        "NOT_APPLICABLE", "尚未进入验收阶段，暂无需核验。", "NONE", "执行已启动，驾驶舱正在处理，无需操作。", "MONITORING"
+    )
+
+    drawer, messages = _open_drawer(qml_engine, payload)
+    qapp.processEvents()
+
+    texts = "\n".join(_texts(drawer))
+    assert "无需核验：尚未进入验收阶段，暂无需核验。" in texts
+    assert "执行已启动，驾驶舱正在处理，无需操作。  （无需操作）" in texts
+    assert not [m for m in messages if "Error" in m or "Unable" in m]
+
+
+def test_drawer_still_opens_with_a_pre_u05_payload(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
+    legacy: dict[str, object] = {
+        "project_id": "SW-2026-008",
+        "read_set": [],
+        "work_graph": [],
+        "checkpoints": [],
+        "verification_evidence": [],
+        "status_note": "只读。",
+    }
+
+    drawer, messages = _open_drawer(qml_engine, legacy)
+    qapp.processEvents()
+
+    texts = "\n".join(_texts(drawer))
+    assert drawer.property("opened") is True
+    assert "暂无进行中的需求。" in texts
+    assert "暂无核验信息。" in texts
+    assert "暂无下一步信息。" in texts
+    assert not [m for m in messages if "Error" in m or "Unable" in m]
+
+
+def test_boss_main_reads_evidence_in_the_background_only() -> None:
+    main_source = (_QML / "boss_main.qml").read_text(encoding="utf-8", errors="replace")
+    drawer_source = (_QML / "components" / "EvidenceDrawer.qml").read_text(
+        encoding="utf-8", errors="replace"
+    )
+
+    assert "pmCockpitBridge.requestEvidence(projectId)" in main_source
+    assert "loadEvidence" not in main_source
+    assert "function onEvidenceFinished(response)" in main_source
+    assert "evidenceDrawer.openEvidence(response.evidence)" in main_source
+    assert "PrimaryButton" in drawer_source  # the existing close button only
+    assert drawer_source.count("onClicked") == 1
+
+
+def test_boss_main_opens_the_drawer_for_the_same_run_after_a_background_read(
+    qapp: QApplication, qml_engine: QQmlEngine, tmp_path: Path
+) -> None:
+    _core_registry(tmp_path)
+    _seed_authorized_mission(tmp_path)
+    bridge = PmCockpitBridge(str(tmp_path))
+    qml_engine.rootContext().setContextProperty("pmCockpitBridge", bridge)
+    window = _load(qml_engine, _QML / "boss_main.qml")
+    drawer = next(
+        child
+        for child in cast(QObject, window).findChildren(QObject)
+        if child.property("focusInfo") is not None
+    )
+
+    assert QMetaObject.invokeMethod(
+        cast(QObject, window), "showEvidence", Q_ARG("QVariant", "SW-2026-008")
+    )
+    assert cast(QObject, window).property("statusMessage") == "正在读取证据…"
+    assert bridge._thread_pool.waitForDone(10_000)
+    for _ in range(300):
+        qapp.processEvents()
+        bridge._poll_evidence_worker()
+        if drawer.property("opened") is True:
+            break
+        QTest.qWait(10)
+
+    assert drawer.property("opened") is True, cast(QObject, window).property("statusMessage")
+    texts = "\n".join(_texts(cast(QQuickItem, drawer)))
+    assert "需求：MISSION-COCKPIT-001" in texts
+    assert "根工作：WORK-COCKPIT-001" in texts
+    assert "运行：RUN-COCKPIT-001（已授权）" in texts
+    assert "等待您确认开工" in texts
+    assert cast(QObject, window).property("statusMessage") in ("", None)
+    bridge.stopSnapshotRefresh()
+
+
+def test_boss_main_reports_an_unreadable_evidence_request_without_opening_the_drawer(
+    qapp: QApplication, qml_engine: QQmlEngine, tmp_path: Path
+) -> None:
+    _core_registry(tmp_path)
+    bridge = PmCockpitBridge(str(tmp_path))
+    qml_engine.rootContext().setContextProperty("pmCockpitBridge", bridge)
+    window = _load(qml_engine, _QML / "boss_main.qml")
+    drawer = next(
+        child
+        for child in cast(QObject, window).findChildren(QObject)
+        if child.property("focusInfo") is not None
+    )
+
+    assert QMetaObject.invokeMethod(
+        cast(QObject, window), "showEvidence", Q_ARG("QVariant", "UNKNOWN-001")
+    )
+    assert bridge._thread_pool.waitForDone(10_000)
+    for _ in range(300):
+        qapp.processEvents()
+        bridge._poll_evidence_worker()
+        if "不在工作空间项目清单" in str(cast(QObject, window).property("statusMessage")):
+            break
+        QTest.qWait(10)
+
+    assert "不在工作空间项目清单" in str(cast(QObject, window).property("statusMessage"))
+    assert drawer.property("opened") is False
+    bridge.stopSnapshotRefresh()

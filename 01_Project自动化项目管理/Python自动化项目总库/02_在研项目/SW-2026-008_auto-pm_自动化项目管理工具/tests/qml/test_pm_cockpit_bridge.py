@@ -12,9 +12,11 @@ from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from PySide6.QtCore import QRunnable, QThreadPool
 
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
-from auto_pm.contracts.pm_cockpit import PmCockpitSnapshot
+from auto_pm.contracts.pm_cockpit import PmCockpitEvidence, PmCockpitFocus, PmCockpitSnapshot
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
+from tests.core.test_pm_cockpit_service import _registry as _core_registry
+from tests.core.test_pm_cockpit_service import _seed_authorized_mission
 
 
 class _HoldingThreadPool:
@@ -306,3 +308,197 @@ def test_snapshot_failure_and_shutdown_never_publish_a_replacement(tmp_path: Pat
     bridge._poll_snapshot_worker()
     assert finished == [{"success": False, "snapshot": {}, "message": "read failed"}]
     assert bridge.requestSnapshot()["accepted"] is False
+
+
+# --- U05: background, one-at-a-time evidence reads -------------------------------------------
+
+
+class _EvidenceService:
+    def __init__(self, outcomes: list[PmCockpitEvidence | Exception]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[str] = []
+
+    def evidence(self, project_id: str) -> PmCockpitEvidence:
+        self.calls.append(project_id)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _evidence(project_id: str = "SW-2026-008") -> PmCockpitEvidence:
+    return PmCockpitEvidence(
+        project_id=project_id,
+        read_set=(),
+        work_graph=(),
+        checkpoints=(),
+        verification_evidence=(),
+        status_note="只读。",
+        focus=PmCockpitFocus(
+            mission_id="MISSION-001", work_id="WORK-001", run_id="RUN-001", run_state="执行中"
+        ),
+    )
+
+
+def _evidence_bridge(
+    tmp_path: Path, outcomes: list[PmCockpitEvidence | Exception]
+) -> tuple[PmCockpitBridge, _EvidenceService, _HoldingThreadPool, list[dict[str, object]]]:
+    service = _EvidenceService(outcomes)
+    pool = _HoldingThreadPool()
+    bridge = PmCockpitBridge(
+        str(tmp_path),
+        service=cast(PmCockpitService, service),
+        thread_pool=cast(QThreadPool, pool),
+    )
+    finished: list[dict[str, object]] = []
+    bridge.evidenceFinished.connect(lambda response: finished.append(response))
+    return bridge, service, pool, finished
+
+
+def test_request_evidence_rejects_a_blank_project_without_queueing_anything(
+    tmp_path: Path,
+) -> None:
+    bridge, service, pool, finished = _evidence_bridge(tmp_path, [_evidence()])
+
+    result = bridge.requestEvidence("   ")
+
+    assert result == {"accepted": False, "busy": False, "message": "未找到要查看证据的项目。"}
+    assert pool.worker is None
+    assert service.calls == []
+    assert finished == []
+
+
+def test_request_evidence_is_background_one_at_a_time_and_finishes_exactly_once(
+    tmp_path: Path,
+) -> None:
+    bridge, service, pool, finished = _evidence_bridge(tmp_path, [_evidence()])
+
+    first = bridge.requestEvidence(" SW-2026-008 ")
+    overlap = bridge.requestEvidence("SW-2026-008")
+
+    assert first == {"accepted": True, "busy": True, "message": "正在读取证据。"}
+    assert overlap == {"accepted": False, "busy": True, "message": "证据正在读取，请稍候。"}
+    assert service.calls == []
+    assert pool.worker is not None
+    bridge._poll_evidence_worker()
+    assert finished == []
+    pool.worker.run()
+    bridge._poll_evidence_worker()
+    bridge._poll_evidence_worker()
+
+    assert service.calls == ["SW-2026-008"]
+    assert len(finished) == 1
+    assert finished[0]["success"] is True
+    assert finished[0]["project_id"] == "SW-2026-008"
+    payload = cast(dict[str, object], finished[0]["evidence"])
+    assert cast(dict[str, object], payload["focus"])["run_id"] == "RUN-001"
+    assert bridge.requestEvidence("SW-2026-008")["accepted"] is True
+
+
+def test_evidence_failures_never_expose_exception_text_or_paths(tmp_path: Path) -> None:
+    secret = f"boom at {tmp_path} secret-detail"
+    bridge, _, pool, finished = _evidence_bridge(
+        tmp_path, [PmCockpitError("该项目不在工作空间项目清单中。"), RuntimeError(secret)]
+    )
+
+    assert bridge.requestEvidence("A-1")["accepted"] is True
+    assert pool.worker is not None
+    pool.worker.run()
+    bridge._poll_evidence_worker()
+    assert bridge.requestEvidence("A-2")["accepted"] is True
+    pool.worker.run()
+    bridge._poll_evidence_worker()
+
+    assert finished[0] == {
+        "success": False,
+        "project_id": "A-1",
+        "evidence": {},
+        "message": "该项目不在工作空间项目清单中。",
+    }
+    assert finished[1]["success"] is False
+    assert finished[1]["message"] == "无法读取证据。"
+    assert "secret-detail" not in json.dumps(finished)
+    assert str(tmp_path) not in json.dumps(finished, ensure_ascii=False)
+
+
+def test_evidence_pool_refusal_clears_the_busy_flag(tmp_path: Path) -> None:
+    class _RefusingPool:
+        def start(self, worker: QRunnable, priority: int = 0) -> None:
+            del worker, priority
+            raise RuntimeError("pool is shut down")
+
+    service = _EvidenceService([_evidence()])
+    bridge = PmCockpitBridge(
+        str(tmp_path),
+        service=cast(PmCockpitService, service),
+        thread_pool=cast(QThreadPool, _RefusingPool()),
+    )
+
+    result = bridge.requestEvidence("SW-2026-008")
+
+    assert result["accepted"] is False
+    assert result["busy"] is False
+    assert "未能进入后台" in str(result["message"])
+    assert bridge._evidence_worker is None
+
+
+def test_evidence_result_is_suppressed_after_shutdown(tmp_path: Path) -> None:
+    bridge, _, pool, finished = _evidence_bridge(tmp_path, [_evidence()])
+
+    assert bridge.requestEvidence("SW-2026-008")["accepted"] is True
+    assert pool.worker is not None
+    bridge.stopSnapshotRefresh()
+    pool.worker.run()
+    bridge._poll_evidence_worker()
+
+    assert finished == []
+    assert bridge._evidence_worker is None
+    refused = bridge.requestEvidence("SW-2026-008")
+    assert refused == {"accepted": False, "busy": False, "message": "驾驶舱正在关闭。"}
+
+
+def test_request_evidence_reads_the_real_store_and_a_reopened_bridge_sees_the_same_run(
+    tmp_path: Path,
+) -> None:
+    _core_registry(tmp_path)
+    _seed_authorized_mission(tmp_path)
+    expected = {
+        "mission_id": "MISSION-COCKPIT-001",
+        "work_id": "WORK-COCKPIT-001",
+        "run_id": "RUN-COCKPIT-001",
+        "run_state": "已授权",
+    }
+    seen: list[dict[str, object]] = []
+    for _ in range(2):
+        pool = _HoldingThreadPool()
+        bridge = PmCockpitBridge(str(tmp_path), thread_pool=cast(QThreadPool, pool))
+        finished: list[dict[str, object]] = []
+        bridge.evidenceFinished.connect(lambda response, sink=finished: sink.append(response))
+        assert bridge.requestEvidence("SW-2026-008")["accepted"] is True
+        assert pool.worker is not None
+        pool.worker.run()
+        bridge._poll_evidence_worker()
+        assert len(finished) == 1 and finished[0]["success"] is True
+        seen.append(cast(dict[str, object], finished[0]["evidence"]))
+        del bridge
+    assert seen[0]["focus"] == seen[1]["focus"] == expected
+    assert cast(dict[str, object], seen[1]["resume"])["user_action"] == "CONFIRM_START"
+    assert "lease" not in json.dumps(seen).lower()
+
+
+def test_request_evidence_for_an_unregistered_project_fails_with_the_service_message(
+    tmp_path: Path,
+) -> None:
+    _registry(tmp_path)
+    pool = _HoldingThreadPool()
+    bridge = PmCockpitBridge(str(tmp_path), thread_pool=cast(QThreadPool, pool))
+    finished: list[dict[str, object]] = []
+    bridge.evidenceFinished.connect(lambda response: finished.append(response))
+
+    assert bridge.requestEvidence("UNKNOWN-001")["accepted"] is True
+    assert pool.worker is not None
+    pool.worker.run()
+    bridge._poll_evidence_worker()
+
+    assert finished[0]["success"] is False
+    assert "不在工作空间项目清单" in str(finished[0]["message"])

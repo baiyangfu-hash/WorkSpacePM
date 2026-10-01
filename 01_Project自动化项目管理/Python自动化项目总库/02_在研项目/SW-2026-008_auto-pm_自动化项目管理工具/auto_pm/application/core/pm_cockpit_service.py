@@ -28,13 +28,28 @@ from auto_pm.contracts.pm_cockpit import (
     PmCockpitActivity,
     PmCockpitCheckpointEvidence,
     PmCockpitEvidence,
+    PmCockpitEvidenceCurrency,
+    PmCockpitFocus,
     PmCockpitProjectCard,
+    PmCockpitResume,
+    PmCockpitResumeState,
     PmCockpitSnapshot,
     PmCockpitWorkNode,
 )
 from auto_pm.contracts.pm_facade import PmConfirmationCard
 from auto_pm.contracts.workspace_context import WorkspaceProjectMapping, WorkspaceRegistry
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+
+_TERMINAL_MISSION_STATES = frozenset(
+    {MissionState.ACCEPTED, MissionState.CLOSED, MissionState.CANCELLED}
+)
+_UNVERIFIABLE_REASON = "无法核验验收证据：读取失败，未做任何修复。"
+_REASON_LIMIT = 200
+
+
+def _clip(text: str) -> str:
+    """Bound a user-facing reason to the contract limit without altering short text."""
+    return text if len(text) <= _REASON_LIMIT else text[: _REASON_LIMIT - 1] + "…"
 
 
 class PmCockpitError(RuntimeError):
@@ -119,6 +134,20 @@ class PmCockpitService:
             )
 
         mission = self._primary_mission(facts.missions)
+        work = self._primary_work(mission, facts.works)
+        run = (
+            self._primary_run(facts.runs_by_work.get(work.work_id, ()))
+            if mission and work
+            else None
+        )
+        focus = PmCockpitFocus(
+            mission_id=mission.mission_id if mission else "",
+            work_id=work.work_id if mission and work else "",
+            run_id=run.run_id if run else "",
+            run_state=self._state_label(run.state.value) if run else "",
+        )
+        currency, currency_reason = self._evidence_currency(mission)
+        resume = self._resume(mission, work, run, facts, currency, currency_reason)
         graph = tuple(
             PmCockpitWorkNode(
                 work_id=work.work_id,
@@ -138,6 +167,8 @@ class PmCockpitService:
                 summary=item.summary,
                 evidence=item.evidence,
                 created_at=item.created_at,
+                run_id=item.run_id,
+                is_current_run=bool(focus.run_id) and item.run_id == focus.run_id,
             )
             for item in facts.checkpoints
         )
@@ -155,6 +186,10 @@ class PmCockpitService:
             checkpoints=checkpoints,
             verification_evidence=verification,
             status_note="证据来自不可变只读连续性记录；未读取或展示执行租约。",
+            focus=focus,
+            evidence_currency=currency,
+            evidence_currency_reason=currency_reason,
+            resume=resume,
         )
 
     def confirm_start(self, mission_id: str) -> PmConfirmationCard:
@@ -381,6 +416,107 @@ class PmCockpitService:
             tone=tone,
             failure_code=failure_code,
         )
+
+    def _evidence_currency(
+        self, mission: Mission | None
+    ) -> tuple[PmCockpitEvidenceCurrency, str]:
+        """Judge evidence currency only at the acceptance gate, by the facade's own checks."""
+        not_applicable = PmCockpitEvidenceCurrency.NOT_APPLICABLE
+        if mission is None:
+            return not_applicable, "暂无进行中的需求。"
+        if mission.state in _TERMINAL_MISSION_STATES:
+            return not_applicable, "该需求已结束，证据仅供追溯。"
+        if mission.state is not MissionState.ACCEPTANCE_PENDING:
+            return not_applicable, "尚未进入验收阶段，暂无需核验。"
+        try:
+            reason = PmFacadeService(self._workspace_root).acceptance_gate_reason(
+                mission.mission_id
+            )
+        except PmFacadeError as error:
+            return PmCockpitEvidenceCurrency.NOT_CURRENT, _clip(str(error))
+        except (ContinuityStoreError, sqlite3.Error, OSError, ValueError):
+            return PmCockpitEvidenceCurrency.NOT_CURRENT, _UNVERIFIABLE_REASON
+        if reason:
+            return PmCockpitEvidenceCurrency.NOT_CURRENT, _clip(reason)
+        return PmCockpitEvidenceCurrency.CURRENT, ""
+
+    def _resume(
+        self,
+        mission: Mission | None,
+        work: WorkItem | None,
+        run: RunItem | None,
+        facts: _ProjectFacts,
+        currency: PmCockpitEvidenceCurrency,
+        currency_reason: str,
+    ) -> PmCockpitResume:
+        """Return the single legal next step; never a way to start or restart anything."""
+        state = PmCockpitResumeState
+        action = CockpitUserAction
+
+        def resume(
+            value: PmCockpitResumeState, user_action: CockpitUserAction, reason: str
+        ) -> PmCockpitResume:
+            return PmCockpitResume(state=value, user_action=user_action, reason=_clip(reason))
+
+        if mission is None or mission.state in _TERMINAL_MISSION_STATES:
+            return resume(state.NO_ACTIVE_WORK, action.NONE, "暂无进行中的需求。")
+        if self._is_blocked(mission, work, facts.runs_by_work):
+            return resume(
+                state.NEEDS_REVIEW,
+                action.REVIEW_ESCALATION,
+                "存在需要您决策的阻塞事项；不会自动重复启动。",
+            )
+        if mission.state is MissionState.AWAITING_APPROVAL:
+            return resume(
+                state.WAITING_FOR_USER,
+                action.CONFIRM_START,
+                "等待您确认开工；确认前不会创建或启动任何执行。",
+            )
+        if mission.state is MissionState.DRAFT:
+            return resume(state.NO_ACTIVE_WORK, action.NONE, "需求仍在准备阶段，尚无可执行内容。")
+        if mission.state is MissionState.ACCEPTANCE_PENDING:
+            if currency is PmCockpitEvidenceCurrency.CURRENT:
+                return resume(
+                    state.WAITING_FOR_USER,
+                    action.CONFIRM_ACCEPTANCE,
+                    "验证证据与当前内容一致，可确认最终验收。",
+                )
+            return resume(
+                state.NEEDS_REVIEW,
+                action.REVIEW_ESCALATION,
+                f"验收证据不能确认：{currency_reason}",
+            )
+        if mission.state is MissionState.ACTIVE:
+            return self._resume_active(run, facts)
+        return resume(
+            state.NEEDS_REVIEW,
+            action.REVIEW_ESCALATION,
+            "当前状态无法确认，已保留现场；请向 PM 说明。",
+        )
+
+    @staticmethod
+    def _resume_active(run: RunItem | None, facts: _ProjectFacts) -> PmCockpitResume:
+        monitoring = (PmCockpitResumeState.MONITORING, CockpitUserAction.NONE)
+        review = (PmCockpitResumeState.NEEDS_REVIEW, CockpitUserAction.REVIEW_ESCALATION)
+        if run is None or run.state is RunState.SUCCEEDED:
+            state, action = monitoring
+            reason = "已授权，等待执行或验证流转，无需操作。"
+        elif run.state is RunState.READY:
+            state, action = monitoring
+            reason = "执行正在启动，无需操作。"
+        elif run.state is RunState.PENDING:
+            state, action = review
+            reason = "执行结果仍待核验；为避免重复执行，不会自动重试。"
+        elif run.state in {RunState.FAILED, RunState.CANCELLED}:
+            state, action = review
+            reason = "最近一次执行未完成；需要您决定是否重新授权，不会自动重试。"
+        elif run.run_id in facts.started_run_ids:
+            state, action = monitoring
+            reason = "执行已启动，驾驶舱正在处理，无需操作。"
+        else:
+            state, action = review
+            reason = "已有执行记录，但无法证明进程已启动；为避免重复执行，不会自动重启。"
+        return PmCockpitResume(state=state, user_action=action, reason=_clip(reason))
 
     def _empty_evidence(self, project_id: str, note: str) -> PmCockpitEvidence:
         return PmCockpitEvidence(

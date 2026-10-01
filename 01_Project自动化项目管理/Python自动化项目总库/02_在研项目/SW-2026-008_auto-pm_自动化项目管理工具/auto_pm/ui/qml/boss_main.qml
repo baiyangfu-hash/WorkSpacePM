@@ -32,13 +32,17 @@ ApplicationWindow {
         }
     }
 
+    readonly property string evidenceLoadingMessage: "正在读取证据…"
+
     function showEvidence(projectId) {
-        var response = pmCockpitBridge.loadEvidence(projectId)
-        if (response.success) {
-            evidenceDrawer.openEvidence(response.evidence)
-        } else {
-            statusMessage = response.message || "无法读取证据。"
+        if (typeof pmCockpitBridge === "undefined") {
+            statusMessage = "驾驶舱桥接尚未连接。"
+            return
         }
+        var response = pmCockpitBridge.requestEvidence(projectId)
+        statusMessage = response.accepted
+            ? evidenceLoadingMessage
+            : (response.message || "无法读取证据。")
     }
 
     Views.BossCockpitView {
@@ -79,6 +83,15 @@ ApplicationWindow {
                 root.statusMessage = ""
             } else {
                 root.statusMessage = response.message || "状态刷新失败；已保留上次可信结果。"
+            }
+        }
+        function onEvidenceFinished(response) {
+            if (response.success) {
+                evidenceDrawer.openEvidence(response.evidence)
+                if (root.statusMessage === root.evidenceLoadingMessage)
+                    root.statusMessage = ""
+            } else {
+                root.statusMessage = response.message || "无法读取证据。"
             }
         }
         function onStartFinished(missionId, success, message) {

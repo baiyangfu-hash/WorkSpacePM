@@ -664,6 +664,22 @@ class PmFacadeService:
             ("close",),
         )
 
+    def acceptance_gate_reason(self, mission_id: str) -> str:
+        """Explain, read-only, why final acceptance is not yet allowed.
+
+        Returns an empty string only when the very checks that ``accept`` applies
+        would pass; otherwise returns the same user-facing reason ``accept`` would
+        raise.  It never writes Mission, Work, Run, Checkpoint or lease state.
+        """
+        mission = self._mission(mission_id)
+        if mission.state is not MissionState.ACCEPTANCE_PENDING:
+            return "当前 Mission 尚未到达用户验收门"
+        try:
+            self._require_current_acceptance_checkpoint(mission)
+        except PmFacadeError as error:
+            return str(error)
+        return ""
+
     def _require_current_acceptance_checkpoint(self, mission: Mission) -> None:
         """Require the newest Run to carry current, passing quality evidence.
 

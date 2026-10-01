@@ -6,6 +6,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1174,3 +1175,171 @@ def test_start_approved_mission_keeps_generated_lease_inside_backend(
     assert isinstance(captured["lease_token"], str)
     assert len(captured["lease_token"]) >= 32
     assert captured["lease_token_environment"] == "AUTO_PM_EXECUTION_LEASE_TOKEN"
+
+
+def _gate_event_count(root: Path) -> int:
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as connection:
+        return int(connection.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+
+
+def _move_to_acceptance_pending(missions: MissionService, key: str) -> None:
+    pending = missions.get("MISSION-C04-001")
+    missions.transition(
+        mission_id=pending.mission_id,
+        expected_version=pending.version,
+        new_state=MissionState.ACCEPTANCE_PENDING,
+        root_work_id=pending.root_work_id,
+        idempotency_key=key,
+    )
+
+
+def test_acceptance_gate_reason_reports_a_mission_that_is_not_at_the_gate(
+    tmp_path: Path,
+) -> None:
+    _, facade, _ = _verified_acceptance_ready(tmp_path)
+    before = _gate_event_count(tmp_path)
+
+    reason = facade.acceptance_gate_reason("MISSION-C04-001")
+
+    assert reason == "当前 Mission 尚未到达用户验收门"
+    assert _gate_event_count(tmp_path) == before
+
+
+def test_acceptance_gate_reason_is_empty_only_when_accept_would_pass(tmp_path: Path) -> None:
+    missions, facade, _ = _verified_acceptance_ready(tmp_path)
+    _move_to_acceptance_pending(missions, "c04-gate-reason-current")
+    before = _gate_event_count(tmp_path)
+
+    assert facade.acceptance_gate_reason("MISSION-C04-001") == ""
+    assert _gate_event_count(tmp_path) == before
+    assert facade._store.get_run("RUN-C04-001").state is RunState.VERIFYING
+    assert missions.get("MISSION-C04-001").state is MissionState.ACCEPTANCE_PENDING
+    assert facade.accept("MISSION-C04-001").mission_state is MissionState.ACCEPTED
+
+
+def test_acceptance_gate_reason_matches_the_accept_refusal_after_content_changes(
+    tmp_path: Path,
+) -> None:
+    missions, facade, _ = _verified_acceptance_ready(tmp_path)
+    (tmp_path / "project" / "auto_pm" / "core" / "target.py").write_text(
+        "def value() -> int:\n    return 2\n", encoding="utf-8"
+    )
+    _move_to_acceptance_pending(missions, "c04-gate-reason-stale")
+    before = _gate_event_count(tmp_path)
+
+    reason = facade.acceptance_gate_reason("MISSION-C04-001")
+
+    with pytest.raises(PmFacadeError) as refusal:
+        facade.accept("MISSION-C04-001")
+    assert reason
+    assert reason == str(refusal.value)
+    assert "证据" in reason
+    assert _gate_event_count(tmp_path) == before
+
+
+def test_acceptance_gate_reason_matches_the_accept_refusal_when_the_run_failed(
+    tmp_path: Path,
+) -> None:
+    missions, facade, execution = _verified_acceptance_ready(tmp_path)
+    execution.transition_run(
+        "RUN-C04-001",
+        RunState.FAILED,
+        "c04-test",
+        "c04-test-lease",
+        "c04-gate-reason-failed",
+    )
+    _move_to_acceptance_pending(missions, "c04-gate-reason-failed-pending")
+
+    reason = facade.acceptance_gate_reason("MISSION-C04-001")
+
+    with pytest.raises(PmFacadeError) as refusal:
+        facade.accept("MISSION-C04-001")
+    assert reason == str(refusal.value)
+    assert "Run" in reason
+
+
+def test_acceptance_gate_reason_requires_a_checkpoint_on_the_latest_run(
+    tmp_path: Path,
+) -> None:
+    missions, facade = _setup(tmp_path)
+    facade.plan("MISSION-PM-001")
+    facade.approve("MISSION-PM-001", "WORK-PM-001")
+    active = missions.get("MISSION-PM-001")
+    missions.transition(
+        mission_id=active.mission_id,
+        expected_version=active.version,
+        new_state=MissionState.ACCEPTANCE_PENDING,
+        root_work_id=active.root_work_id,
+        idempotency_key="gate-reason-no-run",
+    )
+
+    reason = facade.acceptance_gate_reason("MISSION-PM-001")
+
+    assert "Run" in reason
+    with pytest.raises(PmFacadeError) as refusal:
+        facade.accept("MISSION-PM-001")
+    assert reason == str(refusal.value)
+
+
+def _unverified_run_ready(root: Path) -> tuple[MissionService, PmFacadeService, ContinuityExecutionService]:
+    """Mission at the acceptance gate whose only Run is RUNNING, without any Checkpoint."""
+    missions, facade = _setup(root)
+    (root / ".gitignore").write_text(".auto-pm/\n__pycache__/\n", encoding="utf-8")
+    (root / "pm.py").write_text("VALUE = 1\n", encoding="utf-8")
+    facade.plan("MISSION-PM-001")
+    facade.approve("MISSION-PM-001", "WORK-PM-001")
+    head = _commit_baseline(root)
+    execution = ContinuityExecutionService(root, store=facade._store)
+    execution.start_run(
+        run_id="RUN-GATE-001",
+        work_id="WORK-PM-001",
+        executor_id="gate-test",
+        adapter="test",
+        owned_paths=["pm.py"],
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+        git_head=head,
+        worktree_path=str(root),
+        lease_token="gate-lease",
+        lease_seconds=900,
+        idempotency_key="gate-run-create",
+    )
+    execution.transition_run(
+        "RUN-GATE-001", RunState.RUNNING, "gate-test", "gate-lease", "gate-run-running"
+    )
+    active = missions.get("MISSION-PM-001")
+    missions.transition(
+        mission_id=active.mission_id,
+        expected_version=active.version,
+        new_state=MissionState.ACCEPTANCE_PENDING,
+        root_work_id=active.root_work_id,
+        idempotency_key="gate-pending",
+    )
+    return missions, facade, execution
+
+
+def test_acceptance_gate_reason_requires_the_latest_run_to_be_verifying(tmp_path: Path) -> None:
+    _, facade, _ = _unverified_run_ready(tmp_path)
+    before = _gate_event_count(tmp_path)
+
+    reason = facade.acceptance_gate_reason("MISSION-PM-001")
+
+    with pytest.raises(PmFacadeError) as refusal:
+        facade.accept("MISSION-PM-001")
+    assert reason == str(refusal.value)
+    assert "VERIFYING" in reason
+    assert _gate_event_count(tmp_path) == before
+
+
+def test_acceptance_gate_reason_requires_a_checkpoint_on_a_verifying_run(tmp_path: Path) -> None:
+    _, facade, execution = _unverified_run_ready(tmp_path)
+    execution.transition_run(
+        "RUN-GATE-001", RunState.VERIFYING, "gate-test", "gate-lease", "gate-run-verifying"
+    )
+
+    reason = facade.acceptance_gate_reason("MISSION-PM-001")
+
+    with pytest.raises(PmFacadeError) as refusal:
+        facade.accept("MISSION-PM-001")
+    assert reason == str(refusal.value)
+    assert "Checkpoint" in reason

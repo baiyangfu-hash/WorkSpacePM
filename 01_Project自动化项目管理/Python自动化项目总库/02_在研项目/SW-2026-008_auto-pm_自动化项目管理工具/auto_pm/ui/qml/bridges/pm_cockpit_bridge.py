@@ -9,7 +9,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
-from auto_pm.contracts.pm_cockpit import PmCockpitSnapshot
+from auto_pm.contracts.pm_cockpit import PmCockpitEvidence, PmCockpitSnapshot
 from auto_pm.contracts.pm_facade import PmIntent
 from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
@@ -65,11 +65,36 @@ class _SnapshotWorker(QRunnable):
             self.done = True
 
 
+class _EvidenceWorker(QRunnable):
+    """Read one project's evidence drawer data away from the QML main thread."""
+
+    def __init__(self, service: PmCockpitService, project_id: str) -> None:
+        super().__init__()
+        self._service = service
+        self.project_id = project_id
+        self.setAutoDelete(False)
+        self.result: PmCockpitEvidence | None = None
+        self.error = ""
+        self.done = False
+
+    def run(self) -> None:
+        try:
+            self.result = self._service.evidence(self.project_id)
+        except PmCockpitError as error:
+            self.error = str(error) or "无法读取证据。"
+        except Exception:  # noqa: BLE001 - UI must never receive exception text or paths
+            log.exception("Cockpit evidence read failed: %s", self.project_id)
+            self.error = "无法读取证据。"
+        finally:
+            self.done = True
+
+
 class PmCockpitBridge(QObject):
     """Expose the planning draft and explicit user confirmations to QML."""
 
     startFinished = Signal(str, bool, str)
     snapshotFinished = Signal(cast(type[object], "QVariant"))
+    evidenceFinished = Signal(cast(type[object], "QVariant"))
 
     def __init__(
         self,
@@ -95,6 +120,10 @@ class PmCockpitBridge(QObject):
         self._start_poll_timer.timeout.connect(self._poll_start_workers)
         self._snapshot_worker: _SnapshotWorker | None = None
         self._snapshot_delivery_enabled = True
+        self._evidence_worker: _EvidenceWorker | None = None
+        self._evidence_poll_timer = QTimer(self)
+        self._evidence_poll_timer.setInterval(50)
+        self._evidence_poll_timer.timeout.connect(self._poll_evidence_worker)
         self._snapshot_poll_timer = QTimer(self)
         self._snapshot_poll_timer.setInterval(50)
         self._snapshot_poll_timer.timeout.connect(self._poll_snapshot_worker)
@@ -147,8 +176,33 @@ class PmCockpitBridge(QObject):
         self._snapshot_poll_timer.stop()
 
     @Slot(str, result="QVariant")
+    def requestEvidence(self, project_id: str) -> dict[str, Any]:
+        """Queue at most one read-only evidence task; the result arrives via evidenceFinished."""
+        project_id = project_id.strip()
+        if not project_id:
+            return {"accepted": False, "busy": False, "message": "未找到要查看证据的项目。"}
+        if not self._snapshot_delivery_enabled:
+            return {"accepted": False, "busy": False, "message": "驾驶舱正在关闭。"}
+        if self._evidence_worker is not None:
+            return {"accepted": False, "busy": True, "message": "证据正在读取，请稍候。"}
+        worker = _EvidenceWorker(self._service, project_id)
+        self._evidence_worker = worker
+        try:
+            self._thread_pool.start(worker)
+        except RuntimeError as error:
+            self._evidence_worker = None
+            return {
+                "accepted": False,
+                "busy": False,
+                "message": f"证据读取未能进入后台：{error}",
+            }
+        if not self._evidence_poll_timer.isActive():
+            self._evidence_poll_timer.start()
+        return {"accepted": True, "busy": True, "message": "正在读取证据。"}
+
+    @Slot(str, result="QVariant")
     def loadEvidence(self, project_id: str) -> dict[str, Any]:
-        """Load the selected card's bounded evidence drawer."""
+        """Synchronous legacy API for non-QML callers; QML must use requestEvidence."""
         try:
             evidence = self._service.evidence(project_id)
         except PmCockpitError as error:
@@ -293,5 +347,29 @@ class PmCockpitBridge(QObject):
             "message": "",
         })
 
+    def _poll_evidence_worker(self) -> None:
+        worker = self._evidence_worker
+        if worker is None or not worker.done:
+            return
+        self._evidence_worker = None
+        self._evidence_poll_timer.stop()
+        if not self._snapshot_delivery_enabled:
+            return
+        if worker.result is None:
+            self.evidenceFinished.emit({
+                "success": False,
+                "project_id": worker.project_id,
+                "evidence": {},
+                "message": worker.error or "无法读取证据。",
+            })
+            return
+        self.evidenceFinished.emit({
+            "success": True,
+            "project_id": worker.project_id,
+            "evidence": worker.result.model_dump(mode="json"),
+            "message": "",
+        })
+
     def _disable_snapshot_delivery(self, *_args: object) -> None:
+        self._evidence_poll_timer.stop()
         self.stopSnapshotRefresh()
