@@ -207,11 +207,13 @@ class PmClosureService:
         preparation = self.get(closure_id)
         try:
             evidence = self._change_substance_evidence(preparation)
+            facts = self._change_facts(preparation)
             return SubstanceInjector.inject_closure_evidence(
                 self._workspace_root,
                 change_number=preparation.closure.change_id,
                 target_path=preparation.outbox.target_path,
                 evidence=evidence,
+                change_facts=facts,
             )
         except (ValueError, TypeError) as error:
             raise PmClosureError(str(error)) from error
@@ -312,6 +314,27 @@ class PmClosureService:
         ):
             raise PmClosureError("Closure state、step 与 outbox identity 不一致")
         return result
+
+    def _change_facts(self, preparation: ClosurePreparation) -> dict[str, str]:
+        """Read the verified lineage facts used to complete a generated CHG body."""
+
+        closure = preparation.closure
+        try:
+            mission = self._store.get_mission(closure.mission_id)
+            work = self._store.get_work(closure.work_id)
+            run = self._store.get_run(closure.run_id)
+        except ContinuityStoreError as error:
+            raise PmClosureError(str(error)) from error
+        facts = {
+            "baseline_ref": run.git_head[:12],
+            "scope_files": "\n".join(work.scope_paths),
+            "objective": mission.objective,
+            "acceptance": "\n".join(mission.acceptance_criteria),
+            "checkpoint_id": closure.checkpoint_id,
+        }
+        if any(not value.strip() for value in facts.values()):
+            raise PmClosureError("Closure 缺少可写入变更单的事实")
+        return facts
 
     @staticmethod
     def _change_substance_evidence(preparation: ClosurePreparation) -> dict[str, str]:

@@ -1,9 +1,11 @@
 """单元测试：变更单实质内容防御门禁与自动注入引擎（Substance Control & Injection）"""
 
 import json
+from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
-from typing import cast
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from auto_pm.change.constants import ChangeRequest, TransitionGuardError
@@ -11,7 +13,7 @@ from auto_pm.change.constants import ChangeRequest, TransitionGuardError
 from auto_pm.application.core.pm_closure_service import PmClosureError, PmClosureService
 from auto_pm.domain.change.guard_checker import TransitionGuardChecker
 from auto_pm.domain.change.substance_checker import SubstanceChecker
-from auto_pm.domain.change.substance_injector import SubstanceInjector
+from auto_pm.domain.change.substance_injector import SubstanceInjectionError, SubstanceInjector
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 
 
@@ -346,6 +348,17 @@ class _ClosureStore:
         assert closure_id == self._payload["closure"]["closure_id"]
         return self._payload
 
+    def get_mission(self, mission_id: str) -> Any:
+        return SimpleNamespace(
+            objective="Fix add()", acceptance_criteria=("add(2, 3) == 5",)
+        )
+
+    def get_work(self, work_id: str) -> Any:
+        return SimpleNamespace(scope_paths=("SW-TEST-001/src/calc.py",))
+
+    def get_run(self, run_id: str) -> Any:
+        return SimpleNamespace(git_head="8b7f199a527e5b6f0c1d2e3f4a5b6c7d8e9f0a1b")
+
 
 def _write_closure_chg(root: Path, change_id: str) -> Path:
     directory = root / "changes"
@@ -371,3 +384,211 @@ def _write_closure_chg(root: Path, change_id: str) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+_TEMPLATE_CHG = """# {change_id}
+
+## 5. 变更内容
+
+### 5.1 变更前（当前状态）
+
+| 项目 | 当前值/描述 |
+|------|-----------|
+| 涉及文件/交付物 | （待填写） |
+| 关键参数/配置 | （待填写） |
+
+### 5.2 变更后（目标状态）
+
+| 项目 | 目标值/描述 |
+|------|-----------|
+| 涉及文件/交付物 | （待填写） |
+| 关键参数/配置 | （待填写） |
+
+## 6. 变更影响分析
+
+### 6.1 项目约束影响（PMBOK五大约束）
+
+| 约束维度 | 影响程度 | 影响描述 | 应对措施 |
+|---------|:--------:|----------|----------|
+| **范围(Scope)** | □无 □低 □中 □高 |  |  |
+| **进度(Schedule)** | □无 □低 □中 □高 | 延迟___天 |  |
+
+**缓解措施**（风险应对策略）：
+（待填写）
+
+### 6.3 变更传播链（跨领域变更必填！）
+
+**本次变更传播链:**
+```
+[___________] → [___________] → [___________]
+     ↓               ↓               ↓
+  (领域)          (领域)           (领域)
+```
+
+**关联变更单清单:**
+| 关联单号 | 关联领域 | 关联原因 | 状态 |
+|----------|----------|----------|:----:|
+| CHG-______ |  |  | □待发起 □已发起 □已完成 |
+
+## 8. 变更审批
+
+### 8.2 审批结论
+| 结论 | □ 通过 □ 有条件通过(附条件) □ 驳回(附原因) □ 拒绝(附原因) |
+|------|----------------------------------------------------------|
+
+## 9. 变更实施记录
+
+| 实施日期 | 实施人 | 实施任务 | 实施内容摘要 | 实施结果 | 备注 |
+|----------|--------|----------|-------------|----------|------|
+| | | | | | |
+
+## 10. 变更验证
+
+### 10.1 验证项清单
+
+| # | 验证项 | 验证标准 | 预期结果 | 实际结果 | 状态 | 验证人 | 验证日期 |
+|---|--------|----------|----------|----------|------|--------|----------|
+| | | | | | | | |
+
+### 10.3 验证结论
+| 结论 | □ 全部通过,可关闭 □ 部分不通过,需返工 □ 需补充验证 |
+|------|-------------------------------------------------------|
+"""
+
+_APPROVAL_ROW = "| 结论 | □ 通过 □ 有条件通过(附条件) □ 驳回(附原因) □ 拒绝(附原因) |"
+_PLACEHOLDERS = ("（待填写）", "(待填写)", "待补充", "[在此填写", "[___________]")
+
+
+def _change_facts() -> dict[str, str]:
+    return {
+        "baseline_ref": "8b7f199a527e",
+        "scope_files": "SW-TEST-001/src/calc.py\nSW-TEST-001/tests/test_calc.py",
+        "objective": "Fix add()",
+        "acceptance": "add(2, 3) == 5\nadd(-1, 1) == 0",
+        "checkpoint_id": "CP-SW008-PMF-C05-002",
+    }
+
+
+def _write_template_chg(root: Path, change_id: str, text: str | None = None) -> Path:
+    directory = root / "changes"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{change_id}.md"
+    path.write_text((text or _TEMPLATE_CHG).format(change_id=change_id), encoding="utf-8")
+    return path
+
+
+def _inject(
+    root: Path, change_id: str, facts: dict[str, str] | None
+) -> Path:
+    return SubstanceInjector.inject_closure_evidence(
+        root,
+        change_number=change_id,
+        target_path=f"change://{change_id}",
+        evidence=_closure_evidence(change_id),
+        change_facts=facts,
+    )
+
+
+def test_template_shaped_change_is_completed_from_facts_and_replays_byte_identically(
+    tmp_path: Path,
+) -> None:
+    target = _write_template_chg(tmp_path, "CHG-SCPT-2026-281")
+
+    result = _inject(tmp_path, "CHG-SCPT-2026-281", _change_facts())
+
+    content = result.read_text(encoding="utf-8")
+    assert result == target
+    assert not [item for item in _PLACEHOLDERS if item in content]
+    assert (
+        "| 涉及文件/交付物 | 基线 8b7f199a527e 中的范围文件：<br>SW-TEST-001/src/calc.py"
+        "<br>SW-TEST-001/tests/test_calc.py |"
+    ) in content
+    assert "| 关键参数/配置 | 需求：Fix add() |" in content
+    assert (
+        "| 涉及文件/交付物 | 按批准范围修改：<br>SW-TEST-001/src/calc.py"
+        "<br>SW-TEST-001/tests/test_calc.py<br>Checkpoint CP-SW008-PMF-C05-002 |"
+    ) in content
+    assert "| 关键参数/配置 | 验收条件：add(2, 3) == 5；add(-1, 1) == 0 |" in content
+    assert "范围限定于批准的文件清单；在隔离工作树执行；" in content
+    assert "[本次变更仅涉及 SCPT 领域] → [无跨领域传播] → [无需联动]" in content
+    assert "| **验证结论** | Closure CLOSURE-0123456789ABCDEF01234567" in content
+    assert content.count("| 结论 |") == 1
+    assert _APPROVAL_ROW in content
+    assert content.count("PM-CLOSURE-EVIDENCE") == 1
+    # The stricter transition checker only objects to the untouched related-CHG list row.
+    assert all("CHG-______" in item for item in SubstanceChecker.check_placeholders(content))
+
+    replay = _inject(tmp_path, "CHG-SCPT-2026-281", _change_facts())
+    assert replay.read_text(encoding="utf-8") == content
+
+
+def test_placeholders_are_still_refused_without_facts_and_nothing_is_written(
+    tmp_path: Path,
+) -> None:
+    target = _write_template_chg(tmp_path, "CHG-SCPT-2026-282")
+    before = target.read_bytes()
+
+    with pytest.raises(SubstanceInjectionError, match="空壳或占位"):
+        _inject(tmp_path, "CHG-SCPT-2026-282", None)
+
+    assert target.read_bytes() == before
+
+
+def test_hostile_fact_text_cannot_break_the_tables_or_inject_regex_templates(
+    tmp_path: Path,
+) -> None:
+    _write_template_chg(tmp_path, "CHG-SCPT-2026-283")
+    facts = _change_facts()
+    facts["objective"] = "a | b\nc \\g<1> " + "x" * 300
+    facts["scope_files"] = "p|q.py\n\n" + "y" * 300 + ".py"
+
+    content = _inject(tmp_path, "CHG-SCPT-2026-283", facts).read_text(encoding="utf-8")
+
+    rows = [line for line in content.splitlines() if "需求：" in line]
+    assert len(rows) == 1
+    assert rows[0].count("|") == 3
+    assert "a / b c \\g<1> " in rows[0]
+    assert len(rows[0].split("需求：", 1)[1]) <= 202
+    file_rows = [line for line in content.splitlines() if "范围文件：" in line]
+    assert len(file_rows) == 1
+    assert file_rows[0].count("|") == 3
+    assert "p/q.py<br>" in file_rows[0]
+    assert "y" * 201 not in file_rows[0]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda facts: facts.pop("objective"),
+        lambda facts: facts.update({"extra": "x"}),
+        lambda facts: facts.update({"acceptance": "  "}),
+    ],
+    ids=["missing-key", "extra-key", "blank-value"],
+)
+def test_change_facts_must_be_exactly_the_agreed_non_empty_keys(
+    tmp_path: Path, mutate: Callable[[dict[str, str]], object]
+) -> None:
+    target = _write_template_chg(tmp_path, "CHG-SCPT-2026-284")
+    before = target.read_bytes()
+    facts = _change_facts()
+    mutate(facts)
+
+    with pytest.raises(SubstanceInjectionError, match="change_facts"):
+        _inject(tmp_path, "CHG-SCPT-2026-284", facts)
+
+    assert target.read_bytes() == before
+
+
+def test_a_change_without_any_conclusion_row_is_refused_without_writing(tmp_path: Path) -> None:
+    text = _TEMPLATE_CHG.replace(
+        "### 10.3 验证结论\n| 结论 | □ 全部通过,可关闭 □ 部分不通过,需返工 □ 需补充验证 |\n"
+        "|------|-------------------------------------------------------|\n",
+        "",
+    )
+    target = _write_template_chg(tmp_path, "CHG-SCPT-2026-285", text)
+    before = target.read_bytes()
+
+    with pytest.raises(SubstanceInjectionError, match="§10.3 验证结论字段"):
+        _inject(tmp_path, "CHG-SCPT-2026-285", _change_facts())
+
+    assert target.read_bytes() == before

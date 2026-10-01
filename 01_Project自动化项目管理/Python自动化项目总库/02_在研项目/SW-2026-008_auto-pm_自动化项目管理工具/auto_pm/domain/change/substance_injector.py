@@ -19,6 +19,23 @@ from auto_pm.utils.file_utils import read_file, write_file
 
 log = logging.getLogger(__name__)
 
+_CHANGE_FACT_KEYS = frozenset(
+    {"baseline_ref", "scope_files", "objective", "acceptance", "checkpoint_id"}
+)
+_FACT_LIMIT = 200
+_FILES_CELL = re.compile(r"(\| 涉及文件/交付物 \|\s*)（待填写）(\s*\|)")
+_PARAMS_CELL = re.compile(r"(\| 关键参数/配置 \|\s*)（待填写）(\s*\|)")
+_MITIGATION = re.compile(r"(\*\*缓解措施\*\*[^\n]*：\s*\n)（待填写）")
+_MITIGATION_TEXT = (
+    "范围限定于批准的文件清单；在隔离工作树执行；"
+    "经自动质量门禁（pytest/ruff/mypy）与用户最终验收后才收尾。"
+)
+_PROPAGATION_CHAIN = re.compile(r"\[___________\] → \[___________\] → \[___________\]")
+_PROPAGATION_TEXT = "[本次变更仅涉及 SCPT 领域] → [无跨领域传播] → [无需联动]"
+_CONCLUSION_ROW = re.compile(
+    r"(###\s*10\.3\s*验证结论[^\n]*\n)\|\s*(?:\*\*验证结论\*\*|结论)\s*\|[^\n]*\|"
+)
+
 
 class SubstanceInjectionError(ValueError):
     """Raised before an unsafe or unverifiable CHG mutation can occur."""
@@ -187,6 +204,7 @@ class SubstanceInjector:
         change_number: str,
         target_path: str,
         evidence: Mapping[str, str],
+        change_facts: Mapping[str, str] | None = None,
     ) -> Path:
         """Write one verified C06 evidence record to its uniquely bound CHG.
 
@@ -194,9 +212,16 @@ class SubstanceInjector:
         intentionally does not search for a fallback, alter a status, or update
         any ledger state.  Every validation completes before ``write_file`` is
         called so an invalid closure has zero CHG side effects.
+
+        ``change_facts`` (exactly the keys in ``_CHANGE_FACT_KEYS``) lets a
+        freshly generated CHG be completed from verified lineage facts: the
+        template placeholders that are still present are filled with fixed
+        sentences before the evidence rows are written.  Without facts any
+        remaining placeholder is still refused.
         """
 
         cls._validate_closure_evidence(change_number, target_path, evidence)
+        facts = cls._validate_change_facts(change_facts)
         workspace = Path(workspace_root).resolve()
         chg_file = cls._find_unique_change_file(workspace, change_number)
         original = read_file(str(chg_file))
@@ -214,8 +239,9 @@ class SubstanceInjector:
 
         implementation_row = cls._implementation_row(evidence)
         verification_row = cls._verification_row(evidence)
+        completed = original if facts is None else cls._fill_template_placeholders(original, facts)
         updated = cls._insert_table_row(
-            original,
+            completed,
             heading_pattern=r"## 9\. 变更实施记录",
             row=implementation_row,
         )
@@ -228,9 +254,8 @@ class SubstanceInjector:
             f"Closure {evidence['closure_id']} 的 Work/Run/Checkpoint/Decision/Outbox "
             "证据一致，验证通过。"
         )
-        updated, replacements = re.subn(
-            r"(\|\s*\*\*验证结论\*\*\s*\|\s*)[^|\n]*(\s*\|)",
-            rf"\g<1>{conclusion}\g<2>",
+        updated, replacements = _CONCLUSION_ROW.subn(
+            lambda match: f"{match.group(1)}| **验证结论** | {conclusion} |",
             updated,
             count=1,
         )
@@ -241,6 +266,55 @@ class SubstanceInjector:
         write_file(str(chg_file), updated)
         log.info("已写入已验证 closure 证据: %s", chg_file)
         return chg_file
+
+    @staticmethod
+    def _clean_fact(text: str) -> str:
+        collapsed = " ".join(text.split()).replace("|", "/")
+        return collapsed[:_FACT_LIMIT]
+
+    @classmethod
+    def _validate_change_facts(
+        cls, change_facts: Mapping[str, str] | None
+    ) -> dict[str, str] | None:
+        if change_facts is None:
+            return None
+        if set(change_facts) != _CHANGE_FACT_KEYS or any(
+            not isinstance(value, str) or not value.strip() for value in change_facts.values()
+        ):
+            raise SubstanceInjectionError("change_facts 字段不完整或包含未授权字段")
+        return dict(change_facts)
+
+    @staticmethod
+    def _fill_cell(pattern: re.Pattern[str], text: str, content: str) -> str:
+        def render(match: re.Match[str]) -> str:
+            return f"{match.group(1)}{text}{match.group(2)}"
+
+        return pattern.sub(render, content, count=1)
+
+    @classmethod
+    def _fill_template_placeholders(cls, content: str, facts: Mapping[str, str]) -> str:
+        """Fill only the template placeholders that exist, using fixed sentences."""
+
+        files = [cls._clean_fact(item) for item in facts["scope_files"].splitlines()]
+        files = [item for item in files if item]
+        criteria = [cls._clean_fact(item) for item in facts["acceptance"].splitlines()]
+        criteria = [item for item in criteria if item]
+        if not files or not criteria:
+            raise SubstanceInjectionError("change_facts 缺少有效的范围文件或验收条件")
+        file_cells = "<br>".join(files)
+        checkpoint = cls._clean_fact(facts["checkpoint_id"])
+        cells = (
+            (_FILES_CELL, f"基线 {cls._clean_fact(facts['baseline_ref'])} 中的范围文件：<br>{file_cells}"),
+            (_PARAMS_CELL, f"需求：{cls._clean_fact(facts['objective'])}"),
+            (_FILES_CELL, f"按批准范围修改：<br>{file_cells}<br>Checkpoint {checkpoint}"),
+            (_PARAMS_CELL, f"验收条件：{'；'.join(criteria)}"),
+        )
+        for pattern, text in cells:
+            content = cls._fill_cell(pattern, text, content)
+        content = _MITIGATION.sub(
+            lambda match: f"{match.group(1)}{_MITIGATION_TEXT}", content, count=1
+        )
+        return _PROPAGATION_CHAIN.sub(_PROPAGATION_TEXT, content, count=1)
 
     @staticmethod
     def _canonical_evidence(evidence: Mapping[str, str]) -> str:

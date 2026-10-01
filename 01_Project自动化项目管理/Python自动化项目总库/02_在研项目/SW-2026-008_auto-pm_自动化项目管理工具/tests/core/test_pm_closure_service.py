@@ -8,11 +8,13 @@ import subprocess
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from auto_pm.change.ledger_reconciler import ReconcileDiff
 from auto_pm.core.pm_closure_service import (
     ClosureCompletionState,
+    ClosurePreparation,
     ClosureState,
     ClosureStepKind,
     ClosureStepState,
@@ -23,6 +25,7 @@ from auto_pm.core.pm_closure_service import (
 
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
+from auto_pm.domain.change.substance_injector import SubstanceInjector
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 _MISSION_ID = "MISSION-C05-001"
@@ -670,3 +673,66 @@ def test_complete_closure_failure_rolls_back_every_lifecycle_transition(
             )
             == 1
         )
+
+
+def _facts_service(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[PmClosureService, ContinuityStore, ClosurePreparation, list[dict[str, Any]]]:
+    store, _ = _accepted_lineage(root)
+    service = PmClosureService(
+        root, now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC), store=store
+    )
+    preparation = service.prepare_closure(_MISSION_ID, idempotency_key="u07b-facts")
+    calls: list[dict[str, Any]] = []
+
+    def record(workspace_root: Path, **kwargs: Any) -> Path:
+        calls.append(kwargs)
+        return root / "CHG.md"
+
+    monkeypatch.setattr(SubstanceInjector, "inject_closure_evidence", record)
+    return service, store, preparation, calls
+
+
+def test_inject_prepared_change_substance_passes_the_exact_lineage_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, store, preparation, calls = _facts_service(tmp_path, monkeypatch)
+    run = store.get_run(_RUN_ID)
+
+    service.inject_prepared_change_substance(preparation.closure.closure_id)
+
+    assert len(calls) == 1
+    assert calls[0]["change_facts"] == {
+        "baseline_ref": run.git_head[:12],
+        "scope_files": "auto_pm/core/target.py",
+        "objective": "Prepare closure state without external effects.",
+        "acceptance": "The latest passing checkpoint was accepted.",
+        "checkpoint_id": _CHECKPOINT_ID,
+    }
+    assert len(run.git_head) >= 12
+
+
+def test_inject_prepared_change_substance_refuses_when_the_store_cannot_supply_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, store, preparation, calls = _facts_service(tmp_path, monkeypatch)
+
+    def unreadable(run_id: str) -> object:
+        raise ContinuityStoreError("simulated unreadable run")
+
+    monkeypatch.setattr(store, "get_run", unreadable)
+    with pytest.raises(PmClosureError, match="simulated unreadable run"):
+        service.inject_prepared_change_substance(preparation.closure.closure_id)
+    assert calls == []
+
+
+def test_inject_prepared_change_substance_refuses_empty_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, store, preparation, calls = _facts_service(tmp_path, monkeypatch)
+    work = store.get_work(_WORK_ID)
+    monkeypatch.setattr(store, "get_work", lambda work_id: work.model_copy(update={"scope_paths": ()}))
+
+    with pytest.raises(PmClosureError, match="缺少可写入变更单的事实"):
+        service.inject_prepared_change_substance(preparation.closure.closure_id)
+    assert calls == []

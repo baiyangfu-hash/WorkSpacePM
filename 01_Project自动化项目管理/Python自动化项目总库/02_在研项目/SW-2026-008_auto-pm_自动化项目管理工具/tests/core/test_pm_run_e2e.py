@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 import sqlite3
 import subprocess
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from auto_pm.change.change_service import ChangeService
+from auto_pm.change.ledger_reconciler import LedgerReconciler
 from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
 
 from auto_pm.contracts.continuity import RunState, WorkState
@@ -32,8 +34,13 @@ from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 
 if TYPE_CHECKING:
+    from auto_pm.application.core.pm_closure_service import (
+        ClosureCompletionState,
+        PmClosureService,
+    )
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 else:
+    from auto_pm.core.pm_closure_service import ClosureCompletionState, PmClosureService
     from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 
 PROJECT_ID = "SW-TEST-001"
@@ -442,3 +449,106 @@ def test_lease_token_and_paths_never_leak(
         assert outcome.mission_id not in outcome.message
         assert outcome.run_id not in outcome.message
     assert not (passing.root / ".coverage").exists()
+
+
+_CLOSURE_PLACEHOLDERS = ("（待填写）", "(待填写)", "待补充", "[在此填写", "[___________]")
+
+
+def _accepted_outcome(env: _Env) -> PmRunOutcome:
+    outcome = env.run()
+    assert outcome.verified is True
+    env.facade.accept(outcome.mission_id)
+    return outcome
+
+
+def _change_file(env: _Env) -> Path:
+    return next(env.root.glob(f"**/{env.card.change_id}.md"))
+
+
+def _change_status(path: Path) -> str:
+    match = re.search(r"^\|\s*变更状态\s*\|\s*([^|\n]*?)\s*\|", path.read_text(encoding="utf-8"), re.M)
+    assert match is not None
+    return match.group(1)
+
+
+def test_real_chain_closes_to_completed_with_a_filled_change_and_a_clean_ledger(
+    tmp_path: Path,
+) -> None:
+    env = _env(tmp_path)
+    outcome = _accepted_outcome(env)
+    change = _change_file(env)
+    status_before = _change_status(change)
+    service = PmClosureService(env.root, store=env.store)
+
+    preparation = service.prepare_closure(outcome.mission_id, idempotency_key="u07b-prepare")
+    receipt = service.complete_closure(
+        preparation.closure.closure_id, idempotency_key="u07b-complete"
+    )
+
+    assert receipt.state is ClosureCompletionState.COMPLETED
+    assert receipt.run_state is RunState.SUCCEEDED
+    assert receipt.work_state is WorkState.CLOSED
+    assert receipt.mission_state is MissionState.CLOSED
+    assert env.mission_state() is MissionState.CLOSED
+    content = change.read_text(encoding="utf-8")
+    assert not [item for item in _CLOSURE_PLACEHOLDERS if item in content]
+    conclusion = next(line for line in content.splitlines() if line.startswith("| **验证结论**"))
+    assert preparation.closure.closure_id in conclusion
+    assert outcome.checkpoint_id in content
+    assert CALC in content and CALC_TEST in content
+    assert "需求：Fix add()" in content
+    assert "验收条件：add(2, 3) == 5" in content
+    assert _change_status(change) == status_before
+    assert LedgerReconciler().reconcile(str(env.root)).is_clean
+
+
+def test_closure_replay_is_idempotent_and_leaves_the_change_untouched(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    outcome = _accepted_outcome(env)
+    change = _change_file(env)
+    service = PmClosureService(env.root, store=env.store)
+    preparation = service.prepare_closure(outcome.mission_id, idempotency_key="u07b-prepare")
+    first = service.complete_closure(
+        preparation.closure.closure_id, idempotency_key="u07b-complete"
+    )
+    content, events = change.read_bytes(), env.event_count()
+
+    second = service.complete_closure(
+        preparation.closure.closure_id, idempotency_key="u07b-complete"
+    )
+
+    assert second == first
+    assert change.read_bytes() == content
+    assert env.event_count() == events
+
+
+def test_a_change_missing_its_conclusion_section_stays_pending_and_recovers_on_retry(
+    tmp_path: Path,
+) -> None:
+    env = _env(tmp_path)
+    outcome = _accepted_outcome(env)
+    change = _change_file(env)
+    original = change.read_text(encoding="utf-8")
+    assert "### 10.3 验证结论" in original
+    change.write_text(original.replace("### 10.3 验证结论", "### 10.3 结论"), encoding="utf-8")
+    broken = change.read_bytes()
+    service = PmClosureService(env.root, store=env.store)
+    preparation = service.prepare_closure(outcome.mission_id, idempotency_key="u07b-prepare")
+    run_before = env.latest_run()
+
+    pending = service.complete_closure(
+        preparation.closure.closure_id, idempotency_key="u07b-complete"
+    )
+
+    assert pending.state is ClosureCompletionState.PENDING_SYNC
+    assert env.mission_state() is MissionState.ACCEPTED
+    assert env.latest_run() == run_before
+    assert change.read_bytes() == broken
+
+    change.write_text(original, encoding="utf-8")
+    done = service.complete_closure(
+        preparation.closure.closure_id, idempotency_key="u07b-complete"
+    )
+
+    assert done.state is ClosureCompletionState.COMPLETED
+    assert env.mission_state() is MissionState.CLOSED
