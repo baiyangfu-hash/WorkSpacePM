@@ -5,9 +5,14 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import pytest
+from auto_pm.change.ledger_reconciler import ReconcileDiff
+from auto_pm.core.pm_closure_service import PmClosureService
+from auto_pm.core.pm_cockpit_service import PmCockpitService
 from PySide6.QtCore import (
     Q_ARG,
     QMetaObject,
@@ -23,6 +28,11 @@ from PySide6.QtTest import QTest
 
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
+from tests.core.test_pm_closure_service import (
+    _accepted_lineage,
+    _lineage_states,
+    _ProjectionReconciler,
+)
 from tests.core.test_pm_cockpit_service import _registry as _core_registry
 from tests.core.test_pm_cockpit_service import _seed_authorized_mission
 
@@ -489,3 +499,217 @@ def test_boss_main_reports_an_unreadable_evidence_request_without_opening_the_dr
     assert "不在工作空间项目清单" in str(cast(QObject, window).property("statusMessage"))
     assert drawer.property("opened") is False
     bridge.stopSnapshotRefresh()
+
+
+# --- U06: pending-sync / completed states and the retry button -------------------------------
+
+
+def _items_named(item: QQuickItem, name: str) -> list[QQuickItem]:
+    found: list[QQuickItem] = []
+    for child in item.childItems():
+        if child.objectName() == name:
+            found.append(child)
+        found.extend(_items_named(child, name))
+    return found
+
+
+def _sync_card(completion_state: str, note: str = "") -> dict[str, object]:
+    return {
+        "project_name": "自动化项目管理工具",
+        "mission": "A4",
+        "milestone": "验收已记录，待同步",
+        "progress": "验收已记录，待同步",
+        "blocked": False,
+        "verification": "已保存验证证据",
+        "risk": "中：验收已记录，变更单与台账尚未同步",
+        "current_owner": "PM",
+        "next_user_action": "重试台账同步",
+        "user_action": "RETRY_SYNC" if completion_state == "PENDING_SYNC" else "NONE",
+        "mission_id": "MISSION-001",
+        "project_id": "SW-2026-008",
+        "completion_state": completion_state,
+        "completion_note": note,
+    }
+
+
+def _view_with(engine: QQmlEngine, qapp: QApplication, card: dict[str, object]) -> QQuickItem:
+    view = cast(QQuickItem, _load(engine, _QML / "views" / "BossCockpitView.qml"))
+    view.setProperty("cards", [card])
+    qapp.processEvents()
+    return view
+
+
+def test_view_offers_a_retry_only_while_the_sync_is_pending(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
+    note = "验收已记录，变更单与台账尚未同步完成；完成前不会显示为已完成。"
+    pending = _view_with(qml_engine, qapp, _sync_card("PENDING_SYNC", note))
+    completed = _view_with(qml_engine, qapp, _sync_card("COMPLETED", "已验收并完成变更单与台账同步。"))
+    untouched = _view_with(qml_engine, qapp, _sync_card("NOT_STARTED"))
+
+    pending_button = _items_named(pending, "retrySyncButton")[0]
+    assert pending_button.property("visible") is True
+    assert pending_button.property("text") == "重试同步"
+    assert pending_button.property("enabled") is True
+    assert note in _texts(pending)
+    assert _items_named(pending, "completedLabel")[0].property("visible") is False
+
+    assert _items_named(completed, "retrySyncButton")[0].property("visible") is False
+    assert _items_named(completed, "completedLabel")[0].property("visible") is True
+    assert "已完成并同步台账" in _texts(completed)
+
+    assert _items_named(untouched, "retrySyncButton")[0].property("visible") is False
+    assert _items_named(untouched, "completedLabel")[0].property("visible") is False
+
+
+def test_retry_click_emits_once_and_is_disabled_while_the_sync_runs(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
+    view = _view_with(qml_engine, qapp, _sync_card("PENDING_SYNC", "尚未同步完成"))
+    requested: list[str] = []
+    cast(Any, view).syncRetryRequested.connect(lambda mission_id: requested.append(str(mission_id)))
+    button = _items_named(view, "retrySyncButton")[0]
+
+    assert QMetaObject.invokeMethod(button, "clicked")
+    assert QMetaObject.invokeMethod(button, "clicked")
+    qapp.processEvents()
+
+    assert requested == ["MISSION-001"]
+    assert button.property("enabled") is False
+    assert button.property("text") == "正在同步…"
+
+    assert QMetaObject.invokeMethod(
+        view,
+        "setCloseBusy",
+        Qt.ConnectionType.DirectConnection,
+        Q_ARG("QVariant", "MISSION-001"),
+        Q_ARG("QVariant", False),
+    )
+    qapp.processEvents()
+    assert button.property("enabled") is True
+    assert button.property("text") == "重试同步"
+    assert QMetaObject.invokeMethod(button, "clicked")
+    assert requested == ["MISSION-001", "MISSION-001"]
+
+
+def test_pending_sync_texts_never_claim_completion_or_show_progress_numbers(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
+    view = _view_with(
+        qml_engine,
+        qapp,
+        _sync_card("PENDING_SYNC", "验收已记录，变更单与台账尚未同步完成；完成前不会显示为已完成。"),
+    )
+
+    assert _items_named(view, "completedLabel")[0].property("visible") is False
+    assert "%" not in "".join(_texts(view))
+    lowered = "".join(_texts(view)).lower()
+    assert "lease" not in lowered and "token" not in lowered
+
+
+def test_boss_main_wires_acceptance_retry_and_closure_results() -> None:
+    main_source = (_QML / "boss_main.qml").read_text(encoding="utf-8", errors="replace")
+    view_source = (_QML / "views" / "BossCockpitView.qml").read_text(
+        encoding="utf-8", errors="replace"
+    )
+
+    assert "pmCockpitBridge.confirmAcceptance(missionId)" in main_source
+    assert "response.success && response.closing" in main_source
+    assert "cockpitView.setCloseBusy(missionId, true)" in main_source
+    assert "onSyncRetryRequested: function(missionId)" in main_source
+    assert "pmCockpitBridge.retryClosure(missionId)" in main_source
+    assert "function onClosureFinished(missionId, completed, message)" in main_source
+    assert "cockpitView.setCloseBusy(missionId, false)" in main_source
+    assert "signal syncRetryRequested(string missionId)" in view_source
+    assert "if (!missionId || isCloseBusy(missionId))" in view_source
+    assert 'modelData.completion_state === "PENDING_SYNC"' in view_source
+    assert 'modelData.completion_state === "COMPLETED"' in view_source
+    assert "loadEvidence" not in main_source
+
+
+def test_boss_main_retries_the_sync_and_turns_the_card_into_completed(
+    qapp: QApplication,
+    qml_engine: QQmlEngine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _core_registry(tmp_path)
+    store, database = _accepted_lineage(tmp_path)
+    reconciler = _ProjectionReconciler(OSError("ledger unavailable"))
+    closure = PmClosureService(
+        tmp_path,
+        now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC),
+        store=store,
+        ledger_reconciler=reconciler,
+    )
+    monkeypatch.setattr(closure, "inject_prepared_change_substance", lambda _id: tmp_path / "CHG.md")
+    bridge = PmCockpitBridge(
+        str(tmp_path), service=PmCockpitService(tmp_path, store=store, closure_service=closure)
+    )
+    results: list[tuple[str, bool, str]] = []
+    bridge.closureFinished.connect(lambda m, ok, msg: results.append((m, ok, msg)))
+    qml_engine.rootContext().setContextProperty("pmCockpitBridge", bridge)
+    window = cast(QObject, _load(qml_engine, _QML / "boss_main.qml"))
+    root_item = cast(Any, window).contentItem()
+
+    def pump(until: object, rounds: int = 400) -> None:
+        for _ in range(rounds):
+            qapp.processEvents()
+            bridge._poll_snapshot_worker()
+            bridge._poll_close_workers()
+            if cast(Any, until)():
+                return
+            QTest.qWait(10)
+        raise AssertionError("condition was not reached")
+
+    def button_prop(name: str) -> object:
+        found = _items_named(root_item, "retrySyncButton")
+        return found[0].property(name) if found else None
+
+    def button() -> QQuickItem:
+        return _items_named(root_item, "retrySyncButton")[0]
+
+    assert bridge._thread_pool.waitForDone(10_000)
+    pump(lambda: button_prop("visible") is True)
+    assert QMetaObject.invokeMethod(button(), "clicked")
+    assert bridge._thread_pool.waitForDone(10_000)
+    pump(lambda: len(results) == 1)
+    assert results[0][1] is False
+    assert results[0][2] == "台账同步未完成，已保留现场；可稍后重试。"
+    assert _lineage_states(database)[2] == "ACCEPTED"
+    assert bridge._thread_pool.waitForDone(10_000)
+    pump(lambda: button_prop("enabled") is True)
+
+    reconciler.result = ReconcileDiff()
+    assert QMetaObject.invokeMethod(button(), "clicked")
+    assert bridge._thread_pool.waitForDone(10_000)
+    pump(lambda: len(results) == 2)
+    assert results[1][1] is True
+    assert bridge._thread_pool.waitForDone(10_000)
+    pump(lambda: bool(_items_named(root_item, "completedLabel"))
+         and _items_named(root_item, "completedLabel")[0].property("visible") is True)
+
+    assert button_prop("visible") is False
+    assert _lineage_states(database)[:4] == ("SUCCEEDED", "CLOSED", "CLOSED", "COMPLETED")
+    bridge.stopSnapshotRefresh()
+
+
+def test_view_renders_every_completion_state_without_qml_warnings(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
+    view = cast(QQuickItem, _load(qml_engine, _QML / "views" / "BossCockpitView.qml"))
+    legacy_card = _sync_card("NOT_STARTED")
+    del legacy_card["completion_state"]
+    del legacy_card["completion_note"]
+
+    with _QtMessages() as messages:
+        for card in (
+            _sync_card("PENDING_SYNC", "尚未同步完成"),
+            _sync_card("COMPLETED", "已验收并完成变更单与台账同步。"),
+            _sync_card("NOT_STARTED"),
+            legacy_card,
+        ):
+            view.setProperty("cards", [card])
+            qapp.processEvents()
+
+    assert not [m for m in messages if "Error" in m or "Unable" in m or "undefined" in m]

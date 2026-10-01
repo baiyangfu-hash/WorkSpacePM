@@ -24,6 +24,25 @@ class CockpitUserAction(StrEnum):
     CONFIRM_START = "CONFIRM_START"
     CONFIRM_ACCEPTANCE = "CONFIRM_ACCEPTANCE"
     REVIEW_ESCALATION = "REVIEW_ESCALATION"
+    RETRY_SYNC = "RETRY_SYNC"
+
+
+class PmCockpitCompletionState(StrEnum):
+    """Whether the accepted work has really been closed and synchronised."""
+
+    NOT_STARTED = "NOT_STARTED"
+    PENDING_SYNC = "PENDING_SYNC"
+    COMPLETED = "COMPLETED"
+
+
+class PmCockpitCompletion(BaseModel):
+    """Secret-free outcome of one closure attempt; messages are fixed sentences."""
+
+    model_config = ConfigDict(frozen=True)
+
+    mission_id: str = Field(min_length=1)
+    state: PmCockpitCompletionState
+    message: str = Field(default="", max_length=200)
 
 
 class PmCockpitEvidenceCurrency(StrEnum):
@@ -82,6 +101,8 @@ class PmCockpitProjectCard(BaseModel):
     current_owner: str
     next_user_action: str
     user_action: CockpitUserAction = CockpitUserAction.NONE
+    completion_state: PmCockpitCompletionState = PmCockpitCompletionState.NOT_STARTED
+    completion_note: str = Field(default="", max_length=200)
 
 
 class PmCockpitWorkNode(BaseModel):

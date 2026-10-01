@@ -5,16 +5,34 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, cast
 
+import pytest
+from auto_pm.change.ledger_reconciler import ReconcileDiff
+from auto_pm.core.pm_closure_service import PmClosureService
 from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from PySide6.QtCore import QRunnable, QThreadPool
 
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
-from auto_pm.contracts.pm_cockpit import PmCockpitEvidence, PmCockpitFocus, PmCockpitSnapshot
+from auto_pm.contracts.mission import MissionState
+from auto_pm.contracts.pm_cockpit import (
+    PmCockpitCompletion,
+    PmCockpitCompletionState,
+    PmCockpitEvidence,
+    PmCockpitFocus,
+    PmCockpitSnapshot,
+)
+from auto_pm.contracts.pm_facade import PmConfirmationCard, PmConfirmationKind
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
+from tests.core.test_pm_closure_service import _MISSION_ID as _CLOSE_MISSION
+from tests.core.test_pm_closure_service import (
+    _accepted_lineage,
+    _lineage_states,
+    _ProjectionReconciler,
+)
 from tests.core.test_pm_cockpit_service import _registry as _core_registry
 from tests.core.test_pm_cockpit_service import _seed_authorized_mission
 
@@ -502,3 +520,237 @@ def test_request_evidence_for_an_unregistered_project_fails_with_the_service_mes
 
     assert finished[0]["success"] is False
     assert "不在工作空间项目清单" in str(finished[0]["message"])
+
+
+# --- U06: acceptance is followed by a background closure that can be retried -----------------
+
+
+class _AcceptAndCloseService:
+    def __init__(
+        self,
+        acceptance: PmConfirmationCard | Exception,
+        closures: list[PmCockpitCompletion | Exception],
+    ) -> None:
+        self.acceptance = acceptance
+        self.closures = closures
+        self.accept_calls: list[str] = []
+        self.close_calls: list[str] = []
+
+    def confirm_acceptance(self, mission_id: str) -> PmConfirmationCard:
+        self.accept_calls.append(mission_id)
+        if isinstance(self.acceptance, Exception):
+            raise self.acceptance
+        return self.acceptance
+
+    def close_accepted(self, mission_id: str) -> PmCockpitCompletion:
+        self.close_calls.append(mission_id)
+        outcome = self.closures.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+class _MultiThreadPool:
+    """Holds every started worker so several Missions can be in flight at once."""
+
+    def __init__(self) -> None:
+        self.workers: list[QRunnable] = []
+
+    @property
+    def worker(self) -> QRunnable | None:
+        return self.workers[-1] if self.workers else None
+
+    def start(self, worker: QRunnable, priority: int = 0) -> None:
+        del priority
+        self.workers.append(worker)
+
+
+def _acceptance_card(mission_id: str = "MISSION-001") -> PmConfirmationCard:
+    return PmConfirmationCard(
+        kind=PmConfirmationKind.ACCEPTANCE,
+        mission_id=mission_id,
+        title="验收",
+        mission_state=MissionState.ACCEPTED,
+        summary="请确认最终验收；确认后驾驶舱才会执行关闭和台账闭环。",
+        acceptance_criteria=("通过",),
+        next_actions=("close",),
+    )
+
+
+def _completion(state: PmCockpitCompletionState, message: str, mission_id: str = "MISSION-001") -> PmCockpitCompletion:
+    return PmCockpitCompletion(mission_id=mission_id, state=state, message=message)
+
+
+def _closing_bridge(
+    tmp_path: Path,
+    acceptance: PmConfirmationCard | Exception,
+    closures: list[PmCockpitCompletion | Exception],
+) -> tuple[PmCockpitBridge, _AcceptAndCloseService, _MultiThreadPool, list[tuple[str, bool, str]]]:
+    service = _AcceptAndCloseService(acceptance, closures)
+    pool = _MultiThreadPool()
+    bridge = PmCockpitBridge(
+        str(tmp_path),
+        service=cast(PmCockpitService, service),
+        thread_pool=cast(QThreadPool, pool),
+    )
+    finished: list[tuple[str, bool, str]] = []
+    bridge.closureFinished.connect(lambda m, ok, msg: finished.append((m, ok, msg)))
+    return bridge, service, pool, finished
+
+
+def test_accepting_queues_exactly_one_background_closure_and_keeps_the_legacy_keys(
+    tmp_path: Path,
+) -> None:
+    done = _completion(PmCockpitCompletionState.COMPLETED, "已完成：变更单与台账已同步。")
+    bridge, service, pool, finished = _closing_bridge(tmp_path, _acceptance_card(), [done])
+
+    result = bridge.confirmAcceptance("MISSION-001")
+
+    assert result["success"] is True
+    assert result["closing"] is True
+    assert "确认后驾驶舱才会执行关闭" in result["message"]
+    assert result["confirmation"]["mission_id"] == "MISSION-001"
+    assert service.accept_calls == ["MISSION-001"]
+    assert service.close_calls == []
+    assert len(pool.workers) == 1
+    assert finished == []
+    pool.workers[0].run()
+    bridge._poll_close_workers()
+    bridge._poll_close_workers()
+    assert service.close_calls == ["MISSION-001"]
+    assert finished == [("MISSION-001", True, "已完成：变更单与台账已同步。")]
+
+
+def test_a_refused_acceptance_queues_no_closure(tmp_path: Path) -> None:
+    bridge, service, pool, finished = _closing_bridge(
+        tmp_path, PmCockpitError("最新 Checkpoint 未证明当前通过的质量证据"), []
+    )
+
+    result = bridge.confirmAcceptance("MISSION-001")
+
+    assert result == {
+        "success": False,
+        "message": "最新 Checkpoint 未证明当前通过的质量证据",
+        "closing": False,
+    }
+    assert pool.workers == []
+    assert service.close_calls == []
+    assert finished == []
+    blank = bridge.confirmAcceptance("   ")
+    assert blank["success"] is False and blank["closing"] is False
+
+
+def test_retry_closure_is_one_at_a_time_per_mission_and_never_stacks(tmp_path: Path) -> None:
+    pending = _completion(PmCockpitCompletionState.PENDING_SYNC, "台账同步未完成，已保留现场；可稍后重试。")
+    bridge, service, pool, finished = _closing_bridge(tmp_path, _acceptance_card(), [pending, pending])
+    workers = pool.workers
+
+    first = bridge.retryClosure(" MISSION-001 ")
+    overlap = bridge.retryClosure("MISSION-001")
+    other = bridge.retryClosure("MISSION-002")
+    blank = bridge.retryClosure("  ")
+
+    assert first == {"accepted": True, "busy": True, "message": "已提交收尾请求，正在后台同步。"}
+    assert overlap == {"accepted": False, "busy": True, "message": "该需求正在同步，请勿重复操作。"}
+    assert other["accepted"] is True
+    assert blank == {"accepted": False, "busy": False, "message": "未找到可同步的需求。"}
+    assert len(workers) == 2
+    for worker in workers:
+        worker.run()
+    bridge._poll_close_workers()
+    bridge._poll_close_workers()
+    assert sorted(service.close_calls) == ["MISSION-001", "MISSION-002"]
+    assert sorted(item[0] for item in finished) == ["MISSION-001", "MISSION-002"]
+    assert all(ok is False for _, ok, _ in finished)
+    assert bridge.retryClosure("MISSION-001")["accepted"] is True
+
+
+def test_closure_failures_never_expose_exception_text_or_paths(tmp_path: Path) -> None:
+    secret = f"boom at {tmp_path} secret-detail"
+    bridge, _, pool, finished = _closing_bridge(
+        tmp_path,
+        _acceptance_card(),
+        [PmCockpitError("该需求尚未验收，不能收尾。"), RuntimeError(secret)],
+    )
+    workers = pool.workers
+
+    assert bridge.retryClosure("MISSION-A")["accepted"] is True
+    workers[-1].run()
+    bridge._poll_close_workers()
+    assert bridge.retryClosure("MISSION-B")["accepted"] is True
+    workers[-1].run()
+    bridge._poll_close_workers()
+
+    assert finished[0] == ("MISSION-A", False, "该需求尚未验收，不能收尾。")
+    assert finished[1] == ("MISSION-B", False, "无法完成收尾，已保留现场。")
+    assert "secret-detail" not in json.dumps(finished, ensure_ascii=False)
+    assert str(tmp_path) not in json.dumps(finished, ensure_ascii=False)
+
+
+def test_closure_pool_refusal_clears_the_busy_flag(tmp_path: Path) -> None:
+    class _RefusingPool:
+        def start(self, worker: QRunnable, priority: int = 0) -> None:
+            del worker, priority
+            raise RuntimeError("pool is shut down")
+
+    bridge = PmCockpitBridge(
+        str(tmp_path),
+        service=cast(PmCockpitService, _AcceptAndCloseService(_acceptance_card(), [])),
+        thread_pool=cast(QThreadPool, _RefusingPool()),
+    )
+
+    result = bridge.retryClosure("MISSION-001")
+
+    assert result["accepted"] is False and result["busy"] is False
+    assert "未能进入后台" in str(result["message"])
+    assert bridge._close_workers == {}
+    assert bridge.confirmAcceptance("MISSION-001")["closing"] is False
+
+
+def test_closure_result_is_suppressed_after_shutdown(tmp_path: Path) -> None:
+    done = _completion(PmCockpitCompletionState.COMPLETED, "已完成：变更单与台账已同步。")
+    bridge, _, pool, finished = _closing_bridge(tmp_path, _acceptance_card(), [done])
+
+    assert bridge.retryClosure("MISSION-001")["accepted"] is True
+    bridge.stopSnapshotRefresh()
+    pool.workers[0].run()
+    bridge._poll_close_workers()
+
+    assert finished == []
+    assert bridge._close_workers == {}
+    refused = bridge.retryClosure("MISSION-001")
+    assert refused == {"accepted": False, "busy": False, "message": "驾驶舱正在关闭。"}
+    assert bridge.confirmAcceptance("MISSION-001")["closing"] is False
+
+
+def test_retry_closure_runs_the_real_closure_service_and_completes_after_a_failed_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _core_registry(tmp_path)
+    store, database = _accepted_lineage(tmp_path)
+    reconciler = _ProjectionReconciler(OSError("ledger unavailable"))
+    closure = PmClosureService(
+        tmp_path,
+        now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC),
+        store=store,
+        ledger_reconciler=reconciler,
+    )
+    monkeypatch.setattr(closure, "inject_prepared_change_substance", lambda _id: tmp_path / "CHG.md")
+    service = PmCockpitService(tmp_path, store=store, closure_service=closure)
+    pool = _MultiThreadPool()
+    bridge = PmCockpitBridge(str(tmp_path), service=service, thread_pool=cast(QThreadPool, pool))
+    finished: list[tuple[str, bool, str]] = []
+    bridge.closureFinished.connect(lambda m, ok, msg: finished.append((m, ok, msg)))
+
+    for expect_ok in (False, True):
+        if expect_ok:
+            reconciler.result = ReconcileDiff()
+        assert bridge.retryClosure(_CLOSE_MISSION)["accepted"] is True
+        pool.workers[-1].run()
+        bridge._poll_close_workers()
+        assert finished[-1][0] == _CLOSE_MISSION and finished[-1][1] is expect_ok
+
+    assert finished[0][2] == "台账同步未完成，已保留现场；可稍后重试。"
+    assert finished[1][2] == "已完成：变更单与台账已同步。"
+    assert _lineage_states(database)[:4] == ("SUCCEEDED", "CLOSED", "CLOSED", "COMPLETED")
+    assert "ledger unavailable" not in json.dumps(finished)

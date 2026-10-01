@@ -71,7 +71,15 @@ ApplicationWindow {
         onAcceptanceConfirmed: function(missionId) {
             var response = pmCockpitBridge.confirmAcceptance(missionId)
             root.statusMessage = response.message || "已记录最终验收。"
+            if (response.success && response.closing)
+                cockpitView.setCloseBusy(missionId, true)
             root.refreshSnapshot()
+        }
+        onSyncRetryRequested: function(missionId) {
+            var response = pmCockpitBridge.retryClosure(missionId)
+            root.statusMessage = response.message || "未能提交同步请求。"
+            if (!response.accepted)
+                cockpitView.setCloseBusy(missionId, false)
         }
     }
 
@@ -93,6 +101,11 @@ ApplicationWindow {
             } else {
                 root.statusMessage = response.message || "无法读取证据。"
             }
+        }
+        function onClosureFinished(missionId, completed, message) {
+            cockpitView.setCloseBusy(missionId, false)
+            root.statusMessage = message || (completed ? "已完成。" : "同步未完成。")
+            root.refreshSnapshot()
         }
         function onStartFinished(missionId, success, message) {
             cockpitView.setStartBusy(missionId, false)

@@ -9,7 +9,11 @@ from uuid import uuid4
 from pydantic import ValidationError
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
-from auto_pm.contracts.pm_cockpit import PmCockpitEvidence, PmCockpitSnapshot
+from auto_pm.contracts.pm_cockpit import (
+    PmCockpitCompletionState,
+    PmCockpitEvidence,
+    PmCockpitSnapshot,
+)
 from auto_pm.contracts.pm_facade import PmIntent
 from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
@@ -40,6 +44,33 @@ class _StartWorker(QRunnable):
         except Exception as error:  # noqa: BLE001 - worker must always release UI busy state
             log.exception("Mission start failed: %s", self._mission_id)
             self.result = (False, str(error) or "任务启动失败。")
+        finally:
+            self.done = True
+
+
+class _CloseWorker(QRunnable):
+    """Close one accepted Mission through the closure service, off the QML main thread."""
+
+    def __init__(self, mission_id: str, service: PmCockpitService) -> None:
+        super().__init__()
+        self._mission_id = mission_id
+        self._service = service
+        self.setAutoDelete(False)
+        self.result: tuple[bool, str] | None = None
+        self.done = False
+
+    def run(self) -> None:
+        try:
+            completion = self._service.close_accepted(self._mission_id)
+            self.result = (
+                completion.state is PmCockpitCompletionState.COMPLETED,
+                completion.message,
+            )
+        except PmCockpitError as error:
+            self.result = (False, str(error) or "无法完成收尾，已保留现场。")
+        except Exception:  # noqa: BLE001 - UI must never receive exception text or paths
+            log.exception("Mission closure failed: %s", self._mission_id)
+            self.result = (False, "无法完成收尾，已保留现场。")
         finally:
             self.done = True
 
@@ -95,6 +126,7 @@ class PmCockpitBridge(QObject):
     startFinished = Signal(str, bool, str)
     snapshotFinished = Signal(cast(type[object], "QVariant"))
     evidenceFinished = Signal(cast(type[object], "QVariant"))
+    closureFinished = Signal(str, bool, str)
 
     def __init__(
         self,
@@ -120,6 +152,10 @@ class PmCockpitBridge(QObject):
         self._start_poll_timer.timeout.connect(self._poll_start_workers)
         self._snapshot_worker: _SnapshotWorker | None = None
         self._snapshot_delivery_enabled = True
+        self._close_workers: dict[str, _CloseWorker] = {}
+        self._close_poll_timer = QTimer(self)
+        self._close_poll_timer.setInterval(50)
+        self._close_poll_timer.timeout.connect(self._poll_close_workers)
         self._evidence_worker: _EvidenceWorker | None = None
         self._evidence_poll_timer = QTimer(self)
         self._evidence_poll_timer.setInterval(50)
@@ -293,8 +329,37 @@ class PmCockpitBridge(QObject):
 
     @Slot(str, result="QVariant")
     def confirmAcceptance(self, mission_id: str) -> dict[str, Any]:
-        """Apply one explicit final acceptance after the verification gate has opened."""
-        return self._confirmation_result("acceptance", mission_id)
+        """Apply one explicit final acceptance, then close it out in the background."""
+        result = self._confirmation_result("acceptance", mission_id)
+        queued = result["success"] and bool(self._queue_closure(mission_id.strip())["accepted"])
+        return {**result, "closing": queued}
+
+    @Slot(str, result="QVariant")
+    def retryClosure(self, mission_id: str) -> dict[str, Any]:
+        """Queue one more closure attempt for an accepted Mission; replays are idempotent."""
+        return self._queue_closure(mission_id.strip())
+
+    def _queue_closure(self, mission_id: str) -> dict[str, Any]:
+        if not mission_id:
+            return {"accepted": False, "busy": False, "message": "未找到可同步的需求。"}
+        if not self._snapshot_delivery_enabled:
+            return {"accepted": False, "busy": False, "message": "驾驶舱正在关闭。"}
+        if mission_id in self._close_workers:
+            return {"accepted": False, "busy": True, "message": "该需求正在同步，请勿重复操作。"}
+        worker = _CloseWorker(mission_id, self._service)
+        self._close_workers[mission_id] = worker
+        try:
+            self._thread_pool.start(worker)
+        except RuntimeError as error:
+            del self._close_workers[mission_id]
+            return {
+                "accepted": False,
+                "busy": False,
+                "message": f"收尾未能进入后台：{error}",
+            }
+        if not self._close_poll_timer.isActive():
+            self._close_poll_timer.start()
+        return {"accepted": True, "busy": True, "message": "已提交收尾请求，正在后台同步。"}
 
     def _confirmation_result(self, action: str, mission_id: str) -> dict[str, Any]:
         if not mission_id.strip():
@@ -325,6 +390,19 @@ class PmCockpitBridge(QObject):
             self.startFinished.emit(mission_id, success, message)
         if not self._start_workers:
             self._start_poll_timer.stop()
+
+    def _poll_close_workers(self) -> None:
+        completed = tuple(
+            mission_id for mission_id, worker in self._close_workers.items() if worker.done
+        )
+        for mission_id in completed:
+            worker = self._close_workers.pop(mission_id)
+            if not self._snapshot_delivery_enabled:
+                continue
+            completed_ok, message = worker.result or (False, "无法完成收尾，已保留现场。")
+            self.closureFinished.emit(mission_id, completed_ok, message)
+        if not self._close_workers:
+            self._close_poll_timer.stop()
 
     def _poll_snapshot_worker(self) -> None:
         worker = self._snapshot_worker
@@ -372,4 +450,5 @@ class PmCockpitBridge(QObject):
 
     def _disable_snapshot_delivery(self, *_args: object) -> None:
         self._evidence_poll_timer.stop()
+        self._close_poll_timer.stop()
         self.stopSnapshotRefresh()

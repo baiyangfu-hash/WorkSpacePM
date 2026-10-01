@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from auto_pm.core.pm_closure_service import (
+    ClosureCompletionState,
+    PmClosureError,
+    PmClosureService,
+)
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 
 from auto_pm.contracts.continuity import (
@@ -27,6 +33,8 @@ from auto_pm.contracts.pm_cockpit import (
     CockpitUserAction,
     PmCockpitActivity,
     PmCockpitCheckpointEvidence,
+    PmCockpitCompletion,
+    PmCockpitCompletionState,
     PmCockpitEvidence,
     PmCockpitEvidenceCurrency,
     PmCockpitFocus,
@@ -40,9 +48,16 @@ from auto_pm.contracts.pm_facade import PmConfirmationCard
 from auto_pm.contracts.workspace_context import WorkspaceProjectMapping, WorkspaceRegistry
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
-_TERMINAL_MISSION_STATES = frozenset(
-    {MissionState.ACCEPTED, MissionState.CLOSED, MissionState.CANCELLED}
-)
+log = logging.getLogger(__name__)
+
+_TERMINAL_MISSION_STATES = frozenset({MissionState.CLOSED, MissionState.CANCELLED})
+_CLOSE_PREPARE_KEY = "cockpit-close-prepare:"
+_CLOSE_COMPLETE_KEY = "cockpit-close-complete:"
+_COMPLETED_MESSAGE = "已完成：变更单与台账已同步。"
+_PENDING_SYNC_MESSAGE = "台账同步未完成，已保留现场；可稍后重试。"
+_NOT_READY_MESSAGE = "无法完成收尾：必要证据或状态未就绪，已保留现场；请向 PM 说明。"
+_SYNC_PENDING_NOTE = "验收已记录，变更单与台账尚未同步完成；完成前不会显示为已完成。"
+_SYNC_COMPLETED_NOTE = "已验收并完成变更单与台账同步。"
 _UNVERIFIABLE_REASON = "无法核验验收证据：读取失败，未做任何修复。"
 _REASON_LIMIT = 200
 
@@ -80,6 +95,7 @@ class PmCockpitService:
         *,
         registry_path: str | Path | None = None,
         store: ContinuityStore | None = None,
+        closure_service: PmClosureService | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root).resolve()
         selected = Path(registry_path) if registry_path is not None else self._REGISTRY_RELATIVE_PATH
@@ -89,6 +105,7 @@ class PmCockpitService:
             else (self._workspace_root / selected).resolve()
         )
         self._store = store or ContinuityStore(self._workspace_root)
+        self._closure_service = closure_service
 
     def snapshot(self) -> PmCockpitSnapshot:
         """Return the default screen's complete status without initializing any persistence."""
@@ -225,6 +242,55 @@ class PmCockpitService:
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
+    def close_accepted(self, mission_id: str) -> PmCockpitCompletion:
+        """Close one accepted Mission through the closure service; callers must keep this
+        off the UI thread.  Only a COMPLETED closure receipt yields COMPLETED."""
+        mission_id = mission_id.strip()
+        if not mission_id:
+            raise PmCockpitError("未找到可收尾的需求。")
+        try:
+            mission = self._store.get_mission(mission_id)
+        except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
+            raise PmCockpitError("无法读取该需求，已保留现场。") from error
+        if mission.state is MissionState.CLOSED:
+            return PmCockpitCompletion(
+                mission_id=mission_id,
+                state=PmCockpitCompletionState.COMPLETED,
+                message=_COMPLETED_MESSAGE,
+            )
+        if mission.state is not MissionState.ACCEPTED:
+            raise PmCockpitError("该需求尚未验收，不能收尾。")
+        closure = self._closure_service or PmClosureService(
+            self._workspace_root, store=self._store
+        )
+        try:
+            preparation = closure.prepare_closure(
+                mission_id, idempotency_key=_CLOSE_PREPARE_KEY + mission_id
+            )
+            receipt = closure.complete_closure(
+                preparation.closure.closure_id,
+                idempotency_key=_CLOSE_COMPLETE_KEY + mission_id,
+            )
+        except PmClosureError:
+            log.exception("Cockpit closure refused: %s", mission_id)
+            return PmCockpitCompletion(
+                mission_id=mission_id,
+                state=PmCockpitCompletionState.PENDING_SYNC,
+                message=_NOT_READY_MESSAGE,
+            )
+        if receipt.state is ClosureCompletionState.COMPLETED:
+            return PmCockpitCompletion(
+                mission_id=mission_id,
+                state=PmCockpitCompletionState.COMPLETED,
+                message=_COMPLETED_MESSAGE,
+            )
+        log.warning("Cockpit closure pending sync: %s", mission_id)
+        return PmCockpitCompletion(
+            mission_id=mission_id,
+            state=PmCockpitCompletionState.PENDING_SYNC,
+            message=_PENDING_SYNC_MESSAGE,
+        )
+
     def _mappings(self) -> tuple[WorkspaceProjectMapping, ...]:
         self._require_workspace_path(self._registry_path)
         if not self._registry_path.is_file():
@@ -284,6 +350,7 @@ class PmCockpitService:
         work = self._primary_work(mission, facts.works)
         blocked = self._is_blocked(mission, work, facts.runs_by_work)
         action, next_action = self._next_action(mission, blocked)
+        completion_state, completion_note = self._completion(mission)
         return PmCockpitProjectCard(
             project_id=mapping.project_id,
             project_name=self._project_name(mapping),
@@ -299,7 +366,18 @@ class PmCockpitService:
             current_owner=work.owner if work else "驾驶舱待命",
             next_user_action=next_action,
             user_action=action,
+            completion_state=completion_state,
+            completion_note=completion_note,
         )
+
+    @staticmethod
+    def _completion(mission: Mission | None) -> tuple[PmCockpitCompletionState, str]:
+        """Completion is a pure function of the Mission state: only CLOSED is complete."""
+        if mission is not None and mission.state is MissionState.CLOSED:
+            return PmCockpitCompletionState.COMPLETED, _SYNC_COMPLETED_NOTE
+        if mission is not None and mission.state is MissionState.ACCEPTED:
+            return PmCockpitCompletionState.PENDING_SYNC, _SYNC_PENDING_NOTE
+        return PmCockpitCompletionState.NOT_STARTED, ""
 
     def _unavailable_card(
         self,
@@ -424,6 +502,8 @@ class PmCockpitService:
         not_applicable = PmCockpitEvidenceCurrency.NOT_APPLICABLE
         if mission is None:
             return not_applicable, "暂无进行中的需求。"
+        if mission.state is MissionState.ACCEPTED:
+            return not_applicable, "验收已记录，验证证据已封存。"
         if mission.state in _TERMINAL_MISSION_STATES:
             return not_applicable, "该需求已结束，证据仅供追溯。"
         if mission.state is not MissionState.ACCEPTANCE_PENDING:
@@ -458,6 +538,12 @@ class PmCockpitService:
         ) -> PmCockpitResume:
             return PmCockpitResume(state=value, user_action=user_action, reason=_clip(reason))
 
+        if mission is not None and mission.state is MissionState.ACCEPTED:
+            return resume(
+                state.WAITING_FOR_USER,
+                action.RETRY_SYNC,
+                "验收已记录，变更单与台账尚未同步完成；可重试同步，完成前不会显示为已完成。",
+            )
         if mission is None or mission.state in _TERMINAL_MISSION_STATES:
             return resume(state.NO_ACTIVE_WORK, action.NONE, "暂无进行中的需求。")
         if self._is_blocked(mission, work, facts.runs_by_work):
@@ -577,7 +663,7 @@ class PmCockpitService:
             MissionState.ACTIVE: "系统执行",
             MissionState.BLOCKED: "等待决策",
             MissionState.ACCEPTANCE_PENDING: "等待验收确认",
-            MissionState.ACCEPTED: "验收完成",
+            MissionState.ACCEPTED: "验收已记录，待同步",
             MissionState.CLOSED: "已关闭",
             MissionState.CANCELLED: "已取消",
         }
@@ -633,6 +719,8 @@ class PmCockpitService:
             return "低：尚未开始"
         if mission.state is MissionState.ACCEPTANCE_PENDING:
             return "低：仅等待最终验收"
+        if mission.state is MissionState.ACCEPTED:
+            return "中：验收已记录，变更单与台账尚未同步"
         return "低：在既定授权范围内"
 
     @staticmethod
@@ -647,6 +735,8 @@ class PmCockpitService:
             return CockpitUserAction.CONFIRM_ACCEPTANCE, "确认最终验收"
         if mission.state is MissionState.ACTIVE:
             return CockpitUserAction.NONE, "无需操作，驾驶舱正在处理"
+        if mission.state is MissionState.ACCEPTED:
+            return CockpitUserAction.RETRY_SYNC, "重试台账同步"
         return CockpitUserAction.NONE, "向 PM 描述下一项需求"
 
     def _read_set(self) -> tuple[str, ...]:

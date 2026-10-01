@@ -10,9 +10,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from auto_pm.change.ledger_reconciler import ReconcileDiff
 from auto_pm.core.continuity_execution_service import ContinuityExecutionService
 from auto_pm.core.mission_service import MissionService
-from auto_pm.core.pm_cockpit_service import PmCockpitService, _ProjectFacts
+from auto_pm.core.pm_closure_service import PmClosureService
+from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService, _ProjectFacts
 from auto_pm.core.pm_facade_service import PmFacadeService
 from auto_pm.core.work_registry_service import WorkRegistryService
 
@@ -20,10 +22,21 @@ from auto_pm.contracts.continuity import RunItem, RunState, WorkItem, WorkKind, 
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
 from auto_pm.contracts.pm_cockpit import (
     CockpitUserAction,
+    PmCockpitCompletion,
+    PmCockpitCompletionState,
     PmCockpitEvidence,
     PmCockpitEvidenceCurrency,
     PmCockpitFocus,
     PmCockpitResumeState,
+)
+from auto_pm.infrastructure.continuity_store import ContinuityStore
+from tests.core.test_pm_closure_service import _MISSION_ID as _CLOSE_MISSION
+from tests.core.test_pm_closure_service import _RUN_ID as _CLOSE_RUN
+from tests.core.test_pm_closure_service import _WORK_ID as _CLOSE_WORK
+from tests.core.test_pm_closure_service import (
+    _accepted_lineage,
+    _lineage_states,
+    _ProjectionReconciler,
 )
 from tests.core.test_pm_facade_service import (
     _commit_baseline,
@@ -470,7 +483,7 @@ _REVIEW = CockpitUserAction.REVIEW_ESCALATION
 @pytest.mark.parametrize(
     ("mission_state", "run_state", "started", "expected_state", "expected_action", "fragment"),
     [
-        (MissionState.ACCEPTED, None, False, PmCockpitResumeState.NO_ACTIVE_WORK, _NO_ACTION, "暂无进行中"),
+        (MissionState.ACCEPTED, None, False, PmCockpitResumeState.WAITING_FOR_USER, CockpitUserAction.RETRY_SYNC, "尚未同步完成"),
         (MissionState.CLOSED, None, False, PmCockpitResumeState.NO_ACTIVE_WORK, _NO_ACTION, "暂无进行中"),
         (MissionState.CANCELLED, None, False, PmCockpitResumeState.NO_ACTIVE_WORK, _NO_ACTION, "暂无进行中"),
         (MissionState.BLOCKED, None, False, PmCockpitResumeState.NEEDS_REVIEW, _REVIEW, "阻塞"),
@@ -742,3 +755,261 @@ def test_unverifying_run_or_missing_checkpoint_makes_the_evidence_not_current(
     for evidence in (running, verifying):
         assert evidence.resume.user_action is CockpitUserAction.REVIEW_ESCALATION
         assert evidence.focus.run_id == "RUN-GATE-001"
+
+
+# --- U06: accepted work is only "completed" once the closure service really closed it --------
+
+
+def _closing_cockpit(
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    result: ReconcileDiff | Exception | None = None,
+) -> tuple[PmCockpitService, ContinuityStore, Path, _ProjectionReconciler]:
+    """An ACCEPTED lineage whose ledger projection is a controllable stand-in."""
+    _registry(root)
+    store, database = _accepted_lineage(root)
+    reconciler = _ProjectionReconciler(ReconcileDiff() if result is None else result)
+    closure = PmClosureService(
+        root,
+        now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC),
+        store=store,
+        ledger_reconciler=reconciler,
+    )
+    monkeypatch.setattr(closure, "inject_prepared_change_substance", lambda _id: root / "CHG.md")
+    return PmCockpitService(root, store=store, closure_service=closure), store, database, reconciler
+
+
+def _all_event_count(database: Path) -> int:
+    with closing(sqlite3.connect(database)) as connection:
+        return int(connection.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+
+
+def _completed_events(database: Path) -> int:
+    with closing(sqlite3.connect(database)) as connection:
+        return int(
+            connection.execute(
+                "SELECT COUNT(*) FROM events WHERE event_type='CLOSURE_COMPLETED'"
+            ).fetchone()[0]
+        )
+
+
+def test_only_a_closed_mission_is_shown_as_completed(tmp_path: Path) -> None:
+    _registry(tmp_path)
+    _seed_authorized_mission(tmp_path)
+    service = PmCockpitService(tmp_path)
+    base = MissionService(tmp_path).get("MISSION-COCKPIT-001")
+    expected = {
+        MissionState.DRAFT: (PmCockpitCompletionState.NOT_STARTED, ""),
+        MissionState.AWAITING_APPROVAL: (PmCockpitCompletionState.NOT_STARTED, ""),
+        MissionState.ACTIVE: (PmCockpitCompletionState.NOT_STARTED, ""),
+        MissionState.BLOCKED: (PmCockpitCompletionState.NOT_STARTED, ""),
+        MissionState.ACCEPTANCE_PENDING: (PmCockpitCompletionState.NOT_STARTED, ""),
+        MissionState.ACCEPTED: (PmCockpitCompletionState.PENDING_SYNC, "尚未同步完成"),
+        MissionState.CLOSED: (PmCockpitCompletionState.COMPLETED, "已验收并完成"),
+        MissionState.CANCELLED: (PmCockpitCompletionState.NOT_STARTED, ""),
+    }
+
+    for state, (completion, fragment) in expected.items():
+        mission = base.model_copy(update={"state": state})
+        got_state, note = service._completion(mission)
+        assert got_state is completion, state
+        assert fragment in note
+        assert (got_state is PmCockpitCompletionState.COMPLETED) == (state is MissionState.CLOSED)
+    assert service._completion(None) == (PmCockpitCompletionState.NOT_STARTED, "")
+    assert service._milestone(base.model_copy(update={"state": MissionState.ACCEPTED})) == (
+        "验收已记录，待同步"
+    )
+    assert service._next_action(
+        base.model_copy(update={"state": MissionState.ACCEPTED}), False
+    ) == (CockpitUserAction.RETRY_SYNC, "重试台账同步")
+    assert service._next_action(
+        base.model_copy(update={"state": MissionState.CLOSED}), False
+    )[0] is CockpitUserAction.NONE
+
+
+def test_snapshot_of_an_accepted_mission_offers_a_sync_retry_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _, database, _ = _closing_cockpit(tmp_path, monkeypatch)
+    before = database.read_bytes()
+
+    card = service.snapshot().projects[0]
+
+    assert card.completion_state is PmCockpitCompletionState.PENDING_SYNC
+    assert "尚未同步完成" in card.completion_note
+    assert card.user_action is CockpitUserAction.RETRY_SYNC
+    assert card.next_user_action == "重试台账同步"
+    assert card.milestone == "验收已记录，待同步"
+    assert card.risk.startswith("中：")
+    assert database.read_bytes() == before
+
+
+def test_close_accepted_closes_run_work_and_mission_only_after_a_clean_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _, database, reconciler = _closing_cockpit(tmp_path, monkeypatch)
+
+    result = service.close_accepted(_CLOSE_MISSION)
+
+    assert result == PmCockpitCompletion(
+        mission_id=_CLOSE_MISSION,
+        state=PmCockpitCompletionState.COMPLETED,
+        message="已完成：变更单与台账已同步。",
+    )
+    assert _lineage_states(database) == (
+        "SUCCEEDED", "CLOSED", "CLOSED", "COMPLETED", 2, "COMPLETED", 1, True
+    )
+    assert _completed_events(database) == 1
+    assert len(reconciler.calls) == 1
+    card = service.snapshot().projects[0]
+    assert card.completion_state is PmCockpitCompletionState.COMPLETED
+    assert card.user_action is CockpitUserAction.NONE
+    assert service.evidence("SW-2026-008").resume.state is PmCockpitResumeState.NO_ACTIVE_WORK
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        OSError("ledger share \\\\server\\secret-path unavailable"),
+        ReconcileDiff(missing_in_ledger=["CHG-SCPT-2026-999"]),
+    ],
+)
+def test_projection_failure_stays_pending_sync_with_a_fixed_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: ReconcileDiff | Exception
+) -> None:
+    service, _, database, _ = _closing_cockpit(tmp_path, monkeypatch, failure)
+
+    result = service.close_accepted(_CLOSE_MISSION)
+
+    assert result.state is PmCockpitCompletionState.PENDING_SYNC
+    assert result.message == "台账同步未完成，已保留现场；可稍后重试。"
+    assert "secret-path" not in result.model_dump_json()
+    assert "CHG-SCPT-2026-999" not in result.model_dump_json()
+    assert _lineage_states(database) == (
+        "VERIFYING", "IN_PROGRESS", "ACCEPTED", "PREPARED", 1, "PENDING", 0, False
+    )
+    assert _completed_events(database) == 0
+    card = service.snapshot().projects[0]
+    assert card.completion_state is PmCockpitCompletionState.PENDING_SYNC
+
+
+def test_retry_after_a_failed_sync_completes_and_replays_add_no_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _, database, reconciler = _closing_cockpit(
+        tmp_path, monkeypatch, OSError("ledger unavailable")
+    )
+    first = service.close_accepted(_CLOSE_MISSION)
+    events_after_failure = _all_event_count(database)
+    again = service.close_accepted(_CLOSE_MISSION)
+    assert (first.state, again.state) == (
+        PmCockpitCompletionState.PENDING_SYNC,
+        PmCockpitCompletionState.PENDING_SYNC,
+    )
+    assert _all_event_count(database) == events_after_failure
+
+    reconciler.result = ReconcileDiff()
+    done = service.close_accepted(_CLOSE_MISSION)
+    events_after_success = _all_event_count(database)
+    replay = service.close_accepted(_CLOSE_MISSION)
+    replay_again = service.close_accepted(_CLOSE_MISSION)
+
+    assert done.state is PmCockpitCompletionState.COMPLETED
+    assert replay == replay_again == done
+    assert _all_event_count(database) == events_after_success
+    assert _completed_events(database) == 1
+    assert _lineage_states(database)[:3] == ("SUCCEEDED", "CLOSED", "CLOSED")
+
+
+def test_missing_evidence_refuses_the_closure_and_never_reports_completed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, store, database, reconciler = _closing_cockpit(tmp_path, monkeypatch)
+    ContinuityExecutionService(
+        tmp_path, store=store, now=lambda: datetime(2026, 9, 20, 12, 5, tzinfo=UTC)
+    ).transition_run(
+        _CLOSE_RUN, RunState.FAILED, "c05-test", "closure-secret", "u06-run-failed"
+    )
+    before = _all_event_count(database)
+
+    result = service.close_accepted(_CLOSE_MISSION)
+
+    assert result.state is PmCockpitCompletionState.PENDING_SYNC
+    assert result.message == "无法完成收尾：必要证据或状态未就绪，已保留现场；请向 PM 说明。"
+    assert reconciler.calls == []
+    assert _all_event_count(database) == before
+    assert _completed_events(database) == 0
+    with closing(sqlite3.connect(database)) as connection:
+        states = connection.execute(
+            "SELECT (SELECT state FROM work_items WHERE work_id=?), "
+            "(SELECT state FROM mission_items WHERE mission_id=?)",
+            (_CLOSE_WORK, _CLOSE_MISSION),
+        ).fetchone()
+    assert tuple(states) == ("IN_PROGRESS", "ACCEPTED")
+
+
+def test_work_that_is_not_in_progress_refuses_the_closure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, store, database, _ = _closing_cockpit(tmp_path, monkeypatch)
+    WorkRegistryService(tmp_path, store=store).transition(
+        _CLOSE_WORK, WorkState.BLOCKED, "u06-work-blocked"
+    )
+    before = _all_event_count(database)
+
+    result = service.close_accepted(_CLOSE_MISSION)
+
+    assert result.state is PmCockpitCompletionState.PENDING_SYNC
+    assert "必要证据或状态未就绪" in result.message
+    assert _all_event_count(database) == before
+    assert _completed_events(database) == 0
+
+
+def test_close_accepted_refuses_a_mission_that_is_not_accepted_without_writing(
+    tmp_path: Path,
+) -> None:
+    _registry(tmp_path)
+    _seed_authorized_mission(tmp_path)
+    service = PmCockpitService(tmp_path)
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    before = db_path.read_bytes()
+
+    with pytest.raises(PmCockpitError, match="尚未验收"):
+        service.close_accepted("MISSION-COCKPIT-001")
+    with pytest.raises(PmCockpitError):
+        service.close_accepted("   ")
+    with pytest.raises(PmCockpitError):
+        service.close_accepted("MISSION-DOES-NOT-EXIST")
+
+    assert db_path.read_bytes() == before
+
+
+def test_resume_and_currency_treat_an_accepted_mission_as_waiting_for_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _, _, _ = _closing_cockpit(tmp_path, monkeypatch)
+
+    evidence = service.evidence("SW-2026-008")
+
+    assert evidence.resume.state is PmCockpitResumeState.WAITING_FOR_USER
+    assert evidence.resume.user_action is CockpitUserAction.RETRY_SYNC
+    assert "尚未同步完成" in evidence.resume.reason
+    assert evidence.evidence_currency is PmCockpitEvidenceCurrency.NOT_APPLICABLE
+    assert evidence.evidence_currency_reason == "验收已记录，验证证据已封存。"
+    new_fields = _new_fields_text(evidence).lower()
+    assert "lease" not in new_fields and "token" not in new_fields
+
+
+def test_closure_messages_never_expose_lease_token_or_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _, _, _ = _closing_cockpit(
+        tmp_path, monkeypatch, OSError(f"cannot write {tmp_path} closure-secret")
+    )
+
+    result = service.close_accepted(_CLOSE_MISSION)
+
+    dumped = result.model_dump_json().lower()
+    assert "closure-secret" not in dumped
+    assert "token" not in dumped and "lease" not in dumped
+    assert str(tmp_path).lower() not in dumped

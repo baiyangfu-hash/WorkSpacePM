@@ -12,6 +12,8 @@ from auto_pm.contracts.execution_adapter import (
 from auto_pm.contracts.pm_cockpit import (
     CockpitUserAction,
     PmCockpitActivity,
+    PmCockpitCompletion,
+    PmCockpitCompletionState,
     PmCockpitEvidence,
     PmCockpitEvidenceCurrency,
     PmCockpitFocus,
@@ -144,6 +146,7 @@ def test_u05_enums_expose_exactly_the_agreed_values() -> None:
         "CONFIRM_START",
         "CONFIRM_ACCEPTANCE",
         "REVIEW_ESCALATION",
+        "RETRY_SYNC",
     }
 
 
@@ -207,3 +210,72 @@ def test_u05_fields_keep_the_evidence_contract_free_of_lease_and_token_data() ->
     serialized = evidence.model_dump_json().lower()
     assert "lease" not in serialized
     assert "token" not in serialized
+
+
+def test_legacy_project_card_payload_validates_with_not_started_completion() -> None:
+    card = PmCockpitProjectCard.model_validate(
+        {
+            "project_id": "SW-2026-008",
+            "project_name": "自动化项目管理工具",
+            "mission": "A4",
+            "milestone": "系统执行",
+            "progress": "执行中",
+            "blocked": False,
+            "verification": "等待执行验证",
+            "risk": "低：在既定授权范围内",
+            "current_owner": "PM",
+            "next_user_action": "无需操作",
+        }
+    )
+
+    assert card.completion_state is PmCockpitCompletionState.NOT_STARTED
+    assert card.completion_note == ""
+    assert card.user_action is CockpitUserAction.NONE
+
+
+def test_completion_states_and_retry_action_are_exactly_the_agreed_values() -> None:
+    assert {item.value for item in PmCockpitCompletionState} == {
+        "NOT_STARTED",
+        "PENDING_SYNC",
+        "COMPLETED",
+    }
+    assert CockpitUserAction.RETRY_SYNC.value == "RETRY_SYNC"
+
+
+def test_completion_result_is_a_frozen_bounded_secret_free_value_object() -> None:
+    completion = PmCockpitCompletion(
+        mission_id="MISSION-001",
+        state=PmCockpitCompletionState.PENDING_SYNC,
+        message="台账同步未完成，已保留现场；可稍后重试。",
+    )
+
+    assert PmCockpitCompletion.model_config.get("frozen") is True
+    assert completion == PmCockpitCompletion.model_validate(completion.model_dump(mode="json"))
+    serialized = completion.model_dump_json().lower()
+    assert "lease" not in serialized and "token" not in serialized
+    with pytest.raises(ValidationError):
+        PmCockpitCompletion(
+            mission_id="MISSION-001", state=PmCockpitCompletionState.COMPLETED, message="x" * 201
+        )
+    with pytest.raises(ValidationError):
+        PmCockpitCompletion(mission_id="", state=PmCockpitCompletionState.COMPLETED)
+    with pytest.raises(ValidationError):
+        PmCockpitCompletion.model_validate({"mission_id": "M-1", "state": "DONE"})
+
+
+def test_completion_note_on_a_card_is_bounded() -> None:
+    base = {
+        "project_id": "SW-2026-008",
+        "project_name": "x",
+        "mission": "m",
+        "milestone": "m",
+        "progress": "p",
+        "blocked": False,
+        "verification": "v",
+        "risk": "r",
+        "current_owner": "o",
+        "next_user_action": "n",
+    }
+    PmCockpitProjectCard.model_validate({**base, "completion_note": "x" * 200})
+    with pytest.raises(ValidationError):
+        PmCockpitProjectCard.model_validate({**base, "completion_note": "x" * 201})

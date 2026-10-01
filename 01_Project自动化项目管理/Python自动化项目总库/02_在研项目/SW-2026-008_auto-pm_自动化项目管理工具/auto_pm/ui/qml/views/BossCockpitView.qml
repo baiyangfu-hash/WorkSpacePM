@@ -13,12 +13,14 @@ Item {
     property var notices: []
     property var planningDraft: null
     property var startBusyByMission: ({})
+    property var closeBusyByMission: ({})
     property string statusMessage: ""
     signal planningDraftRequested(string projectId, string objective, string acceptanceText)
     signal draftInputChanged()
     signal evidenceRequested(string projectId)
     signal startConfirmed(string missionId)
     signal acceptanceConfirmed(string missionId)
+    signal syncRetryRequested(string missionId)
 
     function isStartBusy(missionId) {
         return missionId && startBusyByMission[missionId] === true
@@ -33,6 +35,28 @@ Item {
         else
             delete next[missionId]
         startBusyByMission = next
+    }
+
+    function isCloseBusy(missionId) {
+        return !!missionId && closeBusyByMission[missionId] === true
+    }
+
+    function setCloseBusy(missionId, busy) {
+        if (!missionId)
+            return
+        var next = Object.assign({}, closeBusyByMission)
+        if (busy)
+            next[missionId] = true
+        else
+            delete next[missionId]
+        closeBusyByMission = next
+    }
+
+    function requestSyncRetry(missionId) {
+        if (!missionId || isCloseBusy(missionId))
+            return
+        setCloseBusy(missionId, true)
+        syncRetryRequested(missionId)
     }
 
     function requestStart(missionId) {
@@ -175,6 +199,30 @@ Item {
                         busy: root.isStartBusy(modelData.mission_id)
                         onStartConfirmed: root.requestStart(modelData.mission_id)
                         onAcceptanceConfirmed: root.acceptanceConfirmed(modelData.mission_id)
+                    }
+                    Text {
+                        visible: modelData.completion_state === "PENDING_SYNC"
+                        text: modelData.completion_note || ""
+                        color: Theme.warning
+                        font.pixelSize: Theme.fontSizeSm
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Components.PrimaryButton {
+                        objectName: "retrySyncButton"
+                        visible: modelData.completion_state === "PENDING_SYNC"
+                        enabled: !root.isCloseBusy(modelData.mission_id)
+                        text: root.isCloseBusy(modelData.mission_id) ? "正在同步…" : "重试同步"
+                        Layout.alignment: Qt.AlignRight
+                        onClicked: root.requestSyncRetry(modelData.mission_id)
+                    }
+                    Text {
+                        objectName: "completedLabel"
+                        visible: modelData.completion_state === "COMPLETED"
+                        text: "已完成并同步台账"
+                        color: Theme.success
+                        font.pixelSize: Theme.fontSizeSm
+                        Layout.fillWidth: true
                     }
                     Components.PrimaryButton {
                         text: "查看证据"
