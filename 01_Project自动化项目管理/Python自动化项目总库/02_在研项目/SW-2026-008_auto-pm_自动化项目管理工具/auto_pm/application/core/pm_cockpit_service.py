@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,7 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionActivity,
     ExecutionActivityStage,
     ExecutionFailureCode,
-    ForegroundExecutionReceipt,
+    WorktreeMode,
 )
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_cockpit import (
@@ -44,7 +45,7 @@ from auto_pm.contracts.pm_cockpit import (
     PmCockpitSnapshot,
     PmCockpitWorkNode,
 )
-from auto_pm.contracts.pm_facade import PmConfirmationCard
+from auto_pm.contracts.pm_facade import PmConfirmationCard, PmRunOutcome
 from auto_pm.contracts.workspace_context import WorkspaceProjectMapping, WorkspaceRegistry
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -60,6 +61,9 @@ _SYNC_PENDING_NOTE = "验收已记录，变更单与台账尚未同步完成；�
 _SYNC_COMPLETED_NOTE = "已验收并完成变更单与台账同步。"
 _UNVERIFIABLE_REASON = "无法核验验收证据：读取失败，未做任何修复。"
 _REASON_LIMIT = 200
+_LEASE_ENVIRONMENT = "AUTO_PM_EXECUTION_LEASE_TOKEN"
+_START_READY_REASON = "等待您确认开工；确认前不会创建或启动任何执行。"
+_ALREADY_VERIFIED_MESSAGE = "该需求已执行并验证，等待验收；请直接确认验收，不要重复执行。"
 
 
 def _clip(text: str) -> str:
@@ -96,6 +100,7 @@ class PmCockpitService:
         registry_path: str | Path | None = None,
         store: ContinuityStore | None = None,
         closure_service: PmClosureService | None = None,
+        facade: PmFacadeService | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root).resolve()
         selected = Path(registry_path) if registry_path is not None else self._REGISTRY_RELATIVE_PATH
@@ -106,6 +111,7 @@ class PmCockpitService:
         )
         self._store = store or ContinuityStore(self._workspace_root)
         self._closure_service = closure_service
+        self._facade_override = facade
 
     def snapshot(self) -> PmCockpitSnapshot:
         """Return the default screen's complete status without initializing any persistence."""
@@ -219,14 +225,34 @@ class PmCockpitService:
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
-    def start_execution(self, mission_id: str) -> ForegroundExecutionReceipt:
-        """Start genuine approved execution; callers must keep this off the UI thread."""
+    def start_execution(self, mission_id: str) -> PmRunOutcome:
+        """Run one approved Mission in isolation and verify it; keep this off the UI thread."""
 
+        mission_id = mission_id.strip()
+        if not mission_id:
+            raise PmCockpitError("未找到可启动的需求。")
         try:
+            mission = self._store.get_mission(mission_id)
+        except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
+            raise PmCockpitError("无法读取该需求，已保留现场。") from error
+        if mission.state is MissionState.ACCEPTANCE_PENDING:
+            raise PmCockpitError(_ALREADY_VERIFIED_MESSAGE)
+        if mission.state not in {
+            MissionState.DRAFT,
+            MissionState.AWAITING_APPROVAL,
+            MissionState.ACTIVE,
+        }:
+            raise PmCockpitError("该需求当前不能开始执行。")
+        facade = self._facade_override or PmFacadeService(self._workspace_root)
+        try:
+            card = facade.recover_planning_scope_card(mission_id)
             return cast(
-                ForegroundExecutionReceipt,
-                PmFacadeService(self._workspace_root).start_approved_mission_foreground(
-                    mission_id
+                PmRunOutcome,
+                facade.run_approved_planning(
+                    card,
+                    expected_plan_hash=card.plan_hash,
+                    lease_token=secrets.token_urlsafe(32),
+                    lease_token_environment=_LEASE_ENVIRONMENT,
                 ),
             )
         except PmFacadeError as error:
@@ -558,6 +584,8 @@ class PmCockpitService:
                 action.CONFIRM_START,
                 "等待您确认开工；确认前不会创建或启动任何执行。",
             )
+        if self._is_start_ready(mission):
+            return resume(state.WAITING_FOR_USER, action.CONFIRM_START, _START_READY_REASON)
         if mission.state is MissionState.DRAFT:
             return resume(state.NO_ACTIVE_WORK, action.NONE, "需求仍在准备阶段，尚无可执行内容。")
         if mission.state is MissionState.ACCEPTANCE_PENDING:
@@ -724,12 +752,24 @@ class PmCockpitService:
         return "低：在既定授权范围内"
 
     @staticmethod
+    def _is_start_ready(mission: Mission) -> bool:
+        """A DRAFT Mission created by an approved planning card may be started by the user."""
+
+        routing = mission.authority.routing
+        return (
+            mission.state is MissionState.DRAFT
+            and routing.required_worktree_mode is WorktreeMode.ISOLATED
+            and bool(routing.approved_model)
+            and bool(routing.allowed_execution_adapters)
+        )
+
+    @staticmethod
     def _next_action(mission: Mission | None, blocked: bool) -> tuple[CockpitUserAction, str]:
         if blocked:
             return CockpitUserAction.REVIEW_ESCALATION, "查看需要您决策的事项"
         if mission is None:
             return CockpitUserAction.NONE, "向 PM 描述您的需求"
-        if mission.state is MissionState.AWAITING_APPROVAL:
+        if mission.state is MissionState.AWAITING_APPROVAL or PmCockpitService._is_start_ready(mission):
             return CockpitUserAction.CONFIRM_START, "确认开始执行"
         if mission.state is MissionState.ACCEPTANCE_PENDING:
             return CockpitUserAction.CONFIRM_ACCEPTANCE, "确认最终验收"

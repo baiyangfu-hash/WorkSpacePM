@@ -15,7 +15,6 @@ from auto_pm.core.pm_closure_service import PmClosureService
 from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from PySide6.QtCore import QRunnable, QThreadPool
 
-from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_cockpit import (
     PmCockpitCompletion,
@@ -24,7 +23,7 @@ from auto_pm.contracts.pm_cockpit import (
     PmCockpitFocus,
     PmCockpitSnapshot,
 )
-from auto_pm.contracts.pm_facade import PmConfirmationCard, PmConfirmationKind
+from auto_pm.contracts.pm_facade import PmConfirmationCard, PmConfirmationKind, PmRunOutcome
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
 from tests.core.test_pm_closure_service import _MISSION_ID as _CLOSE_MISSION
@@ -47,11 +46,11 @@ class _HoldingThreadPool:
 
 
 class _StartService:
-    def __init__(self, outcomes: list[ForegroundExecutionReceipt | Exception]) -> None:
+    def __init__(self, outcomes: list[PmRunOutcome | Exception]) -> None:
         self.outcomes = outcomes
         self.calls: list[str] = []
 
-    def start_execution(self, mission_id: str) -> ForegroundExecutionReceipt:
+    def start_execution(self, mission_id: str) -> PmRunOutcome:
         self.calls.append(mission_id)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
@@ -74,21 +73,21 @@ class _SnapshotService:
 
 def _receipt(
     status: Literal["VERIFYING", "FAILED", "PENDING"],
-) -> ForegroundExecutionReceipt:
-    common: dict[str, object] = {
-        "operation_id": f"OP-{status}",
-        "run_id": f"RUN-{status}",
-        "status": status,
-        "claim_sha256": "a" * 64,
-    }
-    if status == "VERIFYING":
-        common.update({
-            "process_id": 1234,
-            "session_id": "SESSION-1",
-            "exit_code": 0,
-            "projection_sha256": "b" * 64,
-        })
-    return ForegroundExecutionReceipt.model_validate(common)
+) -> PmRunOutcome:
+    verified = status == "VERIFYING"
+    return PmRunOutcome(
+        mission_id="MISSION-001",
+        run_id=f"RUN-{status}",
+        receipt_status=status,
+        verified=verified,
+        checkpoint_id=f"CP-RUN-{status}-VERIFY" if verified else "",
+        mission_state=MissionState.ACCEPTANCE_PENDING if verified else MissionState.ACTIVE,
+        message=(
+            "已执行并通过质量验证，等待您的最终验收。"
+            if verified
+            else "执行未完成，未进行质量验证；已保留现场。"
+        ),
+    )
 
 
 def _registry(root: Path) -> None:
@@ -236,7 +235,7 @@ def test_start_execution_is_one_shot_until_worker_finishes(tmp_path: Path) -> No
     bridge._poll_start_workers()
 
     assert service.calls == ["MISSION-001"]
-    assert finished == [("MISSION-001", True, "任务已启动，正在验证。")]
+    assert finished == [("MISSION-001", True, "已执行并通过质量验证，等待您的最终验收。")]
     assert bridge.startExecution("MISSION-001")["accepted"] is True
 
 
@@ -270,6 +269,59 @@ def test_start_execution_failure_clears_busy_without_false_success(tmp_path: Pat
         False,
         "无法确认任务已启动，已保留待核验状态。",
     )
+
+
+def _finished_start(
+    tmp_path: Path, outcome: PmRunOutcome | Exception
+) -> list[tuple[str, bool, str]]:
+    pool = _HoldingThreadPool()
+    bridge = PmCockpitBridge(
+        str(tmp_path),
+        service=cast(PmCockpitService, _StartService([outcome])),
+        thread_pool=cast(QThreadPool, pool),
+    )
+    finished: list[tuple[str, bool, str]] = []
+    bridge.startFinished.connect(
+        lambda mission_id, success, message: finished.append((mission_id, success, message))
+    )
+    assert bridge.startExecution("MISSION-001")["accepted"] is True
+    assert pool.worker is not None
+    pool.worker.run()
+    bridge._poll_start_workers()
+    return finished
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [
+        (_receipt("VERIFYING"), (True, "已执行并通过质量验证，等待您的最终验收。")),
+        (_receipt("FAILED"), (False, "任务启动失败，执行记录已保留。")),
+        (_receipt("PENDING"), (False, "无法确认任务已启动，已保留待核验状态。")),
+        (
+            PmRunOutcome(
+                mission_id="MISSION-001",
+                run_id="RUN-VERIFYING",
+                receipt_status="VERIFYING",
+                verified=False,
+                mission_state=MissionState.ACTIVE,
+                message="质量验证未通过，已保留现场；未进入验收。",
+            ),
+            (False, "质量验证未通过，已保留现场；未进入验收。"),
+        ),
+    ],
+    ids=["verified", "failed", "pending", "not-verified"],
+)
+def test_start_worker_maps_every_outcome_to_a_fixed_sentence(
+    tmp_path: Path, outcome: PmRunOutcome, expected: tuple[bool, str]
+) -> None:
+    assert _finished_start(tmp_path, outcome) == [("MISSION-001", *expected)]
+
+
+def test_start_worker_never_exposes_unexpected_exception_text(tmp_path: Path) -> None:
+    finished = _finished_start(tmp_path, RuntimeError(r"C:\secret\path token=abc123"))
+
+    assert finished == [("MISSION-001", False, "任务启动失败，已保留现场。")]
+    assert "secret" not in finished[0][2] and "abc123" not in finished[0][2]
 
 
 def test_snapshot_refresh_is_background_and_skips_overlapping_ticks(tmp_path: Path) -> None:

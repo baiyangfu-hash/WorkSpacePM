@@ -34,16 +34,20 @@ class _StartWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            receipt = self._bridge._service.start_execution(self._mission_id)
-            if receipt.status == "VERIFYING":
-                self.result = (True, "任务已启动，正在验证。")
-            elif receipt.status == "FAILED":
+            outcome = self._bridge._service.start_execution(self._mission_id)
+            if outcome.verified:
+                self.result = (True, outcome.message)
+            elif outcome.receipt_status == "FAILED":
                 self.result = (False, "任务启动失败，执行记录已保留。")
-            else:
+            elif outcome.receipt_status == "PENDING":
                 self.result = (False, "无法确认任务已启动，已保留待核验状态。")
-        except Exception as error:  # noqa: BLE001 - worker must always release UI busy state
-            log.exception("Mission start failed: %s", self._mission_id)
+            else:
+                self.result = (False, outcome.message)
+        except PmCockpitError as error:
             self.result = (False, str(error) or "任务启动失败。")
+        except Exception:  # noqa: BLE001 - worker must always release UI busy state
+            log.exception("Mission start failed: %s", self._mission_id)
+            self.result = (False, "任务启动失败，已保留现场。")
         finally:
             self.done = True
 

@@ -19,7 +19,14 @@ from auto_pm.core.pm_facade_service import PmFacadeService
 from auto_pm.core.work_registry_service import WorkRegistryService
 
 from auto_pm.contracts.continuity import RunItem, RunState, WorkItem, WorkKind, WorkState
-from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
+from auto_pm.contracts.mission import (
+    AuthorityAudit,
+    AuthorityEnvelope,
+    InternalRoutingPolicy,
+    Mission,
+    MissionState,
+)
 from auto_pm.contracts.pm_cockpit import (
     CockpitUserAction,
     PmCockpitCompletion,
@@ -1013,3 +1020,142 @@ def test_closure_messages_never_expose_lease_token_or_paths(
     assert "closure-secret" not in dumped
     assert "token" not in dumped and "lease" not in dumped
     assert str(tmp_path).lower() not in dumped
+
+
+def _planning_approved(
+    mission: Mission,
+    *,
+    adapters: frozenset[ExecutionAdapterKind] = frozenset({ExecutionAdapterKind.CODEX}),
+    model: str = "agent-a",
+    mode: WorktreeMode = WorktreeMode.ISOLATED,
+) -> Mission:
+    """A Mission as materialised from an approved planning card (ISOLATED, model, adapter)."""
+
+    policy = InternalRoutingPolicy(
+        allowed_execution_adapters=adapters,
+        approved_model=model,
+        required_worktree_mode=mode,
+        declared_dirty_paths=("auto_pm/core/pm_cockpit_service.py",),
+    )
+    return mission.model_copy(
+        update={"authority": mission.authority.model_copy(update={"routing": policy})}
+    )
+
+
+def test_a_planning_approved_draft_mission_offers_confirm_start(tmp_path: Path) -> None:
+    service, mission, work, run = _resume_inputs(tmp_path)
+    ready = _planning_approved(mission.model_copy(update={"state": MissionState.DRAFT}))
+    facts = _ProjectFacts(
+        missions=(ready,),
+        works=(work,),
+        runs_by_work={work.work_id: ()},
+        checkpoints=(),
+        started_run_ids=frozenset(),
+    )
+
+    resume = service._resume(
+        ready, work, None, facts, PmCockpitEvidenceCurrency.NOT_APPLICABLE, ""
+    )
+
+    assert (resume.state, resume.user_action) == (
+        PmCockpitResumeState.WAITING_FOR_USER,
+        CockpitUserAction.CONFIRM_START,
+    )
+    assert resume.reason == "等待您确认开工；确认前不会创建或启动任何执行。"
+    assert PmCockpitService._next_action(ready, False) == (
+        CockpitUserAction.CONFIRM_START,
+        "确认开始执行",
+    )
+    assert run.run_id
+
+
+@pytest.mark.parametrize(
+    ("adapters", "model", "mode"),
+    [
+        (frozenset({ExecutionAdapterKind.CODEX}), "", WorktreeMode.ISOLATED),
+        (frozenset({ExecutionAdapterKind.CODEX}), "agent-a", WorktreeMode.CURRENT),
+        (frozenset[ExecutionAdapterKind](), "agent-a", WorktreeMode.ISOLATED),
+    ],
+    ids=["no-model", "not-isolated", "no-adapter"],
+)
+def test_a_draft_mission_without_a_complete_planning_grant_never_offers_start(
+    tmp_path: Path,
+    adapters: frozenset[ExecutionAdapterKind],
+    model: str,
+    mode: WorktreeMode,
+) -> None:
+    service, mission, work, _ = _resume_inputs(tmp_path)
+    draft = _planning_approved(
+        mission.model_copy(update={"state": MissionState.DRAFT}),
+        adapters=adapters,
+        model=model,
+        mode=mode,
+    )
+    facts = _ProjectFacts(
+        missions=(draft,),
+        works=(work,),
+        runs_by_work={work.work_id: ()},
+        checkpoints=(),
+        started_run_ids=frozenset(),
+    )
+
+    resume = service._resume(
+        draft, work, None, facts, PmCockpitEvidenceCurrency.NOT_APPLICABLE, ""
+    )
+
+    assert (resume.state, resume.user_action) == (
+        PmCockpitResumeState.NO_ACTIVE_WORK,
+        CockpitUserAction.NONE,
+    )
+    assert PmCockpitService._next_action(draft, False)[0] is CockpitUserAction.NONE
+
+
+def test_only_a_draft_mission_is_start_ready_even_with_a_planning_grant(tmp_path: Path) -> None:
+    _, mission, _, _ = _resume_inputs(tmp_path)
+
+    for state in (MissionState.ACTIVE, MissionState.ACCEPTANCE_PENDING, MissionState.CLOSED):
+        granted = _planning_approved(mission.model_copy(update={"state": state}))
+        assert PmCockpitService._is_start_ready(granted) is False
+
+
+@pytest.mark.parametrize(
+    ("mission_state", "message"),
+    [
+        (MissionState.ACCEPTANCE_PENDING, "该需求已执行并验证，等待验收；请直接确认验收，不要重复执行。"),
+        (MissionState.ACCEPTED, "该需求当前不能开始执行。"),
+        (MissionState.CLOSED, "该需求当前不能开始执行。"),
+        (MissionState.CANCELLED, "该需求当前不能开始执行。"),
+    ],
+)
+def test_start_execution_refuses_a_mission_that_cannot_start_without_writing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mission_state: MissionState,
+    message: str,
+) -> None:
+    service, mission, _, _ = _resume_inputs(tmp_path)
+    monkeypatch.setattr(
+        service._store, "get_mission", lambda _id: mission.model_copy(update={"state": mission_state})
+    )
+    before = _event_count(tmp_path)
+
+    with pytest.raises(PmCockpitError) as refusal:
+        service.start_execution(mission.mission_id)
+
+    assert str(refusal.value) == message
+    assert _event_count(tmp_path) == before
+
+
+def test_start_execution_refuses_blank_unknown_and_unapproved_missions(tmp_path: Path) -> None:
+    service, mission, _, _ = _resume_inputs(tmp_path)
+    before = _event_count(tmp_path)
+
+    with pytest.raises(PmCockpitError, match="未找到可启动的需求"):
+        service.start_execution("   ")
+    with pytest.raises(PmCockpitError, match="无法读取该需求"):
+        service.start_execution("MISSION-NOT-THERE")
+    # A legacy Mission has no planning approval, so there is nothing the Facade may run.
+    with pytest.raises(PmCockpitError):
+        service.start_execution(mission.mission_id)
+
+    assert _event_count(tmp_path) == before
