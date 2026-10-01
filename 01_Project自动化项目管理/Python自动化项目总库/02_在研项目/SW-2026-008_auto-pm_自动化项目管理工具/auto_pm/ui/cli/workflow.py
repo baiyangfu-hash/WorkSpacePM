@@ -12,9 +12,37 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from auto_pm.cli.pm import pm_group
 from auto_pm.constraint.workflow import WorkflowEngine
 
 console = Console()
+
+_DELEGATED_TO_PM = (
+    "plan",
+    "approve",
+    "confirm-start",
+    "execute",
+    "accept",
+    "resume",
+    "context",
+)
+_UNKNOWN_ACTION = (
+    "旧 workflow 动作 {name} 已退役，不会恢复旧写入状态机；"
+    "可用：list/run/history/status（工作流引擎）与 "
+    "plan/approve/confirm-start/execute/accept/resume/context（等同 pm 同名命令）。"
+)
+
+
+class _WorkflowGroup(click.Group):
+    """Keep the engine commands, delegate old PM actions to ``pm``, refuse everything else."""
+
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        name = args[0] if args else ""
+        if name and not name.startswith("-") and self.get_command(ctx, name) is None:
+            raise click.UsageError(_UNKNOWN_ACTION.format(name=repr(name)[:40]), ctx=ctx)
+        return super().resolve_command(ctx, args)
 
 
 def _resolve_workspace(ctx: click.Context) -> Path:
@@ -23,7 +51,7 @@ def _resolve_workspace(ctx: click.Context) -> Path:
     return Path.cwd()
 
 
-@click.group(name="workflow", help="工作流编排与执行管理")
+@click.group(name="workflow", cls=_WorkflowGroup, help="工作流编排与执行管理")
 def workflow_group() -> None:
     pass
 
@@ -128,3 +156,8 @@ def workflow_status(ctx: click.Context, run_id: str) -> None:
     console.print("[bold]步骤日志:[/bold]")
     for log in r.get("step_logs", []):
         console.print(f"  {log}")
+
+
+# The aliases ARE the pm command objects: they inherit every pm guard and add no write path.
+for _name in _DELEGATED_TO_PM:
+    workflow_group.add_command(pm_group.commands[_name], _name)
