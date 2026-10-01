@@ -39,13 +39,16 @@ from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_facade import (
+    PlanningApprovalResult,
     PlanningDraft,
+    PlanningDraftOverview,
     PlanningExecutionGrant,
     PlanningScopeCard,
     PmConfirmationCard,
     PmConfirmationKind,
     PmIntent,
     PmRunOutcome,
+    SubmittedPlanningScopeCard,
 )
 from auto_pm.domain.change.decision_service import (
     DecisionError,
@@ -59,6 +62,14 @@ log = logging.getLogger(__name__)
 _VERIFIED_MESSAGE = "已执行并通过质量验证，等待您的最终验收。"
 _NOT_VERIFIED_MESSAGE = "质量验证未通过，已保留现场；未进入验收。"
 _NOT_FINISHED_MESSAGE = "执行未完成，未进行质量验证；已保留现场。"
+_PLANNING_CHANGE_APPROVAL_STEPS = {
+    "draft": ("submitted", "under_review", "approved"),
+    "submitted": ("under_review", "approved"),
+    "under_review": ("approved",),
+}
+_PLANNING_CHANGE_APPROVED_STATES = frozenset(
+    {"approved", "implementing", "pending_acceptance", "accepting", "completed"}
+)
 
 
 class PmFacadeError(RuntimeError):
@@ -404,6 +415,124 @@ class PmFacadeService:
             )
         except (ExecutionDispatchError, LocalExecutionOrchestratorError) as error:
             raise PmFacadeError(str(error)) from error
+
+    def list_planning_drafts(self, subject_project_id: str) -> tuple[PlanningDraftOverview, ...]:
+        """List every planning draft of a project with the stage its scope card has reached."""
+
+        try:
+            return self._store.list_planning_drafts(subject_project_id)
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+
+    def list_pending_planning_scope_cards(
+        self, subject_project_id: str
+    ) -> tuple[SubmittedPlanningScopeCard, ...]:
+        """List the newest not yet approved scope card of each request of a project."""
+
+        try:
+            return self._store.list_pending_planning_scope_cards(subject_project_id)
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+
+    def submit_planning_scope_card(
+        self,
+        request_id: str,
+        *,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        non_goals: tuple[str, ...],
+        execution_grant: PlanningExecutionGrant,
+        submitted_by: str,
+    ) -> SubmittedPlanningScopeCard:
+        """Build the scope card of a persisted draft and persist it for human approval."""
+
+        grant: object = execution_grant
+        if not isinstance(grant, PlanningExecutionGrant):
+            raise PmFacadeError("范围卡必须显式给出 execution_grant")
+        try:
+            draft = self._store.get_planning_draft(request_id)
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+        card = self.create_planning_scope_card(
+            PmIntent(
+                subject_project_id=draft.subject_project_id,
+                request_id=draft.request_id,
+                objective=draft.objective,
+                acceptance_criteria=draft.acceptance_criteria,
+            ),
+            scope_paths=scope_paths,
+            risks=risks,
+            non_goals=non_goals,
+            execution_grant=execution_grant,
+        )
+        try:
+            self._store.submit_planning_scope_card(card, submitted_by)
+            return self._store.get_submitted_planning_scope_card(card.request_id, card.plan_hash)
+        except (ContinuityStoreError, ValueError) as error:
+            raise PmFacadeError(str(error)) from error
+
+    def approve_pending_planning_scope_card(
+        self,
+        request_id: str,
+        *,
+        expected_plan_hash: str,
+        approver: str,
+        approval_evidence_ref: str,
+    ) -> PlanningApprovalResult:
+        """Approve one persisted card by plan hash: CHG, Decision, Mission and Work in one call."""
+
+        try:
+            # A refused approval must write nothing, so the human evidence is checked first.
+            self._decisions.validate_planning_approval(
+                approver, expected_plan_hash, approval_evidence_ref
+            )
+            submitted = self._store.get_submitted_planning_scope_card(request_id, expected_plan_hash)
+            if submitted.superseded:
+                raise PmFacadeError("该范围卡已被新修订取代，请批准最新修订")
+            card = submitted.card
+            self._approve_planning_change(card, approver)
+            decision = self.approve_planning_scope_card(
+                card,
+                expected_plan_hash=expected_plan_hash,
+                approver=approver,
+                approval_evidence_ref=approval_evidence_ref,
+            )
+            mission = self.materialize_planning_mission(card)
+            work = self.create_planning_work(card)
+        except (
+            ContinuityStoreError,
+            DecisionError,
+            MissionServiceError,
+            WorkRegistryError,
+            ValueError,
+        ) as error:
+            raise PmFacadeError(str(error)) from error
+        return PlanningApprovalResult(
+            request_id=card.request_id,
+            subject_project_id=card.subject_project_id,
+            change_id=card.change_id,
+            plan_hash=card.plan_hash,
+            decision_id=decision.decision_id,
+            mission_id=mission.mission_id,
+            work_id=work.work_id,
+        )
+
+    def _approve_planning_change(self, card: PlanningScopeCard, approver: str) -> None:
+        """Advance the card's CHG to approved, resuming from whichever review step it reached."""
+
+        change = self._changes.get_change_request(card.change_id, project_id=card.subject_project_id)
+        if change is None or change.change_number != card.change_id:
+            raise PmFacadeError("PlanningScopeCard 未绑定可读取的真实 CHG")
+        for state in _PLANNING_CHANGE_APPROVAL_STEPS.get(change.status, ()):
+            change = self._changes.transition_status(
+                card.change_id,
+                state,
+                approver=approver,
+                comment=f"user approved planning scope {card.plan_hash}",
+                project_id=card.subject_project_id,
+            )
+        if change.status not in _PLANNING_CHANGE_APPROVED_STATES:
+            raise PmFacadeError(f"PlanningScopeCard 绑定的 CHG 不可批准: {change.status}")
 
     def recover_planning_scope_card(self, mission_id: str) -> PlanningScopeCard:
         """Rebuild the exact approved card from persisted, independently bound facts."""

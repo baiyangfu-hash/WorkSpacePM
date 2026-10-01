@@ -263,3 +263,88 @@ class PmRunOutcome(BaseModel):
         if not self.verified and self.checkpoint_id:
             raise ValueError("an unverified outcome must not carry a checkpoint_id")
         return self
+
+
+class SubmittedPlanningScopeCard(BaseModel):
+    """A persisted, not yet approved scope card as it is listed for human review."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["submitted-planning-scope-card.v1"] = "submitted-planning-scope-card.v1"
+    card: PlanningScopeCard
+    objective: str
+    revision: int
+    superseded: bool
+    submitted_by: str
+    submitted_at: str
+
+    @field_validator("objective", "submitted_by", "submitted_at")
+    @classmethod
+    def _validate_required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("required text must not be blank")
+        return value
+
+    @field_validator("revision")
+    @classmethod
+    def _validate_revision(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("revision must be at least 1")
+        return value
+
+
+class PlanningDraftOverview(BaseModel):
+    """One planning draft with the stage its scope card has reached."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["planning-draft-overview.v1"] = "planning-draft-overview.v1"
+    draft: PlanningDraft
+    created_at: str
+    change_id: str
+    card_revision: int
+    approved: bool
+
+    @field_validator("created_at")
+    @classmethod
+    def _validate_created_at(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("created_at must not be blank")
+        return value
+
+    @field_validator("card_revision")
+    @classmethod
+    def _validate_card_revision(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("card_revision must not be negative")
+        return value
+
+
+class PlanningApprovalResult(BaseModel):
+    """The authorization chain created by approving one pending scope card."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["planning-approval-result.v1"] = "planning-approval-result.v1"
+    request_id: str
+    subject_project_id: str
+    change_id: str
+    plan_hash: str
+    decision_id: str
+    mission_id: str
+    work_id: str
+
+    @field_validator(
+        "request_id",
+        "subject_project_id",
+        "change_id",
+        "plan_hash",
+        "decision_id",
+        "mission_id",
+        "work_id",
+    )
+    @classmethod
+    def _validate_required_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("required identifier must not be blank")
+        return value
