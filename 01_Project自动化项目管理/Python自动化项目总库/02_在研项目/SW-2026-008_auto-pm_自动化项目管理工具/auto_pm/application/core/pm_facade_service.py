@@ -490,6 +490,10 @@ class PmFacadeService:
             if submitted.superseded:
                 raise PmFacadeError("该范围卡已被新修订取代，请批准最新修订")
             card = submitted.card
+            if not self._planning_request_is_approved(card) and self._store.list_missions(
+                card.subject_project_id
+            ):
+                raise PmFacadeError("项目已有未终结的任务；请先验收或取消它，再批准新的范围卡")
             self._approve_planning_change(card, approver)
             decision = self.approve_planning_scope_card(
                 card,
@@ -515,6 +519,13 @@ class PmFacadeService:
             decision_id=decision.decision_id,
             mission_id=mission.mission_id,
             work_id=work.work_id,
+        )
+
+    def _planning_request_is_approved(self, card: PlanningScopeCard) -> bool:
+        return any(
+            item.approved
+            for item in self._store.list_planning_drafts(card.subject_project_id)
+            if item.draft.request_id == card.request_id
         )
 
     def _approve_planning_change(self, card: PlanningScopeCard, approver: str) -> None:

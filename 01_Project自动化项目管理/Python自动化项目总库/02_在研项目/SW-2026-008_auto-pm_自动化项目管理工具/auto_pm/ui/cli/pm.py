@@ -7,6 +7,7 @@ import os
 from typing import cast
 
 import click
+from click.core import ParameterSource
 
 from auto_pm.app_context import AppContext
 from auto_pm.change.change_service import ChangeService
@@ -117,6 +118,70 @@ def _planning_scope_card(
         raise click.ClickException(str(error)) from error
 
 
+def _submit_scope_card(
+    ctx: click.Context,
+    *,
+    request_id: str,
+    project_id: str,
+    objective: str,
+    acceptance: tuple[str, ...],
+    scope_paths: tuple[str, ...],
+    risks: tuple[str, ...],
+    non_goals: tuple[str, ...],
+    adapter: str | None,
+    approved_model: str,
+    declared_dirty_paths: tuple[str, ...],
+    submitted_by: str,
+    from_draft: bool,
+) -> PlanningScopeCard:
+    """Persist the scope card of a draft (creating the draft first unless it already exists)."""
+    try:
+        _require_control_root(ctx)
+        facade = _facade(ctx)
+        if not from_draft:
+            facade.create_planning_draft(
+                PmIntent(
+                    subject_project_id=project_id,
+                    request_id=request_id,
+                    objective=objective,
+                    acceptance_criteria=acceptance,
+                )
+            )
+        submitted = facade.submit_planning_scope_card(
+            request_id,
+            scope_paths=scope_paths,
+            risks=risks,
+            non_goals=non_goals,
+            execution_grant=PlanningExecutionGrant(
+                adapter=ExecutionAdapterKind(cast(str, adapter)),
+                approved_model=approved_model,
+                declared_dirty_paths=declared_dirty_paths,
+            ),
+            submitted_by=submitted_by,
+        )
+    except (PmFacadeError, ValueError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    return cast(PlanningScopeCard, submitted.card)
+
+
+def _emit_plan_approval(card: PlanningScopeCard, work_state: str) -> None:
+    click.echo(
+        json.dumps(
+            {
+                "schema_version": "pm-plan-approval.v1",
+                "request_id": card.request_id,
+                "subject_project_id": card.subject_project_id,
+                "change_id": card.change_id,
+                "plan_hash": card.plan_hash,
+                "authorization_status": "AUTHORIZED",
+                "work_state": work_state,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
 def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approver: str) -> None:
     app_ctx: AppContext = ctx.find_root().obj
     changes = ChangeService(str(app_ctx.control_root))
@@ -165,6 +230,7 @@ def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approv
 )
 @click.option("--approved-model", default="")
 @click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
+@click.option("--submitted-by", default="pm-cli", show_default=True, help="范围卡提交者标识，写入事件链")
 @click.pass_context
 def plan_pm(
     ctx: click.Context,
@@ -179,8 +245,13 @@ def plan_pm(
     adapter: str | None,
     approved_model: str,
     declared_dirty_paths: tuple[str, ...],
+    submitted_by: str,
 ) -> None:
-    """创建/恢复新需求范围卡，或兼容已有 Mission 调用。"""
+    """创建/恢复并持久化新需求范围卡，或兼容已有 Mission 调用。
+
+    只给 --request-id（不给 --project-id/--objective/--acceptance）时，为已保存的草稿
+    （例如驾驶舱保存的草稿）起草并持久化范围卡。
+    """
     new_values = (
         project_id,
         request_id,
@@ -198,10 +269,32 @@ def plan_pm(
             raise click.ClickException("--mission-id 不能与新需求参数混用")
         _emit_card(ctx, "plan", mission_id)
         return
-    card = _planning_scope_card(
+    from_draft = bool(request_id) and not any((project_id, objective, acceptance))
+    required = [
+        ("--scope", scope_paths),
+        ("--risk", risks),
+        ("--non-goal", non_goals),
+        ("--adapter", adapter),
+        ("--approved-model", approved_model),
+    ]
+    if not from_draft:
+        required = [
+            ("--project-id", project_id),
+            ("--request-id", request_id),
+            ("--objective", objective),
+            ("--acceptance", acceptance),
+            *required,
+        ]
+    missing = [name for name, value in required if not value]
+    if missing:
+        raise click.ClickException(
+            ("按已保存草稿提交范围卡缺少必填参数: " if from_draft else "新需求 plan 缺少必填参数: ")
+            + ", ".join(missing)
+        )
+    card = _submit_scope_card(
         ctx,
-        project_id=project_id,
         request_id=request_id,
+        project_id=project_id,
         objective=objective,
         acceptance=acceptance,
         scope_paths=scope_paths,
@@ -210,8 +303,56 @@ def plan_pm(
         adapter=adapter,
         approved_model=approved_model,
         declared_dirty_paths=declared_dirty_paths,
+        submitted_by=submitted_by,
+        from_draft=from_draft,
     )
     click.echo(card.model_dump_json(indent=2))
+
+
+@pm_group.command(name="drafts")
+@click.option("--project-id", required=True, help="项目 PID")
+@click.pass_context
+def drafts_pm(ctx: click.Context, project_id: str) -> None:
+    """列出项目的全部规划草稿（含驾驶舱保存的草稿）及其范围卡阶段。"""
+    try:
+        _require_control_root(ctx)
+        overview = _facade(ctx).list_planning_drafts(project_id)
+    except (PmFacadeError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(
+        json.dumps(
+            {
+                "schema_version": "pm-planning-drafts.v1",
+                "project_id": project_id,
+                "drafts": [item.model_dump(mode="json") for item in overview],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+@pm_group.command(name="pending")
+@click.option("--project-id", required=True, help="项目 PID")
+@click.pass_context
+def pending_pm(ctx: click.Context, project_id: str) -> None:
+    """列出项目中等待批准的最新范围卡。"""
+    try:
+        _require_control_root(ctx)
+        cards = _facade(ctx).list_pending_planning_scope_cards(project_id)
+    except (PmFacadeError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(
+        json.dumps(
+            {
+                "schema_version": "pm-pending-scope-cards.v1",
+                "project_id": project_id,
+                "cards": [item.model_dump(mode="json") for item in cards],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 @pm_group.command(name="approve")
@@ -294,6 +435,36 @@ def approve_pm(
     ]
     if missing:
         raise click.ClickException("新需求批准缺少必填参数: " + ", ".join(missing))
+    if request_id and not any(
+        (
+            project_id,
+            objective,
+            acceptance,
+            scope_paths,
+            risks,
+            non_goals,
+            adapter,
+            approved_model,
+            declared_dirty_paths,
+        )
+    ):
+        if ctx.get_parameter_source("owner") is ParameterSource.COMMANDLINE:
+            raise click.ClickException("按哈希批准已保存范围卡时不支持 --owner")
+        try:
+            _require_control_root(ctx)
+            short_facade = _facade(ctx)
+            result = short_facade.approve_pending_planning_scope_card(
+                request_id,
+                expected_plan_hash=plan_hash,
+                approver=approver,
+                approval_evidence_ref=approval_evidence_ref,
+            )
+            approved_card = short_facade.recover_planning_scope_card(result.mission_id)
+            approved_work = short_facade.create_planning_work(approved_card)
+        except (PmFacadeError, WorktreePolicyError) as error:
+            raise click.ClickException(str(error)) from error
+        _emit_plan_approval(approved_card, approved_work.state.value)
+        return
     card = _planning_scope_card(
         ctx,
         project_id=project_id,
@@ -320,21 +491,7 @@ def approve_pm(
         work = facade.create_planning_work(card, owner=owner)
     except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
-    click.echo(
-        json.dumps(
-            {
-                "schema_version": "pm-plan-approval.v1",
-                "request_id": card.request_id,
-                "subject_project_id": card.subject_project_id,
-                "change_id": card.change_id,
-                "plan_hash": card.plan_hash,
-                "authorization_status": "AUTHORIZED",
-                "work_state": work.state.value,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
+    _emit_plan_approval(card, work.state.value)
 
 
 @pm_group.command(name="confirm-start")
