@@ -430,7 +430,9 @@ class ExecutionDispatchService:
 
     def _project_stack(self, project_id: str) -> str:
         try:
-            context = WorkspaceContextService(str(self._root)).resolve(project_id=project_id)
+            context = WorkspaceContextService(str(self._root)).resolve(
+                project_id=project_id, start_path=self._root
+            )
         except WorkspaceContextError as error:
             raise ExecutionDispatchError(str(error)) from error
         stack = context.subject.stack

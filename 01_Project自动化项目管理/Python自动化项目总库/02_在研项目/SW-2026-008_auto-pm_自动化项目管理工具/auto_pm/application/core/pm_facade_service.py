@@ -5,11 +5,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 from pathlib import Path
 from typing import Any, cast
 
 from auto_pm.change.change_service import ChangeService
+from auto_pm.core.continuity_execution_service import (
+    ContinuityExecutionError,
+    ContinuityExecutionService,
+)
 from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
 from auto_pm.core.execution_adapter_service import (
     ExecutionDispatchError,
@@ -40,6 +45,7 @@ from auto_pm.contracts.pm_facade import (
     PmConfirmationCard,
     PmConfirmationKind,
     PmIntent,
+    PmRunOutcome,
 )
 from auto_pm.domain.change.decision_service import (
     DecisionError,
@@ -47,6 +53,12 @@ from auto_pm.domain.change.decision_service import (
     DecisionValidationError,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+
+log = logging.getLogger(__name__)
+
+_VERIFIED_MESSAGE = "已执行并通过质量验证，等待您的最终验收。"
+_NOT_VERIFIED_MESSAGE = "质量验证未通过，已保留现场；未进入验收。"
+_NOT_FINISHED_MESSAGE = "执行未完成，未进行质量验证；已保留现场。"
 
 
 class PmFacadeError(RuntimeError):
@@ -451,6 +463,114 @@ class PmFacadeService:
             expected_plan_hash=card.plan_hash,
             lease_token=secrets.token_urlsafe(32),
             lease_token_environment="AUTO_PM_EXECUTION_LEASE_TOKEN",
+        )
+
+    def run_approved_planning(
+        self,
+        card: PlanningScopeCard,
+        *,
+        expected_plan_hash: str,
+        lease_token: str,
+        lease_token_environment: str,
+    ) -> PmRunOutcome:
+        """Run one approved card in isolation, then verify it up to the acceptance gate."""
+
+        actual_hash = self._planning_scope_card_hash(card)
+        if not hmac.compare_digest(actual_hash, card.plan_hash) or not hmac.compare_digest(
+            actual_hash, expected_plan_hash
+        ):
+            raise PmFacadeError("PlanningScopeCard plan_hash 已过期或内容发生漂移")
+        mission = self.materialize_planning_mission(card)
+        work = self.create_planning_work(card)
+        mission = self._mission(mission.mission_id)
+        if mission.state is MissionState.ACCEPTANCE_PENDING:
+            return self.verify_for_acceptance(mission.mission_id, lease_token=lease_token)
+        if mission.state in {
+            MissionState.ACCEPTED,
+            MissionState.CLOSED,
+            MissionState.CANCELLED,
+            MissionState.BLOCKED,
+        }:
+            raise PmFacadeError("该需求已验收、已结束或被阻塞，不能重复执行")
+        if mission.state is MissionState.DRAFT:
+            self.plan(mission.mission_id)
+        self.approve(mission.mission_id, work.work_id)
+        self.execute(mission.mission_id)
+        receipt = self.execute_planning_foreground(
+            card,
+            expected_plan_hash=expected_plan_hash,
+            lease_token=lease_token,
+            lease_token_environment=lease_token_environment,
+        )
+        if receipt.status != "VERIFYING":
+            return PmRunOutcome(
+                mission_id=mission.mission_id,
+                run_id=receipt.run_id,
+                receipt_status=receipt.status,
+                verified=False,
+                mission_state=self._mission(mission.mission_id).state,
+                message=_NOT_FINISHED_MESSAGE,
+            )
+        outcome = self.verify_for_acceptance(mission.mission_id, lease_token=lease_token)
+        return outcome.model_copy(update={"receipt_status": receipt.status})
+
+    def verify_for_acceptance(self, mission_id: str, *, lease_token: str) -> PmRunOutcome:
+        """Generate the system-bound quality Checkpoint and open the acceptance gate."""
+
+        mission = self._mission(mission_id)
+        if mission.state not in {MissionState.ACTIVE, MissionState.ACCEPTANCE_PENDING}:
+            raise PmFacadeError("当前 Mission 不在可验证状态")
+        if not mission.root_work_id:
+            raise PmFacadeError("Mission 缺少根 Work，不能验证")
+        work = self._work(mission.root_work_id)
+        try:
+            runs = self._store.list_runs(work.work_id, include_terminal=True)
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+        if not runs or runs[0].state is not RunState.VERIFYING:
+            raise PmFacadeError("最新 Run 未处于 VERIFYING，不能验证")
+        run = runs[0]
+        try:
+            owner_id = self._store.get_lease(run.run_id).owner_id
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+        checkpoint_id = f"CP-{run.run_id}-VERIFY"
+        try:
+            ContinuityExecutionService(
+                self._workspace_root, store=self._store
+            ).append_verified_checkpoint(
+                checkpoint_id=checkpoint_id,
+                run_id=run.run_id,
+                owner_id=owner_id,
+                lease_token=lease_token,
+                project_root=Path(run.worktree_path),
+                profile="generic",
+            )
+        except ContinuityExecutionError:
+            log.exception("质量验证未通过: mission=%s run=%s", mission.mission_id, run.run_id)
+            return PmRunOutcome(
+                mission_id=mission.mission_id,
+                run_id=run.run_id,
+                receipt_status=run.state.value,
+                verified=False,
+                mission_state=mission.state,
+                message=_NOT_VERIFIED_MESSAGE,
+            )
+        if mission.state is MissionState.ACTIVE:
+            mission = self._transition(
+                mission,
+                MissionState.ACCEPTANCE_PENDING,
+                root_work_id=mission.root_work_id,
+                action="verify",
+            )
+        return PmRunOutcome(
+            mission_id=mission.mission_id,
+            run_id=run.run_id,
+            receipt_status=run.state.value,
+            verified=True,
+            checkpoint_id=checkpoint_id,
+            mission_state=mission.state,
+            message=_VERIFIED_MESSAGE,
         )
 
     @staticmethod

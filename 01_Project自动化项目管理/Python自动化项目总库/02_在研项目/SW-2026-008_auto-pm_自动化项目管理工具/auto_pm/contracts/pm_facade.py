@@ -226,3 +226,40 @@ class PmConfirmationCard(BaseModel):
     summary: str
     acceptance_criteria: tuple[str, ...]
     next_actions: tuple[str, ...]
+
+
+class PmRunOutcome(BaseModel):
+    """Immutable result of one approved run followed by automatic quality verification."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["pm-run-outcome.v1"] = "pm-run-outcome.v1"
+    mission_id: str
+    run_id: str
+    receipt_status: str
+    verified: bool
+    checkpoint_id: str = ""
+    mission_state: MissionState
+    message: str
+
+    @field_validator("mission_id", "run_id")
+    @classmethod
+    def _validate_required_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("required identifier must not be blank")
+        return value
+
+    @field_validator("message")
+    @classmethod
+    def _validate_message(cls, value: str) -> str:
+        if not value.strip() or len(value) > 200:
+            raise ValueError("message must be non-empty and at most 200 characters")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_checkpoint_binding(self) -> PmRunOutcome:
+        if self.verified and not self.checkpoint_id:
+            raise ValueError("a verified outcome must carry its checkpoint_id")
+        if not self.verified and self.checkpoint_id:
+            raise ValueError("an unverified outcome must not carry a checkpoint_id")
+        return self

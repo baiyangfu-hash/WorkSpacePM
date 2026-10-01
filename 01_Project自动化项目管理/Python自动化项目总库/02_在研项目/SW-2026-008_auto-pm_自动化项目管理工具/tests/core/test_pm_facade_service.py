@@ -14,7 +14,10 @@ from typing import Any
 
 import pytest
 from auto_pm.change.change_service import ChangeService
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.core.continuity_execution_service import (
+    ContinuityExecutionError,
+    ContinuityExecutionService,
+)
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
@@ -26,13 +29,18 @@ from auto_pm.application.core.evidence_collection_service import (
     _quality_receipt_hash,
 )
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
-from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
+from auto_pm.contracts.execution_adapter import (
+    ExecutionAdapterKind,
+    ForegroundExecutionReceipt,
+    WorktreeMode,
+)
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 from auto_pm.contracts.pm_facade import (
     PlanningExecutionGrant,
     PlanningScopeCard,
     PmConfirmationKind,
     PmIntent,
+    PmRunOutcome,
 )
 from auto_pm.domain.change.decision_service import DecisionError
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
@@ -1343,3 +1351,239 @@ def test_acceptance_gate_reason_requires_a_checkpoint_on_a_verifying_run(tmp_pat
         facade.accept("MISSION-PM-001")
     assert reason == str(refusal.value)
     assert "Checkpoint" in reason
+
+
+def _approved_run_card(root: Path) -> tuple[PmFacadeService, PlanningScopeCard]:
+    facade, _database, changes = _p10_facade(root)
+    grant = PlanningExecutionGrant(
+        adapter=ExecutionAdapterKind.CODEX,
+        approved_model="agent-a",
+        declared_dirty_paths=("auto_pm/example.py",),
+    )
+    card = facade.create_planning_scope_card(
+        _planning_intent(),
+        scope_paths=("auto_pm/example.py",),
+        risks=("unit",),
+        non_goals=("no refactor",),
+        execution_grant=grant,
+    )
+    for state in ("submitted", "under_review", "approved"):
+        changes.transition_status(
+            card.change_id, state, approver="fubai", comment="human", project_id="SW-TEST-001"
+        )
+    facade.approve_planning_scope_card(
+        card,
+        expected_plan_hash=card.plan_hash,
+        approver="fubai",
+        approval_evidence_ref="user-confirmation:U07A-UNIT",
+    )
+    return facade, card
+
+
+def _event_total(database: Path) -> int:
+    with closing(sqlite3.connect(database)) as connection:
+        return int(connection.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+
+
+def _outcome(mission_id: str, *, verified: bool) -> PmRunOutcome:
+    return PmRunOutcome(
+        mission_id=mission_id,
+        run_id="RUN-UNIT-001",
+        receipt_status="VERIFYING",
+        verified=verified,
+        checkpoint_id="CP-RUN-UNIT-001-VERIFY" if verified else "",
+        mission_state=MissionState.ACCEPTANCE_PENDING,
+        message="unit",
+    )
+
+
+def test_run_outcome_binds_the_checkpoint_to_the_verified_flag() -> None:
+    assert _outcome("MISSION-X", verified=True).checkpoint_id
+    with pytest.raises(ValueError, match="checkpoint_id"):
+        PmRunOutcome(
+            mission_id="MISSION-X",
+            run_id="RUN-X",
+            receipt_status="VERIFYING",
+            verified=True,
+            mission_state=MissionState.ACTIVE,
+            message="unit",
+        )
+    with pytest.raises(ValueError, match="checkpoint_id"):
+        PmRunOutcome(
+            mission_id="MISSION-X",
+            run_id="RUN-X",
+            receipt_status="FAILED",
+            verified=False,
+            checkpoint_id="CP-X",
+            mission_state=MissionState.ACTIVE,
+            message="unit",
+        )
+    with pytest.raises(ValueError, match="at most 200"):
+        PmRunOutcome(
+            mission_id="MISSION-X",
+            run_id="RUN-X",
+            receipt_status="FAILED",
+            verified=False,
+            mission_state=MissionState.ACTIVE,
+            message="x" * 201,
+        )
+
+
+def test_verify_for_acceptance_refuses_a_mission_that_cannot_be_verified(tmp_path: Path) -> None:
+    _, facade = _setup(tmp_path)
+    before = _gate_event_count(tmp_path)
+
+    with pytest.raises(PmFacadeError, match="不在可验证状态"):
+        facade.verify_for_acceptance("MISSION-PM-001", lease_token="unit-lease")
+
+    assert _gate_event_count(tmp_path) == before
+
+
+def test_verify_for_acceptance_requires_the_latest_run_to_be_verifying(tmp_path: Path) -> None:
+    _, facade, _ = _unverified_run_ready(tmp_path)
+    before = _gate_event_count(tmp_path)
+
+    with pytest.raises(PmFacadeError, match="未处于 VERIFYING"):
+        facade.verify_for_acceptance("MISSION-PM-001", lease_token="gate-lease")
+
+    assert _gate_event_count(tmp_path) == before
+
+
+def test_verify_for_acceptance_reports_a_refused_checkpoint_without_changing_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missions, facade, execution = _unverified_run_ready(tmp_path)
+    execution.transition_run(
+        "RUN-GATE-001", RunState.VERIFYING, "gate-test", "gate-lease", "gate-run-verifying"
+    )
+    captured: dict[str, Any] = {}
+
+    def refuse(_self: ContinuityExecutionService, **kwargs: Any) -> None:
+        captured.update(kwargs)
+        raise ContinuityExecutionError("simulated quality failure")
+
+    monkeypatch.setattr(ContinuityExecutionService, "append_verified_checkpoint", refuse)
+    before = _gate_event_count(tmp_path)
+
+    outcome = facade.verify_for_acceptance("MISSION-PM-001", lease_token="gate-lease")
+
+    assert outcome.verified is False
+    assert outcome.checkpoint_id == ""
+    assert outcome.message == "质量验证未通过，已保留现场；未进入验收。"
+    assert outcome.mission_state is MissionState.ACCEPTANCE_PENDING
+    assert "gate-lease" not in outcome.model_dump_json()
+    assert captured == {
+        "checkpoint_id": "CP-RUN-GATE-001-VERIFY",
+        "run_id": "RUN-GATE-001",
+        "owner_id": "gate-test",
+        "lease_token": "gate-lease",
+        "project_root": tmp_path,
+        "profile": "generic",
+    }
+    assert _gate_event_count(tmp_path) == before
+    assert missions.get("MISSION-PM-001").state is MissionState.ACCEPTANCE_PENDING
+
+
+def test_run_approved_planning_rejects_a_drifted_plan_hash_before_any_effect(
+    tmp_path: Path,
+) -> None:
+    facade, card = _approved_run_card(tmp_path)
+
+    with pytest.raises(PmFacadeError, match="plan_hash"):
+        facade.run_approved_planning(
+            card,
+            expected_plan_hash="0" * 64,
+            lease_token="unit-lease",
+            lease_token_environment="AUTO_PM_EXECUTION_LEASE_TOKEN",
+        )
+
+    assert facade._store.list_missions("SW-TEST-001", include_terminal=True) == ()
+
+
+def test_run_approved_planning_skips_verification_when_execution_did_not_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facade, card = _approved_run_card(tmp_path)
+    receipt = ForegroundExecutionReceipt(
+        operation_id="OP-UNIT",
+        run_id="RUN-UNIT-001",
+        status="PENDING",
+        claim_sha256="a" * 64,
+    )
+    calls: list[str] = []
+
+    def execute(_card: PlanningScopeCard, **_kwargs: object) -> ForegroundExecutionReceipt:
+        calls.append("execute")
+        return receipt
+
+    def forbidden(*_args: object, **_kwargs: object) -> PmRunOutcome:
+        raise AssertionError("verification must not run for an unfinished execution")
+
+    monkeypatch.setattr(facade, "execute_planning_foreground", execute)
+    monkeypatch.setattr(facade, "verify_for_acceptance", forbidden)
+
+    first = facade.run_approved_planning(
+        card,
+        expected_plan_hash=card.plan_hash,
+        lease_token="unit-lease",
+        lease_token_environment="AUTO_PM_EXECUTION_LEASE_TOKEN",
+    )
+    database = tmp_path / ".auto-pm" / "p10-test.db"
+    events = _event_total(database)
+    second = facade.run_approved_planning(
+        card,
+        expected_plan_hash=card.plan_hash,
+        lease_token="unit-lease",
+        lease_token_environment="AUTO_PM_EXECUTION_LEASE_TOKEN",
+    )
+
+    assert first == second
+    assert first.verified is False
+    assert first.receipt_status == "PENDING"
+    assert first.run_id == "RUN-UNIT-001"
+    assert first.mission_state is MissionState.ACTIVE
+    assert first.message == "执行未完成，未进行质量验证；已保留现场。"
+    assert calls == ["execute", "execute"]
+    assert _event_total(database) == events
+    mission = facade.materialize_planning_mission(card)
+    assert mission.root_work_id
+    assert facade._store.get_work(mission.root_work_id).state is WorkState.IN_PROGRESS
+
+
+def test_run_approved_planning_verifies_a_finished_execution_with_the_same_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facade, card = _approved_run_card(tmp_path)
+    receipt = ForegroundExecutionReceipt(
+        operation_id="OP-UNIT",
+        run_id="RUN-UNIT-001",
+        status="VERIFYING",
+        claim_sha256="a" * 64,
+        process_id=1,
+        session_id="session-unit",
+        exit_code=0,
+        projection_sha256="b" * 64,
+    )
+    seen: dict[str, str] = {}
+
+    def verify(mission_id: str, *, lease_token: str) -> PmRunOutcome:
+        seen["mission_id"] = mission_id
+        seen["lease_token"] = lease_token
+        return _outcome(mission_id, verified=True).model_copy(update={"receipt_status": "x"})
+
+    monkeypatch.setattr(facade, "execute_planning_foreground", lambda *_a, **_k: receipt)
+    monkeypatch.setattr(facade, "verify_for_acceptance", verify)
+
+    outcome = facade.run_approved_planning(
+        card,
+        expected_plan_hash=card.plan_hash,
+        lease_token="unit-lease",
+        lease_token_environment="AUTO_PM_EXECUTION_LEASE_TOKEN",
+    )
+
+    assert seen == {
+        "mission_id": facade.materialize_planning_mission(card).mission_id,
+        "lease_token": "unit-lease",
+    }
+    assert outcome.verified is True
+    assert outcome.receipt_status == "VERIFYING"

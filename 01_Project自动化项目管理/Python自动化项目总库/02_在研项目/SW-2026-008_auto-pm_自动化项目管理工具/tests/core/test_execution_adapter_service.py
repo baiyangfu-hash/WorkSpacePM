@@ -880,3 +880,20 @@ def test_replay_after_authority_expiry_is_read_only(tmp_path: Path) -> None:
     replay = _prepare(tmp_path, mission=mission, dispatch=later)
     assert replay.intent == prepared.intent
     assert _counts(tmp_path) == before
+
+
+def test_stack_resolution_does_not_depend_on_the_process_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _ready(workspace)
+    monkeypatch.chdir(outside)
+
+    result = _prepare(workspace, stack=None)
+
+    assert result.receipt.run_id == "RUN-E02-001"
+    assert result.receipt.role is ExecutionRole.FULLSTACK_ENGINEER
+    assert Path.cwd() == outside
