@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 __app_name__ = "auto-pm"
 __version__ = "1.3.3"
@@ -39,4 +40,22 @@ __all__ = [
     "infrastructure",
     "application",
     "ui",
+    "CockpitApiError",
+    "CockpitClient",
+    "CockpitIdentity",
 ]
+
+_LAZY_API_NAMES = frozenset({"CockpitApiError", "CockpitClient", "CockpitIdentity"})
+
+if TYPE_CHECKING:
+    from auto_pm.api import CockpitApiError, CockpitClient, CockpitIdentity
+
+
+def __getattr__(name: str) -> object:
+    """Load the thin SDK lazily so importing ``auto_pm`` stays light (PEP 562)."""
+
+    if name in _LAZY_API_NAMES:
+        from auto_pm import api
+
+        return getattr(api, name)
+    raise AttributeError(f"module 'auto_pm' has no attribute {name!r}")
