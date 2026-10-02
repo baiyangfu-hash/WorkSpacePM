@@ -22,19 +22,19 @@ log = logging.getLogger(__name__)
 
 
 class _StartWorker(QRunnable):
-    """Run one approved Mission without blocking the QML event loop."""
+    """Run one approved Mission without retaining its GUI bridge in the pool."""
 
     def __init__(self, mission_id: str, bridge: PmCockpitBridge) -> None:
         super().__init__()
         self._mission_id = mission_id
-        self._bridge = bridge
+        self._service = bridge._service
         self.setAutoDelete(False)
         self.result: tuple[bool, str] | None = None
         self.done = False
 
     def run(self) -> None:
         try:
-            outcome = self._bridge._service.start_execution(self._mission_id)
+            outcome = self._service.start_execution(self._mission_id)
             if outcome.verified:
                 self.result = (True, outcome.message)
             elif outcome.receipt_status == "FAILED":

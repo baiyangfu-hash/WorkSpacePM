@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+import ctypes
+import faulthandler
+import gc
 import json
+import os
 import sqlite3
 import subprocess
+import sys
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, cast
+from threading import Thread, get_native_id
+from typing import Literal, NoReturn, cast
+from weakref import ReferenceType, ref
 
 import pytest
 from auto_pm.change.ledger_reconciler import ReconcileDiff
 from auto_pm.core.pm_closure_service import PmClosureService
 from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
-from PySide6.QtCore import QRunnable, QThreadPool
+from PySide6.QtCore import QRunnable, Qt, QThreadPool, QTimer
+from PySide6.QtWidgets import QApplication
 
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_cockpit import (
@@ -25,7 +35,7 @@ from auto_pm.contracts.pm_cockpit import (
 )
 from auto_pm.contracts.pm_facade import PmConfirmationCard, PmConfirmationKind, PmRunOutcome
 from auto_pm.infrastructure.continuity_store import ContinuityStore
-from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
+from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge, _StartWorker
 from tests.core.test_pm_closure_service import _MISSION_ID as _CLOSE_MISSION
 from tests.core.test_pm_closure_service import (
     _accepted_lineage,
@@ -34,6 +44,7 @@ from tests.core.test_pm_closure_service import (
 )
 from tests.core.test_pm_cockpit_service import _registry as _core_registry
 from tests.core.test_pm_cockpit_service import _seed_authorized_mission
+from tests.qml.conftest import _assert_gui_thread, _delete_qobject
 
 
 class _HoldingThreadPool:
@@ -43,6 +54,25 @@ class _HoldingThreadPool:
     def start(self, worker: QRunnable, priority: int = 0) -> None:
         del priority
         self.worker = worker
+
+
+@contextmanager
+def _managed_start_bridge(
+    root: Path, service: PmCockpitService, pool: _HoldingThreadPool
+) -> Iterator[PmCockpitBridge]:
+    """Close a synchronous holding-pool test even when an assertion interrupts it."""
+    bridge = PmCockpitBridge(str(root), service=service, thread_pool=cast(QThreadPool, pool))
+    try:
+        yield bridge
+    finally:
+        _assert_gui_thread(bridge)
+        for timer in bridge.findChildren(QTimer):
+            timer.stop()
+        bridge.blockSignals(True)
+        # This pool only holds tasks; discard unexecuted work without running business code.
+        pool.worker = None
+        bridge._start_workers.clear()
+        _delete_qobject(bridge)
 
 
 class _StartService:
@@ -206,89 +236,77 @@ def test_bridge_rejects_incomplete_or_unknown_planning_input(tmp_path: Path) -> 
 def test_start_execution_is_one_shot_until_worker_finishes(tmp_path: Path) -> None:
     service = _StartService([_receipt("VERIFYING"), _receipt("VERIFYING")])
     pool = _HoldingThreadPool()
-    bridge = PmCockpitBridge(
-        str(tmp_path),
-        service=cast(PmCockpitService, service),
-        thread_pool=cast(QThreadPool, pool),
-    )
-    finished: list[tuple[str, bool, str]] = []
-    bridge.startFinished.connect(
-        lambda mission_id, success, message: finished.append(
-            (mission_id, success, message)
+    with _managed_start_bridge(tmp_path, cast(PmCockpitService, service), pool) as bridge:
+        finished: list[tuple[str, bool, str]] = []
+        bridge.startFinished.connect(
+            lambda mission_id, success, message: finished.append(
+                (mission_id, success, message)
+            )
         )
-    )
 
-    first = bridge.startExecution(" MISSION-001 ")
-    replay = bridge.startExecution("MISSION-001")
+        first = bridge.startExecution(" MISSION-001 ")
+        replay = bridge.startExecution("MISSION-001")
 
-    assert first == {
-        "accepted": True,
-        "busy": True,
-        "message": "已提交启动请求，正在后台执行。",
-    }
-    assert replay["accepted"] is False
-    assert replay["busy"] is True
-    assert service.calls == []
-    assert pool.worker is not None
+        assert first == {
+            "accepted": True,
+            "busy": True,
+            "message": "已提交启动请求，正在后台执行。",
+        }
+        assert replay["accepted"] is False
+        assert replay["busy"] is True
+        assert service.calls == []
+        assert pool.worker is not None
 
-    pool.worker.run()
-    bridge._poll_start_workers()
+        pool.worker.run()
+        bridge._poll_start_workers()
 
-    assert service.calls == ["MISSION-001"]
-    assert finished == [("MISSION-001", True, "已执行并通过质量验证，等待您的最终验收。")]
-    assert bridge.startExecution("MISSION-001")["accepted"] is True
+        assert service.calls == ["MISSION-001"]
+        assert finished == [("MISSION-001", True, "已执行并通过质量验证，等待您的最终验收。")]
+        assert bridge.startExecution("MISSION-001")["accepted"] is True
 
 
 def test_start_execution_failure_clears_busy_without_false_success(tmp_path: Path) -> None:
     service = _StartService([PmCockpitError("授权已失效"), _receipt("PENDING")])
     pool = _HoldingThreadPool()
-    bridge = PmCockpitBridge(
-        str(tmp_path),
-        service=cast(PmCockpitService, service),
-        thread_pool=cast(QThreadPool, pool),
-    )
-    finished: list[tuple[str, bool, str]] = []
-    bridge.startFinished.connect(
-        lambda mission_id, success, message: finished.append(
-            (mission_id, success, message)
+    with _managed_start_bridge(tmp_path, cast(PmCockpitService, service), pool) as bridge:
+        finished: list[tuple[str, bool, str]] = []
+        bridge.startFinished.connect(
+            lambda mission_id, success, message: finished.append(
+                (mission_id, success, message)
+            )
         )
-    )
 
-    assert bridge.startExecution("MISSION-FAIL")["accepted"] is True
-    assert pool.worker is not None
-    pool.worker.run()
-    bridge._poll_start_workers()
+        assert bridge.startExecution("MISSION-FAIL")["accepted"] is True
+        assert pool.worker is not None
+        pool.worker.run()
+        bridge._poll_start_workers()
 
-    assert finished == [("MISSION-FAIL", False, "授权已失效")]
-    assert bridge.startExecution("MISSION-FAIL")["accepted"] is True
-    assert pool.worker is not None
-    pool.worker.run()
-    bridge._poll_start_workers()
-    assert finished[-1] == (
-        "MISSION-FAIL",
-        False,
-        "无法确认任务已启动，已保留待核验状态。",
-    )
+        assert finished == [("MISSION-FAIL", False, "授权已失效")]
+        assert bridge.startExecution("MISSION-FAIL")["accepted"] is True
+        assert pool.worker is not None
+        pool.worker.run()
+        bridge._poll_start_workers()
+        assert finished[-1] == (
+            "MISSION-FAIL",
+            False,
+            "无法确认任务已启动，已保留待核验状态。",
+        )
 
 
 def _finished_start(
     tmp_path: Path, outcome: PmRunOutcome | Exception
 ) -> list[tuple[str, bool, str]]:
     pool = _HoldingThreadPool()
-    bridge = PmCockpitBridge(
-        str(tmp_path),
-        service=cast(PmCockpitService, _StartService([outcome])),
-        thread_pool=cast(QThreadPool, pool),
-    )
-    finished: list[tuple[str, bool, str]] = []
-    bridge.startFinished.connect(
-        lambda mission_id, success, message: finished.append((mission_id, success, message))
-    )
-    assert bridge.startExecution("MISSION-001")["accepted"] is True
-    assert pool.worker is not None
-    pool.worker.run()
-    bridge._poll_start_workers()
-    return finished
+    with _managed_start_bridge(tmp_path, cast(PmCockpitService, _StartService([outcome])), pool) as bridge:
+        finished: list[tuple[str, bool, str]] = []
+        bridge.startFinished.connect(
+            lambda mission_id, success, message: finished.append((mission_id, success, message))
+        )
+        assert bridge.startExecution("MISSION-001")["accepted"] is True
+        assert pool.worker is not None
+        pool.worker.run()
+        bridge._poll_start_workers()
+        return finished
 
 
 @pytest.mark.parametrize(
@@ -806,3 +824,190 @@ def test_retry_closure_runs_the_real_closure_service_and_completes_after_a_faile
     assert finished[1][2] == "已完成：变更单与台账已同步。"
     assert _lineage_states(database)[:4] == ("SUCCEEDED", "CLOSED", "CLOSED", "COMPLETED")
     assert "ledger unavailable" not in json.dumps(finished)
+
+
+def _destroyed_on(events: list[tuple[str, int]], label: str) -> Callable[..., None]:
+    """Observe native destruction without retaining any Qt object or signal argument."""
+    def record(*_args: object) -> None:
+        events.append((label, get_native_id()))
+    return record
+
+
+def _exit_start_timeout(
+    root: Path, phase: str, timeout_ms: int, facts: dict[str, object]
+) -> NoReturn:
+    """Persist phase and live Python stacks outside pytest's captured descriptors."""
+    junit = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--junitxml=")), None)
+    directory = Path(junit).resolve().parent if junit else root
+    path = directory / f"pm-start-timeout-{os.getpid()}.log"
+    try:
+        with path.open("x", encoding="utf-8", errors="replace") as stream:
+            stream.write(json.dumps({
+                "phase": phase, "timeout_ms": timeout_ms, "pid": os.getpid(),
+                "thread_id": get_native_id(), "at": datetime.now(UTC).isoformat(),
+                "workspace": str(root), **facts,
+            }, ensure_ascii=False) + "\n")
+            stream.flush()
+            faulthandler.dump_traceback(file=stream, all_threads=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        os._exit(124)  # Never unwind owners whose worker completion is unproven.
+
+
+def _real_start_owner_refs(
+    root: Path, succeeds: bool, events: list[tuple[str, int]]
+) -> tuple[_StartWorker, ReferenceType[PmCockpitBridge], ReferenceType[QThreadPool]]:
+    """Run the real service in a real pool, then release every local GUI owner."""
+    if succeeds:
+        # Import lazily: this existing real-execution helper imports our holding pool.
+        from tests.qml.test_pm_cockpit_start_e2e import _cockpit
+
+        cockpit = _cockpit(root)
+        service = cockpit.service
+        mission_id = cockpit.mission_id
+        workspace = cockpit.root
+    else:
+        workspace = root
+        service = PmCockpitService(workspace)
+        mission_id = "MISSION-NOT-IN-TEMP-STORE"
+    pool = QThreadPool()
+    bridge = PmCockpitBridge(str(workspace), service=service, thread_pool=pool)
+    bridge.destroyed.connect(_destroyed_on(events, "bridge"), Qt.ConnectionType.DirectConnection)
+    bridge._start_poll_timer.destroyed.connect(
+        _destroyed_on(events, "start_timer"), Qt.ConnectionType.DirectConnection
+    )
+    delivered: list[tuple[str, bool, str]] = []
+    bridge.startFinished.connect(lambda m, ok, msg: delivered.append((m, ok, msg)))
+    try:
+        assert bridge.startExecution(mission_id)["accepted"] is True
+        worker = bridge._start_workers[mission_id]
+        # The existing real success E2E takes 67-75 seconds, including genuine quality gates.
+        timeout_ms = 180_000 if succeeds else 5_000
+        if not pool.waitForDone(timeout_ms):
+            _exit_start_timeout(workspace, "real-start-worker-drain", timeout_ms, {
+                "mission_id": mission_id, "succeeds": succeeds, "worker_done": worker.done,
+                "active_threads": pool.activeThreadCount(),
+            })
+        assert worker.done and worker.result is not None
+        assert worker.result[0] is succeeds
+        assert any(value is worker for value in gc.get_referents(pool))
+        bridge._poll_start_workers()
+        assert delivered == [(mission_id, *worker.result)]
+        assert bridge._start_workers == {}
+        assert not bridge._start_poll_timer.isActive()
+        if succeeds:
+            assert cockpit.mission_state() is MissionState.ACCEPTANCE_PENDING
+            assert cockpit.starts() == 1
+        else:
+            assert worker.result == (False, "无法读取该需求，已保留现场。")
+            assert not (root / ".auto-pm").exists()
+        return worker, ref(bridge), ref(pool)
+    except BaseException:
+        if not pool.waitForDone(5_000):
+            _exit_start_timeout(workspace, "exception-cleanup-drain", 5_000, {
+                "mission_id": mission_id, "active_threads": pool.activeThreadCount(),
+                "exception_type": type(sys.exception()).__name__,
+            })
+        _delete_qobject(bridge)
+        _delete_qobject(pool)
+        raise
+
+
+@pytest.mark.parametrize("succeeds", [False, True], ids=["missing-mission", "verified-run"])
+def test_real_start_worker_does_not_retain_its_gui_owner(
+    qapp: QApplication, tmp_path: Path, succeeds: bool
+) -> None:
+    """A completed runnable may remain retained; its GUI owner must not."""
+    _assert_gui_thread(qapp)
+    events: list[tuple[str, int]] = []
+    worker, bridge_ref, pool_ref = _real_start_owner_refs(tmp_path, succeeds, events)
+    try:
+        assert worker.done
+        assert bridge_ref() is None, "Completed real-pool worker retained its GUI bridge"
+        assert pool_ref() is None
+        assert events == [("bridge", get_native_id()), ("start_timer", get_native_id())]
+    finally:
+        # Keep old-code negative controls safe inside pytest, without masking the assertion.
+        bridge = bridge_ref()
+        if bridge is not None:
+            _delete_qobject(bridge)
+        pool = pool_ref()
+        if pool is not None:
+            _delete_qobject(pool)
+
+
+def _probe_real_start_background_gc(root: Path) -> None:
+    """Child-only real cycle probe; never add a self-cycle or alter GC policy."""
+    app = QApplication([])
+    app.processEvents()
+    gui = get_native_id()
+    events: list[tuple[str, int]] = []
+    collector_ids: list[int] = []
+
+    def collect() -> None:
+        collector_ids.append(get_native_id())
+        gc.collect()
+
+    collector = Thread(target=collect, daemon=True)
+    worker, bridge_ref, pool_ref = _real_start_owner_refs(root, False, events)
+    del worker
+    before = list(events)
+    collector.start()
+    collector.join(3)
+    if collector.is_alive():
+        _exit_start_timeout(root, "background-gc-join", 3_000, {"collector_ids": collector_ids})
+    print(json.dumps({
+        "gui": gui, "collector": collector_ids, "before_gc": before,
+        "after_gc": events, "bridge_alive": bridge_ref() is not None,
+        "pool_alive": pool_ref() is not None,
+    }), flush=True)
+    assert before == [("bridge", gui), ("start_timer", gui)], "GUI owner outlived its locals"
+    assert events == before and collector_ids[0] != gui
+    assert bridge_ref() is None and pool_ref() is None
+    if os.name == "nt":
+        post = ctypes.WinDLL("user32", use_last_error=True).PostThreadMessageW
+        post.argtypes = [ctypes.c_ulong, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+        post.restype = ctypes.c_int
+        assert post(gui, 0, 0, 0), ctypes.get_last_error()
+    app.processEvents()
+    print("PM_START_NATIVE_PUMP_SURVIVED", flush=True)
+
+
+def test_real_start_background_gc_never_destroys_gui_objects(
+    tmp_path: Path, record_property: Callable[[str, object], None]
+) -> None:
+    """Isolate the native event pump and reap only this test's process tree on timeout."""
+    argv = [
+        sys.executable, "-B", "-X", "utf8", "-c",
+        "from pathlib import Path; import sys; "
+        "from tests.qml.test_pm_cockpit_bridge import _probe_real_start_background_gc; "
+        "_probe_real_start_background_gc(Path(sys.argv[1]))",
+        str(tmp_path),
+    ]
+    child = subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    record_property("lifecycle_child_argv", json.dumps(argv))
+    record_property("lifecycle_child_pid", child.pid)
+    try:
+        stdout, stderr = child.communicate(timeout=20)
+    except subprocess.TimeoutExpired as error:
+        if os.name == "nt":
+            killed = subprocess.run(
+                ["taskkill", "/PID", str(child.pid), "/T", "/F"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
+            )
+            record_property("lifecycle_child_taskkill_exit", killed.returncode)
+        else:
+            child.kill()
+        stdout, stderr = child.communicate(timeout=5)
+        raise AssertionError(
+            f"PM lifecycle child timed out; pid={child.pid}, exit={child.returncode}\n{stdout}\n{stderr}"
+        ) from error
+    record_property("lifecycle_child_exit", child.returncode)
+    record_property("lifecycle_child_stdout", stdout)
+    record_property("lifecycle_child_stderr", stderr)
+    assert child.returncode == 0, f"exit={child.returncode}\n{stdout}\n{stderr}"
+    assert "PM_START_NATIVE_PUMP_SURVIVED" in stdout
