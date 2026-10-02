@@ -52,21 +52,20 @@ class _SyncWorker(QRunnable):
     规避 connection.py:54 默认 check_same_thread=True 的限制。
     完成后关闭连接，WAL 模式保证主线程下次查询能读到最新数据。
 
-    生命周期：setAutoDelete(False) 禁止 QThreadPool 自动 delete，
-    由 FileWatcherBridge._current_worker 持有 Python 引用控制。
+    生命周期：setAutoDelete(False) 禁止 QThreadPool 自动 delete；bridge 在轮询
+    完成前持有 worker，PySide 的线程池绑定也可能继续持有已完成的 worker。
+    worker 不持有 GUI bridge，避免 bridge → pool → worker → bridge 引用环
+    被后台 Python GC 回收，跨线程析构 QFileSystemWatcher 的 native filter。
 
-    结果回传：worker 持有 bridge 引用，run() 完成后 emit bridge._workerFinished
-    （bridge 是稳定 QObject，跨线程自动 queued 到主线程）。不使用 worker 自有
-    signals——根因诊断证明 PySide6 6.11 下 QRunnable 子线程 run() 期间，关联的
-    signals QObject（无论有无 parent）会被主线程事件循环析构（refcnt>0 但
-    isValid=False），emit 报 "Signal source has been deleted"。
+    结果回传：run() 只写 result/done；bridge 的主线程 QTimer 读取结果后发出
+    syncFinished/syncError。不从 worker 转发 Qt 信号，也不访问 GUI QObject。
     """
 
     def __init__(self, workspace_root: str, bridge: FileWatcherBridge) -> None:
         super().__init__()
         self._workspace_root = workspace_root
-        self._bridge = bridge  # 保留引用（轮询方案下未使用，预留扩展）
-        # 禁止 C++ 自动 delete：worker 生命周期由 bridge._current_worker 控制
+        # 保留 bridge 参数以兼容调用方，但轮询方案不需要保存 GUI 对象回指。
+        # 禁止 C++ 自动 delete；保持现有 worker 所有权策略。
         self.setAutoDelete(False)
         # 结果回传：run() 写 result + done，bridge QTimer 轮询读取。
         # 轮询方案规避 PySide6 6.11 QRunnable 子线程 emit 信号时 QObject C++
@@ -143,7 +142,7 @@ class FileWatcherBridge(QObject):
           → fileChanged/directoryChanged 重启 1s 去抖定时器
           → timeout 触发 _SyncWorker（QThreadPool 后台）
           → worker 自建 DB 连接调 sync_to_cache()
-          → syncFinished Signal 回主线程
+          → 主线程 QTimer 读取 result/done 并发出 syncFinished/syncError
           → QML 画面自动刷新
     """
 
@@ -398,7 +397,7 @@ class FileWatcherBridge(QObject):
     def _on_sync_finished(
         self, projects: int, changes: int, ms: int, error_msg: str
     ) -> None:
-        """sync 完成（主线程，QThreadPool 信号回调）"""
+        """sync 完成（主线程 QTimer 轮询结果回调）"""
         self._sync_in_progress = False
         self._current_worker = None  # 释放 worker 引用
         self._last_sync_time = datetime.now().strftime("%H:%M:%S")

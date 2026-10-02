@@ -9,8 +9,18 @@ CHG-SCPT-2026-141：验证文件监听同步 Bridge 的核心逻辑。
 
 from __future__ import annotations
 
+import ctypes
+import gc
+import subprocess
+import sys
 import time
+from ctypes import wintypes
+from pathlib import Path
+from threading import Thread, get_native_id
+from weakref import ReferenceType, ref
 
+import pytest
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
 
@@ -268,3 +278,183 @@ def test_sync_finished_emits_counts(qapp, tmp_workspace) -> None:  # type: ignor
     assert isinstance(ms, int)
     assert projects >= 1
     assert ms >= 0
+
+
+def _finish_real_sync(bridge: FileWatcherBridge, *, io_error: bool) -> _SyncWorker:
+    """Run the production pool and poll once, preserving real success/error results."""
+    finished = QSignalSpy(bridge.syncFinished)
+    failed = QSignalSpy(bridge.syncError)
+    bridge.syncNow()
+    worker = bridge._current_worker
+    assert worker is not None
+    assert bridge._pool.waitForDone(10_000), "Real sync worker did not finish"
+    assert worker.done and worker.result is not None
+    assert not worker.autoDelete()
+    bridge._poll_worker()
+    assert bridge._current_worker is None
+    assert not bridge._poll_timer.isActive()
+    assert not bridge._sync_in_progress
+    if io_error:
+        assert worker.result[0:2] == (0, 0)
+        assert worker.result[3]
+        assert finished.count() == 0
+        assert failed.count() == 1
+        assert failed.at(0)[0] == worker.result[3]
+    else:
+        assert worker.result[0] >= 1
+        assert worker.result[3] == ""
+        assert finished.count() == 1
+        assert failed.count() == 0
+        assert tuple(finished.at(0)) == worker.result[:3]
+    return worker
+
+
+def _sync_workspace(tmp_workspace: Path, *, io_error: bool) -> Path:
+    """A real file in place of a directory makes DB creation fail on every platform."""
+    if not io_error:
+        return tmp_workspace
+    blocked = tmp_workspace / "not-a-workspace-directory"
+    blocked.write_text("not a directory", encoding="utf-8", errors="replace")
+    return blocked
+
+
+@pytest.mark.parametrize("io_error", [False, True], ids=["success", "real-io-error"])
+def test_completed_real_pool_worker_does_not_retain_its_gui_bridge(
+    qapp: QApplication, tmp_workspace: Path, io_error: bool,
+) -> None:
+    """Even a retained completed runnable must not keep its GUI bridge alive."""
+    gui_thread = get_native_id()
+    assert QCoreApplication.instance() is qapp
+    destroyed: list[int] = []
+
+    def on_destroyed() -> None:
+        destroyed.append(get_native_id())
+
+    bridge = FileWatcherBridge(str(_sync_workspace(tmp_workspace, io_error=io_error)))
+    bridge_ref = ref(bridge)
+    bridge.destroyed.connect(on_destroyed, Qt.ConnectionType.DirectConnection)
+    pool = bridge._pool
+    try:
+        worker = _finish_real_sync(bridge, io_error=io_error)
+        del bridge
+        assert bridge_ref() is None, "Completed runnable retained its GUI bridge"
+        assert destroyed == [gui_thread]
+        assert worker.done and pool.waitForDone(0)
+    finally:
+        # A failing old-byte negative control must not leave a live native filter behind.
+        retained = bridge_ref()
+        if retained is not None:
+            retained.prepareForReload()
+            retained._poll_timer.stop()
+            assert pool.waitForDone(10_000)
+            retained.deleteLater()
+            QCoreApplication.sendPostedEvents(retained, QEvent.Type.DeferredDelete.value)
+
+
+def _exercise_real_sync_background_gc(workspace: Path, *, io_error: bool) -> None:
+    """Isolated real sync → local release → background GC → native event dispatch."""
+    app = QApplication([])
+    app.processEvents()
+    gui_thread = get_native_id()
+    bridge_destroyed: list[int] = []
+    watcher_destroyed: list[int] = []
+    collector_threads: list[int] = []
+
+    def bridge_gone() -> None:
+        bridge_destroyed.append(get_native_id())
+
+    def watcher_gone() -> None:
+        watcher_destroyed.append(get_native_id())
+
+    def collect() -> None:
+        gc.collect()
+        collector_threads.append(get_native_id())
+
+    collector = Thread(target=collect, daemon=True)
+
+    def release_completed_sync() -> tuple[ReferenceType[FileWatcherBridge], ReferenceType[QObject]]:
+        bridge = FileWatcherBridge(str(_sync_workspace(workspace, io_error=io_error)))
+        bridge.destroyed.connect(bridge_gone, Qt.ConnectionType.DirectConnection)
+        bridge._watcher.destroyed.connect(watcher_gone, Qt.ConnectionType.DirectConnection)
+        worker = _finish_real_sync(bridge, io_error=io_error)
+        assert worker.done
+        return ref(bridge), ref(bridge._watcher)
+
+    bridge_ref, watcher_ref = release_completed_sync()
+    # Record the boundary before GC can make an old implementation appear released.
+    gui_release_before_gc = (
+        bridge_ref() is None and bridge_destroyed == [gui_thread]
+        and watcher_destroyed == [gui_thread]
+    )
+    collector.start()
+    collector.join(timeout=3)
+    assert not collector.is_alive()
+    assert len(collector_threads) == 1 and collector_threads[0] != gui_thread
+    if sys.platform == "win32":
+        post = ctypes.WinDLL("user32", use_last_error=True).PostThreadMessageW
+        post.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        post.restype = wintypes.BOOL
+        assert post(gui_thread, 0, 0, 0), ctypes.get_last_error()  # Real WM_NULL.
+        print("WINDOWS_NATIVE_MESSAGE_POSTED", flush=True)
+    app.processEvents()
+    assert gui_release_before_gc, "GUI owners survived local release until cyclic GC"
+    assert bridge_ref() is None and watcher_ref() is None
+    assert bridge_destroyed == watcher_destroyed == [gui_thread]
+    print("REAL_SYNC_GUI_RELEASE_AND_NATIVE_PUMP_OK", flush=True)
+
+
+def _run_lifecycle_child(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Reap only this child tree on timeout, including a Windows venv interpreter."""
+    child = subprocess.Popen(
+        command,
+        cwd=Path(__file__).resolve().parents[2],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    try:
+        stdout, stderr = child.communicate(timeout=20)
+    except subprocess.TimeoutExpired as exc:
+        termination = ""
+        try:
+            if sys.platform == "win32":
+                killed = subprocess.run(
+                    ["taskkill", "/PID", str(child.pid), "/T", "/F"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=5, check=False,
+                )
+                termination = f"taskkill_exit={killed.returncode} {killed.stdout}{killed.stderr}"
+            else:
+                child.kill()
+        except (OSError, subprocess.TimeoutExpired) as stop_error:
+            termination = f"termination_error={stop_error}"
+        try:
+            stdout, stderr = child.communicate(timeout=5)
+        except subprocess.TimeoutExpired as reap_error:
+            raise AssertionError(
+                f"Lifecycle child pid={child.pid} timed out; reap unconfirmed: {termination}"
+            ) from reap_error
+        raise AssertionError(
+            f"Lifecycle child pid={child.pid} exceeded 20s; {termination}\n{stdout}{stderr}"
+        ) from exc
+    return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
+
+
+@pytest.mark.parametrize("io_error", [False, True], ids=["success", "real-io-error"])
+def test_real_sync_background_gc_and_native_events_in_an_isolated_process(
+    tmp_workspace: Path, io_error: bool,
+) -> None:
+    """Native access violations/aborts must fail a bounded child, not kill pytest."""
+    command = (
+        "from pathlib import Path; import sys; "
+        "from tests.qml.test_file_watcher_bridge import _exercise_real_sync_background_gc; "
+        "_exercise_real_sync_background_gc(Path(sys.argv[1]), io_error=sys.argv[2] == '1')"
+    )
+    result = _run_lifecycle_child([
+        sys.executable, "-B", "-u", "-X", "faulthandler", "-c", command,
+        str(tmp_workspace), str(int(io_error)),
+    ])
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    if sys.platform == "win32":
+        assert "WINDOWS_NATIVE_MESSAGE_POSTED" in output
+    assert "REAL_SYNC_GUI_RELEASE_AND_NATIVE_PUMP_OK" in output
