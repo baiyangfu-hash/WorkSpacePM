@@ -12,6 +12,8 @@ from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollection,
     EvidenceCollectionError,
     EvidenceCollectionService,
+    PlcQualityReceipt,
+    PythonQualityReceipt,
 )
 from auto_pm.contracts.continuity import (
     CheckpointItem,
@@ -48,6 +50,12 @@ from auto_pm.infrastructure.control_root_guard import (
 class ContinuityExecutionError(RuntimeError):
     """Raised when execution continuity would become ambiguous or unsafe."""
 
+
+_AUTO_CHECKPOINT_SCHEMAS = {
+    "c03": "checkpoint-evidence.v1",
+    "generic": "checkpoint-evidence.v2",
+    "plc": "checkpoint-evidence.v3",
+}
 
 _RUN_TRANSITIONS = {
     RunState.READY: {
@@ -365,6 +373,8 @@ class ContinuityExecutionService:
                 collector.validate_c03_checkpoint_project_root(run, project_root)
             elif profile == "generic":
                 collector.validate_generic_checkpoint_project_root(run, project_root)
+            elif profile == "plc":
+                collector.validate_plc_checkpoint_project_root(run, project_root)
             else:
                 raise EvidenceCollectionError(f"未知自动 Checkpoint profile: {profile}")
         except EvidenceCollectionError as error:
@@ -389,7 +399,7 @@ class ContinuityExecutionService:
                     existing.evidence[0], collection, run, project_root
                 )
                 or json.loads(existing.evidence[0]).get("schema_version")
-                != ("checkpoint-evidence.v1" if profile == "c03" else "checkpoint-evidence.v2")
+                != _AUTO_CHECKPOINT_SCHEMAS[profile]
             ):
                 raise ContinuityExecutionError(
                     "Checkpoint identity 已存在，但自动证据或当前 Run 内容不一致"
@@ -417,19 +427,34 @@ class ContinuityExecutionService:
             )
 
         try:
-            receipt = (
-                collector.run_c03_checkpoint_quality_gates(run, project_root)
-                if profile == "c03"
-                else collector.run_generic_checkpoint_quality_gates(run, project_root)
-            )
+            receipt: PythonQualityReceipt | PlcQualityReceipt
+            if profile == "plc":
+                receipt = collector.run_plc_checkpoint_quality_gates(run, project_root)
+            elif profile == "c03":
+                receipt = collector.run_c03_checkpoint_quality_gates(run, project_root)
+            else:
+                receipt = collector.run_generic_checkpoint_quality_gates(run, project_root)
+            domain = "PLC" if profile == "plc" else "Python"
             if receipt.status != "PASS":
-                raise ContinuityExecutionError("自动 Checkpoint 要求 Python 质量收据为 PASS")
-            if profile == "c03" and not collector.c03_checkpoint_receipt_matches_profile(receipt):
+                raise ContinuityExecutionError(f"自动 Checkpoint 要求 {domain} 质量收据为 PASS")
+            if (
+                profile == "c03"
+                and isinstance(receipt, PythonQualityReceipt)
+                and not collector.c03_checkpoint_receipt_matches_profile(receipt)
+            ):
                 raise ContinuityExecutionError(
                     "自动 Checkpoint 要求固定 C03 pytest profile 与收据 hash"
                 )
-            if not collector.quality_receipt_is_current(run, project_root, receipt):
-                raise ContinuityExecutionError("自动 Checkpoint 的 Python 质量收据已失效")
+            if isinstance(receipt, PlcQualityReceipt):
+                receipt_is_current = collector.plc_quality_receipt_is_current(
+                    run, project_root, receipt
+                )
+            else:
+                receipt_is_current = collector.quality_receipt_is_current(
+                    run, project_root, receipt
+                )
+            if not receipt_is_current:
+                raise ContinuityExecutionError(f"自动 Checkpoint 的 {domain} 质量收据已失效")
             collection = collector.collect(run)
             evidence = collector.build_checkpoint_evidence(collection, receipt)
         except EvidenceCollectionError as error:
@@ -519,6 +544,17 @@ class ContinuityExecutionService:
             return ContinuityExecutionService._c03_checkpoint_idempotency_key(
                 run, checkpoint_id, collection_hash
             )
+        if profile == "plc":
+            plc_payload = {
+                "schema_version": "plc-auto-checkpoint-key.v1",
+                "run_id": run.run_id,
+                "checkpoint_id": checkpoint_id,
+                "collection_hash": collection_hash,
+            }
+            plc_canonical = json.dumps(
+                plc_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            return "plc-auto-checkpoint:" + hashlib.sha256(plc_canonical.encode("utf-8")).hexdigest()
         payload = {
             "schema_version": "generic-auto-checkpoint-key.v1",
             "run_id": run.run_id,

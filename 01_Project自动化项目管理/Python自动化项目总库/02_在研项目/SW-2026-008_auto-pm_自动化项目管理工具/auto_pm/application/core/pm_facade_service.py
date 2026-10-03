@@ -676,6 +676,7 @@ class PmFacadeService:
             raise PmFacadeError(str(error)) from error
         checkpoint_id = f"CP-{run.run_id}-VERIFY"
         try:
+            profile = EvidenceCollectionService(self._workspace_root).checkpoint_profile_for_run(run)
             ContinuityExecutionService(
                 self._workspace_root, store=self._store
             ).append_verified_checkpoint(
@@ -684,9 +685,9 @@ class PmFacadeService:
                 owner_id=owner_id,
                 lease_token=lease_token,
                 project_root=Path(run.worktree_path),
-                profile="generic",
+                profile=profile,
             )
-        except ContinuityExecutionError:
+        except (ContinuityExecutionError, EvidenceCollectionError):
             log.exception("质量验证未通过: mission=%s run=%s", mission.mission_id, run.run_id)
             return PmRunOutcome(
                 mission_id=mission.mission_id,
@@ -993,7 +994,10 @@ class PmFacadeService:
 
         try:
             envelope = json.loads(serialized)
-            if isinstance(envelope, dict) and envelope.get("schema_version") == "checkpoint-evidence.v2":
+            if isinstance(envelope, dict) and envelope.get("schema_version") in {
+                "checkpoint-evidence.v2",
+                "checkpoint-evidence.v3",
+            }:
                 return EvidenceCollectionService.checkpoint_evidence_is_current(
                     serialized, collection, run, project_root
                 )

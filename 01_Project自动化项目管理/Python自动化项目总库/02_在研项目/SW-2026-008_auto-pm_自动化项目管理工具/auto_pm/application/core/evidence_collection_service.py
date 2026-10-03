@@ -28,6 +28,10 @@ from auto_pm.infrastructure.control_root_guard import (
 
 _C03_CHECKPOINT_PYTEST_EXPRESSION = "append_verified_checkpoint"
 _C03_CHECKPOINT_PYTEST_TARGET = "tests/core/test_continuity_execution_service.py"
+_PLC_CHECKPOINT_SCHEMA = "checkpoint-evidence.v3"
+_PLC_CHECK_COMMAND = "auto_pm.plc.checker.PlcChecker.check_project"
+_PLC_LINT_COMMAND = "auto_pm.plc.scl_linter.SclLinter.lint_file"
+_PLC_MIXED_DOMAIN_ERROR = "Run 同时拥有 PLC 工程路径与 Python 路径；一个 Run 只验证一个领域"
 
 
 class EvidenceCollectionError(RuntimeError):
@@ -114,6 +118,50 @@ class PythonQualityReceipt:
         if self.evidence_current and all(gate.passed for gate in self.gates):
             return "PASS"
         return "FAIL"
+
+
+@dataclass(frozen=True)
+class PlcQualityReceipt:
+    """Content-bound result of the real PLC static checker and SCL linter."""
+
+    run_id: str
+    baseline_git_head: str
+    candidate_path: str
+    project_root: str
+    evidence_hash: str
+    gates: tuple[PythonQualityGate, ...]
+    evidence_current: bool
+    evidence_error: str | None
+    content_hash: str
+    project_roots: tuple[str, ...]
+    owned_plc_paths: tuple[str, ...]
+    input_digests: tuple[tuple[str, str], ...]
+    checker_digest: str
+
+    @property
+    def status(self) -> str:
+        """Return PASS only for successful static gates and unchanged evidence."""
+
+        if self.evidence_current and self.gates and all(gate.passed for gate in self.gates):
+            return "PASS"
+        return "FAIL"
+
+
+@dataclass(frozen=True)
+class _OwnedPath:
+    """One normalized Run-owned path and the PLC project root that contains it."""
+
+    relative: PurePosixPath
+    absolute: Path
+    plc_root: Path | None
+
+
+@dataclass(frozen=True)
+class _PlcProject:
+    """One PLC project root with the exact owned SCL files inside it."""
+
+    root: Path
+    scl_paths: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -541,7 +589,7 @@ class EvidenceCollectionService:
 
     @staticmethod
     def build_checkpoint_evidence(
-        collection: EvidenceCollection, receipt: PythonQualityReceipt
+        collection: EvidenceCollection, receipt: PythonQualityReceipt | PlcQualityReceipt
     ) -> str:
         """Build one immutable, canonical evidence envelope for an auto checkpoint.
 
@@ -551,6 +599,8 @@ class EvidenceCollectionService:
         detectable without introducing a new mutable persistence schema.
         """
 
+        if isinstance(receipt, PlcQualityReceipt):
+            return EvidenceCollectionService._build_plc_checkpoint_evidence(collection, receipt)
         expected_receipt_hash = _quality_receipt_hash(
             run_id=receipt.run_id,
             baseline_git_head=receipt.baseline_git_head,
@@ -612,6 +662,10 @@ class EvidenceCollectionService:
             return False
         if isinstance(envelope, dict) and envelope.get("schema_version") == "checkpoint-evidence.v2":
             return EvidenceCollectionService._generic_checkpoint_evidence_is_current(
+                serialized, envelope, collection, run, project_root
+            )
+        if isinstance(envelope, dict) and envelope.get("schema_version") == _PLC_CHECKPOINT_SCHEMA:
+            return EvidenceCollectionService._plc_checkpoint_evidence_is_current(
                 serialized, envelope, collection, run, project_root
             )
         expected_keys = {
@@ -1073,6 +1127,467 @@ class EvidenceCollectionService:
         )
 
 
+    # -- PLC static quality profile (V01) ---------------------------------
+
+    def checkpoint_profile_for_run(self, run: RunItem) -> str:
+        """Return ``"plc"`` for Runs inside a PLC project, else ``"generic"``.
+
+        A Run is verified in exactly one domain: owning both PLC project paths
+        and Python paths outside any PLC project is refused instead of letting
+        one domain's gate silently ignore the other's files.
+        """
+
+        candidate, _ = self._verified_candidate(run)
+        entries = self._owned_path_entries(run, candidate)
+        has_plc = any(entry.plc_root is not None for entry in entries)
+        if has_plc and any(
+            entry.plc_root is None and entry.relative.suffix == ".py" for entry in entries
+        ):
+            raise EvidenceCollectionError(_PLC_MIXED_DOMAIN_ERROR)
+        return "plc" if has_plc else "generic"
+
+    def validate_plc_checkpoint_project_root(
+        self, run: RunItem, project_root: str | Path
+    ) -> Path:
+        """Require every owned PLC path to sit under the supplied project root."""
+
+        candidate, anchor = self._quality_context(run, project_root)
+        self._plc_project_targets(run, candidate, anchor)
+        return anchor
+
+    def run_plc_checkpoint_quality_gates(
+        self, run: RunItem, project_root: str | Path
+    ) -> PlcQualityReceipt:
+        """Run the existing PLC checker and SCL linter on the Run candidate.
+
+        The checker is called as a library on the governed worktree, never on
+        the control root, so ``.plc.json``, SCL, INT/VAR documents and the spec
+        registry it reads come from the same Git baseline as the Run evidence.
+        """
+
+        candidate, anchor = self._quality_context(run, project_root)
+        projects, owned = self._plc_project_targets(run, candidate, anchor)
+        before = self.collect(run)
+        checker_digest = self._plc_checker_digest()
+        inputs_before = self._plc_input_digests(candidate, projects)
+        gates = tuple(
+            self._run_plc_gate(candidate, name, command, root, project)
+            for (name, command, root), project in self._plc_gate_plan(candidate, projects)
+        )
+        evidence_current = False
+        evidence_error: str | None = None
+        try:
+            after = self.collect(run)
+            inputs_after = self._plc_input_digests(candidate, projects)
+            evidence_current = hmac.compare_digest(
+                before.content_hash, after.content_hash
+            ) and inputs_before == inputs_after
+            if not evidence_current:
+                evidence_error = "质量门执行期间 Run evidence 或 PLC 输入已变化"
+        except EvidenceCollectionError as error:
+            evidence_error = f"质量门后 Run evidence 无法复核: {error}"
+        roots = tuple(str(project.root) for project in projects)
+        return PlcQualityReceipt(
+            run_id=run.run_id,
+            baseline_git_head=run.git_head,
+            candidate_path=str(candidate),
+            project_root=str(anchor),
+            evidence_hash=before.content_hash,
+            gates=gates,
+            evidence_current=evidence_current,
+            evidence_error=evidence_error,
+            content_hash=_plc_receipt_hash(
+                run_id=run.run_id,
+                baseline_git_head=run.git_head,
+                candidate_path=str(candidate),
+                project_root=str(anchor),
+                evidence_hash=before.content_hash,
+                gates=gates,
+                evidence_current=evidence_current,
+                evidence_error=evidence_error,
+                project_roots=roots,
+                owned_plc_paths=owned,
+                input_digests=inputs_before,
+                checker_digest=checker_digest,
+            ),
+            project_roots=roots,
+            owned_plc_paths=owned,
+            input_digests=inputs_before,
+            checker_digest=checker_digest,
+        )
+
+    def plc_quality_receipt_is_current(
+        self, run: RunItem, project_root: str | Path, receipt: PlcQualityReceipt
+    ) -> bool:
+        """Return whether a PLC receipt still describes the current Run and inputs."""
+
+        candidate, _ = self._verified_candidate(run)
+        anchor = Path(project_root).resolve()
+        if (
+            receipt.run_id != run.run_id
+            or receipt.baseline_git_head != run.git_head
+            or receipt.candidate_path != str(candidate)
+            or receipt.project_root != str(anchor)
+            or receipt.status != "PASS"
+        ):
+            return False
+        try:
+            projects, owned = self._plc_project_targets(run, candidate, anchor)
+            if not EvidenceCollectionService._plc_receipt_matches_profile(
+                receipt, candidate, projects, owned
+            ):
+                return False
+            current = self.collect(run)
+        except EvidenceCollectionError:
+            return False
+        return hmac.compare_digest(receipt.evidence_hash, current.content_hash)
+
+    @staticmethod
+    def _plc_receipt_matches_profile(
+        receipt: PlcQualityReceipt,
+        candidate: Path,
+        projects: tuple[_PlcProject, ...],
+        owned: tuple[str, ...],
+    ) -> bool:
+        """Require recomputed gates, targets, inputs, checker bytes and receipt hash."""
+
+        expected = tuple(
+            (name, command, str(root))
+            for (name, command, root), _ in EvidenceCollectionService._plc_gate_plan(
+                candidate, projects
+            )
+        )
+        return (
+            tuple((gate.name, gate.command, gate.cwd) for gate in receipt.gates) == expected
+            and receipt.project_roots == tuple(str(project.root) for project in projects)
+            and receipt.owned_plc_paths == owned
+            and receipt.input_digests
+            == EvidenceCollectionService._plc_input_digests(candidate, projects)
+            and receipt.checker_digest == EvidenceCollectionService._plc_checker_digest()
+            and hmac.compare_digest(
+                receipt.content_hash,
+                _plc_receipt_hash(
+                    run_id=receipt.run_id,
+                    baseline_git_head=receipt.baseline_git_head,
+                    candidate_path=receipt.candidate_path,
+                    project_root=receipt.project_root,
+                    evidence_hash=receipt.evidence_hash,
+                    gates=receipt.gates,
+                    evidence_current=receipt.evidence_current,
+                    evidence_error=receipt.evidence_error,
+                    project_roots=receipt.project_roots,
+                    owned_plc_paths=receipt.owned_plc_paths,
+                    input_digests=receipt.input_digests,
+                    checker_digest=receipt.checker_digest,
+                ),
+            )
+        )
+
+    @staticmethod
+    def _build_plc_checkpoint_evidence(
+        collection: EvidenceCollection, receipt: PlcQualityReceipt
+    ) -> str:
+        """Build the ``checkpoint-evidence.v3`` envelope for a PLC Run."""
+
+        expected_receipt_hash = _plc_receipt_hash(
+            run_id=receipt.run_id,
+            baseline_git_head=receipt.baseline_git_head,
+            candidate_path=receipt.candidate_path,
+            project_root=receipt.project_root,
+            evidence_hash=receipt.evidence_hash,
+            gates=receipt.gates,
+            evidence_current=receipt.evidence_current,
+            evidence_error=receipt.evidence_error,
+            project_roots=receipt.project_roots,
+            owned_plc_paths=receipt.owned_plc_paths,
+            input_digests=receipt.input_digests,
+            checker_digest=receipt.checker_digest,
+        )
+        if (
+            receipt.status != "PASS"
+            or not receipt.evidence_current
+            or receipt.run_id != collection.run_id
+            or receipt.baseline_git_head != collection.git_head
+            or receipt.candidate_path != collection.worktree_path
+            or not hmac.compare_digest(receipt.evidence_hash, collection.content_hash)
+            or not hmac.compare_digest(receipt.content_hash, expected_receipt_hash)
+        ):
+            raise EvidenceCollectionError("自动 Checkpoint 的 PLC 质量收据与当前 evidence 不一致")
+        unsigned = {
+            "schema_version": _PLC_CHECKPOINT_SCHEMA,
+            "collection": _collection_payload(collection),
+            "collection_hash": collection.content_hash,
+            "quality_receipt": {**_plc_receipt_payload(receipt), "status": receipt.status},
+            "receipt_hash": receipt.content_hash,
+        }
+        return _canonical_json_payload({**unsigned, "envelope_hash": _sha256_payload(unsigned)})
+
+    @staticmethod
+    def _plc_checkpoint_evidence_is_current(
+        serialized: str,
+        envelope: dict[str, object],
+        collection: EvidenceCollection,
+        run: RunItem,
+        project_root: str | Path,
+    ) -> bool:
+        """Recompute PLC targets, gates, inputs and checker bytes before replay."""
+
+        if set(envelope) != {
+            "schema_version", "collection", "collection_hash", "quality_receipt",
+            "receipt_hash", "envelope_hash",
+        }:
+            return False
+        unsigned = {key: value for key, value in envelope.items() if key != "envelope_hash"}
+        if (
+            serialized != _canonical_json_payload(envelope)
+            or envelope["schema_version"] != _PLC_CHECKPOINT_SCHEMA
+            or not isinstance(envelope["envelope_hash"], str)
+            or envelope["envelope_hash"] != _sha256_payload(unsigned)
+            or envelope["collection"] != _collection_payload(collection)
+            or envelope["collection_hash"] != collection.content_hash
+        ):
+            return False
+        payload = envelope["quality_receipt"]
+        if not isinstance(payload, dict) or set(payload) != {
+            "domain", "run_id", "baseline_git_head", "candidate_path", "project_root",
+            "evidence_hash", "gates", "evidence_current", "evidence_error",
+            "project_roots", "owned_plc_paths", "input_digests", "checker_digest", "status",
+        }:
+            return False
+        candidate = Path(collection.worktree_path).resolve()
+        anchor = Path(project_root).resolve()
+        try:
+            anchor.relative_to(candidate)
+            projects, owned = EvidenceCollectionService._plc_project_targets(
+                run, candidate, anchor
+            )
+            inputs = EvidenceCollectionService._plc_input_digests(candidate, projects)
+            checker_digest = EvidenceCollectionService._plc_checker_digest()
+        except (EvidenceCollectionError, ValueError):
+            return False
+        roots = tuple(str(project.root) for project in projects)
+        if (
+            payload["domain"] != "plc"
+            or payload["run_id"] != run.run_id
+            or payload["baseline_git_head"] != run.git_head
+            or payload["candidate_path"] != collection.worktree_path
+            or payload["project_root"] != str(anchor)
+            or payload["evidence_hash"] != collection.content_hash
+            or payload["project_roots"] != list(roots)
+            or payload["owned_plc_paths"] != list(owned)
+            or payload["input_digests"] != [
+                {"project": project, "sha256": digest} for project, digest in inputs
+            ]
+            or payload["checker_digest"] != checker_digest
+            or payload["evidence_current"] is not True
+            or payload["evidence_error"] is not None
+            or payload["status"] != "PASS"
+        ):
+            return False
+        if envelope["receipt_hash"] != _sha256_payload(
+            {key: value for key, value in payload.items() if key != "status"}
+        ):
+            return False
+        gates = payload["gates"]
+        expected = tuple(
+            (name, list(command), str(root))
+            for (name, command, root), _ in EvidenceCollectionService._plc_gate_plan(
+                candidate, projects
+            )
+        )
+        return (
+            isinstance(gates, list)
+            and len(gates) == len(expected)
+            and all(
+                isinstance(gate, dict)
+                and set(gate)
+                == {"name", "command", "cwd", "exit_code", "output_digest", "output_summary"}
+                and (gate["name"], gate["command"], gate["cwd"]) == expected[index]
+                and type(gate["exit_code"]) is int
+                and gate["exit_code"] == 0
+                and isinstance(gate["output_digest"], str)
+                and bool(gate["output_digest"])
+                and isinstance(gate["output_summary"], str)
+                for index, gate in enumerate(gates)
+            )
+        )
+
+    @staticmethod
+    def _owned_path_entries(run: RunItem, candidate: Path) -> tuple[_OwnedPath, ...]:
+        """Normalize owned paths once and find the PLC project root of each."""
+
+        EvidenceCollectionService._normalize_owned_paths(run.owned_paths)
+        entries: list[_OwnedPath] = []
+        seen: set[PurePosixPath] = set()
+        for raw_path in run.owned_paths:
+            relative = PurePosixPath(str(raw_path).replace("\\", "/"))
+            if relative in seen:
+                continue
+            seen.add(relative)
+            absolute = candidate.joinpath(*relative.parts).resolve()
+            try:
+                absolute.relative_to(candidate)
+            except ValueError as error:
+                raise EvidenceCollectionError(f"Run owned path 超出 candidate: {relative}") from error
+            entries.append(
+                _OwnedPath(
+                    relative, absolute, EvidenceCollectionService._plc_root_of(candidate, absolute)
+                )
+            )
+        return tuple(entries)
+
+    @staticmethod
+    def _plc_root_of(candidate: Path, absolute: Path) -> Path | None:
+        """Return the highest directory below the candidate holding ``.plc.json``."""
+
+        relative = absolute.relative_to(candidate)
+        parts = relative.parts if absolute.is_dir() else relative.parts[:-1]
+        current = candidate
+        for part in parts:
+            current = current / part
+            if (current / ".plc.json").is_file():
+                return current
+        return None
+
+    @staticmethod
+    def _plc_project_targets(
+        run: RunItem, candidate: Path, anchor: Path
+    ) -> tuple[tuple[_PlcProject, ...], tuple[str, ...]]:
+        """Group owned PLC paths by project root and list the exact owned SCL files."""
+
+        entries = EvidenceCollectionService._owned_path_entries(run, candidate)
+        if not any(entry.plc_root is not None for entry in entries):
+            raise EvidenceCollectionError("Run 缺少 PLC 工程内的 owned path")
+        if any(entry.plc_root is None and entry.relative.suffix == ".py" for entry in entries):
+            raise EvidenceCollectionError(_PLC_MIXED_DOMAIN_ERROR)
+        groups: dict[Path, list[str]] = {}
+        owned: list[str] = []
+        for entry in entries:
+            root = entry.plc_root
+            if root is None:
+                continue
+            try:
+                entry.absolute.relative_to(anchor)
+            except ValueError as error:
+                raise EvidenceCollectionError(
+                    f"质量门 project_root 未覆盖 Run owned PLC path: {entry.relative}"
+                ) from error
+            scl_paths = groups.setdefault(root, [])
+            owned.append(entry.relative.as_posix())
+            if entry.absolute.is_dir():
+                scl_paths.extend(
+                    path.relative_to(root).as_posix()
+                    for path in entry.absolute.rglob("*")
+                    if path.is_file() and path.suffix.lower() == ".scl"
+                )
+            elif entry.relative.suffix.lower() == ".scl":
+                if not entry.absolute.is_file():
+                    raise EvidenceCollectionError(f"Run owned SCL path 不存在: {entry.relative}")
+                scl_paths.append(entry.absolute.relative_to(root).as_posix())
+        projects = tuple(
+            _PlcProject(root, tuple(sorted(set(paths))))
+            for root, paths in sorted(groups.items(), key=lambda item: str(item[0]))
+        )
+        return projects, tuple(sorted(set(owned)))
+
+    @staticmethod
+    def _plc_gate_plan(
+        candidate: Path, projects: tuple[_PlcProject, ...]
+    ) -> tuple[tuple[tuple[str, tuple[str, ...], Path], _PlcProject], ...]:
+        """List the fixed gates once, so producers and replay checks cannot drift."""
+
+        plan: list[tuple[tuple[str, tuple[str, ...], Path], _PlcProject]] = []
+        for project in projects:
+            relative_root = project.root.relative_to(candidate).as_posix()
+            plan.append(
+                (("plc-check", (_PLC_CHECK_COMMAND, relative_root), project.root), project)
+            )
+            if project.scl_paths:
+                plan.append(
+                    (("scl-lint", (_PLC_LINT_COMMAND, *project.scl_paths), project.root), project)
+                )
+        return tuple(plan)
+
+    @staticmethod
+    def _run_plc_gate(
+        candidate: Path,
+        name: str,
+        command: tuple[str, ...],
+        root: Path,
+        project: _PlcProject,
+    ) -> PythonQualityGate:
+        """Execute one in-process PLC gate and bind its full output by digest."""
+
+        try:
+            if name == "plc-check":
+                output, exit_code = _plc_check_output(candidate, root)
+            else:
+                output, exit_code = _scl_lint_output(root, project.scl_paths)
+        except Exception as error:
+            output = f"launch error: {error}"
+            exit_code = None
+        return PythonQualityGate(
+            name=name,
+            command=command,
+            cwd=str(root),
+            exit_code=exit_code,
+            output_digest=hashlib.sha256(output.encode("utf-8")).hexdigest(),
+            output_summary=_safe_output_summary(output),
+        )
+
+    @staticmethod
+    def _plc_input_digests(
+        candidate: Path, projects: tuple[_PlcProject, ...]
+    ) -> tuple[tuple[str, str], ...]:
+        """Hash every file under each PLC project root, ignored files included.
+
+        Git evidence cannot see ignored files, yet the checker and linter read
+        whatever is on disk.  This digest is the byte-level proof that the
+        ``.plc.json``, SCL, INT and VAR inputs are the ones that were checked.
+        """
+
+        digests: list[tuple[str, str]] = []
+        for project in projects:
+            entries: list[tuple[str, str]] = []
+            for directory, names, files in os.walk(project.root):
+                names[:] = sorted(name for name in names if name != ".git")
+                for name in (*names, *sorted(files)):
+                    path = Path(directory) / name
+                    if path.is_dir() and not path.is_symlink():
+                        continue
+                    relative = path.relative_to(project.root).as_posix()
+                    if path.is_symlink():
+                        entries.append((relative, f"symlink:{os.readlink(path)}"))
+                        continue
+                    try:
+                        entries.append((relative, hashlib.sha256(path.read_bytes()).hexdigest()))
+                    except OSError as error:
+                        raise EvidenceCollectionError(
+                            f"PLC 输入文件无法读取: {relative}"
+                        ) from error
+            digests.append(
+                (project.root.relative_to(candidate).as_posix(), _sha256_payload(sorted(entries)))
+            )
+        return tuple(digests)
+
+    @staticmethod
+    def _plc_checker_digest() -> str:
+        """Fingerprint the checker package bytes that produced the verdict."""
+
+        from auto_pm.plc import checker as plc_checker
+
+        location = getattr(plc_checker, "__file__", None)
+        if not location:
+            raise EvidenceCollectionError("PLC 检查器位置无法确定")
+        package = Path(location).resolve().parent
+        return _sha256_payload(
+            [
+                (path.name, hashlib.sha256(path.read_bytes()).hexdigest())
+                for path in sorted(package.glob("*.py"))
+            ]
+        )
+
+
 @dataclass(frozen=True)
 class _QualityTargets:
     """Exact Run-owned Python target lists for the three quality tools."""
@@ -1212,6 +1727,138 @@ def _quality_receipt_hash(
     )
 
 
+def _plc_receipt_payload_fields(
+    *,
+    run_id: str,
+    baseline_git_head: str,
+    candidate_path: str,
+    project_root: str,
+    evidence_hash: str,
+    gates: tuple[PythonQualityGate, ...],
+    evidence_current: bool,
+    evidence_error: str | None,
+    project_roots: tuple[str, ...],
+    owned_plc_paths: tuple[str, ...],
+    input_digests: tuple[tuple[str, str], ...],
+    checker_digest: str,
+) -> dict[str, object]:
+    """Keep PLC receipt hashing and checkpoint serialization on one exact schema."""
+
+    return {
+        "domain": "plc",
+        "run_id": run_id,
+        "baseline_git_head": baseline_git_head,
+        "candidate_path": candidate_path,
+        "project_root": project_root,
+        "evidence_hash": evidence_hash,
+        "gates": [_quality_gate_payload(gate) for gate in gates],
+        "evidence_current": evidence_current,
+        "evidence_error": evidence_error,
+        "project_roots": list(project_roots),
+        "owned_plc_paths": list(owned_plc_paths),
+        "input_digests": [
+            {"project": project, "sha256": digest} for project, digest in input_digests
+        ],
+        "checker_digest": checker_digest,
+    }
+
+
+def _plc_receipt_payload(receipt: PlcQualityReceipt) -> dict[str, object]:
+    """Render the exact fields protected by ``PlcQualityReceipt.content_hash``."""
+
+    return _plc_receipt_payload_fields(
+        run_id=receipt.run_id,
+        baseline_git_head=receipt.baseline_git_head,
+        candidate_path=receipt.candidate_path,
+        project_root=receipt.project_root,
+        evidence_hash=receipt.evidence_hash,
+        gates=receipt.gates,
+        evidence_current=receipt.evidence_current,
+        evidence_error=receipt.evidence_error,
+        project_roots=receipt.project_roots,
+        owned_plc_paths=receipt.owned_plc_paths,
+        input_digests=receipt.input_digests,
+        checker_digest=receipt.checker_digest,
+    )
+
+
+def _plc_receipt_hash(
+    *,
+    run_id: str,
+    baseline_git_head: str,
+    candidate_path: str,
+    project_root: str,
+    evidence_hash: str,
+    gates: tuple[PythonQualityGate, ...],
+    evidence_current: bool,
+    evidence_error: str | None,
+    project_roots: tuple[str, ...],
+    owned_plc_paths: tuple[str, ...],
+    input_digests: tuple[tuple[str, str], ...],
+    checker_digest: str,
+) -> str:
+    """Hash the fixed PLC receipt payload used by ``checkpoint-evidence.v3``."""
+
+    return _sha256_payload(
+        _plc_receipt_payload_fields(
+            run_id=run_id,
+            baseline_git_head=baseline_git_head,
+            candidate_path=candidate_path,
+            project_root=project_root,
+            evidence_hash=evidence_hash,
+            gates=gates,
+            evidence_current=evidence_current,
+            evidence_error=evidence_error,
+            project_roots=project_roots,
+            owned_plc_paths=owned_plc_paths,
+            input_digests=input_digests,
+            checker_digest=checker_digest,
+        )
+    )
+
+
+def _plc_check_output(candidate: Path, root: Path) -> tuple[str, int | None]:
+    """Run the existing project checker on a governed PLC root (read-only).
+
+    The candidate worktree is the checker's workspace root, so the spec registry
+    and library paths it consults come from the Run baseline, not the control root.
+    """
+
+    from auto_pm.plc.checker import PlcChecker
+
+    result = PlcChecker(str(candidate)).check_project(str(root))
+    if result.not_applicable:
+        return f"PLC 检查对该工程不适用: {result.not_applicable_reason}", None
+    # Failures and warnings first: the bounded summary must never hide the reason.
+    rank = {"fail": 0, "warn": 1}
+    ordered = sorted(result.items, key=lambda item: rank.get(item.status, 2))
+    lines = [f"{item.status} | {item.item} | {item.message}" for item in ordered]
+    lines.append(
+        f"pass={result.pass_count} warn={result.warn_count} fail={result.fail_count}"
+    )
+    return "\n".join(lines), (1 if result.fail_count > 0 else 0)
+
+
+def _scl_lint_output(root: Path, scl_paths: tuple[str, ...]) -> tuple[str, int | None]:
+    """Lint exactly the owned SCL files with the existing LSP-905 linter."""
+
+    from auto_pm.plc.scl_linter import SclLinter
+
+    errors = 0
+    warnings = 0
+    lines: list[str] = []
+    for relative in scl_paths:
+        report = SclLinter.lint_file(str(root / relative))
+        errors += report.errors_count
+        warnings += report.warnings_count
+        lines.extend(
+            f"{relative}:{violation.line_number} {violation.severity} {violation.message}"
+            for violation in report.violations
+        )
+    lines.append(f"files={len(scl_paths)} errors={errors} warnings={warnings}")
+    return "\n".join(lines), (1 if errors > 0 else 0)
+
+
 def _canonical_json_payload(payload: object) -> str:
     """Render a platform-neutral JSON payload used for immutable evidence."""
 
@@ -1249,6 +1896,7 @@ __all__ = [
     "EvidenceCollection",
     "EvidenceCollectionError",
     "EvidenceCollectionService",
+    "PlcQualityReceipt",
     "PythonQualityGate",
     "PythonQualityReceipt",
 ]
