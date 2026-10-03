@@ -52,6 +52,54 @@ class _StartWorker(QRunnable):
             self.done = True
 
 
+class _ApproveStartWorker(QRunnable):
+    """Approve one pending scope card and start it, off the QML main thread (one user click)."""
+
+    def __init__(self, request_id: str, plan_hash: str, service: PmCockpitService) -> None:
+        super().__init__()
+        self._request_id = request_id
+        self._plan_hash = plan_hash
+        self._service = service
+        self.setAutoDelete(False)
+        self.result: tuple[bool, str] | None = None
+        self.done = False
+
+    def run(self) -> None:
+        approved = False
+        try:
+            try:
+                approval = self._service.approve_scope(self._request_id, self._plan_hash)
+            except PmCockpitError as error:
+                self.result = (False, str(error) or "范围未能批准，已保留现场。")
+                return
+            approved = True
+            try:
+                outcome = self._service.start_execution(approval.mission_id)
+            except PmCockpitError as error:
+                self.result = (
+                    False,
+                    f"范围已批准，但任务未能启动：{error}；可在项目卡上点击“确认开始”重试。",
+                )
+                return
+            if outcome.verified:
+                self.result = (True, outcome.message)
+            elif outcome.receipt_status == "FAILED":
+                self.result = (False, "范围已批准，但任务启动失败，执行记录已保留。")
+            elif outcome.receipt_status == "PENDING":
+                self.result = (False, "范围已批准，但无法确认任务已启动，已保留待核验状态。")
+            else:
+                self.result = (False, f"范围已批准；{outcome.message}")
+        except Exception:  # UI must never receive exception text or paths
+            log.exception("Scope approval failed: %s", self._request_id)
+            self.result = (
+                (False, "范围已批准，但任务启动出现意外错误，已保留现场；可在项目卡上点击“确认开始”重试。")
+                if approved
+                else (False, "范围未能批准，已保留现场。")
+            )
+        finally:
+            self.done = True
+
+
 class _CloseWorker(QRunnable):
     """Close one accepted Mission through the closure service, off the QML main thread."""
 
@@ -131,6 +179,7 @@ class PmCockpitBridge(QObject):
     snapshotFinished = Signal(cast(type[object], "QVariant"))
     evidenceFinished = Signal(cast(type[object], "QVariant"))
     closureFinished = Signal(str, bool, str)
+    scopeApprovalFinished = Signal(str, bool, str)
 
     def __init__(
         self,
@@ -160,6 +209,10 @@ class PmCockpitBridge(QObject):
         self._close_poll_timer = QTimer(self)
         self._close_poll_timer.setInterval(50)
         self._close_poll_timer.timeout.connect(self._poll_close_workers)
+        self._approve_workers: dict[str, _ApproveStartWorker] = {}
+        self._approve_poll_timer = QTimer(self)
+        self._approve_poll_timer.setInterval(50)
+        self._approve_poll_timer.timeout.connect(self._poll_approve_workers)
         self._evidence_worker: _EvidenceWorker | None = None
         self._evidence_poll_timer = QTimer(self)
         self._evidence_poll_timer.setInterval(50)
@@ -312,6 +365,8 @@ class PmCockpitBridge(QObject):
                 "message": "该任务正在启动，请勿重复操作。",
             }
 
+        if self._approve_workers:
+            return {"accepted": False, "busy": True, "message": "正在批准并启动，请勿重复操作。"}
         worker = _StartWorker(mission_id, self)
         self._start_workers[mission_id] = worker
         try:
@@ -330,6 +385,27 @@ class PmCockpitBridge(QObject):
             "busy": True,
             "message": "已提交启动请求，正在后台执行。",
         }
+
+    @Slot(str, str, result="QVariant")
+    def approveScopeAndStart(self, request_id: str, plan_hash: str) -> dict[str, Any]:
+        """Queue the user's single approve-and-start click; replays of the same card are refused."""
+        request_id, plan_hash = request_id.strip(), plan_hash.strip()
+        if not request_id or not plan_hash:
+            return {"accepted": False, "busy": False, "message": "未找到要批准的范围卡。"}
+        if not self._snapshot_delivery_enabled:
+            return {"accepted": False, "busy": False, "message": "驾驶舱正在关闭。"}
+        if self._approve_workers:
+            return {"accepted": False, "busy": True, "message": "正在批准并启动，请勿重复操作。"}
+        worker = _ApproveStartWorker(request_id, plan_hash, self._service)
+        self._approve_workers[request_id] = worker
+        try:
+            self._thread_pool.start(worker)
+        except RuntimeError as error:
+            del self._approve_workers[request_id]
+            return {"accepted": False, "busy": False, "message": f"批准未能进入后台：{error}"}
+        if not self._approve_poll_timer.isActive():
+            self._approve_poll_timer.start()
+        return {"accepted": True, "busy": True, "message": "已提交批准，正在后台批准并启动。"}
 
     @Slot(str, result="QVariant")
     def confirmAcceptance(self, mission_id: str) -> dict[str, Any]:
@@ -408,6 +484,19 @@ class PmCockpitBridge(QObject):
         if not self._close_workers:
             self._close_poll_timer.stop()
 
+    def _poll_approve_workers(self) -> None:
+        completed = tuple(
+            request_id for request_id, worker in self._approve_workers.items() if worker.done
+        )
+        for request_id in completed:
+            worker = self._approve_workers.pop(request_id)
+            if not self._snapshot_delivery_enabled:
+                continue
+            success, message = worker.result or (False, "批准结果不可用，已保留现场。")
+            self.scopeApprovalFinished.emit(request_id, success, message)
+        if not self._approve_workers:
+            self._approve_poll_timer.stop()
+
     def _poll_snapshot_worker(self) -> None:
         worker = self._snapshot_worker
         if worker is None or not worker.done:
@@ -455,4 +544,5 @@ class PmCockpitBridge(QObject):
     def _disable_snapshot_delivery(self, *_args: object) -> None:
         self._evidence_poll_timer.stop()
         self._close_poll_timer.stop()
+        self._approve_poll_timer.stop()
         self.stopSnapshotRefresh()

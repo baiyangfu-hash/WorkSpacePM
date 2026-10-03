@@ -51,6 +51,7 @@ ApplicationWindow {
         cards: root.snapshot.projects || []
         activities: root.snapshot.activities || []
         notices: root.snapshot.notices || []
+        pendingCards: root.snapshot.pending_cards || []
         planningDraft: root.planningDraft
         statusMessage: root.statusMessage
         onDraftInputChanged: root.planningDraft = null
@@ -62,6 +63,12 @@ ApplicationWindow {
             root.planningDraft = response.success ? response.draft : null
         }
         onEvidenceRequested: root.showEvidence(projectId)
+        onScopeApprovalConfirmed: function(requestId, planHash) {
+            var response = pmCockpitBridge.approveScopeAndStart(requestId, planHash)
+            root.statusMessage = response.message || "范围未能提交批准。"
+            if (!response.accepted)
+                cockpitView.setApproveBusy(requestId, false)
+        }
         onStartConfirmed: function(missionId) {
             var response = pmCockpitBridge.startExecution(missionId)
             root.statusMessage = response.message || "任务未能启动。"
@@ -105,6 +112,12 @@ ApplicationWindow {
         function onClosureFinished(missionId, completed, message) {
             cockpitView.setCloseBusy(missionId, false)
             root.statusMessage = message || (completed ? "已完成。" : "同步未完成。")
+            root.refreshSnapshot()
+        }
+        function onScopeApprovalFinished(requestId, success, message) {
+            if (!success)
+                cockpitView.setApproveBusy(requestId, false)
+            root.statusMessage = message || (success ? "范围已批准并启动。" : "范围未能批准并启动。")
             root.refreshSnapshot()
         }
         function onStartFinished(missionId, success, message) {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import secrets
 import sqlite3
@@ -39,13 +40,14 @@ from auto_pm.contracts.pm_cockpit import (
     PmCockpitEvidence,
     PmCockpitEvidenceCurrency,
     PmCockpitFocus,
+    PmCockpitPendingScopeCard,
     PmCockpitProjectCard,
     PmCockpitResume,
     PmCockpitResumeState,
     PmCockpitSnapshot,
     PmCockpitWorkNode,
 )
-from auto_pm.contracts.pm_facade import PmConfirmationCard, PmRunOutcome
+from auto_pm.contracts.pm_facade import PlanningApprovalResult, PmConfirmationCard, PmRunOutcome
 from auto_pm.contracts.workspace_context import WorkspaceProjectMapping, WorkspaceRegistry
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -64,6 +66,11 @@ _REASON_LIMIT = 200
 _LEASE_ENVIRONMENT = "AUTO_PM_EXECUTION_LEASE_TOKEN"
 _START_READY_REASON = "等待您确认开工；确认前不会创建或启动任何执行。"
 _ALREADY_VERIFIED_MESSAGE = "该需求已执行并验证，等待验收；请直接确认验收，不要重复执行。"
+_FINISHED_MISSION_STATES = frozenset(
+    {MissionState.ACCEPTED, MissionState.CLOSED, MissionState.CANCELLED}
+)
+_APPROVER_MISSING_REASON = "未配置批准人，不能批准；请先设置环境变量 AUTO_PM_COCKPIT_APPROVER。"
+_OPEN_TASK_REASON = "项目已有未终结的任务；请先验收或取消它，再批准新的范围卡。"
 
 
 def _clip(text: str) -> str:
@@ -101,6 +108,7 @@ class PmCockpitService:
         store: ContinuityStore | None = None,
         closure_service: PmClosureService | None = None,
         facade: PmFacadeService | None = None,
+        approver: str = "",
     ) -> None:
         self._workspace_root = Path(workspace_root).resolve()
         selected = Path(registry_path) if registry_path is not None else self._REGISTRY_RELATIVE_PATH
@@ -112,6 +120,7 @@ class PmCockpitService:
         self._store = store or ContinuityStore(self._workspace_root)
         self._closure_service = closure_service
         self._facade_override = facade
+        self._approver = approver.strip()
 
     def snapshot(self) -> PmCockpitSnapshot:
         """Return the default screen's complete status without initializing any persistence."""
@@ -123,6 +132,7 @@ class PmCockpitService:
         store_note = self._store_note()
         cards: list[PmCockpitProjectCard] = []
         activities: list[PmCockpitActivity] = []
+        pending: list[PmCockpitPendingScopeCard] = []
         notices: list[str] = [store_note] if store_note else []
         for mapping in mappings:
             if store_note:
@@ -132,6 +142,7 @@ class PmCockpitService:
                 facts = self._facts(mapping.project_id)
                 cards.append(self._card(mapping, facts))
                 activities.extend(self._activities(mapping.project_id, facts))
+                pending.extend(self._pending_cards(mapping, facts, notices))
             except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
                 note = "连续性记录无法安全读取；驾驶舱没有尝试修复或重建它。"
                 notices.append(f"{mapping.project_id}: {note}")
@@ -139,6 +150,7 @@ class PmCockpitService:
         return PmCockpitSnapshot(
             projects=tuple(cards),
             activities=tuple(activities),
+            pending_cards=tuple(pending),
             notices=tuple(dict.fromkeys(notices)),
         )
 
@@ -257,6 +269,34 @@ class PmCockpitService:
             )
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
+
+    def approve_scope(self, request_id: str, plan_hash: str) -> PlanningApprovalResult:
+        """Apply the user's one scope approval; the approver comes from configuration only."""
+
+        request_id, plan_hash = request_id.strip(), plan_hash.strip()
+        if not request_id or not plan_hash:
+            raise PmCockpitError("未找到要批准的范围卡。")
+        if not self._approver:
+            raise PmCockpitError(_APPROVER_MISSING_REASON)
+        facade = self._facade_override or PmFacadeService(self._workspace_root)
+        try:
+            return cast(
+                PlanningApprovalResult,
+                facade.approve_pending_planning_scope_card(
+                    request_id,
+                    expected_plan_hash=plan_hash,
+                    approver=self._approver,
+                    approval_evidence_ref=self._approval_evidence(plan_hash),
+                ),
+            )
+        except PmFacadeError as error:
+            raise PmCockpitError(str(error)) from error
+
+    def _approval_evidence(self, plan_hash: str) -> str:
+        """Deterministic, secret-free reference to this cockpit click, so a retry is idempotent."""
+
+        who = hashlib.sha256(self._approver.encode("utf-8")).hexdigest()[:8]
+        return f"user-confirmation:cockpit-{plan_hash[:16]}-{who}"
 
     def confirm_acceptance(self, mission_id: str) -> PmConfirmationCard:
         """Apply final user acceptance after the existing verification gate has opened."""
@@ -404,6 +444,52 @@ class PmCockpitService:
         if mission is not None and mission.state is MissionState.ACCEPTED:
             return PmCockpitCompletionState.PENDING_SYNC, _SYNC_PENDING_NOTE
         return PmCockpitCompletionState.NOT_STARTED, ""
+
+    def _pending_cards(
+        self,
+        mapping: WorkspaceProjectMapping,
+        facts: _ProjectFacts,
+        notices: list[str],
+    ) -> tuple[PmCockpitPendingScopeCard, ...]:
+        """Pending scope cards of one project; an unreadable record never hides the project card."""
+
+        try:
+            submitted = self._store.list_pending_planning_scope_cards(mapping.project_id)
+        except (ContinuityStoreError, sqlite3.Error, OSError, ValueError):
+            notices.append(
+                f"{mapping.project_id}: 待批准范围卡无法安全读取；驾驶舱没有尝试修复或重建它。"
+            )
+            return ()
+        if not self._approver:
+            reason = _APPROVER_MISSING_REASON
+        elif any(item.state not in _FINISHED_MISSION_STATES for item in facts.missions):
+            reason = _OPEN_TASK_REASON
+        else:
+            reason = ""
+        return tuple(
+            PmCockpitPendingScopeCard(
+                project_id=mapping.project_id,
+                project_name=self._project_name(mapping),
+                request_id=item.card.request_id,
+                plan_hash=item.card.plan_hash,
+                revision=item.revision,
+                objective=item.objective,
+                acceptance_criteria=item.card.acceptance_criteria,
+                scope_paths=item.card.scope_paths,
+                risks=item.card.risks,
+                non_goals=item.card.non_goals,
+                executor=(
+                    f"{item.card.execution_grant.adapter.value} · "
+                    f"{item.card.execution_grant.approved_model}"
+                ),
+                submitted_by=item.submitted_by,
+                submitted_at=item.submitted_at,
+                approver=self._approver,
+                can_approve=not reason,
+                approve_blocked_reason=reason,
+            )
+            for item in submitted
+        )
 
     def _unavailable_card(
         self,

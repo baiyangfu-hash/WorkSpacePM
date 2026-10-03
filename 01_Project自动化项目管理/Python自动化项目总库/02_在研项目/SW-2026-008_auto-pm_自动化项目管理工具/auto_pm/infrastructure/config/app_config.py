@@ -6,6 +6,7 @@
 
 from typing import Literal
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from auto_pm import __app_name__
@@ -14,6 +15,11 @@ from auto_pm import __app_name__
 class AutoPmConfig(BaseSettings):
     app_name: str = __app_name__
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    # Name recorded as the approver when the user approves a scope card in the cockpit; empty = approval refused.
+    cockpit_approver: str = Field(
+        default="",
+        validation_alias=AliasChoices("AUTO_PM_COCKPIT_APPROVER", "cockpit_approver"),
+    )
     # Add more ...
 
     model_config = SettingsConfigDict(

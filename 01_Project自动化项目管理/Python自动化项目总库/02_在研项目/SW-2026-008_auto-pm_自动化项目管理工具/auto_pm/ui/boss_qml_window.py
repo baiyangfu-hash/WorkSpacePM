@@ -10,7 +10,19 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 
+from auto_pm.config.app_config import AutoPmConfig
+from auto_pm.core.pm_cockpit_service import PmCockpitService
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
+
+
+def build_cockpit_bridge(workspace_root: str, config: AutoPmConfig | None = None) -> PmCockpitBridge:
+    """Create the cockpit bridge with the configured approver (empty when unset or unreadable)."""
+
+    try:
+        approver = (config or AutoPmConfig()).cockpit_approver
+    except ValueError:
+        approver = ""
+    return PmCockpitBridge(workspace_root, service=PmCockpitService(workspace_root, approver=approver))
 
 
 def run_boss_cockpit(workspace_root: str, debug: bool = False) -> int:
@@ -25,7 +37,7 @@ def run_boss_cockpit(workspace_root: str, debug: bool = False) -> int:
         return 1
 
     engine = QQmlApplicationEngine()
-    bridge = PmCockpitBridge(workspace_root)
+    bridge = build_cockpit_bridge(workspace_root)
     engine.rootContext().setContextProperty("pmCockpitBridge", bridge)
     engine.load(QUrl.fromLocalFile(str(qml_path)))
     if not engine.rootObjects():

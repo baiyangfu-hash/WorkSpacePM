@@ -14,6 +14,8 @@ Item {
     property var planningDraft: null
     property var startBusyByMission: ({})
     property var closeBusyByMission: ({})
+    property var pendingCards: []
+    property var approveBusyByRequest: ({})
     property string statusMessage: ""
     signal planningDraftRequested(string projectId, string objective, string acceptanceText)
     signal draftInputChanged()
@@ -21,6 +23,7 @@ Item {
     signal startConfirmed(string missionId)
     signal acceptanceConfirmed(string missionId)
     signal syncRetryRequested(string missionId)
+    signal scopeApprovalConfirmed(string requestId, string planHash)
 
     function isStartBusy(missionId) {
         return missionId && startBusyByMission[missionId] === true
@@ -57,6 +60,46 @@ Item {
             return
         setCloseBusy(missionId, true)
         syncRetryRequested(missionId)
+    }
+
+    function isApproveBusy(requestId) {
+        return !!requestId && approveBusyByRequest[requestId] === true
+    }
+
+    function setApproveBusy(requestId, busy) {
+        if (!requestId)
+            return
+        var next = Object.assign({}, approveBusyByRequest)
+        if (busy)
+            next[requestId] = true
+        else
+            delete next[requestId]
+        approveBusyByRequest = next
+    }
+
+    function requestScopeApproval(requestId, planHash) {
+        if (!requestId || !planHash || isApproveBusy(requestId))
+            return
+        setApproveBusy(requestId, true)
+        scopeApprovalConfirmed(requestId, planHash)
+    }
+
+    // An approved card leaves the pending list with the next snapshot; until then it stays busy so that
+    // it cannot be clicked a second time. Forget the busy flag of every card that is no longer listed.
+    onPendingCardsChanged: {
+        var listed = {}
+        for (var i = 0; i < pendingCards.length; i++)
+            listed[pendingCards[i].request_id] = true
+        var next = {}
+        var changed = false
+        for (var key in approveBusyByRequest) {
+            if (listed[key] === true)
+                next[key] = true
+            else
+                changed = true
+        }
+        if (changed)
+            approveBusyByRequest = next
     }
 
     function requestStart(missionId) {
@@ -180,6 +223,16 @@ Item {
                     color: Theme.textPrimary
                     font.pixelSize: Theme.fontSizeSm
                     wrapMode: Text.WordWrap
+                }
+            }
+
+            Repeater {
+                model: root.pendingCards
+                delegate: Components.PendingScopeCard {
+                    Layout.fillWidth: true
+                    card: modelData
+                    busy: root.isApproveBusy(modelData.request_id)
+                    onApproveRequested: root.requestScopeApproval(modelData.request_id, modelData.plan_hash)
                 }
             }
 

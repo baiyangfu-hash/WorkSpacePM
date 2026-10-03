@@ -39,7 +39,10 @@ log = logging.getLogger(__name__)
 _RUNTIME_CHANGE_STATUSES = frozenset({"approved", "implementing"})
 _PLAN_HASH = re.compile(r"[0-9a-f]{64}\Z")
 _USER_CONFIRMATION = re.compile(r"user-confirmation:[A-Za-z0-9][A-Za-z0-9._:/-]{7,}\Z")
-_MODEL_APPROVER = re.compile(r"(?:^|[-_. ])(?:ai|agent|codex|gpt|model)(?:$|[-_. ])", re.IGNORECASE)
+_MODEL_APPROVER = re.compile(
+    r"(?:^|[-_. (])(?:ai|agent|codex|gpt|model|claude|anthropic|opus|sonnet|haiku|fable|gemini|copilot|llm|bot|assistant)(?:$|[-_. )])",
+    re.IGNORECASE,
+)
 
 
 class DecisionError(Exception):

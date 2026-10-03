@@ -9,7 +9,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from auto_pm.contracts.execution_adapter import (
     ExecutionActivityStage,
@@ -169,6 +169,36 @@ class PmCockpitActivity(BaseModel):
     failure_code: ExecutionFailureCode | None = None
 
 
+class PmCockpitPendingScopeCard(BaseModel):
+    """One persisted scope card waiting for the user's single approval; secret-free."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["pm-cockpit-pending-scope-card.v1"] = "pm-cockpit-pending-scope-card.v1"
+    project_id: str = Field(min_length=1)
+    project_name: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    plan_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    revision: int = Field(ge=1)
+    objective: str = Field(min_length=1)
+    acceptance_criteria: tuple[str, ...]
+    scope_paths: tuple[str, ...]
+    risks: tuple[str, ...]
+    non_goals: tuple[str, ...]
+    executor: str = Field(min_length=1)
+    submitted_by: str = Field(min_length=1)
+    submitted_at: str = Field(min_length=1)
+    approver: str = ""
+    can_approve: bool
+    approve_blocked_reason: str = Field(default="", max_length=200)
+
+    @model_validator(mode="after")
+    def _reason_matches_the_decision(self) -> PmCockpitPendingScopeCard:
+        if self.can_approve == bool(self.approve_blocked_reason):
+            raise ValueError("a blocked card needs a reason and an approvable card must have none")
+        return self
+
+
 class PmCockpitSnapshot(BaseModel):
     """A single immutable response for the safe default cockpit screen."""
 
@@ -177,4 +207,5 @@ class PmCockpitSnapshot(BaseModel):
     schema_version: Literal["pm-cockpit-snapshot.v1"] = "pm-cockpit-snapshot.v1"
     projects: tuple[PmCockpitProjectCard, ...]
     activities: tuple[PmCockpitActivity, ...] = ()
+    pending_cards: tuple[PmCockpitPendingScopeCard, ...] = ()
     notices: tuple[str, ...] = ()
