@@ -49,10 +49,10 @@ STRUCT
     bSeparateCylinderDown2  : BOOL;     // 分料气缸 2 下位 (推出分料)
 
     (* 兼容旧引脚别名 *)
-    bBlockCylinderUp        : BOOL;
-    bBlockCylinderDown      : BOOL;
-    bSeparateCylinderUp     : BOOL;
-    bSeparateCylinderDown   : BOOL;
+    bBlockCylinderUp        : BOOL;  // 阻挡气缸上位 (旧引脚别名，兼容保留)
+    bBlockCylinderDown      : BOOL;  // 阻挡气缸下位 (旧引脚别名，兼容保留)
+    bSeparateCylinderUp     : BOOL;  // 分料气缸上位 (旧引脚别名，兼容保留)
+    bSeparateCylinderDown   : BOOL;  // 分料气缸下位 (旧引脚别名，兼容保留)
 
     (* ------------------ 安全与机构联锁输入 ------------------ *)
     bRobotInSafetyPos       : BOOL;     // 取料机构在安全区区域 (干涉区互锁)

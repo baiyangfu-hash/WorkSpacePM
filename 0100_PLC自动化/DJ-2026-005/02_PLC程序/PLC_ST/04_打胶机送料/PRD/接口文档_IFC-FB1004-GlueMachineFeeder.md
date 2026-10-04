@@ -25,40 +25,16 @@ X2轴横移+打胶机交互控制。4步D760状态机，收到取放料放料完
 | D760_MOVE_TO_GLUE | 2 | X2→打胶机送料 | 到D630,关Y47,等X76发Y44,等X102 |
 | D760_RETURN_STANDBY | 3 | X2→待机位 | 返回D610,开Y47 |
 
-## 3. VAR_INPUT
+## 3. 接口参数 (VAR_IN_OUT)
 
-| 名称 | 类型 | 默认值 | 说明 | 来源 |
-|------|------|--------|------|------|
-| i_bAutoMode | BOOL | FALSE | 自动模式 | OB1←HMI |
-| i_bManualMode | BOOL | FALSE | 手动模式 | OB1←HMI |
-| i_bStart | BOOL | FALSE | 启动 | OB1←HMI(M2) |
-| i_bStop | BOOL | FALSE | 停止 | OB1←HMI(M3) |
-| i_bLx_X2JogPos | BOOL | FALSE | 手动:X2正向点动 | OB1←HMI |
-| i_bLx_X2JogNeg | BOOL | FALSE | 手动:X2反向点动 | OB1←HMI |
-| i_bPlaceDone | BOOL | FALSE | FB_1003放料完成脉冲 | OB1←FB_1003 |
-| i_rX2Speed | REAL | 0.0 | X2轴速度 | OB1←HMI |
-| i_bGlueMachineAllowFeed | BOOL | FALSE | 打胶机允许送料(X76) | OB1←IO |
-| i_bGlueMachinePickupComplete | BOOL | FALSE | 打胶机取料完成(X102) | OB1←IO |
-| i_bX2ZoneSensor1 | BOOL | FALSE | X2区域前传感器1(X72) | OB1←IO |
-| i_bX2ZoneSensor2 | BOOL | FALSE | X2区域前传感器2(X73) | OB1←IO |
-| i_bX2ZoneSensor3 | BOOL | FALSE | X2区域后传感器1(X74) | OB1←IO |
-| i_bX2ZoneSensor4 | BOOL | FALSE | X2区域后传感器2(X75) | OB1←IO |
+| 名称 | 类型 | 说明 |
+|---|---|---|
+| io_stFeeder | ST_GlueFeeder | 打胶送料小车工站数据结构体 |
+| io_stX2Axis | ST_ServoAxis | X2轴(送料横移) 对象化标准接口 |
 
-## 4. VAR_OUTPUT
+结构体 `ST_GlueFeeder`、`ST_ServoAxis` 的字段不在本文档展开，统一在 `程序文档/PLC变量定义文档_VAR.md` 对应结构体的小节维护（接口字段只在一处维护，`plc docs check` 会核对）。
 
-| 名称 | 类型 | 默认值 | 说明 | 去向 |
-|------|------|--------|------|------|
-| q_bX2AxisHomeRequest | BOOL | FALSE | X2回原点请求 | OB1→轴FB |
-| q_bX2AxisMoveAbsReq | BOOL | FALSE | X2绝对定位请求 | OB1→轴FB |
-| q_rX2AxisTargetPos | REAL | 0.0 | X2目标位置 | OB1→轴FB |
-| q_bAllowPickup | BOOL | FALSE | 允许打胶机抓料(Y44) | OB1→IO |
-| q_bSafetyZoneSignal | BOOL | FALSE | 打胶机安全区(Y47) | OB1→IO |
-| q_iCurrentState | INT | 0 | 当前D760值(0~3) | OB1→HMI |
-| q_iAlarmCode | INT | 0 | 当前报警码 | OB1→FB_2001 |
-| q_bFrameOnFeedPlatform | BOOL | FALSE | 送料平台有边框(阻塞回原点F81) | OB1→FB_2001 |
-| q_bRunning | BOOL | FALSE | 运行中 | OB1→HMI |
-
-## 5. 状态机伪代码
+## 4. 状态机伪代码
 
 ```
 CASE q_iCurrentState OF
@@ -101,7 +77,7 @@ CASE q_iCurrentState OF
 END_CASE;
 ```
 
-## 6. 报警码
+## 5. 报警码
 
 | 码 | 含义 |
 |:--:|------|
@@ -111,7 +87,7 @@ END_CASE;
 | 204 | 安全区传感器异常 |
 | 205 | 送料平台有边框(回原点阻塞) |
 
-## 7. 关联文档
+## 6. 关联文档
 
 | 文档 | 路径 |
 |------|------|

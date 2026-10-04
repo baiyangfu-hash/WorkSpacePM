@@ -21,18 +21,18 @@ VAR
     // =========================================================================
     // 第一部分: 全局控制信号与系统状态 (FB_2001_CommonAlarm)
     // =========================================================================
-    stGlobal   : ST_CommonAlarm;
+    stGlobal   : ST_CommonAlarm;  // 全局控制与报警数据 (FB_2001_CommonAlarm)
 
     // =========================================================================
     // 第二部分: 外部设备交互信号 (ST_ExternalDevice)
     // =========================================================================
-    stExternal : ST_ExternalDevice;
+    stExternal : ST_ExternalDevice;  // 外部设备交互信号 (ST_ExternalDevice)
 
     // =========================================================================
     // 第三部分: 四层输送机系统信号 (ST_SingleLayerConveyor ARRAY[1..4])
     // =========================================================================
     stConveyor : STRUCT
-        astLayer                 : ARRAY[1..4] OF ST_SingleLayerConveyor;
+        astLayer                 : ARRAY[1..4] OF ST_SingleLayerConveyor;  // 各层输送机数据 (4 层)
         i_bAutoMode              : BOOL := FALSE;    // 自动运行模式
         i_bManualMode            : BOOL := FALSE;    // 手动调试模式
         i_bStart                 : BOOL := FALSE;    // 自动循环启动
@@ -49,31 +49,31 @@ VAR
     // =========================================================================
     // 第四部分: 取放料机构信号与10组配方管理器
     // =========================================================================
-    stPickPlace      : ST_PickPlace;
-    stRecipeManager  : ST_RecipeManager;
+    stPickPlace      : ST_PickPlace;  // 取放料机构信号 (ST_PickPlace)
+    stRecipeManager  : ST_RecipeManager;  // 配方管理器 (10 组配方)
 
     // =========================================================================
     // 第五部分: 打胶机送料机构信号 (ST_GlueFeeder)
     // =========================================================================
-    stFeeder         : ST_GlueFeeder;
+    stFeeder         : ST_GlueFeeder;  // 打胶机送料机构信号 (ST_GlueFeeder)
 
     // =========================================================================
     // 第五部分B: 伺服轴数组 (ST_ServoAxis V3.0, PLCopen MC Part 1)
     // 轴索引: [1]=Z轴(升降) [2]=X1轴(取放料横移) [3]=X2轴(打胶机送料)
     // =========================================================================
-    astServoAxis     : ARRAY[1..3] OF ST_ServoAxis;
+    astServoAxis     : ARRAY[1..3] OF ST_ServoAxis;  // 伺服轴数组: [1]=Z轴 [2]=X1轴 [3]=X2轴
 
     // =========================================================================
     // 第六部分: 功能块实例
     // =========================================================================
-    fbExternalDevice      : FB_ExternalDeviceInteraction;
-    fbConveyor_L1         : FB_1002_SingleLayerConveyor_BufferFraming;
-    fbConveyor_L2         : FB_1002_SingleLayerConveyor_BufferFraming;
-    fbConveyor_L3         : FB_1002_SingleLayerConveyor_BufferFraming;
-    fbConveyor_L4         : FB_1002_SingleLayerConveyor_BufferFraming;
-    fbPickPlace           : FB_1003_PickPlace_BufferFraming;
-    fbGlueFeeder          : FB_1004_GlueMachineFeeder_BufferFraming;
-    fbCommonAlarm         : FB_2001_CommonAlarm_AllStation;
+    fbExternalDevice      : FB_ExternalDeviceInteraction;  // 外部设备交互功能块实例
+    fbConveyor_L1         : FB_1002_SingleLayerConveyor_BufferFraming;  // 第 1 层输送机功能块实例
+    fbConveyor_L2         : FB_1002_SingleLayerConveyor_BufferFraming;  // 第 2 层输送机功能块实例
+    fbConveyor_L3         : FB_1002_SingleLayerConveyor_BufferFraming;  // 第 3 层输送机功能块实例
+    fbConveyor_L4         : FB_1002_SingleLayerConveyor_BufferFraming;  // 第 4 层输送机功能块实例
+    fbPickPlace           : FB_1003_PickPlace_BufferFraming;  // 取放料机构功能块实例
+    fbGlueFeeder          : FB_1004_GlueMachineFeeder_BufferFraming;  // 打胶机送料功能块实例
+    fbCommonAlarm         : FB_2001_CommonAlarm_AllStation;  // 公共报警管理功能块实例
 END_VAR
 
 END_DATA_BLOCK
