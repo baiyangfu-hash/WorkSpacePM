@@ -12,6 +12,7 @@ Commands:
     check --all                  检查工作空间所有项目
     repair <ID> [--rename]       自动修复项目结构
     standardize <ID> [--apply]   文档命名标准化
+    docs check|sync|confirm <ID> 文档与代码一致性核对、自动补全、确认（V01B）
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ from auto_pm.plc.checker import PlcChecker
 from auto_pm.plc.models import CheckResult, RepairResult
 from auto_pm.plc.service import PlcService
 
+from .docs import docs_group
+
 console = Console()
 
 
@@ -37,6 +40,9 @@ console = Console()
 @click.pass_context
 def plc_group(ctx: click.Context) -> None:
     """PLC 项目管理 - 初始化/检查/修复/标准化（LSP-907）"""
+
+
+plc_group.add_command(docs_group)
 
 
 @plc_group.command(name="init")

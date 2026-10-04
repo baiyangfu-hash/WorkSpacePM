@@ -21,6 +21,7 @@ from typing import cast
 
 from auto_pm.core.paths import find_prd_dir
 from auto_pm.models.enums import ProjectType
+from auto_pm.plc.doc_consistency import consistency_items
 from auto_pm.plc.models import (
     _LEGACY_PROJECT_INIT_PLC_PATH,
     FB_PRD_SCAN_DIR,
@@ -218,6 +219,9 @@ class _LegacyPlcCheckerCore:
         # 6. 检查 SCL 代码语法与命名规范 (LSP-905)
         self._check_scl_code_compliance(project_path, result)
 
+        # 7. 检查接口文档/变量定义文档与 SCL 代码一致（REQ-SW008-M2-DOCSYNC，V01B）
+        self._check_doc_code_consistency(project_path, result)
+
         log.info(
             "项目检查完成: %s - pass=%d warn=%d fail=%d",
             os.path.basename(project_path),
@@ -261,6 +265,18 @@ class _LegacyPlcCheckerCore:
             result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议")
         else:
             result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl 文件 100% 遵从 LSP-905 命名与安全闭环规范")
+
+    def _check_doc_code_consistency(self, project_path: str, result: CheckResult) -> None:
+        """核对 FB/FC 接口文档与 DB/OB/结构体变量表是否与 SCL 代码一致（名称、类型、方向、注释）。"""
+        if result.project_type in SKIP_PLC_JSON_TYPES:
+            return
+        try:
+            items = consistency_items(project_path)
+        except Exception as error:
+            result.add("文档一致性", "warn", f"一致性核对异常，已跳过: {error}")
+            return
+        for item, status, message in items:
+            result.add(item, status, message)
 
     # ── 工作空间批量检查 ──────────────────────────────────
 
