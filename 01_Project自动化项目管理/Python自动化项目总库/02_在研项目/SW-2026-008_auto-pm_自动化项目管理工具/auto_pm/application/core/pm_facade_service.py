@@ -963,7 +963,7 @@ class PmFacadeService:
             raise PmFacadeError("最新 VERIFYING Run 缺少 Checkpoint")
         if checkpoint.git_head != run.git_head:
             raise PmFacadeError("Checkpoint 与最新 Run 基线不一致")
-        if checkpoint.dirty_paths != run.declared_dirty_paths:
+        if tuple(sorted(checkpoint.dirty_paths)) != tuple(sorted(run.declared_dirty_paths)):
             raise PmFacadeError("Checkpoint 与最新 Run 声明差异不一致")
         if len(checkpoint.evidence) != 1:
             raise PmFacadeError("Checkpoint 必须包含唯一的自动质量证据")
