@@ -270,4 +270,38 @@ class StageGateEngine:
             )
         )
 
+        plc_item = self._evaluate_plc_doc_code_consistency(p)
+        if plc_item is not None:
+            items.append(plc_item)
+
         return items
+
+    @staticmethod
+    def _evaluate_plc_doc_code_consistency(p: Path) -> GateCheckItemDTO | None:
+        """PLC 项目：接口文档/变量定义文档与 SCL 代码必须一致且没有待确认标记（V01D）；非 PLC 项目不适用。"""
+        if not (p / ".plc.json").is_file():
+            return None
+        item_id, name = "G4-PLC-DOC-CODE-CONSISTENT", "PLC 文档与代码一致且无待确认标记"
+        fix = "运行 plc docs check 查看全部差异；plc docs sync 按代码补全；审核后 plc docs confirm"
+        try:
+            from auto_pm.plc import doc_consistency as dc
+
+            analysis = dc.analyze_project(str(p))
+        except Exception as exc:
+            return GateCheckItemDTO(
+                id=item_id, name=name, passed=False, severity="BLOCKER",
+                message=f"一致性核对异常，按未通过处理: {exc}", fix_suggestion=fix,
+            )
+        fails = [f for f in analysis.findings if f.severity == "fail"]
+        marked = analysis.marked_rows
+        if not fails and not marked:
+            return GateCheckItemDTO(
+                id=item_id, name=name, passed=True, severity="BLOCKER",
+                message=f"{len(analysis.reports)} 个对象的文档与代码一致，没有待确认标记",
+            )
+        shown = "；".join(f.render() for f in fails[:3])
+        return GateCheckItemDTO(
+            id=item_id, name=name, passed=False, severity="BLOCKER",
+            message=f"拦住项 {len(fails)}、待确认标记 {len(marked)}" + (f"（如：{shown}）" if shown else ""),
+            fix_suggestion=fix,
+        )

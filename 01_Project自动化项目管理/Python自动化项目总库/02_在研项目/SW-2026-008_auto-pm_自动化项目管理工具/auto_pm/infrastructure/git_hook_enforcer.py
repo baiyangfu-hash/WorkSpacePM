@@ -666,6 +666,29 @@ def enforce_pre_commit(
     staged_snapshot: StagedSnapshot | None = None,
     control_root: Path | None = None,
 ) -> int:
+    """pre-commit 门禁：先后执行台账一致性检查（原有）与 PLC 文档/代码一致性检查（V01D）。
+
+    两项各自完整报告，任何一项不通过即拒绝提交。
+    """
+    from auto_pm.infrastructure.plc_doc_hook import enforce_plc_docs
+
+    snapshot = (
+        staged_snapshot
+        if staged_snapshot is not None
+        else _get_staged_snapshot_or_reject(workspace_root, "pre-commit")
+    )
+    if snapshot is None:
+        return 1
+    ledger_code = _enforce_ledger_pre_commit(workspace_root, snapshot, control_root)
+    plc_code = enforce_plc_docs(workspace_root, snapshot.paths)
+    return 1 if ledger_code != 0 or plc_code != 0 else 0
+
+
+def _enforce_ledger_pre_commit(
+    workspace_root: Path,
+    staged_snapshot: StagedSnapshot | None = None,
+    control_root: Path | None = None,
+) -> int:
     """pre-commit 阶段拦截检查：
     1. 只阻断暂存生产代码所归属项目的版本变更台账一致性；
     2. 无关项目既存差异仅报告，完整全局检查留给发布门。
