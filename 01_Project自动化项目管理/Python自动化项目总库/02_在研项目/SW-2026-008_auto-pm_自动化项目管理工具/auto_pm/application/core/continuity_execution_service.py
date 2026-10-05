@@ -773,7 +773,7 @@ class ContinuityExecutionService:
             run = self._store.get_run(receipt.run_id)
             if (
                 run.work_id != receipt.work_id
-                or run.executor_id != receipt.executor_id
+                or run.executor_id != receipt.owner_id
                 or run.state not in {RunState.RUNNING, RunState.VERIFYING}
             ):
                 raise ContinuityExecutionError("ExecutionIntent 与活动 Run 身份不一致")

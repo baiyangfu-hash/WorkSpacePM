@@ -12,6 +12,7 @@ import sqlite3
 import stat
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -68,6 +69,19 @@ from auto_pm.infrastructure.control_root_guard import (
 
 class ContinuityStoreError(RuntimeError):
     """Raised when a continuity transaction cannot be completed safely."""
+
+
+class _TransientSidecarError(ContinuityStoreError):
+    """A WAL sidecar looked unsafe at one instant.
+
+    SQLite creates and deletes ``-wal``, ``-shm`` and ``-journal`` while other processes use the database, so a
+    path check can meet a half-created or delete-pending file; only an anomaly that persists is a real refusal.
+    """
+
+
+_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
+_SIDECAR_ATTEMPTS = 6
+_SIDECAR_RETRY_SECONDS = 0.025
 
 
 @dataclass(frozen=True)
@@ -446,30 +460,51 @@ class ContinuityStore:
             raise ContinuityStoreError(str(error)) from error
 
     def _validated_db_path(self) -> Path:
+        """Validate the database path and its sidecars; a sidecar anomaly is retried briefly, the database itself never."""
+
+        for attempt in range(_SIDECAR_ATTEMPTS):
+            try:
+                return self._validated_db_path_once()
+            except _TransientSidecarError as error:
+                if attempt == _SIDECAR_ATTEMPTS - 1:
+                    raise ContinuityStoreError(str(error)) from error
+                time.sleep(_SIDECAR_RETRY_SECONDS)
+        raise AssertionError("unreachable")  # pragma: no cover - the loop always returns or raises
+
+    def _validated_db_path_once(self) -> Path:
         try:
             db_path = require_safe_workspace_path(
                 self.workspace_root,
                 self.db_path,
                 label="Continuity Store path",
             )
-            checked_paths = [db_path]
-            for suffix in ("-wal", "-shm", "-journal"):
-                checked_paths.append(
-                    require_safe_workspace_path(
-                        self.workspace_root,
-                        Path(f"{db_path}{suffix}"),
-                        label=f"Continuity Store sidecar {suffix}",
+            sidecars: list[Path] = []
+            for suffix in _SIDECAR_SUFFIXES:
+                try:
+                    sidecars.append(
+                        require_safe_workspace_path(
+                            self.workspace_root,
+                            Path(f"{db_path}{suffix}"),
+                            label=f"Continuity Store sidecar {suffix}",
+                        )
                     )
-                )
-            for checked in checked_paths:
+                except ControlRootGuardError as error:
+                    raise _TransientSidecarError(str(error)) from error
+            for checked in [db_path, *sidecars]:
+                is_sidecar = checked is not db_path
                 try:
                     metadata = checked.stat()
                 except FileNotFoundError:
                     continue
+                except OSError as error:
+                    if is_sidecar:
+                        raise _TransientSidecarError(
+                            f"Continuity Store sidecar 暂时无法读取: {checked.name}"
+                        ) from error
+                    raise
                 if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-                    raise ContinuityStoreError(
-                        f"Continuity Store DB/sidecar 必须是唯一链接的普通文件: {checked.name}"
-                    )
+                    message = f"Continuity Store DB/sidecar 必须是唯一链接的普通文件: {checked.name}"
+                    raise (_TransientSidecarError(message) if is_sidecar else ContinuityStoreError(message))
             return db_path
         except ControlRootGuardError as error:
             raise ContinuityStoreError(str(error)) from error
@@ -959,7 +994,9 @@ class ContinuityStore:
             temporary.cleanup()
 
     @staticmethod
-    def _file_inventory(path: Path, *, required: bool) -> _FileInventory:
+    def _file_inventory(path: Path, *, required: bool, transient: bool = False) -> _FileInventory:
+        """Hash one file; with ``transient`` (a source sidecar) a permission error while reading means another process holds it for the moment and counts as drift."""
+
         try:
             metadata = path.stat()
         except FileNotFoundError:
@@ -979,6 +1016,10 @@ class ContinuityStore:
                     digest.update(chunk)
         except FileNotFoundError as error:
             raise _ReadSnapshotDriftError(path.name) from error
+        except PermissionError as error:
+            if transient:
+                raise _ReadSnapshotDriftError(path.name) from error
+            raise ContinuityStoreError(f"Continuity Store 文件无法读取: {path.name}") from error
         except OSError as error:
             raise ContinuityStoreError(f"Continuity Store 文件无法读取: {path.name}") from error
         return (
@@ -994,9 +1035,9 @@ class ContinuityStore:
     def _source_inventory(cls, db_path: Path) -> _StoreInventory:
         facts = (
             cls._file_inventory(db_path, required=True),
-            cls._file_inventory(Path(f"{db_path}-wal"), required=False),
-            cls._file_inventory(Path(f"{db_path}-shm"), required=False),
-            cls._file_inventory(Path(f"{db_path}-journal"), required=False),
+            cls._file_inventory(Path(f"{db_path}-wal"), required=False, transient=True),
+            cls._file_inventory(Path(f"{db_path}-shm"), required=False, transient=True),
+            cls._file_inventory(Path(f"{db_path}-journal"), required=False, transient=True),
         )
         if facts[3][0] and facts[3][1] > 0:
             raise ContinuityStoreError(
@@ -1101,7 +1142,7 @@ class ContinuityStore:
         """Copy a stable DB/WAL byte set with bounded fail-closed retries."""
 
         temp_root = self._validated_snapshot_temp_root()
-        for _attempt in range(3):
+        for attempt in range(_SIDECAR_ATTEMPTS):
             temporary = tempfile.TemporaryDirectory(
                 prefix="auto-pm-continuity-read-",
                 dir=temp_root,
@@ -1151,6 +1192,8 @@ class ContinuityStore:
                 return temporary, snapshot_path
             except _ReadSnapshotDriftError:
                 temporary.cleanup()
+                if attempt < _SIDECAR_ATTEMPTS - 1:
+                    time.sleep(_SIDECAR_RETRY_SECONDS)
                 continue
             except Exception:
                 temporary.cleanup()

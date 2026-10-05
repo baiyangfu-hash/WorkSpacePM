@@ -3956,15 +3956,16 @@ def test_service_reconciles_operation_receipt_run_and_started_identity(tmp_path:
         session_id="session-e06",
         started_at=datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
     )
+    # The adapter builds the Run owner as "<adapter>:<executor>"; the Run stores that owner, the receipt keeps both.
     receipt = SimpleNamespace(
-        run_id="RUN-001", work_id="WORK-001", executor_id="agent-a", owner_id="agent-a"
+        run_id="RUN-001", work_id="WORK-001", executor_id="agent-a", owner_id="codex:agent-a"
     )
     store = Mock()
     store.get_execution_intent.return_value = SimpleNamespace(receipt=receipt)
     store.get_run.return_value = SimpleNamespace(
-        work_id="WORK-001", executor_id="agent-a", state=RunState.RUNNING
+        work_id="WORK-001", executor_id="codex:agent-a", state=RunState.RUNNING
     )
-    store.get_run_started_evidence.return_value = ("agent-a", evidence)
+    store.get_run_started_evidence.return_value = ("codex:agent-a", evidence)
     service = ContinuityExecutionService(tmp_path, store=store)
 
     actual_receipt, run, actual_evidence = service.resolve_started_run("operation-e06-1")
@@ -3976,4 +3977,11 @@ def test_service_reconciles_operation_receipt_run_and_started_identity(tmp_path:
 
     store.get_run_started_evidence.return_value = ("other-owner", evidence)
     with pytest.raises(ContinuityExecutionError, match="owner"):
+        service.resolve_started_run("operation-e06-1")
+
+    store.get_run_started_evidence.return_value = ("codex:agent-a", evidence)
+    store.get_run.return_value = SimpleNamespace(
+        work_id="WORK-001", executor_id="agent-a", state=RunState.RUNNING
+    )
+    with pytest.raises(ContinuityExecutionError, match="身份不一致"):
         service.resolve_started_run("operation-e06-1")
