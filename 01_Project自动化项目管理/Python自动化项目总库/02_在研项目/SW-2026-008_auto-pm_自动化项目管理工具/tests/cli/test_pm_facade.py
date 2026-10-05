@@ -158,6 +158,10 @@ def _planning_args() -> list[str]:
         "gpt-approved",
         "--declared-dirty",
         "auto_pm/example.py",
+        "--kind",
+        "bug",
+        "--domain",
+        "SCPT",
     ]
 
 

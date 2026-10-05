@@ -57,6 +57,10 @@ SCOPE = [
     "gpt-approved",
     "--declared-dirty",
     "auto_pm/example.py",
+    "--kind",
+    "bug",
+    "--domain",
+    "SCPT",
 ]
 FORBIDDEN_KEYS = {"mission_id", "decision_id", "work_id"}
 

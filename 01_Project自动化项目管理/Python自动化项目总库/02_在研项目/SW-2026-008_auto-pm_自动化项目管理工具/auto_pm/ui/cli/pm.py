@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import cast
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 
 import click
 from click.core import ParameterSource
@@ -13,11 +14,26 @@ from auto_pm.app_context import AppContext
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import TransitionGuardError
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
+from auto_pm.contracts.intake import (
+    ChangeAction,
+    Disposition,
+    IntakeClassification,
+    IntakeKind,
+    IntakeStatus,
+    TriageTicket,
+    UrgentCriterion,
+)
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PlanningScopeCard, PmIntent
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
+from auto_pm.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.core.pm_resume_service import PmResumeError, PmResumeService
 from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
 from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
+from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+_KIND_CHOICES = tuple(item.value.lower() for item in IntakeKind)
+_ACTION_CHOICES = tuple(item.value.lower() for item in ChangeAction)
 
 
 @click.group(name="pm")
@@ -36,6 +52,76 @@ def _facade(ctx: click.Context) -> PmFacadeService:
 def _require_control_root(ctx: click.Context) -> None:
     app_ctx: AppContext = ctx.find_root().obj
     WorktreePolicyService(app_ctx.control_root).require_control_root()
+
+
+def _classification_options(function: _F) -> _F:
+    """Add the options that classify a plan request (shared by ``plan`` and ``approve``)."""
+
+    options = (
+        click.option(
+            "--kind",
+            type=click.Choice(_KIND_CHOICES, case_sensitive=False),
+            default=None,
+            help="分类：iteration 正常迭代 | bug 缺陷 | change 功能变更 | urgent 紧急 | debt 技术债",
+        ),
+        click.option(
+            "--change-action",
+            type=click.Choice(_ACTION_CHOICES, case_sensitive=False),
+            default=None,
+            help="功能变更的动作（仅 --kind change）：add 增加 | modify 修改 | reduce 减少 | freeze 冻结 | remove 移除",
+        ),
+        click.option("--domain", default="", help="技术领域；缺省时按项目技术栈推断"),
+        click.option(
+            "--impact-scope", "impact_scope", multiple=True, help="影响范围，可重复；缺省 MODULE"
+        ),
+        click.option("--inbox-id", default="", help="把一条已确认的收件箱条目转为本计划"),
+    )
+    for option in reversed(options):
+        function = option(function)
+    return function
+
+
+def _enum_or_none(enum_type: Any, value: str | None) -> Any:
+    return None if value is None else enum_type(value.upper())
+
+
+def _resolve_filing(
+    ctx: click.Context,
+    *,
+    project_id: str,
+    request_id: str,
+    kind: str | None,
+    change_action: str | None,
+    domain: str,
+    impact_scope: tuple[str, ...],
+    inbox_id: str,
+    from_draft: bool,
+) -> tuple[IntakeClassification, str]:
+    """Decide how a plan request is filed; a request nothing classifies is refused."""
+
+    app_ctx: AppContext = ctx.find_root().obj
+    try:
+        _require_control_root(ctx)
+        if from_draft:
+            project_id = (
+                ContinuityStore(app_ctx.control_root).get_planning_draft(request_id).subject_project_id
+            )
+        classification, item_id = PmIntakeService(app_ctx.control_root).plan_classification(
+            project_id,
+            request_id=request_id,
+            kind=_enum_or_none(IntakeKind, kind),
+            change_action=_enum_or_none(ChangeAction, change_action),
+            domain=domain,
+            impact_scope=impact_scope,
+            inbox_id=inbox_id,
+        )
+    except (PmIntakeError, ContinuityStoreError, ValueError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    if classification is None:
+        raise click.ClickException(
+            "新需求必须分类：请给出 --kind（iteration|bug|change|urgent|debt）或 --inbox-id"
+        )
+    return classification, item_id
 
 
 def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: str = "") -> None:
@@ -72,6 +158,8 @@ def _planning_scope_card(
     adapter: str | None,
     approved_model: str,
     declared_dirty_paths: tuple[str, ...],
+    classification: IntakeClassification | None = None,
+    intake_item_id: str = "",
 ) -> PlanningScopeCard:
     missing = [
         name
@@ -112,6 +200,8 @@ def _planning_scope_card(
                     approved_model=approved_model,
                     declared_dirty_paths=declared_dirty_paths,
                 ),
+                classification=classification,
+                intake_item_id=intake_item_id,
             ),
         )
     except (PmFacadeError, ValueError, WorktreePolicyError) as error:
@@ -133,6 +223,8 @@ def _submit_scope_card(
     declared_dirty_paths: tuple[str, ...],
     submitted_by: str,
     from_draft: bool,
+    classification: IntakeClassification,
+    intake_item_id: str,
 ) -> PlanningScopeCard:
     """Persist the scope card of a draft (creating the draft first unless it already exists)."""
     try:
@@ -158,6 +250,8 @@ def _submit_scope_card(
                 declared_dirty_paths=declared_dirty_paths,
             ),
             submitted_by=submitted_by,
+            classification=classification,
+            intake_item_id=intake_item_id,
         )
     except (PmFacadeError, ValueError, WorktreePolicyError) as error:
         raise click.ClickException(str(error)) from error
@@ -231,6 +325,7 @@ def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approv
 @click.option("--approved-model", default="")
 @click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
 @click.option("--submitted-by", default="pm-cli", show_default=True, help="范围卡提交者标识，写入事件链")
+@_classification_options
 @click.pass_context
 def plan_pm(
     ctx: click.Context,
@@ -246,11 +341,16 @@ def plan_pm(
     approved_model: str,
     declared_dirty_paths: tuple[str, ...],
     submitted_by: str,
+    kind: str | None,
+    change_action: str | None,
+    domain: str,
+    impact_scope: tuple[str, ...],
+    inbox_id: str,
 ) -> None:
     """创建/恢复并持久化新需求范围卡，或兼容已有 Mission 调用。
 
     只给 --request-id（不给 --project-id/--objective/--acceptance）时，为已保存的草稿
-    （例如驾驶舱保存的草稿）起草并持久化范围卡。
+    （例如驾驶舱保存的草稿）起草并持久化范围卡。新需求必须分类（--kind 或 --inbox-id）。
     """
     new_values = (
         project_id,
@@ -263,6 +363,11 @@ def plan_pm(
         adapter,
         approved_model,
         declared_dirty_paths,
+        kind,
+        change_action,
+        domain,
+        impact_scope,
+        inbox_id,
     )
     if mission_id:
         if any(new_values):
@@ -291,6 +396,17 @@ def plan_pm(
             ("按已保存草稿提交范围卡缺少必填参数: " if from_draft else "新需求 plan 缺少必填参数: ")
             + ", ".join(missing)
         )
+    classification, intake_item_id = _resolve_filing(
+        ctx,
+        project_id=project_id,
+        request_id=request_id,
+        kind=kind,
+        change_action=change_action,
+        domain=domain,
+        impact_scope=impact_scope,
+        inbox_id=inbox_id,
+        from_draft=from_draft,
+    )
     card = _submit_scope_card(
         ctx,
         request_id=request_id,
@@ -305,6 +421,8 @@ def plan_pm(
         declared_dirty_paths=declared_dirty_paths,
         submitted_by=submitted_by,
         from_draft=from_draft,
+        classification=classification,
+        intake_item_id=intake_item_id,
     )
     click.echo(card.model_dump_json(indent=2))
 
@@ -355,6 +473,229 @@ def pending_pm(ctx: click.Context, project_id: str) -> None:
     )
 
 
+_STATUS_CHOICES = tuple(item.value.lower() for item in IntakeStatus)
+_DISPOSITION_CHOICES = tuple(item.value.lower() for item in Disposition)
+_CRITERION_CHOICES = tuple(item.value.lower() for item in UrgentCriterion)
+
+
+@pm_group.group(name="inbox")
+def inbox_group() -> None:
+    """收件箱：新需求、bug、想法先入箱并附分诊单；入箱不改变当前焦点。"""
+
+
+def _intake(ctx: click.Context) -> PmIntakeService:
+    app_ctx: AppContext = ctx.find_root().obj
+    _require_control_root(ctx)
+    return PmIntakeService(app_ctx.control_root)
+
+
+def _emit_item(item_json: dict[str, Any], *, created: bool | None = None) -> None:
+    payload: dict[str, Any] = {"schema_version": "pm-inbox-item.v1"}
+    if created is not None:
+        payload["created"] = created
+    payload["item"] = item_json
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+@inbox_group.command(name="add")
+@click.option("--project-id", required=True, help="项目 PID")
+@click.option("--request-id", required=True, help="幂等标识；同一标识重放同一内容不会重复入箱")
+@click.option("--title", required=True, help="一行标题（至多 120 字）")
+@click.option("--kind", required=True, type=click.Choice(_KIND_CHOICES, case_sensitive=False))
+@click.option("--change-action", type=click.Choice(_ACTION_CHOICES, case_sensitive=False), default=None)
+@click.option("--domain", default="", help="技术领域；缺省时按项目技术栈推断")
+@click.option("--impact-scope", "impact_scope", multiple=True, help="影响范围，可重复；缺省 MODULE")
+@click.option("--original-words", required=True, help="用户原话")
+@click.option("--affects", required=True, help="影响了什么（项目、WBS 行、文件、依赖）")
+@click.option("--duplicate-check", required=True, help="查重做了什么、结论是什么")
+@click.option("--duplicate-of", "duplicate_of", multiple=True, help="与之重复的条目、台账或变更单编号")
+@click.option("--evidence", "evidence", multiple=True, help="取证，可重复：file:|cmd:|ledger:|chg:|commit:")
+@click.option(
+    "--urgent-criterion",
+    type=click.Choice(_CRITERION_CHOICES, case_sensitive=False),
+    default=None,
+    help="仅 urgent：safety|data_loss|blocks_all|wrong_output",
+)
+@click.option(
+    "--disposition",
+    required=True,
+    type=click.Choice(_DISPOSITION_CHOICES, case_sensitive=False),
+    help="建议处置：interrupt_now|after_current|inbox_wait|reject",
+)
+@click.option("--rationale", required=True, help="建议的理由")
+@click.option("--alternative", "alternatives", multiple=True, help="备选方案，至少一个")
+@click.option("--cost-risk", required=True, help="成本与风险估计")
+@click.option("--ask", "decisions_for_user", multiple=True, help="需要用户决定的点，可重复")
+@click.option("--proposed-by", default="pm-cli", show_default=True, help="提出者标识")
+@click.pass_context
+def inbox_add(
+    ctx: click.Context,
+    project_id: str,
+    request_id: str,
+    title: str,
+    kind: str,
+    change_action: str | None,
+    domain: str,
+    impact_scope: tuple[str, ...],
+    original_words: str,
+    affects: str,
+    duplicate_check: str,
+    duplicate_of: tuple[str, ...],
+    evidence: tuple[str, ...],
+    urgent_criterion: str | None,
+    disposition: str,
+    rationale: str,
+    alternatives: tuple[str, ...],
+    cost_risk: str,
+    decisions_for_user: tuple[str, ...],
+    proposed_by: str,
+) -> None:
+    """把一条新事项连同分诊单记入收件箱（状态 PROPOSED，等待用户确认）。"""
+    try:
+        service = _intake(ctx)
+        classification = service.classify(
+            project_id,
+            kind=IntakeKind(kind.upper()),
+            change_action=_enum_or_none(ChangeAction, change_action),
+            domain=domain,
+            impact_scope=impact_scope,
+        )
+        ticket = TriageTicket(
+            original_words=original_words,
+            affects=affects,
+            duplicate_check=duplicate_check,
+            duplicate_of=duplicate_of,
+            evidence=evidence,
+            urgent_criterion=_enum_or_none(UrgentCriterion, urgent_criterion),
+            disposition=Disposition(disposition.upper()),
+            rationale=rationale,
+            alternatives=alternatives,
+            cost_risk=cost_risk,
+            decisions_for_user=decisions_for_user,
+        )
+        item, created = service.propose(
+            request_id=request_id,
+            project_id=project_id,
+            title=title,
+            classification=classification,
+            ticket=ticket,
+            proposed_by=proposed_by,
+        )
+    except (PmIntakeError, ValueError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    _emit_item(item.model_dump(mode="json"), created=created)
+
+
+@inbox_group.command(name="list")
+@click.option("--project-id", required=True, help="项目 PID")
+@click.option(
+    "--status",
+    "statuses",
+    multiple=True,
+    type=click.Choice(_STATUS_CHOICES, case_sensitive=False),
+    help="按状态过滤，可重复；缺省列出未处理的（proposed、confirmed）",
+)
+@click.pass_context
+def inbox_list(ctx: click.Context, project_id: str, statuses: tuple[str, ...]) -> None:
+    """列出项目的收件箱条目。"""
+    try:
+        service = _intake(ctx)
+        wanted = tuple(IntakeStatus(item.upper()) for item in statuses)
+        items = service.list_items(project_id, wanted) if wanted else service.list_items(project_id)
+    except (PmIntakeError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(
+        json.dumps(
+            {
+                "schema_version": "pm-inbox.v1",
+                "project_id": project_id,
+                "items": [item.model_dump(mode="json") for item in items],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+@inbox_group.command(name="show")
+@click.argument("item_id")
+@click.pass_context
+def inbox_show(ctx: click.Context, item_id: str) -> None:
+    """显示一条收件箱条目的完整分诊单与 ticket_hash。"""
+    try:
+        item = _intake(ctx).get(item_id)
+    except (PmIntakeError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    _emit_item(item.model_dump(mode="json"))
+
+
+def _decide_options(function: _F) -> _F:
+    options = (
+        click.argument("item_id"),
+        click.option("--ticket-hash", required=True, help="用户看到并确认的条目内容哈希"),
+        click.option("--approver", required=True, help="真实人类审批人"),
+        click.option(
+            "--approval-evidence-ref",
+            required=True,
+            help="非模型自签的 user-confirmation 证据引用",
+        ),
+        click.option("--note", default="", help="一行备注"),
+    )
+    for option in reversed(options):
+        function = option(function)
+    return function
+
+
+@inbox_group.command(name="confirm")
+@_decide_options
+@click.pass_context
+def inbox_confirm(
+    ctx: click.Context,
+    item_id: str,
+    ticket_hash: str,
+    approver: str,
+    approval_evidence_ref: str,
+    note: str,
+) -> None:
+    """记录用户对该分诊单的确认（须引用 user-confirmation 证据）。"""
+    try:
+        item = _intake(ctx).confirm(
+            item_id,
+            ticket_hash=ticket_hash,
+            approver=approver,
+            approval_evidence_ref=approval_evidence_ref,
+            note=note,
+        )
+    except (PmIntakeError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    _emit_item(item.model_dump(mode="json"))
+
+
+@inbox_group.command(name="reject")
+@_decide_options
+@click.pass_context
+def inbox_reject(
+    ctx: click.Context,
+    item_id: str,
+    ticket_hash: str,
+    approver: str,
+    approval_evidence_ref: str,
+    note: str,
+) -> None:
+    """记录用户对该分诊单的驳回（须引用 user-confirmation 证据）。"""
+    try:
+        item = _intake(ctx).reject(
+            item_id,
+            ticket_hash=ticket_hash,
+            approver=approver,
+            approval_evidence_ref=approval_evidence_ref,
+            note=note,
+        )
+    except (PmIntakeError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    _emit_item(item.model_dump(mode="json"))
+
+
 @pm_group.command(name="approve")
 @click.option("--mission-id", default="", help="兼容旧入口：已有 Mission 编号")
 @click.option(
@@ -384,6 +725,7 @@ def pending_pm(ctx: click.Context, project_id: str) -> None:
     help="非模型自签的 user-confirmation 证据引用",
 )
 @click.option("--owner", default="PM Facade", show_default=True, help="内部 Work owner")
+@_classification_options
 @click.pass_context
 def approve_pm(
     ctx: click.Context,
@@ -403,6 +745,11 @@ def approve_pm(
     approver: str,
     approval_evidence_ref: str,
     owner: str,
+    kind: str | None,
+    change_action: str | None,
+    domain: str,
+    impact_scope: tuple[str, ...],
+    inbox_id: str,
 ) -> None:
     """批准新需求并内部形成授权链，或兼容已有 Mission 调用。"""
     new_values = (
@@ -417,8 +764,9 @@ def approve_pm(
         approved_model,
         declared_dirty_paths,
     )
+    classified = any((kind, change_action, domain, impact_scope, inbox_id))
     if mission_id:
-        if any(new_values) or any((plan_hash, approver, approval_evidence_ref)):
+        if any(new_values) or classified or any((plan_hash, approver, approval_evidence_ref)):
             raise click.ClickException("--mission-id 不能与新需求批准参数混用")
         _emit_card(ctx, "approve", mission_id, root_work_id)
         return
@@ -450,6 +798,8 @@ def approve_pm(
     ):
         if ctx.get_parameter_source("owner") is ParameterSource.COMMANDLINE:
             raise click.ClickException("按哈希批准已保存范围卡时不支持 --owner")
+        if classified:
+            raise click.ClickException("按哈希批准已保存范围卡时不支持分类参数；分类在 plan 时已绑定")
         try:
             _require_control_root(ctx)
             short_facade = _facade(ctx)
@@ -465,6 +815,17 @@ def approve_pm(
             raise click.ClickException(str(error)) from error
         _emit_plan_approval(approved_card, approved_work.state.value)
         return
+    classification, intake_item_id = _resolve_filing(
+        ctx,
+        project_id=project_id,
+        request_id=request_id,
+        kind=kind,
+        change_action=change_action,
+        domain=domain,
+        impact_scope=impact_scope,
+        inbox_id=inbox_id,
+        from_draft=False,
+    )
     card = _planning_scope_card(
         ctx,
         project_id=project_id,
@@ -477,6 +838,8 @@ def approve_pm(
         adapter=adapter,
         approved_model=approved_model,
         declared_dirty_paths=declared_dirty_paths,
+        classification=classification,
+        intake_item_id=intake_item_id,
     )
     _approve_planning_change(ctx, card, approver)
     facade = _facade(ctx)
@@ -658,6 +1021,16 @@ def resume_pm(
     click.echo(f"下一合法动作: {payload.next_legal_action or '-'}")
     for conflict in payload.conflicts:
         click.echo(f"冲突: {conflict}")
+    if not payload.intake.is_empty:
+        click.echo(
+            f"收件箱: 待确认 {payload.intake.awaiting_confirmation} 条 | "
+            f"已确认待排 {payload.intake.confirmed_waiting} 条"
+        )
+        for brief in payload.intake.queue:
+            click.echo(
+                f"  {brief.item_id} [{brief.kind.value}] {brief.title}"
+                f"（{brief.status.value}，建议 {brief.disposition.value}）"
+            )
     for path in payload.read_set:
         click.echo(f"证据: {path}")
 

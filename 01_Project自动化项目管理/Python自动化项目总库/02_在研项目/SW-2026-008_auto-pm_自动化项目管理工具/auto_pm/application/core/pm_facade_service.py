@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Any, cast
 
 from auto_pm.change.change_service import ChangeService
+from auto_pm.change.constants import (
+    SpecViolationError,
+    validate_business_nature,
+    validate_domain,
+    validate_impact_scope,
+    validate_urgency,
+)
 from auto_pm.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
@@ -37,6 +44,7 @@ from auto_pm.contracts.continuity import RunState, WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
+from auto_pm.contracts.intake import IntakeClassification
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_facade import (
     PlanningApprovalResult,
@@ -56,6 +64,7 @@ from auto_pm.domain.change.decision_service import (
     DecisionValidationError,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.intake_store import IntakeStore
 
 log = logging.getLogger(__name__)
 
@@ -120,27 +129,68 @@ class PmFacadeService:
         except ContinuityStoreError as error:
             raise PmFacadeError(str(error)) from error
 
-    def create_planning_draft_change(self, intent: PmIntent) -> str:
-        """Create or replay the one pre-authorization CHG for a PlanningDraft."""
+    def _planning_classification(
+        self,
+        request_id: str,
+        classification: IntakeClassification | None,
+        intake_item_id: str,
+    ) -> IntakeClassification | None:
+        """Bind and return how a request is filed; an unclassified legacy request returns None."""
+
+        intake = IntakeStore(self._store.workspace_root, self._store.db_path)
+        try:
+            if classification is None:
+                bound = intake.get_planning_classification(request_id)
+                return None if bound is None else bound[0]
+            validate_domain(classification.domain)
+            validate_business_nature(classification.business_nature)
+            validate_impact_scope(list(classification.impact_scope))
+            validate_urgency(classification.urgency)
+            return intake.bind_planning_classification(request_id, classification, intake_item_id)
+        except (ContinuityStoreError, SpecViolationError) as error:
+            raise PmFacadeError(str(error)) from error
+
+    def create_planning_draft_change(
+        self,
+        intent: PmIntent,
+        *,
+        classification: IntakeClassification | None = None,
+        intake_item_id: str = "",
+    ) -> str:
+        """Create or replay the one pre-authorization CHG for a PlanningDraft.
+
+        A classified request is filed under its own domain, nature, scope and urgency. Only a request
+        that nothing classified keeps the legacy filing (SCPT, DEF, MODULE, normal).
+        """
 
         draft = self.create_planning_draft(intent)
+        filing = self._planning_classification(draft.request_id, classification, intake_item_id)
+        domain = "SCPT" if filing is None else filing.domain
+        classified_refs = (
+            ""
+            if filing is None
+            else f"; intake_kind={filing.kind.value}"
+            + (f"; change_action={filing.change_action.value}" if filing.change_action else "")
+            + (f"; intake_item={intake_item_id}" if intake_item_id else "")
+        )
         try:
             candidate_change_id = self._changes.next_change_number(
-                draft.subject_project_id, "SCPT"
+                draft.subject_project_id, domain
             )
             change_id = self._store.reserve_planning_draft_change(
                 draft.request_id, candidate_change_id
             )
             change = self._changes.create_change_request(
                 project_id=draft.subject_project_id,
-                domain="SCPT",
-                business_nature="DEF",
-                impact_scope=["MODULE"],
+                domain=domain,
+                business_nature="DEF" if filing is None else filing.business_nature,
+                impact_scope=["MODULE"] if filing is None else list(filing.impact_scope),
                 applicant="PM Facade",
                 background=draft.objective,
                 necessity="PlanningDraft 需生成可审查的真实 CHG 草稿。",
                 references=f"PlanningDraft request_id={draft.request_id}; "
-                f"input_fingerprint={draft.input_fingerprint}",
+                f"input_fingerprint={draft.input_fingerprint}{classified_refs}",
+                urgency="normal" if filing is None else filing.urgency,
                 change_number=change_id,
             )
         except (ContinuityStoreError, ValueError) as error:
@@ -181,11 +231,15 @@ class PmFacadeService:
         risks: tuple[str, ...],
         non_goals: tuple[str, ...],
         execution_grant: PlanningExecutionGrant | None = None,
+        classification: IntakeClassification | None = None,
+        intake_item_id: str = "",
     ) -> PlanningScopeCard:
         """Create a deterministic, non-executable scope card for later approval."""
 
         draft = self.create_planning_draft(intent)
-        change_id = self.create_planning_draft_change(intent)
+        change_id = self.create_planning_draft_change(
+            intent, classification=classification, intake_item_id=intake_item_id
+        )
         spec_sources = self.bind_planning_draft_specs(intent)
         try:
             return PlanningScopeCard.from_draft(
@@ -443,6 +497,8 @@ class PmFacadeService:
         non_goals: tuple[str, ...],
         execution_grant: PlanningExecutionGrant,
         submitted_by: str,
+        classification: IntakeClassification | None = None,
+        intake_item_id: str = "",
     ) -> SubmittedPlanningScopeCard:
         """Build the scope card of a persisted draft and persist it for human approval."""
 
@@ -464,6 +520,8 @@ class PmFacadeService:
             risks=risks,
             non_goals=non_goals,
             execution_grant=execution_grant,
+            classification=classification,
+            intake_item_id=intake_item_id,
         )
         try:
             self._store.submit_planning_scope_card(card, submitted_by)

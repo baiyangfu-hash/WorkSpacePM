@@ -23,8 +23,10 @@ from auto_pm.contracts.continuity_resume import (
     LeaseView,
     ResumeRunCandidate,
 )
+from auto_pm.contracts.intake import IntakeSummary
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.intake_store import IntakeStore
 
 from .workspace_context_service import WorkspaceContextError, WorkspaceContextService
 
@@ -167,6 +169,13 @@ class ContinuityResumeService:
             except (ContinuityStoreError, sqlite3.Error) as error:
                 raise ContinuityResumeError(f"Continuity Store 无法读取: {error}") from error
 
+        intake = IntakeSummary()
+        if db_exists:
+            try:
+                intake = IntakeStore(self._root).summary(context.subject_project_id)
+            except ContinuityStoreError as error:
+                raise ContinuityResumeError(f"收件箱无法读取: {error}") from error
+
         next_action = self._next_action(
             mission.state if mission else None,
             work.state if work else None,
@@ -193,6 +202,8 @@ class ContinuityResumeService:
             "lease": lease_view.model_dump(mode="json") if lease_view else None,
             "conflicts": conflicts,
         }
+        if not intake.is_empty:
+            seed["intake"] = intake.model_dump(mode="json")
         digest = hashlib.sha256(
             json.dumps(seed, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -208,6 +219,7 @@ class ContinuityResumeService:
             conflicts=tuple(conflicts),
             next_legal_action=next_action,
             read_set=read_set,
+            intake=intake,
             evidence_id=f"RESUME-{digest[:16].upper()}",
         )
 
