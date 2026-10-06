@@ -1,0 +1,12 @@
+RATIFICATION_ID=RATIFICATION-20261005-M2-V01
+RECORDED_AT=2026-10-05T15:55:18Z (UTC; the user's message arrived in the chat of this session just before)
+SUBJECT=CARD-SW008-M2-V01 V1.0 (02_规划/042_V01_PLC静态质量门实施卡_PM.md)
+CARD_SHA256_RATIFIED=dbb04f532449f60f3b157a96d5e11d261f74d70fee06d4e097be43a7a28a1803
+CARD_SHA256_ON_DISK_AT_RECORDING=dbb04f532449f60f3b157a96d5e11d261f74d70fee06d4e097be43a7a28a1803 (equal)
+CARD_SHA256_IN_ORIGINAL_APPROVAL_RECEIPT=dbb04f532449f60f3b157a96d5e11d261f74d70fee06d4e097be43a7a28a1803 (m2-v01/approval_receipt.txt, equal)
+RATIFIED_BY=fubai (same user as baiyang), in chat, verbatim:
+  追认：卡 042 V1.0（SHA-256 dbb04f532449f60f3b157a96d5e11d261f74d70fee06d4e097be43a7a28a1803）的最终内容我已知晓并认可，此追认不改变原批准顺序的历史记录。
+WHY=independent audit finding F06 (AUDIT_REPORT_GPT_20261005.md): the original approval receipt itself says the user's 批准 was given before the final card bytes existed; the final SHA was reported afterwards. The audit asked for the original authorization evidence or an explicit ratification of the final card SHA recorded separately.
+WHAT_THIS_IS=a separate, later record of the user's own words; it was requested by Claude after the audit and given by the user on 2026-10-05
+WHAT_THIS_IS_NOT=it does not change, replace or back-date approval_receipt.txt; the original order stays as recorded there (approval before the final bytes; only section 1.6 was filled afterwards); it does not cover any other card, any later change to the card bytes, merge, push or deployment
+SOURCE_OF_THE_RATIFICATION_TEXT=the sentence offered by Claude in chat (one sentence, with the SHA) and repeated back verbatim by the user
