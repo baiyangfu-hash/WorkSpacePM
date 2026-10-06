@@ -193,30 +193,27 @@ class PmIntakeService:
         Returns ``(None, "")`` only when nothing classifies the request, which the caller must refuse.
         """
 
-        if inbox_id:
-            item = self.get(inbox_id)
-            if item.project_id != project_id:
-                raise PmIntakeError("收件箱条目与计划不属于同一项目")
-            filed = item.classification
+        try:
+            filed, resolved_item_id = self._store.resolve_planning_classification(
+                request_id, project_id, None, inbox_id
+            )
+        except ContinuityStoreError as error:
+            raise PmIntakeError(str(error)) from error
+        if filed is not None:
             if (
                 (kind is not None and kind is not filed.kind)
                 or (change_action is not None and change_action is not filed.change_action)
                 or (domain and domain != filed.domain)
                 or (impact_scope and tuple(impact_scope) != filed.impact_scope)
             ):
-                raise PmIntakeError("命令行分类与收件箱条目的分类不一致")
-            replay = item.status is IntakeStatus.PLANNED and item.plan_request_id == request_id
-            if item.status is not IntakeStatus.CONFIRMED and not replay:
                 raise PmIntakeError(
-                    f"只有已确认的条目可以转为计划，当前为 {item.status.value}"
+                    "命令行分类与收件箱条目的分类不一致"
+                    if resolved_item_id
+                    else "PlanningDraft 已绑定的分类与命令行分类不一致"
                 )
-            return filed, inbox_id
+            return filed, resolved_item_id
         if kind is None:
-            try:
-                bound = self._store.get_planning_classification(request_id)
-            except ContinuityStoreError as error:
-                raise PmIntakeError(str(error)) from error
-            return (None, "") if bound is None else (bound[0], bound[1])
+            return None, ""
         return (
             self.classify(
                 project_id,
@@ -257,10 +254,13 @@ class PmIntakeService:
             kind, value = parse_evidence(entry)
             if kind != "file":
                 continue
-            target = (self._root / value).resolve()
             try:
+                target = (self._root / value).resolve(strict=True)
                 target.relative_to(self._root)
+                regular_file = target.is_file()
             except ValueError as error:
                 raise PmIntakeError(f"取证文件位于工作空间之外: {value}") from error
-            if not target.exists():
-                raise PmIntakeError(f"取证文件不存在: {value}")
+            except (OSError, RuntimeError) as error:
+                raise PmIntakeError(f"取证文件不存在或无法证明为普通文件: {value}") from error
+            if not regular_file:
+                raise PmIntakeError(f"取证目标不是普通文件: {value}")

@@ -1482,12 +1482,19 @@ class ContinuityStore:
             return f"MISSION-{hashlib.sha256(identity).hexdigest()[:16].upper()}"
 
     def submit_planning_scope_card(self, card: PlanningScopeCard, submitted_by: str) -> int:
-        """Persist one immutable scope-card revision awaiting human approval; return its revision.
+        """Persist a scope-card revision using the same operation as classified planning."""
+        with self._transaction() as conn:
+            return self._submit_planning_scope_card(conn, card, submitted_by)
 
-        The card is rebuilt from the persisted draft, CHG binding and spec bindings, so a card whose
-        content or hash does not match the stored facts is refused. A replay of the same card is a
-        no-op. The table is append-only: revisions are inserted, never updated or deleted.
-        """
+    def _submit_planning_scope_card(
+        self,
+        conn: sqlite3.Connection,
+        card: PlanningScopeCard,
+        submitted_by: str,
+        *,
+        allow_approved_replay: bool = False,
+    ) -> int:
+        """Validate and persist a card inside the caller's transaction; never commit here."""
 
         if (
             not submitted_by
@@ -1500,73 +1507,81 @@ class ContinuityStore:
             card.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"), sort_keys=True
         )
         now = self._utc_now().isoformat()
-        with self._transaction() as conn:
-            conn.execute(_PLANNING_SCOPE_CARDS_DDL)
-            draft_row = conn.execute(
-                "SELECT * FROM planning_drafts WHERE request_id=?", (card.request_id,)
-            ).fetchone()
-            if draft_row is None:
-                raise ContinuityStoreError(f"PlanningDraft 不存在: {card.request_id}")
-            draft = self._planning_draft_from_row(draft_row)
-            bound = conn.execute(
-                "SELECT change_id FROM planning_draft_chg_bindings WHERE request_id=?",
+        conn.execute(_PLANNING_SCOPE_CARDS_DDL)
+        draft_row = conn.execute(
+            "SELECT * FROM planning_drafts WHERE request_id=?", (card.request_id,)
+        ).fetchone()
+        if draft_row is None:
+            raise ContinuityStoreError(f"PlanningDraft 不存在: {card.request_id}")
+        draft = self._planning_draft_from_row(draft_row)
+        bound = conn.execute(
+            "SELECT change_id FROM planning_draft_chg_bindings WHERE request_id=?",
+            (card.request_id,),
+        ).fetchone()
+        if bound is None or str(bound["change_id"]) != card.change_id:
+            raise ContinuityStoreError("范围卡的 CHG 与草稿绑定不一致")
+        specs = tuple(
+            (str(row["spec_id"]), str(row["canonical_path"]), str(row["version"]))
+            for row in conn.execute(
+                """SELECT spec_id, canonical_path, version
+                FROM planning_draft_spec_bindings WHERE request_id=? ORDER BY spec_id""",
                 (card.request_id,),
-            ).fetchone()
-            if bound is None or str(bound["change_id"]) != card.change_id:
-                raise ContinuityStoreError("范围卡的 CHG 与草稿绑定不一致")
-            specs = tuple(
-                (str(row["spec_id"]), str(row["canonical_path"]), str(row["version"]))
-                for row in conn.execute(
-                    """SELECT spec_id, canonical_path, version
-                    FROM planning_draft_spec_bindings WHERE request_id=? ORDER BY spec_id""",
-                    (card.request_id,),
-                ).fetchall()
-            )
-            if specs != card.spec_sources:
-                raise ContinuityStoreError("范围卡的规范来源与草稿绑定不一致")
-            if self._rebuilt_planning_scope_card(draft, card) != card:
-                raise ContinuityStoreError("范围卡内容与 plan_hash 或草稿不一致")
-            if conn.execute(
-                "SELECT 1 FROM planning_draft_decision_bindings WHERE request_id=?",
-                (card.request_id,),
-            ).fetchone() is not None:
-                raise ContinuityStoreError("该请求已批准，拒绝再提交范围卡")
-            same = conn.execute(
-                "SELECT revision, card_json FROM planning_scope_cards WHERE request_id=? AND plan_hash=?",
-                (card.request_id, card.plan_hash),
-            ).fetchone()
-            if same is not None:
-                if not hmac.compare_digest(
-                    str(same["card_json"]).encode("utf-8"), card_json.encode("utf-8")
-                ):
-                    raise ContinuityStoreError("同一 plan_hash 对应不同的范围卡内容")
-                return int(same["revision"])
-            latest = conn.execute(
-                "SELECT COALESCE(MAX(revision), 0) FROM planning_scope_cards WHERE request_id=?",
-                (card.request_id,),
-            ).fetchone()[0]
-            revision = int(latest) + 1
-            conn.execute(
-                "INSERT INTO planning_scope_cards VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (card.request_id, revision, card.plan_hash, card.change_id, card_json, submitted_by, now),
-            )
-            self._append_event(
-                conn,
-                card.request_id,
-                "PLANNING_SCOPE_CARD_SUBMITTED",
-                {
-                    "request_id": card.request_id,
-                    "revision": revision,
-                    "plan_hash": card.plan_hash,
-                    "change_id": card.change_id,
-                    "submitted_by": submitted_by,
-                    "card_sha256": hashlib.sha256(card_json.encode("utf-8")).hexdigest(),
-                },
-                f"planning-scope-card-submit:{card.request_id}:{card.plan_hash}",
-                now,
-                aggregate_type="planning_draft",
-            )
-            return revision
+            ).fetchall()
+        )
+        if specs != card.spec_sources:
+            raise ContinuityStoreError("范围卡的规范来源与草稿绑定不一致")
+        if self._rebuilt_planning_scope_card(draft, card) != card:
+            raise ContinuityStoreError("范围卡内容与 plan_hash 或草稿不一致")
+        approval = conn.execute(
+            "SELECT change_id, plan_hash FROM planning_draft_decision_bindings WHERE request_id=?",
+            (card.request_id,),
+        ).fetchone()
+        approved = approval is not None
+        if approved and not allow_approved_replay:
+            raise ContinuityStoreError("该请求已批准，拒绝再提交范围卡")
+        if approval is not None and (
+            str(approval["change_id"]) != card.change_id
+            or not hmac.compare_digest(str(approval["plan_hash"]), card.plan_hash)
+        ):
+            raise ContinuityStoreError("该请求已批准，拒绝恢复不同的范围卡")
+        same = conn.execute(
+            "SELECT revision, card_json FROM planning_scope_cards WHERE request_id=? AND plan_hash=?",
+            (card.request_id, card.plan_hash),
+        ).fetchone()
+        if same is not None:
+            if not hmac.compare_digest(
+                str(same["card_json"]).encode("utf-8"), card_json.encode("utf-8")
+            ):
+                raise ContinuityStoreError("同一 plan_hash 对应不同的范围卡内容")
+            return int(same["revision"])
+        if approved:
+            raise ContinuityStoreError("该请求已批准，拒绝再提交范围卡")
+        latest = conn.execute(
+            "SELECT COALESCE(MAX(revision), 0) FROM planning_scope_cards WHERE request_id=?",
+            (card.request_id,),
+        ).fetchone()[0]
+        revision = int(latest) + 1
+        conn.execute(
+            "INSERT INTO planning_scope_cards VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (card.request_id, revision, card.plan_hash, card.change_id, card_json, submitted_by, now),
+        )
+        self._append_event(
+            conn,
+            card.request_id,
+            "PLANNING_SCOPE_CARD_SUBMITTED",
+            {
+                "request_id": card.request_id,
+                "revision": revision,
+                "plan_hash": card.plan_hash,
+                "change_id": card.change_id,
+                "submitted_by": submitted_by,
+                "card_sha256": hashlib.sha256(card_json.encode("utf-8")).hexdigest(),
+            },
+            f"planning-scope-card-submit:{card.request_id}:{card.plan_hash}",
+            now,
+            aggregate_type="planning_draft",
+        )
+        return revision
 
     def list_pending_planning_scope_cards(
         self, subject_project_id: str

@@ -126,6 +126,183 @@ def _plan(runner: CliRunner, root: Path, request_id: str, *extra: str) -> Result
     )
 
 
+
+@pytest.mark.parametrize("verb", ["plan", "approve"])
+@pytest.mark.parametrize("invalid", ["scope", "risk", "non_goal", "grant"])
+def test_audit_f01_cli_invalid_planning_contract_keeps_confirmed_item(
+    cli_runner: CliRunner,
+    root: Path,
+    verb: str,
+    invalid: str,
+) -> None:
+    item = _item(_add(cli_runner, root))
+    _decide(cli_runner, root, "confirm", item)
+    scope = list(SCOPE)
+    option, value = {
+        "scope": ("--scope", "auto_pm/*"),
+        "risk": ("--risk", " "),
+        "non_goal": ("--non-goal", " "),
+        "grant": ("--declared-dirty", "outside.py"),
+    }[invalid]
+    scope[scope.index(option) + 1] = value
+    args = [
+        verb,
+        "--project-id",
+        PROJECT,
+        "--request-id",
+        "REQ-AUDIT-INVALID",
+        "--objective",
+        "Contract validation",
+        "--acceptance",
+        "Card persists",
+        *scope,
+        "--inbox-id",
+        item["item_id"],
+    ]
+    if verb == "approve":
+        args += [
+            "--plan-hash",
+            "a" * 64,
+            "--approver",
+            APPROVER,
+            "--approval-evidence-ref",
+            CONFIRMATION,
+        ]
+    result = _run(cli_runner, root, *args)
+    assert result.exit_code != 0
+    listed = _listed(cli_runner, root)
+    assert listed[0]["status"] == "CONFIRMED" and listed[0]["plan_request_id"] == ""
+    assert _count(root, "planning_draft_intake_bindings") == 0
+    assert _count(root, "planning_scope_cards") == 0
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM events WHERE event_type IN "
+                "('INTAKE_ITEM_PLANNED', 'PLANNING_DRAFT_INTAKE_BOUND', 'PLANNING_SCOPE_CARD_SUBMITTED')"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+@pytest.mark.parametrize("source", ["direct", "inbox"])
+@pytest.mark.parametrize("field", ["kind", "action", "domain", "scope", "project"])
+def test_audit_f05_cli_bound_replay_refuses_explicit_conflicts_before_writes(
+    cli_runner: CliRunner,
+    root: Path,
+    source: str,
+    field: str,
+) -> None:
+    if source == "inbox":
+        item = _item(_add(cli_runner, root, kind="change", change_action="add"))
+        _decide(cli_runner, root, "confirm", item)
+        options = ["--inbox-id", item["item_id"]]
+    else:
+        options = ["--kind", "change", "--change-action", "add", "--domain", "SCPT"]
+    card = _json(_plan(cli_runner, root, "REQ-AUDIT-REPLAY", *options))
+    change = _change(root, card["change_id"])
+    before_bytes = Path(change.file_path).read_bytes()
+    before_events = _events(root)
+    conflicts = {
+        "kind": ["--kind", "bug"],
+        "action": ["--change-action", "remove"],
+        "domain": ["--domain", "PLC"],
+        "scope": ["--impact-scope", "SYSTEM"],
+        "project": ["--project-id", "SW-OTHER-002"],
+    }
+    failed = _plan(cli_runner, root, "REQ-AUDIT-REPLAY", *conflicts[field])
+    assert failed.exit_code != 0 and ("不一致" in failed.output or "同一项目" in failed.output)
+    assert _events(root) == before_events
+    assert Path(change.file_path).read_bytes() == before_bytes
+    assert _count(root, "planning_scope_cards") == 1
+    assert _json(_plan(cli_runner, root, "REQ-AUDIT-REPLAY")) == card
+    assert (
+        _json(
+            _plan(
+                cli_runner,
+                root,
+                "REQ-AUDIT-REPLAY",
+                "--kind",
+                "change",
+                "--change-action",
+                "add",
+                "--domain",
+                "SCPT",
+                "--impact-scope",
+                "MODULE",
+            )
+        )
+        == card
+    )
+    assert _events(root) == before_events
+
+
+@pytest.mark.parametrize(
+    "evidence", [["file:directory"], ["file:README.md", "file:directory"], ["file:missing.txt"]]
+)
+def test_audit_f06_cli_file_negatives_leave_no_trace(
+    cli_runner: CliRunner,
+    root: Path,
+    evidence: list[str],
+) -> None:
+    (root / "directory").mkdir()
+    before = _events(root)
+    failed = _add(cli_runner, root, evidence=evidence)
+    assert failed.exit_code != 0 and "取证" in failed.output
+    assert _events(root) == before and _count(root, "intake_items") == 0
+    assert _item(_add(cli_runner, root))["ticket"]["evidence"] == ["file:README.md"]
+
+
+def test_audit_f08_cli_full_approve_reuses_the_durable_success_boundary(
+    cli_runner: CliRunner,
+    root: Path,
+) -> None:
+    item = _item(_add(cli_runner, root))
+    _decide(cli_runner, root, "confirm", item)
+    card = _json(_plan(cli_runner, root, "REQ-AUDIT-APPROVE", "--inbox-id", item["item_id"]))
+    for state in ("submitted", "under_review", "approved"):
+        ChangeService(str(root)).transition_status(
+            card["change_id"],
+            state,
+            project_id=PROJECT,
+            approver=APPROVER,
+            comment="Human review",
+        )
+    args = [
+        "approve",
+        "--project-id",
+        PROJECT,
+        "--request-id",
+        "REQ-AUDIT-APPROVE",
+        "--objective",
+        "Plan the classified work",
+        "--acceptance",
+        "A scope card is returned.",
+        *SCOPE,
+        "--plan-hash",
+        card["plan_hash"],
+        "--approver",
+        APPROVER,
+        "--approval-evidence-ref",
+        CONFIRMATION,
+    ]
+    approved = _json(_run(cli_runner, root, *args))
+    assert _json(_run(cli_runner, root, *args)) == approved
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        for event in (
+            "INTAKE_ITEM_PLANNED",
+            "PLANNING_DRAFT_INTAKE_BOUND",
+            "PLANNING_SCOPE_CARD_SUBMITTED",
+        ):
+            assert (
+                conn.execute("SELECT COUNT(*) FROM events WHERE event_type=?", (event,)).fetchone()[
+                    0
+                ]
+                == 1
+            )
+    assert _count(root, "planning_scope_cards") == 1 and _count(root, "run_items") == 0
+
+
+
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
     _setup_planning(tmp_path)

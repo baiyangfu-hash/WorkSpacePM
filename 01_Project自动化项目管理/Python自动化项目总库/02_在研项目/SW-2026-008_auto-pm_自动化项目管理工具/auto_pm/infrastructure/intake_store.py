@@ -24,6 +24,7 @@ from auto_pm.contracts.intake import (
     IntakeSummary,
     TriageTicket,
 )
+from auto_pm.contracts.pm_facade import PlanningScopeCard
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 _INTAKE_ITEMS_DDL = """
@@ -274,22 +275,41 @@ class IntakeStore(ContinuityStore):
             )
             return decided
 
-    def bind_planning_classification(
-        self, request_id: str, classification: IntakeClassification, item_id: str = ""
-    ) -> IntakeClassification:
-        """Bind the classification of a plan request before its change request is created.
+    def resolve_planning_classification(
+        self,
+        request_id: str,
+        project_id: str,
+        classification: IntakeClassification | None,
+        item_id: str = "",
+    ) -> tuple[IntakeClassification | None, str]:
+        """Read and validate a filing without creating a binding or consuming an item."""
+        if not self.db_path.is_file():
+            if item_id:
+                raise ContinuityStoreError(f"收件箱条目不存在: {item_id}")
+            return classification, ""
+        with self._read_connection() as conn:
+            return self._resolve_planning_classification(
+                conn, request_id, project_id, classification, item_id
+            )
 
-        With ``item_id`` the confirmed inbox item is marked PLANNED in the same transaction, so an
-        item can never feed two plans and a plan can never silently differ from its item.
-        """
-
-        now = self._utc_now().isoformat()
-        with self._intake_transaction() as conn:
-            draft = conn.execute(
+    def _resolve_planning_classification(
+        self,
+        conn: sqlite3.Connection,
+        request_id: str,
+        project_id: str,
+        classification: IntakeClassification | None,
+        item_id: str,
+    ) -> tuple[IntakeClassification | None, str]:
+        draft = (
+            conn.execute(
                 "SELECT subject_project_id FROM planning_drafts WHERE request_id=?", (request_id,)
             ).fetchone()
-            if draft is None:
-                raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+            if self._table_exists(conn, "planning_drafts")
+            else None
+        )
+        if draft is not None and str(draft["subject_project_id"]) != project_id:
+            raise ContinuityStoreError("request_id 与计划不属于同一项目")
+        if self._table_exists(conn, "planning_draft_intake_bindings"):
             bound = conn.execute(
                 "SELECT classification_json, item_id FROM planning_draft_intake_bindings "
                 "WHERE request_id=?",
@@ -297,65 +317,149 @@ class IntakeStore(ContinuityStore):
             ).fetchone()
             if bound is not None:
                 try:
-                    stored = IntakeClassification.model_validate_json(str(bound["classification_json"]))
+                    stored = IntakeClassification.model_validate_json(
+                        str(bound["classification_json"])
+                    )
                 except ValueError as error:
                     raise ContinuityStoreError("分类绑定记录无法读取") from error
-                if stored != classification or (item_id and str(bound["item_id"] or "") != item_id):
+                bound_item_id = str(bound["item_id"] or "")
+                if (classification is not None and classification != stored) or (
+                    item_id and item_id != bound_item_id
+                ):
                     raise ContinuityStoreError("PlanningDraft 已绑定不同的分类或收件箱条目")
-                return stored
-            if item_id:
-                row = conn.execute(
+                classification, item_id = stored, bound_item_id
+        if item_id:
+            row = (
+                conn.execute(
                     "SELECT item_json FROM intake_items WHERE item_id=?", (item_id,)
                 ).fetchone()
-                if row is None:
-                    raise ContinuityStoreError(f"收件箱条目不存在: {item_id}")
-                item = self._item_from_json(row["item_json"])
-                if item.status is not IntakeStatus.CONFIRMED:
-                    raise ContinuityStoreError(
-                        f"只有已确认的条目可以转为计划，当前为 {item.status.value}"
-                    )
-                if item.project_id != str(draft["subject_project_id"]):
-                    raise ContinuityStoreError("收件箱条目与计划不属于同一项目")
-                if item.classification != classification:
-                    raise ContinuityStoreError("计划的分类与收件箱条目不一致")
-                try:
-                    planned = IntakeItem.model_validate(
-                        {
-                            **item.model_dump(mode="json"),
-                            "status": IntakeStatus.PLANNED.value,
-                            "plan_request_id": request_id,
-                        }
-                    )
-                except ValueError as error:
-                    raise ContinuityStoreError(str(error)) from error
-                self._store_item(conn, planned, now)
-                self._append_event(
-                    conn,
-                    item_id,
-                    "INTAKE_ITEM_PLANNED",
-                    {"item_id": item_id, "plan_request_id": request_id},
-                    f"intake-item-plan:{item_id}:{request_id}",
-                    now,
-                    aggregate_type="intake_item",
-                )
-            conn.execute(
-                "INSERT INTO planning_draft_intake_bindings VALUES (?, ?, ?, ?)",
-                (request_id, classification.model_dump_json(), item_id or None, now),
+                if self._table_exists(conn, "intake_items")
+                else None
             )
+            if row is None:
+                raise ContinuityStoreError(f"收件箱条目不存在: {item_id}")
+            item = self._item_from_json(row["item_json"])
+            if item.project_id != project_id:
+                raise ContinuityStoreError("收件箱条目与计划不属于同一项目")
+            if classification is not None and item.classification != classification:
+                raise ContinuityStoreError("计划的分类与收件箱条目不一致")
+            replay = item.status is IntakeStatus.PLANNED and item.plan_request_id == request_id
+            if item.status is not IntakeStatus.CONFIRMED and not replay:
+                raise ContinuityStoreError(
+                    f"只有已确认的条目可以转为计划，当前为 {item.status.value}"
+                )
+            classification = item.classification
+        return classification, item_id
+
+    def submit_classified_planning_scope_card(
+        self,
+        card: PlanningScopeCard,
+        classification: IntakeClassification,
+        item_id: str,
+        submitted_by: str,
+        *,
+        allow_approved_replay: bool = False,
+    ) -> int:
+        """Commit the readable card, filing, item consumption and events on one connection."""
+        now = self._utc_now().isoformat()
+        with self._intake_transaction() as conn:
+            self._resolve_planning_classification(
+                conn, card.request_id, card.subject_project_id, classification, item_id
+            )
+            revision = self._submit_planning_scope_card(
+                conn, card, submitted_by, allow_approved_replay=allow_approved_replay
+            )
+            self._bind_planning_classification(conn, card.request_id, classification, item_id, now)
+            return revision
+
+    def bind_planning_classification(
+        self, request_id: str, classification: IntakeClassification, item_id: str = ""
+    ) -> IntakeClassification:
+        """Retain the legacy store API; facade planning uses the atomic card submission."""
+        with self._intake_transaction() as conn:
+            return self._bind_planning_classification(
+                conn, request_id, classification, item_id, self._utc_now().isoformat()
+            )
+
+    def _bind_planning_classification(
+        self,
+        conn: sqlite3.Connection,
+        request_id: str,
+        classification: IntakeClassification,
+        item_id: str,
+        now: str,
+    ) -> IntakeClassification:
+        draft = conn.execute(
+            "SELECT subject_project_id FROM planning_drafts WHERE request_id=?", (request_id,)
+        ).fetchone()
+        if draft is None:
+            raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+        bound = conn.execute(
+            "SELECT classification_json, item_id FROM planning_draft_intake_bindings "
+            "WHERE request_id=?",
+            (request_id,),
+        ).fetchone()
+        if bound is not None:
+            try:
+                stored = IntakeClassification.model_validate_json(str(bound["classification_json"]))
+            except ValueError as error:
+                raise ContinuityStoreError("分类绑定记录无法读取") from error
+            if stored != classification or (item_id and str(bound["item_id"] or "") != item_id):
+                raise ContinuityStoreError("PlanningDraft 已绑定不同的分类或收件箱条目")
+            return stored
+        if item_id:
+            row = conn.execute(
+                "SELECT item_json FROM intake_items WHERE item_id=?", (item_id,)
+            ).fetchone()
+            if row is None:
+                raise ContinuityStoreError(f"收件箱条目不存在: {item_id}")
+            item = self._item_from_json(row["item_json"])
+            if item.status is not IntakeStatus.CONFIRMED:
+                raise ContinuityStoreError(
+                    f"只有已确认的条目可以转为计划，当前为 {item.status.value}"
+                )
+            if item.project_id != str(draft["subject_project_id"]):
+                raise ContinuityStoreError("收件箱条目与计划不属于同一项目")
+            if item.classification != classification:
+                raise ContinuityStoreError("计划的分类与收件箱条目不一致")
+            try:
+                planned = IntakeItem.model_validate(
+                    {
+                        **item.model_dump(mode="json"),
+                        "status": IntakeStatus.PLANNED.value,
+                        "plan_request_id": request_id,
+                    }
+                )
+            except ValueError as error:
+                raise ContinuityStoreError(str(error)) from error
+            self._store_item(conn, planned, now)
             self._append_event(
                 conn,
-                request_id,
-                "PLANNING_DRAFT_INTAKE_BOUND",
-                {
-                    "request_id": request_id,
-                    "kind": classification.kind.value,
-                    "item_id": item_id,
-                },
-                f"planning-draft-intake-bind:{request_id}",
+                item_id,
+                "INTAKE_ITEM_PLANNED",
+                {"item_id": item_id, "plan_request_id": request_id},
+                f"intake-item-plan:{item_id}:{request_id}",
                 now,
-                aggregate_type="planning_draft",
+                aggregate_type="intake_item",
             )
-            return classification
+        conn.execute(
+            "INSERT INTO planning_draft_intake_bindings VALUES (?, ?, ?, ?)",
+            (request_id, classification.model_dump_json(), item_id or None, now),
+        )
+        self._append_event(
+            conn,
+            request_id,
+            "PLANNING_DRAFT_INTAKE_BOUND",
+            {
+                "request_id": request_id,
+                "kind": classification.kind.value,
+                "item_id": item_id,
+            },
+            f"planning-draft-intake-bind:{request_id}",
+            now,
+            aggregate_type="planning_draft",
+        )
+        return classification
 
     def get_planning_classification(self, request_id: str) -> tuple[IntakeClassification, str] | None:
         """Return the bound classification and inbox item id of a plan request, if any.

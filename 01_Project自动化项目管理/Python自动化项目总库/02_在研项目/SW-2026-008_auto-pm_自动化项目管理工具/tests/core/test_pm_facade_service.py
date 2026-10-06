@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import subprocess
@@ -21,6 +22,7 @@ from auto_pm.core.continuity_execution_service import (
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
+from auto_pm.core.workspace_context_service import WorkspaceContextService
 
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionService,
@@ -28,12 +30,15 @@ from auto_pm.application.core.evidence_collection_service import (
     PythonQualityReceipt,
     _quality_receipt_hash,
 )
+from auto_pm.application.core.pm_facade_service import PmFacadeService as PlanningFacade
+from auto_pm.application.core.pm_intake_service import PmIntakeService
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ForegroundExecutionReceipt,
     WorktreeMode,
 )
+from auto_pm.contracts.intake import Disposition, IntakeItem, IntakeKind, IntakeStatus, TriageTicket
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
 from auto_pm.contracts.pm_facade import (
     PlanningExecutionGrant,
@@ -44,7 +49,404 @@ from auto_pm.contracts.pm_facade import (
 )
 from auto_pm.domain.change.decision_service import DecisionError
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.intake_store import IntakeStore
 
+
+def _audit_scene(root: Path) -> tuple[PmFacadeService, Path, IntakeItem]:
+    facade, database, _changes = _p10_facade(root)
+    project_id = _planning_intent().subject_project_id
+    project = root / project_id
+    (project / ".copier-answers.yml").write_text(
+        f"project_id: {project_id}\nproject_name: Audit planning fixture\nstack: python\n",
+        encoding="utf-8", errors="replace",
+    )
+    context = WorkspaceContextService(str(root)).resolve(project_id=project_id, start_path=project)
+    assert context.subject.project_id == project_id
+    assert context.subject.stack == "python"
+    desk = PmIntakeService(root, store=IntakeStore(root, database))
+    filing = desk.classify(
+        project_id, kind=IntakeKind.BUG, change_action=None, domain="", impact_scope=()
+    )
+    item, _created = desk.propose(
+        request_id="REQ-AUDIT-INBOX",
+        project_id="SW-TEST-001",
+        title="Audit failure",
+        classification=filing,
+        proposed_by="audit",
+        ticket=TriageTicket(
+            original_words="Audit failure",
+            affects="Planning",
+            duplicate_check="Checked",
+            evidence=("file:specs/python.md",),
+            disposition=Disposition.AFTER_CURRENT,
+            rationale="After current",
+            alternatives=("Wait",),
+            cost_risk="Low",
+        ),
+    )
+    item = desk.confirm(
+        item.item_id,
+        ticket_hash=item.ticket_hash,
+        approver="fubai",
+        approval_evidence_ref="user-confirmation:chat-20261005-audit",
+    )
+    assert item.project_id == context.subject.project_id
+    assert item.classification.domain == "SCPT"
+    return facade, database, item
+
+
+def _audit_card(facade: PlanningFacade, item: IntakeItem, **options: Any) -> PlanningScopeCard:
+    values: dict[str, Any] = {
+        "scope_paths": ("auto_pm/example.py",),
+        "risks": ("Drift",),
+        "non_goals": ("No deployment",),
+        "execution_grant": PlanningExecutionGrant(
+            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved"
+        ),
+        "classification": item.classification,
+        "intake_item_id": item.item_id,
+    }
+    values.update(options)
+    return facade.create_planning_scope_card(_planning_intent(), **values)
+
+
+def _audit_count(database: Path, table: str, where: str = "", args: tuple[str, ...] = ()) -> int:
+    with closing(sqlite3.connect(database)) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+            return 0
+        return int(conn.execute(f"SELECT COUNT(*) FROM {table} {where}", args).fetchone()[0])
+
+
+def _audit_unconsumed(root: Path, database: Path, item: IntakeItem) -> dict[str, Any]:
+    cold = IntakeStore(root, database)
+    persisted = cold.get_item(item.item_id)
+    assert persisted.status is IntakeStatus.CONFIRMED
+    assert persisted.plan_request_id == ""
+    assert cold.get_planning_classification(_planning_intent().request_id) is None
+    cards = _audit_count(database, "planning_scope_cards")
+    assert cards == 0
+    events = {
+        event: _audit_count(database, "events", "WHERE event_type=?", (event,))
+        for event in (
+        "INTAKE_ITEM_PLANNED",
+        "PLANNING_DRAFT_INTAKE_BOUND",
+        "PLANNING_SCOPE_CARD_SUBMITTED",
+        )
+    }
+    assert list(events.values()) == [0, 0, 0]
+    return {"status": persisted.status.value, "plan_request_id": persisted.plan_request_id,
+            "cards": cards, "events": events}
+
+
+@pytest.mark.parametrize("entry", ["create", "submit"])
+@pytest.mark.parametrize("invalid", ["scope", "risk", "non_goal", "grant"])
+def test_audit_f01_invalid_contract_never_consumes(
+    tmp_path: Path,
+    invalid: str,
+    entry: str,
+) -> None:
+    facade, database, item = _audit_scene(tmp_path)
+    values: dict[str, Any] = {
+        "scope_paths": ("auto_pm/example.py",),
+        "risks": ("Drift",),
+        "non_goals": ("No deployment",),
+        "execution_grant": PlanningExecutionGrant(
+            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved"
+        ),
+        "classification": item.classification,
+        "intake_item_id": item.item_id,
+    }
+    replacements: dict[str, tuple[str, Any]] = {
+        "scope": ("scope_paths", ("auto_pm/*",)),
+        "risk": ("risks", (" ",)),
+        "non_goal": ("non_goals", (" ",)),
+        "grant": (
+            "execution_grant",
+            PlanningExecutionGrant(
+                adapter=ExecutionAdapterKind.CODEX,
+                approved_model="gpt-approved",
+                declared_dirty_paths=("outside.py",),
+            ),
+        ),
+    }
+    key, value = replacements[invalid]
+    values[key] = value
+    with pytest.raises(PmFacadeError):
+        if entry == "create":
+            facade.create_planning_scope_card(_planning_intent(), **values)
+        else:
+            facade.create_planning_draft(_planning_intent())
+            facade.submit_planning_scope_card(
+                _planning_intent().request_id, submitted_by="audit", **values
+            )
+    _audit_unconsumed(tmp_path, database, item)
+    cold = PmFacadeService(tmp_path, store=ContinuityStore(tmp_path, database))
+    card = _audit_card(cold, item)
+    assert (
+        cold._store.get_submitted_planning_scope_card(card.request_id, card.plan_hash).card == card
+    )
+
+
+@pytest.mark.parametrize("boundary", ["chg_before", "chg_after", "specs", "card"])
+def test_audit_f02_preparation_io_failure_cold_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+) -> None:
+    facade, database, item = _audit_scene(tmp_path)
+    with monkeypatch.context() as patch:
+        if boundary.startswith("chg_"):
+            change_module = sys.modules[type(facade._changes).__module__]
+            original_write = vars(change_module)["write_file"]
+
+            def failing_write(*args: Any, **kwargs: Any) -> Any:
+                if boundary == "chg_after":
+                    original_write(*args, **kwargs)
+                raise OSError("audit CHG I/O boundary")
+
+            patch.setattr(change_module, "write_file", failing_write)
+        elif boundary == "specs":
+            original_event = ContinuityStore._append_event
+
+            def failing_event(*args: Any, **kwargs: Any) -> None:
+                original_event(*args, **kwargs)
+                if args[2] == "PLANNING_DRAFT_SPECS_BOUND":
+                    raise sqlite3.OperationalError("audit spec persistence boundary")
+
+            patch.setattr(ContinuityStore, "_append_event", staticmethod(failing_event))
+        else:
+            original_card = PlanningScopeCard.from_draft
+
+            def failing_card(*args: Any, **kwargs: Any) -> PlanningScopeCard:
+                card = original_card(*args, **kwargs)
+                if kwargs["change_id"]:
+                    raise ValueError("audit card construction boundary")
+                return card
+
+            patch.setattr(PlanningScopeCard, "from_draft", failing_card)
+        with pytest.raises((OSError, sqlite3.OperationalError, PmFacadeError)):
+            _audit_card(facade, item)
+    _audit_unconsumed(tmp_path, database, item)
+    with closing(sqlite3.connect(database)) as conn:
+        reserved = conn.execute("SELECT change_id FROM planning_draft_chg_bindings").fetchone()[0]
+    cold = PmFacadeService(tmp_path, store=ContinuityStore(tmp_path, database))
+    card = _audit_card(cold, item)
+    assert card.change_id == reserved
+    assert _audit_card(cold, item) == card
+    assert len(list((tmp_path / "SW-TEST-001").rglob("CHG-*.md"))) == 1
+    assert (
+        cold._store.get_submitted_planning_scope_card(card.request_id, card.plan_hash).card == card
+    )
+
+
+@pytest.mark.parametrize(
+    "boundary", ["card", "item", "binding", "card_event", "item_event", "binding_event", "commit"]
+)
+def test_audit_f03_sqlite_boundaries_roll_back_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+) -> None:
+    from auto_pm.infrastructure.continuity_store import _PLANNING_SCOPE_CARDS_DDL
+
+    facade, database, item = _audit_scene(tmp_path)
+    facade.create_planning_draft_change(
+        _planning_intent(), classification=item.classification, intake_item_id=item.item_id
+    )
+    facade.bind_planning_draft_specs(_planning_intent())
+    commit_observed: list[dict[str, int]] = []
+    with closing(sqlite3.connect(database)) as conn, conn:
+        conn.execute(_PLANNING_SCOPE_CARDS_DDL)
+        if boundary != "commit":
+            operations = {
+                "card": ("INSERT", "planning_scope_cards", ""),
+                "item": ("UPDATE", "intake_items", ""),
+                "binding": ("INSERT", "planning_draft_intake_bindings", ""),
+                "card_event": (
+                    "INSERT",
+                    "events",
+                    "WHEN NEW.event_type='PLANNING_SCOPE_CARD_SUBMITTED'",
+                ),
+                "item_event": ("INSERT", "events", "WHEN NEW.event_type='INTAKE_ITEM_PLANNED'"),
+                "binding_event": (
+                    "INSERT",
+                    "events",
+                    "WHEN NEW.event_type='PLANNING_DRAFT_INTAKE_BOUND'",
+                ),
+            }
+            verb, table, condition = operations[boundary]
+            conn.execute(
+                f"CREATE TRIGGER audit_failure AFTER {verb} ON {table} {condition} BEGIN SELECT RAISE(ABORT, 'audit boundary'); END"
+            )
+    with monkeypatch.context() as patch:
+        if boundary == "commit":
+            real_connect = sqlite3.connect
+
+            class FailingCommit(sqlite3.Connection):
+                def commit(self) -> None:
+                    if self.execute("SELECT 1 FROM planning_scope_cards").fetchone() is not None:
+                        commit_observed.append({
+                            "cards": self.execute("SELECT COUNT(*) FROM planning_scope_cards").fetchone()[0],
+                            "bindings": self.execute("SELECT COUNT(*) FROM planning_draft_intake_bindings").fetchone()[0],
+                            "planned": self.execute("SELECT COUNT(*) FROM intake_items WHERE status='PLANNED'").fetchone()[0],
+                            "success_events": self.execute("SELECT COUNT(*) FROM events WHERE event_type IN ('INTAKE_ITEM_PLANNED', 'PLANNING_DRAFT_INTAKE_BOUND', 'PLANNING_SCOPE_CARD_SUBMITTED')").fetchone()[0],
+                        })
+                        raise sqlite3.OperationalError("audit commit boundary")
+                    super().commit()
+
+            def connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+                kwargs["factory"] = FailingCommit
+                connection = real_connect(*args, **kwargs)
+                assert isinstance(connection, sqlite3.Connection)
+                return connection
+
+            patch.setattr(sqlite3, "connect", connect)
+        with pytest.raises(sqlite3.DatabaseError, match="audit") as injected:
+            _audit_card(facade, item)
+    expected_commit = [{"cards": 1, "bindings": 1, "planned": 1, "success_events": 3}] if boundary == "commit" else []
+    assert commit_observed == expected_commit
+    rollback = _audit_unconsumed(tmp_path, database, item)
+    with closing(sqlite3.connect(database)) as conn, conn:
+        conn.execute("DROP TRIGGER IF EXISTS audit_failure")
+    cold = PmFacadeService(tmp_path, store=ContinuityStore(tmp_path, database))
+    card = _audit_card(cold, item)
+    assert (
+        cold._store.get_submitted_planning_scope_card(card.request_id, card.plan_hash).card == card
+    )
+    for event in (
+        "INTAKE_ITEM_PLANNED",
+        "PLANNING_DRAFT_INTAKE_BOUND",
+        "PLANNING_SCOPE_CARD_SUBMITTED",
+    ):
+        assert _audit_count(database, "events", "WHERE event_type=?", (event,)) == 1
+    with closing(sqlite3.connect(database)) as conn:
+        chain = conn.execute(
+            "SELECT previous_hash, event_hash FROM events ORDER BY rowid"
+        ).fetchall()
+    assert chain[0][0] == ""
+    assert all(chain[index][0] == chain[index - 1][1] for index in range(1, len(chain)))
+    print(json.dumps({"F03": boundary, "exception": type(injected.value).__name__,
+                      "message": str(injected.value), "before_commit": commit_observed,
+                      "cold_rollback": rollback, "retry_plan_hash": card.plan_hash,
+                      "event_chain_rows": len(chain)}, ensure_ascii=False))
+
+
+def test_audit_f04_success_is_durable_and_replay_keeps_execution_rows(tmp_path: Path) -> None:
+    facade, database, item = _audit_scene(tmp_path)
+    tables = (
+        "mission_items",
+        "work_items",
+        "run_items",
+        "execution_leases",
+        "checkpoints",
+        "handoffs_v2",
+    )
+    with closing(sqlite3.connect(database)) as conn:
+        before = {
+            table: conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() for table in tables
+        }
+    card = _audit_card(facade, item)
+    cold = PmFacadeService(tmp_path, store=ContinuityStore(tmp_path, database))
+    assert _audit_count(database, "planning_scope_cards") == 1
+    saved = cold._store.get_submitted_planning_scope_card(card.request_id, card.plan_hash)
+    assert saved.card == card and saved.revision == 1
+    assert _audit_card(cold, item, classification=None, intake_item_id="") == card
+    assert (
+        cold.submit_planning_scope_card(
+            card.request_id,
+            scope_paths=card.scope_paths,
+            risks=card.risks,
+            non_goals=card.non_goals,
+            execution_grant=card.execution_grant,
+            submitted_by="audit",
+        ).card
+        == card
+    )
+    assert _audit_count(database, "planning_scope_cards") == 1
+    for event in (
+        "INTAKE_ITEM_PLANNED",
+        "PLANNING_DRAFT_INTAKE_BOUND",
+        "PLANNING_SCOPE_CARD_SUBMITTED",
+    ):
+        assert _audit_count(database, "events", "WHERE event_type=?", (event,)) == 1
+    with closing(sqlite3.connect(database)) as conn:
+        assert {
+            table: conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() for table in tables
+        } == before
+    assert IntakeStore(tmp_path, database).get_item(item.item_id).plan_request_id == card.request_id
+    revised = _audit_card(cold, item, risks=("Revised risk",))
+    assert revised.plan_hash != card.plan_hash
+    assert (
+        cold._store.get_submitted_planning_scope_card(
+            revised.request_id, revised.plan_hash
+        ).revision
+        == 2
+    )
+    assert _audit_count(database, "events", "WHERE event_type=?", ("INTAKE_ITEM_PLANNED",)) == 1
+
+
+@pytest.mark.parametrize("field", ["domain", "kind", "scope", "action", "project"])
+def test_audit_f02_cold_retry_rejects_mismatched_reserved_change(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    from auto_pm.contracts.intake import ChangeAction, IntakeClassification
+
+    facade, database, item = _audit_scene(tmp_path)
+    filing = IntakeClassification(
+        kind=IntakeKind.CHANGE, change_action=ChangeAction.ADD, domain="SCPT"
+    )
+    facade.create_planning_draft_change(_planning_intent(), classification=filing)
+    changed: dict[str, Any] = {
+        "domain": {"domain": "PLC"},
+        "kind": {"kind": IntakeKind.BUG, "change_action": None},
+        "scope": {"impact_scope": ("SYSTEM",)},
+        "action": {"change_action": ChangeAction.REMOVE},
+        "project": {},
+    }
+    if field == "project":
+        intent = _planning_intent().model_copy(update={"subject_project_id": "SW-OTHER-002"})
+        with pytest.raises(PmFacadeError, match="同一项目|不同输入"):
+            facade.create_planning_draft_change(intent, classification=filing)
+    else:
+        mismatch = IntakeClassification.model_validate({**filing.model_dump(), **changed[field]})
+        with pytest.raises(PmFacadeError, match="CHG|候选"):
+            facade.create_planning_draft_change(_planning_intent(), classification=mismatch)
+    _audit_unconsumed(tmp_path, database, item)
+
+
+def test_audit_f08_saved_classified_card_approves_and_legacy_create_stays_compatible(
+    tmp_path: Path,
+) -> None:
+    facade, database, item = _audit_scene(tmp_path)
+    card = _audit_card(facade, item)
+    cold = PmFacadeService(tmp_path, store=ContinuityStore(tmp_path, database))
+    approved = cold.approve_pending_planning_scope_card(
+        card.request_id,
+        expected_plan_hash=card.plan_hash,
+        approver="fubai",
+        approval_evidence_ref="user-confirmation:chat-20261005-audit-saved",
+    )
+    assert approved.plan_hash == card.plan_hash
+    assert _audit_card(cold, item) == card
+    assert (
+        cold.approve_pending_planning_scope_card(
+            card.request_id,
+            expected_plan_hash=card.plan_hash,
+            approver="fubai",
+            approval_evidence_ref="user-confirmation:chat-20261005-audit-saved",
+        )
+        == approved
+    )
+    assert _audit_count(database, "run_items") == 0
+    legacy_intent = _planning_intent().model_copy(update={"request_id": "REQ-LEGACY"})
+    legacy = cold.create_planning_scope_card(
+        legacy_intent, scope_paths=("legacy.py",), risks=("Risk",), non_goals=("No deployment",)
+    )
+    assert legacy.execution_grant.approved_model == "manual"
+    assert (
+        _audit_count(database, "planning_scope_cards", "WHERE request_id=?", ("REQ-LEGACY",)) == 0
+    )
 
 def _git_root(root: Path) -> None:
     subprocess.run(
@@ -1587,3 +1989,48 @@ def test_run_approved_planning_verifies_a_finished_execution_with_the_same_lease
     }
     assert outcome.verified is True
     assert outcome.receipt_status == "VERIFYING"
+
+
+def _rehearsal_database_inventory(database: Path) -> dict[str, dict[str, object]]:
+    inventory: dict[str, dict[str, object]] = {}
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        path = Path(str(database) + suffix)
+        if path.exists():
+            raw = path.read_bytes()
+            inventory[suffix] = {
+                "exists": True, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+                "mtime_ns": path.stat().st_mtime_ns,
+            }
+        else:
+            inventory[suffix] = {"exists": False}
+    return inventory
+
+
+def test_rehearsal_c11_f08_preview_is_physically_read_only_under_delete_journal(tmp_path: Path) -> None:
+    """C11-RO: preview preserves source database and all sidecar bytes/existence/mtime."""
+    facade, database, item = _audit_scene(tmp_path)
+    card = _audit_card(facade, item)
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("PRAGMA journal_mode=DELETE").fetchone() == ("delete",)
+    before = _rehearsal_database_inventory(database)
+    assert before[""]["exists"] is True
+    preview = facade.preview_planning_scope_card(
+        _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("Drift",),
+        non_goals=("No deployment",),
+        execution_grant=PlanningExecutionGrant(
+            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved"
+        ),
+        classification=item.classification, intake_item_id=item.item_id,
+    )
+    assert preview == card
+    assert _rehearsal_database_inventory(database) == before
+    replay = facade.preview_planning_scope_card(
+        _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("Drift",),
+        non_goals=("No deployment",),
+        execution_grant=PlanningExecutionGrant(
+            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved"
+        ),
+        classification=item.classification, intake_item_id=item.item_id,
+    )
+    assert replay == card
+    assert _rehearsal_database_inventory(database) == before

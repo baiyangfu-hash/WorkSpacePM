@@ -123,6 +123,128 @@ class Desk:
         return int(self.sql("SELECT COUNT(*) FROM events")[0][0])
 
 
+
+@pytest.mark.parametrize("source", ["direct", "inbox"])
+@pytest.mark.parametrize("field", ["kind", "action", "domain", "scope", "project"])
+def test_audit_f05_bound_replay_checks_every_explicit_field(
+    desk: Desk,
+    source: str,
+    field: str,
+) -> None:
+    item = desk.confirm(desk.propose(kind=IntakeKind.CHANGE))
+    request = desk.draft()
+    filing = item.classification
+    item_id = item.item_id if source == "inbox" else ""
+    IntakeStore(desk.root).bind_planning_classification(request, filing, item_id)
+    before = desk.sql("SELECT * FROM events ORDER BY rowid")
+    bound_before = desk.sql("SELECT * FROM planning_draft_intake_bindings")
+    options: dict[str, Any] = {
+        "request_id": request,
+        "kind": None,
+        "change_action": None,
+        "domain": "",
+        "impact_scope": (),
+        "inbox_id": "",
+    }
+    project = PYTHON_PROJECT
+    if field == "project":
+        project = PLC_PROJECT
+    else:
+        key, value = {
+            "kind": ("kind", IntakeKind.BUG),
+            "action": ("change_action", ChangeAction.REMOVE),
+            "domain": ("domain", "PLC"),
+            "scope": ("impact_scope", ("SYSTEM",)),
+        }[field]
+        options[key] = value
+    with pytest.raises(PmIntakeError, match="不一致|同一项目"):
+        desk.service.plan_classification(project, **options)
+    assert desk.sql("SELECT * FROM events ORDER BY rowid") == before
+    assert desk.sql("SELECT * FROM planning_draft_intake_bindings") == bound_before
+    options.update(kind=None, change_action=None, domain="", impact_scope=())
+    assert desk.service.plan_classification(PYTHON_PROJECT, **options) == (filing, item_id)
+    options.update(
+        kind=filing.kind,
+        change_action=filing.change_action,
+        domain=filing.domain,
+        impact_scope=filing.impact_scope,
+    )
+    assert desk.service.plan_classification(PYTHON_PROJECT, **options) == (filing, item_id)
+
+
+@pytest.mark.parametrize("case", ["directory", "mixed", "missing", "external", "broken", "query"])
+def test_audit_f06_file_evidence_requires_a_provable_regular_file(
+    desk: Desk,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    import os
+
+    evidence: tuple[str, ...] = ("file:README.md",)
+    link: Path | None = None
+    if case in ("directory", "mixed"):
+        (desk.root / "directory").mkdir()
+        evidence = (
+            ("file:directory",) if case == "directory" else ("file:README.md", "file:directory")
+        )
+    elif case == "missing":
+        evidence = ("file:missing.txt",)
+    elif case in ("external", "broken"):
+        outside = desk.root.parent / f"outside-{case}"
+        outside.mkdir()
+        (outside / "proof.txt").write_text("outside", encoding="utf-8", errors="replace")
+        link = desk.root / "link"
+        if os.name == "nt":
+            result = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+        else:
+            link.symlink_to(outside, target_is_directory=True)
+        if case == "broken":
+            outside.rename(outside.with_name(outside.name + "-moved"))
+        evidence = ("file:link/proof.txt",)
+    before = desk.sql("SELECT * FROM events ORDER BY rowid")
+    try:
+        with monkeypatch.context() as patch:
+            if case == "query":
+                real_is_file = Path.is_file
+
+                def fail_query(path: Path) -> bool:
+                    if path == desk.root / "README.md":
+                        raise PermissionError("audit status query")
+                    return real_is_file(path)
+
+                patch.setattr(Path, "is_file", fail_query)
+            with pytest.raises(PmIntakeError, match="取证"):
+                desk.propose(ticket=desk.ticket(evidence=evidence))
+        assert desk.sql("SELECT * FROM events ORDER BY rowid") == before
+        assert desk.service.list_items(PYTHON_PROJECT) == ()
+        assert desk.tables().isdisjoint(INTAKE_TABLES)
+        ordinary = desk.propose(ticket=desk.ticket(evidence=("file:README.md",)))
+        assert ordinary.ticket.evidence == ("file:README.md",)
+        after = desk.sql("SELECT * FROM events ORDER BY rowid")
+        replay, created = desk.service.propose(
+            request_id=ordinary.request_id, project_id=ordinary.project_id,
+            title=ordinary.title, classification=ordinary.classification,
+            ticket=ordinary.ticket, proposed_by="replay",
+        )
+        assert (replay, created) == (ordinary, False)
+        assert desk.sql("SELECT * FROM events ORDER BY rowid") == after
+    finally:
+        if link is not None:
+            if os.name == "nt":
+                link.rmdir()
+            else:
+                link.unlink()
+
+
+
 def _repository(root: Path) -> None:
     subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True)
     (root / "README.md").write_text("baseline\n", encoding="utf-8", errors="replace")

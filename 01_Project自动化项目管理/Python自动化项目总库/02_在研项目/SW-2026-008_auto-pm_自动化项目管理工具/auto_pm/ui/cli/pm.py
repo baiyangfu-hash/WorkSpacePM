@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 from collections.abc import Callable
@@ -29,6 +30,7 @@ from auto_pm.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.core.pm_resume_service import PmResumeError, PmResumeService
 from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
 from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
+from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -160,6 +162,7 @@ def _planning_scope_card(
     declared_dirty_paths: tuple[str, ...],
     classification: IntakeClassification | None = None,
     intake_item_id: str = "",
+    preview_only: bool = False,
 ) -> PlanningScopeCard:
     missing = [
         name
@@ -188,9 +191,13 @@ def _planning_scope_card(
             objective=objective,
             acceptance_criteria=acceptance,
         )
+        facade = _facade(ctx)
+        build = (
+            facade.preview_planning_scope_card if preview_only else facade.create_planning_scope_card
+        )
         return cast(
             PlanningScopeCard,
-            _facade(ctx).create_planning_scope_card(
+            build(
                 intent,
                 scope_paths=scope_paths,
                 risks=risks,
@@ -815,6 +822,10 @@ def approve_pm(
             raise click.ClickException(str(error)) from error
         _emit_plan_approval(approved_card, approved_work.state.value)
         return
+    try:
+        DecisionService.validate_planning_approval(approver, plan_hash, approval_evidence_ref)
+    except DecisionError as error:
+        raise click.ClickException(str(error)) from error
     classification, intake_item_id = _resolve_filing(
         ctx,
         project_id=project_id,
@@ -826,6 +837,24 @@ def approve_pm(
         inbox_id=inbox_id,
         from_draft=False,
     )
+    preview = _planning_scope_card(
+        ctx,
+        project_id=project_id,
+        request_id=request_id,
+        objective=objective,
+        acceptance=acceptance,
+        scope_paths=scope_paths,
+        risks=risks,
+        non_goals=non_goals,
+        adapter=adapter,
+        approved_model=approved_model,
+        declared_dirty_paths=declared_dirty_paths,
+        classification=classification,
+        intake_item_id=intake_item_id,
+        preview_only=True,
+    )
+    if not hmac.compare_digest(preview.plan_hash, plan_hash):
+        raise click.ClickException("PlanningScopeCard plan_hash 已过期或内容发生漂移")
     card = _planning_scope_card(
         ctx,
         project_id=project_id,

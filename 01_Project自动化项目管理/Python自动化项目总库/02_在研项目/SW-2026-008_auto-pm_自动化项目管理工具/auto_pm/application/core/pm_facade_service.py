@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import (
+    ChangeRequest,
     SpecViolationError,
     validate_business_nature,
     validate_domain,
@@ -132,21 +133,23 @@ class PmFacadeService:
     def _planning_classification(
         self,
         request_id: str,
+        project_id: str,
         classification: IntakeClassification | None,
         intake_item_id: str,
-    ) -> IntakeClassification | None:
-        """Bind and return how a request is filed; an unclassified legacy request returns None."""
+    ) -> tuple[IntakeClassification | None, str]:
+        """Resolve a filing without consuming anything; unclassified legacy requests stay legal."""
 
         intake = IntakeStore(self._store.workspace_root, self._store.db_path)
         try:
-            if classification is None:
-                bound = intake.get_planning_classification(request_id)
-                return None if bound is None else bound[0]
-            validate_domain(classification.domain)
-            validate_business_nature(classification.business_nature)
-            validate_impact_scope(list(classification.impact_scope))
-            validate_urgency(classification.urgency)
-            return intake.bind_planning_classification(request_id, classification, intake_item_id)
+            filing, item_id = intake.resolve_planning_classification(
+                request_id, project_id, classification, intake_item_id
+            )
+            if filing is not None:
+                validate_domain(filing.domain)
+                validate_business_nature(filing.business_nature)
+                validate_impact_scope(list(filing.impact_scope))
+                validate_urgency(filing.urgency)
+            return filing, item_id
         except (ContinuityStoreError, SpecViolationError) as error:
             raise PmFacadeError(str(error)) from error
 
@@ -163,8 +166,10 @@ class PmFacadeService:
         that nothing classified keeps the legacy filing (SCPT, DEF, MODULE, normal).
         """
 
+        filing, intake_item_id = self._planning_classification(
+            intent.request_id, intent.subject_project_id, classification, intake_item_id
+        )
         draft = self.create_planning_draft(intent)
-        filing = self._planning_classification(draft.request_id, classification, intake_item_id)
         domain = "SCPT" if filing is None else filing.domain
         classified_refs = (
             ""
@@ -174,9 +179,7 @@ class PmFacadeService:
             + (f"; intake_item={intake_item_id}" if intake_item_id else "")
         )
         try:
-            candidate_change_id = self._changes.next_change_number(
-                draft.subject_project_id, domain
-            )
+            candidate_change_id = self._changes.next_change_number(draft.subject_project_id, domain)
             change_id = self._store.reserve_planning_draft_change(
                 draft.request_id, candidate_change_id
             )
@@ -195,6 +198,19 @@ class PmFacadeService:
             )
         except (ContinuityStoreError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
+        self._validate_planning_change(draft, change_id, change, filing, intake_item_id)
+        return change_id
+
+    @staticmethod
+    def _validate_planning_change(
+        draft: PlanningDraft,
+        change_id: str,
+        change: ChangeRequest,
+        filing: IntakeClassification | None,
+        intake_item_id: str,
+    ) -> None:
+        """Prove a reused CHG still has the exact request identity and legal filing."""
+        domain = "SCPT" if filing is None else filing.domain
         replayable_states = {
             "draft",
             "submitted",
@@ -207,10 +223,48 @@ class PmFacadeService:
             "completed",
         }
         if change.change_number != change_id or change.status not in replayable_states:
-            raise PmFacadeError(
-                "PlanningDraft 绑定的 CHG 已被拒绝、关闭或归档，不能恢复范围卡"
-            )
-        return change_id
+            raise PmFacadeError("PlanningDraft 绑定的 CHG 已被拒绝、关闭或归档，不能恢复范围卡")
+        expected_refs = {
+            "PlanningDraft request_id": draft.request_id,
+            "input_fingerprint": draft.input_fingerprint,
+        }
+        if filing is not None:
+            expected_refs["intake_kind"] = filing.kind.value
+            if filing.change_action is not None:
+                expected_refs["change_action"] = filing.change_action.value
+            if intake_item_id:
+                expected_refs["intake_item"] = intake_item_id
+        actual_refs: dict[str, str] = {}
+        for entry in change.references.split(";"):
+            key, separator, value = entry.strip().partition("=")
+            if separator:
+                if key in actual_refs:
+                    raise PmFacadeError("PlanningDraft 的 CHG 引用包含重复身份字段")
+                actual_refs[key] = value
+        legacy_refs = {
+            "PlanningDraft request_id": draft.request_id,
+            "input_fingerprint": draft.input_fingerprint,
+        }
+        # Legacy SDK cards have no intake fields. Permit adding an explicit filing only when
+        # both immutable request identity and all existing CHG filing fields already agree.
+        legacy_filing = (
+            filing is not None
+            and not intake_item_id
+            and actual_refs == legacy_refs
+            and domain == "SCPT"
+            and filing.business_nature == "DEF"
+            and filing.impact_scope == ("MODULE",)
+            and filing.urgency == "normal"
+        )
+        if (
+            change.project_id != draft.subject_project_id
+            or change.domain != domain
+            or change.business_nature != ("DEF" if filing is None else filing.business_nature)
+            or change.impact_scope != (["MODULE"] if filing is None else list(filing.impact_scope))
+            or change.urgency != ("normal" if filing is None else filing.urgency)
+            or (actual_refs != expected_refs and not legacy_filing)
+        ):
+            raise PmFacadeError("PlanningDraft 复用的 CHG 分类或请求身份不一致")
 
     def bind_planning_draft_specs(self, intent: PmIntent) -> tuple[tuple[str, str, str], ...]:
         """Bind a PlanningDraft to the effective Python and PLC spec sources."""
@@ -221,6 +275,50 @@ class PmFacadeService:
                 draft.request_id, self._effective_spec_sources()
             )
         except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+
+    def preview_planning_scope_card(
+        self,
+        intent: PmIntent,
+        *,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        non_goals: tuple[str, ...],
+        execution_grant: PlanningExecutionGrant | None = None,
+        classification: IntakeClassification | None = None,
+        intake_item_id: str = "",
+    ) -> PlanningScopeCard:
+        """Rebuild an existing plan for approval validation without any durable write."""
+        filing, item_id = self._planning_classification(
+            intent.request_id, intent.subject_project_id, classification, intake_item_id
+        )
+        try:
+            draft = self._store.get_planning_draft(intent.request_id)
+            if draft != PlanningDraft.from_intent(intent):
+                raise PmFacadeError("request_id 已绑定不同输入，拒绝覆盖既有 PlanningDraft")
+            overview = next(
+                (entry for entry in self._store.list_planning_drafts(intent.subject_project_id)
+                 if entry.draft.request_id == intent.request_id),
+                None,
+            )
+            if overview is None or not overview.change_id:
+                raise PmFacadeError("PlanningDraft 尚未绑定可供批准的 CHG")
+            change = self._changes.get_change_request(
+                overview.change_id, project_id=intent.subject_project_id
+            )
+            if change is None:
+                raise PmFacadeError("PlanningDraft 未绑定可读取的真实 CHG")
+            self._validate_planning_change(draft, overview.change_id, change, filing, item_id)
+            return PlanningScopeCard.from_draft(
+                draft,
+                change_id=overview.change_id,
+                scope_paths=scope_paths,
+                risks=risks,
+                non_goals=non_goals,
+                spec_sources=self._store.get_planning_draft_specs(intent.request_id),
+                execution_grant=execution_grant,
+            )
+        except (ContinuityStoreError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
 
     def create_planning_scope_card(
@@ -234,15 +332,81 @@ class PmFacadeService:
         classification: IntakeClassification | None = None,
         intake_item_id: str = "",
     ) -> PlanningScopeCard:
-        """Create a deterministic, non-executable scope card for later approval."""
+        """Create a reviewable card; classified planning succeeds only after durable submission."""
+        card, filing, item_id = self._prepare_planning_scope_card(
+            intent,
+            scope_paths=scope_paths,
+            risks=risks,
+            non_goals=non_goals,
+            execution_grant=execution_grant,
+            classification=classification,
+            intake_item_id=intake_item_id,
+        )
+        if filing is not None:
+            self._submit_classified_card(
+                card, filing, item_id, "PM Facade", allow_approved_replay=True
+            )
+        return card
+
+    def _submit_classified_card(
+        self,
+        card: PlanningScopeCard,
+        filing: IntakeClassification,
+        item_id: str,
+        submitted_by: str,
+        *,
+        allow_approved_replay: bool,
+    ) -> None:
+        try:
+            IntakeStore(
+                self._store.workspace_root, self._store.db_path
+            ).submit_classified_planning_scope_card(
+                card, filing, item_id, submitted_by,
+                allow_approved_replay=allow_approved_replay,
+            )
+        except (ContinuityStoreError, ValueError) as error:
+            raise PmFacadeError(str(error)) from error
+
+    def _prepare_planning_scope_card(
+        self,
+        intent: PmIntent,
+        *,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        non_goals: tuple[str, ...],
+        execution_grant: PlanningExecutionGrant | None,
+        classification: IntakeClassification | None,
+        intake_item_id: str,
+    ) -> tuple[PlanningScopeCard, IntakeClassification | None, str]:
+        """Run the real contract's pure validation before reserving files or durable identities."""
+        try:
+            draft = PlanningDraft.from_intent(intent)
+            if execution_grant is not None:
+                execution_grant = PlanningExecutionGrant.model_validate(
+                    execution_grant.model_dump(mode="json")
+                )
+            PlanningScopeCard.from_draft(
+                draft,
+                change_id="",
+                spec_sources=(),
+                scope_paths=scope_paths,
+                risks=risks,
+                non_goals=non_goals,
+                execution_grant=execution_grant,
+            )
+        except (ValueError, AttributeError) as error:
+            raise PmFacadeError(str(error)) from error
+        filing, intake_item_id = self._planning_classification(
+            intent.request_id, intent.subject_project_id, classification, intake_item_id
+        )
 
         draft = self.create_planning_draft(intent)
         change_id = self.create_planning_draft_change(
-            intent, classification=classification, intake_item_id=intake_item_id
+            intent, classification=filing, intake_item_id=intake_item_id
         )
         spec_sources = self.bind_planning_draft_specs(intent)
         try:
-            return PlanningScopeCard.from_draft(
+            card = PlanningScopeCard.from_draft(
                 draft,
                 change_id=change_id,
                 scope_paths=scope_paths,
@@ -251,6 +415,7 @@ class PmFacadeService:
                 spec_sources=spec_sources,
                 execution_grant=execution_grant,
             )
+            return card, filing, intake_item_id
         except ValueError as error:
             raise PmFacadeError(str(error)) from error
 
@@ -509,7 +674,7 @@ class PmFacadeService:
             draft = self._store.get_planning_draft(request_id)
         except ContinuityStoreError as error:
             raise PmFacadeError(str(error)) from error
-        card = self.create_planning_scope_card(
+        card, filing, item_id = self._prepare_planning_scope_card(
             PmIntent(
                 subject_project_id=draft.subject_project_id,
                 request_id=draft.request_id,
@@ -524,7 +689,12 @@ class PmFacadeService:
             intake_item_id=intake_item_id,
         )
         try:
-            self._store.submit_planning_scope_card(card, submitted_by)
+            if filing is None:
+                self._store.submit_planning_scope_card(card, submitted_by)
+            else:
+                self._submit_classified_card(
+                    card, filing, item_id, submitted_by, allow_approved_replay=False
+                )
             return self._store.get_submitted_planning_scope_card(card.request_id, card.plan_hash)
         except (ContinuityStoreError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
