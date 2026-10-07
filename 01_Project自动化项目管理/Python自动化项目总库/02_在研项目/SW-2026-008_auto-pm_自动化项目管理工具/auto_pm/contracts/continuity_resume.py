@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from auto_pm.contracts.continuity import CheckpointItem, RunItem, WorkItem
+from auto_pm.contracts.continuity_query import ContinuityQuery
 from auto_pm.contracts.intake import IntakeSummary
 from auto_pm.contracts.mission import Mission
 from auto_pm.contracts.workspace_context import WorkspaceContext
@@ -53,3 +54,4 @@ class ContinuityResume(BaseModel):
     read_set: tuple[str, ...] = ()
     intake: IntakeSummary = Field(default_factory=IntakeSummary)
     evidence_id: str
+    query: ContinuityQuery | None = None

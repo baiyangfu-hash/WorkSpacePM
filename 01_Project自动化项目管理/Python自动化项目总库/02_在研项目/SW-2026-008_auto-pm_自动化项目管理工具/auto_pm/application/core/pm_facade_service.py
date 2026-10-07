@@ -23,7 +23,7 @@ from auto_pm.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
+from auto_pm.core.continuity_query_service import ContinuityQueryError, ContinuityQueryService
 from auto_pm.core.execution_adapter_service import (
     ExecutionDispatchError,
     ExecutionDispatchResult,
@@ -1118,19 +1118,43 @@ class PmFacadeService:
         run_id: str = "",
     ) -> ContinuityResume:
         """Return a strictly read-only recovery view for a new PM conversation."""
+        return self._query(
+            project_id=project_id, invocation_path=invocation_path, work_id=work_id, run_id=run_id, requested_action=""
+        )
+
+    def orient(
+        self,
+        *,
+        project_id: str = "",
+        invocation_path: str | None = None,
+        work_id: str = "",
+        run_id: str = "",
+        requested_action: str = "",
+    ) -> ContinuityResume:
+        """The same read-only view as ``resume``, plus an explicit answer for one asked action (UNSUPPORTED in M2)."""
+        return self._query(
+            project_id=project_id,
+            invocation_path=invocation_path,
+            work_id=work_id,
+            run_id=run_id,
+            requested_action=requested_action,
+        )
+
+    def _query(
+        self, *, project_id: str, invocation_path: str | None, work_id: str, run_id: str, requested_action: str
+    ) -> ContinuityResume:
         try:
             return cast(
                 ContinuityResume,
-                ContinuityResumeService(
-                    self._workspace_root, execution_root=self._execution_root
-                ).collect(
+                ContinuityQueryService(self._workspace_root, execution_root=self._execution_root).query(
                     project_id=project_id,
                     invocation_path=invocation_path,
                     work_id=work_id,
                     run_id=run_id,
+                    requested_action=requested_action,
                 ),
             )
-        except ContinuityResumeError as error:
+        except ContinuityQueryError as error:
             raise PmFacadeError(str(error)) from error
 
     def accept(self, mission_id: str) -> PmConfirmationCard:

@@ -14,6 +14,8 @@ from click.core import ParameterSource
 from auto_pm.app_context import AppContext
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import TransitionGuardError
+from auto_pm.contracts.continuity_query import QueriedAction
+from auto_pm.contracts.continuity_resume import ContinuityResume
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.intake import (
     ChangeAction,
@@ -1039,6 +1041,11 @@ def resume_pm(
     if as_json:
         click.echo(payload.model_dump_json(indent=2))
         return
+    _echo_resume_text(payload)
+
+
+def _echo_resume_text(payload: ContinuityResume) -> None:
+    """Shared text rendering of the versioned query for ``pm resume`` and ``pm orient``."""
     click.echo(f"evidence_id: {payload.evidence_id}")
     click.echo(
         f"subject: {payload.context.subject_project_id} | "
@@ -1062,6 +1069,65 @@ def resume_pm(
             )
     for path in payload.read_set:
         click.echo(f"证据: {path}")
+    query = payload.query
+    if query is not None:
+        click.echo(f"查询合同: {query.schema_version} | 能力合同: {query.capabilities.contract_version} | query: {query.evidence_id}")
+        click.echo(
+            f"挂起: {'支持' if query.capabilities.parking_supported else '不支持'} | "
+            f"插队: {'支持' if query.capabilities.preemption_supported else '不支持'}"
+        )
+        if query.requested_action is not None:
+            asked = query.requested_action
+            click.echo(f"所问动作 {asked.action.value}: {asked.status}（{asked.reason}）")
+
+
+@pm_group.command(name="orient")
+@click.argument("project_id", required=False, default="")
+@click.option("--work-id", default="", help="显式选择 Work；多活时必须提供")
+@click.option("--run-id", default="", help="显式选择 Run；多活时必须提供")
+@click.option(
+    "--requested-action",
+    type=click.Choice([action.value for action in QueriedAction]),
+    default=None,
+    help="询问某个动作的能力：M2 对 PARK、RESUME_PARKED、PREEMPT 一律明确回答 UNSUPPORTED（查询不是执行授权）",
+)
+@click.option(
+    "--path",
+    "start_path",
+    type=click.Path(exists=True, file_okay=False, path_type=str),
+    default=None,
+    help="自动识别项目时的调用目录（默认：当前目录）",
+)
+@click.option("--json", "as_json", is_flag=True, help="以 JSON 输出带 query 块的 continuity-resume.v2")
+@click.pass_context
+def orient_pm(
+    ctx: click.Context,
+    project_id: str,
+    work_id: str,
+    run_id: str,
+    requested_action: str | None,
+    start_path: str | None,
+    as_json: bool,
+) -> None:
+    """只读定位：与 resume 共用同一份版本化查询，并可询问某个动作的能力。"""
+    app_ctx: AppContext = ctx.find_root().obj
+    try:
+        payload = PmFacadeService(
+            app_ctx.control_root,
+            execution_root=app_ctx.workspace_root,
+        ).orient(
+            project_id=project_id,
+            invocation_path=start_path,
+            work_id=work_id,
+            run_id=run_id,
+            requested_action=requested_action or "",
+        )
+    except PmFacadeError as error:
+        raise click.ClickException(str(error)) from error
+    if as_json:
+        click.echo(payload.model_dump_json(indent=2))
+        return
+    _echo_resume_text(payload)
 
 
 def _emit_context(ctx: click.Context, project_id: str, start_path: str | None) -> None:
