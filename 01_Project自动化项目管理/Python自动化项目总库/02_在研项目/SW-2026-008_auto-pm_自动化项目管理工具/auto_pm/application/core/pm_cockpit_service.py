@@ -109,18 +109,26 @@ class PmCockpitService:
         closure_service: PmClosureService | None = None,
         facade: PmFacadeService | None = None,
         approver: str = "",
+        control_root: str | Path | None = None,
     ) -> None:
+        # ``workspace_root`` is where the GUI was started (the execution root, possibly a linked candidate);
+        # ``control_root`` is the governed main root that owns the registry, the store and every write.
         self._workspace_root = Path(workspace_root).resolve()
+        self._control_root = Path(control_root).resolve() if control_root is not None else self._workspace_root
         selected = Path(registry_path) if registry_path is not None else self._REGISTRY_RELATIVE_PATH
         self._registry_path = (
             selected.resolve()
             if selected.is_absolute()
-            else (self._workspace_root / selected).resolve()
+            else (self._control_root / selected).resolve()
         )
-        self._store = store or ContinuityStore(self._workspace_root)
+        self._store = store or ContinuityStore(self._control_root)
         self._closure_service = closure_service
         self._facade_override = facade
         self._approver = approver.strip()
+
+    def _real_facade(self) -> PmFacadeService:
+        """The facade of the governed control root; execution runs against the GUI's own root."""
+        return PmFacadeService(self._control_root, execution_root=self._workspace_root)
 
     def snapshot(self) -> PmCockpitSnapshot:
         """Return the default screen's complete status without initializing any persistence."""
@@ -232,7 +240,7 @@ class PmCockpitService:
         try:
             return cast(
                 PmConfirmationCard,
-                PmFacadeService(self._workspace_root).confirm_start(mission_id),
+                self._real_facade().confirm_start(mission_id),
             )
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
@@ -255,7 +263,7 @@ class PmCockpitService:
             MissionState.ACTIVE,
         }:
             raise PmCockpitError("该需求当前不能开始执行。")
-        facade = self._facade_override or PmFacadeService(self._workspace_root)
+        facade = self._facade_override or self._real_facade()
         try:
             card = facade.recover_planning_scope_card(mission_id)
             return cast(
@@ -278,7 +286,7 @@ class PmCockpitService:
             raise PmCockpitError("未找到要批准的范围卡。")
         if not self._approver:
             raise PmCockpitError(_APPROVER_MISSING_REASON)
-        facade = self._facade_override or PmFacadeService(self._workspace_root)
+        facade = self._facade_override or self._real_facade()
         try:
             return cast(
                 PlanningApprovalResult,
@@ -303,7 +311,7 @@ class PmCockpitService:
         try:
             return cast(
                 PmConfirmationCard,
-                PmFacadeService(self._workspace_root).accept(mission_id),
+                self._real_facade().accept(mission_id),
             )
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
@@ -327,7 +335,7 @@ class PmCockpitService:
         if mission.state is not MissionState.ACCEPTED:
             raise PmCockpitError("该需求尚未验收，不能收尾。")
         closure = self._closure_service or PmClosureService(
-            self._workspace_root, store=self._store
+            self._control_root, store=self._store
         )
         try:
             preparation = closure.prepare_closure(
@@ -621,7 +629,7 @@ class PmCockpitService:
         if mission.state is not MissionState.ACCEPTANCE_PENDING:
             return not_applicable, "尚未进入验收阶段，暂无需核验。"
         try:
-            reason = PmFacadeService(self._workspace_root).acceptance_gate_reason(
+            reason = self._real_facade().acceptance_gate_reason(
                 mission.mission_id
             )
         except PmFacadeError as error:
@@ -895,10 +903,10 @@ class PmCockpitService:
 
     def _relative(self, path: Path) -> str:
         self._require_workspace_path(path)
-        return path.relative_to(self._workspace_root).as_posix()
+        return path.relative_to(self._control_root).as_posix()
 
     def _require_workspace_path(self, path: Path) -> None:
         try:
-            path.relative_to(self._workspace_root)
+            path.relative_to(self._control_root)
         except ValueError as error:
             raise PmCockpitError("驾驶舱拒绝读取工作空间外的路径。") from error

@@ -15,17 +15,26 @@ from auto_pm.core.pm_cockpit_service import PmCockpitService
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
 
 
-def build_cockpit_bridge(workspace_root: str, config: AutoPmConfig | None = None) -> PmCockpitBridge:
-    """Create the cockpit bridge with the configured approver (empty when unset or unreadable)."""
+def build_cockpit_bridge(
+    workspace_root: str, config: AutoPmConfig | None = None, *, control_root: str | None = None
+) -> PmCockpitBridge:
+    """Create the cockpit bridge with the configured approver (empty when unset or unreadable).
+
+    ``control_root`` is the governed main root; ``workspace_root`` stays the root the GUI was started in.
+    """
 
     try:
         approver = (config or AutoPmConfig()).cockpit_approver
     except ValueError:
         approver = ""
-    return PmCockpitBridge(workspace_root, service=PmCockpitService(workspace_root, approver=approver))
+    return PmCockpitBridge(
+        workspace_root,
+        service=PmCockpitService(workspace_root, approver=approver, control_root=control_root),
+        control_root=control_root,
+    )
 
 
-def run_boss_cockpit(workspace_root: str, debug: bool = False) -> int:
+def run_boss_cockpit(workspace_root: str, debug: bool = False, *, control_root: str | None = None) -> int:
     """Run the user-friendly default screen without constructing legacy services."""
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
     QQuickStyle.setStyle("Basic")
@@ -37,7 +46,7 @@ def run_boss_cockpit(workspace_root: str, debug: bool = False) -> int:
         return 1
 
     engine = QQmlApplicationEngine()
-    bridge = build_cockpit_bridge(workspace_root)
+    bridge = build_cockpit_bridge(workspace_root, control_root=control_root)
     engine.rootContext().setContextProperty("pmCockpitBridge", bridge)
     engine.load(QUrl.fromLocalFile(str(qml_path)))
     if not engine.rootObjects():

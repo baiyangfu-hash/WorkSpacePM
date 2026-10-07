@@ -79,18 +79,22 @@ def gui_command(ctx: click.Context, debug: bool, advanced: bool) -> None:
         _run_qml_gui(workspace, debug)
         return
 
-    console.print(f"[cyan]启动老板驾驶舱（只读）: {workspace}[/cyan]")
-    _run_boss_cockpit(workspace, debug)
+    control = app_ctx.control_root
+    console.print(f"[cyan]启动老板驾驶舱（只读）: {workspace}（控制根: {control}）[/cyan]")
+    if control == workspace:
+        _run_boss_cockpit(workspace, debug)
+    else:
+        _run_boss_cockpit(workspace, debug, control_root=control)
 
 
-def _run_boss_cockpit(workspace: str, debug: bool) -> None:
+def _run_boss_cockpit(workspace: str, debug: bool, control_root: str | None = None) -> None:
     """Launch the safe default view without importing the legacy application stack."""
     try:
         from auto_pm.ui.boss_qml_window import run_boss_cockpit
     except ImportError as error:
         raise click.ClickException("老板驾驶舱模块加载失败") from error
 
-    exit_code = run_boss_cockpit(workspace_root=workspace, debug=debug)
+    exit_code = run_boss_cockpit(workspace_root=workspace, debug=debug, control_root=control_root)
     if exit_code != 0:
         raise click.ClickException(f"老板驾驶舱异常退出: exit_code={exit_code}")
 

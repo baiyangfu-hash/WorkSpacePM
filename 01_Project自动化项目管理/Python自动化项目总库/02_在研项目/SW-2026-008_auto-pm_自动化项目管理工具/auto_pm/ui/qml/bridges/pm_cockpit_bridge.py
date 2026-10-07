@@ -190,12 +190,17 @@ class PmCockpitBridge(QObject):
         thread_pool: QThreadPool | None = None,
         snapshot_interval_ms: int = 5_000,
         parent: QObject | None = None,
+        control_root: str | None = None,
     ) -> None:
         if type(snapshot_interval_ms) is not int or not 1_000 <= snapshot_interval_ms <= 60_000:
             raise ValueError("snapshot_interval_ms 必须在 1000 到 60000 之间")
         super().__init__(parent)
-        self._service = service or PmCockpitService(workspace_root)
-        self._facade = facade or PmFacadeService(workspace_root)
+        self._service = service or PmCockpitService(workspace_root, control_root=control_root)
+        self._facade = facade or (
+            PmFacadeService(control_root, execution_root=workspace_root)
+            if control_root
+            else PmFacadeService(workspace_root)
+        )
         self._planning_input: tuple[str, str, tuple[str, ...]] | None = None
         self._planning_request_id: str | None = None
         self._thread_pool = thread_pool or QThreadPool.globalInstance()
