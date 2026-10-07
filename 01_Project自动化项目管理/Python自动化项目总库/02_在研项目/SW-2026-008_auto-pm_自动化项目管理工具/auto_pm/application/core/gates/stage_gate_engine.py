@@ -276,13 +276,26 @@ class StageGateEngine:
 
         return items
 
-    @staticmethod
-    def _evaluate_plc_doc_code_consistency(p: Path) -> GateCheckItemDTO | None:
+    def _evaluate_plc_doc_code_consistency(self, p: Path) -> GateCheckItemDTO | None:
         """PLC 项目：接口文档/变量定义文档与 SCL 代码必须一致且没有待确认标记（V01D）；非 PLC 项目不适用。"""
-        if not (p / ".plc.json").is_file():
-            return None
         item_id, name = "G4-PLC-DOC-CODE-CONSISTENT", "PLC 文档与代码一致且无待确认标记"
         fix = "运行 plc docs check 查看全部差异；plc docs sync 按代码补全；审核后 plc docs confirm"
+        try:
+            from auto_pm.infrastructure.plc_git_marker_guard import MOVE_RETIRE_HINT, marker_in_head
+
+            historical_marker = marker_in_head(Path(self.workspace_root) if self.workspace_root else None, p)
+        except Exception as exc:
+            return GateCheckItemDTO(
+                id=item_id, name=name, passed=False, severity="BLOCKER",
+                message=f"PLC 工程标记核验异常，按未通过处理: {exc}", fix_suggestion="检查 Git HEAD 与项目路径",
+            )
+        if not (p / ".plc.json").is_file():
+            if historical_marker:
+                return GateCheckItemDTO(
+                    id=item_id, name=name, passed=False, severity="BLOCKER",
+                    message=f"HEAD 中的 PLC 工程标记在工作区缺失；{MOVE_RETIRE_HINT}", fix_suggestion="恢复该工程的 .plc.json",
+                )
+            return None
         try:
             from auto_pm.plc import doc_consistency as dc
 

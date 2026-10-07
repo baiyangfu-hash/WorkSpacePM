@@ -122,6 +122,15 @@ def enforce_plc_docs(workspace_root: Path, staged: Iterable[str]) -> int:
     """
 
     try:
+        from auto_pm.infrastructure.plc_git_marker_guard import (
+            MOVE_RETIRE_HINT,
+            removed_index_markers,
+        )
+
+        removed = removed_index_markers(workspace_root)
+        if removed:
+            print(f"❌ [auto-pm pre-commit] 物理拦截：HEAD 中的 PLC 工程标记在暂存区消失: {', '.join(removed)}；{MOVE_RETIRE_HINT}")
+            return 1
         relevant = [p for p in staged if is_plc_relevant(p)]
         if not relevant:
             return 0

@@ -93,3 +93,113 @@ def test_e3_an_unrelated_commit_is_not_touched_by_the_plc_gate(repo: Path) -> No
     git(repo, "add", "notes.md")
     accepted = git(repo, "commit", "-m", "notes", check=False, env=commit_env())
     assert accepted.returncode == 0 and "PLC" not in accepted.stdout + accepted.stderr
+
+
+F01A_PROJECT = "0100_PLC自动化/DJ-TEST-001"
+F01A_MARKER = f"{F01A_PROJECT}/.plc.json"
+F01A_MOVE_HINT = "移动或退役请走 F01-b 的授权"
+
+
+def _f01a_cli_scene(tmp_path: Path, *, wrong_type: bool = False) -> Path:
+    from tests.plc.test_doc_consistency import IFC_DOC
+
+    root = tmp_path / "f01a-cli-repo"
+    root.mkdir()
+    git(root, "init", "-q")
+    ifc = IFC_DOC.replace("| `i_bStart` | BOOL |", "| `i_bStart` | INT |") if wrong_type else IFC_DOC
+    project = build(root / "0100_PLC自动化", ifc=ifc)
+    (project / ".plc.json").write_text('{"name": "DJ-TEST-001", "version": "V1.0.0", "description": "t"}', encoding="utf-8", errors="replace")
+    (root / "main.py").write_text(LAUNCHER, encoding="utf-8", errors="replace")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "pre-existing PLC history")
+    installed = CliRunner().invoke(cli, ["-w", str(root), "git-hook", "install"])
+    assert installed.exit_code == 0, installed.output
+    (root / ".git" / "hooks" / "commit-msg").unlink()
+    (root / ".git" / "hooks" / "pre-commit").chmod(0o755)
+    return root
+
+
+@pytest.mark.parametrize("wrong_type", [False, True])
+def test_f01a_e04_real_precommit_refuses_a_pure_marker_deletion_then_accepts_a_real_repair(
+    tmp_path: Path, wrong_type: bool
+) -> None:
+    root = _f01a_cli_scene(tmp_path, wrong_type=wrong_type)
+    head = git(root, "rev-parse", "HEAD").stdout.strip()
+    marker_before = (root / F01A_MARKER).read_bytes()
+    document_before = (root / IFC).read_bytes()
+    git(root, "rm", "--", F01A_MARKER)
+    assert git(root, "diff", "--cached", "--diff-filter=ACM", "--name-only").stdout == ""
+    staged_before = git(root, "diff", "--cached", "--binary", "--no-renames").stdout
+
+    refused = git(root, "commit", "-m", "remove PLC identity", check=False, env=commit_env())
+
+    assert refused.returncode != 0
+    assert F01A_MOVE_HINT in refused.stdout + refused.stderr
+    assert git(root, "rev-parse", "HEAD").stdout.strip() == head
+    assert git(root, "diff", "--cached", "--binary", "--no-renames").stdout == staged_before
+    assert (root / IFC).read_bytes() == document_before
+    assert not (root / F01A_MARKER).exists()
+
+    (root / F01A_MARKER).write_bytes(marker_before)
+    git(root, "add", "--", F01A_MARKER)
+    if wrong_type:
+        document = root / IFC
+        document.write_text(document.read_text(encoding="utf-8", errors="replace").replace("| `i_bStart` | INT |", "| `i_bStart` | BOOL |"), encoding="utf-8", errors="replace", newline="\n")
+        git(root, "add", "--", IFC)
+    (root / "repair-note.md").write_text("# F01-a identity retained\n", encoding="utf-8", errors="replace")
+    git(root, "add", "--", "repair-note.md")
+    accepted = git(root, "commit", "-m", "retain PLC identity and consistent documents", check=False, env=commit_env())
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+    assert git(root, "rev-parse", "HEAD").stdout.strip() != head
+    assert (root / F01A_MARKER).read_bytes() == marker_before
+
+
+@pytest.mark.parametrize("move", ["marker_only", "whole_project", "into_archive"])
+def test_f01a_e05_real_precommit_refuses_marker_and_whole_project_moves(tmp_path: Path, move: str) -> None:
+    root = _f01a_cli_scene(tmp_path)
+    head = git(root, "rev-parse", "HEAD").stdout.strip()
+    if move == "marker_only":
+        git(root, "mv", "--", F01A_MARKER, f"{F01A_PROJECT}/retired-marker.json")
+    elif move == "whole_project":
+        git(root, "mv", "--", F01A_PROJECT, "0100_PLC自动化/DJ-MOVED-001")
+    else:
+        (root / "0100_PLC自动化" / "_archive").mkdir()
+        git(root, "mv", "--", F01A_PROJECT, "0100_PLC自动化/_archive/DJ-TEST-001")
+    staged_before = git(root, "diff", "--cached", "--binary", "--no-renames").stdout
+
+    refused = git(root, "commit", "-m", "move PLC identity", check=False, env=commit_env())
+
+    assert refused.returncode != 0
+    assert F01A_MOVE_HINT in refused.stdout + refused.stderr
+    assert git(root, "rev-parse", "HEAD").stdout.strip() == head
+    assert git(root, "diff", "--cached", "--binary", "--no-renames").stdout == staged_before
+
+
+@pytest.mark.parametrize("corruption", ["malformed_head", "missing_commit_object"])
+def test_f01a_e06_real_precommit_cli_fails_closed_when_git_head_is_corrupt(tmp_path: Path, corruption: str) -> None:
+    root = _f01a_cli_scene(tmp_path)
+    head_path = root / ".git" / "HEAD"
+    if corruption == "malformed_head":
+        corrupt_path = head_path
+        corrupt_text = "not-a-valid-git-head\n"
+    else:
+        reference = git(root, "symbolic-ref", "HEAD").stdout.strip()
+        corrupt_path = root / ".git" / reference
+        corrupt_text = "0" * len(git(root, "rev-parse", "HEAD").stdout.strip()) + "\n"
+    corrupt_path.write_text(corrupt_text, encoding="utf-8", errors="replace")
+    head_before = head_path.read_bytes()
+    corrupt_before = corrupt_path.read_bytes()
+    index_before = (root / ".git" / "index").read_bytes()
+
+    refused = subprocess.run(
+        [sys.executable, str(root / "main.py"), "-w", str(root), "git-hook", "pre-commit"],
+        cwd=root, env=commit_env(), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=60, check=False,
+    )
+
+    assert refused.returncode != 0
+    assert "Git" in refused.stdout + refused.stderr
+    assert head_path.read_bytes() == head_before
+    assert corrupt_path.read_bytes() == corrupt_before
+    assert (root / ".git" / "index").read_bytes() == index_before
+    assert (root / F01A_MARKER).is_file()

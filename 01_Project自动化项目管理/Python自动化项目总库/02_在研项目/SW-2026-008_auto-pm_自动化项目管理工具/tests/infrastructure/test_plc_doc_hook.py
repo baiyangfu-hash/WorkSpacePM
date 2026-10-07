@@ -228,3 +228,184 @@ def test_h15_a_project_inside_an_archive_folder_is_not_checked(repo: Path, capsy
     git(repo, "add", "-A")
     code, output = run_hook(repo, capsys)
     assert code == 0 and output == ""
+
+
+F01A_MARKER = f"{PLC_ROOT}/.plc.json"
+F01A_MOVE_HINT = "移动或退役请走 F01-b 的授权"
+
+
+def test_f01a_h16_marker_deletion_blocks_even_when_the_acm_snapshot_is_empty(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    head = git(repo, "rev-parse", "HEAD")
+    source_before = (repo / SCL).read_bytes()
+    document_before = (repo / IFC).read_bytes()
+    git(repo, "rm", "--", F01A_MARKER)
+    assert not git_hook_enforcer.get_staged_snapshot(repo).paths
+    staged_before = git(repo, "diff", "--cached", "--binary", "--no-renames")
+
+    code, output = run_hook(repo, capsys)
+
+    assert code == 1 and F01A_MOVE_HINT in output and F01A_MARKER in output
+    assert git(repo, "rev-parse", "HEAD") == head
+    assert git(repo, "diff", "--cached", "--binary", "--no-renames") == staged_before
+    assert (repo / SCL).read_bytes() == source_before
+    assert (repo / IFC).read_bytes() == document_before
+    assert not (repo / F01A_MARKER).exists()
+
+
+def test_f01a_h17_deleting_the_marker_does_not_hide_a_wrong_ifc_type(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(repo, IFC, read(repo, IFC).replace("| `i_bStart` | BOOL |", "| `i_bStart` | INT |"))
+    git(repo, "add", IFC)
+    git(repo, "rm", "--", F01A_MARKER)
+    document_before = (repo / IFC).read_bytes()
+    staged_before = git(repo, "diff", "--cached", "--binary")
+
+    code, output = run_hook(repo, capsys)
+
+    assert code == 1 and F01A_MOVE_HINT in output
+    assert "| `i_bStart` | INT |" in read(repo, IFC)
+    assert (repo / IFC).read_bytes() == document_before
+    assert git(repo, "diff", "--cached", "--binary") == staged_before
+    assert not (repo / F01A_MARKER).exists()
+
+
+def test_f01a_h18_an_unstaged_marker_restore_does_not_override_the_index_deletion(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker_bytes = (repo / F01A_MARKER).read_bytes()
+    git(repo, "rm", "--", F01A_MARKER)
+    (repo / F01A_MARKER).write_bytes(marker_bytes)
+    assert not git_hook_enforcer.get_staged_snapshot(repo).paths
+
+    code, output = run_hook(repo, capsys)
+
+    assert code == 1 and F01A_MOVE_HINT in output
+    assert (repo / F01A_MARKER).read_bytes() == marker_bytes
+    assert git(repo, "ls-files", "--", F01A_MARKER) == ""
+    git(repo, "add", "--", F01A_MARKER)
+    assert run_hook(repo, capsys) == (0, "")
+
+
+@pytest.mark.parametrize("move", ["marker_only", "whole_project", "into_archive"])
+def test_f01a_h19_marker_and_project_moves_require_f01b_authorization(
+    repo: Path, capsys: pytest.CaptureFixture[str], move: str
+) -> None:
+    head = git(repo, "rev-parse", "HEAD")
+    if move == "marker_only":
+        git(repo, "mv", "--", F01A_MARKER, f"{PLC_ROOT}/retired-marker.json")
+    elif move == "whole_project":
+        git(repo, "mv", "--", PLC_ROOT, "0100_PLC自动化/DJ-MOVED-001")
+    else:
+        (repo / "0100_PLC自动化" / "_archive").mkdir()
+        git(repo, "mv", "--", PLC_ROOT, "0100_PLC自动化/_archive/DJ-TEST-001")
+    staged_before = git(repo, "diff", "--cached", "--binary", "--no-renames")
+
+    code, output = run_hook(repo, capsys)
+
+    assert code == 1 and F01A_MOVE_HINT in output and F01A_MARKER in output
+    assert git(repo, "rev-parse", "HEAD") == head
+    assert git(repo, "diff", "--cached", "--binary", "--no-renames") == staged_before
+
+
+def test_f01a_h20_an_archive_marker_already_in_head_cannot_be_deleted(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    old = build(repo / "0100_PLC自动化" / "_archive", ifc=IFC_DOC, var=VAR_DOC)
+    (old / ".plc.json").write_text('{"name": "DJ-OLD", "version": "V1.0.0", "description": "t"}', encoding="utf-8", errors="replace")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "existing archived project")
+    marker = (old / ".plc.json").relative_to(repo).as_posix()
+    git(repo, "rm", "--", marker)
+    assert not git_hook_enforcer.get_staged_snapshot(repo).paths
+
+    code, output = run_hook(repo, capsys)
+
+    assert code == 1 and F01A_MOVE_HINT in output and marker in output
+
+
+@pytest.mark.parametrize("wrong_type", [False, True])
+def test_f01a_h21_an_unborn_repository_checks_its_new_plc_project(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], wrong_type: bool
+) -> None:
+    from auto_pm.infrastructure.plc_git_marker_guard import removed_index_markers
+
+    root = tmp_path / "unborn"
+    root.mkdir()
+    git(root, "init", "-q")
+    ifc = IFC_DOC.replace("| `i_bStart` | BOOL |", "| `i_bStart` | INT |") if wrong_type else IFC_DOC
+    project = build(root / "0100_PLC自动化", ifc=ifc, var=VAR_DOC)
+    (project / ".plc.json").write_text('{"name": "DJ-TEST-001", "version": "V1.0.0", "description": "t"}', encoding="utf-8", errors="replace")
+    git(root, "add", "-A")
+    assert removed_index_markers(root) == ()
+
+    code, output = run_hook(root, capsys)
+
+    assert code == (1 if wrong_type else 0), output
+    expected_message = "FB_Pump.i_bStart" if wrong_type else "校验通过"
+    assert expected_message in output
+
+
+@pytest.mark.parametrize("corruption", ["malformed_head", "missing_commit_object"])
+def test_f01a_h22_a_corrupt_head_is_a_read_failure_not_an_unborn_repository(
+    repo: Path, capsys: pytest.CaptureFixture[str], corruption: str
+) -> None:
+    from auto_pm.infrastructure.plc_git_marker_guard import (
+        GitMarkerGuardError,
+        removed_index_markers,
+    )
+
+    head_path = repo / ".git" / "HEAD"
+    if corruption == "malformed_head":
+        corrupt_path = head_path
+        corrupt_text = "not-a-valid-git-head\n"
+    else:
+        reference = git(repo, "symbolic-ref", "HEAD").strip()
+        corrupt_path = repo / ".git" / reference
+        corrupt_text = "0" * len(git(repo, "rev-parse", "HEAD").strip()) + "\n"
+    corrupt_path.write_text(corrupt_text, encoding="utf-8", errors="replace")
+    head_before = head_path.read_bytes()
+    corrupt_before = corrupt_path.read_bytes()
+    index_before = (repo / ".git" / "index").read_bytes()
+    with pytest.raises(GitMarkerGuardError):
+        removed_index_markers(repo)
+    capsys.readouterr()
+
+    code = plc_doc_hook.enforce_plc_docs(repo, ())
+
+    assert code == 1
+    assert head_path.read_bytes() == head_before
+    assert corrupt_path.read_bytes() == corrupt_before
+    assert (repo / ".git" / "index").read_bytes() == index_before
+    assert (repo / F01A_MARKER).is_file()
+
+
+def test_f01a_h23_a_git_permission_failure_is_not_an_empty_marker_set(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.infrastructure.plc_git_marker_guard import (
+        GitMarkerGuardError,
+        removed_index_markers,
+    )
+
+    def denied(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise PermissionError("F01-a test Git read denied")
+
+    index_before = (repo / ".git" / "index").read_bytes()
+    marker_before = (repo / F01A_MARKER).read_bytes()
+    monkeypatch.setattr("auto_pm.infrastructure.plc_git_marker_guard.subprocess.run", denied)
+
+    with pytest.raises(GitMarkerGuardError):
+        removed_index_markers(repo)
+    assert plc_doc_hook.enforce_plc_docs(repo, ()) == 1
+    assert (repo / ".git" / "index").read_bytes() == index_before
+    assert (repo / F01A_MARKER).read_bytes() == marker_before
+
+
+def test_f01a_h24_a_verified_non_git_workspace_keeps_the_old_contract(tmp_path: Path) -> None:
+    from auto_pm.infrastructure.plc_git_marker_guard import removed_index_markers
+
+    assert plc_doc_hook.enforce_plc_docs(tmp_path, ()) == 0
+    assert removed_index_markers(tmp_path) == ()
