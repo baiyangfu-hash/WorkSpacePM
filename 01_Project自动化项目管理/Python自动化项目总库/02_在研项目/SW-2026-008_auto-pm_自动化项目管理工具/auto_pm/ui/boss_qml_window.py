@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QCoreApplication, QEvent, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -34,6 +34,21 @@ def build_cockpit_bridge(
     )
 
 
+def shutdown_cockpit(engine: QQmlApplicationEngine, bridge: PmCockpitBridge, timeout_ms: int = 60_000) -> bool:
+    """Close in order: refuse new work and wait for the running workers, delete the QML engine (its views still see the bridge), then the bridge.
+
+    Returns False, deleting nothing, when a worker is still running after ``timeout_ms``: it is neither cancelled nor killed (that needs V04-R1).
+    """
+
+    if not bridge.shutdown(timeout_ms):
+        return False
+    engine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    bridge.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return True
+
+
 def run_boss_cockpit(workspace_root: str, debug: bool = False, *, control_root: str | None = None) -> int:
     """Run the user-friendly default screen without constructing legacy services."""
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
@@ -53,4 +68,8 @@ def run_boss_cockpit(workspace_root: str, debug: bool = False, *, control_root: 
         if debug:
             sys.stderr.write("[ERROR] 老板驾驶舱 QML 加载失败\n")
         return 1
-    return app.exec()
+    exit_code = app.exec()
+    if not shutdown_cockpit(engine, bridge):
+        sys.stderr.write("[WARN] 仍有后台任务未完成，已保留现场、没有强行结束（真正的取消要等运行回收能力 V04-R1）。\n")
+        return exit_code or 3
+    return exit_code

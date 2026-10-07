@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from auto_pm.core.continuity_query_service import ContinuityQueryService
 from auto_pm.core.pm_closure_service import (
     ClosureCompletionState,
     PmClosureError,
@@ -93,6 +94,11 @@ class _ProjectFacts:
     started_run_ids: frozenset[str]
 
 
+_PARKING_ACTIONS = ("PARK", "RESUME_PARKED", "PREEMPT")
+_CAPABILITY_UNSUPPORTED = "挂起、恢复挂起与插队：当前版本不支持（能力查询 runtime-capabilities.v1）；驾驶舱不提供这些操作，也不会假装挂起。"
+_CAPABILITY_UNVERIFIED = "挂起与插队的能力查询未能确认；为安全起见这些操作保持停用，驾驶舱不会假装挂起。"
+
+
 class PmCockpitService:
     """Project the registered workspace without creating indexes, caches, or databases."""
 
@@ -155,12 +161,29 @@ class PmCockpitService:
                 note = "连续性记录无法安全读取；驾驶舱没有尝试修复或重建它。"
                 notices.append(f"{mapping.project_id}: {note}")
                 cards.append(self._unavailable_card(mapping, note, error))
+        notices.append(self._capability_notice())
         return PmCockpitSnapshot(
             projects=tuple(cards),
             activities=tuple(activities),
             pending_cards=tuple(pending),
             notices=tuple(dict.fromkeys(notices)),
         )
+
+    @staticmethod
+    def _capability_notice() -> str:
+        """Say what the shared query declares about parking and pre-emption; anything unexpected keeps them off."""
+        try:
+            capabilities = ContinuityQueryService.capabilities()
+        except (TypeError, ValueError):
+            return _CAPABILITY_UNVERIFIED
+        declared = {item.action.value: item.status for item in capabilities.actions}
+        if (
+            capabilities.parking_supported
+            or capabilities.preemption_supported
+            or declared != dict.fromkeys(_PARKING_ACTIONS, "UNSUPPORTED")
+        ):
+            return _CAPABILITY_UNVERIFIED
+        return _CAPABILITY_UNSUPPORTED
 
     def evidence(self, project_id: str) -> PmCockpitEvidence:
         """Return bounded provenance for the evidence drawer, never execution credentials."""

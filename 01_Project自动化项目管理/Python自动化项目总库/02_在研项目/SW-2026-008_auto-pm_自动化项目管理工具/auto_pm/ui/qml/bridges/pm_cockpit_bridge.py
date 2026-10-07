@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, cast
 from uuid import uuid4
 
@@ -210,6 +211,7 @@ class PmCockpitBridge(QObject):
         self._start_poll_timer.timeout.connect(self._poll_start_workers)
         self._snapshot_worker: _SnapshotWorker | None = None
         self._snapshot_delivery_enabled = True
+        self._closing = False
         self._close_workers: dict[str, _CloseWorker] = {}
         self._close_poll_timer = QTimer(self)
         self._close_poll_timer.setInterval(50)
@@ -261,6 +263,8 @@ class PmCockpitBridge(QObject):
     @Slot(result="QVariant")
     def startSnapshotRefresh(self) -> dict[str, Any]:
         """Start bounded periodic refresh and queue the first snapshot."""
+        if self._closing:
+            return {"accepted": False, "busy": False, "message": "驾驶舱正在关闭。"}
         self._snapshot_delivery_enabled = True
         if not self._snapshot_refresh_timer.isActive():
             self._snapshot_refresh_timer.start()
@@ -312,6 +316,8 @@ class PmCockpitBridge(QObject):
         self, project_id: str, objective: str, acceptance_text: str
     ) -> dict[str, Any]:
         """Persist only a validated PRE_AUTH draft; keep its request key internal."""
+        if self._closing:
+            return {"success": False, "message": "驾驶舱正在关闭。"}
         project_id = project_id.strip()
         objective = objective.strip()
         criteria = tuple(line.strip() for line in acceptance_text.splitlines() if line.strip())
@@ -363,6 +369,8 @@ class PmCockpitBridge(QObject):
                 "busy": False,
                 "message": "未找到可启动的需求。",
             }
+        if self._closing:
+            return {"accepted": False, "busy": False, "message": "驾驶舱正在关闭。"}
         if mission_id in self._start_workers:
             return {
                 "accepted": False,
@@ -545,6 +553,29 @@ class PmCockpitBridge(QObject):
             "evidence": worker.result.model_dump(mode="json"),
             "message": "",
         })
+
+    def pending_tasks(self) -> tuple[str, ...]:
+        """Names of the background tasks that have been started and have not finished."""
+        workers: list[_StartWorker | _CloseWorker | _ApproveStartWorker | _SnapshotWorker | _EvidenceWorker | None] = [
+            *self._start_workers.values(),
+            *self._close_workers.values(),
+            *self._approve_workers.values(),
+            self._snapshot_worker,
+            self._evidence_worker,
+        ]
+        return tuple(type(worker).__name__ for worker in workers if worker is not None and not worker.done)
+
+    def shutdown(self, timeout_ms: int = 60_000) -> bool:
+        """Refuse new work, then wait (bounded) for the tasks already running; never touches the shared pool."""
+        self._closing = True
+        self.stopSnapshotRefresh()
+        deadline = time.monotonic() + timeout_ms / 1000
+        while self.pending_tasks():
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.02)
+        self._disable_snapshot_delivery()
+        return True
 
     def _disable_snapshot_delivery(self, *_args: object) -> None:
         self._evidence_poll_timer.stop()

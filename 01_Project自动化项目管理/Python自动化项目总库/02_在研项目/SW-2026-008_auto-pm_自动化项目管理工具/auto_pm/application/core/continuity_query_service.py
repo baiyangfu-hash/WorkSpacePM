@@ -52,6 +52,12 @@ class ContinuityQueryService:
     ) -> None:
         self._resume = ContinuityResumeService(workspace_root, now, execution_root=execution_root)
 
+    @staticmethod
+    def capabilities() -> RuntimeCapabilities:
+        """Declare what this runtime offers; the one place the flags are produced, for the query and the cockpit alike."""
+
+        return RuntimeCapabilities(actions=tuple(ActionCapability(action=action) for action in QueriedAction))
+
     def query(
         self,
         *,
@@ -79,9 +85,7 @@ class ContinuityQueryService:
             )
         except ContinuityResumeError as error:
             raise ContinuityQueryError(str(error)) from error
-        capabilities = RuntimeCapabilities(
-            actions=tuple(ActionCapability(action=action) for action in QueriedAction)
-        )
+        capabilities = self.capabilities()
         context = resume.context
         producer_path = str(Path(__file__).resolve())
         producer_sha = _producer_sha256()
