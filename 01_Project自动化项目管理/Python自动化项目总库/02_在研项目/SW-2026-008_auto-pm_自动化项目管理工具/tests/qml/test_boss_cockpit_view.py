@@ -221,7 +221,9 @@ def test_snapshot_refresh_is_async_bounded_and_preserves_last_success() -> None:
     assert "pmCockpitBridge.requestSnapshot()" in main_source
     assert "pmCockpitBridge.loadSnapshot()" not in main_source
     assert "pmCockpitBridge.startSnapshotRefresh()" in main_source
-    assert "Component.onDestruction: pmCockpitBridge.stopSnapshotRefresh()" in main_source
+    assert "property bool closesBridgeOnDestruction: true" in main_source
+    assert "onClosing: function(close) {" in main_source
+    assert main_source.count("pmCockpitBridge.beginShutdown()") == 2 and "pmCockpitBridge.stopSnapshotRefresh()" in main_source
     assert "function onSnapshotFinished(response)" in main_source
     assert "root.snapshot = response.snapshot" in main_source
     assert "activities: root.snapshot.activities || []" in main_source
@@ -1224,3 +1226,62 @@ def test_view_renders_every_completion_state_without_qml_warnings(
             qapp.processEvents()
 
     assert not [m for m in messages if "Error" in m or "Unable" in m or "undefined" in m]
+
+
+def _empty_workspace(root: Path) -> None:
+    registry = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps({"schema_version": "workspace-registry.v1", "projects": [{"project_id": "SW-2026-008", "project_root": "projects/SW-2026-008", "development_root": "projects/SW-2026-008"}]}),
+        encoding="utf-8",
+    )
+
+
+def _flag(bridge: PmCockpitBridge, name: str) -> bool:
+    """Read a bridge flag through a call so a static checker does not narrow it from an earlier assertion."""
+    return bool(getattr(bridge, name))
+
+
+def _is_sealed(bridge: PmCockpitBridge) -> bool:
+    return _flag(bridge, "_closing")
+
+
+_SEALED = {"success": False, "message": "驾驶舱正在关闭。"}
+
+
+def test_closing_the_real_window_seals_the_bridge_before_the_window_is_destroyed(qapp: QApplication, qml_engine: QQmlEngine, tmp_path: Path) -> None:
+    _empty_workspace(tmp_path)
+    bridge = PmCockpitBridge(str(tmp_path))
+    with _managed_boss_window(qml_engine, bridge) as window:
+        qapp.processEvents()
+        assert _is_sealed(bridge) is False and bridge.createPlanningDraft("", "", "") != _SEALED  # open: this attempt fails on its input, not on a seal
+        QMetaObject.invokeMethod(window, "close")  # a real close request on the real window
+        qapp.processEvents()
+        assert isValid(window), "the window object still exists: only its close event has run so far"
+        assert _is_sealed(bridge) is True
+        assert bridge.createPlanningDraft("SW-2026-008", "an objective", "a criterion") == _SEALED
+        assert bridge.confirmStart("MISSION-X") == _SEALED
+        assert bridge.startSnapshotRefresh()["accepted"] is False
+
+
+@pytest.mark.parametrize("owning", [True, False], ids=["standalone-window", "embedded-view"])
+def test_destroying_the_real_window_seals_an_owning_bridge_and_only_pauses_an_embedded_one(
+    qapp: QApplication, qml_engine: QQmlEngine, tmp_path: Path, owning: bool
+) -> None:
+    _empty_workspace(tmp_path)
+    bridge = PmCockpitBridge(str(tmp_path))
+    with _managed_boss_window(qml_engine, bridge) as window:
+        qapp.processEvents()
+        window.setProperty("closesBridgeOnDestruction", owning)
+        _delete_qobject(window)  # the real window is destroyed while its bridge lives on, as when a host keeps a reference
+        assert not isValid(window)
+        assert _flag(bridge, "_snapshot_delivery_enabled") is False
+        if owning:
+            assert _is_sealed(bridge) is True
+            assert bridge.confirmStart("MISSION-X") == _SEALED
+            assert bridge.startSnapshotRefresh()["accepted"] is False
+        else:
+            assert _is_sealed(bridge) is False, "an embedded view that unloads only pauses the bridge"
+            assert bridge.confirmStart("MISSION-X")["message"] != _SEALED["message"]
+            assert bridge.startSnapshotRefresh()["message"] != _SEALED["message"]  # not sealed: the refresh may start again (it can be busy with the first refresh)
+            assert _flag(bridge, "_snapshot_delivery_enabled") is True

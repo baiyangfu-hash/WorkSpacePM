@@ -20,6 +20,9 @@ ApplicationWindow {
     property var snapshot: ({ projects: [], activities: [], notices: [] })
     property var planningDraft: null
     property string statusMessage: ""
+    // The standalone window owns its bridge: closing or destroying it seals the bridge for good. An embedding host sets this to false so that
+    // unloading the view only pauses the refresh; the host then seals the bridge itself when it really closes.
+    property bool closesBridgeOnDestruction: true
 
     function refreshSnapshot() {
         if (typeof pmCockpitBridge === "undefined") {
@@ -139,5 +142,14 @@ ApplicationWindow {
     }
 
     Component.onCompleted: pmCockpitBridge.startSnapshotRefresh()
-    Component.onDestruction: pmCockpitBridge.stopSnapshotRefresh()
+    onClosing: function(close) {
+        if (root.closesBridgeOnDestruction)
+            pmCockpitBridge.beginShutdown()
+    }
+    Component.onDestruction: {
+        if (root.closesBridgeOnDestruction)
+            pmCockpitBridge.beginShutdown()
+        else
+            pmCockpitBridge.stopSnapshotRefresh()
+    }
 }

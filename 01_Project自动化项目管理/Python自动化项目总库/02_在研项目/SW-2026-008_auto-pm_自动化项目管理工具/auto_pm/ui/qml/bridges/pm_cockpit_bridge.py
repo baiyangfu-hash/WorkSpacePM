@@ -272,10 +272,16 @@ class PmCockpitBridge(QObject):
 
     @Slot()
     def stopSnapshotRefresh(self) -> None:
-        """Stop future refreshes and suppress any late worker result."""
+        """Pause: stop future refreshes and suppress any late worker result (a paused view may start again)."""
         self._snapshot_delivery_enabled = False
         self._snapshot_refresh_timer.stop()
         self._snapshot_poll_timer.stop()
+
+    @Slot()
+    def beginShutdown(self) -> None:
+        """Seal the cockpit for good: no new work from any entry and no start again; never waits, never deletes anything, safe to repeat."""
+        self._closing = True
+        self.stopSnapshotRefresh()
 
     @Slot(str, result="QVariant")
     def requestEvidence(self, project_id: str) -> dict[str, Any]:
@@ -357,6 +363,8 @@ class PmCockpitBridge(QObject):
     @Slot(str, result="QVariant")
     def confirmStart(self, mission_id: str) -> dict[str, Any]:
         """Retain the legacy synchronous confirmation API for non-QML callers."""
+        if self._closing:
+            return {"success": False, "message": "驾驶舱正在关闭。"}
         return self._confirmation_result("start", mission_id)
 
     @Slot(str, result="QVariant")
@@ -571,8 +579,7 @@ class PmCockpitBridge(QObject):
 
     def shutdown(self, timeout_ms: int = 60_000) -> bool:
         """Refuse new work, then wait (bounded) for the tasks already running; never touches the shared pool."""
-        self._closing = True
-        self.stopSnapshotRefresh()
+        self.beginShutdown()
         deadline = time.monotonic() + timeout_ms / 1000
         while self.pending_tasks():
             if time.monotonic() >= deadline:
