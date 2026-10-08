@@ -423,6 +423,8 @@ class PmCockpitBridge(QObject):
     @Slot(str, result="QVariant")
     def confirmAcceptance(self, mission_id: str) -> dict[str, Any]:
         """Apply one explicit final acceptance, then close it out in the background."""
+        if self._closing or not self._snapshot_delivery_enabled:
+            return {"success": False, "message": "驾驶舱正在关闭。", "closing": False}
         result = self._confirmation_result("acceptance", mission_id)
         queued = result["success"] and bool(self._queue_closure(mission_id.strip())["accepted"])
         return {**result, "closing": queued}
@@ -479,6 +481,8 @@ class PmCockpitBridge(QObject):
         )
         for mission_id in completed:
             worker = self._start_workers.pop(mission_id)
+            if not self._snapshot_delivery_enabled:
+                continue
             success, message = worker.result or (False, "任务启动结果不可用。")
             self.startFinished.emit(mission_id, success, message)
         if not self._start_workers:
@@ -578,6 +582,7 @@ class PmCockpitBridge(QObject):
         return True
 
     def _disable_snapshot_delivery(self, *_args: object) -> None:
+        self._start_poll_timer.stop()
         self._evidence_poll_timer.stop()
         self._close_poll_timer.stop()
         self._approve_poll_timer.stop()
