@@ -46,8 +46,18 @@ class Case:
         path.write_text(json.dumps(self.verdict), encoding="utf-8")
         return path
 
+    def check_file(self, path: Path, gates: list[str] | None = None) -> list[str]:
+        try:
+            return verdict_check.check(str(path), str(self.root), LABEL, BASE, RUN, GATES if gates is None else gates)
+        except Exception as error:  # a crash is not a refusal: it must show up as a failed assertion
+            raise AssertionError(f"the judge crashed instead of refusing: {error!r}") from error
+
     def check(self, label: str = LABEL, base: str = BASE, run: str = RUN, gates: list[str] | None = None) -> list[str]:
-        return verdict_check.check(str(self.write()), str(self.root), label, base, run, GATES if gates is None else gates)
+        path = self.write()
+        try:
+            return verdict_check.check(str(path), str(self.root), label, base, run, GATES if gates is None else gates)
+        except Exception as error:  # a crash is not a refusal: it must show up as a failed assertion
+            raise AssertionError(f"the judge crashed instead of refusing: {error!r}") from error
 
     def command(self, *tail: str) -> subprocess.CompletedProcess[str]:
         argv = [sys.executable, "-B", verdict_check.__file__, str(self.write()), str(self.root), LABEL, BASE, RUN, *tail]
@@ -151,3 +161,118 @@ def test_j16_the_command_line_exits_zero_for_good_evidence_and_one_with_reasons_
     assert bad.returncode == 1 and "VERDICT REFUSED" in bad.stdout and "bound report hash differs" in bad.stdout, bad.stdout + bad.stderr
     usage = subprocess.run([sys.executable, "-B", verdict_check.__file__, "only", "three", "args"], capture_output=True, text=True, timeout=120, check=False)
     assert usage.returncode == 2 and "usage" in usage.stdout
+
+
+EXCEPTION = "PASS_WITH_BASELINE_EXCEPTION"
+
+
+def _entry(**fields: Any) -> dict[str, Any]:
+    return {"id": "E-1", "source_reproduced": True, "source_evidence": "reports/G2.txt", **fields}
+
+
+def test_j17_a_baseline_exception_gate_without_an_exception_entry_is_refused(case: Case) -> None:
+    case.verdict["gates"]["G2"]["verdict"] = EXCEPTION
+    _only(case.check(), "no exception entry names it")
+
+
+def test_j18_an_exception_entry_for_a_gate_that_is_not_an_exception_gate_is_refused(case: Case) -> None:
+    case.verdict["gates"]["G2"]["verdict"] = EXCEPTION
+    case.verdict["exceptions"] = [_entry(gate="G2"), _entry(gate="G99")]
+    _only(case.check(), "not a baseline-exception gate")
+    case.verdict["exceptions"] = [_entry(gate="G2"), _entry(gate="G3")]  # G3 is an ordinary PASS gate
+    _only(case.check(), "not a baseline-exception gate")
+
+
+def test_j19_an_exception_entry_whose_evidence_file_does_not_exist_is_refused(case: Case) -> None:
+    case.verdict["gates"]["G2"]["verdict"] = EXCEPTION
+    case.verdict["exceptions"] = [_entry(gate="G2", source_evidence="reports/never_written.txt")]
+    _only(case.check(), "exception evidence file does not exist")
+
+
+def test_j20_an_exception_entry_whose_evidence_is_not_bound_in_reports_is_refused(case: Case) -> None:
+    case.verdict["gates"]["G2"]["verdict"] = EXCEPTION
+    (case.root / "reports" / "reproduction.txt").write_text("the baseline failure, reproduced", encoding="utf-8")  # exists on disk, but nobody fingerprinted it
+    case.verdict["exceptions"] = [_entry(gate="G2", source_evidence="reports/reproduction.txt")]
+    _only(case.check(), "exception evidence is not bound in reports")
+    case.verdict["reports"]["reports/reproduction.txt"] = _sha(b"the baseline failure, reproduced")
+    assert case.check() == []
+
+
+def test_j21_the_old_exception_format_without_a_gate_key_still_judges_as_before(case: Case) -> None:
+    case.verdict["gates"]["G2"]["verdict"] = EXCEPTION
+    old = {"id": "E-G1-1", "description": "3 baseline failures", "source_reproduced": True, "source_evidence": "reports/G2.txt (same command, earlier commit)"}
+    case.verdict["exceptions"] = [old]
+    assert case.check() == []  # an old entry cannot be attributed to a gate: it covers the exception gates as a group
+    case.verdict["exceptions"] = [{**old, "source_evidence": ["reports/G2.txt", "reports/G3.txt"]}]
+    assert case.check() == []
+    case.verdict["exceptions"] = [{**old, "source_evidence": "reports/never_written.txt"}]
+    _only(case.check(), "exception evidence file does not exist")
+    case.verdict["gates"]["G2"]["verdict"] = "PASS"  # an old entry in a verdict that has no exception gate belongs to nothing
+    case.verdict["exceptions"] = [old]
+    _only(case.check(), "belongs to no gate")
+
+
+def test_j22_an_exception_entry_that_names_no_gate_is_refused(case: Case) -> None:
+    case.verdict["gates"]["G2"]["verdict"] = EXCEPTION
+    case.verdict["exceptions"] = [_entry(gate="")]
+    _only(case.check(), "names no gate")
+    case.verdict["exceptions"] = [_entry(gate=None)]
+    _only(case.check(), "names no gate")
+
+
+@pytest.mark.parametrize("shape", ["all-nine-gates", "two-gates"])
+def test_j23_gates_that_share_one_empty_report_are_refused(case: Case, shape: str) -> None:
+    (case.root / "reports" / "shared.txt").write_bytes(b"  \n")
+    case.verdict["reports"]["reports/shared.txt"] = _sha(b"  \n")
+    for gate in GATES if shape == "all-nine-gates" else ["G1", "G2"]:
+        case.verdict["gates"][gate]["report"] = "reports/shared.txt"
+    _only(case.check(), "share one empty report")
+
+
+def test_j24_a_shared_report_with_content_and_an_own_empty_report_are_accepted(case: Case) -> None:
+    (case.root / "reports" / "shared.txt").write_bytes(b"one combined summary of two gates\n")
+    case.verdict["reports"]["reports/shared.txt"] = _sha(b"one combined summary of two gates\n")
+    case.verdict["gates"]["G1"]["report"] = case.verdict["gates"]["G2"]["report"] = "reports/shared.txt"
+    (case.root / "reports" / "G9.txt").write_bytes(b"")  # a successful check that printed nothing, and the only gate that points at this file
+    case.verdict["reports"]["reports/G9.txt"] = _sha(b"")
+    assert case.check() == []
+
+
+@pytest.mark.parametrize(
+    ("shape", "phrase"),
+    [
+        ("gates-null-detail", "gates is not a mapping"),
+        ("gates-list", "gates is not a mapping"),
+        ("reports-list", "reports is not a mapping"),
+        ("reports-non-string-hash", "reports is not a mapping"),
+        ("exceptions-string", "exceptions is not a list"),
+        ("exception-entry-not-an-object", "exceptions is not a list"),
+    ],
+)
+def test_j25_a_malformed_verdict_is_refused_with_a_reason_and_never_crashes(case: Case, shape: str, phrase: str) -> None:
+    if shape == "gates-null-detail":
+        case.verdict["gates"]["G1"] = None
+    elif shape == "gates-list":
+        case.verdict["gates"] = ["G1", "G2"]
+    elif shape == "reports-list":
+        case.verdict["reports"] = ["reports/G1.txt"]
+    elif shape == "reports-non-string-hash":
+        case.verdict["reports"]["reports/G1.txt"] = 7
+    elif shape == "exceptions-string":
+        case.verdict["exceptions"] = "none"
+    else:
+        case.verdict["exceptions"] = ["not an object"]
+    _only(case.check(), phrase)
+
+
+def test_j26_a_verdict_file_that_is_not_an_object_or_not_json_or_missing_is_refused(case: Case) -> None:
+    listed = case.root / "list.json"
+    listed.write_text("[1, 2, 3]", encoding="utf-8")
+    _only(case.check_file(listed), "verdict is not a JSON object")
+    broken = case.root / "broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    _only(case.check_file(broken), "verdict file unreadable")
+    _only(case.check_file(case.root / "no_such_verdict.json"), "verdict file unreadable")
+    argv = [sys.executable, "-B", verdict_check.__file__, str(broken), str(case.root), LABEL, BASE, RUN, *GATES]
+    out = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, check=False)
+    assert out.returncode == 1 and "VERDICT REFUSED" in out.stdout and "Traceback" not in out.stderr, out.stdout + out.stderr  # exit 1 with reasons, no traceback
