@@ -22,6 +22,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -80,10 +81,36 @@ receipt = LocalExecutionOrchestrator(root, executor=executor).execute(
 )
 print("RECEIPT=" + receipt.model_dump_json(), flush=True)
 """
-RECONCILER = """import ctypes
-import json
+PROBE = """import ctypes
 import os
 import sys
+
+
+def process_state(pid, api=None):
+    \"\"\"'alive', 'exited' or 'unknown': an API failure is never reported as an exit; the caller decides how to fail closed.\"\"\"
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return "exited"
+        except PermissionError:
+            return "alive"
+        except OSError:
+            return "unknown"
+        return "alive"
+    kernel32 = api if api is not None else ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return "exited" if ctypes.get_last_error() == 87 else "unknown"  # ERROR_INVALID_PARAMETER: no such process
+    try:
+        code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return "unknown"
+        return "alive" if code.value == 259 else "exited"  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+"""
+RECONCILER = """import json
 from datetime import datetime
 from pathlib import Path
 
@@ -91,23 +118,10 @@ from auto_pm.core.continuity_execution_service import ContinuityExecutionService
 from auto_pm.core.execution_supervisor_service import ExecutionSupervisorError, ExecutionSupervisorService
 
 
+""" + PROBE + """
+
 def alive(pid):
-    if sys.platform != "win32":
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            return False
-        return True
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(0x1000, False, pid)
-    if not handle:
-        return False
-    try:
-        code = ctypes.c_ulong()
-        kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-        return code.value == 259
-    finally:
-        kernel32.CloseHandle(handle)
+    return process_state(pid) == "alive"
 
 
 root, operation_id, pid, session, started_at = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4], datetime.fromisoformat(sys.argv[5])
@@ -120,7 +134,7 @@ except ExecutionSupervisorError as error:
     detail = ""
     try:
         _, _, durable = ContinuityExecutionService(root).resolve_started_run(operation_id)
-        detail = f" durable=({durable.process_id}, {durable.session_id}, {durable.started_at.isoformat()}) alive={alive(durable.process_id)}"
+        detail = f" durable=({durable.process_id}, {durable.session_id}, {durable.started_at.isoformat()}) state={process_state(durable.process_id)}"
     except Exception as inner:
         detail = f" resolve_failed={inner}"
     print("REFUSED=" + str(error) + detail, flush=True)
@@ -157,25 +171,21 @@ def _environment(**extra: str) -> dict[str, str]:
     return environment
 
 
-def _alive(pid: int) -> bool:
-    """True while the process exists; never sends a signal (on Windows ``os.kill(pid, 0)`` would terminate it)."""
+_PROBE: dict[str, Any] = {}
+exec(PROBE, _PROBE)  # the very source the reconciler child process runs
+_process_state = _PROBE["process_state"]
 
-    if sys.platform != "win32":
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            return False
-        return True
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-    if not handle:
-        return False
-    try:
-        code = ctypes.c_ulong()
-        kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-        return bool(code.value == 259)  # STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
+
+def _alive(pid: int) -> bool:
+    """True only while the process provably runs; never sends a signal (on Windows ``os.kill(pid, 0)`` would terminate it)."""
+
+    return bool(_process_state(pid) == "alive")
+
+
+def _exited(pid: int) -> bool:
+    """True only when the operating system says the process is gone; an API failure (state unknown) is not an exit."""
+
+    return bool(_process_state(pid) == "exited")
 
 
 def _short_lease_dispatch(root: Path, operation_id: str) -> None:
@@ -286,12 +296,13 @@ class Scene:
         )
 
     def kill(self, pid: int) -> None:
+        assert pid in self.pids, f"refusing to signal process {pid}: the test did not start it"
         if _alive(pid):
             os.kill(pid, signal.SIGTERM)
         deadline = time.monotonic() + 15
-        while _alive(pid) and time.monotonic() < deadline:
+        while not _exited(pid) and time.monotonic() < deadline:
             time.sleep(0.2)
-        assert not _alive(pid), f"process {pid} did not die"
+        assert _exited(pid), f"process {pid} did not exit (state {_process_state(pid)})"
 
     def assert_no_second_start(self, operation_id: str, started: dict[str, Any]) -> None:
         """A restarted controller may fail or answer PENDING, but it never claims a second start or launches a second executor."""
@@ -398,11 +409,15 @@ def test_r03_an_expired_lease_never_turns_into_success(scene: Scene) -> None:
     assert not _events(scene.root, "RUN_TRANSITIONED", controller.run_id)
     resumed = ContinuityResumeService(scene.root).collect(project_id=PROJECT_ID, invocation_path=scene.root)
     assert "LEASE_EXPIRED" in resumed.conflicts and resumed.next_legal_action == ""
+    events_before = _query(scene.root, "SELECT rowid, event_type, aggregate_id FROM events ORDER BY rowid")
     renewal = scene.command(
-        "lease", "renew", "--run-id", controller.run_id, "--owner", "agent-a", "--lease-token-env", "V04_LEASE_TOKEN",
+        "lease", "renew", "--run-id", controller.run_id, "--owner", lease.owner_id, "--lease-token-env", "V04_LEASE_TOKEN",
         "--expected-version", str(lease.version), "--idempotency-key", "late-renew", V04_LEASE_TOKEN=LEASE_TOKEN,
     )
-    assert renewal.returncode != 0 and store.get_lease(controller.run_id) == lease
+    assert renewal.returncode != 0
+    assert "lease 已过期" in renewal.stdout + renewal.stderr, "the expiry defence itself must refuse, not an ownership mismatch"
+    assert store.get_lease(controller.run_id) == lease
+    assert _query(scene.root, "SELECT rowid, event_type, aggregate_id FROM events ORDER BY rowid") == events_before
     scene.assert_no_second_start("OP-V04-R03", started)
     assert store.get_run(controller.run_id).state is RunState.RUNNING
 
@@ -523,3 +538,57 @@ def test_r09_a_reader_never_fails_because_another_process_has_a_transaction_open
     outputs = [child.communicate(timeout=300) for child in children]
     assert [child.returncode for child in children] == [0] * len(jobs), [error for _, error in outputs]
     assert all("STRESS_OK" in output for output, _ in outputs)
+
+
+def test_v04t_the_probe_tells_a_live_process_from_an_exited_one(scene: Scene) -> None:
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True
+    )
+    scene.spawned.append(child)
+    assert _process_state(child.pid) == "alive" and _alive(child.pid) and not _exited(child.pid)
+    child.kill()
+    child.wait(timeout=30)
+    assert _process_state(child.pid) == "exited" and _exited(child.pid) and not _alive(child.pid)
+
+
+def _fake_kernel32(handle: int, exit_call_ok: int, exit_code: int) -> SimpleNamespace:
+    """A kernel32 stand-in whose calls answer as the test dictates, to exercise the probe's failure branches."""
+
+    def open_process(access: int, inherit: bool, pid: int) -> int:
+        return handle
+
+    def get_exit_code(opened: int, code: Any) -> int:
+        code._obj.value = exit_code  # the ctypes.byref argument
+        return exit_call_ok
+
+    def close_handle(opened: int) -> int:
+        return 1
+
+    return SimpleNamespace(OpenProcess=open_process, GetExitCodeProcess=get_exit_code, CloseHandle=close_handle)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the failure branches are the Win32 API ones")
+@pytest.mark.parametrize(
+    ("handle", "last_error", "exit_call_ok", "exit_code", "expected"),
+    [
+        (0, 87, 1, 0, "exited"),  # no such process
+        (0, 5, 1, 0, "unknown"),  # access denied: the process may well be alive
+        (7, 0, 0, 0, "unknown"),  # the exit-code call itself failed: its output is not an exit
+        (7, 0, 1, 0, "exited"),
+        (7, 0, 1, 259, "alive"),
+    ],
+    ids=["no-such-process", "api-failure-on-open", "api-failure-on-exit-code", "real-exit", "still-active"],
+)
+def test_v04t_an_api_failure_is_unknown_and_never_an_exit(handle: int, last_error: int, exit_call_ok: int, exit_code: int, expected: str) -> None:
+    ctypes.set_last_error(last_error)
+    assert _process_state(4242, _fake_kernel32(handle, exit_call_ok, exit_code)) == expected
+
+
+def test_v04t_the_scene_refuses_to_signal_a_process_it_did_not_start(scene: Scene) -> None:
+    try:
+        scene.kill(2_000_000_000)  # not recorded by this test: the guard refuses before any signal is sent
+    except AssertionError as error:
+        message = str(error)
+    else:
+        message = "no refusal"
+    assert "did not start it" in message

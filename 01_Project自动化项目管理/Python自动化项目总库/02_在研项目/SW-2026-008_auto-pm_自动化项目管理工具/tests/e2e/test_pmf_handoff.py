@@ -183,10 +183,12 @@ def test_q04_the_handoff_binds_checkpoint_work_and_baseline_and_the_live_token_e
 def test_q05_replaying_the_same_handoff_changes_nothing(scene: Scene) -> None:
     first = scene.hand_off("CP-A1", OWNER_A, TOKEN_A, OWNER_B, TOKEN_B, key="replay-key")
     events = scene.events()
+    lease_before = scene.service._store.get_lease(RUN_ID)  # the full LeaseItem: owner, token, expiry, version, updated_at
 
     second = scene.hand_off("CP-A1", OWNER_A, TOKEN_A, OWNER_B, TOKEN_B, key="replay-key")
 
-    assert second[0] == first[0] and second[1].owner_id == OWNER_B
+    assert second == first and second[1].owner_id == OWNER_B  # the same handoff and the very same lease, not only the same owner
+    assert scene.service._store.get_lease(RUN_ID) == lease_before
     assert scene.events() == events
 
 
