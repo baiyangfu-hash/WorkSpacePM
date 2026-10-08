@@ -3,8 +3,8 @@
 Nothing is faked: the fixture project is built by the product's own ``change`` and ``ledger`` commands in a temporary repository, the hooks are the ones
 ``git-hook install`` writes, and every attempt is a real ``git commit``. A refusal must leave the scene as it was (no commit, the staged change still
 staged) and must come from the right hook for the right reason; a positive control proves that the same scene commits when the evidence is good, so a
-broken fixture cannot pass as a refusal. The judge-side bad-evidence counter-examples (empty gate set, wrong card, base or run, missing report mapping,
-drifted bytes) need ``verdict_check.py``, which lives outside Git today; they are not covered here.
+broken fixture cannot pass as a refusal. The staged state is compared in full (mode, blob id, stage and path of every index entry), not only by file name, and
+a sensitivity test proves the comparison sees a changed blob and a changed mode. The judge-side bad-evidence counter-examples live in ``test_pmf_gate_judge.py``.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from click.testing import CliRunner
 import auto_pm
 
 PID = "SW-2026-901"
+OTHER_PID = "SW-2026-902"
 LAUNCHER = """from auto_pm.cli.__main__ import cli
 
 if __name__ == "__main__":
@@ -66,7 +67,8 @@ class Scene:
         return self.git("rev-parse", "HEAD")
 
     def staged(self) -> str:
-        return self.git("diff", "--cached", "--name-only")
+        """The whole staged state: mode, blob id, stage number and path of every index entry, so a changed blob or mode shows up, not only a changed name."""
+        return self.git("ls-files", "--stage", "-z")
 
     @property
     def project(self) -> Path:
@@ -109,6 +111,45 @@ def _build(tmp_path: Path, final_state: str = "implementing") -> Scene:
     (scene.project / "src" / "service.py").write_text("VALUE = 2\n", encoding="utf-8")
     scene.git("add", "-A")
     return Scene(repo, chg)
+
+
+def _build_two(tmp_path: Path) -> tuple[Scene, str]:
+    """Two registered projects in one repository. The returned scene stages a production change of project 901 together with the governance files of both projects;
+    the second value is a change request that exists only in project 902 (its second one), a valid and approved change request that belongs to the wrong project."""
+
+    repo = tmp_path / "gate-repo"
+    for pid, folder in ((PID, f"{PID}_fixture"), (OTHER_PID, f"{OTHER_PID}_other")):
+        (repo / folder / "src").mkdir(parents=True)
+        (repo / folder / ".copier-answers.yml").write_text(f"project_id: {pid}\nproject_name: gate fixture {pid}\nstack: python\n", encoding="utf-8")
+        (repo / folder / "src" / "service.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / "main.py").write_text(LAUNCHER, encoding="utf-8")
+    (repo / ".gitignore").write_text("main.py\n.auto-pm/\n", encoding="utf-8")
+    scene = Scene(repo, "")
+    scene.git("init")
+    scene.git("config", "user.email", "gate@example.invalid")
+    scene.git("config", "user.name", "gate fixture")
+    scene.git("add", "-A")
+    scene.git("commit", "-m", "baseline")
+    created_ids = []
+    for pid in (PID, OTHER_PID, OTHER_PID):
+        created = scene.product(
+            "change", "create", "--pid", pid, "--domain", "SCPT", "--nature", "OPT", "--scope", "MODULE", "--applicant", "fubai",
+            "--background", "gate fixture", "--necessity", "gate fixture", "--references", "none", "--urgency", "normal",
+        )
+        match = re.search(r"CHG-SCPT-\d{4}-\d+", created.stdout)
+        assert created.returncode == 0 and match, created.stdout + created.stderr
+        for target in _TRANSITIONS:
+            moved = scene.product("change", "transition", match.group(0), "--pid", pid, "--to", target, "--approver", "fubai", "--comment", "gate fixture")
+            assert moved.returncode == 0, moved.stdout + moved.stderr
+        created_ids.append(match.group(0))
+        reconciled = scene.product("ledger", "reconcile", pid)
+        assert reconciled.returncode == 0 and "台账缺失: 0 条, 台账多余(孤儿): 0 条, 状态不一致: 0 条" in reconciled.stdout, reconciled.stdout
+    installed = CliRunner().invoke(cli, ["-w", str(repo), "git-hook", "install"])
+    assert installed.exit_code == 0, installed.output
+    assert not list((repo / f"{PID}_fixture").rglob(f"{created_ids[2]}.md")), "the foreign change request must not exist in project 901"
+    (repo / f"{PID}_fixture" / "src" / "service.py").write_text("VALUE = 2\n", encoding="utf-8")
+    scene.git("add", "-A")
+    return Scene(repo, created_ids[0]), created_ids[2]
 
 
 def _refused(scene: Scene, result: subprocess.CompletedProcess[str], hook: str, phrase: str, head: str, staged: str) -> None:
@@ -197,3 +238,46 @@ def test_g09_a_checker_that_crashes_only_in_commit_msg_still_blocks_the_commit(s
     assert result.returncode != 0 and "commit-msg checker crashed" in output, output
     assert "相关项目台账门禁校验通过" in output, "the pre-commit hook ran and agreed; only the commit-msg checker crashed"
     assert scene.head() == head and scene.staged() == staged
+
+
+@pytest.mark.parametrize("content", ["", "this is not a ledger table\nat all\n"], ids=["empty", "garbage"])
+def test_g10_a_ledger_that_is_empty_or_garbage_is_refused_by_pre_commit(scene: Scene, content: str) -> None:
+    scene.ledger.write_text(content, encoding="utf-8", newline="\n")  # the change request is still there, so its ledger row is missing
+    scene.git("add", "-A")
+    head, staged = scene.head(), scene.staged()
+    result = scene.commit(f"feat: [{scene.chg}] change the service")
+    _refused(scene, result, "pre-commit", "台账未闭环", head, staged)
+    assert "缺失 1 条" in result.stdout + result.stderr, "the reconciler named the missing row, not an orphan or an exception"
+
+
+def test_g11_production_files_of_two_registered_projects_in_one_commit_are_refused_by_commit_msg(tmp_path: Path) -> None:
+    scene, _foreign = _build_two(tmp_path)
+    (scene.repo / f"{OTHER_PID}_other" / "src" / "service.py").write_text("VALUE = 2\n", encoding="utf-8")
+    scene.git("add", "-A")
+    head, staged = scene.head(), scene.staged()
+    _refused(scene, scene.commit(f"feat: [{scene.chg}] change both services"), "commit-msg", "归属项目不唯一", head, staged)
+
+
+def test_g12_a_valid_change_request_that_belongs_to_another_project_is_refused_by_commit_msg(tmp_path: Path) -> None:
+    scene, foreign = _build_two(tmp_path)
+    head, staged = scene.head(), scene.staged()
+    _refused(scene, scene.commit(f"feat: [{foreign}] change the service"), "commit-msg", "缺少或重复关联变更单", head, staged)
+
+
+def test_g13_the_two_projects_fixture_commits_when_the_evidence_is_good(tmp_path: Path) -> None:
+    scene, _foreign = _build_two(tmp_path)
+    head = scene.head()
+    result = scene.commit(f"feat: [{scene.chg}] change the service")
+    assert result.returncode == 0 and scene.head() != head, result.stdout + result.stderr  # so the two refusals above are not an artefact of the two-project fixture
+
+
+def test_g14_the_staged_state_comparison_sees_a_changed_blob_and_a_changed_mode_not_only_a_changed_name(scene: Scene) -> None:
+    names_before, state_before = scene.git("diff", "--cached", "--name-only"), scene.staged()
+    (scene.project / "src" / "service.py").write_text("VALUE = 3\n", encoding="utf-8")
+    scene.git("add", "-A")  # the same path, another blob
+    state_other_blob = scene.staged()
+    assert scene.git("diff", "--cached", "--name-only") == names_before, "the name list alone cannot tell these two states apart"
+    assert state_other_blob != state_before
+    scene.git("update-index", "--chmod=+x", f"{PID}_fixture/src/service.py")  # the same path, the same blob, another mode
+    assert scene.git("diff", "--cached", "--name-only") == names_before
+    assert scene.staged() != state_other_blob
