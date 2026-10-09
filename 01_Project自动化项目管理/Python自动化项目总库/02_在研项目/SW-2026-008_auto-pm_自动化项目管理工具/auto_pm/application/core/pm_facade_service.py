@@ -42,7 +42,7 @@ from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionService,
 )
 from auto_pm.contracts.continuity import RunState, WorkItem, WorkState
-from auto_pm.contracts.continuity_resume import ContinuityResume
+from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.intake import IntakeClassification
@@ -1144,17 +1144,15 @@ class PmFacadeService:
         self, *, project_id: str, invocation_path: str | None, work_id: str, run_id: str, requested_action: str
     ) -> ContinuityResume:
         try:
-            return cast(
-                ContinuityResume,
-                ContinuityQueryService(self._workspace_root, execution_root=self._execution_root).query(
-                    project_id=project_id,
-                    invocation_path=invocation_path,
-                    work_id=work_id,
-                    run_id=run_id,
-                    requested_action=requested_action,
-                ),
+            answer = ContinuityQueryService(self._workspace_root, execution_root=self._execution_root).query(
+                project_id=project_id,
+                invocation_path=invocation_path,
+                work_id=work_id,
+                run_id=run_id,
+                requested_action=requested_action,
             )
-        except ContinuityQueryError as error:
+            return validate_query_resume(answer, require_query=True)
+        except (ContinuityQueryError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
 
     def accept(self, mission_id: str) -> PmConfirmationCard:

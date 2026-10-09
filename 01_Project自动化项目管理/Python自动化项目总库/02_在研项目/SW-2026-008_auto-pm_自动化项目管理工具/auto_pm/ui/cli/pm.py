@@ -15,7 +15,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import TransitionGuardError
 from auto_pm.contracts.continuity_query import QueriedAction
-from auto_pm.contracts.continuity_resume import ContinuityResume
+from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.intake import (
     ChangeAction,
@@ -1038,10 +1038,19 @@ def resume_pm(
         )
     except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
+    _emit_query(payload, as_json)
+
+
+def _emit_query(payload: ContinuityResume, as_json: bool) -> None:
+    """Check the answer once more at this consumer (a replaced facade must not slip through), then print it; nothing is printed when the check fails."""
+    try:
+        checked = validate_query_resume(payload, require_query=True)
+    except ValueError as error:
+        raise click.ClickException(str(error)) from error
     if as_json:
-        click.echo(payload.model_dump_json(indent=2))
+        click.echo(checked.model_dump_json(indent=2))
         return
-    _echo_resume_text(payload)
+    _echo_resume_text(checked)
 
 
 def _echo_resume_text(payload: ContinuityResume) -> None:
@@ -1124,10 +1133,7 @@ def orient_pm(
         )
     except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
-    if as_json:
-        click.echo(payload.model_dump_json(indent=2))
-        return
-    _echo_resume_text(payload)
+    _emit_query(payload, as_json)
 
 
 def _emit_context(ctx: click.Context, project_id: str, start_path: str | None) -> None:

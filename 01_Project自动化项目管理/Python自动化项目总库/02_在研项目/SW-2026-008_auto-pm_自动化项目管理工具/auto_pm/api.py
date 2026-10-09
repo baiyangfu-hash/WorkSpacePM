@@ -22,7 +22,7 @@ from auto_pm.application.core.worktree_policy_service import (
 )
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import TransitionGuardError
-from auto_pm.contracts.continuity_resume import ContinuityResume
+from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import MissionState
@@ -107,14 +107,15 @@ class CockpitClient:
         """Read-only versioned query shared with ``pm resume`` and ``pm orient``; a capability is not an authorization."""
 
         try:
-            return self._facade.orient(
+            answer = self._facade.orient(
                 project_id=self._project_id,
                 invocation_path=str(self._root),
                 work_id=work_id,
                 run_id=run_id,
                 requested_action=requested_action,
             )
-        except PmFacadeError as error:
+            return validate_query_resume(answer, require_query=True)
+        except (PmFacadeError, ValueError) as error:
             raise CockpitApiError(str(error)) from error
 
     def mission_state(self, mission_id: str) -> MissionState:

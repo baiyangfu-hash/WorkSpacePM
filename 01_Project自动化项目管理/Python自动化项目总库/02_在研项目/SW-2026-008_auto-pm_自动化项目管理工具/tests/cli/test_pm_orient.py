@@ -6,11 +6,15 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from auto_pm.cli.__main__ import cli
+from auto_pm.core.pm_facade_service import PmFacadeService
 from click.testing import CliRunner, Result
+
+from auto_pm.contracts.continuity_query import ContinuityQuery
+from auto_pm.contracts.continuity_resume import ContinuityResume
 
 PROJECT = "SW-2026-008"
 UNSUPPORTED_ACTIONS = ("PARK", "RESUME_PARKED", "PREEMPT")
@@ -122,3 +126,36 @@ def test_neither_command_creates_or_changes_anything_in_a_workspace_without_a_st
         assert _run(tmp_path, *args).exit_code == 0
     assert _snapshot(tmp_path) == before
     assert not (tmp_path / ".auto-pm").exists()
+
+
+def _replaced_answer(root: Path, kind: str) -> ContinuityResume:
+    """What a replaced or regressed facade could hand to the command: a Resume that was never validated."""
+
+    good = cast(ContinuityResume, PmFacadeService(root).resume(project_id=PROJECT))
+    assert good.query is not None
+    if kind == "legal":
+        return good
+    if kind == "no-query-block":
+        return good.model_copy(update={"query": None})
+    fields = {name: getattr(good.query, name) for name in ContinuityQuery.model_fields if name != "schema_version"}
+    return good.model_copy(update={"query": ContinuityQuery.model_construct(**fields)})
+
+
+@pytest.mark.parametrize("kind", ["legal", "no-schema-version", "no-query-block"])
+@pytest.mark.parametrize("as_json", [True, False])
+@pytest.mark.parametrize("command", ["resume", "orient"])
+def test_both_commands_check_the_answer_again_and_print_nothing_when_it_is_broken(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str, as_json: bool, kind: str
+) -> None:
+    _workspace(tmp_path)
+    answer = _replaced_answer(tmp_path, kind)
+    before = _snapshot(tmp_path)
+    monkeypatch.setattr(PmFacadeService, command, lambda self, **_kwargs: answer)
+    shown = _run(tmp_path, command, PROJECT, *(["--json"] if as_json else []))
+    if kind == "legal":  # the control: the replaced facade itself is not what makes the command fail
+        assert shown.exit_code == 0, shown.output
+        assert answer.evidence_id in shown.output and "continuity-query.v1" in shown.output
+    else:
+        assert shown.exit_code != 0 and ("未通过校验" in shown.output or "缺少 query" in shown.output)
+        assert answer.evidence_id not in shown.output and "continuity-resume.v2" not in shown.output  # no half of a success payload
+    assert _snapshot(tmp_path) == before

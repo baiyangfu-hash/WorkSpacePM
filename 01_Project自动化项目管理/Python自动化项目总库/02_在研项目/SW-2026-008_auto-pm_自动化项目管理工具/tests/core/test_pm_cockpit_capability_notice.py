@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from auto_pm.core.continuity_query_service import ContinuityQueryService
@@ -25,7 +26,7 @@ def test_the_snapshot_says_parking_and_preemption_are_not_supported(tmp_path: Pa
 def test_the_notice_follows_the_shared_producer_and_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     main, _candidate = _roots(tmp_path)
     _work(main, "WORK-CAP-002")
-    monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(lambda: RuntimeCapabilities(actions=())))
+    monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(lambda: RuntimeCapabilities(contract_version="runtime-capabilities.v1", actions=())))
     notices = PmCockpitService(main).snapshot().notices
     assert notices, "the snapshot carries no notice at all"
     notice = notices[-1]
@@ -52,7 +53,7 @@ def test_a_producer_that_raises_also_fails_closed(tmp_path: Path, monkeypatch: p
 def test_the_query_block_is_built_from_the_same_producer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     main, _candidate = _roots(tmp_path)
     _work(main, "WORK-CAP-004")
-    only_park = RuntimeCapabilities(actions=(ActionCapability(action=QueriedAction.PARK),))
+    only_park = RuntimeCapabilities(contract_version="runtime-capabilities.v1", actions=(ActionCapability(action=QueriedAction.PARK),))
     monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(lambda: only_park))
     answered = ContinuityQueryService(main).query(project_id=PROJECT)
     assert answered.query is not None
@@ -65,3 +66,21 @@ def test_the_notice_follows_the_other_notices_and_creates_nothing(tmp_path: Path
     assert "未建立连续性记录" in notices[0]
     assert len(notices) == 2 and "不支持" in notices[-1]
     assert not (main / ".auto-pm").exists()
+
+
+@pytest.mark.parametrize(("name", "version", "expect_unsupported"), [("valid", "runtime-capabilities.v1", True), ("missing", None, False), ("wrong", "runtime-capabilities.v2", False), ("empty", "", False)])
+def test_a_capability_block_without_a_valid_version_is_not_taken_as_unsupported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, version: str | None, expect_unsupported: bool
+) -> None:
+    main, _candidate = _roots(tmp_path)
+    _work(main, f"WORK-CAP-V-{name.upper()}")
+    fields: dict[str, Any] = {"actions": tuple(ActionCapability(action=action) for action in QueriedAction)}  # everything else is exactly what the real producer declares
+    if version is not None:
+        fields["contract_version"] = version
+    block = RuntimeCapabilities.model_construct(**fields)  # never validated: only the cockpit's own check can refuse it
+    monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(lambda: block))
+    notice = PmCockpitService(main).snapshot().notices[-1]
+    if expect_unsupported:
+        assert "不支持" in notice and "未能确认" not in notice  # the control: the same block with a legal version is read as before
+    else:
+        assert "未能确认" in notice and "保持停用" in notice and "不支持" not in notice

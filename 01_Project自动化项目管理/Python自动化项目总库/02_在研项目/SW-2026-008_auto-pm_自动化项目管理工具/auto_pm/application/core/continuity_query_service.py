@@ -21,7 +21,7 @@ from auto_pm.contracts.continuity_query import (
     QueriedAction,
     RuntimeCapabilities,
 )
-from auto_pm.contracts.continuity_resume import ContinuityResume
+from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 
 from .continuity_resume_service import ContinuityResumeError, ContinuityResumeService
 
@@ -56,7 +56,9 @@ class ContinuityQueryService:
     def capabilities() -> RuntimeCapabilities:
         """Declare what this runtime offers; the one place the flags are produced, for the query and the cockpit alike."""
 
-        return RuntimeCapabilities(actions=tuple(ActionCapability(action=action) for action in QueriedAction))
+        return RuntimeCapabilities(
+            contract_version=CAPABILITY_CONTRACT_VERSION, actions=tuple(ActionCapability(action=action) for action in QueriedAction)
+        )
 
     def query(
         self,
@@ -101,6 +103,7 @@ class ContinuityQueryService:
             json.dumps(seed, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         block = ContinuityQuery(
+            schema_version=QUERY_SCHEMA_VERSION,
             control_root=context.control_root,
             execution_root=context.execution_root,
             candidate_commit=context.candidate_commit,
@@ -114,4 +117,7 @@ class ContinuityQueryService:
             requested_action=asked,
             evidence_id=f"QUERY-{digest[:16].upper()}",
         )
-        return resume.model_copy(update={"query": block})
+        try:
+            return validate_query_resume(resume.model_copy(update={"query": block}), require_query=True)
+        except ValueError as error:
+            raise ContinuityQueryError(str(error)) from error

@@ -25,6 +25,7 @@ from auto_pm.contracts.continuity import (
     WorkItem,
     WorkState,
 )
+from auto_pm.contracts.continuity_query import validate_runtime_capabilities
 from auto_pm.contracts.execution_adapter import (
     ExecutionActivity,
     ExecutionActivityStage,
@@ -173,7 +174,7 @@ class PmCockpitService:
     def _capability_notice() -> str:
         """Say what the shared query declares about parking and pre-emption; anything unexpected keeps them off."""
         try:
-            capabilities = ContinuityQueryService.capabilities()
+            capabilities = validate_runtime_capabilities(ContinuityQueryService.capabilities())
         except (TypeError, ValueError):
             return _CAPABILITY_UNVERIFIED
         declared = {item.action.value: item.status for item in capabilities.actions}
