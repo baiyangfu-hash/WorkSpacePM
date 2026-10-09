@@ -1,17 +1,17 @@
 # PM-Flow 恢复与可用化总方案
 
-> 文档版本：V3.0.11；修订日期：2026-09-28；状态：M0、M1 已验收；M2 进行中，U01、U02、U03A、统一集成基线 `M2-BL01` 与实施卡工作流 `M2-GOV-IC01` 均已验收闭环；下一项为 U03B。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
+> 文档版本：V3.0.24；修订日期：2026-10-09；状态：M0、M1 已验收；M2 进行中，U01、U02、U03A、U03B、U04A、U04B、统一集成基线 `M2-BL01`、实施卡工作流 `M2-GOV-IC01` 与规范沉淀 `M2-GOV-U04S01` 均已验收闭环；H11 已 `COMPLETED / ACCEPTED`，治理整改阶段 1～5 已完成（阶段 2～5 的批准与验收为用户授权下的委托执行，记为 `DELEGATED_ACCEPTED`），阶段 6 `M2-GOV-WBS2` 的复查候选 `e07f7662` 已由用户于 2026-09-30 亲自验收并绑定回执（V3.0.18），记为 `COMPLETED / ACCEPTED`；详见 §4.7.3。U05、U06、U07A～U07D、U08 已于 2026-09-30～2026-10-01 逐项验收闭环，新增 V05 前置任务 U09A～U09C（`PLANNED / NOT_AUTHORIZED`）；详见 §4.7.4（V3.0.19）。U09A～U09C 与 QML 生命周期根修 `M2-GOV-QML1` 已于 2026-10-01～2026-10-03 验收闭环，U01～U09 全部完成；详见 §4.7.5（V3.0.20）。V01 已于 2026-10-03 验收闭环（实际 5 路径）；用户同日确认新增 PLC 文档与代码一致性核对任务 V01B～V01D，并定顺序 V01B → V01C → V01D → V02；详见 §4.7.6（V3.0.21）。V01B～V04、第 1 期、TD1、第 1 期审计缺陷修复与 TD2 已于 2026-10-03～2026-10-06 逐项验收闭环；审计结论、F01 与 V05 的拆分、F05 分期与新的执行顺序登记于 §4.7.7（V3.0.22）。F01-a、V05-A/B/B2/B3、V04-T、V06 钩子半与判卷半及其两次补强（V06B～V06D）和台账四张卡（TD3R～TD6）已于 2026-10-07～2026-10-08 逐项验收闭环；三次独立审计的处置、授权记录、新增任务与新顺序、部署意图与 M3 候选登记于 §4.7.8（V3.0.23）。F02、V05-C、TD7、规则修订与分档器已于 2026-10-09 验收闭环，N1a 与 N2-0 已完成并等待用户验收；用户同日决定 M2 基线冻结，V04-R1（整张）、V07、V08、M2-F01B、M2-B1 与文档采纳后移到 M3（承诺保留），M2 的剩余集合为最小 WBS 文档卡、`M2-DEP-INT`、审计包、GPT 审计、技术部署与推送；本修订同时采纳 V3.0.23，登记于 §4.7.9（V3.0.24）。当前裁决以下方机器可检的“当前投影”为准；后续长篇版本记录仅是历史证据，不再参与当前状态判定。
 > 项目：SW-2026-008；治理：SYS-2026-001；规划标识：PMF-20260912。
 > 修订依据：用户要求“重新修订方案，原子级拆解，最终需求必须达成”。本轮直接修订既有计划；不再设置一个等待批准的“先盘点再规划”项目。
-> 本文件给出 4 个产品里程碑、97 个原子任务及 1 条主线；其中 Q01～Q03 是已冻结基线失败的独立收敛队列。任务属于批次内部步骤，不等于逐条重复用户审批。C09 的补强门槛不构成重新派发原业务的许可。
+> 本文件给出 4 个产品里程碑、155 个任务 ID 行（V3.0.20 起按逐行机器计数；V3.0.18 以前写作“100 个原子任务”，见 §4.7.5）及 1 条主线；其中 Q01～Q03 是已冻结基线失败的独立收敛队列。任务属于批次内部步骤，不等于逐条重复用户审批。C09 的补强门槛不构成重新派发原业务的许可。
 
 <!-- AUTO_PM:BEGIN wbs-current-projection -->
 | Milestone | Status | Evidence | Next |
 |---|---|---|---|
 | M0 | ACCEPTED | 历史验收链；G10 集成锚点 `d87fd3d`；本轮未重跑但不撤销既有验收 | 保持冻结基线，仅在依赖漂移时复验 |
 | M1 | ACCEPTED | 不可变候选 `8b02de55`；`CP-SW008-PMF-G10R1-001`；Run SUCCEEDED/lease RELEASED/Work CLOSED；稳定运行时 `1.3.3-8b02de5` | 从 U01 启动 M2 |
-| M2 | IN_PROGRESS / U03A_ACCEPTED / U03B_READY | U01、U02、`M2-BL01`、`M2-GOV-IC01` 已闭环；U03A 隔离提交 `316ab46b`，`CP-SW008-M2-U03A-002` 绑定六路径且 dirty paths 为空，35 项测试、Ruff、Mypy 全绿，Run SUCCEEDED、Work CLOSED、CHG-340 completed，canonical 台账 0/0/0 | 从 `316ab46b` 建立 U03B 独立候选；不得把 U04 的持续进度功能提前混入 |
-| M3 | NOT_STARTED | WBS §4.9 | M2 验收后进入 D01 |
+| M2 | IN_PROGRESS / BASELINE_FROZEN_V3.0.24 / V06_ACCEPTED / F011_ACCEPTED / F02_ACCEPTED / V05C_ACCEPTED / TD7_ACCEPTED / RULE_ACCEPTED / TIER_ACCEPTED / N1A_PENDING_USER_ACCEPTANCE / N2_0_PENDING_USER_ACCEPTANCE | U04A `d59120c7`；U04B `d200eb9b`、R1 `e05fafa1`；H11A `e648e0b4`、H11C `0b724997`；14 条目标 Work 均 `CANCELLED`，5 条旧终态 lease 已围栏，历史 Run/Checkpoint/旧事件保留；2026-09-29 采样时事件链 2566 条、0 断裂，SW008 无 BLOCKED Work，Resume 无冲突，台账 0/0/0；**2026-09-30 整改后（2026-09-30T15:35:07-07:00）**：BL02 `7cfe227e`、ADJ `d876cf98`、IC02 `e6529115`、整合 `a808fa8a`，开发运行时 active `1.3.3-a808fa8`/previous `1.3.3-0b72499`；事件链 2651 条、0 断裂，`pm resume` 无冲突，两项目台账 0/0/0；**2026-10-01（2026-10-01T13:44:48-07:00）**：U05 `ace7a959`、U06 `8b7f199a`、U07A `795fe448`、U07B `35379585`、U07C `9a92e9b7`、U07D `460e24f6`、U08 `d40318d0` 均已验收闭环（CHG-SCPT-2026-362～369 completed）；事件链 2778 条、0 断裂，SW008 无未终结 Mission，两项目台账 0/0/0；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～U08 代码；**2026-10-03（2026-10-03T05:59:44-07:00）**：U09A `eebdeecb`、U09B `cec3afa7`、QML 根修 `6eead5e4`/`d95f45d2`、U09C `3c32e8ad` 均已验收闭环（CHG-SCPT-2026-370～373 completed），事件链 2929 条、0 断裂，两项目台账 0/0/0；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～U09C 代码；**2026-10-03（2026-10-03T14:54:46-07:00）**：V01 `37a4faff`（父 `3c32e8ad`）已验收闭环（CHG-SCPT-2026-374 completed），用户确认新增 V01B～V01D（需求说明 043），事件链 2973 条、0 断裂，两项目台账 0/0/0；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～V01 代码；**2026-10-06（2026-10-06T15:20:40-07:00）**：V01B `d890be25`、V01C `1e1ef760`、V01D `fb94afa9`、V02 `cf6f6f33`、TD1 `b6668dcf`、V03 `edeeead9`、第 1 期 `4e165cf4`、V04 `a6447be6`、第 1 期审计缺陷修复 `948884db`、TD2 `1956dd9a` 均已验收闭环（对应 CHG 全部 completed），代码线唯一尖端 `1956dd9a`，事件链 3164 条、0 断裂，两项目台账 0/0/0；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～1956dd9a 代码；**2026-10-08（2026-10-08T16:28:17-07:00）**：F01-a `01ad3923`、V05-A `5a2f9c48`、V05-B `5686bd9f`、V05-B2 `aeedf92f`、TD3R `769f145d`、V04-T `715713bb`、V06 钩子半 `c3c20e07`、V05-B3 `4d0b33ac`、TD4 `23e6ed64`、TD5 `6a84a186`、V06B `592211ee`、TD6 `06f4ae4d`、V06C `83369f67`、V06D `3bc740a4`、F01-1 `763395e4` 均已验收闭环（对应 CHG 全部 completed），代码线唯一尖端 `763395e4`，事件链 3421 条、0 断裂，两项目台账 0/0/0；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～`763395e4` 代码；**2026-10-09（2026-10-09T11:10:39-07:00）**：F02 `98c2110d`、V05-C `6e17f086`、TD7 `c8d49c29`、规则修订 `a0ac852b`、分档器 `370e0297` 均已验收闭环（对应 CHG 全部 completed），N1a `388b22c4`（CHG-DOCU-2026-031）已提交、N2-0（CHG-DOCU-2026-025，只读勘测，无提交）已出报告，二者均等待用户验收；代码线唯一尖端 `388b22c43a334faf1e29d9bb0038150a403b17e3`，两项目台账 0/0/0；开发运行时仍为 `1.3.3-a808fa8`，**不含** M2 代码，且与 M2 代码线从 `7cfe227e` 分叉（缺 ADJ 与 IC02 两个功能，见 §4.7.9） | 按 §4.7.9 的冻结清单推进（用户 2026-10-09 决定）：最小 WBS 文档卡（本修订）→ `M2-DEP-INT`（ADJ/IC02 整合）→ 审计包 → GPT 对 M2 的最终审计（发现缺陷按冻结条款修）→ 开发运行时技术性部署（审计之后，须用户再明确批准）→ 一次推送（须用户另行明确授权）；V04-R1、V07、V08、M2-F01B、M2-B1 与文档采纳后移到 M3；合并 main 等到 M3 的 D03 |
+| M3 | NOT_STARTED | WBS §4.9；自 M2 后移：V04-R1、V07、V08、M2-F01B、M2-B1、M2-GOV-DOCS（延期承诺表见 §4.7.9） | M2 验收后进入 D01 |
 
 | Blocker | Target | Blocking | Record | Disposition |
 |---|---|---|---|---|
@@ -20,8 +20,13 @@
 | main 尚未集成 M1 候选 | M2 | NO | 分支 `codex/g10-r1-lifecycle`；提交 `8b02de55` | 合并、推送、部署继续作为独立边界 |
 | U01 与 runtime-fix 尚无统一基线 | M2 后续执行 | NO / RESOLVED | `M2-BL01`；候选 `4851fce4`；`CP-SW008-M2-BL01-001`；Run SUCCEEDED/lease RELEASED；Work CLOSED；CHG-HMI-2026-002 completed | 统一基线固定；后续任务只能从该不可变提交或经独立验收的后继开始 |
 | M2-GOV-IC01 首次执行提交合同冲突 | M2-GOV-IC01 | NO / RESOLVED | 首次失败历史保留；纠正链 `RUN-SW008-M2-GOV-IC01-002` SUCCEEDED；`CP-SW008-M2-GOV-IC01-003`；commit `b7bb9357`；CHG-SCPT-2026-338 completed | 八个产品路径与两个提交证据路径已分层建模并由正常 Git hook 验收；后续任务复用该合同 |
+| 历史 `BLOCKED` Work 仍进入活动视图 | 默认 Resume / 历史治理 | NO / RESOLVED_BY_H11 | H11A/B/C 已使 14 条目标 Work 全部前向 `CANCELLED`；NOSKIP Run 已合法结算；5 条旧终态 lease 已围栏；QG 两个 SUCCEEDED Checkpoint 与全部失败史原样保留 | 不重开或二次验收 H11；后续仅修复裁决 Decision 的 Git 绑定与正式 CLI 合同，历史对象不再作为 U05 活动阻断 |
 <!-- AUTO_PM:END wbs-current-projection -->
 
+> V3.0.16 将 H11 的已执行终态写回当前投影：14 条目标 Work 均 `CANCELLED`，5 条旧终态 lease 已围栏，事件链与历史 Checkpoint 保持可审计；明确 `fubai` 与 `baiyang` 是同一用户的等权署名，并区分 Claude 编制记录与用户亲手执行的收口动作。新增 BL02、ADJ、IC02、DEP1、WBS2 五个治理原子任务，冻结 U/R/发布三线血统及 U05 的统一基线前置；本修订只改 WBS 单文件，不执行后续整改、部署、合并或推送。
+> V3.0.15 记录 U04 完整验收：U04B 十路径产品候选正常 Hook 提交 `d200eb9b`，U04B-R1 七路径合同提交 `e05fafa1`；两个当前字节 Checkpoint、终态租约恢复事件、Run/Work/Mission/CHG 与台账证据均成立。H11 只读复核把 14 条历史 BLOCKED Work 划分为 11 条常规处置、1 条 NOSKIP 非终态 Run 结算、2 个 Work 下 5 条旧终态未释放 lease 的兼容裁决；本修订仅更新 WBS 与建立实施卡，不创建 H11 CHG/Decision/Work/Run，不修改 canonical 数据库。
+> V3.0.13 依据 U03B 当前字节与 canonical 事件链只读预检修订 U04：现有三路径范围无法同时满足后台持续刷新、Boss 视图接线与结构化失败定位；现有哈希事件可证明启动/投影/状态迁移，但 FAILED 迁移缺少可安全展示的结构化失败步骤。U04 因而拆分为 U04A“不可变执行阶段与失败归因事件合同”和 U04B“QML 真实活动时间线与持续刷新”，以 `b8010027` 为唯一新增基线。另登记 H11 处置 14 条历史 BLOCKED Work，并登记 `M2-GOV-U04S01` 在 U04 验收后、U05 前沉淀跨项目规范。本修订只规划，不创建 CHG/Decision/Work/Run，不修改源码、数据库或 release。
+> V3.0.12 记录 U03B 独立验收：五路径候选正常 Hook 提交 `b8010027`；`CP-SW008-M2-U03B-001` 绑定当前洁净字节，11 项定向测试、Ruff、strict Mypy 与 diff-check 全部 Exit 0，Run 002 `SUCCEEDED`、Work/Mission `CLOSED`、CHG-341 completed。首次 Run 因行政命令缺失幂等参数停在 READY、无 Checkpoint/子进程，已通过独立恢复链前向撤销；历史保留且不参与通过判定。下一产品任务为 U04。
 > V3.0.11 记录 U03A 独立验收：六路径候选正常 Hook 提交 `316ab46b`；`CP-SW008-M2-U03A-002` 绑定当前洁净字节，35 项定向测试、Ruff、Mypy 全部 Exit 0，Run `SUCCEEDED`、Work `CLOSED`、CHG-340 completed。首次过早建立的 Run 已通过独立恢复 Decision/Work/Run 前向撤销，历史原样保留，不参与通过判定；下一产品任务为 U03B。
 > V3.0.10 依据 U03 当前调用链只读复核拆分 U03A/U03B：旧 `confirm_start` 只推进 Work 状态，不能证明真实 Run/session；Cockpit 旧投影会把状态变化误显示为“执行中”，并可能被无关历史 BLOCKED Run 污染。U03A 先恢复持久化批准链并接通 E08 真实启动证据，U03B 再完成 QML 异步一次确认；U04 保留持续进度/失败时间线职责。固定模型名不再作为未启动任务的执行合同，改由风险等级与独立复核级别路由，实际模型写入 Run。本修订不创建 U03A CHG/Decision/Work/Run，不修改源码。
 > V3.0.5 记录 `M2-GOV-IC01` 首次执行的真实结果：八个产品文件已通过 26 项定向测试、Ruff、strict Mypy 与 diff-check，并形成当前字节 Checkpoint；本地提交因稳定 commit-msg 合同要求 CHG 与项目台账同一暂存快照而被正确拒绝。旧 Run/Work/Mission 如实保持 FAILED/BLOCKED，未使用 `--no-verify`。后续唯一纠正链将产品路径与两个提交治理证据路径分层建模；不得增加第十一路径或重写历史。
@@ -415,21 +420,33 @@ E07 依赖 C03，C01～C03 只依赖 E05，因此没有 E→C→E 的循环。�
 
 历史辅助 Run `RUN-SW008-PMF-C09-CLOSURE-003` 和 `RUN-SW008-PMF-C09R3C-007` 的 FAILED 记录只读保留作审计证据，不改写历史。稳定部署运行时回退加载 1.3.2 归属独立基础设施线 Track A，后续与 M2 推进并行或单独处置。合并、推送、部署和 release 切换仍为独立后续边界。
 
-### 4.7 U：用户界面与 SDK（U01～U08）
+### 4.7 U：用户界面与 SDK（U01～U09）
 
 | ID | 单一交付 | 依赖 | 精确产出/改动边界 | 验收与失败出口 | 模型 |
 |---|---|---|---|---|---|
 | U01 | 五状态可点击界面原型 | P06、E03、C07 | 拟新增 S/01_项目文档/prototypes/pm-flow-v2.html | 新目标、确认、执行、失败/恢复、验收五场景可达；标明演示数据；按钮/函数/导航无死链 | T/G |
 | U02 | QML 输入目标生成真实草稿 | U01、P11 | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、QML/boss_main.qml、T/qml/test_pm_cockpit_bridge.py、T/qml/test_boss_cockpit_view.py | Bridge→Facade 实际持久化 `PRE_AUTH` PlanningDraft；显示项目、目标、验收与“范围待规划”，不让用户填内部 ID；未形成真实范围卡前不得虚构范围，批准前不得展示为 Mission；按实施卡 016 五产品路径及独立治理证据门禁验收 | ACCEPTED / `74493c37` / `CP-SW008-M2-U02-002` |
 | U03A | 批准链恢复与真实启动合同 | U02、E08 | INFRA/continuity_store.py、CORE/pm_facade_service.py、CORE/pm_cockpit_service.py；T/infrastructure/test_continuity_store.py、T/core/test_pm_facade_service.py、T/core/test_pm_cockpit_service.py | 从持久化批准链恢复精确 PlanningScopeCard；一次确认只形成一个 operation/Run；只有真实 RUN_STARTED、session/PID 后显示执行中；历史 BLOCKED Run 不污染当前 Mission；按实施卡 017 验收 | ACCEPTED / `316ab46b` / `CP-SW008-M2-U03A-002` |
-| U03B | QML 一次确认与异步启动接线 | U03A | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、QML/boss_main.qml；T/qml/test_pm_cockpit_bridge.py、T/qml/test_boss_cockpit_view.py | 后台调用不阻塞主线程；连点/信号重放只调用一次；busy 防重；失败解除 busy 且不显示伪接管；重载后以 canonical 快照为准；按实施卡 017 验收 | R1 / Terra 实施、Sol 验收 |
-| U04 | QML 进度和失败来自真实事件 | U03B | CORE/pm_cockpit_service.py、QML/components/ActivityTimeline.qml、T/core/test_pm_cockpit_service.py | QRunnable/Signal 持续更新；无伪百分比，失败原因能定位步骤；不得重新实现 U03A 的首次真实启动判定 | R2 / Sol 实施、异模型复核 |
-| U05 | 恢复同一任务与证据抽屉 | U04、E06、C03 | QML/bridges/pm_cockpit_bridge.py、QML/components/EvidenceDrawer.qml、T/qml/test_pm_cockpit_bridge.py | 关闭重开后同 Work/Run；证据匹配当前内容；恢复动作受服务资格限制 | T/G |
-| U06 | GUI 验收与待同步状态 | U05、C07 | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、T/qml/test_boss_cockpit_view.py | 验收→投影失败→重试→完成可观测；缺必要证据不能点成“已完成” | T/G |
-| U07 | 薄 Cockpit SDK | C09 | 拟新增 D/auto_pm/api.py、T/core/test_cockpit_api.py；D/auto_pm/__init__.py | SDK经统一运行身份/Facade从新目标到批准、真实execute、验收落账完整实演；生产初始化不落到editable/母体；不只验import/查询 | T/G |
-| U08 | 旧 workflow 接口兼容 | U07 | CLI/workflow.py、拟新增 T/cli/test_workflow_compat.py | 现有命令保留；新 workflow 别名只委托 pm；不能恢复旧写入状态机；未知旧动作明确拒绝 | T/G |
+| U03B | QML 一次确认与异步启动接线 | U03A | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、QML/boss_main.qml；T/qml/test_pm_cockpit_bridge.py、T/qml/test_boss_cockpit_view.py | 后台调用不阻塞主线程；连点/信号重放只调用一次；busy 防重；失败解除 busy 且不显示伪接管；重载后以 canonical 快照为准；按实施卡 017 验收 | ACCEPTED / `b8010027` / `CP-SW008-M2-U03B-001` |
+| U04A | 不可变执行阶段与失败归因事件合同 | U03B | CONTRACT/execution_adapter.py、CORE/continuity_execution_service.py、CORE/execution_supervisor_service.py、CORE/local_execution_orchestrator.py、INFRA/continuity_store.py；T/contracts/test_execution_adapter.py、T/core/test_continuity_execution_service.py、test_execution_supervisor_service.py、test_local_execution_orchestrator.py、T/infrastructure/test_continuity_store.py | 进度与失败步骤进入同一 canonical 哈希事件链；FAILED/PENDING/BLOCKED 只能显示结构化安全 reason code，旧事件缺失原因时明确 `LEGACY_UNKNOWN`；不得从未哈希 idempotency key、stdout/stderr 或 QML 内存猜测；不重写历史事件或数据库 schema | ACCEPTED / `d59120c7` / `CP-SW008-M2-U04A-001` |
+| U04B | QML 真实活动时间线与持续刷新 | U04A | CONTRACT/pm_cockpit.py、CORE/pm_cockpit_service.py、QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、QML/components/ActivityTimeline.qml、QML/boss_main.qml；T/contracts/test_pm_cockpit.py、T/core/test_pm_cockpit_service.py、T/qml/test_pm_cockpit_bridge.py、T/qml/test_boss_cockpit_view.py | QRunnable＋Signal 有界持续刷新；仅显示当前 Mission/root Work/Run 的 canonical 活动；无伪百分比；失败能定位到 U04A 安全步骤；历史 BLOCKED Work 不污染当前卡片；不得修改 U05 EvidenceDrawer 或重新实现 U03A 首次启动判定 | ACCEPTED / `d200eb9b` / `CP-SW008-M2-U04B-001`；R1 `e05fafa1` |
+| U05 | 恢复同一任务与证据抽屉 | U04B、E06、C03、`M2-GOV-BL02`；整改按 024 闭环并经用户验收 | QML/bridges/pm_cockpit_bridge.py、QML/components/EvidenceDrawer.qml、T/qml/test_pm_cockpit_bridge.py | 关闭重开后同 Work/Run；证据匹配当前内容；恢复动作受服务资格限制；隔离候选必须从 BL02 统一基线启动。`M2-GOV-DEP1` 是软依赖：未部署时可开发，但必须声明运行时不含 M2 产品代码，不得声称稳定运行时验收 | ACCEPTED / `ace7a959` / `CKPT-SW008-M2-U05-001` / CHG-SCPT-2026-362 completed（实际 11 路径，见 §4.7.4） |
+| U06 | GUI 验收与待同步状态 | U05、C07 | QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml、T/qml/test_boss_cockpit_view.py | 验收→投影失败→重试→完成可观测；缺必要证据不能点成“已完成” | ACCEPTED / `8b7f199a` / `CKPT-SW008-M2-U06-001` / CHG-SCPT-2026-363 completed（实际 9 路径，见 §4.7.4） |
+| U07 | 薄 Cockpit SDK | C09 | 拟新增 D/auto_pm/api.py、T/core/test_cockpit_api.py；D/auto_pm/__init__.py | SDK经统一运行身份/Facade从新目标到批准、真实execute、验收落账完整实演；生产初始化不落到editable/母体；不只验import/查询 | SPLIT（V3.0.19）：按下方 U07A～U07D 四行执行并验收；本行保留为原合同 |
+| U07A | 验证与验收门接线 | U06、C09 | CORE/execution_adapter_service.py、CORE/pm_facade_service.py、CONTRACT/pm_facade.py；T/core/test_execution_adapter_service.py、T/core/test_pm_facade_service.py、T/core/test_pm_run_e2e.py | 批准的范围卡一次调用完成真实执行与质量验证并到达验收门；执行或验证失败保留现场、不进入验收；技术栈解析不依赖进程当前目录；按实施卡 032 V1.1 验收 | ACCEPTED / `795fe448` / `CKPT-SW008-M2-U07A-001` / CHG-SCPT-2026-364、365 completed |
+| U07B | 收尾实质接线 | U07A | CORE/pm_closure_service.py、D/auto_pm/domain/change/substance_injector.py；T/change/test_substance_control.py、T/core/test_pm_closure_service.py、T/core/test_pm_run_e2e.py | 真实链路验收后收尾由 `PENDING_SYNC` 变为 `COMPLETED`：生成的 CHG 被写入实质内容与验证结论，台账无差异；缺章节时待同步、修复后可重试；不推进 CHG 状态；按实施卡 033 验收 | ACCEPTED / `35379585` / `CKPT-SW008-M2-U07B-001` / CHG-SCPT-2026-366 completed |
+| U07C | 薄 Cockpit SDK 与运行身份守卫 | U07B | D/auto_pm/api.py、D/auto_pm/__init__.py；T/core/test_cockpit_api.py | 即原 U07 的交付：SDK 经统一运行身份/Facade 从新目标到批准、真实执行、验收、收尾完整实演；每次写入前重解析运行身份，冲突或非控制根即拒绝且零写入；按实施卡 034 验收 | ACCEPTED / `9a92e9b7` / `CKPT-SW008-M2-U07C-001` / CHG-SCPT-2026-367 completed |
+| U07D | GUI 开工接线 | U07C、U06 | CORE/pm_cockpit_service.py、QML/bridges/pm_cockpit_bridge.py；T/core/test_pm_cockpit_service.py、T/qml/test_pm_cockpit_bridge.py、T/qml/test_pm_cockpit_start_e2e.py | 驾驶舱对规划批准的草稿任务给出“确认开始”；开始即恢复范围卡、执行并验证，到达验收门；非预期异常不泄漏原文；无 QML 改动；按实施卡 035 验收 | ACCEPTED / `460e24f6` / `CKPT-SW008-M2-U07D-001` / CHG-SCPT-2026-368 completed |
+| U08 | 旧 workflow 接口兼容 | U07 | CLI/workflow.py、拟新增 T/cli/test_workflow_compat.py | 现有命令保留；新 workflow 别名只委托 pm；不能恢复旧写入状态机；未知旧动作明确拒绝 | ACCEPTED / `d40318d0` / `CKPT-SW008-M2-U08-001` / CHG-SCPT-2026-369 completed |
+| U09A | 范围卡持久化与按哈希批准 | U07A、U08（隔离基线 `d40318d0`） | INFRA/continuity_store.py、CONTRACT/pm_facade.py、CORE/pm_facade_service.py；拟新增 T/core/test_pm_pending_scope_card.py | 规范库追加范围卡表且不升 schema 版本；可提交与修订、列出待批准、列出草稿；读出即校验，记录被改动即拒绝；凭 request_id 与 plan_hash 一次完成 CHG 批准、Decision、Mission、Work，重放幂等；不启动执行；按实施卡 037 验收 | ACCEPTED / `eebdeecb` / `CKPT-SW008-M2-U09A-001` / CHG-SCPT-2026-370 completed（实际 4 路径，见 §4.7.5） |
+| U09B | CLI 列出草稿与范围卡持久化 | U09A | CLI/pm.py；测试与其余确切路径以开工前勘测后的实施卡为准 | `pm` 能列出草稿与待批准范围卡；`pm plan` 经 U09A 的提交方法持久化范围卡；`pm approve` 可只凭 request_id 与 plan_hash 批准；既有参数形式保持兼容 | ACCEPTED / `cec3afa7` / `CKPT-SW008-M2-U09B-001` / CHG-SCPT-2026-371 completed（实际 4 路径，见 §4.7.5） |
+| U09C | 驾驶舱展示待批准范围卡与“批准范围并开始” | U09B、U07D、U06 | CONTRACT/pm_cockpit.py、CORE/pm_cockpit_service.py、QML/bridges/pm_cockpit_bridge.py、QML/views/BossCockpitView.qml 与批准人配置项；确切路径以开工前勘测后的实施卡为准 | 驾驶舱展示 PM 起草的待批准范围卡；一个按钮完成批准并接 U07D 的开始；整条链只有“批准范围”“最终验收”两次业务决策；批准人来自配置项，未配置则拒绝，且模型身份不得充当批准人 | ACCEPTED / `3c32e8ad` / `CKPT-SW008-M2-U09C-004` / CHG-SCPT-2026-372 completed（实际 13 路径；基线为根修 `d95f45d2`；Run004，见 §4.7.5） |
 
-U01 已于 2026-09-27 独立验收：隔离候选提交 `d88eedd5` 仅含 `S/01_项目文档/prototypes/pm-flow-v2.html` 与其静态测试；`CP-SW008-U01-001` 绑定验收前候选字节，Run `SUCCEEDED`、lease `RELEASED`、Work `CLOSED`，`CHG-HMI-2026-001` 为 `completed`。U02 已以提交 `74493c37`、`CP-SW008-M2-U02-002` 和完整治理终态独立验收。U03A 已以提交 `316ab46b`、`CP-SW008-M2-U03A-002` 和完整 Run/Work 终态独立验收；下一项为 U03B。U04～U08 仍须逐项按实施卡和独立授权推进。
+U01 已于 2026-09-27 独立验收：隔离候选提交 `d88eedd5` 仅含 `S/01_项目文档/prototypes/pm-flow-v2.html` 与其静态测试；`CP-SW008-U01-001` 绑定验收前候选字节，Run `SUCCEEDED`、lease `RELEASED`、Work `CLOSED`，`CHG-HMI-2026-001` 为 `completed`。U02 已以提交 `74493c37`、`CP-SW008-M2-U02-002` 和完整治理终态独立验收。U03A 已以提交 `316ab46b`、`CP-SW008-M2-U03A-002` 验收；U03B 已以提交 `b8010027`、`CP-SW008-M2-U03B-001` 验收；U04A 已以提交 `d59120c7`、`CP-SW008-M2-U04A-001` 验收；U04B 已以产品提交 `d200eb9b`、恢复合同提交 `e05fafa1`、`CP-SW008-M2-U04B-001`、`CP-SW008-M2-U04BR1-001` 及完整治理终态验收。H11 已完成并验收；U05～U08 仍须逐项按实施卡和独立授权推进，其中 U05 必须从 BL02 统一基线启动。
+
+**V3.0.19 补记。** U05、U06、U07A～U07D、U08 已逐项按实施卡 030～036 与独立授权完成并验收，证据见 §4.7.4；上一段“U05～U08 仍须逐项……推进”是 V3.0.16 时点的表述，予以保留。原 U07 在开工前勘测中拆为 U07A～U07D；为满足 V05“从 GUI 输入目标到验收、两次业务决策”，按用户 2026-10-01 的裁决新增 U09A～U09C，三项均为 `PLANNED / NOT_AUTHORIZED`。
+
+**V3.0.20 补记。** U09A～U09C 已逐项按实施卡 037、039、040 与独立授权完成并验收，U01～U09 至此全部闭环；U09C 的首个 Run 在 `tests/qml` 门禁遇到间歇性原生崩溃而硬停止，其根修作为横向治理任务 `M2-GOV-QML1` 完成并验收，U09C 的隔离基线因此由 U09B 改为根修提交 `d95f45d2`。上一段“三项均为 `PLANNED / NOT_AUTHORIZED`”是 V3.0.19 时点的表述，予以保留；证据见 §4.7.5。
 
 U01 是在现有 PySide6/QML 方案上的交互原型，不换 Web 技术栈。界面核心信息固定为：目标、当前阶段、实际执行器、下一可行动作、证据、验收；复杂内部对象默认折叠。
 
@@ -439,25 +456,508 @@ U01 是在现有 PySide6/QML 方案上的交互原型，不换 Web 技术栈。�
 |---|---|---|---|---|---|
 | M2-BL01 | runtime-fix 与 U01 两文件形成唯一不可变集成基线 | active runtime 源 `f4626947`；`main@0d7071b7`；U01 `d88eedd5` | `02_规划/016_M2统一集成基线实施卡_PM.md` 规定的两个 U01 owned paths；独立规划卡/WBS 不进入产品提交 | 候选 `4851fce4` 精确两文件、blob 等同 U01、pytest/Ruff/Mypy Exit 0、候选入口 fail-closed、canonical runtime 无 fallback、Checkpoint 当前；Run SUCCEEDED/lease RELEASED、Work CLOSED、CHG completed | ACCEPTED / CLOSED |
 | M2-GOV-IC01 | 实施卡一等合同、模板、校验与 dispatch/verify 工作流 | PM-033 V2.1；`M2-BL01` ACCEPTED | 实施卡 015 的八个产品路径；CHG-338 与 SW008 台账仅作为提交证据路径 | 33 passed；Ruff/Mypy/diff-check Exit 0；`CP-SW008-M2-GOV-IC01-003`；commit `b7bb9357` 恰含十路径；Run SUCCEEDED、Work/Mission CLOSED、CHG completed | ACCEPTED / CLOSED |
+| M2-GOV-U04S01 | U03/U04 异步一次启动与 canonical 活动投影规范沉淀 | U04B ACCEPTED；Obsidian CCB 独立批准 | `00_Obsidian_Base全局规范文件仓库/02_Python开发域/216_PySide6_GUI开发规范_DEV.md`、`00_Obsidian_Base全局规范文件仓库/04_驾驶舱与全栈域/300_高级语言与工业上位机系统_Google_SRE工程可靠性规范_DEV.md`、`00_Obsidian_Base全局规范文件仓库/spec_registry.json` | 仅沉淀经 U03/U04 实测成立的一次启动、canonical 重载、后台 Signal、真实事件进度和失败降级合同；注册表校验通过；不得把项目 ID、历史事故或具体 CHG 写成全局规范 | ACCEPTED / `14650723` / `CP-SW008-M2-GOV-U04S01-001` / CHG-SPEC-2026-017 completed |
+| M2-GOV-BL02 | U04B、R1/Hook 修复与 H11 发布线形成唯一统一基线 | U04B、U04B-R1、Hook 修复与 H11 合同均已验收；卡 023 | 卡 023 的 20 个修改路径与 4 个只读对照路径；不得引入 CHG/台账证据文件 | U、R、发布线差异按合同整合；冲突逐文件记录；事件兼容、pytest/Ruff/Mypy、exact-tree 与临时切换/回退演练全部通过；形成不可变提交 | COMPLETED / DELEGATED_ACCEPTED / `7cfe227e` / `CKPT-SW008-M2-GOV-BL02-002` / CHG-SCPT-2026-356、357 completed |
+| M2-GOV-ADJ | 裁决合同绑定 Git Decision 字节并提供正式 CLI | `M2-GOV-BL02` ACCEPTED；卡 026 | 卡 026 的 9 个 owned paths；`adjudicate_blocked_work` 复用 `_decision_git_snapshots`；`decision create` 增加精确 `--target-work-id` 合同 | 原/裁决 Decision 均绑定恢复 Run HEAD；未跟踪、脏改、SHA/HEAD 漂移 fail-closed；CLI/API 等价与正反例全绿 | COMPLETED / DELEGATED_ACCEPTED / `d876cf98` / `CKPT-SW008-M2-GOV-ADJ-001` / CHG-SCPT-2026-358 completed |
+| M2-GOV-IC02 | 实施卡在创建 Work/Run 前完成命令、测试路径、基线与范围预检 | `M2-GOV-BL02` ACCEPTED；与 ADJ 独立；卡 027 | 卡 027 的 11 个 owned paths；强制接入 `continuity work create` 前置判卷 | 未知命令、未知既有路径、baseline/scope 漂移在 Work/Run 创建前 fail-closed；历史两类问题有防复发测试 | COMPLETED / DELEGATED_ACCEPTED / `e6529115` / `CKPT-SW008-M2-GOV-IC02-001` / CHG-SCPT-2026-359 completed |
+| M2-GOV-DEP1 | 把 BL02、ADJ、IC02 的整合提交构建为开发运行时 | BL02、ADJ、IC02 均 ACCEPTED；用户另行批准；卡 028 | 无产品源码 owned paths；仅受治理的 release/manifest/pointer 与报告对象 | exact-tree、身份一致性、切换与回退演练通过；失败自动回退；不等同 D07 正式稳定交付 | COMPLETED / DELEGATED_ACCEPTED / 整合 `a808fa8a`、release `1.3.3-a808fa8` / `CKPT-SW008-M2-GOV-DEP1-001`、`CKPT-SW008-M2-GOV-DEP1-002` / CHG-SCPT-2026-360、361 completed |
+| M2-GOV-WBS2 | WBS 修订 2 与整改交付包 | 阶段 1～5 按 024 达成；未部署时如实记录；卡 029 | WBS 单文件与整改交付证据清单 | 回写各阶段 SHA/ID、当前时点证据、技术债与 U05 准入；Claude 阶段复查或用户明确裁决后关闭整改 | COMPLETED / ACCEPTED（复查候选 `e07f7662` 由 CHG-DOCU-2026-023 / `DEC-20260930-WBS2CAND` 形成，用户 2026-09-30 亲自验收，回执 `.auto-pm/reports/m2-gov-wbs2/first_commit_acceptance_receipt.txt`（SHA-256 `628e475452cf7d9b1c7e7734e08d609dac1559d9b28a27d6723a9f89c30b9c9d`）） |
+| M2-GOV-WBS1 | WBS 修订 1：H11 终态、三线血统、治理整改任务与来源说明 | H11 COMPLETED / ACCEPTED；卡 025 | WBS 单文件 | 提交 `a385452c`（父 `58ac6a03`）仅含 WBS；CHG-DOCU-2026-022 closed；`CP-SYS001-M2-GOV-WBS1-001`；Claude 只读复查见 024 §7 | COMPLETED / CLAUDE_REVIEWED（用户批准开工；终验收的发起进程无法由 schema 证明，未记为 ACCEPTED） |
+| M2-GOV-WBS3 | WBS 修订 3：U05～U08 验收回写、U07 拆分补记与 U09 新增 | U08 ACCEPTED；用户 2026-10-01 选定“先修订 WBS 再开工 U09A”；卡 038 | WBS 单文件 | 回写 U05～U08 的提交、CHG、Checkpoint；登记 U07A～U07D 与 U09A～U09C；调整 V05 依赖与 M2 范围；登记两项技术债；除卡 038 §5 列明的行外只加不删 | COMPLETED / ACCEPTED（提交 `79ab9516`；CHG-DOCU-2026-024 completed，用户 2026-10-01 在对话弹窗确认验收，Claude 代跑收口） |
+| M2-GOV-QML1 | QML 测试生命周期根修（间歇性原生崩溃） | U09C 首个 Run 的 qml 门禁硬停止（失败史保留）；用户 2026-10-02 授权接手并查明根因 | QML/bridges/file_watcher_bridge.py、QML/bridges/pm_cockpit_bridge.py；T/qml/conftest.py、T/qml/test_boss_cockpit_view.py、T/qml/test_file_watcher_bridge.py、T/qml/test_pm_cockpit_bridge.py（相对 U09B 累计 6 路径） | 查明并消除后台 worker 与 GUI 对象的强引用环所致的原生崩溃：真实原生栈、真实对象环与线程轨迹、旧生产代码负向对照；窗口、Bridge、engine 有序收尾；叠加 U09C 十三文件后崩溃配置重复通过 | COMPLETED / ACCEPTED（F `6eead5e4`、F2 `d95f45d2`；`CKPT-SW008-M2-QMLLIFE-003`、`CKPT-SW008-M2-QMLLIFE-004`；CHG-SCPT-2026-373 completed，用户 2026-10-03 在对话中确认验收，Claude 代跑收口） |
+| M2-GOV-WBS4 | WBS 修订 4：U09A～U09C 验收回写、QML 根修补记与技术基线校准 | U09C ACCEPTED；CHG-SCPT-2026-372、373 completed；用户 2026-10-03 批准；卡 041 | WBS 单文件 | 回写 U09A～U09C 的提交、CHG、Checkpoint；登记 `M2-GOV-QML1`；写明 M2 代码线的堆叠提交链与唯一尖端；对齐任务计数口径；沉淀教训与技术债；除卡 041 §5 列明的行外只加不删 | COMPLETED / ACCEPTED（提交 `7e2768a1`；CHG-DOCU-2026-025 completed，用户 2026-10-03 在对话中确认验收，Claude 代跑收口） |
+| M2-GOV-WBS5 | WBS 修订 5：V01 验收回写与 PLC 文档与代码一致性核对任务登记 | V01 ACCEPTED；CHG-SCPT-2026-374 completed；需求说明 043 已由用户确认；用户 2026-10-03 同意写卡；卡 044 | WBS 单文件 | 回写 V01 的提交、CHG、Checkpoint、实际路径与已知限制；登记 V01B～V01D 并改 V02 依赖；更新 M2 代码线唯一尖端；沉淀教训与技术债；除卡 044 §5 列明的行外只加不删 | COMPLETED / ACCEPTED（提交 `57e14c19`；CHG-DOCU-2026-026 completed） |
+| M2-GOV-TD1 | 技术债台账回写：复核 TD-SW008-001～008 并导入 WBS 圈号清单 | WBS5 ACCEPTED；V02 ACCEPTED；卡 049 | 台账单文件 | 复核 TD-SW008-001～008 的状态，导入 009 起的 WBS 圈号清单与暂存清单；旧行只改状态、不删 | COMPLETED / ACCEPTED（提交 `b6668dcf`，父 `cf6f6f33`；CHG-DOCU-2026-016 completed） |
+| M2-P1 | 第 1 期：入口分类与分诊收件箱 | V03 ACCEPTED；需求说明 043；卡 051 | 14 个路径（见 §4.7.7） | 分类、收件箱、分诊记录校验、plan 分类、只读建议；用户批准时附的是有条件预授权，验收与收口由用户做出 | COMPLETED / ACCEPTED（提交 `4e165cf4`，父 `edeeead9`；CHG-SCPT-2026-379 completed） |
+| M2-P1FIX | 第 1 期审计缺陷修复（A-P1-01～03、C11、C12） | M2-P1 ACCEPTED；V04 ACCEPTED；独立审计 P1/V04 报告；卡 054 | 9 个路径（5 个产品、4 个既有测试） | 分类规划成为单一的持久成功边界；已绑定重放逐项核对显式分类；文件取证必须是控制根内的普通文件；CLI 批准在写入前核对批准身份与 plan_hash；GPT 起草的卡 053 与其 CHG-SCPT-2026-381、Work `WORK-SW008-M2-P1-AUDITFIX-001`（BLOCKED）作为失败尝试保留、未处置 | COMPLETED / ACCEPTED（提交 `948884db`，父 `a6447be6`；CHG-SCPT-2026-382 completed） |
+| M2-GOV-TD2 | TD2：台账登记、审计归档、需求说明与分档规则落库 | M2-P1FIX ACCEPTED；卡 055 | 17 个文档路径（含 CHG-374 §9.1 追认的两个落点） | 台账追加 TD-SW008-078～086；12 个原始文件归档并建索引；需求说明与门禁分档规则成文；F06 追认写入 CHG-374 | COMPLETED / ACCEPTED（提交 `1956dd9a`，父 `948884db`；CHG-DOCU-2026-017 completed） |
+| M2-GOV-WBS6 | WBS 修订 6：V01B～V04、P1、TD1、P1 修复与 TD2 验收回写，F01 与 V05 拆分，F05 分期与新顺序 | TD2 ACCEPTED；用户 2026-10-06 同意拆卡与顺序；卡 056 | WBS 单文件 | 回写上列任务的提交、CHG、Checkpoint 与路径数；登记 F01-a、F01-b、V05-A/B/C、V04-T；更正 V03、V04 的验收口径；除卡 056 §5 列明的行外只加不删 | COMPLETED / ACCEPTED（提交 `0b56b2f4`；CHG-DOCU-2026-027 completed） |
+| M2-GOV-TD3R | 技术债台账登记重启（TD-SW008-087～094） | V05-B2 ACCEPTED；卡 062（重启自 GPT 起草的卡 061，两次启动失败，其遗留对象不处置） | 台账单文件 | 追加八行：Git 子进程固定时限、卡工具身份与幂等键硬编码、V05-B2 首次尝试的失败对象、实施卡测试日期写死，以及独立审计 R2 的四项发现 | COMPLETED / ACCEPTED（提交 `769f145d`，父 `aeedf92f`；CHG-DOCU-2026-019 completed） |
+| M2-GOV-TD4 | 台账状态更新（TD-SW008-081、091、092） | V05-B3 ACCEPTED；V04-T ACCEPTED；卡 066 | 台账单文件 | 逐条核对各行自己的验收条件：081、091 写已偿还，092 只写部分处置并改活动；旧列一字不改 | COMPLETED / ACCEPTED（提交 `23e6ed64`，父 `4d0b33ac`；CHG-DOCU-2026-020 completed） |
+| M2-GOV-TD5 | 技术债台账追加三条（TD-SW008-095～097） | TD4 ACCEPTED；用户 2026-10-08 批准登记；卡 067 | 台账单文件 | 负载敏感测试、判卷器不在 Git、本机残留进程；只登记不处置 | COMPLETED / ACCEPTED（提交 `6a84a186`，父 `23e6ed64`；CHG-DOCU-2026-021 completed） |
+| M2-GOV-TD6 | 台账同步（TD-SW008-098～102 与四行更新） | V06B ACCEPTED；卡 069 | 台账单文件 | 登记 Astra 审计 F-01 与 GPT R4 的发现；078 补 F01-a 进展，091 收窄处置说明，094 关联 F-02，096 补 V06B 进展 | COMPLETED / ACCEPTED（提交 `06f4ae4d`，父 `592211ee`；CHG-DOCU-2026-022 completed） |
+| M2-GOV-WBS7 | WBS 修订 7：F01-a、V05-A/B/B2/B3、V04-T、V06 系列与台账四卡验收回写，三次审计处置，授权与新顺序，部署意图与 M3 候选 | V06D ACCEPTED；用户 2026-10-08 接受修订；卡 073 | WBS 单文件 | 回写上列任务的提交、CHG、Checkpoint 与路径数；登记新任务；除卡 073 §5 列明的行外只加不删 | COMPLETED / ACCEPTED（提交 `a538f942`，在分支 `codex/m2-gov-wbs7b`；CHG-DOCU-2026-029 completed；由 M2-GOV-WBS8 一并采纳进 M2 主链） |
+| M2-GOV-RULE | 门禁规则修订：把分档与并行验证的测量结论写成规则 | 提速测量三次结果（见 §4.7.8）；用户 2026-10-08 同意提出；M2-F02 ACCEPTED | 规则文档 `02_规划/M2_门禁分档与单卡规模规则_PM.md` 单文件 | 并行 4 进程快 1.6～2.4 倍但不稳定，不无条件写入规则；按改动范围选测试，发布前再全跑；规则修订不放宽任何门禁 | COMPLETED / ACCEPTED（提交 `a0ac852b`，父 `c8d49c29`；CHG-DOCU-2026-024 completed） |
+| M2-TOOL-TIER | 分档器：按精确改动路径与版本化核心清单自动定档 | M2-GOV-RULE ACCEPTED；用户 2026-10-08 同意提出 | 拟：工具文件与对应测试（范围在勘测后确定） | 未知路径或无法归类就拒绝定档并按核心档处理；产品与核心档的字节核验不降档；在空闲机器上重测最慢测试以取得可信耗时 | COMPLETED / ACCEPTED（提交 `370e0297`，父 `a0ac852b`；CHG-SCPT-2026-398 completed） |
+| M2-GOV-DOCS | 文档采纳：项目关键文档按 Astra 对账草案修订并刷新到当时尖端 | M2-F02 ACCEPTED；Astra 里程碑审计的九份草案（`.auto-pm/reports/astra-milestone-audit-20261008/proposals/document_drafts/`） | 草案列明的项目文档（含 README、PM_SESSION、章程、发布门禁规范、立项表、当前基线评估与三份历史报告标注） | 保留历史验收原文与 PM_SESSION 行数约束；采纳前重核源文件指纹；文档档，跑 `tests/test_pm_session_size.py` 与文档检查 | 后移到 M3，承诺保留（用户 2026-10-09 决定：GPT 的设计不算 M2，不属 M2 收口集合；见 §4.7.9 延期承诺表）；原状态 PLANNED |
+| M2-B1 | 耦合治理第一步：连续性存储的三个纯哈希函数提取 | M2-F02 ACCEPTED；Astra 耦合方案 `COUPLING_REFACTOR_PLAN.md` | 拟：`continuity_store.py` 与一个新增内部模块及定向测试 | 保留既有接口、输入输出与事件 JSON 一致；不得据此宣布存储已解耦；触及核心清单，按核心档全量九组 | 后移到 M3，承诺保留（用户 2026-10-09 决定：GPT 的设计不算 M2，不属 M2 收口集合；见 §4.7.9 延期承诺表）；原状态 PLANNED |
+| M2-DEP-TECH | 开发运行时技术性部署：构建 M2 发布包并切换开发运行时（含回退演练） | V05-C、M2-DEP-INT ACCEPTED；审计包备好且 GPT 对 M2 的最终审计完成（审计发现的缺陷按冻结条款修复）；用户在审计之后另行明确批准（V3.0.24：V04-R1、V07、V08 后移到 M3，不再是前置） | 拟：发布构建与安装映射（仿 `M2-GOV-DEP1`），无产品源码改动 | 构建可复现；切换前后 active/previous 与实际加载身份一致；回退演练保留新事件；切换须用户明确批准；不等同 D07 正式交付 | PLANNED（用户 2026-10-08 表达意图；须报 SHA 并经用户批准） |
+| M2-PUSH | 以 M2 作隔离候选，一次推送 | M2-DEP-TECH ACCEPTED | 无文件改动；一次推送动作 | 推送目标、分支与范围由用户在对话中明确授权后才执行；目前没有任何推送授权；不合并 main | PLANNED（用户 2026-10-08 表达意图；须另行明确授权） |
+| M2-GOV-TD7 | 技术债台账同步（登记 TD-SW008-103～107，更新七条既有行） | V05-C ACCEPTED；卡 076 | 台账单文件 | 登记真实模型联验与失败记录处置中发现的问题（沙箱初始化、只读预检缺失、状态快照读写冲突、变更单没有作废状态、V05-C 已知限制）；只登记与同步，不处理债务 | COMPLETED / ACCEPTED（提交 `c8d49c29`，父 `6e17f086`；CHG-DOCU-2026-023 completed） |
+| M2-N1A | 驾驶舱角色与边界说明文档入库 | 用户 2026-10-09 批准 N1a + N2-0 批次；卡 079 | 新增 `SYS-2026-001_WorkspaceGovernance/01_项目文档/40_驾驶舱角色与边界_PM.md`（1 个路径） | 只写用户已确认的内容；开头声明不改变任何现行规则、不替代 AGENTS.md；不碰 `.trae` | COMPLETED / 等待用户通读验收（提交 `388b22c4`，父 `370e0297`；CHG-DOCU-2026-031 implementing；收口不委托） |
+| M2-N2-0 | 恢复与查询合同只读勘测 | 用户 2026-10-09 批准 N1a + N2-0 批次；卡 080 | 报告 `.auto-pm/reports/m2-n20/N2-0_SURVEY_REPORT.md`（SHA-256 前 8 位 `1352e908`），不改任何仓库文件 | 比较控制根检出、发布 `1.3.3-a808fa8` 与 M2 尖端三个版本；机器引用逐条核对、只读前后指纹相同 | COMPLETED / 等待用户读报告验收（CHG-DOCU-2026-025 implementing；Run SUCCEEDED、Work CLOSED；收口不委托） |
+| M2-DEP-INT | 把发布线的 ADJ 与 IC02 整合进 M2 代码线（部署前提任务，不是债务偿还） | N2-0 报告；用户 2026-10-09 预授权 | 拟：`decision.py`、`ui/cli/continuity.py`、`continuity_store.py`、`implementation_card_*` 等发布线改过的文件及对应测试，落点以实施卡为准 | 整合后 `adjudicate_blocked_work` 与实施卡预检均可用且合同不变；M2 已有功能不回退；触及核心清单，按核心档全量九组；不以丢弃任一方改动解决冲突；门禁全过且提交等于 Checkpoint 时可代为收口 | PLANNED（用户 2026-10-09 预授权；须先在聊天报卡 SHA） |
+| M2-GOV-WBS8 | WBS 修订 8（最小版）：采纳 V3.0.23，回写 F02 至分档器及 N1a、N2-0 的事实，写入 M2 冻结条款、剩余清单与延期承诺表，新增 M2-DEP-INT | 用户 2026-10-09 决定与预授权；卡 081 | WBS 单文件 | 除卡 081 §5 列明的行外只加不删；E 链、V04-R1 拆分、D08、N 系列等处置不写入，留给 M3 规划 | PLANNED（实施与验收状态以 Work `WORK-SYS001-M2-GOV-WBS8-001` 与其变更单为准） |
 
 产品代码范围与提交治理证据必须分层表达。实施卡建立本身不等于验收；最终仍须新的 Decision、有效 Work/Run、当前字节 Checkpoint、正常 Git Hook 本地提交及合法治理终态。
+
+#### 4.7.2 治理时点、三线血统与来源说明（2026-09-29）
+
+**当前时点证据。** 于主工作区 HEAD `58ac6a03a886832588e8adc6d81c16453ac8b25a`、本地时间 `2026-09-29T19:44:46-07:00` 只读采集：canonical 事件 2566 条、前后哈希断裂 0；`WORK_ADJUDICATED` 14 条且对应 14 个 Work 全部 `CANCELLED`；`RUN_LEGACY_LEASE_FENCED` 5 条；SW008 Work 状态仅有 `ACCEPTED/CANCELLED/CLOSED`，无 `BLOCKED`；`pm resume SW-2026-008 --json` 无候选和冲突；SW008 台账 0 缺失、0 孤儿、0 状态不一致。CHG-SCPT 状态精确统计为 approved 33、implementing 15、pending_acceptance 10、draft 4、completed 97、closed 28；按非终态口径未关闭 62 条。active release 为 `1.3.3-0b72499`，previous 为 `1.3.3-e648e0b`，configured/effective/load path 一致且无 fallback。
+
+**署名与来源。** `fubai` 与 `baiyang` 是同一用户的等权署名。CHG-347～354 的文件编制字段为 Claude，审批字段为用户等权署名 `baiyang`；CHG-355 的编制与审批字段均为 `baiyang`。根据用户 2026-09-29 的明确确认，CHG-354/355 最终收口、H11C 执行 CHG-355，以及 `DEC-20260929-H11CFENC`、`DEC-20260929-H11CADJD` 的创建与批准由用户亲手执行；其余 Claude 写入均源自对话授权。现有 CHG/Decision schema 不单独记录命令发起进程，故本段同时引用文件字段与用户确认，不以署名等价掩盖 Agent 写入来源。
+
+| 血统 | 冻结点 | 当前事实 |
+|---|---|---|
+| U 线 | `d200eb9b` | U04B 驾驶舱活动时间线，10 个产品路径 |
+| R 线 | `70d7e093`（父提交 `e05fafa1`） | 终态 lease reconcile + Hook 双根修复，共 11 个路径 |
+| 发布线 | `0b724997`（经 `e648e0b4`） | H11A/H11C 行政裁决与旧终态 lease 围栏，去重后 10 个路径 |
+
+验证方法为 `git rev-parse`、`git merge-base`、`git merge-tree` 与逐提交 `git diff --name-only`（2026-09-29）：U 线与 R 线代码合并无冲突，仅治理台账冲突；继续并入发布线时，产品代码冲突集中在 `continuity_execution_service.py`、`decision_package.py`、`continuity.py`、`test_continuity_store.py` 四个文件，`continuity_store.py` 可文本自动合并但仍需语义验收。实施卡工具只在 M2 线；发布线独有 `work adjudicate`、`adjudication-evidence`、`run fence-legacy-terminal`、`legacy-terminal-evidence` 四个命令，M2 线独有 `run reconcile-terminal-lease` 与五个 `implementation-card` 命令。
+
+**开发运行时切换政策。** M2 期间任何开发运行时切换必须使用独立 CHG、Decision、exact-tree 校验、身份一致性核验及切换/回退演练；D07 仍是唯一正式稳定交付边界。2026-09-29 已受控切换 `1.3.3-8f08c1a`、`1.3.3-e648e0b`、`1.3.3-0b72499`；这些开发运行时不自动授权下一次部署，也不把候选验收外推为 main 合并或正式发布。
+
+#### 4.7.3 整改阶段最终证据与技术债登记（V3.0.17，2026-09-30）
+
+本节由 `M2-GOV-WBS2`（卡 029 V0.4）追加，只加不删；V3.0.16 及更早的文字保留，§4.7.1 表仅修改各行状态单元格。所有数字均在 2026-09-30T15:35:07-07:00 重新采集（命令见下表“采集方法”），与 2026-09-29 的“当时值”并列，不沿用旧数字。完整交付包（精确 diff、原始命令与 Exit Code、提交关系图、控制面终态、技术债、GPT 原始要求、偏差与风险）位于 `.auto-pm/reports/m2-gov-wbs2/M2_GOV_DELIVERY_PACKAGE.md`。
+
+**整改阶段最终证据。**
+
+| 阶段 | 卡 | 不可变提交 / 产物 | CHG / Decision | Run / Work / Checkpoint | 门禁结果摘要 |
+|---|---|---|---|---|---|
+| 1 WBS 修订 1 | 025 | `a385452c`（父 `58ac6a03`） | CHG-DOCU-2026-022 closed；`DEC-20260929-WBS10001` | RUN/WORK-SYS001-M2-GOV-WBS1-001 SUCCEEDED/CLOSED；`CP-SYS001-M2-GOV-WBS1-001` | 仅 WBS 单文件；G1～G5（见 024 §7） |
+| 2 BL02 统一基线 | 023 V0.4 | `7cfe227e`（经 `e8d9b3e5`、`4e08b0dd`） | CHG-SCPT-2026-356、357 completed；`DEC-20260929-BL02CODE`、`DEC-20260930-BL02RSET` | Run 002 SUCCEEDED（001 CANCELLED 保留）、Work CLOSED；`CKPT-SW008-M2-GOV-BL02-002` | G1 `PASS_WITH_BASELINE_EXCEPTION`（E-G1-1/2/3、E-G3-1），G2/G4/G5/G6 PASS，G3 `PASS_WITH_BASELINE_EXCEPTION` |
+| 3 ADJ（R1） | 026 V0.3 | `d876cf98`（父 `7cfe227e`，9 路径） | CHG-SCPT-2026-358 completed；`DEC-20260930-ADJCODE0` | RUN/WORK-SW008-M2-GOV-ADJ-001 SUCCEEDED/CLOSED；`CKPT-SW008-M2-GOV-ADJ-001` | G1 `PASS_WITH_BASELINE_EXCEPTION`（1204 passed），G2～G6 PASS |
+| 4 IC02（R2） | 027 V0.4 | `e6529115`（父 `7cfe227e`，11 路径） | CHG-SCPT-2026-359 completed；`DEC-20260930-IC02CODE` | RUN/WORK-SW008-M2-GOV-IC02-001 SUCCEEDED/CLOSED；`CKPT-SW008-M2-GOV-IC02-001` | G1～G7 全 PASS（1197 passed） |
+| 5A DEP1 Gate A | 028 V0.2/V0.3 | 整合 `a808fa8a`（父 `7cfe227e`、`d876cf98`、`e6529115`） | CHG-SCPT-2026-360 completed；`DEC-20260930-DEP1INTG` | RUN/WORK-SW008-M2-GOV-DEP1-001 SUCCEEDED/CLOSED；`CKPT-SW008-M2-GOV-DEP1-001` | 并集回归 1458/1458 有结果、0 失败；两次构建逐文件一致；临时切换/回退演练通过 |
+| 5B DEP1 Gate B | 028 V0.3 | release `1.3.3-a808fa8`（无源码提交） | CHG-SCPT-2026-361 completed；`DEC-20260930-DEP1DPLY` | RUN/WORK-SW008-M2-GOV-DEP1-002 SUCCEEDED/CLOSED；`CKPT-SW008-M2-GOV-DEP1-002` | 切换后核验全部通过（identity 无 fallback、新命令可用、V0.3 预检 exit 0、台账 0/0/0、证据命令 19/19、事件链 0 断裂、三个 release exact-tree） |
+
+**验收状态口径。** `DELEGATED_ACCEPTED` 表示批准与验收由 Claude 依用户 2026-09-30 的对话授权以委托方式执行（CHG 批准/验证结论文件带“委托执行”标记），证据齐备，但**用户本人尚未逐阶段亲自验收**，故不记为 `ACCEPTED`。阶段 1 的批准文件无委托标记，终验收发起进程无法由现有 schema 证明，记 `CLAUDE_REVIEWED`。`M2-GOV-WBS2` 由本复查候选形成，处于 `VERIFYING / PENDING_ACCEPTANCE`；用户亲自验收候选后，方可由仅含状态与验收回执的第二提交更新。
+
+**H11 现状。** 保持 `COMPLETED / ACCEPTED`：14 条目标 Work 均 `CANCELLED`、5 条旧终态 lease 已围栏（`WORK_ADJUDICATED` 14 条、`RUN_LEGACY_LEASE_FENCED` 5 条，当前采集）；本轮未重新执行、未重新裁决、未改写历史事件或 Checkpoint。
+
+**时点证据（当前值对当时值）。**
+
+| 指标 | 当前值（2026-09-30T15:35） | 2026-09-29 当时值 | 采集方法 |
+|---|---|---|---|
+| 主工作区 HEAD / 分支 | `6f759fce` / `codex/c09-recovery-governance` | `58ac6a03` | `git rev-parse HEAD`、`git branch --show-current` |
+| active / previous release | `1.3.3-a808fa8` / `1.3.3-0b72499` | `1.3.3-0b72499` / `1.3.3-e648e0b` | 读 `active_release.json`、`previous_release.json` |
+| canonical 事件数 / 链断裂 | 2651 / 0（304/304 Run 活动校验通过） | 2566 / 0 | 只读数据库副本上运行 `m2-gov-dep1/tools/drill.py` |
+| `WORK_ADJUDICATED` / `RUN_LEGACY_LEASE_FENCED` | 14 / 5 | 14 / 5 | `select count(*) from events where event_type=…`（只读） |
+| Work 状态分布（全库） | ACCEPTED 97、BLOCKED 2、CANCELLED 87、CLOSED 64；2 条 BLOCKED 均属 SW009，SW008 无 BLOCKED | SW008 无 BLOCKED | `select state,count(*) from work_items group by state`（只读） |
+| SW008 未关闭 CHG | **73**（approved 38、implementing 16、pending_acceptance 14、draft 5）；另有 4 个归档目录下格式异常文件 CHG-SCPT-2026-161～164 状态字段无法解析 | 62（仅 CHG-SCPT 口径） | 读 CHG 文件「变更状态」字段（`collect_facts.py`），不用文本近似 |
+| 工作树数量 / 含未提交改动 | 124 / 22 | 119 / 22 | `git worktree list --porcelain` 与逐个 `git status --porcelain` |
+| 台账 SW-2026-008 / SYS-2026-001 | 均 0/0/0 | 0/0/0 | `main.py ledger reconcile <PID>` |
+
+**来源说明（按 CHG 文件 approver/comment 字段现场核对，不凭聊天角色推断）。** GPT 实施了阶段 1 的候选（卡 025）；CHG-DOCU-2026-022 的批准文件无委托标记，以用户批准为据。阶段 2 的 CHG-356 批准行（V0.3，2026-09-29）无委托标记，其验证结论与 CHG-357、358、359、360、361 的批准及验收均带“委托执行”标记，实际执行者为 Claude Opus 5.5 代 `fubai` 署名；CHG-DOCU-2026-023（本卡）由 Claude Sonnet 5.5 代为批准，复查候选验收与最终验收不在委托内。DEP1 Gate B 的切换脚本由用户亲自运行（第 3 次运行通过）。`fubai` 与 `baiyang` 为同一用户等权署名；现有 CHG/Decision schema 不单独记录命令发起进程。
+
+**实际偏差声明（相对 GPT 原始整改要求）。** ① 增加 BL02 统一基线（三线互不包含）；② 增加并**已执行**开发运行时集成部署（原文“不部署、不切换 release”；用户批准，开发运行时，非 D07）；③ H11 直接记为 `COMPLETED / ACCEPTED`；④ WBS 分两次修订；⑤ D 项扩大为“预检命令 + 强制接入 `continuity work create`”；⑥ 增加来源说明；⑦ 阶段 2～5 由 Claude 委托执行批准与验收；⑧ DEP1 Gate B 经三次运行（首次因预检相对路径自动回退、二次因备份目录已存在在切换前停止、三次首轮被中断后幂等重入通过）；⑨ BL02 首个整合 Run 001 CANCELLED 并以恢复链完成；⑩ 卡 029 由 Claude Sonnet 5.5 执行，且起卡时错建的 Work（`WORK-SW008-M2-GOV-WBS2-001`）已 CANCELLED 保留。
+
+**技术债登记（当前值；完整 17 项见交付包 §6）。** ① 主工作区大量 CHG/台账/Decision/实施卡及三个 release 指针文件未提交；② SW008 未关闭 CHG 73 个，另有 4 个格式异常归档 CHG；③ Markdown 与结构化实施卡两套并存（方案 C 为后续）；④ Service/Facade 层 `create_work` 与 Mission 派生 Work 未接入预检；⑤ 缺少正式 release 构建命令；⑥ H11 在较弱合同下执行；⑦ 旧 Hook 在 GBK 终端 emoji 报错；⑧ 主工作区 WBS 与本隔离候选分叉；⑨ 历史非终态 Run；⑩ 124 个工作树中 22 个含未提交改动；⑪ release 目录未被 Git 跟踪；⑫ CHG-346 失败历史；⑬ pytest-qt 间歇性 access violation（E-G1-3）；⑭ `list_missions` 历史 Mission 校验失败（E-G3-1）；⑮ SW009 有 2 条 BLOCKED Work；⑯ 部署脚本缺少中断保护；⑰ `work create` 不校验 Work 与 Decision 的项目一致性。
+
+**U05 状态。** 整改闭环并经用户验收后可启动；U05 的隔离基线为 BL02 统一基线 `7cfe227e`；集成部署（`1.3.3-a808fa8`）为软依赖，现已就绪。未经用户验收本候选，不得启动 U05；本修订不授权合并 main、推送、正式发布或 D07。
+
+**V3.0.18 补记（验收回执）。** 用户于 2026-09-30 在会话中亲自作出“第一提交验收通过”（未委托执行 Agent），回执 `.auto-pm/reports/m2-gov-wbs2/first_commit_acceptance_receipt.txt`（SHA-256 `628e475452cf7d9b1c7e7734e08d609dac1559d9b28a27d6723a9f89c30b9c9d`） 绑定复查候选 `e07f7662`（父 `a385452c`）、卡 029 V0.4 与首个 Checkpoint `CKPT-SYS001-M2-GOV-WBS2-001`。据此 `M2-GOV-WBS2` 更新为 `COMPLETED / ACCEPTED`，整改闭环，U05 可由 BL02 统一基线 `7cfe227e` 启动。该验收只覆盖 WBS V3.0.17 候选本身：阶段 2～5 仍为 `DELEGATED_ACCEPTED`，阶段 1 仍为 `CLAUDE_REVIEWED`（用户尚未逐阶段亲自验收）；不授权合并 main、推送、正式发布、D07 或新的 release 切换。上文 V3.0.17 段落中关于“待用户验收”的表述是当时的历史状态，予以保留。
+
+#### 4.7.4 U05～U08 验收回写、U07 拆分与 U09 新增（V3.0.19，2026-10-01）
+
+本节由 `M2-GOV-WBS3`（卡 038 V1.0）追加，只加不删；V3.0.18 及更早的文字保留，仅修改卡 038 §5 列明的行。所有 SHA、ID 与数字均在 2026-10-01T13:44:48-07:00 只读采集（`.auto-pm/reports/m2-gov-wbs3/collect_facts.py`，输出 `facts_raw.json`）。
+
+**U05～U08 验收证据。**
+
+| 卡（SHA-256 前 8 位） | 任务 | 不可变提交 | CHG / Decision | Run / Work / Checkpoint | 门禁 | 最终验收方式 |
+|---|---|---|---|---|---|---|
+| 030 V1.0（`269c0093`） | U05 | `ace7a959`（父 `7cfe227e`；11 路径） | CHG-SCPT-2026-362 completed；`DEC-20260930-U05CODE0` | Run U05-001 SUCCEEDED；Work U05-001 CLOSED；`CKPT-SW008-M2-U05-001` | G1、G3～G7 PASS；G2 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1） | 用户本人验收并运行收口脚本 |
+| 031 V1.0（`30781b0a`） | U06 | `8b7f199a`（父 `ace7a959`；9 路径） | CHG-SCPT-2026-363 completed；`DEC-20260930-U06CODE0` | Run U06-001 SUCCEEDED；Work U06-001 CLOSED；`CKPT-SW008-M2-U06-001` | G1、G3～G7 PASS；G2 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1） | 用户本人验收并运行收口脚本 |
+| 032 V1.1（`81b08a50`） | U07A | `795fe448`（父 `8b7f199a`；6 路径） | CHG-SCPT-2026-364 completed；CHG-SCPT-2026-365 completed；`DEC-20260930-U07ACODE`、`DEC-20261001-U07ARSET` | Run U07A-001 CANCELLED、Run U07A-002 SUCCEEDED、Run U07A-RSET-001 SUCCEEDED；Work U07A-001 CLOSED、Work U07A-RSET-001 CLOSED；`CKPT-SW008-M2-U07A-001` | G1、G3～G7 PASS；G2 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1） | 用户本人验收并运行收口脚本（364、365） |
+| 033 V1.0（`03d05c11`） | U07B | `35379585`（父 `795fe448`；5 路径） | CHG-SCPT-2026-366 completed；`DEC-20261001-U07BCODE` | Run U07B-001 SUCCEEDED；Work U07B-001 CLOSED；`CKPT-SW008-M2-U07B-001` | G1、G3～G7 PASS；G2 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1） | 用户本人验收并运行收口脚本 |
+| 034 V1.0（`039853bb`） | U07C | `9a92e9b7`（父 `35379585`；3 路径） | CHG-SCPT-2026-367 completed；`DEC-20261001-U07CCODE` | Run U07C-001 SUCCEEDED；Work U07C-001 CLOSED；`CKPT-SW008-M2-U07C-001` | G1、G3～G7 PASS；G2 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1） | 用户在对话弹窗确认，Claude 代跑收口 |
+| 035 V1.0（`4d284a50`） | U07D | `460e24f6`（父 `9a92e9b7`；5 路径） | CHG-SCPT-2026-368 completed；`DEC-20261001-U07DCODE` | Run U07D-001 SUCCEEDED；Work U07D-001 CLOSED；`CKPT-SW008-M2-U07D-001` | G1、G3～G7 PASS；G2 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1） | 用户在对话弹窗确认，Claude 代跑收口 |
+| 036 V1.0（`d2788e3c`） | U08 | `d40318d0`（父 `460e24f6`；2 路径） | CHG-SCPT-2026-369 completed；`DEC-20261001-U08CODE0` | Run U08-001 SUCCEEDED；Work U08-001 CLOSED；`CKPT-SW008-M2-U08-001` | G1、G3～G7 PASS；G2 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1） | 用户在对话弹窗确认，Claude 代跑收口 |
+
+**来源说明（按 CHG 文件批准行与验证结论现场核对）。** 七张卡的实施批准均为用户在对话或确认弹窗中明确批准后，由 Claude Sonnet 5.5 以委托方式执行（CHG 批准行带“委托执行”标记）。最终验收：CHG-SCPT-2026-362～366 的验证结论为“用户本人验收通过”；CHG-SCPT-2026-367～369 为“用户在对话弹窗确认验收通过（由 Claude 代为运行）”。卡 035（U07D）的字节写成于用户批准设计摘要之后，用户未逐字阅读，CHG-SCPT-2026-368 的批准行已如实记录。U07A、U07B 回执中的执行者与委托日期沿用通用脚本的旧文案，实际执行者为 Claude Sonnet 5.5、批准日期以 CHG 批准行为准，属显示问题。`fubai` 与 `baiyang` 为同一用户等权署名。
+
+**实际偏差声明（相对 V3.0.18 任务表）。** ① U05 实际 11 个路径、U06 实际 9 个路径（表内原各列 3 个），原因见实施卡 030、031 的 §1；② 原 U07 一行在开工前勘测后拆为四项：U07A（执行成功后没有任何产品代码生成验证 Checkpoint，驾驶舱到不了验收门）、U07B（规划生成的 CHG 没有实质内容，收尾永远待同步）、U07C（原 U07 的 SDK）、U07D（驾驶舱“开始”对规划类任务失败）；该拆分在执行前没有先回写 WBS，由本修订补记；③ U07A 的 Run 001 因长门禁期间漏续租而租约过期，经恢复链 CHG-SCPT-2026-365 / `DEC-20261001-U07ARSET` 结算为 `CANCELLED`，Run 002 `SUCCEEDED`；卡 032 因隐私口径与既有存储设计矛盾，经用户批准由 V1.0 升为 V1.1；④ U08 只提供代码层兼容，CLI 参考文档的修订留给 D01。
+
+**U09 新增（V05 前置）。** 2026-10-01 U08 收口后的只读勘测确认：驾驶舱只能保存 `PRE_AUTH` 草稿，且其 `request_id` 对用户不可见；范围、风险、非目标与执行授权由调用方传入，产品内没有自动规划器；批准前的范围卡没有持久化，规范库也没有“列出草稿”的读取接口。因此 V05 要求的“从 GUI 输入目标到验收”缺少“目标 → 范围卡 → 批准”一段。用户 2026-10-01 裁决：① 范围卡由 PM 经 CLI/SDK 起草，驾驶舱只展示给用户审；② 驾驶舱用一个按钮“批准范围并开始”，整条链两次业务决策（批准范围、最终验收）；③ 待批准范围卡存规范库追加的一张表，在事件链内可审计；④ 驾驶舱批准人身份来自配置项，未配置则拒绝批准。据此新增 U09A（Store 与 Facade，实施卡 037）、U09B（CLI）、U09C（驾驶舱），V05 增加对 U09C 的依赖，M2 范围改为 U01～U09、V01～V08。U09B、U09C 须各自先勘测写卡。
+
+**任务表计数。** §4.2～§4.10 各表按 ID 行机器计数：V3.0.18 为 107 行，本修订后为 115 行（U07A～U07D 4 行、U09A～U09C 3 行、`M2-GOV-WBS3` 1 行）。文首“100 个原子任务”为历史口径，与逐行计数不一致；本修订不改该句，口径留待 M2 总审计统一。
+
+**时点证据（2026-10-01T13:44:48-07:00）。**
+
+| 指标 | 当前值 | 采集方法 |
+|---|---|---|
+| 主工作区 HEAD / 分支 | `a84fd7ee` / `codex/c09-recovery-governance` | `git rev-parse HEAD`、`git branch --show-current` |
+| active / previous release | `1.3.3-a808fa8` / `1.3.3-0b72499` | 读 `active_release.json`、`previous_release.json` |
+| canonical 事件数 / 链断裂 | 2778 / 0 | 只读连接逐条复算前后哈希 |
+| SW008 未终结 Mission | 0 | `select count(*) from mission_items …`（只读） |
+| SW008 未关闭 CHG | 73（另有 4 个格式异常归档文件无法解析） | 逐文件读“变更状态”字段 |
+| 工作树数量 | 132 | `git worktree list --porcelain` |
+| 台账 SW-2026-008 / SYS-2026-001 | 均 0/0/0 | `main.py ledger reconcile <PID>` |
+
+**技术债登记（增补，接 §4.7.3 的 ①～⑰）。** ⑱ 真实控制库 `schema_meta` 存在 `continuity-store.v2` 与 `continuity-store.v3` 两行，迁移链从未走到 v7，各表由每次重跑的建表语句补齐；当前不影响读写，但任何新逻辑不得依赖 schema 版本号判断，只能判断表是否存在；⑲ `DecisionService` 的模型自签拦截规则只拦 `ai/agent/codex/gpt/model`，不拦 `claude`，由 U09C 与批准人配置项一并处置。已知限制（各验收回执已记录，不另编号）：U07D 的租约口令只在进程内存，进程在“执行完成、验证未做”之间崩溃后无法补验证；`SubstanceChecker` 仍会对 CHG 模板 §6.3 的占位关联单行报占位；开发运行时 `1.3.3-a808fa8` 不含 U05～U08 代码。
+
+**后续顺序。** U09A → U09B → U09C → V01～V08 → M2 总审计与 WBS 回写。M2 完成后做一次开发运行时部署（独立 CHG/Decision、exact-tree、切换/回退演练，切换脚本由用户运行，不等于正式发布）；合并 main 等到 M3 的 D03；正式部署只在 D07。本修订不授权 U09A 开工、合并 main、推送、部署或 release 切换。
+
+#### 4.7.5 U09A～U09C 验收回写、QML 生命周期根修与技术基线校准（V3.0.20，2026-10-03）
+
+本节由 `M2-GOV-WBS4`（卡 041 V1.0）追加，只加不删；V3.0.19 及更早的文字保留，仅修改卡 041 §5 列明的行。所有 SHA、ID 与数字均在 2026-10-03T05:59:44-07:00 只读采集（`.auto-pm/reports/m2-gov-wbs4/collect_facts4.py`，输出 `facts_raw.json`）。用户在对话中批准本修订的范围，批准发生在卡字节写成之前，回执已如实记录。
+
+**U09A～U09C 验收证据。**
+
+| 卡（SHA-256 前 8 位） | 任务 | 不可变提交 | CHG / Decision | Run / Work / Checkpoint | 门禁 | 最终验收方式 |
+|---|---|---|---|---|---|---|
+| 037 V1.0（`a8b5475a`） | U09A | `eebdeecb`（父 `d40318d0`；4 路径） | CHG-SCPT-2026-370 completed；`DEC-20261001-U09ACODE` | Run U09A-001 SUCCEEDED；Work U09A-001 CLOSED；`CKPT-SW008-M2-U09A-001` | G1、G3～G7 PASS；G2 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1）；变异 4/4 | 用户在对话弹窗确认，Claude 代跑收口 |
+| 039 V1.0（`df6de8d0`） | U09B | `cec3afa7`（父 `eebdeecb`；4 路径） | CHG-SCPT-2026-371 completed；`DEC-20261001-U09BCODE` | Run U09B-001 SUCCEEDED；Work U09B-001 CLOSED；`CKPT-SW008-M2-U09B-001` | G1、G3～G8 PASS；G2 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1）；变异 6/6；qml 首跑 1 个时序抖动已按卡处置并记入判卷 | 用户在对话弹窗确认，Claude 代跑收口 |
+| 040 V1.0（`5c4cd040`）→ V1.2（`6d09d57e`）→ V1.3（`b5e39548`） | U09C | `3c32e8ad`（父 `d95f45d2`；13 路径） | CHG-SCPT-2026-372 completed；`DEC-20261001-U09CCODE`、`DEC-20261002-U09CROOT`、`DEC-20261002-U09CFIN3`、`DEC-20261002-U09CRUN4` | Run U09C-001 FAILED、Run U09C-002 FAILED、Run U09C-003 FAILED、Run U09C-004 SUCCEEDED；Work U09C-001 CANCELLED、Work U09C-002 CANCELLED、Work U09C-003 CANCELLED、Work U09C-004 CLOSED；`CKPT-SW008-M2-U09C-004` | Run004 判卷 `PASS_WITH_BASELINE_EXCEPTION`（仅 E-G1-1）：崩溃配置复验 5×40、混合 G1 307、QML 283+1、core 916/3/1、contracts 191/1、infrastructure 32、cli 252/1、change 230；G8 6/6 | 用户在对话中确认验收通过，Claude 代跑收口（2026-10-03） |
+
+**M2-GOV-QML1（QML 测试生命周期根修）。** U09C 首个 Run 在 `tests/qml` 门禁出现间歇性原生崩溃（`Fatal Python error: Aborted`，第 36 项，位于已有测试 `test_pm_cockpit_start_e2e.py` 的事件处理处），按实施卡 040 §9 硬停止。限时诊断确认已有的 U06 测试 `test_boss_main_retries_the_sync_and_turns_the_card_into_completed` 是崩溃的必要条件、新增测试并非原因，随后由 CHG-SCPT-2026-373 查明并修复。根因（外部调试器抓到的原生调用栈，导出符号近邻为 `QAbstractEventDispatcher::filterNativeEvent → purecall → abort`，不是精确的函数与源码行，也不是完整内存转储；真实对象环与线程轨迹佐证）：后台 worker 与 GUI Bridge 之间存在强引用环，GUI 线程创建的对象被后台垃圾回收线程销毁，随后 GUI 原生事件泵处理已销毁对象而中止。修复分两次提交：F `6eead5e4`（4 路径：文件监视 worker 去掉无用的 GUI 回指并补真实线程池与后台回收回归；测试侧确定性的窗口、Bridge、engine 收尾，以及 U06 测试在后台快照未完成时就读库的时序竞态）与 F2 `d95f45d2`（2 路径：PM 启动 worker 持有应用服务而不是 GUI Bridge，旧生产代码的负向对照在真实所有权断言处失败）；相对 U09B 累计 6 路径。验证：F2 基线混合 G1 220 passed、QML 260 passed/1 deselected；叠加 U09C 十三文件后崩溃配置复验 5×40 通过。已知限制：有限次无崩溃不等于永不崩溃；没有取得完整内存转储；F2 的旧代码负向对照证明所有权缺陷，不单独证明所有崩溃都只有这一个原因。Run 记录：Run QMLLIFE-001 FAILED、Run QMLLIFE-002 FAILED、Run QMLLIFE-003 SUCCEEDED、Run QMLLIFE-004 SUCCEEDED；Work：Work QMLLIFE-001 CANCELLED、Work QMLLIFE-002 CANCELLED、Work QMLLIFE-003 CLOSED、Work QMLLIFE-004 CLOSED；Checkpoint `CKPT-SW008-M2-QMLLIFE-003`、`CKPT-SW008-M2-QMLLIFE-004`；CHG-SCPT-2026-373 completed。
+
+**U09C 实际偏差声明（相对 V3.0.19 任务表）。** ① U09C 实际 13 个路径（表内只列四类路径加“批准人配置项”），多出 `boss_main.qml`、新增组件 `PendingScopeCard.qml`、`app_config.py`、`boss_qml_window.py`、`decision_service.py` 与 4 个新增测试文件；② 隔离基线由 U09B `cec3afa7` 改为根修 F2 `d95f45d2`；③ Run 历史：Run001（qml 门禁硬停止）、Run002、Run003（core 门禁在 4500 秒上限处超时）均 FAILED、Checkpoint 为 0，Work001～003 均 `CANCELLED`，历史原样保留；Run004 `SUCCEEDED`、Work004 `CLOSED`。Work003 因旧 Decision 条件明文“不允许 Run004”且授权只接受 `PLANNED` 的 Work，不能转回继续使用，故取消并新建后继 Work004 与 Decision `DEC-20261002-U09CRUN4`；④ Run004 内发现并修正了判卷与变异工具三处从未在真实输出上验证过的缺陷（JUnit 失败类型读取、含中文参数的节点编号转义归一、变异 M2 的预期失败形式），工具字节被门禁证据绑定，所以整个窗口重开，前两轮窗口作为被取代证据保留；详见 `.auto-pm/reports/m2-u09c-run004/DEVIATIONS_RUN004.md`（SHA-256 `6fda603e8c144259b4dc385962a676b4d5c3552a91945cad4937b52aadf976ce`）；⑤ 非 QML 批次末尾的自动源码检查两次报 `git failed:` 原因未查明（逐进程指纹与判卷的源码核验均无漂移）；⑥ 已知限制：批准人是配置声明而不是认证；提示语随下一次快照清除；一个项目同一时刻只能有一个未终结任务；`AUTO_PM_COCKPIT_APPROVER` 的使用说明留给 D01。
+
+**技术基线（M2 代码线，V3.0.20 校准）。** M2 代码线是一条尚未合并的堆叠提交链，从 BL02 统一基线起到 U09C 止，逐个核对父子相连（核对结果：相连）；链上最后一个提交 `3c32e8ad`（分支 `codex/m2-u09c-lifecycle-final`）就是 M2 代码线当前唯一的尖端，后继任务只能从该提交或经独立验收的后继开始；WBS 修订提交（V3.0.18 `572932a7`、V3.0.19 `79ab9516` 与本修订）在 SYS-2026-001 的文档分支链上，不在代码链内。
+
+| 序 | 标签 | 提交 | 父提交 |
+|---|---|---|---|
+| 1 | BL02 | `7cfe227e` | `4e08b0dd` |
+| 2 | U05 | `ace7a959` | `7cfe227e` |
+| 3 | U06 | `8b7f199a` | `ace7a959` |
+| 4 | U07A | `795fe448` | `8b7f199a` |
+| 5 | U07B | `35379585` | `795fe448` |
+| 6 | U07C | `9a92e9b7` | `35379585` |
+| 7 | U07D | `460e24f6` | `9a92e9b7` |
+| 8 | U08 | `d40318d0` | `460e24f6` |
+| 9 | U09A | `eebdeecb` | `d40318d0` |
+| 10 | U09B | `cec3afa7` | `eebdeecb` |
+| 11 | QML-F | `6eead5e4` | `cec3afa7` |
+| 12 | QML-F2 | `d95f45d2` | `6eead5e4` |
+| 13 | U09C | `3c32e8ad` | `d95f45d2` |
+
+分支当前指向：`codex/m2-u09a-scope-card-store` `eebdeecb`、`codex/m2-u09b-cli-scope-card` `cec3afa7`、`codex/m2-qml-lifecycle` `d95f45d2`、`codex/m2-u09c-lifecycle-final` `3c32e8ad`、`codex/m2-gov-wbs3` `79ab9516`。开发运行时 active `1.3.3-a808fa8`、previous `1.3.3-0b72499`，不含 U05～U09C 代码；M2 全部完成后做一次开发运行时部署（独立 CHG/Decision、exact-tree、切换/回退演练，切换脚本由用户运行，不等于正式发布）；合并 main 等到 M3 的 D03；正式部署只在 D07。
+
+**任务表计数。** §4.2～§4.10 各表按 ID 行机器计数：V3.0.19 为 115 行，本修订后为 117 行（`M2-GOV-QML1`、`M2-GOV-WBS4` 各 1 行）。文首原写“100 个原子任务”，是 V3.0.18 以前的历史口径；V3.0.20 起文首改写为逐行机器计数口径，并在此保留原数字作说明。
+
+**时点证据（2026-10-03T05:59:44-07:00）。**
+
+| 指标 | 当前值 | 采集方法 |
+|---|---|---|
+| 主工作区 HEAD / 分支 | `a84fd7ee` / `codex/c09-recovery-governance` | `git rev-parse HEAD`、`git branch --show-current` |
+| active / previous release | `1.3.3-a808fa8` / `1.3.3-0b72499` | 读 `active_release.json`、`previous_release.json` |
+| canonical 事件数 / 链断裂 | 2929 / 0 | 只读连接逐条复算前后哈希 |
+| SW008 未终结 Mission | 0 | `select count(*) from mission_items …`（只读） |
+| SW008 未关闭 CHG | 73（另有 4 个格式异常归档文件无法解析） | 逐文件读“变更状态”字段 |
+| 工作树数量 | 139 | `git worktree list --porcelain` |
+| 台账 SW-2026-008 / SYS-2026-001 | 均 0/0/0 | `main.py ledger reconcile <PID>` |
+
+**教训沉淀（V3.0.20）。** ① 演练用的项目副本必须包含点文件（`.ruff.toml`），否则 Ruff 通过没有意义：U09C 的演练漏了它，真实配置下有 4 处告警；② 门禁工具的判卷代码要先在真实输出上验证再启动长批次：U09C 的判卷工具缺陷到 Run004 才暴露，工具字节绑定证据，修正会使整个窗口重开；③ 长门禁的时间上限要用实测值估算并留余量：Run003 的 core 在 4500 秒上限处约 72% 超时，Run004 把上限放到 8000 秒，实测 3728 秒；④ 后台任务有约 30 分钟的系统时限，会杀掉启动长批次的外壳而真正的测试进程不受影响，串联与续租因此不能依赖外壳，需要每个检查周期手动续租；⑤ 间歇性原生崩溃对输出捕获方式、导入顺序等无关扰动极敏感，诊断要用固定顺序重放加对照，并把“必要条件”与“相关因素”分开。
+
+**技术债登记（增补，接 ⑱⑲）。** ⑲ 已由 U09C 处置：`DecisionService` 的自签拦截规则现在也拦 `claude`、`anthropic`、`opus`、`sonnet`、`haiku`、`fable`、`gemini`、`copilot`、`llm`、`bot`、`assistant`；⑳ 驾驶舱批准人是配置声明而不是认证，拒绝模型名只是防误用、不是防伪造；㉑ 根修只有原生调用栈与对象环证据、没有完整内存转储，间歇性崩溃不能证明“永不再发”；㉒ 非 QML 批次末尾自动源码检查两次报 `git failed:`，原因未查明。
+
+**后续顺序。** V01～V08（V05 对 U09C 的依赖已满足）→ M2 总审计与 WBS 回写 → 一次开发运行时部署 → M3。本修订不授权 V01 开工、合并 main、推送、部署或 release 切换。
+
+#### 4.7.6 V01 验收回写、PLC 文档与代码一致性核对任务登记（V3.0.21，2026-10-03）
+
+本节由 `M2-GOV-WBS5`（卡 044 V1.0）追加，只加不删；V3.0.20 及更早的文字保留，仅修改卡 044 §5 列明的行。所有 SHA、ID 与数字均在 2026-10-03T14:54:46-07:00 只读采集（`.auto-pm/reports/m2-gov-wbs5/collect_facts5.py`，输出 `facts_raw.json`）。
+
+**V01 验收证据。**
+
+| 卡（SHA-256 前 8 位） | 任务 | 不可变提交 | CHG / Decision | Run / Work / Checkpoint | 门禁 | 最终验收方式 |
+|---|---|---|---|---|---|---|
+| 042 V1.0（`dbb04f53`） | V01 | `37a4faff`（父 `3c32e8ad`；5 路径；+1552/−14） | CHG-SCPT-2026-374 completed；`DEC-20261003-V01PLCQG` | Run V01-001 SUCCEEDED；Work V01-001 CLOSED；`CKPT-SW008-M2-V01-001` | G1～G9 全部通过（G2 仅含基线例外 E-G1-1）；G1 268 passed（基线 236，新增 32）；core 948 passed/3 failed/1 skipped；qml 283、cli 252/1、contracts 191/1、infrastructure 32、change 230 与基线相同；变异 12/12；钉死基准冒烟通过 | 用户在对话弹窗确认，Claude 代跑收口 |
+
+**V01 的效果。** PLC 任务（Run 的 owned 路径位于带 `.plc.json` 的 PLC 工程内）现在在验证时自动走 PLC 质量门：在候选工作树上以库方式调用现行 `PlcChecker` 与 `SclLinter`，失败项即不通过，警告只记录；证据存为 `checkpoint-evidence.v3`，绑定 Git 证据、PLC 工程根下全部文件字节（含被 Git 忽略的文件）与检查器包指纹；Facade 按 Run 选择 profile，验收校验识别 v3；一个 Run 只验证一个领域；Python 路径与 v1/v2 证据不变。
+
+**V01 实际偏差声明（相对 V3.0.20 任务表）。** ① 路径：WBS 的 V01 行只列 2 个路径，实际 5 个：执行服务与 Facade 两个产品文件必须同改（否则 PLC 任务走不到验收门：通用门只认 `.py`、Facade 写死 profile、验收只认 v1/v2），另新增两个测试文件，既有 `test_evidence_collection_service.py` 未改；② 用户批准早于卡的最终字节（其后只补写演练事实），回执已如实记录；③ 判卷没有偏差记录，唯一例外为基线既有 E-G1-1；④ 钉死基准：DJ-2026-005 在提交 `3c32e8ad` 的 Git 目录树 SHA 为 `b457f2b95acd58db7cf65207236ef0999ebda9dd`（现行检查器实测 50 通过、1 警告、0 失败）。
+
+**V01 已知限制。** INT/VAR 与 SCL 的一致性未核对（只做同基线绑定）；进程内质量门没有超时；检查器指纹只覆盖 `plc` 包本身；工程根之外被 Git 忽略的输入不在绑定内；整项目检查意味着已有失败项的工程（如 DJ-2026-000）内任何 Run 都会被拒绝。
+
+**PLC 文档与代码一致性核对：用户确认的需求。** 需求说明 `02_规划/043_PLC文档与代码一致性核对与自动补全需求说明_PM.md`（SHA-256 前 8 位 `3fee21e6`，用户 2026-10-03 确认）：核对信号名、数据类型、方向、注释，不核对通信协议；FB/FC 的接口文档只写自己声明的参数，DB、OB、结构体的变量表在变量定义文档、结构体字段只在一处维护；整份文档缺失警告并给草稿，不一致拦住并精确指出；直接拦提交、不设宽限期；自动补全只补缺行、不覆盖人写文字、补入行带【待确认】、一条命令确认；AI 任务写的文档不带标记。基准现状：DJ-2026-005 的文档与代码已大面积对不上（例如 FB_2001 的文档仍是旧的逐个信号，代码已重构为结构体整块传递），规则生效后须先治愈基准。
+
+**新增任务与顺序（用户 2026-10-03 确定）：V01B → V01C → V01D → V02。** V01B 把核对并入检查器并做自动补全（`plc check`、驾驶舱红灯、AI 验收门同时生效）；V01C 用其工具给 DJ-2026-005 生成草稿、用户审核后写入并重新钉基准；V01D 做提交拦截钩子与阶段门接入，碰提交钩子，单独验收；V02 依赖改为 V01、V01B、V01C、V01D、C09。V08 的模板提取使用治愈并重新钉死后的基准。各任务均须先勘测、写卡、用户批准后开工；本修订不授权其中任何一项。
+
+**技术基线更新（M2 代码线）。** 代码线唯一尖端由 U09C 变为 V01 `37a4faff`（分支 `codex/m2-v01-plc-quality-gate`，父 `3c32e8ad`），逐个核对父子相连（核对结果：相连）；后继任务从该提交或经独立验收的后继开始。
+
+| 序 | 标签 | 提交 | 父提交 |
+|---|---|---|---|
+| 1 | BL02 | `7cfe227e` | `4e08b0dd` |
+| 2 | U05 | `ace7a959` | `7cfe227e` |
+| 3 | U06 | `8b7f199a` | `ace7a959` |
+| 4 | U07A | `795fe448` | `8b7f199a` |
+| 5 | U07B | `35379585` | `795fe448` |
+| 6 | U07C | `9a92e9b7` | `35379585` |
+| 7 | U07D | `460e24f6` | `9a92e9b7` |
+| 8 | U08 | `d40318d0` | `460e24f6` |
+| 9 | U09A | `eebdeecb` | `d40318d0` |
+| 10 | U09B | `cec3afa7` | `eebdeecb` |
+| 11 | QML-F | `6eead5e4` | `cec3afa7` |
+| 12 | QML-F2 | `d95f45d2` | `6eead5e4` |
+| 13 | U09C | `3c32e8ad` | `d95f45d2` |
+| 14 | V01 | `37a4faff` | `3c32e8ad` |
+
+分支当前指向：`codex/m2-u09c-lifecycle-final` `3c32e8ad`、`codex/m2-v01-plc-quality-gate` `37a4faff`、`codex/m2-gov-wbs4` `7e2768a1`。开发运行时 active `1.3.3-a808fa8`、previous `1.3.3-0b72499`，不含 U05～V01 代码；M2 全部完成后做一次开发运行时部署（独立 CHG/Decision、exact-tree、切换/回退演练，切换脚本由用户运行）；合并 main 等到 M3 的 D03。
+
+**任务表计数。** §4.2～§4.10 各表按 ID 行机器计数：V3.0.20 为 117 行，本修订后为 121 行（`M2-GOV-WBS5`、`V01B`、`V01C`、`V01D` 各 1 行）。
+
+**时点证据（2026-10-03T14:54:46-07:00）。**
+
+| 指标 | 当前值 | 采集方法 |
+|---|---|---|
+| 主工作区 HEAD / 分支 | `a84fd7ee` / `codex/c09-recovery-governance` | `git rev-parse HEAD`、`git branch --show-current` |
+| active / previous release | `1.3.3-a808fa8` / `1.3.3-0b72499` | 读 `active_release.json`、`previous_release.json` |
+| canonical 事件数 / 链断裂 | 2973 / 0 | 只读连接逐条复算前后哈希 |
+| SW008 未终结 Mission | 0 | `select count(*) from mission_items …`（只读） |
+| SW008 未关闭 CHG | 73（另有 4 个格式异常归档文件无法解析） | 逐文件读“变更状态”字段 |
+| 工作树数量 | 141 | `git worktree list --porcelain` |
+| 台账 SW-2026-008 / SYS-2026-001 | 均 0/0/0 | `main.py ledger reconcile <PID>` |
+
+**教训沉淀（V3.0.21）。** ① 后台长任务的外壳有 2 小时上限，续租循环到期会停，需要在到期前重开，不能假设它一直在；② 涉及“文档对代码”这类规则时，先用真实基准粗测再定拦截策略：V01 勘测发现基准文档与代码已大面积不一致，直接改变了任务顺序；③ 基准按“某个提交上目录的 Git 目录树 SHA”钉死，不指向活目录；④ 在这台机器上 Bash 的 `$'\r'` 与 heredoc 里的反斜杠不可靠，字节级检查一律用 Python；⑤ 系统可能拒绝停止已启动的后台测试进程，长跑应避免重叠。
+
+**技术债登记（增补，接 ⑳～㉒）。** ㉓ `plc check --json` 的输出末尾追加一行 `launcher:` 且受控制台编码影响，无法被直接解析（V01 勘测发现，未处理）；㉔ V01 的质量门在进程内执行、没有超时；㉕ V01 的检查器指纹只覆盖 `plc` 包本身（不含 `find_prd_dir` 所在模块），工程根之外被 Git 忽略的输入不在绑定内。
+
+**后续顺序。** V01B → V01C → V01D → V02 → V03～V08 → M2 总审计与 WBS 回写 → 一次开发运行时部署 → M3。本修订不授权 V01B 开工、合并 main、推送、部署或 release 切换。
+
+#### 4.7.7 V01B～V04、第 1 期、TD1、第 1 期审计缺陷修复与 TD2 验收回写；拆分、分期与新顺序（V3.0.22，2026-10-06）
+
+本节由 `M2-GOV-WBS6`（卡 056 V1.0）追加，只加不删；V3.0.21 及更早的文字保留，仅修改卡 056 §5 列明的行。所有 SHA、ID 与数字均在 2026-10-06T15:20:40-07:00 只读采集（`.auto-pm/reports/m2-gov-wbs6/collect_facts6.py`，输出 `facts_raw.json`）；文中时间均为用户所在地的本地时间（UTC-7）。
+
+**验收证据（均由用户在对话中确认验收，CHG 收口由 Claude 代跑）。**
+
+| 卡 | 不可变提交 | CHG | Run / Work / Checkpoint | 门禁 |
+|---|---|---|---|---|
+| 卡 045（V01B；SHA-256 前 8 位 `ed93c8fb`） | `d890be25`（父 `37a4faff`；15 路径；15 个文件，+1766/−161） | CHG-SCPT-2026-375 completed | RUN-SW008-M2-V01B-001 SUCCEEDED；WORK-SW008-M2-V01B-001 CLOSED；`CKPT-SW008-M2-V01B-001` | 9 项门禁全部通过（含基线例外） |
+| 卡 046（V01C；SHA-256 前 8 位 `5a53a7f0`） | `1e1ef760`（父 `d890be25`；8 路径；8 个文件，+410/−411） | CHG-PLC-2026-014 completed | RUN-DJ005-M2-V01C-001 SUCCEEDED；WORK-DJ005-M2-V01C-001 CLOSED；`CKPT-DJ005-M2-V01C-001` | 6 项门禁全部通过 |
+| 卡 047（V01D；SHA-256 前 8 位 `241d98a3`） | `fb94afa9`（父 `1e1ef760`；6 路径；6 个文件，+604/−0） | CHG-SCPT-2026-376 completed | RUN-SW008-M2-V01D-001 SUCCEEDED；WORK-SW008-M2-V01D-001 CLOSED；`CKPT-SW008-M2-V01D-001` | 9 项门禁全部通过（含基线例外） |
+| 卡 048（V02；SHA-256 前 8 位 `67ab5cfa`） | `cf6f6f33`（父 `fb94afa9`；2 路径；2 个文件，+341/−1） | CHG-SCPT-2026-377 completed | RUN-SW008-M2-V02-001 SUCCEEDED；WORK-SW008-M2-V02-001 CLOSED；`CKPT-SW008-M2-V02-001` | 9 项门禁全部通过（含基线例外） |
+| 卡 049（TD1；SHA-256 前 8 位 `4659e65d`） | `b6668dcf`（父 `cf6f6f33`；1 路径；1 个文件，+84/−7） | CHG-DOCU-2026-016 completed | RUN-SW008-M2-GOV-TD1-001 SUCCEEDED；WORK-SW008-M2-GOV-TD1-001 CLOSED；`CKPT-SW008-M2-GOV-TD1-001` | 6 项门禁全部通过 |
+| 卡 050（V03；SHA-256 前 8 位 `fbd566e4`） | `edeeead9`（父 `b6668dcf`；2 路径；2 个文件，+237/−0） | CHG-SCPT-2026-378 completed | RUN-SW008-M2-V03-001 SUCCEEDED；WORK-SW008-M2-V03-001 CLOSED；`CKPT-SW008-M2-V03-001` | 9 项门禁全部通过 |
+| 卡 051（P1；SHA-256 前 8 位 `1e6fe979`） | `4e165cf4`（父 `edeeead9`；14 路径；14 个文件，+2967/−12） | CHG-SCPT-2026-379 completed | RUN-SW008-M2-P1-001 SUCCEEDED；WORK-SW008-M2-P1-001 CLOSED；`CKPT-SW008-M2-P1-001` | 9 项门禁全部通过 |
+| 卡 052（V04；SHA-256 前 8 位 `131edf48`） | `a6447be6`（父 `4e165cf4`；6 路径；6 个文件，+794/−21） | CHG-SCPT-2026-380 completed | RUN-SW008-M2-V04-001 SUCCEEDED；WORK-SW008-M2-V04-001 CLOSED；`CKPT-SW008-M2-V04-001` | 9 项门禁全部通过 |
+| 卡 054（P1FIX；SHA-256 前 8 位 `2f6e5de2`） | `948884db`（父 `a6447be6`；9 路径；9 个文件，+1650/−174） | CHG-SCPT-2026-382 completed | RUN-SW008-M2-P1FIX-001 SUCCEEDED；WORK-SW008-M2-P1FIX-001 CLOSED；`CKPT-SW008-M2-P1FIX-001` | 9 项门禁全部通过 |
+| 卡 055（TD2；SHA-256 前 8 位 `24751227`） | `1956dd9a`（父 `948884db`；17 路径；17 个文件，+1563/−1） | CHG-DOCU-2026-017 completed | RUN-SW008-M2-TD2-001 SUCCEEDED；WORK-SW008-M2-TD2-001 CLOSED；`CKPT-SW008-M2-TD2-001` | 9 项门禁全部通过 |
+
+V01C 的变更对象在 DJ-2026-005 项目内（`CHG-PLC-2026-014`，Work 与 Run 的项目标识为 `DJ005`），与其余各卡同属一条代码链；卡 053 是 GPT 起草的、未获批准的第 1 期修复草稿卡，其演练留下的 CHG-SCPT-2026-381（implementing）、Work `WORK-SW008-M2-P1-AUDITFIX-001`（BLOCKED）与候选分支 `codex/m2-p1-audit-fix` 作为失败尝试**保留、未处置**（登记为 TD-SW008-086），不计入上表。
+
+**验收口径的更正与区分。** ① V03：底层 handoff.v2 机制、同一 Work 续跑与旧 owner 拒写已验收；“无需用户搬 JSON 或口令”的产品流程**尚未交付**（N2，关联 TD-SW008-063～065）。② V04：实际范围为 6 个路径——两处产品修复（E06 对账改用回执的 `owner_id`；存储对 WAL 边车瞬时状态的有限重试，写路径与严格只读路径各一处）、三个测试文件（含真实进程恢复演练 r01～r09 与边车确定性测试 sc01～sc08）与台账追加 TD-SW008-074～077；不扩写为“主控重启后自动续做”或“任意并发读取”，残余边界保留在 TD-SW008-074～077。③ 第 1 期：卡 051 的验收是历史事实，**不等于**审计发现已修复；A-P1-01～03、C11、C12 由卡 054 的提交 `948884db` 修复并验收，TD-SW008-066、070、072、073 的其余部分不关闭。④ 第 1 期审计缺陷修复的验证缺口（变异检查只覆盖 10 个守护点、测试文件新增行未逐行审读）登记为 TD-SW008-085。
+
+**计划修订与拆分（用户 2026-10-05、2026-10-06 同意）。** 新顺序：WBS 修订 6（本卡）→ M2-F01A → V05-A → V05-B → V05-C → V04-R1 → V06 → V07/V08 → V04-T（可并入 V04-R1 的明确测试范围）→ M2-F01B（M2 末或 M3）→ M2 交叉总审计与 WBS 终稿 → 经单独批准的一次开发运行时部署；合并 main 保留至 M3 D03。其中：
+- **F01 拆分**：F01-a 只做失败关闭（HEAD 有 `.plc.json` 而暂存区或工作区没有即拒绝，全部改名与移动一并拒绝，不新增存储，不改 `checker.py`），是 V05、V08 与部署的前置；F01-b 是合法移动与退役入口，独立新能力卡。F01-a 的 Git HEAD 身份不是持久登记，不据此关闭历史身份债务。
+- **V05 拆分**：V05-A 带版本和能力标志的共用查询合同（触及 contracts，按核心档）；V05-B GUI 双根与生产线程池接线；V05-C 真实双领域 GUI 联验（调用真实模型前须先获用户授权）。V05 顶层行是汇总，A、B 通过不能写成 V05 完成。
+- **F05 分期**：M2 只交 `parking_supported=false`、`preemption_supported=false` 的版本化查询合同，挂起与抢占相关动作返回 UNSUPPORTED；完整挂起放 M3（调度状态与业务状态分离，每项目一个当前槽、最多三个挂起槽，恢复重新核验授权）；运行中插队依赖 V04-R1。N1.4 的完整目标**保持未交付**。V04-R1 不是 V05 的前置。
+- **单卡规模**：产品文件一般不超过约 6 个、围绕一组关键反例，超出继续拆；文档卡按业务项目与基线拆分，SW-2026-008 侧（TD2）与 SYS-2026-001 侧（本卡）分开。门禁分档规则见 `02_规划/M2_门禁分档与单卡规模规则_PM.md`（SHA-256 前 8 位 `8fec2229`），需求说明见 `02_规划/M2_入口分类与定位交接_需求说明_REQ.md`（SHA-256 前 8 位 `6ea58e0f`）；两者随 TD2 提交 `1956dd9a` 入库，没有机器分档器，各卡仍须显式写完整门禁矩阵。
+- **本期不采纳演练证据的跨 Run 复用**，受治理执行里完整重跑；以后的演练前后用 `m2-tools/seal_inputs.py` 封存输入，但封存不是复用授权。
+
+**新增与修改的任务行。** §4.7.1 新增 `M2-GOV-TD1`、`M2-P1`、`M2-P1FIX`、`M2-GOV-TD2`、`M2-GOV-WBS6`；§4.8 新增 `M2-F01A`、`M2-F01B`、`V04-T`、`V05-A`、`V05-B`、`V05-C`；V05 的依赖与验收文字、V06 的坏证据反例、V08 的依赖与边界相应补充（见表）。新增 ID 先去重再计数。
+
+**技术基线更新（M2 代码线）。** 代码线唯一尖端由 V01 `37a4faff` 变为 TD2 `1956dd9a`（分支 `codex/m2-td2-docs`），逐个核对父子相连（核对结果：相连）；后继任务从该提交或经独立验收的后继开始。未合并 main、未推送；开发运行时 active `1.3.3-a808fa8`、previous `1.3.3-0b72499`，不含 U05～1956dd9a 的代码。
+
+| 序 | 标签 | 提交 | 父提交 |
+|---|---|---|---|
+| 1 | V01 | `37a4faff` | `3c32e8ad` |
+| 2 | V01B | `d890be25` | `37a4faff` |
+| 3 | V01C | `1e1ef760` | `d890be25` |
+| 4 | V01D | `fb94afa9` | `1e1ef760` |
+| 5 | V02 | `cf6f6f33` | `fb94afa9` |
+| 6 | TD1 | `b6668dcf` | `cf6f6f33` |
+| 7 | V03 | `edeeead9` | `b6668dcf` |
+| 8 | P1 | `4e165cf4` | `edeeead9` |
+| 9 | V04 | `a6447be6` | `4e165cf4` |
+| 10 | P1FIX | `948884db` | `a6447be6` |
+| 11 | TD2 | `1956dd9a` | `948884db` |
+
+**任务表计数。** §4.2～§4.10 各表按 ID 行机器计数：V3.0.21 为 121 行，本修订后为 132 行（新增 11 个 ID，见上）。
+
+**时点证据（2026-10-06T15:20:40-07:00）。**
+
+| 指标 | 当前值 | 采集方法 |
+|---|---|---|
+| 主工作区 HEAD / 分支 | `a84fd7ee` / `codex/c09-recovery-governance` | `git rev-parse HEAD`、`git branch --show-current` |
+| active / previous release | `1.3.3-a808fa8` / `1.3.3-0b72499` | 读 `active_release.json`、`previous_release.json` |
+| canonical 事件数 / 链断裂 | 3164 / 0 | 只读连接逐条复算前后哈希 |
+| SW008 未终结 Mission | 0 | `select count(*) from mission_items …`（只读） |
+| SW008 未关闭 CHG | 74（另有 4 个格式异常的归档文件无法解析） | 逐文件读“变更状态”字段 |
+| 工作树数量 | 154 | `git worktree list --porcelain` |
+| 台账 SW-2026-008 / SYS-2026-001 | 均 0/0/0 | `main.py ledger reconcile <PID>` |
+| 活动技术债台账行数 / 最后编号 | 94 / TD-SW008-086 | 读 TD2 提交里的台账 |
+
+**教训沉淀（V3.0.22）。** ① 变异检查的判据要在真实环境里校准：pytest 在窄终端下会把失败消息从摘要里丢掉，严格判据曾因此把全部变异误判为“未抓住”，运行脚本须固定宽终端；② 草稿与演练的交付要先“演练、再报批”，重门禁由总协调方独占机器顺序执行，演练长时间没有可验收交付时应及时换人接手；③ 凡写进卡或 WBS 的数字都由工具读取，不凭记忆。
+
+**技术债登记（增补）。** 本修订不新增债务编号；审计发现与台账、需求、WBS 的映射见 `02_规划/archive/F05_与审计讨论_20261005/INDEX.md`，新增债务见台账 TD-SW008-078～086。
+
+**后续顺序。** WBS 修订 6 → F01-a → V05-A → V05-B → V05-C → V04-R1 → V06 → V07/V08 → V04-T → F01-b → M2 交叉总审计与 WBS 终稿 → 一次开发运行时部署（须单独批准）→ M3。本修订不授权任何后续任务开工、合并 main、推送、部署或 release 切换。
+
+#### 4.7.8 F01-a 至 F01-1 验收回写；三次独立审计的处置；授权记录；新任务与新顺序；部署意图与 M3 候选（V3.0.23，2026-10-08）
+
+本节由 `M2-GOV-WBS7`（卡 073）追加，只加不删；V3.0.22 及更早的文字保留，仅修改卡 073 §5 列明的行。所有 SHA、ID 与数字均在 2026-10-08T16:28:17-07:00 只读采集（`.auto-pm/reports/m2-gov-wbs7/collect_facts7.py`，输出 `facts_raw.json`）；文中时间均为用户所在地的本地时间（UTC-7）。
+
+**验收证据（所有卡均经受治理执行：Work/Run/Checkpoint、提交字节等于 Checkpoint、G1～G9 全部通过；验收由用户本人或按用户的有条件预授权委托 Claude 代为收口，条件是 G1～G9 全部通过且提交与 Checkpoint 一致，逐卡原话与回执见 `.auto-pm/reports` 下的 PREAUTH 记录与各卡 `acceptance_receipt.txt`）。**
+
+| 卡 | 不可变提交 | CHG | Run / Work / Checkpoint | 门禁 |
+|---|---|---|---|---|
+| 卡 057（F01-a；SHA-256 前 8 位 `a4f4445c`） | `01ad3923`（父 `1956dd9a`；6 路径；6 个文件，+664/−4） | CHG-SCPT-2026-383 completed | RUN-SW008-M2-F01A-001 SUCCEEDED；WORK-SW008-M2-F01A-001 CLOSED；`CKPT-SW008-M2-F01A-001` | 9 项门禁全部通过 |
+| 卡 058（V05-A；SHA-256 前 8 位 `a2f53542`） | `5a2f9c48`（父 `01ad3923`；8 路径；8 个文件，+635/−5） | CHG-SCPT-2026-384 completed | RUN-SW008-M2-V05A-001 SUCCEEDED；WORK-SW008-M2-V05A-001 CLOSED；`CKPT-SW008-M2-V05A-001` | 9 项门禁全部通过 |
+| 卡 059（V05-B；SHA-256 前 8 位 `40f64238`） | `5686bd9f`（父 `5a2f9c48`；6 路径；6 个文件，+292/−21） | CHG-SCPT-2026-385 completed | RUN-SW008-M2-V05B-001 SUCCEEDED；WORK-SW008-M2-V05B-001 CLOSED；`CKPT-SW008-M2-V05B-001` | 9 项门禁全部通过 |
+| 卡 060（V05-B2；SHA-256 前 8 位 `bbe50730`） | `aeedf92f`（父 `5686bd9f`；6 路径；6 个文件，+321/−5） | CHG-SCPT-2026-387 completed | RUN-SW008-M2-V05B2-002 SUCCEEDED；WORK-SW008-M2-V05B2-002 CLOSED；`CKPT-SW008-M2-V05B2-002` | 9 项门禁全部通过 |
+| 卡 062（M2-GOV-TD3R；SHA-256 前 8 位 `4637d6a4`） | `769f145d`（父 `aeedf92f`；1 路径；1 个文件，+8/−0） | CHG-DOCU-2026-019 completed | RUN-SW008-M2-TD3R-001 SUCCEEDED；WORK-SW008-M2-TD3R-001 CLOSED；`CKPT-SW008-M2-TD3R-001` | 9 项门禁全部通过 |
+| 卡 063（V04-T；SHA-256 前 8 位 `e68ccf2b`） | `715713bb`（父 `769f145d`；2 路径；2 个文件，+109/−38） | CHG-SCPT-2026-388 completed | RUN-SW008-M2-V04T-001 SUCCEEDED；WORK-SW008-M2-V04T-001 CLOSED；`CKPT-SW008-M2-V04T-001` | 9 项门禁全部通过 |
+| 卡 065（V06（钩子一半）；SHA-256 前 8 位 `a4d675aa`） | `c3c20e07`（父 `715713bb`；1 路径；1 个文件，+199/−0） | CHG-SCPT-2026-390 completed | RUN-SW008-M2-V06-001 SUCCEEDED；WORK-SW008-M2-V06-001 CLOSED；`CKPT-SW008-M2-V06-001` | 9 项门禁全部通过 |
+| 卡 064（V05-B3；SHA-256 前 8 位 `85573204`） | `4d0b33ac`（父 `c3c20e07`；2 路径；2 个文件，+98/−0） | CHG-SCPT-2026-389 completed | RUN-SW008-M2-V05B3-002 SUCCEEDED；WORK-SW008-M2-V05B3-002 CLOSED；`CKPT-SW008-M2-V05B3-002` | 9 项门禁全部通过 |
+| 卡 066（M2-GOV-TD4；SHA-256 前 8 位 `5f21aa5e`） | `23e6ed64`（父 `4d0b33ac`；1 路径；1 个文件，+3/−3） | CHG-DOCU-2026-020 completed | RUN-SW008-M2-TD4-001 SUCCEEDED；WORK-SW008-M2-TD4-001 CLOSED；`CKPT-SW008-M2-TD4-001` | 9 项门禁全部通过 |
+| 卡 067（M2-GOV-TD5；SHA-256 前 8 位 `b0aa03e8`） | `6a84a186`（父 `23e6ed64`；1 路径；1 个文件，+3/−0） | CHG-DOCU-2026-021 completed | RUN-SW008-M2-TD5-001 SUCCEEDED；WORK-SW008-M2-TD5-001 CLOSED；`CKPT-SW008-M2-TD5-001` | 9 项门禁全部通过 |
+| 卡 068（V06B；SHA-256 前 8 位 `7b2132bd`） | `592211ee`（父 `6a84a186`；3 路径；3 个文件，+230/−0） | CHG-SCPT-2026-391 completed | RUN-SW008-M2-V06B-001 SUCCEEDED；WORK-SW008-M2-V06B-001 CLOSED；`CKPT-SW008-M2-V06B-001` | 9 项门禁全部通过 |
+| 卡 069（M2-GOV-TD6；SHA-256 前 8 位 `1b57f967`） | `06f4ae4d`（父 `592211ee`；1 路径；1 个文件，+9/−4） | CHG-DOCU-2026-022 completed | RUN-SW008-M2-TD6-001 SUCCEEDED；WORK-SW008-M2-TD6-001 CLOSED；`CKPT-SW008-M2-TD6-001` | 9 项门禁全部通过 |
+| 卡 070（V06C；SHA-256 前 8 位 `6f6f7a1d`） | `83369f67`（父 `06f4ae4d`；2 路径；2 个文件，+205/−11） | CHG-SCPT-2026-392 completed | RUN-SW008-M2-V06C-001 SUCCEEDED；WORK-SW008-M2-V06C-001 CLOSED；`CKPT-SW008-M2-V06C-001` | 9 项门禁全部通过 |
+| 卡 071（V06D；SHA-256 前 8 位 `26d712fd`） | `3bc740a4`（父 `83369f67`；1 路径；1 个文件，+87/−3） | CHG-SCPT-2026-393 completed | RUN-SW008-M2-V06D-001 SUCCEEDED；WORK-SW008-M2-V06D-001 CLOSED；`CKPT-SW008-M2-V06D-001` | 9 项门禁全部通过 |
+| 卡 072（F01-1；SHA-256 前 8 位 `35529109`） | `763395e4`（父 `3bc740a4`；4 路径；4 个文件，+179/−6） | CHG-SCPT-2026-394 completed | RUN-SW008-M2-F011-001 SUCCEEDED；WORK-SW008-M2-F011-001 CLOSED；`CKPT-SW008-M2-F011-001` | 9 项门禁全部通过 |
+
+**口径更正与区分。** ① V06：卡 065 只做了钩子一半；判卷反例一半由 V06B 入库、V06C 收紧，钩子侧的证明缺口由 V06D 补强；WBS 层面的 V06 以三次独立审计后的残余为准——双根（linked-worktree 与控制根）路由和预检内部故障分支未覆盖（TD-SW008-100）、判卷器只证明报告字节一致而不证明报告内容实质（TD-SW008-099 的更深一层）、变异分类器与封存工具仍在不进 Git 的外部目录（TD-SW008-096）。② V05-B3 修复的 TD-SW008-091 已写已偿还，但 GPT R4-05 指出其证明强度低于措辞（写入比较只比行数、没有真实销毁窗口），措辞已在台账收窄并登记补证（TD-SW008-102）；F01-1 已补完整数据库内容比较与真实窗口关闭实演。③ F01-a 的台账 TD-SW008-078 写活动而非已偿还：已进入 HEAD 的删除认不出、部分分支缺直接变异证据、合法移动与退役入口属 F01-b。④ V05-C 尚未进行：前面各卡用的是无界面窗口与受控替身，可见窗口与真实模型联验由 V05-C 交付。⑤ 首次受治理执行失败的记录（V05-B2 首次 CHG-SCPT-2026-386、V05-B3 首次 Run、GPT 起草的 TD3 卡留下的 CHG-DOCU-2026-018 等）全部原样保留，处置须先提方案并经用户批准。
+
+**三次独立审计与处置。** ① GPT R2（`.auto-pm/reports/m2-gpt-r2-20261007/AUDIT_REPORT_GPT_R2.md`）对 P1 修复、F01-a、V05-A、V05-B 与 V05-B2 冻结字节的审计：发现关闭后最终验收仍先写入、启动任务迟到信号无关闭抑制等，登记 TD-SW008-091～094，V05-B3 修复前两项。② Astra 里程碑只读审计（`.auto-pm/reports/astra-milestone-audit-20261008/`）：确认两项固定源码缺口——关闭后遗漏的写入口（`confirmStart` 无关闭检查，登记 TD-SW008-098，由 F01-1 修复）与缺失版本字段被默认补值（并入 TD-SW008-094，由 F02 修复）；另给出文档对账九份草案（由 M2-GOV-DOCS 采纳）、耦合治理方案（M2-B1 只做首个小切片）与技术债状态核验。③ GPT R4（`.auto-pm/reports/m2-gpt-r4-20261008/AUDIT_REPORT_GPT_R4_V06.md`）对 V06 两半的审计：1 项阻断（基线例外不要求真实、正确绑定的复现证据，登记 TD-SW008-099，V06C 收紧）、4 项重要（暂存区只比文件名与跨项目反例缺失登记 TD-SW008-100，由 V06D 补；TD-SW008-091 证明偏弱登记 TD-SW008-102；报告只证字节一致登记于 099）、3 项次要与 1 项观察（101 与 096）；三份报告的处理决定见 `.auto-pm/reports/m2-relay/DECISIONS_20261008.md` 与 `ASTRA_AUDIT_RECEIPT_20261008.md`。GPT 只做审计，不实现，不替用户验收。
+
+**授权记录（用户 2026-10-08 对话原话，逐字记录在 `.auto-pm/reports/PREAUTH_M2_20261008.txt`）。** ① V06C、V06D、F01-1、F02 四张卡的有条件预授权（卡 SHA 先在聊天报出、字节一致、机器预检通过、范围不超出卡路径；门禁失败即停；验收与变更单收口委托，条件为 G1～G9 全过且提交与 Checkpoint 一致；止损照旧）。② V05-C 的真实模型调用：合计不超过 20 次、累计不超过 90 分钟、模型用 Sol 不用 Astra；确认电脑不休眠，PLC 演练接受 V02 的工程。③ 接受本 WBS 修订 7。预授权不含：规则修订卡、分档器卡、V04-R1、V05-C 的卡本身、技术性部署、推送、合并与文档采纳，这些仍须逐张报 SHA 并经用户批准。
+
+**新任务行与新顺序。** §4.7.1 新增 `M2-GOV-TD3R`、`M2-GOV-TD4`、`M2-GOV-TD5`、`M2-GOV-TD6`、`M2-GOV-WBS7`、`M2-GOV-RULE`、`M2-TOOL-TIER`、`M2-GOV-DOCS`、`M2-B1`、`M2-DEP-TECH`、`M2-PUSH`；§4.8 新增 `V05-B2`、`V05-B3`、`V06B`、`V06C`、`V06D`、`M2-F011`、`M2-F02`，并补充 V05-C 与 V06 的文字。顺序：F02 → 规则修订与分档器 → V04-R1 → V05-C → 文档采纳与 WBS 终稿 → B1 小切片 → V07、V08、F01-b → GPT 对 M2（并回溯 M1、M0）的最终审计 → 开发运行时技术性部署 → 以 M2 作隔离候选 → 一次推送。
+
+**部署意图（用户 2026-10-08）。** 把 M2 成果构建成发布包、装进开发运行时做一次技术性切换（仿 `M2-GOV-DEP1`，含回退演练），然后以 M2 作为隔离候选，再一次推送。三步各自须用户批准：技术性部署须报卡 SHA 并经批准；推送须用户在对话中另行明确授权，目前没有任何推送授权；合并 main 仍等到 M3 的 D03；技术性部署不等同 D07 正式交付。
+
+**M3 候选（未排期、未批准，不计入任务行；M2 收口后出可批准的规划）。** ① 业务缺口：界面设计闭环（原型预览、批准、截图对比）、博图或 InoProShop 编译报错的结构化反馈通道、图与文档一致性检查（图能渲染、与接口表和变量表一致）、PLC 仿真门（PLCSIM 或软 PLC）、上位机与 PLC 的通信回环联调、客户文档结构化入口。② 治理成本：不降门槛，降单卡搭建成本——卡工厂（从一份配置生成整套门禁工具，对应 TD-SW008-088）、分档器（M2-TOOL-TIER）、按执行器的信任档（新接入的模型或 Agent 先用受限档：小范围、仅文档档或测试档、沙箱、无批准权、变异与独立审计必过；对应 TD-SW008-084）。③ 其余：完整挂起与抢占（V3.0.22 已分期）、线程亲和检查、暂停状态的统一拒写、多项目与多人协作。
+
+**提速测量结论（2026-10-08，`.auto-pm/reports/m2-speedup/`）。** core 组并行 4 进程两次分别耗时 57 分钟与 85 分钟（第一次多出一个对并行敏感的失败），串行逐项计时一次 2 小时 16 分（失败集合与基线相同）；最慢 60 项约占 45%，集中在真实多进程链路类测试；串行测量期间我同时跑了其他任务，耗时有并发污染，真热点须在空闲机器上重测（M2-TOOL-TIER 的任务）。结论：并行不能无条件写进规则，更稳的方向是按改动范围选测试、发布前再全跑。
+
+**技术基线更新（M2 代码线）。** 代码线唯一尖端由 TD2 `1956dd9a` 变为 `763395e4`（分支 `codex/m2-f011-closing-seal`），逐个核对父子相连（核对结果：相连）；后继任务从该提交或经独立验收的后继开始。未合并 main、未推送；开发运行时 `1.3.3-a808fa8`。
+
+| 序 | 标签 | 提交 | 父提交 |
+|---|---|---|---|
+| 1 | TD2 | `1956dd9a` | `948884db` |
+| 2 | F01A | `01ad3923` | `1956dd9a` |
+| 3 | V05A | `5a2f9c48` | `01ad3923` |
+| 4 | V05B | `5686bd9f` | `5a2f9c48` |
+| 5 | V05B2 | `aeedf92f` | `5686bd9f` |
+| 6 | TD3R | `769f145d` | `aeedf92f` |
+| 7 | V04T | `715713bb` | `769f145d` |
+| 8 | V06 | `c3c20e07` | `715713bb` |
+| 9 | V05B3 | `4d0b33ac` | `c3c20e07` |
+| 10 | TD4 | `23e6ed64` | `4d0b33ac` |
+| 11 | TD5 | `6a84a186` | `23e6ed64` |
+| 12 | V06B | `592211ee` | `6a84a186` |
+| 13 | TD6 | `06f4ae4d` | `592211ee` |
+| 14 | V06C | `83369f67` | `06f4ae4d` |
+| 15 | V06D | `3bc740a4` | `83369f67` |
+| 16 | F011 | `763395e4` | `3bc740a4` |
+
+**任务表计数。** §4.2～§4.10 各表按 ID 行机器计数：V3.0.22 为 132 行，本修订后为 150 行（新增 18 个 ID，见上）。
+
+**时点证据（2026-10-08T16:28:17-07:00）。**
+
+| 指标 | 当前值 | 采集方法 |
+|---|---|---|
+| 主工作区 HEAD / 分支 | `a84fd7ee` / `codex/c09-recovery-governance` | `git rev-parse HEAD`、`git branch --show-current` |
+| active / previous release | `1.3.3-a808fa8` / `1.3.3-0b72499` | 读 `active_release.json`、`previous_release.json` |
+| canonical 事件数 / 链断裂 | 3421 / 0 | 只读连接逐条复算前后哈希 |
+| SW008 未终结 Mission | 0 | `select count(*) from mission_items …`（只读） |
+| SW008 未关闭 CHG | 76（另有 4 个格式异常的归档文件无法解析） | 逐文件读“变更状态”字段 |
+| 工作树数量 | 179 | `git worktree list --porcelain` |
+| 台账 SW-2026-008 / SYS-2026-001 | 均 0/0/0 | `main.py ledger reconcile <PID>` |
+| 活动技术债台账行数 / 最后编号 | 110 / TD-SW008-102 | 读尖端提交里的台账 |
+
+**教训沉淀（V3.0.23）。** ① 卡工具的身份（卡号、分支、Run、幂等键、计数）分散在多处手改，派生新卡时反复出现残留与改错（分支名被前一个替换改坏、卡文件名未换、判卷计数忽略多组变异）；解法是单一配置加生成器，并让工具自检残留，不是降低标准。② 夹具陷阱要在写测试前探测：两个项目的变更单编号各自从 001 起，用“001”当“他项目变更单”实际两边都有；探测发现后改用只存在于另一个项目的编号。③ 门禁的计数要按“命名组的运行次数”而不是“变异个数”。④ 全量测试对机器负载敏感，重门禁期间不并发其他重任务，演练也不与测量并跑。⑤ 独立审计找到了我自己漏掉的相邻入口与证明偏弱之处，交叉审计（谁也不审自己写的）是必要的，不是形式。
+
+**技术债登记（增补）。** 本修订不新增债务编号；TD-SW008-098、102 在代码侧已由 F01-1 处置，台账状态留待下一张台账同步卡更新（不在本卡）；本期台账变化：TD3R 追加 087～094，TD4 更新 081、091、092 的状态，TD5 追加 095～097，TD6 追加 098～102 并更新 078、091、094、096，见各卡。
+
+**后续顺序。** F02 → 规则修订与分档器 → V04-R1 → V05-C → 文档采纳与 WBS 终稿 → B1 → V07/V08/F01-b → GPT 最终审计 → 技术性部署 → 隔离候选 → 一次推送。本修订不授权任何后续任务开工、合并 main、推送、部署或 release 切换。
+
+#### 4.7.9 F02 至分档器的验收回写；N1a 与 N2-0 的结果；M2 冻结条款、剩余清单与延期承诺表（V3.0.24，2026-10-09）
+
+本节由 `M2-GOV-WBS8`（卡 081）追加，只加不删；V3.0.23 及更早的文字保留，仅修改卡 081 §5 列明的行。所有 SHA、ID 与状态均在 2026-10-09T11:10:39-07:00 只读采集（`.auto-pm/reports/m2-wbs8/collect_facts8.py`，输出 `facts8.json`）；文中时间均为用户所在地的本地时间（UTC-7）。V3.0.23 本身（提交 `a538f942`，CHG-DOCU-2026-029 completed）此前不在 M2 主链上，本卡一并采纳，所以相对主链上 V3.0.11 的差异很大；第 8 次修订独有的部分是本节、§4.11 的冻结条款与上面列明的行。第 8 次修订是**最小版**：用户 2026-10-09 决定 GPT 的设计不算 M2，E 链拆分、V04-R1 拆分、D08 新增项、N 系列等处置都不写进 M2 的 WBS，留给 M3 规划（见 `.auto-pm/reports/WBS_REVISION_PROPOSAL_20261009_V0.2.md` 与 `.auto-pm/reports/REQUIREMENT_POOL.md`）。
+
+**验收证据（经受治理执行：Work/Run/Checkpoint、提交字节等于 Checkpoint、G1～G9 全部通过；验收与变更单收口由用户按 2026-10-08、2026-10-09 的有条件预授权委托 Claude 代为运行脚本，逐卡原话与回执见 `.auto-pm/reports/PREAUTH_M2_20261008.txt` 与各卡 `acceptance_receipt.txt`）。**
+
+| 卡 | 不可变提交 | CHG | Run / Work / Checkpoint | 门禁 |
+|---|---|---|---|---|
+| 卡 074（F02；SHA-256 前 8 位 `0045da34`） | `98c2110d`（父 `763395e4`；10 路径；10 个文件，+319/−39） | CHG-SCPT-2026-395 completed | RUN-SW008-M2-F02-002 SUCCEEDED；WORK-SW008-M2-F02-002 CLOSED；`CKPT-SW008-M2-F02-002` | 9 项门禁全部通过 |
+| 卡 075（V05-C；SHA-256 前 8 位 `604f3f9f`） | `6e17f086`（父 `98c2110d`；1 路径；1 个文件，+525/−0） | CHG-SCPT-2026-396 completed | RUN-SW008-M2-V05C-002 SUCCEEDED；WORK-SW008-M2-V05C-002 CLOSED；`CKPT-SW008-M2-V05C-002` | 9 项门禁全部通过 |
+| 卡 076（M2-GOV-TD7；SHA-256 前 8 位 `863daef6`） | `c8d49c29`（父 `6e17f086`；1 路径；1 个文件，+12/−7） | CHG-DOCU-2026-023 completed | RUN-SW008-M2-TD7-001 SUCCEEDED；WORK-SW008-M2-TD7-001 CLOSED；`CKPT-SW008-M2-TD7-001` | 9 项门禁全部通过 |
+| 卡 077（M2-GOV-RULE；SHA-256 前 8 位 `1ac7d8a4`） | `a0ac852b`（父 `c8d49c29`；1 路径；1 个文件，+15/−0） | CHG-DOCU-2026-024 completed | RUN-SW008-M2-RULE-001 SUCCEEDED；WORK-SW008-M2-RULE-001 CLOSED；`CKPT-SW008-M2-RULE-001` | 9 项门禁全部通过 |
+| 卡 078（M2-TOOL-TIER；SHA-256 前 8 位 `f7f89abc`） | `370e0297`（父 `a0ac852b`；3 路径；3 个文件，+683/−0） | CHG-SCPT-2026-398 completed | RUN-SW008-M2-TIER-001 SUCCEEDED；WORK-SW008-M2-TIER-001 CLOSED；`CKPT-SW008-M2-TIER-001` | 9 项门禁全部通过 |
+
+**等待用户验收的两项（不委托）。** N1a（卡 079）：提交 `388b22c4`（父 `370e0297`，1 个新增文件），`CKPT-SYS001-M2-N1A-001`，RUN-SYS001-M2-N1A-001 SUCCEEDED、WORK-SYS001-M2-N1A-001 CLOSED，CHG-DOCU-2026-031 停在 implementing，等用户通读后说“内容是我的意思”再收口。N2-0（卡 080）：只读勘测，成果是 `.auto-pm/reports/m2-n20/N2-0_SURVEY_REPORT.md`（SHA-256 前 8 位 `1352e908`），RUN-SW008-M2-N20-001 SUCCEEDED、WORK-SW008-M2-N20-001 CLOSED，CHG-DOCU-2026-025 停在 implementing，等用户读报告后验收。
+
+**租约过期的结算（方案 A，用户 2026-10-08 确认）。** V05-C 第一轮（RUN-SW008-M2-V05C-001）与 WBS 修订 7 的第一次运行（RUN-SYS001-M2-GOV-WBS7-001）都因租约过期而作废；两条旧 Run 与旧 Work 均已以 CANCELLED 结算，恢复链为 RUN-SW008-M2-SETTLE-V05C-001（CHG-SCPT-2026-397）与 RUN-SYS001-M2-SETTLE-WBS7-001（CHG-DOCU-2026-030），Decision 已绑定提交 `3f4fff29`、`5feb8e93`；历史原样保留，不改写。V05-C 第二轮（RUN-SW008-M2-V05C-002）通过。
+
+**授权与决定记录（用户对话原话逐字记录在 `.auto-pm/reports/PREAUTH_M2_20261008.txt`）。** ① 2026-10-09 白天预授权：V05-C 收口、结算方案 A、TD7、规则修订、分档器。② 路线定向：驾驶舱是“守门人/管理者”，配合用户选的 IDE、Agent 与模型使用；用户个人介入每张低风险卡不超过 3 次；不再就路线与 GPT 往返；批准 N1a + N2-0 批次。③ M2 按原承诺收口，批准按 V0.2 起草 WBS 修订。④ 尽快完成 M2 后做技术部署，基线必须冻结。⑤ 开工信号：GPT 的设计不算 M2，V04-R1（整张）、V07、V08、M2-F01B、M2-B1、文档采纳后移到 M3；WBS 第 8 次修订缩成最小版，并与采纳 V3.0.23 合为一张卡；M2 剩余为最小 WBS 文档卡、ADJ/IC02 整合、审计包、GPT 审计（发现缺陷按冻结条款修）、技术部署（审计之后用户再明确批准）、推送（用户另行授权）；最小 WBS 文档卡与 ADJ/IC02 整合两张卡预授权（先聊天报 SHA 等条件照旧），WBS 卡由用户验收一次，整合卡门禁全过且提交等于 Checkpoint 时可委托收口。本节不授权合并 main、推送、部署或 release 切换。
+
+**N2-0 的发现与新增 `M2-DEP-INT`。** 发布 `1.3.3-a808fa8` 的源提交 `a808fa8a` 与 M2 代码线从 `7cfe227e` 分叉：发布线比分叉点多 3 个提交，M2 线多 44 个提交，发布源提交不是 M2 尖端的祖先。发布线里的 ADJ（`d876cf98`，`adjudicate_blocked_work`）与 IC02（`e6529115`，实施卡预检，强制接入 `continuity work create`）不在 M2 线上：M2 线里没有 `implementation_card_precheck.py`，`decision.py` 里没有 `adjudicate_blocked_work`。所以技术性部署之前必须先整合，新增任务 `M2-DEP-INT`（核心档；两线改过同一批文件，会有合并冲突）。它是部署前提任务，把已验收的两个功能带进 M2 线，不是债务偿还。依据 `.auto-pm/reports/m2-n20/N2-0_SURVEY_REPORT.md`（SHA-256 前 8 位 `1352e908`）。
+
+**M2 冻结后的剩余清单与顺序（用户 2026-10-09 决定；逐张出卡，一次只激活一张，重门禁独占）。**
+
+| 顺序 | 事项 | 说明 |
+|---|---|---|
+| 1 | `M2-GOV-WBS8`（本卡：最小 WBS 文档卡，采纳 V3.0.23 并写入 V3.0.24） | 已预授权；用户验收一次，收口不委托 |
+| 2 | `M2-DEP-INT`（ADJ/IC02 整合，核心档） | 已预授权；门禁全过且提交等于 Checkpoint 时可委托收口 |
+| 3 | 审计包 | 备好后交 GPT |
+| 4 | GPT 对 M2 的最终审计 | 审计，不是路线讨论；发现缺陷按冻结条款修（修缺陷，不加功能） |
+| 5 | `M2-DEP-TECH` 技术性部署（含回退演练） | 审计之后，用户再明确批准切换 |
+| 6 | `M2-PUSH` 一次推送 | 用户另行明确授权目标与范围；目前没有任何推送授权 |
+
+**延期承诺表（后移到 M3 不等于取消；D09 要求未达成的承诺不得移出验收表）。**
+
+| 项 | 原目的 | 现处置 | 触发条件 |
+|---|---|---|---|
+| V04-R1（整张，不拆） | 受控租约撤销与 fencing 的真实进程演练 | 后移到 M3 | M3 规划时排序 |
+| V07、V08 | 从基准提取 Python 与 PLC 模板 | 后移到 M3 | M3 规划时排序 |
+| F01-b（任务 M2-F01B） | PLC 工程合法移动与退役入口 | 后移到 M3 | 用户批准范围后 |
+| B1 小切片（任务 M2-B1） | 连续性存储三个纯哈希函数提取 | 后移到 M3 | M3 规划时排序 |
+| 文档采纳（任务 M2-GOV-DOCS，9 份草案） | 项目关键文档按对账草案修订 | 后移到 M3 | M3 规划时排序 |
+
+**技术基线更新（M2 代码线）。** 代码线唯一尖端由 F01-1 `763395e4` 变为 `388b22c43a334faf1e29d9bb0038150a403b17e3`（分支 `codex/m2-n1a-roles-doc`），逐个核对父子相连（核对结果：相连）；后继任务从该提交或经独立验收的后继开始。未合并 main、未推送；开发运行时 `1.3.3-a808fa8`，不含 M2 代码。
+
+| 序 | 标签 | 提交 | 父提交 |
+|---|---|---|---|
+| 1 | F02 | `98c2110d` | `763395e4` |
+| 2 | V05-C | `6e17f086` | `98c2110d` |
+| 3 | M2-GOV-TD7 | `c8d49c29` | `6e17f086` |
+| 4 | M2-GOV-RULE | `a0ac852b` | `c8d49c29` |
+| 5 | M2-TOOL-TIER | `370e0297` | `a0ac852b` |
+| 6 | M2-N1A | `388b22c4` | `370e0297` |
+
+**任务表计数。** §4.2～§4.10 各表按 ID 行机器计数：V3.0.23 为 150 行，本修订后为 155 行（新增 5 个 ID：`M2-GOV-TD7`、`M2-N1A`、`M2-N2-0`、`M2-DEP-INT`、`M2-GOV-WBS8`）。
+
+**时点证据（2026-10-09T11:10:39-07:00）。**
+
+| 指标 | 当前值 | 采集方法 |
+|---|---|---|
+| 主工作区 HEAD / 分支 | `5feb8e93` / `codex/c09-recovery-governance` | `git rev-parse HEAD`、`git branch --show-current` |
+| active / previous release | `1.3.3-a808fa8` / `1.3.3-0b72499` | 读 `active_release.json`、`previous_release.json` |
+| 台账 SW-2026-008 / SYS-2026-001 | 均 0/0/0 | `main.py ledger reconcile <PID>` |
+| 活动技术债台账最后编号 | `TD-SW008-107` | 读尖端提交里的台账 |
+
+**教训沉淀（V3.0.24）。** ① 外部 Agent 的租约续期必须有明确的责任人，并在每次查看进度时先核对续租日志；V05-C 第一轮因续租循环的相对路径静默失败而作废，修复后的脚本先续租一次再睡眠、失败时大声报错。② 部署前先比较发布线与开发线的差异，不要假设后者包含前者（N2-0 的发现）。
+
+**后续顺序。** 见上表。本修订不授权合并 main、推送、部署或 release 切换；这些仍须用户在对话中明确授权。
 
 ### 4.8 V：双领域、恢复和模板（V01～V08）
 
 当前进度：V01～V08 尚未作为整体开工，M2 未启动或验收。仅 V04-R0 因 C09 的旧租约阻断提前开展：原 Run 保留 CANCELLED，新同 Work 验证 Run SUCCEEDED、有当前字节 Checkpoint、lease RELEASED，原 Work ACCEPTED、CHG-309 completed；FIX/FENCE 子 Work 各自 ACCEPTED，FENCE CHG completed（非 closed），两次早期 Recovery 仍 FAILED。V04-R0 基础合同已闭合，不等于 V04/V04-R1 的真实进程回收演练完成，也不表示 V 批次整体启动。V01 仅可在 C01/C03 的独立授权及真实 PLC 门禁证据下启动。
 
+**V3.0.21 补记。** V01 已于 2026-10-03 验收闭环（提交 `37a4faff`、卡 042、CHG-SCPT-2026-374），上一段“V01～V08 尚未作为整体开工”与“V01 仅可在……启动”是 V3.0.20 及更早时点的表述，予以保留。用户同日确认新增 V01B～V01D（PLC 文档与代码一致性核对、基准治愈、提交拦截），V02 依赖随之改为 V01、V01B、V01C、V01D、C09；证据与需求见 §4.7.6。
+
 | ID | 单一交付 | 依赖 | 精确产出/改动边界 | 验收与失败出口 | 模型 |
 |---|---|---|---|---|---|
 | V01 | PLC 静态质量门插件 | C01、C03 | CORE/evidence_collection_service.py、T/core/test_evidence_collection_service.py | 复用现行 PLC checker；违规 SCL 确实失败；.plc.json/SCL/INT/VAR 证据同基线 | T/G |
-| V02 | PLC 新需求静态闭环 | V01、C09 | 拟新增 T/e2e/test_pmf_plc.py；批准的 PLC 演练工程 | 新目标到真实 SCL 变化、静态门禁、验收落账；上机编译/下发单列未执行，不虚报工业运行成功 | T/A |
+| V01B | PLC 文档与代码一致性核对与自动补全 | V01；需求说明 043 已确认 | 拟：PLC 域新增核对与补全模块并并入 `PlcChecker`；`plc` 命令组的核对、补全与确认命令；PLC 变量定义文档与 FB 接口文档模板的修订；对应测试（确切路径以勘测后的实施卡为准） | 核对信号名、数据类型、方向、注释（不核对通信协议）；整份文档缺失警告并给出草稿；不一致拦住并精确指出对象、变量、差异与位置；代码到文档的补全只补缺行、不覆盖人写文字、补入行带【待确认】、一条命令确认；新检查项使 `plc check`、驾驶舱 PLC 检查统计与 V01 的 AI 验收门同时生效；钉死基准隔离副本冒烟 | T/G |
+| V01C | 基准治愈与升基准 | V01B | DJ-2026-005 的接口文档与变量定义文档（项目内容，非产品源码）；基准钉值（提交与目录树 SHA） | 用 V01B 的工具生成草稿，用户审核确认后写入；现行检查器对该项目全绿；重新钉基准并更新冒烟钉值；独立 CHG，活目录只在用户确认后改动 | A/G |
+| V01D | 提交拦截钩子与阶段门接入 | V01B、V01C | 提交钩子（碰 Hook 基础设施）；`StageGateEngine` 的“监控→收尾”门；对应测试（确切路径以勘测后的实施卡为准） | PLC 文档与代码对不上或仍带【待确认】即拦提交并自动补全；阶段门与交付拦未确认；`--no-verify` 无法阻止，由其他关口兜底；单独验收 | T/G |
+| M2-F01A | F01-a：删除 PLC 工程标记后提交钩子与阶段门失败关闭 | TD-SW008-078；V01D ACCEPTED | 拟：`plc_git_marker_guard.py`（新增）、`plc_doc_hook.py`、`stage_gate_engine.py` 三个产品文件（必要时第 4 个 `git_hook_enforcer.py`）及对应测试；不新增存储、不改 `checker.py` | 以 Git HEAD 为身份来源：HEAD 有 `.plc.json` 而暂存区或工作区没有即拒绝，不放行任何改名或移动（错误信息指向 F01-b）；纯删除、坏 IFC 后删标记、首次创建、无 PLC 身份的工程、HEAD 读取故障均有真实 Git 反例；已进入 HEAD 的删除认不出（`--no-verify`、其他克隆），如实保留；产品档，全量九组回归；V05、V08 与部署之前必须验收 | T/G |
+| M2-F01B | F01-b：合法的 PLC 工程移动与退役入口 | M2-F01A ACCEPTED；TD-SW008-079 | 独立新能力卡，范围在勘测后确定 | 经用户明确批准的移动与退役入口，含授权记录、真实 Git 反例与失败关闭；不阻塞 F01-a；M2 末或 M3；持久登记另行设计；V3.0.24：后移到 M3，承诺保留，范围待用户批准 | T/G |
+| M2-F011 | F01-1：驾驶舱关闭封口 | V06D ACCEPTED；TD-SW008-098、102；Astra 审计 F-01；卡 072（已验收闭环） | 驾驶舱桥与 `boss_main.qml` 两个产品文件、两个 QML 测试文件（4 个既有路径） | 不可逆的 `beginShutdown`；`confirmStart` 补关闭检查；独立窗口在关闭请求与销毁时封口，嵌入宿主只暂停；完整数据库内容比较与真实窗口实演；产品档，全量九组；GPT 设计里暂停状态统一拒写、线程亲和与代际丢弃未采纳，留作后续 | T/G |
+| M2-F02 | F02：查询合同版本字段必填与消费者重验 | M2-F011 ACCEPTED；Astra 审计 F-02；TD-SW008-094 | 拟：`continuity_query.py`、`continuity_resume.py`、`continuity_query_service.py`、`pm_facade_service.py`、`pm_cockpit_service.py`、`ui/cli/pm.py`、`api.py` 与对应测试，落点以实施卡为准 | 两个版本字段去默认并由生产显式填写；完整 query 与能力输入统一严格重验并接入 Facade、CLI、SDK、GUI 的实际消费点；旧 Resume 缺 query 的读取兼容保留，现代入口不得补版本或降级；触及 contracts，按核心档全量九组与变异；已验收闭环（提交 `98c2110d`，父 `763395e4`；CHG-SCPT-2026-395 completed） | T/G |
+| V02 | PLC 新需求静态闭环 | V01、V01B、V01C、V01D、C09 | 拟新增 T/e2e/test_pmf_plc.py；批准的 PLC 演练工程 | 新目标到真实 SCL 变化、静态门禁、验收落账；上机编译/下发单列未执行，不虚报工业运行成功 | T/A |
 | V03 | 真实更换 Agent 续跑 | E07、C09 | 拟新增 T/e2e/test_pmf_handoff.py；R 下本场景证据 | 第二 Agent 接同一 Work，旧 owner 后续写入拒绝；无需用户搬 JSON/token | T/A |
 | V04-R0 | 租约生命周期、受控撤销与 epoch fencing 基础 | C08、E08 | 候选 lease/执行合同、CORE/continuity_execution_service.py、INFRA/continuity_store.py、CLI/continuity.py；T/core/test_continuity_execution_service.py | 正常 SUCCEEDED/FAILED/CANCELLED 在同一事务释放 lease；提前撤销必须由新的 Recovery CHG/Decision/Work/Run 明确授权，且仅在无 Popen 证据时取消；无法证明 child 回收即 PENDING；撤销/接管提升 epoch，旧 epoch 写入被拒绝；不得直改 expires_at 或泄露 token | A/G |
 | V04 | 进程中断/lease 到期恢复实演 | E06、V03 | 拟新增 T/e2e/test_pmf_recovery.py | 杀执行进程、主控重启各实演；到期不冒记成功；取消/续跑有合法证据与幂等事件 | A/G |
-| V04-R1 | 受控租约撤销与 fencing 真实进程演练 | V04、V04-R0、C09-R3A | T/e2e/test_pmf_lease_recovery.py；R 下真实本机场景证据 | 短租约心跳续租；已启动进程先以 PID/job 指纹证明回收，否则 PENDING；每次接管提升 lease epoch，旧 epoch 的回写被拒绝；不得直改 expires_at、泄露 token 或抢占未知进程 | A/G |
-| V05 | GUI 双领域联合验收 | U06、U07、V02、V04 | 拟新增 T/e2e/test_pmf_gui.py；R 下截图/事件证据 | Python/PLC 各从GUI输入目标到验收；两次业务决策；真实进程/静态检查；无人工改库 | T/A |
-| V06 | 双 Hook 与坏证据负向实演 | G06、C09 | 拟新增 T/e2e/test_pmf_gate_failures.py；隔离 Git 测试仓 | 错 CHG、坏台账、空壳证据、越权文件、预检异常分别拒绝；不得破坏真实用户项目来造测试 | T/G |
-| V07 | 从通过的 Python 基准提取模板 | C09 | D/auto_pm/templates/python_cockpit 中基准确定的最小文件清单；拟新增 T/e2e/test_pmf_template_python.py | 先固定活体基准 commit/测试，再提模板；生成第二个新工程复测；不能用预制空壳替代 | T/G |
-| V08 | 从通过的 PLC 基准提取模板 | V02 | 母体实际 PLC Copier 模板中基准确定的最小文件清单；拟新增 T/e2e/test_pmf_template_plc.py | .plc.json/INT/VAR/门禁生成后完整；字段错误真实被拒绝；不擅改 O 正式规范 | T/G |
+| V04-R1 | 受控租约撤销与 fencing 真实进程演练 | V04、V04-R0、C09-R3A | T/e2e/test_pmf_lease_recovery.py；R 下真实本机场景证据 | 短租约心跳续租；已启动进程先以 PID/job 指纹证明回收，否则 PENDING；每次接管提升 lease epoch，旧 epoch 的回写被拒绝；不得直改 expires_at、泄露 token 或抢占未知进程；V3.0.24：整张（不拆分）后移到 M3，承诺保留，不属 M2 收口集合（用户 2026-10-09 决定；见 §4.7.9 延期承诺表） | A/G |
+| V04-T | V04 与 V03 的测试补强 | V04 ACCEPTED；V03 ACCEPTED；TD-SW008-081 | 范围只在 V04 的恢复测试与 V03 的交接测试文件，不改产品代码 | r03 证明真实的到期拒绝而非错误 owner；Win32 进程探测分存活、已退出、未知三态，查询失败不当作已退出；V03 的 q05 重放测试比较完整的租约值；每项有真实失败变异；测试档 | T/G |
+| V05 | GUI 双领域联合验收 | U06、U07、U09C、V02、V04、M2-P1FIX、M2-GOV-TD2、M2-GOV-WBS6、M2-F01A | 拟新增 T/e2e/test_pmf_gui.py；R 下截图/事件证据；顶层汇总行，交付拆为 V05-A、V05-B、V05-C | Python/PLC 各从GUI输入目标到验收；两次业务决策；真实进程/静态检查；无人工改库；仅 V05-A、V05-B、V05-C 各自通过并完成最终真实联验才可更新本行的验收，A 或 B 通过不能写成 V05 完成；Python 与 PLC 均经生产构造路径、真实线程池、真实权限链与确定性收尾；替身、手调 worker.run 与静态合同测试不能替代真实联验；V04-R1 不是 V05 的前置 | T/A |
+| V05-A | 带版本和能力标志的 resume/orient 共用只读查询合同 | M2-P1FIX、M2-GOV-WBS6、M2-F01A；TD-SW008-071 | 拟：约 6 个产品文件以内（含 `contracts/continuity_query.py`、`contracts/continuity_resume.py`）与三个测试文件；落点以勘测后的实施卡为准 | 真实生产者与 GUI、CLI、SDK 消费者；`parking_supported=false`、`preemption_supported=false`，挂起与抢占相关动作返回 UNSUPPORTED；缺失或不兼容的版本失败关闭；快照不含租约口令、不建表、不改焦点；触及 contracts，按核心档全量九组与变异；不关闭完整挂起债务 | T/G |
+| V05-B | GUI 双根、对共用查询的消费、生产线程池与构造接线 | V05-A ACCEPTED；TD-SW008-083 | 拟：GUI 与驾驶舱接线相关文件（约 6 个产品文件以内），落点以勘测后的实施卡为准 | 生产构造路径、真实线程池、权限链接线；不等于双领域全链已验收 | T/G |
+| V05-B2 | GUI 能力提示与有序关闭 | V05-B ACCEPTED；卡 060 | `pm_cockpit_service.py`、`continuity_query_service.py`、驾驶舱桥与窗口入口及对应测试（6 个路径） | 能力提示只在版本合法时才断言“不支持”，查不到、不完整或抛错保持操作停用；关闭有界等待在途任务、超时保留对象、窗口入口按序拆除；17 项变异；首次尝试因一次无关 Git 超时失败，原样保留，第二次受治理执行成功 | T/G |
+| V05-B3 | 关闭防护修复（最终验收入口与启动轮询） | V05-B2 ACCEPTED；TD-SW008-091、092；卡 064 | 驾驶舱桥与一个新增测试文件（2 个路径） | `confirmAcceptance` 在关闭后拒绝且不写；启动轮询在交付关闭后丢弃迟到结果、关闭时停计时器；4 项变异；首次受治理执行因 core 组一个对负载敏感的无关测试失败，Run 记 FAILED、Work 记 BLOCKED，原样保留，第二次成功 | T/G |
+| V05-C | 真实双领域 GUI 联验 | V05-A、V05-B、M2-F01A ACCEPTED；U06、U07、U09C、V02、V04；M2-F011、M2-F02 ACCEPTED | 拟新增 `T/e2e/test_pmf_gui.py` 与 R 下截图、事件证据 | Python 与 PLC 各从 GUI 输入目标到验收；两次业务决策；真实模型进程与权限；调用真实模型前须先获用户授权；确定性收尾；无人工改库；用户 2026-10-08 已授权调用真实模型：合计不超过 20 次、累计不超过 90 分钟、模型用 Sol（不用 Astra），卡本身仍须批准；联验期间电脑不休眠；PLC 演练工程用 V02 的那个，只做静态语法自检，不碰 TIA 与硬件；已验收闭环（提交 `6e17f086`，父 `98c2110d`；CHG-SCPT-2026-396 completed；第一轮因租约过期作废，第二轮通过，见 §4.7.9） | T/A |
+| V06 | 双 Hook 与坏证据负向实演 | G06、C09 | 拟新增 T/e2e/test_pmf_gate_failures.py；隔离 Git 测试仓 | 错 CHG、坏台账、空壳证据、越权文件、预检异常分别拒绝；不得破坏真实用户项目来造测试；坏证据反例须含空集合、错卡或基线或 Run、报告映射缺项、陈旧或漂移字节，明确 FAIL 或 UNVERIFIED，测试报错不得充当成功反例；已拆为钩子半（卡 065，提交 `c3c20e07`）、判卷半入库（V06B）、判卷合同收紧（V06C）与钩子测试补强（V06D），均已验收，残余见 TD-SW008-100、101、096 | T/G |
+| V06B | 判卷器入库与坏证据反例 | V06 ACCEPTED；TD-SW008-096；卡 068 | `tests/tools/verdict_check.py`、`tests/tools/__init__.py`、`tests/e2e/test_pmf_gate_judge.py`（3 个新增文件） | 判卷器迁入版本库且判卷语义与外部原件逐分支等价；16 个反例各因自己的原因被拒绝；14 项变异；变异分类器与封存工具未入库，096 保持待执行 | T/G |
+| V06C | 判卷器例外合同收紧 | V06B ACCEPTED；TD-SW008-099、101；卡 070 | `tests/tools/verdict_check.py`、`tests/e2e/test_pmf_gate_judge.py`（2 个既有文件） | 基线例外必须有匹配的例外条目与存在的证据文件；共用空报告与畸形判卷文件稳定拒绝；110 份历史判卷新旧判卷器接受或拒绝逐份相同；32 个测试、28 项变异，变异运行器保存完整输出 | T/G |
+| V06D | 钩子测试补强 | V06C ACCEPTED；TD-SW008-100；卡 071 | `tests/e2e/test_pmf_gate_failures.py`（1 个既有文件） | 暂存状态逐项比较（mode、blob、stage、路径）与敏感性测试；空台账与垃圾台账、两个项目文件同提交、他项目有效变更单的真实拒绝；15 个测试节点、4 项变异；双根路由与预检内部故障分支留待后续 | T/G |
+| V07 | 从通过的 Python 基准提取模板 | C09 | D/auto_pm/templates/python_cockpit 中基准确定的最小文件清单；拟新增 T/e2e/test_pmf_template_python.py | 先固定活体基准 commit/测试，再提模板；生成第二个新工程复测；不能用预制空壳替代；V3.0.24：后移到 M3，承诺保留（不属 M2 收口集合；见 §4.7.9 延期承诺表） | T/G |
+| V08 | 从通过的 PLC 基准提取模板 | V02、M2-F01A | 母体实际 PLC Copier 模板中基准确定的最小文件清单；拟新增 T/e2e/test_pmf_template_plc.py | .plc.json/INT/VAR/门禁生成后完整；字段错误真实被拒绝；不擅改 O 正式规范；保留 PLC 静态验证边界，不宣称 TIA 编译、下发或设备运行；V3.0.24：后移到 M3，承诺保留（不属 M2 收口集合；见 §4.7.9 延期承诺表） | T/G |
 
 演练目标优先复用已存在的 SW-2026-010、DJ-2026-011，确认其所属和用途后固化精确路径。它们不是运行前假定有效的资产；若不可用，则以 SW-2026-009/DJ-2026-005 的固定只读基准创建隔离演练副本并纳入 V 批次，不默认修改真实业务项目。
 
@@ -493,8 +993,9 @@ D08 用三次可重复任务验收替代“等三天看一看”。无需新增�
 | H08 | A2工作树处置 | H04～H06；目录处置已批准 | git worktree list 中对应 codex/a2-pm-facade 的精确物理路径 | 无有效占用、独有提交/忽略资产保全后才退役；达不到条件则登记保留理由；禁止git clean | T/G |
 | H09 | 已批准文档归档闭环 | 既有归档授权仍有效 | 既有PMF-20260912归档清单的9组源/目标与引用 | 已移动不重复移动；源/目标hash/引用核验后独立提交该清单；不把后续发现混入归档 | T/G |
 | H10 | wbs8-candidate用途定性 | 本轮事实可用 | 实际wbs8-candidate目录及其现有索引记录 | 判明普通目录/候选资产而非Git工作树；明确保留/隔离标签；不在其中错误向父Git写入 | T/G |
+| H11 | 历史 BLOCKED Work 裁决与活动索引退出 | H01；实施卡 019；H11A/B/C 分批独立批准 | H11A 11 条 Work；H11B NOSKIP Run/Work；H11C 5 条旧终态 lease 与 2 条 Work | 14 条目标 Work 全部 `CANCELLED`；NOSKIP Run 合法结算；5 条 lease 围栏；历史 Run/Checkpoint/旧事件不改写；QG 成功 Checkpoint 仅作辅助证据；事件链 0 断裂、Resume 无冲突、台账 0/0/0 | COMPLETED / ACCEPTED；CHG-349～355 completed |
 
-H01先核对上述五个Run是否仍为原状态/版本；任何已变化目标单独退出，其它获批目标继续。恢复Run自身也必须有合法终态回执。历史CHG161～164格式、旧release ACL、远端同步不扩成此队列的额外原子。
+H01先核对上述五个Run是否仍为原状态/版本；任何已变化目标单独退出，其它获批目标继续。恢复Run自身也必须有合法终态回执。H11 必须先输出 14 条对象的“当前版本—Run/lease—验收事实—建议终态—工作树引用”矩阵，再分离常规终态化与 NOSKIP 单目标恢复；不得把一张批处理卡解释为统一取消授权。历史CHG161～164格式、旧release ACL、远端同步不扩成此队列的额外原子。
 
 ### 4.11 里程碑、依赖与第一张执行卡
 
@@ -502,8 +1003,8 @@ H01先核对上述五个Run是否仍为原状态/版本；任何已变化目标�
 |---|---|---|---|
 | M0 交付通道恢复 | B01～B10、G01～G10 | 216 可提交；后续任务知道用什么代码、检什么范围、在哪执行 | 历史完成记录保留；2026-09-27 只核到 B10 `ACCEPTED`、B218 `CLOSED`、G10 后续 Work `ACCEPTED`，未逐项重演双 Hook 与集成候选，当前完整复验 `UNVERIFIED`。 |
 | M1 第一条可用 PM-Flow 候选 | P01～P11、E01～E08、C01～C09、G10-R1 | CLI在候选环境完成真实Python新任务；内部对象和证据由系统生成 | **COMPLETED / ACCEPTED**：历史业务终态与台账成立；统一不可变候选最终为 `8b02de55`，完整技术门 PASS；G10-R1 当前字节 Checkpoint、SUCCEEDED/RELEASED Run、CLOSED Work 与 CHG-328/329 终态成立；release `1.3.3-8b02de5` 可重复构建、前切换/回退演练和 exact-tree 验证通过，根入口 configured/effective/load path 一致且无 fallback。原 C09 Checkpoint 局限保留，不回写历史；main 尚未合并。 |
-| M2 驾驶舱与双领域候选 | U01～U08、V01～V08 | GUI、SDK、PLC、跨Agent、故障恢复在候选中走同一条链 | V05/V06真实正反验收；模板源于实演基准 |
-| M3 稳定使用 | Q01～Q03、D01～D09 | 根入口稳定运行，三次真实任务可重复交付 | 全部 AC、制品一致性、兼容回退、全量门禁与 D08 均有证据 |
+| M2 驾驶舱与双领域候选 | U01～U09、V01～V06（含 V01B～V01D、V05-A～V05-C、V05-B2、V05-B3、V04-T、V06B～V06D；V04-R1、V07、V08 后移到 M3）、M2-P1、M2-P1FIX、M2-F01A、M2-F011、M2-F02、M2-GOV-WBS8、M2-DEP-INT | GUI、SDK、PLC、跨Agent、故障恢复在候选中走同一条链 | V05/V06真实正反验收；V04-R1、V07、V08、M2-F01B、M2-B1 与文档采纳后移到 M3，承诺保留（延期承诺表见 §4.7.9）；M2 基线按 V3.0.24 冻结 |
+| M3 稳定使用 | Q01～Q03、D01～D09；自 M2 后移：V04-R1、V07、V08、M2-F01B、M2-B1、M2-GOV-DOCS | 根入口稳定运行，三次真实任务可重复交付 | 全部 AC、制品一致性、兼容回退、全量门禁与 D08 均有证据 |
 
 主依赖：
 ~~~text
@@ -517,9 +1018,23 @@ G10 -> P01 -> P02 -> P03 -> P04 -> P05 -> P06 -> P07 -> P08 -> P08-R -> P09 -> P
 G10 -> E01; P09 + E01 -> E02 -> E03 -> E04/E05 -> E06
 E05 -> C01 -> C02 -> C03 -> C04 -> C05 -> C06 -> C07 -> C08
 C03 + E06 -> E07; E05 + P11 -> E08
-C08 + E08 + G10 -> C09-R1 -> C09-R2 -> C09-R3A -> C09-R3B -> C09-R3C -> C09 -> U/V -> D
+C08 + E08 + G10 -> C09-R1 -> C09-R2 -> C09-R3A -> C09-R3B -> C09-R3C -> C09
+C09 -> U01 -> U02 -> U03A -> U03B -> U04A -> U04B -> M2-GOV-BL02 -> U05 -> U06 -> U07 -> U08
+U04B -> M2-GOV-U04S01; H01 -> H11（COMPLETED / ACCEPTED）
+M2-GOV-BL02 -> M2-GOV-ADJ; M2-GOV-BL02 -> M2-GOV-IC02; M2-GOV-ADJ + M2-GOV-IC02 -> M2-GOV-DEP1（软依赖 U05）; M2-GOV-DEP1 -> M2-GOV-WBS2
+C09 -> V -> D
+U06 -> U07A -> U07B -> U07C -> U07D -> U08（V3.0.19：原 U07 的实际拆分）
+U08 -> U09A -> U09B -> U09C -> V05（V3.0.19：V05 前置）
+U09B -> M2-GOV-QML1 -> U09C（V3.0.20：U09C 的实际隔离基线是根修提交 d95f45d2）
+V01 -> V01B -> V01C -> V01D -> V02（V3.0.21：用户 2026-10-03 确定顺序；V02 另依赖 C09）
+V02 -> M2-GOV-TD1 -> V03 -> M2-P1 -> V04 -> M2-P1FIX -> M2-GOV-TD2 -> M2-GOV-WBS6 -> M2-F01A -> V05-A -> V05-B -> V05-C（V3.0.22；V04-R1 不是 V05 的前置；M2-F01B 与 V04-T 不阻塞 V05）
+V05-B -> V05-B2 -> V05-B3 -> V06B -> V06C -> V06D -> M2-F011 -> M2-F02 -> M2-GOV-RULE -> M2-TOOL-TIER -> V04-R1 -> V05-C -> M2-GOV-DOCS -> M2-B1 -> V07/V08/M2-F01B -> M2-DEP-TECH -> M2-PUSH（V3.0.23 的执行顺序，不是新增依赖：V04-R1 仍不是 V05 的前置；V04-T 与 TD3R～TD6、V06 钩子半在其间验收；V05-C 的卡仍须批准）
+M2-F02 -> M2-GOV-RULE -> M2-TOOL-TIER -> V05-C -> M2-GOV-TD7 -> M2-N1A / M2-N2-0 -> M2-GOV-WBS8 -> M2-DEP-INT -> 审计包 -> GPT 最终审计 -> M2-DEP-TECH -> M2-PUSH（V3.0.24 的冻结顺序；V04-R1、V07、V08、M2-F01B、M2-B1、M2-GOV-DOCS 后移到 M3，不在 M2 收口集合内）
 G07 -> Q01/Q02/Q03 -> D03 -> D04 -> D05
 ~~~
+
+**M2 冻结条款（V3.0.24，用户 2026-10-09 决定）。** ① M2 的收口集合就是下面的剩余清单，本条款随 V3.0.24 落库的那一刻起它就是 M2 的基线：最小 WBS 文档卡（本修订）→ ADJ/IC02 整合（`M2-DEP-INT`）→ 审计包 → GPT 对 M2 的最终审计（发现缺陷按②修）→ 开发运行时技术性部署（审计之后，用户再明确批准）→ 一次推送（用户另行明确授权）。② 此后只允许两类改动进入 M2：原清单里的承诺；最终审计或部署门禁发现的缺陷（修缺陷，不加功能）。③ 其他新想法、新需求、新界面一律进 M3（`.auto-pm/reports/REQUIREMENT_POOL.md` 与 M3 规划），收到时当场说明它在线的哪一侧与对工期的影响；要把它插进 M2，是一次需用户批准的正式基线变更，先报推迟多久再动。④ V3.0.24 之后，本文件对 M2 只做“状态写回”（某卡已验收、提交号），不改范围，直到 M2 收口。⑤ 冻结不禁止修错：发现缺陷按②处理。
+
 
 V2.0 的第一张执行卡为 B 批次；其历史输入、输出和批准边界保留如下，不能作为 2026-09-13 的当前启动指令：
 
@@ -724,5 +1239,36 @@ V2.6.2 仅同步唯一 M1 不可变候选的真实质量证据，并新增 G10-R
 | V3.0.7 | 2026-09-28 | U02 开工前校准：确认现有 QML 接线与测试需要五条产品路径；`PlanningDraft` 无确定范围字段，界面只能如实标示“范围待规划”，不得提前创建 Mission。实施卡 016 已建，本次不宣称 U02 产品或治理验收。 |
 | V3.0.8 | 2026-09-28 | U02 五产品路径已在 `m2-u02-planning-draft` 隔离候选实现，定向 QML/Cockpit 11 项、Facade 27 项、Ruff/Mypy/diff-check 均 Exit 0；`CP-SW008-M2-U02-001` 绑定 `b7bb9357` 与七条授权路径。正常 Git Hook 因候选旧基线 CHG 集合与现行台账不一致（120 孤儿、3 状态差异）拒绝提交；Run/Work 如实置 `BLOCKED`，CHG-339 保持 `implementing`。未提交、未验收，不改变 M0/M1 或 release。 |
 | V3.0.9 | 2026-09-28 | U02 有界纠正闭环：确认首次阻断源于把 canonical 294 条完整台账复制到历史候选；恢复 `b7bb9357` 的 173 条分支本地快照并仅增量加入 CHG-339 后，候选达到 174/174、0/0/0。完整复跑 38 项测试及 Ruff/Mypy/diff-check，`CP-SW008-M2-U02-002` 与正常 Hook 提交 `74493c37` 成立；Run SUCCEEDED、lease RELEASED、Work/Mission CLOSED、CHG-339 completed，canonical 台账 0/0/0。旧 `CP-SW008-M2-U02-001` 仅保留为失败尝试历史证据。 |
+| V3.0.10 | 2026-09-28 | U03 开工前代码评审确认一次性启动与后台快照刷新属于不同风险域，将原 U03 拆分为 U03A/U03B 并分别设置独立验收边界；本次仅修订规划，不启动执行。 |
+| V3.0.11 | 2026-09-28 | U03A 一次性受控启动闭环：不可变提交 `316ab46b`、当前字节 Checkpoint `CP-SW008-M2-U03A-002` 与 35 项定向门禁成立；首次过早 Run 如实取消并保留，最终 Run/Work/Mission/CHG 合法闭环。 |
+| V3.0.12 | 2026-09-28 | U03B 后台快照刷新闭环：隔离候选洁净提交 `b8010027`、当前字节 Checkpoint 与 11 项门禁成立；首次 READY Run 安全取消并保留，最终治理链合法闭环。下一产品任务校准为 U04。 |
+| V3.0.13 | 2026-09-28 | U04 开工前只读根因核验：现有事件可证明执行阶段，但终态事件缺少可供 UI 可信投影的结构化失败原因；旧 `ActivityTimeline` 仍消费 PM_SESSION 摘要且驾驶舱无连续后台刷新。将 U04 拆为 U04A（不可变进度/失败合同）与 U04B（当前 Mission 时间线/连续刷新），新增实施卡 018；另登记非阻断的历史活动 Work 清障 H11 与规范沉淀 `M2-GOV-U04S01`。本次仅修订 WBS 与实施卡，不创建治理对象或执行源码变更。 |
+| V3.0.14 | 2026-09-28 | U04A 已在 `d59120c7` 不可变隔离提交完成：结构化失败合同、哈希事件写入、legacy 兼容与 fail-closed 读取均落地；188 项 Pytest、Ruff、strict Mypy、diff-check 全绿；`CP-SW008-M2-U04A-001` 当前，Run/Work/Mission/CHG 合法终态，台账零差异。U04B 消费第二次用户授权并从该提交启动；H11、U05、合并、推送、部署与 release 仍在边界外。 |
+| V3.0.15 | 2026-09-28 | U04 完整验收：U04B 产品提交 `d200eb9b`、R1 合同提交 `e05fafa1`、两个 Checkpoint、唯一终态租约恢复事件及治理终态成立。H11 只读准备将 14 条历史 BLOCKED Work 分为 11 条常规处置、NOSKIP 单目标结算、5 条旧终态未释放 lease 兼容裁决；仅更新 WBS 与实施卡，不执行 H11。 |
+| V3.0.16 | 2026-09-29 | H11 已完成并验收：14 条目标 Work 均 `CANCELLED`、NOSKIP 已结算、5 条旧终态 lease 已围栏，历史证据保留；明确 `fubai`/`baiyang` 等权署名及 Claude/用户写入来源。新增 BL02、ADJ、IC02、DEP1、WBS2 五个治理原子任务，冻结 U/R/发布三线血统、开发运行时切换政策与 U05 的 BL02 硬依赖。本次仅修订 WBS。 |
+| V3.0.17 | 2026-09-30 | 整改阶段 1～5 最终证据写入：BL02 `7cfe227e`、ADJ `d876cf98`、IC02 `e6529115`、整合 `a808fa8a` 与开发运行时 `1.3.3-a808fa8`（CHG-SCPT-2026-356～361 completed）；H11 保持 `COMPLETED / ACCEPTED`；新增 §4.7.3（当前值对当时值的时点证据、来源说明、偏差声明、技术债登记、U05 准入）；§4.7.1 仅更新状态单元格并补 `M2-GOV-WBS1` 行；`M2-GOV-WBS2` 为 `VERIFYING / PENDING_ACCEPTANCE`，待用户亲自验收。本次仅修订 WBS，不创建产品提交、不合并、不推送、不部署。 |
+| V3.0.18 | 2026-09-30 | 用户亲自验收 V3.0.17 复查候选 `e07f7662`：`M2-GOV-WBS2` 更新为 `COMPLETED / ACCEPTED` 并绑定验收回执；新增 §4.7.3 “V3.0.18 补记”与当前状态段落。仅状态、回执引用与版本记录，不改其它阶段状态，不合并、不推送、不部署。 |
+| V3.0.19 | 2026-10-01 | U05、U06、U07A～U07D、U08 验收回写（`ace7a959`、`8b7f199a`、`795fe448`、`35379585`、`9a92e9b7`、`460e24f6`、`d40318d0`；CHG-SCPT-2026-362～369 completed）；补记原 U07 拆分为 U07A～U07D；新增 V05 前置任务 U09A～U09C（`PLANNED / NOT_AUTHORIZED`），V05 增加对 U09C 的依赖，M2 范围改为 U01～U09；新增 §4.7.4 与两项技术债；§4.7.1 补 `M2-GOV-WBS3` 行，其实施与验收以 CHG-DOCU-2026-024 为准。本次仅修订 WBS，不创建产品提交、不合并、不推送、不部署。 |
+| V3.0.20 | 2026-10-03 | U09A～U09C 验收回写（`eebdeecb`、`cec3afa7`、`3c32e8ad`；CHG-SCPT-2026-370～372 completed）；§4.7.1 新增 `M2-GOV-QML1`（根修 `6eead5e4`、`d95f45d2`；CHG-SCPT-2026-373 completed）与 `M2-GOV-WBS4` 两行并回写 `M2-GOV-WBS3` 状态；新增 §4.7.5（验收证据、U09C 偏差、M2 代码线技术基线、任务计数口径、教训与技术债）；文首任务计数改为逐行机器计数口径；其实施与验收以 CHG-DOCU-2026-025 为准。本次仅修订 WBS，不创建产品提交、不合并、不推送、不部署。 |
+| V3.0.21 | 2026-10-03 | V01 验收回写（`37a4faff`；CHG-SCPT-2026-374 completed；实际 5 路径）；§4.7.1 新增 `M2-GOV-WBS5` 并回写 `M2-GOV-WBS4` 状态；§4.8 新增 V01B、V01C、V01D 三行并改 V02 依赖；新增 §4.7.6（V01 证据、已知限制、一致性核对需求、任务顺序、技术基线更新、教训与技术债）；任务计数 117 → 121；其实施与验收以 CHG-DOCU-2026-026 为准。本次仅修订 WBS，不创建产品提交、不合并、不推送、不部署。 |
+| V3.0.22 | 2026-10-06 | V01B～V04、第 1 期、TD1、第 1 期审计缺陷修复与 TD2 验收回写（提交 `d890be25`、`1e1ef760`、`fb94afa9`、`cf6f6f33`、`b6668dcf`、`edeeead9`、`4e165cf4`、`a6447be6`、`948884db`、`1956dd9a`）；§4.7.1 新增 5 个治理与产品任务行并回写 `M2-GOV-WBS5` 状态；§4.8 新增 F01-a、F01-b、V04-T、V05-A、V05-B、V05-C 并补充 V05、V06、V08；新增 §4.7.7（验收证据、口径更正、F01 与 V05 拆分、F05 分期、新顺序、技术基线更新、教训）；任务计数 121 → 132；其实施与验收以 CHG-DOCU-2026-027 为准。本次仅修订 WBS，不创建产品提交、不合并、不推送、不部署。 |
+| V3.0.23 | 2026-10-08 | F01-a、V05-A/B/B2/B3、V04-T、V06 系列（钩子半、判卷半入库、合同收紧、钩子补强）与台账四卡验收回写（提交 `01ad3923`、`5a2f9c48`、`5686bd9f`、`aeedf92f`、`769f145d`、`715713bb`、`c3c20e07`、`4d0b33ac`、`23e6ed64`、`6a84a186`、`592211ee`、`06f4ae4d`、`83369f67`、`3bc740a4`、`763395e4`）；§4.7.1 新增 11 个治理任务行并回写 `M2-GOV-WBS6` 状态；§4.8 新增 V05-B2、V05-B3、V06B～V06D、M2-F011、M2-F02 并补充 V05-C 与 V06；新增 §4.7.8（验收证据、口径更正、三次独立审计的处置、授权记录、新顺序、部署意图、M3 候选、提速测量结论、技术基线更新、教训）；任务计数 132 → 150；其实施与验收以 CHG-DOCU-2026-029 为准。本次仅修订 WBS，不创建产品提交、不合并、不推送、不部署。 |
+| V3.0.24 | 2026-10-09 | M2 冻结修订（最小版）：采纳 V3.0.23；回写 F02 `98c2110d`、V05-C `6e17f086`、TD7 `c8d49c29`、规则修订 `a0ac852b`、分档器 `370e0297` 的验收，N1a `388b22c4` 与 N2-0 的结果（均待用户验收）；记录租约过期结算（方案 A）与用户 2026-10-09 的决定和预授权；§4.11 增加 M2 冻结条款与剩余清单；延期承诺表（V04-R1 整张、V07、V08、M2-F01B、M2-B1、文档采纳后移到 M3，承诺保留）；新增 M2-DEP-INT（N2-0 发现 M2 线缺发布线的 ADJ 与 IC02）；E 链拆分、V04-R1 拆分、D08 新增项、N 系列等 GPT 的处置不写入 M2，留 M3 规划；D08 不变；§4.7.1 新增 5 个任务行并回写 5 行状态；新增 §4.7.9；任务计数 150 → 155；其实施与验收以 Work `WORK-SYS001-M2-GOV-WBS8-001` 与其变更单为准。本次仅修订 WBS，不创建产品提交、不合并、不推送、不部署。 |
 
-当前产品状态（2026-09-28）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账 0 差异，历史事件和批准均保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；新统一不可变候选最终提交 `8b02de55` 已完成完整技术复验、G10-R1 治理闭环并由稳定 release `1.3.3-8b02de5` 消费，根入口不再 fallback，故 M1 为 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。P2/CHG-323 仍因历史 `BLOCKED` Work 与 NOSKIP 进程/租约证据未闭合而 `BLOCKED`，不得宣称五文件真实验收完成，也不作为撤销 M1 的依据。U01、U02 已按各自依赖独立验收，M2 为 `IN_PROGRESS`；下一产品任务为 U03A，U03A 验收后才进入 U03B。main 尚未合并，后续源码集成与 D 阶段发布仍是独立边界。
+当前产品状态（2026-09-29）：原 C09 业务 Run `SUCCEEDED`、租约 `RELEASED`，原 Work/Mission `CLOSED`，CHG-012 `completed`，双项目台账历史证据保留。原 Checkpoint 的 SW009 类型检查范围不足、原候选 strict 复验 Exit 1 的历史结论不改写；不可变候选 `8b02de55` 已完成完整技术复验和 G10-R1 治理闭环，故 M1 维持 `COMPLETED / ACCEPTED`。M0 历史完成保留、当前完整复验 `UNVERIFIED`。U01、U02、U03A、U03B、U04A、U04B 与 `M2-GOV-U04S01` 已独立验收，M2 为 `IN_PROGRESS`。H11 的 14 条历史目标 Work 已全部退出活动索引，5 条旧终态 lease 已围栏；当前开发运行时为 `1.3.3-0b72499`、无 fallback。下一治理任务为 `M2-GOV-BL02`，U05 以 BL02 为硬基线前置，开发运行时部署为软依赖。main 尚未合并，后续整改、集成、推送与 D 阶段正式发布仍是独立边界。
+
+当前产品状态（2026-09-30，V3.0.17）：治理整改阶段 1～5 已完成并在隔离分支上形成不可变提交（未合并 main、未推送）；开发运行时已切换为 `1.3.3-a808fa8`，previous `1.3.3-0b72499`，无 fallback；阶段 2～5 的批准与验收为委托执行（`DELEGATED_ACCEPTED`）。`M2-GOV-WBS2` 处于 `VERIFYING / PENDING_ACCEPTANCE`，U05 待用户亲自验收本修订后启动。M1 维持 `COMPLETED / ACCEPTED`，M0 当前完整复验仍 `UNVERIFIED`，D 阶段正式稳定交付仍是独立边界。
+
+当前产品状态（2026-09-30，V3.0.18）：整改阶段 6 `M2-GOV-WBS2` 已由用户亲自验收第一提交并 `COMPLETED / ACCEPTED`；整改闭环，U05 可从 BL02 统一基线 `7cfe227e` 启动。阶段 2～5 仍为 `DELEGATED_ACCEPTED`；未合并 main、未推送；开发运行时 `1.3.3-a808fa8` 不等同 D07 正式稳定交付。
+
+当前产品状态（2026-10-01，V3.0.19）：U05、U06、U07A～U07D、U08 已验收闭环，各自在隔离分支上形成不可变提交（未合并 main、未推送）；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～U08 代码。M2 为 `IN_PROGRESS`；下一项为 U09A（实施卡 037，待用户批准），随后 U09B、U09C 与 V01～V08。D 阶段正式稳定交付仍是独立边界。
+
+当前产品状态（2026-10-03，V3.0.20）：U01～U09 已全部验收闭环；M2 代码线唯一尖端为 `3c32e8ad`（分支 `codex/m2-u09c-lifecycle-final`，未合并 main、未推送）；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～U09C 代码。M2 为 `IN_PROGRESS`；下一项为 V01～V08，随后 M2 总审计与一次开发运行时部署。D 阶段正式稳定交付仍是独立边界。
+
+当前产品状态（2026-10-03，V3.0.21）：U01～U09 与 V01 已验收闭环；M2 代码线唯一尖端为 `37a4faff`（分支 `codex/m2-v01-plc-quality-gate`，未合并 main、未推送）；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～V01 代码。M2 为 `IN_PROGRESS`；下一项为 V01B（PLC 文档与代码一致性核对与自动补全），顺序 V01B → V01C → V01D → V02，随后 V03～V08、M2 总审计与一次开发运行时部署。D 阶段正式稳定交付仍是独立边界。
+
+当前产品状态（2026-10-06，V3.0.22）：U01～U09、V01～V04、第 1 期及其审计缺陷修复、TD1、TD2 均已验收闭环；M2 代码线唯一尖端为 `1956dd9a`（分支 `codex/m2-td2-docs`，未合并 main、未推送）；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～1956dd9a 的代码。M2 为 `IN_PROGRESS`；下一项为 M2-F01A（删除 PLC 工程标记后失败关闭），随后 V05-A、V05-B、V05-C，再 V04-R1、V06、V07/V08、V04-T、M2-F01B，最后做 M2 交叉总审计、WBS 终稿与一次开发运行时部署（须单独批准）。N1.4 的完整挂起目标属于 M3，M2 只交 UNSUPPORTED 的查询合同；D 阶段正式稳定交付仍是独立边界。
+
+当前产品状态（2026-10-08，V3.0.23）：U01～U09、V01～V06、V05-A/B/B2/B3、V04-T、第 1 期及其审计缺陷修复、F01-a、TD1～TD6 均已验收闭环（含 F01-1）；M2 代码线唯一尖端为 `763395e4`（分支 `codex/m2-f011-closing-seal`，未合并 main、未推送）；开发运行时仍为 `1.3.3-a808fa8`，不含 U05～`763395e4` 的代码。M2 为 `IN_PROGRESS`；下一项为 F02，随后规则修订与分档器、V04-R1、V05-C（真实模型调用已获用户授权，卡仍须批准）、文档采纳与 WBS 终稿、B1、V07/V08/F01-b，最后做 GPT 对 M2 的最终审计、开发运行时技术性部署与一次推送（均须用户批准）。N1.4 的完整挂起目标属于 M3；D 阶段正式稳定交付仍是独立边界。
+
+当前产品状态（2026-10-09，V3.0.24）：U01～U09、V01～V06、V05-A/B/B2/B3、V05-C、V04-T、第 1 期及其审计缺陷修复、F01-a、F01-1、F02、TD1～TD7、规则修订、分档器均已验收闭环；N1a 与 N2-0 已完成并等待用户验收；M2 代码线唯一尖端为 `388b22c43a334faf1e29d9bb0038150a403b17e3`（分支 `codex/m2-n1a-roles-doc`，未合并 main、未推送）；开发运行时仍为 `1.3.3-a808fa8`，不含 M2 代码，且与 M2 代码线分叉（缺 ADJ 与 IC02，见 §4.7.9）。M2 为 `IN_PROGRESS`，基线自本修订起冻结：剩余为最小 WBS 文档卡、`M2-DEP-INT`、审计包、GPT 最终审计、技术性部署与一次推送（部署在审计之后须用户再明确批准，推送须用户另行授权）；V04-R1、V07、V08、M2-F01B、M2-B1 与文档采纳在 M3。D 阶段正式稳定交付仍是独立边界。
