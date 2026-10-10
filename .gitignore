@@ -162,3 +162,13 @@ PLC源程序样例/
 # 规范库内部过程文件与历史任务规约（避免临时过程文档入库）
 00_Obsidian_Base全局规范文件仓库/.trae/
 **/03_归档/**/.trae/specs/
+
+# --- 2026-10-10 (TD-SW008-115, card 094): archives and backups are never committed; rules only keep NEW files out, already tracked files and history are not affected ---
+*.zip
+*.7z
+*.rar
+*.tar
+*.tgz
+*.tar.gz
+*.bak
+*.hmiproj.bak
