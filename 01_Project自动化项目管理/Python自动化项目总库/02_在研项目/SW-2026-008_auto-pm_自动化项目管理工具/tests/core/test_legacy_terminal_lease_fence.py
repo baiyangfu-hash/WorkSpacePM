@@ -52,8 +52,12 @@ def _legacy_fence_ready(
     capability_targets: tuple[str, ...] = ("RUN-TARGET",),
     decision_conditions: list[str] | None = None,
     reuse_original_chain: bool = False,
+    tracked: tuple[str, ...] = (ORIGINAL_DECISION, FENCE_DECISION),
 ) -> tuple[ContinuityExecutionService, WorkRegistryService]:
-    """One terminal Run whose expired lease token was never RELEASED, plus a live authority."""
+    """One terminal Run whose expired lease token was never RELEASED, plus a live authority.
+
+    ``tracked`` selects which Decision files are committed before the recovery Run starts.
+    """
 
     root.mkdir(parents=True, exist_ok=True)
     _works, execution = _services(root, clock)
@@ -94,8 +98,8 @@ def _legacy_fence_ready(
         (decisions / f"{item.decision_id}.json").write_bytes(
             json.dumps(item.to_dict(), ensure_ascii=False, indent=2).encode("utf-8")
         )
-    _git(root, "add", "-f", "--", f".auto-pm/decisions/{ORIGINAL_DECISION}.json")
-    _git(root, "add", "-f", "--", f".auto-pm/decisions/{FENCE_DECISION}.json")
+    for decision_id in tracked:
+        _git(root, "add", "-f", "--", f".auto-pm/decisions/{decision_id}.json")
     _git(
         root,
         "-c",
@@ -103,6 +107,7 @@ def _legacy_fence_ready(
         "-c",
         "user.email=continuity@example.invalid",
         "commit",
+        "--allow-empty",
         "-m",
         "bind decisions",
     )
@@ -401,3 +406,204 @@ def test_fence_rolls_back_release_when_event_append_fails(
 
     assert _snapshot(tmp_path) == before
     assert not execution._store.get_lease("RUN-TARGET").lease_token.startswith("RELEASED:")
+
+
+# M2-GOV-ADJ B2 (card 026 §4, §6 G2): the legacy terminal lease fence binds the target Work's
+# original Decision and the fence Decision to the recovery Run's control-root commit; replay first.
+
+_H11_FENCE_REQUEST_KEYS = frozenset(
+    {
+        "schema_version",
+        "target_run_id",
+        "expected_run_state",
+        "expected_run_version",
+        "expected_lease_version",
+        "expected_terminal_evidence_kind",
+        "expected_event_set_sha256",
+        "expected_checkpoint_set_sha256",
+        "recovery_run_id",
+        "expected_recovery_run_version",
+        "expected_recovery_lease_version",
+        "recovery_work_id",
+        "expected_recovery_work_version",
+        "recovery_owner_id",
+        "decision_id",
+        "decision_sha256",
+        "reason",
+    }
+)
+_FENCE_REASON = "Expired legacy terminal token invalidated; Run history preserved."
+
+
+def _git_out(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _advance_head(root: Path) -> None:
+    _git(
+        root,
+        "-c",
+        "user.name=Continuity Test",
+        "-c",
+        "user.email=continuity@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "advance control-root HEAD",
+    )
+
+
+def _fence_payloads(root: Path) -> list[dict[str, Any]]:
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        rows = conn.execute(
+            "SELECT payload_json FROM events WHERE event_type='RUN_LEGACY_LEASE_FENCED' "
+            "ORDER BY rowid"
+        ).fetchall()
+    return [json.loads(row[0]) for row in rows]
+
+
+def _assert_not_fenced(root: Path, execution: ContinuityExecutionService, before: Any) -> None:
+    assert _snapshot(root) == before
+    assert not execution._store.get_lease("RUN-TARGET").lease_token.startswith("RELEASED:")
+
+
+@pytest.mark.parametrize(
+    "tracked",
+    [(FENCE_DECISION,), (ORIGINAL_DECISION,)],
+    ids=["original-untracked", "fence-untracked"],
+)
+def test_fence_rejects_untracked_decision_and_rolls_back(
+    tmp_path: Path, tracked: tuple[str, ...]
+) -> None:
+    execution, _works = _legacy_fence_ready(tmp_path, Clock(), tracked=tracked)
+    before = _snapshot(tmp_path)
+    evidence = execution.legacy_terminal_lease_evidence("RUN-TARGET")
+    if ORIGINAL_DECISION not in tracked:
+        assert any("未被控制根 Git 跟踪" in item for item in evidence.blockers)
+
+    # An untracked file makes `git ls-files --error-unmatch` itself fail (same fail-closed path
+    # as settle_expired_run); a tracked-but-not-exact path reports 精确跟踪.
+    with pytest.raises(ContinuityExecutionError, match="Decision Git commit/blob 不存在|精确跟踪"):
+        _fence(execution)
+
+    _assert_not_fenced(tmp_path, execution, before)
+
+
+@pytest.mark.parametrize(
+    "decision_id", [ORIGINAL_DECISION, FENCE_DECISION], ids=["original", "fence"]
+)
+def test_fence_rejects_decision_dirty_against_head(tmp_path: Path, decision_id: str) -> None:
+    execution, _works = _legacy_fence_ready(tmp_path, Clock())
+    path = tmp_path / ".auto-pm" / "decisions" / f"{decision_id}.json"
+    # Same JSON content, different bytes: the file no longer matches the committed blob.
+    path.write_text(
+        json.dumps(json.loads(path.read_text(encoding="utf-8")), ensure_ascii=False, indent=4),
+        encoding="utf-8",
+    )
+    before = _snapshot(tmp_path)
+
+    with pytest.raises(ContinuityExecutionError, match="脏改"):
+        _fence(execution)
+
+    _assert_not_fenced(tmp_path, execution, before)
+
+
+def test_fence_rejects_control_root_head_moved_before_first_execution(tmp_path: Path) -> None:
+    execution, _works = _legacy_fence_ready(tmp_path, Clock())
+    _advance_head(tmp_path)
+    before = _snapshot(tmp_path)
+
+    with pytest.raises(ContinuityExecutionError, match="精确匹配恢复 Run git_head"):
+        _fence(execution)
+
+    _assert_not_fenced(tmp_path, execution, before)
+
+
+def test_fence_rejects_decision_drift_during_recheck(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    execution, _works = _legacy_fence_ready(tmp_path, Clock())
+    store = execution._store
+    real_snapshot = store._decision_snapshot
+    calls = {"count": 0}
+
+    def drifting(decision_id: str) -> Any:
+        dto, digest = real_snapshot(decision_id)
+        calls["count"] += 1
+        # The two post-check re-reads observe different bytes than the two pre-check reads.
+        return (dto, "f" * 64) if calls["count"] > 2 else (dto, digest)
+
+    before = _snapshot(tmp_path)
+    monkeypatch.setattr(store, "_decision_snapshot", drifting)
+    with pytest.raises(ContinuityExecutionError, match="漂移"):
+        _fence(execution)
+    monkeypatch.undo()
+
+    _assert_not_fenced(tmp_path, execution, before)
+
+
+def test_fence_records_git_authority_and_keeps_request_fields(tmp_path: Path) -> None:
+    execution, _works = _legacy_fence_ready(tmp_path, Clock())
+    head = _git_out(tmp_path, "rev-parse", "HEAD")
+    assert execution._store.get_run("RUN-RECOVERY").git_head == head
+
+    _fence(execution)
+
+    payload = _fence_payloads(tmp_path)[-1]
+    assert set(payload["request"]) == _H11_FENCE_REQUEST_KEYS
+    assert payload["authority"] == {
+        "schema_version": "decision-git-binding.v1",
+        "git_head": head,
+        "original_decision_id": ORIGINAL_DECISION,
+        "original_decision_blob": _git_out(
+            tmp_path, "rev-parse", f"{head}:.auto-pm/decisions/{ORIGINAL_DECISION}.json"
+        ),
+        "decision_id": FENCE_DECISION,
+        "decision_blob": _git_out(
+            tmp_path, "rev-parse", f"{head}:.auto-pm/decisions/{FENCE_DECISION}.json"
+        ),
+    }
+
+
+def test_fence_replay_survives_head_moving_forward(tmp_path: Path) -> None:
+    execution, _works = _legacy_fence_ready(tmp_path, Clock())
+    evidence = execution.legacy_terminal_lease_evidence("RUN-TARGET")
+    first = _fence_with_reason(execution, evidence, _FENCE_REASON)
+    events = _snapshot(tmp_path)["events"]
+    _advance_head(tmp_path)
+
+    replay = _fence_with_reason(execution, evidence, _FENCE_REASON)
+
+    assert replay == first
+    assert _snapshot(tmp_path)["events"] == events
+
+
+def test_fence_replay_accepts_h11_event_without_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    execution, _works = _legacy_fence_ready(tmp_path, Clock())
+    store = execution._store
+    evidence = execution.legacy_terminal_lease_evidence("RUN-TARGET")
+    real_append = store._append_event
+
+    def h11_writer(
+        conn: Any, aggregate_id: str, event_type: str, payload: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        # Reproduce the pre-binding (H11C) event shape: no ``authority`` sub-object.
+        if event_type == "RUN_LEGACY_LEASE_FENCED":
+            payload = {key: value for key, value in payload.items() if key != "authority"}
+        return real_append(conn, aggregate_id, event_type, payload, *args, **kwargs)
+
+    monkeypatch.setattr(store, "_append_event", h11_writer)
+    first = _fence_with_reason(execution, evidence, _FENCE_REASON)
+    monkeypatch.undo()
+    assert "authority" not in _fence_payloads(tmp_path)[-1]
+    events = _snapshot(tmp_path)["events"]
+    _advance_head(tmp_path)
+
+    replay = _fence_with_reason(execution, evidence, _FENCE_REASON)
+
+    assert replay == first
+    assert _snapshot(tmp_path)["events"] == events

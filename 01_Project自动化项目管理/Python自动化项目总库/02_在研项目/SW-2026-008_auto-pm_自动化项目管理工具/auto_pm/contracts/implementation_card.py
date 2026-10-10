@@ -186,6 +186,9 @@ class ImplementationCard(BaseModel):
     worktree_path: str
     owned_paths: tuple[str, ...]
     commit_evidence_paths: tuple[str, ...]
+    # Owned paths that must NOT exist at base_commit (card 027 §5.1 “计划新增”); every other owned
+    # path must exist there. Empty by default so earlier cards keep their bytes and meaning.
+    planned_new_paths: tuple[str, ...] = ()
     non_goals: tuple[str, ...]
     gates: tuple[GateDefinition, ...]
     stop_lines: StopLines
@@ -207,6 +210,13 @@ class ImplementationCard(BaseModel):
     def _authorized_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if not value or len(value) != len(set(value)):
             raise ValueError("authorized path groups must be nonempty and unique")
+        return tuple(safe_relative_path(item) for item in value)
+
+    @field_validator("planned_new_paths")
+    @classmethod
+    def _planned_new_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("planned_new_paths must be unique")
         return tuple(safe_relative_path(item) for item in value)
 
     @field_validator("source_refs")
@@ -235,6 +245,8 @@ class ImplementationCard(BaseModel):
     def _intent(self) -> Self:
         if set(self.owned_paths) & set(self.commit_evidence_paths):
             raise ValueError("owned_paths and commit_evidence_paths must not overlap")
+        if not set(self.planned_new_paths) <= set(self.owned_paths):
+            raise ValueError("planned_new_paths must be a subset of owned_paths")
         if not self.state_history or self.state_history[0] is not CardState.DRAFT or self.state_history[-1] is not self.state:
             raise ValueError("state history must begin at DRAFT and end at current state")
         if any(later not in NEXT_STATES[earlier] for earlier, later in zip(self.state_history, self.state_history[1:], strict=False)):

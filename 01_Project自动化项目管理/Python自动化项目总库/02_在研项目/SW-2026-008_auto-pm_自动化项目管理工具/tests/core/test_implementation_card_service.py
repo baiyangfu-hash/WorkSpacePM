@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -211,7 +211,9 @@ def draft() -> ImplementationCard:
         commit_evidence_paths=("governance/evidence.md",),
         non_goals=("TODO: define exclusions",), gates=(),
         stop_lines=StopLines(max_runs=2, max_healing_attempts=1,
-                             deadline_utc="2026-09-29T00:00:00Z",
+                             # The deadline is relative to now: a fixed date turned this fixture into a time bomb
+                             # (baseline exception E-G1-1, failing from 2026-09-29).
+                             deadline_utc=(datetime.now(UTC) + timedelta(days=1)).isoformat().replace("+00:00", "Z"),
                              quota_stop_remaining_percent=30),
         outcomes=Outcomes(normal="TODO", small_problem="TODO", non_blocking="TODO", blocking="TODO"),
         evidence=EvidenceMap(decision_id="DEC-20260928-8D72B667", work_id="WORK-1",
@@ -419,3 +421,45 @@ def test_verify_rejects_non_exact_final_commit_without_mutating_card(
                        final_commit=final_commit)
     assert card_path.read_bytes() == before
     assert outside_card_bytes(root) == outside_before
+
+
+def test_validate_and_dispatch_are_intercepted_by_the_same_precheck(
+    governed_candidate: tuple[Path, Path, str],
+) -> None:
+    """M2-GOV-IC02 (card 027 §5.3, §6 G3): structured cards reuse the Markdown precheck rules."""
+
+    from auto_pm.cli.__main__ import cli
+
+    from auto_pm.ui.cli.implementation_card import command_tree_of
+
+    tree = command_tree_of(cli)
+    root, candidate, base = governed_candidate
+    paths = ("project/file.py", "project/new.py", "governance/evidence.md")
+    establish_authority(
+        root, candidate, base, decision_paths=paths, work_paths=paths, run_paths=paths, running=True
+    )
+    service = ImplementationCardService(root)
+    owned = ("project/file.py", "project/new.py")
+    card = complete_draft(candidate, base).model_copy(update={
+        "owned_paths": owned,
+        "gates": (GateDefinition(name="pytest", cwd="project", argv=("python", "-m", "pytest"),
+                                 coverage_targets=owned),),
+    })
+    target, _ = service.create(card)
+
+    with pytest.raises(ImplementationCardError, match="precheck failed.*project/new.py"):
+        service.validate(card.card_id, command_tree=tree)
+
+    declared = card.model_copy(update={"planned_new_paths": ("project/new.py",)})
+    replace_card(service, declared)
+    assert service.validate(card.card_id, command_tree=tree).planned_new_paths == ("project/new.py",)
+
+    unknown_option = declared.model_copy(update={"gates": (GateDefinition(
+        name="doc", cwd="project", argv=("python", "main.py", "doc", "check", "--strict"),
+        coverage_targets=owned),)})
+    replace_card(service, unknown_option)
+    service.approve(card.card_id, approver="fubai", approval_evidence=card.evidence.decision_id)
+    approved = target.read_bytes()
+    with pytest.raises(ImplementationCardError, match="--strict"):
+        service.dispatch(card.card_id, command_tree=tree)
+    assert target.read_bytes() == approved

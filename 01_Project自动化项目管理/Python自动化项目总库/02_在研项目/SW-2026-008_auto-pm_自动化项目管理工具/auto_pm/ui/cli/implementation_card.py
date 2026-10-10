@@ -9,6 +9,10 @@ import click
 from pydantic import ValidationError
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.implementation_card_precheck import (
+    CommandNode,
+    precheck_markdown_card,
+)
 from auto_pm.application.core.implementation_card_service import (
     ImplementationCardError,
     ImplementationCardService,
@@ -32,6 +36,33 @@ def _emit(value: object) -> None:
     click.echo(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+def _node(command: click.Command) -> CommandNode:
+    options = {
+        name: not parameter.is_flag and parameter.nargs != 0
+        for parameter in command.params
+        if isinstance(parameter, click.Option)
+        for name in (*parameter.opts, *parameter.secondary_opts)
+    }
+    children = (
+        {name: _node(child) for name, child in command.commands.items()}
+        if isinstance(command, click.Group)
+        else {}
+    )
+    return CommandNode(options=options, children=children)
+
+
+def command_tree_of(root: click.Command) -> dict[str, CommandNode]:
+    """Command tree below one click root; ``main.py <group> ... <command>`` resolves against it."""
+    if not isinstance(root, click.Group):
+        return {}
+    return dict(_node(root).children)
+
+
+def command_tree_from_click(ctx: click.Context) -> dict[str, CommandNode]:
+    """The real, installed command tree the precheck resolves ``main.py`` calls against."""
+    return command_tree_of(ctx.find_root().command)
+
+
 @click.group(name="implementation-card")
 def implementation_card_group() -> None:
     """Bounded implementation-card.v1 workflow."""
@@ -49,6 +80,8 @@ def implementation_card_group() -> None:
 @click.option("--worktree", required=True)
 @click.option("--owned-path", "owned_paths", multiple=True, required=True)
 @click.option("--commit-evidence-path", "commit_evidence_paths", multiple=True, required=True)
+@click.option("--planned-new-path", "planned_new_paths", multiple=True,
+              help="Owned path that must not exist at --base-commit (repeatable)")
 @click.option("--decision-id", required=True)
 @click.option("--work-id", required=True)
 @click.option("--run-id", required=True)
@@ -61,6 +94,7 @@ def create_card(
     ctx: click.Context, card_id: str, project_id: str, wbs_item_id: str,
     milestone_id: str, source_refs: tuple[str, ...], intent: str, base_commit: str,
     worktree: str, owned_paths: tuple[str, ...], commit_evidence_paths: tuple[str, ...],
+    planned_new_paths: tuple[str, ...],
     decision_id: str, work_id: str, run_id: str, max_runs: int,
     max_healing_attempts: int, deadline_utc: str, quota_stop_remaining_percent: int,
 ) -> None:
@@ -72,7 +106,7 @@ def create_card(
             intent_type=IntentType(intent),
             problem_statement="" if intent == "FEATURE" else "TODO: problem statement",
             base_commit=base_commit, worktree_path=worktree, owned_paths=owned_paths,
-            commit_evidence_paths=commit_evidence_paths,
+            commit_evidence_paths=commit_evidence_paths, planned_new_paths=planned_new_paths,
             non_goals=("TODO: non-goals",), gates=(),
             stop_lines=StopLines(
                 max_runs=max_runs, max_healing_attempts=max_healing_attempts,
@@ -91,13 +125,34 @@ def create_card(
         raise click.ClickException(str(error)) from error
 
 
+@implementation_card_group.command(name="precheck")
+@click.option(
+    "--card-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Markdown implementation card to precheck (read-only)",
+)
+@click.pass_context
+def precheck_card(ctx: click.Context, card_file: Path) -> None:
+    """Card 027 §5.3: commands, paths and baseline; exit 0 only when every check passes."""
+    app_ctx: AppContext = ctx.find_root().obj
+    report = precheck_markdown_card(
+        card_file,
+        workspace_root=Path(app_ctx.control_root),
+        command_tree=command_tree_from_click(ctx),
+    )
+    _emit(report.to_dict())
+    if not report.passed:
+        ctx.exit(1)
+
+
 @implementation_card_group.command(name="validate")
 @click.argument("card_id")
 @click.pass_context
 def validate_card(ctx: click.Context, card_id: str) -> None:
     """Validate without changing the card, governance store, or repository."""
     try:
-        card = _service(ctx).validate(card_id)
+        card = _service(ctx).validate(card_id, command_tree=command_tree_from_click(ctx))
         _emit({"card_id": card.card_id, "state": card.state.value, "valid": True})
     except (ImplementationCardError, ValueError) as error:
         raise click.ClickException(str(error)) from error
@@ -123,7 +178,7 @@ def approve_card(ctx: click.Context, card_id: str, approver: str, approval_evide
 def dispatch_card(ctx: click.Context, card_id: str) -> None:
     """Emit the checked execution package; do not launch an executor."""
     try:
-        _emit(_service(ctx).dispatch(card_id))
+        _emit(_service(ctx).dispatch(card_id, command_tree=command_tree_from_click(ctx)))
     except (ImplementationCardError, ValueError, OSError) as error:
         raise click.ClickException(str(error)) from error
 

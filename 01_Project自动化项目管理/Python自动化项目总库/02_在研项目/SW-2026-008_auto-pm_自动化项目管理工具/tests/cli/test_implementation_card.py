@@ -50,3 +50,59 @@ def test_create_then_validate_is_read_only(tmp_path: Path) -> None:
     )
     assert verification.exit_code != 0
     assert card_path.read_bytes() == before
+
+
+def _markdown_card(root: Path, baseline: str, body: str = "") -> Path:
+    card = root / "card.md"
+    card.write_text(
+        f"> 隔离基线：`{baseline}`\n> 路径根：`.`\n\n| # | 路径 | 基线状态 |\n|---|---|---|\n"
+        f"| 1 | `README.md` | 存在 |\n| 2 | `new.md` | 计划新增 |\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return card
+
+
+def _control_root(root: Path) -> str:
+    import subprocess
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    git("init")
+    (root / "README.md").write_text("baseline\n", encoding="utf-8")
+    git("add", "README.md")
+    git("-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-m", "base")
+    return git("rev-parse", "HEAD")
+
+
+def test_precheck_command_passes_a_valid_card_and_is_read_only(tmp_path: Path) -> None:
+    from auto_pm.cli.__main__ import cli
+
+    baseline = _control_root(tmp_path)
+    card = _markdown_card(tmp_path, baseline, "`main.py continuity work create --work-id W`")
+    before = sorted(str(path) for path in tmp_path.rglob("*") if ".git" not in path.parts)
+
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "implementation-card", "precheck",
+                                      "--card-file", str(card)])
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["passed"] is True and report["baseline"] == baseline
+    assert report["commands"] == ["continuity work create"]
+    assert sorted(str(path) for path in tmp_path.rglob("*") if ".git" not in path.parts) == before
+
+
+def test_precheck_command_exits_nonzero_with_findings(tmp_path: Path) -> None:
+    from auto_pm.cli.__main__ import cli
+
+    baseline = _control_root(tmp_path)
+    card = _markdown_card(tmp_path, baseline, "`main.py doc check --strict`")
+
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "implementation-card", "precheck",
+                                      "--card-file", str(card)])
+
+    assert result.exit_code == 1
+    report = json.loads(result.output)
+    assert report["passed"] is False
+    assert any("--strict" in item["message"] for item in report["findings"])
