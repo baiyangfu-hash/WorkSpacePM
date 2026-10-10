@@ -1,0 +1,222 @@
+{
+  "basis": [
+    "inventory card 087 (release_inventory.json)",
+    "local release-src tags of card 090",
+    "deployment_manifest.json and the two pointers at preparation time"
+  ],
+  "pointers_when_recorded": {
+    "active": "1.3.3-4b5c630",
+    "previous": "1.3.3-a808fa8"
+  },
+  "recorded_on": "2026-10-10",
+  "releases": {
+    "1.2.3-813105c": {
+      "corrections": [],
+      "exact_tree_detail": "bootstrap.BootstrapError: release SHA-256 不匹配: release_meta.json",
+      "exact_tree_ok": false,
+      "rebuild_from_source": "different",
+      "rollback_eligible": false,
+      "source_commit": "813105c3238aa21d506fc8d16a22a293735e033a",
+      "source_on_origin_when_recorded": false,
+      "source_tag": "release-src/1.2.3-813105c",
+      "status": "archive_unverified",
+      "version": "1.2.3"
+    },
+    "1.2.3-d41eb38": {
+      "corrections": [],
+      "exact_tree_detail": "bootstrap.BootstrapError: release SHA-256 不匹配: auto_pm/domain/spec/services/fix_svc.py",
+      "exact_tree_ok": false,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "d41eb38c773c0b5f175b3231cb6c30f4c90b60aa",
+      "source_on_origin_when_recorded": false,
+      "source_tag": "release-src/1.2.3-d41eb38",
+      "status": "archive_unverified",
+      "version": "1.2.3"
+    },
+    "1.2.3-f950525": {
+      "corrections": [],
+      "exact_tree_detail": "bootstrap.BootstrapError: release SHA-256 不匹配: release_meta.json",
+      "exact_tree_ok": false,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "f95052537392eae53143e20a5b5e1a9a3d271f11",
+      "source_on_origin_when_recorded": false,
+      "source_tag": "release-src/1.2.3-f950525",
+      "status": "archive_unverified",
+      "version": "1.2.3"
+    },
+    "1.2.4-6699a5b": {
+      "corrections": [
+        {
+          "correct_value": "6699a5b831d9df6bc11800a5f3a320fd6b5ec82d",
+          "field": "source_commit",
+          "manifest_value": "6699a5b746d0343fa0c9a41926610b427771765c",
+          "reason": "the object named in the manifest and in the payload's release_meta.json does not exist; the existing commit whose id starts with the release suffix is the one deployed on 2026-09-07"
+        }
+      ],
+      "exact_tree_detail": "bootstrap.BootstrapError: release SHA-256 不匹配: auto_pm/__main__.py",
+      "exact_tree_ok": false,
+      "rebuild_from_source": "n/a",
+      "rollback_eligible": false,
+      "source_commit": "6699a5b831d9df6bc11800a5f3a320fd6b5ec82d",
+      "source_on_origin_when_recorded": false,
+      "source_tag": "release-src/1.2.4-6699a5b",
+      "status": "archive_unverified",
+      "version": "1.2.4"
+    },
+    "1.3.0-5345f40": {
+      "corrections": [],
+      "exact_tree_detail": "exact-tree OK 1.3.0-5345f40",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "5345f403d96e7a13a9eba2ed73d32502f8cb5dc8",
+      "source_on_origin_when_recorded": true,
+      "source_tag": "release-src/1.3.0-5345f40",
+      "status": "verified_historical",
+      "version": "1.3.0"
+    },
+    "1.3.1-a7dae04": {
+      "corrections": [],
+      "exact_tree_detail": "exact-tree OK 1.3.1-a7dae04",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "a7dae04a64e9eb5d91bba67ee3769651a100545c",
+      "source_on_origin_when_recorded": true,
+      "source_tag": "release-src/1.3.1-a7dae04",
+      "status": "verified_historical",
+      "version": "1.3.1"
+    },
+    "1.3.2-9d3c920": {
+      "corrections": [
+        {
+          "correct_value": "9d3c92057a5dcdadbf1f1f693030ef9bc3c102a3",
+          "field": "source_commit",
+          "manifest_value": "9d3c9205",
+          "reason": "the manifest records only a short SHA; this is its full, unique expansion"
+        }
+      ],
+      "exact_tree_detail": "exact-tree OK 1.3.2-9d3c920",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "9d3c92057a5dcdadbf1f1f693030ef9bc3c102a3",
+      "source_on_origin_when_recorded": true,
+      "source_tag": "release-src/1.3.2-9d3c920",
+      "status": "verified_historical",
+      "version": "1.3.2"
+    },
+    "1.3.3-0b72499": {
+      "corrections": [],
+      "exact_tree_detail": "exact-tree OK 1.3.3-0b72499",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "0b7249972a51b64a9e78e98213f37d38263d2502",
+      "source_on_origin_when_recorded": false,
+      "source_tag": "release-src/1.3.3-0b72499",
+      "status": "verified_historical",
+      "version": "1.3.3"
+    },
+    "1.3.3-4b5c630": {
+      "corrections": [],
+      "exact_tree_detail": "exact-tree OK 1.3.3-4b5c630",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "4b5c6307e814cd6bf17337f31ccd8c7e533553e1",
+      "source_on_origin_when_recorded": true,
+      "source_tag": "release-src/1.3.3-4b5c630",
+      "status": "active",
+      "version": "1.3.3"
+    },
+    "1.3.3-8b02de5": {
+      "corrections": [],
+      "exact_tree_detail": "exact-tree OK 1.3.3-8b02de5",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "8b02de55f011df31591601464e0eebf4db5e4f23",
+      "source_on_origin_when_recorded": true,
+      "source_tag": "release-src/1.3.3-8b02de5",
+      "status": "verified_historical",
+      "version": "1.3.3"
+    },
+    "1.3.3-8f08c1a": {
+      "corrections": [],
+      "exact_tree_detail": "exact-tree OK 1.3.3-8f08c1a",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "8f08c1a59fb43bd156586d8afeec43af96edabdb",
+      "source_on_origin_when_recorded": false,
+      "source_tag": "release-src/1.3.3-8f08c1a",
+      "status": "verified_historical",
+      "version": "1.3.3"
+    },
+    "1.3.3-a808fa8": {
+      "corrections": [],
+      "exact_tree_detail": "exact-tree OK 1.3.3-a808fa8",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": true,
+      "source_commit": "a808fa8a43335ceb5705d7384d2afbb0a12e412c",
+      "source_on_origin_when_recorded": true,
+      "source_tag": "release-src/1.3.3-a808fa8",
+      "status": "previous",
+      "version": "1.3.3"
+    },
+    "1.3.3-d8f7c8b": {
+      "corrections": [
+        {
+          "correct_value": "d8f7c8b84b1bcffb68d079f108ffe182b0e1db27",
+          "field": "source_commit",
+          "manifest_value": "d8f7c8b8",
+          "reason": "the manifest records only a short SHA; this is its full, unique expansion"
+        }
+      ],
+      "exact_tree_detail": "bootstrap.BootstrapError: release 存在未登记目录: auto_pm/__pycache__",
+      "exact_tree_ok": false,
+      "rebuild_from_source": "different",
+      "rollback_eligible": false,
+      "source_commit": "d8f7c8b84b1bcffb68d079f108ffe182b0e1db27",
+      "source_on_origin_when_recorded": true,
+      "source_tag": "release-src/1.3.3-d8f7c8b",
+      "status": "archive_unverified",
+      "version": "1.3.3"
+    },
+    "1.3.3-e648e0b": {
+      "corrections": [],
+      "exact_tree_detail": "exact-tree OK 1.3.3-e648e0b",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "e648e0b4a07adadae418a7bbf7bfb60494666b5c",
+      "source_on_origin_when_recorded": false,
+      "source_tag": "release-src/1.3.3-e648e0b",
+      "status": "verified_historical",
+      "version": "1.3.3"
+    },
+    "1.3.3-f462694": {
+      "corrections": [],
+      "exact_tree_detail": "exact-tree OK 1.3.3-f462694",
+      "exact_tree_ok": true,
+      "rebuild_from_source": "identical",
+      "rollback_eligible": false,
+      "source_commit": "f46269475542d8407416fbec84c1b0b0b4542804",
+      "source_on_origin_when_recorded": true,
+      "source_tag": "release-src/1.3.3-f462694",
+      "status": "verified_historical",
+      "version": "1.3.3"
+    }
+  },
+  "rules": [
+    "A rollback target must be the release named by previous_release.json and must pass the exact-tree verification at the moment of the switch; every other release is not a rollback target.",
+    "archive_unverified releases are kept as history only: they are neither rollback targets nor to be installed; their payloads are not deleted.",
+    "verified_historical releases pass the exact-tree verification but are not rollback targets until a switch makes one of them the previous release.",
+    "This file annotates the deployment manifest; it never rewrites the manifest, a pointer or a payload byte. A wrong value in the manifest is corrected here (corrections), not in place."
+  ],
+  "schema": "release-annotations.v1"
+}
