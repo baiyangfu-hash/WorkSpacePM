@@ -1,0 +1,145 @@
+{
+  "declared_vs_actual": [
+    {
+      "actual": "3.31.0",
+      "declared": "<4,>=3",
+      "package": "commitizen",
+      "within_declared": true
+    },
+    {
+      "actual": "9.17.1",
+      "declared": "<10,>=9.7.1",
+      "package": "copier",
+      "within_declared": true
+    },
+    {
+      "actual": "30.10.0",
+      "declared": "<31,>=30",
+      "package": "faker",
+      "within_declared": true
+    },
+    {
+      "actual": "2.3.1",
+      "declared": "<2,>=1",
+      "package": "mypy",
+      "within_declared": false
+    },
+    {
+      "actual": "2.22.5",
+      "declared": "<3,>=2",
+      "package": "polyfactory",
+      "within_declared": true
+    },
+    {
+      "actual": "3.8.0",
+      "declared": "<4,>=3",
+      "package": "pre-commit",
+      "within_declared": true
+    },
+    {
+      "actual": "9.1.1",
+      "declared": "<9,>=8",
+      "package": "pytest",
+      "within_declared": false
+    },
+    {
+      "actual": "7.1.0",
+      "declared": "<6,>=5",
+      "package": "pytest-cov",
+      "within_declared": false
+    },
+    {
+      "actual": "1.8.0",
+      "declared": "<2,>=1",
+      "package": "pytest-datadir",
+      "within_declared": true
+    },
+    {
+      "actual": "1.7.0",
+      "declared": "<2,>=1",
+      "package": "pytest-env",
+      "within_declared": true
+    },
+    {
+      "actual": "4.5.0",
+      "declared": "<5,>=4.4",
+      "package": "pytest-qt",
+      "within_declared": true
+    },
+    {
+      "actual": "3.8.0",
+      "declared": "<4,>=3",
+      "package": "pytest-xdist",
+      "within_declared": true
+    },
+    {
+      "actual": "0.16.4",
+      "declared": "<0.6,>=0.5",
+      "package": "ruff",
+      "within_declared": false
+    },
+    {
+      "actual": "3.8.1",
+      "declared": "<4,>=3.2.9",
+      "package": "safety",
+      "within_declared": true
+    },
+    {
+      "actual": "0.24.4",
+      "declared": "<0.25,>=0.24.2",
+      "package": "toml-sort",
+      "within_declared": true
+    },
+    {
+      "actual": "6.0.12.20260815",
+      "declared": "<7,>=6",
+      "package": "types-PyYAML",
+      "within_declared": true
+    }
+  ],
+  "editable_packages_not_in_lock": [
+    {
+      "name": "python_bridge",
+      "source": "git+https://github.com/baiyangfu-hash/WorkSpacePM.git@5feb8e9301f99aceffd56b761a4b05a70912da15#egg=python_bridge&subdirectory=0100_plc自动化\\dj-2026-009_汇川换型改造\\python_bridge"
+    }
+  ],
+  "interpreter": {
+    "base_interpreter": "the venv's pyvenv.cfg points at an interpreter inside the codex runtime cache directory of the user profile (outside the repository); pyvenv.cfg records 3.12.13 while the interpreter there now reports a newer patch version: that tool replaces the interpreter in place",
+    "platform": "win32 AMD64",
+    "venv": ".venv at the control root (not tracked)",
+    "version": "3.12.14"
+  },
+  "limits": [
+    "the fresh venv uses the same base interpreter binary; a different interpreter or machine is not covered",
+    "the lock pins versions, not hashes",
+    "declared_vs_actual lists the dev constraints of pyproject.toml; pyproject.toml itself is not changed by this card"
+  ],
+  "lock_file": {
+    "install_command": "python -m pip install --no-deps -r requirements-lock-py312-win.txt",
+    "package_count": 108,
+    "path": "00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt",
+    "sha256": "53b75f3feee2fe455c29231a0c3678850022bbe4259438793bc33dec60f7671b"
+  },
+  "pip_version": "26.2.1",
+  "recorded_on": "2026-10-10",
+  "schema": "environment-record.v1",
+  "verification": {
+    "all_ok": true,
+    "method": "fresh venv from the same interpreter, `pip install --no-deps` of exactly the pinned set, pip check, imports, a 7-test subset and the package type check on an export of the base commit",
+    "steps": {
+      "create_venv": "ok",
+      "export_base_tree": "ok",
+      "imports": "ok",
+      "install_pinned_set": "ok",
+      "installed_equals_lock": "ok",
+      "mypy_package": "Success: no issues found in 244 source files",
+      "pip_check": "No broken requirements found.",
+      "tests_subset": "7 passed"
+    },
+    "tool_versions": {
+      "mypy": "mypy 2.3.1 (compiled: yes)",
+      "pytest": "pytest 9.1.1",
+      "ruff": "ruff 0.16.4"
+    }
+  }
+}
