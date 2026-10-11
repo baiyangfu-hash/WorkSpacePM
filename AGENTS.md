@@ -14,6 +14,7 @@
 | 全局开发规则 | `.trae/rules/project-rule.md` |
 | 跨技能公共契约 | `.trae/skills/shared/refs/skill_coordination.md` |
 | 治理基线 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
+| 当前计划与状态投影 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md`（以其“当前投影”为准；上一行的 26 号总计划是治理基线与历史依据） |
 | 日常迭代操作手册 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md` |
 | 隔离对象（禁止使用） | `.trae/skills/pm-workflow/SKILL.md` |
 | 全栈执行 | `.trae/skills/fullstack-engineer/SKILL.md` |
@@ -39,7 +40,7 @@
    - **有效提问门槛**：只有当代码库探路完毕，且发现涉及无法推导的真实业务决策抉择（Trade-off）、新增未接线硬件定义或客户冲突诉求时，方可发起《高质量澄清提问清单》；
 2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）；
 3. **阶段 2【执行】**：仅在用户明确回复“同意/批准”后，方可派发给对应执行技能（PLC / 全栈）编写代码与自动化测试。严禁在对话框要求或输出长篇说明书草稿，文档骨架由 Copier 脚手架生成并填空；
-4. **阶段 3【验收】**：执行端创建 Checkpoint 并回执后，主 Agent 核验 Git/门禁证据，推进 Run/Work 与 CHG 状态并执行 `main.py ledger reconcile <PID>`。PM_SESSION 仅按需刷新项目摘要。闭环未完成前不得宣布结项。
+4. **阶段 3【验收】**：执行端创建 Checkpoint 并回执后，主 Agent 核验 Git/门禁证据，推进 Run/Work 与 CHG 状态并执行 `main.py ledger reconcile <PID>`。PM_SESSION 已退役（用户 2026-10-10 裁决），不再刷新，仅作历史证据。闭环未完成前不得宣布结项。
 
 ## 子代理物理隔离法则（执行权剥离）
 
@@ -137,7 +138,7 @@
    - **验证与生成的绝对隔离**：在编写自动化验证脚本或门禁（如 `--verify` 命令）时，必须确保验证逻辑完全处于只读（Read-Only）上下文中。严禁在执行断言之前意外触发文件生成或覆写动作，导致“自己检查自己刚刚生成的文件”从而掩盖用户的破坏性篡改。
 
 ## 文件编码与读写铁律 (DEV-ENC-001)
-在执行 Python 脚本读写工作区内的文本或 Markdown 文件时，**必须显式声明 encoding=utf-8, errors=eplace`**。这是为了防止由于中文字符、GBK 终端历史遗留导致的 UnicodeDecodeError，保证全栈工具链在各种极端环境下的鲁棒性。
+在执行 Python 脚本读写工作区内的文本或 Markdown 文件时，**必须显式声明 `encoding="utf-8", errors="replace"`**。这是为了防止由于中文字符、GBK 终端历史遗留导致的 UnicodeDecodeError，保证全栈工具链在各种极端环境下的鲁棒性。
 
 ## 子代理零负担自闭环约束 (Execution Loop)
-执行代理在向 PM 或用户通过 \send_message\ 回复之前，必须**强制进行自我门禁校验**（如 \uto_pm check\ 或 \pytest\）。如果运行结果不是 Exit Code 0，且系统未达到防死循环上限（Bounded Healing），**绝对禁止返回半成品**。必须内部消化错误并重试，违者视为严重破坏零负担铁律。
+执行代理在向 PM 或用户通过 `send_message` 回复之前，必须**强制进行自我门禁校验**（如 `main.py doc check`、`main.py plc check <PID>` 或 `pytest`）。如果运行结果不是 Exit Code 0，且系统未达到防死循环上限（Bounded Healing），**绝对禁止返回半成品**。必须内部消化错误并重试，违者视为严重破坏零负担铁律。

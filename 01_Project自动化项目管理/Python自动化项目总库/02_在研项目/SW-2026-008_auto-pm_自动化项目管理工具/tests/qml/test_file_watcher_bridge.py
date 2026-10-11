@@ -343,12 +343,14 @@ def test_completed_real_pool_worker_does_not_retain_its_gui_bridge(
     finally:
         # A failing old-byte negative control must not leave a live native filter behind.
         retained = bridge_ref()
+        pool_done = True
         if retained is not None:
             retained.prepareForReload()
             retained._poll_timer.stop()
-            assert pool.waitForDone(10_000)
+            pool_done = pool.waitForDone(10_000)
             retained.deleteLater()
             QCoreApplication.sendPostedEvents(retained, QEvent.Type.DeferredDelete.value)
+        assert pool_done, "Worker pool did not finish while the retained bridge was released"
 
 
 def _exercise_real_sync_background_gc(workspace: Path, *, io_error: bool) -> None:
