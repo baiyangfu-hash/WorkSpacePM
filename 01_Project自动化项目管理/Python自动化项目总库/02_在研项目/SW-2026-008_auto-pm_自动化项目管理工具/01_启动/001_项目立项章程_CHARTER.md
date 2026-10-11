@@ -12,7 +12,7 @@ author: "Product PM"
 
 > **所属过程组**：`01_启动 (Initiating)`  
 > **项目编号**：`SW-2026-008`  
-> **单一真源索引**：`PM_SESSION_SW-2026-008.md`
+> **治理来源索引**：项目控制状态按工作区治理规则核对 canonical Continuity v2 记录、有效 WBS、已验收 Git/Checkpoint 与有效运行身份。`PM_SESSION_SW-2026-008.md` 已退役（用户 2026-10-10 裁决），仅作历史摘要，不是控制真源。
 
 ---
 
@@ -60,4 +60,4 @@ author: "Product PM"
 - **代码质量门禁**：
   - 静态检查：`ruff check` 0 errors, `mypy` 0 errors。
   - 自动化测试：`pytest` 单元测试通过率 100%。
-  - 真源对齐：`PM_SESSION` 保持 ≤150 行双层快照。
+  - 摘要投影：`PM_SESSION` 保持 ≤150 行双层快照（历史约束；该文件已退役）；行数与结构约束不改变 canonical 控制证据的优先级。
