@@ -1,0 +1,4 @@
+# Keep the real samples byte for byte: Work-FB is UTF-16LE with a BOM, Autoshop-FB is GB18030 with CRLF line endings.
+# Git detects both as binary on its own today; the explicit -text pins that down so that no end-of-line normalisation can ever apply
+# (the workspace default is * text=auto eol=lf and Git for Windows sets core.autocrlf=true).
+*.csv -text -diff

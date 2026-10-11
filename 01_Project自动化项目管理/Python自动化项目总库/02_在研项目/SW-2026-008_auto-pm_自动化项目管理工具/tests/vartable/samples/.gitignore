@@ -1,0 +1,4 @@
+# The two real-sample fixtures of the vartable parser tests (WBS task Q01).
+# The project .gitignore ignores *.csv*; these two files are committed on purpose. They are byte-identical to the copies already tracked in
+# 00_Infrastructure/auto_pm/tests/vartable/samples. Without this file a clean checkout lacks them and 14 real-sample tests fail.
+!*.csv
