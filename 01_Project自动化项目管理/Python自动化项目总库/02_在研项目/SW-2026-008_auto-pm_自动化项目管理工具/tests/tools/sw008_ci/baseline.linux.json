@@ -2,6 +2,8 @@
   "schema": "ci-baseline.v1",
   "platform": "linux",
   "recorded_on": "2026-10-10",
+  "refreshed_on": "2026-10-11",
+  "refresh_note": "Q01 category and its 14 ids removed by card 106 (M2-GOV-CIBASE): the two real vartable samples are committed since card 101 (853fc651), so a clean checkout has them and those 14 tests pass. The remaining 21 ids are unchanged; the first CI run after the push re-measures them on Python 3.12.",
   "measured_on": {
     "source_commit": "d3c50a8b1c1f48778721617ca79ed78e1bc7a8f7",
     "python": "3.13 (cloud container; CI uses 3.12 and MUST re-measure before this file is accepted)",
@@ -11,7 +13,6 @@
     "result": "3485 passed, 35 failed, 0 errors, 21 skipped, 328.9 s"
   },
   "categories": {
-    "Q01": "Real Vartable sample CSVs are untracked (ignored by *.csv*); fixtures missing in a clean checkout (WBS Q01)",
     "POSIX_HOOK_EXEC_BIT": "Real Git hooks installed by the scene are not executable on POSIX, Git ignores them, so refusals never happen; passes on Windows",
     "SH_LOGIN_GIT_FOR_WINDOWS": "Test invokes `sh --login`, a Git-for-Windows sh flag that dash rejects",
     "WINDOWS_PATH": "Test uses C:\\\\workspace\\\\... Windows paths",
@@ -39,21 +40,7 @@
     "tests/e2e/test_pmf_gate_failures.py::test_g11_production_files_of_two_registered_projects_in_one_commit_are_refused_by_commit_msg",
     "tests/e2e/test_pmf_gate_failures.py::test_g12_a_valid_change_request_that_belongs_to_another_project_is_refused_by_commit_msg",
     "tests/e2e/test_pmf_recovery.py::test_r01_a_killed_executor_is_recorded_as_a_failure_never_as_success",
-    "tests/test_fixture_health.py::TestFixtureHealth::test_no_conditional_assertion_skips",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_comment_extraction",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_data_types",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_entries_count",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_gbk",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_i_start",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_in_scope",
-    "tests/vartable/test_format_detector.py::TestDetectFormatRealSamples::test_detect_format_real_autoshop_sample_gbk",
-    "tests/vartable/test_format_detector.py::TestDetectFormatRealSamples::test_detect_format_real_work3_sample_utf16_le",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_address_no_quotes",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_data_types",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_entries_count",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_fb_name_metadata",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_utf16_le",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_var_input_scope"
+    "tests/test_fixture_health.py::TestFixtureHealth::test_no_conditional_assertion_skips"
   ],
   "id_category": {
     "tests/cli/test_git_hook.py::test_installed_commit_msg_hook_rejects_missing_or_external_message_file": "SH_LOGIN_GIT_FOR_WINDOWS",
@@ -76,20 +63,6 @@
     "tests/e2e/test_pmf_gate_failures.py::test_g11_production_files_of_two_registered_projects_in_one_commit_are_refused_by_commit_msg": "POSIX_HOOK_EXEC_BIT",
     "tests/e2e/test_pmf_gate_failures.py::test_g12_a_valid_change_request_that_belongs_to_another_project_is_refused_by_commit_msg": "POSIX_HOOK_EXEC_BIT",
     "tests/e2e/test_pmf_recovery.py::test_r01_a_killed_executor_is_recorded_as_a_failure_never_as_success": "PLATFORM_SIGNAL_UNVERIFIED",
-    "tests/test_fixture_health.py::TestFixtureHealth::test_no_conditional_assertion_skips": "KNOWN_BASELINE_ALSO_ON_WINDOWS",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_comment_extraction": "Q01",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_data_types": "Q01",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_entries_count": "Q01",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_gbk": "Q01",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_i_start": "Q01",
-    "tests/vartable/test_autoshop_parser.py::TestAutoshopParserRealSample::test_autoshop_parse_real_sample_in_scope": "Q01",
-    "tests/vartable/test_format_detector.py::TestDetectFormatRealSamples::test_detect_format_real_autoshop_sample_gbk": "Q01",
-    "tests/vartable/test_format_detector.py::TestDetectFormatRealSamples::test_detect_format_real_work3_sample_utf16_le": "Q01",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_address_no_quotes": "Q01",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_data_types": "Q01",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_entries_count": "Q01",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_fb_name_metadata": "Q01",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_utf16_le": "Q01",
-    "tests/vartable/test_work3_parser.py::TestWork3ParserRealSample::test_work3_parse_real_sample_var_input_scope": "Q01"
+    "tests/test_fixture_health.py::TestFixtureHealth::test_no_conditional_assertion_skips": "KNOWN_BASELINE_ALSO_ON_WINDOWS"
   }
 }
