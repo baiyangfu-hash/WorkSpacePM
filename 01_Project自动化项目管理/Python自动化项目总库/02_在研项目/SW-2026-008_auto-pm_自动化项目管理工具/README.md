@@ -2,7 +2,11 @@
 
 统一 CLI 管理 PLC/Python 多技术栈项目的脚手架工具。
 
-> 迁移状态：本目录保留为 `SW-2026-008` 历史母体、研发记录与回退参考；工作空间默认运行入口已迁至 `00_Infrastructure/auto_pm`。
+> 迁移状态：本目录是 `SW-2026-008` 的**研发母体**（源码、测试、模板、研发记录）；工作空间的**运行入口**是工作区根的 `main.py`，它经 `00_Infrastructure/auto_pm/launcher` 校验并启动 `active_release.json` 指向的不可变 release，**不直接运行本目录的源码**。
+>
+> 当前阶段（以 WBS 顶部的"当前投影"为准；本段依据 V3.0.26，2026-10-09）：M0、M1 已验收；M2 的 U 批次与治理卡已验收，`M2-DEP-TECH`（构建 M2 发布包并切换**开发运行时**为 `1.3.3-4b5c630`）与 `M2-PUSH`（把 M2 以隔离分支一次推送到远端）均记录为已完成。**`main` 尚未合并**，M2 里程碑的总状态以 WBS 当前投影为准——该投影在 V3.0.26 里仍写 `IN_PROGRESS`，会随用户验收更新。本文不替这些记录作结论。
+>
+> 日常用法见 `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md`；没有 AI 时的最低限度维护见同目录的 41 号手册（候选）。
 
 ## 模块成熟度矩阵 (Module Maturity)
 
@@ -45,7 +49,9 @@ python -m auto_pm doctor
 
 ### 依赖
 
-- Python >= 3.11
+**可复现的安装以锁文件为准**：`00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt`（108 个固定版本，用 `python -m pip install --no-deps -r <锁文件>` 安装；配套记录见同目录 `environment_record.json`）。下面的下限只是 `pyproject.toml` 的声明；开发工具（ruff、mypy、pytest、pytest-cov）的实际版本与 `pyproject.toml` 的 dev 约束目前不一致，以锁文件和环境记录为准。
+
+- Python >= 3.11（锁文件按 3.12 制作）
 - Click >= 8.1.7
 - Rich >= 14
 - Pydantic >= 2.10.6
@@ -53,6 +59,37 @@ python -m auto_pm doctor
 - PyYAML >= 6.0
 - Copier >= 9.7.1,<10
 - PySide6 >= 6.8,<7
+
+## 命令一览（25 个命令组）
+
+下表来自在 `d3c50a8b` 上运行 `main.py --help` 的实测输出，只列名称与一句话说明；每个命令组的用法用 `main.py <命令组> --help` 查看。
+
+| 命令组 | 说明 |
+|---|---|
+| `pm` | 面向用户的 PM 门面：计划、确认、执行、恢复与验收（`resume`、`orient`、`plan`、`approve`、`confirm-start`、`execute`、`accept`、`inbox`、`pending`、`drafts`） |
+| `continuity` | 事务化连续性 v2：Mission、Work、Run、Lease、Checkpoint、Handoff.v2、Dispatch |
+| `context` | 平台无关、只读的调用上下文（`context resolve`） |
+| `decision` | 审批结构化决策包 |
+| `implementation-card` | 受限的实施卡工作流 |
+| `git-hook` | Git 提交硬锁门禁：`install`、`pre-commit`、`commit-msg`、`preflight`、`release-gate` |
+| `ledger` | 版本变更台账对账（`ledger reconcile`，只读） |
+| `change` | 变更单创建、查询、状态流转 |
+| `project` | 项目列表、创建、查看、编辑、导入、补全元数据 |
+| `plc` | PLC 项目：初始化、检查、修复、文档一致性、工业源工程摄取（LSP-907） |
+| `python` | Python 项目：初始化、检查（210/211/220 规范） |
+| `doc` | 文档与代码一致性门禁、自动区维护 |
+| `spec` | 规范管理：检查、索引、frontmatter、报告 |
+| `template` | Copier 模板列表与增量更新 |
+| `vartable` | 变量表解析、编码检测、格式识别 |
+| `constraint` | 约束合规检查、守护、自愈 |
+| `delivery` | 交付物构建、打包、归档、状态 |
+| `doctor` | 环境与依赖健康诊断 |
+| `clean` | 清扫游离日志、散装脚本、临时产物 |
+| `dogfood` | 驾驶舱自用隔离、指纹与稳定版外部复核 |
+| `pm-session` | PM_SESSION 检查、归档、视图 |
+| `gui` | 启动桌面应用（见下文"GUI 功能"） |
+| `handoff` | handoff.v1 交接包（历史格式；新流程用 `continuity handoff`） |
+| `workflow`、`prototype` | 保留历史名称以便发现；已隔离的旧技能不再加载，`prototype` 标注为 pm-workflow 专属 |
 
 ## CLI 使用
 
@@ -190,7 +227,9 @@ auto-pm gui --debug    # 调试模式（开启日志详细输出）
 
 ## GUI 功能
 
-> V0.6.0 起 GUI 已迁移至 QML 运行时，V0.8.0 QML 完整覆盖，V0.9.0 旧 QWidget 完整移除 + CLI 标志退役 + Facade 接口层落地（5 个域 Facade + 5 个域 Bridge）。
+> **当前默认入口**：`main.py gui` 启动**老板驾驶舱**，只读取项目注册表和已存在的连续性记录；`main.py gui --advanced` 才打开下面描述的原专业工作台。老板驾驶舱的卡片只显示项目、需求、里程碑、进展、阻塞、验证、风险、当前负责人和下一步，内部编号放在"证据抽屉"里按需展开。（依据：`main.py gui --help`；`37_Cockpit_OS_…迁移总方案_PM.md` §20。）
+
+> 以下为原专业工作台的功能清单（`--advanced`）。V0.6.0 起 GUI 已迁移至 QML 运行时，V0.8.0 QML 完整覆盖，V0.9.0 旧 QWidget 完整移除 + CLI 标志退役 + Facade 接口层落地（5 个域 Facade + 5 个域 Bridge）。
 
 - **项目中心式导航** - QML 主窗口 + 左侧侧边栏 + StackLayout 切换主区域
 - **项目列表首页** - 项目卡片网格（编号/名称/技术栈徽标/版本/阶段/业务线），统计栏 + 搜索 + 筛选（ProjectListView.qml）
@@ -211,14 +250,19 @@ auto-pm gui --debug    # 调试模式（开启日志详细输出）
 
 ### 测试
 
-```bash
-# 运行测试
-task test
+> `Taskfile.yml` 已标注为"2026-08-28 冻结前的母体口径，仅供开发回退参考"，下面的 `task` 命令不再是主路径。
 
-# 运行测试并查看覆盖率
-task test
-task coverage
+```bash
+# 在本目录运行测试（-o addopts= 去掉 pyproject 里默认的覆盖率/报告输出，避免在目录里写出 coverage/ 等文件）
+python -B -m pytest -o addopts= --no-cov -p no:cacheprovider -q tests
+
+# 并行（4 进程）：Linux 上约 4～6 分钟；Windows 全量分组运行约 2.5 小时
+python -B -m pytest -o addopts= --no-cov -p no:cacheprovider -q -n 4 tests
 ```
+
+**已知失败（不是新问题）**：Windows 本地 15 项（14 个变量表真实样例缺失 + `test_fixture_health` 1 项）；Linux 35 项（另含 Linux 上不成立的真实 Hook E2E 等）。只有出现这些名单之外的失败才需要处理。
+
+**GitHub 上的自动检查（早期预警）**：推送到非 `main` 分支时，`.github/workflows/sw008-ci.yml` 会在 GitHub 的 Linux 虚拟机（Python 3.12，按锁文件装依赖）上自动运行：工具自检、密钥扫描、`ruff`、`mypy --platform win32`、全量测试（4 进程），再把失败与已知基线逐项比对，约 7 分钟（首次落地的运行为 7 分 5 秒）。结果有三种：`PASS`、`PASS_KNOWN_BASELINE`（失败集合与基线逐项相等）、`FAIL`（出现新失败、基线项意外通过、或运行崩溃）。`PASS_KNOWN_BASELINE` **不是全绿，也不替代本地门禁**。工具与基线文件在本目录的 `tests/tools/sw008_ci/`。它不检查真实 Hook 的 E2E 和 Windows 路径语义，这两块仍靠本地 Windows 门禁。
 
 ### 代码质量
 
@@ -267,7 +311,7 @@ auto-pm/
 │   ├── plc-shared-library/         # PLC 共享函数库模板
 │   ├── plc-test-suite/             # PLC 测试套件模板
 │   └── python-tool/                # Python 工具项目模板
-├── tests/                          # 测试（1761 项，2026-09-06 实测；含 application/change/core/db/plc/spec/qml/workflow 等）
+├── tests/                          # 测试（221 个测试文件、3541 项，2026-10-10 在 d3c50a8b 实测；含 application/change/core/db/plc/spec/qml/e2e/vartable 等）
 │   ├── plc/                        # PLC 规范检查测试
 │   ├── spec/                       # 规范中心测试（SHC-001~017）
 │   ├── modbus/                     # Modbus 通信测试
@@ -306,7 +350,7 @@ auto-pm/
 | INT 接口文档 | `02_规划/002_接口文档_INT.md` | DTO/Command/Event 接口契约 |
 | DSN 详细设计说明书 | `02_规划/003_详细设计说明书_DSN.md` | 五层架构详细设计 |
 | TEC 技术方案文档 | `02_规划/004_技术方案文档_TEC.md` | 技术选型与方案（接口优先策略） |
-| 里程碑与实施计划 | `02_规划/005_里程碑与实施计划.md` | 30 周滚动计划（M0-M9） |
+| 里程碑与实施计划 | `02_规划/005_里程碑与实施计划.md` | **[待确认]** 该文件已不在 `02_规划/` 原位置（在 `d3c50a8b` 的树里找不到），请确认是否已归档，再更新或删除此行 |
 | UI 架构原型 | `02_规划/Html原型预览/` | HTML 交互原型目录 |
 | UI 原型说明 | `02_规划/007_UI架构原型说明.md` | 原型配套说明 |
 
@@ -318,6 +362,15 @@ auto-pm/
 | 立项表 | `01_启动/01_立项表_PROJ.md` | 立项登记与基础信息 |
 | 发布门禁规范 | `01_启动/007_发布门禁规范_REL.md` | 发布前质量门禁定义 |
 | 测试策略与验收规程 | `05_收尾/003_测试策略与验收规程_TEST_PLAN.md` | 收尾阶段测试与验收基线 |
+
+### 当前现行的治理文档（工作区级，路径相对工作区根）
+
+| 文档 | 路径 | 说明 |
+|---|---|---|
+| 日常迭代操作手册 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md` | 每次开工的固定动作 |
+| 驾驶舱角色与边界 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/40_驾驶舱角色与边界_PM.md` | 用户、Agent、驾驶舱各管什么 |
+| PM-Flow 总方案与 WBS | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md` | 顶部"当前投影"是状态真源 |
+| 协作规则 | `AGENTS.md` | 所有 AI 共用的入口 |
 
 ### 项目管理文档
 
