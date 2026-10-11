@@ -1,0 +1,94 @@
+# SW-2026-008 minimal CI (Linux only).  Runs the checks that already exist; adds no new test code.
+# It is an early warning.  It does NOT replace the governed local gates and its result is not
+# acceptance evidence for any card.  A PASS_KNOWN_BASELINE result is not an all-green result.
+name: sw008-ci
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/**"
+      - "00_Infrastructure/auto_pm/environment/**"
+      - ".github/workflows/sw008-ci.yml"
+  workflow_dispatch:
+
+# Read-only token; no secrets are used by any step.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the older, now obsolete check.
+concurrency:
+  group: sw008-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJ: "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+  QT_QPA_PLATFORM: offscreen
+  PYTHONDONTWRITEBYTECODE: "1"
+  # The e2e tests create commits in throw-away repositories.
+  GIT_AUTHOR_NAME: ci
+  GIT_AUTHOR_EMAIL: ci@example.invalid
+  GIT_COMMITTER_NAME: ci
+  GIT_COMMITTER_EMAIL: ci@example.invalid
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: System libraries for Qt (offscreen)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+
+      - name: Install the locked dependencies
+        run: |
+          python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          python -m pip check
+
+      - name: CI tools self-test (the checks must be able to fail)
+        run: python -I "$PROJ/tests/tools/sw008_ci/selftest.py"
+
+      - name: Secret scan (lines added since main)
+        run: python -I "$PROJ/tests/tools/sw008_ci/secret_scan.py" origin/main
+
+      - name: Ruff
+        working-directory: ${{ env.PROJ }}
+        run: python -m ruff check --no-cache auto_pm tests
+
+      - name: Mypy (win32 platform, as the product runs on Windows)
+        working-directory: ${{ env.PROJ }}
+        run: python -m mypy --platform win32 --no-incremental --cache-dir=/dev/null auto_pm
+
+      - name: Pytest
+        id: pytest
+        working-directory: ${{ env.PROJ }}
+        run: |
+          set +e
+          python -m pytest -q -p no:cacheprovider -o addopts= -n 4 tests 2>&1 | tee "$RUNNER_TEMP/pytest.log"
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Compare the failures with the known Linux baseline
+        run: python -I "$PROJ/tests/tools/sw008_ci/compare_baseline.py" "$RUNNER_TEMP/pytest.log" "$PROJ/tests/tools/sw008_ci/baseline.linux.json" "${{ steps.pytest.outputs.code }}"
+
+      - name: The working tree must still be clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then git status --short; exit 1; fi
+
+      - name: Keep the test log for 14 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sw008-pytest-log
+          path: ${{ runner.temp }}/pytest.log
+          retention-days: 14
