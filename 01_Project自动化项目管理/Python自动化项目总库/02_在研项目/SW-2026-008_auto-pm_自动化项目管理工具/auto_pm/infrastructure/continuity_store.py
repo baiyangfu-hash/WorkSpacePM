@@ -56,6 +56,7 @@ from auto_pm.contracts.pm_facade import (
     PlanningScopeCard,
     SubmittedPlanningScopeCard,
 )
+from auto_pm.infrastructure.continuity_internal import codec as continuity_codec
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
     authority_path_parts,
@@ -3628,15 +3629,11 @@ class ContinuityStore:
 
     @staticmethod
     def _run_creation_request_hash(request: dict[str, object]) -> str:
-        return hashlib.sha256(
-            json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        return continuity_codec.run_creation_request_hash(request)
 
     @staticmethod
     def _lease_token_fingerprint(lease_token: str) -> str:
-        return hashlib.sha256(
-            b"auto-pm/run-lease-token/v1\0" + lease_token.encode("utf-8")
-        ).hexdigest()
+        return continuity_codec.lease_token_fingerprint(lease_token)
 
     def run_creation_replay(
         self,
@@ -4462,8 +4459,7 @@ class ContinuityStore:
 
     @staticmethod
     def _settlement_request_hash(request: dict[str, object]) -> str:
-        canonical = json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode()).hexdigest()
+        return continuity_codec.settlement_request_hash(request)
 
     @staticmethod
     def _validated_settlement_text(*, reason: object, idempotency_key: object) -> tuple[str, str]:
