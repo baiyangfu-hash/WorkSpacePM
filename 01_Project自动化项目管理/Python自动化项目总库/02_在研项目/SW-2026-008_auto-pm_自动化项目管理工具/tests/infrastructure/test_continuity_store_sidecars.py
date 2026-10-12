@@ -1,4 +1,4 @@
-"""The store tolerates a WAL sidecar that is briefly in a half-created, delete-pending or locked state, and still refuses a real anomaly (card CARD-SW008-M2-V04, scenarios sc01-sc08).
+"""The store tolerates a WAL sidecar that is briefly in a half-created, delete-pending or locked state, and still refuses a real anomaly (card CARD-SW008-M2-V04, scenarios sc01-sc08; card CARD-SW008-M3-RACE, scenarios sc09-sc12: the second place that meets the same instants, the inventory of the strict read).
 
 SQLite creates and deletes ``-wal``, ``-shm`` and ``-journal`` while other processes use the database, so the path check that runs before every transaction can
 meet such a file at the wrong instant, and on Windows the ``-shm`` file cannot even be read while another process has a transaction open. These tests make those
@@ -20,6 +20,8 @@ from auto_pm.infrastructure.continuity_store import (
     _SIDECAR_ATTEMPTS,
     ContinuityStore,
     ContinuityStoreError,
+    _ReadSnapshotAnomalyError,
+    _ReadSnapshotDriftError,
 )
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
@@ -191,3 +193,81 @@ def test_sc08_a_database_file_that_cannot_be_read_is_never_retried_by_the_strict
     with pytest.raises(ContinuityStoreError, match="文件无法读取: continuity.db"):
         _strict_read(store)
     assert len(failed) == 1 and probe.sleeps == 0
+
+
+def _fake_wrong_links(monkeypatch: pytest.MonkeyPatch, names: set[str], links: int) -> None:
+    """Report another link count for every ``stat`` of the named files."""
+
+    def fake(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+        result = ORIGINAL_STAT(self, follow_symlinks=follow_symlinks)
+        if self.name in names and follow_symlinks:
+            return os.stat_result(
+                (result.st_mode, result.st_ino, result.st_dev, links, result.st_uid, result.st_gid, result.st_size, int(result.st_atime), int(result.st_mtime), int(result.st_ctime))
+            )
+        return result
+
+    monkeypatch.setattr(Path, "stat", fake)
+
+
+@pytest.mark.parametrize("links", [0, 2], ids=["links-0-delete-pending", "links-2-hard-linked"])
+def test_sc09_the_inventory_treats_a_wrong_link_count_of_a_sidecar_as_a_retry_signal_and_of_the_database_as_a_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, links: int
+) -> None:
+    sidecar = tmp_path / "continuity.db-wal"
+    sidecar.write_bytes(b"x")
+    database = tmp_path / "continuity.db"
+    database.write_bytes(b"x")
+    _fake_wrong_links(monkeypatch, {"continuity.db-wal", "continuity.db"}, links)
+
+    with pytest.raises(_ReadSnapshotAnomalyError, match="唯一链接的普通文件: continuity.db-wal") as caught:
+        ContinuityStore._file_inventory(sidecar, required=False, transient=True)
+    assert isinstance(caught.value, _ReadSnapshotDriftError)
+    with pytest.raises(ContinuityStoreError, match="唯一链接的普通文件: continuity.db") as refused:
+        ContinuityStore._file_inventory(database, required=True)
+    assert not isinstance(refused.value, _ReadSnapshotDriftError)
+
+
+def test_sc10_a_sidecar_that_is_not_a_regular_file_for_a_moment_is_retried_not_refused_by_the_inventory(tmp_path: Path) -> None:
+    sidecar = tmp_path / "continuity.db-shm"
+    sidecar.mkdir()
+
+    with pytest.raises(_ReadSnapshotAnomalyError, match="唯一链接的普通文件: continuity.db-shm"):
+        ContinuityStore._file_inventory(sidecar, required=False, transient=True)
+
+
+def _inventory_anomaly(monkeypatch: pytest.MonkeyPatch, failures: int | None) -> list[int]:
+    """Make the inventory of the source files raise the sidecar anomaly ``failures`` times (always when None); returns the calls that were failed."""
+
+    original = ContinuityStore._source_inventory.__func__  # type: ignore[attr-defined]
+    failed: list[int] = []
+
+    def wrapped(cls: type[ContinuityStore], db_path: Path) -> Any:
+        if failures is None or len(failed) < failures:
+            failed.append(len(failed) + 1)
+            raise _ReadSnapshotAnomalyError(f"Continuity Store 路径必须是唯一链接的普通文件: {db_path.name}-wal")
+        return original(cls, db_path)
+
+    monkeypatch.setattr(ContinuityStore, "_source_inventory", classmethod(wrapped))
+    return failed
+
+
+def test_sc11_a_sidecar_anomaly_met_by_the_inventory_for_a_moment_does_not_fail_the_strict_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _make_root(tmp_path)
+    probe = _probe(monkeypatch)
+    failed = _inventory_anomaly(monkeypatch, failures=2)
+
+    assert _strict_read(store) == 1
+    assert len(failed) == 2 and probe.sleeps == 2
+
+
+def test_sc12_a_sidecar_anomaly_that_persists_through_the_inventory_is_refused_with_its_own_message_after_bounded_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _make_root(tmp_path)
+    probe = _probe(monkeypatch)
+    failed = _inventory_anomaly(monkeypatch, failures=None)
+
+    with pytest.raises(ContinuityStoreError, match="唯一链接的普通文件: continuity.db-wal") as refused:
+        _strict_read(store)
+    assert "BUSY" not in str(refused.value)
+    assert len(failed) == _SIDECAR_ATTEMPTS and probe.sleeps == _SIDECAR_ATTEMPTS - 1

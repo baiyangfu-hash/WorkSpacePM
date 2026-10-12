@@ -130,6 +130,15 @@ class _ReadSnapshotDriftError(RuntimeError):
     """Internal bounded-retry signal for a changing SQLite source snapshot."""
 
 
+class _ReadSnapshotAnomalyError(_ReadSnapshotDriftError):
+    """A source sidecar was not a single-link regular file at one instant.
+
+    SQLite creates, truncates and deletes ``-wal``, ``-shm`` and ``-journal`` while another process runs a transaction, so the inventory can meet
+    such a file at the wrong instant (the same instants the path check in ``_validated_db_path`` already tolerates). It is retried like any other
+    drift; the message is the refusal that is raised when the anomaly persists through every bounded attempt.
+    """
+
+
 _FileInventory = tuple[bool, int, int, int, int, str]
 _StoreInventory = tuple[_FileInventory, _FileInventory, _FileInventory, _FileInventory]
 
@@ -1074,9 +1083,10 @@ class ContinuityStore:
         except OSError as error:
             raise ContinuityStoreError(f"Continuity Store 文件无法读取: {path.name}") from error
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-            raise ContinuityStoreError(
-                f"Continuity Store 路径必须是唯一链接的普通文件: {path.name}"
-            )
+            message = f"Continuity Store 路径必须是唯一链接的普通文件: {path.name}"
+            if transient:
+                raise _ReadSnapshotAnomalyError(message)
+            raise ContinuityStoreError(message)
         digest = hashlib.sha256()
         try:
             with path.open("rb") as stream:
@@ -1210,6 +1220,7 @@ class ContinuityStore:
         """Copy a stable DB/WAL byte set with bounded fail-closed retries."""
 
         temp_root = self._validated_snapshot_temp_root()
+        persistent_anomaly: str | None = None
         for attempt in range(_SIDECAR_ATTEMPTS):
             temporary = tempfile.TemporaryDirectory(
                 prefix="auto-pm-continuity-read-",
@@ -1258,14 +1269,18 @@ class ContinuityStore:
                     ):
                         raise _ReadSnapshotDriftError("source changed during snapshot")
                 return temporary, snapshot_path
-            except _ReadSnapshotDriftError:
+            except _ReadSnapshotDriftError as error:
                 temporary.cleanup()
+                # only the anomaly seen on the LAST attempt can be the refusal; a later plain drift clears it
+                persistent_anomaly = str(error) if isinstance(error, _ReadSnapshotAnomalyError) else None
                 if attempt < _SIDECAR_ATTEMPTS - 1:
                     time.sleep(_SIDECAR_RETRY_SECONDS)
                 continue
             except Exception:
                 temporary.cleanup()
                 raise
+        if persistent_anomaly is not None:
+            raise ContinuityStoreError(persistent_anomaly)
         raise ContinuityStoreError("Continuity Store BUSY: 无法取得稳定只读快照")
 
     def create_work(self, values: dict[str, Any], idempotency_key: str, now: str) -> WorkItem:
