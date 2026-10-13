@@ -81,6 +81,15 @@ IF i_bReset THEN
     s_iMinAlarmCode := ALM_NONE;
     s_wPrevGlobalAlarmWord := ALM_WORD_ZERO;
     s_bQueueFull := FALSE;
+    (* 复位周期同样要把输出写回结构体，否则上位机读到的是复位前的旧值 *)
+    io_stGlobal.o_wGlobalAlarmWord       := q_wGlobalAlarmWord;
+    io_stGlobal.o_iCurrentAlarmCode      := q_iCurrentAlarmCode;
+    io_stGlobal.o_bAnyAlarmActive        := q_bAnyAlarmActive;
+    io_stGlobal.o_iMESAlarmCount         := q_iMESAlarmCount;
+    io_stGlobal.o_bNewAlarmFlag          := q_bNewAlarmFlag;
+    io_stGlobal.o_bConveyorAlarmActive   := q_bConveyorAlarmActive;
+    io_stGlobal.o_bPickPlaceAlarmActive  := q_bPickPlaceAlarmActive;
+    io_stGlobal.o_bFeederAlarmActive     := q_bFeederAlarmActive;
     RETURN;
 END_IF;
 

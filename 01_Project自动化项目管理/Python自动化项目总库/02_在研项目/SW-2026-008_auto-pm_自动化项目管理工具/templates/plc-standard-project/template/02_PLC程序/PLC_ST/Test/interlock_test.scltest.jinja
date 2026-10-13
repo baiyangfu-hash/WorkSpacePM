@@ -1,12 +1,12 @@
 // ============================================================================
-// interlock_test.scltest - {{ project_name }} 安全联锁集成测试
+// interlock_test.scltest - {{ project_name }} 报警优先级联锁集成测试
 // ============================================================================
 // 项目: {{ project_id }} {{ project_name }}
 // ============================================================================
 
-TEST_CASE "TC_Interlock_SafetyDoor"
-    SET GlobalVars.stGlobal.bPowerOn := TRUE;
-    SET GlobalVars.stGlobal.bSafetyLight := FALSE;
+TEST_CASE "TC_Interlock_AlarmPriority"
+    SET GlobalVars.stGlobal.i_iConveyorAlarm := 5;
+    SET GlobalVars.stGlobal.i_iPickPlaceAlarm := 2;
     WAIT_CYCLES 2;
-    ASSERT GlobalVars.stGlobal.bSafetyLight = FALSE;
+    ASSERT GlobalVars.stGlobal.o_iCurrentAlarmCode = 2;
 END_TEST_CASE

@@ -45,14 +45,14 @@ VAR_TEMP
     t_dProcessTime  : DINT;
 END_VAR
 
-CONST
+VAR CONSTANT
     STEP_IDLE           : DINT := 0;    // 待机就绪
     STEP_WAIT_MATERIAL  : DINT := 1;    // 等待来料
     STEP_FEEDING        : DINT := 2;    // 进料输送
     STEP_CLAMP          : DINT := 10;   // 夹紧顶升
     STEP_PROCESS        : DINT := 20;   // 工艺加工
     STEP_RELEASE_UNLOAD : DINT := 30;   // 松开出料
-END_CONST
+END_VAR
 
 BEGIN
     // 1. 解包临时变量
