@@ -101,7 +101,8 @@ class TestCliAutoGenerateAiContext:
             ["-w", str(tmp_workspace), "plc", "check", "DJ-2026-TEST"],
             catch_exceptions=False,
         )
-        assert result.exit_code == 0
+        # 这个最小工程有失败项，门禁以退出码判卷（M3-PLUGIN）；ai_context.json 在退出前就已写出
+        assert result.exit_code == 1
         ctx_file = tmp_workspace / ".auto-pm" / "ai_context.json"
         assert ctx_file.exists(), "plc check 后应自动生成 ai_context.json"
         content = json.loads(ctx_file.read_text(encoding="utf-8"))

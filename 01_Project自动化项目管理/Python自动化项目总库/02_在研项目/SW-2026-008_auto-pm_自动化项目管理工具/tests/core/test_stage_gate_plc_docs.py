@@ -66,10 +66,12 @@ def test_s05_a_failing_check_fails_closed(tmp_path: Path, monkeypatch: pytest.Mo
     assert found is not None and not found.passed and "解析器崩溃" in found.message and result.can_proceed is False
 
 
-def test_s06_missing_documents_alone_do_not_block(tmp_path: Path) -> None:
+def test_s06_missing_documents_block_the_delivery_gate(tmp_path: Path) -> None:
+    """Whole missing documents are only a warning in `plc check`, but the delivery gate blocks on them (user ruling of 2026-10-13)."""
     result = evaluate(plc_project(tmp_path, ifc=None, var=None))
     found = item(result)
-    assert found is not None and found.passed and result.can_proceed is True
+    assert found is not None and not found.passed and result.can_proceed is False
+    assert "拦住项" in found.message and "plc docs sync" in found.fix_suggestion
 
 
 def _f01a_stage_git(root: Path, *args: str) -> str:

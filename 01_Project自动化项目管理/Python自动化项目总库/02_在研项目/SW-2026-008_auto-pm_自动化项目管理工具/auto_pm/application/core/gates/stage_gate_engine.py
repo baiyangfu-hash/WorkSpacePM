@@ -14,13 +14,16 @@ from auto_pm.contracts.gate_dtos import (
     ProcessGroupStage,
     StageGateResultDTO,
 )
+from auto_pm.domain.plc.language_service import LanguageService, evaluate_project
 
 
 class StageGateEngine:
     """5 大过程组门禁规则评估引擎"""
 
-    def __init__(self, workspace_root: str = "") -> None:
+    def __init__(self, workspace_root: str = "", language_service: LanguageService | None = None) -> None:
         self.workspace_root = workspace_root
+        # 可选：Siemens 语言服务（插件命令行）；None 表示本引擎不评估这一项（保持原行为），由组合根注入真实实现
+        self._language_service = language_service
 
     def evaluate_stage_transition(
         self,
@@ -274,6 +277,10 @@ class StageGateEngine:
         if plc_item is not None:
             items.append(plc_item)
 
+        language_item = self._evaluate_plc_language_service(p)
+        if language_item is not None:
+            items.append(language_item)
+
         return items
 
     def _evaluate_plc_doc_code_consistency(self, p: Path) -> GateCheckItemDTO | None:
@@ -305,7 +312,8 @@ class StageGateEngine:
                 id=item_id, name=name, passed=False, severity="BLOCKER",
                 message=f"一致性核对异常，按未通过处理: {exc}", fix_suggestion=fix,
             )
-        fails = [f for f in analysis.findings if f.severity == "fail"]
+        # 交付阶段：整份文档缺失（平时只是警告，可由 plc docs sync 补全）也算拦住项
+        fails = [f for f in analysis.findings if f.severity == "fail" or f.kind == "missing_doc"]
         marked = analysis.marked_rows
         if not fails and not marked:
             return GateCheckItemDTO(
@@ -318,3 +326,30 @@ class StageGateEngine:
             message=f"拦住项 {len(fails)}、待确认标记 {len(marked)}" + (f"（如：{shown}）" if shown else ""),
             fix_suggestion=fix,
         )
+
+    def _evaluate_plc_language_service(self, p: Path) -> GateCheckItemDTO | None:
+        """PLC 项目：Siemens 语言服务（插件命令行 check，有 ``.scltest`` 时再加 test）必须通过；找不到插件算“未验证”，交付阶段按失败处理。
+
+        没有注入语言服务（None）或不是 PLC 项目时不评估这一项。
+        """
+        service = self._language_service
+        if service is None or not (p / ".plc.json").is_file():
+            return None
+        item_id, name = "G4-PLC-LANGUAGE-SERVICE", "PLC 通过 Siemens 语言服务检查（插件命令行 check/test）"
+        fix = "在 VS Code 安装 Dynamic Siemens Language Support 插件后重跑；有错误时按诊断行修正源码或测试"
+        if not service.available:
+            return GateCheckItemDTO(
+                id=item_id, name=name, passed=False, severity="BLOCKER",
+                message="未验证：本机未找到插件命令行，语言服务这一层没有执行，交付阶段不能当作通过", fix_suggestion=fix,
+            )
+        report = evaluate_project(service, p)
+        checked = report.check
+        problems: list[str] = []
+        if not checked.passed:
+            problems.append(f"check 退出码 {checked.exit_code}，{checked.error_count} 个错误：" + "；".join(checked.messages[:3]))
+        if report.test is not None and not report.test.passed:
+            problems.append(f"test 退出码 {report.test.exit_code}，{report.test.error_count} 个问题：" + "；".join(report.test.messages[:3]))
+        if problems:
+            return GateCheckItemDTO(id=item_id, name=name, passed=False, severity="BLOCKER", message=" | ".join(problems), fix_suggestion=fix)
+        version = checked.binary.version if checked.binary else "?"
+        return GateCheckItemDTO(id=item_id, name=name, passed=True, severity="BLOCKER", message=f"插件命令行 check 通过（插件 {version}）")

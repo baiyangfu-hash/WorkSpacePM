@@ -23,7 +23,8 @@ from auto_pm.infrastructure.control_root_guard import clean_git_environment
 
 _TIMESTAMP = "2026-10-03T00:00:00+00:00"
 PROJECT = "0100_PLC/DJ-TEST-001"
-GOOD_SCL = '// OB1\nIF "FirstScan" THEN\n    ;\nEND_IF;\n'
+# a minimal valid block: the structure rule (LSP-905-STRUCT-NO-BLOCK, M3-PLUGIN) rejects bare statements without a block header
+GOOD_SCL = '// OB1\nORGANIZATION_BLOCK OB1\nBEGIN\n    ;\nEND_ORGANIZATION_BLOCK\n'
 BAD_SCL = "FUNCTION_BLOCK FB_Bad\nVAR_INPUT\n    Start : Bool;\nEND_VAR\nEND_FUNCTION_BLOCK\n"
 _PRD_FILES = (
     "需求分析文档_REQ.md",

@@ -67,7 +67,8 @@ def test_plc_check_all(cli_runner: CliRunner, tmp_workspace: Path) -> None:
         ["-w", str(tmp_workspace), "plc", "check", "--all"],
         catch_exceptions=False,
     )
-    assert result.exit_code == 0
+    # 门禁以退出码判卷（M3-PLUGIN）：这个最小工程有失败项，所以退出码为 1（此前无论结果如何都是 0）
+    assert result.exit_code == 1
     assert "DJ-2026-TEST" in result.output
 
 
@@ -78,7 +79,8 @@ def test_plc_check_project(cli_runner: CliRunner, tmp_workspace: Path) -> None:
         ["-w", str(tmp_workspace), "plc", "check", "DJ-2026-TEST"],
         catch_exceptions=False,
     )
-    assert result.exit_code == 0
+    # 门禁以退出码判卷（M3-PLUGIN）：这个最小工程有失败项，所以退出码为 1（此前无论结果如何都是 0）
+    assert result.exit_code == 1
     assert "检查结果" in result.output
 
 
@@ -112,7 +114,8 @@ def test_plc_check_substance(cli_runner: CliRunner, tmp_path: Path) -> None:
         ["-w", str(tmp_path), "plc", "check", project_id, "--substance"],
         catch_exceptions=False,
     )
-    assert result.exit_code == 0
+    # 门禁以退出码判卷（M3-PLUGIN）：这个最小工程有失败项，所以退出码为 1（此前无论结果如何都是 0）
+    assert result.exit_code == 1
     assert "检查结果" in result.output
 
 
@@ -127,7 +130,8 @@ def test_plc_check_fix(cli_runner: CliRunner, tmp_path: Path) -> None:
         ["-w", str(tmp_path), "plc", "check", project_id, "--fix"],
         catch_exceptions=False,
     )
-    assert result.exit_code == 0
+    # 门禁以退出码判卷（M3-PLUGIN）：这个最小工程有失败项，所以退出码为 1（此前无论结果如何都是 0）
+    assert result.exit_code == 1
     # 修复后应创建标准目录（检查其中一个，CHG-SCPT-2026-146: 01_启动）
     assert (project_dir / "01_启动").is_dir()
 
@@ -228,7 +232,8 @@ def test_plc_check_all_skips_python_project(
         ["-w", str(tmp_path), "plc", "check", "--all"],
         catch_exceptions=False,
     )
-    assert result.exit_code == 0
+    # 门禁以退出码判卷（M3-PLUGIN）：这个最小工程有失败项，所以退出码为 1（此前无论结果如何都是 0）
+    assert result.exit_code == 1
     # PLC 项目应出现在检查摘要中
     assert "DJ-2026-001" in result.output
     # Python 项目不应出现在检查摘要中（_is_project_dir 已排除）

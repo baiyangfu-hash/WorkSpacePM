@@ -9,6 +9,7 @@ and well-formed by the product's static PLC rules", not "the PLC program runs".
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -17,6 +18,8 @@ import pytest
 from auto_pm.application.core.template_service import TemplateService
 from auto_pm.domain.models.plc import CheckResult
 from auto_pm.domain.plc.checker import PlcChecker
+from auto_pm.domain.plc.language_service import evaluate_project
+from auto_pm.infrastructure.siemens_language_service import SiemensLanguageService
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 PID, NAME = "DJ-2026-901", "TESTMACHINE"
@@ -260,3 +263,69 @@ def test_v08_a_malformed_project_id_is_rejected_and_leaves_nothing_behind(tmp_pa
     with pytest.raises(Exception):  # noqa: B017, PT011 - copier raises its own validation error type
         TemplateService(str(TEMPLATES_DIR)).copy_template("plc-standard-project", str(destination), {"project_id": bad_id, "project_name": "x"})
     assert not destination.exists() or not any(destination.iterdir())
+
+
+# ── the repaired template against the plugin's own command line (M3-PLUGIN) ──────────────────────────────────────────────────────────────────────────
+
+
+def _shared_libraries() -> Path | None:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "0100_PLC自动化" / "01_SharedLibraries"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+@pytest.fixture(scope="module")
+def plugin_service() -> SiemensLanguageService:
+    service = SiemensLanguageService.discover()
+    if not service.available:
+        pytest.skip("UNVERIFIED: the Dynamic Siemens Language Support command line is not installed on this machine")
+    return service
+
+
+def _plugin_workspace(tmp_path: Path) -> Path:
+    libraries = _shared_libraries()
+    if libraries is None:
+        pytest.skip("UNVERIFIED: 0100_PLC自动化/01_SharedLibraries is not part of this checkout")
+    shutil.copytree(libraries, tmp_path / "01_SharedLibraries")
+    return _generate(tmp_path)
+
+
+def test_v09_the_generated_project_passes_the_plugin_check_and_test(tmp_path: Path, plugin_service: SiemensLanguageService) -> None:
+    report = evaluate_project(plugin_service, _plugin_workspace(tmp_path))
+    assert report.check.passed, report.check.messages
+    assert report.test is not None and report.test.passed, report.test.messages
+    assert (report.test.cases_run, report.test.cases_total) == (2, 2)
+
+
+def test_v10_the_plugin_rejects_a_bare_const_block_in_the_generated_function_block(tmp_path: Path, plugin_service: SiemensLanguageService) -> None:
+    project = _plugin_workspace(tmp_path)
+    block = next(project.rglob("FB_1001_Station1.scl"))
+    text = block.read_text(encoding="utf-8")
+    broken = re.sub(r"END_VAR(\s*)BEGIN", r"END_CONSTBEGIN", text.replace("VAR CONSTANT", "CONST", 1), count=1)
+    assert broken != text and "END_CONST" in broken
+    block.write_text(broken, encoding="utf-8")
+    report = evaluate_project(plugin_service, project)
+    assert not report.check.passed and report.check.error_count > 0
+
+
+def test_v11_the_plugin_test_catches_a_reset_that_does_not_write_the_outputs(tmp_path: Path, plugin_service: SiemensLanguageService) -> None:
+    project = _plugin_workspace(tmp_path)
+    block = next(project.rglob("FB_2001_CommonAlarm_AllStation.scl"))
+    text = block.read_text(encoding="utf-8")
+    start = text.index("(* 复位周期同样要把输出写回结构体")
+    end = text.index("    RETURN;", start)
+    block.write_text(text[:start] + text[end:], encoding="utf-8")
+    report = evaluate_project(plugin_service, project)
+    assert report.check.passed  # the source is still well formed ...
+    assert report.test is not None and not report.test.passed  # ... but the test sees the stale output after a reset
+
+
+def test_v12_an_emptied_source_file_fails_the_cockpit_structure_check_although_the_plugin_reports_nothing(tmp_path: Path) -> None:
+    project = _generate(tmp_path)
+    (project / "02_PLC程序" / "PLC_ST" / "00_主程序" / "OB1.scl").write_text("", encoding="utf-8")
+    result = _check(tmp_path, project)
+    failed = [i for i in result.items if i.status == "fail"]
+    assert [i.item for i in failed] == ["SCL 代码规范"]
+    assert "没有任何程序块" in failed[0].message

@@ -50,6 +50,11 @@ class SclLinter:
     CHINESE_PUNCT_PATTERN = re.compile(r"[，；：\uFF08\uFF09\u3001]")
     TIMER_MISSING_Q_PATTERN = re.compile(r"\bQ\s*=>\s*[,)]")
 
+    # 结构完整性：每个源文件至少有一个程序块或类型声明，且每个声明都有配对的 END_*（插件命令行对空文件与乱码单文件也报 0 诊断，由这里补）
+    STRUCT_KEYWORDS = ("ORGANIZATION_BLOCK", "FUNCTION_BLOCK", "FUNCTION", "DATA_BLOCK", "TYPE")
+    STRUCT_OPEN_PATTERNS = {kw: re.compile(rf"^\s*{kw}\b", re.IGNORECASE) for kw in STRUCT_KEYWORDS}
+    STRUCT_END_PATTERNS = {kw: re.compile(rf"^\s*END_{kw}\b", re.IGNORECASE) for kw in STRUCT_KEYWORDS}
+
     # 声明块识别正则
     BLOCK_VAR_INPUT = re.compile(r"^\s*VAR_INPUT\b", re.IGNORECASE)
     BLOCK_VAR_OUTPUT = re.compile(r"^\s*VAR_OUTPUT\b", re.IGNORECASE)
@@ -82,6 +87,7 @@ class SclLinter:
         case_has_else = False
         case_start_line = 0
         in_multiline_comment = False
+        code_lines: list[str] = []
 
         for line_idx, line in enumerate(lines, start=1):
             stripped = line.strip()
@@ -118,6 +124,7 @@ class SclLinter:
             code_part = line.split("//")[0].strip()
             if not code_part:
                 continue
+            code_lines.append(code_part)
 
             # ------------------------------------------------------------------
             # 1. 语法白名单与错误预防校验 (LSP-905 §4 / LSP-906)
@@ -333,6 +340,30 @@ class SclLinter:
                             )
                         )
                     in_case_block = False
+
+        # 结构完整性（LSP-905-STRUCT-*）
+        opens = {kw: sum(1 for ln in code_lines if cls.STRUCT_OPEN_PATTERNS[kw].match(ln)) for kw in cls.STRUCT_KEYWORDS}
+        ends = {kw: sum(1 for ln in code_lines if cls.STRUCT_END_PATTERNS[kw].match(ln)) for kw in cls.STRUCT_KEYWORDS}
+        if not any(opens.values()):
+            report.violations.append(
+                SclViolation(
+                    line_number=1,
+                    rule_id="LSP-905-STRUCT-NO-BLOCK",
+                    severity="ERROR",
+                    message="文件中没有任何程序块或类型声明（空文件，或内容无法识别为 SCL）",
+                )
+            )
+        else:
+            for kw in cls.STRUCT_KEYWORDS:
+                if opens[kw] != ends[kw]:
+                    report.violations.append(
+                        SclViolation(
+                            line_number=1,
+                            rule_id="LSP-905-STRUCT-UNCLOSED",
+                            severity="ERROR",
+                            message=f"{kw} 声明 {opens[kw]} 个而 END_{kw} {ends[kw]} 个，块没有配对闭合（文件被截断或写坏）",
+                        )
+                    )
 
         # 汇总计数
         report.total_violations = len(report.violations)

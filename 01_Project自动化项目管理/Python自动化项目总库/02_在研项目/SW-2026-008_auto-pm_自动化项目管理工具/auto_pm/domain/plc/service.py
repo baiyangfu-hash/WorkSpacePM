@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 
+from auto_pm.domain.plc.language_service import LanguageService
 from auto_pm.plc.checker import PlcChecker
 from auto_pm.plc.models import CheckResult, RepairResult, StandardizeResult
 from auto_pm.plc.repairer import PlcRepairer
@@ -37,9 +38,10 @@ class PlcService:
     UI/CLI 层通过本服务操作 PLC 项目，遵循分层架构。
     """
 
-    def __init__(self, workspace_root: str) -> None:
+    def __init__(self, workspace_root: str, language_service: LanguageService | None = None) -> None:
         self.workspace_root = os.path.abspath(workspace_root)
-        self._checker = PlcChecker(self.workspace_root)
+        # 语言服务由调用方（CLI 等组合根）注入；None 表示不跑插件命令行这一层
+        self._checker = PlcChecker(self.workspace_root, language_service=language_service)
         self._repairer = PlcRepairer(self.workspace_root)
         self._substance_checker = SubstanceChecker(self.workspace_root)
 

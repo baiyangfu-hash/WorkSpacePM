@@ -565,7 +565,9 @@ class WorkbenchUseCases:
             project = self.project_service.get_project(project_id)
             if not project:
                 return CommandOutcome(False, f"项目不存在: {project_id}")
-            engine = StageGateEngine(workspace_root=self.project_service.workspace_root)
+            from auto_pm.infrastructure.siemens_language_service import default_language_service
+
+            engine = StageGateEngine(workspace_root=self.project_service.workspace_root, language_service=default_language_service())
             gate_result = engine.evaluate_stage_transition(
                 project_path=project.path,
                 current_stage=current_stage,

@@ -392,7 +392,8 @@ def test_project_create_plc_initializes_dynamic_spec_snapshot(
     }
     check_result = cli_runner.invoke(
         cli,
-        ["-w", str(tmp_path), "plc", "check", "DJ-2026-023", "--json"],
+        # 本测试只看规范快照：不跑 Siemens 语言服务这一层（它在没有插件的机器上会多出一条“未验证”警告）
+        ["-w", str(tmp_path), "plc", "check", "DJ-2026-023", "--json", "--no-language-service"],
         catch_exceptions=False,
     )
     check_payload = json.loads(check_result.output)

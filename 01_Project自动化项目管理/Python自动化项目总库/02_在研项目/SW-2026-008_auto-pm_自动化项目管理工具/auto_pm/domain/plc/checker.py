@@ -17,9 +17,11 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import cast
 
 from auto_pm.core.paths import find_prd_dir
+from auto_pm.domain.plc.language_service import LanguageService, evaluate_project
 from auto_pm.models.enums import ProjectType
 from auto_pm.plc.doc_consistency import consistency_items
 from auto_pm.plc.models import (
@@ -142,8 +144,10 @@ class _LegacyPlcCheckerCore:
         },
     ]
 
-    def __init__(self, workspace_root: str) -> None:
+    def __init__(self, workspace_root: str, language_service: LanguageService | None = None) -> None:
         self.workspace_root = os.path.abspath(workspace_root)
+        # 可选：Siemens 语言服务（插件命令行）。None 表示不跑这一层（单元测试与不需要的调用方保持原行为）。
+        self._language_service = language_service
 
     # ── 单项目检查 ────────────────────────────────────────
 
@@ -222,6 +226,9 @@ class _LegacyPlcCheckerCore:
         # 7. 检查接口文档/变量定义文档与 SCL 代码一致（REQ-SW008-M2-DOCSYNC，V01B）
         self._check_doc_code_consistency(project_path, result)
 
+        # 8. Siemens 语言服务（用户实际依赖的 PLC 门禁：插件命令行 check / test；M3-PLUGIN）
+        self._check_language_service(project_path, result)
+
         log.info(
             "项目检查完成: %s - pass=%d warn=%d fail=%d",
             os.path.basename(project_path),
@@ -265,6 +272,44 @@ class _LegacyPlcCheckerCore:
             result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议")
         else:
             result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl 文件 100% 遵从 LSP-905 命名与安全闭环规范")
+
+    def _check_language_service(self, project_path: str, result: CheckResult) -> None:
+        """运行插件命令行的 ``check``（以及有 ``.scltest`` 时的 ``test``）。
+
+        找不到插件命令行是“未验证”（warn，交付阶段门禁按失败处理），不是通过；命令行有错误或退出码非零是 fail。
+        """
+        service = self._language_service
+        if service is None or result.project_type in SKIP_PLC_JSON_TYPES or not self._find_plc_json(project_path):
+            return
+        report = evaluate_project(service, Path(project_path))
+        checked = report.check
+        if not checked.available:
+            result.add(
+                "Siemens 语言服务 check", "warn",
+                "未验证：本机未找到 Dynamic Siemens Language Support 插件命令行，语言服务这一层没有执行（交付阶段门禁按失败处理）",
+            )
+            return
+        binary = f"（插件 {checked.binary.version}）" if checked.binary else ""
+        if checked.passed:
+            result.add("Siemens 语言服务 check", "pass", f"插件命令行 check 退出码 0，无诊断错误{binary}: {checked.summary}")
+        else:
+            shown = "；".join(checked.messages[:3])
+            result.add(
+                "Siemens 语言服务 check", "fail",
+                f"插件命令行 check 退出码 {checked.exit_code}，{checked.error_count} 个错误{binary}" + (f"（如: {shown}）" if shown else ""),
+            )
+        tested = report.test
+        if tested is None:
+            return
+        if tested.passed:
+            cases = f"，{tested.cases_run}/{tested.cases_total} 个用例" if tested.cases_total is not None else ""
+            result.add("Siemens 语言服务 test", "pass", f"插件命令行 test 退出码 0{cases}{binary}")
+        else:
+            shown = "；".join(tested.messages[:3])
+            result.add(
+                "Siemens 语言服务 test", "fail",
+                f"插件命令行 test 退出码 {tested.exit_code}，{tested.error_count} 个问题{binary}" + (f"（如: {shown}）" if shown else ""),
+            )
 
     def _check_doc_code_consistency(self, project_path: str, result: CheckResult) -> None:
         """核对 FB/FC 接口文档与 DB/OB/结构体变量表是否与 SCL 代码一致（名称、类型、方向、注释）。"""
@@ -1212,8 +1257,9 @@ class _LegacyPlcCheckerCore:
 class _CheckGroupBase:
     """PLC 检查分组基类，仅承载共享上下文。"""
 
-    def __init__(self, workspace_root: str) -> None:
+    def __init__(self, workspace_root: str, language_service: LanguageService | None = None) -> None:
         self.workspace_root = os.path.abspath(workspace_root)
+        self._language_service = language_service
 
 
 # ── 分组 A：配置 / 文档检查 ──────────────────────────────

@@ -103,6 +103,7 @@ def cmd_init(
 @click.option("--substance", is_flag=True, help="执行文档实质化检查（V2.0.1-B）")
 @click.option("--fix", is_flag=True, help="检查后自动修复非破坏性问题")
 @click.option("--list", "list_items", is_flag=True, help="列出所有检查项及说明")
+@click.option("--no-language-service", "no_language_service", is_flag=True, help="不运行 Siemens 语言服务（插件命令行 check/test）这一层")
 @click.pass_context
 def cmd_check(
     ctx: click.Context,
@@ -112,15 +113,21 @@ def cmd_check(
     substance: bool,
     fix: bool,
     list_items: bool,
+    no_language_service: bool = False,
 ) -> None:
-    """检查项目结构是否符合 LSP-907 规范"""
+    """检查项目结构是否符合 LSP-907 规范，并运行 Siemens 语言服务（插件命令行）；有失败项时退出码为 1。"""
     app_ctx: AppContext = ctx.obj
 
     if list_items:
         _print_check_items()
         return
 
-    svc = PlcService(app_ctx.workspace_root)
+    language_service = None
+    if not no_language_service:
+        from auto_pm.infrastructure.siemens_language_service import default_language_service
+
+        language_service = default_language_service()
+    svc = PlcService(app_ctx.workspace_root, language_service=language_service)
 
     if check_all:
         results = svc.check_workspace()
@@ -134,6 +141,8 @@ def cmd_check(
             print(json.dumps([r.model_dump() for r in results], ensure_ascii=False, indent=2))  # noqa: T201
         else:
             _print_check_summary(results)
+        if any(r.fail_count > 0 for r in results):
+            ctx.exit(1)
         return
 
     if not project_id:
@@ -182,6 +191,10 @@ def cmd_check(
             stack=proj.stack,
             phase=proj.phase or "",
         )
+
+    # 门禁必须能靠退出码判卷：有失败项即退出码 1（此前无论结果如何都是 0）
+    if result.fail_count > 0:
+        ctx.exit(1)
 
 
 @plc_group.command(name="repair")
