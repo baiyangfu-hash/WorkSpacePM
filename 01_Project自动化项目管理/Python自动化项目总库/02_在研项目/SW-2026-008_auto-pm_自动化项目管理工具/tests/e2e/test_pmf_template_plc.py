@@ -226,7 +226,7 @@ BREAKS = {
     "plc-json-without-version": (_break_plc_json_without_version, ".plc.json"),
     "plc-json-missing": (_break_plc_json_missing, ".plc.json"),
     "pm-session-missing": (_break_pm_session_missing, "PM_SESSION"),
-    "ledger-missing": (_break_ledger_missing, "版本变更台帐"),  # the product labels this item with the old glyph
+    "ledger-missing": (_break_ledger_missing, "版本变更台账"),  # the item label follows the specification glyph (TD-SW008-130)
     "interface-document-missing": (_break_interface_document_missing, "PRD/接口文档_INT.md"),
     "standard-folder-missing": (_break_standard_folder_missing, "目录 05_测试与验证"),
 }

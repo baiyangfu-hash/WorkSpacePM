@@ -1024,7 +1024,7 @@ class _LegacyPlcCheckerCore:
         return set(dirs).issubset(allowed_dirs)
 
     def _check_change_management_and_governance(self, project_path: str, result: CheckResult) -> None:
-        """检查变更管理体系与版本变更台帐 (PM-042 / PM-043 / PROJ-016)"""
+        """检查变更管理体系与版本变更台账 (PM-042 / PM-043 / PROJ-016)"""
         # 1. 检查变更管理根目录 (支持 04_监控/01_变更管理 或 11_监控/01_变更管理)
         chg_candidates = [
             os.path.join(project_path, "04_监控", "01_变更管理"),
@@ -1054,7 +1054,7 @@ class _LegacyPlcCheckerCore:
             else:
                 result.add("变更单管理体系", "fail", f"缺少 {rel_path}/01_变更单/ 目录")
 
-            # 检查版本变更台帐
+            # 检查版本变更台账
             has_ledger = False
             rec_dir = os.path.join(active_chg_dir, "02_变更记录")
             if os.path.isdir(rec_dir):
@@ -1064,9 +1064,9 @@ class _LegacyPlcCheckerCore:
                         break
 
             if has_ledger:
-                result.add("版本变更台帐", "pass", "02_变更记录/版本变更台帐 存在")
+                result.add("版本变更台账", "pass", "02_变更记录/版本变更台账 存在")
             else:
-                result.add("版本变更台帐", "fail", f"缺少 {rel_path}/02_变更记录/01_版本变更台帐.md")
+                result.add("版本变更台账", "fail", f"缺少 {rel_path}/02_变更记录/01_版本变更台账.md")
         else:
             result.add(
                 "变更管理目录",
