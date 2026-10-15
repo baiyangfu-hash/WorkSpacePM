@@ -3,6 +3,7 @@
 只从一个**已提交**的 Git 提交构建发布载荷（``auto_pm`` 与 ``templates``），因此工作树是否 dirty、有没有未跟踪文件都不影响结果；
 输入不是提交对象、载荷缺必需入口、载荷里有指向载荷之外的 ``auto_pm`` 导入、输出目录已存在，一律拒绝。
 同一提交两次构建得到相同的文件清单与相同的 ``release_meta.json``（``built_at`` 取提交时间，不取当前时间）。
+“可复现”的判据：载荷文件逐字节相同，且 ``release_meta.json`` 除 ``builder.*``（构建机器的解释器版本等）外相同；``verify`` 据此忽略 ``builder.*``。
 
 本脚本只**构建**，不触碰 ``active_release.json``、``previous_release.json``，也不写 ``deployment_manifest.json``：
 切换与回退是 D06、D07 的事，需要用户另行授权。
@@ -38,6 +39,8 @@ REQUIRED_FILES = ("auto_pm/__init__.py", "auto_pm/__main__.py")
 IMPORT_ROOTS = ("auto_pm", "auto_pm/domain", "auto_pm/infrastructure", "auto_pm/application", "auto_pm/ui")
 META_SCHEMA = "release_metadata.v1"
 META_NAME = "release_meta.json"
+#: ``release_meta.json`` 里允许因机器而异的键：判可复现与 ``verify`` 时不比较
+META_VOLATILE_KEYS = ("builder",)
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -178,6 +181,24 @@ def release_meta(release_id: str, commit: str, version: str, built_at: str) -> d
     }
 
 
+def meta_identity(meta: dict[str, object]) -> dict[str, object]:
+    """``release_meta.json`` 去掉因机器而异的键（``builder``）之后的身份部分。"""
+    return {key: value for key, value in meta.items() if key not in META_VOLATILE_KEYS}
+
+
+def compare_meta(recorded: dict[str, object], rebuilt: dict[str, object]) -> list[str]:
+    """记录里写了的身份键与重建结果不同的键名（``builder`` 不比较；``source_commit`` 允许记录里是缩写，即重建值的前缀）。"""
+    problems: list[str] = []
+    for key, value in meta_identity(recorded).items():
+        other = rebuilt.get(key)
+        if key == "source_commit" and isinstance(value, str) and isinstance(other, str):
+            if not value or not (other.startswith(value) or value.startswith(other)):
+                problems.append(key)
+        elif other != value:
+            problems.append(key)
+    return sorted(problems)
+
+
 def build(repo: Path, commit_rev: str, project_root: str, output: Path, release_id: str | None = None) -> BuildResult:
     """构建并写出载荷；任何拒绝条件成立时**不写任何文件**。"""
     repo = repo.resolve()
@@ -202,18 +223,37 @@ def build(repo: Path, commit_rev: str, project_root: str, output: Path, release_
     return BuildResult(rid, commit, version, built_at, manifest, output)
 
 
-def verify(output: Path, manifest_files: dict[str, str] | None = None) -> dict[str, list[str]]:
-    """重算 ``output`` 下每个文件的 SHA-256 并与清单比较；没有给清单时只检查与 ``release_meta.json`` 同目录的完整性（返回空表示无法比较）。"""
+def verify(output: Path, manifest_files: dict[str, str] | None = None, recorded_meta: dict[str, object] | None = None) -> dict[str, list[str]]:
+    """重算 ``output`` 下每个文件的 SHA-256 并与清单比较；没有给清单时只返回文件数。
+
+    ``release_meta.json`` 不按整文件哈希比较（它带构建机器的解释器版本）：检查它可解析、``schema_version`` 正确，
+    给了 ``recorded_meta`` 时再比较记录里写了的身份键（``builder`` 除外）。载荷文件的任何不同仍是 ``mismatch``。
+    """
     actual: dict[str, str] = {}
     for path in sorted(output.rglob("*")):
         if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
             actual[path.relative_to(output).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    meta_problems: list[str] = []
+    if META_NAME in actual:
+        try:
+            meta = json.loads((output / META_NAME).read_text(encoding="utf-8"))
+        except ValueError:
+            meta = None
+            meta_problems.append("unparsable")
+        if isinstance(meta, dict):
+            if meta.get("schema_version") != META_SCHEMA:
+                meta_problems.append("schema_version")
+            if recorded_meta is not None:
+                meta_problems.extend(key for key in compare_meta(recorded_meta, meta) if key not in meta_problems)
+        elif meta is not None:
+            meta_problems.append("unparsable")
     if manifest_files is None:
-        return {"missing": [], "orphans": [], "mismatch": [], "files": [str(len(actual))]}
+        return {"missing": [], "orphans": [], "mismatch": [], "meta": meta_problems, "files": [str(len(actual))]}
     return {
         "missing": sorted(set(manifest_files) - set(actual)),
         "orphans": sorted(set(actual) - set(manifest_files)),
-        "mismatch": sorted(k for k in manifest_files if k in actual and manifest_files[k] != actual[k]),
+        "mismatch": sorted(k for k in manifest_files if k in actual and k != META_NAME and manifest_files[k] != actual[k]),
+        "meta": meta_problems,
         "files": [str(len(actual))],
     }
 
@@ -239,13 +279,16 @@ def main(argv: list[str] | None = None) -> int:
                               "files": len(result.files), "output": str(result.output)}, ensure_ascii=False))
             return 0
         entry_files: dict[str, str] | None = None
+        recorded: dict[str, object] | None = None
         if args.manifest:
             if not args.release_id:
                 print(json.dumps({"ok": False, "code": "input-error", "details": "--release-id is required with --manifest"}, ensure_ascii=False))
                 return 3
-            entry_files = json.loads(Path(args.manifest).read_text(encoding="utf-8"))["releases"][args.release_id]["files"]
-        report = verify(Path(args.output), entry_files)
-        clean = not report["missing"] and not report["orphans"] and not report["mismatch"]
+            entry = json.loads(Path(args.manifest).read_text(encoding="utf-8"))["releases"][args.release_id]
+            entry_files = entry["files"]
+            recorded = {"release_id": args.release_id, **{k: entry[k] for k in ("source_commit", "version", "built_at") if k in entry}}
+        report = verify(Path(args.output), entry_files, recorded)
+        clean = not report["missing"] and not report["orphans"] and not report["mismatch"] and not report["meta"]
         print(json.dumps({"ok": clean, **report}, ensure_ascii=False))
         return 0 if clean else 2
     except BuildError as exc:
