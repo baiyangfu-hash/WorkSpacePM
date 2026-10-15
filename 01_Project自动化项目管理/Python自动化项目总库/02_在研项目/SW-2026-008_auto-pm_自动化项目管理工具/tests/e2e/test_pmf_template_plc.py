@@ -68,6 +68,11 @@ EXPECTED_TEMPLATE_FILES = [
     "02_PLC程序/PLC_ST/05_公共报警/PRD/接口文档_IFC-FB2001-CommonAlarm.md",
     "02_PLC程序/PLC_ST/05_公共报警/PRD/详细设计说明书_DSN-FB2001-CommonAlarm.md",
     "02_PLC程序/PLC_ST/05_公共报警/ST_CommonAlarm.scl",
+    "02_PLC程序/PLC_ST/06_公共函数/FC_4001_ScaleAnalog.scl",
+    "02_PLC程序/PLC_ST/06_公共函数/PRD/使用说明_UM-FC4001-ScaleAnalog.md",
+    "02_PLC程序/PLC_ST/06_公共函数/PRD/变更记录_CHG-FC4001-ScaleAnalog.md",
+    "02_PLC程序/PLC_ST/06_公共函数/PRD/接口文档_IFC-FC4001-ScaleAnalog.md",
+    "02_PLC程序/PLC_ST/06_公共函数/PRD/详细设计说明书_DSN-FC4001-ScaleAnalog.md",
     "02_PLC程序/PLC_ST/Test/basic_test.scltest",
     "02_PLC程序/PLC_ST/Test/interlock_test.scltest",
     "02_PLC程序/工程资产/communications.yml",
@@ -104,10 +109,6 @@ EXPECTED_TEMPLATE_FILES = [
     "11_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
     "12_驱动器与设备/伺服参数配置.md",
     "PM_SESSION_{pid}.md",
-    "PRD/技术方案文档_TEC.md",
-    "PRD/接口文档_INT.md",
-    "PRD/详细设计说明书_DSN.md",
-    "PRD/需求分析文档_REQ.md",
 ]
 
 
@@ -174,7 +175,7 @@ def test_v04_the_plc_json_files_carry_the_project_answers(tmp_path: Path, relati
 
 def test_v05_the_interface_and_variable_documents_name_the_project(tmp_path: Path) -> None:
     project = _generate(tmp_path)
-    for relative in ("PRD/接口文档_INT.md", "02_PLC程序/PLC_ST/00_程序方案/接口文档_INT.md", "02_PLC程序/程序文档/PLC变量定义文档_VAR.md"):
+    for relative in ("02_PLC程序/PLC_ST/00_程序方案/接口文档_INT.md", "02_PLC程序/程序文档/PLC变量定义文档_VAR.md"):
         text = (project / relative).read_text(encoding="utf-8")
         assert PID in text and NAME in text, relative
         assert "stGlobal" in text or "GlobalVars" in text, relative
@@ -213,7 +214,7 @@ def _break_ledger_missing(project: Path) -> None:
 
 
 def _break_interface_document_missing(project: Path) -> None:
-    (project / "PRD/接口文档_INT.md").unlink()
+    (project / "02_PLC程序/PLC_ST/00_程序方案/接口文档_INT.md").unlink()
 
 
 def _break_standard_folder_missing(project: Path) -> None:
@@ -227,7 +228,7 @@ BREAKS = {
     "plc-json-missing": (_break_plc_json_missing, ".plc.json"),
     "pm-session-missing": (_break_pm_session_missing, "PM_SESSION"),
     "ledger-missing": (_break_ledger_missing, "版本变更台账"),  # the item label follows the specification glyph (TD-SW008-130)
-    "interface-document-missing": (_break_interface_document_missing, "PRD/接口文档_INT.md"),
+    "interface-document-missing": (_break_interface_document_missing, "00_程序方案/接口文档_INT.md"),
     "standard-folder-missing": (_break_standard_folder_missing, "目录 05_测试与验证"),
 }
 
@@ -329,3 +330,40 @@ def test_v12_an_emptied_source_file_fails_the_cockpit_structure_check_although_t
     failed = [i for i in result.items if i.status == "fail"]
     assert [i.item for i in failed] == ["SCL 代码规范"]
     assert "没有任何程序块" in failed[0].message
+
+
+# ---- M3-PRDLAYOUT: the three-layer interface documents (user ruling 2026-10-14) -------------------------------------------------------------------------------------------------
+
+
+def test_v13_the_root_prd_directory_is_no_longer_generated_and_the_program_scheme_directory_is_the_prd_directory(tmp_path: Path) -> None:
+    from auto_pm.application.core.paths import find_prd_dir
+
+    project = _generate(tmp_path)
+    assert not (project / "PRD").exists()
+    found = find_prd_dir(str(project))
+    assert found is not None and found[1] == "00_程序方案"
+    for doc in ("需求分析文档_REQ.md", "接口文档_INT.md", "详细设计说明书_DSN.md", "技术方案文档_TEC.md"):
+        assert (Path(found[0]) / doc).is_file(), doc
+
+
+def test_v14_the_program_scheme_interface_document_lists_exactly_the_fb_instances_declared_in_the_global_data_block(tmp_path: Path) -> None:
+    project = _generate(tmp_path)
+    db = (project / "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db").read_text(encoding="utf-8")
+    declared = sorted(set(re.findall(r"^\s*(fb\w+)\s*:\s*(FB_\w+)\s*;", db, flags=re.M)))
+    assert len(declared) >= 3
+    text = (project / "02_PLC程序/PLC_ST/00_程序方案/接口文档_INT.md").read_text(encoding="utf-8")
+    section = text.split("## 1. FB 实例表", 1)[1].split("## 2. FC 调用表", 1)[0]
+    listed = sorted({(m.group(2), m.group(1)) for m in re.finditer(r"\|\s*`(FB_\w+)`\s*\|\s*`GlobalVars\.(fb\w+)`", section)})
+    assert listed == declared, (listed, declared)
+
+
+def test_v15_the_program_scheme_interface_document_has_the_fc_table_and_the_exchange_area_contract(tmp_path: Path) -> None:
+    project = _generate(tmp_path)
+    text = (project / "02_PLC程序/PLC_ST/00_程序方案/接口文档_INT.md").read_text(encoding="utf-8")
+    for heading in ("## 1. FB 实例表", "## 2. FC 调用表", "## 3. 跨系统交换区契约", "### 3.0 交换区一览", "### 3.1 字定义"):
+        assert heading in text, heading
+    fc_section = text.split("## 2. FC 调用表", 1)[1].split("## 3. 跨系统交换区契约", 1)[0]
+    assert "`FC_4001_ScaleAnalog`" in fc_section
+    assert (project / "02_PLC程序/PLC_ST/06_公共函数/PRD/接口文档_IFC-FC4001-ScaleAnalog.md").is_file()
+    parameter_rows = [line for line in text.splitlines() if re.match(r"^\|\s*`(?:i|q|io)_[A-Za-z0-9]+`", line)]
+    assert parameter_rows == [], f"the program-scheme document must not repeat block parameter details: {parameter_rows[:3]}"

@@ -1,30 +1,75 @@
-# {{ project_name }} 接口设计文档
+# {{ project_name }} 方案级接口文档（INT）
 
-> **项目编号**: {{ project_id }}  
-> **项目名称**: {{ project_name }}  
-> **版本号**: {{ version }}  
-> **编制人**: {{ author }}  
-> **更新日期**: {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }}  
-> **规范依据**: DEV-001 / LSP-907 / PROJ-016  
-
----
-
-## 1. 全局数据交互总线 (GlobalVars.db)
-
-| 变量名 | 数据类型 | 访问属性 | 功能描述 |
-| :--- | :--- | :---: | :--- |
-| `stGlobal` | `ST_CommonAlarm` | 读写 | 全局控制、系统工作模式与首出报警字 |
-| `stExternal` | `ST_ExternalDevice` | 读写 | 外部机器人、上游/下游总线握手与安全门互锁 |
-| `stStation1` | `ST_Station1` | 读写 | 工位1 动作机构控制、状态、气缸与定时器结构体 |
-| `astServoAxis` | `ARRAY[1..4] OF ST_ServoAxis` | 读写 | PLCopen MC Part 1 伺服轴状态与控制总线 |
+> **项目编号**: {{ project_id }}
+> **项目名称**: {{ project_name }}
+> **版本号**: {{ version }}
+> **编制人**: {{ author }}
+> **更新日期**: {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }}
+> **规范依据**: INT-815 (三层分工) / DEV-001 / LSP-907 / PROJ-016
 
 ---
 
-## 2. 功能块调度接口规范
+## 0. 本文档写什么、不写什么
 
-所有工站 FB 严格遵循单一 `VAR_IN_OUT` 结构体参数调用规范：
-```scl
-// OB1.scl 调度调用范例
-GlobalVars.fbStation1(io_stStation := GlobalVars.stStation1);
-GlobalVars.stStation1 := GlobalVars.fbStation1.io_stStation;
-```
+本文档是**方案级**接口文档，只回答三件事：
+
+1. 用了哪些 FB，实例叫什么，是做什么的（第 1 节）；
+2. 用了哪些 FC，是做什么的（第 2 节）；
+3. 与外部系统（上游、下游、机器人或其他）交换数据的**交换区契约**（第 3 节）。
+
+每个 FB、FC 自己的参数明细（输入、输出、输入输出、类型、含义）**不在这里**，在各块目录下的 `PRD/接口文档_IFC-<块名>.md`。方案级引用块级，块级不引用方案级。
+
+---
+
+## 1. FB 实例表
+
+| FB 类型名 | 实例名 | 一句话用途 | 块级接口文档 |
+| :--- | :--- | :--- | :--- |
+| `FB_3001_ExternalInteraction` | `GlobalVars.fbExternalDevice` | 外部设备交互：上下游握手与心跳 | `01_外部设备交互/PRD/接口文档_IFC-FB3001-ExternalInteraction.md` |
+| `FB_1001_Station1` | `GlobalVars.fbStation1` | 工位1 动作机构控制 | `02_工位1_动作机构/PRD/接口文档_IFC-FB1001-Station1.md` |
+| `FB_2001_CommonAlarm_AllStation` | `GlobalVars.fbCommonAlarm` | 公共报警汇总与首出报警 | `05_公共报警/PRD/接口文档_IFC-FB2001-CommonAlarm.md` |
+
+调度位置：`00_主程序/OB1.scl`，每个 FB 实例在 OB1 内按“调用 → 结构体写回”的顺序执行；FB 之间不读写对方内部变量，只通过 `VAR_IN_OUT` 结构体或第 3 节的交换区交互。
+
+---
+
+## 2. FC 调用表
+
+FC 很少用（计算、模数换算），没有 FC 时本表保留表头、不写行。
+
+| FC 名 | 一句话用途 | 被谁调用 | 块级接口文档 |
+| :--- | :--- | :--- | :--- |
+| `FC_4001_ScaleAnalog` | 模拟量原始值（0..27648）换算为工程量（模板自带的最小示例，纯函数） | 模板默认未被调用；需要时在工位 FB 内调用，并在此处写明调用者 | `06_公共函数/PRD/接口文档_IFC-FC4001-ScaleAnalog.md` |
+
+---
+
+## 3. 跨系统交换区契约
+
+> 这是一份**独立契约**，不属于 IO 分配表。双方约定使用 Modbus TCP 或 CC-Link，用连续寄存器地址或数组变量交换数据；每个对象一个交换区，一个交换区由双方各占一半（例如 128 字，双方各用连续 64 字）。字的定义**只在 3.1 一处**写，其他文档只引用，不重复。通信通道本身（协议、端点）的机器可读配置在 `02_PLC程序/工程资产/communications.yml`；本节只写交换区的地址区间、读写分区与字定义。
+
+### 3.0 交换区一览
+
+| 对象（方向） | 协议 | 地址区间 | 总字数 | 本机写区 | 对方写区 | 本机侧承载的变量 | 负责的块 |
+| :--- | :--- | :--- | :---: | :--- | :--- | :--- | :--- |
+| 上游 | Modbus TCP 或 CC-Link（按项目填写） | `Dxxx–Dyyy`（按项目填写） | 128 | 前 64 字 | 后 64 字 | `GlobalVars.stExternal.stUpstream` | `FB_3001_ExternalInteraction` |
+| 下游 | 同上 | `Dxxx–Dyyy`（按项目填写） | 128 | 前 64 字 | 后 64 字 | `GlobalVars.stExternal.stDownstream` | `FB_3001_ExternalInteraction` |
+| 机器人或其他 | 同上 | `Dxxx–Dyyy`（按项目填写） | 128 | 前 64 字 | 后 64 字 | 按项目填写 | 按项目填写 |
+
+### 3.1 字定义（只在这里定义）
+
+> 按交换区分别写。下面是上游交换区的写法示例，按项目实际替换；偏移从交换区起始地址算起。
+
+| 偏移 | 写方 | 名称 | 类型 | 含义 |
+| :---: | :--- | :--- | :--- | :--- |
+| 0 | 本机 | `bMachine_ReadyIn` | BOOL（字内 bit0） | 机器准备好进料 |
+| 0 | 本机 | `bMachine_AllowInfeed` | BOOL（字内 bit1） | 机器允许上游进料 |
+| 64 | 对方 | `bUpstream_LineReady` | BOOL（字内 bit0） | 上游流水线准备好 |
+| 64 | 对方 | `bUpstream_InfeedReq` | BOOL（字内 bit1） | 上游入料请求 |
+
+---
+
+## 4. 版本记录
+
+| 版本号 | 日期 | 变更内容 | 变更人 |
+| :--- | :--- | :--- | :--- |
+| {{ version }} | {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }} | 初始版本（方案级：FB 实例表、FC 调用表、跨系统交换区契约） | {{ author }} |

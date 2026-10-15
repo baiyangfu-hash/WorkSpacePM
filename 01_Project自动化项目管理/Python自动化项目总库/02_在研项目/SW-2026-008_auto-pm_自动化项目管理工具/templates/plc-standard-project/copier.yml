@@ -66,6 +66,9 @@ _subdirectory: template
 _exclude:
   - "copier.yml"
   - "README.md"
+  # M3-PRDLAYOUT: 根 PRD/ 不再生成（标准位置是 02_PLC程序/PLC_ST/00_程序方案/）；
+  # 源文件在卡工具包能删除路径之前留在模板里作为不用的死文件，由 _exclude 挡住
+  - "/PRD"
 
 # 生成 .copier-answers.yml 记录答案
 _answers_file: .copier-answers.yml
