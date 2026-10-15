@@ -59,12 +59,20 @@ class PlcRepairer:
         return None
 
     @staticmethod
+    def _default_prd_path(project_path: str) -> str:
+        """新建文档目录的默认位置：有 02_PLC程序/PLC_ST 的 PLC 项目补到 00_程序方案/（标准位置），否则沿用 PRD/"""
+        plc_st = os.path.join(project_path, "02_PLC程序", "PLC_ST")
+        if os.path.isdir(plc_st):
+            return os.path.join(plc_st, "00_程序方案")
+        return os.path.join(project_path, PRD_DIR)
+
+    @staticmethod
     def _resolve_prd_path(project_path: str) -> str:
-        """解析实际存在的 PRD 目录路径，若都不存在则返回默认 PRD_DIR 路径"""
+        """解析实际存在的 PRD 目录路径，若都不存在则返回默认位置（PLC 项目为 00_程序方案/，其余为 PRD/）"""
         found = find_prd_dir(project_path)
         if found is not None:
             return str(found[0])
-        return os.path.join(project_path, PRD_DIR)
+        return PlcRepairer._default_prd_path(project_path)
 
     # ── 单项目修复 ────────────────────────────────────────
 
@@ -584,16 +592,17 @@ class PlcRepairer:
         result: RepairResult,
         dry_run: bool,
     ) -> None:
-        """修复 PRD 目录（创建缺失目录）"""
-        prd_path = os.path.join(project_path, PRD_DIR)
+        """修复 PRD 目录（创建缺失目录；PLC 项目建在 00_程序方案/，根 PRD/ 不再新建）"""
+        prd_path = self._default_prd_path(project_path)
+        dir_name = os.path.basename(prd_path)
         if not dry_run:
             os.makedirs(prd_path, exist_ok=True)
         result.add(
             item="PRD 目录",
-            action="创建 PRD/ 目录",
+            action=f"创建 {dir_name}/ 目录",
             destructive=False,
             status="fixed",
-            detail="已创建 PRD/ 目录",
+            detail=f"已创建 {dir_name}/ 目录",
         )
 
     def _repair_prd_doc(

@@ -37,6 +37,7 @@ from auto_pm.plc.models import (
     STD_PRDS,
     CheckResult,
 )
+from auto_pm.plc.scheme_doc import scheme_items
 from auto_pm.plc.scl_linter import SclLinter
 from auto_pm.plc.spec_snapshot import (
     compare_versions,
@@ -321,6 +322,14 @@ class _LegacyPlcCheckerCore:
             result.add("文档一致性", "warn", f"一致性核对异常，已跳过: {error}")
             return
         for item, status, message in items:
+            result.add(item, status, message)
+        # 方案级接口文档（FB 实例表、FC 调用表、交换区契约）与代码的存在性对照：只警告，不失败（M3-PRDLAYOUT 第 2 张）
+        try:
+            scheme = scheme_items(project_path)
+        except Exception as error:
+            result.add("接口文档 INT ↔ 代码", "warn", f"方案级对照异常，已跳过: {error}")
+            return
+        for item, status, message in scheme:
             result.add(item, status, message)
 
     # ── 工作空间批量检查 ──────────────────────────────────

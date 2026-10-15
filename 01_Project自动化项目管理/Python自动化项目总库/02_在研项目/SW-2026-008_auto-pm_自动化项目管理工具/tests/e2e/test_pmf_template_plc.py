@@ -367,3 +367,32 @@ def test_v15_the_program_scheme_interface_document_has_the_fc_table_and_the_exch
     assert (project / "02_PLC程序/PLC_ST/06_公共函数/PRD/接口文档_IFC-FC4001-ScaleAnalog.md").is_file()
     parameter_rows = [line for line in text.splitlines() if re.match(r"^\|\s*`(?:i|q|io)_[A-Za-z0-9]+`", line)]
     assert parameter_rows == [], f"the program-scheme document must not repeat block parameter details: {parameter_rows[:3]}"
+    contract = text.split("### 3.0 交换区一览", 1)[1].split("### 3.1 字定义", 1)[0]
+    header = next(line for line in contract.splitlines() if line.startswith("| 对象"))
+    assert "协议（开放列表）" in header and "| 单位 |" in header, header
+    for protocol in ("PROFINET", "OPC UA", "Modbus TCP", "CC-Link"):
+        assert protocol in text, protocol
+    assert "word16" in contract and "byte" in text
+
+
+def test_v16_the_generated_project_has_all_three_scheme_comparison_items_passing(tmp_path: Path) -> None:
+    project = _generate(tmp_path)
+    result = _check(tmp_path, project)
+    scheme = {i.item: i for i in result.items if i.item.startswith("接口文档 INT ↔ 代码")}
+    assert sorted(scheme) == ["接口文档 INT ↔ 代码 [FB 实例]", "接口文档 INT ↔ 代码 [FC 调用]", "接口文档 INT ↔ 代码 [交换区契约]"], sorted(scheme)
+    assert all(i.status == "pass" for i in scheme.values()), [(k, v.status, v.message) for k, v in scheme.items()]
+    assert "3 个 FB 实例" in scheme["接口文档 INT ↔ 代码 [FB 实例]"].message
+
+
+def test_v17_a_new_instance_in_the_code_that_the_scheme_document_does_not_list_is_warned_not_failed(tmp_path: Path) -> None:
+    project = _generate(tmp_path)
+    db = project / "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db"
+    text = db.read_text(encoding="utf-8")
+    anchor = "    fbCommonAlarm   : FB_2001_CommonAlarm_AllStation;"
+    assert anchor in text
+    extra = "    fbStation2      : FB_1001_Station1;  // 工位2功能块实例" + chr(10)
+    db.write_text(text.replace(anchor, extra + anchor, 1), encoding="utf-8")
+    result = _check(tmp_path, project)
+    item = next(i for i in result.items if i.item == "接口文档 INT ↔ 代码 [FB 实例]")
+    assert item.status == "warn" and "GlobalVars.fbStation2" in item.message, (item.status, item.message)
+    assert [i.item for i in result.items if i.status == "fail" and i.item.startswith("接口文档 INT")] == []
