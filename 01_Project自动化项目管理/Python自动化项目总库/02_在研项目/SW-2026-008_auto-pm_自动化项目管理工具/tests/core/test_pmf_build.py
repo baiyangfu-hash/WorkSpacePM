@@ -238,13 +238,16 @@ def test_pb16_an_unparsable_or_wrong_schema_meta_is_reported(tmp_path: Path) -> 
     meta_path.write_text("{not json", encoding="utf-8")
     assert pb.verify(tmp_path / "out")["meta"] == ["unparsable"]
     meta_path.write_text(json.dumps({"schema_version": "something-else"}), encoding="utf-8")
-    assert pb.verify(tmp_path / "out")["meta"] == ["schema_version"]
+    assert pb.verify(tmp_path / "out")["meta"] == ["schema_version", "missing-key:release_id", "missing-key:source_commit", "missing-key:version", "missing-key:built_at"]
 
 
 def test_pb17_the_short_commit_form_of_an_older_record_is_a_prefix_match_not_a_difference() -> None:
     full = "9d3c92057a5dcdadbf1f1f693030ef9bc3c102a3"
     assert pb.compare_meta({"source_commit": "9d3c9205", "version": "1.3.2"}, {"source_commit": full, "version": "1.3.2", "builder": {"interpreter": "x"}}) == []
     assert pb.compare_meta({"source_commit": "deadbeef"}, {"source_commit": full}) == ["source_commit"]
+    assert pb.compare_meta({"source_commit": "9d3c92"}, {"source_commit": full}) == ["source_commit"]  # 6 characters: shorter than the minimum prefix
+    assert pb.compare_meta({"source_commit": "9d"}, {"source_commit": full}) == ["source_commit"]
+    assert pb.compare_meta({"source_commit": full[:7]}, {"source_commit": full}) == []
     assert pb.compare_meta({"version": "1.3.2"}, {"version": "1.3.3"}) == ["version"]
 
 
@@ -274,6 +277,58 @@ def test_pb18_golden_the_commit_of_release_1_3_2_rebuilds_to_the_committed_paylo
     assert [k for k in payload_rebuilt if payload_rebuilt[k] != payload_committed[k]] == []
     recorded_meta = json.loads(committed["release_meta.json"].decode("utf-8"))
     rebuilt_meta = json.loads(rebuilt["release_meta.json"].decode("utf-8"))
-    differing = pb.compare_meta(recorded_meta, rebuilt_meta)
+    differing = pb.compare_meta(recorded_meta, rebuilt_meta, complete=True)
     # built_at of this pre-D02 release was typed by hand (2026-09-09T20:30:00Z); since D02 it is the commit time. Nothing else may differ.
     assert differing == ["built_at"], differing
+
+
+def test_pb19_the_payload_bytes_do_not_depend_on_the_autocrlf_setting_of_the_building_machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, commit = _make_repo(tmp_path)
+    plain = pb.build(repo, commit, "proj", tmp_path / "plain")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    converted = pb.build(repo, commit, "proj", tmp_path / "converted")
+    assert plain.files == converted.files
+    assert b"\r" not in (tmp_path / "converted" / "auto_pm" / "__init__.py").read_bytes()
+    assert (tmp_path / "converted" / "auto_pm" / "__init__.py").read_bytes() == BASE_FILES["auto_pm/__init__.py"].encode("utf-8")
+
+
+def test_pb20_a_symbolic_link_in_the_payload_is_refused(tmp_path: Path) -> None:
+    repo, _commit = _make_repo(tmp_path)
+    target_file = tmp_path / "target.txt"
+    target_file.write_text("__init__.py", encoding="utf-8", newline="\n")
+    blob = _git(repo, "hash-object", "-w", str(target_file))
+    _git(repo, "update-index", "--add", "--cacheinfo", f"120000,{blob},proj/auto_pm/link.py")
+    _git(repo, "commit", "-q", "-m", "link")
+    with pytest.raises(pb.BuildError) as refused:
+        pb.build(repo, _git(repo, "rev-parse", "HEAD"), "proj", tmp_path / "out")
+    assert refused.value.code == "unsupported-member"
+    assert not (tmp_path / "out").exists()
+
+
+def test_pb21_an_injected_key_a_missing_key_and_a_too_short_recorded_commit_are_all_reported(tmp_path: Path) -> None:
+    repo, commit = _make_repo(tmp_path)
+    built = pb.build(repo, commit, "proj", tmp_path / "out")
+    meta_path = tmp_path / "out" / "release_meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    recorded = {"release_id": built.release_id, "source_commit": built.source_commit, "version": built.version}
+    meta["evil"] = 1
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    assert pb.verify(tmp_path / "out", built.files, recorded)["meta"] == ["unexpected-key:evil"]
+    del meta["evil"]
+    del meta["built_at"]
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    assert pb.verify(tmp_path / "out", built.files, recorded)["meta"] == ["missing-key:built_at"]
+    meta["built_at"] = built.built_at
+    meta["source_commit"] = built.source_commit[:2]
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    assert pb.verify(tmp_path / "out", built.files, recorded)["meta"] == ["source_commit"]
+
+
+def test_pb22_a_complete_recorded_meta_must_have_the_same_key_set(tmp_path: Path) -> None:
+    full = {"schema_version": "release_metadata.v1", "release_id": "r", "source_commit": "a" * 40, "version": "1", "built_at": "t", "builder": {"interpreter": "3.12"}}
+    assert pb.compare_meta(full, {**full, "builder": {"interpreter": "3.13"}}, complete=True) == []
+    assert pb.compare_meta(full, {**full, "evil": 1}, complete=True) == ["evil"]
+    assert pb.compare_meta(full, {k: v for k, v in full.items() if k != "version"}, complete=True) == ["version"]
+    assert pb.compare_meta({"version": "1"}, {**full, "evil": 1}) == []  # a partial record only covers the keys it names

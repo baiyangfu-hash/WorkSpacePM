@@ -189,3 +189,28 @@ def test_a_legacy_project_with_only_a_root_prd_document_is_still_compared(tmp_pa
     found = find_scheme_int_doc(str(project))
     assert found is not None and Path(found).parent.name == "PRD"
     assert _by_item(scheme_items(str(project)))[ITEM_FB][0] == "pass"
+
+
+def test_a_single_quoted_name_is_read_like_a_double_quoted_one(tmp_path: Path) -> None:
+    quoted = ["| `'FB_1001_Station1'` | `'GlobalVars.fbStation1'` | 工位1 | `x.md` |", FB_GOOD[1]]
+    project = _project(tmp_path, _doc(quoted, FC_LISTED))
+    assert _by_item(scheme_items(str(project)))[ITEM_FB][0] == "pass"
+
+
+def test_an_instance_written_without_the_data_block_prefix_matches_when_it_is_unique(tmp_path: Path) -> None:
+    short = ["| `FB_1001_Station1` | `fbStation1` | 工位1 | `x.md` |", "| `FB_2001_CommonAlarm` | `fbAlarm` | 报警 | `y.md` |"]
+    project = _project(tmp_path, _doc(short, FC_LISTED))
+    assert _by_item(scheme_items(str(project)))[ITEM_FB][0] == "pass"
+
+
+def test_a_header_without_the_literal_fb_is_still_an_instance_table(tmp_path: Path) -> None:
+    text = _doc(FB_GOOD, FC_LISTED).replace("| FB 类型名 | 实例名 |", "| 功能块类型 | 实例名 |")
+    project = _project(tmp_path, text)
+    status, _message = _by_item(scheme_items(str(project)))[ITEM_FB]
+    assert status == "pass"
+
+
+def test_a_duplicated_instance_row_is_named(tmp_path: Path) -> None:
+    project = _project(tmp_path, _doc([*FB_GOOD, FB_GOOD[0]], FC_LISTED))
+    status, message = _by_item(scheme_items(str(project)))[ITEM_FB]
+    assert status == "warn" and "文档里重复" in message and "GlobalVars.fbStation1" in message

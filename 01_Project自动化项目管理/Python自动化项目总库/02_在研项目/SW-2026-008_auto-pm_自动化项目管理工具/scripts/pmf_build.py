@@ -21,13 +21,11 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
-import io
 import json
 import platform
 import re
 import subprocess
 import sys
-import tarfile
 import tomllib
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -41,6 +39,11 @@ META_SCHEMA = "release_metadata.v1"
 META_NAME = "release_meta.json"
 #: ``release_meta.json`` 里允许因机器而异的键：判可复现与 ``verify`` 时不比较
 META_VOLATILE_KEYS = ("builder",)
+#: ``release_meta.json`` 允许出现的全部键；多出来的键视为篡改
+META_KNOWN_KEYS = ("schema_version", "release_id", "source_commit", "version", "built_at", "builder")
+META_REQUIRED_KEYS = ("schema_version", "release_id", "source_commit", "version", "built_at")
+#: 记录里的缩写提交号至少这么长才算前缀匹配（再短的前缀对不上任何东西）
+MIN_COMMIT_PREFIX = 7
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -101,25 +104,41 @@ def project_version(repo: Path, commit: str, project_root: str) -> str:
 
 
 def export_payload(repo: Path, commit: str, project_root: str) -> dict[str, bytes]:
-    """用 ``git archive`` 取 ``<commit>:<project_root>`` 下的 ``auto_pm`` 与 ``templates``；字节级、不经过工作树。"""
+    """取 ``<commit>:<project_root>`` 下的 ``auto_pm`` 与 ``templates``：用 ``ls-tree`` 列目录、``cat-file --batch`` 读 blob，字节与提交里的完全一致。
+
+    不用 ``git archive``：它会按构建机器的 ``core.autocrlf`` 与 eol 属性转换换行，同一提交在不同机器上得到不同字节。
+    """
+    root = project_root.rstrip("/")
     for name in PAYLOAD_DIRS:
-        listed = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{commit}:{project_root.rstrip('/')}/{name}"], capture_output=True)
+        listed = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{commit}:{root}/{name}"], capture_output=True)
         if listed.returncode != 0:
             raise BuildError("missing-payload-dir", f"{name}/ is not in {commit[:8]}:{project_root}")
-    raw = _git(repo, "archive", "--format=tar", f"{commit}:{project_root.rstrip('/')}", *PAYLOAD_DIRS)
+    raw = _git(repo, "ls-tree", "-r", "-z", "--full-tree", commit, "--", *[f"{root}/{name}" for name in PAYLOAD_DIRS])
+    wanted: list[tuple[str, str]] = []
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        meta, _, path = record.partition(b"\t")
+        mode, kind, oid = meta.decode("ascii").split()
+        rel = path.decode("utf-8")[len(root) + 1:]
+        if kind != "blob" or mode not in ("100644", "100755"):
+            raise BuildError("unsupported-member", f"{rel} is a link, a submodule or a special file")
+        if "__pycache__" in PurePosixPath(rel).parts or rel.endswith(".pyc"):
+            continue
+        wanted.append((rel, oid))
+    done = subprocess.run(["git", "-C", str(repo), "cat-file", "--batch"], input=("".join(f"{oid}\n" for _rel, oid in wanted)).encode("ascii"), capture_output=True)
+    if done.returncode != 0:
+        raise BuildError("git-failed", f"git cat-file --batch: {done.stderr.decode('utf-8', errors='replace').strip()[:300]}")
+    out, cursor = done.stdout, 0
     files: dict[str, bytes] = {}
-    with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
-        for member in tar.getmembers():
-            if member.isdir():
-                continue
-            if not member.isfile():
-                raise BuildError("unsupported-member", f"{member.name} is a link or special file")
-            parts = PurePosixPath(member.name).parts
-            if "__pycache__" in parts or member.name.endswith(".pyc"):
-                continue
-            extracted = tar.extractfile(member)
-            assert extracted is not None
-            files[member.name] = extracted.read()
+    for rel, oid in wanted:
+        newline = out.index(b"\n", cursor)
+        header = out[cursor:newline].decode("ascii").split()
+        if len(header) != 3 or header[0] != oid or header[1] != "blob":
+            raise BuildError("git-failed", f"unexpected cat-file header for {rel}: {' '.join(header)}")
+        size = int(header[2])
+        files[rel] = out[newline + 1:newline + 1 + size]
+        cursor = newline + 1 + size + 1
     return files
 
 
@@ -186,16 +205,23 @@ def meta_identity(meta: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in meta.items() if key not in META_VOLATILE_KEYS}
 
 
-def compare_meta(recorded: dict[str, object], rebuilt: dict[str, object]) -> list[str]:
-    """记录里写了的身份键与重建结果不同的键名（``builder`` 不比较；``source_commit`` 允许记录里是缩写，即重建值的前缀）。"""
-    problems: list[str] = []
-    for key, value in meta_identity(recorded).items():
-        other = rebuilt.get(key)
+def compare_meta(recorded: dict[str, object], rebuilt: dict[str, object], *, complete: bool = False) -> list[str]:
+    """记录与重建结果不同的身份键名（``builder`` 不比较）。
+
+    默认只比较记录里写了的键；``complete=True``（记录是一份完整的 release_meta.json）时键集合也必须相同。
+    ``source_commit`` 允许记录里是缩写，但缩写至少 ``MIN_COMMIT_PREFIX`` 位且必须是重建值的前缀（反过来也一样）。
+    """
+    problems: set[str] = set()
+    left, right = meta_identity(recorded), meta_identity(rebuilt)
+    keys = set(left) | set(right) if complete else set(left)
+    for key in keys:
+        value, other = left.get(key), right.get(key)
         if key == "source_commit" and isinstance(value, str) and isinstance(other, str):
-            if not value or not (other.startswith(value) or value.startswith(other)):
-                problems.append(key)
-        elif other != value:
-            problems.append(key)
+            short, long_ = sorted((value, other), key=len)
+            if len(short) < MIN_COMMIT_PREFIX or not long_.startswith(short):
+                problems.add(key)
+        elif key not in left or key not in right or value != other:
+            problems.add(key)
     return sorted(problems)
 
 
@@ -243,8 +269,10 @@ def verify(output: Path, manifest_files: dict[str, str] | None = None, recorded_
         if isinstance(meta, dict):
             if meta.get("schema_version") != META_SCHEMA:
                 meta_problems.append("schema_version")
+            meta_problems.extend(f"unexpected-key:{key}" for key in sorted(set(meta) - set(META_KNOWN_KEYS)))
+            meta_problems.extend(f"missing-key:{key}" for key in META_REQUIRED_KEYS if key not in meta and key != "schema_version")
             if recorded_meta is not None:
-                meta_problems.extend(key for key in compare_meta(recorded_meta, meta) if key not in meta_problems)
+                meta_problems.extend(key for key in compare_meta(recorded_meta, meta) if key not in meta_problems and f"missing-key:{key}" not in meta_problems)
         elif meta is not None:
             meta_problems.append("unparsable")
     if manifest_files is None:

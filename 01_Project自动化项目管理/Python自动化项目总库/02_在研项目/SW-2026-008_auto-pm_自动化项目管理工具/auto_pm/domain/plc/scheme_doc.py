@@ -65,7 +65,7 @@ def _tables(lines: Sequence[str]) -> list[tuple[list[str], list[list[str]]]]:
 
 
 def _clean(cell: str) -> str:
-    return cell.strip().strip("`").strip('"').strip()
+    return cell.strip().strip("`").strip('"').strip("'").strip("`").strip()
 
 
 def _column(header: Sequence[str], *needles: str) -> int:
@@ -123,8 +123,13 @@ def scheme_items(project_path: str) -> list[tuple[str, str, str]]:
 
     # ---- FB instance table ------------------------------------------------------------------------------------------------------
     doc_instances: set[tuple[str, str]] | None = None
+    doc_duplicates: list[str] = []
+    doc_rows_seen: set[tuple[str, str]] = set()
+    short_names: dict[str, list[str]] = {}
+    for _type, full_name in code_instances:
+        short_names.setdefault(full_name.rsplit(".", 1)[-1].casefold(), []).append(full_name)
     for header, rows in tables:
-        type_col, inst_col = _column(header, "FB", "类型"), _column(header, "实例名")
+        type_col, inst_col = _column(header, "类型"), _column(header, "实例名")
         if type_col >= 0 and inst_col >= 0:
             doc_instances = doc_instances or set()
             for row in rows:
@@ -132,6 +137,12 @@ def scheme_items(project_path: str) -> list[tuple[str, str, str]]:
                     continue
                 type_name, inst_name = _clean(row[type_col]), _clean(row[inst_col])
                 if _IDENT.match(type_name) and _PATH.match(inst_name):
+                    if "." not in inst_name and len(short_names.get(inst_name.casefold(), [])) == 1:
+                        inst_name = short_names[inst_name.casefold()][0]
+                    key = (type_name.casefold(), inst_name.casefold())
+                    if key in doc_rows_seen:
+                        doc_duplicates.append(f"{type_name} {inst_name}")
+                    doc_rows_seen.add(key)
                     doc_instances.add((type_name, inst_name))
     if doc_instances is None:
         if code_instances:
@@ -141,8 +152,10 @@ def scheme_items(project_path: str) -> list[tuple[str, str, str]]:
         doc_keys = {(t.casefold(), i.casefold()): f"{t} {i}" for t, i in doc_instances}
         only_code = [code_keys[k] for k in code_keys if k not in doc_keys]
         only_doc = [doc_keys[k] for k in doc_keys if k not in code_keys]
-        if only_code or only_doc:
+        if only_code or only_doc or doc_duplicates:
             parts = []
+            if doc_duplicates:
+                parts.append(f"文档里重复：{_names(doc_duplicates)}")
             if only_code:
                 parts.append(f"代码有、文档无：{_names(only_code)}")
             if only_doc:
