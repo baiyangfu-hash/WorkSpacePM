@@ -1,0 +1,34 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261006-TD2DOCS0",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-017",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/M2_入口分类与定位交接_需求说明_REQ.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/M2_门禁分档与单卡规模规则_PM.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/AUDIT_ADDENDUM_V04_DEFECTS.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/AUDIT_REPORT_GPT_20261005.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/AUDIT_REPORT_GPT_P1_V04_20261005.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/CLAUDE_PROPOSAL.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/CLAUDE_REVIEW_OF_GPT_SURVEYS_20261006.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/DECISIONS_20261006.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/DECISION_20261005.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/GATE_TIERS_DRAFT.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/GPT_PROPOSAL.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/INDEX.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/MASTER_PLAN_20261006.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/REQ_DRAFT_入口分类_分诊队列_换Agent_薄入口_需求草案.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/F05_与审计讨论_20261005/ratification_20261005.txt",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-374.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/02_整改项/活动技术债台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-06T21:23:05.249537+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 055 V1.0 的 17 个 owned paths；文件字节必须等于卡 §5.1 的 SHA-256；台账只许改回写说明一行并在 §2.2 末尾追加 TD-SW008-078～086 九行，其余一字不改；CHG-374 只在 §9.1 追加冻结的追认段",
+    "不得改 §4 之外的任何文件（产品、测试、templates、WBS、既有 CHG、PM_SESSION、Obsidian 规范、Hook、release、驾驶舱、SDK）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并、不推送、不部署、不切换 release；控制根 CHG-374 权威文件只在提交完成并核验后由 td2_2b_root_landing.sh 追加同一段"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261010-CICDLAND",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-402",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".github/sw008-ci/baseline.linux.json",
+    ".github/sw008-ci/compare_baseline.py",
+    ".github/sw008-ci/secret_scan.py",
+    ".github/sw008-ci/selftest.py",
+    ".github/workflows/sw008-ci.yml"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-10T19:02:26.399565+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 098 V1.0 的 5 个 owned path（均为新增文件）；文件字节必须等于卡 §5.1 的 SHA-256",
+    "不得改 §4 之外的任何文件（含删除或修改既有工作流 plc-tool-ci.yml、产品文件、测试、共享夹具、conftest、测试配置、templates、台账、WBS、既有 CHG、PM_SESSION、Obsidian 规范、Hook 脚本、release）；工作流不得使用 secret 或写权限；不得直接 SQL 改真实库；不合并、不推送、不打 tag、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

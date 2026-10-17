@@ -1,0 +1,25 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261003-V01CHEAL",
+  "project_id": "DJ-2026-005",
+  "change_id": "CHG-PLC-2026-014",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/01_外部设备交互/PRD/接口文档_IFC-FB3001-ExternalDeviceInteraction.md",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/02_输送机/PRD/接口文档_IFC-FB1002-SingleLayerConveyor.md",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/02_输送机/ST_SingleLayerConveyor.scl",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/03_取放料/PRD/接口文档_IFC-FB1003-PickPlace.md",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/04_打胶机送料/PRD/接口文档_IFC-FB1004-GlueMachineFeeder.md",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/05_公共报警/PRD/接口文档_IFC-FB2001-CommonAlarm.md",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/程序文档/PLC变量定义文档_VAR.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-04T04:12:51.732421+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 046 V1.0 的 8 个 owned paths；文件内容必须与卡 §5.1 的 SHA-256 一致；GlobalVars.db 与 ST_SingleLayerConveyor.scl 只许增加行尾注释，去掉注释后与基线逐词相同",
+    "不得改产品源码、测试、模板、命令、V01/V01B 已验收字节、其他项目、主工作区活目录内容、任何文档与 Obsidian 规范、Hook、release；不得直接 SQL 改真实库 .auto-pm/continuity.db、改历史事件或 Checkpoint；不得改旧钉值；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-FE6F4E97",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-240",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/pm.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_pm_facade.py"
+  ],
+  "approver": "架构师",
+  "approved_at": "2026-09-14T21:54:26.363933+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "P11 WBS 别名已按 D/CLI/T 映射机械展开；两条路径已在 aa99fc67 基线通过 git cat-file 预检。",
+    "复用干净候选 codex/p11-cli-new-plan，仅实现新需求 plan 与旧 Mission 兼容。",
+    "门禁通过后停在待验收；不得提交、合并、部署或切换 release。"
+  ],
+  "metadata": {}
+}

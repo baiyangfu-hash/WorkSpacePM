@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261010-RTAGLOCL",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-030",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    ".auto-pm/reports/m2-rtag/out/RTAG_REPORT.md",
+    ".auto-pm/reports/m2-rtag/out/tags.json"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-10T14:43:15.960014+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 090 V1.0 的 2 个 owned path（输出文件，新增）与 15 个本地带注释 tag release-src/<release-id>（指向冻结清单里的提交）；不改任何已有引用、不移动已有 tag",
+    "不得改 §4 之外的任何文件（产品、测试、模板、规则、WBS、台账、既有 CHG、Hook、release、manifest、指针）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并、不推送任何东西（含 tag）、不部署、不切换 release、不入库、不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

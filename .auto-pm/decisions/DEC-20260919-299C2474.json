@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-299C2474",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-250",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-19T16:28:38.831657+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅核验并前向取消 WORK-SW008-REC-001；仅创建具名历史剩余对象的窄范围替代 Work/Run。",
+    "不修改产品源码、发布指针或历史记录。"
+  ],
+  "metadata": {}
+}

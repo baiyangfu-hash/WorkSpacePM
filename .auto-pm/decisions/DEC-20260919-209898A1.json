@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-209898A1",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-257",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/evidence_collection_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_evidence_collection_service.py"
+  ],
+  "approver": "架构师",
+  "approved_at": "2026-09-19T18:02:00.383283+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅在基于 C01 commit 4dc30f2a25e38cd83257eb0221ee4327463b282e 的隔离候选执行。",
+    "必须在 Run 受管候选项目根执行真实 pytest、Ruff、Mypy，并绑定命令、cwd、退出码、输出摘要和基线/staged/unstaged 内容 hash。",
+    "任一门禁非零必须明确失败；内容或证据变化后旧结果无效；测试仅用隔离临时仓或工作树。",
+    "通过定向 pytest、Ruff、Mypy、真实双 Hook 与 diff --check 后停在 VERIFYING；不提交、不合并、不部署、不切换 release，不启动 C03。"
+  ],
+  "metadata": {}
+}

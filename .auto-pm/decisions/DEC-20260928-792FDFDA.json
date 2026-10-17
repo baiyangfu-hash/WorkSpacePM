@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-792FDFDA",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-HMI-2026-001",
+  "approved_scope": "CROSS",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/prototypes/pm-flow-v2.html",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_flow_v2_prototype.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T00:05:11.787541+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only an isolated candidate based on 8b02de55f011df31591601464e0eebf4db5e4f23.",
+    "No QML, Bridge, backend, database, WBS, merge, push, deployment, or release switching.",
+    "Five scenarios and static dead-link checks must pass before acceptance."
+  ],
+  "metadata": {}
+}

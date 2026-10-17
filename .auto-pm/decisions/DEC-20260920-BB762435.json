@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-BB762435",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-278",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/execution_adapter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_microtask_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_execution_adapter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_microtask_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T07:06:06.481254+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "保留E08B候选现有7路径差异；补齐ExecutionMicrotaskPlan及marker的approved_model、secret-safe objective、owned_paths、declared_dirty_paths并纳入canonical request/marker hash；事实必须从E08A持久Mission/Intent/READY Run精确交叉核验，禁止默认/推断/回读可变旁路。secret-shaped objective必须fail-closed。补直接篡改/缺字段/不一致能力证明后重跑三整文件、Ruff、Mypy、diff check；不提交、不启动模型。"
+  ],
+  "metadata": {}
+}

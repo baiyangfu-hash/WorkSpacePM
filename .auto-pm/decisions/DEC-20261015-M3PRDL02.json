@@ -1,0 +1,24 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261015-M3PRDL02",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-418",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/checker.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/repairer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/scheme_doc.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/plc-standard-project/template/02_PLC程序/PLC_ST/00_程序方案/接口文档_INT.md.jinja",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_template_plc.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_repairer_prd_location.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_scheme_doc.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-15T15:19:44.558319+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 142 V1.0 的 7 个 owned path；文件字节必须等于卡 §5.1 的 SHA-256",
+    "不得改 §4 之外的任何文件（产品文件、其他测试、既有 CHG 原文、台账、规则、AGENTS.md、.trae、.cursor、.agent、Hook 脚本、release）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并进 main、不推送、不打 tag、不部署、不切换 release、不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

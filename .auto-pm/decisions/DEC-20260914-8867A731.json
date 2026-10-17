@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-8867A731",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-240",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/auto_pm/ui/cli/pm.py",
+    "00_Infrastructure/auto_pm/tests/cli/test_pm_facade.py"
+  ],
+  "approver": "架构师",
+  "approved_at": "2026-09-14T21:49:36.627916+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基线 aa99fc67969b516f87fd765d4127442ebf195e1b；复用干净隔离候选 codex/p11-cli-new-plan。",
+    "仅实现新需求 CLI plan 入口并保留 pm plan --mission-id 兼容。",
+    "通过定向 pytest、Ruff、Mypy、真实双 Hook、diff --check 后停在待验收；不得提交、合并、部署或切换 release。"
+  ],
+  "metadata": {}
+}

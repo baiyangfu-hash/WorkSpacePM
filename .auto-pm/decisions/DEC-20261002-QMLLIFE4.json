@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261002-QMLLIFE4",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-373",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/bridges/pm_cockpit_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_pm_cockpit_bridge.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-02T18:49:47.353216+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "user-confirmation:20261002-PM-BRIDGE-BOUNDED-CORRECTION; 用户在获知混合AV、两路径根因验证与次数修订建议后回复允许；Codex委托执行，非最终人验。 CARD-SW008-M2-QML-LIFECYCLE V1.3 SHA256=0e783d5bd080cc0c606d28469f210e2930a3195640a32f5a6cf7161d12afc9d1 BASE=6eead5e4b678550c1f084699de31b5f79190d5a6；精确两路径；仅一个根修Run004；混合G1与完整QML先通过再恢复业务；真实CP先于正常Hook隔离提交；不改旧Run/CP、不合并推送部署release。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261009-WBS9ATTE",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-033",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-10T01:47:41.109568+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 083 V1.0 的 1 个 owned path（WBS 单文件）；文件字节必须等于卡 §5 的最终 SHA-256；相对 V3.0.24 只改卡 §5 列明的行与单元格，其余只加不删；D08 与冻结条款不变；不引入卡 §5 之外的任何事实",
+    "不得改 §4 之外的任何文件（规则文档、AGENTS.md、.trae、.cursor、.agent、产品、测试、templates、台账、既有 CHG、PM_SESSION、Obsidian 规范、Hook、release）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并、不推送、不部署、不切换 release；不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

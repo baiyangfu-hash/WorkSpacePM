@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261001-U07CCODE",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-367",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/api.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/__init__.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_cockpit_api.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-01T15:46:10.082751+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 034 V1.0 的 3 个 owned paths；不得改 PmFacadeService、PmCockpitService、PmClosureService、WorkspaceContextService、ChangeService、DecisionService、ContinuityStore、CLI、驾驶舱、事件类型、SQLite schema、Hook、release",
+    "不得推进变更单状态、不得提供默认审批人或自行构造 user-confirmation 证据、不得使用 os.chdir 等进程级全局状态；不得直接 SQL、写 canonical 数据库、改历史事件或 Checkpoint；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-7753334D",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-287",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T19:37:47.184485+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only transition WORK-SW008-PMF-C06R-001, WORK-SW008-PMF-C06R3-001 and WORK-SW008-PMF-C06R4-001 to CLOSED after confirming their associated Runs remain CANCELLED.",
+    "Do not modify C06 code, other Work or Run records, merge, deploy, or change the active release."
+  ],
+  "metadata": {}
+}

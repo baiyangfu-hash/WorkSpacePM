@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-2CF755A1",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-240",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/pm.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_pm_facade.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py"
+  ],
+  "approver": "架构师",
+  "approved_at": "2026-09-14T22:05:11.990323+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "WBS V2.4 P11 四路径；基线 aa99fc67；复用 codex/p11-cli-new-plan。",
+    "保留现有 CLI 与 CLI 测试两条候选差异；新 Run 必须精确声明这两条 dirty paths。",
+    "根治 CHG 离开 DRAFT 后的冷启动 request_id 重放；门禁通过后停在待验收；不得提交、合并、部署或切换 release。"
+  ],
+  "metadata": {}
+}

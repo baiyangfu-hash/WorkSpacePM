@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-FEECDFD7",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-SPEC-2026-016",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "00_Obsidian_Base全局规范文件仓库/01_项目管理域/02_规划阶段/033_功能模块迭代流程标准_PM.md",
+    "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/056_跨Agent工作连续性与恢复协议_PM.md",
+    "00_Obsidian_Base全局规范文件仓库/spec_registry.json"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T15:32:42.606960+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅沉淀平台中立抽象合同，不写入C09/P2私有编号、Agent临时过程或聊天结论",
+    "不得修改PM-042、AGENTS、WBS、SW008项目文档、源码、continuity.db或release",
+    "任何registry/frontmatter/死链/禁词/diff门禁非零立即停止；批次B/C不自动授权"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260912-488F0A16",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SAFE-2026-008",
+  "approved_scope": "SYSTEM/SAFE",
+  "approved_files": [
+    ".auto-pm/reports/PMF-R01-R02-20260912_发布身份与active缓存修复_REP.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SAFE/CHG-SAFE-2026-008.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/contracts/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/change/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/modbus/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/models/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/plc/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/project/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/spec/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/vartable/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/vartable/parsers/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/domain/vartable/utils/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/infrastructure/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/infrastructure/db/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/infrastructure/logging/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/infrastructure/utils/__pycache__",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/auto_pm/ui/__pycache__"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-12T22:37:08.455540+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅允许逐项删除本决策列出的17个空__pycache__目录；每项删除前后都必须验证为空或不存在。不得使用-Recurse，不得删除任何文件、目录之外的节点、发布指针、源码、continuity.db或Work/Run。",
+    "删除后必须使用launcher --resolve-only验证active 1.3.3精确树，再用根入口验证实效版本与continuity命令；任一不通过即停止且不切换指针。"
+  ],
+  "metadata": {}
+}

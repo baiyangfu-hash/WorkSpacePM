@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260915-2F4E76FB",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-011",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-15T16:36:28.219043+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅修订 WBS 至 V2.6：记录根因，拆分 E03A/E03B，重排 E04-E08 编号及依赖、当前进度和版本记录。",
+    "产品实现必须基于 E02 不可变提交 deaef0cd48e66cfc189016f58b6cadf3c804b191 前向修复；不得回退、改写或合并 E02 历史。",
+    "本治理票不改产品源码、Continuity Store、Hook、稳定 release；文档验证后停在 VERIFYING，不提交、不合并、不部署、不切换 release。"
+  ],
+  "metadata": {}
+}

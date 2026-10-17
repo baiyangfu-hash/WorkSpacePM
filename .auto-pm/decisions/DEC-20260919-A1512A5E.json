@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-A1512A5E",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-255",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_supervisor_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_supervisor_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_execution_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-19T17:03:41.105300+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "只经 Continuity 服务读取并核验唯一 RUN_STARTED 结构化证据；监督器不得解析 SQLite 或事件 JSON。",
+    "session_id、process_id、started_at 必须共同匹配；缺失、多条、损坏、PID 复用或失联均 BLOCKED 且禁止自动重启。"
+  ],
+  "metadata": {}
+}

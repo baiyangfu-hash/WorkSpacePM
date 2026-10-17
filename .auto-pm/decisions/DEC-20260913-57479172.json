@@ -1,0 +1,24 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-57479172",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-221",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    ".git/hooks/pre-commit",
+    ".git/hooks/commit-msg",
+    ".auto-pm/reports/PMF-20260912/G02-pre-commit.before",
+    ".auto-pm/reports/PMF-20260912/G02-commit-msg.before",
+    ".auto-pm/reports/PMF-20260912/G02.json"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T16:03:58.175985+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "写前必须确认 root HEAD=4f6c0f2b1ec707049aca738ee3e397fac92c00e7，研发母体模板 blob=1114325b2b0fcf30cfb2b066d477f3bcd31c22b4，文件 SHA256=B72872F7C820BA41602291EAD886D9CB121C939E9C948F6FFBB581E93F0421F6。",
+    "渲染模板 SHA256 固定为 pre-commit=F0B9AB3587BF9094CF1FDDE83698DF3514FDE6F1604C52DE46AAADD412986E43、commit-msg=9DE4F77840F024661B6C527753141BF5BF0DA8EB694CF94D8257A72FDBC0B4C6；实际旧 hash 漂移即停止。",
+    "只允许写入已列五路径；不得运行稳定 main.py git-hook install，不得改源码、tests、.git/config、index、Git 历史、worktree、active/previous release、continuity.db 或其它 Hook。",
+    "失败仅在对应目标仍等于本次输出 hash 时恢复该 Hook；双 Hook shell 语法、输出 hash、根 main.py 禁缓存启动链与真实预检全部通过后停在待验收。"
+  ],
+  "metadata": {}
+}

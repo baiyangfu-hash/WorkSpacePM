@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260929-DEPLOYH2",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-350",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/releases/1.3.3-e648e0b",
+    "00_Infrastructure/auto_pm/deployment_manifest.json",
+    "00_Infrastructure/auto_pm/active_release.json",
+    "00_Infrastructure/auto_pm/previous_release.json"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-09-29T21:30:12.644896+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "release 仅由 e648e0b4 精确导出，先演练 exact-tree/切换/回退再切 active",
+    "previous 指向 1.3.3-8f08c1a；不改任何历史 release 与 canonical 数据库"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260929-3FE5E138",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-345",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/workspace_context_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_workspace_context_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-29T04:54:45.588251+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅在独立隔离候选中修改两条授权路径；CHG/台账属于控制根证据层，不计入候选 dirty paths。",
+    "不得修改 release 指针、release payload、launcher、CLI、contract、Git hook、canonical continuity.db、WBS 或任何历史证据。",
+    "出现第三条产品路径、runtime/evidence 不可证明、候选直启不再拒绝或任何门禁失败时立即停止。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260915-53746F27",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-243",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/execution_adapter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/local_executor.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_execution_adapter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_local_executor.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-15T17:09:31.455992+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Base must be E02 immutable commit deaef0cd48e66cfc189016f58b6cadf3c804b191.",
+    "Only canonical executor-control thread.started bound to this Popen PID, session, and aware started_at may prove startup.",
+    "Handshake failures, invalid events, or timeouts must terminate and reap only the current child process.",
+    "Keep execute compatibility wrapper; do not modify Continuity mapping, adapter service, store, Run state, CLI, hooks, or release."
+  ],
+  "metadata": {}
+}

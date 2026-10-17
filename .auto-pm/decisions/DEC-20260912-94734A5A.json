@@ -1,0 +1,39 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260912-94734A5A",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-012",
+  "approved_scope": "SYSTEM/CROSS",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/03_分阶段整改路线图_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/PMF-20260912/03_分阶段整改路线图_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/07_SW-2026-008_驾驶舱Dogfooding迭代方案与WBS_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/PMF-20260912/07_SW-2026-008_驾驶舱Dogfooding迭代方案与WBS_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/12_SW-2026-008_PM驾驶舱强制闭环_对话交接_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/PMF-20260912/12_SW-2026-008_PM驾驶舱强制闭环_对话交接_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/15_SW-2026-008_驾驶舱强制闭环_后续WBS校准_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/PMF-20260912/15_SW-2026-008_驾驶舱强制闭环_后续WBS校准_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/17_SW-2026-008_研发母体稳定部署_重制实施方案_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/PMF-20260912/17_SW-2026-008_研发母体稳定部署_重制实施方案_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/18_SW-2026-008_旧方案历史治理索引_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/PMF-20260912/18_SW-2026-008_旧方案历史治理索引_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/18_SW-2026-008_切流回退与问题移交_GEMINI.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/PMF-20260912/18_SW-2026-008_切流回退与问题移交_GEMINI.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/37_Cockpit_OS_超级特种兵大一统目标架构与迁移总方案_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/PMF-20260912/37_Cockpit_OS_超级特种兵大一统目标架构与迁移总方案_PM.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/010_Cockpit_OS_后续原子迭代WBS_PM.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/archive/PMF-20260912/010_Cockpit_OS_后续原子迭代WBS_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive/PMF-20260912/PMF-20260912_文档归档台账_REP.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-DOCU/CHG-DOCU-2026-012.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-12T22:25:35.694277+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅允许Git rename、更新39号活动方案链接与新增归档台账；不得删除、修改旧文档内容、改写历史CHG、移动报告、修改26/36或碰触运行/发布/源码。",
+    "九个源文件必须维持已核验SHA-256；归档后哈希一致、活动目录无同名旧计划、39号链接可解析；失败即以Git rename逆向恢复。"
+  ],
+  "metadata": {}
+}

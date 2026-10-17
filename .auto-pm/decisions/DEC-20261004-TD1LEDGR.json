@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261004-TD1LEDGR",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-016",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/02_整改项/活动技术债台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-04T23:02:45.735751+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 049 V1.0 的 1 个 owned path（活动技术债台账）；文件字节必须等于卡 §5.1 的 SHA-256；TD-SW008-001～008 除状态格外一字不变",
+    "不得改 WBS、任何产品代码与测试、既有 CHG 的状态与内容、PM_SESSION、Obsidian 规范、Hook、release、驾驶舱、SDK、ContinuityStore、合同模型；不得新增 schema、事件类型或迁移；不得直接 SQL 改真实库 .auto-pm/continuity.db、改历史事件或 Checkpoint；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

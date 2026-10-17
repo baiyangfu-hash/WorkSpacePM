@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261010-MRGSIBLG",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-403",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_chg_tracking_check.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/tools/chg_tracking_check.py",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-11T03:08:16.056636+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 100 V1.0 的 3 个 owned path；文件字节必须等于卡 §5.1 的 SHA-256，即 git merge --no-commit --no-ff 657f3dc5fef37607233cd4145d254b65e6644fe0 的结果；提交是第二个父提交为 657f3dc5fef37607233cd4145d254b65e6644fe0 的合并提交",
+    "不得改 §4 之外的任何文件（产品文件、其他测试、共享夹具、conftest、测试配置、templates、台账、既有 CHG、PM_SESSION、Obsidian 规范、Hook 脚本、release）；不得手改合并结果；不合并进 main、不推送、不打 tag、不部署、不切换 release、不处置任何债务或历史失败记录；不得直接 SQL 改真实库 .auto-pm/continuity.db"
+  ],
+  "metadata": {}
+}

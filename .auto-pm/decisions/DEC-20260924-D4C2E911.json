@@ -1,0 +1,28 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260924-D4C2E911",
+  "project_id": "SW-2026-009",
+  "change_id": "CHG-SCPT-2026-016",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/cefr_tagger.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/course_manager.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/dictionary.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/fsrs_engine.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/grammar_engine.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/grammar_practice.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/course_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/database_manager.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/dictionary_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/grammar_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/study_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/tests/test_services.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-24T19:54:10.724756+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅隔离同头候选 12 文件；原 C09 候选只读；不合并推送部署切换 release；SW009 strict Mypy/pytest/Ruff 非零即停止"
+  ],
+  "metadata": {}
+}

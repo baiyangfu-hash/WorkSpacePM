@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-83AF9E52",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-277",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/execution_adapter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_microtask_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_execution_adapter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_microtask_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T06:31:25.556560+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基线8ed0000b；必须先以既有append-only events持久化唯一operation微任务Plan，成功后才允许在确定性安全路径物化独立.git仓和已提交.codex-microtask.json；同载荷重放复用同一Plan/仓/commit，异载荷、候选漂移、部分仓、dirty、marker/hash漂移、符号链接和越界均拒绝且不清理现场；Run保持READY，不启动模型，不新增schema/table/JSON旁路账本，不持久化token。通过三组定向pytest、七路径Ruff、四生产路径Mypy、真实双Hook与diff check。"
+  ],
+  "metadata": {}
+}

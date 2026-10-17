@@ -1,0 +1,25 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260926-0DEF6ADE",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-319",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/continuity.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/work_registry_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/gates/stage_gate_engine.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_incident_adjudication.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_stage_gate_engine.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-26T22:26:19.495673+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅 Stage 1 八文件隔离候选的代码与测试范围；不授权 canonical 事故裁决事件、旧记录状态流转、合并、推送、部署或 release 切换",
+    "此 Decision 无 incident_adjudication 精确目标元数据，不得用于 record_incident_adjudication"
+  ],
+  "metadata": {}
+}

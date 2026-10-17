@@ -1,0 +1,30 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261001-U09CCODE",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-372",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/pm_cockpit.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/bridges/pm_cockpit_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/views/BossCockpitView.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/boss_main.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/components/PendingScopeCard.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/config/app_config.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/boss_qml_window.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/decision_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_approval.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_approver.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_pm_cockpit_approval_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_boss_cockpit_approval_view.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-02T01:19:38.310193+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 040 V1.0 的 13 个 owned paths；已存在产品文件被删除或改写的行只允许卡 §6 G6 列明的 4 行，其余必须是纯新增；不得弱化、删除或跳过参考测试的断言",
+    "不得改命令行、SDK api.py、ContinuityStore、PmFacadeService、合同模型中 U09A/U09B 的部分、onSnapshotFinished、“提出新目标”表单、.bat、__main__.py、任何文档、Hook、release；不得新增 schema、事件类型或迁移；不得提供批准人的界面输入；不得直接 SQL 改真实库 .auto-pm/continuity.db、改历史事件或 Checkpoint；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

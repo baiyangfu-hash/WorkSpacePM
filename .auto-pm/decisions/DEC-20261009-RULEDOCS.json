@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261009-RULEDOCS",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-024",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/M2_门禁分档与单卡规模规则_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-09T15:18:00.687817+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 077 V1.0 的 1 个 owned path（门禁分档与单卡规模规则文档）；文件字节必须等于卡 §5 的最终 SHA-256；只许只在规则文档里追加三个块：一行版本说明、§9～§19 与不放宽句、一段机器落地缺口；既有每一行逐字保留，不放宽任何要求",
+    "不得改 §4 之外的任何文件（产品、测试、templates、WBS、既有 CHG、PM_SESSION、Obsidian 规范、Hook、release、驾驶舱、SDK）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并、不推送、不部署、不切换 release；不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

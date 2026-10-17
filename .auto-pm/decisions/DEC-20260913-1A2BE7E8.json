@@ -1,0 +1,28 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-1A2BE7E8",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-228",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/git_hook_enforcer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/continuity_resume.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/workspace_context_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/workspace_context.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_workspace_context_service.py",
+    ".auto-pm/reports/PMF-20260912/G10.json"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T23:53:18.196904+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅以 G06=02af25747f0aea8489a6879f806ccd67dbde6112 为集成基线，组合 G08=16d358033a6c8508e89110a251a656fad74b2308 与 G09=1c45ebb2e897b81c9b3bd54e93cea72c7635cef5；来源提交和候选均不得改写。",
+    "仅创建受管非活动集成 worktree 与 G10.json；运行 G06/G08/G09 定向组合测试、九路径 Ruff、六生产源码路径 Mypy 与 diff --check，创建 Checkpoint 后停在 VERIFYING。",
+    "冲突或基线不一致时，只允许终止本次新 G10 候选中的未完成组合并保留证据；不得补丁来源票，不得合并 main、安装 Hook、部署、切换 release 或启动 P/E/C。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-4BAC1FE5",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-280",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T13:26:38.416992+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Baseline must be b71f89c87206469e6a1653b54a6ca2098405afb7 and C04 dependency 986e62d must remain in ancestry.",
+    "DB state plus closure step/outbox must commit atomically; idempotent replay and injected failure must leave no duplicate or partial write.",
+    "Do not import or consume AiHandoffService or HANDOFF_CONSUMED; no merge, deployment, or release switch."
+  ],
+  "metadata": {}
+}

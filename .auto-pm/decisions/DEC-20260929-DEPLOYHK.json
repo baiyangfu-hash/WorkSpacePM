@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260929-DEPLOYHK",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-348",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/git_hook_enforcer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/infrastructure/test_git_hook_enforcer.py"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-09-29T19:44:10.787315+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "派生候选=f4626947+CHG-347 四路径原字节",
+    "release 仅 auto_pm/templates/release_meta；构建后先演练 exact-tree、切换、回退再切 active",
+    "previous_release 保留 1.3.3-f462694；不改历史 release/M2 代码/canonical DB"
+  ],
+  "metadata": {}
+}

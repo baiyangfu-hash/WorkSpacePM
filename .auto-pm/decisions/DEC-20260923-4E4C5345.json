@@ -1,0 +1,27 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260923-4E4C5345",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-309",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/continuity.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/decision_package.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/continuity.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_execution_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_lease_recovery.py"
+  ],
+  "approver": "用户",
+  "approved_at": "2026-09-23T05:24:02.752676+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "只在新隔离候选中改产品源码；canonical Store 只写本 CHG/Decision/Work/Run/Checkpoint 事实。",
+    "终态自动释放；提前撤销只能由新的 Recovery CHG/Decision/Work/Run 触发；无已启动进程的可证明证据才可取消，无法证明即 PENDING；每次撤销或接管提升 epoch，旧 epoch 写入必须拒绝。",
+    "不得直接改 expires_at，不得在 argv、环境、日志、事件或公开回执泄露 token；不得合并、推送、部署或切换 release。"
+  ],
+  "metadata": {}
+}

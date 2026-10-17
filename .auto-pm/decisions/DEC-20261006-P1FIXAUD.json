@@ -1,0 +1,26 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261006-P1FIXAUD",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-382",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_intake_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/intake_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/pm.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_pm_inbox.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_intake_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_intake.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-06T17:45:03.164683+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 054 V1.0 的 9 个 owned paths；文件字节必须等于卡 §5.1 的 SHA-256；所有路径均已存在，不得新增文件",
+    "不得改 §4 之外的任何产品文件（auto_pm、templates）、既有测试、台账、WBS、既有 CHG（含 CHG-SCPT-2026-381）、既有 Work（含 WORK-SW008-M2-P1-AUDITFIX-001）、PM_SESSION、Obsidian 规范、Hook、release、驾驶舱、SDK；不得新增 schema 版本或迁移；不得直接 SQL 改真实库 .auto-pm/continuity.db、改历史事件或 Checkpoint；测试只用临时仓库与临时库，测试结束后不得留下子进程；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

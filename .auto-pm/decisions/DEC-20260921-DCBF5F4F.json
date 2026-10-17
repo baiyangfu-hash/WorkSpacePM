@@ -1,0 +1,41 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260921-DCBF5F4F",
+  "project_id": "SW-2026-009",
+  "change_id": "CHG-SCPT-2026-004",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/dictionary_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/tests/test_services.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_python.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-21T20:31:07.845720+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: Prefix search accepts integer limits 1 through 20 and uses default 20 for invalid inputs.",
+    "acceptance: Returned dictionary results retain CEFR labels.",
+    "acceptance: Targeted service tests and C09 Python end-to-end test pass.",
+    "risk: Candidate execution_root must remain bound to canonical control_root.",
+    "risk: Invalid search-limit inputs must not leak type errors.",
+    "non-goal: Do not change main, remote, deployment, release, or existing production worktree files."
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "c455300bde20d2ce5dde5f6202a74a250f012de1bb83cd3c5d65221cbf9e8c77",
+      "approval_evidence_ref": "user-confirmation:2026-09-21-c09",
+      "request_id": "SW008-PMF-C09-001",
+      "execution_grant": {
+        "adapter": "codex",
+        "approved_model": "gpt-6-astra",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/dictionary_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/tests/test_services.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_python.py"
+        ]
+      }
+    }
+  }
+}

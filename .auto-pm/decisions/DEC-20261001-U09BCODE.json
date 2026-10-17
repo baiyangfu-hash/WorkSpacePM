@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261001-U09BCODE",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-371",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/pm.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_pm_pending_cards.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_approval_guard.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-01T22:38:53.479141+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 039 V1.0 的 4 个 owned paths；pm_facade_service.py 只允许追加（diff 零删除行）；pm.py 被删除或改写的行只允许来自卡 §6 G6 列明的两块基线文本与 import 行",
+    "不得改驾驶舱服务/Bridge/QML、DecisionService、SDK api.py、workflow.py、__main__.py、ContinuityStore、合同模型、任何文档、Hook、release；不得新增 schema、事件类型或迁移；不得直接 SQL 改真实库 .auto-pm/continuity.db、改历史事件或 Checkpoint；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

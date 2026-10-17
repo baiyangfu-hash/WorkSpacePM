@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-BCAEACD2",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-218",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-216.md",
+    ".auto-pm/reports/PMF-20260912/CHG-SCPT-2026-218_B02-B09_execution_report.md"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T00:05:28.530251+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅允许独立临时fixture验证后，对台账中CHG-SAFE-2026-007这一状态单元格执行CLI --fix；不得修改CHG-SAFE-2026-007正文。",
+    "不得切换active/previous发布，不得修改Git Hook，不得处理历史Work/Run，不得使用--no-verify。",
+    "源代码和测试仅按既有DEC-20260912-B5DE7168进入216隔离提交；本Decision不扩展该两路径。"
+  ],
+  "metadata": {}
+}

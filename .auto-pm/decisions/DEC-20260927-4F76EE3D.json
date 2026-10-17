@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260927-4F76EE3D",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-326",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/mission_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/mission.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_mission_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-27T04:50:25.316479+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅过期 Mission 的安全 BLOCKED/CANCELLED 降权；其余状态、旧 Work/Run/Checkpoint、CHG323 与发布边界不变；本单结束即停止"
+  ],
+  "metadata": {}
+}

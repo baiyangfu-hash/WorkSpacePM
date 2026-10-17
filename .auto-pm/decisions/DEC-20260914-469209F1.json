@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-469209F1",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-008",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "user",
+  "approved_at": "2026-09-14T19:48:55.386288+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only update P08/P09 authority contract, dependency graph, version record, and current-progress projection.",
+    "Record P08-R commit e2cb0787e246b0d462f26e2c6bbd5be64ff266d6 and CP-SW008-PMF-P08R-001 as the sole corrective gate.",
+    "No product source, Continuity state, Hook, deployment, release pointer, or P09 execution object may be changed."
+  ],
+  "metadata": {}
+}

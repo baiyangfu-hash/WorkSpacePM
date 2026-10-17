@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260915-A5D0A37E",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-010",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "架构师",
+  "approved_at": "2026-09-15T00:36:21.362674+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅修订 WBS V2.5：E02 五路径、ExecutionIntent 单一真源幂等合同、当前执行叠加状态与修订记录。",
+    "旧 RUN-SYS001-PMF-WBS24-001 保留 Checkpoint；不得伪造成功或直写 continuity.db。",
+    "不提交、不合并、不部署、不切换 release；验证后停在 VERIFYING。"
+  ],
+  "metadata": {}
+}

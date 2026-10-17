@@ -1,0 +1,17 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-H12VAL01",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-274",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T05:47:34.715518+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅允许通过 SQLite backup API 在临时目录复制 canonical continuity.db，并以 G13+G14 代码复验 H12 原同键同完整载荷重放及异目标/异授权/跨Work/错误事件/新键终态拒绝；canonical 业务对象除本治理 Work/Run/Checkpoint 外不得改变。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261004-V03HNDOF",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-378",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_handoff.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/02_整改项/活动技术债台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-05T01:19:00.493312+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 050 V1.0 的 2 个 owned paths；文件字节必须等于卡 §5.1 的 SHA-256；台账只许在 §2.2 末尾追加 7 行，既有行与其他内容一字不变",
+    "不得改任何产品文件（auto_pm、templates）、既有测试、WBS、既有 CHG、PM_SESSION、Obsidian 规范、Hook、release、驾驶舱、SDK、ContinuityStore、合同模型；不得新增 schema、事件类型或迁移；不得直接 SQL 改真实库 .auto-pm/continuity.db、改历史事件或 Checkpoint；测试只用临时仓库与临时库；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

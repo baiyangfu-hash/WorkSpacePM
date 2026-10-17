@@ -1,0 +1,24 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260927-DBB26950",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-328",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/continuity.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/work_registry_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_work_registry_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-27T20:15:34.457701+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅限CARD-SW008-WORK-LIFECYCLE-20260927第一阶段；不可变基线0fb0c6f3056a18b4eeb5f204445c8ba38a595db6；不得出现第七路径。",
+    "只允许隔离候选、定向及相关核心pytest、六文件Ruff与normal-import strict Mypy；禁止follow-imports=skip和文件级抑制。",
+    "不处置历史Work/Run/Checkpoint，不写历史原始行，不部署、不切换release、不合并或推送；周额度剩余<=50%即停止。"
+  ],
+  "metadata": {}
+}

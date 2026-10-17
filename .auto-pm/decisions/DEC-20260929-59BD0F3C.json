@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260929-59BD0F3C",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-346",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/git_hook_enforcer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/infrastructure/test_git_hook_enforcer.py"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-09-29T14:37:05.377678+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定四个owned paths，禁止修改任何第五个文件",
+    "候选工作树与控制根必须证明同属于一个Git common-dir，否则fail-closed",
+    "严禁修改CHG-345候选、canonical数据库、release或WBS"
+  ],
+  "metadata": {}
+}

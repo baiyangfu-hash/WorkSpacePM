@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-406D7018",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-015",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    ".auto-pm/reports/sw008-doc-governance/2026-09-28/git-asset-matrix.json",
+    ".auto-pm/reports/sw008-doc-governance/2026-09-28/m2-readiness-verdict.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/014_M2前置知识与工作区治理收敛实施卡_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T16:37:59.481562+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅分类与裁决，不删除、移动、reset、clean、merge、push、deploy 或切换 release",
+    "准入不满足时必须输出 M2_BLOCKED，不得降低 runtime fail-closed 标准",
+    "结束后只允许另建实施卡并登记 M2 原子任务，不执行该新任务"
+  ],
+  "metadata": {}
+}

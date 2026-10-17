@@ -1,0 +1,28 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260929-H11BADJD",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-352",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-09-29T21:37:12.977726+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "adjudicate_blocked_work"
+      ],
+      "target_run_ids": [],
+      "allowed_outcomes": [
+        "CANCELLED"
+      ],
+      "target_work_ids": [
+        "WORK-SW008-PMF-C09R3C-NOSKIP-001"
+      ]
+    }
+  }
+}

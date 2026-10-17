@@ -1,0 +1,41 @@
+{
+  "schema_version": "decision_disposition.v1",
+  "record_id": "DISP-20260914-FA85DD64-01",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-238",
+  "authorizing_decision_id": "DEC-20260914-FB35F02D",
+  "target_decision_id": "DEC-20260914-FA85DD64",
+  "target_decision_sha256": "2f513d03a53860986a5730e42d2d0c1849bbaca5ba88838e9204afbefe36015d",
+  "disposition": "DUPLICATE_CREATION_DO_NOT_CONSUME",
+  "effect": "NOT_AUTHORITY_FOR_P09_WORK_RUN_OR_SOURCE_EXECUTION",
+  "preserves_original": true,
+  "retroactive_mutation": false,
+  "approver": "fubai",
+  "approved_at": "2026-09-14T12:57:46.3065569-07:00",
+  "recorded_at": "2026-09-14T12:57:46.3065569-07:00",
+  "supersession_status": "SUPERSEDED_BY_IDENTICAL_LATER_DECISION",
+  "superseding_decision_id": "DEC-20260914-FB35F02D",
+  "basis_evidence": [
+    {
+      "role": "target_decision_immutable_bytes",
+      "path": ".auto-pm/decisions/DEC-20260914-FA85DD64.json",
+      "hash_algorithm": "SHA-256",
+      "sha256": "2f513d03a53860986a5730e42d2d0c1849bbaca5ba88838e9204afbefe36015d"
+    },
+    {
+      "role": "selected_later_identical_decision",
+      "path": ".auto-pm/decisions/DEC-20260914-FB35F02D.json",
+      "hash_algorithm": "SHA-256",
+      "sha256": "60cc1bef3443093761ca50ccf9d13be68305b7b42e62f0f72e7df71c6fe4b498"
+    }
+  ],
+  "authority_semantics": {
+    "future_consumption_only": true,
+    "rewrites_target_decision": false,
+    "statement": "The earlier duplicate remains immutable audit evidence and must not be consumed for P09. Only DEC-20260914-FB35F02D may authorize P09 Work, Run, source execution, checkpoint, or acceptance."
+  },
+  "conditions": [
+    "This record resolves only the duplicate Decision creation for CHG-SCPT-2026-238.",
+    "It grants no source, Git commit, merge, deployment, activation, rollback, cleanup, or release authority beyond the selected Decision's own conditions."
+  ]
+}

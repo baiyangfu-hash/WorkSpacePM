@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260929-B84378C5",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-345",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/workspace_context.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/workspace_context_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_workspace_context_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-29T12:29:56.424427+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅限 managed isolated worktree runtime-context-contract；不得修改第四条产品路径",
+    "禁止修改 release pointer/payload、launcher、CLI、Git hook、canonical DB、WBS 与历史证据",
+    "候选直启必须继续 fail-closed；控制根 active release 与候选身份均须可证明；任一门禁非零即停止"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-AF2B899D",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-237",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/mission_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py"
+  ],
+  "approver": "user",
+  "approved_at": "2026-09-14T19:29:32.502489+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "P08-R only: based on immutable P08 isolated commit 11558ed03ebe696e96084773a8f59976ca9235a8.",
+    "At Mission materialization, explicitly authorize WorkKind.WBS only; do not expand scope paths, authorizers, or any non-WBS child Work kind.",
+    "Regression must prove strong Mission derives WBS capability and still rejects BUG, TEST, DEBT, GOVERNANCE or unapproved kinds.",
+    "Use an isolated temporary database; do not mutate the real Continuity database.",
+    "After verification stop for acceptance; no commit, merge, deploy, release switch, or P09 start."
+  ],
+  "metadata": {}
+}

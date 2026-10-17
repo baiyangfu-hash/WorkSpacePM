@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261007-TD3DOCS0",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-018",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/02_整改项/活动技术债台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-07T22:02:07.513187+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "批准卡061 V1.0 SHA256=b440b2dc9fcaad75f33d8934eb60db3e7acbe3e7b3250412d0528f4cd41e154b，工具manifest SHA256=20482761660094920a181b406570246a8658ef28b55f56dc9d0b2e12fcdb33d8，BASE=aeedf92f2ca8b23dfb609aba7471e65746ef7bd5；唯一owned路径仅插入087–090，最终文件SHA256=ad9b89ab34326cab1355bc53b8f42860e9efe3188508929ebffa36348ac6f352，其余字节不变。",
+    "禁止其他产品路径、测试、模板、WBS、既有CHG和历史失败对象、Obsidian、Hook、安全设置、release、直接SQL写库；不得重跑失败门禁；不merge/push/deploy/release。主PM治理，gpt-6-astra/medium执行；先Checkpoint再正常Hook提交；最终人工验收和CHG收口另行确认。"
+  ],
+  "metadata": {}
+}

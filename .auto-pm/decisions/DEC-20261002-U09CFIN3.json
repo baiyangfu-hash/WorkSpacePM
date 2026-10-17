@@ -1,0 +1,29 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261002-U09CFIN3",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-372",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/pm_cockpit.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/bridges/pm_cockpit_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/views/BossCockpitView.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/boss_main.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/config/app_config.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/boss_qml_window.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/decision_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/components/PendingScopeCard.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_approval.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_approver.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_pm_cockpit_approval_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_boss_cockpit_approval_view.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-02T20:21:53.582591+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "user-confirmation:20261002-PM-BRIDGE-BOUNDED-CORRECTION; 用户批准根修及完整基线通过后的唯一U09C后继Run003；Codex委托执行，最终人验待定; CARD-SW008-M2-U09C V1.2 SHA256=6d09d57e53ba7bf5786bcced43de1cb83f9378e020019d6a923d37baa693f90f BASE=d95f45d28a64c5dbc1abbcfeaa5a98ab71408293; 精确十三路径；十二原字节及PM bridge真实业务diff合成；G1-G8当前字节完整复验；不允许Run004；不改历史；CP先于正常Hook隔离提交；不合并推送部署或切换release。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261001-U08CODE0",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-369",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/workflow.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_workflow_compat.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-01T19:06:09.764032+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 036 V1.0 的 2 个 owned paths；不得改 pm.py、__main__.py、任何文档、PmFacadeService 及服务层、ContinuityStore、事件类型、SQLite schema、Hook、release",
+    "不得为委托命令写包装或复制 pm 逻辑、不得导入或恢复旧 handoff/saga/pm-workflow 状态机、不得使用 os.chdir 等进程级全局状态；不得直接 SQL、写 canonical 数据库、改历史事件或 Checkpoint；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-05BC73A2",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-337",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    ".auto-pm/reports/workspace-hygiene/2026-09-28/preflight.json",
+    ".auto-pm/reports/workspace-hygiene/2026-09-28/archive-receipts.json",
+    ".auto-pm/reports/workspace-hygiene/2026-09-28/frozen-inventory.json",
+    ".auto-pm/reports/workspace-hygiene/2026-09-28/final-verification.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T14:51:04.785044+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅允许托管归档 identityKey=C:\\Users\\fubai\\.codex\\worktrees\\runtime-identity-adoption\\My_Workspace",
+    "仅允许托管归档 identityKey=C:\\Users\\fubai\\.codex\\worktrees\\runtime-release-integration\\My_Workspace",
+    "仅允许托管归档 identityKey=C:\\Users\\fubai\\.codex\\worktrees\\m1-final-candidate\\My_Workspace",
+    "仅允许托管归档 identityKey=C:\\Users\\fubai\\.codex\\worktrees\\m2-u01-prototype\\My_Workspace",
+    "仅允许托管归档 identityKey=C:\\Users\\fubai\\.codex\\worktrees\\c09-p2-effective\\My_Workspace",
+    "禁止源代码修改、Git提交、数据库写入、Work/Run状态流转、合并、推送、部署或release切换",
+    "单对象预检失败时冻结该对象并继续；不得自动补偿或扩大归档集合"
+  ],
+  "metadata": {}
+}

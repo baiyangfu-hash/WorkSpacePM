@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-D10D4AAB",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-018",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T03:13:23.416648+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅允许在基线 da33c8739e619b5acc0f5a2b55690eb344a9b1a5 的隔离候选中修改这一文件；V2.12 已验收内容作为输入，原候选不得改动。",
+    "H12 必须改为控制根常规 continuity work transition，精确目标 WORK-SW008-PMF-E08-001，明确 IN_PROGRESS 到 CANCELLED、CAS 与幂等。",
+    "H12 不得声明 runtime capability、不得以 settle_expired_run 或 target_run_ids 结算 Work；Decision 条件、前后快照、H12 Work/Run/Checkpoint 是后续审计证据。",
+    "验证 93 个原子唯一、E08A 仍依赖 H12、doc check 和 diff --check；不得改产品源码、Hook、release、Continuity schema 或 canonical Continuity 状态。",
+    "完成后仅创建 Checkpoint 并停在 VERIFYING；不提交、不合并、不部署、不切换 release、不执行 H12 或启动 E08A。"
+  ],
+  "metadata": {}
+}

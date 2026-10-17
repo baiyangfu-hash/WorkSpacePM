@@ -1,0 +1,29 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261002-U09CROOT",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-372",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/pm_cockpit.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/bridges/pm_cockpit_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/config/app_config.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/boss_qml_window.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/decision_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_approval.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_approver.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_pm_cockpit_approval_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_boss_cockpit_approval_view.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/views/BossCockpitView.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/boss_main.qml",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/components/PendingScopeCard.qml"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-02T17:55:44.776782+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "user-confirmation:20261002-U47-ROOT-FIX; 用户直接授权接手、找到根因解决、完成整个4.7U；Codex委托执行，非用户手写签名，最终人验待定。 CARD-SW008-M2-U09C V1.1 SHA256=4b09bf7b2404a039ed545929f180d12f6164bca54339f8e1dee6cf40ad8304fc BASE=6eead5e4b678550c1f084699de31b5f79190d5a6；精确13路径；原13字节重现；G1-G8真实复验；唯一后继Run002；CP先于隔离提交；不改旧Run/CP、不扩大范围、不合并推送部署release。"
+  ],
+  "metadata": {}
+}

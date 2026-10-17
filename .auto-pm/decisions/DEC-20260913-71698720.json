@@ -1,0 +1,27 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-71698720",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-219",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SAFE/CHG-SAFE-2026-007.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-216.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-218.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-219.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    ".auto-pm/decisions/DEC-20260912-00D5A8C2.json",
+    ".auto-pm/decisions/DEC-20260912-B5DE7168.json",
+    ".auto-pm/decisions/DEC-20260913-BCAEACD2.json",
+    ".auto-pm/decisions/DEC-20260913-3D9D721F.json"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T03:30:35.292056+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "CHG-SAFE-2026-007 正文逐字节保持不变；执行报告继续留在 .auto-pm/reports 运行态，不得 git add -f。",
+    "台账仅纳入 CHG-SAFE-2026-007、CHG-SCPT-2026-216、CHG-SCPT-2026-218 与本票 CHG-SCPT-2026-219 的行；排除 DOCU-012、SAFE-008、SCPT-217、39、归档和 G。",
+    "必须实际运行 commit-msg 与 pre-commit；禁止 --no-verify、Hook 安装、合并、部署及 active/previous release 切换。"
+  ],
+  "metadata": {}
+}

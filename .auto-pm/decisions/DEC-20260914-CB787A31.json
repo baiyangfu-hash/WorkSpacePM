@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-CB787A31",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-239",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-14T21:19:18.172483+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基线 91889722；仅上述三路径。",
+    "对 PlanningDraft、CHG、Decision、Mission、Work 每个持久化边界实施故障注入后重试，始终仅一条完整授权链。",
+    "不得留下虚假 READY 或无授权 Mission；测试仅使用隔离临时数据库。",
+    "验证后停在 VERIFYING；不提交、不合并、不部署、不切换 release。"
+  ],
+  "metadata": {}
+}

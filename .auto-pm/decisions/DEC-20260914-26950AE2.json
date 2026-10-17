@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-26950AE2",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-241",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/local_executor.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_local_executor.py"
+  ],
+  "approver": "架构师",
+  "approved_at": "2026-09-14T22:29:59.392506+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅在基线 50a929ccb60de32365fafe0f1819c9c195401656 的隔离候选执行；真实 Codex 模型进程仅在隔离微任务 Git 仓内修改允许文件；不得触碰现有适配器、Facade、Store、CLI、真实业务项目或真实 Continuity 数据库；门禁全绿后停在 VERIFYING，不提交、不合并、不部署、不切换 release。"
+  ],
+  "metadata": {}
+}

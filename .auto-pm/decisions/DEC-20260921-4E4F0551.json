@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260921-4E4F0551",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-300",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-21T15:59:19.985478+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only classify and minimally repair the recorded Continuity failures in the existing isolated candidate.",
+    "Exclude Q01 fixture failures and all commit, main, remote, deployment, and release actions."
+  ],
+  "metadata": {}
+}

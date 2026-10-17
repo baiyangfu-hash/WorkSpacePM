@@ -1,0 +1,47 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260927-871B343F",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-323",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/evidence_collection_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_evidence_collection_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_local_execution_orchestrator.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_supervisor_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_execution_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-27T13:32:43.313536+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: LocalExecutor records a real thread.started PID and proves process collection.",
+    "acceptance: Projection changes exactly the five CHG-323 owned paths from baseline 69cb2ec5.",
+    "acceptance: Generic checkpoint completes 177 pytest cases and Ruff/Mypy with exit code 0.",
+    "acceptance: Mypy covers all five Python files without --follow-imports=skip.",
+    "risk: Any sixth dirty path, missing process collection, or stale checkpoint is blocking.",
+    "risk: At most one separately classified corrective Run is allowed after this primary Run.",
+    "non-goal: No historical checkpoint rewrite, direct SQL, merge, push, deploy, or release switch.",
+    "non-goal: No code changes outside the five approved paths."
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "eb871087c7b40368a5a0d6faf089a643f4dd98c3cbd32bdd97d2c25341fdc26f",
+      "approval_evidence_ref": "user-confirmation:20260927-C09P2-EXEC-ONE-SHOT",
+      "request_id": "REQ-SW008-C09P2-EXEC-20260927-001",
+      "execution_grant": {
+        "adapter": "codex",
+        "approved_model": "gpt-6-sol",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/evidence_collection_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_evidence_collection_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_local_execution_orchestrator.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_supervisor_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_execution_service.py"
+        ]
+      }
+    }
+  }
+}

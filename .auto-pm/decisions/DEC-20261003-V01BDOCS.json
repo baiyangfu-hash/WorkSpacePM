@@ -1,0 +1,32 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261003-V01BDOCS",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-375",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/doc_consistency.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/checker.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/plc/docs.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/plc/__init__.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/plc-standard-project/template/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db.jinja",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/plc-standard-project/template/02_PLC程序/PLC_ST/01_外部设备交互/FB_3001_ExternalInteraction.scl.jinja",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/plc-standard-project/template/02_PLC程序/PLC_ST/01_外部设备交互/ST_ExternalDevice.scl.jinja",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/plc-standard-project/template/02_PLC程序/PLC_ST/01_外部设备交互/PRD/接口文档_IFC-FB3001-ExternalInteraction.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/plc-standard-project/template/02_PLC程序/PLC_ST/02_工位1_动作机构/ST_Station1.scl.jinja",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/plc-standard-project/template/02_PLC程序/PLC_ST/02_工位1_动作机构/PRD/接口文档_IFC-FB1001-Station1.md.jinja",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/plc-standard-project/template/02_PLC程序/PLC_ST/05_公共报警/PRD/接口文档_IFC-FB2001-CommonAlarm.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/templates/plc-standard-project/template/02_PLC程序/程序文档/PLC变量定义文档_VAR.md.jinja",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_doc_consistency.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_doc_consistency_checker.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_plc_docs.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-03T23:32:49.867483+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 045 V1.0 的 15 个 owned paths；checker.py 与 ui/cli/plc/__init__.py 只许追加，被删除或改写的既有行数必须为 0；4 个 SCL/DB 模板只许增改行尾注释，去掉注释后与基线逐词相同",
+    "不得改 V01 的三个产品文件、auto_pm/domain/vartable、domain/plc 下除 checker.py 外的文件、驾驶舱、SDK、ContinuityStore、合同模型、任何文档与 Obsidian 规范、Hook、release；不得写提交钩子或阶段门；不得新增 schema、事件类型或迁移；不得直接 SQL 改真实库 .auto-pm/continuity.db、改历史事件或 Checkpoint；不得改真实 PLC 工程目录；不得改基准钉值；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

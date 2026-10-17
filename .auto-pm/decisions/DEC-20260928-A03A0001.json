@@ -1,0 +1,25 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-A03A0001",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-340",
+  "approved_scope": "MODULE",
+  "approved_files": [],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T21:43:18.495419+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "revoke_unstarted_run"
+      ],
+      "target_run_ids": [
+        "RUN-SW008-M2-U03A-001"
+      ],
+      "allowed_outcomes": [
+        "CANCELLED"
+      ]
+    }
+  }
+}

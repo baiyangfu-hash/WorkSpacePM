@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-5A7739A2",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-234",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/pm_facade.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-14T15:52:22.813876+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "范围卡必须含精确文件、验收、风险、非目标和不可变方案 hash；不得产生 Mission、Work 或 Run。",
+    "基线必须为 6db7241aa928107bfb4991d7069279c9b3ac7c57；通过后停在 VERIFYING。",
+    "不得提交、合并、部署或切换 release。"
+  ],
+  "metadata": {}
+}

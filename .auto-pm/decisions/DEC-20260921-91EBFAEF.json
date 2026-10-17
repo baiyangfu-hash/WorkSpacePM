@@ -1,0 +1,17 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260921-91EBFAEF",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-296",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-21T04:27:58.712174+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only transition the current 66 ACCEPTED historical Work records to CLOSED; preserve every Run, Checkpoint, immutable event, code file, Git state, release, remote, and deployment."
+  ],
+  "metadata": {}
+}

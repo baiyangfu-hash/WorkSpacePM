@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261014-M3AGNT01",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-415",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "AGENTS.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-14T16:59:18.102440+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 131 V1.0 的 1 个 owned path；文件字节必须等于卡 §5.1 的 SHA-256",
+    "不得改 §4 之外的任何文件（产品文件、其他测试、既有 CHG 原文、台账、规则、AGENTS.md、.trae、.cursor、.agent、Hook 脚本、release）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并进 main、不推送、不打 tag、不部署、不切换 release、不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

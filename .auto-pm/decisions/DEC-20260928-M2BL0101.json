@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-M2BL0101",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-HMI-2026-002",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/prototypes/pm-flow-v2.html",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_flow_v2_prototype.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T17:20:08.085583+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "base_commit=0d7071b7943944bbb99ec4441014851baf3c9b91",
+    "source_commit=d88eedd578cee7866a55ccd8e10dc2c9b45ded13",
+    "exactly_two_paths; no merge/push/deploy/release switch; stop if remaining quota <=30%"
+  ],
+  "metadata": {}
+}

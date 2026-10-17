@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261009-TD7DOCS0",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-023",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/02_整改项/活动技术债台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-09T14:50:57.401383+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 076 V1.0 的 1 个 owned path（活动技术债台账）；文件字节必须等于卡 §5 的最终 SHA-256；只许仅修改活动技术债台账一个文件；既有行只改证据、关联变更单和状态中的必要列；新增行追加在第 2.2 节末尾；不处置任何债务或历史失败记录；不改任何其他文档、产品代码、测试或模板。",
+    "不得改 §4 之外的任何文件（产品、测试、templates、WBS、既有 CHG、PM_SESSION、Obsidian 规范、Hook、release、驾驶舱、SDK）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并、不推送、不部署、不切换 release；不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

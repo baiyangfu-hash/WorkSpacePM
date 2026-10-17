@@ -1,0 +1,17 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-8B521F39",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-016",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "User",
+  "approved_at": "2026-09-19T23:34:57.831425+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅修订WBS V2.11，新增G12并同步当前事实；不得改源码、安装Hook、提交、合并、部署或切换release"
+  ],
+  "metadata": {}
+}

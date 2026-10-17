@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-6B2D26B9",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-289",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/ledger_reconciler.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_closure_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T20:10:38.152013+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "C07 may create only fixture-backed closure projection tests; it must not create or alter canonical production closure, Mission, Work, Run, release pointers, merge state, or deployment state.",
+    "Projection failure remains pending and retry must be idempotent with no duplicate event; C08 terminal-state transitions remain prohibited."
+  ],
+  "metadata": {}
+}

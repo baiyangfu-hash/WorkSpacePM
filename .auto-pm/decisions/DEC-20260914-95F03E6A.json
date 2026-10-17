@@ -1,0 +1,17 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-95F03E6A",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-009",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "架构师",
+  "approved_at": "2026-09-14T22:03:09.107365+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅修订 V2.4 文档版本、P11 四路径范围、冷启动重放验收和修订记录。"
+  ],
+  "metadata": {}
+}

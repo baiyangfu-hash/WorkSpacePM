@@ -1,0 +1,24 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-C0C653BF",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-217",
+  "approved_scope": "SYSTEM/CROSS",
+  "approved_files": [
+    ".auto-pm/reports/PMF-20260912/G07.json",
+    ".auto-pm/reports/PMF-20260912/G08.json",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/continuity_resume.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_resume_service.py"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T01:55:30.442554+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "G07 必须在从 4f6c0f2b1ec707049aca738ee3e397fac92c00e7 冻结出的独立临时 worktree 完成；报告须记录全量基线、失败指纹、候选 SHA 与源码差异清单。",
+    "G08 仅在 G07 Run 成功及 G07.json 已存在后启动；唯一非终态过期 lease 的 Run 必须可见、标记 LEASE_EXPIRED 且不得建议 CREATE_RUN。",
+    "多 Work/Run 只输出无 token 的可选择候选；显式 --work-id/--run-id 仍须接受项目与归属校验；终态 Run 的旧 lease 不得被投影为活跃故障。",
+    "禁止改动 .git/hooks、00_Infrastructure/auto_pm、active_release.json、previous_release.json、历史 Run/Work；本 Decision 不授权提交、Hook 安装、稳定发布或 B 验收。"
+  ],
+  "metadata": {}
+}

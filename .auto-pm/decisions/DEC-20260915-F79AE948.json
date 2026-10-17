@@ -1,0 +1,26 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260915-F79AE948",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-244",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_supervisor_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_execution_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_supervisor_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-15T17:22:18.365466+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Base must be E03A immutable commit dcdd252841c60548fced1d057314e25d5f16b859.",
+    "prepare creates only a lease-bound READY Run after persisted intent and candidate materialization; it must not write RUNNING.",
+    "Only E03A ExecutionStartEvidence may be transactionally persisted and CAS-transition the same READY Run to RUNNING under owner, token, expiry, and version checks.",
+    "Handshake or persistence failure must reap the current child before precise retry; unreaped child becomes BLOCKED with no automatic restart; no token in receipts, logs, argv, or evidence."
+  ],
+  "metadata": {}
+}

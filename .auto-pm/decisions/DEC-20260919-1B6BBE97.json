@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-1B6BBE97",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-256",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/evidence_collection_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_evidence_collection_service.py"
+  ],
+  "approver": "架构师",
+  "approved_at": "2026-09-19T17:23:22.282597+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅在基于 E06 commit 41b523270aa305769b3537f7726b219515546b76 的隔离候选执行。",
+    "只记录候选工作树差异；owned_paths 外差异必须拒绝；staged 与 unstaged 分别记录。",
+    "通过定向 pytest、Ruff、Mypy、真实双 Hook 与 diff --check 后停在 VERIFYING；不提交、不合并、不部署、不切换 release，不启动 C02。"
+  ],
+  "metadata": {}
+}

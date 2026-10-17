@@ -1,0 +1,24 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-31369489",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-236",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/mission_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py"
+  ],
+  "approver": "user",
+  "approved_at": "2026-09-14T17:52:38.603801+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基于 c9c13db46054d6efee0b5da68615abf27b5bf92f 创建隔离候选",
+    "仅以真实 change_id、decision_id、精确 plan_hash 和 CHG_DECISION 构造 AuthorityEnvelope 并物化唯一 Mission",
+    "禁止占位 ID、空授权、绕过 Decision；同一批准重放返回同一 Mission",
+    "测试仅使用隔离临时数据库；通过门禁后停在 VERIFYING",
+    "不提交、不合并、不部署、不切换 release、不启动 P09"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261008-WBS7CND2",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-029",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-08T23:31:06.256620+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 073 V1.1 的 WBS 单文件；只加不删历史；基线中仅卡 §5 列明的 7 行可被原位替换；全部文字由已批准字节的 patch_wbs7.py 生成，不得手工改写",
+    "不得直接 SQL、写 canonical 数据库、改历史事件或 Checkpoint；不改任何实施卡、需求说明、台账或产品源码、不开工 F02 或任何后续任务；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

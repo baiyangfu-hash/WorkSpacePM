@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-15D983A0",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-291",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T21:11:19.636924+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only advance WORK-SW008-PMF-C06CLOSE-003 from VERIFYING through ACCEPTED to CLOSED, based on RUN-SW008-PMF-C06CLOSE-003 and CP-SW008-PMF-C06CLOSE-003.",
+    "Do not modify product source, Git worktree state, historical documents, ledger records, release pointers, merge state, deployment state, or any other Work or Run."
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-259B6927",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-254",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_supervisor_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_supervisor_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-19T16:49:18.416710+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅 E05 真实结束状态进入验证；复用 E03A wait collect 与 E04 内存续租。",
+    "退出码零、非零、终止、collect 失败与续租失败分别处理；任一失败不得进入 VERIFYING。"
+  ],
+  "metadata": {}
+}

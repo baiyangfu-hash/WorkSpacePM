@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260929-78D8B61C",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-SPEC-2026-017",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "00_Obsidian_Base全局规范文件仓库/02_Python开发域/216_PySide6_GUI开发规范_DEV.md",
+    "00_Obsidian_Base全局规范文件仓库/04_驾驶舱与全栈域/300_高级语言与工业上位机系统_Google_SRE工程可靠性规范_DEV.md",
+    "00_Obsidian_Base全局规范文件仓库/spec_registry.json"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-29T04:15:45.427922+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅修改三份规范正文和注册表；不得写入项目 ID、CHG、Decision、Run、Checkpoint、提交号或事故叙事。",
+    "隔离候选出现第四个脏路径、需要源码/检查器/索引生成器修改，或候选/runtime/证据身份不一致时立即停止。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-F51725B7",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-269",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/work_registry_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_work_registry_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T04:42:20.472570+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基线 0d320310c4cf5c02d518ad5e494ce03134eb156b；保留 G13-001 两路径差异；仅增加 Store 原事件完整载荷读取与事务复核，不改 schema/CLI/canonical 数据库。通过定向 pytest、Ruff、Mypy、真实双 Hook、diff --check 后连续验收和隔离提交。"
+  ],
+  "metadata": {}
+}

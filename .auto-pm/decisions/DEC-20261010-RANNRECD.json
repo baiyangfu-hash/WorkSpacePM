@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261010-RANNRECD",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-031",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/release_annotations.json"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-10T14:54:06.339410+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 091 V1.0 冻结的 1 个新增文件（路径与 SHA-256 见 .auto-pm/reports/m2-rann/files_manifest.json）；文件字节必须等于冻结值",
+    "不得改清单之外的任何文件（deployment_manifest.json、active_release.json、previous_release.json、releases/ 下载荷、产品、测试、模板、规则、WBS、台账、Hook、release）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并、不推送、不打 tag、不部署、不切换 release、不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

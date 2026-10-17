@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-FA85DD64",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-238",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/work_registry_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_work_registry_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-14T19:54:45.733439+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基线 e2cb0787；仅上述三路径。",
+    "仅从现有有效 CHG_DECISION Mission 派生 Work；仅 WBS 子 Work；无 Mission 或无 WBS 授权不得创建。",
+    "派生路径不得超 Decision；其他 active owner 冲突须精确拒绝；调用方不得提供 Work ID；同一授权幂等。",
+    "仅隔离临时数据库测试；验证后停在 VERIFYING；不提交、不合并、不部署、不切换 release。"
+  ],
+  "metadata": {}
+}

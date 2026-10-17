@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261009-N1ADOCS1",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-031",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/40_驾驶舱角色与边界_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-09T17:04:36.698521+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 079 V1.0 的 1 个 owned path（新增说明文档）；文件字节必须等于卡 §5 的最终 SHA-256；只许新增这一份说明文档，内容只来自用户已确认的文字，开头声明不改变任何现行规则",
+    "不得改 §4 之外的任何文件（规则文档、AGENTS.md、.trae、.cursor、.agent、产品、测试、templates、WBS、台账、既有 CHG、PM_SESSION、Obsidian 规范、Hook、release）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并、不推送、不部署、不切换 release；不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

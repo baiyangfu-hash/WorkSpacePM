@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-6F2DA44A",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-231",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-14T14:48:03.676637+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅持久化 PlanningDraft；request_id+同一输入指纹重放返回同一草稿，不同指纹拒绝。",
+    "测试仅使用隔离临时数据库；不得连接或写入根 .auto-pm/continuity.db，不得创建 Mission、CHG、Decision、Work 或 Run 业务对象。",
+    "基线 b6c6fd006dcb4240a5c275103c31d1001ff94480；门禁后停在 VERIFYING，不提交、不合并、不部署、不切换 release。"
+  ],
+  "metadata": {}
+}

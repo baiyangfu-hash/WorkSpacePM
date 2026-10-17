@@ -1,0 +1,17 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-5A441F8D",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-020",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T04:31:11.302142+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅修订 WBS V2.15，闭合 G13 精确幂等及 E08A-D 端到端链；不改产品源码、数据库、Hook、release 指针，不合并部署。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261002-QMLLIFE1",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-373",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/conftest.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_boss_cockpit_view.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-02T05:11:54.580380+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "用户本轮明确委托：那么你来接手，找到根因，并修复。由Codex运行服务入口；非用户手写签名，不代表最终验收。user-confirmation:20261001-QML-ROOT-REPAIR；卡SHA256=4F548C6A571ED91B3BE3431B393E844206291BFDD090E43B73F95AB3DFBBF678；仅本卡两测试文件；新候选cec3afa7；原13文件只读叠加验证；不改库历史、不改发布、不合并推送提交；最终验收仍由用户。"
+  ],
+  "metadata": {}
+}

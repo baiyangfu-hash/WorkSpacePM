@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-6E1773AD",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-223",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/workspace_context_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/workspace_context.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_workspace_context_service.py"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T16:04:51.369009+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅在从 4f6c0f2b1ec707049aca738ee3e397fac92c00e7 冻结的独立候选完成；只修改三条已列路径。",
+    "读模型必须分别呈现 configured/effective/load path/fallback reason，实际加载身份须来自运行时模块/受控证据，不能把 active 指针当作加载证明。",
+    "不得改 main.py、00_Infrastructure/auto_pm/launcher、active/previous release、.git/hooks、Obsidian、其它源码或历史 Work/Run；不提交、不合并、不部署、不切换 release。",
+    "候选测试与定向静态检查通过后只建立 Checkpoint 并停在待验收。"
+  ],
+  "metadata": {}
+}

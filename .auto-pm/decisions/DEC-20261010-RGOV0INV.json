@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261010-RGOV0INV",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-027",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    ".auto-pm/reports/m2-rgov0/out/RGOV0_INVENTORY_REPORT.md",
+    ".auto-pm/reports/m2-rgov0/out/chg_freeze_list.json",
+    ".auto-pm/reports/m2-rgov0/out/release_inventory.json",
+    ".auto-pm/reports/m2-rgov0/out/exposure_scan.json"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-10T13:00:59.693122+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 087 V1.0 的 4 个 owned path（盘点输出，新增文件）；只读盘点：不改仓库里的任何已有文件，读取之外的唯一写入是这四个文件",
+    "不得改 §4 之外的任何文件（产品、测试、模板、规则、AGENTS.md、.trae、.cursor、.agent、WBS、台账、既有 CHG、PM_SESSION、Hook、release、manifest、指针）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并、不推送、不部署、不切换 release、不入库、不打 tag、不处置任何债务或历史失败记录；输出里不得记录任何秘密值"
+  ],
+  "metadata": {}
+}

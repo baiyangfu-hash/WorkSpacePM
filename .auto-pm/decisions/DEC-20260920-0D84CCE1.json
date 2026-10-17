@@ -1,0 +1,17 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-0D84CCE1",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-020",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T04:29:39.511141+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅修订 WBS V2.15：一次性闭合 G13 精确幂等载荷验证、E08 外部入口/模型授权/declared-dirty、持久微任务计划、可信启动监督和结果投影；不改产品源码、canonical 数据库、Hook、release 指针，不合并不部署不切换 release。"
+  ],
+  "metadata": {}
+}

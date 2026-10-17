@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261010-RTOOLFRZ",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-032",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/environment/environment_record.json",
+    "00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-10T15:08:11.159834+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 092 V1.0 冻结的 2 个新增文件（路径与 SHA-256 见 .auto-pm/reports/m2-rtool/files_manifest.json）；文件字节必须等于冻结值",
+    "不得改清单之外的任何文件（pyproject.toml、.venv、产品、测试、模板、规则、WBS、台账、Hook、release、manifest、指针）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并、不推送、不打 tag、不部署、不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

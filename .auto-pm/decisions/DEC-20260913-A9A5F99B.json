@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-A9A5F99B",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-222",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/git_hook_enforcer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook.py"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T16:04:21.254348+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅在从 4f6c0f2b1ec707049aca738ee3e397fac92c00e7 冻结的独立候选完成；只修改两条已列路径。",
+    "Git、项目/台账、消息读取与 CHG 解析异常必须以非零拒绝；合法正常提交仍须通过，并用定向正反向测试锁定。",
+    "不得修改 .git/hooks、00_Infrastructure/auto_pm、release 指针、Obsidian、其它源码或历史 Work/Run；不提交、不合并、不部署、不切换 release。",
+    "G03 测试通过后只建立 Checkpoint 并停在待验收；G04 不自动启动。"
+  ],
+  "metadata": {}
+}

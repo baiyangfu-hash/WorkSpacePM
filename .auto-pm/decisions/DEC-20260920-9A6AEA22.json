@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-9A6AEA22",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-273",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_execution_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T04:58:05.083646+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基线 ed46b9c6；以 Git path-aware clean 映射绑定 Windows 工作树与精确 HEAD blob，保持 tracked/clean/head/稳定读取/CAS 门禁；补 CRLF 与真实漂移回归；通过定向 pytest、Ruff、Mypy、真实双 Hook、diff --check 后连续验收和隔离提交。"
+  ],
+  "metadata": {}
+}

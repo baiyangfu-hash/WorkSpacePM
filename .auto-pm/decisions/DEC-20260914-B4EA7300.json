@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-B4EA7300",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-229",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/pm_facade.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_pm_intent.py"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-14T01:15:49.490660+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅以 d87fd3d68222a27850530a14ec1ac452b467be87 建立 P01 隔离候选；只交付 PmIntent DTO 及契约测试；不创建业务对象或写入数据库。",
+    "测试通过后停在 VERIFYING；不提交、不合并、不部署、不切换 release。"
+  ],
+  "metadata": {}
+}

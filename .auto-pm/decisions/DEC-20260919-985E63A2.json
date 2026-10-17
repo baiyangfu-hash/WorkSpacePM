@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-985E63A2",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-266",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook.py"
+  ],
+  "approver": "User",
+  "approved_at": "2026-09-19T23:49:10.454300+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基线986e62d6；实现控制根与链接worktree commit-msg路径合同；不得修改.git/hooks、使用--no-verify、单票特判、合并、部署或切换release"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-9AD04286",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-268",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/work_registry_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_work_registry_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T04:12:35.881129+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "治理依据为 WBS V2.14 不可变提交 481b2f73dd16247492b1ed68884ac980b017b58f；产品基线为 G12 不可变提交 0d320310c4cf5c02d518ad5e494ce03134eb156b。",
+    "只允许在 WorkRegistryService.transition 中先识别已绑定于同一 Work 的幂等键，再校验尚未发生的新迁移；不得修改 ContinuityStore、CLI、schema 或 canonical 数据库。",
+    "同键同 Work 且当前状态等于请求目标返回同一 Work，版本和 WORK_TRANSITIONED 事件数不增长；同键跨 Work 拒绝，新键非法迁移仍拒绝。",
+    "测试只使用隔离临时数据库；通过定向 pytest、两路径 Ruff、生产源码 Mypy、真实双 Hook 与 diff --check。",
+    "测试通过后允许按用户全权授权完成验收与两路径隔离提交；不合并、不部署、不切换 release，不启动 E08A 直至 H12 复验闭合。"
+  ],
+  "metadata": {}
+}

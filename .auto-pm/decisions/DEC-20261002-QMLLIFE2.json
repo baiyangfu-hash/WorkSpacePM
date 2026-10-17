@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261002-QMLLIFE2",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-373",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/conftest.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_boss_cockpit_view.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-02T13:19:30.324084+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "user-confirmation:20261002-U47-ROOT-FIX; 用户明确委托：我不专业，我给你授权，我只要找到根因解决它。完成整个4.7u。Codex代执行，非手写签字，非最终验收。; CARD-SW008-M2-QML-LIFECYCLE V1.1 SHA256=3B37005ED32B1E7E6E008B90D0A05933B6494E60B323FAD9BA6A517F7FDD296F; 明确替代V1.0执行窗口但不改旧记录；仅两测试文件及真实门禁；允许Checkpoint后的两文件隔离本地提交；原U09C十三文件只读；不合并推送部署切换release；最终验收仍由用户。"
+  ],
+  "metadata": {}
+}

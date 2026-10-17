@@ -1,0 +1,38 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260925-C09R3C01",
+  "project_id": "SW-2026-009",
+  "change_id": "CHG-SCPT-2026-012",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/dictionary_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/tests/test_services.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_python.py",
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-25T11:46:00.000000+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "recover_expired_verification_lease"
+      ],
+      "target_run_ids": [
+        "RUN-PLAN-F767C11087531180"
+      ],
+      "allowed_outcomes": [
+        "RECOVERED"
+      ],
+      "expired_verification_recovery": {
+        "expected_owner_id": "codex:c09-fe-acceptance-2",
+        "prior_reissue_decision_id": "DEC-20260923-C09FE002",
+        "receiver_id": "antigravity:c09-verifier",
+        "recovery_run_id": "RUN-SW009-PMF-C09FE-002",
+        "user_approval_ref": "user-confirmation:20260925-c09-execution-approved",
+        "lease_seconds": 900
+      }
+    }
+  }
+}

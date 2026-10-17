@@ -1,0 +1,26 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260927-C09P2ADJ",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-325",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "CHG-SCPT-2026-318 及其 P2-001/002 旧控制面链；仅只读核验原始行",
+    "`.auto-pm/continuity.db` 仅通过 `ContinuityStore.record_incident_adjudication` 追加事件；不改写旧行。"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-27T03:53:55.109286+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "incident_adjudication": {
+      "action": "INVALID_ACCEPTANCE",
+      "targets": [
+        {
+          "type": "change",
+          "id": "CHG-SCPT-2026-318"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-895E71AE",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-227",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook.py"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T22:15:57.175757+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "治理写入口仅为管理候选 git:4f6c0f2b1ec707049aca738ee3e397fac92c00e7，cwd=codex-g01-hook-template 项目根，workspace=C:\\Users\\fubai\\Documents\\My_Workspace，ledger_updater.py sha256=46065476118AA9B8DD061E08B30CEA4D4DCB395957B4B21213AB7BB29FF69802。",
+    "研发候选必须从 G05 immutable commit 157f150457c7988b6a5142c1c0ddd52e0cb02339 新建；不得从 main、G04、G09 或未注册目录取基线。",
+    "仅允许两条 approved_files；不得改 auto_pm/infrastructure、.git/hooks、00_Infrastructure/auto_pm、release 指针、Obsidian、其他源码或历史 Work/Run。",
+    "preflight 必须只读接收 message file；冻结当前 Git index 至工作区外临时副本，并仅在短调用内以 GIT_INDEX_FILE 使既有 enforce_pre_commit 与 enforce_commit_msg 复用同一函数和同一快照；finally 删除临时副本；不得修复被检文件或生成工作区产物。",
+    "Run owned_paths 与 declared_dirty_paths 必须精确等于两条 approved_files。定向 pytest 使用 --override-ini addopts= -p no:cacheprovider，随后 Ruff、Mypy、diff --check；通过后创建 Checkpoint 并停在 VERIFYING。",
+    "执行模型=gpt-5.6-terra ultra；独立只读复核=gpt-5.5 xhigh。不得提交、合并、部署、切换 release 或启动后续 WBS 原子。"
+  ],
+  "metadata": {}
+}

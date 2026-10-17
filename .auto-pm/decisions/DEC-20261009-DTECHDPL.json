@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261009-DTECHDPL",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-400",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/deployment_manifest.json",
+    "00_Infrastructure/auto_pm/active_release.json",
+    "00_Infrastructure/auto_pm/previous_release.json",
+    "00_Infrastructure/auto_pm/releases/1.3.3-4b5c630"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-10T02:15:28.282323+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅写入 releases/1.3.3-4b5c630、deployment_manifest.json、active_release.json、previous_release.json；release 由 M2 提交 4b5c6307e814cd6bf17337f31ccd8c7e533553e1 以 dep1_release_ops.sh 确定性构建，manifest 条目 SHA-256 必须为 f8cecee8d79ffd40c58d2fa577bf7f9f277b4152c50dbc1ef435f0544a79613e",
+    "切换后核验任一失败即回退指针；不回滚数据库、不改历史 release/事件/Checkpoint、不合并 main、不推送"
+  ],
+  "metadata": {}
+}

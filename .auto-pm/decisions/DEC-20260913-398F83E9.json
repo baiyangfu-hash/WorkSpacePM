@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-398F83E9",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-220",
+  "approved_scope": "SYSTEM",
+  "approved_files": [],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T15:07:25.574274+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "G01 仅在基线 4f6c0f2b1ec707049aca738ee3e397fac92c00e7 的隔离候选中执行只读核验；验证对象限研发母体的 auto_pm/ui/cli/git_hook.py、tests/cli/test_git_hook.py 与根 main.py 启动链。",
+    "验收结论须证明 pre-commit 与 commit-msg 模板均由根 main.py 启动，启动链具备 -B 与 PYTHONDONTWRITEBYTECODE=1 保障，且模板不含 PYTHONPATH、CONTAINER 或 python -m auto_pm。",
+    "实际 .git/hooks/pre-commit 与 commit-msg 仅做哈希与文本只读比对；不得安装、备份、删除、改写或执行 G02。",
+    "禁止改动源码、测试、.git/hooks、00_Infrastructure/auto_pm、active_release.json、previous_release.json、Obsidian、历史 Run/Work；不提交、不合并、不部署、不切换 release。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260914-190A22F3",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-230",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/pm_facade.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_pm_intent.py"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-14T14:29:01.328073+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅实现不可执行 PlanningDraft 合同；不得创建、修改或弱化 Mission、AuthorityEnvelope、Work、Run 或持久化表。",
+    "候选基线必须为 d0b5760df4ffdd1fbc3a375bd09b427c5f2e2544；通过定向 pytest、Ruff、Mypy、真实双 Hook 和 diff --check 后停在 VERIFYING。",
+    "不提交、不合并、不部署、不切换 release；不启动 P03。"
+  ],
+  "metadata": {}
+}

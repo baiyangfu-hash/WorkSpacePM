@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261006-F01AGUAR",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-383",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/gates/stage_gate_engine.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/plc_doc_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/plc_git_marker_guard.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook_plc_docs.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_stage_gate_plc_docs.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/infrastructure/test_plc_doc_hook.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-06T23:39:30.010508+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 057 V1.0 的 6 个 owned paths；文件字节必须等于卡 §5.1 的 SHA-256；其中 1 个为新增文件，其余 5 个既有；测试文件只追加",
+    "不得改 §4 之外的任何文件（产品、测试、templates、checker、台账、WBS、既有 CHG、PM_SESSION、Obsidian 规范、Hook 脚本、release、驾驶舱、SDK）；不得新增存储、登记或 schema；不得直接 SQL 改真实库；测试只用临时 Git 仓库，测试结束后不得留下子进程；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

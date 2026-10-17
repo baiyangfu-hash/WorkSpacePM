@@ -1,0 +1,17 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-C4518F63",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-264",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "用户授权 / Codex",
+  "approved_at": "2026-09-19T23:18:45.786877+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "runtime_capability: only settle RUN-SW008-PMF-E08-002 to CANCELLED; no source edits; recovery operates in control root"
+  ],
+  "metadata": {}
+}

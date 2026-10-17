@@ -1,0 +1,24 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260921-F04E318A",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-298",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_closure_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_continuity_resume_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_service.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-21T13:42:06.869637+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Base the isolated candidate on C07 commit 0d974bd7ad405b6d91387b70936ac084d7696e96 and integrate commit 05a75452d2a9679116e21f6a770a7eb3b1aa229e before C08 changes.",
+    "No modification to main, remote, active release, deployment, or files outside the six listed paths.",
+    "Stop at the user acceptance boundary; isolated commit remains separately authorized."
+  ],
+  "metadata": {}
+}

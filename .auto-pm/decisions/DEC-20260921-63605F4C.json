@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260921-63605F4C",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-300",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-21T15:58:39.141229+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only classify and minimally repair the 12 recorded Continuity full-regression failures in the existing codex/c08-integration-candidate worktree.",
+    "Exclude the 15 Q01 missing-real-fixture failures.",
+    "No commit, main update, push, deployment, or release switch."
+  ],
+  "metadata": {}
+}

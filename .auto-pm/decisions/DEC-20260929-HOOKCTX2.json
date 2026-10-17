@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260929-HOOKCTX2",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-347",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/git_hook_enforcer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/infrastructure/test_git_hook_enforcer.py"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-09-29T19:18:06.402943+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定四个owned paths",
+    "候选与控制根必须同 common-dir 否则 fail-closed",
+    "不得修改CHG-345候选/canonical DB/release/WBS/Hook安装"
+  ],
+  "metadata": {}
+}

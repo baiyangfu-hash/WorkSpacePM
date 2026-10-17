@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260920-18569966",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-019",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T03:48:41.500290+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "基线必须为 WBS V2.13 不可变提交 6dd13dd346b420db61b46bcd5b58470a1d2b6329，且只修改该 WBS 文件。",
+    "V2.14 必须新增 G13，产品 owned paths 仅为 auto_pm/application/core/work_registry_service.py 与 tests/core/test_work_registry_service.py；不得以修改 Store、CLI 或弱化幂等定义取得绿灯。",
+    "必须加入通用 Capability Proof Gate：涉及幂等、CAS、恢复、Hook、控制根或链接 worktree 差异时，在真实状态变更前以隔离临时数据库/临时仓执行端到端正反探针。",
+    "H12 保持 VERIFYING、CHG-SCPT-2026-267 保持 implementing，旧 E08 Work 保持 CANCELLED v4；不得回退、不得启动 E08A。",
+    "修订后只验证并停在 VERIFYING；不提交、不合并、不部署、不切换 release。"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260930-WBS2CAND",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-023",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-30T22:46:11.979358+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 029 V0.4 的 WBS 单文件；只加不删历史；第一提交 WBS2 状态只能是 VERIFYING / PENDING_ACCEPTANCE",
+    "不得直接 SQL、写 canonical 数据库、改历史事件或 Checkpoint；不合并、不推送、不部署、不切换 release；最终状态提交须待用户亲自验收"
+  ],
+  "metadata": {}
+}

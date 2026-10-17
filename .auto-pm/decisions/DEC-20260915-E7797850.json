@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260915-E7797850",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-242",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/execution_adapter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_execution_adapter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_adapter_service.py"
+  ],
+  "approver": "架构师",
+  "approved_at": "2026-09-15T02:35:31.262097+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "WBS V2.5 commit 1ee1c2bc；产品基线 d013ccfd；五路径；持久化先于副作用。",
+    "验证后停在 VERIFYING；不提交、不合并、不部署、不切换 release、不启动 E03。"
+  ],
+  "metadata": {}
+}

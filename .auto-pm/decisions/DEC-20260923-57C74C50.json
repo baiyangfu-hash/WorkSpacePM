@@ -1,0 +1,39 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260923-57C74C50",
+  "project_id": "SW-2026-009",
+  "change_id": "CHG-SCPT-2026-009",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/dictionary_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/tests/test_services.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_python.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-23T03:09:34.103183+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: Dictionary prefix result limit is safely normalized to 1-20 for bad, zero, oversized and valid inputs while CEFR remains annotated",
+    "acceptance: PM-Flow new-goal chain creates CHG Decision Mission Work Run and checkpoint, passes directed gates and isolated commit precheck without manual governance JSON",
+    "risk: Pre-existing Q01 real CSV fixtures missing; report separately and do not claim unfiltered full gate green",
+    "non-goal: No main merge, push, deployment or release switch"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "1ffa86bfad21c3eeee3442e30c3e55056a418e317f5ad650528433e42d411bd3",
+      "approval_evidence_ref": "user-confirmation:20260922-C09-full",
+      "request_id": "REQ-SW009-C09-20260922-FINAL02",
+      "execution_grant": {
+        "adapter": "codex",
+        "approved_model": "gpt-6-sol",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/src/services/dictionary_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/tests/test_services.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_python.py"
+        ]
+      }
+    }
+  }
+}

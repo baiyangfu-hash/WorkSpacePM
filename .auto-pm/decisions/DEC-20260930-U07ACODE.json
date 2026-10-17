@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260930-U07ACODE",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-364",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/pm_facade.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_execution_adapter_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_run_e2e.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-01T05:01:44.351279+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 032 V1.0 的 6 个 owned paths；不得改驾驶舱服务与 QML、PmClosureService、ContinuityStore、ContinuityExecutionService、EvidenceCollectionService、变更单代码、事件类型、SQLite schema、Hook、release",
+    "不得使用 os.chdir 等进程级全局状态、不得新增无批准链即启动执行的入口；不得直接 SQL、写 canonical 数据库、改历史事件或 Checkpoint；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

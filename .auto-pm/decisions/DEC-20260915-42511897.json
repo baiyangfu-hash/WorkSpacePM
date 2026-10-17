@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260915-42511897",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-012",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-15T16:55:49.785349+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only tec, cockpit_dogfood_plan, and cockpit_enforced_closure_handoff index values may change.",
+    "Each new value must resolve under 01_项目文档/archive/PMF-20260912 to an already existing file.",
+    "No archive content change; no commit, merge, deployment, or release switch."
+  ],
+  "metadata": {}
+}

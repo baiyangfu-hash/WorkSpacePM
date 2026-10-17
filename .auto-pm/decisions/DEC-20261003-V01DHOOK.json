@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261003-V01DHOOK",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-376",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/plc_doc_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/git_hook_enforcer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/gates/stage_gate_engine.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/infrastructure/test_plc_doc_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_stage_gate_plc_docs.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook_plc_docs.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-04T05:18:07.729133+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 047 V1.0 的 6 个 owned paths；git_hook_enforcer.py 与 stage_gate_engine.py 只许追加，被删除或改写的既有行数必须为 0；既有的台账检查逻辑只许被改名为私有函数并由新的包装函数先于 PLC 检查调用，行为不变",
+    "不得改 doc_consistency.py、checker.py、V01～V01C 已验收字节、既有测试的任何断言、Hook 安装逻辑、真实 .git/hooks 与已安装的钩子脚本、release、驾驶舱、SDK、ContinuityStore、合同模型、任何文档与 Obsidian 规范、任何 PLC 工程目录；不得新增 schema、事件类型或迁移；不得直接 SQL 改真实库 .auto-pm/continuity.db、改历史事件或 Checkpoint；不得改基准钉值；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

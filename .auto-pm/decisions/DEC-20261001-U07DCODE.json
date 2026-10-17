@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261001-U07DCODE",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-368",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/bridges/pm_cockpit_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_pm_cockpit_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_pm_cockpit_start_e2e.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-01T17:24:09.694594+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 035 V1.0 的 5 个 owned paths；不得改任何 QML、CLI、SDK、PmFacadeService、PmClosureService、收尾/变更单代码、ContinuityStore、事件类型、SQLite schema、Hook、release",
+    "不得启动真实 codex、不得新增无批准链的启动入口、不得使用 os.chdir 等进程级全局状态；不得直接 SQL、写 canonical 数据库、改历史事件或 Checkpoint；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

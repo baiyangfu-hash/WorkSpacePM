@@ -1,0 +1,27 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260927-8B177C43",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-330",
+  "approved_scope": "SYSTEM/CROSS",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/releases/1.3.3-8b02de5/",
+    "00_Infrastructure/auto_pm/deployment_manifest.json",
+    "00_Infrastructure/auto_pm/active_release.json",
+    "00_Infrastructure/auto_pm/previous_release.json",
+    ".auto-pm/reports/CHG-SCPT-2026-330_release_validation.md",
+    ".auto-pm/continuity.db",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-330.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-27T22:39:11.822956+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only export committed bytes from 8b02de55f011df31591601464e0eebf4db5e4f23; verify two reproducible builds before install.",
+    "Do not modify candidate source, merge main, push additional branches, or touch canonical business history.",
+    "Switch pointers only after exact-tree and rollback rehearsal pass; restore prior pointers on failure."
+  ],
+  "metadata": {}
+}

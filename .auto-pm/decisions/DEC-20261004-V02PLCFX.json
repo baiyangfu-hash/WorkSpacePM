@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261004-V02PLCFX",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-377",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_facade_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_plc.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-04T14:53:21.715607+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 048 V1.0 的 2 个 owned paths；pm_facade_service.py 只许删除一行（checkpoint.dirty_paths != run.declared_dirty_paths）并新增一行（两侧各自排序后再比较），其余字节不变",
+    "不得改 V01～V01D 已验收的其他文件、既有测试的任何断言、真实 PLC 工程目录与基准钉值、Hook 与 release、驾驶舱、SDK、ContinuityStore、合同模型、任何文档与 Obsidian 规范；不得新增 schema、事件类型或迁移；不得直接 SQL 改真实库 .auto-pm/continuity.db、改历史事件或 Checkpoint；测试只用临时仓库与对钉死提交的只读访问；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

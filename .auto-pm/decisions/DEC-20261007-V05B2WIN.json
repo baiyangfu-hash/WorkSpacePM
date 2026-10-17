@@ -1,0 +1,23 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261007-V05B2WIN",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-386",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_query_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_cockpit_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/boss_qml_window.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/bridges/pm_cockpit_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_cockpit_capability_notice.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_pm_cockpit_shutdown.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-07T14:20:08.899664+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 060 V1.0 的 6 个 owned paths；文件字节必须等于卡 §5.1 的 SHA-256；其中 2 个为新增测试文件，其余 4 个既有产品文件",
+    "不得改 §4 之外的任何文件（产品、测试、templates、QML、合同、gui 命令、Store、resume 收集器、台账、WBS、既有 CHG、PM_SESSION、Obsidian 规范、Hook 脚本、release、驾驶舱 QML 视图、SDK）；不得新增存储、表或 schema 版本；不得直接 SQL 改真实库；不合并、不推送、不部署、不切换 release"
+  ],
+  "metadata": {}
+}

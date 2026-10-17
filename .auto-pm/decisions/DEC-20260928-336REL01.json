@@ -1,0 +1,26 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260928-336REL01",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-336",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/releases/1.3.3-f462694/",
+    "00_Infrastructure/auto_pm/deployment_manifest.json",
+    "00_Infrastructure/auto_pm/active_release.json",
+    "00_Infrastructure/auto_pm/previous_release.json",
+    ".auto-pm/reports/CHG-SCPT-2026-336_release_validation.md",
+    ".auto-pm/continuity.db",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-336.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-28T13:51:10.886707+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Only export committed bytes from f46269475542d8407416fbec84c1b0b0b4542804; verify two reproducible builds before install.",
+    "No source modification, merge, push, C09/P2/WBS history edit, or manual pointer JSON write.",
+    "Switch pointers only after exact-tree verification and isolated rollback rehearsal; fail closed and preserve previous release on any mismatch."
+  ],
+  "metadata": {}
+}

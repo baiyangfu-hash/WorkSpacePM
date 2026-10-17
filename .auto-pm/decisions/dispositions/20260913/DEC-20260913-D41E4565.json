@@ -1,0 +1,22 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260913-D41E4565",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-225",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/cli/git_hook.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/git_hook_enforcer.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/cli/test_git_hook.py"
+  ],
+  "approver": "User (fubai)",
+  "approved_at": "2026-09-13T19:11:18.507570+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅在 HEAD=1651d0cb3638de09c509b8dfeef06f718edd9b75 的独立 G05 候选中执行；不得从 main 或 G09 候选取基线。",
+    "本次 CHG 或关联项目台账缺项必须拒绝；无关项目既有台账差异仅报告；未知生产路径归属必须拒绝；发布门必须仍对所有注册项目对账。",
+    "Run 的 owned_paths 与 declared_dirty_paths 必须精确等于三条批准路径；定向测试、Ruff、差异检查通过后创建 Checkpoint 并停在 VERIFYING。",
+    "不得改 .git/hooks、00_Infrastructure/auto_pm、release 指针、Obsidian、其他源码或历史 Work/Run；不提交、不合并、不部署、不切换 release，且不得启动 G06。"
+  ],
+  "metadata": {}
+}

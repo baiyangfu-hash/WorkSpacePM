@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260919-WBS21201",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-017",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-20T01:24:20.898695+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅修订此 WBS；不得修改产品源码、现有 E08 候选、Continuity 数据库、Hook 或 release 指针。",
+    "将 E08A 的 adapter 与隔离权限显式纳入 plan_hash、Decision 与 AuthorityEnvelope，并以原子范围取代临时默认授权。",
+    "明确旧 WORK-SW008-PMF-E08-001 在新 E08A 链建立前受控退役为 CANCELLED；保留旧 CHG、Decision、Run 与候选作为审计证据。",
+    "验证后仅创建 Checkpoint 并停在 VERIFYING；不提交、不合并、不部署、不切换 release。"
+  ],
+  "metadata": {}
+}

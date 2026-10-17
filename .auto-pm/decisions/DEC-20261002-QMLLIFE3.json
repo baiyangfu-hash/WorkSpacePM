@@ -1,0 +1,20 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261002-QMLLIFE3",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-373",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/conftest.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_boss_cockpit_view.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/qml/bridges/file_watcher_bridge.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/qml/test_file_watcher_bridge.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-02T16:40:44.834274+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "user-confirmation:20261002-U47-ROOT-FIX; 用户直接委托：我不专业，我给你授权，我只要找到根因解决它。完成整个4.7u。Codex代执行，非手写签字、非最终验收。 CARD-SW008-M2-QML-LIFECYCLE V1.2 SHA256=78D8DC70F6E6D67239A1865AE30A76C76053FFD1C9D889A84E838678BF22DC59；真实native/filter和worker-pool回指根因，精确四文件；承接两dirty、另两clean；旧Run失败真实保留；允许真实CP后本地隔离提交；禁止第五文件、历史改写、依赖/Hook变更、合并推送部署release切换。"
+  ],
+  "metadata": {}
+}

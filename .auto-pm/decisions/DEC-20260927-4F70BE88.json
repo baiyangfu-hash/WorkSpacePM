@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260927-4F70BE88",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-329",
+  "approved_scope": "MODULE/CROSS",
+  "approved_files": [
+    "00_Obsidian_Base全局规范文件仓库/01_项目管理域/04_变更管理/040_通用变更单模板_CHG.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/generator.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/decision_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/change/test_generator.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_decision_package.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-27T19:58:36.201395+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {}
+}

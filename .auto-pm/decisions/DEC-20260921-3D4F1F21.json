@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20260921-3D4F1F21",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-300",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+    ".auto-pm/decisions"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-09-21T16:01:00.101802+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "Repair only the 12 recorded Continuity failures in the existing C08 integration candidate; .auto-pm/decisions is declared solely because four previously preserved Decision files are already staged.",
+    "Do not edit or remove preserved Decisions; exclude Q01 fixture failures; no commit, main, remote, deployment, or release actions."
+  ],
+  "metadata": {}
+}

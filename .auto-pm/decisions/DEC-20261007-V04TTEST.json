@@ -1,0 +1,19 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261007-V04TTEST",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-388",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_handoff.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/e2e/test_pmf_recovery.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-08T00:09:18.408716+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 063 V1.0 的 2 个 owned paths（都是既有测试文件）；文件字节必须等于卡 §5.1 的 SHA-256",
+    "不得改 §4 之外的任何文件（产品、其他测试、共享夹具、conftest、测试配置、templates、台账、WBS、既有 CHG、PM_SESSION、Obsidian 规范、Hook 脚本、release、驾驶舱、SDK）；不得直接 SQL 改真实库；不合并、不推送、不部署、不切换 release；变异检查会临时改动并逐字节还原存储文件，不是改动授权"
+  ],
+  "metadata": {}
+}
