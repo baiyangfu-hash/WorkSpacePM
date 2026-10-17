@@ -2,10 +2,13 @@
 
 Rules, independent of where a lease is arbitrated (the local SQLite store today, a Git reference later):
 
-- **epoch = lease version**, per Run, strictly increasing; it is raised only when a lease is granted, renewed or transferred, by whoever grants it. A holder records the epoch it was granted.
+- **epoch is the ownership number of a Run's lease, NOT the lease version**: per Run, strictly increasing, raised only when ownership changes (a grant, a transfer, a reclaim) by whoever arbitrates the lease.
+  A renewal never changes it. (The store's ``version`` is bumped by every renewal and serves only as the compare-and-swap of the renewal itself: a write that had to carry ``epoch == version`` would reject the
+  holder's own in-flight writes after each heartbeat.) A holder records the epoch it was granted.
 - A started Run may be reclaimed from its holder only with evidence about the holder's process: ``PROVEN_DEAD`` allows it, ``ALIVE`` refuses it, ``UNKNOWN`` (another host, no fingerprint recorded, the process
   table could not be read, same start time but unverifiable image) is **PENDING** - an unknown process is never pre-empted.
 - A live lease (not yet expired plus a grace period) is reclaimed only by an explicit decision and only when the holder's process is proven dead.
+- The write check must happen inside the same write transaction as the write itself (a check made earlier, in another transaction, can be overtaken by a reclaim): that is the job of the storage card.
 - A write that carries an epoch older than the current one is refused; an epoch ahead of the current one is refused too (it cannot have been granted); a write without an epoch is accepted with a
   warning only during the compatibility period.
 
@@ -33,6 +36,15 @@ class ReclaimDecision(StrEnum):
     REFUSE_LIVE_LEASE = "REFUSE_LIVE_LEASE"
     REFUSE_PROCESS_ALIVE = "REFUSE_PROCESS_ALIVE"
     PENDING = "PENDING"
+
+
+class LeaseEvent(StrEnum):
+    """What happened to a lease; only a change of ownership raises the epoch."""
+
+    GRANT = "GRANT"
+    TRANSFER = "TRANSFER"
+    RECLAIM = "RECLAIM"
+    RENEW = "RENEW"
 
 
 class EpochVerdict(StrEnum):
@@ -68,6 +80,7 @@ class ProcessObservation:
 class ReclaimResult:
     decision: ReclaimDecision
     reason: str
+    exit_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -113,18 +126,29 @@ def decide_reclaim(*, lease_expires_at: datetime, now: datetime, process: Proces
     if process is ProcessVerdict.ALIVE:
         return ReclaimResult(ReclaimDecision.REFUSE_PROCESS_ALIVE, "the holder's process is still running")
     if process is ProcessVerdict.UNKNOWN:
-        return ReclaimResult(ReclaimDecision.PENDING, "the holder's process cannot be established; an unknown process is never pre-empted")
+        return ReclaimResult(ReclaimDecision.PENDING, "the holder's process cannot be established; an unknown process is never pre-empted",
+                             "exit: the user signs a Decision that forces the reclaim and accepts the risk of pre-empting a process nobody could identify; until then nothing changes")
     if live and not forced_by_decision:
         return ReclaimResult(ReclaimDecision.REFUSE_LIVE_LEASE, "the lease has not expired (plus grace) and no decision forces the reclaim")
     return ReclaimResult(ReclaimDecision.ALLOW, "the holder's process is proven dead" + (" and a decision forces the reclaim" if live else " and the lease has expired"))
 
 
 def next_epoch(current: int) -> int:
-    """The epoch a new grant, renewal or transfer must carry."""
+    """The epoch after a change of ownership (a grant, a transfer or a reclaim); a renewal does not use it (see ``epoch_after``)."""
 
     if type(current) is not int or current < 1:
         raise ValueError("epoch must be a positive integer")
     return current + 1
+
+
+def epoch_after(current: int, event: LeaseEvent) -> int:
+    """The epoch of a lease after ``event``: raised by a grant, a transfer or a reclaim, unchanged by a renewal."""
+
+    if event is LeaseEvent.RENEW:
+        if type(current) is not int or current < 1:
+            raise ValueError("epoch must be a positive integer")
+        return current
+    return next_epoch(current)
 
 
 def check_write_epoch(current: int, presented: int | None, *, compatibility_period: bool = True) -> EpochResult:

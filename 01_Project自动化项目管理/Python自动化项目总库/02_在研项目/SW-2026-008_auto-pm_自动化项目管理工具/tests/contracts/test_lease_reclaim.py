@@ -9,12 +9,14 @@ import pytest
 from auto_pm.contracts.lease_reclaim import (
     GRACE_SECONDS,
     EpochVerdict,
+    LeaseEvent,
     ProcessFingerprint,
     ProcessObservation,
     ProcessVerdict,
     ReclaimDecision,
     check_write_epoch,
     decide_reclaim,
+    epoch_after,
     judge_process,
     lease_is_live,
     next_epoch,
@@ -136,3 +138,35 @@ def test_a_non_positive_or_non_integer_presented_epoch_is_refused_in_every_perio
         assert not check_write_epoch(3, bad, compatibility_period=False).accepted  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         check_write_epoch(0, 1)
+
+
+def test_only_a_change_of_ownership_raises_the_epoch_and_a_renewal_never_does() -> None:
+    assert epoch_after(3, LeaseEvent.GRANT) == 4
+    assert epoch_after(3, LeaseEvent.TRANSFER) == 4
+    assert epoch_after(3, LeaseEvent.RECLAIM) == 4
+    assert epoch_after(3, LeaseEvent.RENEW) == 3
+    with pytest.raises(ValueError):
+        epoch_after(0, LeaseEvent.RENEW)
+    with pytest.raises(ValueError):
+        epoch_after(0, LeaseEvent.GRANT)
+
+
+def test_an_in_flight_write_of_the_holder_is_not_refused_after_any_number_of_renewals() -> None:
+    epoch = 3
+    for _heartbeat in range(5):
+        epoch = epoch_after(epoch, LeaseEvent.RENEW)
+        assert check_write_epoch(epoch, 3, compatibility_period=False).accepted
+
+
+def test_after_a_transfer_or_a_reclaim_the_former_holders_write_is_refused() -> None:
+    for event in (LeaseEvent.TRANSFER, LeaseEvent.RECLAIM):
+        epoch = epoch_after(3, event)
+        refused = check_write_epoch(epoch, 3, compatibility_period=False)
+        assert not refused.accepted and refused.verdict is EpochVerdict.STALE
+
+
+def test_a_pending_reclaim_names_its_exit_and_the_other_decisions_do_not_need_one() -> None:
+    pending = decide_reclaim(lease_expires_at=NOW - timedelta(minutes=10), now=NOW, process=ProcessVerdict.UNKNOWN)
+    assert pending.decision is ReclaimDecision.PENDING and "Decision" in pending.exit_path and "risk" in pending.exit_path
+    allowed = decide_reclaim(lease_expires_at=NOW - timedelta(minutes=10), now=NOW, process=ProcessVerdict.PROVEN_DEAD)
+    assert allowed.exit_path == ""
