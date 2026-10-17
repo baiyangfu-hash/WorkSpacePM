@@ -7,22 +7,25 @@ echo        Auto-PM 工业级 AI 研发工作台 - 一键环境初始化向导
 echo ==============================================================================
 echo.
 
-:: 1. 检查 Python
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [错误] 未检测到 Python 环境！请先安装 Python 3.11+ 并勾选 "Add Python to PATH"。
+:: 1. 检查 Python：锁定文件只覆盖 Python 3.12（requirements-lock-py312-win.txt）
+set "PY_EXE="
+python -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>&1
+if %errorlevel% equ 0 set "PY_EXE=python"
+if not defined PY_EXE py -3.12 -c "import sys" >nul 2>&1 && set "PY_EXE=py -3.12"
+if not defined PY_EXE (
+    echo [错误] 未找到 Python 3.12。依赖锁定文件只覆盖 Python 3.12，请安装 3.12 并勾选 "Add Python to PATH"。
     echo 下载地址: https://www.python.org/downloads/
     pause
     exit /b 1
 )
 
 echo [1/4] 正在检测 Python 版本...
-python --version
+%PY_EXE% --version
 
 :: 2. 创建虚拟环境
 if not exist ".venv" (
     echo [2/4] 正在创建专属虚拟环境 (.venv)...
-    python -m venv .venv
+    %PY_EXE% -m venv .venv
     if %errorlevel% neq 0 (
         echo [错误] 创建虚拟环境失败，请检查 Python 权限。
         pause
@@ -35,11 +38,32 @@ if not exist ".venv" (
 :: 3. 激活虚拟环境并安装依赖
 echo [3/4] 正在激活虚拟环境并安装核心依赖库...
 call .venv\Scripts\activate.bat
+python -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [错误] 已有的 .venv 不是 Python 3.12。请把 .venv 改名备份（例如 .venv.old）后重新运行本脚本。
+    pause
+    exit /b 1
+)
 python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple --quiet
 
-if exist "requirements.txt" (
-    echo 正在从 requirements.txt 安装依赖...
-    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+set "LOCK_FILE=00_Infrastructure\auto_pm\environment\requirements-lock-py312-win.txt"
+if not exist "%LOCK_FILE%" (
+    echo [错误] 依赖锁定文件缺失: %LOCK_FILE%
+    pause
+    exit /b 1
+)
+echo 正在按锁定文件安装依赖（精确版本，不解析新依赖）...
+python -m pip install --no-deps -r "%LOCK_FILE%" -i https://pypi.tuna.tsinghua.edu.cn/simple
+if %errorlevel% neq 0 (
+    echo [错误] 依赖安装失败，请检查网络后重新运行本脚本。
+    pause
+    exit /b 1
+)
+python -m pip check
+if %errorlevel% neq 0 (
+    echo [错误] 依赖一致性检查未通过（pip check），请把上面的输出发给维护者。
+    pause
+    exit /b 1
 )
 
 :: 4. 校验稳定入口（运行时通过 manifest 校验的 active release，不安装平铺源码）

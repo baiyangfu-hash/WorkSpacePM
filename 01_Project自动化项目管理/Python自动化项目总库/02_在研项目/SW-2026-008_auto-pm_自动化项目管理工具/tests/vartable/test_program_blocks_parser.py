@@ -12,7 +12,9 @@ from auto_pm.vartable.parsers.program_blocks_parser import ProgramBlocksParser
 
 # 真实 DJ-2026-005 program_blocks.yml 路径（只读，不修改）
 DJ_2026_005_PROGRAM_BLOCKS = (
-    Path(r"c:\Users\fubai\Desktop\My_Workspace\0100_PLC自动化\DJ-2026-005")
+    Path(__file__).resolve().parents[6]  # 工作区根目录：tests/vartable → SW-2026-008 → 02_在研项目 → … → 工作区根
+    / "0100_PLC自动化"
+    / "DJ-2026-005"
     / "02_PLC程序"
     / "工程资产"
     / "program_blocks.yml"
