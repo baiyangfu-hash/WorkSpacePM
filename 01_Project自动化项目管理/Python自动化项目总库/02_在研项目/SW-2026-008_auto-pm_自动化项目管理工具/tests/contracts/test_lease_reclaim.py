@@ -170,3 +170,63 @@ def test_a_pending_reclaim_names_its_exit_and_the_other_decisions_do_not_need_on
     assert pending.decision is ReclaimDecision.PENDING and "Decision" in pending.exit_path and "risk" in pending.exit_path
     allowed = decide_reclaim(lease_expires_at=NOW - timedelta(minutes=10), now=NOW, process=ProcessVerdict.PROVEN_DEAD)
     assert allowed.exit_path == ""
+
+
+def test_the_pending_exit_is_reachable_only_through_its_own_explicit_decision() -> None:
+    expired = NOW - timedelta(minutes=10)
+    assert decide_reclaim(lease_expires_at=expired, now=NOW, process=ProcessVerdict.UNKNOWN, forced_by_decision=True).decision is ReclaimDecision.PENDING
+    accepted = decide_reclaim(lease_expires_at=expired, now=NOW, process=ProcessVerdict.UNKNOWN, unknown_risk_accepted_by_decision=True)
+    assert accepted.decision is ReclaimDecision.ALLOW and "risk" in accepted.reason
+    live = decide_reclaim(lease_expires_at=NOW + timedelta(minutes=10), now=NOW, process=ProcessVerdict.UNKNOWN, unknown_risk_accepted_by_decision=True)
+    assert live.decision is ReclaimDecision.ALLOW
+    alive = decide_reclaim(lease_expires_at=expired, now=NOW, process=ProcessVerdict.ALIVE, unknown_risk_accepted_by_decision=True, forced_by_decision=True)
+    assert alive.decision is ReclaimDecision.REFUSE_PROCESS_ALIVE
+
+
+def test_the_same_start_instant_written_two_ways_is_the_same_process() -> None:
+    other_spelling = ProcessObservation(pid_exists=True, start_time="2026-10-16T10:00:00+00:00", image_sha256=FP.image_sha256, cmdline_sha256=FP.cmdline_sha256)
+    other_zone = ProcessObservation(pid_exists=True, start_time="2026-10-16T12:00:00+02:00", image_sha256=FP.image_sha256, cmdline_sha256=FP.cmdline_sha256)
+    assert judge_process(FP, other_spelling, local_host_id=HOST) is ProcessVerdict.ALIVE
+    assert judge_process(FP, other_zone, local_host_id=HOST) is ProcessVerdict.ALIVE
+
+
+def test_tick_counts_are_compared_as_integers() -> None:
+    ticks = ProcessFingerprint(host_id=HOST, pid=4242, start_time="133000000000000000", image_sha256="a" * 64, cmdline_sha256="b" * 64)
+    same = ProcessObservation(pid_exists=True, start_time=" 133000000000000000", image_sha256="a" * 64, cmdline_sha256="b" * 64)
+    other = ProcessObservation(pid_exists=True, start_time="133000000000000001")
+    assert judge_process(ticks, same, local_host_id=HOST) is ProcessVerdict.ALIVE
+    assert judge_process(ticks, other, local_host_id=HOST) is ProcessVerdict.PROVEN_DEAD
+
+
+def test_start_times_that_cannot_be_compared_are_unknown_never_dead() -> None:
+    cases = (
+        "not a time",  # unparseable
+        "2026-10-16T10:00:00",  # no timezone
+        "133000000000000000",  # a tick count against a recorded timestamp: different clocks
+        "-5",  # not a tick count
+        "",
+    )
+    for observed in cases:
+        observation = ProcessObservation(pid_exists=True, start_time=observed, image_sha256=FP.image_sha256, cmdline_sha256=FP.cmdline_sha256)
+        assert judge_process(FP, observation, local_host_id=HOST) is ProcessVerdict.UNKNOWN, observed
+
+
+def test_a_difference_explained_by_precision_loss_is_unknown_but_a_real_difference_is_reuse() -> None:
+    finer = ProcessObservation(pid_exists=True, start_time="2026-10-16T10:00:00.700000+00:00")
+    earlier_rounding = ProcessObservation(pid_exists=True, start_time="2026-10-16T09:59:59.600000+00:00")
+    a_second_later = ProcessObservation(pid_exists=True, start_time="2026-10-16T10:00:01.200000+00:00")
+    assert judge_process(FP, finer, local_host_id=HOST) is ProcessVerdict.UNKNOWN
+    assert judge_process(FP, earlier_rounding, local_host_id=HOST) is ProcessVerdict.UNKNOWN
+    assert judge_process(FP, a_second_later, local_host_id=HOST) is ProcessVerdict.PROVEN_DEAD
+    fine = ProcessFingerprint(host_id=HOST, pid=4242, start_time="2026-10-16T10:00:00.100000+00:00")
+    assert judge_process(fine, ProcessObservation(pid_exists=True, start_time="2026-10-16T10:00:00.100001+00:00"), local_host_id=HOST) is ProcessVerdict.PROVEN_DEAD
+
+
+def test_naive_datetimes_are_rejected_with_a_contract_error() -> None:
+    naive = datetime(2026, 10, 16, 12, 0, 0)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        lease_is_live(naive, NOW)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        lease_is_live(NOW, naive)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        decide_reclaim(lease_expires_at=naive, now=NOW, process=ProcessVerdict.PROVEN_DEAD)

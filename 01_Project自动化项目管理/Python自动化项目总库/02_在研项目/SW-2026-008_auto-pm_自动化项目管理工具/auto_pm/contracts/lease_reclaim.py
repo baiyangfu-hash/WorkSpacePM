@@ -12,13 +12,18 @@ Rules, independent of where a lease is arbitrated (the local SQLite store today,
 - A write that carries an epoch older than the current one is refused; an epoch ahead of the current one is refused too (it cannot have been granted); a write without an epoch is accepted with a
   warning only during the compatibility period.
 
+Start times are compared in one canonical form, never as raw text: a decimal tick count (the platform's own process start counter) or a
+timezone-aware ISO-8601 timestamp. Two start times of different kinds, an unparseable one, or two timestamps that agree at the coarser of their
+two precisions but differ at the finer one prove nothing: the verdict is ``UNKNOWN``, never ``PROVEN_DEAD``. Every ``datetime`` passed in must be
+timezone-aware.
+
 Nothing here edits ``expires_at``, reads or returns a lease token, or runs a process probe: callers pass in the facts they observed.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Final
 
@@ -104,7 +109,10 @@ def judge_process(recorded: ProcessFingerprint | None, observation: ProcessObser
         return ProcessVerdict.PROVEN_DEAD
     if observation.start_time is None:
         return ProcessVerdict.UNKNOWN
-    if observation.start_time != recorded.start_time:
+    same_start = _same_start_time(recorded.start_time, observation.start_time)
+    if same_start is None:
+        return ProcessVerdict.UNKNOWN  # the two start times cannot be compared: not proof of anything
+    if not same_start:
         return ProcessVerdict.PROVEN_DEAD  # the pid now belongs to a different process (reuse)
     if recorded.image_sha256 is None or recorded.cmdline_sha256 is None or observation.image_sha256 is None or observation.cmdline_sha256 is None:
         return ProcessVerdict.UNKNOWN
@@ -113,21 +121,69 @@ def judge_process(recorded: ProcessFingerprint | None, observation: ProcessObser
     return ProcessVerdict.UNKNOWN  # same start time but a different image or command line: not proven either way
 
 
+def _canonical_start(value: str) -> int | datetime | None:
+    """A decimal tick count, a timezone-aware timestamp in UTC, or ``None`` when ``value`` is neither."""
+
+    text = value.strip()
+    if text.isascii() and text.isdigit():
+        return int(text)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _same_start_time(recorded: str, observed: str) -> bool | None:
+    """``True`` or ``False`` when the two start times can be compared; ``None`` when they cannot."""
+
+    left, right = _canonical_start(recorded), _canonical_start(observed)
+    if left is None or right is None:
+        return None
+    if isinstance(left, int) and isinstance(right, int):
+        return left == right
+    if not isinstance(left, datetime) or not isinstance(right, datetime):
+        return None  # a tick count and a timestamp are different clocks
+    if left == right:
+        return True
+    coarse = timedelta(seconds=1) if left.microsecond == 0 or right.microsecond == 0 else timedelta(microseconds=1)
+    if coarse > timedelta(microseconds=1) and abs(left - right) < coarse:
+        return None  # equal at the coarser precision: the difference may be precision loss, not another process
+    return False
+
+
+def _require_aware(value: datetime, label: str) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{label} must be a timezone-aware datetime")
+
+
 def lease_is_live(expires_at: datetime, now: datetime, grace_seconds: int = GRACE_SECONDS) -> bool:
     """A lease still counts as live until ``expires_at`` plus the grace period (ordinary clock skew between machines)."""
 
+    _require_aware(expires_at, "expires_at")
+    _require_aware(now, "now")
     return now < expires_at + timedelta(seconds=grace_seconds)
 
 
-def decide_reclaim(*, lease_expires_at: datetime, now: datetime, process: ProcessVerdict, forced_by_decision: bool = False, grace_seconds: int = GRACE_SECONDS) -> ReclaimResult:
-    """Whether a started Run may be reclaimed from its holder."""
+def decide_reclaim(*, lease_expires_at: datetime, now: datetime, process: ProcessVerdict, forced_by_decision: bool = False,
+                   unknown_risk_accepted_by_decision: bool = False, grace_seconds: int = GRACE_SECONDS) -> ReclaimResult:
+    """Whether a started Run may be reclaimed from its holder.
+
+    ``forced_by_decision`` lets a Decision reclaim a live lease from a holder proven dead; it never touches an unknown holder.
+    ``unknown_risk_accepted_by_decision`` is the separate, explicit exit of a PENDING reclaim: a Decision that accepts the
+    risk of pre-empting a holder nobody could identify. It never overrides ``ALIVE``.
+    """
 
     live = lease_is_live(lease_expires_at, now, grace_seconds)
     if process is ProcessVerdict.ALIVE:
         return ReclaimResult(ReclaimDecision.REFUSE_PROCESS_ALIVE, "the holder's process is still running")
     if process is ProcessVerdict.UNKNOWN:
+        if unknown_risk_accepted_by_decision:
+            return ReclaimResult(ReclaimDecision.ALLOW, "the holder's process cannot be established and a decision accepts the risk of pre-empting it")
         return ReclaimResult(ReclaimDecision.PENDING, "the holder's process cannot be established; an unknown process is never pre-empted",
-                             "exit: the user signs a Decision that forces the reclaim and accepts the risk of pre-empting a process nobody could identify; until then nothing changes")
+                             "exit: the user signs a Decision that accepts the risk (unknown_risk_accepted_by_decision) of pre-empting a process nobody could identify; until then nothing changes")
     if live and not forced_by_decision:
         return ReclaimResult(ReclaimDecision.REFUSE_LIVE_LEASE, "the lease has not expired (plus grace) and no decision forces the reclaim")
     return ReclaimResult(ReclaimDecision.ALLOW, "the holder's process is proven dead" + (" and a decision forces the reclaim" if live else " and the lease has expired"))
