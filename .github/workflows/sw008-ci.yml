@@ -5,7 +5,12 @@ name: sw008-ci
 
 on:
   push:
-    branches-ignore: [main]
+    paths:
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/**"
+      - "00_Infrastructure/auto_pm/environment/**"
+      - ".github/workflows/sw008-ci.yml"
+  pull_request:
+    branches: [main]
     paths:
       - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/**"
       - "00_Infrastructure/auto_pm/environment/**"
@@ -16,10 +21,11 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same branch cancels the older, now obsolete check.
+# A newer push to the same branch cancels the older, now obsolete check - except on main: every commit on main
+# must get a verdict (M3-MAIN requires a commit on which this check passed).
 concurrency:
   group: sw008-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   PROJ: "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
@@ -58,8 +64,28 @@ jobs:
       - name: CI tools self-test (the checks must be able to fail)
         run: python -I "$PROJ/tests/tools/sw008_ci/selftest.py"
 
-      - name: Secret scan (lines added since main)
-        run: python -I "$PROJ/tests/tools/sw008_ci/secret_scan.py" origin/main
+      - name: Secret scan (lines added by this change)
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Ordinary branches (push, manual run): the whole range origin/main..HEAD, as before, so the commits of a push
+          # that a newer push cancelled are scanned by the next one. A push to main (never cancelled): before..HEAD.
+          # A pull request: base.sha..HEAD.
+          base=origin/main
+          if [ "$EVENT" = pull_request ]; then
+            base="$PR_BASE"
+          elif [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
+            base="$BEFORE"
+          fi
+          if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ] \
+             || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "::error::secret scan base '$base' is not available in this checkout; scan refused (fail closed)"
+            exit 1
+          fi
+          python -I "$PROJ/tests/tools/sw008_ci/secret_scan.py" "$base"
 
       - name: Ruff
         working-directory: ${{ env.PROJ }}
