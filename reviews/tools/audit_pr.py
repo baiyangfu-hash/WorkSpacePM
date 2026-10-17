@@ -211,7 +211,11 @@ def tree_diff(left: str, right: str, cwd: str | None = None) -> list[str]:
 
 
 def github_json(path: str) -> dict | None:
-    request = urllib.request.Request(f"https://api.github.com/repos/{path}", headers={"Accept": "application/vnd.github+json"})
+    headers = {"Accept": "application/vnd.github+json"}
+    # In GitHub Actions the job token lifts the anonymous rate limit; the token is only sent to api.github.com.
+    if os.environ.get("GITHUB_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
+    request = urllib.request.Request(f"https://api.github.com/repos/{path}", headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             return json.loads(response.read().decode("utf-8", errors="replace"))
@@ -255,7 +259,15 @@ def scan_privacy(lines: list[tuple[str, str]]) -> list[Check]:
 
 
 def audit(
-    pr: int, *, repo: str, remote: str, patch: str | None, patch_base: str | None, network: bool, cwd: str | None = None
+    pr: int,
+    *,
+    repo: str,
+    remote: str,
+    patch: str | None,
+    patch_base: str | None,
+    network: bool,
+    ci_result: bool = True,
+    cwd: str | None = None,
 ) -> tuple[dict, list[Check]]:
     git("fetch", "-q", remote, "main", f"+refs/pull/{pr}/head:refs/audit/pr-{pr}", cwd=cwd)
     main_ref = f"{remote}/main"
@@ -356,7 +368,9 @@ def audit(
         )
     )
 
-    if network:
+    if not ci_result:
+        checks.append(Check("ci_result", "INFO", "按 --skip-ci-result 跳过（在 CI 里运行时，CI 本身的结论由必需检查负责）"))
+    elif network:
         shas = [head] + ([info["merge"]] if "merge" in info else [])
         runs = []
         for sha in shas:
@@ -440,11 +454,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--patch", help="要对比的审阅补丁")
     parser.add_argument("--patch-base", help="补丁基于的提交")
     parser.add_argument("--offline", action="store_true", help="不访问 GitHub 接口")
+    parser.add_argument("--skip-ci-result", action="store_true", help="不查 CI 结论（在 CI 里运行时使用）")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     args = parser.parse_args(argv)
     try:
         info, checks = audit(
-            args.pr, repo=args.repo, remote=args.remote, patch=args.patch, patch_base=args.patch_base, network=not args.offline
+            args.pr,
+            repo=args.repo,
+            remote=args.remote,
+            patch=args.patch,
+            patch_base=args.patch_base,
+            network=not args.offline,
+            ci_result=not args.skip_ci_result,
         )
     except GitError as exc:
         print(f"audit_pr: {exc}", file=sys.stderr)
