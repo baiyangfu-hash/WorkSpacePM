@@ -16,7 +16,7 @@
 | 两个父提交 | `46aead1`（原 main）和 `9ae5635`（卡 158），是合并提交 |
 | 与补丁 10 对比 | 在 `46aead1` 上 `git apply --check` 通过；应用后和 `9ae5635` 对比，只差 `launcher/launch.py`（+35 行）和 `tests/launcher/test_launch.py`（+33/−1 行），也就是启动器部分。其余 7 个文件（`requirements.txt`、`setup_env.bat`、SW008 的 `pyproject.toml`、`build_delivery.py`、`verify_m7_gui.py`、两个 vartable 解析器测试）完全相同 |
 | 隐私扫描（新增行） | 令牌前缀、长 base64、邮箱、内网地址、本机路径、`fubai`：都没有命中 |
-| `setup_env.bat` | 只认 Python 3.12，先 `python` 再 `py -3.12`；已有的 `.venv` 版本不对会停下来，不删除；按锁定文件 `--no-deps` 安装，再跑 `pip check`。逻辑和补丁一致。只能在 Windows 上验证，**UNVERIFIED** |
+| `setup_env.bat` | 只认 Python 3.12，先 `python` 再 `py -3.12`；已有的 `.venv` 版本不对会停下来，不删除；按锁定文件 `--no-deps` 安装，再跑 `pip check`。逻辑和补丁一致。`.bat` 本身只能在 Windows 上跑，**UNVERIFIED**；它的每一步已在 Linux 上照做验证，见第 5 节 |
 
 ## 小问题（低，原来就有，不是本 PR 引入的）
 
@@ -26,7 +26,24 @@
 
 run 39049835786，`success`。`EVENT: push`，`BEFORE: 46aead1`；`secret scan: 0 location(s) flagged in 46aead1..HEAD`；Ruff、Mypy 通过；pytest 20 failed、3697 passed、22 skipped；`verdict: PASS_KNOWN_BASELINE`。和 PR #2 那次（3695 passed、24 skipped）相比，多了 2 个通过、少了 2 个跳过，正是卡 158 去掉 Desktop 路径后放开的两个 vartable 测试，失败的 20 个与基线一致。
 
+## 5. 在云端模拟“第二台电脑”（2026-10-17）
+
+在云端容器里新建空目录，从 main `b68bd03` 全新克隆，按 `setup_env.bat` 的步骤逐一照做（Linux 版命令，用默认 PyPI 源，没用清华镜像）：
+
+| 步骤 | 结果 |
+|---|---|
+| 1. 找 Python 3.12 | 3.12.3 |
+| 2. 新建 `.venv` | 成功 |
+| 3. `pip install --no-deps -r requirements-lock-py312-win.txt` | 退出码 0，111 行锁定文件全部装上（Windows 专用的 `pywin32-ctypes` 也能装） |
+| 3. `pip check` | `No broken requirements found.` |
+| 4. 三个入口文件（launcher、active_release.json、deployment_manifest.json） | 都在 |
+| 启动 `python main.py --help` | 退出码 0，launcher 校验通过 release `1.3.3-d8f7c8b` |
+| `python main.py doctor` | 退出码 0，所有依赖“已安装”，根目录纯净 |
+| 工作区 | 跑完后 `git status` 干净 |
+
+没验证到的：Windows 专有的部分（`py -3.12` 启动器、`%errorlevel%` 写法、中文控制台编码、清华镜像）。这些只有真有第二台 Windows 电脑时才能验证，不急。
+
 ## 建议用户做的事
 
-1. 在第二台电脑上新建一个空目录，克隆仓库，双击 `setup_env.bat`，看最后是否没有报错。结果（截图或文字）发回来即可。
+1. ~~第二台电脑实测~~：已在云端模拟（第 5 节）。以后真有第二台 Windows 电脑时再双击跑一次即可，不急。
 2. ~~存储卡验收用例的三个问题~~：用户已在 2026-10-17 回答，见 `19_user_rulings_storage_acceptance.md`。
