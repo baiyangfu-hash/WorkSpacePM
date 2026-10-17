@@ -5,7 +5,7 @@
 ## 结论
 
 1. **你的判断是对的：产品源码（`<SW008>/auto_pm/**`）里没有任何 `C:/Users/fubai` 或 `C:\Users\fubai`；发布载荷（`00_Infrastructure/auto_pm/releases/**`）里也没有。** 此前“10 个 Python 源文件”的说法不成立，应当更正。我在产品源码、`00_Infrastructure/auto_pm/launcher/`、`environment/`、`main.py` 中另外搜了 `My_Workspace` 和 `'X:\` 形式的盘符字面量，也是 0 处。（严重度：信息，属于更正）
-2. 真正挡住“新电脑一键可用”的是**依赖**，不是路径。有三个缺口：
+2. 真正挡住“新电脑一键可用”的是**依赖**，不是路径。主要缺口有四个：
    - 可编辑安装的 `python_bridge` 被钉在提交 `5feb8e93`，这个提交**不在 GitHub 上**（`git cat-file` 找不到，任何远端分支都不包含它），新机器无法按记录安装；（高）
    - 锁定文件只有 Windows + Python 3.12 一份，并且有 4 个包超出 `pyproject.toml` 的开发约束；（中）
    - **新电脑的一键安装脚本 `setup_env.bat` 装的是根目录那份过时的 `requirements.txt`**（第 40-43 行），不是锁定文件。那份清单缺 pydantic、pydantic-settings、copier、markdown，版本也都没有锁定，所以照现在的“一键安装”装完，启动器会因为缺包而失败。（高）
