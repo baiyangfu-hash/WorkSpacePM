@@ -1,0 +1,50 @@
+diff --git a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/lease_reclaim.py b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/lease_reclaim.py
+index 1578b04..807b5a8 100644
+--- a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/lease_reclaim.py
++++ b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/lease_reclaim.py
+@@ -119,15 +119,23 @@ def lease_is_live(expires_at: datetime, now: datetime, grace_seconds: int = GRAC
+     return now < expires_at + timedelta(seconds=grace_seconds)
+ 
+ 
+-def decide_reclaim(*, lease_expires_at: datetime, now: datetime, process: ProcessVerdict, forced_by_decision: bool = False, grace_seconds: int = GRACE_SECONDS) -> ReclaimResult:
+-    """Whether a started Run may be reclaimed from its holder."""
++def decide_reclaim(*, lease_expires_at: datetime, now: datetime, process: ProcessVerdict, forced_by_decision: bool = False,
++                   unknown_risk_accepted_by_decision: bool = False, grace_seconds: int = GRACE_SECONDS) -> ReclaimResult:
++    """Whether a started Run may be reclaimed from its holder.
++
++    ``forced_by_decision`` lets a Decision reclaim a live lease from a holder proven dead; it never touches an unknown holder.
++    ``unknown_risk_accepted_by_decision`` is the separate, explicit exit of a PENDING reclaim: a Decision that accepts the
++    risk of pre-empting a holder nobody could identify. It never overrides ``ALIVE``.
++    """
+ 
+     live = lease_is_live(lease_expires_at, now, grace_seconds)
+     if process is ProcessVerdict.ALIVE:
+         return ReclaimResult(ReclaimDecision.REFUSE_PROCESS_ALIVE, "the holder's process is still running")
+     if process is ProcessVerdict.UNKNOWN:
++        if unknown_risk_accepted_by_decision:
++            return ReclaimResult(ReclaimDecision.ALLOW, "the holder's process cannot be established and a decision accepts the risk of pre-empting it")
+         return ReclaimResult(ReclaimDecision.PENDING, "the holder's process cannot be established; an unknown process is never pre-empted",
+-                             "exit: the user signs a Decision that forces the reclaim and accepts the risk of pre-empting a process nobody could identify; until then nothing changes")
++                             "exit: the user signs a Decision that accepts the risk (unknown_risk_accepted_by_decision) of pre-empting a process nobody could identify; until then nothing changes")
+     if live and not forced_by_decision:
+         return ReclaimResult(ReclaimDecision.REFUSE_LIVE_LEASE, "the lease has not expired (plus grace) and no decision forces the reclaim")
+     return ReclaimResult(ReclaimDecision.ALLOW, "the holder's process is proven dead" + (" and a decision forces the reclaim" if live else " and the lease has expired"))
+diff --git a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_lease_reclaim.py b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_lease_reclaim.py
+index 942f6b8..ddae3dc 100644
+--- a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_lease_reclaim.py
++++ b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/contracts/test_lease_reclaim.py
+@@ -170,3 +170,14 @@ def test_a_pending_reclaim_names_its_exit_and_the_other_decisions_do_not_need_on
+     assert pending.decision is ReclaimDecision.PENDING and "Decision" in pending.exit_path and "risk" in pending.exit_path
+     allowed = decide_reclaim(lease_expires_at=NOW - timedelta(minutes=10), now=NOW, process=ProcessVerdict.PROVEN_DEAD)
+     assert allowed.exit_path == ""
++
++
++def test_the_pending_exit_is_reachable_only_through_its_own_explicit_decision() -> None:
++    expired = NOW - timedelta(minutes=10)
++    assert decide_reclaim(lease_expires_at=expired, now=NOW, process=ProcessVerdict.UNKNOWN, forced_by_decision=True).decision is ReclaimDecision.PENDING
++    accepted = decide_reclaim(lease_expires_at=expired, now=NOW, process=ProcessVerdict.UNKNOWN, unknown_risk_accepted_by_decision=True)
++    assert accepted.decision is ReclaimDecision.ALLOW and "risk" in accepted.reason
++    live = decide_reclaim(lease_expires_at=NOW + timedelta(minutes=10), now=NOW, process=ProcessVerdict.UNKNOWN, unknown_risk_accepted_by_decision=True)
++    assert live.decision is ReclaimDecision.ALLOW
++    alive = decide_reclaim(lease_expires_at=expired, now=NOW, process=ProcessVerdict.ALIVE, unknown_risk_accepted_by_decision=True, forced_by_decision=True)
++    assert alive.decision is ReclaimDecision.REFUSE_PROCESS_ALIVE

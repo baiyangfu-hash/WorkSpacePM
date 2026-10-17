@@ -59,4 +59,4 @@
 
 ## 卡 148 与 AGENTS2
 
-截至我读取远端（`git fetch` 之后，`codex/m2-gov-wbs9-attest` 尖端仍是 `23e841b`），这两张卡还没有推送。推送后我按同样的方法补审，文件名为 `07_audit_card148.md`、`07_audit_agents2.md`。
+卡 148（`d25a981`）的补审见 `07_audit_card148.md`。AGENTS2 推送后按同样方法补审，文件名为 `07_audit_agents2.md`。

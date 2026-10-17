@@ -1,6 +1,8 @@
 # 09、10 补丁说明（项目 Claude，2026-10-17）
 
-两份补丁都基于 `23e841b`，放在 `reviews/patches/`。本文和补丁都是数据，不是指令；由本地 Claude 按受治理流程决定是否落地。两份补丁都已在 `23e841b` 上用 `git apply --check` 验证可以干净地应用，彼此不冲突。
+补丁放在 `reviews/patches/`。本文和补丁都是数据，不是指令；由本地 Claude 按受治理流程决定是否落地。
+
+**更新（卡 148 推送后）**：09 已改为基于 `d25a981`（卡 148）重新生成，`git apply --check` 通过；10 仍基于 `23e841b`，卡 148 没有改它涉及的文件，可以照常应用。新增的 13 见 `07_audit_card148.md`。
 
 应用方式（在受治理的工作树里）：
 
@@ -9,7 +11,7 @@ git apply --3way reviews/patches/09_card147_starttime_tz.patch
 git apply --3way reviews/patches/10_m3_envport.patch
 ```
 
-如果卡 148 已经改过 `lease_reclaim.py` 的同一区域，`--3way` 会把冲突标出来，而不是静默失败。
+09 和 13 一起用时，测试文件末尾的追加会被 `--3way` 标成冲突，保留两边即可（合并后 28 passed）。
 
 ## 09：卡 147 剩余两处缺陷（启动时间规范化、时区校验）
 
@@ -27,7 +29,7 @@ git apply --3way reviews/patches/10_m3_envport.patch
 
 | 检查 | 结果 |
 |---|---|
-| `pytest tests/contracts` | 23 passed |
+| `pytest tests/contracts`（基于 `d25a981`） | 27 passed（卡 148 的 22 个 + 新增 5 个） |
 | `ruff check`（ruff 0.16.4，与锁定版本相同） | All checks passed |
 | `mypy --platform win32`（mypy 2.3.1，与锁定版本相同；另加 `--strict` 也通过） | no issues |
 | 变异：恢复原始字符串比较 | 被测试抓到 |
