@@ -312,6 +312,7 @@ class ContinuityExecutionService:
         dirty_paths: list[str],
         evidence: list[str],
         idempotency_key: str,
+        expected_epoch: int | None = None,
     ) -> CheckpointItem:
         now = self._utc_now()
         try:
@@ -335,7 +336,9 @@ class ContinuityExecutionService:
                 "evidence_json": json.dumps(clean_evidence, ensure_ascii=False),
                 "created_at": now.isoformat(),
             }
-            return self._store.create_checkpoint(values, idempotency_key, now.isoformat())
+            return self._store.create_checkpoint(
+                values, idempotency_key, now.isoformat(), owner_id=owner_id, lease_token=lease_token, expected_epoch=expected_epoch
+            )
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
@@ -711,6 +714,7 @@ class ContinuityExecutionService:
         idempotency_key: str,
         *,
         failure: ExecutionFailure | None = None,
+        expected_epoch: int | None = None,
     ) -> RunItem:
         try:
             run = self._store.get_run(run_id)
@@ -727,6 +731,9 @@ class ContinuityExecutionService:
                 new_state.value,
                 idempotency_key,
                 self._utc_now().isoformat(),
+                owner_id=owner_id,
+                lease_token=lease_token,
+                expected_epoch=expected_epoch,
                 failure=failure,
             )
         except ContinuityStoreError as error:

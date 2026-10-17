@@ -211,6 +211,16 @@ def test_start_times_that_cannot_be_compared_are_unknown_never_dead() -> None:
         assert judge_process(FP, observation, local_host_id=HOST) is ProcessVerdict.UNKNOWN, observed
 
 
+def test_an_oversized_numeric_start_time_is_unknown_and_never_raises() -> None:
+    for digits in (31, 4301, 5000):
+        observation = ProcessObservation(pid_exists=True, start_time="9" * digits, image_sha256=FP.image_sha256, cmdline_sha256=FP.cmdline_sha256)
+        assert judge_process(FP, observation, local_host_id=HOST) is ProcessVerdict.UNKNOWN, digits
+    ticks = ProcessFingerprint(host_id=HOST, pid=4242, start_time="9" * 5000, image_sha256="a" * 64, cmdline_sha256="b" * 64)
+    assert judge_process(ticks, ProcessObservation(pid_exists=True, start_time="133000000000000000"), local_host_id=HOST) is ProcessVerdict.UNKNOWN
+    limit = ProcessFingerprint(host_id=HOST, pid=4242, start_time="1" * 30, image_sha256="a" * 64, cmdline_sha256="b" * 64)
+    assert judge_process(limit, ProcessObservation(pid_exists=True, start_time="1" * 30, image_sha256="a" * 64, cmdline_sha256="b" * 64), local_host_id=HOST) is ProcessVerdict.ALIVE
+
+
 def test_a_difference_explained_by_precision_loss_is_unknown_but_a_real_difference_is_reuse() -> None:
     finer = ProcessObservation(pid_exists=True, start_time="2026-10-16T10:00:00.700000+00:00")
     earlier_rounding = ProcessObservation(pid_exists=True, start_time="2026-10-16T09:59:59.600000+00:00")
