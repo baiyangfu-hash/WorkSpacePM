@@ -48,6 +48,7 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionStartClaim,
     ExecutionStartEvidence,
 )
+from auto_pm.contracts.lease_reclaim import check_write_epoch
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.orchestration import OrchestrationOutcome
 from auto_pm.contracts.pm_facade import (
@@ -3993,6 +3994,9 @@ class ContinuityStore:
         idempotency_key: str,
         now: str,
         *,
+        owner_id: str,
+        lease_token: str,
+        expected_epoch: int | None = None,
         failure: ExecutionFailure | None = None,
     ) -> RunItem:
         del now
@@ -4070,6 +4074,7 @@ class ContinuityStore:
                 raise ContinuityStoreError("Run 不存在或版本冲突")
             if destination not in _STORE_RUN_TRANSITIONS[current.state]:
                 raise ContinuityStoreError(f"非法 Run 状态迁移: {current.state} -> {destination}")
+            self._require_lease_in_tx(conn, run_id=run_id, owner_id=owner_id, lease_token=lease_token, expected_epoch=expected_epoch)
             if destination not in {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}:
                 sibling = conn.execute(
                     """SELECT run_id FROM run_items
@@ -6024,7 +6029,14 @@ class ContinuityStore:
             return self._get_lease(conn, handoff.run_id)
 
     def create_checkpoint(
-        self, values: dict[str, Any], idempotency_key: str, now: str
+        self,
+        values: dict[str, Any],
+        idempotency_key: str,
+        now: str,
+        *,
+        owner_id: str,
+        lease_token: str,
+        expected_epoch: int | None = None,
     ) -> CheckpointItem:
         with self._transaction() as conn:
             existing = self._event_by_key(conn, idempotency_key)
@@ -6033,6 +6045,9 @@ class ContinuityStore:
                     raise ContinuityStoreError("idempotency_key 已用于其他 Run")
                 return self._get_checkpoint(conn, values["checkpoint_id"])
             self._get_run(conn, values["run_id"])
+            self._require_lease_in_tx(
+                conn, run_id=values["run_id"], owner_id=owner_id, lease_token=lease_token, expected_epoch=expected_epoch
+            )
             stored = dict(values)
             row = conn.execute(
                 "SELECT COALESCE(MAX(sequence), 0) + 1 FROM checkpoints WHERE run_id=?",
@@ -7206,6 +7221,66 @@ class ContinuityStore:
         if row is None:
             raise ContinuityStoreError(f"Run lease 不存在: {run_id}")
         return LeaseItem.model_validate(dict(row))
+
+    @staticmethod
+    def _grant_epoch(conn: sqlite3.Connection, run_id: str) -> int:
+        """The epoch of the lease token now installed on a Run: the lease version at which the token was granted.
+
+        Only an event that installs a new token changes it (a Run creation grants version 1, a transfer grants the version it produces); a renewal raises the
+        lease version but never the epoch (V04-R1: ``lease_reclaim.LeaseEvent``).  Read in the caller's write transaction.
+        """
+
+        row = conn.execute(
+            """SELECT event_type, payload_json FROM events
+            WHERE aggregate_id=? AND event_type IN ('RUN_CREATED', 'LEASE_TRANSFERRED')
+            ORDER BY rowid DESC LIMIT 1""",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Run 没有 lease 授予事件: {run_id}")
+        if row["event_type"] == "RUN_CREATED":
+            return 1
+        try:
+            version = json.loads(str(row["payload_json"])).get("version")
+        except (TypeError, ValueError, AttributeError) as error:
+            raise ContinuityStoreError("lease 移交事件 payload 无法读取") from error
+        if type(version) is not int or version < 2:
+            raise ContinuityStoreError("lease 移交事件缺少合法的授予版本")
+        return version
+
+    def get_grant_epoch(self, run_id: str) -> int:
+        """Read-only: the epoch a holder presents with its writes (see ``_grant_epoch``)."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            self._get_run(conn, run_id)
+            return self._grant_epoch(conn, run_id)
+
+    def _require_lease_in_tx(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        expected_epoch: int | None,
+    ) -> LeaseItem:
+        """Check the holder, the expiry and (when presented) the epoch INSIDE the write transaction, so a transfer cannot slip in between the check and the write.
+
+        The service layer keeps its own earlier check for a friendly early failure; this one is the one that cannot be raced (``BEGIN IMMEDIATE``).  A call that
+        presents no epoch is accepted during the compatibility period (``check_write_epoch`` default).
+        """
+
+        lease = self._get_lease(conn, run_id)
+        if lease.owner_id != owner_id or lease.lease_token != lease_token:
+            raise ContinuityStoreError("lease ownership 不匹配")
+        if self._aware_timestamp(lease.expires_at, "lease") <= self._utc_now():
+            raise ContinuityStoreError("lease 已过期")
+        if expected_epoch is not None:  # no epoch presented: accepted during the compatibility period, and the grant event is not even read
+            verdict = check_write_epoch(self._grant_epoch(conn, run_id), expected_epoch)
+            if not verdict.accepted:
+                raise ContinuityStoreError(f"lease epoch 拒绝（{verdict.verdict.value}）: {verdict.reason}")
+        return lease
 
     @staticmethod
     def _get_checkpoint(conn: sqlite3.Connection, checkpoint_id: str) -> CheckpointItem:

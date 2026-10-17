@@ -1071,6 +1071,8 @@ def test_run_activity_timeline_preserves_structured_and_legacy_failure_truth(
         RunState.FAILED.value,
         "fail-with-structured-reason",
         clock().isoformat(),
+        owner_id="agent-a",
+        lease_token="lease-secret",
         failure=failure,
     )
 
@@ -1091,6 +1093,8 @@ def test_run_activity_timeline_preserves_structured_and_legacy_failure_truth(
             RunState.FAILED.value,
             "fail-with-structured-reason",
             clock().isoformat(),
+            owner_id="agent-a",
+            lease_token="lease-secret",
             failure=ExecutionFailure(
                 stage=ExecutionActivityStage.FAILED,
                 code=ExecutionFailureCode.TERMINATED,
@@ -2260,7 +2264,7 @@ def test_append_verified_checkpoint_rejects_store_collision_return(
     observed_keys: list[str] = []
 
     def collision_return(
-        values: dict[str, object], idempotency_key: str, _now: str
+        values: dict[str, object], idempotency_key: str, _now: str, **_lease: object
     ) -> CheckpointItem:
         observed_keys.append(idempotency_key)
         return CheckpointItem(
@@ -2558,6 +2562,8 @@ def test_run_state_machine_rejects_terminal_reopen(tmp_path: Path) -> None:
             RunState.RUNNING.value,
             "direct-reopen",
             "2000-01-01T00:00:00+00:00",
+            owner_id="agent-a",
+            lease_token="lease-secret",
         )
     with pytest.raises(ContinuityStoreError, match="语义不一致"):
         service._store.transition_run(
@@ -2566,6 +2572,8 @@ def test_run_state_machine_rejects_terminal_reopen(tmp_path: Path) -> None:
             RunState.BLOCKED.value,
             "verify",
             "2000-01-01T00:00:00+00:00",
+            owner_id="agent-a",
+            lease_token="lease-secret",
         )
 
 
@@ -3985,3 +3993,150 @@ def test_service_reconciles_operation_receipt_run_and_started_identity(tmp_path:
     )
     with pytest.raises(ContinuityExecutionError, match="身份不一致"):
         service.resolve_started_run("operation-e06-1")
+
+
+# ---- V04-R1 card 4 (M3-V04R1D): the lease and its epoch are checked INSIDE the write transaction -----------------------------------------------------------------------------------
+
+
+def _transfer_to_agent_b(service: ContinuityExecutionService, *, handoff_id: str = "HO-B", key: str = "b") -> Any:
+    checkpoint = service._store.latest_checkpoint("RUN-001")
+    assert checkpoint is not None
+    service.create_handoff(
+        handoff_id=handoff_id,
+        checkpoint_id=checkpoint.checkpoint_id,
+        from_owner="agent-a",
+        to_owner="agent-b",
+        lease_token="lease-secret",
+        idempotency_key=f"handoff-{key}",
+    )
+    return service.accept_handoff(
+        handoff_id=handoff_id,
+        receiver_id="agent-b",
+        new_lease_token="receiver-secret",
+        lease_seconds=900,
+        idempotency_key=f"accept-{key}",
+    )
+
+
+def test_the_grant_epoch_follows_the_grant_and_never_a_renewal(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    assert service._store.get_grant_epoch("RUN-001") == 1
+    for index in range(3):
+        service.renew_lease("RUN-001", "agent-a", "lease-secret", 900, f"renew-{index}")
+    assert service._store.get_lease("RUN-001").version == 4
+    assert service._store.get_grant_epoch("RUN-001") == 1
+
+    _start_evidence(service)
+    checkpoint = _checkpoint(service, expected_epoch=1)
+    assert checkpoint.run_id == "RUN-001"
+
+    receiver = _transfer_to_agent_b(service)
+    assert receiver.version == 5
+    assert service._store.get_grant_epoch("RUN-001") == 5
+    service.renew_lease("RUN-001", "agent-b", "receiver-secret", 900, "renew-b")
+    assert service._store.get_lease("RUN-001").version == 6
+    assert service._store.get_grant_epoch("RUN-001") == 5
+    moved = service.transition_run("RUN-001", RunState.VERIFYING, "agent-b", "receiver-secret", "verify-after-transfer", expected_epoch=5)
+    assert moved.state is RunState.VERIFYING
+
+
+def test_after_a_transfer_the_old_holder_a_stale_epoch_and_a_future_epoch_are_all_refused(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    _checkpoint(service)
+    _transfer_to_agent_b(service)
+    assert service._store.get_grant_epoch("RUN-001") == 2
+
+    with pytest.raises(ContinuityExecutionError, match="ownership"):
+        _checkpoint(service, checkpoint_id="CP-OLD", idempotency_key="old-holder")
+    new_holder = {"owner_id": "agent-b", "lease_token": "receiver-secret"}
+    with pytest.raises(ContinuityExecutionError, match="STALE"):
+        _checkpoint(service, checkpoint_id="CP-STALE", idempotency_key="stale", expected_epoch=1, **new_holder)
+    with pytest.raises(ContinuityExecutionError, match="FUTURE"):
+        _checkpoint(service, checkpoint_id="CP-FUTURE", idempotency_key="future", expected_epoch=3, **new_holder)
+    accepted = _checkpoint(service, checkpoint_id="CP-OK", idempotency_key="ok", expected_epoch=2, **new_holder)
+    assert accepted.checkpoint_id == "CP-OK"
+    for refused in ("CP-OLD", "CP-STALE", "CP-FUTURE"):
+        with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+            service._store.get_checkpoint(refused)
+
+
+def test_a_transfer_between_the_service_check_and_the_store_write_cannot_be_raced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    checkpoint = _checkpoint(service)
+    service.create_handoff(
+        handoff_id="HO-RACE",
+        checkpoint_id=checkpoint.checkpoint_id,
+        from_owner="agent-a",
+        to_owner="agent-b",
+        lease_token="lease-secret",
+        idempotency_key="handoff-race",
+    )
+    early_check = ContinuityExecutionService._require_active_lease
+
+    def check_then_lose_the_lease(lease: Any, owner_id: str, lease_token: str, now: datetime) -> None:
+        early_check(lease, owner_id, lease_token, now)  # the service-level check passes...
+        service._store.transfer_lease("HO-RACE", "agent-b", "receiver-secret", 900, "race-transfer")  # ...and then a real transfer lands before the write
+
+    monkeypatch.setattr(ContinuityExecutionService, "_require_active_lease", staticmethod(check_then_lose_the_lease))
+    events_before = _event_count(tmp_path)
+
+    with pytest.raises(ContinuityExecutionError, match="ownership"):
+        _checkpoint(service, checkpoint_id="CP-RACE", idempotency_key="race-write")
+
+    with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
+        service._store.get_checkpoint("CP-RACE")
+    assert _event_count(tmp_path) == events_before + 1  # only the transfer event; the refused write left nothing behind
+    assert service._store.get_lease("RUN-001").owner_id == "agent-b"
+
+
+def test_expiry_is_judged_inside_the_write_transaction_not_only_by_the_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    _start_evidence(service)
+    monkeypatch.setattr(ContinuityExecutionService, "_require_active_lease", staticmethod(lambda *_args: None))  # a service check that missed the expiry
+    clock.value += timedelta(seconds=1000)
+
+    with pytest.raises(ContinuityExecutionError, match="过期"):
+        _checkpoint(service, checkpoint_id="CP-LATE", idempotency_key="late")
+    with pytest.raises(ContinuityExecutionError, match="过期"):
+        service.transition_run("RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "late-transition")
+    assert service._store.get_run("RUN-001").state is RunState.RUNNING
+
+
+def test_an_exact_replay_still_returns_the_original_after_the_lease_moved_on(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    original = _checkpoint(service)
+    _transfer_to_agent_b(service)
+
+    replay = service._store.create_checkpoint(
+        {"run_id": "RUN-001", "checkpoint_id": original.checkpoint_id},
+        "checkpoint-1",
+        clock().isoformat(),
+        owner_id="agent-a",
+        lease_token="lease-secret",
+    )
+
+    assert replay == original
+
+
+def test_a_write_that_presents_no_epoch_is_accepted_during_the_compatibility_period(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    assert _checkpoint(service).checkpoint_id == "CP-001"
+    with pytest.raises(ContinuityExecutionError, match="MISSING"):
+        _checkpoint(service, checkpoint_id="CP-ZERO", idempotency_key="zero", expected_epoch=0)
+
+
+def _event_count(root: Path) -> int:
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])

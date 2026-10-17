@@ -932,6 +932,8 @@ def test_missing_evidence_refuses_the_closure_and_never_reports_completed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     service, store, database, reconciler = _closing_cockpit(tmp_path, monkeypatch)
+    # The store now judges the lease inside its own write transaction with its own clock, so the lineage's fixed 2026-09-20 clock must be the store's clock too.
+    monkeypatch.setattr(store, "_clock", lambda: datetime(2026, 9, 20, 12, 5, tzinfo=UTC))
     ContinuityExecutionService(
         tmp_path, store=store, now=lambda: datetime(2026, 9, 20, 12, 5, tzinfo=UTC)
     ).transition_run(

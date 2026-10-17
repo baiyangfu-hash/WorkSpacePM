@@ -28,6 +28,7 @@ from enum import StrEnum
 from typing import Final
 
 GRACE_SECONDS: Final = 120
+MAX_TICK_DIGITS: Final = 30  # a 64-bit platform tick count has at most 20 digits; a longer all-digit value is malformed, never a number worth converting
 
 
 class ProcessVerdict(StrEnum):
@@ -126,6 +127,8 @@ def _canonical_start(value: str) -> int | datetime | None:
 
     text = value.strip()
     if text.isascii() and text.isdigit():
+        if len(text) > MAX_TICK_DIGITS:
+            return None  # also keeps ``int()`` away from the interpreter's integer-conversion limit (4300 digits), which would raise instead of giving UNKNOWN
         return int(text)
     try:
         parsed = datetime.fromisoformat(text)
