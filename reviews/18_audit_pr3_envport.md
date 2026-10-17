@@ -4,7 +4,7 @@
 
 ## 结论
 
-**同意（有一处保留）。** PR #3 已在 09:32 合并，main 现在是 `b68bd03`。除了故意去掉的启动器部分，内容和补丁 10 逐字节一致；没有新增隐私类问题。main 推送那次的 CI 结果见下面第 4 节。
+**同意（有一处保留）。** PR #3 已在 09:32 合并，main 现在是 `b68bd03`。除了故意去掉的启动器部分，内容和补丁 10 逐字节一致；没有新增隐私类问题。main 推送那次的 CI 已通过（第 4 节）。
 
 保留：补丁 10 的启动器依赖预检（缺依赖时退出码 5，并给出安装命令）没有落地。提交信息里写明了是故意的（"patch 10 without the launcher part"），不算偏差，但这项防护现在没人负责。建议本地 Claude 在台账里登记一条技术债，或者写个 Decision 说明不做。
 
@@ -24,9 +24,9 @@
 
 ## 4. main 推送那次的 CI
 
-run 39049835786：写报告时还在跑（Pytest 那一步），结果待补。
+run 39049835786，`success`。`EVENT: push`，`BEFORE: 46aead1`；`secret scan: 0 location(s) flagged in 46aead1..HEAD`；Ruff、Mypy 通过；pytest 20 failed、3697 passed、22 skipped；`verdict: PASS_KNOWN_BASELINE`。和 PR #2 那次（3695 passed、24 skipped）相比，多了 2 个通过、少了 2 个跳过，正是卡 158 去掉 Desktop 路径后放开的两个 vartable 测试，失败的 20 个与基线一致。
 
 ## 建议用户做的事
 
 1. 在第二台电脑上新建一个空目录，克隆仓库，双击 `setup_env.bat`，看最后是否没有报错。结果（截图或文字）发回来即可。
-2. 交接文件第 4 节第 3 项的三个问题仍然等你回答（建议：三条用例都要；“接受风险”只能你本人签；宽限期保持 120 秒）。
+2. ~~存储卡验收用例的三个问题~~：用户已在 2026-10-17 回答，见 `19_user_rulings_storage_acceptance.md`。
