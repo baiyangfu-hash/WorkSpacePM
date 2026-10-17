@@ -89,7 +89,7 @@
 | 编号 | 文件 | 版本 | 说明 |
 |------|------|------|------|
 | PLC-023 | [023_PLC程序设计文档模板_PLC.md](03_PLC自动化域/023_PLC程序设计文档模板_PLC.md) | V2.2.0 | PLC程序设计文档模板（四位报警分段/OB调度/安全矩阵） |
-| INT-815 | [815_PLC接口文档模板_INT.md](03_PLC自动化域/815_PLC接口文档模板_INT.md) | V1.2.0 | PLC接口文档模板（io_points schema/接口登记册） |
+| INT-815 | [815_PLC接口文档模板_INT.md](03_PLC自动化域/815_PLC接口文档模板_INT.md) | V1.3.0 | PLC接口文档模板（io_points schema/接口登记册） |
 | STD-816 | [816_PLC测试与上机复核模板_STD.md](03_PLC自动化域/816_PLC测试与上机复核模板_STD.md) | V1.0.0 | PLC测试与上机复核模板（scltest/两区制/安全验证） |
 | STD-817 | [817_移植一致性核查规范_STD.md](03_PLC自动化域/817_移植一致性核查规范_STD.md) | V1.0.0 | 移植一致性核查规范（五维判定/地址→语义映射） |
 | STD-820 | [820_设备间信号交握与外部对接规范_STD.md](03_PLC自动化域/820_设备间信号交握与外部对接规范_STD.md) | V1.0.0 | 设备间信号交握与外部对接规范 |
@@ -101,7 +101,7 @@
 | LSP-904 | [904_SCL注释规范_LSP.md](03_PLC自动化域/904_SCL注释规范_LSP.md) | V1.2.0 | SCL注释规范 |
 | LSP-905 | [905_SCL编程规范_LSP.md](03_PLC自动化域/905_SCL编程规范_LSP.md) | V1.2.1 | SCL编程规范 |
 | LSP-906 | [906_错误预防规则_LSP.md](03_PLC自动化域/906_错误预防规则_LSP.md) | V2.1.0 | PLC编程错误预防规则 |
-| LSP-907 | [907_项目配置规范_LSP.md](03_PLC自动化域/907_项目配置规范_LSP.md) | V1.3.0 | PLC项目配置规范 |
+| LSP-907 | [907_项目配置规范_LSP.md](03_PLC自动化域/907_项目配置规范_LSP.md) | V1.4.0 | PLC项目配置规范 |
 | TOOL-908 | [908_Siemens_Language_Support_使用指南_TOOL.md](03_PLC自动化域/908_Siemens_Language_Support_使用指南_TOOL.md) | V1.0.0 | Siemens Language Support插件使用指南 |
 | STD-909 | [909_PLC上位机与人机交互规范_STD.md](03_PLC自动化域/909_PLC上位机与人机交互规范_STD.md) | V1.1.0 | PLC上位机与人机交互规范（交握真源=820） |
 
