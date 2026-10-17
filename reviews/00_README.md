@@ -11,3 +11,4 @@
 | `07_audit_agents2.md` | AGENTS2（`cecfe0c`）审计 |
 | `15_main_ruleset_guide.md` | 在 GitHub 网页上设置 main 分支保护的逐步点击指南 |
 | `16_v04r1_storage_acceptance.md` | V04-R1 存储接入卡的验收用例（请用户确认） |
+| `17_review_handoff_20261017.md` | 审阅交接：角色边界、文件位置、未完成事项、审计做法 |
