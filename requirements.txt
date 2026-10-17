@@ -1,27 +1,10 @@
 # ==============================================================================
-# Auto-PM 工业级 AI 研发工作台 - 依赖清单
+# Auto-PM 依赖清单已迁移（M3-ENVPORT）
 # ==============================================================================
-
-# 核心桌面端与 GUI 依赖
-PySide6>=6.5.0
-
-# 核心 CLI 与规则引擎依赖
-click>=8.1.0
-rich>=13.0.0
-jinja2>=3.1.0
-pyyaml>=6.0.0
-
-# 增强工具（可选平滑降级）
-psutil>=5.9.0
-
-# 打包构建工具
-pyinstaller>=6.0.0
-
-# 开发与自动化测试套件 (Dev & Tests)
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-asyncio>=0.21.0
-ruff>=0.1.0
-mypy>=1.5.0
-types-PyYAML>=6.0.0
-types-requests>=2.31.0
+# 本文件不再列出依赖，避免与锁定文件不一致。请使用精确锁定的版本：
+#
+#   python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+#   python -m pip check
+#
+# 新电脑请直接运行 setup_env.bat（它会做上面两步，并检查 Python 为 3.12）。
+# 版本约束的真源：SW-2026-008 的 pyproject.toml；精确版本的真源：上面的锁定文件。

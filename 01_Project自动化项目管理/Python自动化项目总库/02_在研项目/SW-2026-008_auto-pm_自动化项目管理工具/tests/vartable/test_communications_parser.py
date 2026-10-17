@@ -12,7 +12,9 @@ from auto_pm.vartable.parsers.communications_parser import CommunicationsParser
 
 # 真实 DJ-2026-005 communications.yml 路径（只读，不修改）
 DJ_2026_005_COMMUNICATIONS = (
-    Path(r"c:\Users\fubai\Desktop\My_Workspace\0100_PLC自动化\DJ-2026-005")
+    Path(__file__).resolve().parents[6]  # 工作区根目录：tests/vartable → SW-2026-008 → 02_在研项目 → … → 工作区根
+    / "0100_PLC自动化"
+    / "DJ-2026-005"
     / "02_PLC程序"
     / "工程资产"
     / "communications.yml"

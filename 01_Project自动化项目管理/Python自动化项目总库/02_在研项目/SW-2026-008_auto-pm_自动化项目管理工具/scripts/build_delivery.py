@@ -28,7 +28,7 @@ from pathlib import Path
 # ============================================================
 # 配置区
 # ============================================================
-BASE_DIR = Path(r"c:\Users\fubai\Desktop\My_Workspace\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-008_auto-pm_自动化项目管理工具")
+BASE_DIR = Path(__file__).resolve().parents[1]  # scripts/ 的上一级即 SW-2026-008 项目根，不依赖本机路径
 SRC_CODE = BASE_DIR
 DELIVERY_DIR = BASE_DIR / "06_交付物"
 PACK_DIR = BASE_DIR / "06_交付物"  # CHG-SCPT-2026-145: 合并06_交付物打包到06_交付物

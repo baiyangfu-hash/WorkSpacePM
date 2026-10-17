@@ -40,7 +40,7 @@ from auto_pm.ui.qml.models.project_list_model import ProjectListModel
 def run_s11_s13_gui_verification() -> bool:
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
 
-    repo_root = Path(r"c:\Users\fubai\Desktop\My_Workspace\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-008_auto-pm_自动化项目管理工具")
+    repo_root = Path(__file__).resolve().parents[1]  # SW-2026-008 项目根，不依赖本机路径
     workspace_root = str(repo_root / "02_在研项目")
     evidence_dir = repo_root / "04_监控" / "03_M7_真实试用" / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
