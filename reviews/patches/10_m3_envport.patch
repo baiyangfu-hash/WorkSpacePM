@@ -1,0 +1,301 @@
+diff --git a/00_Infrastructure/auto_pm/launcher/launch.py b/00_Infrastructure/auto_pm/launcher/launch.py
+index 4a1a438..9fca7b9 100644
+--- a/00_Infrastructure/auto_pm/launcher/launch.py
++++ b/00_Infrastructure/auto_pm/launcher/launch.py
+@@ -17,6 +17,16 @@ _RELEASE_CHILD = (
+ )
+ _UNSAFE_PYTHON_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE")
+ _RESOLVE_ONLY_ARGUMENT = "--resolve-only"
++EXIT_DEPENDENCIES_MISSING = 5
++# Top-level import names of the runtime dependencies in SW-2026-008's pyproject.toml.
++_REQUIRED_MODULES = ("pydantic", "pydantic_settings", "click", "rich", "yaml", "copier", "PySide6", "markdown")
++_LOCK_FILE = "00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt"
++# Run in the same isolated mode as the release child, so a module found only through
++# PYTHONPATH or the user site does not count as installed.
++_PROBE_CHILD = (
++    "import importlib.util, sys; "
++    "print(' '.join(m for m in sys.argv[1:] if importlib.util.find_spec(m) is None))"
++)
+ 
+ 
+ def _child_environment(cache_root: Path, workspace_root: Path) -> dict[str, str]:
+@@ -31,6 +41,21 @@ def _child_environment(cache_root: Path, workspace_root: Path) -> dict[str, str]
+     return env
+ 
+ 
++def _missing_modules(modules: tuple[str, ...] | None = None) -> list[str] | None:
++    """Return the modules the release child could not import, or ``None`` when the probe itself failed."""
++    probe = subprocess.run(
++        [sys.executable, "-B", "-I", "-c", _PROBE_CHILD, *(_REQUIRED_MODULES if modules is None else modules)],
++        capture_output=True,
++        text=True,
++        encoding="utf-8",
++        errors="replace",
++        check=False,
++    )
++    if probe.returncode != 0:
++        return None
++    return probe.stdout.split()
++
++
+ def main(argv: list[str] | None = None, *, container: Path | None = None) -> int:
+     """Resolve and execute a release, or only resolve for isolation testing."""
+     resolved_container = container or Path(__file__).resolve().parent.parent
+@@ -45,6 +70,16 @@ def main(argv: list[str] | None = None, *, container: Path | None = None) -> int
+         _RESOLVE_ONLY_ARGUMENT
+     ]:
+         return 0
++    missing = _missing_modules()
++    if missing is None:
++        print("launcher: dependency probe failed; continuing without it", file=sys.stderr)
++    elif missing:
++        print(f"launcher: missing dependencies: {', '.join(missing)}", file=sys.stderr)
++        print(
++            f"launcher: install them with: {sys.executable} -m pip install --no-deps -r {_LOCK_FILE}",
++            file=sys.stderr,
++        )
++        return EXIT_DEPENDENCIES_MISSING
+     command = [sys.executable, "-B", "-I", "-c", _RELEASE_CHILD, str(release_dir)]
+     command.extend(release_args)
+     cache_root = resolved_container / ".auto-pm" / "runtime-cache" / "ruff"
+diff --git a/00_Infrastructure/auto_pm/tests/launcher/test_launch.py b/00_Infrastructure/auto_pm/tests/launcher/test_launch.py
+index 387aa63..5542741 100644
+--- a/00_Infrastructure/auto_pm/tests/launcher/test_launch.py
++++ b/00_Infrastructure/auto_pm/tests/launcher/test_launch.py
+@@ -96,7 +96,7 @@ def test_main_pins_child_to_workspace_owning_container(
+     def fake_run(command: list[str], **kwargs: object) -> object:
+         captured["command"] = command
+         captured.update(kwargs)
+-        return type("Completed", (), {"returncode": 0})()
++        return type("Completed", (), {"returncode": 0, "stdout": ""})()  # "" = no missing dependency
+ 
+     monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+ 
+@@ -105,3 +105,34 @@ def test_main_pins_child_to_workspace_owning_container(
+     assert isinstance(environment, dict)
+     assert environment["AUTO_PM_WORKSPACE"] == str(workspace_root)
+     assert captured["cwd"] == container / "releases" / "1.2.4-test"
++
++
++def test_missing_modules_reports_only_what_the_isolated_child_cannot_import() -> None:
++    launcher = _load_launcher()
++
++    assert launcher._missing_modules(("json", "auto_pm_no_such_module_m3envport")) == [
++        "auto_pm_no_such_module_m3envport"
++    ]
++
++
++def test_missing_dependencies_stop_before_the_release_child_with_an_install_hint(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
++) -> None:
++    launcher = _load_launcher()
++    container = _write_valid_container(tmp_path)
++    monkeypatch.setattr(launcher, "_REQUIRED_MODULES", ("json", "auto_pm_no_such_module_m3envport"))
++
++    assert launcher.main([], container=container) == launcher.EXIT_DEPENDENCIES_MISSING
++    error = capsys.readouterr().err
++    assert "auto_pm_no_such_module_m3envport" in error
++    assert "requirements-lock-py312-win.txt" in error
++
++
++def test_resolve_only_skips_the_dependency_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    launcher = _load_launcher()
++
++    def _fail() -> list[str]:
++        raise AssertionError("resolve-only must not probe dependencies")
++
++    monkeypatch.setattr(launcher, "_missing_modules", _fail)
++    assert launcher.main(["--resolve-only"], container=_write_valid_container(tmp_path)) == 0
+diff --git a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/pyproject.toml b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/pyproject.toml
+index 4c31ae0..b094f53 100644
+--- a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/pyproject.toml
++++ b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/pyproject.toml
+@@ -37,16 +37,16 @@ dev = [
+     "copier>=9.7.1,<10",
+     "commitizen>=3,<4",
+     "faker>=30,<31",
+-    "mypy>=1,<2",
++    "mypy>=1,<3",
+     "polyfactory>=2,<3",
+     "pre-commit>=3,<4",
+-    "pytest>=8,<9",
+-    "pytest-cov>=5,<6",
++    "pytest>=8,<10",
++    "pytest-cov>=5,<8",
+     "pytest-datadir>=1,<2",
+     "pytest-env>=1,<2",
+     "pytest-qt>=4.4,<5",
+     "pytest-xdist>=3,<4",
+-    "ruff>=0.5,<0.6",
++    "ruff>=0.5,<0.17",
+     "toml-sort>=0.24.2,<0.25",
+     "safety>=3.2.9,<4",
+     "types-PyYAML>=6,<7",
+diff --git a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/build_delivery.py b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/build_delivery.py
+index 08e36ec..f452820 100644
+--- a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/build_delivery.py
++++ b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/build_delivery.py
+@@ -28,7 +28,7 @@ from pathlib import Path
+ # ============================================================
+ # 配置区
+ # ============================================================
+-BASE_DIR = Path(r"c:\Users\fubai\Desktop\My_Workspace\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-008_auto-pm_自动化项目管理工具")
++BASE_DIR = Path(__file__).resolve().parents[1]  # scripts/ 的上一级即 SW-2026-008 项目根，不依赖本机路径
+ SRC_CODE = BASE_DIR
+ DELIVERY_DIR = BASE_DIR / "06_交付物"
+ PACK_DIR = BASE_DIR / "06_交付物"  # CHG-SCPT-2026-145: 合并06_交付物打包到06_交付物
+diff --git a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/verify_m7_gui.py b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/verify_m7_gui.py
+index 487dba6..c1fbd2c 100644
+--- a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/verify_m7_gui.py
++++ b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/verify_m7_gui.py
+@@ -40,7 +40,7 @@ from auto_pm.ui.qml.models.project_list_model import ProjectListModel
+ def run_s11_s13_gui_verification() -> bool:
+     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
+ 
+-    repo_root = Path(r"c:\Users\fubai\Desktop\My_Workspace\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-008_auto-pm_自动化项目管理工具")
++    repo_root = Path(__file__).resolve().parents[1]  # SW-2026-008 项目根，不依赖本机路径
+     workspace_root = str(repo_root / "02_在研项目")
+     evidence_dir = repo_root / "04_监控" / "03_M7_真实试用" / "evidence"
+     evidence_dir.mkdir(parents=True, exist_ok=True)
+diff --git a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/test_communications_parser.py b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/test_communications_parser.py
+index 4acceb2..0e6e1d5 100644
+--- a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/test_communications_parser.py
++++ b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/test_communications_parser.py
+@@ -12,7 +12,9 @@ from auto_pm.vartable.parsers.communications_parser import CommunicationsParser
+ 
+ # 真实 DJ-2026-005 communications.yml 路径（只读，不修改）
+ DJ_2026_005_COMMUNICATIONS = (
+-    Path(r"c:\Users\fubai\Desktop\My_Workspace\0100_PLC自动化\DJ-2026-005")
++    Path(__file__).resolve().parents[6]  # 工作区根目录：tests/vartable → SW-2026-008 → 02_在研项目 → … → 工作区根
++    / "0100_PLC自动化"
++    / "DJ-2026-005"
+     / "02_PLC程序"
+     / "工程资产"
+     / "communications.yml"
+diff --git a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/test_program_blocks_parser.py b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/test_program_blocks_parser.py
+index c058c1e..bed281c 100644
+--- a/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/test_program_blocks_parser.py
++++ b/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/test_program_blocks_parser.py
+@@ -12,7 +12,9 @@ from auto_pm.vartable.parsers.program_blocks_parser import ProgramBlocksParser
+ 
+ # 真实 DJ-2026-005 program_blocks.yml 路径（只读，不修改）
+ DJ_2026_005_PROGRAM_BLOCKS = (
+-    Path(r"c:\Users\fubai\Desktop\My_Workspace\0100_PLC自动化\DJ-2026-005")
++    Path(__file__).resolve().parents[6]  # 工作区根目录：tests/vartable → SW-2026-008 → 02_在研项目 → … → 工作区根
++    / "0100_PLC自动化"
++    / "DJ-2026-005"
+     / "02_PLC程序"
+     / "工程资产"
+     / "program_blocks.yml"
+diff --git a/requirements.txt b/requirements.txt
+index 960035b..ebc6f93 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,27 +1,10 @@
+ # ==============================================================================
+-# Auto-PM 工业级 AI 研发工作台 - 依赖清单
++# Auto-PM 依赖清单已迁移（M3-ENVPORT）
+ # ==============================================================================
+-
+-# 核心桌面端与 GUI 依赖
+-PySide6>=6.5.0
+-
+-# 核心 CLI 与规则引擎依赖
+-click>=8.1.0
+-rich>=13.0.0
+-jinja2>=3.1.0
+-pyyaml>=6.0.0
+-
+-# 增强工具（可选平滑降级）
+-psutil>=5.9.0
+-
+-# 打包构建工具
+-pyinstaller>=6.0.0
+-
+-# 开发与自动化测试套件 (Dev & Tests)
+-pytest>=7.4.0
+-pytest-cov>=4.1.0
+-pytest-asyncio>=0.21.0
+-ruff>=0.1.0
+-mypy>=1.5.0
+-types-PyYAML>=6.0.0
+-types-requests>=2.31.0
++# 本文件不再列出依赖，避免与锁定文件不一致。请使用精确锁定的版本：
++#
++#   python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
++#   python -m pip check
++#
++# 新电脑请直接运行 setup_env.bat（它会做上面两步，并检查 Python 为 3.12）。
++# 版本约束的真源：SW-2026-008 的 pyproject.toml；精确版本的真源：上面的锁定文件。
+diff --git a/setup_env.bat b/setup_env.bat
+index 6f544b8..2332d10 100644
+--- a/setup_env.bat
++++ b/setup_env.bat
+@@ -7,22 +7,25 @@ echo        Auto-PM 工业级 AI 研发工作台 - 一键环境初始化向导
+ echo ==============================================================================
+ echo.
+ 
+-:: 1. 检查 Python
+-python --version >nul 2>&1
+-if %errorlevel% neq 0 (
+-    echo [错误] 未检测到 Python 环境！请先安装 Python 3.11+ 并勾选 "Add Python to PATH"。
++:: 1. 检查 Python：锁定文件只覆盖 Python 3.12（requirements-lock-py312-win.txt）
++set "PY_EXE="
++python -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>&1
++if %errorlevel% equ 0 set "PY_EXE=python"
++if not defined PY_EXE py -3.12 -c "import sys" >nul 2>&1 && set "PY_EXE=py -3.12"
++if not defined PY_EXE (
++    echo [错误] 未找到 Python 3.12。依赖锁定文件只覆盖 Python 3.12，请安装 3.12 并勾选 "Add Python to PATH"。
+     echo 下载地址: https://www.python.org/downloads/
+     pause
+     exit /b 1
+ )
+ 
+ echo [1/4] 正在检测 Python 版本...
+-python --version
++%PY_EXE% --version
+ 
+ :: 2. 创建虚拟环境
+ if not exist ".venv" (
+     echo [2/4] 正在创建专属虚拟环境 (.venv)...
+-    python -m venv .venv
++    %PY_EXE% -m venv .venv
+     if %errorlevel% neq 0 (
+         echo [错误] 创建虚拟环境失败，请检查 Python 权限。
+         pause
+@@ -35,11 +38,32 @@ if not exist ".venv" (
+ :: 3. 激活虚拟环境并安装依赖
+ echo [3/4] 正在激活虚拟环境并安装核心依赖库...
+ call .venv\Scripts\activate.bat
++python -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>&1
++if %errorlevel% neq 0 (
++    echo [错误] 已有的 .venv 不是 Python 3.12。请把 .venv 改名备份（例如 .venv.old）后重新运行本脚本。
++    pause
++    exit /b 1
++)
+ python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple --quiet
+ 
+-if exist "requirements.txt" (
+-    echo 正在从 requirements.txt 安装依赖...
+-    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
++set "LOCK_FILE=00_Infrastructure\auto_pm\environment\requirements-lock-py312-win.txt"
++if not exist "%LOCK_FILE%" (
++    echo [错误] 依赖锁定文件缺失: %LOCK_FILE%
++    pause
++    exit /b 1
++)
++echo 正在按锁定文件安装依赖（精确版本，不解析新依赖）...
++python -m pip install --no-deps -r "%LOCK_FILE%" -i https://pypi.tuna.tsinghua.edu.cn/simple
++if %errorlevel% neq 0 (
++    echo [错误] 依赖安装失败，请检查网络后重新运行本脚本。
++    pause
++    exit /b 1
++)
++python -m pip check
++if %errorlevel% neq 0 (
++    echo [错误] 依赖一致性检查未通过（pip check），请把上面的输出发给维护者。
++    pause
++    exit /b 1
+ )
+ 
+ :: 4. 校验稳定入口（运行时通过 manifest 校验的 active release，不安装平铺源码）
