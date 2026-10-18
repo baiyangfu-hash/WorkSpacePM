@@ -31,7 +31,7 @@ python reviews/tools/audit_pr.py <PR 编号> --patch <分支>:reviews/patches/<�
 | `merge_shape` | 已合并的 PR 是不是“合并提交”，第二个父提交是不是 PR 头部 | FAIL 说明用了 Squash 或 Rebase，提交号变了，要在报告里写明；WARN 说明用了快进（例：PR #1），离线跑时 `scope` 会是 UNVERIFIED，要联网重跑 |
 | `merge_content` | 合并提交有没有夹带 PR 以外的改动 | FAIL 列出多出的文件，属于严重问题；WARN 说明合并时手工解决过冲突，要人工看解决结果 |
 | `mergeable` / `up_to_date` | 未合并的 PR 和当前 main 有没有冲突；PR 是否已包含最新 main | `mergeable` FAIL 时建议作者先把 main 合进来；`up_to_date` 只给 PASS 或 INFO，INFO 在没有冲突时不影响合并 |
-| `scope` / `protected_paths` | 改了几个文件，有没有碰 WBS、台账、`AGENTS.md`、规范库、`auto_pm` 基建、`.github/workflows`、CHG/DEC | WARN 不是错，但报告里要点名，并核对这张卡有没有授权改这些路径（第 3 步） |
+| `scope` / `protected_paths` | 改了几个文件，有没有碰 WBS、台账、`AGENTS.md`、规范库、`auto_pm` 基建、`.github/workflows`、CHG/DEC，以及 agent 入口（`.trae/`、`.cursor/rules/`、`.agent/rules/`、`.agents/skills.json`，改这些要用户签字） | WARN 不是错，但报告里要点名，并核对这张卡有没有授权改这些路径（第 3 步） |
 | `secrets` | 新增行里有没有令牌、API 密钥、私钥 | FAIL 立刻告诉用户（仓库是公开的），不要在报告里抄写密钥原文，只写位置 |
 | `privacy` | 邮箱、内网地址、手机号、身份证号、本机路径、`fubai`、长 base64 | 本机路径和 `fubai` 在 main 上已有约 200 个文件，属于已知基线，只报告“新增了哪一类” |
 | `ci_expected` | 改动是否落在 CI 的 `paths` 过滤范围内 | 只改文档时不会触发 CI，这是正常的 |
@@ -88,7 +88,7 @@ PR 合并以后，在同一份报告末尾追加“合并后核对”一节：�
 
 ## 6. 脚本本身的维护
 
-- 测试：`python -m pytest reviews/tools/test_audit_pr.py -q -p no:cacheprovider`。9 个用例各自在临时仓库里埋问题：合并提交夹带后门文件、冲突（冲突说明只列文件名）、令牌泄露（包括以 `++ ` 开头、在差异里显示成 `+++ ` 的行）、个人信息、CI 路径过滤、补丁少文件、快进合并、工作区不能被改动。
-- 2026-10-17 做过 3 次变异检查（去掉夹带检查、去掉密钥检查、补丁对比恒为通过），每次都有测试失败，说明测试能抓到这些问题。同日修复独立审阅发现的问题后又做了 3 次（把 `+++ ` 一律当文件名、不认快进合并、冲突说明不截断），也各有 1 个测试失败。
+- 测试：`python -m pytest reviews/tools/test_audit_pr.py -q -p no:cacheprovider`。10 个用例各自在临时仓库里埋问题：合并提交夹带后门文件、冲突（冲突说明只列文件名）、令牌泄露（包括以 `++ ` 开头、在差异里显示成 `+++ ` 的行）、个人信息、CI 路径过滤、补丁少文件、快进合并、工作区不能被改动、改到 agent 入口（`.trae/` 等）必须点名。
+- 2026-10-17 做过 3 次变异检查（去掉夹带检查、去掉密钥检查、补丁对比恒为通过），每次都有测试失败，说明测试能抓到这些问题。同日修复独立审阅发现的问题后又做了 3 次（把 `+++ ` 一律当文件名、不认快进合并、冲突说明不截断），也各有 1 个测试失败。2026-10-18 加入 agent 入口点名后，去掉 `.trae/*` 一条，新用例失败。
 - 用真实 PR 校准过：PR #2、#3、#4 的结果和 `reviews/08`、`18`、`20` 的人工结论一致；PR #1（快进）报 WARN，PR #7 报 PASS，都没有 FAIL。
 - 以后要让每个 PR 自动跑这个脚本，需要改 `.github/workflows/`，这属于本地 Claude 的地盘，要出卡并经用户批准。审阅者只写建议。

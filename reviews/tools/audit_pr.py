@@ -39,6 +39,11 @@ MERGE_SEARCH_LIMIT = 500
 PROTECTED_PATTERNS = (
     "AGENTS.md",
     ".github/workflows/*",
+    # Agent entry points and rules: writes there need the user's signature (AGENTS.md, "基础设施").
+    ".trae/*",
+    ".cursor/rules/*",
+    ".agent/rules/*",
+    ".agents/skills.json",
     "00_Obsidian_Base*",
     "00_Infrastructure/auto_pm/*",
     ".auto-pm/*",

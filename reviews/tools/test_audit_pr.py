@@ -112,6 +112,25 @@ def test_clean_merge_passes(world):
     assert status(checks, "secrets") == "PASS"
 
 
+def test_agent_entry_paths_must_be_named(world):
+    head = world["open_pr"](
+        10,
+        {
+            ".trae/rules/entry.md": "rule\n",
+            ".trae/skills/entry/SKILL.md": "skill\n",
+            ".agents/skills.json": "{}\n",
+            "docs/readme.md": "hello again\n",
+        },
+    )
+    world["merge_pr"](head)
+    _, checks = world["audit"](10)
+    detail = next(c.detail for c in checks if c.id == "protected_paths")
+    assert status(checks, "protected_paths") == "WARN"
+    for name in (".trae/rules/entry.md", ".trae/skills/entry/SKILL.md", ".agents/skills.json"):
+        assert name in detail
+    assert "docs/readme.md" not in detail
+
+
 def test_extra_change_hidden_in_merge_commit_fails(world):
     head = world["open_pr"](2, {"src/app.py": "x = 2\n"})
     world["merge_pr"](head, extra={"src/backdoor.py": "evil = True\n"})
