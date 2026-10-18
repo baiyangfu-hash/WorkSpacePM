@@ -7,7 +7,10 @@ import json
 import os
 import re
 import subprocess
+import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, TypeVar
 
 import click
 from pydantic import BaseModel, ValidationError
@@ -31,6 +34,7 @@ from auto_pm.core.execution_adapter_service import (
     ExecutionDispatchError,
     ExecutionDispatchService,
 )
+from auto_pm.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
 from auto_pm.core.mission_orchestrator import (
     MissionOrchestrator,
     MissionOrchestratorError,
@@ -38,6 +42,8 @@ from auto_pm.core.mission_orchestrator import (
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
+from auto_pm.infrastructure import lease_wallet, process_probe
+from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
     authority_path_parts,
@@ -46,6 +52,7 @@ from auto_pm.infrastructure.control_root_guard import (
 )
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
 
+_Command = TypeVar("_Command", bound=Callable[..., Any])
 
 def _workspace(ctx: click.Context) -> Path:
     app_ctx: AppContext = ctx.find_root().obj
@@ -78,6 +85,13 @@ def _execution_service(ctx: click.Context) -> ContinuityExecutionService:
     root = _workspace(ctx)
     WorkRegistryService(root).initialize(__version__)
     return ContinuityExecutionService(root)
+
+
+def _handover(ctx: click.Context) -> LeaseHandoverService:
+    _require_mutation_root(ctx)
+    root = _workspace(ctx)
+    WorkRegistryService(root).initialize(__version__)
+    return LeaseHandoverService(root)
 
 
 def _dispatch_service(ctx: click.Context) -> ExecutionDispatchService:
@@ -117,6 +131,54 @@ def _secret_from_environment(variable_name: str) -> str:
     if any(not character.isprintable() for character in value):
         raise click.ClickException("lease token 安全秘密源无效")
     return value
+
+
+_ARGV_TOKEN_WARNING = (
+    "警告：{option} 已弃用：口令会留在进程列表与 shell 历史里；请改用 {env_option}（环境变量名）"
+    "或 --lease-wallet（本机钱包）"
+)
+
+
+def _lease_token(
+    ctx: click.Context,
+    *,
+    argv_value: str | None,
+    env_name: str | None,
+    use_wallet: bool = False,
+    run_id: str = "",
+    owner_id: str = "",
+    option: str = "--lease-token",
+    env_option: str = "--lease-token-env",
+) -> str:
+    """Exactly one token source: an environment variable (preferred), the local wallet, or the deprecated argv option (TD-SW008-064)."""
+
+    sources = sum(1 for given in (argv_value is not None, env_name is not None, use_wallet) if given)
+    if sources != 1:
+        wallet_hint = " 或 --lease-wallet" if use_wallet or run_id else ""
+        raise click.UsageError(f"必须且只能给出一个口令来源：{env_option}{wallet_hint}（{option} 已弃用）")
+    if env_name is not None:
+        return _secret_from_environment(env_name)
+    if use_wallet:
+        try:
+            return lease_wallet.load(_workspace(ctx), run_id=run_id, owner_id=owner_id)
+        except lease_wallet.LeaseWalletError as error:
+            raise click.ClickException(str(error)) from error
+    assert argv_value is not None
+    if sys.stderr.isatty():  # only an interactive user sees it; scripts and tests parse unchanged output
+        click.echo(_ARGV_TOKEN_WARNING.format(option=option, env_option=env_option), err=True)
+    return argv_value
+
+
+def _holder_pid(value: str) -> int | None:
+    """``auto`` = the long-lived process behind this call (the agent's shell or IDE), ``none`` = record nothing, or an explicit pid."""
+
+    if value == "none":
+        return None
+    if value == "auto":
+        return process_probe.holder_process_pid()
+    if value.isdigit() and int(value) > 0:
+        return int(value)
+    raise click.BadParameter("--holder-pid 必须是 auto、none 或正整数")
 
 
 def _git(root: Path, *args: str) -> bytes:
@@ -569,7 +631,19 @@ def run_group() -> None:
 @click.option(
     "--worktree", type=click.Path(exists=True, file_okay=False, path_type=Path), default=None
 )
-@click.option("--lease-token", required=True)
+@click.option("--lease-token", default=None, help="已弃用：口令会留在进程列表里；请用 --lease-token-env 或 --lease-wallet")
+@click.option("--lease-token-env", default=None, metavar="ENV_NAME", help="从该环境变量读取口令（读后即清除）")
+@click.option(
+    "--lease-wallet",
+    is_flag=True,
+    help="本命令自己生成口令并存入本机钱包（.auto-pm/cache/lease-wallet/），用户与 agent 都不必经手口令",
+)
+@click.option(
+    "--holder-pid",
+    default="auto",
+    show_default=True,
+    help="与 --lease-wallet 一起：记录持有者的长驻进程（auto=调用本命令的 shell 或 IDE；none=不记录；或给出 pid），供日后回收判定",
+)
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
@@ -582,12 +656,25 @@ def start_run(
     owned_paths: tuple[str, ...],
     declared_dirty_paths: tuple[str, ...],
     worktree: Path | None,
-    lease_token: str,
+    lease_token: str | None,
+    lease_token_env: str | None,
+    lease_wallet: bool,
+    holder_pid: str,
     lease_seconds: int,
     idempotency_key: str,
 ) -> None:
     """Start a Run after independently observing Git HEAD and owned-path dirtiness."""
     _require_mutation_root(ctx)
+    if lease_wallet:
+        if lease_token is not None or lease_token_env is not None:
+            raise click.UsageError("--lease-wallet 不能与 --lease-token 或 --lease-token-env 同用")
+        handover = _handover(ctx)
+        try:
+            lease_token = handover.reusable_token(run_id, executor_id)
+        except LeaseHandoverError as error:
+            raise click.ClickException(str(error)) from error
+    else:
+        lease_token = _lease_token(ctx, argv_value=lease_token, env_name=lease_token_env)
     owned = tuple(path.replace("\\", "/") for path in owned_paths)
     declared = tuple(path.replace("\\", "/") for path in declared_dirty_paths)
     requested_worktree = worktree or _workspace(ctx)
@@ -607,6 +694,8 @@ def start_run(
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
     if replay is not None:
+        if lease_wallet:
+            _remember_started(ctx, replay.run_id, executor_id, lease_token, holder_pid, idempotency_key)
         _emit(replay)
         return
     root = _governed_worktree(ctx, requested_worktree)
@@ -629,7 +718,34 @@ def start_run(
         )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
+    if lease_wallet:
+        _remember_started(ctx, item.run_id, executor_id, lease_token, holder_pid, idempotency_key)
     _emit(item)
+
+
+def _remember_started(
+    ctx: click.Context, run_id: str, owner_id: str, lease_token: str, holder_pid: str, idempotency_key: str
+) -> None:
+    handover = _handover(ctx)
+    try:
+        handover.remember(run_id, owner_id, lease_token)
+        handover.record_holder(run_id, owner_id, lease_token, _holder_pid(holder_pid), f"{idempotency_key}:holder")
+    except LeaseHandoverError as error:
+        raise click.ClickException(str(error)) from error
+
+
+def _token_options(function: _Command) -> _Command:
+    """The three token sources of a write made by the current holder (TD-SW008-064)."""
+
+    function = click.option(
+        "--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令"
+    )(function)
+    function = click.option(
+        "--lease-token-env", default=None, metavar="ENV_NAME", help="从该环境变量读取口令（读后即清除）"
+    )(function)
+    return click.option(
+        "--lease-token", default=None, help="已弃用：口令会留在进程列表里；请用 --lease-token-env 或 --lease-wallet"
+    )(function)
 
 
 @run_group.command(name="transition")
@@ -638,7 +754,7 @@ def start_run(
     "--to", "new_state", type=click.Choice([item.value for item in RunState]), required=True
 )
 @click.option("--owner", "owner_id", required=True)
-@click.option("--lease-token", required=True)
+@_token_options
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def transition_run(
@@ -646,10 +762,15 @@ def transition_run(
     run_id: str,
     new_state: str,
     owner_id: str,
-    lease_token: str,
+    lease_token: str | None,
+    lease_token_env: str | None,
+    lease_wallet: bool,
     idempotency_key: str,
 ) -> None:
     """Apply one legal Run state transition under an active lease."""
+    lease_token = _lease_token(
+        ctx, argv_value=lease_token, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
+    )
     try:
         item = _execution_service(ctx).transition_run(
             run_id, RunState(new_state), owner_id, lease_token, idempotency_key
@@ -663,7 +784,10 @@ def transition_run(
 @click.option("--target-run-id", required=True)
 @click.option("--recovery-run-id", required=True)
 @click.option("--recovery-owner", "recovery_owner_id", required=True)
-@click.option("--recovery-lease-token", required=True)
+@click.option(
+    "--recovery-lease-token", default=None, help="已弃用：口令会留在进程列表里；请用 --recovery-lease-token-env"
+)
+@click.option("--recovery-lease-token-env", default=None, metavar="ENV_NAME", help="从该环境变量读取恢复 Run 的口令")
 @click.option("--decision-id", required=True)
 @click.option(
     "--outcome",
@@ -678,7 +802,8 @@ def settle_expired_run(
     target_run_id: str,
     recovery_run_id: str,
     recovery_owner_id: str,
-    recovery_lease_token: str,
+    recovery_lease_token: str | None,
+    recovery_lease_token_env: str | None,
     decision_id: str,
     outcome: str,
     reason: str,
@@ -686,6 +811,13 @@ def settle_expired_run(
 ) -> None:
     """Settle one abandoned Run through an explicit live recovery authority."""
 
+    recovery_lease_token = _lease_token(
+        ctx,
+        argv_value=recovery_lease_token,
+        env_name=recovery_lease_token_env,
+        option="--recovery-lease-token",
+        env_option="--recovery-lease-token-env",
+    )
     try:
         item = _execution_service(ctx).settle_expired_run(
             target_run_id=target_run_id,
@@ -919,6 +1051,57 @@ def revoke_unstarted_run(
     _emit(item)
 
 
+RECLAIM_EXIT_CODES = {"ALLOW": 0, "REFUSE_LIVE_LEASE": 1, "REFUSE_PROCESS_ALIVE": 1, "PENDING": 3}
+
+
+@run_group.command(name="reclaim")
+@click.option("--run-id", required=True)
+@click.option("--claimant", "claimant_id", required=True, help="接手的 agent 身份（将成为新持有者）")
+@click.option("--reason", required=True, help="为什么要回收（写进事件）")
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--holder-pid", default="auto", show_default=True, help="接手后记录新持有者的长驻进程：auto、none 或 pid")
+@click.pass_context
+def reclaim_run(
+    ctx: click.Context, run_id: str, claimant_id: str, reason: str, lease_seconds: int, holder_pid: str
+) -> None:
+    """Take over a started Run whose holder vanished: only after the lease expired (plus grace) and the holder's process is proven gone.
+
+    Exit 0 = taken over (new token in the local wallet); 1 = refused (live lease or holder alive); 3 = PENDING (the holder's process
+    cannot be identified: only the user's own `pm sign-risk` opens it).  A refusal and PENDING write nothing.
+    """
+
+    _require_mutation_root(ctx)
+    service = _handover(ctx)
+    try:
+        outcome = service.reclaim(
+            run_id=run_id, claimant_id=claimant_id, lease_seconds=lease_seconds, reason=reason, holder_pid=_holder_pid(holder_pid)
+        )
+    except LeaseHandoverError as error:
+        raise click.ClickException(str(error)) from error
+    payload: dict[str, object] = {
+        "schema_version": "lease-reclaim-outcome.v1",
+        "run_id": run_id,
+        "decision": outcome.decision.value,
+        "reason": outcome.reason,
+        "exit_path": outcome.exit_path,
+        "holder_owner_id": outcome.holder_owner_id,
+        "lease_expires_at": outcome.lease_expires_at,
+        "lease_expires_local": ContinuityStore.local_time_text(outcome.lease_expires_at),
+        "process_verdict": outcome.process_verdict.value if outcome.process_verdict else None,
+        "wait_seconds": outcome.wait_seconds,
+    }
+    if outcome.lease is not None:
+        payload.update(
+            owner_id=outcome.lease.owner_id,
+            epoch=outcome.lease.epoch,
+            expires_at=outcome.lease.expires_at,
+            wallet_path=outcome.lease.wallet_path,
+            holder_process_recorded=outcome.lease.holder_process_recorded,
+        )
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    ctx.exit(RECLAIM_EXIT_CODES[outcome.decision.value])
+
+
 @continuity_group.group(name="dispatch")
 def dispatch_group() -> None:
     """Prepare local, secret-free execution packages without provider side effects."""
@@ -934,7 +1117,8 @@ def dispatch_group() -> None:
     required=True,
 )
 @click.option("--executor", "executor_id", required=True)
-@click.option("--lease-token", required=True)
+@click.option("--lease-token", default=None, help="已弃用：口令会留在进程列表里；请用 --lease-token-env")
+@click.option("--lease-token-env", default=None, metavar="ENV_NAME", help="从该环境变量读取口令（读后即清除）")
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
 @click.option("--stack", default=None, help="已验证项目技术栈；省略时从 Workspace Registry 读取。")
 @click.option("--force-isolation", is_flag=True, help="即使控制工作树干净也创建隔离分支。")
@@ -947,7 +1131,8 @@ def prepare_dispatch(
     run_id: str,
     adapter: str,
     executor_id: str,
-    lease_token: str,
+    lease_token: str | None,
+    lease_token_env: str | None,
     lease_seconds: int,
     stack: str | None,
     force_isolation: bool,
@@ -955,6 +1140,7 @@ def prepare_dispatch(
 ) -> None:
     """Allocate a local Run and emit only a desensitized PREPARED receipt."""
 
+    lease_token = _lease_token(ctx, argv_value=lease_token, env_name=lease_token_env)
     try:
         mission = _mission_service(ctx, mutating=False).get(mission_id)
         result = _dispatch_service(ctx).prepare(
@@ -982,7 +1168,8 @@ def lease_group() -> None:
 @lease_group.command(name="renew")
 @click.option("--run-id", required=True)
 @click.option("--owner", "owner_id", required=True)
-@click.option("--lease-token-env", required=True, metavar="ENV_NAME")
+@click.option("--lease-token-env", default=None, metavar="ENV_NAME")
+@click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
 @click.option("--expected-version", type=click.IntRange(min=1), required=True)
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
 @click.option("--idempotency-key", required=True)
@@ -991,13 +1178,18 @@ def renew_lease(
     ctx: click.Context,
     run_id: str,
     owner_id: str,
-    lease_token_env: str,
+    lease_token_env: str | None,
+    lease_wallet: bool,
     expected_version: int,
     lease_seconds: int,
     idempotency_key: str,
 ) -> None:
     """Renew a lease held by the same owner and token."""
-    lease_token = _secret_from_environment(lease_token_env)
+    if (lease_token_env is None) == (not lease_wallet):
+        raise click.UsageError("必须且只能给出一个口令来源：--lease-token-env 或 --lease-wallet")
+    lease_token = _lease_token(
+        ctx, argv_value=None, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
+    )
     try:
         item = _execution_service(ctx).renew_lease(
             run_id,
@@ -1012,6 +1204,41 @@ def renew_lease(
     _emit(item)
 
 
+@lease_group.command(name="record-holder")
+@click.option("--run-id", required=True)
+@click.option("--owner", "owner_id", required=True)
+@_token_options
+@click.option("--holder-pid", default="auto", show_default=True, help="持有者的长驻进程：auto（调用本命令的 shell 或 IDE）或 pid")
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def record_holder(
+    ctx: click.Context,
+    run_id: str,
+    owner_id: str,
+    lease_token: str | None,
+    lease_token_env: str | None,
+    lease_wallet: bool,
+    holder_pid: str,
+    idempotency_key: str,
+) -> None:
+    """Record the holder's long-lived process (for example a renewal loop) so that a later reclaim can prove it gone."""
+
+    lease_token = _lease_token(
+        ctx, argv_value=lease_token, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
+    )
+    _require_mutation_root(ctx)
+    pid = _holder_pid(holder_pid)
+    if pid is None:
+        raise click.ClickException("找不到可记录的持有者进程；请用 --holder-pid 给出 pid")
+    try:
+        recorded = _handover(ctx).record_holder(run_id, owner_id, lease_token, pid, idempotency_key)
+    except LeaseHandoverError as error:
+        raise click.ClickException(str(error)) from error
+    if not recorded:
+        raise click.ClickException(f"进程 {pid} 不在运行或读不到启动时间，未记录")
+    click.echo(json.dumps({"run_id": run_id, "owner_id": owner_id, "holder_pid": pid, "recorded": True}, ensure_ascii=False))
+
+
 @continuity_group.group(name="checkpoint")
 def checkpoint_group() -> None:
     """Create immutable Run recovery checkpoints."""
@@ -1021,7 +1248,7 @@ def checkpoint_group() -> None:
 @click.option("--checkpoint-id", required=True)
 @click.option("--run-id", required=True)
 @click.option("--owner", "owner_id", required=True)
-@click.option("--lease-token", required=True)
+@_token_options
 @click.option("--summary", required=True)
 @click.option("--evidence", multiple=True, required=True)
 @click.option("--idempotency-key", required=True)
@@ -1031,12 +1258,17 @@ def create_checkpoint(
     checkpoint_id: str,
     run_id: str,
     owner_id: str,
-    lease_token: str,
+    lease_token: str | None,
+    lease_token_env: str | None,
+    lease_wallet: bool,
     summary: str,
     evidence: tuple[str, ...],
     idempotency_key: str,
 ) -> None:
     """Checkpoint current Git baseline and dirty paths from the Run worktree."""
+    lease_token = _lease_token(
+        ctx, argv_value=lease_token, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
+    )
     service = _execution_service(ctx)
     try:
         run = service.get_run(run_id)
@@ -1068,7 +1300,8 @@ def handoff_v2_group() -> None:
 @click.option("--checkpoint-id", required=True)
 @click.option("--from-owner", required=True)
 @click.option("--to-owner", required=True)
-@click.option("--lease-token", required=True)
+@click.option("--lease-token", default=None, help="已弃用：口令会留在进程列表里；请用 --lease-token-env（或直接用 pm handoff）")
+@click.option("--lease-token-env", default=None, metavar="ENV_NAME", help="从该环境变量读取口令（读后即清除）")
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def create_handoff(
@@ -1077,10 +1310,12 @@ def create_handoff(
     checkpoint_id: str,
     from_owner: str,
     to_owner: str,
-    lease_token: str,
+    lease_token: str | None,
+    lease_token_env: str | None,
     idempotency_key: str,
 ) -> None:
     """Create an immutable handoff.v2 from an active lease and checkpoint."""
+    lease_token = _lease_token(ctx, argv_value=lease_token, env_name=lease_token_env)
     try:
         item = _execution_service(ctx).create_handoff(
             handoff_id=handoff_id,
@@ -1098,7 +1333,10 @@ def create_handoff(
 @handoff_v2_group.command(name="accept")
 @click.option("--handoff-id", required=True)
 @click.option("--receiver", "receiver_id", required=True)
-@click.option("--new-lease-token", required=True)
+@click.option(
+    "--new-lease-token", default=None, help="已弃用：口令会留在进程列表里；请用 --new-lease-token-env（或直接用 pm takeover）"
+)
+@click.option("--new-lease-token-env", default=None, metavar="ENV_NAME", help="从该环境变量读取新口令（读后即清除）")
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
@@ -1106,11 +1344,19 @@ def accept_handoff(
     ctx: click.Context,
     handoff_id: str,
     receiver_id: str,
-    new_lease_token: str,
+    new_lease_token: str | None,
+    new_lease_token_env: str | None,
     lease_seconds: int,
     idempotency_key: str,
 ) -> None:
     """Atomically transfer the Run lease to the named receiver."""
+    new_lease_token = _lease_token(
+        ctx,
+        argv_value=new_lease_token,
+        env_name=new_lease_token_env,
+        option="--new-lease-token",
+        env_option="--new-lease-token-env",
+    )
     try:
         item = _execution_service(ctx).accept_handoff(
             handoff_id=handoff_id,

@@ -1346,7 +1346,10 @@ class ContinuityExecutionService:
     ) -> None:
         expires_at = ContinuityExecutionService._lease_expiry(lease, "lease")
         if lease.owner_id != owner_id or lease.lease_token != lease_token:
-            raise ContinuityExecutionError("lease ownership 不匹配")
+            raise ContinuityExecutionError(
+                "lease ownership 不匹配（租约可能已被移交或回收，你持有的口令已失效）："
+                f"Run {lease.run_id} 当前持有者 {lease.owner_id}，租约到 {ContinuityStore.local_time_text(lease.expires_at)}（本机时间）"
+            )
         if expires_at <= now:
             raise ContinuityExecutionError("lease 已过期")
 
@@ -1370,7 +1373,16 @@ class ContinuityExecutionService:
         for candidate in self._store.list_runs(work_id):
             if candidate.run_id == run_id:
                 raise ContinuityExecutionError("Run 已存在；精确重放必须使用原 idempotency_key")
-            raise ContinuityExecutionError("Work 已有非终态 Run")
+            try:
+                lease = self._store.get_lease(candidate.run_id)
+                holder = (
+                    f"：Run {candidate.run_id} 正由 {lease.owner_id} 持有，租约到 "
+                    f"{ContinuityStore.local_time_text(lease.expires_at)}（本机时间）；"
+                    "请等对方交接（pm handoff），或租约过期后再回收（continuity run reclaim）"
+                )
+            except ContinuityStoreError:
+                holder = f"：Run {candidate.run_id}"
+            raise ContinuityExecutionError("Work 已有非终态 Run" + holder)
 
     @staticmethod
     def _normalize_paths(paths: list[str], *, allow_empty: bool = False) -> tuple[str, ...]:
