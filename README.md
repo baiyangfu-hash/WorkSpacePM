@@ -21,7 +21,7 @@ Auto-PM 为工业电气工程师与软件开发者提供了从**“需求澄清 
   │    • 深色实底磨砂拟物面板 / 70% 焦点遮罩 / 20 维全景交互 / 免安装即开即用    │
   ├─────────────────────────────────────────────────────────────────────────────┤
   │ 🧠 【跨 AI 协作技能矩阵 (.trae/skills/ & .cursor/rules/)】                  │
-  │    • pm-workflow：需求澄清、PRD/DSN、5大过程组门禁、PM_SESSION 单一真源落账  │
+  │    • cockpit-entry：薄入口，进门先跑只读定位 pm orient（pm-workflow 已隔离） │
   │    • fullstack-engineer：Python Clean Architecture 5层整洁架构、自动化测试   │
   │    • plc-electrical-engineer：西门子 S7-1200/1500、SCL 代码生成、变量表/IO   │
   ├─────────────────────────────────────────────────────────────────────────────┤
@@ -96,7 +96,8 @@ cd My_Workspace
 
 本工作空间由 **Trae / Cursor / Antigravity / Claude** 等多个 AI 共用，规则单一真源维护于 `AGENTS.md`：
 
-- **`pm-workflow`**：PM 总控技能，负责读取并回写 `PM_SESSION_<编号>.md`，自动调度全栈或 PLC 技能；
+- **`cockpit-entry`**：驾驶舱薄入口，任何 agent 进门先确认控制根与项目编号、运行只读定位命令 `pm orient <项目编号> --json`；
+- **`pm-workflow`**：已退役隔离（2026-09-09），禁止使用；PM 是治理角色，通过 CHG、Decision 与 Continuity v2 工作，`PM_SESSION` 仅作历史证据；
 - **`fullstack-engineer`**：全栈开发技能，负责 Python 5 层整洁架构编码与单测；
 - **`plc-electrical-engineer`**：电气工程技能，主适配西门子 S7-1200/1500 与 SCL。
 
