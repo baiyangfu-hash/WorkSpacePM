@@ -104,6 +104,29 @@ def _commit_with_real_hooks(repo: Path, message: str) -> None:
     )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no execute bit; Git for Windows runs any hook file")
+def test_git_hook_install_makes_both_hooks_executable_so_git_runs_them(tmp_path: Path) -> None:
+    (tmp_path / ".git" / "hooks").mkdir(parents=True)
+
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "git-hook", "install"])
+
+    assert result.exit_code == 0, result.output
+    for name in ("pre-commit", "commit-msg"):
+        assert os.access(tmp_path / ".git" / "hooks" / name, os.X_OK), f"{name} is not executable, Git would skip it"
+
+
+def test_git_hook_install_falls_back_to_python3_when_python_is_absent(tmp_path: Path) -> None:
+    (tmp_path / ".git" / "hooks").mkdir(parents=True)
+
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "git-hook", "install"])
+
+    assert result.exit_code == 0, result.output
+    for name in ("pre-commit", "commit-msg"):
+        script = (tmp_path / ".git" / "hooks" / name).read_text(encoding="utf-8")
+        assert 'if ! command -v python >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then' in script
+        assert script.index('PYTHON_EXE="python3"') < script.index("/.venv/Scripts/python.exe")
+
+
 def test_installed_commit_msg_hook_resolves_primary_and_linked_worktree_paths(
     tmp_path: Path,
 ) -> None:
@@ -158,6 +181,11 @@ def _git_hook_shell() -> str:
     return shell_executable
 
 
+def _git_hook_shell_command() -> list[str]:
+    # ``--login`` is how Git for Windows starts its sh; dash (the POSIX /bin/sh on Debian/Ubuntu) rejects it.
+    return [_git_hook_shell(), "--login"] if os.name == "nt" else [_git_hook_shell()]
+
+
 def test_installed_commit_msg_hook_rejects_missing_or_external_message_file(
     tmp_path: Path,
 ) -> None:
@@ -172,7 +200,7 @@ def test_installed_commit_msg_hook_rejects_missing_or_external_message_file(
     hook.chmod(0o755)
 
     missing = subprocess.run(
-        [_git_hook_shell(), "--login", str(hook), ".git/missing"],
+        [*_git_hook_shell_command(), str(hook), ".git/missing"],
         cwd=repo,
         check=False,
         capture_output=True,
@@ -187,7 +215,7 @@ def test_installed_commit_msg_hook_rejects_missing_or_external_message_file(
     external_message = tmp_path / "COMMIT_EDITMSG"
     external_message.write_text("external\n", encoding="utf-8")
     external = subprocess.run(
-        [_git_hook_shell(), "--login", str(hook), str(external_message)],
+        [*_git_hook_shell_command(), str(hook), str(external_message)],
         cwd=repo,
         check=False,
         capture_output=True,
