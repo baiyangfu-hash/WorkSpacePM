@@ -36,7 +36,7 @@ sequenceDiagram
 
 ### 1.3 驾驶舱与 CHG 变更传播链联动
 1. **008 驾驶舱回写**：提取的矩阵自动同步回写到 `PM_SESSION_<PID>.md` 的 **§3 系统架构与工站交握视图**。
-2. **CHG 传播链计算**：当使用 `pm-workflow` 创建变更单时，自动根据矩阵计算并填入 CHG 变更单 §6.2/§6.3 的“变更传播链 (Propagation Chain)”。
+2. **CHG 传播链计算**：当 PM 治理角色创建变更单时（`pm-workflow` 已隔离，不得使用），自动根据矩阵计算并填入 CHG 变更单 §6.2/§6.3 的“变更传播链 (Propagation Chain)”。
 
 ---
 
@@ -97,7 +97,7 @@ END_TEST_CASE
 
 ### 2.2 008 驾驶舱与 PM 里程碑联动
 - **驾驶舱质量仪表盘 (Quality Gauge)**：运行 `auto-pm plc check` 的通过率自动上报至 `PM_SESSION` 驾驶舱。
-- **PM 里程碑硬门禁**：`pm-workflow` 在 Release 阶段校验测试分数为 100% 后方允许关单。
+- **PM 里程碑硬门禁**：PM 治理角色在验收阶段核验测试分数为 100% 后方允许关单。
 
 ---
 
