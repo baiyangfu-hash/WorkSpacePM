@@ -357,7 +357,9 @@ def test_r01_a_killed_executor_is_recorded_as_a_failure_never_as_success(scene: 
     assert store.get_lease(controller.run_id).lease_token.startswith("RELEASED:")
     transitions = _events(scene.root, "RUN_TRANSITIONED", controller.run_id)
     assert [event["new_state"] for event in transitions] == ["FAILED"]
-    assert transitions[0]["failure"]["code"] == "NONZERO_EXIT" and transitions[0]["lease_release"]["reason"] == "terminal:FAILED"
+    # Windows TerminateProcess leaves exit code 1 (NONZERO_EXIT); on POSIX SIGTERM leaves a negative return code (TERMINATED).
+    expected_code = "NONZERO_EXIT" if os.name == "nt" else "TERMINATED"
+    assert transitions[0]["failure"]["code"] == expected_code and transitions[0]["lease_release"]["reason"] == "terminal:FAILED"
     assert len(_events(scene.root, "EXECUTION_START_CLAIMED")) == 1 and len(_events(scene.root, "RUN_STARTED", controller.run_id)) == 1
     assert not _query(scene.root, "SELECT 1 FROM events WHERE payload_json LIKE ?", f"%{LEASE_TOKEN}%")
 

@@ -223,11 +223,11 @@ class ProjectScanner:
         Returns:
             推断的 stack 值（"python" / "plc" / "unknown"）
         """
-        # 统一路径分隔符为 os.sep，再小写化做包含判断
-        norm_path = project_path.replace("/", os.sep)
-        if "01_Project自动化项目管理" + os.sep + "Python自动化项目总库" + os.sep in norm_path:
+        # 两种分隔符都统一为 "/"：Windows 写下的反斜杠路径在 Linux 上也要能识别
+        norm_path = project_path.replace("\\", "/")
+        if "01_Project自动化项目管理/Python自动化项目总库/" in norm_path:
             return "python"
-        if "0100_PLC自动化" + os.sep in norm_path:
+        if "0100_PLC自动化/" in norm_path:
             return "plc"
         return "unknown"
 

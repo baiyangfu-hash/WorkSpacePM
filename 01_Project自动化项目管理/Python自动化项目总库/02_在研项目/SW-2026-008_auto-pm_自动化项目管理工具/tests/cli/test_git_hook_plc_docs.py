@@ -38,6 +38,15 @@ def commit_env() -> dict[str, str]:
     return environment
 
 
+def add_revision_note(doc: Path) -> None:
+    """Give the accepting commit a real change of its own.
+
+    Restoring a document to its committed text leaves nothing to commit on Linux. On Windows the commit only went through because
+    ``build`` writes CRLF and the tests write LF, so the line endings were the whole diff.
+    """
+    doc.write_text(doc.read_text(encoding="utf-8") + "\n修订说明：已与代码核对一致。\n", encoding="utf-8", newline="\n")
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
@@ -69,6 +78,7 @@ def test_e1_a_real_commit_is_refused_then_accepted_after_the_documents_agree(rep
     assert git(repo, "rev-parse", "HEAD").stdout.strip() == head
 
     doc.write_text(doc.read_text(encoding="utf-8").replace("| `i_bStart` | INT |", "| `i_bStart` | BOOL |"), encoding="utf-8", newline="\n")
+    add_revision_note(doc)
     git(repo, "add", IFC)
     accepted = git(repo, "commit", "-m", "back to the code type", check=False, env=commit_env())
     assert accepted.returncode == 0, accepted.stdout + accepted.stderr
@@ -84,6 +94,7 @@ def test_e2_a_marker_row_is_refused_until_it_is_confirmed(repo: Path) -> None:
 
     result = dc.confirm_project(str(repo / "0100_PLC自动化" / "DJ-TEST-001"))
     assert result.confirmed == 1
+    add_revision_note(doc)
     git(repo, "add", IFC)
     assert git(repo, "commit", "-m", "confirmed", check=False, env=commit_env()).returncode == 0
 

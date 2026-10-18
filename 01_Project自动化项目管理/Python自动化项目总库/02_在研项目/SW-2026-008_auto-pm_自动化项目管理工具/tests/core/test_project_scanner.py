@@ -469,6 +469,15 @@ class TestStackFallback:
         path = "C:/workspace/01_Project自动化项目管理/Python自动化项目总库/SW-2026-001"
         assert scanner._infer_stack_from_path(path) == "python"
 
+    def test_infer_stack_backslash_path_written_on_windows_is_recognised_anywhere(
+        self, tmp_path: Path
+    ) -> None:
+        """Windows 写下的反斜杠路径换到 Linux 机器上读，也要能推断出 stack"""
+        scanner = ProjectScanner(str(tmp_path))
+        assert scanner._infer_stack_from_path(r"D:\ws\0100_PLC自动化\DJ-2026-001") == "plc"
+        assert scanner._infer_stack_from_path("/home/u/ws/0100_PLC自动化/DJ-2026-001") == "plc"
+        assert scanner._infer_stack_from_path("/home/u/ws/0100_PLC自动化X/DJ") == "unknown"
+
     def test_apply_stack_fallback_skips_when_already_set(
         self, tmp_path: Path
     ) -> None:
