@@ -1179,3 +1179,11 @@ def resolve_context(ctx: click.Context, project_id: str, start_path: str | None)
 def resolve_context_compat(ctx: click.Context, project_id: str, start_path: str | None) -> None:
     """兼容入口；请迁移到 `context resolve`。"""
     _emit_context(ctx, project_id, start_path)
+
+
+# Agent swap commands (M3-HANDOFF card): kept in their own module, registered here so they appear under `pm`.
+from auto_pm.ui.cli.pm_handoff import handoff_pm, sign_risk_pm, takeover_pm  # noqa: E402
+
+pm_group.add_command(handoff_pm)
+pm_group.add_command(takeover_pm)
+pm_group.add_command(sign_risk_pm)

@@ -48,7 +48,13 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionStartClaim,
     ExecutionStartEvidence,
 )
-from auto_pm.contracts.lease_reclaim import check_write_epoch
+from auto_pm.contracts.lease_reclaim import (
+    GRACE_SECONDS,
+    ProcessFingerprint,
+    ProcessVerdict,
+    check_write_epoch,
+    lease_is_live,
+)
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.orchestration import OrchestrationOutcome
 from auto_pm.contracts.pm_facade import (
@@ -3965,7 +3971,9 @@ class ContinuityStore:
                 (stored_values["work_id"], stored_values["run_id"]),
             ).fetchone()
             if active_sibling is not None:
-                raise ContinuityStoreError("Work 已有非终态 Run")
+                raise ContinuityStoreError(
+                    "Work 已有非终态 Run" + self._holder_notice(conn, str(active_sibling[0]))
+                )
             self._insert_mapping(conn, "run_items", stored_values)
             self._insert_mapping(conn, "execution_leases", stored_lease)
             self._append_event(
@@ -7232,7 +7240,7 @@ class ContinuityStore:
 
         row = conn.execute(
             """SELECT event_type, payload_json FROM events
-            WHERE aggregate_id=? AND event_type IN ('RUN_CREATED', 'LEASE_TRANSFERRED')
+            WHERE aggregate_id=? AND event_type IN ('RUN_CREATED', 'LEASE_TRANSFERRED', 'LEASE_RECLAIMED')
             ORDER BY rowid DESC LIMIT 1""",
             (run_id,),
         ).fetchone()
@@ -7240,7 +7248,7 @@ class ContinuityStore:
             raise ContinuityStoreError(f"Run 没有 lease 授予事件: {run_id}")
         if row["event_type"] == "RUN_CREATED":
             return 1
-        try:
+        try:  # a transfer and a reclaim both record the lease version they produce: that version is the new epoch
             version = json.loads(str(row["payload_json"])).get("version")
         except (TypeError, ValueError, AttributeError) as error:
             raise ContinuityStoreError("lease 移交事件 payload 无法读取") from error
@@ -7255,6 +7263,340 @@ class ContinuityStore:
         with self._read_connection() as conn:
             self._get_run(conn, run_id)
             return self._grant_epoch(conn, run_id)
+
+    @staticmethod
+    def local_time_text(raw: str) -> str:
+        """An ISO timestamp shown in this machine's local time with its offset (the user reads Arizona time); the raw text when it cannot be parsed."""
+
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            return str(raw)
+        if parsed.tzinfo is None:
+            return str(raw)
+        return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+
+    def _holder_notice(self, conn: sqlite3.Connection, run_id: str) -> str:
+        """Who holds a Run's lease and until when, for refusal messages (case 1 of the storage acceptance cases); never the token."""
+
+        try:
+            lease = self._get_lease(conn, run_id)
+            epoch = str(self._grant_epoch(conn, run_id))
+        except ContinuityStoreError:
+            return f"：Run {run_id}"
+        return (
+            f"：Run {run_id} 正由 {lease.owner_id} 持有（epoch {epoch}），租约到 "
+            f"{self.local_time_text(lease.expires_at)}（本机时间，另有 {GRACE_SECONDS} 秒宽限）；"
+            "请等对方交接（pm handoff），或租约过期后再回收（continuity run reclaim）"
+        )
+
+    _RECLAIMABLE_RUN_STATES = frozenset(
+        {RunState.READY, RunState.RUNNING, RunState.BLOCKED, RunState.PENDING, RunState.VERIFYING}
+    )
+
+    def record_holder_process(
+        self,
+        *,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        fingerprint: ProcessFingerprint,
+        idempotency_key: str,
+    ) -> None:
+        """Record the holder's long-lived process for the CURRENT grant epoch (used only by a later reclaim; never a precondition of any write)."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        owner_id = self._validated_run_text(owner_id, label="lease owner")
+        lease_token = self._validated_run_text(lease_token, label="lease token")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        record = {
+            "host_id": self._validated_run_text(fingerprint.host_id, label="host_id"),
+            "pid": fingerprint.pid,
+            "start_time": self._validated_run_text(fingerprint.start_time, label="start_time"),
+            "image_sha256": fingerprint.image_sha256,
+            "cmdline_sha256": fingerprint.cmdline_sha256,
+        }
+        if type(fingerprint.pid) is not int or fingerprint.pid <= 0:
+            raise ContinuityStoreError("持有者进程 pid 必须是正整数")
+        for label in ("image_sha256", "cmdline_sha256"):
+            value = record[label]
+            if value is not None and (not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None):
+                raise ContinuityStoreError(f"{label} 必须是 64 位小写十六进制或空")
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="持有者进程")
+                if (
+                    existing["event_type"] != "HOLDER_PROCESS_RECORDED"
+                    or existing["aggregate_id"] != run_id
+                    or payload.get("owner_id") != owner_id
+                    or payload.get("process") != record
+                ):
+                    raise ContinuityStoreError("idempotency_key 的持有者进程记录语义不一致")
+                return
+            run = self._get_run(conn, run_id)
+            if run.state not in self._RECLAIMABLE_RUN_STATES:
+                raise ContinuityStoreError("只有非终态 Run 可以记录持有者进程")
+            self._require_lease_in_tx(conn, run_id=run_id, owner_id=owner_id, lease_token=lease_token, expected_epoch=None)
+            now = self._utc_now().isoformat()
+            self._append_event(
+                conn,
+                run_id,
+                "HOLDER_PROCESS_RECORDED",
+                {
+                    "schema_version": "holder-process.v1",
+                    "run_id": run_id,
+                    "owner_id": owner_id,
+                    "epoch": self._grant_epoch(conn, run_id),
+                    "process": record,
+                    "lease_token_sha256": self._lease_token_fingerprint(lease_token),
+                    "recorded_at": now,
+                },
+                idempotency_key,
+                now,
+                aggregate_type="run",
+            )
+
+    @staticmethod
+    def _current_holder_process(conn: sqlite3.Connection, run_id: str, owner_id: str, epoch: int) -> ProcessFingerprint | None:
+        rows = conn.execute(
+            """SELECT payload_json FROM events
+            WHERE aggregate_type='run' AND aggregate_id=? AND event_type='HOLDER_PROCESS_RECORDED'
+            ORDER BY rowid DESC""",
+            (run_id,),
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(str(row["payload_json"]))
+                process = payload["process"]
+                if payload.get("owner_id") != owner_id or payload.get("epoch") != epoch:
+                    continue
+                return ProcessFingerprint(
+                    host_id=str(process["host_id"]),
+                    pid=int(process["pid"]),
+                    start_time=str(process["start_time"]),
+                    image_sha256=process.get("image_sha256"),
+                    cmdline_sha256=process.get("cmdline_sha256"),
+                )
+            except (TypeError, ValueError, KeyError, AttributeError):
+                return None  # a malformed record proves nothing: the reclaim then sees UNKNOWN
+        return None
+
+    def holder_process(self, run_id: str) -> ProcessFingerprint | None:
+        """Read-only: the recorded process of the current holder in the current epoch, or ``None`` (then a reclaim sees UNKNOWN)."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            lease = self._get_lease(conn, run_id)
+            return self._current_holder_process(conn, run_id, lease.owner_id, self._grant_epoch(conn, run_id))
+
+    def record_reclaim_risk_acceptance(
+        self,
+        *,
+        run_id: str,
+        claimant_id: str,
+        signer: str,
+        method: str,
+        idempotency_key: str,
+    ) -> str:
+        """Record the user's own acceptance of the risk of reclaiming a Run whose holder process cannot be identified (PENDING exit).
+
+        It binds the Run, the claimant, the current holder, the grant epoch and the lease version: a renewal or any change of ownership after
+        the signature voids it. The caller (``pm sign-risk``) refuses non-interactive and agent sessions; the store records, it does not judge.
+        """
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        claimant_id = self._validated_run_text(claimant_id, label="claimant")
+        signer = self._validated_run_text(signer, label="signer")
+        method = self._validated_run_text(method, label="method")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        with self._transaction() as conn:
+            run = self._get_run(conn, run_id)
+            if run.state not in self._RECLAIMABLE_RUN_STATES:
+                raise ContinuityStoreError("只有非终态 Run 可以签署回收风险")
+            lease = self._get_lease(conn, run_id)
+            if lease.owner_id == claimant_id:
+                raise ContinuityStoreError("回收方已是当前持有者，无需签署")
+            epoch = self._grant_epoch(conn, run_id)
+            payload = {
+                "schema_version": "reclaim-risk-accepted.v1",
+                "run_id": run_id,
+                "claimant_id": claimant_id,
+                "holder_owner_id": lease.owner_id,
+                "epoch": epoch,
+                "lease_version": lease.version,
+                "signer": signer,
+                "method": method,
+            }
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                stored = self._validated_event_payload(existing, label="回收风险签署")
+                if existing["event_type"] != "RECLAIM_RISK_ACCEPTED" or {k: stored.get(k) for k in payload} != payload:
+                    raise ContinuityStoreError("idempotency_key 的回收风险签署语义不一致")
+                return str(existing["event_id"])
+            now = self._utc_now().isoformat()
+            digest = hashlib.sha256(
+                json.dumps({**payload, "signed_at": now}, sort_keys=True, ensure_ascii=False).encode()
+            ).hexdigest()[:16].upper()
+            event_id = f"RISK-{digest}"
+            self._append_event(
+                conn,
+                run_id,
+                "RECLAIM_RISK_ACCEPTED",
+                {**payload, "signed_at": now},
+                idempotency_key,
+                now,
+                event_id=event_id,
+                aggregate_type="run",
+            )
+            return event_id
+
+    @staticmethod
+    def _current_risk_acceptance(
+        conn: sqlite3.Connection, run_id: str, claimant_id: str, holder_owner_id: str, epoch: int, lease_version: int
+    ) -> str | None:
+        rows = conn.execute(
+            """SELECT event_id, payload_json FROM events
+            WHERE aggregate_type='run' AND aggregate_id=? AND event_type='RECLAIM_RISK_ACCEPTED'
+            ORDER BY rowid DESC""",
+            (run_id,),
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(str(row["payload_json"]))
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(payload, dict)
+                and payload.get("claimant_id") == claimant_id
+                and payload.get("holder_owner_id") == holder_owner_id
+                and payload.get("epoch") == epoch
+                and payload.get("lease_version") == lease_version
+            ):
+                return str(row["event_id"])
+        return None
+
+    def reclaim_risk_acceptance(self, run_id: str, claimant_id: str) -> str | None:
+        """Read-only: the id of a still-valid risk acceptance for this claimant (same holder, epoch and lease version), or ``None``."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            lease = self._get_lease(conn, run_id)
+            return self._current_risk_acceptance(
+                conn, run_id, claimant_id, lease.owner_id, self._grant_epoch(conn, run_id), lease.version
+            )
+
+    def reclaim_lease(
+        self,
+        *,
+        run_id: str,
+        expected_owner_id: str,
+        expected_lease_version: int,
+        claimant_id: str,
+        new_token: str,
+        lease_seconds: int,
+        process_verdict: ProcessVerdict,
+        risk_acceptance_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> LeaseItem:
+        """Install a new holder on a started Run whose lease is no longer live (expired plus grace) - V04-R1 case 3.
+
+        Allowed only for ``PROVEN_DEAD`` or for ``UNKNOWN`` with a still-valid user risk acceptance; ``ALIVE`` and a live lease are refused here
+        again INSIDE the write transaction, so a renewal or a transfer between the caller's check and this write cannot be overtaken.  The lease
+        version is raised by one and that version is the new epoch (``_grant_epoch``); the old token is gone with the overwritten row.
+        """
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        expected_owner_id = self._validated_run_text(expected_owner_id, label="expected owner")
+        claimant_id = self._validated_run_text(claimant_id, label="claimant")
+        new_token = self._validated_run_text(new_token, label="new lease token")
+        reason = self._validated_run_text(reason, label="reason")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(expected_lease_version) is not int or expected_lease_version < 1:
+            raise ContinuityStoreError("expected_lease_version 必须是正整数")
+        if type(lease_seconds) is not int or not 60 <= lease_seconds <= 3_600:
+            raise ContinuityStoreError("回收后的 lease_seconds 必须在 60 到 3600 之间")
+        if claimant_id == expected_owner_id:
+            raise ContinuityStoreError("回收方不得是当前持有者；持有者请续租")
+        if new_token in reason:
+            raise ContinuityStoreError("回收原因不得包含 lease token")
+        if process_verdict is ProcessVerdict.ALIVE:
+            raise ContinuityStoreError("持有者进程仍在运行，拒绝回收")
+        if process_verdict is ProcessVerdict.UNKNOWN and not risk_acceptance_id:
+            raise ContinuityStoreError("持有者进程无法判断：须用户本人签署接受风险（pm sign-risk）后才能回收")
+        if process_verdict is ProcessVerdict.PROVEN_DEAD and risk_acceptance_id:
+            raise ContinuityStoreError("持有者进程已证明不在时不需要风险签署")
+        request = {
+            "schema_version": "lease-reclaim-request.v1",
+            "run_id": run_id,
+            "expected_owner_id": expected_owner_id,
+            "expected_lease_version": expected_lease_version,
+            "claimant_id": claimant_id,
+            "lease_seconds": lease_seconds,
+            "process_verdict": process_verdict.value,
+            "risk_acceptance_id": risk_acceptance_id,
+            "reason": reason,
+            "new_token_sha256": self._lease_token_fingerprint(new_token),
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="lease 回收")
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["aggregate_id"] != run_id
+                    or existing["event_type"] != "LEASE_RECLAIMED"
+                    or payload.get("schema_version") != "lease-reclaimed.v1"
+                    or payload.get("request") != request
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 lease 回收语义不一致")
+                return self._get_lease(conn, run_id)
+            run = self._get_run(conn, run_id)
+            if run.state not in self._RECLAIMABLE_RUN_STATES:
+                raise ContinuityStoreError(f"只有非终态 Run 可以回收租约（当前 {run.state.value}）")
+            current = self._get_lease(conn, run_id)
+            if current.owner_id != expected_owner_id or current.version != expected_lease_version:
+                raise ContinuityStoreError("lease 持有者或版本在回收判定之后已变化，拒绝回收" + self._holder_notice(conn, run_id))
+            observed_at = self._utc_now()
+            expires = self._aware_timestamp(current.expires_at, "lease")
+            if lease_is_live(expires, observed_at):
+                raise ContinuityStoreError("租约仍有效（含宽限期），拒绝回收" + self._holder_notice(conn, run_id))
+            if process_verdict is ProcessVerdict.UNKNOWN:
+                valid = self._current_risk_acceptance(
+                    conn, run_id, claimant_id, current.owner_id, self._grant_epoch(conn, run_id), current.version
+                )
+                if valid is None or not hmac.compare_digest(valid, risk_acceptance_id):
+                    raise ContinuityStoreError("风险签署不存在或已失效（持有者、epoch 或租约版本已变化），请用户重新签署")
+            new_expires = (observed_at + timedelta(seconds=lease_seconds)).isoformat()
+            event_time = observed_at.isoformat()
+            cursor = conn.execute(
+                """UPDATE execution_leases
+                SET owner_id=?, lease_token=?, expires_at=?, version=version+1, updated_at=?
+                WHERE run_id=? AND owner_id=? AND version=?""",
+                (claimant_id, new_token, new_expires, event_time, run_id, expected_owner_id, expected_lease_version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("lease 回收 owner 或版本冲突")
+            self._append_event(
+                conn,
+                run_id,
+                "LEASE_RECLAIMED",
+                {
+                    "schema_version": "lease-reclaimed.v1",
+                    "request": request,
+                    "run_id": run_id,
+                    "from_owner": expected_owner_id,
+                    "to_owner": claimant_id,
+                    "previous_expires_at": current.expires_at,
+                    "expires_at": new_expires,
+                    "version": expected_lease_version + 1,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_lease(conn, run_id)
 
     def _require_lease_in_tx(
         self,
@@ -7273,7 +7615,10 @@ class ContinuityStore:
 
         lease = self._get_lease(conn, run_id)
         if lease.owner_id != owner_id or lease.lease_token != lease_token:
-            raise ContinuityStoreError("lease ownership 不匹配")
+            raise ContinuityStoreError(
+                "lease ownership 不匹配（租约可能已被移交或回收，你持有的口令已失效）"
+                + self._holder_notice(conn, run_id)
+            )
         if self._aware_timestamp(lease.expires_at, "lease") <= self._utc_now():
             raise ContinuityStoreError("lease 已过期")
         if expected_epoch is not None:  # no epoch presented: accepted during the compatibility period, and the grant event is not even read
