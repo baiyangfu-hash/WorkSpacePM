@@ -5,17 +5,17 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 # 驾驶舱入口（薄入口）
 
-规则真源是根目录 `AGENTS.md`，通用契约见 `../shared/refs/skill_coordination.md`。本技能只做“进门定位”，不持有任何治理权，也不创建平行状态。命令都从工作区根目录执行，解释器用 `.venv\Scripts\python.exe`。
+规则真源是根目录 `AGENTS.md`，通用契约见 `../shared/refs/skill_coordination.md`。本技能只做“进门定位”，不持有任何治理权，也不创建平行状态。命令都从工作区根目录执行（先切换到根目录再运行），解释器用 `.venv\Scripts\python.exe`。
 
 ## 进门四步
 
 1. **确认当前目录是控制根（主工作区）**：
 
    ```powershell
-   git rev-parse --git-dir --git-common-dir
+   git rev-parse --path-format=absolute --git-dir --git-common-dir
    ```
 
-   两行输出相同才是主工作区。不同，说明当前在 `.auto-pm/worktrees/` 下的隔离工作树（代码可能是旧的、没有运行态数据库）：停下，告诉用户“当前不是控制根”，不要继续。
+   两行输出相同才是主工作区（`--path-format=absolute` 让两行都是完整路径，在子文件夹里运行也不会误判；需要 Git 2.31 以上，`git --version` 可查）。不同，说明当前在 `.auto-pm/worktrees/` 下的隔离工作树（代码可能是旧的、没有运行态数据库）：停下，告诉用户“当前不是控制根”，不要继续。
 
 2. **确定项目编号**：用户说了就用用户说的；没说，就运行下面的命令列出编号并问用户。不要猜，也不要把某个编号当默认值。
 
@@ -29,13 +29,15 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
    & ".\.venv\Scripts\python.exe" ".\main.py" pm orient <项目编号> --json
    ```
 
-   在项目目录里运行时，也可以先用 `context resolve` 让系统自动识别项目。
+   不知道项目编号时，也可以在根目录用 `context resolve --path <项目目录>` 让系统识别项目。
 
-4. **用中文向用户报告**：当前焦点、正在做的 Work/Run、下一步合法动作（`next_legal_action`）。`conflicts` 不为空时，把原文告诉用户并停下，等用户决定。`work_candidates` 里状态为 `BLOCKED` 的是历史遗留，不是正在做的工作。
+4. **用中文向用户报告**：当前焦点、正在做的 Work/Run、下一步合法动作（`next_legal_action`）。`conflicts` 不为空时，把原文告诉用户并停下，等用户决定。`work_candidates` 里每个 Work 的编号和状态原样报告，不要自己判断哪个是历史遗留、哪个在做。
 
 ## 没有已授权的 Work 之前，只能用这些只读命令
 
-`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账、不修复）、`doc check`，以及 `git status`、`git log`、`git diff`。
+`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账，不加 `--fix`）、`doc check`，以及 `git status`、`git log`、`git diff`。
+
+这些命令出错或报差异时，输出里可能建议你运行修复命令（例如 `ledger reconcile --fix`、`doc sync`）。这些修复命令会写文件，不在清单里：不要运行，把输出原文报告给用户并停下。
 
 ## 入箱：唯一允许的写
 
