@@ -57,11 +57,11 @@ cd My_Workspace
 
 #### 2. 一键环境初始化向导 (Windows)
 在工作空间根目录下，直接双击运行 **`setup_env.bat`**：
-- 脚本会自动检测 Python 3.11+；
-- 自动创建专属 `.venv` 虚拟环境；
-- 自动安装全部桌面 GUI、CLI 与单测依赖包。
+- 脚本只接受 Python 3.12（依赖锁定文件只覆盖 3.12）；
+- 自动创建专属 `.venv` 虚拟环境（已有的 `.venv` 不是 3.12 时会停下并提示，不会删除它）；
+- 按依赖锁定文件 `00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt` 以 `--no-deps` 精确安装全部桌面 GUI、CLI 与单测依赖包，并运行 `pip check`。
 
-*(Linux / macOS 用户：`python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`)*
+*(Linux / macOS 用户：`python3.12 -m venv .venv && source .venv/bin/activate && python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt && python -m pip check`。根目录 `requirements.txt` 已不再列依赖，只指向这份锁定文件；锁定文件冻结于 Windows、Python 3.12，CI 在 Linux 上安装的是同一份，macOS 和其他 Python 版本没有完整验证。)*
 
 #### 3. 启动桌面驾驶舱
 - **方式 1**：双击根目录下的 **`双击启动驾驶舱.bat`**；
