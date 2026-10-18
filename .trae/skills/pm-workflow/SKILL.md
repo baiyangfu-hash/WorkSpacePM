@@ -1,6 +1,6 @@
 ---
 name: pm-workflow
-description: "统一项目管理主入口，仅保留核心流转法则与 auto_pm 命令速查。"
+description: "已隔离，禁止使用（QUARANTINED / DECOMMISSIONED，2026-09-09 起）。不要选用本技能；进入工作区请用 cockpit-entry。"
 ---
 
 # PM Workflow
