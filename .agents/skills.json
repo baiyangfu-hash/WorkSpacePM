@@ -1,6 +1,9 @@
 {
   "entries": [
     {
+      "path": "../.trae/skills/cockpit-entry"
+    },
+    {
       "path": "../.trae/skills/fullstack-engineer"
     },
     {
