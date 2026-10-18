@@ -89,7 +89,7 @@ def world(tmp_path: Path):
             number,
             repo="x/y",
             remote="origin",
-            network=False,
+            network=kwargs.get("network", False),
             cwd=str(work),
             patch=kwargs.get("patch"),
             patch_base=kwargs.get("patch_base"),
@@ -128,11 +128,16 @@ def test_open_pr_with_conflict_fails(world):
     info, checks = world["audit"](3)
     assert info["state"] != "merged"
     assert status(checks, "mergeable") == "FAIL"
+    assert next(c.detail for c in checks if c.id == "mergeable") == "和当前 main 冲突：src/app.py"
 
 
 def test_token_in_added_line_fails(world):
     world["open_pr"](5, {"docs/readme.md": "token ghp_" + "a" * 36 + "\n"})
     _, checks = world["audit"](5)
+    assert status(checks, "secrets") == "FAIL"
+    # An added line starting with "++ " shows as "+++ " in the diff and must still be scanned.
+    world["open_pr"](13, {"docs/readme.md": "++ ghp_" + "a" * 36 + "\n"}, branch="b13")
+    _, checks = world["audit"](13)
     assert status(checks, "secrets") == "FAIL"
 
 
@@ -140,6 +145,9 @@ def test_personal_data_warns_but_allowed_addresses_do_not(world):
     world["open_pr"](6, {"docs/a.md": "mail me: someone@corp.cn\nCo-Authored-By: x <noreply@anthropic.com>\n"})
     _, checks = world["audit"](6)
     assert status(checks, "privacy") == "WARN"
+    world["open_pr"](14, {"docs/c.md": "see C:/Users/someone/x\n"}, branch="b14")
+    _, checks = world["audit"](14)
+    assert "本机路径" in next(c.detail for c in checks if c.id == "privacy")
     world["open_pr"](7, {"docs/b.md": "Co-Authored-By: x <noreply@anthropic.com>\nstart 123456789012345678\n"}, branch="b7")
     _, checks = world["audit"](7)
     assert status(checks, "privacy") == "PASS"
@@ -183,3 +191,20 @@ def test_audit_leaves_worktree_and_index_untouched(world):
     before = run(work, "status", "--porcelain")
     world["audit"](12)
     assert run(work, "status", "--porcelain") == before
+
+
+def test_fast_forward_merge_warns_instead_of_failing(world, monkeypatch):
+    work = world["work"]
+    head = world["open_pr"](15, {"src/app.py": "x = 15\n"})
+    run(work, "merge", "-q", "--ff-only", head)
+    run(work, "push", "-q", "origin", "main")
+    info, checks = world["audit"](15)
+    assert info["state"] == "merged"
+    assert status(checks, "merge_shape") == "WARN"
+    assert status(checks, "scope") == "UNVERIFIED"  # offline the PR's own base is unknown
+    assert not any(c.status == "FAIL" for c in checks)
+
+    monkeypatch.setattr(audit_pr, "github_json", lambda path: {"merged_at": "x", "base": {"sha": world["base"]}})
+    info, checks = world["audit"](15, network=True)
+    assert info["files"] == ["src/app.py"]
+    assert status(checks, "merge_shape") == "WARN"

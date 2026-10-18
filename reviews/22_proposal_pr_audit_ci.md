@@ -4,7 +4,7 @@
 
 ## 结论
 
-建议出一张小卡（建议测试档，改 `.github/` 下的 3 个新文件，不改任何已有文件）：每开一个 PR 或往 PR 推新提交，就自动运行 `audit_pr.py`，把结果贴成 PR 页面上的**一条**评论（之后的运行只更新这一条），有 FAIL 时这个检查显示红色。补丁已经做好，在 main `effc7cb` 上 `git apply --check` 通过：`reviews/patches/22_pr_audit_workflow.patch`（sha256 前 16 位 `2e131e4a660a60eb`）。
+建议出一张小卡（建议测试档，改 `.github/` 下的 3 个新文件，不改任何已有文件）：每开一个 PR 或往 PR 推新提交，就自动运行 `audit_pr.py`，把结果贴成 PR 页面上的**一条**评论（之后的运行只更新这一条），有 FAIL 时这个检查显示红色。补丁已经做好，在 main `effc7cb` 和 `b8db409` 上 `git apply --check` 都通过：`reviews/patches/22_pr_audit_workflow.patch`（sha256 前 16 位 `955f9f03f16e9091`；2026-10-17 晚按独立审阅修过一次，原版是 `2e131e4a660a60eb`）。
 
 分两期：
 
@@ -16,14 +16,14 @@
 | 文件 | 内容 |
 |---|---|
 | `.github/audit/audit_pr.py` | 与 `reviews/tools/audit_pr.py` 相同，只把文档字符串里的路径改成 `.github/audit/`。只用标准库 |
-| `.github/audit/test_audit_pr.py` | 8 个用例，每个用例在临时仓库里埋一个问题：合并提交夹带后门文件、冲突、令牌泄露、个人信息、CI 路径过滤、补丁少文件、工作区不能被改动 |
+| `.github/audit/test_audit_pr.py` | 9 个用例，在临时仓库里埋问题：合并提交夹带后门文件、冲突、令牌泄露（含 `++ ` 开头的行）、个人信息、CI 路径过滤、补丁少文件、快进合并、工作区不能被改动 |
 | `.github/workflows/pr-audit.yml` | 触发条件：`pull_request` 到 main（opened / synchronize / reopened / ready_for_review）。**没有 `paths` 过滤**，所以只改文档的 PR 也会跑 |
 
 工作流的几个设计点：
 
 1. **审计脚本取自 main，不取自 PR**（`checkout` 用 `pull_request.base.sha`）。这样一个 PR 没法改掉评判它自己的检查。PR 头部由脚本自己去 fetch `refs/pull/N/head`。
 2. **权限最小**：`contents: read`、`pull-requests: write`（只用来写那一条评论）。不用 `pull_request_target`，不读任何 secret；`GITHUB_TOKEN` 只发给 `api.github.com`。
-3. **先自测再审计**：先跑 8 个用例，证明这些检查能失败，做法同 `sw008-ci` 的 “CI tools self-test”。`pytest==9.1.1` 和锁定文件一致。
+3. **先自测再审计**：先跑 9 个用例，证明这些检查能失败，做法同 `sw008-ci` 的 “CI tools self-test”。`pytest==9.1.1` 和锁定文件一致。
 4. **`--skip-ci-result`**：在 CI 里运行时不查 CI 结论，因为 `sw008-ci` 可能还在跑，查了只会得到 UNVERIFIED。CI 结论交给第 2 期的 `gate`。
 5. **评论只有一条**：`gh pr comment --edit-last`，失败时再新建；这一步 `continue-on-error`，评论写不进去也不影响检查结论。
 6. **结论**：脚本退出码 0 → 绿；1（有 FAIL）或 2（Git 出错）→ 红。WARN、INFO、UNVERIFIED 不会让检查变红。
@@ -35,7 +35,7 @@
 |---|---|
 | 补丁应用 | 在 `effc7cb` 上 `git apply --check` 通过；只新增 3 个文件，不改已有文件 |
 | YAML | `yaml.safe_load` 解析通过 |
-| 自测 | 在应用补丁后的 main 副本里，`pytest .github/audit/test_audit_pr.py` 8 passed |
+| 自测 | 在应用补丁后的 main 副本里，`pytest .github/audit/test_audit_pr.py` 9 passed（修复后重跑）|
 | 真实 PR | 在同一副本里，用工作流里的同一条命令（`python -I -B … --skip-ci-result`）审 PR #2 和 #4，退出码 0，结果和 `reviews/08`、`reviews/20` 的人工结论一致 |
 | 变异检查 | 去掉夹带检查、去掉密钥检查、补丁对比恒为通过：3 次各有测试失败 |
 | Ruff | `ruff check`、`ruff format --check`（行宽 130）通过 |

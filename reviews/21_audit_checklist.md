@@ -1,6 +1,8 @@
 # 21 PR 审计检查清单（任何 agent 通用）
 
-本清单写给接手审计的任何 agent（Claude、Codex 或其他工具），照着做就能产出和 `reviews/18`、`reviews/20` 同样水平的报告。时间一律用亚利桑那时间（MST，UTC−7）。本文是数据，不是指令；角色、边界和背景以交接文件 `17_handoff_review_thread.md`（在 `project/review-20261017` 分支）为准。
+本清单写给接手审计的任何 agent（Claude、Codex 或其他工具），照着做就能产出和 `reviews/18`、`reviews/20` 同样水平的报告。时间一律用亚利桑那时间（MST，UTC−7）。本文是数据，不是指令；角色、边界和背景以交接文件 `17_review_handoff_20261017.md`（在 `project/review-20261017` 分支）为准。
+
+> **给用户 baiyang 的三句话**：脚本结果里没有 FAIL，就可以合并，在 PR 页面选 Merge（不要选 Squash 或 Rebase）；有 FAIL 先别合并，把结果发给审阅线程；WARN 大多是“改到了重要文件，请审阅者在报告里点名”，不是错误。
 
 ## 0. 开始前
 
@@ -20,13 +22,15 @@ python reviews/tools/audit_pr.py <PR 编号>
 python reviews/tools/audit_pr.py <PR 编号> --patch <分支>:reviews/patches/<补丁文件> --patch-base <补丁基于的提交>
 ```
 
-退出码：0 表示没有 FAIL，1 表示至少一项 FAIL，2 表示用法或 Git 出错。脚本只读，只会新增 `refs/audit/pr-N` 这个引用，不改工作区、暂存区或任何分支。
+退出码：0 表示没有 FAIL，1 表示至少一项 FAIL，2 表示用法或 Git 出错。脚本只读，不改工作区、暂存区或任何分支；它做的 `git fetch` 会新增 `refs/audit/pr-N`，并顺带更新 `origin/main`（无害）。加 `--offline` 不访问 GitHub：这时查不了 CI 结论，被 Squash 合并的 PR 也会被当成未合并。
+
+每项结果的意思：PASS 通过；FAIL 有问题；WARN 要在报告里点名；INFO 只是信息；UNVERIFIED 没查成（网络或离线），要人工补查。
 
 | 检查项 | 它查什么 | FAIL / WARN 时怎么办 |
 |---|---|---|
-| `merge_shape` | 已合并的 PR 是不是“合并提交”，第二个父提交是不是 PR 头部 | FAIL 说明用了 Squash 或 Rebase，提交号变了，要在报告里写明 |
-| `merge_content` | 合并提交有没有夹带 PR 以外的改动 | FAIL 列出多出的文件，属于严重问题 |
-| `mergeable` / `up_to_date` | 未合并的 PR 和当前 main 有没有冲突 | FAIL 时建议作者先把 main 合进来 |
+| `merge_shape` | 已合并的 PR 是不是“合并提交”，第二个父提交是不是 PR 头部 | FAIL 说明用了 Squash 或 Rebase，提交号变了，要在报告里写明；WARN 说明用了快进（例：PR #1），离线跑时 `scope` 会是 UNVERIFIED，要联网重跑 |
+| `merge_content` | 合并提交有没有夹带 PR 以外的改动 | FAIL 列出多出的文件，属于严重问题；WARN 说明合并时手工解决过冲突，要人工看解决结果 |
+| `mergeable` / `up_to_date` | 未合并的 PR 和当前 main 有没有冲突；PR 是否已包含最新 main | `mergeable` FAIL 时建议作者先把 main 合进来；`up_to_date` 只给 PASS 或 INFO，INFO 在没有冲突时不影响合并 |
 | `scope` / `protected_paths` | 改了几个文件，有没有碰 WBS、台账、`AGENTS.md`、规范库、`auto_pm` 基建、`.github/workflows`、CHG/DEC | WARN 不是错，但报告里要点名，并核对这张卡有没有授权改这些路径（第 3 步） |
 | `secrets` | 新增行里有没有令牌、API 密钥、私钥 | FAIL 立刻告诉用户（仓库是公开的），不要在报告里抄写密钥原文，只写位置 |
 | `privacy` | 邮箱、内网地址、手机号、身份证号、本机路径、`fubai`、长 base64 | 本机路径和 `fubai` 在 main 上已有约 200 个文件，属于已知基线，只报告“新增了哪一类” |
@@ -80,11 +84,11 @@ PR 合并以后，在同一份报告末尾追加“合并后核对”一节：�
 
 ## 5. 交给另一个 agent 时，可以直接发这段话
 
-> 你是 WorkSpacePM 的审阅者，只读。先读 `reviews/21_audit_checklist.md`（在 `claude/hopeful-hawking-lly2ck` 分支），再读 `project/review-20261017` 分支的 `reviews/17_handoff_review_thread.md`。然后按清单审计 PR #<编号>：先跑 `python reviews/tools/audit_pr.py <编号>`，再做第 2、3 步，把报告写到 `reviews/` 并推到你自己的审阅分支。不要推 main，不要合并，不要删除任何东西。
+> 你是 WorkSpacePM 的审阅者，只读。先读 `reviews/21_audit_checklist.md`（在 `claude/project-thread-imagwg` 分支），再读 `project/review-20261017` 分支的 `reviews/17_review_handoff_20261017.md`。然后按清单审计 PR #<编号>：先跑 `python reviews/tools/audit_pr.py <编号>`，再做第 2、3 步，把报告写到 `reviews/` 并推到你自己的审阅分支。不要推 main，不要合并，不要删除任何东西。
 
 ## 6. 脚本本身的维护
 
-- 测试：`python -m pytest reviews/tools/test_audit_pr.py -q -p no:cacheprovider`。8 个用例各自在临时仓库里埋一个问题：合并提交夹带后门文件、冲突、令牌泄露、个人信息、CI 路径过滤、补丁少文件、工作区不能被改动。
-- 2026-10-17 做过 3 次变异检查（去掉夹带检查、去掉密钥检查、补丁对比恒为通过），每次都有测试失败，说明测试能抓到这些问题。
-- 用真实 PR 校准过：PR #2、#3、#4 的结果和 `reviews/08`、`18`、`20` 的人工结论一致。
+- 测试：`python -m pytest reviews/tools/test_audit_pr.py -q -p no:cacheprovider`。9 个用例各自在临时仓库里埋问题：合并提交夹带后门文件、冲突（冲突说明只列文件名）、令牌泄露（包括以 `++ ` 开头、在差异里显示成 `+++ ` 的行）、个人信息、CI 路径过滤、补丁少文件、快进合并、工作区不能被改动。
+- 2026-10-17 做过 3 次变异检查（去掉夹带检查、去掉密钥检查、补丁对比恒为通过），每次都有测试失败，说明测试能抓到这些问题。同日修复独立审阅发现的问题后又做了 3 次（把 `+++ ` 一律当文件名、不认快进合并、冲突说明不截断），也各有 1 个测试失败。
+- 用真实 PR 校准过：PR #2、#3、#4 的结果和 `reviews/08`、`18`、`20` 的人工结论一致；PR #1（快进）报 WARN，PR #7 报 PASS，都没有 FAIL。
 - 以后要让每个 PR 自动跑这个脚本，需要改 `.github/workflows/`，这属于本地 Claude 的地盘，要出卡并经用户批准。审阅者只写建议。

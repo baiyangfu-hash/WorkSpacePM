@@ -4,7 +4,8 @@ Runs the checks every audit in reviews/ repeats by hand: merge shape, no extra
 changes in the merge commit, conflicts, scope, privacy scan of added lines,
 whether CI should run, the CI result, and an optional byte-for-byte comparison
 with a review patch.  It never writes to the working tree, the index or any
-branch; the only Git writes are fetched refs under refs/audit/.
+branch; the only Git writes are the fetch itself: refs/audit/pr-N, the
+remote-tracking main and FETCH_HEAD.
 
 Usage:
     python reviews/tools/audit_pr.py 4
@@ -132,7 +133,13 @@ def merge_result_tree(ours: str, theirs: str, cwd: str | None = None) -> tuple[b
     if result.returncode == 0:
         return True, lines[0]
     if result.returncode == 1:
-        return False, ", ".join(line for line in lines[1:] if line and "\t" not in line) or "冲突"
+        # Output: tree, conflicted file names, a blank line, then Git's informational messages.
+        names = []
+        for line in lines[1:]:
+            if not line:
+                break
+            names.append(line)
+        return False, ", ".join(names) or "冲突"
     raise GitError(f"git merge-tree: {result.stderr.strip()}")
 
 
@@ -144,11 +151,17 @@ def added_lines(base: str, head: str, cwd: str | None = None) -> list[tuple[str,
     """Return (file, line) for every line the PR adds."""
     out = git("diff", "-U0", "--no-color", f"{base}...{head}", cwd=cwd)
     current = ""
+    in_header = False
     lines: list[tuple[str, str]] = []
     for line in out.splitlines():
-        if line.startswith("+++ "):
+        # "+++ " names the file only in a file header; inside a hunk it is an added line that starts with "++ ".
+        if line.startswith("diff --git "):
+            in_header = True
+        elif in_header and line.startswith("+++ "):
             current = line[6:] if line.startswith("+++ b/") else line[4:]
-        elif line.startswith("+") and not line.startswith("+++"):
+        elif line.startswith("@@"):
+            in_header = False
+        elif not in_header and line.startswith("+"):
             lines.append((current, line[1:]))
     return lines
 
@@ -277,19 +290,34 @@ def audit(
     checks: list[Check] = []
 
     meta = github_json(f"{repo}/pulls/{pr}") if network else None
+    pr_base = None
     if meta:
         info["title"] = meta.get("title")
         state = "merged" if meta.get("merged_at") else meta.get("state", "unknown")
+        pr_base = (meta.get("base") or {}).get("sha")
     else:
         state = "unknown"
 
     found = find_merge_commit(head, main_ref, cwd=cwd)
-    if found:
+    # Without a merge commit the head can still be on main: a fast-forward, or carried in by another merge.
+    on_main = not found and git_ok("merge-base", "--is-ancestor", head, main_ref, cwd=cwd)
+    if found or on_main:
         state = "merged"
     info["state"] = state
 
+    base: str | None = main
     if state == "merged":
-        if not found:
+        if on_main:
+            first_line = head in git("rev-list", "--first-parent", main_ref, cwd=cwd).split()
+            how = "用了快进合并" if first_line else "PR 的提交随别的合并一起进了 main"
+            checks.append(
+                Check("merge_shape", "WARN", f"PR 头部 {short(head)} 已在 main 上，但没有合并提交（{how}），需要在报告里写明")
+            )
+            # The diff is measured from the PR's own base; GitHub reports it, offline it is unknown.
+            first_parent = pr_base if pr_base and git_ok("merge-base", "--is-ancestor", pr_base, head, cwd=cwd) else None
+            if first_parent is None:
+                base = None
+        elif not found:
             checks.append(
                 Check(
                     "merge_shape",
@@ -328,9 +356,9 @@ def audit(
                 checks.append(
                     Check("merge_content", "WARN", f"原 main 与 PR 头部之间有冲突（{expected}），合并时手工解决过，需要人工看")
                 )
-        base = first_parent or main
+        if base is not None:
+            base = first_parent or main
     else:
-        base = main
         clean, detail = merge_result_tree(main, head, cwd=cwd)
         checks.append(
             Check("mergeable", "PASS" if clean else "FAIL", "和当前 main 合并无冲突" if clean else f"和当前 main 冲突：{detail}")
@@ -341,32 +369,41 @@ def audit(
             checks.append(Check("up_to_date", "INFO", "PR 不包含当前 main 的全部提交（无冲突时不影响合并）"))
     info["base"] = base
 
-    files = changed_files(base, head, cwd=cwd)
-    info["files"] = files
-    protected = [
-        f for f in files if any(path_matches(f, p) or fnmatch.fnmatchcase(os.path.basename(f), p) for p in PROTECTED_PATTERNS)
-    ]
-    checks.append(Check("scope", "INFO", f"{len(files)} 个文件"))
-    if protected:
+    if base is None:
+        info["files"] = []
+        expected_ci = True
         checks.append(
             Check(
-                "protected_paths",
-                "WARN",
-                "改到需要在报告里点名的路径：" + ", ".join(protected[:10]) + ("…" if len(protected) > 10 else ""),
+                "scope", "UNVERIFIED", "快进合并的 PR，离线时不知道它原来的基线；文件范围、个人信息和 CI 路径检查没做，请联网重跑"
             )
         )
+    else:
+        files = changed_files(base, head, cwd=cwd)
+        info["files"] = files
+        protected = [
+            f for f in files if any(path_matches(f, p) or fnmatch.fnmatchcase(os.path.basename(f), p) for p in PROTECTED_PATTERNS)
+        ]
+        checks.append(Check("scope", "INFO", f"{len(files)} 个文件"))
+        if protected:
+            checks.append(
+                Check(
+                    "protected_paths",
+                    "WARN",
+                    "改到需要在报告里点名的路径：" + ", ".join(protected[:10]) + ("…" if len(protected) > 10 else ""),
+                )
+            )
 
-    checks.extend(scan_privacy(added_lines(base, head, cwd=cwd)))
+        checks.extend(scan_privacy(added_lines(base, head, cwd=cwd)))
 
-    patterns = ci_path_patterns(head, cwd=cwd)
-    expected_ci = True if patterns is None else any(path_matches(f, p) for f in files for p in patterns)
-    checks.append(
-        Check(
-            "ci_expected",
-            "INFO",
-            "改到 CI 关心的路径，应当跑 CI" if expected_ci else "只改了 CI 不关心的路径（paths 过滤），不会触发 CI",
+        patterns = ci_path_patterns(head, cwd=cwd)
+        expected_ci = True if patterns is None else any(path_matches(f, p) for f in files for p in patterns)
+        checks.append(
+            Check(
+                "ci_expected",
+                "INFO",
+                "改到 CI 关心的路径，应当跑 CI" if expected_ci else "只改了 CI 不关心的路径（paths 过滤），不会触发 CI",
+            )
         )
-    )
 
     if not ci_result:
         checks.append(Check("ci_result", "INFO", "按 --skip-ci-result 跳过（在 CI 里运行时，CI 本身的结论由必需检查负责）"))
@@ -404,7 +441,7 @@ def audit(
             pending = [r for r in runs if r["status"] != "completed"]
             status = "FAIL" if bad else "UNVERIFIED" if pending else "PASS"
             checks.append(
-                Check("ci_result", status, summary + "。PASS 只代表 GitHub 显示 success；verdict 和失败数要看日志（清单第 3 步）")
+                Check("ci_result", status, summary + "。PASS 只代表 GitHub 显示 success；verdict 和失败数要看日志（清单第 2 步）")
             )
     else:
         checks.append(Check("ci_result", "UNVERIFIED", "离线模式，没有查 CI"))
