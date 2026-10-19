@@ -97,6 +97,8 @@ def test_python_init_actual_create(cli_runner: CliRunner, tmp_path: Path) -> Non
     """init 实际创建 Python 项目骨架
 
     依赖项目根的 Copier python-tool 模板；模板随仓库提交，缺失即失败（路径写旧曾让本测试静默跳过）。
+    输入须过模板校验：项目号“字母-年份-三位序号”，包名“小写字母开头、仅含小写字母/数字/下划线”
+    （中文项目名推导出的默认包名不合法，故显式给 --package）。
     """
     project_root = Path(__file__).resolve().parent.parent.parent
     template_dir = project_root / "templates" / "python-tool"
@@ -106,13 +108,14 @@ def test_python_init_actual_create(cli_runner: CliRunner, tmp_path: Path) -> Non
         cli,
         [
             "-w", str(tmp_path),
-            "python", "init", "SW-2026-INIT",
+            "python", "init", "SW-2026-901",
             "--name", "初始化测试",
+            "--package", "init_test",
         ],
         catch_exceptions=False,
     )
-    assert result.exit_code == 0
-    project_dir = tmp_path / "SW-2026-INIT_初始化测试"
+    assert result.exit_code == 0, result.output
+    project_dir = tmp_path / "SW-2026-901_初始化测试"
     assert project_dir.is_dir()
     # 应生成 .copier-answers.yml
     assert (project_dir / ".copier-answers.yml").is_file()

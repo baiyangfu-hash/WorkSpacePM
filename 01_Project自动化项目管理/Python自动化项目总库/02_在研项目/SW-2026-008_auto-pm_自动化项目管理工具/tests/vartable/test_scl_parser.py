@@ -198,27 +198,38 @@ class TestSclParserRealSamples:
         assert "未识别到 VAR 块" in result.warnings[0]
 
     def test_real_fb_2001_common_alarm_var_blocks(self) -> None:
-        """FB_2001: VAR_INPUT(4) + VAR_OUTPUT(10) + VAR(18, 含 VAR_CONSTANT 4) = 32"""
+        """FB_2001: VAR_IN_OUT(1) + VAR(14) + VAR CONSTANT(8, 归入 VAR) = 23"""
         result = SclParser().parse(FB_2001_SCL)
         assert result.success
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_2001_CommonAlarm_AllStation"
-        assert vt.metadata["var_block_count"] == 4
-        assert vt.total_count == 32
-        # VAR_CONSTANT 因 regex (VAR_INPUT|...|VAR) 匹配优先级被归入 VAR 块
+        assert vt.metadata["var_block_count"] == 3
+        assert vt.total_count == 23
+        # VAR CONSTANT 因 regex (VAR_INPUT|...|VAR) 匹配优先级被归入 VAR 块
         stations = {e.station for e in vt.entries}
-        assert stations == {"VAR_INPUT", "VAR_OUTPUT", "VAR"}
-        # 验证 VAR_INPUT 首个变量 (中文注释)
-        first_input = next(e for e in vt.entries if e.station == "VAR_INPUT")
-        assert first_input.tag == "i_iConveyorAlarm"
-        assert first_input.signal_type == "INT"
-        assert "输送机" in first_input.comment
-        # 验证 VAR_CONSTANT 常量被提取 (QUEUE_SIZE/ALM_NONE 等)
+        assert stations == {"VAR_IN_OUT", "VAR"}
+        assert sum(1 for e in vt.entries if e.station == "VAR_IN_OUT") == 1
+        assert sum(1 for e in vt.entries if e.station == "VAR") == 22
+        # 结构体整块传递: 唯一 VAR_IN_OUT 为公共报警全量结构体 (中文注释)
+        io_entry = next(e for e in vt.entries if e.station == "VAR_IN_OUT")
+        assert io_entry.tag == "io_stGlobal"
+        assert io_entry.signal_type == "ST_CommonAlarm"
+        assert io_entry.comment == "公共报警工站全量数据结构体"
+        # 验证 VAR CONSTANT 常量被提取 (QUEUE_*/ALM_*)
         const_tags = {
             e.tag for e in vt.entries if e.tag.startswith(("QUEUE", "ALM"))
         }
-        assert {"QUEUE_SIZE", "QUEUE_MASK", "ALM_NONE", "ALM_WORD_ZERO"} == const_tags
+        assert const_tags == {
+            "QUEUE_SIZE",
+            "QUEUE_MASK",
+            "ALM_NONE",
+            "ALM_WORD_ZERO",
+            "ALM_CODE_SAFETY_TIMEOUT",
+            "ALM_BIT_SAFETY_TIMEOUT",
+            "ALM_CODE_HEARTBEAT_LOST",
+            "ALM_BIT_HEARTBEAT_LOST",
+        }
 
     def test_real_fb_1002_conveyor_complex_types(self) -> None:
         """FB_1002: 验证 ST_/FB_ 复杂类型字段提取 + device 元数据"""
@@ -227,25 +238,30 @@ class TestSclParserRealSamples:
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_1002_SingleLayerConveyor_BufferFraming"
-        assert vt.total_count == 74
+        # VAR_IN_OUT(1) + VAR(65) + VAR CONSTANT(10, 归入 VAR) = 76
+        assert vt.total_count == 76
         # FB_ 子功能块实例类型提取
         fb_types = {
             e.tag: e.signal_type
             for e in vt.entries
             if e.signal_type.startswith("FB_")
         }
-        assert fb_types["fbBlock"] == "FB_1011_CylinderControl"
-        assert fb_types["fbSeparate"] == "FB_1011_CylinderControl"
-        assert fb_types["fbMotor"] == "FB_1012_ConveyorMotor"
-        # ST_ 结构体类型提取 (命令/状态对)
+        assert fb_types["fb_Block"] == "FB_1011_CylinderControl"
+        assert fb_types["fb_Separate"] == "FB_1011_CylinderControl"
+        assert fb_types["fb_Motor"] == "FB_1012_ConveyorMotor"
+        # ST_ 结构体类型提取 (VAR_IN_OUT 全量结构体 + 命令/状态对)
         st_types = {
             e.tag: e.signal_type
             for e in vt.entries
             if e.signal_type.startswith("ST_")
         }
-        assert st_types["stBlockCmd"] == "ST_CylinderCmd"
-        assert st_types["stBlockSts"] == "ST_CylinderSts"
-        assert st_types["stSeparateCmd"] == "ST_CylinderCmd"
+        assert st_types == {
+            "io_stLayer": "ST_SingleLayerConveyor",
+            "st_BlockCmd": "ST_CylinderCmd",
+            "st_BlockSts": "ST_CylinderSts",
+            "st_SeparateCmd": "ST_CylinderCmd",
+            "st_SeparateSts": "ST_CylinderSts",
+        }
         # device 字段填充 FB 名
         assert all(
             e.device == "FB_1002_SingleLayerConveyor_BufferFraming"
@@ -253,66 +269,87 @@ class TestSclParserRealSamples:
         )
 
     def test_real_fb_external_device_interaction(self) -> None:
-        """FB_ExternalDeviceInteraction: VAR_INPUT(27) + VAR_OUTPUT(16) + VAR(2) = 45"""
+        """FB_ExternalDeviceInteraction: VAR_IN_OUT(1) + VAR(20) + VAR CONSTANT(2, 归入 VAR) = 23"""
         result = SclParser().parse(FB_EXTERNAL_SCL)
         assert result.success
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_ExternalDeviceInteraction"
         assert vt.metadata["var_block_count"] == 3
-        assert vt.total_count == 45
+        assert vt.total_count == 23
         # 各 VAR 块条目数核查
-        input_count = sum(1 for e in vt.entries if e.station == "VAR_INPUT")
-        output_count = sum(1 for e in vt.entries if e.station == "VAR_OUTPUT")
+        in_out_count = sum(1 for e in vt.entries if e.station == "VAR_IN_OUT")
         var_count = sum(1 for e in vt.entries if e.station == "VAR")
-        assert input_count == 27
-        assert output_count == 16
-        assert var_count == 2
-        # 首个 VAR_INPUT 变量含中文注释
-        first_input = next(e for e in vt.entries if e.station == "VAR_INPUT")
-        assert first_input.tag == "i_bEnable"
-        assert first_input.signal_type == "BOOL"
-        assert first_input.comment == "系统总使能"
+        assert in_out_count == 1
+        assert var_count == 22
+        assert in_out_count + var_count == vt.total_count
+        # 唯一 VAR_IN_OUT 为外部设备交互全量结构体 (中文注释)
+        io_entry = next(e for e in vt.entries if e.station == "VAR_IN_OUT")
+        assert io_entry.tag == "io_stExternal"
+        assert io_entry.signal_type == "ST_ExternalDevice"
+        assert io_entry.comment == "外部设备交互全量数据结构体"
+        # 首个 VAR 变量含中文注释
+        first_var = next(e for e in vt.entries if e.station == "VAR")
+        assert first_var.tag == "s_bSafetyConditionMet"
+        assert first_var.signal_type == "BOOL"
+        assert first_var.comment == "内部安全条件满足标志"
 
-    def test_real_fb_1004_feeder_fb_tonr_and_array(self) -> None:
-        """FB_1004: 验证 FB_TONR 实例 + ARRAY 类型 (regex 截断为 ARRAY) + (* *) 注释"""
+    def test_real_fb_1004_feeder_fb_tonr_and_real(self) -> None:
+        """FB_1004: 验证 FB_TONR 实例 + REAL 类型 (初值 := 被剥离) + // 与 (* *) 注释"""
         result = SclParser().parse(FB_1004_SCL)
         assert result.success
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_1004_GlueMachineFeeder_BufferFraming"
-        assert vt.total_count == 46
+        # VAR_IN_OUT(2) + VAR(36) + VAR CONSTANT(7, 归入 VAR) = 45
+        assert vt.total_count == 45
         # FB_TONR 实例 (SysLib 共享库定时器)
         tonr_entries = {e.tag: e for e in vt.entries if e.signal_type == "FB_TONR"}
-        assert "tMoveTimer" in tonr_entries
-        assert "tCommTimer" in tonr_entries
-        # (* *) 块注释提取
-        assert tonr_entries["tMoveTimer"].comment == "X2移动超时"
-        assert tonr_entries["tCommTimer"].comment == "打胶机通信超时"
-        # ARRAY 类型 (regex 仅保留 ARRAY 关键字, [0..1] OF BOOL 被截断)
-        array_tags = {e.tag for e in vt.entries if e.signal_type == "ARRAY"}
-        assert {"tIn", "tQ", "tR", "tPt", "tEt"} <= array_tags
+        assert set(tonr_entries) == {
+            "fb_tMoveTimer",
+            "fb_tFullConfirmTimer",
+            "fb_tReleaseTimer",
+            "fb_tCommTimer",
+        }
+        # // 行注释提取
+        assert tonr_entries["fb_tMoveTimer"].comment == "X2 移动看门狗超时 (20.0s)"
+        assert tonr_entries["fb_tCommTimer"].comment == "跨机交握超时看门狗 (15.0s)"
+        # (* *) 块注释提取 (VAR CONSTANT 常量)
+        by_tag = {e.tag: e for e in vt.entries}
+        assert by_tag["T_MOVE_DEFAULT"].signal_type == "DINT"
+        assert by_tag["T_MOVE_DEFAULT"].comment == "移动超时 20s"
+        # REAL 类型 (":= 512.0" 初值不进入类型字段)
+        real_tags = {e.tag for e in vt.entries if e.signal_type == "REAL"}
+        assert real_tags == {
+            "s_rPickupPos",
+            "s_rFeedPos",
+            "s_rStandbyPos",
+            "s_rFeedSpeed",
+        }
 
     def test_real_fb_1003_pickplace_var_in_out(self) -> None:
-        """FB_1003: 验证 VAR_IN_OUT 块 + ST_ServoAxis 复杂类型 + // 中文注释"""
+        """FB_1003: 验证 4 个 VAR_IN_OUT 结构体 + ST_ServoAxis 复杂类型 + // 中文注释"""
         result = SclParser().parse(FB_1003_SCL)
         assert result.success
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_1003_PickPlace_BufferFraming"
-        assert vt.metadata["var_block_count"] == 5
-        assert vt.total_count == 81
-        # VAR_IN_OUT 块识别 (FB_1003 是唯一含 VAR_IN_OUT 的样例)
+        assert vt.metadata["var_block_count"] == 3
+        # VAR_IN_OUT(4) + VAR(37) + VAR CONSTANT(6, 归入 VAR) = 47
+        assert vt.total_count == 47
+        # VAR_IN_OUT 块识别 (FB_1003 是含 VAR_IN_OUT 最多的样例)
         in_out_entries = [e for e in vt.entries if e.station == "VAR_IN_OUT"]
-        assert len(in_out_entries) == 2
-        assert in_out_entries[0].tag == "io_stZAxis"
-        assert in_out_entries[0].signal_type == "ST_ServoAxis"
-        assert in_out_entries[1].tag == "io_stX1Axis"
-        assert in_out_entries[1].signal_type == "ST_ServoAxis"
+        assert [(e.tag, e.signal_type) for e in in_out_entries] == [
+            ("io_stPickPlace", "ST_PickPlace"),
+            ("io_stRecipe", "ST_RecipeManager"),
+            ("io_stZAxis", "ST_ServoAxis"),
+            ("io_stX1Axis", "ST_ServoAxis"),
+        ]
         # // 行注释风格中文提取
-        first_input = next(e for e in vt.entries if e.station == "VAR_INPUT")
-        assert first_input.tag == "i_bAutoMode"
-        assert first_input.comment == "自动模式"
+        assert in_out_entries[2].comment == "Z轴升降伺服 (对象化标准接口)"
+        first_var = next(e for e in vt.entries if e.station == "VAR")
+        assert first_var.tag == "fb_LiftTimer"
+        assert first_var.comment == "辅助升降气缸与Z轴动作超时定时器"
 
     def test_real_all_six_files_detect_format_scl(self) -> None:
         """6 个真实 .scl 文件 detect_format 均返回 True"""
@@ -344,17 +381,24 @@ class TestSclParserRealSamples:
                 assert entry.device == expected_name
 
     def test_real_var_block_identification(self) -> None:
-        """验证 VAR_INPUT/VAR_OUTPUT/VAR/VAR_IN_OUT 块识别跨文件一致性"""
-        # FB_1003 是唯一含 VAR_IN_OUT 的样例
-        r1003 = SclParser().parse(FB_1003_SCL)
-        assert r1003.var_table is not None
-        stations_1003 = set(r1003.var_table.stations)
-        assert stations_1003 == {"VAR_INPUT", "VAR_OUTPUT", "VAR", "VAR_IN_OUT"}
-        # FB_2001 含 VAR_CONSTANT (regex 归为 VAR)
-        r2001 = SclParser().parse(FB_2001_SCL)
-        assert r2001.var_table is not None
-        stations_2001 = set(r2001.var_table.stations)
-        assert stations_2001 == {"VAR_INPUT", "VAR_OUTPUT", "VAR"}
+        """验证 VAR_IN_OUT/VAR 块识别跨文件一致性 (结构体整块传递架构)"""
+        # 5 个 FB 均为 VAR_IN_OUT 结构体 + VAR + VAR CONSTANT (常量归为 VAR)
+        expected_in_out = {
+            FB_2001_SCL: 1,
+            FB_EXTERNAL_SCL: 1,
+            FB_1002_SCL: 1,
+            FB_1003_SCL: 4,
+            FB_1004_SCL: 2,
+        }
+        for path, in_out_count in expected_in_out.items():
+            vt = SclParser().parse(path).var_table
+            assert vt is not None
+            assert set(vt.stations) == {"VAR_IN_OUT", "VAR"}, path.name
+            assert vt.metadata["var_block_count"] == 3, path.name
+            assert (
+                sum(1 for e in vt.entries if e.station == "VAR_IN_OUT")
+                == in_out_count
+            ), path.name
         # OB1 无任何 VAR 块
         r_ob1 = SclParser().parse(OB1_SCL)
         assert r_ob1.var_table is not None
@@ -365,22 +409,20 @@ class TestSclParserRealSamples:
         # FB_1003: // 行注释风格
         r1003 = SclParser().parse(FB_1003_SCL)
         assert r1003.var_table is not None
-        auto_mode = next(
-            e for e in r1003.var_table.entries if e.tag == "i_bAutoMode"
-        )
-        assert auto_mode.comment == "自动模式"
+        lift_up = next(e for e in r1003.var_table.entries if e.tag == "s_bLiftUp")
+        assert lift_up.comment == "Y42 气缸上升 (高度补偿)"
         # FB_1004: (* *) 块注释风格
         r1004 = SclParser().parse(FB_1004_SCL)
         assert r1004.var_table is not None
-        move_timer = next(
-            e for e in r1004.var_table.entries if e.tag == "tMoveTimer"
+        stable_delay = next(
+            e for e in r1004.var_table.entries if e.tag == "T_STABLE_DELAY"
         )
-        assert move_timer.comment == "X2移动超时"
+        assert stable_delay.comment == "到位/脱离防抖延时 1.0s"
         # FB_2001: // 行注释含中文 + 标点
         r2001 = SclParser().parse(FB_2001_SCL)
         assert r2001.var_table is not None
-        reset_entry = next(
-            e for e in r2001.var_table.entries if e.tag == "i_bReset"
+        bit_entry = next(
+            e for e in r2001.var_table.entries if e.tag == "ALM_BIT_SAFETY_TIMEOUT"
         )
-        assert "复位" in reset_entry.comment
-        assert "清除所有报警状态" in reset_entry.comment
+        assert "报警字第3位" in bit_entry.comment
+        assert bit_entry.comment == "报警字第3位: 安全回路看门狗超时"
