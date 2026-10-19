@@ -16,6 +16,7 @@
 | 治理基线 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
 | 当前计划与状态投影 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md`（以其“当前投影”为准；上一行的 26 号总计划是治理基线与历史依据） |
 | 日常迭代操作手册 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md` |
+| 多 agent 工位与控制根规则 | 本文件“多 agent 工位与控制根规则 (WS-001)”一节 |
 | 隔离对象（禁止使用） | `.trae/skills/pm-workflow/SKILL.md` |
 | 全栈执行 | `.trae/skills/fullstack-engineer/SKILL.md` |
 | PLC 执行 | `.trae/skills/plc-electrical-engineer/SKILL.md` |
@@ -49,6 +50,57 @@
    - **阶段 0 预研模式（`--mode grooming`）**：PM 调度领域子代理执行只读探路与代码上下文勘测，子代理以 `handoff_result` 回传事实摘要；
    - **阶段 2 执行模式（`--mode execution`）**：用户审批后，PM 褫夺编码权，派发执行子代理进行代码填空、门禁自检与测试验证。
 3. **强制契约化交接**：派发前必须建立并授权 Work、启动带 lease 的 Run，声明 Decision 与 owned paths；执行端创建 Checkpoint，并在换 Agent 时使用 handoff.v2。主 Agent 收到回执后完成 Run/Work、CHG 与台账闭环。
+
+## 多 agent 工位与控制根规则 (WS-001)
+
+每台电脑分两层。两个 agent 站在同一个工位上，等于两个人同时改一张接线图，所以工位必须分开；账本只能有一本，所以控制根只能有一个。
+
+| 层 | 位置 | 每台电脑几个 | 用途 |
+|------|------|------|------|
+| 控制根 `R` | 本机唯一一份仓库克隆，停在 `main` | **1 个** | 持本机账本 `R/.auto-pm/continuity.db`；只跑驾驶舱命令（`main.py pm resume`、`main.py ledger reconcile`、`main.py continuity …`），不写业务代码 |
+| 工位 `W` | `R/.auto-pm/worktrees/<agent>` | 每个会改文件的 agent 1 个 | agent 在自己的分支上写代码、跑测试、提交、推送 |
+
+**工位与分支前缀表**（第二个写代码的 agent 默认是本机 Claude Code）：
+
+| agent | 工位 | 分支前缀 |
+|------|------|------|
+| 本机 Claude Code（含在 VS Code 里跑的 Claude Code） | `R/.auto-pm/worktrees/claude` | `claude/` |
+| Trae 里的 AI | `R/.auto-pm/worktrees/trae` | `trae/` |
+| Cursor 里的 AI | `R/.auto-pm/worktrees/cursor` | `cursor/` |
+| VS Code 里的其他 AI（如 Copilot） | `R/.auto-pm/worktrees/vscode` | `vscode/` |
+| Codex（当前只做 PR 自动审查，不写代码；将来写代码时） | `R/.auto-pm/worktrees/codex` | `codex/` |
+| 项目 Claude、云端会话 | 不占本机工位；每个云端会话的克隆就是那台“电脑”自己的控制根 | `project/`（项目 Claude）、`claude/`（云端会话） |
+
+表外的 AI 先由用户登记名字和前缀，再开工位。已合并的历史分支（如主执行用过的 `codex/pr-…`）不改名，新卡按本表。
+
+**铁律：**
+
+1. **一台电脑只克隆一次。** 工位一律用 `git worktree add` 从控制根派生，放在 `R/.auto-pm/worktrees/<agent>`。放到别处会出问题：
+   - 另克隆一份仓库：驾驶舱把它当成第二个控制根，另开一本 `continuity.db`，一台电脑两本账，谁在做哪张卡对不上。**严禁。**
+   - 控制根里、但不在 `.auto-pm/worktrees/` 下的工作树：登记 Run 被拒，提示“Run worktree 必须位于受管 .auto-pm/worktrees 目录”。
+   - 控制根外面的工作树：登记 Run 被拒（“Run worktree 位于 workspace 外”）；在里面执行驾驶舱写命令也被拒（“控制面写命令只能在含真实 .git 目录的主 Git 工作树执行”）。
+   - `.codex/worktrees/`：根入口在那里会拒跑，但登记 Run 不认它，不要用。
+2. **驾驶舱命令只在控制根执行。** 在工位里执行 `main.py` 会被拒（“managed candidate is execution-only; invoke the canonical control root instead”）。登记 Run 时在控制根执行 `main.py continuity run start …`，用 `--worktree` 指向自己的工位绝对路径。
+3. **一个 agent 同一时刻只开一个工位，一个工位同一时刻只做一张卡**，分支名 `<前缀><卡号或主题>`。Git 本身保证同一分支不能被两个工作树同时签出。
+4. **一张卡同一时刻只派给一个 agent**，派卡时写明 owned paths，两个 agent 不同时改同一批文件。
+5. **在工位里提交**：提交检查通过 `git rev-parse --git-common-dir` 自动找到控制根，不需要手工指定；手工调用时必须带 `--control-root R`，否则 fail-closed 拒绝。
+6. **台账、WBS、治理库、发布指针只由账本主机上的主执行写**，工位里的 agent 不写。
+7. **跨电脑只通过 GitHub 交换代码**：每个工位推自己的分支、开 PR，合进 `main` 后各控制根拉 `main`。
+
+**开工位 / 收工位（现在手工执行，在控制根里）：**
+
+```
+git fetch origin main
+git worktree add -b claude/<卡号> .auto-pm/worktrees/claude origin/main
+git worktree list
+git worktree remove .auto-pm/worktrees/claude    # 收工：分支已推送、工位无未提交改动后再执行
+```
+
+**待实现**（实现前按上面手工规则执行）：
+
+- 一键命令 `main.py worktree open <agent> <卡号>` / `worktree list` / `worktree close` 与 agent 名册（X05）。
+- 账本主机联锁：非账本主机写台账一律拒绝（X06）。
+- 跨电脑工作票（同一张卡两台电脑不能同时领）与查看其他电脑在做什么（X10、X08）。
 
 ## AI 工程师主动担当与零负担交付铁律 (Zero-Burden Law)
 
