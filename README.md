@@ -4,8 +4,6 @@
 
 **面向工业自动化、西门子 PLC SCL 编程与 Python 全栈研发的 AI-Native 智能工作台**
 
-[快速上手](#-极速上手指南) • [核心特性](#-核心功能矩阵) • [AI 技能协同](#-ai-技能生态) • [规范知识库](#-obsidian-全局规范库)
-
 </div>
 
 ---
@@ -26,7 +24,7 @@ Auto-PM 为工业电气工程师与软件开发者提供了从**“需求澄清 
   │    • plc-electrical-engineer：西门子 S7-1200/1500、SCL 代码生成、变量表/IO   │
   ├─────────────────────────────────────────────────────────────────────────────┤
   │ ⚙️ 【底层规则与门禁引擎 (auto_pm CLI)】                                      │
-  │    • 1585 单测安全网 / SCL 规范 Linter / 5 大阶段门禁 G1~G4 / 动态自动寻根   │
+  │    • 3800+ 项自动化测试 / SCL 规范 Linter / 阶段门禁 G1~G4 / 动态自动寻根    │
   ├─────────────────────────────────────────────────────────────────────────────┤
   │ 📚 【Obsidian 全局规范知识库 (00_Obsidian_Base/)】                          │
   │    • 30+ 工业研发规范 / spec_registry 注册表 / 毫秒级自动索引重构与自愈      │
@@ -37,15 +35,9 @@ Auto-PM 为工业电气工程师与软件开发者提供了从**“需求澄清 
 
 ## 🚀 极速上手指南 (Quick Start)
 
-### 方式 A：免安装直接运行（适合现场工控机 / 最终使用方）
+> 当前版本（1.3.3）没有免安装包：旧的 V1.1.0 打包产物只留在 `06_交付物/archive/` 作历史存档，不再适用。所有电脑都按下面的源码方式安装。
 
-无需在电脑上安装 Python 或配置任何环境：
-1. 前往 `06_交付物/` 目录获取最新的 **`auto-pm_V1.1.0_Release_*.zip`**（或从 GitHub Releases 下载）；
-2. 解压压缩包后，**直接双击 `auto-pm.exe` 或 `双击启动驾驶舱.bat`** 即可秒开桌面驾驶舱！
-
----
-
-### 方式 B：Git 源码克隆与开发（适合研发人员 / AI 极客）
+### 源码克隆与环境初始化
 
 #### 1. 克隆代码仓库
 ```bash
@@ -61,7 +53,7 @@ cd My_Workspace
 - 自动创建专属 `.venv` 虚拟环境（已有的 `.venv` 不是 3.12 时会停下并提示，不会删除它）；
 - 按依赖锁定文件 `00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt` 以 `--no-deps` 精确安装全部桌面 GUI、CLI 与单测依赖包，并运行 `pip check`。
 
-*(Linux / macOS 用户：`python3.12 -m venv .venv && source .venv/bin/activate && python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt && python -m pip check`。根目录 `requirements.txt` 已不再列依赖，只指向这份锁定文件；锁定文件冻结于 Windows、Python 3.12，CI 在 Linux 上安装的是同一份，macOS 和其他 Python 版本没有完整验证。)*
+*(Linux / macOS 用户：在工作空间根目录执行 `sh 00_Infrastructure/auto_pm/environment/setup_env.sh`，步骤与 `setup_env.bat` 相同、用同一份锁定文件。根目录 `requirements.txt` 已不再列依赖，只指向这份锁定文件；锁定文件冻结于 Windows、Python 3.12，CI 在 Linux 上安装的是同一份，macOS 和其他 Python 版本没有完整验证。)*
 
 #### 3. 启动桌面驾驶舱
 - **方式 1**：双击根目录下的 **`双击启动驾驶舱.bat`**；
@@ -109,7 +101,7 @@ cd My_Workspace
 在修改任何规范后，只需在根目录执行：
 
 ```bash
-python -m auto_pm spec sync
+python main.py spec sync
 ```
 
 系统将自动重新生成 `00_INDEX_全局规范索引.md` 及各业务线通用规范 README，实现知识库 100% 实时自愈与索引对齐！
@@ -118,12 +110,16 @@ python -m auto_pm spec sync
 
 ## 🧪 自动化测试与质量验证
 
-```bash
-# 运行后端与应用层单测 (1585 passed)
-pytest
+驾驶舱自身的测试都在 SW-2026-008 项目目录下，先进入该目录再运行（CI 用的是同一条命令）：
 
-# 运行 20 维全景 GUI 桌面端冒烟测试 (真机交互与快照)
-python 01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/gui_smoke_test.py
+```bash
+cd 01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具
+
+# 全量单测（约 3800 项；装了 pytest-xdist 时可加 -n 4 并行）
+python -m pytest -q tests
+
+# GUI 桌面端冒烟测试 (真机交互与快照)
+python scripts/gui_smoke_test.py
 ```
 
 ---

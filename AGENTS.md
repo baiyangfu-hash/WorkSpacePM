@@ -8,6 +8,7 @@
 
 | 用途 | 路径 |
 |------|------|
+| 进门第一步（薄入口，只读定位） | `.trae/skills/cockpit-entry/SKILL.md` |
 | 跨 AI 共存与路由 | `.cursor/rules/workspace-ai-coexistence.mdc` |
 | 跨 AI 适配入口（非 Trae，纯引用） | `.agent/rules/project-rule.md` |
 | 技能注册表 | `.agents/skills.json` |
@@ -36,7 +37,7 @@
    - **严禁代码盲问 (Zero-Stupid-Questions Redline)**：严禁在未检索代码库的情况下直接向用户提问。任何可在项目源码、配置文件（`.plc.json` / `pyproject.toml`）、接口文档（`INT.md` / `VAR.md`）、数据结构（DTO / UDT）或规范库中读取到的参数、变量名、调用关系与目录路径，**绝对禁止向用户发问**；
    - **二分法处理原则 (Greenfield vs Brownfield)**：
      - **全新建仓 (Greenfield)**：审查 CAD/轴系/动作时序 3 要素。若缺失，先检索 Obsidian 规范库与模板库；仍缺失物理硬件事实时方可向用户提问；
-     - **在研迭代/缺陷变更 (Brownfield)**：从工作区根执行 `main.py pm resume <PID> --json`，再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
+     - **在研迭代/缺陷变更 (Brownfield)**：先按 `cockpit-entry` 从工作区根执行只读定位 `main.py pm orient <PID> --json`（需要恢复细节时再用 `main.py pm resume <PID> --json`），再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
    - **有效提问门槛**：只有当代码库探路完毕，且发现涉及无法推导的真实业务决策抉择（Trade-off）、新增未接线硬件定义或客户冲突诉求时，方可发起《高质量澄清提问清单》；
 2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）；
 3. **阶段 2【执行】**：仅在用户明确回复“同意/批准”后，方可派发给对应执行技能（PLC / 全栈）编写代码与自动化测试。严禁在对话框要求或输出长篇说明书草稿，文档骨架由 Copier 脚手架生成并填空；
@@ -118,7 +119,7 @@
    PLC 源码的零负担交付边界停留在**静态语法自检全绿**阶段。AI 必须确保逻辑自洽并符合 LSP 规范；将 ST 源码导入 TIA Portal/InoProShop、编译下发、以及捕捉断言报错等深度动作，由 User 接管并作为外部反馈（截图/文本）闭环给 AI。
 
 5. **【反提示词依赖与基建下沉铁律 (Anti-Prompt-Dependency)】**
-   - **系统级卡点优先**：严禁试图用冗长的自然语言 Prompt 去乞求 AI 遵守代码规范、写注释或输出文档。任何可量化的质量要求（如注释覆盖率、文件存在性），必须下沉为物理脚本（如 `auto_pm doc check`）或 Git 自动化卡点。
+   - **系统级卡点优先**：严禁试图用冗长的自然语言 Prompt 去乞求 AI 遵守代码规范、写注释或输出文档。任何可量化的质量要求（如注释覆盖率、文件存在性），必须下沉为物理脚本（如 `main.py doc check`）或 Git 自动化卡点。
    - **模板即“捕兽夹”**：Copier 等工具生成的绝不仅仅是空文件，而是带有强制 `TODO` 占位符的质量陷阱。执行代理（AI 程序员）的唯一任务是精确填空，禁止擅自修改验证骨架。
    - **机器无情判卷**：主控 PM 严禁主观肉眼审查代码质量。PM 必须无条件采信底层 `Linter / Checker` 的物理 Exit Code，只要非零就无情打回重做，拒绝听取 AI 的任何口头解释。
 6. **【标杆驱动基建法则 (Benchmark-Driven Infrastructure)】**
