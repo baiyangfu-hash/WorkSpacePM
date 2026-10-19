@@ -1,0 +1,57 @@
+# PR 越界检查（可设为必需检查）：PR 改到的文件必须都在它的任务卡（或自报的“可改范围”）里，锁定文件要逐字写出路径；
+# 改到 PLC 文件时再跑提交前钩子同一套文档/代码一致性检查。说明见 reviews/越界检查上GitHub_说明.md。
+# 不设 paths 过滤：必需检查必须对每个 PR 都报告结果。
+name: pr-gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+# Read-only token; no secrets are used by any step.
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the locked dependencies
+        run: |
+          python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          python -m pip check
+
+      # The judge comes from the PR base, so a PR cannot loosen the check that judges it.
+      - name: Take the checker from the PR base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/gate-base" "$BASE_SHA"
+          if [ -f "$RUNNER_TEMP/gate-base/reviews/tools/pr_scope_check.py" ]; then
+            echo "CHECKER=$RUNNER_TEMP/gate-base/reviews/tools/pr_scope_check.py" >> "$GITHUB_ENV"
+          else
+            echo "::warning::the PR base has no pr_scope_check.py yet; using the copy in this PR (first introduction only)"
+            echo "CHECKER=$GITHUB_WORKSPACE/reviews/tools/pr_scope_check.py" >> "$GITHUB_ENV"
+          fi
+
+      - name: Scope check
+        env:
+          # The PR body is untrusted text: it reaches the script only through the environment.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python -I "$CHECKER" --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$GITHUB_WORKSPACE"
