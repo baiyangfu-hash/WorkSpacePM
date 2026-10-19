@@ -9,8 +9,9 @@
 判定（任何一项不通过即退出 1）：
 
 * 每个改到的文件（新增、修改、删除、改名的两端）都等于某个允许路径或在其目录下（复用 ``scopes_outside_card``）；
-* 落在锁定清单（``reviews/tools/audit_pr.py`` 的 ``PROTECTED_PATTERNS``）里的文件，必须在范围里**逐字写出完整路径**，
-  目录前缀不算授权；
+* 落在锁定清单里的文件，必须在范围里**逐字写出完整路径**，目录前缀不算授权。锁定清单是
+  ``reviews/tools/audit_pr.py`` 的 ``PROTECTED_PATTERNS`` 加上裁判自己的文件（``JUDGE_PATTERNS``：本脚本、它导入的
+  驾驶舱代码、安装依赖用的文件），所以 PR 改裁判、改配置、改依赖都要被点名；
 * PR 改到的 PLC 文件，用提交前钩子同一套 ``enforce_plc_docs`` 核对文档与代码一致性。
 
 不做的事：不读也不验 CHG 单与台账（CHG 文件只在本机控制根上，CI 里查必然失败）；不写仓库，不访问网络。
@@ -20,7 +21,8 @@ PR 描述从环境变量 ``PR_BODY`` 读入，不进入任何命令行。
 
     PR_BODY="..." python reviews/tools/pr_scope_check.py --base <base sha> --head <head sha> [--repo <被检查的检出>]
 
-``--repo`` 默认是脚本所在的仓库；CI 用基线上的脚本（PR 改不了裁判）去检查 PR 的检出，所以两者可以不同。
+``--repo`` 默认是脚本所在的仓库。CI 里裁判（本脚本、它读取的配置、安装依赖用的文件）一律取自 PR 基线的检出，
+``--repo`` 指向 PR 头部的另一份检出，PR 头里的东西只当被检查对象读取、从不导入或执行；``--ci`` 要求两者不是同一份检出。
 
 退出码：0 通过；1 越界或检查不通过；2 用法或 Git 出错。
 """
@@ -56,6 +58,15 @@ from auto_pm.application.core.implementation_card_precheck import (
 CARD_LINE = re.compile(r"^\s*任务卡\s*[:：]\s*`?([^`\s]+)`?\s*$")
 SCOPE_HEADER = re.compile(r"^\s*(?:#+\s*)?可改范围\s*[:：]?\s*$")
 SCOPE_ITEM = re.compile(r"^\s*[-*]\s+`?([^`\s]+)`?")
+# 裁判自己的文件：改它们等于改判卷规则，必须逐字点名（与 PROTECTED_PATTERNS 一样处理）
+_SW008 = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+JUDGE_PATTERNS = (
+    "reviews/tools/pr_scope_check.py",
+    "reviews/tools/audit_pr.py",
+    "requirements.txt",
+    f"{_SW008}/pyproject.toml",
+    f"{_SW008}/auto_pm/**",
+)
 # 只有这些规则关乎“范围”；命令、审批占位等属于卡的生命周期，不在本检查判定
 SCOPE_RULES = frozenset({"header", "path_table"})
 
@@ -98,9 +109,11 @@ def normalized(path: str) -> str | None:
 
 
 def is_protected(path: str) -> bool:
-    """与 audit_pr.py 的 protected_paths 检查同一判定。"""
+    """锁定文件：audit_pr.py 的 protected_paths 判定，再加裁判自己的文件。"""
 
     name = PurePosixPath(path).name
+    if any(path_matches(path, p) for p in JUDGE_PATTERNS):
+        return True
     return any(path_matches(path, p) or fnmatch.fnmatchcase(name, p) for p in PROTECTED_PATTERNS)
 
 
@@ -242,8 +255,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", required=True, help="PR 基线提交（base.sha）")
     parser.add_argument("--head", required=True, help="PR 头部提交（head.sha）")
     parser.add_argument("--repo", type=Path, default=TOOL_ROOT, help="被检查的仓库检出（默认：脚本所在仓库）")
+    parser.add_argument("--ci", action="store_true", help="CI 模式：裁判与被检查对象必须是两份不同的检出")
     args = parser.parse_args(argv)
     repo = args.repo.resolve()
+    if args.ci and (repo == TOOL_ROOT or TOOL_ROOT.is_relative_to(repo) or repo.is_relative_to(TOOL_ROOT)):
+        print(f"拒绝运行：裁判 {TOOL_ROOT} 与被检查的检出 {repo} 必须分开（裁判取自 PR 基线）", file=sys.stderr)
+        return 2
     body = os.environ.get("PR_BODY", "")
     try:
         result = check(repo, args.base, args.head, body)

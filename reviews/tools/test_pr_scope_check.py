@@ -193,3 +193,82 @@ def test_s14_main_exit_codes_and_step_summary(
     assert gate.main(["--base", base, "--head", head, "--repo", str(repo)]) == 0
     assert gate.main(["--base", "nope", "--head", head, "--repo", str(repo)]) == 2
     capsys.readouterr()
+
+
+CHECKER = Path(gate.__file__).resolve()
+WORKFLOW = Path(gate.__file__).resolve().parents[2] / ".github" / "workflows" / "pr-gate.yml"
+LOCK = "00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt"
+
+
+def run_ci(repo: Path, base: str, head: str, body: str) -> subprocess.CompletedProcess[str]:
+    """Run the checker exactly as the workflow does: base judge, PR checkout as data, cwd inside the PR checkout."""
+
+    return subprocess.run(
+        [sys.executable, "-I", str(CHECKER), "--ci", "--base", base, "--head", head, "--repo", str(repo)],
+        cwd=repo, env={"PR_BODY": body, "PATH": "/usr/bin:/bin"}, capture_output=True, text=True, encoding="utf-8",
+        check=False,
+    )
+
+
+def test_s15_a_pr_that_rewrites_the_judges_configuration_is_still_judged_by_the_base(repo: Path) -> None:
+    write(repo, "docs/台账.md", "ledger\n")  # locked, but only covered by the `docs` directory scope
+    poison = {
+        "reviews/tools/audit_pr.py": "print('POISONED')\nPROTECTED_PATTERNS = ()\ndef path_matches(p, q):\n    return False\n",
+        "reviews/tools/pr_scope_check.py": "print('POISONED')\nraise SystemExit(0)\n",
+        "auto_pm/__init__.py": "print('POISONED')\nraise SystemExit(0)\n",
+    }
+    base, head = commit(repo, poison)
+    body = "可改范围\n- docs\n- reviews/tools\n- auto_pm\n"
+    result = run_ci(repo, base, head, body)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "POISONED" not in result.stdout + result.stderr
+    assert "锁定文件 `docs/台账.md`" in result.stdout
+    assert "锁定文件 `reviews/tools/audit_pr.py`" in result.stdout
+    assert "锁定文件 `reviews/tools/pr_scope_check.py`" in result.stdout
+
+
+def test_s16_a_pr_that_changes_the_dependency_files_must_name_them(repo: Path) -> None:
+    base, head = commit(repo, {LOCK: "evil-package==6.6.6\n", "requirements.txt": "evil-package\n"})
+    blocked = run_ci(repo, base, head, "可改范围\n- 00_Infrastructure\n")
+    assert blocked.returncode == 1
+    assert f"锁定文件 `{LOCK}`" in blocked.stdout
+    assert "锁定文件 `requirements.txt`" in blocked.stdout
+    named = run_ci(repo, base, head, f"可改范围\n- {LOCK}\n- requirements.txt\n")
+    assert named.returncode == 0, named.stdout  # allowed only when named exactly, so a reviewer sees it
+
+
+def test_s17_the_judges_own_code_must_be_named_exactly(repo: Path) -> None:
+    sw008 = gate._SW008
+    base, head = commit(repo, {f"{sw008}/auto_pm/infrastructure/plc_doc_hook.py": "x = 1\n"})
+    result = gate.check(repo, base, head, f"可改范围\n- {sw008}\n")
+    assert f"锁定文件 `{sw008}/auto_pm/infrastructure/plc_doc_hook.py`" in errors(result)
+
+
+def test_s18_ci_mode_refuses_when_the_judge_and_the_checked_tree_are_one_checkout(repo: Path) -> None:
+    base, head = commit(repo, {"src/a.py": "a = 2\n"})
+    same = subprocess.run(
+        [sys.executable, "-I", str(CHECKER), "--ci", "--base", base, "--head", head, "--repo", str(CHECKER.parents[2])],
+        env={"PR_BODY": "可改范围\n- src/a.py\n", "PATH": "/usr/bin:/bin"}, capture_output=True, text=True,
+        encoding="utf-8", check=False,
+    )
+    assert same.returncode == 2 and "必须分开" in same.stderr
+
+
+def test_s19_the_workflow_takes_the_judge_from_the_base_and_never_runs_the_pr_head() -> None:
+    yaml = pytest.importorskip("yaml")
+    flow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    assert list(flow[True]) == ["pull_request_target"]  # the base's copy of this workflow runs, not the PR's
+    assert flow["permissions"] == {"contents": "read"}
+    steps = flow["jobs"]["gate"]["steps"]
+    checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    assert checkout["with"]["persist-credentials"] is False
+    runs = [s.get("run", "") for s in steps]
+    install = next(r for r in runs if "pip install" in r)
+    assert "pr-head" not in install and "RUNNER_TEMP" not in install
+    check = next(r for r in runs if "pr_scope_check.py" in r)
+    assert '"$GITHUB_WORKSPACE/reviews/tools/pr_scope_check.py" --ci' in check
+    for run in runs:  # the PR head appears only as the worktree that is created and as --repo data
+        for line in run.splitlines():
+            if "pr-head" in line:
+                assert line.strip().startswith("git worktree add") or '--repo "$RUNNER_TEMP/pr-head"' in line

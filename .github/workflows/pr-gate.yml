@@ -1,10 +1,15 @@
 # PR 越界检查（可设为必需检查）：PR 改到的文件必须都在它的任务卡（或自报的“可改范围”）里，锁定文件要逐字写出路径；
 # 改到 PLC 文件时再跑提交前钩子同一套文档/代码一致性检查。说明见 reviews/越界检查上GitHub_说明.md。
+#
+# 裁判全部来自 PR 基线（main），PR 改不了它：
+# - pull_request_target：GitHub 用 main 上的这份工作流，而不是 PR 里改过的版本；
+# - 检查脚本、它读取的配置、安装依赖用的锁定文件，都取自基线的检出（$GITHUB_WORKSPACE）；
+# - PR 头部只拉成 git 对象和另一份工作树（$RUNNER_TEMP/pr-head），只当数据读取，其中的任何文件都不导入、不执行、不安装。
 # 不设 paths 过滤：必需检查必须对每个 PR 都报告结果。
 name: pr-gate
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, edited]
 
@@ -21,8 +26,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the PR base (the judge)
+        uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -30,23 +37,22 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install the locked dependencies
+      - name: Install the locked dependencies of the base
         run: |
           python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
           python -m pip check
 
-      # The judge comes from the PR base, so a PR cannot loosen the check that judges it.
-      - name: Take the checker from the PR base
+      # Data only: the PR head becomes git objects plus a separate work tree that is read, never run.
+      - name: Fetch the PR head as data
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git worktree add --detach "$RUNNER_TEMP/gate-base" "$BASE_SHA"
-          if [ -f "$RUNNER_TEMP/gate-base/reviews/tools/pr_scope_check.py" ]; then
-            echo "CHECKER=$RUNNER_TEMP/gate-base/reviews/tools/pr_scope_check.py" >> "$GITHUB_ENV"
-          else
-            echo "::warning::the PR base has no pr_scope_check.py yet; using the copy in this PR (first introduction only)"
-            echo "CHECKER=$GITHUB_WORKSPACE/reviews/tools/pr_scope_check.py" >> "$GITHUB_ENV"
-          fi
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+          test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA"
+          git worktree add --detach "$RUNNER_TEMP/pr-head" "$HEAD_SHA"
 
       - name: Scope check
         env:
@@ -54,4 +60,6 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python -I "$CHECKER" --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$GITHUB_WORKSPACE"
+        run: >-
+          python -I "$GITHUB_WORKSPACE/reviews/tools/pr_scope_check.py" --ci
+          --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$RUNNER_TEMP/pr-head"
