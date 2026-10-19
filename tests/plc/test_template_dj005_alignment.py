@@ -7,14 +7,26 @@ Covers:
 """
 
 import os
-from auto_pm.domain.plc.checker import PlcChecker
+import sys
+from pathlib import Path
+
+# 工作空间根与 SW-2026-008 母体源码：按本文件位置推导，不依赖调用目录；导入路径与母体 pyproject 的 pythonpath 一致
+_WS_ROOT = Path(__file__).resolve().parents[2]
+_SW008_ROOT = (
+    _WS_ROOT / "01_Project自动化项目管理" / "Python自动化项目总库" / "02_在研项目" / "SW-2026-008_auto-pm_自动化项目管理工具"
+)
+for _entry in (_SW008_ROOT / "auto_pm", _SW008_ROOT):
+    if str(_entry) not in sys.path:
+        sys.path.insert(0, str(_entry))
+
+from auto_pm.domain.plc.checker import PlcChecker  # noqa: E402
 
 
 class TestTemplateDJ005Alignment:
     """验证 PLC 脚手架模板与 DJ-005 标杆架构对齐防御测试"""
 
     def test_template_directories_and_files_exist(self):
-        ws_root = os.getcwd()
+        ws_root = str(_WS_ROOT)
         tpl_dir = os.path.join(
             ws_root,
             "01_Project自动化项目管理",
