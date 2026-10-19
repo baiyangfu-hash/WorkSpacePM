@@ -88,7 +88,7 @@ cd My_Workspace
 
 本工作空间由 **Trae / Cursor / Antigravity / Claude** 等多个 AI 共用，规则单一真源维护于 `AGENTS.md`：
 
-- **`cockpit-entry`**：驾驶舱薄入口，任何 agent 进门先确认控制根与项目编号、运行只读定位命令 `pm orient <项目编号> --json`；
+- **`cockpit-entry`**：驾驶舱薄入口，任何 agent 进门先确认控制根与项目编号、运行只读定位命令 `pm orient <项目编号> --json`（新克隆的工作区在发布指针更新前还没有这条命令，先用 `pm resume <项目编号> --json`）；
 - **`pm-workflow`**：已退役隔离（2026-09-09），禁止使用；PM 是治理角色，通过 CHG、Decision 与 Continuity v2 工作，`PM_SESSION` 仅作历史证据；
 - **`fullstack-engineer`**：全栈开发技能，负责 Python 5 层整洁架构编码与单测；
 - **`plc-electrical-engineer`**：电气工程技能，主适配西门子 S7-1200/1500 与 SCL。
