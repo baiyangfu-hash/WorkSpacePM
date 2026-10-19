@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from auto_pm.application.core.ai_handoff_service import (
+    PM_ACTOR,
     AiHandoffService,
     HandoffError,
     HandoffNotFoundError,
@@ -110,7 +111,7 @@ class PmClosureSagaCoordinator:
         *,
         result: Mapping[str, Any] | None = None,
         idempotency_key: str = "",
-        actor: str = "pm-workflow",
+        actor: str = PM_ACTOR,
         simulate_fail_at: str = "",
     ) -> dict[str, Any]:
         """执行 PM 收口跨资产全流程 Saga 事务。"""
@@ -168,7 +169,7 @@ class PmClosureSagaCoordinator:
         self,
         request_id: str,
         *,
-        actor: str = "pm-workflow",
+        actor: str = PM_ACTOR,
         simulate_fail_at: str = "",
     ) -> dict[str, Any]:
         """从断点继续执行未完成步骤直至 completed。"""
@@ -205,7 +206,7 @@ class PmClosureSagaCoordinator:
             merged=merged,
             effective_key=effective_key,
             fingerprint=fingerprint,
-            actor=actor or str(saga_data.get("actor", "pm-workflow")),
+            actor=actor or str(saga_data.get("actor", PM_ACTOR)),
             result=result,
             simulate_fail_at=simulate_fail_at,
         )
@@ -214,7 +215,7 @@ class PmClosureSagaCoordinator:
         self,
         request_id: str,
         *,
-        actor: str = "pm-workflow",
+        actor: str = PM_ACTOR,
     ) -> dict[str, Any]:
         """从 backup_files 恢复所有被修改文件原始内容，将状态置为 compensated。"""
         self._handoff_service._validate_request_id(request_id)
