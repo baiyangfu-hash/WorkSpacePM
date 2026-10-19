@@ -13,3 +13,4 @@ description: 驾驶舱薄入口：新会话先定位再动手；没有已授权�
 4. **要写代码或文档**：必须有用户批准的实施卡和已授权的 Work；执行时按 `.trae/skills/fullstack-engineer/SKILL.md` 或 `.trae/skills/plc-electrical-engineer/SKILL.md`。
 5. **不得使用**已隔离的 `pm-workflow`；`PM_SESSION` 和聊天文字都不是授权。
 6. 目录不对、命令报错或定位结果有冲突：停下，把原话报告给用户，不要换办法绕过。
+7. **审计 PR**：照 `AGENTS.md`“独立审计 (AUD-001)”一节做。

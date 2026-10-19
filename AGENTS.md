@@ -18,6 +18,7 @@
 | 当前计划与状态投影 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md`（以其“当前投影”为准；上一行的 26 号总计划是治理基线与历史依据） |
 | 日常迭代操作手册 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md` |
 | 多 agent 工位与控制根规则 | 本文件“多 agent 工位与控制根规则 (WS-001)”一节 |
+| 独立审计（任何 agent 通用） | 本文件“独立审计 (AUD-001)”一节；脚本 `reviews/tools/audit_pr.py`，清单 `reviews/21_audit_checklist.md` |
 | 隔离对象（禁止使用） | `.trae/skills/pm-workflow/SKILL.md` |
 | 全栈执行 | `.trae/skills/fullstack-engineer/SKILL.md` |
 | PLC 执行 | `.trae/skills/plc-electrical-engineer/SKILL.md` |
@@ -104,6 +105,17 @@ git worktree remove .auto-pm/worktrees/claude    # 收工：分支已推送、�
 - 一键命令 `main.py worktree open <agent> <卡号>` / `worktree list` / `worktree close` 与 agent 名册（X05）。
 - 账本主机联锁：非账本主机写台账一律拒绝（X06）。
 - 跨电脑工作票（同一张卡两台电脑不能同时领）与查看其他电脑在做什么（X10、X08）。
+
+## 独立审计 (AUD-001)
+
+每个 PR 合并前都要独立审计，换成任何 agent（Claude、Codex、Cursor、Trae 或新来的）都照这一节做。审计脚本只用 Python 标准库、git 和 GitHub 公开接口，不依赖哪一家 AI。
+
+1. **做的和审的分开**：写这个 PR 的 agent 或会话不能审它，要换另一个 agent 或另一个会话。
+2. **先跑机械检查**：在仓库根执行 `python reviews/tools/audit_pr.py <PR号>`；可选 `--json`（机器可读输出）、`--offline`（不访问 GitHub，查不了 CI 结论）、`--skip-ci-result`（不查 CI 结论）、`--repo owner/name`。
+3. **读退出码**：0＝没有 FAIL；1＝至少一项 FAIL，不能合并；2＝用法或 Git 出错，修好再跑。WARN 要在报告里点名，UNVERIFIED 要人工补查。
+4. **再人工逐项核**：照 `reviews/21_audit_checklist.md` 一条条核（范围、受保护路径、内容是否属实），脚本不代替这一步。
+5. **出报告**：按清单第 4 节写到 `reviews/`，推到审计者自己的分支，并把结论贴到 PR 评论里；审计者不推 `main`、不删除任何东西。
+6. **合并条件**：审计通过、CI 全绿、评审对话全部解决，三条都满足才能合并，只用 **Merge commit**（不用 Squash 或 Rebase）。
 
 ## AI 工程师主动担当与零负担交付铁律 (Zero-Burden Law)
 
