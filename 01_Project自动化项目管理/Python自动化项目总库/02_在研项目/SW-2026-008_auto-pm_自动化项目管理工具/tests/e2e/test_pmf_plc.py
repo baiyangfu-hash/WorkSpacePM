@@ -76,6 +76,17 @@ def benchmark_tar() -> bytes:
     """The pinned benchmark directory as a tar stream; the tree SHA proves it is the approved content."""
 
     repository = Path(git(Path(__file__).resolve().parent, "rev-parse", "--show-toplevel"))
+    pinned = subprocess.run(
+        ["git", "-C", str(repository), "cat-file", "-e", f"{PIN_COMMIT}^{{commit}}"], check=False, capture_output=True
+    )
+    if pinned.returncode != 0:
+        # A missing pin is a broken checkout, not a passing proof: fail with the cause instead of a bare git error, never skip.
+        shallow = git(repository, "rev-parse", "--is-shallow-repository") == "true"
+        cause = "浅克隆，" if shallow else "本地仓库"
+        pytest.fail(
+            f"{cause}缺锁定提交 {PIN_COMMIT[:8]}，请补全历史（git fetch --unshallow 或 git fetch origin {PIN_COMMIT}）",
+            pytrace=False,
+        )
     observed = git(repository, "rev-parse", f"{PIN_COMMIT}:{PROJECT}")
     assert observed == PIN_TREE, f"benchmark drifted or the pinned commit is unavailable: {observed}"
     return subprocess.run(
