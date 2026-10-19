@@ -21,26 +21,26 @@ _WORKSPACE_ROOT = Path(__file__).resolve().parents[6]
 _DJ_2026_005_ST_ROOT = (
     _WORKSPACE_ROOT / "0100_PLC自动化" / "DJ-2026-005" / "02_PLC程序" / "PLC_ST"
 )
-OB1_SCL = _DJ_2026_005_ST_ROOT / "OB1" / "OB1.scl"
+OB1_SCL = _DJ_2026_005_ST_ROOT / "00_主程序" / "OB1.scl"
 FB_2001_SCL = (
-    _DJ_2026_005_ST_ROOT / "common" / "FB_2001_CommonAlarm_AllStation.scl"
+    _DJ_2026_005_ST_ROOT / "05_公共报警" / "FB_2001_CommonAlarm_AllStation.scl"
 )
 FB_1002_SCL = (
     _DJ_2026_005_ST_ROOT
-    / "conveyor"
+    / "02_输送机"
     / "FB_1002_SingleLayerConveyor_BufferFraming.scl"
 )
 FB_EXTERNAL_SCL = (
-    _DJ_2026_005_ST_ROOT / "external" / "FB_ExternalDeviceInteraction.scl"
+    _DJ_2026_005_ST_ROOT / "01_外部设备交互" / "FB_ExternalDeviceInteraction.scl"
 )
 FB_1004_SCL = (
     _DJ_2026_005_ST_ROOT
-    / "feeder"
+    / "04_打胶机送料"
     / "FB_1004_GlueMachineFeeder_BufferFraming.scl"
 )
 FB_1003_SCL = (
     _DJ_2026_005_ST_ROOT
-    / "pickplace"
+    / "03_取放料"
     / "FB_1003_PickPlace_BufferFraming.scl"
 )
 _REAL_SAMPLES = (
@@ -51,11 +51,23 @@ _REAL_SAMPLES = (
     FB_1004_SCL,
     FB_1003_SCL,
 )
-_REAL_SAMPLES_AVAILABLE = all(p.exists() for p in _REAL_SAMPLES)
-skip_if_real_samples_missing = pytest.mark.skipif(
-    not _REAL_SAMPLES_AVAILABLE,
-    reason="DJ-2026-005 真实样例不存在",
-)
+
+
+@pytest.fixture
+def _real_samples_present() -> None:
+    """真实样例随工作空间检出提交：检出里缺任何一个即失败，不跳过。
+
+    路径写旧曾让整类测试在所有机器上静默跳过；只有不在工作空间 Git 检出里运行时才允许跳过。
+    """
+    missing = [str(p.relative_to(_WORKSPACE_ROOT)) for p in _REAL_SAMPLES if not p.is_file()]
+    if not missing:
+        return
+    if not (_WORKSPACE_ROOT / ".git").exists():
+        pytest.skip("不在工作空间 Git 检出中，DJ-2026-005 真实样例不可用")
+    pytest.fail(f"DJ-2026-005 真实样例缺失（路径写旧或文件被移动）: {missing}")
+
+
+require_real_samples = pytest.mark.usefixtures("_real_samples_present")
 
 
 class TestSclParserDetectFormat:
@@ -165,7 +177,7 @@ class TestSclParserEdgeCases:
         assert result.var_table.metadata["var_block_count"] == 0
 
 
-@skip_if_real_samples_missing
+@require_real_samples
 class TestSclParserRealSamples:
     """DJ-2026-005 真实 .scl 样例端到端解析验证
 

@@ -96,13 +96,11 @@ def test_python_init_dry_run(cli_runner: CliRunner, tmp_path: Path) -> None:
 def test_python_init_actual_create(cli_runner: CliRunner, tmp_path: Path) -> None:
     """init 实际创建 Python 项目骨架
 
-    依赖 Copier python-tool 模板存在。若模板不存在则跳过（避免无模板环境失败）。
+    依赖项目根的 Copier python-tool 模板；模板随仓库提交，缺失即失败（路径写旧曾让本测试静默跳过）。
     """
-    # 检查模板是否存在
     project_root = Path(__file__).resolve().parent.parent.parent
-    template_dir = project_root / "auto_pm" / "templates" / "python-tool"
-    if not template_dir.exists():
-        pytest.skip("python-tool 模板不存在，跳过实际创建测试")
+    template_dir = project_root / "templates" / "python-tool"
+    assert template_dir.is_dir(), f"python-tool 模板缺失: {template_dir}"
 
     result = cli_runner.invoke(
         cli,
