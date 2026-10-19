@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 
 import click
@@ -113,7 +114,11 @@ case "$GIT_COMMON_DIR" in
     *) GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) ;;
 esac
 PROJECT_ROOT=$(dirname "$GIT_COMMON_DIR")
+# Linux images often ship only python3; keep the Windows default "python" first.
 PYTHON_EXE="python"
+if ! command -v python >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    PYTHON_EXE="python3"
+fi
 if [ -f "$PROJECT_ROOT/.venv/Scripts/python.exe" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/Scripts/python.exe"
 elif [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
@@ -137,7 +142,11 @@ case "$GIT_COMMON_DIR" in
 esac
 GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd) || exit 1
 PROJECT_ROOT=$(dirname "$GIT_COMMON_DIR")
+# Linux images often ship only python3; keep the Windows default "python" first.
 PYTHON_EXE="python"
+if ! command -v python >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    PYTHON_EXE="python3"
+fi
 if [ -f "$PROJECT_ROOT/.venv/Scripts/python.exe" ]; then
     PYTHON_EXE="$PROJECT_ROOT/.venv/Scripts/python.exe"
 elif [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
@@ -175,6 +184,9 @@ exit $?
 
     pre_commit_file.write_text(pre_commit_script, encoding="utf-8", newline="\n")
     commit_msg_file.write_text(commit_msg_script, encoding="utf-8", newline="\n")
+    # On POSIX Git silently skips a hook without the execute bit, which would turn the gate off.
+    for hook_file in (pre_commit_file, commit_msg_file):
+        hook_file.chmod(hook_file.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     console.print("[green]✅ Git 物理门禁硬锁已成功激活！[/green]")
     console.print(f"  - pre-commit: {pre_commit_file}")
