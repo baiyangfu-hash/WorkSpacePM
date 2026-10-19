@@ -12,6 +12,7 @@
 * 落在锁定清单里的文件，必须在范围里**逐字写出完整路径**，目录前缀不算授权。锁定清单是
   ``reviews/tools/audit_pr.py`` 的 ``PROTECTED_PATTERNS`` 加上裁判自己的文件（``JUDGE_PATTERNS``：本脚本、它导入的
   驾驶舱代码、安装依赖用的文件），所以 PR 改裁判、改配置、改依赖都要被点名；
+* PR 改它自己的任务卡是允许的（范围仍按基线上的卡判定），但卡本身是锁定文件时不豁免；
 * PR 改到的 PLC 文件，用提交前钩子同一套 ``enforce_plc_docs`` 核对文档与代码一致性。
 
 不做的事：不读也不验 CHG 单与台账（CHG 文件只在本机控制根上，CI 里查必然失败）；不写仓库，不访问网络。
@@ -213,9 +214,15 @@ def check(repo: Path, base: str, head: str, body: str) -> Result:
 
     files = changed_files(repo, base, head)
     exact = set(result.allowed)
-    in_scope = [f for f in files if f != card_normalized]
+    # 改任务卡本身默认允许（范围仍按基线上的卡判定）；但卡若是锁定文件（例如 WBS），豁免不适用，
+    # 必须和其他锁定文件一样在卡的路径表里逐字列出自己，否则 PR 写一行“任务卡: <WBS>”就能整篇改写它
+    card_exempt = card_normalized is not None and not is_protected(card_normalized)
+    in_scope = [f for f in files if not (card_exempt and f == card_normalized)]
     if card_normalized in files:
-        result.notes.append(f"PR 改了任务卡本身 `{card_normalized}`：允许，但范围仍按基线上的版本判定")
+        if card_exempt:
+            result.notes.append(f"PR 改了任务卡本身 `{card_normalized}`：允许，但范围仍按基线上的版本判定")
+        else:
+            result.notes.append(f"任务卡 `{card_normalized}` 是锁定文件，改它不享受豁免，按普通锁定文件判定")
     for path in scopes_outside_card(in_scope, report):
         result.errors.append(f"越界：`{path}` 不在允许范围内")
     for path in in_scope:

@@ -268,7 +268,46 @@ def test_s19_the_workflow_takes_the_judge_from_the_base_and_never_runs_the_pr_he
     assert "pr-head" not in install and "RUNNER_TEMP" not in install
     check = next(r for r in runs if "pr_scope_check.py" in r)
     assert '"$GITHUB_WORKSPACE/reviews/tools/pr_scope_check.py" --ci' in check
+    assert "python -I " in check
+    fetch = next(r for r in runs if "refs/pull/" in r)
+    assert 'test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA"' in fetch  # the fetched head is the event's head
+    worktree = " ".join(fetch.split())
+    for flag in ("-c core.symlinks=false", "-c filter.lfs.smudge=", "-c filter.lfs.process=", "-c filter.lfs.required=false"):
+        assert f"git {flag}" in worktree or f" {flag} " in worktree, flag
+    assert worktree.index("core.symlinks=false") < worktree.index("worktree add")
     for run in runs:  # the PR head appears only as the worktree that is created and as --repo data
         for line in run.splitlines():
             if "pr-head" in line:
-                assert line.strip().startswith("git worktree add") or '--repo "$RUNNER_TEMP/pr-head"' in line
+                assert "worktree add --detach" in line or '--repo "$RUNNER_TEMP/pr-head"' in line
+
+
+def test_s20_a_locked_card_does_not_exempt_itself(repo: Path) -> None:
+    wbs = "plan_WBS_PM.md"  # a WBS file named as the task card: locked by *_WBS_PM.md
+    write(repo, wbs, card(("src/a.py", "存在")))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "wbs card")
+    git(repo, "branch", "-f", "main", "HEAD")
+    base, head = commit(repo, {wbs: "# 整篇改写\n"})
+    result = gate.check(repo, base, head, f"任务卡: {wbs}")
+    assert not result.passed
+    assert f"锁定文件 `{wbs}`" in errors(result) and f"越界：`{wbs}`" in errors(result)
+    assert any("不享受豁免" in note for note in result.notes)
+
+
+def test_s21_an_ordinary_card_may_edit_itself(repo: Path) -> None:
+    base, head = commit(repo, {CARD: card(("src/a.py", "存在")) + "\n补充说明\n", "src/a.py": "a = 3\n"})
+    result = gate.check(repo, base, head, f"任务卡: {CARD}")
+    assert result.passed, errors(result)
+    assert any("改了任务卡本身" in note for note in result.notes)
+
+
+def test_s22_a_locked_file_deep_in_a_subdirectory_is_locked_by_its_name(repo: Path) -> None:
+    base, head = commit(repo, {"docs/sub/AGENTS.md": "copy\n"})  # matches the bare pattern AGENTS.md only by file name
+    result = gate.check(repo, base, head, f"任务卡: {CARD}")
+    assert "锁定文件 `docs/sub/AGENTS.md`" in errors(result) and "越界" not in errors(result)
+
+
+def test_s23_paths_after_a_blank_line_in_the_scope_list_are_not_authorised(repo: Path) -> None:
+    base, head = commit(repo, {"src/a.py": "a = 2\n", "src/b.py": "b = 2\n"})
+    result = gate.check(repo, base, head, "可改范围\n- src/a.py\n\n- src/b.py\n")
+    assert "越界：`src/b.py`" in errors(result) and "src/a.py" not in errors(result)
