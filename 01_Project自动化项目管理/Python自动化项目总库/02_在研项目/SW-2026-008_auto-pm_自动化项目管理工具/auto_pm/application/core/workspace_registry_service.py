@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from auto_pm.core.project_scanner import ProjectScanner
-from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
+from auto_pm.core.workspace_context_service import WorkspaceContextService
+from auto_pm.models import ProjectInfo
 
 from auto_pm.contracts.workspace_context import WorkspaceProjectMapping, WorkspaceRegistry
 
@@ -88,14 +89,17 @@ class WorkspaceRegistryService:
         if not isinstance(projects, list):
             raise WorkspaceRegistryError("Workspace Registry schema 无效，拒绝改写")
         projects.append(mapping.model_dump())
-        self._write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
         try:
+            self._write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
             WorkspaceContextService(str(self._workspace_root), registry_path=self._registry_path).resolve(
                 project_id, start_path=self._workspace_root / relative_root
             )
-        except (WorkspaceContextError, OSError, ValueError) as error:
-            self._registry_path.write_bytes(original)
-            raise WorkspaceRegistryError(f"登记后校验失败，已恢复原登记表: {error}") from error
+        except BaseException as error:
+            # Whatever went wrong (resolver refusal, I/O error, interrupt), the registry goes back byte for byte.
+            self._restore(original)
+            if isinstance(error, Exception):
+                raise WorkspaceRegistryError(f"登记后校验失败，已恢复原登记表: {error}") from error
+            raise
         return RegistrationResult(mapping=mapping, already_registered=False, written=True)
 
     def _load(self) -> tuple[bytes, dict[str, object], WorkspaceRegistry]:
@@ -114,10 +118,7 @@ class WorkspaceRegistryService:
 
     def _project_relative_root(self, project_id: str, project_root: str | Path | None) -> str:
         if project_root is None:
-            matches = [info for info in self._scanner.scan() if info.project_id == project_id]
-            if not matches:
-                raise WorkspaceRegistryError(f"工作区内找不到项目目录: {project_id}（可用 --path 指定）")
-            candidate = Path(matches[0].path)
+            candidate = self._unique_project_directory(project_id)
         else:
             candidate = Path(project_root)
             if not candidate.is_absolute():
@@ -140,6 +141,35 @@ class WorkspaceRegistryService:
             raise WorkspaceRegistryError(f"目录锚点的项目编号不一致: {info.project_id} != {project_id}")
         return relative.as_posix()
 
+    def _unique_project_directory(self, project_id: str) -> Path:
+        """Without ``--path`` the ID must name exactly one directory; ``scan()`` would silently keep one of several."""
+        found: list[ProjectInfo] = []
+        root_info = self._scanner.try_identify_project(str(self._workspace_root))
+        if root_info is not None:
+            found.append(root_info)
+        self._scanner._scan(str(self._workspace_root), found, depth=0, max_depth=4)
+        directories = sorted({Path(info.path).resolve() for info in found if info.project_id == project_id})
+        if not directories:
+            raise WorkspaceRegistryError(f"工作区内找不到项目目录: {project_id}（可用 --path 指定）")
+        if len(directories) > 1:
+            listed = "、".join(self._display(path) for path in directories)
+            raise WorkspaceRegistryError(
+                f"项目编号 {project_id} 对应多个目录（{listed}），请用 --path 指定要登记的那一个"
+            )
+        return directories[0]
+
+    def _display(self, path: Path) -> str:
+        try:
+            return path.relative_to(self._workspace_root).as_posix()
+        except ValueError:
+            return str(path)
+
+    def _restore(self, original: bytes) -> None:
+        try:
+            self._write_bytes(original)
+        finally:
+            self._registry_path.with_name(self._registry_path.name + ".tmp").unlink(missing_ok=True)
+
     @staticmethod
     def _shared_control(registry: WorkspaceRegistry) -> tuple[str, str, str]:
         """Reuse the control project and runtime that the registered projects already share."""
@@ -153,9 +183,11 @@ class WorkspaceRegistryService:
         return settings.most_common(1)[0][0]
 
     def _write(self, text: str) -> None:
+        self._write_bytes(text.encode("utf-8"))
+
+    def _write_bytes(self, data: bytes) -> None:
         temporary = self._registry_path.with_name(self._registry_path.name + ".tmp")
-        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
+        temporary.write_bytes(data)
         os.replace(temporary, self._registry_path)
 
     def _require_inside(self, path: Path, label: str) -> None:

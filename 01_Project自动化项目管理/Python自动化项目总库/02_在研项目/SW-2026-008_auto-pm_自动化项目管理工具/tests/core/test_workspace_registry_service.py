@@ -180,3 +180,42 @@ def test_a_registration_that_pm_orient_could_not_resolve_is_rolled_back(tmp_path
 
     assert registry.read_bytes() == before
     assert not registry.with_name(registry.name + ".tmp").exists()
+
+
+def test_one_id_in_two_directories_needs_an_explicit_path(tmp_path: Path) -> None:
+    registry = _workspace(tmp_path)
+    before = registry.read_bytes()
+    _anchor(tmp_path / "0100_PLC自动化" / "DJ-2026-009", "DJ-2026-009")
+    _anchor(tmp_path / "0100_PLC自动化" / "DJ-2026-009_旧副本", "DJ-2026-009")
+
+    code, output = _cli(tmp_path, "project", "register", "DJ-2026-009")
+
+    assert code == 1
+    assert "对应多个目录" in output and "--path" in output
+    assert registry.read_bytes() == before
+
+    chosen = WorkspaceRegistryService(tmp_path).register("DJ-2026-009", "0100_PLC自动化/DJ-2026-009")
+    assert chosen.written and chosen.mapping.project_root == "0100_PLC自动化/DJ-2026-009"
+
+
+@pytest.mark.parametrize("failure", [OSError("disk gone"), RuntimeError("resolver crashed"), KeyboardInterrupt()])
+def test_every_failure_after_writing_restores_the_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException
+) -> None:
+    registry = _workspace(tmp_path)
+    before = registry.read_bytes()
+    _anchor(tmp_path / "0100_PLC自动化" / "DJ-2026-009", "DJ-2026-009")
+
+    def broken_resolve(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(
+        "auto_pm.core.workspace_registry_service.WorkspaceContextService.resolve", broken_resolve
+    )
+
+    expected: type[BaseException] = KeyboardInterrupt if isinstance(failure, KeyboardInterrupt) else WorkspaceRegistryError
+    with pytest.raises(expected):
+        WorkspaceRegistryService(tmp_path).register("DJ-2026-009")
+
+    assert registry.read_bytes() == before
+    assert not registry.with_name(registry.name + ".tmp").exists()
