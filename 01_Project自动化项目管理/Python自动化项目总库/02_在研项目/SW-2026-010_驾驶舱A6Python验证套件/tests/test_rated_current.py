@@ -61,6 +61,41 @@ def test_cli_requires_all_inputs(option: str) -> None:
     assert result.exit_code != 0
 
 
+@pytest.mark.parametrize(
+    ("power_factor", "efficiency"),
+    [
+        (1.5, 0.9),
+        (0.85, 90.0),
+    ],
+)
+def test_rejects_above_unit_interval(power_factor: float, efficiency: float) -> None:
+    """功率因数或效率大于 1 时抛出中文 ValueError"""
+    with pytest.raises(ValueError, match="必须大于 0 且不大于 1"):
+        calculate_rated_current(7.5, 380.0, power_factor, efficiency)
+
+
+def test_accepts_unit_boundary_values() -> None:
+    """功率因数与效率恰好等于 1 时应正常计算"""
+    current = calculate_rated_current(7.5, 380.0, 1.0, 1.0)
+    assert current == pytest.approx(7500.0 / (3**0.5 * 380.0), abs=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("--power-factor", "1.5"),
+        ("--efficiency", "90"),
+    ],
+)
+def test_cli_rejects_above_unit_interval(option: str, value: str) -> None:
+    """功率因数或效率大于 1：中文报错、非零退出码、无 traceback"""
+    args = _build_args({**NOMINAL_ARGS, option: value})
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code != 0
+    assert "必须大于 0 且不大于 1" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_cli_help_lists_rated_current() -> None:
     """--help 应列出 rated-current 命令"""
     result = CliRunner().invoke(cli, ["--help"])
