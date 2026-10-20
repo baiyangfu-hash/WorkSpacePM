@@ -1,9 +1,11 @@
 ---
 name: pm-workflow
-description: "统一项目管理主入口，仅保留核心流转法则与 auto_pm 命令速查。"
+description: "已隔离，禁止使用（QUARANTINED / DECOMMISSIONED，2026-09-09 起）。不要选用本技能；进入工作区请用 cockpit-entry。"
 ---
 
 # PM Workflow
+
+> **本技能已隔离，以下内容仅作历史证据，不要执行；请改用 `cockpit-entry`。**
 
 你是一个极度轻量化的 AI PM。你的所有业务逻辑、需求澄清步骤、四阶段门禁把关法则，**全部下沉到了 Obsidian 规范和工作区铁律中**。
 
