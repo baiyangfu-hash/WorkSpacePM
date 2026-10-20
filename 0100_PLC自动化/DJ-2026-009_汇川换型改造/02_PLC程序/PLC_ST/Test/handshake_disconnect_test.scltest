@@ -1,0 +1,350 @@
+// ============================================================================
+// handshake_disconnect_test.scltest - 汇川换型改造 握手中途断线撤销允许信号测试
+// ============================================================================
+// 项目: DJ-2026-009 汇川换型改造
+// 实施卡: CARD-DJ-2026-009-002 验收第 3 项 (需求说明验收项 A3)
+// 被测: FB_3001_ExternalInteraction (实例 GlobalVars.fbExternalDevice)
+// 做法: Modbus 映射层不使能, 直接置握手变量把步序推到第 N 步, 再置通讯故障位
+//       (等同于 12s 心跳超时的结果), 检查一个扫描周期后允许信号和动作输出已撤销,
+//       步序回 0, 错误码非 0.
+// 说明: OB1 目前没有给 fbExternalDevice 接输入引脚, 测试里直接置实例输入.
+// ============================================================================
+
+TEST_CASE "TC_HD_Infeed_Step0_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_HD_Infeed_Step10_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 10;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_HD_Infeed_Step20_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 20;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_HD_Infeed_Step30_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 30;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_HD_Infeed_Step40_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 40;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_HD_Outfeed_Step0_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_HD_Outfeed_Step10_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 10;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_HD_Outfeed_Step20_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 20;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_HD_Outfeed_Step30_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 30;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_HD_Outfeed_Step40_ComFault"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 40;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+END_TEST_CASE

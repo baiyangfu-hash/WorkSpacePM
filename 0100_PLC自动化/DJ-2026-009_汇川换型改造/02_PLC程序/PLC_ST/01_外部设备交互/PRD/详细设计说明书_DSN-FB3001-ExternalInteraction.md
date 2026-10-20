@@ -19,3 +19,18 @@ domain: plc
 ## 2. 心跳与超时机制
 - 本机心跳：4.0s ON / 4.0s OFF 方波输出 (`bMachine_HeartbeatToUp` / `ToDown`)
 - 超时保护：连续 12.0s 检测不到外部心跳电平翻转，置位 `ComFault` 并安全封锁。
+
+## 3. 握手中途通讯故障处理（CARD-DJ-2026-009-002，对应需求说明验收项 A3）
+
+- 进料握手在第 10～40 步时，只要 `bUpstreamComFault` 为 1：当拍撤销 `bMachine_RcvModuleIdAck`、`bMachine_AllowInfeed`、`bMachine_InfeedArrived` 和 `q_bAllowInfeedAct`，步序回第 0 步；第 0 步因通讯故障不再发 `bMachine_ReadyIn`，不会重新开始握手。
+- 出料握手在第 10～40 步时，只要 `bDownstreamComFault` 为 1：当拍撤销 `bMachine_SendModuleId`、`bMachine_OutfeedReq`、`bMachine_OutfeedArrivedAck` 和 `q_bAllowOutfeedAct`，步序回第 0 步；第 0 步因通讯故障不再发 `bMachine_ReadyOut`。
+- 进料只看上游故障、出料只看下游故障；第 0 步是否开始新的握手仍按原逻辑看 `bAnyComFault`（任一侧故障都不开始）。
+- 通讯恢复（对方心跳重新翻转）后，第 0 步按原逻辑重新开始握手，不需要复位。
+- `q_wErrorCode` 位定义（常量见 VAR CONSTANT）：
+
+| 位 | 常量 | 含义 | 清除方式 |
+|:---:|:---|:---|:---|
+| 16#0001 | `ERR_INFEED_ABORT` | 进料握手第 10～40 步因上游通讯故障中止 | 复位 `i_bResetCmd` |
+| 16#0002 | `ERR_OUTFEED_ABORT` | 出料握手第 10～40 步因下游通讯故障中止 | 复位 `i_bResetCmd` |
+| 16#0010 | `ERR_UP_COM` | 上游通讯故障（实时） | 故障消失即清 |
+| 16#0020 | `ERR_DOWN_COM` | 下游通讯故障（实时） | 故障消失即清 |
