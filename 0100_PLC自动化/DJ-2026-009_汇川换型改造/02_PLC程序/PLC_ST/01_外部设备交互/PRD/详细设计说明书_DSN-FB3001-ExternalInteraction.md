@@ -22,15 +22,19 @@ domain: plc
 
 ## 3. 握手中途通讯故障处理（CARD-DJ-2026-009-002，对应需求说明验收项 A3）
 
-- 进料握手在第 10～40 步时，只要 `bUpstreamComFault` 为 1：当拍撤销 `bMachine_RcvModuleIdAck`、`bMachine_AllowInfeed`、`bMachine_InfeedArrived` 和 `q_bAllowInfeedAct`，步序回第 0 步；第 0 步因通讯故障不再发 `bMachine_ReadyIn`，不会重新开始握手。
-- 出料握手在第 10～40 步时，只要 `bDownstreamComFault` 为 1：当拍撤销 `bMachine_SendModuleId`、`bMachine_OutfeedReq`、`bMachine_OutfeedArrivedAck` 和 `q_bAllowOutfeedAct`，步序回第 0 步；第 0 步因通讯故障不再发 `bMachine_ReadyOut`。
-- 进料只看上游故障、出料只看下游故障；第 0 步是否开始新的握手仍按原逻辑看 `bAnyComFault`（任一侧故障都不开始）。
-- 通讯恢复（对方心跳重新翻转）后，第 0 步按原逻辑重新开始握手，不需要复位。
+- 进料握手在第 10～40 步时，上下游**任一侧**通讯故障（`bAnyComFault` 为 1）：当拍撤销 `bMachine_RcvModuleIdAck`、`bMachine_AllowInfeed`、`bMachine_InfeedArrived` 和 `q_bAllowInfeedAct`，步序回第 0 步。
+- 出料握手在第 10～40 步时，上下游**任一侧**通讯故障：当拍撤销 `bMachine_SendModuleId`、`bMachine_OutfeedReq`、`bMachine_OutfeedArrivedAck` 和 `q_bAllowOutfeedAct`，步序回第 0 步。
+- 下游断线也中止进料、上游断线也中止出料（用户 2026-10-20 答复）。第 0 步有通讯故障时不发 `bMachine_ReadyIn` / `bMachine_ReadyOut`，不开始新的握手。
+- 通讯恢复后分两种情况（用户 2026-10-20 答复）：
+  - 不在作业中（故障时握手在第 0 步），或者在非自动模式下中止的：对方心跳恢复翻转后，第 0 步按原逻辑重新开始握手，不需要复位。
+  - 自动模式（`i_bAutoMode` 为 1）且正在作业中（第 10～40 步）被中止的：置内部锁 `s_bInfeedLock` / `s_bOutfeedLock`，通讯恢复后仍不发就绪信号，要人工复位 `i_bResetCmd` 才能重新握手。
+- 断线到 12 s 心跳超时之前，读进来的对方信号保持旧值（用户 2026-10-20 确认可以接受）。
 - `q_wErrorCode` 位定义（常量见 VAR CONSTANT）：
 
 | 位 | 常量 | 含义 | 清除方式 |
 |:---:|:---|:---|:---|
-| 16#0001 | `ERR_INFEED_ABORT` | 进料握手第 10～40 步因上游通讯故障中止 | 复位 `i_bResetCmd` |
-| 16#0002 | `ERR_OUTFEED_ABORT` | 出料握手第 10～40 步因下游通讯故障中止 | 复位 `i_bResetCmd` |
+| 16#0001 | `ERR_INFEED_ABORT` | 进料握手第 10～40 步因通讯故障中止 | 复位 `i_bResetCmd` |
+| 16#0002 | `ERR_OUTFEED_ABORT` | 出料握手第 10～40 步因通讯故障中止 | 复位 `i_bResetCmd` |
+| 16#0004 | `ERR_WAIT_RESET` | 自动作业中被中止，等待人工复位 | 复位 `i_bResetCmd` |
 | 16#0010 | `ERR_UP_COM` | 上游通讯故障（实时） | 故障消失即清 |
 | 16#0020 | `ERR_DOWN_COM` | 下游通讯故障（实时） | 故障消失即清 |
