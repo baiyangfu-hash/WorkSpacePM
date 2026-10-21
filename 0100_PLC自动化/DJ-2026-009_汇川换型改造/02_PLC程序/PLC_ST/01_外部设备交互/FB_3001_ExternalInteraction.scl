@@ -43,6 +43,7 @@ VAR
     s_wAbortLatch       : WORD := 16#0000; // 握手中途中止记录 (保持到复位)
     s_bInfeedLock       : BOOL := FALSE;   // 自动作业中进料被中止, 需人工复位才能重新握手
     s_bOutfeedLock      : BOOL := FALSE;   // 自动作业中出料被中止, 需人工复位才能重新握手
+    s_bResetPrev        : BOOL := FALSE;   // 上一周期复位指令 (清锁只认上升沿)
 END_VAR
 
 VAR CONSTANT
@@ -65,8 +66,9 @@ BEGIN
 
     (* 0. 复位处理 *)
     IF i_bResetCmd THEN
-        // 自动作业中断线留下的锁: 只有通讯已恢复 (上一周期无通讯故障) 时按复位才清 (用户 2026-10-20 按建议批准)
-        IF NOT io_stExternal.bAnyComFault THEN
+        // 自动作业中断线留下的锁: 只有通讯已恢复 (上一周期无通讯故障) 时按下复位的那一下才清 (用户 2026-10-20 按建议批准)
+        // 只认上升沿: 按住不松时网线接回来, 锁不会被清掉
+        IF (NOT s_bResetPrev) AND (NOT io_stExternal.bAnyComFault) THEN
             s_bInfeedLock := FALSE;
             s_bOutfeedLock := FALSE;
         END_IF;
@@ -78,6 +80,8 @@ BEGIN
         s_tUpTimeout.IN := FALSE;
         s_tDownTimeout.IN := FALSE;
     END_IF;
+
+    s_bResetPrev := i_bResetCmd;
 
     IF NOT i_bEnable THEN
         io_stExternal.stUpstream.bMachine_ReadyIn := FALSE;
