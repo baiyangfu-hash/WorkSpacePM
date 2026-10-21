@@ -1,0 +1,119 @@
+# PR 安全区检查：PR 碰到 PLC 安全区（急停、安全门、光栅、安全继电器、只靠软件的防撞联锁……）时，
+# 必须有用户本人在 PR 页面评论“安全签字 <头提交号>”才放行；OR TRUE 旁路、安全点漏引用直接判不通过，签字也放不行。
+# 说明见 reviews/安全区签字检查_说明.md。
+#
+# 结果以提交状态 `safety-zone` 回报到 PR 头提交上，main 分支保护把 `safety-zone` 设为必过检查。
+# 用提交状态而不是本任务的成败：用户签字（issue_comment 事件）后重跑的结果要能落到同一个 PR 头提交上，
+# 而 issue_comment 触发的任务不会挂到 PR 上。所以本任务只在出错时失败，判定结果全看 `safety-zone`。
+#
+# 裁判来自 main，PR 改不了它（与 pr-gate 同一套做法）：
+# - pull_request_target / issue_comment 都用默认分支上的这份工作流；
+# - 检查脚本与依赖取自 PR 基线的检出（$GITHUB_WORKSPACE），PR 头只拉成另一份工作树当数据读，从不导入、执行、安装；
+# - PR 评论由 gh api 取成 JSON 文件交给脚本，评论内容不进入任何命令行。
+name: safety-gate
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+
+concurrency:
+  group: safety-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  safety:
+    if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Read the PR
+        id: pr
+        run: |
+          gh api "repos/$REPO/pulls/$PR_NUMBER" > "$RUNNER_TEMP/pr.json"
+          {
+            echo "base_ref=$(jq -r .base.ref "$RUNNER_TEMP/pr.json")"
+            echo "base_sha=$(jq -r .base.sha "$RUNNER_TEMP/pr.json")"
+            echo "head_sha=$(jq -r .head.sha "$RUNNER_TEMP/pr.json")"
+            echo "state=$(jq -r .state "$RUNNER_TEMP/pr.json")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mark the check pending
+        if: steps.pr.outputs.base_ref == 'main' && steps.pr.outputs.state == 'open'
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          gh api "repos/$REPO/statuses/$HEAD_SHA" -f state=pending -f context=safety-zone \
+            -f description="安全区检查进行中" -f target_url="$RUN_URL" > /dev/null
+
+      - name: Check out the PR base (the judge)
+        if: steps.pr.outputs.base_ref == 'main' && steps.pr.outputs.state == 'open'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        if: steps.pr.outputs.base_ref == 'main' && steps.pr.outputs.state == 'open'
+        with:
+          python-version: "3.12"
+
+      - name: Install the locked dependencies of the base
+        if: steps.pr.outputs.base_ref == 'main' && steps.pr.outputs.state == 'open'
+        run: |
+          python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          python -m pip check
+
+      # Data only: the PR head becomes git objects plus a separate work tree that is read, never run.
+      - name: Fetch the PR head and comments as data
+        if: steps.pr.outputs.base_ref == 'main' && steps.pr.outputs.state == 'open'
+        env:
+          TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+          test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA"
+          git -c core.symlinks=false -c filter.lfs.smudge= -c filter.lfs.process= -c filter.lfs.required=false \
+            worktree add --detach "$RUNNER_TEMP/pr-head" "$HEAD_SHA"
+          gh api --paginate --slurp "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" > "$RUNNER_TEMP/comments.json"
+
+      - name: Safety zone check
+        if: steps.pr.outputs.base_ref == 'main' && steps.pr.outputs.state == 'open'
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set +e
+          python -I "$GITHUB_WORKSPACE/reviews/tools/safety_zone_check.py" --ci \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$RUNNER_TEMP/pr-head" \
+            --comments "$RUNNER_TEMP/comments.json" --status-out "$RUNNER_TEMP/status.json"
+          code=$?
+          set -e
+          # 0 通过、1 不通过都是正常判定；2 是出错，让本任务失败，状态由最后一步标成 error
+          test "$code" -le 1
+          gh api "repos/$REPO/statuses/$HEAD_SHA" -f context=safety-zone -f target_url="$RUN_URL" \
+            -f state="$(jq -r .state "$RUNNER_TEMP/status.json")" \
+            -f description="$(jq -r .description "$RUNNER_TEMP/status.json")" > /dev/null
+
+      - name: Report an error status
+        if: failure() && steps.pr.outputs.head_sha
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          gh api "repos/$REPO/statuses/$HEAD_SHA" -f state=error -f context=safety-zone \
+            -f description="安全区检查出错，见运行日志" -f target_url="$RUN_URL" > /dev/null
