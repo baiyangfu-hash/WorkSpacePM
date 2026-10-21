@@ -506,11 +506,13 @@ TEST_CASE "TC_HD_Auto_Outfeed_InWork_NeedReset"
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
     ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = FALSE;
+    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0004;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep <> 0;
+    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0000;
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Auto_Idle_AutoRecover"
