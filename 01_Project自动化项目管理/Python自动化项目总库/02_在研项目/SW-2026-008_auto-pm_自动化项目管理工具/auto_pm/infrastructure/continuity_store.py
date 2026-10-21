@@ -3178,7 +3178,7 @@ class ContinuityStore:
                 checkpoint = self._get_checkpoint(conn, str(checkpoint_row["checkpoint_id"]))
                 if (
                     checkpoint.git_head != run.git_head
-                    or checkpoint.dirty_paths != run.declared_dirty_paths
+                    or sorted(checkpoint.dirty_paths) != sorted(run.declared_dirty_paths)
                     or not checkpoint.evidence
                 ):
                     raise ContinuityStoreError("最新 Checkpoint 未绑定 Run 当前验证证据")
