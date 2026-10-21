@@ -18,6 +18,7 @@ DRILL_FILES = (
     "tests/e2e/test_closure_drill.py",
     "tests/e2e/test_closure_drill_agent_misconduct.py",
     "tests/e2e/test_release_pycache_drill.py",
+    "tests/e2e/test_raw_requirement_drill.py",
 )
 
 
