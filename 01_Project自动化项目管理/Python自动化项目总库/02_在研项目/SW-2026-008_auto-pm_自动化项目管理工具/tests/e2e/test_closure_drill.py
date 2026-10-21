@@ -55,10 +55,6 @@ SAME_NUMBER_DEFECT = (
     "缺陷⑤（样件联调新发现，技术债候选，未开卡）：变更单编号只在项目内唯一，但 Continuity Store 的 planning_draft_chg_bindings.change_id 全库 UNIQUE；"
     "另一个项目用过同号（如 CHG-ELEC-2026-001）后，本项目 pm plan 报“候选 CHG 已绑定其他 PlanningDraft”"
 )
-WAITING_FOR_CARD_179 = (
-    "缺陷③（卡 179 修复中）：C05 用有序列表比较 checkpoint.dirty_paths 与 run.declared_dirty_paths，"
-    "证据按字典序落库，登记顺序不是字典序时收口永远被拒"
-)
 
 LAUNCHER = """from auto_pm.cli.__main__ import cli
 
@@ -428,30 +424,15 @@ def test_d00_a_project_on_the_old_11_layout_can_be_approved_and_closed(tmp_path:
 # --- 2. field-shaped variants -------------------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason=WAITING_FOR_CARD_179)
 def test_d02_declared_out_of_alphabetical_order_still_closes(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Defect 3 (card 179): C05 compared the checkpoint's sorted paths with the run's declared order."""
+
     drill = make_drill(tmp_path, benchmark_tar)
     files, declared = _unsorted_buzzer(drill.root)
 
     result = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D02", files=files, declared=declared)
 
     assert_closed_and_clean(drill, result, PROJECT_ID)
-
-
-def test_d02b_out_of_order_today_dies_after_acceptance_not_before(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
-    """Pins the current D08 dead end so the report can quote it; flips when card 179 lands (then delete this test)."""
-
-    drill = make_drill(tmp_path, benchmark_tar)
-    files, declared = _unsorted_buzzer(drill.root)
-
-    result = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D02B", files=files, declared=declared)
-
-    if result.stage == "closed":
-        pytest.skip("卡 179 已生效：乱序登记已能收口，本钉子测试可以删除")
-    assert result.stage == "accepted-but-not-closed", f"{result.stage}: {result.refusal}"
-    assert "最新 Checkpoint 未绑定 Run 当前验证证据" in result.refusal
-    # What the user sees is only the generic sentence; the real reason is only in the log.
-    assert "必要证据或状态未就绪" in result.refusal
 
 
 def test_d03_single_file(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
