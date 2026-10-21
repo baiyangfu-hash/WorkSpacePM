@@ -37,6 +37,8 @@ from auto_pm.models.enums import ChangeStatus
 log = logging.getLogger(__name__)
 
 _RUNTIME_CHANGE_STATUSES = frozenset({"approved", "implementing"})
+# Change cabinets of a registered project: the five-process-group layout and the PLC template layout.
+_CHANGE_MONITOR_DIRS = ("04_监控", "11_监控")
 _PLAN_HASH = re.compile(r"[0-9a-f]{64}\Z")
 _USER_CONFIRMATION = re.compile(r"user-confirmation:[A-Za-z0-9][A-Za-z0-9._:/-]{7,}\Z")
 _MODEL_APPROVER = re.compile(
@@ -432,10 +434,7 @@ class DecisionService:
 
         self._validate_runtime_change_id(change_id)
         project_root = self._registered_project_root(project_id)
-        family = "-".join(change_id.split("-")[:2])
-        candidate = (
-            project_root / "04_监控" / "01_变更管理" / "01_变更单" / family / f"{change_id}.md"
-        )
+        candidate = self._project_change_candidate(project_root, change_id, label="运行态 CHG 真源")
         try:
             path = require_safe_workspace_path(
                 self.workspace_root,
@@ -542,10 +541,7 @@ class DecisionService:
 
         self._validate_runtime_change_id(change_id)
         project_root = self._registered_project_root(project_id)
-        family = "-".join(change_id.split("-")[:2])
-        candidate = (
-            project_root / "04_监控" / "01_变更管理" / "01_变更单" / family / f"{change_id}.md"
-        )
+        candidate = self._project_change_candidate(project_root, change_id, label="Planning CHG 真源")
         try:
             path = require_safe_workspace_path(
                 self.workspace_root,
@@ -586,6 +582,26 @@ class DecisionService:
         if change.project_id != project_id or change.change_number != change_id:
             raise DecisionValidationError("Planning CHG filename/request/payload identity 不一致")
         return path, change, hashlib.sha256(source_after).hexdigest()
+
+    @staticmethod
+    def _project_change_candidate(project_root: Path, change_id: str, *, label: str) -> Path:
+        """The one standard CHG path of a registered project, under ``04_监控`` or ``11_监控``.
+
+        Template PLC projects keep their change cabinet under ``11_监控`` (the commit hook already
+        accepts both).  A copy in both cabinets is ambiguous and refused; with neither, the
+        ``04_监控`` path is returned so the caller reports it as missing.
+        """
+        family = "-".join(change_id.split("-")[:2])
+        candidates = [
+            project_root / monitor / "01_变更管理" / "01_变更单" / family / f"{change_id}.md"
+            for monitor in _CHANGE_MONITOR_DIRS
+        ]
+        present = [path for path in candidates if os.path.lexists(path)]
+        if len(present) > 1:
+            raise DecisionValidationError(
+                f"{label}在 04_监控 与 11_监控 下各有一份，无法确定唯一真源: {change_id}"
+            )
+        return present[0] if present else candidates[0]
 
     @staticmethod
     def _runtime_authority_projection(change: ChangeRequest) -> str:
