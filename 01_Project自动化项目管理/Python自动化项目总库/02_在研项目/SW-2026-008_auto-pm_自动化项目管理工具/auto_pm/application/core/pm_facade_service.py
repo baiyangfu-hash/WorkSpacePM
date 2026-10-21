@@ -885,6 +885,14 @@ class PmFacadeService:
     def verify_for_acceptance(self, mission_id: str, *, lease_token: str) -> PmRunOutcome:
         """Generate the system-bound quality Checkpoint and open the acceptance gate."""
 
+        return self.verify_for_acceptance_with_reason(mission_id, lease_token=lease_token)[0]
+
+    def verify_for_acceptance_with_reason(
+        self, mission_id: str, *, lease_token: str
+    ) -> tuple[PmRunOutcome, str]:
+        """The very verification ``verify_for_acceptance`` runs, plus why the quality gate
+        refused (empty when verified); ``pm verify`` prints it for the IDE agent."""
+
         mission = self._mission(mission_id)
         if mission.state not in {MissionState.ACTIVE, MissionState.ACCEPTANCE_PENDING}:
             raise PmFacadeError("当前 Mission 不在可验证状态")
@@ -915,7 +923,7 @@ class PmFacadeService:
                 project_root=Path(run.worktree_path),
                 profile=profile,
             )
-        except (ContinuityExecutionError, EvidenceCollectionError):
+        except (ContinuityExecutionError, EvidenceCollectionError) as error:
             log.exception("质量验证未通过: mission=%s run=%s", mission.mission_id, run.run_id)
             return PmRunOutcome(
                 mission_id=mission.mission_id,
@@ -924,7 +932,7 @@ class PmFacadeService:
                 verified=False,
                 mission_state=mission.state,
                 message=_NOT_VERIFIED_MESSAGE,
-            )
+            ), str(error)
         if mission.state is MissionState.ACTIVE:
             mission = self._transition(
                 mission,
@@ -940,7 +948,7 @@ class PmFacadeService:
             checkpoint_id=checkpoint_id,
             mission_state=mission.state,
             message=_VERIFIED_MESSAGE,
-        )
+        ), ""
 
     @staticmethod
     def _planning_scope_card_hash(card: PlanningScopeCard) -> str:
@@ -1081,9 +1089,39 @@ class PmFacadeService:
         )
 
     def confirm_start(self, mission_id: str) -> PmConfirmationCard:
-        """Perform the user's one start confirmation without requesting internal IDs."""
-        self.approve(mission_id)
+        """Perform the user's one start confirmation without requesting internal IDs.
+
+        A Mission approved by ``pm approve --request-id`` is still DRAFT with its Work
+        created but not bound; the IDE-agent lane (gap 8) starts here, so the same two
+        steps ``run_approved_planning`` takes (plan, then bind the card's own Work) are
+        taken first.  Nothing is relaxed: the Work exists only for this approved card.
+        """
+        mission = self._mission(mission_id)
+        if mission.state is MissionState.DRAFT:
+            self.plan(mission.mission_id)
+            mission = self._mission(mission.mission_id)
+        root_work_id = ""
+        if mission.state is MissionState.AWAITING_APPROVAL and not mission.root_work_id:
+            root_work_id = self._planning_work_id(mission)
+        self.approve(mission_id, root_work_id)
         return self.execute(mission_id)
+
+    def _planning_work_id(self, mission: Mission) -> str:
+        """The one Work derived from this Mission's own Decision, or '' when there is none yet."""
+        try:
+            works = self._store.list_works(mission.subject_project_id, include_terminal=False)
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+        matches = [
+            work.work_id
+            for work in works
+            if work.work_id.startswith("WORK-MSN-")
+            and work.authorization_ref == mission.authority.decision_id
+            and work.state in {WorkState.READY, WorkState.IN_PROGRESS}
+        ]
+        if len(matches) > 1:
+            raise PmFacadeError("该需求对应多个内部授权，拒绝猜测执行范围")
+        return matches[0] if matches else ""
 
     def execute(self, mission_id: str) -> PmConfirmationCard:
         """Start the Mission's authorized root Work, without creating hidden state."""

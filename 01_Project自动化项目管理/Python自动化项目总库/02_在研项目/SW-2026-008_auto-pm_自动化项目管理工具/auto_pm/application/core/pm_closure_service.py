@@ -12,6 +12,10 @@ from typing import Any
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from auto_pm.application.core.candidate_merge_back_service import (
+    CandidateMergeBackError,
+    CandidateMergeBackService,
+)
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.mission import MissionState
 from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
@@ -272,6 +276,7 @@ class PmClosureService:
                 return ClosureCompletionReceipt.model_validate(context["completion"])
 
             preparation = self._decode(context["preparation"])
+            self._merge_back(preparation)
             projection = self._project_preparation(preparation)
             if projection.state is LedgerProjectionState.PENDING_SYNC:
                 return ClosureCompletionReceipt(
@@ -295,6 +300,19 @@ class PmClosureService:
             return ClosureCompletionReceipt.model_validate(payload)
         except (ContinuityStoreError, ValueError, TypeError, json.JSONDecodeError) as error:
             raise PmClosureError(str(error)) from error
+
+    def _merge_back(self, preparation: ClosurePreparation) -> None:
+        """Bring the accepted bytes of an isolated Run into the control root before anything turns terminal."""
+
+        closure = preparation.closure
+        try:
+            run = self._store.get_run(closure.run_id)
+            checkpoint = self._store.get_checkpoint(closure.checkpoint_id)
+            CandidateMergeBackService(self._workspace_root).merge_back(run, checkpoint)
+        except ContinuityStoreError as error:
+            raise PmClosureError(str(error)) from error
+        except (CandidateMergeBackError, OSError) as error:
+            raise PmClosureError(f"验收过的文件未能并回控制根: {error}") from error
 
     @staticmethod
     def _decode(payload: Mapping[str, Mapping[str, Any]]) -> ClosurePreparation:

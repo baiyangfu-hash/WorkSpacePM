@@ -160,8 +160,9 @@ def test_confirm_start_runs_verifies_and_reaches_acceptance_then_closes(
     assert not [item for item in _PLACEHOLDERS if item in change]
     assert any(line.startswith("| **验证结论**") for line in change.splitlines())
     assert LedgerReconciler().reconcile(str(cockpit.root)).is_clean
-    assert (cockpit.root / CALC).read_text(encoding="utf-8") == source_before
+    # Closure brings the accepted bytes of the isolated Run back into the control root (gap 8), uncommitted.
     assert source_before != FIXED_CALC
+    assert (cockpit.root / CALC).read_text(encoding="utf-8") == FIXED_CALC
     assert _token_locations(cockpit.root, _KNOWN_TOKEN) == set()
     visible = " ".join([*(message for _, _, message in finished), *(m for _, _, m in closed), caplog.text])
     assert _KNOWN_TOKEN not in visible

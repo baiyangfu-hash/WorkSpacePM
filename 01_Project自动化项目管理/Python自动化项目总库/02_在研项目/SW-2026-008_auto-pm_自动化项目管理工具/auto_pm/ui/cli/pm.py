@@ -1187,3 +1187,9 @@ from auto_pm.ui.cli.pm_handoff import handoff_pm, sign_risk_pm, takeover_pm  # n
 pm_group.add_command(handoff_pm)
 pm_group.add_command(takeover_pm)
 pm_group.add_command(sign_risk_pm)
+
+# IDE-agent closing commands (gap 8): quality verification and one-step closure without a temporary script.
+from auto_pm.ui.cli.pm_closure import close_pm, verify_pm  # noqa: E402
+
+pm_group.add_command(verify_pm)
+pm_group.add_command(close_pm)

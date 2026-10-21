@@ -2,9 +2,9 @@
 
 The D08 prompts spelled out goal, scope, every command and every prohibition.  The user cannot write prompts like that; the
 field input is one sentence.  This scenario checks the parts a machine can check: the route the entry skill describes uses
-commands that exist, the command-line lane from the sentence to an approved scope card works, and the two gaps found while an
-AI played Trae with only the sentence and the skill (no command-line verify/close for an IDE agent; approval evidence that is
-only format-checked) are pinned as known defects.  Whether a real Trae finds its way is decided by the field trial
+commands that exist, the command-line lane from the sentence to an approved scope card works, the IDE agent's verify/close
+commands exist (gap 8, closed by ``pm verify`` / ``pm close``; the full walk is ``test_ide_lane_drill.py``), and gap 9
+(approval evidence that is only format-checked) is pinned as a known defect.  Whether a real Trae finds its way is decided by the field trial
 (``/mnt/project-files/plans/原始需求直接交给Trae_评估_20261021.md`` §4), not here.
 """
 
@@ -24,11 +24,6 @@ from tests.e2e.test_pmf_plc import (
 )
 
 SENTENCE = "公共报警加一个蜂鸣器输出，任意报警激活时响"
-NO_IDE_LANE = (
-    "缺口⑧（原始需求场景新发现，技术债候选，未开卡）：批准之后，IDE 里的 agent（Trae 等，40 号文定的主路径）没有命令可走："
-    "pm execute / CockpitClient.run 只会启动 Codex 执行器（已挂起），核验 verify_for_acceptance 与收口 close_accepted 没有命令行入口，"
-    "agent 只能写临时 Python 调内部函数（D08 第 2 道因此把 __pycache__ 写进发布目录、自己手工拷回控制根）"
-)
 SELF_SIGNED = (
     "缺口⑨（原始需求场景新发现，技术债候选，未开卡）：命令行批准只检查证据引用的格式（user-confirmation: 加 8 个字符以上）和批准人名字里"
     "不含 agent/model 等字样；agent 填用户名和自编的引用就能批准，用户本人没有说过“开工”也拦不住。界面按钮生成的证据才是用户亲手点的"
@@ -47,10 +42,10 @@ def _pm_commands(drill) -> set[str]:  # type: ignore[no-untyped-def]
     return {match.group(1) for match in re.finditer(r"^\s{2}([a-z][a-z-]*)\s", section, re.MULTILINE)}
 
 
-def _approve_from_one_sentence(drill, request_id: str):  # type: ignore[no-untyped-def]
+def _approve_from_one_sentence(drill, request_id: str, files: dict[str, str] | None = None):  # type: ignore[no-untyped-def]
     """What the skill's route makes an agent do with the sentence, using command-line calls only."""
 
-    files = comment_files(drill.root, "原始需求")
+    files = files if files is not None else comment_files(drill.root, "原始需求")
     added = drill.cli(
         "pm", "inbox", "add", "--project-id", PROJECT_ID, "--request-id", request_id, "--title", "公共报警加蜂鸣器输出",
         "--kind", "iteration", "--domain", MAIN_DOMAIN, "--original-words", SENTENCE, "--affects", "公共报警块 FB_2001",
@@ -99,12 +94,19 @@ def test_r06_one_sentence_reaches_an_approved_scope_card_by_command_line_alone(t
     assert card["change_id"].startswith(f"CHG-{MAIN_DOMAIN}-")
 
 
-@pytest.mark.xfail(strict=True, reason=NO_IDE_LANE)
 def test_r07_an_ide_agent_can_verify_and_close_by_command_line(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Gap 8 closed: ``pm verify`` and ``pm close`` exist and the skill sends the agent to them, not to a script.
+
+    The full walk (worktree, wallet lease, merge back into the control root, refusals) is ``test_ide_lane_drill.py``.
+    """
+
     drill = make_drill(tmp_path, benchmark_tar)
     commands = _pm_commands(drill)
     missing = {"verify", "close"} - commands
     assert not missing, f"pm 下没有 IDE agent 用的命令: {sorted(missing)}"
+    skill = _skill_text()
+    assert "pm verify" in skill and "pm close" in skill
+    assert "临时调用" not in skill, "技能里还留着临时调用 verify_for_acceptance 的过渡做法"
 
 
 @pytest.mark.xfail(strict=True, reason=SELF_SIGNED)

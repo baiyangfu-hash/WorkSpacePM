@@ -275,8 +275,9 @@ def test_full_real_flow_from_a_new_goal_to_a_closed_mission(real_flow: _RealFlow
     assert not [item for item in _PLACEHOLDERS if item in flow.change_text]
     assert any(line.startswith("| **验证结论**") for line in flow.change_text.splitlines())
     assert flow.ledger_clean is True
-    assert flow.source_calc_after == flow.source_calc_before
+    # Closure brings the accepted bytes of the isolated Run back into the control root (gap 8), uncommitted.
     assert flow.source_calc_before != FIXED_CALC
+    assert flow.source_calc_after == FIXED_CALC
 
 
 def test_replay_in_one_process_is_equal_and_starts_no_second_process(real_flow: _RealFlow) -> None:
