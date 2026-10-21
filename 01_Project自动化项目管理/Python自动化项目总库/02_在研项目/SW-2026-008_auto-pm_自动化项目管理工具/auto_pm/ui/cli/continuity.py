@@ -372,6 +372,7 @@ def create_work(
                 card_file,
                 workspace_root=_workspace(ctx),
                 command_tree=command_tree_from_click(ctx),
+                project_id=project_id,
             )
             if not report.passed:
                 raise click.ClickException(f"实施卡开工前预检失败: {format_findings(report)}")
