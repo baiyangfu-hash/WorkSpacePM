@@ -54,6 +54,13 @@ SysLib 是一个符合 **IEC 61131-3 标准**的 PLC 功能库，专为多平台
 
 ### 1️⃣ Timer 模块 (`timer/`)
 
+> **2026-10-21 V3.0.0 起：FB_TON、FB_TONR 是真实毫秒。** 名字和引脚不变（PT/ET 仍为 DINT），
+> 内部改为调用平台标准 IEC 定时器 `TON`，FB_TONR 用 TON 分段累计、IN 断开时保持、R 清零。
+> 本节下面"PT=扫描周期数"、"ET*10 换算"、"移植到 TIA 改 TIME 类型"的说明只适用于 FB_TOF、FB_TP（仍是旧的按扫描计数，暂无调用方）。
+> 导入方法：TIA Portal 直接导入（若报 TON 类型未知，把内部实例类型改为 `TON_TIME`）；
+> InoProShop 粘贴到 POU 时去掉 `BEGIN` 行和变量前的 `#`。
+> 说明与验证步骤见分支说明 `plans/共享库计时器毫秒化_预做分支说明_20261021.md`（项目共享文件夹）。
+
 #### 包含文件
 - [FB_TON.scl](timer/FB_TON.scl) - 接通延时定时器
 - [FB_TOF.scl](timer/FB_TOF.scl) - 关断延时定时器
