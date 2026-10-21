@@ -52,16 +52,23 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 3. **入箱**：`pm inbox add`，`--original-words` 一字不改填用户原话；分诊单里影响、查重、取证都写你实际查到的东西。
 4. **出计划给用户看**：用中文列出 目标 / 可改范围（具体文件路径）/ 验收标准 / 风险 / 不做什么 / 需要用户决定的点。验收标准必须是机器能判的（某条命令退出码 0、某个测试通过、某个输出含某行），“能用”“正常”这类不算。然后停下，等用户亲口说“确认开工”。
 5. **用户确认后**才运行 `pm inbox confirm`、`pm plan`、`pm approve`。批准人填用户，证据引用写成 `user-confirmation:` 加用户确认消息的时间或编号；用户没说过的确认，绝不要自己编。
-6. **动手**：只改范围卡列出的路径。所有 `change` 命令都带 `--pid <项目编号>`。不要单独用 `continuity run transition` / `continuity work transition` 去推 Run 或 Work 的状态；终态只由收口一步推进。**已知缺口⑧**：IDE 里的 agent 自己写代码时，批准以后怎样生成 Run 和 Checkpoint 目前没有正式入口。界面的“批准范围并开始”和 `run_approved_planning` 都会启动 Codex 执行器（已挂起），不要点、不要调；遇到这一步，停下告诉用户，按用户转给你的做法走。
+6. **动手**：只改范围卡列出的路径。所有 `change` 命令都带 `--pid <项目编号>`。界面的“批准范围并开始”和 `pm execute`、`run_approved_planning` 都会启动 Codex 执行器（已挂起），不要点、不要调。**已知缺口⑧**：IDE 里的 agent 自己写代码这条路还没有一条命令走到底。补上之前按下面的过渡做法（D08 第 2 道实际走过的顺序），每条命令的参数以 `--help` 为准：
+   1. `main.py pm confirm-start --mission-id <Mission 编号>`（编号从 `pm orient` 读）：Mission 转为进行中、Work 转为 IN_PROGRESS，不启动 Codex；
+   2. `git worktree add --detach .auto-pm/worktrees/<名字>`（这一步是 Git 命令，不是驾驶舱命令），在这个工作树里写代码；
+   3. `main.py continuity run start … --worktree <工作树绝对路径> --lease-wallet`，`--owned`/`--declared-dirty` 列范围卡里的文件；
+   4. `main.py continuity run transition --to RUNNING`，写完、自检过后再 `--to VERIFYING`。只允许这两步；SUCCEEDED、CLOSED 等终态绝不手推，Work 也不手推；
+   5. `main.py continuity checkpoint create …`；
+   6. 质量验证 `verify_for_acceptance` 目前没有命令，只能临时调用：必须先告诉用户；用控制根 `.venv` 的解释器加 `-B` 运行；脚本放 `.agents/`、用完删；不 import 发布目录以外的驾驶舱代码，不往 `00_Infrastructure/auto_pm/releases/` 写任何文件或缓存；
+   7. 交验收前把工作树里改好的文件按字节拷回控制根，列出每个文件的 SHA-256。
 7. **自检**：交给用户验收前，范围卡里的每条验收标准都要跑过，把命令和退出码原样报告；有没跑的，明说没跑。
-8. **验收与收口**：请用户在驾驶舱界面上亲手点“确认验收”。这个按钮先记下用户验收，再走 `close_accepted` 一步收口：推进 Run、Work 和 Mission，把证据写进变更单、同步台账，但**不推进变更单状态**。你不要写脚本去调它（核验和收口没有命令行入口，属已知缺口⑧）。用户告诉你收口完成后：
+8. **验收与收口**：请用户在驾驶舱界面上亲手点“确认验收”。这个按钮先记下用户验收，再走 `close_accepted` 一步收口：推进 Run、Work 和 Mission，把证据写进变更单、同步台账，但**不推进变更单状态**。你不要写脚本去调它。用户告诉你收口完成后：
    1. 用 `change transition <单号> --to <下一状态> --pid <项目编号>` 把变更单逐步推到 `completed`；
    2. 运行 `main.py ledger reconcile <项目编号>` 只读对账，结果报告给用户；
-   3. 在隔离工作树里写的文件，确认控制根里对应文件逐字节一致（列出每个文件的 SHA-256）。
+   3. 再核对一次控制根里的文件与工作树逐字节一致。
 
-   界面上收口被拒时，请用户把界面提示的原话发给你，原样报告并停下，不换办法绕过。
+   已经验收、只是收口失败的任务，界面上显示的是“重试同步”按钮，不是“确认验收”，请用户点它重试。界面上收口被拒时，请用户把界面提示的原话发给你，原样报告并停下，不换办法绕过。
 
-不要写临时脚本去调驾驶舱内部接口，也不要在 `00_Infrastructure/auto_pm/releases/` 里写任何文件或缓存；没有命令的步骤，停下告诉用户。不要直接改数据库或治理 JSON。
+除第 6 步第 6 小步的过渡做法外，不要写临时脚本去调驾驶舱内部接口，也不要在 `00_Infrastructure/auto_pm/releases/` 里写任何文件或缓存；其他没有命令的步骤，停下告诉用户。不要直接改数据库或治理 JSON。
 
 ## 换 agent
 
