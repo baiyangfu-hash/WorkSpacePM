@@ -27,6 +27,7 @@ TEST_CASE "TC_HD_Infeed_Step0_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -58,6 +59,7 @@ TEST_CASE "TC_HD_Infeed_Step10_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -92,6 +94,7 @@ TEST_CASE "TC_HD_Infeed_Step20_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -128,6 +131,7 @@ TEST_CASE "TC_HD_Infeed_Step30_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -165,6 +169,7 @@ TEST_CASE "TC_HD_Infeed_Step40_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -202,6 +207,7 @@ TEST_CASE "TC_HD_Outfeed_Step0_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -233,6 +239,7 @@ TEST_CASE "TC_HD_Outfeed_Step10_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -267,6 +274,7 @@ TEST_CASE "TC_HD_Outfeed_Step20_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -302,6 +310,7 @@ TEST_CASE "TC_HD_Outfeed_Step30_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -339,6 +348,7 @@ TEST_CASE "TC_HD_Outfeed_Step40_ComFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -377,6 +387,7 @@ TEST_CASE "TC_HD_Infeed_Step20_DownstreamFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -411,6 +422,7 @@ TEST_CASE "TC_HD_Outfeed_Step20_UpstreamFault"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -446,6 +458,7 @@ TEST_CASE "TC_HD_Auto_InWork_NeedReset"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -459,6 +472,55 @@ TEST_CASE "TC_HD_Auto_InWork_NeedReset"
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := TRUE;
     WAIT_CYCLES 1;
     ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
+    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0004;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep <> 0;
+    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0000;
+END_TEST_CASE
+
+// 网线还断着时按复位不清锁, 通讯恢复后再按一次才算数 (用户 2026-10-20 17:40 MST 按建议批准)
+TEST_CASE "TC_HD_Auto_ResetDuringFault_KeepLock"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bAutoMode := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bAutoMode := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 20;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    WAIT_CYCLES 2;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
@@ -489,6 +551,7 @@ TEST_CASE "TC_HD_Auto_Outfeed_InWork_NeedReset"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -532,6 +595,7 @@ TEST_CASE "TC_HD_Auto_Idle_AutoRecover"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
@@ -565,6 +629,7 @@ TEST_CASE "TC_HD_Manual_InWork_AutoRecover"
     SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
     SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
     SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;

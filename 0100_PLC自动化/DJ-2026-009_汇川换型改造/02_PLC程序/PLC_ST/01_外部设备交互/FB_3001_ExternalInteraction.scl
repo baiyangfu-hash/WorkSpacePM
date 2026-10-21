@@ -65,13 +65,16 @@ BEGIN
 
     (* 0. 复位处理 *)
     IF i_bResetCmd THEN
+        // 自动作业中断线留下的锁: 只有通讯已恢复 (上一周期无通讯故障) 时按复位才清 (用户 2026-10-20 按建议批准)
+        IF NOT io_stExternal.bAnyComFault THEN
+            s_bInfeedLock := FALSE;
+            s_bOutfeedLock := FALSE;
+        END_IF;
         io_stExternal.stUpstream.bUpstreamComFault := FALSE;
         io_stExternal.stDownstream.bDownstreamComFault := FALSE;
         io_stExternal.bAnyComFault := FALSE;
         q_wErrorCode := 16#0000;
         s_wAbortLatch := 16#0000;
-        s_bInfeedLock := FALSE;
-        s_bOutfeedLock := FALSE;
         s_tUpTimeout.IN := FALSE;
         s_tDownTimeout.IN := FALSE;
     END_IF;
