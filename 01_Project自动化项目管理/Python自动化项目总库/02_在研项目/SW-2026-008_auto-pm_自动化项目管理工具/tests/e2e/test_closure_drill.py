@@ -1,4 +1,4 @@
-"""No-load commissioning drill: one PLC Mission driven from inbox to a clean ledger through real child processes.
+"""Sample-part commissioning drill (样件联调): one PLC Mission driven from inbox to a clean ledger through real child processes.
 
 The unit suites prove each closure stage with hand-made state.  This drill joins the stages the way an IDE agent does in the
 field (D08): every step is a separate real process running the real ``pm`` / ``ledger`` commands, or the same facade and
@@ -13,7 +13,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -29,7 +28,6 @@ import pytest
 import auto_pm
 from tests.e2e.test_pmf_plc import (
     BLOCK,
-    BLOCK_ADDED,
     BLOCK_ANCHOR,
     PROJECT,
     PROJECT_ID,
@@ -46,15 +44,20 @@ SECOND_ID = "DJ-2026-905"
 SECOND = "0100_PLC自动化/DJ-2026-905"
 NEW_NOTE = f"{PROJECT}/02_PLC程序/程序文档/蜂鸣器说明.md"
 LEGACY_LAYOUT_DEFECT = (
-    "缺陷④（本次空跑新发现）：项目已有旧目录 11_监控/…/CHG-<领域>/ 时，plan 把变更单写进 11_监控，"
-    "而批准签发 Decision 只到 04_监控 找，pm approve 报“未找到指定项目的 Planning CHG 真源”"
+    "缺陷④：项目已有旧目录 11_监控/…/CHG-<领域>/ 时，plan 把变更单写进 11_监控，而批准签发 Decision 只到 04_监控 找，"
+    "pm approve 报“未找到指定项目的 Planning CHG 真源”。已由分支 claude/d09-onboarding-blockers 的 N2（15a481dd）修好"
+    "（样件联调在合并后全绿），D09 后合并；合并后本用例转 XPASS，届时去掉 xfail"
 )
 # The benchmark (like DJ-2026-005/009 in the field) already holds 11_监控/…/CHG-PLC/, which defect ④ trips over; the
 # main line files under a domain with no old folder so the rest of the chain can be exercised.  d00 keeps the PLC domain.
 MAIN_DOMAIN = "ELEC"
 SAME_NUMBER_DEFECT = (
-    "缺陷⑤（本次空跑新发现）：变更单编号只在项目内唯一，但 Continuity Store 的 planning_draft_chg_bindings.change_id 全库 UNIQUE；"
+    "缺陷⑤（样件联调新发现，技术债候选，未开卡）：变更单编号只在项目内唯一，但 Continuity Store 的 planning_draft_chg_bindings.change_id 全库 UNIQUE；"
     "另一个项目用过同号（如 CHG-ELEC-2026-001）后，本项目 pm plan 报“候选 CHG 已绑定其他 PlanningDraft”"
+)
+STRANDED_CANDIDATE = (
+    "疑点⑥（样件联调新发现，已复核代码、待定性）：隔离执行的 Mission 关闭后，验收过的改动只留在 .auto-pm/worktrees/run-plan-* 里没有提交，"
+    "控制根仍是原样；代码里没有任何把候选改动并回控制根的步骤。若属设计（由人手工提交），把本用例改成检查“收口后提示去提交”"
 )
 WAITING_FOR_CARD_179 = (
     "缺陷③（卡 179 修复中）：C05 用有序列表比较 checkpoint.dirty_paths 与 run.declared_dirty_paths，"
@@ -94,11 +97,17 @@ facade = PmFacadeService(root)
 mission_id = facade.materialize_planning_mission(card).mission_id
 if action == 'run':
     outcome = facade.run_approved_planning(
-        card, expected_plan_hash=card.plan_hash, lease_token=secrets.token_urlsafe(32),
+        card, expected_plan_hash=card.plan_hash, lease_token=os.environ.get('DRILL_LEASE_TOKEN') or secrets.token_urlsafe(32),
         lease_token_environment='AUTO_PM_EXECUTION_LEASE_TOKEN',
     )
     print(json.dumps({'mission_id': mission_id, 'verified': outcome.verified, 'run_id': outcome.run_id,
                       'checkpoint_id': outcome.checkpoint_id, 'mission_state': outcome.mission_state.value}, ensure_ascii=False))
+elif action == 'prepare':
+    # A close attempt that stopped after C05, as happened in D08 track 1 (prepared 21:30, never completed).
+    from auto_pm.core.pm_closure_service import PmClosureService
+    from auto_pm.core.pm_cockpit_service import _CLOSE_PREPARE_KEY
+    preparation = PmClosureService(root).prepare_closure(mission_id, idempotency_key=_CLOSE_PREPARE_KEY + mission_id)
+    print(json.dumps({'mission_id': mission_id, 'closure_id': preparation.closure.closure_id}, ensure_ascii=False))
 elif action == 'close':
     completion = PmCockpitService(root).close_accepted(mission_id)
     print(json.dumps({'mission_id': mission_id, 'state': completion.state.value, 'message': completion.message}, ensure_ascii=False))
@@ -143,7 +152,9 @@ class Drill:
     def cli(self, *arguments: str) -> Step:
         return self._call(" ".join(arguments[:2]), [sys.executable, str(self.tools / "launcher.py"), "-w", str(self.root), *arguments])
 
-    def sdk(self, action: str, card: dict[str, Any], agent_files: dict[str, str] | None = None) -> Step:
+    def sdk(
+        self, action: str, card: dict[str, Any], agent_files: dict[str, str] | None = None, lease_token: str = ""
+    ) -> Step:
         card_file = self.tools / f"card-{card['request_id']}.json"
         card_file.write_text(json.dumps(card, ensure_ascii=False), encoding="utf-8")
         environment = self._env()
@@ -151,6 +162,8 @@ class Drill:
             files_path = self.tools / f"agent-{card['request_id']}.json"
             files_path.write_text(json.dumps(agent_files, ensure_ascii=False), encoding="utf-8")
             environment["DRILL_AGENT_FILES"] = str(files_path)
+        if lease_token:
+            environment["DRILL_LEASE_TOKEN"] = lease_token
         return self._call(f"sdk {action}", [sys.executable, str(self.tools / "sdk_step.py"), action, str(self.root), str(card_file)], environment)
 
     def transcript(self) -> str:
@@ -248,6 +261,7 @@ def drive_mission(
     declared: tuple[str, ...],
     stop_after: str = "",
     domain: str = MAIN_DOMAIN,
+    lease_token: str = "",
 ) -> MissionResult:
     """inbox -> confirm -> plan -> approve -> run+verify -> accept -> close_accepted, as separate processes.
 
@@ -256,8 +270,8 @@ def drive_mission(
     """
 
     added = drill.cli(
-        "pm", "inbox", "add", "--project-id", project_id, "--request-id", request_id, "--title", f"空载联调 {request_id}",
-        "--kind", "iteration", "--domain", domain, "--original-words", "空载联调：走完整条收口流程", "--affects", "公共报警块",
+        "pm", "inbox", "add", "--project-id", project_id, "--request-id", request_id, "--title", f"样件联调 {request_id}",
+        "--kind", "iteration", "--domain", domain, "--original-words", "样件联调：走完整条收口流程", "--affects", "公共报警块",
         "--duplicate-check", "查过收件箱与台账，没有同类条目", "--evidence", f"file:{PROJECT}/.plc.json",
         "--disposition", "after_current", "--rationale", "演练", "--alternative", "不做", "--cost-risk", "低",
     )
@@ -290,7 +304,7 @@ def drive_mission(
     if approved.returncode != 0:
         return MissionResult("refused:approve", change_id=card["change_id"], refusal=approved.stderr + approved.stdout)
 
-    ran = drill.sdk("run", card, files)
+    ran = drill.sdk("run", card, files, lease_token=lease_token)
     if ran.returncode != 0:
         return MissionResult("refused:run", change_id=card["change_id"], refusal=ran.stderr + ran.stdout)
     outcome = ran.json()
@@ -303,6 +317,8 @@ def drive_mission(
     accepted = drill.cli("pm", "accept", "--mission-id", mission_id)
     if accepted.returncode != 0:
         return MissionResult("refused:accept", mission_id, card["change_id"], accepted.stderr + accepted.stdout)
+    if stop_after == "accept":
+        return MissionResult("accepted", mission_id, card["change_id"])
     return close_mission(drill, card, mission_id)
 
 
@@ -335,7 +351,7 @@ def assert_closed_and_clean(drill: Drill, result: MissionResult, project_id: str
     assert status in order, status
     for target in order[order.index(status) + 1 :]:
         moved = drill.cli(
-            "change", "transition", result.change_id, "--to", target, "--approver", APPROVER, "--comment", "空载联调", "--pid", project_id
+            "change", "transition", result.change_id, "--to", target, "--approver", APPROVER, "--comment", "样件联调", "--pid", project_id
         )
         assert moved.returncode == 0, drill.transcript()
     assert change_status(drill.root, project_id, result.change_id) == "completed", drill.transcript()
@@ -369,7 +385,7 @@ def _unsorted_buzzer(root: Path) -> tuple[dict[str, str], tuple[str, ...]]:
 
 
 def _single_file(root: Path) -> tuple[dict[str, str], tuple[str, ...]]:
-    files = comment_files(root, "空载联调：单文件")
+    files = comment_files(root, "样件联调：单文件")
     return files, tuple(files)
 
 
@@ -485,7 +501,7 @@ def test_d07_two_missions_back_to_back_on_one_project(tmp_path: Path, benchmark_
     first = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D07A", files=files, declared=declared)
     assert_closed_and_clean(drill, first, PROJECT_ID)
 
-    second_files = comment_files(drill.root, "空载联调：第二单")
+    second_files = comment_files(drill.root, "样件联调：第二单")
     second = drive_mission(
         drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D07B", files=second_files, declared=tuple(second_files)
     )
@@ -493,9 +509,20 @@ def test_d07_two_missions_back_to_back_on_one_project(tmp_path: Path, benchmark_
     assert_closed_and_clean(drill, second, PROJECT_ID)
 
 
+@pytest.mark.xfail(strict=True, reason=STRANDED_CANDIDATE)
+def test_d11_after_closure_the_accepted_bytes_are_in_the_control_root(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    drill = make_drill(tmp_path, benchmark_tar)
+    files = comment_files(drill.root, "样件联调：收口后应在控制根")
+    result = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D11", files=files, declared=tuple(files))
+    assert_closed_and_clean(drill, result, PROJECT_ID)
+
+    for relative, text in files.items():
+        assert (drill.root / relative).read_text(encoding="utf-8") == text, f"控制根没有收到验收过的改动: {relative}"
+
+
 def _parallel_pair(drill: Drill, domain_b: str) -> None:
-    files_a = comment_files(drill.root, "空载联调：项目 A")
-    files_b = comment_files(drill.root, "空载联调：项目 B", project=SECOND)
+    files_a = comment_files(drill.root, "样件联调：项目 A")
+    files_b = comment_files(drill.root, "样件联调：项目 B", project=SECOND)
 
     # Both reach the acceptance gate before either is accepted, then they close in the opposite order.
     a = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-PA", files=files_a, declared=tuple(files_a), stop_after="verify")
@@ -531,11 +558,11 @@ def test_d09_two_projects_in_parallel_whose_first_change_numbers_coincide(tmp_pa
 @pytest.mark.xfail(strict=True, reason=SAME_NUMBER_DEFECT)
 def test_d10_a_closed_mission_in_one_project_blocks_the_same_number_in_another(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar, second_project=True)
-    files_a = comment_files(drill.root, "空载联调：项目 A 先做完")
+    files_a = comment_files(drill.root, "样件联调：项目 A 先做完")
     first = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D10A", files=files_a, declared=tuple(files_a))
     assert_closed_and_clean(drill, first, PROJECT_ID)
 
-    files_b = comment_files(drill.root, "空载联调：项目 B 后做", project=SECOND)
+    files_b = comment_files(drill.root, "样件联调：项目 B 后做", project=SECOND)
     second = drive_mission(drill, project_id=SECOND_ID, request_id="REQ-DRILL-D10B", files=files_b, declared=tuple(files_b))
 
     assert_closed_and_clean(drill, second, SECOND_ID)
