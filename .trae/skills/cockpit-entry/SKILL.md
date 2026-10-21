@@ -52,9 +52,15 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 3. **入箱**：`pm inbox add`，`--original-words` 一字不改填用户原话；分诊单里影响、查重、取证都写你实际查到的东西。
 4. **出计划给用户看**：用中文列出 目标 / 可改范围（具体文件路径）/ 验收标准 / 风险 / 不做什么 / 需要用户决定的点。验收标准必须是机器能判的（某条命令退出码 0、某个测试通过、某个输出含某行），“能用”“正常”这类不算。然后停下，等用户亲口说“确认开工”。
 5. **用户确认后**才运行 `pm inbox confirm`、`pm plan`、`pm approve`。批准人填用户，证据引用写成 `user-confirmation:` 加用户确认消息的时间或编号；用户没说过的确认，绝不要自己编。
-6. **动手**：只改范围卡列出的路径。所有 `change` 命令都带 `--pid <项目编号>`。不要单独用 `continuity run transition` / `continuity work transition` 去推 Run 或 Work 的状态；终态只由收口一步推进。
+6. **动手**：Run 和 Checkpoint 由驾驶舱的执行入口产生（`PmFacadeService.run_approved_planning` 或界面），命令行目前没有这一步的入口，不要用 `continuity run start` 等底层命令自己拼。只改范围卡列出的路径。所有 `change` 命令都带 `--pid <项目编号>`。不要单独用 `continuity run transition` / `continuity work transition` 去推 Run 或 Work 的状态；终态只由收口一步推进。
 7. **自检**：交给用户验收前，范围卡里的每条验收标准都要跑过，把命令和退出码原样报告；有没跑的，明说没跑。
-8. **验收与收口**：用户说“验收通过”后，收口只用驾驶舱的 `close_accepted` 一步；它会同时推进 Run、Work 和变更单。被拒时把拒绝原文报告给用户并停下，不换办法绕过。在隔离工作树里写的文件，收口后确认控制根里对应文件逐字节一致（列出每个文件的 SHA-256）。最后运行 `main.py ledger reconcile <项目编号>` 只读对账，结果报告给用户。
+8. **验收与收口**：用户说“验收通过”后，按顺序：
+   1. `pm accept --mission-id <Mission 编号>` 记下用户验收（不做这一步，收口会被拒）；
+   2. 用驾驶舱的 `close_accepted` 一步收口：它同时推进 Run、Work 和 Mission，并把证据写进变更单、同步台账，但**不推进变更单状态**；
+   3. 收口成功后，用 `change transition <单号> --to <下一状态> --pid <项目编号>` 把变更单逐步推到 `completed`；
+   4. 运行 `main.py ledger reconcile <项目编号>` 只读对账，结果报告给用户。
+
+   收口被拒时，返回的只是一句通用话，真正原因写在日志里：调用脚本先 `logging.basicConfig(level=logging.WARNING)` 让原因打印到终端，或者看 `~/.auto-pm/logs/auto-pm.log`。把返回原话和日志里的原因一起报告给用户并停下，不换办法绕过。在隔离工作树里写的文件，收口后确认控制根里对应文件逐字节一致（列出每个文件的 SHA-256）。
 
 需要写 Python 调驾驶舱接口时（目前核验和收口还没有命令行入口）：只在控制根用 `.venv` 的解释器加 `-B` 运行，脚本放在 `.agents/` 下、用完删掉；不要把脚本或缓存写进 `00_Infrastructure/auto_pm/releases/`，也不要直接改数据库或治理 JSON。
 
