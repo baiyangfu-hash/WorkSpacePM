@@ -104,7 +104,9 @@ def _launch(container: Path, *arguments: str) -> subprocess.CompletedProcess[str
 def _orient(container: Path) -> dict[str, object]:
     result = _launch(container, "pm", "orient", PROJECT_ID, "--json")
     assert result.returncode == 0, result.stdout + result.stderr
-    payload: dict[str, object] = json.loads(result.stdout[result.stdout.index("{") :])
+    # The launcher's own "verified via" line is buffered and can land before or after the JSON when stdout is a pipe.
+    payload, _ = json.JSONDecoder().raw_decode(result.stdout[result.stdout.index("{") :])
+    assert isinstance(payload, dict)
     return payload
 
 

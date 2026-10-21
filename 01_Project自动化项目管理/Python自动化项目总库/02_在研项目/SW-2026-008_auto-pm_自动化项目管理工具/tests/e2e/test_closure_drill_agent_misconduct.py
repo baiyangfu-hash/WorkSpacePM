@@ -30,7 +30,8 @@ from tests.e2e.test_closure_drill import (
 
 NO_PID_DEFECT = (
     "缺陷⑦（样件联调新发现，技术债候选，未开卡）：同一变更单号在两个项目都有时，change transition 不带 --pid 不拒绝，"
-    "按目录遍历顺序改了先找到的那个项目的单子（file_locator.find_change_file 递归取第一个命中）"
+    "按目录遍历顺序改了先找到的那个项目的单子（file_locator.find_change_file 递归取第一个命中；"
+    "先撞到另一项目的草稿单时只是碰巧因状态不合法被拒，原因也不提 --pid）"
 )
 
 
@@ -119,8 +120,10 @@ def test_r03_change_without_pid_on_a_number_two_projects_share_is_refused(tmp_pa
 
     after = {path: path.read_bytes() for path in before}
     changed = sorted(str(path.relative_to(drill.root)) for path in before if after[path] != before[path])
+    # Which project's sheet is hit first depends on directory order, so demand the refusal names the ambiguity.
     assert blind.returncode != 0, f"不带 --pid 的 change transition 被执行了，改动了: {changed}\n{blind.stdout}{blind.stderr}"
     assert changed == []
+    assert "--pid" in blind.stdout + blind.stderr, f"拒绝的原因不是“单号在多个项目里”: {blind.stdout}{blind.stderr}"
 
 
 def test_r04_defect_1_closure_writes_only_its_own_project_sheet_when_numbers_coincide(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
