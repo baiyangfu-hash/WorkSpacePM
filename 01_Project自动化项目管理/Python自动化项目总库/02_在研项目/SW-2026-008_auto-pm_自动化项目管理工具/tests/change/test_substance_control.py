@@ -354,7 +354,7 @@ class _ClosureStore:
         )
 
     def get_work(self, work_id: str) -> Any:
-        return SimpleNamespace(scope_paths=("SW-TEST-001/src/calc.py",))
+        return SimpleNamespace(scope_paths=("SW-TEST-001/src/calc.py",), subject_project_id="SW-TEST-001")
 
     def get_run(self, run_id: str) -> Any:
         return SimpleNamespace(git_head="8b7f199a527e5b6f0c1d2e3f4a5b6c7d8e9f0a1b")
