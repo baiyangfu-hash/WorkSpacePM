@@ -1912,6 +1912,8 @@ class ContinuityStore:
                 ):
                     raise ContinuityStoreError("idempotency_key 已绑定不同 Work 状态迁移")
                 return self._get_work(conn, work_id)
+            if destination in {WorkState.VERIFYING, WorkState.ACCEPTED, WorkState.CLOSED}:
+                self._refuse_while_closure_prepared(conn, "work_id", work_id, "Work")
             cursor = conn.execute(
                 """UPDATE work_items SET state=?, authorization_ref=?, version=version+1,
                 updated_at=? WHERE work_id=? AND version=?""",
@@ -3360,9 +3362,10 @@ class ContinuityStore:
                 or mission.authority.decision_id != closure["decision_id"]
             ):
                 raise ContinuityStoreError("Closure 的 Run/Work/Mission 授权链已漂移")
-            if run.state is not RunState.VERIFYING:
+            adopted = self._early_terminal_lineage(conn, closure, run, work)
+            if adopted is None and run.state is not RunState.VERIFYING:
                 raise ContinuityStoreError("C08 要求 Run 仍处于 VERIFYING")
-            if work.state is not WorkState.IN_PROGRESS:
+            if adopted is None and work.state is not WorkState.IN_PROGRESS:
                 raise ContinuityStoreError("C08 要求 Work 仍处于 IN_PROGRESS")
             if mission.state is not MissionState.ACCEPTED:
                 raise ContinuityStoreError("C08 要求 Mission 已 ACCEPTED 且尚未关闭")
@@ -3385,61 +3388,77 @@ class ContinuityStore:
             ):
                 raise ContinuityStoreError("Closure Checkpoint 已不是 Run 的最新证据")
 
-            run_result_version = run.version + 1
-            run_cursor = conn.execute(
-                """UPDATE run_items SET state='SUCCEEDED', version=version+1, updated_at=?
-                WHERE run_id=? AND state='VERIFYING' AND version=?""",
-                (event_time, run.run_id, run.version),
-            )
-            if run_cursor.rowcount != 1:
-                raise ContinuityStoreError("Run 收口出现版本冲突")
-            release = self._release_lease_in_transaction(
-                conn,
-                lease=self._get_lease(conn, run.run_id),
-                event_time=event_time,
-                reason="terminal:SUCCEEDED",
-            )
-            self._append_event(
-                conn,
-                run.run_id,
-                "RUN_TRANSITIONED",
-                {
-                    "schema_version": "run-transition.v3",
-                    "expected_version": run.version,
-                    "new_state": RunState.SUCCEEDED.value,
-                    "result_version": run_result_version,
-                    "lease_release": release,
-                },
-                f"{idempotency_key}:run-succeeded",
-                event_time,
-                aggregate_type="run",
-            )
-
-            work_version = work.version
-            for destination, suffix in (
-                (WorkState.VERIFYING, "work-verifying"),
-                (WorkState.ACCEPTED, "work-accepted"),
-                (WorkState.CLOSED, "work-closed"),
-            ):
-                cursor = conn.execute(
-                    """UPDATE work_items SET state=?, version=version+1, updated_at=?
-                    WHERE work_id=? AND version=?""",
-                    (destination.value, event_time, work.work_id, work_version),
-                )
-                if cursor.rowcount != 1:
-                    raise ContinuityStoreError("Work 收口出现版本冲突")
-                work_version += 1
+            if adopted is not None:
                 self._append_event(
                     conn,
-                    work.work_id,
-                    "WORK_TRANSITIONED",
+                    closure_id,
+                    "CLOSURE_LINEAGE_ADOPTED",
                     {
-                        "state": destination.value,
-                        "authorization_ref": work.authorization_ref,
+                        "schema_version": "closure-lineage-adopted.v1",
+                        "run_id": run.run_id,
+                        "work_id": work.work_id,
+                        **adopted,
                     },
-                    f"{idempotency_key}:{suffix}",
+                    f"{idempotency_key}:lineage-adopted",
                     event_time,
+                    aggregate_type="closure",
                 )
+            else:
+                run_result_version = run.version + 1
+                run_cursor = conn.execute(
+                    """UPDATE run_items SET state='SUCCEEDED', version=version+1, updated_at=?
+                    WHERE run_id=? AND state='VERIFYING' AND version=?""",
+                    (event_time, run.run_id, run.version),
+                )
+                if run_cursor.rowcount != 1:
+                    raise ContinuityStoreError("Run 收口出现版本冲突")
+                release = self._release_lease_in_transaction(
+                    conn,
+                    lease=self._get_lease(conn, run.run_id),
+                    event_time=event_time,
+                    reason="terminal:SUCCEEDED",
+                )
+                self._append_event(
+                    conn,
+                    run.run_id,
+                    "RUN_TRANSITIONED",
+                    {
+                        "schema_version": "run-transition.v3",
+                        "expected_version": run.version,
+                        "new_state": RunState.SUCCEEDED.value,
+                        "result_version": run_result_version,
+                        "lease_release": release,
+                    },
+                    f"{idempotency_key}:run-succeeded",
+                    event_time,
+                    aggregate_type="run",
+                )
+
+                work_version = work.version
+                for destination, suffix in (
+                    (WorkState.VERIFYING, "work-verifying"),
+                    (WorkState.ACCEPTED, "work-accepted"),
+                    (WorkState.CLOSED, "work-closed"),
+                ):
+                    cursor = conn.execute(
+                        """UPDATE work_items SET state=?, version=version+1, updated_at=?
+                        WHERE work_id=? AND version=?""",
+                        (destination.value, event_time, work.work_id, work_version),
+                    )
+                    if cursor.rowcount != 1:
+                        raise ContinuityStoreError("Work 收口出现版本冲突")
+                    work_version += 1
+                    self._append_event(
+                        conn,
+                        work.work_id,
+                        "WORK_TRANSITIONED",
+                        {
+                            "state": destination.value,
+                            "authorization_ref": work.authorization_ref,
+                        },
+                        f"{idempotency_key}:{suffix}",
+                        event_time,
+                    )
 
             mission_cursor = conn.execute(
                 """UPDATE mission_items SET state='CLOSED', version=version+1, updated_at=?
@@ -4082,6 +4101,8 @@ class ContinuityStore:
                 raise ContinuityStoreError("Run 不存在或版本冲突")
             if destination not in _STORE_RUN_TRANSITIONS[current.state]:
                 raise ContinuityStoreError(f"非法 Run 状态迁移: {current.state} -> {destination}")
+            if destination is RunState.SUCCEEDED:
+                self._refuse_while_closure_prepared(conn, "run_id", run_id, "Run")
             self._require_lease_in_tx(conn, run_id=run_id, owner_id=owner_id, lease_token=lease_token, expected_epoch=expected_epoch)
             if destination not in {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}:
                 sibling = conn.execute(
@@ -6992,6 +7013,59 @@ class ContinuityStore:
         if value.tzinfo is None:
             raise ContinuityStoreError(f"{label} 时间戳必须包含时区")
         return value.astimezone(UTC)
+
+    @staticmethod
+    def _refuse_while_closure_prepared(
+        conn: sqlite3.Connection, column: str, value: str, label: str
+    ) -> None:
+        """Once a closure is prepared, only C08 may move its Run/Work to the end."""
+
+        assert column in {"run_id", "work_id"}
+        row = conn.execute(
+            f"SELECT closure_id FROM closure_items WHERE {column}=? AND state='PREPARED'",
+            (value,),
+        ).fetchone()
+        if row is not None:
+            raise ContinuityStoreError(
+                f"收口 {row['closure_id']} 已准备：{label} 的终态只能由 close_accepted 一步推进"
+            )
+
+    @classmethod
+    def _early_terminal_lineage(
+        cls,
+        conn: sqlite3.Connection,
+        closure: dict[str, Any],
+        run: RunItem,
+        work: WorkItem,
+    ) -> dict[str, str] | None:
+        """Facts of a Run SUCCEEDED and a Work CLOSED that were reached by hand after
+        this closure was prepared (before the guard existed); None when not both."""
+
+        if run.state is not RunState.SUCCEEDED or work.state is not WorkState.CLOSED:
+            return None
+        prepared_at = datetime.fromisoformat(str(closure["created_at"]))
+        facts: dict[str, str] = {}
+        for aggregate_type, aggregate_id, event_type, key, terminal in (
+            ("run", run.run_id, "RUN_TRANSITIONED", "new_state", RunState.SUCCEEDED.value),
+            ("work", work.work_id, "WORK_TRANSITIONED", "state", WorkState.CLOSED.value),
+        ):
+            row = conn.execute(
+                """SELECT event_id, payload_json, created_at FROM events
+                WHERE aggregate_type=? AND aggregate_id=? AND event_type=?
+                ORDER BY rowid DESC LIMIT 1""",
+                (aggregate_type, aggregate_id, event_type),
+            ).fetchone()
+            try:
+                payload = json.loads(str(row["payload_json"])) if row is not None else {}
+                reached_at = datetime.fromisoformat(str(row["created_at"])) if row else None
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ContinuityStoreError("C08 无法读取提前终态的迁移事件") from error
+            if reached_at is None or payload.get(key) != terminal or reached_at < prepared_at:
+                raise ContinuityStoreError(
+                    "C08 只接纳收口准备之后由同一 Run/Work 到达的提前终态"
+                )
+            facts[f"{aggregate_type}_terminal_event_id"] = str(row["event_id"])
+        return facts
 
     @classmethod
     def _closure_completion_from_event(
