@@ -81,6 +81,7 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
+    // @安全区 开始：心跳/超时定时器, 复位清锁 (只认上升沿, 通讯恢复后)
     // --- 定时器顶部无条件批量调用 (LSP-906/903) ---
     s_tHbToggle(IN := s_tHbToggle.IN, PT := s_tHbToggle.PT,
                 Q => s_tHbToggle.Q, ET => s_tHbToggle.ET);
@@ -126,6 +127,7 @@ BEGIN
     END_IF;
 
     s_bResetPrev := i_bResetCmd;
+    // @安全区 结束
 
     (* 0.1 组件 ID 人工操作, 不使能时也处理 (HMI 置 1, PLC 处理后清 0; PLC 不做权限, 权限由 HMI 权限动画处理) *)
     IF io_stIdHmi.bCmdCopyFromUp THEN
@@ -159,6 +161,7 @@ BEGIN
         io_stIdHmi.bCmdClear := FALSE;
     END_IF;
 
+    // @安全区 开始：失去使能(急停)撤销输出, 心跳方波与 12s 超时, 断线当拍撤销与人工复位锁
     IF NOT i_bEnable THEN
         // 握手进行中失去使能 (如急停), 按中途中止处理: 自动模式下要人工复位, 第 20 步起要人工核对 ID
         IF s_iInfeedStep <> 0 THEN
@@ -300,7 +303,9 @@ BEGIN
     IF io_stExternal.stDownstream.bDownstreamComFault THEN
         q_wErrorCode := q_wErrorCode OR ERR_DOWN_COM;
     END_IF;
+    // @安全区 结束
 
+    // @安全区 开始：进料/出料 8 步握手: 准备好/允许进料/出料请求/动作允许输出
     (* 2. 上游进料 8 步闭环状态机 (STD-820) *)
     CASE s_iInfeedStep OF
         0: (* 待机态: 广播本机准备好进料 (1) *)
@@ -399,6 +404,7 @@ BEGIN
             s_iOutfeedStep := 0;
     END_CASE;
     io_stExternal.stDownstream.iOutfeedStep := s_iOutfeedStep;
+    // @安全区 结束
 
     (* 4. 组件 ID 自动清除 *)
     // R3 第 2 种: 出料第 30/40 步 (已发出料请求) 本机持续检测不到产品超过设定时间, 判产品已离开, 清下游 ID
