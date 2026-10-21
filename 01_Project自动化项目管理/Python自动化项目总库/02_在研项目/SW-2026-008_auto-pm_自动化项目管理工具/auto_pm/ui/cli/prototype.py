@@ -1,6 +1,6 @@
 """
 Prototype CLI Command Group for auto-pm (SW-2026-008).
-Provides prototype bundle, check, archive, and init commands exclusively for pm-workflow skill.
+Provides prototype bundle, check, archive, and init commands for the PM governance role.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def _resolve_project_dir(workspace_root: str, pid: str) -> str:
             return str(item)
     return str(ws)
 
-@click.group(name="prototype", help="通用原型管理命令组 (pm-workflow 专属)")
+@click.group(name="prototype", help="通用原型管理命令组 (PM 治理角色使用)")
 def prototype_cmd() -> None:
     """Prototype command group."""
     pass
