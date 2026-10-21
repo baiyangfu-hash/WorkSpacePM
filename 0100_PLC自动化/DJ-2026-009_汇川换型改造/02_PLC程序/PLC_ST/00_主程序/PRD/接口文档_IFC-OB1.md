@@ -176,3 +176,26 @@ PickPlace ──o_bPlaceComplete_ToFeeder──→ Feeder.i_bPickPlace_FeedCompl
 | V6.0.1 | 2026-05-18 | 修复: 所有GlobalVars成员引用对齐DB实际定义(stExternal 27in/20out, stConveyor 34in/30out, stPickPlace 51in/20out等) |
 | V6.0.0 | 2026-05-18 | Phase 3全部重写: 同步所有FB到V6.0.0新接口, 变量名100%英文 |
 | V5.0.0 | 2026-05-04 | 接口变量名100%英文化, 与GlobalVars.db V3.0.0同步 |
+
+---
+
+## 8. DJ-2026-009 当前 OB1 的 FB_3001 接线（CARD-DJ-2026-009-003 草稿）
+
+> 本文第 1～7 节是从 DJ-2026-005 带过来的旧内容，和本项目现在的 OB1 对不上；以本节和 DSN 第 6 节为准。
+
+| FB_3001 引脚 | OB1 接到 | 说明 / 待确认 |
+| :--- | :--- | :--- |
+| `i_bEnable` | `GlobalVars.stExternal.bEmergencyStop` | 急停回路正常（1 = 正常，IO 表 `I0.0 ESTOP_OK`）；该变量的 IO 映射还没写，导入工程时接 |
+| `i_bAutoMode` | `GlobalVars.stStation1.stControl.bAutoEnable` | 工位 1 自动使能（项目里只有这一个自动位） |
+| `i_bResetCmd` | `GlobalVars.stGlobal.i_bReset OR GlobalVars.stStation1.stControl.bReset` | 公共复位或工位复位，任一按下都算 |
+| `i_bMachineReadyIn` | `GlobalVars.stStation1.stStatus.bWaitMaterial` | 工位 1 在“等待来料”步 |
+| `i_bMachineReadyOut` | `GlobalVars.stStation1.stStatus.bReadyOut` | 工位 1 在出料步且气缸已松开（FB_1001 新增状态位） |
+| `i_bInfeedArrivedSens` | `GlobalVars.stStation1.stSensors.bInPosSensor` | 入料到位光电 |
+| `i_bProductPresent` | `bInPosSensor OR bWorkPosSensor` | 本机有产品；现场如有单独的产品检测传感器，改接那个点 |
+| `q_bAllowInfeedAct` / `q_bAllowOutfeedAct` | `GlobalVars.bExtAllowInfeedAct` / `bExtAllowOutfeedAct` | 先接到全局变量；工位 1 电机还没用它们做联锁（另开卡） |
+| `q_bUpstreamDone` / `q_bDownstreamDone` | `GlobalVars.bExtUpstreamDone` / `bExtDownstreamDone` | 单周期脉冲 |
+| `q_bComAlarm` / `q_wErrorCode` | `GlobalVars.bExtComAlarm` / `wExtErrorCode` | 给 HMI 显示；FB_2001 公共报警没有外部通讯报警输入，接入公共报警另开卡 |
+| `io_stExternal` | `GlobalVars.stExternal` | 不变 |
+| `io_sMachineModuleID` | `GlobalVars.sMachineModuleID` | 本机 ID，须断电保持 |
+| `io_stIdHmi` | `GlobalVars.stModuleIdHmi` | HMI 操作与时间参数 |
+

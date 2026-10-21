@@ -41,3 +41,6 @@
 | `bDone` | BOOL | 周期完成标志 |
 | `bAlarm` | BOOL | 站级报警标志 |
 | `iAlarmCode` | DINT | 报警代码 (101=进料超时, 102=夹紧超时, 103=松开超时) |
+
+> CARD-DJ-2026-009-003（预做分支 `claude/dj009-card003`）：`stStatus` 新增 `bReadyOut`（BOOL，加工完成可出料：出料步且气缸已松开），OB1 接 FB_3001 `i_bMachineReadyOut`。本块不再直接写 `io_stExternal` 里的 `bMachine_ReadyIn` / `bMachine_ReadyOut`，改由 FB_3001 根据 `stStatus.bWaitMaterial` / `stStatus.bReadyOut` 发出，`io_stExternal` 对本块只读（读 `iInfeedStep`）。
+

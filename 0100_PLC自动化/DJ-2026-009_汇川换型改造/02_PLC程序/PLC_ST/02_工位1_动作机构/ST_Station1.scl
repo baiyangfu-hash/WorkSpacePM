@@ -25,6 +25,7 @@ STRUCT
     iAlarmCode      : DINT;     // 报警代码 (101~199)
     bWaitMaterial   : BOOL;     // 等待来料
     bProcessing     : BOOL;     // 加工中
+    bReadyOut       : BOOL;     // 加工完成可出料 (出料步且气缸已松开)
 END_STRUCT;
 END_TYPE
 

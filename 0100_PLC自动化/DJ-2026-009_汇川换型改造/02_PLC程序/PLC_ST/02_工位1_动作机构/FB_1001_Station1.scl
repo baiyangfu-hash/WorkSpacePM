@@ -92,10 +92,8 @@ BEGIN
         io_stStation.stActuators.stCyl1.stCmd.Retract := TRUE;
         io_stStation.stActuators.stCyl2.stCmd.Extend := FALSE;
         io_stStation.stActuators.stCyl2.stCmd.Retract := TRUE;
-        
-        // 撤销握手准备信号
-        io_stExternal.stUpstream.bMachine_ReadyIn := FALSE;
-        io_stExternal.stDownstream.bMachine_ReadyOut := FALSE;
+        // 握手准备信号由 FB_3001 根据 stStatus.bWaitMaterial / bReadyOut 发出, 本块不直接写
+        // (直接写会绕过 FB_3001 的通讯故障联锁, CARD-DJ-2026-009-003)
 
         s_bRunning := FALSE;
         s_bDone := FALSE;
@@ -130,15 +128,13 @@ BEGIN
                 END_IF;
 
             STEP_WAIT_MATERIAL:
-                // 发出准备好信号，由 FB_3001 负责上游交握
-                io_stExternal.stUpstream.bMachine_ReadyIn := TRUE;
+                // 等待来料: stStatus.bWaitMaterial = 1, 由 FB_3001 向上游发准备好信号并负责交握
                 
                 // 等待 FB_3001 状态机推进至允许进料或收到进料请求
                 // 根据 STD-820，FB_3001 的 iInfeedStep >= 30 表示允许电机动作
                 IF io_stExternal.stUpstream.iInfeedStep >= 30 THEN
                     s_iStep := STEP_FEEDING;
                     s_tStepTimer.IN := FALSE;
-                    io_stExternal.stUpstream.bMachine_ReadyIn := FALSE; // 撤销就绪
                 END_IF;
 
             STEP_FEEDING:
@@ -197,16 +193,14 @@ BEGIN
                     s_tStepTimer.IN := TRUE;
                     s_tStepTimer.PT := 10000; // 出料超时 10s
                     
-                    // STD-820 出料握手：等待下游交握完成 (iOutfeedStep 走完) 且工件离开本站
-                    // FB_3001 负责与下游交握，本站主要监测工件离开
-                    io_stExternal.stDownstream.bMachine_ReadyOut := TRUE;
+                    // STD-820 出料握手：stStatus.bReadyOut = 1, 由 FB_3001 向下游发准备好出料并负责交握
+                    // 本站主要监测工件离开
                     
                     IF NOT t_bWorkPos AND NOT t_bInPos THEN
                         io_stStation.stActuators.stMotorFwd.i_bFwdReq := FALSE;
                         s_bDone := TRUE;
                         s_iStep := STEP_IDLE;
                         s_tStepTimer.IN := FALSE;
-                        io_stExternal.stDownstream.bMachine_ReadyOut := FALSE;
                     ELSIF s_tStepTimer.Q THEN
                         s_bAlarm := TRUE;
                         s_iAlarmCode := 103; // 松开/出料超时报警
@@ -242,5 +236,9 @@ BEGIN
     io_stStation.stStatus.iAlarmCode   := s_iAlarmCode;
     io_stStation.stStatus.bWaitMaterial:= (s_iStep = STEP_WAIT_MATERIAL);
     io_stStation.stStatus.bProcessing  := (s_iStep = STEP_PROCESS);
+    // 加工完成、气缸已松开, 可以出料 (接 FB_3001 i_bMachineReadyOut, CARD-DJ-2026-009-003)
+    io_stStation.stStatus.bReadyOut    := (s_iStep = STEP_RELEASE_UNLOAD)
+                                          AND io_stStation.stActuators.stCyl1.stSts.IsRetracted
+                                          AND io_stStation.stActuators.stCyl2.stSts.IsRetracted;
 
 END_FUNCTION_BLOCK
