@@ -58,7 +58,7 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
    3. `main.py continuity run start … --worktree <工作树绝对路径> --lease-wallet`，`--owned`/`--declared-dirty` 列范围卡里的文件；
    4. `main.py continuity run transition --to RUNNING`，写完、自检过后再 `--to VERIFYING`。只允许这两步；SUCCEEDED、CLOSED 等终态绝不手推，Work 也不手推；
    5. `main.py continuity checkpoint create …`；
-   6. 质量验证 `verify_for_acceptance` 目前没有命令，只能临时调用：必须先告诉用户；用控制根 `.venv` 的解释器加 `-B` 运行；脚本放 `.agents/`、用完删；不 import 发布目录以外的驾驶舱代码，不往 `00_Infrastructure/auto_pm/releases/` 写任何文件或缓存；
+   6. 质量验证 `verify_for_acceptance` 目前没有命令，只能临时调用：必须先告诉用户；用控制根 `.venv` 的解释器加 `-B` 运行；脚本放 `.agents/`、用完删；不 import 发布目录以外的驾驶舱代码，不往 `00_Infrastructure/auto_pm/releases/` 写任何文件或缓存；用这个 Run 自己的租约（从 `--lease-wallet` 存的本机钱包读），不另起租约，也不把口令打印出来；门禁正在跑的时候不做这一步；
    7. 交验收前把工作树里改好的文件按字节拷回控制根，列出每个文件的 SHA-256。
 7. **自检**：交给用户验收前，范围卡里的每条验收标准都要跑过，把命令和退出码原样报告；有没跑的，明说没跑。
 8. **验收与收口**：请用户在驾驶舱界面上亲手点“确认验收”。这个按钮先记下用户验收，再走 `close_accepted` 一步收口：推进 Run、Work 和 Mission，把证据写进变更单、同步台账，但**不推进变更单状态**。你不要写脚本去调它。用户告诉你收口完成后：
