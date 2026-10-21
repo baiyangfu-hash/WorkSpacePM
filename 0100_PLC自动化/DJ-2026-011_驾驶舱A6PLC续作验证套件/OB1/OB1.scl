@@ -1,18 +1,29 @@
-// OB1 - 主循环程序
+// ==============================================================================
+// 模块名称: OB1 (Main Organization Block)
 // 项目: DJ-2026-011 驾驶舱A6PLC续作验证套件
-// 版本: V1.0.0
-// 创建日期: 2026-09-10
+// 模块功能: 双手启动功能块调度 (FB_1091_TwoHandStart_DJ2026011)
+//           激励与结果均经 DB_TwoHandStartTest 暴露, 供 .scltest 测试步骤读写
+// 遵守规范: Siemens LSP (LSP-903/905/906)
+// ==============================================================================
 
-// === 区域 1: 初始化 ===
-// 仅在首次扫描时执行
-IF "FirstScan" THEN
-    // TODO: 初始化代码
-    ;
-END_IF;
+ORGANIZATION_BLOCK "Main"
+{ S7_Optimized_Block := 'TRUE' }
+VERSION : 1.0
 
-// === 区域 2: 功能块调用 ===
-// TODO: 在此调用需要测试的功能块
-// 示例: "FB_TON_Instance"();
+VAR_TEMP
+END_VAR
 
-// === 区域 3: 测试逻辑 ===
-// TODO: 在此编写测试逻辑
+BEGIN
+    // --------------------------------------------------------------------------
+    // 双手启动功能块调度: 两个启动按钮须在 0.5 秒同步窗口内先后按下并一直按住
+    // 才输出启动; 任一松开立即停止; 两个都松开后才允许下一次启动。
+    // 测试步骤见 Test/two_hand_start_test.scltest
+    // --------------------------------------------------------------------------
+    DB_TwoHandStartTest.fb_TwoHandStart(
+        i_bStartLeft := DB_TwoHandStartTest.s_bStartLeft,
+        i_bStartRight := DB_TwoHandStartTest.s_bStartRight,
+        i_dSyncWindowMs := DB_TwoHandStartTest.s_dSyncWindowMs,
+        o_bStartOutput => DB_TwoHandStartTest.s_bStartOutput,
+        o_bSyncFault => DB_TwoHandStartTest.s_bSyncFault);
+
+END_ORGANIZATION_BLOCK
