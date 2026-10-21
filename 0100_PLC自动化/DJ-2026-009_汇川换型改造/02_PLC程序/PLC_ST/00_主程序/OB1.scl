@@ -36,7 +36,7 @@ BEGIN
         i_bMachineReadyIn := GlobalVars.stStation1.stStatus.bWaitMaterial,
         i_bMachineReadyOut := GlobalVars.stStation1.stStatus.bReadyOut,
         i_bInfeedArrivedSens := GlobalVars.stStation1.stSensors.bInPosSensor,
-        i_bProductPresent := GlobalVars.stStation1.stSensors.bInPosSensor OR GlobalVars.stStation1.stSensors.bWorkPosSensor,
+        i_bProductPresent := GlobalVars.stStation1.stStatus.bProductPresent,
         q_bAllowInfeedAct => GlobalVars.bExtAllowInfeedAct,
         q_bAllowOutfeedAct => GlobalVars.bExtAllowOutfeedAct,
         q_bUpstreamDone => GlobalVars.bExtUpstreamDone,

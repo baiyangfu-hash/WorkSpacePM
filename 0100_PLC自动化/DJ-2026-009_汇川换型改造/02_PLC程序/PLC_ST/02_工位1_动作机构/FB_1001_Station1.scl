@@ -34,6 +34,8 @@ VAR_TEMP
     t_bWorkPos      : BOOL;
     t_dCylTimeout   : DINT;
     t_dProcessTime  : DINT;
+    t_iIdx          : INT;              // 产品传感器数组下标
+    t_bProduct      : BOOL;             // 本工位有产品
 END_VAR
 
 CONST
@@ -236,6 +238,12 @@ BEGIN
     io_stStation.stStatus.iAlarmCode   := s_iAlarmCode;
     io_stStation.stStatus.bWaitMaterial:= (s_iStep = STEP_WAIT_MATERIAL);
     io_stStation.stStatus.bProcessing  := (s_iStep = STEP_PROCESS);
+    // 本工位有产品: 有无产品在工位块内部判断 (用户 2026-10-21), 接 FB_3001 i_bProductPresent
+    t_bProduct := t_bInPos OR t_bWorkPos;
+    FOR t_iIdx := 0 TO 7 DO
+        t_bProduct := t_bProduct OR io_stStation.stSensors.arrProductSens[t_iIdx];
+    END_FOR;
+    io_stStation.stStatus.bProductPresent := t_bProduct;
     // 加工完成、气缸已松开, 可以出料 (接 FB_3001 i_bMachineReadyOut, CARD-DJ-2026-009-003)
     io_stStation.stStatus.bReadyOut    := (s_iStep = STEP_RELEASE_UNLOAD)
                                           AND io_stStation.stActuators.stCyl1.stSts.IsRetracted

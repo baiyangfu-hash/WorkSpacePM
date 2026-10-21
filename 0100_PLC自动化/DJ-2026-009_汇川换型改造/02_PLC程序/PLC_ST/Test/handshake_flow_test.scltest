@@ -7,7 +7,7 @@
 // 做法: Modbus 映射层不使能, 直接置对方的握手变量; 本机一侧全部走 OB1 正常接线
 //   (使能 = stExternal.bEmergencyStop, 自动 = stStation1.stControl.bAutoEnable, 复位 = stStation1.stControl.bReset,
 //    进料就绪 = 工位“等待来料”, 出料就绪 = 工位出料步且气缸已缩回, 进料到位 = bInPosSensor,
-//    有产品 = bInPosSensor OR bWorkPosSensor).
+//    有产品 = 工位块判断 (入料到位/加工到位/arrProductSens 任一路)).
 // 计时: 共享库 FB_TON 目前按扫描次数计数, 本文件的时间参数和 WAIT_CYCLES 按“1 ms = 1 个扫描周期”写;
 //   共享库定时器修复成真实毫秒后, 带计时的用例 (TC_HF_Outfeed_ProductLeft_ClearDownId, TC_HF_Idle_AutoClear_MachineId,
 //   TC_HF_Heartbeat_SquareWave) 的等待周期数要按扫描周期重算.
@@ -387,6 +387,53 @@ TEST_CASE "TC_HF_Idle_AutoClear_MachineId"
     WAIT_CYCLES 2;
     ASSERT GlobalVars.sMachineModuleID = 'L06A20261020165232';
     WAIT_CYCLES 10;
+    ASSERT GlobalVars.sMachineModuleID = '';
+END_TEST_CASE
+
+// 有产品由工位块判断: 预留产品传感器数组任一路为 1 即算有产品 (用户 2026-10-21), 有产品时不自动清本机 ID
+TEST_CASE "TC_HF_ProductSensorArray_Present"
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.stExternal.bEmergencyStop := TRUE;
+    SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
+    SET GlobalVars.fbStation1.s_iStep := 0;
+    SET GlobalVars.stStation1.stActuators.stCyl1.stSts.IsRetracted := FALSE;
+    SET GlobalVars.stStation1.stActuators.stCyl2.stSts.IsRetracted := FALSE;
+    SET GlobalVars.stStation1.stSensors.bInPosSensor := FALSE;
+    SET GlobalVars.stStation1.stSensors.bWorkPosSensor := FALSE;
+    SET GlobalVars.stExternal.stUpstream.sRcvModuleID := 'L06A20261020165232';
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    SET GlobalVars.stModuleIdHmi.dLeaveTimeMs := 0;
+    SET GlobalVars.stModuleIdHmi.dIdleClearMs := 0;
+    SET GlobalVars.stModuleIdHmi.sManualId := '';
+    SET GlobalVars.stModuleIdHmi.bCmdCopyFromUp := FALSE;
+    SET GlobalVars.stModuleIdHmi.bCmdManualEntry := FALSE;
+    SET GlobalVars.stModuleIdHmi.bCmdRelease := FALSE;
+    SET GlobalVars.stModuleIdHmi.bCmdClear := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.stStation1.stControl.bReset := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.stStation1.stControl.bReset := FALSE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.stModuleIdHmi.dIdleClearMs := 5;
+    SET GlobalVars.sMachineModuleID := 'L06A20261020165232';
+    SET GlobalVars.stStation1.stSensors.arrProductSens[3] := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stStation1.stStatus.bProductPresent = TRUE;
+    WAIT_CYCLES 20;
+    ASSERT GlobalVars.sMachineModuleID = 'L06A20261020165232';
+    SET GlobalVars.stStation1.stSensors.arrProductSens[3] := FALSE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stStation1.stStatus.bProductPresent = FALSE;
+    WAIT_CYCLES 20;
     ASSERT GlobalVars.sMachineModuleID = '';
 END_TEST_CASE
 

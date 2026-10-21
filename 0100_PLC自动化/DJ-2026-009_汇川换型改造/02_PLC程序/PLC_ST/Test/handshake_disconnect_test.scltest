@@ -10,7 +10,7 @@
 // CARD-DJ-2026-009-003 起 OB1 已接齐 FB_3001 引脚, 用例改走正常接线 (不再直接置实例输入):
 //   使能 = stExternal.bEmergencyStop, 自动 = stStation1.stControl.bAutoEnable, 复位 = stStation1.stControl.bReset,
 //   进料就绪 = 工位在“等待来料”步 (气缸已缩回即进入), 出料就绪 = 工位在出料步且气缸已缩回 (置 fbStation1.s_iStep := 30),
-//   进料到位 = bInPosSensor, 有产品 = bInPosSensor OR bWorkPosSensor; 第 20 步要有合格的上游 ID.
+//   进料到位 = bInPosSensor, 有产品 = 工位块判断 (入料到位/加工到位/arrProductSens 任一路); 第 20 步要有合格的上游 ID.
 //   用例统一在自动模式下跑: 接线后非自动模式工位不发就绪, 握手不会开始. 期望值不变.
 // ============================================================================
 

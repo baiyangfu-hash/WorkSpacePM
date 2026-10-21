@@ -191,7 +191,7 @@ PickPlace ──o_bPlaceComplete_ToFeeder──→ Feeder.i_bPickPlace_FeedCompl
 | `i_bMachineReadyIn` | `GlobalVars.stStation1.stStatus.bWaitMaterial` | 工位 1 在“等待来料”步 |
 | `i_bMachineReadyOut` | `GlobalVars.stStation1.stStatus.bReadyOut` | 工位 1 在出料步且气缸已松开（FB_1001 新增状态位） |
 | `i_bInfeedArrivedSens` | `GlobalVars.stStation1.stSensors.bInPosSensor` | 入料到位光电 |
-| `i_bProductPresent` | `bInPosSensor OR bWorkPosSensor` | 本机有产品；现场如有单独的产品检测传感器，改接那个点 |
+| `i_bProductPresent` | `GlobalVars.stStation1.stStatus.bProductPresent` | 本机有产品，由 FB_1001 内部判断：入料到位、加工到位或预留产品传感器数组 `stSensors.arrProductSens[0..7]` 任一路为 1（用户 2026-10-21） |
 | `q_bAllowInfeedAct` / `q_bAllowOutfeedAct` | `GlobalVars.bExtAllowInfeedAct` / `bExtAllowOutfeedAct` | 先接到全局变量；工位 1 电机还没用它们做联锁（另开卡） |
 | `q_bUpstreamDone` / `q_bDownstreamDone` | `GlobalVars.bExtUpstreamDone` / `bExtDownstreamDone` | 单周期脉冲 |
 | `q_bComAlarm` / `q_wErrorCode` | `GlobalVars.bExtComAlarm` / `wExtErrorCode` | 给 HMI 显示；FB_2001 公共报警没有外部通讯报警输入，接入公共报警另开卡 |

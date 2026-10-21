@@ -36,6 +36,7 @@ graph TD
 ## 3. 与 FB_3001 握手的分工（CARD-DJ-2026-009-003 草稿）
 
 - 本块只给出状态：等待来料 `stStatus.bWaitMaterial`、加工完成可出料 `stStatus.bReadyOut`（出料步且两个气缸都已松开）。OB1 把这两个状态接到 FB_3001 的 `i_bMachineReadyIn` / `i_bMachineReadyOut`，由 FB_3001 统一发握手信号，通讯故障、锁、空 ID 等联锁都在 FB_3001 里。
+- 有没有产品在本块内部判断（用户 2026-10-21）：`stStatus.bProductPresent` = 入料到位 OR 加工到位 OR `stSensors.arrProductSens[0..7]` 任一路；数组是产品检测传感器的 8 路预留，未接的保持 0。
 - 本块不再直接写 `bMachine_ReadyIn` / `bMachine_ReadyOut`。
 - 已知未处理（另开卡）：出料步电机不等下游“允许出料”就转；握手中途中止时本块的进/出料电机不停。见预做分支说明。
 
