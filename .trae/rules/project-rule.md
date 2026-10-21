@@ -29,7 +29,7 @@ description: 全局开发规则，适用于工作空间内所有项目的通用�
    - **有效提问门槛**：只有当代码库探路完毕，且发现涉及无法推导的真实业务决策抉择（Trade-off）、新增未接线硬件定义或客户冲突诉求时，方可发起《高质量澄清提问清单》；
 2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）；
 3. **阶段 2【执行】**：仅在用户明确回复“同意/批准”后，方可派发给对应执行技能（PLC / 全栈）编写代码与自动化测试；
-4. **阶段 3【验收】**：运行根入口领域门禁与测试，创建 Continuity Checkpoint 后呈报验收；用户验收后先 `pm accept --mission-id <Mission 编号>` 记下验收，再只用驾驶舱的 `close_accepted` 一步收口（它推进 Run、Work 和 Mission，把证据写进变更单；变更单再用 `change transition … --pid <PID>` 推到 completed），不得单独推 Run 或 Work 的状态，再运行 `main.py ledger reconcile <PID>` 对账。步骤见 `.trae/skills/cockpit-entry/SKILL.md`。
+4. **阶段 3【验收】**：运行根入口领域门禁与测试，创建 Continuity Checkpoint 后呈报验收；用户验收后由用户在驾驶舱界面点“确认验收”，它记下验收并走 `close_accepted` 一步收口（推进 Run、Work 和 Mission，把证据写进变更单；变更单再用 `change transition … --pid <PID>` 推到 completed），不得单独推 Run 或 Work 的状态，再运行 `main.py ledger reconcile <PID>` 对账。步骤见 `.trae/skills/cockpit-entry/SKILL.md`。
 
 ## AI 工程师主动担当与零负担交付铁律 (Zero-Burden Law)
 
