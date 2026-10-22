@@ -49,7 +49,8 @@ GUARDED_FILES = (
 GUARDED_SUFFIXES = (f"/{CHANGE_CABINET}/02_变更记录/01_版本变更台账.md",)
 
 NEW_CARD_NAME = re.compile(r"^(CARD-[A-Z]+-\d{4}-\d{3})-(\d{3})(?=_|$)")
-BC_ID = re.compile(r"^BC-[A-Z]+-\d{4}-\d{3}-\d{3}$")
+# Old ids keep a three-digit serial; from 2026-10-22 a new row is numbered by the month it was raised: BC-<pid>-<year>_<month>_<serial>.
+BC_ID = re.compile(r"^BC-[A-Z]+-\d{4}-\d{3}-(?:\d{3}|\d{4}_(?:0[1-9]|1[0-2])_\d{3})$")
 CHG_ID = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3,}$")
 CARD_ID = re.compile(r"CARD-[A-Za-z0-9-]+")
 _BASIS_HEADER = re.compile(r"^>\s*(依据|变更单|前置卡|状态)：(.*)$")
@@ -267,7 +268,7 @@ def _basis_rule(
         bc_ids = [item for item in bcs if BC_ID.fullmatch(item)]
         for item in bcs:
             if item not in bc_ids:
-                findings.append(BasisFinding("basis", item, "业务变更编号格式应为 BC-<项目号>-<三位序号>"))
+                findings.append(BasisFinding("basis", item, "业务变更编号格式应为 BC-<项目号>-<年>_<月>_<三位序号>（旧编号 BC-<项目号>-<三位序号>）"))
             elif not item.startswith(f"BC-{pid}-"):
                 findings.append(BasisFinding("basis", item, f"依据的业务变更不属于本项目 {pid}"))
         record = monitor_dir.joinpath(CHANGE_CABINET, *BC_RECORD)

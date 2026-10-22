@@ -32,6 +32,7 @@ BC_TABLE = """# 业务变更记录
 | BC-DJ-2099-001-001 | 2099-01-01 | 主控换型 | 待补 | 待补（程序在写） | 待补 |
 | BC-DJ-2099-001-002 | 2099-01-02 | 握手改 Modbus TCP | baiyang | 已批（文档已更新） | 待补 |
 | BC-DJ-2099-001-003 | 2099-01-03 | 外部交互层 | baiyang | 已实施（未现场验证） | 待补 |
+| BC-DJ-2099-001-2099_01_000 | 2099-01-04 09:30 | 报警汇总 | baiyang | 已批 | 待补 |
 """
 
 
@@ -132,6 +133,9 @@ def test_basis_must_exist_belong_to_the_project_and_be_approved(tmp_path: Path) 
         "`BC-DJ-2099-001-099`": "业务变更记录表里没有这一条",
         "`BC-DJ-2099-002-001`": "不属于本项目",
         "`BC-DJ-2099-1`": "格式应为",
+        "`BC-DJ-2099-001-2099_13_000`": "格式应为",
+        "`BC-DJ-2099-001-2099_01_1000`": "格式应为",
+        "`BC-DJ-2099-001-2099_01_001`": "业务变更记录表里没有这一条",
         "`CHG-PLC-2099-001`": "不能当作依据",
         "`<BC-…>`": "占位符",
     }
@@ -139,6 +143,16 @@ def test_basis_must_exist_belong_to_the_project_and_be_approved(tmp_path: Path) 
         card = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, basis=basis)
         report = _check(tmp_path, card)
         assert not report.passed and fragment in _messages(report), (basis, _messages(report))
+
+
+def test_month_numbered_bc_is_accepted(tmp_path: Path) -> None:
+    baseline = _workspace(tmp_path)
+    card = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, basis="`BC-DJ-2099-001-2099_01_000`")
+
+    report = _check(tmp_path, card)
+
+    assert report.passed, _messages(report)
+    assert report.basis == ("BC-DJ-2099-001-2099_01_000",)
 
 
 def test_implemented_bc_also_counts_as_approved(tmp_path: Path) -> None:
