@@ -97,7 +97,9 @@ def test_no_checklist_at_all_names_every_missing_field() -> None:
     assert [problem[0] for problem in problems] == ["①", "③", "④", "⑤", "⑥", "⑦"]
 
 
-@pytest.mark.parametrize("placeholder", ["", "  ", "无", "N/A", "none", "-", "待定", "TODO"])
+@pytest.mark.parametrize(
+    "placeholder", ["", "  ", "无", "N/A", "none", "-", "待定", "TODO", "无。", "N/A.", "暂无！", "none;", "。"]
+)
 def test_placeholder_risk_and_rollback_do_not_count(placeholder: str) -> None:
     problems = _problems(_filled(rollback=placeholder), risks=(placeholder,))
     assert [problem[0] for problem in problems] == ["⑥", "⑦"]
@@ -139,6 +141,17 @@ def test_original_words_must_match_the_inbox_exactly() -> None:
     assert _problems(_filled(), original_words=DJ011_WORDS) == ()
     paraphrased = _problems(_filled(original_request="做报警汇总，复位灭灯"), original_words=DJ011_WORDS)
     assert len(paraphrased) == 1 and "一字不改" in paraphrased[0]
+
+
+def test_original_words_ignore_only_whitespace_layout() -> None:
+    respaced = f"  {DJ011_WORDS[:4]} {DJ011_WORDS[4:]}\n"
+    assert _problems(_filled(original_request=respaced), original_words=DJ011_WORDS) == ()
+    repunctuated = DJ011_WORDS.replace("，", ",")
+    assert len(_problems(_filled(original_request=repunctuated), original_words=DJ011_WORDS)) == 1
+
+
+def test_a_risk_ending_in_punctuation_is_still_a_real_risk() -> None:
+    assert _problems(_filled(rollback="git revert 本次提交。"), risks=("复位可能误灭其他报警。",)) == ()
 
 
 @pytest.mark.parametrize(

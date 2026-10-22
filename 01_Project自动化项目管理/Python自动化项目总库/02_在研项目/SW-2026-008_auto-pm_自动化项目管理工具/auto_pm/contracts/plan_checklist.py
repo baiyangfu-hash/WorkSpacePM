@@ -66,8 +66,18 @@ def parse_acceptance_check(raw: str) -> AcceptanceCheck:
     return AcceptanceCheck(command=command.strip(), expected_exit_code=int(code))
 
 
+_TRAILING_PUNCTUATION = "。．.，,；;！!？?、…~～ "
+
+
 def _blank(value: str) -> bool:
-    return value.strip().lower() in _PLACEHOLDERS or not value.strip()
+    text = value.strip().rstrip(_TRAILING_PUNCTUATION).strip().lower()
+    return not text or text in _PLACEHOLDERS
+
+
+def _same_words(left: str, right: str) -> bool:
+    """Compare the user's words verbatim except for whitespace layout."""
+
+    return "".join(left.split()) == "".join(right.split())
 
 
 def plan_checklist_problems(
@@ -87,7 +97,7 @@ def plan_checklist_problems(
     problems: list[str] = []
     if _blank(items.original_request):
         problems.append("①需求原文（--original-request，照抄用户原话）")
-    elif original_words is not None and items.original_request != original_words:
+    elif original_words is not None and not _same_words(items.original_request, original_words):
         problems.append("①需求原文与收件箱里登记的用户原话不一致，须一字不改照抄")
     if not scope_paths:
         problems.append("②可改范围（--scope）")
