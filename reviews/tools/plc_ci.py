@@ -48,7 +48,7 @@ SHARED = "01_SharedLibraries"
 SW008 = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
 SAFETY_TOOL = "reviews/tools/safety_zone_check.py"
 # 改到这些文件说明检查程序本身变了：所有 PLC 项目都跑一遍
-JUDGE_FILES = (".github/workflows/plc-ci.yml", "reviews/tools/plc_ci.py")
+JUDGE_FILES = (".github/workflows/plc-ci.yml", "reviews/tools/plc_ci.py", "reviews/tools/test_plc_ci.py")
 # SW-2026-008 里决定 plc check / plc docs check 结果的代码；推到 main 时它们变了，用新代码把所有 PLC 项目查一遍
 CHECKER_PATHS = (
     f"{SW008}/auto_pm/domain/plc/",
@@ -175,7 +175,7 @@ def select(head: Path, base: Path, changed: list[str], check_all: bool,
     if check_all:
         return [Target(rel, "全量检查") for rel in all_projects(head)], notes
     if any(path in JUDGE_FILES for path in changed):
-        notes.append("改到了 PLC CI 本身（工作流或 plc_ci.py）：所有 PLC 项目都跑一遍")
+        notes.append("改到了 PLC CI 本身（工作流、plc_ci.py 或它的自测）：自测和所有 PLC 项目都跑一遍")
         return [Target(rel, "PLC CI 本身有改动") for rel in all_projects(head)], notes
     if any(is_checker(path) for path in changed):
         if checker_from_head:

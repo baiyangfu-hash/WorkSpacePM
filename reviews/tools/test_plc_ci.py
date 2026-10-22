@@ -362,3 +362,15 @@ def test_workflow_and_script_agree_on_protocol_and_checker_paths() -> None:
     assert f'PLC_CI_PROTOCOL: "{plc_ci.PLC_CI_PROTOCOL}"' in wf
     for p in plc_ci.CHECKER_PATHS:
         assert f'"{p}**"' in wf if p.endswith("/") else f'"{p}"' in wf
+
+
+def test_changing_only_the_self_test_still_applies(sample: Path) -> None:
+    # 只改自测文件也要跑（否则自测被削弱也能以“不适用”合进去）——Codex 评审 #40
+    targets, _ = plc_ci.select(sample, sample, ["reviews/tools/test_plc_ci.py"], False)
+    assert targets
+
+
+def test_every_judge_file_triggers_the_main_push() -> None:
+    wf = (REPO / ".github" / "workflows" / "plc-ci.yml").read_text(encoding="utf-8")
+    for path in plc_ci.JUDGE_FILES:
+        assert f'- "{path}"' in wf
