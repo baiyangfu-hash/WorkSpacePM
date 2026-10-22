@@ -50,12 +50,23 @@ from auto_pm.contracts.execution_adapter import (
 )
 from auto_pm.contracts.lease_reclaim import (
     GRACE_SECONDS,
+    PARKED_TOKEN_PREFIX,
     ProcessFingerprint,
     ProcessVerdict,
     check_write_epoch,
+    lease_is_held,
     lease_is_live,
+    lease_token_is_fenced,
 )
-from auto_pm.contracts.mission import Mission, MissionState
+from auto_pm.contracts.mission import (
+    BOARD_COLUMN_BY_STATE,
+    Mission,
+    MissionBoard,
+    MissionBoardColumn,
+    MissionPark,
+    MissionState,
+    ParkedMission,
+)
 from auto_pm.contracts.orchestration import OrchestrationOutcome
 from auto_pm.contracts.pm_facade import (
     PlanningDraft,
@@ -344,10 +355,29 @@ CREATE INDEX IF NOT EXISTS idx_closure_state ON closure_items(state);
 CREATE INDEX IF NOT EXISTS idx_closure_steps_state ON closure_steps(closure_id, state, sequence);
 CREATE INDEX IF NOT EXISTS idx_closure_outbox_pending
 ON closure_outbox(published_at, created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_mission_per_project
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_mission_per_project
 ON mission_items(subject_project_id)
-WHERE state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED');
+WHERE state = 'ACTIVE';
+CREATE TABLE IF NOT EXISTS run_parks (
+    park_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES run_items(run_id),
+    mission_id TEXT NOT NULL REFERENCES mission_items(mission_id),
+    checkpoint_id TEXT NOT NULL REFERENCES checkpoints(checkpoint_id),
+    parked_by TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    parked_at TEXT NOT NULL,
+    unparked_at TEXT,
+    unparked_by TEXT,
+    CHECK ((unparked_at IS NULL) = (unparked_by IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_run_parks_mission
+ON run_parks(mission_id, unparked_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_park_per_run
+ON run_parks(run_id) WHERE unparked_at IS NULL;
 """
+# v7 and earlier enforced "one open Mission per project"; v8 keeps only "one ACTIVE Mission per
+# project" in the database (TD-071).  The old index is dropped by the v7 -> v8 migration.
+_V7_OPEN_MISSION_INDEX = "idx_one_open_mission_per_project"
 
 _PLANNING_SCOPE_CARDS_DDL = """
 CREATE TABLE IF NOT EXISTS planning_scope_cards (
@@ -369,7 +399,8 @@ _V3_SCHEMA_VERSION = "continuity-store.v3"
 _V4_SCHEMA_VERSION = "continuity-store.v4"
 _V5_SCHEMA_VERSION = "continuity-store.v5"
 _V6_SCHEMA_VERSION = "continuity-store.v6"
-_CURRENT_SCHEMA_VERSION = "continuity-store.v7"
+_V7_SCHEMA_VERSION = "continuity-store.v7"
+_CURRENT_SCHEMA_VERSION = "continuity-store.v8"
 _KNOWN_SCHEMA_VERSIONS = frozenset(
     {
         _LEGACY_SCHEMA_VERSION,
@@ -377,6 +408,7 @@ _KNOWN_SCHEMA_VERSIONS = frozenset(
         _V4_SCHEMA_VERSION,
         _V5_SCHEMA_VERSION,
         _V6_SCHEMA_VERSION,
+        _V7_SCHEMA_VERSION,
         _CURRENT_SCHEMA_VERSION,
     }
 )
@@ -981,11 +1013,24 @@ class ContinuityStore:
             if versions == {_V6_SCHEMA_VERSION}:
                 conn.execute(
                     "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
-                    (_CURRENT_SCHEMA_VERSION, _V6_SCHEMA_VERSION),
+                    (_V7_SCHEMA_VERSION, _V6_SCHEMA_VERSION),
                 )
                 conn.execute(
                     "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
-                    (_V6_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
+                    (_V6_SCHEMA_VERSION, _V7_SCHEMA_VERSION, now, tool_version),
+                )
+                versions = {_V7_SCHEMA_VERSION}
+            if versions == {_V7_SCHEMA_VERSION}:
+                # TD-071: the old rule (at most one open Mission) is stricter than the new one (at
+                # most one ACTIVE), so no existing row can violate the index created by _DDL above.
+                conn.execute(f"DROP INDEX IF EXISTS {_V7_OPEN_MISSION_INDEX}")
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_CURRENT_SCHEMA_VERSION, _V7_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V7_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
                 )
                 migrated = True
         if migrated:
@@ -1840,8 +1885,22 @@ class ContinuityStore:
         except ValueError as error:
             raise ContinuityStoreError(f"范围卡记录无法读取: {request_id}") from error
 
-    def create_mission(self, values: dict[str, Any], idempotency_key: str, now: str) -> Mission:
-        """Persist one Mission and its append-only creation event atomically."""
+    def create_mission(
+        self,
+        values: dict[str, Any],
+        idempotency_key: str,
+        now: str,
+        *,
+        max_open_per_project: int = 1,
+    ) -> Mission:
+        """Persist one Mission and its append-only creation event atomically.
+
+        Since v8 the database only forbids a second ACTIVE Mission per project (TD-071).  How many
+        Missions may be open at once is a service rule checked here, inside the write transaction;
+        the default keeps the old one-open-Mission rule until the entry gates are opened (TD-071 card 3).
+        """
+        if type(max_open_per_project) is not int or max_open_per_project < 1:
+            raise ContinuityStoreError("max_open_per_project 必须是正整数")
         with self._transaction() as conn:
             existing = self._event_by_key(conn, idempotency_key)
             if existing is not None:
@@ -1851,10 +1910,23 @@ class ContinuityStore:
                 ):
                     raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
                 return self._get_mission(conn, values["mission_id"])
+            open_count = int(
+                conn.execute(
+                    """SELECT COUNT(*) FROM mission_items WHERE subject_project_id=?
+                    AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED')""",
+                    (values["subject_project_id"],),
+                ).fetchone()[0]
+            )
+            if open_count >= max_open_per_project:
+                raise ContinuityStoreError(
+                    "同一项目已有未终结 Mission，拒绝并发创建"
+                    if max_open_per_project == 1
+                    else f"同一项目开着的 Mission 已达上限 {max_open_per_project} 张，拒绝再开"
+                )
             try:
                 self._insert_mapping(conn, "mission_items", values)
             except sqlite3.IntegrityError as error:
-                raise ContinuityStoreError("同一项目已有未终结 Mission，拒绝并发创建") from error
+                raise ContinuityStoreError("Mission 已存在或与项目在干 Mission 冲突，拒绝创建") from error
             self._append_event(
                 conn,
                 values["mission_id"],
@@ -1885,12 +1957,28 @@ class ContinuityStore:
                 ):
                     raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
                 return self._get_mission(conn, mission_id)
-            cursor = conn.execute(
-                """UPDATE mission_items
-                SET state=?, root_work_id=?, version=version+1, updated_at=?
-                WHERE mission_id=? AND version=?""",
-                (new_state.value, root_work_id, now, mission_id, expected_version),
-            )
+            if new_state is MissionState.PARKED:
+                raise ContinuityStoreError("搁着只能走 park_mission：要在同一事务里记断点并摘牌")
+            current_state = conn.execute(
+                "SELECT state FROM mission_items WHERE mission_id=?", (mission_id,)
+            ).fetchone()
+            if (
+                current_state is not None
+                and current_state["state"] == MissionState.PARKED.value
+                and new_state is MissionState.ACTIVE
+            ):
+                raise ContinuityStoreError("拿回搁着的卡只能走 unpark_mission：要核对断点并发新租约")
+            try:
+                cursor = conn.execute(
+                    """UPDATE mission_items
+                    SET state=?, root_work_id=?, version=version+1, updated_at=?
+                    WHERE mission_id=? AND version=?""",
+                    (new_state.value, root_work_id, now, mission_id, expected_version),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ContinuityStoreError(
+                    "项目里已有一张在干（ACTIVE）的 Mission；同一时刻只能有一张在干"
+                ) from error
             if cursor.rowcount != 1:
                 raise ContinuityStoreError("Mission 不存在或版本冲突")
             self._append_event(
@@ -3162,6 +3250,19 @@ class ContinuityStore:
                 mission = self._get_mission(conn, mission_id)
                 if mission.state is not MissionState.ACCEPTED:
                     raise ContinuityStoreError("只有已验收 Mission 可以准备 v2 收口")
+                # TD-071: closure writes the project ledgers, so one project closes one Mission at a time.
+                busy = conn.execute(
+                    """SELECT c.closure_id, c.mission_id FROM closure_items c
+                    JOIN mission_items m ON m.mission_id = c.mission_id
+                    WHERE m.subject_project_id=? AND c.state='PREPARED' AND c.mission_id<>?
+                    LIMIT 1""",
+                    (mission.subject_project_id, mission_id),
+                ).fetchone()
+                if busy is not None:
+                    raise ContinuityStoreError(
+                        f"项目里另一张卡 {busy['mission_id']} 正在收口（{busy['closure_id']}）；"
+                        "同一项目一次只收口一张，等它收完再收这张"
+                    )
                 if mission.root_work_id is None:
                     raise ContinuityStoreError("已验收 Mission 缺少根 Work")
                 work = self._get_work(conn, mission.root_work_id)
@@ -4763,6 +4864,7 @@ class ContinuityStore:
             terminal = {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}
             if target.state in terminal:
                 raise ContinuityStoreError("目标 Run 已处于终态")
+            self._refuse_if_parked(conn, target_run_id, "租约到期不等于过期，不能行政结算")
             if (
                 target.state.value != expected_target_state
                 or target.version != expected_target_version
@@ -5939,6 +6041,7 @@ class ContinuityStore:
                 raise ContinuityStoreError("新 lease 续租 lease_seconds 必须在 60 到 3600 之间")
             observed_at = self._utc_now()
             run = self._get_run(conn, run_id)
+            self._refuse_if_parked(conn, run_id, "不能续租")
             if run.state not in {RunState.READY, RunState.RUNNING}:
                 raise ContinuityStoreError("只有 READY 或 RUNNING Run 可以续租")
             current = self._get_lease(conn, run_id)
@@ -6030,7 +6133,10 @@ class ContinuityStore:
             handoff = self._validated_handoff_receipt(conn, handoff_id)
             if handoff.to_owner != receiver_id:
                 raise ContinuityStoreError("接收方与 Handoff to_owner 不一致")
+            self._refuse_if_parked(conn, handoff.run_id, "不能接手（pm takeover）")
             current = self._get_lease(conn, handoff.run_id)
+            if lease_token_is_fenced(current.lease_token):
+                raise ContinuityStoreError("Handoff 源 lease 已摘牌，拒绝移交")
             observed_at = self._utc_now()
             if current.owner_id != handoff.from_owner:
                 raise ContinuityStoreError("Handoff 源 owner 已失去 lease")
@@ -6162,6 +6268,7 @@ class ContinuityStore:
                 return self._validated_handoff_receipt(conn, handoff_id)
             checkpoint = self._get_checkpoint(conn, checkpoint_id)
             run = self._get_run(conn, checkpoint.run_id)
+            self._refuse_if_parked(conn, run.run_id, "不需要再交接（搁着时已记过断点）")
             lease = self._get_lease(conn, run.run_id)
             observed_at = self._utc_now()
             if lease.owner_id != from_owner or lease.lease_token != lease_token:
@@ -7329,7 +7436,8 @@ class ContinuityStore:
 
         row = conn.execute(
             """SELECT event_type, payload_json FROM events
-            WHERE aggregate_id=? AND event_type IN ('RUN_CREATED', 'LEASE_TRANSFERRED', 'LEASE_RECLAIMED')
+            WHERE aggregate_id=?
+            AND event_type IN ('RUN_CREATED', 'LEASE_TRANSFERRED', 'LEASE_RECLAIMED', 'RUN_UNPARKED')
             ORDER BY rowid DESC LIMIT 1""",
             (run_id,),
         ).fetchone()
@@ -7337,7 +7445,7 @@ class ContinuityStore:
             raise ContinuityStoreError(f"Run 没有 lease 授予事件: {run_id}")
         if row["event_type"] == "RUN_CREATED":
             return 1
-        try:  # a transfer and a reclaim both record the lease version they produce: that version is the new epoch
+        try:  # a transfer, a reclaim and an unpark (TD-071) record the lease version they produce: that version is the new epoch
             version = json.loads(str(row["payload_json"])).get("version")
         except (TypeError, ValueError, AttributeError) as error:
             raise ContinuityStoreError("lease 移交事件 payload 无法读取") from error
@@ -7642,6 +7750,7 @@ class ContinuityStore:
                     raise ContinuityStoreError("idempotency_key 的 lease 回收语义不一致")
                 return self._get_lease(conn, run_id)
             run = self._get_run(conn, run_id)
+            self._refuse_if_parked(conn, run_id, "搁着不是掉线，不用回收")
             if run.state not in self._RECLAIMABLE_RUN_STATES:
                 raise ContinuityStoreError(f"只有非终态 Run 可以回收租约（当前 {run.state.value}）")
             current = self._get_lease(conn, run_id)
@@ -7687,6 +7796,552 @@ class ContinuityStore:
             )
             return self._get_lease(conn, run_id)
 
+    # ---- TD-071: park / unpark (one ACTIVE Mission per project, the others put down with a checkpoint) ----
+
+    _PARKABLE_MISSION_STATES = frozenset({MissionState.ACTIVE, MissionState.BLOCKED})
+    _PARKABLE_RUN_STATES = frozenset({RunState.RUNNING, RunState.BLOCKED})
+
+    def _validated_park_paths(self, raw: object, *, label: str) -> tuple[str, ...]:
+        if not isinstance(raw, (tuple, list)) or any(not isinstance(item, str) for item in raw):
+            raise ContinuityStoreError(f"{label} 必须是路径列表")
+        normalized = tuple(self._normalize_authority_path(item) for item in raw)
+        if len(set(normalized)) != len(normalized):
+            raise ContinuityStoreError(f"{label} 含重复路径")
+        return tuple(sorted(normalized))
+
+    @staticmethod
+    def _park_marker(lease: LeaseItem, park_id: str, event_time: str) -> str:
+        seed = f"{lease.run_id}\0{lease.version}\0park:{park_id}\0{event_time}".encode()
+        return PARKED_TOKEN_PREFIX + hashlib.sha256(seed).hexdigest()
+
+    @staticmethod
+    def _get_mission_park(conn: sqlite3.Connection, park_id: str) -> MissionPark:
+        row = conn.execute("SELECT * FROM run_parks WHERE park_id=?", (park_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"搁着记录不存在: {park_id}")
+        return MissionPark.model_validate(dict(row))
+
+    @staticmethod
+    def _open_park_row(conn: sqlite3.Connection, column: str, value: str) -> sqlite3.Row | None:
+        assert column in {"run_id", "mission_id"}
+        row = conn.execute(
+            f"SELECT * FROM run_parks WHERE {column}=? AND unparked_at IS NULL",
+            (value,),
+        ).fetchone()
+        return cast(sqlite3.Row | None, row)
+
+    def _refuse_if_parked(self, conn: sqlite3.Connection, run_id: str, action: str) -> None:
+        """A parked Run is not lost or expired: every lease action other than unpark is refused."""
+
+        if self._table_exists(conn, "run_parks") and self._open_park_row(conn, "run_id", run_id):
+            raise ContinuityStoreError(f"这张卡搁着呢，{action}；请用 pm unpark 拿回来")
+
+    def _project_held_lease_run_ids(
+        self, conn: sqlite3.Connection, subject_project_id: str, observed_at: datetime
+    ) -> tuple[str, ...]:
+        rows = conn.execute(
+            """SELECT l.run_id, l.lease_token, l.expires_at FROM execution_leases l
+            JOIN run_items r ON r.run_id = l.run_id
+            JOIN work_items w ON w.work_id = r.work_id
+            WHERE w.subject_project_id=?
+            AND r.state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+            ORDER BY l.run_id""",
+            (subject_project_id,),
+        ).fetchall()
+        return tuple(
+            str(row["run_id"])
+            for row in rows
+            if lease_is_held(
+                lease_token=str(row["lease_token"]),
+                expires_at=self._aware_timestamp(str(row["expires_at"]), "lease"),
+                now=observed_at,
+            )
+        )
+
+    def _single_live_run_of_mission(self, conn: sqlite3.Connection, mission: Mission) -> RunItem:
+        if mission.root_work_id is None:
+            raise ContinuityStoreError("Mission 缺少根 Work，无法搁着")
+        rows = conn.execute(
+            """SELECT run_id FROM run_items WHERE work_id=?
+            AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')""",
+            (mission.root_work_id,),
+        ).fetchall()
+        if len(rows) != 1:
+            raise ContinuityStoreError(
+                f"Mission 根 Work 必须恰有 1 个未终结 Run 才能搁着（实际 {len(rows)} 个）"
+            )
+        return self._get_run(conn, str(rows[0]["run_id"]))
+
+    def park_mission(
+        self,
+        *,
+        mission_id: str,
+        expected_mission_version: int,
+        park_id: str,
+        checkpoint_id: str,
+        owner_id: str,
+        lease_token: str,
+        reason: str,
+        summary: str,
+        git_head: str,
+        dirty_paths: tuple[str, ...] | list[str],
+        idempotency_key: str,
+    ) -> MissionPark:
+        """Put an ACTIVE or BLOCKED Mission down in one transaction (TD-071 design 4.2).
+
+        Checks the caller still holds the Run's lease, writes a park checkpoint (where it got to and
+        what is next), fences the lease with ``PARKED:`` (row kept, expiry untouched), moves the Run
+        RUNNING -> BLOCKED and the Mission to PARKED, and records one open ``run_parks`` row.  Any
+        failure writes nothing.
+        """
+
+        mission_id = self._validated_run_text(mission_id, label="mission_id")
+        park_id = self._validated_run_text(park_id, label="park_id")
+        checkpoint_id = self._validated_run_text(checkpoint_id, label="checkpoint_id")
+        owner_id = self._validated_run_text(owner_id, label="lease owner")
+        lease_token = self._validated_run_text(lease_token, label="lease token")
+        reason = self._validated_run_text(reason, label="搁着原因")
+        summary = self._validated_run_text(summary, label="断点摘要")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(expected_mission_version) is not int or expected_mission_version < 1:
+            raise ContinuityStoreError("expected_mission_version 必须是正整数")
+        if not isinstance(git_head, str) or not _FULL_GIT_COMMIT.fullmatch(git_head):
+            raise ContinuityStoreError("断点 git_head 必须是 40 位提交号")
+        if lease_token in reason or lease_token in summary:
+            raise ContinuityStoreError("搁着原因和断点摘要不得包含 lease token")
+        paths = self._validated_park_paths(dirty_paths, label="断点改动文件")
+        try:
+            MissionPark(
+                park_id=park_id,
+                run_id="RUN",
+                mission_id=mission_id,
+                checkpoint_id=checkpoint_id,
+                parked_by=owner_id,
+                reason=reason,
+                parked_at=self._utc_now(),
+            )
+        except ValueError as error:
+            raise ContinuityStoreError("park_id 格式非法（应为 PARK-…）") from error
+        request = {
+            "schema_version": "mission-park-request.v1",
+            "mission_id": mission_id,
+            "expected_mission_version": expected_mission_version,
+            "park_id": park_id,
+            "checkpoint_id": checkpoint_id,
+            "owner_id": owner_id,
+            "reason": reason,
+            "summary": summary,
+            "git_head": git_head,
+            "dirty_paths": list(paths),
+            "lease_token_sha256": self._lease_token_fingerprint(lease_token),
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="Mission 搁着")
+                if (
+                    existing["aggregate_type"] != "mission"
+                    or existing["aggregate_id"] != mission_id
+                    or existing["event_type"] != "MISSION_PARKED"
+                    or payload.get("schema_version") != "mission-parked.v1"
+                    or payload.get("request") != request
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 Mission 搁着语义不一致")
+                return self._get_mission_park(conn, park_id)
+            mission = self._get_mission(conn, mission_id)
+            if mission.version != expected_mission_version:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            if mission.state not in self._PARKABLE_MISSION_STATES:
+                raise ContinuityStoreError(
+                    f"只有在干（ACTIVE）或卡住（BLOCKED）的 Mission 可以搁着（当前 {mission.state.value}）"
+                )
+            run = self._single_live_run_of_mission(conn, mission)
+            if run.state not in self._PARKABLE_RUN_STATES:
+                raise ContinuityStoreError(
+                    f"只有 RUNNING 或 BLOCKED 的 Run 可以搁着（当前 {run.state.value}）"
+                )
+            self._refuse_while_closure_prepared(conn, "run_id", run.run_id, "Run")
+            if self._open_park_row(conn, "run_id", run.run_id) is not None:
+                raise ContinuityStoreError("这个 Run 已有未拿回的搁着记录")
+            lease = self._require_lease_in_tx(
+                conn, run_id=run.run_id, owner_id=owner_id, lease_token=lease_token, expected_epoch=None
+            )
+            if git_head != run.git_head:
+                raise ContinuityStoreError("断点 git_head 与 Run 基线不一致（Git baseline drift）")
+            allowed = (*run.owned_paths, *run.declared_dirty_paths)
+            outside = [path for path in paths if not self._authority_path_covered(path, allowed)]
+            if outside:
+                raise ContinuityStoreError("断点改动文件超出本卡范围: " + ", ".join(outside))
+            observed_at = self._utc_now()
+            event_time = observed_at.isoformat()
+
+            sequence = int(
+                conn.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM checkpoints WHERE run_id=?",
+                    (run.run_id,),
+                ).fetchone()[0]
+            )
+            checkpoint_values = {
+                "checkpoint_id": checkpoint_id,
+                "run_id": run.run_id,
+                "summary": summary,
+                "git_head": git_head,
+                "dirty_paths_json": json.dumps(list(paths), ensure_ascii=False),
+                "evidence_json": json.dumps(
+                    [f"park:{park_id}", f"reason:{reason}"], ensure_ascii=False
+                ),
+                "created_at": event_time,
+                "sequence": sequence,
+            }
+            self._insert_mapping(conn, "checkpoints", checkpoint_values)
+            self._append_event(
+                conn,
+                run.run_id,
+                "CHECKPOINT_CREATED",
+                checkpoint_values,
+                f"{idempotency_key}#checkpoint",
+                event_time,
+                event_id=checkpoint_id,
+                aggregate_type="run",
+            )
+
+            marker = self._park_marker(lease, park_id, event_time)
+            cursor = conn.execute(
+                """UPDATE execution_leases SET lease_token=?, version=version+1, updated_at=?
+                WHERE run_id=? AND lease_token=? AND version=?""",
+                (marker, event_time, run.run_id, lease.lease_token, lease.version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("搁着摘牌 CAS 冲突")
+            run_to = RunState.BLOCKED
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND version=?""",
+                (run_to.value, event_time, run.run_id, run.version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Run 不存在或版本冲突")
+            self._append_event(
+                conn,
+                run.run_id,
+                "RUN_PARKED",
+                {
+                    "schema_version": "run-parked.v1",
+                    "run_id": run.run_id,
+                    "park_id": park_id,
+                    "from_state": run.state.value,
+                    "new_state": run_to.value,
+                    "result_version": run.version + 1,
+                    "lease_owner": lease.owner_id,
+                    "lease_epoch_fenced": lease.version + 1,
+                },
+                f"{idempotency_key}#run",
+                event_time,
+                aggregate_type="run",
+            )
+            cursor = conn.execute(
+                """UPDATE mission_items SET state=?, version=version+1, updated_at=?
+                WHERE mission_id=? AND version=?""",
+                (MissionState.PARKED.value, event_time, mission_id, mission.version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            self._insert_mapping(
+                conn,
+                "run_parks",
+                {
+                    "park_id": park_id,
+                    "run_id": run.run_id,
+                    "mission_id": mission_id,
+                    "checkpoint_id": checkpoint_id,
+                    "parked_by": owner_id,
+                    "reason": reason,
+                    "parked_at": event_time,
+                    "unparked_at": None,
+                    "unparked_by": None,
+                },
+            )
+            self._append_event(
+                conn,
+                mission_id,
+                "MISSION_PARKED",
+                {
+                    "schema_version": "mission-parked.v1",
+                    "request": request,
+                    "run_id": run.run_id,
+                    "from_state": mission.state.value,
+                    "result_version": mission.version + 1,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="mission",
+            )
+            # Built inside the transaction, so a bad row rolls the whole park back.
+            return self._get_mission_park(conn, park_id)
+
+    def unpark_mission(
+        self,
+        *,
+        mission_id: str,
+        expected_mission_version: int,
+        new_owner_id: str,
+        new_token: str,
+        lease_seconds: int,
+        observed_git_head: str,
+        observed_dirty_paths: tuple[str, ...] | list[str],
+        approval_evidence_ref: str,
+        idempotency_key: str,
+    ) -> tuple[MissionPark, LeaseItem]:
+        """Pick a parked Mission back up (TD-071 design 4.3); only the user may decide this.
+
+        Refuses unless the project has no other ACTIVE Mission and no other held lease, the
+        Mission's authority is still current, and the worktree is exactly as the park checkpoint left
+        it (same HEAD, same changed files).  Grants a new lease (a new epoch) to ``new_owner_id``,
+        who may differ from the one who parked it, moves Run BLOCKED -> RUNNING and Mission
+        PARKED -> ACTIVE, and closes the park record.  ``approval_evidence_ref`` points at the
+        user's own words and is recorded in the event.
+        """
+
+        mission_id = self._validated_run_text(mission_id, label="mission_id")
+        new_owner_id = self._validated_run_text(new_owner_id, label="new lease owner")
+        new_token = self._validated_run_text(new_token, label="new lease token")
+        approval_evidence_ref = self._validated_run_text(
+            approval_evidence_ref, label="用户授权凭据"
+        )
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(expected_mission_version) is not int or expected_mission_version < 1:
+            raise ContinuityStoreError("expected_mission_version 必须是正整数")
+        if type(lease_seconds) is not int or not 60 <= lease_seconds <= 3_600:
+            raise ContinuityStoreError("拿回后的 lease_seconds 必须在 60 到 3600 之间")
+        if lease_token_is_fenced(new_token):
+            raise ContinuityStoreError("新 lease token 不得使用保留前缀")
+        if new_token in approval_evidence_ref:
+            raise ContinuityStoreError("用户授权凭据不得包含 lease token")
+        if not isinstance(observed_git_head, str) or not _FULL_GIT_COMMIT.fullmatch(observed_git_head):
+            raise ContinuityStoreError("工作树 HEAD 必须是 40 位提交号")
+        observed_paths = self._validated_park_paths(observed_dirty_paths, label="工作树改动文件")
+        request = {
+            "schema_version": "mission-unpark-request.v1",
+            "mission_id": mission_id,
+            "expected_mission_version": expected_mission_version,
+            "new_owner_id": new_owner_id,
+            "lease_seconds": lease_seconds,
+            "observed_git_head": observed_git_head,
+            "observed_dirty_paths": list(observed_paths),
+            "approval_evidence_ref": approval_evidence_ref,
+            "new_token_sha256": self._lease_token_fingerprint(new_token),
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="Mission 拿回")
+                if (
+                    existing["aggregate_type"] != "mission"
+                    or existing["aggregate_id"] != mission_id
+                    or existing["event_type"] != "MISSION_UNPARKED"
+                    or payload.get("schema_version") != "mission-unparked.v1"
+                    or payload.get("request") != request
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 Mission 拿回语义不一致")
+                park = self._get_mission_park(conn, str(payload["park_id"]))
+                return park, self._get_lease(conn, park.run_id)
+            mission = self._get_mission(conn, mission_id)
+            if mission.version != expected_mission_version:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            if mission.state is not MissionState.PARKED:
+                raise ContinuityStoreError(
+                    f"只有搁着（PARKED）的 Mission 可以拿回（当前 {mission.state.value}）"
+                )
+            observed_at = self._utc_now()
+            if not mission.authority.valid_from <= observed_at <= mission.authority.expires_at:
+                raise ContinuityStoreError("Mission 授权已过期或尚未生效，不能拿回开干；请先重新批准范围")
+            park_row = self._open_park_row(conn, "mission_id", mission_id)
+            if park_row is None:
+                raise ContinuityStoreError("搁着的 Mission 缺少未拿回的搁着记录（数据不一致）")
+            park = MissionPark.model_validate(dict(park_row))
+            run = self._get_run(conn, park.run_id)
+            if run.state is not RunState.BLOCKED:
+                raise ContinuityStoreError(f"搁着的 Run 应为 BLOCKED（当前 {run.state.value}）")
+            lease = self._get_lease(conn, run.run_id)
+            if not lease.lease_token.startswith(PARKED_TOKEN_PREFIX):
+                raise ContinuityStoreError("搁着的 Run 租约没有处于摘牌状态（数据不一致）")
+            other_active = conn.execute(
+                """SELECT mission_id, title FROM mission_items
+                WHERE subject_project_id=? AND state='ACTIVE' AND mission_id<>?""",
+                (mission.subject_project_id, mission_id),
+            ).fetchone()
+            if other_active is not None:
+                raise ContinuityStoreError(
+                    f"项目里“{other_active['title']}”（{other_active['mission_id']}）正在干；"
+                    "请先搁着它（pm park），或用 pm switch 一步切换"
+                )
+            held = [
+                run_id
+                for run_id in self._project_held_lease_run_ids(
+                    conn, mission.subject_project_id, observed_at
+                )
+                if run_id != run.run_id
+            ]
+            if held:
+                raise ContinuityStoreError(
+                    "项目里还有别的 Run 持有租约，不能再拿回一张开干: " + ", ".join(held)
+                )
+            checkpoint = self._get_checkpoint(conn, park.checkpoint_id)
+            problems: list[str] = []
+            if observed_git_head != checkpoint.git_head:
+                problems.append(
+                    f"HEAD 变了：断点 {checkpoint.git_head[:12]}，现在 {observed_git_head[:12]}"
+                )
+            recorded = set(checkpoint.dirty_paths)
+            observed = set(observed_paths)
+            if observed - recorded:
+                problems.append("多出改动: " + ", ".join(sorted(observed - recorded)))
+            if recorded - observed:
+                problems.append("少了改动: " + ", ".join(sorted(recorded - observed)))
+            if problems:
+                raise ContinuityStoreError(
+                    "搁着期间这张卡的工作树被动过，拒绝拿回：" + "；".join(problems)
+                )
+            event_time = observed_at.isoformat()
+            new_expires = (observed_at + timedelta(seconds=lease_seconds)).isoformat()
+            cursor = conn.execute(
+                """UPDATE execution_leases
+                SET owner_id=?, lease_token=?, expires_at=?, version=version+1, updated_at=?
+                WHERE run_id=? AND lease_token=? AND version=?""",
+                (
+                    new_owner_id,
+                    new_token,
+                    new_expires,
+                    event_time,
+                    run.run_id,
+                    lease.lease_token,
+                    lease.version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("拿回发新租约 CAS 冲突")
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND version=?""",
+                (RunState.RUNNING.value, event_time, run.run_id, run.version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Run 不存在或版本冲突")
+            self._append_event(
+                conn,
+                run.run_id,
+                "RUN_UNPARKED",
+                {
+                    "schema_version": "run-unparked.v1",
+                    "run_id": run.run_id,
+                    "park_id": park.park_id,
+                    "from_owner": lease.owner_id,
+                    "to_owner": new_owner_id,
+                    "new_state": RunState.RUNNING.value,
+                    "result_version": run.version + 1,
+                    "expires_at": new_expires,
+                    # The lease version this grant produces: the new epoch (see _grant_epoch).
+                    "version": lease.version + 1,
+                },
+                f"{idempotency_key}#run",
+                event_time,
+                aggregate_type="run",
+            )
+            try:
+                cursor = conn.execute(
+                    """UPDATE mission_items SET state=?, version=version+1, updated_at=?
+                    WHERE mission_id=? AND version=?""",
+                    (MissionState.ACTIVE.value, event_time, mission_id, mission.version),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ContinuityStoreError(
+                    "项目里已有一张在干（ACTIVE）的 Mission；同一时刻只能有一张在干"
+                ) from error
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            cursor = conn.execute(
+                """UPDATE run_parks SET unparked_at=?, unparked_by=?
+                WHERE park_id=? AND unparked_at IS NULL""",
+                (event_time, new_owner_id, park.park_id),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("搁着记录已被拿回（并发冲突）")
+            self._append_event(
+                conn,
+                mission_id,
+                "MISSION_UNPARKED",
+                {
+                    "schema_version": "mission-unparked.v1",
+                    "request": request,
+                    "park_id": park.park_id,
+                    "run_id": run.run_id,
+                    "result_version": mission.version + 1,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="mission",
+            )
+            return self._get_mission_park(conn, park.park_id), self._get_lease(conn, run.run_id)
+
+    def get_open_park(self, mission_id: str) -> MissionPark | None:
+        """The open park record of a Mission, if it is parked."""
+
+        with self._read_connection() as conn:
+            if not self._table_exists(conn, "run_parks"):
+                return None
+            row = self._open_park_row(conn, "mission_id", mission_id)
+            return MissionPark.model_validate(dict(row)) if row is not None else None
+
+    def list_missions_by_board(self, subject_project_id: str) -> MissionBoard:
+        """Group all Missions of a project into the four board columns (TD-071 design 5.5)."""
+
+        with self._read_connection() as conn:
+            versions = self._schema_versions(conn)
+            if not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
+                rendered = ", ".join(sorted(versions))
+                raise ContinuityStoreError(f"未知或未来 Continuity Store schema: {rendered}")
+            if versions == {_LEGACY_SCHEMA_VERSION}:
+                return MissionBoard(subject_project_id=subject_project_id)
+            rows = conn.execute(
+                """SELECT mission_id FROM mission_items WHERE subject_project_id=?
+                ORDER BY updated_at DESC, mission_id""",
+                (subject_project_id,),
+            ).fetchall()
+            has_parks = self._table_exists(conn, "run_parks")
+            columns: dict[MissionBoardColumn, list[Mission]] = {
+                column: [] for column in MissionBoardColumn
+            }
+            parked: list[ParkedMission] = []
+            for row in rows:
+                mission = self._get_mission(conn, str(row["mission_id"]))
+                column = BOARD_COLUMN_BY_STATE[mission.state]
+                if column is not MissionBoardColumn.PARKED:
+                    columns[column].append(mission)
+                    continue
+                park_row = (
+                    self._open_park_row(conn, "mission_id", mission.mission_id)
+                    if has_parks
+                    else None
+                )
+                if park_row is None:
+                    raise ContinuityStoreError(
+                        f"搁着的 Mission 缺少未拿回的搁着记录（数据不一致）: {mission.mission_id}"
+                    )
+                park = MissionPark.model_validate(dict(park_row))
+                checkpoint = self._get_checkpoint(conn, park.checkpoint_id)
+                parked.append(
+                    ParkedMission(mission=mission, park=park, checkpoint_summary=checkpoint.summary)
+                )
+            # Last put down, first suggested back (design 7.1).
+            parked.sort(key=lambda item: (item.park.parked_at, item.park.park_id), reverse=True)
+            return MissionBoard(
+                subject_project_id=subject_project_id,
+                active=tuple(columns[MissionBoardColumn.ACTIVE]),
+                waiting=tuple(columns[MissionBoardColumn.WAITING]),
+                parked=tuple(parked),
+                closed=tuple(columns[MissionBoardColumn.CLOSED]),
+            )
+
     def _require_lease_in_tx(
         self,
         conn: sqlite3.Connection,
@@ -7703,6 +8358,10 @@ class ContinuityStore:
         """
 
         lease = self._get_lease(conn, run_id)
+        if lease_token_is_fenced(lease_token) or lease_token_is_fenced(lease.lease_token):
+            if lease.lease_token.startswith(PARKED_TOKEN_PREFIX):
+                raise ContinuityStoreError("这张卡搁着呢，租约已摘牌；请用 pm unpark 拿回来")
+            raise ContinuityStoreError("lease 已释放（摘牌口令不能当作持有凭据）")
         if lease.owner_id != owner_id or lease.lease_token != lease_token:
             raise ContinuityStoreError(
                 "lease ownership 不匹配（租约可能已被移交或回收，你持有的口令已失效）"

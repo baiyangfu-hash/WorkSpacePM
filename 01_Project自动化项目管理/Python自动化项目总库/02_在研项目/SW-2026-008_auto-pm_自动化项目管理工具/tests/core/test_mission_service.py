@@ -248,13 +248,14 @@ def test_v2_store_migrates_additively_and_preserves_existing_work(tmp_path: Path
         migrations = conn.execute(
             "SELECT from_version, to_version FROM schema_migrations ORDER BY rowid"
         ).fetchall()
-    assert version == "continuity-store.v7"
+    assert version == "continuity-store.v8"
     assert migrations == [
         ("continuity-store.v2", "continuity-store.v3"),
         ("continuity-store.v3", "continuity-store.v4"),
         ("continuity-store.v4", "continuity-store.v5"),
         ("continuity-store.v5", "continuity-store.v6"),
         ("continuity-store.v6", "continuity-store.v7"),
+        ("continuity-store.v7", "continuity-store.v8"),
     ]
     _create(service)
 

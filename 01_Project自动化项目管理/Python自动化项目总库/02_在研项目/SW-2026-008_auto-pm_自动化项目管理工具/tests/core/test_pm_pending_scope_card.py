@@ -259,7 +259,7 @@ def test_s01_new_table_is_appended_without_a_schema_bump(tmp_path: Path) -> None
     env = _env(tmp_path)
     tables = set(env.scalars("SELECT name FROM sqlite_master WHERE type='table'"))
     assert "planning_scope_cards" in tables
-    assert env.scalars("SELECT schema_version FROM schema_meta") == ["continuity-store.v7"]
+    assert env.scalars("SELECT schema_version FROM schema_meta") == ["continuity-store.v8"]
     assert env.count("schema_migrations") == 0
 
 

@@ -30,9 +30,17 @@ _TRANSITIONS: dict[MissionState, frozenset[MissionState]] = {
     MissionState.DRAFT: frozenset({MissionState.AWAITING_APPROVAL, MissionState.CANCELLED}),
     MissionState.AWAITING_APPROVAL: frozenset({MissionState.ACTIVE, MissionState.CANCELLED}),
     MissionState.ACTIVE: frozenset(
-        {MissionState.BLOCKED, MissionState.ACCEPTANCE_PENDING, MissionState.CANCELLED}
+        {
+            MissionState.BLOCKED,
+            MissionState.PARKED,
+            MissionState.ACCEPTANCE_PENDING,
+            MissionState.CANCELLED,
+        }
     ),
-    MissionState.BLOCKED: frozenset({MissionState.ACTIVE, MissionState.CANCELLED}),
+    MissionState.BLOCKED: frozenset(
+        {MissionState.ACTIVE, MissionState.PARKED, MissionState.CANCELLED}
+    ),
+    MissionState.PARKED: frozenset({MissionState.ACTIVE, MissionState.CANCELLED}),
     MissionState.ACCEPTANCE_PENDING: frozenset({MissionState.ACCEPTED, MissionState.BLOCKED}),
     MissionState.ACCEPTED: frozenset({MissionState.CLOSED}),
     MissionState.CLOSED: frozenset(),
@@ -250,6 +258,14 @@ class MissionService:
                 raise MissionServiceError(
                     f"Mission 不允许从 {current.state.value} 流转到 {new_state.value}"
                 )
+            if new_state is MissionState.PARKED or (
+                current.state is MissionState.PARKED and new_state is MissionState.ACTIVE
+            ):
+                raise MissionServiceError(
+                    "搁着和拿回只能走 park/unpark：它们在同一个事务里记断点、摘牌或发新租约"
+                )
+            if new_state is MissionState.ACTIVE:
+                self._assert_no_other_active(current)
             self._assert_authority_is_current(
                 current.authority,
                 instant,
@@ -283,6 +299,7 @@ class MissionService:
         if new_state in {
             MissionState.ACTIVE,
             MissionState.BLOCKED,
+            MissionState.PARKED,
             MissionState.ACCEPTANCE_PENDING,
             MissionState.ACCEPTED,
             MissionState.CLOSED,
@@ -293,6 +310,16 @@ class MissionService:
         elif requested_root_work_id is not None:
             raise MissionServiceError("DRAFT、AWAITING_APPROVAL 或 CANCELLED 不允许新增 root_work_id")
         return root_work_id
+
+    def _assert_no_other_active(self, mission: Mission) -> None:
+        """Friendly early refusal; the partial unique index on ACTIVE is the hard lock (TD-071)."""
+
+        for other in self._store.list_missions(mission.subject_project_id):
+            if other.mission_id != mission.mission_id and other.state is MissionState.ACTIVE:
+                raise MissionServiceError(
+                    f"项目里“{other.title}”（{other.mission_id}）正在干；"
+                    "请先搁着它（pm park），或用 pm switch 一步切换"
+                )
 
     def _assert_root_work_matches_project(self, subject_project_id: str, root_work_id: str) -> None:
         try:

@@ -363,7 +363,7 @@ def test_multiple_active_missions_fail_closed_without_guessing(tmp_path: Path) -
     _mission(tmp_path, "MISSION-001")
     db_path = tmp_path / ".auto-pm" / "continuity.db"
     with closing(sqlite3.connect(db_path)) as conn, conn:
-        conn.execute("DROP INDEX idx_one_open_mission_per_project")
+        conn.execute("DROP INDEX idx_one_active_mission_per_project")
         conn.execute(
             """INSERT INTO mission_items
             SELECT 'MISSION-002', subject_project_id, title, objective, state, root_work_id,
