@@ -121,3 +121,16 @@ def test_m11_shared_libraries_are_not_checked(tmp_path: Path) -> None:
     assert not table.applicable and table.findings == []
     (tmp_path / ".plc.json").write_text('{"name": "DJ-2026-MS", "project_type": "single_machine"}', encoding="utf-8")
     assert kinds(ms.check_project(str(tmp_path))) == [("missing", "", "warn")]
+
+
+def test_m12_generated_shared_libraries_are_recognised_by_their_copier_mode(tmp_path: Path) -> None:
+    (tmp_path / ".plc.json").write_text('{"name": "MyLib", "libraries": []}', encoding="utf-8")
+    (tmp_path / ".copier-answers.yml").write_text("library_name: MyLib\nstack: plc\nmode: shared-library\n",
+                                                  encoding="utf-8")
+    assert not ms.check_project(str(tmp_path)).applicable
+    (tmp_path / ".copier-answers.yml").write_text("project_id: DJ-2026-MS\nmode: standard-project\n",
+                                                  encoding="utf-8")
+    assert kinds(ms.check_project(str(tmp_path))) == [("missing", "", "warn")]
+    (tmp_path / ".copier-answers.yml").unlink()
+    (tmp_path / ".plc.json").write_text('{"name": "MyLib", "project_type": "shared_library"}', encoding="utf-8")
+    assert not ms.check_project(str(tmp_path)).applicable

@@ -5,7 +5,8 @@
 - 表头写 ``项目来源: 新项目``（或没写、写错）：每条问题都是 ``fail``，``plc docs check`` 退出码 1；
 - ``项目来源: 老项目迁入``：同样的问题只给 ``warn``（先只提示）；
 - 项目里找不到里程碑表：只给 ``warn``（分不清新老项目；现有老项目都还没有这张表）；
-- 共享库（``.plc.json`` 里 ``project_type`` 为 ``library``）不是交付项目，不查。
+- 共享库（``.plc.json`` 里 ``project_type`` 为 ``library``/``shared_library``，或 ``.copier-answers.yml`` 里
+  ``mode: shared-library``）不是交付项目，不查。
 
 只读，不写文件。
 """
@@ -33,6 +34,8 @@ _SKIP_DIRS = {"node_modules", "__pycache__", "archive", "_archive", "Test", "99_
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ORIGIN = re.compile(r"^\s*项目来源\s*[:：]\s*[\"']?(.*?)[\"']?\s*(?:#.*)?$")
 _COLUMNS = ("阶段", "计划日期", "实际日期", "状态")
+_LIBRARY_TYPES = {"library", "shared_library", "shared-library"}
+_MODE = re.compile(r"^\s*mode\s*:\s*[\"']?([\w-]+)[\"']?\s*$")
 
 
 @dataclass(frozen=True)
@@ -175,11 +178,21 @@ def read_milestones(path: str) -> MilestoneTable:
 
 
 def _is_library(project_path: str) -> bool:
+    """SysLib writes ``project_type: library``; ``project create --mode shared-library`` only records the mode in
+    ``.copier-answers.yml`` (its ``.plc.json`` carries no project_type)."""
+
     try:
         config = json.loads(Path(project_path, ".plc.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        config = None
+    if isinstance(config, dict) and config.get("project_type") in _LIBRARY_TYPES:
+        return True
+    try:
+        answers = Path(project_path, ".copier-answers.yml").read_text(encoding="utf-8").splitlines()
+    except OSError:
         return False
-    return isinstance(config, dict) and config.get("project_type") == "library"
+    modes = (_MODE.match(line) for line in answers)
+    return any(match is not None and match.group(1) in _LIBRARY_TYPES for match in modes)
 
 
 def check_project(project_path: str) -> MilestoneTable:
