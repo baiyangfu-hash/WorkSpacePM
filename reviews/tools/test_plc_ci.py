@@ -213,3 +213,38 @@ def test_mismatch_between_verdict_and_details_fails_the_project(monkeypatch, sam
     out = plc_ci.evaluate(REPO, sample, sample, plc_ci.Target(D011, "测试"), compare=True)
     assert out.verdict == "FAIL"
     assert "不一致" in out.error
+
+
+# ── Codex 评审两条 ─────────────────────────────────────────
+
+
+def test_deleting_only_plc_json_is_a_failure(pr, capsys) -> None:
+    head, run = pr
+    (head / SYSLIB / ".plc.json").unlink()
+    code, out = run(capsys)
+    assert code == 1
+    assert f"[FAIL] {SYSLIB}（{plc_ci.LOST_CONFIG}）" in out
+
+
+def test_deleting_the_whole_project_is_only_noted(pr, capsys) -> None:
+    head, run = pr
+    shutil.rmtree(head / D011)
+    code, out = run(capsys)
+    assert code == 0
+    assert "PR 里整个删掉了" in out
+
+
+def _structural(message: str) -> dict:
+    return {"check": {"items": [{"item": "目录唯一性与冲突排查", "status": "fail", "message": message}]},
+            "docs": [], "scl": []}
+
+
+def test_structural_item_compares_its_message_not_only_its_name() -> None:
+    before = plc_ci.failure_keys(_structural("序号冲突: 01_A, 01_B"))
+    after = plc_ci.failure_keys(_structural("序号冲突: 01_A, 01_B, 02_C, 02_D"))
+    assert before != after  # 同一项里多了一处冲突，键必须不同，才会判新增
+
+
+def test_structural_item_ignores_changing_numbers() -> None:
+    assert plc_ci.failure_keys(_structural("PM_SESSION 189 行（阈值 150 行）")) == \
+        plc_ci.failure_keys(_structural("PM_SESSION 201 行（阈值 150 行）"))

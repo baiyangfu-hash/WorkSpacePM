@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from collections import Counter
@@ -45,6 +46,8 @@ SW008 = "01_Project自动化项目管理/Python自动化项目总库/02_在研�
 SAFETY_TOOL = "reviews/tools/safety_zone_check.py"
 # 改到这些文件说明检查程序本身变了：所有 PLC 项目都跑一遍
 JUDGE_FILES = (".github/workflows/plc-ci.yml", "reviews/tools/plc_ci.py")
+LOST_CONFIG = "PR 删掉了 .plc.json，但项目目录还在"
+_DIGITS = re.compile(r"\d+")
 
 # 子进程里执行：用基线上的 SW-2026-008 源码检查一个项目目录，结果以 JSON 打印
 _CHILD = r"""
@@ -166,13 +169,16 @@ def select(head: Path, base: Path, changed: list[str], check_all: bool) -> tuple
                 other.add("/".join(PurePosixPath(path).parts[:2]))
             continue
         if not is_project(head, rel):
-            if is_project(base, rel):
-                notes.append(f"{rel}：PR 里整个删掉了（或删掉了 .plc.json），不再检查")
+            if is_project(base, rel) and (head / rel).is_dir() and any(p.is_file() for p in (head / rel).rglob("*")):
+                # 只删配置、留下程序：不能借此躲开检查（也包括共享库）
+                targets.setdefault(rel, LOST_CONFIG)
+            elif is_project(base, rel):
+                notes.append(f"{rel}：PR 里整个删掉了，不再检查")
             else:
                 other.add(rel)
             continue
         targets.setdefault(rel, "PR 改到")
-        if rel.startswith(f"{PLC_TOP}/{SHARED}/"):
+        if targets[rel] != LOST_CONFIG and rel.startswith(f"{PLC_TOP}/{SHARED}/"):
             for dep in dependents(head, rel):
                 targets.setdefault(dep, f"引用了改动的共享库 {PurePosixPath(rel).name}")
     for rel in sorted(other):
@@ -206,7 +212,8 @@ def failure_keys(data: dict) -> Counter:
         # 这两项另有逐条明细，下面单独展开
         if name == "SCL 代码规范" or name.startswith("文档一致性"):
             continue
-        keys[f"plc check · {name}"] += 1  # 说明里常带行数、计数，按项名比
+        # 说明里常带行数、计数，数字抹平后连说明一起比：同一项里多出一处新问题（说明变了）也算新增
+        keys[f"plc check · {name}：{_DIGITS.sub('#', item['message'])}"] += 1
     for f in data["docs"]:
         if f["severity"] == "fail":
             who = f"{f['obj']}.{f['variable']}" if f["variable"] else f["obj"]
@@ -236,6 +243,9 @@ def evaluate(judge: Path, base: Path, head: Path, target: Target, *, compare: bo
     if scltests:
         out.skipped.append(f"{len(scltests)} 个 .scltest 仿真测试没跑（同样要本机插件 test）：{'、'.join(scltests)}")
     out.skipped.append(SKIP_VENDOR)
+    if target.reason == LOST_CONFIG:
+        out.verdict, out.error = "FAIL", f"{LOST_CONFIG}：没有 .plc.json 就跑不了 PLC 检查，要么恢复配置，要么连目录一起删"
+        return out
     try:
         now = run_checks(judge, head, rel)
         mismatch = consistent(now)
