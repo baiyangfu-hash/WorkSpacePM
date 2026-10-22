@@ -366,7 +366,7 @@ def test_k05_the_pending_card_has_no_lease_or_internal_work_fields() -> None:
     assert not {"mission_id", "work_id", "run_id", "decision_id", "lease_token", "approval_evidence_ref"} & names
 
 
-def test_p13_a_second_card_on_other_files_is_approvable_without_a_release(tmp_path: Path) -> None:
+def test_p15_a_second_card_on_other_files_is_approvable_without_a_release(tmp_path: Path) -> None:
     """TD-071 card 3, positive control of p04: an open task alone no longer blocks the next card."""
 
     env = _env(tmp_path)
