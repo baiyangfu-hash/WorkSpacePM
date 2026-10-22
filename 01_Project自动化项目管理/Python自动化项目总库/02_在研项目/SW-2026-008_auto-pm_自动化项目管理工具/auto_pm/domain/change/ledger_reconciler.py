@@ -286,7 +286,8 @@ class LedgerReconciler:
         “approved”之类的手填文案照旧不比，免得把以前从不比对的台帐一下子判成不一致。
         """
         known = {_plain_status(text) for text in LEDGER_STATUS_MAP.values()}
-        number_col, status_col = header.index("变更编号"), header.index("状态")
+        number_col = next(n for n, name in enumerate(header) if LedgerUpdater._LEGACY_COLUMNS.get(name) == "number")
+        status_col = header.index("状态")
         result: dict[str, str] = {}
         for line in content.split("\n"):
             stripped = line.strip()

@@ -94,3 +94,21 @@ def test_a_heading_that_only_mentions_the_index_does_not_count_as_a_table(tmp_pa
     LedgerUpdater().update(str(ledger), "CHG-PLC-2026-001", "测试")
 
     assert "[→ CHG-PLC-2026-001]" in ledger.read_text(encoding="utf-8")
+
+
+def test_a_real_detail_table_is_used_instead_of_adding_an_index_table(tmp_path: Path) -> None:
+    """DJ-2026-009 的旧明细表里有真的 CHG 行：对账自愈把行写进那张表，不另补索引表。"""
+    project = _generate(tmp_path)
+    ledger = project / LEDGER
+    old = _without_index_table(ledger).replace(
+        "| *暂无变更记录* | - | - | - | - | - | - |",
+        "| CHG-ELEC-2026-007 | 旧修复 | FB_3001 | V1.0.0 | 已关闭 | fubai | 2026-08-27 |",
+    )
+    ledger.write_text(old, encoding="utf-8")
+    assert LedgerUpdater().ensure_index_table(str(ledger)) is False
+
+    change_number = _create_change(tmp_path)
+
+    healed = ledger.read_text(encoding="utf-8")
+    assert "变更单索引" not in healed
+    assert f"| {change_number} | 双手启动窗口 |" in healed

@@ -37,7 +37,8 @@ class LedgerUpdater:
             是否补建了表格
         """
         content = read_file(ledger_path)
-        if not content or self._has_index_table(content):
+        if not content or self._has_index_table(content) or self._legacy_table_at(content):
+            # 已有能认出的旧格式明细表（DJ-2026-009）时行就写在那张表里，不再另补一张
             return False
         separator = "" if content.endswith("\n\n") else ("\n" if content.endswith("\n") else "\n\n")
         write_file(ledger_path, content + separator + INDEX_TABLE_SECTION)
@@ -292,6 +293,7 @@ class LedgerUpdater:
     _LEGACY_COLUMNS: dict[str, str] = {
         "序号": "seq",
         "变更编号": "number",
+        "变更单号": "number",
         "领域": "domain",
         "申请人": "applicant",
         "责任人": "applicant",
@@ -309,8 +311,13 @@ class LedgerUpdater:
         return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
     @classmethod
-    def _legacy_table_header(cls, content: str) -> list[str] | None:
-        """没有“变更单索引”标题时，返回第一张同时有“变更编号”“状态”栏的表头。"""
+    def _legacy_table_at(cls, content: str) -> tuple[int, list[str]] | None:
+        """没有“变更单索引”标题时，找第一张能认出的旧格式明细表：（表头行号, 表头）。
+
+        表头要同时有编号栏（“变更编号”或“变更单号”）和“状态”栏，并且至少有一行编号栏里写着
+        真的 CHG 编号。模板里只有“*暂无变更记录*”占位行的空明细表不认，交给
+        ``ensure_index_table`` 补标准索引表（D09 迁入 N3：``update()`` 不往占位表里写）。
+        """
         if "变更单索引" in content:
             return None
         lines = content.split("\n")
@@ -319,27 +326,36 @@ class LedgerUpdater:
             if not stripped.startswith("|") or not re.match(r"^\|[\s\-:|]+\|$", lines[i + 1].strip()):
                 continue
             header = [cell.strip("* ") for cell in cls._table_cells(stripped)]
-            if "变更编号" in header and "状态" in header:
-                return header
+            number_cols = [n for n, name in enumerate(header) if cls._LEGACY_COLUMNS.get(name) == "number"]
+            if not number_cols or "状态" not in header:
+                continue
+            for row in lines[i + 2 :]:
+                if not row.strip().startswith("|"):
+                    break
+                cells = cls._table_cells(row)
+                if len(cells) > number_cols[0] and re.search(r"CHG-[A-Z]+-\d{4}-\d+", cells[number_cols[0]]):
+                    return i, header
         return None
+
+    @classmethod
+    def _legacy_table_header(cls, content: str) -> list[str] | None:
+        found = cls._legacy_table_at(content)
+        return None if found is None else found[1]
+
+    @classmethod
+    def _insert_row_to_legacy_table(cls, content: str, new_row: str) -> str:
+        """旧格式表行间不空行：插在分隔行之后、紧贴已有行。"""
+        found = cls._legacy_table_at(content)
+        if found is None:
+            return content
+        lines = content.split("\n")
+        at = found[0] + 2
+        return "\n".join([*lines[:at], new_row, *lines[at:]])
 
     @classmethod
     def _legacy_row(cls, header: list[str], values: dict[str, str]) -> str:
         cells = [values.get(cls._LEGACY_COLUMNS.get(name, ""), "") for name in header]
         return "| " + " | ".join(cells) + " |"
-
-    @classmethod
-    def _insert_row_to_legacy_table(cls, content: str, new_row: str) -> str:
-        """旧格式表行间不空行：插在分隔行之后、紧贴已有行。"""
-        lines = content.split("\n")
-        for i, line in enumerate(lines[:-1]):
-            stripped = line.strip()
-            if not stripped.startswith("|") or not re.match(r"^\|[\s\-:|]+\|$", lines[i + 1].strip()):
-                continue
-            header = [cell.strip("* ") for cell in cls._table_cells(stripped)]
-            if "变更编号" in header and "状态" in header:
-                return "\n".join([*lines[: i + 2], new_row, *lines[i + 2 :]])
-        return content
 
     @classmethod
     def _status_parts(cls, content: str) -> tuple[int, int | None]:
