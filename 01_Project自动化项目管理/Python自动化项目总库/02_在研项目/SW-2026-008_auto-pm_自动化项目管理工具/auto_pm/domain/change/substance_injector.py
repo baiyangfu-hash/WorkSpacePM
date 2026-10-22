@@ -368,7 +368,8 @@ class SubstanceInjector:
     ) -> list[Path] | None:
         """本项目变更单目录（``04_监控``/``11_监控`` 下的 ``01_变更管理/01_变更单``）里的同号文件，不含 ``archive``。
 
-        没给项目编号、或按编号定位不到项目目录时返回 None（调用方沿用原来的全工作区查找）。
+        没给项目编号时返回 None（调用方沿用原来的全工作区查找）；给了编号却定位不到项目目录时
+        返回空列表，调用方据此拒绝，绝不退回全工作区去找别的项目的同号变更单（M3-CHGUNIQ）。
         """
         if not project_id:
             return None
@@ -377,7 +378,7 @@ class SubstanceInjector:
 
         root = ChangeFileLocator(str(workspace), ChgParser()).get_project_path(project_id)
         if not root:
-            return None
+            return []
         found: list[Path] = []
         for monitor in ("04_监控", "11_监控"):
             base = Path(root) / monitor / "01_变更管理" / "01_变更单"
