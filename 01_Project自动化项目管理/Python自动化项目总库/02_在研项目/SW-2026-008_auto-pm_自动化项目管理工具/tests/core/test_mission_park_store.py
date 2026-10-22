@@ -816,3 +816,23 @@ def test_administrative_settlement_refuses_a_parked_run_even_after_its_old_expir
     with pytest.raises(ContinuityStoreError, match="搁着.*不能行政结算"):
         store.settle_expired_run(**_direct_settlement_values(service))
     assert store.get_run("RUN-TARGET").state is target_run.state
+
+
+# ------------------------------------------------------------------ sweep: exhaustive state maps
+
+
+def test_views_that_map_every_mission_state_know_parked(scene: Scene) -> None:
+    from auto_pm.core.continuity_resume_service import ContinuityResumeService
+    from auto_pm.core.pm_cockpit_service import PmCockpitService
+
+    from auto_pm.contracts.continuity import WorkState
+
+    scene.park()
+    parked = scene.store.get_mission("MISSION-A")
+    assert PmCockpitService._milestone(parked) == "搁着（断点已记）"
+    for state in MissionState:
+        PmCockpitService._milestone(parked.model_copy(update={"state": state}))
+    action = ContinuityResumeService._next_action(
+        MissionState.PARKED, WorkState.IN_PROGRESS, RunState.BLOCKED, True
+    )
+    assert action == "AWAIT_USER_UNPARK"

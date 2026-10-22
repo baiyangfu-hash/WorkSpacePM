@@ -858,8 +858,9 @@ class PmFacadeService:
             MissionState.CLOSED,
             MissionState.CANCELLED,
             MissionState.BLOCKED,
+            MissionState.PARKED,
         }:
-            raise PmFacadeError("该需求已验收、已结束或被阻塞，不能重复执行")
+            raise PmFacadeError("该需求已验收、已结束或被阻塞（或搁着），不能重复执行")
         if mission.state is MissionState.DRAFT:
             self.plan(mission.mission_id)
         self.approve(mission.mission_id, work.work_id)

@@ -808,6 +808,7 @@ class PmCockpitService:
             MissionState.AWAITING_APPROVAL: "等待开工确认",
             MissionState.ACTIVE: "系统执行",
             MissionState.BLOCKED: "等待决策",
+            MissionState.PARKED: "搁着（断点已记）",
             MissionState.ACCEPTANCE_PENDING: "等待验收确认",
             MissionState.ACCEPTED: "验收已记录，待同步",
             MissionState.CLOSED: "已关闭",

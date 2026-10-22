@@ -249,6 +249,8 @@ class ContinuityResumeService:
                 MissionState.DRAFT: "SUBMIT_MISSION_FOR_APPROVAL",
                 MissionState.AWAITING_APPROVAL: "AWAIT_USER_APPROVAL",
                 MissionState.BLOCKED: "RESOLVE_MISSION_BLOCKER",
+                # TD-071: only the user decides which parked card is picked back up.
+                MissionState.PARKED: "AWAIT_USER_UNPARK",
                 MissionState.ACCEPTANCE_PENDING: "AWAIT_USER_ACCEPTANCE",
             }
             if mission_state in mission_actions:
