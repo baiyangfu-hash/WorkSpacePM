@@ -15,7 +15,8 @@ domain: plc
 ## 2. 结构体定义
 - `stGlobal`: 全局系统控制与报警 (ST_CommonAlarm)
 - `stExternal`: 外部交互总线 (ST_ExternalDevice)
-- `astServoAxis`: 伺服驱动轴数组 (ST_AxisPos)
+- `stStation1`: 工位 1 全量数据 (ST_Station1)
+- ~~`astServoAxis`: 伺服驱动轴数组 (ST_AxisPos)~~ 009 代码里没有 (2026-10-22 核对; 全部全局名见 `程序文档/PLC变量定义文档_VAR.md` 第 3.1、4 节)
 
 ## 3. 待在 GlobalVars 里补声明的变量
 

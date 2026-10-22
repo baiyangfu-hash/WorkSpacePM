@@ -1,5 +1,7 @@
 # FB_2001_CommonAlarm_AllStation 详细设计说明书
 
+> **【与代码不符，2026-10-22 核对】** 本文写的是 DJ-2026-005 源程序基线，009 代码没有实现。009 现状以 `接口文档_IFC-FB2001-CommonAlarm.md` V9.2.0 和 `FB_2001_CommonAlarm_AllStation.scl` 为准。旧内容保留不删。
+
 ## 1. 文档基础信息
 
 | 属性 | 值 |
