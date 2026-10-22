@@ -509,7 +509,7 @@ def test_c15_a_first_approval_is_refused_while_another_task_is_open_and_works_af
     refused = _run(cli_runner, tmp_path, *_approve_args(SECOND, second["plan_hash"]))
 
     assert refused.exit_code == 1
-    assert "未终结的任务" in refused.output
+    assert "要改同一批文件" in refused.output and "--admission-release-ref" in refused.output
     assert (_state(tmp_path), _chg_status(tmp_path, second["change_id"])) == (before, status)
     assert _count(tmp_path, "planning_draft_decision_bindings") == bindings == 1
     assert [card["card"]["request_id"] for card in _pending(cli_runner, tmp_path)] == [SECOND]
@@ -526,3 +526,22 @@ def test_c15_a_first_approval_is_refused_while_another_task_is_open_and_works_af
 
     assert approved["authorization_status"] == "AUTHORIZED"
     assert _pending(cli_runner, tmp_path) == []
+
+
+def test_c16_the_users_release_on_the_command_line_admits_a_colliding_card(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """TD-071 card 3: ``--admission-release-ref`` carries the user's own word past a collision; it is recorded."""
+
+    _setup_planning(tmp_path)
+    first = _planned(cli_runner, tmp_path, COCKPIT)
+    second = _planned(cli_runner, tmp_path, SECOND)
+    _json(_run(cli_runner, tmp_path, *_approve_args(COCKPIT, first["plan_hash"])))
+    release = "user-confirmation:TD071-C16"
+
+    approved = _json(_run(cli_runner, tmp_path, *_approve_args(SECOND, second["plan_hash"], "--admission-release-ref", release)))
+
+    assert approved["authorization_status"] == "AUTHORIZED"
+    missions = ContinuityStore(tmp_path).list_missions(PROJECT)
+    assert len(missions) == 2
+    store = ContinuityStore(tmp_path)
+    overlaps = {mission.mission_id: store.list_mission_overlaps(mission.mission_id) for mission in missions}
+    assert all(len(found) == 1 for found in overlaps.values())

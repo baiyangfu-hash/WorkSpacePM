@@ -12,6 +12,7 @@ from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 from auto_pm.contracts.mission import (
+    OPEN_MISSION_SOFT_LIMIT,
     AuthorityAudit,
     AuthorityEnvelope,
     InternalRoutingPolicy,
@@ -79,6 +80,7 @@ class MissionService:
         created_by: str,
         idempotency_key: str,
         root_work_id: str | None = None,
+        max_open_per_project: int = OPEN_MISSION_SOFT_LIMIT,
     ) -> Mission:
         instant = self._instant()
         now = instant.isoformat()
@@ -109,7 +111,9 @@ class MissionService:
             values.pop("authority"), ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
         try:
-            return self._store.create_mission(values, idempotency_key, now)
+            return self._store.create_mission(
+                values, idempotency_key, now, max_open_per_project=max_open_per_project
+            )
         except ContinuityStoreError as error:
             raise MissionServiceError(str(error)) from error
 
@@ -121,6 +125,7 @@ class MissionService:
         decision: DecisionPackageDTO,
         plan_hash: str,
         created_by: str,
+        max_open_per_project: int = OPEN_MISSION_SOFT_LIMIT,
     ) -> Mission:
         """Create a strong-authority Mission from one exact planning approval."""
 
@@ -234,6 +239,7 @@ class MissionService:
             authority=authority,
             created_by=created_by,
             idempotency_key=f"planning-mission-create:{draft.request_id}",
+            max_open_per_project=max_open_per_project,
         )
 
     def get(self, mission_id: str) -> Mission:

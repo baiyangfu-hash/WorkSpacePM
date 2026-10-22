@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 from auto_pm.core.continuity_query_service import ContinuityQueryService
+from auto_pm.core.mission_admission import admission_verdict
 from auto_pm.core.pm_closure_service import (
     ClosureCompletionState,
     PmClosureError,
@@ -68,11 +69,8 @@ _REASON_LIMIT = 200
 _LEASE_ENVIRONMENT = "AUTO_PM_EXECUTION_LEASE_TOKEN"
 _START_READY_REASON = "等待您确认开工；确认前不会创建或启动任何执行。"
 _ALREADY_VERIFIED_MESSAGE = "该需求已执行并验证，等待验收；请直接确认验收，不要重复执行。"
-_FINISHED_MISSION_STATES = frozenset(
-    {MissionState.ACCEPTED, MissionState.CLOSED, MissionState.CANCELLED}
-)
 _APPROVER_MISSING_REASON = "未配置批准人，不能批准；请先设置环境变量 AUTO_PM_COCKPIT_APPROVER。"
-_OPEN_TASK_REASON = "项目已有未终结的任务；请先验收或取消它，再批准新的范围卡。"
+_ADMISSION_RELEASE_HINT = "。放行请在命令行用 pm approve --admission-release-ref。"
 
 
 def _clip(text: str) -> str:
@@ -95,8 +93,11 @@ class _ProjectFacts:
     started_run_ids: frozenset[str]
 
 
-_PARKING_ACTIONS = ("PARK", "RESUME_PARKED", "PREEMPT")
-_CAPABILITY_UNSUPPORTED = "挂起、恢复挂起与插队：当前版本不支持（能力查询 runtime-capabilities.v1）；驾驶舱不提供这些操作，也不会假装挂起。"
+_EXPECTED_CAPABILITIES = {"PARK": "SUPPORTED", "RESUME_PARKED": "SUPPORTED", "PREEMPT": "UNSUPPORTED"}
+_CAPABILITY_DECLARED = (
+    "挂起与拿回：支持，只在命令行做（pm park / pm unpark / pm switch），拿回哪张只听用户的；"
+    "运行中插队：不支持（能力查询 runtime-capabilities.v2）。驾驶舱只显示四栏，不提供切换按钮。"
+)
 _CAPABILITY_UNVERIFIED = "挂起与插队的能力查询未能确认；为安全起见这些操作保持停用，驾驶舱不会假装挂起。"
 
 
@@ -179,12 +180,12 @@ class PmCockpitService:
             return _CAPABILITY_UNVERIFIED
         declared = {item.action.value: item.status for item in capabilities.actions}
         if (
-            capabilities.parking_supported
+            capabilities.parking_supported is not True
             or capabilities.preemption_supported
-            or declared != dict.fromkeys(_PARKING_ACTIONS, "UNSUPPORTED")
+            or declared != _EXPECTED_CAPABILITIES
         ):
             return _CAPABILITY_UNVERIFIED
-        return _CAPABILITY_UNSUPPORTED
+        return _CAPABILITY_DECLARED
 
     def evidence(self, project_id: str) -> PmCockpitEvidence:
         """Return bounded provenance for the evidence drawer, never execution credentials."""
@@ -492,12 +493,14 @@ class PmCockpitService:
                 f"{mapping.project_id}: 待批准范围卡无法安全读取；驾驶舱没有尝试修复或重建它。"
             )
             return ()
-        if not self._approver:
-            reason = _APPROVER_MISSING_REASON
-        elif any(item.state not in _FINISHED_MISSION_STATES for item in facts.missions):
-            reason = _OPEN_TASK_REASON
-        else:
-            reason = ""
+        def blocked_reason(scope_paths: tuple[str, ...]) -> str:
+            if not self._approver:
+                return _APPROVER_MISSING_REASON
+            # TD-071 card 3: past the soft limit or over an open card's paths, the button stays off and
+            # the reason says why; the user's word is given on the command line (pm approve --admission-release-ref).
+            verdict = admission_verdict(facts.missions, scope_paths)
+            return _clip(verdict.reason() + _ADMISSION_RELEASE_HINT) if verdict.needs_user_release else ""
+
         return tuple(
             PmCockpitPendingScopeCard(
                 project_id=mapping.project_id,
@@ -517,8 +520,8 @@ class PmCockpitService:
                 submitted_by=item.submitted_by,
                 submitted_at=item.submitted_at,
                 approver=self._approver,
-                can_approve=not reason,
-                approve_blocked_reason=reason,
+                can_approve=not blocked_reason(item.card.scope_paths),
+                approve_blocked_reason=blocked_reason(item.card.scope_paths),
             )
             for item in submitted
         )
@@ -762,10 +765,22 @@ class PmCockpitService:
 
     @staticmethod
     def _primary_mission(missions: tuple[Mission, ...]) -> Mission | None:
-        terminal = {MissionState.ACCEPTED, MissionState.CLOSED, MissionState.CANCELLED}
-        return next((mission for mission in missions if mission.state not in terminal), None) or (
-            missions[0] if missions else None
-        )
+        """The card in hand first, then one waiting for the user, then a parked one (TD-071), then the latest closed."""
+
+        for wanted in (
+            {MissionState.ACTIVE},
+            {
+                MissionState.ACCEPTANCE_PENDING,
+                MissionState.BLOCKED,
+                MissionState.AWAITING_APPROVAL,
+                MissionState.DRAFT,
+            },
+            {MissionState.PARKED},
+        ):
+            found = next((mission for mission in missions if mission.state in wanted), None)
+            if found is not None:
+                return found
+        return missions[0] if missions else None
 
     @staticmethod
     def _primary_work(mission: Mission | None, works: tuple[WorkItem, ...]) -> WorkItem | None:

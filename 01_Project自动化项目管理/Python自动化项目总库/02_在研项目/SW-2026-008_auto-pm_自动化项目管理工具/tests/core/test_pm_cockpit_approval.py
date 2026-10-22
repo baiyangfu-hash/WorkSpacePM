@@ -130,8 +130,9 @@ def test_p04_an_unfinished_task_blocks_approval_until_it_ends(tmp_path: Path) ->
 
     blocked = _service(env).snapshot().pending_cards
     assert [(c.request_id, c.can_approve) for c in blocked] == [("REQ-U09C-B", False)]
-    assert "项目已有未终结的任务" in blocked[0].approve_blocked_reason
-    assert "MISSION-" not in blocked[0].approve_blocked_reason
+    # TD-071 card 3: the second card collides with the open one; the cockpit names it and points at the user's release
+    reason = blocked[0].approve_blocked_reason
+    assert "要改同一批文件" in reason and first.mission_id in reason and "pm approve --admission-release-ref" in reason
 
     _cancel(env, first.mission_id, "u09c-p04-cancel")
     freed = _service(env).snapshot().pending_cards
@@ -253,7 +254,7 @@ def test_p12_an_unfinished_task_refuses_the_approval_before_any_write(tmp_path: 
     _service(env).approve_scope("REQ-U09C-A", first_hash)
     before = _writes(env)
 
-    with pytest.raises(PmCockpitError, match="未终结的任务"):
+    with pytest.raises(PmCockpitError, match="要改同一批文件"):
         _service(env).approve_scope("REQ-U09C-B", second_hash)
 
     assert _writes(env) == before

@@ -734,6 +734,11 @@ def inbox_reject(
     help="非模型自签的 user-confirmation 证据引用",
 )
 @click.option("--owner", default="PM Facade", show_default=True, help="内部 Work owner")
+@click.option(
+    "--admission-release-ref",
+    default="",
+    help="项目开着的卡已满 8 张，或新卡和开着的卡要改同一批文件时，用户放行原话的位置",
+)
 @_classification_options
 @click.pass_context
 def approve_pm(
@@ -754,6 +759,7 @@ def approve_pm(
     approver: str,
     approval_evidence_ref: str,
     owner: str,
+    admission_release_ref: str,
     kind: str | None,
     change_action: str | None,
     domain: str,
@@ -817,6 +823,7 @@ def approve_pm(
                 expected_plan_hash=plan_hash,
                 approver=approver,
                 approval_evidence_ref=approval_evidence_ref,
+                admission_release_ref=admission_release_ref,
             )
             approved_card = short_facade.recover_planning_scope_card(result.mission_id)
             approved_work = short_facade.create_planning_work(approved_card)
@@ -872,8 +879,12 @@ def approve_pm(
         classification=classification,
         intake_item_id=intake_item_id,
     )
-    _approve_planning_change(ctx, card, approver)
     facade = _facade(ctx)
+    try:
+        facade.admission_check_for_card(card, admission_release_ref)
+    except PmFacadeError as error:
+        raise click.ClickException(str(error)) from error
+    _approve_planning_change(ctx, card, approver)
     try:
         facade.approve_planning_scope_card(
             card,
@@ -881,7 +892,9 @@ def approve_pm(
             approver=approver,
             approval_evidence_ref=approval_evidence_ref,
         )
-        facade.materialize_planning_mission(card, created_by="PM Facade")
+        facade.materialize_planning_mission(
+            card, created_by="PM Facade", admission_release_ref=admission_release_ref
+        )
         work = facade.create_planning_work(card, owner=owner)
     except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
@@ -1086,6 +1099,7 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
         click.echo(
             f"挂起: {'支持' if query.capabilities.parking_supported else '不支持'} | "
             f"插队: {'支持' if query.capabilities.preemption_supported else '不支持'}"
+            + ("（挂起/拿回用 pm park / pm unpark / pm switch，只听用户的）" if query.capabilities.parking_supported else "")
         )
         if query.requested_action is not None:
             asked = query.requested_action

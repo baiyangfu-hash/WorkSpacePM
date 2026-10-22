@@ -13,7 +13,13 @@ from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryService
 
 from auto_pm.contracts.continuity import WorkKind
-from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
+from auto_pm.contracts.mission import (
+    OPEN_MISSION_SOFT_LIMIT,
+    AuthorityAudit,
+    AuthorityEnvelope,
+    Mission,
+    MissionState,
+)
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 
 NOW = datetime(2026, 9, 10, 3, 0, tzinfo=UTC)
@@ -90,7 +96,9 @@ def _work(root: Path) -> None:
     )
 
 
-def test_create_is_idempotent_and_rejects_another_open_mission(tmp_path: Path) -> None:
+def test_create_is_idempotent_and_admits_open_missions_up_to_the_soft_limit(tmp_path: Path) -> None:
+    """TD-071 card 3: a project may hold up to eight open cards; the ninth needs the user's release (a higher limit)."""
+
     service = _service(tmp_path)
     _create(service)
 
@@ -106,8 +114,22 @@ def test_create_is_idempotent_and_rejects_another_open_mission(tmp_path: Path) -
     )
 
     assert duplicate.mission_id == "MISSION-SW008-A1"
-    with pytest.raises(MissionServiceError, match="未终结 Mission"):
-        _create(service, "MISSION-SW008-SECOND")
+    for number in range(2, OPEN_MISSION_SOFT_LIMIT + 1):
+        _create(service, f"MISSION-SW008-OPEN{number}")
+    with pytest.raises(MissionServiceError, match=f"已达上限 {OPEN_MISSION_SOFT_LIMIT} 张"):
+        _create(service, "MISSION-SW008-NINTH")
+    ninth = service.create(
+        mission_id="MISSION-SW008-NINTH",
+        subject_project_id="SW-2026-008",
+        title="Released by the user",
+        objective="Past the soft limit only with the user's word.",
+        acceptance_criteria=["The ninth card exists."],
+        authority=_authority(),
+        created_by="Codex PM",
+        idempotency_key="create-MISSION-SW008-NINTH",
+        max_open_per_project=OPEN_MISSION_SOFT_LIMIT + 1,
+    )
+    assert ninth.mission_id == "MISSION-SW008-NINTH"
 
 
 def test_create_can_bind_the_authorized_root_work_before_user_confirmation(tmp_path: Path) -> None:

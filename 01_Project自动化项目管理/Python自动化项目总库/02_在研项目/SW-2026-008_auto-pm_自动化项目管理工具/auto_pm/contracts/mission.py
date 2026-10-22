@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
-from typing import Literal, Self
+from typing import Final, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -39,6 +39,12 @@ class EscalationTrigger(StrEnum):
 
 _ALL_RESTRICTED_ACTIONS = frozenset(RestrictedAction)
 _REQUIRED_ESCALATIONS = frozenset(EscalationTrigger)
+
+
+# TD-071 decision 2: a project may hold this many open cards; the next one needs the user's word.
+OPEN_MISSION_SOFT_LIMIT: Final = 8
+# A card parked for longer than this is flagged on the board.
+PARKED_STALE_DAYS: Final = 7
 
 
 class MissionState(StrEnum):

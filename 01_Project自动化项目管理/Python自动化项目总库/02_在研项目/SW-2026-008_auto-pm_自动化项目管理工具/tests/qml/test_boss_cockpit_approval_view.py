@@ -125,7 +125,7 @@ def test_v02_a_blocked_card_disables_the_button_and_states_the_reason(
     open_task = _component(
         qml_engine,
         qapp,
-        _card(can_approve=False, approve_blocked_reason="项目已有未终结的任务；请先验收或取消它，再批准新的范围卡。"),
+        _card(can_approve=False, approve_blocked_reason="和开着的卡“A”（MISSION-A）要改同一批文件：src/a.py，要你一句话放行。放行请在命令行用 pm approve --admission-release-ref。"),
     )
     ready = _component(qml_engine, qapp, _card())
 
@@ -134,7 +134,7 @@ def test_v02_a_blocked_card_disables_the_button_and_states_the_reason(
     assert reason in _texts(blocked)
     assert "批准人：未配置" in _texts(blocked)
     assert _items_named(open_task, "approveScopeButton")[0].property("enabled") is False
-    assert "项目已有未终结的任务" in " ".join(_texts(open_task))
+    assert "要改同一批文件" in " ".join(_texts(open_task))
     assert _items_named(ready, "approveScopeButton")[0].property("enabled") is True
     assert _items_named(ready, "approveBlockedReason")[0].property("visible") is False
 

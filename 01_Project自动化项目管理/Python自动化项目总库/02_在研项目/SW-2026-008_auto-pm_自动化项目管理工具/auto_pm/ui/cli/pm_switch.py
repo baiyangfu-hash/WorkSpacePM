@@ -15,7 +15,7 @@ import click
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
-from auto_pm.contracts.mission import Mission, MissionBoard
+from auto_pm.contracts.mission import PARKED_STALE_DAYS, Mission, MissionBoard
 from auto_pm.core.mission_switch_service import (
     MissionSwitchError,
     MissionSwitchService,
@@ -27,8 +27,6 @@ from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePo
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.cli.continuity import _secret_from_environment
 from auto_pm.ui.cli.pm_handoff import _holder_pid
-
-PARKED_STALE_DAYS = 7
 
 
 def _service(ctx: click.Context, *, mutating: bool) -> MissionSwitchService:
@@ -116,6 +114,10 @@ def _unpark_payload(outcome: UnparkOutcome) -> dict[str, Any]:
             if behind
             else "本卡分支没有落后 main"
         ),
+        "overlap_note": [
+            f"和 {other} 改同一批文件（{'、'.join(paths)}），开干前先同步对方已合并的改动"
+            for other, paths in outcome.overlaps
+        ],
     }
 
 

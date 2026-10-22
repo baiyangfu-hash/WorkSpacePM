@@ -8360,6 +8360,72 @@ class ContinuityStore:
             aggregate_type="run",
         )
 
+    def record_mission_admission(
+        self,
+        *,
+        mission_id: str,
+        open_count: int,
+        over_limit: bool,
+        overlaps: tuple[tuple[str, tuple[str, ...]], ...],
+        release_ref: str,
+        idempotency_key: str,
+        now: str,
+    ) -> None:
+        """Record that the user released a new card past the open limit or over overlapping paths (TD-071 decisions 2, 3)."""
+
+        mission_id = self._validated_run_text(mission_id, label="mission_id")
+        release_ref = self._validated_run_text(release_ref, label="用户放行凭据")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        payload = {
+            "schema_version": "mission-admission-released.v1",
+            "mission_id": mission_id,
+            "open_count": open_count,
+            "over_limit": over_limit,
+            "overlaps": [
+                {"mission_id": other, "paths": list(paths)} for other, paths in overlaps
+            ],
+            "release_ref": release_ref,
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if (
+                    existing["event_type"] != "MISSION_ADMISSION_RELEASED"
+                    or self._validated_event_payload(existing, label="放行记录") != payload
+                ):
+                    raise ContinuityStoreError("idempotency_key 的放行记录语义不一致")
+                return
+            self._get_mission(conn, mission_id)
+            self._append_event(
+                conn,
+                mission_id,
+                "MISSION_ADMISSION_RELEASED",
+                payload,
+                idempotency_key,
+                now,
+                aggregate_type="mission",
+            )
+
+    def list_mission_overlaps(self, mission_id: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """Cards whose overlapping paths the user released together with this one, from either side."""
+
+        found: dict[str, set[str]] = {}
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM events WHERE event_type='MISSION_ADMISSION_RELEASED' ORDER BY rowid"
+            ).fetchall()
+        for row in rows:
+            payload = json.loads(str(row["payload_json"]))
+            owner = str(payload.get("mission_id", ""))
+            for item in payload.get("overlaps", []):
+                other = str(item.get("mission_id", ""))
+                paths = {str(path) for path in item.get("paths", [])}
+                if owner == mission_id:
+                    found.setdefault(other, set()).update(paths)
+                elif other == mission_id:
+                    found.setdefault(owner, set()).update(paths)
+        return tuple((other, tuple(sorted(paths))) for other, paths in sorted(found.items()))
+
     def get_open_park_for_run(self, run_id: str) -> MissionPark | None:
         """The open park record of a Run, if its Mission is parked (or waiting with a checkpoint)."""
 

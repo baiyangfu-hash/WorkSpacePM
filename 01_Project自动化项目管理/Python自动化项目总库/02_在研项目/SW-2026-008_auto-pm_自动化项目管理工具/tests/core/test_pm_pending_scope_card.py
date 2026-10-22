@@ -148,12 +148,14 @@ class _Env:
         *,
         approver: str = APPROVER,
         evidence: str = EVIDENCE,
+        release: str = "",
     ) -> PlanningApprovalResult:
         return self.facade.approve_pending_planning_scope_card(
             request_id,
             expected_plan_hash=plan_hash,
             approver=approver,
             approval_evidence_ref=evidence,
+            admission_release_ref=release,
         )
 
     def chg_status(self, change_id: str, project: str = PROJECT_ID) -> str:

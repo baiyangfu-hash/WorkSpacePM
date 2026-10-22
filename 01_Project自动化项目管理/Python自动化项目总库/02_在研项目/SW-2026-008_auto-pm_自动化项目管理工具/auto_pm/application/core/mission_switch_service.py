@@ -62,6 +62,8 @@ class UnparkOutcome:
     wallet_path: str
     holder_process_recorded: bool
     behind_main: int | None
+    # Cards whose overlapping paths the user released together with this one (decision 3): sync first.
+    overlaps: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -199,6 +201,7 @@ class MissionSwitchService:
             )
             epoch = self._store.get_grant_epoch(run.run_id)
             back = self._store.get_mission(mission_id)
+            overlaps = self._store.list_mission_overlaps(mission_id)
         except (LeaseHandoverError, ContinuityStoreError) as error:
             raise MissionSwitchError(f"卡已拿回，但收尾失败: {error}") from error
         return UnparkOutcome(
@@ -211,6 +214,7 @@ class MissionSwitchService:
             wallet_path=wallet,
             holder_process_recorded=recorded,
             behind_main=self._behind_main(run),
+            overlaps=overlaps,
         )
 
     # ---------------------------------------------------------------- switch
