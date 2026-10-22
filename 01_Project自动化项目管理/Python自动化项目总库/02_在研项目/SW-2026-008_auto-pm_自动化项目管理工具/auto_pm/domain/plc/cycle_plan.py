@@ -1,8 +1,9 @@
 """按《项目周期规范》推里程碑计划日期（规范：``0100_PLC自动化/00_通用规范/项目周期规范.md``）。
 
 工期数字只从规范文档里的表格读，不写死在代码里：用户改了规范里的数，推出来的日期跟着变。
-计划日期是阶段完成日：需求 = 需求确认日；设计 = 需求 + 设计工期；编程 = 设计 + 衔接间隔 + 编程工期；
-其后各阶段首尾相接。工期 =（主类型周数 + 附加项周数）× 规模系数，换成天数向上取整；衔接间隔不乘系数。
+计划日期是阶段完成日：需求 = 需求确认日；设计 = 需求 + 设计工期；电气初稿确认 = 需求 + 纯电气设计周数 × 系数；
+编程 = 电气初稿确认 + 衔接间隔 + 编程工期（和机械设计并行，用户 2026-10-22 定）；仿真 = 编程和设计里较晚的那天 +
+仿真工期；其后首尾相接。工期 =（主类型周数 + 附加项周数）× 规模系数，换成天数向上取整；衔接间隔不乘系数。
 
 ``fill_milestone_file`` 只填计划日期为空的行（状态“不适用”的行不填），已有日期一律不改。
 """
@@ -21,7 +22,7 @@ from auto_pm.plc import milestones as ms
 SPEC_RELATIVE = Path("0100_PLC自动化") / "00_通用规范" / "项目周期规范.md"
 MAIN_TYPES = ("纯电气", "机电协作")
 ADDONS = ("上位机", "机器人")
-_GAP_ROW = "设计确认 → 开始编程"
+_GAP_ROW = "电气初稿确认 → 开始编程"
 _VERSION = re.compile(r"^\s*version\s*:\s*[\"']?([^\"'\s]+)", re.M)
 
 
@@ -125,14 +126,13 @@ def plan(spec: CycleSpec, start: _dt.date, main_type: str, addons: tuple[str, ..
         row = spec.weeks[stage]
         return _days((row[main_type] + sum(row[f"加{a}"] for a in addons)) * factor)
 
-    dates: dict[str, _dt.date] = {}
-    current = start + duration("需求")
-    dates["需求"] = current
-    for stage in ms.STAGES[1:]:
-        if stage == "编程":
-            current += _days(spec.gap_weeks)
-        current += duration(stage)
-        dates[stage] = current
+    dates: dict[str, _dt.date] = {"需求": start + duration("需求")}
+    dates["设计"] = dates["需求"] + duration("设计")
+    electrical_draft = dates["需求"] + _days(spec.weeks["设计"]["纯电气"] * factor)
+    dates["编程"] = electrical_draft + _days(spec.gap_weeks) + duration("编程")
+    dates["仿真"] = max(dates["编程"], dates["设计"]) + duration("仿真")
+    dates["现场"] = dates["仿真"] + duration("现场")
+    dates["收尾"] = dates["现场"] + duration("收尾")
     return dates
 
 

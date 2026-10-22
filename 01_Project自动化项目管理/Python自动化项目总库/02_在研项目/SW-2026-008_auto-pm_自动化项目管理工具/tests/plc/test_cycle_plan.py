@@ -37,7 +37,7 @@ version: "V9"
 
 | 衔接 | 间隔（周） | 说明 |
 |---|---|---|
-| 设计确认 → 开始编程 | 1 | |
+| 电气初稿确认 → 开始编程 | 1 | |
 """
 
 
@@ -49,19 +49,20 @@ def spec_file(tmp_path: Path, text: str = MINI_SPEC) -> cp.CycleSpec:
 
 def test_c01_the_repository_spec_reproduces_its_own_dj009_example() -> None:
     spec = cp.read_spec(str(SPEC))
-    assert spec.version == "V0.1" and spec.scales == {"单机": 1.0, "小线": 1.5, "整线": 2.5}
+    assert spec.version == "V0.2" and spec.scales == {"单机": 1.0, "小线": 1.5, "整线": 2.5}
     dates = cp.plan(spec, D, "机电协作", (), "单机")
     assert {k: v.isoformat() for k, v in dates.items()} == {
-        "需求": "2026-10-10", "设计": "2026-11-07", "编程": "2026-12-05",
-        "仿真": "2026-12-19", "现场": "2027-01-16", "收尾": "2027-01-30"}
+        "需求": "2026-10-10", "设计": "2026-11-07", "编程": "2026-11-14",
+        "仿真": "2026-11-28", "现场": "2026-12-26", "收尾": "2027-01-09"}
 
 
 def test_c02_addons_and_scale_multiply_stage_weeks_but_not_the_gap(tmp_path: Path) -> None:
     spec = spec_file(tmp_path)
     dates = cp.plan(spec, D, "纯电气", ("上位机", "机器人"), "小线")
-    # 设计 (1+1+2)*2=8 周；编程 间隔 1 周 + (2+1+2)*2=10 周；仿真 (1+0.5+1)*2=5 周；现场 (4+0.5+1)*2=11 周；收尾 4 周
+    # 设计 (1+1+2)*2=8 周；电气初稿 1*2=2 周；编程 初稿 + 间隔 1 周 + (2+1+2)*2=10 周 = 13 周；
+    # 仿真 从编程和设计较晚者起 (1+0.5+1)*2=5 周；现场 (4+0.5+1)*2=11 周；收尾 4 周
     assert dates["设计"] == D + dt.timedelta(weeks=8)
-    assert dates["编程"] == dates["设计"] + dt.timedelta(weeks=11)
+    assert dates["编程"] == D + dt.timedelta(weeks=13)
     assert dates["仿真"] == dates["编程"] + dt.timedelta(weeks=5)
     assert dates["现场"] == dates["仿真"] + dt.timedelta(weeks=11)
     assert dates["收尾"] == dates["现场"] + dt.timedelta(weeks=4)
@@ -82,7 +83,7 @@ def test_c04_changing_a_number_in_the_spec_changes_the_dates(tmp_path: Path) -> 
 @pytest.mark.parametrize(("old", "new", "message"), [
     ("| 仿真 | 1 | 2 | 0.5 | 1 | |\n", "", "缺阶段 仿真"),
     ("| 编程 | 2 |", "| 编程 | 两 |", "不是数字"),
-    ("| 设计确认 → 开始编程 | 1 | |\n", "", "设计确认 → 开始编程"),
+    ("| 电气初稿确认 → 开始编程 | 1 | |\n", "", "电气初稿确认 → 开始编程"),
     ("| 规模 | 判据 | 系数 |", "| 级别 | 判据 | 系数 |", "规模表"),
     ("| 加机器人 |", "| 机器人 |", "缺列"),
 ])
@@ -112,8 +113,8 @@ def test_c07_fill_only_touches_empty_planned_dates_and_keeps_not_applicable(tmp_
     cp.fill_milestone_file(str(path), dates, "按规范推算", write=True)
     table = ms.read_milestones(str(path))
     by_stage = {r.stage: r for r in table.rows}
-    assert by_stage["编程"].planned == "2026-12-05" and by_stage["编程"].note == "按规范推算"
-    assert by_stage["收尾"].planned == "2027-01-30"
+    assert by_stage["编程"].planned == "2026-11-14" and by_stage["编程"].note == "按规范推算"
+    assert by_stage["收尾"].planned == "2027-01-09"
     assert by_stage["设计"].planned == "2026-10-20"  # existing date untouched
     assert by_stage["现场"].planned == "" and by_stage["现场"].status == "不适用"
     assert by_stage["现场"].note == "纯测试套件"
@@ -156,9 +157,18 @@ def test_c09_cli_previews_by_default_writes_with_flag_and_rejects_bad_dates(tmp_
     assert "| 仿真 | |" in path.read_text(encoding="utf-8")
     code, output = invoke(tmp_path, *base, "--start", "2026-10-10", "--write")
     assert code == 0 and "已写入 1 个" in output
-    assert "| 仿真 | 2026-12-19 |" in path.read_text(encoding="utf-8")
+    assert "| 仿真 | 2026-11-28 |" in path.read_text(encoding="utf-8")
     assert "V9" in path.read_text(encoding="utf-8")
 
     for bad in ("20261010", "2026-W41-6", "2026-13-01"):
         assert invoke(tmp_path, *base, "--start", bad)[0] == 2
     assert invoke(tmp_path, *base[:4], "--scale", "巨线", "--start", "2026-10-10")[0] == 1
+
+
+def test_c10_programming_runs_parallel_to_design_and_simulation_waits_for_both(tmp_path: Path) -> None:
+    # 编程从电气初稿（纯电气设计 1 周）+ 间隔 1 周开始、3 周后完成，共 5 周；设计拉长到 8 周时仿真要等设计。
+    spec = spec_file(tmp_path, MINI_SPEC.replace("| 设计 | 1 | 4 |", "| 设计 | 1 | 8 |"))
+    dates = cp.plan(spec, D, "机电协作", (), "单机")
+    assert dates["编程"] == D + dt.timedelta(weeks=5)
+    assert dates["设计"] == D + dt.timedelta(weeks=8)
+    assert dates["仿真"] == dates["设计"] + dt.timedelta(weeks=2)
