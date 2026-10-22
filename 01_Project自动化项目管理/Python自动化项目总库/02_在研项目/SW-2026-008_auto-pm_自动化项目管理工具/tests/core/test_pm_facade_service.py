@@ -50,12 +50,14 @@ from auto_pm.contracts.pm_facade import (
 from auto_pm.domain.change.decision_service import DecisionError
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.intake_store import IntakeStore
+from tests.plan_checklist_support import full_checklist
 
 # Plans must declare the exact files they will change (改动声明不得为空).
 _EXAMPLE_GRANT = PlanningExecutionGrant(
     adapter=ExecutionAdapterKind.MANUAL,
     approved_model="manual",
     declared_dirty_paths=("auto_pm/example.py",),
+    plan_checklist=full_checklist(),
 )
 
 
@@ -110,6 +112,7 @@ def _audit_card(facade: PlanningFacade, item: IntakeItem, **options: Any) -> Pla
         "execution_grant": PlanningExecutionGrant(
             adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved",
             declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(original="Audit failure"),
         ),
         "classification": item.classification,
         "intake_item_id": item.item_id,
@@ -161,6 +164,7 @@ def test_audit_f01_invalid_contract_never_consumes(
         "execution_grant": PlanningExecutionGrant(
             adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved",
             declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(original="Audit failure"),
         ),
         "classification": item.classification,
         "intake_item_id": item.item_id,
@@ -781,6 +785,7 @@ def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
         approved_model="gpt-approved",
         required_worktree_mode=WorktreeMode.ISOLATED,
         declared_dirty_paths=("auto_pm/example.py",),
+        plan_checklist=full_checklist(),
     )
     card = facade.create_planning_scope_card(
         _planning_intent(),
@@ -1557,6 +1562,7 @@ def test_approved_planning_card_can_be_recovered_from_persisted_truth(tmp_path: 
             adapter=ExecutionAdapterKind.CODEX,
             approved_model="gpt-5.6-sol",
             declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(),
         ),
     )
     for state in ("submitted", "under_review", "approved"):
@@ -1776,6 +1782,7 @@ def _approved_run_card(root: Path) -> tuple[PmFacadeService, PlanningScopeCard]:
         adapter=ExecutionAdapterKind.CODEX,
         approved_model="agent-a",
         declared_dirty_paths=("auto_pm/example.py",),
+        plan_checklist=full_checklist(),
     )
     card = facade.create_planning_scope_card(
         _planning_intent(),
@@ -2035,6 +2042,7 @@ def test_rehearsal_c11_f08_preview_is_physically_read_only_under_delete_journal(
         execution_grant=PlanningExecutionGrant(
             adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved",
             declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(original="Audit failure"),
         ),
         classification=item.classification, intake_item_id=item.item_id,
     )
@@ -2046,6 +2054,7 @@ def test_rehearsal_c11_f08_preview_is_physically_read_only_under_delete_journal(
         execution_grant=PlanningExecutionGrant(
             adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved",
             declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(original="Audit failure"),
         ),
         classification=item.classification, intake_item_id=item.item_id,
     )
