@@ -76,6 +76,11 @@ class ReconcileDiff:
 _CHANGE_NUMBER_RE = re.compile(r"CHG-[A-Z]+-\d{4}-\d{3}")
 
 
+def _plain_status(text: str) -> str:
+    """去掉状态文案前的图标再比：旧格式台帐写“已关闭”，标准台帐写“✅已关闭”。"""
+    return re.sub(r"^[^\w]+", "", text.strip())
+
+
 class LedgerReconciler:
     """台账对账器（CHG-108 缺陷 1 修复）
 
@@ -142,7 +147,7 @@ class LedgerReconciler:
             cr = chg_meta[cn]
             expected = LEDGER_STATUS_MAP.get(cr.status, "")
             actual = ledger_status_map.get(cn, "")
-            if expected and actual and expected != actual:
+            if expected and actual and _plain_status(expected) != _plain_status(actual):
                 diff.status_mismatches.append((cn, expected, actual))
 
         log.info(
@@ -271,6 +276,28 @@ class LedgerReconciler:
             return set()
         return set(_CHANGE_NUMBER_RE.findall(content))
 
+    @staticmethod
+    def _parse_legacy_status_map(content: str, header: list[str]) -> dict[str, str]:
+        """旧格式表（如 DJ-2026-009“变更明细台账”）：按表头找“变更编号”“状态”栏。
+
+        只收认得出的台帐状态文案（去图标后与 ``LEDGER_STATUS_MAP`` 对得上）；写成
+        “approved”之类的手填文案照旧不比，免得把以前从不比对的台帐一下子判成不一致。
+        """
+        known = {_plain_status(text) for text in LEDGER_STATUS_MAP.values()}
+        number_col, status_col = header.index("变更编号"), header.index("状态")
+        result: dict[str, str] = {}
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if not stripped.startswith("|") or re.match(r"^\|[\s\-:|]+\|$", stripped):
+                continue
+            cells = LedgerUpdater._table_cells(stripped)
+            if len(cells) != len(header):
+                continue
+            match = _CHANGE_NUMBER_RE.search(cells[number_col])
+            if match and _plain_status(cells[status_col]) in known:
+                result[match.group(0)] = cells[status_col]
+        return result
+
     def _parse_ledger_status_map(self, ledger_path: str) -> dict[str, str]:
         """从台账解析 {变更编号: 状态文案}
 
@@ -279,6 +306,9 @@ class LedgerReconciler:
         content = read_file(ledger_path)
         if not content:
             return {}
+        legacy = LedgerUpdater._legacy_table_header(content)
+        if legacy is not None:
+            return self._parse_legacy_status_map(content, legacy)
         result: dict[str, str] = {}
         in_index = False
         for line in content.split("\n"):

@@ -385,3 +385,60 @@ class TestLedgerReconcilerAutoFix:
         assert diff.is_clean is True
         assert legacy.exists()
         assert not canonical.exists()
+
+
+# DJ-2026-009 的旧格式台帐：没有“变更单索引”标题，编号在第 1 栏，状态不在最后一栏，行间不空行
+_DETAIL_LEDGER = """# 版本变更台帐 - DJ-2026-009
+
+## 1. 变更统计一览
+
+| 变更类型 | 累计数量 | 待处理 | 已验证/关闭 |
+|:---|:---:|:---:|:---:|
+| **CHG-PLC (控制逻辑)** | 1 | 0 | 1 |
+
+## 2. 变更明细台账 (引用模式)
+
+| 变更编号 | 变更标题 | 影响模块 | 关联版本 | 状态 | 责任人 | 验证日期 |
+|:---|:---|:---|:---:|:---:|:---:|:---:|
+| CHG-SCPT-2026-001 | 旧修复 | FB_3001 | V1.0.0 | 已关闭 | fubai | 2026-08-27 |
+"""
+
+
+class TestDetailLedgerFormat:
+    """change create / 对账认 DJ-2026-009 旧格式台帐（以前追加静默失败、状态永远不比）。"""
+
+    def _project(self, tmp_path: Path) -> Path:
+        project = _make_project(tmp_path)
+        _ledger_path(project).write_text(_DETAIL_LEDGER, encoding="utf-8")
+        _make_chg_file(project, "CHG-SCPT-2026-001", status="closed")
+        return project
+
+    def test_old_status_text_without_icon_is_clean(self, tmp_path: Path) -> None:
+        project = self._project(tmp_path)
+        assert LedgerReconciler().reconcile(str(project)).is_clean
+
+    def test_missing_row_is_added_in_the_tables_own_columns(self, tmp_path: Path) -> None:
+        project = self._project(tmp_path)
+        _make_chg_file(project, "CHG-SCPT-2026-002", status="approved", applicant="baiyang")
+        diff = LedgerReconciler().reconcile(str(project))
+        assert diff.missing_in_ledger == ["CHG-SCPT-2026-002"]
+
+        LedgerReconciler().auto_fix(str(project), diff)
+
+        content = _ledger_path(project).read_text(encoding="utf-8")
+        assert "| CHG-SCPT-2026-002 | 测试变更背景 |  |  | 🔄已批准 | baiyang |  |\n| CHG-SCPT-2026-001 |" in content
+        assert LedgerReconciler().reconcile(str(project)).is_clean
+
+    def test_status_mismatch_is_detected_and_fixed_in_the_status_column(
+        self, tmp_path: Path
+    ) -> None:
+        project = self._project(tmp_path)
+        _make_chg_file(project, "CHG-SCPT-2026-001", status="implementing")
+        diff = LedgerReconciler().reconcile(str(project))
+        assert diff.status_mismatches == [("CHG-SCPT-2026-001", "🔄实施中", "已关闭")]
+
+        LedgerReconciler().auto_fix(str(project), diff)
+
+        content = _ledger_path(project).read_text(encoding="utf-8")
+        assert "| CHG-SCPT-2026-001 | 旧修复 | FB_3001 | V1.0.0 | 🔄实施中 | fubai | 2026-08-27 |" in content
+        assert LedgerReconciler().reconcile(str(project)).is_clean

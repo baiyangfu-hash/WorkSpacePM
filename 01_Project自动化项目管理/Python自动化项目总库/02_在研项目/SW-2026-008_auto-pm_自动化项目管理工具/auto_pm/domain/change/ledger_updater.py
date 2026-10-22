@@ -62,6 +62,24 @@ class LedgerUpdater:
         # 生成变更单链接
         link = f"[→ {change_number}](./01_变更单/CHG-{domain}/{change_number}.md)"
 
+        legacy = self._legacy_table_header(content)
+        if legacy is not None:
+            # 旧格式台帐（如 DJ-2026-009“变更明细台账”）：按它自己的表头列顺序填
+            updated = self._insert_row_to_legacy_table(
+                content,
+                self._legacy_row(
+                    legacy,
+                    {"number": change_number, "domain": domain, "applicant": applicant,
+                     "apply_date": apply_date, "desc": desc, "status": "🔄待处理"},
+                ),
+            )
+            if updated != content:
+                write_file(ledger_path, updated)
+                log.info("台帐已更新（旧格式表）: 追加 %s", change_number)
+            else:
+                log.warning("台帐更新失败: 未找到变更单索引表格 %s", ledger_path)
+            return
+
         # 构造新行（CHG-085：填入申请人/申请日期列，原 L47 留空导致台账字段缺失）
         # 列结构：| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |
         new_row = (
@@ -107,6 +125,7 @@ class LedgerUpdater:
 
         lines = content.split("\n")
         updated = False
+        status_part, date_part = self._status_parts(content)
         for i, line in enumerate(lines):
             if not self._matches_change_number_row(line, change_number):
                 continue
@@ -114,13 +133,12 @@ class LedgerUpdater:
             parts = line.split("|")
             # 列结构：| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |
             # split 后：['', ' 序号 ', ' 变更编号 ', ..., ' 状态 ', '']
-            # 状态列 = parts[-2]，完成日期列 = parts[-3]
+            # 标准表：状态列 = parts[-2]，完成日期列 = parts[-3]；旧格式表按表头定位
             if len(parts) >= 4:  # 至少有内容列（首尾空字符串 + 至少 2 列）
-                # 状态列是最后一个内容列 = parts[-2]（parts[-1] 是行尾空字符串）
-                parts[-2] = f" {status} "
-                # CHG-085：closed/archived 时回写完成日期列（parts[-3]）
-                if complete_date and status in ("✅已关闭", "✅已归档"):
-                    parts[-3] = f" {complete_date} "
+                parts[status_part] = f" {status} "
+                # CHG-085：closed/archived 时回写完成日期列
+                if complete_date and status in ("✅已关闭", "✅已归档") and date_part is not None:
+                    parts[date_part] = f" {complete_date} "
                     log.info("台帐完成日期已回写: %s → %s", change_number, complete_date)
                 lines[i] = "|".join(parts)
                 updated = True
@@ -148,7 +166,19 @@ class LedgerUpdater:
                 f"| {seq:03d} | {link} | {domain} | {applicant} | {apply_date} "
                 f"| {change_number} | {complete_date_str} | {status} |\n"
             )
-            updated_content = self._insert_row_to_index_table(content, new_row)
+            legacy = self._legacy_table_header(content)
+            if legacy is not None:
+                updated_content = self._insert_row_to_legacy_table(
+                    content,
+                    self._legacy_row(
+                        legacy,
+                        {"number": change_number, "domain": domain, "applicant": applicant,
+                         "apply_date": apply_date, "desc": change_number,
+                         "complete_date": complete_date_str, "status": status},
+                    ),
+                )
+            else:
+                updated_content = self._insert_row_to_index_table(content, new_row)
             if updated_content != content:
                 write_file(ledger_path, updated_content)
                 log.info(
@@ -170,9 +200,12 @@ class LedgerUpdater:
         if len(cells) < 2:
             return False
 
-        # 标准台账的变更编号在第 2 列；两列表格则以第 1 列为编号。
+        # 标准台账的变更编号在第 2 列；两列表格与旧格式表（DJ-2026-009“变更明细台账”）
+        # 以第 1 列为编号。标准表第 1 列是数字序号，不会误中。
         change_cell_index = 1 if len(cells) > 2 else 0
-        return cls._matches_change_number_cell(cells[change_cell_index], change_number)
+        return cls._matches_change_number_cell(
+            cells[change_cell_index], change_number
+        ) or cls._matches_change_number_cell(cells[0], change_number)
 
     @staticmethod
     def _matches_change_number_cell(cell: str, change_number: str) -> bool:
@@ -212,6 +245,69 @@ class LedgerUpdater:
 
         if removed:
             write_file(ledger_path, "\n".join(new_lines))
+
+    # 旧格式表表头 → 字段；没列出的栏（影响模块、关联版本等）留空
+    _LEGACY_COLUMNS: dict[str, str] = {
+        "序号": "seq",
+        "变更编号": "number",
+        "领域": "domain",
+        "申请人": "applicant",
+        "责任人": "applicant",
+        "申请日期": "apply_date",
+        "变更描述": "desc",
+        "变更标题": "desc",
+        "描述": "desc",
+        "完成日期": "complete_date",
+        "验证日期": "complete_date",
+        "状态": "status",
+    }
+
+    @staticmethod
+    def _table_cells(line: str) -> list[str]:
+        return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+    @classmethod
+    def _legacy_table_header(cls, content: str) -> list[str] | None:
+        """没有“变更单索引”标题时，返回第一张同时有“变更编号”“状态”栏的表头。"""
+        if "变更单索引" in content:
+            return None
+        lines = content.split("\n")
+        for i, line in enumerate(lines[:-1]):
+            stripped = line.strip()
+            if not stripped.startswith("|") or not re.match(r"^\|[\s\-:|]+\|$", lines[i + 1].strip()):
+                continue
+            header = [cell.strip("* ") for cell in cls._table_cells(stripped)]
+            if "变更编号" in header and "状态" in header:
+                return header
+        return None
+
+    @classmethod
+    def _legacy_row(cls, header: list[str], values: dict[str, str]) -> str:
+        cells = [values.get(cls._LEGACY_COLUMNS.get(name, ""), "") for name in header]
+        return "| " + " | ".join(cells) + " |"
+
+    @classmethod
+    def _insert_row_to_legacy_table(cls, content: str, new_row: str) -> str:
+        """旧格式表行间不空行：插在分隔行之后、紧贴已有行。"""
+        lines = content.split("\n")
+        for i, line in enumerate(lines[:-1]):
+            stripped = line.strip()
+            if not stripped.startswith("|") or not re.match(r"^\|[\s\-:|]+\|$", lines[i + 1].strip()):
+                continue
+            header = [cell.strip("* ") for cell in cls._table_cells(stripped)]
+            if "变更编号" in header and "状态" in header:
+                return "\n".join([*lines[: i + 2], new_row, *lines[i + 2 :]])
+        return content
+
+    @classmethod
+    def _status_parts(cls, content: str) -> tuple[int, int | None]:
+        """``line.split("|")`` 下的（状态栏, 完成日期栏）下标；标准表是最后两栏。"""
+        header = cls._legacy_table_header(content)
+        if header is None:
+            return -2, -3
+        status = header.index("状态") + 1
+        date_cols = [i for i, name in enumerate(header) if cls._LEGACY_COLUMNS.get(name) == "complete_date"]
+        return status, (date_cols[0] + 1 if date_cols else None)
 
     def _get_next_sequence(self, content: str) -> int:
         """获取变更单索引中的下一个序号"""

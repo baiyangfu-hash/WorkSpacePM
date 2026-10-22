@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from auto_pm.change.parser import ChgParser
+from auto_pm.infrastructure.business_change_gate import (
+    BusinessChangeError,
+    find_bc_ids,
+    validate_business_change_basis,
+)
 
 log = logging.getLogger(__name__)
 
@@ -760,6 +765,61 @@ def enforce_release_ledger_gate(workspace_root: Path) -> int:
     return 0
 
 
+def _single_production_binding(gov_root: Path, snapshot: StagedSnapshot) -> ProjectBinding:
+    """暂存生产代码必须恰好归属一个注册项目。"""
+    from auto_pm.core.project_service import ProjectService
+
+    bindings = _project_bindings(
+        gov_root,
+        list(ProjectService(str(gov_root)).list_projects()),
+    )
+    project_ids = _production_project_ids(snapshot, bindings)
+    if len(project_ids) != 1:
+        project_id_text = ", ".join(project_ids) or "无"
+        raise StagedSnapshotError(f"暂存生产代码归属项目不唯一: {project_id_text}")
+    matched_bindings = [
+        binding for binding in bindings if binding.project_id == project_ids[0]
+    ]
+    if len(matched_bindings) != 1:
+        raise StagedSnapshotError(f"项目 PID 映射不唯一: {project_ids[0]}")
+    return matched_bindings[0]
+
+
+def _enforce_business_change_basis(
+    cand_root: Path,
+    gov_root: Path,
+    snapshot: StagedSnapshot,
+    msg_content: str,
+    bc_ids: tuple[str, ...],
+) -> int:
+    """没写 CHG、写了 BC：按业务变更记录放行，发版与安全区仍要 CHG。"""
+    try:
+        binding = _single_production_binding(gov_root, snapshot)
+        validate_business_change_basis(
+            cand_root,
+            gov_root,
+            binding.project_id,
+            binding.relative_root,
+            snapshot.paths,
+            msg_content,
+            bc_ids,
+        )
+    except BusinessChangeError as exc:
+        print(f"❌ [auto-pm commit-msg] 物理拦截：业务变更依据不成立，已拒绝提交: {exc}")
+        return 1
+    except Exception as exc:
+        print(
+            "❌ [auto-pm commit-msg] 物理拦截：业务变更依据检查异常，"
+            f"为防止绕过门禁已拒绝提交: {exc}"
+        )
+        return 1
+    print(
+        f"✅ [auto-pm commit-msg] 生产代码与已批业务变更 {', '.join(bc_ids)} 绑定通过"
+        "（非发版、未碰安全区）！"
+    )
+    return 0
+
+
 def enforce_commit_msg(
     workspace_root: Path,
     commit_msg_file: Path,
@@ -768,7 +828,9 @@ def enforce_commit_msg(
 ) -> int:
     """commit-msg 阶段拦截检查：
     1. 若暂存区包含生产代码（.py, .scl 等），强制 Commit Message 必须注明关联单号；
-    2. 在同一 index 快照内校验 CHG、PID、项目台账及其合法执行态。
+    2. 在同一 index 快照内校验 CHG、PID、项目台账及其合法执行态；
+    3. 没写 CHG 时可改写本项目“已批”的业务变更编号（BC），发版与安全区除外，
+       见 ``business_change_gate``。
 
     ``staged_snapshot`` 由提交前预检调用方一次捕获后直接注入，确保
     pre-commit 与 commit-msg 对同一份不可变 index 证据作出判断。
@@ -808,6 +870,11 @@ def enforce_commit_msg(
         return 1
 
     if not chg_matches:
+        bc_ids = find_bc_ids(msg_content)
+        if bc_ids:
+            return _enforce_business_change_basis(
+                cand_root, gov_root, snapshot, msg_content, bc_ids
+            )
         print("=" * 70)
         print("❌ [auto-pm commit-msg] 物理拦截：检测到暂存区包含生产代码变更，但 Commit Message 未绑定变更单！")
         print("📄 涉及生产文件:")
@@ -817,6 +884,8 @@ def enforce_commit_msg(
             print(f"   ... (共 {len(prod_files)} 个文件)")
         print("\n👉 规程要求：生产代码提交必须显式注明合法变更单号，例如:")
         print("   feat(core): [CHG-SCPT-2026-170] 落地决策包与门禁护航机制")
+        print("   或写本项目已批的业务变更编号（发版、安全区改动除外），例如:")
+        print("   fix(plc): [BC-DJ-2026-009-2026_10_001] 进料超时 10 s 改 15 s")
         print("=" * 70)
         return 1
 
@@ -829,22 +898,7 @@ def enforce_commit_msg(
 
     chg_id = chg_matches[0]
     try:
-        from auto_pm.core.project_service import ProjectService
-
-        bindings = _project_bindings(
-            gov_root,
-            list(ProjectService(str(gov_root)).list_projects()),
-        )
-        project_ids = _production_project_ids(snapshot, bindings)
-        if len(project_ids) != 1:
-            project_id_text = ", ".join(project_ids) or "无"
-            raise StagedSnapshotError(f"暂存生产代码归属项目不唯一: {project_id_text}")
-        matched_bindings = [
-            binding for binding in bindings if binding.project_id == project_ids[0]
-        ]
-        if len(matched_bindings) != 1:
-            raise StagedSnapshotError(f"项目 PID 映射不唯一: {project_ids[0]}")
-        binding = matched_bindings[0]
+        binding = _single_production_binding(gov_root, snapshot)
 
         if cand_root.resolve() == gov_root.resolve():
             # 单根场景：校验暂存快照内的证据

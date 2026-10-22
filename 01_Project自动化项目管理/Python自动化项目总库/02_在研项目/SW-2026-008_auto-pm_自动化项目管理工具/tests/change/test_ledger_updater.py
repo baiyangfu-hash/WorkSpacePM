@@ -503,3 +503,60 @@ class TestLedgerUpdaterChg085:
                 assert cells[7] == "", f"完成日期列应为空，实际: {cells[7]}"
                 assert cells[8] == "🔄实施中", f"状态列应为 🔄实施中，实际: {cells[8]}"
                 break
+
+
+class TestDetailLedgerFormat:
+    """DJ-2026-009 旧格式台帐：change create 以前在这里静默写不进去。"""
+
+    _LEDGER = (
+        "# 版本变更台帐\n\n"
+        "## 2. 变更明细台账 (引用模式)\n\n"
+        "| 变更编号 | 变更标题 | 影响模块 | 关联版本 | 状态 | 责任人 | 验证日期 |\n"
+        "|:---|:---|:---|:---:|:---:|:---:|:---:|\n"
+        "| CHG-PLC-2026-001 | 旧修复 | FB_3001 | V1.0.0 | 已关闭 | fubai | 2026-08-27 |\n"
+    )
+
+    def test_update_adds_a_row_in_its_own_columns_once(self, tmp_path: Path) -> None:
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(self._LEDGER, encoding="utf-8")
+
+        LedgerUpdater().update(str(ledger), "CHG-PLC-2026-002", "进料超时", applicant="baiyang")
+        LedgerUpdater().update(str(ledger), "CHG-PLC-2026-002", "重复", applicant="baiyang")
+
+        lines = ledger.read_text(encoding="utf-8").split("\n")
+        assert lines[6] == "| CHG-PLC-2026-002 | 进料超时 |  |  | 🔄待处理 | baiyang |  |"
+        assert lines[7].startswith("| CHG-PLC-2026-001 |")
+        assert sum("CHG-PLC-2026-002" in line for line in lines) == 1
+
+    def test_update_status_writes_status_and_check_date_columns(self, tmp_path: Path) -> None:
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(self._LEDGER, encoding="utf-8")
+
+        LedgerUpdater().update_status(
+            str(ledger), "CHG-PLC-2026-001", "✅已归档", complete_date="2026-10-22"
+        )
+
+        content = ledger.read_text(encoding="utf-8")
+        assert "| CHG-PLC-2026-001 | 旧修复 | FB_3001 | V1.0.0 | ✅已归档 | fubai | 2026-10-22 |" in content
+
+    def test_update_status_self_heal_uses_its_own_columns(self, tmp_path: Path) -> None:
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(self._LEDGER, encoding="utf-8")
+
+        LedgerUpdater().update_status(str(ledger), "CHG-ELEC-2026-001", "🔄已批准")
+
+        content = ledger.read_text(encoding="utf-8")
+        assert "| CHG-ELEC-2026-001 | CHG-ELEC-2026-001 |  |  | 🔄已批准 |  |  |" in content
+
+    def test_statistics_table_is_never_mistaken_for_the_index(self, tmp_path: Path) -> None:
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(
+            "| 变更类型 | 累计数量 |\n|:---|:---:|\n| **CHG-PLC** | 1 |\n\n" + self._LEDGER,
+            encoding="utf-8",
+        )
+
+        LedgerUpdater().update(str(ledger), "CHG-PLC-2026-002", "进料超时")
+
+        lines = ledger.read_text(encoding="utf-8").split("\n")
+        assert lines[2] == "| **CHG-PLC** | 1 |"
+        assert lines[10].startswith("| CHG-PLC-2026-002 |")
