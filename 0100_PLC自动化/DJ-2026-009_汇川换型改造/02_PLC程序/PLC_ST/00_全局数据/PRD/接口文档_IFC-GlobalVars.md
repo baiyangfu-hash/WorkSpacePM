@@ -27,4 +27,4 @@ GlobalVars 的声明不在仓库里，导入 InoProShop 工程时按下表补（
 | `sMachineModuleID` | CARD-DJ-2026-009-003 | **VAR_GLOBAL RETAIN（断电保持）** |
 | `stModuleIdHmi` | CARD-DJ-2026-009-003 | 建议 RETAIN（时间参数要保持） |
 | `bExtAllowInfeedAct`、`bExtAllowOutfeedAct`、`bExtUpstreamDone`、`bExtDownstreamDone`、`bExtComAlarm`、`wExtErrorCode` | CARD-DJ-2026-009-003 | FB_3001 输出 |
-
+| `fbSafety`（类型 `FB_1030_SafetyManager`，共享库） | CARD-DJ-2026-009-004 | 安全区；安全 IO 和入参数组不放 GlobalVars，见 `00_全局数据/GVL_SafetyIO.st`（导入时新建 GVL `GVL_SafetyIO` 粘入） |

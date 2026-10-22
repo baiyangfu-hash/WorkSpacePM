@@ -16,9 +16,9 @@ domain: plc
 
 | 变量名 | 类型 | 方向 | 说明 |
 |:---|:---:|:---:|:---|
-| `i_bEnable` | BOOL | VAR_INPUT | 功能块总使能 |
+| `i_bEnable` | BOOL | VAR_INPUT | 功能块总使能 (OB1 接 FB_1030 运行许可 q_bSafeToRun, CARD-DJ-2026-009-004) |
 | `i_bAutoMode` | BOOL | VAR_INPUT | 自动运行模式 |
-| `i_bResetCmd` | BOOL | VAR_INPUT | 故障复位指令 |
+| `i_bResetCmd` | BOOL | VAR_INPUT | 故障复位指令 (OB1: FB_1030 运行复位脉冲, 或运行许可中的普通复位, CARD-DJ-2026-009-004) |
 | `i_bMachineReadyIn` | BOOL | VAR_INPUT | 本机进料就绪 (工位空闲) |
 | `i_bMachineReadyOut` | BOOL | VAR_INPUT | 本机出料就绪 (加工完成) |
 | `i_bInfeedArrivedSens` | BOOL | VAR_INPUT | 本机进料到位光电传感器 |
@@ -50,8 +50,12 @@ V1.2.0（CARD-DJ-2026-009-003）：删除 `i_sSendModuleID`（OB1 从来没接�
 | `DEF_LEAVE_MS` | 2000 | 产品离开判定时间设定为 0 时按 2000 ms |
 | `DEF_IDLE_MS` | 20000 | 无产品自动清本机 ID 时间设定为 0 时按 20000 ms（暂定） |
 | `STEP_ID_INVOLVED` | 20 | 第 20 步起中止的握手要人工核对 ID |
+| `HB_HALF_MS` | 4000 | 心跳半周期（4 s 亮 / 4 s 灭），安全区常量（CARD-DJ-2026-009-004，原为普通变量 `s_dHeartbeatPulse`） |
+| `HB_TIMEOUT_MS` | 12000 | 对方心跳超时阈值，安全区常量（CARD-DJ-2026-009-004，原为普通变量 `s_dHbTimeoutMs`） |
 
-时间参数用 DINT 毫秒写，但共享库 `FB_TON` 目前按扫描次数计数，实际时长要等共享库定时器修复卡后才准。
+时间参数用 DINT 毫秒写；共享库 `FB_TON` V3.0.0 起按真实毫秒计时（分支 `claude/syslib-timer-ms`）。
+
+V1.3.0（CARD-DJ-2026-009-004 预做，安全区待签字）：OB1 把 `i_bEnable` 从急停按钮点改接 `FB_1030_SafetyManager.q_bSafeToRun`（开安全门时按钮点仍为 1，原来握手照走）；`i_bResetCmd` 改为 `q_bRunResetPulse OR (q_bSafeToRun AND 原复位来源)`，安全停机后不再一按就清；心跳两个时间改为 `VAR CONSTANT`（规范 0.4、9）。
 
 ## 4. 调用的函数
 

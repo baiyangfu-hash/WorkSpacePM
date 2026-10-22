@@ -5,9 +5,9 @@ FUNCTION_BLOCK FB_3001_ExternalInteraction
  * 遵循规范: STD-820 (8步握手 + 4s ON / 4s OFF 心跳)
  * ============================================================================== *)
 VAR_INPUT
-    i_bEnable           : BOOL;         // 功能块总使能
+    i_bEnable           : BOOL;         // 功能块总使能 (OB1 接 FB_1030 运行许可 q_bSafeToRun, CARD-DJ-2026-009-004)
     i_bAutoMode         : BOOL;         // 自动运行模式
-    i_bResetCmd         : BOOL;         // 故障复位指令
+    i_bResetCmd         : BOOL;         // 故障复位指令 (OB1: FB_1030 运行复位脉冲, 或运行许可中的普通复位, CARD-DJ-2026-009-004)
     i_bMachineReadyIn   : BOOL;         // 本机进料就绪 (工位空闲)
     i_bMachineReadyOut  : BOOL;         // 本机出料就绪 (加工完成)
     i_bInfeedArrivedSens: BOOL;         // 本机进料到位光电传感器
@@ -31,8 +31,7 @@ END_VAR
 
 VAR
     // --- STD-820 心跳: 4s ON / 4s OFF 方波 + 12s 超时监视 (LSP-903: FB_TON + DINT 毫秒) ---
-    s_dHeartbeatPulse   : DINT := 4000;    // 心跳半周期 4000ms
-    s_dHbTimeoutMs      : DINT := 12000;   // 心跳超时阈值 12000ms
+    // 半周期与超时阈值已改为 VAR CONSTANT HB_HALF_MS / HB_TIMEOUT_MS (规范 0.4/9, CARD-DJ-2026-009-004)
     s_tHbToggle         : FB_TON;          // 心跳翻转定时器
     s_tUpTimeout        : FB_TON;          // 上游心跳超时定时器
     s_tDownTimeout      : FB_TON;          // 下游心跳超时定时器
@@ -78,6 +77,10 @@ VAR CONSTANT
     DEF_LEAVE_MS        : DINT := 2000;     // 产品离开判定时间设定为 0 时按 2000ms
     DEF_IDLE_MS         : DINT := 20000;    // 无产品自动清本机 ID 时间设定为 0 时按 20000ms (暂定)
     STEP_ID_INVOLVED    : INT  := 20;       // 第 20 步起中止的握手, ID 已交接一半, 要人工核对
+
+    // --- 心跳与断线判定时间 (安全区常量, HMI 不能改; 改值要签字. 规范 0.4/9, CARD-DJ-2026-009-004) ---
+    HB_HALF_MS          : DINT := 4000;     // 心跳半周期 4000ms (4s ON / 4s OFF)
+    HB_TIMEOUT_MS       : DINT := 12000;    // 心跳超时阈值 12000ms (12 s 内保持旧值, 超时判断线)
 END_VAR
 
 BEGIN
@@ -99,7 +102,7 @@ BEGIN
     q_bDownstreamDone := FALSE;
     t_bIdWait := FALSE;
 
-    // 时间参数: 设定为 0 (或负数) 时用默认值. 注意: 共享库 FB_TON 目前按扫描次数计数, 实际时长待共享库修复卡
+    // 时间参数: 设定为 0 (或负数) 时用默认值. 共享库 FB_TON V3.0.0 起按真实毫秒计时
     t_dLeaveMs := io_stIdHmi.dLeaveTimeMs;
     IF t_dLeaveMs <= 0 THEN
         t_dLeaveMs := DEF_LEAVE_MS;
@@ -220,7 +223,7 @@ BEGIN
     // 心跳翻转: FB_TON 自复位, 每到 4s 出一个单周期脉冲, 用脉冲翻转心跳电平, 输出 4s ON / 4s OFF 方波
     // (原来直接把定时器 Q 当心跳输出, 心跳只亮一个扫描周期, 对方按 ≤100ms 轮询基本采不到, 会误判本机断线)
     s_tHbToggle.IN := NOT s_tHbToggle.Q;
-    s_tHbToggle.PT := s_dHeartbeatPulse;
+    s_tHbToggle.PT := HB_HALF_MS;
     IF s_tHbToggle.Q THEN
         s_bHbState := NOT s_bHbState;
     END_IF;
@@ -235,7 +238,7 @@ BEGIN
     ELSE
         s_tUpTimeout.IN := TRUE;
     END_IF;
-    s_tUpTimeout.PT := s_dHbTimeoutMs;
+    s_tUpTimeout.PT := HB_TIMEOUT_MS;
     IF s_tUpTimeout.Q THEN
         io_stExternal.stUpstream.bUpstreamComFault := TRUE;
     END_IF;
@@ -248,7 +251,7 @@ BEGIN
     ELSE
         s_tDownTimeout.IN := TRUE;
     END_IF;
-    s_tDownTimeout.PT := s_dHbTimeoutMs;
+    s_tDownTimeout.PT := HB_TIMEOUT_MS;
     IF s_tDownTimeout.Q THEN
         io_stExternal.stDownstream.bDownstreamComFault := TRUE;
     END_IF;

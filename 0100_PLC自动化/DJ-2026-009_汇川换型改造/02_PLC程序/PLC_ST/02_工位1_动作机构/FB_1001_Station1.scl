@@ -5,6 +5,9 @@
 //   实现 DJ-2026-009 汇川换型改造 工位1 进料、定位、夹紧、加工与出料控制.
 //   严格遵循 LSP-905 语法白名单、DINT 毫秒定时器三段式、CASE 防死锁 ELSE 与结构体整块传递.
 //   遵循 STD-840 设备抽象, STD-820 8步握手.
+//   CARD-DJ-2026-009-004 (安全区, 预做): 运动只在共享库 FB_1030 给出运行许可
+//   (stControl.bSafeToRun) 时进行; 许可一丢当拍电机清零、步序冻结, 两次复位 +
+//   按启动后从断点接着走 (3Sun 断点续跑, 规范 2.5); 气缸按 IO 表逐阀定保持/缩回.
 // ============================================================================
 
 FUNCTION_BLOCK FB_1001_Station1
@@ -36,6 +39,7 @@ VAR_TEMP
     t_dProcessTime  : DINT;
     t_iIdx          : INT;              // 产品传感器数组下标
     t_bProduct      : BOOL;             // 本工位有产品
+    t_bSafeToRun    : BOOL;             // FB_1030 运行许可 (CARD-DJ-2026-009-004)
 END_VAR
 
 CONST
@@ -46,6 +50,12 @@ CONST
     STEP_PROCESS        : DINT := 20;   // 工艺加工
     STEP_RELEASE_UNLOAD : DINT := 30;   // 松开出料
     STEP_FAULT          : DINT := 99;   // 故障保护
+
+    // 停机 (急停/开门/断线/报警/离开自动) 时各气缸电磁阀怎么处理 (规范 2.3/8.3, CARD-DJ-2026-009-004)
+    // FALSE = 保持当前命令 (中封阀/真空/怕掉料的阀); TRUE = 发缩回命令. 按 IO 表"急停/断线时输出"列逐阀定,
+    // 阀型未定前一律按保持 (原来一刀切强制缩回, 第 93~96 行). 改值 = 改安全区, 要签字.
+    CYL1_RETRACT_ON_STOP : BOOL := FALSE; // 夹紧气缸
+    CYL2_RETRACT_ON_STOP : BOOL := FALSE; // 顶升气缸
 END_CONST
 
 BEGIN
@@ -59,6 +69,7 @@ BEGIN
     // 1. 解包临时变量
     // =========================================================================
     t_bAutoEnable  := io_stStation.stControl.bAutoEnable;
+    t_bSafeToRun   := io_stStation.stControl.bSafeToRun;
     t_bReset       := io_stStation.stControl.bReset;
     t_bInPos       := io_stStation.stSensors.bInPosSensor;
     t_bWorkPos     := io_stStation.stSensors.bWorkPosSensor;
@@ -87,13 +98,35 @@ BEGIN
     // =========================================================================
     // 3. 主工步状态机
     // =========================================================================
-    IF NOT t_bAutoEnable OR s_bAlarm THEN
-        // 非使能或报警模式下，安全保持，撤销所有设备命令
+    // @安全区 开始：运行许可丢失时冻结步序 (断点续跑), 停机时电机清零、气缸按阀定
+    IF NOT t_bSafeToRun THEN
+        // 安全许可丢失 (急停/开门/光栅/总线断) 或还没复位+启动: 同一扫描电机清零, 步序冻结不回零
+        // (3Sun 断点续跑, 规范 2.5; 用户 10-21). 许可回来 (两次复位 + 按启动) 后从冻结的步接着走.
+        // 冻结期间工步/加工计时停止, 续跑时该步的超时从头计.
         io_stStation.stActuators.stMotorFwd.i_bFwdReq := FALSE;
-        io_stStation.stActuators.stCyl1.stCmd.Extend := FALSE;
-        io_stStation.stActuators.stCyl1.stCmd.Retract := TRUE;
-        io_stStation.stActuators.stCyl2.stCmd.Extend := FALSE;
-        io_stStation.stActuators.stCyl2.stCmd.Retract := TRUE;
+        IF CYL1_RETRACT_ON_STOP THEN
+            io_stStation.stActuators.stCyl1.stCmd.Extend := FALSE;
+            io_stStation.stActuators.stCyl1.stCmd.Retract := TRUE;
+        END_IF;
+        IF CYL2_RETRACT_ON_STOP THEN
+            io_stStation.stActuators.stCyl2.stCmd.Extend := FALSE;
+            io_stStation.stActuators.stCyl2.stCmd.Retract := TRUE;
+        END_IF;
+        s_bRunning := FALSE;
+        s_bDone := FALSE;
+        s_tStepTimer.IN := FALSE;
+        s_tProcessTimer.IN := FALSE;
+    ELSIF NOT t_bAutoEnable OR s_bAlarm THEN
+        // 非使能或报警模式下，撤销电机命令; 气缸按阀定保持或缩回 (原来一刀切强制缩回, 规范 2.3 重审)
+        io_stStation.stActuators.stMotorFwd.i_bFwdReq := FALSE;
+        IF CYL1_RETRACT_ON_STOP THEN
+            io_stStation.stActuators.stCyl1.stCmd.Extend := FALSE;
+            io_stStation.stActuators.stCyl1.stCmd.Retract := TRUE;
+        END_IF;
+        IF CYL2_RETRACT_ON_STOP THEN
+            io_stStation.stActuators.stCyl2.stCmd.Extend := FALSE;
+            io_stStation.stActuators.stCyl2.stCmd.Retract := TRUE;
+        END_IF;
         // 握手准备信号由 FB_3001 根据 stStatus.bWaitMaterial / bReadyOut 发出, 本块不直接写
         // (直接写会绕过 FB_3001 的通讯故障联锁, CARD-DJ-2026-009-003)
 
@@ -227,6 +260,7 @@ BEGIN
                 s_tProcessTimer.IN := FALSE;
         END_CASE;
     END_IF;
+    // @安全区 结束
 
     // =========================================================================
     // 4. 统一末尾封包与回写
@@ -238,6 +272,12 @@ BEGIN
     io_stStation.stStatus.iAlarmCode   := s_iAlarmCode;
     io_stStation.stStatus.bWaitMaterial:= (s_iStep = STEP_WAIT_MATERIAL);
     io_stStation.stStatus.bProcessing  := (s_iStep = STEP_PROCESS);
+    io_stStation.stStatus.bFrozen      := (NOT t_bSafeToRun) AND (s_iStep <> STEP_IDLE) AND (s_iStep <> STEP_FAULT);
+    // 动作完全停止 (FB_1030 开门条件之一): 电机无请求且不在转, 两个气缸都在端点 (CARD-DJ-2026-009-004)
+    io_stStation.stStatus.bMotionStopped := (NOT io_stStation.stActuators.stMotorFwd.i_bFwdReq)
+                                          AND (NOT io_stStation.stActuators.stMotorFwd.q_bRunning)
+                                          AND (io_stStation.stActuators.stCyl1.stSts.IsExtended OR io_stStation.stActuators.stCyl1.stSts.IsRetracted)
+                                          AND (io_stStation.stActuators.stCyl2.stSts.IsExtended OR io_stStation.stActuators.stCyl2.stSts.IsRetracted);
     // 本工位有产品: 有无产品在工位块内部判断 (用户 2026-10-21), 接 FB_3001 i_bProductPresent
     t_bProduct := t_bInPos OR t_bWorkPos;
     FOR t_iIdx := 0 TO 7 DO
