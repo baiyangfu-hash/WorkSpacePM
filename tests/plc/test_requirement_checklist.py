@@ -1,4 +1,4 @@
-"""需求核对单（REQ-<项目号>-NNN）模板与样例的结构检查。
+"""需求核对单（REQ-<项目号>-<年>_<月>_<序号>）模板与样例的结构检查。
 
 驾驶舱代码冻结到 D09，这里先用测试内的小检查器把规则固定下来（设计稿：项目文件
 plans/需求核对单_设计稿_20261022.md）；D09 后做 R01/R02 时把 ``check_checklist`` 和 ``content_fingerprint``
@@ -14,7 +14,7 @@ import pytest
 _WS_ROOT = Path(__file__).resolve().parents[2]
 _TPL_DIR = _WS_ROOT / "0100_PLC自动化" / "00_通用规范" / "项目文档模板"
 TEMPLATE = _TPL_DIR / "11_需求核对单模板.md"
-SAMPLE = _TPL_DIR / "样例" / "REQ-DJ-2026-011-001_报警汇总与复位熄灭.md"
+SAMPLE = _TPL_DIR / "样例" / "REQ-DJ-2026-011-2026_10_000_报警汇总与复位熄灭.md"
 
 SECTIONS = (
     "## 1. 我理解的需求",
@@ -55,9 +55,12 @@ def check_checklist(text: str, *, template: bool = False) -> list[str]:
     """返回所有不合格项；空列表表示合格。``template`` 为真时允许占位符、不要求勾安全区。"""
 
     errors: list[str] = []
-    if not re.search(r"^# 需求核对单 REQ-(?:<项目号>|[A-Z]{2,3}-\d{4}-\d{3})-(?:<三位序号>|\d{3})：\S", text, re.MULTILINE):
-        errors.append("标题须为“# 需求核对单 REQ-<项目号>-<三位序号>：<主题>”")
-    for field in ("项目", "版本", "状态", "起草", "用户原话"):
+    title = re.search(
+        r"^# 需求核对单 REQ-(?:<项目号>|[A-Z]{2,3}-\d{4}-\d{3})-(<年>_<月>_<序号>|\d{4}_\d{2}_\d{3})：\S", text, re.MULTILINE
+    )
+    if title is None:
+        errors.append("标题须为“# 需求核对单 REQ-<项目号>-<年>_<月>_<序号>：<主题>”，序号三位、每月从 000 起")
+    for field in ("项目", "提出", "版本", "状态", "起草", "用户原话"):
         if not re.search(rf"^> {field}：\S", text, re.MULTILINE):
             errors.append(f"头部缺少“{field}”")
     if not template:
@@ -65,6 +68,13 @@ def check_checklist(text: str, *, template: bool = False) -> list[str]:
             errors.append("版本须写成 Vn（上一版：…）")
         if not re.search(r"^> 用户原话：「[^<」][^」]*」", text, re.MULTILINE):
             errors.append("用户原话须一字不改放在「」里")
+        raised = re.search(r"^> 提出：([^<\s　][^　]*)　(\d{4})-(\d{2})-\d{2} \d{2}:\d{2}", text, re.MULTILINE)
+        if raised is None:
+            errors.append("“提出”须写提出人和提出时间（YYYY-MM-DD HH:MM）")
+        elif title is not None:
+            year, month, _seq = title.group(1).split("_")
+            if (year, month) != (raised.group(2), raised.group(3)) or not 1 <= int(month) <= 12:
+                errors.append(f"编号的年月 {year}_{month} 与提出时间 {raised.group(2)}-{raised.group(3)} 不一致")
     positions = [text.find(h) for h in SECTIONS]
     for heading, pos in zip(SECTIONS, positions):
         if pos == -1:
@@ -91,6 +101,10 @@ def check_checklist(text: str, *, template: bool = False) -> list[str]:
     for row in questions:
         if not template and (len(row) < 3 or not row[1] or not row[2]):
             errors.append(f"问题 {row[0]} 须有问题和建议答案")
+
+    for row in _table_rows(_section(text, SECTIONS[8])):
+        if not template and (len(row) < 5 or not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", row[1]) or not row[2]):
+            errors.append(f"版本记录 {row[0] if row else ''} 须写时间（YYYY-MM-DD HH:MM）和谁提的")
 
     for row in _table_rows(_section(text, CONFIRM_SECTION)):
         if row[-1] != CONFIRM_PLACEHOLDER:
@@ -140,6 +154,11 @@ def test_sample_is_one_page(sample_text):
         ("| 确认人 / 时间 | （由驾驶舱写入） |", "| 确认人 / 时间 | baiyang 2026-10-22 |", "只能由驾驶舱写入"),
         ("## 6. 安全区影响", "## 6. 安全影响", "缺少一节"),
         ("> 版本：V1（上一版：无）", "> 版本：最新", "Vn"),
+        ("REQ-DJ-2026-011-2026_10_000", "REQ-DJ-2026-011-2026_11_000", "不一致"),
+        ("REQ-DJ-2026-011-2026_10_000", "REQ-DJ-2026-011-2026_10_1000", "序号三位"),
+        ("REQ-DJ-2026-011-2026_10_000", "REQ-DJ-2026-011-001", "序号三位"),
+        ("> 提出：baiyang（我方电气）　2026-10-22 09:00", "> 提出：2026-10-22", "提出人和提出时间"),
+        ("| V1 | 2026-10-22 09:00 | baiyang |", "| V1 | 2026-10-22 | |", "谁提的"),
     ],
 )
 def test_mutations_are_rejected(sample_text, old, new, expected):
