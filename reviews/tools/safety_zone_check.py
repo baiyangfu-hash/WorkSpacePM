@@ -23,7 +23,8 @@ PR 改了 ``io_points.csv`` 里涉及安全点的行。
 
 * PR 描述里单独一行 ``安全回路: 是`` / ``安全回路: 否``（GitHub 上的检查只看得到 PR 描述）。填“是”：不论改到哪些文件都要签字；
   填“否”但上面任一层认定碰了安全区：同样要签字，并在结论里点明“计划与改动不一致”。写了这一行但值不是 是/否、
-  或写了多行且不一致，直接判不通过（改 PR 描述后自动重跑）。没写这一行时只按改动判定。
+  或写了多行且不一致，直接判不通过（改 PR 描述后自动重跑）。没写这一行、也没改 PLC 目录时只按改动判定。
+* PR 改到 ``0100_PLC自动化`` 下任何文件而描述里没写这一行，直接判不通过（审计 80）；代码块里的示例行不算声明。
 * 批准记录（Decision 元数据 ``execution_grant.plan_checklist.safety_circuit``）只在本机控制根的账本里，CI 读不到；
   合并前由主执行在本机加 ``--decision DEC-…`` 跑一次：批准记录为“是”而 PR 描述没写“是”，判不通过（先改 PR 描述，
   让 GitHub 上的硬锁也接上）；批准记录的值同样按上面两条判定。
@@ -455,7 +456,15 @@ def touched_lines(repo: Path, base: str, head: str, path: str, zone: Zone, resul
 def plan_declaration(body: str | None) -> tuple[str | None, list[str]]:
     """PR 描述里的计划栏④：返回（“是”/“否”/None，问题清单）。写了多行且不一致、或值不是 是/否，都是问题。"""
 
-    values = [m.group(1).strip("`*_ ") for m in (PLAN_LINE.match(line) for line in (body or "").splitlines()) if m]
+    values: list[str] = []
+    fenced = False
+    for line in (body or "").splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced  # 代码块里的是示例，不算声明
+            continue
+        match = None if fenced else PLAN_LINE.match(line)
+        if match:
+            values.append(match.group(1).strip("`*_ "))
     if not values:
         return None, []
     bad = sorted({v for v in values if v not in PLAN_CHOICES})
@@ -722,6 +731,13 @@ def main(argv: list[str] | None = None) -> int:
                 source = f"批准记录 {args.decision}" if plan == recorded else "PR 描述"
         result = check(repo, base, head, comments, plan=plan, plan_source=source)
         result.violations += plan_problems + decision_problems
+        body_known = args.pr is not None or args.pr_body_file is not None
+        if body_known and declared is None and not plan_problems and not decision_problems:
+            plc = [f for f in changed_files(repo, base, head) if PurePosixPath(f).parts[:1] == (PLC_TOP,)]
+            if plc:
+                result.violations.append(
+                    f"本 PR 改到了 {PLC_TOP}（如 `{plc[0]}`），PR 描述里必须单独写一行“安全回路: 是”或“安全回路: 否”（照计划第④栏）"
+                )
         result.notes += decision_notes
         head_sha = git(repo, "rev-parse", f"{head}^{{commit}}").strip()
     except (GitError, DecisionReadError, ValueError, KeyError) as error:
