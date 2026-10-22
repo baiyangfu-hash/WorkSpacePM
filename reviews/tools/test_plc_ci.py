@@ -181,3 +181,35 @@ def test_broken_judge_is_a_failure_not_a_pass(pr, capsys, tmp_path: Path) -> Non
     out = capsys.readouterr().out
     assert code == 1
     assert "检查程序出错" in out and "坏裁判" in out
+
+
+# ── 防明细漏展开（审计 79）────────────────────────────────
+
+
+def _data(scl_status: str, scl: list, docs_status: str = "pass", docs: list | None = None) -> dict:
+    return {"check": {"items": [{"item": "SCL 代码规范", "status": scl_status, "message": ""},
+                                {"item": "文档一致性 [功能块 FB_X]", "status": docs_status, "message": ""}]},
+            "docs": docs or [], "scl": scl}
+
+
+def test_consistent_flags_scl_fail_without_details() -> None:
+    assert "SCL 代码规范" in plc_ci.consistent(_data("fail", []))
+    assert "SCL 代码规范" in plc_ci.consistent(_data("pass", [{"file": "a.scl", "rule": "R", "message": "m"}]))
+
+
+def test_consistent_flags_docs_fail_without_details() -> None:
+    assert "文档一致性" in plc_ci.consistent(_data("pass", [], "fail", [{"severity": "warn"}]))
+
+
+def test_consistent_accepts_matching_details() -> None:
+    assert plc_ci.consistent(_data("pass", [])) == ""
+    assert plc_ci.consistent(_data("fail", [{"file": "a.scl", "rule": "R", "message": "m"}], "fail",
+                                   [{"severity": "fail"}])) == ""
+
+
+def test_mismatch_between_verdict_and_details_fails_the_project(monkeypatch, sample: Path) -> None:
+    # plc check 判 SCL 失败，逐条明细却为空：不能因为没有可比对的键就判通过
+    monkeypatch.setattr(plc_ci, "run_checks", lambda judge, ws, rel: _data("fail", []))
+    out = plc_ci.evaluate(REPO, sample, sample, plc_ci.Target(D011, "测试"), compare=True)
+    assert out.verdict == "FAIL"
+    assert "不一致" in out.error
