@@ -13,8 +13,16 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
 
-def _card(mission_id: str, title: str, label: str, note: str = "", stale: bool = False) -> dict[str, object]:
-    return {"mission_id": mission_id, "title": title, "state_label": label, "note": note, "stale": stale}
+def _card(
+    mission_id: str, title: str, label: str, note: str = "", stale: bool = False
+) -> dict[str, object]:
+    return {
+        "mission_id": mission_id,
+        "title": title,
+        "state_label": label,
+        "note": note,
+        "stale": stale,
+    }
 
 
 def _board(**changes: object) -> dict[str, object]:
@@ -26,7 +34,15 @@ def _board(**changes: object) -> dict[str, object]:
         "open_limit": 8,
         "active": [_card("MISSION-B", "客户急改 IO 表", "系统执行")],
         "waiting": [_card("MISSION-C", "报警汇总", "等待开工确认")],
-        "parked": [_card("MISSION-A", "OB1 接线", "搁着（断点已记）", "为什么放下：客户急改 IO 表；断点：OB1 改完，差测试", stale=True)],
+        "parked": [
+            _card(
+                "MISSION-A",
+                "OB1 接线",
+                "搁着（断点已记）",
+                "为什么放下：客户急改 IO 表；断点：OB1 改完，差测试",
+                stale=True,
+            )
+        ],
         "closed": [],
         "closed_hidden": 0,
     }
@@ -41,21 +57,48 @@ def _component(engine: QQmlEngine, qapp: QApplication, board: dict[str, object])
     return item
 
 
-def test_the_board_shows_four_columns_with_counts_and_no_internal_id(qapp: QApplication, qml_engine: QQmlEngine) -> None:
+def test_the_board_shows_four_columns_with_counts_and_no_internal_id(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
     with _QtMessages() as warnings:
         item = _component(qml_engine, qapp, _board())
     texts = " ".join(_texts(item))
 
-    for expected in ("3Sun 打胶线 · 开着 3 / 8 张", "在干（1）", "等你（1）", "搁着（1）", "已关（0）", "客户急改 IO 表", "OB1 改完，差测试"):
+    for expected in (
+        "3Sun 打胶线 · 开着 3 / 8 张",
+        "在干（1）",
+        "等你（1）",
+        "搁着（1）",
+        "已关（0）",
+        "客户急改 IO 表",
+        "OB1 改完，差测试",
+    ):
         assert expected in texts
     assert "MISSION-" not in texts
     assert [message for message in warnings if "qml" in message.lower()] == []
 
 
-def test_a_stale_parked_card_is_drawn_apart_and_there_is_no_button(qapp: QApplication, qml_engine: QQmlEngine) -> None:
+def test_a_stale_parked_card_is_drawn_apart_and_there_is_no_button(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
     item = _component(qml_engine, qapp, _board())
-    assert len(_items_named(item, "boardCardStale")) == 1 and len(_items_named(item, "boardCard")) == 2
+    assert (
+        len(_items_named(item, "boardCardStale")) == 1 and len(_items_named(item, "boardCard")) == 2
+    )
     assert not any(child.metaObject().className().startswith("Button") for child in _all(item))
+    # nothing on the board reacts to a click or a tap, whatever element would carry it
+    source = (_QML / "components" / "MissionBoard.qml").read_text(encoding="utf-8")
+    for clickable in (
+        "onClicked",
+        "onPressed",
+        "onTapped",
+        "onReleased",
+        "MouseArea",
+        "TapHandler",
+        "Button",
+        "signal ",
+    ):
+        assert clickable not in source, clickable
 
 
 def test_the_limit_line_shows_only_at_the_limit(qapp: QApplication, qml_engine: QQmlEngine) -> None:
@@ -65,9 +108,24 @@ def test_the_limit_line_shows_only_at_the_limit(qapp: QApplication, qml_engine: 
     assert _items_named(at, "boardOverLimit")[0].isVisible() is True
 
 
-def test_the_cockpit_view_renders_one_board_per_project(qapp: QApplication, qml_engine: QQmlEngine) -> None:
+def test_the_cockpit_view_renders_one_board_per_project(
+    qapp: QApplication, qml_engine: QQmlEngine
+) -> None:
     view = cast(QQuickItem, _load(qml_engine, _QML / "views" / "BossCockpitView.qml"))
-    view.setProperty("boards", [_board(), _board(project_id="DJ-2026-005", project_name="老线改造", open_count=0, active=[], waiting=[], parked=[])])
+    view.setProperty(
+        "boards",
+        [
+            _board(),
+            _board(
+                project_id="DJ-2026-005",
+                project_name="老线改造",
+                open_count=0,
+                active=[],
+                waiting=[],
+                parked=[],
+            ),
+        ],
+    )
     qapp.processEvents()
     titles = [title.property("text") for title in _items_named(view, "boardTitle")]
     assert titles == ["3Sun 打胶线 · 开着 3 / 8 张", "老线改造 · 开着 0 / 8 张"]
