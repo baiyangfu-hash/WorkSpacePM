@@ -477,10 +477,38 @@ def test_p10_cli_reads_the_plan_from_the_pr_body_file(repo: Path, tmp_path: Path
     assert len(status["description"]) <= 140
 
 
-def test_p11_ci_mode_refuses_the_local_only_options(tmp_path: Path) -> None:
-    for extra in (["--decision", "DEC-20261022-AAAAAAAA"], ["--pr", "1"]):
-        assert gate.main(["--ci", "--base", "HEAD", "--head", "HEAD", "--repo", str(tmp_path), *extra]) == 2
-    assert gate.main(["--repo", str(tmp_path)]) == 2  # 既没 --pr 也没 --base/--head
+def test_p11_ci_mode_refuses_the_local_only_options(repo: Path, tmp_path: Path, capsys) -> None:
+    base, head = commit(repo, {DOC: "改了说明\n"})
+    ci = ["--ci", "--base", base, "--head", head, "--repo", str(repo)]
+    assert gate.main(ci) == 0  # 反例：同样的参数不带本机选项能跑通，下面的 2 只能来自这道保护
+    for extra in (["--decision", DEC], ["--pr", "1"]):
+        capsys.readouterr()
+        assert gate.main([*ci, *extra]) == 2
+        assert "CI 里读不到本机账本" in capsys.readouterr().err
+    assert gate.main(["--repo", str(repo)]) == 2  # 既没 --pr 也没 --base/--head
+
+
+@pytest.mark.parametrize("body", ["", "## 说明\n只改文档\n", "```\n安全回路: 否\n```\n"])
+def test_p12_plc_change_without_a_plan_line_fails(repo: Path, tmp_path: Path, body: str) -> None:
+    base, head = commit(repo, {DOC: "改了说明\n"})  # 只改 PLC 目录下的文档，也要写
+    body_file = tmp_path / "body.txt"
+    body_file.write_text(body, encoding="utf-8")
+    args = ["--base", base, "--head", head, "--repo", str(repo), "--pr-body-file", str(body_file)]
+    assert gate.main(args) == 1
+    body_file.write_text(body + NO_BODY, encoding="utf-8")
+    assert gate.main(args) == 0
+
+
+def test_p13_non_plc_pr_without_a_plan_line_still_passes(repo: Path, tmp_path: Path) -> None:
+    base, head = commit(repo, {PY: "print(1)\n"})
+    body_file = tmp_path / "body.txt"
+    body_file.write_text("## 说明\n", encoding="utf-8")
+    assert gate.main(["--base", base, "--head", head, "--repo", str(repo), "--pr-body-file", str(body_file)]) == 0
+
+
+def test_p14_fenced_example_is_not_a_declaration() -> None:
+    assert gate.plan_declaration("示例：\n```\n安全回路: 否\n```\n安全回路: 是\n") == ("是", [])
+    assert gate.plan_declaration("~~~\n安全回路: 不确定\n~~~\n") == (None, [])
 
 
 # ---------------------------------------------------------------- 本机：批准记录 vs PR 描述
