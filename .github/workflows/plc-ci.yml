@@ -2,7 +2,7 @@
 # 检查代码取自 PR 基线（裁判），PR 头只当数据读。和基线逐条比：新问题判 FAIL；只有老问题判 PASS_KNOWN_BASELINE（不是全绿）。
 # 需要本机或 Windows 的层（Siemens 语言服务插件、.scltest 仿真、博图/InoProShop 编译）明确跳过并在日志里写原因，不算通过。
 # 每个 PR 都运行（好设成必过检查）：没碰 PLC 时只做一步判断，报“不适用（N/A）”后通过，不装依赖。
-# 推到 main 时 PLC 检查代码（SW-2026-008 的 domain/plc 等）有改动，也会用新代码把所有 PLC 项目查一遍。
+# 推到 main 时 PLC 检查代码（检查子进程加载的 SW-2026-008 模块与锁定依赖）有改动，也会用新代码把所有 PLC 项目查一遍。
 # 它是提前报警，不替代本机门禁，结果也不是任何卡的验收证据。说明：项目文件夹 plans/PLC项目CI_说明_20261022.md。
 name: plc-ci
 
@@ -16,10 +16,26 @@ on:
       - ".github/workflows/plc-ci.yml"
       - "reviews/tools/plc_ci.py"
       - "reviews/tools/test_plc_ci.py"
-      # PLC 检查代码：与 plc_ci.py 的 CHECKER_PATHS 保持一致
-      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/**"
-      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/models/plc.py"
+      # PLC 检查代码：与 plc_ci.py 的 CHECKER_PATHS 保持一致（自测核对）
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/__init__.py"
       - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/paths.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/modbus/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/models/**"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/**"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/project/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/project/state_machine.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/spec/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/vartable/**"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/db/**"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/logging/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/utils/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/utils/file_utils.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/__init__.py"
+      - "00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt"
   workflow_dispatch:
 
 # 只读令牌；没有任何步骤用到密钥。

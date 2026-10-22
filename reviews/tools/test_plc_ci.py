@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -374,3 +376,35 @@ def test_every_judge_file_triggers_the_main_push() -> None:
     wf = (REPO / ".github" / "workflows" / "plc-ci.yml").read_text(encoding="utf-8")
     for path in plc_ci.JUDGE_FILES:
         assert f'- "{path}"' in wf
+
+
+_LOADED = r"""
+import contextlib, io, json, os, sys
+sw008, workspace, project, child = sys.argv[1:5]
+sys.argv = ["x", sw008, workspace, project]
+with contextlib.redirect_stdout(io.StringIO()):
+    exec(child)
+root = os.path.abspath(os.path.join(sw008, "auto_pm"))
+print(json.dumps(sorted({os.path.relpath(os.path.abspath(m.__file__), root).replace(os.sep, "/")
+                         for m in list(sys.modules.values())
+                         if getattr(m, "__file__", None) and os.path.abspath(m.__file__).startswith(root + os.sep)})))
+"""
+
+
+@pytest.mark.parametrize("project", [D009, D011, SYSLIB])
+def test_checker_paths_cover_every_loaded_module(project: str) -> None:
+    # 检查子进程真正加载了哪些 SW-2026-008 模块，每一个都必须在 CHECKER_PATHS 里（审计 82：漏了 vartable 等）
+    proc = subprocess.run(
+        [sys.executable, "-B", "-I", "-c", _LOADED, str(REPO / plc_ci.SW008), str(REPO), str(REPO / project), plc_ci._CHILD],
+        capture_output=True, text=True, encoding="utf-8", check=True,
+        env={**os.environ, "AUTO_PM_WORKSPACE": str(REPO), "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    loaded = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert "domain/plc/checker.py" in loaded  # 确实跑到了检查代码
+    missing = [rel for rel in loaded if not plc_ci.is_checker(f"{plc_ci.SW008}/auto_pm/{rel}")]
+    assert missing == []
+
+
+def test_vartable_parser_change_is_a_checker_change() -> None:
+    assert plc_ci.is_checker(f"{plc_ci.SW008}/auto_pm/domain/vartable/parsers/scl_parser.py")
+    assert not plc_ci.is_checker(f"{plc_ci.SW008}/auto_pm/ui/cli/project.py")

@@ -49,11 +49,28 @@ SW008 = "01_Project自动化项目管理/Python自动化项目总库/02_在研�
 SAFETY_TOOL = "reviews/tools/safety_zone_check.py"
 # 改到这些文件说明检查程序本身变了：所有 PLC 项目都跑一遍
 JUDGE_FILES = (".github/workflows/plc-ci.yml", "reviews/tools/plc_ci.py", "reviews/tools/test_plc_ci.py")
-# SW-2026-008 里决定 plc check / plc docs check 结果的代码；推到 main 时它们变了，用新代码把所有 PLC 项目查一遍
+# SW-2026-008 里检查子进程实际加载的代码（自测 test_checker_paths_cover_every_loaded_module 逐个核对）；
+# 推到 main 时它们变了，用新代码把所有 PLC 项目查一遍。另加锁定依赖：第三方库换版本也可能改结果
 CHECKER_PATHS = (
-    f"{SW008}/auto_pm/domain/plc/",
-    f"{SW008}/auto_pm/domain/models/plc.py",
+    f"{SW008}/auto_pm/__init__.py",
+    f"{SW008}/auto_pm/application/core/__init__.py",
     f"{SW008}/auto_pm/application/core/paths.py",
+    f"{SW008}/auto_pm/domain/__init__.py",
+    f"{SW008}/auto_pm/domain/change/__init__.py",
+    f"{SW008}/auto_pm/domain/modbus/__init__.py",
+    f"{SW008}/auto_pm/domain/models/",
+    f"{SW008}/auto_pm/domain/plc/",
+    f"{SW008}/auto_pm/domain/project/__init__.py",
+    f"{SW008}/auto_pm/domain/project/state_machine.py",
+    f"{SW008}/auto_pm/domain/spec/__init__.py",
+    f"{SW008}/auto_pm/domain/vartable/",
+    f"{SW008}/auto_pm/infrastructure/__init__.py",
+    f"{SW008}/auto_pm/infrastructure/db/",
+    f"{SW008}/auto_pm/infrastructure/logging/__init__.py",
+    f"{SW008}/auto_pm/infrastructure/utils/__init__.py",
+    f"{SW008}/auto_pm/infrastructure/utils/file_utils.py",
+    f"{SW008}/auto_pm/ui/__init__.py",
+    "00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt",
 )
 # 工作流按这个版本号调用本脚本；基线上的脚本版本低于工作流要求时，工作流改取 PR 头的脚本并明说
 PLC_CI_PROTOCOL = 2
