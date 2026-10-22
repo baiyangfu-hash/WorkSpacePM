@@ -2,7 +2,7 @@
 
 > 项目编号: DJ-2026-011
 > 项目名称: 驾驶舱A6PLC续作验证套件
-> 版本: V1.1.0
+> 版本: V1.2.0
 > 创建日期: 2026-09-10 16:11:55
 > 项目类型: PLC 公共库验证项目（扁平结构）
 
@@ -23,6 +23,8 @@
 | I-007 | SysLib 调用 | 库引用 | OB1→SysLib | 通过 libraries 配置引用公共库 |
 | I-008 | 报警复位 | 内部符号 | 测试/上位机→FB | `DB_AlarmSummaryTest.s_bReset` 上升沿复位报警锁存 |
 | I-009 | 报警灯 | 内部符号 | FB→测试/上位机 | `DB_AlarmSummaryTest.s_bAlarmLamp` 报警锁存指示灯 |
+| I-010 | 批量计数激励 | 内部符号 | 测试/上位机→FB | `DB_BatchCounterTest.s_bPhotoSensor`、`s_dBatchTarget`、`s_bReset` 批量计数输入 |
+| I-011 | 批量计数结果 | 内部符号 | FB→测试/上位机 | `DB_BatchCounterTest.s_dBatchCount`、`s_bBatchComplete` 已计件数与批次完成 |
 
 ## 2. 数字量输入（DI）
 
@@ -51,6 +53,18 @@
 | s_bReset | DB_AlarmSummaryTest.s_bReset | 输入→FB | 报警复位按钮 | 上升沿有效 |
 | s_bAlarmLamp | DB_AlarmSummaryTest.s_bAlarmLamp | FB→输出 | 报警灯 | 报警锁存后保持点亮 |
 | s_bAnyAlarm | DB_AlarmSummaryTest.s_bAnyAlarm | FB→输出 | 任意报警汇总 | 当前任一路报警为 TRUE |
+
+### 3.2 批量计数信号（验证项目内部符号）
+
+批量计数的输入输出同样通过 `DB_BatchCounterTest` 符号暴露，不新增物理 DI/DO，由 `.scltest` 激励与断言，也可由上位机读写。
+
+| 信号名称 | 符号地址 | 方向 | 信号说明 | 备注 |
+|---------|---------|------|---------|------|
+| s_bPhotoSensor | DB_BatchCounterTest.s_bPhotoSensor | 输入→FB | 光电传感器信号 | 上升沿计一件, 长亮只计一件 |
+| s_dBatchTarget | DB_BatchCounterTest.s_dBatchTarget | 输入→FB | 批次设定数量 | DINT, 小于等于 0 时禁用计数 |
+| s_bReset | DB_BatchCounterTest.s_bReset | 输入→FB | 批量计数复位按钮 | 上升沿清零并重新计数 |
+| s_dBatchCount | DB_BatchCounterTest.s_dBatchCount | FB→输出 | 当前批次已计工件数 | DINT, 计满后保持设定值 |
+| s_bBatchComplete | DB_BatchCounterTest.s_bBatchComplete | FB→输出 | 批次完成 | 计满后保持到复位 |
 
 ## 4. 模拟量输入（AI）
 
@@ -100,11 +114,14 @@
 |--------|------|---------|---------|------|
 | fb_TwoHandStart | FB_1091_TwoHandStart_DJ2026011 | DB_TwoHandStartTest | OB1 | 双手启动功能块实例 |
 | fb_AlarmSummary | FB_2001_AlarmSummary_DJ2026011 | DB_AlarmSummaryTest | OB1 | 报警汇总功能块实例 |
+| fb_BatchCounter | FB_2002_BatchCounter_DJ2026011 | DB_BatchCounterTest | OB1 | 批量计数功能块实例 |
 
 - 报警汇总的 `i_arrAlarms` 为 `ARRAY[1..16] OF BOOL`，下标从 1 开始，调用方不得传入长度不足的数组。
 - 复位按钮传电平信号，功能块内部取上升沿；禁止外部再叠加沿检测。
 - OB1 每个扫描周期先把 `DB_TwoHandStartTest.s_bSyncFault` 写入 `DB_AlarmSummaryTest.s_arrAlarms[1]`，再调用报警汇总。
 - 第 1 路之外的报警位由测试或上位机直接写入 `DB_AlarmSummaryTest.s_arrAlarms[2..16]`。
+- 批量计数的光电信号与复位按钮同传电平信号，功能块内部取上升沿；`i_dBatchTarget` 为 DINT 计数值，小于等于 0 时不计数也不完成。
+- OB1 在报警汇总调用之后调用批量计数，激励与结果均经 `DB_BatchCounterTest` 读写。
 
 ## 8. 版本兼容性说明
 
@@ -118,3 +135,4 @@
 |------|------|---------|--------|
 | 2026-09-10 16:11:55 | V1.0.0 | 初始版本，由 plc-test-suite 模板生成 | auto-pm |
 | 2026-10-22 | V1.1.0 | 新增 I-008/I-009、报警汇总内部符号表与 FB 实例调用约定 | trae |
+| 2026-10-22 | V1.2.0 | 新增 I-010/I-011、批量计数内部符号表与 FB 实例调用约定 | trae |

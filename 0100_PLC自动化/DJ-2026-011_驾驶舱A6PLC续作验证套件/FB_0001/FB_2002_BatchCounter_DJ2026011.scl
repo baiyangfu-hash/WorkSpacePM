@@ -1,0 +1,57 @@
+// ============================================================================
+// FB_2002_BatchCounter_DJ2026011: 批量计数功能块
+// 描述: 光电每检测到一个工件计一件, 计数达到设定数量时输出批次完成并保持;
+//       按复位按钮的上升沿清零计数并重新计数;
+//       批次完成后不再累加, 设定数量小于等于 0 时不计数也不完成。
+// 遵守规范: Siemens LSP (LSP-904 注释 / LSP-905 命名与结构 / LSP-906 边沿检测)
+// ============================================================================
+
+FUNCTION_BLOCK FB_2002_BatchCounter_DJ2026011
+VAR_INPUT
+    i_bPhotoSensor   : BOOL;  // 光电传感器信号, 每来一件产生一个上升沿, 按下=TRUE
+    i_dBatchTarget   : DINT;  // 批次设定数量, 小于等于 0 时禁用计数
+    i_bReset         : BOOL;  // 复位按钮 (上升沿有效, 按下=TRUE)
+END_VAR
+VAR_OUTPUT
+    o_dBatchCount    : DINT;  // 当前批次已计工件数
+    o_bBatchComplete : BOOL;  // 批次完成输出, 达到设定数量后保持到复位
+END_VAR
+VAR
+    fb_rTrigPhoto : FB_R_TRIG; // 光电信号上升沿检测
+    fb_rTrigReset : FB_R_TRIG; // 复位按钮上升沿检测
+    s_bPhotoPulse : BOOL;      // 光电信号单周期脉冲
+    s_bResetPulse : BOOL;      // 复位按钮单周期脉冲
+    s_bBatchLatch : BOOL;      // 批次完成锁存状态
+END_VAR
+
+BEGIN
+    // ------------------------------------------------------------------
+    // 光电与复位上升沿: 各自只在信号跳变瞬间产生一个扫描周期脉冲,
+    // 因此光电长亮只计一件, 复位按钮长按不会反复清零。
+    // ------------------------------------------------------------------
+    fb_rTrigPhoto(IN := i_bPhotoSensor, Q => s_bPhotoPulse);
+    fb_rTrigReset(IN := i_bReset, Q => s_bResetPulse);
+
+    // ------------------------------------------------------------------
+    // 复位: 上升沿清零计数与批次完成锁存, 之后重新计数。
+    // ------------------------------------------------------------------
+    IF s_bResetPulse THEN
+        o_dBatchCount := 0;
+        s_bBatchLatch := FALSE;
+    END_IF;
+
+    // ------------------------------------------------------------------
+    // 计数: 未完成且设定数量有效时, 每个光电上升沿加 1;
+    // 达到设定数量时钳位到设定值并锁存批次完成, 之后不再累加。
+    // ------------------------------------------------------------------
+    IF (NOT s_bBatchLatch) AND (i_dBatchTarget > 0) AND s_bPhotoPulse THEN
+        o_dBatchCount := o_dBatchCount + 1;
+        IF o_dBatchCount >= i_dBatchTarget THEN
+            o_dBatchCount := i_dBatchTarget;
+            s_bBatchLatch := TRUE;
+        END_IF;
+    END_IF;
+
+    o_bBatchComplete := s_bBatchLatch;
+
+END_FUNCTION_BLOCK

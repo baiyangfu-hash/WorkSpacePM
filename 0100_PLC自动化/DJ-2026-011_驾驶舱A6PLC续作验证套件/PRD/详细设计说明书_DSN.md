@@ -2,7 +2,7 @@
 
 > 项目编号: DJ-2026-011
 > 项目名称: 驾驶舱A6PLC续作验证套件
-> 版本: V1.1.0
+> 版本: V1.2.0
 > 创建日期: 2026-09-10 16:11:55
 > 项目类型: PLC 公共库验证项目（扁平结构）
 
@@ -172,8 +172,63 @@ OB1 采用"区域化"布局，遵循 LSP-905 规范：
 - 报警与复位同时有效时按报警优先处理，灯保持点亮。
 - 首扫描时 `s_bAlarmLatch` 默认为 FALSE，无报警则灯不亮。
 
-## 7. 变更记录
+## 7. 批量计数设计（F-008）
+
+### 7.1 设计目标
+
+在 OB1 现有双手启动与报警汇总之外，新增一个独立的批量计数功能块，实现“光电逐件计数、达到设定数量输出批次完成、复位上升沿清零重新计数”的行为。批量计数不与双手启动、报警汇总逻辑耦合，只通过 `DB_BatchCounterTest` 暴露激励与结果。
+
+### 7.2 功能块接口
+
+功能块：`FB_2002_BatchCounter_DJ2026011`（LSP-905 公共服务段 2001~2999）。
+
+| 参数名 | 方向 | 类型 | 说明 |
+|--------|------|------|------|
+| i_bPhotoSensor | VAR_INPUT | BOOL | 光电传感器信号，每来一件产生一个上升沿 |
+| i_dBatchTarget | VAR_INPUT | DINT | 批次设定数量，小于等于 0 时禁用计数 |
+| i_bReset | VAR_INPUT | BOOL | 复位按钮，上升沿有效，按下=TRUE |
+| o_dBatchCount | VAR_OUTPUT | DINT | 当前批次已计工件数 |
+| o_bBatchComplete | VAR_OUTPUT | BOOL | 批次完成输出，达到设定数量后保持到复位 |
+
+静态变量：`fb_rTrigPhoto`、`fb_rTrigReset`（FB_R_TRIG 沿检测）、`s_bPhotoPulse`、`s_bResetPulse`（单周期脉冲）、`s_bBatchLatch`（批次完成锁存）。无临时变量。
+
+### 7.3 计数与完成逻辑
+
+1. `i_bPhotoSensor` 与 `i_bReset` 分别经 `FB_R_TRIG` 取上升沿，得到单周期脉冲；光电长亮只计一件，复位长按不会反复清零。
+2. 复位优先：复位脉冲到来时 `o_dBatchCount` 清零、`s_bBatchLatch` 清零，同一周期内到来的光电脉冲从 0 重新计 1 件。
+3. 计数：`s_bBatchLatch` 为 FALSE 且 `i_dBatchTarget > 0` 时，每个光电脉冲 `o_dBatchCount` 加 1。
+4. 完成：`o_dBatchCount` 达到 `i_dBatchTarget` 时钳位到设定值并置位 `s_bBatchLatch`，`o_bBatchComplete` 输出锁存状态；锁存期间继续来件不再累加。
+5. 设定数量小于等于 0 时不计数也不完成，复位仍可清零。
+
+### 7.4 OB1 集成与数据块映射
+
+- 新建 `DB_BatchCounterTest`，内含 `fb_BatchCounter` 实例、`s_bPhotoSensor` 光电激励、`s_dBatchTarget` 设定数量、`s_bReset` 复位激励、`s_dBatchCount` 与 `s_bBatchComplete` 结果。
+- OB1 在报警汇总调用之后调用 `DB_BatchCounterTest.fb_BatchCounter(...)`，激励与结果均经测试 DB 读写，不新增物理 IO。
+
+### 7.5 测试用例设计
+
+新建 `Test/batch_counter_test.scltest`，包含 7 条用例：
+
+| 用例 | 场景 | 预期 |
+|------|------|------|
+| test1 | 复位上升沿 | 计数清零, 批次未完成 |
+| test2 | 3 个光电上升沿 | 计数为 3, 批次未完成 |
+| test3 | 光电长亮 10 个周期 | 只计 1 件 |
+| test4 | 计满 5 件 | 计数保持 5, 批次完成 |
+| test5 | 完成后再来一件 | 计数保持 5, 完成保持 |
+| test6 | 完成后复位再计 2 件 | 复位后为 0, 再计为 2 |
+| test7 | 设定数量为 1 | 首件即批次完成 |
+
+### 7.6 边界与异常处理
+
+- 计数为 DINT，达到设定值后钳位，不存在溢出累加。
+- 光电与复位均只在上升沿生效，长亮或长按不会重复计数或清零。
+- 设定数量小于等于 0 时模块不动作，避免非法设定导致误完成。
+- 首扫描时 `o_dBatchCount` 为 0、`s_bBatchLatch` 为 FALSE，批次完成不误输出。
+
+## 8. 变更记录
 | 日期 | 版本 | 变更内容 | 变更人 |
 |------|------|---------|--------|
 | 2026-09-10 16:11:55 | V1.0.0 | 初始版本，由 plc-test-suite 模板生成 | auto-pm |
 | 2026-10-22 | V1.1.0 | 新增第 6 节报警汇总设计（F-007） | trae |
+| 2026-10-22 | V1.2.0 | 新增第 7 节批量计数设计（F-008） | trae |

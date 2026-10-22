@@ -3,6 +3,7 @@
 // 项目: DJ-2026-011 驾驶舱A6PLC续作验证套件
 // 模块功能: 双手启动功能块调度 (FB_1091_TwoHandStart_DJ2026011)
 //           报警汇总功能块调度 (FB_2001_AlarmSummary_DJ2026011)
+//           批量计数功能块调度 (FB_2002_BatchCounter_DJ2026011)
 //           激励与结果均经测试 DB 暴露, 供 .scltest 测试步骤读写
 // 遵守规范: Siemens LSP (LSP-903/905/906)
 // ==============================================================================
@@ -38,5 +39,17 @@ BEGIN
         i_bReset := DB_AlarmSummaryTest.s_bReset,
         o_bAlarmLamp => DB_AlarmSummaryTest.s_bAlarmLamp,
         o_bAnyAlarm => DB_AlarmSummaryTest.s_bAnyAlarm);
+
+    // --------------------------------------------------------------------------
+    // 批量计数功能块调度: 光电每检测到一个工件计一件, 达到设定数量输出批次完成
+    // 并保持; 按复位按钮上升沿清零并重新计数。
+    // 测试步骤见 Test/batch_counter_test.scltest
+    // --------------------------------------------------------------------------
+    DB_BatchCounterTest.fb_BatchCounter(
+        i_bPhotoSensor := DB_BatchCounterTest.s_bPhotoSensor,
+        i_dBatchTarget := DB_BatchCounterTest.s_dBatchTarget,
+        i_bReset := DB_BatchCounterTest.s_bReset,
+        o_dBatchCount => DB_BatchCounterTest.s_dBatchCount,
+        o_bBatchComplete => DB_BatchCounterTest.s_bBatchComplete);
 
 END_ORGANIZATION_BLOCK
