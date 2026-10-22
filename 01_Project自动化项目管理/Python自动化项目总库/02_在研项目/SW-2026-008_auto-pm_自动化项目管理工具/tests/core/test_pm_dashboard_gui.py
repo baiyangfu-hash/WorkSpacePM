@@ -228,15 +228,17 @@ def test_fast_read_first_and_legacy_never_before_td105(qapp, tmp_path: Path) -> 
     window.close()
 
 
-def test_read_failure_keeps_the_window_alive(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+@pytest.mark.parametrize("reader", ["copy", "store"])
+def test_read_failure_keeps_the_window_alive(qapp, tmp_path: Path, reader: str) -> None:  # noqa: ANN001
+    """账本坏了：copy 读法报 sqlite 的 DatabaseError，store 读法报 Store 包过的 ContinuityStoreError；窗口都不挂。"""
     root, db = base._workspace(tmp_path, [])
     db.write_bytes(b"not a database")
-    options = _options(root, db)
+    options = _options(root, db, ledger_reader=reader)
     loader = gui.BoardLoader(options, False, None)
     failures: list[str] = []
     loader.failed.connect(failures.append)
     loader.run()
-    assert failures and "DatabaseError" in failures[0]
+    assert failures and any(name in failures[0] for name in ("DatabaseError", "ContinuityStoreError")), failures
     window = gui.CockpitWindow(options)
     window._on_failed(failures[0])
     assert window.status.text().startswith("这次没读成")
