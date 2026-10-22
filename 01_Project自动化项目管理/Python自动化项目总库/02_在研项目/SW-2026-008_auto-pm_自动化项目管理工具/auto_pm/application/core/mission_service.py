@@ -192,12 +192,16 @@ class MissionService:
         if approval.get("request_id") != draft.request_id:
             raise MissionServiceError("Decision 与 PlanningDraft request_id 不一致")
         grant = approval.get("execution_grant")
-        if not isinstance(grant, dict) or set(grant) != {
+        base_grant_keys = {
             "adapter",
             "approved_model",
             "required_worktree_mode",
             "declared_dirty_paths",
-        }:
+        }
+        if not isinstance(grant, dict) or set(grant) not in (
+            base_grant_keys,
+            base_grant_keys | {"plan_checklist"},
+        ):
             raise MissionServiceError("Decision execution_grant schema 不精确")
         try:
             adapter_raw = grant["adapter"]

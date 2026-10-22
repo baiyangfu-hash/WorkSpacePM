@@ -26,6 +26,11 @@ from auto_pm.contracts.intake import (
     TriageTicket,
     UrgentCriterion,
 )
+from auto_pm.contracts.plan_checklist import (
+    SAFETY_CIRCUIT_CHOICES,
+    PlanChecklist,
+    parse_acceptance_check,
+)
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PlanningScopeCard, PmIntent
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.core.pm_intake_service import PmIntakeError, PmIntakeService
@@ -83,6 +88,43 @@ def _classification_options(function: _F) -> _F:
     for option in reversed(options):
         function = option(function)
     return function
+
+
+def _checklist_options(function: _F) -> _F:
+    """Add the plan poka-yoke fields (计划防呆必填栏) shared by ``plan`` and ``approve``."""
+
+    options = (
+        click.option("--original-request", default="", help="①需求原文：一字不改照抄用户原话"),
+        click.option(
+            "--safety-circuit", default="", help="④是否涉及安全回路（急停/安全门/光栅/联锁等）：只能填 是 或 否"
+        ),
+        click.option(
+            "--check",
+            "checks",
+            multiple=True,
+            help="⑤验收命令，格式“命令 => 退出码”，按 --acceptance 的顺序一条对一条，可重复",
+        ),
+        click.option("--rollback", default="", help="⑦回退办法：出问题时怎么退回去"),
+    )
+    for option in reversed(options):
+        function = option(function)
+    return function
+
+
+def _plan_checklist(
+    original_request: str, safety_circuit: str, checks: tuple[str, ...], rollback: str
+) -> PlanChecklist:
+    try:
+        parsed = tuple(parse_acceptance_check(raw) for raw in checks)
+    except ValueError as error:
+        raise click.ClickException(str(error)) from error
+    safety = safety_circuit.strip()
+    return PlanChecklist(
+        original_request=original_request,
+        safety_circuit=safety if safety in SAFETY_CIRCUIT_CHOICES else "",
+        acceptance_checks=parsed,
+        rollback=rollback,
+    )
 
 
 def _enum_or_none(enum_type: Any, value: str | None) -> Any:
@@ -162,6 +204,7 @@ def _planning_scope_card(
     adapter: str | None,
     approved_model: str,
     declared_dirty_paths: tuple[str, ...],
+    plan_checklist: PlanChecklist,
     classification: IntakeClassification | None = None,
     intake_item_id: str = "",
     preview_only: bool = False,
@@ -208,6 +251,7 @@ def _planning_scope_card(
                     adapter=ExecutionAdapterKind(cast(str, adapter)),
                     approved_model=approved_model,
                     declared_dirty_paths=declared_dirty_paths,
+                    plan_checklist=plan_checklist,
                 ),
                 classification=classification,
                 intake_item_id=intake_item_id,
@@ -230,6 +274,7 @@ def _submit_scope_card(
     adapter: str | None,
     approved_model: str,
     declared_dirty_paths: tuple[str, ...],
+    plan_checklist: PlanChecklist,
     submitted_by: str,
     from_draft: bool,
     classification: IntakeClassification,
@@ -257,6 +302,7 @@ def _submit_scope_card(
                 adapter=ExecutionAdapterKind(cast(str, adapter)),
                 approved_model=approved_model,
                 declared_dirty_paths=declared_dirty_paths,
+                plan_checklist=plan_checklist,
             ),
             submitted_by=submitted_by,
             classification=classification,
@@ -334,6 +380,7 @@ def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approv
 @click.option("--approved-model", default="")
 @click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
 @click.option("--submitted-by", default="pm-cli", show_default=True, help="范围卡提交者标识，写入事件链")
+@_checklist_options
 @_classification_options
 @click.pass_context
 def plan_pm(
@@ -350,6 +397,10 @@ def plan_pm(
     approved_model: str,
     declared_dirty_paths: tuple[str, ...],
     submitted_by: str,
+    original_request: str,
+    safety_circuit: str,
+    checks: tuple[str, ...],
+    rollback: str,
     kind: str | None,
     change_action: str | None,
     domain: str,
@@ -377,6 +428,10 @@ def plan_pm(
         domain,
         impact_scope,
         inbox_id,
+        original_request,
+        safety_circuit,
+        checks,
+        rollback,
     )
     if mission_id:
         if any(new_values):
@@ -428,6 +483,7 @@ def plan_pm(
         adapter=adapter,
         approved_model=approved_model,
         declared_dirty_paths=declared_dirty_paths,
+        plan_checklist=_plan_checklist(original_request, safety_circuit, checks, rollback),
         submitted_by=submitted_by,
         from_draft=from_draft,
         classification=classification,
@@ -739,6 +795,7 @@ def inbox_reject(
     default="",
     help="项目开着的卡已满 8 张，或新卡和开着的卡要改同一批文件时，用户放行原话的位置",
 )
+@_checklist_options
 @_classification_options
 @click.pass_context
 def approve_pm(
@@ -760,6 +817,10 @@ def approve_pm(
     approval_evidence_ref: str,
     owner: str,
     admission_release_ref: str,
+    original_request: str,
+    safety_circuit: str,
+    checks: tuple[str, ...],
+    rollback: str,
     kind: str | None,
     change_action: str | None,
     domain: str,
@@ -778,6 +839,10 @@ def approve_pm(
         adapter,
         approved_model,
         declared_dirty_paths,
+        original_request,
+        safety_circuit,
+        checks,
+        rollback,
     )
     classified = any((kind, change_action, domain, impact_scope, inbox_id))
     if mission_id:
@@ -809,6 +874,10 @@ def approve_pm(
             adapter,
             approved_model,
             declared_dirty_paths,
+            original_request,
+            safety_circuit,
+            checks,
+            rollback,
         )
     ):
         if ctx.get_parameter_source("owner") is ParameterSource.COMMANDLINE:
@@ -846,6 +915,7 @@ def approve_pm(
         inbox_id=inbox_id,
         from_draft=False,
     )
+    checklist = _plan_checklist(original_request, safety_circuit, checks, rollback)
     preview = _planning_scope_card(
         ctx,
         project_id=project_id,
@@ -858,6 +928,7 @@ def approve_pm(
         adapter=adapter,
         approved_model=approved_model,
         declared_dirty_paths=declared_dirty_paths,
+        plan_checklist=checklist,
         classification=classification,
         intake_item_id=intake_item_id,
         preview_only=True,
@@ -876,6 +947,7 @@ def approve_pm(
         adapter=adapter,
         approved_model=approved_model,
         declared_dirty_paths=declared_dirty_paths,
+        plan_checklist=checklist,
         classification=classification,
         intake_item_id=intake_item_id,
     )

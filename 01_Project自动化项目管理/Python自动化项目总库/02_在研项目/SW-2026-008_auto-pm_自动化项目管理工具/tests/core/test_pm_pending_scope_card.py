@@ -44,6 +44,7 @@ from tests.core.test_pm_run_e2e import (
     _build_workspace,
     _helper_source,
 )
+from tests.plan_checklist_support import full_checklist
 
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
@@ -64,6 +65,7 @@ def _grant(scope: tuple[str, ...] = SCOPE) -> PlanningExecutionGrant:
         adapter=ExecutionAdapterKind.CODEX,
         approved_model="agent-a",
         declared_dirty_paths=scope,
+        plan_checklist=full_checklist(),
     )
 
 

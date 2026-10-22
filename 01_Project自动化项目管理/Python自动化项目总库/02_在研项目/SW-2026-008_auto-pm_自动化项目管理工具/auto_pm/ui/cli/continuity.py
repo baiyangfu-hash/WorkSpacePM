@@ -23,6 +23,7 @@ from auto_pm.application.core.implementation_card_precheck import (
     scopes_outside_card,
 )
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.declared_dirty import declared_dirty_problem
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import AuthorityEnvelope, MissionState
 from auto_pm.contracts.orchestration import OrchestrationFinding, RepairAttempt
@@ -716,6 +717,9 @@ def start_run(
             _remember_started(ctx, replay.run_id, executor_id, lease_token, holder_pid, idempotency_key)
         _emit(replay)
         return
+    problem = declared_dirty_problem(declared, scope=owned)
+    if problem:
+        raise click.ClickException(problem)
     root = _governed_worktree(ctx, requested_worktree)
     git_head, all_dirty = _git_snapshot(root)
     observed = _within(all_dirty, owned)
