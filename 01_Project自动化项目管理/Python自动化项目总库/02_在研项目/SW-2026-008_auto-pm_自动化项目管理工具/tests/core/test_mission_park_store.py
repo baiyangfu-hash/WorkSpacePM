@@ -45,7 +45,7 @@ from tests.core.test_continuity_execution_service import (
 )
 
 PROJECT = "SW-2026-008"
-APPROVAL = "thread:cmsg_user_says_switch_to_A"
+APPROVAL = "user-confirmation:cmsg_user_says_switch_to_A"
 
 
 class Scene:

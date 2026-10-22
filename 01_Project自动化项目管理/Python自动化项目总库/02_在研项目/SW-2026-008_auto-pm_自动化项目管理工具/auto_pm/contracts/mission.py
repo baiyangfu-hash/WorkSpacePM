@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
@@ -67,6 +68,24 @@ _ROOT_WORK_REQUIRED_STATES = frozenset(
 )
 # Parking is a safe stop like blocking: a Mission may still be put down after its authority expired (TD-071).
 _SAFE_STOP_STATES = frozenset({MissionState.BLOCKED, MissionState.PARKED})
+
+# The user's own words, as the planning approval requires them (DecisionService): a ``user-confirmation:`` reference that
+# an agent or model did not write for itself. Parking, unparking, switching and admission releases all use this rule.
+_USER_EVIDENCE = re.compile(r"user-confirmation:[A-Za-z0-9][A-Za-z0-9._:/-]{7,}\Z")
+_AGENT_MARKER = re.compile(
+    r"(?:^|[-_. (:/])(?:ai|agent|codex|gpt|model|claude|anthropic|opus|sonnet|haiku|fable|gemini|copilot|llm|bot|assistant|trae|cursor)(?:$|[-_. ):/])",
+    re.IGNORECASE,
+)
+
+
+def user_evidence_problem(evidence_ref: str) -> str:
+    """Why ``evidence_ref`` is not the user's own words; empty when it is acceptable."""
+
+    if _USER_EVIDENCE.fullmatch(evidence_ref) is None:
+        return "用户原话凭据必须写成 user-confirmation:<用户消息的时间或编号>（至少 8 个字符）"
+    if _AGENT_MARKER.search(evidence_ref.removeprefix("user-confirmation:")):
+        return "用户原话凭据不能是 agent 或模型自己写的"
+    return ""
 
 
 class InternalRoutingPolicy(BaseModel):
