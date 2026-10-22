@@ -75,6 +75,21 @@ def test_mismatch_is_empty_only_for_the_identical_set_in_any_order() -> None:
     assert declared_dirty_mismatch((), ()) == ""
 
 
+@pytest.mark.parametrize(
+    ("dirty", "declared"),
+    [
+        (("a.py",), ("a.py", "b.py")),  # declared but untouched: a subset is not enough
+        (("a.py", "b.py"), ("a.py",)),  # touched but undeclared
+        ((), ("a.py",)),
+        (("a.py",), ()),
+    ],
+)
+def test_mismatch_requires_set_equality_in_both_directions(
+    dirty: tuple[str, ...], declared: tuple[str, ...]
+) -> None:
+    assert declared_dirty_mismatch(dirty, declared).startswith(DECLARED_DIRTY_MISMATCH)
+
+
 def test_mismatch_explains_the_dj011_shape() -> None:
     changed = tuple(f"DJ-2026-011/src/file_{index:02d}.st" for index in range(11))
 
