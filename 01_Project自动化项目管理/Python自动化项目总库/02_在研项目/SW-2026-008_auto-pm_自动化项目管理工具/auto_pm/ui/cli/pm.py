@@ -34,7 +34,7 @@ from auto_pm.core.workspace_context_service import WorkspaceContextError, Worksp
 from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
-from auto_pm.ui.cli.approval_pin import read_approval_pin
+from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 _KIND_CHOICES = tuple(item.value.lower() for item in IntakeKind)
@@ -782,21 +782,22 @@ def approve_pm(
         return
     if root_work_id:
         raise click.ClickException("新需求批准不允许手工传入 --root-work-id")
-    if not plan_hash:
-        raise click.ClickException("新需求批准缺少必填参数: --plan-hash")
-    approval_pin = read_approval_pin(
-        ctx, summary=f"批准范围卡：请求 {request_id or '(新需求)'}，方案哈希 {plan_hash[:16]}…（确认这就是你看过的那张卡）"
-    )
+    # With a committed approver PIN the approver and evidence come from the PIN, so only the hash is required.
+    pin_required = approval_pin_enforced(ctx)
     missing = [
         name
         for name, value in (
-            ("--approver", approver),
-            ("--approval-evidence-ref", approval_evidence_ref),
+            ("--plan-hash", plan_hash),
+            ("--approver", approver or pin_required),
+            ("--approval-evidence-ref", approval_evidence_ref or pin_required),
         )
-        if not value and not approval_pin
+        if not value
     ]
     if missing:
         raise click.ClickException("新需求批准缺少必填参数: " + ", ".join(missing))
+    approval_pin = read_approval_pin(
+        ctx, summary=f"批准范围卡：请求 {request_id or '(新需求)'}，方案哈希 {plan_hash[:16]}…（确认这就是你看过的那张卡）"
+    )
     if request_id and not any(
         (
             project_id,

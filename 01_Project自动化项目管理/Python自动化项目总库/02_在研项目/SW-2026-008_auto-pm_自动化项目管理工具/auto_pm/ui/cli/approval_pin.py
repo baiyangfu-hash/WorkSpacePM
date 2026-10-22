@@ -42,6 +42,15 @@ def control_root(ctx: click.Context) -> Path:
     return Path(getattr(app_ctx, "control_root", None) or app_ctx.workspace_root)
 
 
+def approval_pin_enforced(ctx: click.Context) -> bool:
+    """Whether an approver PIN is committed (read-only; never prompts)."""
+
+    try:
+        return ApprovalProofService(control_root(ctx)).enforced()
+    except ApprovalProofError as error:
+        raise click.ClickException(str(error)) from error
+
+
 def read_approval_pin(ctx: click.Context, *, summary: str) -> str:
     """'' when no approver PIN is committed (old format check); otherwise the PIN the user types, hidden."""
 
