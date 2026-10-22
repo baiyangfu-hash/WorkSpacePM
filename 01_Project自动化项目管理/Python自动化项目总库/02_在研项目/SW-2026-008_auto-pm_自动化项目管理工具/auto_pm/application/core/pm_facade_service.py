@@ -1001,7 +1001,9 @@ class PmFacadeService:
             )
         except (ContinuityExecutionError, EvidenceCollectionError) as error:
             log.exception("质量验证未通过: mission=%s run=%s", mission.mission_id, run.run_id)
-            return self._not_verified(mission, run, str(error))
+            # The cockpit keeps its fixed sentence here (as before); only ``pm verify`` prints the reason.
+            outcome, _ = self._not_verified(mission, run)
+            return outcome, str(error)
         try:
             # Open the gate only when the very check ``accept`` applies would pass.
             self._require_current_acceptance_checkpoint(mission)

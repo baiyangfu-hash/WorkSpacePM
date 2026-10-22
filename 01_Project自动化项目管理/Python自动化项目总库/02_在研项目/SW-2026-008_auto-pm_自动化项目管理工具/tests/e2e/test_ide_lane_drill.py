@@ -236,3 +236,79 @@ def test_i07_both_commands_refuse_inside_a_worktree(tmp_path: Path, benchmark_ta
 
     assert inside.returncode != 0, inside.stdout
 
+
+
+def test_i08_a_plain_mission_transition_cannot_close_an_accepted_mission_around_the_merge_back(
+    tmp_path: Path, benchmark_tar: bytes  # noqa: F811
+) -> None:
+    """Audit 71 (high): ``continuity mission transition --to CLOSED`` used to close it, skip the merge back, and
+    ``pm close`` then reported COMPLETED."""
+
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    lane = Lane(drill, "REQ-IDE-I08", comment_files(drill.root, "IDE 路线：侧门关单"))
+    lane.walk_to_acceptance()
+    mission = ContinuityStore(drill.root).get_mission(lane.mission_id)
+
+    side_door = drill.cli(
+        "continuity", "mission", "transition", "--mission-id", lane.mission_id, "--to", "CLOSED",
+        "--expected-version", str(mission.version), "--idempotency-key", "i08:close",
+    )
+
+    assert side_door.returncode != 0
+    assert "只能由收口关闭" in side_door.stderr + side_door.stdout
+    assert ContinuityStore(drill.root).get_mission(lane.mission_id).state.value == "ACCEPTED"
+    closed = lane.close()
+    assert closed.returncode == 0 and closed.json()["state"] == "COMPLETED", drill.transcript()
+    for relative, text in lane.files.items():
+        assert (drill.root / relative).read_text(encoding="utf-8") == text
+
+
+def test_i09_pm_close_does_not_report_completed_for_a_mission_closed_without_a_closure(
+    tmp_path: Path, benchmark_tar: bytes  # noqa: F811
+) -> None:
+    """A Mission that reached CLOSED some other way (an old side door, a hand edit) is not 'closed and merged back'."""
+
+    from datetime import UTC, datetime
+
+    from auto_pm.contracts.mission import MissionState
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    lane = Lane(drill, "REQ-IDE-I09", comment_files(drill.root, "IDE 路线：无收口记录"))
+    lane.walk_to_acceptance()
+    store = ContinuityStore(drill.root)
+    mission = store.get_mission(lane.mission_id)
+    store.transition_mission(  # the store itself, below every guard: what an old side door left behind
+        lane.mission_id, mission.version, MissionState.CLOSED, mission.root_work_id, "i09:legacy",
+        datetime.now(UTC).isoformat(),
+    )
+
+    reported = lane.close()
+
+    assert reported.returncode != 0
+    assert "没有经过收口" in reported.stderr + reported.stdout
+
+
+def test_i10_pm_verify_exits_1_with_a_reason_when_the_quality_gate_refuses(
+    tmp_path: Path, benchmark_tar: bytes  # noqa: F811
+) -> None:
+    """Audit 71 (M6): the skill tells the agent to trust the exit code, so a refused gate must exit 1."""
+
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    lane = Lane(drill, "REQ-IDE-I10", comment_files(drill.root, "IDE 路线：门禁不过"))
+    lane.start()
+    lane.write()
+    (lane.worktree / "范围外的文件.txt").write_text("不在范围卡里\n", encoding="utf-8")
+    lane.transition("VERIFYING")
+
+    refused = lane.verify()
+
+    assert refused.returncode == 1, drill.transcript()
+    payload = refused.json()
+    assert payload["verified"] is False
+    assert payload["reason"].strip()
+    assert ContinuityStore(drill.root).get_mission(lane.mission_id).state.value != "ACCEPTANCE_PENDING"

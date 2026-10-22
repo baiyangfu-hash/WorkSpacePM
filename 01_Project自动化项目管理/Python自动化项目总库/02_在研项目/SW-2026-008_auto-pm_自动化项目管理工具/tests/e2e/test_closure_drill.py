@@ -51,10 +51,6 @@ LEGACY_LAYOUT_DEFECT = (
 # The benchmark (like DJ-2026-005/009 in the field) already holds 11_监控/…/CHG-PLC/, which defect ④ trips over; the
 # main line files under a domain with no old folder so the rest of the chain can be exercised.  d00 keeps the PLC domain.
 MAIN_DOMAIN = "ELEC"
-SAME_NUMBER_DEFECT = (
-    "缺陷⑤（样件联调新发现，技术债候选，未开卡）：变更单编号只在项目内唯一，但 Continuity Store 的 planning_draft_chg_bindings.change_id 全库 UNIQUE；"
-    "另一个项目用过同号（如 CHG-ELEC-2026-001）后，本项目 pm plan 报“候选 CHG 已绑定其他 PlanningDraft”"
-)
 
 LAUNCHER = """from auto_pm.cli.__main__ import cli
 
@@ -279,7 +275,9 @@ def drive_mission(
 
     plan_args = [
         "pm", "plan", "--project-id", project_id, "--request-id", request_id, "--objective", "公共报警新增蜂鸣器输出",
-        "--acceptance", "门禁全绿并一步收口", "--risk", "none", "--non-goal", "不下载到控制器",
+        "--acceptance", "门禁全绿并一步收口", "--check", f"main.py plc check {project_id} => 0",
+        "--risk", "只动公共报警块，可能影响报警输出", "--non-goal", "不下载到控制器",
+        "--original-request", "样件联调：走完整条收口流程", "--safety-circuit", "否", "--rollback", "git 还原本单改动的文件",
         "--adapter", "codex", "--approved-model", "agent-a", "--inbox-id", item["item_id"],
     ]
     for path in declared:
@@ -558,14 +556,12 @@ def test_d08_two_projects_in_parallel_with_different_change_numbers(tmp_path: Pa
     _parallel_pair(drill, domain_b="MECH")
 
 
-@pytest.mark.xfail(strict=True, reason=SAME_NUMBER_DEFECT)
 def test_d09_two_projects_in_parallel_whose_first_change_numbers_coincide(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar, second_project=True)
 
     _parallel_pair(drill, domain_b=MAIN_DOMAIN)
 
 
-@pytest.mark.xfail(strict=True, reason=SAME_NUMBER_DEFECT)
 def test_d10_a_closed_mission_in_one_project_blocks_the_same_number_in_another(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar, second_project=True)
     files_a = comment_files(drill.root, "样件联调：项目 A 先做完")
