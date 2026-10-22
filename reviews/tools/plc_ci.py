@@ -16,6 +16,7 @@ GitHub Actions 的 plc-ci 工作流调用。说明见项目文件夹 ``plans/PLC
 * ``PASS``：没有失败项；
 * ``PASS_KNOWN_BASELINE``：有失败项，但全部是 PR 基线上就有的老问题——**不是全绿**，汇总表里逐条列出；
 * ``FAIL``：出现基线上没有的新失败项（或检查程序本身出错）——整个作业失败。
+* 没碰任何 PLC 项目：``不适用（N/A）``，作业通过但写明没跑检查（工作流对每个 PR 都运行，好设成必过检查）。
 
 比对粒度：``plc check`` 的结构类检查按检查项名；文档一致性按 ``plc docs check`` 的每条发现（对象、变量、说明，不含行号）；
 SCL 规范按每条违规（文件、规则、说明，不含行号，同类数量增加也算新增）。
@@ -24,6 +25,8 @@ SCL 规范按每条违规（文件、规则、说明，不含行号，同类数�
 
     python plc_ci.py --base-root <基线检出> --head-root <PR 头检出> --base-sha <sha> --head-sha <sha>
     python plc_ci.py --base-root <基线检出> --head-root <PR 头检出> --all            # 全部 PLC 项目
+    python plc_ci.py ... --scope-only          # 只判断要不要跑（没碰 PLC 时报“不适用”），不需要装依赖
+    python plc_ci.py ... --checker-from-head   # 推到 main：检查代码取自推送后的提交，检查代码改了就全量查
 
 退出码：0 通过（含 PASS_KNOWN_BASELINE）；1 有新失败或检查出错；2 用法错误。
 """
@@ -46,7 +49,16 @@ SW008 = "01_Project自动化项目管理/Python自动化项目总库/02_在研�
 SAFETY_TOOL = "reviews/tools/safety_zone_check.py"
 # 改到这些文件说明检查程序本身变了：所有 PLC 项目都跑一遍
 JUDGE_FILES = (".github/workflows/plc-ci.yml", "reviews/tools/plc_ci.py")
+# SW-2026-008 里决定 plc check / plc docs check 结果的代码；推到 main 时它们变了，用新代码把所有 PLC 项目查一遍
+CHECKER_PATHS = (
+    f"{SW008}/auto_pm/domain/plc/",
+    f"{SW008}/auto_pm/domain/models/plc.py",
+    f"{SW008}/auto_pm/application/core/paths.py",
+)
+# 工作流按这个版本号调用本脚本；基线上的脚本版本低于工作流要求时，工作流改取 PR 头的脚本并明说
+PLC_CI_PROTOCOL = 2
 LOST_CONFIG = "PR 删掉了 .plc.json，但项目目录还在"
+NOT_APPLICABLE = "不适用（N/A）：本次改动没碰任何 PLC 项目或共享库，没有跑 PLC 检查（这不是“检查通过”）。"
 _DIGITS = re.compile(r"\d+")
 
 # 子进程里执行：用基线上的 SW-2026-008 源码检查一个项目目录，结果以 JSON 打印
@@ -152,7 +164,12 @@ def dependents(root: Path, lib_rel: str) -> list[str]:
     return found
 
 
-def select(head: Path, base: Path, changed: list[str], check_all: bool) -> tuple[list[Target], list[str]]:
+def is_checker(path: str) -> bool:
+    return any(path == p or (p.endswith("/") and path.startswith(p)) for p in CHECKER_PATHS)
+
+
+def select(head: Path, base: Path, changed: list[str], check_all: bool,
+           checker_from_head: bool = False) -> tuple[list[Target], list[str]]:
     """返回 (要检查的项目, 说明性日志行)。"""
     notes: list[str] = []
     if check_all:
@@ -160,6 +177,12 @@ def select(head: Path, base: Path, changed: list[str], check_all: bool) -> tuple
     if any(path in JUDGE_FILES for path in changed):
         notes.append("改到了 PLC CI 本身（工作流或 plc_ci.py）：所有 PLC 项目都跑一遍")
         return [Target(rel, "PLC CI 本身有改动") for rel in all_projects(head)], notes
+    if any(is_checker(path) for path in changed):
+        if checker_from_head:
+            notes.append("PLC 检查代码（SW-2026-008）有改动：用新代码把所有 PLC 项目查一遍")
+            return [Target(rel, "PLC 检查代码有改动") for rel in all_projects(head)], notes
+        notes.append("PLC 检查代码（SW-2026-008）有改动，但 PR 上裁判取基线、看不出新代码的效果："
+                     "合进 main 后推送那次会用新代码全量查；代码本身的测试归 sw008-ci")
     targets: dict[str, str] = {}
     other: set[str] = set()
     for path in changed:
@@ -235,7 +258,9 @@ def consistent(data: dict) -> str:
     return ""
 
 
-def evaluate(judge: Path, base: Path, head: Path, target: Target, *, compare: bool) -> Outcome:
+def evaluate(judge: Path, base: Path, head: Path, target: Target, *, compare: bool,
+             base_judge: Path | None = None) -> Outcome:
+    """base_judge：跑基线那一次用的检查代码（默认同 judge）。推到 main 时它是推送前的代码，比的是“推送前 vs 推送后”整体。"""
     out = Outcome(target)
     rel = target.rel
     out.skipped.append(SKIP_LANGUAGE_SERVICE)
@@ -251,7 +276,7 @@ def evaluate(judge: Path, base: Path, head: Path, target: Target, *, compare: bo
         mismatch = consistent(now)
         if mismatch:
             raise RuntimeError(mismatch)
-        before = run_checks(judge, base, rel) if compare and is_project(base, rel) else None
+        before = run_checks(base_judge or judge, base, rel) if compare and is_project(base, rel) else None
     except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
         out.verdict, out.error = "FAIL", str(exc)
         return out
@@ -290,7 +315,7 @@ def render_log(outcomes: list[Outcome], notes: list[str], safety: str, judge_not
     lines += [f"注意：{n}" for n in notes]
     lines.append(f"SKIPPED（全局）：{safety}")
     if not outcomes:
-        lines.append("没有要检查的 PLC 项目。")
+        lines.append(NOT_APPLICABLE)
     for o in outcomes:
         lines.append("")
         lines.append(f"[{o.verdict}] {o.target.rel}（{o.target.reason}）")
@@ -313,7 +338,7 @@ def render_summary(outcomes: list[Outcome], notes: list[str], safety: str, judge
     md += [f"- 注意：{n}" for n in notes]
     md += [f"- **跳过（全局）**：{safety}", ""]
     if not outcomes:
-        md.append("没有要检查的 PLC 项目。")
+        md.append(NOT_APPLICABLE)
         return "\n".join(md)
     md += ["| 项目 | 判定 | 新增失败 | 基线已有失败 | 说明 |", "|---|---|---|---|---|"]
     for o in outcomes:
@@ -329,6 +354,29 @@ def render_summary(outcomes: list[Outcome], notes: list[str], safety: str, judge
             if len(o.new) > 50:
                 md.append(f"- ……另有 {len(o.new) - 50} 条，见作业日志")
     return "\n".join(md)
+
+
+def scope_only(targets: list[Target], notes: list[str]) -> int:
+    applies = bool(targets)
+    for n in notes:
+        print(f"注意：{n}")
+    if applies:
+        print(f"要检查 {len(targets)} 个 PLC 项目：")
+        for t in targets:
+            print(f"  - {t.rel}（{t.reason}）")
+    else:
+        print(NOT_APPLICABLE)
+    out = os.environ.get("GITHUB_OUTPUT")
+    if out:
+        with open(out, "a", encoding="utf-8") as handle:
+            handle.write(f"applies={'true' if applies else 'false'}\n")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary and not applies:
+        with open(summary, "a", encoding="utf-8") as handle:
+            handle.write("## PLC CI\n\n" + "".join(f"- 注意：{n}\n" for n in notes) + f"\n{NOT_APPLICABLE}\n")
+    if os.environ.get("GITHUB_ACTIONS") == "true" and not applies:
+        print(f"::notice title=PLC CI 不适用::{NOT_APPLICABLE}")
+    return 0
 
 
 def changed_files(head: Path, base_sha: str, head_sha: str) -> list[str]:
@@ -350,12 +398,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head-sha", help="PR 头提交")
     parser.add_argument("--all", action="store_true", help="检查全部 PLC 项目")
     parser.add_argument("--no-compare", action="store_true", help="不和基线比（盘点模式：有失败项就判 FAIL）")
+    parser.add_argument("--checker-from-head", action="store_true",
+                        help="检查代码取自 --head-root（只用于推到 main：代码已审过合入）；检查代码改了就全量查")
+    parser.add_argument("--scope-only", action="store_true",
+                        help="只判断要不要跑（不需要装依赖）：打印要查的项目，向 GITHUB_OUTPUT 写 applies=true/false")
     args = parser.parse_args(argv)
-    base, head = args.base_root.resolve(), args.head_root.resolve()
-    judge = (args.judge_root or args.base_root).resolve()
-    if not (judge / SW008 / "auto_pm").is_dir():
-        print(f"用法错误：基线检出里没有检查代码 {SW008}/auto_pm", file=sys.stderr)
+    if args.judge_root and args.checker_from_head:
+        print("用法错误：--judge-root 和 --checker-from-head 只能给一个", file=sys.stderr)
         return 2
+    base, head = args.base_root.resolve(), args.head_root.resolve()
+    judge = head if args.checker_from_head else (args.judge_root or args.base_root).resolve()
     if not args.all and not (args.base_sha and args.head_sha):
         print("用法错误：要么给 --base-sha 和 --head-sha，要么用 --all", file=sys.stderr)
         return 2
@@ -364,10 +416,18 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    targets, notes = select(head, base, changed, args.all)
-    judge_note = f"检查代码取自{'基线检出' if judge == base else f'指定检出 {judge}'}（{SW008}），被检查数据取自 PR 头检出；比对基线：{'不比对（盘点模式）' if args.no_compare else '是'}。"
+    targets, notes = select(head, base, changed, args.all, args.checker_from_head)
+    if args.scope_only:
+        return scope_only(targets, notes)
+    if not (judge / SW008 / "auto_pm").is_dir():
+        print(f"用法错误：检查代码所在检出里没有 {SW008}/auto_pm", file=sys.stderr)
+        return 2
+    where = "基线检出" if judge == base else ("PR 头检出（推到 main，代码已合入）" if judge == head else f"指定检出 {judge}")
+    judge_note = f"检查代码取自{where}（{SW008}），被检查数据取自 PR 头检出；比对基线：{'不比对（盘点模式）' if args.no_compare else '是'}。"
     safety = safety_note(base)
-    outcomes = [evaluate(judge, base, head, t, compare=not args.no_compare) for t in targets]
+    # 推到 main 时基线那一次用推送前的检查代码：检查代码自己变严/变松造成的差异也算进来
+    base_judge = base if args.checker_from_head else judge
+    outcomes = [evaluate(judge, base, head, t, compare=not args.no_compare, base_judge=base_judge) for t in targets]
     print(render_log(outcomes, notes, safety, judge_note))
     if os.environ.get("GITHUB_ACTIONS") == "true":
         # 显示在 PR 的检查页上：跳过的层与新失败一眼可见
