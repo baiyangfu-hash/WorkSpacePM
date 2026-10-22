@@ -22,6 +22,8 @@ from auto_pm.contracts.mission import (
 from auto_pm.contracts.pm_facade import PlanningDraft
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
+from .mission_admission import AdmissionVerdict, admission_verdict, release_problem
+
 
 class MissionServiceError(RuntimeError):
     """Raised when a Mission request cannot be safely authorized or persisted."""
@@ -117,6 +119,52 @@ class MissionService:
         except ContinuityStoreError as error:
             raise MissionServiceError(str(error)) from error
 
+    def admit(
+        self,
+        *,
+        mission_id: str,
+        subject_project_id: str,
+        scope_paths: tuple[str, ...],
+        admission_release_ref: str = "",
+    ) -> tuple[int, AdmissionVerdict]:
+        """Admission of a new card (TD-071 card 3): the open limit to create it with, and the verdict to record.
+
+        A card that already exists is a retry, never refused; its verdict leaves itself out, so that a retry that now
+        brings the user's release can still record it. A new card past the soft limit, or over paths an open card also
+        changes, is refused until the user's own word is given as ``admission_release_ref``.
+        """
+
+        try:
+            missions = self._store.list_missions(subject_project_id, include_terminal=True)
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+        others = [item for item in missions if item.mission_id != mission_id]
+        verdict = admission_verdict(others, scope_paths)
+        exists = len(others) != len(missions)
+        if not exists and (problem := release_problem(verdict, admission_release_ref)):
+            raise MissionServiceError(problem)
+        limit = verdict.open_count + 1 if verdict.over_limit else OPEN_MISSION_SOFT_LIMIT
+        return limit, verdict
+
+    def record_admission(self, mission_id: str, verdict: AdmissionVerdict, admission_release_ref: str) -> None:
+        """Record the user's release of a card that needed one; idempotent per card, so a retry may fill it in."""
+
+        release = admission_release_ref.strip()
+        if not verdict.needs_user_release or not release:
+            return
+        try:
+            self._store.record_mission_admission(
+                mission_id=mission_id,
+                open_count=verdict.open_count,
+                over_limit=verdict.over_limit,
+                overlaps=tuple((item.mission_id, item.paths) for item in verdict.overlaps),
+                release_ref=release,
+                idempotency_key=f"admission-release:{mission_id}",
+                now=self._timestamp(),
+            )
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+
     def create_from_planning_approval(
         self,
         *,
@@ -144,12 +192,16 @@ class MissionService:
         if approval.get("request_id") != draft.request_id:
             raise MissionServiceError("Decision 与 PlanningDraft request_id 不一致")
         grant = approval.get("execution_grant")
-        if not isinstance(grant, dict) or set(grant) != {
+        base_grant_keys = {
             "adapter",
             "approved_model",
             "required_worktree_mode",
             "declared_dirty_paths",
-        }:
+        }
+        if not isinstance(grant, dict) or set(grant) not in (
+            base_grant_keys,
+            base_grant_keys | {"plan_checklist"},
+        ):
             raise MissionServiceError("Decision execution_grant schema 不精确")
         try:
             adapter_raw = grant["adapter"]

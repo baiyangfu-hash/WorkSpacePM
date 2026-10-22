@@ -25,7 +25,13 @@ from pathlib import Path
 from auto_pm.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
 
 from auto_pm.contracts.continuity import RunItem, RunState
-from auto_pm.contracts.mission import Mission, MissionBoard, MissionPark, MissionState
+from auto_pm.contracts.mission import (
+    Mission,
+    MissionBoard,
+    MissionPark,
+    MissionState,
+    user_evidence_problem,
+)
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
@@ -36,6 +42,15 @@ from auto_pm.infrastructure.control_root_guard import (
 
 _LIVE_RUN_STATES = frozenset({RunState.READY, RunState.RUNNING, RunState.BLOCKED, RunState.PENDING, RunState.VERIFYING})
 NO_APPROVAL_HINT = "请让用户说一句先干哪张（--approval-evidence-ref 填用户原话所在的位置）"
+
+
+def _require_user_words(evidence_ref: str, *, optional: bool = False) -> None:
+    """Refuse early, before any snapshot or write, words that are not the user's own (design line 214)."""
+
+    if optional and not evidence_ref.strip():
+        return
+    if problem := user_evidence_problem(evidence_ref.strip()):
+        raise MissionSwitchError(problem + "；" + NO_APPROVAL_HINT)
 
 
 class MissionSwitchError(RuntimeError):
@@ -112,6 +127,7 @@ class MissionSwitchService:
 
         if not reason.strip() or not summary.strip():
             raise MissionSwitchError("搁着原因和断点摘要（干到哪了、下一步做什么）都不能为空")
+        _require_user_words(approval_evidence_ref, optional=True)
         try:
             mission = self._store.get_mission(mission_id)
             run = self._live_run(mission)
@@ -163,6 +179,7 @@ class MissionSwitchService:
 
         if not approval_evidence_ref.strip():
             raise MissionSwitchError("拿回哪张卡只听用户的；" + NO_APPROVAL_HINT)
+        _require_user_words(approval_evidence_ref)
         if not as_owner.strip():
             raise MissionSwitchError("--as 必须写明接手的 agent 身份")
         try:
@@ -247,6 +264,7 @@ class MissionSwitchService:
             return SwitchOutcome(None, None, latest_parked, "", note)
         if not approval_evidence_ref.strip():
             raise MissionSwitchError("切换只听用户的；" + NO_APPROVAL_HINT)
+        _require_user_words(approval_evidence_ref)
         try:
             target = self._store.get_mission(to_mission_id)
             target_park = self._store.get_open_park(to_mission_id)

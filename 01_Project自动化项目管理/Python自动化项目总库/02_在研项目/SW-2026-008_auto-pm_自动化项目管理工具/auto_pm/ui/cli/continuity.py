@@ -23,6 +23,7 @@ from auto_pm.application.core.implementation_card_precheck import (
     scopes_outside_card,
 )
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.declared_dirty import declared_dirty_problem
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import AuthorityEnvelope, MissionState
 from auto_pm.contracts.orchestration import OrchestrationFinding, RepairAttempt
@@ -242,6 +243,11 @@ def mission_group() -> None:
 @click.option("--authority-json", required=True)
 @click.option("--created-by", required=True)
 @click.option("--idempotency-key", required=True)
+@click.option(
+    "--admission-release-ref",
+    default="",
+    help="用户原话所在的位置：新卡和开着的卡改同一批文件、或项目已开满 8 张时，有它才放行（TD-071）",
+)
 @click.pass_context
 def create_mission(
     ctx: click.Context,
@@ -253,11 +259,22 @@ def create_mission(
     authority_json: str,
     created_by: str,
     idempotency_key: str,
+    admission_release_ref: str,
 ) -> None:
-    """Create a DRAFT Mission from an explicit, validated authority envelope."""
+    """Create a DRAFT Mission from an explicit, validated authority envelope.
+
+    Admitted like ``pm approve``: past the soft limit, or over paths an open card also changes, only with the user's word.
+    """
     try:
         authority = AuthorityEnvelope.model_validate(json.loads(authority_json))
-        item = _mission_service(ctx, mutating=True).create(
+        service = _mission_service(ctx, mutating=True)
+        limit, verdict = service.admit(
+            mission_id=mission_id,
+            subject_project_id=project_id,
+            scope_paths=authority.scope_paths,
+            admission_release_ref=admission_release_ref,
+        )
+        item = service.create(
             mission_id=mission_id,
             subject_project_id=project_id,
             title=title,
@@ -266,7 +283,9 @@ def create_mission(
             authority=authority,
             created_by=created_by,
             idempotency_key=idempotency_key,
+            max_open_per_project=limit,
         )
+        service.record_admission(item.mission_id, verdict, admission_release_ref)
     except (json.JSONDecodeError, ValidationError, MissionServiceError) as error:
         raise click.ClickException(str(error)) from error
     _emit(item)
@@ -698,6 +717,9 @@ def start_run(
             _remember_started(ctx, replay.run_id, executor_id, lease_token, holder_pid, idempotency_key)
         _emit(replay)
         return
+    problem = declared_dirty_problem(declared, scope=owned)
+    if problem:
+        raise click.ClickException(problem)
     root = _governed_worktree(ctx, requested_worktree)
     git_head, all_dirty = _git_snapshot(root)
     observed = _within(all_dirty, owned)

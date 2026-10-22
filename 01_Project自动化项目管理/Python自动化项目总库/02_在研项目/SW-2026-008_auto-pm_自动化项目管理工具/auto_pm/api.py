@@ -26,6 +26,7 @@ from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import MissionState
+from auto_pm.contracts.plan_checklist import PlanChecklist
 from auto_pm.contracts.pm_cockpit import PmCockpitCompletion
 from auto_pm.contracts.pm_facade import (
     PlanningExecutionGrant,
@@ -138,6 +139,7 @@ class CockpitClient:
         adapter: ExecutionAdapterKind,
         approved_model: str,
         declared_dirty_paths: Sequence[str] = (),
+        plan_checklist: PlanChecklist | None = None,
     ) -> PlanningScopeCard:
         """Create the non-executable scope card that a human must still approve."""
 
@@ -157,6 +159,7 @@ class CockpitClient:
                     adapter=adapter,
                     approved_model=approved_model,
                     declared_dirty_paths=tuple(declared_dirty_paths),
+                    plan_checklist=plan_checklist,
                 ),
             )
         except (PmFacadeError, ValueError) as error:
@@ -168,8 +171,13 @@ class CockpitClient:
         *,
         approver: str,
         approval_evidence_ref: str,
+        admission_release_ref: str = "",
     ) -> DecisionPackageDTO:
-        """Bind the caller's human approval; the SDK never supplies an approver or evidence."""
+        """Bind the caller's human approval; the SDK never supplies an approver, evidence or a release.
+
+        A card that collides with an open one, or one past the soft limit, is refused before anything is written
+        unless the user's own word is given as ``admission_release_ref`` (TD-071 card 3); ``run`` takes it again.
+        """
 
         self._require_writable()
         try:
@@ -177,6 +185,7 @@ class CockpitClient:
             DecisionService.validate_planning_approval(
                 approver, card.plan_hash, approval_evidence_ref
             )
+            self._facade.admission_check_for_card(card, admission_release_ref)
             self._approve_change(card, approver)
             return self._facade.approve_planning_scope_card(
                 card,
@@ -187,14 +196,16 @@ class CockpitClient:
         except (PmFacadeError, DecisionError, TransitionGuardError, ValueError) as error:
             raise CockpitApiError(str(error)) from error
 
-    def run(self, card: PlanningScopeCard) -> PmRunOutcome:
+    def run(self, card: PlanningScopeCard, *, admission_release_ref: str = "") -> PmRunOutcome:
         """Run the approved card in isolation and verify it up to the acceptance gate."""
 
         self._require_writable()
         try:
             token = self._leases.get(card.plan_hash)
             if token is None:
-                mission = self._facade.materialize_planning_mission(card)
+                mission = self._facade.materialize_planning_mission(
+                    card, admission_release_ref=admission_release_ref
+                )
                 state = ContinuityStore(self._root).get_mission(mission.mission_id).state
                 if state is MissionState.ACCEPTANCE_PENDING:
                     raise CockpitApiError(_ALREADY_VERIFIED)

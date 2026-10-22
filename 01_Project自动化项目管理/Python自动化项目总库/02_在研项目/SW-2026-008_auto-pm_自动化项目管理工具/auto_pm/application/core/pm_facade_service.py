@@ -7,7 +7,6 @@ import hmac
 import json
 import logging
 import secrets
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -34,7 +33,7 @@ from auto_pm.core.local_execution_orchestrator import (
     LocalExecutionOrchestrator,
     LocalExecutionOrchestratorError,
 )
-from auto_pm.core.mission_admission import AdmissionVerdict, admission_verdict
+from auto_pm.core.mission_admission import AdmissionVerdict, admission_verdict, release_problem
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
@@ -46,9 +45,11 @@ from auto_pm.application.core.evidence_collection_service import (
 from auto_pm.contracts.continuity import RunState, WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
+from auto_pm.contracts.declared_dirty import declared_dirty_mismatch
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.intake import IntakeClassification
-from auto_pm.contracts.mission import OPEN_MISSION_SOFT_LIMIT, Mission, MissionState
+from auto_pm.contracts.mission import Mission, MissionState
+from auto_pm.contracts.plan_checklist import plan_checklist_problems, plan_checklist_refusal
 from auto_pm.contracts.pm_facade import (
     PlanningApprovalResult,
     PlanningDraft,
@@ -294,6 +295,13 @@ class PmFacadeService:
         filing, item_id = self._planning_classification(
             intent.request_id, intent.subject_project_id, classification, intake_item_id
         )
+        self._require_plan_checklist(
+            execution_grant,
+            scope_paths=scope_paths,
+            risks=risks,
+            acceptance_criteria=intent.acceptance_criteria,
+            intake_item_id=item_id,
+        )
         try:
             draft = self._store.get_planning_draft(intent.request_id)
             if draft != PlanningDraft.from_intent(intent):
@@ -401,6 +409,13 @@ class PmFacadeService:
         filing, intake_item_id = self._planning_classification(
             intent.request_id, intent.subject_project_id, classification, intake_item_id
         )
+        self._require_plan_checklist(
+            execution_grant,
+            scope_paths=scope_paths,
+            risks=risks,
+            acceptance_criteria=intent.acceptance_criteria,
+            intake_item_id=intake_item_id,
+        )
 
         draft = self.create_planning_draft(intent)
         change_id = self.create_planning_draft_change(
@@ -421,6 +436,55 @@ class PmFacadeService:
         except ValueError as error:
             raise PmFacadeError(str(error)) from error
 
+    def _require_plan_checklist(
+        self,
+        execution_grant: PlanningExecutionGrant | None,
+        *,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        acceptance_criteria: tuple[str, ...],
+        intake_item_id: str = "",
+    ) -> None:
+        """Refuse, before any durable write, a plan missing any of the seven mandatory fields."""
+
+        original_words: str | None = None
+        if intake_item_id:
+            try:
+                original_words = IntakeStore(
+                    self._store.workspace_root, self._store.db_path
+                ).get_item(intake_item_id).ticket.original_words
+            except (ContinuityStoreError, ValueError) as error:
+                raise PmFacadeError(str(error)) from error
+        problems = plan_checklist_problems(
+            execution_grant.plan_checklist if execution_grant is not None else None,
+            declared=execution_grant.declared_dirty_paths if execution_grant is not None else (),
+            scope=scope_paths,
+            risks=risks,
+            acceptance_criteria=acceptance_criteria,
+            original_words=original_words,
+        )
+        if problems:
+            raise PmFacadeError(plan_checklist_refusal(problems))
+
+    @staticmethod
+    def _safety_conditions(card: PlanningScopeCard) -> tuple[str, ...]:
+        checklist = card.execution_grant.plan_checklist
+        if checklist is None:
+            return ()
+        if checklist.safety_circuit == "是":
+            return (
+                "safety-circuit: 是（安全区：先仿真，再由用户在 PR 上写“安全签字 + 提交号”后才能合并）",
+            )
+        return ("safety-circuit: 否",)
+
+    def _require_card_checklist(self, card: PlanningScopeCard) -> None:
+        self._require_plan_checklist(
+            card.execution_grant,
+            scope_paths=card.scope_paths,
+            risks=card.risks,
+            acceptance_criteria=card.acceptance_criteria,
+        )
+
     def approve_planning_scope_card(
         self,
         card: PlanningScopeCard,
@@ -431,6 +495,7 @@ class PmFacadeService:
     ) -> DecisionPackageDTO:
         """Bind one exact human approval to one real, immutable Decision."""
 
+        self._require_card_checklist(card)
         actual_hash = self._planning_scope_card_hash(card)
         if not hmac.compare_digest(actual_hash, card.plan_hash) or not hmac.compare_digest(
             actual_hash, expected_plan_hash
@@ -459,6 +524,7 @@ class PmFacadeService:
                         *(f"acceptance: {item}" for item in card.acceptance_criteria),
                         *(f"risk: {item}" for item in card.risks),
                         *(f"non-goal: {item}" for item in card.non_goals),
+                        *self._safety_conditions(card),
                     ],
                     decision_id=decision_id,
                     planning_plan_hash=actual_hash,
@@ -533,18 +599,12 @@ class PmFacadeService:
                 decision.change_id,
                 actual_hash,
             )
-            known = {
-                item.mission_id
-                for item in self._store.list_missions(card.subject_project_id, include_terminal=True)
-            }
-            verdict: AdmissionVerdict | None = None
-            limit = OPEN_MISSION_SOFT_LIMIT
-            if mission_id not in known:
-                verdict = self.admission_check(
-                    card.subject_project_id, card.scope_paths, admission_release_ref
-                )
-                if verdict.over_limit:
-                    limit = verdict.open_count + 1
+            limit, verdict = self._missions.admit(
+                mission_id=mission_id,
+                subject_project_id=card.subject_project_id,
+                scope_paths=card.scope_paths,
+                admission_release_ref=admission_release_ref,
+            )
             mission = cast(
                 Mission,
                 self._missions.create_from_planning_approval(
@@ -556,16 +616,7 @@ class PmFacadeService:
                     max_open_per_project=limit,
                 ),
             )
-            if verdict is not None and verdict.needs_user_release:
-                self._store.record_mission_admission(
-                    mission_id=mission.mission_id,
-                    open_count=verdict.open_count,
-                    over_limit=verdict.over_limit,
-                    overlaps=tuple((item.mission_id, item.paths) for item in verdict.overlaps),
-                    release_ref=admission_release_ref.strip(),
-                    idempotency_key=f"admission-release:{mission.mission_id}",
-                    now=datetime.now(UTC).isoformat(),
-                )
+            self._missions.record_admission(mission.mission_id, verdict, admission_release_ref)
             return mission
         except (ContinuityStoreError, DecisionError, MissionServiceError) as error:
             raise PmFacadeError(str(error)) from error
@@ -755,6 +806,7 @@ class PmFacadeService:
             if submitted.superseded:
                 raise PmFacadeError("该范围卡已被新修订取代，请批准最新修订")
             card = submitted.card
+            self._require_card_checklist(card)
             # Refuse before anything is written; materialize checks again and records the release.
             self.admission_check_for_card(card, admission_release_ref)
             self._approve_planning_change(card, approver)
@@ -795,10 +847,8 @@ class PmFacadeService:
             verdict = admission_verdict(self._store.list_missions(subject_project_id), scope_paths)
         except ContinuityStoreError as error:
             raise PmFacadeError(str(error)) from error
-        if verdict.needs_user_release and not admission_release_ref.strip():
-            raise PmFacadeError(
-                verdict.reason() + "（命令行加 --admission-release-ref 写明用户原话的位置）"
-            )
+        if problem := release_problem(verdict, admission_release_ref):
+            raise PmFacadeError(problem)
         return verdict
 
     def admission_check_for_card(self, card: PlanningScopeCard, admission_release_ref: str) -> None:
@@ -963,7 +1013,15 @@ class PmFacadeService:
             raise PmFacadeError(str(error)) from error
         checkpoint_id = f"CP-{run.run_id}-VERIFY"
         try:
-            profile = EvidenceCollectionService(self._workspace_root).checkpoint_profile_for_run(run)
+            collector = EvidenceCollectionService(self._workspace_root)
+            # Same comparison as the acceptance gate, before anything is written.
+            mismatch = declared_dirty_mismatch(
+                ContinuityExecutionService.checkpoint_dirty_paths(collector.collect(run)),
+                run.declared_dirty_paths,
+            )
+            if mismatch:
+                return self._not_verified(mission, run, mismatch)
+            profile = collector.checkpoint_profile_for_run(run)
             ContinuityExecutionService(
                 self._workspace_root, store=self._store
             ).append_verified_checkpoint(
@@ -976,14 +1034,12 @@ class PmFacadeService:
             )
         except (ContinuityExecutionError, EvidenceCollectionError):
             log.exception("质量验证未通过: mission=%s run=%s", mission.mission_id, run.run_id)
-            return PmRunOutcome(
-                mission_id=mission.mission_id,
-                run_id=run.run_id,
-                receipt_status=run.state.value,
-                verified=False,
-                mission_state=mission.state,
-                message=_NOT_VERIFIED_MESSAGE,
-            )
+            return self._not_verified(mission, run)
+        try:
+            # Open the gate only when the very check ``accept`` applies would pass.
+            self._require_current_acceptance_checkpoint(mission)
+        except PmFacadeError as error:
+            return self._not_verified(mission, run, str(error))
         if mission.state is MissionState.ACTIVE:
             mission = self._transition(
                 mission,
@@ -999,6 +1055,20 @@ class PmFacadeService:
             checkpoint_id=checkpoint_id,
             mission_state=mission.state,
             message=_VERIFIED_MESSAGE,
+        )
+
+    @staticmethod
+    def _not_verified(mission: Mission, run: Any, reason: str = "") -> PmRunOutcome:
+        message = f"{_NOT_VERIFIED_MESSAGE}原因：{reason}" if reason else _NOT_VERIFIED_MESSAGE
+        if reason:
+            log.warning("质量验证未通过: mission=%s run=%s %s", mission.mission_id, run.run_id, reason)
+        return PmRunOutcome(
+            mission_id=mission.mission_id,
+            run_id=run.run_id,
+            receipt_status=run.state.value,
+            verified=False,
+            mission_state=mission.state,
+            message=message if len(message) <= 200 else message[:199] + "…",
         )
 
     @staticmethod
@@ -1190,7 +1260,7 @@ class PmFacadeService:
         run_id: str = "",
         requested_action: str = "",
     ) -> ContinuityResume:
-        """The same read-only view as ``resume``, plus an explicit answer for one asked action (UNSUPPORTED in M2)."""
+        """The same read-only view as ``resume``, plus an explicit answer for one asked action (runtime-capabilities.v2)."""
         return self._query(
             project_id=project_id,
             invocation_path=invocation_path,
@@ -1272,8 +1342,9 @@ class PmFacadeService:
             raise PmFacadeError("最新 VERIFYING Run 缺少 Checkpoint")
         if checkpoint.git_head != run.git_head:
             raise PmFacadeError("Checkpoint 与最新 Run 基线不一致")
-        if tuple(sorted(checkpoint.dirty_paths)) != tuple(sorted(run.declared_dirty_paths)):
-            raise PmFacadeError("Checkpoint 与最新 Run 声明差异不一致")
+        mismatch = declared_dirty_mismatch(checkpoint.dirty_paths, run.declared_dirty_paths)
+        if mismatch:
+            raise PmFacadeError(mismatch)
         if len(checkpoint.evidence) != 1:
             raise PmFacadeError("Checkpoint 必须包含唯一的自动质量证据")
 

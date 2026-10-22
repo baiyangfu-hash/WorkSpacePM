@@ -44,6 +44,7 @@ from tests.core.test_pm_run_e2e import (
     _build_workspace,
     _helper_source,
 )
+from tests.plan_checklist_support import full_checklist
 
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
@@ -59,11 +60,12 @@ COCKPIT_REQUEST = "REQ-COCKPIT-0123456789ABCDEF0123456789ABCDEF"
 EVENT_KEYS = {"request_id", "revision", "plan_hash", "change_id", "submitted_by", "card_sha256"}
 
 
-def _grant() -> PlanningExecutionGrant:
+def _grant(scope: tuple[str, ...] = SCOPE) -> PlanningExecutionGrant:
     return PlanningExecutionGrant(
         adapter=ExecutionAdapterKind.CODEX,
         approved_model="agent-a",
-        declared_dirty_paths=SCOPE,
+        declared_dirty_paths=scope,
+        plan_checklist=full_checklist(),
     )
 
 
@@ -131,13 +133,14 @@ class _Env:
         *,
         risks: tuple[str, ...] = ("r1",),
         submitter: str = SUBMITTER,
+        scope: tuple[str, ...] = SCOPE,
     ) -> SubmittedPlanningScopeCard:
         return self.facade.submit_planning_scope_card(
             request_id,
-            scope_paths=SCOPE,
+            scope_paths=scope,
             risks=risks,
             non_goals=("no refactor",),
-            execution_grant=_grant(),
+            execution_grant=_grant(scope),
             submitted_by=submitter,
         )
 

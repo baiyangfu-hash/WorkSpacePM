@@ -356,3 +356,32 @@ def test_resume_picks_the_card_in_hand_and_lists_the_others(sw: Switch) -> None:
     chosen, others = ContinuityResumeService._select_mission(missions, "WORK-001")
     assert chosen is not None and chosen.mission_id == "MISSION-A"
     assert [m.mission_id for m in others] == ["MISSION-B"]
+
+
+@pytest.mark.parametrize(
+    "words",
+    ["agent-claude 自己写的", "thread:cmsg_user_says_go", "user-confirmation:short", "user-confirmation:agent-claude-self", "user-confirmation:codex/auto-ok"],
+)
+def test_words_that_are_not_the_users_own_are_refused_before_any_write(sw: Switch, words: str) -> None:
+    """Audit 75: the user's words follow the planning approval rule, in the service and in the store."""
+
+    before = sw.store.get_mission("MISSION-A")
+    with pytest.raises(MissionSwitchError, match="请让用户说一句"):  # the service refuses first, with the hint
+        sw.park_a(approval=words)
+    assert sw.store.get_mission("MISSION-A") == before and sw.store.get_open_park("MISSION-A") is None
+    with pytest.raises(ContinuityStoreError, match="user-confirmation|agent 或模型"):
+        sw.park(approval_evidence_ref=words)  # the store refuses on its own as well
+
+    sw.park_a()
+    with pytest.raises(ContinuityStoreError, match="user-confirmation|agent 或模型"):
+        sw.unpark(approval_evidence_ref=words)
+    for call in (
+        lambda: sw.service.unpark(mission_id="MISSION-A", as_owner="claude:local", approval_evidence_ref=words),
+        lambda: sw.service.switch(
+            project_id=PROJECT, to_mission_id="MISSION-A", reason="r", summary="s", as_owner="claude:local",
+            approval_evidence_ref=words,
+        ),
+    ):
+        with pytest.raises(MissionSwitchError, match="请让用户说一句"):
+            call()
+    assert sw.store.get_mission("MISSION-A").state is MissionState.PARKED

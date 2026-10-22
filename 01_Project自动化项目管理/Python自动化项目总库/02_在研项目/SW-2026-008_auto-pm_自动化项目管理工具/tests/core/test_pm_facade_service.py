@@ -50,6 +50,15 @@ from auto_pm.contracts.pm_facade import (
 from auto_pm.domain.change.decision_service import DecisionError
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.intake_store import IntakeStore
+from tests.plan_checklist_support import full_checklist
+
+# Plans must declare the exact files they will change (改动声明不得为空).
+_EXAMPLE_GRANT = PlanningExecutionGrant(
+    adapter=ExecutionAdapterKind.MANUAL,
+    approved_model="manual",
+    declared_dirty_paths=("auto_pm/example.py",),
+    plan_checklist=full_checklist(),
+)
 
 
 def _audit_scene(root: Path) -> tuple[PmFacadeService, Path, IntakeItem]:
@@ -101,7 +110,9 @@ def _audit_card(facade: PlanningFacade, item: IntakeItem, **options: Any) -> Pla
         "risks": ("Drift",),
         "non_goals": ("No deployment",),
         "execution_grant": PlanningExecutionGrant(
-            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved"
+            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved",
+            declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(original="Audit failure"),
         ),
         "classification": item.classification,
         "intake_item_id": item.item_id,
@@ -151,7 +162,9 @@ def test_audit_f01_invalid_contract_never_consumes(
         "risks": ("Drift",),
         "non_goals": ("No deployment",),
         "execution_grant": PlanningExecutionGrant(
-            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved"
+            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved",
+            declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(original="Audit failure"),
         ),
         "classification": item.classification,
         "intake_item_id": item.item_id,
@@ -415,7 +428,7 @@ def test_audit_f02_cold_retry_rejects_mismatched_reserved_change(
     _audit_unconsumed(tmp_path, database, item)
 
 
-def test_audit_f08_saved_classified_card_approves_and_legacy_create_stays_compatible(
+def test_audit_f08_saved_classified_card_approves_and_legacy_create_without_declaration_is_refused(
     tmp_path: Path,
 ) -> None:
     facade, database, item = _audit_scene(tmp_path)
@@ -440,10 +453,11 @@ def test_audit_f08_saved_classified_card_approves_and_legacy_create_stays_compat
     )
     assert _audit_count(database, "run_items") == 0
     legacy_intent = _planning_intent().model_copy(update={"request_id": "REQ-LEGACY"})
-    legacy = cold.create_planning_scope_card(
-        legacy_intent, scope_paths=("legacy.py",), risks=("Risk",), non_goals=("No deployment",)
-    )
-    assert legacy.execution_grant.approved_model == "manual"
+    # A legacy create without any declared dirty path is now refused before any write.
+    with pytest.raises(PmFacadeError, match="--declared-dirty"):
+        cold.create_planning_scope_card(
+            legacy_intent, scope_paths=("legacy.py",), risks=("Risk",), non_goals=("No deployment",)
+        )
     assert (
         _audit_count(database, "planning_scope_cards", "WHERE request_id=?", ("REQ-LEGACY",)) == 0
     )
@@ -755,7 +769,7 @@ def _p10_facade(root: Path) -> tuple[PmFacadeService, Path, ChangeService]:
 def _p10_card(root: Path) -> tuple[PmFacadeService, PlanningScopeCard, Path]:
     """Build one approved, isolated PlanningScopeCard for fault-retry checks."""
     facade, database, changes = _p10_facade(root)
-    card = facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/example.py",), risks=("retry",), non_goals=("no execution",))
+    card = facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/example.py",), risks=("retry",), non_goals=("no execution",), execution_grant=_EXAMPLE_GRANT)
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(card.change_id, state, approver="fubai", comment="human", project_id="SW-TEST-001")
     return facade, card, database
@@ -771,6 +785,7 @@ def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
         approved_model="gpt-approved",
         required_worktree_mode=WorktreeMode.ISOLATED,
         declared_dirty_paths=("auto_pm/example.py",),
+        plan_checklist=full_checklist(),
     )
     card = facade.create_planning_scope_card(
         _planning_intent(),
@@ -1316,10 +1331,12 @@ def test_planning_scope_card_is_deterministic_and_never_creates_execution(tmp_pa
     facade = PmFacadeService(tmp_path, store=store, change_service=ChangeService(str(tmp_path)))
 
     card = facade.create_planning_scope_card(
-        _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("scope drift",), non_goals=("no execution",)
+        _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("scope drift",), non_goals=("no execution",),
+        execution_grant=_EXAMPLE_GRANT,
     )
     assert facade.create_planning_scope_card(
-        _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("scope drift",), non_goals=("no execution",)
+        _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("scope drift",), non_goals=("no execution",),
+        execution_grant=_EXAMPLE_GRANT,
     ) == card
     assert card.executable is False and len(card.plan_hash) == 64
     with sqlite3.connect(database) as conn:
@@ -1391,6 +1408,7 @@ def test_planning_approval_materializes_one_exact_authorized_mission(
         scope_paths=("auto_pm/example.py",),
         risks=("scope drift",),
         non_goals=("no execution",),
+        execution_grant=_EXAMPLE_GRANT,
     )
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(
@@ -1493,6 +1511,7 @@ def test_planning_scope_card_cold_replay_survives_approved_change(tmp_path: Path
         scope_paths=("auto_pm/example.py",),
         risks=("scope drift",),
         non_goals=("no execution",),
+        execution_grant=_EXAMPLE_GRANT,
     )
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(
@@ -1513,6 +1532,7 @@ def test_planning_scope_card_cold_replay_survives_approved_change(tmp_path: Path
         scope_paths=("auto_pm/example.py",),
         risks=("scope drift",),
         non_goals=("no execution",),
+        execution_grant=_EXAMPLE_GRANT,
     )
 
     assert replayed == card
@@ -1542,6 +1562,7 @@ def test_approved_planning_card_can_be_recovered_from_persisted_truth(tmp_path: 
             adapter=ExecutionAdapterKind.CODEX,
             approved_model="gpt-5.6-sol",
             declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(),
         ),
     )
     for state in ("submitted", "under_review", "approved"):
@@ -1761,6 +1782,7 @@ def _approved_run_card(root: Path) -> tuple[PmFacadeService, PlanningScopeCard]:
         adapter=ExecutionAdapterKind.CODEX,
         approved_model="agent-a",
         declared_dirty_paths=("auto_pm/example.py",),
+        plan_checklist=full_checklist(),
     )
     card = facade.create_planning_scope_card(
         _planning_intent(),
@@ -2018,7 +2040,9 @@ def test_rehearsal_c11_f08_preview_is_physically_read_only_under_delete_journal(
         _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("Drift",),
         non_goals=("No deployment",),
         execution_grant=PlanningExecutionGrant(
-            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved"
+            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved",
+            declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(original="Audit failure"),
         ),
         classification=item.classification, intake_item_id=item.item_id,
     )
@@ -2028,7 +2052,9 @@ def test_rehearsal_c11_f08_preview_is_physically_read_only_under_delete_journal(
         _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("Drift",),
         non_goals=("No deployment",),
         execution_grant=PlanningExecutionGrant(
-            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved"
+            adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved",
+            declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(original="Audit failure"),
         ),
         classification=item.classification, intake_item_id=item.item_id,
     )

@@ -38,6 +38,7 @@ from tests.core.test_pm_run_e2e import (
     _build_workspace,
     _helper_source,
 )
+from tests.plan_checklist_support import full_checklist
 
 APPROVER = "fubai"
 EVIDENCE = "user-confirmation:U07C-E2E-001"
@@ -146,11 +147,12 @@ def _plan(client: CockpitClient, request_id: str = "REQ-U07C-E2E") -> PlanningSc
         objective="Fix add()",
         acceptance=("add(2, 3) == 5",),
         scope_paths=(CALC, CALC_TEST),
-        risks=("none",),
+        risks=("改错文件导致回归",),
         non_goals=("no refactor",),
         adapter=ExecutionAdapterKind.CODEX,
         approved_model="agent-a",
         declared_dirty_paths=(CALC, CALC_TEST),
+        plan_checklist=full_checklist(),
     )
 
 
@@ -390,7 +392,8 @@ def test_an_approval_that_is_not_a_real_human_confirmation_writes_nothing(tmp_pa
     assert after == decisions_before
     parameters = CockpitClient.approve_plan.__annotations__
     assert "approver" in parameters and "approval_evidence_ref" in parameters
-    assert CockpitClient.approve_plan.__kwdefaults__ is None
+    # approver and evidence have no default; only the release may be left out (it then means "no release")
+    assert CockpitClient.approve_plan.__kwdefaults__ == {"admission_release_ref": ""}
 
 
 def test_unknown_missions_and_projects_raise_only_the_sdk_error(tmp_path: Path) -> None:
@@ -439,3 +442,25 @@ def test_importing_the_package_does_not_load_the_sdk_but_exports_it_lazily() -> 
     unknown = "NotAThing"
     with pytest.raises(AttributeError):
         getattr(auto_pm, unknown)
+
+
+def test_the_sdk_admits_a_colliding_card_only_with_the_users_release(tmp_path: Path) -> None:
+    """TD-071 card 3: approve_plan refuses before any write; run cannot slip a colliding card in either."""
+
+    workspace = _workspace(tmp_path)
+    client = workspace.client()
+    first = _plan(client, "REQ-SDK-A")
+    client.approve_plan(first, approver=APPROVER, approval_evidence_ref=EVIDENCE)
+    PmFacadeService(workspace.root).materialize_planning_mission(first)
+    second = _plan(client, "REQ-SDK-B")
+    change_file = next(workspace.root.glob(f"**/{second.change_id}.md"))
+    change_before = change_file.read_bytes()
+
+    with pytest.raises(CockpitApiError, match="要改同一批文件"):
+        client.approve_plan(second, approver=APPROVER, approval_evidence_ref=EVIDENCE)
+    assert change_file.read_bytes() == change_before
+
+    client.approve_plan(second, approver=APPROVER, approval_evidence_ref=EVIDENCE, admission_release_ref="user-confirmation:SDK-B-0001")
+    with pytest.raises(CockpitApiError, match="要改同一批文件"):
+        client.run(second)  # the Mission is created on run, and is admitted again there
+    assert len(ContinuityStore(workspace.root).list_missions(PROJECT_ID)) == 1

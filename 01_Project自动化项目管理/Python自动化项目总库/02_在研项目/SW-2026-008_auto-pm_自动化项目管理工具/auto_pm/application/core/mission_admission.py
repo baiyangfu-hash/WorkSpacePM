@@ -13,9 +13,15 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from auto_pm.contracts.mission import OPEN_MISSION_SOFT_LIMIT, Mission, MissionState
+from auto_pm.contracts.mission import (
+    OPEN_MISSION_SOFT_LIMIT,
+    Mission,
+    MissionState,
+    user_evidence_problem,
+)
 from auto_pm.infrastructure.control_root_guard import authority_path_parts
 
+ADMISSION_RELEASE_HINT = "（命令行加 --admission-release-ref 写明用户原话的位置）"
 _CLOSED_STATES = frozenset({MissionState.ACCEPTED, MissionState.CLOSED, MissionState.CANCELLED})
 
 
@@ -43,7 +49,9 @@ class AdmissionVerdict:
     def reason(self) -> str:
         parts: list[str] = []
         if self.over_limit:
-            parts.append(f"项目开着的卡已有 {self.open_count} 张（上限 {self.limit} 张），再开一张要你一句话放行")
+            parts.append(
+                f"项目开着的卡已有 {self.open_count} 张（上限 {self.limit} 张），再开一张要你一句话放行"
+            )
         for overlap in self.overlaps:
             parts.append(
                 f"和开着的卡“{overlap.title}”（{overlap.mission_id}）要改同一批文件："
@@ -53,17 +61,30 @@ class AdmissionVerdict:
         return "；".join(parts)
 
 
-def _overlapping(left: str, right: str) -> bool:
-    a, b = authority_path_parts(left), authority_path_parts(right)
+def _overlapping(left: str, right: str, windows: bool | None) -> bool:
+    a, b = authority_path_parts(left, windows=windows), authority_path_parts(right, windows=windows)
     shorter = min(len(a), len(b))
     return a[:shorter] == b[:shorter]
 
 
-def scope_overlaps(new_paths: Iterable[str], other: Mission) -> tuple[str, ...]:
-    """The new card's paths that overlap ``other``'s authorized paths (a folder covers what is inside it)."""
+def scope_overlaps(
+    new_paths: Iterable[str], other: Mission, *, windows: bool | None = None
+) -> tuple[str, ...]:
+    """The new card's paths that overlap ``other``'s authorized paths (a folder covers what is inside it).
+
+    Paths are compared by whole parts with the host's casing rule (case-insensitive on Windows), as the Run guard does.
+    """
 
     others = other.authority.scope_paths
-    return tuple(sorted({path for path in new_paths if any(_overlapping(path, mine) for mine in others)}))
+    return tuple(
+        sorted(
+            {
+                path
+                for path in new_paths
+                if any(_overlapping(path, mine, windows) for mine in others)
+            }
+        )
+    )
 
 
 def admission_verdict(
@@ -80,3 +101,15 @@ def admission_verdict(
         if hit:
             overlaps.append(ScopeOverlap(mission.mission_id, mission.title, hit))
     return AdmissionVerdict(open_count=len(live), limit=limit, overlaps=tuple(overlaps))
+
+
+def release_problem(verdict: AdmissionVerdict, admission_release_ref: str) -> str:
+    """Why a new card cannot be admitted: no release where one is needed, or words that are not the user's own."""
+
+    if not verdict.needs_user_release:
+        return ""
+    release = admission_release_ref.strip()
+    if not release:
+        return verdict.reason() + ADMISSION_RELEASE_HINT
+    problem = user_evidence_problem(release)
+    return f"{verdict.reason()}；放行凭据不合格：{problem}" if problem else ""

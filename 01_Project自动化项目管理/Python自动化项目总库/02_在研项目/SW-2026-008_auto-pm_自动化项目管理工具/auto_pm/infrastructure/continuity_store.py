@@ -66,6 +66,7 @@ from auto_pm.contracts.mission import (
     MissionPark,
     MissionState,
     ParkedMission,
+    user_evidence_problem,
 )
 from auto_pm.contracts.orchestration import OrchestrationOutcome
 from auto_pm.contracts.pm_facade import (
@@ -7935,6 +7936,8 @@ class ContinuityStore:
             raise ContinuityStoreError(
                 "放进“搁着”要用户一句话（--approval-evidence-ref）；agent 自己只能把卡放进“等你”"
             )
+        if approval_evidence_ref and (problem := user_evidence_problem(approval_evidence_ref)):
+            raise ContinuityStoreError(problem)
         if approval_evidence_ref and lease_token in approval_evidence_ref:
             raise ContinuityStoreError("用户授权凭据不得包含 lease token")
         try:
@@ -8149,6 +8152,8 @@ class ContinuityStore:
             raise ContinuityStoreError("新 lease token 不得使用保留前缀")
         if new_token in approval_evidence_ref:
             raise ContinuityStoreError("用户授权凭据不得包含 lease token")
+        if problem := user_evidence_problem(approval_evidence_ref):
+            raise ContinuityStoreError(problem)
         if not isinstance(observed_git_head, str) or not _FULL_GIT_COMMIT.fullmatch(observed_git_head):
             raise ContinuityStoreError("工作树 HEAD 必须是 40 位提交号")
         observed_paths = self._validated_park_paths(observed_dirty_paths, label="工作树改动文件")
@@ -8375,6 +8380,8 @@ class ContinuityStore:
 
         mission_id = self._validated_run_text(mission_id, label="mission_id")
         release_ref = self._validated_run_text(release_ref, label="用户放行凭据")
+        if problem := user_evidence_problem(release_ref):
+            raise ContinuityStoreError(problem)
         idempotency_key = self._validated_idempotency_key(idempotency_key)
         payload = {
             "schema_version": "mission-admission-released.v1",
