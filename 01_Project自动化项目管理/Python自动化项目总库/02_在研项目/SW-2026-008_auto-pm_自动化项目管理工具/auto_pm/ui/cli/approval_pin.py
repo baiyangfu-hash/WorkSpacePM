@@ -42,19 +42,23 @@ def control_root(ctx: click.Context) -> Path:
     return Path(getattr(app_ctx, "control_root", None) or app_ctx.workspace_root)
 
 
-def approval_pin_enforced(ctx: click.Context) -> bool:
-    """Whether an approver PIN is committed (read-only; never prompts)."""
+def approval_pin_enforced(root: str | Path) -> bool:
+    """Whether an approver PIN is committed in ``root`` (read-only; never prompts)."""
 
     try:
-        return ApprovalProofService(control_root(ctx)).enforced()
+        return ApprovalProofService(root).enforced()
     except ApprovalProofError as error:
         raise click.ClickException(str(error)) from error
 
 
-def read_approval_pin(ctx: click.Context, *, summary: str) -> str:
-    """'' when no approver PIN is committed (old format check); otherwise the PIN the user types, hidden."""
+def read_approval_pin(root: str | Path, *, summary: str) -> str:
+    """'' when no approver PIN is committed in ``root`` (old format check); otherwise the PIN the user types, hidden.
 
-    service = ApprovalProofService(control_root(ctx))
+    ``root`` must be the root the command then writes to (audit 72, high-2): a PIN looked up in one root and an
+    approval written into another is no proof at all.
+    """
+
+    service = ApprovalProofService(root)
     try:
         if not service.enforced():
             return ""
@@ -67,20 +71,22 @@ def read_approval_pin(ctx: click.Context, *, summary: str) -> str:
 
 
 def require_approval_pin(
-    ctx: click.Context, *, summary: str, purpose: str, subject: str, approver: str = ""
+    root: str | Path, *, summary: str, purpose: str, subject: str, approver: str = ""
 ) -> ApprovalProof | None:
-    """For a command whose own service has no PIN gate: verify here before anything is written.
+    """For a command whose own service has no PIN gate: verify here, in the root it writes to, before anything is written.
 
     None under the old format check; otherwise the proof, whose approver must be ``approver`` when one was given.
     """
 
-    pin = read_approval_pin(ctx, summary=summary)
+    pin = read_approval_pin(root, summary=summary)
     try:
-        proof = ApprovalProofService(control_root(ctx)).require(pin=pin, purpose=purpose, subject=subject)
+        proof = ApprovalProofService(root).require(pin=pin, purpose=purpose, subject=subject)
     except ApprovalProofError as error:
         raise click.ClickException(str(error)) from error
     if proof is not None and approver.strip() and approver.strip() != proof.approver:
         raise click.ClickException(f"批准口令属于 {proof.approver}，与填写的批准人 {approver.strip()} 不一致")
+    if proof is not None:
+        click.echo(f"已凭 {proof.approver} 的批准口令（编号 {proof.key_id}）批准", err=True)
     return proof
 
 
@@ -96,11 +102,13 @@ def approver_pin_status(ctx: click.Context) -> None:
 
     service = ApprovalProofService(control_root(ctx))
     try:
-        committed = service.committed_keys()
+        committed, problem = service.committed_state()
         working = service.working_keys()
     except ApprovalProofError as error:
         raise click.ClickException(str(error)) from error
-    if committed is None:
+    if problem:
+        click.echo("批准口令：所有批准暂停。" + problem)
+    elif committed is None:
         click.echo("批准口令：未生效（Git HEAD 里没有 " + REGISTRY_RELATIVE_PATH + "），批准只做格式检查")
     else:
         click.echo("批准口令：已生效；批准人 " + "、".join(f"{key.approver}（{key.key_id}）" for key in committed))
@@ -124,7 +132,8 @@ def approver_pin_init(ctx: click.Context, approver: str) -> None:
         raise click.ClickException("批准口令只能由用户本人在交互式终端里设置")
     service = ApprovalProofService(control_root(ctx))
     try:
-        committed = service.committed_keys()
+        # An uncommitted or vanished registry refuses approvals but must not stop the user from setting the PIN again.
+        committed, _problem = service.committed_state()
         keys = service.working_keys()
     except ApprovalProofError as error:
         raise click.ClickException(str(error)) from error
@@ -137,7 +146,7 @@ def approver_pin_init(ctx: click.Context, approver: str) -> None:
             raise click.ClickException(str(error)) from error
         if proof.approver != approver:
             raise click.ClickException(f"旧口令属于 {proof.approver}，不是 {approver}")
-    pin = _prompt_hidden("请设置批准口令（至少 8 位、不能全是数字，输入时不显示）")
+    pin = _prompt_hidden("请设置批准口令（至少 10 位、不能全是数字，输入时不显示）")
     problem = pin_problem(pin)
     if problem:
         raise click.ClickException(problem)
@@ -149,6 +158,6 @@ def approver_pin_init(ctx: click.Context, approver: str) -> None:
         raise click.ClickException(str(error)) from error
     path = service.write_working_keys([item for item in keys if item.approver != approver] + [key])
     click.echo(f"已写入 {path}（只存口令的校验值，不存口令本身）。你的口令编号（key_id）：{key.key_id}，请记下。")
-    click.echo("下一步：把这个文件提交（git add + git commit）。提交之后口令才生效；没提交前批准仍只做格式检查。")
+    click.echo("下一步：把这个文件提交（git add + git commit）。提交之后口令才生效；提交之前所有批准一律暂停。")
     click.echo("提交后运行 pm approver-pin status，核对显示的口令编号和上面这个一样（不一样说明文件被别人换过）。")
     click.echo("口令只在终端里输入，永远不要发给任何 AI 或写进聊天。")

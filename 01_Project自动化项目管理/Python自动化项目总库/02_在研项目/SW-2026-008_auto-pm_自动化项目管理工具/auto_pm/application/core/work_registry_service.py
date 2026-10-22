@@ -259,6 +259,9 @@ class WorkRegistryService:
             return work
         if new_state not in _TRANSITIONS[work.state]:
             raise WorkRegistryError(f"非法 Work 状态迁移: {work.state} -> {new_state}")
+        if work.state is WorkState.PLANNED and new_state is WorkState.READY:
+            # READY is the authorization itself; only ``authorize`` binds the Decision the user approved (audit 72, R1 sweep).
+            raise WorkRegistryError("PLANNED → READY 只能用 work authorize 绑定已批准的决策包，不能直接推状态")
         return self._transition(work, new_state, work.authorization_ref, idempotency_key)
 
     def adjudication_evidence(self, work_id: str) -> tuple[WorkAdjudicationEvidence, str]:

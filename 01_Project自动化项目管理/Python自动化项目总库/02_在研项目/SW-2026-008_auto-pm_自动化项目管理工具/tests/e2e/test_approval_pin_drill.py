@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import select
+import sqlite3
 import subprocess
 import sys
 import time
@@ -259,3 +260,79 @@ def test_p08_the_side_doors_ask_for_the_pin_too(tmp_path: Path, benchmark_tar: b
     setup = drill.cli("pm", "approver-pin", "init", "--approver", "agent-claims-to-be-user")
     # Refused as an agent session or as a session without a terminal, whichever the drill runs in.
     assert setup.returncode != 0 and "终端" in setup.stderr, drill.transcript()
+
+
+# ---------------------------------------------------------------- audit 72: the three ways around the PIN, and their kin
+def test_p09_a_pointed_away_git_does_not_switch_the_pin_off(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Audit 72 high-1: GIT_DIR, no git on PATH and a HEAD that points nowhere used to fall back to the format check."""
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    commit_approver_pin(drill)
+    card = _planned_card(drill, "REQ-PIN-P09")
+    before = ledger_snapshot(drill)
+    arguments = [
+        sys.executable, str(drill.tools / "launcher.py"), "-w", str(drill.root), "pm", "approve", "--request-id", "REQ-PIN-P09",
+        "--plan-hash", card["plan_hash"], "--approver", APPROVER, "--approval-evidence-ref", "user-confirmation:chat-REQ-PIN-P09",
+    ]
+    pointed = dict(drill._env(), GIT_DIR=str(tmp_path / "no-such-git-dir"), GIT_WORK_TREE=str(tmp_path))
+    step = drill._call("pm approve (GIT_DIR)", arguments, pointed)
+    assert step.returncode != 0 and "批准口令" in step.stderr, drill.transcript()
+    no_git = dict(drill._env(), PATH=str(Path(sys.executable).parent))
+    step = drill._call("pm approve (no git)", arguments, no_git)
+    assert step.returncode != 0, drill.transcript()
+    git(drill.root, "symbolic-ref", "HEAD", "refs/heads/nothing-here")
+    step = drill._call("pm approve (HEAD nowhere)", arguments)
+    assert step.returncode != 0 and "拒绝" in step.stderr, drill.transcript()
+    git(drill.root, "symbolic-ref", "HEAD", "refs/heads/" + git(drill.root, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()[0])
+    assert ledger_snapshot(drill) == before
+
+
+def test_p10_the_pin_is_looked_up_where_the_approval_is_written(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Audit 72 high-2: an empty --control-root used to skip the PIN while -w still received the approval."""
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    commit_approver_pin(drill)
+    card = _planned_card(drill, "REQ-PIN-P10")
+    empty = tmp_path / "empty-control-root"
+    empty.mkdir()
+    before = ledger_snapshot(drill)
+    for arguments in (
+        ("change", "transition", card["change_id"], "--to", "approved", "--approver", APPROVER, "--pid", PROJECT_ID),
+        ("decision", "create", "--change-id", card["change_id"], "--approver", APPROVER, "--pid", PROJECT_ID),
+    ):
+        step = drill._call(
+            " ".join(arguments[:2]) + " (--control-root)",
+            [sys.executable, str(drill.tools / "launcher.py"), "-w", str(drill.root), "--control-root", str(empty), *arguments],
+        )
+        assert step.returncode != 0 and "批准口令" in step.stdout + step.stderr, drill.transcript()
+    assert ledger_snapshot(drill) == before
+
+
+def test_p11_generic_state_commands_are_no_side_doors(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Audit 72 high-3: ``continuity mission transition --to ACCEPTED`` is no acceptance; the real one records the key."""
+
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    lane = Lane(drill, "REQ-PIN-P11", comment_files(drill.root, "批准口令：侧门"))
+    commit_approver_pin(drill)
+    lane.start()
+    lane.write()
+    lane.transition("VERIFYING")
+    assert lane.verify().returncode == 0, drill.transcript()
+    mission = ContinuityStore(drill.root).get_mission(lane.mission_id)
+    assert mission.state.value == "ACCEPTANCE_PENDING"
+    side = drill.cli(
+        "continuity", "mission", "transition", "--mission-id", lane.mission_id, "--to", "ACCEPTED",
+        "--expected-version", str(mission.version), "--idempotency-key", "p11-side-door",
+    )
+    assert side.returncode != 0 and "pm accept" in side.stderr, drill.transcript()
+    assert ContinuityStore(drill.root).get_mission(lane.mission_id).state.value == "ACCEPTANCE_PENDING"
+    assert lane.close().returncode != 0, "没验收就收口了"
+    # The user's acceptance leaves the key's reference in the transition record, so who accepted can be told afterwards.
+    accepted = cli_in_terminal(drill, [USER_PIN], "pm", "accept", "--mission-id", lane.mission_id)
+    assert accepted.returncode == 0, drill.transcript()
+    with sqlite3.connect(drill.root / ".auto-pm" / "continuity.db") as connection:
+        keys = [row[0] for row in connection.execute("SELECT idempotency_key FROM events WHERE aggregate_id=?", (lane.mission_id,))]
+    assert any(key.startswith("pm-accept:") and "user-confirmation:pin-" in key for key in keys), keys
+    # Work: a plain transition to READY is refused too (it skipped work authorize); covered in tests/core/test_approval_proof_service.py.

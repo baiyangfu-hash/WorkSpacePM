@@ -563,8 +563,9 @@ def cmd_transition(
     """状态流转（更新变更单章节并持久化状态）；批准（approved）在已启用批准口令时须用户本人在终端输入口令。"""
     app_ctx: AppContext = ctx.obj
     if new_status == "approved":
+        # The PIN is looked up in the very root ChangeService writes to (audit 72, high-2).
         proof = require_approval_pin(
-            ctx, summary=f"批准变更单 {change_number}", purpose="change-approve", subject=f"{pid or ''}:{change_number}",
+            app_ctx.workspace_root, summary=f"批准变更单 {change_number}", purpose="change-approve", subject=f"{pid or ''}:{change_number}",
             approver=approver,
         )
         if proof is not None:

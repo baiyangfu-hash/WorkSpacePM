@@ -13,7 +13,8 @@ terminal and clear its own environment markers.  What an agent does not have is 
 - With a committed verifier, a scope approval and a final acceptance need the PIN, on every entrance (``pm approve``,
   ``pm accept``, the cockpit buttons, the thin SDK).  The approver name and the evidence reference then come from the
   verified key, not from the caller.  A wrong PIN writes nothing; five wrong PINs in a row lock approvals for 15 minutes.
-- Without a committed verifier the old format check still applies (rollout: the user's first commit switches it on).
+- Without a committed verifier the old format check still applies (rollout: the user's first commit switches it on),
+  but only when that is provably so; anything unreadable refuses (see ``committed_state``).
 
 The PIN is read from an interactive terminal only (hidden input).  It is never an option, an environment variable or a
 file, so an agent has no channel to pass one it was told; it must never ask the user for it.
@@ -24,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import subprocess
 from dataclasses import dataclass
@@ -32,7 +34,7 @@ from pathlib import Path
 
 REGISTRY_RELATIVE_PATH = "SYS-2026-001_WorkspaceGovernance/approvers.json"
 SCHEMA_VERSION = "approvers.v1"
-MIN_PIN_LENGTH = 8
+MIN_PIN_LENGTH = 10
 MAX_FAILURES = 5
 LOCKOUT = timedelta(minutes=15)
 # scrypt cost for a new verifier: about 64 MiB and a fraction of a second, so a guessed PIN costs the same for anyone.
@@ -166,20 +168,73 @@ class ApprovalProofService:
         return self._root / REGISTRY_RELATIVE_PATH
 
     def committed_keys(self) -> list[ApproverKey] | None:
-        """The verifiers in Git HEAD, or None when HEAD has no registry (format-only approvals, the old behaviour)."""
+        """The verifiers in Git HEAD, or None only when the PIN was provably never set up (the old format check).
 
+        Fails closed (audit 72, high-1): anything that keeps the committed file from being read - an inherited
+        ``GIT_DIR``, no ``git`` on PATH, a HEAD that points nowhere, a repository that is not this root - refuses every
+        approval instead of falling back.  So does a registry that exists in the working tree but not in HEAD, or one
+        that ever existed in the history but is gone from HEAD: once switched on, the PIN cannot be switched off by
+        moving HEAD or deleting the file.
+        """
+
+        keys, problem = self.committed_state()
+        if problem:
+            raise ApprovalProofError(problem)
+        return keys
+
+    def committed_state(self) -> tuple[list[ApproverKey] | None, str]:
+        """(keys or None, '') when the state is clear; (None, reason) when approvals must be refused."""
+
+        if not (self._root / ".git").exists():
+            # Not a Git working tree at all (a scratch workspace): there is no committed file to read.
+            return None, ""
+        refuse = f"读不到 Git 里已提交的批准人登记文件（{REGISTRY_RELATIVE_PATH}），为安全起见所有批准一律拒绝："
         try:
-            shown = subprocess.run(
-                ["git", "-C", str(self._root), "show", f"HEAD:{REGISTRY_RELATIVE_PATH}"],
-                capture_output=True,
-                check=False,
-                timeout=30,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-        if shown.returncode != 0:
-            return None
-        return parse_registry(shown.stdout.decode("utf-8", errors="replace"))
+            top = self._git("rev-parse", "--show-toplevel")
+            if top.returncode != 0 or Path(top.stdout.decode("utf-8", "replace").strip()).resolve() != self._root:
+                return None, refuse + "Git 仓库不是这个控制根"
+            head = self._git("rev-parse", "--verify", "-q", "HEAD^{commit}")
+            if head.returncode != 0:
+                refs = self._git("for-each-ref", "--count=1")
+                if refs.returncode == 0 and not refs.stdout.strip() and not self.registry_path.exists():
+                    return None, ""  # a brand-new repository with no commit yet
+                return None, refuse + "HEAD 不指向任何提交"
+            listed = self._git("ls-tree", "--name-only", "HEAD", "--", REGISTRY_RELATIVE_PATH)
+            if listed.returncode != 0:
+                return None, refuse + "git ls-tree 出错"
+            if not listed.stdout.strip():
+                if self.registry_path.exists():
+                    return None, (
+                        f"批准人登记文件 {REGISTRY_RELATIVE_PATH} 还没提交（或已被移出 HEAD）；"
+                        "请先提交它，提交前所有批准一律拒绝"
+                    )
+                ever = self._git("rev-list", "-n", "1", "--all", "--", REGISTRY_RELATIVE_PATH)
+                if ever.returncode != 0:
+                    return None, refuse + "git rev-list 出错"
+                if ever.stdout.strip():
+                    return None, refuse + "批准口令曾经启用过，现在 HEAD 里却没有登记文件"
+                return None, ""
+            shown = self._git("show", f"HEAD:{REGISTRY_RELATIVE_PATH}")
+            if shown.returncode != 0:
+                return None, refuse + "git show 出错"
+        except (OSError, subprocess.SubprocessError) as error:
+            return None, refuse + f"无法运行 git（{type(error).__name__}）"
+        try:
+            return parse_registry(shown.stdout.decode("utf-8", errors="replace")), ""
+        except ApprovalProofError as error:
+            return None, str(error)
+
+    def _git(self, *arguments: str) -> subprocess.CompletedProcess[bytes]:
+        """git in this root only: inherited GIT_* variables (GIT_DIR, GIT_WORK_TREE, ...) could point it elsewhere."""
+
+        environment = {name: value for name, value in os.environ.items() if not name.upper().startswith("GIT_")}
+        return subprocess.run(
+            ["git", "-C", str(self._root), *arguments],
+            capture_output=True,
+            check=False,
+            timeout=30,
+            env=environment,
+        )
 
     def enforced(self) -> bool:
         return self.committed_keys() is not None

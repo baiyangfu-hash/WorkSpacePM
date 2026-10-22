@@ -1249,7 +1249,7 @@ class PmFacadeService:
         if mission.state is MissionState.ACCEPTANCE_PENDING:
             self._require_current_acceptance_checkpoint(mission)
             try:
-                ApprovalProofService(self._workspace_root).require(
+                proof = ApprovalProofService(self._workspace_root).require(
                     pin=approval_pin, purpose="accept", subject=mission.mission_id
                 )
             except ApprovalProofError as error:
@@ -1259,6 +1259,8 @@ class PmFacadeService:
                 MissionState.ACCEPTED,
                 root_work_id=mission.root_work_id,
                 action="accept",
+                # The PIN reference (key id) stays in the transition record, so who accepted can be told afterwards.
+                evidence=proof.evidence_ref if proof is not None else "format-only:pm-accept",
             )
         if mission.state is not MissionState.ACCEPTED:
             raise PmFacadeError("当前 Mission 尚未到达用户验收门")
@@ -1474,7 +1476,11 @@ class PmFacadeService:
         *,
         root_work_id: str | None,
         action: str,
+        evidence: str = "",
     ) -> Mission:
+        key = f"pm-{action}:{mission.mission_id}:v{mission.version}"
+        if evidence.startswith("user-confirmation:"):
+            key += f":{evidence}"
         try:
             return cast(
                 Mission,
@@ -1483,7 +1489,8 @@ class PmFacadeService:
                     expected_version=mission.version,
                     new_state=new_state,
                     root_work_id=root_work_id,
-                    idempotency_key=f"pm-{action}:{mission.mission_id}:v{mission.version}",
+                    idempotency_key=key,
+                    acceptance_evidence=evidence,
                 ),
             )
         except MissionServiceError as error:

@@ -189,7 +189,7 @@ def sign_risk_pm(ctx: click.Context, run_id: str, claimant_id: str) -> None:
         raise click.ClickException("未输入“接受风险”，未签署")
     # A pseudo terminal and a cleared environment pass the checks above; the user's PIN (gap 9) does not.
     proof = require_approval_pin(
-        ctx, summary=f"签署接受风险：Run {run_id} → {claimant_id}", purpose="sign-risk", subject=f"{run_id}:{claimant_id}"
+        ctx.find_root().obj.control_root, summary=f"签署接受风险：Run {run_id} → {claimant_id}", purpose="sign-risk", subject=f"{run_id}:{claimant_id}"
     )
     try:
         signature = service.sign_risk(

@@ -54,6 +54,13 @@ def _facade(ctx: click.Context) -> PmFacadeService:
     )
 
 
+def _control_root_path(ctx: click.Context) -> str:
+    """The root the Facade writes to; the approval PIN is looked up in the same root (audit 72, high-2)."""
+
+    app_ctx: AppContext = ctx.find_root().obj
+    return str(app_ctx.control_root)
+
+
 def _require_control_root(ctx: click.Context) -> None:
     app_ctx: AppContext = ctx.find_root().obj
     WorktreePolicyService(app_ctx.control_root).require_control_root()
@@ -783,7 +790,7 @@ def approve_pm(
     if root_work_id:
         raise click.ClickException("新需求批准不允许手工传入 --root-work-id")
     # With a committed approver PIN the approver and evidence come from the PIN, so only the hash is required.
-    pin_required = approval_pin_enforced(ctx)
+    pin_required = approval_pin_enforced(_control_root_path(ctx))
     missing = [
         name
         for name, value in (
@@ -796,7 +803,7 @@ def approve_pm(
     if missing:
         raise click.ClickException("新需求批准缺少必填参数: " + ", ".join(missing))
     approval_pin = read_approval_pin(
-        ctx, summary=f"批准范围卡：请求 {request_id or '(新需求)'}，方案哈希 {plan_hash[:16]}…（确认这就是你看过的那张卡）"
+        _control_root_path(ctx), summary=f"批准范围卡：请求 {request_id or '(新需求)'}，方案哈希 {plan_hash[:16]}…（确认这就是你看过的那张卡）"
     )
     if request_id and not any(
         (
@@ -975,7 +982,7 @@ def execute_pm(
 @click.pass_context
 def accept_pm(ctx: click.Context, mission_id: str) -> None:
     """记录最终用户验收；已启用批准口令时须用户本人在终端输入口令。关闭动作仍受治理门禁约束。"""
-    approval_pin = read_approval_pin(ctx, summary=f"最终验收：任务 {mission_id}（确认你已经看过结果）")
+    approval_pin = read_approval_pin(_control_root_path(ctx), summary=f"最终验收：任务 {mission_id}（确认你已经看过结果）")
     try:
         _require_control_root(ctx)
         card = _facade(ctx).accept(mission_id, approval_pin=approval_pin)

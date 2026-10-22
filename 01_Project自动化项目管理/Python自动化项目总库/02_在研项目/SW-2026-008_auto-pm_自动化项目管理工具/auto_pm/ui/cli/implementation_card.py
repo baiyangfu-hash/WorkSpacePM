@@ -167,7 +167,7 @@ def validate_card(ctx: click.Context, card_id: str) -> None:
 def approve_card(ctx: click.Context, card_id: str, approver: str, approval_evidence: str) -> None:
     """Attach external user approval to an already reviewed card (the user's PIN once one is committed, gap 9)."""
     proof = require_approval_pin(
-        ctx, summary=f"批准实施卡 {card_id}", purpose="card-approve", subject=card_id, approver=approver
+        Path(ctx.find_root().obj.control_root), summary=f"批准实施卡 {card_id}", purpose="card-approve", subject=card_id, approver=approver
     )
     if proof is not None:
         approver, approval_evidence = proof.approver, proof.evidence_ref
