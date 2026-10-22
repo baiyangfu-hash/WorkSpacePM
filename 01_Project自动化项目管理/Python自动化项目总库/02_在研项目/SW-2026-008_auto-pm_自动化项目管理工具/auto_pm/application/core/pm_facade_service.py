@@ -33,11 +33,7 @@ from auto_pm.core.local_execution_orchestrator import (
     LocalExecutionOrchestrator,
     LocalExecutionOrchestratorError,
 )
-from auto_pm.core.mission_admission import (
-    ADMISSION_RELEASE_HINT,
-    AdmissionVerdict,
-    admission_verdict,
-)
+from auto_pm.core.mission_admission import AdmissionVerdict, admission_verdict, release_problem
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
@@ -851,8 +847,8 @@ class PmFacadeService:
             verdict = admission_verdict(self._store.list_missions(subject_project_id), scope_paths)
         except ContinuityStoreError as error:
             raise PmFacadeError(str(error)) from error
-        if verdict.needs_user_release and not admission_release_ref.strip():
-            raise PmFacadeError(verdict.reason() + ADMISSION_RELEASE_HINT)
+        if problem := release_problem(verdict, admission_release_ref):
+            raise PmFacadeError(problem)
         return verdict
 
     def admission_check_for_card(self, card: PlanningScopeCard, admission_release_ref: str) -> None:

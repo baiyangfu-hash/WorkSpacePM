@@ -460,7 +460,7 @@ def test_the_sdk_admits_a_colliding_card_only_with_the_users_release(tmp_path: P
         client.approve_plan(second, approver=APPROVER, approval_evidence_ref=EVIDENCE)
     assert change_file.read_bytes() == change_before
 
-    client.approve_plan(second, approver=APPROVER, approval_evidence_ref=EVIDENCE, admission_release_ref="user-confirmation:SDK-B")
+    client.approve_plan(second, approver=APPROVER, approval_evidence_ref=EVIDENCE, admission_release_ref="user-confirmation:SDK-B-0001")
     with pytest.raises(CockpitApiError, match="要改同一批文件"):
         client.run(second)  # the Mission is created on run, and is admitted again there
     assert len(ContinuityStore(workspace.root).list_missions(PROJECT_ID)) == 1

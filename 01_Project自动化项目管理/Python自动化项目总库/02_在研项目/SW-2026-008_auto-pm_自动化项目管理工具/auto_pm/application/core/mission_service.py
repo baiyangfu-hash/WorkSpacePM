@@ -22,7 +22,7 @@ from auto_pm.contracts.mission import (
 from auto_pm.contracts.pm_facade import PlanningDraft
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
-from .mission_admission import ADMISSION_RELEASE_HINT, AdmissionVerdict, admission_verdict
+from .mission_admission import AdmissionVerdict, admission_verdict, release_problem
 
 
 class MissionServiceError(RuntimeError):
@@ -141,8 +141,8 @@ class MissionService:
         others = [item for item in missions if item.mission_id != mission_id]
         verdict = admission_verdict(others, scope_paths)
         exists = len(others) != len(missions)
-        if not exists and verdict.needs_user_release and not admission_release_ref.strip():
-            raise MissionServiceError(verdict.reason() + ADMISSION_RELEASE_HINT)
+        if not exists and (problem := release_problem(verdict, admission_release_ref)):
+            raise MissionServiceError(problem)
         limit = verdict.open_count + 1 if verdict.over_limit else OPEN_MISSION_SOFT_LIMIT
         return limit, verdict
 

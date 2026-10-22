@@ -1862,7 +1862,7 @@ def test_mission_cli_create_is_admitted_like_pm_approve(cli_runner: CliRunner, t
     assert refused.exit_code != 0 and "要改同一批文件" in refused.output and "--admission-release-ref" in refused.output
     assert [item.mission_id for item in store.list_missions("SW-TEST-001")] == ["MISSION-CLI-A"]
 
-    released = _invoke(cli_runner, tmp_path, _create_args("MISSION-CLI-B", "--admission-release-ref", "user-confirmation:CLI-B"))
+    released = _invoke(cli_runner, tmp_path, _create_args("MISSION-CLI-B", "--admission-release-ref", "user-confirmation:CLI-B-0001"))
     assert released.exit_code == 0, released.output
     assert [other for other, _paths in store.list_mission_overlaps("MISSION-CLI-A")] == ["MISSION-CLI-B"]
     # a retry of the same card is not a new card

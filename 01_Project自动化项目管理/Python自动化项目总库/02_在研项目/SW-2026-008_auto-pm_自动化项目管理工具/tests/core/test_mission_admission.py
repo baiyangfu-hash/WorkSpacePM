@@ -172,7 +172,7 @@ def test_a_release_record_cannot_be_replayed_with_other_content(sw: Switch) -> N
             open_count=9,
             over_limit=True,
             overlaps=(),
-            release_ref="user-confirmation:OTHER",
+            release_ref="user-confirmation:OTHER-0001",
             idempotency_key="admit-MISSION-B",
             now=sw.clock.value.isoformat(),
         )

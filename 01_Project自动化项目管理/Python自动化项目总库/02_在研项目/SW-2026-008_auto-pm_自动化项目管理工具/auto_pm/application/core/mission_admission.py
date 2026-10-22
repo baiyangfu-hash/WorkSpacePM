@@ -13,7 +13,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from auto_pm.contracts.mission import OPEN_MISSION_SOFT_LIMIT, Mission, MissionState
+from auto_pm.contracts.mission import (
+    OPEN_MISSION_SOFT_LIMIT,
+    Mission,
+    MissionState,
+    user_evidence_problem,
+)
 from auto_pm.infrastructure.control_root_guard import authority_path_parts
 
 ADMISSION_RELEASE_HINT = "（命令行加 --admission-release-ref 写明用户原话的位置）"
@@ -96,3 +101,15 @@ def admission_verdict(
         if hit:
             overlaps.append(ScopeOverlap(mission.mission_id, mission.title, hit))
     return AdmissionVerdict(open_count=len(live), limit=limit, overlaps=tuple(overlaps))
+
+
+def release_problem(verdict: AdmissionVerdict, admission_release_ref: str) -> str:
+    """Why a new card cannot be admitted: no release where one is needed, or words that are not the user's own."""
+
+    if not verdict.needs_user_release:
+        return ""
+    release = admission_release_ref.strip()
+    if not release:
+        return verdict.reason() + ADMISSION_RELEASE_HINT
+    problem = user_evidence_problem(release)
+    return f"{verdict.reason()}；放行凭据不合格：{problem}" if problem else ""

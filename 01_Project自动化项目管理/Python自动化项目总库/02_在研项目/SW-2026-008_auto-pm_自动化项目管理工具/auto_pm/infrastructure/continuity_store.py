@@ -8380,6 +8380,8 @@ class ContinuityStore:
 
         mission_id = self._validated_run_text(mission_id, label="mission_id")
         release_ref = self._validated_run_text(release_ref, label="用户放行凭据")
+        if problem := user_evidence_problem(release_ref):
+            raise ContinuityStoreError(problem)
         idempotency_key = self._validated_idempotency_key(idempotency_key)
         payload = {
             "schema_version": "mission-admission-released.v1",
