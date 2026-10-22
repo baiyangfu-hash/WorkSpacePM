@@ -134,3 +134,14 @@ def test_m12_generated_shared_libraries_are_recognised_by_their_copier_mode(tmp_
     (tmp_path / ".copier-answers.yml").unlink()
     (tmp_path / ".plc.json").write_text('{"name": "MyLib", "project_type": "shared_library"}', encoding="utf-8")
     assert not ms.check_project(str(tmp_path)).applicable
+
+
+def test_m13_dates_fromisoformat_accepts_but_the_template_forbids_are_rejected(tmp_path: Path) -> None:
+    # Python 3.11+ date.fromisoformat also takes basic and week forms; only YYYY-MM-DD is allowed.
+    text = (FILLED.format(origin="新项目")
+            .replace("| 编程 | 2026-11-05 |", "| 编程 | 20261105 |")
+            .replace("| 仿真 | 2026-11-15 |", "| 仿真 | 2026-W46-1 |")
+            .replace("| 需求 | 2026-10-01 | 2026-10-03 |", "| 需求 | 2026-10-01 | 2026-276 |"))
+    write(tmp_path, text)
+    assert kinds(ms.check_project(str(tmp_path))) == [
+        ("actual", "需求", "fail"), ("planned", "编程", "fail"), ("planned", "仿真", "fail")]
