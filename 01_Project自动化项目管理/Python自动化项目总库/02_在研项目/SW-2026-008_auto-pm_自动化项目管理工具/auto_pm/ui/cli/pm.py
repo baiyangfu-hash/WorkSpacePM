@@ -867,10 +867,7 @@ def approve_pm(
     ]
     if missing:
         raise click.ClickException("新需求批准缺少必填参数: " + ", ".join(missing))
-    approval_pin = read_approval_pin(
-        _control_root_path(ctx), summary=f"批准范围卡：请求 {request_id or '(新需求)'}，方案哈希 {plan_hash[:16]}…（确认这就是你看过的那张卡）"
-    )
-    if request_id and not any(
+    by_hash = request_id and not any(
         (
             project_id,
             objective,
@@ -886,7 +883,17 @@ def approve_pm(
             checks,
             rollback,
         )
-    ):
+    )
+    if by_hash and pin_required:
+        # The user should not type the PIN only to learn the saved card cannot be approved anyway.
+        try:
+            _facade(ctx).check_pending_planning_scope_card(request_id, expected_plan_hash=plan_hash)
+        except PmFacadeError as error:
+            raise click.ClickException(str(error)) from error
+    approval_pin = read_approval_pin(
+        _control_root_path(ctx), summary=f"批准范围卡：请求 {request_id or '(新需求)'}，方案哈希 {plan_hash[:16]}…（确认这就是你看过的那张卡）"
+    )
+    if by_hash:
         if ctx.get_parameter_source("owner") is ParameterSource.COMMANDLINE:
             raise click.ClickException("按哈希批准已保存范围卡时不支持 --owner")
         if classified:

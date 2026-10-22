@@ -803,6 +803,17 @@ class PmFacadeService:
         except (ContinuityStoreError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
 
+    def check_pending_planning_scope_card(self, request_id: str, *, expected_plan_hash: str) -> None:
+        """Read-only pre-check of a saved card (exists, current revision, seven fields), so a refusal comes before the PIN."""
+
+        try:
+            submitted = self._store.get_submitted_planning_scope_card(request_id, expected_plan_hash)
+        except (ContinuityStoreError, ValueError) as error:
+            raise PmFacadeError(str(error)) from error
+        if submitted.superseded:
+            raise PmFacadeError("该范围卡已被新修订取代，请批准最新修订")
+        self._require_card_checklist(submitted.card)
+
     def approve_pending_planning_scope_card(
         self,
         request_id: str,

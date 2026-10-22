@@ -67,6 +67,24 @@ def test_a_root_that_is_not_a_git_working_tree_keeps_the_old_check(tmp_path: Pat
     assert ApprovalProofService(tmp_path).committed_keys() is None
 
 
+def test_a_folder_below_the_repository_follows_the_repository(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit 72 re-review: a sub folder has no .git of its own; it must not shed the PIN its repository enforces."""
+
+    folder = root / "0100_PLC自动化" / "DJ"
+    folder.mkdir(parents=True)
+    assert ApprovalProofService(folder).committed_state() == (None, "")  # repository not enforced: old check
+    _commit_pin(root)
+    for environment_path in (None, ""):  # also when git cannot be found
+        if environment_path is not None:
+            monkeypatch.setenv("PATH", environment_path)
+        keys, problem = ApprovalProofService(folder).committed_state()
+        assert keys is None and "必须在控制根运行" in problem
+        with pytest.raises(ApprovalProofError, match="必须在控制根运行"):
+            ApprovalProofService(folder).resolve(
+                pin="", approver="baiyang", evidence_ref="user-confirmation:x-12345678", purpose="p", subject="s"
+            )
+
+
 def test_unreadable_committed_state_refuses_instead_of_falling_back(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Audit 72 high-1: GIT_DIR, no git on PATH and a HEAD that points nowhere used to switch the PIN off."""
 

@@ -336,3 +336,32 @@ def test_p11_generic_state_commands_are_no_side_doors(tmp_path: Path, benchmark_
         keys = [row[0] for row in connection.execute("SELECT idempotency_key FROM events WHERE aggregate_id=?", (lane.mission_id,))]
     assert any(key.startswith("pm-accept:") and "user-confirmation:pin-" in key for key in keys), keys
     # Work: a plain transition to READY is refused too (it skipped work authorize); covered in tests/core/test_approval_proof_service.py.
+
+
+def test_p12_a_folder_below_the_control_root_is_no_way_around_the_pin(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Audit 72 re-review: ``-w <control root>/0100_PLC自动化`` has no .git of its own but still writes the real CHG."""
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    commit_approver_pin(drill)
+    card = _planned_card(drill, "REQ-PIN-P12")
+    chg = next(drill.root.rglob(f"{card['change_id']}.md"))
+    for state in ("submitted", "under_review"):  # not approvals: they bring the CHG to where approval is next
+        assert drill.cli("change", "transition", card["change_id"], "--to", state, "--pid", PROJECT_ID).returncode == 0, drill.transcript()
+    before = ledger_snapshot(drill)
+    for folder in [drill.root / part for part in chg.relative_to(drill.root).parents][::-1][1:]:
+        step = drill._call(
+            "change transition (subfolder)",
+            [sys.executable, str(drill.tools / "launcher.py"), "-w", str(folder), "--control-root", str(folder),
+             "change", "transition", card["change_id"], "--to", "approved", "--approver", APPROVER, "--pid", PROJECT_ID],
+        )
+        assert step.returncode != 0, drill.transcript()
+    assert ledger_snapshot(drill) == before, "子目录当工作区批准了真变更单"
+
+
+def test_p13_a_card_that_cannot_be_approved_is_refused_before_the_pin_is_asked(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    drill = make_drill(tmp_path, benchmark_tar)
+    commit_approver_pin(drill)
+    _planned_card(drill, "REQ-PIN-P13")
+    refused = cli_in_terminal(drill, [USER_PIN], "pm", "approve", "--request-id", "REQ-PIN-P13", "--plan-hash", "b" * 64)
+    assert refused.returncode != 0 and "范围卡不存在" in refused.stderr, drill.transcript()
+    assert "请输入批准口令" not in refused.stderr, "卡本身批不了，却先让用户输了口令"
