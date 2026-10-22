@@ -986,8 +986,10 @@ def test_td105_writes_on_one_thread_never_fail_while_another_thread_keeps_readin
                 if "BUSY" not in str(error):
                     read_errors.append(str(error))
 
-    reader = threading.Thread(target=keep_reading, daemon=True)
-    reader.start()
+    # Two readers share one store, as the cockpit's refresh and its own closure worker do.
+    readers = [threading.Thread(target=keep_reading, daemon=True) for _ in range(2)]
+    for reader in readers:
+        reader.start()
     try:
         writer = WorkRegistryService(tmp_path, now=lambda: "2026-09-09T12:00:00+00:00")
         for index in range(2, 14):
@@ -996,10 +998,11 @@ def test_td105_writes_on_one_thread_never_fail_while_another_thread_keeps_readin
             writer.transition(work_id, WorkState.IN_PROGRESS, f"start-{work_id}")
     finally:
         stop.set()
-        reader.join(timeout=30)
+        for reader in readers:
+            reader.join(timeout=30)
         reader_store.close_read_snapshot()
 
-    assert not reader.is_alive()
+    assert not any(reader.is_alive() for reader in readers)
     assert read_errors == []
     assert reads, "the reader never got a snapshot"
     assert ContinuityStore(tmp_path).get_work("WORK-013").state is WorkState.IN_PROGRESS
