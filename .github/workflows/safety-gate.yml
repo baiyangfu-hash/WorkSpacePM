@@ -1,5 +1,7 @@
 # PR 安全区检查：PR 碰到 PLC 安全区（急停、安全门、光栅、安全继电器、只靠软件的防撞联锁……）时，
 # 必须有用户本人在 PR 页面评论“安全签字 <头提交号>”才放行；OR TRUE 旁路、安全点漏引用直接判不通过，签字也放不行。
+# 计划栏④（审计 69 的两条联锁）：PR 描述里“安全回路: 是”一律要签字；“安全回路: 否”却碰了安全区，同样要签字并点明不一致。
+# 改 PR 描述（edited）也会重跑。批准记录在本机账本里，CI 读不到，合并前由主执行在本机用 --decision 核对一次。
 # 说明见 reviews/安全区签字检查_说明.md。
 #
 # 结果以提交状态 `safety-zone` 回报到 PR 头提交上，main 分支保护把 `safety-zone` 设为必过检查。
@@ -15,7 +17,7 @@ name: safety-gate
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
   issue_comment:
     types: [created, edited, deleted]
 
@@ -91,6 +93,7 @@ jobs:
           git -c core.symlinks=false -c filter.lfs.smudge= -c filter.lfs.process= -c filter.lfs.required=false \
             worktree add --detach "$RUNNER_TEMP/pr-head" "$HEAD_SHA"
           gh api --paginate --slurp "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" > "$RUNNER_TEMP/comments.json"
+          jq -r '.body // ""' "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/pr-body.txt"
 
       - name: Safety zone check
         if: steps.pr.outputs.base_ref == 'main' && steps.pr.outputs.state == 'open'
@@ -101,7 +104,8 @@ jobs:
           set +e
           python -I "$GITHUB_WORKSPACE/reviews/tools/safety_zone_check.py" --ci \
             --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$RUNNER_TEMP/pr-head" \
-            --comments "$RUNNER_TEMP/comments.json" --status-out "$RUNNER_TEMP/status.json"
+            --comments "$RUNNER_TEMP/comments.json" --pr-body-file "$RUNNER_TEMP/pr-body.txt" \
+            --status-out "$RUNNER_TEMP/status.json"
           code=$?
           set -e
           # 0 通过、1 不通过都是正常判定；2 是出错，让本任务失败，状态由最后一步标成 error

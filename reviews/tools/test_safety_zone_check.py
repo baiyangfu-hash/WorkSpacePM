@@ -357,3 +357,237 @@ def test_s09_cli_without_signature_reports_failure_status(repo: Path, tmp_path: 
 
 def test_s10_ci_mode_refuses_to_judge_its_own_checkout() -> None:
     assert gate.main(["--ci", "--base", "HEAD", "--head", "HEAD", "--repo", str(gate.TOOL_ROOT)]) == 2
+
+
+# ---------------------------------------------------------------- 计划栏④ 联锁（审计 69）
+
+PY = "01_Project自动化项目管理/x/tool.py"
+SAFE_BODY = "## 说明\n改急停\n\n安全回路: 是\n"
+NO_BODY = "## 说明\n只改送料\n\n安全回路: 否\n"
+
+
+def test_p01_plan_yes_needs_signature_even_without_touching_the_zone(repo: Path) -> None:
+    base, head = commit(repo, {DOC: "改了说明\n"})
+    result = gate.check(repo, base, head, plan="是")
+    assert not result.passed and not result.violations
+    assert gate.PLAN_KEY in result.touched
+    assert gate.check(repo, base, head, [sign(head)], plan="是").passed
+
+
+def test_p02_plan_yes_locks_a_pr_that_touches_no_plc_file_at_all(repo: Path) -> None:
+    base, head = commit(repo, {PY: "print(1)\n"})
+    assert gate.check(repo, base, head).passed  # 反例：没填计划栏时这个 PR 不要签字
+    result = gate.check(repo, base, head, plan="是")
+    assert not result.passed
+    assert gate.status(result) == ("failure", "计划填了涉及安全回路：等用户在 PR 上评论“安全签字 <头提交号>”")
+
+
+def test_p03_plan_no_but_listed_safety_file_changed_is_a_mismatch(repo: Path) -> None:
+    base, head = commit(repo, {ESTOP: ESTOP_SRC + "// 只改注释\n"})
+    result = gate.check(repo, base, head, plan="否")
+    assert result.plan_mismatch and not result.passed
+    assert "计划与改动不一致" in "\n".join(result.touched[gate.PLAN_KEY])
+    assert gate.status(result)[1].startswith("计划填“否”却碰了安全区")
+    assert gate.check(repo, base, head, [sign(head)], plan="否").passed
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {FEED: edit_feed("ESTOP_OK AND i_bSafetyOk", "ESTOP_OK AND i_bSafetyOk AND i_bPart")},  # 区段
+        {FEED: edit_feed("q_bRun := i_bPart AND NOT q_bDone;", "q_bRun := %I0.0 AND i_bPart;")},  # 安全点
+        {MANIFEST: MANIFEST_SRC + "  - EXTRA_OK\n"},  # 清单本身
+    ],
+)
+def test_p04_plan_no_mismatch_covers_every_way_of_touching_the_zone(repo: Path, files: dict) -> None:
+    base, head = commit(repo, files)
+    assert gate.check(repo, base, head, plan="否").plan_mismatch
+
+
+def test_p05_plan_no_on_an_unmarked_project_is_a_mismatch(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path, marked=False)
+    base, head = commit(repo, {FEED: edit_feed("nTimeout := 10;\n// @", "nTimeout := 15;\n// @")})
+    assert gate.check(repo, base, head, plan="否").plan_mismatch
+
+
+def test_p06_plan_no_and_zone_untouched_passes(repo: Path) -> None:
+    base, head = commit(repo, {FEED: edit_feed("nTimeout := 10;\n// @", "nTimeout := 15;\n// @")})
+    result = gate.check(repo, base, head, plan="否")
+    assert result.passed and not result.plan_mismatch and not result.touched
+
+
+def test_p07_no_plan_line_keeps_the_old_behaviour(repo: Path) -> None:
+    base, head = touch(repo)
+    result = gate.check(repo, base, head)
+    assert not result.passed and not result.plan_mismatch and gate.PLAN_KEY not in result.touched
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (SAFE_BODY, "是"),
+        (NO_BODY, "否"),
+        ("安全回路：否", "否"),
+        ("**安全回路**：是", "是"),
+        ("④是否涉及安全回路: 是", "是"),
+        ("安全回路: `否`", "否"),
+        ("安全回路: 否\n安全回路：否", "否"),
+        ("> 安全回路: 是", None),
+        ("本卡不涉及安全回路: 是", None),
+        ("- 安全回路说明见附件", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_p08_plan_line_variants(body: str | None, expected: str | None) -> None:
+    value, problems = gate.plan_declaration(body)
+    assert (value, problems) == (expected, [])
+
+
+@pytest.mark.parametrize(
+    ("body", "word"),
+    [("安全回路: 不确定", "只能写 是 或 否"), ("安全回路:", "只能写 是 或 否"), ("安全回路: 是\n安全回路: 否", "不一致")],
+)
+def test_p09_bad_plan_line_is_a_hard_failure_even_with_signature(repo: Path, tmp_path: Path, body: str, word: str) -> None:
+    value, problems = gate.plan_declaration(body)
+    assert value is None and word in problems[0]
+    base, head = touch(repo)
+    comments = tmp_path / "c.json"
+    comments.write_text(json.dumps([sign(head)]), encoding="utf-8")
+    body_file = tmp_path / "body.txt"
+    body_file.write_text(body, encoding="utf-8")
+    out = tmp_path / "status.json"
+    args = ["--base", base, "--head", head, "--repo", str(repo), "--comments", str(comments),
+            "--pr-body-file", str(body_file), "--status-out", str(out)]
+    assert gate.main(args) == 1
+    assert json.loads(out.read_text(encoding="utf-8"))["state"] == "failure"
+
+
+def test_p10_cli_reads_the_plan_from_the_pr_body_file(repo: Path, tmp_path: Path) -> None:
+    base, head = commit(repo, {DOC: "改了说明\n"})
+    body_file = tmp_path / "body.txt"
+    out = tmp_path / "status.json"
+    args = ["--base", base, "--head", head, "--repo", str(repo), "--pr-body-file", str(body_file), "--status-out", str(out)]
+    body_file.write_text(NO_BODY, encoding="utf-8")
+    assert gate.main(args) == 0
+    body_file.write_text(SAFE_BODY, encoding="utf-8")
+    assert gate.main(args) == 1
+    status = json.loads(out.read_text(encoding="utf-8"))
+    assert status["state"] == "failure" and "安全回路" in status["description"]
+    assert len(status["description"]) <= 140
+
+
+def test_p11_ci_mode_refuses_the_local_only_options(tmp_path: Path) -> None:
+    for extra in (["--decision", "DEC-20261022-AAAAAAAA"], ["--pr", "1"]):
+        assert gate.main(["--ci", "--base", "HEAD", "--head", "HEAD", "--repo", str(tmp_path), *extra]) == 2
+    assert gate.main(["--repo", str(tmp_path)]) == 2  # 既没 --pr 也没 --base/--head
+
+
+# ---------------------------------------------------------------- 本机：批准记录 vs PR 描述
+
+DEC = "DEC-20261022-5AFE0001"
+
+
+def write_decision(root: Path, safety: str | None, decision_id: str = DEC) -> Path:
+    """用 SW-2026-008 自己的契约（DecisionPackageDTO、PlanChecklist）写一份批准记录，字段形状与 pm 批准时一致。"""
+
+    for entry in (gate.SW008_ROOT / "auto_pm", gate.SW008_ROOT):
+        if str(entry) not in sys.path:
+            sys.path.insert(0, str(entry))
+    from auto_pm.contracts.decision_package import DecisionPackageDTO
+    from auto_pm.contracts.plan_checklist import AcceptanceCheck, PlanChecklist
+
+    grant: dict = {"adapter": "manual", "approved_model": "manual", "required_worktree_mode": "isolated",
+                   "declared_dirty_paths": ["a.py"]}
+    if safety is not None:
+        checklist = PlanChecklist(original_request="改急停", safety_circuit=safety if safety in ("是", "否") else "",
+                                  acceptance_checks=(AcceptanceCheck(command="pytest", expected_exit_code=0),),
+                                  rollback="git revert")
+        grant["plan_checklist"] = checklist.model_dump(mode="json")
+        grant["plan_checklist"]["safety_circuit"] = safety  # 坏值测试直接写进文件
+    decision = DecisionPackageDTO(
+        decision_id=decision_id, project_id="DJ-TEST-001", change_id="CHG-PLC-2026-001", approved_scope="LOCAL",
+        approver="baiyang", approved_at="2026-10-22T00:00:00+00:00",
+        metadata={"planning_approval": {"schema_version": "planning-approval.v2", "execution_grant": grant}},
+    )
+    path = root / ".auto-pm" / "decisions" / f"{decision_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(decision.to_dict(), ensure_ascii=False), encoding="utf-8")
+    return root
+
+
+
+
+@pytest.mark.parametrize(("safety", "expected"), [("是", "是"), ("否", "否"), (None, None)])
+def test_d01_reads_the_safety_field_from_a_real_decision_file(tmp_path: Path, safety: str | None, expected: str | None) -> None:
+    pytest.importorskip("pydantic")
+    root = write_decision(tmp_path / "control", safety)
+    assert gate.decision_safety(root, DEC) == expected
+
+
+def test_d02_unreadable_or_bad_decision_never_passes(tmp_path: Path) -> None:
+    pytest.importorskip("pydantic")
+    root = tmp_path / "control"
+    root.mkdir()
+    with pytest.raises(gate.DecisionReadError):
+        gate.decision_safety(root, DEC)  # 没有这个文件
+    write_decision(root, "也许")
+    with pytest.raises(gate.DecisionReadError, match="只认"):
+        gate.decision_safety(root, DEC)
+    with pytest.raises(gate.DecisionReadError):
+        gate.decision_safety(root, "../DEC-20261022-5AFE0001")  # 不规范的编号
+
+
+@pytest.mark.parametrize(
+    ("recorded", "declared", "plan", "problem", "note"),
+    [
+        ("是", "是", "是", False, False),
+        ("是", "否", "是", True, False),
+        ("是", None, "是", True, False),
+        ("否", "否", "否", False, False),
+        ("否", "是", "是", False, True),
+        ("否", None, "否", False, True),
+        (None, "是", "是", False, True),
+        (None, None, None, False, True),
+    ],
+)
+def test_d03_reconcile_takes_the_stricter_side(recorded, declared, plan, problem, note) -> None:
+    got_plan, problems, notes = gate.reconcile(recorded, declared, DEC)
+    assert (got_plan, bool(problems), bool(notes)) == (plan, problem, note)
+
+
+def test_d04_cli_recorded_yes_with_body_no_fails_even_with_signature(repo: Path, tmp_path: Path) -> None:
+    pytest.importorskip("pydantic")
+    root = write_decision(tmp_path / "control", "是")
+    base, head = commit(repo, {DOC: "改了说明\n"})
+    body_file = tmp_path / "body.txt"
+    body_file.write_text(NO_BODY, encoding="utf-8")
+    comments = tmp_path / "c.json"
+    comments.write_text(json.dumps([sign(head)]), encoding="utf-8")
+    args = ["--base", base, "--head", head, "--repo", str(repo), "--pr-body-file", str(body_file),
+            "--comments", str(comments), "--decision", DEC, "--control-root", str(root)]
+    assert gate.main(args) == 1  # 描述与批准记录不一致：签字也放不行，先改描述
+    body_file.write_text(SAFE_BODY, encoding="utf-8")
+    assert gate.main(args) == 0
+    comments.write_text("[]", encoding="utf-8")
+    assert gate.main(args) == 1  # 描述对上了，但还没签字
+
+
+def test_d05_cli_recorded_no_but_zone_touched_is_a_mismatch(repo: Path, tmp_path: Path, capsys) -> None:
+    pytest.importorskip("pydantic")
+    root = write_decision(tmp_path / "control", "否")
+    base, head = commit(repo, {ESTOP: ESTOP_SRC + "// 只改注释\n"})
+    body_file = tmp_path / "body.txt"
+    body_file.write_text(NO_BODY, encoding="utf-8")
+    args = ["--base", base, "--head", head, "--repo", str(repo), "--pr-body-file", str(body_file),
+            "--decision", DEC, "--control-root", str(root)]
+    assert gate.main(args) == 1
+    out = capsys.readouterr().out
+    assert f"批准记录 {DEC}填了“否”" in out and "计划与改动不一致" in out
+
+
+def test_d06_cli_missing_decision_is_an_error_not_a_pass(repo: Path, tmp_path: Path) -> None:
+    pytest.importorskip("pydantic")
+    base, head = commit(repo, {DOC: "改了说明\n"})
+    args = ["--base", base, "--head", head, "--repo", str(repo), "--decision", DEC, "--control-root", str(tmp_path)]
+    assert gate.main(args) == 2

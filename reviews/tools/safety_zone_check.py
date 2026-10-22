@@ -19,16 +19,29 @@ PR 改了 ``io_points.csv`` 里涉及安全点的行。
 * **完整性**：清单 ``points`` 和 ``io_points.csv`` 标“安全=是”的每个点，在该项目程序逻辑里（去掉注释和 VAR 声明段）
   至少出现一次（标签名或地址任一即可）。
 
+计划栏④“是否涉及安全回路”（审计 69 要求的两条联锁）：
+
+* PR 描述里单独一行 ``安全回路: 是`` / ``安全回路: 否``（GitHub 上的检查只看得到 PR 描述）。填“是”：不论改到哪些文件都要签字；
+  填“否”但上面任一层认定碰了安全区：同样要签字，并在结论里点明“计划与改动不一致”。写了这一行但值不是 是/否、
+  或写了多行且不一致，直接判不通过（改 PR 描述后自动重跑）。没写这一行时只按改动判定。
+* 批准记录（Decision 元数据 ``execution_grant.plan_checklist.safety_circuit``）只在本机控制根的账本里，CI 读不到；
+  合并前由主执行在本机加 ``--decision DEC-…`` 跑一次：批准记录为“是”而 PR 描述没写“是”，判不通过（先改 PR 描述，
+  让 GitHub 上的硬锁也接上）；批准记录的值同样按上面两条判定。
+
 签字：PR 页面上一条评论，某一行写 ``安全签字 <PR 头提交号，至少 7 位>``。只认 ``SIGNERS`` 里的账号（登录名和数字 ID
 都要对上），经由 GitHub App 发出的评论不算，提交号不是当前头提交的不算（签完再推新提交，签字自动作废）。
 已知漏洞：本机 agent 用用户已登录的 ``gh`` 命令行代发评论，机器分不出来——见说明文档。
 
-本脚本不访问网络、不写仓库：PR 评论由工作流用 ``gh api`` 取好，以 JSON 文件经 ``--comments`` 传入。
+本脚本不写仓库：CI 里 PR 评论和描述由工作流用 ``gh api`` 取好，以文件经 ``--comments`` / ``--pr-body-file`` 传入，
+脚本本身不访问网络。只有本机的 ``--pr`` 用法会调用已登录的 ``gh`` 读 PR、并把 PR 头取到 ``refs/safety/pr-<编号>``。
 
 用法（在仓库根执行）::
 
     python reviews/tools/safety_zone_check.py --base <base sha> --head <head sha> [--repo <被检查的检出>]
-        [--comments <comments.json>] [--status-out <status.json>]
+        [--comments <comments.json>] [--pr-body-file <body.txt>] [--status-out <status.json>]
+
+    # 本机合并前（主执行，控制根上）：读批准记录，与 PR 描述、改动、签字一起判
+    python -B reviews/tools/safety_zone_check.py --pr <PR 编号> --decision <DEC-…> [--control-root <控制根>]
 
 退出码：0 通过（没碰安全区，或碰了且签字有效）；1 不通过；2 用法或 Git 出错。
 """
@@ -63,6 +76,12 @@ SAFETY_YES = frozenset({"是", "y", "yes", "true", "1"})
 # 能签字的人：GitHub 登录名 → 数字用户 ID（ID 不随改名变化，两个都要对上）
 SIGNERS = {"baiyangfu-hash": 246858089}
 
+# 计划栏④：PR 描述里单独一行“安全回路: 是/否”（“是否涉及安全回路”也认）
+PLAN_LINE = re.compile(r"^\s*(?:\*\*)?(?:④\s*)?(?:是否涉及)?安全回路(?:\*\*)?\s*[:：]\s*(.*?)\s*$")
+PLAN_CHOICES = ("是", "否")
+PLAN_KEY = "计划栏④（是否涉及安全回路）"
+DEFAULT_REPO = "baiyangfu-hash/WorkSpacePM"
+SW008_ROOT = TOOL_ROOT / "01_Project自动化项目管理" / "Python自动化项目总库" / "02_在研项目" / "SW-2026-008_auto-pm_自动化项目管理工具"
 SIGN_LINE = re.compile(r"^\s*安全签字\s*[:：]?\s*`?([0-9a-fA-F]{7,40})`?(?:\s.*)?$")
 REGION_START = re.compile(r"@安全区\s*开始")
 REGION_END = re.compile(r"@安全区\s*结束")
@@ -359,6 +378,8 @@ class Result:
     violations: list[str] = field(default_factory=list)
     signature: str | None = None
     notes: list[str] = field(default_factory=list)
+    plan: str | None = None
+    plan_mismatch: bool = False
 
     def touch(self, root: str, reason: str) -> None:
         reasons = self.touched.setdefault(root, [])
@@ -431,7 +452,39 @@ def touched_lines(repo: Path, base: str, head: str, path: str, zone: Zone, resul
                 result.touch(zone.root, f"`{path}` {side}的第 {number} 行引用安全变量 {', '.join(found)}")
 
 
-def check(repo: Path, base: str, head: str, comments: list[dict[str, Any]] | None = None) -> Result:
+def plan_declaration(body: str | None) -> tuple[str | None, list[str]]:
+    """PR 描述里的计划栏④：返回（“是”/“否”/None，问题清单）。写了多行且不一致、或值不是 是/否，都是问题。"""
+
+    values = [m.group(1).strip("`*_ ") for m in (PLAN_LINE.match(line) for line in (body or "").splitlines()) if m]
+    if not values:
+        return None, []
+    bad = sorted({v for v in values if v not in PLAN_CHOICES})
+    if bad:
+        return None, [f"PR 描述里“安全回路”只能写 是 或 否，现在写的是：{'、'.join(bad)}"]
+    if len(set(values)) > 1:
+        return None, ["PR 描述里“安全回路”写了多行且不一致（既有“是”又有“否”），只留一行"]
+    return values[0], []
+
+
+def apply_plan(result: Result, plan: str | None, source: str) -> None:
+    """两条联锁：填“是”一律要签字；填“否”却碰了安全区，同样要签字并点明不一致。须在改动判定之后调用。"""
+
+    result.plan = plan
+    if plan == "是":
+        result.touch(PLAN_KEY, f"{source}填了“是”（涉及安全回路）：不论改到哪些文件都要安全签字")
+    elif plan == "否" and result.touched:
+        result.plan_mismatch = True
+        result.touch(PLAN_KEY, f"{source}填了“否”，但本 PR 改到了安全区（见上）：计划与改动不一致，按安全区处理")
+
+
+def check(
+    repo: Path,
+    base: str,
+    head: str,
+    comments: list[dict[str, Any]] | None = None,
+    plan: str | None = None,
+    plan_source: str = "PR 描述",
+) -> Result:
     result = Result()
     head_sha = git(repo, "rev-parse", f"{head}^{{commit}}").strip()
     files = changed_files(repo, base, head)
@@ -462,6 +515,7 @@ def check(repo: Path, base: str, head: str, comments: list[dict[str, Any]] | Non
                     forbidden(path, text, zone, result)
         completeness(repo, head, head_zone, result)
 
+    apply_plan(result, plan, plan_source)
     if result.needs_signature:
         result.signature = find_signature(comments or [], head_sha, result)
     return result
@@ -501,6 +555,81 @@ def find_signature(comments: list[dict[str, Any]], head_sha: str, result: Result
     return None
 
 
+# ---------------------------------------------------------------- 本机：批准记录
+
+
+class DecisionReadError(RuntimeError):
+    pass
+
+
+def decision_safety(control_root: Path, decision_id: str) -> str | None:
+    """读批准记录（Decision）里的计划栏④：“是”/“否”；#36 之前批的、没有计划栏的返回 None。
+
+    经 SW-2026-008 的 ``DecisionService`` 读，与 pm 同一套校验（规范编号、唯一链接、不漂移、合法 UTF-8）。
+    """
+
+    for entry in (SW008_ROOT / "auto_pm", SW008_ROOT):
+        if str(entry) not in sys.path:
+            sys.path.insert(0, str(entry))
+    try:
+        from auto_pm.domain.change.decision_service import DecisionService
+    except ImportError as error:
+        raise DecisionReadError(f"导入不了 auto_pm（本机用法要在装好依赖的控制根上跑）：{error}") from error
+    try:
+        decision = DecisionService(control_root).get_decision(decision_id)
+    except Exception as error:  # DecisionService 的几种错误都按“读不了”处理，不放行
+        raise DecisionReadError(f"读不了批准记录 {decision_id}：{error}") from error
+    approval = decision.metadata.get("planning_approval")
+    grant = approval.get("execution_grant") if isinstance(approval, dict) else None
+    checklist = grant.get("plan_checklist") if isinstance(grant, dict) else None
+    if checklist is None:
+        return None
+    value = checklist.get("safety_circuit") if isinstance(checklist, dict) else None
+    if value not in PLAN_CHOICES:
+        raise DecisionReadError(f"批准记录 {decision_id} 的计划栏④值不对：{value!r}（只认 是/否）")
+    return value
+
+
+def reconcile(recorded: str | None, declared: str | None, decision_id: str) -> tuple[str | None, list[str], list[str]]:
+    """批准记录 vs PR 描述：返回（按哪个值判，硬问题，提示）。以严的一方为准。"""
+
+    if recorded is None:
+        return declared, [], [f"批准记录 {decision_id} 没有计划栏（计划防呆生效前批的），只按 PR 描述和改动判"]
+    if recorded == "是" and declared != "是":
+        said = "写了“否”" if declared == "否" else "没写"
+        problem = f"批准记录 {decision_id} 计划栏④是“是”，PR 描述却{said}：先把 PR 描述改成单独一行“安全回路: 是”，GitHub 上的硬锁才接得上"
+        return "是", [problem], []
+    if recorded == "否" and declared == "是":
+        return "是", [], [f"PR 描述写“是”，比批准记录 {decision_id} 的“否”严，按“是”处理"]
+    if recorded == "否" and declared is None:
+        return "否", [], ["PR 描述没写“安全回路: 否”，建议补上，让 GitHub 上的检查也做“填否却碰安全区”的核对"]
+    return recorded, [], []
+
+
+def gh_json(*args: str) -> Any:
+    result = subprocess.run(["gh", "api", *args], capture_output=True, text=True, encoding="utf-8", check=False,
+                            stdin=subprocess.DEVNULL)
+    if result.returncode != 0:
+        raise GitError(f"gh api {' '.join(args)}: {result.stderr.strip()}")
+    return json.loads(result.stdout)
+
+
+def fetch_pr(repo: Path, number: int, gh_repo: str) -> tuple[str, str, str, list[dict[str, Any]]]:
+    """本机用法：经已登录的 gh 读 PR（基线、头、描述、评论），把头取到 refs/safety/pr-N。返回（base, head, body, 评论）。"""
+
+    pr = gh_json(f"repos/{gh_repo}/pulls/{number}")
+    comments = flatten(gh_json("--paginate", "--slurp", f"repos/{gh_repo}/issues/{number}/comments?per_page=100"))
+    base, head = pr["base"]["sha"], pr["head"]["sha"]
+    git(repo, "fetch", "--no-tags", "origin", f"+refs/pull/{number}/head:refs/safety/pr-{number}")
+    if git(repo, "rev-parse", f"refs/safety/pr-{number}").strip() != head:
+        raise GitError(f"取到的 PR 头和 GitHub 上的 {head[:8]} 不一致，重跑一次")
+    try:
+        git(repo, "cat-file", "-e", f"{base}^{{commit}}")
+    except GitError:
+        git(repo, "fetch", "--no-tags", "origin", pr["base"]["ref"])
+    return base, head, pr.get("body") or "", comments
+
+
 # ---------------------------------------------------------------- 输出
 
 
@@ -511,14 +640,18 @@ def status(result: Result) -> tuple[str, str]:
         return "success", "没碰安全区"
     if result.signature:
         return "success", "碰了安全区，已有本人对当前提交的有效签字"
+    if result.plan_mismatch:
+        return "failure", "计划填“否”却碰了安全区：等用户在 PR 上评论“安全签字 <头提交号>”"
+    if result.plan == "是" and list(result.touched) == [PLAN_KEY]:
+        return "failure", "计划填了涉及安全回路：等用户在 PR 上评论“安全签字 <头提交号>”"
     return "failure", "碰了安全区：等用户在 PR 上评论“安全签字 <头提交号>”"
 
 
 def render(result: Result, head: str) -> str:
     state, description = status(result)
-    lines = ["## PR 安全区检查", "", f"- 头提交：`{head}`"]
+    lines = ["## PR 安全区检查", "", f"- 头提交：`{head}`", f"- 计划栏④ 是否涉及安全回路：{result.plan or '没写'}"]
     if result.touched:
-        lines.append(f"- 碰到安全区的项目：{len(result.touched)} 个")
+        lines.append(f"- 要签字的原因（按项目和计划栏分组）：{len(result.touched)} 组")
         for root, reasons in result.touched.items():
             lines.append(f"  - `{root}`")
             lines += [f"    - {r}" for r in reasons[:30]]
@@ -539,14 +672,25 @@ def render(result: Result, head: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="PR 安全区检查（只读）")
-    parser.add_argument("--base", required=True, help="PR 基线提交（base.sha）")
-    parser.add_argument("--head", required=True, help="PR 头部提交（head.sha）")
+    parser.add_argument("--base", help="PR 基线提交（base.sha）；用 --pr 时不填")
+    parser.add_argument("--head", help="PR 头部提交（head.sha）；用 --pr 时不填")
+    parser.add_argument("--pr", type=int, help="本机用法：经已登录的 gh 读这个 PR 的基线、头、描述和评论")
+    parser.add_argument("--gh-repo", default=DEFAULT_REPO, help="owner/name（配合 --pr）")
+    parser.add_argument("--pr-body-file", type=Path, help="PR 描述文本（读其中“安全回路: 是/否”一行）")
+    parser.add_argument("--decision", help="本机用法：批准记录编号 DEC-…，读其计划栏④与 PR 描述核对")
+    parser.add_argument("--control-root", type=Path, default=TOOL_ROOT, help="批准记录所在的控制根（默认：脚本所在仓库）")
     parser.add_argument("--repo", type=Path, default=TOOL_ROOT, help="被检查的仓库检出（默认：脚本所在仓库）")
     parser.add_argument("--comments", type=Path, help="PR 评论 JSON（GitHub issue comments API 的输出）")
     parser.add_argument("--status-out", type=Path, help="把提交状态（state/description）写成 JSON，供工作流回报")
     parser.add_argument("--ci", action="store_true", help="CI 模式：裁判与被检查对象必须是两份不同的检出")
     args = parser.parse_args(argv)
     repo = args.repo.resolve()
+    if args.ci and (args.decision or args.pr is not None):
+        print("拒绝运行：CI 里读不到本机账本，--decision / --pr 只在本机用", file=sys.stderr)
+        return 2
+    if args.pr is None and not (args.base and args.head):
+        print("要么给 --pr，要么同时给 --base 和 --head", file=sys.stderr)
+        return 2
     if args.ci and (repo == TOOL_ROOT or TOOL_ROOT.is_relative_to(repo) or repo.is_relative_to(TOOL_ROOT)):
         print(f"拒绝运行：裁判 {TOOL_ROOT} 与被检查的检出 {repo} 必须分开（裁判取自 PR 基线）", file=sys.stderr)
         return 2
@@ -557,11 +701,31 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as error:
             print(f"读不了评论文件：{error}", file=sys.stderr)
             return 2
+    body = ""
+    if args.pr_body_file:
+        try:
+            body = args.pr_body_file.read_text(encoding="utf-8")
+        except OSError as error:
+            print(f"读不了 PR 描述文件：{error}", file=sys.stderr)
+            return 2
+    base, head = args.base, args.head
     try:
-        result = check(repo, args.base, args.head, comments)
-        head_sha = git(repo, "rev-parse", f"{args.head}^{{commit}}").strip()
-    except GitError as error:
-        print(f"git 出错：{error}", file=sys.stderr)
+        if args.pr is not None:
+            base, head, body, fetched = fetch_pr(repo, args.pr, args.gh_repo)
+            comments = comments or fetched
+        declared, plan_problems = plan_declaration(body)
+        plan, source, decision_problems, decision_notes = declared, "PR 描述", [], []
+        if args.decision:
+            recorded = decision_safety(args.control_root.resolve(), args.decision)
+            plan, decision_problems, decision_notes = reconcile(recorded, declared, args.decision)
+            if recorded is not None:
+                source = f"批准记录 {args.decision}" if plan == recorded else "PR 描述"
+        result = check(repo, base, head, comments, plan=plan, plan_source=source)
+        result.violations += plan_problems + decision_problems
+        result.notes += decision_notes
+        head_sha = git(repo, "rev-parse", f"{head}^{{commit}}").strip()
+    except (GitError, DecisionReadError, ValueError, KeyError) as error:
+        print(f"出错：{error}", file=sys.stderr)
         return 2
     report = render(result, head_sha)
     print(report)

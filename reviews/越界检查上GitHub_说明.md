@@ -102,7 +102,7 @@
    - 其他工具：`.agent/rules/project-rule.md`。
 3. **开工位**：在控制根执行 `git worktree add -b <前缀><卡号> .auto-pm/worktrees/<agent> origin/main`。不要另外克隆仓库，否则会出现第二本账。
 4. **先只读定位**：按 `cockpit-entry` 运行 `main.py pm resume <项目号> --json`（D07 部署后改用 `pm orient`）。没有匹配的 Work/Run/Decision 时不改任何文件。
-5. **交 PR 时写明范围**：PR 描述里写 `任务卡: <卡路径>`，或者写 `可改范围` 清单；`gate` 通过后再请人审。不要用 `--no-verify` 跳过本机钩子：CHG 和台账检查只在本机做。
+5. **交 PR 时写明范围**：PR 描述里写 `任务卡: <卡路径>`，或者写 `可改范围` 清单；走 pm 计划出的卡，再照计划第④栏写一行 `安全回路: 是` 或 `安全回路: 否`（安全区检查读它，见 `reviews/安全区签字检查_说明.md` 第 8 节）；`gate` 通过后再请人审。不要用 `--no-verify` 跳过本机钩子：CHG 和台账检查只在本机做。
 
 ## 5. 已验证与未验证
 
