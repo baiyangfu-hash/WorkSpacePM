@@ -185,13 +185,12 @@ class ApprovalProofService:
     def committed_state(self) -> tuple[list[ApproverKey] | None, str]:
         """(keys or None, '') when the state is clear; (None, reason) when approvals must be refused."""
 
-        if not (self._root / ".git").exists():
-            enclosing = next((parent for parent in self._root.parents if (parent / ".git").exists()), None)
-            if enclosing is None:
-                # Not inside any Git working tree (a scratch workspace): there is no committed file to read.
-                return None, ""
+        enclosing = next((parent for parent in self._root.parents if (parent / ".git").exists()), None)
+        if enclosing is not None:
             # A folder below a repository (e.g. ``-w <control root>/0100_PLC自动化``) must not shed the PIN that
-            # repository enforces (audit 72 re-review).  Checked on the file system, so a missing git cannot hide it.
+            # repository enforces, whether or not the folder has a .git of its own (a planted ``git init`` or gitlink
+            # file would otherwise stop the search; audit 72 re-reviews).  Found on the file system, so a missing git
+            # cannot hide it; the enclosing repository's own check walks further up in turn.
             keys, problem = ApprovalProofService(enclosing).committed_state()
             if keys is not None or problem:
                 return None, (
@@ -199,6 +198,8 @@ class ApprovalProofService:
                     "不能用它的子目录当工作区"
                     + (f"；{problem}" if problem else "")
                 )
+        if not (self._root / ".git").exists():
+            # Not inside any PIN-enforcing Git working tree (a scratch workspace): there is no committed file to read.
             return None, ""
         refuse = f"读不到 Git 里已提交的批准人登记文件（{REGISTRY_RELATIVE_PATH}），为安全起见所有批准一律拒绝："
         try:

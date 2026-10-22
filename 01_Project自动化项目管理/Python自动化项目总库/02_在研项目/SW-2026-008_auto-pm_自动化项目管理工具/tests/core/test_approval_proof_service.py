@@ -85,6 +85,21 @@ def test_a_folder_below_the_repository_follows_the_repository(root: Path, monkey
             )
 
 
+def test_a_planted_repository_below_the_control_root_does_not_shed_the_pin(root: Path) -> None:
+    """Audit 72 second re-review: ``git init`` or a gitlink file in a sub folder used to stop the upward search."""
+
+    _commit_pin(root)
+    planted = root / "0100_PLC自动化"
+    planted.mkdir()
+    _git(planted, "init", "-q")
+    gitlink = root / "0200_其他"
+    gitlink.mkdir()
+    (gitlink / ".git").write_text(f"gitdir: {planted / '.git'}\n", encoding="utf-8")
+    for folder in (planted, gitlink):
+        keys, problem = ApprovalProofService(folder).committed_state()
+        assert keys is None and "必须在控制根运行" in problem, folder
+
+
 def test_unreadable_committed_state_refuses_instead_of_falling_back(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Audit 72 high-1: GIT_DIR, no git on PATH and a HEAD that points nowhere used to switch the PIN off."""
 

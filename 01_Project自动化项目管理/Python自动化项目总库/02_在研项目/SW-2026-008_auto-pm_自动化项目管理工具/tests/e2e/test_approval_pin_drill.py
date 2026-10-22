@@ -365,3 +365,27 @@ def test_p13_a_card_that_cannot_be_approved_is_refused_before_the_pin_is_asked(t
     refused = cli_in_terminal(drill, [USER_PIN], "pm", "approve", "--request-id", "REQ-PIN-P13", "--plan-hash", "b" * 64)
     assert refused.returncode != 0 and "范围卡不存在" in refused.stderr, drill.transcript()
     assert "请输入批准口令" not in refused.stderr, "卡本身批不了，却先让用户输了口令"
+
+
+def test_p14_a_repository_planted_below_the_control_root_is_no_way_around_the_pin(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Audit 72 second re-review: ``git init <control root>/0100_PLC自动化`` (or a gitlink file) used to hide the PIN."""
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    commit_approver_pin(drill)
+    card = _planned_card(drill, "REQ-PIN-P14")
+    for state in ("submitted", "under_review"):
+        assert drill.cli("change", "transition", card["change_id"], "--to", state, "--pid", PROJECT_ID).returncode == 0, drill.transcript()
+    planted = drill.root / "0100_PLC自动化"
+    git(planted, "init", "-q")
+    before = ledger_snapshot(drill)
+    for arguments in (
+        ("change", "transition", card["change_id"], "--to", "approved", "--approver", APPROVER, "--pid", PROJECT_ID),
+        ("decision", "create", "--change-id", card["change_id"], "--approver", APPROVER, "--pid", PROJECT_ID),
+    ):
+        step = drill._call(
+            " ".join(arguments[:2]) + " (planted repository)",
+            [sys.executable, str(drill.tools / "launcher.py"), "-w", str(planted), "--control-root", str(planted), *arguments],
+        )
+        assert step.returncode != 0 and "批准口令" in step.stdout + step.stderr, drill.transcript()
+    assert ledger_snapshot(drill) == before, "植入的子仓库批准了真变更单"
+    assert not (planted / ".auto-pm").exists() or not list((planted / ".auto-pm").rglob("DEC-*")), "子目录里签出了决策包"
