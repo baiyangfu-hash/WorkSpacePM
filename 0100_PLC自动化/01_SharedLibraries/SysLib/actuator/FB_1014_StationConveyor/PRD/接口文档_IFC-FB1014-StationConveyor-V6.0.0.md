@@ -15,6 +15,7 @@ tags: ["工站输送机", "编排器", "PLC功能块", "接口", "气缸", "电�
 | ------------ | ----------------------------------------------------------------------------------------------------- |
 | **文档标题** | FB_1014 工站输送机接口定义                                                                            |
 | **文档版本** | V6.0.0                                                                                                |
+| **2026-10-22 对齐** | 接口表“说明”列按代码行尾注释逐字对齐（`plc docs check`），对齐前写法移到文末附录；只改文档，版本号和文件名不变 |
 | **关联源码** | actuator/FB_1014_StationConveyor/FB_1014_StationConveyor.scl                                          |
 | **编制日期** | 2026-05-31                                                                                            |
 | **编制人**   | Trae                                                                                                  |
@@ -143,7 +144,7 @@ FB_1014内部不实例化任何执行器FB, 所有执行器(FB_1011 x3, FB_1012 
 | 名称            | 类型 | 默认值 | 有效值域   | 说明           | 来源   |
 | --------------- | ---- | ------ | ---------- | -------------- | ------ |
 | i_bAutoMode     | BOOL | FALSE  | TRUE/FALSE | 自动模式使能   | OB1    |
-| i_iMode         | INT  | 1      | 0~2        | 运行模式(0=正常/1=B侧双向/2=A侧双向) | OB1/HMI |
+| i_iMode         | INT  | 1      | 0~2        | 运行模式: 0=正常/1=B侧双向/2=A侧双向 | OB1/HMI |
 | i_bUpstreamReq  | BOOL | FALSE  | TRUE/FALSE | 上游请求       | 上游FB |
 | i_bDownstreamReq| BOOL | FALSE  | TRUE/FALSE | 下游请求       | 下游FB |
 | i_bSelected     | BOOL | FALSE  | TRUE/FALSE | 工站选中       | 上层   |
@@ -165,20 +166,20 @@ FB_1014内部不实例化任何执行器FB, 所有执行器(FB_1011 x3, FB_1012 
 
 | 名称          | 类型 | 默认值 | 有效值域   | 说明                          | 来源          |
 | ------------- | ---- | ------ | ---------- | ----------------------------- | ------------- |
-| i_xInfeedStart| BOOL | FALSE  | TRUE/FALSE | 入料开始光电(X420, 始终有效)  | OB1->IO映射   |
-| i_xPos1       | BOOL | FALSE  | TRUE/FALSE | 位置1光电(X421, 功能随方向切换)| OB1->IO映射  |
-| i_xPos2       | BOOL | FALSE  | TRUE/FALSE | 位置2光电(X422, 功能随方向切换)| OB1->IO映射  |
+| i_xInfeedStart| BOOL | FALSE  | TRUE/FALSE | 入料开始光电(X420)        | OB1->IO映射   |
+| i_xPos1       | BOOL | FALSE  | TRUE/FALSE | 位置1光电(X421)         | OB1->IO映射  |
+| i_xPos2       | BOOL | FALSE  | TRUE/FALSE | 位置2光电(X422)         | OB1->IO映射  |
 
 ### 2.4 VAR_INPUT - 气缸状态(从FB_1011) (6)
 
 | 名称                   | 类型 | 默认值 | 有效值域   | 说明                          | 来源                |
 | ---------------------- | ---- | ------ | ---------- | ----------------------------- | ------------------- |
-| i_bInfeedIsExtended    | BOOL | FALSE  | TRUE/FALSE | 进料气缸已伸出(从FB_1011)     | FB_1011.q_bIsExtended |
-| i_bInfeedIsRetracted   | BOOL | FALSE  | TRUE/FALSE | 进料气缸已收回(从FB_1011)     | FB_1011.q_bIsRetracted|
-| i_bAlignIsExtended     | BOOL | FALSE  | TRUE/FALSE | 拍正气缸已伸出(从FB_1011)     | FB_1011.q_bIsExtended |
-| i_bAlignIsRetracted    | BOOL | FALSE  | TRUE/FALSE | 拍正气缸已收回(从FB_1011)     | FB_1011.q_bIsRetracted|
-| i_bDischargeIsExtended | BOOL | FALSE  | TRUE/FALSE | 出料气缸已伸出(从FB_1011)     | FB_1011.q_bIsExtended |
-| i_bDischargeIsRetracted| BOOL | FALSE  | TRUE/FALSE | 出料气缸已收回(从FB_1011)     | FB_1011.q_bIsRetracted|
+| i_bInfeedIsExtended    | BOOL | FALSE  | TRUE/FALSE | A侧阻挡气缸伸出到位(来自FB_1011) | FB_1011.q_bIsExtended |
+| i_bInfeedIsRetracted   | BOOL | FALSE  | TRUE/FALSE | A侧阻挡气缸收回到位(来自FB_1011) | FB_1011.q_bIsRetracted|
+| i_bAlignIsExtended     | BOOL | FALSE  | TRUE/FALSE | 拍正气缸伸出到位(来自FB_1011)   | FB_1011.q_bIsExtended |
+| i_bAlignIsRetracted    | BOOL | FALSE  | TRUE/FALSE | 拍正气缸收回到位(来自FB_1011)   | FB_1011.q_bIsRetracted|
+| i_bDischargeIsExtended | BOOL | FALSE  | TRUE/FALSE | B侧阻挡气缸伸出到位(来自FB_1011) | FB_1011.q_bIsExtended |
+| i_bDischargeIsRetracted| BOOL | FALSE  | TRUE/FALSE | B侧阻挡气缸收回到位(来自FB_1011) | FB_1011.q_bIsRetracted|
 
 > **极性透明**: 拍正气缸的FB_1011实例在OB1中配置i_bExtendPolarity=TRUE, 因此FB_1011的q_bIsExtended/q_bIsRetracted已经是极性映射后的逻辑值. FB_1014无需关心极性, 直接使用即可.
 
@@ -186,18 +187,18 @@ FB_1014内部不实例化任何执行器FB, 所有执行器(FB_1011 x3, FB_1012 
 
 | 名称        | 类型 | 默认值 | 有效值域   | 说明                    | 来源              |
 | ----------- | ---- | ------ | ---------- | ----------------------- | ----------------- |
-| i_bVfdAlarm | BOOL | FALSE  | TRUE/FALSE | VFD报警(从FB_1012)      | FB_1012.q_bVfdAlarm |
+| i_bVfdAlarm | BOOL | FALSE  | TRUE/FALSE | VFD报警(来自FB_1012)     | FB_1012.q_bVfdAlarm |
 
 ### 2.6 VAR_OUTPUT - 气缸命令(给FB_1011) (6)
 
 | 名称              | 类型 | 默认值 | 有效值域   | 说明                        | 去向               |
 | ----------------- | ---- | ------ | ---------- | --------------------------- | ------------------ |
-| q_bInfeedExtend   | BOOL | FALSE  | TRUE/FALSE | 进料气缸伸出命令            | FB_1011.i_bExtend  |
-| q_bInfeedRetract  | BOOL | FALSE  | TRUE/FALSE | 进料气缸收回命令            | FB_1011.i_bRetract |
+| q_bInfeedExtend   | BOOL | FALSE  | TRUE/FALSE | A侧阻挡气缸伸出命令          | FB_1011.i_bExtend  |
+| q_bInfeedRetract  | BOOL | FALSE  | TRUE/FALSE | A侧阻挡气缸收回命令          | FB_1011.i_bRetract |
 | q_bAlignExtend    | BOOL | FALSE  | TRUE/FALSE | 拍正气缸伸出命令            | FB_1011.i_bExtend  |
 | q_bAlignRetract   | BOOL | FALSE  | TRUE/FALSE | 拍正气缸收回命令            | FB_1011.i_bRetract |
-| q_bDischargeExtend| BOOL | FALSE  | TRUE/FALSE | 出料气缸伸出命令            | FB_1011.i_bExtend  |
-| q_bDischargeRetract| BOOL | FALSE | TRUE/FALSE | 出料气缸收回命令            | FB_1011.i_bRetract |
+| q_bDischargeExtend| BOOL | FALSE  | TRUE/FALSE | B侧阻挡气缸伸出命令          | FB_1011.i_bExtend  |
+| q_bDischargeRetract| BOOL | FALSE | TRUE/FALSE | B侧阻挡气缸收回命令          | FB_1011.i_bRetract |
 
 > **命令语义**: Extend/Retract是逻辑语义, 实际电磁阀输出由FB_1011根据i_bExtendPolarity决定. 拍正气缸在OB1中配置i_bExtendPolarity=TRUE, 因此q_bAlignExtend=TRUE时FB_1011会自动处理极性反转.
 
@@ -205,9 +206,9 @@ FB_1014内部不实例化任何执行器FB, 所有执行器(FB_1011 x3, FB_1012 
 
 | 名称       | 类型 | 默认值 | 有效值域   | 说明                          | 去向              |
 | ---------- | ---- | ------ | ---------- | ----------------------------- | ----------------- |
-| q_bFwdCmd  | BOOL | FALSE  | TRUE/FALSE | 电机正转命令                  | FB_1012.i_bFwdCmd |
-| q_bRevCmd  | BOOL | FALSE  | TRUE/FALSE | 电机反转命令                  | FB_1012.i_bRevCmd |
-| q_bSlowCmd | BOOL | FALSE  | TRUE/FALSE | 慢速命令(方向修饰符)          | FB_1012.i_bSlowCmd|
+| q_bFwdCmd  | BOOL | FALSE  | TRUE/FALSE | 电机正转命令(到FB_1012)        | FB_1012.i_bFwdCmd |
+| q_bRevCmd  | BOOL | FALSE  | TRUE/FALSE | 电机反转命令(到FB_1012)        | FB_1012.i_bRevCmd |
+| q_bSlowCmd | BOOL | FALSE  | TRUE/FALSE | 电机慢速命令(到FB_1012)     | FB_1012.i_bSlowCmd|
 
 > **慢速修饰规则**: q_bSlowCmd是方向命令的修饰符, 不能独立运行. 仅当q_bFwdCmd或q_bRevCmd为TRUE时, q_bSlowCmd才生效. 参见FB_1012 IFC.
 
@@ -223,16 +224,19 @@ FB_1014内部不实例化任何执行器FB, 所有执行器(FB_1011 x3, FB_1012 
 | 名称                 | 类型  | 默认值 | 有效值域    | 说明                | 去向       |
 | -------------------- | ----- | ------ | ----------- | ------------------- | ---------- |
 | q_iState             | INT   | 0      | 0~8         | 当前状态(0-8)       | HMI/上层   |
-| q_dwProductionCount  | DWORD | 0      | 0~16#FFFFFFFF| 累计产量计数       | HMI/上层   |
+| q_dwProductionCount  | DWORD | 0      | 0~16#FFFFFFFF| 产量计数器        | HMI/上层   |
 | q_bInfeedActive      | BOOL  | FALSE  | TRUE/FALSE  | 输送进行中          | HMI/上层   |
 | q_bIntAlarmMem       | BOOL  | FALSE  | TRUE/FALSE  | 中断报警暂存        | HMI/上层   |
 
 ### 2.10 VAR - 内部状态变量 (2)
 
-| 名称             | 类型 | 默认值 | 有效值域 | 说明                       |
-| ---------------- | ---- | ------ | -------- | -------------------------- |
-| m_iAlignStep     | INT  | 0      | 0~3      | 拍正对齐子步骤计数(ALIGN状态) |
-| m_iDischPrepStep | INT  | 0      | 0~3      | 出料准备子步骤计数(DISCHARGE状态) |
+> 2026-10-22 对齐说明：这两个是块内部的静态变量（`VAR`），不是接口引脚，`plc docs check` 只核对接口引脚，所以本表第一列不再叫“名称”，检查器不把它当接口表。
+> 值域按代码实际改了：`m_iAlignStep` 代码里最大赋到 4（FB_1014_StationConveyor.scl:402），`m_iDischPrepStep` 最大赋到 2（同文件:509）。原写的“0~3”见文末附录。
+
+| 内部变量         | 类型 | 默认值 | 有效值域 | 说明（= 代码注释）           |
+| ---------------- | ---- | ------ | -------- | ---------------------------- |
+| m_iAlignStep     | INT  | 0      | 0~4      | 拍正对齐子步骤计数(ALIGN状态) |
+| m_iDischPrepStep | INT  | 0      | 0~2      | 出料准备子步骤计数(DISCHARGE状态) |
 
 > **子步骤计数器用途**: m_iAlignStep跟踪ALIGN状态内"伸出检测→下降到位→拍正收回"子流程; m_iDischPrepStep跟踪DISCHARGE状态内"出料气缸准备→电机启动→到位检测"子流程. Mode=1/2时子步骤分支不同, 详见第4章交互协议.
 
@@ -803,3 +807,40 @@ yMotorSlow := fbConveyorMotor.q_bSlowOut;        // 慢速输出->物理IO
 | LSP-904     | ../../../../../0100_PLC自动化/00_通用规范/PLC编程/904_SCL注释规范_LSP.md                         |
 | LSP-903     | ../../../../../0100_PLC自动化/00_通用规范/PLC编程/903_定时器使用规范_LSP.md                       |
 | LSP-906     | ../../../../../0100_PLC自动化/00_通用规范/PLC编程/906_错误预防规则_LSP.md                         |
+
+---
+
+## 附：2026-10-22 对齐前的旧说明（留底，不删）
+
+> 2026-10-22 按 `plc docs check` 把上面接口表的“说明”列逐字改成代码行尾注释（代码为准，只改文档，没改 .scl）。
+> 下表是改之前文档里的写法，有些比代码注释多写了单位、触发方式或用途，留在这里备查；
+> 其中与代码实际行为不一致的地方，见共享库对齐记录 `PRD/文档代码对齐记录_20261022.md` 第 3 节。
+
+| 引脚 | 对齐前文档说明 | 现说明（= 代码注释） |
+|------|------|------|
+| i_iMode | 运行模式(0=正常/1=B侧双向/2=A侧双向) | 运行模式: 0=正常/1=B侧双向/2=A侧双向 |
+| i_xInfeedStart | 入料开始光电(X420, 始终有效) | 入料开始光电(X420) |
+| i_xPos1 | 位置1光电(X421, 功能随方向切换) | 位置1光电(X421) |
+| i_xPos2 | 位置2光电(X422, 功能随方向切换) | 位置2光电(X422) |
+| i_bInfeedIsExtended | 进料气缸已伸出(从FB_1011) | A侧阻挡气缸伸出到位(来自FB_1011) |
+| i_bInfeedIsRetracted | 进料气缸已收回(从FB_1011) | A侧阻挡气缸收回到位(来自FB_1011) |
+| i_bAlignIsExtended | 拍正气缸已伸出(从FB_1011) | 拍正气缸伸出到位(来自FB_1011) |
+| i_bAlignIsRetracted | 拍正气缸已收回(从FB_1011) | 拍正气缸收回到位(来自FB_1011) |
+| i_bDischargeIsExtended | 出料气缸已伸出(从FB_1011) | B侧阻挡气缸伸出到位(来自FB_1011) |
+| i_bDischargeIsRetracted | 出料气缸已收回(从FB_1011) | B侧阻挡气缸收回到位(来自FB_1011) |
+| i_bVfdAlarm | VFD报警(从FB_1012) | VFD报警(来自FB_1012) |
+| q_bInfeedExtend | 进料气缸伸出命令 | A侧阻挡气缸伸出命令 |
+| q_bInfeedRetract | 进料气缸收回命令 | A侧阻挡气缸收回命令 |
+| q_bDischargeExtend | 出料气缸伸出命令 | B侧阻挡气缸伸出命令 |
+| q_bDischargeRetract | 出料气缸收回命令 | B侧阻挡气缸收回命令 |
+| q_bFwdCmd | 电机正转命令 | 电机正转命令(到FB_1012) |
+| q_bRevCmd | 电机反转命令 | 电机反转命令(到FB_1012) |
+| q_bSlowCmd | 慢速命令(方向修饰符) | 电机慢速命令(到FB_1012) |
+| q_dwProductionCount | 累计产量计数 | 产量计数器 |
+
+### 附：2.10 内部变量表对齐前的写法
+
+| 内部变量 | 对齐前表头第一列 | 对齐前有效值域 | 现值域（按代码） |
+|------|------|------|------|
+| m_iAlignStep | 名称 | 0~3 | 0~4 |
+| m_iDischPrepStep | 名称 | 0~3 | 0~2 |
