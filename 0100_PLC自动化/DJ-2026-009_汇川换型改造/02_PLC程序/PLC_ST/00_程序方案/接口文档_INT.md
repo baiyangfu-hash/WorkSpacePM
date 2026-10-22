@@ -30,3 +30,11 @@
 GlobalVars.fbStation1(io_stStation := GlobalVars.stStation1);
 GlobalVars.stStation1 := GlobalVars.fbStation1.io_stStation;
 ```
+
+---
+
+## 3. FC 调用表（CARD-DJ-2026-009-003 追加，本节有效）
+
+| FC 名 | 调用方 | 用途 |
+| :--- | :--- | :--- |
+| `FC_3003_CheckModuleId` | `FB_3001_ExternalInteraction` | 组件 ID 合格检查（现只判空） |

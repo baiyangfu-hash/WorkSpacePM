@@ -18,3 +18,7 @@ blocks:
     type: "FB"
     path: "02_PLC程序/PLC_ST/01_外部设备交互/FB_3002_ModbusTcpClient.scl"
     responsibility: "上下游 Modbus TCP 客户端数据映射与链路诊断（CARD-DJ-2026-009-001）"
+  - name: "FC_3003_CheckModuleId"
+    type: "FC"
+    path: "02_PLC程序/PLC_ST/01_外部设备交互/FC_3003_CheckModuleId.scl"
+    responsibility: "组件 ID 合格检查，现只判空（CARD-DJ-2026-009-003 草稿）"

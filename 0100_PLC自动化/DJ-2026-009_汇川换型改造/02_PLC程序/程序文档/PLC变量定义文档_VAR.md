@@ -96,6 +96,31 @@
 | `stExternal.q_bSystemSafetyConditionMet` | BOOL | 系统安全条件满足 |
 | `stExternal.q_bExternalDeviceFault` | BOOL | 外部设备故障 |
 
+### 3.6 组件 ID 与外部交互新增全局变量（CARD-DJ-2026-009-003 草稿）
+
+| 变量名 | 类型 | 说明 |
+|--------|------|------|
+| `sMachineModuleID` | STRING[32] | 本机 ID（组件 ID 第 2 格），**须声明在断电保持区（VAR_GLOBAL RETAIN）** |
+| `stModuleIdHmi` | ST_ModuleIdHmi | 组件 ID 人工操作与时间参数（HMI），建议也放断电保持区（参数要保持；命令位 PLC 处理后自动清 0） |
+| `bExtAllowInfeedAct` | BOOL | FB_3001 进料动作允许（供工位联锁，见待办） |
+| `bExtAllowOutfeedAct` | BOOL | FB_3001 出料动作允许（供工位联锁，见待办） |
+| `bExtUpstreamDone` | BOOL | 进料握手完成脉冲 |
+| `bExtDownstreamDone` | BOOL | 出料握手完成脉冲 |
+| `bExtComAlarm` | BOOL | 外部通讯综合报警 |
+| `wExtErrorCode` | WORD | FB_3001 故障诊断字（位定义见 FB_3001 接口文档第 3 节） |
+
+### ST_ModuleIdHmi（组件 ID 人工操作与时间参数）
+
+| 名称 | 类型 | 说明 |
+|------|------|------|
+| `bCmdCopyFromUp` | BOOL | 拷入: 上游 ID -> 本机 ID (R4) |
+| `bCmdManualEntry` | BOOL | 补录: sManualId -> 本机 ID (R5) |
+| `bCmdRelease` | BOOL | 放行: 上游 ID 不合格时人工允许本次进料 (R5) |
+| `bCmdClear` | BOOL | 清空本机 ID (R6) |
+| `sManualId` | STRING[32] | 人工补录的组件 ID |
+| `dLeaveTimeMs` | DINT | 出料中检测不到产品判产品离开的时间 ms (0 = 按 2000) |
+| `dIdleClearMs` | DINT | 自动作业中无产品自动清本机 ID 的时间 ms (0 = 按 20000, 暂定) |
+
 ## 4. 功能块实例
 
 | 实例名 | FB类型 | 声明位置 | 说明 |

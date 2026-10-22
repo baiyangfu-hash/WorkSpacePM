@@ -153,3 +153,24 @@ END_IF;
 
 **文档版本**: V7.0.0  
 **最后更新**: 2026-05-18
+
+## 6. FB_3001 接线（CARD-DJ-2026-009-003 草稿，本节有效）
+
+调用顺序：第 0 部分 FB_3002（Modbus 映射）→ 第 1 部分 FB_3001（握手）→ 第 2 部分 FB_1001（工位 1）→ 第 3 部分 FB_2001。FB_3001 用的工位状态是上一周期 FB_1001 的结果，有 1 个扫描周期延迟。
+
+| FB_3001 引脚 | OB1 接到 | 说明 / 待确认 |
+| :--- | :--- | :--- |
+| `i_bEnable` | `GlobalVars.stExternal.bEmergencyStop` | 急停回路正常（1 = 正常，IO 表 `I0.0 ESTOP_OK`）；该变量的 IO 映射还没写，导入工程时接 |
+| `i_bAutoMode` | `GlobalVars.stStation1.stControl.bAutoEnable` | 工位 1 自动使能（项目里只有这一个自动位） |
+| `i_bResetCmd` | `GlobalVars.stGlobal.i_bReset OR GlobalVars.stStation1.stControl.bReset` | 公共复位或工位复位，任一按下都算 |
+| `i_bMachineReadyIn` | `GlobalVars.stStation1.stStatus.bWaitMaterial` | 工位 1 在“等待来料”步 |
+| `i_bMachineReadyOut` | `GlobalVars.stStation1.stStatus.bReadyOut` | 工位 1 在出料步且气缸已松开（FB_1001 新增状态位） |
+| `i_bInfeedArrivedSens` | `GlobalVars.stStation1.stSensors.bInPosSensor` | 入料到位光电 |
+| `i_bProductPresent` | `GlobalVars.stStation1.stStatus.bProductPresent` | 本机有产品，由 FB_1001 内部判断：入料到位、加工到位或预留产品传感器数组 `stSensors.arrProductSens[0..7]` 任一路为 1（用户 2026-10-21） |
+| `q_bAllowInfeedAct` / `q_bAllowOutfeedAct` | `GlobalVars.bExtAllowInfeedAct` / `bExtAllowOutfeedAct` | 先接到全局变量；工位 1 电机还没用它们做联锁（另开卡） |
+| `q_bUpstreamDone` / `q_bDownstreamDone` | `GlobalVars.bExtUpstreamDone` / `bExtDownstreamDone` | 单周期脉冲 |
+| `q_bComAlarm` / `q_wErrorCode` | `GlobalVars.bExtComAlarm` / `wExtErrorCode` | 给 HMI 显示；FB_2001 公共报警没有外部通讯报警输入，接入公共报警另开卡 |
+| `io_stExternal` | `GlobalVars.stExternal` | 不变 |
+| `io_sMachineModuleID` | `GlobalVars.sMachineModuleID` | 本机 ID，须断电保持 |
+| `io_stIdHmi` | `GlobalVars.stModuleIdHmi` | HMI 操作与时间参数 |
+

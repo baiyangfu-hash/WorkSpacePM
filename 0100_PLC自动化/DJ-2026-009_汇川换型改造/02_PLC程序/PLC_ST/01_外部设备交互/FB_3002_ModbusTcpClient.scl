@@ -69,6 +69,7 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
+    // @安全区 开始：未使能时发给对方的状态字全部清零
     IF NOT i_bEnable THEN
         // 未使能: 本机发给对方的状态字和组件 ID 全部清零 (对方看到的允许/请求信号均为 0)
         FOR s_iReg := 0 TO REG_IMAGE_LAST DO
@@ -79,6 +80,7 @@ BEGIN
         q_wErrorCode := ERR_NONE;
         RETURN;
     END_IF;
+    // @安全区 结束
 
     (* 1. 链路状态与错误码 *)
     q_wErrorCode := ERR_NONE;
@@ -91,6 +93,7 @@ BEGIN
     q_bComOK := (q_wErrorCode = ERR_NONE);
 
     (* 2. 上游读解包 (链路断开时保持最后值, 由 FB_3001 心跳超时判故障) *)
+    // @安全区 开始：上游状态字解包 (含心跳; 链路断开保持旧值, 靠心跳超时判断线)
     IF i_bUpLinkOK THEN
         s_wStatusIn := io_arrUpRead[REG_STATUS_IN];
         io_stExternal.stUpstream.bUpstream_LineReady := (s_wStatusIn AND MASK_B0) <> 16#0000;
@@ -99,6 +102,7 @@ BEGIN
         io_stExternal.stUpstream.bUpstream_InfeedArrivedAck := (s_wStatusIn AND MASK_B3) <> 16#0000;
         io_stExternal.stUpstream.bUpstream_HeartbeatFromUp := (s_wStatusIn AND MASK_B15) <> 16#0000;
 
+        // @安全区 结束
         // 组件 ID: 每个寄存器 2 个字符, 高字节在前; 遇到 0 即结束, 内容原样保留
         s_sIdBuf := '';
         s_bIdEnd := FALSE;
@@ -127,6 +131,7 @@ BEGIN
         io_stExternal.stUpstream.sRcvModuleID := s_sIdBuf;
     END_IF;
 
+    // @安全区 开始：下游状态字解包 (含心跳) 与本机->上下游状态字封包 (允许/请求/心跳)
     (* 3. 下游读解包 (链路断开时保持最后值) *)
     IF i_bDownLinkOK THEN
         s_wStatusIn := io_arrDownRead[REG_STATUS_IN];
@@ -174,6 +179,7 @@ BEGIN
         s_wStatusOut := s_wStatusOut OR MASK_B15;
     END_IF;
     io_arrDownWrite[REG_STATUS_OUT] := s_wStatusOut;
+    // @安全区 结束
 
     // 组件 ID 原样封包: 第 2n 个字符放高字节, 第 2n+1 个放低字节, 不足 32 个字符补 0
     s_sIdBuf := io_stExternal.stDownstream.sSendModuleID;
