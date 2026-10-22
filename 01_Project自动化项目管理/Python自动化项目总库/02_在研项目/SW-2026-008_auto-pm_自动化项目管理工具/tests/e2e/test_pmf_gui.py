@@ -25,8 +25,7 @@ import sys
 import tempfile
 import textwrap
 import time
-from collections.abc import Iterator
-from contextlib import closing, contextmanager
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -224,12 +223,6 @@ def _executor(tmp_path: Path, label: str, files: dict[str, str]) -> tuple[_Count
 
 
 # ------------------------------------------------------------------------------------------------ driving the real window
-class _HeldOff:
-    """Stands in for a snapshot worker that never finishes, so the bridge accepts no new snapshot request (the periodic one and the window's own refresh both get "busy")."""
-
-    done = False
-
-
 class _Window:
     def __init__(self, qapp: QApplication, engine: QQmlApplicationEngine, bridge: PmCockpitBridge, window: QObject) -> None:
         self.qapp, self.engine, self.bridge, self.window = qapp, engine, bridge, window
@@ -270,22 +263,6 @@ class _Window:
             return None
 
         return walk(self.item)
-
-    @contextmanager
-    def snapshots_held_off(self) -> Iterator[None]:
-        """Keep the snapshot reader away while something writes to the store.
-
-        A snapshot copies the database under share-deny locks (Windows, ``ContinuityStore._source_read_locks``); a SQLite write that starts in that instant is opened read-only and
-        fails with "attempt to write a readonly database" (found by this very test, TD-SW008 ledger). The old tests never met it because their workers ran inline. Until the store
-        is fixed, the writes of this scenario are serialised with the reader here.
-        """
-
-        self.pump(lambda: cast(Any, self.bridge)._snapshot_worker is None, 60, "no snapshot in flight")
-        cast(Any, self.bridge)._snapshot_worker = _HeldOff()
-        try:
-            yield
-        finally:
-            cast(Any, self.bridge)._snapshot_worker = None
 
     def refresh(self) -> None:
         QMetaObject.invokeMethod(self.window, "refreshSnapshot")
@@ -349,30 +326,27 @@ def _drive(
     win.named("planningObjective").setProperty("text", objective)
     win.named("planningAcceptance").setProperty("text", "\n".join(acceptance))
     win.shot(evidence, "1-goal-typed")
-    with win.snapshots_held_off():
-        win.click(win.named("savePlanningDraft"))
-        win.pump(lambda: win.window.property("planningDraft") is not None, 30, "the saved draft")
+    win.click(win.named("savePlanningDraft"))
+    win.pump(lambda: win.window.property("planningDraft") is not None, 30, "the saved draft")
     win.shot(evidence, "2-draft-saved")
 
     # 2. the PM turns the draft into a scope card (the production facade call); the window shows the pending approval
     draft = next(item.draft for item in facade.list_planning_drafts(project_id) if item.draft.objective == objective)
-    with win.snapshots_held_off():
-        submitted = facade.submit_planning_scope_card(
-            draft.request_id,
-            scope_paths=scope,
-            risks=("none",),
-            non_goals=("no refactor", "no dependency change", "no hardware download"),
-            execution_grant=PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX, approved_model=MODEL, declared_dirty_paths=scope),
-            submitted_by="PM (Claude)",
-        )
+    submitted = facade.submit_planning_scope_card(
+        draft.request_id,
+        scope_paths=scope,
+        risks=("none",),
+        non_goals=("no refactor", "no dependency change", "no hardware download"),
+        execution_grant=PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX, approved_model=MODEL, declared_dirty_paths=scope),
+        submitted_by="PM (Claude)",
+    )
     win.refresh()
     win.pump(lambda: bool(_items_named(win.item, "approveScopeButton")) and _items_named(win.item, "approveScopeButton")[0].property("enabled") is True, 60, "the approve button")
     win.shot(evidence, "3-pending-approval")
 
     # 3. the first business decision: one click approves the scope and starts the run (the real model works while the window stays alive)
-    with win.snapshots_held_off():
-        win.click(win.named("approveScopeButton"))
-        win.pump(lambda: bool(approvals), 2400 if REAL else 900, "the end of the run and its verification")
+    win.click(win.named("approveScopeButton"))
+    win.pump(lambda: bool(approvals), 2400 if REAL else 900, "the end of the run and its verification")
     win.refresh()
     win.shot(evidence, "4-after-run")
     return win, store, facade, draft.request_id, str(submitted.card.change_id), approvals
@@ -387,9 +361,8 @@ def _accept_and_close(win: _Window, store: ContinuityStore, mission_id: str) -> 
     win.pump(lambda: win.button_with_text("确认验收") is not None, 60, "the acceptance button")
     button = win.button_with_text("确认验收")
     assert button is not None
-    with win.snapshots_held_off():
-        win.click(button)
-        win.pump(lambda: bool(closures), 900, "the closure")
+    win.click(button)
+    win.pump(lambda: bool(closures), 900, "the closure")
     return closures
 
 

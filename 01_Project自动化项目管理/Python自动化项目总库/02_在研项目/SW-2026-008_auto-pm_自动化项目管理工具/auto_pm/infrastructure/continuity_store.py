@@ -12,6 +12,7 @@ import sqlite3
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -149,6 +150,25 @@ class _ReadSnapshotAnomalyError(_ReadSnapshotDriftError):
 
 _FileInventory = tuple[bool, int, int, int, int, str]
 _StoreInventory = tuple[_FileInventory, _FileInventory, _FileInventory, _FileInventory]
+# The identity of the snapshot copy: (exists, size, mtime_ns, dev, ino) of the copied database and WAL.
+_CopyStamp = tuple[tuple[bool, int, int, int, int], tuple[bool, int, int, int, int]]
+
+
+@dataclass
+class _ReadSnapshot:
+    """One verified off-workspace copy of the database and WAL, reused while the source bytes stay the same (TD-105).
+
+    ``source`` holds the database, WAL and journal facts (the ``-shm`` index is left out: SQLite rewrites it on every
+    connection without changing the content). ``users`` counts open strict-read connections on the copy; a retired copy
+    is deleted when the last one closes.
+    """
+
+    temporary: tempfile.TemporaryDirectory[str]
+    path: Path
+    source: tuple[_FileInventory, _FileInventory, _FileInventory]
+    copy_stamp: _CopyStamp
+    users: int = 0
+    retired: bool = False
 
 
 _DDL = """
@@ -463,6 +483,8 @@ class ContinuityStore:
             )
         except ControlRootGuardError as error:
             raise ContinuityStoreError(str(error)) from error
+        self._read_snapshot: _ReadSnapshot | None = None
+        self._read_snapshot_lock = threading.Lock()
 
     def _utc_now(self) -> datetime:
         current = self._clock()
@@ -1050,25 +1072,13 @@ class ContinuityStore:
         """Read one byte-stable off-workspace snapshot without touching source sidecars."""
 
         db_path = self._validated_db_path()
-        temporary, snapshot_path = self._stable_read_snapshot(db_path)
+        snapshot = self._acquire_read_snapshot(db_path)
         conn: sqlite3.Connection | None = None
         try:
-            conn = sqlite3.connect(
-                f"{snapshot_path.as_uri()}?mode=ro&cache=private",
-                uri=True,
-                timeout=5.0,
-            )
-        except sqlite3.Error as error:
-            temporary.cleanup()
-            raise ContinuityStoreError("Continuity Store 严格只读快照无法打开") from error
-        conn.row_factory = sqlite3.Row
-        try:
-            conn.execute("PRAGMA query_only=ON")
-            conn.execute("PRAGMA busy_timeout=5000")
-            conn.execute("BEGIN")
-            integrity = conn.execute("PRAGMA quick_check").fetchall()
-            if len(integrity) != 1 or str(integrity[0][0]) != "ok":
-                raise ContinuityStoreError("Continuity Store 严格只读快照完整性检查失败")
+            try:
+                conn = self._open_snapshot(snapshot.path)
+            except sqlite3.Error as error:
+                raise ContinuityStoreError("Continuity Store 严格只读快照无法打开") from error
             yield conn
         except sqlite3.Error as error:
             raise ContinuityStoreError("Continuity Store 严格只读查询失败") from error
@@ -1076,7 +1086,75 @@ class ContinuityStore:
             if conn is not None:
                 conn.rollback()
                 conn.close()
-            temporary.cleanup()
+            self._release_read_snapshot(snapshot)
+
+    @staticmethod
+    def _open_snapshot(snapshot_path: Path) -> sqlite3.Connection:
+        conn = sqlite3.connect(
+            f"{snapshot_path.as_uri()}?mode=ro&cache=private",
+            uri=True,
+            timeout=5.0,
+        )
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("BEGIN")
+        except sqlite3.Error:
+            conn.close()
+            raise
+        return conn
+
+    @staticmethod
+    def _copy_stamp(snapshot_path: Path) -> _CopyStamp:
+        def stamp(path: Path) -> tuple[bool, int, int, int, int]:
+            try:
+                metadata = path.stat()
+            except FileNotFoundError:
+                return (False, 0, 0, 0, 0)
+            return (
+                True,
+                int(metadata.st_size),
+                int(metadata.st_mtime_ns),
+                int(metadata.st_dev),
+                int(metadata.st_ino),
+            )
+
+        return stamp(snapshot_path), stamp(Path(f"{snapshot_path}-wal"))
+
+    def _acquire_read_snapshot(self, db_path: Path) -> _ReadSnapshot:
+        """Hand out the cached copy while the source bytes are unchanged, otherwise take and verify a new one."""
+
+        with self._read_snapshot_lock:
+            snapshot = self._stable_read_snapshot(db_path, self._read_snapshot)
+            if snapshot is not self._read_snapshot:
+                self._retire_read_snapshot()
+                self._read_snapshot = snapshot
+            snapshot.users += 1
+            return snapshot
+
+    def _release_read_snapshot(self, snapshot: _ReadSnapshot) -> None:
+        with self._read_snapshot_lock:
+            snapshot.users -= 1
+            if snapshot.retired and snapshot.users == 0:
+                snapshot.temporary.cleanup()
+
+    def _retire_read_snapshot(self) -> None:
+        """Drop the cached copy; it is deleted now, or when its last open connection closes."""
+
+        snapshot = self._read_snapshot
+        self._read_snapshot = None
+        if snapshot is None or snapshot.retired:
+            return
+        snapshot.retired = True
+        if snapshot.users == 0:
+            snapshot.temporary.cleanup()
+
+    def close_read_snapshot(self) -> None:
+        """Delete the cached strict-read copy now instead of when the store is garbage collected."""
+
+        with self._read_snapshot_lock:
+            self._retire_read_snapshot()
 
     @staticmethod
     def _file_inventory(path: Path, *, required: bool, transient: bool = False) -> _FileInventory:
@@ -1164,79 +1242,41 @@ class ContinuityStore:
             raise ContinuityStoreError("Continuity Store 严格只读临时根必须位于 workspace 外")
         return resolved
 
-    @staticmethod
-    @contextmanager
-    def _source_read_locks(db_path: Path) -> Iterator[None]:
-        """Deny source DB/WAL/journal writes during a Windows snapshot capture."""
-
-        if os.name != "nt":
-            yield
-            return
-        import ctypes
-        from ctypes import wintypes
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        create_file = kernel32.CreateFileW
-        create_file.argtypes = (
-            wintypes.LPCWSTR,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.LPVOID,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.HANDLE,
-        )
-        create_file.restype = wintypes.HANDLE
-        close_handle = kernel32.CloseHandle
-        close_handle.argtypes = (wintypes.HANDLE,)
-        close_handle.restype = wintypes.BOOL
-        generic_read = 0x80000000
-        share_read = 0x00000001
-        open_existing = 3
-        normal_attribute = 0x00000080
-        invalid_handle = ctypes.c_void_p(-1).value
-        handles: list[int] = []
-        try:
-            for path in (
-                db_path,
-                Path(f"{db_path}-wal"),
-                Path(f"{db_path}-journal"),
-            ):
-                if not path.exists():
-                    continue
-                handle = create_file(
-                    str(path),
-                    generic_read,
-                    share_read,
-                    None,
-                    open_existing,
-                    normal_attribute,
-                    None,
-                )
-                if handle == invalid_handle:
-                    raise _ReadSnapshotDriftError(f"sharing violation: {path.name}")
-                handles.append(int(handle))
-            yield
-        finally:
-            for handle in reversed(handles):
-                close_handle(handle)
-
     def _stable_read_snapshot(
         self,
         db_path: Path,
-    ) -> tuple[tempfile.TemporaryDirectory[str], Path]:
-        """Copy a stable DB/WAL byte set with bounded fail-closed retries."""
+        cached: _ReadSnapshot | None,
+    ) -> _ReadSnapshot:
+        """Copy a stable DB/WAL byte set with bounded fail-closed retries; reuse ``cached`` when nothing changed.
+
+        The source is only ever opened for reading with the default sharing, so a writer in another process can always
+        open the database while the copy is taken (TD-105: an earlier Windows share-deny handle turned that writer's open
+        into a read-only one and its transaction failed with "readonly database"). A write that lands during the copy is
+        caught by the before/after inventory and retried, never copied half-way.
+        """
 
         temp_root = self._validated_snapshot_temp_root()
         persistent_anomaly: str | None = None
         for attempt in range(_SIDECAR_ATTEMPTS):
-            temporary = tempfile.TemporaryDirectory(
-                prefix="auto-pm-continuity-read-",
-                dir=temp_root,
-            )
-            snapshot_dir = Path(temporary.name)
-            snapshot_path = snapshot_dir / db_path.name
+            temporary: tempfile.TemporaryDirectory[str] | None = None
             try:
+                # Revalidate every acquisition attempt so a late reparse swap fails closed.
+                if self._validated_db_path() != db_path:
+                    raise ContinuityStoreError("Continuity Store path 在读取期间发生漂移")
+                before = self._source_inventory(db_path)
+                content = (before[0], before[1], before[3])
+                if (
+                    cached is not None
+                    and cached.source == content
+                    and self._copy_stamp(cached.path) == cached.copy_stamp
+                ):
+                    return cached
+                temporary = tempfile.TemporaryDirectory(
+                    prefix="auto-pm-continuity-read-",
+                    dir=temp_root,
+                )
+                snapshot_dir = Path(temporary.name)
+                snapshot_path = snapshot_dir / db_path.name
                 resolved_snapshot_dir = snapshot_dir.resolve(strict=True)
                 if (
                     is_link_like(snapshot_dir)
@@ -1244,52 +1284,74 @@ class ContinuityStore:
                     or self._path_is_within(resolved_snapshot_dir, self.workspace_root)
                 ):
                     raise ContinuityStoreError("Continuity Store 严格只读快照临时路径越界")
-                # Revalidate every acquisition attempt so a late reparse swap fails closed.
-                if self._validated_db_path() != db_path:
-                    raise ContinuityStoreError("Continuity Store path 在读取期间发生漂移")
-                # Detect a hot journal before attempting Windows share-deny handles.
-                self._source_inventory(db_path)
-                with self._source_read_locks(db_path):
-                    before = self._source_inventory(db_path)
-                    source_paths = (db_path, Path(f"{db_path}-wal"))
-                    snapshot_paths = (snapshot_path, Path(f"{snapshot_path}-wal"))
-                    for source, target, fact in zip(
-                        source_paths,
-                        snapshot_paths,
-                        before[:2],
-                        strict=True,
-                    ):
-                        if fact[0]:
-                            try:
-                                shutil.copyfile(source, target)
-                            except FileNotFoundError as error:
-                                raise _ReadSnapshotDriftError(source.name) from error
-                    copied = tuple(
-                        self._file_inventory(path, required=fact[0])
-                        if fact[0]
-                        else self._file_inventory(path, required=False)
-                        for path, fact in zip(snapshot_paths, before[:2], strict=True)
-                    )
-                    after = self._source_inventory(db_path)
-                    if before != after or any(
-                        self._content_inventory(copied_fact) != self._content_inventory(source_fact)
-                        for copied_fact, source_fact in zip(copied, before[:2], strict=True)
-                    ):
-                        raise _ReadSnapshotDriftError("source changed during snapshot")
-                return temporary, snapshot_path
+                source_paths = (db_path, Path(f"{db_path}-wal"))
+                snapshot_paths = (snapshot_path, Path(f"{snapshot_path}-wal"))
+                for source, target, fact in zip(
+                    source_paths,
+                    snapshot_paths,
+                    before[:2],
+                    strict=True,
+                ):
+                    if fact[0]:
+                        try:
+                            shutil.copyfile(source, target)
+                        except FileNotFoundError as error:
+                            raise _ReadSnapshotDriftError(source.name) from error
+                        except PermissionError as error:
+                            # Windows: a writer may hold a byte-range lock on the file for a moment.
+                            raise _ReadSnapshotDriftError(source.name) from error
+                copied = tuple(
+                    self._file_inventory(path, required=fact[0])
+                    if fact[0]
+                    else self._file_inventory(path, required=False)
+                    for path, fact in zip(snapshot_paths, before[:2], strict=True)
+                )
+                after = self._source_inventory(db_path)
+                if before != after or any(
+                    self._content_inventory(copied_fact) != self._content_inventory(source_fact)
+                    for copied_fact, source_fact in zip(copied, before[:2], strict=True)
+                ):
+                    raise _ReadSnapshotDriftError("source changed during snapshot")
+                self._check_snapshot_integrity(snapshot_path)
+                return _ReadSnapshot(
+                    temporary=temporary,
+                    path=snapshot_path,
+                    source=content,
+                    copy_stamp=self._copy_stamp(snapshot_path),
+                )
             except _ReadSnapshotDriftError as error:
-                temporary.cleanup()
+                if temporary is not None:
+                    temporary.cleanup()
                 # only the anomaly seen on the LAST attempt can be the refusal; a later plain drift clears it
                 persistent_anomaly = str(error) if isinstance(error, _ReadSnapshotAnomalyError) else None
                 if attempt < _SIDECAR_ATTEMPTS - 1:
                     time.sleep(_SIDECAR_RETRY_SECONDS)
                 continue
             except Exception:
-                temporary.cleanup()
+                if temporary is not None:
+                    temporary.cleanup()
                 raise
         if persistent_anomaly is not None:
             raise ContinuityStoreError(persistent_anomaly)
         raise ContinuityStoreError("Continuity Store BUSY: 无法取得稳定只读快照")
+
+    @classmethod
+    def _check_snapshot_integrity(cls, snapshot_path: Path) -> None:
+        """Run ``quick_check`` once on a new copy; a reused copy was checked when it was taken."""
+
+        try:
+            conn = cls._open_snapshot(snapshot_path)
+        except sqlite3.Error as error:
+            raise ContinuityStoreError("Continuity Store 严格只读快照无法打开") from error
+        try:
+            integrity = conn.execute("PRAGMA quick_check").fetchall()
+        except sqlite3.Error as error:
+            raise ContinuityStoreError("Continuity Store 严格只读查询失败") from error
+        finally:
+            conn.rollback()
+            conn.close()
+        if len(integrity) != 1 or str(integrity[0][0]) != "ok":
+            raise ContinuityStoreError("Continuity Store 严格只读快照完整性检查失败")
 
     def create_work(self, values: dict[str, Any], idempotency_key: str, now: str) -> WorkItem:
         with self._transaction() as conn:
