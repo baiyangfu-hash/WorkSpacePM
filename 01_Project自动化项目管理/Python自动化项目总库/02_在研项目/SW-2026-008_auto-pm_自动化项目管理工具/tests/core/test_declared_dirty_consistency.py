@@ -180,7 +180,7 @@ def test_approve_refuses_a_saved_card_whose_declaration_is_empty(
     facade, database, changes = _p10_facade(tmp_path)
     facade.create_planning_draft(_planning_intent())
     with monkeypatch.context() as legacy:
-        legacy.setattr(facade_module, "declared_dirty_problem", lambda *_a, **_k: "")
+        legacy.setattr(facade_module, "plan_checklist_problems", lambda *_a, **_k: ())
         submitted = facade.submit_planning_scope_card(
             _planning_intent().request_id,
             scope_paths=("auto_pm/example.py",),
