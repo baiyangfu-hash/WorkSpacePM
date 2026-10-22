@@ -119,8 +119,15 @@ BEGIN
     GlobalVars.stExternal := GlobalVars.fbStation1.io_stExternal;
 
     // ============================================================================
-    // 第3部分：公共报警与 OMAC 状态机 (ST_CommonAlarm)
+    // 第3部分：公共报警汇总 (ST_CommonAlarm, 报警汇总卡预做)
+    // 三路报警源本扫描的结果只读接入, 不改它们的动作; 码表见 FB_2001 文件头.
+    // 原来这三个输入 (输送/取放料/打胶送料, 005 抄来的) 没人写, 报警块报不出任何报警.
     // ============================================================================
+    // @安全区 开始：只读安全管理块报警字 (急停/门/继电器/总线, 只用于报警显示)
+    GlobalVars.stGlobal.i_dwSafetyAlarm := GlobalVars.fbSafety.q_dwAlarm;
+    // @安全区 结束
+    GlobalVars.stGlobal.i_wExtErrorCode := GlobalVars.wExtErrorCode;
+    GlobalVars.stGlobal.i_iStationAlarm := GlobalVars.stStation1.stStatus.iAlarmCode;
     GlobalVars.fbCommonAlarm(io_stGlobal := GlobalVars.stGlobal);
     GlobalVars.stGlobal := GlobalVars.fbCommonAlarm.io_stGlobal;
 

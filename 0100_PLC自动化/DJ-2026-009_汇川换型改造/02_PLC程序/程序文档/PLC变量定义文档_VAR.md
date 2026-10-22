@@ -2,7 +2,7 @@
 
 > **项目编号**: DJ-2026-009
 > **项目名称**: 汇川换型改造
-> **文档版本**: V1.1.0（2026-10-22 按代码对齐）
+> **文档版本**: V1.2.0（2026-10-22 报警汇总卡预做）
 > **编制日期**: 2026-08-24
 > **遵循规范**: LSP-905 SCL编程规范, LSP-907 项目结构规范
 
@@ -11,7 +11,7 @@
 | 属性 | 值 |
 |------|-----|
 | **文档标题** | 汇川换型改造 PLC变量定义文档 |
-| **文档版本** | V1.1.0 |
+| **文档版本** | V1.2.0 |
 | **编制日期** | 2026-08-24 |
 | **适用范围** | 汇川换型改造 项目 (DJ-2026-009) |
 | **遵循规范** | IEC 61131-3, LSP-905 SCL编程规范 |
@@ -59,10 +59,7 @@ GlobalVars 的声明不在仓库里（见 `PLC_ST/00_全局数据/PRD/接口文�
 | `bModbusUpLinkOK` / `bModbusDownLinkOK` | BOOL | 上 / 下游 Modbus 链路正常 |
 | `awModbusUpRead` / `awModbusUpWrite` / `awModbusDownRead` / `awModbusDownWrite` | WORD 数组 | Modbus 寄存器映像，长度见 FB_3002 接口文档第 5 节 |
 
-ST_ExternalDevice 与 ST_Station1 两个“外壳”结构体只是把上面的子结构体打包：
-ST_ExternalDevice = `stUpstream`（ST_UpstreamDocking）、`stDownstream`（ST_DownstreamDocking）、`bEmergencyStop`（外部总线急停，1=正常）、`bSafetyDoorOK`（外部安全门锁信号）、`bAnyComFault`（外部通讯综合故障）；
-ST_Station1 = `stControl` / `stStatus` / `stConfig` / `stSensors` / `stActuators`。
-这两个结构体里 7 个子结构体成员代码没写注释，`plc docs check` 会报“代码里没有写注释”，所以这里不用变量表写（只差代码补注释，见 `文档代码对齐记录_20261022.md` 第 3 节 C-6）。
+ST_ExternalDevice 与 ST_Station1 两个“外壳”结构体的字段表见 3.7 节（报警汇总卡已给 7 个子结构体成员补上行尾注释，原 C-6）。
 
 原 3.1～3.5 节（stConveyor / stPickPlace / stFeeder 等，DJ-2026-005 三工站的变量）009 代码里没有，已移到文末附录。
 
@@ -186,20 +183,40 @@ ST_Station1 = `stControl` / `stStatus` / `stConfig` / `stSensors` / `stActuators
 
 | 名称 | 类型 | 说明 |
 |------|------|------|
-| `i_bReset` | BOOL | 系统复位 |
-| `i_iConveyorAlarm` | INT | 输送机报警码 |
-| `i_iPickPlaceAlarm` | INT | 取放料机构报警码 |
-| `i_iFeederAlarm` | INT | 打胶送料机构报警码 |
-| `o_wGlobalAlarmWord` | WORD | 全局报警字 |
-| `o_iCurrentAlarmCode` | INT | 当前最高优先级报警码 |
+| `i_bReset` | BOOL | 系统复位 (HMI); 报警汇总只认上升沿: 清报警历史、计数和新报警标志 |
+| `i_dwSafetyAlarm` | DWORD | 安全报警字, 接 FB_1030 q_dwAlarm (只读, 位定义见 FB_1030 文件头) |
+| `i_wExtErrorCode` | WORD | 上下游握手故障字, 接 FB_3001 q_wErrorCode (位定义见 FB_3001 常量区) |
+| `i_iStationAlarm` | DINT | 工位 1 报警码, 接 stStation1.stStatus.iAlarmCode (101~199, 0 = 无) |
+| `o_wGlobalAlarmWord` | WORD | 报警类别字: bit0 安全, bit1 上下游通讯/握手, bit2 工位 1 |
+| `o_iCurrentAlarmCode` | INT | 当前最高优先级报警码 (码越小越优先, 0 = 无报警, 码表见 FB_2001 文件头) |
 | `o_bAnyAlarmActive` | BOOL | 任意报警激活 |
-| `o_iMESAlarmCount` | INT | MES报警计数 |
-| `o_iMESAlarmQueue` | INT | MES报警队列 |
-| `o_bNewAlarmFlag` | BOOL | 新报警标志 |
-| `o_iStationAlarmStatus` | INT | 工站报警汇总状态 |
-| `o_bConveyorAlarmActive` | BOOL | 输送机报警激活 |
-| `o_bPickPlaceAlarmActive` | BOOL | 取放料报警激活 |
-| `o_bFeederAlarmActive` | BOOL | 打胶送料报警激活 |
+| `o_iActiveAlarmCount` | INT | 当前同时存在的报警条数 |
+| `o_iAlarmEventCount` | INT | 新报警累计次数 (复位清零, 到 32767 后从 1 重新计) |
+| `o_arrAlarmHistory` | ARRAY[0..9] OF INT | 最近 10 条新报警码, [0] 最新, 空位为 0 |
+| `o_bNewAlarmFlag` | BOOL | 有未确认的新报警 (出现新报警置 1, 按复位清, 可接蜂鸣器) |
+| `o_bSafetyAlarmActive` | BOOL | 安全类报警激活 (急停/门/继电器/总线/复位被拒等) |
+| `o_bExtAlarmActive` | BOOL | 上下游通讯/握手类报警激活 |
+| `o_bStationAlarmActive` | BOOL | 工位 1 报警激活 |
+
+### ST_ExternalDevice（上下游对接外壳，代码 `PLC_ST/01_外部设备交互/ST_ExternalDevice.scl`）
+
+| 名称 | 类型 | 说明 |
+|------|------|------|
+| `stUpstream` | ST_UpstreamDocking | 上游对接 8 步握手 |
+| `stDownstream` | ST_DownstreamDocking | 下游对接 8 步握手 |
+| `bEmergencyStop` | BOOL | 外部总线急停 (1=正常, 0=急停) |
+| `bSafetyDoorOK` | BOOL | 外部安全门锁信号 |
+| `bAnyComFault` | BOOL | 外部通讯综合故障 |
+
+### ST_Station1（工位1 外壳，代码 `PLC_ST/02_工位1_动作机构/ST_Station1.scl`）
+
+| 名称 | 类型 | 说明 |
+|------|------|------|
+| `stControl` | ST_Station1_Control | 控制命令与模式 |
+| `stStatus` | ST_Station1_Status | 运行状态与报警 |
+| `stConfig` | ST_Station1_Config | 参数设定 |
+| `stSensors` | ST_Station1_Sensors | 传感器输入 |
+| `stActuators` | ST_Station1_Actuators | 执行机构 (电机/气缸) |
 
 ## 4. 功能块实例
 
@@ -209,7 +226,7 @@ ST_Station1 = `stControl` / `stStatus` / `stConfig` / `stSensors` / `stActuators
 | `fbModbusClient` | FB_3002_ModbusTcpClient | GlobalVars | 上下游 Modbus TCP 客户端数据映射 |
 | `fbExternalDevice` | FB_3001_ExternalInteraction | GlobalVars | 上下游 8 步握手、心跳、组件 ID 三格 |
 | `fbStation1` | FB_1001_Station1 | GlobalVars | 工位 1 动作机构 |
-| `fbCommonAlarm` | FB_2001_CommonAlarm_AllStation | GlobalVars | 公共报警汇总（三个报警码输入 OB1 目前没接，见 FB_2001 接口文档第 3 节） |
+| `fbCommonAlarm` | FB_2001_CommonAlarm_AllStation | GlobalVars | 公共报警汇总：OB1 第 3 部分接入 FB_1030 q_dwAlarm、FB_3001 q_wErrorCode、工位 1 iAlarmCode（报警汇总卡） |
 
 ## 5. M/D 区规划
 
@@ -227,7 +244,7 @@ ST_Station1 = `stControl` / `stStatus` / `stConfig` / `stSensors` / `stActuators
 |---------|------|------|
 | D100~D112 | 工艺参数设定 | HMI 写入 |
 | D400~D425 | 报警 D 区 | PLC 写入 |
-| D406~D425 | MES 报警队列 | 去重队列 |
+| D406~D425 | MES 报警队列（005 旧规划，009 不接 MES；报警历史为 `stGlobal.o_arrAlarmHistory`，HMI 地址待 HMI 选型后定） | 旧规划 |
 
 ## 6. 版本更新记录
 
@@ -235,6 +252,7 @@ ST_Station1 = `stControl` / `stStatus` / `stConfig` / `stSensors` / `stActuators
 |------|------|----------|--------|
 | V1.0.0 | 2026-08-24 | 初始版本 | auto-pm |
 | V1.1.0 | 2026-10-22 | 按代码对齐：3.1 改为 OB1 实际全局名，新增 3.7 结构体字段表，第 4 节改为 009 实际实例；005 三工站旧条目移到附录 | Claude |
+| V1.2.0 | 2026-10-22 | 报警汇总卡预做：ST_CommonAlarm 改为 009 实际报警源与输出；补 ST_ExternalDevice、ST_Station1 外壳字段表 | Claude |
 
 ## 附：代码中已不存在的旧条目（DJ-2026-005 三工站设计，009 未实现，留底不删）
 
