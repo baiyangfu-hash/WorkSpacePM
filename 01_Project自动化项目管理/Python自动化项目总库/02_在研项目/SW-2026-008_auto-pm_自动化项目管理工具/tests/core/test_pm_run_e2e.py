@@ -434,7 +434,8 @@ def test_an_accepted_mission_cannot_be_run_again(tmp_path: Path) -> None:
 def test_lease_token_and_paths_never_leak(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with caplog.at_level(logging.DEBUG):
+    # 包日志器 auto_pm 被 AppContext 配过级别后，只设根日志器拦不住 auto_pm.* 的 DEBUG；两层都放开才查得全。
+    with caplog.at_level(logging.DEBUG), caplog.at_level(logging.DEBUG, logger="auto_pm"):
         failing = _env(tmp_path, calc=BROKEN_CALC, name="failing")
         failed = failing.run()
         passing = _env(tmp_path, name="passing")
