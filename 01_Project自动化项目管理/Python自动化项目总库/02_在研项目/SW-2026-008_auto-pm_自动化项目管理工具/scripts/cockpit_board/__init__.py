@@ -8,5 +8,9 @@
     widgets/        每个画面一个文件，只画 viewmodel 给的数据，不算业务。
     app.py          主窗口：模式切换、后台读取、把 viewmodel 交给画面。
 
+数据层在包外：scripts/pm_dashboard.py（账本、项目文件夹）、scripts/github_collector.py（GitHub 只读：PR、CI、
+安全回路声明与签字、reviews/ 审计结论；只 GET，令牌读环境变量 GITHUB_TOKEN / GH_TOKEN，本机缓存带“数据截至”）。
+包里没有任何网络代码；widgets/delivery.py 只画 viewmodel 给的 PR 表。
+
 设计稿：/mnt/project-files/plans/驾驶舱总控屏设计_20261022.md（共享文件夹）。
 """

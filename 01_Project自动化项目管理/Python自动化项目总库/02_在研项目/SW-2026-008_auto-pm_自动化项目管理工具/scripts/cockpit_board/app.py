@@ -2,6 +2,7 @@
 
 读取只读：账本由 pm_dashboard 拷到临时目录后 mode=ro + query_only；老后台只在手动“重新读取”且
 TD-105 合并后才调 snapshot()（见 LEGACY_ALLOWED）。工程工位的动作走 actions.py，在后台线程跑。
+GitHub（PR、门禁、安全签字、审计）走 scripts/github_collector.py，只 GET，在后台线程跑；读不到画面显示“未知”。
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import github_collector as gh  # noqa: E402
 import pm_dashboard as pd  # noqa: E402
 from PySide6.QtCore import QObject, QThread, QTimer, Signal  # noqa: E402
 from PySide6.QtGui import QGuiApplication, QPalette  # noqa: E402
@@ -81,6 +83,28 @@ class ActionRunner(QThread):
             self.done.emit(result)
 
 
+class GithubLoader(QThread):
+    """GitHub 采集在后台读；collect() 自己吞掉所有读失败，变成 Snapshot.state。"""
+
+    loaded = Signal(object)
+
+    def __init__(self, options: argparse.Namespace, parent: QObject | None) -> None:
+        super().__init__(parent)
+        self.options = options
+
+    def run(self) -> None:
+        self.loaded.emit(load_github(self.options))
+
+
+def load_github(options: argparse.Namespace) -> gh.Snapshot | None:
+    if options.no_github:
+        return None
+    return gh.collect(
+        options.github_repo, options.root, options.reviews_dirs, options.github_cache,
+        options.now or datetime.now(UTC), fetch=getattr(options, "github_fetch", None), offline=options.no_net,
+    )
+
+
 def load_board(options: argparse.Namespace, use_legacy: bool) -> pd.Board:
     now = options.now or datetime.now(UTC)
     board = pd.build_board(
@@ -102,6 +126,7 @@ class CockpitWindow(QMainWindow):
         self.options = options
         self.offset: timezone = options.offset
         self.board: pd.Board | None = None
+        self.github: gh.Snapshot | None = None
         self.home_vm: vm.HomeVM | None = None
         self.online: bool | None = None if not options.no_net else False
         self.mode = "pm"
@@ -190,7 +215,8 @@ class CockpitWindow(QMainWindow):
         card = next((p for p in self.home_vm.hot + self.home_vm.rest if p.project_id == project_id), None)
         if card is None:
             return
-        self.project.render(vm.project_vm(self.board, card, self.offset, self.online), self.board.generated_at, self.online)
+        self.project.render(vm.project_vm(self.board, card, self.offset, self.online, self.home_vm.github),
+                            self.board.generated_at, self.online)
         self.goto("project")
 
     def set_mode(self, key: str) -> None:
@@ -221,6 +247,10 @@ class CockpitWindow(QMainWindow):
         self._start(use_legacy=False)
         if not self.options.no_net:
             self.probe()
+        if not self.options.no_github:
+            loader = GithubLoader(self.options, self)
+            loader.loaded.connect(self._on_github)
+            self._track(loader)
 
     def _start(self, use_legacy: bool) -> None:
         loader = BoardLoader(self.options, use_legacy, self)
@@ -247,6 +277,10 @@ class CockpitWindow(QMainWindow):
         self.status.setText("这次没读成：" + pd._short(message, 80))
         self.refresh_button.setEnabled(True)
 
+    def _on_github(self, snapshot: gh.Snapshot | None) -> None:
+        self.github = snapshot
+        self._render()
+
     def probe(self) -> None:
         runner = ActionRunner(lambda: actions.probe_online(self.options.root), self)
         runner.probed.connect(self._on_probed)
@@ -266,7 +300,7 @@ class CockpitWindow(QMainWindow):
         if self.board is None:
             return
         board = self.board
-        self.home_vm = vm.home_vm(board, self.offset, self.online, not self.options.no_git)
+        self.home_vm = vm.home_vm(board, self.offset, self.online, not self.options.no_git, self.github)
         now = board.generated_at
         self.home.show_board(self.home_vm, now)
         self.issues.render(vm.all_issues(self.home_vm), now)
@@ -343,6 +377,10 @@ def parse_options(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--ledger-reader", choices=pd.LEDGER_READERS, default="auto",
                         help="账本读法：copy 本地拷贝 / store 复用 ContinuityStore 严格只读快照（TD-105）/ auto 自动")
     parser.add_argument("--examples", action="store_true", help="叠加示例卡")
+    parser.add_argument("--no-github", action="store_true", help="不读 GitHub（PR、门禁、安全签字一律“没检查”）")
+    parser.add_argument("--github-repo", default="", help="owner/name，默认取 <root>/.git/config 的 origin")
+    parser.add_argument("--github-cache", default="", help="GitHub 本机缓存文件，默认放用户缓存目录（不在工作空间）")
+    parser.add_argument("--reviews-dir", action="append", default=[], help="另读一个审计目录（可多次）；<root>/reviews 总会读")
     parser.add_argument("--station-project", default="", help="工程工位默认项目，默认第一个客户项目")
     parser.add_argument("--manual-branch", default="manual/<日期>-<主题>", help="人工分支名（显示用）")
     parser.add_argument("--source-version", default="", help="身份条：源码版本")
@@ -357,6 +395,9 @@ def parse_options(argv: list[str] | None) -> argparse.Namespace:
     else:
         options.offset = timezone(timedelta(hours=options.utc_offset))
     options.manual_worktree = options.root / ".auto-pm" / "worktrees" / "manual"
+    options.github_repo = options.github_repo or gh.repo_from_git_config(options.root)
+    options.github_cache = Path(options.github_cache) if options.github_cache else gh.default_cache_path(options.github_repo)
+    options.reviews_dirs = [options.root / "reviews", *(Path(d) for d in options.reviews_dir)]
     return options
 
 
@@ -374,6 +415,7 @@ def main(argv: list[str] | None = None) -> int:
         options.station_project = next(
             (p.project_id for p in pd.discover_projects(options.root, pd.DEFAULT_TOOL_PROJECTS) if not p.tool and p.registered), "")
     if options.screenshot:
+        window.github = load_github(options)
         window.show_board(load_board(options, use_legacy=False))
         window.resize(1360, 1600)
         target = Path(options.screenshot)

@@ -83,7 +83,7 @@ def test_checks_never_render_zero_without_a_source(tmp_path: Path) -> None:
                 assert check.text in policy.UNCHECKED_TEXTS
                 assert check.sev == "na"
         keys = {c.key: c.state for c in checks}
-        assert keys["gate_red"] == "unchecked" and keys["scope"] == "unchecked"
+        assert keys["gate_red"] == ("offline" if online is False else "unchecked") and keys["scope"] == "unchecked"
         assert keys["safety_unsigned"] == ("offline" if online is False else "unchecked")
     home = vm.home_vm(board, OFFSET, online=None, use_git=False)
     assert home.checks_ran == 3  # 只有账本路线的三项真跑了

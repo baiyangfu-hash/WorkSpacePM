@@ -3,7 +3,7 @@
 项目经理看板只读（按钮只在 policy.PM_BUTTONS 里）、工程工位按钮只在 policy.STATION_BUTTONS 里且
 批准 / 开工 / 提交灰着、没有输入框、不写工作空间、纯文本标签、没检查显示“没检查”不显示 0、
 先快读再接老后台（TD-105 前永远不接）、读失败窗口不挂、双击 bat 不在 releases/ 里、
-子进程和写文件只在 actions.py。
+子进程和写文件只在 actions.py；GitHub 区块显示“数据截至”，没真读到时一格绿都没有。
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import importlib.util
 import os
 import re
 import sys
+from datetime import timedelta
 from pathlib import Path
 from types import ModuleType
 
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QAbstractSpinBox,
     QCheckBox,
     QComboBox,
+    QFrame,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
@@ -63,7 +65,7 @@ def _options(root: Path, db: Path, **extra: object) -> argparse.Namespace:
         ["--root", str(root), "--db", str(db), "--now", NOW.isoformat(), "--no-git", "--no-net",
          "--station-project", "DJ-2026-101", "--source-version", "1.3.3", "--effective-version", "1.3.3"]
         + ["--no-legacy"] * (not extra.pop("legacy", False))
-        + ["--utc-offset", "-7"]
+        + ["--utc-offset", "-7", "--github-cache", str(root.parent / "github_cache_test.json")]
     )
     for key, value in extra.items():
         setattr(options, key, value)
@@ -144,7 +146,8 @@ def test_window_and_screenshot_never_write_the_workspace(qapp, tmp_path: Path) -
     window.close()
     shots = tmp_path / "shots"
     shots.mkdir()
-    argv = ["--root", str(root), "--now", NOW.isoformat(), "--no-git", "--no-legacy", "--no-net"]
+    argv = ["--root", str(root), "--now", NOW.isoformat(), "--no-git", "--no-legacy", "--no-net",
+            "--github-cache", str(tmp_path / "github_cache_test.json")]
     assert gui.main([*argv, "--screenshot", str(shots / "看板.png")]) == 0
     assert _files(root) == before  # 账本哈希、修改时间都不变，旁边也不多出 -shm / -wal
     assert sorted(path.name for path in shots.iterdir()) == [
@@ -305,3 +308,35 @@ def test_process_and_file_writes_live_only_in_actions() -> None:
     assert "tempfile.gettempdir()" in app_source.split("def _crash_report", 1)[1]
     assert len(re.findall(WRITES, sources[PACKAGE / "actions.py"])) == 1
     assert len(re.findall(WRITES, app_source)) == 1
+
+
+def test_github_block_shows_as_of_and_never_green_when_stale(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+    import github_collector as gh
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db)
+    pull = gh.PullInfo(7, "改 OB1", "u", "baiyangfu-hash", "a" * 40, "claude/x", False, "2026-10-22T09:00:00Z",
+                       projects=["DJ-2026-101"], plc=True, ci=[gh.CiState("plc-ci", "pass", "过")],
+                       safety=gh.Safety("signed", "是", "已签"))
+    fresh = gh.Snapshot("o/r", "ok", NOW, NOW, pulls=[pull], main_ci=[gh.CiState("plc-ci", "pass", "过")],
+                        authenticated=True)
+    stale = gh.Snapshot("o/r", "offline", NOW, NOW - timedelta(hours=3), from_cache=True, pulls=[pull],
+                        main_ci=[gh.CiState("plc-ci", "pass", "过")], errors=["断网：timed out"])
+    for snapshot, green in ((fresh, True), (stale, False)):
+        window.github = snapshot
+        window._render()
+        window.goto("home")
+        window.open_project("DJ-2026-101")
+        window.project.set_tab("io")
+        qapp.processEvents()
+        for page in (window.home, window.project):
+            blocks = [f for f in page.findChildren(QFrame) if f.property("github_state")]
+            assert len(blocks) == 1
+            texts = _texts(blocks[0])
+            assert any(t.startswith("数据截至 ") for t in texts)
+            chips = [lab for lab in blocks[0].findChildren(QLabel) if lab.objectName() == "chip"]
+            assert chips and any(lab.property("sev") == "ok" for lab in chips) is green
+            if not green:
+                assert all(lab.text() in ("未知", "没审计记录") and lab.property("sev") == "na" for lab in chips)
+                assert any("3 小时前" in t for t in texts), texts
+    window.close()

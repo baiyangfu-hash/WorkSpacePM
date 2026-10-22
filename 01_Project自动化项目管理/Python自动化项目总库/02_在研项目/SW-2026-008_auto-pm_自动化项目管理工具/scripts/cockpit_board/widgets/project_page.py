@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from cockpit_board.viewmodel import PHASES, ProjectVM
 from cockpit_board.widgets import common as c
+from cockpit_board.widgets.delivery import github_block
 from cockpit_board.widgets.home import decision_card
 from cockpit_board.widgets.issues import issue_card
 from PySide6.QtWidgets import QButtonGroup, QVBoxLayout, QWidget
@@ -137,13 +138,13 @@ class ProjectPage(QWidget):
         inner.addWidget(c.label("它在等谁", "section"))
         inner.addWidget(c.label("依赖栏来自计划防呆七栏（PR #36 合并后才有数据）；现在没有。", "muted"))
         self.layout_.addWidget(frame)
-        frame, inner = c.card()
-        inner.addWidget(c.label("交出去的东西（PR · 门禁 · 审计 · 安全签字）", "section"))
-        if self.online is False:
-            inner.addWidget(c.label("离线：GitHub 读不到，不显示旧数据。", "muted"))
+        self.layout_.addWidget(c.section("交出去的东西（PR · 门禁 · 安全签字 · 审计）"))
+        if vm.github is None:
+            frame, inner = c.card(dashed=True)
+            inner.addWidget(c.label("没开 GitHub 采集：PR、门禁、安全签字都没检查。", "muted"))
+            self.layout_.addWidget(frame)
         else:
-            inner.addWidget(c.label("GitHub 采集模块未接；接上后这里列开着的 PR，门禁三态：过 / 红 / 没跑。", "muted"))
-        self.layout_.addWidget(frame)
+            self.layout_.addWidget(github_block(vm.github, vm.prs, "没有改到这个项目的开着的 PR。"))
 
     def _recipe(self, vm: ProjectVM, _now) -> None:  # noqa: ANN001
         frame, inner = c.card()

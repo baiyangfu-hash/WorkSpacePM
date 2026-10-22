@@ -7,6 +7,7 @@ from collections.abc import Callable
 from cockpit_board import theme
 from cockpit_board.viewmodel import Check, Decision, HomeVM, ProjectCard, waited
 from cockpit_board.widgets import common as c
+from cockpit_board.widgets.delivery import github_block
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QWidget
 
@@ -115,6 +116,10 @@ class HomePage(QWidget):
         holder, grid = c.grid(CARD_COLUMNS)
         c.fill_grid(grid, [check_tile(k) for k in vm.checks], CARD_COLUMNS)
         lay.addWidget(holder)
+
+        if vm.github is not None:
+            lay.addWidget(c.section("交出去的东西", "GitHub 上开着的 PR · 门禁 · 安全签字 · 审计 · 没读到就写“未知”"))
+            lay.addWidget(github_block(vm.github, vm.github.rows, "没有开着的 PR。"))
 
         lay.addWidget(c.section("要留意的项目", f"{len(vm.hot)} 个受阻或有风险 · 点进去看详情"))
         if vm.hot:
