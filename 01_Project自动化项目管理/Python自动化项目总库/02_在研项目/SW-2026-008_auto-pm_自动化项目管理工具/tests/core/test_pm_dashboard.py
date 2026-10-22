@@ -267,3 +267,85 @@ def test_recent_events_and_change_matrix(tmp_path: Path) -> None:
     page = pd.render_page(board, timezone.utc)
     assert '<td class="mono">BC-DJ-2026-101-001</td>' in page
     assert "点开看全部 1 条变更" in page
+
+
+# ---------------------------------------------------------------- 账本读法可切换（TD-105）
+
+
+class _FakeStore:
+    """冒充 ContinuityStore：只给 _read_connection 和 close_read_snapshot，记下调用顺序。"""
+
+    calls: list[str] = []
+
+    def __init__(self, root: Path, db_path: Path) -> None:
+        _FakeStore.calls.append(f"init {root.name} {db_path.name}")
+        self.db_path = db_path
+
+    def _read_connection(self):  # noqa: ANN202
+        _FakeStore.calls.append("_read_connection")
+        return pd.copy_ledger_connection(self.db_path.parent, self.db_path)  # 真 Store 也是先拷快照再开
+
+    def close_read_snapshot(self) -> None:
+        _FakeStore.calls.append("close_read_snapshot")
+
+    def initialize(self) -> None:
+        raise AssertionError("看板不许 initialize 账本")
+
+
+class _OldStore(_FakeStore):
+    """TD-105 之前的 Store：没有 close_read_snapshot。"""
+
+    close_read_snapshot = None  # type: ignore[assignment]
+
+
+def test_ledger_reader_auto_follows_the_td105_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert pd.td105_merged(_FakeStore) is True
+    assert pd.td105_merged(_OldStore) is False  # 老 Store 的 _read_connection 在 Windows 上会把写账本的锁在外面，不用
+    assert pd.td105_merged(None) is False
+    monkeypatch.setattr(pd, "continuity_store_class", lambda: _OldStore)
+    assert pd.choose_ledger_reader("auto") == ("copy", pd.copy_ledger_connection)
+    monkeypatch.setattr(pd, "continuity_store_class", lambda: _FakeStore)
+    assert pd.choose_ledger_reader("auto") == ("store", pd.store_ledger_connection)
+    # Store 只认工作空间自己的账本；看别处拷来的账本（--db 指到外面）auto 仍走 copy
+    root = Path("/ws")
+    assert pd.choose_ledger_reader("auto", root, root / ".auto-pm" / "continuity.db")[0] == "store"
+    assert pd.choose_ledger_reader("auto", root, Path("/elsewhere") / "continuity.db")[0] == "copy"
+    assert pd.choose_ledger_reader("copy")[0] == "copy" and pd.choose_ledger_reader("store")[0] == "store"
+    with pytest.raises(ValueError):
+        pd.choose_ledger_reader("legacy")
+    # 现在这条分支上 auto 选什么，只看真 Store 有没有 TD-105 的标记
+    monkeypatch.undo()
+    expected = "store" if pd.td105_merged(pd.continuity_store_class()) else "copy"
+    assert pd.choose_ledger_reader("auto")[0] == expected
+
+
+def test_store_reader_only_calls_read_connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, db = _workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    before = _digest(db)
+    neighbours = sorted(path.name for path in db.parent.iterdir())
+    _FakeStore.calls = []
+    monkeypatch.setattr(pd, "continuity_store_class", lambda: _FakeStore)
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False, ledger_reader="store")
+    assert _FakeStore.calls == ["init ws continuity.db", "_read_connection", "close_read_snapshot"]
+    assert "TD-105 严格只读快照" in board.ledger_note
+    assert [m.title for p in board.projects for m in p.missions] == ["写通讯层"]
+    assert _digest(db) == before
+    assert sorted(path.name for path in db.parent.iterdir()) == neighbours
+    # 同一份账本，两种读法读出来的卡一样
+    copied = pd.build_board(root, db, NOW, use_git=False, use_legacy=False, ledger_reader="copy")
+    assert "本地拷贝" in copied.ledger_note
+    assert [m.title for p in copied.projects for m in p.missions] == ["写通讯层"]
+
+
+def test_store_reader_fits_the_real_continuity_store(tmp_path: Path) -> None:
+    """接口要对得上真 Store（现在是 main 的版本；TD-105 合入后自动换成新读法，不用改这里）。"""
+    store_class = pd.continuity_store_class()
+    assert store_class is not None and hasattr(store_class, "_read_connection")
+    root, db = _workspace(tmp_path, [("DJ-2026-101", "BLOCKED", "卡住了", 0.5)])
+    before = _digest(db)
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False, ledger_reader="store")
+    assert [m.state for p in board.projects for m in p.missions] == ["BLOCKED"]
+    assert _digest(db) == before
+    assert pd.main(["--root", str(root), "--out", str(tmp_path / "b.html"), "--now", NOW.isoformat(),
+                    "--no-git", "--no-legacy", "--ledger-reader", "store"]) == 0
+    assert _digest(db) == before

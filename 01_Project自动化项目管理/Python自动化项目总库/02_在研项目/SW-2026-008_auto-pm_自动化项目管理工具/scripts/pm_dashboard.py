@@ -28,7 +28,8 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -229,8 +230,39 @@ def _short(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def read_ledger_copy(db_path: Path, now: datetime) -> tuple[list[MissionInfo], list[Attention]]:
+# ---------------------------------------------------------------- 账本读法（可切换）
+#
+# 两种读法，接口一样：给 (root, db_path)，吐一个只读 sqlite3 连接。
+#   copy  ：本脚本自己的读法——账本连 -wal 拷到工作空间外的临时目录再 mode=ro 打开（老路线）。
+#   store ：复用 auto_pm ContinuityStore._read_connection（TD-105 修过：严格只读快照，拷贝时不把
+#           写账本的进程锁在外面，拷到一半账本变了会重拷）。
+#   auto  ：TD-105 合进 main 后（ContinuityStore 有 close_read_snapshot）走 store，否则走 copy。
+LEDGER_READERS = ("auto", "copy", "store")
+TD105_MARKER = "close_read_snapshot"  # TD-105 分支（claude/td105-ui-concurrency）给 ContinuityStore 加的方法
+LEDGER_READER_LABEL = {"copy": "本地拷贝", "store": "TD-105 严格只读快照"}
+
+
+def continuity_store_class() -> type | None:
+    """找 auto_pm 的 ContinuityStore；找不到（脚本单独拷走了）返回 None。"""
+    try:
+        source_root = str(Path(__file__).resolve().parent.parent)
+        if source_root not in sys.path:
+            sys.path.insert(0, source_root)
+        from auto_pm.infrastructure.continuity_store import ContinuityStore
+    except Exception:  # noqa: BLE001 - 没有 auto_pm 就只能走 copy
+        return None
+    return ContinuityStore
+
+
+def td105_merged(store_class: type | None) -> bool:
+    """这个 Store 类带不带 TD-105 的读法（None＝没有 auto_pm，按没合处理）。"""
+    return store_class is not None and callable(getattr(store_class, TD105_MARKER, None))
+
+
+@contextmanager
+def copy_ledger_connection(root: Path, db_path: Path) -> Iterator[sqlite3.Connection]:
     """先把账本（连同 -wal）拷到工作空间外的临时目录再只读打开，账本旁边连 -shm 都不会多出来。"""
+    del root
     with tempfile.TemporaryDirectory(prefix="andon-") as temporary:
         copy = Path(temporary) / db_path.name
         shutil.copyfile(db_path, copy)
@@ -239,9 +271,61 @@ def read_ledger_copy(db_path: Path, now: datetime) -> tuple[list[MissionInfo], l
             shutil.copyfile(wal, copy.with_name(copy.name + "-wal"))
         connection = open_ledger_read_only(copy)
         try:
-            return read_ledger(connection, now)
+            yield connection
         finally:
             connection.close()
+
+
+@contextmanager
+def store_ledger_connection(
+    root: Path, db_path: Path, store_factory: Callable[..., object] | None = None
+) -> Iterator[sqlite3.Connection]:
+    """复用 ContinuityStore 的严格只读快照读法；只调 _read_connection，不 initialize、不建表。"""
+    if store_factory is None:
+        store_factory = continuity_store_class()
+        if store_factory is None:
+            raise RuntimeError("找不到 auto_pm.infrastructure.continuity_store，无法用 store 读法")
+    store = store_factory(root, db_path)
+    try:
+        with store._read_connection() as connection:  # noqa: SLF001 - 账本读法以 Store 为准
+            yield connection
+    finally:
+        close = getattr(store, TD105_MARKER, None)
+        if callable(close):
+            close()
+
+
+def _within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def choose_ledger_reader(
+    name: str = "auto", root: Path | None = None, db_path: Path | None = None
+) -> tuple[str, Callable[[Path, Path], object]]:
+    """把 auto 定成 copy 或 store，返回 (读法名, 连接工厂)。
+
+    auto 走 store 的条件：TD-105 已合入，且账本在工作空间自己的目录下（Store 只认自己的账本，
+    看别处拷来的账本仍用 copy）。
+    """
+    if name not in LEDGER_READERS:
+        raise ValueError(f"账本读法只能是 {LEDGER_READERS}，不是 {name!r}")
+    if name == "auto":
+        own_ledger = root is None or db_path is None or _within(db_path, root)
+        name = "store" if own_ledger and td105_merged(continuity_store_class()) else "copy"
+    return name, (store_ledger_connection if name == "store" else copy_ledger_connection)
+
+
+def read_ledger_copy(
+    db_path: Path, now: datetime, root: Path | None = None, reader: str = "copy"
+) -> tuple[list[MissionInfo], list[Attention]]:
+    """按选定读法打开账本并读出卡和遗留；默认老路线 copy，原有调用不变。"""
+    _name, connect = choose_ledger_reader(reader)
+    with connect(root or db_path.parent.parent, db_path) as connection:  # type: ignore[attr-defined]
+        return read_ledger(connection, now)
 
 
 def read_ledger(
@@ -612,13 +696,15 @@ def build_board(
     use_git: bool = True,
     use_legacy: bool = True,
     legacy_factory: Callable[[Path], object] | None = None,
+    ledger_reader: str = "auto",
 ) -> Board:
     projects = discover_projects(root, tool_projects)
     by_id = {project.project_id: project for project in projects}
     ledger_note = "没找到账本，只显示文件夹里的记录"
     if db_path is not None and db_path.is_file():
-        missions, attention = read_ledger_copy(db_path, now)
-        ledger_note = f"账本只读：{db_path.name}"
+        reader_name, _connect = choose_ledger_reader(ledger_reader, root, db_path)
+        missions, attention = read_ledger_copy(db_path, now, root, reader_name)
+        ledger_note = f"账本只读：{db_path.name}（{LEDGER_READER_LABEL[reader_name]}）"
         for mission in missions:
             project = by_id.get(mission.project_id)
             if project is None:
@@ -1183,6 +1269,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-legacy", action="store_true", help="不调老驾驶舱后台（快，约省 20 秒）"
     )
+    parser.add_argument(
+        "--ledger-reader", choices=LEDGER_READERS, default="auto",
+        help="账本读法：copy 本地拷贝；store 复用 ContinuityStore 严格只读快照（TD-105）；auto 按 TD-105 是否合入自动选",
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.root).resolve()
@@ -1195,7 +1285,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.utc_offset is not None
         else datetime.now().astimezone().tzinfo
     )
-    board = build_board(root, db_path, now, use_git=not args.no_git, use_legacy=not args.no_legacy)
+    board = build_board(root, db_path, now, use_git=not args.no_git, use_legacy=not args.no_legacy,
+                        ledger_reader=args.ledger_reader)
     if args.examples:
         board = add_examples(board, now)
     out = Path(args.out) if args.out else Path(tempfile.gettempdir()) / "安灯板.html"

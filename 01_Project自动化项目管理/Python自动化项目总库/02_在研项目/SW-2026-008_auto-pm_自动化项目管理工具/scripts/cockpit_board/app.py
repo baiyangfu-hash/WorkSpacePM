@@ -86,6 +86,7 @@ def load_board(options: argparse.Namespace, use_legacy: bool) -> pd.Board:
     board = pd.build_board(
         options.root, options.db, now, use_git=not options.no_git,
         use_legacy=use_legacy, legacy_factory=getattr(options, "legacy_factory", None),
+        ledger_reader=getattr(options, "ledger_reader", "auto"),
     )
     if options.examples:
         board = pd.add_examples(board, now)
@@ -339,6 +340,8 @@ def parse_options(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--no-git", action="store_true", help="不跑 git log")
     parser.add_argument("--no-legacy", action="store_true", help="不调老驾驶舱后台")
     parser.add_argument("--no-net", action="store_true", help="不探测网络，按离线处理")
+    parser.add_argument("--ledger-reader", choices=pd.LEDGER_READERS, default="auto",
+                        help="账本读法：copy 本地拷贝 / store 复用 ContinuityStore 严格只读快照（TD-105）/ auto 自动")
     parser.add_argument("--examples", action="store_true", help="叠加示例卡")
     parser.add_argument("--station-project", default="", help="工程工位默认项目，默认第一个客户项目")
     parser.add_argument("--manual-branch", default="manual/<日期>-<主题>", help="人工分支名（显示用）")

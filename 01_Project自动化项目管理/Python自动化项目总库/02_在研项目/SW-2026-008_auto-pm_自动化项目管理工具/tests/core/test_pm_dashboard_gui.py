@@ -244,6 +244,25 @@ def test_read_failure_keeps_the_window_alive(qapp, tmp_path: Path) -> None:  # n
     window.close()
 
 
+def test_ledger_reader_flag_reaches_build_board(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    options = _options(root, db)
+    assert options.ledger_reader == "auto"
+    seen: list[str] = []
+    real = app_module.pd.build_board
+
+    def spy(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        seen.append(kwargs["ledger_reader"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(app_module.pd, "build_board", spy)
+    gui.load_board(options, use_legacy=False)
+    options = gui.parse_options(["--root", str(root), "--no-git", "--no-legacy", "--no-net", "--ledger-reader", "store"])
+    board = gui.load_board(options, use_legacy=False)
+    assert seen == ["auto", "store"]
+    assert "TD-105 严格只读快照" in board.ledger_note
+
+
 def test_double_click_launcher_is_outside_releases() -> None:
     assert BAT.is_file()
     raw = BAT.read_bytes()
