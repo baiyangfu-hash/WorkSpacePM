@@ -20,6 +20,7 @@ from auto_pm.domain.change.decision_service import (
     DecisionError,
     DecisionService,
 )
+from auto_pm.ui.cli.approval_pin import require_approval_pin
 
 console = Console()
 
@@ -149,7 +150,13 @@ def create_decision(
     runtime_outcomes: tuple[str, ...],
     as_json: bool,
 ) -> None:
-    """从已批准的变更单创建结构化决策包。"""
+    """从已批准的变更单创建结构化决策包（已启用批准口令时须用户本人在终端输入口令）。"""
+    proof = require_approval_pin(
+        ctx, summary=f"签发决策包：变更单 {change_id}，批准人 {approver}", purpose="decision", subject=change_id,
+        approver=approver,
+    )
+    if proof is not None:
+        approver = proof.approver
     try:
         root = _workspace(ctx)
         WorktreePolicyService(root).require_control_root()

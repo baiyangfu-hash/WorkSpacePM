@@ -52,6 +52,7 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 3. **入箱**：`pm inbox add`，`--original-words` 一字不改填用户原话；分诊单里影响、查重、取证都写你实际查到的东西。
 4. **出计划给用户看**：用中文列出 目标 / 可改范围（具体文件路径）/ 验收标准 / 风险 / 不做什么 / 需要用户决定的点。验收标准必须是机器能判的（某条命令退出码 0、某个测试通过、某个输出含某行），“能用”“正常”这类不算。然后停下，等用户亲口说“确认开工”。
 5. **用户确认后**才运行 `pm inbox confirm`、`pm plan`、`pm approve`。批准人填用户，证据引用写成 `user-confirmation:` 加用户确认消息的时间或编号；用户没说过的确认，绝不要自己编。
+   **已启用批准口令时**（`main.py pm approver-pin status` 显示“已生效”）：`pm approve` 和第 8 步的 `pm accept` 会在终端里提示用户输入批准口令，批准人和证据由口令决定，`--approver`/`--approval-evidence-ref` 可不填。你只把完整命令（`main.py pm approve --request-id <请求号> --plan-hash <哈希>`）在 IDE 终端里运行或交给用户，等用户本人在终端里敲口令；**绝不向用户索要口令、绝不让用户把口令发到对话里、绝不设法绕过**（伪造终端、改登记文件、调内部函数都算违规）。`pm approver-pin init` 只能用户本人运行。
 6. **动手**：只改范围卡列出的路径。所有 `change` 命令都带 `--pid <项目编号>`。界面的“批准范围并开始”和 `pm execute`、`run_approved_planning` 都会启动 Codex 执行器（已挂起），不要点、不要调。IDE 里的 agent 自己写代码按下面顺序走，每条命令的参数以 `--help` 为准，全部在控制根运行：
    1. `main.py pm confirm-start --mission-id <Mission 编号>`（编号从 `pm orient` 读）：Mission 转为进行中、Work 转为 IN_PROGRESS，不启动 Codex；
    2. `git worktree add --detach .auto-pm/worktrees/<名字>`（这一步是 Git 命令，不是驾驶舱命令），在这个工作树里写代码。控制根里范围内的文件如果还有没提交的改动（例如上一单收口并回的成果），下一步会被拒绝：请用户先提交，再建工作树；
@@ -60,7 +61,7 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
    5. 质量验证：`main.py pm verify --mission-id <Mission 编号> --lease-wallet`。它用本 Run 自己的租约（从本机钱包读，不打印口令）跑领域门禁、生成系统证据检查点；通过后 Mission 进入“等待用户验收”，退出码 0。没通过时退出码非 0，`reason` 是原因，原样报告给用户，改好后再运行一次 `pm verify`。门禁正在跑的时候不做这一步。
    不要自己把工作树的文件拷回控制根：收口时驾驶舱会按字节并回（见第 8 步）。
 7. **自检**：交给用户验收前，范围卡里的每条验收标准都要跑过，把命令和退出码原样报告；有没跑的，明说没跑。`pm verify` 之后工作树里不要再改任何文件，改了收口会被拒，要重新验证、重新验收。
-8. **验收与收口**：请用户在驾驶舱界面上亲手点“确认验收”。这个按钮先记下用户验收，再走 `close_accepted` 一步收口：把工作树里验收过的文件按字节并回控制根、推进 Run、Work 和 Mission，把证据写进变更单、同步台账，但**不推进变更单状态**，也**不替用户提交 Git**。用户已经验收、但收口没完成（界面显示“重试同步”）时，你可以运行 `main.py pm close --mission-id <Mission 编号>`，它和“重试同步”是同一个收口；它只收用户已验收的任务，失败时退出码非 0，`reason` 是原因。收口完成后：
+8. **验收与收口**：请用户在驾驶舱界面上亲手点“确认验收”（已启用批准口令时界面会拒绝，改为请用户在终端运行 `main.py pm accept --mission-id <Mission 编号>` 并输入口令，然后你运行 `main.py pm close --mission-id <Mission 编号>`）。这个按钮先记下用户验收，再走 `close_accepted` 一步收口：把工作树里验收过的文件按字节并回控制根、推进 Run、Work 和 Mission，把证据写进变更单、同步台账，但**不推进变更单状态**，也**不替用户提交 Git**。用户已经验收、但收口没完成（界面显示“重试同步”）时，你可以运行 `main.py pm close --mission-id <Mission 编号>`，它和“重试同步”是同一个收口；它只收用户已验收的任务，失败时退出码非 0，`reason` 是原因。收口完成后：
    1. 用 `change transition <单号> --to <下一状态> --pid <项目编号>` 把变更单逐步推到 `completed`；
    2. 运行 `main.py ledger reconcile <项目编号>` 只读对账，结果报告给用户；
    3. 告诉用户哪些文件已并回控制根、尚未提交，请用户提交（下一单动同一批文件前必须先提交）。

@@ -22,6 +22,7 @@ from auto_pm.core.work_registry_service import WorkRegistryService
 from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.infrastructure import process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.ui.cli.approval_pin import require_approval_pin
 
 RISK_PHRASE = "接受风险"
 
@@ -186,11 +187,15 @@ def sign_risk_pm(ctx: click.Context, run_id: str, claimant_id: str) -> None:
     typed_phrase = click.prompt(f"请输入“{RISK_PHRASE}”四个字", default="", show_default=False)
     if typed_phrase.strip() != RISK_PHRASE:
         raise click.ClickException("未输入“接受风险”，未签署")
+    # A pseudo terminal and a cleared environment pass the checks above; the user's PIN (gap 9) does not.
+    proof = require_approval_pin(
+        ctx, summary=f"签署接受风险：Run {run_id} → {claimant_id}", purpose="sign-risk", subject=f"{run_id}:{claimant_id}"
+    )
     try:
         signature = service.sign_risk(
             run_id=run_id,
             claimant_id=claimant_id,
-            signer=getpass.getuser(),
+            signer=proof.approver if proof is not None else getpass.getuser(),
             environ=os.environ,
             stdin_is_tty=_stdin_is_tty(),
             stdout_is_tty=_stdout_is_tty(),

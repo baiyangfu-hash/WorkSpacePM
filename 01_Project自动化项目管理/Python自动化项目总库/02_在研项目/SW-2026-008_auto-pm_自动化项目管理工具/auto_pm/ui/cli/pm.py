@@ -34,6 +34,7 @@ from auto_pm.core.workspace_context_service import WorkspaceContextError, Worksp
 from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.ui.cli.approval_pin import read_approval_pin
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 _KIND_CHOICES = tuple(item.value.lower() for item in IntakeKind)
@@ -727,11 +728,11 @@ def inbox_reject(
 @click.option("--approved-model", default="")
 @click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
 @click.option("--plan-hash", default="", help="plan 输出的不可变方案哈希")
-@click.option("--approver", default="", help="真实人类审批人")
+@click.option("--approver", default="", help="真实人类审批人（已启用批准口令时由口令决定，可不填）")
 @click.option(
     "--approval-evidence-ref",
     default="",
-    help="非模型自签的 user-confirmation 证据引用",
+    help="非模型自签的 user-confirmation 证据引用（已启用批准口令时由口令生成，可不填）",
 )
 @click.option("--owner", default="PM Facade", show_default=True, help="内部 Work owner")
 @_classification_options
@@ -781,14 +782,18 @@ def approve_pm(
         return
     if root_work_id:
         raise click.ClickException("新需求批准不允许手工传入 --root-work-id")
+    if not plan_hash:
+        raise click.ClickException("新需求批准缺少必填参数: --plan-hash")
+    approval_pin = read_approval_pin(
+        ctx, summary=f"批准范围卡：请求 {request_id or '(新需求)'}，方案哈希 {plan_hash[:16]}…（确认这就是你看过的那张卡）"
+    )
     missing = [
         name
         for name, value in (
-            ("--plan-hash", plan_hash),
             ("--approver", approver),
             ("--approval-evidence-ref", approval_evidence_ref),
         )
-        if not value
+        if not value and not approval_pin
     ]
     if missing:
         raise click.ClickException("新需求批准缺少必填参数: " + ", ".join(missing))
@@ -817,6 +822,7 @@ def approve_pm(
                 expected_plan_hash=plan_hash,
                 approver=approver,
                 approval_evidence_ref=approval_evidence_ref,
+                approval_pin=approval_pin,
             )
             approved_card = short_facade.recover_planning_scope_card(result.mission_id)
             approved_work = short_facade.create_planning_work(approved_card)
@@ -825,8 +831,15 @@ def approve_pm(
         _emit_plan_approval(approved_card, approved_work.state.value)
         return
     try:
+        approver, approval_evidence_ref = _facade(ctx).resolve_approval(
+            approval_pin=approval_pin,
+            approver=approver,
+            approval_evidence_ref=approval_evidence_ref,
+            purpose="approve-scope",
+            subject=plan_hash,
+        )
         DecisionService.validate_planning_approval(approver, plan_hash, approval_evidence_ref)
-    except DecisionError as error:
+    except (DecisionError, PmFacadeError) as error:
         raise click.ClickException(str(error)) from error
     classification, intake_item_id = _resolve_filing(
         ctx,
@@ -880,6 +893,7 @@ def approve_pm(
             expected_plan_hash=plan_hash,
             approver=approver,
             approval_evidence_ref=approval_evidence_ref,
+            approval_pin=approval_pin,
         )
         facade.materialize_planning_mission(card, created_by="PM Facade")
         work = facade.create_planning_work(card, owner=owner)
@@ -959,8 +973,14 @@ def execute_pm(
 @click.option("--mission-id", required=True)
 @click.pass_context
 def accept_pm(ctx: click.Context, mission_id: str) -> None:
-    """记录最终用户验收；关闭动作仍受治理门禁约束。"""
-    _emit_card(ctx, "accept", mission_id)
+    """记录最终用户验收；已启用批准口令时须用户本人在终端输入口令。关闭动作仍受治理门禁约束。"""
+    approval_pin = read_approval_pin(ctx, summary=f"最终验收：任务 {mission_id}（确认你已经看过结果）")
+    try:
+        _require_control_root(ctx)
+        card = _facade(ctx).accept(mission_id, approval_pin=approval_pin)
+    except (PmFacadeError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(card.model_dump_json(indent=2))
 
 
 @pm_group.command(name="workflow")
@@ -1182,7 +1202,10 @@ def resolve_context_compat(ctx: click.Context, project_id: str, start_path: str 
 
 
 # Agent swap commands (M3-HANDOFF card): kept in their own module, registered here so they appear under `pm`.
+from auto_pm.ui.cli.approval_pin import approver_pin_group  # noqa: E402
 from auto_pm.ui.cli.pm_handoff import handoff_pm, sign_risk_pm, takeover_pm  # noqa: E402
+
+pm_group.add_command(approver_pin_group)
 
 pm_group.add_command(handoff_pm)
 pm_group.add_command(takeover_pm)

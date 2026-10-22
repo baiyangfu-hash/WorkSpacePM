@@ -20,6 +20,7 @@ DRILL_FILES = (
     "tests/e2e/test_release_pycache_drill.py",
     "tests/e2e/test_raw_requirement_drill.py",
     "tests/e2e/test_ide_lane_drill.py",
+    "tests/e2e/test_approval_pin_drill.py",
 )
 
 
