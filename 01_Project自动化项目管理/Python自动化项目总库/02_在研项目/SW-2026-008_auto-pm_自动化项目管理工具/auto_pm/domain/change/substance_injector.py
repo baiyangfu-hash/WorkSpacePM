@@ -68,12 +68,18 @@ class SubstanceInjector:
             被更新的变更单文件路径
         """
         ws = Path(workspace_root)
-        # 定位变更单文件
+        # 定位变更单文件：给了项目编号时只在本项目的变更单目录里找（变更单按项目编号，别的项目可以有同号）
         chg_file: Path | None = None
-        for path in ws.glob(f"**/{change_number}.md"):
-            if path.is_file():
-                chg_file = path
-                break
+        scoped = cls._project_change_files(ws, change_number, project_id)
+        if scoped is not None:
+            chg_file = scoped[0] if len(scoped) == 1 else None
+            if len(scoped) > 1:
+                raise FileNotFoundError(f"项目 {project_id} 内变更单 {change_number}.md 不唯一: {len(scoped)} 份")
+        else:
+            for path in ws.glob(f"**/{change_number}.md"):
+                if path.is_file():
+                    chg_file = path
+                    break
 
         if chg_file is None:
             raise FileNotFoundError(f"未找到变更单文件: {change_number}.md")
@@ -205,6 +211,7 @@ class SubstanceInjector:
         target_path: str,
         evidence: Mapping[str, str],
         change_facts: Mapping[str, str] | None = None,
+        project_id: str | None = None,
     ) -> Path:
         """Write one verified C06 evidence record to its uniquely bound CHG.
 
@@ -218,12 +225,16 @@ class SubstanceInjector:
         template placeholders that are still present are filled with fixed
         sentences before the evidence rows are written.  Without facts any
         remaining placeholder is still refused.
+
+        ``project_id`` (the Work's project) limits the search to that project's own change folders: CHG
+        numbers are issued per project, so another project may legitimately hold the same number
+        (M3-CHGSCOPE).  The match there must still be exactly one.
         """
 
         cls._validate_closure_evidence(change_number, target_path, evidence)
         facts = cls._validate_change_facts(change_facts)
         workspace = Path(workspace_root).resolve()
-        chg_file = cls._find_unique_change_file(workspace, change_number)
+        chg_file = cls._find_unique_change_file(workspace, change_number, project_id)
         original = read_file(str(chg_file))
         canonical_evidence = cls._canonical_evidence(evidence)
         evidence_hash = sha256(canonical_evidence.encode("utf-8")).hexdigest()
@@ -352,7 +363,43 @@ class SubstanceInjector:
             raise SubstanceInjectionError("closure 证据存在空值")
 
     @staticmethod
-    def _find_unique_change_file(workspace: Path, change_number: str) -> Path:
+    def _project_change_files(
+        workspace: Path, change_number: str, project_id: str | None
+    ) -> list[Path] | None:
+        """本项目变更单目录（``04_监控``/``11_监控`` 下的 ``01_变更管理/01_变更单``）里的同号文件，不含 ``archive``。
+
+        没给项目编号、或按编号定位不到项目目录时返回 None（调用方沿用原来的全工作区查找）。
+        """
+        if not project_id:
+            return None
+        from auto_pm.change.file_locator import ChangeFileLocator
+        from auto_pm.change.parser import ChgParser
+
+        root = ChangeFileLocator(str(workspace), ChgParser()).get_project_path(project_id)
+        if not root:
+            return None
+        found: list[Path] = []
+        for monitor in ("04_监控", "11_监控"):
+            base = Path(root) / monitor / "01_变更管理" / "01_变更单"
+            if not base.is_dir():
+                continue
+            for path in base.glob(f"**/{change_number}.md"):
+                rel = path.relative_to(base).parts
+                if path.is_file() and "archive" not in rel:
+                    found.append(path.resolve())
+        return sorted(set(found))
+
+    @classmethod
+    def _find_unique_change_file(
+        cls, workspace: Path, change_number: str, project_id: str | None = None
+    ) -> Path:
+        scoped = cls._project_change_files(workspace, change_number, project_id)
+        if scoped is not None:
+            if len(scoped) != 1:
+                raise SubstanceInjectionError(
+                    f"目标 CHG 必须在项目 {project_id} 的变更单目录内唯一存在，实际匹配数: {len(scoped)}"
+                )
+            return scoped[0]
         candidates = [
             path.resolve()
             for path in workspace.glob(f"**/{change_number}.md")

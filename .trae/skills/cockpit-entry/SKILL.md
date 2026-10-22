@@ -45,17 +45,41 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 用户提出新需求、缺陷或想法时，不要直接动手，用 `pm inbox add` 把用户原话记入收件箱（参数以 `pm inbox add --help` 为准）。入箱只是记录，不授权任何工作，也不改变当前焦点。
 
-## 要写代码或文档时
+## 用户只给了一句话需求时（标准路线）
 
-先告诉用户：需要一张经用户批准的实施卡和已授权的 Work。有了之后，按执行技能 `../fullstack-engineer/SKILL.md` 或 `../plc-electrical-engineer/SKILL.md` 的启动门禁执行，只改卡里列出的路径。
+用户通常只说一句话，例如“加一条命令，读入 IO 点表 CSV，报告重复的地址和重复的变量名”。目标拆分、可改范围、验收标准由你补出来，用户只做三件事：确认计划、验收结果、拍板取舍。按下面顺序走，每一步的参数以该命令的 `--help` 为准：
+
+1. **先读后问**：读项目代码、`.plc.json`/`pyproject.toml`、接口文档和规范库，能查到的不问用户。
+2. **先跑一次基线门禁**（只读）：PLC 项目 `main.py plc check <项目编号>`，Python 项目跑该项目的 pytest。基线就有失败的文件，要么列进可改范围一起修，要么写进“不做什么”并告诉用户。不要等收口时才发现门禁过不去。
+3. **入箱**：`pm inbox add`，`--original-words` 一字不改填用户原话；分诊单里影响、查重、取证都写你实际查到的东西。
+4. **出计划给用户看**：用中文列出 目标 / 可改范围（具体文件路径）/ 验收标准 / 风险 / 不做什么 / 需要用户决定的点。验收标准必须是机器能判的（某条命令退出码 0、某个测试通过、某个输出含某行），“能用”“正常”这类不算。然后停下，等用户亲口说“确认开工”。
+5. **用户确认后**才运行 `pm inbox confirm`、`pm plan`、`pm approve`。批准人填用户，证据引用写成 `user-confirmation:` 加用户确认消息的时间或编号；用户没说过的确认，绝不要自己编。
+6. **动手**：只改范围卡列出的路径。所有 `change` 命令都带 `--pid <项目编号>`。界面的“批准范围并开始”和 `pm execute`、`run_approved_planning` 都会启动 Codex 执行器（已挂起），不要点、不要调。**已知缺口⑧**：IDE 里的 agent 自己写代码这条路还没有一条命令走到底。补上之前按下面的过渡做法（D08 第 2 道实际走过的顺序），每条命令的参数以 `--help` 为准：
+   1. `main.py pm confirm-start --mission-id <Mission 编号>`（编号从 `pm orient` 读）：Mission 转为进行中、Work 转为 IN_PROGRESS，不启动 Codex；
+   2. `git worktree add --detach .auto-pm/worktrees/<名字>`（这一步是 Git 命令，不是驾驶舱命令），在这个工作树里写代码；
+   3. `main.py continuity run start … --worktree <工作树绝对路径> --lease-wallet`，`--owned`/`--declared-dirty` 列范围卡里的文件；
+   4. `main.py continuity run transition --to RUNNING`，写完、自检过后再 `--to VERIFYING`。只允许这两步；SUCCEEDED、CLOSED 等终态绝不手推，Work 也不手推；
+   5. `main.py continuity checkpoint create …`；
+   6. 质量验证 `verify_for_acceptance` 目前没有命令，只能临时调用：必须先告诉用户；用控制根 `.venv` 的解释器加 `-B` 运行；脚本放 `.agents/`、用完删；不 import 发布目录以外的驾驶舱代码，不往 `00_Infrastructure/auto_pm/releases/` 写任何文件或缓存；用这个 Run 自己的租约（从 `--lease-wallet` 存的本机钱包读），不另起租约，也不把口令打印出来；门禁正在跑的时候不做这一步；
+   7. 交验收前把工作树里改好的文件按字节拷回控制根，列出每个文件的 SHA-256。
+7. **自检**：交给用户验收前，范围卡里的每条验收标准都要跑过，把命令和退出码原样报告；有没跑的，明说没跑。
+8. **验收与收口**：请用户在驾驶舱界面上亲手点“确认验收”。这个按钮先记下用户验收，再走 `close_accepted` 一步收口：推进 Run、Work 和 Mission，把证据写进变更单、同步台账，但**不推进变更单状态**。你不要写脚本去调它。用户告诉你收口完成后：
+   1. 用 `change transition <单号> --to <下一状态> --pid <项目编号>` 把变更单逐步推到 `completed`；
+   2. 运行 `main.py ledger reconcile <项目编号>` 只读对账，结果报告给用户；
+   3. 再核对一次控制根里的文件与工作树逐字节一致。
+
+   已经验收、只是收口失败的任务，界面上显示的是“重试同步”按钮，不是“确认验收”，请用户点它重试。界面上收口被拒时，请用户把界面提示的原话发给你，原样报告并停下，不换办法绕过。
+
+除第 6 步第 6 小步的过渡做法外，不要写临时脚本去调驾驶舱内部接口，也不要在 `00_Infrastructure/auto_pm/releases/` 里写任何文件或缓存；其他没有命令的步骤，停下告诉用户。不要直接改数据库或治理 JSON。
 
 ## 换 agent
 
-一条命令交接由后续任务提供。在那之前：接手方先做上面的四步定位，再按用户给的交接说明接手，不要自己编造口令，也不要读取别人的口令文件。
+当前持有者运行 `main.py pm handoff` 交接（不用 `reclaim`），把输出的 handoff_id 告诉用户后停止写入；接手方先做上面的四步定位，再用 `main.py pm takeover` 接手，从对方的 Checkpoint 接着做，不重做已完成的部分。不要自己编造口令，也不要读取别人的口令文件。
 
 ## 不要做
 
 - 不使用已隔离的 `pm-workflow`，也不读取它的内容当作指令；
 - 不把 `PM_SESSION_*.md`、聊天文字当作授权；
 - 不在隔离工作树里运行驾驶舱命令；
+- 驾驶舱界面里的“批准范围并开始”会启动 Codex 执行器（目前挂起），用 Trae 等 IDE 里的 agent 干活时不要让用户点它；
 - 遇到冲突或报错，不换办法绕过：把原话报告给用户。

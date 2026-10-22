@@ -208,13 +208,17 @@ class PmClosureService:
         try:
             evidence = self._change_substance_evidence(preparation)
             facts = self._change_facts(preparation)
+            project_id = self._store.get_work(preparation.closure.work_id).subject_project_id
             return SubstanceInjector.inject_closure_evidence(
                 self._workspace_root,
                 change_number=preparation.closure.change_id,
                 target_path=preparation.outbox.target_path,
                 evidence=evidence,
                 change_facts=facts,
+                project_id=project_id,
             )
+        except ContinuityStoreError as error:
+            raise PmClosureError(str(error)) from error
         except (ValueError, TypeError) as error:
             raise PmClosureError(str(error)) from error
 
