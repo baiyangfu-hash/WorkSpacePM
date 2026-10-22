@@ -1114,7 +1114,7 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
     "--requested-action",
     type=click.Choice([action.value for action in QueriedAction]),
     default=None,
-    help="询问某个动作的能力：M2 对 PARK、RESUME_PARKED、PREEMPT 一律明确回答 UNSUPPORTED（查询不是执行授权）",
+    help="询问某个动作的能力：PARK、RESUME_PARKED 回答 SUPPORTED（用 pm park / pm unpark / pm switch，只听用户的），PREEMPT 回答 UNSUPPORTED；查询不是执行授权",
 )
 @click.option(
     "--path",

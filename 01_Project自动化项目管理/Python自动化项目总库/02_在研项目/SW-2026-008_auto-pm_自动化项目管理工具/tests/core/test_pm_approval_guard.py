@@ -9,6 +9,8 @@ repository. Scenario numbers (g01..g05) follow card 039 section 5.3; g06..g08 ar
 from __future__ import annotations
 
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -247,3 +249,39 @@ def test_g09_past_the_soft_limit_the_users_release_admits_one_more_card(tmp_path
     assert len(env.store.list_missions(PROJECT_ID)) == OPEN_MISSION_SOFT_LIMIT + 1
     released = [payload for _kind, aggregate, payload in env.events("MISSION_ADMISSION_RELEASED") if aggregate == admitted.mission_id]
     assert len(released) == 1 and json.loads(released[0])["over_limit"] is True
+
+
+OTHER_FILE = f"{PROJECT_ID}/docs/notes.md"
+
+
+def test_g10_a_second_card_that_changes_other_files_needs_no_release(tmp_path: Path) -> None:
+    """The positive control of g01: only a collision (or the limit) stops a second card, not the open card itself."""
+
+    env = _env(tmp_path)
+    env.draft("REQ-FREE-A")
+    env.draft("REQ-FREE-B")
+    first = env.approve("REQ-FREE-A", env.submit("REQ-FREE-A").card.plan_hash)
+    second_hash = env.submit("REQ-FREE-B", risks=("risk of b",), scope=(OTHER_FILE,)).card.plan_hash
+
+    second = env.approve("REQ-FREE-B", second_hash)
+
+    assert second.mission_id != first.mission_id
+    assert len(env.store.list_missions(PROJECT_ID)) == 2
+    assert env.events("MISSION_ADMISSION_RELEASED") == []
+
+
+def test_g11_a_retry_that_now_carries_the_release_records_it(tmp_path: Path) -> None:
+    """If the release was not recorded when the card was created, the same approval with the release fills it in."""
+
+    env, first_hash, second_hash = _two_requests(tmp_path)
+    first = env.approve("REQ-GUARD-A", first_hash)
+    second = env.approve("REQ-GUARD-B", second_hash, release=RELEASE)
+    with closing(sqlite3.connect(env.db)) as conn, conn:
+        conn.execute("DELETE FROM events WHERE event_type='MISSION_ADMISSION_RELEASED'")
+    assert env.store.list_mission_overlaps(second.mission_id) == ()
+
+    assert env.facade.materialize_planning_mission(
+        env.store.get_submitted_planning_scope_card("REQ-GUARD-B", second_hash).card, admission_release_ref=RELEASE
+    ).mission_id == second.mission_id
+
+    assert [other for other, _paths in env.store.list_mission_overlaps(second.mission_id)] == [first.mission_id]

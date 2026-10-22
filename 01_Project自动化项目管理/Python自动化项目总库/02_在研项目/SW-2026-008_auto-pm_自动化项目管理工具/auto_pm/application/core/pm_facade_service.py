@@ -7,7 +7,6 @@ import hmac
 import json
 import logging
 import secrets
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -34,7 +33,11 @@ from auto_pm.core.local_execution_orchestrator import (
     LocalExecutionOrchestrator,
     LocalExecutionOrchestratorError,
 )
-from auto_pm.core.mission_admission import AdmissionVerdict, admission_verdict
+from auto_pm.core.mission_admission import (
+    ADMISSION_RELEASE_HINT,
+    AdmissionVerdict,
+    admission_verdict,
+)
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
@@ -48,7 +51,7 @@ from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.intake import IntakeClassification
-from auto_pm.contracts.mission import OPEN_MISSION_SOFT_LIMIT, Mission, MissionState
+from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.pm_facade import (
     PlanningApprovalResult,
     PlanningDraft,
@@ -533,18 +536,12 @@ class PmFacadeService:
                 decision.change_id,
                 actual_hash,
             )
-            known = {
-                item.mission_id
-                for item in self._store.list_missions(card.subject_project_id, include_terminal=True)
-            }
-            verdict: AdmissionVerdict | None = None
-            limit = OPEN_MISSION_SOFT_LIMIT
-            if mission_id not in known:
-                verdict = self.admission_check(
-                    card.subject_project_id, card.scope_paths, admission_release_ref
-                )
-                if verdict.over_limit:
-                    limit = verdict.open_count + 1
+            limit, verdict = self._missions.admit(
+                mission_id=mission_id,
+                subject_project_id=card.subject_project_id,
+                scope_paths=card.scope_paths,
+                admission_release_ref=admission_release_ref,
+            )
             mission = cast(
                 Mission,
                 self._missions.create_from_planning_approval(
@@ -556,16 +553,7 @@ class PmFacadeService:
                     max_open_per_project=limit,
                 ),
             )
-            if verdict is not None and verdict.needs_user_release:
-                self._store.record_mission_admission(
-                    mission_id=mission.mission_id,
-                    open_count=verdict.open_count,
-                    over_limit=verdict.over_limit,
-                    overlaps=tuple((item.mission_id, item.paths) for item in verdict.overlaps),
-                    release_ref=admission_release_ref.strip(),
-                    idempotency_key=f"admission-release:{mission.mission_id}",
-                    now=datetime.now(UTC).isoformat(),
-                )
+            self._missions.record_admission(mission.mission_id, verdict, admission_release_ref)
             return mission
         except (ContinuityStoreError, DecisionError, MissionServiceError) as error:
             raise PmFacadeError(str(error)) from error
@@ -796,9 +784,7 @@ class PmFacadeService:
         except ContinuityStoreError as error:
             raise PmFacadeError(str(error)) from error
         if verdict.needs_user_release and not admission_release_ref.strip():
-            raise PmFacadeError(
-                verdict.reason() + "（命令行加 --admission-release-ref 写明用户原话的位置）"
-            )
+            raise PmFacadeError(verdict.reason() + ADMISSION_RELEASE_HINT)
         return verdict
 
     def admission_check_for_card(self, card: PlanningScopeCard, admission_release_ref: str) -> None:
@@ -1190,7 +1176,7 @@ class PmFacadeService:
         run_id: str = "",
         requested_action: str = "",
     ) -> ContinuityResume:
-        """The same read-only view as ``resume``, plus an explicit answer for one asked action (UNSUPPORTED in M2)."""
+        """The same read-only view as ``resume``, plus an explicit answer for one asked action (runtime-capabilities.v2)."""
         return self._query(
             project_id=project_id,
             invocation_path=invocation_path,

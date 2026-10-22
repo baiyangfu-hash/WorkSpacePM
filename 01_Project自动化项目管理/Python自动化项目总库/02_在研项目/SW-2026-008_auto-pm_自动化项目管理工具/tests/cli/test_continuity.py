@@ -1748,3 +1748,30 @@ def test_work_create_offers_no_precheck_bypass(cli_runner: CliRunner, tmp_path: 
         "--help",
     }
     # The exact option set above is the proof that no skip/bypass/force switch exists.
+
+
+def _create_args(mission_id: str, *extra: str) -> list[str]:
+    return [
+        "mission", "create", "--mission-id", mission_id, "--pid", "SW-TEST-001", "--title", mission_id,
+        "--objective", "Same files as the open card.", "--acceptance", "Mission can be read.",
+        "--authority-json", _authority_json(), "--created-by", "Codex PM", "--idempotency-key", f"create-{mission_id}", *extra,
+    ]
+
+
+def test_mission_cli_create_is_admitted_like_pm_approve(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """TD-071 card 3: the low-level create also stops a colliding card until the user's word releases it."""
+
+    _repository(tmp_path)
+    assert _invoke(cli_runner, tmp_path, _create_args("MISSION-CLI-A")).exit_code == 0
+    store = ContinuityStore(tmp_path)
+
+    refused = _invoke(cli_runner, tmp_path, _create_args("MISSION-CLI-B"))
+    assert refused.exit_code != 0 and "要改同一批文件" in refused.output and "--admission-release-ref" in refused.output
+    assert [item.mission_id for item in store.list_missions("SW-TEST-001")] == ["MISSION-CLI-A"]
+
+    released = _invoke(cli_runner, tmp_path, _create_args("MISSION-CLI-B", "--admission-release-ref", "user-confirmation:CLI-B"))
+    assert released.exit_code == 0, released.output
+    assert [other for other, _paths in store.list_mission_overlaps("MISSION-CLI-A")] == ["MISSION-CLI-B"]
+    # a retry of the same card is not a new card
+    assert _invoke(cli_runner, tmp_path, _create_args("MISSION-CLI-B")).exit_code == 0
+    assert len(store.list_missions("SW-TEST-001")) == 2
