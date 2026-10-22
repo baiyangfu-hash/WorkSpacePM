@@ -358,23 +358,43 @@ def test_accepted_mission_root_does_not_splice_unrelated_blocked_work(tmp_path: 
         )
 
 
-def test_multiple_active_missions_fail_closed_without_guessing(tmp_path: Path) -> None:
-    _workspace(tmp_path)
-    _mission(tmp_path, "MISSION-001")
+def _copy_mission(tmp_path: Path, state_sql: str = "state") -> None:
     db_path = tmp_path / ".auto-pm" / "continuity.db"
     with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute("DROP INDEX idx_one_active_mission_per_project")
         conn.execute(
-            """INSERT INTO mission_items
-            SELECT 'MISSION-002', subject_project_id, title, objective, state, root_work_id,
+            f"""INSERT INTO mission_items
+            SELECT 'MISSION-002', subject_project_id, title, objective, {state_sql}, root_work_id,
                    acceptance_criteria_json, authority_json, version, created_by, created_at, updated_at
             FROM mission_items WHERE mission_id='MISSION-001'"""
         )
+
+
+def test_two_active_missions_are_damaged_data_and_fail_closed(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _mission(tmp_path, "MISSION-001")
+    _copy_mission(tmp_path)
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.execute("UPDATE mission_items SET state='ACTIVE', root_work_id='WORK-001'")
     result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
 
     assert result.mission is None
     assert result.conflicts == ("MULTIPLE_ACTIVE_MISSIONS",)
     assert result.next_legal_action == ""
+
+
+def test_several_open_cards_and_none_in_hand_wait_for_the_user_without_guessing(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _mission(tmp_path, "MISSION-001")
+    _copy_mission(tmp_path)
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.mission is None and result.work is None and result.run is None
+    assert [m.mission_id for m in result.mission_candidates] == ["MISSION-001", "MISSION-002"]
+    assert result.conflicts == ()
+    assert result.next_legal_action == "AWAIT_USER_SWITCH"
 
 
 def test_resume_must_not_recommend_replacement_for_expired_nonterminal_run(

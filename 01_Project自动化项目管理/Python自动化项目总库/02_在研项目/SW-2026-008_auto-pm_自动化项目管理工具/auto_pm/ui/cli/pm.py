@@ -1063,6 +1063,8 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
     )
     click.echo(f"work: {payload.work.work_id if payload.work else '-'}")
     click.echo(f"run: {payload.run.run_id if payload.run else '-'}")
+    for other in payload.mission_candidates:
+        click.echo(f"其他开着的卡: {other.mission_id} [{other.state.value}] {other.title}")
     click.echo(f"下一合法动作: {payload.next_legal_action or '-'}")
     for conflict in payload.conflicts:
         click.echo(f"冲突: {conflict}")
@@ -1187,3 +1189,9 @@ from auto_pm.ui.cli.pm_handoff import handoff_pm, sign_risk_pm, takeover_pm  # n
 pm_group.add_command(handoff_pm)
 pm_group.add_command(takeover_pm)
 pm_group.add_command(sign_risk_pm)
+from auto_pm.ui.cli.pm_switch import missions_pm, park_pm, switch_pm, unpark_pm  # noqa: E402
+
+pm_group.add_command(missions_pm)
+pm_group.add_command(park_pm)
+pm_group.add_command(unpark_pm)
+pm_group.add_command(switch_pm)

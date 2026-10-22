@@ -1962,12 +1962,23 @@ class ContinuityStore:
             current_state = conn.execute(
                 "SELECT state FROM mission_items WHERE mission_id=?", (mission_id,)
             ).fetchone()
-            if (
-                current_state is not None
-                and current_state["state"] == MissionState.PARKED.value
-                and new_state is MissionState.ACTIVE
+            open_park = (
+                self._open_park_row(conn, "mission_id", mission_id)
+                if self._table_exists(conn, "run_parks")
+                else None
+            )
+            if new_state is MissionState.ACTIVE and (
+                open_park is not None
+                or (
+                    current_state is not None
+                    and current_state["state"] == MissionState.PARKED.value
+                )
             ):
                 raise ContinuityStoreError("拿回搁着的卡只能走 unpark_mission：要核对断点并发新租约")
+            if open_park is not None and new_state is MissionState.CANCELLED:
+                # TD-071 design 7.1: a parked card that is called off ends its Run and closes its
+                # park record in the same transaction, so nothing is left half-held.
+                self._end_parked_run(conn, open_park, idempotency_key, now)
             try:
                 cursor = conn.execute(
                     """UPDATE mission_items
@@ -7886,8 +7897,15 @@ class ContinuityStore:
         git_head: str,
         dirty_paths: tuple[str, ...] | list[str],
         idempotency_key: str,
+        target_state: MissionState = MissionState.PARKED,
+        approval_evidence_ref: str = "",
     ) -> MissionPark:
         """Put an ACTIVE or BLOCKED Mission down in one transaction (TD-071 design 4.2).
+
+        ``target_state`` PARKED ("搁着") needs the user's own words (``approval_evidence_ref``,
+        design 7.2).  Without them an agent may only stop its own ACTIVE card into BLOCKED
+        ("等你"): same checkpoint, same fenced lease, same park record, and only the user picks it
+        back up (unpark).
 
         Checks the caller still holds the Run's lease, writes a park checkpoint (where it got to and
         what is next), fences the lease with ``PARKED:`` (row kept, expiry untouched), moves the Run
@@ -7910,6 +7928,15 @@ class ContinuityStore:
         if lease_token in reason or lease_token in summary:
             raise ContinuityStoreError("搁着原因和断点摘要不得包含 lease token")
         paths = self._validated_park_paths(dirty_paths, label="断点改动文件")
+        if target_state not in {MissionState.PARKED, MissionState.BLOCKED}:
+            raise ContinuityStoreError("搁着的目标状态只能是 PARKED（搁着）或 BLOCKED（等你）")
+        approval_evidence_ref = approval_evidence_ref.strip() if isinstance(approval_evidence_ref, str) else ""
+        if target_state is MissionState.PARKED and not approval_evidence_ref:
+            raise ContinuityStoreError(
+                "放进“搁着”要用户一句话（--approval-evidence-ref）；agent 自己只能把卡放进“等你”"
+            )
+        if approval_evidence_ref and lease_token in approval_evidence_ref:
+            raise ContinuityStoreError("用户授权凭据不得包含 lease token")
         try:
             MissionPark(
                 park_id=park_id,
@@ -7934,6 +7961,8 @@ class ContinuityStore:
             "git_head": git_head,
             "dirty_paths": list(paths),
             "lease_token_sha256": self._lease_token_fingerprint(lease_token),
+            "target_state": target_state.value,
+            "approval_evidence_ref": approval_evidence_ref,
         }
         with self._transaction() as conn:
             existing = self._event_by_key(conn, idempotency_key)
@@ -7955,6 +7984,8 @@ class ContinuityStore:
                 raise ContinuityStoreError(
                     f"只有在干（ACTIVE）或卡住（BLOCKED）的 Mission 可以搁着（当前 {mission.state.value}）"
                 )
+            if target_state is MissionState.BLOCKED and mission.state is not MissionState.ACTIVE:
+                raise ContinuityStoreError("只有在干的卡可以放进“等你”")
             run = self._single_live_run_of_mission(conn, mission)
             if run.state not in self._PARKABLE_RUN_STATES:
                 raise ContinuityStoreError(
@@ -8042,7 +8073,7 @@ class ContinuityStore:
             cursor = conn.execute(
                 """UPDATE mission_items SET state=?, version=version+1, updated_at=?
                 WHERE mission_id=? AND version=?""",
-                (MissionState.PARKED.value, event_time, mission_id, mission.version),
+                (target_state.value, event_time, mission_id, mission.version),
             )
             if cursor.rowcount != 1:
                 raise ContinuityStoreError("Mission 不存在或版本冲突")
@@ -8070,6 +8101,7 @@ class ContinuityStore:
                     "request": request,
                     "run_id": run.run_id,
                     "from_state": mission.state.value,
+                    "new_state": target_state.value,
                     "result_version": mission.version + 1,
                 },
                 idempotency_key,
@@ -8148,9 +8180,12 @@ class ContinuityStore:
             mission = self._get_mission(conn, mission_id)
             if mission.version != expected_mission_version:
                 raise ContinuityStoreError("Mission 不存在或版本冲突")
-            if mission.state is not MissionState.PARKED:
+            if mission.state not in {MissionState.PARKED, MissionState.BLOCKED} or (
+                mission.state is MissionState.BLOCKED
+                and self._open_park_row(conn, "mission_id", mission_id) is None
+            ):
                 raise ContinuityStoreError(
-                    f"只有搁着（PARKED）的 Mission 可以拿回（当前 {mission.state.value}）"
+                    f"只有搁着（PARKED）或带断点等你的 Mission 可以拿回（当前 {mission.state.value}）"
                 )
             observed_at = self._utc_now()
             if not mission.authority.valid_from <= observed_at <= mission.authority.expires_at:
@@ -8282,6 +8317,57 @@ class ContinuityStore:
                 aggregate_type="mission",
             )
             return self._get_mission_park(conn, park.park_id), self._get_lease(conn, run.run_id)
+
+    def _end_parked_run(
+        self, conn: sqlite3.Connection, park_row: sqlite3.Row, idempotency_key: str, now: str
+    ) -> None:
+        park = MissionPark.model_validate(dict(park_row))
+        run = self._get_run(conn, park.run_id)
+        if run.state is not RunState.BLOCKED:
+            raise ContinuityStoreError(f"搁着的 Run 应为 BLOCKED（当前 {run.state.value}）")
+        lease = self._get_lease(conn, run.run_id)
+        release = self._release_lease_in_transaction(
+            conn, lease=lease, event_time=now, reason=f"cancelled-while-parked:{park.park_id}"
+        )
+        cursor = conn.execute(
+            """UPDATE run_items SET state=?, version=version+1, updated_at=?
+            WHERE run_id=? AND version=?""",
+            (RunState.CANCELLED.value, now, run.run_id, run.version),
+        )
+        if cursor.rowcount != 1:
+            raise ContinuityStoreError("Run 不存在或版本冲突")
+        cursor = conn.execute(
+            """UPDATE run_parks SET unparked_at=?, unparked_by=?
+            WHERE park_id=? AND unparked_at IS NULL""",
+            (now, "CANCELLED", park.park_id),
+        )
+        if cursor.rowcount != 1:
+            raise ContinuityStoreError("搁着记录已被拿回（并发冲突）")
+        self._append_event(
+            conn,
+            run.run_id,
+            "RUN_PARK_CANCELLED",
+            {
+                "schema_version": "run-park-cancelled.v1",
+                "run_id": run.run_id,
+                "park_id": park.park_id,
+                "new_state": RunState.CANCELLED.value,
+                "result_version": run.version + 1,
+                "lease_release": release,
+            },
+            f"{idempotency_key}#parked-run",
+            now,
+            aggregate_type="run",
+        )
+
+    def get_open_park_for_run(self, run_id: str) -> MissionPark | None:
+        """The open park record of a Run, if its Mission is parked (or waiting with a checkpoint)."""
+
+        with self._read_connection() as conn:
+            if not self._table_exists(conn, "run_parks"):
+                return None
+            row = self._open_park_row(conn, "run_id", run_id)
+            return MissionPark.model_validate(dict(row)) if row is not None else None
 
     def get_open_park(self, mission_id: str) -> MissionPark | None:
         """The open park record of a Mission, if it is parked."""

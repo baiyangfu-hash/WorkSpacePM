@@ -1,0 +1,358 @@
+"""TD-071 card 2: pm missions / park / unpark / switch over the store primitives of card 1.
+
+Who may do what: with the user's words a card goes to "搁着" and another one is picked up; without
+them an agent may only stop the card it holds into "等你".  Tokens come from and go to the wallet.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
+
+import pytest
+from auto_pm.cli.__main__ import cli
+from auto_pm.core.execution_adapter_service import ExecutionDispatchError, ExecutionDispatchService
+from auto_pm.core.lease_handover_service import (
+    AGENT_MARKERS,
+    LeaseHandoverError,
+    LeaseHandoverService,
+)
+from auto_pm.core.mission_switch_service import MissionSwitchError, MissionSwitchService
+from click.testing import CliRunner
+
+from auto_pm.contracts.continuity import RunState
+from auto_pm.contracts.lease_reclaim import PARKED_TOKEN_PREFIX
+from auto_pm.contracts.mission import MissionState
+from auto_pm.infrastructure import lease_wallet
+from auto_pm.infrastructure.continuity_store import ContinuityStoreError
+from tests.core.test_continuity_execution_service import _start
+from tests.core.test_mission_park_store import APPROVAL, PROJECT, Scene
+
+A_FILE = "auto_pm/core/a.py"
+
+
+class Switch(Scene):
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        (root / "auto_pm" / "core").mkdir(parents=True)
+        (root / A_FILE).write_text("print('half done')\n", encoding="utf-8")
+        self.remember("RUN-001", "agent-a", "lease-secret")
+        self.handover = LeaseHandoverService(root, store=self.store, now=self.clock)
+        self.service = MissionSwitchService(root, store=self.store, now=self.clock, handover=self.handover)
+
+    def start_second_run(self) -> None:
+        _start(
+            self.execution, run_id="RUN-002", work_id="WORK-002", executor_id="agent-b", lease_token="token-b",
+            idempotency_key="create-run-b", declared_dirty_paths=[A_FILE], observed_dirty_paths=[A_FILE],
+        )
+        self.execution.transition_run("RUN-002", RunState.RUNNING, "agent-b", "token-b", "b-running")
+
+    def remember(self, run_id: str, owner: str, token: str) -> None:
+        lease_wallet.save(self.root, run_id=run_id, owner_id=owner, lease_token=token, epoch=self.store.get_grant_epoch(run_id))
+
+    def park_a(self, approval: str = APPROVAL) -> Any:
+        return self.service.park(
+            mission_id="MISSION-A", reason="客户急改 IO 表", summary="OB1 改完，差测试", approval_evidence_ref=approval
+        )
+
+    def b_in_hand(self) -> None:
+        """A parked by the user's word; B started and held by agent-b."""
+        b = self.second_card()
+        self.park_a()
+        self.missions.transition(
+            mission_id="MISSION-B", expected_version=b.version, new_state=MissionState.ACTIVE,
+            root_work_id=None, idempotency_key="start-b",
+        )
+        self.start_second_run()
+        self.remember("RUN-002", "agent-b", "token-b")
+
+    def cli(self, *args: str) -> Any:
+        return CliRunner().invoke(cli, ["-w", str(self.root), *args], catch_exceptions=False)
+
+
+@pytest.fixture
+def sw(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Switch:
+    import auto_pm.ui.cli.pm_switch as pm_switch_cli
+
+    for name in AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+    scene = Switch(tmp_path / "ws")
+    # The CLI drives the same service, so it shares the scene's test clock.
+    monkeypatch.setattr(pm_switch_cli, "MissionSwitchService", lambda _root: scene.service)
+    return scene
+
+
+# ------------------------------------------------------------------ park
+
+
+def test_an_agent_without_the_users_words_can_only_stop_its_card_into_waiting(sw: Switch) -> None:
+    outcome = sw.park_a(approval="")
+
+    assert outcome.mission.state is MissionState.BLOCKED
+    assert sw.store.get_lease("RUN-001").lease_token.startswith(PARKED_TOKEN_PREFIX)
+    assert sw.store.get_checkpoint(outcome.checkpoint_id).dirty_paths == (A_FILE,)
+    board = sw.service.board(PROJECT)
+    assert [m.mission_id for m in board.waiting] == ["MISSION-A"] and board.parked == ()
+    # Waiting with a checkpoint: a plain transition back to ACTIVE would skip the checks, so it is refused.
+    with pytest.raises(Exception, match="unpark_mission"):
+        sw.missions.transition(
+            mission_id="MISSION-A", expected_version=outcome.mission.version, new_state=MissionState.ACTIVE,
+            root_work_id=None, idempotency_key="sneak-back",
+        )
+    # Only the user picks it back up.
+    with pytest.raises(MissionSwitchError, match="只听用户的"):
+        sw.service.unpark(mission_id="MISSION-A", as_owner="agent-a", approval_evidence_ref="")
+    back = sw.service.unpark(mission_id="MISSION-A", as_owner="agent-a", approval_evidence_ref=APPROVAL)
+    assert back.mission.state is MissionState.ACTIVE
+
+
+def test_the_store_refuses_parked_without_the_users_words_and_waiting_from_blocked(sw: Switch) -> None:
+    with pytest.raises(ContinuityStoreError, match="要用户一句话"):
+        sw.park(approval_evidence_ref="")
+    blocked = sw.missions.transition(
+        mission_id="MISSION-A", expected_version=sw.a.version, new_state=MissionState.BLOCKED,
+        root_work_id=None, idempotency_key="block-a",
+    )
+    with pytest.raises(ContinuityStoreError, match="只有在干的卡可以放进"):
+        sw.park(expected_mission_version=blocked.version, approval_evidence_ref="", target_state=MissionState.BLOCKED)
+    with pytest.raises(ContinuityStoreError, match="只能是 PARKED"):
+        sw.park(expected_mission_version=blocked.version, target_state=MissionState.CANCELLED)
+
+
+def test_park_with_the_users_words_goes_to_parked_and_needs_a_summary(sw: Switch) -> None:
+    with pytest.raises(MissionSwitchError, match="不能为空"):
+        sw.service.park(mission_id="MISSION-A", reason="x", summary=" ", approval_evidence_ref=APPROVAL)
+    outcome = sw.park_a()
+    assert outcome.mission.state is MissionState.PARKED
+    assert sw.store.get_checkpoint(outcome.checkpoint_id).summary == "OB1 改完，差测试"
+    # Re-running the same park after it landed is refused cleanly (the card is no longer in hand).
+    with pytest.raises(MissionSwitchError):
+        sw.park_a()
+
+
+# ------------------------------------------------------------------ unpark
+
+
+def test_unpark_hands_a_new_token_to_the_wallet_and_never_shows_it(sw: Switch) -> None:
+    sw.park_a()
+    outcome = sw.service.unpark(mission_id="MISSION-A", as_owner="claude:local", approval_evidence_ref=APPROVAL)
+
+    token = lease_wallet.load(sw.root, run_id="RUN-001", owner_id="claude:local")
+    assert token != "lease-secret" and sw.store.get_lease("RUN-001").lease_token == token
+    assert outcome.epoch == sw.store.get_grant_epoch("RUN-001")
+    assert outcome.checkpoint_summary == "OB1 改完，差测试"
+    assert outcome.behind_main is None or outcome.behind_main == 0
+    assert sw.store.get_run("RUN-001").state is RunState.RUNNING
+
+
+def test_unpark_refuses_when_the_worktree_moved_while_parked(sw: Switch) -> None:
+    sw.park_a()
+    (sw.root / A_FILE).unlink()
+    with pytest.raises(MissionSwitchError, match=f"少了改动: {A_FILE}"):
+        sw.service.unpark(mission_id="MISSION-A", as_owner="agent-a", approval_evidence_ref=APPROVAL)
+    assert sw.store.get_mission("MISSION-A").state is MissionState.PARKED
+
+
+def test_unpark_of_a_card_that_is_not_parked_says_so(sw: Switch) -> None:
+    with pytest.raises(MissionSwitchError, match="没有搁着"):
+        sw.service.unpark(mission_id="MISSION-A", as_owner="agent-a", approval_evidence_ref=APPROVAL)
+
+
+# ------------------------------------------------------------------ switch
+
+
+def test_switch_without_a_target_only_recommends_the_last_parked(sw: Switch) -> None:
+    sw.b_in_hand()
+    before = sw.snapshot()
+    outcome = sw.service.switch(
+        project_id=PROJECT, to_mission_id=None, reason="", summary="", as_owner="", approval_evidence_ref=""
+    )
+    assert outcome.recommended_mission_id == "MISSION-A" and "请用户说一句" in outcome.note
+    assert outcome.parked is None and outcome.started is None
+    assert sw.snapshot() == before
+
+
+def test_switch_needs_the_users_words_and_writes_nothing_without_them(sw: Switch) -> None:
+    sw.b_in_hand()
+    before = sw.snapshot()
+    with pytest.raises(MissionSwitchError, match="只听用户的"):
+        sw.service.switch(
+            project_id=PROJECT, to_mission_id="MISSION-A", reason="r", summary="s", as_owner="agent-a",
+            approval_evidence_ref="",
+        )
+    assert sw.snapshot() == before
+
+
+def test_switch_parks_the_card_in_hand_and_picks_the_target_up(sw: Switch) -> None:
+    sw.b_in_hand()
+    outcome = sw.service.switch(
+        project_id=PROJECT, to_mission_id="MISSION-A", reason="急活做完一半，等客户回图", summary="IO 表改了一半",
+        as_owner="agent-a", approval_evidence_ref=APPROVAL,
+    )
+    assert outcome.parked is not None and outcome.parked.mission.mission_id == "MISSION-B"
+    assert outcome.started is not None and outcome.started.mission.mission_id == "MISSION-A"
+    board = sw.service.board(PROJECT)
+    assert [m.mission_id for m in board.active] == ["MISSION-A"]
+    assert [p.mission.mission_id for p in board.parked] == ["MISSION-B"]
+    # Switching to the card already in hand is a no-op.
+    again = sw.service.switch(
+        project_id=PROJECT, to_mission_id="MISSION-A", reason="", summary="", as_owner="agent-a",
+        approval_evidence_ref=APPROVAL,
+    )
+    assert again.parked is None and again.started is None and "已经在干" in again.note
+
+
+def test_when_the_second_step_fails_the_first_card_stays_parked_and_a_rerun_finishes(sw: Switch) -> None:
+    sw.b_in_hand()
+    moved = sw.root / A_FILE
+    moved.unlink()  # A's worktree no longer matches its checkpoint
+    with pytest.raises(MissionSwitchError, match="MISSION-B 已搁着，MISSION-A 没起来，原因是：.*少了改动"):
+        sw.service.switch(
+            project_id=PROJECT, to_mission_id="MISSION-A", reason="r", summary="s", as_owner="agent-a",
+            approval_evidence_ref=APPROVAL,
+        )
+    board = sw.service.board(PROJECT)
+    assert board.active == () and {p.mission.mission_id for p in board.parked} == {"MISSION-A", "MISSION-B"}
+    moved.write_text("print('half done')\n", encoding="utf-8")
+    outcome = sw.service.switch(
+        project_id=PROJECT, to_mission_id="MISSION-A", reason="r", summary="s", as_owner="agent-a",
+        approval_evidence_ref=APPROVAL,
+    )
+    assert outcome.parked is None and outcome.started is not None
+    assert sw.store.get_mission("MISSION-A").state is MissionState.ACTIVE
+
+
+def test_switch_to_an_approved_card_that_never_started_points_to_confirm_start(sw: Switch) -> None:
+    sw.second_card()
+    outcome = sw.service.switch(
+        project_id=PROJECT, to_mission_id="MISSION-B", reason="急活", summary="OB1 改完", as_owner="agent-b",
+        approval_evidence_ref=APPROVAL,
+    )
+    assert outcome.parked is not None and outcome.parked.mission.state is MissionState.PARKED
+    assert outcome.next_command == "main.py pm confirm-start --mission-id MISSION-B"
+
+
+def test_switch_refuses_a_card_of_another_project_or_a_closed_one(sw: Switch) -> None:
+    with pytest.raises(MissionSwitchError, match="不属于项目"):
+        sw.service.switch(
+            project_id="DJ-2026-009", to_mission_id="MISSION-A", reason="", summary="", as_owner="a",
+            approval_evidence_ref=APPROVAL,
+        )
+    b = sw.second_card()
+    sw.missions.transition(
+        mission_id="MISSION-B", expected_version=b.version, new_state=MissionState.CANCELLED,
+        root_work_id=None, idempotency_key="cancel-b",
+    )
+    with pytest.raises(MissionSwitchError, match="只能切到"):
+        sw.service.switch(
+            project_id=PROJECT, to_mission_id="MISSION-B", reason="r", summary="s", as_owner="a",
+            approval_evidence_ref=APPROVAL,
+        )
+    assert sw.store.get_mission("MISSION-A").state is MissionState.ACTIVE
+
+
+# ------------------------------------------------------------------ cancel, other commands, dispatch
+
+
+def test_cancelling_a_parked_card_ends_its_run_and_closes_the_park(sw: Switch) -> None:
+    sw.park_a()
+    parked = sw.store.get_mission("MISSION-A")
+    sw.missions.transition(
+        mission_id="MISSION-A", expected_version=parked.version, new_state=MissionState.CANCELLED,
+        root_work_id=None, idempotency_key="cancel-parked-a",
+    )
+    assert sw.store.get_run("RUN-001").state is RunState.CANCELLED
+    assert sw.store.get_lease("RUN-001").lease_token.startswith("RELEASED:")
+    assert sw.store.get_open_park("MISSION-A") is None
+    board = sw.service.board(PROJECT)
+    assert [m.mission_id for m in board.closed] == ["MISSION-A"] and board.parked == ()
+
+
+def test_handoff_takeover_and_reclaim_refuse_a_parked_card_early_and_plainly(sw: Switch) -> None:
+    handoff = sw.handover.handoff(run_id="RUN-001", to_owner="agent-b", lease_token="lease-secret", summary="交接")
+    sw.park_a()
+    with pytest.raises(LeaseHandoverError, match="搁着呢.*不需要再交接"):
+        sw.handover.handoff(run_id="RUN-001", to_owner="agent-c", lease_token="lease-secret", summary="交接")
+    with pytest.raises(LeaseHandoverError, match="搁着呢（MISSION-A，客户急改 IO 表），不能接手"):
+        sw.handover.takeover(handoff_id=handoff.handoff.handoff_id, receiver_id="agent-b", lease_seconds=900, holder_pid=None)
+    sw.clock.value = sw.clock.value + timedelta(days=2)
+    with pytest.raises(LeaseHandoverError, match="搁着不是掉线"):
+        sw.handover.reclaim(run_id="RUN-001", claimant_id="agent-b", lease_seconds=900, reason="dead?", holder_pid=None)
+
+
+def test_dispatch_capacity_ignores_a_parked_lease_but_counts_a_held_one(sw: Switch) -> None:
+    dispatch = ExecutionDispatchService.__new__(ExecutionDispatchService)
+    dispatch._store = sw.store
+    b = sw.second_card()
+    with pytest.raises(ExecutionDispatchError, match="RUN-001.*只能一张在干"):
+        dispatch._assert_parallel_capacity(b, "RUN-NEW", sw.clock())
+    sw.park_a()
+    dispatch._assert_parallel_capacity(b, "RUN-NEW", sw.clock())
+
+
+# ------------------------------------------------------------------ CLI
+
+
+def test_cli_missions_park_unpark_switch(sw: Switch) -> None:
+    board = sw.cli("pm", "missions", "--pid", PROJECT)
+    assert board.exit_code == 0, board.output
+    assert [c["mission_id"] for c in json.loads(board.output)["active"]] == ["MISSION-A"]
+
+    parked = sw.cli(
+        "pm", "park", "--mission-id", "MISSION-A", "--reason", "急活", "--summary", "OB1 改完",
+        "--approval-evidence-ref", APPROVAL,
+    )
+    assert parked.exit_code == 0, parked.output
+    assert json.loads(parked.output)["state"] == "PARKED" and "lease-secret" not in parked.output
+
+    board = json.loads(sw.cli("pm", "missions", "--pid", PROJECT).output)
+    assert board["parked"][0]["checkpoint_summary"] == "OB1 改完"
+
+    refused = CliRunner().invoke(
+        cli, ["-w", str(sw.root), "pm", "unpark", "--mission-id", "MISSION-A", "--as", "agent-a", "--holder-pid", "none"]
+    )
+    assert refused.exit_code != 0 and "approval-evidence-ref" in refused.output
+
+    recommend = sw.cli("pm", "switch", "--pid", PROJECT)
+    assert recommend.exit_code == 0 and json.loads(recommend.output)["recommended_mission_id"] == "MISSION-A"
+
+    back = sw.cli(
+        "pm", "unpark", "--mission-id", "MISSION-A", "--as", "claude:local", "--approval-evidence-ref", APPROVAL,
+        "--holder-pid", "none",
+    )
+    assert back.exit_code == 0, back.output
+    payload = json.loads(back.output)
+    token = lease_wallet.load(sw.root, run_id="RUN-001", owner_id="claude:local")
+    assert payload["state"] == "ACTIVE" and token not in back.output and "sync_note" in payload
+
+
+def test_cli_park_shows_stale_flag_after_seven_days(sw: Switch) -> None:
+    sw.park_a()
+    assert json.loads(sw.cli("pm", "missions", "--pid", PROJECT).output)["parked"][0]["stale"] is False
+    sw.clock.value = sw.clock.value + timedelta(days=8)
+    assert json.loads(sw.cli("pm", "missions", "--pid", PROJECT).output)["parked"][0]["stale"] is True
+
+
+def test_park_record_survives_a_raw_sqlite_look(sw: Switch) -> None:
+    sw.park_a()
+    with sqlite3.connect(sw.root / ".auto-pm" / "continuity.db") as conn:
+        payload = conn.execute("SELECT payload_json FROM events WHERE event_type='MISSION_PARKED'").fetchone()[0]
+    request = json.loads(payload)["request"]
+    assert request["target_state"] == "PARKED" and request["approval_evidence_ref"] == APPROVAL
+
+
+def test_resume_picks_the_card_in_hand_and_lists_the_others(sw: Switch) -> None:
+    from auto_pm.core.continuity_resume_service import ContinuityResumeService
+
+    sw.b_in_hand()
+    missions = sw.store.list_active_missions(PROJECT)
+    chosen, others = ContinuityResumeService._select_mission(missions, "")
+    assert chosen is not None and chosen.mission_id == "MISSION-B"
+    assert [m.mission_id for m in others] == ["MISSION-A"]
+    # Asking for the parked card by its root Work selects it explicitly.
+    chosen, others = ContinuityResumeService._select_mission(missions, "WORK-001")
+    assert chosen is not None and chosen.mission_id == "MISSION-A"
+    assert [m.mission_id for m in others] == ["MISSION-B"]

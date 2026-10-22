@@ -34,6 +34,7 @@ from auto_pm.contracts.execution_adapter import (
     WorktreeMode,
     execution_role_for_stack,
 )
+from auto_pm.contracts.lease_reclaim import lease_is_held
 from auto_pm.contracts.mission import Mission
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -382,19 +383,29 @@ class ExecutionDispatchService:
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _assert_parallel_capacity(self, mission: Mission, run_id: str, now: datetime) -> None:
-        active = 0
+        """One held lease per project (TD-071): a parked card's fenced lease does not count, and a
+        Mission's ``max_parallel_runs`` can no longer widen the project-level limit."""
+
+        held: list[str] = []
         try:
             for work in self._store.list_works(mission.subject_project_id):
                 for run in self._store.list_runs(work.work_id):
                     if run.run_id == run_id:
                         continue
                     lease = self._store.get_lease(run.run_id)
-                    if datetime.fromisoformat(lease.expires_at) > now:
-                        active += 1
-        except ContinuityStoreError as error:
+                    if lease_is_held(
+                        lease_token=lease.lease_token,
+                        expires_at=datetime.fromisoformat(lease.expires_at),
+                        now=now,
+                    ):
+                        held.append(run.run_id)
+        except (ContinuityStoreError, ValueError) as error:
             raise ExecutionDispatchError(str(error)) from error
-        if active >= mission.authority.routing.max_parallel_runs:
-            raise ExecutionDispatchError("Mission 已达到 max_parallel_runs，拒绝隐式并发执行")
+        if held:
+            raise ExecutionDispatchError(
+                "项目里已有 Run 持有租约（" + "、".join(held) + "），同一项目同一时刻只能一张在干；"
+                "拒绝隐式并发执行（max_parallel_runs 不再放大项目上限）"
+            )
 
     @staticmethod
     def _adapter_kind(adapter: ExecutionAdapterKind | str) -> ExecutionAdapterKind:

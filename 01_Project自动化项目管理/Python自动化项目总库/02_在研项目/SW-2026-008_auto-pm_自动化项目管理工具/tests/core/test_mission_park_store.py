@@ -154,6 +154,7 @@ class Scene:
             "git_head": self.head,
             "dirty_paths": ["auto_pm/core/a.py"],
             "idempotency_key": f"park-{mission_id}",
+            "approval_evidence_ref": APPROVAL,
         }
         values.update(changes)
         return self.store.park_mission(**values)
@@ -378,6 +379,7 @@ def test_park_replays_with_the_same_key_and_refuses_a_changed_request(scene: Sce
         git_head=scene.head,
         dirty_paths=["auto_pm/core/a.py"],
         idempotency_key="park-MISSION-A",
+        approval_evidence_ref=APPROVAL,
     )
     assert again == first and scene.snapshot() == before
     with pytest.raises(ContinuityStoreError, match="语义不一致"):
@@ -393,6 +395,7 @@ def test_park_replays_with_the_same_key_and_refuses_a_changed_request(scene: Sce
             git_head=scene.head,
             dirty_paths=["auto_pm/core/a.py"],
             idempotency_key="park-MISSION-A",
+            approval_evidence_ref=APPROVAL,
         )
 
 
