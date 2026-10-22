@@ -5,12 +5,20 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 from auto_pm.contracts.mission import MissionState
+from auto_pm.contracts.plan_checklist import PlanChecklist
 
 
 class PmIntent(BaseModel):
@@ -110,6 +118,15 @@ class PlanningExecutionGrant(BaseModel):
     approved_model: str
     required_worktree_mode: Literal[WorktreeMode.ISOLATED] = WorktreeMode.ISOLATED
     declared_dirty_paths: tuple[str, ...] = ()
+    plan_checklist: PlanChecklist | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_checklist(self, handler: SerializerFunctionWrapHandler) -> Any:
+        # Cards approved before the poka-yoke keep byte-identical hashes and metadata.
+        data = handler(self)
+        if self.plan_checklist is None and isinstance(data, dict):
+            data.pop("plan_checklist", None)
+        return data
 
     @field_validator("approved_model")
     @classmethod

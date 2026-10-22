@@ -6,6 +6,7 @@
 |------|-----|
 | **文档标题** | FB_1020 设备通讯握手接口定义 |
 | **文档版本** | V2.0.0 |
+| **2026-10-22 对齐** | 接口表“说明”列按代码行尾注释逐字对齐（`plc docs check`），对齐前写法移到文末附录；只改文档，版本号和文件名不变 |
 | **关联源码** | communication/FB_1020_EquipmentHandshake.scl |
 | **关联DSN** | 详细设计说明书_DSN-FB1020-EquipmentHandshake-V2.0.0.md |
 | **编制日期** | 2026-05-30 |
@@ -94,10 +95,10 @@
 | 名称 | 类型 | 默认值 | 有效值域 | 说明 | 来源 |
 |------|------|--------|----------|------|------|
 | i_bEnable | BOOL | FALSE | TRUE/FALSE | 使能 TRUE=执行握手逻辑 | OB1 |
-| i_bRequestOut | BOOL | FALSE | TRUE/FALSE | 向上游发起要料请求(上升沿触发) | 编排器/OB1 |
+| i_bRequestOut | BOOL | FALSE | TRUE/FALSE | 向上游发起要料请求        | 编排器/OB1 |
 | i_bAllowDischarge | BOOL | FALSE | TRUE/FALSE | 允许向下游出料 | 编排器/OB1 |
 | i_bReset | BOOL | FALSE | TRUE/FALSE | 复位故障/强制回IDLE | OB1←HMI |
-| i_bTransportDone | BOOL | FALSE | TRUE/FALSE | 物理搬运完成信号(输送机构到位) | OB1←FB_xxx |
+| i_bTransportDone | BOOL | FALSE | TRUE/FALSE | 物理搬运完成信号(输送机构反馈) | OB1←FB_xxx |
 
 ### 3.2 VAR_INPUT (产品数据)
 
@@ -118,10 +119,10 @@
 
 | 名称 | 类型 | 默认值 | 有效值域 | 说明 | 来源 |
 |------|------|--------|----------|------|------|
-| i_dReqDelayMs | DINT | 1000 | 0~60000 | 请求->搬运 延迟时间(ms) | OB1←HMI |
-| i_dHbToggleMs | DINT | 500 | 100~5000 | 心跳翻转周期(ms) | OB1←HMI |
-| i_dHbTimeoutMs | DINT | 3000 | 500~30000 | 心跳超时阈值(ms) | OB1←HMI |
-| i_dCompleteMs | DINT | 500 | 100~5000 | 完成脉冲宽度(ms) | OB1←HMI |
+| i_dReqDelayMs | DINT | 1000 | 0~60000 | 请求->搬运 延迟时间 ms  | OB1←HMI |
+| i_dHbToggleMs | DINT | 500 | 100~5000 | 心跳翻转周期 ms  | OB1←HMI |
+| i_dHbTimeoutMs | DINT | 3000 | 500~30000 | 心跳超时阈值 ms  | OB1←HMI |
+| i_dCompleteMs | DINT | 500 | 100~5000 | 完成脉冲宽度 ms  | OB1←HMI |
 
 ### 3.4 VAR_OUTPUT (状态输出)
 
@@ -145,15 +146,15 @@
 
 | 名称 | 类型 | 默认值 | 说明 | 去向 |
 |------|------|--------|------|------|
-| q_stUpReceivedProduct | ST_ProductData | -- | 从上游接收的产品数据(Read.Complete上升沿锁存) | 编排器 |
-| q_stDownReceivedProduct | ST_ProductData | -- | 从下游接收的产品数据(TransportDone/DsComplete上升沿锁存) | 编排器 |
+| q_stUpReceivedProduct | ST_ProductData | -- | 从上游接收的产品数据                     | 编排器 |
+| q_stDownReceivedProduct | ST_ProductData | -- | 从下游接收的产品数据                                | 编排器 |
 
 ### 3.7 VAR_IN_OUT (通道结构体)
 
 | 名称 | 类型 | 说明 | OB1接线 |
 |------|------|------|---------|
-| io_stUpStream | ST_HandshakeCh | 上游通道: Write=本机→上游, Read=上游→本机 | 通讯层映射 |
-| io_stDownStream | ST_HandshakeCh | 下游通道: Write=本机→下游, Read=下游→本机 | 通讯层映射 |
+| io_stUpStream | ST_HandshakeCh | 上游通道 Write=本机->上游 Read=上游->本机 | 通讯层映射 |
+| io_stDownStream | ST_HandshakeCh | 下游通道 Write=本机->下游 Read=下游->本机 | 通讯层映射 |
 
 **ST_HandshakeCh 子字段**:
 
@@ -369,3 +370,24 @@ q_bAlarm = Up.CommFault OR Down.CommFault
 | LSP-905 | 905_SCL编程规范_LSP-V1.0.1.md | V1.0.1 |
 | LSP-904 | 904_SCL注释规范_LSP-V1.2.0.md | V1.2.0 |
 | LSP-903 | 903_定时器使用规范_LSP-V1.0.0.md | V1.0.0 |
+
+---
+
+## 附：2026-10-22 对齐前的旧说明（留底，不删）
+
+> 2026-10-22 按 `plc docs check` 把上面接口表的“说明”列逐字改成代码行尾注释（代码为准，只改文档，没改 .scl）。
+> 下表是改之前文档里的写法，有些比代码注释多写了单位、触发方式或用途，留在这里备查；
+> 其中与代码实际行为不一致的地方，见共享库对齐记录 `PRD/文档代码对齐记录_20261022.md` 第 3 节。
+
+| 引脚 | 对齐前文档说明 | 现说明（= 代码注释） |
+|------|------|------|
+| i_bRequestOut | 向上游发起要料请求(上升沿触发) | 向上游发起要料请求 |
+| i_bTransportDone | 物理搬运完成信号(输送机构到位) | 物理搬运完成信号(输送机构反馈) |
+| i_dReqDelayMs | 请求->搬运 延迟时间(ms) | 请求->搬运 延迟时间 ms |
+| i_dHbToggleMs | 心跳翻转周期(ms) | 心跳翻转周期 ms |
+| i_dHbTimeoutMs | 心跳超时阈值(ms) | 心跳超时阈值 ms |
+| i_dCompleteMs | 完成脉冲宽度(ms) | 完成脉冲宽度 ms |
+| q_stUpReceivedProduct | 从上游接收的产品数据(Read.Complete上升沿锁存) | 从上游接收的产品数据 |
+| q_stDownReceivedProduct | 从下游接收的产品数据(TransportDone/DsComplete上升沿锁存) | 从下游接收的产品数据 |
+| io_stUpStream | 上游通道: Write=本机→上游, Read=上游→本机 | 上游通道 Write=本机->上游 Read=上游->本机 |
+| io_stDownStream | 下游通道: Write=本机→下游, Read=下游→本机 | 下游通道 Write=本机->下游 Read=下游->本机 |

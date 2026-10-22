@@ -1354,6 +1354,9 @@ class ContinuityStore:
 
         The durable reservation makes a failed file write safely retryable: later
         calls receive the original identifier instead of allocating a second CHG.
+        CHG numbers are issued per project, but this binding table is unique across the
+        workspace; when another draft (of any project) already holds the candidate, the
+        next higher number of the same series is taken instead of refusing.
         """
 
         now = self._utc_now().isoformat()
@@ -1368,12 +1371,7 @@ class ContinuityStore:
             ).fetchone()
             if existing is not None:
                 return str(existing["change_id"])
-            conflicting = conn.execute(
-                "SELECT request_id FROM planning_draft_chg_bindings WHERE change_id=?",
-                (change_id,),
-            ).fetchone()
-            if conflicting is not None:
-                raise ContinuityStoreError("候选 CHG 已绑定其他 PlanningDraft")
+            change_id = self._first_unbound_change_id(conn, change_id)
             conn.execute(
                 "INSERT INTO planning_draft_chg_bindings VALUES (?, ?, ?)",
                 (request_id, change_id, now),
@@ -1388,6 +1386,23 @@ class ContinuityStore:
                 aggregate_type="planning_draft",
             )
             return change_id
+
+    @staticmethod
+    def _first_unbound_change_id(conn: sqlite3.Connection, candidate: str) -> str:
+        """The candidate, or the next number of its series that no draft has bound yet."""
+
+        prefix, _, number = candidate.rpartition("-")
+        if not prefix or not number.isdigit():
+            raise ContinuityStoreError(f"候选 CHG 编号格式非法: {candidate}")
+        sequence = int(number)
+        while True:
+            change_id = f"{prefix}-{sequence:0{len(number)}d}"
+            taken = conn.execute(
+                "SELECT 1 FROM planning_draft_chg_bindings WHERE change_id=?", (change_id,)
+            ).fetchone()
+            if taken is None:
+                return change_id
+            sequence += 1
 
     def bind_planning_draft_specs(
         self, request_id: str, specs: tuple[tuple[str, str, str], ...]
