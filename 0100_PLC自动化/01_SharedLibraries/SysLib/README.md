@@ -42,6 +42,7 @@ SysLib 是一个符合 **IEC 61131-3 标准**的 PLC 功能库，专为多平台
 | **edge/** | 2 | ✅ 100% | ✅ 100% | ✅ 100% | 无需修改 |
 | **pulse/** | 1 | ✅ 100% | ✅ 100% | ✅ 100% | 待验证 |
 | **actuator/** | 2 | ✅ 100% | ✅ 100% | ✅ 100% | 🆕 新增 |
+| **safety/** | 1 | — | — | 待 InoProShop 仿真 | 🆕 2026-10-22 预做，安全区待签字 |
 
 **图例:**
 - `*` PT/ET 参数需要从 DINT 改为 TIME 类型
@@ -51,6 +52,12 @@ SysLib 是一个符合 **IEC 61131-3 标准**的 PLC 功能库，专为多平台
 ---
 
 ## 🔧 各模块详细说明
+
+### 0️⃣ Safety 模块 (`safety/`，2026-10-22 预做，安全区)
+
+- [FB_1030_SafetyManager.scl](safety/FB_1030_SafetyManager.scl)：全机安全管理块（安全回路状态 + 两次复位隔 10 s + 启动许可 + 最多 8 扇门开门流程），全机只调一次。依赖 FB_TON V3.0.0（真实毫秒）。
+- 接口文档：[safety/PRD/接口文档_IFC-FB1030-SafetyManager-V1.0.0.md](safety/PRD/接口文档_IFC-FB1030-SafetyManager-V1.0.0.md)。
+- 改本模块等于改安全区：先仿真（汇川 InoProShop / 西门子 PLCSIM），再由用户在 PR 上写“安全签字 + 提交号”才合并。
 
 ### 1️⃣ Timer 模块 (`timer/`)
 
