@@ -53,7 +53,9 @@ def _approve_from_one_sentence(drill, request_id: str, files: dict[str, str] | N
     assert confirmed.returncode == 0, drill.transcript()
     plan = [
         "pm", "plan", "--project-id", PROJECT_ID, "--request-id", request_id, "--objective", SENTENCE,
-        "--acceptance", f"main.py plc check {PROJECT_ID} 退出码 0", "--risk", "只动公共报警块", "--non-goal", "不下载到控制器",
+        "--acceptance", f"main.py plc check {PROJECT_ID} 退出码 0", "--check", f"main.py plc check {PROJECT_ID} => 0",
+        "--risk", "只动公共报警块", "--non-goal", "不下载到控制器",
+        "--original-request", SENTENCE, "--safety-circuit", "否", "--rollback", "git 还原本单改动的文件",
         "--adapter", "trae", "--approved-model", "trae", "--inbox-id", item["item_id"],
     ]
     for path in files:

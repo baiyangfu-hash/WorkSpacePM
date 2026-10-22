@@ -522,6 +522,12 @@ class ContinuityExecutionService:
                 return None
             raise
 
+    @classmethod
+    def checkpoint_dirty_paths(cls, collection: EvidenceCollection) -> list[str]:
+        """Public view of the exact path set an automatic Checkpoint would record."""
+
+        return cls._checkpoint_dirty_paths(collection)
+
     @staticmethod
     def _checkpoint_dirty_paths(collection: EvidenceCollection) -> list[str]:
         """Derive the immutable checkpoint path set from all Git dirty classes."""

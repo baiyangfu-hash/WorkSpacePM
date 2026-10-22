@@ -26,6 +26,7 @@ from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import MissionState
+from auto_pm.contracts.plan_checklist import PlanChecklist
 from auto_pm.contracts.pm_cockpit import PmCockpitCompletion
 from auto_pm.contracts.pm_facade import (
     PlanningExecutionGrant,
@@ -138,6 +139,7 @@ class CockpitClient:
         adapter: ExecutionAdapterKind,
         approved_model: str,
         declared_dirty_paths: Sequence[str] = (),
+        plan_checklist: PlanChecklist | None = None,
     ) -> PlanningScopeCard:
         """Create the non-executable scope card that a human must still approve."""
 
@@ -157,6 +159,7 @@ class CockpitClient:
                     adapter=adapter,
                     approved_model=approved_model,
                     declared_dirty_paths=tuple(declared_dirty_paths),
+                    plan_checklist=plan_checklist,
                 ),
             )
         except (PmFacadeError, ValueError) as error:

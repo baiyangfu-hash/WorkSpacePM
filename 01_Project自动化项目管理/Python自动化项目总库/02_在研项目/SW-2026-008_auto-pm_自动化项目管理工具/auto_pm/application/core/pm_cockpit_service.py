@@ -357,6 +357,14 @@ class PmCockpitService:
         except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
             raise PmCockpitError("无法读取该需求，已保留现场。") from error
         if mission.state is MissionState.CLOSED:
+            try:
+                closed_by_closure = self._store.has_completed_closure(mission_id)
+            except (ContinuityStoreError, sqlite3.Error, OSError) as error:
+                raise PmCockpitError("无法读取该需求的收口记录，已保留现场。") from error
+            if not closed_by_closure:
+                raise PmCockpitError(
+                    "该需求已关闭，但没有经过收口（没有收口记录）：验收过的文件可能没有并回控制根，请向 PM 说明。"
+                )
             return PmCockpitCompletion(
                 mission_id=mission_id,
                 state=PmCockpitCompletionState.COMPLETED,

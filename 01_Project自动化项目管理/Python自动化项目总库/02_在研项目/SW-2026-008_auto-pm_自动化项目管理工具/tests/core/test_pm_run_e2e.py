@@ -32,6 +32,7 @@ from auto_pm.contracts.pm_facade import (
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
+from tests.plan_checklist_support import full_checklist
 
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_closure_service import (
@@ -263,6 +264,7 @@ def _env(
         adapter=ExecutionAdapterKind.CODEX,
         approved_model="agent-a",
         declared_dirty_paths=scope,
+        plan_checklist=full_checklist(),
     )
     intent = PmIntent(
         request_id="REQ-U07A-E2E",
@@ -273,7 +275,7 @@ def _env(
     card = facade.create_planning_scope_card(
         intent,
         scope_paths=scope,
-        risks=("none",),
+        risks=("改错文件导致回归",),
         non_goals=("no refactor",),
         execution_grant=grant,
     )

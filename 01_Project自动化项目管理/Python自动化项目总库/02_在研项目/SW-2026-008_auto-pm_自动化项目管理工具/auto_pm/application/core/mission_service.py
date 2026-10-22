@@ -131,12 +131,16 @@ class MissionService:
         if approval.get("request_id") != draft.request_id:
             raise MissionServiceError("Decision 与 PlanningDraft request_id 不一致")
         grant = approval.get("execution_grant")
-        if not isinstance(grant, dict) or set(grant) != {
+        base_grant_keys = {
             "adapter",
             "approved_model",
             "required_worktree_mode",
             "declared_dirty_paths",
-        }:
+        }
+        if not isinstance(grant, dict) or set(grant) not in (
+            base_grant_keys,
+            base_grant_keys | {"plan_checklist"},
+        ):
             raise MissionServiceError("Decision execution_grant schema 不精确")
         try:
             adapter_raw = grant["adapter"]
@@ -253,6 +257,10 @@ class MissionService:
         try:
             current = self._store.get_mission(mission_id)
             instant = self._instant()
+            if new_state is MissionState.CLOSED:
+                raise MissionServiceError(
+                    "Mission 只能由收口关闭（界面确认验收 / pm close），不能直接流转到 CLOSED"
+                )
             if new_state not in _TRANSITIONS[current.state]:
                 raise MissionServiceError(
                     f"Mission 不允许从 {current.state.value} 流转到 {new_state.value}"
