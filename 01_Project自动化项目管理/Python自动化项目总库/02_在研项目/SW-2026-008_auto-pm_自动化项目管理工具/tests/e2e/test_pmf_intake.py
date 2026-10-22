@@ -225,14 +225,14 @@ def test_e03_the_whole_loop_from_inbox_to_a_filed_plan_runs_in_real_processes(sc
     item = scene.item(scene.add("REQ-ASIDE-1", "冻结旧导出功能", "--change-action", "freeze", kind="change"))
     refused = scene.child(
         "plan", "--project-id", PROJECT, "--request-id", "REQ-PLAN-1", "--objective", "Freeze the legacy export", "--acceptance", "Export is frozen.",
-        "--scope", "auto_pm/export.py", "--risk", "users still depend on it", "--non-goal", "no removal", "--adapter", "codex",
+        "--scope", "auto_pm/export.py", "--declared-dirty", "auto_pm/export.py", "--risk", "users still depend on it", "--non-goal", "no removal", "--adapter", "codex",
         "--approved-model", "gpt-approved", "--inbox-id", item["item_id"],
     )
     assert refused.returncode != 0 and "已确认" in refused.stdout + refused.stderr
     scene.confirm(item)
     planned = scene.child(
         "plan", "--project-id", PROJECT, "--request-id", "REQ-PLAN-1", "--objective", "Freeze the legacy export", "--acceptance", "Export is frozen.",
-        "--scope", "auto_pm/export.py", "--risk", "users still depend on it", "--non-goal", "no removal", "--adapter", "codex",
+        "--scope", "auto_pm/export.py", "--declared-dirty", "auto_pm/export.py", "--risk", "users still depend on it", "--non-goal", "no removal", "--adapter", "codex",
         "--approved-model", "gpt-approved", "--inbox-id", item["item_id"],
     )
     assert planned.returncode == 0, planned.stderr + planned.stdout
@@ -334,6 +334,7 @@ def _audit_race_worker(
                 execution_grant=PlanningExecutionGrant(
                     adapter=ExecutionAdapterKind.CODEX,
                     approved_model="gpt-approved",
+                    declared_dirty_paths=("auto_pm/race.py",),
                 ),
                 classification=item.classification,
                 intake_item_id=item_id,
@@ -505,7 +506,9 @@ def test_audit_f01_f04_real_cli_failure_stays_visible_then_cold_retry_succeeds(
     assert failed.returncode != 0 and "wildcards" in failed.stdout + failed.stderr
     visible = json.loads(_rehearsal_process(scene, "inbox", "list", "--project-id", PROJECT).stdout)["items"]
     assert visible[0]["status"] == "CONFIRMED" and visible[0]["plan_request_id"] == ""
-    succeeded = _rehearsal_process(scene, *args, "--scope", "auto_pm/retry.py")
+    succeeded = _rehearsal_process(
+        scene, *args, "--scope", "auto_pm/retry.py", "--declared-dirty", "auto_pm/retry.py"
+    )
     assert succeeded.returncode == 0, succeeded.stdout + succeeded.stderr
     card = json.loads(succeeded.stdout)
     assert (
