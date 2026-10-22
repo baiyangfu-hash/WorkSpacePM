@@ -185,9 +185,10 @@ PickPlace ──o_bPlaceComplete_ToFeeder──→ Feeder.i_bPickPlace_FeedCompl
 
 | FB_3001 引脚 | OB1 接到 | 说明 / 待确认 |
 | :--- | :--- | :--- |
-| `i_bEnable` | `GlobalVars.stExternal.bEmergencyStop` | 急停回路正常（1 = 正常，IO 表 `I0.0 ESTOP_OK`）；该变量的 IO 映射还没写，导入工程时接 |
+| `i_bEnable` | `TRUE` | 常开：心跳一直发（CARD-DJ-2026-009-004 起；原接急停按钮点 `stExternal.bEmergencyStop`） |
+| `i_bSafeToRun` | `GlobalVars.fbSafety.q_bSafeToRun` | FB_1030 运行许可；为 0 时只撤握手，心跳照发（用户 2026-10-22） |
 | `i_bAutoMode` | `GlobalVars.stStation1.stControl.bAutoEnable` | 工位 1 自动使能（项目里只有这一个自动位） |
-| `i_bResetCmd` | `GlobalVars.stGlobal.i_bReset OR GlobalVars.stStation1.stControl.bReset` | 公共复位或工位复位，任一按下都算 |
+| `i_bResetCmd` | `GlobalVars.fbSafety.q_bRunResetPulse OR (GlobalVars.fbSafety.q_bSafeToRun AND (GlobalVars.stGlobal.i_bReset OR GlobalVars.stStation1.stControl.bReset))` | 安全停机后只认 FB_1030 运行复位脉冲；运行许可中公共复位或工位复位照常（CARD-DJ-2026-009-004） |
 | `i_bMachineReadyIn` | `GlobalVars.stStation1.stStatus.bWaitMaterial` | 工位 1 在“等待来料”步 |
 | `i_bMachineReadyOut` | `GlobalVars.stStation1.stStatus.bReadyOut` | 工位 1 在出料步且气缸已松开（FB_1001 新增状态位） |
 | `i_bInfeedArrivedSens` | `GlobalVars.stStation1.stSensors.bInPosSensor` | 入料到位光电 |

@@ -16,8 +16,15 @@ BEGIN
     // @安全区 开始：安全点读入、FB_1030 调用、运行许可与门锁输出
     arrSafetyFault[0] := SAFETY_FAULT;
     arrEStopOk[0] := ESTOP_OK;
-    arrDoorClosed[0] := DOOR1_LOCKED;
-    arrDoorReqBtn[0] := DOOR1_REQ_BTN;
+    // 安全门: 只读 DOOR_COUNT 扇 (GVL_SafetyIO, 默认 8); 没用到的数组位保持初值 TRUE (门正常)
+    IF DOOR_COUNT >= 1 THEN arrDoorClosed[0] := DOOR1_LOCKED; arrDoorReqBtn[0] := DOOR1_REQ_BTN; END_IF;
+    IF DOOR_COUNT >= 2 THEN arrDoorClosed[1] := DOOR2_LOCKED; arrDoorReqBtn[1] := DOOR2_REQ_BTN; END_IF;
+    IF DOOR_COUNT >= 3 THEN arrDoorClosed[2] := DOOR3_LOCKED; arrDoorReqBtn[2] := DOOR3_REQ_BTN; END_IF;
+    IF DOOR_COUNT >= 4 THEN arrDoorClosed[3] := DOOR4_LOCKED; arrDoorReqBtn[3] := DOOR4_REQ_BTN; END_IF;
+    IF DOOR_COUNT >= 5 THEN arrDoorClosed[4] := DOOR5_LOCKED; arrDoorReqBtn[4] := DOOR5_REQ_BTN; END_IF;
+    IF DOOR_COUNT >= 6 THEN arrDoorClosed[5] := DOOR6_LOCKED; arrDoorReqBtn[5] := DOOR6_REQ_BTN; END_IF;
+    IF DOOR_COUNT >= 7 THEN arrDoorClosed[6] := DOOR7_LOCKED; arrDoorReqBtn[6] := DOOR7_REQ_BTN; END_IF;
+    IF DOOR_COUNT >= 8 THEN arrDoorClosed[7] := DOOR8_LOCKED; arrDoorReqBtn[7] := DOOR8_REQ_BTN; END_IF;
     GlobalVars.stExternal.bEmergencyStop := ESTOP_OK;   // 急停按钮状态, 只报警显示; 握手使能改看运行许可
     GlobalVars.fbSafety(
         i_arrSafetyFault := arrSafetyFault,
@@ -33,6 +40,20 @@ BEGIN
     );
     DOOR1_UNLOCK := GlobalVars.fbSafety.q_arrDoorUnlock[0];
     DOOR1_REQ_LAMP := GlobalVars.fbSafety.q_arrDoorLamp[0];
+    DOOR2_UNLOCK := GlobalVars.fbSafety.q_arrDoorUnlock[1];
+    DOOR2_REQ_LAMP := GlobalVars.fbSafety.q_arrDoorLamp[1];
+    DOOR3_UNLOCK := GlobalVars.fbSafety.q_arrDoorUnlock[2];
+    DOOR3_REQ_LAMP := GlobalVars.fbSafety.q_arrDoorLamp[2];
+    DOOR4_UNLOCK := GlobalVars.fbSafety.q_arrDoorUnlock[3];
+    DOOR4_REQ_LAMP := GlobalVars.fbSafety.q_arrDoorLamp[3];
+    DOOR5_UNLOCK := GlobalVars.fbSafety.q_arrDoorUnlock[4];
+    DOOR5_REQ_LAMP := GlobalVars.fbSafety.q_arrDoorLamp[4];
+    DOOR6_UNLOCK := GlobalVars.fbSafety.q_arrDoorUnlock[5];
+    DOOR6_REQ_LAMP := GlobalVars.fbSafety.q_arrDoorLamp[5];
+    DOOR7_UNLOCK := GlobalVars.fbSafety.q_arrDoorUnlock[6];
+    DOOR7_REQ_LAMP := GlobalVars.fbSafety.q_arrDoorLamp[6];
+    DOOR8_UNLOCK := GlobalVars.fbSafety.q_arrDoorUnlock[7];
+    DOOR8_REQ_LAMP := GlobalVars.fbSafety.q_arrDoorLamp[7];
     GlobalVars.stStation1.stControl.bSafeToRun := GlobalVars.fbSafety.q_bSafeToRun;
     // @安全区 结束
 
@@ -59,11 +80,14 @@ BEGIN
     // CARD-DJ-2026-009-003: 补接全部输入输出 (原来只传 io_stExternal, i_bEnable 默认 0, 握手不跑)
     // 工位状态取上一周期 FB_1001 的结果 (1 个扫描周期延迟)
     // ============================================================================
-    // @安全区 开始：握手使能=运行许可, 复位来源, 工位状态接入断线联锁
-    // CARD-DJ-2026-009-004: 使能原来看急停按钮点 (开安全门时按钮点仍是 1, 握手照走 = 漏洞), 改看 FB_1030 运行许可;
-    // 复位原来一按就清, 改为: 安全停机后只认 FB_1030 的运行复位脉冲; 运行许可中按复位照常清通讯故障
+    // @安全区 开始：握手运行许可, 复位来源, 工位状态接入断线联锁
+    // CARD-DJ-2026-009-004: 使能原来看急停按钮点 (开安全门时按钮点仍是 1, 握手照走 = 漏洞), 改为:
+    //   使能常开 = 心跳一直发 (用户 10-22: 心跳停了对方判断线, 以后同一心跳也给 MES);
+    //   运行许可 = FB_1030, 许可丢失只撤握手. 复位原来一按就清, 改为: 安全停机后只认 FB_1030 的
+    //   运行复位脉冲; 运行许可中按复位照常清通讯故障
     GlobalVars.fbExternalDevice(
-        i_bEnable := GlobalVars.fbSafety.q_bSafeToRun,
+        i_bEnable := TRUE,
+        i_bSafeToRun := GlobalVars.fbSafety.q_bSafeToRun,
         i_bAutoMode := GlobalVars.stStation1.stControl.bAutoEnable,
         i_bResetCmd := GlobalVars.fbSafety.q_bRunResetPulse
                        OR (GlobalVars.fbSafety.q_bSafeToRun AND (GlobalVars.stGlobal.i_bReset OR GlobalVars.stStation1.stControl.bReset)),

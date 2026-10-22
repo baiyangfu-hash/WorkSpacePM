@@ -16,7 +16,8 @@ domain: plc
 
 | 变量名 | 类型 | 方向 | 说明 |
 |:---|:---:|:---:|:---|
-| `i_bEnable` | BOOL | VAR_INPUT | 功能块总使能 (OB1 接 FB_1030 运行许可 q_bSafeToRun, CARD-DJ-2026-009-004) |
+| `i_bEnable` | BOOL | VAR_INPUT | 功能块总使能 (通讯与心跳; 0 = 心跳也停, 对方判断线) |
+| `i_bSafeToRun` | BOOL | VAR_INPUT | 运行许可 (OB1 接 FB_1030 q_bSafeToRun); 0 = 心跳照发, 只撤握手许可, CARD-DJ-2026-009-004 |
 | `i_bAutoMode` | BOOL | VAR_INPUT | 自动运行模式 |
 | `i_bResetCmd` | BOOL | VAR_INPUT | 故障复位指令 (OB1: FB_1030 运行复位脉冲, 或运行许可中的普通复位, CARD-DJ-2026-009-004) |
 | `i_bMachineReadyIn` | BOOL | VAR_INPUT | 本机进料就绪 (工位空闲) |
@@ -55,7 +56,7 @@ V1.2.0（CARD-DJ-2026-009-003）：删除 `i_sSendModuleID`（OB1 从来没接�
 
 时间参数用 DINT 毫秒写；共享库 `FB_TON` V3.0.0 起按真实毫秒计时（分支 `claude/syslib-timer-ms`）。
 
-V1.3.0（CARD-DJ-2026-009-004 预做，安全区待签字）：OB1 把 `i_bEnable` 从急停按钮点改接 `FB_1030_SafetyManager.q_bSafeToRun`（开安全门时按钮点仍为 1，原来握手照走）；`i_bResetCmd` 改为 `q_bRunResetPulse OR (q_bSafeToRun AND 原复位来源)`，安全停机后不再一按就清；心跳两个时间改为 `VAR CONSTANT`（规范 0.4、9）。
+V1.3.0（CARD-DJ-2026-009-004 预做，安全区待签字）：新增 `i_bSafeToRun`，OB1 接 `FB_1030_SafetyManager.q_bSafeToRun`（原来使能接急停按钮点，开安全门时按钮点仍为 1，握手照走）；许可为 0 时心跳照发，只撤握手许可和动作输出，按中途中止处理（用户 2026-10-22：心跳停了对方判断线，以后同一心跳也给 MES）；`i_bEnable` 在 OB1 常接 TRUE；`i_bResetCmd` 改为 `q_bRunResetPulse OR (q_bSafeToRun AND 原复位来源)`，安全停机后不再一按就清；心跳两个时间改为 `VAR CONSTANT`（规范 0.4、9）。
 
 ## 4. 调用的函数
 

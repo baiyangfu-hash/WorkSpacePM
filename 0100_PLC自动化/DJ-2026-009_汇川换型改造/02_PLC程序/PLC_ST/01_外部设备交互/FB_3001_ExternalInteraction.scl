@@ -5,7 +5,8 @@ FUNCTION_BLOCK FB_3001_ExternalInteraction
  * 遵循规范: STD-820 (8步握手 + 4s ON / 4s OFF 心跳)
  * ============================================================================== *)
 VAR_INPUT
-    i_bEnable           : BOOL;         // 功能块总使能 (OB1 接 FB_1030 运行许可 q_bSafeToRun, CARD-DJ-2026-009-004)
+    i_bEnable           : BOOL;         // 功能块总使能 (通讯与心跳; 0 = 心跳也停, 对方判断线)
+    i_bSafeToRun        : BOOL;         // 运行许可 (OB1 接 FB_1030 q_bSafeToRun); 0 = 心跳照发, 只撤握手许可, CARD-DJ-2026-009-004
     i_bAutoMode         : BOOL;         // 自动运行模式
     i_bResetCmd         : BOOL;         // 故障复位指令 (OB1: FB_1030 运行复位脉冲, 或运行许可中的普通复位, CARD-DJ-2026-009-004)
     i_bMachineReadyIn   : BOOL;         // 本机进料就绪 (工位空闲)
@@ -164,9 +165,9 @@ BEGIN
         io_stIdHmi.bCmdClear := FALSE;
     END_IF;
 
-    // @安全区 开始：失去使能(急停)撤销输出, 心跳方波与 12s 超时, 断线当拍撤销与人工复位锁
+    // @安全区 开始：失去使能撤销输出, 心跳方波与 12s 超时, 断线当拍撤销与人工复位锁, 运行许可丢失撤销握手
     IF NOT i_bEnable THEN
-        // 握手进行中失去使能 (如急停), 按中途中止处理: 自动模式下要人工复位, 第 20 步起要人工核对 ID
+        // 握手进行中失去使能 (通讯整体关闭), 按中途中止处理: 自动模式下要人工复位, 第 20 步起要人工核对 ID
         IF s_iInfeedStep <> 0 THEN
             IF i_bAutoMode THEN
                 s_bInfeedLock := TRUE;
@@ -305,6 +306,55 @@ BEGIN
     END_IF;
     IF io_stExternal.stDownstream.bDownstreamComFault THEN
         q_wErrorCode := q_wErrorCode OR ERR_DOWN_COM;
+    END_IF;
+
+    (* 1.2 运行许可丢失 (急停/开门/继电器故障/总线断, 或还没两次复位 + 启动): 心跳照发, 只撤握手 *)
+    //     用户 2026-10-22: 心跳停了对方就判断线 (以后同一心跳也给 MES), 所以本机急停时心跳不停.
+    //     握手按中途中止处理, 与失去使能相同: 自动下要人工复位 (FB_1030 运行复位脉冲), 第 20 步起要核对 ID.
+    IF NOT i_bSafeToRun THEN
+        IF s_iInfeedStep <> 0 THEN
+            IF i_bAutoMode THEN
+                s_bInfeedLock := TRUE;
+            END_IF;
+            IF s_iInfeedStep >= STEP_ID_INVOLVED THEN
+                s_bIdCheckReq := TRUE;
+            END_IF;
+            s_wAbortLatch := s_wAbortLatch OR ERR_INFEED_ABORT;
+        END_IF;
+        IF s_iOutfeedStep <> 0 THEN
+            IF i_bAutoMode THEN
+                s_bOutfeedLock := TRUE;
+            END_IF;
+            IF s_iOutfeedStep >= STEP_ID_INVOLVED THEN
+                s_bIdCheckReq := TRUE;
+            END_IF;
+            s_wAbortLatch := s_wAbortLatch OR ERR_OUTFEED_ABORT;
+        END_IF;
+        io_stExternal.stUpstream.bMachine_ReadyIn := FALSE;
+        io_stExternal.stUpstream.bMachine_RcvModuleIdAck := FALSE;
+        io_stExternal.stUpstream.bMachine_AllowInfeed := FALSE;
+        io_stExternal.stUpstream.bMachine_InfeedArrived := FALSE;
+        io_stExternal.stDownstream.bMachine_ReadyOut := FALSE;
+        io_stExternal.stDownstream.bMachine_SendModuleId := FALSE;
+        io_stExternal.stDownstream.bMachine_OutfeedReq := FALSE;
+        io_stExternal.stDownstream.bMachine_OutfeedArrivedAck := FALSE;
+        q_bAllowInfeedAct := FALSE;
+        q_bAllowOutfeedAct := FALSE;
+        s_tLeaveTimer.IN := FALSE;
+        s_tIdleTimer.IN := FALSE;
+        s_bIdRelease := FALSE;
+        s_iInfeedStep := 0;
+        s_iOutfeedStep := 0;
+        io_stExternal.stUpstream.iInfeedStep := 0;
+        io_stExternal.stDownstream.iOutfeedStep := 0;
+        q_wErrorCode := q_wErrorCode OR s_wAbortLatch;
+        IF s_bInfeedLock OR s_bOutfeedLock THEN
+            q_wErrorCode := q_wErrorCode OR ERR_WAIT_RESET;
+        END_IF;
+        IF s_bIdCheckReq THEN
+            q_wErrorCode := q_wErrorCode OR ERR_ID_CHECK;
+        END_IF;
+        RETURN;
     END_IF;
     // @安全区 结束
 

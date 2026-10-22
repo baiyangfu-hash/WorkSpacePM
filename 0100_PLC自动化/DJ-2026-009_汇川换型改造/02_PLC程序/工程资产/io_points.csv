@@ -10,4 +10,32 @@ common,DI,,DOOR1_LOCKED,安全门1 关好且已锁,欧姆龙门锁,1=关好且�
 common,DI,,DOOR1_REQ_BTN,安全门1 申请开门,操作台,自动时不响应; 地址待定,是,—,申请按钮
 common,DO,,DOOR1_UNLOCK,安全门1 解锁线圈,欧姆龙门锁,得电解锁 失电锁定; 地址待定,是,清零,—
 common,DO,,DOOR1_REQ_LAMP,安全门1 申请指示灯,操作台,申请中 1 s 闪 允许开门常亮; 地址待定,否,清零,—
+common,DI,,DOOR2_LOCKED,安全门2 关好且已锁,欧姆龙门锁,预留; DOOR_COUNT>=2 才读; 地址待定,是,—,门锁 PLC 状态触点
+common,DI,,DOOR2_REQ_BTN,安全门2 申请开门,操作台,预留; 地址待定,是,—,申请按钮
+common,DO,,DOOR2_UNLOCK,安全门2 解锁线圈,欧姆龙门锁,预留; 得电解锁 失电锁定; 地址待定,是,清零,—
+common,DO,,DOOR2_REQ_LAMP,安全门2 申请指示灯,操作台,预留; 地址待定,否,清零,—
+common,DI,,DOOR3_LOCKED,安全门3 关好且已锁,欧姆龙门锁,预留; DOOR_COUNT>=3 才读; 地址待定,是,—,门锁 PLC 状态触点
+common,DI,,DOOR3_REQ_BTN,安全门3 申请开门,操作台,预留; 地址待定,是,—,申请按钮
+common,DO,,DOOR3_UNLOCK,安全门3 解锁线圈,欧姆龙门锁,预留; 得电解锁 失电锁定; 地址待定,是,清零,—
+common,DO,,DOOR3_REQ_LAMP,安全门3 申请指示灯,操作台,预留; 地址待定,否,清零,—
+common,DI,,DOOR4_LOCKED,安全门4 关好且已锁,欧姆龙门锁,预留; DOOR_COUNT>=4 才读; 地址待定,是,—,门锁 PLC 状态触点
+common,DI,,DOOR4_REQ_BTN,安全门4 申请开门,操作台,预留; 地址待定,是,—,申请按钮
+common,DO,,DOOR4_UNLOCK,安全门4 解锁线圈,欧姆龙门锁,预留; 得电解锁 失电锁定; 地址待定,是,清零,—
+common,DO,,DOOR4_REQ_LAMP,安全门4 申请指示灯,操作台,预留; 地址待定,否,清零,—
+common,DI,,DOOR5_LOCKED,安全门5 关好且已锁,欧姆龙门锁,预留; DOOR_COUNT>=5 才读; 地址待定,是,—,门锁 PLC 状态触点
+common,DI,,DOOR5_REQ_BTN,安全门5 申请开门,操作台,预留; 地址待定,是,—,申请按钮
+common,DO,,DOOR5_UNLOCK,安全门5 解锁线圈,欧姆龙门锁,预留; 得电解锁 失电锁定; 地址待定,是,清零,—
+common,DO,,DOOR5_REQ_LAMP,安全门5 申请指示灯,操作台,预留; 地址待定,否,清零,—
+common,DI,,DOOR6_LOCKED,安全门6 关好且已锁,欧姆龙门锁,预留; DOOR_COUNT>=6 才读; 地址待定,是,—,门锁 PLC 状态触点
+common,DI,,DOOR6_REQ_BTN,安全门6 申请开门,操作台,预留; 地址待定,是,—,申请按钮
+common,DO,,DOOR6_UNLOCK,安全门6 解锁线圈,欧姆龙门锁,预留; 得电解锁 失电锁定; 地址待定,是,清零,—
+common,DO,,DOOR6_REQ_LAMP,安全门6 申请指示灯,操作台,预留; 地址待定,否,清零,—
+common,DI,,DOOR7_LOCKED,安全门7 关好且已锁,欧姆龙门锁,预留; DOOR_COUNT>=7 才读; 地址待定,是,—,门锁 PLC 状态触点
+common,DI,,DOOR7_REQ_BTN,安全门7 申请开门,操作台,预留; 地址待定,是,—,申请按钮
+common,DO,,DOOR7_UNLOCK,安全门7 解锁线圈,欧姆龙门锁,预留; 得电解锁 失电锁定; 地址待定,是,清零,—
+common,DO,,DOOR7_REQ_LAMP,安全门7 申请指示灯,操作台,预留; 地址待定,否,清零,—
+common,DI,,DOOR8_LOCKED,安全门8 关好且已锁,欧姆龙门锁,预留; DOOR_COUNT>=8 才读; 地址待定,是,—,门锁 PLC 状态触点
+common,DI,,DOOR8_REQ_BTN,安全门8 申请开门,操作台,预留; 地址待定,是,—,申请按钮
+common,DO,,DOOR8_UNLOCK,安全门8 解锁线圈,欧姆龙门锁,预留; 得电解锁 失电锁定; 地址待定,是,清零,—
+common,DO,,DOOR8_REQ_LAMP,安全门8 申请指示灯,操作台,预留; 地址待定,否,清零,—
 common,DI,,FIELDBUS_OK,远程IO与伺服在线(汇总),EIP 远程 IO/SV660N,设备诊断汇总写入; 未接前恒 0,是,—,设备诊断

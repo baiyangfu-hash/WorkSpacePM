@@ -142,9 +142,13 @@ class Parser:
 
     # 功能块
     def parse_fb(self) -> dict[str, Any]:
-        self.expect("FUNCTION_BLOCK")
+        is_func = self.at_word("FUNCTION")
+        self.take()  # FUNCTION_BLOCK / FUNCTION
         name = self.take().text
         decls: dict[str, list[tuple[str, TypeSpec, Any]]] = {}
+        if is_func:  # FUNCTION 名 : 返回类型 —— 返回值当作与函数同名的输出变量
+            self.expect(":")
+            decls["VAR_OUTPUT"] = [(name, self.parse_type(), None)]
         while True:
             if self.at_word("VAR_INPUT", "VAR_OUTPUT", "VAR_IN_OUT", "VAR_TEMP", "VAR"):
                 sect = self.take().text.upper()
@@ -160,9 +164,10 @@ class Parser:
             else:
                 break
         self.accept("BEGIN")
-        body = self.parse_block("END_FUNCTION_BLOCK")
-        self.expect("END_FUNCTION_BLOCK")
-        return {"name": name, "decls": decls, "body": body}
+        end = "END_FUNCTION" if is_func else "END_FUNCTION_BLOCK"
+        body = self.parse_block(end)
+        self.expect(end)
+        return {"name": name, "decls": decls, "body": body, "is_func": is_func}
 
     def parse_types(self) -> dict[str, list[tuple[str, TypeSpec, Any]]]:
         """TYPE name : STRUCT ... END_STRUCT; END_TYPE（一个文件可有多个）。"""
@@ -649,6 +654,14 @@ class Instance:
                 return len(args[0])
             if "_TO_" in name:
                 return args[0]
+            fc = self.sim.funcs.get(name)
+            if fc is not None:  # 用户 FC：每次调用新建实例，按引脚名或位置传参
+                inst = Instance(self.sim, fc)
+                inputs = [n for n, _, _ in fc["decls"].get("VAR_INPUT", [])]
+                for pos, (pname, _, _) in enumerate(node[2]):
+                    inst.vars[pname or inputs[pos]] = args[pos]
+                inst.call()
+                return inst.vars[fc["name"]]
             raise NameError(f"不支持的函数 {name}")
         raise TypeError(node)
 
@@ -660,6 +673,7 @@ class Sim:
         self.now_ms = 0
         self.fbs: dict[str, dict[str, Any]] = {}
         self.structs: dict[str, list[tuple[str, TypeSpec, Any]]] = {}
+        self.funcs: dict[str, dict[str, Any]] = {}  # 键为大写函数名
 
     def load(self, path: Path) -> None:
         src = path.read_text(encoding="utf-8")
@@ -668,7 +682,10 @@ class Sim:
             self.structs.update(parser.parse_types())
             return
         fb = parser.parse_fb()
-        self.fbs[fb["name"]] = fb
+        if fb["is_func"]:
+            self.funcs[fb["name"].upper()] = fb
+        else:
+            self.fbs[fb["name"]] = fb
 
     def new_struct(self, type_name: str) -> dict[str, Any]:
         holder = Instance.__new__(Instance)  # 只借用初值求值
