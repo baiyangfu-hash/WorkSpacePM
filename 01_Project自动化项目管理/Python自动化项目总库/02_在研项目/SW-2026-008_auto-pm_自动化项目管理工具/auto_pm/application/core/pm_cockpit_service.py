@@ -6,7 +6,9 @@ import hashlib
 import logging
 import secrets
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -33,16 +35,24 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionFailureCode,
     WorktreeMode,
 )
-from auto_pm.contracts.mission import Mission, MissionState
+from auto_pm.contracts.mission import (
+    OPEN_MISSION_SOFT_LIMIT,
+    PARKED_STALE_DAYS,
+    Mission,
+    MissionBoard,
+    MissionState,
+)
 from auto_pm.contracts.pm_cockpit import (
     CockpitUserAction,
     PmCockpitActivity,
+    PmCockpitBoardCard,
     PmCockpitCheckpointEvidence,
     PmCockpitCompletion,
     PmCockpitCompletionState,
     PmCockpitEvidence,
     PmCockpitEvidenceCurrency,
     PmCockpitFocus,
+    PmCockpitMissionBoard,
     PmCockpitPendingScopeCard,
     PmCockpitProjectCard,
     PmCockpitResume,
@@ -98,6 +108,7 @@ _CAPABILITY_DECLARED = (
     "挂起与拿回：支持，只在命令行做（pm park / pm unpark / pm switch），拿回哪张只听用户的；"
     "运行中插队：不支持（能力查询 runtime-capabilities.v2）。驾驶舱只显示四栏，不提供切换按钮。"
 )
+_BOARD_CLOSED_SHOWN = 5
 _CAPABILITY_UNVERIFIED = "挂起与插队的能力查询未能确认；为安全起见这些操作保持停用，驾驶舱不会假装挂起。"
 
 
@@ -118,6 +129,7 @@ class PmCockpitService:
         facade: PmFacadeService | None = None,
         approver: str = "",
         control_root: str | Path | None = None,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         # ``workspace_root`` is where the GUI was started (the execution root, possibly a linked candidate);
         # ``control_root`` is the governed main root that owns the registry, the store and every write.
@@ -133,6 +145,7 @@ class PmCockpitService:
         self._closure_service = closure_service
         self._facade_override = facade
         self._approver = approver.strip()
+        self._now = now or (lambda: datetime.now(UTC))
 
     def _real_facade(self) -> PmFacadeService:
         """The facade of the governed control root; execution runs against the GUI's own root."""
@@ -149,6 +162,7 @@ class PmCockpitService:
         cards: list[PmCockpitProjectCard] = []
         activities: list[PmCockpitActivity] = []
         pending: list[PmCockpitPendingScopeCard] = []
+        boards: list[PmCockpitMissionBoard] = []
         notices: list[str] = [store_note] if store_note else []
         for mapping in mappings:
             if store_note:
@@ -159,6 +173,7 @@ class PmCockpitService:
                 cards.append(self._card(mapping, facts))
                 activities.extend(self._activities(mapping.project_id, facts))
                 pending.extend(self._pending_cards(mapping, facts, notices))
+                boards.append(self._board(mapping, self._store.list_missions_by_board(mapping.project_id)))
             except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
                 note = "连续性记录无法安全读取；驾驶舱没有尝试修复或重建它。"
                 notices.append(f"{mapping.project_id}: {note}")
@@ -168,7 +183,50 @@ class PmCockpitService:
             projects=tuple(cards),
             activities=tuple(activities),
             pending_cards=tuple(pending),
+            boards=tuple(boards),
             notices=tuple(dict.fromkeys(notices)),
+        )
+
+    def _board(self, mapping: WorkspaceProjectMapping, board: MissionBoard) -> PmCockpitMissionBoard:
+        """The four columns, read-only (TD-071 card 4): who is in hand, who waits for you, who is put down and why."""
+
+        now = self._now()
+
+        def plain(mission: Mission) -> PmCockpitBoardCard:
+            return PmCockpitBoardCard(
+                mission_id=mission.mission_id, title=mission.title, state_label=self._milestone(mission)
+            )
+
+        parked = []
+        for item in board.parked:
+            days = (now - item.park.parked_at).total_seconds() / 86_400
+            stale = days > PARKED_STALE_DAYS
+            note = (
+                f"为什么放下：{item.park.reason}；断点：{item.checkpoint_summary}；"
+                f"放下于 {ContinuityStore.local_time_text(item.park.parked_at.isoformat())}"
+            )
+            if stale:
+                note += f"；已搁着超过 {PARKED_STALE_DAYS} 天，请决定拿回还是作废"
+            parked.append(
+                PmCockpitBoardCard(
+                    mission_id=item.mission.mission_id,
+                    title=item.mission.title,
+                    state_label=self._milestone(item.mission),
+                    note=note,
+                    stale=stale,
+                )
+            )
+        shown_closed = board.closed[:_BOARD_CLOSED_SHOWN]
+        return PmCockpitMissionBoard(
+            project_id=mapping.project_id,
+            project_name=self._project_name(mapping),
+            open_count=board.open_count,
+            open_limit=OPEN_MISSION_SOFT_LIMIT,
+            active=tuple(plain(mission) for mission in board.active),
+            waiting=tuple(plain(mission) for mission in board.waiting),
+            parked=tuple(parked),
+            closed=tuple(plain(mission) for mission in shown_closed),
+            closed_hidden=len(board.closed) - len(shown_closed),
         )
 
     @staticmethod

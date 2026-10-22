@@ -55,6 +55,7 @@ ApplicationWindow {
         activities: root.snapshot.activities || []
         notices: root.snapshot.notices || []
         pendingCards: root.snapshot.pending_cards || []
+        boards: root.snapshot.boards || []
         planningDraft: root.planningDraft
         statusMessage: root.statusMessage
         onDraftInputChanged: root.planningDraft = null
