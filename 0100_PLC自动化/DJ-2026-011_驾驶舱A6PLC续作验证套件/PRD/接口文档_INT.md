@@ -2,7 +2,7 @@
 
 > 项目编号: DJ-2026-011
 > 项目名称: 驾驶舱A6PLC续作验证套件
-> 版本: V1.0.0
+> 版本: V1.1.0
 > 创建日期: 2026-09-10 16:11:55
 > 项目类型: PLC 公共库验证项目（扁平结构）
 
@@ -21,6 +21,8 @@
 | I-005 | 运行指示 | 数字量输出 | OB1→外部 | 测试进行中闪烁，空闲时常亮 |
 | I-006 | 测试结果数据块 | 数据块 | OB1→上位机 | DB1 存放步骤号、通过数、失败数、失败步骤号 |
 | I-007 | SysLib 调用 | 库引用 | OB1→SysLib | 通过 libraries 配置引用公共库 |
+| I-008 | 报警复位 | 内部符号 | 测试/上位机→FB | `DB_AlarmSummaryTest.s_bReset` 上升沿复位报警锁存 |
+| I-009 | 报警灯 | 内部符号 | FB→测试/上位机 | `DB_AlarmSummaryTest.s_bAlarmLamp` 报警锁存指示灯 |
 
 ## 2. 数字量输入（DI）
 
@@ -38,6 +40,17 @@
 | doFailed | %Q0.1 | 红色指示灯 | 任一用例失败时点亮并保持 | 需手动复位清除 |
 | doRunning | %Q0.2 | 黄色指示灯 | 测试进行中 0.5Hz 闪烁，空闲时常亮 | 表征 PLC 运行状态 |
 | doStepPulse | %Q0.3 | 示波器/记录仪 | 每完成一条用例输出一个周期窄脉冲 | 用于外部计数校验 |
+
+### 3.1 报警汇总信号（验证项目内部符号）
+
+本验证项目不新增物理 DI/DO，报警汇总的输入输出均通过 `DB_AlarmSummaryTest` 符号暴露，由 `.scltest` 激励与断言，也可由上位机读写。
+
+| 信号名称 | 符号地址 | 方向 | 信号说明 | 备注 |
+|---------|---------|------|---------|------|
+| s_arrAlarms | DB_AlarmSummaryTest.s_arrAlarms | 输入→FB | 16 路报警输入 | 第 1 路由 OB1 接双手启动同步故障 |
+| s_bReset | DB_AlarmSummaryTest.s_bReset | 输入→FB | 报警复位按钮 | 上升沿有效 |
+| s_bAlarmLamp | DB_AlarmSummaryTest.s_bAlarmLamp | FB→输出 | 报警灯 | 报警锁存后保持点亮 |
+| s_bAnyAlarm | DB_AlarmSummaryTest.s_bAnyAlarm | FB→输出 | 任意报警汇总 | 当前任一路报警为 TRUE |
 
 ## 4. 模拟量输入（AI）
 
@@ -81,6 +94,18 @@
 - 格式：`TC-<FB编号>-<序号>`，如 `TC-001-01` 表示 FB-001 的第 1 条用例
 - 每条用例对应 DB1 中一条记录，含用例编号、预期值、实际值、判定结果
 
+### 7.3 FB 实例与调用约定
+
+| 实例名 | 类型 | 所在 DB | 调用位置 | 说明 |
+|--------|------|---------|---------|------|
+| fb_TwoHandStart | FB_1091_TwoHandStart_DJ2026011 | DB_TwoHandStartTest | OB1 | 双手启动功能块实例 |
+| fb_AlarmSummary | FB_2001_AlarmSummary_DJ2026011 | DB_AlarmSummaryTest | OB1 | 报警汇总功能块实例 |
+
+- 报警汇总的 `i_arrAlarms` 为 `ARRAY[1..16] OF BOOL`，下标从 1 开始，调用方不得传入长度不足的数组。
+- 复位按钮传电平信号，功能块内部取上升沿；禁止外部再叠加沿检测。
+- OB1 每个扫描周期先把 `DB_TwoHandStartTest.s_bSyncFault` 写入 `DB_AlarmSummaryTest.s_arrAlarms[1]`，再调用报警汇总。
+- 第 1 路之外的报警位由测试或上位机直接写入 `DB_AlarmSummaryTest.s_arrAlarms[2..16]`。
+
 ## 8. 版本兼容性说明
 
 - 测试项目与 SysLib 通过语义化版本绑定，主版本号不一致时不允许执行
@@ -92,3 +117,4 @@
 | 日期 | 版本 | 变更内容 | 变更人 |
 |------|------|---------|--------|
 | 2026-09-10 16:11:55 | V1.0.0 | 初始版本，由 plc-test-suite 模板生成 | auto-pm |
+| 2026-10-22 | V1.1.0 | 新增 I-008/I-009、报警汇总内部符号表与 FB 实例调用约定 | trae |

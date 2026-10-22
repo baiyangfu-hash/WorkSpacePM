@@ -1,0 +1,208 @@
+// ============================================================================
+// alarm_summary_test.scltest - FB_2001_AlarmSummary_DJ2026011 功能测试
+// ============================================================================
+// 被测对象: FB_0001/FB_2001_AlarmSummary_DJ2026011 (实例在 DB_AlarmSummaryTest)
+// 报警输入: s_arrAlarms[1..16]; 第 1 路由 OB1 接双手启动同步故障,
+//           第 2..16 路由本测试直接注入。
+// 锁存语义: 任意报警点亮并保持; 报警消失后按复位熄灭; 报警仍在时复位无效。
+//
+// 测试覆盖 (LSP-905 §4.8 四标段):
+//   test1 - 基本: 无报警时按复位 -> 灯保持熄灭
+//   test2 - 基本: 任一路报警 -> 灯点亮
+//   test3 - 状态转移: 报警消失 -> 灯锁存保持, 按复位后熄灭
+//   test4 - 异常防错: 报警仍在时按复位 -> 灯不熄灭
+//   test5 - 边界: 第 16 路报警 -> 同样点亮并锁存
+//   test6 - 集成: 双手启动同步故障经第 1 路输入点亮报警灯
+// ============================================================================
+
+// ============================================================================
+// test1: 无报警时按复位 -> 报警灯保持熄灭
+// ============================================================================
+TEST_CASE "test1_no_alarm_reset_keeps_lamp_off"
+    SET DB_TwoHandStartTest.s_bStartLeft := FALSE;
+    SET DB_TwoHandStartTest.s_bStartRight := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[2] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[3] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[4] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[16] := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_AlarmSummaryTest.s_bAnyAlarm = FALSE;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = FALSE;
+END_TEST_CASE
+
+// ============================================================================
+// test2: 任一路报警 (第 2 路) -> 报警灯点亮
+// ============================================================================
+TEST_CASE "test2_any_alarm_lights_lamp"
+    SET DB_TwoHandStartTest.s_bStartLeft := FALSE;
+    SET DB_TwoHandStartTest.s_bStartRight := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[3] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[4] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[16] := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_AlarmSummaryTest.s_arrAlarms[2] := TRUE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_AlarmSummaryTest.s_bAnyAlarm = TRUE;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+END_TEST_CASE
+
+// ============================================================================
+// test3: 报警消失后 -> 灯锁存保持; 按复位 -> 熄灭
+// ============================================================================
+TEST_CASE "test3_latch_holds_until_reset"
+    SET DB_TwoHandStartTest.s_bStartLeft := FALSE;
+    SET DB_TwoHandStartTest.s_bStartRight := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[3] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[4] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[16] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[2] := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_AlarmSummaryTest.s_arrAlarms[2] := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+
+    SET DB_AlarmSummaryTest.s_arrAlarms[2] := FALSE;
+    WAIT_CYCLES 2;
+    ASSERT DB_AlarmSummaryTest.s_bAnyAlarm = FALSE;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = FALSE;
+END_TEST_CASE
+
+// ============================================================================
+// test4: 报警仍在时按复位 -> 灯不熄灭; 报警消失后再复位 -> 熄灭
+// ============================================================================
+TEST_CASE "test4_reset_ignored_while_alarm_present"
+    SET DB_TwoHandStartTest.s_bStartLeft := FALSE;
+    SET DB_TwoHandStartTest.s_bStartRight := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[2] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[4] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[16] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[3] := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_AlarmSummaryTest.s_arrAlarms[3] := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+
+    SET DB_AlarmSummaryTest.s_arrAlarms[3] := FALSE;
+    WAIT_CYCLES 2;
+    ASSERT DB_AlarmSummaryTest.s_bAnyAlarm = FALSE;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = FALSE;
+END_TEST_CASE
+
+// ============================================================================
+// test5: 第 16 路边界报警 -> 点亮并锁存, 复位后熄灭
+// ============================================================================
+TEST_CASE "test5_last_channel_lights_and_latches"
+    SET DB_TwoHandStartTest.s_bStartLeft := FALSE;
+    SET DB_TwoHandStartTest.s_bStartRight := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[2] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[3] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[4] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[16] := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_AlarmSummaryTest.s_arrAlarms[16] := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT DB_AlarmSummaryTest.s_bAnyAlarm = TRUE;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+
+    SET DB_AlarmSummaryTest.s_arrAlarms[16] := FALSE;
+    WAIT_CYCLES 2;
+    ASSERT DB_AlarmSummaryTest.s_bAnyAlarm = FALSE;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = FALSE;
+END_TEST_CASE
+
+// ============================================================================
+// test6: 双手启动同步故障经第 1 路输入 -> 点亮报警灯; 故障消失后锁存
+// ============================================================================
+TEST_CASE "test6_sync_fault_lights_lamp"
+    SET DB_TwoHandStartTest.s_bStartLeft := FALSE;
+    SET DB_TwoHandStartTest.s_bStartRight := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[2] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[3] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[4] := FALSE;
+    SET DB_AlarmSummaryTest.s_arrAlarms[16] := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    // 单手持按超过 500 周期 -> 双手启动功能块置同步故障
+    SET DB_TwoHandStartTest.s_bStartLeft := TRUE;
+    SET DB_TwoHandStartTest.s_bStartRight := FALSE;
+    WAIT_CYCLES 600;
+
+    ASSERT DB_TwoHandStartTest.s_bSyncFault = TRUE;
+    ASSERT DB_AlarmSummaryTest.s_bAnyAlarm = TRUE;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+
+    // 松开按钮 -> 同步故障消失, 报警灯仍锁存
+    SET DB_TwoHandStartTest.s_bStartLeft := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_TwoHandStartTest.s_bSyncFault = FALSE;
+    ASSERT DB_AlarmSummaryTest.s_bAnyAlarm = FALSE;
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = TRUE;
+
+    // 按复位 -> 报警灯熄灭
+    SET DB_AlarmSummaryTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_AlarmSummaryTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_AlarmSummaryTest.s_bAlarmLamp = FALSE;
+END_TEST_CASE

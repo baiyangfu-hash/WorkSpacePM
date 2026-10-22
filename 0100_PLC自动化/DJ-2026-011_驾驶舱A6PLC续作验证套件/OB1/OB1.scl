@@ -2,7 +2,8 @@
 // 模块名称: OB1 (Main Organization Block)
 // 项目: DJ-2026-011 驾驶舱A6PLC续作验证套件
 // 模块功能: 双手启动功能块调度 (FB_1091_TwoHandStart_DJ2026011)
-//           激励与结果均经 DB_TwoHandStartTest 暴露, 供 .scltest 测试步骤读写
+//           报警汇总功能块调度 (FB_2001_AlarmSummary_DJ2026011)
+//           激励与结果均经测试 DB 暴露, 供 .scltest 测试步骤读写
 // 遵守规范: Siemens LSP (LSP-903/905/906)
 // ==============================================================================
 
@@ -25,5 +26,17 @@ BEGIN
         i_dSyncWindowMs := DB_TwoHandStartTest.s_dSyncWindowMs,
         o_bStartOutput => DB_TwoHandStartTest.s_bStartOutput,
         o_bSyncFault => DB_TwoHandStartTest.s_bSyncFault);
+
+    // --------------------------------------------------------------------------
+    // 报警汇总功能块调度: 第 1 路接双手启动同步故障, 第 2..16 路保留给测试注入;
+    // 任意报警点亮报警灯并锁存, 报警消失后按复位熄灭, 报警仍在时复位无效。
+    // 测试步骤见 Test/alarm_summary_test.scltest
+    // --------------------------------------------------------------------------
+    DB_AlarmSummaryTest.s_arrAlarms[1] := DB_TwoHandStartTest.s_bSyncFault;
+    DB_AlarmSummaryTest.fb_AlarmSummary(
+        i_arrAlarms := DB_AlarmSummaryTest.s_arrAlarms,
+        i_bReset := DB_AlarmSummaryTest.s_bReset,
+        o_bAlarmLamp => DB_AlarmSummaryTest.s_bAlarmLamp,
+        o_bAnyAlarm => DB_AlarmSummaryTest.s_bAnyAlarm);
 
 END_ORGANIZATION_BLOCK

@@ -2,7 +2,7 @@
 
 > 项目编号: DJ-2026-011
 > 项目名称: 驾驶舱A6PLC续作验证套件
-> 版本: V1.0.0
+> 版本: V1.1.0
 > 创建日期: 2026-09-10 16:11:55
 > 项目类型: PLC 公共库验证项目（扁平结构）
 
@@ -120,7 +120,60 @@ OB1 采用"区域化"布局，遵循 LSP-905 规范：
 2. **明细**：逐条列出用例编号、预期、实际、判定、耗时周期数
 3. **缺陷**：失败用例的失败原因分类（时序超差、数值超差、状态错误、异常停机）
 
-## 6. 变更记录
+## 6. 报警汇总设计（F-007）
+
+### 6.1 设计目标
+
+在 OB1 现有双手启动验证之外，新增一个独立的报警汇总功能块，实现“任意报警点亮、锁存保持、无报警时复位熄灭、报警仍在时复位无效”的行为。报警汇总不与双手启动逻辑耦合，只通过第 1 路报警输入接收其同步故障。
+
+### 6.2 功能块接口
+
+功能块：`FB_2001_AlarmSummary_DJ2026011`（LSP-905 报警管理段 2001~2999）。
+
+| 参数名 | 方向 | 类型 | 说明 |
+|--------|------|------|------|
+| i_arrAlarms | VAR_INPUT | ARRAY[1..16] OF BOOL | 16 路报警输入，任意一路 TRUE 表示有报警 |
+| i_bReset | VAR_INPUT | BOOL | 复位按钮，上升沿有效，按下=TRUE |
+| o_bAlarmLamp | VAR_OUTPUT | BOOL | 报警灯输出，报警锁存后保持点亮 |
+| o_bAnyAlarm | VAR_OUTPUT | BOOL | 报警汇总结果，当前任一路报警为 TRUE |
+
+静态变量：`fb_rTrigReset`（FB_R_TRIG，复位沿检测）、`s_bResetPulse`（单周期复位脉冲）、`s_bAlarmLatch`（锁存状态）。临时变量：`temp_iIndex`（遍历索引）。
+
+### 6.3 锁存逻辑
+
+1. 每周期遍历 `i_arrAlarms[1..16]`，任意一路为 TRUE 时 `o_bAnyAlarm` 置 TRUE。
+2. `i_bReset` 经 `FB_R_TRIG` 取上升沿，得到单周期脉冲 `s_bResetPulse`。
+3. 报警优先：`o_bAnyAlarm` 为 TRUE 时置位 `s_bAlarmLatch`；仅当 `o_bAnyAlarm` 为 FALSE 且 `s_bResetPulse` 为 TRUE 时清零。
+4. `o_bAlarmLamp` 输出 `s_bAlarmLatch`，因此报警消失后灯仍亮，直到复位；报警仍在时复位被忽略。
+
+### 6.4 OB1 集成与数据块映射
+
+- 新建 `DB_AlarmSummaryTest`，内含 `fb_AlarmSummary` 实例、`s_arrAlarms[1..16]` 激励、`s_bReset` 复位激励、`s_bAlarmLamp` 与 `s_bAnyAlarm` 结果。
+- OB1 在双手启动调用之后，先执行 `DB_AlarmSummaryTest.s_arrAlarms[1] := DB_TwoHandStartTest.s_bSyncFault;`，再调用 `DB_AlarmSummaryTest.fb_AlarmSummary(...)`。
+- 第 2 至 16 路报警位不由 OB1 写入，保留给 `.scltest` 激励与后续扩展。
+
+### 6.5 测试用例设计
+
+新建 `Test/alarm_summary_test.scltest`，包含 6 条用例：
+
+| 用例 | 场景 | 预期 |
+|------|------|------|
+| test1 | 无报警时按复位 | 报警灯保持熄灭 |
+| test2 | 第 2 路报警 | 报警灯点亮 |
+| test3 | 报警消失后锁存 | 灯保持点亮，按复位后熄灭 |
+| test4 | 报警仍在时按复位 | 灯不熄灭；报警消失后再复位才熄灭 |
+| test5 | 第 16 路边界报警 | 灯点亮并锁存，复位后熄灭 |
+| test6 | 双手启动同步故障经第 1 路联动 | 灯点亮并锁存，故障消失后复位熄灭 |
+
+### 6.6 边界与异常处理
+
+- 数组下标固定为 1..16，遍历范围与数组声明一致，不存在越界访问。
+- 复位只在上升沿生效，复位按钮长按不会反复清零。
+- 报警与复位同时有效时按报警优先处理，灯保持点亮。
+- 首扫描时 `s_bAlarmLatch` 默认为 FALSE，无报警则灯不亮。
+
+## 7. 变更记录
 | 日期 | 版本 | 变更内容 | 变更人 |
 |------|------|---------|--------|
 | 2026-09-10 16:11:55 | V1.0.0 | 初始版本，由 plc-test-suite 模板生成 | auto-pm |
+| 2026-10-22 | V1.1.0 | 新增第 6 节报警汇总设计（F-007） | trae |
