@@ -19,6 +19,7 @@ from click.testing import CliRunner, Result
 
 from auto_pm.contracts.pm_facade import PlanningDraft, PmIntent
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from tests.plan_checklist_support import checklist_args
 
 # Reuse the existing PM CLI fixtures; imported dynamically so that this file is type-checked on its own.
 _pm_facade_tests = importlib.import_module("tests.cli.test_pm_facade")
@@ -33,6 +34,7 @@ CONFIRMATION = "user-confirmation:chat-20261005-c1"
 SCOPE = [
     "--scope", "auto_pm/example.py", "--risk", "scope drift", "--non-goal", "no execution before approval",
     "--adapter", "codex", "--approved-model", "gpt-approved", "--declared-dirty", "auto_pm/example.py",
+    *checklist_args(original="登录页有时候是白的，刷新才好"),
 ]
 KIND_NATURE = {"iteration": "OPT", "bug": "DEF", "change": "REQ", "urgent": "EMRG", "debt": "OPT"}
 

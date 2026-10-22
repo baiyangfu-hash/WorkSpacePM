@@ -69,6 +69,7 @@ from tests.core.test_pm_run_e2e import (
     _build_workspace as build_python_workspace,
 )
 from tests.e2e import test_pmf_plc as plc
+from tests.plan_checklist_support import full_checklist
 from tests.qml.test_boss_cockpit_view import _items_named, _texts
 
 if TYPE_CHECKING:
@@ -360,9 +361,9 @@ def _drive(
         submitted = facade.submit_planning_scope_card(
             draft.request_id,
             scope_paths=scope,
-            risks=("none",),
+            risks=("改错文件导致回归",),
             non_goals=("no refactor", "no dependency change", "no hardware download"),
-            execution_grant=PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX, approved_model=MODEL, declared_dirty_paths=scope),
+            execution_grant=PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX, approved_model=MODEL, declared_dirty_paths=scope, plan_checklist=full_checklist(len(acceptance))),
             submitted_by="PM (Claude)",
         )
     win.refresh()
