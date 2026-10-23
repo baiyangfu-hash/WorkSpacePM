@@ -6,6 +6,7 @@
 //   2. 新增 FB_1011_CylinderControl 实例(气缸控制测试)
 //   3. 新增 FB_1012_ConveyorMotor 实例(输送电机测试)
 //   4. 新增 FB_1014_StationConveyor 实例(工站输送机测试)
+//   6. 新增 FB_1030_SafetyManager 实例(安全管理块测试, 2026-10-22)
 //   5. HMI按钮数组用于测试驱动信号注入
 //
 // 变更记录:
@@ -121,6 +122,33 @@ DATA_BLOCK GlobalVars
         st_dwProductionCount : DWORD;
         st_bInfeedActive : BOOL;
         st_bIntAlarmMem : BOOL;
+
+        // =========================================================================
+        // 第七部分: FB_1030_SafetyManager 测试实例 (2026-10-22, 安全区, 分支 claude/safety-manager-card004)
+        // =========================================================================
+        SafetyMgr : FB_1030_SafetyManager;
+
+        // FB_1030 测试输入信号 (默认: 继电器正常、急停/光栅/门正常、总线在线、手动)
+        sm_arrSafetyFault : ARRAY[0..3] OF BOOL;
+        sm_arrEStopOk : ARRAY[0..7] OF BOOL := [8(TRUE)];
+        sm_arrCurtainOk : ARRAY[0..7] OF BOOL := [8(TRUE)];
+        sm_arrDoorClosed : ARRAY[0..7] OF BOOL := [8(TRUE)];
+        sm_bFieldbusOk : BOOL := TRUE;
+        sm_bResetBtn : BOOL := FALSE;
+        sm_bStartBtn : BOOL := FALSE;
+        sm_bAutoMode : BOOL := FALSE;
+        sm_bMotionStopped : BOOL := FALSE;
+        sm_arrDoorReqBtn : ARRAY[0..7] OF BOOL;
+
+        // FB_1030 测试输出信号
+        sm_bSafeToRun : BOOL;
+        sm_bStopNow : BOOL;
+        sm_bRunResetPulse : BOOL;
+        sm_bStartPulse : BOOL;
+        sm_iState : INT;
+        sm_dwAlarm : DWORD;
+        sm_arrDoorUnlock : ARRAY[0..7] OF BOOL;
+        sm_arrDoorLamp : ARRAY[0..7] OF BOOL;
 
     END_VAR
 END_DATA_BLOCK

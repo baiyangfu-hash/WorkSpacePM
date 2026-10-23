@@ -5,13 +5,14 @@ FUNCTION_BLOCK FB_3001_ExternalInteraction
  * 遵循规范: STD-820 (8步握手 + 4s ON / 4s OFF 心跳)
  * ============================================================================== *)
 VAR_INPUT
-    i_bEnable           : BOOL;         // 功能块总使能
+    i_bEnable           : BOOL;         // 功能块总使能 (通讯与心跳; 0 = 心跳也停, 对方判断线)
+    i_bSafeToRun        : BOOL;         // 运行许可 (OB1 接 FB_1030 q_bSafeToRun); 0 = 心跳照发, 只撤握手许可, CARD-DJ-2026-009-004
     i_bAutoMode         : BOOL;         // 自动运行模式
-    i_bResetCmd         : BOOL;         // 故障复位指令
+    i_bResetCmd         : BOOL;         // 故障复位指令 (OB1: FB_1030 运行复位脉冲, 或运行许可中的普通复位, CARD-DJ-2026-009-004)
     i_bMachineReadyIn   : BOOL;         // 本机进料就绪 (工位空闲)
     i_bMachineReadyOut  : BOOL;         // 本机出料就绪 (加工完成)
     i_bInfeedArrivedSens: BOOL;         // 本机进料到位光电传感器
-    i_sSendModuleID     : STRING[32];   // 本机待发出的组件 ID
+    i_bProductPresent   : BOOL;         // 本机有产品 (产品检测传感器, CARD-DJ-2026-009-003)
 END_VAR
 
 VAR_OUTPUT
@@ -24,25 +25,67 @@ VAR_OUTPUT
 END_VAR
 
 VAR_IN_OUT
-    io_stExternal       : ST_ExternalDevice;    // STD-820 通用外部对接数据总线
+    io_stExternal       : ST_ExternalDevice;  // STD-820 通用外部对接数据总线
+    io_sMachineModuleID : STRING[32];         // 本机 ID (组件 ID 第 2 格, 全局变量须断电保持 RETAIN)
+    io_stIdHmi          : ST_ModuleIdHmi;     // 组件 ID 人工操作与时间参数 (HMI)
 END_VAR
 
 VAR
     // --- STD-820 心跳: 4s ON / 4s OFF 方波 + 12s 超时监视 (LSP-903: FB_TON + DINT 毫秒) ---
-    s_dHeartbeatPulse   : DINT := 4000;    // 心跳半周期 4000ms
-    s_dHbTimeoutMs      : DINT := 12000;   // 心跳超时阈值 12000ms
+    // 半周期与超时阈值已改为 VAR CONSTANT HB_HALF_MS / HB_TIMEOUT_MS (规范 0.4/9, CARD-DJ-2026-009-004)
     s_tHbToggle         : FB_TON;          // 心跳翻转定时器
     s_tUpTimeout        : FB_TON;          // 上游心跳超时定时器
     s_tDownTimeout      : FB_TON;          // 下游心跳超时定时器
 
+    s_bHbState          : BOOL := FALSE;   // 本机心跳电平 (每 4s 翻转一次 = 4s ON / 4s OFF 方波)
     s_bLastUpHeartbeat  : BOOL := FALSE;
     s_bLastDownHeartbeat: BOOL := FALSE;
 
     s_iInfeedStep       : INT  := 0;
     s_iOutfeedStep      : INT  := 0;
+    s_wAbortLatch       : WORD := 16#0000; // 握手中途中止记录 (保持到复位)
+    s_bInfeedLock       : BOOL := FALSE;   // 自动作业中进料被中止, 需人工复位才能重新握手
+    s_bOutfeedLock      : BOOL := FALSE;   // 自动作业中出料被中止, 需人工复位才能重新握手
+    s_bResetPrev        : BOOL := FALSE;   // 上一周期复位指令 (清锁只认上升沿)
+
+    // --- 组件 ID 三格存储 (CARD-DJ-2026-009-003, 规则 R1~R6) ---
+    s_sInfeedId         : STRING[32] := ''; // 进料第 10 步确认收到的上游 ID (到位时拷入本机 ID)
+    s_wIdCheck          : WORD := 16#0000;  // FC_3003 检查结果 (0 = 合格)
+    s_bIdRelease        : BOOL := FALSE;    // HMI 人工放行: 本次进料不检查 ID
+    s_bIdCheckReq       : BOOL := FALSE;    // 握手中途中止后 ID 待人工核对 (HMI 拷入/补录/清空后清)
+    s_tLeaveTimer       : FB_TON;           // 出料中检测不到产品计时 (R3 第 2 种)
+    s_tIdleTimer        : FB_TON;           // 自动作业中长时间无产品计时 (R6)
+END_VAR
+
+VAR_TEMP
+    t_dLeaveMs          : DINT;             // 产品离开判定时间 (ms)
+    t_dIdleMs           : DINT;             // 无产品自动清本机 ID 时间 (ms)
+    t_bIdWait           : BOOL;             // 进料第 20 步因 ID 不合格停住
+END_VAR
+
+VAR CONSTANT
+    // --- q_wErrorCode 位定义 (CARD-DJ-2026-009-002) ---
+    ERR_INFEED_ABORT    : WORD := 16#0001;  // 进料握手第 10~40 步因通讯故障中止 (保持到复位)
+    ERR_OUTFEED_ABORT   : WORD := 16#0002;  // 出料握手第 10~40 步因通讯故障中止 (保持到复位)
+    ERR_WAIT_RESET      : WORD := 16#0004;  // 自动作业中被中止, 等待人工复位 (复位后清)
+    ERR_UP_COM          : WORD := 16#0010;  // 上游通讯故障 (实时)
+    ERR_DOWN_COM        : WORD := 16#0020;  // 下游通讯故障 (实时)
+    ERR_ID_EMPTY        : WORD := 16#0040;  // 进料第 20 步上游 ID 不合格 (现只判空), 等人工放行或补录 (实时)
+    ERR_ID_CHECK        : WORD := 16#0080;  // 握手中途中止, ID 待人工核对 (HMI 拷入/补录/清空后清)
+
+    // --- 组件 ID 规则参数 (CARD-DJ-2026-009-003, 用户 2026-10-20 答复) ---
+    ID_CHECK_OK         : WORD := 16#0000;  // FC_3003 返回 0 = 合格
+    DEF_LEAVE_MS        : DINT := 2000;     // 产品离开判定时间设定为 0 时按 2000ms
+    DEF_IDLE_MS         : DINT := 20000;    // 无产品自动清本机 ID 时间设定为 0 时按 20000ms (暂定)
+    STEP_ID_INVOLVED    : INT  := 20;       // 第 20 步起中止的握手, ID 已交接一半, 要人工核对
+
+    // --- 心跳与断线判定时间 (安全区常量, HMI 不能改; 改值要签字. 规范 0.4/9, CARD-DJ-2026-009-004) ---
+    HB_HALF_MS          : DINT := 4000;     // 心跳半周期 4000ms (4s ON / 4s OFF)
+    HB_TIMEOUT_MS       : DINT := 12000;    // 心跳超时阈值 12000ms (12 s 内保持旧值, 超时判断线)
 END_VAR
 
 BEGIN
+    // @安全区 开始：心跳/超时定时器, 复位清锁 (只认上升沿, 通讯恢复后)
     // --- 定时器顶部无条件批量调用 (LSP-906/903) ---
     s_tHbToggle(IN := s_tHbToggle.IN, PT := s_tHbToggle.PT,
                 Q => s_tHbToggle.Q, ET => s_tHbToggle.ET);
@@ -50,38 +93,143 @@ BEGIN
                  Q => s_tUpTimeout.Q, ET => s_tUpTimeout.ET);
     s_tDownTimeout(IN := s_tDownTimeout.IN, PT := s_tDownTimeout.PT,
                    Q => s_tDownTimeout.Q, ET => s_tDownTimeout.ET);
+    s_tLeaveTimer(IN := s_tLeaveTimer.IN, PT := s_tLeaveTimer.PT,
+                  Q => s_tLeaveTimer.Q, ET => s_tLeaveTimer.ET);
+    s_tIdleTimer(IN := s_tIdleTimer.IN, PT := s_tIdleTimer.PT,
+                 Q => s_tIdleTimer.Q, ET => s_tIdleTimer.ET);
+
+    // 完成信号只保持一个扫描周期 (原来置 1 后从不清 0)
+    q_bUpstreamDone := FALSE;
+    q_bDownstreamDone := FALSE;
+    t_bIdWait := FALSE;
+
+    // 时间参数: 设定为 0 (或负数) 时用默认值. 共享库 FB_TON V3.0.0 起按真实毫秒计时
+    t_dLeaveMs := io_stIdHmi.dLeaveTimeMs;
+    IF t_dLeaveMs <= 0 THEN
+        t_dLeaveMs := DEF_LEAVE_MS;
+    END_IF;
+    t_dIdleMs := io_stIdHmi.dIdleClearMs;
+    IF t_dIdleMs <= 0 THEN
+        t_dIdleMs := DEF_IDLE_MS;
+    END_IF;
 
     (* 0. 复位处理 *)
     IF i_bResetCmd THEN
+        // 自动作业中断线留下的锁: 只有通讯已恢复 (上一周期无通讯故障) 时按下复位的那一下才清 (用户 2026-10-20 按建议批准)
+        // 只认上升沿: 按住不松时网线接回来, 锁不会被清掉
+        IF (NOT s_bResetPrev) AND (NOT io_stExternal.bAnyComFault) THEN
+            s_bInfeedLock := FALSE;
+            s_bOutfeedLock := FALSE;
+        END_IF;
         io_stExternal.stUpstream.bUpstreamComFault := FALSE;
         io_stExternal.stDownstream.bDownstreamComFault := FALSE;
         io_stExternal.bAnyComFault := FALSE;
         q_wErrorCode := 16#0000;
+        s_wAbortLatch := 16#0000;
         s_tUpTimeout.IN := FALSE;
         s_tDownTimeout.IN := FALSE;
     END_IF;
 
+    s_bResetPrev := i_bResetCmd;
+    // @安全区 结束
+
+    (* 0.1 组件 ID 人工操作, 不使能时也处理 (HMI 置 1, PLC 处理后清 0; PLC 不做权限, 权限由 HMI 权限动画处理) *)
+    IF io_stIdHmi.bCmdCopyFromUp THEN
+        // R4: 人工把上游 ID 拷入本机 ID
+        io_sMachineModuleID := io_stExternal.stUpstream.sRcvModuleID;
+        s_bIdCheckReq := FALSE;
+        io_stIdHmi.bCmdCopyFromUp := FALSE;
+    END_IF;
+    IF io_stIdHmi.bCmdManualEntry THEN
+        // R5: 人工补录 ID (补录内容本身也要检查合格); 进料第 20 步停住时一并作为本次进料的 ID
+        IF FC_3003_CheckModuleId(i_sModuleId := io_stIdHmi.sManualId) = ID_CHECK_OK THEN
+            io_sMachineModuleID := io_stIdHmi.sManualId;
+            IF s_iInfeedStep = 20 THEN
+                s_sInfeedId := io_stIdHmi.sManualId;
+            END_IF;
+            s_bIdCheckReq := FALSE;
+        END_IF;
+        io_stIdHmi.bCmdManualEntry := FALSE;
+    END_IF;
+    IF io_stIdHmi.bCmdRelease THEN
+        // R5: 人工放行, 只对正停在第 20 步的这一次进料有效
+        IF s_iInfeedStep = 20 THEN
+            s_bIdRelease := TRUE;
+        END_IF;
+        io_stIdHmi.bCmdRelease := FALSE;
+    END_IF;
+    IF io_stIdHmi.bCmdClear THEN
+        // R6: 人工清空本机 ID
+        io_sMachineModuleID := '';
+        s_bIdCheckReq := FALSE;
+        io_stIdHmi.bCmdClear := FALSE;
+    END_IF;
+
+    // @安全区 开始：失去使能撤销输出, 心跳方波与 12s 超时, 断线当拍撤销与人工复位锁, 运行许可丢失撤销握手
     IF NOT i_bEnable THEN
+        // 握手进行中失去使能 (通讯整体关闭), 按中途中止处理: 自动模式下要人工复位, 第 20 步起要人工核对 ID
+        IF s_iInfeedStep <> 0 THEN
+            IF i_bAutoMode THEN
+                s_bInfeedLock := TRUE;
+            END_IF;
+            IF s_iInfeedStep >= STEP_ID_INVOLVED THEN
+                s_bIdCheckReq := TRUE;
+            END_IF;
+            s_wAbortLatch := s_wAbortLatch OR ERR_INFEED_ABORT;
+        END_IF;
+        IF s_iOutfeedStep <> 0 THEN
+            IF i_bAutoMode THEN
+                s_bOutfeedLock := TRUE;
+            END_IF;
+            IF s_iOutfeedStep >= STEP_ID_INVOLVED THEN
+                s_bIdCheckReq := TRUE;
+            END_IF;
+            s_wAbortLatch := s_wAbortLatch OR ERR_OUTFEED_ABORT;
+        END_IF;
         io_stExternal.stUpstream.bMachine_ReadyIn := FALSE;
+        io_stExternal.stUpstream.bMachine_RcvModuleIdAck := FALSE;
         io_stExternal.stUpstream.bMachine_AllowInfeed := FALSE;
+        io_stExternal.stUpstream.bMachine_InfeedArrived := FALSE;
         io_stExternal.stDownstream.bMachine_ReadyOut := FALSE;
+        io_stExternal.stDownstream.bMachine_SendModuleId := FALSE;
         io_stExternal.stDownstream.bMachine_OutfeedReq := FALSE;
+        io_stExternal.stDownstream.bMachine_OutfeedArrivedAck := FALSE;
         io_stExternal.stUpstream.bMachine_HeartbeatToUp := FALSE;
         io_stExternal.stDownstream.bMachine_HeartbeatToDown := FALSE;
+        // 不使能时动作输出也撤销 (原来不清, CARD-DJ-2026-009-003 一并处理)
+        q_bAllowInfeedAct := FALSE;
+        q_bAllowOutfeedAct := FALSE;
         s_tHbToggle.IN := FALSE;
+        s_bHbState := FALSE;
         s_tUpTimeout.IN := FALSE;
         s_tDownTimeout.IN := FALSE;
+        s_tLeaveTimer.IN := FALSE;
+        s_tIdleTimer.IN := FALSE;
+        s_bIdRelease := FALSE;
         s_iInfeedStep := 0;
         s_iOutfeedStep := 0;
+        io_stExternal.stUpstream.iInfeedStep := 0;
+        io_stExternal.stDownstream.iOutfeedStep := 0;
+        q_wErrorCode := s_wAbortLatch;
+        IF s_bInfeedLock OR s_bOutfeedLock THEN
+            q_wErrorCode := q_wErrorCode OR ERR_WAIT_RESET;
+        END_IF;
+        IF s_bIdCheckReq THEN
+            q_wErrorCode := q_wErrorCode OR ERR_ID_CHECK;
+        END_IF;
         RETURN;
     END_IF;
 
     (* 1. 心跳生成 (4s ON / 4s OFF) 与 12s 超时监视 *)
-    // 心跳翻转: FB_TON 定时翻转, 输出 4s 方波
+    // 心跳翻转: FB_TON 自复位, 每到 4s 出一个单周期脉冲, 用脉冲翻转心跳电平, 输出 4s ON / 4s OFF 方波
+    // (原来直接把定时器 Q 当心跳输出, 心跳只亮一个扫描周期, 对方按 ≤100ms 轮询基本采不到, 会误判本机断线)
     s_tHbToggle.IN := NOT s_tHbToggle.Q;
-    s_tHbToggle.PT := s_dHeartbeatPulse;
-    io_stExternal.stUpstream.bMachine_HeartbeatToUp := s_tHbToggle.Q;
-    io_stExternal.stDownstream.bMachine_HeartbeatToDown := s_tHbToggle.Q;
+    s_tHbToggle.PT := HB_HALF_MS;
+    IF s_tHbToggle.Q THEN
+        s_bHbState := NOT s_bHbState;
+    END_IF;
+    io_stExternal.stUpstream.bMachine_HeartbeatToUp := s_bHbState;
+    io_stExternal.stDownstream.bMachine_HeartbeatToDown := s_bHbState;
 
     // 上游心跳边沿检测 + 12s 超时监视
     IF io_stExternal.stUpstream.bUpstream_HeartbeatFromUp <> s_bLastUpHeartbeat THEN
@@ -91,7 +239,7 @@ BEGIN
     ELSE
         s_tUpTimeout.IN := TRUE;
     END_IF;
-    s_tUpTimeout.PT := s_dHbTimeoutMs;
+    s_tUpTimeout.PT := HB_TIMEOUT_MS;
     IF s_tUpTimeout.Q THEN
         io_stExternal.stUpstream.bUpstreamComFault := TRUE;
     END_IF;
@@ -104,7 +252,7 @@ BEGIN
     ELSE
         s_tDownTimeout.IN := TRUE;
     END_IF;
-    s_tDownTimeout.PT := s_dHbTimeoutMs;
+    s_tDownTimeout.PT := HB_TIMEOUT_MS;
     IF s_tDownTimeout.Q THEN
         io_stExternal.stDownstream.bDownstreamComFault := TRUE;
     END_IF;
@@ -112,33 +260,141 @@ BEGIN
     io_stExternal.bAnyComFault := io_stExternal.stUpstream.bUpstreamComFault OR io_stExternal.stDownstream.bDownstreamComFault;
     q_bComAlarm := io_stExternal.bAnyComFault;
 
+    (* 1.1 握手中途通讯故障: 当拍撤销允许信号和动作输出, 步序回 0 (验收项 A3, CARD-DJ-2026-009-002) *)
+    //     上下游任一侧故障, 进料和出料都中止 (用户 2026-10-20 答复第 7 条)
+    //     自动模式下中止的, 通讯恢复后也要人工复位才能重新握手; 不在作业中的, 通讯恢复即自动恢复 (第 8 条)
+    IF (s_iInfeedStep <> 0) AND io_stExternal.bAnyComFault THEN
+        IF i_bAutoMode THEN
+            s_bInfeedLock := TRUE;
+        END_IF;
+        // R4: 异常不自动处理 ID, 报警交人工在 HMI 上核对 (拷入/补录/清空)
+        IF s_iInfeedStep >= STEP_ID_INVOLVED THEN
+            s_bIdCheckReq := TRUE;
+        END_IF;
+        io_stExternal.stUpstream.bMachine_RcvModuleIdAck := FALSE;
+        io_stExternal.stUpstream.bMachine_AllowInfeed := FALSE;
+        io_stExternal.stUpstream.bMachine_InfeedArrived := FALSE;
+        q_bAllowInfeedAct := FALSE;
+        s_wAbortLatch := s_wAbortLatch OR ERR_INFEED_ABORT;
+        s_iInfeedStep := 0;
+    END_IF;
+    IF (s_iOutfeedStep <> 0) AND io_stExternal.bAnyComFault THEN
+        IF i_bAutoMode THEN
+            s_bOutfeedLock := TRUE;
+        END_IF;
+        IF s_iOutfeedStep >= STEP_ID_INVOLVED THEN
+            s_bIdCheckReq := TRUE;
+        END_IF;
+        io_stExternal.stDownstream.bMachine_SendModuleId := FALSE;
+        io_stExternal.stDownstream.bMachine_OutfeedReq := FALSE;
+        io_stExternal.stDownstream.bMachine_OutfeedArrivedAck := FALSE;
+        q_bAllowOutfeedAct := FALSE;
+        s_wAbortLatch := s_wAbortLatch OR ERR_OUTFEED_ABORT;
+        s_iOutfeedStep := 0;
+    END_IF;
+    // "作业中" = 握手进行中 (第 10~40 步) 或机器里有产品 (用户 2026-10-20 17:40 MST 按建议批准, 本卡接产品检测后扩展)
+    // 握手在第 0 步但机器里有产品时出现通讯故障: 自动模式下产品要出料前须人工复位
+    IF io_stExternal.bAnyComFault AND i_bAutoMode AND i_bProductPresent THEN
+        s_bOutfeedLock := TRUE;
+    END_IF;
+    q_wErrorCode := s_wAbortLatch;
+    IF s_bInfeedLock OR s_bOutfeedLock THEN
+        q_wErrorCode := q_wErrorCode OR ERR_WAIT_RESET;
+    END_IF;
+    IF io_stExternal.stUpstream.bUpstreamComFault THEN
+        q_wErrorCode := q_wErrorCode OR ERR_UP_COM;
+    END_IF;
+    IF io_stExternal.stDownstream.bDownstreamComFault THEN
+        q_wErrorCode := q_wErrorCode OR ERR_DOWN_COM;
+    END_IF;
+
+    (* 1.2 运行许可丢失 (急停/开门/继电器故障/总线断, 或还没两次复位 + 启动): 心跳照发, 只撤握手 *)
+    //     用户 2026-10-22: 心跳停了对方就判断线 (以后同一心跳也给 MES), 所以本机急停时心跳不停.
+    //     握手按中途中止处理, 与失去使能相同: 自动下要人工复位 (FB_1030 运行复位脉冲), 第 20 步起要核对 ID.
+    IF NOT i_bSafeToRun THEN
+        IF s_iInfeedStep <> 0 THEN
+            IF i_bAutoMode THEN
+                s_bInfeedLock := TRUE;
+            END_IF;
+            IF s_iInfeedStep >= STEP_ID_INVOLVED THEN
+                s_bIdCheckReq := TRUE;
+            END_IF;
+            s_wAbortLatch := s_wAbortLatch OR ERR_INFEED_ABORT;
+        END_IF;
+        IF s_iOutfeedStep <> 0 THEN
+            IF i_bAutoMode THEN
+                s_bOutfeedLock := TRUE;
+            END_IF;
+            IF s_iOutfeedStep >= STEP_ID_INVOLVED THEN
+                s_bIdCheckReq := TRUE;
+            END_IF;
+            s_wAbortLatch := s_wAbortLatch OR ERR_OUTFEED_ABORT;
+        END_IF;
+        io_stExternal.stUpstream.bMachine_ReadyIn := FALSE;
+        io_stExternal.stUpstream.bMachine_RcvModuleIdAck := FALSE;
+        io_stExternal.stUpstream.bMachine_AllowInfeed := FALSE;
+        io_stExternal.stUpstream.bMachine_InfeedArrived := FALSE;
+        io_stExternal.stDownstream.bMachine_ReadyOut := FALSE;
+        io_stExternal.stDownstream.bMachine_SendModuleId := FALSE;
+        io_stExternal.stDownstream.bMachine_OutfeedReq := FALSE;
+        io_stExternal.stDownstream.bMachine_OutfeedArrivedAck := FALSE;
+        q_bAllowInfeedAct := FALSE;
+        q_bAllowOutfeedAct := FALSE;
+        s_tLeaveTimer.IN := FALSE;
+        s_tIdleTimer.IN := FALSE;
+        s_bIdRelease := FALSE;
+        s_iInfeedStep := 0;
+        s_iOutfeedStep := 0;
+        io_stExternal.stUpstream.iInfeedStep := 0;
+        io_stExternal.stDownstream.iOutfeedStep := 0;
+        q_wErrorCode := q_wErrorCode OR s_wAbortLatch;
+        IF s_bInfeedLock OR s_bOutfeedLock THEN
+            q_wErrorCode := q_wErrorCode OR ERR_WAIT_RESET;
+        END_IF;
+        IF s_bIdCheckReq THEN
+            q_wErrorCode := q_wErrorCode OR ERR_ID_CHECK;
+        END_IF;
+        RETURN;
+    END_IF;
+    // @安全区 结束
+
+    // @安全区 开始：进料/出料 8 步握手: 准备好/允许进料/出料请求/动作允许输出
     (* 2. 上游进料 8 步闭环状态机 (STD-820) *)
     CASE s_iInfeedStep OF
         0: (* 待机态: 广播本机准备好进料 (1) *)
-            io_stExternal.stUpstream.bMachine_ReadyIn := i_bMachineReadyIn AND NOT io_stExternal.bAnyComFault;
+            io_stExternal.stUpstream.bMachine_ReadyIn := i_bMachineReadyIn AND NOT io_stExternal.bAnyComFault AND NOT s_bInfeedLock;
             io_stExternal.stUpstream.bMachine_RcvModuleIdAck := FALSE;
             io_stExternal.stUpstream.bMachine_AllowInfeed := FALSE;
             io_stExternal.stUpstream.bMachine_InfeedArrived := FALSE;
+            s_bIdRelease := FALSE;
             IF io_stExternal.stUpstream.bMachine_ReadyIn AND io_stExternal.stUpstream.bUpstream_LineReady THEN
                 s_iInfeedStep := 10;
             END_IF;
 
         10: (* 等待上游传组件 ID (3) *)
             IF io_stExternal.stUpstream.bUpstream_SendModuleId THEN
-                io_stExternal.stUpstream.sRcvModuleID := io_stExternal.stUpstream.sRcvModuleID;
+                s_sInfeedId := io_stExternal.stUpstream.sRcvModuleID; (* 锁存本次确认收到的上游 ID *)
                 io_stExternal.stUpstream.bMachine_RcvModuleIdAck := TRUE; (* (4) 确认收到ID *)
                 s_iInfeedStep := 20;
             END_IF;
 
-        20: (* 允许上游进料 (5) *)
-            io_stExternal.stUpstream.bMachine_AllowInfeed := TRUE;
-            IF io_stExternal.stUpstream.bUpstream_InfeedReq THEN (* (6) 上游请求入料 *)
-                q_bAllowInfeedAct := TRUE;
-                s_iInfeedStep := 30;
+        20: (* 允许上游进料 (5); R5: ID 不合格不允许进料, 可人工放行或补录 *)
+            s_wIdCheck := FC_3003_CheckModuleId(i_sModuleId := s_sInfeedId);
+            IF (s_wIdCheck = ID_CHECK_OK) OR s_bIdRelease THEN
+                io_stExternal.stUpstream.bMachine_AllowInfeed := TRUE;
+                IF io_stExternal.stUpstream.bUpstream_InfeedReq THEN (* (6) 上游请求入料 *)
+                    q_bAllowInfeedAct := TRUE;
+                    s_iInfeedStep := 30;
+                END_IF;
+            ELSE
+                io_stExternal.stUpstream.bMachine_AllowInfeed := FALSE;
+                t_bIdWait := TRUE;
             END_IF;
 
         30: (* 检测工件进料到位 (7) *)
             IF i_bInfeedArrivedSens THEN
+                io_sMachineModuleID := s_sInfeedId; (* R1: 到位时上游 ID -> 本机 ID *)
+                s_bIdRelease := FALSE;
                 io_stExternal.stUpstream.bMachine_InfeedArrived := TRUE;
                 q_bAllowInfeedAct := FALSE;
                 s_iInfeedStep := 40;
@@ -158,16 +414,18 @@ BEGIN
     (* 3. 下游出料 8 步闭环状态机 (STD-820) *)
     CASE s_iOutfeedStep OF
         0: (* 待机态: 等待下游准备好 (1) 并广播本机准备好出料 (2) *)
-            io_stExternal.stDownstream.bMachine_ReadyOut := i_bMachineReadyOut AND NOT io_stExternal.bAnyComFault;
+            io_stExternal.stDownstream.bMachine_ReadyOut := i_bMachineReadyOut AND NOT io_stExternal.bAnyComFault AND NOT s_bOutfeedLock;
             io_stExternal.stDownstream.bMachine_SendModuleId := FALSE;
             io_stExternal.stDownstream.bMachine_OutfeedReq := FALSE;
             io_stExternal.stDownstream.bMachine_OutfeedArrivedAck := FALSE;
+            IF io_stExternal.stDownstream.bMachine_ReadyOut THEN
+                io_stExternal.stDownstream.sSendModuleID := io_sMachineModuleID; (* R2: 加工完成准备出料时本机 ID -> 下游 ID *)
+            END_IF;
             IF io_stExternal.stDownstream.bMachine_ReadyOut AND io_stExternal.stDownstream.bDownstream_LineReady THEN
                 s_iOutfeedStep := 10;
             END_IF;
 
-        10: (* 发送组件 ID (3) *)
-            io_stExternal.stDownstream.sSendModuleID := i_sSendModuleID;
+        10: (* 发送组件 ID (3), 下游 ID 已在第 0 步转存 (R2) *)
             io_stExternal.stDownstream.bMachine_SendModuleId := TRUE;
             IF io_stExternal.stDownstream.bDownstream_RcvModuleIdAck THEN (* (4) 下游确认收到 *)
                 s_iOutfeedStep := 20;
@@ -189,6 +447,8 @@ BEGIN
 
         40: (* 下游撤销到位信号，事务完成 *)
             IF NOT io_stExternal.stDownstream.bDownstream_OutfeedArrived THEN
+                io_stExternal.stDownstream.sSendModuleID := ''; (* R3 第 1 种: 握手完成, 清下游 ID *)
+                io_sMachineModuleID := '';                     (* 用户答复: 握手完成本机 ID 一起清 *)
                 q_bDownstreamDone := TRUE;
                 s_iOutfeedStep := 0; (* 完成闭环 *)
             END_IF;
@@ -197,5 +457,28 @@ BEGIN
             s_iOutfeedStep := 0;
     END_CASE;
     io_stExternal.stDownstream.iOutfeedStep := s_iOutfeedStep;
+    // @安全区 结束
+
+    (* 4. 组件 ID 自动清除 *)
+    // R3 第 2 种: 出料第 30/40 步 (已发出料请求) 本机持续检测不到产品超过设定时间, 判产品已离开, 清下游 ID
+    s_tLeaveTimer.IN := (s_iOutfeedStep >= 30) AND NOT i_bProductPresent;
+    s_tLeaveTimer.PT := t_dLeaveMs;
+    IF s_tLeaveTimer.Q THEN
+        io_stExternal.stDownstream.sSendModuleID := '';
+    END_IF;
+    // R6: 自动作业中, 握手都在第 0 步且长时间检测不到产品, 自动清本机 ID
+    s_tIdleTimer.IN := i_bAutoMode AND NOT i_bProductPresent AND (s_iInfeedStep = 0) AND (s_iOutfeedStep = 0)
+                       AND (LEN(io_sMachineModuleID) > 0);
+    s_tIdleTimer.PT := t_dIdleMs;
+    IF s_tIdleTimer.Q THEN
+        io_sMachineModuleID := '';
+    END_IF;
+
+    IF t_bIdWait THEN
+        q_wErrorCode := q_wErrorCode OR ERR_ID_EMPTY;
+    END_IF;
+    IF s_bIdCheckReq THEN
+        q_wErrorCode := q_wErrorCode OR ERR_ID_CHECK;
+    END_IF;
 
 END_FUNCTION_BLOCK

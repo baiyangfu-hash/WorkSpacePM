@@ -15,16 +15,45 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from auto_pm.contracts.lease_reclaim import ProcessFingerprint, ProcessObservation
 
-# Interpreter images skipped when looking for the long-lived process behind a CLI call: the root entry and the launcher are two short-lived
-# Python parents of every governed command, so the holder is the first ancestor that is not one of them (the agent's shell or IDE).
+# Images skipped when looking for the long-lived process behind a CLI call (M3 drill 2026-10-19):
+# - the root entry and the launcher are two short-lived Python parents of every governed command;
+# - agent hosts (Trae CN, Claude Code, Codex, Cursor) run every command in a fresh shell that exits with it, so recording that shell made
+#   every reclaim see PROVEN_DEAD while the agent was still working.  The holder is the first ancestor past both kinds: the agent's host.
+# - per-command sandboxes: Trae CN (user's laptop, 2026-10-23) starts each command as python -> powershell -> trae-sandbox.exe ->
+#   agent-tool-host.exe -> Trae CN utility -> Trae CN; the sandbox exits with the command, the tool host stays.  A sandbox is skipped like
+#   a shell but never kept as the fallback holder, since it never outlives its command.
+# A person typing in a terminal has no host above the shell, only the terminal window or the desktop; when the walk reaches one of those
+# session roots, the shell nearest to it (the one the person keeps open) is the holder.
 _LAUNCHER_IMAGES = frozenset({"python.exe", "pythonw.exe", "python3.exe", "py.exe", "python", "python3"})
-_MAX_ANCESTORS = 8
+_SHELL_IMAGES = frozenset(
+    {
+        "cmd.exe", "powershell.exe", "pwsh.exe", "bash.exe", "sh.exe", "zsh.exe", "dash.exe", "fish.exe", "wsl.exe",
+        "bash", "sh", "zsh", "dash", "fish", "ksh", "pwsh", "sudo", "env", "timeout", "nohup",
+    }
+)
+_SANDBOX_IMAGES = frozenset({"trae-sandbox.exe", "trae-sandbox"})
+_SESSION_ROOT_IMAGES = frozenset(
+    {
+        "explorer.exe", "windowsterminal.exe", "openconsole.exe", "conhost.exe", "wininit.exe", "winlogon.exe", "services.exe",
+        "svchost.exe", "userinit.exe", "sihost.exe", "sshd.exe", "systemd", "init", "launchd", "sshd", "login", "su",
+        "tmux: server", "screen", "gnome-terminal-", "konsole", "xterm", "alacritty", "kitty", "wezterm-gui",
+    }
+)
+_VERSIONED_PYTHON = re.compile(r"pythonw?[0-9.]*(\.exe)?")
+_MAX_ANCESTORS = 12
+
+
+def _is_launcher(image_name: str) -> bool:
+    # Linux shows the interpreter as its versioned name ("python3.12"), Windows as an image ("python.exe")
+    return image_name in _LAUNCHER_IMAGES or _VERSIONED_PYTHON.fullmatch(image_name) is not None
 
 
 @dataclass(frozen=True)
@@ -297,20 +326,40 @@ def _parent_pid(pid: int) -> tuple[int, str] | None:
         return None
 
 
-def holder_process_pid(start_pid: int | None = None) -> int | None:
-    """The long-lived process behind this CLI call: the first ancestor that is not a Python interpreter of the root entry or launcher chain."""
+def holder_process_pid(
+    start_pid: int | None = None, parent_of: Callable[[int], tuple[int, str] | None] | None = None
+) -> int | None:
+    """The long-lived process behind this CLI call: the agent host above the per-command shells, or the person's own shell.
 
+    Walks up from ``start_pid`` past Python launchers, shells and per-command sandboxes.  The first other ancestor is the holder, unless it is a session root
+    (terminal window, desktop, init), in which case the nearest shell below it is.  ``None`` when the ancestry cannot be read (the parent is
+    gone, nameless, or outside the visible PID space, which shows as PPID 1 under a PID 1 that is not a known session root), or when it
+    reaches a session root with no shell on the way (started from Explorer or a service): a later reclaim then sees UNKNOWN, never
+    PROVEN_DEAD, and never a desktop or service process that would keep the lease alive forever.  A shell seen below an unreadable
+    parent is not recorded: it may be the per-command shell of an agent host the walk cannot see, and it exits with the command.
+    """
+
+    lookup = _parent_pid if parent_of is None else parent_of
     current = os.getpid() if start_pid is None else start_pid
+    nearest_shell: int | None = None
     for _ in range(_MAX_ANCESTORS):
-        parent = _parent_pid(current)
+        parent = lookup(current)
         if parent is None:
             return None
         parent_pid, image_name = parent
-        if parent_pid <= 0 or parent_pid == current:
+        if parent_pid <= 0 or parent_pid == current or not image_name:
             return None
-        if image_name and image_name not in _LAUNCHER_IMAGES:
+        if image_name in _SESSION_ROOT_IMAGES:
+            # a session root is never the holder: explorer.exe or svchost.exe outlive every agent, so a lease on them could never be reclaimed
+            return nearest_shell
+        if parent_pid == 1:
+            # PID 1 that is no known session root: a container or sandbox boundary, the real host is out of sight
+            return None
+        if image_name in _SHELL_IMAGES:
+            nearest_shell = parent_pid
+        elif image_name in _SANDBOX_IMAGES:
+            pass
+        elif not _is_launcher(image_name):
             return parent_pid
-        if not image_name:
-            return None
         current = parent_pid
-    return None
+    return nearest_shell

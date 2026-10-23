@@ -1,5 +1,7 @@
 # OB1 主程序组织块接口文档
 
+> **【与代码不符，2026-10-22 核对】** 本文大部分是从 DJ-2026-005（三工站、FB_1002～FB_1004、FB_2001 V6.0.0）抄来的旧内容，009 代码里没有这些块。009 实际调用以 `OB1.scl` 和 `详细设计说明书_DSN-OB1.md` 第 6 节起为准，全局名和实例见 `程序文档/PLC变量定义文档_VAR.md` 第 3.1、4 节。旧内容保留不删。
+
 ## 1. 文档基础信息
 
 | 属性 | 值 |
@@ -176,3 +178,27 @@ PickPlace ──o_bPlaceComplete_ToFeeder──→ Feeder.i_bPickPlace_FeedCompl
 | V6.0.1 | 2026-05-18 | 修复: 所有GlobalVars成员引用对齐DB实际定义(stExternal 27in/20out, stConveyor 34in/30out, stPickPlace 51in/20out等) |
 | V6.0.0 | 2026-05-18 | Phase 3全部重写: 同步所有FB到V6.0.0新接口, 变量名100%英文 |
 | V5.0.0 | 2026-05-04 | 接口变量名100%英文化, 与GlobalVars.db V3.0.0同步 |
+
+---
+
+## 8. DJ-2026-009 当前 OB1 的 FB_3001 接线（CARD-DJ-2026-009-003 草稿）
+
+> 本文第 1～7 节是从 DJ-2026-005 带过来的旧内容，和本项目现在的 OB1 对不上；以本节和 DSN 第 6 节为准。
+
+| FB_3001 引脚 | OB1 接到 | 说明 / 待确认 |
+| :--- | :--- | :--- |
+| `i_bEnable` | `TRUE` | 常开：心跳一直发（CARD-DJ-2026-009-004 起；原接急停按钮点 `stExternal.bEmergencyStop`） |
+| `i_bSafeToRun` | `GlobalVars.fbSafety.q_bSafeToRun` | FB_1030 运行许可；为 0 时只撤握手，心跳照发（用户 2026-10-22） |
+| `i_bAutoMode` | `GlobalVars.stStation1.stControl.bAutoEnable` | 工位 1 自动使能（项目里只有这一个自动位） |
+| `i_bResetCmd` | `GlobalVars.fbSafety.q_bRunResetPulse OR (GlobalVars.fbSafety.q_bSafeToRun AND (GlobalVars.stGlobal.i_bReset OR GlobalVars.stStation1.stControl.bReset))` | 安全停机后只认 FB_1030 运行复位脉冲；运行许可中公共复位或工位复位照常（CARD-DJ-2026-009-004） |
+| `i_bMachineReadyIn` | `GlobalVars.stStation1.stStatus.bWaitMaterial` | 工位 1 在“等待来料”步 |
+| `i_bMachineReadyOut` | `GlobalVars.stStation1.stStatus.bReadyOut` | 工位 1 在出料步且气缸已松开（FB_1001 新增状态位） |
+| `i_bInfeedArrivedSens` | `GlobalVars.stStation1.stSensors.bInPosSensor` | 入料到位光电 |
+| `i_bProductPresent` | `GlobalVars.stStation1.stStatus.bProductPresent` | 本机有产品，由 FB_1001 内部判断：入料到位、加工到位或预留产品传感器数组 `stSensors.arrProductSens[0..7]` 任一路为 1（用户 2026-10-21） |
+| `q_bAllowInfeedAct` / `q_bAllowOutfeedAct` | `GlobalVars.bExtAllowInfeedAct` / `bExtAllowOutfeedAct` | 先接到全局变量；工位 1 电机还没用它们做联锁（另开卡） |
+| `q_bUpstreamDone` / `q_bDownstreamDone` | `GlobalVars.bExtUpstreamDone` / `bExtDownstreamDone` | 单周期脉冲 |
+| `q_bComAlarm` / `q_wErrorCode` | `GlobalVars.bExtComAlarm` / `wExtErrorCode` | 给 HMI 显示；FB_2001 公共报警没有外部通讯报警输入，接入公共报警另开卡 |
+| `io_stExternal` | `GlobalVars.stExternal` | 不变 |
+| `io_sMachineModuleID` | `GlobalVars.sMachineModuleID` | 本机 ID，须断电保持 |
+| `io_stIdHmi` | `GlobalVars.stModuleIdHmi` | HMI 操作与时间参数 |
+

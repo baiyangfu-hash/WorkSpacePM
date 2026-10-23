@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from auto_pm.core.governance_service import GovernanceService
+from auto_pm.core.governance_service import ROOT_WHITELIST, GovernanceService
 
 
 def test_governance_service_init(tmp_path: Path) -> None:
@@ -48,3 +48,17 @@ def test_clean_workspace(tmp_path: Path) -> None:
     assert len(cleaned) == 2
     assert not (tmp_path / "mypy_errors.txt").exists()
     assert not (tmp_path / "test_run.log").exists()
+
+
+def test_claude_code_entry_files_are_whitelisted(tmp_path: Path) -> None:
+    # 薄入口：Claude Code 读根目录 CLAUDE.md，设置放 .claude/；与 AGENTS.md 一样不算散落文件
+    (tmp_path / "AGENTS.md").touch()
+    (tmp_path / "CLAUDE.md").touch()
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+
+    report = GovernanceService(workspace_root=tmp_path).inspect_sanitation()
+
+    assert report.is_pure is True, [issue.relative_path for issue in report.unauthorized_files]
+    assert {"claude.md", ".claude"} <= ROOT_WHITELIST
+
