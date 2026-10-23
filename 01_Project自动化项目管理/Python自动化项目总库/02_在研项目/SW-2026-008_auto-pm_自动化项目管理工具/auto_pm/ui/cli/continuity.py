@@ -51,6 +51,7 @@ from auto_pm.infrastructure.control_root_guard import (
     clean_git_environment,
     require_governed_worktree,
 )
+from auto_pm.ui.cli.approval_pin import approval_pin_enforced
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
 
 _Command = TypeVar("_Command", bound=Callable[..., Any])
@@ -265,6 +266,11 @@ def create_mission(
 
     Admitted like ``pm approve``: past the soft limit, or over paths an open card also changes, only with the user's word.
     """
+    # A release is the user's word: once an approver PIN is committed it is typed only through ``pm approve`` (audit 123).
+    if admission_release_ref.strip() and approval_pin_enforced(_workspace(ctx)):
+        raise click.ClickException(
+            "已启用批准口令：这条命令不收放行凭据；放行只能由用户本人在 pm approve 里输口令给出（agent 不得代填）"
+        )
     try:
         authority = AuthorityEnvelope.model_validate(json.loads(authority_json))
         service = _mission_service(ctx, mutating=True)

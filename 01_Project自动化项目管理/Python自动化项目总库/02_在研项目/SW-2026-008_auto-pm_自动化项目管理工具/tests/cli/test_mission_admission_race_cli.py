@@ -87,3 +87,30 @@ def test_pm_approve_refuses_a_card_opened_after_its_check(
     )
     assert released["authorization_status"] == "AUTHORIZED"
     assert len(ContinuityStore(tmp_path).list_missions(PROJECT)) == 2
+
+
+def test_continuity_mission_create_takes_no_release_once_an_approver_pin_is_committed(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit 123 P2: an agent-typed ``user-confirmation:`` string must not release a colliding card behind the PIN."""
+
+    from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
+
+    _repository(tmp_path)
+    store = ContinuityStore(tmp_path)
+    assert _invoke(cli_runner, tmp_path, _create_args("MISSION-CLI-A")).exit_code == 0
+    key = make_key("baiyang", "relay-K1-on-cli", n=2**10)
+    monkeypatch.setattr(ApprovalProofService, "committed_state", lambda self: ([key], ""))
+
+    blocked = _invoke(
+        cli_runner, tmp_path, [*_create_args("MISSION-CLI-B"), "--admission-release-ref", "user-confirmation:CLI-B-0001"]
+    )
+
+    assert blocked.exit_code != 0 and "已启用批准口令" in blocked.output
+    assert [item.mission_id for item in store.list_missions("SW-TEST-001")] == ["MISSION-CLI-A"]
+    monkeypatch.undo()
+    # without a committed PIN the old release rule stands
+    allowed = _invoke(
+        cli_runner, tmp_path, [*_create_args("MISSION-CLI-B"), "--admission-release-ref", "user-confirmation:CLI-B-0001"]
+    )
+    assert allowed.exit_code == 0, allowed.output
