@@ -1,7 +1,7 @@
 """plc docs 子命令组 - PLC 文档与代码一致性核对、自动补全、确认（REQ-SW008-M2-DOCSYNC，V01B）
 
 Commands:
-    check <ID> [--json] [--strict-markers]      核对接口文档/变量定义文档与 SCL 代码（有失败项退出码为 1）
+    check <ID> [--json] [--strict-markers]      核对接口文档/变量定义文档与 SCL 代码，并检查里程碑表计划日期（有失败项退出码为 1）
     sync <ID> [--dry-run] [--apply-suggestions] 按代码补全文档（补入的行带“待确认”标记，只写文档）
     confirm <ID>                                去掉已与代码对上的行上的“待确认”标记
 
@@ -18,6 +18,7 @@ import click
 from auto_pm.app_context import AppContext
 from auto_pm.core.project_service import ProjectService
 from auto_pm.plc import doc_consistency as dc
+from auto_pm.plc import milestones as ms
 
 
 def _resolve(ctx: click.Context, project_id: str | None, project_path: str | None) -> str:
@@ -50,12 +51,15 @@ def docs_group() -> None:
 @click.pass_context
 def cmd_check(ctx: click.Context, project_id: str | None, project_path: str | None,
               output_json: bool, strict_markers: bool) -> None:
-    """核对接口文档/变量定义文档与 SCL 代码（名称、类型、方向、注释）。有失败项退出码为 1。"""
+    """核对接口文档/变量定义文档与 SCL 代码（名称、类型、方向、注释），并检查里程碑表的计划日期
+    （新项目没填直接拦，老项目迁入先只提示）。有失败项退出码为 1。"""
     path = _resolve(ctx, project_id, project_path)
     analysis = dc.analyze_project(path)
     failing = [f for f in analysis.findings if f.severity == "fail"]
     warnings = [f for f in analysis.findings if f.severity == "warn"]
     marked = analysis.marked_rows
+    milestones = ms.check_project(path)
+    ms_failing = [f for f in milestones.findings if f.severity == "fail"]
     if output_json:
         payload = {
             "schema_version": "plc-docs-check.v1",
@@ -64,6 +68,13 @@ def cmd_check(ctx: click.Context, project_id: str | None, project_path: str | No
                          "doc_state": r.doc_state, "status": r.status} for r in analysis.reports],
             "findings": [asdict(f) for f in analysis.findings],
             "marked_rows": len(marked),
+            "milestones": {
+                "applicable": milestones.applicable,
+                "path": milestones.path,
+                "origin": milestones.origin,
+                "rows": [asdict(row) for row in milestones.rows],
+                "findings": [asdict(f) for f in milestones.findings],
+            },
         }
         click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
@@ -76,7 +87,16 @@ def cmd_check(ctx: click.Context, project_id: str | None, project_path: str | No
         click.echo(f"拦住项 {len(failing)}、警告 {len(warnings)}、待确认 {len(marked)}")
         if failing:
             click.echo("提示：运行 plc docs sync 按代码补全文档，补全后审核并运行 plc docs confirm")
-    if failing or (strict_markers and marked):
+        if milestones.findings:
+            origin = milestones.origin or "未写"
+            click.echo(f"[{'fail' if ms_failing else 'warn'}] 里程碑表（项目来源：{origin}）")
+            for finding in milestones.findings:
+                click.echo(f"    {finding.severity}: {finding.render()}")
+        if milestones.applicable:
+            click.echo(f"里程碑表：拦住项 {len(ms_failing)}、提示 {len(milestones.findings) - len(ms_failing)}")
+        else:
+            click.echo("里程碑表：不适用（共享库）")
+    if failing or ms_failing or (strict_markers and marked):
         ctx.exit(1)
 
 
