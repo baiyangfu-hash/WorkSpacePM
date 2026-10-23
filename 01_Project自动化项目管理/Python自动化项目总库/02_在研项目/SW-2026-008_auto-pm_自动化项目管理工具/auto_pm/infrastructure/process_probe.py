@@ -332,8 +332,9 @@ def holder_process_pid(
     """The long-lived process behind this CLI call: the agent host above the per-command shells, or the person's own shell.
 
     Walks up from ``start_pid`` past Python launchers, shells and per-command sandboxes.  The first other ancestor is the holder, unless it is a session root
-    (terminal window, desktop, init), in which case the nearest shell below it is.  ``None`` when the ancestry cannot be read: a later
-    reclaim then sees UNKNOWN, never PROVEN_DEAD.
+    (terminal window, desktop, init), in which case the nearest shell below it is.  ``None`` when the ancestry cannot be read, or when it
+    reaches a session root with no shell on the way (started from Explorer or a service): a later reclaim then sees UNKNOWN, never
+    PROVEN_DEAD, and never a desktop or service process that would keep the lease alive forever.
     """
 
     lookup = _parent_pid if parent_of is None else parent_of
@@ -347,7 +348,8 @@ def holder_process_pid(
         if parent_pid <= 0 or parent_pid == current or not image_name:
             return nearest_shell
         if image_name in _SESSION_ROOT_IMAGES or parent_pid == 1:
-            return nearest_shell if nearest_shell is not None else (None if parent_pid == 1 else parent_pid)
+            # a session root is never the holder: explorer.exe or svchost.exe outlive every agent, so a lease on them could never be reclaimed
+            return nearest_shell
         if image_name in _SHELL_IMAGES:
             nearest_shell = parent_pid
         elif image_name in _SANDBOX_IMAGES:

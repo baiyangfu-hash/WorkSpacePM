@@ -139,6 +139,11 @@ def test_an_unreadable_or_interpreter_only_ancestry_records_nothing_rather_than_
     assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (8, "python.exe"))) is None
     assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (1, "systemd"))) is None
     assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, ""))) is None
+    # started without any shell (double-click in Explorer, a scheduled task under svchost): the session root is never recorded, because
+    # explorer.exe or svchost.exe outlive every agent and a lease held by them could never be reclaimed (cloud audit of ee0268fa)
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (8, "python.exe"), (5, "explorer.exe"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "pythonw.exe"), (4, "svchost.exe"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (7, "trae-sandbox.exe"), (4, "services.exe"))) is None
     # the shell already seen is still the best long-lived candidate when the walk cannot read further
     assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"))) == 8
 
