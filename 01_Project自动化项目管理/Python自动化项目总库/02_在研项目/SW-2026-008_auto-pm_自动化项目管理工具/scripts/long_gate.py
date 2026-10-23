@@ -143,6 +143,9 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
         raise GateError("lease.renew_interval_s must be 1..3000")
     if not 60 <= int(lease["lease_seconds"]) <= 3600:
         raise GateError("lease.lease_seconds must be 60..3600")
+    if mode != "none" and int(lease["renew_interval_s"]) > int(lease["lease_seconds"]) - MIN_REMAINING_S - 60:
+        raise GateError(f"lease.renew_interval_s must leave the {MIN_REMAINING_S} s floor plus a minute: "
+                        f"at most lease_seconds - {MIN_REMAINING_S + 60}")
     if mode == "auto_pm":
         for k in ("run_id", "owner"):
             if not isinstance(lease.get(k), str) or not lease[k]:
@@ -165,6 +168,8 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
     for k in ("done", "failed"):
         cfg.setdefault("markers", {}).setdefault(k, {})
     cfg.setdefault("poll_s", 15)
+    if not 1 <= int(cfg["poll_s"]) <= 300:
+        raise GateError("poll_s must be 1..300")
     return cfg, hashlib.sha256(raw).hexdigest()
 
 
@@ -186,7 +191,8 @@ def local_stamp() -> str:
 
 def atomic_write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
+    # One temp name per writer: the heartbeat and the step loop both write the status file.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(text, encoding="utf-8", newline="\n")
     for attempt in range(20):
         try:
@@ -499,10 +505,7 @@ class LeaseKeeper(threading.Thread):
         interval = int(self.lease.cfg["renew_interval_s"])
         self.next_at = utc_now() + dt.timedelta(seconds=interval)
         while not self._stop_evt.wait(1):
-            remaining = self.lease.remaining_s()
-            if remaining is not None and remaining < MIN_REMAINING_S:
-                self._trip(f"lease has {int(remaining)} s left (< {MIN_REMAINING_S})")
-                return
+            # A due renewal goes first, so the floor below judges the lease as renewed.
             if utc_now() >= self.next_at:
                 try:
                     self.lease.renew()
@@ -510,6 +513,10 @@ class LeaseKeeper(threading.Thread):
                     self._trip(f"renewal failed: {error}")
                     return
                 self.next_at = utc_now() + dt.timedelta(seconds=interval)
+            remaining = self.lease.remaining_s()
+            if remaining is not None and remaining < MIN_REMAINING_S:
+                self._trip(f"lease has {int(remaining)} s left (< {MIN_REMAINING_S})")
+                return
 
     def _trip(self, reason: str) -> None:
         self.reason = reason
@@ -532,6 +539,7 @@ class Runner:
         self.keeper: LeaseKeeper | None = None
         self.awake = KeepAwake(self.stop_all)
         self.state: dict[str, Any] = {}
+        self._status_lock = threading.Lock()
         self.current: str | None = None
 
     # state
@@ -564,7 +572,8 @@ class Runner:
             "keep_awake": self.awake.state,
             "updated_at": iso(utc_now()),
         }
-        atomic_write(self.out / STATUS_FILE, json.dumps(status, ensure_ascii=False, indent=2))
+        with self._status_lock:
+            atomic_write(self.out / STATUS_FILE, json.dumps(status, ensure_ascii=False, indent=2))
 
     def finish(self, result: str, reason: str | None = None) -> int:
         self.state["result"], self.state["reason"] = result, reason

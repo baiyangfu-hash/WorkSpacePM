@@ -358,3 +358,71 @@ def test_config_validation_rejects_relative_out_dir(tmp_path: Path) -> None:
     p.write_text(json.dumps({"name": "x", "out_dir": "rel", "steps": [{"name": "a", "argv": ["x"]}]}), encoding="utf-8")
     with pytest.raises(mod.GateError):
         mod.load_config(p)
+
+
+def test_interval_must_leave_the_ten_minute_floor(tmp_path: Path) -> None:
+    mod = _module()
+    p = tmp_path / "c.json"
+    base = {"name": "x", "out_dir": str(tmp_path / "o"), "steps": [{"name": "a", "argv": ["x"]}],
+            "lease": {"mode": "command", "argv": ["x"], "lease_seconds": 3600, "renew_interval_s": 3000}}
+    p.write_text(json.dumps(base), encoding="utf-8")
+    with pytest.raises(mod.GateError, match="floor"):
+        mod.load_config(p)
+    base["lease"]["renew_interval_s"] = 2940
+    p.write_text(json.dumps(base), encoding="utf-8")
+    mod.load_config(p)
+
+
+def test_a_due_renewal_runs_before_the_floor_is_judged(tmp_path: Path) -> None:
+    import datetime as dt
+    import threading
+
+    mod = _module()
+
+    class FakeLease:
+        cfg = {"renew_interval_s": 1}
+
+        def __init__(self) -> None:
+            self.expires_at = mod.utc_now() + dt.timedelta(seconds=590)  # below the floor, renewal due
+
+        def remaining_s(self) -> float:
+            return (self.expires_at - mod.utc_now()).total_seconds()
+
+        def renew(self) -> None:
+            self.expires_at = mod.utc_now() + dt.timedelta(seconds=3600)
+
+    hard, stop = threading.Event(), threading.Event()
+    keeper = mod.LeaseKeeper(FakeLease(), hard, stop, mod.Log(tmp_path / "log"))
+    keeper.start()
+    time.sleep(3)
+    stop.set()
+    keeper.join(timeout=5)
+    assert not hard.is_set(), keeper.reason
+
+
+def test_concurrent_status_writes_do_not_crash(tmp_path: Path) -> None:
+    import threading
+
+    mod = _module()
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({"name": "x", "out_dir": str(tmp_path / "o"), "steps": [{"name": "a", "argv": ["x"]}]}),
+                 encoding="utf-8")
+    cfg, sha = mod.load_config(p)
+    runner = mod.Runner(cfg, sha)
+    runner.out.mkdir(parents=True)
+    errors: list[BaseException] = []
+
+    def hammer() -> None:
+        try:
+            for _ in range(200):
+                runner.write_status()
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    threads = [threading.Thread(target=hammer) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    assert json.loads((runner.out / "long_gate_status.json").read_text(encoding="utf-8"))["name"] == "x"
