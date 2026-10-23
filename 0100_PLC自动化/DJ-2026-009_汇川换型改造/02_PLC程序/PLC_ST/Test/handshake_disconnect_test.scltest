@@ -4,18 +4,21 @@
 // 项目: DJ-2026-009 汇川换型改造
 // 实施卡: CARD-DJ-2026-009-002 验收第 3 项 (需求说明验收项 A3)
 // 被测: FB_3001_ExternalInteraction (实例 GlobalVars.fbExternalDevice)
-// 做法: Modbus 映射层不使能, 直接置握手变量把步序推到第 N 步, 再置通讯故障位
+// 做法: Modbus 映射层使能但两条链路都置为断开 (FB_3002 链路断开时不刷新读侧, OB1 握手使能要 bModbusEnable),
+//       直接置握手变量把步序推到第 N 步, 再置通讯故障位
 //       (等同于 12s 心跳超时的结果), 检查一个扫描周期后允许信号和动作输出已撤销,
 //       步序回 0, 错误码非 0.
 // CARD-DJ-2026-009-003 起 OB1 已接齐 FB_3001 引脚, 用例改走正常接线 (不再直接置实例输入):
-//   使能 = stExternal.bEmergencyStop, 自动 = stStation1.stControl.bAutoEnable, 复位 = stStation1.stControl.bReset,
+//   使能 = stExternal.bEmergencyStop AND bModbusEnable, 自动 = stStation1.stControl.bAutoEnable, 复位 = stStation1.stControl.bReset,
 //   进料就绪 = 工位在“等待来料”步 (气缸已缩回即进入), 出料就绪 = 工位在出料步且气缸已缩回 (置 fbStation1.s_iStep := 30),
 //   进料到位 = bInPosSensor, 有产品 = 工位块判断 (入料到位/加工到位/arrProductSens 任一路); 第 20 步要有合格的上游 ID.
 //   用例统一在自动模式下跑: 接线后非自动模式工位不发就绪, 握手不会开始. 期望值不变.
 // ============================================================================
 
 TEST_CASE "TC_HD_Infeed_Step0_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -50,7 +53,9 @@ TEST_CASE "TC_HD_Infeed_Step0_ComFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Infeed_Step10_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -89,7 +94,9 @@ TEST_CASE "TC_HD_Infeed_Step10_ComFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Infeed_Step20_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -130,7 +137,9 @@ TEST_CASE "TC_HD_Infeed_Step20_ComFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Infeed_Step30_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -172,7 +181,9 @@ TEST_CASE "TC_HD_Infeed_Step30_ComFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Infeed_Step40_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -214,7 +225,9 @@ TEST_CASE "TC_HD_Infeed_Step40_ComFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Outfeed_Step0_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -249,7 +262,9 @@ TEST_CASE "TC_HD_Outfeed_Step0_ComFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Outfeed_Step10_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -290,7 +305,9 @@ TEST_CASE "TC_HD_Outfeed_Step10_ComFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Outfeed_Step20_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -332,7 +349,9 @@ TEST_CASE "TC_HD_Outfeed_Step20_ComFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Outfeed_Step30_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -376,7 +395,9 @@ TEST_CASE "TC_HD_Outfeed_Step30_ComFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Outfeed_Step40_ComFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -421,7 +442,9 @@ END_TEST_CASE
 
 // 用户 2026-10-20 答复第 7 条: 下游断线也中止进料, 上游断线也中止出料
 TEST_CASE "TC_HD_Infeed_Step20_DownstreamFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -460,7 +483,9 @@ TEST_CASE "TC_HD_Infeed_Step20_DownstreamFault"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Outfeed_Step20_UpstreamFault"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -502,7 +527,9 @@ END_TEST_CASE
 
 // 用户 2026-10-20 答复第 8 条: 自动且作业中被中止 -> 通讯恢复后仍要人工复位; 不在作业中 -> 通讯恢复自动恢复
 TEST_CASE "TC_HD_Auto_InWork_NeedReset"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -551,7 +578,9 @@ END_TEST_CASE
 
 // 网线还断着时按复位不清锁, 通讯恢复后再按一次才算数 (用户 2026-10-20 17:40 MST 按建议批准)
 TEST_CASE "TC_HD_Auto_ResetDuringFault_KeepLock"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -603,7 +632,9 @@ TEST_CASE "TC_HD_Auto_ResetDuringFault_KeepLock"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Auto_Outfeed_InWork_NeedReset"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -653,7 +684,9 @@ TEST_CASE "TC_HD_Auto_Outfeed_InWork_NeedReset"
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Auto_Idle_AutoRecover"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -692,7 +725,9 @@ END_TEST_CASE
 // 非自动模式下中止的, 按第 8 条第一种情况处理: 不置锁, 通讯恢复、回到自动后不用复位就重新握手
 // (接线后非自动模式不发就绪, 所以先在自动下推到第 20 步, 再切手动, 再断线)
 TEST_CASE "TC_HD_Manual_InWork_AutoRecover"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -738,7 +773,9 @@ END_TEST_CASE
 
 // 复位按住不松: 断线中按下并一直按着, 网线接回来后锁仍在; 松开再按一次才清 (审计 59 复核)
 TEST_CASE "TC_HD_Auto_ResetHeld_KeepLock"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;

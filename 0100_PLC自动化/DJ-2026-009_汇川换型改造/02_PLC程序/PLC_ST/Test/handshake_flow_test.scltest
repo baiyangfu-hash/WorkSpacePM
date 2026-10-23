@@ -4,8 +4,9 @@
 // 项目: DJ-2026-009 汇川换型改造
 // 实施卡: CARD-DJ-2026-009-003 (草稿, 预做分支 claude/dj009-card003) 验收第 3 项
 // 被测: OB1 接线 + FB_3001_ExternalInteraction + FB_1001_Station1 状态位 + FC_3003_CheckModuleId
-// 做法: Modbus 映射层不使能, 直接置对方的握手变量; 本机一侧全部走 OB1 正常接线
-//   (使能 = stExternal.bEmergencyStop, 自动 = stStation1.stControl.bAutoEnable, 复位 = stStation1.stControl.bReset,
+// 做法: Modbus 映射层使能但两条链路都置为断开 (FB_3002 链路断开时不刷新读侧), 直接置对方的握手变量; 本机一侧全部走 OB1 正常接线
+//   (OB1 的握手使能 = 急停正常 AND bModbusEnable (Codex 评审 #77), 所以不能再用“Modbus 不使能”来置对方变量)
+//   (使能 = stExternal.bEmergencyStop AND bModbusEnable, 自动 = stStation1.stControl.bAutoEnable, 复位 = stStation1.stControl.bReset,
 //    进料就绪 = 工位“等待来料”, 出料就绪 = 工位出料步且气缸已缩回, 进料到位 = bInPosSensor,
 //    有产品 = 工位块判断 (入料到位/加工到位/arrProductSens 任一路)).
 // 计时: 共享库 FB_TON 目前按扫描次数计数, 本文件的时间参数和 WAIT_CYCLES 按“1 ms = 1 个扫描周期”写;
@@ -15,7 +16,9 @@
 
 // R1: 进料 8 步走通; 到位时上游 ID -> 本机 ID; 完成信号只保持一个扫描周期
 TEST_CASE "TC_HF_Infeed_FullFlow_IdTakeover"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -80,7 +83,9 @@ END_TEST_CASE
 
 // R5: 上游 ID 为空不允许进料并报警 16#0040; HMI 放行后本次进料继续
 TEST_CASE "TC_HF_Infeed_EmptyId_Release"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -142,7 +147,9 @@ END_TEST_CASE
 
 // R5: 上游 ID 为空时 HMI 补录; 补录空串无效, 补录合格 ID 后允许进料并成为本机 ID
 TEST_CASE "TC_HF_Infeed_EmptyId_ManualEntry"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -206,7 +213,9 @@ END_TEST_CASE
 
 // R2/R3 第 1 种: 准备出料时本机 ID -> 下游 ID; 出料握手完成清下游 ID, 本机 ID 一起清
 TEST_CASE "TC_HF_Outfeed_FullFlow_IdHandover"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -278,7 +287,9 @@ END_TEST_CASE
 
 // R3 第 2 种: 出料中本机持续检测不到产品超过设定时间 (这里设 5) 清下游 ID; 本机 ID 留给 R6
 TEST_CASE "TC_HF_Outfeed_ProductLeft_ClearDownId"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -343,7 +354,9 @@ END_TEST_CASE
 
 // R6: 有产品或非自动时不清; 自动且长时间 (这里设 5) 无产品自动清本机 ID
 TEST_CASE "TC_HF_Idle_AutoClear_MachineId"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -392,7 +405,9 @@ END_TEST_CASE
 
 // 有产品由工位块判断: 预留产品传感器数组任一路为 1 即算有产品 (用户 2026-10-21), 有产品时不自动清本机 ID
 TEST_CASE "TC_HF_ProductSensorArray_Present"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -439,7 +454,9 @@ END_TEST_CASE
 
 // R4/R6: HMI 拷入 (上游 -> 本机) 和清空; 命令位由 PLC 处理后清 0
 TEST_CASE "TC_HF_Hmi_CopyAndClear"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -482,7 +499,9 @@ END_TEST_CASE
 
 // R4: 握手第 20 步起中止, ID 待人工核对 16#0080; 复位不清, HMI 拷入后清
 TEST_CASE "TC_HF_Abort_IdCheckAlarm"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -542,7 +561,9 @@ END_TEST_CASE
 
 // 作业中扩展: 握手在第 0 步但机器里有产品 (加工中) 时断线, 自动模式下出料前要人工复位
 TEST_CASE "TC_HF_InWork_ProductPresent_NeedReset"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -602,7 +623,9 @@ END_TEST_CASE
 
 // 接线联锁: 工位在等待来料, 通讯故障时“准备好进料”必须撤销 (原来 FB_1001 直接写 ReadyIn, 会绕过这个联锁)
 TEST_CASE "TC_HF_ComFault_StationCannotForceReady"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -648,7 +671,9 @@ END_TEST_CASE
 
 // 失去使能 (急停回路断开) 时撤销动作输出, 按中途中止处理 (自动下要人工复位, 第 20 步起要核对 ID)
 TEST_CASE "TC_HF_EStop_RevokeActOutputs"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
@@ -709,7 +734,9 @@ END_TEST_CASE
 
 // 心跳是 4s 亮 / 4s 灭方波 (按扫描计数时 PT = 4000 个周期), 亮起后保持, 不是单周期脉冲
 TEST_CASE "TC_HF_Heartbeat_SquareWave"
-    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
     SET GlobalVars.stExternal.bEmergencyStop := TRUE;
     SET GlobalVars.stStation1.stControl.bAutoEnable := TRUE;
     SET GlobalVars.fbStation1.s_iStep := 0;
