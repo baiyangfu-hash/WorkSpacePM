@@ -9,3 +9,4 @@
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **V1.0.0** | pm-workflow | 2026-08-24 | `Init/Retrofit` | `DJ-2026-009-REQ-001` | **【基线初始化 - 异构平台移植】**<br>1. 从原 DJ005 平台（西门子/三菱）向汇川 AM500 平台迁移的初始骨架。<br>2. 剥离了原程序中绑死的物理硬线 IO，主逻辑全面接入 `ST_ExternalDevice` DTO 接口层。<br>3. 在 OB1 循环中初始化调用新增的 8 步握手防呆块 `FB_Handshake_8Step`。 |
 | **V1.2.0** | 云端 Claude（分支 `claude/dj009-card003`，预做） | 2026-10-21 | `Bugfix` | `CARD-DJ-2026-009-003`（草稿） | **【补接 FB_3001 引脚】**<br>1. 原来调用 `fbExternalDevice` 只传 `io_stExternal`，`i_bEnable` 默认 0，握手和心跳都不跑；现在接齐全部输入输出，接线表见 DSN 第 6 节。<br>2. （CARD-DJ-2026-009-001 已在第 0 部分加 FB_3002 调用。）<br>属安全区（进料允许联锁），须仿真和用户签字后才能合并。 |
+| **V1.2.1** | 云端 Claude（D09 合并日第 2 天，PR #77） | 2026-10-23 | `Bugfix` | `CARD-DJ-2026-009-003`（草稿） | **【Modbus 停用时不走握手】**<br>`fbExternalDevice.i_bEnable` 由只看 `bEmergencyStop` 改为 `bEmergencyStop AND bModbusEnable`。原来 Modbus 停用时 FB_3002 不再解包，对方信号停在最后值，FB_3001 仍可能按旧的进料请求走到第 30 步、让 FB_1001 启动进料电机。属安全区，随本 PR 一并仿真签字。 |
