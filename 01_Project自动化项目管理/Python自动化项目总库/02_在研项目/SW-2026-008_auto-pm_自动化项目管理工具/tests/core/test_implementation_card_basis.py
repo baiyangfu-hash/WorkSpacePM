@@ -235,12 +235,48 @@ def test_one_change_order_with_several_cards(tmp_path: Path) -> None:
     ordered = _card(tmp_path, "CARD-DJ-2099-001-003", baseline=baseline, change=change,
                     rows=(("02_PLC程序", "存在"),),
                     extra="> 前置卡：`CARD-DJ-2099-001-001`、`CARD-DJ-2099-001-002`")
+    # 前置卡 fixes the order: the earlier cards may go ahead, the later one waits until they close.
+    assert _check(tmp_path, first).passed, _messages(_check(tmp_path, first))
+    waiting = _messages(_check(tmp_path, ordered))
+    assert "前置卡 CARD-DJ-2099-001-001 还没关闭" in waiting
+    assert "前置卡 CARD-DJ-2099-001-002 还没关闭" in waiting and "等前置卡验收关闭后再开工" in waiting
+    for name in ("CARD-DJ-2099-001-001", "CARD-DJ-2099-001-002"):
+        _card(tmp_path, name, baseline=baseline, change=change, rows=(("02_PLC程序/FB_3001.scl", "存在"),),
+              extra="> 状态：已验收")
     assert _check(tmp_path, ordered).passed, _messages(_check(tmp_path, ordered))
 
     # A sibling that is already accepted no longer competes for the files.
+    first = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, change=change,
+                  extra="> 状态：已派工")
     _card(tmp_path, "CARD-DJ-2099-001-003", baseline=baseline, change=change,
           rows=(("02_PLC程序", "存在"),), extra="> 状态：已验收")
     assert _check(tmp_path, first).passed
+
+
+def test_a_sibling_card_whose_path_table_cannot_be_read_is_refused_not_ignored(tmp_path: Path) -> None:
+    """Codex on #60: a sibling row that fails to parse may be the one that overlaps."""
+    baseline = _workspace(tmp_path)
+    change = "`CHG-PLC-2099-001`"
+    mine = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, change=change)
+    assert _check(tmp_path, mine).passed, _messages(_check(tmp_path, mine))  # positive control
+    _card(tmp_path, "CARD-DJ-2099-001-002", baseline=baseline, change=change,
+          rows=(("02_PLC程序/OB1.scl", "改一下"),))  # baseline state not allowed: row is dropped
+    assert "路径表读不全" in _messages(_check(tmp_path, mine))
+
+
+def test_an_ancestor_directory_of_a_guarded_file_needs_a_change_order(tmp_path: Path) -> None:
+    """Codex on #60: a path table that names a parent directory still touches what it contains."""
+    baseline = _workspace(tmp_path)
+    for directory in ("00_Infrastructure/auto_pm", "00_Infrastructure", "."):
+        card = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline,
+                     extra="> 路径根：`.`", rows=((directory, "运行态"),))
+        assert "变更单不能写“无”" in _messages(_check(tmp_path, card)), directory
+    # A project directory contains its version ledger.
+    project = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, rows=(("11_监控", "存在"),))
+    assert "变更单不能写“无”" in _messages(_check(tmp_path, project))
+    # Positive control: an ordinary program folder needs no change order.
+    plain = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, rows=(("02_PLC程序", "存在"),))
+    assert _check(tmp_path, plain).passed, _messages(_check(tmp_path, plain))
 
 
 def test_by_change_lists_the_cards_of_one_project_only(tmp_path: Path) -> None:
