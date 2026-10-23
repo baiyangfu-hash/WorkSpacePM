@@ -51,6 +51,10 @@ GUARDED_SUFFIXES = (f"/{CHANGE_CABINET}/02_变更记录/01_版本变更台账.md
 NEW_CARD_NAME = re.compile(r"^(CARD-[A-Z]+-\d{4}-\d{3})-(\d{3})(?=_|$)")
 # Old ids keep a three-digit serial; from 2026-10-22 a new row is numbered by the month it was raised: BC-<pid>-<year>_<month>_<serial>.
 BC_ID = re.compile(r"^BC-[A-Z]+-\d{4}-\d{3}-(?:\d{3}|\d{4}_(?:0[1-9]|1[0-2])_\d{3})$")
+# A confirmed requirement checklist cited with its version: REQ-<pid>-<year>_<month>_<serial> V<n>.
+REQ_ID = re.compile(r"^(REQ-[A-Z]+-\d{4}-\d{3}-\d{4}_(?:0[1-9]|1[0-2])_\d{3}) V([1-9]\d*)$")
+REQ_DRAWER = "00_需求核对单"
+_REQ_CONFIRMED_VERSION = re.compile(r"^\|\s*确认的版本\s*\|\s*(V[1-9]\d*)\s*\|", re.MULTILINE)
 CHG_ID = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3,}$")
 CARD_ID = re.compile(r"CARD-[A-Za-z0-9-]+")
 _BASIS_HEADER = re.compile(r"^>\s*(依据|变更单|前置卡|状态)：(.*)$")
@@ -175,8 +179,32 @@ def _bc_states(record: Path) -> dict[str, str]:
 def _req_files(project_dir: Path) -> list[Path]:
     return sorted(
         path for path in project_dir.rglob("*REQ*.md")
-        if path.is_file() and not _skip(path, project_dir)
+        if path.is_file() and not _skip(path, project_dir) and REQ_DRAWER not in path.parts
     )
+
+
+def _req_checklist_finding(item: str, project_dir: Path, pid: str) -> BasisFinding | None:
+    """A cited checklist must be this project's, sit in its drawer, and carry the cockpit's confirmation of that version."""
+
+    match = REQ_ID.fullmatch(item)
+    if match is None:
+        return BasisFinding("basis", item, "需求核对单的写法应为 REQ-<项目号>-<年>_<月>_<三位序号> V<版本>")
+    req_id, version = match.group(1), f"V{match.group(2)}"
+    if not req_id.startswith(f"REQ-{pid}-"):
+        return BasisFinding("basis", item, f"依据的需求核对单不属于本项目 {pid}")
+    files = sorted(
+        path for path in project_dir.rglob(f"{req_id}_*.md")
+        if path.is_file() and path.parent.name == REQ_DRAWER and not _skip(path, project_dir)
+    )
+    if len(files) != 1:
+        return BasisFinding("basis", item, f"本项目 {REQ_DRAWER}/ 里应恰有一份 {req_id}，实际 {len(files)} 份")
+    text = files[0].read_text(encoding="utf-8", errors="replace")
+    confirmed = _REQ_CONFIRMED_VERSION.search(text)
+    if not re.search(r"^> 状态：已确认\s*$", text, re.MULTILINE) or confirmed is None:
+        return BasisFinding("basis", item, "需求核对单还没有经用户确认（第 8 节未由驾驶舱写入）")
+    if confirmed.group(1) != version:
+        return BasisFinding("basis", item, f"用户确认的是 {confirmed.group(1)}，实施卡依据写的是 {version}")
+    return None
 
 
 def _resolve_doc(token: str, project_dir: Path, workspace_root: Path) -> Path | None:
@@ -257,8 +285,13 @@ def _basis_rule(
 
     findings: list[BasisFinding] = []
     bcs = [item for item in header.basis if item.startswith("BC-")]
+    reqs = [item for item in header.basis if item.startswith("REQ-")]
     docs = [item for item in header.basis if "/" in item or item.endswith(".md")]
-    items = [item for item in header.basis if item not in bcs and item not in docs]
+    items = [item for item in header.basis if item not in bcs and item not in reqs and item not in docs]
+    for item in reqs:
+        finding = _req_checklist_finding(item, project_dir, pid)
+        if finding is not None:
+            findings.append(finding)
     for item in header.basis:
         if item.startswith("CHG-"):
             findings.append(BasisFinding("basis", item, "CHG 变更单写在 `变更单：` 一栏，不能当作依据"))
@@ -303,7 +336,7 @@ def _basis_rule(
             pattern = re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(item)}(?![A-Za-z0-9_-])")
             if not any(pattern.search(text) for text in texts):
                 findings.append(BasisFinding("basis", item, "需求条目在本项目的需求说明（*REQ*.md）里找不到"))
-    if not bcs and not items:
+    if not bcs and not reqs and not items:
         findings.append(BasisFinding("basis", "依据", "依据至少要引用一条业务变更（BC）或需求条目"))
     return findings
 
