@@ -4,12 +4,14 @@ Commands:
     check <ID> [--json] [--strict-markers]      核对接口文档/变量定义文档与 SCL 代码，并检查里程碑表计划日期（有失败项退出码为 1）
     sync <ID> [--dry-run] [--apply-suggestions] 按代码补全文档（补入的行带“待确认”标记，只写文档）
     confirm <ID>                                去掉已与代码对上的行上的“待确认”标记
+    plan <ID> --start --type --scale [--with] [--write]  按项目周期规范推里程碑计划日期（只填空着的计划日期）
 
 ``<ID>`` 也可以换成 ``--project-path <项目目录>``（用于隔离副本）。
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 from dataclasses import asdict
 
@@ -17,6 +19,7 @@ import click
 
 from auto_pm.app_context import AppContext
 from auto_pm.core.project_service import ProjectService
+from auto_pm.plc import cycle_plan as cp
 from auto_pm.plc import doc_consistency as dc
 from auto_pm.plc import milestones as ms
 
@@ -135,3 +138,47 @@ def cmd_confirm(ctx: click.Context, project_id: str | None, project_path: str | 
     click.echo(f"已确认 {result.confirmed} 行")
     for line in result.skipped:
         click.echo(f"    未确认: {line}")
+
+
+@docs_group.command(name="plan")
+@_ID
+@_PATH
+@click.option("--start", "start_text", required=True, help="需求确认日 YYYY-MM-DD")
+@click.option("--type", "main_type", required=True, type=click.Choice(list(cp.MAIN_TYPES)), help="主类型")
+@click.option("--with", "addons", multiple=True, type=click.Choice(list(cp.ADDONS)), help="附加项，可写多次")
+@click.option("--scale", required=True, help="规模（按规范里的规模表：单机 / 小线 / 整线）")
+@click.option("--spec", "spec_path", type=click.Path(dir_okay=False, exists=True), default=None,
+              help="周期规范文件（默认在项目上级目录里找 0100_PLC自动化/00_通用规范/项目周期规范.md）")
+@click.option("--write", is_flag=True, help="把推算日期写进里程碑表里空着的计划日期（已有日期不改）")
+@click.pass_context
+def cmd_plan(ctx: click.Context, project_id: str | None, project_path: str | None, start_text: str,
+             main_type: str, addons: tuple[str, ...], scale: str, spec_path: str | None, write: bool) -> None:
+    """按项目周期规范推里程碑计划日期。默认只显示；加 --write 才写，且只填空着的计划日期。"""
+    path = _resolve(ctx, project_id, project_path)
+    try:
+        start = _dt.date.fromisoformat(start_text)
+    except ValueError:
+        raise click.BadParameter("要写 YYYY-MM-DD", param_hint="--start") from None
+    if not ms._DATE.match(start_text):
+        raise click.BadParameter("要写 YYYY-MM-DD", param_hint="--start")
+    found = spec_path or cp.find_spec(path)
+    if not found:
+        raise click.ClickException(f"找不到周期规范 {cp.SPEC_RELATIVE}，用 --spec 指定")
+    try:
+        spec = cp.read_spec(found)
+        dates = cp.plan(spec, start, main_type, tuple(addons), scale)
+    except cp.CycleSpecError as exc:
+        raise click.ClickException(str(exc)) from None
+    note = cp.describe(spec, main_type, tuple(addons), scale)
+    click.echo(f"{note}（需求确认日 {start.isoformat()}）")
+    for stage, date in dates.items():
+        click.echo(f"    {stage}  {date.isoformat()}")
+    files = ms.find_milestone_files(path)
+    if not files:
+        click.echo("项目里没有里程碑表，没有写入；先按模板 11_里程碑表模板.md 建表")
+        return
+    result = cp.fill_milestone_file(files[0], dates, note, write=write)
+    prefix = "已写入" if write else "（预览，未写文件）将写入"
+    click.echo(f"{prefix} {len(result.filled)} 个空着的计划日期：{'、'.join(result.filled) or '无'}")
+    if result.kept:
+        click.echo(f"已有日期或不适用、没动：{'、'.join(result.kept)}")
