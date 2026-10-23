@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -715,7 +716,7 @@ class Runner:
         while (p["txt"].with_name(f"{s['name']}.interrupted.{n}.txt")).exists():
             n += 1
         if p["txt"].exists():
-            p["txt"].rename(p["txt"].with_name(f"{s['name']}.interrupted.{n}.txt"))
+            _keep_partial(p["txt"], p["txt"].with_name(f"{s['name']}.interrupted.{n}.txt"), self.log)
         rec.setdefault("interruptions", []).append({"started": rec.get("started"), "kept_as": f"{s['name']}.interrupted.{n}.txt"})
         rec["status"] = "interrupted"
         self.log(f"step {_key(s)} had not finished; partial output kept as {s['name']}.interrupted.{n}.txt; it runs again in full")
@@ -794,6 +795,20 @@ class Runner:
             except OSError as error:
                 self.log(f"status write failed: {error}")
             self.stop_all.wait(int(self.cfg["poll_s"]))
+
+
+def _keep_partial(src: Path, dst: Path, log: Log) -> None:
+    """Rename the partial output aside. On Windows a killed grandchild can still hold an inherited handle for a
+    moment (a Job Object kill is asynchronous), which blocks a rename but not a read: retry, then copy."""
+
+    for attempt in range(10):
+        try:
+            src.rename(dst)
+            return
+        except PermissionError:
+            time.sleep(0.5 * (attempt + 1))
+    shutil.copyfile(src, dst)
+    log(f"{src.name} is still held open; its partial output was copied to {dst.name} instead of renamed")
 
 
 def _key(s: dict[str, Any]) -> str:

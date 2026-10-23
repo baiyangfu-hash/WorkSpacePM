@@ -489,3 +489,20 @@ def test_the_task_is_deleted_once_the_round_is_final(lab: dict[str, Path]) -> No
     assert r.returncode == 0
     assert (lab["tools"] / "schtasks.log").read_text().split() == ["/Delete", "/TN", "WSPM-LongGate-drill", "/F"]
     assert "scheduled task WSPM-LongGate-drill deleted" in (lab["out"] / "long_gate.log").read_text()
+
+
+def test_partial_output_held_open_is_copied_aside(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows: a killed grandchild can still hold the output for a moment; a rename that keeps failing becomes a copy."""
+
+    mod = _module()
+    src, dst = tmp_path / "core.txt", tmp_path / "core.interrupted.1.txt"
+    src.write_text("half a group\n", encoding="utf-8")
+
+    def refuse(self: Path, target: Path) -> Path:
+        raise PermissionError("held open")
+
+    monkeypatch.setattr(Path, "rename", refuse)
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    mod._keep_partial(src, dst, mod.Log(tmp_path / "log"))
+    assert dst.read_text(encoding="utf-8") == "half a group\n"
+    assert "copied to core.interrupted.1.txt" in (tmp_path / "log").read_text(encoding="utf-8")
