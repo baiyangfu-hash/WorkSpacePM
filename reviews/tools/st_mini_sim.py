@@ -17,7 +17,7 @@ PT<=0 时 Q 跟随 IN；ET 到 PT 封顶）。``FB_R_TRIG`` / ``FB_F_TRIG`` 也�
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -77,14 +77,14 @@ class TypeSpec:
     name: str  # BOOL / INT / ... / ARRAY / FB 名
     lo: int = 0
     hi: int = 0
-    elem: "TypeSpec | None" = None
+    elem: TypeSpec | None = None
 
 
 INT_TYPES = {"INT", "DINT", "SINT", "LINT", "UINT", "UDINT", "USINT", "BYTE", "WORD", "DWORD", "LWORD", "TIME"}
 BITS = {"BYTE": 8, "WORD": 16, "DWORD": 32, "LWORD": 64}
 
 
-def default_value(t: TypeSpec, sim: "Sim") -> Any:
+def default_value(t: TypeSpec, sim: Sim) -> Any:
     n = t.name.upper()
     if n == "BOOL":
         return False
@@ -460,14 +460,14 @@ class _Return(Exception):
 class NativeTON:
     """FB_TON（真实毫秒）。"""
 
-    def __init__(self, sim: "Sim"):
+    def __init__(self, sim: Sim):
         self.sim = sim
         self.vars = {"IN": False, "PT": 0, "Q": False, "ET": 0}
         self._start: int | None = None
 
     def call(self) -> None:
         v = self.vars
-        pt = v["PT"] if v["PT"] > 0 else 0
+        pt = max(0, v["PT"])
         if not v["IN"]:
             self._start = None
             v["Q"], v["ET"] = False, 0
@@ -482,7 +482,7 @@ class NativeTON:
 
 
 class NativeTrig:
-    def __init__(self, sim: "Sim", rising: bool):
+    def __init__(self, sim: Sim, rising: bool):
         self.vars = {"IN": False, "Q": False}
         self.rising = rising
         self._last = False
@@ -494,7 +494,7 @@ class NativeTrig:
 
 
 class Instance:
-    def __init__(self, sim: "Sim", fb: dict[str, Any]):
+    def __init__(self, sim: Sim, fb: dict[str, Any]):
         self.sim = sim
         self.fb = fb
         self.vars: dict[str, Any] = {}

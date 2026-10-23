@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from st_mini_sim import Sim  # noqa: E402
+from st_mini_sim import Sim
 
 REPO = Path(__file__).resolve().parents[2]
 PLC = REPO / "0100_PLC自动化"

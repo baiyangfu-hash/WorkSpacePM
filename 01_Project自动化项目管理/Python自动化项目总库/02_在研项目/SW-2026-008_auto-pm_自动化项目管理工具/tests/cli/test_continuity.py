@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -842,7 +843,8 @@ def test_run_start_rejects_physically_dirty_undeclared_owned_path(
         ],
     )
     assert started.exit_code == 1
-    assert "未声明" in started.output
+    # An empty declaration is refused before the dirty tree is even sampled.
+    assert "--declared-dirty" in started.output
 
 
 def test_run_start_cli_exact_replay_survives_dirty_tree_and_successor_commit(
@@ -887,6 +889,8 @@ def test_run_start_cli_exact_replay_survives_dirty_tree_and_successor_commit(
         "codex",
         "--owned",
         "README.md",
+        "--declared-dirty",
+        "README.md",
         "--lease-token",
         "cli-replay-secret",
         "--lease-seconds",
@@ -928,6 +932,7 @@ def test_run_start_cli_exact_replay_survives_dirty_tree_and_successor_commit(
 def test_run_start_cli_replays_only_provable_legacy_receipt(
     cli_runner: CliRunner,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _repository(tmp_path)
     work = _invoke(
@@ -974,7 +979,12 @@ def test_run_start_cli_replays_only_provable_legacy_receipt(
         "--idempotency-key",
         "run-start-legacy",
     ]
-    first = _invoke(cli_runner, tmp_path, args)
+    # Legacy Runs (only provable with an empty declaration) predate the
+    # empty-declaration refusal, so the first start bypasses that new rule.
+    with monkeypatch.context() as legacy:
+        for module in (continuity_cli, sys.modules["auto_pm.cli.continuity"]):
+            legacy.setattr(module, "declared_dirty_problem", lambda *_a, **_k: "")
+        first = _invoke(cli_runner, tmp_path, args)
     assert first.exit_code == 0, first.output
     _replace_run_created_event_with_legacy_payload(tmp_path, "RUN-CLI-LEGACY")
 
@@ -1067,6 +1077,8 @@ def test_run_start_rejects_external_repository_before_run_persistence(
             "--adapter",
             "codex",
             "--owned",
+            "README.md",
+            "--declared-dirty",
             "README.md",
             "--worktree",
             str(foreign),
@@ -1748,3 +1760,84 @@ def test_work_create_offers_no_precheck_bypass(cli_runner: CliRunner, tmp_path: 
         "--help",
     }
     # The exact option set above is the proof that no skip/bypass/force switch exists.
+
+
+def _declaration_work(cli_runner: CliRunner, root: Path, scope: str) -> None:
+    _repository(root)
+    created = _invoke(
+        cli_runner,
+        root,
+        [
+            "work", "create", "--work-id", "WORK-CLI-DECL", "--pid", "SW-TEST-001",
+            "--kind", "TEST", "--title", "Declaration gate", "--owner", "agent-a",
+            "--scope", scope, "--idempotency-key", "work-create-decl", "--read-only",
+        ],
+    )
+    assert created.exit_code == 0, created.output
+
+
+def _declaration_start(cli_runner: CliRunner, root: Path, *extra: str) -> Result:
+    return _invoke(
+        cli_runner,
+        root,
+        [
+            "run", "start", "--run-id", "RUN-CLI-DECL", "--work-id", "WORK-CLI-DECL",
+            "--executor", "agent-a", "--adapter", "codex", *extra,
+            "--lease-token", "decl-secret", "--lease-seconds", "900",
+            "--idempotency-key", "run-start-decl",
+        ],
+    )
+
+
+def _run_count(root: Path) -> int:
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM run_items").fetchone()[0])
+
+
+def test_run_start_refuses_an_empty_declaration_on_a_clean_tree(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    """DJ-2026-011 defect: a Run started with nothing declared later failed acceptance."""
+    _declaration_work(cli_runner, tmp_path, "README.md")
+
+    refused = _declaration_start(cli_runner, tmp_path, "--owned", "README.md")
+
+    assert refused.exit_code == 1
+    assert "改动声明为空" in refused.output and "--declared-dirty" in refused.output
+    assert _run_count(tmp_path) == 0
+    started = _declaration_start(
+        cli_runner, tmp_path, "--owned", "README.md", "--declared-dirty", "README.md"
+    )
+    assert started.exit_code == 0, started.output
+    assert json.loads(started.output)["declared_dirty_paths"] == ["README.md"]
+
+
+@pytest.mark.parametrize(
+    "retired", ["PM_SESSION_SW-TEST-001.md", "docs/PM_SESSION_FB1011.md", "docs/pm_session_x.md"]
+)
+def test_run_start_refuses_a_retired_pm_session_file(
+    cli_runner: CliRunner, tmp_path: Path, retired: str
+) -> None:
+    _declaration_work(cli_runner, tmp_path, retired)
+
+    refused = _declaration_start(
+        cli_runner, tmp_path, "--owned", retired, "--declared-dirty", retired
+    )
+
+    assert refused.exit_code == 1
+    assert "PM_SESSION" in refused.output and "已退役" in refused.output
+    assert _run_count(tmp_path) == 0
+
+
+def test_run_start_accepts_a_file_that_only_resembles_pm_session(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    """Counter-example: only PM_SESSION_*.md is retired, not every similar name."""
+    lookalike = "docs/PM_SESSION_GUIDE.txt"
+    _declaration_work(cli_runner, tmp_path, lookalike)
+
+    started = _declaration_start(
+        cli_runner, tmp_path, "--owned", lookalike, "--declared-dirty", lookalike
+    )
+
+    assert started.exit_code == 0, started.output

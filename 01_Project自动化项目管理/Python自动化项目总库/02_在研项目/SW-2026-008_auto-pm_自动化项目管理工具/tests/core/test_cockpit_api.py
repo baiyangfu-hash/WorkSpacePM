@@ -38,6 +38,7 @@ from tests.core.test_pm_run_e2e import (
     _build_workspace,
     _helper_source,
 )
+from tests.plan_checklist_support import full_checklist
 
 APPROVER = "fubai"
 EVIDENCE = "user-confirmation:U07C-E2E-001"
@@ -146,11 +147,12 @@ def _plan(client: CockpitClient, request_id: str = "REQ-U07C-E2E") -> PlanningSc
         objective="Fix add()",
         acceptance=("add(2, 3) == 5",),
         scope_paths=(CALC, CALC_TEST),
-        risks=("none",),
+        risks=("改错文件导致回归",),
         non_goals=("no refactor",),
         adapter=ExecutionAdapterKind.CODEX,
         approved_model="agent-a",
         declared_dirty_paths=(CALC, CALC_TEST),
+        plan_checklist=full_checklist(),
     )
 
 

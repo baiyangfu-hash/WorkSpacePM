@@ -1,0 +1,34 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261018-CLEAN8W1",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-431",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-18T14:14:52.462022+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "adjudicate_blocked_work"
+      ],
+      "target_run_ids": [],
+      "allowed_outcomes": [
+        "CANCELLED"
+      ],
+      "target_work_ids": [
+        "WORK-SW008-M2-F02-001",
+        "WORK-SW008-M2-P1-AUDITFIX-001",
+        "WORK-SW008-M2-V05B2-001",
+        "WORK-SW008-M2-V05B3-001",
+        "WORK-SW008-M3-PLUGIN-001",
+        "WORK-SW008-M3-PLUGIN-003",
+        "WORK-SW008-M3-V04D-001"
+      ]
+    }
+  }
+}
