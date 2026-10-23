@@ -6,7 +6,8 @@
 
 V1.0.0 接口设计原则：
 - 所有 Slot 返回类型与 QML 兼容（bool/str/list/"QVariant"）
-- 耗时操作（scan）在 QThread 中执行并通过 Signal 异步回传进度
+- 耗时操作（scan/ping）在线程池中执行；子线程只写结果，主线程 QTimer 轮询后用 Signal 回传进度；
+  后台出错一律回传失败原因（scanFailed / pingResultReceived(False, 原因)），界面不会卡在“扫描中”
 - 轮询模式使用 QTimer 定时触发（频率：1000ms，由 QML 控制开关）
 
 设计参考：02_设计/Html原型预览/018_UI架构原型_V13.html
@@ -29,49 +30,56 @@ log = logging.getLogger(__name__)
 # 后台扫描任务（QRunnable → QThreadPool）
 # ─────────────────────────────────────────────
 
-class _ScanWorkerSignals(QObject):
-    """扫描任务信号容器（QRunnable 不能继承 QObject，故独立）"""
-    cellResult = Signal(int, bool)   # (offset, is_active)
-    finished = Signal()
-
-
 class _ScanWorker(QRunnable):
-    """在线程池后台执行寄存器扫描探测。"""
+    """在线程池后台执行寄存器扫描探测。
+
+    结果回传沿用 file_watcher_bridge / pm_cockpit_bridge 的轮询方案：run() 只写
+    cells/error/done，不从子线程发 Qt 信号；bridge 的主线程 QTimer 读取后逐格推送。
+    run() 任何异常都落到 error 并置 done，界面一定能退出“扫描中”。
+    """
 
     def __init__(self, service: ModbusService, start: int, end: int) -> None:
         super().__init__()
         self.service = service
         self.start_offset = start
         self.end_offset = end
-        self.signals = _ScanWorkerSignals()
+        self.setAutoDelete(False)
+        self.cells: list[tuple[int, bool]] = []
+        self.error = ""
+        self.done = False
 
     def run(self) -> None:
-        import time as _time
-        cells = self.service.scan_registers(self.start_offset, self.end_offset)
-        for cell in cells:
-            self.signals.cellResult.emit(cell.offset, cell.is_active)
-            _time.sleep(0.05)  # 渐进展示节奏（50ms/格）
-        self.signals.finished.emit()
-
-
-class _PingWorkerSignals(QObject):
-    """Ping 任务信号容器"""
-    finished = Signal(bool, str)
+        try:
+            cells = self.service.scan_registers(self.start_offset, self.end_offset)
+            self.cells = [(cell.offset, cell.is_active) for cell in cells]
+        except Exception as e:  # noqa: BLE001 - worker must always release the scan button
+            log.warning("scan worker failed: %s", e, exc_info=True)
+            self.error = IndustrialErrorMapper.format_exception(e)
+        finally:
+            self.done = True
 
 
 class _PingWorker(QRunnable):
-    """在后台执行 Ping 探测，不阻塞 UI 线程。"""
+    """在后台执行 Ping 探测，不阻塞 UI 线程。结果回传同 _ScanWorker（轮询，不跨线程发信号）。"""
 
     def __init__(self, service: ModbusService, ip: str, source_ip: str = "") -> None:
         super().__init__()
         self.service = service
         self.ip = ip
         self.source_ip = source_ip
-        self.signals = _PingWorkerSignals()
+        self.setAutoDelete(False)
+        self.result: tuple[bool, str] | None = None
+        self.done = False
 
     def run(self) -> None:
-        result = self.service.ping_host(self.ip, self.source_ip)
-        self.signals.finished.emit(result.success, result.message)
+        try:
+            result = self.service.ping_host(self.ip, self.source_ip)
+            self.result = (result.success, result.message)
+        except Exception as e:  # noqa: BLE001 - worker must always release the ping button
+            log.warning("ping worker failed: %s", e, exc_info=True)
+            self.result = (False, f"Ping 后台异常: {IndustrialErrorMapper.format_exception(e)}")
+        finally:
+            self.done = True
 
 
 # ─────────────────────────────────────────────
@@ -91,6 +99,7 @@ class ModbusBridge(QObject):
         pingResultReceived(bool, str)   — Ping 探测结果
         scanCellUpdated(int, bool)      — 单格扫描进度 (offset, is_active)
         scanFinished()                  — 扫描完成
+        scanFailed(str)                 — 扫描失败/被拒（原因），界面据此恢复按钮
     """
 
     # ── Signals ──────────────────────────────────────────
@@ -100,12 +109,24 @@ class ModbusBridge(QObject):
     pingResultReceived   = Signal(bool, str)
     scanCellUpdated      = Signal(int, bool)
     scanFinished         = Signal()
+    scanFailed           = Signal(str)
+
+    _POLL_INTERVAL_MS = 50  # 主线程轮询节奏；扫描结果每拍推一格（渐进展示 50ms/格）
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._service = ModbusService()
         self._poll_timer: QTimer | None = None
         self._pool = QThreadPool.globalInstance()
+        self._scan_worker: _ScanWorker | None = None
+        self._scan_next = 0
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setInterval(self._POLL_INTERVAL_MS)
+        self._scan_timer.timeout.connect(self._poll_scan)
+        self._ping_workers: list[_PingWorker] = []
+        self._ping_timer = QTimer(self)
+        self._ping_timer.setInterval(self._POLL_INTERVAL_MS)
+        self._ping_timer.timeout.connect(self._poll_ping)
 
     # ── 内部工具 ─────────────────────────────────────────
 
@@ -126,8 +147,22 @@ class ModbusBridge(QObject):
         """
         self._log("PING", f"发起 ICMP PING 探测 → {ip} (网卡绑定: {source_ip if source_ip else '自动'})...")
         worker = _PingWorker(self._service, ip, source_ip)
-        worker.signals.finished.connect(self._on_ping_finished)
+        self._ping_workers.append(worker)
         self._pool.start(worker)
+        self._ping_timer.start()
+
+    def _poll_ping(self) -> None:
+        """主线程读取已完成的 Ping 结果并推送（对应 _PingWorker 的轮询回传）。"""
+        pending: list[_PingWorker] = []
+        for worker in self._ping_workers:
+            if not worker.done:
+                pending.append(worker)
+                continue
+            success, msg = worker.result or (False, "Ping 后台未返回结果")
+            self._on_ping_finished(success, msg)
+        self._ping_workers = pending
+        if not pending:
+            self._ping_timer.stop()
 
     def _on_ping_finished(self, success: bool, msg: str) -> None:
         self._log("PING" if success else "ERR", msg)
@@ -319,17 +354,45 @@ class ModbusBridge(QObject):
         完成后发射 scanFinished()。
         """
         if not self._service.is_connected:
-            self._log("ERR", "请先连接 Modbus TCP 设备再执行扫描！")
+            self._fail_scan("请先连接 Modbus TCP 设备再执行扫描！")
+            return
+        if self._scan_worker is not None:
+            self._fail_scan("上一次扫描尚未结束，请稍候再试。")
             return
 
         self._log("SYS", f"[扫描开始] 并发探测保持寄存器 [{40001 + start_offset} - {40001 + end_offset}]...")
         worker = _ScanWorker(self._service, start_offset, end_offset)
-        worker.signals.cellResult.connect(self.scanCellUpdated)
-        worker.signals.finished.connect(self.scanFinished)
-        worker.signals.finished.connect(
-            lambda: self._log("SYS", "[扫描完成] 活跃物理通道已用绿色标出，不可达通道已用红色标出。")
-        )
+        self._scan_worker = worker
+        self._scan_next = 0
         self._pool.start(worker)
+        self._scan_timer.start()
+
+    def _fail_scan(self, reason: str) -> None:
+        self._log("ERR", f"[扫描失败] {reason}")
+        self.scanFailed.emit(reason)
+
+    def _poll_scan(self) -> None:
+        """主线程推送扫描进度：每拍一格；全部推完后发 scanFinished，出错发 scanFailed。"""
+        worker = self._scan_worker
+        if worker is None:
+            self._scan_timer.stop()
+            return
+        if not worker.done:
+            return
+        if worker.error:
+            self._scan_timer.stop()
+            self._scan_worker = None
+            self._fail_scan(worker.error)
+            return
+        if self._scan_next < len(worker.cells):
+            offset, is_active = worker.cells[self._scan_next]
+            self._scan_next += 1
+            self.scanCellUpdated.emit(offset, is_active)
+            return
+        self._scan_timer.stop()
+        self._scan_worker = None
+        self.scanFinished.emit()
+        self._log("SYS", "[扫描完成] 活跃物理通道已用绿色标出，不可达通道已用红色标出。")
 
 
     # ── JSON 配置 ─────────────────────────────────────────

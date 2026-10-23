@@ -104,6 +104,13 @@ Item {
             startScanBtn.text = "⚡ 重新探测"
         }
 
+        // 扫描失败/被拒：恢复按钮，红框显示原因（不再永远停在“扫描中...”）
+        function onScanFailed(reason) {
+            startScanBtn.enabled = true
+            startScanBtn.text = "⚡ 重新探测"
+            scanErrorText.text = "扫描失败：" + reason
+        }
+
         function onTrendDataUpdated(v1, v2) {
             trendCanvas.appendData(v1, v2)
         }
@@ -797,10 +804,12 @@ Item {
                                 }
                                 Button {
                                     id: startScanBtn
+                                    objectName: "startScanBtn"
                                     text: "⚡ 立即探测 (0-99)"
                                     font.pixelSize: Theme.fontSizeSm
                                     onClicked: {
                                         scannerGrid.resetAll()
+                                        scanErrorText.text = ""
                                         startScanBtn.enabled = false
                                         startScanBtn.text = "扫描中..."
                                         if (typeof modbusBridge !== "undefined" && modbusBridge !== null) {
@@ -809,6 +818,29 @@ Item {
                                             _simulateScan()
                                         }
                                     }
+                                }
+                            }
+
+                            // 扫描失败原因红框（无错误时不占位）
+                            Rectangle {
+                                id: scanErrorBox
+                                objectName: "scanErrorBox"
+                                Layout.fillWidth: true
+                                visible: scanErrorText.text !== ""
+                                implicitHeight: scanErrorText.implicitHeight + Theme.spacingSm * 2
+                                radius: Theme.radiusSm
+                                color: Qt.rgba(0.94, 0.27, 0.27, 0.12)
+                                border.color: Theme.error
+                                border.width: 1
+                                Text {
+                                    id: scanErrorText
+                                    objectName: "scanErrorText"
+                                    anchors.fill: parent
+                                    anchors.margins: Theme.spacingSm
+                                    text: ""
+                                    color: Theme.error
+                                    font.pixelSize: Theme.fontSizeXs
+                                    wrapMode: Text.Wrap
                                 }
                             }
 
