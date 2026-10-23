@@ -10,6 +10,7 @@ import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -613,12 +614,21 @@ def test_an_agent_sweep_only_cleans_its_own_station(
     assert "只由用户" in {item.target: item.reason for item in report.items}[str(leftover)]
 
 
-def test_a_failing_git_status_stops_the_sweep(lab: Lab) -> None:
+def test_a_failing_git_status_stops_the_sweep(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
     station = finished_station(lab, "claude", "CARD-1")
     lab.merge_on_github("claude/CARD-1")
-    (station / ".git").write_text("gitdir: /nowhere\n", encoding="utf-8")
+    run_git = AgentWorktreeService._git
 
-    with pytest.raises(AgentWorktreeError):
+    def broken_status(
+        self: AgentWorktreeService, *args: str, **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
+        if args and args[0] == "status":
+            return subprocess.CompletedProcess(args, 128, "", "fatal: cannot read the index")
+        return run_git(self, *args, **kwargs)
+
+    monkeypatch.setattr(AgentWorktreeService, "_git", broken_status)
+
+    with pytest.raises(AgentWorktreeError, match="读不到工位状态"):
         lab.service().sweep(apply=True)
     assert station.exists()
 
