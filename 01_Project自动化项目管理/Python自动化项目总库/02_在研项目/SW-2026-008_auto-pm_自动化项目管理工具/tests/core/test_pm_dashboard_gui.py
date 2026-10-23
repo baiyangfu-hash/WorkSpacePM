@@ -1,7 +1,7 @@
 """驾驶舱总控屏桌面界面 ``scripts/pm_dashboard_gui.py`` → ``scripts/cockpit_board/``：
 
 项目经理看板只读（按钮只在 policy.PM_BUTTONS 里）、工程工位按钮只在 policy.STATION_BUTTONS 里且
-批准 / 开工 / 提交灰着、没有输入框、不写工作空间、纯文本标签、没检查显示“没检查”不显示 0、
+批准 / 开工 / 提交灰着、输入框只在 BC 表单里、不写工作空间、纯文本标签、没检查显示“没检查”不显示 0、
 先快读再接老后台（TD-105 前永远不接）、读失败窗口不挂、双击 bat 不在 releases/ 里、
 子进程和写文件只在 actions.py；GitHub 区块显示“数据截至”，没真读到时一格绿都没有。
 """
@@ -42,6 +42,7 @@ PACKAGE = Path(__file__).resolve().parents[2] / "scripts" / "cockpit_board"
 REPO_ROOT = Path(__file__).resolve().parents[6]
 BAT_DIR = REPO_ROOT / "00_Infrastructure" / "auto_pm" / "environment"
 BAT = BAT_DIR / "双击打开驾驶舱看板.bat"
+BC_TEMPLATE = REPO_ROOT / "0100_PLC自动化" / "00_通用规范" / "项目文档模板" / "02_业务变更记录模板.md"
 NOW = base.NOW
 WRITES = r"(?<![\w.])open\(|write_bytes\(|write_text\("
 
@@ -90,6 +91,13 @@ def _texts(widget) -> list[str]:  # noqa: ANN001
     return [label.text() for label in widget.findChildren(QLabel)]
 
 
+def _inside(widget, name: str) -> bool:  # noqa: ANN001
+    parent = widget.parentWidget()
+    while parent is not None and parent.objectName() != name:
+        parent = parent.parentWidget()
+    return parent is not None
+
+
 def _files(root: Path) -> dict[str, int]:
     return {str(path): path.stat().st_mtime_ns for path in root.rglob("*") if path.is_file()}
 
@@ -111,7 +119,11 @@ def test_pm_board_is_read_only(qapp, tmp_path: Path) -> None:  # noqa: ANN001
     assert seen <= policy.PM_BUTTONS, seen - policy.PM_BUTTONS
     assert window.menuBar().actions() == []
     for kind in (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox):
-        assert window.findChildren(kind) == [], kind.__name__
+        for page in (window.home, window.issues, window.projects, window.project):
+            assert page.findChildren(kind) == [], kind.__name__
+        # 整个窗口里唯一能打字的地方：工程工位第 4 步的 BC 表单
+        for widget in window.findChildren(kind):
+            assert _inside(widget, "bc_form"), (kind.__name__, widget.objectName())
     assert window.projects.table.editTriggers() == window.projects.table.EditTrigger.NoEditTriggers
     window.close()
 
@@ -171,17 +183,41 @@ def test_bc_write_only_after_preview_and_appends_one_line(qapp, tmp_path: Path) 
     assert window.station.bc_preview_text == "" and "没有人工工位" in window.status.text()
     record = window.options.manual_worktree / relative
     record.parent.mkdir(parents=True)
-    record.write_bytes(control_before)
+    record.write_bytes(BC_TEMPLATE.read_bytes())  # 现行 11 栏模板
     before = record.read_bytes()
     window.run_action("bc_write")  # 没预览：拒绝
     assert window.status.text() == "先预览，再写入"
     assert record.read_bytes() == before
+    # 表单没填：拒绝预览，说清缺什么；提出时间进工位时已按现在填到分钟
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", window.station.bc_values["raised"])
+    window.run_action("bc_preview")
+    assert window.station.bc_preview_text == "" and "“提出人”没填" in window.station.bc_note
+    inputs = window.station.bc_inputs
+    inputs["raised"].setText("2026-10-23 14:05")
+    inputs["channel"].setCurrentText("电话")
+    inputs["who"].setText("张工（客户设备科）")
+    inputs["kind"].setCurrentText("参数")
+    inputs["what"].setText("上料节拍 30 s → 28 s")
+    inputs["why"].setText("客户要提产")
+    inputs["impact"].setText("FB_2001 节拍计时")
     window.run_action("bc_preview")
     qapp.processEvents()
-    assert window.station.bc_preview_text.startswith("| BC-DJ-2026-101-2026_10_001 |")
+    cells = [cell.strip() for cell in window.station.bc_preview_text.strip().strip("|").split("|")]
+    assert cells == ["BC-DJ-2026-101-2026_10_000", "2026-10-23 14:05（电话）", "张工（客户设备科）", "参数",
+                     "上料节拍 30 s → 28 s", "客户要提产", "FB_2001 节拍计时", "", "", "待批", ""]
+    assert len(window.station.bc_preview.columns) == 11  # 预览里 11 栏逐栏给人看
+    assert "预览：要往表末追加的一行，共 11 栏" in _texts(window.station)
     assert record.read_bytes() == before  # 预览不写
+    # 预览后又改了表单：预览作废、写入变灰
+    inputs["why"].setText("客户要提产到 28 s")
+    buttons = {b.text(): b for b in _buttons(window.station)}
+    assert window.station.bc_preview_text == "" and not buttons["写入 02_业务变更记录.md"].isEnabled()
+    window.run_action("bc_preview")
+    qapp.processEvents()
+    assert "客户要提产到 28 s" in window.station.bc_preview_text
     buttons = {b.text(): b for b in _buttons(window.station)}
     assert buttons["写入 02_业务变更记录.md"].isEnabled()
+    line = window.station.bc_preview_text
     window.run_action("bc_write")
     # 写入一开始就清掉预览，按钮变灰；连点第二下被拒
     buttons = {b.text(): b for b in _buttons(window.station)}
@@ -193,6 +229,7 @@ def test_bc_write_only_after_preview_and_appends_one_line(qapp, tmp_path: Path) 
     qapp.processEvents()
     after = record.read_bytes()
     assert after.startswith(before) and after.count(b"\n") == before.count(b"\n") + 1
+    assert after.decode("utf-8").splitlines()[-1] == line  # 写进去的就是预览的那 11 栏
     assert window.station.receipts[0].action == "写入 BC 行" and window.station.receipts[0].rc == 0
     assert control.read_bytes() == control_before  # 控制根那份一字没动
     window.close()

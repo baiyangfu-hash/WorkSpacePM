@@ -9,11 +9,36 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from cockpit_board import theme
-from cockpit_board.actions import Receipt
+from cockpit_board.actions import BC_CHANNELS, BC_TYPES, BcForm, BcPreview, Receipt
 from cockpit_board.viewmodel import StationVM, Step
 from cockpit_board.widgets import common as c
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+# 第 4 步表单的栏（键, 标签, 提示）。栏名和说明照 02_业务变更记录模板.md 的填写说明。
+BC_FIELDS = (
+    ("raised", "提出时间", "YYYY-MM-DD HH:MM，对方提出的时间，写到分钟"),
+    ("channel", "渠道", ""),
+    ("who", "提出人", "姓名 + 单位或岗位，例如：张工（客户设备科）"),
+    ("kind", "类型", ""),
+    ("what", "改了什么", "原来 → 改成，写具体值"),
+    ("why", "为什么", "对方给的原因，不要自己推测"),
+    ("impact", "影响", "会动到的程序块、图纸、IO、节拍、成本、交期；没有就写“无”"),
+)
+BC_CHOICES = {"channel": BC_CHANNELS, "kind": BC_TYPES}
+BC_NOTE_EMPTY = "全部填好后点“预览”，看过整行再点“写入”。批准人、批准日期、关联留空，状态写“待批”。"
+BC_NOTE_READY = "确认下面每一栏都对，再点“写入”。写入后表单若再改，要重新预览。"
 
 SAFETY_CHECKLIST = (
     "急停、安全门、光栅、联锁、安全继电器、双手启动的逻辑，改了先 PLCSIM / InoProShop 仿真",
@@ -41,6 +66,13 @@ class StationPage(QWidget):
         self.banner_dismissed = False
         self.checks_state = [False] * len(SAFETY_CHECKLIST)
         self.bc_preview_text = ""
+        self.bc_preview: BcPreview | None = None
+        self.bc_values: dict[str, str] = {}
+        self.bc_note = BC_NOTE_EMPTY
+        self.bc_inputs: dict[str, QLineEdit | QComboBox] = {}
+        self._bc_note: QLabel | None = None
+        self._bc_preview_box: QWidget | None = None
+        self._bc_write_button: QPushButton | None = None
         self.commit_text = ""
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -142,8 +174,8 @@ class StationPage(QWidget):
             hit_layout.addWidget(c.label("必须先仿真；BC“影响”栏写“安全区，待签字”；有网后补 CHG，签字前不合并。"
                                          "发现 OR TRUE 旁路直接判不合格。只提醒，不阻断。", "small"))
             inner.addWidget(hit)
-        if step.number == 4 and self.bc_preview_text:
-            inner.addWidget(pre(self.bc_preview_text))
+        if step.number == 4:
+            inner.addWidget(self._bc_form())
         if step.number == 5 and self.commit_text:
             inner.addWidget(pre(self.commit_text))
         if step.buttons:
@@ -153,6 +185,8 @@ class StationPage(QWidget):
                 reason = reason if not enabled else ""
                 item = c.button(text, "", reason or text, enabled)
                 item.setProperty("action", key)
+                if key == "bc_write":
+                    self._bc_write_button = item
                 if key == "copy_commit":
                     item.clicked.connect(lambda: self.on_copy(self.commit_text))
                 else:
@@ -185,8 +219,75 @@ class StationPage(QWidget):
         self.receipts.insert(0, receipt)
         self._render_drawer()
 
-    def set_bc_preview(self, text: str) -> None:
-        self.bc_preview_text = text
+    # ------------------------------------------------ 第 4 步：业务变更表单
+
+    def _bc_form(self) -> QFrame:
+        """提出时间 / 渠道 / 提出人 / 类型 / 改了什么 / 为什么 / 影响，全由你填；预览把整行 11 栏逐栏列出来。"""
+        frame, layout = c.inner("bc_form")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(theme.SPACE)
+        grid.setVerticalSpacing(theme.SPACE // 2)
+        self.bc_inputs: dict[str, QLineEdit | QComboBox] = {}
+        for row, (key, label, hint) in enumerate(BC_FIELDS):
+            grid.addWidget(c.label(label, "muted", wrap=False), row, 0)
+            if key in BC_CHOICES:
+                box = QComboBox()
+                box.addItems(BC_CHOICES[key])
+                box.setCurrentText(self.bc_values.get(key) or BC_CHOICES[key][0])
+                box.currentTextChanged.connect(lambda text, k=key: self._bc_edited(k, text))
+                widget: QLineEdit | QComboBox = box
+            else:
+                edit = QLineEdit(self.bc_values.get(key, ""))
+                edit.setPlaceholderText(hint)
+                edit.textChanged.connect(lambda text, k=key: self._bc_edited(k, text))
+                widget = edit
+            widget.setObjectName("bc_" + key)
+            self.bc_inputs[key] = widget
+            grid.addWidget(widget, row, 1)
+        holder = QWidget()
+        holder.setLayout(grid)
+        layout.addWidget(holder)
+        self._bc_note = c.label(self.bc_note, "small")
+        layout.addWidget(self._bc_note)
+        self._bc_preview_box = QWidget()
+        box_layout = QVBoxLayout(self._bc_preview_box)
+        box_layout.setContentsMargins(0, 0, 0, 0)
+        if self.bc_preview is not None:
+            box_layout.addWidget(c.label(f"预览：要往表末追加的一行，共 {len(self.bc_preview.columns)} 栏", "small"))
+            box_layout.addWidget(c.kv([(name, cell or "（空）") for name, cell in self.bc_preview.columns]))
+            box_layout.addWidget(pre(self.bc_preview.line))
+        layout.addWidget(self._bc_preview_box)
+        return frame
+
+    def bc_form(self) -> BcForm:
+        v = self.bc_values
+        return BcForm(v.get("raised", ""), v.get("channel", BC_CHANNELS[0]), v.get("who", ""),
+                      v.get("kind", BC_TYPES[0]), v.get("what", ""), v.get("why", ""), v.get("impact", ""))
+
+    def set_bc_time(self, text: str) -> None:
+        """进工位时给“提出时间”填上现在（到分钟），你可以改成对方实际提出的时间。"""
+        self.bc_values.setdefault("raised", text)
+
+    def _bc_edited(self, key: str, text: str) -> None:
+        self.bc_values[key] = text
+        if self.bc_preview is not None:  # 预览后又改了表单：预览作废，写入变灰，要重新预览
+            self.bc_preview = None
+            self.bc_preview_text = ""
+            self._set_bc_note("表单改过了，请重新预览再写入。")
+            if self._bc_preview_box is not None:
+                self._bc_preview_box.setVisible(False)
+            if self._bc_write_button is not None:
+                self._bc_write_button.setEnabled(False)
+
+    def _set_bc_note(self, text: str) -> None:
+        self.bc_note = text
+        if self._bc_note is not None:
+            self._bc_note.setText(text)
+
+    def set_bc_preview(self, preview: BcPreview | None, note: str = "") -> None:
+        self.bc_preview = preview
+        self.bc_preview_text = preview.line if preview else ""
+        self.bc_note = note or (BC_NOTE_READY if preview else BC_NOTE_EMPTY)
         if self.vm is not None:
             self.render(self.vm)
 

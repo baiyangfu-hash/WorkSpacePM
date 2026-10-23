@@ -146,19 +146,93 @@ def test_theme_tokens_are_the_only_colors() -> None:
 # ---------------------------------------------------------------- 本机动作
 
 
-def test_bc_next_id_and_append_only(tmp_path: Path) -> None:
+REPO_ROOT = Path(__file__).resolve().parents[6]
+BC_TEMPLATE = REPO_ROOT / "0100_PLC自动化" / "00_通用规范" / "项目文档模板" / "02_业务变更记录模板.md"
+BC_REAL = REPO_ROOT / "0100_PLC自动化" / "DJ-2026-009_汇川换型改造" / "11_监控" / "01_变更管理" / "02_变更记录" / "02_业务变更记录.md"
+
+
+def _form(**changes: str) -> actions.BcForm:
+    values = {
+        "raised": "2026-10-23 14:05", "channel": "电话", "who": "张工（客户设备科）", "kind": "参数",
+        "what": "上料节拍 30 s → 28 s", "why": "客户要提产", "impact": "FB_2001 节拍计时；无图纸改动",
+    }
+    values.update(changes)
+    return actions.BcForm(**values)
+
+
+def _row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _template_record(tmp_path: Path, source: Path = BC_TEMPLATE) -> Path:
     record = tmp_path / "02_业务变更记录.md"
-    record.write_text(
-        "| 编号 | 提出日期 | 类型 | 改了什么 | 状态 |\n|---|---|---|---|---|\n"
-        "| BC-DJ-2026-009-2026_10_005 | 2026-10-21 | 需求 | 三格 | 待批 |\n",
-        encoding="utf-8",
-    )
+    record.write_bytes(source.read_bytes())
+    return record
+
+
+def test_bc_row_matches_the_11_column_template(tmp_path: Path) -> None:
+    """审计 95（高）：BC 行按模板 11 栏生成，内容全来自用户填的表单，提出时间写到分钟，提出人不写死。"""
+    record = _template_record(tmp_path)
+    header = actions.bc_header(record)
+    assert len(header) == 11 and header[0] == "编号" and header[-1] == "关联 CHG / 提交"
+    preview = actions.bc_preview(record, "DJ-2026-009", _form(what="A | B"))
+    cells = _row(preview.line)
+    assert len(cells) == len(header) == len(preview.columns) == 11
+    assert dict(preview.columns) == dict(zip(header, cells, strict=True))
+    by_name = dict(preview.columns)
+    assert by_name["编号"] == "BC-DJ-2026-009-2026_10_000"  # 模板占位行 BC-<项目号>-… 不算，这个月从 000 起
+    assert by_name["提出时间"] == "2026-10-23 14:05（电话）"
+    assert by_name["提出人"] == "张工（客户设备科）" and by_name["类型"] == "参数"
+    assert by_name["改了什么（原来 → 改成）"] == "A ｜ B"  # 竖线换成全角，不会多出一栏
+    assert by_name["为什么"] == "客户要提产" and by_name["影响"].startswith("FB_2001")
+    assert by_name["批准人"] == by_name["批准日期"] == by_name["关联 CHG / 提交"] == ""
+    assert by_name["状态"] == "待批"
+    assert "baiyang" not in preview.line and "（填" not in preview.line
+
+
+def test_bc_row_against_the_real_009_record(tmp_path: Path) -> None:
+    """拿 DJ-2026-009 真实的变更记录（旧栏名“提出日期”、旧编号 BC-…-001）试：仍是 11 栏，编号按月从 000 起。"""
+    record = _template_record(tmp_path, BC_REAL)
+    preview = actions.bc_preview(record, "DJ-2026-009", _form())
+    assert len(_row(preview.line)) == len(actions.bc_header(record)) == 11
+    assert _row(preview.line)[0] == "BC-DJ-2026-009-2026_10_000"
+    assert dict(preview.columns)["提出日期"] == "2026-10-23 14:05（电话）"
+
+
+def test_bc_form_must_be_filled_for_real(tmp_path: Path) -> None:
+    record = _template_record(tmp_path)
+    bad = {
+        "raised": ("2026-10-23", "写到分钟"), "channel": ("飞鸽", "渠道"), "kind": ("其他", "类型"),
+        "who": ("", "提出人"), "what": ("（填改了什么）", "占位字"), "why": ("  ", "为什么"),
+        "impact": ("", "影响"),
+    }
+    for field_name, (value, message) in bad.items():
+        with pytest.raises(actions.BcError, match=message):
+            actions.bc_preview(record, "DJ-2026-009", _form(**{field_name: value}))
+    with pytest.raises(actions.BcError, match="真实日期"):
+        actions.bc_preview(record, "DJ-2026-009", _form(raised="2026-02-30 10:00"))
+    assert actions.bc_preview(record, "DJ-2026-009", _form(impact="无")).line  # 影响“无”是合法的
+    short = tmp_path / "short.md"
+    short.write_text("| 编号 | 提出日期 | 类型 | 改了什么 | 状态 |\n|---|---|---|---|---|\n", encoding="utf-8")
+    with pytest.raises(actions.BcError, match="表头认不出"):  # 旧的 5 栏表：拒绝，不猜
+        actions.bc_preview(short, "DJ-2026-009", _form())
+
+
+def test_bc_next_id_and_append_only(tmp_path: Path) -> None:
+    record = _template_record(tmp_path)
+    with record.open("a", encoding="utf-8") as stream:
+        stream.write("| BC-DJ-2026-009-2026_10_005 | 2026-10-21 09:00（当面） | 李工 | 需求 | 三格 | 甲 | 无 | | | 待批 | |\n")
+        stream.write("| BC-DJ-2026-009-2026_10_002 | 2026-10-21 10:00（当面） | 李工 | 需求 | 补登 | 乙 | 无 | | | 待批 | |\n")
+        stream.write("| BC-DJ-2026-011-2026_10_009 | 2026-10-21 10:00（当面） | 别的项目 | 需求 | x | y | 无 | | | 待批 | |\n")
     october = datetime(2026, 10, 22, tzinfo=OFFSET)
-    assert actions.bc_next_id(record, "DJ-2026-009", october) == "BC-DJ-2026-009-2026_10_006"
+    assert actions.bc_next_id(record, "DJ-2026-009", october) == "BC-DJ-2026-009-2026_10_006"  # 取本项目本月最大号 +1
     november = datetime(2026, 11, 3, tzinfo=OFFSET)
-    assert actions.bc_next_id(record, "DJ-2026-009", november) == "BC-DJ-2026-009-2026_11_001"  # 跨月归零
-    line = actions.bc_preview(record, "DJ-2026-009", october, "baiyang", "改 | 了", "安全区，待签字")
-    assert line.startswith("| BC-DJ-2026-009-2026_10_006 |") and "｜" in line and "待批 2026-10-22" in line
+    assert actions.bc_next_id(record, "DJ-2026-009", november) == "BC-DJ-2026-009-2026_11_000"  # 跨月从 000 起
+    preview = actions.bc_preview(record, "DJ-2026-009", _form(raised="2026-11-03 08:30"))
+    assert preview.line.startswith("| BC-DJ-2026-009-2026_11_000 |")  # 年月跟“提出时间”走
+    preview = actions.bc_preview(record, "DJ-2026-009", _form())
+    line = preview.line
+    assert line.startswith("| BC-DJ-2026-009-2026_10_006 |")
     before = record.read_bytes()
     receipt = actions.bc_append(record, line)
     after = record.read_bytes()
@@ -169,21 +243,19 @@ def test_bc_next_id_and_append_only(tmp_path: Path) -> None:
 
 def test_bc_append_refuses_when_the_file_changed_after_preview(tmp_path: Path) -> None:
     """预览后文件被别人改了（外部编辑器、连点两下）就拒写，不拿旧快照覆盖新内容（Codex 评审 #52）。"""
-    record = tmp_path / "02_业务变更记录.md"
-    record.write_text("| 编号 | 状态 |\n|---|---|\n", encoding="utf-8")
-    when = datetime(2026, 10, 23, tzinfo=OFFSET)
+    record = _template_record(tmp_path)
     digest = actions.bc_digest(record)
-    line = actions.bc_preview(record, "DJ-2026-009", when, "baiyang", "改", "影响")
+    line = actions.bc_preview(record, "DJ-2026-009", _form()).line
     with record.open("a", encoding="utf-8") as stream:  # 预览后，别人在编辑器里加了一行
-        stream.write("| BC-DJ-2026-009-2026_10_001 | 别人写的 |\n")
+        stream.write("| BC-DJ-2026-009-2026_10_000 | 别人写的 | | | | | | | | | |\n")
     edited = record.read_bytes()
     receipt = actions.bc_append(record, line, digest)
     assert receipt.rc == 1 and "重新预览" in receipt.command
     assert record.read_bytes() == edited  # 别人那行还在，也没多写
     # 重新预览：编号顺延，写进去后原有内容一字不差
     digest = actions.bc_digest(record)
-    line = actions.bc_preview(record, "DJ-2026-009", when, "baiyang", "改", "影响")
-    assert line.startswith("| BC-DJ-2026-009-2026_10_002 |")
+    line = actions.bc_preview(record, "DJ-2026-009", _form()).line
+    assert line.startswith("| BC-DJ-2026-009-2026_10_001 |")
     assert actions.bc_append(record, line, digest).rc == 0
     assert record.read_bytes() == edited + (line + "\n").encode("utf-8")
     # 同一份预览再写一次（连点）也拒写

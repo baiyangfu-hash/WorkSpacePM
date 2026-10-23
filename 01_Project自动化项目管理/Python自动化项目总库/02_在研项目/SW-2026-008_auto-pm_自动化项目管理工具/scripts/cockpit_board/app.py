@@ -311,6 +311,7 @@ class CockpitWindow(QMainWindow):
             "effective": self.options.effective_version, "control_root": "是" if (self.options.root / pd.REGISTRY_RELATIVE).is_file() else "否",
             "collected": vm.fmt(now, self.offset),
         }
+        self.station.set_bc_time((self.options.now or datetime.now(UTC)).astimezone(self.offset).strftime("%Y-%m-%d %H:%M"))
         self.station.render(vm.station_vm(board, self.home_vm.hot + self.home_vm.rest, self.online, identity,
                                           self.options.manual_branch, [], GAP9_MERGED))
         for key, button in self.net_buttons.items():
@@ -329,14 +330,21 @@ class CockpitWindow(QMainWindow):
         elif key == "bc_preview":
             record = self._bc_record()
             when = (self.options.now or datetime.now(UTC)).astimezone(self.offset)
+            self.bc_digest = None
             if record is None:
-                self.bc_digest = None
-                self.station.set_bc_preview("")
+                self.station.set_bc_preview(None, self._bc_missing())
                 self.status.setText(self._bc_missing())
                 return
-            self.bc_digest = actions.bc_digest(record)
-            self.station.set_bc_preview(actions.bc_preview(record, pid, when, "baiyang", "（填改了什么）", "（填影响）"))
-            self.station.add_receipt(actions.Receipt(when.strftime("%H:%M"), "写入 BC 行（预览）", f"append {record.name}", 0, True))
+            try:
+                digest = actions.bc_digest(record)
+                preview = actions.bc_preview(record, pid, self.station.bc_form())
+            except actions.BcError as error:
+                self.station.set_bc_preview(None, "没法预览：" + str(error))
+                self.status.setText("BC 表单没填好，看第 4 步的提示")
+                return
+            self.bc_digest = digest
+            self.station.set_bc_preview(preview)
+            self.station.add_receipt(actions.Receipt(when.strftime("%H:%M"), "写入 BC 行（预览）", f"append {record.name} ← {preview.columns[0][1]}", 0, True))
             return
         elif key == "bc_write":
             record, line, digest = self._bc_record(), self.station.bc_preview_text, self.bc_digest
@@ -345,7 +353,7 @@ class CockpitWindow(QMainWindow):
                 return
             # 一次预览只写一次：先清掉预览，“写入”按钮立刻变灰，连点也不会写第二行
             self.bc_digest = None
-            self.station.set_bc_preview("")
+            self.station.set_bc_preview(None, "已提交写入，结果看底部控制台；要再记一行请重新预览。")
             job = lambda: actions.bc_append(record, line, digest)  # noqa: E731
         elif key == "bc_open":
             record = self._bc_record()
