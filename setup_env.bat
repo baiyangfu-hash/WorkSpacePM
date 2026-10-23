@@ -25,8 +25,8 @@ echo [1/4] 正在检测 Python 版本...
 :: 2. 创建虚拟环境
 if not exist ".venv" (
     echo [2/4] 正在创建专属虚拟环境 .venv ...
-    %PY_EXE% -m venv .venv
-    if %errorlevel% neq 0 (
+    rem 不在括号块里读 errorlevel：整块解析时就展开成旧值（TD-SW008-150），改用双竖线接本条命令的失败分支
+    %PY_EXE% -m venv .venv || (
         echo [错误] 创建虚拟环境失败，请检查 Python 权限。
         pause
         exit /b 1
