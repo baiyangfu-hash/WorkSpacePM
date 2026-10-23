@@ -631,3 +631,18 @@ def test_w01_the_workflow_judges_with_the_base_branch_as_it_is_now_not_a_stale_b
     assert all("base.sha" not in str(step) and "base_sha" not in str(step) for step in steps)
     check = next(s.get("run", "") for s in steps if "safety_zone_check.py" in s.get("run", ""))
     assert '--base "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"' in check
+
+
+def test_w02_a_deleted_zone_line_is_caught_when_main_later_grew_the_same_file(repo: Path) -> None:
+    # audit 107: with the judge's main head as --base, removed lines are numbered by the merge base but the zone sections were read
+    # from main's newer file; once main added lines above the zone, deleting a neutral line inside it (no safety variable) passed
+    zoned = edit_feed("// @安全区 结束", "nHold := 5;\n// @安全区 结束")
+    git(repo, "checkout", "-q", "main")
+    commit(repo, {FEED: zoned})
+    git(repo, "checkout", "-q", "-b", "pr-late", "main")
+    _main, head = commit(repo, {FEED: zoned.replace("nHold := 5;\n", "")})
+    git(repo, "checkout", "-q", "main")
+    grown = zoned.replace("// 送料\n", "// 送料\n" + "".join(f"// 说明 {n}\n" for n in range(6)))
+    main_now, _ = commit(repo, {FEED: grown})
+    result = gate.check(repo, main_now, head)
+    assert result.needs_signature, result

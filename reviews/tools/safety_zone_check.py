@@ -496,6 +496,9 @@ def check(
 ) -> Result:
     result = Result()
     head_sha = git(repo, "rev-parse", f"{head}^{{commit}}").strip()
+    # Read the base side at the fork point, never at a later main: the diff (three-dot) numbers removed lines by the merge base, so
+    # zone sections read from a main that later grew the same file would sit on other lines and a deleted zone line would pass (audit 107)
+    base = git(repo, "merge-base", base, head).strip()
     files = changed_files(repo, base, head)
     roots: dict[str, list[str]] = {}
     for path in files:
