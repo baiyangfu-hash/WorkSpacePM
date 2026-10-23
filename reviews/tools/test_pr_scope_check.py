@@ -283,13 +283,16 @@ def test_s19_the_workflow_takes_the_judge_from_the_base_and_never_runs_the_pr_he
     assert flow["permissions"] == {"contents": "read"}
     steps = flow["jobs"]["gate"]["steps"]
     checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
-    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    # the base branch now, never the event's base.sha, which can predate the checker itself (PR #67, 2026-10-23)
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.ref }}"
+    assert all("base.sha" not in str(step) for step in steps)
     assert checkout["with"]["persist-credentials"] is False
     runs = [s.get("run", "") for s in steps]
     install = next(r for r in runs if "pip install" in r)
     assert "pr-head" not in install and "RUNNER_TEMP" not in install
     check = next(r for r in runs if "pr_scope_check.py" in r)
     assert '"$GITHUB_WORKSPACE/reviews/tools/pr_scope_check.py" --ci' in check
+    assert '--base "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"' in check  # the judge's own commit is the base
     assert "python -I " in check
     fetch = next(r for r in runs if "refs/pull/" in r)
     assert 'test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA"' in fetch  # the fetched head is the event's head
