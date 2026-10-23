@@ -18,7 +18,8 @@ import pytest
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 ERRORLEVEL_VAR = re.compile(r"%errorlevel%", re.IGNORECASE)
 COMMENT = re.compile(r"^\s*(?:@?rem(?:\s|$)|::)", re.IGNORECASE)
-ECHO = re.compile(r"^\s*@?echo(?:[\s.]|$)", re.IGNORECASE)
+# echo 后面紧跟这些字符也是 echo（echo. / echo( / echo: 等打空行的写法），echo( 的左括号不开块
+ECHO = re.compile(r"^\s*@?echo(?:[\s.(:;,=/+\[\]\\]|$)", re.IGNORECASE)
 
 
 def _tracked_scripts() -> list[Path]:
@@ -114,6 +115,11 @@ def test_catches_errorlevel_case_and_nesting() -> None:
 
 def test_catches_unescaped_paren_in_block_echo() -> None:
     assert len(check_batch(OLD_TD181)) == 1
+
+
+def test_echo_paren_blank_line_does_not_open_a_block() -> None:
+    text = 'if exist "a" (\r\n    echo(\r\n    echo.\r\n    echo:\r\n)\r\npython -V\r\nif %errorlevel% neq 0 exit /b 1\r\n'
+    assert check_batch(text) == []
 
 
 def test_allows_the_safe_forms() -> None:
