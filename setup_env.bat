@@ -24,7 +24,7 @@ echo [1/4] 正在检测 Python 版本...
 
 :: 2. 创建虚拟环境
 if not exist ".venv" (
-    echo [2/4] 正在创建专属虚拟环境 (.venv)...
+    echo [2/4] 正在创建专属虚拟环境 .venv ...
     %PY_EXE% -m venv .venv
     if %errorlevel% neq 0 (
         echo [错误] 创建虚拟环境失败，请检查 Python 权限。
@@ -32,7 +32,7 @@ if not exist ".venv" (
         exit /b 1
     )
 ) else (
-    echo [2/4] 虚拟环境 (.venv) 已存在，跳过创建。
+    echo [2/4] 虚拟环境 .venv 已存在，跳过创建。
 )
 
 :: 3. 激活虚拟环境并安装依赖
