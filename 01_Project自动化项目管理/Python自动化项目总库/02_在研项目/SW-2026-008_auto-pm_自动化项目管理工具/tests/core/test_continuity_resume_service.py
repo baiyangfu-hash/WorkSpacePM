@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -35,6 +36,7 @@ from auto_pm.contracts.decision_package import (
 )
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
+import auto_pm.infrastructure.continuity_store as continuity_store_module
 from auto_pm.infrastructure.continuity_store import (
     ContinuityStore,
     ContinuityStoreError,
@@ -920,3 +922,170 @@ def test_pm_session_projection_contains_no_execution_queue(tmp_path: Path) -> No
     assert "current_focus" not in content
     with pytest.raises(PmSessionProjectionError, match="subject project"):
         PmSessionProjectionService().write(result, tmp_path / "outside.md")
+
+
+# ---- the strict read copy without share-deny handles (PR #72; tests 1-2 ported from the TD-105 branch, 36e42a9b) ----
+
+
+def _snapshot_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    parent = tmp_path.parent / f"{tmp_path.name}-snapshot-temp"
+    parent.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(parent))
+    return parent
+
+
+def _write_title(db_path: Path, title: str) -> None:
+    """Write the way every store transaction does (WAL, BEGIN IMMEDIATE) on a connection of its own."""
+    conn = sqlite3.connect(db_path, timeout=5.0)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE work_items SET title=? WHERE work_id='WORK-001'", (title,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_td105_a_write_that_starts_while_the_strict_read_copies_is_never_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TD-105: the copy once held share-deny handles on Windows, so this write was opened read-only ("readonly database")."""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _snapshot_temp(tmp_path, monkeypatch)
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    original = continuity_store_module.shutil.copyfile
+    writes: list[str] = []
+
+    def copy_with_a_concurrent_write(source: Path, target: Path) -> object:
+        if not writes:
+            writes.append("written during the copy")
+            _write_title(db_path, writes[0])
+        return original(source, target)
+
+    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", copy_with_a_concurrent_write)
+
+    work = ContinuityStore(tmp_path).get_work("WORK-001")
+
+    assert writes == ["written during the copy"]
+    assert work.title == "written during the copy"
+
+
+def test_td105_writes_on_one_thread_never_fail_while_another_thread_keeps_reading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The TD-SW008-105 acceptance: one thread reads snapshots non-stop, another creates and moves Work; no write may fail."""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _snapshot_temp(tmp_path, monkeypatch)
+    reader_store = ContinuityStore(tmp_path)
+    stop = threading.Event()
+    reads: list[str] = []
+    read_errors: list[str] = []
+
+    def keep_reading() -> None:
+        while not stop.is_set():
+            try:
+                reads.append(reader_store.get_work("WORK-001").title)
+            except ContinuityStoreError as error:
+                if "BUSY" not in str(error):
+                    read_errors.append(str(error))
+
+    readers = [threading.Thread(target=keep_reading, daemon=True) for _ in range(2)]
+    for reader in readers:
+        reader.start()
+    try:
+        writer = WorkRegistryService(tmp_path, now=lambda: "2026-09-09T12:00:00+00:00")
+        for index in range(2, 14):
+            work_id = f"WORK-{index:03d}"
+            _work(tmp_path, work_id)
+            writer.transition(work_id, WorkState.IN_PROGRESS, f"start-{work_id}")
+    finally:
+        stop.set()
+        for reader in readers:
+            reader.join(timeout=30)
+
+    assert not any(reader.is_alive() for reader in readers)
+    assert read_errors == []
+    assert reads, "the reader never got a snapshot"
+    assert ContinuityStore(tmp_path).get_work("WORK-013").state is WorkState.IN_PROGRESS
+
+
+def test_a_permission_error_while_copying_counts_as_drift_and_is_retried(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows: a writer that holds the file for a moment makes the copy raise PermissionError; that is drift, not a failed read."""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    temp_parent = _snapshot_temp(tmp_path, monkeypatch)
+    original = continuity_store_module.shutil.copyfile
+    refused: list[str] = []
+
+    def held_once(source: Path, target: Path) -> object:
+        if not refused:
+            refused.append(Path(source).name)
+            raise PermissionError(32, "The process cannot access the file because it is being used by another process")
+        return original(source, target)
+
+    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", held_once)
+
+    assert ContinuityStore(tmp_path).get_work("WORK-001").title == "WORK-001"
+    assert refused == ["continuity.db"]
+    assert list(temp_parent.iterdir()) == []
+
+
+def test_a_copy_whose_bytes_differ_from_the_source_is_taken_again(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The copied bytes are hashed against the source inventory: a torn copy is never opened."""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _snapshot_temp(tmp_path, monkeypatch)
+    original = continuity_store_module.shutil.copyfile
+    copies: list[str] = []
+
+    def torn_once(source: Path, target: Path) -> object:
+        copies.append(Path(source).name)
+        result = original(source, target)
+        if copies.count("continuity.db") == 1 and Path(source).name == "continuity.db":
+            with open(target, "r+b") as stream:  # one flipped byte in the header area, as a tear would leave
+                stream.seek(100)
+                byte = stream.read(1)
+                stream.seek(100)
+                stream.write(bytes([byte[0] ^ 0xFF]))
+        return result
+
+    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", torn_once)
+
+    assert ContinuityStore(tmp_path).get_work("WORK-001").title == "WORK-001"
+    assert copies.count("continuity.db") == 2
+
+
+def test_a_write_that_lands_after_the_copy_but_before_the_second_inventory_is_retried(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The copy matches the first inventory, but the source moved on before the second one: take it again, so the read is current."""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _snapshot_temp(tmp_path, monkeypatch)
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    original_inventory = ContinuityStore._file_inventory
+    copied_inventories: list[str] = []
+
+    def write_after_copy(path: Path, *, required: bool, transient: bool = False) -> object:
+        # the first inventory of a copied file (not under the workspace) runs right after the copy: write then, once
+        if not Path(path).is_relative_to(tmp_path) and not copied_inventories:
+            copied_inventories.append(path.name)
+            _write_title(db_path, "written after the copy")
+        return original_inventory(path, required=required, transient=transient)
+
+    monkeypatch.setattr(ContinuityStore, "_file_inventory", staticmethod(write_after_copy))
+
+    assert ContinuityStore(tmp_path).get_work("WORK-001").title == "written after the copy"
+    assert copied_inventories == ["continuity.db"]
