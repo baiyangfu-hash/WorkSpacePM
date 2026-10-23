@@ -856,7 +856,8 @@ def test_strict_read_retries_drift_then_fails_busy_without_temp_residue(
         nonlocal calls
         calls += 1
         inventory = original_inventory(db_path)
-        if calls % 3 != 0:
+        # each attempt takes two inventories (before and after the copy): the one after always drifts
+        if calls % 2 != 0:
             return inventory
         database = inventory[0]
         drifted_database = (

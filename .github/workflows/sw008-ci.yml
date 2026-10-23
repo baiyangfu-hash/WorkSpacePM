@@ -141,15 +141,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install the locked dependencies
+      # A clean virtual environment, as the installer makes on a field PC: the runner's own Python carries pipx,
+      # whose pins clash with the lock file and fail pip check.
+      - name: Install the locked dependencies into a fresh virtual environment
         run: |
-          python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
-          python -m pip check
+          python -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/Scripts" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
 
       - name: Pytest (cli, core, sample drill)
         working-directory: ${{ env.PROJ }}
         run: >-
-          python -m pytest -q -p no:cacheprovider -o addopts= -n 4
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -p no:cacheprovider -o addopts= -n 4
           tests/cli tests/core tests/e2e/test_closure_drill.py tests/e2e/test_closure_drill_agent_misconduct.py
 
       - name: The working tree must still be clean
