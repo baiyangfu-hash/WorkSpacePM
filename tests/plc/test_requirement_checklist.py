@@ -133,16 +133,18 @@ def content_fingerprint(text: str) -> str:
     body = _STATE_LINE.sub("> 状态：", text.lstrip("\ufeff").replace("\r\n", "\n"))
     start = body.index(CONFIRM_SECTION)
     end = body.index(SECTIONS[8], start)
-    return hashlib.sha256((body[:start] + body[end:]).encode("utf-8")).hexdigest()
+    # 第 8 节只有表格行由驾驶舱写；表格外多出的字照样计入，确认后再加内容指纹就变
+    prose = "\n".join(line for line in body[start:end].splitlines() if not line.lstrip().startswith("|"))
+    return hashlib.sha256((body[:start] + prose + body[end:]).encode("utf-8")).hexdigest()
 
 
 @pytest.fixture(scope="module")
 def sample_text() -> str:
-    return SAMPLE.read_text(encoding="utf-8")
+    return SAMPLE.read_text(encoding="utf-8", errors="replace")
 
 
 def test_template_is_well_formed():
-    assert check_checklist(TEMPLATE.read_text(encoding="utf-8"), template=True) == []
+    assert check_checklist(TEMPLATE.read_text(encoding="utf-8", errors="replace"), template=True) == []
 
 
 def test_sample_passes(sample_text):
@@ -207,6 +209,9 @@ def test_fingerprint_ignores_confirm_area_only(sample_text):
         content_fingerprint(sample_text.replace("| V1 | 2026-10-22 09:00 | baiyang |", "| V1 | 2026-10-22 09:01 | baiyang |", 1))
         != base
     )
+    # 确认区表格外塞进去的字不能躲开指纹
+    smuggled = sample_text.replace("| 确认方式 | （由驾驶舱写入） |\n", "| 确认方式 | （由驾驶舱写入） |\n\n另加：报警改成 8 路。\n", 1)
+    assert smuggled != sample_text and content_fingerprint(smuggled) != base
 
 
 @pytest.mark.parametrize("keep", [0, 3])
