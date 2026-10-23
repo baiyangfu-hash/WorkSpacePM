@@ -177,7 +177,8 @@ class ModbusBridge(QObject):
         self._io_timer.timeout.connect(self._poll_io)
         self._connect_in_flight = False
         self._read_in_flight = False
-        # 连接代次：每次断开 +1；迟到的连接结果代次对不上就作废，不把界面翻回“已连接”
+        # 连接代次：每次断开、每次发起连接都 +1；迟到的连接结果代次对不上就作废，不把界面翻回“已连接”；
+        # 排队的写入代次对不上也作废，不把旧连接的写入发到新 PLC
         self._conn_gen = 0
 
     # ── 内部工具 ─────────────────────────────────────────
@@ -293,6 +294,7 @@ class ModbusBridge(QObject):
             self._log("SYS", "正在连接，请稍候。")
             return
         self._connect_in_flight = True
+        self._conn_gen += 1
         gen = self._conn_gen
         self._log("SYS", f"发起 TCP Socket 握手 → {ip}:{port} Unit={slave_id} sim={sim_mode} bind={source_ip if source_ip else 'Auto'}")
         self._run_io(
@@ -402,11 +404,22 @@ class ModbusBridge(QObject):
             self._log("ERR", IndustrialErrorMapper.format_exception(f"写入数值格式错误: '{value_str}'"))
             return
 
-        self._run_io(lambda: self._service.write_register(write_fc, addr, value), self._on_write_done)
+        gen = self._conn_gen
+
+        def _write() -> Any:
+            # 持锁后再核代次：排队期间断开或换了连接，这次写入作废，不发给新 PLC
+            if gen != self._conn_gen:
+                return None
+            return self._service.write_register(write_fc, addr, value)
+
+        self._run_io(_write, self._on_write_done)
 
     def _on_write_done(self, worker: _IoWorker) -> None:
         if worker.error is not None:
             self._log("ERR", IndustrialErrorMapper.format_exception(worker.error))
+            return
+        if worker.result is None:
+            self._log("SYS", "写入排队期间连接已断开或更换，本次写入已作废（未发送）。")
             return
         result = worker.result
         if result.tx_hex:

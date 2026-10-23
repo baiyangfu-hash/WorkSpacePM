@@ -485,3 +485,39 @@ def test_probe_register_tells_no_answer_apart_from_exception_reply(behaviour, ex
 
 def test_probe_register_when_disconnected_is_no_answer():
     assert ModbusService().probe_register(0) is None
+
+
+def test_queued_write_is_dropped_after_disconnect_and_reconnect(qapp, monkeypatch):
+    """写入排在别的操作后面时用户断开又连上（可能是另一台 PLC）：旧写入不得发出（Codex 评审 #83）。"""
+    bridge = _connected_bridge(monkeypatch)
+    sent = []
+    monkeypatch.setattr(bridge._service, "write_register", lambda *a: sent.append(a))
+    monkeypatch.setattr(bridge._service, "connect", lambda *a: (True, "ok"))
+    logs = []
+    bridge.consoleLogAppended.connect(lambda t, m: logs.append((t, m)))
+
+    bridge._io_lock.acquire()  # 模拟前面有扫描/读取占着锁，写入排队
+    try:
+        bridge.writeRegister("06", 0, "1500")
+        bridge.disconnectDevice()
+        bridge.connectDevice("10.0.0.2", 502, 1, False, "")
+    finally:
+        bridge._io_lock.release()
+    _wait_until(lambda: not bridge._io_jobs)
+
+    assert sent == []
+    assert any("已作废" in m for _, m in logs)
+
+
+def test_write_on_unchanged_connection_is_sent(qapp, monkeypatch):
+    bridge = _connected_bridge(monkeypatch)
+    sent = []
+
+    def fake_write(*a):
+        sent.append(a)
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(bridge._service, "write_register", fake_write)
+    bridge.writeRegister("06", 0, "1500")
+    _wait_until(lambda: not bridge._io_jobs)
+    assert sent == [("06", 0, 1500)]
