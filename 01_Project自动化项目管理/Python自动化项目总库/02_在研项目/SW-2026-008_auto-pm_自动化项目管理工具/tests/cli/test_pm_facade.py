@@ -16,6 +16,7 @@ from click.testing import CliRunner
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from tests.plan_checklist_support import checklist_args
 
 
 def _git(root: Path, *args: str) -> None:
@@ -158,6 +159,7 @@ def _planning_args() -> list[str]:
         "gpt-approved",
         "--declared-dirty",
         "auto_pm/example.py",
+        *checklist_args(),
         "--kind",
         "bug",
         "--domain",

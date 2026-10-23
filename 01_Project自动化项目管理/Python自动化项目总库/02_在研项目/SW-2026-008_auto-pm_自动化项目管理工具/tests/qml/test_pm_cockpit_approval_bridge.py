@@ -41,6 +41,7 @@ from tests.core.test_pm_run_e2e import (
     _build_workspace,
     _helper_source,
 )
+from tests.plan_checklist_support import full_checklist
 from tests.qml.test_pm_cockpit_bridge import _HoldingThreadPool
 
 _VERIFIED = "已执行并通过质量验证，等待您的最终验收。"
@@ -97,7 +98,8 @@ class _Cockpit:
             risks=risks,
             non_goals=("no refactor",),
             execution_grant=PlanningExecutionGrant(
-                adapter=ExecutionAdapterKind.CODEX, approved_model="agent-a", declared_dirty_paths=(CALC, CALC_TEST)
+                adapter=ExecutionAdapterKind.CODEX, approved_model="agent-a", declared_dirty_paths=(CALC, CALC_TEST),
+                plan_checklist=full_checklist(),
             ),
             submitted_by="PM (Claude)",
         )
@@ -129,7 +131,7 @@ def _cockpit(base: Path, *, approver: str = "fubai", calc: str = FIXED_CALC, exi
     )
     service = PmCockpitService(root, store=store, facade=facade, approver=approver)
     cockpit = _Cockpit(root, store, facade, changes, service, counter, {})
-    cockpit.add_request(_REQUEST, risks=("none",))
+    cockpit.add_request(_REQUEST, risks=("改错文件导致回归",))
     return cockpit
 
 
