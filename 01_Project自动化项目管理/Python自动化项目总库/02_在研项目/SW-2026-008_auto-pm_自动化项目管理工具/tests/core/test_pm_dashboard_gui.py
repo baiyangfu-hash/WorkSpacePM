@@ -160,10 +160,18 @@ def test_window_and_screenshot_never_write_the_workspace(qapp, tmp_path: Path) -
 
 def test_bc_write_only_after_preview_and_appends_one_line(qapp, tmp_path: Path) -> None:  # noqa: ANN001
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
-    record = root / "0100_PLC自动化" / "DJ-2026-101_甲" / "11_监控" / "01_变更管理" / "02_变更记录" / "02_业务变更记录.md"
-    before = record.read_bytes()
+    relative = Path("0100_PLC自动化") / "DJ-2026-101_甲" / "11_监控" / "01_变更管理" / "02_变更记录" / "02_业务变更记录.md"
+    control = root / relative  # 控制根 main 上的那份：永远不写
+    control_before = control.read_bytes()
     window = _window(qapp, root, db)
     window.set_mode("ws")
+    # 还没开人工工位：不预览、不写，提示先开 manual/ 分支（Codex 评审 #52：BC 行要跟 manual/ 分支一起提交）
+    window.run_action("bc_preview")
+    assert window.station.bc_preview_text == "" and "没有人工工位" in window.status.text()
+    record = window.options.manual_worktree / relative
+    record.parent.mkdir(parents=True)
+    record.write_bytes(control_before)
+    before = record.read_bytes()
     window.run_action("bc_write")  # 没预览：拒绝
     assert window.status.text() == "先预览，再写入"
     assert record.read_bytes() == before
@@ -174,12 +182,18 @@ def test_bc_write_only_after_preview_and_appends_one_line(qapp, tmp_path: Path) 
     buttons = {b.text(): b for b in _buttons(window.station)}
     assert buttons["写入 02_业务变更记录.md"].isEnabled()
     window.run_action("bc_write")
+    # 写入一开始就清掉预览，按钮变灰；连点第二下被拒
+    buttons = {b.text(): b for b in _buttons(window.station)}
+    assert not buttons["写入 02_业务变更记录.md"].isEnabled()
+    window.run_action("bc_write")
+    assert window.status.text() == "先预览，再写入"
     for thread in list(window._threads):
         thread.wait(5000)
     qapp.processEvents()
     after = record.read_bytes()
     assert after.startswith(before) and after.count(b"\n") == before.count(b"\n") + 1
-    assert window.station.receipts[0].action == "写入 BC 行"
+    assert window.station.receipts[0].action == "写入 BC 行" and window.station.receipts[0].rc == 0
+    assert control.read_bytes() == control_before  # 控制根那份一字没动
     window.close()
 
 

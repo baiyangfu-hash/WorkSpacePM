@@ -114,8 +114,11 @@ def test_station_gating(tmp_path: Path) -> None:
     assert buttons["重新跑 plc check"][0] is True
     # 在线 + ⑨已合：推送和批准开放，开工仍不启动 agent（只是按钮可用）
     station = vm.station_vm(board, home.hot + home.rest, True, {"source": "a", "effective": "a"}, "manual/x", [], True)
-    buttons = {text: enabled for step in station.steps for text, _k, enabled, _r in step.buttons}
-    assert buttons["推送 manual/ 分支"] and buttons["批准范围"] and buttons["开工"]
+    buttons = {text: (enabled, reason) for step in station.steps for text, _k, enabled, reason in step.buttons}
+    assert buttons["批准范围"][0] and buttons["开工"][0]
+    # 推送 / 开 PR 本版没实现：在线也灰着，提示去命令提示符和网页做（Codex 评审 #52）
+    for text in ("推送 manual/ 分支", "打开 GitHub 开 PR"):
+        assert buttons[text][0] is False and "本版不做" in buttons[text][1]
     assert not station.warn
     # 只有登记的客户项目进“接着干”
     assert [p[0].project_id for p in station.projects] == ["DJ-2026-101"]
@@ -162,6 +165,30 @@ def test_bc_next_id_and_append_only(tmp_path: Path) -> None:
     assert after.startswith(before) and after[len(before):] == (line + "\n").encode("utf-8")
     assert receipt.rc == 0 and receipt.action == "写入 BC 行"
     assert actions.bc_next_id(record, "DJ-2026-009", october) == "BC-DJ-2026-009-2026_10_007"
+
+
+def test_bc_append_refuses_when_the_file_changed_after_preview(tmp_path: Path) -> None:
+    """预览后文件被别人改了（外部编辑器、连点两下）就拒写，不拿旧快照覆盖新内容（Codex 评审 #52）。"""
+    record = tmp_path / "02_业务变更记录.md"
+    record.write_text("| 编号 | 状态 |\n|---|---|\n", encoding="utf-8")
+    when = datetime(2026, 10, 23, tzinfo=OFFSET)
+    digest = actions.bc_digest(record)
+    line = actions.bc_preview(record, "DJ-2026-009", when, "baiyang", "改", "影响")
+    with record.open("a", encoding="utf-8") as stream:  # 预览后，别人在编辑器里加了一行
+        stream.write("| BC-DJ-2026-009-2026_10_001 | 别人写的 |\n")
+    edited = record.read_bytes()
+    receipt = actions.bc_append(record, line, digest)
+    assert receipt.rc == 1 and "重新预览" in receipt.command
+    assert record.read_bytes() == edited  # 别人那行还在，也没多写
+    # 重新预览：编号顺延，写进去后原有内容一字不差
+    digest = actions.bc_digest(record)
+    line = actions.bc_preview(record, "DJ-2026-009", when, "baiyang", "改", "影响")
+    assert line.startswith("| BC-DJ-2026-009-2026_10_002 |")
+    assert actions.bc_append(record, line, digest).rc == 0
+    assert record.read_bytes() == edited + (line + "\n").encode("utf-8")
+    # 同一份预览再写一次（连点）也拒写
+    assert actions.bc_append(record, line, digest).rc == 1
+    assert record.read_bytes().count(line.encode("utf-8")) == 1
 
 
 def test_probe_offline_on_timeout_and_run_check_receipt(tmp_path: Path) -> None:

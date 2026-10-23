@@ -405,3 +405,20 @@ def test_audit_verdicts(tmp_path: Path) -> None:
         else:
             assert found[name].verdict == want, name
     assert found["6_a.md"].head == "abcdef12"
+
+
+def test_project_page_keeps_pr_rows_next_to_card_columns(tmp_path: Path) -> None:
+    """项目页按栏排卡时不能把 PR 行冲掉（Codex 评审 #52）：有在干和刚关的卡，PR #2 仍要出现在证据和 PR 列表里。"""
+    snap = _collect(tmp_path, FakeGitHub(routes()))
+    root, db = base._workspace(
+        tmp_path / "ws", [("SW-2026-008", "ACTIVE", "工具卡", 0.1), ("SW-2026-008", "CLOSED", "刚关的", 1)]
+    )
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    home = vm.home_vm(board, OFFSET, True, False, snap)
+    card = next(c for c in home.hot + home.rest if c.project_id == "SW-2026-008")
+    page = vm.project_vm(board, card, OFFSET, True, home.github)
+    assert [r.number for r in page.prs] == [2]
+    gate = next(e for e in page.evidence if e.title == "门禁")
+    assert gate.detail.startswith("#2 ") and gate.state == "block"
+    columns = {c.name: c.cards for c in page.columns}
+    assert [r[1] for r in columns["在干"]] == ["工具卡"] and [r[1] for r in columns["已关"]] == ["刚关的"]

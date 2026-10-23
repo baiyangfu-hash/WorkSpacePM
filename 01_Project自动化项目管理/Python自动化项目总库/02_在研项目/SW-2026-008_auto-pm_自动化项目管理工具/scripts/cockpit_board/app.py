@@ -130,6 +130,7 @@ class CockpitWindow(QMainWindow):
         self.home_vm: vm.HomeVM | None = None
         self.online: bool | None = None if not options.no_net else False
         self.mode = "pm"
+        self.bc_digest: str | None = None  # 预览那一刻 02_业务变更记录.md 的指纹
         self._threads: list[QThread] = []
         self.setWindowTitle(WINDOW_TITLE)
         self.resize(1360, 880)
@@ -328,19 +329,27 @@ class CockpitWindow(QMainWindow):
         elif key == "bc_preview":
             record = self._bc_record()
             when = (self.options.now or datetime.now(UTC)).astimezone(self.offset)
-            text = actions.bc_preview(record, pid, when, "baiyang", "（填改了什么）", "（填影响）") if record else "找不到 02_业务变更记录.md"
-            self.station.set_bc_preview(text)
-            self.station.add_receipt(actions.Receipt(when.strftime("%H:%M"), "写入 BC 行（预览）", f"append {record.name if record else '?'}", 0, True))
+            if record is None:
+                self.bc_digest = None
+                self.station.set_bc_preview("")
+                self.status.setText(self._bc_missing())
+                return
+            self.bc_digest = actions.bc_digest(record)
+            self.station.set_bc_preview(actions.bc_preview(record, pid, when, "baiyang", "（填改了什么）", "（填影响）"))
+            self.station.add_receipt(actions.Receipt(when.strftime("%H:%M"), "写入 BC 行（预览）", f"append {record.name}", 0, True))
             return
         elif key == "bc_write":
-            record, line = self._bc_record(), self.station.bc_preview_text
-            if not record or not line.startswith("|"):
+            record, line, digest = self._bc_record(), self.station.bc_preview_text, self.bc_digest
+            if not record or not line.startswith("|") or digest is None:
                 self.status.setText("先预览，再写入")
                 return
-            job = lambda: actions.bc_append(record, line)  # noqa: E731
+            # 一次预览只写一次：先清掉预览，“写入”按钮立刻变灰，连点也不会写第二行
+            self.bc_digest = None
+            self.station.set_bc_preview("")
+            job = lambda: actions.bc_append(record, line, digest)  # noqa: E731
         elif key == "bc_open":
             record = self._bc_record()
-            self.status.setText("文件：" + (str(record) if record else "找不到 02_业务变更记录.md"))
+            self.status.setText("文件：" + str(record) if record else self._bc_missing())
             return
         else:
             self.status.setText("这个动作本版不做：" + key)
@@ -349,13 +358,21 @@ class CockpitWindow(QMainWindow):
         runner.done.connect(self.station.add_receipt)
         self._track(runner)
 
+    def _bc_missing(self) -> str:
+        worktree = self.options.manual_worktree
+        if not worktree.is_dir():
+            return f"没有人工工位 {worktree.name}/（先做第 1 步开 manual/ 分支），BC 行只写在人工工位里，不写控制根"
+        return "人工工位里找不到这个项目的 02_业务变更记录.md"
+
     def _bc_record(self) -> Path | None:
+        """BC 行写在人工工位（.auto-pm/worktrees/manual）里，跟着 manual/ 分支一起提交；绝不写控制根的 main。"""
         if self.board is None:
             return None
         project = next((p for p in self.board.projects if p.project_id == self.options.station_project), None)
-        if project is None or not project.root:
+        worktree = self.options.manual_worktree
+        if project is None or not project.root or not worktree.is_dir():
             return None
-        for folder in pd._change_dirs(self.options.root / project.root):
+        for folder in pd._change_dirs(worktree / project.root):
             record = folder / "02_变更记录" / "02_业务变更记录.md"
             if record.is_file():
                 return record

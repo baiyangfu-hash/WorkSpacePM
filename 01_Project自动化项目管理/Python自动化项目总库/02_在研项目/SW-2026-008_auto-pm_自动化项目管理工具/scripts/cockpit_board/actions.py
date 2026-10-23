@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +22,7 @@ from pathlib import Path
 PROBE_TIMEOUT = 3
 CHECK_TIMEOUT = 600
 BC_PATTERN = re.compile(r"^BC-([A-Z]+-\d{4}-\d{3})-(\d{4})_(\d{2})_(\d{3})$")
+_BC_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -93,12 +96,25 @@ def bc_preview(record: Path, project_id: str, when: datetime, who: str, what: st
     return "| " + " | ".join(cells) + " |"
 
 
-def bc_append(record: Path, line: str) -> Receipt:
-    """只追加一行。写后校验：除新增的最后一行外，字节不变。"""
-    before = record.read_bytes()
-    text = before.decode("utf-8")
-    sep = "" if text.endswith("\n") else "\n"
-    record.write_bytes(before + (sep + line + "\n").encode("utf-8"))
-    after = record.read_bytes()
-    assert after.startswith(before), "追加写校验失败：前面的内容变了"
+def bc_digest(record: Path) -> str:
+    """预览时记下文件指纹；写入时文件变了就拒写（编号是按预览那一刻的最后一行算的）。"""
+    return hashlib.sha256(record.read_bytes()).hexdigest()
+
+
+def bc_append(record: Path, line: str, expected_digest: str | None = None) -> Receipt:
+    """只往表末追加一行，用追加模式打开，不重写整份文件。
+
+    同一时刻只允许一次写（锁）；预览之后文件被别人改过（外部编辑器、连点两下）就拒写，回执 rc 1，
+    要你重新预览。写后校验：除新增的最后一行外，字节不变。
+    """
+    with _BC_LOCK:
+        before = record.read_bytes()
+        if expected_digest is not None and hashlib.sha256(before).hexdigest() != expected_digest:
+            return Receipt(_now_text(), "写入 BC 行", f"拒写 {record.name}：预览后文件变了，请重新预览", 1)
+        sep = b"" if before.endswith(b"\n") or not before else b"\n"
+        with open(record, "ab") as stream:
+            stream.write(sep + (line + "\n").encode("utf-8"))
+        after = record.read_bytes()
+    if not after.startswith(before) or after[len(before):] != sep + (line + "\n").encode("utf-8"):
+        return Receipt(_now_text(), "写入 BC 行", f"追加写校验失败：{record.name} 写入期间被别人改了，请人工核对", 1)
     return Receipt(_now_text(), "写入 BC 行", f"append {record.name} ← {line.split('|')[1].strip()}", 0)

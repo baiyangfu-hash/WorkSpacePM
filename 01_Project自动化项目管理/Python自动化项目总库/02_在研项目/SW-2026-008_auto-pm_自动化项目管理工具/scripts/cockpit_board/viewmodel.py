@@ -743,7 +743,7 @@ def project_vm(
             missions = pd._recent_closed(project, now)
         else:
             missions = [m for m in project.missions if m.column == name]
-        rows = []
+        card_rows = []  # 这一栏的卡；别和上面的 PR 行 rows 混用
         for m in missions:
             bits = [pd.STATE_LABEL.get(m.state, m.state)]
             if m.run and m.column == "在干":
@@ -752,9 +752,9 @@ def project_vm(
                     bits.append("租约到 " + fmt(m.run.lease_expires, offset))
             if m.change_id:
                 bits.append(m.change_id)
-            rows.append((m.mission_id, pd._short(m.title, 70), " · ".join(bits), m.example))
+            card_rows.append((m.mission_id, pd._short(m.title, 70), " · ".join(bits), m.example))
         note = "PARKED 状态账本里还没有，TD-071 合并后才有数据" if name == "搁着" else ""
-        columns.append(BoardColumn(name, note, rows))
+        columns.append(BoardColumn(name, note, card_rows))
     evidence = [
         EvidenceRow(
             "ok" if not any(i.title == "账本对不上" for i in card.issues) else "risk",
@@ -840,7 +840,9 @@ def station_vm(
         Step(5, *STEP_TITLES[4], "todo", "", [("复制提交说明", "copy_commit", True, ""), ("提交", "commit", False, "提交在命令提示符里做，本页不替你提交")]),
         Step(
             6, *STEP_TITLES[5], "todo", "",
-            [("推送 manual/ 分支", "push", *dis_off), ("打开 GitHub 开 PR", "open_pr", *dis_off),
+            # 推送 / 开 PR 本版只给提示不做：在命令提示符里 git push，到 GitHub 网页开 PR
+            [("推送 manual/ 分支", "push", False, dis_off[1] if off else "本版不做：在命令提示符里 git push -u origin manual/…"),
+             ("打开 GitHub 开 PR", "open_pr", False, dis_off[1] if off else "本版不做：推送后到 GitHub 网页开 PR"),
              ("批准范围", "approve", gap9_merged, "缺口⑨防冒签合并后才开放：批准只写一条凭据"),
              ("开工", "start", gap9_merged, "缺口⑨合并后才开放，且和批准分开；不启动任何 agent")],
         ),
