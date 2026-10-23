@@ -192,12 +192,35 @@ def make_drill(tmp_path: Path, benchmark: bytes, *, second_project: bool = False
     tools.mkdir()
     (tools / "launcher.py").write_text(LAUNCHER, encoding="utf-8")
     (tools / "sdk_step.py").write_text(SDK_STEP, encoding="utf-8")
+    _install_fake_codex(tools)
+    return Drill(root, tools)
+
+
+def _install_fake_codex(tools: Path) -> None:
+    """Put a ``codex`` that runs ``FAKE_CODEX`` on ``PATH``, in the form each OS finds it.
+
+    The executor starts ``["codex", ...]`` without a shell. On Windows ``CreateProcess`` then looks only for
+    ``codex.exe``: a ``codex.cmd`` would never be found (and a prompt passed through ``cmd.exe`` is not safe
+    anyway). So on Windows the script is wrapped in pip's console-script launcher, the same ``.exe`` pip puts
+    in front of every installed entry point; elsewhere a ``/bin/sh`` wrapper does the same job.
+    """
+
     script = tools / "codex_agent.py"
     script.write_text(FAKE_CODEX, encoding="utf-8")
-    codex = tools / "codex"
-    codex.write_text(f"#!/bin/sh\nexec {sys.executable} {script} \"$@\"\n", encoding="utf-8")
-    codex.chmod(0o755)
-    return Drill(root, tools)
+    if os.name != "nt":
+        codex = tools / "codex"
+        codex.write_text(f"#!/bin/sh\nexec {sys.executable} {script} \"$@\"\n", encoding="utf-8")
+        codex.chmod(0o755)
+        return
+    from pip._vendor.distlib.scripts import ScriptMaker
+
+    source = tools / "codex-source"
+    source.mkdir()
+    (source / "codex").write_text("#!python\n" + FAKE_CODEX, encoding="utf-8")
+    maker = ScriptMaker(str(source), str(tools))
+    maker.executable = sys.executable
+    made = maker.make("codex")
+    assert [Path(path).name for path in made] == ["codex.exe"], made
 
 
 def _add_second_project(root: Path, benchmark: bytes) -> None:
