@@ -1,0 +1,63 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261023-709FDD26",
+  "project_id": "DJ-2026-005",
+  "change_id": "CHG-PLC-2026-015",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/05_公共报警/ST_CommonAlarm.scl",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation.scl",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/程序文档/PLC变量定义文档_VAR.md",
+    "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/Test/alarm_test.scltest"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-10-23T21:55:32.473900+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: 公共报警数组声明修正后，语言服务不再报 05_公共报警 的数组路径错误；check 行问题数由 8 降到 2，仅剩范围外 basic_test.scltest 两条；Pass=67、Warn=2、Fail 两行均为范围外文件",
+    "acceptance: 新报警在报警由无到有的那个扫描周期为 TRUE、下一周期复位为 FALSE，MES 计数为 1、队列只入一次（沙箱过滤用例 TC01_NewAlarm_Edge）",
+    "risk: 数组下标范围假设：队列 0..9 与 QUEUE_MASK=9、FB 内 FOR 0..9 一致；工站 1..3 与 FB 内 [1][2][3] 一致；未核对 HMI 组态按同一范围访问，错位会在上位机侧表现为报警显示串号",
+    "risk: 行为变更：o_bNewAlarmFlag 从恒 FALSE 变成真实单周期脉冲，MES 计数与队列会开始真实增长，上位机若依赖旧行为会看到新的上传/蜂鸣动作",
+    "risk: 数组去掉 := 0 显式初值：PLC 运行时仍默认清零，但数据块不再有显式初值声明；这是转译器不支持数组初值的唯一可行写法",
+    "risk: 回归保护休眠：新增用例在范围外 basic_test.scltest 修好前无法在仓库内执行，只能靠一次性沙箱验证",
+    "non-goal: 不修范围外 Test/basic_test.scltest:86/100 的 i_bGlueMachine_Fault 路径错误",
+    "non-goal: 不修范围外 Test/interlock_test.scltest 失败用例",
+    "non-goal: 不改共享库 01_SharedLibraries，不改 PM_SESSION_*.md，不改 DSN/IFC/UM 与项目内旧 CHG",
+    "non-goal: 不重构 s_wPrevGlobalAlarmWord 死状态，不新增边沿/计时块，不使用 FB_TON/FB_TONR",
+    "safety-circuit: 否"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "d61290be1d78a423f8c405b01779b3f73f44be053743c4ecbec8422e92f8eb01",
+      "approval_evidence_ref": "user-confirmation:2026-10-23T14:53:57-07:00",
+      "request_id": "DJ-2026-005-common-alarm-array-edge-20261023",
+      "execution_grant": {
+        "adapter": "trae",
+        "approved_model": "trae",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/05_公共报警/ST_CommonAlarm.scl",
+          "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation.scl",
+          "0100_PLC自动化/DJ-2026-005/02_PLC程序/程序文档/PLC变量定义文档_VAR.md",
+          "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/Test/alarm_test.scltest"
+        ],
+        "plan_checklist": {
+          "original_request": "项目 DJ-2026-005：公共报警块编译不过，修好报警队列和工站报警状态的数组声明，并修好“新报警”检测一直不触发的问题。",
+          "safety_circuit": "否",
+          "acceptance_checks": [
+            {
+              "command": ".venv\\Scripts\\python.exe -B main.py plc check DJ-2026-005",
+              "expected_exit_code": 1
+            },
+            {
+              "command": ".venv\\Scripts\\python.exe -B .agents\\verify_dj005_alarm_edge.py",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "工作树分支未合并，回退即删除 .auto-pm/worktrees/trae 与 trae/<变更单号> 分支；逐文件恢复：两字段改回 INT := 0、3 条 prev 赋值移回块首并删掉第 9 节新增行、VAR 文档两行改回 INT、删除 alarm_test.scltest；若已拷回控制根未提交，用 git checkout -- 恢复 3 个受控文件并删除新增测试文件；若已提交，git revert 该提交"
+        }
+      }
+    }
+  }
+}
