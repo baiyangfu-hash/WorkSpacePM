@@ -24,6 +24,7 @@ from rich.table import Table
 from auto_pm.app_context import AppContext
 from auto_pm.core.paths import PYTHON_REQUIRED_DIRS
 from auto_pm.core.project_service import ProjectService
+from auto_pm.core.python_service import derive_package_name
 from auto_pm.core.template_service import TemplateService
 
 console = Console()
@@ -53,7 +54,12 @@ def python_group(ctx: click.Context) -> None:
 @click.argument("project_id")
 @click.option("--name", "project_name", required=True, help="项目名称")
 @click.option("--desc", "description", default="", help="项目描述")
-@click.option("--package", "package_name", default=None, help="Python 包名（默认从项目名生成）")
+@click.option(
+    "--package",
+    "package_name",
+    default=None,
+    help="Python 包名（默认从项目名生成；项目名不能当包名时取项目号，如 sw_2026_901）",
+)
 @click.option("--author", default="fubai", help="作者名")
 @click.option("--dry-run", is_flag=True, help="仅预览，不实际创建")
 @click.pass_context
@@ -71,7 +77,7 @@ def cmd_init(
 
     # 推导 package_name 和 cli_command
     if package_name is None:
-        package_name = project_name.replace(" ", "_").lower()
+        package_name = derive_package_name(project_name, project_id)
     cli_command = package_name.replace("_", "-")
 
     # 目标路径
