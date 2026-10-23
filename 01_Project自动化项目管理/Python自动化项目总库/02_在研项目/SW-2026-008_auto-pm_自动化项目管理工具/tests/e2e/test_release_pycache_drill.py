@@ -3,7 +3,7 @@
 Field report (D08, Trae CN): running plain ``python`` against ``releases/<id>`` leaves ``__pycache__`` there; the stable
 launcher's exact-tree check then rejects the active slot and quietly runs the previous release.  This drill builds a real
 two-slot container from the current source and the real stable launcher, and records what a user or agent can notice.
-Passing tests pin today's behaviour; strict xfails name what should happen and wait for a card.
+Since the launcher fix a cache folder alone stops the launcher (exit 4) with the purge command; real payload damage\nstill falls back to the previous release, now with a warning.  Strict xfails name what should happen and wait for a card.
 """
 
 from __future__ import annotations
@@ -128,37 +128,42 @@ def test_c01_a_clean_container_runs_the_active_release_without_conflicts(tmp_pat
     assert oriented["conflicts"] == []
 
 
-def test_c02_today_a_cache_folder_switches_to_the_previous_release_and_git_cannot_see_it(tmp_path: Path) -> None:
+def _tamper(container: Path) -> None:
+    """Real damage to a payload file, which the launcher still answers by falling back to the previous release."""
+
+    payload = container / "releases" / ACTIVE / "auto_pm" / "__init__.py"
+    payload.write_bytes(payload.read_bytes() + b"\n# tampered\n")
+
+
+def test_c02_a_cache_folder_stops_the_launcher_with_the_purge_command_and_does_not_switch(tmp_path: Path) -> None:
     workspace, container = _container(tmp_path)
     _pollute(container)
 
     resolved = _launch(container, "--resolve-only")
-    oriented = _orient(container)
 
-    assert resolved.returncode == 0
-    assert "previous_release.json" in resolved.stdout
-    assert _git(workspace, "status", "--porcelain") == ""  # the root .gitignore hides __pycache__
-    context = oriented["context"]
-    assert isinstance(context, dict)
-    assert context["configured_release_id"] == ACTIVE and context["effective_release_id"] == PREVIOUS
-    assert oriented["conflicts"] == ["RUNTIME_IDENTITY_DIVERGENCE"]
-    assert context["runtime_fallback_reason"] == ""  # the read-only view does not say why
+    assert resolved.returncode == 4, resolved.stdout + resolved.stderr
+    assert "__pycache__" in resolved.stderr and "--purge-bytecode" in resolved.stderr
+    assert "previous_release.json" not in resolved.stdout
+    assert _git(workspace, "status", "--porcelain") == ""  # the root .gitignore still hides __pycache__
+    purged = _launch(container, "--purge-bytecode")
+    assert purged.returncode == 0 and "active_release.json" in purged.stdout, purged.stdout + purged.stderr
+    assert _orient(container)["conflicts"] == []
 
 
-@pytest.mark.xfail(strict=True, reason=SILENT_FALLBACK)
 def test_c03_falling_back_to_the_previous_release_is_reported_loudly_with_its_reason(tmp_path: Path) -> None:
     _, container = _container(tmp_path)
-    _pollute(container)
+    _tamper(container)
 
     resolved = _launch(container, "--resolve-only")
 
-    assert "__pycache__" in resolved.stderr
+    assert resolved.returncode == 0 and "previous_release.json" in resolved.stdout
+    assert "警告" in resolved.stderr and "previous" in resolved.stderr
 
 
 @pytest.mark.xfail(strict=True, reason=WRITES_DESPITE_DIVERGENCE)
 def test_c04_a_write_command_refuses_while_the_runtime_identity_diverges(tmp_path: Path) -> None:
     workspace, container = _container(tmp_path)
-    _pollute(container)
+    _tamper(container)
 
     written = _launch(
         container, "pm", "inbox", "add", "--project-id", PROJECT_ID, "--request-id", "REQ-PYC", "--title", "退回旧版时写入",
