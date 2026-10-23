@@ -22,6 +22,7 @@ import datetime
 import logging
 import os
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from auto_pm.change.constants import (
@@ -504,24 +505,35 @@ class ChangeService:
                 missing.append(name)
         return missing
 
-    def _check_doc_sync(self, project_id: str | None) -> list[str]:
-        """运行文档同步检查（SHC-011, SHC-014）（CHG-SCPT-2026-145）
+    @staticmethod
+    def _project_root_of(change_file: str) -> Path | None:
+        """变更单文件所在项目的根目录：路径里 ``04_监控`` 或 ``11_监控`` 之前的那一级（M3-DOCSYNC）。"""
+        parts = Path(change_file).resolve().parts
+        for marker in ("04_监控", "11_监控"):
+            if marker in parts:
+                idx = len(parts) - 1 - parts[::-1].index(marker)
+                return Path(*parts[:idx])
+        return None
+
+    def _check_doc_sync(self, project_id: str | None, change_file: str | None = None) -> list[str]:
+        """运行文档同步检查（SHC-011, SHC-014）（CHG-SCPT-2026-145；M3-DOCSYNC 起只作提示）
 
         在 CHG 流转到 completed 前调用，检查版本号一致性和文档索引有效性。
-        返回 ERROR 级别的检查结果描述列表（空列表表示通过）。
+        只读**本变更单所在项目根目录**下的 ``PM_SESSION_<项目编号>.md``，不再在整个工作空间里递归查找
+        （以前会命中 ``.auto-pm/worktrees`` 等处的旧副本）；项目根下没有 PM_SESSION 时跳过。
+        PM_SESSION 已于 2026-10-10 退役、不再刷新，所以结果只作为提示写进验证结论，不再阻止流转。
 
         Args:
             project_id: 项目编号（如 SW-2026-008）
+            change_file: 本变更单文件路径，用来确定项目根目录
 
         Returns:
-            ERROR 级别检查结果描述列表
+            ERROR 级别检查结果描述列表（空列表表示没有提示）
         """
-        if not project_id:
+        if not project_id or not change_file:
             return []
 
         try:
-            from pathlib import Path
-
             from auto_pm.spec.core.checker_base import HealthChecker, Severity
             from auto_pm.spec.core.config import WorkspaceConfig
             from auto_pm.spec.core.registry import SpecRegistry
@@ -530,21 +542,11 @@ class ChangeService:
             log.warning("文档同步检查依赖不可用，跳过")
             return []
 
-        workspace = Path(self.workspace_root)
-        workspace = Path(self.workspace_root)
-        # 查找项目根目录（优先使用包含标志文件的根目录，避免命中子目录测试/历史 PM_SESSION）
-        pm_files = list(workspace.rglob(f"PM_SESSION_{project_id}*.md"))
-        if not pm_files:
-            return []  # 找不到 PM_SESSION 文件时跳过
+        project_root = self._project_root_of(change_file)
+        if project_root is None or not (project_root / f"PM_SESSION_{project_id}.md").is_file():
+            return []  # 项目根下没有 PM_SESSION 时跳过
 
-        target_pm = pm_files[0]
-        for f in pm_files:
-            p = f.parent
-            if (p / ".copier-answers.yml").exists() or (p / ".plc.json").exists() or (p / "pyproject.toml").exists():
-                target_pm = f
-                break
-
-        project_root = target_pm.parent
+        workspace = Path(self.workspace_root)
         config = WorkspaceConfig(workspace=workspace)
         scanner = SpecScanner(
             workspace=workspace, config=config, project_root=project_root
@@ -638,14 +640,14 @@ class ChangeService:
                     f"待验证项：{pending_str}；其余项已验证通过"
                 )
 
-            # [CHG-SCPT-2026-145 门禁3] 文档同步检查：SHC-011 版本号一致性 + SHC-014 文档索引有效性
-            # 确保变更闭环前 PRD/INT/DSN/TEC 索引有效、版本号四件套一致
-            doc_errors = self._check_doc_sync(project_id)
-            if doc_errors:
-                raise TransitionGuardError(
-                    f"变更单 {change_number} 文档同步检查失败（SHC-011/SHC-014）：\n"
-                    + "\n".join(f"  - {e}" for e in doc_errors)
+            # [CHG-SCPT-2026-145 门禁3 → M3-DOCSYNC 提示] 文档同步检查：SHC-011 版本号一致性 + SHC-014 文档索引有效性。
+            # PM_SESSION 已退役：只读本项目根下的 PM_SESSION，结果写进验证结论作提示，不再阻止完成。
+            doc_notes = self._check_doc_sync(project_id, file_path)
+            if doc_notes:
+                log.warning(
+                    "变更单 %s 文档同步提示（SHC-011/SHC-014，不阻止完成）：%s", change_number, "; ".join(doc_notes)
                 )
+                final_conclusion = f"{final_conclusion} [文档同步提示，不阻止完成] " + "；".join(doc_notes)
 
             # 门禁通过：写入验证行和验证结论到§10
             verify_row = (

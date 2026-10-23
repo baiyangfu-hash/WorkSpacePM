@@ -20,6 +20,8 @@ alwaysApply: true
 | 隔离对象（禁止使用） | `.trae/skills/pm-workflow/SKILL.md` |
 | 全栈执行 | `.trae/skills/fullstack-engineer/SKILL.md` |
 | PLC 执行 | `.trae/skills/plc-electrical-engineer/SKILL.md` |
+| 工位与控制根规则 | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)” |
+| 独立审计（审 PR 时） | `AGENTS.md`“独立审计 (AUD-001)” |
 | 规范索引 | `00_Obsidian_Base全局规范文件仓库/00_INDEX_全局规范索引.md` |
 
 冲突时：项目级 > 技术栈规则 > 全局规则 > Cursor 默认行为。
@@ -29,6 +31,12 @@ alwaysApply: true
 - **可以**：从根入口执行 `main.py pm resume`；在有效 Work/Run/Decision/lease 下写 owned paths 并运行门禁
 - **禁止**：回写 PM_SESSION、写 `.auto-pm/ai_feedback.json`、创建 handoff.v1 或从聊天文字推定执行权
 - **执行结束时**：创建 Continuity Checkpoint；需要换 Agent 时创建并接受 handoff.v2
+
+## 工位与控制根（真源：`AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”）
+
+- Cursor 里的 AI 只在自己的工位 `R/.auto-pm/worktrees/cursor` 写代码，分支前缀 `cursor/`；`R` 是本机唯一的控制根（停在 `main`，持 `.auto-pm/continuity.db`）
+- 驾驶舱命令只在控制根执行；不得另克隆仓库、不得把工作树放在 `.auto-pm/worktrees/` 之外（否则成为第二本账或被拒登记 Run）
+- 其他 agent 的工位与前缀、开收工位命令，以 `AGENTS.md` 该节为准
 
 ## 多 AI 隔离与零负担交付红线
 

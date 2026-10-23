@@ -16,9 +16,51 @@ from auto_pm.utils.file_utils import read_file, write_file
 
 log = logging.getLogger(__name__)
 
+# 驾驶舱维护的「变更单索引」表骨架（与 path_resolver.get_or_create_ledger_file 新建台账时写入的一致）
+INDEX_TABLE_SECTION = (
+    "## 变更单索引\n\n"
+    "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |\n"
+    "|------|----------|------|--------|----------|----------|----------|------|\n"
+)
+
 
 class LedgerUpdater:
     """版本变更台帐更新器"""
+
+    def ensure_index_table(self, ledger_path: str) -> bool:
+        """台账没有「变更单索引」表时在文末补上空表骨架（D09 迁入硬挡 N3）
+
+        模板生成的台账和 DJ-2026-009 的现有台账都没有这张表，建单写不进、
+        ``ledger reconcile --fix`` 也补不了行。只由对账自愈调用；已有表格时不改动文件。
+
+        Returns:
+            是否补建了表格
+        """
+        content = read_file(ledger_path)
+        if not content or self._has_index_table(content):
+            return False
+        separator = "" if content.endswith("\n\n") else ("\n" if content.endswith("\n") else "\n\n")
+        write_file(ledger_path, content + separator + INDEX_TABLE_SECTION)
+        log.info("台帐已补建变更单索引表: %s", ledger_path)
+        return True
+
+    @staticmethod
+    def _has_index_table(content: str) -> bool:
+        """与 _insert_row_to_index_table 同一判定：标题行之后、遇到正文之前出现表格分隔行"""
+        in_index = False
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if "变更单索引" in stripped:
+                in_index = True
+                continue
+            if not in_index:
+                continue
+            if stripped.startswith("|"):
+                if re.match(r"^\|[\s\-:|]+\|$", stripped):
+                    return True
+            elif stripped:
+                in_index = False
+        return False
 
     def update(
         self,
