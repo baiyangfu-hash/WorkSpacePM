@@ -22,6 +22,8 @@ alwaysApply: true
 | **全栈高级语言** | `.trae/skills/fullstack-engineer/SKILL.md` |
 | **Obsidian 规范注册表** | `00_Obsidian_Base全局规范文件仓库/spec_registry.json` |
 | **全局协作入口** | `AGENTS.md` |
+| **工位与控制根规则** | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”：每台电脑 1 个控制根，每个 agent 一个工位 `.auto-pm/worktrees/<agent>` |
+| **独立审计（审 PR 时）** | `AGENTS.md`“独立审计 (AUD-001)” |
 
 ## 规则优先级
 

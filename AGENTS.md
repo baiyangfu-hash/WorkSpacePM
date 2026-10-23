@@ -8,6 +8,7 @@
 
 | 用途 | 路径 |
 |------|------|
+| 进门第一步（薄入口，只读定位） | `.trae/skills/cockpit-entry/SKILL.md` |
 | 跨 AI 共存与路由 | `.cursor/rules/workspace-ai-coexistence.mdc` |
 | 跨 AI 适配入口（非 Trae，纯引用） | `.agent/rules/project-rule.md` |
 | 技能注册表 | `.agents/skills.json` |
@@ -16,6 +17,9 @@
 | 治理基线 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
 | 当前计划与状态投影 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md`（以其“当前投影”为准；上一行的 26 号总计划是治理基线与历史依据） |
 | 日常迭代操作手册 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md` |
+| 无 AI、断网时的电气/PLC 人工路线 | `0100_PLC自动化/00_通用规范/无AI离线手册.md` |
+| 多 agent 工位与控制根规则 | 本文件“多 agent 工位与控制根规则 (WS-001)”一节 |
+| 独立审计（任何 agent 通用） | 本文件“独立审计 (AUD-001)”一节；脚本 `reviews/tools/audit_pr.py`，清单 `reviews/21_audit_checklist.md` |
 | 隔离对象（禁止使用） | `.trae/skills/pm-workflow/SKILL.md` |
 | 全栈执行 | `.trae/skills/fullstack-engineer/SKILL.md` |
 | PLC 执行 | `.trae/skills/plc-electrical-engineer/SKILL.md` |
@@ -32,15 +36,16 @@
 ## 强制协同铁律（澄清-报批-执行-验收 四阶段）
 
 所有 AI 在处理用户的业务需求、功能修改或缺陷变更时，必须严格分步执行，**严禁在需求不明时擅自脑补实施，严禁未经审批擅自篡改代码**：
+0. **用户只给一句话需求是常态**：目标拆分、可改范围、机器可判的验收标准由 agent 补出、交用户核对；具体步骤见 `.trae/skills/cockpit-entry/SKILL.md`“用户只给了一句话需求时”。
 1. **阶段 0【需求澄清与代码基优先门禁 (Codebase-First Gating)】**：
    - **严禁代码盲问 (Zero-Stupid-Questions Redline)**：严禁在未检索代码库的情况下直接向用户提问。任何可在项目源码、配置文件（`.plc.json` / `pyproject.toml`）、接口文档（`INT.md` / `VAR.md`）、数据结构（DTO / UDT）或规范库中读取到的参数、变量名、调用关系与目录路径，**绝对禁止向用户发问**；
    - **二分法处理原则 (Greenfield vs Brownfield)**：
      - **全新建仓 (Greenfield)**：审查 CAD/轴系/动作时序 3 要素。若缺失，先检索 Obsidian 规范库与模板库；仍缺失物理硬件事实时方可向用户提问；
-     - **在研迭代/缺陷变更 (Brownfield)**：从工作区根执行 `main.py pm resume <PID> --json`，再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
+     - **在研迭代/缺陷变更 (Brownfield)**：先按 `cockpit-entry` 从工作区根执行只读定位 `main.py pm orient <PID> --json`（需要恢复细节时再用 `main.py pm resume <PID> --json`；仓库记录的发布版本 1.3.3-d8f7c8b 还没有 `pm orient`，新克隆的工作区在发布指针更新前改用 `pm resume`），再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
    - **有效提问门槛**：只有当代码库探路完毕，且发现涉及无法推导的真实业务决策抉择（Trade-off）、新增未接线硬件定义或客户冲突诉求时，方可发起《高质量澄清提问清单》；
 2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）；
 3. **阶段 2【执行】**：仅在用户明确回复“同意/批准”后，方可派发给对应执行技能（PLC / 全栈）编写代码与自动化测试。严禁在对话框要求或输出长篇说明书草稿，文档骨架由 Copier 脚手架生成并填空；
-4. **阶段 3【验收】**：执行端创建 Checkpoint 并回执后，主 Agent 核验 Git/门禁证据，推进 Run/Work 与 CHG 状态并执行 `main.py ledger reconcile <PID>`。PM_SESSION 已退役（用户 2026-10-10 裁决），不再刷新，仅作历史证据。闭环未完成前不得宣布结项。
+4. **阶段 3【验收】**：执行端创建 Checkpoint 并回执后，主 Agent 核验 Git/门禁证据，报用户验收；用户验收后由用户在驾驶舱界面点“确认验收”，它记下验收并走 `close_accepted` 一步收口（推进 Run、Work 和 Mission，把证据写进变更单；变更单再用 `change transition … --pid <PID>` 推到 completed），**不得单独用 `continuity run/work transition` 推 Run 或 Work 的状态**，收口后执行 `main.py ledger reconcile <PID>`。PM_SESSION 已退役（用户 2026-10-10 裁决），不再刷新，仅作历史证据。闭环未完成前不得宣布结项。
 
 ## 子代理物理隔离法则（执行权剥离）
 
@@ -49,6 +54,78 @@
    - **阶段 0 预研模式（`--mode grooming`）**：PM 调度领域子代理执行只读探路与代码上下文勘测，子代理以 `handoff_result` 回传事实摘要；
    - **阶段 2 执行模式（`--mode execution`）**：用户审批后，PM 褫夺编码权，派发执行子代理进行代码填空、门禁自检与测试验证。
 3. **强制契约化交接**：派发前必须建立并授权 Work、启动带 lease 的 Run，声明 Decision 与 owned paths；执行端创建 Checkpoint，并在换 Agent 时使用 handoff.v2。主 Agent 收到回执后完成 Run/Work、CHG 与台账闭环。
+
+## 多 agent 工位与控制根规则 (WS-001)
+
+> 生效时间：下面写到的“登记 Run 被拒”和第 5 条“不带 `--control-root` 就拒绝”，在源码里已实现，但当前部署的发布版 1.3.3 还没有，要等 D07 部署后才自动拦截；在那之前由各 agent 自觉遵守。根入口拒绝在工位里运行（第 2 条）现在就生效。
+
+每台电脑分两层。两个 agent 站在同一个工位上，等于两个人同时改一张接线图，所以工位必须分开；账本只能有一本，所以控制根只能有一个。
+
+| 层 | 位置 | 每台电脑几个 | 用途 |
+|------|------|------|------|
+| 控制根 `R` | 本机唯一一份仓库克隆，停在 `main` | **1 个** | 持本机账本 `R/.auto-pm/continuity.db`；只跑驾驶舱命令（`main.py pm resume`、`main.py ledger reconcile`、`main.py continuity …`），不写业务代码 |
+| 工位 `W` | `R/.auto-pm/worktrees/<agent>` | 每个会改文件的 agent 1 个 | agent 在自己的分支上写代码、跑测试、提交、推送 |
+
+**工位与分支前缀表**（第二个写代码的 agent 默认是本机 Claude Code）：
+
+| agent | 工位 | 分支前缀 |
+|------|------|------|
+| 本机 Claude Code（含在 VS Code 里跑的 Claude Code） | `R/.auto-pm/worktrees/claude` | `claude/` |
+| Trae 里的 AI | `R/.auto-pm/worktrees/trae` | `trae/` |
+| Cursor 里的 AI | `R/.auto-pm/worktrees/cursor` | `cursor/` |
+| VS Code 里的其他 AI（如 Copilot） | `R/.auto-pm/worktrees/vscode` | `vscode/` |
+| Codex（当前只做 PR 自动审查，不写代码；将来写代码时） | `R/.auto-pm/worktrees/codex` | `codex/` |
+| 项目 Claude、云端会话 | 不占本机工位；每个云端会话的克隆就是那台“电脑”自己的控制根 | `project/`（项目 Claude）、`claude/`（云端会话） |
+
+表外的 AI 先由用户登记名字和前缀，再开工位。已合并的历史分支（如主执行用过的 `codex/pr-…`）不改名，新卡按本表。
+
+**铁律：**
+
+1. **一台电脑只克隆一次。** 工位一律用 `git worktree add` 从控制根派生，放在 `R/.auto-pm/worktrees/<agent>`。放到别处会出问题：
+   - 另克隆一份仓库：驾驶舱把它当成第二个控制根，另开一本 `continuity.db`，一台电脑两本账，谁在做哪张卡对不上。**严禁。**
+   - 控制根里、但不在 `.auto-pm/worktrees/` 下的工作树：登记 Run 被拒，提示“Run worktree 必须位于受管 .auto-pm/worktrees 目录”。
+   - 控制根外面的工作树：登记 Run 被拒（“Run worktree 位于 workspace 外”）；在里面执行驾驶舱写命令也被拒（“控制面写命令只能在含真实 .git 目录的主 Git 工作树执行”）。
+   - `.codex/worktrees/`：根入口在那里会拒跑，但登记 Run 不认它，不要用。
+2. **驾驶舱命令只在控制根执行。** 在工位里执行 `main.py` 会被拒（“managed candidate is execution-only; invoke the canonical control root instead”）。登记 Run 时在控制根执行 `main.py continuity run start …`，用 `--worktree` 指向自己的工位绝对路径。
+3. **一个 agent 同一时刻只开一个工位，一个工位同一时刻只做一张卡**，分支名 `<前缀><卡号或主题>`。Git 本身保证同一分支不能被两个工作树同时签出。
+4. **一张卡同一时刻只派给一个 agent**，派卡时写明 owned paths，两个 agent 不同时改同一批文件。
+5. **在工位里提交**：提交检查通过 `git rev-parse --git-common-dir` 自动找到控制根，不需要手工指定；手工调用时必须带 `--control-root R`，否则 fail-closed 拒绝。
+6. **台账、WBS、治理库、发布指针只由账本主机上的主执行写**，工位里的 agent 不写。
+7. **跨电脑只通过 GitHub 交换代码**：每个工位推自己的分支、开 PR，合进 `main` 后各控制根拉 `main`。
+
+**开工位 / 收工位（现在手工执行，在控制根里）：**
+
+```
+git fetch origin main
+git worktree add -b claude/<卡号> .auto-pm/worktrees/claude origin/main
+git worktree list
+git worktree remove .auto-pm/worktrees/claude    # 收工：分支已推送、工位无未提交改动后再执行
+```
+
+**待实现**（实现前按上面手工规则执行）：
+
+- 一键命令 `main.py worktree open <agent> <卡号>` / `worktree list` / `worktree close` 与 agent 名册（X05）。
+- 账本主机联锁：非账本主机写台账一律拒绝（X06）。
+- 跨电脑工作票（同一张卡两台电脑不能同时领）与查看其他电脑在做什么（X10、X08）。
+
+## 独立审计 (AUD-001)
+
+每个 PR 合并前都要独立审计，换成任何 agent（Claude、Codex、Cursor、Trae 或新来的）都照这一节做。审计脚本只用 Python 标准库、git 和 GitHub 公开接口，不依赖哪一家 AI。
+
+1. **做的和审的分开**：写这个 PR 的 agent 或会话不能审它，要换另一个 agent 或另一个会话。
+2. **先跑机械检查**：在仓库根执行 `python reviews/tools/audit_pr.py <PR号>`；可选 `--json`（机器可读输出）、`--offline`（不访问 GitHub，查不了 CI 结论）、`--skip-ci-result`（不查 CI 结论）、`--repo owner/name`。
+3. **读退出码**：0＝没有 FAIL；1＝至少一项 FAIL，不能合并；2＝用法或 Git 出错，修好再跑。WARN 要在报告里点名，UNVERIFIED 要人工补查。
+4. **再人工逐项核**：照 `reviews/21_audit_checklist.md` 一条条核（范围、受保护路径、内容是否属实），脚本不代替这一步。
+5. **出报告**：按清单第 4 节写到 `reviews/`，推到审计者自己的分支，并把结论贴到 PR 评论里；审计者不推 `main`、不删除任何东西。
+6. **合并条件**：审计通过、CI 全绿、评审对话全部解决，三条都满足才能合并，只用 **Merge commit**（不用 Squash 或 Rebase）。
+
+## 修复与汇报规矩 (FIX-001，用户 2026-10-22 批准)
+
+1. **修复卡附同类排查清单**：修一个缺陷时，先写根因，再把全库同类写法一次查全，清单写进卡里，逐条修或写明不修的理由；只修挡路的那一处不许报“已修好”。独立审计逐条核这张清单；技术债关单时要证明根因已经除掉。
+2. **样件联调查出的缺陷先修再用**：只要本周要做的活会碰到，就先修，不做“这一单不受影响”的窄核对。
+3. **“完成”“可承诺”必须附证据**：提交号、对账结果、门禁或样件联调结果，至少一样；拿不出证据就写“未核实”。
+4. **先查已定事项再提问**：向用户提问前，先查项目的《用户已定事项台账》和用户给过的图纸、手册；查到了就照着做，只告诉用户按哪天的定法处理。同一个问题不问第二次。
+5. **操作说明四要素**：交给用户的每个操作都写清哪台电脑、哪个窗口或对话（写全名）、点什么或贴什么、做完会看到什么。AI 能用命令行自己做的，不交给用户做。
 
 ## AI 工程师主动担当与零负担交付铁律 (Zero-Burden Law)
 
@@ -118,7 +195,7 @@
    PLC 源码的零负担交付边界停留在**静态语法自检全绿**阶段。AI 必须确保逻辑自洽并符合 LSP 规范；将 ST 源码导入 TIA Portal/InoProShop、编译下发、以及捕捉断言报错等深度动作，由 User 接管并作为外部反馈（截图/文本）闭环给 AI。
 
 5. **【反提示词依赖与基建下沉铁律 (Anti-Prompt-Dependency)】**
-   - **系统级卡点优先**：严禁试图用冗长的自然语言 Prompt 去乞求 AI 遵守代码规范、写注释或输出文档。任何可量化的质量要求（如注释覆盖率、文件存在性），必须下沉为物理脚本（如 `auto_pm doc check`）或 Git 自动化卡点。
+   - **系统级卡点优先**：严禁试图用冗长的自然语言 Prompt 去乞求 AI 遵守代码规范、写注释或输出文档。任何可量化的质量要求（如注释覆盖率、文件存在性），必须下沉为物理脚本（如 `main.py doc check`）或 Git 自动化卡点。
    - **模板即“捕兽夹”**：Copier 等工具生成的绝不仅仅是空文件，而是带有强制 `TODO` 占位符的质量陷阱。执行代理（AI 程序员）的唯一任务是精确填空，禁止擅自修改验证骨架。
    - **机器无情判卷**：主控 PM 严禁主观肉眼审查代码质量。PM 必须无条件采信底层 `Linter / Checker` 的物理 Exit Code，只要非零就无情打回重做，拒绝听取 AI 的任何口头解释。
 6. **【标杆驱动基建法则 (Benchmark-Driven Infrastructure)】**
