@@ -94,6 +94,31 @@ def test_an_agent_host_that_runs_each_command_in_a_fresh_shell_is_the_holder_not
     assert process_probe.holder_process_pid(900, TRAE_CN) == 600
 
 
+# Trae CN on the user's laptop, 2026-10-23 (PR #53 audit 98 §5, probe A): the pids and images as observed; trae-sandbox.exe (42116) was
+# gone as soon as A finished, so recording it made reclaim PROVEN_DEAD again; agent-tool-host.exe hangs off the resident utility process
+TRAE_CN_SANDBOXED = _ancestry(
+    (43680, "python.exe"),
+    (16152, "powershell.exe"),
+    (42116, "trae-sandbox.exe"),
+    (17968, "agent-tool-host.exe"),
+    (31476, "trae cn.exe"),
+    (17036, "trae cn.exe"),
+    (4000, "explorer.exe"),
+)
+
+
+def test_a_per_command_sandbox_is_skipped_and_the_resident_tool_host_is_the_holder() -> None:
+    assert process_probe.holder_process_pid(43680, TRAE_CN_SANDBOXED) == 17968
+
+
+def test_a_sandbox_is_never_the_fallback_holder_even_when_the_walk_stops_above_it() -> None:
+    # the walk cannot read past the sandbox: neither the sandbox nor the per-command shell below it is recorded, both die with the command
+    cut_off = _ancestry((9, "python.exe"), (8, "powershell.exe"), (7, "trae-sandbox.exe"), (6, ""))
+    assert process_probe.holder_process_pid(9, cut_off) is None
+    reaches_root = _ancestry((9, "python.exe"), (8, "powershell.exe"), (7, "trae-sandbox.exe"), (5, "explorer.exe"))
+    assert process_probe.holder_process_pid(9, reaches_root) == 8
+
+
 def test_nested_shells_and_versioned_interpreters_are_all_skipped() -> None:
     claude_code = _ancestry(
         (90, "python3.12"), (80, "python3"), (70, "bash"), (60, "timeout"), (50, "bash"), (40, "claude"), (1, "systemd")
@@ -114,8 +139,23 @@ def test_an_unreadable_or_interpreter_only_ancestry_records_nothing_rather_than_
     assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (8, "python.exe"))) is None
     assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (1, "systemd"))) is None
     assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, ""))) is None
-    # the shell already seen is still the best long-lived candidate when the walk cannot read further
-    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"))) == 8
+    # started without any shell (double-click in Explorer, a scheduled task under svchost): the session root is never recorded, because
+    # explorer.exe or svchost.exe outlive every agent and a lease held by them could never be reclaimed (cloud audit of ee0268fa)
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (8, "python.exe"), (5, "explorer.exe"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "pythonw.exe"), (4, "svchost.exe"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (7, "trae-sandbox.exe"), (4, "services.exe"))) is None
+    # a shell below an unreadable parent is not recorded (Codex on #80/#81): it may be the per-command shell of a host out of sight
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (7, ""))) is None
+
+
+def test_a_shell_whose_parent_shows_as_pid_1_outside_a_session_root_records_nothing() -> None:
+    # Codex on #80/#81: in a container or sandbox the agent host is outside the visible PID space and the per-command shell shows PPID 1;
+    # recording that shell made the lease PROVEN_DEAD as soon as the command exited, so a second agent could reclaim a live card
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "tini"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "node"))) is None
+    # positive control: a known session root as PID 1 still keeps the person's own shell
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "systemd"))) == 8
 
 
 def test_on_a_real_process_chain_auto_records_the_agent_host_and_not_its_per_command_shell(tmp_path: Path) -> None:
