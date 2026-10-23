@@ -116,7 +116,10 @@ class DecisionService:
                 "required_worktree_mode",
                 "declared_dirty_paths",
             }
-            if set(execution_grant) != expected_grant_keys:
+            if set(execution_grant) not in (
+                expected_grant_keys,
+                expected_grant_keys | {"plan_checklist"},
+            ):
                 raise DecisionValidationError("planning execution_grant schema 不精确")
             approval = {
                 "schema_version": "planning-approval.v2",

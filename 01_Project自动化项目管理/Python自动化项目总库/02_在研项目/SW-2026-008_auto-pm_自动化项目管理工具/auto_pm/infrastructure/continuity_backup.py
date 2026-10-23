@@ -9,8 +9,8 @@ Why the SQLite backup API on top of the store's strict read snapshot, and not a 
   ledger's bytes would change merely because it was backed up, and on Windows that connection
   meets the historical "database is locked" contention (TD-077).
 * ``ContinuityStore._read_connection`` already solves both: it copies a byte-stable DB/WAL pair to
-  a temporary directory outside the workspace (Windows share-deny locks, bounded retries,
-  before/after inventories) and opens that copy read-only. The SQLite backup API then turns the
+  a temporary directory outside the workspace (bounded retries, before/after inventories and
+  content hashes; no share-deny handles, which made every read BUSY on Windows while the ledger was open) and opens that copy read-only. The SQLite backup API then turns the
   snapshot into one self-contained file (journal mode DELETE, no sidecars) that opens anywhere.
 
 Every backup is verified before it is published: full ``integrity_check``, schema versions known
