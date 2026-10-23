@@ -13,7 +13,7 @@ import os
 
 from auto_pm import __app_name__
 from auto_pm.config.app_config import AutoPmConfig
-from auto_pm.logging.logging import setup_logger
+from auto_pm.logging.logging import PACKAGE_LOGGER_NAME, setup_logger
 
 
 class AppContext:
@@ -21,8 +21,14 @@ class AppContext:
 
     def __init__(self, workspace_root: str = "") -> None:
         self.app_config = AutoPmConfig(app_name=__app_name__)
+        # 挂在包日志器 auto_pm 上：各模块 getLogger(__name__) 都是它的子节点，日志才进得了 auto-pm.log。
+        # 控制台只打 WARNING 以上、且只在根日志器没有 handler 时打，和修复前 Python 兜底输出的条件完全一致，
+        # 命令行输出不多一行也不少一行；文件按配置级别全记。
         self.logger = setup_logger(
-            log_level=self.app_config.log_level, app_name=__app_name__
+            log_level=self.app_config.log_level,
+            app_name=PACKAGE_LOGGER_NAME,
+            console_level="WARNING",
+            console_as_last_resort=True,
         )
         # 工作空间根目录（项目库所在目录）
         if not workspace_root:
