@@ -52,7 +52,8 @@ def _workspace(root: Path, *, runtime_root: str = "") -> Path:
             },
         ],
     }
-    registry.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # newline="\n": on Windows write_text would turn every "\n" into CRLF, unlike the LF registry git checks out
+    registry.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     return registry
 
 

@@ -155,7 +155,7 @@ def test_pb08_committed_bytecode_and_pycache_never_reach_the_payload(tmp_path: P
 def test_pb09_verify_accepts_a_fresh_build_and_reports_a_changed_a_missing_and_an_extra_file(tmp_path: Path) -> None:
     repo, commit = _make_repo(tmp_path)
     result = pb.build(repo, commit, "proj", tmp_path / "out")
-    assert pb.verify(tmp_path / "out", result.files) == {"missing": [], "orphans": [], "mismatch": [], "meta": [], "files": [str(len(result.files))]}
+    assert pb.verify(tmp_path / "out", result.files) == {"missing": [], "orphans": [], "mismatch": [], "meta": [], "bytecode": [], "files": [str(len(result.files))]}
     (tmp_path / "out" / "auto_pm" / "domain" / "models" / "item.py").write_text("class Item:\n    tampered = 1\n", encoding="utf-8")
     (tmp_path / "out" / "templates" / "t" / "template" / "readme.txt").unlink()
     (tmp_path / "out" / "auto_pm" / "extra.py").write_text("x = 1\n", encoding="utf-8")
@@ -163,6 +163,19 @@ def test_pb09_verify_accepts_a_fresh_build_and_reports_a_changed_a_missing_and_a
     assert report["mismatch"] == ["auto_pm/domain/models/item.py"]
     assert report["missing"] == ["templates/t/template/readme.txt"]
     assert report["orphans"] == ["auto_pm/extra.py"]
+
+
+def test_pb09b_verify_reports_bytecode_left_in_a_release_and_the_command_line_refuses_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    result = pb.build(repo, commit, "proj", tmp_path / "out")
+    cache = tmp_path / "out" / "auto_pm" / "__pycache__"
+    cache.mkdir()
+    (cache / "__init__.cpython-312.pyc").write_bytes(b"\x00")
+    report = pb.verify(tmp_path / "out", result.files)
+    assert report["bytecode"] == ["auto_pm/__pycache__/__init__.cpython-312.pyc"]
+    assert report["missing"] == [] and report["orphans"] == [] and report["mismatch"] == []
+    assert pb.main(["verify", "--output", str(tmp_path / "out")]) == 2
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["ok"] is False
 
 
 def test_pb10_a_project_root_with_non_ascii_characters_builds(tmp_path: Path) -> None:
