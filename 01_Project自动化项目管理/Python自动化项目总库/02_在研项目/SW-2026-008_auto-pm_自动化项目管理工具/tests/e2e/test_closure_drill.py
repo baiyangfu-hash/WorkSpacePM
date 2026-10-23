@@ -43,13 +43,8 @@ APPROVER = "fubai"
 SECOND_ID = "DJ-2026-905"
 SECOND = "0100_PLC自动化/DJ-2026-905"
 NEW_NOTE = f"{PROJECT}/02_PLC程序/程序文档/蜂鸣器说明.md"
-LEGACY_LAYOUT_DEFECT = (
-    "缺陷④：项目已有旧目录 11_监控/…/CHG-<领域>/ 时，plan 把变更单写进 11_监控，而批准签发 Decision 只到 04_监控 找，"
-    "pm approve 报“未找到指定项目的 Planning CHG 真源”。已由分支 claude/d09-onboarding-blockers 的 N2（15a481dd）修好"
-    "（样件联调在合并后全绿），D09 后合并；合并后本用例转 XPASS，届时去掉 xfail"
-)
-# The benchmark (like DJ-2026-005/009 in the field) already holds 11_监控/…/CHG-PLC/, which defect ④ trips over; the
-# main line files under a domain with no old folder so the rest of the chain can be exercised.  d00 keeps the PLC domain.
+# The benchmark (like DJ-2026-005/009 in the field) already holds 11_监控/…/CHG-PLC/, which defect ④ tripped over until
+# claude/d09-onboarding-blockers N2 (15a481dd); the main line files under a domain with no old folder, d00 keeps the PLC domain.
 MAIN_DOMAIN = "ELEC"
 STRANDED_CANDIDATE = (
     "疑点⑥（样件联调新发现，已复核代码、待定性）：隔离执行的 Mission 关闭后，验收过的改动只留在 .auto-pm/worktrees/run-plan-* 里没有提交，"
@@ -415,7 +410,6 @@ def test_d01_main_line_sorted_three_files_closes_in_one_step_and_ledger_is_clean
     assert_closed_and_clean(drill, result, PROJECT_ID)
 
 
-@pytest.mark.xfail(strict=True, reason=LEGACY_LAYOUT_DEFECT)
 def test_d00_a_project_on_the_old_11_layout_can_be_approved_and_closed(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar)
     files, declared = _sorted_buzzer(drill.root)
