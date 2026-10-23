@@ -53,7 +53,8 @@ MIN_REMAINING_S = 600
 NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 # Final results are never re-run; the others resume on the next `run`.
-FINAL = {"DONE", "FAILED", "HARD_STOP_LEASE", "LEASE_FAILED_AT_START"}
+FINAL = {"DONE", "FAILED", "HARD_STOP_LEASE", "LEASE_FAILED_AT_START", "ROUND_TIMEOUT"}
+STEP_TIMEOUT_EXIT = 124  # what `timeout` returns; the judge sees a failed group
 EXIT_CODES = {
     "DONE": 0,
     "FAILED": 1,
@@ -62,6 +63,7 @@ EXIT_CODES = {
     "LEASE_FAILED_AT_START": 5,
     "HARD_STOP_LEASE": 6,
     "STOPPED": 7,
+    "ROUND_TIMEOUT": 8,
 }
 
 
@@ -128,6 +130,9 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
         if not isinstance(d, str) or Path(d).is_absolute() or ".." in Path(d).parts:
             raise GateError(f"step {sname}: dir must be relative to out_dir")
         step.setdefault("stop_on_fail", False)
+        step.setdefault("timeout_s", cfg.get("step_timeout_s", 4 * 3600))
+        if not isinstance(step["timeout_s"], int) or not 1 <= step["timeout_s"] <= 12 * 3600:
+            raise GateError(f"step {sname}: timeout_s must be 1..43200")
         step["env"] = {**cfg.get("env", {}), **step.get("env", {})}
         if not all(isinstance(k, str) and isinstance(v, str) for k, v in step["env"].items()):
             raise GateError(f"step {sname}: env must map strings to strings")
@@ -162,9 +167,14 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
             raise GateError("lease.argv is required for command mode")
         lease["argv"] = [fill(a) for a in argv]
 
-    fp = cfg.setdefault("fingerprint", {})
-    if fp.get("git_worktree"):
-        fp["git_worktree"] = fill(fp["git_worktree"])
+    # Required: without it a resume could not tell whether the code under test changed (audit 109 ④).
+    fp = cfg.get("fingerprint")
+    if not isinstance(fp, dict) or not isinstance(fp.get("git_worktree"), str) or not fp["git_worktree"]:
+        raise GateError("fingerprint.git_worktree (the candidate worktree) is required")
+    fp["git_worktree"] = fill(fp["git_worktree"])
+    cfg.setdefault("round_timeout_s", 10 * 3600)
+    if not isinstance(cfg["round_timeout_s"], int) or not 10 <= cfg["round_timeout_s"] <= 11 * 3600:
+        raise GateError("round_timeout_s must be 10..39600 (the scheduled task stops at 12 h)")
     for k in ("done", "failed"):
         cfg.setdefault("markers", {}).setdefault(k, {})
     cfg.setdefault("poll_s", 15)
@@ -539,6 +549,7 @@ class Runner:
         self.keeper: LeaseKeeper | None = None
         self.awake = KeepAwake(self.stop_all)
         self.state: dict[str, Any] = {}
+        self.task_name: str | None = None
         self._status_lock = threading.Lock()
         self.current: str | None = None
 
@@ -560,6 +571,8 @@ class Runner:
             "current_step": self.current,
             "done": [k for k, v in steps.items() if v.get("status") == "done"],
             "todo": [s["name"] for s in self.cfg["steps"] if steps.get(_key(s), {}).get("status") != "done"],
+            # A failed group does not stop the round (the judge decides), so the count is shown here.
+            "failed_steps": [k for k, v in steps.items() if v.get("status") == "done" and v.get("exit") != 0],
             "lease": {
                 "mode": self.lease.cfg["mode"],
                 "version": self.lease.version,
@@ -588,6 +601,16 @@ class Runner:
         self.log(f"result {result}" + (f": {reason}" if reason else ""))
         self.stop_all.set()
         self.write_status()
+        if result in FINAL and self.task_name:
+            # Last act: the one-off task has done its job (audit 109 ③). Everything is already on disk.
+            try:
+                r = subprocess.run(["schtasks", "/Delete", "/TN", self.task_name, "/F"], capture_output=True,
+                                   check=False, creationflags=0x08000000 if IS_WINDOWS else 0)
+                code: int | str = r.returncode
+            except OSError as error:
+                code = type(error).__name__
+            self.log(f"scheduled task {self.task_name} deleted" if code == 0
+                     else f"scheduled task {self.task_name} not deleted ({code})")
         return EXIT_CODES[result]
 
     def run(self) -> int:
@@ -659,7 +682,11 @@ class Runner:
             rec = self.state["steps"].get(_key(s))
             if rec and rec.get("status") == "done":
                 continue
+            if self._round_elapsed_s() > self.cfg["round_timeout_s"]:
+                return self.finish("ROUND_TIMEOUT", f"the round ran past {self.cfg['round_timeout_s']} s before step {s['name']}")
             outcome = self._run_step(s)
+            if outcome == "round_timeout":
+                return self.finish("ROUND_TIMEOUT", f"the round ran past {self.cfg['round_timeout_s']} s in step {s['name']}")
             if outcome == "hard_stop":
                 return self.finish("HARD_STOP_LEASE", self.keeper.reason if self.keeper else None)
             if outcome == "stopped":
@@ -716,15 +743,25 @@ class Runner:
                 child = self.children.popen(s["argv"], s["cwd"], env, out)
                 rec["child_pid"] = child.pid
                 self.save()
+                step_deadline = time.monotonic() + s["timeout_s"]
                 while True:
                     try:
                         code = child.wait(timeout=1)
                         break
                     except subprocess.TimeoutExpired:
                         pass
-                    if self.hard_stop.is_set() or (self.out / STOP_FILE).exists():
+                    if time.monotonic() > step_deadline:
+                        # A hung group must not keep the lease renewed forever (audit 109 ①): it is a failed result.
                         self.children.kill(child)
-                        why = "hard_stop" if self.hard_stop.is_set() else "stopped"
+                        code = STEP_TIMEOUT_EXIT
+                        rec["timed_out"] = True
+                        out.write(f"\n[long_gate] step killed after timeout_s={s['timeout_s']}\n".encode())
+                        self.log(f"step {key} timed out after {s['timeout_s']} s; recorded as exit {code}")
+                        break
+                    round_over = self._round_elapsed_s() > self.cfg["round_timeout_s"]
+                    if round_over or self.hard_stop.is_set() or (self.out / STOP_FILE).exists():
+                        self.children.kill(child)
+                        why = "round_timeout" if round_over else "hard_stop" if self.hard_stop.is_set() else "stopped"
                         self.log(f"step {key} killed ({why}); it has no result")
                         self.current = None
                         self._park_interrupted(s, rec)
@@ -741,6 +778,10 @@ class Runner:
         self.log(f"step {key} finished exit={code}")
         self.write_status()
         return "done"
+
+    def _round_elapsed_s(self) -> float:
+        started = dt.datetime.fromisoformat(self.state["started_at"])
+        return (utc_now() - started).total_seconds()
 
     def _heartbeat(self) -> None:
         while not self.stop_all.is_set():
@@ -811,7 +852,8 @@ def _launch_windows(cfg: dict[str, Any], config_path: Path) -> None:
     py = Path(cfg["python"])
     pyw = py.with_name("pythonw.exe")
     command = str(pyw if pyw.exists() else py)
-    args = subprocess.list2cmdline(["-B", str(Path(__file__).resolve()), "run", "--config", str(config_path)])
+    args = subprocess.list2cmdline(["-B", str(Path(__file__).resolve()), "run", "--config", str(config_path),
+                                    "--task-name", task_name(cfg)])
     user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".lstrip("\\")
     xml_path = Path(cfg["out_dir"]) / "long_gate_task.xml"
     xml_path.write_text(task_xml(command, args, cfg["out_dir"], user), encoding="utf-16")
@@ -887,12 +929,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("command", choices=["run", "launch", "status", "stop"])
     ap.add_argument("--config", required=True, type=Path)
     ap.add_argument("--wait", type=int, default=90, help="launch: seconds to wait for the runner to report")
+    ap.add_argument("--task-name", help="run: the scheduled task that started it, deleted once the round is final")
     a = ap.parse_args(argv)
     config_path = a.config.resolve()
     try:
         if a.command == "run":
             cfg, sha = load_config(config_path)
-            return Runner(cfg, sha).run()
+            runner = Runner(cfg, sha)
+            runner.task_name = a.task_name
+            return runner.run()
         if a.command == "launch":
             return cmd_launch(config_path, a.wait)
         if a.command == "status":

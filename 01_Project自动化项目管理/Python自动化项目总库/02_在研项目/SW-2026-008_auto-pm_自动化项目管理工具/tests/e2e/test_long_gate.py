@@ -364,6 +364,7 @@ def test_interval_must_leave_the_ten_minute_floor(tmp_path: Path) -> None:
     mod = _module()
     p = tmp_path / "c.json"
     base = {"name": "x", "out_dir": str(tmp_path / "o"), "steps": [{"name": "a", "argv": ["x"]}],
+            "fingerprint": {"git_worktree": str(tmp_path)},
             "lease": {"mode": "command", "argv": ["x"], "lease_seconds": 3600, "renew_interval_s": 3000}}
     p.write_text(json.dumps(base), encoding="utf-8")
     with pytest.raises(mod.GateError, match="floor"):
@@ -405,8 +406,8 @@ def test_concurrent_status_writes_do_not_crash(tmp_path: Path) -> None:
 
     mod = _module()
     p = tmp_path / "c.json"
-    p.write_text(json.dumps({"name": "x", "out_dir": str(tmp_path / "o"), "steps": [{"name": "a", "argv": ["x"]}]}),
-                 encoding="utf-8")
+    p.write_text(json.dumps({"name": "x", "out_dir": str(tmp_path / "o"), "steps": [{"name": "a", "argv": ["x"]}],
+                             "fingerprint": {"git_worktree": str(tmp_path)}}), encoding="utf-8")
     cfg, sha = mod.load_config(p)
     runner = mod.Runner(cfg, sha)
     runner.out.mkdir(parents=True)
@@ -426,3 +427,65 @@ def test_concurrent_status_writes_do_not_crash(tmp_path: Path) -> None:
         t.join()
     assert not errors
     assert json.loads((runner.out / "long_gate_status.json").read_text(encoding="utf-8"))["name"] == "x"
+
+
+def test_fingerprint_is_required(tmp_path: Path) -> None:
+    mod = _module()
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({"name": "x", "out_dir": str(tmp_path / "o"), "steps": [{"name": "a", "argv": ["x"]}]}),
+                 encoding="utf-8")
+    with pytest.raises(mod.GateError, match="fingerprint"):
+        mod.load_config(p)
+
+
+def test_a_failed_group_is_not_rerun_on_resume(lab: dict[str, Path]) -> None:
+    cfg = _config(lab, [_step(lab, "plc", code=1), _step(lab, "core", wait=120)])
+    runner = _start(cfg)
+    _wait_for(lambda: _runs(lab, "core") == 1)
+    _kill(runner.pid)
+    runner.wait(timeout=30)
+    (lab["tools"] / "release_core").write_text("")
+    assert _run(cfg, "run").returncode == 0
+    assert _runs(lab, "plc") == 1 and _runs(lab, "core") == 2
+    assert (lab["out"] / "plc.exit").read_text() == "1\n"
+    assert json.loads(_run(cfg, "status").stdout)["failed_steps"] == ["plc"]
+
+
+def test_a_hung_group_times_out_as_a_failed_group(lab: dict[str, Path]) -> None:
+    cfg = _config(lab, [_step(lab, "core", wait=3600, timeout_s=3), _step(lab, "judge")])
+    r = _run(cfg, "run")
+    assert r.returncode == 0  # the round goes on; the judge sees the failure
+    st = _state(lab)
+    assert st["steps"]["core"]["exit"] == 124 and st["steps"]["core"]["timed_out"] is True
+    assert (lab["out"] / "core.exit").read_text() == "124\n"
+    assert _runs(lab, "judge") == 1
+    assert _run(cfg, "run").returncode == 0 and _runs(lab, "core") == 1  # never re-run as if unfinished
+
+
+def test_the_round_has_a_total_time_limit(lab: dict[str, Path]) -> None:
+    cfg_path = _config(lab, [_step(lab, "core", wait=3600), _step(lab, "judge")])
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    cfg["round_timeout_s"] = 10
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+    start = time.time()
+    r = _run(cfg_path, "run", timeout=180)
+    assert r.returncode == 8 and time.time() - start < 60
+    assert _state(lab)["result"] == "ROUND_TIMEOUT" and (lab["out"] / "FAILED").exists()
+    assert _runs(lab, "judge") == 0
+    assert _run(cfg_path, "run").returncode == 8 and _runs(lab, "core") == 1  # final
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a fake schtasks on PATH; the Windows drill deletes the real task")
+def test_the_task_is_deleted_once_the_round_is_final(lab: dict[str, Path]) -> None:
+    bindir = lab["root"] / "bin"
+    bindir.mkdir()
+    fake = bindir / "schtasks"
+    fake.write_text(f"#!/bin/sh\necho \"$@\" >> '{lab['tools'] / 'schtasks.log'}'\n", encoding="utf-8")
+    fake.chmod(0o755)
+    cfg = _config(lab, [_step(lab, "rest")])
+    env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    r = subprocess.run([PY, "-B", str(SCRIPT), "run", "--config", str(cfg), "--task-name", "WSPM-LongGate-drill"],
+                       capture_output=True, text=True, env=env, timeout=120, check=False)
+    assert r.returncode == 0
+    assert (lab["tools"] / "schtasks.log").read_text().split() == ["/Delete", "/TN", "WSPM-LongGate-drill", "/F"]
+    assert "scheduled task WSPM-LongGate-drill deleted" in (lab["out"] / "long_gate.log").read_text()

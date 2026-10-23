@@ -11,7 +11,7 @@
    门禁进程还活着、续租还在继续、防休眠在位（Windows），它的父进程不是“假会话”。
 3. 把门禁进程本身强杀在第 2 组中间：第 2 组的子进程跟着死，不留孤儿继续写文件。
 4. 再 `launch` 一次：第 1 组不重跑，第 2 组从头重跑、半截输出留档，第 3 组跑完，结果 DONE。
-5. 收尾：删掉演练登记的计划任务（只删本演练自己建的那一个）。
+5. 门禁拿到最终结果后自己删掉那个一次性计划任务（Windows 上核对）；演练收尾时兜底再删一次本演练建的那一个。
 """
 
 # ruff: noqa: T201
@@ -224,6 +224,10 @@ def main() -> int:
         check(runs("rest") == 1, "group 1 was not re-run")
         check((out / "core.interrupted.1.txt").exists(), "the half-run group 2 output is kept as core.interrupted.1.txt")
         check((out / "judge.exit").read_text() == "0\n", "group 3 ran once with its result written")
+        if WIN:
+            gone = wait_for(lambda: subprocess.run(["schtasks", "/Query", "/TN", f"WSPM-LongGate-{name}"],
+                                                   capture_output=True, check=False).returncode != 0, 30)
+            check(gone, "the one-off scheduled task deleted itself after the final result")
     finally:
         if WIN:
             subprocess.run(["schtasks", "/Delete", "/TN", f"WSPM-LongGate-{name}", "/F"], capture_output=True, check=False)
