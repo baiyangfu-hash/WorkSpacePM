@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from st_mini_sim import Sim  # noqa: E402
+from st_mini_sim import Sim
 
 REPO = Path(__file__).resolve().parents[2]
 PLC = REPO / "0100_PLC自动化"
@@ -327,7 +327,7 @@ def test_alarm_block_does_not_write_safety_inputs():
     """只读：报警块跑多少扫描，FB_1030 的输入输出都不受影响（本块没有任何写安全变量的语句）。"""
     src = FB2001.read_text(encoding="utf-8")
     body = src.split("END_VAR")[-1]
-    writes = re.findall(r"^\s*([A-Za-z_][\w.\[\]]*)\s*:=", body, re.M)
+    writes = re.findall(r"^\s*([A-Za-z_][\w.\[\]]*)\s*:=", body, re.MULTILINE)
     assert writes, "没解析到赋值语句"
     for w in writes:
         assert w.startswith(("s_", "t_", "io_stGlobal.o_")), f"报警块写了 {w}"
