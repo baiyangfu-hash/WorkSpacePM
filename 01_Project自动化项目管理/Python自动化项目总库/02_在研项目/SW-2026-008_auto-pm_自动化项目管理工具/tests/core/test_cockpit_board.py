@@ -191,12 +191,15 @@ def test_bc_row_matches_the_11_column_template(tmp_path: Path) -> None:
 
 
 def test_bc_row_against_the_real_009_record(tmp_path: Path) -> None:
-    """拿 DJ-2026-009 真实的变更记录（旧栏名“提出日期”、旧编号 BC-…-001）试：仍是 11 栏，编号按月从 000 起。"""
+    """拿 DJ-2026-009 真实的变更记录试：仍是 11 栏，编号按月从 000 起。
+    第 2 栏名跟着仓库现状走（老表“提出日期”，main 上 eab587dc 起改成“提出时间”），两种都要能过。"""
     record = _template_record(tmp_path, BC_REAL)
     preview = actions.bc_preview(record, "DJ-2026-009", _form())
-    assert len(_row(preview.line)) == len(actions.bc_header(record)) == 11
+    header = actions.bc_header(record)
+    assert len(_row(preview.line)) == len(header) == 11
     assert _row(preview.line)[0] == "BC-DJ-2026-009-2026_10_000"
-    assert dict(preview.columns)["提出日期"] == "2026-10-23 14:05（电话）"
+    assert header[1] in ("提出日期", "提出时间")
+    assert dict(preview.columns)[header[1]] == "2026-10-23 14:05（电话）"
 
 
 def test_bc_refuses_when_text_follows_the_table(tmp_path: Path) -> None:
