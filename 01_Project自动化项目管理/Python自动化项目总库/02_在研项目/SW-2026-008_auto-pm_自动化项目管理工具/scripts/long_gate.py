@@ -739,6 +739,7 @@ class Runner:
             # "{PATH}" in a value is the runner's own PATH, so a config can prepend (e.g. Git Bash's usr/bin, as run_g2.sh does).
             env.update({k: v.replace("{PATH}", os.environ.get("PATH", "")) for k, v in s["env"].items()})
             env.pop(TOKEN_ENV, None)
+            killed: str | None = None
             with open(p["txt"], "wb") as out:
                 child = self.children.popen(s["argv"], s["cwd"], env, out)
                 rec["child_pid"] = child.pid
@@ -761,12 +762,15 @@ class Runner:
                     round_over = self._round_elapsed_s() > self.cfg["round_timeout_s"]
                     if round_over or self.hard_stop.is_set() or (self.out / STOP_FILE).exists():
                         self.children.kill(child)
-                        why = "round_timeout" if round_over else "hard_stop" if self.hard_stop.is_set() else "stopped"
-                        self.log(f"step {key} killed ({why}); it has no result")
-                        self.current = None
-                        self._park_interrupted(s, rec)
-                        self.save()
-                        return why
+                        killed = "round_timeout" if round_over else "hard_stop" if self.hard_stop.is_set() else "stopped"
+                        break
+            if killed:
+                # Parked only after the output file is closed: Windows refuses to rename an open file.
+                self.log(f"step {key} killed ({killed}); it has no result")
+                self.current = None
+                self._park_interrupted(s, rec)
+                self.save()
+                return killed
         p["exit"].write_text(f"{code}\n", encoding="utf-8", newline="\n")
         rec.update(exit=code, finished=local_stamp(), finished_utc=iso(utc_now()))
         p["finished"].write_text(rec["finished"] + "\n", encoding="utf-8", newline="\n")
