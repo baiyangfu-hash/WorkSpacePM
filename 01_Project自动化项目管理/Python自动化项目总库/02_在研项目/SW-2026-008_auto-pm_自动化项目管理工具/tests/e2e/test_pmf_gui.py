@@ -450,7 +450,7 @@ def test_a_python_goal_typed_into_the_window_reaches_the_final_acceptance_and_a_
     closures = _accept_and_close(win, store, mission_id)
     assert [(mid, ok) for mid, ok, _ in closures] == [(mission_id, True)]
     _assert_closed(store, mission_id, root, change_id)
-    assert (root / CALC).read_text(encoding="utf-8") != source  # the control root still holds the defect: the work happened in the isolated copy
+    assert (root / CALC).read_bytes() == (candidate / CALC).read_bytes()  # closure merged the accepted bytes back (gap 8)
     _finish(win, Path(EVIDENCE_ENV or tmp_path / "evidence") / PY_PROJECT_ID, root)
     _model_was_named(budget, counter, before_calls, 1)
 
@@ -478,7 +478,8 @@ def test_a_plc_goal_typed_into_the_window_reaches_the_final_acceptance_with_a_co
     closures = _accept_and_close(win, store, mission_id)
     assert [(mid, ok) for mid, ok, _ in closures] == [(mission_id, True)]
     _assert_closed(store, mission_id, root, change_id)
-    assert plc.git(root, "diff", "--name-only", "--", *plc.SCOPE) == ""  # the control root still holds the benchmark bytes
+    for path in plc.SCOPE:  # closure merged the accepted bytes back into the control root (gap 8), uncommitted
+        assert (root / path).read_bytes() == (candidate / path).read_bytes()
     _finish(win, Path(EVIDENCE_ENV or tmp_path / "evidence") / plc.PROJECT_ID, root)
     _model_was_named(budget, counter, before_calls, 1)
 

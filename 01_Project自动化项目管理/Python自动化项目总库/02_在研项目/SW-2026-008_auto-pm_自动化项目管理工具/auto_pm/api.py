@@ -171,12 +171,23 @@ class CockpitClient:
         *,
         approver: str,
         approval_evidence_ref: str,
+        approval_pin: str = "",
     ) -> DecisionPackageDTO:
-        """Bind the caller's human approval; the SDK never supplies an approver or evidence."""
+        """Bind the caller's human approval; the SDK never supplies an approver or evidence.
+
+        With a committed approver PIN (gap 9) only the user's PIN approves; ``approver`` and the evidence then come from it.
+        """
 
         self._require_writable()
         try:
             # Same validation the Facade applies first: a refused approval must write nothing.
+            approver, approval_evidence_ref = self._facade.resolve_approval(
+                approval_pin=approval_pin,
+                approver=approver,
+                approval_evidence_ref=approval_evidence_ref,
+                purpose="approve-scope",
+                subject=card.plan_hash,
+            )
             DecisionService.validate_planning_approval(
                 approver, card.plan_hash, approval_evidence_ref
             )
@@ -186,6 +197,7 @@ class CockpitClient:
                 expected_plan_hash=card.plan_hash,
                 approver=approver,
                 approval_evidence_ref=approval_evidence_ref,
+                approval_pin=approval_pin,
             )
         except (PmFacadeError, DecisionError, TransitionGuardError, ValueError) as error:
             raise CockpitApiError(str(error)) from error
@@ -211,12 +223,12 @@ class CockpitClient:
         except (PmFacadeError, ContinuityStoreError, ValueError) as error:
             raise CockpitApiError(str(error)) from error
 
-    def accept(self, mission_id: str) -> PmConfirmationCard:
-        """Record the final user acceptance through the Facade's evidence gate."""
+    def accept(self, mission_id: str, *, approval_pin: str = "") -> PmConfirmationCard:
+        """Record the final user acceptance through the Facade's evidence gate (and the user's PIN once committed)."""
 
         self._require_writable()
         try:
-            return self._facade.accept(mission_id)
+            return self._facade.accept(mission_id, approval_pin=approval_pin)
         except (PmFacadeError, ValueError) as error:
             raise CockpitApiError(str(error)) from error
 

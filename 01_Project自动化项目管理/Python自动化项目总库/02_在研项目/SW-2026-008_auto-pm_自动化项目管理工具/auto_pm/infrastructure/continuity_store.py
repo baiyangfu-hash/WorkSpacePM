@@ -3182,6 +3182,15 @@ class ContinuityStore:
         with self._read_connection() as conn:
             return self._get_mission(conn, mission_id)
 
+    def has_completed_closure(self, mission_id: str) -> bool:
+        """True only when the Mission was closed by the C05-C08 closure (gap 8: a CLOSED state alone is no proof)."""
+        with self._read_connection() as conn:
+            row = conn.execute(
+                "SELECT state FROM closure_items WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+        return row is not None and row["state"] == "COMPLETED"
+
     def prepare_closure(
         self,
         mission_id: str,
