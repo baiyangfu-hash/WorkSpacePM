@@ -111,11 +111,28 @@ def parent_name(pid: int) -> str:
         return "?"
 
 
+# Windows: the stand-in session puts itself in a kill-on-close Job Object, then runs the command and stays up.
+# Killing it closes the job, which kills everything started under it, detached or not: the way a session host
+# can reap a session's work (a plain tree kill misses a process whose parent has already exited).
+SESSION_WRAPPER = r"""
+import ctypes, subprocess, sys, time
+sys.path.insert(0, sys.argv[1])
+import long_gate
+job = long_gate._win_job()
+k32 = ctypes.WinDLL("kernel32")
+k32.GetCurrentProcess.restype = ctypes.c_void_p
+k32.AssignProcessToJobObject(job, ctypes.c_void_p(k32.GetCurrentProcess()))
+subprocess.call(sys.argv[2:])
+time.sleep(600)
+"""
+
+
 def session(argv: list[str]) -> subprocess.Popen[bytes]:
-    """A stand-in for the AI session: its own process (group) whose whole tree we kill."""
+    """A stand-in for the AI session whose whole tree (Windows: whole job) we kill."""
 
     if WIN:
-        return subprocess.Popen(["cmd", "/c", *argv], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        return subprocess.Popen([PY, "-c", SESSION_WRAPPER, str(HERE), *argv],
+                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return subprocess.Popen(argv, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -179,7 +196,7 @@ def main() -> int:
         # 1. the old way, for comparison
         beat = tools / "legacy_beat.txt"
         if WIN:
-            legacy = session(["start", "/b", PY, str(tools / "legacy.py"), str(beat)])
+            legacy = session(["cmd", "/c", "start", "/b", PY, str(tools / "legacy.py"), str(beat)])
         else:
             legacy = session(["sh", "-c", f"nohup '{PY}' '{tools / 'legacy.py'}' '{beat}' >/dev/null 2>&1 &  sleep 600"])
         wait_for(beat.exists, 30)
