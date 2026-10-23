@@ -10,6 +10,7 @@ import click
 
 from auto_pm.app_context import AppContext
 from auto_pm.core.ai_handoff_service import (
+    PM_ACTOR,
     AiHandoffService,
     HandoffError,
 )
@@ -493,7 +494,7 @@ def list_handoff_failures(ctx: click.Context, request_id: str, as_json: bool) ->
 @click.option("--other-check", multiple=True, help="其他门禁结果，可重复")
 @click.option("--not-run", multiple=True, help="未运行项目，可重复")
 @click.option("--idempotency-key", default="", help="关闭幂等键")
-@click.option("--actor", default="pm-workflow", show_default=True, help="收口方")
+@click.option("--actor", default=PM_ACTOR, show_default=True, help="收口方")
 @click.option("--json-output", "as_json", is_flag=True, help="以 JSON 输出")
 @click.pass_context
 def close_handoff(
@@ -611,7 +612,7 @@ def saga_status(ctx: click.Context, request_id: str, as_json: bool) -> None:
 
 @saga_group.command(name="resume")
 @click.argument("request_id")
-@click.option("--actor", default="pm-workflow", show_default=True, help="收口方")
+@click.option("--actor", default=PM_ACTOR, show_default=True, help="收口方")
 @click.option("--json-output", "as_json", is_flag=True, help="以 JSON 输出")
 @click.pass_context
 def saga_resume(ctx: click.Context, request_id: str, actor: str, as_json: bool) -> None:
@@ -631,7 +632,7 @@ def saga_resume(ctx: click.Context, request_id: str, actor: str, as_json: bool) 
 
 @saga_group.command(name="compensate")
 @click.argument("request_id")
-@click.option("--actor", default="pm-workflow", show_default=True, help="补偿执行方")
+@click.option("--actor", default=PM_ACTOR, show_default=True, help="补偿执行方")
 @click.option("--json-output", "as_json", is_flag=True, help="以 JSON 输出")
 @click.pass_context
 def saga_compensate(ctx: click.Context, request_id: str, actor: str, as_json: bool) -> None:
