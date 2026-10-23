@@ -142,11 +142,16 @@ def bc_form_errors(form: BcForm) -> list[str]:
 
 
 def bc_header(record: Path) -> list[str]:
-    """变更记录表的表头：第一格是“编号”、下一行是 |---| 分隔线的那一行（“填写说明”表里的“编号”行不算）。"""
+    """变更记录表的表头：第一格是“编号”、下一行是 |---| 分隔线的那一行（“填写说明”表里的“编号”行不算）。
+
+    这张表后面除了表格行和空行不许再有别的字，否则追加到文件末尾的那一行就落在表外了。
+    """
     lines = record.read_text(encoding="utf-8").splitlines()
-    for line, below in zip(lines, lines[1:], strict=False):
+    for index, (line, below) in enumerate(zip(lines, lines[1:], strict=False)):
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         if cells and cells[0] == "编号" and re.fullmatch(r"\|?(\s*:?-+:?\s*\|)+\s*:?-*:?\s*", below.strip()):
+            if any(rest.strip() and not rest.lstrip().startswith("|") for rest in lines[index + 2:]):
+                raise BcError(f"{record.name} 的变更表后面还有别的内容，追加会落在表外，不写；请人工补这一行")
             return cells
     raise BcError(f"{record.name} 里没有找到以“编号”开头的表头")
 

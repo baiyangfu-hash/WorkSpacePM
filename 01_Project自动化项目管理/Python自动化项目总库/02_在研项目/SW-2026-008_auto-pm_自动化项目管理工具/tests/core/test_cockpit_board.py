@@ -199,6 +199,16 @@ def test_bc_row_against_the_real_009_record(tmp_path: Path) -> None:
     assert dict(preview.columns)["提出日期"] == "2026-10-23 14:05（电话）"
 
 
+def test_bc_refuses_when_text_follows_the_table(tmp_path: Path) -> None:
+    """表后还有正文时拒写：追加到文件末尾的行会落在表外。表后只有空行或表格行照常。"""
+    record = _template_record(tmp_path)
+    record.write_text(record.read_text(encoding="utf-8") + "\n\n| BC-DJ-2026-101-2026_10_000 | x |\n", encoding="utf-8")
+    assert len(actions.bc_preview(record, "DJ-2026-101", _form()).columns) == 11
+    record.write_text(record.read_text(encoding="utf-8") + "\n## 备注\n别的内容\n", encoding="utf-8")
+    with pytest.raises(actions.BcError, match="落在表外"):
+        actions.bc_preview(record, "DJ-2026-101", _form())
+
+
 def test_bc_form_must_be_filled_for_real(tmp_path: Path) -> None:
     record = _template_record(tmp_path)
     bad = {
