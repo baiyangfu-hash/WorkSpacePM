@@ -98,17 +98,26 @@ def alive(pid: int) -> bool:
         return True
 
 
-def parent_name(pid: int) -> str:
+def ancestors(pid: int) -> list[str]:
+    """Names of the process's ancestors, nearest first (a few levels)."""
+
     if WIN:
-        ps = (f"$p=(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').ParentProcessId;"
-              "(Get-CimInstance Win32_Process -Filter \"ProcessId=$p\").Name")
-        return subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
-                              check=False).stdout.strip() or "(parent gone)"
+        ps = (f"$p={pid}; $n=@(); for($i=0;$i -lt 4;$i++){{"
+              "$q=(Get-CimInstance Win32_Process -Filter \"ProcessId=$p\").ParentProcessId; if(-not $q){break};"
+              "$x=Get-CimInstance Win32_Process -Filter \"ProcessId=$q\"; if(-not $x){break}; $n+=$x.Name; $p=$q}; $n -join ','")
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                             check=False).stdout.strip()
+        return [n for n in out.split(",") if n]
+    names = []
     try:
-        ppid = int(Path(f"/proc/{pid}/stat").read_text().split()[3])
-        return Path(f"/proc/{ppid}/comm").read_text().strip()
+        for _ in range(4):
+            pid = int(Path(f"/proc/{pid}/stat").read_text().split()[3])
+            if pid <= 0:
+                break
+            names.append(Path(f"/proc/{pid}/comm").read_text().strip())
     except OSError:
-        return "?"
+        pass
+    return names
 
 
 # Windows: the stand-in session puts itself in a kill-on-close Job Object, then runs the command and stays up.
@@ -218,12 +227,14 @@ def main() -> int:
         kill_tree(s1)
         time.sleep(3)
         check(alive(runner), f"session killed: the runner (pid {runner}) is still alive")
-        parent = parent_name(runner)
+        chain = ancestors(runner)
         if WIN:
-            check(parent.lower() in ("svchost.exe", "taskeng.exe", "taskhostw.exe"),
-                  f"the runner's parent is the Task Scheduler service, not the session (parent: {parent})")
+            # A venv's pythonw.exe is a launcher that starts the real one, so skip python launchers first.
+            first = next((n for n in chain if n.lower() not in ("python.exe", "pythonw.exe")), "(none)")
+            check(first.lower() in ("svchost.exe", "taskeng.exe", "taskhostw.exe"),
+                  f"the runner is started by the Task Scheduler service, not the session (ancestors: {chain})")
         else:
-            print(f"INFO  runner parent process: {parent}")
+            print(f"INFO  runner ancestors: {chain}")
         n0 = int((tools / "renew_count").read_text())
         check(wait_for(lambda: int((tools / "renew_count").read_text()) >= n0 + 2, 30),
               "session killed: lease renewals continue inside the runner")
