@@ -119,9 +119,10 @@ import ctypes, subprocess, sys, time
 sys.path.insert(0, sys.argv[1])
 import long_gate
 job = long_gate._win_job()
-k32 = ctypes.WinDLL("kernel32")
+k32 = ctypes.WinDLL("kernel32", use_last_error=True)
 k32.GetCurrentProcess.restype = ctypes.c_void_p
-k32.AssignProcessToJobObject(job, ctypes.c_void_p(k32.GetCurrentProcess()))
+if not k32.AssignProcessToJobObject(job, ctypes.c_void_p(k32.GetCurrentProcess())):
+    sys.exit(f"stand-in session could not join its job (error {ctypes.get_last_error()})")
 subprocess.call(sys.argv[2:])
 time.sleep(600)
 """
@@ -217,7 +218,12 @@ def main() -> int:
         kill_tree(s1)
         time.sleep(3)
         check(alive(runner), f"session killed: the runner (pid {runner}) is still alive")
-        print(f"INFO  runner parent process: {parent_name(runner)}")
+        parent = parent_name(runner)
+        if WIN:
+            check(parent.lower() in ("svchost.exe", "taskeng.exe", "taskhostw.exe"),
+                  f"the runner's parent is the Task Scheduler service, not the session (parent: {parent})")
+        else:
+            print(f"INFO  runner parent process: {parent}")
         n0 = int((tools / "renew_count").read_text())
         check(wait_for(lambda: int((tools / "renew_count").read_text()) >= n0 + 2, 30),
               "session killed: lease renewals continue inside the runner")
