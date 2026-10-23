@@ -23,8 +23,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 import auto_pm
 from tests.e2e.test_pmf_plc import (
     BLOCK,
@@ -46,10 +44,6 @@ NEW_NOTE = f"{PROJECT}/02_PLC程序/程序文档/蜂鸣器说明.md"
 # The benchmark (like DJ-2026-005/009 in the field) already holds 11_监控/…/CHG-PLC/, which defect ④ tripped over until
 # claude/d09-onboarding-blockers N2 (15a481dd); the main line files under a domain with no old folder, d00 keeps the PLC domain.
 MAIN_DOMAIN = "ELEC"
-STRANDED_CANDIDATE = (
-    "疑点⑥（样件联调新发现，已复核代码、待定性）：隔离执行的 Mission 关闭后，验收过的改动只留在 .auto-pm/worktrees/run-plan-* 里没有提交，"
-    "控制根仍是原样；代码里没有任何把候选改动并回控制根的步骤。若属设计（由人手工提交），把本用例改成检查“收口后提示去提交”"
-)
 
 # The user's words as the inbox records them, and the plan poka-yoke fields (PR #36) a complete plan carries.
 ORIGINAL_WORDS = "样件联调：走完整条收口流程"
@@ -389,6 +383,16 @@ def assert_closed_and_clean(drill: Drill, result: MissionResult, project_id: str
     assert "台账缺失: 0 条, 台账多余(孤儿): 0 条, 状态不一致: 0 条" in checked.stdout, checked.stdout
 
 
+def commit_control_root(drill: Drill, paths: tuple[str, ...], message: str) -> None:
+    """The user's own commit of the accepted files in the control root (closure merges back but never commits).
+
+    Only the Mission's files: the benchmark's CHG folder clash (defect ④) would otherwise ride into the next worktree.
+    """
+
+    git(drill.root, "add", "--", *paths)
+    git(drill.root, "commit", "-q", "--no-verify", "-m", message, "--", *paths)
+
+
 def assert_never_stuck(drill: Drill, result: MissionResult) -> None:
     """Field input may be refused early, but an accepted Mission must never be left unclosable."""
 
@@ -510,6 +514,9 @@ def test_d07_two_missions_back_to_back_on_one_project(tmp_path: Path, benchmark_
     files, declared = _sorted_buzzer(drill.root)
     first = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D07A", files=files, declared=declared)
     assert_closed_and_clean(drill, first, PROJECT_ID)
+    # Closure merged the first Mission's bytes back into the control root, uncommitted; the user commits them
+    # before the next isolated Run is cut from HEAD (otherwise run start refuses, see test_d12).
+    commit_control_root(drill, declared, "第一单成果入库")
 
     second_files = comment_files(drill.root, "样件联调：第二单")
     second = drive_mission(
@@ -519,7 +526,6 @@ def test_d07_two_missions_back_to_back_on_one_project(tmp_path: Path, benchmark_
     assert_closed_and_clean(drill, second, PROJECT_ID)
 
 
-@pytest.mark.xfail(strict=True, reason=STRANDED_CANDIDATE)
 def test_d11_after_closure_the_accepted_bytes_are_in_the_control_root(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar)
     files = comment_files(drill.root, "样件联调：收口后应在控制根")
@@ -528,6 +534,27 @@ def test_d11_after_closure_the_accepted_bytes_are_in_the_control_root(tmp_path: 
 
     for relative, text in files.items():
         assert (drill.root / relative).read_text(encoding="utf-8") == text, f"控制根没有收到验收过的改动: {relative}"
+
+
+def test_d12_an_isolated_run_on_uncommitted_merged_bytes_is_refused_at_start_not_after_acceptance(
+    tmp_path: Path, benchmark_tar: bytes  # noqa: F811
+) -> None:
+    """Back-to-back on the same file without the user's commit in between: refused before work starts, never stuck later."""
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    files = comment_files(drill.root, "样件联调：第一单")
+    first = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D12A", files=files, declared=tuple(files))
+    assert_closed_and_clean(drill, first, PROJECT_ID)
+
+    again = comment_files(drill.root, "样件联调：第二单")
+    second = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D12B", files=again, declared=tuple(again))
+
+    assert_never_stuck(drill, second)
+    assert second.stage == "refused:run", f"{second.stage}: {second.refusal}"
+    assert "控制根里范围内的文件与本 Run 起点不一致" in second.refusal
+    # Nothing of the second Mission reached the control root.
+    for relative, text in files.items():
+        assert (drill.root / relative).read_text(encoding="utf-8") == text
 
 
 def _parallel_pair(drill: Drill, domain_b: str) -> None:
