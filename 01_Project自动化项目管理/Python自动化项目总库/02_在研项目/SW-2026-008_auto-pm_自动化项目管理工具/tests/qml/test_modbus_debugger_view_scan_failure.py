@@ -27,6 +27,8 @@ class _FakeModbusBridge(QObject):
     def __init__(self) -> None:
         super().__init__()
         self.scan_calls = 0
+        self.stop_calls = 0
+        self.hold = False
         self.fail_reason = "【通信中断】连接被对端复位"
 
     @Slot(result="QVariant")
@@ -36,10 +38,16 @@ class _FakeModbusBridge(QObject):
     @Slot(int, int)
     def scanRegisters(self, start: int, end: int) -> None:
         self.scan_calls += 1
+        if self.hold:
+            return
         if self.fail_reason:
             self.scanFailed.emit(self.fail_reason)
         else:
             self.scanFinished.emit()
+
+    @Slot()
+    def stopScan(self) -> None:
+        self.stop_calls += 1
 
     @Slot(result=bool)
     def isConnected(self) -> bool:
@@ -80,3 +88,28 @@ def test_scan_failure_releases_button_and_shows_reason(qapp: QApplication, qml_e
     assert bridge.scan_calls == 2
     assert error_text.property("text") == ""
     assert button.property("enabled") is True
+
+
+def test_stop_button_follows_the_scan_and_calls_stop(qapp: QApplication, qml_engine: QQmlEngine) -> None:
+    bridge = _FakeModbusBridge()
+    bridge.hold = True
+    view = _create_view(qml_engine, bridge)
+    start = view.findChild(QObject, "startScanBtn")
+    stop = view.findChild(QObject, "stopScanBtn")
+    assert start is not None and stop is not None
+    assert view.property("_scanning") is False
+
+    start.clicked.emit()
+    qapp.processEvents()
+    assert view.property("_scanning") is True
+    assert start.property("enabled") is False
+
+    stop.clicked.emit()
+    qapp.processEvents()
+    assert bridge.stop_calls == 1
+
+    bridge.scanFailed.emit("扫描已停止（已探测 3 格）。")
+    qapp.processEvents()
+    assert view.property("_scanning") is False
+    assert start.property("enabled") is True
+    assert view.findChild(QObject, "scanErrorText").property("text") == "扫描失败：扫描已停止（已探测 3 格）。"

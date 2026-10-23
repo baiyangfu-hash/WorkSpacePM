@@ -32,6 +32,7 @@ Item {
     // ── 连接状态 ──────────────────────────────────────────
     property bool _isConnected: false
     property int _subTabIndex: 0   // 0=监测 1=扫描
+    property bool _scanning: false  // 扫描进行中（控制“停止”按钮）
     // ── 网卡数据源 ─────────────────────────────────────────
     ListModel { id: nicModel }
 
@@ -100,12 +101,14 @@ Item {
         }
 
         function onScanFinished() {
+            root._scanning = false
             startScanBtn.enabled = true
             startScanBtn.text = "⚡ 重新探测"
         }
 
         // 扫描失败/被拒：恢复按钮，红框显示原因（不再永远停在“扫描中...”）
         function onScanFailed(reason) {
+            root._scanning = false
             startScanBtn.enabled = true
             startScanBtn.text = "⚡ 重新探测"
             scanErrorText.text = "扫描失败：" + reason
@@ -813,11 +816,24 @@ Item {
                                         startScanBtn.enabled = false
                                         startScanBtn.text = "扫描中..."
                                         if (typeof modbusBridge !== "undefined" && modbusBridge !== null) {
+                                            root._scanning = true
                                             modbusBridge.scanRegisters(0, 99)
                                         } else {
                                             _simulateScan()
                                         }
                                     }
+                                }
+                                Button {
+                                    id: stopScanBtn
+                                    objectName: "stopScanBtn"
+                                    text: "⏹ 停止"
+                                    visible: root._scanning
+                                    font.pixelSize: Theme.fontSizeSm
+                                    onClicked: {
+                                        stopScanBtn.enabled = false
+                                        modbusBridge.stopScan()
+                                    }
+                                    onVisibleChanged: if (visible) stopScanBtn.enabled = true
                                 }
                             }
 
