@@ -164,6 +164,7 @@ class ContinuityExecutionService:
         lease_token: str,
         lease_seconds: int,
         idempotency_key: str,
+        one_holder_per_project: bool = False,
     ) -> RunItem:
         if not all(
             isinstance(value, str) and value and value == value.strip()
@@ -265,6 +266,7 @@ class ContinuityExecutionService:
                 actual_observed,
                 lease_seconds,
                 idempotency_key,
+                one_holder_per_project=one_holder_per_project,
             )
         except (ContinuityStoreError, ControlRootGuardError) as error:
             raise ContinuityExecutionError(str(error)) from error

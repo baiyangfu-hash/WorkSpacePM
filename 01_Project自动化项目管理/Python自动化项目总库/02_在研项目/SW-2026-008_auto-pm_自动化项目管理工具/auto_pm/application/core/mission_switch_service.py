@@ -278,6 +278,9 @@ class MissionSwitchService:
             raise MissionSwitchError(
                 f"{to_mission_id} 当前是 {target.state.value}，只能切到“搁着”或“已批未开工”的卡"
             )
+        if target_park is not None and not as_owner.strip():
+            # Checked before the first write: an input error must not leave the card in hand parked.
+            raise MissionSwitchError("--as 必须写明接手的 agent 身份")
         parked: ParkOutcome | None = None
         if board.active:
             current = board.active[0]

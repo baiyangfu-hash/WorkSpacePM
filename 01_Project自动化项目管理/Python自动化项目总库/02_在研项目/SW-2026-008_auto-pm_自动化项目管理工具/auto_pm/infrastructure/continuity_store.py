@@ -3932,6 +3932,8 @@ class ContinuityStore:
         observed_dirty_paths: tuple[str, ...],
         lease_seconds: int,
         idempotency_key: str,
+        *,
+        one_holder_per_project: bool = False,
     ) -> RunItem:
         idempotency_key = self._validated_idempotency_key(idempotency_key)
         try:
@@ -4086,6 +4088,24 @@ class ContinuityStore:
             if active_sibling is not None:
                 raise ContinuityStoreError(
                     "Work 已有非终态 Run" + self._holder_notice(conn, str(active_sibling[0]))
+                )
+            # TD-071: a parked card's other Works start again only through pm unpark.
+            parked = self._parked_mission_of_work(conn, work)
+            if parked is not None:
+                raise ContinuityStoreError(
+                    f"{parked} 搁着呢，不能再起新的 Run；请用户说一句后用 pm unpark 拿回来"
+                )
+            # For a dispatch the one-card-per-project limit is enforced here, inside the
+            # transaction that writes the Run and its lease, so two overlapping dispatches cannot
+            # both pass the preflight count.
+            held = (
+                self._project_held_lease_run_ids(conn, work.subject_project_id, observed_at)
+                if one_holder_per_project
+                else ()
+            )
+            if held:
+                raise ContinuityStoreError(
+                    "项目里已有 Run 持有租约（" + "、".join(held) + "），同一项目同一时刻只能一张在干"
                 )
             self._insert_mapping(conn, "run_items", stored_values)
             self._insert_mapping(conn, "execution_leases", stored_lease)
@@ -7887,6 +7907,28 @@ class ContinuityStore:
                 now=observed_at,
             )
         )
+
+    def _parked_mission_of_work(self, conn: sqlite3.Connection, work: WorkItem) -> str | None:
+        """The parked Mission whose Decision authorizes ``work``, if any (TD-071): a parked card's
+        other Works start again only through ``pm unpark``."""
+
+        if not self._table_exists(conn, "run_parks"):
+            return None
+        rows = conn.execute(
+            """SELECT DISTINCT m.mission_id, m.authority_json FROM mission_items m
+            JOIN run_parks p ON p.mission_id = m.mission_id
+            WHERE p.unparked_at IS NULL AND m.subject_project_id=?
+            ORDER BY m.mission_id""",
+            (work.subject_project_id,),
+        ).fetchall()
+        for row in rows:
+            try:
+                decision_id = json.loads(str(row["authority_json"])).get("decision_id")
+            except (json.JSONDecodeError, AttributeError) as error:
+                raise ContinuityStoreError("Mission authority JSON 无法读取") from error
+            if decision_id == work.authorization_ref:
+                return str(row["mission_id"])
+        return None
 
     def _single_live_run_of_mission(self, conn: sqlite3.Connection, mission: Mission) -> RunItem:
         if mission.root_work_id is None:

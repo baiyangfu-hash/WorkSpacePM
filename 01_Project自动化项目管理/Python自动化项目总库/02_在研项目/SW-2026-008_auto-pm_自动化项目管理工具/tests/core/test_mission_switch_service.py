@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 from auto_pm.cli.__main__ import cli
+from auto_pm.core.continuity_execution_service import ContinuityExecutionError
 from auto_pm.core.execution_adapter_service import ExecutionDispatchError, ExecutionDispatchService
 from auto_pm.core.lease_handover_service import (
     AGENT_MARKERS,
@@ -23,7 +24,7 @@ from auto_pm.core.lease_handover_service import (
 from auto_pm.core.mission_switch_service import MissionSwitchError, MissionSwitchService
 from click.testing import CliRunner
 
-from auto_pm.contracts.continuity import RunState
+from auto_pm.contracts.continuity import RunState, WorkKind
 from auto_pm.contracts.lease_reclaim import PARKED_TOKEN_PREFIX
 from auto_pm.contracts.mission import MissionState
 from auto_pm.infrastructure import lease_wallet
@@ -291,6 +292,74 @@ def test_dispatch_capacity_ignores_a_parked_lease_but_counts_a_held_one(sw: Swit
         dispatch._assert_parallel_capacity(b, "RUN-NEW", sw.clock())
     sw.park_a()
     dispatch._assert_parallel_capacity(b, "RUN-NEW", sw.clock())
+
+
+def test_dispatch_refuses_a_fresh_run_for_a_parked_card(sw: Switch) -> None:
+    """Codex P1 on #86: another READY Work of a parked Mission must not start behind pm unpark."""
+    dispatch = ExecutionDispatchService.__new__(ExecutionDispatchService)
+    dispatch._store = sw.store
+    dispatch._assert_mission_not_parked(sw.store.get_mission("MISSION-A"))  # positive control
+    sw.park_a()
+    with pytest.raises(ExecutionDispatchError, match="MISSION-A 搁着呢.*pm unpark"):
+        dispatch._assert_mission_not_parked(sw.store.get_mission("MISSION-A"))
+    # An agent's own stop into "等你" (BLOCKED with an open park) is refused the same way.
+    sw.service.unpark(mission_id="MISSION-A", as_owner="agent-a", approval_evidence_ref=APPROVAL)
+    sw.park_a(approval="")
+    assert sw.store.get_mission("MISSION-A").state is MissionState.BLOCKED
+    with pytest.raises(ExecutionDispatchError, match="搁着呢"):
+        dispatch._assert_mission_not_parked(sw.store.get_mission("MISSION-A"))
+
+
+def test_a_dispatch_run_is_held_to_one_lease_per_project_inside_the_transaction(sw: Switch) -> None:
+    """Codex P2 on #86: for a dispatch the project limit holds where the Run and lease are written,
+    not only in the preflight count; other run starts keep their old rules."""
+    sw.second_card()
+    second = dict(
+        run_id="RUN-002", work_id="WORK-002", executor_id="agent-b", lease_token="token-b",
+        idempotency_key="create-run-b", declared_dirty_paths=[A_FILE], observed_dirty_paths=[A_FILE],
+    )
+    before = sw.snapshot()
+    with pytest.raises(ContinuityExecutionError, match="RUN-001.*只能一张在干"):
+        _start(sw.execution, one_holder_per_project=True, **second)
+    assert sw.snapshot() == before
+    sw.park_a()  # the parked lease is fenced and no longer counts
+    _start(sw.execution, one_holder_per_project=True, **second)
+    assert sw.store.get_run("RUN-002").state is RunState.READY
+
+
+def test_a_parked_cards_other_work_cannot_start_a_run_by_any_path(sw: Switch) -> None:
+    """Codex P1 on #86, store side: ``continuity run start`` does not go through dispatch, so the
+    store itself refuses a fresh Run for a Work that a parked Mission's Decision authorizes."""
+    sw.works.create_work(
+        work_id="WORK-A2", subject_project_id=PROJECT, kind=WorkKind.GOVERNANCE, title="A 的第二件",
+        owner="architect", scope_paths=[A_FILE], source_fingerprint="sha256:a2",
+        idempotency_key="create-work-a2", read_only=True,
+    )
+    with sw.db() as conn, conn:  # shape WORK-A2 as authorized by A's Decision, like the real binding
+        conn.execute(
+            "UPDATE work_items SET authorization_ref=? WHERE work_id='WORK-A2'", (sw.a.authority.decision_id,)
+        )
+    sw.park_a()
+    before = sw.snapshot()
+    with pytest.raises(ContinuityExecutionError, match="MISSION-A 搁着呢.*pm unpark"):
+        _start(
+            sw.execution, run_id="RUN-A2", work_id="WORK-A2", idempotency_key="create-run-a2",
+            declared_dirty_paths=[A_FILE], observed_dirty_paths=[A_FILE],
+        )
+    assert sw.snapshot() == before
+
+
+def test_switch_with_a_blank_owner_refuses_before_parking_the_card_in_hand(sw: Switch) -> None:
+    """Codex P2 on #86: an input error must not leave the card in hand parked."""
+    sw.b_in_hand()
+    before = sw.snapshot()
+    with pytest.raises(MissionSwitchError, match="--as"):
+        sw.service.switch(
+            project_id=PROJECT, to_mission_id="MISSION-A", reason="r", summary="s", as_owner=" ",
+            approval_evidence_ref=APPROVAL,
+        )
+    assert sw.snapshot() == before
+    assert [m.mission_id for m in sw.service.board(PROJECT).active] == ["MISSION-B"]
 
 
 # ------------------------------------------------------------------ CLI
