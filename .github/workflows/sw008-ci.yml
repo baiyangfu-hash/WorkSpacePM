@@ -1,4 +1,4 @@
-# SW-2026-008 minimal CI (Linux checks, plus the cli/core groups and the sample drill on Windows).  Runs the checks that already exist.
+# SW-2026-008 minimal CI (Linux checks, plus the cli/core groups, the sample drill and the long gate drill on Windows).  Runs the checks that already exist.
 # It is an early warning.  It does NOT replace the governed local gates and its result is not
 # acceptance evidence for any card.  A PASS_KNOWN_BASELINE result is not an all-green result.
 name: sw008-ci
@@ -156,6 +156,14 @@ jobs:
         run: >-
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -p no:cacheprovider -o addopts= -n 4
           tests/cli tests/core tests/e2e/test_closure_drill.py tests/e2e/test_closure_drill_agent_misconduct.py
+          tests/e2e/test_long_gate.py
+
+      # The long gate must survive the session that started it (10-23: a session teardown killed card 184's gate twice).
+      # This launches the runner through a real scheduled task, kills the launching process tree, kills the runner
+      # mid-group and resumes it. Fake groups and a fake renewal only; no ledger.
+      - name: Long gate drill (kill the session mid-gate, then resume)
+        working-directory: ${{ env.PROJ }}
+        run: '"$RUNNER_TEMP/venv/Scripts/python.exe" -B scripts/long_gate_drill.py'
 
       - name: The working tree must still be clean
         run: |
