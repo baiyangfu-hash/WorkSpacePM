@@ -34,11 +34,12 @@ PR 改了 ``io_points.csv`` 里涉及安全点的行。
 已知漏洞：本机 agent 用用户已登录的 ``gh`` 命令行代发评论，机器分不出来——见说明文档。
 
 本脚本不写仓库：CI 里 PR 评论和描述由工作流用 ``gh api`` 取好，以文件经 ``--comments`` / ``--pr-body-file`` 传入，
-脚本本身不访问网络。只有本机的 ``--pr`` 用法会调用已登录的 ``gh`` 读 PR、并把 PR 头取到 ``refs/safety/pr-<编号>``。
+脚本本身不访问网络。只有本机的 ``--pr`` 用法会调用已登录的 ``gh`` 读 PR、并把 PR 头取到 ``refs/safety/pr-<编号>``、main 当前头取到 ``refs/safety/base-<编号>``。
+判的是“PR 合进 main 当前头以后”的样子：main 当前头对比 ``git merge-tree --write-tree`` 算出的合并树（需要 git 2.38 以上）。
 
 用法（在仓库根执行）::
 
-    python reviews/tools/safety_zone_check.py --base <base sha> --head <head sha> [--repo <被检查的检出>]
+    python reviews/tools/safety_zone_check.py --base <main 当前头> --head <PR 头> [--repo <被检查的检出>]
         [--comments <comments.json>] [--pr-body-file <body.txt>] [--status-out <status.json>]
 
     # 本机合并前（主执行，控制根上）：读批准记录，与 PR 描述、改动、签字一起判
@@ -123,8 +124,37 @@ def show(repo: Path, rev: str, path: str) -> str | None:
 
 
 def changed_files(repo: Path, base: str, head: str) -> list[str]:
-    raw = git(repo, "diff", "--name-only", "--no-renames", "-z", f"{base}...{head}")
+    """Files that differ between two commits or trees (two-dot: ``check`` passes main's head and the merged tree)."""
+    raw = git(repo, "diff", "--name-only", "--no-renames", "-z", base, head)
     return sorted({item for item in raw.split("\0") if item})
+
+
+class MergeConflictError(Exception):
+    """The PR head does not merge cleanly into the base branch head."""
+
+
+def merged_tree(repo: Path, base: str, head: str) -> str:
+    """The tree main would have after merging the PR (``git merge-tree --write-tree``, git 2.38+); conflicts raise.
+
+    The check compares main's head with this tree, so line numbers, zone sections and manifests all come from the two sides of
+    one two-dot diff (audit 107): reading the base side at the merge base instead missed zones main marked after the fork (107b),
+    and reading it at main's head against a three-dot diff numbered removed lines by the wrong file (107).
+    """
+    result = subprocess.run(
+        ["git", "-c", "core.quotepath=false", "merge-tree", "--write-tree", "--no-messages", base, head],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        stdin=subprocess.DEVNULL,
+    )
+    if result.returncode == 1:
+        raise MergeConflictError(result.stdout.strip())
+    if result.returncode != 0:
+        raise GitError(f"git merge-tree --write-tree: {result.stderr.strip()}（需要 git 2.38 以上）")
+    return result.stdout.split()[0]
 
 
 # ---------------------------------------------------------------- 文件归属
@@ -348,7 +378,7 @@ def inside(number: int, spans: list[tuple[int, int]]) -> bool:
 def diff_lines(repo: Path, base: str, head: str, path: str) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
     """（删掉的行：基线行号+内容，新增的行：PR 头行号+内容）。"""
 
-    raw = git(repo, "diff", "-U0", "--no-renames", "--no-color", "--text", f"{base}...{head}", "--", path)
+    raw = git(repo, "diff", "-U0", "--no-renames", "--no-color", "--text", base, head, "--", path)
     removed: list[tuple[int, str]] = []
     added: list[tuple[int, str]] = []
     old = new = 0
@@ -496,9 +526,14 @@ def check(
 ) -> Result:
     result = Result()
     head_sha = git(repo, "rev-parse", f"{head}^{{commit}}").strip()
-    # Read the base side at the fork point, never at a later main: the diff (three-dot) numbers removed lines by the merge base, so
-    # zone sections read from a main that later grew the same file would sit on other lines and a deleted zone line would pass (audit 107)
-    base = git(repo, "merge-base", base, head).strip()
+    # Judge what the merge would do to main as it is now: main's head against the merged tree (see merged_tree)
+    base = git(repo, "rev-parse", f"{base}^{{commit}}").strip()
+    try:
+        head = merged_tree(repo, base, head_sha)
+    except MergeConflictError:
+        result.violations.append("PR 和 main 当前头合并有冲突：先把 main 合进 PR 分支解决冲突，再检查")
+        apply_plan(result, plan, plan_source)
+        return result
     files = changed_files(repo, base, head)
     roots: dict[str, list[str]] = {}
     for path in files:
@@ -631,14 +666,13 @@ def fetch_pr(repo: Path, number: int, gh_repo: str) -> tuple[str, str, str, list
 
     pr = gh_json(f"repos/{gh_repo}/pulls/{number}")
     comments = flatten(gh_json("--paginate", "--slurp", f"repos/{gh_repo}/issues/{number}/comments?per_page=100"))
-    base, head = pr["base"]["sha"], pr["head"]["sha"]
+    head = pr["head"]["sha"]
     git(repo, "fetch", "--no-tags", "origin", f"+refs/pull/{number}/head:refs/safety/pr-{number}")
     if git(repo, "rev-parse", f"refs/safety/pr-{number}").strip() != head:
         raise GitError(f"取到的 PR 头和 GitHub 上的 {head[:8]} 不一致，重跑一次")
-    try:
-        git(repo, "cat-file", "-e", f"{base}^{{commit}}")
-    except GitError:
-        git(repo, "fetch", "--no-tags", "origin", pr["base"]["ref"])
+    # the base branch as it is now, not base.sha (which only moves when the head is pushed)
+    git(repo, "fetch", "--no-tags", "origin", f"+refs/heads/{pr['base']['ref']}:refs/safety/base-{number}")
+    base = git(repo, "rev-parse", f"refs/safety/base-{number}").strip()
     return base, head, pr.get("body") or "", comments
 
 
@@ -684,7 +718,7 @@ def render(result: Result, head: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="PR 安全区检查（只读）")
-    parser.add_argument("--base", help="PR 基线提交（base.sha）；用 --pr 时不填")
+    parser.add_argument("--base", help="基线分支（main）当前头的提交；用 --pr 时不填（自动取 main 当前头）")
     parser.add_argument("--head", help="PR 头部提交（head.sha）；用 --pr 时不填")
     parser.add_argument("--pr", type=int, help="本机用法：经已登录的 gh 读这个 PR 的基线、头、描述和评论")
     parser.add_argument("--gh-repo", default=DEFAULT_REPO, help="owner/name（配合 --pr）")
@@ -736,7 +770,8 @@ def main(argv: list[str] | None = None) -> int:
         result.violations += plan_problems + decision_problems
         body_known = args.pr is not None or args.pr_body_file is not None
         if body_known and declared is None and not plan_problems and not decision_problems:
-            plc = [f for f in changed_files(repo, base, head) if PurePosixPath(f).parts[:1] == (PLC_TOP,)]
+            fork = git(repo, "merge-base", base, head).strip()
+            plc = [f for f in changed_files(repo, fork, head) if PurePosixPath(f).parts[:1] == (PLC_TOP,)]
             if plc:
                 result.violations.append(
                     f"本 PR 改到了 {PLC_TOP}（如 `{plc[0]}`），PR 描述里必须单独写一行“安全回路: 是”或“安全回路: 否”（照计划第④栏）"

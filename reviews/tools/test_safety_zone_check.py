@@ -646,3 +646,25 @@ def test_w02_a_deleted_zone_line_is_caught_when_main_later_grew_the_same_file(re
     main_now, _ = commit(repo, {FEED: grown})
     result = gate.check(repo, main_now, head)
     assert result.needs_signature, result
+
+
+def test_w03_a_variable_main_marked_after_the_fork_still_needs_a_signature(repo: Path) -> None:
+    # audit 107b: reading the base side at the merge base lost what main marked later; the merged tree keeps it
+    plain = edit_feed("nTimeout := 10;\n// @安全区", "nTimeout := 10;\nnHold := 5;\n// @安全区")
+    git(repo, "checkout", "-q", "main")
+    commit(repo, {FEED: plain})
+    git(repo, "checkout", "-q", "-b", "pr-old", "main")
+    _main, head = commit(repo, {FEED: plain.replace("nHold := 5;", "nHold := 0;")})
+    git(repo, "checkout", "-q", "main")
+    main_now, _ = commit(repo, {MANIFEST: MANIFEST_SRC.replace('  - "*SafetyOk*"\n', '  - "*SafetyOk*"\n  - nHold\n')})
+    result = gate.check(repo, main_now, head)
+    assert result.needs_signature, result
+
+
+def test_w04_a_pr_that_does_not_merge_cleanly_into_main_is_refused(repo: Path) -> None:
+    git(repo, "checkout", "-q", "main")
+    commit(repo, {DOC: "main 改的说明\n"})
+    git(repo, "checkout", "-q", "-b", "pr-conflict", "main~1")
+    _main, head = commit(repo, {DOC: "PR 改的说明\n"})
+    result = gate.check(repo, git(repo, "rev-parse", "main"), head)
+    assert not result.passed and any("冲突" in v for v in result.violations), result
