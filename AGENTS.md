@@ -114,7 +114,7 @@ git worktree remove .auto-pm/worktrees/claude    # 收工：分支已推送、�
 
 一个项目可以同时开着好几张卡（软上限 8 张），但**同一时刻只有一张“在干”**，像一台设备只有一把操作钥匙。驾驶舱把卡分四栏：**在干 / 等你 / 搁着 / 已关**。“搁着”的卡记了断点（干到哪、下一步做什么），钥匙已经交出，谁也不能往它的工作树里写。
 
-1. **切哪张、拿回哪张只听用户的。** `pm park`（放进“搁着”）、`pm unpark`、`pm switch` 都要带 `--approval-evidence-ref`，写成 `user-confirmation:<用户那条消息的时间或编号>`（至少 8 个字符；不是这个格式、或看得出是 agent / 模型自己写的，命令会拒）。用户没说过，绝不自己编；`--admission-release-ref` 同样按这条。
+1. **切哪张、拿回哪张只听用户的。** `pm park`（放进“搁着”）、`pm unpark`、`pm switch` 都要带 `--approval-evidence-ref`，写成 `user-confirmation:<用户那条消息的时间或编号>`（至少 8 个字符；不是这个格式、或看得出是 agent / 模型自己写的，命令会拒）。用户没说过，绝不自己编；`--admission-release-ref` 同样按这条。**开了批准口令以后**，这三条命令和放行都改为用户本人在终端输入口令，agent 不索要、不代填、不绕过（口令办法见上面“阶段 3【验收】”）。
 2. **agent 自己只能停在“等你”。** 没有用户原话时，只能 `pm park` 不带凭据，把**自己手上**这张卡记好断点放进“等你”，然后停下告诉用户。
 3. **插急活的标准顺序**：用户说“先做 B” → `pm switch --pid <项目> --to <B> --reason … --summary … --as <你的身份> --approval-evidence-ref …`（一步：先把手上的卡搁着，再拿起 B）。B 还没开工时，switch 只做第一步，并给出 `pm confirm-start --mission-id <B>`。B 干完验收后，再按用户的话 `pm unpark` 拿回原来那张。
 4. **拿回后先同步再干活**：`pm unpark` 会报告“本卡分支落后 main 几个提交”和“和哪张卡改同一批文件”。在本卡工作树里同步 `main`、跑测试；有冲突就停下交给用户，不自动变基。
