@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,21 @@ _REQUIRED_FILES = [
 
 # Python 项目规范必需目录（CHG-SCPT-2026-144: 引用集中常量）
 _REQUIRED_DIRS = PYTHON_REQUIRED_DIRS
+
+# 合法包名：与 templates/python-tool/copier.yml 的 package_name 校验一致
+_PACKAGE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def derive_package_name(project_name: str, project_id: str) -> str:
+    """未显式给包名时推导默认 Python 包名
+
+    项目名能直接当包名（如 "Data Tool" → data_tool）时沿用项目名；
+    否则（中文名等）与 project create 一致，按模板默认值取项目号（SW-2026-901 → sw_2026_901）。
+    """
+    candidate = project_name.strip().replace(" ", "_").replace("-", "_").lower()
+    if _PACKAGE_NAME_RE.match(candidate):
+        return candidate
+    return project_id.replace("-", "_").lower()
 
 
 class PythonProjectService:
@@ -158,7 +174,7 @@ class PythonProjectService:
             # 类似 "SW-2026-008_auto-pm_自动化项目管理工具"
             parts = project_name.split("_", 1)
             project_name = parts[1]
-        package_name = project_name.replace(" ", "_").lower()
+        package_name = derive_package_name(project_name, project_id)
         cli_command = package_name.replace("_", "-")
 
         # 读取现有的 copier answers 或其他元数据以尽可能还原

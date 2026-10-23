@@ -26,6 +26,7 @@ from auto_pm.contracts.pm_facade import (
     PmIntent,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from tests.plan_checklist_support import checklist_args, full_checklist
 
 if TYPE_CHECKING:
     from auto_pm.application.core.mission_service import MissionService
@@ -61,6 +62,7 @@ SCOPE = [
     "bug",
     "--domain",
     "SCPT",
+    *checklist_args(),
 ]
 FORBIDDEN_KEYS = {"mission_id", "decision_id", "work_id"}
 
@@ -409,6 +411,7 @@ def test_c11_the_full_form_approve_still_works_with_and_without_a_persisted_card
             adapter=ExecutionAdapterKind.CODEX,
             approved_model="gpt-approved",
             declared_dirty_paths=("auto_pm/example.py",),
+            plan_checklist=full_checklist(),
         ),
     )
     assert PmFacadeService(fresh).list_pending_planning_scope_cards(PROJECT) == ()

@@ -1,0 +1,35 @@
+// ============================================================================
+// GlobalVars.db - 长边框堆垛机全局变量数据块
+// ============================================================================
+// 项目: DJ-2026-009 长边框堆垛机
+// 控制器: 汇川 H5U (IEC 61131-3 SCL)
+// 遵循规范: STD-820 (通用外部交互) / STD-901 (架构)
+// ============================================================================
+
+DATA_BLOCK GlobalVars
+{
+    stGlobal : STRUCT
+        bPowerOn        : BOOL;     (* 系统上电就绪 *)
+        bAutoRunning    : BOOL;     (* 全自动运行中 *)
+        bEmergencyStop  : BOOL;     (* 急停回路 (1=正常, 0=急停) *)
+        bSafetyLight    : BOOL;     (* 安全光幕 (1=正常, 0=遮挡) *)
+        bResetCmd       : BOOL;     (* 全局故障复位指令 *)
+        iCycleTimeMs    : DINT;     (* 当前单循环节拍 (ms) *)
+    END_STRUCT;
+
+    stExternal      : ST_ExternalDevice;        (* STD-820 通用外部对接数据总线 *)
+    stDualInfeed    : ST_DualInfeedConveyor;     (* FB_1001 双路进料输送 *)
+    stStackTransfer : ST_StackTransferRobot_XZ;  (* FB_1002 叠垛移载机械手 *)
+    stPaperHolder   : ST_PaperHolder_Z;          (* FB_1003 隔纸架与自动裁切 *)
+    stFrameAlign    : ST_FrameAlignUnit;         (* FB_1004 边框长短边归正 *)
+    stRecipeAlarm   : ST_StackRecipeAlarm;       (* FB_2001 配方与公共报警 *)
+
+    fbExternal      : FB_3001_ExternalInteraction;
+    fbDualInfeed    : FB_1001_DualInfeedConveyor;
+    fbStackTransfer : FB_1002_StackTransferRobot_XZ;
+    fbPaperHolder   : FB_1003_PaperHolder_Z;
+    fbFrameAlign    : FB_1004_FrameAlignUnit;
+    fbRecipeAlarm   : FB_2001_StackRecipeAlarm;
+}
+BEGIN
+END_DATA_BLOCK

@@ -1,8 +1,8 @@
 """AI skill handoff contract and transactional inbox service.
 
 The inbox is a short-lived execution message. It is deliberately not a
-second project ledger: only the PM workflow may consume a handoff and write
-the result to PM_SESSION or cockpit feedback.
+second project ledger: only the PM governance role may consume a handoff and
+write the result to cockpit feedback.
 """
 
 from __future__ import annotations
@@ -21,6 +21,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_saga_service import PmClosureSagaCoordinator
+
+ENTRY_SKILL = "cockpit-entry"
+"""Skill named in AI context when no executor skill fits; pm-workflow is quarantined."""
+
+PM_ACTOR = "pm-governance"
+"""Default actor recorded for PM closure, requeue and compensation."""
 
 
 class HandoffError(RuntimeError):
@@ -186,7 +192,7 @@ class AiHandoffService:
             "change_id": change_id,
             "decision_id": decision_id,
             "generated_at": generated_at,
-            "created_by": "pm-workflow",
+            "created_by": PM_ACTOR,
             "skill_context": context,
             "idempotency_key": resolved_request_id,
             "changed_files": [],
@@ -541,7 +547,7 @@ class AiHandoffService:
         *,
         result: Mapping[str, Any] | None = None,
         idempotency_key: str = "",
-        actor: str = "pm-workflow",
+        actor: str = PM_ACTOR,
     ) -> dict[str, Any]:
         """Retry a failed close using the same idempotent close protocol."""
         return self.close_request(
@@ -557,7 +563,7 @@ class AiHandoffService:
         *,
         result: Mapping[str, Any] | None = None,
         idempotency_key: str = "",
-        actor: str = "pm-workflow",
+        actor: str = PM_ACTOR,
         use_saga: bool = False,
         simulate_fail_at: str = "",
     ) -> dict[str, Any]:
@@ -660,7 +666,7 @@ class AiHandoffService:
         *,
         result: Mapping[str, Any] | None = None,
         idempotency_key: str = "",
-        actor: str = "pm-workflow",
+        actor: str = PM_ACTOR,
         simulate_fail_at: str = "",
     ) -> dict[str, Any]:
         """通过 PmClosureSagaCoordinator 执行跨资产原子收口事务。"""
@@ -686,7 +692,7 @@ class AiHandoffService:
         self,
         request_id: str,
         *,
-        actor: str = "pm-workflow",
+        actor: str = PM_ACTOR,
         simulate_fail_at: str = "",
     ) -> dict[str, Any]:
         """从断点恢复并继续执行未完成的 Saga 事务。"""
@@ -700,7 +706,7 @@ class AiHandoffService:
         self,
         request_id: str,
         *,
-        actor: str = "pm-workflow",
+        actor: str = PM_ACTOR,
     ) -> dict[str, Any]:
         """补偿回滚已失败或需撤销的 Saga 事务。"""
         return self.saga_coordinator.compensate_saga(

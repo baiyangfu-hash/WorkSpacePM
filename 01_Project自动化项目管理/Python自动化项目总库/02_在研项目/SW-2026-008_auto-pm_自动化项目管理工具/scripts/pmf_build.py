@@ -254,11 +254,19 @@ def verify(output: Path, manifest_files: dict[str, str] | None = None, recorded_
 
     ``release_meta.json`` 不按整文件哈希比较（它带构建机器的解释器版本）：检查它可解析、``schema_version`` 正确，
     给了 ``recorded_meta`` 时再比较记录里写了的身份键（``builder`` 除外）。载荷文件的任何不同仍是 ``mismatch``。
+    ``__pycache__``/``*.pyc`` 不算载荷，单列在 ``bytecode``；命令行只要它非空就判不通过（与稳定启动器的精确树校验一致）。
     """
     actual: dict[str, str] = {}
+    bytecode: list[str] = []
     for path in sorted(output.rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
-            actual[path.relative_to(output).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        if not path.is_file():
+            continue
+        relative = path.relative_to(output).as_posix()
+        if "__pycache__" in path.parts or path.suffix == ".pyc":
+            # 不算载荷，但必须报出来：稳定启动器把发布目录里的缓存判为未登记节点，校验“通过”而启动失败就是 D08 的坑。
+            bytecode.append(relative)
+            continue
+        actual[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
     meta_problems: list[str] = []
     if META_NAME in actual:
         try:
@@ -276,12 +284,13 @@ def verify(output: Path, manifest_files: dict[str, str] | None = None, recorded_
         elif meta is not None:
             meta_problems.append("unparsable")
     if manifest_files is None:
-        return {"missing": [], "orphans": [], "mismatch": [], "meta": meta_problems, "files": [str(len(actual))]}
+        return {"missing": [], "orphans": [], "mismatch": [], "meta": meta_problems, "bytecode": bytecode, "files": [str(len(actual))]}
     return {
         "missing": sorted(set(manifest_files) - set(actual)),
         "orphans": sorted(set(actual) - set(manifest_files)),
         "mismatch": sorted(k for k in manifest_files if k in actual and k != META_NAME and manifest_files[k] != actual[k]),
         "meta": meta_problems,
+        "bytecode": bytecode,
         "files": [str(len(actual))],
     }
 
@@ -316,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
             entry_files = entry["files"]
             recorded = {"release_id": args.release_id, **{k: entry[k] for k in ("source_commit", "version", "built_at") if k in entry}}
         report = verify(Path(args.output), entry_files, recorded)
-        clean = not report["missing"] and not report["orphans"] and not report["mismatch"] and not report["meta"]
+        clean = not report["missing"] and not report["orphans"] and not report["mismatch"] and not report["meta"] and not report["bytecode"]
         print(json.dumps({"ok": clean, **report}, ensure_ascii=False))
         return 0 if clean else 2
     except BuildError as exc:

@@ -39,6 +39,7 @@ from tests.core.test_plc_quality_gate import (
     write_plc_project,
 )
 from tests.core.test_pm_run_e2e import NOT_VERIFIED_SENTENCE, VERIFIED_SENTENCE, _Env
+from tests.plan_checklist_support import full_checklist
 
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
@@ -274,7 +275,8 @@ def _plc_env(
         local_orchestrator=LocalExecutionOrchestrator(root, store=store, executor=executor),
     )
     grant = PlanningExecutionGrant(
-        adapter=ExecutionAdapterKind.CODEX, approved_model="agent-a", declared_dirty_paths=scope
+        adapter=ExecutionAdapterKind.CODEX, approved_model="agent-a", declared_dirty_paths=scope,
+        plan_checklist=full_checklist(),
     )
     card = facade.create_planning_scope_card(
         PmIntent(
@@ -284,7 +286,7 @@ def _plc_env(
             acceptance_criteria=("SCL passes LSP-905",),
         ),
         scope_paths=scope,
-        risks=("none",),
+        risks=("改错文件导致回归",),
         non_goals=("no hardware download",),
         execution_grant=grant,
     )

@@ -32,6 +32,7 @@ from auto_pm.contracts.pm_facade import (
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
+from tests.plan_checklist_support import full_checklist
 
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_closure_service import (
@@ -263,6 +264,7 @@ def _env(
         adapter=ExecutionAdapterKind.CODEX,
         approved_model="agent-a",
         declared_dirty_paths=scope,
+        plan_checklist=full_checklist(),
     )
     intent = PmIntent(
         request_id="REQ-U07A-E2E",
@@ -273,7 +275,7 @@ def _env(
     card = facade.create_planning_scope_card(
         intent,
         scope_paths=scope,
-        risks=("none",),
+        risks=("改错文件导致回归",),
         non_goals=("no refactor",),
         execution_grant=grant,
     )
@@ -434,7 +436,8 @@ def test_an_accepted_mission_cannot_be_run_again(tmp_path: Path) -> None:
 def test_lease_token_and_paths_never_leak(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with caplog.at_level(logging.DEBUG):
+    # 包日志器 auto_pm 被 AppContext 配过级别后，只设根日志器拦不住 auto_pm.* 的 DEBUG；两层都放开才查得全。
+    with caplog.at_level(logging.DEBUG), caplog.at_level(logging.DEBUG, logger="auto_pm"):
         failing = _env(tmp_path, calc=BROKEN_CALC, name="failing")
         failed = failing.run()
         passing = _env(tmp_path, name="passing")
