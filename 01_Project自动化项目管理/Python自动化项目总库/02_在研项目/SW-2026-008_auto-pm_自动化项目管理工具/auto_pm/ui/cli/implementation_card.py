@@ -9,6 +9,7 @@ import click
 from pydantic import ValidationError
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core import implementation_card_basis as card_basis
 from auto_pm.application.core.implementation_card_precheck import (
     CommandNode,
     precheck_markdown_card,
@@ -133,18 +134,47 @@ def create_card(
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Markdown implementation card to precheck (read-only)",
 )
+@click.option("--pid", "project_id", default=None, help="Project the Work will be created for")
 @click.pass_context
-def precheck_card(ctx: click.Context, card_file: Path) -> None:
-    """Card 027 §5.3: commands, paths and baseline; exit 0 only when every check passes."""
+def precheck_card(ctx: click.Context, card_file: Path, project_id: str | None) -> None:
+    """Card 027 §5.3: commands, paths and baseline; new-format cards also basis and change order.
+
+    Exit 0 only when every check passes."""
     app_ctx: AppContext = ctx.find_root().obj
     report = precheck_markdown_card(
         card_file,
         workspace_root=Path(app_ctx.control_root),
         command_tree=command_tree_from_click(ctx),
+        project_id=project_id,
     )
     _emit(report.to_dict())
     if not report.passed:
         ctx.exit(1)
+
+
+@implementation_card_group.command(name="by-change")
+@click.option("--change", "change_id", required=True, help="Change order id, e.g. CHG-PLC-2026-002")
+@click.option(
+    "--project-dir",
+    required=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Project directory (control-root relative); only its own change cabinet is read",
+)
+@click.pass_context
+def cards_by_change(ctx: click.Context, change_id: str, project_dir: Path) -> None:
+    """List the implementation cards hanging under one change order and their states (read-only)."""
+    app_ctx: AppContext = ctx.find_root().obj
+    base = project_dir if project_dir.is_absolute() else Path(app_ctx.control_root) / project_dir
+    if not base.is_dir():
+        raise click.ClickException(f"项目目录不存在: {base}")
+    cards = [
+        {"card_id": card.card_id, "card": str(card.card_file), "state": card.header.state, "open": card.open}
+        for monitor in card_basis.MONITOR_DIRS
+        for card in card_basis.cards_for_change(
+            base / monitor / card_basis.CHANGE_CABINET / card_basis.CARD_DRAWER, change_id
+        )
+    ]
+    _emit({"change": change_id, "project_dir": str(project_dir), "cards": cards})
 
 
 @implementation_card_group.command(name="validate")
