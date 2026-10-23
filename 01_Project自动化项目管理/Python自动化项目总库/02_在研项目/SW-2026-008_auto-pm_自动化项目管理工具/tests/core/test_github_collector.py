@@ -399,11 +399,11 @@ def test_audit_verdicts(tmp_path: Path) -> None:
     for name, (body, _want) in cases.items():
         (tmp_path / name).write_text("# 审计\n\n" + body, encoding="utf-8")
     found = {a.file: a for a in gh.read_audits([tmp_path, tmp_path / "missing"])}
-    for name, (_body, want) in cases.items():
-        if want is None:
-            assert name not in found
-        else:
-            assert found[name].verdict == want, name
+    # 没有审计编号的文件（notes.md）不算审计结论；其余每份都要读出预期结论
+    assert set(found) == {name for name, (_body, want) in cases.items() if want}
+    assert {name: found[name].verdict for name in found} == {
+        name: want for name, (_body, want) in cases.items() if want
+    }
     assert found["6_a.md"].head == "abcdef12"
 
 
