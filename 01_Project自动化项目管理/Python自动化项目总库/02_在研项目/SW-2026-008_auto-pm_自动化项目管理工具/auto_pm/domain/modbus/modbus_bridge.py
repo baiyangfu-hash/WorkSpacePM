@@ -177,6 +177,8 @@ class ModbusBridge(QObject):
         self._io_timer.timeout.connect(self._poll_io)
         self._connect_in_flight = False
         self._read_in_flight = False
+        # 连接代次：每次断开 +1；迟到的连接结果代次对不上就作废，不把界面翻回“已连接”
+        self._conn_gen = 0
 
     # ── 内部工具 ─────────────────────────────────────────
 
@@ -291,14 +293,21 @@ class ModbusBridge(QObject):
             self._log("SYS", "正在连接，请稍候。")
             return
         self._connect_in_flight = True
+        gen = self._conn_gen
         self._log("SYS", f"发起 TCP Socket 握手 → {ip}:{port} Unit={slave_id} sim={sim_mode} bind={source_ip if source_ip else 'Auto'}")
         self._run_io(
             lambda: self._service.connect(ip, port, slave_id, sim_mode, source_ip),
-            self._on_connect_done,
+            lambda worker: self._on_connect_done(worker, gen),
         )
 
-    def _on_connect_done(self, worker: _IoWorker) -> None:
+    def _on_connect_done(self, worker: _IoWorker, gen: int) -> None:
         self._connect_in_flight = False
+        if gen != self._conn_gen:
+            # 握手期间用户点了断开：结果作废；若握手刚好成功，补关一次连接
+            if worker.error is None and worker.result[0]:
+                self._service.disconnect()
+            self._log("SYS", "连接结果到达时已断开，已作废本次连接。")
+            return
         if worker.error is not None:
             self._log("ERR", IndustrialErrorMapper.format_exception(worker.error))
             self.connectionStateChanged.emit(False)
@@ -315,6 +324,7 @@ class ModbusBridge(QObject):
 
         不等 _io_lock：关闭 socket 会让正在等设备的后台读取立即出错返回，界面线程不被拖住。
         """
+        self._conn_gen += 1
         self._stop_poll()
         if self._scan_worker is not None:
             self._scan_worker.stop_requested = True

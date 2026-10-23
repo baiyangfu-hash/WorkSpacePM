@@ -351,6 +351,57 @@ def test_scan_and_reads_never_use_the_client_at_the_same_time(qapp, monkeypatch)
     assert peak == 1, "扫描和读写同时在用同一个 Modbus 客户端（会串包）"
 
 
+def test_disconnect_returns_at_once_while_the_client_lock_is_held(qapp, monkeypatch):
+    bridge = _connected_bridge(monkeypatch)
+    rec = _Recorder(bridge)
+    closed: list[int] = []
+    monkeypatch.setattr(bridge._service, "disconnect", lambda: closed.append(1))
+    held = threading.Event()
+    release = threading.Event()
+
+    def busy_reader() -> None:  # 模拟后台读取正持锁等设备（最多 2 s）
+        with bridge._io_lock:
+            held.set()
+            release.wait(2)
+
+    reader = threading.Thread(target=busy_reader)
+    reader.start()
+    try:
+        assert held.wait(1)
+        t0 = monotonic()
+        bridge.disconnectDevice()
+        elapsed = monotonic() - t0
+    finally:
+        release.set()
+        reader.join()
+    assert elapsed < 0.5, "断开不能等后台读取放锁（界面会冻结一整个超时）"
+    assert closed == [1]
+    assert rec.states == [False]
+
+
+def test_late_connect_success_after_disconnect_does_not_flip_back_to_connected(qapp):
+    bridge = ModbusBridge()
+    bridge._io_timer.setInterval(1)
+    rec = _Recorder(bridge)
+    gate = threading.Event()
+    svc = bridge._service
+    real_connect = svc.connect
+
+    def slow_connect(*args: Any) -> tuple[bool, str]:
+        gate.wait(5)
+        return real_connect("127.0.0.1", 502, 1, True, "")
+
+    svc.connect = slow_connect  # type: ignore[method-assign]
+    bridge.connectDevice("127.0.0.1", 502, 1, True, "")
+    bridge.disconnectDevice()
+    gate.set()
+    _wait_until(lambda: not bridge._io_jobs)
+
+    assert rec.states == [False], "迟到的连接成功把界面翻回了“已连接”"
+    assert bridge.isConnected() is False, "迟到的连接必须被关掉"
+    assert bridge._connect_in_flight is False
+
+
 # ── Ping ──────────────────────────────────────────────────
 
 
