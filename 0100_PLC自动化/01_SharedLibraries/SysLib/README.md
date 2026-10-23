@@ -106,31 +106,18 @@ BEGIN
 END_FUNCTION_BLOCK
 ```
 
-#### 使用示例
+#### 使用示例（FB_TON / FB_TONR，各平台写法相同）
 
-**LSP / 开发环境:**
 ```pascal
 VAR
     myTON : FB_TON;
     bStart : BOOL;
     bOut : BOOL;
-    diElapsed : DINT;
+    diElapsedMs : DINT;
 END_VAR
 
-myTON(IN := bStart, PT := 500, Q => bOut, ET => diElapsed);
-(* PT=500 表示 500 个扫描周期 *)
-```
-
-**TIA Portal:**
-```pascal
-VAR
-    myTON : FB_TON;
-    bStart : BOOL;
-    bOut : BOOL;
-    tElapsed : TIME;
-END_VAR
-
-myTON(IN := bStart, PT := T#500ms, Q => bOut, ET => tElapsed);
+myTON(IN := bStart, PT := 500, Q => bOut, ET => diElapsedMs);
+(* PT=500 表示 500 ms (V3.0.0 起真实毫秒); ET 也是毫秒, 到点后停在 PT *)
 ```
 
 ---
@@ -274,7 +261,7 @@ fbMotor(i_bFwd := bFwd,
 
    timerA(
        IN := bTrigger,
-       PT := 500,        (* 500 个扫描周期 *)
+       PT := 500,        (* 500 ms (V3.0.0 起真实毫秒) *)
        Q => bDone,
        ET => diCount
    );
