@@ -86,6 +86,12 @@ def test_c04_changing_a_number_in_the_spec_changes_the_dates(tmp_path: Path) -> 
     ("| 电气初稿确认 → 开始编程 | 1 | |\n", "", "电气初稿确认 → 开始编程"),
     ("| 规模 | 判据 | 系数 |", "| 级别 | 判据 | 系数 |", "规模表"),
     ("| 加机器人 |", "| 机器人 |", "缺列"),
+    ("| 编程 | 2 |", "| 编程 | -2 |", "超出范围"),
+    ("| 编程 | 2 |", "| 编程 | nan |", "超出范围"),
+    ("| 编程 | 2 |", "| 编程 | inf |", "超出范围"),
+    ("| 单机 | 1 台 | 1.0 |", "| 单机 | 1 台 | 0 |", "超出范围"),
+    ("| 单机 | 1 台 | 1.0 |", "| 单机 | 1 台 | -1 |", "超出范围"),
+    ("| 电气初稿确认 → 开始编程 | 1 |", "| 电气初稿确认 → 开始编程 | -1 |", "超出范围"),
 ])
 def test_c05_a_broken_spec_is_refused_with_the_reason(tmp_path: Path, old: str, new: str, message: str) -> None:
     with pytest.raises(cp.CycleSpecError, match=message):

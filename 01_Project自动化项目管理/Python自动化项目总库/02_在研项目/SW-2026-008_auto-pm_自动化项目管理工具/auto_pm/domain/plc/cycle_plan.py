@@ -56,11 +56,16 @@ def _tables(lines: list[str]) -> list[tuple[list[str], list[list[str]]]]:
     return tables
 
 
-def _number(text: str, where: str) -> float:
+def _number(text: str, where: str, *, positive: bool = False) -> float:
+    """Weeks and gaps must be finite and >= 0; a scale factor (``positive``) must be finite and > 0."""
+
     try:
-        return float(text)
+        value = float(text)
     except ValueError:
         raise CycleSpecError(f"{where}：“{text}”不是数字") from None
+    if not math.isfinite(value) or value < 0 or (positive and value == 0):
+        raise CycleSpecError(f"{where}：“{text}”超出范围（{'须大于 0' if positive else '须为不小于 0 的有限数'}）")
+    return value
 
 
 def find_spec(start: str) -> str | None:
@@ -93,7 +98,7 @@ def read_spec(path: str) -> CycleSpec:
                     weeks[stage] = {c: _number(row[header.index(c)], f"工期表 {stage}·{c}") for c in columns}
         elif header[:1] == ["规模"] and "系数" in header:
             for row in rows:
-                scales[row[0]] = _number(row[header.index("系数")], f"规模表 {row[0]}")
+                scales[row[0]] = _number(row[header.index("系数")], f"规模表 {row[0]}", positive=True)
         elif header[:1] == ["衔接"]:
             for row in rows:
                 if row[0] == _GAP_ROW:
