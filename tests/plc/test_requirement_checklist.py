@@ -13,7 +13,7 @@ import pytest
 
 _WS_ROOT = Path(__file__).resolve().parents[2]
 _TPL_DIR = _WS_ROOT / "0100_PLC自动化" / "00_通用规范" / "项目文档模板"
-TEMPLATE = _TPL_DIR / "11_需求核对单模板.md"
+TEMPLATE = _TPL_DIR / "12_需求核对单模板.md"
 SAMPLE = _TPL_DIR / "样例" / "REQ-DJ-2026-011-2026_10_000_报警汇总与复位熄灭.md"
 
 SECTIONS = (
