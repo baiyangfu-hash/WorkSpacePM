@@ -11,6 +11,8 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from auto_pm.application.core.ai_handoff_service import ENTRY_SKILL
+
 log = logging.getLogger(__name__)
 
 
@@ -48,7 +50,7 @@ def write_ai_context(
         target_skill = "fullstack-engineer"
     else:
         intent = "project_followup"
-        target_skill = "pm-workflow"
+        target_skill = ENTRY_SKILL
 
     session_ref = f"PM_SESSION_{project_id}.md" if project_id else ""
     context = {

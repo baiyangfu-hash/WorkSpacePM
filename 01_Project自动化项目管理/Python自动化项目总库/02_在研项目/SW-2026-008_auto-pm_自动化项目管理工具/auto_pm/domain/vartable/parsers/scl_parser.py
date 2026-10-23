@@ -43,9 +43,9 @@ _SCOPE_MAP = {
     "VAR_CONSTANT": "VAR_CONSTANT",
 }
 
-# VAR 块开始/结束标记
+# VAR 块开始/结束标记（Siemens 写法 "VAR CONSTANT" 带空格，与 VAR_CONSTANT 同归常量类）
 _VAR_BLOCK_RE = re.compile(
-    r"^\s*(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR_CONSTANT|VAR)\b",
+    r"^\s*(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR_CONSTANT|VAR\s+CONSTANT|VAR)\b",
     re.IGNORECASE,
 )
 _END_VAR_RE = re.compile(r"^\s*END_VAR\b", re.IGNORECASE)
@@ -139,7 +139,7 @@ class SclParser(BaseParser):
             if not in_var_block:
                 match = _VAR_BLOCK_RE.match(line)
                 if match:
-                    scope_key = match.group(1).upper()
+                    scope_key = re.sub(r"\s+", "_", match.group(1).upper())
                     current_scope = _SCOPE_MAP.get(scope_key, scope_key)
                     in_var_block = True
                     var_block_count += 1

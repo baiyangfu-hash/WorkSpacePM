@@ -1210,63 +1210,6 @@ class ContinuityStore:
             raise ContinuityStoreError("Continuity Store 严格只读临时根必须位于 workspace 外")
         return resolved
 
-    @staticmethod
-    @contextmanager
-    def _source_read_locks(db_path: Path) -> Iterator[None]:
-        """Deny source DB/WAL/journal writes during a Windows snapshot capture."""
-
-        if os.name != "nt":
-            yield
-            return
-        import ctypes
-        from ctypes import wintypes
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        create_file = kernel32.CreateFileW
-        create_file.argtypes = (
-            wintypes.LPCWSTR,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.LPVOID,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.HANDLE,
-        )
-        create_file.restype = wintypes.HANDLE
-        close_handle = kernel32.CloseHandle
-        close_handle.argtypes = (wintypes.HANDLE,)
-        close_handle.restype = wintypes.BOOL
-        generic_read = 0x80000000
-        share_read = 0x00000001
-        open_existing = 3
-        normal_attribute = 0x00000080
-        invalid_handle = ctypes.c_void_p(-1).value
-        handles: list[int] = []
-        try:
-            for path in (
-                db_path,
-                Path(f"{db_path}-wal"),
-                Path(f"{db_path}-journal"),
-            ):
-                if not path.exists():
-                    continue
-                handle = create_file(
-                    str(path),
-                    generic_read,
-                    share_read,
-                    None,
-                    open_existing,
-                    normal_attribute,
-                    None,
-                )
-                if handle == invalid_handle:
-                    raise _ReadSnapshotDriftError(f"sharing violation: {path.name}")
-                handles.append(int(handle))
-            yield
-        finally:
-            for handle in reversed(handles):
-                close_handle(handle)
-
     def _stable_read_snapshot(
         self,
         db_path: Path,
@@ -1293,35 +1236,37 @@ class ContinuityStore:
                 # Revalidate every acquisition attempt so a late reparse swap fails closed.
                 if self._validated_db_path() != db_path:
                     raise ContinuityStoreError("Continuity Store path 在读取期间发生漂移")
-                # Detect a hot journal before attempting Windows share-deny handles.
-                self._source_inventory(db_path)
-                with self._source_read_locks(db_path):
-                    before = self._source_inventory(db_path)
-                    source_paths = (db_path, Path(f"{db_path}-wal"))
-                    snapshot_paths = (snapshot_path, Path(f"{snapshot_path}-wal"))
-                    for source, target, fact in zip(
-                        source_paths,
-                        snapshot_paths,
-                        before[:2],
-                        strict=True,
-                    ):
-                        if fact[0]:
-                            try:
-                                shutil.copyfile(source, target)
-                            except FileNotFoundError as error:
-                                raise _ReadSnapshotDriftError(source.name) from error
-                    copied = tuple(
-                        self._file_inventory(path, required=fact[0])
-                        if fact[0]
-                        else self._file_inventory(path, required=False)
-                        for path, fact in zip(snapshot_paths, before[:2], strict=True)
-                    )
-                    after = self._source_inventory(db_path)
-                    if before != after or any(
-                        self._content_inventory(copied_fact) != self._content_inventory(source_fact)
-                        for copied_fact, source_fact in zip(copied, before[:2], strict=True)
-                    ):
-                        raise _ReadSnapshotDriftError("source changed during snapshot")
+                # No share-deny handles on the source: SQLite opens it with FILE_SHARE_READ|WRITE, so a
+                # GENERIC_READ+FILE_SHARE_READ handle always fails while the cockpit holds it open (BUSY
+                # every time) and, the other way round, turns a writer's open read-only. The before/after
+                # inventories and content hashes below already reject any write that lands mid-copy.
+                before = self._source_inventory(db_path)
+                source_paths = (db_path, Path(f"{db_path}-wal"))
+                snapshot_paths = (snapshot_path, Path(f"{snapshot_path}-wal"))
+                for source, target, fact in zip(
+                    source_paths,
+                    snapshot_paths,
+                    before[:2],
+                    strict=True,
+                ):
+                    if fact[0]:
+                        try:
+                            shutil.copyfile(source, target)
+                        except (FileNotFoundError, PermissionError) as error:
+                            # Windows: a writer momentarily holding the file counts as drift, not a failure
+                            raise _ReadSnapshotDriftError(source.name) from error
+                copied = tuple(
+                    self._file_inventory(path, required=fact[0])
+                    if fact[0]
+                    else self._file_inventory(path, required=False)
+                    for path, fact in zip(snapshot_paths, before[:2], strict=True)
+                )
+                after = self._source_inventory(db_path)
+                if before != after or any(
+                    self._content_inventory(copied_fact) != self._content_inventory(source_fact)
+                    for copied_fact, source_fact in zip(copied, before[:2], strict=True)
+                ):
+                    raise _ReadSnapshotDriftError("source changed during snapshot")
                 return temporary, snapshot_path
             except _ReadSnapshotDriftError as error:
                 temporary.cleanup()

@@ -15,3 +15,11 @@
 - 未部署任何 release（`releases/` 为空，双指针为 null）。
 - 未切换运行入口：工作区根 `main.py`、`双击启动驾驶舱.bat`、`.venv` 均未改动；当前运行代码仍是本目录平铺源码，直到 NG-WP-13/15 完成入口解耦与首个正式发布。
 - 母体源码真源：`01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具`（`auto_pm/application/core/deployment_service.py`）。
+
+## 回退与 Python 缓存（2026-10-22）
+
+- active 校验不过、previous 校验通过时仍会改用 previous 启动，但会在标准错误打一段“警告：……已改用上一版本……原因：……”，不再只在标准输出写一行 `verified via previous_release.json`。
+- active 里多出的只是 `__pycache__`（目录里全是 `*.pyc`）时**不回退**，直接以退出码 4 停下，并给出清除命令：
+  `python -B 00_Infrastructure/auto_pm/launcher/launch.py --purge-bytecode`
+  该命令只删 active / previous 发布目录里未登记的 `__pycache__`，删前确认载荷其余部分与 manifest 逐字节一致（载荷损坏时一个文件都不删），删完重新校验并打印结果，不启动驾驶舱。
+- 缓存的来源：有人在发布目录里不带 `-B` 运行过 Python（例如临时脚本 import 了发布目录的代码）。启动器自己的子进程始终 `-B -I` 且设 `PYTHONDONTWRITEBYTECODE=1`。
