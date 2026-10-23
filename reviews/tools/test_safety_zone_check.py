@@ -619,3 +619,15 @@ def test_d06_cli_missing_decision_is_an_error_not_a_pass(repo: Path, tmp_path: P
     base, head = commit(repo, {DOC: "改了说明\n"})
     args = ["--base", base, "--head", head, "--repo", str(repo), "--decision", DEC, "--control-root", str(tmp_path)]
     assert gate.main(args) == 2
+
+
+def test_w01_the_workflow_judges_with_the_base_branch_as_it_is_now_not_a_stale_base_sha() -> None:
+    # same fault as pr-gate (#69): base.sha only moves when the head is pushed, so it can name an old main and an old judge
+    yaml = pytest.importorskip("yaml")
+    workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "safety-gate.yml"
+    steps = yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]["safety"]["steps"]
+    checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"]["ref"] == "${{ steps.pr.outputs.base_ref }}"
+    assert all("base.sha" not in str(step) and "base_sha" not in str(step) for step in steps)
+    check = next(s.get("run", "") for s in steps if "safety_zone_check.py" in s.get("run", ""))
+    assert '--base "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"' in check
