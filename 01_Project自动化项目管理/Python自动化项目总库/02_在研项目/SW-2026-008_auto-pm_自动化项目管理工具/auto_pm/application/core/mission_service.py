@@ -324,13 +324,28 @@ class MissionService:
         new_state: MissionState,
         root_work_id: str | None,
         idempotency_key: str,
+        acceptance_evidence: str = "",
     ) -> Mission:
+        """Apply one legal transition.
+
+        ACCEPTED is the user's final acceptance: it needs ``acceptance_evidence``, which only the Facade's ``accept``
+        supplies after its quality gate and the user's approval PIN.  A generic transition (``continuity mission
+        transition --to ACCEPTED``) is refused, so the PIN cannot be walked around (audit 72, high-3).
+        """
         try:
             current = self._store.get_mission(mission_id)
             instant = self._instant()
+            if new_state is MissionState.CLOSED:
+                raise MissionServiceError(
+                    "Mission 只能由收口关闭（界面确认验收 / pm close），不能直接流转到 CLOSED"
+                )
             if new_state not in _TRANSITIONS[current.state]:
                 raise MissionServiceError(
                     f"Mission 不允许从 {current.state.value} 流转到 {new_state.value}"
+                )
+            if new_state is MissionState.ACCEPTED and not acceptance_evidence.strip():
+                raise MissionServiceError(
+                    "最终验收只能由用户通过 pm accept（或驾驶舱“确认验收”）记录，不能直接推 Mission 状态"
                 )
             if new_state is MissionState.PARKED or (
                 current.state is MissionState.PARKED and new_state is MissionState.ACTIVE

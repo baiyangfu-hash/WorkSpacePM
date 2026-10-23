@@ -454,3 +454,53 @@ def test_words_that_are_not_the_users_own_are_refused_before_any_write(sw: Switc
         with pytest.raises(MissionSwitchError, match="请让用户说一句"):
             call()
     assert sw.store.get_mission("MISSION-A").state is MissionState.PARKED
+
+
+# ------------------------------------------------------------------ gap 9: the user's words are the PIN once it is committed
+PIN = "relay-K1-on"
+
+
+@pytest.fixture
+def committed_pin(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """A committed verifier.  Reading it from Git HEAD is covered in test_approval_proof_service.py; a real commit here
+    would move HEAD under the scene's live Runs."""
+
+    from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
+
+    key = make_key("baiyang", PIN, n=2**10)
+    return lambda: monkeypatch.setattr(ApprovalProofService, "committed_state", lambda self: ([key], ""))
+
+
+def test_with_a_committed_pin_an_agent_cannot_park_unpark_or_switch_in_the_users_name(sw: Switch, committed_pin: Any) -> None:
+    sw.b_in_hand()
+    committed_pin()
+    before = sw.snapshot()
+    with pytest.raises(MissionSwitchError, match="批准口令"):
+        sw.service.switch(
+            project_id=PROJECT, to_mission_id="MISSION-A", reason="r", summary="s", as_owner="agent-a",
+            approval_evidence_ref=APPROVAL,
+        )
+    with pytest.raises(MissionSwitchError, match="批准口令错误"):
+        sw.service.switch(
+            project_id=PROJECT, to_mission_id="MISSION-A", reason="r", summary="s", as_owner="agent-a",
+            approval_evidence_ref=APPROVAL, approval_pin="guessed-pin-1",
+        )
+    with pytest.raises(MissionSwitchError, match="批准口令"):
+        sw.service.park(mission_id="MISSION-B", reason="r", summary="s", approval_evidence_ref=APPROVAL)
+    with pytest.raises(MissionSwitchError, match="批准口令"):
+        sw.service.unpark(mission_id="MISSION-A", as_owner="agent-a", approval_evidence_ref=APPROVAL)
+    assert sw.snapshot() == before
+    # The user's PIN switches, and the record names the key instead of a reference the agent typed.
+    outcome = sw.service.switch(
+        project_id=PROJECT, to_mission_id="MISSION-A", reason="急活做完一半", summary="IO 表改了一半",
+        as_owner="agent-a", approval_evidence_ref="", approval_pin=PIN,
+    )
+    assert outcome.started is not None and outcome.started.mission.mission_id == "MISSION-A"
+    with sqlite3.connect(sw.store.db_path) as connection:
+        dump = "\n".join(connection.iterdump())
+    assert "user-confirmation:pin-" in dump, "切换记录里应留下口令编号"
+
+
+def test_with_a_committed_pin_an_agent_alone_can_still_stop_its_card_into_waiting(sw: Switch, committed_pin: Any) -> None:
+    committed_pin()
+    assert sw.park_a(approval="").mission.state is MissionState.BLOCKED

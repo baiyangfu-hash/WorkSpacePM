@@ -24,6 +24,7 @@ from pathlib import Path
 
 from auto_pm.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
 
+from auto_pm.application.core.approval_proof_service import ApprovalProofError, ApprovalProofService
 from auto_pm.contracts.continuity import RunItem, RunState
 from auto_pm.contracts.mission import (
     Mission,
@@ -122,9 +123,36 @@ class MissionSwitchService:
         summary: str,
         approval_evidence_ref: str = "",
         lease_token: str | None = None,
+        approval_pin: str = "",
     ) -> ParkOutcome:
-        """Put the card down with a checkpoint: into "搁着" with the user's words, else into "等你"."""
+        """Put the card down with a checkpoint: into "搁着" with the user's words, else into "等你".
 
+        With a committed approver PIN (gap 9) the user's words are the PIN: an agent alone can only put a card into "等你".
+        """
+
+        if approval_evidence_ref.strip() or approval_pin:
+            approval_evidence_ref = self._user_evidence(approval_pin, approval_evidence_ref, "park", mission_id)
+        return self._park(
+            mission_id=mission_id,
+            reason=reason,
+            summary=summary,
+            approval_evidence_ref=approval_evidence_ref,
+            lease_token=lease_token,
+        )
+
+    def _user_evidence(self, approval_pin: str, approval_evidence_ref: str, purpose: str, subject: str) -> str:
+        """The user's words as recorded: the caller's reference under the old check, the PIN reference once committed."""
+
+        try:
+            return ApprovalProofService(self._root).resolve(
+                pin=approval_pin, approver="", evidence_ref=approval_evidence_ref, purpose=purpose, subject=subject
+            )[1]
+        except ApprovalProofError as error:
+            raise MissionSwitchError(str(error)) from error
+
+    def _park(
+        self, *, mission_id: str, reason: str, summary: str, approval_evidence_ref: str, lease_token: str | None
+    ) -> ParkOutcome:
         if not reason.strip() or not summary.strip():
             raise MissionSwitchError("搁着原因和断点摘要（干到哪了、下一步做什么）都不能为空")
         _require_user_words(approval_evidence_ref, optional=True)
@@ -174,9 +202,28 @@ class MissionSwitchService:
         approval_evidence_ref: str,
         lease_seconds: int = 900,
         holder_pid: int | None = None,
+        approval_pin: str = "",
     ) -> UnparkOutcome:
-        """Pick a card back up for ``as_owner``; refused without the user's words or when the worktree moved."""
+        """Pick a card back up for ``as_owner``; refused without the user's words (the PIN once committed) or when the worktree moved."""
 
+        approval_evidence_ref = self._user_evidence(approval_pin, approval_evidence_ref, "unpark", mission_id)
+        return self._unpark(
+            mission_id=mission_id,
+            as_owner=as_owner,
+            approval_evidence_ref=approval_evidence_ref,
+            lease_seconds=lease_seconds,
+            holder_pid=holder_pid,
+        )
+
+    def _unpark(
+        self,
+        *,
+        mission_id: str,
+        as_owner: str,
+        approval_evidence_ref: str,
+        lease_seconds: int,
+        holder_pid: int | None,
+    ) -> UnparkOutcome:
         if not approval_evidence_ref.strip():
             raise MissionSwitchError("拿回哪张卡只听用户的；" + NO_APPROVAL_HINT)
         _require_user_words(approval_evidence_ref)
@@ -246,6 +293,7 @@ class MissionSwitchService:
         approval_evidence_ref: str,
         lease_seconds: int = 900,
         holder_pid: int | None = None,
+        approval_pin: str = "",
     ) -> SwitchOutcome:
         """Park the card in hand and pick ``to_mission_id`` up; without ``--to`` only recommend.
 
@@ -262,6 +310,8 @@ class MissionSwitchService:
                 else "没有搁着的卡"
             )
             return SwitchOutcome(None, None, latest_parked, "", note)
+        # One PIN for the whole switch: it covers parking the card in hand and picking the target up.
+        approval_evidence_ref = self._user_evidence(approval_pin, approval_evidence_ref, "switch", to_mission_id)
         if not approval_evidence_ref.strip():
             raise MissionSwitchError("切换只听用户的；" + NO_APPROVAL_HINT)
         _require_user_words(approval_evidence_ref)
@@ -284,11 +334,12 @@ class MissionSwitchService:
         parked: ParkOutcome | None = None
         if board.active:
             current = board.active[0]
-            parked = self.park(
+            parked = self._park(
                 mission_id=current.mission_id,
                 reason=reason,
                 summary=summary,
                 approval_evidence_ref=approval_evidence_ref,
+                lease_token=None,
             )
         prefix = f"{parked.mission.mission_id} 已搁着，" if parked else ""
         if target_park is None:
@@ -300,7 +351,7 @@ class MissionSwitchService:
                 prefix + f"{to_mission_id} 还没开工；用 next_command 开工",
             )
         try:
-            started = self.unpark(
+            started = self._unpark(
                 mission_id=to_mission_id,
                 as_owner=as_owner,
                 approval_evidence_ref=approval_evidence_ref,

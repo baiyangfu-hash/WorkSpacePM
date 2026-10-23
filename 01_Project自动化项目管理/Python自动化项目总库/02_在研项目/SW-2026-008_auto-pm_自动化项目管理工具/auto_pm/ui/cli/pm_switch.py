@@ -25,8 +25,16 @@ from auto_pm.core.mission_switch_service import (
 from auto_pm.core.work_registry_service import WorkRegistryService
 from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.ui.cli.approval_pin import read_approval_pin
 from auto_pm.ui.cli.continuity import _secret_from_environment
 from auto_pm.ui.cli.pm_handoff import _holder_pid
+
+
+def _root(ctx: click.Context) -> str:
+    """The root MissionSwitchService writes to; the approval PIN is looked up in the same root."""
+
+    app_ctx: AppContext = ctx.find_root().obj
+    return str(app_ctx.control_root)
 
 
 def _service(ctx: click.Context, *, mutating: bool) -> MissionSwitchService:
@@ -158,6 +166,10 @@ def park_pm(
 
     service = _service(ctx, mutating=True)
     token = _secret_from_environment(lease_token_env) if lease_token_env is not None else None
+    # Into "搁着" is the user's call: with a committed approver PIN the user types it here (gap 9).
+    approval_pin = (
+        read_approval_pin(_root(ctx), summary=f"把 {mission_id} 放进“搁着”（{reason}）") if approval_evidence_ref.strip() else ""
+    )
     try:
         outcome = service.park(
             mission_id=mission_id,
@@ -165,6 +177,7 @@ def park_pm(
             summary=summary,
             approval_evidence_ref=approval_evidence_ref,
             lease_token=token,
+            approval_pin=approval_pin,
         )
     except MissionSwitchError as error:
         raise click.ClickException(str(error)) from error
@@ -181,7 +194,7 @@ def park_pm(
 @click.command(name="unpark")
 @click.option("--mission-id", required=True)
 @click.option("--as", "as_owner", required=True, help="拿回来接着干的 agent 身份，可以不是放下它的那个")
-@click.option("--approval-evidence-ref", required=True, help="用户原话所在的位置（拿回哪张只听用户的）")
+@click.option("--approval-evidence-ref", default="", help="用户原话所在的位置（拿回哪张只听用户的；已启用批准口令时由口令代替）")
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
 @click.option("--holder-pid", default="auto", show_default=True, help="记录你的长驻进程：auto、none 或 pid")
 @click.pass_context
@@ -191,6 +204,7 @@ def unpark_pm(
     """凭断点把搁着的卡拿回来：先核对工作树没被动过，再发新钥匙（存本机钱包，不显示）。"""
 
     service = _service(ctx, mutating=True)
+    approval_pin = read_approval_pin(_root(ctx), summary=f"拿回 {mission_id}，交给 {as_owner} 接着干")
     try:
         outcome = service.unpark(
             mission_id=mission_id,
@@ -198,6 +212,7 @@ def unpark_pm(
             approval_evidence_ref=approval_evidence_ref,
             lease_seconds=lease_seconds,
             holder_pid=_holder_pid(holder_pid),
+            approval_pin=approval_pin,
         )
     except MissionSwitchError as error:
         raise click.ClickException(str(error)) from error
@@ -228,6 +243,9 @@ def switch_pm(
     """插急活一步完成：把在干的卡搁着，再把目标卡拿起来；第二步失败时第一张稳稳停在“搁着”。"""
 
     service = _service(ctx, mutating=bool(to_mission_id))
+    approval_pin = (
+        read_approval_pin(_root(ctx), summary=f"插急活：把手上的卡搁着，改干 {to_mission_id}") if to_mission_id else ""
+    )
     try:
         outcome = service.switch(
             project_id=project_id,
@@ -238,6 +256,7 @@ def switch_pm(
             approval_evidence_ref=approval_evidence_ref,
             lease_seconds=lease_seconds,
             holder_pid=_holder_pid(holder_pid) if to_mission_id else None,
+            approval_pin=approval_pin,
         )
     except MissionSwitchError as error:
         raise click.ClickException(str(error)) from error

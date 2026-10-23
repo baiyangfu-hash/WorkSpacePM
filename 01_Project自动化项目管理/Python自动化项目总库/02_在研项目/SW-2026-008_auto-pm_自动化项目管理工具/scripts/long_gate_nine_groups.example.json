@@ -1,0 +1,316 @@
+{
+  "_comment": [
+    "Template: the nine regression groups (ten outputs) exactly as run_g2.sh, then the three r09 reruns, as rel1_gates_all.sh.",
+    "Copy into the card's evidence folder, replace <card>, and add the card's own stages before (baseline, install, fast; stop_on_fail true) and after (judge; stop_on_fail true).",
+    "Group steps have stop_on_fail false: a failed group is a result for the judge, exactly as in run_g2.sh.",
+    "ALL_DONE_marker writes gates/g2_candidate/ALL_DONE_marker.txt; run_g2.sh's ALL_DONE file is written by markers.done below.",
+    "lease.token_file is read by the runner only and passed to `continuity lease renew` through an environment variable; it never reaches a group.",
+    "step_timeout_s: a hung group is killed and recorded as exit 124 (a failed group); round_timeout_s: the whole round, a final ROUND_TIMEOUT."
+  ],
+  "name": "card-<card>",
+  "root": "C:\\Users\\fubai\\Documents\\My_Workspace",
+  "python": "C:\\Users\\fubai\\Documents\\My_Workspace\\.venv\\Scripts\\python.exe",
+  "out_dir": "{root}\\.auto-pm\\reports\\<card>",
+  "env": {
+    "PYTHONIOENCODING": "utf-8",
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "QT_QPA_PLATFORM": "offscreen",
+    "PATH": "C:\\Program Files\\Git\\usr\\bin;C:\\Program Files\\Git\\mingw64\\bin;{PATH}"
+  },
+  "lease": {
+    "mode": "auto_pm",
+    "run_id": "RUN-SW008-<card>-001",
+    "owner": "<owner>",
+    "token_file": "{root}\\.auto-pm\\reports\\<card>\\lease_token.txt",
+    "lease_seconds": 3600,
+    "renew_interval_s": 1200
+  },
+  "fingerprint": {
+    "git_worktree": "{root}\\.auto-pm\\worktrees\\<card>"
+  },
+  "step_timeout_s": 14400,
+  "round_timeout_s": 36000,
+  "markers": {
+    "done": {
+      "gates/g2_candidate/ALL_DONE": "done\n",
+      "gates/DONE": "done\n",
+      "gates_all.exit": "{exit}\n"
+    },
+    "failed": {
+      "gates/FAILED": "FAILED: see long_gate.log\n",
+      "gates_all.exit": "{exit}\n"
+    }
+  },
+  "steps": [
+    {
+      "name": "rest",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/db",
+        "tests/delivery",
+        "tests/doc",
+        "tests/domain",
+        "tests/models",
+        "tests/spec",
+        "tests/utils",
+        "tests/vartable",
+        "tests/constraint",
+        "tests/config",
+        "tests/logging",
+        "tests/modbus",
+        "tests/e2e",
+        "tests/ui",
+        "tests/test_bug1_get_project_path.py",
+        "tests/test_bug2_sync_changes.py",
+        "tests/test_bug4_retrofit_src_path.py",
+        "tests/test_bug5_scan_depth.py",
+        "tests/test_fixture_health.py",
+        "tests/test_import.py",
+        "tests/test_pm_session_size.py",
+        "tests/test_smoke.py",
+        "--ignore=tests/e2e/test_closure_drill.py",
+        "--ignore=tests/e2e/test_closure_drill_agent_misconduct.py",
+        "--ignore=tests/e2e/test_release_pycache_drill.py",
+        "--ignore=tests/e2e/test_trial_run_drill.py"
+      ]
+    },
+    {
+      "name": "application",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/application"
+      ]
+    },
+    {
+      "name": "plc",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/plc"
+      ]
+    },
+    {
+      "name": "change",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/change"
+      ]
+    },
+    {
+      "name": "contracts",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/contracts"
+      ]
+    },
+    {
+      "name": "infrastructure",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/infrastructure"
+      ]
+    },
+    {
+      "name": "qml_debounce_alone",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/qml/test_file_watcher_bridge.py::test_debounce_coalesces_events"
+      ]
+    },
+    {
+      "name": "cli",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/cli"
+      ]
+    },
+    {
+      "name": "qml",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/qml",
+        "--deselect",
+        "tests/qml/test_file_watcher_bridge.py::test_debounce_coalesces_events"
+      ]
+    },
+    {
+      "name": "core",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "tests/core"
+      ]
+    },
+    {
+      "name": "ALL_DONE_marker",
+      "dir": "gates/g2_candidate",
+      "write": "done\n"
+    },
+    {
+      "name": "transient_1",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "-q",
+        "tests/e2e/test_pmf_recovery.py::test_r09_a_reader_never_fails_because_another_process_has_a_transaction_open"
+      ]
+    },
+    {
+      "name": "transient_2",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "-q",
+        "tests/e2e/test_pmf_recovery.py::test_r09_a_reader_never_fails_because_another_process_has_a_transaction_open"
+      ]
+    },
+    {
+      "name": "transient_3",
+      "dir": "gates/g2_candidate",
+      "cwd": "{root}/.auto-pm/worktrees/<card>/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--no-cov",
+        "-p",
+        "no:cacheprovider",
+        "--color=no",
+        "-q",
+        "tests/e2e/test_pmf_recovery.py::test_r09_a_reader_never_fails_because_another_process_has_a_transaction_open"
+      ]
+    }
+  ]
+}

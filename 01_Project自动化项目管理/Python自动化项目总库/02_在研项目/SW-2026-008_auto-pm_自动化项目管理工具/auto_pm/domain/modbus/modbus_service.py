@@ -713,13 +713,24 @@ class ModbusService:
 
         cells: list[ScanCell] = []
         for offset in range(start_offset, end_offset + 1):
-            try:
-                resp = self._client.read_holding_registers(address=offset, count=1, device_id=self._slave_id)
-                is_active = not resp.isError()
-            except Exception:
-                is_active = False
-            cells.append(ScanCell(offset=offset, is_active=is_active))
+            cells.append(ScanCell(offset=offset, is_active=bool(self.probe_register(offset))))
         return cells
+
+    def probe_register(self, offset: int) -> bool | None:
+        """探测单个保持寄存器。
+
+        Returns:
+            True=设备应答且地址可读；False=设备应答了异常码（地址不可读）；
+            None=没有应答（超时、连接断开、未连接），扫描据此判断“设备不回话”。
+        """
+        client = self._client
+        if not self._connected or not client:
+            return None
+        try:
+            resp = client.read_holding_registers(address=offset, count=1, device_id=self._slave_id)
+        except Exception:
+            return None
+        return not resp.isError()
 
     # ── JSON 配置导入导出 ────────────────────────────────
 

@@ -25,8 +25,7 @@ import sys
 import tempfile
 import textwrap
 import time
-from collections.abc import Iterator
-from contextlib import closing, contextmanager
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -225,12 +224,6 @@ def _executor(tmp_path: Path, label: str, files: dict[str, str]) -> tuple[_Count
 
 
 # ------------------------------------------------------------------------------------------------ driving the real window
-class _HeldOff:
-    """Stands in for a snapshot worker that never finishes, so the bridge accepts no new snapshot request (the periodic one and the window's own refresh both get "busy")."""
-
-    done = False
-
-
 class _Window:
     def __init__(self, qapp: QApplication, engine: QQmlApplicationEngine, bridge: PmCockpitBridge, window: QObject) -> None:
         self.qapp, self.engine, self.bridge, self.window = qapp, engine, bridge, window
@@ -271,22 +264,6 @@ class _Window:
             return None
 
         return walk(self.item)
-
-    @contextmanager
-    def snapshots_held_off(self) -> Iterator[None]:
-        """Keep the snapshot reader away while something writes to the store.
-
-        A snapshot used to copy the database under share-deny locks (Windows, ``ContinuityStore._source_read_locks``); a SQLite write that started in that instant was opened
-        read-only and failed with "attempt to write a readonly database" (found by this very test, TD-SW008 ledger). The locks are gone now (the snapshot relies on before/after
-        hashes), but the serialisation stays: it keeps this scenario's screenshots deterministic and costs nothing.
-        """
-
-        self.pump(lambda: cast(Any, self.bridge)._snapshot_worker is None, 60, "no snapshot in flight")
-        cast(Any, self.bridge)._snapshot_worker = _HeldOff()
-        try:
-            yield
-        finally:
-            cast(Any, self.bridge)._snapshot_worker = None
 
     def refresh(self) -> None:
         QMetaObject.invokeMethod(self.window, "refreshSnapshot")
@@ -350,30 +327,27 @@ def _drive(
     win.named("planningObjective").setProperty("text", objective)
     win.named("planningAcceptance").setProperty("text", "\n".join(acceptance))
     win.shot(evidence, "1-goal-typed")
-    with win.snapshots_held_off():
-        win.click(win.named("savePlanningDraft"))
-        win.pump(lambda: win.window.property("planningDraft") is not None, 30, "the saved draft")
+    win.click(win.named("savePlanningDraft"))
+    win.pump(lambda: win.window.property("planningDraft") is not None, 30, "the saved draft")
     win.shot(evidence, "2-draft-saved")
 
     # 2. the PM turns the draft into a scope card (the production facade call); the window shows the pending approval
     draft = next(item.draft for item in facade.list_planning_drafts(project_id) if item.draft.objective == objective)
-    with win.snapshots_held_off():
-        submitted = facade.submit_planning_scope_card(
-            draft.request_id,
-            scope_paths=scope,
-            risks=("改错文件导致回归",),
-            non_goals=("no refactor", "no dependency change", "no hardware download"),
-            execution_grant=PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX, approved_model=MODEL, declared_dirty_paths=scope, plan_checklist=full_checklist(len(acceptance))),
-            submitted_by="PM (Claude)",
-        )
+    submitted = facade.submit_planning_scope_card(
+        draft.request_id,
+        scope_paths=scope,
+        risks=("改错文件导致回归",),
+        non_goals=("no refactor", "no dependency change", "no hardware download"),
+        execution_grant=PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX, approved_model=MODEL, declared_dirty_paths=scope, plan_checklist=full_checklist(len(acceptance))),
+        submitted_by="PM (Claude)",
+    )
     win.refresh()
     win.pump(lambda: bool(_items_named(win.item, "approveScopeButton")) and _items_named(win.item, "approveScopeButton")[0].property("enabled") is True, 60, "the approve button")
     win.shot(evidence, "3-pending-approval")
 
     # 3. the first business decision: one click approves the scope and starts the run (the real model works while the window stays alive)
-    with win.snapshots_held_off():
-        win.click(win.named("approveScopeButton"))
-        win.pump(lambda: bool(approvals), 2400 if REAL else 900, "the end of the run and its verification")
+    win.click(win.named("approveScopeButton"))
+    win.pump(lambda: bool(approvals), 2400 if REAL else 900, "the end of the run and its verification")
     win.refresh()
     win.shot(evidence, "4-after-run")
     return win, store, facade, draft.request_id, str(submitted.card.change_id), approvals
@@ -388,9 +362,8 @@ def _accept_and_close(win: _Window, store: ContinuityStore, mission_id: str) -> 
     win.pump(lambda: win.button_with_text("确认验收") is not None, 60, "the acceptance button")
     button = win.button_with_text("确认验收")
     assert button is not None
-    with win.snapshots_held_off():
-        win.click(button)
-        win.pump(lambda: bool(closures), 900, "the closure")
+    win.click(button)
+    win.pump(lambda: bool(closures), 900, "the closure")
     return closures
 
 
@@ -477,7 +450,7 @@ def test_a_python_goal_typed_into_the_window_reaches_the_final_acceptance_and_a_
     closures = _accept_and_close(win, store, mission_id)
     assert [(mid, ok) for mid, ok, _ in closures] == [(mission_id, True)]
     _assert_closed(store, mission_id, root, change_id)
-    assert (root / CALC).read_text(encoding="utf-8") != source  # the control root still holds the defect: the work happened in the isolated copy
+    assert (root / CALC).read_bytes() == (candidate / CALC).read_bytes()  # closure merged the accepted bytes back (gap 8)
     _finish(win, Path(EVIDENCE_ENV or tmp_path / "evidence") / PY_PROJECT_ID, root)
     _model_was_named(budget, counter, before_calls, 1)
 
@@ -505,7 +478,8 @@ def test_a_plc_goal_typed_into_the_window_reaches_the_final_acceptance_with_a_co
     closures = _accept_and_close(win, store, mission_id)
     assert [(mid, ok) for mid, ok, _ in closures] == [(mission_id, True)]
     _assert_closed(store, mission_id, root, change_id)
-    assert plc.git(root, "diff", "--name-only", "--", *plc.SCOPE) == ""  # the control root still holds the benchmark bytes
+    for path in plc.SCOPE:  # closure merged the accepted bytes back into the control root (gap 8), uncommitted
+        assert (root / path).read_bytes() == (candidate / path).read_bytes()
     _finish(win, Path(EVIDENCE_ENV or tmp_path / "evidence") / plc.PROJECT_ID, root)
     _model_was_named(budget, counter, before_calls, 1)
 

@@ -32,6 +32,7 @@ Item {
     // ── 连接状态 ──────────────────────────────────────────
     property bool _isConnected: false
     property int _subTabIndex: 0   // 0=监测 1=扫描
+    property bool _scanning: false  // 扫描进行中（控制“停止”按钮）
     // ── 网卡数据源 ─────────────────────────────────────────
     ListModel { id: nicModel }
 
@@ -100,8 +101,17 @@ Item {
         }
 
         function onScanFinished() {
+            root._scanning = false
             startScanBtn.enabled = true
             startScanBtn.text = "⚡ 重新探测"
+        }
+
+        // 扫描失败/被拒：恢复按钮，红框显示原因（不再永远停在“扫描中...”）
+        function onScanFailed(reason) {
+            root._scanning = false
+            startScanBtn.enabled = true
+            startScanBtn.text = "⚡ 重新探测"
+            scanErrorText.text = "扫描失败：" + reason
         }
 
         function onTrendDataUpdated(v1, v2) {
@@ -797,18 +807,56 @@ Item {
                                 }
                                 Button {
                                     id: startScanBtn
+                                    objectName: "startScanBtn"
                                     text: "⚡ 立即探测 (0-99)"
                                     font.pixelSize: Theme.fontSizeSm
                                     onClicked: {
                                         scannerGrid.resetAll()
+                                        scanErrorText.text = ""
                                         startScanBtn.enabled = false
                                         startScanBtn.text = "扫描中..."
                                         if (typeof modbusBridge !== "undefined" && modbusBridge !== null) {
+                                            root._scanning = true
                                             modbusBridge.scanRegisters(0, 99)
                                         } else {
                                             _simulateScan()
                                         }
                                     }
+                                }
+                                Button {
+                                    id: stopScanBtn
+                                    objectName: "stopScanBtn"
+                                    text: "⏹ 停止"
+                                    visible: root._scanning
+                                    font.pixelSize: Theme.fontSizeSm
+                                    onClicked: {
+                                        stopScanBtn.enabled = false
+                                        modbusBridge.stopScan()
+                                    }
+                                    onVisibleChanged: if (visible) stopScanBtn.enabled = true
+                                }
+                            }
+
+                            // 扫描失败原因红框（无错误时不占位）
+                            Rectangle {
+                                id: scanErrorBox
+                                objectName: "scanErrorBox"
+                                Layout.fillWidth: true
+                                visible: scanErrorText.text !== ""
+                                implicitHeight: scanErrorText.implicitHeight + Theme.spacingSm * 2
+                                radius: Theme.radiusSm
+                                color: Qt.rgba(0.94, 0.27, 0.27, 0.12)
+                                border.color: Theme.error
+                                border.width: 1
+                                Text {
+                                    id: scanErrorText
+                                    objectName: "scanErrorText"
+                                    anchors.fill: parent
+                                    anchors.margins: Theme.spacingSm
+                                    text: ""
+                                    color: Theme.error
+                                    font.pixelSize: Theme.fontSizeXs
+                                    wrapMode: Text.Wrap
                                 }
                             }
 

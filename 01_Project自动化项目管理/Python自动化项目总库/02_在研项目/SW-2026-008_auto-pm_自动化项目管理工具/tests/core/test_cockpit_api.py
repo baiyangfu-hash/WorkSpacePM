@@ -277,8 +277,9 @@ def test_full_real_flow_from_a_new_goal_to_a_closed_mission(real_flow: _RealFlow
     assert not [item for item in _PLACEHOLDERS if item in flow.change_text]
     assert any(line.startswith("| **验证结论**") for line in flow.change_text.splitlines())
     assert flow.ledger_clean is True
-    assert flow.source_calc_after == flow.source_calc_before
+    # Closure brings the accepted bytes of the isolated Run back into the control root (gap 8), uncommitted.
     assert flow.source_calc_before != FIXED_CALC
+    assert flow.source_calc_after == FIXED_CALC
 
 
 def test_replay_in_one_process_is_equal_and_starts_no_second_process(real_flow: _RealFlow) -> None:
@@ -392,8 +393,9 @@ def test_an_approval_that_is_not_a_real_human_confirmation_writes_nothing(tmp_pa
     assert after == decisions_before
     parameters = CockpitClient.approve_plan.__annotations__
     assert "approver" in parameters and "approval_evidence_ref" in parameters
-    # approver and evidence have no default; only the release may be left out (it then means "no release")
-    assert CockpitClient.approve_plan.__kwdefaults__ == {"admission_release_ref": ""}
+    # Approver and evidence have no default; the defaults are the release (empty means "no release") and the
+    # user's PIN (gap 9), empty unless the user typed it.
+    assert CockpitClient.approve_plan.__kwdefaults__ == {"admission_release_ref": "", "approval_pin": ""}
 
 
 def test_unknown_missions_and_projects_raise_only_the_sdk_error(tmp_path: Path) -> None:
@@ -463,4 +465,37 @@ def test_the_sdk_admits_a_colliding_card_only_with_the_users_release(tmp_path: P
     client.approve_plan(second, approver=APPROVER, approval_evidence_ref=EVIDENCE, admission_release_ref="user-confirmation:SDK-B-0001")
     with pytest.raises(CockpitApiError, match="要改同一批文件"):
         client.run(second)  # the Mission is created on run, and is admitted again there
+    assert len(ContinuityStore(workspace.root).list_missions(PROJECT_ID)) == 1
+
+
+def test_with_a_committed_pin_the_sdk_release_needs_the_users_pin_on_approve_and_on_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit 123 item 4: a release string an agent typed is not the user's word once an approver PIN is committed."""
+
+    from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
+
+    workspace = _workspace(tmp_path)
+    client = workspace.client()
+    first = _plan(client, "REQ-SDK-A")
+    client.approve_plan(first, approver=APPROVER, approval_evidence_ref=EVIDENCE)
+    PmFacadeService(workspace.root).materialize_planning_mission(first)
+    second = _plan(client, "REQ-SDK-B")
+    pin = "relay-K1-on-sdk"
+    key = make_key("baiyang", pin, n=2**10)
+    monkeypatch.setattr(ApprovalProofService, "committed_state", lambda self: ([key], ""))
+    release = "user-confirmation:SDK-B-0001"
+
+    with pytest.raises(CockpitApiError, match="批准口令"):
+        client.approve_plan(second, approver="", approval_evidence_ref="", admission_release_ref=release)
+    with pytest.raises(CockpitApiError, match="批准口令错误"):
+        client.approve_plan(
+            second, approver="", approval_evidence_ref="", admission_release_ref=release, approval_pin="guessed-pin-1"
+        )
+    client.approve_plan(
+        second, approver="", approval_evidence_ref="", admission_release_ref=release, approval_pin=pin
+    )
+    # run: a release without the PIN is refused before any Mission is written; with the PIN it is admitted
+    with pytest.raises(CockpitApiError, match="批准口令"):
+        client.run(second, admission_release_ref=release)
     assert len(ContinuityStore(workspace.root).list_missions(PROJECT_ID)) == 1
