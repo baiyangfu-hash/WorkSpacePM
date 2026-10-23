@@ -94,6 +94,31 @@ def test_an_agent_host_that_runs_each_command_in_a_fresh_shell_is_the_holder_not
     assert process_probe.holder_process_pid(900, TRAE_CN) == 600
 
 
+# Trae CN on the user's laptop, 2026-10-23 (PR #53 audit 98 §5, probe A): the pids and images as observed; trae-sandbox.exe (42116) was
+# gone as soon as A finished, so recording it made reclaim PROVEN_DEAD again; agent-tool-host.exe hangs off the resident utility process
+TRAE_CN_SANDBOXED = _ancestry(
+    (43680, "python.exe"),
+    (16152, "powershell.exe"),
+    (42116, "trae-sandbox.exe"),
+    (17968, "agent-tool-host.exe"),
+    (31476, "trae cn.exe"),
+    (17036, "trae cn.exe"),
+    (4000, "explorer.exe"),
+)
+
+
+def test_a_per_command_sandbox_is_skipped_and_the_resident_tool_host_is_the_holder() -> None:
+    assert process_probe.holder_process_pid(43680, TRAE_CN_SANDBOXED) == 17968
+
+
+def test_a_sandbox_is_never_the_fallback_holder_even_when_the_walk_stops_above_it() -> None:
+    # the walk cannot read past the sandbox: the shell below it is the best candidate, never the sandbox that dies with the command
+    cut_off = _ancestry((9, "python.exe"), (8, "powershell.exe"), (7, "trae-sandbox.exe"), (6, ""))
+    assert process_probe.holder_process_pid(9, cut_off) == 8
+    reaches_root = _ancestry((9, "python.exe"), (8, "powershell.exe"), (7, "trae-sandbox.exe"), (5, "explorer.exe"))
+    assert process_probe.holder_process_pid(9, reaches_root) == 8
+
+
 def test_nested_shells_and_versioned_interpreters_are_all_skipped() -> None:
     claude_code = _ancestry(
         (90, "python3.12"), (80, "python3"), (70, "bash"), (60, "timeout"), (50, "bash"), (40, "claude"), (1, "systemd")
