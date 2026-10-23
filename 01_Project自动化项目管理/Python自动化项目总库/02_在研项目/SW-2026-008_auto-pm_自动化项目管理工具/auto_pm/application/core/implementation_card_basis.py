@@ -389,6 +389,21 @@ def cards_for_change(drawer: Path, change_id: str) -> list[SiblingCard]:
     return cards
 
 
+def unreadable_cards(drawer: Path) -> list[Path]:
+    """Cards in the drawer that are not UTF-8 text: their change order cannot be read, so they may be siblings."""
+    unreadable: list[Path] = []
+    if not drawer.is_dir():
+        return unreadable
+    for path in sorted(drawer.glob("*.md")):
+        if path.name.casefold() == "readme.md" or not path.is_file():
+            continue
+        try:
+            path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            unreadable.append(path)
+    return unreadable
+
+
 def paths_overlap(left: Iterable[str], right: Iterable[str]) -> list[str]:
     right_paths = list(right)
     shared: set[str] = set()

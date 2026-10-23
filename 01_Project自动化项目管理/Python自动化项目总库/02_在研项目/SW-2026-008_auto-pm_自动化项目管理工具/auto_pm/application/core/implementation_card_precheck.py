@@ -463,10 +463,31 @@ def _sibling_findings(
         return []
     own_id = basis.card_id_of(card_file)
     findings: list[PrecheckFinding] = []
-    for sibling in basis.cards_for_change(card_file.resolve().parent, change_id):
+    drawer = card_file.resolve().parent
+    for unreadable in basis.unreadable_cards(drawer):
+        if unreadable.resolve() != card_file.resolve():
+            findings.append(
+                PrecheckFinding(
+                    "change",
+                    unreadable.name,
+                    "同一抽屉里的这张卡不是 UTF-8 文本，读不出它挂哪张变更单、改哪些文件；先转成 UTF-8",
+                )
+            )
+    for sibling in basis.cards_for_change(drawer, change_id):
         if sibling.card_file.resolve() == card_file.resolve() or not sibling.open:
             continue
-        if own_id in sibling.header.predecessors:
+        names_me = own_id in sibling.header.predecessors
+        named_by_me = sibling.card_id in header.predecessors
+        if names_me and named_by_me:
+            findings.append(
+                PrecheckFinding(
+                    "change",
+                    sibling.card_id,
+                    f"本卡和 {sibling.card_id} 互为前置卡，先后没有排定；只在后做的那张卡写 `前置卡：`",
+                )
+            )
+            continue
+        if names_me:
             continue  # this card goes first; the sibling waits for it
         lines = sibling.card_file.read_text(encoding="utf-8").splitlines()
         declared = _machine_header(lines)["路径根"]

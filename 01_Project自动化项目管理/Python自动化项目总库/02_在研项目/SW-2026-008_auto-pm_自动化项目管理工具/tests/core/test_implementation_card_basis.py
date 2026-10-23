@@ -264,6 +264,32 @@ def test_a_sibling_card_whose_path_table_cannot_be_read_is_refused_not_ignored(t
     assert "路径表读不全" in _messages(_check(tmp_path, mine))
 
 
+def test_two_cards_that_name_each_other_as_predecessor_are_refused(tmp_path: Path) -> None:
+    """Audit 122: mutual 前置卡 fixes no order, so neither card may skip the overlap check."""
+    baseline = _workspace(tmp_path)
+    change = "`CHG-PLC-2099-001`"
+    first = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, change=change,
+                  extra="> 前置卡：`CARD-DJ-2099-001-002`")
+    second = _card(tmp_path, "CARD-DJ-2099-001-002", baseline=baseline, change=change,
+                   extra="> 前置卡：`CARD-DJ-2099-001-001`")
+    for card in (first, second):
+        assert "互为前置卡" in _messages(_check(tmp_path, card))
+    # positive control: one direction only lets the earlier card go ahead
+    _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, change=change)
+    assert _check(tmp_path, first).passed, _messages(_check(tmp_path, first))
+
+
+def test_a_card_in_the_drawer_that_is_not_utf8_is_refused_not_ignored(tmp_path: Path) -> None:
+    """Audit 122: a GBK card cannot be read for its change order or paths, so it may be an overlapping sibling."""
+    baseline = _workspace(tmp_path)
+    mine = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, change="`CHG-PLC-2099-001`")
+    assert _check(tmp_path, mine).passed, _messages(_check(tmp_path, mine))  # positive control
+    (tmp_path / DRAWER / "CARD-DJ-2099-001-002_测试.md").write_bytes(
+        "> 变更单：`CHG-PLC-2099-001`\n| 1 | `02_PLC程序/OB1.scl` | 存在 |\n".encode("gbk")
+    )
+    assert "不是 UTF-8" in _messages(_check(tmp_path, mine))
+
+
 def test_an_ancestor_directory_of_a_guarded_file_needs_a_change_order(tmp_path: Path) -> None:
     """Codex on #60: a path table that names a parent directory still touches what it contains."""
     baseline = _workspace(tmp_path)
