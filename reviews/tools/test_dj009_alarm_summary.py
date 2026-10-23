@@ -400,3 +400,40 @@ def test_mutation_or_codes_mixes(tmp_path):
     a.safety = 0b11
     a.scan()
     assert a.o("o_iCurrentAlarmCode") == 3
+
+
+def _assert_estop_alarm_holds(a: Alarm, scans: int) -> None:
+    for _ in range(scans):
+        a.scan()
+        assert a.o("o_iCurrentAlarmCode") == 1
+        assert a.o("o_iActiveAlarmCount") >= 1
+        assert a.o("o_bSafetyAlarmActive")
+
+
+def test_safety_alarm_holds_while_cause_present_even_through_reset():
+    """审计 120 缺口：安全位一直在时，码和条数每个扫描都在，按复位也不消失（不能只看类别位）。"""
+    a = Alarm()
+    a.safety = 0b1                                  # 急停（码 1）
+    _assert_estop_alarm_holds(a, 20)
+    a.reset = True                                  # 原因还在时按复位
+    _assert_estop_alarm_holds(a, 3)
+    a.reset = False
+    _assert_estop_alarm_holds(a, 20)
+    a.safety = 0
+    a.scan()
+    assert a.o("o_iCurrentAlarmCode") == 0 and a.o("o_iActiveAlarmCount") == 0
+
+
+def test_mutation_active_only_on_new_scan_is_caught(tmp_path):
+    """把安全位的“当前有效”改成“只在新出现那一扫描有效”（报警一扫描后自己消失），上一条应抓到。"""
+    src = _mutate(
+        "        t_bActive := (s_dwSafetyAlarm AND SHL(DWORD#1, t_i)) <> 0;",
+        "        t_bActive := (s_dwSafetyNew AND SHL(DWORD#1, t_i)) <> 0;",
+    )
+    a = Alarm(src, tmp_path)
+    a.safety = 0b1
+    a.scan()
+    a.scan()
+    assert a.o("o_iCurrentAlarmCode") != 1          # 改坏了 → 第二个扫描码就没了
+    with pytest.raises(AssertionError):
+        _assert_estop_alarm_holds(a, 3)
