@@ -6,7 +6,9 @@ helper clone that plays "the PR got merged on GitHub".
 
 from __future__ import annotations
 
+import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -15,10 +17,12 @@ from click.testing import CliRunner
 from auto_pm.application.core.agent_worktree_service import (
     AgentWorktreeError,
     AgentWorktreeService,
+    Station,
     StationRefusedError,
 )
 from auto_pm.ui.cli.__main__ import cli
 
+AGENT_MARKER_KEYS = ("AUTO_PM_AGENT", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
 IDENTITY = ("-c", "user.name=Station Test", "-c", "user.email=station@example.invalid")
 
 
@@ -90,7 +94,10 @@ class Lab:
 
 @pytest.fixture
 def lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Lab:
-    monkeypatch.delenv("AUTO_PM_AGENT", raising=False)
+    # The suite itself may run inside an agent session; every test starts as the user's own terminal.
+    for key in list(os.environ):
+        if key in AGENT_MARKER_KEYS or key.upper().startswith("CODEX_"):
+            monkeypatch.delenv(key, raising=False)
     return Lab(tmp_path)
 
 
@@ -475,3 +482,163 @@ def test_locked_or_detached_stations_are_left_alone(lab: Lab) -> None:
     assert "detached" in reasons[str(detached)]
     with pytest.raises(StationRefusedError, match="detached"):
         lab.service().close("trae")
+
+
+def test_open_refuses_a_stations_directory_that_points_outside(lab: Lab, tmp_path: Path) -> None:
+    elsewhere = tmp_path.resolve() / "elsewhere"
+    elsewhere.mkdir()
+    (lab.root / ".auto-pm").mkdir()
+    try:
+        os.symlink(elsewhere, lab.root / ".auto-pm" / "worktrees", target_is_directory=True)
+    except OSError:
+        pytest.skip("this machine cannot create directory symlinks")
+
+    with pytest.raises(AgentWorktreeError, match="symlink"):
+        lab.service().open("claude", "CARD-1")
+    assert not any(elsewhere.iterdir())
+
+
+def _switch_to_pushed_branch(station: Path) -> None:
+    git(station, "checkout", "-q", "-b", "claude/CARD-2", "origin/main")
+    commit(station, "wip.txt")
+    git(station, "push", "-q", "-u", "origin", "claude/CARD-2")
+
+
+def _detach(station: Path) -> None:
+    git(station, "checkout", "-q", "--detach", "origin/main")
+
+
+def _lock(station: Path) -> None:
+    git(station, "worktree", "lock", str(station))
+
+
+def _unpushed_commit(station: Path) -> None:
+    commit(station, "late.txt")
+
+
+def _pushed_commit(station: Path) -> None:
+    commit(station, "late.txt")
+    git(station, "push", "-q", "origin", "claude/CARD-1")
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (_switch_to_pushed_branch, "换到 claude/CARD-2"),
+        (_detach, "换到 (detached)"),
+        (_lock, "工位被 git worktree lock 锁着"),
+        (_unpushed_commit, "还没推到 GitHub"),
+        (_pushed_commit, "没并进 main 的提交"),
+    ],
+)
+def test_sweep_rechecks_a_station_that_changed_between_listing_and_removal(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, change: Callable[[Path], None], reason: str
+) -> None:
+    station = finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    listed = AgentWorktreeService.stations
+
+    def list_then_change(self: AgentWorktreeService) -> list[Station]:
+        result = listed(self)
+        change(station)
+        return result
+
+    monkeypatch.setattr(AgentWorktreeService, "stations", list_then_change)
+
+    report = lab.service().sweep(apply=True)
+
+    assert station.exists()
+    assert str(station) not in report.done
+    assert any(reason in line for line in report.failed), report.failed
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        {"AUTO_PM_AGENT": "trae:cn"},
+        {"CLAUDECODE": "1"},
+        {"CLAUDE_CODE_ENTRYPOINT": "cli"},
+        {"CODEX_THREAD_ID": "x"},
+    ],
+)
+def test_an_agent_session_cannot_close_someone_elses_station(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, marker: dict[str, str]
+) -> None:
+    station = finished_station(lab, "cursor", "CARD-9")
+    for key, value in marker.items():
+        monkeypatch.setenv(key, value)
+
+    with pytest.raises(StationRefusedError, match="不能收 cursor 的工位"):
+        lab.service().close("cursor")
+    assert station.exists()
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [{"AUTO_PM_AGENT": "copilot"}, {"AUTO_PM_AGENT": "trae:cn", "CLAUDECODE": "1"}],
+)
+def test_an_unrecognised_agent_session_is_refused(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, marker: dict[str, str]
+) -> None:
+    station = finished_station(lab, "cursor", "CARD-9")
+    lab.merge_on_github("cursor/CARD-9")
+    for key, value in marker.items():
+        monkeypatch.setenv(key, value)
+
+    with pytest.raises(StationRefusedError, match="认不出"):
+        lab.service().close("cursor")
+    with pytest.raises(StationRefusedError, match="认不出"):
+        lab.service().sweep(apply=True)
+    assert lab.service().sweep().items, "只看清单不受限"
+    assert station.exists()
+
+
+def test_an_agent_sweep_only_cleans_its_own_station(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claude = finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    cursor = finished_station(lab, "cursor", "CARD-3")
+    lab.merge_on_github("cursor/CARD-3")
+    leftover = run_plan(lab)
+    lab.runs[RUN_ID] = "SUCCEEDED"
+    monkeypatch.setenv("CLAUDECODE", "1")
+
+    with pytest.raises(StationRefusedError, match="只能清自己的工位"):
+        lab.service().sweep(apply=True, agent="cursor")
+    report = lab.service().sweep(apply=True)
+
+    assert report.done == [str(claude)]
+    assert cursor.exists() and leftover.exists()
+    assert "只由用户" in {item.target: item.reason for item in report.items}[str(leftover)]
+
+
+def test_a_failing_git_status_stops_the_sweep(lab: Lab) -> None:
+    station = finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    (station / ".git").write_text("gitdir: /nowhere\n", encoding="utf-8")
+
+    with pytest.raises(AgentWorktreeError):
+        lab.service().sweep(apply=True)
+    assert station.exists()
+
+
+def test_a_finished_run_plan_with_its_own_commit_keeps_the_branch(lab: Lab) -> None:
+    path = run_plan(lab)
+    lab.runs[RUN_ID] = "SUCCEEDED"
+    commit(path, "only-here.txt")
+    git(lab.root, "worktree", "remove", str(path))
+    service = lab.service()
+
+    assert service._delete_local_branch(f"codex/{RUN_DIR}", require_merged=False) is False
+    assert f"codex/{RUN_DIR}" in lab.local_branches()
+
+
+def test_sweep_leaves_gone_branches_outside_the_roster(lab: Lab) -> None:
+    git(lab.root, "branch", "feature/x", "origin/main")
+    git(lab.root, "push", "-q", "-u", "origin", "feature/x")
+    git(lab.github, "push", "-q", "origin", "--delete", "feature/x")
+
+    lab.service().sweep(apply=True)
+
+    assert "feature/x" in lab.local_branches()

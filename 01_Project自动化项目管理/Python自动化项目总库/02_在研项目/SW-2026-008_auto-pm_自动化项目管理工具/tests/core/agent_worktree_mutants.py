@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -20,7 +21,50 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ("有没推送的提交也删", "        if station.unpushed:\n", "        if False:\n"),
     ("锁住的工位也删", "        if station.locked:\n", "        if False:\n"),
     ("detached 工位也删", "        if not station.branch:\n", "        if False:\n"),
-    ("可以收别的 agent 的工位", "if caller in AGENT_ROSTER and caller != agent:", "if False:"),
+    ("可以收别的 agent 的工位", "        if caller and caller != agent:\n", "        if False:\n"),
+    (
+        "认不出调用方时放行（close）",
+        "        if caller == _UNKNOWN_CALLER:\n",
+        "        if False:\n",
+    ),
+    (
+        "认不出调用方时放行（sweep）",
+        "        if apply and caller == _UNKNOWN_CALLER:\n",
+        "        if False:\n",
+    ),
+    (
+        "互相矛盾的标记当成认得出",
+        "if len(found) > 1 or not found <= set(AGENT_ROSTER):",
+        "if not found <= set(AGENT_ROSTER):",
+    ),
+    (
+        "agent 会话 sweep 可清别人的",
+        "            if agent is not None and agent != caller:\n",
+        "            if False:\n",
+    ),
+    ("agent 会话 sweep 不限定到自己", "            agent = caller\n", "            pass\n"),
+    ("agent 会话可清 run-plan", 'if station.kind == "run-plan" and caller_agent():', "if False:"),
+    (
+        "名册外前缀的孤儿分支也删",
+        "if not branch.startswith(tuple(AGENT_ROSTER.values())):",
+        "if False:",
+    ),
+    (
+        "删前复查丢了 locked",
+        "head=info.head, locked=info.locked\n        )\n        self._require_removable(fresh)",
+        "head=info.head\n        )\n        self._require_removable(fresh)",
+    ),
+    (
+        "删前不再核对是否并进 main",
+        "        if require_merged and not fresh.merged:\n",
+        "        if False:\n",
+    ),
+    ("分支上有独有提交也删", "        if self._unique_commits(branch):\n", "        if False:\n"),
+    (
+        "git status 失败按干净处理",
+        "            if status.returncode != 0:\n",
+        "            if False:\n",
+    ),
     (
         "工位里是别人的分支也收",
         "if station.branch and not station.branch.startswith(prefix):",
@@ -70,6 +114,16 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     ("卡号可占用 control-root/run-plan", " or card.lower().startswith(RESERVED_CARD_PREFIXES)", ""),
     (
+        "工位目录可以经过 symlink",
+        'require_safe_workspace_path(self._root, path, label="工位目录")',
+        "path.resolve()",
+    ),
+    (
+        "删前不核对分支是否被换",
+        "        if info.branch != station.branch:\n",
+        "        if False:\n",
+    ),
+    (
         "新分支把 origin/main 设成上游",
         '"worktree", "add", "--no-track",',
         '"worktree", "add", "--track",',
@@ -79,6 +133,9 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
 
 def main() -> int:
     original = SOURCE.read_text(encoding="utf-8")
+    signal.signal(
+        signal.SIGTERM, lambda *_: sys.exit(3)
+    )  # a killed run still restores the source in finally
     survivors: list[str] = []
     try:
         for name, before, after in MUTANTS:

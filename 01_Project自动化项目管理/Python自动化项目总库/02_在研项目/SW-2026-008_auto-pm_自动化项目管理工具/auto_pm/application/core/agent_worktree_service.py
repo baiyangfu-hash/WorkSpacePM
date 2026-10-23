@@ -25,6 +25,7 @@ from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
     clean_git_environment,
     require_control_root,
+    require_safe_workspace_path,
 )
 
 # WS-001 station and branch prefix table.  An agent not listed here is registered by the user first.
@@ -43,6 +44,32 @@ MAIN_REF = "refs/remotes/origin/main"
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 RunStateLookup = Callable[[str], str | None]
+
+
+_UNKNOWN_CALLER = "?"
+
+
+def caller_agent() -> str:
+    """Who is running this command: "" for the user's own terminal, a roster name, or "?" when unknown.
+
+    Uses the same markers as the lease handover (``AGENT_MARKERS``): ``AUTO_PM_AGENT`` (``trae:cn`` style, the part
+    before the colon), ``CLAUDECODE``/``CLAUDE_CODE_ENTRYPOINT`` for Claude Code and ``CODEX_*`` for Codex.  An agent
+    marker that names nobody on the roster, or markers that disagree, give "?" so the caller is refused, never let through.
+    """
+
+    found: set[str] = set()
+    marker = os.environ.get("AUTO_PM_AGENT", "").strip()
+    if marker:
+        found.add(marker.split(":", 1)[0].strip().lower())
+    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
+        found.add("claude")
+    if any(key.upper().startswith("CODEX_") and value for key, value in os.environ.items()):
+        found.add("codex")
+    if not found:
+        return ""
+    if len(found) > 1 or not found <= set(AGENT_ROSTER):
+        return _UNKNOWN_CALLER
+    return found.pop()
 
 
 class AgentWorktreeError(RuntimeError):
@@ -173,7 +200,9 @@ class AgentWorktreeService:
                 raise StationRefusedError(
                     f"分支 {branch} 已存在（{ref}）；换一个卡号，或先查清这条分支是谁的"
                 )
+        self._require_inside(path)
         self._stations_dir.mkdir(parents=True, exist_ok=True)
+        self._require_inside(path)
         added = self._git("worktree", "add", "--no-track", "-b", branch, str(path), MAIN_REF)
         if added.returncode != 0:
             raise AgentWorktreeError(f"建工位失败：{_detail(added)}")
@@ -207,8 +236,12 @@ class AgentWorktreeService:
 
     def close(self, agent: str, *, fetch: bool = True) -> CloseResult:
         prefix = self._prefix(agent)
-        caller = os.environ.get("AUTO_PM_AGENT", "").strip().lower()
-        if caller in AGENT_ROSTER and caller != agent:
+        caller = caller_agent()
+        if caller == _UNKNOWN_CALLER:
+            raise StationRefusedError(
+                "认不出是哪个 agent 在执行（环境标记不在名册里或互相矛盾），不收工位；请用户在自己的终端执行"
+            )
+        if caller and caller != agent:
             raise StationRefusedError(
                 f"你是 {caller}，不能收 {agent} 的工位；请 {agent} 自己收，或由用户决定"
             )
@@ -238,6 +271,15 @@ class AgentWorktreeService:
     ) -> SweepReport:
         if agent is not None:
             self._prefix(agent)
+        caller = caller_agent()
+        if apply and caller == _UNKNOWN_CALLER:
+            raise StationRefusedError(
+                "认不出是哪个 agent 在执行，不清理；先不加 --apply 看清单，删除请用户在自己的终端执行"
+            )
+        if apply and caller:
+            if agent is not None and agent != caller:
+                raise StationRefusedError(f"你是 {caller}，只能清自己的工位，不能 --agent {agent}")
+            agent = caller
         warning = (
             self._fetch_prune() if fetch else "没有联网核对（--no-fetch），按本机已知的远程分支判断"
         )
@@ -264,7 +306,7 @@ class AgentWorktreeService:
                 continue
             try:
                 if station is not None:
-                    self._remove_station(station)
+                    self._remove_station(station, require_merged=station.kind == "agent")
                 else:
                     self._delete_local_branch(item.target, require_merged=True)
                 report.done.append(item.target)
@@ -282,6 +324,10 @@ class AgentWorktreeService:
         if station.kind == "other":
             return SweepItem(
                 target, "other", False, "不在 agent 名册里、也不是 run-plan，不归本命令管"
+            )
+        if station.kind == "run-plan" and caller_agent():
+            return SweepItem(
+                target, "run-plan", False, "run-plan 不属于任何 agent，只由用户在自己的终端清"
             )
         if station.kind == "agent" and agent is not None and station.name != agent:
             return SweepItem(
@@ -317,6 +363,8 @@ class AgentWorktreeService:
     def _sweep_gone(self, branch: str) -> SweepItem:
         if branch == "main" or branch.startswith("codex/control-root"):
             return SweepItem(branch, "gone-branch", False, "控制根自己的分支，不动")
+        if not branch.startswith(tuple(AGENT_ROSTER.values())):
+            return SweepItem(branch, "gone-branch", False, "不是名册前缀的分支，不归本命令管")
         if not self._is_ancestor(f"refs/heads/{branch}", MAIN_REF):
             return SweepItem(
                 branch,
@@ -351,12 +399,22 @@ class AgentWorktreeService:
         if refusal:
             raise StationRefusedError(f"不收工位 {station.path}：{refusal}")
 
-    def _remove_station(self, station: Station) -> CloseResult:
-        # Re-read just before removing: the agent may have kept working since the station was inspected.
+    def _remove_station(self, station: Station, *, require_merged: bool = False) -> CloseResult:
+        # Re-read everything just before removing: the agent may have kept working since the station was listed.
+        self._require_inside(station.path)
+        info = self._worktrees().get(station.path.resolve())
+        if info is None:
+            raise StationRefusedError(f"工位 {station.path} 已不在 Git 登记里，不动")
+        if info.branch != station.branch:
+            raise StationRefusedError(
+                f"工位 {station.path} 已从 {station.branch} 换到 {info.branch or '(detached)'}，有人在用，不删"
+            )
         fresh = self._inspect(
-            station.path, registered=True, branch=station.branch, head=self._head(station.path)
+            station.path, registered=True, branch=info.branch, head=info.head, locked=info.locked
         )
         self._require_removable(fresh)
+        if require_merged and not fresh.merged:
+            raise StationRefusedError(f"工位 {station.path} 上又有了没并进 main 的提交，不删")
         removed = self._git("worktree", "remove", str(station.path))
         if removed.returncode != 0:
             raise AgentWorktreeError(f"删工作树失败：{_detail(removed)}")
@@ -512,6 +570,16 @@ class AgentWorktreeService:
 
     def _head(self, path: Path) -> str:
         return self._out("rev-parse", "HEAD", cwd=path)
+
+    def _require_inside(self, path: Path) -> None:
+        """A station must really live under the control root: no symlink or junction on the way."""
+
+        try:
+            require_safe_workspace_path(self._root, path, label="工位目录")
+        except ControlRootGuardError as error:
+            raise AgentWorktreeError(
+                f"{error}；工位必须真在控制根的 .auto-pm/worktrees 下"
+            ) from error
 
     def _prefix(self, agent: str) -> str:
         if agent not in AGENT_ROSTER:
