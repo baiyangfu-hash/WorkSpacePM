@@ -1,17 +1,14 @@
 # PLC 项目 CI（Linux）：PR 改到 0100_PLC自动化 下的项目或共享库时，跑 plc check、plc docs check 与 SCL 规范逐条比对。
 # 检查代码取自 PR 基线（裁判），PR 头只当数据读。和基线逐条比：新问题判 FAIL；只有老问题判 PASS_KNOWN_BASELINE（不是全绿）。
 # 需要本机或 Windows 的层（Siemens 语言服务插件、.scltest 仿真、博图/InoProShop 编译）明确跳过并在日志里写原因，不算通过。
+# 每个 PR 都运行（好设成必过检查）：没碰 PLC 时只做一步判断，报“不适用（N/A）”后通过，不装依赖。
+# 推到 main 时 PLC 检查代码（检查子进程加载的 SW-2026-008 模块与锁定依赖）有改动，也会用新代码把所有 PLC 项目查一遍。
 # 它是提前报警，不替代本机门禁，结果也不是任何卡的验收证据。说明：项目文件夹 plans/PLC项目CI_说明_20261022.md。
 name: plc-ci
 
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "0100_PLC自动化/**"
-      - ".github/workflows/plc-ci.yml"
-      - "reviews/tools/plc_ci.py"
-      - "reviews/tools/test_plc_ci.py"
   push:
     branches: [main]
     paths:
@@ -19,6 +16,26 @@ on:
       - ".github/workflows/plc-ci.yml"
       - "reviews/tools/plc_ci.py"
       - "reviews/tools/test_plc_ci.py"
+      # PLC 检查代码：与 plc_ci.py 的 CHECKER_PATHS 保持一致（自测核对）
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/paths.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/change/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/modbus/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/models/**"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/**"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/project/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/project/state_machine.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/spec/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/vartable/**"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/db/**"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/logging/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/utils/__init__.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/utils/file_utils.py"
+      - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/ui/__init__.py"
+      - "00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt"
   workflow_dispatch:
 
 # 只读令牌；没有任何步骤用到密钥。
@@ -32,6 +49,8 @@ concurrency:
 env:
   PYTHONDONTWRITEBYTECODE: "1"
   PYTHONIOENCODING: utf-8
+  # 本工作流需要的 plc_ci.py 版本（脚本里的 PLC_CI_PROTOCOL）
+  PLC_CI_PROTOCOL: "2"
 
 jobs:
   plc:
@@ -84,40 +103,59 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install the locked dependencies (from the baseline)
-        run: |
-          python -m pip install --no-deps -r base/00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
-          python -m pip check
-
       - name: Pick the judge script
         id: judge
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
-          # 裁判脚本取自基线；只有引入本工作流的那个 PR（基线上还没有脚本）才取 PR 头，并明说
-          if [ -f base/reviews/tools/plc_ci.py ]; then
+          # 推到 main：代码已审过合入，脚本和检查代码都取推送后的提交（checker=--checker-from-head）
+          # PR：脚本取自基线；基线上的脚本版本不够（工作流与脚本同时升级）时才取 PR 头，并明说
+          if [ "$EVENT" = push ]; then
+            echo "dir=head" >> "$GITHUB_OUTPUT"
+            echo "checker=--checker-from-head" >> "$GITHUB_OUTPUT"
+          elif [ -f base/reviews/tools/plc_ci.py ] \
+               && grep -q "^PLC_CI_PROTOCOL = $PLC_CI_PROTOCOL\$" base/reviews/tools/plc_ci.py; then
             echo "dir=base" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::基线上还没有 reviews/tools/plc_ci.py（引入本工作流的 PR）：检查脚本暂取自 PR 头，合并前须人工审过脚本"
+            echo "::warning::基线上的 reviews/tools/plc_ci.py 不是本工作流要求的版本 $PLC_CI_PROTOCOL（工作流与脚本同时升级）：检查脚本暂取自 PR 头，合并前须人工审过脚本"
             echo "dir=head" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: CI tool self-test (the check must be able to fail)
-        run: python -m pytest -q -p no:cacheprovider -p no:pytest-qt -o addopts= "${{ steps.judge.outputs.dir }}/reviews/tools/test_plc_ci.py"
-
-      - name: PLC checks against the baseline
+      - name: Does this change touch any PLC project?
+        id: scope
         env:
           MODE: ${{ steps.base.outputs.mode }}
           BASE_SHA: ${{ steps.base.outputs.sha }}
           HEAD_SHA: ${{ steps.base.outputs.head }}
           JUDGE: ${{ steps.judge.outputs.dir }}
+          CHECKER: ${{ steps.judge.outputs.checker }}
+        run: |
+          if [ "$MODE" = all ]; then scope=(--all); else scope=(--base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"); fi
+          python -I "$JUDGE/reviews/tools/plc_ci.py" --base-root base --head-root head "${scope[@]}" $CHECKER --scope-only
+
+      - name: Install the locked dependencies (from the baseline)
+        if: steps.scope.outputs.applies == 'true'
+        run: |
+          python -m pip install --no-deps -r base/00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          python -m pip check
+
+      - name: CI tool self-test (the check must be able to fail)
+        if: steps.scope.outputs.applies == 'true'
+        run: python -m pytest -q -p no:cacheprovider -p no:pytest-qt -o addopts= "${{ steps.judge.outputs.dir }}/reviews/tools/test_plc_ci.py"
+
+      - name: PLC checks against the baseline
+        if: steps.scope.outputs.applies == 'true'
+        env:
+          MODE: ${{ steps.base.outputs.mode }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          HEAD_SHA: ${{ steps.base.outputs.head }}
+          JUDGE: ${{ steps.judge.outputs.dir }}
+          CHECKER: ${{ steps.judge.outputs.checker }}
         run: |
           set -o pipefail
-          if [ "$MODE" = all ]; then
-            scope=(--all)
-          else
-            scope=(--base-sha "$BASE_SHA" --head-sha "$HEAD_SHA")
-          fi
-          # 裁判是 JUDGE 检出里的脚本；检查代码（SW-2026-008 源码）一律取基线
-          python -I "$JUDGE/reviews/tools/plc_ci.py" --base-root base --head-root head "${scope[@]}" \
+          if [ "$MODE" = all ]; then scope=(--all); else scope=(--base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"); fi
+          # PR：检查代码（SW-2026-008 源码）取基线；推到 main：取推送后的提交（CHECKER=--checker-from-head）
+          python -I "$JUDGE/reviews/tools/plc_ci.py" --base-root base --head-root head "${scope[@]}" $CHECKER \
             2>&1 | tee "$RUNNER_TEMP/plc-ci.log"
 
       - name: The PR checkout must still be clean (checks are read-only)
@@ -127,7 +165,7 @@ jobs:
           if [ -n "$(git status --porcelain)" ]; then git status --short; exit 1; fi
 
       - name: Keep the log for 14 days
-        if: always()
+        if: always() && steps.scope.outputs.applies == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: plc-ci-log
