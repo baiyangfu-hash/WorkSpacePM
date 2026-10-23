@@ -84,7 +84,7 @@
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| io_stGlobal | ST_CommonAlarm | 【待确认】公共报警工站全量数据结构体 |
+| io_stGlobal | ST_CommonAlarm | 公共报警工站全量数据结构体 |
 
 ## 附：代码中已不存在的旧条目（待确认后删除）
 

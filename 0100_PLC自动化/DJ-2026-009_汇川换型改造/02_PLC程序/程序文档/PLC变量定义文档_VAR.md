@@ -134,118 +134,118 @@
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| bMachine_ReadyIn | BOOL | 【待确认】(1) 机器准备好进料信号 |
-| bMachine_RcvModuleIdAck | BOOL | 【待确认】(4) 机器收到组件ID信号 |
-| bMachine_AllowInfeed | BOOL | 【待确认】(5) 机器允许上游进料信号 |
-| bMachine_InfeedArrived | BOOL | 【待确认】(7) 机器给上游组件进料到位信号 |
-| bMachine_HeartbeatToUp | BOOL | 【待确认】[心跳] 本机向上游心跳 (4s ON / 4s OFF) |
-| bUpstream_LineReady | BOOL | 【待确认】(2) 上游流水线准备好信号 |
-| bUpstream_SendModuleId | BOOL | 【待确认】(3) 上游流水线传组件ID信号 |
-| bUpstream_InfeedReq | BOOL | 【待确认】(6) 上游流水线入料请求信号 |
-| bUpstream_InfeedArrivedAck | BOOL | 【待确认】(8) 上游回收收到进料到位信号 |
-| bUpstream_HeartbeatFromUp | BOOL | 【待确认】[心跳] 上游输入心跳 |
-| sRcvModuleID | STRING[32] | 【待确认】接收的组件 ID |
-| bUpstreamComFault | BOOL | 【待确认】上游通讯心跳超时故障 (12s) |
-| iInfeedStep | INT | 【待确认】进料握手当前步序 0~8 |
+| bMachine_ReadyIn | BOOL | (1) 机器准备好进料信号 |
+| bMachine_RcvModuleIdAck | BOOL | (4) 机器收到组件ID信号 |
+| bMachine_AllowInfeed | BOOL | (5) 机器允许上游进料信号 |
+| bMachine_InfeedArrived | BOOL | (7) 机器给上游组件进料到位信号 |
+| bMachine_HeartbeatToUp | BOOL | [心跳] 本机向上游心跳 (4s ON / 4s OFF) |
+| bUpstream_LineReady | BOOL | (2) 上游流水线准备好信号 |
+| bUpstream_SendModuleId | BOOL | (3) 上游流水线传组件ID信号 |
+| bUpstream_InfeedReq | BOOL | (6) 上游流水线入料请求信号 |
+| bUpstream_InfeedArrivedAck | BOOL | (8) 上游回收收到进料到位信号 |
+| bUpstream_HeartbeatFromUp | BOOL | [心跳] 上游输入心跳 |
+| sRcvModuleID | STRING[32] | 接收的组件 ID |
+| bUpstreamComFault | BOOL | 上游通讯心跳超时故障 (12s) |
+| iInfeedStep | INT | 进料握手当前步序 0~8 |
 
 ### ST_DownstreamDocking（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| bMachine_ReadyOut | BOOL | 【待确认】(2) 机器准备好出料信号 |
-| bMachine_SendModuleId | BOOL | 【待确认】(3) 机器传组件ID信号 |
-| bMachine_OutfeedReq | BOOL | 【待确认】(6) 机器给下游出料请求信号 |
-| bMachine_OutfeedArrivedAck | BOOL | 【待确认】(8) 机器回收收到进料到位信号 |
-| bMachine_HeartbeatToDown | BOOL | 【待确认】[心跳] 本机向下游心跳 (4s ON / 4s OFF) |
-| bDownstream_LineReady | BOOL | 【待确认】(1) 下游流水线准备好信号 |
-| bDownstream_RcvModuleIdAck | BOOL | 【待确认】(4) 下游流水线收到组件ID信号 |
-| bDownstream_AllowOutfeed | BOOL | 【待确认】(5) 下游流水线允许机器出料信号 |
-| bDownstream_OutfeedArrived | BOOL | 【待确认】(7) 下游流水线给机器进料到位信号 |
-| bDownstream_HeartbeatFromDown | BOOL | 【待确认】[心跳] 下游输入心跳 |
-| sSendModuleID | STRING[32] | 【待确认】发送给下游的组件 ID |
-| bDownstreamComFault | BOOL | 【待确认】下游通讯心跳超时故障 (12s) |
-| iOutfeedStep | INT | 【待确认】出料握手当前步序 0~8 |
+| bMachine_ReadyOut | BOOL | (2) 机器准备好出料信号 |
+| bMachine_SendModuleId | BOOL | (3) 机器传组件ID信号 |
+| bMachine_OutfeedReq | BOOL | (6) 机器给下游出料请求信号 |
+| bMachine_OutfeedArrivedAck | BOOL | (8) 机器回收收到进料到位信号 |
+| bMachine_HeartbeatToDown | BOOL | [心跳] 本机向下游心跳 (4s ON / 4s OFF) |
+| bDownstream_LineReady | BOOL | (1) 下游流水线准备好信号 |
+| bDownstream_RcvModuleIdAck | BOOL | (4) 下游流水线收到组件ID信号 |
+| bDownstream_AllowOutfeed | BOOL | (5) 下游流水线允许机器出料信号 |
+| bDownstream_OutfeedArrived | BOOL | (7) 下游流水线给机器进料到位信号 |
+| bDownstream_HeartbeatFromDown | BOOL | [心跳] 下游输入心跳 |
+| sSendModuleID | STRING[32] | 发送给下游的组件 ID |
+| bDownstreamComFault | BOOL | 下游通讯心跳超时故障 (12s) |
+| iOutfeedStep | INT | 出料握手当前步序 0~8 |
 
 ### ST_ExternalDevice（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| stUpstream | ST_UpstreamDocking | 【待确认】上游对接交握区 |
-| stDownstream | ST_DownstreamDocking | 【待确认】下游对接交握区 |
-| bEmergencyStop | BOOL | 【待确认】外部总线急停 (1=正常, 0=急停) |
-| bSafetyDoorOK | BOOL | 【待确认】外部安全门锁信号 |
-| bAnyComFault | BOOL | 【待确认】外部通讯综合故障 |
+| stUpstream | ST_UpstreamDocking | 上游对接交握区 |
+| stDownstream | ST_DownstreamDocking | 下游对接交握区 |
+| bEmergencyStop | BOOL | 外部总线急停 (1=正常, 0=急停) |
+| bSafetyDoorOK | BOOL | 外部安全门锁信号 |
+| bAnyComFault | BOOL | 外部通讯综合故障 |
 
 ### ST_Station1_Control（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| bAutoEnable | BOOL | 【待确认】自动运行使能 |
-| bManualStart | BOOL | 【待确认】手动单步启动 |
-| bReset | BOOL | 【待确认】故障复位 |
-| bPause | BOOL | 【待确认】暂停 |
-| bSingleStepMode | BOOL | 【待确认】单步模式 |
+| bAutoEnable | BOOL | 自动运行使能 |
+| bManualStart | BOOL | 手动单步启动 |
+| bReset | BOOL | 故障复位 |
+| bPause | BOOL | 暂停 |
+| bSingleStepMode | BOOL | 单步模式 |
 
 ### ST_Station1_Status（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| iStep | DINT | 【待确认】当前工步号 |
-| bRunning | BOOL | 【待确认】运行中 |
-| bDone | BOOL | 【待确认】本周期动作完成 |
-| bAlarm | BOOL | 【待确认】站级报警 |
-| iAlarmCode | DINT | 【待确认】报警代码 (101~199) |
-| bWaitMaterial | BOOL | 【待确认】等待来料 |
-| bProcessing | BOOL | 【待确认】加工中 |
+| iStep | DINT | 当前工步号 |
+| bRunning | BOOL | 运行中 |
+| bDone | BOOL | 本周期动作完成 |
+| bAlarm | BOOL | 站级报警 |
+| iAlarmCode | DINT | 报警代码 (101~199) |
+| bWaitMaterial | BOOL | 等待来料 |
+| bProcessing | BOOL | 加工中 |
 
 ### ST_Station1_Config（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| dDebounceMs | DINT | 【待确认】光电消抖时间 (ms, 默认 100) |
-| dCylTimeoutMs | DINT | 【待确认】气缸动作超时时间 (ms, 默认 5000) |
-| dProcessTimeMs | DINT | 【待确认】工艺加工延时时间 (ms, 默认 2000) |
+| dDebounceMs | DINT | 光电消抖时间 (ms, 默认 100) |
+| dCylTimeoutMs | DINT | 气缸动作超时时间 (ms, 默认 5000) |
+| dProcessTimeMs | DINT | 工艺加工延时时间 (ms, 默认 2000) |
 
 ### ST_Station1_Sensors（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| bInPosSensor | BOOL | 【待确认】入料到位光电 |
-| bWorkPosSensor | BOOL | 【待确认】加工到位光电 |
+| bInPosSensor | BOOL | 入料到位光电 |
+| bWorkPosSensor | BOOL | 加工到位光电 |
 
 ### ST_Station1_Actuators（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| stMotorFwd | ST_ConveyorMotor | 【待确认】进料输送电机 |
-| stCyl1 | ST_Cylinder | 【待确认】夹紧气缸 |
-| stCyl2 | ST_Cylinder | 【待确认】顶升气缸 |
+| stMotorFwd | ST_ConveyorMotor | 进料输送电机 |
+| stCyl1 | ST_Cylinder | 夹紧气缸 |
+| stCyl2 | ST_Cylinder | 顶升气缸 |
 
 ### ST_Station1（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| stControl | ST_Station1_Control | 【待确认】工位1 控制命令 |
-| stStatus | ST_Station1_Status | 【待确认】工位1 状态反馈 |
-| stConfig | ST_Station1_Config | 【待确认】工位1 参数配置 |
-| stSensors | ST_Station1_Sensors | 【待确认】工位1 传感器输入 |
-| stActuators | ST_Station1_Actuators | 【待确认】工位1 执行器输出 |
+| stControl | ST_Station1_Control | 工位1 控制命令 |
+| stStatus | ST_Station1_Status | 工位1 状态反馈 |
+| stConfig | ST_Station1_Config | 工位1 参数配置 |
+| stSensors | ST_Station1_Sensors | 工位1 传感器输入 |
+| stActuators | ST_Station1_Actuators | 工位1 执行器输出 |
 
 ### ST_CommonAlarm（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| i_bReset | BOOL | 【待确认】系统复位 |
-| i_iConveyorAlarm | INT | 【待确认】输送机报警码 |
-| i_iPickPlaceAlarm | INT | 【待确认】取放料机构报警码 |
-| i_iFeederAlarm | INT | 【待确认】打胶送料机构报警码 |
-| o_wGlobalAlarmWord | WORD | 【待确认】全局报警字 |
-| o_iCurrentAlarmCode | INT | 【待确认】当前最高优先级报警码 |
-| o_bAnyAlarmActive | BOOL | 【待确认】任意报警激活 |
-| o_iMESAlarmCount | INT | 【待确认】MES报警计数 |
-| o_iMESAlarmQueue | INT | 【待确认】MES报警队列 |
-| o_bNewAlarmFlag | BOOL | 【待确认】新报警标志 |
-| o_iStationAlarmStatus | INT | 【待确认】工站报警汇总状态 |
-| o_bConveyorAlarmActive | BOOL | 【待确认】输送机报警激活 |
-| o_bPickPlaceAlarmActive | BOOL | 【待确认】取放料报警激活 |
-| o_bFeederAlarmActive | BOOL | 【待确认】打胶送料报警激活 |
+| i_bReset | BOOL | 系统复位 |
+| i_iConveyorAlarm | INT | 输送机报警码 |
+| i_iPickPlaceAlarm | INT | 取放料机构报警码 |
+| i_iFeederAlarm | INT | 打胶送料机构报警码 |
+| o_wGlobalAlarmWord | WORD | 全局报警字 |
+| o_iCurrentAlarmCode | INT | 当前最高优先级报警码 |
+| o_bAnyAlarmActive | BOOL | 任意报警激活 |
+| o_iMESAlarmCount | INT | MES报警计数 |
+| o_iMESAlarmQueue | INT | MES报警队列 |
+| o_bNewAlarmFlag | BOOL | 新报警标志 |
+| o_iStationAlarmStatus | INT | 工站报警汇总状态 |
+| o_bConveyorAlarmActive | BOOL | 输送机报警激活 |
+| o_bPickPlaceAlarmActive | BOOL | 取放料报警激活 |
+| o_bFeederAlarmActive | BOOL | 打胶送料报警激活 |

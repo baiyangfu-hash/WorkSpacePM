@@ -20,7 +20,7 @@
 
 | 参数名 | 数据类型 | 描述 |
 | :--- | :--- | :--- |
-| `io_stStation` | ST_Station1 | 【待确认】工位1 全局交互结构体 (整块传递) |
+| `io_stStation` | ST_Station1 | 工位1 全局交互结构体 (整块传递) |
 
 ### 2.1 控制指令子结构 (`stControl`)
 
@@ -31,7 +31,7 @@
 
 | 字段名 | 类型 | 说明 |
 | :--- | :---: | :--- |
-| io_stExternal | ST_ExternalDevice | 【待确认】外部设备 8步握手交握结构体 |
+| io_stExternal | ST_ExternalDevice | 外部设备 8步握手交握结构体 |
 
 ## 附：代码中已不存在的旧条目（待确认后删除）
 

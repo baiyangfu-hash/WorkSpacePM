@@ -17,16 +17,16 @@ domain: plc
 | 变量名 | 类型 | 方向 | 说明 |
 |:---|:---:|:---:|:---|
 | `i_bEnable` | BOOL | VAR_INPUT | 功能块总使能 |
-| `i_bAutoMode` | BOOL | VAR_INPUT | 【待确认】自动运行模式 |
+| `i_bAutoMode` | BOOL | VAR_INPUT | 自动运行模式 |
 | `i_bMachineReadyIn` | BOOL | VAR_INPUT | 本机进料就绪 (工位空闲) |
 | `i_bMachineReadyOut`| BOOL | VAR_INPUT | 本机出料就绪 (加工完成) |
 | `i_bInfeedArrivedSens`| BOOL | VAR_INPUT | 本机进料到位光电传感器 |
-| `i_sSendModuleID` | STRING[32] | VAR_INPUT | 【待确认】本机待发出的组件 ID |
-| `q_bAllowInfeedAct` | BOOL | VAR_OUTPUT | 【待确认】触发本机进料动作输出 |
-| `q_bAllowOutfeedAct` | BOOL | VAR_OUTPUT | 【待确认】触发本机出料动作输出 |
-| `q_bUpstreamDone` | BOOL | VAR_OUTPUT | 【待确认】本次进料交握事务完成脉冲 |
-| `q_bDownstreamDone` | BOOL | VAR_OUTPUT | 【待确认】本次出料交握事务完成脉冲 |
-| `q_bComAlarm` | BOOL | VAR_OUTPUT | 【待确认】外部通讯中断综合报警 |
+| `i_sSendModuleID` | STRING[32] | VAR_INPUT | 本机待发出的组件 ID |
+| `q_bAllowInfeedAct` | BOOL | VAR_OUTPUT | 触发本机进料动作输出 |
+| `q_bAllowOutfeedAct` | BOOL | VAR_OUTPUT | 触发本机出料动作输出 |
+| `q_bUpstreamDone` | BOOL | VAR_OUTPUT | 本次进料交握事务完成脉冲 |
+| `q_bDownstreamDone` | BOOL | VAR_OUTPUT | 本次出料交握事务完成脉冲 |
+| `q_bComAlarm` | BOOL | VAR_OUTPUT | 外部通讯中断综合报警 |
 | `io_stExternal` | ST_ExternalDevice | VAR_IN_OUT | STD-820 通用外部对接数据总线 |
-| i_bResetCmd | BOOL | VAR_INPUT | 【待确认】故障复位指令 |
-| q_wErrorCode | WORD | VAR_OUTPUT | 【待确认】故障诊断字 |
+| i_bResetCmd | BOOL | VAR_INPUT | 故障复位指令 |
+| q_wErrorCode | WORD | VAR_OUTPUT | 故障诊断字 |
