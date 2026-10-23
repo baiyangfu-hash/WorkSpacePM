@@ -107,9 +107,8 @@ class IntDocParser(BaseParser):
             # 检测 VAR 区段标题
             section_match = _SECTION_RE.match(line)
             if section_match:
-                current_scope = section_match.group(1).upper().replace(
-                    " CONSTANT", ""
-                )
+                # "VAR CONSTANT" 区段单独归为常量类，不与普通静态 VAR 混用
+                current_scope = re.sub(r"\s+", "_", section_match.group(1).upper())
                 in_section = True
                 in_table = False
                 table_columns = []

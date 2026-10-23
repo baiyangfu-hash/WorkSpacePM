@@ -52,6 +52,7 @@ from auto_pm.cli.change import change_group  # noqa: E402
 from auto_pm.cli.clean import clean_cmd  # noqa: E402
 from auto_pm.cli.constraint import constraint_group  # noqa: E402
 from auto_pm.cli.continuity import continuity_group  # noqa: E402
+from auto_pm.cli.continuity_backup import BACKUP_COMMANDS  # noqa: E402
 from auto_pm.cli.decision import decision_group  # noqa: E402
 from auto_pm.cli.delivery import delivery_group  # noqa: E402
 from auto_pm.cli.doc import doc_group  # noqa: E402
@@ -127,6 +128,8 @@ cli.add_command(pm_session_group)
 cli.add_command(ledger_group)
 cli.add_command(constraint_group)
 cli.add_command(continuity_group)
+for _backup_command in BACKUP_COMMANDS:
+    continuity_group.add_command(_backup_command)
 cli.add_command(workflow_group)
 cli.add_command(prototype_cmd)
 cli.add_command(doctor_command)

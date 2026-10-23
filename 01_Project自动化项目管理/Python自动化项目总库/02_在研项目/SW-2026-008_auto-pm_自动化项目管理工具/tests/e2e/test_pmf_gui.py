@@ -276,9 +276,9 @@ class _Window:
     def snapshots_held_off(self) -> Iterator[None]:
         """Keep the snapshot reader away while something writes to the store.
 
-        A snapshot copies the database under share-deny locks (Windows, ``ContinuityStore._source_read_locks``); a SQLite write that starts in that instant is opened read-only and
-        fails with "attempt to write a readonly database" (found by this very test, TD-SW008 ledger). The old tests never met it because their workers ran inline. Until the store
-        is fixed, the writes of this scenario are serialised with the reader here.
+        A snapshot used to copy the database under share-deny locks (Windows, ``ContinuityStore._source_read_locks``); a SQLite write that started in that instant was opened
+        read-only and failed with "attempt to write a readonly database" (found by this very test, TD-SW008 ledger). The locks are gone now (the snapshot relies on before/after
+        hashes), but the serialisation stays: it keeps this scenario's screenshots deterministic and costs nothing.
         """
 
         self.pump(lambda: cast(Any, self.bridge)._snapshot_worker is None, 60, "no snapshot in flight")

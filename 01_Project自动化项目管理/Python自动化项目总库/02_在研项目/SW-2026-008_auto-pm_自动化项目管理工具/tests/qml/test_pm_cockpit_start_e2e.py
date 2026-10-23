@@ -132,7 +132,8 @@ def test_confirm_start_runs_verifies_and_reaches_acceptance_then_closes(
     assert cockpit.card_action() == (CockpitUserAction.CONFIRM_START, "确认开始执行")
     assert cockpit.mission_state() is MissionState.DRAFT
 
-    with caplog.at_level(logging.DEBUG):
+    # 包日志器 auto_pm 被 AppContext 配过级别后，只设根日志器拦不住 auto_pm.* 的 DEBUG；两层都放开才查得全。
+    with caplog.at_level(logging.DEBUG), caplog.at_level(logging.DEBUG, logger="auto_pm"):
         finished, bridge, pool = _run_start(cockpit)
 
         assert finished == [(cockpit.mission_id, True, _VERIFIED)]
