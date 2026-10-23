@@ -10,7 +10,7 @@
 - check 验证必需文件/目录检查逻辑
 
 10 个用例分布：
-- init: 3（dry-run 预览/实际创建/已存在路径）
+- init: 4（dry-run 预览/实际创建/中文名默认包名/已存在路径），另有默认包名推导参数化用例
 - check: 7（正常/--json/不存在/非 Python/--all/无 Python 项目/缺参）
 """
 
@@ -20,7 +20,9 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from auto_pm.cli.__main__ import cli
+from auto_pm.core.python_service import derive_package_name
 from click.testing import CliRunner
 
 
@@ -98,7 +100,7 @@ def test_python_init_actual_create(cli_runner: CliRunner, tmp_path: Path) -> Non
 
     依赖项目根的 Copier python-tool 模板；模板随仓库提交，缺失即失败（路径写旧曾让本测试静默跳过）。
     输入须过模板校验：项目号“字母-年份-三位序号”，包名“小写字母开头、仅含小写字母/数字/下划线”
-    （中文项目名推导出的默认包名不合法，故显式给 --package）。
+    （这里显式给 --package，测“给定包名能生成骨架”；不给包名的情形见下面的中文名用例）。
     """
     project_root = Path(__file__).resolve().parent.parent.parent
     template_dir = project_root / "templates" / "python-tool"
@@ -119,6 +121,41 @@ def test_python_init_actual_create(cli_runner: CliRunner, tmp_path: Path) -> Non
     assert project_dir.is_dir()
     # 应生成 .copier-answers.yml
     assert (project_dir / ".copier-answers.yml").is_file()
+
+
+@pytest.mark.cli
+def test_python_init_chinese_name_default_package(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """中文项目名、不给 --package 也能创建：默认包名取项目号（与 project create 一致）"""
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w", str(tmp_path),
+            "python", "init", "SW-2026-902",
+            "--name", "中文测试",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    project_dir = tmp_path / "SW-2026-902_中文测试"
+    answers = yaml.safe_load((project_dir / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert answers["package_name"] == "sw_2026_902"
+    assert answers["cli_command"] == "sw-2026-902"
+    assert (project_dir / "sw_2026_902").is_dir()
+
+
+@pytest.mark.parametrize(
+    ("project_name", "expected"),
+    [
+        ("Data Tool", "data_tool"),
+        ("data-tool", "data_tool"),
+        ("初始化测试", "sw_2026_901"),
+        ("Data 工具", "sw_2026_901"),
+        ("2026tool", "sw_2026_901"),
+    ],
+)
+def test_derive_package_name(project_name: str, expected: str) -> None:
+    """项目名能当包名就沿用，否则退回项目号"""
+    assert derive_package_name(project_name, "SW-2026-901") == expected
 
 
 @pytest.mark.cli

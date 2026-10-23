@@ -138,7 +138,7 @@ def test_ai_context_bridge_write_pm_closure_context_uses_pending_handoff(tmp_pat
     assert context["request_id"] == "AI-20260813-000001"
     assert context["entry_mode"] == "cockpit"
     assert context["intent"] == "close_handoff"
-    assert context["target_skill"] == "pm-workflow"
+    assert context["target_skill"] == "cockpit-entry"
     assert context["active_change"]["number"] == "CHG-PLC-2026-009"
     assert context["active_change"]["domain"] == "PLC"
     assert context["product_context"]["goal_ref"] == "PM_SESSION_SW-2026-008.md#product-goal"
@@ -177,3 +177,19 @@ def test_ai_context_bridge_extracts_active_hypothesis_from_pm_session(tmp_path) 
     assert prod_ctx["active_hypothesis"]["statement"] == "在移载状态机引入安全区互锁"
     assert prod_ctx["active_hypothesis"]["expected_signal"] == "未达安全高度禁止推料"
 
+
+
+def test_ai_context_bridge_unknown_stack_falls_back_to_cockpit_entry(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """栈和变更域都不是 PLC/Python 时，兜底指向进门技能 cockpit-entry，而不是已隔离的 pm-workflow。"""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    bridge = AiContextBridge(str(workspace))
+
+    result = bridge.writeAiContext(
+        "SYS-2026-001", "治理", "", "developing", "CHG-DOCU-2026-001", "文档修订", "DOCU", "DOC",
+        "implementing", "changeCenter",
+    )
+
+    assert result["success"] is True
+    content = json.loads((workspace / ".auto-pm" / "ai_context.json").read_text(encoding="utf-8"))
+    assert content["target_skill"] == "cockpit-entry"
