@@ -82,6 +82,7 @@ _DIGITS = re.compile(r"\d+")
 _CHILD = r"""
 import json, os, sys
 from dataclasses import asdict
+getattr(sys.stdout, "reconfigure", lambda **kw: None)(encoding="utf-8")  # -I 会忽略 PYTHONIOENCODING；Windows 控制台默认 cp1252 打不出中文
 sys.path.insert(0, sys.argv[1])
 workspace, project = sys.argv[2], sys.argv[3]
 from auto_pm.plc.service import PlcService
