@@ -139,3 +139,12 @@ def test_mutation_without_permission_check_is_caught(tmp_path: Path) -> None:
     h.permit(False)
     h.scan()
     assert h.fb.vars["q_bAllowInfeedAct"]   # 改坏后不撤 —— 说明上面的用例确实在验这一段
+
+
+def test_ob1_permission_also_needs_modbus_enabled() -> None:
+    """Modbus 停用时 FB_3002 不再解包，对方信号停在最后值；OB1 的运行许可必须同时看 bModbusEnable（Codex 评审 #77）。"""
+    ob1 = (EXT.parent / "00_主程序" / "OB1.scl").read_text(encoding="utf-8")
+    call = ob1[ob1.index("GlobalVars.fbExternalDevice(") :]
+    call = call[: call.index(");")]
+    line = next(ln for ln in call.splitlines() if "i_bSafeToRun" in ln)
+    assert "GlobalVars.fbSafety.q_bSafeToRun" in line and "GlobalVars.bModbusEnable" in line
