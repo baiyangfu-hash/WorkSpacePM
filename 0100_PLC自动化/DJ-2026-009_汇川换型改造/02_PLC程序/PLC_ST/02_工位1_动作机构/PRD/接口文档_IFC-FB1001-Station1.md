@@ -20,24 +20,30 @@
 
 | 参数名 | 数据类型 | 描述 |
 | :--- | :--- | :--- |
-| `io_stStation` | `ST_Station1` | 工位1 全局交互结构体 (包含 Control, Status, Config, Sensors, Actuators) |
+| `io_stStation` | ST_Station1 | 工位1 全局交互结构体 (整块传递) |
 
 ### 2.1 控制指令子结构 (`stControl`)
 
 | 字段名 | 类型 | 说明 |
 | :--- | :---: | :--- |
-| `bAutoEnable` | BOOL | 自动运行使能 (1=使能) |
-| `bManualStart` | BOOL | 手动单步启动 |
-| `bReset` | BOOL | 故障复位指令 |
-| `bPause` | BOOL | 暂停运行 |
-| `bSingleStepMode` | BOOL | 单步运行模式 |
 
 ### 2.2 状态反馈子结构 (`stStatus`)
 
 | 字段名 | 类型 | 说明 |
 | :--- | :---: | :--- |
-| `iStep` | DINT | 当前工步号 (0=待机, 1=等料, 2=进料, 10=夹紧, 20=加工, 30=出料) |
-| `bRunning` | BOOL | 运行中标志 |
-| `bDone` | BOOL | 周期完成标志 |
-| `bAlarm` | BOOL | 站级报警标志 |
-| `iAlarmCode` | DINT | 报警代码 (101=进料超时, 102=夹紧超时, 103=松开超时) |
+| io_stExternal | ST_ExternalDevice | 外部设备 8步握手交握结构体 |
+
+## 附：代码中已不存在的旧条目（待确认后删除）
+
+| 名称 | 类型 | 说明 | 原对象 |
+|---|---|---|---|
+| bAutoEnable | BOOL | 【待确认】自动运行使能 (1=使能) | FB_1001_Station1 |
+| bManualStart | BOOL | 【待确认】手动单步启动 | FB_1001_Station1 |
+| bReset | BOOL | 【待确认】故障复位指令 | FB_1001_Station1 |
+| bPause | BOOL | 【待确认】暂停运行 | FB_1001_Station1 |
+| bSingleStepMode | BOOL | 【待确认】单步运行模式 | FB_1001_Station1 |
+| iStep | DINT | 【待确认】当前工步号 (0=待机, 1=等料, 2=进料, 10=夹紧, 20=加工, 30=出料) | FB_1001_Station1 |
+| bRunning | BOOL | 【待确认】运行中标志 | FB_1001_Station1 |
+| bDone | BOOL | 【待确认】周期完成标志 | FB_1001_Station1 |
+| bAlarm | BOOL | 【待确认】站级报警标志 | FB_1001_Station1 |
+| iAlarmCode | DINT | 【待确认】报警代码 (101=进料超时, 102=夹紧超时, 103=松开超时) | FB_1001_Station1 |
