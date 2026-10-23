@@ -166,10 +166,18 @@ def scope_from_card(repo: Path, card: str, base: str, result: Result) -> Prechec
     except GitError:
         result.errors.append(f"任务卡 `{card}` 在 PR 基线 {base[:8]} 上不存在：卡要先合入 main，范围才算数")
         return None
-    with tempfile.TemporaryDirectory(prefix="pr_scope_") as tmp:
-        copy = Path(tmp) / PurePosixPath(card).name
-        copy.write_text(content, encoding="utf-8")
-        report = precheck_markdown_card(copy, workspace_root=repo, command_tree={})
+    # Precheck the base bytes where they live when a checkout holds them unchanged (the PR head if the PR left the
+    # card alone, else the judge's base checkout): a new-format card takes its project directory from its location.
+    for root in (repo, TOOL_ROOT):
+        in_place = root / PurePosixPath(card)
+        if in_place.is_file() and not in_place.is_symlink() and in_place.read_bytes() == content.encode("utf-8"):
+            report = precheck_markdown_card(in_place, workspace_root=root, command_tree={})
+            break
+    else:
+        with tempfile.TemporaryDirectory(prefix="pr_scope_") as tmp:
+            copy = Path(tmp) / PurePosixPath(card).name
+            copy.write_text(content, encoding="utf-8")
+            report = precheck_markdown_card(copy, workspace_root=repo, command_tree={})
     for finding in report.findings:
         if finding.rule in SCOPE_RULES:
             result.errors.append(f"任务卡路径表不合格：[{finding.rule}] {finding.subject}: {finding.message}")

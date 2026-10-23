@@ -58,6 +58,15 @@ jobs:
 
       - name: Scope check
         env:
+          # Every git call in this step (the PLC doc check exports PR files with checkout-index) runs with
+          # Git LFS switched off, so a PR's .gitattributes/.lfsconfig cannot start git-lfs or reach its endpoint.
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: filter.lfs.smudge
+          GIT_CONFIG_VALUE_0: ""
+          GIT_CONFIG_KEY_1: filter.lfs.process
+          GIT_CONFIG_VALUE_1: ""
+          GIT_CONFIG_KEY_2: filter.lfs.required
+          GIT_CONFIG_VALUE_2: "false"
           # The PR body is untrusted text: it reaches the script only through the environment.
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

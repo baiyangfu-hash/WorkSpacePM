@@ -94,6 +94,28 @@ def test_s03_the_card_is_read_at_the_base_so_a_pr_cannot_widen_its_own_scope(rep
     assert any("改了任务卡本身" in note for note in result.notes)
 
 
+def test_s03b_the_base_card_is_prechecked_where_it_lives(repo: Path, tmp_path: Path, monkeypatch) -> None:
+    seen: list[Path] = []
+    real = gate.precheck_markdown_card
+
+    def spy(card_file: Path, **kwargs):  # type: ignore[no-untyped-def]
+        seen.append(card_file)
+        return real(card_file, **kwargs)
+
+    monkeypatch.setattr(gate, "precheck_markdown_card", spy)
+    # the PR leaves the card alone: its own copy in the PR head is the base bytes, so a new-format card keeps its project dir
+    base, head = commit(repo, {"src/a.py": "a = 2\n"})
+    assert gate.check(repo, base, head, f"任务卡: {CARD}").passed
+    assert seen[-1] == repo / CARD
+    # the PR edits the card: the judge's base checkout still holds the base bytes in place
+    judge = tmp_path / "judge"
+    write(judge, CARD, git(repo, "show", f"{base}:{CARD}") + "\n")
+    monkeypatch.setattr(gate, "TOOL_ROOT", judge)
+    base, head = commit(repo, {CARD: card(("src/a.py", "存在"), ("src/b.py", "存在")), "src/b.py": "b = 2\n"})
+    result = gate.check(repo, base, head, f"任务卡: {CARD}")
+    assert seen[-1] == judge / CARD and "越界：`src/b.py`" in errors(result)
+
+
 def test_s04_a_card_missing_at_the_base_fails(repo: Path) -> None:
     new_card = "02_规划/002_Y_实施卡_PM.md"
     base, head = commit(repo, {new_card: card(("src/b.py", "存在")), "src/b.py": "b = 2\n"})
@@ -275,6 +297,10 @@ def test_s19_the_workflow_takes_the_judge_from_the_base_and_never_runs_the_pr_he
     for flag in ("-c core.symlinks=false", "-c filter.lfs.smudge=", "-c filter.lfs.process=", "-c filter.lfs.required=false"):
         assert f"git {flag}" in worktree or f" {flag} " in worktree, flag
     assert worktree.index("core.symlinks=false") < worktree.index("worktree add")
+    # later git calls (checkout-index in the PLC doc check) also run with LFS off, through the step environment
+    env = next(s for s in steps if "pr_scope_check.py" in s.get("run", "")).get("env", {})
+    lfs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+    assert lfs == {"filter.lfs.smudge": "", "filter.lfs.process": "", "filter.lfs.required": "false"}
     for run in runs:  # the PR head appears only as the worktree that is created and as --repo data
         for line in run.splitlines():
             if "pr-head" in line:
