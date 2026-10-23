@@ -642,3 +642,36 @@ def test_sweep_leaves_gone_branches_outside_the_roster(lab: Lab) -> None:
     lab.service().sweep(apply=True)
 
     assert "feature/x" in lab.local_branches()
+
+
+def test_close_and_sweep_refuse_a_station_reached_through_a_link(lab: Lab, tmp_path: Path) -> None:
+    elsewhere = tmp_path.resolve() / "elsewhere"
+    elsewhere.mkdir()
+    (lab.root / ".auto-pm").mkdir()
+    try:
+        os.symlink(elsewhere, lab.root / ".auto-pm" / "worktrees", target_is_directory=True)
+    except OSError:
+        pytest.skip("this machine cannot create directory symlinks")
+    station = lab.station("claude")
+    git(
+        lab.root,
+        "worktree",
+        "add",
+        "-q",
+        "--no-track",
+        "-b",
+        "claude/CARD-1",
+        str(station),
+        "origin/main",
+    )
+    commit(station, "CARD-1.txt")
+    git(station, "push", "-q", "-u", "origin", "claude/CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+
+    with pytest.raises(AgentWorktreeError, match="工位必须真在控制根"):
+        lab.service().close("claude")
+    report = lab.service().sweep(apply=True)
+
+    assert report.done == []
+    assert any("工位必须真在控制根" in line for line in report.failed), report.failed
+    assert (elsewhere / "claude" / "CARD-1.txt").exists()

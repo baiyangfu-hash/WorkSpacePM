@@ -119,6 +119,11 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "path.resolve()",
     ),
     (
+        "删除时不查工位目录是否经过链接",
+        "        self._require_inside(station.path)\n        info = self._worktrees()",
+        "        info = self._worktrees()",
+    ),
+    (
         "删前不核对分支是否被换",
         "        if info.branch != station.branch:\n",
         "        if False:\n",
