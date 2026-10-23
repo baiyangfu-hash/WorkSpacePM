@@ -116,14 +116,14 @@ TEST_CASE "TC_MB05_UpStatus_Unpack"
     ASSERT GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp = TRUE;
 END_TEST_CASE
 
-// 下游状态字封包: 选用 FB_3001 未使能时不会清掉的两个位 (bit1 发送 ID, bit3 确认到位)
+// 下游状态字封包 (bit1 发送 ID, bit3 确认到位): 卡 003 起 FB_3001 未使能时也清这两个位, 所以只等 1 个周期
 TEST_CASE "TC_MB06_DownStatus_Pack"
     SET GlobalVars.bModbusEnable := TRUE;
     SET GlobalVars.bModbusUpLinkOK := TRUE;
     SET GlobalVars.bModbusDownLinkOK := TRUE;
     SET GlobalVars.stExternal.stDownstream.bMachine_SendModuleId := TRUE;
     SET GlobalVars.stExternal.stDownstream.bMachine_OutfeedArrivedAck := TRUE;
-    WAIT_CYCLES 2;
+    WAIT_CYCLES 1;   // OB1 先调 FB_3002 封包再调 FB_3001; 第 2 个周期 FB_3001 (未使能或按握手) 会改写这两个位, 只看第 1 个周期的封包
     ASSERT GlobalVars.awModbusDownWrite[1] = 16#000A;
 END_TEST_CASE
 
