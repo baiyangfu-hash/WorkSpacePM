@@ -186,7 +186,9 @@ class LedgerReconciler:
                 if parsed_cr.change_number:
                     chg_meta[parsed_cr.change_number] = parsed_cr
 
-        # 1. 补建缺失行
+        # 1. 补建缺失行（台账缺「变更单索引」表时先补表，否则一行也写不进）
+        if diff.missing_in_ledger:
+            self._updater.ensure_index_table(ledger_path)
         for cn in diff.missing_in_ledger:
             chg_cr = chg_meta.get(cn)
             if not chg_cr:

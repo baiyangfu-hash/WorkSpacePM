@@ -6,6 +6,7 @@
 |------|-----|
 | **文档标题** | FB_1013 九十度转向机构接口定义 |
 | **文档版本** | V9.0.0 |
+| **2026-10-22 对齐** | 接口表“说明”列按代码行尾注释逐字对齐（`plc docs check`），对齐前写法移到文末附录；只改文档，版本号和文件名不变 |
 | **关联源码** | actuator/FB_1013_NinetyDegreeTransfer.scl |
 | **编制日期** | 2026-05-29 |
 | **编制人** | Trae |
@@ -81,69 +82,69 @@
 
 | 名称 | 类型 | 默认值 | 有效值域 | 说明 | 来源 |
 |------|------|--------|----------|------|------|
-| i_bReset | BOOL | FALSE | TRUE/FALSE | 系统复位命令 | OB1←HMI |
-| i_bAutoMode | BOOL | FALSE | TRUE/FALSE | 自动模式选择 | OB1←HMI |
-| i_bManualMode | BOOL | FALSE | TRUE/FALSE | 手动模式选择 | OB1←HMI |
-| i_bStart | BOOL | FALSE | TRUE/FALSE | 启动信号(上升沿触发) | OB1←HMI |
-| i_bStop | BOOL | FALSE | TRUE/FALSE | 停止信号(电平有效) | OB1←HMI |
+| i_bReset | BOOL | FALSE | TRUE/FALSE | 系统复位   | OB1←HMI |
+| i_bAutoMode | BOOL | FALSE | TRUE/FALSE | 自动模式   | OB1←HMI |
+| i_bManualMode | BOOL | FALSE | TRUE/FALSE | 手动模式   | OB1←HMI |
+| i_bStart | BOOL | FALSE | TRUE/FALSE | 启动信号        | OB1←HMI |
+| i_bStop | BOOL | FALSE | TRUE/FALSE | 停止信号       | OB1←HMI |
 | i_bEnable | BOOL | FALSE | TRUE/FALSE | 使能信号 | 编排器/OB1 |
 
 ### 3.2 VAR_INPUT (入料检测传感器)
 
 | 名称 | 类型 | 默认值 | 有效值域 | 说明 | 来源 |
 |------|------|--------|----------|------|------|
-| i_bFeedDetect0 | BOOL | FALSE | TRUE/FALSE | 入料检测传感器0 | OB1←IO |
-| i_bFeedDetect1 | BOOL | FALSE | TRUE/FALSE | 入料检测传感器1 | OB1←IO |
-| i_bFeedDetect2 | BOOL | FALSE | TRUE/FALSE | 入料检测传感器2 | OB1←IO |
-| i_bFeedDetect3 | BOOL | FALSE | TRUE/FALSE | 入料检测传感器3 | OB1←IO |
-| i_bFeedDetect4 | BOOL | FALSE | TRUE/FALSE | 入料检测传感器4 | OB1←IO |
+| i_bFeedDetect0 | BOOL | FALSE | TRUE/FALSE | 入料检测通道0  | OB1←IO |
+| i_bFeedDetect1 | BOOL | FALSE | TRUE/FALSE | 入料检测通道1  | OB1←IO |
+| i_bFeedDetect2 | BOOL | FALSE | TRUE/FALSE | 入料检测通道2  | OB1←IO |
+| i_bFeedDetect3 | BOOL | FALSE | TRUE/FALSE | 入料检测通道3  | OB1←IO |
+| i_bFeedDetect4 | BOOL | FALSE | TRUE/FALSE | 入料检测通道4  | OB1←IO |
 
 ### 3.3 VAR_INPUT (到位/位置传感器)
 
 | 名称 | 类型 | 默认值 | 有效值域 | 说明 | 来源 |
 |------|------|--------|----------|------|------|
-| i_bPickPlaceDone | BOOL | FALSE | TRUE/FALSE | 取放完成信号(外部确认) | OB1←FB_xxx |
-| i_bLiftUpPos | BOOL | FALSE | TRUE/FALSE | 升降气缸上位/上限位 | OB1←IO |
-| i_bLiftDownPos | BOOL | FALSE | TRUE/FALSE | 升降气缸下位/下限位 | OB1←IO |
-| i_bFwdArrived | BOOL | FALSE | TRUE/FALSE | 正转到位信号 | OB1←IO |
-| i_bRevArrived | BOOL | FALSE | TRUE/FALSE | 反转到位信号 | OB1←IO |
+| i_bPickPlaceDone | BOOL | FALSE | TRUE/FALSE | 取放完成确认       | OB1←FB_xxx |
+| i_bLiftUpPos | BOOL | FALSE | TRUE/FALSE | 升降上位传感器    | OB1←IO |
+| i_bLiftDownPos | BOOL | FALSE | TRUE/FALSE | 升降下位传感器    | OB1←IO |
+| i_bFwdArrived | BOOL | FALSE | TRUE/FALSE | 正转到位传感器 | OB1←IO |
+| i_bRevArrived | BOOL | FALSE | TRUE/FALSE | 反转到位传感器 | OB1←IO |
 
 ### 3.4 VAR_INPUT (工艺参数)
 
 | 名称 | 类型 | 默认值 | 有效值域 | 说明 | 来源 |
 |------|------|--------|----------|------|------|
-| i_iFeedTimeoutMs | INT | 3000 | 0~60000 | 入料检测超时(ms)，0=关闭 | OB1←HMI |
-| i_iLiftTimeoutMs | INT | 5000 | 0~60000 | 升降气缸动作超时(ms)，0=关闭 | OB1←HMI |
-| i_iPickTimeoutMs | INT | 3000 | 0~60000 | 取物机构动作超时(ms) | OB1←HMI |
-| i_iPlaceTimeoutMs | INT | 3000 | 0~60000 | 放物机构动作超时(ms) | OB1←HMI |
-| i_iMotorTimeoutMs | INT | 5000 | 0~60000 | 电机旋转超时(ms) | OB1←HMI |
-| i_iClampConfirmMs | INT | 500 | 0~5000 | 夹取/释放确认时间(ms) | OB1←HMI |
-| i_iCycleDonePulseMs | INT | 500 | 0~2000 | 完成脉冲宽度(ms) | OB1←HMI |
+| i_iFeedTimeoutMs | INT | 3000 | 0~60000 | 入料检测超时          | OB1←HMI |
+| i_iLiftTimeoutMs | INT | 5000 | 0~60000 | 升降动作超时            | OB1←HMI |
+| i_iPickTimeoutMs | INT | 3000 | 0~60000 | 取物动作超时       | OB1←HMI |
+| i_iPlaceTimeoutMs | INT | 3000 | 0~60000 | 放物动作超时       | OB1←HMI |
+| i_iMotorTimeoutMs | INT | 5000 | 0~60000 | 电机转动超时     | OB1←HMI |
+| i_iClampConfirmMs | INT | 500 | 0~5000 | 夹取/释放确认时间     | OB1←HMI |
+| i_iCycleDonePulseMs | INT | 500 | 0~2000 | Done脉冲宽度   | OB1←HMI |
 
 ### 3.5 VAR_OUTPUT (气缸/电机直接输出)
 
 | 名称 | 类型 | 默认值 | 有效值域 | 说明 | 去向 |
 |------|------|--------|----------|------|------|
-| q_bOutputReset | BOOL | FALSE | TRUE/FALSE | 复位输出(全部清零) | OB1→IO |
-| q_bCylinderUp | BOOL | FALSE | TRUE/FALSE | 升降气缸-上升 | OB1→IO |
-| q_bCylinderDown | BOOL | FALSE | TRUE/FALSE | 升降气缸-下降 | OB1→IO |
-| q_bPickUp | BOOL | FALSE | TRUE/FALSE | 取物机构-上升 | OB1→IO |
-| q_bPickDown | BOOL | FALSE | TRUE/FALSE | 取物机构-下降 | OB1→IO |
-| q_bPlaceUp | BOOL | FALSE | TRUE/FALSE | 入物/放物机构-上升 | OB1→IO |
-| q_bPlaceDown | BOOL | FALSE | TRUE/FALSE | 入物/放物机构-下降 | OB1→IO |
+| q_bOutputReset | BOOL | FALSE | TRUE/FALSE | 输出总复位      | OB1→IO |
+| q_bCylinderUp | BOOL | FALSE | TRUE/FALSE | 主升降上升   | OB1→IO |
+| q_bCylinderDown | BOOL | FALSE | TRUE/FALSE | 主升降下降   | OB1→IO |
+| q_bPickUp | BOOL | FALSE | TRUE/FALSE | 取物升降上升  | OB1→IO |
+| q_bPickDown | BOOL | FALSE | TRUE/FALSE | 取物升降下降  | OB1→IO |
+| q_bPlaceUp | BOOL | FALSE | TRUE/FALSE | 放物升降上升     | OB1→IO |
+| q_bPlaceDown | BOOL | FALSE | TRUE/FALSE | 放物升降下降     | OB1→IO |
 | q_bSwingArmDown | BOOL | FALSE | TRUE/FALSE | 摆臂下降 | OB1→IO |
 | q_bPushPlateUp | BOOL | FALSE | TRUE/FALSE | 推板上升 | OB1→IO |
 | q_bPushPlateDown | BOOL | FALSE | TRUE/FALSE | 推板下降 | OB1→IO |
-| q_bMotorFwd | BOOL | FALSE | TRUE/FALSE | 旋转电机-正向 | OB1→IO |
-| q_bMotorRev | BOOL | FALSE | TRUE/FALSE | 旋转电机-反向 | OB1→IO |
+| q_bMotorFwd | BOOL | FALSE | TRUE/FALSE | 电机正转    | OB1→IO |
+| q_bMotorRev | BOOL | FALSE | TRUE/FALSE | 电机反转    | OB1→IO |
 
 ### 3.6 VAR_OUTPUT (状态指示输出) — V9.0精简
 
 | 名称 | 类型 | 默认值 | 有效值域 | 说明 | 去向 |
 |------|------|--------|----------|------|------|
-| q_bPickDone | BOOL | FALSE | TRUE/FALSE | 取物完成信号 | 编排器/HMI |
-| q_bPlaceDone | BOOL | FALSE | TRUE/FALSE | 放物完成信号 | 编排器/HMI |
-| q_iTablePosition | INT | 0 | 0~5 | 台面位置枚举: 0=未知 1=A 2=AO 3=O 4=OD 5=D | HMI |
+| q_bPickDone | BOOL | FALSE | TRUE/FALSE | 取物完成   | 编排器/HMI |
+| q_bPlaceDone | BOOL | FALSE | TRUE/FALSE | 放物完成   | 编排器/HMI |
+| q_iTablePosition | INT | 0 | 0~5 | 台面位置: 0=未知 1=A 2=AO 3=O 4=OD 5=D   | HMI |
 
 > **V9.0变更说明**：删除了以下V7.0的状态输出 —— q_bWaitState1, q_bTrayIn, q_bCylinderAtTop/Bottom, q_bPickAtTop/Bottom, q_bPickUpDone, q_bSwingArmUpDone, q_bPosA_Picker/Feeder, q_bPosA/AO/O/OD/D, q_bFwdArrived/RevArrived, q_bA_InputHasMaterial/InputA_HasMaterial/CPortIn_HasMaterial, q_bM0~M10。这些信息均可通过 q_iCurrentStep、q_iTablePosition 或直接读取传感器输入获得。
 
@@ -153,7 +154,7 @@
 |------|------|--------|----------|------|------|
 | q_wAlarm | WORD | 0 | 0~16#3FFF | 报警位: bitN→报警码(130+N), N=0~13 | OB1→FB_2001/HMI |
 | q_wErrorClass | WORD | 0 | 0~16#001F | 错误分类: bit0=主升降 bit1=取物 bit2=电机 bit3=放物 bit4=安全/入料 | OB1→FB_2001 |
-| q_wErrorID | WORD | 0 | 130~143 | 当前错误编号 | OB1→FB_2001 |
+| q_wErrorID | WORD | 0 | 130~143 | 当前错误编号 130~143 | OB1→FB_2001 |
 | q_bError | BOOL | FALSE | TRUE/FALSE | 错误汇总标志 | 编排器→FB_2001 |
 
 **q_wAlarm 位映射表**：
@@ -191,11 +192,11 @@
 
 | 名称 | 类型 | 默认值 | 有效值域 | 说明 | 去向 |
 |------|------|--------|----------|------|------|
-| q_iCurrentStep | INT | 0 | 0~12 | 当前步序号(S30~S42对应0~12) | OB1→HMI |
-| q_bBusy | BOOL | FALSE | TRUE/FALSE | 功能块忙(运行中) | 编排器 |
-| q_bDone | BOOL | FALSE | TRUE/FALSE | 单周期完成(脉冲) | 编排器 |
-| q_bErrorStatus | BOOL | FALSE | TRUE/FALSE | 错误发生(PLCopen) | 编排器→FB_2001 |
-| q_wErrorIDPLCopen | WORD | 0 | 130~143 | 当前错误ID(PLCopen标准) | OB1→FB_2001 |
+| q_iCurrentStep | INT | 0 | 0~12 | 当前步序(调试用)            | OB1→HMI |
+| q_bBusy | BOOL | FALSE | TRUE/FALSE | 运行中       | 编排器 |
+| q_bDone | BOOL | FALSE | TRUE/FALSE | 完成脉冲      | 编排器 |
+| q_bErrorStatus | BOOL | FALSE | TRUE/FALSE | 错误标志(PLCopen) | 编排器→FB_2001 |
+| q_wErrorIDPLCopen | WORD | 0 | 130~143 | 错误号(PLCopen)      | OB1→FB_2001 |
 
 ### 3.9 VAR_OUTPUT (断电保持)
 
@@ -207,12 +208,12 @@
 
 | 名称 | 类型 | 说明 | OB1接线 |
 |------|------|------|---------|
-| io_stMainCylinder | ST_Cylinder | 主升降气缸结构体 - 直读直写 | => astCylinder[1] |
-| io_stPickCylinder | ST_Cylinder | 取物升降气缸结构体 - 直读直写 | => astCylinder[2] |
-| io_stPlaceCylinder | ST_Cylinder | 放物升降气缸结构体 - 直读直写 | => astCylinder[3] |
-| io_stSwingArmCyl | ST_Cylinder | 摆臂气缸结构体 - 直读直写 | => astCylinder[4] |
-| io_stPushPlateCyl | ST_Cylinder | 推板气缸结构体 - 直读直写 | => astCylinder[5] |
-| io_stRotateMotor | ST_ConveyorMotor | 旋转电机结构体 - 直读直写 | => astMotor[1] |
+| io_stMainCylinder | ST_Cylinder | 主升降气缸           | => astCylinder[1] |
+| io_stPickCylinder | ST_Cylinder | 取物升降气缸           | => astCylinder[2] |
+| io_stPlaceCylinder | ST_Cylinder | 放物升降气缸           | => astCylinder[3] |
+| io_stSwingArmCyl | ST_Cylinder | 摆臂气缸           | => astCylinder[4] |
+| io_stPushPlateCyl | ST_Cylinder | 推板气缸           | => astCylinder[5] |
+| io_stRotateMotor | ST_ConveyorMotor | 旋转电机           | => astMotor[1] |
 
 **ST_Cylinder 子字段访问路径 (V1.1.0)**:
 
@@ -433,3 +434,60 @@ i_bManualMode=TRUE 时:
 | 取放料机构 IFC | ../../../../DJ-2026-005/02_PLC程序/通用ST程序及变量表/pickplace/PRD/接口文档_IFC-FB1003-PickPlace-V7.0.0.md | V7.0.0 |
 | 规范 | 905_SCL编程规范_LSP（法典 03_PLC自动化域；原801已归档，职能由905承接） | V1.2.1 | 
 | 905规范 | ../../../../../01_需求与设计/10_编程及变量规范/905_SCL编程规范_DEV.md | V7.0.0 |
+
+---
+
+## 附：2026-10-22 对齐前的旧说明（留底，不删）
+
+> 2026-10-22 按 `plc docs check` 把上面接口表的“说明”列逐字改成代码行尾注释（代码为准，只改文档，没改 .scl）。
+> 下表是改之前文档里的写法，有些比代码注释多写了单位、触发方式或用途，留在这里备查；
+> 其中与代码实际行为不一致的地方，见共享库对齐记录 `PRD/文档代码对齐记录_20261022.md` 第 3 节。
+
+| 引脚 | 对齐前文档说明 | 现说明（= 代码注释） |
+|------|------|------|
+| i_bReset | 系统复位命令 | 系统复位 |
+| i_bAutoMode | 自动模式选择 | 自动模式 |
+| i_bManualMode | 手动模式选择 | 手动模式 |
+| i_bStart | 启动信号(上升沿触发) | 启动信号 |
+| i_bStop | 停止信号(电平有效) | 停止信号 |
+| i_bFeedDetect0 | 入料检测传感器0 | 入料检测通道0 |
+| i_bFeedDetect1 | 入料检测传感器1 | 入料检测通道1 |
+| i_bFeedDetect2 | 入料检测传感器2 | 入料检测通道2 |
+| i_bFeedDetect3 | 入料检测传感器3 | 入料检测通道3 |
+| i_bFeedDetect4 | 入料检测传感器4 | 入料检测通道4 |
+| i_bPickPlaceDone | 取放完成信号(外部确认) | 取放完成确认 |
+| i_bLiftUpPos | 升降气缸上位/上限位 | 升降上位传感器 |
+| i_bLiftDownPos | 升降气缸下位/下限位 | 升降下位传感器 |
+| i_bFwdArrived | 正转到位信号 | 正转到位传感器 |
+| i_bRevArrived | 反转到位信号 | 反转到位传感器 |
+| i_iFeedTimeoutMs | 入料检测超时(ms)，0=关闭 | 入料检测超时 |
+| i_iLiftTimeoutMs | 升降气缸动作超时(ms)，0=关闭 | 升降动作超时 |
+| i_iPickTimeoutMs | 取物机构动作超时(ms) | 取物动作超时 |
+| i_iPlaceTimeoutMs | 放物机构动作超时(ms) | 放物动作超时 |
+| i_iMotorTimeoutMs | 电机旋转超时(ms) | 电机转动超时 |
+| i_iClampConfirmMs | 夹取/释放确认时间(ms) | 夹取/释放确认时间 |
+| i_iCycleDonePulseMs | 完成脉冲宽度(ms) | Done脉冲宽度 |
+| q_bOutputReset | 复位输出(全部清零) | 输出总复位 |
+| q_bCylinderUp | 升降气缸-上升 | 主升降上升 |
+| q_bCylinderDown | 升降气缸-下降 | 主升降下降 |
+| q_bPickUp | 取物机构-上升 | 取物升降上升 |
+| q_bPickDown | 取物机构-下降 | 取物升降下降 |
+| q_bPlaceUp | 入物/放物机构-上升 | 放物升降上升 |
+| q_bPlaceDown | 入物/放物机构-下降 | 放物升降下降 |
+| q_bMotorFwd | 旋转电机-正向 | 电机正转 |
+| q_bMotorRev | 旋转电机-反向 | 电机反转 |
+| q_bPickDone | 取物完成信号 | 取物完成 |
+| q_bPlaceDone | 放物完成信号 | 放物完成 |
+| q_iTablePosition | 台面位置枚举: 0=未知 1=A 2=AO 3=O 4=OD 5=D | 台面位置: 0=未知 1=A 2=AO 3=O 4=OD 5=D |
+| q_wErrorID | 当前错误编号 | 当前错误编号 130~143 |
+| q_iCurrentStep | 当前步序号(S30~S42对应0~12) | 当前步序(调试用) |
+| q_bBusy | 功能块忙(运行中) | 运行中 |
+| q_bDone | 单周期完成(脉冲) | 完成脉冲 |
+| q_bErrorStatus | 错误发生(PLCopen) | 错误标志(PLCopen) |
+| q_wErrorIDPLCopen | 当前错误ID(PLCopen标准) | 错误号(PLCopen) |
+| io_stMainCylinder | 主升降气缸结构体 - 直读直写 | 主升降气缸 |
+| io_stPickCylinder | 取物升降气缸结构体 - 直读直写 | 取物升降气缸 |
+| io_stPlaceCylinder | 放物升降气缸结构体 - 直读直写 | 放物升降气缸 |
+| io_stSwingArmCyl | 摆臂气缸结构体 - 直读直写 | 摆臂气缸 |
+| io_stPushPlateCyl | 推板气缸结构体 - 直读直写 | 推板气缸 |
+| io_stRotateMotor | 旋转电机结构体 - 直读直写 | 旋转电机 |
