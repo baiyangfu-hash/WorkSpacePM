@@ -96,3 +96,21 @@ def test_tracked_text_db_files_not_ignored() -> None:
         if head != SQLITE_MAGIC:
             offenders.append(f"{name}  <- {_rule(name)}")
     assert not offenders, "这些 .db 不是 SQLite 库（多半是 PLC 源文件），却命中忽略规则：\n" + "\n".join(offenders)
+
+
+def test_released_db_files_are_not_sqlite() -> None:
+    """反向：放行范围（不被忽略）里已跟踪的 .db 必须是文本数据块，SQLite 运行时库不许借放行规则入库。"""
+    proc = _git("ls-files", "-z", "-c")
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    offenders = []
+    for raw in proc.stdout.split(b"\0"):
+        name = raw.decode("utf-8", "replace")
+        if not name.lower().endswith(".db") or _ignored(name):
+            continue
+        path = WORKSPACE_ROOT / name
+        if not path.is_file():
+            continue
+        with path.open("rb") as fh:
+            if fh.read(len(SQLITE_MAGIC)) == SQLITE_MAGIC:
+                offenders.append(name)
+    assert not offenders, "这些 SQLite 库借 PLC 放行规则入了库，应删掉或改放 .auto-pm/：\n" + "\n".join(offenders)
