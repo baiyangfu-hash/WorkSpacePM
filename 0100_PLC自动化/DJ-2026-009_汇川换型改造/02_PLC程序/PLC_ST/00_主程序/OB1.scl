@@ -87,7 +87,8 @@ BEGIN
     //   运行复位脉冲; 运行许可中按复位照常清通讯故障
     GlobalVars.fbExternalDevice(
         i_bEnable := TRUE,
-        i_bSafeToRun := GlobalVars.fbSafety.q_bSafeToRun,
+        // Modbus 停用时对方信号冻结在最后值, 不能拿来走握手 (Codex 评审 #77): 运行许可同时看 bModbusEnable
+        i_bSafeToRun := GlobalVars.fbSafety.q_bSafeToRun AND GlobalVars.bModbusEnable,
         i_bAutoMode := GlobalVars.stStation1.stControl.bAutoEnable,
         i_bResetCmd := GlobalVars.fbSafety.q_bRunResetPulse
                        OR (GlobalVars.fbSafety.q_bSafeToRun AND (GlobalVars.stGlobal.i_bReset OR GlobalVars.stStation1.stControl.bReset)),
