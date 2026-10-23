@@ -55,6 +55,9 @@ BC_ID = re.compile(r"^BC-[A-Z]+-\d{4}-\d{3}-(?:\d{3}|\d{4}_(?:0[1-9]|1[0-2])_\d{
 REQ_ID = re.compile(r"^(REQ-[A-Z]+-\d{4}-\d{3}-\d{4}_(?:0[1-9]|1[0-2])_\d{3}) V([1-9]\d*)$")
 REQ_DRAWER = "00_需求核对单"
 _REQ_CONFIRMED_VERSION = re.compile(r"^\|\s*确认的版本\s*\|\s*(V[1-9]\d*)\s*\|", re.MULTILINE)
+_BC_MONTH = re.compile(r"-(\d{4})_(\d{2})_\d{3}$")
+# The template column is 提出时间; older project tables still say 提出日期.
+_BC_RAISED = ("提出时间", "提出日期")
 CHG_ID = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3,}$")
 CARD_ID = re.compile(r"CARD-[A-Za-z0-9-]+")
 _BASIS_HEADER = re.compile(r"^>\s*(依据|变更单|前置卡|状态)：(.*)$")
@@ -158,8 +161,9 @@ def _skip(path: Path, base: Path) -> bool:
     return any(part.casefold() == "archive" for part in path.relative_to(base).parts)
 
 
-def _bc_states(record: Path) -> dict[str, str]:
-    states: dict[str, str] = {}
+def _bc_rows(record: Path) -> dict[str, tuple[str, str]]:
+    """``{BC id: (状态, 提出时间)}``; the raise time is "" when the table has neither 提出时间 nor 提出日期."""
+    rows: dict[str, tuple[str, str]] = {}
     head: list[str] = []
     for line in record.read_text(encoding="utf-8", errors="replace").splitlines():
         if not line.lstrip().startswith("|"):
@@ -172,8 +176,9 @@ def _bc_states(record: Path) -> dict[str, str]:
         if re.fullmatch(r"[\s|:\-]+", line.strip()) or "编号" not in head or "状态" not in head:
             continue
         if len(cells) == len(head):
-            states[cells[head.index("编号")].strip("`")] = cells[head.index("状态")]
-    return states
+            raised = next((cells[head.index(name)] for name in _BC_RAISED if name in head), "")
+            rows[cells[head.index("编号")].strip("`")] = (cells[head.index("状态")], raised)
+    return rows
 
 
 def _req_files(project_dir: Path) -> list[Path]:
@@ -310,14 +315,25 @@ def _basis_rule(
                 BasisFinding("basis", "02_业务变更记录.md", "本项目变更管理柜里没有业务变更记录表")
             )
         else:
-            states = _bc_states(record)
+            rows = _bc_rows(record)
             for item in bc_ids:
                 if not item.startswith(f"BC-{pid}-"):
                     continue
-                state = states.get(item)
-                if state is None:
+                row = rows.get(item)
+                if row is None:
                     findings.append(BasisFinding("basis", item, "业务变更记录表里没有这一条"))
-                elif not state.startswith(APPROVED_BC_STATES):
+                    continue
+                state, raised = row
+                month = _BC_MONTH.search(item)
+                if month and not raised.startswith(f"{month.group(1)}-{month.group(2)}"):
+                    findings.append(
+                        BasisFinding(
+                            "basis",
+                            item,
+                            f"编号里的年月 {month.group(1)}_{month.group(2)} 与提出时间不符: {raised or '空'}",
+                        )
+                    )
+                if not state.startswith(APPROVED_BC_STATES):
                     findings.append(
                         BasisFinding("basis", item, f"依据的业务变更必须是“已批”，实际为: {state or '空'}")
                     )
