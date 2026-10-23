@@ -332,9 +332,11 @@ def holder_process_pid(
     """The long-lived process behind this CLI call: the agent host above the per-command shells, or the person's own shell.
 
     Walks up from ``start_pid`` past Python launchers, shells and per-command sandboxes.  The first other ancestor is the holder, unless it is a session root
-    (terminal window, desktop, init), in which case the nearest shell below it is.  ``None`` when the ancestry cannot be read, or when it
+    (terminal window, desktop, init), in which case the nearest shell below it is.  ``None`` when the ancestry cannot be read (the parent is
+    gone, nameless, or outside the visible PID space, which shows as PPID 1 under a PID 1 that is not a known session root), or when it
     reaches a session root with no shell on the way (started from Explorer or a service): a later reclaim then sees UNKNOWN, never
-    PROVEN_DEAD, and never a desktop or service process that would keep the lease alive forever.
+    PROVEN_DEAD, and never a desktop or service process that would keep the lease alive forever.  A shell seen below an unreadable
+    parent is not recorded: it may be the per-command shell of an agent host the walk cannot see, and it exits with the command.
     """
 
     lookup = _parent_pid if parent_of is None else parent_of
@@ -343,13 +345,16 @@ def holder_process_pid(
     for _ in range(_MAX_ANCESTORS):
         parent = lookup(current)
         if parent is None:
-            return nearest_shell
+            return None
         parent_pid, image_name = parent
         if parent_pid <= 0 or parent_pid == current or not image_name:
-            return nearest_shell
-        if image_name in _SESSION_ROOT_IMAGES or parent_pid == 1:
+            return None
+        if image_name in _SESSION_ROOT_IMAGES:
             # a session root is never the holder: explorer.exe or svchost.exe outlive every agent, so a lease on them could never be reclaimed
             return nearest_shell
+        if parent_pid == 1:
+            # PID 1 that is no known session root: a container or sandbox boundary, the real host is out of sight
+            return None
         if image_name in _SHELL_IMAGES:
             nearest_shell = parent_pid
         elif image_name in _SANDBOX_IMAGES:

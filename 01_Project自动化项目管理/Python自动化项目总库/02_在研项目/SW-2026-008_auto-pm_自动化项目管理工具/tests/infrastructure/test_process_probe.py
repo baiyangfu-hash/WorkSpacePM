@@ -112,9 +112,9 @@ def test_a_per_command_sandbox_is_skipped_and_the_resident_tool_host_is_the_hold
 
 
 def test_a_sandbox_is_never_the_fallback_holder_even_when_the_walk_stops_above_it() -> None:
-    # the walk cannot read past the sandbox: the shell below it is the best candidate, never the sandbox that dies with the command
+    # the walk cannot read past the sandbox: neither the sandbox nor the per-command shell below it is recorded, both die with the command
     cut_off = _ancestry((9, "python.exe"), (8, "powershell.exe"), (7, "trae-sandbox.exe"), (6, ""))
-    assert process_probe.holder_process_pid(9, cut_off) == 8
+    assert process_probe.holder_process_pid(9, cut_off) is None
     reaches_root = _ancestry((9, "python.exe"), (8, "powershell.exe"), (7, "trae-sandbox.exe"), (5, "explorer.exe"))
     assert process_probe.holder_process_pid(9, reaches_root) == 8
 
@@ -144,8 +144,18 @@ def test_an_unreadable_or_interpreter_only_ancestry_records_nothing_rather_than_
     assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (8, "python.exe"), (5, "explorer.exe"))) is None
     assert process_probe.holder_process_pid(9, _ancestry((9, "pythonw.exe"), (4, "svchost.exe"))) is None
     assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (7, "trae-sandbox.exe"), (4, "services.exe"))) is None
-    # the shell already seen is still the best long-lived candidate when the walk cannot read further
-    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"))) == 8
+    # a shell below an unreadable parent is not recorded (Codex on #80/#81): it may be the per-command shell of a host out of sight
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (7, ""))) is None
+
+
+def test_a_shell_whose_parent_shows_as_pid_1_outside_a_session_root_records_nothing() -> None:
+    # Codex on #80/#81: in a container or sandbox the agent host is outside the visible PID space and the per-command shell shows PPID 1;
+    # recording that shell made the lease PROVEN_DEAD as soon as the command exited, so a second agent could reclaim a live card
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "tini"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "node"))) is None
+    # positive control: a known session root as PID 1 still keeps the person's own shell
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "systemd"))) == 8
 
 
 def test_on_a_real_process_chain_auto_records_the_agent_host_and_not_its_per_command_shell(tmp_path: Path) -> None:
