@@ -94,7 +94,20 @@
 6. **台账、WBS、治理库、发布指针只由账本主机上的主执行写**，工位里的 agent 不写。
 7. **跨电脑只通过 GitHub 交换代码**：每个工位推自己的分支、开 PR，合进 `main` 后各控制根拉 `main`。
 
-**开工位 / 收工位（现在手工执行，在控制根里）：**
+**开工位 / 收工位（在控制根里）：**
+
+> 生效时间：`main.py worktree …` 已合进 `main`（PR #87），但当前部署的发布版还没有，要等下一次发版切换后才能在控制根使用；在那之前，下面“手工命令”照旧。
+
+```
+main.py worktree open <agent> <卡号>    # 开工：从最新 origin/main 建工位和 <前缀><卡号> 分支
+main.py worktree list                   # 看每个工位：未提交、未推送、是否并进 main、占用
+main.py worktree close <agent>          # 收工：无未提交改动、提交都已推送才删，已并进 main 的再删本地分支
+main.py worktree sweep                  # 只列可清理的；加 --apply 才删（已并进 main 的工位、远程已删的本地分支、已结束 Run 的 run-plan-*）
+```
+
+命令的护栏：不删有未提交改动或没推送提交的工位；不删远程分支（合并后由 GitHub 自动删）；不动别的 agent 的工位；认不出调用方（带了 agent 标记但不在名册里）一律拒绝，只有用户自己的终端（没有任何 agent 标记）才能收别人的工位和清 run-plan。调用方靠环境变量 `AUTO_PM_AGENT`（冒号前一段，如 `trae:cn`）、`CLAUDECODE`、`CODEX_*` 识别。
+
+发版切换前的手工命令（等价于上面四条）：
 
 ```
 git fetch origin main
@@ -103,9 +116,8 @@ git worktree list
 git worktree remove .auto-pm/worktrees/claude    # 收工：分支已推送、工位无未提交改动后再执行
 ```
 
-**待实现**（实现前按上面手工规则执行）：
+**待实现**：
 
-- 一键命令 `main.py worktree open <agent> <卡号>` / `worktree list` / `worktree close` 与 agent 名册（X05）。
 - 账本主机联锁：非账本主机写台账一律拒绝（X06）。
 - 跨电脑工作票（同一张卡两台电脑不能同时领）与查看其他电脑在做什么（X10、X08）。
 
