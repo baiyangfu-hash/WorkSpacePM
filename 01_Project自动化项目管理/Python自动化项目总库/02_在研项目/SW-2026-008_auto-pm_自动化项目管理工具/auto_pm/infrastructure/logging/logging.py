@@ -10,6 +10,26 @@ import logging
 import sys
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from typing import TextIO
+
+#: 包内各模块日志器（``logging.getLogger(__name__)`` → ``auto_pm.*``）的共同父节点。
+#: 运行日志的 handler 必须挂在这里，模块日志（包括收口被拒原因）才会进 ``auto-pm.log``；
+#: 挂在 ``__app_name__``（``auto-pm``，短横线）上，模块日志一条也收不到。
+PACKAGE_LOGGER_NAME = "auto_pm"
+
+
+class _CurrentStderrHandler(logging.StreamHandler[TextIO]):
+    """每次输出时才取当时的 ``sys.stderr``（与 ``logging.lastResort`` 同理）。
+
+    Click 测试会临时换掉 ``sys.stderr``；在构造时绑定流的普通 StreamHandler 之后会写到已关闭的流。
+    """
+
+    def __init__(self, level: int = logging.NOTSET) -> None:
+        logging.Handler.__init__(self, level)
+
+    @property
+    def stream(self) -> TextIO:  # type: ignore[override]
+        return sys.stderr
 
 
 class _SilentTimedRotatingFileHandler(TimedRotatingFileHandler):
@@ -43,7 +63,12 @@ def _get_log_dir() -> Path:
 
 
 def setup_logger(
-    *, app_name: str, log_level: str, bind_to: logging.Logger | None = None
+    *,
+    app_name: str,
+    log_level: str,
+    bind_to: logging.Logger | None = None,
+    console_level: str | None = None,
+    console_as_last_resort: bool = False,
 ) -> logging.Logger:
     """
     Set up a logger with the specified application name and log level.
@@ -60,6 +85,12 @@ def setup_logger(
     log_level : str
         The logging level as a string (e.g., 'DEBUG', 'INFO', 'WARNING',
         'ERROR', 'CRITICAL').
+    console_level : str | None, optional
+        控制台 handler 的最低级别；实际取它与 ``log_level`` 中较高的一个。``None`` 表示与 ``log_level`` 相同。
+        文件 handler 始终按 ``log_level`` 记录。
+    console_as_last_resort : bool, optional
+        为 True 时控制台只在根日志器没有任何 handler 时输出，与 Python 自带兜底（``logging.lastResort``）
+        的触发条件一致：宿主（pytest、将来的界面）已配置根日志器时不重复打印。
     bind_to : logging.Logger | None, optional
         An existing logger to bind the new logger's handlers to, by
         default None. Typically used for fastapi applications.
@@ -80,10 +111,14 @@ def setup_logger(
 
     # 幂等：已配置 handler 则不再重复添加，仅更新级别
     if not logger.handlers:
-        formatter = logging.Formatter("%(asctime)s [%(levelname)8.8s] %(message)s")
+        formatter = logging.Formatter("%(asctime)s [%(levelname)8.8s] %(name)s: %(message)s")
 
         # 1. 控制台 handler（stderr，避免污染 stdout 机器可读输出）
-        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler = _CurrentStderrHandler()
+        if console_level is not None:
+            console_handler.setLevel(max(normalised_log_level, getattr(logging, console_level.upper())))
+        if console_as_last_resort:
+            console_handler.addFilter(lambda _record: not logging.getLogger().handlers)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 

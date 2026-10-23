@@ -9,6 +9,10 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
+from auto_pm.application.core.candidate_merge_back_service import (
+    CandidateMergeBackError,
+    CandidateMergeBackService,
+)
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollection,
     EvidenceCollectionError,
@@ -149,6 +153,25 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def _reject_control_root_drift(
+        self, worktree: Path, owned: tuple[str, ...], git_head: str
+    ) -> None:
+        """An isolated Run must start from what the control root holds, or its closure could never merge back."""
+
+        merge_back = CandidateMergeBackService(self._root)
+        if not merge_back.is_isolated_path(worktree):
+            return
+        try:
+            drift = merge_back.control_root_drift(owned, git_head)
+        except CandidateMergeBackError as error:
+            raise ContinuityExecutionError(str(error)) from error
+        if drift:
+            raise ContinuityExecutionError(
+                "控制根里范围内的文件与本 Run 起点不一致（多半是上一单收口并回、还没提交）："
+                + "、".join(drift)
+                + "；请先把它们提交，再从新的提交建隔离工作树，否则收口时无法并回"
+            )
+
     def start_run(
         self,
         *,
@@ -222,6 +245,7 @@ class ContinuityExecutionService:
             )
             if actual_head != git_head:
                 raise ContinuityExecutionError("Run git_head 与受管 worktree 当前 HEAD 不一致")
+            self._reject_control_root_drift(governed_worktree, owned, git_head)
             actual_observed = tuple(
                 path for path in actual_dirty if self._paths_covered((path,), owned)
             )

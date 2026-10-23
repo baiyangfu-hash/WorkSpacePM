@@ -145,7 +145,7 @@ def test_closure_with_valid_decision_and_files_passes(
 
     closed = service.close_request(request_id, result=result)
     assert closed["status"] == "consumed"
-    assert closed["closure"]["closed_by"] == "pm-workflow"
+    assert closed["closure"]["closed_by"] == "pm-governance"
 
 
 def test_closure_rejects_changed_files_out_of_approved_scope(

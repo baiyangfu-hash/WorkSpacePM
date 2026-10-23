@@ -230,11 +230,29 @@ def change_files(monitor_dir: Path, change_id: str) -> list[Path]:
     )
 
 
-def is_guarded(path: str) -> bool:
-    return (
+def is_guarded(path: str, workspace_root: Path | None = None) -> bool:
+    """A guarded file or directory, or a directory that contains one (an ancestor such as
+    ``00_Infrastructure/auto_pm`` covers ``active_release.json``).  With ``workspace_root`` a
+    directory is also searched for project version ledgers."""
+
+    if (
         path in GUARDED_FILES
         or any(path.startswith(prefix) or f"{path}/" == prefix for prefix in GUARDED_PREFIXES)
         or any(path.endswith(suffix) for suffix in GUARDED_SUFFIXES)
+    ):
+        return True
+    directory = path.rstrip("/")
+    if directory in {"", "."}:
+        return True
+    if any(item.startswith(f"{directory}/") for item in (*GUARDED_FILES, *GUARDED_PREFIXES)):
+        return True
+    if workspace_root is None or not (workspace_root / directory).is_dir():
+        return False
+    ledger_name = GUARDED_SUFFIXES[0].rsplit("/", 1)[-1]
+    return any(
+        f"/{ledger.relative_to(workspace_root).as_posix()}".endswith(suffix)
+        for ledger in (workspace_root / directory).rglob(ledger_name)
+        for suffix in GUARDED_SUFFIXES
     )
 
 
@@ -274,7 +292,7 @@ def basis_findings(
 
     monitor_dir = card_file.resolve().parent.parent.parent
     findings.extend(_basis_rule(header, project_dir, monitor_dir, workspace_root, pid))
-    findings.extend(_change_rule(header, monitor_dir, paths))
+    findings.extend(_change_rule(header, monitor_dir, paths, workspace_root.resolve()))
     return findings
 
 
@@ -357,7 +375,9 @@ def _basis_rule(
     return findings
 
 
-def _change_rule(header: CardHeader, monitor_dir: Path, paths: Iterable[str]) -> list[BasisFinding]:
+def _change_rule(
+    header: CardHeader, monitor_dir: Path, paths: Iterable[str], workspace_root: Path
+) -> list[BasisFinding]:
     if not header.change:
         return [BasisFinding("change", "变更单", "新式实施卡缺少机器可读头部 `变更单：`（没有就写 `无`）")]
     if len(header.change) > 1:
@@ -369,7 +389,7 @@ def _change_rule(header: CardHeader, monitor_dir: Path, paths: Iterable[str]) ->
     value = values[0].strip()
     if _PLACEHOLDER.search(value) or not value:
         return [BasisFinding("placeholder", "变更单", f"变更单仍是空的或占位符: {raw}")]
-    guarded = sorted(path for path in paths if is_guarded(path))
+    guarded = sorted(path for path in paths if is_guarded(path, workspace_root))
     if value == NO_CHANGE:
         if guarded:
             return [
@@ -417,6 +437,21 @@ def cards_for_change(drawer: Path, change_id: str) -> list[SiblingCard]:
         if header.change_id == change_id:
             cards.append(SiblingCard(path, card_id_of(path), header))
     return cards
+
+
+def unreadable_cards(drawer: Path) -> list[Path]:
+    """Cards in the drawer that are not UTF-8 text: their change order cannot be read, so they may be siblings."""
+    unreadable: list[Path] = []
+    if not drawer.is_dir():
+        return unreadable
+    for path in sorted(drawer.glob("*.md")):
+        if path.name.casefold() == "readme.md" or not path.is_file():
+            continue
+        try:
+            path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            unreadable.append(path)
+    return unreadable
 
 
 def paths_overlap(left: Iterable[str], right: Iterable[str]) -> list[str]:

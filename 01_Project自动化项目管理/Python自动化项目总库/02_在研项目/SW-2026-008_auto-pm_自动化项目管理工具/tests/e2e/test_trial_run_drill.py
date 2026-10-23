@@ -23,7 +23,6 @@ import sqlite3
 import sys
 from contextlib import closing
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -50,22 +49,6 @@ from tests.e2e.test_pmf_plc import (
 EXECUTOR = "trae:cn"
 TOKEN_ENV = "DRILL_TRAE_LEASE_TOKEN"
 SESSION_FILE = f"{PROJECT}/PM_SESSION_{PROJECT_ID}.md"
-GAP_9 = (
-    "缺口⑨（预做在分支 claude/gap9-approval-proof，未合）：命令行批准只查证据格式，agent 填上用户名和一个自己编的 "
-    "user-confirmation: 引用就能批准；试跑第 5 条过，只是因为 Trae 自觉等了用户“确认开工”"
-)
-
-# What Trae ran in the trial for verification (the sanctioned temporary call, gap ⑧): the facade's own quality check.
-VERIFY_STEP = """\
-import json, os, sys
-from pathlib import Path
-from auto_pm.core.pm_facade_service import PmFacadeService
-outcome = PmFacadeService(Path(sys.argv[1])).verify_for_acceptance(sys.argv[2], lease_token=os.environ.pop(sys.argv[3]))
-print(json.dumps({'verified': outcome.verified, 'mission_state': outcome.mission_state.value, 'message': outcome.message},
-                 ensure_ascii=False))
-"""
-
-
 class KnownDefectError(AssertionError):
     """The one symptom a strict xfail may absorb; any other failure stays a failure."""
 
@@ -103,14 +86,15 @@ def test_t01b_verification_refuses_what_acceptance_would_refuse(tmp_path: Path, 
 
     verified = lane.verify()
 
-    assert verified.returncode == 0, drill.transcript()
     outcome = verified.json()
+    assert verified.returncode == (0 if outcome["verified"] else 1), drill.transcript()
     if outcome["verified"]:
         accepted = drill.cli("pm", "accept", "--mission-id", lane.mission_id)
         assert accepted.returncode == 0, f"质量验证放行、验收却拒收（试跑第 8 条的死路）: {accepted.stderr}\n{drill.transcript()}"
         pytest.fail(f"声明 1 个、实际改 3 个，质量验证和验收却都放行了\n{drill.transcript()}")
     assert outcome["mission_state"] == "ACTIVE", outcome
-    assert "未声明却改动 2 个" in outcome["message"], f"质量验证没说清为什么不过: {outcome['message']}"
+    why = outcome["message"] + outcome.get("reason", "")
+    assert "未声明却改动 2 个" in why, f"质量验证没说清为什么不过: {why}"
 
 
 def test_t01c_an_ide_run_cannot_start_with_an_empty_declaration(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
@@ -288,9 +272,13 @@ def test_t05a_a_plan_on_a_triage_ticket_the_user_has_not_confirmed_is_refused(tm
     assert _sheets(drill) == []
 
 
-@pytest.mark.xfail(strict=True, raises=KnownDefectError, reason=GAP_9)
 def test_t05b_an_agent_cannot_approve_with_a_confirmation_the_user_never_gave(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Gap 9: once the user's approver PIN is committed, a made-up confirmation no longer approves."""
+
+    from tests.e2e.test_approval_pin_drill import commit_approver_pin
+
     drill = make_drill(tmp_path, benchmark_tar)
+    commit_approver_pin(drill)
     files = comment_files(drill.root, "试跑：自批")
     item = _inbox(drill, "REQ-TRIAL-T05B")
     planned = drill.cli(*_plan(item, "REQ-TRIAL-T05B", files))
@@ -302,8 +290,8 @@ def test_t05b_an_agent_cannot_approve_with_a_confirmation_the_user_never_gave(tm
         "--approval-evidence-ref", "user-confirmation:2026-10-22T07:11:03-07:00",
     )
 
-    if forged.returncode == 0:
-        raise KnownDefectError(f"agent 自己编的确认引用批准成功: {forged.stdout[:200]}")
+    assert forged.returncode != 0, f"agent 自己编的确认引用批准成功: {forged.stdout[:200]}"
+    assert "批准口令" in forged.stderr, drill.transcript()
 
 
 # --- helpers --------------------------------------------------------------------------------------------------------
@@ -397,7 +385,7 @@ def _uncommitted(root: Path) -> list[str]:
 
 class _IdeLane:
     """An approved Mission taken up by an IDE agent the way Trae did in the trial: start confirmation, its own worktree,
-    ``continuity run start``, RUNNING, writing, VERIFYING, the facade's quality check."""
+    ``continuity run start``, RUNNING, writing, VERIFYING, ``pm verify``."""
 
     def __init__(self, drill: Drill, request_id: str, files: dict[str, str]) -> None:
         self.drill = drill
@@ -421,10 +409,9 @@ class _IdeLane:
         ]
         assert len(missions) == 1, missions
         self.mission_id = missions[0].mission_id
-        self.work_id = _start_the_approved_work(drill.root, missions[0])
+        self.work_id = _start_the_approved_work(drill, self.mission_id)
         self.worktree = drill.root / ".auto-pm" / "worktrees" / f"ide-{request_id.lower()}"
         git(drill.root, "worktree", "add", "-q", "--detach", str(self.worktree))
-        (drill.tools / "verify_step.py").write_text(VERIFY_STEP, encoding="utf-8")
 
     def _with_token(self, name: str, command: list[str]) -> Step:
         environment = self.drill._env()
@@ -463,29 +450,19 @@ class _IdeLane:
             target.write_text(text, encoding="utf-8", newline="\n")
 
     def verify(self) -> Step:
-        script = str(self.drill.tools / "verify_step.py")
-        return self._with_token("verify_for_acceptance", [sys.executable, script, str(self.drill.root), self.mission_id, TOKEN_ENV])
+        return self._with_token(
+            "pm verify",
+            self._launcher(["pm", "verify", "--mission-id", self.mission_id, "--lease-token-env", TOKEN_ENV]),
+        )
 
 
-def _start_the_approved_work(root: Path, mission: Any) -> str:
-    """The user's start confirmation for a Mission approved by ``pm approve --request-id``.
-
-    On this base ``pm confirm-start`` cannot bind that Mission's Work yet (gap ⑧, branch claude/gap8-verify-close-cli);
-    these are the facade steps it takes there, so the IDE lane reaches ``continuity run start`` as Trae did.
-    """
-
-    from auto_pm.core.pm_facade_service import PmFacadeService
+def _start_the_approved_work(drill: Drill, mission_id: str) -> str:
+    """The user's start confirmation, as Trae runs it: ``pm confirm-start`` (gap ⑧ binds the card's own Work)."""
 
     from auto_pm.infrastructure.continuity_store import ContinuityStore
 
-    facade = PmFacadeService(root)
-    facade.plan(mission.mission_id)
-    works = [
-        work.work_id
-        for work in ContinuityStore(root).list_works(PROJECT_ID, include_terminal=False)
-        if work.work_id.startswith("WORK-MSN-") and work.authorization_ref == mission.authority.decision_id
-    ]
-    assert len(works) == 1, works
-    facade.approve(mission.mission_id, works[0])
-    facade.execute(mission.mission_id)
-    return works[0]
+    started = drill.cli("pm", "confirm-start", "--mission-id", mission_id)
+    assert started.returncode == 0, drill.transcript()
+    work_id = ContinuityStore(drill.root).get_mission(mission_id).root_work_id
+    assert work_id and work_id.startswith("WORK-MSN-"), work_id
+    return work_id

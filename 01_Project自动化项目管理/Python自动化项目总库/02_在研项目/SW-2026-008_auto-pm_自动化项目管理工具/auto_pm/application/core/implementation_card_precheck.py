@@ -463,18 +463,59 @@ def _sibling_findings(
         return []
     own_id = basis.card_id_of(card_file)
     findings: list[PrecheckFinding] = []
-    for sibling in basis.cards_for_change(card_file.resolve().parent, change_id):
+    drawer = card_file.resolve().parent
+    for unreadable in basis.unreadable_cards(drawer):
+        if unreadable.resolve() != card_file.resolve():
+            findings.append(
+                PrecheckFinding(
+                    "change",
+                    unreadable.name,
+                    "同一抽屉里的这张卡不是 UTF-8 文本，读不出它挂哪张变更单、改哪些文件；先转成 UTF-8",
+                )
+            )
+    for sibling in basis.cards_for_change(drawer, change_id):
         if sibling.card_file.resolve() == card_file.resolve() or not sibling.open:
             continue
-        if sibling.card_id in header.predecessors or own_id in sibling.header.predecessors:
+        names_me = own_id in sibling.header.predecessors
+        named_by_me = sibling.card_id in header.predecessors
+        if names_me and named_by_me:
+            findings.append(
+                PrecheckFinding(
+                    "change",
+                    sibling.card_id,
+                    f"本卡和 {sibling.card_id} 互为前置卡，先后没有排定；只在后做的那张卡写 `前置卡：`",
+                )
+            )
             continue
+        if names_me:
+            continue  # this card goes first; the sibling waits for it
         lines = sibling.card_file.read_text(encoding="utf-8").splitlines()
         declared = _machine_header(lines)["路径根"]
         root = _normalized(declared[0]) if declared and declared[0] not in {".", "./"} else None
         sibling_root = root or ("." if declared else project_root)
-        sibling_paths, _ = _parse_path_tables(lines, sibling_root, str(sibling.card_file))
+        sibling_paths, sibling_problems = _parse_path_tables(lines, sibling_root, str(sibling.card_file))
+        if any(item.rule in {"path_table", "placeholder"} for item in sibling_problems):
+            # A row that cannot be read may be the one that overlaps: refuse rather than guess.
+            findings.append(
+                PrecheckFinding(
+                    "change",
+                    sibling.card_id,
+                    f"同一变更单 {change_id} 下未关闭的卡路径表读不全，无法核对是否改同一批文件；"
+                    "先把那张卡的路径表补齐",
+                )
+            )
+            continue
         shared = basis.paths_overlap(paths, [item.path for item in sibling_paths])
-        if shared:
+        if shared and sibling.card_id in header.predecessors:
+            findings.append(
+                PrecheckFinding(
+                    "change",
+                    sibling.card_id,
+                    f"前置卡 {sibling.card_id} 还没关闭，它和本卡改同一批文件（{', '.join(shared)}）；"
+                    "等前置卡验收关闭后再开工",
+                )
+            )
+        elif shared:
             findings.append(
                 PrecheckFinding(
                     "change",

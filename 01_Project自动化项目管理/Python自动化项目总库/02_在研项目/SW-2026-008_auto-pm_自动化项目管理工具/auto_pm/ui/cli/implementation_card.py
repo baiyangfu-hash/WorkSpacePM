@@ -26,6 +26,7 @@ from auto_pm.contracts.implementation_card import (
     Outcomes,
     StopLines,
 )
+from auto_pm.ui.cli.approval_pin import require_approval_pin
 
 
 def _service(ctx: click.Context) -> ImplementationCardService:
@@ -194,7 +195,12 @@ def validate_card(ctx: click.Context, card_id: str) -> None:
 @click.option("--approval-evidence", required=True)
 @click.pass_context
 def approve_card(ctx: click.Context, card_id: str, approver: str, approval_evidence: str) -> None:
-    """Attach external user approval to an already reviewed card."""
+    """Attach external user approval to an already reviewed card (the user's PIN once one is committed, gap 9)."""
+    proof = require_approval_pin(
+        Path(ctx.find_root().obj.control_root), summary=f"批准实施卡 {card_id}", purpose="card-approve", subject=card_id, approver=approver
+    )
+    if proof is not None:
+        approver, approval_evidence = proof.approver, proof.evidence_ref
     try:
         card = _service(ctx).approve(card_id, approver=approver, approval_evidence=approval_evidence)
         _emit({"card_id": card.card_id, "state": card.state.value})

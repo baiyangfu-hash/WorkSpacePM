@@ -1,0 +1,119 @@
+"""Raw-requirement scenario: the user gives one sentence, the IDE agent must get from there to a closed Mission by the cockpit alone.
+
+The D08 prompts spelled out goal, scope, every command and every prohibition.  The user cannot write prompts like that; the
+field input is one sentence.  This scenario checks the parts a machine can check: the route the entry skill describes uses
+commands that exist, the command-line lane from the sentence to an approved scope card works, the IDE agent's verify/close
+commands exist (gap 8, closed by ``pm verify`` / ``pm close``; the full walk is ``test_ide_lane_drill.py``), and gap 9
+(approval evidence that was only format-checked) is closed by the user's approval PIN.  Whether a real Trae finds its way is decided by the field trial
+(``/mnt/project-files/plans/原始需求直接交给Trae_评估_20261021.md`` §4), not here.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from tests.e2e.test_closure_drill import APPROVER, MAIN_DOMAIN, comment_files, make_drill
+from tests.e2e.test_pmf_plc import (
+    PROJECT,
+    PROJECT_ID,
+    benchmark_tar,  # noqa: F401 - module fixture re-used by name
+    git,
+)
+
+SENTENCE = "公共报警加一个蜂鸣器输出，任意报警激活时响"
+def _skill_text() -> str:
+    repository = Path(git(Path(__file__).resolve().parent, "rev-parse", "--show-toplevel"))
+    return (repository / ".trae" / "skills" / "cockpit-entry" / "SKILL.md").read_text(encoding="utf-8")
+
+
+def _pm_commands(drill) -> set[str]:  # type: ignore[no-untyped-def]
+    listed = drill.cli("pm", "--help")
+    assert listed.returncode == 0, drill.transcript()
+    section = listed.stdout.split("Commands:", 1)[1]
+    return {match.group(1) for match in re.finditer(r"^\s{2}([a-z][a-z-]*)\s", section, re.MULTILINE)}
+
+
+def _approve_from_one_sentence(drill, request_id: str, files: dict[str, str] | None = None):  # type: ignore[no-untyped-def]
+    """What the skill's route makes an agent do with the sentence, using command-line calls only."""
+
+    files = files if files is not None else comment_files(drill.root, "原始需求")
+    added = drill.cli(
+        "pm", "inbox", "add", "--project-id", PROJECT_ID, "--request-id", request_id, "--title", "公共报警加蜂鸣器输出",
+        "--kind", "iteration", "--domain", MAIN_DOMAIN, "--original-words", SENTENCE, "--affects", "公共报警块 FB_2001",
+        "--duplicate-check", "查过收件箱与台账，没有同类条目", "--evidence", f"file:{PROJECT}/.plc.json",
+        "--disposition", "after_current", "--rationale", "用户提出", "--alternative", "不做", "--cost-risk", "低：只改一个块",
+    )
+    assert added.returncode == 0, drill.transcript()
+    item = added.json()["item"]
+    confirmed = drill.cli(
+        "pm", "inbox", "confirm", item["item_id"], "--ticket-hash", item["ticket_hash"], "--approver", APPROVER,
+        "--approval-evidence-ref", f"user-confirmation:chat-{request_id}",
+    )
+    assert confirmed.returncode == 0, drill.transcript()
+    plan = [
+        "pm", "plan", "--project-id", PROJECT_ID, "--request-id", request_id, "--objective", SENTENCE,
+        "--acceptance", f"main.py plc check {PROJECT_ID} 退出码 0", "--check", f"main.py plc check {PROJECT_ID} => 0",
+        "--risk", "只动公共报警块", "--non-goal", "不下载到控制器",
+        "--original-request", SENTENCE, "--safety-circuit", "否", "--rollback", "git 还原本单改动的文件",
+        "--adapter", "trae", "--approved-model", "trae", "--inbox-id", item["item_id"],
+    ]
+    for path in files:
+        plan += ["--scope", path, "--declared-dirty", path]
+    planned = drill.cli(*plan)
+    assert planned.returncode == 0, drill.transcript()
+    card = planned.json()
+    approved = drill.cli(
+        "pm", "approve", "--request-id", request_id, "--plan-hash", card["plan_hash"], "--approver", APPROVER,
+        "--approval-evidence-ref", f"user-confirmation:chat-{request_id}",
+    )
+    return card, approved
+
+
+def test_r05_every_pm_command_the_entry_skill_names_exists(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    drill = make_drill(tmp_path, benchmark_tar)
+    commands = _pm_commands(drill)
+    named = set(re.findall(r"pm ([a-z][a-z-]*)", _skill_text()))
+    assert {"orient", "inbox", "plan", "approve", "handoff", "takeover"} <= named, named
+    assert named <= commands, f"技能里写了但驾驶舱没有的 pm 命令: {sorted(named - commands)}"
+    for phrase in ("--original-words", "--pid", "close_accepted", "ledger reconcile", "plc check", "user-confirmation:"):
+        assert phrase in _skill_text(), phrase
+
+
+def test_r06_one_sentence_reaches_an_approved_scope_card_by_command_line_alone(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    drill = make_drill(tmp_path, benchmark_tar)
+    card, approved = _approve_from_one_sentence(drill, "REQ-RAW-R06")
+    assert approved.returncode == 0, drill.transcript()
+    assert approved.json()["authorization_status"] == "AUTHORIZED"
+    assert card["change_id"].startswith(f"CHG-{MAIN_DOMAIN}-")
+
+
+def test_r07_an_ide_agent_can_verify_and_close_by_command_line(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Gap 8 closed: ``pm verify`` and ``pm close`` exist and the skill sends the agent to them, not to a script.
+
+    The full walk (worktree, wallet lease, merge back into the control root, refusals) is ``test_ide_lane_drill.py``.
+    """
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    commands = _pm_commands(drill)
+    missing = {"verify", "close"} - commands
+    assert not missing, f"pm 下没有 IDE agent 用的命令: {sorted(missing)}"
+    skill = _skill_text()
+    assert "pm verify" in skill and "pm close" in skill
+    assert "临时调用" not in skill, "技能里还留着临时调用 verify_for_acceptance 的过渡做法"
+
+
+def test_r08_command_line_approval_needs_the_users_own_act(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Gap 9 closed: once the user's approval PIN is committed, the user's name and a made-up reference no longer approve.
+
+    The other entrances (pseudo terminal, the cockpit, a script, acceptance, side doors) are ``test_approval_pin_drill.py``.
+    """
+
+    from tests.e2e.test_approval_pin_drill import commit_approver_pin
+
+    drill = make_drill(tmp_path, benchmark_tar)
+    commit_approver_pin(drill)
+    _card, approved = _approve_from_one_sentence(drill, "REQ-RAW-R08")
+    # The drill runs without a terminal, so nobody typed the PIN.
+    assert approved.returncode != 0, "没有用户亲手输入的批准口令，批准却被接受了"
+    assert "批准口令" in approved.stderr, drill.transcript()

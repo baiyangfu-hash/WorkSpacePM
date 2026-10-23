@@ -24,6 +24,13 @@ from click.testing import CliRunner
 class TestWriteAiContext:
     """write_ai_context 函数单元测试"""
 
+    def test_write_ai_context_unknown_stack_targets_cockpit_entry(self, tmp_path: Path) -> None:
+        """栈不是 plc/python 时兜底指向进门技能 cockpit-entry，而不是已隔离的 pm-workflow"""
+        assert write_ai_context(str(tmp_path), "SYS-2026-001", "治理", "", "developing") is True
+        content = json.loads((tmp_path / ".auto-pm" / "ai_context.json").read_text(encoding="utf-8"))
+        assert content["intent"] == "project_followup"
+        assert content["target_skill"] == "cockpit-entry"
+
     def test_write_ai_context_creates_file(self, tmp_path: Path) -> None:
         """调用后应生成 .auto-pm/ai_context.json 文件"""
         result = write_ai_context(

@@ -343,6 +343,12 @@ class PmCockpitService:
     def close_accepted(self, mission_id: str) -> PmCockpitCompletion:
         """Close one accepted Mission through the closure service; callers must keep this
         off the UI thread.  Only a COMPLETED closure receipt yields COMPLETED."""
+        return self.close_accepted_with_reason(mission_id)[0]
+
+    def close_accepted_with_reason(self, mission_id: str) -> tuple[PmCockpitCompletion, str]:
+        """The very closure ``close_accepted`` runs, plus the refusal or pending reason
+        (empty when completed) that the cockpit keeps out of its fixed sentences.
+        ``pm close`` prints it so an IDE agent can tell the user what to fix."""
         mission_id = mission_id.strip()
         if not mission_id:
             raise PmCockpitError("未找到可收尾的需求。")
@@ -351,11 +357,19 @@ class PmCockpitService:
         except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
             raise PmCockpitError("无法读取该需求，已保留现场。") from error
         if mission.state is MissionState.CLOSED:
+            try:
+                closed_by_closure = self._store.has_completed_closure(mission_id)
+            except (ContinuityStoreError, sqlite3.Error, OSError) as error:
+                raise PmCockpitError("无法读取该需求的收口记录，已保留现场。") from error
+            if not closed_by_closure:
+                raise PmCockpitError(
+                    "该需求已关闭，但没有经过收口（没有收口记录）：验收过的文件可能没有并回控制根，请向 PM 说明。"
+                )
             return PmCockpitCompletion(
                 mission_id=mission_id,
                 state=PmCockpitCompletionState.COMPLETED,
                 message=_COMPLETED_MESSAGE,
-            )
+            ), ""
         if mission.state is not MissionState.ACCEPTED:
             raise PmCockpitError("该需求尚未验收，不能收尾。")
         closure = self._closure_service or PmClosureService(
@@ -369,25 +383,25 @@ class PmCockpitService:
                 preparation.closure.closure_id,
                 idempotency_key=_CLOSE_COMPLETE_KEY + mission_id,
             )
-        except PmClosureError:
+        except PmClosureError as error:
             log.exception("Cockpit closure refused: %s", mission_id)
             return PmCockpitCompletion(
                 mission_id=mission_id,
                 state=PmCockpitCompletionState.PENDING_SYNC,
                 message=_NOT_READY_MESSAGE,
-            )
+            ), str(error)
         if receipt.state is ClosureCompletionState.COMPLETED:
             return PmCockpitCompletion(
                 mission_id=mission_id,
                 state=PmCockpitCompletionState.COMPLETED,
                 message=_COMPLETED_MESSAGE,
-            )
+            ), ""
         log.warning("Cockpit closure pending sync: %s", mission_id)
         return PmCockpitCompletion(
             mission_id=mission_id,
             state=PmCockpitCompletionState.PENDING_SYNC,
             message=_PENDING_SYNC_MESSAGE,
-        )
+        ), receipt.pending_reason or ""
 
     def _mappings(self) -> tuple[WorkspaceProjectMapping, ...]:
         self._require_workspace_path(self._registry_path)

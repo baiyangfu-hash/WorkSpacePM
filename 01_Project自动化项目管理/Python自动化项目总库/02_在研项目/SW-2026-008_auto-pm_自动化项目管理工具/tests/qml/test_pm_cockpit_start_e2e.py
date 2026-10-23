@@ -132,7 +132,8 @@ def test_confirm_start_runs_verifies_and_reaches_acceptance_then_closes(
     assert cockpit.card_action() == (CockpitUserAction.CONFIRM_START, "确认开始执行")
     assert cockpit.mission_state() is MissionState.DRAFT
 
-    with caplog.at_level(logging.DEBUG):
+    # 包日志器 auto_pm 被 AppContext 配过级别后，只设根日志器拦不住 auto_pm.* 的 DEBUG；两层都放开才查得全。
+    with caplog.at_level(logging.DEBUG), caplog.at_level(logging.DEBUG, logger="auto_pm"):
         finished, bridge, pool = _run_start(cockpit)
 
         assert finished == [(cockpit.mission_id, True, _VERIFIED)]
@@ -160,8 +161,9 @@ def test_confirm_start_runs_verifies_and_reaches_acceptance_then_closes(
     assert not [item for item in _PLACEHOLDERS if item in change]
     assert any(line.startswith("| **验证结论**") for line in change.splitlines())
     assert LedgerReconciler().reconcile(str(cockpit.root)).is_clean
-    assert (cockpit.root / CALC).read_text(encoding="utf-8") == source_before
+    # Closure brings the accepted bytes of the isolated Run back into the control root (gap 8), uncommitted.
     assert source_before != FIXED_CALC
+    assert (cockpit.root / CALC).read_text(encoding="utf-8") == FIXED_CALC
     assert _token_locations(cockpit.root, _KNOWN_TOKEN) == set()
     visible = " ".join([*(message for _, _, message in finished), *(m for _, _, m in closed), caplog.text])
     assert _KNOWN_TOKEN not in visible
