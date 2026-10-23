@@ -169,11 +169,18 @@ class PmCockpitService:
                 cards.append(self._unavailable_card(mapping, store_note))
                 continue
             try:
-                facts = self._facts(mapping.project_id)
+                facts = self._snapshot_facts(mapping.project_id)
                 cards.append(self._card(mapping, facts))
                 activities.extend(self._activities(mapping.project_id, facts))
                 pending.extend(self._pending_cards(mapping, facts, notices))
-                boards.append(self._board(mapping, self._store.list_missions_by_board(mapping.project_id)))
+                boards.append(
+                    self._board(
+                        mapping,
+                        self._store.list_missions_by_board(
+                            mapping.project_id, closed_limit=_BOARD_CLOSED_SHOWN
+                        ),
+                    )
+                )
             except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
                 note = "连续性记录无法安全读取；驾驶舱没有尝试修复或重建它。"
                 notices.append(f"{mapping.project_id}: {note}")
@@ -226,7 +233,7 @@ class PmCockpitService:
             waiting=tuple(plain(mission) for mission in board.waiting),
             parked=tuple(parked),
             closed=tuple(plain(mission) for mission in shown_closed),
-            closed_hidden=len(board.closed) - len(shown_closed),
+            closed_hidden=len(board.closed) - len(shown_closed) + board.closed_hidden,
         )
 
     @staticmethod
@@ -472,12 +479,47 @@ class PmCockpitService:
         return ""
 
     def _facts(self, project_id: str) -> _ProjectFacts:
+        """The whole history of one project, for the evidence view the user opens on that project."""
+
         missions = self._store.list_missions(project_id, include_terminal=True)
         works = self._store.list_works(project_id, include_terminal=True)
         runs_by_work = {
             work.work_id: self._store.list_runs(work.work_id, include_terminal=True)
             for work in works
         }
+        return self._facts_from(missions, works, runs_by_work)
+
+    def _snapshot_facts(self, project_id: str) -> _ProjectFacts:
+        """What the default screen needs of one project, without reading its whole history (audit 78, 5).
+
+        Every open card and the latest closed one (the card shown when none is open), every unfinished Work plus the
+        shown card's root Work, and the Runs of only the Work the card shows.  The project card, the activity feed and
+        the pending cards built from these are the same as from the full history; the snapshot refreshes every project,
+        so its cost no longer grows with every card, Work and Run ever finished.
+        """
+
+        missions = self._store.list_missions(project_id, include_terminal=True, terminal_limit=1)
+        works = self._store.list_works(project_id, include_terminal=True, terminal_limit=0)
+        mission = self._primary_mission(missions)
+        root_id = mission.root_work_id if mission else None
+        if root_id and all(work.work_id != root_id for work in works):
+            try:
+                works = (self._store.get_work(root_id), *works)
+            except ContinuityStoreError:
+                pass  # the full history would not find it either; the card falls back to an unfinished Work
+        work = self._primary_work(mission, works)
+        shown = {work_id for work_id in (work.work_id if work else None, root_id) if work_id}
+        runs_by_work = {
+            work_id: self._store.list_runs(work_id, include_terminal=True) for work_id in sorted(shown)
+        }
+        return self._facts_from(missions, works, runs_by_work)
+
+    def _facts_from(
+        self,
+        missions: tuple[Mission, ...],
+        works: tuple[WorkItem, ...],
+        runs_by_work: dict[str, tuple[RunItem, ...]],
+    ) -> _ProjectFacts:
         checkpoints = tuple(
             checkpoint
             for runs in runs_by_work.values()

@@ -284,6 +284,7 @@ def create_mission(
             created_by=created_by,
             idempotency_key=idempotency_key,
             max_open_per_project=limit,
+            admitted_open_ids=verdict.open_ids,
         )
         service.record_admission(item.mission_id, verdict, admission_release_ref)
     except (json.JSONDecodeError, ValidationError, MissionServiceError) as error:

@@ -37,6 +37,9 @@ class AdmissionVerdict:
     open_count: int
     limit: int
     overlaps: tuple[ScopeOverlap, ...]
+    # The open cards this verdict was made over; creating the new card re-reads them inside its write transaction and
+    # refuses when another card was opened in between, so two approvals cannot both pass a stale check (audit 77, 6).
+    open_ids: tuple[str, ...] = ()
 
     @property
     def over_limit(self) -> bool:
@@ -100,7 +103,12 @@ def admission_verdict(
         hit = scope_overlaps(paths, mission)
         if hit:
             overlaps.append(ScopeOverlap(mission.mission_id, mission.title, hit))
-    return AdmissionVerdict(open_count=len(live), limit=limit, overlaps=tuple(overlaps))
+    return AdmissionVerdict(
+        open_count=len(live),
+        limit=limit,
+        overlaps=tuple(overlaps),
+        open_ids=tuple(sorted(mission.mission_id for mission in live)),
+    )
 
 
 def release_problem(verdict: AdmissionVerdict, admission_release_ref: str) -> str:

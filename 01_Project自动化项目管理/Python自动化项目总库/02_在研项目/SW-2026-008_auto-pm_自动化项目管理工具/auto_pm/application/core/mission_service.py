@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -83,6 +83,7 @@ class MissionService:
         idempotency_key: str,
         root_work_id: str | None = None,
         max_open_per_project: int = OPEN_MISSION_SOFT_LIMIT,
+        admitted_open_ids: Collection[str] | None = None,
     ) -> Mission:
         instant = self._instant()
         now = instant.isoformat()
@@ -114,7 +115,11 @@ class MissionService:
         )
         try:
             return self._store.create_mission(
-                values, idempotency_key, now, max_open_per_project=max_open_per_project
+                values,
+                idempotency_key,
+                now,
+                max_open_per_project=max_open_per_project,
+                admitted_open_ids=admitted_open_ids,
             )
         except ContinuityStoreError as error:
             raise MissionServiceError(str(error)) from error
@@ -135,16 +140,25 @@ class MissionService:
         """
 
         try:
-            missions = self._store.list_missions(subject_project_id, include_terminal=True)
+            # Only the open cards count and collide; the project's finished history is not read (audit 78, 5).
+            missions = self._store.list_missions(subject_project_id)
         except ContinuityStoreError as error:
             raise MissionServiceError(str(error)) from error
         others = [item for item in missions if item.mission_id != mission_id]
         verdict = admission_verdict(others, scope_paths)
-        exists = len(others) != len(missions)
+        exists = len(others) != len(missions) or self._exists_in_project(mission_id, subject_project_id)
         if not exists and (problem := release_problem(verdict, admission_release_ref)):
             raise MissionServiceError(problem)
         limit = verdict.open_count + 1 if verdict.over_limit else OPEN_MISSION_SOFT_LIMIT
         return limit, verdict
+
+    def _exists_in_project(self, mission_id: str, subject_project_id: str) -> bool:
+        """Whether a (finished) card with this id is already stored for the project: a retry, never a new card."""
+
+        try:
+            return self._store.get_mission(mission_id).subject_project_id == subject_project_id
+        except ContinuityStoreError:
+            return False
 
     def record_admission(self, mission_id: str, verdict: AdmissionVerdict, admission_release_ref: str) -> None:
         """Record the user's release of a card that needed one; idempotent per card, so a retry may fill it in."""
@@ -174,6 +188,7 @@ class MissionService:
         plan_hash: str,
         created_by: str,
         max_open_per_project: int = OPEN_MISSION_SOFT_LIMIT,
+        admitted_open_ids: Collection[str] | None = None,
     ) -> Mission:
         """Create a strong-authority Mission from one exact planning approval."""
 
@@ -292,6 +307,7 @@ class MissionService:
             created_by=created_by,
             idempotency_key=f"planning-mission-create:{draft.request_id}",
             max_open_per_project=max_open_per_project,
+            admitted_open_ids=admitted_open_ids,
         )
 
     def get(self, mission_id: str) -> Mission:

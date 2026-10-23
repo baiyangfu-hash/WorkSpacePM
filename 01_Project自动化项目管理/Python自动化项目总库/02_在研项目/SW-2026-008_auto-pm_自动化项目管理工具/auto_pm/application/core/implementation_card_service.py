@@ -24,6 +24,7 @@ from auto_pm.application.core.implementation_card_precheck import (
 )
 from auto_pm.contracts.continuity import CheckpointItem, RunState, WorkState
 from auto_pm.contracts.implementation_card import CardState, ImplementationCard
+from auto_pm.contracts.user_evidence import names_an_agent
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.control_root_guard import (
@@ -189,7 +190,10 @@ class ImplementationCardService:
             raise ImplementationCardError("approval requires DRAFT or REVIEWED card")
         if not approver.strip() or not approval_evidence.strip() or "TODO" in approval_evidence:
             raise ImplementationCardError("external user approval evidence is required")
-        if any(token in approver.casefold() for token in ("agent", "model", "codex", "gpt", "assistant")):
+        # The shared whole-word agent list (contracts.user_evidence) plus the older substring check, which stays stricter.
+        if names_an_agent(approver) or any(
+            token in approver.casefold() for token in ("agent", "model", "codex", "gpt", "assistant")
+        ):
             raise ImplementationCardError("model/agent cannot self-approve")
         self._validate_external(card)
         if approval_evidence != card.evidence.decision_id:

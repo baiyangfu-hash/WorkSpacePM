@@ -614,6 +614,7 @@ class PmFacadeService:
                     plan_hash=actual_hash,
                     created_by=created_by,
                     max_open_per_project=limit,
+                    admitted_open_ids=verdict.open_ids,
                 ),
             )
             self._missions.record_admission(mission.mission_id, verdict, admission_release_ref)

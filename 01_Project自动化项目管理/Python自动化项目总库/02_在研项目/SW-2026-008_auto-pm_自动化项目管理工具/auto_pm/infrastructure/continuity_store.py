@@ -13,7 +13,7 @@ import stat
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -1893,12 +1893,17 @@ class ContinuityStore:
         now: str,
         *,
         max_open_per_project: int = 1,
+        admitted_open_ids: Collection[str] | None = None,
     ) -> Mission:
         """Persist one Mission and its append-only creation event atomically.
 
         Since v8 the database only forbids a second ACTIVE Mission per project (TD-071).  How many
         Missions may be open at once is a service rule checked here, inside the write transaction;
         the default keeps the old one-open-Mission rule until the entry gates are opened (TD-071 card 3).
+
+        ``admitted_open_ids`` are the open Missions the caller's admission check (limit and path collisions) was made
+        over.  When given, a Mission opened in the project since that check refuses this one, so two approvals racing
+        past the same check cannot both create cards; a retry checks again against what is open now.
         """
         if type(max_open_per_project) is not int or max_open_per_project < 1:
             raise ContinuityStoreError("max_open_per_project 必须是正整数")
@@ -1924,6 +1929,22 @@ class ContinuityStore:
                     if max_open_per_project == 1
                     else f"同一项目开着的 Mission 已达上限 {max_open_per_project} 张，拒绝再开"
                 )
+            if admitted_open_ids is not None:
+                opened_since = sorted(
+                    str(row["mission_id"])
+                    for row in conn.execute(
+                        """SELECT mission_id FROM mission_items WHERE subject_project_id=?
+                        AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED') AND mission_id<>?""",
+                        (values["subject_project_id"], values["mission_id"]),
+                    ).fetchall()
+                    if str(row["mission_id"]) not in admitted_open_ids
+                )
+                if opened_since:
+                    raise ContinuityStoreError(
+                        "准入检查之后项目里又开了新卡（"
+                        + "、".join(opened_since)
+                        + "），没有建卡；请重新执行，会按现在开着的卡重新检查上限和撞车"
+                    )
             try:
                 self._insert_mapping(conn, "mission_items", values)
             except sqlite3.IntegrityError as error:
@@ -6521,11 +6542,24 @@ class ContinuityStore:
             return self._get_handoff(conn, handoff_id)
 
     def list_works(
-        self, subject_project_id: str, *, include_terminal: bool = False
+        self,
+        subject_project_id: str,
+        *,
+        include_terminal: bool = False,
+        terminal_limit: int | None = None,
     ) -> tuple[WorkItem, ...]:
-        """List execution-active Work by default, or complete history on request."""
+        """List execution-active Work by default, or complete history on request.
+
+        With ``include_terminal`` and a ``terminal_limit``, every Work that is not finished (accepted, closed or
+        cancelled) is listed but only the ``terminal_limit`` most recent finished ones, so a screen that refreshes
+        every project does not read each project's whole history (audit 78, 5).
+        """
         with self._read_connection() as conn:
-            if include_terminal:
+            if include_terminal and terminal_limit is not None:
+                rows = self._open_and_recent_rows(
+                    conn, "work_items", "work_id", subject_project_id, terminal_limit
+                )
+            elif include_terminal:
                 rows = conn.execute(
                     """SELECT work_id FROM work_items WHERE subject_project_id=?
                     ORDER BY updated_at DESC, work_id""",
@@ -6543,9 +6577,17 @@ class ContinuityStore:
             return tuple(self._get_work(conn, str(row["work_id"])) for row in rows)
 
     def list_missions(
-        self, subject_project_id: str, *, include_terminal: bool = False
+        self,
+        subject_project_id: str,
+        *,
+        include_terminal: bool = False,
+        terminal_limit: int | None = None,
     ) -> tuple[Mission, ...]:
-        """List project Missions through the immutable reader, including history on request."""
+        """List project Missions through the immutable reader, including history on request.
+
+        With ``include_terminal`` and a ``terminal_limit``, every open Mission is listed but only the
+        ``terminal_limit`` most recently updated finished ones (audit 78, 5).
+        """
         with self._read_connection() as conn:
             versions = self._schema_versions(conn)
             if not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
@@ -6554,6 +6596,11 @@ class ContinuityStore:
             if versions == {_LEGACY_SCHEMA_VERSION}:
                 # Strict reads must not upgrade a legacy store. It has no Mission table yet.
                 return ()
+            if include_terminal and terminal_limit is not None:
+                rows = self._open_and_recent_rows(
+                    conn, "mission_items", "mission_id", subject_project_id, terminal_limit
+                )
+                return tuple(self._get_mission(conn, str(row["mission_id"])) for row in rows)
             query = (
                 """SELECT mission_id FROM mission_items WHERE subject_project_id=?
                 ORDER BY updated_at DESC, mission_id"""
@@ -6564,6 +6611,32 @@ class ContinuityStore:
             )
             rows = conn.execute(query, (subject_project_id,)).fetchall()
             return tuple(self._get_mission(conn, str(row["mission_id"])) for row in rows)
+
+    @staticmethod
+    def _open_and_recent_rows(
+        conn: sqlite3.Connection, table: str, id_column: str, subject_project_id: str, terminal_limit: int
+    ) -> list[sqlite3.Row]:
+        """Ids of every unfinished row of a project plus its ``terminal_limit`` most recent finished ones, newest first.
+
+        ``table`` and ``id_column`` are fixed by the callers (Missions and Work share the same three finished states).
+        """
+
+        if type(terminal_limit) is not int or terminal_limit < 0:
+            raise ContinuityStoreError("terminal_limit 必须是非负整数")
+        if (table, id_column) not in {("mission_items", "mission_id"), ("work_items", "work_id")}:
+            raise ContinuityStoreError(f"不支持的历史截取: {table}")
+        return conn.execute(
+            f"""SELECT {id_column}, updated_at FROM {table} WHERE subject_project_id=?
+            AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
+            UNION ALL
+            SELECT {id_column}, updated_at FROM (
+                SELECT {id_column}, updated_at FROM {table} WHERE subject_project_id=?
+                AND state IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
+                ORDER BY updated_at DESC, {id_column} LIMIT ?
+            )
+            ORDER BY updated_at DESC, {id_column}""",
+            (subject_project_id, subject_project_id, terminal_limit),
+        ).fetchall()
 
     def list_active_missions(self, subject_project_id: str) -> tuple[Mission, ...]:
         """Compatibility view for callers that need only live Missions."""
@@ -8451,8 +8524,15 @@ class ContinuityStore:
             row = self._open_park_row(conn, "mission_id", mission_id)
             return MissionPark.model_validate(dict(row)) if row is not None else None
 
-    def list_missions_by_board(self, subject_project_id: str) -> MissionBoard:
-        """Group all Missions of a project into the four board columns (TD-071 design 5.5)."""
+    def list_missions_by_board(
+        self, subject_project_id: str, *, closed_limit: int | None = None
+    ) -> MissionBoard:
+        """Group the Missions of a project into the four board columns (TD-071 design 5.5).
+
+        Every open Mission is read.  With ``closed_limit`` only that many of the most recently closed ones are read and
+        the rest are only counted (``closed_hidden``), so the cockpit's refresh does not grow with every card ever
+        closed (audit 78, 5).  Without it the whole history is read, as ``pm missions`` shows it.
+        """
 
         with self._read_connection() as conn:
             versions = self._schema_versions(conn)
@@ -8461,11 +8541,25 @@ class ContinuityStore:
                 raise ContinuityStoreError(f"未知或未来 Continuity Store schema: {rendered}")
             if versions == {_LEGACY_SCHEMA_VERSION}:
                 return MissionBoard(subject_project_id=subject_project_id)
-            rows = conn.execute(
-                """SELECT mission_id FROM mission_items WHERE subject_project_id=?
-                ORDER BY updated_at DESC, mission_id""",
-                (subject_project_id,),
-            ).fetchall()
+            closed_hidden = 0
+            if closed_limit is None:
+                rows = conn.execute(
+                    """SELECT mission_id FROM mission_items WHERE subject_project_id=?
+                    ORDER BY updated_at DESC, mission_id""",
+                    (subject_project_id,),
+                ).fetchall()
+            else:
+                rows = self._open_and_recent_rows(
+                    conn, "mission_items", "mission_id", subject_project_id, closed_limit
+                )
+                closed_total = int(
+                    conn.execute(
+                        """SELECT COUNT(*) FROM mission_items WHERE subject_project_id=?
+                        AND state IN ('ACCEPTED', 'CLOSED', 'CANCELLED')""",
+                        (subject_project_id,),
+                    ).fetchone()[0]
+                )
+                closed_hidden = max(closed_total - closed_limit, 0)
             has_parks = self._table_exists(conn, "run_parks")
             columns: dict[MissionBoardColumn, list[Mission]] = {
                 column: [] for column in MissionBoardColumn
@@ -8499,6 +8593,7 @@ class ContinuityStore:
                 waiting=tuple(columns[MissionBoardColumn.WAITING]),
                 parked=tuple(parked),
                 closed=tuple(columns[MissionBoardColumn.CLOSED]),
+                closed_hidden=closed_hidden,
             )
 
     def _require_lease_in_tx(
