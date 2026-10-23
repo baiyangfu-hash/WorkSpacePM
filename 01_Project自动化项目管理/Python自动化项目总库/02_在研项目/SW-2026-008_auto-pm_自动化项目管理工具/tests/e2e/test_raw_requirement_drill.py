@@ -4,7 +4,7 @@ The D08 prompts spelled out goal, scope, every command and every prohibition.  T
 field input is one sentence.  This scenario checks the parts a machine can check: the route the entry skill describes uses
 commands that exist, the command-line lane from the sentence to an approved scope card works, the IDE agent's verify/close
 commands exist (gap 8, closed by ``pm verify`` / ``pm close``; the full walk is ``test_ide_lane_drill.py``), and gap 9
-(approval evidence that is only format-checked) is pinned as a known defect.  Whether a real Trae finds its way is decided by the field trial
+(approval evidence that was only format-checked) is closed by the user's approval PIN.  Whether a real Trae finds its way is decided by the field trial
 (``/mnt/project-files/plans/原始需求直接交给Trae_评估_20261021.md`` §4), not here.
 """
 
@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-
-import pytest
 
 from tests.e2e.test_closure_drill import APPROVER, MAIN_DOMAIN, comment_files, make_drill
 from tests.e2e.test_pmf_plc import (
@@ -24,12 +22,6 @@ from tests.e2e.test_pmf_plc import (
 )
 
 SENTENCE = "公共报警加一个蜂鸣器输出，任意报警激活时响"
-SELF_SIGNED = (
-    "缺口⑨（原始需求场景新发现，技术债候选，未开卡）：命令行批准只检查证据引用的格式（user-confirmation: 加 8 个字符以上）和批准人名字里"
-    "不含 agent/model 等字样；agent 填用户名和自编的引用就能批准，用户本人没有说过“开工”也拦不住。界面按钮生成的证据才是用户亲手点的"
-)
-
-
 def _skill_text() -> str:
     repository = Path(git(Path(__file__).resolve().parent, "rev-parse", "--show-toplevel"))
     return (repository / ".trae" / "skills" / "cockpit-entry" / "SKILL.md").read_text(encoding="utf-8")
@@ -111,9 +103,17 @@ def test_r07_an_ide_agent_can_verify_and_close_by_command_line(tmp_path: Path, b
     assert "临时调用" not in skill, "技能里还留着临时调用 verify_for_acceptance 的过渡做法"
 
 
-@pytest.mark.xfail(strict=True, reason=SELF_SIGNED)
 def test_r08_command_line_approval_needs_the_users_own_act(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Gap 9 closed: once the user's approval PIN is committed, the user's name and a made-up reference no longer approve.
+
+    The other entrances (pseudo terminal, the cockpit, a script, acceptance, side doors) are ``test_approval_pin_drill.py``.
+    """
+
+    from tests.e2e.test_approval_pin_drill import commit_approver_pin
+
     drill = make_drill(tmp_path, benchmark_tar)
+    commit_approver_pin(drill)
     _card, approved = _approve_from_one_sentence(drill, "REQ-RAW-R08")
-    # The drill runs without a terminal and without a cockpit click, so nothing proves a human approved.
-    assert approved.returncode != 0, "没有用户亲手操作的证据，批准却被接受了"
+    # The drill runs without a terminal, so nobody typed the PIN.
+    assert approved.returncode != 0, "没有用户亲手输入的批准口令，批准却被接受了"
+    assert "批准口令" in approved.stderr, drill.transcript()

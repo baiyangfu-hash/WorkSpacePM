@@ -393,7 +393,8 @@ def test_an_approval_that_is_not_a_real_human_confirmation_writes_nothing(tmp_pa
     assert after == decisions_before
     parameters = CockpitClient.approve_plan.__annotations__
     assert "approver" in parameters and "approval_evidence_ref" in parameters
-    assert CockpitClient.approve_plan.__kwdefaults__ is None
+    # Approver and evidence have no default; the only default is the user's PIN (gap 9), empty unless the user typed it.
+    assert CockpitClient.approve_plan.__kwdefaults__ == {"approval_pin": ""}
 
 
 def test_unknown_missions_and_projects_raise_only_the_sdk_error(tmp_path: Path) -> None:

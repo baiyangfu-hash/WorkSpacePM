@@ -49,11 +49,6 @@ from tests.e2e.test_pmf_plc import (
 EXECUTOR = "trae:cn"
 TOKEN_ENV = "DRILL_TRAE_LEASE_TOKEN"
 SESSION_FILE = f"{PROJECT}/PM_SESSION_{PROJECT_ID}.md"
-GAP_9 = (
-    "缺口⑨（预做在分支 claude/gap9-approval-proof，未合）：命令行批准只查证据格式，agent 填上用户名和一个自己编的 "
-    "user-confirmation: 引用就能批准；试跑第 5 条过，只是因为 Trae 自觉等了用户“确认开工”"
-)
-
 class KnownDefectError(AssertionError):
     """The one symptom a strict xfail may absorb; any other failure stays a failure."""
 
@@ -277,9 +272,13 @@ def test_t05a_a_plan_on_a_triage_ticket_the_user_has_not_confirmed_is_refused(tm
     assert _sheets(drill) == []
 
 
-@pytest.mark.xfail(strict=True, raises=KnownDefectError, reason=GAP_9)
 def test_t05b_an_agent_cannot_approve_with_a_confirmation_the_user_never_gave(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Gap 9: once the user's approver PIN is committed, a made-up confirmation no longer approves."""
+
+    from tests.e2e.test_approval_pin_drill import commit_approver_pin
+
     drill = make_drill(tmp_path, benchmark_tar)
+    commit_approver_pin(drill)
     files = comment_files(drill.root, "试跑：自批")
     item = _inbox(drill, "REQ-TRIAL-T05B")
     planned = drill.cli(*_plan(item, "REQ-TRIAL-T05B", files))
@@ -291,8 +290,8 @@ def test_t05b_an_agent_cannot_approve_with_a_confirmation_the_user_never_gave(tm
         "--approval-evidence-ref", "user-confirmation:2026-10-22T07:11:03-07:00",
     )
 
-    if forged.returncode == 0:
-        raise KnownDefectError(f"agent 自己编的确认引用批准成功: {forged.stdout[:200]}")
+    assert forged.returncode != 0, f"agent 自己编的确认引用批准成功: {forged.stdout[:200]}"
+    assert "批准口令" in forged.stderr, drill.transcript()
 
 
 # --- helpers --------------------------------------------------------------------------------------------------------

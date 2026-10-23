@@ -36,6 +36,7 @@ from auto_pm.core.local_execution_orchestrator import (
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
+from auto_pm.application.core.approval_proof_service import ApprovalProofError, ApprovalProofService
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollection,
     EvidenceCollectionError,
@@ -435,6 +436,22 @@ class PmFacadeService:
         except ValueError as error:
             raise PmFacadeError(str(error)) from error
 
+    def resolve_approval(
+        self, *, approval_pin: str, approver: str, approval_evidence_ref: str, purpose: str, subject: str
+    ) -> tuple[str, str]:
+        """(approver, evidence) to record: the caller's under the old format check, or the user's PIN proof (gap 9)."""
+
+        try:
+            return ApprovalProofService(self._workspace_root).resolve(
+                pin=approval_pin,
+                approver=approver,
+                evidence_ref=approval_evidence_ref,
+                purpose=purpose,
+                subject=subject,
+            )
+        except ApprovalProofError as error:
+            raise PmFacadeError(str(error)) from error
+
     def _require_plan_checklist(
         self,
         execution_grant: PlanningExecutionGrant | None,
@@ -491,8 +508,12 @@ class PmFacadeService:
         expected_plan_hash: str,
         approver: str,
         approval_evidence_ref: str,
+        approval_pin: str = "",
     ) -> DecisionPackageDTO:
-        """Bind one exact human approval to one real, immutable Decision."""
+        """Bind one exact human approval to one real, immutable Decision.
+
+        With a committed approver PIN the approval needs ``approval_pin``; the approver and evidence then come from it.
+        """
 
         self._require_card_checklist(card)
         actual_hash = self._planning_scope_card_hash(card)
@@ -500,6 +521,22 @@ class PmFacadeService:
             actual_hash, expected_plan_hash
         ):
             raise PmFacadeError("PlanningScopeCard plan_hash 已过期或内容发生漂移")
+        approver, approval_evidence_ref = self.resolve_approval(
+            approval_pin=approval_pin,
+            approver=approver,
+            approval_evidence_ref=approval_evidence_ref,
+            purpose="approve-scope",
+            subject=actual_hash,
+        )
+        return self._approve_proven_planning_scope_card(
+            card, actual_hash=actual_hash, approver=approver, approval_evidence_ref=approval_evidence_ref
+        )
+
+    def _approve_proven_planning_scope_card(
+        self, card: PlanningScopeCard, *, actual_hash: str, approver: str, approval_evidence_ref: str
+    ) -> DecisionPackageDTO:
+        """The approval after its human evidence has been resolved; only the public entrances call it."""
+
         try:
             self._decisions.validate_planning_approval(
                 approver,
@@ -766,6 +803,17 @@ class PmFacadeService:
         except (ContinuityStoreError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
 
+    def check_pending_planning_scope_card(self, request_id: str, *, expected_plan_hash: str) -> None:
+        """Read-only pre-check of a saved card (exists, current revision, seven fields), so a refusal comes before the PIN."""
+
+        try:
+            submitted = self._store.get_submitted_planning_scope_card(request_id, expected_plan_hash)
+        except (ContinuityStoreError, ValueError) as error:
+            raise PmFacadeError(str(error)) from error
+        if submitted.superseded:
+            raise PmFacadeError("该范围卡已被新修订取代，请批准最新修订")
+        self._require_card_checklist(submitted.card)
+
     def approve_pending_planning_scope_card(
         self,
         request_id: str,
@@ -773,11 +821,19 @@ class PmFacadeService:
         expected_plan_hash: str,
         approver: str,
         approval_evidence_ref: str,
+        approval_pin: str = "",
     ) -> PlanningApprovalResult:
         """Approve one persisted card by plan hash: CHG, Decision, Mission and Work in one call."""
 
+        # A refused approval must write nothing, so the human evidence is checked first.
+        approver, approval_evidence_ref = self.resolve_approval(
+            approval_pin=approval_pin,
+            approver=approver,
+            approval_evidence_ref=approval_evidence_ref,
+            purpose="approve-scope",
+            subject=expected_plan_hash,
+        )
         try:
-            # A refused approval must write nothing, so the human evidence is checked first.
             self._decisions.validate_planning_approval(
                 approver, expected_plan_hash, approval_evidence_ref
             )
@@ -790,12 +846,14 @@ class PmFacadeService:
                 card.subject_project_id
             ):
                 raise PmFacadeError("项目已有未终结的任务；请先验收或取消它，再批准新的范围卡")
+            actual_hash = self._planning_scope_card_hash(card)
+            if not hmac.compare_digest(actual_hash, card.plan_hash) or not hmac.compare_digest(
+                actual_hash, expected_plan_hash
+            ):
+                raise PmFacadeError("PlanningScopeCard plan_hash 已过期或内容发生漂移")
             self._approve_planning_change(card, approver)
-            decision = self.approve_planning_scope_card(
-                card,
-                expected_plan_hash=expected_plan_hash,
-                approver=approver,
-                approval_evidence_ref=approval_evidence_ref,
+            decision = self._approve_proven_planning_scope_card(
+                card, actual_hash=actual_hash, approver=approver, approval_evidence_ref=approval_evidence_ref
             )
             mission = self.materialize_planning_mission(card)
             work = self.create_planning_work(card)
@@ -1284,16 +1342,27 @@ class PmFacadeService:
         except (ContinuityQueryError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
 
-    def accept(self, mission_id: str) -> PmConfirmationCard:
-        """Record only the final user acceptance after verification has reached its gate."""
+    def accept(self, mission_id: str, *, approval_pin: str = "") -> PmConfirmationCard:
+        """Record only the final user acceptance after verification has reached its gate.
+
+        With a committed approver PIN the acceptance needs ``approval_pin`` (checked after the quality gate, before any write).
+        """
         mission = self._mission(mission_id)
         if mission.state is MissionState.ACCEPTANCE_PENDING:
             self._require_current_acceptance_checkpoint(mission)
+            try:
+                proof = ApprovalProofService(self._workspace_root).require(
+                    pin=approval_pin, purpose="accept", subject=mission.mission_id
+                )
+            except ApprovalProofError as error:
+                raise PmFacadeError(str(error)) from error
             mission = self._transition(
                 mission,
                 MissionState.ACCEPTED,
                 root_work_id=mission.root_work_id,
                 action="accept",
+                # The PIN reference (key id) stays in the transition record, so who accepted can be told afterwards.
+                evidence=proof.evidence_ref if proof is not None else "format-only:pm-accept",
             )
         if mission.state is not MissionState.ACCEPTED:
             raise PmFacadeError("当前 Mission 尚未到达用户验收门")
@@ -1510,7 +1579,11 @@ class PmFacadeService:
         *,
         root_work_id: str | None,
         action: str,
+        evidence: str = "",
     ) -> Mission:
+        key = f"pm-{action}:{mission.mission_id}:v{mission.version}"
+        if evidence.startswith("user-confirmation:"):
+            key += f":{evidence}"
         try:
             return cast(
                 Mission,
@@ -1519,7 +1592,8 @@ class PmFacadeService:
                     expected_version=mission.version,
                     new_state=new_state,
                     root_work_id=root_work_id,
-                    idempotency_key=f"pm-{action}:{mission.mission_id}:v{mission.version}",
+                    idempotency_key=key,
+                    acceptance_evidence=evidence,
                 ),
             )
         except MissionServiceError as error:
