@@ -8,6 +8,7 @@ GitHub（PR、门禁、安全签字、审计）走 scripts/github_collector.py�
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 import traceback
@@ -334,8 +335,16 @@ class CockpitWindow(QMainWindow):
                 self.station.set_bc_preview("")
                 self.status.setText(self._bc_missing())
                 return
+            who = actions.operator_name(self.options.operator, dict(os.environ), self.options.manual_worktree)
+            try:
+                line = actions.bc_preview(record, pid, when, who, dict(self.station.bc_fields))
+            except (actions.BcError, OSError, UnicodeDecodeError) as error:
+                self.bc_digest = None
+                self.station.set_bc_preview("")
+                self.status.setText(str(error))
+                return
             self.bc_digest = actions.bc_digest(record)
-            self.station.set_bc_preview(actions.bc_preview(record, pid, when, "baiyang", "（填改了什么）", "（填影响）"))
+            self.station.set_bc_preview(line)
             self.station.add_receipt(actions.Receipt(when.strftime("%H:%M"), "写入 BC 行（预览）", f"append {record.name}", 0, True))
             return
         elif key == "bc_write":
@@ -399,6 +408,7 @@ def parse_options(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--github-cache", default="", help="GitHub 本机缓存文件，默认放用户缓存目录（不在工作空间）")
     parser.add_argument("--reviews-dir", action="append", default=[], help="另读一个审计目录（可多次）；<root>/reviews 总会读")
     parser.add_argument("--station-project", default="", help="工程工位默认项目，默认第一个客户项目")
+    parser.add_argument("--operator", default="", help="提出人（写 BC 行用）；不给就读环境变量 WORKSPACEPM_OPERATOR，再读人工工位的 git user.name")
     parser.add_argument("--manual-branch", default="manual/<日期>-<主题>", help="人工分支名（显示用）")
     parser.add_argument("--source-version", default="", help="身份条：源码版本")
     parser.add_argument("--effective-version", default="", help="身份条：生效版本")

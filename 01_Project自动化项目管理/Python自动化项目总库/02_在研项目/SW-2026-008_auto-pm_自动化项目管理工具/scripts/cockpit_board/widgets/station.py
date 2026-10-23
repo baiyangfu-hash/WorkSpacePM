@@ -9,11 +9,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from cockpit_board import theme
-from cockpit_board.actions import Receipt
+from cockpit_board.actions import BC_REQUIRED, Receipt
 from cockpit_board.viewmodel import StationVM, Step
 from cockpit_board.widgets import common as c
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 
 SAFETY_CHECKLIST = (
     "急停、安全门、光栅、联锁、安全继电器、双手启动的逻辑，改了先 PLCSIM / InoProShop 仿真",
@@ -21,6 +21,14 @@ SAFETY_CHECKLIST = (
     "下载前校验码和上次上载记录对得上",
     "有网后 PR 上写“安全签字 + 提交号”，再合并",
 )
+
+# 记 BC 行时要你填的四栏（输入框里的灰字只是提示，不会写进文件）
+BC_HINTS = {
+    "类型": "需求 / 硬件 / 参数 / 工艺",
+    "改了什么": "原来 → 改成，例如：急停复位 → 加 2 s 延时",
+    "为什么": "谁提的、什么原因",
+    "影响": "要改的程序、图纸、参数；涉及安全区写“安全区，待仿真 + 签字”",
+}
 
 
 def pre(text: str) -> QFrame:
@@ -41,6 +49,9 @@ class StationPage(QWidget):
         self.banner_dismissed = False
         self.checks_state = [False] * len(SAFETY_CHECKLIST)
         self.bc_preview_text = ""
+        self.bc_fields: dict[str, str] = dict.fromkeys(BC_REQUIRED, "")
+        self._bc_preview_frame: QFrame | None = None
+        self._bc_write_button = None
         self.commit_text = ""
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -142,8 +153,21 @@ class StationPage(QWidget):
             hit_layout.addWidget(c.label("必须先仿真；BC“影响”栏写“安全区，待签字”；有网后补 CHG，签字前不合并。"
                                          "发现 OR TRUE 旁路直接判不合格。只提醒，不阻断。", "small"))
             inner.addWidget(hit)
-        if step.number == 4 and self.bc_preview_text:
-            inner.addWidget(pre(self.bc_preview_text))
+        if step.number == 4:
+            for key in BC_REQUIRED:
+                field = QLineEdit(self.bc_fields[key])
+                field.setObjectName("bc_field")
+                field.setProperty("bc_key", key)
+                field.setPlaceholderText(BC_HINTS[key])
+                field.textChanged.connect(lambda text, k=key: self._bc_edited(k, text))
+                name = c.label(key, "q", wrap=False)
+                name.setMinimumWidth(name.fontMetrics().horizontalAdvance("改了什么") + theme.SPACE)  # 四栏对齐
+                inner.addWidget(c.hrow(name, field, spacing=theme.SPACE))
+            inner.addWidget(c.label("提出人从配置读（--operator / 环境变量 WORKSPACEPM_OPERATOR / git user.name），"
+                                    "提出时间到分钟；批准人、批准日期、关联写“待补”，批了以后人工补。", "small"))
+            self._bc_preview_frame = pre(self.bc_preview_text) if self.bc_preview_text else None
+            if self._bc_preview_frame is not None:
+                inner.addWidget(self._bc_preview_frame)
         if step.number == 5 and self.commit_text:
             inner.addWidget(pre(self.commit_text))
         if step.buttons:
@@ -153,6 +177,8 @@ class StationPage(QWidget):
                 reason = reason if not enabled else ""
                 item = c.button(text, "", reason or text, enabled)
                 item.setProperty("action", key)
+                if key == "bc_write":
+                    self._bc_write_button = item
                 if key == "copy_commit":
                     item.clicked.connect(lambda: self.on_copy(self.commit_text))
                 else:
@@ -189,6 +215,18 @@ class StationPage(QWidget):
         self.bc_preview_text = text
         if self.vm is not None:
             self.render(self.vm)
+
+    def _bc_edited(self, key: str, text: str) -> None:
+        """改了任何一栏，之前的预览就作废：写入按钮立刻变灰，要重新预览（不整页重画，输入框不丢焦点）。"""
+        self.bc_fields[key] = text
+        if not self.bc_preview_text:
+            return
+        self.bc_preview_text = ""
+        if self._bc_preview_frame is not None:
+            self._bc_preview_frame.setVisible(False)
+        if self._bc_write_button is not None:
+            self._bc_write_button.setEnabled(False)
+            self._bc_write_button.setToolTip("改过内容，先重新预览")
 
     def set_commit_text(self, text: str) -> None:
         self.commit_text = text

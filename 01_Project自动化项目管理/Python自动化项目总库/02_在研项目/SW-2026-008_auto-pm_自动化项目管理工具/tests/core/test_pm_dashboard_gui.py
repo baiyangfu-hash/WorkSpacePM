@@ -111,7 +111,14 @@ def test_pm_board_is_read_only(qapp, tmp_path: Path) -> None:  # noqa: ANN001
     assert seen <= policy.PM_BUTTONS, seen - policy.PM_BUTTONS
     assert window.menuBar().actions() == []
     for kind in (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox):
+        for page in (window.home, window.issues, window.projects, window.project):  # 项目经理看板一个输入框都没有
+            assert page.findChildren(kind) == [], kind.__name__
+    # 整个窗口唯一的输入框：工程工位第 4 步记 BC 行的四栏（用户 10-22 批准“允许写，预览”）
+    for kind in (QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox):
         assert window.findChildren(kind) == [], kind.__name__
+    assert {f.objectName() for f in window.findChildren(QLineEdit)} <= {"bc_field"}
+    for field in window.findChildren(QLineEdit):
+        assert field.parent() is not None and window.station.isAncestorOf(field)
     assert window.projects.table.editTriggers() == window.projects.table.EditTrigger.NoEditTriggers
     window.close()
 
@@ -173,12 +180,33 @@ def test_bc_write_only_after_preview_and_appends_one_line(qapp, tmp_path: Path) 
     record.parent.mkdir(parents=True)
     record.write_bytes(control_before)
     before = record.read_bytes()
+    window.options.operator = "张工"
     window.run_action("bc_write")  # 没预览：拒绝
     assert window.status.text() == "先预览，再写入"
     assert record.read_bytes() == before
+    # 四栏没填：预览拒绝，写入按钮仍灰（审计 95：不许写占位字）
+    window.run_action("bc_preview")
+    assert window.station.bc_preview_text == "" and window.status.text().startswith("先填：")
+    fields = {f.property("bc_key"): f for f in window.station.findChildren(QLineEdit)}
+    assert set(fields) == {"类型", "改了什么", "为什么", "影响"}
+    for key, text in {"类型": "参数", "改了什么": "急停复位 → 加 2 s 延时", "为什么": "现场误动作", "影响": "OB1"}.items():
+        fields[key].setText(text)
     window.run_action("bc_preview")
     qapp.processEvents()
     assert window.station.bc_preview_text.startswith("| BC-DJ-2026-101-2026_10_001 |")
+    assert "急停复位 → 加 2 s 延时" in window.station.bc_preview_text
+    from cockpit_board import actions
+
+    header = actions.bc_header(record)
+    assert len(window.station.bc_preview_text.strip("|").split(" | ")) == len(header)  # 格数跟表头走
+    # 预览后又改了一栏：预览作废、写入变灰，要重新预览
+    fields = {f.property("bc_key"): f for f in window.station.findChildren(QLineEdit)}
+    fields["改了什么"].setText("急停复位 → 加 3 s 延时")
+    assert window.station.bc_preview_text == ""
+    assert not {b.text(): b for b in _buttons(window.station)}["写入 02_业务变更记录.md"].isEnabled()
+    window.run_action("bc_preview")
+    qapp.processEvents()
+    assert "加 3 s 延时" in window.station.bc_preview_text
     assert record.read_bytes() == before  # 预览不写
     buttons = {b.text(): b for b in _buttons(window.station)}
     assert buttons["写入 02_业务变更记录.md"].isEnabled()
