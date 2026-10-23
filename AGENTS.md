@@ -11,6 +11,7 @@
 | 进门第一步（薄入口，只读定位） | `.trae/skills/cockpit-entry/SKILL.md` |
 | 跨 AI 共存与路由 | `.cursor/rules/workspace-ai-coexistence.mdc` |
 | 跨 AI 适配入口（非 Trae，纯引用） | `.agent/rules/project-rule.md` |
+| Claude Code 入口（纯引用） | `CLAUDE.md` |
 | 技能注册表 | `.agents/skills.json` |
 | 全局开发规则 | `.trae/rules/project-rule.md` |
 | 跨技能公共契约 | `.trae/skills/shared/refs/skill_coordination.md` |

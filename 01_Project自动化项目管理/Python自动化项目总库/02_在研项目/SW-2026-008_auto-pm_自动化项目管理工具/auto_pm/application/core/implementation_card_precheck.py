@@ -5,6 +5,9 @@ One precheck serves both entry points:
 * Markdown cards (the hand-written cards actually used): machine-readable header lines
   ``隔离基线：`` (40-hex commit or ``WORKTREE``) and ``路径根：``, plus path tables whose header row
   contains ``路径`` and ``基线状态`` (values ``存在`` / ``计划新增`` / ``运行态``).
+* New-format Markdown cards (``CARD-<PID>-NNN`` in ``<project>/<监控>/01_变更管理/03_实施卡/``)
+  additionally carry ``依据：`` and ``变更单：``; see ``implementation_card_basis``. Their ``路径根``
+  defaults to the project directory and several cards may share one change order.
 * Structured ``implementation_card.v1`` cards: ``base_commit``, ``owned_paths`` with
   ``planned_new_paths``, and gate ``argv``.
 
@@ -23,6 +26,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from auto_pm.application.core import implementation_card_basis as basis
 from auto_pm.contracts.implementation_card import ImplementationCard
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 
@@ -72,6 +76,9 @@ class PrecheckReport:
     paths: tuple[CardPath, ...]
     commands: tuple[str, ...]
     findings: tuple[PrecheckFinding, ...]
+    card_format: str = "legacy"
+    basis: tuple[str, ...] = ()
+    change: str = ""
 
     @property
     def passed(self) -> bool:
@@ -87,6 +94,9 @@ class PrecheckReport:
             "passed": self.passed,
             "paths": [{"path": item.path, "state": item.state} for item in self.paths],
             "commands": list(self.commands),
+            "card_format": self.card_format,
+            "basis": list(self.basis),
+            "change": self.change,
             "findings": [
                 {"rule": item.rule, "subject": item.subject, "message": item.message}
                 for item in self.findings
@@ -130,7 +140,13 @@ def _join(root: str, relative: str) -> str | None:
     return _normalized(f"{root}/{relative}")
 
 
-def _baseline_findings(baseline: str, workspace_root: Path) -> list[PrecheckFinding]:
+def _baseline_findings(
+    baseline: str, workspace_root: Path, *, new_format: bool = False
+) -> list[PrecheckFinding]:
+    if not baseline and new_format:
+        return [
+            PrecheckFinding("header", "隔离基线", "派工前要在卡片头部填 `隔离基线：`（起始 main 的 40 位提交号）")
+        ]
     if not baseline:
         return [PrecheckFinding("header", "隔离基线", "卡片缺少机器可读头部 `隔离基线：`（旧格式卡，不能作为 Work 依据）")]
     if _PLACEHOLDER.search(baseline):
@@ -264,48 +280,27 @@ def _command_tokens(text: str) -> list[list[str]]:
     return invocations
 
 
-def precheck_markdown_card(
-    card_file: Path, *, workspace_root: Path, command_tree: Mapping[str, CommandNode]
-) -> PrecheckReport:
-    """Precheck one hand-written Markdown card; pure read, fail-closed findings."""
+def _path_column(head: Sequence[str]) -> int | None:
+    """The path column: ``路径`` or an annotated ``路径（相对项目根）``."""
+    for index, cell in enumerate(head):
+        if cell == "路径" or cell.startswith(("路径（", "路径(")):
+            return index
+    return None
 
-    raw = card_file.read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
+
+def _state_of(cell: str) -> str:
+    """``存在（只加调用）`` reads as ``存在``; any other annotation stays and is rejected."""
+    state = cell.strip()
+    for known in BASELINE_STATES:
+        if state.startswith((f"{known}（", f"{known}(")) and state.endswith(("）", ")")):
+            return known
+    return state
+
+
+def _parse_path_tables(
+    lines: Sequence[str], path_root: str, card: str
+) -> tuple[tuple[CardPath, ...], list[PrecheckFinding]]:
     findings: list[PrecheckFinding] = []
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return PrecheckReport(
-            str(card_file), digest, "", "", (), (),
-            (PrecheckFinding("header", str(card_file), "卡片不是合法 UTF-8"),),
-        )
-    lines = text.splitlines()
-    header: dict[str, list[str]] = {"隔离基线": [], "路径根": []}
-    for line in lines:
-        match = _HEADER.match(line)
-        if match:
-            value = match.group(2).strip()
-            quoted = _BACKTICK.search(value)
-            header[match.group(1)].append(quoted.group(1).strip() if quoted else value)
-    for key, values in header.items():
-        if len(values) > 1:
-            findings.append(PrecheckFinding("header", key, f"头部字段 `{key}：` 重复出现 {len(values)} 次"))
-    baseline = header["隔离基线"][0] if header["隔离基线"] else ""
-    path_root_raw = header["路径根"][0] if header["路径根"] else ""
-    baseline_findings = _baseline_findings(baseline, workspace_root)
-    findings.extend(baseline_findings)
-    path_root = ""
-    if not path_root_raw:
-        findings.append(PrecheckFinding("header", "路径根", "卡片缺少机器可读头部 `路径根：`"))
-    elif _PLACEHOLDER.search(path_root_raw):
-        findings.append(PrecheckFinding("placeholder", "路径根", f"路径根仍是占位符: {path_root_raw}"))
-    else:
-        normalized_root = "." if path_root_raw.strip() in {".", "./"} else _normalized(path_root_raw)
-        if normalized_root is None:
-            findings.append(PrecheckFinding("header", "路径根", f"路径根必须是控制根内的相对路径: {path_root_raw}"))
-        else:
-            path_root = normalized_root
-
     paths: list[CardPath] = []
     path_tables = 0
     for line_number, head, rows in _tables(lines):
@@ -313,7 +308,8 @@ def precheck_markdown_card(
             for row in rows:
                 if row and row[0] in _APPROVAL_FIELDS and _PLACEHOLDER.search(" ".join(row[1:])):
                     findings.append(PrecheckFinding("placeholder", row[0], "审批字段含占位符"))
-        if "路径" not in head:
+        path_column = _path_column(head)
+        if path_column is None:
             continue
         if "基线状态" not in head:
             findings.append(
@@ -321,7 +317,6 @@ def precheck_markdown_card(
             )
             continue
         path_tables += 1
-        path_column = head.index("路径")
         state_column = head.index("基线状态")
         for offset, row in enumerate(rows, start=2):
             where = f"第 {line_number + offset} 行"
@@ -333,7 +328,7 @@ def precheck_markdown_card(
                 findings.append(PrecheckFinding("path_table", where, "路径单元格缺少反引号包裹的相对路径"))
                 continue
             relative = quoted.group(1).strip()
-            state = row[state_column].strip()
+            state = _state_of(row[state_column])
             if _PLACEHOLDER.search(relative):
                 findings.append(PrecheckFinding("placeholder", relative, "路径仍是占位符"))
                 continue
@@ -348,12 +343,81 @@ def precheck_markdown_card(
                 continue
             paths.append(CardPath(resolved, state))
     if path_tables == 0:
-        findings.append(PrecheckFinding("path_table", str(card_file), "卡片没有含“路径”与“基线状态”两列的路径表"))
+        findings.append(PrecheckFinding("path_table", card, "卡片没有含“路径”与“基线状态”两列的路径表"))
+    return tuple(paths), findings
+
+
+def precheck_markdown_card(
+    card_file: Path,
+    *,
+    workspace_root: Path,
+    command_tree: Mapping[str, CommandNode],
+    project_id: str | None = None,
+) -> PrecheckReport:
+    """Precheck one hand-written Markdown card; pure read, fail-closed findings.
+
+    ``project_id`` (the Work's ``--pid``) is compared with the project a new-format card lives in.
+    """
+
+    raw = card_file.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    findings: list[PrecheckFinding] = []
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return PrecheckReport(
+            str(card_file), digest, "", "", (), (),
+            (PrecheckFinding("header", str(card_file), "卡片不是合法 UTF-8"),),
+        )
+    lines = text.splitlines()
+    header = _machine_header(lines)
+    basis_header = basis.parse_header(lines)
+    new_format = basis.is_new_format(card_file, basis_header)
+    project_root = _project_root(card_file, workspace_root) if new_format else None
+    for key, values in header.items():
+        if len(values) > 1:
+            findings.append(PrecheckFinding("header", key, f"头部字段 `{key}：` 重复出现 {len(values)} 次"))
+    baseline = header["隔离基线"][0] if header["隔离基线"] else ""
+    path_root_raw = header["路径根"][0] if header["路径根"] else ""
+    baseline_findings = _baseline_findings(baseline, workspace_root, new_format=new_format)
+    findings.extend(baseline_findings)
+    path_root = ""
+    if not path_root_raw and project_root is not None:
+        path_root = project_root  # new-format path tables are relative to the project directory
+    elif not path_root_raw:
+        findings.append(PrecheckFinding("header", "路径根", "卡片缺少机器可读头部 `路径根：`"))
+    elif _PLACEHOLDER.search(path_root_raw):
+        findings.append(PrecheckFinding("placeholder", "路径根", f"路径根仍是占位符: {path_root_raw}"))
+    else:
+        normalized_root = "." if path_root_raw.strip() in {".", "./"} else _normalized(path_root_raw)
+        if normalized_root is None:
+            findings.append(PrecheckFinding("header", "路径根", f"路径根必须是控制根内的相对路径: {path_root_raw}"))
+        else:
+            path_root = normalized_root
+
+    table_paths, table_findings = _parse_path_tables(lines, path_root, str(card_file))
+    paths = list(table_paths)
+    findings.extend(table_findings)
     findings.extend(
         _path_findings(
             paths, baseline=baseline, workspace_root=workspace_root, baseline_valid=not baseline_findings
         )
     )
+    if new_format:
+        card_paths = [item.path for item in paths]
+        findings.extend(
+            PrecheckFinding(item.rule, item.subject, item.message)
+            for item in basis.basis_findings(
+                card_file,
+                basis_header,
+                workspace_root=workspace_root,
+                paths=card_paths,
+                project_id=project_id,
+            )
+        )
+        findings.extend(
+            _sibling_findings(card_file, basis_header, card_paths, project_root or "")
+        )
 
     commands: list[str] = []
     for tokens in _command_tokens(text):
@@ -361,8 +425,85 @@ def precheck_markdown_card(
         commands.append(resolved_command)
         findings.extend(command_findings)
     return PrecheckReport(
-        str(card_file), digest, baseline, path_root, tuple(paths), tuple(commands), tuple(findings)
+        str(card_file), digest, baseline, path_root, tuple(paths), tuple(commands), tuple(findings),
+        card_format="new" if new_format else "legacy",
+        basis=basis_header.basis,
+        change=basis_header.change_id,
     )
+
+
+def _machine_header(lines: Sequence[str]) -> dict[str, list[str]]:
+    header: dict[str, list[str]] = {"隔离基线": [], "路径根": []}
+    for line in lines:
+        match = _HEADER.match(line)
+        if match:
+            value = match.group(2).strip()
+            quoted = _BACKTICK.search(value)
+            header[match.group(1)].append(quoted.group(1).strip() if quoted else value)
+    return header
+
+
+def _project_root(card_file: Path, workspace_root: Path) -> str | None:
+    """The card's project directory relative to the control root, when it sits in its drawer."""
+    project_dir = basis.project_dir_of(card_file)
+    root = workspace_root.resolve()
+    if project_dir is None or not project_dir.is_relative_to(root):
+        return None
+    return project_dir.relative_to(root).as_posix() or "."
+
+
+def _sibling_findings(
+    card_file: Path, header: basis.CardHeader, paths: Sequence[str], project_root: str
+) -> list[PrecheckFinding]:
+    """One change order, several cards: open cards under it must not touch the same paths
+    unless one names the other in ``前置卡：`` (their order is then fixed)."""
+
+    change_id = header.change_id
+    if not change_id or not project_root:
+        return []
+    own_id = basis.card_id_of(card_file)
+    findings: list[PrecheckFinding] = []
+    for sibling in basis.cards_for_change(card_file.resolve().parent, change_id):
+        if sibling.card_file.resolve() == card_file.resolve() or not sibling.open:
+            continue
+        if own_id in sibling.header.predecessors:
+            continue  # this card goes first; the sibling waits for it
+        lines = sibling.card_file.read_text(encoding="utf-8").splitlines()
+        declared = _machine_header(lines)["路径根"]
+        root = _normalized(declared[0]) if declared and declared[0] not in {".", "./"} else None
+        sibling_root = root or ("." if declared else project_root)
+        sibling_paths, sibling_problems = _parse_path_tables(lines, sibling_root, str(sibling.card_file))
+        if any(item.rule in {"path_table", "placeholder"} for item in sibling_problems):
+            # A row that cannot be read may be the one that overlaps: refuse rather than guess.
+            findings.append(
+                PrecheckFinding(
+                    "change",
+                    sibling.card_id,
+                    f"同一变更单 {change_id} 下未关闭的卡路径表读不全，无法核对是否改同一批文件；"
+                    "先把那张卡的路径表补齐",
+                )
+            )
+            continue
+        shared = basis.paths_overlap(paths, [item.path for item in sibling_paths])
+        if shared and sibling.card_id in header.predecessors:
+            findings.append(
+                PrecheckFinding(
+                    "change",
+                    sibling.card_id,
+                    f"前置卡 {sibling.card_id} 还没关闭，它和本卡改同一批文件（{', '.join(shared)}）；"
+                    "等前置卡验收关闭后再开工",
+                )
+            )
+        elif shared:
+            findings.append(
+                PrecheckFinding(
+                    "change",
+                    sibling.card_id,
+                    f"与同一变更单 {change_id} 下未关闭的卡改同一批文件（{', '.join(shared)}）；"
+                    "在其中一张卡头部写 `前置卡：` 排定先后",
+                )
+            )
+    return findings
 
 
 def precheck_structured_card(

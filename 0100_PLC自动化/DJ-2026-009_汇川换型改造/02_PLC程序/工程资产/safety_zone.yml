@@ -1,0 +1,91 @@
+# DJ-2026-009 安全区清单（初稿，2026-10-21，待用户逐条核对后签字）
+# 规则：plans/现场回传与安全签字规则_设计稿_20261021.md 第 2 节；检查脚本 reviews/tools/safety_zone_check.py
+# 三层取并集，任一层命中就算碰了安全区：
+#   files      整个文件都是安全逻辑
+#   区段注释    程序里 // @安全区 开始 … // @安全区 结束 圈出的行（OB1、FB_3001、FB_3002）
+#   variables  改动的任何一行引用了这些名字就算碰（可通配，不分大小写）
+#   points     安全输入点：程序逻辑里必须读到，且不得赋常量；另见 io_points.csv 的“安全”列
+# 安全回路本身由独立安全继电器硬接线控制，不受 PLC 程序控制；这里标的是 PLC 读安全状态、
+# 以及只靠软件实现的设备间联锁（Modbus TCP 握手、断线联锁、气缸/输送先后联锁）。
+project_id: DJ-2026-009
+
+files:
+  # 工位 1 动作块：电机/气缸先后条件、等握手才进料、工步超时停机、急停/报警时撤销全部命令
+  - 02_PLC程序/PLC_ST/02_工位1_动作机构/FB_1001_Station1.scl
+  # 安全 IO 全局变量表（急停 AT %IX0.0、继电器反馈、复位/启动、门锁、总线在线，CARD-DJ-2026-009-004）
+  - 02_PLC程序/PLC_ST/00_全局数据/GVL_SafetyIO.st
+
+variables:
+  # 安全继电器经 IO 报给 PLC 的状态
+  - bEmergencyStop
+  - bSafetyDoorOK
+  # 共享库 FB_1030 安全管理块的实例、入参数组和输出（CARD-DJ-2026-009-004）
+  - fbSafety
+  - bSafeToRun
+  - bFrozen
+  - bMotionStopped
+  - arrSafetyFault
+  - arrEStopOk
+  - arrCurtainOk
+  - arrDoorClosed
+  - arrDoorReqBtn
+  - "DOOR?_*"
+  - DOOR_COUNT
+  # 停机时气缸保持/缩回（按阀定）、心跳与断线时间常量
+  - "CYL*_RETRACT_ON_STOP"
+  - HB_HALF_MS
+  - HB_TIMEOUT_MS
+  # 断线判定：上下游心跳与通讯故障位
+  - "*Heartbeat*"
+  - "*ComFault*"
+  # 发给对方、让对方把料推进来 / 允许对方接料的许可信号
+  - bMachine_ReadyIn
+  - bMachine_AllowInfeed
+  - bMachine_ReadyOut
+  - bMachine_OutfeedReq
+  # 对方发来、会让本机电机动起来的信号
+  - bUpstream_InfeedReq
+  - bDownstream_AllowOutfeed
+  # 握手给工位的动作许可与步序
+  - "*AllowInfeedAct"
+  - "*AllowOutfeedAct"
+  - iInfeedStep
+  - iOutfeedStep
+  # 有无产品（决定断线后要不要人工复位，S4）
+  - bProductPresent
+
+points:
+  # 急停按钮状态（1 = 正常）；CARD-004 起 OB1 由 ESTOP_OK 赋值，只报警显示，握手使能改看运行许可
+  - bEmergencyStop
+  # 以下随卡 004 补（核对表第 8.1 节 A1～A3、A5）；io_points.csv 安全列也已标“是”
+  - SAFETY_FAULT
+  - RESET_BTN
+  - START_BTN
+  - DOOR1_LOCKED
+  - DOOR1_REQ_BTN
+  - DOOR2_LOCKED
+  - DOOR2_REQ_BTN
+  - DOOR3_LOCKED
+  - DOOR3_REQ_BTN
+  - DOOR4_LOCKED
+  - DOOR4_REQ_BTN
+  - DOOR5_LOCKED
+  - DOOR5_REQ_BTN
+  - DOOR6_LOCKED
+  - DOOR6_REQ_BTN
+  - DOOR7_LOCKED
+  - DOOR7_REQ_BTN
+  - DOOR8_LOCKED
+  - DOOR8_REQ_BTN
+  - FIELDBUS_OK
+
+note: >-
+  初稿由云端预做（分支 claude/dj009-safety-zone，基线 claude/dj009-card003 1465719f），只加清单和注释，逻辑未改。
+  核对表见项目文件夹 plans/DJ-2026-009_安全区清单初稿_20261021.md。用户 2026-10-21 已答：急停映射用 ESTOP_OK AT %IX0.0（随卡 004）；
+  急停后同一按钮两次复位（先安全继电器、反馈正常且隔 10 s 后再复位运行系统，卡 004）；有安全门（欧姆龙门锁，线圈得电解锁），
+  门锁反馈与解锁输出待用户补安全规范后加入 points/variables；FC_3003 不列为安全区。
+  2026-10-22 卡 004 预做（分支 claude/safety-manager-card004）按《电气自动化安全规范》V1.0 补：GVL_SafetyIO 整文件、
+  FB_1030 实例与入参数组、SAFETY_FAULT/RESET_BTN/START_BTN/DOOR1_*/FIELDBUS_OK 六个安全点、气缸停机处理常量、心跳常量。
+  2026-10-22 用户答：门最多 8 扇、只留变量不定地址 → DOOR1～DOOR8 全列进 points，实际门数由 DOOR_COUNT 定（默认 8）；
+  心跳照发、许可丢失只撤握手（FB_3001 i_bSafeToRun）；夹紧/顶升气缸停机保持。
+  清单改动本身也要签字。

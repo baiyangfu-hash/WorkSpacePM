@@ -1,0 +1,308 @@
+// ============================================================================
+// safety_manager_test.scltest - FB_1030_SafetyManager 功能测试 (安全区)
+// ============================================================================
+// 被测对象: SysLib/safety/FB_1030_SafetyManager V1.0.0
+// 测试实例: GlobalVars.SafetyMgr (OB1 第六部分调用)
+// 用例编号对应《安全FB设计草案_20261022》第 4 节 T1~T13.
+//
+// 计时说明: FB_1030 的 10 s 用共享库 FB_TON V3.0.0 (真实毫秒). LSP 仿真里 TON 是否随
+//   仿真时间走以本机实测为准 (见 FB_TON 文件头). 不靠计时的用例 (T1~T3、T7~T13 的停机
+//   和拒绝部分) 在这里验; 要等满 10 s 的 T5/T6 标了 [计时], LSP 跑不过时改在
+//   InoProShop 仿真里验 (分支说明里的用例单). 逻辑全量 (含计时) 已在云端用
+//   reviews/tools/test_fb1030_safety_manager.py 按真实毫秒跑过.
+//
+// 每个用例开头先让总线断一下再恢复: 任何状态都会回到 0 (安全回路断开), 用例之间互不影响.
+// ============================================================================
+
+// ============================================================================
+// T1: 运行中任一继电器反馈 = 故障 -> 当拍停 (需先到状态 4, 依赖计时, 见 test_t5)
+// 这里验不靠计时的部分: 状态 0 时继电器故障, 运行许可为 0、立即停为 1、报警位 24
+// ============================================================================
+TEST_CASE "t1_relay_fault_stop_now"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    SET GlobalVars.sm_arrSafetyFault[0] := TRUE;
+    WAIT_CYCLES 1;
+
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+    ASSERT GlobalVars.sm_bStopNow = TRUE;
+    ASSERT GlobalVars.sm_iState = 0;
+    ASSERT GlobalVars.sm_dwAlarm = 16#01000000;
+
+    SET GlobalVars.sm_arrSafetyFault[0] := FALSE;
+    WAIT_CYCLES 1;
+END_TEST_CASE
+
+// ============================================================================
+// T2: 反馈恢复后不按任何按钮 -> 一直不出运行许可 (不自启)
+// ============================================================================
+TEST_CASE "t2_no_auto_restart"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    SET GlobalVars.sm_arrSafetyFault[0] := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_arrSafetyFault[0] := FALSE;
+    WAIT_CYCLES 200;
+
+    ASSERT GlobalVars.sm_iState = 0;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+    ASSERT GlobalVars.sm_bStopNow = FALSE;
+END_TEST_CASE
+
+// ============================================================================
+// T3: 继电器故障时按复位 -> 第一次只记时刻 (状态 1), 再按不采纳, 报 bit29
+// ============================================================================
+TEST_CASE "t3_reset_rejected_while_fault"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    SET GlobalVars.sm_arrSafetyFault[0] := TRUE;
+    WAIT_CYCLES 1;
+
+    SET GlobalVars.sm_bResetBtn := TRUE;   // 第一次
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.sm_iState = 1;
+
+    SET GlobalVars.sm_bResetBtn := TRUE;   // 继电器还是故障
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 1;
+
+    ASSERT GlobalVars.sm_iState = 1;
+    ASSERT GlobalVars.sm_bRunResetPulse = FALSE;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+    ASSERT GlobalVars.sm_dwAlarm = 16#21000000;   // bit29 复位被拒 + bit24 继电器 1 故障
+
+    SET GlobalVars.sm_arrSafetyFault[0] := FALSE;
+    WAIT_CYCLES 1;
+END_TEST_CASE
+
+// ============================================================================
+// T4: 第一次复位后马上再按 (不足 10 s) -> 不采纳, 报 bit30 复位过早
+// ============================================================================
+TEST_CASE "t4_second_reset_too_early"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    WAIT_CYCLES 1;
+
+    SET GlobalVars.sm_bResetBtn := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 5;
+    SET GlobalVars.sm_bResetBtn := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 1;
+
+    ASSERT GlobalVars.sm_iState = 1;
+    ASSERT GlobalVars.sm_bRunResetPulse = FALSE;
+    ASSERT GlobalVars.sm_dwAlarm = 16#40000000;   // bit30 复位过早
+END_TEST_CASE
+
+// ============================================================================
+// T5 [计时]: 第一次复位后满 10 s 再按 -> 状态 3 (已复位未启动), 再按启动才许可
+// LSP 扫描周期按 10 ms 估 1100 个周期; TON 不随仿真时间走时本条会停在状态 1
+// ============================================================================
+TEST_CASE "t5_reset_after_10s_then_start"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    WAIT_CYCLES 1;
+
+    SET GlobalVars.sm_bResetBtn := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 1100;
+    ASSERT GlobalVars.sm_iState = 2;
+
+    SET GlobalVars.sm_bResetBtn := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.sm_iState = 3;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;     // 复位不等于启动
+
+    SET GlobalVars.sm_bStartBtn := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bStartBtn := FALSE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.sm_iState = 4;
+    ASSERT GlobalVars.sm_bSafeToRun = TRUE;
+
+    // T1 续: 运行中继电器故障 -> 当拍停
+    SET GlobalVars.sm_arrSafetyFault[0] := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+    ASSERT GlobalVars.sm_iState = 0;
+    SET GlobalVars.sm_arrSafetyFault[0] := FALSE;
+    WAIT_CYCLES 1;
+END_TEST_CASE
+
+// ============================================================================
+// T6 [计时]: 按住复位不放跨过 10 s -> 不算第二次 (只认上升沿)
+// ============================================================================
+TEST_CASE "t6_hold_reset_not_accepted"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    WAIT_CYCLES 1;
+
+    SET GlobalVars.sm_bResetBtn := TRUE;
+    WAIT_CYCLES 1500;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT GlobalVars.sm_bRunResetPulse = FALSE;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+    ASSERT GlobalVars.sm_iState <> 3;
+END_TEST_CASE
+
+// ============================================================================
+// T7: 第 3 扇门门锁点 = 0 -> 立即停为 1, 报警位 bit10; 此时按复位不采纳 (bit29)
+// ============================================================================
+TEST_CASE "t7_door_not_locked"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    SET GlobalVars.sm_arrDoorClosed[2] := FALSE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.sm_bStopNow = TRUE;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+
+    SET GlobalVars.sm_bResetBtn := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.sm_iState = 0;
+    ASSERT GlobalVars.sm_dwAlarm = 16#20000400;  // bit29 + bit10
+
+    SET GlobalVars.sm_arrDoorClosed[2] := TRUE;
+    WAIT_CYCLES 1;
+END_TEST_CASE
+
+// ============================================================================
+// T8: 总线断线 -> 立即停为 1, 报 bit28; 恢复后不自启
+// ============================================================================
+TEST_CASE "t8_fieldbus_lost"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.sm_bStopNow = TRUE;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+    ASSERT GlobalVars.sm_dwAlarm = 16#30000000;  // bit28 总线断 + T7 留下的 bit29 (保持到下次复位被采纳)
+
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    WAIT_CYCLES 100;
+    ASSERT GlobalVars.sm_iState = 0;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+END_TEST_CASE
+
+// ============================================================================
+// T9: 自动时按申请开门 -> 不响应, 灯不亮
+// ============================================================================
+TEST_CASE "t9_door_request_in_auto"
+    SET GlobalVars.sm_bAutoMode := TRUE;
+    SET GlobalVars.sm_bMotionStopped := TRUE;
+    SET GlobalVars.sm_arrDoorReqBtn[0] := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_arrDoorReqBtn[0] := FALSE;
+    WAIT_CYCLES 100;
+
+    ASSERT GlobalVars.sm_arrDoorUnlock[0] = FALSE;
+    ASSERT GlobalVars.sm_arrDoorLamp[0] = FALSE;
+
+    SET GlobalVars.sm_bAutoMode := FALSE;
+    SET GlobalVars.sm_bMotionStopped := FALSE;
+    WAIT_CYCLES 1;
+END_TEST_CASE
+
+// ============================================================================
+// T10: 手动、动作没停时申请 -> 不解锁; 动作停后解锁、灯常亮
+// T11: 门开着按复位 -> 1 s 内门锁点没回来, 恢复解锁 (不采纳); 关门后按复位 -> 锁回、灯灭
+// ============================================================================
+TEST_CASE "t10_t11_door_unlock_and_relock"
+    SET GlobalVars.sm_bAutoMode := FALSE;
+    SET GlobalVars.sm_bMotionStopped := FALSE;
+    SET GlobalVars.sm_arrDoorReqBtn[0] := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_arrDoorReqBtn[0] := FALSE;
+    WAIT_CYCLES 20;
+    ASSERT GlobalVars.sm_arrDoorUnlock[0] = FALSE;   // 动作没停, 不解锁
+
+    SET GlobalVars.sm_bMotionStopped := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.sm_arrDoorUnlock[0] = TRUE;
+    ASSERT GlobalVars.sm_arrDoorLamp[0] = TRUE;      // 常亮
+
+    // 开门: 门锁点 = 0, 门锁串在继电器里, 回路断
+    SET GlobalVars.sm_arrDoorClosed[0] := FALSE;
+    SET GlobalVars.sm_arrSafetyFault[0] := TRUE;
+    WAIT_CYCLES 2;
+
+    // 关门后按复位: 撤销解锁, 门锁住后点回 1
+    SET GlobalVars.sm_bResetBtn := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.sm_arrDoorUnlock[0] = FALSE;
+    SET GlobalVars.sm_arrDoorClosed[0] := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.sm_arrDoorUnlock[0] = FALSE;
+    ASSERT GlobalVars.sm_arrDoorLamp[0] = FALSE;
+    ASSERT GlobalVars.sm_iState = 0;                 // 锁门这一下不算第一次复位
+
+    SET GlobalVars.sm_arrSafetyFault[0] := FALSE;
+    SET GlobalVars.sm_bMotionStopped := FALSE;
+    WAIT_CYCLES 1;
+END_TEST_CASE
+
+// ============================================================================
+// T12: 遮挡第 2 道光栅 (它接在第 2 个继电器) -> 停, 报 bit17 + bit25
+// ============================================================================
+TEST_CASE "t12_curtain_2_blocked"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    SET GlobalVars.sm_arrCurtainOk[1] := FALSE;
+    SET GlobalVars.sm_arrSafetyFault[1] := TRUE;
+    WAIT_CYCLES 1;
+
+    ASSERT GlobalVars.sm_bStopNow = TRUE;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+    ASSERT GlobalVars.sm_dwAlarm = 16#22020000;  // bit17 光栅 2 + bit25 继电器 2 + T11 锁门那一下留下的 bit29
+
+    SET GlobalVars.sm_arrCurtainOk[1] := TRUE;
+    SET GlobalVars.sm_arrSafetyFault[1] := FALSE;
+    WAIT_CYCLES 1;
+END_TEST_CASE
+
+// ============================================================================
+// T13: 两个继电器, 只让第 2 个反馈 = 1 -> 停, 只报 bit25; 它恢复前复位不采纳
+// ============================================================================
+TEST_CASE "t13_second_relay_fault"
+    SET GlobalVars.sm_bFieldbusOk := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bFieldbusOk := TRUE;
+    SET GlobalVars.sm_arrSafetyFault[1] := TRUE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.sm_bStopNow = TRUE;
+    ASSERT GlobalVars.sm_dwAlarm = 16#22000000;  // 只报 bit25 继电器 2 (bit24 不报) + 前面留下的 bit29
+
+    SET GlobalVars.sm_bResetBtn := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := TRUE;
+    WAIT_CYCLES 2;
+    SET GlobalVars.sm_bResetBtn := FALSE;
+    WAIT_CYCLES 1;
+    ASSERT GlobalVars.sm_bRunResetPulse = FALSE;
+    ASSERT GlobalVars.sm_bSafeToRun = FALSE;
+
+    SET GlobalVars.sm_arrSafetyFault[1] := FALSE;
+    WAIT_CYCLES 1;
+END_TEST_CASE

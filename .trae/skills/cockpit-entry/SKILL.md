@@ -29,6 +29,8 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
    & ".\.venv\Scripts\python.exe" ".\main.py" pm orient <项目编号> --json
    ```
 
+   如果报 `No such command 'orient'`：说明本机生效的发布版本还没有这条命令（仓库里记录的发布版本 1.3.3-d8f7c8b 就没有，新克隆的工作区在发布指针更新前会遇到）。这不是故障，改用同样只读的 `pm resume <项目编号> --json`，照第 4 步报告；不要为此切换或部署版本。
+
    不知道项目编号时，也可以在根目录用 `context resolve --path <项目目录>` 让系统识别项目。
 
 4. **用中文向用户报告**：当前焦点、正在做的 Work/Run、下一步合法动作（`next_legal_action`）。`conflicts` 不为空时，把原文告诉用户并停下，等用户决定。`work_candidates` 里每个 Work 的编号和状态原样报告，不要自己判断哪个是历史遗留、哪个在做。

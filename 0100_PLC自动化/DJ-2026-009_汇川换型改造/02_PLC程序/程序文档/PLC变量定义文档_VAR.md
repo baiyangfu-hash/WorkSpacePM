@@ -96,6 +96,31 @@
 | `stExternal.q_bSystemSafetyConditionMet` | BOOL | 系统安全条件满足 |
 | `stExternal.q_bExternalDeviceFault` | BOOL | 外部设备故障 |
 
+### 3.6 组件 ID 与外部交互新增全局变量（CARD-DJ-2026-009-003 草稿）
+
+| 变量名 | 类型 | 说明 |
+|--------|------|------|
+| `sMachineModuleID` | STRING[32] | 本机 ID（组件 ID 第 2 格），**须声明在断电保持区（VAR_GLOBAL RETAIN）** |
+| `stModuleIdHmi` | ST_ModuleIdHmi | 组件 ID 人工操作与时间参数（HMI），建议也放断电保持区（参数要保持；命令位 PLC 处理后自动清 0） |
+| `bExtAllowInfeedAct` | BOOL | FB_3001 进料动作允许（供工位联锁，见待办） |
+| `bExtAllowOutfeedAct` | BOOL | FB_3001 出料动作允许（供工位联锁，见待办） |
+| `bExtUpstreamDone` | BOOL | 进料握手完成脉冲 |
+| `bExtDownstreamDone` | BOOL | 出料握手完成脉冲 |
+| `bExtComAlarm` | BOOL | 外部通讯综合报警 |
+| `wExtErrorCode` | WORD | FB_3001 故障诊断字（位定义见 FB_3001 接口文档第 3 节） |
+
+### ST_ModuleIdHmi（组件 ID 人工操作与时间参数）
+
+| 名称 | 类型 | 说明 |
+|------|------|------|
+| `bCmdCopyFromUp` | BOOL | 拷入: 上游 ID -> 本机 ID (R4) |
+| `bCmdManualEntry` | BOOL | 补录: sManualId -> 本机 ID (R5) |
+| `bCmdRelease` | BOOL | 放行: 上游 ID 不合格时人工允许本次进料 (R5) |
+| `bCmdClear` | BOOL | 清空本机 ID (R6) |
+| `sManualId` | STRING[32] | 人工补录的组件 ID |
+| `dLeaveTimeMs` | DINT | 出料中检测不到产品判产品离开的时间 ms (0 = 按 2000) |
+| `dIdleClearMs` | DINT | 自动作业中无产品自动清本机 ID 的时间 ms (0 = 按 20000, 暂定) |
+
 ## 4. 功能块实例
 
 | 实例名 | FB类型 | 声明位置 | 说明 |
@@ -185,6 +210,7 @@
 | bReset | BOOL | 故障复位 |
 | bPause | BOOL | 暂停 |
 | bSingleStepMode | BOOL | 单步模式 |
+| bSafeToRun | BOOL | 运行许可, OB1 每扫描从 FB_1030 q_bSafeToRun 写入 (CARD-DJ-2026-009-004) |
 
 ### ST_Station1_Status（结构体）
 
@@ -197,6 +223,10 @@
 | iAlarmCode | DINT | 报警代码 (101~199) |
 | bWaitMaterial | BOOL | 等待来料 |
 | bProcessing | BOOL | 加工中 |
+| bReadyOut | BOOL | 【待确认】加工完成可出料 (出料步且气缸已松开) |
+| bProductPresent | BOOL | 【待确认】本工位有产品 (入料到位/加工到位/预留产品传感器任一路为 1) |
+| bFrozen | BOOL | 安全停机, 步序冻结在断点等续跑 (CARD-DJ-2026-009-004) |
+| bMotionStopped | BOOL | 【待确认】动作完全停止: 电机无请求且不转, 气缸都在端点 (接 FB_1030 i_bMotionStopped) |
 
 ### ST_Station1_Config（结构体）
 
@@ -212,6 +242,7 @@
 |---|---|---|
 | bInPosSensor | BOOL | 入料到位光电 |
 | bWorkPosSensor | BOOL | 加工到位光电 |
+| arrProductSens | ARRAY[0..7] OF BOOL | 【待确认】产品检测传感器预留 8 路 (未接的保持 0), 任一路为 1 即有产品 |
 
 ### ST_Station1_Actuators（结构体）
 
