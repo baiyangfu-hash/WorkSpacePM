@@ -1,0 +1,76 @@
+# PR 越界检查（可设为必需检查）：PR 改到的文件必须都在它的任务卡（或自报的“可改范围”）里，锁定文件要逐字写出路径；
+# 改到 PLC 文件时再跑提交前钩子同一套文档/代码一致性检查。说明见 reviews/越界检查上GitHub_说明.md。
+#
+# 裁判全部来自 PR 基线（main），PR 改不了它：
+# - pull_request_target：GitHub 用 main 上的这份工作流，而不是 PR 里改过的版本；
+# - 检查脚本、它读取的配置、安装依赖用的锁定文件，都取自基线的检出（$GITHUB_WORKSPACE）；
+# - PR 头部只拉成 git 对象和另一份工作树（$RUNNER_TEMP/pr-head），只当数据读取，其中的任何文件都不导入、不执行、不安装。
+# 不设 paths 过滤：必需检查必须对每个 PR 都报告结果。
+name: pr-gate
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+# Read-only token; no secrets are used by any step.
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the PR base (the judge)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the locked dependencies of the base
+        run: |
+          python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          python -m pip check
+
+      # Data only: the PR head becomes git objects plus a separate work tree that is read, never run.
+      - name: Fetch the PR head as data
+        env:
+          TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+          test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA"
+          # Symlinks become plain files and Git LFS never runs: the PR head cannot point outside its tree or fetch content.
+          git -c core.symlinks=false -c filter.lfs.smudge= -c filter.lfs.process= -c filter.lfs.required=false \
+            worktree add --detach "$RUNNER_TEMP/pr-head" "$HEAD_SHA"
+
+      - name: Scope check
+        env:
+          # Every git call in this step (the PLC doc check exports PR files with checkout-index) runs with
+          # Git LFS switched off, so a PR's .gitattributes/.lfsconfig cannot start git-lfs or reach its endpoint.
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: filter.lfs.smudge
+          GIT_CONFIG_VALUE_0: ""
+          GIT_CONFIG_KEY_1: filter.lfs.process
+          GIT_CONFIG_VALUE_1: ""
+          GIT_CONFIG_KEY_2: filter.lfs.required
+          GIT_CONFIG_VALUE_2: "false"
+          # The PR body is untrusted text: it reaches the script only through the environment.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          python -I "$GITHUB_WORKSPACE/reviews/tools/pr_scope_check.py" --ci
+          --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$RUNNER_TEMP/pr-head"
