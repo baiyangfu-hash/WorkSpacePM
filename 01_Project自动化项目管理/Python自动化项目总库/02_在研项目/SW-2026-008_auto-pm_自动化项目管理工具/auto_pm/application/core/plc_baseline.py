@@ -87,8 +87,24 @@ def export_plc_baseline(repo: Path, rev: str, project_rel: str, destination: Pat
         raise PlcBaselineError(archive.stderr.decode("utf-8", "replace").strip() or "git archive 失败")
     destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as bundle:
-        bundle.extractall(destination, filter="data")
+        _extract(bundle, destination)
     return destination / project_rel
+
+
+def _extract(bundle: tarfile.TarFile, destination: Path) -> None:
+    """解包到 ``destination``；Python 3.11.4 以前的 ``extractall`` 没有 ``filter``，就自己挡掉越界路径和链接。"""
+
+    try:
+        bundle.extractall(destination, filter="data")
+        return
+    except TypeError:
+        pass
+    root = destination.resolve()
+    for member in bundle.getmembers():
+        target = (destination / member.name).resolve()
+        if not (member.isfile() or member.isdir()) or (target != root and root not in target.parents):
+            raise PlcBaselineError(f"基线归档里有不安全的条目: {member.name}")
+    bundle.extractall(destination)  # noqa: S202 - every member was checked above
 
 
 def repo_top(path: Path) -> Path:

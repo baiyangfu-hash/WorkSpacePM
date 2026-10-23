@@ -1912,6 +1912,10 @@ def _plc_check_output(
     diff = diff_failures(now, base, baseline_note=note)
     # Verdict and new failures first: the bounded summary must never hide the reason.
     lines = diff.render(_baseline_title(baseline))
+    if any(item.item == "Siemens 语言服务 check" and item.status == "warn" for item in result.items):
+        # Not a pass: AGENTS.md rule — an unfound plugin is "unverified", blocked at the delivery stage gate.
+        # Right after the verdict and the new failures, so the bounded summary keeps it.
+        lines.insert(1 + bool(diff.baseline_note) + len(diff.new), "注意：本机没找到 Siemens 插件命令行，语言服务这一层未验证（交付阶段门禁按失败处理）")
     rank = {"fail": 0, "warn": 1}
     ordered = sorted(result.items, key=lambda item: rank.get(item.status, 2))
     lines.extend(f"{item.status} | {item.item} | {item.message}" for item in ordered)

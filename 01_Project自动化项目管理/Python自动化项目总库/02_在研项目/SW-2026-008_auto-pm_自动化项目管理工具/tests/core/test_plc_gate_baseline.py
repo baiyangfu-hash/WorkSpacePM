@@ -263,6 +263,26 @@ def test_b10_without_the_plugin_the_gate_still_compares_and_says_unverified(tmp_
 
     assert receipt.status == "PASS"
     assert "warn | Siemens 语言服务 check | 未验证" in receipt.gates[0].output_summary
+    assert "注意：本机没找到 Siemens 插件命令行" in receipt.gates[0].output_summary.splitlines()[1]
+
+
+def test_b13_baseline_export_works_without_tarfile_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Python 3.11.0–3.11.3 的 ``extractall`` 不认 ``filter``：照样能导出。"""
+    import tarfile
+
+    original = tarfile.TarFile.extractall
+
+    def old_extractall(self: tarfile.TarFile, path: object = ".", members: object = None, **kwargs: object) -> None:
+        if "filter" in kwargs:
+            raise TypeError("extractall() got an unexpected keyword argument 'filter'")
+        original(self, path, members)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", old_extractall)
+    _, candidate, head = plc_workspace(tmp_path)
+
+    exported = export_plc_baseline(candidate, head, PROJECT, tmp_path / "base")
+
+    assert exported is not None and (exported / ".plc.json").is_file()
 
 
 def test_b11_plc_check_baseline_reproduces_the_verdict_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
