@@ -36,6 +36,8 @@ class LanguageServiceResult:
     binary: LanguageServiceBinary | None = None
     cases_run: int | None = None  # ``test``：诊断行里的 "running X/Y cases"
     cases_total: int | None = None
+    # 全部诊断行（``messages`` 只留前几条给人看；验收门逐条和基线比时要全部）
+    diagnostics: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -111,12 +113,14 @@ def merge_results(command: str, project_root: Path, parts: list[tuple[Path, Lang
         return LanguageServiceResult(command=command, available=False, exit_code=None, summary=parts[0][1].summary, binary=parts[0][1].binary)
     multi = len(parts) > 1
     messages: list[str] = []
+    diagnostics: list[str] = []
     for scope, result in parts:
         try:
             tag = scope.relative_to(project_root).as_posix()
         except ValueError:
             tag = scope.as_posix()
         messages.extend((f"[{tag}] {m}" if multi else m) for m in result.messages)
+        diagnostics.extend((f"[{tag}] {m}" if multi else m) for m in (result.diagnostics or result.messages))
     codes = [r.exit_code for _, r in parts]
     worst = next((c for c in codes if c not in (0, None)), 0)
     run = [r.cases_run for _, r in parts if r.cases_run is not None]
@@ -124,6 +128,7 @@ def merge_results(command: str, project_root: Path, parts: list[tuple[Path, Lang
     return LanguageServiceResult(
         command=command, available=True, exit_code=worst, error_count=sum(r.error_count for _, r in parts), messages=tuple(messages[:MAX_SHOWN_MESSAGES]),
         summary=parts[-1][1].summary, binary=parts[0][1].binary, cases_run=sum(run) if run else None, cases_total=sum(total) if total else None,
+        diagnostics=tuple(diagnostics),
     )
 
 
