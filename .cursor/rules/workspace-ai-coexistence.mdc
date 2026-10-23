@@ -21,6 +21,7 @@ alwaysApply: true
 | 全栈执行 | `.trae/skills/fullstack-engineer/SKILL.md` |
 | PLC 执行 | `.trae/skills/plc-electrical-engineer/SKILL.md` |
 | 工位与控制根规则 | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)” |
+| 独立审计（审 PR 时） | `AGENTS.md`“独立审计 (AUD-001)” |
 | 规范索引 | `00_Obsidian_Base全局规范文件仓库/00_INDEX_全局规范索引.md` |
 
 冲突时：项目级 > 技术栈规则 > 全局规则 > Cursor 默认行为。
