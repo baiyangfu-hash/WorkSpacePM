@@ -2,14 +2,14 @@
 """AiContext Bridge - 驾驶舱 ↔ AI 技能上下文桥接（双向）
 
 将当前驾驶舱状态（项目、变更单、页面）写入 JSON 文件，
-供 AI 技能（pm-workflow）快速恢复上下文；
+供进门技能（cockpit-entry）与执行技能快速恢复上下文；
 同时读取 AI 技能执行结果（门禁/测试/LSP）反馈给驾驶舱展示。
 
 设计原则：
 - 轻量 QObject，不依赖 Facade/Service 体系
 - 只依赖 workspace_root（已在 qml_main_window.py 中可用）
 - 写入 .auto-pm/ai_context.json，技能侧检查此文件决定是否跳过上下文恢复
-- 读取 .auto-pm/ai_feedback.json，pm-workflow 统一收集子技能结果后写入
+- 读取 .auto-pm/ai_feedback.json，由 PM 治理角色统一收集子技能结果后写入
 """
 
 import json
@@ -20,6 +20,7 @@ from typing import Any, cast
 
 from PySide6.QtCore import QObject, Slot
 
+from auto_pm.application.core.ai_handoff_service import ENTRY_SKILL
 from auto_pm.core.ai_handoff_service import AiHandoffService
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class AiContextBridge(QObject):
             return "plc-electrical-engineer"
         if domain in {"SCPT", "PYTHON"} or stack_lower == "python":
             return "fullstack-engineer"
-        return "pm-workflow"
+        return ENTRY_SKILL
 
     def _infer_intent(self, current_page: str, stack: str, change_number: str, phase: str = "") -> str:
         if phase == "initiating":
@@ -255,8 +256,9 @@ class AiContextBridge(QObject):
     ) -> dict[str, Any]:
         """Write a PM-only closure context for one pending handoff.
 
-        The method deliberately leaves the handoff unchanged.  It is consumed by
-        pm-workflow, the sole writer of PM_SESSION and ai_feedback.json.
+        The method deliberately leaves the handoff unchanged.  An agent enters
+        through cockpit-entry; the PM governance role then closes the handoff
+        and is the sole writer of ai_feedback.json.
         """
         handoff = self._handoff_service().get_pending(request_id)
         if handoff is None:
@@ -271,7 +273,7 @@ class AiContextBridge(QObject):
             "request_id": request_id,
             "entry_mode": "cockpit",
             "intent": "close_handoff",
-            "target_skill": "pm-workflow",
+            "target_skill": ENTRY_SKILL,
             "handoff_request_id": request_id,
             "active_project": {
                 "id": project_id or handoff["project_id"],
@@ -303,7 +305,7 @@ class AiContextBridge(QObject):
     def readAiFeedback(self) -> dict[str, Any]:
         """读取 AI 技能执行结果反馈
 
-        pm-workflow 在子技能执行完毕后，将结果写入
+        PM 治理角色在子技能执行完毕后，将结果写入
         .auto-pm/ai_feedback.json。驾驶舱读取此文件展示 AI 工作状态。
 
         Returns:
