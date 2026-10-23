@@ -15,6 +15,7 @@ Commands:
     delete <ID> --confirm         删除项目
     retrofit <ID>                 补全 .copier-answers.yml 元数据文件
     import <PATH> [--move]        导入外部项目目录到工作空间
+    register <ID> [--path]        把已有项目登记到工作区登记表
     snapshot <ID> [--dry-run]     刷新 PM_SESSION 的 Spec Snapshot 版本号
 """
 
@@ -878,6 +879,45 @@ def cmd_import(
             console.print("[green]DB 缓存已同步[/green]")
         except Exception as e:
             console.print(f"[yellow]DB 缓存同步失败（不影响导入）: {e}[/yellow]")
+
+
+@project_group.command(name="register")
+@click.argument("project_id")
+@click.option(
+    "--path",
+    "project_path",
+    default=None,
+    help="项目目录（工作区相对路径或绝对路径）；不给则在工作区内按项目编号查找",
+)
+@click.option("--dry-run", is_flag=True, help="只显示将要登记的内容，不写登记表")
+@click.pass_context
+def cmd_register(ctx: click.Context, project_id: str, project_path: str | None, dry_run: bool) -> None:
+    """把已有项目登记到工作区登记表（登记后 pm orient、批准、驾驶舱才认识它）"""
+    from auto_pm.core.workspace_registry_service import (
+        WorkspaceRegistryError,
+        WorkspaceRegistryService,
+    )
+
+    app_ctx: AppContext = ctx.obj
+    try:
+        result = WorkspaceRegistryService(app_ctx.workspace_root).register(
+            project_id, project_path, dry_run=dry_run
+        )
+    except WorkspaceRegistryError as e:
+        console.print(f"[red]登记失败: {e}[/red]")
+        ctx.exit(1)
+
+    mapping = result.mapping
+    if result.already_registered:
+        console.print(f"[green]项目已登记，未改动: {mapping.project_id} -> {mapping.project_root}[/green]")
+        return
+    if result.written:
+        console.print(f"[green]项目已登记: {mapping.project_id}[/green]")
+    else:
+        console.print(f"[yellow]预览（--dry-run，未写入）: {mapping.project_id}[/yellow]")
+    console.print(f"  项目目录: {mapping.project_root}")
+    console.print(f"  控制项目: {mapping.control_project_id or '-'}")
+    console.print(f"  运行版本目录: {mapping.runtime_root or '-'}")
 
 
 @project_group.group(name="hooks")

@@ -35,6 +35,7 @@ from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PmIntent
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 from tests.core.test_pm_run_e2e import NOT_VERIFIED_SENTENCE, VERIFIED_SENTENCE, _Env
+from tests.plan_checklist_support import full_checklist
 
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_closure_service import ClosureCompletionState, PmClosureService
@@ -189,7 +190,7 @@ def plc_env(
         change_service=changes,
         local_orchestrator=LocalExecutionOrchestrator(root, store=store, executor=executor),
     )
-    grant = PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX, approved_model="agent-a", declared_dirty_paths=scope)
+    grant = PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX, approved_model="agent-a", declared_dirty_paths=scope, plan_checklist=full_checklist(3))
     card = facade.create_planning_scope_card(
         PmIntent(
             request_id="REQ-V02-BUZZER",
@@ -198,7 +199,7 @@ def plc_env(
             acceptance_criteria=("ST_CommonAlarm 新增 o_bBuzzer", "FB_2001 在任意报警激活时置位 o_bBuzzer", "变量定义文档同步"),
         ),
         scope_paths=scope,
-        risks=("none",),
+        risks=("改错文件导致回归",),
         non_goals=("no hardware download",),
         execution_grant=grant,
     )
