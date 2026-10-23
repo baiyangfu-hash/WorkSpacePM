@@ -20,7 +20,7 @@
 
 | 参数名 | 数据类型 | 描述 |
 | :--- | :--- | :--- |
-| `io_stStation` | ST_Station1 | 【待确认】工位1 全局交互结构体 (整块传递) |
+| `io_stStation` | ST_Station1 | 工位1 全局交互结构体 (整块传递) |
 
 ### 2.1 控制指令子结构 (`stControl`)
 
@@ -31,7 +31,7 @@
 
 | 字段名 | 类型 | 说明 |
 | :--- | :---: | :--- |
-| io_stExternal | ST_ExternalDevice | 【待确认】外部设备 8步握手交握结构体 |
+| io_stExternal | ST_ExternalDevice | 外部设备 8步握手交握结构体 |
 
 > CARD-DJ-2026-009-003（预做分支 `claude/dj009-card003`）：`stStatus` 新增 `bReadyOut`（BOOL，加工完成可出料：出料步且气缸已松开），OB1 接 FB_3001 `i_bMachineReadyOut`；`stStatus` 新增 `bProductPresent`（入料到位、加工到位或 `stSensors.arrProductSens[0..7]` 任一路为 1），接 FB_3001 `i_bProductPresent`；`stSensors` 新增 `arrProductSens`（ARRAY[0..7] OF BOOL，产品检测传感器预留 8 路，未接的保持 0）。本块不再直接写 `io_stExternal` 里的 `bMachine_ReadyIn` / `bMachine_ReadyOut`，改由 FB_3001 根据 `stStatus.bWaitMaterial` / `stStatus.bReadyOut` 发出，`io_stExternal` 对本块只读（读 `iInfeedStep`）。
 
