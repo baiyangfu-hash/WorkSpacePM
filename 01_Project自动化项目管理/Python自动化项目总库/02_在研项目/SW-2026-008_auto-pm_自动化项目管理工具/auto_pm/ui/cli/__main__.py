@@ -72,6 +72,7 @@ from auto_pm.cli.spec import spec_group  # noqa: E402
 from auto_pm.cli.template import template_group  # noqa: E402
 from auto_pm.cli.vartable import vartable_group  # noqa: E402
 from auto_pm.cli.workflow import workflow_group  # noqa: E402
+from auto_pm.cli.worktree import worktree_group  # noqa: E402
 from auto_pm.ui.cli.implementation_card import implementation_card_group  # noqa: E402
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
@@ -135,6 +136,7 @@ cli.add_command(prototype_cmd)
 cli.add_command(doctor_command)
 cli.add_command(dogfood_group)
 cli.add_command(clean_cmd)
+cli.add_command(worktree_group)
 
 
 if __name__ == "__main__":
