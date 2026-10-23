@@ -275,6 +275,10 @@ def test_s19_the_workflow_takes_the_judge_from_the_base_and_never_runs_the_pr_he
     for flag in ("-c core.symlinks=false", "-c filter.lfs.smudge=", "-c filter.lfs.process=", "-c filter.lfs.required=false"):
         assert f"git {flag}" in worktree or f" {flag} " in worktree, flag
     assert worktree.index("core.symlinks=false") < worktree.index("worktree add")
+    # later git calls (checkout-index in the PLC doc check) also run with LFS off, through the step environment
+    env = next(s for s in steps if "pr_scope_check.py" in s.get("run", "")).get("env", {})
+    lfs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+    assert lfs == {"filter.lfs.smudge": "", "filter.lfs.process": "", "filter.lfs.required": "false"}
     for run in runs:  # the PR head appears only as the worktree that is created and as --repo data
         for line in run.splitlines():
             if "pr-head" in line:
