@@ -228,6 +228,43 @@ def _ready(
     return missions, works, ExecutionDispatchService(root)
 
 
+def _dispatch_a5(dispatch: ExecutionDispatchService, mission: Any) -> Any:
+    return dispatch.prepare(
+        mission=mission, work_id="WORK-A5-001", run_id="RUN-A5-001", adapter=ExecutionAdapterKind.CODEX,
+        executor_id="agent-a", lease_token="codex-lease-secret", lease_seconds=900, idempotency_key="dispatch-1",
+        stack="python", force_isolation=True,
+    )
+
+
+def test_prepare_refuses_a_parked_mission_before_any_worktree_or_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit 123 (TD-071): prepare itself calls the parked-card check, ahead of the worktree and the Run."""
+    missions, _, dispatch = _ready(tmp_path)
+    monkeypatch.setattr(dispatch._store, "get_open_park", lambda mission_id: object())
+    with pytest.raises(ExecutionDispatchError, match="MISSION-A5-001 搁着呢"):
+        _dispatch_a5(dispatch, missions.get("MISSION-A5-001"))
+    assert dispatch._store.get_execution_intent("dispatch-1") is None
+    assert dispatch._store.list_runs("WORK-A5-001") == ()
+
+
+def test_prepare_asks_the_store_for_one_held_lease_per_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit 123 (TD-071): the Run a dispatch creates is written with the in-transaction project limit on."""
+    missions, _, dispatch = _ready(tmp_path)
+    seen: list[bool] = []
+    original = dispatch._execution.start_run
+
+    def spy(**values: Any) -> Any:
+        seen.append(values.get("one_holder_per_project", False))
+        return original(**values)
+
+    monkeypatch.setattr(dispatch._execution, "start_run", spy)
+    _dispatch_a5(dispatch, missions.get("MISSION-A5-001"))
+    assert seen == [True]
+
+
 def test_codex_preparation_hands_the_same_run_to_trae_and_resume_is_exact(tmp_path: Path) -> None:
     missions, _, dispatch = _ready(tmp_path)
     mission = missions.get("MISSION-A5-001")
