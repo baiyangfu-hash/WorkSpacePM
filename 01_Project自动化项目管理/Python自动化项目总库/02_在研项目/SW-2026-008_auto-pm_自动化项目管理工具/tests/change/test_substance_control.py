@@ -248,7 +248,10 @@ def test_closure_evidence_rejects_non_target_and_has_zero_side_effects(tmp_path:
 
 def test_pm_closure_service_only_accepts_verified_pending_outbox(tmp_path: Path) -> None:
     """C06 service validates the C05 identity chain before any CHG write."""
-    _write_closure_chg(tmp_path, "CHG-SCPT-2026-280")
+    project = tmp_path / "SW-TEST-001_计算器"
+    project.mkdir()
+    (project / "PM_SESSION_SW-TEST-001.md").write_text("# PM_SESSION\n", encoding="utf-8")
+    _write_closure_chg(project / "04_监控" / "01_变更管理" / "01_变更单", "CHG-SCPT-2026-280")
     payload = _prepared_closure_payload("CHG-SCPT-2026-280")
     closure_id = str(payload["closure"]["closure_id"])
     service = PmClosureService(tmp_path, store=cast(ContinuityStore, _ClosureStore(payload)))
@@ -354,7 +357,7 @@ class _ClosureStore:
         )
 
     def get_work(self, work_id: str) -> Any:
-        return SimpleNamespace(scope_paths=("SW-TEST-001/src/calc.py",))
+        return SimpleNamespace(scope_paths=("SW-TEST-001/src/calc.py",), subject_project_id="SW-TEST-001")
 
     def get_run(self, run_id: str) -> Any:
         return SimpleNamespace(git_head="8b7f199a527e5b6f0c1d2e3f4a5b6c7d8e9f0a1b")

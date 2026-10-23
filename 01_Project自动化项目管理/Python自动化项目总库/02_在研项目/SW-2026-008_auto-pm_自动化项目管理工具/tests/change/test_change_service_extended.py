@@ -664,11 +664,25 @@ class TestCrossProjectFilter:
         # 项目 B 的文件应保留
         assert os.path.isfile(file_b)
 
-    def test_find_with_nonexistent_project_id_fallback(
+    def test_find_in_a_project_without_the_change_does_not_return_another_project(
         self,
         workspace_with_cross_project_chg: tuple[str, str, str],
     ) -> None:
-        """project_id 不存在 → 回退递归搜索（向后兼容）"""
+        """项目 A 定位成功但没有该单 → 返回 None，不拿项目 B 的同号单（M3-CHGUNIQ）"""
+        workspace, file_a, file_b = workspace_with_cross_project_chg
+        from auto_pm.change.file_locator import ChangeFileLocator
+        from auto_pm.change.parser import ChgParser
+
+        os.remove(file_a)
+        locator = ChangeFileLocator(workspace, ChgParser())
+        assert locator.find_change_file("CHG-DOCU-2026-001", project_id="TEST-2026-001") is None
+        assert locator.find_change_file("CHG-DOCU-2026-001", project_id="TEST-2026-002") == file_b
+
+    def test_find_with_nonexistent_project_id_does_not_fall_back(
+        self,
+        workspace_with_cross_project_chg: tuple[str, str, str],
+    ) -> None:
+        """project_id 不存在 → 不回退到全工作空间，返回 None（M3-CHGUNIQ）"""
         workspace, _, _ = workspace_with_cross_project_chg
         from auto_pm.change.file_locator import ChangeFileLocator
         from auto_pm.change.parser import ChgParser
@@ -677,5 +691,5 @@ class TestCrossProjectFilter:
         result = locator.find_change_file(
             "CHG-DOCU-2026-001", project_id="NONEXISTENT-2026-999"
         )
-        # project_id 定位失败时回退递归搜索
-        assert result is not None
+        # project_id 定位失败时不再回退：否则会读写别的项目的同号变更单
+        assert result is None

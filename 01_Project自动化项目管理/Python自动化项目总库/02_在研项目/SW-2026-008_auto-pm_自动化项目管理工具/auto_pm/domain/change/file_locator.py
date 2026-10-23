@@ -257,9 +257,10 @@ class ChangeFileLocator:
 
         Args:
             change_number: 变更单编号
-            project_id: 项目编号（可选）。提供时优先在该项目目录内搜索，
-                       避免跨项目单号冲突时返回错误项目的文件（TD-A04 修复）。
-                       未提供或项目定位失败时回退到递归全工作空间搜索（向后兼容）。
+            project_id: 项目编号（可选）。提供时只在该项目目录内搜索，避免跨项目单号
+                       冲突时返回错误项目的文件（TD-A04）；项目定位失败或项目内没有该单
+                       都返回 None，不再回退到全工作空间（M3-CHGUNIQ）。未提供时仍递归
+                       全工作空间搜索并返回第一个匹配（向后兼容）。
         """
         domain = extract_domain_from_change_number(change_number)
         if not domain:
@@ -270,22 +271,19 @@ class ChangeFileLocator:
             log.warning("查找变更单: 工作空间目录不存在 %s", self.workspace_root)
             return None
 
-        # TD-A04 修复：提供 project_id 时优先在该项目目录内搜索
+        # TD-A04：提供 project_id 时只在该项目目录内搜索；找不到不回退（M3-CHGUNIQ），
+        # 否则会把别的项目的同号变更单当成本项目的来读写
         if project_id:
             project_path = self.get_project_path(project_id)
-            if project_path:
-                result = self._find_change_in_project(project_path, change_number, domain)
-                if result:
-                    return result
+            if not project_path:
+                log.warning("查找变更单: project_id=%s 未定位到项目目录", project_id)
+                return None
+            result = self._find_change_in_project(project_path, change_number, domain)
+            if not result:
                 log.debug(
-                    "查找变更单: project_id=%s 定位到项目目录但未找到变更单 %s，回退递归搜索",
-                    project_id, change_number,
+                    "查找变更单: project_id=%s 的项目目录内没有变更单 %s", project_id, change_number
                 )
-            else:
-                log.warning(
-                    "查找变更单: project_id=%s 未定位到项目目录，回退递归搜索",
-                    project_id,
-                )
+            return result
 
         # 递归遍历工作空间，只在项目目录内搜索变更单文件（向后兼容）
         return self._recursive_find_change_file(
