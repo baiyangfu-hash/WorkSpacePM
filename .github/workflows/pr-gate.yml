@@ -26,10 +26,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      # The judge is the base branch as it is now, not the event's base.sha: GitHub keeps base.sha at the commit the PR
+      # was last refreshed against, so a PR opened before a rule (or this very checker) reached main was judged by a base
+      # that did not have it (PR #67 on 2026-10-23: base.sha predated #61, so reviews/tools/pr_scope_check.py was missing).
       - name: Check out the PR base (the judge)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -58,10 +61,19 @@ jobs:
 
       - name: Scope check
         env:
+          # Every git call in this step (the PLC doc check exports PR files with checkout-index) runs with
+          # Git LFS switched off, so a PR's .gitattributes/.lfsconfig cannot start git-lfs or reach its endpoint.
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: filter.lfs.smudge
+          GIT_CONFIG_VALUE_0: ""
+          GIT_CONFIG_KEY_1: filter.lfs.process
+          GIT_CONFIG_VALUE_1: ""
+          GIT_CONFIG_KEY_2: filter.lfs.required
+          GIT_CONFIG_VALUE_2: "false"
           # The PR body is untrusted text: it reaches the script only through the environment.
           PR_BODY: ${{ github.event.pull_request.body }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # The base is the judge's own commit; the checker diffs base...head, i.e. from their merge base.
         run: >-
           python -I "$GITHUB_WORKSPACE/reviews/tools/pr_scope_check.py" --ci
-          --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$RUNNER_TEMP/pr-head"
+          --base "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" --head "$HEAD_SHA" --repo "$RUNNER_TEMP/pr-head"

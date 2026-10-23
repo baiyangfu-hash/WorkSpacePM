@@ -72,8 +72,8 @@ END_TYPE
 
 TYPE ST_ExternalDevice :
 STRUCT
-    stUpstream      : ST_UpstreamDocking;
-    stDownstream    : ST_DownstreamDocking;
+    stUpstream      : ST_UpstreamDocking;   // 上游对接交握区
+    stDownstream    : ST_DownstreamDocking; // 下游对接交握区
     bEmergencyStop  : BOOL;                 // 外部总线急停 (1=正常, 0=急停)
     bSafetyDoorOK   : BOOL;                 // 外部安全门锁信号
     bAnyComFault    : BOOL;                 // 外部通讯综合故障

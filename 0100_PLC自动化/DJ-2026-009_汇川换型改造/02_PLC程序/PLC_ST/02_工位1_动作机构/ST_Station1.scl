@@ -59,10 +59,10 @@ END_TYPE
 
 TYPE ST_Station1 :
 STRUCT
-    stControl       : ST_Station1_Control;
-    stStatus        : ST_Station1_Status;
-    stConfig        : ST_Station1_Config;
-    stSensors       : ST_Station1_Sensors;
-    stActuators     : ST_Station1_Actuators;
+    stControl       : ST_Station1_Control;     // 工位1 控制命令
+    stStatus        : ST_Station1_Status;      // 工位1 状态反馈
+    stConfig        : ST_Station1_Config;      // 工位1 参数配置
+    stSensors       : ST_Station1_Sensors;     // 工位1 传感器输入
+    stActuators     : ST_Station1_Actuators;   // 工位1 执行器输出
 END_STRUCT;
 END_TYPE
