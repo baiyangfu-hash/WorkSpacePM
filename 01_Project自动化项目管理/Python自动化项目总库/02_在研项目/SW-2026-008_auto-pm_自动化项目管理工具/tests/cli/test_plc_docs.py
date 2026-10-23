@@ -108,3 +108,32 @@ def test_k08_project_path_option_works_without_a_workspace_project_and_usage_err
     assert code == 0 and "拦住项 0" in output
     assert invoke(tmp_path, "check")[0] == 2
     assert invoke(tmp_path, "check", "NOT-EXIST")[0] == 1
+
+
+def test_k09_milestone_table_new_project_blocks_and_migrated_project_only_warns(tmp_path: Path) -> None:
+    from tests.plc.test_milestones import FILLED, write
+
+    project = project_in_workspace(tmp_path)
+    code, output = invoke(tmp_path, "check", "DJ-2026-DOCS")
+    assert code == 0 and "里程碑表：拦住项 0、提示 1" in output and "没有里程碑表" in output
+
+    write(project, FILLED.format(origin="新项目").replace("| 仿真 | 2026-11-15 |", "| 仿真 | |"))
+    code, output = invoke(tmp_path, "check", "DJ-2026-DOCS")
+    assert code == 1 and "拦住项 0、" in output and "里程碑表：拦住项 1" in output
+    assert "里程碑表.仿真：计划日期没填" in output and "_里程碑表.md:" in output
+
+    write(project, FILLED.format(origin="老项目迁入").replace("| 仿真 | 2026-11-15 |", "| 仿真 | |"))
+    code, output = invoke(tmp_path, "check", "DJ-2026-DOCS")
+    assert code == 0 and "里程碑表：拦住项 0、提示 1" in output and "warn: 里程碑表.仿真" in output
+
+
+def test_k10_milestones_are_in_the_json_output(tmp_path: Path) -> None:
+    from tests.plc.test_milestones import FILLED, write
+
+    project = project_in_workspace(tmp_path)
+    write(project, FILLED.format(origin="新项目"))
+    code, output = invoke(tmp_path, "check", "DJ-2026-DOCS", "--json")
+    block = json.loads(output)["milestones"]
+    assert code == 0 and block["origin"] == "新项目" and block["findings"] == []
+    assert [(r["stage"], r["planned"], r["status"]) for r in block["rows"]][:2] == [
+        ("需求", "2026-10-01", "已完成"), ("设计", "2026-10-20", "进行中")]

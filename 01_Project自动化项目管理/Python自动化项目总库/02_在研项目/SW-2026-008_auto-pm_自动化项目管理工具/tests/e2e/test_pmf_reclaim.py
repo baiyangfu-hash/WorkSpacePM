@@ -98,6 +98,7 @@ def scene(tmp_path: Path) -> Scene:
 def _start(scene: Scene, owner: str, holder_pid: int, run_id: str = RUN) -> subprocess.CompletedProcess[str]:
     return scene.agent(
         "run", "start", "--run-id", run_id, "--work-id", "WORK-001", "--executor", owner, "--adapter", "codex", "--owned", "auto_pm/core/a.py",
+        "--declared-dirty", "auto_pm/core/a.py",
         "--lease-wallet", "--holder-pid", str(holder_pid), "--lease-seconds", "60", "--idempotency-key", f"start-{owner}",
     )
 

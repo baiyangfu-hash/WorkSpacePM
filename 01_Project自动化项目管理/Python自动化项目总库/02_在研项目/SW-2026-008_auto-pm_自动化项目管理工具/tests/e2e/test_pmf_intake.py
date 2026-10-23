@@ -26,6 +26,7 @@ import auto_pm
 from auto_pm.contracts.continuity import RunState, WorkKind
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.core.test_continuity_execution_service import Clock, _checkpoint, _start
+from tests.plan_checklist_support import checklist_args, full_checklist
 
 LAUNCHER = """from auto_pm.cli.__main__ import cli
 
@@ -225,15 +226,17 @@ def test_e03_the_whole_loop_from_inbox_to_a_filed_plan_runs_in_real_processes(sc
     item = scene.item(scene.add("REQ-ASIDE-1", "冻结旧导出功能", "--change-action", "freeze", kind="change"))
     refused = scene.child(
         "plan", "--project-id", PROJECT, "--request-id", "REQ-PLAN-1", "--objective", "Freeze the legacy export", "--acceptance", "Export is frozen.",
-        "--scope", "auto_pm/export.py", "--risk", "users still depend on it", "--non-goal", "no removal", "--adapter", "codex",
+        "--scope", "auto_pm/export.py", "--declared-dirty", "auto_pm/export.py", "--risk", "users still depend on it", "--non-goal", "no removal", "--adapter", "codex",
         "--approved-model", "gpt-approved", "--inbox-id", item["item_id"],
+        *checklist_args(original="刚才发现的问题"),
     )
     assert refused.returncode != 0 and "已确认" in refused.stdout + refused.stderr
     scene.confirm(item)
     planned = scene.child(
         "plan", "--project-id", PROJECT, "--request-id", "REQ-PLAN-1", "--objective", "Freeze the legacy export", "--acceptance", "Export is frozen.",
-        "--scope", "auto_pm/export.py", "--risk", "users still depend on it", "--non-goal", "no removal", "--adapter", "codex",
+        "--scope", "auto_pm/export.py", "--declared-dirty", "auto_pm/export.py", "--risk", "users still depend on it", "--non-goal", "no removal", "--adapter", "codex",
         "--approved-model", "gpt-approved", "--inbox-id", item["item_id"],
+        *checklist_args(original="刚才发现的问题"),
     )
     assert planned.returncode == 0, planned.stderr + planned.stdout
     change = ChangeService(str(scene.root)).get_change_request(json.loads(planned.stdout)["change_id"], project_id=PROJECT)
@@ -334,6 +337,8 @@ def _audit_race_worker(
                 execution_grant=PlanningExecutionGrant(
                     adapter=ExecutionAdapterKind.CODEX,
                     approved_model="gpt-approved",
+                    declared_dirty_paths=("auto_pm/race.py",),
+                    plan_checklist=full_checklist(original="刚才发现的问题"),
                 ),
                 classification=item.classification,
                 intake_item_id=item_id,
@@ -500,12 +505,15 @@ def test_audit_f01_f04_real_cli_failure_stays_visible_then_cold_retry_succeeds(
         "gpt-approved",
         "--inbox-id",
         item["item_id"],
+        *checklist_args(original="刚才发现的问题"),
     ]
     failed = _rehearsal_process(scene, *args, "--scope", "auto_pm/*")
     assert failed.returncode != 0 and "wildcards" in failed.stdout + failed.stderr
     visible = json.loads(_rehearsal_process(scene, "inbox", "list", "--project-id", PROJECT).stdout)["items"]
     assert visible[0]["status"] == "CONFIRMED" and visible[0]["plan_request_id"] == ""
-    succeeded = _rehearsal_process(scene, *args, "--scope", "auto_pm/retry.py")
+    succeeded = _rehearsal_process(
+        scene, *args, "--scope", "auto_pm/retry.py", "--declared-dirty", "auto_pm/retry.py"
+    )
     assert succeeded.returncode == 0, succeeded.stdout + succeeded.stderr
     card = json.loads(succeeded.stdout)
     assert (
@@ -555,6 +563,7 @@ def _rehearsal_plan_args(request: str) -> list[str]:
         "--scope", "auto_pm/example.py", "--risk", "Scope drift",
         "--non-goal", "No execution", "--adapter", "codex",
         "--approved-model", "gpt-approved", "--declared-dirty", "auto_pm/example.py",
+        *checklist_args(),
     ]
 
 
@@ -587,13 +596,15 @@ def _rehearsal_legacy_sdk_card(scene: Scene, request: str) -> dict[str, Any]:
 from auto_pm.application.core.pm_facade_service import PmFacadeService
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PmIntent
+from tests.plan_checklist_support import full_checklist
 facade = PmFacadeService(sys.argv[1])
 card = facade.create_planning_scope_card(
     PmIntent(subject_project_id=sys.argv[3], request_id=sys.argv[2],
              objective='Rehearsal approval', acceptance_criteria=('Exact saved identity',)),
     scope_paths=('auto_pm/example.py',), risks=('Scope drift',), non_goals=('No execution',),
     execution_grant=PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX,
-        approved_model='gpt-approved', declared_dirty_paths=('auto_pm/example.py',)),
+        approved_model='gpt-approved', declared_dirty_paths=('auto_pm/example.py',),
+        plan_checklist=full_checklist()),
 )
 print(card.model_dump_json())
 """

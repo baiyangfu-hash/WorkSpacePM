@@ -56,7 +56,7 @@ def _invoke(root: Path, *args: str, env: dict[str, str] | None = None, input_tex
 def _start(root: Path, owner: str = "agent-a", run_id: str = RUN, key: str = "start-1") -> Result:
     return _invoke(
         root, "continuity", "run", "start", "--run-id", run_id, "--work-id", WORK, "--executor", owner, "--adapter", "codex",
-        "--owned", "README.md", "--lease-wallet", "--holder-pid", "none", "--idempotency-key", key,
+        "--owned", "README.md", "--declared-dirty", "README.md", "--lease-wallet", "--holder-pid", "none", "--idempotency-key", key,
     )
 
 
