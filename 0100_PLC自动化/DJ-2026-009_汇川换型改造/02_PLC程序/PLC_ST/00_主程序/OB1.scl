@@ -30,7 +30,8 @@ BEGIN
     // 工位状态取上一周期 FB_1001 的结果 (1 个扫描周期延迟)
     // ============================================================================
     GlobalVars.fbExternalDevice(
-        i_bEnable := GlobalVars.stExternal.bEmergencyStop,
+        // Modbus 停用时对方信号冻结在最后值, 不能拿来走握手 (Codex 评审 #77): 使能同时看 bModbusEnable
+        i_bEnable := GlobalVars.stExternal.bEmergencyStop AND GlobalVars.bModbusEnable,
         i_bAutoMode := GlobalVars.stStation1.stControl.bAutoEnable,
         i_bResetCmd := GlobalVars.stGlobal.i_bReset OR GlobalVars.stStation1.stControl.bReset,
         i_bMachineReadyIn := GlobalVars.stStation1.stStatus.bWaitMaterial,
