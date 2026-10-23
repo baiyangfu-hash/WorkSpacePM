@@ -1,0 +1,5 @@
+// 计时器仿真测试的主循环: 只调 FB_TimerTest (背景 DB_TimerTest), 不调别的块
+ORGANIZATION_BLOCK OB1
+BEGIN
+    DB_TimerTest();
+END_ORGANIZATION_BLOCK
