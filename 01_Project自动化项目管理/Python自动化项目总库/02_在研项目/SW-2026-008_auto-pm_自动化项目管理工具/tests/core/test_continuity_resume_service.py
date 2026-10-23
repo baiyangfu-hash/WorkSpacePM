@@ -1135,3 +1135,80 @@ def test_pm_session_projection_contains_no_execution_queue(tmp_path: Path) -> No
     assert "current_focus" not in content
     with pytest.raises(PmSessionProjectionError, match="subject project"):
         PmSessionProjectionService().write(result, tmp_path / "outside.md")
+
+
+def test_a_permission_error_while_copying_counts_as_drift_and_is_retried(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows: a writer that holds the file for a moment makes the copy raise PermissionError; that is drift, not a failed read."""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    temp_parent = _snapshot_temp(tmp_path, monkeypatch)
+    original = continuity_store_module.shutil.copyfile
+    refused: list[str] = []
+
+    def held_once(source: Path, target: Path) -> object:
+        if not refused:
+            refused.append(Path(source).name)
+            raise PermissionError(32, "The process cannot access the file because it is being used by another process")
+        return original(source, target)
+
+    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", held_once)
+
+    assert ContinuityStore(tmp_path).get_work("WORK-001").title == "WORK-001"
+    assert refused == ["continuity.db"]
+    assert list(temp_parent.iterdir()) == []
+
+
+def test_a_copy_whose_bytes_differ_from_the_source_is_taken_again(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The copied bytes are hashed against the source inventory: a torn copy is never opened."""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _snapshot_temp(tmp_path, monkeypatch)
+    original = continuity_store_module.shutil.copyfile
+    copies: list[str] = []
+
+    def torn_once(source: Path, target: Path) -> object:
+        copies.append(Path(source).name)
+        result = original(source, target)
+        if copies.count("continuity.db") == 1 and Path(source).name == "continuity.db":
+            with open(target, "r+b") as stream:  # one flipped byte in the header area, as a tear would leave
+                stream.seek(100)
+                byte = stream.read(1)
+                stream.seek(100)
+                stream.write(bytes([byte[0] ^ 0xFF]))
+        return result
+
+    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", torn_once)
+
+    assert ContinuityStore(tmp_path).get_work("WORK-001").title == "WORK-001"
+    assert copies.count("continuity.db") == 2
+
+
+def test_a_write_that_lands_after_the_copy_but_before_the_second_inventory_is_retried(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The copy matches the first inventory, but the source moved on before the second one: take it again, so the read is current."""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _snapshot_temp(tmp_path, monkeypatch)
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    original_inventory = ContinuityStore._file_inventory
+    copied_inventories: list[str] = []
+
+    def write_after_copy(path: Path, *, required: bool, transient: bool = False) -> object:
+        # the first inventory of a copied file (not under the workspace) runs right after the copy: write then, once
+        if not Path(path).is_relative_to(tmp_path) and not copied_inventories:
+            copied_inventories.append(path.name)
+            _write_title(db_path, "written after the copy")
+        return original_inventory(path, required=required, transient=transient)
+
+    monkeypatch.setattr(ContinuityStore, "_file_inventory", staticmethod(write_after_copy))
+
+    assert ContinuityStore(tmp_path).get_work("WORK-001").title == "written after the copy"
+    assert copied_inventories == ["continuity.db"]
