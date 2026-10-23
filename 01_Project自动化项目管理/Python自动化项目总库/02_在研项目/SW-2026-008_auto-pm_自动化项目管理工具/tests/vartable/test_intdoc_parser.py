@@ -105,3 +105,33 @@ class TestIntDocParserEdgeCases:
         assert result.var_table.total_count == 0
         assert result.warning_count >= 1
         assert result.var_table.metadata["section_count"] == 0
+
+
+class TestIntDocParserVarConstant:
+    def test_intdoc_var_constant_section_is_separate_scope(
+        self, tmp_path: Path
+    ) -> None:
+        """### VAR CONSTANT 区段归为 VAR_CONSTANT（常量类），不再并入 VAR"""
+        f = tmp_path / "接口文档.md"
+        f.write_text(
+            "# FB_Demo 接口文档\n\n"
+            "## 2.1 VAR\n\n"
+            "| 变量名 | 类型 | 注释 |\n"
+            "|---|---|---|\n"
+            "| s_iStep | INT | 当前步号 |\n\n"
+            "## 2.2 VAR CONSTANT\n\n"
+            "| 变量名 | 类型 | 注释 |\n"
+            "|---|---|---|\n"
+            "| STEP_IDLE | INT | 空闲步 |\n"
+            "| T_TIMEOUT | DINT | 超时 5s |\n",
+            encoding="utf-8",
+        )
+        result = IntDocParser().parse(f)
+        assert result.success
+        assert result.var_table is not None
+        scope_by_tag = {e.tag: e.station for e in result.var_table.entries}
+        assert scope_by_tag == {
+            "s_iStep": "VAR",
+            "STEP_IDLE": "VAR_CONSTANT",
+            "T_TIMEOUT": "VAR_CONSTANT",
+        }

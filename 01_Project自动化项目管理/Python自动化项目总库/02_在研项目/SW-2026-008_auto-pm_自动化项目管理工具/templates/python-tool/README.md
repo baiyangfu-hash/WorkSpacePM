@@ -45,7 +45,7 @@ Copier 会依次询问以下问题：
 1. **对齐 auto-pm 实践**：模板生成的项目与 auto-pm 自身结构一致
 2. **flat layout**：包目录直接在根目录，pythonpath 配置简单
 3. **开箱即用**：生成的项目立即可 `pytest` + `ruff check` + `mypy` 通过
-4. **PM_SESSION 骨架**：生成项目即含 PM_SESSION，支持 pm-workflow 技能立即接入
+4. **PM_SESSION 骨架**：生成项目即含 PM_SESSION（已退役，仅作历史记录，不是执行真源）；进入工作区请用 `cockpit-entry` 技能
 
 ## 增量更新
 
