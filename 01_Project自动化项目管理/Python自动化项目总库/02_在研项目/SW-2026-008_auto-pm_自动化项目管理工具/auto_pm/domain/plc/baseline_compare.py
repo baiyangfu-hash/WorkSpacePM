@@ -3,9 +3,15 @@
 口径与 PLC 项目 CI（``reviews/tools/plc_ci.py`` 的 ``failure_keys``）相同：
 
 * 一般检查项：项目名 + 说明，说明里的数字抹平（行数、计数会变，问题本身没变）；
-* “SCL 代码规范”只给总数和前 3 条，这里用同一个 ``SclLinter`` 逐条展开（文件 + 规则 + 说明，不含行号）；
+* “SCL 代码规范”只给总数和前 3 条，这里用同一个 ``SclLinter`` 逐条展开（文件 + 规则 + 说明 + **违规处的代码文字**，不含行号）；
 * “文档一致性 [...]”逐条展开成 ``plc docs check`` 的明细；
-* Siemens 语言服务 check/test 逐条展开成插件命令行的诊断行（行号、列号抹平）。
+* Siemens 语言服务 check/test 逐条展开成插件命令行的诊断行（行号、列号抹平，同样带上那一行的代码文字）。
+
+为什么键里要有代码文字：规范错误的说明大多不带变量名（CASE 缺 ELSE、GOTO、TIME 字面量……），只比“文件 + 规则 + 说明”，
+同一个文件里“补上一处、新写一处”会被当成同一条老问题放行（审计 125）。“违规处的代码文字”= 违规那一行加上它前面最多
+2 行非空、非纯注释的代码（CASE 缺 ELSE 报在 ``END_CASE;`` 上，只看那一行两个 CASE 长得一样，要连着前面的 ``CASE xxx OF`` 一起看）。
+只是整体挪了行号、或前面插了注释的错仍是同一条；违规处及其紧挨着的前两行被改动，就算新增（宁可多拦，不漏拦）。
+同样的算法在 ``reviews/tools/plc_ci.py`` 里有一份，测试 b12 锁两边一致。
 
 同一个键出现的次数也算数：基线 2 条、现在 3 条，多出的 1 条就是新增。展开不出明细时退回用检查项本身的说明当键，宁可多拦不漏拦。
 
@@ -27,6 +33,9 @@ from auto_pm.domain.plc.scl_linter import SclLinter
 
 _DIGITS = re.compile(r"\d+")
 _LOCATION = re.compile(r":\d+(?::\d+)?")
+_DIAGNOSTIC = re.compile(r"^(?:\[(?P<scope>[^\]]*)\]\s*)?(?:\./)?(?P<file>[^:\n]+?):(?P<line>\d+)(?::\d+)?:")
+MAX_CODE_TEXT = 300
+CONTEXT_LINES = 2
 SCL_ITEM = "SCL 代码规范"
 DOC_ITEM_PREFIX = "文档一致性"
 LANGUAGE_ITEMS = {"Siemens 语言服务 check": "check", "Siemens 语言服务 test": "test"}
@@ -82,6 +91,50 @@ def _plain(text: str, project_path: str) -> str:
     return text.replace("\\", "/")
 
 
+def code_context(source: Sequence[str], line_number: int) -> str:
+    """违规处的代码文字：第 ``line_number`` 行（从 1 数）加上它前面最多 ``CONTEXT_LINES`` 行非空、非纯注释的代码。"""
+
+    index = line_number - 1
+    if not 0 <= index < len(source):
+        return ""
+    picked = [source[index].strip()]
+    previous = index - 1
+    while previous >= 0 and len(picked) <= CONTEXT_LINES:
+        text = source[previous].strip()
+        if text and not text.startswith("//"):
+            picked.append(text)
+        previous -= 1
+    return " / ".join(reversed(picked))
+
+
+def _context_in_file(path: Path | str, line_number: int, fallback: str = "") -> str:
+    try:
+        source = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return fallback
+    return code_context(source, line_number) or fallback
+
+
+def code_suffix(code: str) -> str:
+    """键尾巴：违规那一行的代码文字（去掉首尾空白，数字不抹平）；取不到就不加。"""
+
+    text = " ".join(code.split())[:MAX_CODE_TEXT]
+    return f" | 代码: {text}" if text else ""
+
+
+def _source_line(project_path: str, diagnostic: str) -> str:
+    """插件诊断行 ``[范围] 文件:行:列: …`` 指向的那一行源码；读不到返回空串。"""
+
+    found = _DIAGNOSTIC.match(diagnostic)
+    if found is None:
+        return ""
+    base = Path(project_path)
+    scope = found.group("scope")
+    if scope and scope != ".":
+        base = base / scope
+    return _context_in_file(base / found.group("file"), int(found.group("line")))
+
+
 def scl_failure_keys(project_path: str) -> Counter[str]:
     """工程里全部 .scl 的规范错误，逐条（与 ``PlcChecker`` 的“SCL 代码规范”一项扫同一批文件）。"""
 
@@ -94,7 +147,10 @@ def scl_failure_keys(project_path: str) -> Counter[str]:
             relative = os.path.relpath(path, project_path).replace(os.sep, "/")
             for violation in SclLinter.lint_file(path).violations:
                 if violation.severity == "ERROR":
-                    keys[f"SCL 规范 · {relative} [{violation.rule_id}] {violation.message}"] += 1
+                    context = _context_in_file(path, violation.line_number, violation.code_snippet)
+                    keys[
+                        f"SCL 规范 · {relative} [{violation.rule_id}] {violation.message}{code_suffix(context)}"
+                    ] += 1
     return keys
 
 
@@ -105,7 +161,8 @@ def lint_failure_keys(files: Iterable[tuple[str, Path]]) -> Counter[str]:
     for relative, path in files:
         for violation in SclLinter.lint_file(str(path)).violations:
             if violation.severity == "ERROR":
-                keys[f"{relative} [{violation.rule_id}] {violation.message}"] += 1
+                context = _context_in_file(path, violation.line_number, violation.code_snippet)
+                keys[f"{relative} [{violation.rule_id}] {violation.message}{code_suffix(context)}"] += 1
     return keys
 
 
@@ -144,7 +201,8 @@ def failure_keys(
             lines = (language or {}).get(command, ())
             if lines:
                 for line in lines:
-                    keys[f"Siemens 语言服务 {command} · {_LOCATION.sub(':#', _plain(line, project_path))}"] += 1
+                    shown = _LOCATION.sub(":#", _plain(line, project_path))
+                    keys[f"Siemens 语言服务 {command} · {shown}{code_suffix(_source_line(project_path, line))}"] += 1
             else:
                 keys[plain_key] += 1
         else:

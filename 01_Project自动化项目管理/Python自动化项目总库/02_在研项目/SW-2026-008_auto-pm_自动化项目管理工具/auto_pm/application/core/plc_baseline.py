@@ -107,6 +107,25 @@ def _extract(bundle: tarfile.TarFile, destination: Path) -> None:
     bundle.extractall(destination)  # noqa: S202 - every member was checked above
 
 
+def baseline_anchor_note(repo: Path, rev: str) -> str:
+    """基线提交不在主线（main）上时的说明，否则空串。
+
+    Run 开工时 worktree 的 HEAD 通常就是主线上的提交；手工开工指向一个已经带了自己提交的工位时，
+    那些提交里已有的失败会被当成“基线已有”，所以要在记录里写明（审计 125 建议项）。找不到主线分支就不下结论。
+    """
+
+    for branch in ("main", "origin/main", "master"):
+        if _git(repo, "rev-parse", "--verify", "--quiet", f"{branch}^{{commit}}").returncode != 0:
+            continue
+        if _git(repo, "merge-base", "--is-ancestor", rev, branch).returncode == 0:
+            return ""
+        return (
+            f"开工基线 {rev[:12]} 不在 {branch} 上（这个工位开工前已带了自己的提交），"
+            "这些提交里已有的失败也算“基线已有”"
+        )
+    return ""
+
+
 def repo_top(path: Path) -> Path:
     """``path`` 所在 Git 仓库（或 worktree）的顶层目录。"""
 
@@ -140,6 +159,7 @@ def check_against_baseline(
         raise PlcBaselineError("Siemens 语言服务命令行没有跑完（超时或起不来），这次检查不算数")
     top = repo_top(project)
     relative = project.resolve().relative_to(top).as_posix()
+    anchor = baseline_anchor_note(top, rev)
     with TemporaryDirectory(prefix="pmb-") as temporary:
         exported = export_plc_baseline(top, rev, relative, Path(temporary))
         if exported is None:
@@ -147,11 +167,14 @@ def check_against_baseline(
         base_result, base, base_incomplete = checked_keys(Path(temporary), exported, service)
     if base_incomplete:
         return result, diff_failures(now, None, baseline_note="基线上 Siemens 语言服务没有跑完，现在的失败全部按新增算")
-    return result, diff_failures(now, None if base_result.not_applicable else base)
+    if base_result.not_applicable:
+        return result, diff_failures(now, None, baseline_note="基线上这个工程不适用 PLC 检查，现在的失败全部按新增算")
+    return result, diff_failures(now, base, baseline_note=anchor)
 
 
 __all__ = [
     "PlcBaselineError",
+    "baseline_anchor_note",
     "check_against_baseline",
     "checked_keys",
     "export_plc_baseline",

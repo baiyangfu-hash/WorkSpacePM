@@ -89,15 +89,33 @@ from auto_pm.plc import doc_consistency as dc
 from auto_pm.domain.plc.scl_linter import SclLinter
 result = PlcService(workspace, language_service=None).check(project, fix=False)
 analysis = dc.analyze_project(project)
+def context(source, line_number):
+    # 违规处的代码文字：违规那一行加前面最多 2 行非空、非纯注释的代码。与验收门 baseline_compare.code_context 同一算法（审计 125）
+    index = line_number - 1
+    if not 0 <= index < len(source):
+        return ""
+    picked = [source[index].strip()]
+    previous = index - 1
+    while previous >= 0 and len(picked) <= 2:
+        text = source[previous].strip()
+        if text and not text.startswith("//"):
+            picked.append(text)
+        previous -= 1
+    return " / ".join(reversed(picked))
 scl = []
 for root, _, files in os.walk(project):
     for name in sorted(files):
         if name.lower().endswith(".scl"):
             path = os.path.join(root, name)
             rel = os.path.relpath(path, project).replace(os.sep, "/")
+            try:
+                source = open(path, encoding="utf-8", errors="replace").read().splitlines()
+            except OSError:
+                source = []
             for v in SclLinter.lint_file(path).violations:
                 if v.severity == "ERROR":
-                    scl.append({"file": rel, "rule": v.rule_id, "message": v.message, "line": v.line_number})
+                    scl.append({"file": rel, "rule": v.rule_id, "message": v.message, "line": v.line_number,
+                                "code": context(source, v.line_number) or v.code_snippet})
 print(json.dumps({
     "check": result.model_dump(),
     "docs": [asdict(f) for f in analysis.findings],
@@ -259,7 +277,10 @@ def failure_keys(data: dict) -> Counter:
             who = f"{f['obj']}.{f['variable']}" if f["variable"] else f["obj"]
             keys[f"plc docs check · {who}：{f['message']}"] += 1
     for v in data["scl"]:
-        keys[f"SCL 规范 · {v['file']} [{v['rule']}] {v['message']}"] += 1
+        # 违规处的代码文字也进键：说明不带变量名的规则（CASE 缺 ELSE 等），同文件“补一处、写一处”才不会被当成老问题（审计 125）。
+        # 与验收门 baseline_compare.code_suffix 同一写法，测试 b12 锁两边一致。
+        code = " ".join(str(v.get("code", "")).split())[:300]
+        keys[f"SCL 规范 · {v['file']} [{v['rule']}] {v['message']}" + (f" | 代码: {code}" if code else "")] += 1
     return keys
 
 

@@ -181,6 +181,7 @@ class _PlcBaseline:
     workspace: Path | None
     project: Path | None
     note: str = ""
+    anchor_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -1540,16 +1541,21 @@ class EvidenceCollectionService:
     ) -> _PlcBaseline:
         """Export one project at the Run baseline; a failed export is recorded, never fatal."""
 
-        from auto_pm.application.core.plc_baseline import PlcBaselineError, export_plc_baseline
+        from auto_pm.application.core.plc_baseline import (
+            PlcBaselineError,
+            baseline_anchor_note,
+            export_plc_baseline,
+        )
 
         relative = project.root.relative_to(candidate).as_posix()
         try:
             exported = export_plc_baseline(candidate, git_head, relative, destination)
+            anchor = baseline_anchor_note(candidate, git_head)
         except (PlcBaselineError, OSError, tarfile.TarError) as error:
             return _PlcBaseline(git_head, None, None, f"开工基线取不出来（{error}），现在的失败全部按新增算")
         if exported is None:
             return _PlcBaseline(git_head, None, None, "开工基线上还没有这个工程，现在的失败全部按新增算")
-        return _PlcBaseline(git_head, destination, exported)
+        return _PlcBaseline(git_head, destination, exported, anchor_note=anchor)
 
     @staticmethod
     def _run_plc_gate(
@@ -1872,6 +1878,13 @@ def _plc_language_service() -> LanguageService | None:
     return default_language_service()
 
 
+def _with_anchor(note: str, baseline: _PlcBaseline | None) -> str:
+    """Append the "baseline is not on main" remark to whatever else the baseline note says."""
+
+    anchor = baseline.anchor_note if baseline else ""
+    return "；".join(part for part in (note, anchor) if part)
+
+
 def _baseline_title(baseline: _PlcBaseline | None) -> str:
     head = baseline.git_head[:12] if baseline else "?"
     return f"和 Run 开工基线 {head} 逐条比"
@@ -1909,7 +1922,7 @@ def _plc_check_output(
                 base = base_keys
         except Exception as error:  # the baseline run must never hide a current failure
             note = f"开工基线检查出错（{error}），现在的失败全部按新增算"
-    diff = diff_failures(now, base, baseline_note=note)
+    diff = diff_failures(now, base, baseline_note=_with_anchor(note, baseline))
     # Verdict and new failures first: the bounded summary must never hide the reason.
     lines = diff.render(_baseline_title(baseline))
     if any(item.item == "Siemens 语言服务 check" and item.status == "warn" for item in result.items):
@@ -1959,7 +1972,7 @@ def _scl_lint_output(
             for relative in scl_paths
             if (base_project / relative).is_file()
         )
-    diff = diff_failures(now, base, baseline_note=note)
+    diff = diff_failures(now, base, baseline_note=_with_anchor(note, baseline))
     return "\n".join([*diff.render(_baseline_title(baseline)), *lines]), (0 if diff.passed else 1)
 
 

@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from auto_pm.application.core import evidence_collection_service as ecs
-from auto_pm.application.core.plc_baseline import export_plc_baseline
-from auto_pm.domain.plc.baseline_compare import diff_failures, failure_keys
+from auto_pm.application.core import plc_baseline
+from auto_pm.application.core.plc_baseline import PlcBaselineError, export_plc_baseline
+from auto_pm.domain.plc.baseline_compare import diff_failures, failure_keys, lint_failure_keys
 from auto_pm.domain.plc.language_service import LanguageServiceResult
 from tests.core.test_plc_quality_gate import (
     BAD_SCL,
@@ -50,7 +52,7 @@ def scltest(*marks: str, pad: int = 0) -> str:
 class FakeSiemensLsp:
     """按文件内容出诊断的插件替身（真插件只许在用户本机跑）。"""
 
-    def __init__(self, incomplete: bool = False) -> None:
+    def __init__(self, incomplete: bool | Callable[[Path], bool] = False) -> None:
         self.incomplete = incomplete
         self.calls: list[tuple[str, Path]] = []
 
@@ -66,7 +68,7 @@ class FakeSiemensLsp:
 
     def _run(self, command: str, root: Path, suffix: str, kind: str, word: str) -> LanguageServiceResult:
         self.calls.append((command, root))
-        if self.incomplete:
+        if self.incomplete is True or (callable(self.incomplete) and self.incomplete(root)):
             return LanguageServiceResult(command, True, -1, 1, ("命令行未能完成: timeout",), "timeout", diagnostics=("命令行未能完成",))
         hits: list[str] = []
         for directory, _, files in sorted(os.walk(root)):
@@ -144,17 +146,26 @@ def test_b02_a_new_plugin_error_in_the_owned_block_is_blocked(tmp_path: Path, ls
     assert receipt.gates[0].exit_code == 1
     lines = receipt.gates[0].output_summary.splitlines()
     assert "新增失败 1 条" in lines[0]
-    assert lines[1].startswith("new | Siemens 语言服务 check · ") and "i_bNewAlarm 未声明" in lines[1]
+    new = [line for line in lines if line.startswith("new | ")]
+    assert len(new) == 1 and new[0].startswith("new | Siemens 语言服务 check · ") and "i_bNewAlarm 未声明" in new[0]
 
 
-def test_b03_the_same_failure_occurring_more_often_is_blocked(tmp_path: Path, lsp: FakeSiemensLsp) -> None:
-    # interlock_test is not owned, so put the extra occurrence where the Run may write: its own block
+def test_b03_the_same_failure_written_once_more_is_blocked(tmp_path: Path, lsp: FakeSiemensLsp) -> None:
     receipt = gate(tmp_path, fb("o_iMESAlarmQueue 不是数组", "o_iMESAlarmQueue 不是数组", "o_iStationAlarmStatus 不是数组"))
 
     assert receipt.status == "FAIL"
     summary = receipt.gates[0].output_summary
-    assert "新增失败 1 条" in summary and "基线已有失败 7 条" in summary
+    # the extra copy is new; the line right after it now has other neighbours, so it counts as new too (better too many than too few)
+    assert "新增失败 2 条" in summary and "基线已有失败 6 条" in summary
     assert "new | Siemens 语言服务 check · [.] ./02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm.scl:#: error: o_iMESAlarmQueue 不是数组" in summary
+
+
+def test_b03b_identical_failures_are_counted_not_merged() -> None:
+    from collections import Counter
+
+    diff = diff_failures(Counter({"A": 2, "B": 1}), Counter({"A": 1, "B": 1}))
+
+    assert diff.new == ("A",) and diff.known == ("A", "B") and not diff.passed
 
 
 def test_b04_a_failure_that_only_moved_lines_is_still_the_known_one(tmp_path: Path, lsp: FakeSiemensLsp) -> None:
@@ -263,7 +274,9 @@ def test_b10_without_the_plugin_the_gate_still_compares_and_says_unverified(tmp_
 
     assert receipt.status == "PASS"
     assert "warn | Siemens 语言服务 check | 未验证" in receipt.gates[0].output_summary
-    assert "注意：本机没找到 Siemens 插件命令行" in receipt.gates[0].output_summary.splitlines()[1]
+    assert any(
+        "注意：本机没找到 Siemens 插件命令行" in line for line in receipt.gates[0].output_summary.splitlines()[:4]
+    )
 
 
 def test_b13_baseline_export_works_without_tarfile_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,6 +362,7 @@ def test_b12_keys_match_the_plc_ci_rule_so_ci_and_acceptance_never_disagree(
 
     _, candidate, _ = plc_workspace(tmp_path)
     (candidate / PROJECT / "OB1" / "OB2.scl").write_text(BAD_SCL, encoding="utf-8")
+    (candidate / PROJECT / "OB1" / "OB3.scl").write_text(CASE_SWAPPED, encoding="utf-8")  # context lines in the key
     (candidate / PROJECT / f"PM_SESSION_{Path(PROJECT).name}.md").unlink()
     project = candidate / PROJECT
 
@@ -356,3 +370,262 @@ def test_b12_keys_match_the_plc_ci_rule_so_ci_and_acceptance_never_disagree(
     theirs = plc_ci.failure_keys(plc_ci.run_checks(repo, candidate, PROJECT))
 
     assert ours and ours == theirs
+
+
+# ── 审计 125 P1：同一文件里“补一处、写一处”同类错，不能当成老问题放行 ─────────────────────────────
+
+CASE_NO_ELSE = """FUNCTION_BLOCK FB_Demo
+VAR_INPUT i_bStart : BOOL; END_VAR
+VAR iStep : INT; END_VAR
+CASE iStep OF
+  0: iStep := 10;
+END_CASE;
+END_FUNCTION_BLOCK
+"""
+CASE_SWAPPED = """FUNCTION_BLOCK FB_Demo
+VAR_INPUT i_bStart : BOOL; END_VAR
+VAR iStep : INT; iDoor : INT; END_VAR
+CASE iStep OF
+  0: iStep := 10;
+ELSE
+  iStep := 0;
+END_CASE;
+CASE iDoor OF
+  0: iDoor := 1;
+END_CASE;
+END_FUNCTION_BLOCK
+"""
+
+
+def test_b14_fixing_one_case_while_writing_another_missing_else_is_new(tmp_path: Path) -> None:
+    base_file, now_file = tmp_path / "b.scl", tmp_path / "n.scl"
+    base_file.write_text(CASE_NO_ELSE, encoding="utf-8")
+    now_file.write_text(CASE_SWAPPED, encoding="utf-8")
+    base = lint_failure_keys([("FB_Demo.scl", base_file)])
+    now = lint_failure_keys([("FB_Demo.scl", now_file)])
+
+    diff = diff_failures(now, base)
+
+    assert not diff.passed
+    assert len(diff.new) == 1 and "CASE iDoor OF" in diff.new[0]
+    assert len(diff.fixed) == 1 and "CASE iStep OF" in diff.fixed[0]
+
+
+def test_b15_the_same_error_only_moved_down_is_still_the_known_one(tmp_path: Path) -> None:
+    base_file, now_file = tmp_path / "b.scl", tmp_path / "n.scl"
+    base_file.write_text(CASE_NO_ELSE, encoding="utf-8")
+    now_file.write_text("// 前面加两行注释\n// 行号整体下移\n" + CASE_NO_ELSE, encoding="utf-8")
+
+    diff = diff_failures(
+        lint_failure_keys([("FB_Demo.scl", now_file)]), lint_failure_keys([("FB_Demo.scl", base_file)])
+    )
+
+    assert diff.passed and len(diff.known) == 1
+
+
+def test_b16_the_gate_blocks_the_swap_in_an_owned_file(tmp_path: Path) -> None:
+    workspace, candidate, _ = plc_workspace(tmp_path)
+    scl = candidate / PROJECT / "OB1" / "FB_Demo.scl"
+    scl.write_text(CASE_NO_ELSE, encoding="utf-8")
+    commit(candidate, "owned file already has a CASE without ELSE")
+    baseline = git(candidate, "rev-parse", "HEAD")
+    scl.write_text(CASE_SWAPPED, encoding="utf-8")
+
+    receipt = _service(workspace).run_plc_checkpoint_quality_gates(
+        plc_run(candidate, baseline, (f"{PROJECT}/OB1/FB_Demo.scl",)), candidate
+    )
+
+    assert receipt.status == "FAIL"
+    assert receipt.gates[1].exit_code == 1
+    assert "new | OB1/FB_Demo.scl [" in receipt.gates[1].output_summary
+    assert "CASE iDoor OF" in receipt.gates[1].output_summary
+
+
+def test_b17_a_plugin_error_swapped_for_a_new_one_on_another_line_is_new(tmp_path: Path, lsp: FakeSiemensLsp) -> None:
+    """插件诊断的说明相同、只是换了一行代码（同一文件修一处写一处）：算新增。"""
+    workspace, candidate, baseline = dj005(tmp_path)
+    (candidate / ALARM).write_text(
+        fb("o_iMESAlarmQueue 不是数组").replace("    ; // LSP-ERR", "    iOld := 1; // LSP-ERR"), encoding="utf-8"
+    )
+    commit(candidate, "rewrite the old error line")
+    baseline = git(candidate, "rev-parse", "HEAD")
+    (candidate / ALARM).write_text(
+        fb("o_iMESAlarmQueue 不是数组").replace("    ; // LSP-ERR", "    iNew := 2; // LSP-ERR"), encoding="utf-8"
+    )
+
+    receipt = _service(workspace).run_plc_checkpoint_quality_gates(plc_run(candidate, baseline, (ALARM,)), candidate)
+
+    assert receipt.status == "FAIL"
+    assert "new | Siemens 语言服务 check · " in receipt.gates[0].output_summary
+    assert "iNew := 2" in receipt.gates[0].output_summary
+
+
+# ── 审计 125 P2：取不到基线或基线不可信时，宁可多拦，不能放行 ─────────────────────────────────────
+
+
+def test_b18_a_baseline_check_that_errors_counts_everything_as_new(
+    tmp_path: Path, lsp: FakeSiemensLsp, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = plc_baseline.checked_keys
+    calls: list[Path] = []
+
+    def flaky(workspace: Path, project: Path, service: object):  # type: ignore[no-untyped-def]
+        calls.append(project)
+        if len(calls) == 2:
+            raise RuntimeError("baseline exploded")
+        return real(workspace, project, service)
+
+    monkeypatch.setattr(plc_baseline, "checked_keys", flaky)
+
+    receipt = gate(tmp_path, fb())
+
+    assert receipt.status == "FAIL"
+    summary = receipt.gates[0].output_summary
+    assert "开工基线检查出错（baseline exploded）" in summary and "基线已有失败 0 条" in summary
+
+
+def test_b19_a_baseline_plugin_run_that_did_not_finish_counts_everything_as_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeSiemensLsp(incomplete=lambda root: "pmb-" in str(root))
+    monkeypatch.setattr(ecs, "_plc_language_service", lambda: fake)
+
+    receipt = gate(tmp_path, fb())
+
+    assert receipt.status == "FAIL"
+    summary = receipt.gates[0].output_summary
+    assert "开工基线上 Siemens 语言服务没有跑完" in summary and "基线已有失败 0 条" in summary
+
+
+def test_b20_a_baseline_that_is_not_applicable_counts_everything_as_new(
+    tmp_path: Path, lsp: FakeSiemensLsp, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = plc_baseline.checked_keys
+    calls: list[Path] = []
+
+    def baseline_not_applicable(workspace: Path, project: Path, service: object):  # type: ignore[no-untyped-def]
+        calls.append(project)
+        result, keys, incomplete = real(workspace, project, service)
+        if len(calls) == 2:
+            result.not_applicable = True
+        return result, keys, incomplete
+
+    monkeypatch.setattr(plc_baseline, "checked_keys", baseline_not_applicable)
+
+    receipt = gate(tmp_path, fb())
+
+    assert receipt.status == "FAIL"
+    assert "基线已有失败 0 条" in receipt.gates[0].output_summary
+
+
+def test_b21_a_baseline_export_that_fails_counts_everything_as_new(
+    tmp_path: Path, lsp: FakeSiemensLsp, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*args: object, **kwargs: object) -> Path:
+        raise PlcBaselineError("git archive 失败")
+
+    monkeypatch.setattr(plc_baseline, "export_plc_baseline", broken)
+
+    receipt = gate(tmp_path, fb())
+
+    assert receipt.status == "FAIL"
+    summary = receipt.gates[0].output_summary
+    assert "开工基线取不出来（git archive 失败）" in summary and "基线已有失败 0 条" in summary
+
+
+def test_b22_when_a_failure_cannot_be_expanded_the_whole_item_is_the_key(tmp_path: Path) -> None:
+    from auto_pm.plc.models import CheckResult
+
+    result = CheckResult(project_path=str(tmp_path))
+    result.add("SCL 代码规范", "fail", "发现 2 个规范错误")
+    result.add("文档一致性 [FB X]", "fail", "类型不同 1")
+    result.add("Siemens 语言服务 check", "fail", "插件命令行 check 退出码 1，3 个错误")
+
+    keys = failure_keys(result, str(tmp_path), {})
+
+    assert keys == {
+        "plc check · SCL 代码规范：发现 # 个规范错误": 1,
+        "plc check · 文档一致性 [FB X]：类型不同 #": 1,
+        "plc check · Siemens 语言服务 check：插件命令行 check 退出码 #，# 个错误": 1,
+    }
+    # an unexpandable old failure still blocks a new one of the same item with other numbers? no: numbers are flattened,
+    # so the same item failing again is "known" — but a different item failing is new
+    other = CheckResult(project_path=str(tmp_path))
+    other.add("目录结构", "fail", "缺少 05_测试与验证")
+    assert not diff_failures(failure_keys(other, str(tmp_path)), keys).passed
+
+
+def _cli_workspace(tmp_path: Path) -> tuple[Path, Path]:
+    from auto_pm.application.core.template_service import TemplateService
+
+    templates = Path(__file__).resolve().parents[2] / "templates"
+    root = tmp_path / "ws"
+    project = root / "DJ-2026-901_测试机"
+    TemplateService(str(templates)).copy_template(
+        "plc-standard-project", str(project), {"project_id": "DJ-2026-901", "project_name": "测试机"}
+    )
+    inner = sorted(path.parent for path in project.rglob(".plc.json") if path.parent != project)
+    st = inner[0] if inner else project
+    (st / "Test").mkdir(parents=True, exist_ok=True)
+    (st / "Test" / "basic_test.scltest").write_text(scltest("路径无效", pad=84), encoding="utf-8")
+    git(root, "init")
+    commit(root, "baseline")
+    return root, st
+
+
+def _plc_check_baseline(root: Path, monkeypatch: pytest.MonkeyPatch, fake: FakeSiemensLsp):  # type: ignore[no-untyped-def]
+    from auto_pm.cli.__main__ import cli
+    from click.testing import CliRunner
+
+    import auto_pm.infrastructure.siemens_language_service as module
+
+    monkeypatch.setattr(module, "default_language_service", lambda: fake)
+    return CliRunner().invoke(
+        cli, ["-w", str(root), "plc", "check", "DJ-2026-901", "--json", "--baseline", "HEAD"], catch_exceptions=False
+    )
+
+
+def test_b23_plc_check_baseline_with_an_unfinished_baseline_plugin_run_counts_everything_as_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    root, _ = _cli_workspace(tmp_path)
+
+    done = _plc_check_baseline(root, monkeypatch, FakeSiemensLsp(incomplete=lambda path: "pmb-" in str(path)))
+
+    data = json.loads(done.output[done.output.index("{"):])
+    assert done.exit_code == 1
+    assert data["known"] == [] and data["new"]
+    assert "没有跑完" in data["baseline_note"]
+
+
+def test_b24_plc_check_baseline_with_an_unfinished_current_plugin_run_is_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _ = _cli_workspace(tmp_path)
+
+    done = _plc_check_baseline(root, monkeypatch, FakeSiemensLsp(incomplete=True))
+
+    assert done.exit_code == 1
+    assert "和基线比对失败" in done.output and "没有跑完" in done.output
+    assert "{" not in done.output
+
+
+# ── 审计 125 建议项：基线不在 main 上要写明 ──────────────────────────────────────────────────
+
+
+def test_b25_a_baseline_that_is_not_on_main_is_said_so_in_the_record(tmp_path: Path, lsp: FakeSiemensLsp) -> None:
+    workspace, candidate, baseline = dj005(tmp_path)  # the baseline commit lives on the Run branch, not on main
+    (candidate / ALARM).write_text(fb(), encoding="utf-8")
+
+    receipt = _service(workspace).run_plc_checkpoint_quality_gates(plc_run(candidate, baseline, (ALARM,)), candidate)
+
+    assert receipt.status == "PASS"
+    assert "不在 " in receipt.gates[0].output_summary and "上（这个工位开工前已带了自己的提交）" in receipt.gates[0].output_summary
+
+
+def test_b26_a_baseline_on_main_has_no_such_remark(tmp_path: Path) -> None:
+    _, candidate, baseline = plc_workspace(tmp_path)
+
+    assert plc_baseline.baseline_anchor_note(candidate, baseline) == ""
