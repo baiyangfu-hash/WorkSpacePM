@@ -26,6 +26,7 @@ from auto_pm.core.pm_session_projection_service import (
 )
 from auto_pm.core.work_registry_service import WorkRegistryService
 
+import auto_pm.infrastructure.continuity_store as continuity_store_module
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
@@ -36,7 +37,6 @@ from auto_pm.contracts.decision_package import (
 )
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
-import auto_pm.infrastructure.continuity_store as continuity_store_module
 from auto_pm.infrastructure.continuity_store import (
     ContinuityStore,
     ContinuityStoreError,
