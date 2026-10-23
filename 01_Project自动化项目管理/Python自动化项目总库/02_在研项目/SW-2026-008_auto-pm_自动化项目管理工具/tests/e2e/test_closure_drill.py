@@ -23,8 +23,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 import auto_pm
 from tests.e2e.test_pmf_plc import (
     BLOCK,
@@ -43,14 +41,16 @@ APPROVER = "fubai"
 SECOND_ID = "DJ-2026-905"
 SECOND = "0100_PLC自动化/DJ-2026-905"
 NEW_NOTE = f"{PROJECT}/02_PLC程序/程序文档/蜂鸣器说明.md"
-LEGACY_LAYOUT_DEFECT = (
-    "缺陷④：项目已有旧目录 11_监控/…/CHG-<领域>/ 时，plan 把变更单写进 11_监控，而批准签发 Decision 只到 04_监控 找，"
-    "pm approve 报“未找到指定项目的 Planning CHG 真源”。已由分支 claude/d09-onboarding-blockers 的 N2（15a481dd）修好"
-    "（样件联调在合并后全绿），D09 后合并；合并后本用例转 XPASS，届时去掉 xfail"
-)
-# The benchmark (like DJ-2026-005/009 in the field) already holds 11_监控/…/CHG-PLC/, which defect ④ trips over; the
-# main line files under a domain with no old folder so the rest of the chain can be exercised.  d00 keeps the PLC domain.
+# The benchmark (like DJ-2026-005/009 in the field) already holds 11_监控/…/CHG-PLC/, which defect ④ tripped over until
+# claude/d09-onboarding-blockers N2 (15a481dd); the main line files under a domain with no old folder, d00 keeps the PLC domain.
 MAIN_DOMAIN = "ELEC"
+
+# The user's words as the inbox records them, and the plan poka-yoke fields (PR #36) a complete plan carries.
+ORIGINAL_WORDS = "样件联调：走完整条收口流程"
+PLAN_CHECKLIST = (
+    "--original-request", ORIGINAL_WORDS, "--safety-circuit", "否",
+    "--check", f"python main.py plc check {PROJECT_ID} => 0", "--rollback", "git revert 本次提交，恢复原块",
+)
 
 LAUNCHER = """from auto_pm.cli.__main__ import cli
 
@@ -89,7 +89,8 @@ if action == 'run':
         lease_token_environment='AUTO_PM_EXECUTION_LEASE_TOKEN',
     )
     print(json.dumps({'mission_id': mission_id, 'verified': outcome.verified, 'run_id': outcome.run_id,
-                      'checkpoint_id': outcome.checkpoint_id, 'mission_state': outcome.mission_state.value}, ensure_ascii=False))
+                      'checkpoint_id': outcome.checkpoint_id, 'mission_state': outcome.mission_state.value,
+                      'message': outcome.message}, ensure_ascii=False))
 elif action == 'prepare':
     # A close attempt that stopped after C05, as happened in D08 track 1 (prepared 21:30, never completed).
     from auto_pm.core.pm_closure_service import PmClosureService
@@ -250,16 +251,19 @@ def drive_mission(
     stop_after: str = "",
     domain: str = MAIN_DOMAIN,
     lease_token: str = "",
+    scope: tuple[str, ...] | None = None,
+    checklist: tuple[str, ...] | None = None,
 ) -> MissionResult:
     """inbox -> confirm -> plan -> approve -> run+verify -> accept -> close_accepted, as separate processes.
 
     Returns at the first refused stage instead of asserting, so a variant can tell 'refused early' (fine) from
-    'accepted but cannot close' (the D08 dead end).
+    'accepted but cannot close' (the D08 dead end).  ``scope`` defaults to the declared paths; ``checklist`` replaces
+    the plan poka-yoke fields (PR #36) when a variant wants to leave some out.
     """
 
     added = drill.cli(
         "pm", "inbox", "add", "--project-id", project_id, "--request-id", request_id, "--title", f"样件联调 {request_id}",
-        "--kind", "iteration", "--domain", domain, "--original-words", "样件联调：走完整条收口流程", "--affects", "公共报警块",
+        "--kind", "iteration", "--domain", domain, "--original-words", ORIGINAL_WORDS, "--affects", "公共报警块",
         "--duplicate-check", "查过收件箱与台账，没有同类条目", "--evidence", f"file:{PROJECT}/.plc.json",
         "--disposition", "after_current", "--rationale", "演练", "--alternative", "不做", "--cost-risk", "低",
     )
@@ -275,13 +279,14 @@ def drive_mission(
 
     plan_args = [
         "pm", "plan", "--project-id", project_id, "--request-id", request_id, "--objective", "公共报警新增蜂鸣器输出",
-        "--acceptance", "门禁全绿并一步收口", "--check", f"main.py plc check {project_id} => 0",
-        "--risk", "只动公共报警块，可能影响报警输出", "--non-goal", "不下载到控制器",
-        "--original-request", "样件联调：走完整条收口流程", "--safety-circuit", "否", "--rollback", "git 还原本单改动的文件",
+        "--acceptance", "门禁全绿并一步收口", "--risk", "只动公共报警块，改错会影响报警指示", "--non-goal", "不下载到控制器",
         "--adapter", "codex", "--approved-model", "agent-a", "--inbox-id", item["item_id"],
+        *(PLAN_CHECKLIST if checklist is None else checklist),
     ]
+    for path in declared if scope is None else scope:
+        plan_args += ["--scope", path]
     for path in declared:
-        plan_args += ["--scope", path, "--declared-dirty", path]
+        plan_args += ["--declared-dirty", path]
     planned = drill.cli(*plan_args)
     if planned.returncode != 0:
         return MissionResult("refused:plan", refusal=planned.stderr + planned.stdout)
@@ -293,6 +298,8 @@ def drive_mission(
     )
     if approved.returncode != 0:
         return MissionResult("refused:approve", change_id=card["change_id"], refusal=approved.stderr + approved.stdout)
+    if stop_after == "approve":
+        return MissionResult("approved", change_id=card["change_id"])
 
     ran = drill.sdk("run", card, files, lease_token=lease_token)
     if ran.returncode != 0:
@@ -407,7 +414,6 @@ def test_d01_main_line_sorted_three_files_closes_in_one_step_and_ledger_is_clean
     assert_closed_and_clean(drill, result, PROJECT_ID)
 
 
-@pytest.mark.xfail(strict=True, reason=LEGACY_LAYOUT_DEFECT)
 def test_d00_a_project_on_the_old_11_layout_can_be_approved_and_closed(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar)
     files, declared = _sorted_buzzer(drill.root)
@@ -557,6 +563,8 @@ def test_d08_two_projects_in_parallel_with_different_change_numbers(tmp_path: Pa
 
 
 def test_d09_two_projects_in_parallel_whose_first_change_numbers_coincide(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
+    """Defect 5 (change_id was UNIQUE across the whole store) is fixed by card 180 (PR #34): the draft moves to the next free number."""
+
     drill = make_drill(tmp_path, benchmark_tar, second_project=True)
 
     _parallel_pair(drill, domain_b=MAIN_DOMAIN)
