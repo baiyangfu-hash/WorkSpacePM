@@ -4,7 +4,7 @@
 所有代码在同目录的 cockpit_board 包里：theme（颜色字体一处改）、viewmodel（纯 Python 算法）、
 policy（按钮规矩）、actions（本机动作）、widgets（画面）、app（主窗口）。本文件只负责启动。
 
-运行方式（控制根下，或双击控制根的“双击打开驾驶舱看板.bat”）：
+运行方式（控制根下，或双击 控制根/00_Infrastructure/auto_pm/environment/双击打开驾驶舱看板.bat）：
     python -B <本脚本> --root .
     python -B <本脚本> --root . --screenshot 看板.png   # 离屏截图后退出（自查用）
 """

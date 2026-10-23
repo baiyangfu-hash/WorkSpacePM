@@ -40,7 +40,8 @@ from tests.core import test_pm_dashboard as base  # noqa: E402 - 复用原型测
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "pm_dashboard_gui.py"
 PACKAGE = Path(__file__).resolve().parents[2] / "scripts" / "cockpit_board"
 REPO_ROOT = Path(__file__).resolve().parents[6]
-BAT = REPO_ROOT / "双击打开驾驶舱看板.bat"
+BAT_DIR = REPO_ROOT / "00_Infrastructure" / "auto_pm" / "environment"
+BAT = BAT_DIR / "双击打开驾驶舱看板.bat"
 NOW = base.NOW
 WRITES = r"(?<![\w.])open\(|write_bytes\(|write_text\("
 
@@ -291,6 +292,10 @@ def test_double_click_launcher_is_outside_releases() -> None:
     assert "main.py" not in text
     assert "codex" not in text.lower()
     assert "-B" in text and "pm_dashboard_gui.py" in text
+    # 控制根白名单（governance_service.ROOT_WHITELIST）不收新文件：bat 不放控制根，往上三级回到控制根再找脚本
+    assert not (REPO_ROOT / BAT.name).exists()
+    assert BAT_DIR.parent.parent.parent == REPO_ROOT and 'cd /d "%~dp0..\\..\\.."' in text
+    assert '--root "%ROOT%"' in text and "%~dp001_Project" not in text
     matches = [
         path
         for a in REPO_ROOT.glob("01_Project*")
