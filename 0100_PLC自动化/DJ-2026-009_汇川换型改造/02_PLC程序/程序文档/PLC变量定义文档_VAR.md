@@ -210,6 +210,7 @@
 | bReset | BOOL | 故障复位 |
 | bPause | BOOL | 暂停 |
 | bSingleStepMode | BOOL | 单步模式 |
+| bSafeToRun | BOOL | 【待确认】运行许可, OB1 每扫描从 FB_1030 q_bSafeToRun 写入 (CARD-DJ-2026-009-004) |
 
 ### ST_Station1_Status（结构体）
 
@@ -224,6 +225,8 @@
 | bProcessing | BOOL | 加工中 |
 | bReadyOut | BOOL | 【待确认】加工完成可出料 (出料步且气缸已松开) |
 | bProductPresent | BOOL | 【待确认】本工位有产品 (入料到位/加工到位/预留产品传感器任一路为 1) |
+| bFrozen | BOOL | 【待确认】安全停机, 步序冻结在断点等续跑 (CARD-DJ-2026-009-004) |
+| bMotionStopped | BOOL | 【待确认】动作完全停止: 电机无请求且不转, 气缸都在端点 (接 FB_1030 i_bMotionStopped) |
 
 ### ST_Station1_Config（结构体）
 
