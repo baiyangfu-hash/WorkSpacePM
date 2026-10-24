@@ -9,10 +9,50 @@ ORGANIZATION_BLOCK OB1
 
 BEGIN
     // ============================================================================
-    // 第1部分：外部设备交互 (ST_ExternalDevice)
+    // 第0部分：上下游 Modbus TCP 客户端数据映射 (FB_3002, CARD-DJ-2026-009-001)
+    // 先解包对方寄存器, 再由第1部分握手; 本机信号在下一周期封包 (1 个扫描周期延迟)
     // ============================================================================
-    GlobalVars.fbExternalDevice(io_stExternal := GlobalVars.stExternal);
+    // @安全区 开始：Modbus 客户端使能与链路状态 (断线判定的数据来源, 见 safety_zone.yml)
+    GlobalVars.fbModbusClient(
+        i_bEnable := GlobalVars.bModbusEnable,
+        i_bUpLinkOK := GlobalVars.bModbusUpLinkOK,
+        i_bDownLinkOK := GlobalVars.bModbusDownLinkOK,
+        io_stExternal := GlobalVars.stExternal,
+        io_arrUpRead := GlobalVars.awModbusUpRead,
+        io_arrUpWrite := GlobalVars.awModbusUpWrite,
+        io_arrDownRead := GlobalVars.awModbusDownRead,
+        io_arrDownWrite := GlobalVars.awModbusDownWrite
+    );
+    GlobalVars.stExternal := GlobalVars.fbModbusClient.io_stExternal;
+    // @安全区 结束
+
+    // ============================================================================
+    // 第1部分：外部设备交互 (ST_ExternalDevice)
+    // CARD-DJ-2026-009-003: 补接全部输入输出 (原来只传 io_stExternal, i_bEnable 默认 0, 握手不跑)
+    // 工位状态取上一周期 FB_1001 的结果 (1 个扫描周期延迟)
+    // ============================================================================
+    // @安全区 开始：握手使能=急停回路正常, 复位来源, 工位状态接入断线联锁
+    GlobalVars.fbExternalDevice(
+        // Modbus 停用时对方信号冻结在最后值, 不能拿来走握手 (Codex 评审 #77): 使能同时看 bModbusEnable
+        i_bEnable := GlobalVars.stExternal.bEmergencyStop AND GlobalVars.bModbusEnable,
+        i_bAutoMode := GlobalVars.stStation1.stControl.bAutoEnable,
+        i_bResetCmd := GlobalVars.stGlobal.i_bReset OR GlobalVars.stStation1.stControl.bReset,
+        i_bMachineReadyIn := GlobalVars.stStation1.stStatus.bWaitMaterial,
+        i_bMachineReadyOut := GlobalVars.stStation1.stStatus.bReadyOut,
+        i_bInfeedArrivedSens := GlobalVars.stStation1.stSensors.bInPosSensor,
+        i_bProductPresent := GlobalVars.stStation1.stStatus.bProductPresent,
+        q_bAllowInfeedAct => GlobalVars.bExtAllowInfeedAct,
+        q_bAllowOutfeedAct => GlobalVars.bExtAllowOutfeedAct,
+        q_bUpstreamDone => GlobalVars.bExtUpstreamDone,
+        q_bDownstreamDone => GlobalVars.bExtDownstreamDone,
+        q_bComAlarm => GlobalVars.bExtComAlarm,
+        q_wErrorCode => GlobalVars.wExtErrorCode,
+        io_stExternal := GlobalVars.stExternal,
+        io_sMachineModuleID := GlobalVars.sMachineModuleID,
+        io_stIdHmi := GlobalVars.stModuleIdHmi
+    );
     GlobalVars.stExternal := GlobalVars.fbExternalDevice.io_stExternal;
+    // @安全区 结束
 
     // ============================================================================
     // 第2部分：工位1 动作机构 (ST_Station1)
