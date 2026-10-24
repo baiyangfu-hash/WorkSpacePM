@@ -1,0 +1,168 @@
+// ============================================================================
+// modbus_client_test.scltest - 汇川换型改造 Modbus TCP 客户端数据映射层测试
+// ============================================================================
+// 项目: DJ-2026-009 汇川换型改造
+// 实施卡: CARD-DJ-2026-009-001 验收第 3、4 项
+// 被测: FB_3002_ModbusTcpClient (OB1 第0部分, 实例 GlobalVars.fbModbusClient)
+// 寄存器地址按通讯契约 V0.3 我方提议版 (0 状态字入, 1 状态字出, 2~17 组件 ID)
+// ============================================================================
+
+TEST_CASE "TC_MB01_SendId_32Chars_HighByteFirst"
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := TRUE;
+    SET GlobalVars.bModbusDownLinkOK := TRUE;
+    SET GlobalVars.stExternal.stDownstream.sSendModuleID := 'L1-A-20261020T235959Z-ABCDEFGHIJ';
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.awModbusDownWrite[2] = 16#4C31;
+    ASSERT GlobalVars.awModbusDownWrite[3] = 16#2D41;
+    ASSERT GlobalVars.awModbusDownWrite[4] = 16#2D32;
+    ASSERT GlobalVars.awModbusDownWrite[5] = 16#3032;
+    ASSERT GlobalVars.awModbusDownWrite[6] = 16#3631;
+    ASSERT GlobalVars.awModbusDownWrite[7] = 16#3032;
+    ASSERT GlobalVars.awModbusDownWrite[8] = 16#3054;
+    ASSERT GlobalVars.awModbusDownWrite[9] = 16#3233;
+    ASSERT GlobalVars.awModbusDownWrite[10] = 16#3539;
+    ASSERT GlobalVars.awModbusDownWrite[11] = 16#3539;
+    ASSERT GlobalVars.awModbusDownWrite[12] = 16#5A2D;
+    ASSERT GlobalVars.awModbusDownWrite[13] = 16#4142;
+    ASSERT GlobalVars.awModbusDownWrite[14] = 16#4344;
+    ASSERT GlobalVars.awModbusDownWrite[15] = 16#4546;
+    ASSERT GlobalVars.awModbusDownWrite[16] = 16#4748;
+    ASSERT GlobalVars.awModbusDownWrite[17] = 16#494A;
+END_TEST_CASE
+
+TEST_CASE "TC_MB02_SendId_Short_PadZero"
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := TRUE;
+    SET GlobalVars.bModbusDownLinkOK := TRUE;
+    SET GlobalVars.stExternal.stDownstream.sSendModuleID := 'ABC';
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.awModbusDownWrite[2] = 16#4142;
+    ASSERT GlobalVars.awModbusDownWrite[3] = 16#4300;
+    ASSERT GlobalVars.awModbusDownWrite[4] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[5] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[6] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[7] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[8] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[9] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[10] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[11] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[12] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[13] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[14] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[15] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[16] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[17] = 16#0000;
+END_TEST_CASE
+
+TEST_CASE "TC_MB03_RcvId_32Chars_RoundTrip"
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := TRUE;
+    SET GlobalVars.bModbusDownLinkOK := TRUE;
+    SET GlobalVars.awModbusUpRead[2] := 16#4C31;
+    SET GlobalVars.awModbusUpRead[3] := 16#2D41;
+    SET GlobalVars.awModbusUpRead[4] := 16#2D32;
+    SET GlobalVars.awModbusUpRead[5] := 16#3032;
+    SET GlobalVars.awModbusUpRead[6] := 16#3631;
+    SET GlobalVars.awModbusUpRead[7] := 16#3032;
+    SET GlobalVars.awModbusUpRead[8] := 16#3054;
+    SET GlobalVars.awModbusUpRead[9] := 16#3233;
+    SET GlobalVars.awModbusUpRead[10] := 16#3539;
+    SET GlobalVars.awModbusUpRead[11] := 16#3539;
+    SET GlobalVars.awModbusUpRead[12] := 16#5A2D;
+    SET GlobalVars.awModbusUpRead[13] := 16#4142;
+    SET GlobalVars.awModbusUpRead[14] := 16#4344;
+    SET GlobalVars.awModbusUpRead[15] := 16#4546;
+    SET GlobalVars.awModbusUpRead[16] := 16#4748;
+    SET GlobalVars.awModbusUpRead[17] := 16#494A;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stExternal.stUpstream.sRcvModuleID = 'L1-A-20261020T235959Z-ABCDEFGHIJ';
+END_TEST_CASE
+
+TEST_CASE "TC_MB04_RcvId_Short_StopAtZero"
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := TRUE;
+    SET GlobalVars.bModbusDownLinkOK := TRUE;
+    SET GlobalVars.awModbusUpRead[2] := 16#4142;
+    SET GlobalVars.awModbusUpRead[3] := 16#4300;
+    SET GlobalVars.awModbusUpRead[4] := 16#0000;
+    SET GlobalVars.awModbusUpRead[5] := 16#0000;
+    SET GlobalVars.awModbusUpRead[6] := 16#0000;
+    SET GlobalVars.awModbusUpRead[7] := 16#0000;
+    SET GlobalVars.awModbusUpRead[8] := 16#0000;
+    SET GlobalVars.awModbusUpRead[9] := 16#0000;
+    SET GlobalVars.awModbusUpRead[10] := 16#0000;
+    SET GlobalVars.awModbusUpRead[11] := 16#0000;
+    SET GlobalVars.awModbusUpRead[12] := 16#0000;
+    SET GlobalVars.awModbusUpRead[13] := 16#0000;
+    SET GlobalVars.awModbusUpRead[14] := 16#0000;
+    SET GlobalVars.awModbusUpRead[15] := 16#0000;
+    SET GlobalVars.awModbusUpRead[16] := 16#0000;
+    SET GlobalVars.awModbusUpRead[17] := 16#0000;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stExternal.stUpstream.sRcvModuleID = 'ABC';
+END_TEST_CASE
+
+TEST_CASE "TC_MB05_UpStatus_Unpack"
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := TRUE;
+    SET GlobalVars.bModbusDownLinkOK := TRUE;
+    SET GlobalVars.awModbusUpRead[0] := 16#8005;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstream_LineReady = TRUE;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq = TRUE;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp = TRUE;
+END_TEST_CASE
+
+// 下游状态字封包: 选用 FB_3001 未使能时不会清掉的两个位 (bit1 发送 ID, bit3 确认到位)
+TEST_CASE "TC_MB06_DownStatus_Pack"
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := TRUE;
+    SET GlobalVars.bModbusDownLinkOK := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bMachine_SendModuleId := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bMachine_OutfeedArrivedAck := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.awModbusDownWrite[1] = 16#000A;
+END_TEST_CASE
+
+// 验收第 4 项: 对方不应答时给出通讯状态和错误码, 读回的心跳保持最后值不刷新
+TEST_CASE "TC_MB07_UpLinkLost_HoldLastValue"
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := TRUE;
+    SET GlobalVars.bModbusDownLinkOK := TRUE;
+    SET GlobalVars.awModbusUpRead[0] := 16#8001;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp = TRUE;
+    SET GlobalVars.bModbusUpLinkOK := FALSE;
+    SET GlobalVars.awModbusUpRead[0] := 16#0000;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp = TRUE;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstream_LineReady = TRUE;
+    ASSERT GlobalVars.fbModbusClient.q_bComOK = FALSE;
+    ASSERT GlobalVars.fbModbusClient.q_wErrorCode = 16#0001;
+END_TEST_CASE
+
+TEST_CASE "TC_MB08_DownLinkLost_ErrorCode"
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := TRUE;
+    SET GlobalVars.bModbusDownLinkOK := FALSE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.fbModbusClient.q_bComOK = FALSE;
+    ASSERT GlobalVars.fbModbusClient.q_wErrorCode = 16#0002;
+END_TEST_CASE
+
+TEST_CASE "TC_MB09_Disable_ClearWriteImage"
+    SET GlobalVars.bModbusEnable := TRUE;
+    SET GlobalVars.bModbusUpLinkOK := TRUE;
+    SET GlobalVars.bModbusDownLinkOK := TRUE;
+    SET GlobalVars.stExternal.stDownstream.sSendModuleID := 'ABC';
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.awModbusDownWrite[2] = 16#4142;
+    SET GlobalVars.bModbusEnable := FALSE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.awModbusDownWrite[1] = 16#0000;
+    ASSERT GlobalVars.awModbusDownWrite[2] = 16#0000;
+    ASSERT GlobalVars.awModbusUpWrite[1] = 16#0000;
+END_TEST_CASE
