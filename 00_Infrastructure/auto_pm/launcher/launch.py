@@ -12,7 +12,7 @@ from bootstrap import BootstrapError, purge_bytecode, resolve_release
 
 _RELEASE_CHILD = (
     "import runpy, sys; release_dir = sys.argv[1]; "
-    "sys.argv = [sys.argv[0], *sys.argv[2:]]; "
+    "sys.argv = ['main.py', *sys.argv[2:]]; "  # under -c argv[0] is '-c', which click prints in its usage line
     "sys.path.insert(0, release_dir); runpy.run_module('auto_pm', run_name='__main__')"
 )
 _UNSAFE_PYTHON_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE")

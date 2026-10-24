@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -105,3 +106,20 @@ def test_main_pins_child_to_workspace_owning_container(
     assert isinstance(environment, dict)
     assert environment["AUTO_PM_WORKSPACE"] == str(workspace_root)
     assert captured["cwd"] == container / "releases" / "1.2.4-test"
+
+
+def test_release_child_reports_the_entry_as_main_py_not_dash_c(tmp_path: Path) -> None:
+    # Problem pool 17: under ``python -c`` argv[0] is "-c", so click's usage line read "Usage: -c [OPTIONS]".
+    launcher = _load_launcher()
+    package = tmp_path / "auto_pm"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text("import sys\nprint(repr(sys.argv))\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, "-B", "-I", "-c", launcher._RELEASE_CHILD, str(tmp_path), "pm", "--flag"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == repr(["main.py", "pm", "--flag"])
