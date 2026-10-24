@@ -1,207 +1,190 @@
 (* ================================================================= *)
-(*  功能块名称:FB_2001_CommonAlarm_AllStation                        *)
-(*  功能描述:公共报警管理功能块 - 汇总所有工站报警信息                *)
-(*  版本号:V4.0.0 (结构体整块传递架构, LSP-905 0-Warn 合规)          *)
+(*  功能块名称: FB_2001_CommonAlarm_AllStation                        *)
+(*  功能描述:   F0~F127 报警自保持、分级、汇总、复位、声光            *)
+(*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V4.x)       *)
+(*                                                                   *)
+(*  依据:                                                            *)
+(*    - 详细设计说明书_DSN.md 9; 接口文档_INT.md 4.9 / 9              *)
+(*    - 原程序 PDF 的报警块与声光块                                  *)
+(*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
+(*                                                                   *)
+(*  调用位置: OB1 最后一个, 本扫描产生的 Hold / M8 下一扫描生效。    *)
+(*  分级: A 类进 bFault (M8); B 类按机构给 Hold; 提示类只显示。      *)
+(*                                                                   *)
+(*  与 INT 的差异 (评审请确认):                                      *)
+(*    1. 增加 VAR_IN_OUT io_stHmi (静音 M9, 强置选项 M515 要读)       *)
+(*    2. iAlarmNo = 最小锁存 F 号 + 1, 0 表示无报警 (否则 F0 急停     *)
+(*       与"无报警"重名)                                             *)
 (* ================================================================= *)
+
 FUNCTION_BLOCK FB_2001_CommonAlarm_AllStation
 
 VAR_IN_OUT
-    io_stGlobal                : ST_CommonAlarm; // 公共报警工站全量数据结构体
+    io_stAlarm          : ST_Alarm;         // 报警触发 / 锁存 / 分级输出 / 声光
+    io_stMachine        : ST_Machine;       // 模式 (声光条件)
+    io_stIo             : ST_Io;            // 复位键 X100 输入, 声光输出 Y24~Y27 / Y50
+    io_stHmi            : ST_Hmi;           // 静音 M9, 强置选项 M515
 END_VAR
 
 VAR
-    s_iPrevConveyorAlarm       : INT;
-    s_iPrevPickPlaceAlarm      : INT;
-    s_iPrevFeederAlarm         : INT;
-    s_wPrevGlobalAlarmWord     : WORD;
-    s_bConveyorAlarmActive     : BOOL;
-    s_bPickPlaceAlarmActive    : BOOL;
-    s_bFeederAlarmActive       : BOOL;
-    s_iMinAlarmCode            : INT;
-    s_iQueueTailIndex          : INT;
-    s_bAlarmExistsInQueue      : BOOL;
-    s_iQueueScanIndex          : INT;
-    s_iAlarmCount              : INT;
-    s_bNewAlarmDetected        : BOOL;
-    s_bQueueFull               : BOOL;
+    fb_trReset          : FB_R_TRIG;        // 复位键上升沿
+    s_bResetEdge        : BOOL := FALSE;
+
+    (* 时钟: 两个 FB_TON 互相触发的方波振荡 *)
+    fb_tClk1On          : FB_TON;           // 1 s 时钟: 低电平 500 ms
+    s_bClk1OnQ          : BOOL := FALSE;
+    s_dClk1OnEt         : DINT := 0;
+    fb_tClk1Off         : FB_TON;           // 1 s 时钟: 高电平 500 ms
+    s_bClk1OffQ         : BOOL := FALSE;
+    s_dClk1OffEt        : DINT := 0;
+    s_bClk1s            : BOOL := FALSE;    // 1 s 时钟
+    fb_tClk01On         : FB_TON;           // 100 ms 时钟: 低电平 50 ms
+    s_bClk01OnQ         : BOOL := FALSE;
+    s_dClk01OnEt        : DINT := 0;
+    fb_tClk01Off        : FB_TON;           // 100 ms 时钟: 高电平 50 ms
+    s_bClk01OffQ        : BOOL := FALSE;
+    s_dClk01OffEt       : DINT := 0;
+    s_bClk01s           : BOOL := FALSE;    // 100 ms 时钟
+
+    s_iIdx              : INT := 0;         // 扫描下标
+    s_bAnyAll           : BOOL := FALSE;    // 任一锁存 (含提示类)
+    s_bBlink            : BOOL := FALSE;    // 声光闪烁条件 N
+    s_iMin              : INT := 0;         // 最小锁存 F 号 + 1
 END_VAR
 
 VAR CONSTANT
-    QUEUE_SIZE              : INT := 10;     // 报警队列大小
-    QUEUE_MASK              : INT := 9;      // 队列索引掩码 (用于循环队列)
-    ALM_NONE                : INT := 0;      // 无报警值
-    ALM_WORD_ZERO           : WORD := 0;     // 报警字零值
-    ALM_CODE_SAFETY_TIMEOUT : INT := 2009;   // 安全回看看门狗超时报警代码 (STD-860)
-    ALM_BIT_SAFETY_TIMEOUT  : WORD := 16#0008; // 报警字第3位: 安全回路看门狗超时
-    ALM_CODE_HEARTBEAT_LOST : INT := 2010;   // 外部设备通信心跳丢失报警代码 (STD-860/820)
-    ALM_BIT_HEARTBEAT_LOST  : WORD := 16#0010; // 报警字第4位: 外部设备通信心跳丢失
+    NO_ALARM            : INT := 0;
+    LAST_IDX            : INT := 127;
+    CLK1_HALF_MS        : DINT := 500;      // 1 s 时钟半周期
+    CLK01_HALF_MS       : DINT := 50;       // 100 ms 时钟半周期
 END_VAR
 
-(* -------------------------------------------------------------------------- *)
-(* 1. 保存当前输入状态用于下一周期比较                                          *)
-(* -------------------------------------------------------------------------- *)
-s_iPrevConveyorAlarm := io_stGlobal.i_iConveyorAlarm;
-s_iPrevPickPlaceAlarm := io_stGlobal.i_iPickPlaceAlarm;
-s_iPrevFeederAlarm := io_stGlobal.i_iFeederAlarm;
+BEGIN
+    (* ============ 1. 定时器与边沿统一调用 (顶部, 无条件) ============ *)
+    fb_trReset(IN := io_stIo.bResetButton, Q => s_bResetEdge);
+    fb_tClk1On(IN := NOT s_bClk1s, PT := CLK1_HALF_MS, Q => s_bClk1OnQ, ET => s_dClk1OnEt);
+    fb_tClk1Off(IN := s_bClk1s, PT := CLK1_HALF_MS, Q => s_bClk1OffQ, ET => s_dClk1OffEt);
+    fb_tClk01On(IN := NOT s_bClk01s, PT := CLK01_HALF_MS, Q => s_bClk01OnQ, ET => s_dClk01OnEt);
+    fb_tClk01Off(IN := s_bClk01s, PT := CLK01_HALF_MS, Q => s_bClk01OffQ, ET => s_dClk01OffEt);
 
-(* -------------------------------------------------------------------------- *)
-(* 2. 复位处理                                                                *)
-(* -------------------------------------------------------------------------- *)
-IF io_stGlobal.i_bReset THEN
-    io_stGlobal.o_wGlobalAlarmWord := ALM_WORD_ZERO;
-    io_stGlobal.o_iCurrentAlarmCode := ALM_NONE;
-    io_stGlobal.o_bAnyAlarmActive := FALSE;
-    io_stGlobal.o_bNewAlarmFlag := FALSE;
-    io_stGlobal.o_iMESAlarmCount := ALM_NONE;
-    s_iAlarmCount := ALM_NONE;
-    FOR s_iQueueScanIndex := 0 TO QUEUE_MASK DO
-        io_stGlobal.o_iMESAlarmQueue[s_iQueueScanIndex] := ALM_NONE;
-    END_FOR;
-    s_iQueueTailIndex := 0;
-    s_bNewAlarmDetected := FALSE;
-    s_iMinAlarmCode := ALM_NONE;
-    s_wPrevGlobalAlarmWord := ALM_WORD_ZERO;
-    s_bQueueFull := FALSE;
-    RETURN;
-END_IF;
-
-(* -------------------------------------------------------------------------- *)
-(* 3. 各工站报警激活状态检测                                                    *)
-(* -------------------------------------------------------------------------- *)
-s_bConveyorAlarmActive := (io_stGlobal.i_iConveyorAlarm <> ALM_NONE);
-s_bPickPlaceAlarmActive := (io_stGlobal.i_iPickPlaceAlarm <> ALM_NONE);
-s_bFeederAlarmActive := (io_stGlobal.i_iFeederAlarm <> ALM_NONE);
-
-(* -------------------------------------------------------------------------- *)
-(* 4. 全局报警字生成                                                          *)
-(*    将各工站报警码按位或组合成全局报警字                                      *)
-(* -------------------------------------------------------------------------- *)
-io_stGlobal.o_wGlobalAlarmWord := ALM_WORD_ZERO;
-
-IF s_bConveyorAlarmActive THEN
-    io_stGlobal.o_wGlobalAlarmWord := io_stGlobal.o_wGlobalAlarmWord OR INT_TO_WORD(io_stGlobal.i_iConveyorAlarm);
-END_IF;
-
-IF s_bPickPlaceAlarmActive THEN
-    io_stGlobal.o_wGlobalAlarmWord := io_stGlobal.o_wGlobalAlarmWord OR INT_TO_WORD(io_stGlobal.i_iPickPlaceAlarm);
-END_IF;
-
-IF s_bFeederAlarmActive THEN
-    io_stGlobal.o_wGlobalAlarmWord := io_stGlobal.o_wGlobalAlarmWord OR INT_TO_WORD(io_stGlobal.i_iFeederAlarm);
-END_IF;
-
-IF (io_stGlobal.i_iConveyorAlarm = ALM_CODE_SAFETY_TIMEOUT) OR
-   (io_stGlobal.i_iPickPlaceAlarm = ALM_CODE_SAFETY_TIMEOUT) OR
-   (io_stGlobal.i_iFeederAlarm = ALM_CODE_SAFETY_TIMEOUT) THEN
-    io_stGlobal.o_wGlobalAlarmWord := io_stGlobal.o_wGlobalAlarmWord OR ALM_BIT_SAFETY_TIMEOUT;
-END_IF;
-
-IF (io_stGlobal.i_iConveyorAlarm = ALM_CODE_HEARTBEAT_LOST) OR
-   (io_stGlobal.i_iPickPlaceAlarm = ALM_CODE_HEARTBEAT_LOST) OR
-   (io_stGlobal.i_iFeederAlarm = ALM_CODE_HEARTBEAT_LOST) THEN
-    io_stGlobal.o_wGlobalAlarmWord := io_stGlobal.o_wGlobalAlarmWord OR ALM_BIT_HEARTBEAT_LOST;
-END_IF;
-
-(* -------------------------------------------------------------------------- *)
-(* 5. 最高优先级报警码选择                                                      *)
-(*    选择最小报警码作为当前最高优先级报警(报警码越小优先级越高)                *)
-(* -------------------------------------------------------------------------- *)
-s_iMinAlarmCode := ALM_NONE;
-
-IF s_bConveyorAlarmActive THEN
-    IF s_iMinAlarmCode = ALM_NONE THEN
-        s_iMinAlarmCode := io_stGlobal.i_iConveyorAlarm;
-    ELSIF io_stGlobal.i_iConveyorAlarm < s_iMinAlarmCode THEN
-        s_iMinAlarmCode := io_stGlobal.i_iConveyorAlarm;
+    IF s_bClk1OnQ THEN
+        s_bClk1s := TRUE;
+    ELSIF s_bClk1OffQ THEN
+        s_bClk1s := FALSE;
     END_IF;
-END_IF;
-
-IF s_bPickPlaceAlarmActive THEN
-    IF s_iMinAlarmCode = ALM_NONE THEN
-        s_iMinAlarmCode := io_stGlobal.i_iPickPlaceAlarm;
-    ELSIF io_stGlobal.i_iPickPlaceAlarm < s_iMinAlarmCode THEN
-        s_iMinAlarmCode := io_stGlobal.i_iPickPlaceAlarm;
+    IF s_bClk01OnQ THEN
+        s_bClk01s := TRUE;
+    ELSIF s_bClk01OffQ THEN
+        s_bClk01s := FALSE;
     END_IF;
-END_IF;
 
-IF s_bFeederAlarmActive THEN
-    IF s_iMinAlarmCode = ALM_NONE THEN
-        s_iMinAlarmCode := io_stGlobal.i_iFeederAlarm;
-    ELSIF io_stGlobal.i_iFeederAlarm < s_iMinAlarmCode THEN
-        s_iMinAlarmCode := io_stGlobal.i_iFeederAlarm;
-    END_IF;
-END_IF;
-
-(* -------------------------------------------------------------------------- *)
-(* 6. 输出状态赋值                                                            *)
-(* -------------------------------------------------------------------------- *)
-io_stGlobal.o_iCurrentAlarmCode := s_iMinAlarmCode;
-io_stGlobal.o_bAnyAlarmActive := s_bConveyorAlarmActive OR s_bPickPlaceAlarmActive OR s_bFeederAlarmActive;
-
-io_stGlobal.o_iStationAlarmStatus[1] := io_stGlobal.i_iConveyorAlarm;
-io_stGlobal.o_iStationAlarmStatus[2] := io_stGlobal.i_iPickPlaceAlarm;
-io_stGlobal.o_iStationAlarmStatus[3] := io_stGlobal.i_iFeederAlarm;
-
-io_stGlobal.o_bConveyorAlarmActive := s_bConveyorAlarmActive;
-io_stGlobal.o_bPickPlaceAlarmActive := s_bPickPlaceAlarmActive;
-io_stGlobal.o_bFeederAlarmActive := s_bFeederAlarmActive;
-
-(* -------------------------------------------------------------------------- *)
-(* 7. 新报警检测(上升沿检测)                                                  *)
-(*    只检测报警从无到有的变化,避免报警解除时误触发                            *)
-(* -------------------------------------------------------------------------- *)
-s_bNewAlarmDetected := FALSE;
-
-IF (io_stGlobal.i_iConveyorAlarm <> ALM_NONE AND s_iPrevConveyorAlarm = ALM_NONE) THEN
-    s_bNewAlarmDetected := TRUE;
-END_IF;
-IF (io_stGlobal.i_iPickPlaceAlarm <> ALM_NONE AND s_iPrevPickPlaceAlarm = ALM_NONE) THEN
-    s_bNewAlarmDetected := TRUE;
-END_IF;
-IF (io_stGlobal.i_iFeederAlarm <> ALM_NONE AND s_iPrevFeederAlarm = ALM_NONE) THEN
-    s_bNewAlarmDetected := TRUE;
-END_IF;
-
-io_stGlobal.o_bNewAlarmFlag := s_bNewAlarmDetected AND io_stGlobal.o_bAnyAlarmActive;
-
-(* -------------------------------------------------------------------------- *)
-(* 8. MES报警队列管理                                                          *)
-(*    维护最近10条报警记录,支持去重存储,队列满时自动覆盖最旧记录              *)
-(* -------------------------------------------------------------------------- *)
-IF s_bNewAlarmDetected THEN
-    s_iAlarmCount := s_iAlarmCount + 1;
-    io_stGlobal.o_iMESAlarmCount := s_iAlarmCount;
-END_IF;
-
-IF io_stGlobal.o_bAnyAlarmActive THEN
-    s_bAlarmExistsInQueue := FALSE;
-
-    (* 检查报警码是否已存在于队列中(去重) *)
-    FOR s_iQueueScanIndex := 0 TO QUEUE_MASK DO
-        IF io_stGlobal.o_iMESAlarmQueue[s_iQueueScanIndex] = io_stGlobal.o_iCurrentAlarmCode THEN
-            s_bAlarmExistsInQueue := TRUE;
-            EXIT;
+    (* ============ 2. 锁存: 触发即锁, 复位键沿且触发已消失才清 ============ *)
+    io_stAlarm.bReset := s_bResetEdge;
+    FOR s_iIdx := 0 TO LAST_IDX DO
+        IF io_stAlarm.arrTrig[s_iIdx] THEN
+            io_stAlarm.arrLatch[s_iIdx] := TRUE;
+        ELSIF s_bResetEdge THEN
+            io_stAlarm.arrLatch[s_iIdx] := FALSE;
         END_IF;
     END_FOR;
 
-    (* 如果报警码不存在于队列中,则加入队列 *)
-    IF NOT s_bAlarmExistsInQueue THEN
-        io_stGlobal.o_iMESAlarmQueue[s_iQueueTailIndex] := io_stGlobal.o_iCurrentAlarmCode;
-        s_iQueueTailIndex := s_iQueueTailIndex + 1;
+    (* ============ 3. 分级汇总 ============ *)
+    io_stAlarm.bFault := FALSE;
+    io_stAlarm.bAny := FALSE;
+    io_stAlarm.abHoldConv[1] := FALSE;
+    io_stAlarm.abHoldConv[2] := FALSE;
+    io_stAlarm.abHoldConv[3] := FALSE;
+    io_stAlarm.abHoldConv[4] := FALSE;
+    io_stAlarm.bHoldPP := FALSE;
+    io_stAlarm.bHoldFeeder := FALSE;
+    io_stAlarm.bHoldHome := FALSE;
+    s_bAnyAll := FALSE;
+    s_iMin := NO_ALARM;
 
-        (* 循环队列处理 *)
-        IF s_iQueueTailIndex > QUEUE_MASK THEN
-            s_iQueueTailIndex := 0;
-            s_bQueueFull := TRUE;
-        ELSE
-            s_bQueueFull := FALSE;
+    FOR s_iIdx := 0 TO LAST_IDX DO
+        IF io_stAlarm.arrLatch[s_iIdx] THEN
+            s_bAnyAll := TRUE;
+            IF s_iMin = NO_ALARM THEN
+                s_iMin := s_iIdx + 1;       // 下标升序扫描, 第一个即最小
+            END_IF;
+
+            // A 类: F0~F11、F13~F16、F104 -> M8
+            IF (s_iIdx <= 11) OR ((s_iIdx >= 13) AND (s_iIdx <= 16)) OR (s_iIdx = 104) THEN
+                io_stAlarm.bFault := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            // B 类 取放料: F20 F21 F24 F25, F30~F33, F66~F75, F106
+            IF (s_iIdx = 20) OR (s_iIdx = 21) OR (s_iIdx = 24) OR (s_iIdx = 25)
+               OR ((s_iIdx >= 30) AND (s_iIdx <= 33)) OR ((s_iIdx >= 66) AND (s_iIdx <= 75))
+               OR (s_iIdx = 106) THEN
+                io_stAlarm.bHoldPP := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            // B 类 小车: F22 F23, F90 F91
+            IF (s_iIdx = 22) OR (s_iIdx = 23) OR (s_iIdx = 90) OR (s_iIdx = 91) THEN
+                io_stAlarm.bHoldFeeder := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            // B 类 输送 1~4 层: F34~F65 每层 8 个, F100~F103 缺料 (F103 = 1 层)
+            IF (s_iIdx >= 34) AND (s_iIdx <= 41) THEN
+                io_stAlarm.abHoldConv[1] := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            IF (s_iIdx >= 42) AND (s_iIdx <= 49) THEN
+                io_stAlarm.abHoldConv[2] := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            IF (s_iIdx >= 50) AND (s_iIdx <= 57) THEN
+                io_stAlarm.abHoldConv[3] := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            IF (s_iIdx >= 58) AND (s_iIdx <= 65) THEN
+                io_stAlarm.abHoldConv[4] := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            IF s_iIdx = 103 THEN
+                io_stAlarm.abHoldConv[1] := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            IF s_iIdx = 102 THEN
+                io_stAlarm.abHoldConv[2] := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            IF s_iIdx = 101 THEN
+                io_stAlarm.abHoldConv[3] := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            IF s_iIdx = 100 THEN
+                io_stAlarm.abHoldConv[4] := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
+            // B 类 回原点: F80 F81
+            IF (s_iIdx = 80) OR (s_iIdx = 81) THEN
+                io_stAlarm.bHoldHome := TRUE;
+                io_stAlarm.bAny := TRUE;
+            END_IF;
         END_IF;
-    END_IF;
-END_IF;
+    END_FOR;
+    io_stAlarm.iAlarmNo := s_iMin;
 
-(* -------------------------------------------------------------------------- *)
-(* 9. 保存当前状态用于下一周期比较                                              *)
-(* -------------------------------------------------------------------------- *)
-s_wPrevGlobalAlarmWord := io_stGlobal.o_wGlobalAlarmWord;
+    (* ============ 4. 声光 (PRC 7.2, DSN 9) ============ *)
+    s_bBlink := ((s_bAnyAll OR io_stMachine.bPause) AND s_bClk1s)
+                OR ((io_stMachine.bHoming OR (io_stMachine.bManual AND io_stHmi.bBlinkOpt) OR io_stMachine.bPrepare)
+                    AND s_bClk01s);
 
+    io_stAlarm.bLampYellow := s_bBlink AND (NOT io_stMachine.bFault);
+    io_stAlarm.bBuzzer := s_bBlink AND (NOT io_stHmi.bMute);
+    io_stAlarm.bLampRed := s_bBlink AND (NOT io_stMachine.bHoming) AND (NOT io_stMachine.bPrepare);
+    io_stAlarm.bResetLamp := io_stAlarm.bAny AND s_bClk1s;
+    io_stAlarm.bLampGreen := (io_stMachine.bManual AND s_bClk1s)
+                             OR (io_stMachine.bAuto AND (NOT s_bAnyAll))
+                             OR ((io_stMachine.bHoming OR io_stMachine.bPrepare
+                                  OR ((NOT io_stMachine.bAuto) AND (NOT io_stMachine.bManual) AND io_stHmi.bBlinkOpt))
+                                 AND s_bClk01s);
+
+    io_stIo.bQLampGreen := io_stAlarm.bLampGreen;
+    io_stIo.bQLampYellow := io_stAlarm.bLampYellow;
+    io_stIo.bQLampRed := io_stAlarm.bLampRed;
+    io_stIo.bQBuzzer := io_stAlarm.bBuzzer;
+    io_stIo.bQLampResetBtn := io_stAlarm.bResetLamp;
 END_FUNCTION_BLOCK

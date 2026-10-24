@@ -1,0 +1,21 @@
+(* ================================================================= *)
+(*  类型名称：ST_ExternalLink                                    *)
+(*  功能描述：组框机链路与打胶机握手数据 (FB_3001 写)                          *)
+(*  版本号：V1.0.0 (2026-10-24, DJ-2026-005 新设计)                    *)
+(*  依据：接口文档_INT.md                                              *)
+(* ================================================================= *)
+
+TYPE ST_ExternalLink
+STRUCT
+    bLinkMode               : BOOL;     // 组框机联机 (M501)
+    bContinuous             : BOOL;     // 连续送框 (M502)
+    bSingle                 : BOOL;     // 单套送框许可 (M510)
+    bLinkSafetyOut          : BOOL;     // 本机 -> 组框机: 安全异常 (R5000.0), F0 或 F1~F8
+    bPeerSafetyFault        : BOOL;     // 组框机 -> 本机: 安全异常 (R5010.0, 平台写入)
+    bPeerPermit             : BOOL;     // 组框机 -> 本机: 允许送料 (R5011.0, 平台写入)
+    bLinkFail               : BOOL;     // 通讯异常 (SB49 / SB6A / SB0A1 合并, 平台写入)
+    bY45                    : BOOL;     // 组框机暂停输出 (Y45)
+    bY46                    : BOOL;     // 组框机急停输出 (Y46)
+    arrTrig                 : ARRAY[0..1] OF BOOL;      // [0] F104 组框机安全异常, [1] F105 通讯异常
+END_STRUCT
+END_TYPE

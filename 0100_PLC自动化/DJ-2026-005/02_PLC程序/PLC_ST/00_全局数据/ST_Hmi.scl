@@ -1,0 +1,47 @@
+(* ================================================================= *)
+(*  类型名称：ST_Hmi                                             *)
+(*  功能描述：HMI 命令与设定值 (HMI 写, PLC 读); 部分为 PLC 回写状态            *)
+(*  版本号：V1.0.0 (2026-10-24, DJ-2026-005 新设计)                    *)
+(*  依据：接口文档_INT.md                                              *)
+(* ================================================================= *)
+
+TYPE ST_Hmi
+STRUCT
+    (* ------------------ 模式与运行键 ------------------ *)
+    bManual                 : BOOL;     // 手动 (M0)
+    bAutoRun                : BOOL;     // 自动运行键 (M6)
+    bStop                   : BOOL;     // 停止 (M7)
+    bPause                  : BOOL;     // 暂停 (M95)
+    bMute                   : BOOL;     // 静音 (M9)
+    bPrepareKey             : BOOL;     // 准备键 (保留)
+    bBlinkOpt               : BOOL;     // 强置选项 / 一键退料 (M515)
+
+    (* ------------------ 手动: 点动 / 示教 / 定位 ------------------ *)
+    bTeach                  : ARRAY[1..6] OF BOOL;      // 示教 M61~M66
+    bJog                    : ARRAY[1..6] OF BOOL;      // 点动 M156~M161 (X1 正反, X2 正反, Z 正反)
+    bSpeedUp                : ARRAY[1..3] OF BOOL;      // 手动速度加 M150/M152/M154 (X1 / X2 / Z)
+    bSpeedDown              : ARRAY[1..3] OF BOOL;      // 手动速度减 M151/M153/M155
+    bPosX1                  : ARRAY[1..4] OF BOOL;      // X1 定位 M162~M165 (D510 / D520 / D540 / D550)
+    bPosX2                  : ARRAY[1..2] OF BOOL;      // X2 定位 M166 / M167 (D512 / D522)
+    bGripRelease            : BOOL;     // 夹爪松开 (M67, 新增)
+    bLiftUp                 : BOOL;     // 升降缸上升 (新增, 待 HMI 核对)
+    bLiftDown               : BOOL;     // 升降缸下降 (新增, 待 HMI 核对)
+    bConvForce              : ARRAY[0..20] OF BOOL;     // 输送强制位 M70~M90 (M80 除外)
+    bFeedBtn                : ARRAY[1..4] OF BOOL;      // 上料按钮 M250~M253
+    bAutoSpeedUp            : BOOL;     // 自动速度加 (M700)
+    bAutoSpeedDown          : BOOL;     // 自动速度减 (M701)
+
+    (* ------------------ 组框机送框模式 ------------------ *)
+    bLinkMode               : BOOL;     // 组框机联机 (M501)
+    bContinuousSend         : BOOL;     // 连续送框 (M502)
+    bSingleSend             : BOOL;     // 单套送框回读 (M510, PLC 回写)
+
+    (* ------------------ 设定值 ------------------ *)
+    rManualSpeed            : ARRAY[1..3] OF REAL;      // 手动速度 D2000 / D2002 / D2004, 范围 500~5000
+    rAutoSpeed              : REAL;     // 自动速度 D600, 范围 10000~100000
+
+    (* ------------------ PLC 回写状态 ------------------ *)
+    iAlarmNo                : INT;      // 最小报警号 (D117), 无报警为 0
+    iDeviceState            : INT;      // 设备状态 (D116)
+END_STRUCT
+END_TYPE

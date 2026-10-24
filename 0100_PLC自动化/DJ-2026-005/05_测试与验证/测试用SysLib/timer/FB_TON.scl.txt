@@ -1,0 +1,47 @@
+// ============================================================================
+// FB_TON (测试用替身): 仅测试, 按扫描次数计时, 不得用于生产
+// 用途: Siemens 语言服务插件的测试运行时没有原生 TON (panic: STUB BUILTIN: B_TON),
+//       SysLib 的毫秒版 FB_TON 内部调用原生 TON, 一跑就崩. 只在插件 test 时由
+//       run_plugin_test.py 把本文件临时拷进测试副本顶替; 仓库里的 SysLib 不改.
+// 注意: PT 在这里按"扫描周期数"理解 (旧版语义), 计时行为未验证,
+//       以 PLCSIM 或现场为准. 生产代码只能用 SysLib/timer/FB_TON.scl (真实毫秒).
+// ============================================================================
+
+FUNCTION_BLOCK FB_TON
+VAR_INPUT
+    IN  : BOOL;
+    PT  : DINT;   // 预设(测试替身: 扫描周期数)
+END_VAR
+VAR_OUTPUT
+    Q   : BOOL;
+    ET  : DINT;   // 已用(测试替身: 扫描周期数)
+END_VAR
+VAR
+    Counter   : DINT := 0;
+END_VAR
+
+BEGIN
+    IF #IN THEN
+        IF #PT <= 0 THEN
+            #Q := TRUE;
+            #ET := 0;
+        ELSIF #Counter >= #PT THEN
+            #Q := TRUE;
+            #ET := #PT;
+        ELSE
+            #Counter := #Counter + 1;
+            IF #Counter >= #PT THEN
+                #Q := TRUE;
+                #ET := #PT;
+            ELSE
+                #Q := FALSE;
+                #ET := #Counter;
+            END_IF;
+        END_IF;
+    ELSE
+        #Q := FALSE;
+        #ET := 0;
+        #Counter := 0;
+    END_IF;
+
+END_FUNCTION_BLOCK

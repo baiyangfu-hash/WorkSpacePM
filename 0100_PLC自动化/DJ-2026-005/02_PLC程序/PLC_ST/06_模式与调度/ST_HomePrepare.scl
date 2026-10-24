@@ -1,0 +1,28 @@
+(* ================================================================= *)
+(*  类型名称：ST_HomePrepare                                     *)
+(*  功能描述：回原点 / 准备序列状态 (FB_1005 写)                           *)
+(*  版本号：V1.0.0 (2026-10-24, DJ-2026-005 新设计)                    *)
+(*  依据：接口文档_INT.md                                              *)
+(* ================================================================= *)
+
+TYPE ST_HomePrepare
+STRUCT
+    iHomeStep               : INT;      // 回原点步: 0 待机, 10 预处理, 20 Z, 30 X1/X2, 40 完成
+    iPrepStep               : INT;      // 准备步: 0 待机, 10~60
+    bPreprocessDone         : BOOL;     // 预处理完成 (夹爪松开 + 升降缸下位)
+    bAxisInitDone           : BOOL;     // 准备: 三轴到位完成
+    bHomeDoneZ              : BOOL;     // Z 已回原点
+    bHomeDoneX1             : BOOL;     // X1 已回原点
+    bHomeDoneX2             : BOOL;     // X2 已回原点
+    bPrepareDone            : BOOL;     // 准备完成 (一拍)
+    bInitReqConv            : BOOL;     // 输送初始化请求 (回原点预处理期间)
+    bReleaseGripperLock     : BOOL;     // F80 期间禁止 Z 定位
+    bGripOpenCmd            : BOOL;     // 夹爪松开命令 (RST Y40 / Y41)
+    bLiftDownCmd            : BOOL;     // 升降缸下降命令
+
+    (* ------------------ 时间参数 (ms, 掉电保持, HMI 可写) ------------------ *)
+    dPrepZDelayMs           : DINT := 300;          // 准备: 夹爪松开 + 升降缸下位后, Z 动作前延时
+    dPrepX1DelayMs          : DINT := 500;          // 准备: Z 到待机点后, X1 动作前延时
+    dPrepX2DelayMs          : DINT := 1000;         // 准备: X1、Z 都到位后, X2 动作前延时
+END_STRUCT
+END_TYPE

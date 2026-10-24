@@ -1,0 +1,23 @@
+(* ================================================================= *)
+(*  类型名称：ST_Machine                                         *)
+(*  功能描述：模式、暂停、停止与设备状态字 (FB_1001 写)                         *)
+(*  版本号：V1.0.0 (2026-10-24, DJ-2026-005 新设计)                    *)
+(*  依据：接口文档_INT.md                                              *)
+(* ================================================================= *)
+
+TYPE ST_Machine
+STRUCT
+    bManual                 : BOOL;     // 手动模式 (M0)
+    bHoming                 : BOOL;     // 回原点模式 (M1)
+    bPrepare                : BOOL;     // 准备模式 (M2)
+    bAuto                   : BOOL;     // 自动模式 (M4)
+    bHomeDone               : BOOL;     // 已回原点 (M94)
+    bFault                  : BOOL;     // 异常 / 急停类 (M8)
+    bPause                  : BOOL;     // 暂停 (M95)
+    bStopPending            : BOOL;     // 停止请求: 本循环结束后退出自动 (F12 语义)
+    bPrepareDone            : BOOL;     // 准备完成 (一拍)
+    bAllAtRest              : BOOL;     // 输送 / 取放料 / 小车都在静止点 (FB_2002 写, FB_1001 读)
+    iDeviceState            : INT;      // D116: 手动 1, 回原点 2, 准备 3, 自动 5, 待机 6, 异常 8, 暂停 10
+    bSimulate               : BOOL;     // 本机模拟 (M500): 跳过产品检测条件, 生产中必须为 FALSE
+END_STRUCT
+END_TYPE

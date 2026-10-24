@@ -5,7 +5,7 @@
 - [x] **SCL 语法合规**：0 Error / 0 Warning（已通过 Siemens LSP 诊断，遵循 LSP-905/904/903 规范）
 - [x] **作用域与依赖**：`.plc.json` 解析通过，指向 `../../../01_SharedLibraries/SysLib` 库依赖映射 5/5 健全
 - [x] **变量前缀标准**：`FB_2001` 等所有 FB 的 `VAR_OUTPUT` 统一采用 `q_` 小驼峰前缀
-- [x] **单元测试集**：`basic_test.scltest` (11个TC) 及 `interlock_test.scltest` (工站交握) 100% 静态与模拟测试通过
+- [ ] **单元测试集**：`mode_alarm_test.scltest`、`conveyor_test.scltest`、`manual_home_external_test.scltest`（新设计，2026-10-24 已写、待本机 `plc test` 跑通；旧 basic_test / interlock_test 已随旧设计删除）
 - [x] **台账与 PM 闭环**：`auto-pm ledger reconcile DJ-2026-005` 自动对账一致，CHG 变更单完工闭环
 
 ---

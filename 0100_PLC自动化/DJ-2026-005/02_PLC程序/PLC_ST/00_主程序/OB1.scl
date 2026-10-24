@@ -1,116 +1,19 @@
 // ============================================================================
-// OB1.scl - 边框缓存机主组织块 (V11.0.0 全工站整块传递与信号中继闭环)
+// OB1.scl - 边框缓存机主组织块 (V15.0.0, 2026-10-24 新设计)
 // ============================================================================
-// 描述:
-//   DJ-2026-005 边框缓存机 PLC 控制系统主循环程序.
-//   全工站通过 VAR_IN_OUT 结构体整块传递 (Struct Chunk Passing).
-//   在循环开始与结束阶段自动完成工站间跨机信号中继 (Inter-Station Signal Bridge).
+// 只做调用, 不含逻辑 (REQ R-NFR-05); 调用顺序见详细设计说明书 DSN 3.2。
+// 站间信号经 FB_2002 中继, 一拍延迟; 报警最后汇总, 本扫描的 Hold / M8 下一扫描生效。
 // ============================================================================
 ORGANIZATION_BLOCK OB1
 
 BEGIN
-    // ============================================================================
-    // 第0部分：工站间跨机信号中继输入桥接 (Pre-Cycle Signal Dispatch)
-    // ============================================================================
-    // 1. 输送机安全区输入 (来自取放料机构安全区)
-    GlobalVars.stConveyor.astLayer[1].bRobotInSafetyPos := GlobalVars.stPickPlace.o_bPickPlaceInSafetyZone;
-    GlobalVars.stConveyor.astLayer[2].bRobotInSafetyPos := GlobalVars.stPickPlace.o_bPickPlaceInSafetyZone;
-    GlobalVars.stConveyor.astLayer[3].bRobotInSafetyPos := GlobalVars.stPickPlace.o_bPickPlaceInSafetyZone;
-    GlobalVars.stConveyor.astLayer[4].bRobotInSafetyPos := GlobalVars.stPickPlace.o_bPickPlaceInSafetyZone;
-
-    // 2. 输送机取料完成输入 (来自取放料机构脉冲)
-    GlobalVars.stConveyor.astLayer[1].bPickupConfirmed := GlobalVars.stPickPlace.o_bLayerPickupDone[1];
-    GlobalVars.stConveyor.astLayer[2].bPickupConfirmed := GlobalVars.stPickPlace.o_bLayerPickupDone[2];
-    GlobalVars.stConveyor.astLayer[3].bPickupConfirmed := GlobalVars.stPickPlace.o_bLayerPickupDone[3];
-    GlobalVars.stConveyor.astLayer[4].bPickupConfirmed := GlobalVars.stPickPlace.o_bLayerPickupDone[4];
-
-    // 3. 取放料机构输入：来自4层输送机的取料请求
-    GlobalVars.stPickPlace.i_bLayerRequestPickup[1] := GlobalVars.stConveyor.astLayer[1].q_bRequestPickup;
-    GlobalVars.stPickPlace.i_bLayerRequestPickup[2] := GlobalVars.stConveyor.astLayer[2].q_bRequestPickup;
-    GlobalVars.stPickPlace.i_bLayerRequestPickup[3] := GlobalVars.stConveyor.astLayer[3].q_bRequestPickup;
-    GlobalVars.stPickPlace.i_bLayerRequestPickup[4] := GlobalVars.stConveyor.astLayer[4].q_bRequestPickup;
-
-    // 4. 取放料机构输入：来自小车的接料就绪与4卡槽物料状态
-    GlobalVars.stPickPlace.i_bCartAtPickPos         := GlobalVars.stFeeder.o_bCartAtPickPos;
-    GlobalVars.stPickPlace.i_bCartPermitPlace       := GlobalVars.stFeeder.o_bCartPermitPlace;
-    GlobalVars.stPickPlace.i_bCartSlotLong1_HasMat  := GlobalVars.stFeeder.i_bCartSlotLong1_HasMat;
-    GlobalVars.stPickPlace.i_bCartSlotLong2_HasMat  := GlobalVars.stFeeder.i_bCartSlotLong2_HasMat;
-    GlobalVars.stPickPlace.i_bCartSlotShort1_HasMat := GlobalVars.stFeeder.i_bCartSlotShort1_HasMat;
-    GlobalVars.stPickPlace.i_bCartSlotShort2_HasMat := GlobalVars.stFeeder.i_bCartSlotShort2_HasMat;
-
-    // 5. 打胶送料小车输入：来自取放料机构的4根边框集齐全满 (M30) 与安全区
-    GlobalVars.stFeeder.i_bAllSlotsFull_FromPickPlace := GlobalVars.stPickPlace.o_bAllSlotsFull_ToCart;
-    GlobalVars.stFeeder.i_bPickPlaceInSafetyZone      := GlobalVars.stPickPlace.o_bPickPlaceInSafetyZone;
-
-    // 6. 打胶送料小车输入：来自打胶机 STD-820 跨机交握状态
-    GlobalVars.stFeeder.i_bGlueMachine_AllowFeed      := GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed;
-    GlobalVars.stFeeder.i_bGlueMachine_PickupComplete := GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived;
-    GlobalVars.stFeeder.i_bGlueMachine_ComFault      := GlobalVars.stExternal.stDownstream.bDownstreamComFault;
-    GlobalVars.stFeeder.i_bGlueMachine_EStop         := GlobalVars.stExternal.stDownstream.bDownstream_EStop;
-    GlobalVars.stFeeder.i_bGlueMachine_Fault         := GlobalVars.stExternal.stDownstream.bDownstream_Fault;
-
-    // ============================================================================
-    // 第1部分：外部设备交互 (ST_ExternalDevice)
-    // ============================================================================
-    GlobalVars.fbExternalDevice(io_stExternal := GlobalVars.stExternal);
-    GlobalVars.stExternal := GlobalVars.fbExternalDevice.io_stExternal;
-
-    // ============================================================================
-    // 第2部分：四层输送机 (ST_SingleLayerConveyor ARRAY[1..4])
-    // ============================================================================
-    GlobalVars.fbConveyor_L1(io_stLayer := GlobalVars.stConveyor.astLayer[1]);
-    GlobalVars.stConveyor.astLayer[1] := GlobalVars.fbConveyor_L1.io_stLayer;
-
-    GlobalVars.fbConveyor_L2(io_stLayer := GlobalVars.stConveyor.astLayer[2]);
-    GlobalVars.stConveyor.astLayer[2] := GlobalVars.fbConveyor_L2.io_stLayer;
-
-    GlobalVars.fbConveyor_L3(io_stLayer := GlobalVars.stConveyor.astLayer[3]);
-    GlobalVars.stConveyor.astLayer[3] := GlobalVars.fbConveyor_L3.io_stLayer;
-
-    GlobalVars.fbConveyor_L4(io_stLayer := GlobalVars.stConveyor.astLayer[4]);
-    GlobalVars.stConveyor.astLayer[4] := GlobalVars.fbConveyor_L4.io_stLayer;
-
-    // ============================================================================
-    // 第3部分：取放料机构 (ST_PickPlace + ST_RecipeManager + ST_ServoAxis[1..2])
-    // ============================================================================
-    GlobalVars.fbPickPlace(
-        io_stPickPlace := GlobalVars.stPickPlace,
-        io_stRecipe    := GlobalVars.stRecipeManager,
-        io_stZAxis     := GlobalVars.astServoAxis[1],
-        io_stX1Axis    := GlobalVars.astServoAxis[2]
-    );
-    GlobalVars.stPickPlace := GlobalVars.fbPickPlace.io_stPickPlace;
-    GlobalVars.stRecipeManager := GlobalVars.fbPickPlace.io_stRecipe;
-    GlobalVars.astServoAxis[1] := GlobalVars.fbPickPlace.io_stZAxis;
-    GlobalVars.astServoAxis[2] := GlobalVars.fbPickPlace.io_stX1Axis;
-
-    // ============================================================================
-    // 第4部分：打胶机送料机构 (ST_GlueFeeder + ST_ServoAxis[3])
-    // ============================================================================
-    GlobalVars.fbGlueFeeder(
-        io_stFeeder := GlobalVars.stFeeder,
-        io_stX2Axis := GlobalVars.astServoAxis[3]
-    );
-    GlobalVars.stFeeder := GlobalVars.fbGlueFeeder.io_stFeeder;
-    GlobalVars.astServoAxis[3] := GlobalVars.fbGlueFeeder.io_stX2Axis;
-
-    // 将小车状态回传给外部打胶机交握结构体
-    GlobalVars.stExternal.stDownstream.bSafetyZoneSignal  := GlobalVars.stFeeder.o_bSafetyZoneSignal;
-    GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq := GlobalVars.stFeeder.o_bAllowPickup;
-
-    // ============================================================================
-    // 第5部分：公共报警管理 (ST_CommonAlarm)
-    // ============================================================================
-    // 汇总各站报警码
-    GlobalVars.stGlobal.i_iConveyorAlarm  := GlobalVars.stConveyor.astLayer[1].q_iAlarmCode;
-    IF GlobalVars.stConveyor.astLayer[2].q_iAlarmCode > 0 THEN GlobalVars.stGlobal.i_iConveyorAlarm := GlobalVars.stConveyor.astLayer[2].q_iAlarmCode; END_IF;
-    IF GlobalVars.stConveyor.astLayer[3].q_iAlarmCode > 0 THEN GlobalVars.stGlobal.i_iConveyorAlarm := GlobalVars.stConveyor.astLayer[3].q_iAlarmCode; END_IF;
-    IF GlobalVars.stConveyor.astLayer[4].q_iAlarmCode > 0 THEN GlobalVars.stGlobal.i_iConveyorAlarm := GlobalVars.stConveyor.astLayer[4].q_iAlarmCode; END_IF;
-
-    GlobalVars.stGlobal.i_iPickPlaceAlarm := GlobalVars.stPickPlace.o_iStationAlarmCode;
-    GlobalVars.stGlobal.i_iFeederAlarm    := GlobalVars.stFeeder.o_iStationAlarmCode;
-
-    GlobalVars.fbCommonAlarm(io_stGlobal := GlobalVars.stGlobal);
-    GlobalVars.stGlobal := GlobalVars.fbCommonAlarm.io_stGlobal;
-
+    GlobalVars.fbMode(io_stMachine := GlobalVars.stMachine, io_stHmi := GlobalVars.stHmi, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_stHome := GlobalVars.stHome);
+    GlobalVars.fbHome(io_stHome := GlobalVars.stHome, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_arrAxis := GlobalVars.astAxis, io_stBridge := GlobalVars.stBridge, io_stPP := GlobalVars.stPP, io_stFeed := GlobalVars.stFeed, io_stConv := GlobalVars.stConv);
+    GlobalVars.fbManual(io_stManual := GlobalVars.stManual, io_stMachine := GlobalVars.stMachine, io_stHmi := GlobalVars.stHmi, io_stIo := GlobalVars.stIo, io_stPP := GlobalVars.stPP, io_stFeed := GlobalVars.stFeed, io_stExt := GlobalVars.stExt, io_stBridge := GlobalVars.stBridge, io_arrAxis := GlobalVars.astAxis);
+    GlobalVars.fbExternal(io_stExt := GlobalVars.stExt, io_stMachine := GlobalVars.stMachine, io_stHmi := GlobalVars.stHmi, io_stIo := GlobalVars.stIo, io_stFeed := GlobalVars.stFeed, io_stAlarm := GlobalVars.stAlarm);
+    GlobalVars.fbBridge(io_stBridge := GlobalVars.stBridge, io_stConv := GlobalVars.stConv, io_stPP := GlobalVars.stPP, io_stFeed := GlobalVars.stFeed, io_stHome := GlobalVars.stHome, io_stManual := GlobalVars.stManual, io_stExt := GlobalVars.stExt, io_stMachine := GlobalVars.stMachine, io_stAlarm := GlobalVars.stAlarm);
+    GlobalVars.fbConv(io_stConv := GlobalVars.stConv, io_stBridge := GlobalVars.stBridge, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_stHmi := GlobalVars.stHmi, io_stManual := GlobalVars.stManual);
+    GlobalVars.fbPickPlace(io_stPP := GlobalVars.stPP, io_stBridge := GlobalVars.stBridge, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_arrAxis := GlobalVars.astAxis);
+    GlobalVars.fbFeeder(io_stFeed := GlobalVars.stFeed, io_stBridge := GlobalVars.stBridge, io_stExt := GlobalVars.stExt, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_arrAxis := GlobalVars.astAxis);
+    GlobalVars.fbAlarm(io_stAlarm := GlobalVars.stAlarm, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stHmi := GlobalVars.stHmi);
 END_ORGANIZATION_BLOCK

@@ -1,0 +1,177 @@
+(* ================================================================= *)
+(*  功能块名称: FB_1001_MachineMode_BufferFraming                     *)
+(*  功能描述:   机器模式 (手动 / 回原点 / 准备 / 自动)、暂停、停止收尾、*)
+(*              设备状态字 D116、机器级报警触发 F0~F25                *)
+(*  版本号:     V15.0.0 (2026-10-24, 新设计)                          *)
+(*                                                                   *)
+(*  依据: 详细设计说明书_DSN.md 4.1; 接口文档_INT.md 4.2 / 9;        *)
+(*        原程序工艺说明 PRC 2                                       *)
+(*  遵循规范: LSP-905                                                *)
+(*                                                                   *)
+(*  与 INT / DSN 的差异 (评审请确认):                                *)
+(*    1. 增加 VAR_IN_OUT io_stHome (读回原点完成 / 准备完成)          *)
+(*    2. 极限报警编号按 DSN: F20/F21 = X1 前后极限 (X3/X4),           *)
+(*       F22/F23 = X2 (X5/X6), F24/F25 = Z 上下极限 (X7/X10);        *)
+(*       INT 第 9 节表头把 F20/F21 写成 Z、F24/F25 写成 X1, 应改      *)
+(*    3. "准备完成标志" s_bPrepared: 准备完成置位; M8 或进手动清除;  *)
+(*       停止退出自动后保留, 再按自动键直接进自动 (PRC 2: M6 + SM8044) *)
+(* ================================================================= *)
+
+FUNCTION_BLOCK FB_1001_MachineMode_BufferFraming
+
+VAR_IN_OUT
+    io_stMachine        : ST_Machine;           // 模式与状态字 (本 FB 写)
+    io_stHmi            : ST_Hmi;               // HMI 命令 (读); 回写报警号 / 设备状态
+    io_stIo             : ST_Io;                // 物理输入 (读)
+    io_stAlarm          : ST_Alarm;             // 报警 (读锁存, 写机器级触发)
+    io_stHome           : ST_HomePrepare;       // 回原点 / 准备状态 (读)
+END_VAR
+
+VAR
+    fb_trAutoKey        : FB_R_TRIG;            // 自动运行键 M6 上升沿
+    s_bAutoKey          : BOOL := FALSE;
+    s_bStopReq          : BOOL := FALSE;        // 停止请求 (HMI 停止 或 触摸屏 STOP 断开)
+    s_bF12Latched       : BOOL := FALSE;        // F12 已锁存
+    s_bPrepared         : BOOL := FALSE;        // 准备完成标志 (PRC 的 SM8044)
+    s_bResetPrev        : BOOL := FALSE;        // 上一扫描的复位键沿 (报警汇总在本 FB 之后, 晚一拍才看得到清除结果)
+END_VAR
+
+VAR CONSTANT
+    HM_DONE             : INT := 40;            // 回原点完成步
+    DEV_MANUAL          : INT := 1;
+    DEV_HOMING          : INT := 2;
+    DEV_PREPARE         : INT := 3;
+    DEV_AUTO            : INT := 5;
+    DEV_STANDBY         : INT := 6;
+    DEV_FAULT           : INT := 8;
+    DEV_PAUSE           : INT := 10;
+    IDX_STOP            : INT := 12;            // F12 HMI 停止
+END_VAR
+
+BEGIN
+    (* ============ 1. 边沿与派生量 ============ *)
+    fb_trAutoKey(IN := io_stHmi.bAutoRun, Q => s_bAutoKey);
+    s_bStopReq := io_stHmi.bStop OR (NOT io_stIo.bHmiStopButton);
+    s_bF12Latched := io_stAlarm.arrLatch[IDX_STOP];
+    io_stMachine.bPause := io_stHmi.bPause;
+    io_stMachine.bFault := io_stAlarm.bFault;
+    io_stMachine.bPrepareDone := FALSE;
+
+    (* ============ 2. 机器级报警触发 (电平, 每扫描全部重写) ============ *)
+    // 常闭点: 字段 1 = 正常, 0 = 动作
+    io_stAlarm.arrTrig[0] := NOT io_stIo.bEStop;                    // F0 急停 X101
+    io_stAlarm.arrTrig[1] := NOT io_stIo.bDoorL1;                   // F1~F8 安全门 X140~X147
+    io_stAlarm.arrTrig[2] := NOT io_stIo.bDoorL2;
+    io_stAlarm.arrTrig[3] := NOT io_stIo.bDoorL3;
+    io_stAlarm.arrTrig[4] := NOT io_stIo.bDoorL4;
+    io_stAlarm.arrTrig[5] := NOT io_stIo.bDoorR1;
+    io_stAlarm.arrTrig[6] := NOT io_stIo.bDoorR2;
+    io_stAlarm.arrTrig[7] := NOT io_stIo.bDoorR3;
+    io_stAlarm.arrTrig[8] := NOT io_stIo.bDoorR4;
+    io_stAlarm.arrTrig[9] := NOT io_stIo.bX1ServoAlarm;             // F9 X1 伺服报警 X11
+    io_stAlarm.arrTrig[10] := NOT io_stIo.bX2ServoAlarm;            // F10 X2 伺服报警 X12
+    io_stAlarm.arrTrig[11] := NOT io_stIo.bZServoAlarm;             // F11 Z 伺服报警 X13
+    io_stAlarm.arrTrig[12] := s_bStopReq;                           // F12 停止 (提示类)
+    io_stAlarm.arrTrig[13] := NOT io_stIo.bVfd1Alarm;               // F13~F16 变频器 X14~X17
+    io_stAlarm.arrTrig[14] := NOT io_stIo.bVfd2Alarm;
+    io_stAlarm.arrTrig[15] := NOT io_stIo.bVfd3Alarm;
+    io_stAlarm.arrTrig[16] := NOT io_stIo.bVfd4Alarm;
+    // 极限 (常闭, 断开 = 到极限), 只在自动时报警
+    io_stAlarm.arrTrig[20] := (NOT io_stIo.bX1LimitFwd) AND io_stMachine.bAuto;     // F20 X1 前极限
+    io_stAlarm.arrTrig[21] := (NOT io_stIo.bX1LimitRev) AND io_stMachine.bAuto;     // F21 X1 后极限
+    io_stAlarm.arrTrig[22] := (NOT io_stIo.bX2LimitFwd) AND io_stMachine.bAuto;     // F22 X2 前极限
+    io_stAlarm.arrTrig[23] := (NOT io_stIo.bX2LimitRev) AND io_stMachine.bAuto;     // F23 X2 后极限
+    io_stAlarm.arrTrig[24] := (NOT io_stIo.bZLimitUp) AND io_stMachine.bAuto;       // F24 Z 上极限
+    io_stAlarm.arrTrig[25] := (NOT io_stIo.bZLimitDown) AND io_stMachine.bAuto;     // F25 Z 下极限
+
+    (* ============ 3. 模式 ============ *)
+    IF io_stAlarm.bFault THEN
+        // M8: 清所有序列与"已回原点", 手动也强制退出 (异常存在期间进不了手动)
+        io_stMachine.bManual := FALSE;
+        io_stMachine.bHoming := FALSE;
+        io_stMachine.bPrepare := FALSE;
+        io_stMachine.bAuto := FALSE;
+        io_stMachine.bStopPending := FALSE;
+        io_stMachine.bHomeDone := FALSE;
+        s_bPrepared := FALSE;
+        io_stHmi.bManual := FALSE;
+    ELSIF io_stHmi.bManual AND (NOT s_bF12Latched) THEN
+        // 手动: 强制退出自动 / 准备 / 回原点, 不清已回原点; 出手动后须重新准备
+        IF NOT io_stMachine.bManual THEN
+            s_bPrepared := FALSE;
+        END_IF;
+        io_stMachine.bManual := TRUE;
+        io_stMachine.bHoming := FALSE;
+        io_stMachine.bPrepare := FALSE;
+        io_stMachine.bAuto := FALSE;
+        io_stMachine.bStopPending := FALSE;
+    ELSE
+        IF io_stHmi.bManual THEN
+            io_stHmi.bManual := FALSE;      // F12 存在: 强制复位手动键
+        END_IF;
+        io_stMachine.bManual := FALSE;
+
+        // 回原点: 复位键 + 未回原点 + 非自动 / 准备 + 无非提示类报警
+        // 复位键沿当拍与下一拍都可启动: 报警汇总在本 FB 之后, 当拍的 bAny 还是清除前的值 (R-MODE-06 一次按键)
+        IF (io_stAlarm.bReset OR s_bResetPrev) AND (NOT io_stMachine.bHomeDone) AND (NOT io_stMachine.bHoming)
+           AND (NOT io_stMachine.bPrepare) AND (NOT io_stMachine.bAuto) AND (NOT io_stAlarm.bAny) THEN
+            io_stMachine.bHoming := TRUE;
+        END_IF;
+        IF io_stMachine.bHoming AND (io_stHome.iHomeStep = HM_DONE) THEN
+            io_stMachine.bHomeDone := TRUE;
+            io_stMachine.bHoming := FALSE;
+        END_IF;
+
+        // 自动运行键: 已准备 -> 直接自动; 否则先准备
+        IF s_bAutoKey AND io_stMachine.bHomeDone AND (NOT io_stMachine.bHoming)
+           AND (NOT io_stMachine.bPrepare) AND (NOT io_stMachine.bAuto) AND (NOT io_stAlarm.bAny) THEN
+            IF s_bPrepared THEN
+                io_stMachine.bAuto := TRUE;
+            ELSE
+                io_stMachine.bPrepare := TRUE;
+            END_IF;
+        END_IF;
+
+        // 准备完成: 进自动
+        IF io_stMachine.bPrepare AND io_stHome.bPrepareDone THEN
+            io_stMachine.bPrepare := FALSE;
+            io_stMachine.bPrepareDone := TRUE;
+            s_bPrepared := TRUE;
+            io_stMachine.bAuto := TRUE;
+        END_IF;
+
+        // 停止: 本循环结束后退出自动 (各机构只收尾不开新循环)
+        IF io_stMachine.bAuto AND s_bStopReq THEN
+            io_stMachine.bStopPending := TRUE;
+        END_IF;
+        IF io_stMachine.bAuto AND io_stMachine.bStopPending AND io_stMachine.bAllAtRest THEN
+            io_stMachine.bAuto := FALSE;
+            io_stMachine.bStopPending := FALSE;
+        END_IF;
+        IF NOT io_stMachine.bAuto THEN
+            io_stMachine.bStopPending := FALSE;
+        END_IF;
+    END_IF;
+
+    s_bResetPrev := io_stAlarm.bReset;
+
+    (* ============ 4. 设备状态字 D116 与回写 HMI ============ *)
+    // 异常 8 > 暂停 10 > 自动 5 > 准备 3 > 回原点 2 > 手动 1 > 待机 6
+    IF io_stMachine.bFault THEN
+        io_stMachine.iDeviceState := DEV_FAULT;
+    ELSIF io_stMachine.bPause THEN
+        io_stMachine.iDeviceState := DEV_PAUSE;
+    ELSIF io_stMachine.bAuto THEN
+        io_stMachine.iDeviceState := DEV_AUTO;
+    ELSIF io_stMachine.bPrepare THEN
+        io_stMachine.iDeviceState := DEV_PREPARE;
+    ELSIF io_stMachine.bHoming THEN
+        io_stMachine.iDeviceState := DEV_HOMING;
+    ELSIF io_stMachine.bManual THEN
+        io_stMachine.iDeviceState := DEV_MANUAL;
+    ELSE
+        io_stMachine.iDeviceState := DEV_STANDBY;
+    END_IF;
+    io_stHmi.iDeviceState := io_stMachine.iDeviceState;
+    io_stHmi.iAlarmNo := io_stAlarm.iAlarmNo;
+END_FUNCTION_BLOCK

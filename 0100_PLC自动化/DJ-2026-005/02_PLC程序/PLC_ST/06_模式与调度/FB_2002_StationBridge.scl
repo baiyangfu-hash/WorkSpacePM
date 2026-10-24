@@ -1,0 +1,99 @@
+(* ================================================================= *)
+(*  功能块名称: FB_2002_StationBridge                                 *)
+(*  功能描述:   站间信号中继 (只赋值, 取代旧 OB1 的 60 行搬运)        *)
+(*  版本号:     V15.0.0 (2026-10-24, 新设计)                          *)
+(*                                                                   *)
+(*  依据: 详细设计说明书_DSN.md 4.4; 接口文档_INT.md 5 / 6            *)
+(*  遵循规范: LSP-905                                                *)
+(*                                                                   *)
+(*  读上一扫描各机构的输出, 写入 ST_Bridge 与各机构的输入字段,       *)
+(*  信号一拍延迟 (原程序块间同样一拍)。                              *)
+(*  除搬运外只有三处最简单的组合 (均在 DSN 里有明文):                *)
+(*    a. Hold = 报警 Hold 或 暂停                                    *)
+(*    b. 送框许可 = 不联机 或 连续送框 或 单套许可 (R-EXT-02)        *)
+(*    c. 收到"清 X1 送料完成"后清取放料的两个送料完成位              *)
+(*                                                                   *)
+(*  与 INT 的差异 (评审请确认):                                      *)
+(*    1. 增加 VAR_IN_OUT io_stHome / io_stManual / io_stExt          *)
+(*       (夹爪 / 升降缸要求来自回原点与手动; 送框许可来自组框机链路) *)
+(*    2. 取放料 / 小车的 arrTrig 在此搬入 stAlarm.arrTrig            *)
+(*       (F30~F33, F66~F75, F106, F90, F91, F107)                    *)
+(* ================================================================= *)
+
+FUNCTION_BLOCK FB_2002_StationBridge
+
+VAR_IN_OUT
+    io_stBridge         : ST_Bridge;            // 站间中继
+    io_stConv           : ST_ConveyorSystem;    // 4 层输送
+    io_stPP             : ST_PickPlace;         // 取放料
+    io_stFeed           : ST_Feeder;            // X2 小车
+    io_stHome           : ST_HomePrepare;       // 回原点 / 准备
+    io_stManual         : ST_Manual;            // 手动
+    io_stExt            : ST_ExternalLink;      // 组框机链路
+    io_stMachine        : ST_Machine;           // 模式
+    io_stAlarm          : ST_Alarm;             // 报警
+END_VAR
+
+VAR
+    s_iIdx              : INT := 0;
+END_VAR
+
+VAR CONSTANT
+    STEP_S20            : INT := 20;            // 取放料待料步
+END_VAR
+
+BEGIN
+    (* ============ 1. 取放料 -> 小车 / 输送 ============ *)
+    io_stBridge.bSafeZone := io_stPP.bSafeZone;
+    io_stBridge.bPPAtS20 := (io_stPP.iStep = STEP_S20);
+    io_stBridge.rZStandby := io_stPP.rZStandby;
+    FOR s_iIdx := 1 TO 4 DO
+        io_stBridge.abPickDone[s_iIdx] := io_stPP.abPickDone[s_iIdx];
+        io_stBridge.abLayerReq[s_iIdx] := io_stConv.astLayer[s_iIdx].bRequest;
+    END_FOR;
+
+    (* ============ 2. 小车 <-> 取放料 ============ *)
+    io_stBridge.bReqA := io_stFeed.bReqA;
+    io_stBridge.bReqB := io_stFeed.bReqB;
+    IF io_stBridge.bFeedDoneClr THEN
+        io_stPP.abFeedDone[1] := FALSE;
+        io_stPP.abFeedDone[2] := FALSE;
+    END_IF;
+    io_stBridge.abFeedDone[1] := io_stPP.abFeedDone[1];
+    io_stBridge.abFeedDone[2] := io_stPP.abFeedDone[2];
+
+    (* ============ 3. 送框许可: 不联机 或 连续送框 或 单套许可 ============ *)
+    io_stBridge.bFeedPermit := (NOT io_stExt.bLinkMode) OR io_stExt.bContinuous OR io_stExt.bSingle;
+    io_stFeed.bFeedPermit := io_stBridge.bFeedPermit;
+    io_stFeed.rAutoSpeed := io_stPP.rAutoSpeed;     // 自动速度 D600 同步给小车
+
+    (* ============ 4. Hold = 报警 Hold 或 暂停 ============ *)
+    FOR s_iIdx := 1 TO 4 DO
+        io_stBridge.abHoldConv[s_iIdx] := io_stAlarm.abHoldConv[s_iIdx] OR io_stMachine.bPause;
+    END_FOR;
+    io_stBridge.bHoldPP := io_stAlarm.bHoldPP OR io_stMachine.bPause;
+    io_stBridge.bHoldFeeder := io_stAlarm.bHoldFeeder OR io_stMachine.bPause;
+    io_stBridge.bHoldHome := io_stAlarm.bHoldHome OR io_stMachine.bPause;
+
+    (* ============ 5. 回原点 / 手动 -> 输送 / 取放料 ============ *)
+    io_stBridge.bInitReqConv := io_stHome.bInitReqConv;
+    io_stBridge.bReleaseGripperLock := io_stHome.bReleaseGripperLock;
+    io_stPP.bGripOpenReq := io_stHome.bGripOpenCmd OR io_stManual.bGripOpenCmd;
+    io_stPP.bLiftDownReq := io_stHome.bLiftDownCmd OR io_stManual.bLiftDownCmd;
+    io_stPP.bLiftUpReq := io_stManual.bLiftUpCmd;
+
+    (* ============ 6. 停止收尾: 三类机构都在静止点 ============ *)
+    io_stMachine.bAllAtRest := io_stConv.bAllAtRest AND io_stPP.bAtRest AND io_stFeed.bAtRest;
+
+    (* ============ 7. 取放料 / 小车报警触发搬入 stAlarm ============ *)
+    FOR s_iIdx := 0 TO 3 DO
+        io_stAlarm.arrTrig[30 + s_iIdx] := io_stPP.arrTrig[s_iIdx];         // F30~F33
+    END_FOR;
+    FOR s_iIdx := 0 TO 9 DO
+        io_stAlarm.arrTrig[66 + s_iIdx] := io_stPP.arrTrig[4 + s_iIdx];     // F66~F75
+    END_FOR;
+    io_stAlarm.arrTrig[106] := io_stPP.arrTrig[14];                         // F106 夹紧超时
+    io_stAlarm.arrTrig[90] := io_stFeed.arrTrig[0];                         // F90
+    io_stAlarm.arrTrig[91] := io_stFeed.arrTrig[1];                         // F91
+    io_stAlarm.arrTrig[107] := io_stFeed.arrTrig[2];                        // F107
+END_FUNCTION_BLOCK

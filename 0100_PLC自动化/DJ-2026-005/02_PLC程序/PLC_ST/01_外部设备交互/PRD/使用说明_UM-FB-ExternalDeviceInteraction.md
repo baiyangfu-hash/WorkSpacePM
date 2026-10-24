@@ -1,30 +1,16 @@
-# 使用说明 FB_3001_ExternalInteraction（DJ005实现名：FB_ExternalDeviceInteraction）
+# 使用说明 FB_ExternalDeviceInteraction
 
-## 1. 功能
+## 组框机链路（FB_ExternalDeviceInteraction）
 
-外部设备交互与安全信号汇总。采集 8 路安全门、急停、HMI STOP、总线健康等信号，统一输出安全状态给各 FB。
+组框机链路（FB_3001）：联机 M501 / 连续送框 M502 / 单套送框许可 M510，本机安全异常输出 R5000.0 与 Y45 / Y46，组框机安全异常 F104（A 类）、通讯异常 F105（提示类）。
 
-## 2. 安全信号
+要点：
 
-| 信号 | 地址 | 方向 | 说明 |
-|------|------|:--:|------|
-| 安全门 1~8 | X140~X147 | ←输入 | 8 路安全门开关状态 |
-| 急停 | X101 | ←输入 | 紧急停止按钮 |
-| HMI STOP | X77 | ←输入 | 触摸屏停止按钮 |
-| 总线健康 | — | ←内部 | Profinet/总线通信状态 |
+1. 调用位置：OB1 第 4 个。
+2. 组框机侧的 R5010.0 / R5011.0 与通讯状态由平台适配写入 `stExt.bPeerSafetyFault / bPeerPermit / bLinkFail`，本 FB 只读。
+3. 单套许可 `bSingle`：联机且组框机允许送料上升沿置位；下降沿、小车 Y44 成立、不联机时复位（复位优先）。
+4. X160 / X161 暂未并入组框机安全异常（极性待现场确认）。
 
-## 3. 输出信号
+## 调用
 
-| 信号 | 说明 |
-|------|------|
-| q_bSafetyOK | 所有安全门关闭 + 无急停 = TRUE |
-| q_bEStopActive | 急停激活 |
-| q_bBusHealthy | 总线通信正常 |
-| q_bAnyDoorOpen | 任一安全门打开 |
-
-## 4. 调试要点
-
-1. 安全门信号为常闭触点（NC），开门=TRUE
-2. 急停为双通道冗余，任一通道断开即触发
-3. 总线健康看门狗超时 500ms，超时后 q_bBusHealthy=FALSE
-4. 安全门去抖时间 i_dDebounceMs 建议 50~100ms
+OB1 的调用行见 `00_主程序/OB1.scl`，实例声明见 `00_全局数据/GlobalVars.db`。

@@ -1,209 +1,90 @@
 (* ================================================================= *)
-(*  功能块名称:FB_ExternalDeviceInteraction                           *)
-(*  功能描述:处理与组框机,打胶机和上游机器人的交互逻辑 (遵循 STD-820) *)
-(*  创建日期:2026-04-27                                            *)
-(*  版本号:V5.0.0 (STD-820 结构化交握升级, LSP-905 0-Warn 合规)    *)
-(*                                                                  *)
-(*  遵循规范:                                                      *)
-(*    - LSP-905 SCL编程规范                                         *)
-(*    - STD-820 设备间信号交握与外部对接规范                        *)
+(*  功能块名称: FB_ExternalDeviceInteraction (FB_3001)                *)
+(*  功能描述:   组框机链路: 联机 / 连续送框 / 单套送框许可,           *)
+(*              本机 -> 组框机安全异常与暂停 / 急停输出 Y45 / Y46,    *)
+(*              组框机安全异常 F104 (A 类)、通讯异常 F105 (提示)      *)
+(*  版本号:     V15.0.0 (2026-10-24, 新设计, 取代 V1.x STD-820 全套)  *)
+(*                                                                   *)
+(*  依据: 详细设计说明书_DSN.md 8; 接口文档_INT.md 4.8 / 7.3;        *)
+(*        需求 R-EXT-01~05                                           *)
+(*  遵循规范: LSP-905                                                *)
+(*                                                                   *)
+(*  组框机的 R5010.0 / R5011.0 与通讯状态由平台适配写入 stExt        *)
+(*  (bPeerSafetyFault / bPeerPermit / bLinkFail), 本 FB 只读。       *)
+(*                                                                   *)
+(*  与 DSN 的差异 (评审请确认):                                      *)
+(*    1. X160 / X161 (组框机开门暂停 / 急停信号) 未并入"组框机安全    *)
+(*       异常": 极性与含义图纸与原程序都没写清 (R-EXT-04, 待现场确认) *)
+(*    2. Y45 与 Y46 目前同一条件 (DSN 8); 若现场需区分暂停与急停,    *)
+(*       另行拆开                                                    *)
 (* ================================================================= *)
 
 FUNCTION_BLOCK FB_ExternalDeviceInteraction
 
 VAR_IN_OUT
-    io_stExternal               : ST_ExternalDevice; // 外部设备交互全量数据结构体
+    io_stExt            : ST_ExternalLink;      // 组框机链路 (本 FB 写)
+    io_stMachine        : ST_Machine;           // 模式 (保留, 本 FB 暂不读)
+    io_stHmi            : ST_Hmi;               // 联机 M501 / 连续 M502 (读), 单套回读 M510 (写)
+    io_stIo             : ST_Io;                // Y45 / Y46 输出
+    io_stFeed           : ST_Feeder;            // 小车 Y44 (读, 消耗单套许可)
+    io_stAlarm          : ST_Alarm;             // 报警 (读 F0~F8 锁存, 写 F104 / F105 触发)
 END_VAR
 
 VAR
-    s_bSafetyConditionMet       : BOOL;   // 内部安全条件满足标志
-    s_iExternalDeviceAlarmCode  : INT;    // 内部报警码变量
-
-    // 本机心跳发生器 (4.0s 翻转)
-    fb_tHbGenTimer              : FB_TONR;
-    s_bHbState                  : BOOL := FALSE;
-    s_bHbGen_In                 : BOOL := FALSE;
-    s_bHbGen_Q                  : BOOL := FALSE;
-    s_bHbGen_R                  : BOOL := FALSE;
-    s_dHbGen_Et                 : DINT := 0;
-
-    // 通讯超时监视器 (12.0s)
-    fb_tUpstreamTimeoutTimer    : FB_TONR;
-    s_bUpHb_In                  : BOOL := FALSE;
-    s_bUpHb_Q                   : BOOL := FALSE;
-    s_bUpHb_R                   : BOOL := FALSE;
-    s_dUpHb_Et                  : DINT := 0;
-    s_bLastUpHb                 : BOOL := FALSE;
-
-    fb_tDownstreamTimeoutTimer  : FB_TONR;
-    s_bDownHb_In                : BOOL := FALSE;
-    s_bDownHb_Q                 : BOOL := FALSE;
-    s_bDownHb_R                 : BOOL := FALSE;
-    s_dDownHb_Et                : DINT := 0;
-    s_bLastDownHb               : BOOL := FALSE;
+    fb_trPermitUp       : FB_R_TRIG;            // 组框机允许送料 上升沿
+    fb_tfPermitDn       : FB_F_TRIG;            // 组框机允许送料 下降沿
+    s_bPermitUp         : BOOL := FALSE;
+    s_bPermitDn         : BOOL := FALSE;
+    s_iI                : INT := 0;
+    s_bLocalSafety      : BOOL := FALSE;        // 本机 F0 或 F1~F8 锁存
+    s_bPeerFault        : BOOL := FALSE;        // 组框机安全异常 (联机且通讯正常)
 END_VAR
 
 VAR CONSTANT
-    T_HEARTBEAT_PERIOD          : DINT := 4000;    (* 心跳翻转周期 4.0s *)
-    T_COMM_TIMEOUT              : DINT := 12000;   (* 通讯中断超时 12.0s *)
+    IDX_F0              : INT := 0;
+    IDX_F8              : INT := 8;
+    IDX_F104            : INT := 104;
+    IDX_F105            : INT := 105;
 END_VAR
 
-(* ========================================================================== *)
-(* 功能块执行体                                                                *)
-(* ========================================================================== *)
+BEGIN
+    (* ============ 1. 联机 / 连续送框: 取自 HMI ============ *)
+    io_stExt.bLinkMode := io_stHmi.bLinkMode;
+    io_stExt.bContinuous := io_stHmi.bContinuousSend;
 
-//#region 100_STD820_心跳发生与监视
-// 1.1 本机心跳发生器 (4s ON / 4s OFF)
-s_bHbGen_In := TRUE;
-s_bHbGen_R := s_bHbGen_Q;
-fb_tHbGenTimer(
-    IN := s_bHbGen_In,
-    PT := T_HEARTBEAT_PERIOD,
-    R  := s_bHbGen_R,
-    Q  => s_bHbGen_Q,
-    ET => s_dHbGen_Et
-);
-IF s_bHbGen_Q THEN
-    s_bHbState := NOT s_bHbState;
-END_IF;
-io_stExternal.stUpstream.bMachine_HeartbeatToUp := s_bHbState;
-io_stExternal.stDownstream.bMachine_HeartbeatToDown := s_bHbState;
+    (* ============ 2. 边沿 ============ *)
+    fb_trPermitUp(IN := io_stExt.bLinkMode AND io_stExt.bPeerPermit, Q => s_bPermitUp);
+    fb_tfPermitDn(IN := io_stExt.bLinkMode AND io_stExt.bPeerPermit, Q => s_bPermitDn);
 
-// 1.2 上游心跳边沿检测与超时监视 (12s)
-IF io_stExternal.stUpstream.bUpstream_HeartbeatFromUp <> s_bLastUpHb THEN
-    s_bUpHb_R := TRUE;
-    s_bLastUpHb := io_stExternal.stUpstream.bUpstream_HeartbeatFromUp;
-ELSE
-    s_bUpHb_R := FALSE;
-END_IF;
-s_bUpHb_In := io_stExternal.i_bEnable;
-fb_tUpstreamTimeoutTimer(
-    IN := s_bUpHb_In,
-    PT := T_COMM_TIMEOUT,
-    R  := s_bUpHb_R,
-    Q  => s_bUpHb_Q,
-    ET => s_dUpHb_Et
-);
-io_stExternal.stUpstream.bUpstreamComFault := s_bUpHb_Q;
+    (* ============ 3. 单套送框许可 M510 ============ *)
+    // 联机且允许送料上升沿置位; 下降沿、小车 Y44 成立、不联机时复位 (复位优先)
+    IF s_bPermitUp THEN
+        io_stExt.bSingle := TRUE;
+    END_IF;
+    IF s_bPermitDn OR io_stFeed.bY44 OR (NOT io_stExt.bLinkMode) THEN
+        io_stExt.bSingle := FALSE;
+    END_IF;
+    io_stHmi.bSingleSend := io_stExt.bSingle;
 
-// 1.3 下游心跳边沿检测与超时监视 (12s)
-IF io_stExternal.stDownstream.bDownstream_HeartbeatFromDown <> s_bLastDownHb THEN
-    s_bDownHb_R := TRUE;
-    s_bLastDownHb := io_stExternal.stDownstream.bDownstream_HeartbeatFromDown;
-ELSE
-    s_bDownHb_R := FALSE;
-END_IF;
-s_bDownHb_In := io_stExternal.i_bEnable;
-fb_tDownstreamTimeoutTimer(
-    IN := s_bDownHb_In,
-    PT := T_COMM_TIMEOUT,
-    R  := s_bDownHb_R,
-    Q  => s_bDownHb_Q,
-    ET => s_dDownHb_Et
-);
-io_stExternal.stDownstream.bDownstreamComFault := s_bDownHb_Q;
-//#endregion 100_STD820_心跳发生与监视
+    (* ============ 4. 本机安全异常 -> 组框机 (R5000.0 / Y45 / Y46) ============ *)
+    s_bLocalSafety := FALSE;
+    FOR s_iI := IDX_F0 TO IDX_F8 DO
+        IF io_stAlarm.arrLatch[s_iI] THEN
+            s_bLocalSafety := TRUE;
+        END_IF;
+    END_FOR;
+    io_stExt.bLinkSafetyOut := s_bLocalSafety;
 
-//#region 200_上游供料与机器人交互
-// 上游就绪状态检查
-io_stExternal.stUpstream.bMachine_ReadyIn := io_stExternal.i_bLocalReady 
-                                        AND io_stExternal.i_bAutoMode 
-                                        AND NOT io_stExternal.stUpstream.bUpstreamComFault;
+    (* ============ 5. 组框机安全异常 / 通讯异常 ============ *)
+    s_bPeerFault := io_stExt.bLinkMode AND (NOT io_stExt.bLinkFail) AND io_stExt.bPeerSafetyFault;
+    io_stExt.arrTrig[0] := s_bPeerFault;                                    // F104 (A 类)
+    io_stExt.arrTrig[1] := io_stExt.bLinkMode AND io_stExt.bLinkFail;       // F105 (提示)
+    io_stAlarm.arrTrig[IDX_F104] := io_stExt.arrTrig[0];
+    io_stAlarm.arrTrig[IDX_F105] := io_stExt.arrTrig[1];
 
-// 允许上游进料: 本机准备好且无报警
-IF io_stExternal.stUpstream.bMachine_ReadyIn AND (NOT io_stExternal.i_bAnyAlarmActive) THEN
-    io_stExternal.stUpstream.bMachine_AllowInfeed := TRUE;
-ELSE
-    io_stExternal.stUpstream.bMachine_AllowInfeed := FALSE;
-END_IF;
-//#endregion 200_上游供料与机器人交互
-
-//#region 300_下游打胶机安全交握
-// 下游出料就绪状态检查
-io_stExternal.stDownstream.bMachine_ReadyOut := io_stExternal.i_bAutoMode 
-                                            AND io_stExternal.i_bEnable 
-                                            AND NOT io_stExternal.stDownstream.bDownstreamComFault;
-
-// 安全区管理 (Y47): 自动运行且无通讯中断时有效
-IF io_stExternal.stDownstream.bDownstreamComFault THEN
-    io_stExternal.stDownstream.bSafetyZoneSignal := FALSE;
-    io_stExternal.stDownstream.bMachine_OutfeedReq := FALSE;
-END_IF;
-//#endregion 300_下游打胶机安全交握
-
-//#region 400_组框机交互
-IF io_stExternal.i_bFrameMachine_EStop OR io_stExternal.i_bFrameMachine_SafetyErr THEN
-    io_stExternal.o_bFrameMachine_EStop := TRUE;
-    io_stExternal.o_bFrameMachine_EmergencyStop := TRUE;
-ELSE
-    io_stExternal.o_bFrameMachine_EStop := FALSE;
-    io_stExternal.o_bFrameMachine_EmergencyStop := FALSE;
-END_IF;
-
-IF io_stExternal.i_bDoorOpenRequest THEN
-    io_stExternal.o_bFrameMachine_Pause := TRUE;
-    io_stExternal.o_bDoorOpenRequest := TRUE;
-ELSE
-    io_stExternal.o_bFrameMachine_Pause := FALSE;
-    io_stExternal.o_bDoorOpenRequest := FALSE;
-END_IF;
-
-io_stExternal.o_bFrameMachine_Ready := io_stExternal.i_bAutoMode 
-                                   AND io_stExternal.i_bEnable 
-                                   AND (NOT io_stExternal.i_bAnyAlarmActive)
-                                   AND (NOT io_stExternal.o_bFrameMachine_EmergencyStop);
-
-IF io_stExternal.i_bEnable 
-   AND (NOT io_stExternal.o_bFrameMachine_EmergencyStop)
-   AND io_stExternal.i_bFrameMachine_AllowFeed
-   AND io_stExternal.i_bAutoMode 
-THEN
-    io_stExternal.o_bFrameMachine_RequestFeed := TRUE;
-ELSE
-    io_stExternal.o_bFrameMachine_RequestFeed := FALSE;
-END_IF;
-//#endregion 400_组框机交互
-
-//#region 500_报警汇总
-IF io_stExternal.stDownstream.bDownstream_Fault THEN
-    s_iExternalDeviceAlarmCode := 300;        // 300=打胶机设备故障
-ELSIF io_stExternal.stDownstream.bDownstream_EStop THEN
-    s_iExternalDeviceAlarmCode := 301;        // 301=打胶机急停
-ELSIF io_stExternal.stDownstream.bDownstreamComFault THEN
-    s_iExternalDeviceAlarmCode := 302;        // 302=打胶机通讯中断(12s超时)
-ELSIF io_stExternal.i_bFrameMachine_SafetyErr THEN
-    s_iExternalDeviceAlarmCode := 310;        // 310=组框机安全异常
-ELSIF io_stExternal.i_bFrameMachine_EStop THEN
-    s_iExternalDeviceAlarmCode := 311;        // 311=组框机急停
-ELSIF io_stExternal.i_bFrameMachine_CommErr THEN
-    s_iExternalDeviceAlarmCode := 312;        // 312=组框机通讯异常
-ELSIF io_stExternal.stUpstream.bRobot_Fault THEN
-    s_iExternalDeviceAlarmCode := 320;        // 320=机器人设备故障
-ELSIF io_stExternal.stUpstream.bRobot_EStop THEN
-    s_iExternalDeviceAlarmCode := 321;        // 321=机器人急停
-ELSIF io_stExternal.stUpstream.bUpstreamComFault THEN
-    s_iExternalDeviceAlarmCode := 322;        // 322=上游通讯中断(12s超时)
-ELSE
-    s_iExternalDeviceAlarmCode := 0;          // 0=无报警
-END_IF;
-
-io_stExternal.o_iExternalDeviceAlarmSummary := s_iExternalDeviceAlarmCode;
-io_stExternal.o_bExternalDeviceFault := (s_iExternalDeviceAlarmCode <> 0);
-//#endregion 500_报警汇总
-
-//#region 600_安全综合联锁
-IF NOT io_stExternal.i_bFrameMachine_EStop
-   AND NOT io_stExternal.stDownstream.bDownstream_EStop
-   AND NOT io_stExternal.stDownstream.bDownstream_Fault
-   AND NOT io_stExternal.stUpstream.bRobot_EStop
-   AND NOT io_stExternal.stUpstream.bRobot_Fault
-THEN
-    s_bSafetyConditionMet := TRUE;
-ELSE
-    s_bSafetyConditionMet := FALSE;
-END_IF;
-
-io_stExternal.o_bSystemSafetyConditionMet := s_bSafetyConditionMet;
-//#endregion 600_安全综合联锁
-
+    (* ============ 6. 输出 Y45 / Y46: 组框机安全异常 或 本机安全异常 ============ *)
+    io_stExt.bY45 := s_bPeerFault OR s_bLocalSafety;
+    io_stExt.bY46 := s_bPeerFault OR s_bLocalSafety;
+    io_stIo.bQFramePause := io_stExt.bY45;
+    io_stIo.bQFrameEStop := io_stExt.bY46;
 END_FUNCTION_BLOCK
