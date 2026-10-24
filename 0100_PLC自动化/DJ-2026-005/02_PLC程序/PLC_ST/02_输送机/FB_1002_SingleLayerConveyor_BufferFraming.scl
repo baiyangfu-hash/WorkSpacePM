@@ -207,7 +207,8 @@ BEGIN
             STEP_INIT_RUN:
                 // 步 2: 反转排空 (时长 i_dInitRevMs), 到时置准备完成
                 s_bRev := TRUE;
-                s_bInitRevIn := TRUE;
+                // 反转实际输出被 Hold / 离开安全区切断时不计时, 保证实际反转满 i_dInitRevMs
+                s_bInitRevIn := (NOT io_stLayer.bHold) AND io_stLayer.bSafeZone;
                 IF s_bInitRevQ THEN
                     s_bRev := FALSE;
                     s_bSlow := FALSE;

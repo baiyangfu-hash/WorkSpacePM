@@ -23,12 +23,12 @@ STRUCT
     rPosTol                 : REAL := 10.0;         // 位置判定容差 (脉冲, 待现场整定)
     dSettleMs               : DINT := 500;          // 步入口窗口
     dFeedFullMs             : DINT := 10000;        // 4 光电全亮计时 (步 1)
-    dFeedEmptyMs            : DINT := 10000;        // 光电全灭等 X102 超时 (F107)
+    dFeedEmptyMs            : DINT := 10000;        // 光电全灭持续超时, 与 X102 二选一返回
     dEyeAlarmMs             : DINT := 1000;         // 光电异常报警 (F90 / F91)
 
     (* ------------------ 报警触发 ------------------ *)
-    // [0] F90 前光电异常, [1] F91 后光电异常, [2] F107 等 X102 超时 (提示类), [3..4] 预留
+    // [0] F90 前光电异常, [1] F91 后光电异常, [2] F107 已取消 (恒 FALSE), [3..4] 预留
     // (F22 / F23 X2 极限由 FB_1001 直接写 stAlarm)
-    arrTrig                 : ARRAY[0..4] OF BOOL;      // 报警触发: [0] F90, [1] F91, [2] F107, [3..4] 预留
+    arrTrig                 : ARRAY[0..4] OF BOOL;      // 报警触发: [0] F90, [1] F91, [2] F107 已取消, [3..4] 预留
 END_STRUCT
 END_TYPE

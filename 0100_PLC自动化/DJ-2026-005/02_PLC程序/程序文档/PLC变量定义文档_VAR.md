@@ -360,9 +360,9 @@
 | rPosTol | REAL | 位置判定容差 (脉冲, 待现场整定) |
 | dSettleMs | DINT | 步入口窗口 |
 | dFeedFullMs | DINT | 4 光电全亮计时 (步 1) |
-| dFeedEmptyMs | DINT | 光电全灭等 X102 超时 (F107) |
+| dFeedEmptyMs | DINT | 光电全灭持续超时，与 X102 二选一返回 |
 | dEyeAlarmMs | DINT | 光电异常报警 (F90 / F91) |
-| arrTrig | ARRAY[0..4] OF BOOL | 报警触发: [0] F90, [1] F91, [2] F107, [3..4] 预留 |
+| arrTrig | ARRAY[0..4] OF BOOL | 报警触发: [0] F90, [1] F91, [2] F107 已取消, [3..4] 预留 |
 
 ### ST_Alarm（结构体）
 

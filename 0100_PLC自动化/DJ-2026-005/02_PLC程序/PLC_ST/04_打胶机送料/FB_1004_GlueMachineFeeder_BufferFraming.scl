@@ -35,7 +35,7 @@ VAR
     s_bFullIn           : BOOL := FALSE;
     s_bFullQ            : BOOL := FALSE;
     s_dFullEt           : DINT := 0;
-    fb_tEmpty           : FB_TON;       // 步 3: 光电全灭后等 X102 超时 (F107)
+    fb_tEmpty           : FB_TON;       // 步 3: 光电全灭持续超时, 与 X102 二选一返回
     s_bEmptyIn          : BOOL := FALSE;
     s_bEmptyQ           : BOOL := FALSE;
     s_dEmptyEt          : DINT := 0;
@@ -178,7 +178,8 @@ BEGIN
                 END_IF;
                 s_bFullIn := s_bEyesAll;
                 IF (io_stBridge.abFeedDone[1] AND io_stBridge.abFeedDone[2] OR s_bFullQ)
-                   AND s_bZStandby AND s_bEyesAll AND (NOT s_bAnyBusy) AND (NOT io_stMachine.bStopPending) THEN
+                   AND s_bZStandby AND s_bEyesAll AND (NOT s_bAnyBusy) THEN
+                    // 送料交接只看: 自动 ∧ 无报警 (外层已判) ∧ 与取放料不干涉; 不看"停止收尾"
                     s_bFullIn := FALSE;
                     s_iStep := STEP_TO_FEED;
                     s_iPhase := PH_WINDOW;
@@ -216,7 +217,8 @@ BEGIN
                 // 步 3: X2 在 D522 且 4 光电全亮 -> Y44 = 1 (任一光电灭即 0); 等打胶机取走
                 io_stFeed.bY44 := s_bAtFeed AND s_bEyesAll;
                 s_bEmptyIn := s_bEyesNone;
-                IF s_bEyesNone AND s_bPickDoneLatch THEN
+                // 返回条件(原程序二选一): 4 光电全灭 ∧ (X102 取料完成 ∨ 全灭持续 dFeedEmptyMs)
+                IF s_bEyesNone AND (s_bPickDoneLatch OR s_bEmptyQ) THEN
                     s_bEmptyIn := FALSE;
                     s_bPickDoneLatch := FALSE;
                     io_stFeed.bY44 := FALSE;
@@ -264,7 +266,7 @@ BEGIN
     s_bF91In := ((NOT io_stIo.bFeederRearEye1) OR (NOT io_stIo.bFeederRearEye2)) AND io_stBridge.abFeedDone[2];
     io_stFeed.arrTrig[0] := s_bF90Q;
     io_stFeed.arrTrig[1] := s_bF91Q;
-    io_stFeed.arrTrig[2] := s_bEmptyQ;      // F107 等 X102 超时 (提示类, 仍停在步 3)
+    io_stFeed.arrTrig[2] := FALSE;          // F107 取消 (原程序全灭超时自行返回, 不报警); 号保留
 
     (* ============ 7. 状态输出 ============ *)
     io_stFeed.iStep := s_iStep;
