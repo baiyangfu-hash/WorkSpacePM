@@ -28,9 +28,9 @@ changelog:
 
 # SCL 编程规范 (Siemens LSP 兼容版)
 
-> 版本：V1.2.1
-> 状态：已验证
-> 更新日期：2026-08-26
+> 版本：V1.3.0
+> 状态：已验证（§4.4 ENUM 为新增语法，待本机插件与目标平台验证，验证前不得用于交付）
+> 更新日期：2026-10-24
 > 适用环境：Siemens LSP (VS Code)、TIA Portal、CODESYS、GX Works
 
 ---
@@ -286,11 +286,12 @@ fb_tActionTimer(IN := FALSE, PT := 500, Q => , ET => q_eElapsed);
 
 ---
 
-### 4.4 ENUM 枚举类型（V1.3.0 新增）
+### 4.4 ENUM 枚举类型（V1.3.0 新增，待验证）
 
-步序、模式、状态等有限取值的变量，允许用 `TYPE … END_TYPE` 声明枚举，成员带**显式数值**（便于和 HMI、测试、报警码对照），变量用 `e` 二级标识（见 §3.2）。
+步序、模式、状态等有限取值的变量，允许用枚举，成员带**显式数值**（便于和 HMI、测试、报警码对照），变量用 `e` 二级标识（见 §3.2）。各平台声明语法不同，**项目在方案文档里写明目标平台用哪一种**：
 
 ```scl
+// 形式 A：IEC 61131-3 枚举（CODESYS / InoProShop 等）
 TYPE E_ConveyorStep :
 (
     STEP_IDLE := 0,
@@ -299,7 +300,12 @@ TYPE E_ConveyorStep :
 );
 END_TYPE
 
-// 使用
+// 形式 B：TIA Portal V20+ 命名值类型（Named Value Type）
+// 必须带基础类型和默认值，类型放在软件单元的 .nvt 文件里，成员值显式给出：
+// E_ConveyorStep : Int ( STEP_IDLE := 0, STEP_INIT_WAIT := 1, STEP_SEND_ON := 10 ) := STEP_IDLE
+// 具体写法以 TIA 文档“Named value data types (S7-1500)”为准，项目落地时先在 TIA 里建一个样例确认。
+
+// 使用（形式 A 示例）
 s_eStep : E_ConveyorStep;
 CASE s_eStep OF
     E_ConveyorStep#STEP_IDLE:
@@ -313,7 +319,7 @@ END_CASE;
 - 类型名 `E_` + 大驼峰；成员名全大写加下划线，带模块前缀；成员值必须显式给出，不得依赖默认编号。
 - CASE 仍必须有 `ELSE`（STD-850）。
 - 不得对枚举变量做算术运算；与 INT 的互转只在 HMI / 报警码出口处做，且注明。
-- **前置验证**：Siemens 语言服务插件与驾驶舱 SclLinter 对 ENUM 的解析需在用户本机验证；验证不通过的项目回退为 `INT` + `VAR CONSTANT` 命名常量，数值不变。
+- **前置验证**：Siemens 语言服务插件与驾驶舱 SclLinter 对所选形式的解析，以及目标平台能否编译，需在用户本机验证；验证不通过的项目回退为 `INT` + `VAR CONSTANT` 命名常量，数值不变。验证通过后把本节标题的“待验证”去掉。
 
 ---
 

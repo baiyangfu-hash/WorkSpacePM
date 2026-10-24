@@ -99,7 +99,7 @@
 | STD-860 | [860_汽车级首出报警与缺失条件自诊断规范_STD.md](03_PLC自动化域/860_汽车级首出报警与缺失条件自诊断规范_STD.md) | V1.0.0 | 汽车级首出报警与缺失条件自诊断规范 |
 | LSP-903 | [903_定时器使用规范_LSP.md](03_PLC自动化域/903_定时器使用规范_LSP.md) | V2.1.0 | 定时器使用规范 |
 | LSP-904 | [904_SCL注释规范_LSP.md](03_PLC自动化域/904_SCL注释规范_LSP.md) | V1.2.0 | SCL注释规范 |
-| LSP-905 | [905_SCL编程规范_LSP.md](03_PLC自动化域/905_SCL编程规范_LSP.md) | V1.2.1 | SCL编程规范 |
+| LSP-905 | [905_SCL编程规范_LSP.md](03_PLC自动化域/905_SCL编程规范_LSP.md) | V1.3.0 | SCL编程规范 |
 | LSP-906 | [906_错误预防规则_LSP.md](03_PLC自动化域/906_错误预防规则_LSP.md) | V2.1.0 | PLC编程错误预防规则 |
 | LSP-907 | [907_项目配置规范_LSP.md](03_PLC自动化域/907_项目配置规范_LSP.md) | V1.4.0 | PLC项目配置规范 |
 | TOOL-908 | [908_Siemens_Language_Support_使用指南_TOOL.md](03_PLC自动化域/908_Siemens_Language_Support_使用指南_TOOL.md) | V1.0.0 | Siemens Language Support插件使用指南 |
