@@ -15,7 +15,7 @@ cpu,DI,X14,Vfd1_Alarm,变频器1异常,F13 → M8；常闭,原程序软元件注
 cpu,DI,X15,Vfd2_Alarm,变频器2异常,F14 → M8；常闭,原程序软元件注释
 cpu,DI,X16,Vfd3_Alarm,变频器3异常,F15 → M8；常闭,原程序软元件注释
 cpu,DI,X17,Vfd4_Alarm,变频器4异常,F16 → M8；常闭,原程序软元件注释
-cpu,DI,X20,Conv1_DropEye,一层放料检测光电,放料检测光电（原程序未使用）,原程序软元件注释
+cpu,DI,X20,Conv1_DropEye,一层放料检测光电,放料检测光电（图纸已装；原程序未使用）,原程序软元件注释
 cpu,DI,X21,Conv1_PreBlock,一层阻挡前接近开关,阻挡前到位（步 20 计 3 s）,原程序软元件注释
 cpu,DI,X22,Conv1_Pos1,一层到位接近开关1,取料位开关 1,原程序软元件注释
 cpu,DI,X23,Conv1_Pos2,一层到位接近开关2,取料位开关 2,原程序软元件注释
@@ -23,7 +23,7 @@ cpu,DI,X24,Conv1_BlockUp1,一层阻挡气缸上位1,阻挡上位 1（F34 类）,
 cpu,DI,X25,Conv1_BlockDown1,一层阻挡气缸下位1,阻挡下位 1,原程序软元件注释
 cpu,DI,X26,Conv1_SepUp1,一层分料气缸上位1,分料上位 1,原程序软元件注释
 cpu,DI,X27,Conv1_SepDown1,一层分料气缸下位1,分料下位 1,原程序软元件注释
-cpu,DI,X30,Conv2_DropEye,二层放料检测光电,放料检测光电（原程序未使用）,原程序软元件注释
+cpu,DI,X30,Conv2_DropEye,二层放料检测光电,放料检测光电（图纸已装；原程序未使用）,原程序软元件注释
 cpu,DI,X31,Conv2_PreBlock,二层阻挡前接近开关,阻挡前到位（步 20 计 3 s）,原程序软元件注释
 cpu,DI,X32,Conv2_Pos1,二层到位接近开关1,取料位开关 1,原程序软元件注释
 cpu,DI,X33,Conv2_Pos2,二层到位接近开关2,取料位开关 2,原程序软元件注释
@@ -31,7 +31,7 @@ cpu,DI,X34,Conv2_BlockUp1,二层阻挡气缸上位1,阻挡上位 1（F34 类）,
 cpu,DI,X35,Conv2_BlockDown1,二层阻挡气缸下位1,阻挡下位 1,原程序软元件注释
 cpu,DI,X36,Conv2_SepUp1,二层分料气缸上位1,分料上位 1,原程序软元件注释
 cpu,DI,X37,Conv2_SepDown1,二层分料气缸下位1,分料下位 1,原程序软元件注释
-cpu,DI,X40,Conv3_DropEye,三层放料检测光电,放料检测光电（原程序未使用）,原程序软元件注释
+cpu,DI,X40,Conv3_DropEye,三层放料检测光电,放料检测光电（图纸已装；原程序未使用）,原程序软元件注释
 cpu,DI,X41,Conv3_PreBlock,三层阻挡前接近开关,阻挡前到位（步 20 计 3 s）,原程序软元件注释
 cpu,DI,X42,Conv3_Pos1,三层到位接近开关1,取料位开关 1,原程序软元件注释
 cpu,DI,X43,Conv3_Pos2,三层到位接近开关2,取料位开关 2,原程序软元件注释
@@ -39,7 +39,7 @@ cpu,DI,X44,Conv3_BlockUp1,三层阻挡气缸上位1,阻挡上位 1（F34 类）,
 cpu,DI,X45,Conv3_BlockDown1,三层阻挡气缸下位1,阻挡下位 1,原程序软元件注释
 cpu,DI,X46,Conv3_SepUp1,三层分料气缸上位1,分料上位 1,原程序软元件注释
 cpu,DI,X47,Conv3_SepDown1,三层分料气缸下位1,分料下位 1,原程序软元件注释
-di_ext_1,DI,X50,Conv4_DropEye,四层放料检测光电,放料检测光电（原程序未使用）,原程序软元件注释
+di_ext_1,DI,X50,Conv4_DropEye,四层放料检测光电,放料检测光电（图纸已装；原程序未使用）,原程序软元件注释
 di_ext_1,DI,X51,Conv4_PreBlock,四层阻挡前接近开关,阻挡前到位（步 20 计 3 s）,原程序软元件注释
 di_ext_1,DI,X52,Conv4_Pos1,四层到位接近开关1,取料位开关 1,原程序软元件注释
 di_ext_1,DI,X53,Conv4_Pos2,四层到位接近开关2,取料位开关 2,原程序软元件注释
@@ -87,6 +87,8 @@ di_ext_3,DI,X124,PP_RearClamp2,夹紧气缸后夹紧位2,后夹紧位 2,原程�
 di_ext_3,DI,X125,PP_RearOpen2,夹紧气缸后松开位2,后松开位 2,原程序软元件注释
 di_ext_3,DI,X126,PP_FrontClamp2,夹紧气缸前夹紧位2,前夹紧位 2,原程序软元件注释
 di_ext_3,DI,X127,PP_FrontOpen2,夹紧气缸前松开位2,前松开位 2,原程序软元件注释
+di_ext_4,DI,X130,Frame_DropEye1,边框掉料检测1,边框掉料检测 1（图纸 PH5 已装；原程序未使用）,电气图纸第27页
+di_ext_4,DI,X131,Frame_DropEye2,边框掉料检测2,边框掉料检测 2（图纸 PH6 已装；原程序未使用）,电气图纸第27页
 di_ext_4,DI,X140,Door_L1,左1安全门,左 1 安全门（F1 → M8）；常闭,原程序软元件注释
 di_ext_4,DI,X141,Door_L2,左2安全门,左 2 安全门（F2 → M8）；常闭,原程序软元件注释
 di_ext_4,DI,X142,Door_L3,左3安全门,左 3 安全门（F3 → M8）；常闭,原程序软元件注释
@@ -103,8 +105,8 @@ di_ext_5,DI,X154,Conv3_Full1,3层边框检测开关1,满料检测 1（正转时�
 di_ext_5,DI,X155,Conv3_Full2,3层边框检测开关2,满料检测 2,原程序软元件注释
 di_ext_5,DI,X156,Conv4_Full1,4层边框检测开关1,满料检测 1（正转时同亮即慢速）,原程序软元件注释
 di_ext_5,DI,X157,Conv4_Full2,4层边框检测开关2,满料检测 2,原程序软元件注释
-di_ext_5,DI,X160,Frame_PauseIn,组框机开门暂停信号,组框机开门暂停信号（原程序未使用）,原程序软元件注释
-di_ext_5,DI,X161,Frame_EStopIn,组框机急停信号,组框机急停信号（原程序未使用）,原程序软元件注释
+di_ext_5,DI,X160,Frame_PauseIn,组框机开门暂停信号,组框机开门暂停信号（图纸第30页为备用、未接线；原程序未使用）,原程序软元件注释
+di_ext_5,DI,X161,Frame_EStopIn,组框机急停信号,组框机急停信号（图纸第30页为备用、未接线；原程序未使用）,原程序软元件注释
 cpu,DO,Y0,X1_Pulse,X1轴PLS,X1 脉冲,原程序软元件注释
 cpu,DO,Y1,X2_Pulse,X2轴PLS,X2 脉冲,原程序软元件注释
 cpu,DO,Y2,Z_Pulse,Z轴PLS,Z 脉冲,原程序软元件注释
@@ -141,7 +143,7 @@ cpu,DO,Y41,PP_FrontClamp,取料前侧气缸夹紧,前侧夹爪夹紧（SET/RST �
 cpu,DO,Y42,PP_LiftUp,气缸上升,升降气缸上升,原程序软元件注释
 cpu,DO,Y43,PP_LiftDown,气缸下降,升降气缸下降,原程序软元件注释
 cpu,DO,Y44,Glue_PickAllowed,抓料可,给打胶机：抓料可（小车在放料点且 4 光电全亮）,原程序软元件注释
-cpu,DO,Y45,Frame_Pause,组框机暂停,给组框机：暂停（原程序被 /SM400 屏蔽，恒 OFF）,原程序软元件注释
-cpu,DO,Y46,Frame_EStop,组框机急停,给组框机：急停（原程序被 /SM400 屏蔽，恒 OFF）,原程序软元件注释
+cpu,DO,Y45,Frame_Pause,组框机暂停,给组框机：暂停（图纸第35页为备用、未接线；原程序被 /SM400 屏蔽，恒 OFF）,原程序软元件注释
+cpu,DO,Y46,Frame_EStop,组框机急停,给组框机：急停（图纸第35页为备用、未接线；原程序被 /SM400 屏蔽，恒 OFF）,原程序软元件注释
 cpu,DO,Y47,Glue_SafeZone,给打胶机安全区信号,给打胶机：安全区（小车在取料点、不在驱动、自动）,原程序软元件注释
 do_ext_1,DO,Y50,Lamp_ResetBtn,复位按钮指示灯,复位按钮灯,原程序软元件注释
