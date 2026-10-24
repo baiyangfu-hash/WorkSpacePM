@@ -11,7 +11,7 @@ changelog:
   - version: V1.3.0
     date: 2026-10-24
     author: Claude
-    changes: 语法白名单新增 ENUM 枚举类型（§4.4）；经用户 2026-10-24 在 DJ-2026-005 线程批准方向，待 PR 评审
+    changes: 语法白名单新增 ENUM 枚举类型（§4.4）；经用户 2026-10-24 批准
   - version: V1.2.0
     date: 2026-08-25
     author: Codex
@@ -319,6 +319,8 @@ END_CASE;
 - 类型名 `E_` + 大驼峰；成员名全大写加下划线，带模块前缀；成员值必须显式给出，不得依赖默认编号。
 - CASE 仍必须有 `ELSE`（STD-850）。
 - 不得对枚举变量做算术运算；与 INT 的互转只在 HMI / 报警码出口处做，且注明。
+- **只用于支持枚举的平台**：CODESYS 系（InoProShop 等）用形式 A；TIA Portal 用形式 B（命名值类型，需 V20+），低版本 TIA 回退 `INT` + `VAR CONSTANT`。
+- **验证现状**：驾驶舱 SclLinter 已验证认得形式 A、无误报（审计 130）；Siemens 语言服务插件与目标平台编译待用户本机验证。
 - **前置验证**：Siemens 语言服务插件与驾驶舱 SclLinter 对所选形式的解析，以及目标平台能否编译，需在用户本机验证；验证不通过的项目回退为 `INT` + `VAR CONSTANT` 命名常量，数值不变。验证通过后把本节标题的“待验证”去掉。
 
 ---
