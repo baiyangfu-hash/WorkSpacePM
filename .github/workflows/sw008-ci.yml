@@ -124,7 +124,7 @@ jobs:
   # drill on a real Windows runner. Same rule as above: early warning, not acceptance evidence.
   windows-cli-core:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -151,11 +151,11 @@ jobs:
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
 
-      - name: Pytest (cli, core, sample drill)
+      - name: Pytest (core, sample drill)
         working-directory: ${{ env.PROJ }}
         run: >-
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -p no:cacheprovider -o addopts= -n 4
-          tests/cli tests/core tests/e2e/test_closure_drill.py tests/e2e/test_closure_drill_agent_misconduct.py
+          tests/core tests/e2e/test_closure_drill.py tests/e2e/test_closure_drill_agent_misconduct.py
           tests/e2e/test_long_gate.py
 
       # The long gate must survive the session that started it (10-23: a session teardown killed card 184's gate twice).
@@ -164,6 +164,45 @@ jobs:
       - name: Long gate drill (kill the session mid-gate, then resume)
         working-directory: ${{ env.PROJ }}
         run: '"$RUNNER_TEMP/venv/Scripts/python.exe" -B scripts/long_gate_drill.py'
+
+      - name: The working tree must still be clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then git status --short; exit 1; fi
+
+  # cli has its own job (windows-cli): cli+core together took 42 of the 45 minutes.
+  windows-cli:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Long paths (the project paths are deep and Chinese)
+        run: git config --system core.longpaths true
+
+      - uses: actions/checkout@v4
+        with:
+          # full history: the sample drill builds its benchmark from a pinned commit
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A clean virtual environment, as the installer makes on a field PC: the runner's own Python carries pipx,
+      # whose pins clash with the lock file and fail pip check.
+      - name: Install the locked dependencies into a fresh virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/Scripts" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
+
+      - name: Pytest (cli)
+        working-directory: ${{ env.PROJ }}
+        run: >-
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -p no:cacheprovider -o addopts= -n 4 tests/cli
 
       - name: The working tree must still be clean
         run: |
