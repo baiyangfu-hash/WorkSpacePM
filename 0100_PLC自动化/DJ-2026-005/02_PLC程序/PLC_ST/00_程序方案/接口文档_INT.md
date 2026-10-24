@@ -106,12 +106,14 @@ tags: ["接口文档", "PLC程序"]
 | | `bReset` | BOOL | 入 | 异常停机（M8 或进手动） |
 | | `bSafeZone` | BOOL | 入 | 取料机构在安全区 |
 | | `bPickDone` | BOOL | 入 | 本层取料完成（来自取放料，本层对本层） |
+| | `bStopPending` | BOOL | 入 | 停止请求：本循环结束后不再开新循环（2026-10-24 编码时补，DSN 4.1） |
 | 命令输出 | `bBlockDown` | BOOL | 出 | 阻挡下降命令（Y 阻挡） |
 | | `bSepDown` | BOOL | 出 | 分料下降命令 |
 | | `bFwd, bRev, bSlow` | BOOL | 出 | 输送正转、反转、慢速 |
 | 状态输出 | `bReady` | BOOL | 出 | 准备完成 |
 | | `bRequest` | BOOL | 出 | 请求取料 |
 | | `iStep` | INT | 出 | 当前步（供 HMI / 测试） |
+| | `bAtRest` | BOOL | 出 | 静止点（步 0），停止收尾判断用（2026-10-24 编码时补） |
 | 双向 | `bUnload` | BOOL | 进出 | 退料（原 `VAR_IN_OUT 退料`） |
 | 报警触发 | `arrTrig[0..8]` | ARRAY OF BOOL | 出 | 8 个气缸位置报警触发 + 1 个缺料触发，由 FB_1007 映射到 F 号（第 9 节） |
 
