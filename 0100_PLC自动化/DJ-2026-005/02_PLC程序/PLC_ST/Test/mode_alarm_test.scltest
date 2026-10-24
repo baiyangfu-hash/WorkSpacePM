@@ -1182,7 +1182,7 @@ TEST_CASE "T_MODE_08_StopFinishesCycle"
 END_TEST_CASE
 
 TEST_CASE "T_MODE_10_EStop"
-    // 测试目标: ★ 自动中急停: F0 锁存, M8, 已回原点清, D116=8, 夹爪命令不变
+    // 测试目标: ★ 自动中急停: F0 锁存, M8, 已回原点清, D116=8, 夹爪命令不变 (取放料不在 S20 松爪窗口时)
 
     // RESET: 急停恢复 -> 复位键清锁存 -> 进手动取消自动启动的回原点 -> 退出手动, 回到待机
     SET GlobalVars.stIo.bEStop := FALSE;
@@ -1369,9 +1369,13 @@ TEST_CASE "T_MODE_10_EStop"
     WAIT_CYCLES 3;
 
     SET GlobalVars.stMachine.bHomeDone := TRUE;
+    SET GlobalVars.astAxis[1].stAbs.Busy := TRUE;
     SET GlobalVars.stMachine.bAuto := TRUE;
     WAIT_CYCLES 6;
+    ASSERT GlobalVars.stPP.iStep = 0;
     SET GlobalVars.stPP.bClampFront := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stPP.bClampFront = TRUE;
     SET GlobalVars.stIo.bEStop := FALSE;
     WAIT_CYCLES 3;
     ASSERT GlobalVars.stAlarm.arrLatch[0] = TRUE;
@@ -1380,6 +1384,7 @@ TEST_CASE "T_MODE_10_EStop"
     ASSERT GlobalVars.stMachine.bHomeDone = FALSE;
     ASSERT GlobalVars.stMachine.iDeviceState = 8;
     ASSERT GlobalVars.stPP.bClampFront = TRUE;
+    SET GlobalVars.astAxis[1].stAbs.Busy := FALSE;
 END_TEST_CASE
 
 TEST_CASE "T_MODE_11_Door_F1"
