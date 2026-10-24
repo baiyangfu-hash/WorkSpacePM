@@ -544,7 +544,7 @@ def test_r09_a_reader_never_fails_because_another_process_has_a_transaction_open
 
 def test_v04t_the_probe_tells_a_live_process_from_an_exited_one(scene: Scene) -> None:
     child = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(120)"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True
+        [sys.executable, "-c", "import time; time.sleep(120)"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace"
     )
     scene.spawned.append(child)
     assert _process_state(child.pid) == "alive" and _alive(child.pid) and not _exited(child.pid)

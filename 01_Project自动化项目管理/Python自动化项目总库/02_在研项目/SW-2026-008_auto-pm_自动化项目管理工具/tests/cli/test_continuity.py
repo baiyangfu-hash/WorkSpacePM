@@ -1608,7 +1608,7 @@ def _write_card(root: Path, rows: list[tuple[str, str]], *, baseline: str | None
     """Minimal card whose baseline is the test repository HEAD (card 027 §6 G6)."""
 
     head = baseline or subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
     ).stdout.strip()
     table = "\n".join(f"| {index} | `{path}` | {state} |" for index, (path, state) in enumerate(rows, 1))
     card = root / "work-card.md"

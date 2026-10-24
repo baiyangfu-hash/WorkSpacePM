@@ -231,7 +231,7 @@ def test_the_database_and_the_wallet_are_never_tracked_by_git() -> None:
     """TD-SW008-065 (minimal subset): the plain-text token lives only in two git-ignored local files of the control root."""
 
     here = Path(__file__).resolve().parent
-    top = subprocess.run(["git", "-C", str(here), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
+    top = subprocess.run(["git", "-C", str(here), "rev-parse", "--show-toplevel"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
     if top.returncode != 0:
         pytest.skip("not inside a git checkout")
     repository = Path(top.stdout.strip())

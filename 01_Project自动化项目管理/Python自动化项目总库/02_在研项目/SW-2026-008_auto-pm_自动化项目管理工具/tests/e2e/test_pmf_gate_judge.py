@@ -159,7 +159,7 @@ def test_j16_the_command_line_exits_zero_for_good_evidence_and_one_with_reasons_
     (case.root / "reports" / "G8.txt").write_bytes(b"drifted\n")
     bad = case.command(*GATES)
     assert bad.returncode == 1 and "VERDICT REFUSED" in bad.stdout and "bound report hash differs" in bad.stdout, bad.stdout + bad.stderr
-    usage = subprocess.run([sys.executable, "-B", verdict_check.__file__, "only", "three", "args"], capture_output=True, text=True, timeout=120, check=False)
+    usage = subprocess.run([sys.executable, "-B", verdict_check.__file__, "only", "three", "args"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, check=False)
     assert usage.returncode == 2 and "usage" in usage.stdout
 
 

@@ -22,7 +22,7 @@ OTHER = "proj/src/other.scl"
 
 def _git(root: Path, *arguments: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(root), *arguments], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), *arguments], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
     ).stdout.strip()
 
 
