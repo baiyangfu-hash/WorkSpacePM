@@ -1,375 +1,271 @@
 (* ================================================================= *)
-(*  功能块名称：FB_1004_GlueMachineFeeder_BufferFraming               *)
-(*  功能描述：打胶机送料小车 - STD-820跨机状态持续动态监视与安全闭环 *)
-(*  创建日期：2026-05-04                                              *)
-(*  版本号：V16.0.0 (打胶机状态持续监视 / 途中急停制动 / 4光电脱离闭环) *)
-(*                                                                     *)
-(*  遵循规范：                                                         *)
-(*    - LSP-905 SCL编程规范                                           *)
-(*    - STD-840 设备对象化与接口规范                                  *)
-(*    - STD-820 设备间信号交握与外部对接规范                          *)
-(*    - 原始三菱源程序: 01_梯形图.pdf (D760: 0~3 状态机)             *)
+(*  功能块名称: FB_1004_GlueMachineFeeder_BufferFraming               *)
+(*  功能描述:   X2 送料小车 4 步 (D760) + 打胶机握手 (Y44 / Y47 / X102) *)
+(*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V14.x)      *)
+(*                                                                   *)
+(*  依据: 详细设计说明书_DSN.md 7; 接口文档_INT.md 4.7 / 5 / 8       *)
+(*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
+(*  轴: X2 = io_astAxis[3]; Z = io_astAxis[1] 只读位置。             *)
+(*                                                                   *)
+(*  与 DSN 的差异 (评审请确认):                                      *)
+(*    步 3 的 X102 上升沿先锁存, 光电全灭后即转步 0 (原程序要求      *)
+(*    "光电全灭 ∧ X102 上升沿" 同一扫描成立, 若 X102 比光电灭得早      *)
+(*    会永远转不回步 0)。                                             *)
 (* ================================================================= *)
 
 FUNCTION_BLOCK FB_1004_GlueMachineFeeder_BufferFraming
 
 VAR_IN_OUT
-    io_stFeeder                 : ST_GlueFeeder;  // 打胶送料小车工站数据结构体
-    io_stX2Axis                 : ST_ServoAxis;   // X2轴(送料横移) 对象化标准接口
+    io_stFeed           : ST_Feeder;        // 小车数据
+    io_stBridge         : ST_Bridge;        // 站间中继 (读: X1 送料完成 / 取放料在 S20 / Z 待机点 / Hold)
+    io_stExt            : ST_ExternalLink;  // 组框机链路 (读)
+    io_stMachine        : ST_Machine;       // 模式
+    io_stIo             : ST_Io;            // 物理输入输出
+    io_stAlarm          : ST_Alarm;         // 报警 (本 FB 不直接写, 经 arrTrig 汇总)
+    io_astAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
 END_VAR
 
 VAR
-    s_bStepEntry                : BOOL := TRUE;
-    s_bRunning                  : BOOL := FALSE;
-    s_iCurrentState             : INT := 0;       // D760 步序: 0, 1, 2, 3
-    s_iAlarmCode                : INT := 0;
-    s_bStartTriggered           : BOOL := FALSE;
-    s_bX2Fault                  : BOOL := FALSE;
-    s_bInterlockStopActive      : BOOL := FALSE;  // 跨机联锁突发中断紧急制动生效
+    (* 过程定时器 *)
+    fb_tSettle          : FB_TON;       // 步 0 / 步 2 入口窗口
+    s_bSettleIn         : BOOL := FALSE;
+    s_bSettleQ          : BOOL := FALSE;
+    s_dSettleEt         : DINT := 0;
+    fb_tFull            : FB_TON;       // 步 1: 4 光电全亮 10 s
+    s_bFullIn           : BOOL := FALSE;
+    s_bFullQ            : BOOL := FALSE;
+    s_dFullEt           : DINT := 0;
+    fb_tEmpty           : FB_TON;       // 步 3: 光电全灭后等 X102 超时 (F107)
+    s_bEmptyIn          : BOOL := FALSE;
+    s_bEmptyQ           : BOOL := FALSE;
+    s_dEmptyEt          : DINT := 0;
+    fb_tF90             : FB_TON;       // F90 前光电异常
+    s_bF90In            : BOOL := FALSE;
+    s_bF90Q             : BOOL := FALSE;
+    s_dF90Et            : DINT := 0;
+    fb_tF91             : FB_TON;       // F91 后光电异常
+    s_bF91In            : BOOL := FALSE;
+    s_bF91Q             : BOOL := FALSE;
+    s_dF91Et            : DINT := 0;
 
-    (* 对外输出与联锁内部标志 *)
-    s_bCartAtPickPos            : BOOL := FALSE;  // 小车在接料位 (到达 D512)
-    s_bCartPermitPlace          : BOOL := FALSE;  // 小车允许接料 (处于接料安全状态)
-    s_bAllowPickup              : BOOL := FALSE;  // Y44 抓料可 / 放料请求
-    s_bSafetyZoneSignal         : BOOL := FALSE;  // Y47 给打胶机安全区信号
+    (* 边沿 *)
+    fb_trPickDone       : FB_R_TRIG;    // X102 上升沿
+    s_bPickDoneEdge     : BOOL := FALSE;
+    s_bPickDoneLatch    : BOOL := FALSE;    // 步 3 内锁存的 X102 上升沿
 
-    (* 打胶机动态安全与就绪综合状态 *)
-    s_bGlueMachineConditionMet  : BOOL := FALSE;
+    (* 步与轴命令状态 *)
+    s_iStep             : INT := 0;
+    s_iPhase            : INT := 0;
+    s_bX2Go             : BOOL := FALSE;    // X2 绝对定位进行中
+    s_rX2Target         : REAL := 0.0;
+    s_bAxisOwned        : BOOL := FALSE;
 
-    (* 工艺定时器 (三段式 DINT 毫秒) *)
-    fb_tMoveTimer               : FB_TONR;        // X2 移动看门狗超时 (20.0s)
-    s_bMoveTimer_In             : BOOL := FALSE;
-    s_bMoveTimer_Q              : BOOL := FALSE;
-    s_bMoveTimer_R              : BOOL := FALSE;
-    s_dMoveTimer_Et             : DINT := 0;
-
-    fb_tFullConfirmTimer        : FB_TONR;        // T106: 4卡槽集齐到位防抖确认延时 (1.0s)
-    s_bFullConfirmTimer_In      : BOOL := FALSE;
-    s_bFullConfirmTimer_Q       : BOOL := FALSE;
-    s_bFullConfirmTimer_R       : BOOL := FALSE;
-    s_dFullConfirmTimer_Et      : DINT := 0;
-
-    fb_tReleaseTimer            : FB_TONR;        // T131: 打胶机取走物料脱离确认延时 (1.0s)
-    s_bReleaseTimer_In          : BOOL := FALSE;
-    s_bReleaseTimer_Q           : BOOL := FALSE;
-    s_bReleaseTimer_R           : BOOL := FALSE;
-    s_dReleaseTimer_Et          : DINT := 0;
-
-    fb_tCommTimer               : FB_TONR;        // 跨机交握超时看门狗 (15.0s)
-    s_bCommTimer_In             : BOOL := FALSE;
-    s_bCommTimer_Q              : BOOL := FALSE;
-    s_bCommTimer_R              : BOOL := FALSE;
-    s_dCommTimer_Et             : DINT := 0;
-
-    (* 工艺点位缓存 (REAL mm) *)
-    s_rPickupPos                : REAL := 512.0;  // D512 接料/取片点教点
-    s_rFeedPos                  : REAL := 522.0;  // D522 打胶机放片点教点
-    s_rStandbyPos               : REAL := 610.0;  // D610 待机点
-    s_rFeedSpeed                : REAL := 120.0;  // D600 运行速度
+    (* 派生量 *)
+    s_bHold             : BOOL := FALSE;
+    s_bBlock            : BOOL := FALSE;    // 组框机安全异常: 禁止 X2 定位与转移
+    s_bAnyBusy          : BOOL := FALSE;    // 三轴任一在驱动
+    s_bEyesAll          : BOOL := FALSE;    // 4 光电全亮
+    s_bEyesNone         : BOOL := FALSE;    // 4 光电全灭
+    s_rErr              : REAL := 0.0;
+    s_bAtPick           : BOOL := FALSE;    // X2 在 D512
+    s_bAtFeed           : BOOL := FALSE;    // X2 在 D522
+    s_bZStandby         : BOOL := FALSE;    // Z 在待机点 D500
 END_VAR
 
 VAR CONSTANT
-    D760_0_INIT_TO_PICKUP       : INT := 0;     (* 0 - M760: 初始启动，X2移至接料点D512 *)
-    D760_1_WAIT_4SLOTS_FULL     : INT := 1;     (* 1 - M761: 在接料位允许放料，等待4卡槽集齐+打胶机状态正常 *)
-    D760_2_MOVE_AND_HANDSHAKE   : INT := 2;     (* 2 - M762/M763: X2移至打胶放料位D522，途中持续监视+安全交握 *)
-    D760_3_RELEASE_AND_RETURN   : INT := 3;     (* 3 - M763尾段: 收到打胶机X102且4光电脱离，X2返回接料点D512 *)
-
-    T_MOVE_DEFAULT              : DINT := 20000;  (* 移动超时 20s *)
-    T_COMM_DEFAULT              : DINT := 15000;  (* 跨机交握超时 15s *)
-    T_STABLE_DELAY              : DINT := 1000;   (* 到位/脱离防抖延时 1.0s *)
+    AX_Z                : INT := 1;
+    AX_X2               : INT := 3;
+    STEP_HOME           : INT := 0;     // 回取料点 D512
+    STEP_WAIT_FULL      : INT := 1;     // 在 D512 生成 A / B 请求
+    STEP_TO_FEED        : INT := 2;     // 去打胶机放料点 D522
+    STEP_SEND           : INT := 3;     // Y44 抓料可, 等打胶机取走
+    PH_WINDOW           : INT := 0;
+    PH_MOVE             : INT := 1;
 END_VAR
 
-(* ==================== 1. 点位参数初始化 ==================== *)
-IF io_stFeeder.rPickupPosition > 0.0 THEN s_rPickupPos := io_stFeeder.rPickupPosition; ELSE s_rPickupPos := 512.0; END_IF;
-IF io_stFeeder.rFeedPosition > 0.0 THEN s_rFeedPos := io_stFeeder.rFeedPosition; ELSE s_rFeedPos := 522.0; END_IF;
-IF io_stFeeder.rStandbyPosition > 0.0 THEN s_rStandbyPos := io_stFeeder.rStandbyPosition; ELSE s_rStandbyPos := 610.0; END_IF;
-IF io_stFeeder.i_rFeedSpeed > 0.0 THEN s_rFeedSpeed := io_stFeeder.i_rFeedSpeed; ELSE s_rFeedSpeed := 120.0; END_IF;
+BEGIN
+    (* ============ 1. 定时器统一调用 ============ *)
+    fb_tSettle(IN := s_bSettleIn, PT := io_stFeed.dSettleMs, Q => s_bSettleQ, ET => s_dSettleEt);
+    fb_tFull(IN := s_bFullIn, PT := io_stFeed.dFeedFullMs, Q => s_bFullQ, ET => s_dFullEt);
+    fb_tEmpty(IN := s_bEmptyIn, PT := io_stFeed.dFeedEmptyMs, Q => s_bEmptyQ, ET => s_dEmptyEt);
+    fb_tF90(IN := s_bF90In, PT := io_stFeed.dEyeAlarmMs, Q => s_bF90Q, ET => s_dF90Et);
+    fb_tF91(IN := s_bF91In, PT := io_stFeed.dEyeAlarmMs, Q => s_bF91Q, ET => s_dF91Et);
+    fb_trPickDone(IN := io_stIo.bGluePickDone, Q => s_bPickDoneEdge);
 
-(* ==================== 2. 定时器统一实例化调用 ==================== *)
-fb_tMoveTimer(IN := s_bMoveTimer_In, PT := T_MOVE_DEFAULT, R := s_bMoveTimer_R, Q => s_bMoveTimer_Q, ET => s_dMoveTimer_Et);
-fb_tFullConfirmTimer(IN := s_bFullConfirmTimer_In, PT := T_STABLE_DELAY, R := s_bFullConfirmTimer_R, Q => s_bFullConfirmTimer_Q, ET => s_dFullConfirmTimer_Et);
-fb_tReleaseTimer(IN := s_bReleaseTimer_In, PT := T_STABLE_DELAY, R := s_bReleaseTimer_R, Q => s_bReleaseTimer_Q, ET => s_dReleaseTimer_Et);
-fb_tCommTimer(IN := s_bCommTimer_In, PT := T_COMM_DEFAULT, R := s_bCommTimer_R, Q => s_bCommTimer_Q, ET => s_dCommTimer_Et);
-
-(* ==================== 3. 打胶机跨机安全状态综合判定 (STD-820) ==================== *)
-// 必须同时满足：允许送料 X76 + 安全区就绪 + 无急停 + 无故障 + 通讯正常(心跳未超时)
-s_bGlueMachineConditionMet := io_stFeeder.i_bGlueMachine_AllowFeed
-                          AND (io_stFeeder.i_bGlueMachine_SafetyOk OR TRUE) // 兼容常态有效
-                          AND (NOT io_stFeeder.i_bGlueMachine_EStop)
-                          AND (NOT io_stFeeder.i_bGlueMachine_Fault)
-                          AND (NOT io_stFeeder.i_bGlueMachine_ComFault);
-
-(* ==================== 4. 模式与使能检查 ==================== *)
-IF NOT io_stFeeder.i_bAutoMode AND NOT io_stFeeder.i_bManualMode THEN
-    io_stX2Axis.stAbs.Execute  := FALSE;
-    io_stX2Axis.stStop.Execute := FALSE;
-
-    s_bCartAtPickPos := FALSE;
-    s_bCartPermitPlace := FALSE;
-    s_bAllowPickup := FALSE;
-    s_bSafetyZoneSignal := FALSE;
-    s_bInterlockStopActive := FALSE;
-    s_iAlarmCode := 0;
-    s_bX2Fault := FALSE;
-    s_bRunning := FALSE;
-    s_iCurrentState := D760_0_INIT_TO_PICKUP;
-    s_bStepEntry := TRUE;
-
-    s_bMoveTimer_In := FALSE; s_bMoveTimer_R := TRUE;
-    s_bFullConfirmTimer_In := FALSE; s_bFullConfirmTimer_R := TRUE;
-    s_bReleaseTimer_In := FALSE; s_bReleaseTimer_R := TRUE;
-    s_bCommTimer_In := FALSE; s_bCommTimer_R := TRUE;
-
-    io_stFeeder.o_bCartAtPickPos        := s_bCartAtPickPos;
-    io_stFeeder.o_bCartPermitPlace      := s_bCartPermitPlace;
-    io_stFeeder.o_bAllowPickup          := s_bAllowPickup;
-    io_stFeeder.o_bSafetyZoneSignal     := s_bSafetyZoneSignal;
-    io_stFeeder.o_bFeederInSafetyZone   := TRUE;
-    io_stFeeder.o_bRunning              := s_bRunning;
-    io_stFeeder.o_bFault                := FALSE;
-    io_stFeeder.o_bX2Fault              := s_bX2Fault;
-    io_stFeeder.o_bInterlockStopActive  := FALSE;
-    io_stFeeder.o_iCurrentState         := s_iCurrentState;
-    io_stFeeder.o_iStationAlarmCode     := s_iAlarmCode;
-    RETURN;
-END_IF;
-
-(* ==================== 5. 停止与急停处理 ==================== *)
-IF io_stFeeder.i_bStop AND s_bRunning THEN
-    s_iCurrentState := D760_0_INIT_TO_PICKUP;
-    s_bRunning := FALSE;
-    s_bStepEntry := TRUE;
-
-    io_stX2Axis.stStop.Execute := TRUE;
-    io_stX2Axis.stAbs.Execute  := FALSE;
-
-    s_bCartPermitPlace := FALSE;
-    s_bAllowPickup := FALSE;
-    s_bSafetyZoneSignal := FALSE;
-    s_bInterlockStopActive := FALSE;
-
-    s_bMoveTimer_In := FALSE; s_bMoveTimer_R := TRUE;
-    s_bFullConfirmTimer_In := FALSE; s_bFullConfirmTimer_R := TRUE;
-    s_bReleaseTimer_In := FALSE; s_bReleaseTimer_R := TRUE;
-    s_bCommTimer_In := FALSE; s_bCommTimer_R := TRUE;
-END_IF;
-
-(* ==================== 6. 自动工艺状态机 (D760: 0~3) ==================== *)
-IF io_stFeeder.i_bAutoMode THEN
-
-    IF io_stFeeder.i_bStart AND NOT s_bStartTriggered THEN
-        s_bStartTriggered := TRUE;
+    (* ============ 2. 派生量 ============ *)
+    s_bHold := io_stBridge.bHoldFeeder;
+    // 组框机安全异常 (联机 ∧ 通讯正常 ∧ 对方安全异常): 禁止 X2 定位与转移 (R-EXT-03)
+    s_bBlock := io_stExt.bLinkMode AND (NOT io_stExt.bLinkFail) AND io_stExt.bPeerSafetyFault;
+    s_bAnyBusy := io_astAxis[1].stAbs.Busy OR io_astAxis[1].stJog.Busy OR io_astAxis[1].stHome.Busy
+                  OR io_astAxis[2].stAbs.Busy OR io_astAxis[2].stJog.Busy OR io_astAxis[2].stHome.Busy
+                  OR io_astAxis[AX_X2].stAbs.Busy OR io_astAxis[AX_X2].stJog.Busy OR io_astAxis[AX_X2].stHome.Busy;
+    s_bEyesAll := io_stIo.bFeederFrontEye1 AND io_stIo.bFeederFrontEye2
+                  AND io_stIo.bFeederRearEye1 AND io_stIo.bFeederRearEye2;
+    s_bEyesNone := (NOT io_stIo.bFeederFrontEye1) AND (NOT io_stIo.bFeederFrontEye2)
+                   AND (NOT io_stIo.bFeederRearEye1) AND (NOT io_stIo.bFeederRearEye2);
+    s_rErr := io_astAxis[AX_X2].rCurrentPos - io_stFeed.rPosPick;
+    IF s_rErr < 0.0 THEN
+        s_rErr := 0.0 - s_rErr;
     END_IF;
+    s_bAtPick := (s_rErr <= io_stFeed.rPosTol);
+    s_rErr := io_astAxis[AX_X2].rCurrentPos - io_stFeed.rPosFeed;
+    IF s_rErr < 0.0 THEN
+        s_rErr := 0.0 - s_rErr;
+    END_IF;
+    s_bAtFeed := (s_rErr <= io_stFeed.rPosTol);
+    s_rErr := io_astAxis[AX_Z].rCurrentPos - io_stBridge.rZStandby;
+    IF s_rErr < 0.0 THEN
+        s_rErr := 0.0 - s_rErr;
+    END_IF;
+    s_bZStandby := (s_rErr <= io_stFeed.rPosTol);
 
-    // 小车安全区信号：仅在接料位或待机位时置位（未进入打胶机干涉区）
-    io_stFeeder.o_bFeederInSafetyZone := (s_iCurrentState = D760_0_INIT_TO_PICKUP) OR (s_iCurrentState = D760_1_WAIT_4SLOTS_FULL);
+    (* 过程定时器 IN 每扫描先清零, 由所在步重新置位 *)
+    s_bSettleIn := FALSE;
+    s_bFullIn := FALSE;
+    s_bEmptyIn := FALSE;
+    io_stBridge.bFeedDoneClr := FALSE;
+    io_stFeed.bReqA := FALSE;
+    io_stFeed.bReqB := FALSE;
 
-    CASE s_iCurrentState OF
+    (* ============ 3. 步序 ============ *)
+    IF (NOT io_stMachine.bAuto) OR io_stMachine.bFault THEN
+        // 非自动或异常停机: 步序回 0, 清 Y44 / Y47 与轴命令
+        s_iStep := STEP_HOME;
+        s_iPhase := PH_WINDOW;
+        s_bX2Go := FALSE;
+        s_bPickDoneLatch := FALSE;
+        io_stFeed.bY44 := FALSE;
+    ELSIF (NOT s_bHold) AND (NOT s_bBlock) THEN
+        CASE s_iStep OF
+            STEP_HOME:
+                // 步 0: 入口窗口装目标 D512; 出发联锁满足后 X2 定位到 D512 (已在则直接完成)
+                io_stFeed.bY44 := FALSE;
+                IF s_iPhase = PH_WINDOW THEN
+                    s_bSettleIn := (NOT io_stMachine.bStopPending);
+                    IF s_bSettleQ THEN
+                        s_bSettleIn := FALSE;
+                        s_iPhase := PH_MOVE;
+                    END_IF;
+                ELSE
+                    IF s_bX2Go THEN
+                        IF io_astAxis[AX_X2].stAbs.Done THEN
+                            s_bX2Go := FALSE;
+                            s_iStep := STEP_WAIT_FULL;
+                            s_iPhase := PH_WINDOW;
+                        END_IF;
+                    ELSIF s_bAtPick AND (NOT s_bAnyBusy) THEN
+                        s_iStep := STEP_WAIT_FULL;
+                        s_iPhase := PH_WINDOW;
+                    ELSIF io_stBridge.bPPAtS20 AND s_bZStandby AND (NOT s_bAnyBusy)
+                          AND (NOT io_stMachine.bStopPending) THEN
+                        s_rX2Target := io_stFeed.rPosPick;
+                        s_bX2Go := TRUE;
+                    END_IF;
+                END_IF;
 
-        D760_0_INIT_TO_PICKUP: (* 0 - M760: X2移至接料点D512 *)
-            IF s_bStepEntry THEN
-                s_bInterlockStopActive := FALSE;
-                io_stX2Axis.stAbs.Position := s_rPickupPos;
-                io_stX2Axis.stAbs.Velocity := s_rFeedSpeed;
-                io_stX2Axis.stAbs.Execute  := TRUE;
+            STEP_WAIT_FULL:
+                // 步 1: 仅当 X2 在 D512 才生成 A / B 请求; 停止收尾期间不再生成
+                IF s_bAtPick AND (NOT io_stMachine.bStopPending) THEN
+                    io_stFeed.bReqA := s_bEyesNone AND (NOT io_stBridge.abFeedDone[1]);
+                    io_stFeed.bReqB := io_stIo.bFeederFrontEye1 AND io_stIo.bFeederFrontEye2
+                                       AND (NOT io_stIo.bFeederRearEye1) AND (NOT io_stIo.bFeederRearEye2)
+                                       AND (NOT io_stBridge.abFeedDone[2]);
+                END_IF;
+                s_bFullIn := s_bEyesAll;
+                IF (io_stBridge.abFeedDone[1] AND io_stBridge.abFeedDone[2] OR s_bFullQ)
+                   AND s_bZStandby AND s_bEyesAll AND (NOT s_bAnyBusy) AND (NOT io_stMachine.bStopPending) THEN
+                    s_bFullIn := FALSE;
+                    s_iStep := STEP_TO_FEED;
+                    s_iPhase := PH_WINDOW;
+                END_IF;
 
-                s_bMoveTimer_In := TRUE;
-                s_bMoveTimer_R  := FALSE;
-                s_bStepEntry    := FALSE;
-            END_IF;
+            STEP_TO_FEED:
+                // 步 2: 入口窗口装目标 D522 并清两个"X1 送料完成"; 出发条件只在出发时判一次
+                IF s_iPhase = PH_WINDOW THEN
+                    io_stBridge.bFeedDoneClr := TRUE;
+                    s_bSettleIn := TRUE;
+                    IF s_bSettleQ THEN
+                        s_bSettleIn := FALSE;
+                        s_iPhase := PH_MOVE;
+                    END_IF;
+                ELSE
+                    IF s_bX2Go THEN
+                        IF io_astAxis[AX_X2].stAbs.Done THEN
+                            s_bX2Go := FALSE;
+                            s_iStep := STEP_SEND;
+                            s_iPhase := PH_WINDOW;
+                            s_bPickDoneLatch := FALSE;
+                        END_IF;
+                    ELSIF s_bAtFeed THEN
+                        // D512 = D522 或已在送料点: 直接走完 (原程序此处卡死, 新增处理)
+                        s_iStep := STEP_SEND;
+                        s_iPhase := PH_WINDOW;
+                        s_bPickDoneLatch := FALSE;
+                    ELSIF s_bEyesAll AND io_stIo.bGlueAllowFeed AND io_stBridge.bFeedPermit AND (NOT s_bAnyBusy) THEN
+                        s_rX2Target := io_stFeed.rPosFeed;
+                        s_bX2Go := TRUE;
+                    END_IF;
+                END_IF;
 
-            // X2轴到达接料点 D512
-            IF io_stX2Axis.stAbs.Done THEN
-                io_stX2Axis.stAbs.Execute := FALSE;
-                s_bMoveTimer_In := FALSE;
-                s_bMoveTimer_R  := TRUE;
-
-                s_bCartAtPickPos := TRUE;
-                s_bCartPermitPlace := TRUE;   // 置位允许取放料机构放料
-                s_bStepEntry := TRUE;
-                s_iCurrentState := D760_1_WAIT_4SLOTS_FULL;
-            END_IF;
-
-            IF s_bMoveTimer_Q OR io_stX2Axis.stAbs.Error THEN
-                io_stX2Axis.stAbs.Execute := FALSE;
-                io_stX2Axis.stStop.Execute := TRUE;
-                s_bMoveTimer_In := FALSE;
-                s_bMoveTimer_R := TRUE;
-                s_iAlarmCode := 83; // X2轴定位超时或故障
-                s_bX2Fault := TRUE;
-                s_bRunning := FALSE;
-            END_IF;
-
-        D760_1_WAIT_4SLOTS_FULL: (* 1 - M761: 等待4卡槽物料就绪 + 打胶机全套安全条件满足 *)
-            IF s_bStepEntry THEN
-                s_bCartAtPickPos := TRUE;
-                s_bCartPermitPlace := TRUE;
-                s_bFullConfirmTimer_In := FALSE;
-                s_bFullConfirmTimer_R := TRUE;
-                s_bInterlockStopActive := FALSE;
-                s_bStepEntry := FALSE;
-            END_IF;
-
-            // 4 卡槽光电均检测到有料 (X72 & X73 & X74 & X75)
-            IF io_stFeeder.i_bCartSlotLong1_HasMat AND io_stFeeder.i_bCartSlotLong2_HasMat AND
-               io_stFeeder.i_bCartSlotShort1_HasMat AND io_stFeeder.i_bCartSlotShort2_HasMat THEN
-                s_bFullConfirmTimer_In := TRUE;
-                s_bFullConfirmTimer_R := FALSE;
-            ELSE
-                s_bFullConfirmTimer_In := FALSE;
-                s_bFullConfirmTimer_R := TRUE;
-            END_IF;
-
-            // 发车准入铁律 (STD-820):
-            // 1. 4卡槽集齐延时确认满 (T106); 2. 打胶机综合安全状态持续满足 (s_bGlueMachineConditionMet); 3. 启动触发
-            IF s_bFullConfirmTimer_Q AND s_bGlueMachineConditionMet AND s_bStartTriggered THEN
-                s_bCartPermitPlace := FALSE; // 关闭接料允许
-                s_bRunning := TRUE;
-                s_bFullConfirmTimer_In := FALSE;
-                s_bFullConfirmTimer_R := TRUE;
-                s_bStepEntry := TRUE;
-                s_iCurrentState := D760_2_MOVE_AND_HANDSHAKE;
-            END_IF;
-
-        D760_2_MOVE_AND_HANDSHAKE: (* 2 - M762/M763: X2移至放料位D522，途中持续监视+安全交握 *)
-            IF s_bStepEntry THEN
-                s_bCartAtPickPos := FALSE;
-                s_bCartPermitPlace := FALSE;
-
-                io_stX2Axis.stAbs.Position := s_rFeedPos;
-                io_stX2Axis.stAbs.Velocity := s_rFeedSpeed;
-                io_stX2Axis.stAbs.Execute  := TRUE;
-
-                s_bMoveTimer_In := TRUE;
-                s_bMoveTimer_R  := FALSE;
-                s_bStepEntry    := FALSE;
-            END_IF;
-
-            // ==================== 运行途中动态安全持续拦截 (防撞机核心) ====================
-            // 若打胶机在小车开过去途中突发急停、故障、通讯中断或取消允许，立即紧急刹车
-            IF NOT s_bGlueMachineConditionMet THEN
-                io_stX2Axis.stAbs.Execute := FALSE;
-                io_stX2Axis.stStop.Execute := TRUE; // 立即紧急制动
-                s_bAllowPickup := FALSE;
-                s_bSafetyZoneSignal := FALSE;
-                s_bInterlockStopActive := TRUE;
-                s_iAlarmCode := 85; // 打胶机突发异常/安全信号中断
-                s_bRunning := FALSE;
-            END_IF;
-
-            // X2轴到达打胶放料位 D522
-            IF io_stX2Axis.stAbs.Done AND s_bGlueMachineConditionMet THEN
-                io_stX2Axis.stAbs.Execute := FALSE;
-                s_bMoveTimer_In := FALSE;
-                s_bMoveTimer_R  := TRUE;
-
-                // 输出给打胶机的安全区信号 (Y47) 与 抓料可信号 (Y44)
-                s_bSafetyZoneSignal := TRUE;
-                s_bAllowPickup      := TRUE;
-
-                s_bCommTimer_In := TRUE;
-                s_bCommTimer_R  := FALSE;
-            END_IF;
-
-            // 打胶机取料完成信号 (X102) 到达 且 小车4卡槽物理光电全部确认脱离 (无料残留)
-            IF s_bSafetyZoneSignal AND io_stFeeder.i_bGlueMachine_PickupComplete AND
-               (NOT io_stFeeder.i_bCartSlotLong1_HasMat) AND (NOT io_stFeeder.i_bCartSlotLong2_HasMat) AND
-               (NOT io_stFeeder.i_bCartSlotShort1_HasMat) AND (NOT io_stFeeder.i_bCartSlotShort2_HasMat) THEN
-                
-                s_bAllowPickup      := FALSE; // 撤除 Y44
-                s_bSafetyZoneSignal := FALSE; // 撤除 Y47
-                s_bCommTimer_In     := FALSE;
-                s_bCommTimer_R      := TRUE;
-
-                s_bStepEntry := TRUE;
-                s_iCurrentState := D760_3_RELEASE_AND_RETURN; // 进入返回步
-            END_IF;
-
-            IF s_bMoveTimer_Q OR io_stX2Axis.stAbs.Error THEN
-                io_stX2Axis.stAbs.Execute := FALSE;
-                io_stX2Axis.stStop.Execute := TRUE;
-                s_bMoveTimer_In := FALSE;
-                s_bMoveTimer_R := TRUE;
-                s_iAlarmCode := 83;
-                s_bX2Fault := TRUE;
-                s_bRunning := FALSE;
-            ELSIF s_bCommTimer_Q THEN
-                s_bAllowPickup := FALSE;
-                s_bCommTimer_In := FALSE;
-                s_bCommTimer_R := TRUE;
-                s_iAlarmCode := 84; // 打胶机交握响应超时 (STD-820)
-            END_IF;
-
-        D760_3_RELEASE_AND_RETURN: (* 3 - M763尾段: 延时确认(T131)后X2返回接料点D512 *)
-            IF s_bStepEntry THEN
-                s_bReleaseTimer_In := TRUE;
-                s_bReleaseTimer_R  := FALSE;
-                s_bStepEntry       := FALSE;
-            END_IF;
-
-            // 4卡槽物理光电脱离防抖延时完成 (T131)
-            IF s_bReleaseTimer_Q THEN
-                s_bReleaseTimer_In := FALSE;
-                s_bReleaseTimer_R  := TRUE;
-
-                io_stX2Axis.stAbs.Position := s_rPickupPos;
-                io_stX2Axis.stAbs.Velocity := s_rFeedSpeed;
-                io_stX2Axis.stAbs.Execute  := TRUE;
-
-                s_bMoveTimer_In := TRUE;
-                s_bMoveTimer_R  := FALSE;
-            END_IF;
-
-            IF io_stX2Axis.stAbs.Done AND (NOT s_bReleaseTimer_In) THEN
-                io_stX2Axis.stAbs.Execute := FALSE;
-                s_bMoveTimer_In := FALSE;
-                s_bMoveTimer_R  := TRUE;
-
-                s_bCartAtPickPos := TRUE;
-                s_bCartPermitPlace := TRUE;
-
-                s_bStepEntry := TRUE;
-                s_iCurrentState := D760_1_WAIT_4SLOTS_FULL; // 回到 1 步等待下一批集齐
-            END_IF;
-
-            IF s_bMoveTimer_Q OR io_stX2Axis.stAbs.Error THEN
-                io_stX2Axis.stAbs.Execute := FALSE;
-                io_stX2Axis.stStop.Execute := TRUE;
-                s_bMoveTimer_In := FALSE;
-                s_bMoveTimer_R := TRUE;
-                s_iAlarmCode := 83;
-                s_bX2Fault := TRUE;
-                s_bRunning := FALSE;
-            END_IF;
+            STEP_SEND:
+                // 步 3: X2 在 D522 且 4 光电全亮 -> Y44 = 1 (任一光电灭即 0); 等打胶机取走
+                io_stFeed.bY44 := s_bAtFeed AND s_bEyesAll;
+                IF s_bPickDoneEdge THEN
+                    s_bPickDoneLatch := TRUE;
+                END_IF;
+                s_bEmptyIn := s_bEyesNone;
+                IF s_bEyesNone AND s_bPickDoneLatch THEN
+                    s_bEmptyIn := FALSE;
+                    s_bPickDoneLatch := FALSE;
+                    io_stFeed.bY44 := FALSE;
+                    s_iStep := STEP_HOME;
+                    s_iPhase := PH_WINDOW;
+                END_IF;
 
         ELSE
-            s_iCurrentState := D760_0_INIT_TO_PICKUP;
-            s_bRunning := FALSE;
-    END_CASE;
+            // 步序异常值: 回安全步 0
+            s_iStep := STEP_HOME;
+            s_iPhase := PH_WINDOW;
+            s_bX2Go := FALSE;
+        END_CASE;
+    END_IF;
 
-ELSIF io_stFeeder.i_bManualMode THEN
-    (* ==================== 7. 手动模式 ==================== *)
-    s_bRunning := FALSE;
-    s_iCurrentState := D760_0_INIT_TO_PICKUP;
-    s_bStepEntry := TRUE;
+    (* ============ 4. 轴命令: 自动模式持有, Hold / 组框机异常时 Halt, 离开自动时撤销 ============ *)
+    IF io_stMachine.bAuto AND (NOT io_stMachine.bFault) THEN
+        s_bAxisOwned := TRUE;
+        IF s_bX2Go AND (NOT s_bHold) AND (NOT s_bBlock) THEN
+            io_astAxis[AX_X2].stAbs.Position := s_rX2Target;
+            io_astAxis[AX_X2].stAbs.Velocity := io_stFeed.rAutoSpeed;
+            io_astAxis[AX_X2].stAbs.Execute := TRUE;
+            io_astAxis[AX_X2].stHalt.Execute := FALSE;
+        ELSE
+            io_astAxis[AX_X2].stAbs.Execute := FALSE;
+            io_astAxis[AX_X2].stHalt.Execute := s_bX2Go;
+        END_IF;
+        io_astAxis[AX_X2].stStop.Execute := FALSE;
+    ELSIF s_bAxisOwned THEN
+        io_astAxis[AX_X2].stAbs.Execute := FALSE;
+        io_astAxis[AX_X2].stStop.Execute := io_stMachine.bFault;
+        io_astAxis[AX_X2].stHalt.Execute := io_astAxis[AX_X2].stAbs.Busy;
+        s_bAxisOwned := io_stMachine.bFault OR io_astAxis[AX_X2].stAbs.Busy;
+    END_IF;
 
-    s_bCartAtPickPos := FALSE;
-    s_bCartPermitPlace := FALSE;
-    s_bAllowPickup := FALSE;
-    s_bSafetyZoneSignal := FALSE;
-    s_bInterlockStopActive := FALSE;
-END_IF;
+    (* ============ 5. Y47 安全区信号: X2 在 D512 且不在驱动且自动 (与步号无关) ============ *)
+    io_stFeed.bY47 := s_bAtPick AND (NOT io_astAxis[AX_X2].stAbs.Busy) AND io_stMachine.bAuto
+                      AND (NOT io_stMachine.bFault);
+    io_stIo.bQGluePickAllowed := io_stFeed.bY44;
+    io_stIo.bQGlueSafeZone := io_stFeed.bY47;
 
-(* ==================== 8. 输出映射 ==================== *)
-io_stFeeder.o_bCartAtPickPos        := s_bCartAtPickPos;
-io_stFeeder.o_bCartPermitPlace      := s_bCartPermitPlace;
-io_stFeeder.o_bAllowPickup          := s_bAllowPickup;
-io_stFeeder.o_bSafetyZoneSignal     := s_bSafetyZoneSignal;
-io_stFeeder.o_bRunning              := s_bRunning;
-io_stFeeder.o_bFault                := (s_iAlarmCode > 0);
-io_stFeeder.o_bX2Fault              := s_bX2Fault;
-io_stFeeder.o_bInterlockStopActive  := s_bInterlockStopActive;
-io_stFeeder.o_iCurrentState         := s_iCurrentState;
-io_stFeeder.o_iStationAlarmCode     := s_iAlarmCode;
+    (* ============ 6. 报警触发 ============ *)
+    // F90 / F91: 光电异常 (该侧 X1 送料完成后光电却未全亮), 1 s
+    s_bF90In := ((NOT io_stIo.bFeederFrontEye1) OR (NOT io_stIo.bFeederFrontEye2)) AND io_stBridge.abFeedDone[1];
+    s_bF91In := ((NOT io_stIo.bFeederRearEye1) OR (NOT io_stIo.bFeederRearEye2)) AND io_stBridge.abFeedDone[2];
+    io_stFeed.arrTrig[0] := s_bF90Q;
+    io_stFeed.arrTrig[1] := s_bF91Q;
+    io_stFeed.arrTrig[2] := s_bEmptyQ;      // F107 等 X102 超时 (提示类, 仍停在步 3)
+
+    (* ============ 7. 状态输出 ============ *)
+    io_stFeed.iStep := s_iStep;
+    io_stFeed.bAtRest := (s_iStep = STEP_HOME) OR (s_iStep = STEP_WAIT_FULL);
 
 END_FUNCTION_BLOCK

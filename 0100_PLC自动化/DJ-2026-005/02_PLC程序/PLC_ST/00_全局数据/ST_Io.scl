@@ -1,0 +1,163 @@
+(* ================================================================= *)
+(*  类型名称：ST_Io                                                   *)
+(*  功能描述：物理输入 / 输出映射结构体 (DJ-2026-005)                  *)
+(*  版本号：V1.0.0 (2026-10-24)                                        *)
+(*                                                                     *)
+(*  由 工程资产/io_points.csv 逐点生成：输入字段 = 'b' + 符号名去下划线, *)
+(*  输出字段 = 'bQ' + 符号名去下划线, 注释 = 原 FX5U 地址 + 信号名。   *)
+(*  输入在 OB1 之前由平台侧映射写入, 输出在 OB1 之后由平台侧读出      *)
+(*  (平台适配另立任务, 见技术方案 6)。                                 *)
+(*  不在此结构体: X1 / X2 / Z 三轴的脉冲与方向输出 (Y0~Y2, Y4~Y6),   *)
+(*  由平台轴对象 (ST_ServoAxis) 驱动; 备用点 Y7。                      *)
+(*  常闭点 (急停 / 安全门 / 伺服报警 / 变频器异常 / 触摸屏 STOP):      *)
+(*  字段值 = 物理电平, 1 = 正常, 0 = 动作 (程序里按断开 = 动作读)。    *)
+(* ================================================================= *)
+
+TYPE ST_Io
+STRUCT
+    (* ------------------ 输入 (108 点) ------------------ *)
+    bX1Home                   : BOOL;   // X0 X1轴原点
+    bX2Home                   : BOOL;   // X1 X2轴原点
+    bZHome                    : BOOL;   // X2 Z轴原点
+    bX1LimitFwd               : BOOL;   // X3 X1轴前极限
+    bX1LimitRev               : BOOL;   // X4 X1轴后极限
+    bX2LimitFwd               : BOOL;   // X5 X2轴前极限
+    bX2LimitRev               : BOOL;   // X6 X2轴后极限
+    bZLimitUp                 : BOOL;   // X7 Z轴上极限
+    bZLimitDown               : BOOL;   // X10 Z轴下极限
+    bX1ServoAlarm             : BOOL;   // X11 X1轴伺服报警
+    bX2ServoAlarm             : BOOL;   // X12 X2轴伺服报警
+    bZServoAlarm              : BOOL;   // X13 Z轴伺服报警
+    bVfd1Alarm                : BOOL;   // X14 变频器1异常
+    bVfd2Alarm                : BOOL;   // X15 变频器2异常
+    bVfd3Alarm                : BOOL;   // X16 变频器3异常
+    bVfd4Alarm                : BOOL;   // X17 变频器4异常
+    bConv1DropEye             : BOOL;   // X20 一层放料检测光电
+    bConv1PreBlock            : BOOL;   // X21 一层阻挡前接近开关
+    bConv1Pos1                : BOOL;   // X22 一层到位接近开关1
+    bConv1Pos2                : BOOL;   // X23 一层到位接近开关2
+    bConv1BlockUp1            : BOOL;   // X24 一层阻挡气缸上位1
+    bConv1BlockDown1          : BOOL;   // X25 一层阻挡气缸下位1
+    bConv1SepUp1              : BOOL;   // X26 一层分料气缸上位1
+    bConv1SepDown1            : BOOL;   // X27 一层分料气缸下位1
+    bConv2DropEye             : BOOL;   // X30 二层放料检测光电
+    bConv2PreBlock            : BOOL;   // X31 二层阻挡前接近开关
+    bConv2Pos1                : BOOL;   // X32 二层到位接近开关1
+    bConv2Pos2                : BOOL;   // X33 二层到位接近开关2
+    bConv2BlockUp1            : BOOL;   // X34 二层阻挡气缸上位1
+    bConv2BlockDown1          : BOOL;   // X35 二层阻挡气缸下位1
+    bConv2SepUp1              : BOOL;   // X36 二层分料气缸上位1
+    bConv2SepDown1            : BOOL;   // X37 二层分料气缸下位1
+    bConv3DropEye             : BOOL;   // X40 三层放料检测光电
+    bConv3PreBlock            : BOOL;   // X41 三层阻挡前接近开关
+    bConv3Pos1                : BOOL;   // X42 三层到位接近开关1
+    bConv3Pos2                : BOOL;   // X43 三层到位接近开关2
+    bConv3BlockUp1            : BOOL;   // X44 三层阻挡气缸上位1
+    bConv3BlockDown1          : BOOL;   // X45 三层阻挡气缸下位1
+    bConv3SepUp1              : BOOL;   // X46 三层分料气缸上位1
+    bConv3SepDown1            : BOOL;   // X47 三层分料气缸下位1
+    bConv4DropEye             : BOOL;   // X50 四层放料检测光电
+    bConv4PreBlock            : BOOL;   // X51 四层阻挡前接近开关
+    bConv4Pos1                : BOOL;   // X52 四层到位接近开关1
+    bConv4Pos2                : BOOL;   // X53 四层到位接近开关2
+    bConv4BlockUp1            : BOOL;   // X54 四层阻挡气缸上位1
+    bConv4BlockDown1          : BOOL;   // X55 四层阻挡气缸下位1
+    bConv4SepUp1              : BOOL;   // X56 四层分料气缸上位1
+    bConv4SepDown1            : BOOL;   // X57 四层分料气缸下位1
+    bPPFrontProd1             : BOOL;   // X60 前夹料产品检测1
+    bPPFrontProd2             : BOOL;   // X61 前夹料产品检测2
+    bPPRearProd1              : BOOL;   // X62 后夹料产品检测1
+    bPPRearProd2              : BOOL;   // X63 后夹料产品检测2
+    bPPRearClamp1             : BOOL;   // X64 夹紧气缸后夹紧位1
+    bPPRearOpen1              : BOOL;   // X65 夹紧气缸后松开位1
+    bPPFrontClamp1            : BOOL;   // X66 夹紧气缸前夹紧位1
+    bPPFrontOpen1             : BOOL;   // X67 夹紧气缸前松开位1
+    bPPLiftUp                 : BOOL;   // X70 上升气缸上位
+    bPPLiftDown               : BOOL;   // X71 上升气缸下位
+    bFeederFrontEye1          : BOOL;   // X72 送料机构前检测1
+    bFeederFrontEye2          : BOOL;   // X73 送料机构前检测2
+    bFeederRearEye1           : BOOL;   // X74 送料机构后检测1
+    bFeederRearEye2           : BOOL;   // X75 送料机构后检测1
+    bGlueAllowFeed            : BOOL;   // X76 打胶机允许送料
+    bHmiStopButton            : BOOL;   // X77 触摸屏STOP按钮
+    bResetButton              : BOOL;   // X100 复位按钮
+    bEStop                    : BOOL;   // X101 急停按钮
+    bGluePickDone             : BOOL;   // X102 打胶机取料完成信号
+    bDoorCheck2               : BOOL;   // X103 电控门检测2
+    bConv1BlockUp2            : BOOL;   // X104 一层阻挡气缸上位2
+    bConv1BlockDown2          : BOOL;   // X105 一层阻挡气缸下位2
+    bConv1SepUp2              : BOOL;   // X106 一层分料气缸上位2
+    bConv1SepDown2            : BOOL;   // X107 一层分料气缸下位2
+    bConv2BlockUp2            : BOOL;   // X110 二层阻挡气缸上位2
+    bConv2BlockDown2          : BOOL;   // X111 二层阻挡气缸下位2
+    bConv2SepUp2              : BOOL;   // X112 二层分料气缸上位2
+    bConv2SepDown2            : BOOL;   // X113 二层分料气缸下位2
+    bConv3BlockUp2            : BOOL;   // X114 三层阻挡气缸上位2
+    bConv3BlockDown2          : BOOL;   // X115 三层阻挡气缸下位2
+    bConv3SepUp2              : BOOL;   // X116 三层分料气缸上位2
+    bConv3SepDown2            : BOOL;   // X117 三层分料气缸下位2
+    bConv4BlockUp2            : BOOL;   // X120 四层阻挡气缸上位2
+    bConv4BlockDown2          : BOOL;   // X121 四层阻挡气缸下位2
+    bConv4SepUp2              : BOOL;   // X122 四层分料气缸上位2
+    bConv4SepDown2            : BOOL;   // X123 四层分料气缸下位2
+    bPPRearClamp2             : BOOL;   // X124 夹紧气缸后夹紧位2
+    bPPRearOpen2              : BOOL;   // X125 夹紧气缸后松开位2
+    bPPFrontClamp2            : BOOL;   // X126 夹紧气缸前夹紧位2
+    bPPFrontOpen2             : BOOL;   // X127 夹紧气缸前松开位2
+    bFrameDropEye1            : BOOL;   // X130 边框掉料检测1 (图纸已装, 原程序未使用)
+    bFrameDropEye2            : BOOL;   // X131 边框掉料检测2 (图纸已装, 原程序未使用)
+    bDoorL1                   : BOOL;   // X140 左1安全门
+    bDoorL2                   : BOOL;   // X141 左2安全门
+    bDoorL3                   : BOOL;   // X142 左3安全门
+    bDoorL4                   : BOOL;   // X143 左4安全门
+    bDoorR1                   : BOOL;   // X144 右1安全门
+    bDoorR2                   : BOOL;   // X145 右2安全门
+    bDoorR3                   : BOOL;   // X146 右3安全门
+    bDoorR4                   : BOOL;   // X147 右4安全门
+    bConv1Full1               : BOOL;   // X150 1层边框检测开关1
+    bConv1Full2               : BOOL;   // X151 1层边框检测开关2
+    bConv2Full1               : BOOL;   // X152 2层边框检测开关1
+    bConv2Full2               : BOOL;   // X153 2层边框检测开关2
+    bConv3Full1               : BOOL;   // X154 3层边框检测开关1
+    bConv3Full2               : BOOL;   // X155 3层边框检测开关2
+    bConv4Full1               : BOOL;   // X156 4层边框检测开关1
+    bConv4Full2               : BOOL;   // X157 4层边框检测开关2
+    bFramePauseIn             : BOOL;   // X160 组框机开门暂停信号
+    bFrameEStopIn             : BOOL;   // X161 组框机急停信号
+
+    (* ------------------ 输出 (33 点) ------------------ *)
+    bQConv1Fwd                : BOOL;   // Y10 输送线1正转
+    bQConv1Rev                : BOOL;   // Y11 输送线1反转
+    bQConv1Slow               : BOOL;   // Y12 输送线1慢速
+    bQConv2Fwd                : BOOL;   // Y13 输送线2正转
+    bQConv2Rev                : BOOL;   // Y14 输送线2反转
+    bQConv2Slow               : BOOL;   // Y15 输送线2慢速
+    bQConv3Fwd                : BOOL;   // Y16 输送线3正转
+    bQConv3Rev                : BOOL;   // Y17 输送线3反转
+    bQConv3Slow               : BOOL;   // Y20 输送线3慢速
+    bQConv4Fwd                : BOOL;   // Y21 四层输送线正转
+    bQConv4Rev                : BOOL;   // Y22 输送线4反转
+    bQConv4Slow               : BOOL;   // Y23 输送线4慢速
+    bQLampGreen               : BOOL;   // Y24 杆灯绿
+    bQLampRed                 : BOOL;   // Y25 杆灯红
+    bQLampYellow              : BOOL;   // Y26 杆灯黄
+    bQBuzzer                  : BOOL;   // Y27 蜂鸣器
+    bQConv1Block              : BOOL;   // Y30 一层阻挡气缸
+    bQConv1Sep                : BOOL;   // Y31 一层分料气缸
+    bQConv2Block              : BOOL;   // Y32 二层阻挡气缸
+    bQConv2Sep                : BOOL;   // Y33 二层分料气缸
+    bQConv3Block              : BOOL;   // Y34 三层阻挡气缸
+    bQConv3Sep                : BOOL;   // Y35 三层分料气缸
+    bQConv4Block              : BOOL;   // Y36 四层阻挡气缸
+    bQConv4Sep                : BOOL;   // Y37 四层分料气缸
+    bQPPRearClamp             : BOOL;   // Y40 取料后侧气缸夹紧
+    bQPPFrontClamp            : BOOL;   // Y41 取料前侧气缸夹紧
+    bQPPLiftUp                : BOOL;   // Y42 气缸上升
+    bQPPLiftDown              : BOOL;   // Y43 气缸下降
+    bQGluePickAllowed         : BOOL;   // Y44 抓料可
+    bQFramePause              : BOOL;   // Y45 组框机暂停
+    bQFrameEStop              : BOOL;   // Y46 组框机急停
+    bQGlueSafeZone            : BOOL;   // Y47 给打胶机安全区信号
+    bQLampResetBtn            : BOOL;   // Y50 复位按钮指示灯
+END_STRUCT
+END_TYPE

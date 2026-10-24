@@ -1,0 +1,27 @@
+(* ================================================================= *)
+(*  类型名称：ST_Bridge                                          *)
+(*  功能描述：站间中继信号 (FB_2002 只做赋值, 信号一拍延迟)                      *)
+(*  版本号：V1.0.0 (2026-10-24, DJ-2026-005 新设计)                    *)
+(*  依据：接口文档_INT.md                                              *)
+(* ================================================================= *)
+
+TYPE ST_Bridge
+STRUCT
+    bSafeZone               : BOOL;     // 取料机构在安全区 (取放料 -> 4 层)
+    abLayerReq              : ARRAY[1..4] OF BOOL;      // 各层请求取料 (4 层 -> 取放料)
+    abPickDone              : ARRAY[1..4] OF BOOL;      // 各层取料完成 (取放料 -> 本层, 本层对本层)
+    bReqA                   : BOOL;     // 前位请求 A (小车 -> 取放料)
+    bReqB                   : BOOL;     // 后位请求 B (小车 -> 取放料)
+    abFeedDone              : ARRAY[1..2] OF BOOL;      // X1 前 / 后送料完成 (取放料 -> 小车)
+    bFeedDoneClr            : BOOL;     // 清两个"X1 送料完成" (小车 -> 取放料, 步 2 入口一拍)
+    abHoldConv              : ARRAY[1..4] OF BOOL;      // 各层保持 (报警 -> 4 层)
+    bHoldPP                 : BOOL;     // 取放料保持
+    bHoldFeeder             : BOOL;     // 小车保持
+    bHoldHome               : BOOL;     // 回原点保持
+    bInitReqConv            : BOOL;     // 回原点预处理期间输送初始化 (回原点 -> 4 层)
+    bReleaseGripperLock     : BOOL;     // F80 期间禁止 Z 定位 (回原点 -> 取放料)
+    bFeedPermit             : BOOL;     // 送框许可 (组框机链路 -> 小车)
+    bPPAtS20                : BOOL;     // 取放料处于 S20 (取放料 -> 小车)
+    rZStandby               : REAL;     // Z 待机点 D500 (取放料 -> 小车)
+END_STRUCT
+END_TYPE

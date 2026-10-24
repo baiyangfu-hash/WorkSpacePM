@@ -1,0 +1,26 @@
+(* ================================================================= *)
+(*  类型名称：ST_Alarm                                           *)
+(*  功能描述：报警触发、锁存、分级输出与声光 (FB_2001 写)                        *)
+(*  版本号：V1.0.0 (2026-10-24, DJ-2026-005 新设计)                    *)
+(*  依据：接口文档_INT.md                                              *)
+(* ================================================================= *)
+
+TYPE ST_Alarm
+STRUCT
+    arrTrig                 : ARRAY[0..127] OF BOOL;    // 各机构每扫描写入的触发 (一位一写)
+    arrLatch                : ARRAY[0..127] OF BOOL;    // 自保持输出
+    bReset                  : BOOL;     // 复位键 (X100) 上升沿, 一拍
+    bFault                  : BOOL;     // 任一 A 类锁存 (-> M8)
+    bAny                    : BOOL;     // 任一非提示类锁存
+    abHoldConv              : ARRAY[1..4] OF BOOL;      // 各层保持
+    bHoldPP                 : BOOL;     // 取放料保持
+    bHoldFeeder             : BOOL;     // 小车保持
+    bHoldHome               : BOOL;     // 回原点保持
+    iAlarmNo                : INT;      // 最小锁存 F 号 (给 HMI D117), 无报警为 0
+    bLampGreen              : BOOL;     // 杆灯绿 (Y24)
+    bLampYellow             : BOOL;     // 杆灯黄 (Y26)
+    bLampRed                : BOOL;     // 杆灯红 (Y25)
+    bBuzzer                 : BOOL;     // 蜂鸣器 (Y27)
+    bResetLamp              : BOOL;     // 复位按钮灯 (Y50)
+END_STRUCT
+END_TYPE

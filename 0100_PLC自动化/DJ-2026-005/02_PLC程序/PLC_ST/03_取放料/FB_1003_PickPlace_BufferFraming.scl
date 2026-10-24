@@ -1,472 +1,469 @@
 (* ================================================================= *)
-(*  功能块名称:FB_1003_PickPlace_BufferFraming                        *)
-(*  功能描述:取放料搬运机构 - 伺服+辅助升降气缸/小车4槽位调度/10组配方 *)
-(*  版本号:V15.0.0 (辅助升降气缸高度补偿 / 小车纯4卡槽光电无气缸)     *)
+(*  功能块名称: FB_1003_PickPlace_BufferFraming                       *)
+(*  功能描述:   取放料机构 S20~S25 状态机 (成对取料, Z + X1 两轴)     *)
+(*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V14.x)      *)
 (*                                                                   *)
-(*  遵循规范:                                                        *)
-(*    - LSP-905 SCL编程规范                                          *)
-(*    - STD-840 设备对象化与接口规范                                  *)
-(*    - 原始三菱源程序: 01_梯形图.pdf (S20~S25 STL 状态机)           *)
+(*  依据:                                                            *)
+(*    - 详细设计说明书_DSN.md 6 / 3.3; 接口文档_INT.md 4.6 / 5 / 8   *)
+(*    - 原程序 PDF 的取放料块 (S20 待料 ~ S25 松开)                  *)
+(*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
+(*                                                                   *)
+(*  轴: Z = io_astAxis[1], X1 = io_astAxis[2] (沿用现有 GlobalVars    *)
+(*  轴编号, 与原程序的轴号不同, 以信号名为准)。                      *)
+(*  夹爪 / 升降缸的 Y40~Y43 由本 FB 统一写出, 回原点、准备、手动     *)
+(*  通过 stPP 的 *Req 字段提出要求 (FB_2002 汇入)。                  *)
 (* ================================================================= *)
 
 FUNCTION_BLOCK FB_1003_PickPlace_BufferFraming
 
 VAR_IN_OUT
-    io_stPickPlace              : ST_PickPlace;        // 取放料机构数据结构体
-    io_stRecipe                 : ST_RecipeManager;    // 10组配方管理器与当前生效配方
-    io_stZAxis                  : ST_ServoAxis;        // Z轴升降伺服 (对象化标准接口)
-    io_stX1Axis                 : ST_ServoAxis;        // X1轴横移伺服 (对象化标准接口)
+    io_stPP             : ST_PickPlace;     // 取放料数据
+    io_stBridge         : ST_Bridge;        // 站间中继 (读: 层请求 / A、B 请求 / Hold)
+    io_stMachine        : ST_Machine;       // 模式
+    io_stIo             : ST_Io;            // 物理输入输出
+    io_stAlarm          : ST_Alarm;         // 报警 (本 FB 不直接写, 经 arrTrig 汇总)
+    io_astAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
 END_VAR
 
 VAR
-    (* 工艺定时器 (三段式 DINT 毫秒) *)
-    fb_LiftTimer                : FB_TONR;   // 辅助升降气缸与Z轴动作超时定时器
-    s_bLiftTimer_In             : BOOL := FALSE;
-    s_bLiftTimer_Q              : BOOL := FALSE;
-    s_bLiftTimer_R              : BOOL := FALSE;
-    s_dLiftTimer_Et             : DINT := 0;
+    (* 过程定时器 *)
+    fb_tSettle          : FB_TON;       // 步入口窗口 / S25 松开计时
+    s_bSettleIn         : BOOL := FALSE;
+    s_bSettleQ          : BOOL := FALSE;
+    s_dSettleEt         : DINT := 0;
+    fb_tAB              : FB_TON;       // A 或 B 请求出现满 0.5 s
+    s_bABIn             : BOOL := FALSE;
+    s_bABQ              : BOOL := FALSE;
+    s_dABEt             : DINT := 0;
+    fb_tClamp           : FB_TON;       // 夹紧超时 (F106)
+    s_bClampIn          : BOOL := FALSE;
+    s_bClampQ           : BOOL := FALSE;
+    s_dClampEt          : DINT := 0;
 
-    fb_ClampTimer               : FB_TONR;   // 夹紧确认定时器
-    s_bClampTimer_In            : BOOL := FALSE;
-    s_bClampTimer_Q             : BOOL := FALSE;
-    s_bClampTimer_R             : BOOL := FALSE;
-    s_dClampTimer_Et            : DINT := 0;
+    (* 报警定时器: F30~F33, F66~F73, F74, F75 *)
+    fb_tF30             : FB_TON;
+    s_bF30In            : BOOL := FALSE;
+    s_bF30Q             : BOOL := FALSE;
+    s_dF30Et            : DINT := 0;
+    fb_tF31             : FB_TON;
+    s_bF31In            : BOOL := FALSE;
+    s_bF31Q             : BOOL := FALSE;
+    s_dF31Et            : DINT := 0;
+    fb_tF32             : FB_TON;
+    s_bF32In            : BOOL := FALSE;
+    s_bF32Q             : BOOL := FALSE;
+    s_dF32Et            : DINT := 0;
+    fb_tF33             : FB_TON;
+    s_bF33In            : BOOL := FALSE;
+    s_bF33Q             : BOOL := FALSE;
+    s_dF33Et            : DINT := 0;
+    fb_tF66             : FB_TON;
+    s_bF66In            : BOOL := FALSE;
+    s_bF66Q             : BOOL := FALSE;
+    s_dF66Et            : DINT := 0;
+    fb_tF67             : FB_TON;
+    s_bF67In            : BOOL := FALSE;
+    s_bF67Q             : BOOL := FALSE;
+    s_dF67Et            : DINT := 0;
+    fb_tF68             : FB_TON;
+    s_bF68In            : BOOL := FALSE;
+    s_bF68Q             : BOOL := FALSE;
+    s_dF68Et            : DINT := 0;
+    fb_tF69             : FB_TON;
+    s_bF69In            : BOOL := FALSE;
+    s_bF69Q             : BOOL := FALSE;
+    s_dF69Et            : DINT := 0;
+    fb_tF70             : FB_TON;
+    s_bF70In            : BOOL := FALSE;
+    s_bF70Q             : BOOL := FALSE;
+    s_dF70Et            : DINT := 0;
+    fb_tF71             : FB_TON;
+    s_bF71In            : BOOL := FALSE;
+    s_bF71Q             : BOOL := FALSE;
+    s_dF71Et            : DINT := 0;
+    fb_tF72             : FB_TON;
+    s_bF72In            : BOOL := FALSE;
+    s_bF72Q             : BOOL := FALSE;
+    s_dF72Et            : DINT := 0;
+    fb_tF73             : FB_TON;
+    s_bF73In            : BOOL := FALSE;
+    s_bF73Q             : BOOL := FALSE;
+    s_dF73Et            : DINT := 0;
+    fb_tF74             : FB_TON;
+    s_bF74In            : BOOL := FALSE;
+    s_bF74Q             : BOOL := FALSE;
+    s_dF74Et            : DINT := 0;
+    fb_tF75             : FB_TON;
+    s_bF75In            : BOOL := FALSE;
+    s_bF75Q             : BOOL := FALSE;
+    s_dF75Et            : DINT := 0;
 
-    fb_UnclampTimer             : FB_TONR;   // 松开确认定时器
-    s_bUnclampTimer_In          : BOOL := FALSE;
-    s_bUnclampTimer_Q           : BOOL := FALSE;
-    s_bUnclampTimer_R           : BOOL := FALSE;
-    s_dUnclampTimer_Et          : DINT := 0;
+    (* 步与轴命令状态 *)
+    s_iStep             : INT := 0;         // 0 未激活, 20~25
+    s_iPhase            : INT := 0;         // 子相
+    s_iPair             : INT := 1;         // 1 = A 前位对 (3+4 层), 2 = B 后位对 (1+2 层)
+    s_bZGo              : BOOL := FALSE;    // Z 绝对定位进行中
+    s_bX1Go             : BOOL := FALSE;    // X1 绝对定位进行中
+    s_rZTarget          : REAL := 0.0;      // Z 目标
+    s_rX1Target         : REAL := 0.0;      // X1 目标
+    s_bXStarted         : BOOL := FALSE;    // S20 中 X1 已出发 (不再算静止)
+    s_bAxisOwned        : BOOL := FALSE;    // 本 FB 持有过轴命令, 离开自动时需撤销
 
-    (* 内部夹爪与辅助升降气缸命令 (Y42/Y43 / Y40/Y41) *)
-    s_bFrontClamp               : BOOL := FALSE;
-    s_bRearClamp                : BOOL := FALSE;
-    s_bFrontClamp2              : BOOL := FALSE;
-    s_bRearClamp2               : BOOL := FALSE;
-    s_bLiftUp                   : BOOL := FALSE;     // Y42 气缸上升 (高度补偿)
-    s_bLiftDown                 : BOOL := TRUE;      // Y43 气缸下降 (放料/待机复位)
-
-    (* 状态机变量 *)
-    s_iCurrentState             : INT := 0;          // STL 步序 (20, 21, 22, 23, 24, 25)
-    s_bStepEntry                : BOOL := TRUE;
-    s_bRunning                  : BOOL := FALSE;
-    s_bStartTriggered           : BOOL := FALSE;
-    s_iPickLayer                : INT := 0;          // 当前锁定的取料层 (1..4)
-    s_iTargetSlot               : INT := 0;          // 当前锁定的小车卡槽 (1..4: 长1/长2/短1/短2)
-    s_iAlarmCode                : INT := 0;
-
-    (* 对外通知标志 *)
-    s_bPlaceDoneToCart          : BOOL := FALSE;
-    s_bAllSlotsFull             : BOOL := FALSE;
-    s_bSensorFault              : BOOL := FALSE;
-    s_bProductMissing           : BOOL := FALSE;
-    s_bX1Fault                  : BOOL := FALSE;
-    s_bZFault                   : BOOL := FALSE;
-
-    (* 工艺参数预设 *)
-    s_dLiftTimeoutMs            : DINT := 3000;
-    s_dClampConfirmMs           : DINT := 800;
-    s_dUnclampConfirmMs         : DINT := 600;
+    (* 派生量 *)
+    s_bHold             : BOOL := FALSE;
+    s_bAnyBusy          : BOOL := FALSE;    // 三轴任一在驱动
+    s_bZAtStandby       : BOOL := FALSE;
+    s_rZErr             : REAL := 0.0;
+    s_bProdAll          : BOOL := FALSE;    // X60~X63 全亮
+    s_bClampedAll       : BOOL := FALSE;    // 4 个夹紧位全亮
+    s_bReleasedAll      : BOOL := FALSE;    // 4 个松开位全亮
+    s_bAnyClamped       : BOOL := FALSE;    // 任一夹紧位亮
+    s_bAnyReleased      : BOOL := FALSE;    // 任一松开位亮
+    s_bPairA            : BOOL := FALSE;    // A 请求成立 (A 且 3、4 层请求)
+    s_bPairB            : BOOL := FALSE;    // B 请求成立 (B 且 1、2 层请求)
+    s_bPairReq          : BOOL := FALSE;    // 已选对的两层请求仍在
 END_VAR
 
 VAR CONSTANT
-    S20_IDLE                    : INT := 20;  // 待机与小车4卡槽供需调度 (升降气缸下位X71)
-    S21_UP_TO_PICK              : INT := 21;  // Z轴上升+辅助升降气缸上升(Y42)至取料高度
-    S22_CLAMP_AND_DETECT        : INT := 22;  // 4夹爪夹紧 + 4路光电工件检测
-    S23_MOVE_TO_SLOT            : INT := 23;  // X1轴横移至小车对应卡槽放料点
-    S24_DOWN_TO_PLACE           : INT := 24;  // Z轴下降+升降气缸下降(Y43)放料 + 发出取料完成信号
-    S25_UNCLAMP_AND_NOTIFY      : INT := 25;  // 4夹爪松开 + 小车满料判定与通知
+    AX_Z                : INT := 1;     // Z 轴下标
+    AX_X1               : INT := 2;     // X1 轴下标
+    AX_X2               : INT := 3;     // X2 轴下标
+    STEP_NONE           : INT := 0;
+    STEP_S20            : INT := 20;    // 待料: Z 到待机点, X1 到取料点
+    STEP_S21            : INT := 21;    // 取料准备: 升降缸上升, Z 升到取料高度
+    STEP_S22            : INT := 22;    // 夹紧
+    STEP_S23            : INT := 23;    // X1 横移到放料点
+    STEP_S24            : INT := 24;    // 放料: 升降缸下降, Z 降到放料高度
+    STEP_S25            : INT := 25;    // 松开
+    PH_WINDOW           : INT := 0;     // 步入口窗口
+    PH_MOVE             : INT := 1;     // 轴运动
+    PH_WAIT             : INT := 2;     // 等待转移
 END_VAR
 
-(* ==================== 1. 配方管理与参数加载 ==================== *)
-IF io_stRecipe.bRecipeLoadReq THEN
-    IF io_stRecipe.iActiveRecipeId >= 1 AND io_stRecipe.iActiveRecipeId <= 10 THEN
-        io_stRecipe.stActiveRecipe := io_stRecipe.astRecipes[io_stRecipe.iActiveRecipeId];
+BEGIN
+    (* ============ 1. 定时器统一调用 (顶部, 无条件) ============ *)
+    fb_tSettle(IN := s_bSettleIn, PT := io_stPP.dSettleMs, Q => s_bSettleQ, ET => s_dSettleEt);
+    fb_tAB(IN := s_bABIn, PT := io_stPP.dSettleMs, Q => s_bABQ, ET => s_dABEt);
+    fb_tClamp(IN := s_bClampIn, PT := io_stPP.dClampTimeoutMs, Q => s_bClampQ, ET => s_dClampEt);
+    fb_tF30(IN := s_bF30In, PT := io_stPP.dCylTimeoutMs, Q => s_bF30Q, ET => s_dF30Et);
+    fb_tF31(IN := s_bF31In, PT := io_stPP.dCylTimeoutMs, Q => s_bF31Q, ET => s_dF31Et);
+    fb_tF32(IN := s_bF32In, PT := io_stPP.dCylTimeoutMs, Q => s_bF32Q, ET => s_dF32Et);
+    fb_tF33(IN := s_bF33In, PT := io_stPP.dCylTimeoutMs, Q => s_bF33Q, ET => s_dF33Et);
+    fb_tF66(IN := s_bF66In, PT := io_stPP.dCylTimeoutMs, Q => s_bF66Q, ET => s_dF66Et);
+    fb_tF67(IN := s_bF67In, PT := io_stPP.dCylTimeoutMs, Q => s_bF67Q, ET => s_dF67Et);
+    fb_tF68(IN := s_bF68In, PT := io_stPP.dCylTimeoutMs, Q => s_bF68Q, ET => s_dF68Et);
+    fb_tF69(IN := s_bF69In, PT := io_stPP.dCylTimeoutMs, Q => s_bF69Q, ET => s_dF69Et);
+    fb_tF70(IN := s_bF70In, PT := io_stPP.dCylTimeoutMs, Q => s_bF70Q, ET => s_dF70Et);
+    fb_tF71(IN := s_bF71In, PT := io_stPP.dCylTimeoutMs, Q => s_bF71Q, ET => s_dF71Et);
+    fb_tF72(IN := s_bF72In, PT := io_stPP.dCylTimeoutMs, Q => s_bF72Q, ET => s_dF72Et);
+    fb_tF73(IN := s_bF73In, PT := io_stPP.dCylTimeoutMs, Q => s_bF73Q, ET => s_dF73Et);
+    fb_tF74(IN := s_bF74In, PT := io_stPP.dCylTimeoutMs, Q => s_bF74Q, ET => s_dF74Et);
+    fb_tF75(IN := s_bF75In, PT := io_stPP.dCylTimeoutMs, Q => s_bF75Q, ET => s_dF75Et);
+
+    (* ============ 2. 派生量 ============ *)
+    s_bHold := io_stBridge.bHoldPP;
+    s_bAnyBusy := io_astAxis[AX_Z].stAbs.Busy OR io_astAxis[AX_Z].stJog.Busy OR io_astAxis[AX_Z].stHome.Busy
+                  OR io_astAxis[AX_X1].stAbs.Busy OR io_astAxis[AX_X1].stJog.Busy OR io_astAxis[AX_X1].stHome.Busy
+                  OR io_astAxis[AX_X2].stAbs.Busy OR io_astAxis[AX_X2].stJog.Busy OR io_astAxis[AX_X2].stHome.Busy;
+    s_rZErr := io_astAxis[AX_Z].rCurrentPos - io_stPP.rZStandby;
+    IF s_rZErr < 0.0 THEN
+        s_rZErr := 0.0 - s_rZErr;
     END_IF;
-    io_stRecipe.bRecipeLoadReq := FALSE;
-END_IF;
-
-IF io_stRecipe.bRecipeSaveReq THEN
-    IF io_stRecipe.iActiveRecipeId >= 1 AND io_stRecipe.iActiveRecipeId <= 10 THEN
-        io_stRecipe.astRecipes[io_stRecipe.iActiveRecipeId] := io_stRecipe.stActiveRecipe;
-    END_IF;
-    io_stRecipe.bRecipeSaveReq := FALSE;
-END_IF;
-
-// 超时参数装载
-IF io_stRecipe.stActiveRecipe.iLiftActionTimeMs > 0 THEN
-    s_dLiftTimeoutMs := INT_TO_DINT(io_stRecipe.stActiveRecipe.iLiftActionTimeMs);
-ELSE
-    s_dLiftTimeoutMs := 3000;
-END_IF;
-
-IF io_stRecipe.stActiveRecipe.iClampConfirmTimeMs > 0 THEN
-    s_dClampConfirmMs := INT_TO_DINT(io_stRecipe.stActiveRecipe.iClampConfirmTimeMs);
-ELSE
-    s_dClampConfirmMs := 800;
-END_IF;
-
-(* ==================== 2. 定时器统一实例化调用 ==================== *)
-fb_LiftTimer(IN := s_bLiftTimer_In, PT := s_dLiftTimeoutMs, R := s_bLiftTimer_R, Q => s_bLiftTimer_Q, ET => s_dLiftTimer_Et);
-fb_ClampTimer(IN := s_bClampTimer_In, PT := s_dClampConfirmMs, R := s_bClampTimer_R, Q => s_bClampTimer_Q, ET => s_dClampTimer_Et);
-fb_UnclampTimer(IN := s_bUnclampTimer_In, PT := s_dUnclampConfirmMs, R := s_bUnclampTimer_R, Q => s_bUnclampTimer_Q, ET => s_dUnclampTimer_Et);
-
-(* ==================== 3. 安全区判定 ==================== *)
-// 取放料机构在安全区：待机位或仅在横移中，且升降气缸在下位 (X71)
-io_stPickPlace.o_bPickPlaceInSafetyZone := (s_iCurrentState = S20_IDLE) OR (s_iCurrentState = S23_MOVE_TO_SLOT);
-
-(* ==================== 4. 模式与使能检查 ==================== *)
-IF NOT io_stPickPlace.i_bAutoMode AND NOT io_stPickPlace.i_bManualMode THEN
-    s_bFrontClamp := FALSE; s_bRearClamp := FALSE;
-    s_bFrontClamp2 := FALSE; s_bRearClamp2 := FALSE;
-    s_bLiftUp := FALSE; s_bLiftDown := TRUE;
-
-    s_bLiftTimer_In := FALSE; s_bLiftTimer_R := TRUE;
-    s_bClampTimer_In := FALSE; s_bClampTimer_R := TRUE;
-    s_bUnclampTimer_In := FALSE; s_bUnclampTimer_R := TRUE;
-
-    s_iCurrentState := S20_IDLE;
-    s_bRunning := FALSE;
-    s_bStartTriggered := FALSE;
-    s_bStepEntry := TRUE;
-    s_iAlarmCode := 0;
-    RETURN;
-END_IF;
-
-(* ==================== 5. 停止处理 ==================== *)
-IF io_stPickPlace.i_bStop AND s_bRunning THEN
-    s_iCurrentState := S20_IDLE;
-    s_bRunning := FALSE;
-    s_bStepEntry := TRUE;
-
-    s_bFrontClamp := FALSE; s_bRearClamp := FALSE;
-    s_bFrontClamp2 := FALSE; s_bRearClamp2 := FALSE;
-    s_bLiftUp := FALSE; s_bLiftDown := TRUE;
-
-    io_stZAxis.stStop.Execute := TRUE;
-    io_stX1Axis.stStop.Execute := TRUE;
-    io_stZAxis.stAbs.Execute := FALSE;
-    io_stX1Axis.stAbs.Execute := FALSE;
-
-    s_bPlaceDoneToCart := FALSE;
-    s_bLiftTimer_In := FALSE; s_bLiftTimer_R := TRUE;
-    s_bClampTimer_In := FALSE; s_bClampTimer_R := TRUE;
-    s_bUnclampTimer_In := FALSE; s_bUnclampTimer_R := TRUE;
-END_IF;
-
-(* ==================== 6. 自动状态机 (小车4卡槽智能调度) ==================== *)
-IF io_stPickPlace.i_bAutoMode THEN
-
-    IF io_stPickPlace.i_bStart AND NOT s_bStartTriggered THEN
-        s_bStartTriggered := TRUE;
+    s_bZAtStandby := (s_rZErr <= io_stPP.rPosTol);
+    s_bProdAll := io_stIo.bPPFrontProd1 AND io_stIo.bPPFrontProd2 AND io_stIo.bPPRearProd1 AND io_stIo.bPPRearProd2;
+    s_bClampedAll := io_stIo.bPPRearClamp1 AND io_stIo.bPPRearClamp2 AND io_stIo.bPPFrontClamp1 AND io_stIo.bPPFrontClamp2;
+    s_bReleasedAll := io_stIo.bPPRearOpen1 AND io_stIo.bPPRearOpen2 AND io_stIo.bPPFrontOpen1 AND io_stIo.bPPFrontOpen2;
+    s_bAnyClamped := io_stIo.bPPRearClamp1 OR io_stIo.bPPRearClamp2 OR io_stIo.bPPFrontClamp1 OR io_stIo.bPPFrontClamp2;
+    s_bAnyReleased := io_stIo.bPPRearOpen1 OR io_stIo.bPPRearOpen2 OR io_stIo.bPPFrontOpen1 OR io_stIo.bPPFrontOpen2;
+    // A (前位对) = 3、4 层请求; B (后位对) = 1、2 层请求
+    s_bPairA := io_stBridge.bReqA AND io_stBridge.abLayerReq[3] AND io_stBridge.abLayerReq[4];
+    s_bPairB := io_stBridge.bReqB AND io_stBridge.abLayerReq[1] AND io_stBridge.abLayerReq[2];
+    IF s_iPair = 1 THEN
+        s_bPairReq := io_stBridge.abLayerReq[3] AND io_stBridge.abLayerReq[4];
+    ELSE
+        s_bPairReq := io_stBridge.abLayerReq[1] AND io_stBridge.abLayerReq[2];
     END_IF;
 
-    // 小车 4 卡槽是否已全部集齐全满 (M30)
-    s_bAllSlotsFull := io_stPickPlace.i_bCartSlotLong1_HasMat AND
-                       io_stPickPlace.i_bCartSlotLong2_HasMat AND
-                       io_stPickPlace.i_bCartSlotShort1_HasMat AND
-                       io_stPickPlace.i_bCartSlotShort2_HasMat;
+    (* 过程定时器 IN 每扫描先清零, 由所在步重新置位 (Hold / Reset 时即清零重算) *)
+    s_bSettleIn := FALSE;
+    s_bABIn := FALSE;
+    s_bClampIn := FALSE;
 
-    CASE s_iCurrentState OF
+    (* ============ 3. 其他机构对夹爪 / 升降缸的要求 (回原点 / 准备 / 手动) ============ *)
+    IF io_stPP.bGripOpenReq THEN
+        io_stPP.bClampFront := FALSE;
+        io_stPP.bClampRear := FALSE;
+    END_IF;
+    IF io_stPP.bLiftDownReq THEN
+        io_stPP.bLiftDown := TRUE;
+        io_stPP.bLiftUp := FALSE;
+    ELSIF io_stPP.bLiftUpReq THEN
+        io_stPP.bLiftUp := TRUE;
+        io_stPP.bLiftDown := FALSE;
+    END_IF;
 
-        S20_IDLE: (* 20 - 待机与小车4卡槽供需匹配调度 (气缸在下位X71) *)
-            IF s_bStepEntry THEN
-                io_stZAxis.stAbs.Execute := FALSE;
-                io_stX1Axis.stAbs.Execute := FALSE;
-                s_bLiftUp := FALSE;
-                s_bLiftDown := TRUE;      // 待机时气缸保持在下位
-                s_bPlaceDoneToCart := FALSE;
-                s_iPickLayer := 0;
-                s_iTargetSlot := 0;
-                s_bStepEntry := FALSE;
-            END_IF;
-
-            IF NOT io_stZAxis.stPower.Status THEN io_stZAxis.stPower.Enable := TRUE; END_IF;
-            IF NOT io_stX1Axis.stPower.Status THEN io_stX1Axis.stPower.Enable := TRUE; END_IF;
-
-            // 伺服报警检查
-            IF io_stZAxis.stSensor.ServoAlarm OR io_stX1Axis.stSensor.ServoAlarm THEN
-                s_iAlarmCode := 73;
-                IF io_stZAxis.stSensor.ServoAlarm THEN s_bZFault := TRUE; END_IF;
-                IF io_stX1Axis.stSensor.ServoAlarm THEN s_bX1Fault := TRUE; END_IF;
-                s_iCurrentState := S20_IDLE;
-                s_bRunning := FALSE;
-                s_bStartTriggered := FALSE;
-            END_IF;
-
-            // 自动调度准入条件:
-            // 1. 启动触发; 2. 小车在接料位 (i_bCartAtPickPos); 3. 小车允许放料 (i_bCartPermitPlace); 4. 小车未满
-            IF s_bStartTriggered AND io_stPickPlace.i_bCartAtPickPos AND io_stPickPlace.i_bCartPermitPlace AND (NOT s_bAllSlotsFull) THEN
-                
-                // 供需匹配调度算法:
-                // 规则 1: 1层(长边1)就绪 AND 小车长边1卡槽为空
-                IF (io_stPickPlace.i_bLayerRequestPickup[1] OR io_stPickPlace.i_bLayerFeedDone[1]) AND (NOT io_stPickPlace.i_bCartSlotLong1_HasMat) THEN
-                    s_iPickLayer := 1;
-                    s_iTargetSlot := 1;
-                    s_bRunning := TRUE;
-                    s_bStepEntry := TRUE;
-                    s_iCurrentState := S21_UP_TO_PICK;
-
-                // 规则 2: 2层(长边2)就绪 AND 小车长边2卡槽为空
-                ELSIF (io_stPickPlace.i_bLayerRequestPickup[2] OR io_stPickPlace.i_bLayerFeedDone[2]) AND (NOT io_stPickPlace.i_bCartSlotLong2_HasMat) THEN
-                    s_iPickLayer := 2;
-                    s_iTargetSlot := 2;
-                    s_bRunning := TRUE;
-                    s_bStepEntry := TRUE;
-                    s_iCurrentState := S21_UP_TO_PICK;
-
-                // 规则 3: 3层(短边1)就绪 AND 小车短边1卡槽为空
-                ELSIF (io_stPickPlace.i_bLayerRequestPickup[3] OR io_stPickPlace.i_bLayerFeedDone[3]) AND (NOT io_stPickPlace.i_bCartSlotShort1_HasMat) THEN
-                    s_iPickLayer := 3;
-                    s_iTargetSlot := 3;
-                    s_bRunning := TRUE;
-                    s_bStepEntry := TRUE;
-                    s_iCurrentState := S21_UP_TO_PICK;
-
-                // 规则 4: 4层(短边2)就绪 AND 小车短边2卡槽为空
-                ELSIF (io_stPickPlace.i_bLayerRequestPickup[4] OR io_stPickPlace.i_bLayerFeedDone[4]) AND (NOT io_stPickPlace.i_bCartSlotShort2_HasMat) THEN
-                    s_iPickLayer := 4;
-                    s_iTargetSlot := 4;
-                    s_bRunning := TRUE;
-                    s_bStepEntry := TRUE;
-                    s_iCurrentState := S21_UP_TO_PICK;
+    (* ============ 4. 步序 ============ *)
+    IF (NOT io_stMachine.bAuto) OR io_stMachine.bFault THEN
+        // 非自动或异常停机: 步序回 0, 轴命令清除; 夹爪和升降缸不动 (R-PP-09)
+        s_iStep := STEP_NONE;
+        s_iPhase := PH_WINDOW;
+        s_bZGo := FALSE;
+        s_bX1Go := FALSE;
+        s_bXStarted := FALSE;
+    ELSIF NOT s_bHold THEN
+        CASE s_iStep OF
+            STEP_NONE:
+                // 自动且三轴都不在驱动且无 Hold: 进入 S20
+                IF NOT s_bAnyBusy THEN
+                    s_iStep := STEP_S20;
+                    s_iPhase := PH_WINDOW;
                 END_IF;
 
-            END_IF;
-
-        S21_UP_TO_PICK: (* 21 - Z轴伺服上升 + 辅助升降气缸上升(Y42)补偿高度 *)
-            IF s_bStepEntry THEN
-                // 1. 触发辅助升降气缸上升 (Y42)
-                s_bLiftUp := TRUE;
-                s_bLiftDown := FALSE;
-
-                // 2. 根据层号下发 Z 轴定位目标
-                CASE s_iPickLayer OF
-                    1: io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PickHeightL1;
-                    2: io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PickHeightL2;
-                    3: io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PickHeightL3;
-                    4: io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PickHeightL4;
-                    ELSE io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PickHeightL1;
-                END_CASE;
-
-                IF io_stRecipe.stActiveRecipe.rZ_Speed > 0.0 THEN
-                    io_stZAxis.stAbs.Velocity := io_stRecipe.stActiveRecipe.rZ_Speed;
-                ELSE
-                    io_stZAxis.stAbs.Velocity := 100.0;
-                END_IF;
-
-                io_stZAxis.stAbs.Execute := TRUE;
-                s_bLiftTimer_In := TRUE;
-                s_bLiftTimer_R := FALSE;
-                s_bStepEntry := FALSE;
-            END_IF;
-
-            // Z轴伺服完成 + 升降气缸上位 (X70) 到位确认
-            IF io_stZAxis.stAbs.Done AND (io_stPickPlace.i_bLift_HomePos OR NOT io_stPickPlace.i_bLift_WorkPoint) THEN
-                io_stZAxis.stAbs.Execute := FALSE;
-                s_bLiftTimer_In := FALSE;
-                s_bLiftTimer_R := TRUE;
-                s_bStepEntry := TRUE;
-                s_iCurrentState := S22_CLAMP_AND_DETECT;
-
-            ELSIF s_bLiftTimer_Q OR io_stZAxis.stAbs.Error THEN
-                io_stZAxis.stAbs.Execute := FALSE;
-                io_stZAxis.stStop.Execute := TRUE;
-                s_bLiftTimer_In := FALSE;
-                s_bLiftTimer_R := TRUE;
-                s_iAlarmCode := 75; // Z轴升降或气缸上升超时故障 (F74)
-                s_iCurrentState := S20_IDLE;
-                s_bRunning := FALSE;
-            END_IF;
-
-        S22_CLAMP_AND_DETECT: (* 22 - 四夹爪夹紧 + 四光电工件检测 *)
-            IF s_bStepEntry THEN
-                s_bFrontClamp := TRUE;
-                s_bRearClamp := TRUE;
-                s_bFrontClamp2 := TRUE;
-                s_bRearClamp2 := TRUE;
-
-                s_bClampTimer_In := TRUE;
-                s_bClampTimer_R := FALSE;
-                s_bStepEntry := FALSE;
-            END_IF;
-
-            IF s_bClampTimer_Q THEN
-                s_bClampTimer_In := FALSE;
-                s_bClampTimer_R := TRUE;
-
-                // 物理夹爪夹紧确认 (Y40/Y41 闭合)
-                IF io_stPickPlace.i_bFrontClamp_Closed AND io_stPickPlace.i_bRearClamp_Closed AND
-                   io_stPickPlace.i_bFrontClamp2_Closed AND io_stPickPlace.i_bRearClamp2_Closed THEN
-                    
-                    // 工件光电检测确认
-                    IF (s_iTargetSlot <= 2 AND (io_stPickPlace.i_bLongEdge1Detect OR io_stPickPlace.i_bLongEdge2Detect)) OR
-                       (s_iTargetSlot >= 3 AND (io_stPickPlace.i_bShortEdge1Detect OR io_stPickPlace.i_bShortEdge2Detect)) OR
-                       (io_stPickPlace.i_bFrameDetect1 OR io_stPickPlace.i_bFrameDetect2) THEN
-                        s_bStepEntry := TRUE;
-                        s_iCurrentState := S23_MOVE_TO_SLOT;
-                    ELSE
-                        s_bProductMissing := TRUE;
-                        s_iAlarmCode := 72; // 工件缺失报警
-                        s_iCurrentState := S25_UNCLAMP_AND_NOTIFY;
+            STEP_S20:
+                IF s_iPhase = PH_WINDOW THEN
+                    // 入口窗口: 松开两爪, 清 4 个"取料完成"
+                    io_stPP.bClampFront := FALSE;
+                    io_stPP.bClampRear := FALSE;
+                    io_stPP.abPickDone[1] := FALSE;
+                    io_stPP.abPickDone[2] := FALSE;
+                    io_stPP.abPickDone[3] := FALSE;
+                    io_stPP.abPickDone[4] := FALSE;
+                    s_bSettleIn := TRUE;
+                    IF s_bSettleQ THEN
+                        s_bSettleIn := FALSE;
+                        s_iPhase := PH_MOVE;
                     END_IF;
-
                 ELSE
-                    s_bSensorFault := TRUE;
-                    s_iAlarmCode := 71; // 夹爪未夹紧到位
-                    s_iCurrentState := S25_UNCLAMP_AND_NOTIFY;
+                    IF NOT s_bZAtStandby THEN
+                        // Z 先动: 到待机点
+                        IF NOT s_bZGo THEN
+                            s_rZTarget := io_stPP.rZStandby;
+                            s_bZGo := TRUE;
+                        END_IF;
+                    ELSIF NOT s_bX1Go THEN
+                        // Z 到位后: A 或 B 请求出现满 0.5 s, 且不在停止收尾中
+                        s_bABIn := (s_bPairA OR s_bPairB) AND (NOT io_stMachine.bStopPending);
+                        IF s_bABQ THEN
+                            IF s_bPairA THEN
+                                s_iPair := 1;
+                            ELSE
+                                s_iPair := 2;
+                            END_IF;
+                            s_rX1Target := io_stPP.astPair[s_iPair].rXPick;
+                            s_bX1Go := TRUE;
+                            s_bXStarted := TRUE;
+                            s_bABIn := FALSE;
+                        END_IF;
+                    END_IF;
+                    IF s_bZGo AND io_astAxis[AX_Z].stAbs.Done THEN
+                        s_bZGo := FALSE;
+                    END_IF;
+                    IF s_bX1Go AND io_astAxis[AX_X1].stAbs.Done THEN
+                        s_bX1Go := FALSE;
+                        s_bXStarted := FALSE;
+                        s_iStep := STEP_S21;
+                        s_iPhase := PH_WINDOW;
+                    END_IF;
                 END_IF;
-            END_IF;
 
-        S23_MOVE_TO_SLOT: (* 23 - X1横移至小车对应卡槽示教放料点 *)
-            IF s_bStepEntry THEN
-                CASE s_iTargetSlot OF
-                    1: io_stX1Axis.stAbs.Position := io_stRecipe.stActiveRecipe.rX1_PlaceLong1_Pos;
-                    2: io_stX1Axis.stAbs.Position := io_stRecipe.stActiveRecipe.rX1_PlaceLong2_Pos;
-                    3: io_stX1Axis.stAbs.Position := io_stRecipe.stActiveRecipe.rX1_PlaceShort1_Pos;
-                    4: io_stX1Axis.stAbs.Position := io_stRecipe.stActiveRecipe.rX1_PlaceShort2_Pos;
-                    ELSE io_stX1Axis.stAbs.Position := io_stRecipe.stActiveRecipe.rX1_PlaceLong1_Pos;
-                END_CASE;
-
-                IF io_stRecipe.stActiveRecipe.rX1_Speed > 0.0 THEN
-                    io_stX1Axis.stAbs.Velocity := io_stRecipe.stActiveRecipe.rX1_Speed;
+            STEP_S21:
+                // 升降缸上升
+                io_stPP.bLiftUp := TRUE;
+                io_stPP.bLiftDown := FALSE;
+                IF s_iPhase = PH_WINDOW THEN
+                    s_bSettleIn := TRUE;
+                    IF s_bSettleQ THEN
+                        s_bSettleIn := FALSE;
+                        s_iPhase := PH_MOVE;
+                    END_IF;
                 ELSE
-                    io_stX1Axis.stAbs.Velocity := 150.0;
+                    IF s_bZGo THEN
+                        IF io_astAxis[AX_Z].stAbs.Done THEN
+                            s_bZGo := FALSE;
+                            s_iStep := STEP_S22;
+                            s_iPhase := PH_WAIT;
+                        END_IF;
+                    ELSIF s_bReleasedAll AND (NOT s_bAnyClamped) AND s_bPairReq AND io_stIo.bPPLiftUp THEN
+                        // 4 松开位亮, 4 夹紧位灭, 两层请求仍在, 升降缸已在上位: Z 升到取料高度
+                        s_rZTarget := io_stPP.astPair[s_iPair].rZPick;
+                        s_bZGo := TRUE;
+                    END_IF;
                 END_IF;
 
-                io_stX1Axis.stAbs.Execute := TRUE;
-                s_bStepEntry := FALSE;
-            END_IF;
-
-            IF io_stX1Axis.stAbs.Done THEN
-                io_stX1Axis.stAbs.Execute := FALSE;
-                s_bStepEntry := TRUE;
-                s_iCurrentState := S24_DOWN_TO_PLACE;
-
-            ELSIF io_stX1Axis.stAbs.Error THEN
-                io_stX1Axis.stAbs.Execute := FALSE;
-                io_stX1Axis.stStop.Execute := TRUE;
-                s_iAlarmCode := 74; // X1轴横移故障
-                s_iCurrentState := S20_IDLE;
-                s_bRunning := FALSE;
-            END_IF;
-
-        S24_DOWN_TO_PLACE: (* 24 - Z轴下降+升降气缸下降(Y43)放料 + 发出取料完成信号 *)
-            IF s_bStepEntry THEN
-                // 1. 辅助升降气缸下降复位 (Y43)
-                s_bLiftUp := FALSE;
-                s_bLiftDown := TRUE;
-
-                // 2. Z轴定位至放料高度
-                CASE s_iTargetSlot OF
-                    1: io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PlaceLong1_Height;
-                    2: io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PlaceLong2_Height;
-                    3: io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PlaceShort1_Height;
-                    4: io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PlaceShort2_Height;
-                    ELSE io_stZAxis.stAbs.Position := io_stRecipe.stActiveRecipe.rZ_PlaceLong1_Height;
-                END_CASE;
-
-                io_stZAxis.stAbs.Velocity := io_stRecipe.stActiveRecipe.rZ_Speed;
-                io_stZAxis.stAbs.Execute := TRUE;
-
-                // 3. 置位对应输送机层的取料完成信号
-                IF s_iPickLayer >= 1 AND s_iPickLayer <= 4 THEN
-                    io_stPickPlace.o_bLayerPickupDone[s_iPickLayer] := TRUE;
+            STEP_S22:
+                // 夹紧: 升降缸在上位才夹; 夹紧位 + 产品检测都到才转移; 5 s 不满足报 F106 并停在 S22
+                IF io_stIo.bPPLiftUp THEN
+                    io_stPP.bClampFront := TRUE;
+                    io_stPP.bClampRear := TRUE;
+                END_IF;
+                s_bClampIn := io_stPP.bClampFront AND io_stPP.bClampRear;
+                IF s_bClampedAll AND (NOT s_bAnyReleased) AND (s_bProdAll OR io_stMachine.bSimulate) THEN
+                    s_bClampIn := FALSE;
+                    s_iStep := STEP_S23;
+                    s_iPhase := PH_WINDOW;
                 END_IF;
 
-                s_bLiftTimer_In := TRUE;
-                s_bLiftTimer_R := FALSE;
-                s_bStepEntry := FALSE;
-            END_IF;
-
-            // Z轴到位且升降气缸在下位 (X71)
-            IF io_stZAxis.stAbs.Done AND (io_stPickPlace.i_bLift_WorkPoint OR NOT io_stPickPlace.i_bLift_HomePos) THEN
-                io_stZAxis.stAbs.Execute := FALSE;
-                s_bLiftTimer_In := FALSE;
-                s_bLiftTimer_R := TRUE;
-                s_bStepEntry := TRUE;
-                s_iCurrentState := S25_UNCLAMP_AND_NOTIFY;
-
-            ELSIF s_bLiftTimer_Q OR io_stZAxis.stAbs.Error THEN
-                io_stZAxis.stAbs.Execute := FALSE;
-                io_stZAxis.stStop.Execute := TRUE;
-                s_bLiftTimer_In := FALSE;
-                s_bLiftTimer_R := TRUE;
-                s_iAlarmCode := 75;
-                s_iCurrentState := S20_IDLE;
-                s_bRunning := FALSE;
-            END_IF;
-
-        S25_UNCLAMP_AND_NOTIFY: (* 25 - 4夹爪松开 + 放料完成通知 *)
-            IF s_bStepEntry THEN
-                s_bFrontClamp := FALSE;
-                s_bRearClamp := FALSE;
-                s_bFrontClamp2 := FALSE;
-                s_bRearClamp2 := FALSE;
-
-                s_bUnclampTimer_In := TRUE;
-                s_bUnclampTimer_R := FALSE;
-                s_bStepEntry := FALSE;
-            END_IF;
-
-            IF s_bUnclampTimer_Q THEN
-                s_bUnclampTimer_In := FALSE;
-                s_bUnclampTimer_R := TRUE;
-
-                // 清除对应层取料完成脉冲
-                IF s_iPickLayer >= 1 AND s_iPickLayer <= 4 THEN
-                    io_stPickPlace.o_bLayerPickupDone[s_iPickLayer] := FALSE;
+            STEP_S23:
+                // X1 横移到放料点; Z、夹爪、升降缸不动
+                IF s_iPhase = PH_WINDOW THEN
+                    s_bSettleIn := TRUE;
+                    IF s_bSettleQ THEN
+                        s_bSettleIn := FALSE;
+                        s_iPhase := PH_MOVE;
+                    END_IF;
+                ELSE
+                    IF s_bX1Go THEN
+                        IF io_astAxis[AX_X1].stAbs.Done THEN
+                            s_bX1Go := FALSE;
+                            s_iStep := STEP_S24;
+                            s_iPhase := PH_WINDOW;
+                        END_IF;
+                    ELSE
+                        s_rX1Target := io_stPP.astPair[s_iPair].rXPlace;
+                        s_bX1Go := TRUE;
+                    END_IF;
                 END_IF;
 
-                s_bPlaceDoneToCart := TRUE; // 单次放料完成
-                s_bStepEntry := TRUE;
-                s_iCurrentState := S20_IDLE; // 返回待机准备下一次取料
-            END_IF;
+            STEP_S24:
+                // 放料: 一进步就命令升降缸下降; 窗口内置"取料完成", 清对应"X1 送料完成"
+                io_stPP.bLiftDown := TRUE;
+                io_stPP.bLiftUp := FALSE;
+                IF s_iPhase = PH_WINDOW THEN
+                    IF s_iPair = 1 THEN
+                        io_stPP.abPickDone[4] := TRUE;
+                        io_stPP.abPickDone[3] := TRUE;
+                    ELSE
+                        io_stPP.abPickDone[2] := TRUE;
+                        io_stPP.abPickDone[1] := TRUE;
+                    END_IF;
+                    io_stPP.abFeedDone[s_iPair] := FALSE;
+                    s_bSettleIn := TRUE;
+                    IF s_bSettleQ THEN
+                        s_bSettleIn := FALSE;
+                        s_iPhase := PH_MOVE;
+                    END_IF;
+                ELSE
+                    IF s_bZGo THEN
+                        IF io_astAxis[AX_Z].stAbs.Done THEN
+                            s_bZGo := FALSE;
+                            s_iStep := STEP_S25;
+                            s_iPhase := PH_WAIT;
+                        END_IF;
+                    ELSIF io_stIo.bPPLiftDown AND (NOT io_stIo.bPPLiftUp) THEN
+                        // 升降缸下位亮且上位灭: Z 降到放料高度
+                        s_rZTarget := io_stPP.rZPlace;
+                        s_bZGo := TRUE;
+                    END_IF;
+                END_IF;
+
+            STEP_S25:
+                // 松开两爪, 计时到且松开位全亮: 置"X1 送料完成", 回 S20
+                io_stPP.bClampFront := FALSE;
+                io_stPP.bClampRear := FALSE;
+                s_bSettleIn := TRUE;
+                IF s_bSettleQ AND s_bReleasedAll THEN
+                    s_bSettleIn := FALSE;
+                    io_stPP.abFeedDone[s_iPair] := TRUE;
+                    s_iStep := STEP_S20;
+                    s_iPhase := PH_WINDOW;
+                END_IF;
 
         ELSE
-            s_iCurrentState := S20_IDLE;
-            s_bRunning := FALSE;
-    END_CASE;
+            // 步序异常值: 回安全步 0
+            s_iStep := STEP_NONE;
+            s_iPhase := PH_WINDOW;
+            s_bZGo := FALSE;
+            s_bX1Go := FALSE;
+        END_CASE;
+    END_IF;
 
-ELSIF io_stPickPlace.i_bManualMode THEN
-    (* ==================== 7. 手动模式 ==================== *)
-    s_bRunning := FALSE;
-    s_iCurrentState := S20_IDLE;
-    s_bStepEntry := TRUE;
-    s_bPlaceDoneToCart := FALSE;
+    (* ============ 5. 轴命令: 自动模式持有, Hold 时 Halt, 离开自动时撤销 ============ *)
+    IF io_stMachine.bAuto AND (NOT io_stMachine.bFault) THEN
+        s_bAxisOwned := TRUE;
+        IF s_bZGo AND (NOT s_bHold) THEN
+            io_astAxis[AX_Z].stAbs.Position := s_rZTarget;
+            io_astAxis[AX_Z].stAbs.Velocity := io_stPP.rAutoSpeed;
+            io_astAxis[AX_Z].stAbs.Execute := TRUE;
+            io_astAxis[AX_Z].stHalt.Execute := FALSE;
+        ELSE
+            io_astAxis[AX_Z].stAbs.Execute := FALSE;
+            io_astAxis[AX_Z].stHalt.Execute := s_bZGo AND s_bHold;
+        END_IF;
+        IF s_bX1Go AND (NOT s_bHold) THEN
+            io_astAxis[AX_X1].stAbs.Position := s_rX1Target;
+            io_astAxis[AX_X1].stAbs.Velocity := io_stPP.rAutoSpeed;
+            io_astAxis[AX_X1].stAbs.Execute := TRUE;
+            io_astAxis[AX_X1].stHalt.Execute := FALSE;
+        ELSE
+            io_astAxis[AX_X1].stAbs.Execute := FALSE;
+            io_astAxis[AX_X1].stHalt.Execute := s_bX1Go AND s_bHold;
+        END_IF;
+        io_astAxis[AX_Z].stStop.Execute := FALSE;
+        io_astAxis[AX_X1].stStop.Execute := FALSE;
+    ELSIF s_bAxisOwned THEN
+        // 离开自动: 撤销绝对定位; 异常停机给 Stop, 进手动时仍在动的轴给 Halt
+        io_astAxis[AX_Z].stAbs.Execute := FALSE;
+        io_astAxis[AX_X1].stAbs.Execute := FALSE;
+        io_astAxis[AX_Z].stStop.Execute := io_stMachine.bFault;
+        io_astAxis[AX_X1].stStop.Execute := io_stMachine.bFault;
+        io_astAxis[AX_Z].stHalt.Execute := io_astAxis[AX_Z].stAbs.Busy;
+        io_astAxis[AX_X1].stHalt.Execute := io_astAxis[AX_X1].stAbs.Busy;
+        s_bAxisOwned := io_stMachine.bFault OR io_astAxis[AX_Z].stAbs.Busy OR io_astAxis[AX_X1].stAbs.Busy;
+    END_IF;
 
-    s_bFrontClamp := io_stPickPlace.i_bLx_FrontClamp;
-    s_bRearClamp := io_stPickPlace.i_bLx_RearClamp;
-    s_bFrontClamp2 := io_stPickPlace.i_bLx_FrontClamp2;
-    s_bRearClamp2 := io_stPickPlace.i_bLx_RearClamp2;
-    s_bLiftUp := io_stPickPlace.i_bLx_LiftUp OR io_stPickPlace.i_bLx_Lift_Up;
-    s_bLiftDown := io_stPickPlace.i_bLx_LiftDown OR io_stPickPlace.i_bLx_Lift_Down;
-END_IF;
+    (* ============ 6. 夹爪 / 升降缸输出 ============ *)
+    io_stIo.bQPPRearClamp := io_stPP.bClampRear;
+    io_stIo.bQPPFrontClamp := io_stPP.bClampFront;
+    io_stIo.bQPPLiftUp := io_stPP.bLiftUp;
+    io_stIo.bQPPLiftDown := io_stPP.bLiftDown;
 
-(* ==================== 8. 执行器与输出映射 ==================== *)
-io_stPickPlace.o_bFrontClamp_Action        := s_bFrontClamp;
-io_stPickPlace.o_bFrontClamp_Release       := NOT s_bFrontClamp;
-io_stPickPlace.o_bRearClamp_Action         := s_bRearClamp;
-io_stPickPlace.o_bRearClamp_Release        := NOT s_bRearClamp;
-io_stPickPlace.o_bFrontClamp2_Action       := s_bFrontClamp2;
-io_stPickPlace.o_bFrontClamp2_Release      := NOT s_bFrontClamp2;
-io_stPickPlace.o_bRearClamp2_Action        := s_bRearClamp2;
-io_stPickPlace.o_bRearClamp2_Release       := NOT s_bRearClamp2;
+    (* ============ 7. 安全区 (R-CONV-03): 自动 = 不在 S22 / S23; 其余模式 = Z <= 待机点 ============ *)
+    IF io_stMachine.bAuto THEN
+        io_stPP.bSafeZone := (s_iStep <> STEP_S22) AND (s_iStep <> STEP_S23);
+    ELSE
+        io_stPP.bSafeZone := (io_astAxis[AX_Z].rCurrentPos <= (io_stPP.rZStandby + io_stPP.rPosTol));
+    END_IF;
 
-// 辅助升降气缸输出 (Y42/Y43)
-io_stPickPlace.o_bLift_Up                  := s_bLiftUp;
-io_stPickPlace.o_bLift_Down                := s_bLiftDown;
-io_stPickPlace.o_bLiftUp                   := s_bLiftUp;
-io_stPickPlace.o_bLiftDown                 := s_bLiftDown;
+    (* ============ 8. 报警触发 ============ *)
+    // F30 / F31: 后夹爪夹紧命令 ON 但前夹料产品检测 1 / 2 灭 (原程序命名交叉, 保持); 本机模拟时不报
+    s_bF30In := io_stPP.bClampRear AND (NOT io_stIo.bPPFrontProd1) AND (NOT io_stMachine.bSimulate);
+    s_bF31In := io_stPP.bClampRear AND (NOT io_stIo.bPPFrontProd2) AND (NOT io_stMachine.bSimulate);
+    // F32 / F33: 前夹爪夹紧命令 ON 但后夹料产品检测 1 / 2 灭
+    s_bF32In := io_stPP.bClampFront AND (NOT io_stIo.bPPRearProd1) AND (NOT io_stMachine.bSimulate);
+    s_bF33In := io_stPP.bClampFront AND (NOT io_stIo.bPPRearProd2) AND (NOT io_stMachine.bSimulate);
+    // F66~F69: 后夹爪 夹紧位 1 / 2, 松开位 1 / 2 与命令不符
+    s_bF66In := io_stPP.bClampRear AND (NOT io_stIo.bPPRearClamp1);
+    s_bF67In := io_stPP.bClampRear AND (NOT io_stIo.bPPRearClamp2);
+    s_bF68In := (NOT io_stPP.bClampRear) AND (NOT io_stIo.bPPRearOpen1);
+    s_bF69In := (NOT io_stPP.bClampRear) AND (NOT io_stIo.bPPRearOpen2);
+    // F70~F73: 前夹爪 夹紧位 1 / 2, 松开位 1 / 2 与命令不符
+    s_bF70In := io_stPP.bClampFront AND (NOT io_stIo.bPPFrontClamp1);
+    s_bF71In := io_stPP.bClampFront AND (NOT io_stIo.bPPFrontClamp2);
+    s_bF72In := (NOT io_stPP.bClampFront) AND (NOT io_stIo.bPPFrontOpen1);
+    s_bF73In := (NOT io_stPP.bClampFront) AND (NOT io_stIo.bPPFrontOpen2);
+    // F74 / F75: 升降缸上升 / 下降命令后上位 / 下位未到
+    s_bF74In := io_stPP.bLiftUp AND (NOT io_stIo.bPPLiftUp);
+    s_bF75In := io_stPP.bLiftDown AND (NOT io_stIo.bPPLiftDown);
+    io_stPP.arrTrig[0] := s_bF30Q;
+    io_stPP.arrTrig[1] := s_bF31Q;
+    io_stPP.arrTrig[2] := s_bF32Q;
+    io_stPP.arrTrig[3] := s_bF33Q;
+    io_stPP.arrTrig[4] := s_bF66Q;
+    io_stPP.arrTrig[5] := s_bF67Q;
+    io_stPP.arrTrig[6] := s_bF68Q;
+    io_stPP.arrTrig[7] := s_bF69Q;
+    io_stPP.arrTrig[8] := s_bF70Q;
+    io_stPP.arrTrig[9] := s_bF71Q;
+    io_stPP.arrTrig[10] := s_bF72Q;
+    io_stPP.arrTrig[11] := s_bF73Q;
+    io_stPP.arrTrig[12] := s_bF74Q;
+    io_stPP.arrTrig[13] := s_bF75Q;
+    io_stPP.arrTrig[14] := s_bClampQ;       // F106 夹紧超时 (只报警, 停在 S22 等待)
 
-io_stPickPlace.o_bPlaceComplete_ToFeeder   := s_bPlaceDoneToCart;
-io_stPickPlace.o_bAllSlotsFull_ToCart      := s_bAllSlotsFull;
-io_stPickPlace.o_bRunning                  := s_bRunning;
-io_stPickPlace.o_bFault                    := (s_iAlarmCode > 0);
-io_stPickPlace.o_bX1Fault                  := s_bX1Fault;
-io_stPickPlace.o_bZFault                   := s_bZFault;
-io_stPickPlace.o_iCurrentState             := s_iCurrentState;
-io_stPickPlace.o_iCurrentPickLayer         := s_iPickLayer;
-io_stPickPlace.o_iStationAlarmCode         := s_iAlarmCode;
+    (* ============ 9. 状态输出 ============ *)
+    io_stPP.iStep := s_iStep;
+    io_stPP.iPhase := s_iPhase;
+    io_stPP.iPair := s_iPair;
+    io_stPP.bAtRest := (s_iStep = STEP_NONE) OR ((s_iStep = STEP_S20) AND (NOT s_bXStarted));
 
 END_FUNCTION_BLOCK
