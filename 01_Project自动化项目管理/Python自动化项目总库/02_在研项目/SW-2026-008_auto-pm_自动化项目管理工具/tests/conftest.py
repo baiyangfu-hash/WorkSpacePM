@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import os
 import random
@@ -69,6 +70,26 @@ def qapp() -> Generator[QApplication, None, None]:
     app = _TEST_QAPPLICATION
     assert isinstance(app, QApplication)
     yield app
+
+
+# Qt tests whose leftovers must not be freed by the cyclic garbage collector at a random later moment (see tests/modbus/conftest.py).
+_QT_TEST_PREFIXES = ("tests/modbus/", "tests/qml/", "tests/ui/", "tests/e2e/test_pmf_gui.py")
+
+
+@pytest.fixture(autouse=True)
+def _qt_garbage_is_collected_on_the_gui_thread(request: pytest.FixtureRequest) -> Generator[None, None, None]:
+    """After a Qt test: let the global thread pool finish, then collect garbage here, on the GUI thread.
+
+    Left to itself the collector runs on whichever thread allocates next - possibly a QThreadPool worker - and would then
+    destroy a dead test's QObjects and timers from the wrong thread (access violation 0xC0000005 in the single-process gate run).
+    """
+    yield
+    if not request.node.nodeid.replace("\\", "/").startswith(_QT_TEST_PREFIXES):
+        return
+    from PySide6.QtCore import QThreadPool
+
+    QThreadPool.globalInstance().waitForDone(10_000)
+    gc.collect()
 
 
 @pytest.fixture
