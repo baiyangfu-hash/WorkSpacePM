@@ -1,0 +1,40 @@
+// ============================================================================
+// FB_TONR (测试用替身): 仅测试, 按扫描次数计时, 不得用于生产
+// 用途: 同 FB_TON 替身. 生产代码只能用 SysLib/timer/FB_TONR.scl (真实毫秒).
+// 注意: 计时行为未验证, 以 PLCSIM 或现场为准.
+// ============================================================================
+
+FUNCTION_BLOCK FB_TONR
+VAR_INPUT
+    IN  : BOOL;
+    R   : BOOL;   // 复位输入, 优先于 IN
+    PT  : DINT;   // 预设(测试替身: 扫描周期数)
+END_VAR
+VAR_OUTPUT
+    Q   : BOOL;
+    ET  : DINT;
+END_VAR
+VAR
+    Counter   : DINT := 0;
+END_VAR
+
+BEGIN
+    IF #R THEN
+        #Counter := 0;
+        #Q := FALSE;
+        #ET := 0;
+    ELSIF #IN THEN
+        IF #PT <= 0 THEN
+            #Q := TRUE;
+        ELSIF #Counter < #PT THEN
+            #Counter := #Counter + 1;
+            IF #Counter >= #PT THEN
+                #Q := TRUE;
+                #ET := #PT;
+            ELSE
+                #ET := #Counter;
+            END_IF;
+        END_IF;
+    END_IF;
+
+END_FUNCTION_BLOCK
