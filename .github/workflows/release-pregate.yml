@@ -60,8 +60,8 @@ jobs:
             name="$1"; shift
             echo "::group::$name"
             start=$(date +%s)
-            timeout 5400 "$PY" -X faulthandler -B -m pytest -o addopts= --no-cov -p no:cacheprovider --color=no -o faulthandler_timeout=240 -v "$@"
-            code=$?
+            code=0
+            timeout 5400 "$PY" -X faulthandler -B -m pytest -o addopts= --no-cov -p no:cacheprovider --color=no -o faulthandler_timeout=240 -v "$@" || code=$?
             echo "::endgroup::"
             echo "$name exit=$code seconds=$(( $(date +%s) - start ))" | tee -a "$RUNNER_TEMP/summary.txt"
             if [ "$code" -ne 0 ]; then echo "::error::group $name failed with exit code $code"; fi
