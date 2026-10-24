@@ -1,0 +1,15 @@
+(* ================================================================= *)
+(*  类型名称：ST_ConveyorSystem                                       *)
+(*  功能描述：4 层输送系统数据结构体 (FB_1007 通过 VAR_IN_OUT 传递)    *)
+(*  版本号：V1.0.0 (2026-10-24, DJ-2026-005 新设计)                    *)
+(*  依据：接口文档_INT.md 4.5                                          *)
+(* ================================================================= *)
+
+TYPE ST_ConveyorSystem
+STRUCT
+    astLayer                : ARRAY[1..4] OF ST_SingleLayer;  // 4 层 (1 = 最下层)
+    bAllReady               : BOOL;     // 4 层准备完成
+    bAnyRequest             : BOOL;     // 任一层有取料请求
+    bAllAtRest              : BOOL;     // 4 层都在静止点 (停止收尾判断)
+END_STRUCT
+END_TYPE

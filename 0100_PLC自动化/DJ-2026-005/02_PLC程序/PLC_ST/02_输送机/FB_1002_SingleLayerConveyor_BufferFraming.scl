@@ -1,434 +1,362 @@
 (* ================================================================= *)
-(*  功能块名称:FB_1002_SingleLayerConveyor_BufferFraming              *)
-(*  功能描述:单层边框分料输送机 - 100%复现三菱源程序(送料分料测试FB) *)
-(*  版本号:V14.0.0 (满料防侧翻自动减速 / 单阀双气缸双端全检 / 分级暂停) *)
+(*  功能块名称: FB_1002_SingleLayerConveyor_BufferFraming             *)
+(*  功能描述:   单层边框输送机 10 步状态机 (4 层各调用一次)           *)
+(*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V14.x)      *)
 (*                                                                   *)
-(*  遵循规范:                                                        *)
-(*    - LSP-905 SCL编程规范                                          *)
-(*    - 原始三菱源程序: 04_FB_FUN.pdf (送料分料测试)                 *)
+(*  依据:                                                            *)
+(*    - 详细设计说明书_DSN.md 5.1 / 5.2                              *)
+(*    - 接口文档_INT.md 4.5 / 5 / 8 / 9                              *)
+(*    - 原程序 PDF 的送料分料块 (步序 0/1/2/10/20/30/50/60/70/80)    *)
+(*  遵循规范: LSP-905 SCL编程规范; 定时器用 SysLib FB_TON (毫秒)     *)
+(*                                                                   *)
+(*  与 DSN 的差异 (评审请确认):                                      *)
+(*    1. 不再调用 FB_1011 / FB_1012: 阻挡、分料命令直接输出 Y30 系列, *)
+(*       电机三个输出直接给出; 8 个气缸位置各自一个 5 s 定时器        *)
+(*       (DSN 5.2 要求逐点报警, FB_1011 只给一个合并超时)             *)
+(*    2. 新增输入 bStopPending, 新增输出 bAtRest (DSN 4.1 停止收尾)  *)
+(*    3. 安全区丢失时, 任意步的正转 / 反转 / 慢速都立即切断           *)
+(*       (REQ R-CONV-03 "不在安全区时正在送料的立即停")                *)
 (* ================================================================= *)
 
 FUNCTION_BLOCK FB_1002_SingleLayerConveyor_BufferFraming
 
+VAR_INPUT
+    i_dInitRevMs        : DINT;     // 初始化反转时长 ms (10000)
+    i_dPreBlockMs       : DINT;     // 阻挡前到位延时 ms (3000)
+    i_dSlowFeedMs       : DINT;     // 慢速到位延时 ms (2000)
+    i_dReleaseOkMs      : DINT;     // 取走后延时, 有"取料完成" ms (1000)
+    i_dReleaseNgMs      : DINT;     // 取走后延时, 无"取料完成" ms (8000)
+    i_dStarveMs         : DINT;     // 缺料判定时间 ms (10000)
+    i_dCylTimeoutMs     : DINT;     // 气缸位置报警时间 ms (5000)
+END_VAR
+
 VAR_IN_OUT
-    io_stLayer                  : ST_SingleLayerConveyor; // 单层输送机全量数据结构体
+    io_stLayer          : ST_SingleLayer;   // 本层全部数据
 END_VAR
 
 VAR
-    (* 子功能块实例 *)
-    fb_Block                    : FB_1011_CylinderControl;  // 阻挡气缸
-    fb_Separate                 : FB_1011_CylinderControl;  // 分料气缸
-    fb_Motor                    : FB_1012_ConveyorMotor;    // 输送电机
+    (* 工艺定时器 (三段式: 顶部调用, 逻辑段置 IN, 下一扫描读 Q) *)
+    fb_tInitRev         : FB_TON;       // 步 2 反转 10 s
+    s_bInitRevIn        : BOOL := FALSE;
+    s_bInitRevQ         : BOOL := FALSE;
+    s_dInitRevEt        : DINT := 0;
 
-    (* FB_1011 结构体接口 *)
-    st_BlockCmd                 : ST_CylinderCmd;
-    st_BlockSts                 : ST_CylinderSts;
-    st_SeparateCmd              : ST_CylinderCmd;
-    st_SeparateSts              : ST_CylinderSts;
+    fb_tPreBlock        : FB_TON;       // 步 20 阻挡前到位 3 s
+    s_bPreBlockIn       : BOOL := FALSE;
+    s_bPreBlockQ        : BOOL := FALSE;
+    s_dPreBlockEt       : DINT := 0;
 
-    (* 工艺定时器 (DINT 毫秒) *)
-    fb_InitTimer                : FB_TONR;   // 10.0s 初始化反转排空定时器 (TIMER_100_FB_M_1)
-    s_bInitTimer_In             : BOOL := FALSE;
-    s_bInitTimer_Q              : BOOL := FALSE;
-    s_bInitTimer_R              : BOOL := FALSE;
-    s_dInitTimer_Et             : DINT := 0;
+    fb_tSlowFeed        : FB_TON;       // 步 60 慢速 2 s
+    s_bSlowFeedIn       : BOOL := FALSE;
+    s_bSlowFeedQ        : BOOL := FALSE;
+    s_dSlowFeedEt       : DINT := 0;
 
-    fb_PreBlockTimer            : FB_TONR;   // 3.0s 阻挡前到位延时定时器 (TIMER_100_FB_M_2, TT0[7]=30)
-    s_bPreBlockTimer_In         : BOOL := FALSE;
-    s_bPreBlockTimer_Q          : BOOL := FALSE;
-    s_bPreBlockTimer_R          : BOOL := FALSE;
-    s_dPreBlockTimer_Et         : DINT := 0;
+    fb_tRelease         : FB_TON;       // 步 80 取走后延时 1 s / 8 s
+    s_bReleaseIn        : BOOL := FALSE;
+    s_bReleaseQ         : BOOL := FALSE;
+    s_dReleaseEt        : DINT := 0;
+    s_dReleasePt        : DINT := 0;    // 本扫描生效的延时设定
 
-    fb_SlowFeedTimer            : FB_TONR;   // 2.0s 慢速定位到位延时定时器 (TT0[7]=20)
-    s_bSlowFeedTimer_In         : BOOL := FALSE;
-    s_bSlowFeedTimer_Q          : BOOL := FALSE;
-    s_bSlowFeedTimer_R          : BOOL := FALSE;
-    s_dSlowFeedTimer_Et         : DINT := 0;
+    fb_tStarve          : FB_TON;       // 缺料 10 s
+    s_bStarveIn         : BOOL := FALSE;
+    s_bStarveQ          : BOOL := FALSE;
+    s_dStarveEt         : DINT := 0;
 
-    fb_FullMaterialSlowTimer    : FB_TONR;   // 5.0s 满料防侧翻自动减速延时定时器 (TT0[9]=50)
-    s_bFullSlowTimer_In         : BOOL := FALSE;
-    s_bFullSlowTimer_Q          : BOOL := FALSE;
-    s_bFullSlowTimer_R          : BOOL := FALSE;
-    s_dFullSlowTimer_Et         : DINT := 0;
+    (* 气缸位置报警定时器: 命令后 5 s 位置未到 *)
+    fb_tBlkUp1          : FB_TON;
+    s_bBlkUp1In         : BOOL := FALSE;
+    s_bBlkUp1Q          : BOOL := FALSE;
+    s_dBlkUp1Et         : DINT := 0;
+    fb_tBlkUp2          : FB_TON;
+    s_bBlkUp2In         : BOOL := FALSE;
+    s_bBlkUp2Q          : BOOL := FALSE;
+    s_dBlkUp2Et         : DINT := 0;
+    fb_tBlkDn1          : FB_TON;
+    s_bBlkDn1In         : BOOL := FALSE;
+    s_bBlkDn1Q          : BOOL := FALSE;
+    s_dBlkDn1Et         : DINT := 0;
+    fb_tBlkDn2          : FB_TON;
+    s_bBlkDn2In         : BOOL := FALSE;
+    s_bBlkDn2Q          : BOOL := FALSE;
+    s_dBlkDn2Et         : DINT := 0;
+    fb_tSepUp1          : FB_TON;
+    s_bSepUp1In         : BOOL := FALSE;
+    s_bSepUp1Q          : BOOL := FALSE;
+    s_dSepUp1Et         : DINT := 0;
+    fb_tSepUp2          : FB_TON;
+    s_bSepUp2In         : BOOL := FALSE;
+    s_bSepUp2Q          : BOOL := FALSE;
+    s_dSepUp2Et         : DINT := 0;
+    fb_tSepDn1          : FB_TON;
+    s_bSepDn1In         : BOOL := FALSE;
+    s_bSepDn1Q          : BOOL := FALSE;
+    s_dSepDn1Et         : DINT := 0;
+    fb_tSepDn2          : FB_TON;
+    s_bSepDn2In         : BOOL := FALSE;
+    s_bSepDn2Q          : BOOL := FALSE;
+    s_dSepDn2Et         : DINT := 0;
 
-    fb_ReleaseTimer             : FB_TONR;   // 取料完成脱离延时 (有交互 1.0s / 无交互 8.0s, TIMER_100_FB_M_3)
-    s_bReleaseTimer_In          : BOOL := FALSE;
-    s_bReleaseTimer_Q           : BOOL := FALSE;
-    s_bReleaseTimer_R           : BOOL := FALSE;
-    s_dReleaseTimer_Et          : DINT := 0;
+    (* 边沿 *)
+    fb_trUnload         : FB_R_TRIG;    // 退料上升沿
+    s_bUnloadEdge       : BOOL := FALSE;
 
-    (* 内部命令变量 *)
-    s_bBlockExtend              : BOOL := FALSE;     // 阻挡气缸下位命令 (TRUE=阻挡下降)
-    s_bBlockRetract             : BOOL := FALSE;     // 阻挡气缸上位命令 (TRUE=阻挡升起)
-    s_bSeparateExtend           : BOOL := FALSE;     // 分料气缸推出命令 (TRUE=推出分料)
-    s_bSeparateRetract          : BOOL := FALSE;     // 分料气缸缩回命令 (TRUE=缩回复位)
-    s_bMotorFwd                 : BOOL := FALSE;     // 电机正转命令
-    s_bMotorRev                 : BOOL := FALSE;     // 电机反转命令
-    s_bMotorSlow                : BOOL := FALSE;     // 电机慢速命令
-    s_bFullMaterialSlowActive   : BOOL := FALSE;     // 满料防侧翻自动慢速生效标志
-
-    (* 内部状态与标志 *)
-    s_bBlockIsExtended          : BOOL := FALSE;
-    s_bBlockIsRetracted         : BOOL := FALSE;
-    s_bBlockTimeout             : BOOL := FALSE;
-    s_bBlockSensorFault         : BOOL := FALSE;
-    s_bSeparateIsExtended       : BOOL := FALSE;
-    s_bSeparateIsRetracted      : BOOL := FALSE;
-    s_bSeparateTimeout          : BOOL := FALSE;
-    s_bSeparateSensorFault      : BOOL := FALSE;
-    s_bMotorRunning             : BOOL := FALSE;
-    s_bMotorVfdAlarm            : BOOL := FALSE;
-
-    (* 状态机变量 *)
-    s_iCurrentState             : INT := 0;          // Step_S 步序 (0, 1, 2, 10, 20, 30, 50, 60, 70, 80)
-    s_bStepEntry                : BOOL := TRUE;
-    s_bRunning                  : BOOL := FALSE;
-    s_bInitDone                 : BOOL := FALSE;     // 准备完成
-    s_bRequestPickup            : BOOL := FALSE;     // 请求取料
-    s_iAlarmCode                : INT := 0;
-
-    (* 传感器综合标志 (单阀双气缸双端冗余) *)
-    s_bBlockAllUp               : BOOL := FALSE;
-    s_bBlockAllDown             : BOOL := FALSE;
-    s_bSeparateAllUp            : BOOL := FALSE;
-    s_bSeparateAllDown          : BOOL := FALSE;
-
-    (* 工艺参数预设缓存 (DINT) *)
-    s_dInitRevDurationMs        : DINT := 10000;     // 10s
-    s_dPreBlockDelayMs          : DINT := 3000;      // 3s
-    s_dSlowFeedDelayMs          : DINT := 2000;      // 2s
-    s_dFullMaterialDelayMs      : DINT := 5000;      // 5s
-    s_dSeparateTimeoutMs        : DINT := 5000;      // 5s
+    (* 状态与内部命令 *)
+    s_iStep             : INT := 0;     // 当前步
+    s_bFwd              : BOOL := FALSE;    // 正转命令 (输出前再受 Hold / 安全区限制)
+    s_bRev              : BOOL := FALSE;    // 反转命令
+    s_bSlow             : BOOL := FALSE;    // 慢速命令
+    s_bPreBlockTiming   : BOOL := FALSE;    // 步 20: 阻挡前已亮过, 计时标志 (传感器掉了也继续)
+    s_bSlowTiming       : BOOL := FALSE;    // 步 60: 慢速已开始计时标志
+    s_bPosAllOk         : BOOL := FALSE;    // 步 1: 8 个气缸位置点全部符合
+    s_bBothPick         : BOOL := FALSE;    // 取料位开关 1、2 都亮
+    s_bAnyPick          : BOOL := FALSE;    // 取料位开关 1、2 任一亮
+    s_bOutFwd           : BOOL := FALSE;    // 实际正转输出
+    s_bOutRev           : BOOL := FALSE;    // 实际反转输出
+    s_bFullSlow         : BOOL := FALSE;    // 满料减速生效
 END_VAR
 
 VAR CONSTANT
-    STEP_0_IDLE                 : INT := 0;   // 待机与模式分支
-    STEP_1_INIT_CHECK           : INT := 1;   // 初始化状态判断 (阻挡下/分料上，安全区检查)
-    STEP_2_INIT_REVERSE         : INT := 2;   // 10.0s 输送线反转退料排空
-    STEP_10_AUTO_START          : INT := 10;  // 自动启动，高速正转
-    STEP_20_PRE_BLOCK_WAIT      : INT := 20;  // 阻挡前到位，3.0s 输送延时
-    STEP_30_SEPARATE_PUSH       : INT := 30;  // 分料气缸推出
-    STEP_50_BLOCK_DOWN          : INT := 50;  // 取料位无料，阻挡气缸下降
-    STEP_60_SLOW_FEED           : INT := 60;  // 安全区确认，慢速送料，2.0s 到位延时
-    STEP_70_REQUEST_PICKUP      : INT := 70;  // 阻挡升起，请求取料
-    STEP_80_PICKUP_DONE         : INT := 80;  // 取料完成脱离延时 (1s/8s)
+    STEP_IDLE           : INT := 0;     // 分支 / 待机
+    STEP_INIT_WAIT      : INT := 1;     // 状态判断
+    STEP_INIT_RUN       : INT := 2;     // 初始化反转
+    STEP_SEND_ON        : INT := 10;    // 放行, 正转
+    STEP_ARRIVE         : INT := 20;    // 运行到阻挡前
+    STEP_SEPARATE       : INT := 30;    // 分料下降
+    STEP_BLOCK_DOWN     : INT := 50;    // 阻挡下降
+    STEP_SLOW_FEED      : INT := 60;    // 送到取料位
+    STEP_REQUEST        : INT := 70;    // 请求取料
+    STEP_RELEASE        : INT := 80;    // 等取走
 END_VAR
 
-(* ==================== 1. 工艺参数初始化与更新 ==================== *)
-IF io_stLayer.dInitRevDurationMs > 0 THEN s_dInitRevDurationMs := io_stLayer.dInitRevDurationMs; ELSE s_dInitRevDurationMs := 10000; END_IF;
-IF io_stLayer.dPreBlockDelayMs > 0 THEN s_dPreBlockDelayMs := io_stLayer.dPreBlockDelayMs; ELSE s_dPreBlockDelayMs := 3000; END_IF;
-IF io_stLayer.dSlowFeedDelayMs > 0 THEN s_dSlowFeedDelayMs := io_stLayer.dSlowFeedDelayMs; ELSE s_dSlowFeedDelayMs := 2000; END_IF;
-IF io_stLayer.dFullMaterialDelayMs > 0 THEN s_dFullMaterialDelayMs := io_stLayer.dFullMaterialDelayMs; ELSE s_dFullMaterialDelayMs := 5000; END_IF;
-IF io_stLayer.dSeparateTimeoutMs > 0 THEN s_dSeparateTimeoutMs := io_stLayer.dSeparateTimeoutMs; ELSE s_dSeparateTimeoutMs := 5000; END_IF;
+BEGIN
+    (* ============ 1. 定时器统一调用 (顶部, 无条件) ============ *)
+    fb_tInitRev(IN := s_bInitRevIn, PT := i_dInitRevMs, Q => s_bInitRevQ, ET => s_dInitRevEt);
+    fb_tPreBlock(IN := s_bPreBlockIn, PT := i_dPreBlockMs, Q => s_bPreBlockQ, ET => s_dPreBlockEt);
+    fb_tSlowFeed(IN := s_bSlowFeedIn, PT := i_dSlowFeedMs, Q => s_bSlowFeedQ, ET => s_dSlowFeedEt);
+    fb_tRelease(IN := s_bReleaseIn, PT := s_dReleasePt, Q => s_bReleaseQ, ET => s_dReleaseEt);
+    fb_tStarve(IN := s_bStarveIn, PT := i_dStarveMs, Q => s_bStarveQ, ET => s_dStarveEt);
+    fb_tBlkUp1(IN := s_bBlkUp1In, PT := i_dCylTimeoutMs, Q => s_bBlkUp1Q, ET => s_dBlkUp1Et);
+    fb_tBlkUp2(IN := s_bBlkUp2In, PT := i_dCylTimeoutMs, Q => s_bBlkUp2Q, ET => s_dBlkUp2Et);
+    fb_tBlkDn1(IN := s_bBlkDn1In, PT := i_dCylTimeoutMs, Q => s_bBlkDn1Q, ET => s_dBlkDn1Et);
+    fb_tBlkDn2(IN := s_bBlkDn2In, PT := i_dCylTimeoutMs, Q => s_bBlkDn2Q, ET => s_dBlkDn2Et);
+    fb_tSepUp1(IN := s_bSepUp1In, PT := i_dCylTimeoutMs, Q => s_bSepUp1Q, ET => s_dSepUp1Et);
+    fb_tSepUp2(IN := s_bSepUp2In, PT := i_dCylTimeoutMs, Q => s_bSepUp2Q, ET => s_dSepUp2Et);
+    fb_tSepDn1(IN := s_bSepDn1In, PT := i_dCylTimeoutMs, Q => s_bSepDn1Q, ET => s_dSepDn1Et);
+    fb_tSepDn2(IN := s_bSepDn2In, PT := i_dCylTimeoutMs, Q => s_bSepDn2Q, ET => s_dSepDn2Et);
+    fb_trUnload(IN := io_stLayer.bUnload, Q => s_bUnloadEdge);
 
-(* ==================== 2. 双端传感器冗余采集 ==================== *)
-// 阻挡单阀双气缸双端传感器综合判断
-IF io_stLayer.bBlockCylinderUp1 OR io_stLayer.bBlockCylinderUp2 THEN
-    s_bBlockAllUp := io_stLayer.bBlockCylinderUp1 AND io_stLayer.bBlockCylinderUp2;
-ELSIF io_stLayer.bBlockCylinderUp THEN
-    s_bBlockAllUp := io_stLayer.bBlockCylinderUp;
-ELSE
-    s_bBlockAllUp := FALSE;
-END_IF;
+    (* ============ 2. 本扫描派生量 ============ *)
+    s_bBothPick := io_stLayer.bPick1 AND io_stLayer.bPick2;
+    s_bAnyPick := io_stLayer.bPick1 OR io_stLayer.bPick2;
+    s_bPosAllOk := (NOT io_stLayer.bBlkUp1) AND (NOT io_stLayer.bBlkUp2)
+                   AND io_stLayer.bBlkDn1 AND io_stLayer.bBlkDn2
+                   AND io_stLayer.bSepUp1 AND io_stLayer.bSepUp2
+                   AND (NOT io_stLayer.bSepDn1) AND (NOT io_stLayer.bSepDn2);
 
-IF io_stLayer.bBlockCylinderDown1 OR io_stLayer.bBlockCylinderDown2 THEN
-    s_bBlockAllDown := io_stLayer.bBlockCylinderDown1 AND io_stLayer.bBlockCylinderDown2;
-ELSIF io_stLayer.bBlockCylinderDown THEN
-    s_bBlockAllDown := io_stLayer.bBlockCylinderDown;
-ELSE
-    s_bBlockAllDown := FALSE;
-END_IF;
+    (* 过程定时器的 IN 每扫描先清零, 由所在步重新置位 (Hold / Reset 时即清零重算) *)
+    s_bInitRevIn := FALSE;
+    s_bPreBlockIn := FALSE;
+    s_bSlowFeedIn := FALSE;
+    s_bReleaseIn := FALSE;
+    s_dReleasePt := i_dReleaseNgMs;
 
-// 分料单阀双气缸双端传感器综合判断
-IF io_stLayer.bSeparateCylinderUp1 OR io_stLayer.bSeparateCylinderUp2 THEN
-    s_bSeparateAllUp := io_stLayer.bSeparateCylinderUp1 AND io_stLayer.bSeparateCylinderUp2;
-ELSIF io_stLayer.bSeparateCylinderUp THEN
-    s_bSeparateAllUp := io_stLayer.bSeparateCylinderUp;
-ELSE
-    s_bSeparateAllUp := FALSE;
-END_IF;
+    (* ============ 3. 异常停机 / 退料上升沿: 整层复位 (R-CONV-08) ============ *)
+    IF io_stLayer.bReset OR s_bUnloadEdge THEN
+        s_iStep := STEP_IDLE;
+        s_bFwd := FALSE;
+        s_bRev := FALSE;
+        s_bSlow := FALSE;
+        s_bPreBlockTiming := FALSE;
+        s_bSlowTiming := FALSE;
+        io_stLayer.bBlockDown := FALSE;     // 阻挡升起
+        io_stLayer.bSepDown := FALSE;       // 分料升起
+        io_stLayer.bReady := FALSE;
+        io_stLayer.bRequest := FALSE;
 
-IF io_stLayer.bSeparateCylinderDown1 OR io_stLayer.bSeparateCylinderDown2 THEN
-    s_bSeparateAllDown := io_stLayer.bSeparateCylinderDown1 AND io_stLayer.bSeparateCylinderDown2;
-ELSIF io_stLayer.bSeparateCylinderDown THEN
-    s_bSeparateAllDown := io_stLayer.bSeparateCylinderDown;
-ELSE
-    s_bSeparateAllDown := FALSE;
-END_IF;
-
-(* ==================== 3. 定时器统一实例化调用 ==================== *)
-fb_InitTimer(IN := s_bInitTimer_In, PT := s_dInitRevDurationMs, R := s_bInitTimer_R, Q => s_bInitTimer_Q, ET => s_dInitTimer_Et);
-fb_PreBlockTimer(IN := s_bPreBlockTimer_In, PT := s_dPreBlockDelayMs, R := s_bPreBlockTimer_R, Q => s_bPreBlockTimer_Q, ET => s_dPreBlockTimer_Et);
-fb_SlowFeedTimer(IN := s_bSlowFeedTimer_In, PT := s_dSlowFeedDelayMs, R := s_bSlowFeedTimer_R, Q => s_bSlowFeedTimer_Q, ET => s_dSlowFeedTimer_Et);
-fb_FullMaterialSlowTimer(IN := s_bFullSlowTimer_In, PT := s_dFullMaterialDelayMs, R := s_bFullSlowTimer_R, Q => s_bFullSlowTimer_Q, ET => s_dFullSlowTimer_Et);
-
-// 取料脱离延时：有外部取料完成握手为 1000ms，否则为 8000ms
-fb_ReleaseTimer(
-    IN := s_bReleaseTimer_In,
-    PT := SEL(io_stLayer.bPickupConfirmed, 8000, 1000),
-    R  := s_bReleaseTimer_R,
-    Q  => s_bReleaseTimer_Q,
-    ET => s_dReleaseTimer_Et
-);
-
-(* ==================== 4. 满料防侧翻自动减速逻辑 ==================== *)
-// L型角铁边框在料仓后方满料贴紧时，正转运行5s后触发自动慢速，防止挤压侧翻
-IF io_stLayer.bFullMaterial1 AND io_stLayer.bFullMaterial2 AND (s_bMotorFwd OR s_bMotorSlow) THEN
-    s_bFullSlowTimer_In := TRUE;
-    s_bFullSlowTimer_R  := FALSE;
-ELSE
-    s_bFullSlowTimer_In := FALSE;
-    s_bFullSlowTimer_R  := TRUE;
-END_IF;
-s_bFullMaterialSlowActive := s_bFullSlowTimer_Q;
-
-(* ==================== 5. 模式与安全使能检查 ==================== *)
-IF NOT io_stLayer.bAutoMode AND NOT io_stLayer.bManualMode THEN
-    s_bBlockExtend := FALSE;
-    s_bBlockRetract := FALSE;
-    s_bSeparateExtend := FALSE;
-    s_bSeparateRetract := FALSE;
-    s_bMotorFwd := FALSE;
-    s_bMotorRev := FALSE;
-    s_bMotorSlow := FALSE;
-
-    s_bInitTimer_In := FALSE; s_bInitTimer_R := TRUE;
-    s_bPreBlockTimer_In := FALSE; s_bPreBlockTimer_R := TRUE;
-    s_bSlowFeedTimer_In := FALSE; s_bSlowFeedTimer_R := TRUE;
-    s_bReleaseTimer_In := FALSE; s_bReleaseTimer_R := TRUE;
-
-    s_iCurrentState := STEP_0_IDLE;
-    s_bRunning := FALSE;
-    s_bInitDone := FALSE;
-    s_bRequestPickup := FALSE;
-    s_iAlarmCode := 0;
-
-    io_stLayer.q_bBlockSolenoid      := FALSE;
-    io_stLayer.q_bSeparateSolenoid   := FALSE;
-    io_stLayer.q_bConveyorFwd        := FALSE;
-    io_stLayer.q_bConveyorRev        := FALSE;
-    io_stLayer.q_bConveyorSlow       := FALSE;
-    io_stLayer.q_bInitDone           := s_bInitDone;
-    io_stLayer.q_bRequestPickup      := s_bRequestPickup;
-    io_stLayer.q_bLayerFeedDone      := s_bRequestPickup;
-    io_stLayer.q_iCurrentState       := s_iCurrentState;
-    io_stLayer.q_iAlarmCode          := s_iAlarmCode;
-    io_stLayer.q_bRunning            := s_bRunning;
-    io_stLayer.q_bFault              := FALSE;
-    io_stLayer.q_bAnySensorFault     := FALSE;
-    RETURN;
-END_IF;
-
-(* ==================== 6. 停机处理 (电平有效, 步序清零复位) ==================== *)
-IF (io_stLayer.bStop AND s_bRunning) OR (NOT io_stLayer.bSafetyDoorOk AND s_bRunning) THEN
-    s_iCurrentState := STEP_0_IDLE;
-    s_bRunning := FALSE;
-    s_bStepEntry := TRUE;
-
-    s_bBlockExtend := FALSE;
-    s_bBlockRetract := TRUE;
-    s_bSeparateExtend := FALSE;
-    s_bSeparateRetract := TRUE;
-    s_bMotorFwd := FALSE;
-    s_bMotorRev := FALSE;
-    s_bMotorSlow := FALSE;
-
-    s_bInitTimer_In := FALSE; s_bInitTimer_R := TRUE;
-    s_bPreBlockTimer_In := FALSE; s_bPreBlockTimer_R := TRUE;
-    s_bSlowFeedTimer_In := FALSE; s_bSlowFeedTimer_R := TRUE;
-    s_bReleaseTimer_In := FALSE; s_bReleaseTimer_R := TRUE;
-    s_bRequestPickup := FALSE;
-END_IF;
-
-(* ==================== 7. 自动工艺状态机 (对齐三菱源程序) ==================== *)
-IF io_stLayer.bAutoMode THEN
-
-    IF io_stLayer.bVfdFault THEN
-        s_bMotorFwd := FALSE;
-        s_bMotorRev := FALSE;
-        s_bMotorSlow := FALSE;
-        s_iAlarmCode := 100 + io_stLayer.iLayerIndex;
-    END_IF;
-
-    CASE s_iCurrentState OF
-
-        STEP_0_IDLE: (* 0 - 初始化分支与自动待机 *)
-            s_bRequestPickup := FALSE;
-            s_bInitTimer_In := FALSE; s_bInitTimer_R := TRUE;
-            s_bPreBlockTimer_In := FALSE; s_bPreBlockTimer_R := TRUE;
-            s_bSlowFeedTimer_In := FALSE; s_bSlowFeedTimer_R := TRUE;
-            s_bReleaseTimer_In := FALSE; s_bReleaseTimer_R := TRUE;
-
-            // 分支 1: 未初始化时请求初始化，或触发退料
-            IF (io_stLayer.bInitStart AND NOT s_bInitDone) OR (NOT io_stLayer.bStart AND io_stLayer.bInitStart) THEN
-                s_bStepEntry := TRUE;
-                s_iCurrentState := STEP_1_INIT_CHECK;
-
-            // 分支 2: 准备完成 + 启动 + 机械手在安全区 ➔ 自动进入运行
-            ELSIF io_stLayer.bStart AND s_bInitDone AND io_stLayer.bRobotInSafetyPos THEN
-                s_bRunning := TRUE;
-                s_bStepEntry := TRUE;
-
-                // 自动启动直接进入持续运行 (Step 10)
-                s_iCurrentState := STEP_10_AUTO_START;
-            END_IF;
-
-        STEP_1_INIT_CHECK: (* 1 - 状态判断: 阻挡下降、分料缩回，安全区检查 *)
-            IF s_bStepEntry THEN
-                s_bBlockExtend := TRUE;       // 阻挡下降打开通道
-                s_bBlockRetract := FALSE;
-                s_bSeparateExtend := FALSE;   // 分料气缸缩回
-                s_bSeparateRetract := TRUE;
-                s_bStepEntry := FALSE;
-            END_IF;
-
-            // 必须确认: 取料机构在安全区 + 分料气缸上位确认 + 阻挡气缸下位确认
-            IF io_stLayer.bRobotInSafetyPos THEN
-                IF s_bSeparateAllUp AND s_bBlockAllDown THEN
-                    s_bStepEntry := TRUE;
-                    s_iCurrentState := STEP_2_INIT_REVERSE;
+    (* ============ 4. 本层未 Hold: 步序执行 ============ *)
+    ELSIF NOT io_stLayer.bHold THEN
+        CASE s_iStep OF
+            STEP_IDLE:
+                // 步 0 分支: 电机全停, 请求取料清零
+                io_stLayer.bRequest := FALSE;
+                s_bFwd := FALSE;
+                s_bRev := FALSE;
+                s_bSlow := FALSE;
+                IF io_stLayer.bInitReq AND (NOT io_stLayer.bReady) THEN
+                    s_iStep := STEP_INIT_WAIT;
+                ELSIF io_stLayer.bAutoRun AND io_stLayer.bReady AND io_stLayer.bSafeZone
+                      AND (NOT io_stLayer.bStopPending) THEN
+                    IF s_bAnyPick THEN
+                        s_iStep := STEP_SLOW_FEED;      // 取料位已有料, 直接去送到取料位
+                    ELSE
+                        s_iStep := STEP_SEND_ON;
+                    END_IF;
+                ELSIF (NOT io_stLayer.bAutoRun) AND (NOT io_stLayer.bInitReq) AND io_stLayer.bUnload THEN
+                    s_iStep := STEP_INIT_WAIT;          // 退料: 重新初始化
                 END_IF;
-            END_IF;
 
-        STEP_2_INIT_REVERSE: (* 2 - 初始化反转排空 10.0s *)
-            IF s_bStepEntry THEN
-                s_bMotorRev := TRUE;
-                s_bMotorSlow := FALSE;
-                s_bMotorFwd := FALSE;
-                s_bInitTimer_In := TRUE;
-                s_bInitTimer_R := FALSE;
-                s_bStepEntry := FALSE;
-            END_IF;
+            STEP_INIT_WAIT:
+                // 步 1: 阻挡下降, 分料升起, 等 8 个位置点符合
+                io_stLayer.bBlockDown := TRUE;
+                io_stLayer.bSepDown := FALSE;
+                IF io_stLayer.bSafeZone AND s_bPosAllOk THEN
+                    s_bRev := TRUE;
+                    s_iStep := STEP_INIT_RUN;
+                END_IF;
 
-            // 10s 计时完成
-            IF s_bInitTimer_Q THEN
-                s_bMotorRev := FALSE;
-                s_bInitTimer_In := FALSE;
-                s_bInitTimer_R := TRUE;
-                s_bInitDone := TRUE;          // 准备完成
-                s_bStepEntry := TRUE;
-                s_iCurrentState := STEP_0_IDLE; // 返回 0 步待机
-            END_IF;
+            STEP_INIT_RUN:
+                // 步 2: 反转排空 (时长 i_dInitRevMs), 到时置准备完成
+                s_bRev := TRUE;
+                s_bInitRevIn := TRUE;
+                IF s_bInitRevQ THEN
+                    s_bRev := FALSE;
+                    s_bSlow := FALSE;
+                    io_stLayer.bReady := TRUE;
+                    io_stLayer.bUnload := FALSE;
+                    s_iStep := STEP_IDLE;
+                END_IF;
 
-        STEP_10_AUTO_START: (* 10 - 自动启动: 阻挡升起，输送慢速持续运行 *)
-            // SUPPRESS_TAMPER_CHECK: 架构师已批准
-            // 阻挡气缸升起，分料缩回复位，物理无干涉
-            s_bBlockExtend := FALSE;
-            s_bBlockRetract := TRUE;
-            s_bSeparateExtend := FALSE;
-            s_bSeparateRetract := TRUE;
+            STEP_SEND_ON:
+                // 步 10: 阻挡 / 分料升起, 位置到后快速正转
+                io_stLayer.bRequest := FALSE;
+                IF io_stLayer.bAutoRun THEN
+                    io_stLayer.bBlockDown := FALSE;
+                END_IF;
+                io_stLayer.bSepDown := FALSE;
+                IF io_stLayer.bStopPending AND (NOT io_stLayer.bPreBlock) THEN
+                    // 停止收尾: 还没有料到阻挡前, 不再开新循环
+                    s_bFwd := FALSE;
+                    s_iStep := STEP_IDLE;
+                ELSIF io_stLayer.bSafeZone AND io_stLayer.bBlkUp1 AND io_stLayer.bBlkUp2
+                      AND io_stLayer.bSepUp1 AND io_stLayer.bSepUp2 THEN
+                    s_bFwd := TRUE;
+                    s_bSlow := FALSE;
+                    s_iStep := STEP_ARRIVE;
+                END_IF;
 
-            // 当机械手在安全区无交互时，保持慢速运行；当发生取料交互时，停止输送防干涉
-            IF io_stLayer.bRobotInSafetyPos THEN
-                s_bMotorFwd := TRUE;
-                s_bMotorSlow := TRUE;
-                s_bMotorRev := FALSE;
-                
-                // 物料到位后发出取料请求
-                IF io_stLayer.bPositionSensor1 AND io_stLayer.bPositionSensor2 THEN
-                    s_bRequestPickup := TRUE;
+            STEP_ARRIVE:
+                // 步 20: 阻挡前到位光电一亮就计时, 掉了也继续; 到时停正转
+                IF io_stLayer.bPreBlock THEN
+                    s_bPreBlockTiming := TRUE;
+                END_IF;
+                s_bPreBlockIn := s_bPreBlockTiming;
+                IF s_bPreBlockQ THEN
+                    s_bFwd := FALSE;
+                    s_bPreBlockTiming := FALSE;
+                    s_iStep := STEP_SEPARATE;
+                ELSIF io_stLayer.bStopPending AND (NOT s_bPreBlockTiming) THEN
+                    s_bFwd := FALSE;
+                    s_iStep := STEP_IDLE;
+                END_IF;
+
+            STEP_SEPARATE:
+                // 步 30: 分料下降压住第 2 根
+                IF io_stLayer.bPreBlock AND io_stLayer.bSepUp1 AND io_stLayer.bSepUp2 THEN
+                    io_stLayer.bSepDown := TRUE;
+                END_IF;
+                IF io_stLayer.bSepDn1 AND io_stLayer.bSepDn2 THEN
+                    s_iStep := STEP_BLOCK_DOWN;
+                END_IF;
+
+            STEP_BLOCK_DOWN:
+                // 步 50: 取料位空且阻挡前有料才放下阻挡, 让第 1 根通过
+                IF (NOT s_bAnyPick) AND io_stLayer.bPreBlock THEN
+                    io_stLayer.bBlockDown := TRUE;
+                    IF io_stLayer.bBlkDn1 AND io_stLayer.bBlkDn2 THEN
+                        s_iStep := STEP_SLOW_FEED;
+                    END_IF;
+                END_IF;
+
+            STEP_SLOW_FEED:
+                // 步 60: 安全区内正转送到取料位; 两个开关都亮转慢速并计时
+                IF io_stLayer.bSafeZone THEN
+                    s_bFwd := TRUE;
+                    s_bSlow := s_bBothPick;
+                    IF s_bBothPick THEN
+                        s_bSlowTiming := TRUE;
+                    END_IF;
                 ELSE
-                    s_bRequestPickup := FALSE;
+                    s_bFwd := FALSE;
+                    s_bSlow := FALSE;
+                    s_bSlowTiming := FALSE;
                 END_IF;
-            ELSE
-                s_bMotorFwd := FALSE;
-                s_bMotorSlow := FALSE;
-                s_bMotorRev := FALSE;
-                
-                // 交互完成后，若物料已被取走，则清除请求
-                IF NOT io_stLayer.bPositionSensor1 AND NOT io_stLayer.bPositionSensor2 THEN
-                    s_bRequestPickup := FALSE;
+                s_bSlowFeedIn := s_bSlowTiming;
+                IF s_bSlowFeedQ THEN
+                    s_bFwd := FALSE;
+                    s_bSlow := FALSE;
+                    s_bSlowTiming := FALSE;
+                    s_iStep := STEP_REQUEST;
                 END_IF;
-            END_IF;
+
+            STEP_REQUEST:
+                // 步 70: 阻挡升起, 电机都停且位置到后发请求取料
+                io_stLayer.bBlockDown := FALSE;
+                IF s_bBothPick AND io_stLayer.bBlkUp1 AND io_stLayer.bBlkUp2
+                   AND (NOT s_bOutFwd) AND (NOT s_bOutRev) AND (NOT s_bFwd) AND (NOT s_bSlow) THEN
+                    io_stLayer.bRequest := TRUE;
+                    s_iStep := STEP_RELEASE;
+                END_IF;
+
+            STEP_RELEASE:
+                // 步 80: 等取走; 取料位两开关都灭后按"取料完成"选 1 s / 8 s (每扫描重判)
+                io_stLayer.bRequest := TRUE;
+                IF io_stLayer.bPickDone THEN
+                    s_dReleasePt := i_dReleaseOkMs;
+                ELSE
+                    s_dReleasePt := i_dReleaseNgMs;
+                END_IF;
+                IF NOT s_bAnyPick THEN
+                    s_bReleaseIn := TRUE;
+                END_IF;
+                IF s_bReleaseQ THEN
+                    io_stLayer.bRequest := FALSE;
+                    IF io_stLayer.bStopPending THEN
+                        s_iStep := STEP_IDLE;       // 停止收尾: 不再开新循环
+                    ELSE
+                        s_iStep := STEP_SEND_ON;
+                    END_IF;
+                END_IF;
 
         ELSE
-            s_iCurrentState := STEP_0_IDLE;
-            s_bRunning := FALSE;
-    END_CASE;
+            // 步序异常值: 回安全步 0
+            s_iStep := STEP_IDLE;
+        END_CASE;
+    END_IF;
 
-ELSIF io_stLayer.bManualMode THEN
-    (* ==================== 8. 手动模式 ==================== *)
-    s_bRunning := FALSE;
-    s_iCurrentState := STEP_0_IDLE;
-    s_bStepEntry := TRUE;
-    s_bRequestPickup := FALSE;
+    (* ============ 5. 电机输出: Hold 或不在安全区一律切断 (R-CONV-03/04) ============ *)
+    s_bOutFwd := s_bFwd AND (NOT io_stLayer.bHold) AND io_stLayer.bSafeZone;
+    s_bOutRev := s_bRev AND (NOT io_stLayer.bHold) AND io_stLayer.bSafeZone;
+    // 满料减速: 满料 1、2 同亮且正转时立即慢速, 条件消失立即撤销 (R-CONV-02)
+    s_bFullSlow := io_stLayer.bFull1 AND io_stLayer.bFull2 AND s_bOutFwd;
+    io_stLayer.bFwd := s_bOutFwd;
+    io_stLayer.bRev := s_bOutRev;
+    // 慢速只在有方向时输出 (变频器约定: 单独慢速不转动)
+    io_stLayer.bSlow := (s_bSlow OR s_bFullSlow) AND (s_bOutFwd OR s_bOutRev);
 
-    s_bBlockExtend := io_stLayer.bManBlockExtend;
-    s_bBlockRetract := io_stLayer.bManBlockRetract AND NOT io_stLayer.bManBlockExtend;
+    (* ============ 6. 缺料 (R-CONV-05): 正转连续 10 s 既没到阻挡前又没到取料位 ============ *)
+    s_bStarveIn := s_bOutFwd AND (NOT io_stLayer.bPreBlock) AND (NOT s_bBothPick);
+    io_stLayer.arrTrig[8] := s_bStarveQ;
 
-    s_bSeparateExtend := io_stLayer.bManSeparatePush;
-    s_bSeparateRetract := NOT io_stLayer.bManSeparatePush;
+    (* ============ 7. 气缸位置报警 (R-CONV-06): 命令后 i_dCylTimeoutMs 位置未到 ============ *)
+    s_bBlkUp1In := (NOT io_stLayer.bBlockDown) AND (NOT io_stLayer.bBlkUp1);
+    s_bBlkUp2In := (NOT io_stLayer.bBlockDown) AND (NOT io_stLayer.bBlkUp2);
+    s_bBlkDn1In := io_stLayer.bBlockDown AND (NOT io_stLayer.bBlkDn1);
+    s_bBlkDn2In := io_stLayer.bBlockDown AND (NOT io_stLayer.bBlkDn2);
+    s_bSepUp1In := (NOT io_stLayer.bSepDown) AND (NOT io_stLayer.bSepUp1);
+    s_bSepUp2In := (NOT io_stLayer.bSepDown) AND (NOT io_stLayer.bSepUp2);
+    s_bSepDn1In := io_stLayer.bSepDown AND (NOT io_stLayer.bSepDn1);
+    s_bSepDn2In := io_stLayer.bSepDown AND (NOT io_stLayer.bSepDn2);
+    io_stLayer.arrTrig[0] := s_bBlkUp1Q;
+    io_stLayer.arrTrig[1] := s_bBlkUp2Q;
+    io_stLayer.arrTrig[2] := s_bBlkDn1Q;
+    io_stLayer.arrTrig[3] := s_bBlkDn2Q;
+    io_stLayer.arrTrig[4] := s_bSepUp1Q;
+    io_stLayer.arrTrig[5] := s_bSepUp2Q;
+    io_stLayer.arrTrig[6] := s_bSepDn1Q;
+    io_stLayer.arrTrig[7] := s_bSepDn2Q;
 
-    s_bMotorFwd := io_stLayer.bManConveyorFwd;
-    s_bMotorRev := io_stLayer.bManConveyorRev;
-    s_bMotorSlow := io_stLayer.bManConveyorSlow;
-
-END_IF;
-
-(* ==================== 9. 调用标准子 FB (气缸/电机) ==================== *)
-st_BlockCmd.Extend := s_bBlockExtend;
-st_BlockCmd.Retract := s_bBlockRetract;
-st_BlockCmd.ExtendedPos := s_bBlockAllDown;
-st_BlockCmd.RetractedPos := s_bBlockAllUp;
-st_BlockCmd.TimeoutMs := s_dSeparateTimeoutMs;
-st_BlockCmd.DebounceMs := io_stLayer.dDebounceMs;
-st_BlockCmd.SolenoidType := INT#0;
-st_BlockCmd.ExtendPolarity := FALSE;
-IF io_stLayer.bAutoMode THEN st_BlockCmd.Mode := INT#1; ELSE st_BlockCmd.Mode := INT#0; END_IF;
-fb_Block(i_stCmd := st_BlockCmd, q_stSts => st_BlockSts);
-io_stLayer.q_bBlockSolenoid := st_BlockSts.SolenoidA;
-s_bBlockIsExtended := st_BlockSts.IsExtended;
-s_bBlockIsRetracted := st_BlockSts.IsRetracted;
-s_bBlockTimeout := st_BlockSts.Timeout;
-s_bBlockSensorFault := st_BlockSts.SensorFault;
-
-st_SeparateCmd.Extend := s_bSeparateExtend;
-st_SeparateCmd.Retract := s_bSeparateRetract;
-st_SeparateCmd.ExtendedPos := s_bSeparateAllDown;
-st_SeparateCmd.RetractedPos := s_bSeparateAllUp;
-st_SeparateCmd.TimeoutMs := s_dSeparateTimeoutMs;
-st_SeparateCmd.DebounceMs := io_stLayer.dDebounceMs;
-st_SeparateCmd.SolenoidType := INT#0;
-st_SeparateCmd.ExtendPolarity := FALSE;
-IF io_stLayer.bAutoMode THEN st_SeparateCmd.Mode := INT#1; ELSE st_SeparateCmd.Mode := INT#0; END_IF;
-fb_Separate(i_stCmd := st_SeparateCmd, q_stSts => st_SeparateSts);
-io_stLayer.q_bSeparateSolenoid := st_SeparateSts.SolenoidA;
-s_bSeparateIsExtended := st_SeparateSts.IsExtended;
-s_bSeparateIsRetracted := st_SeparateSts.IsRetracted;
-s_bSeparateTimeout := st_SeparateSts.Timeout;
-s_bSeparateSensorFault := st_SeparateSts.SensorFault;
-
-// 电机运行信号：受 bPause 暂停联锁控制
-fb_Motor(
-    i_bFwdCmd := s_bMotorFwd AND (NOT io_stLayer.bPause),
-    i_bRevCmd := s_bMotorRev AND (NOT io_stLayer.bPause),
-    i_bSlowCmd := (s_bMotorSlow OR s_bFullMaterialSlowActive) AND (NOT io_stLayer.bPause),
-    i_bVfdFault := io_stLayer.bVfdFault,
-    i_iCtrlMode := INT#0,
-    i_rSpeed := REAL#100.0,
-    q_bFwdOut => io_stLayer.q_bConveyorFwd,
-    q_bRevOut => io_stLayer.q_bConveyorRev,
-    q_bSlowOut => io_stLayer.q_bConveyorSlow,
-    q_bRunning => s_bMotorRunning,
-    q_bVfdAlarm => s_bMotorVfdAlarm
-);
-
-(* ==================== 10. 报警汇总 ==================== *)
-s_iAlarmCode := 0;
-IF s_bMotorVfdAlarm THEN s_iAlarmCode := 100 + io_stLayer.iLayerIndex; END_IF;
-IF s_bBlockTimeout THEN s_iAlarmCode := 110 + io_stLayer.iLayerIndex; END_IF;
-IF s_bBlockSensorFault AND s_iAlarmCode = 0 THEN s_iAlarmCode := 120 + io_stLayer.iLayerIndex; END_IF;
-IF s_bSeparateTimeout AND s_iAlarmCode = 0 THEN s_iAlarmCode := 130 + io_stLayer.iLayerIndex; END_IF;
-IF s_bSeparateSensorFault AND s_iAlarmCode = 0 THEN s_iAlarmCode := 140 + io_stLayer.iLayerIndex; END_IF;
-
-(* ==================== 11. 输出结构体映射 ==================== *)
-io_stLayer.q_bInitDone           := s_bInitDone;
-io_stLayer.q_bRequestPickup      := s_bRequestPickup;
-io_stLayer.q_bLayerFeedDone      := s_bRequestPickup;
-io_stLayer.q_iCurrentState       := s_iCurrentState;
-io_stLayer.q_iAlarmCode          := s_iAlarmCode;
-io_stLayer.q_bRunning            := s_bRunning;
-io_stLayer.q_bFault              := (s_iAlarmCode > 0);
-io_stLayer.q_bAnySensorFault     := s_bBlockSensorFault OR s_bSeparateSensorFault;
+    (* ============ 8. 状态输出 ============ *)
+    io_stLayer.iStep := s_iStep;
+    io_stLayer.bAtRest := (s_iStep = STEP_IDLE);
 
 END_FUNCTION_BLOCK
