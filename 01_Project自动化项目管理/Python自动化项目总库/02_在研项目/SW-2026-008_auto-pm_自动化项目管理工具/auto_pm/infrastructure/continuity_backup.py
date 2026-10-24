@@ -51,8 +51,25 @@ BACKUP_RELATIVE_DIR = Path(".auto-pm") / "backups" / "continuity"
 MANIFEST_SCHEMA = "continuity-backup.v1"
 _SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 _BACKUP_NAME = re.compile(r"^continuity-(\d{8}T\d{6}Z)-e(\d+)(?:-(\d+))?\.db$")
-# Checkpoint and handoff events carry caller-chosen identifiers; every other event id is derived from its hash.
+# Checkpoint and handoff events carry caller-chosen identifiers; every other event id is derived from its hash,
+# except the two event types below, whose writers derive the id from something else.  Those are checked against that
+# one derivation (``_self_numbered_event_id``), not exempted: a forged id still breaks the chain.
 _FREE_ID_EVENT_TYPES = frozenset({"CHECKPOINT_CREATED", "HANDOFF_CREATED"})
+_SELF_NUMBERED_EVENT_TYPES = frozenset({"WORK_RELATION_ADDED", "RECLAIM_RISK_ACCEPTED"})
+
+
+def _self_numbered_event_id(event_type: str, idempotency_key: str, payload: object) -> str:
+    """The id the writer of this event type gives it.
+
+    ``WORK_RELATION_ADDED`` (work_registry_service.add_relation): ``EVT-`` + first 16 hex of sha256(idempotency_key).
+    ``RECLAIM_RISK_ACCEPTED`` (continuity_store, risk signature): ``RISK-`` + first 16 hex of the sha256 of the stored
+    payload (which already holds ``signed_at``) dumped with sorted keys and ``ensure_ascii=False``.
+    """
+
+    if event_type == "WORK_RELATION_ADDED":
+        return f"EVT-{hashlib.sha256(idempotency_key.encode()).hexdigest()[:16].upper()}"
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return f"RISK-{digest[:16].upper()}"
 
 
 class ContinuityBackupError(ContinuityStoreError):
@@ -123,13 +140,13 @@ def _chain_findings(conn: sqlite3.Connection) -> tuple[int, str, str, list[str]]
     findings: list[str] = []
     rows = conn.execute(
         "SELECT event_id, aggregate_id, event_type, payload_json, previous_hash, event_hash, "
-        "created_at FROM events ORDER BY rowid"
+        "created_at, idempotency_key FROM events ORDER BY rowid"
     )
     for row in rows:
         count += 1
         if findings:
             continue
-        event_id, aggregate_id, event_type, payload_json, stored_previous, stored_hash, created_at = (
+        event_id, aggregate_id, event_type, payload_json, stored_previous, stored_hash, created_at, idempotency_key = (
             str(value) for value in row
         )
         reason = ""
@@ -146,6 +163,9 @@ def _chain_findings(conn: sqlite3.Connection) -> tuple[int, str, str, list[str]]
                 reason = "previous_hash 与上一条事件的 event_hash 不相接"
             elif stored_hash != expected:
                 reason = "event_hash 与内容复算结果不一致（内容被改过）"
+            elif event_type in _SELF_NUMBERED_EVENT_TYPES:
+                if event_id != _self_numbered_event_id(event_type, idempotency_key, payload):
+                    reason = "event_id 与该事件类型的编号规则不对应"
             elif event_type not in _FREE_ID_EVENT_TYPES and event_id != f"EVT-{expected[:16].upper()}":
                 reason = "event_id 与 event_hash 不对应"
         if reason:
