@@ -344,7 +344,7 @@
 | iGripCount | INT | 本机夹爪个数 (现场配置): 2 或 4; 005 为 2 |
 | iPickMode | INT | 生效的取料模式, 只在手动或待机且无料时才接受 iPickModeReq |
 | iGroupCount | INT | 取料组数: 2 根模式 2 组, 4 根模式 1 组 |
-| bModeInvalid | BOOL | 请求 4 根模式但夹爪个数不足: 不切换, 只提示 (不占报警号) |
+| bModeInvalid | BOOL | 请求或生效 4 根模式但夹爪个数不足: 不切换或回退 2 根, 只提示 (不占报警号) |
 | rZStandby | REAL | D500 Z 待机点 |
 | rZPlace | REAL | D524 Z 放料高度 (前后位共用) |
 | rAutoSpeed | REAL | D600 自动速度, 范围 10000~100000 |

@@ -141,10 +141,10 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | `iGroup` | INT | 当前取料组：1 = 组 1（2 根模式 3+4 层；4 根模式 1~4 层），2 = 组 2（2 根模式 1+2 层） |
 | `astGroup[1..2]` | `ST_PickGroup` | `rXPick, rZPick, rXPlace`（4 根模式只用组 1） |
 | `iPickModeReq` | INT | HMI 请求的取料模式：2 = 一次 2 根（005 原机），4 = 一次 4 根（R-PP-13） |
-| `iGripCount` | INT | 本机夹爪个数（现场配置）：2 或 4，005 为 2 |
+| `iGripCount` | INT | 本机夹爪个数（现场配置）：2 或 4，005 为 2；`iPickModeReq / iPickMode / iGripCount` 三个都要掉电保持（TEC 4.5） |
 | `iPickMode` | INT | 生效模式，仅在非自动、非回原点 / 准备、取放料未激活、夹爪和小车无料时接受请求 |
 | `iGroupCount` | INT | 取料组数：2 根模式 2，4 根模式 1（经中继同步给小车） |
-| `bModeInvalid` | BOOL | 请求 4 根模式但夹爪不足：不切换，只提示，不占报警号 |
+| `bModeInvalid` | BOOL | 请求或生效 4 根模式但夹爪不足：不切换或回退 2 根，只提示，不占报警号 |
 | `bClampG3, bClampG4` | BOOL | 预留 夹爪 3、4 夹紧命令（4 根模式，未接线） |
 | `rZStandby` | REAL | D500 |
 | `rZPlace` | REAL | D524 |
@@ -318,7 +318,7 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | D544 | Z 后位取 | `astGroup[2].rZPick` |
 | D512 / D522 | X2 取 / 送 | `rPosPick / rPosFeed` |
 
-> 现场点位值是 PDF 快照；示教会覆盖。点位断电保持：放在 `GlobalVars` 的 `VAR RETAIN`（TEC 7）。
+> 现场点位值是 PDF 快照；示教会覆盖。点位断电保持：放在 `GlobalVars` 的 `VAR RETAIN`（TEC 7）；取料模式三个变量同理（见 4.6）。
 
 ## 8. 步序常量
 

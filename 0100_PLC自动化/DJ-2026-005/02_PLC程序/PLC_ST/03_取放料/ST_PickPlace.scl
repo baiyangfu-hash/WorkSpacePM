@@ -19,7 +19,7 @@ STRUCT
     iGripCount              : INT := 2;     // 本机夹爪个数 (现场配置): 2 或 4; 005 为 2
     iPickMode               : INT := 2;     // 生效的取料模式, 只在手动或待机且无料时才接受 iPickModeReq
     iGroupCount             : INT := 2;     // 取料组数: 2 根模式 2 组, 4 根模式 1 组
-    bModeInvalid            : BOOL;         // 请求 4 根模式但夹爪个数不足: 不切换, 只提示 (不占报警号)
+    bModeInvalid            : BOOL;         // 请求或生效 4 根模式但夹爪个数不足: 不切换或回退 2 根, 只提示 (不占报警号)
 
     (* ------------------ 点位与速度 (HMI 可写, 掉电保持) ------------------ *)
     astGroup                : ARRAY[1..2] OF ST_PickGroup;      // [1] 组 1 (原前位对 A), [2] 组 2 (原后位对 B, 4 根模式不用)

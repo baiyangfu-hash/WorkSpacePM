@@ -124,6 +124,8 @@ VAR
     s_bGroupReq         : BOOL := FALSE;    // 已选组的各层请求仍在
     s_bQuad             : BOOL := FALSE;    // 生效模式 = 一次 4 根
     s_bModeOk           : BOOL := FALSE;    // HMI 请求的模式本机支持 (4 根需要 4 个夹爪)
+    s_bModeInit         : BOOL := TRUE;     // 上电第一扫描: 把请求值同步成生效模式 (防请求值没保持而改掉保持的模式)
+    s_bGripShort        : BOOL := FALSE;    // 生效模式为 4 根但夹爪个数不足 4
     s_bModeSwitchOk     : BOOL := FALSE;    // 允许切换: 非自动、非回原点 / 准备、取放料静止、夹爪与小车无料
     s_bAnyProd          : BOOL := FALSE;    // 夹爪里任一产品检测亮
     s_bFeederAny        : BOOL := FALSE;    // 小车任一光电亮
@@ -180,12 +182,20 @@ BEGIN
     s_bFeederAny := io_stIo.bFeederFrontEye1 OR io_stIo.bFeederFrontEye2 OR io_stIo.bFeederRearEye1 OR io_stIo.bFeederRearEye2;
 
     // 取料模式: 请求的模式本机支持才算有效 (2 根恒支持, 4 根要 4 个夹爪); 无效只置提示位, 不占报警号
+    IF s_bModeInit THEN
+        io_stPP.iPickModeReq := io_stPP.iPickMode;
+        s_bModeInit := FALSE;
+    END_IF;
     s_bModeOk := (io_stPP.iPickModeReq = 2) OR ((io_stPP.iPickModeReq = 4) AND (io_stPP.iGripCount >= 4));
-    io_stPP.bModeInvalid := NOT s_bModeOk;
+    s_bGripShort := (io_stPP.iPickMode = 4) AND (io_stPP.iGripCount < 4);
+    io_stPP.bModeInvalid := (NOT s_bModeOk) OR s_bGripShort;
     // 切换只在: 非自动、非回原点 / 准备、取放料未激活、夹爪和小车都没料 (R-PP-13)
     s_bModeSwitchOk := (NOT io_stMachine.bAuto) AND (NOT io_stMachine.bHoming) AND (NOT io_stMachine.bPrepare)
                        AND (s_iStep = STEP_NONE) AND (NOT s_bAnyProd) AND (NOT s_bFeederAny);
-    IF s_bModeOk AND s_bModeSwitchOk THEN
+    IF s_bGripShort AND s_bModeSwitchOk THEN
+        // 夹爪个数配置变小: 能切时回到 2 根模式 (自动中不切, 提示位一直亮)
+        io_stPP.iPickMode := 2;
+    ELSIF s_bModeOk AND s_bModeSwitchOk THEN
         io_stPP.iPickMode := io_stPP.iPickModeReq;
     END_IF;
     s_bQuad := (io_stPP.iPickMode = 4);
