@@ -6,7 +6,8 @@
 |------|-----|
 | **文档标题** | 06 模式与调度接口定义 |
 | **文档版本** | V15.0.0 |
-| **关联源码** | 06_模式与调度/FB_1001_MachineMode_BufferFraming.scl / 06_模式与调度/FB_1005_HomePrepare_BufferFraming.scl / 06_模式与调度/FB_1006_ManualTeach_BufferFraming.scl / 06_模式与调度/FB_2002_StationBridge.scl |
+| **关联源码** | 06_模式与调度/FB_1001_MachineMode_BufferFraming.scl |
+| **同文档涵盖** | 06_模式与调度/FB_1005_HomePrepare_BufferFraming.scl；06_模式与调度/FB_1006_ManualTeach_BufferFraming.scl；06_模式与调度/FB_2002_StationBridge.scl |
 | **编制日期** | 2026-10-24 |
 | **编制人** | Claude（用户待审） |
 | **遵循规范** | LSP-905_SCL编程规范 |
@@ -40,7 +41,7 @@
 | io_stMachine | ST_Machine | 模式 (读) |
 | io_stIo | ST_Io | 物理输入 (读) |
 | io_stAlarm | ST_Alarm | 报警 (写 F80 / F81 触发, 读复位) |
-| io_astAxis | ARRAY[1..3] OF ST_ServoAxis | 轴: 1 = Z, 2 = X1, 3 = X2 |
+| io_arrAxis | ARRAY[1..3] OF ST_ServoAxis | 轴: 1 = Z, 2 = X1, 3 = X2 |
 | io_stBridge | ST_Bridge | 站间中继 (读 Hold) |
 | io_stPP | ST_PickPlace | 取放料 (读点位 / 速度) |
 | io_stFeed | ST_Feeder | 小车 (读点位) |
@@ -62,7 +63,7 @@
 | io_stFeed | ST_Feeder | 小车 (示教写点位) |
 | io_stExt | ST_ExternalLink | 组框机链路 (读安全异常) |
 | io_stBridge | ST_Bridge | 站间中继 (读安全区) |
-| io_astAxis | ARRAY[1..3] OF ST_ServoAxis | 轴: 1 = Z, 2 = X1, 3 = X2 |
+| io_arrAxis | ARRAY[1..3] OF ST_ServoAxis | 轴: 1 = Z, 2 = X1, 3 = X2 |
 
 ## 站间中继（FB_2002_StationBridge）
 

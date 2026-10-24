@@ -8,7 +8,7 @@
 (*        需求 R-MAN-01~08; 原程序工艺说明 PRC 3                     *)
 (*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
 (*                                                                   *)
-(*  轴: Z = io_astAxis[1], X1 = io_astAxis[2], X2 = io_astAxis[3];    *)
+(*  轴: Z = io_arrAxis[1], X1 = io_arrAxis[2], X2 = io_arrAxis[3];    *)
 (*  HMI 数组的轴序: [1] = X1, [2] = X2, [3] = Z (沿用原 M150~M161)。 *)
 (*                                                                   *)
 (*  与 INT / DSN 的差异 (评审请确认):                                *)
@@ -35,7 +35,7 @@ VAR_IN_OUT
     io_stFeed           : ST_Feeder;            // 小车 (示教写点位)
     io_stExt            : ST_ExternalLink;      // 组框机链路 (读安全异常)
     io_stBridge         : ST_Bridge;            // 站间中继 (读安全区)
-    io_astAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
+    io_arrAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
 END_VAR
 
 VAR
@@ -46,13 +46,13 @@ VAR
     s_bTick             : BOOL := FALSE;    // 重复脉冲 (一拍)
     s_bAnySpdBtn        : BOOL := FALSE;
 
-    s_abPrevUp          : ARRAY[1..3] OF BOOL;
-    s_abPrevDn          : ARRAY[1..3] OF BOOL;
+    s_arrPrevUp          : ARRAY[1..3] OF BOOL;
+    s_arrPrevDn          : ARRAY[1..3] OF BOOL;
     s_bPrevAutoUp       : BOOL := FALSE;
     s_bPrevAutoDn       : BOOL := FALSE;
-    s_abPrevTeach       : ARRAY[1..6] OF BOOL;
-    s_abPrevPosX1       : ARRAY[1..4] OF BOOL;
-    s_abPrevPosX2       : ARRAY[1..2] OF BOOL;
+    s_arrPrevTeach       : ARRAY[1..6] OF BOOL;
+    s_arrPrevPosX1       : ARRAY[1..4] OF BOOL;
+    s_arrPrevPosX2       : ARRAY[1..2] OF BOOL;
 
     s_iX1Req            : INT := 0;         // X1 手动定位请求: 0 无, 1~4 = D510 / D520 / D540 / D550
     s_iX2Req            : INT := 0;         // X2 手动定位请求: 0 无, 1~2 = D512 / D522
@@ -95,7 +95,7 @@ BEGIN
 
     (* ============ 2. 派生量 ============ *)
     s_bManualOk := io_stMachine.bManual AND (NOT io_stMachine.bFault);
-    s_bZLow := (io_astAxis[AX_Z].rCurrentPos <= (io_stPP.rZStandby + io_stPP.rPosTol));
+    s_bZLow := (io_arrAxis[AX_Z].rCurrentPos <= (io_stPP.rZStandby + io_stPP.rPosTol));
     s_bTeachOk := s_bManualOk AND io_stMachine.bHomeDone;
     s_bX1PosOk := s_bTeachOk AND s_bZLow AND io_stIo.bPPLiftDown AND (NOT io_stManual.bJogLockX1);
     s_bX2PosOk := s_bTeachOk AND io_stIo.bFrameDropEye1 AND io_stIo.bFrameDropEye2
@@ -111,11 +111,11 @@ BEGIN
             io_stHmi.rManualSpeed[s_iI] := SPD_DEFAULT;
         END_IF;
         IF s_bManualOk THEN
-            s_bStep := io_stHmi.bSpeedUp[s_iI] AND ((NOT s_abPrevUp[s_iI]) OR s_bTick);
+            s_bStep := io_stHmi.bSpeedUp[s_iI] AND ((NOT s_arrPrevUp[s_iI]) OR s_bTick);
             IF s_bStep THEN
                 io_stHmi.rManualSpeed[s_iI] := io_stHmi.rManualSpeed[s_iI] + SPD_STEP;
             END_IF;
-            s_bStep := io_stHmi.bSpeedDown[s_iI] AND ((NOT s_abPrevDn[s_iI]) OR s_bTick);
+            s_bStep := io_stHmi.bSpeedDown[s_iI] AND ((NOT s_arrPrevDn[s_iI]) OR s_bTick);
             IF s_bStep THEN
                 io_stHmi.rManualSpeed[s_iI] := io_stHmi.rManualSpeed[s_iI] - SPD_STEP;
             END_IF;
@@ -125,8 +125,8 @@ BEGIN
         ELSIF io_stHmi.rManualSpeed[s_iI] < SPD_MIN THEN
             io_stHmi.rManualSpeed[s_iI] := SPD_MIN;
         END_IF;
-        s_abPrevUp[s_iI] := io_stHmi.bSpeedUp[s_iI];
-        s_abPrevDn[s_iI] := io_stHmi.bSpeedDown[s_iI];
+        s_arrPrevUp[s_iI] := io_stHmi.bSpeedUp[s_iI];
+        s_arrPrevDn[s_iI] := io_stHmi.bSpeedDown[s_iI];
     END_FOR;
 
     // 自动速度 D600 (任何模式可调), 同步给取放料
@@ -158,29 +158,29 @@ BEGIN
 
     (* ============ 4. 示教: 手动 + 已回原点, 上升沿写当前位置 ============ *)
     FOR s_iI := 1 TO 6 DO
-        io_stManual.bTeachWrite[s_iI] := s_bTeachOk AND io_stHmi.bTeach[s_iI] AND (NOT s_abPrevTeach[s_iI]);
-        s_abPrevTeach[s_iI] := io_stHmi.bTeach[s_iI];
+        io_stManual.bTeachWrite[s_iI] := s_bTeachOk AND io_stHmi.bTeach[s_iI] AND (NOT s_arrPrevTeach[s_iI]);
+        s_arrPrevTeach[s_iI] := io_stHmi.bTeach[s_iI];
     END_FOR;
     IF io_stManual.bTeachWrite[1] THEN
-        io_stPP.astPair[1].rXPick := io_astAxis[AX_X1].rCurrentPos;     // M61 -> D510, D514
-        io_stPP.astPair[1].rZPick := io_astAxis[AX_Z].rCurrentPos;
+        io_stPP.astPair[1].rXPick := io_arrAxis[AX_X1].rCurrentPos;     // M61 -> D510, D514
+        io_stPP.astPair[1].rZPick := io_arrAxis[AX_Z].rCurrentPos;
     END_IF;
     IF io_stManual.bTeachWrite[2] THEN
-        io_stPP.astPair[1].rXPlace := io_astAxis[AX_X1].rCurrentPos;    // M62 -> D520, D524
-        io_stPP.rZPlace := io_astAxis[AX_Z].rCurrentPos;
+        io_stPP.astPair[1].rXPlace := io_arrAxis[AX_X1].rCurrentPos;    // M62 -> D520, D524
+        io_stPP.rZPlace := io_arrAxis[AX_Z].rCurrentPos;
     END_IF;
     IF io_stManual.bTeachWrite[3] THEN
-        io_stPP.astPair[2].rXPick := io_astAxis[AX_X1].rCurrentPos;     // M63 -> D540, D544
-        io_stPP.astPair[2].rZPick := io_astAxis[AX_Z].rCurrentPos;
+        io_stPP.astPair[2].rXPick := io_arrAxis[AX_X1].rCurrentPos;     // M63 -> D540, D544
+        io_stPP.astPair[2].rZPick := io_arrAxis[AX_Z].rCurrentPos;
     END_IF;
     IF io_stManual.bTeachWrite[4] THEN
-        io_stPP.astPair[2].rXPlace := io_astAxis[AX_X1].rCurrentPos;    // M64 -> D550
+        io_stPP.astPair[2].rXPlace := io_arrAxis[AX_X1].rCurrentPos;    // M64 -> D550
     END_IF;
     IF io_stManual.bTeachWrite[5] THEN
-        io_stFeed.rPosPick := io_astAxis[AX_X2].rCurrentPos;            // M65 -> D512
+        io_stFeed.rPosPick := io_arrAxis[AX_X2].rCurrentPos;            // M65 -> D512
     END_IF;
     IF io_stManual.bTeachWrite[6] THEN
-        io_stFeed.rPosFeed := io_astAxis[AX_X2].rCurrentPos;            // M66 -> D522
+        io_stFeed.rPosFeed := io_arrAxis[AX_X2].rCurrentPos;            // M66 -> D522
     END_IF;
 
     (* ============ 5. 夹爪松开 / 升降缸 (新增 R-MAN-07) ============ *)
@@ -207,23 +207,23 @@ BEGIN
     (* ============ 7. 轴命令: 手动持有, 离开手动撤销 ============ *)
     // 定位请求: 上升沿锁入, 联锁不满足不接收; 点动或离开手动取消
     FOR s_iI := 1 TO 4 DO
-        IF io_stHmi.bPosX1[s_iI] AND (NOT s_abPrevPosX1[s_iI]) AND s_bX1PosOk THEN
+        IF io_stHmi.bPosX1[s_iI] AND (NOT s_arrPrevPosX1[s_iI]) AND s_bX1PosOk THEN
             s_iX1Req := s_iI;
         END_IF;
-        s_abPrevPosX1[s_iI] := io_stHmi.bPosX1[s_iI];
+        s_arrPrevPosX1[s_iI] := io_stHmi.bPosX1[s_iI];
     END_FOR;
     FOR s_iI := 1 TO 2 DO
-        IF io_stHmi.bPosX2[s_iI] AND (NOT s_abPrevPosX2[s_iI]) AND s_bX2PosOk THEN
+        IF io_stHmi.bPosX2[s_iI] AND (NOT s_arrPrevPosX2[s_iI]) AND s_bX2PosOk THEN
             s_iX2Req := s_iI;
         END_IF;
-        s_abPrevPosX2[s_iI] := io_stHmi.bPosX2[s_iI];
+        s_arrPrevPosX2[s_iI] := io_stHmi.bPosX2[s_iI];
     END_FOR;
     IF (NOT s_bManualOk) OR io_stHmi.bJog[1] OR io_stHmi.bJog[2] OR (NOT s_bX1PosOk)
-       OR io_astAxis[AX_X1].stAbs.Done THEN
+       OR io_arrAxis[AX_X1].stAbs.Done THEN
         s_iX1Req := 0;
     END_IF;
     IF (NOT s_bManualOk) OR io_stHmi.bJog[3] OR io_stHmi.bJog[4] OR (NOT s_bX2PosOk)
-       OR io_astAxis[AX_X2].stAbs.Done THEN
+       OR io_arrAxis[AX_X2].stAbs.Done THEN
         s_iX2Req := 0;
     END_IF;
     CASE s_iX1Req OF
@@ -236,7 +236,7 @@ BEGIN
         4:
             s_rX1Target := io_stPP.astPair[2].rXPlace;
     ELSE
-        s_rX1Target := io_astAxis[AX_X1].rCurrentPos;
+        s_rX1Target := io_arrAxis[AX_X1].rCurrentPos;
     END_CASE;
     CASE s_iX2Req OF
         1:
@@ -244,39 +244,39 @@ BEGIN
         2:
             s_rX2Target := io_stFeed.rPosFeed;
     ELSE
-        s_rX2Target := io_astAxis[AX_X2].rCurrentPos;
+        s_rX2Target := io_arrAxis[AX_X2].rCurrentPos;
     END_CASE;
 
     IF s_bManualOk THEN
         s_bAxisOwned := TRUE;
         // 点动: 按住运动, 松开 Forward / Backward 撤销 (减速停); 正反速度相同
-        io_astAxis[AX_X1].stJog.Forward := io_stHmi.bJog[1] AND (NOT io_stHmi.bJog[2]) AND (NOT io_stManual.bJogLockX1);
-        io_astAxis[AX_X1].stJog.Backward := io_stHmi.bJog[2] AND (NOT io_stHmi.bJog[1]) AND (NOT io_stManual.bJogLockX1);
-        io_astAxis[AX_X1].stJog.Velocity := io_stHmi.rManualSpeed[HMI_X1];
-        io_astAxis[AX_X2].stJog.Forward := io_stHmi.bJog[3] AND (NOT io_stHmi.bJog[4]) AND (NOT io_stManual.bJogLockX2);
-        io_astAxis[AX_X2].stJog.Backward := io_stHmi.bJog[4] AND (NOT io_stHmi.bJog[3]) AND (NOT io_stManual.bJogLockX2);
-        io_astAxis[AX_X2].stJog.Velocity := io_stHmi.rManualSpeed[HMI_X2];
-        io_astAxis[AX_Z].stJog.Forward := io_stHmi.bJog[5] AND (NOT io_stHmi.bJog[6]) AND (NOT io_stManual.bJogLockZ);
-        io_astAxis[AX_Z].stJog.Backward := io_stHmi.bJog[6] AND (NOT io_stHmi.bJog[5]) AND (NOT io_stManual.bJogLockZ);
-        io_astAxis[AX_Z].stJog.Velocity := io_stHmi.rManualSpeed[HMI_Z];
+        io_arrAxis[AX_X1].stJog.Forward := io_stHmi.bJog[1] AND (NOT io_stHmi.bJog[2]) AND (NOT io_stManual.bJogLockX1);
+        io_arrAxis[AX_X1].stJog.Backward := io_stHmi.bJog[2] AND (NOT io_stHmi.bJog[1]) AND (NOT io_stManual.bJogLockX1);
+        io_arrAxis[AX_X1].stJog.Velocity := io_stHmi.rManualSpeed[HMI_X1];
+        io_arrAxis[AX_X2].stJog.Forward := io_stHmi.bJog[3] AND (NOT io_stHmi.bJog[4]) AND (NOT io_stManual.bJogLockX2);
+        io_arrAxis[AX_X2].stJog.Backward := io_stHmi.bJog[4] AND (NOT io_stHmi.bJog[3]) AND (NOT io_stManual.bJogLockX2);
+        io_arrAxis[AX_X2].stJog.Velocity := io_stHmi.rManualSpeed[HMI_X2];
+        io_arrAxis[AX_Z].stJog.Forward := io_stHmi.bJog[5] AND (NOT io_stHmi.bJog[6]) AND (NOT io_stManual.bJogLockZ);
+        io_arrAxis[AX_Z].stJog.Backward := io_stHmi.bJog[6] AND (NOT io_stHmi.bJog[5]) AND (NOT io_stManual.bJogLockZ);
+        io_arrAxis[AX_Z].stJog.Velocity := io_stHmi.rManualSpeed[HMI_Z];
         // 手动定位
-        io_astAxis[AX_X1].stAbs.Position := s_rX1Target;
-        io_astAxis[AX_X1].stAbs.Velocity := io_stHmi.rManualSpeed[HMI_X1];
-        io_astAxis[AX_X1].stAbs.Execute := (s_iX1Req > 0);
-        io_astAxis[AX_X2].stAbs.Position := s_rX2Target;
-        io_astAxis[AX_X2].stAbs.Velocity := io_stHmi.rManualSpeed[HMI_X2];
-        io_astAxis[AX_X2].stAbs.Execute := (s_iX2Req > 0);
-        io_astAxis[AX_Z].stAbs.Execute := FALSE;
+        io_arrAxis[AX_X1].stAbs.Position := s_rX1Target;
+        io_arrAxis[AX_X1].stAbs.Velocity := io_stHmi.rManualSpeed[HMI_X1];
+        io_arrAxis[AX_X1].stAbs.Execute := (s_iX1Req > 0);
+        io_arrAxis[AX_X2].stAbs.Position := s_rX2Target;
+        io_arrAxis[AX_X2].stAbs.Velocity := io_stHmi.rManualSpeed[HMI_X2];
+        io_arrAxis[AX_X2].stAbs.Execute := (s_iX2Req > 0);
+        io_arrAxis[AX_Z].stAbs.Execute := FALSE;
     ELSIF s_bAxisOwned THEN
         FOR s_iI := AX_Z TO AX_X2 DO
-            io_astAxis[s_iI].stJog.Forward := FALSE;
-            io_astAxis[s_iI].stJog.Backward := FALSE;
-            io_astAxis[s_iI].stAbs.Execute := FALSE;
-            io_astAxis[s_iI].stStop.Execute := io_stMachine.bFault;
-            io_astAxis[s_iI].stHalt.Execute := io_astAxis[s_iI].stAbs.Busy OR io_astAxis[s_iI].stJog.Busy;
+            io_arrAxis[s_iI].stJog.Forward := FALSE;
+            io_arrAxis[s_iI].stJog.Backward := FALSE;
+            io_arrAxis[s_iI].stAbs.Execute := FALSE;
+            io_arrAxis[s_iI].stStop.Execute := io_stMachine.bFault;
+            io_arrAxis[s_iI].stHalt.Execute := io_arrAxis[s_iI].stAbs.Busy OR io_arrAxis[s_iI].stJog.Busy;
         END_FOR;
-        s_bAxisOwned := io_stMachine.bFault OR io_astAxis[AX_Z].stAbs.Busy OR io_astAxis[AX_X1].stAbs.Busy
-                        OR io_astAxis[AX_X2].stAbs.Busy OR io_astAxis[AX_Z].stJog.Busy
-                        OR io_astAxis[AX_X1].stJog.Busy OR io_astAxis[AX_X2].stJog.Busy;
+        s_bAxisOwned := io_stMachine.bFault OR io_arrAxis[AX_Z].stAbs.Busy OR io_arrAxis[AX_X1].stAbs.Busy
+                        OR io_arrAxis[AX_X2].stAbs.Busy OR io_arrAxis[AX_Z].stJog.Busy
+                        OR io_arrAxis[AX_X1].stJog.Busy OR io_arrAxis[AX_X2].stJog.Busy;
     END_IF;
 END_FUNCTION_BLOCK

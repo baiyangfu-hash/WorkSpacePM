@@ -9,7 +9,7 @@
 (*        原程序工艺说明 PRC 4                                       *)
 (*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
 (*                                                                   *)
-(*  轴: Z = io_astAxis[1], X1 = io_astAxis[2], X2 = io_astAxis[3]。  *)
+(*  轴: Z = io_arrAxis[1], X1 = io_arrAxis[2], X2 = io_arrAxis[3]。  *)
 (*                                                                   *)
 (*  与 INT / DSN 的差异 (评审请确认):                                *)
 (*    1. 增加 VAR_IN_OUT io_stPP / io_stFeed / io_stConv             *)
@@ -28,7 +28,7 @@ VAR_IN_OUT
     io_stMachine        : ST_Machine;           // 模式 (读)
     io_stIo             : ST_Io;                // 物理输入 (读)
     io_stAlarm          : ST_Alarm;             // 报警 (写 F80 / F81 触发, 读复位)
-    io_astAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
+    io_arrAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
     io_stBridge         : ST_Bridge;            // 站间中继 (读 Hold)
     io_stPP             : ST_PickPlace;         // 取放料 (读点位 / 速度)
     io_stFeed           : ST_Feeder;            // 小车 (读点位)
@@ -156,7 +156,7 @@ BEGIN
                 // Z 回原点: 要求 4 松开位 + 升降缸下位; 有报警撤销命令, 清除后从头再回
                 IF (NOT s_bF80) AND (NOT s_bHold) AND s_bGripReady THEN
                     s_bHomeZ := TRUE;
-                    IF io_astAxis[AX_Z].stHome.Done THEN
+                    IF io_arrAxis[AX_Z].stHome.Done THEN
                         io_stHome.bHomeDoneZ := TRUE;
                         s_bHomeZ := FALSE;
                         io_stHome.iHomeStep := HM_XX;
@@ -168,14 +168,14 @@ BEGIN
                 IF NOT s_bHold THEN
                     IF NOT io_stHome.bHomeDoneX1 THEN
                         s_bHomeX1 := TRUE;
-                        IF io_astAxis[AX_X1].stHome.Done THEN
+                        IF io_arrAxis[AX_X1].stHome.Done THEN
                             io_stHome.bHomeDoneX1 := TRUE;
                             s_bHomeX1 := FALSE;
                         END_IF;
                     END_IF;
                     IF (NOT io_stHome.bHomeDoneX2) AND (NOT s_bF81) THEN
                         s_bHomeX2 := TRUE;
-                        IF io_astAxis[AX_X2].stHome.Done THEN
+                        IF io_arrAxis[AX_X2].stHome.Done THEN
                             io_stHome.bHomeDoneX2 := TRUE;
                             s_bHomeX2 := FALSE;
                         END_IF;
@@ -221,7 +221,7 @@ BEGIN
                 IF s_bPrepZQ THEN
                     s_bZGo := TRUE;
                     s_rZTarget := io_stPP.rZStandby;
-                    IF io_astAxis[AX_Z].stAbs.Done THEN
+                    IF io_arrAxis[AX_Z].stAbs.Done THEN
                         s_bZGo := FALSE;
                         io_stHome.iPrepStep := PR_X1;
                     END_IF;
@@ -233,7 +233,7 @@ BEGIN
                 IF s_bPrepX1Q THEN
                     s_bX1Go := TRUE;
                     s_rX1Target := io_stPP.astPair[1].rXPick;
-                    IF io_astAxis[AX_X1].stAbs.Done THEN
+                    IF io_arrAxis[AX_X1].stAbs.Done THEN
                         s_bX1Go := FALSE;
                         io_stHome.iPrepStep := PR_X2;
                     END_IF;
@@ -245,7 +245,7 @@ BEGIN
                 IF s_bPrepX2Q THEN
                     s_bX2Go := TRUE;
                     s_rX2Target := io_stFeed.rPosPick;
-                    IF io_astAxis[AX_X2].stAbs.Done THEN
+                    IF io_arrAxis[AX_X2].stAbs.Done THEN
                         s_bX2Go := FALSE;
                         io_stHome.iPrepStep := PR_WAIT_CONV;
                     END_IF;
@@ -269,56 +269,56 @@ BEGIN
 
     (* ============ 5. 轴命令: 回原点 / 准备期间持有, 离开时撤销 ============ *)
     FOR s_iAx := AX_Z TO AX_X2 DO
-        io_astAxis[s_iAx].stPower.Enable := NOT io_stMachine.bFault;
-        io_astAxis[s_iAx].stReset.Execute := io_stAlarm.bReset;
+        io_arrAxis[s_iAx].stPower.Enable := NOT io_stMachine.bFault;
+        io_arrAxis[s_iAx].stReset.Execute := io_stAlarm.bReset;
     END_FOR;
 
     IF s_bActive AND (NOT io_stMachine.bFault) THEN
         s_bAxisOwned := TRUE;
-        io_astAxis[AX_Z].stHome.Execute := s_bHomeZ;
-        io_astAxis[AX_X1].stHome.Execute := s_bHomeX1;
-        io_astAxis[AX_X2].stHome.Execute := s_bHomeX2;
+        io_arrAxis[AX_Z].stHome.Execute := s_bHomeZ;
+        io_arrAxis[AX_X1].stHome.Execute := s_bHomeX1;
+        io_arrAxis[AX_X2].stHome.Execute := s_bHomeX2;
 
         // 准备定位: Hold / 暂停时 Halt, 恢复后重发 Execute (目标不变)
         IF s_bZGo AND (NOT s_bHold) THEN
-            io_astAxis[AX_Z].stAbs.Position := s_rZTarget;
-            io_astAxis[AX_Z].stAbs.Velocity := io_stPP.rAutoSpeed;
-            io_astAxis[AX_Z].stAbs.Execute := TRUE;
-            io_astAxis[AX_Z].stHalt.Execute := FALSE;
+            io_arrAxis[AX_Z].stAbs.Position := s_rZTarget;
+            io_arrAxis[AX_Z].stAbs.Velocity := io_stPP.rAutoSpeed;
+            io_arrAxis[AX_Z].stAbs.Execute := TRUE;
+            io_arrAxis[AX_Z].stHalt.Execute := FALSE;
         ELSE
-            io_astAxis[AX_Z].stAbs.Execute := FALSE;
-            io_astAxis[AX_Z].stHalt.Execute := s_bZGo;
+            io_arrAxis[AX_Z].stAbs.Execute := FALSE;
+            io_arrAxis[AX_Z].stHalt.Execute := s_bZGo;
         END_IF;
         IF s_bX1Go AND (NOT s_bHold) THEN
-            io_astAxis[AX_X1].stAbs.Position := s_rX1Target;
-            io_astAxis[AX_X1].stAbs.Velocity := io_stPP.rAutoSpeed;
-            io_astAxis[AX_X1].stAbs.Execute := TRUE;
-            io_astAxis[AX_X1].stHalt.Execute := FALSE;
+            io_arrAxis[AX_X1].stAbs.Position := s_rX1Target;
+            io_arrAxis[AX_X1].stAbs.Velocity := io_stPP.rAutoSpeed;
+            io_arrAxis[AX_X1].stAbs.Execute := TRUE;
+            io_arrAxis[AX_X1].stHalt.Execute := FALSE;
         ELSE
-            io_astAxis[AX_X1].stAbs.Execute := FALSE;
-            io_astAxis[AX_X1].stHalt.Execute := s_bX1Go;
+            io_arrAxis[AX_X1].stAbs.Execute := FALSE;
+            io_arrAxis[AX_X1].stHalt.Execute := s_bX1Go;
         END_IF;
         IF s_bX2Go AND (NOT s_bHold) THEN
-            io_astAxis[AX_X2].stAbs.Position := s_rX2Target;
-            io_astAxis[AX_X2].stAbs.Velocity := io_stPP.rAutoSpeed;
-            io_astAxis[AX_X2].stAbs.Execute := TRUE;
-            io_astAxis[AX_X2].stHalt.Execute := FALSE;
+            io_arrAxis[AX_X2].stAbs.Position := s_rX2Target;
+            io_arrAxis[AX_X2].stAbs.Velocity := io_stPP.rAutoSpeed;
+            io_arrAxis[AX_X2].stAbs.Execute := TRUE;
+            io_arrAxis[AX_X2].stHalt.Execute := FALSE;
         ELSE
-            io_astAxis[AX_X2].stAbs.Execute := FALSE;
-            io_astAxis[AX_X2].stHalt.Execute := s_bX2Go;
+            io_arrAxis[AX_X2].stAbs.Execute := FALSE;
+            io_arrAxis[AX_X2].stHalt.Execute := s_bX2Go;
         END_IF;
-        io_astAxis[AX_Z].stStop.Execute := FALSE;
-        io_astAxis[AX_X1].stStop.Execute := FALSE;
-        io_astAxis[AX_X2].stStop.Execute := FALSE;
+        io_arrAxis[AX_Z].stStop.Execute := FALSE;
+        io_arrAxis[AX_X1].stStop.Execute := FALSE;
+        io_arrAxis[AX_X2].stStop.Execute := FALSE;
     ELSIF s_bAxisOwned THEN
         FOR s_iAx := AX_Z TO AX_X2 DO
-            io_astAxis[s_iAx].stHome.Execute := FALSE;
-            io_astAxis[s_iAx].stAbs.Execute := FALSE;
-            io_astAxis[s_iAx].stStop.Execute := io_stMachine.bFault;
-            io_astAxis[s_iAx].stHalt.Execute := io_astAxis[s_iAx].stAbs.Busy OR io_astAxis[s_iAx].stHome.Busy;
+            io_arrAxis[s_iAx].stHome.Execute := FALSE;
+            io_arrAxis[s_iAx].stAbs.Execute := FALSE;
+            io_arrAxis[s_iAx].stStop.Execute := io_stMachine.bFault;
+            io_arrAxis[s_iAx].stHalt.Execute := io_arrAxis[s_iAx].stAbs.Busy OR io_arrAxis[s_iAx].stHome.Busy;
         END_FOR;
-        s_bAxisOwned := io_stMachine.bFault OR io_astAxis[AX_Z].stAbs.Busy OR io_astAxis[AX_X1].stAbs.Busy
-                        OR io_astAxis[AX_X2].stAbs.Busy OR io_astAxis[AX_Z].stHome.Busy
-                        OR io_astAxis[AX_X1].stHome.Busy OR io_astAxis[AX_X2].stHome.Busy;
+        s_bAxisOwned := io_stMachine.bFault OR io_arrAxis[AX_Z].stAbs.Busy OR io_arrAxis[AX_X1].stAbs.Busy
+                        OR io_arrAxis[AX_X2].stAbs.Busy OR io_arrAxis[AX_Z].stHome.Busy
+                        OR io_arrAxis[AX_X1].stHome.Busy OR io_arrAxis[AX_X2].stHome.Busy;
     END_IF;
 END_FUNCTION_BLOCK

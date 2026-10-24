@@ -8,7 +8,7 @@
 (*    - 原程序 PDF 的取放料块 (S20 待料 ~ S25 松开)                  *)
 (*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
 (*                                                                   *)
-(*  轴: Z = io_astAxis[1], X1 = io_astAxis[2] (沿用现有 GlobalVars    *)
+(*  轴: Z = io_arrAxis[1], X1 = io_arrAxis[2] (沿用现有 GlobalVars    *)
 (*  轴编号, 与原程序的轴号不同, 以信号名为准)。                      *)
 (*  夹爪 / 升降缸的 Y40~Y43 由本 FB 统一写出, 回原点、准备、手动     *)
 (*  通过 stPP 的 *Req 字段提出要求 (FB_2002 汇入)。                  *)
@@ -22,7 +22,7 @@ VAR_IN_OUT
     io_stMachine        : ST_Machine;       // 模式
     io_stIo             : ST_Io;            // 物理输入输出
     io_stAlarm          : ST_Alarm;         // 报警 (本 FB 不直接写, 经 arrTrig 汇总)
-    io_astAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
+    io_arrAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
 END_VAR
 
 VAR
@@ -162,10 +162,10 @@ BEGIN
 
     (* ============ 2. 派生量 ============ *)
     s_bHold := io_stBridge.bHoldPP;
-    s_bAnyBusy := io_astAxis[AX_Z].stAbs.Busy OR io_astAxis[AX_Z].stJog.Busy OR io_astAxis[AX_Z].stHome.Busy
-                  OR io_astAxis[AX_X1].stAbs.Busy OR io_astAxis[AX_X1].stJog.Busy OR io_astAxis[AX_X1].stHome.Busy
-                  OR io_astAxis[AX_X2].stAbs.Busy OR io_astAxis[AX_X2].stJog.Busy OR io_astAxis[AX_X2].stHome.Busy;
-    s_rZErr := io_astAxis[AX_Z].rCurrentPos - io_stPP.rZStandby;
+    s_bAnyBusy := io_arrAxis[AX_Z].stAbs.Busy OR io_arrAxis[AX_Z].stJog.Busy OR io_arrAxis[AX_Z].stHome.Busy
+                  OR io_arrAxis[AX_X1].stAbs.Busy OR io_arrAxis[AX_X1].stJog.Busy OR io_arrAxis[AX_X1].stHome.Busy
+                  OR io_arrAxis[AX_X2].stAbs.Busy OR io_arrAxis[AX_X2].stJog.Busy OR io_arrAxis[AX_X2].stHome.Busy;
+    s_rZErr := io_arrAxis[AX_Z].rCurrentPos - io_stPP.rZStandby;
     IF s_rZErr < 0.0 THEN
         s_rZErr := 0.0 - s_rZErr;
     END_IF;
@@ -255,10 +255,10 @@ BEGIN
                             s_bABIn := FALSE;
                         END_IF;
                     END_IF;
-                    IF s_bZGo AND io_astAxis[AX_Z].stAbs.Done THEN
+                    IF s_bZGo AND io_arrAxis[AX_Z].stAbs.Done THEN
                         s_bZGo := FALSE;
                     END_IF;
-                    IF s_bX1Go AND io_astAxis[AX_X1].stAbs.Done THEN
+                    IF s_bX1Go AND io_arrAxis[AX_X1].stAbs.Done THEN
                         s_bX1Go := FALSE;
                         s_bXStarted := FALSE;
                         s_iStep := STEP_S21;
@@ -278,7 +278,7 @@ BEGIN
                     END_IF;
                 ELSE
                     IF s_bZGo THEN
-                        IF io_astAxis[AX_Z].stAbs.Done THEN
+                        IF io_arrAxis[AX_Z].stAbs.Done THEN
                             s_bZGo := FALSE;
                             s_iStep := STEP_S22;
                             s_iPhase := PH_WAIT;
@@ -313,7 +313,7 @@ BEGIN
                     END_IF;
                 ELSE
                     IF s_bX1Go THEN
-                        IF io_astAxis[AX_X1].stAbs.Done THEN
+                        IF io_arrAxis[AX_X1].stAbs.Done THEN
                             s_bX1Go := FALSE;
                             s_iStep := STEP_S24;
                             s_iPhase := PH_WINDOW;
@@ -344,7 +344,7 @@ BEGIN
                     END_IF;
                 ELSE
                     IF s_bZGo THEN
-                        IF io_astAxis[AX_Z].stAbs.Done THEN
+                        IF io_arrAxis[AX_Z].stAbs.Done THEN
                             s_bZGo := FALSE;
                             s_iStep := STEP_S25;
                             s_iPhase := PH_WAIT;
@@ -381,34 +381,34 @@ BEGIN
     IF io_stMachine.bAuto AND (NOT io_stMachine.bFault) THEN
         s_bAxisOwned := TRUE;
         IF s_bZGo AND (NOT s_bHold) THEN
-            io_astAxis[AX_Z].stAbs.Position := s_rZTarget;
-            io_astAxis[AX_Z].stAbs.Velocity := io_stPP.rAutoSpeed;
-            io_astAxis[AX_Z].stAbs.Execute := TRUE;
-            io_astAxis[AX_Z].stHalt.Execute := FALSE;
+            io_arrAxis[AX_Z].stAbs.Position := s_rZTarget;
+            io_arrAxis[AX_Z].stAbs.Velocity := io_stPP.rAutoSpeed;
+            io_arrAxis[AX_Z].stAbs.Execute := TRUE;
+            io_arrAxis[AX_Z].stHalt.Execute := FALSE;
         ELSE
-            io_astAxis[AX_Z].stAbs.Execute := FALSE;
-            io_astAxis[AX_Z].stHalt.Execute := s_bZGo AND s_bHold;
+            io_arrAxis[AX_Z].stAbs.Execute := FALSE;
+            io_arrAxis[AX_Z].stHalt.Execute := s_bZGo AND s_bHold;
         END_IF;
         IF s_bX1Go AND (NOT s_bHold) THEN
-            io_astAxis[AX_X1].stAbs.Position := s_rX1Target;
-            io_astAxis[AX_X1].stAbs.Velocity := io_stPP.rAutoSpeed;
-            io_astAxis[AX_X1].stAbs.Execute := TRUE;
-            io_astAxis[AX_X1].stHalt.Execute := FALSE;
+            io_arrAxis[AX_X1].stAbs.Position := s_rX1Target;
+            io_arrAxis[AX_X1].stAbs.Velocity := io_stPP.rAutoSpeed;
+            io_arrAxis[AX_X1].stAbs.Execute := TRUE;
+            io_arrAxis[AX_X1].stHalt.Execute := FALSE;
         ELSE
-            io_astAxis[AX_X1].stAbs.Execute := FALSE;
-            io_astAxis[AX_X1].stHalt.Execute := s_bX1Go AND s_bHold;
+            io_arrAxis[AX_X1].stAbs.Execute := FALSE;
+            io_arrAxis[AX_X1].stHalt.Execute := s_bX1Go AND s_bHold;
         END_IF;
-        io_astAxis[AX_Z].stStop.Execute := FALSE;
-        io_astAxis[AX_X1].stStop.Execute := FALSE;
+        io_arrAxis[AX_Z].stStop.Execute := FALSE;
+        io_arrAxis[AX_X1].stStop.Execute := FALSE;
     ELSIF s_bAxisOwned THEN
         // 离开自动: 撤销绝对定位; 异常停机给 Stop, 进手动时仍在动的轴给 Halt
-        io_astAxis[AX_Z].stAbs.Execute := FALSE;
-        io_astAxis[AX_X1].stAbs.Execute := FALSE;
-        io_astAxis[AX_Z].stStop.Execute := io_stMachine.bFault;
-        io_astAxis[AX_X1].stStop.Execute := io_stMachine.bFault;
-        io_astAxis[AX_Z].stHalt.Execute := io_astAxis[AX_Z].stAbs.Busy;
-        io_astAxis[AX_X1].stHalt.Execute := io_astAxis[AX_X1].stAbs.Busy;
-        s_bAxisOwned := io_stMachine.bFault OR io_astAxis[AX_Z].stAbs.Busy OR io_astAxis[AX_X1].stAbs.Busy;
+        io_arrAxis[AX_Z].stAbs.Execute := FALSE;
+        io_arrAxis[AX_X1].stAbs.Execute := FALSE;
+        io_arrAxis[AX_Z].stStop.Execute := io_stMachine.bFault;
+        io_arrAxis[AX_X1].stStop.Execute := io_stMachine.bFault;
+        io_arrAxis[AX_Z].stHalt.Execute := io_arrAxis[AX_Z].stAbs.Busy;
+        io_arrAxis[AX_X1].stHalt.Execute := io_arrAxis[AX_X1].stAbs.Busy;
+        s_bAxisOwned := io_stMachine.bFault OR io_arrAxis[AX_Z].stAbs.Busy OR io_arrAxis[AX_X1].stAbs.Busy;
     END_IF;
 
     (* ============ 6. 夹爪 / 升降缸输出 ============ *)
@@ -421,7 +421,7 @@ BEGIN
     IF io_stMachine.bAuto THEN
         io_stPP.bSafeZone := (s_iStep <> STEP_S22) AND (s_iStep <> STEP_S23);
     ELSE
-        io_stPP.bSafeZone := (io_astAxis[AX_Z].rCurrentPos <= (io_stPP.rZStandby + io_stPP.rPosTol));
+        io_stPP.bSafeZone := (io_arrAxis[AX_Z].rCurrentPos <= (io_stPP.rZStandby + io_stPP.rPosTol));
     END_IF;
 
     (* ============ 8. 报警触发 ============ *)

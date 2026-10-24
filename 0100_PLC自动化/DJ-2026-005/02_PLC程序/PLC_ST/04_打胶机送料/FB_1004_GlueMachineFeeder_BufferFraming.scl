@@ -5,7 +5,7 @@
 (*                                                                   *)
 (*  依据: 详细设计说明书_DSN.md 7; 接口文档_INT.md 4.7 / 5 / 8       *)
 (*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
-(*  轴: X2 = io_astAxis[3]; Z = io_astAxis[1] 只读位置。             *)
+(*  轴: X2 = io_arrAxis[3]; Z = io_arrAxis[1] 只读位置。             *)
 (*                                                                   *)
 (*  与 DSN 的差异 (评审请确认):                                      *)
 (*    步 3 的 X102 上升沿先锁存, 光电全灭后即转步 0 (原程序要求      *)
@@ -22,7 +22,7 @@ VAR_IN_OUT
     io_stMachine        : ST_Machine;       // 模式
     io_stIo             : ST_Io;            // 物理输入输出
     io_stAlarm          : ST_Alarm;         // 报警 (本 FB 不直接写, 经 arrTrig 汇总)
-    io_astAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
+    io_arrAxis          : ARRAY[1..3] OF ST_ServoAxis;  // 轴: 1 = Z, 2 = X1, 3 = X2
 END_VAR
 
 VAR
@@ -96,24 +96,24 @@ BEGIN
     s_bHold := io_stBridge.bHoldFeeder;
     // 组框机安全异常 (联机 ∧ 通讯正常 ∧ 对方安全异常): 禁止 X2 定位与转移 (R-EXT-03)
     s_bBlock := io_stExt.bLinkMode AND (NOT io_stExt.bLinkFail) AND io_stExt.bPeerSafetyFault;
-    s_bAnyBusy := io_astAxis[1].stAbs.Busy OR io_astAxis[1].stJog.Busy OR io_astAxis[1].stHome.Busy
-                  OR io_astAxis[2].stAbs.Busy OR io_astAxis[2].stJog.Busy OR io_astAxis[2].stHome.Busy
-                  OR io_astAxis[AX_X2].stAbs.Busy OR io_astAxis[AX_X2].stJog.Busy OR io_astAxis[AX_X2].stHome.Busy;
+    s_bAnyBusy := io_arrAxis[1].stAbs.Busy OR io_arrAxis[1].stJog.Busy OR io_arrAxis[1].stHome.Busy
+                  OR io_arrAxis[2].stAbs.Busy OR io_arrAxis[2].stJog.Busy OR io_arrAxis[2].stHome.Busy
+                  OR io_arrAxis[AX_X2].stAbs.Busy OR io_arrAxis[AX_X2].stJog.Busy OR io_arrAxis[AX_X2].stHome.Busy;
     s_bEyesAll := io_stIo.bFeederFrontEye1 AND io_stIo.bFeederFrontEye2
                   AND io_stIo.bFeederRearEye1 AND io_stIo.bFeederRearEye2;
     s_bEyesNone := (NOT io_stIo.bFeederFrontEye1) AND (NOT io_stIo.bFeederFrontEye2)
                    AND (NOT io_stIo.bFeederRearEye1) AND (NOT io_stIo.bFeederRearEye2);
-    s_rErr := io_astAxis[AX_X2].rCurrentPos - io_stFeed.rPosPick;
+    s_rErr := io_arrAxis[AX_X2].rCurrentPos - io_stFeed.rPosPick;
     IF s_rErr < 0.0 THEN
         s_rErr := 0.0 - s_rErr;
     END_IF;
     s_bAtPick := (s_rErr <= io_stFeed.rPosTol);
-    s_rErr := io_astAxis[AX_X2].rCurrentPos - io_stFeed.rPosFeed;
+    s_rErr := io_arrAxis[AX_X2].rCurrentPos - io_stFeed.rPosFeed;
     IF s_rErr < 0.0 THEN
         s_rErr := 0.0 - s_rErr;
     END_IF;
     s_bAtFeed := (s_rErr <= io_stFeed.rPosTol);
-    s_rErr := io_astAxis[AX_Z].rCurrentPos - io_stBridge.rZStandby;
+    s_rErr := io_arrAxis[AX_Z].rCurrentPos - io_stBridge.rZStandby;
     IF s_rErr < 0.0 THEN
         s_rErr := 0.0 - s_rErr;
     END_IF;
@@ -148,7 +148,7 @@ BEGIN
                     END_IF;
                 ELSE
                     IF s_bX2Go THEN
-                        IF io_astAxis[AX_X2].stAbs.Done THEN
+                        IF io_arrAxis[AX_X2].stAbs.Done THEN
                             s_bX2Go := FALSE;
                             s_iStep := STEP_WAIT_FULL;
                             s_iPhase := PH_WINDOW;
@@ -190,7 +190,7 @@ BEGIN
                     END_IF;
                 ELSE
                     IF s_bX2Go THEN
-                        IF io_astAxis[AX_X2].stAbs.Done THEN
+                        IF io_arrAxis[AX_X2].stAbs.Done THEN
                             s_bX2Go := FALSE;
                             s_iStep := STEP_SEND;
                             s_iPhase := PH_WINDOW;
@@ -234,24 +234,24 @@ BEGIN
     IF io_stMachine.bAuto AND (NOT io_stMachine.bFault) THEN
         s_bAxisOwned := TRUE;
         IF s_bX2Go AND (NOT s_bHold) AND (NOT s_bBlock) THEN
-            io_astAxis[AX_X2].stAbs.Position := s_rX2Target;
-            io_astAxis[AX_X2].stAbs.Velocity := io_stFeed.rAutoSpeed;
-            io_astAxis[AX_X2].stAbs.Execute := TRUE;
-            io_astAxis[AX_X2].stHalt.Execute := FALSE;
+            io_arrAxis[AX_X2].stAbs.Position := s_rX2Target;
+            io_arrAxis[AX_X2].stAbs.Velocity := io_stFeed.rAutoSpeed;
+            io_arrAxis[AX_X2].stAbs.Execute := TRUE;
+            io_arrAxis[AX_X2].stHalt.Execute := FALSE;
         ELSE
-            io_astAxis[AX_X2].stAbs.Execute := FALSE;
-            io_astAxis[AX_X2].stHalt.Execute := s_bX2Go;
+            io_arrAxis[AX_X2].stAbs.Execute := FALSE;
+            io_arrAxis[AX_X2].stHalt.Execute := s_bX2Go;
         END_IF;
-        io_astAxis[AX_X2].stStop.Execute := FALSE;
+        io_arrAxis[AX_X2].stStop.Execute := FALSE;
     ELSIF s_bAxisOwned THEN
-        io_astAxis[AX_X2].stAbs.Execute := FALSE;
-        io_astAxis[AX_X2].stStop.Execute := io_stMachine.bFault;
-        io_astAxis[AX_X2].stHalt.Execute := io_astAxis[AX_X2].stAbs.Busy;
-        s_bAxisOwned := io_stMachine.bFault OR io_astAxis[AX_X2].stAbs.Busy;
+        io_arrAxis[AX_X2].stAbs.Execute := FALSE;
+        io_arrAxis[AX_X2].stStop.Execute := io_stMachine.bFault;
+        io_arrAxis[AX_X2].stHalt.Execute := io_arrAxis[AX_X2].stAbs.Busy;
+        s_bAxisOwned := io_stMachine.bFault OR io_arrAxis[AX_X2].stAbs.Busy;
     END_IF;
 
     (* ============ 5. Y47 安全区信号: X2 在 D512 且不在驱动且自动 (与步号无关) ============ *)
-    io_stFeed.bY47 := s_bAtPick AND (NOT io_astAxis[AX_X2].stAbs.Busy) AND io_stMachine.bAuto
+    io_stFeed.bY47 := s_bAtPick AND (NOT io_arrAxis[AX_X2].stAbs.Busy) AND io_stMachine.bAuto
                       AND (NOT io_stMachine.bFault);
     io_stIo.bQGluePickAllowed := io_stFeed.bY44;
     io_stIo.bQGlueSafeZone := io_stFeed.bY47;

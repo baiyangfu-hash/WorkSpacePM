@@ -30,16 +30,15 @@ VAR_IN_OUT
 END_VAR
 
 VAR
-    fbL1                : FB_1002_SingleLayerConveyor_BufferFraming;
-    fbL2                : FB_1002_SingleLayerConveyor_BufferFraming;
-    fbL3                : FB_1002_SingleLayerConveyor_BufferFraming;
-    fbL4                : FB_1002_SingleLayerConveyor_BufferFraming;
+    fb_L1                : FB_1002_SingleLayerConveyor_BufferFraming;
+    fb_L2                : FB_1002_SingleLayerConveyor_BufferFraming;
+    fb_L3                : FB_1002_SingleLayerConveyor_BufferFraming;
+    fb_L4                : FB_1002_SingleLayerConveyor_BufferFraming;
     fb_trUnload         : FB_R_TRIG;            // 一键退料 M515 上升沿
     s_bUnloadEdge       : BOOL := FALSE;
     s_bUnloadReq        : BOOL := FALSE;        // 退料有效 (非自动)
-    s_iLayer            : INT := 0;             // 层号 1~4
     s_iK                : INT := 0;             // 报警下标
-    s_bJog              : ARRAY[1..4] OF BOOL;  // 上料按钮点动有效
+    s_arrJog              : ARRAY[1..4] OF BOOL;  // 上料按钮点动有效
 END_VAR
 
 VAR CONSTANT
@@ -83,18 +82,18 @@ BEGIN
     IF s_bUnloadEdge AND s_bUnloadReq THEN
         io_stConv.astLayer[1].bUnload := TRUE;
     END_IF;
-    fbL1(i_dInitRevMs := INIT_REV_MS, i_dPreBlockMs := PRE_BLOCK_MS, i_dSlowFeedMs := SLOW_FEED_MS,
+    fb_L1(i_dInitRevMs := INIT_REV_MS, i_dPreBlockMs := PRE_BLOCK_MS, i_dSlowFeedMs := SLOW_FEED_MS,
            i_dReleaseOkMs := RELEASE_OK_MS, i_dReleaseNgMs := RELEASE_NG_MS, i_dStarveMs := STARVE_MS,
            i_dCylTimeoutMs := CYL_TIMEOUT_MS, io_stLayer := io_stConv.astLayer[1]);
 
     (* ---- 1 层: 上料按钮 (暂停或有报警, 取放料停在 S20, 在安全区, 非 M8 才点动正转) ---- *)
-    s_bJog[1] := io_stHmi.bFeedBtn[1] AND (io_stMachine.bPause OR io_stAlarm.bAny)
+    s_arrJog[1] := io_stHmi.bFeedBtn[1] AND (io_stMachine.bPause OR io_stAlarm.bAny)
                    AND io_stBridge.bPPAtS20 AND io_stBridge.bSafeZone AND (NOT io_stMachine.bFault);
 
     (* ---- 1 层: 输出 = 状态机命令 或 手动强制 或 上料点动 ---- *)
     io_stIo.bQConv1Block := io_stConv.astLayer[1].bBlockDown OR io_stManual.abForce[0];
     io_stIo.bQConv1Sep := io_stConv.astLayer[1].bSepDown OR io_stManual.abForce[1];
-    io_stIo.bQConv1Fwd := io_stConv.astLayer[1].bFwd OR io_stManual.abForce[2] OR s_bJog[1];
+    io_stIo.bQConv1Fwd := io_stConv.astLayer[1].bFwd OR io_stManual.abForce[2] OR s_arrJog[1];
     io_stIo.bQConv1Rev := io_stConv.astLayer[1].bRev OR io_stManual.abForce[3];
     io_stIo.bQConv1Slow := io_stConv.astLayer[1].bSlow OR io_stManual.abForce[4];
 
@@ -128,18 +127,18 @@ BEGIN
     IF s_bUnloadEdge AND s_bUnloadReq THEN
         io_stConv.astLayer[2].bUnload := TRUE;
     END_IF;
-    fbL2(i_dInitRevMs := INIT_REV_MS, i_dPreBlockMs := PRE_BLOCK_MS, i_dSlowFeedMs := SLOW_FEED_MS,
+    fb_L2(i_dInitRevMs := INIT_REV_MS, i_dPreBlockMs := PRE_BLOCK_MS, i_dSlowFeedMs := SLOW_FEED_MS,
            i_dReleaseOkMs := RELEASE_OK_MS, i_dReleaseNgMs := RELEASE_NG_MS, i_dStarveMs := STARVE_MS,
            i_dCylTimeoutMs := CYL_TIMEOUT_MS, io_stLayer := io_stConv.astLayer[2]);
 
     (* ---- 2 层: 上料按钮 (暂停或有报警, 取放料停在 S20, 在安全区, 非 M8 才点动正转) ---- *)
-    s_bJog[2] := io_stHmi.bFeedBtn[2] AND (io_stMachine.bPause OR io_stAlarm.bAny)
+    s_arrJog[2] := io_stHmi.bFeedBtn[2] AND (io_stMachine.bPause OR io_stAlarm.bAny)
                    AND io_stBridge.bPPAtS20 AND io_stBridge.bSafeZone AND (NOT io_stMachine.bFault);
 
     (* ---- 2 层: 输出 = 状态机命令 或 手动强制 或 上料点动 ---- *)
     io_stIo.bQConv2Block := io_stConv.astLayer[2].bBlockDown OR io_stManual.abForce[5];
     io_stIo.bQConv2Sep := io_stConv.astLayer[2].bSepDown OR io_stManual.abForce[6];
-    io_stIo.bQConv2Fwd := io_stConv.astLayer[2].bFwd OR io_stManual.abForce[7] OR s_bJog[2];
+    io_stIo.bQConv2Fwd := io_stConv.astLayer[2].bFwd OR io_stManual.abForce[7] OR s_arrJog[2];
     io_stIo.bQConv2Rev := io_stConv.astLayer[2].bRev OR io_stManual.abForce[8];
     io_stIo.bQConv2Slow := io_stConv.astLayer[2].bSlow OR io_stManual.abForce[9];
 
@@ -173,18 +172,18 @@ BEGIN
     IF s_bUnloadEdge AND s_bUnloadReq THEN
         io_stConv.astLayer[3].bUnload := TRUE;
     END_IF;
-    fbL3(i_dInitRevMs := INIT_REV_MS, i_dPreBlockMs := PRE_BLOCK_MS, i_dSlowFeedMs := SLOW_FEED_MS,
+    fb_L3(i_dInitRevMs := INIT_REV_MS, i_dPreBlockMs := PRE_BLOCK_MS, i_dSlowFeedMs := SLOW_FEED_MS,
            i_dReleaseOkMs := RELEASE_OK_MS, i_dReleaseNgMs := RELEASE_NG_MS, i_dStarveMs := STARVE_MS,
            i_dCylTimeoutMs := CYL_TIMEOUT_MS, io_stLayer := io_stConv.astLayer[3]);
 
     (* ---- 3 层: 上料按钮 (暂停或有报警, 取放料停在 S20, 在安全区, 非 M8 才点动正转) ---- *)
-    s_bJog[3] := io_stHmi.bFeedBtn[3] AND (io_stMachine.bPause OR io_stAlarm.bAny)
+    s_arrJog[3] := io_stHmi.bFeedBtn[3] AND (io_stMachine.bPause OR io_stAlarm.bAny)
                    AND io_stBridge.bPPAtS20 AND io_stBridge.bSafeZone AND (NOT io_stMachine.bFault);
 
     (* ---- 3 层: 输出 = 状态机命令 或 手动强制 或 上料点动 ---- *)
     io_stIo.bQConv3Block := io_stConv.astLayer[3].bBlockDown OR io_stManual.abForce[11];
     io_stIo.bQConv3Sep := io_stConv.astLayer[3].bSepDown OR io_stManual.abForce[12];
-    io_stIo.bQConv3Fwd := io_stConv.astLayer[3].bFwd OR io_stManual.abForce[13] OR s_bJog[3];
+    io_stIo.bQConv3Fwd := io_stConv.astLayer[3].bFwd OR io_stManual.abForce[13] OR s_arrJog[3];
     io_stIo.bQConv3Rev := io_stConv.astLayer[3].bRev OR io_stManual.abForce[14];
     io_stIo.bQConv3Slow := io_stConv.astLayer[3].bSlow OR io_stManual.abForce[15];
 
@@ -218,18 +217,18 @@ BEGIN
     IF s_bUnloadEdge AND s_bUnloadReq THEN
         io_stConv.astLayer[4].bUnload := TRUE;
     END_IF;
-    fbL4(i_dInitRevMs := INIT_REV_MS, i_dPreBlockMs := PRE_BLOCK_MS, i_dSlowFeedMs := SLOW_FEED_MS,
+    fb_L4(i_dInitRevMs := INIT_REV_MS, i_dPreBlockMs := PRE_BLOCK_MS, i_dSlowFeedMs := SLOW_FEED_MS,
            i_dReleaseOkMs := RELEASE_OK_MS, i_dReleaseNgMs := RELEASE_NG_MS, i_dStarveMs := STARVE_MS,
            i_dCylTimeoutMs := CYL_TIMEOUT_MS, io_stLayer := io_stConv.astLayer[4]);
 
     (* ---- 4 层: 上料按钮 (暂停或有报警, 取放料停在 S20, 在安全区, 非 M8 才点动正转) ---- *)
-    s_bJog[4] := io_stHmi.bFeedBtn[4] AND (io_stMachine.bPause OR io_stAlarm.bAny)
+    s_arrJog[4] := io_stHmi.bFeedBtn[4] AND (io_stMachine.bPause OR io_stAlarm.bAny)
                    AND io_stBridge.bPPAtS20 AND io_stBridge.bSafeZone AND (NOT io_stMachine.bFault);
 
     (* ---- 4 层: 输出 = 状态机命令 或 手动强制 或 上料点动 ---- *)
     io_stIo.bQConv4Block := io_stConv.astLayer[4].bBlockDown OR io_stManual.abForce[16];
     io_stIo.bQConv4Sep := io_stConv.astLayer[4].bSepDown OR io_stManual.abForce[17];
-    io_stIo.bQConv4Fwd := io_stConv.astLayer[4].bFwd OR io_stManual.abForce[18] OR s_bJog[4];
+    io_stIo.bQConv4Fwd := io_stConv.astLayer[4].bFwd OR io_stManual.abForce[18] OR s_arrJog[4];
     io_stIo.bQConv4Rev := io_stConv.astLayer[4].bRev OR io_stManual.abForce[19];
     io_stIo.bQConv4Slow := io_stConv.astLayer[4].bSlow OR io_stManual.abForce[20];
 

@@ -1,7 +1,7 @@
 ---
 spec_id: INT-DJ-2026-005-PLC_ST
 title: "DJ-2026-005 边框缓存机 PLC 程序接口文档"
-version: "V10.0.0"
+version: "V10.1.0"
 domain: plc
 lifecycle: active
 tags: ["接口文档", "PLC程序"]
@@ -12,7 +12,7 @@ tags: ["接口文档", "PLC程序"]
 ## 1. 文档基础信息
 
 **文档标题**：DJ-2026-005 边框缓存机 PLC 程序接口文档
-**文档版本**：V10.0.0
+**文档版本**：V10.1.0
 **编制日期**：2026-10-24
 **编制人**：Claude
 **审核人**：用户（待审）
@@ -23,6 +23,7 @@ tags: ["接口文档", "PLC程序"]
 
 | 版本号 | 变更内容 | 变更人 | 变更日期 |
 |--------|----------|--------|----------|
+| V10.1.0 | 编码落地后回改（2026-10-24）：FB 增加的 VAR_IN_OUT（FB_1001 + `io_stHome`；FB_1005 + `io_stPP / io_stFeed / io_stConv`；FB_1006 + `io_stExt / io_stBridge`；FB_1007 + `io_stHmi / io_stManual`；FB_2001 + `io_stHmi`；FB_2002 + `io_stHome / io_stManual / io_stExt`），轴参数更名 `io_arrAxis`（规范要求数组带 arr），`ST_PickPlace` / `ST_Feeder` / `ST_HomePrepare` / `ST_Bridge` 字段与代码对齐，报警表 F20~F25 轴归属改正，`iAlarmNo` = 最小 F 号 + 1 | Claude | 2026-10-24 |
 | V10.0.0 | 全部重写：按 DSN V8.0.0 的 11 个模块重新定义结构体、FB 接口、站间中继、HMI 软元件、步序常量、报警表。旧版（V9.x）中的 MES 报警字、配方管理器、心跳等条目原程序没有，已删除 | Claude | 2026-10-24 |
 | V9.2.0 及更早 | Trae 版本，已废 | Trae / plc-electrical-engineer | 2026-06 ~ 09 |
 
@@ -133,8 +134,13 @@ tags: ["接口文档", "PLC程序"]
 | `bClampFront, bClampRear` | BOOL | 夹紧命令（Y40/Y41 语义） |
 | `bLiftUp, bLiftDown` | BOOL | 升降缸命令 |
 | `bSafeZone` | BOOL | 输出：取料机构在安全区（给 Bridge） |
-| 传感器输入 | `bClampedF1..2, bClampedR1..2, bReleasedF1..2, bReleasedR1..2, bLiftUpPos, bLiftDnPos, bProdF1..2, bProdR1..2` | BOOL | 输入映射，名称见 IO 表 |
-| 报警触发 | `arrTrig[0..15]` | BOOL | F30~F33、F66~F75 的 14 个触发 + 夹紧超时 |
+| `bAtRest` | BOOL | 静止点（S20 且 X1 未出发，或未激活），停止收尾判断用 |
+| `rPosTol` | REAL | 位置判定容差（脉冲，待现场整定） |
+| `dSettleMs, dClampTimeoutMs, dCylTimeoutMs` | DINT | 窗口 500、夹紧超时 5000（F106）、气缸位置报警 5000 |
+| `bGripOpenReq, bLiftUpReq, bLiftDownReq` | BOOL | 回原点 / 准备 / 手动对夹爪、升降缸的要求（FB_2002 汇入；Y40~Y43 只由 FB_1003 写） |
+| 报警触发 | `arrTrig[0..15]` | BOOL | [0..3] F30~F33，[4..11] F66~F73，[12..13] F74~F75，[14] F106，[15] 预留 |
+
+> 传感器直接读 `stIo`（不再复制进本结构体）：夹紧 / 松开位 X64~X67、X124~X127，升降缸 X70 / X71，产品检测 X60~X63。
 
 ### 4.7 `ST_Feeder`
 
@@ -145,11 +151,16 @@ tags: ["接口文档", "PLC程序"]
 | `rPosFeed` | REAL | D522 |
 | `bReqA` | BOOL | 前位请求 A |
 | `bReqB` | BOOL | 后位请求 B |
-| `abEyes[1..4]` | BOOL | X72~X75 四个光电（亮 = 有料） |
 | `bY44` | BOOL | 送料完成通知 / 送框信号 Y44 |
 | `bY47` | BOOL | X2 在取料点 |
 | `bFeedPermit` | BOOL | 出发许可（来自 FB_3001） |
-| `arrTrig[0..4]` | BOOL | F90、F91、小车提示、F22、F23 |
+| `bAtRest` | BOOL | 静止点（步 0 / 1），停止收尾判断用 |
+| `rAutoSpeed` | REAL | 自动速度 D600（FB_2002 由取放料同步） |
+| `rPosTol` | REAL | 位置判定容差（脉冲，待现场整定） |
+| `dSettleMs, dFeedFullMs, dFeedEmptyMs, dEyeAlarmMs` | DINT | 窗口 500、光电全亮 10000、等 X102 超时 10000、光电异常 1000 |
+| `arrTrig[0..4]` | BOOL | [0] F90，[1] F91，[2] F107（提示类），[3..4] 预留；F22 / F23（X2 极限）由 FB_1001 直接写 |
+
+> 4 个小车光电 X72~X75 直接读 `stIo`。步 3 的 X102（取料完成）上升沿在步内锁存。
 
 ### 4.8 `ST_ExternalLink`
 
@@ -176,13 +187,13 @@ tags: ["接口文档", "PLC程序"]
 | `bAny` | BOOL | 任一非提示类 |
 | `abHoldConv[1..4]` | BOOL | 各层保持 |
 | `bHoldPP, bHoldFeeder, bHoldHome` | BOOL | 取放料 / 小车 / 回原点保持 |
-| `iAlarmNo` | INT | 最小 F 号 → HMI D117（无报警为 0） |
+| `iAlarmNo` | INT | 最小锁存 F 号 + 1 → HMI D117（无报警为 0；加 1 是为了让 F0 急停与“无报警”区分，待确认） |
 | `bLampGreen/Yellow/Red/Buzzer/Reset` | BOOL | 声光 Y24~Y27、Y50 |
 
 ### 4.10 `ST_HomePrepare` / `ST_Manual` / `ST_Bridge`
 
-- `ST_HomePrepare`：`iHomeStep, iPrepStep, bPreprocessDone, bAxisInitDone, bHomeDoneZ, bHomeDoneX1, bHomeDoneX2, bPrepareDone, bInitReqConv`。
-- `ST_Manual`：`bJogLockZ/X1/X2`（轴禁止）、`abForce[0..20]`（输送强制位）、`bTeachWrite[1..6]`、`arrTrig[0..1]`（保留）。
+- `ST_HomePrepare`：`iHomeStep, iPrepStep, bPreprocessDone, bAxisInitDone, bHomeDoneZ, bHomeDoneX1, bHomeDoneX2, bPrepareDone, bInitReqConv, bReleaseGripperLock, bGripOpenCmd, bLiftDownCmd, dPrepZDelayMs(300), dPrepX1DelayMs(500), dPrepX2DelayMs(1000)`。
+- `ST_Manual`：`bJogLockZ/X1/X2`（轴禁止 = 该轴伺服报警）、`abForce[0..20]`（输送强制位，已按模式 / 安全区放行）、`bTeachWrite[1..6]`、`bGripOpenCmd, bLiftUpCmd, bLiftDownCmd`、`arrTrig[0..1]`（保留）。
 - `ST_Bridge`：第 6 节全部中继信号。
 
 ## 5. FB 接口（`VAR_IN_OUT` 整体传递）
@@ -191,16 +202,16 @@ tags: ["接口文档", "PLC程序"]
 
 | FB | VAR_IN_OUT | 说明 |
 |---|---|---|
-| FB_1001_MachineMode_BufferFraming | `io_stMachine : ST_Machine`, `io_stHmi : ST_Hmi`, `io_stIo : ST_Io`, `io_stAlarm : ST_Alarm` | 模式 / D116 / 机器级报警触发 |
-| FB_1005_HomePrepare_BufferFraming | `io_stHome : ST_HomePrepare`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_astAxis : ARRAY[1..3] OF ST_ServoAxis`, `io_stBridge` | 回原点 + 准备 |
-| FB_1006_ManualTeach_BufferFraming | `io_stManual : ST_Manual`, `io_stMachine`, `io_stHmi`, `io_stIo`, `io_stPP : ST_PickPlace`, `io_stFeed : ST_Feeder`, `io_astAxis` | 手动与示教 |
+| FB_1001_MachineMode_BufferFraming | `io_stMachine : ST_Machine`, `io_stHmi : ST_Hmi`, `io_stIo : ST_Io`, `io_stAlarm : ST_Alarm`, `io_stHome : ST_HomePrepare` | 模式 / D116 / 机器级报警触发 |
+| FB_1005_HomePrepare_BufferFraming | `io_stHome : ST_HomePrepare`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_arrAxis : ARRAY[1..3] OF ST_ServoAxis`, `io_stBridge`, `io_stPP`, `io_stFeed`, `io_stConv` | 回原点 + 准备 |
+| FB_1006_ManualTeach_BufferFraming | `io_stManual : ST_Manual`, `io_stMachine`, `io_stHmi`, `io_stIo`, `io_stPP : ST_PickPlace`, `io_stFeed : ST_Feeder`, `io_stExt`, `io_stBridge`, `io_arrAxis` | 手动与示教 |
 | FB_3001（`FB_ExternalDeviceInteraction`） | `io_stExt : ST_ExternalLink`, `io_stMachine`, `io_stHmi`, `io_stIo`, `io_stFeed`, `io_stAlarm` | 组框机链路 |
-| FB_2002_StationBridge | `io_stBridge : ST_Bridge`, `io_stConv`, `io_stPP`, `io_stFeed`, `io_stMachine`, `io_stAlarm` | 中继（纯赋值） |
-| FB_1007_ConveyorSystem_BufferFraming | `io_stConv : ST_ConveyorSystem`, `io_stBridge`, `io_stMachine`, `io_stIo`, `io_stAlarm` | 内含 fbL1~fbL4 |
+| FB_2002_StationBridge | `io_stBridge : ST_Bridge`, `io_stConv`, `io_stPP`, `io_stFeed`, `io_stHome`, `io_stManual`, `io_stExt`, `io_stMachine`, `io_stAlarm` | 中继（纯赋值）；另把取放料 / 小车的 `arrTrig` 搬入 `stAlarm` |
+| FB_1007_ConveyorSystem_BufferFraming | `io_stConv : ST_ConveyorSystem`, `io_stBridge`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_stHmi`, `io_stManual` | 内含 fb_L1~fb_L4 |
 | FB_1002_SingleLayerConveyor_BufferFraming | `io_stLayer : ST_SingleLayer` | 单层状态机；参数 `VAR_INPUT`：`i_dInitRevMs, i_dPreBlockMs, i_dSlowFeedMs, i_dReleaseOkMs, i_dReleaseNgMs, i_dStarveMs, i_dCylTimeoutMs : DINT` |
-| FB_1003_PickPlace_BufferFraming | `io_stPP : ST_PickPlace`, `io_stBridge`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_astAxis` | S20~S25 |
-| FB_1004_GlueMachineFeeder_BufferFraming | `io_stFeed : ST_Feeder`, `io_stBridge`, `io_stExt`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_astAxis` | 小车 |
-| FB_2001_CommonAlarm_AllStation | `io_stAlarm : ST_Alarm`, `io_stMachine`, `io_stIo` | 锁存 / 分级 / 声光 |
+| FB_1003_PickPlace_BufferFraming | `io_stPP : ST_PickPlace`, `io_stBridge`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_arrAxis` | S20~S25 |
+| FB_1004_GlueMachineFeeder_BufferFraming | `io_stFeed : ST_Feeder`, `io_stBridge`, `io_stExt`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_arrAxis` | 小车 |
+| FB_2001_CommonAlarm_AllStation | `io_stAlarm : ST_Alarm`, `io_stMachine`, `io_stIo`, `io_stHmi` | 锁存 / 分级 / 声光 |
 
 所有时间参数 `DINT` 毫秒；所有位置 / 速度 `REAL`。
 
@@ -220,7 +231,12 @@ tags: ["接口文档", "PLC程序"]
 | `bManual, bHoming, bPrepare, bAuto, bFault, bPause` | `stMachine` | 各 FB | 模式标志 |
 | `bInitReqConv` | `stHome` | 4 层 `bInitReq` | 回原点预处理期间初始化输送 |
 | `bReleaseGripperLock` | `stHome` | `stPP` | F80 期间禁止 Z 定位 |
-| `bFeedPermit` | `stExt` | `stFeed` | 送框许可 |
+| `bFeedPermit` | `stExt` | `stFeed` | 送框许可 = ¬M501 ∨ M502 ∨ M510 |
+| `bFeedDoneClr` | `stFeed`（步 2 入口一拍） | FB_2002 清 `stPP.abFeedDone` | 清两个“X1 送料完成” |
+| `bPPAtS20, rZStandby` | `stPP` | `stFeed` | 取放料在 S20；Z 待机点 D500 |
+| `bAllAtRest` | 4 层 / `stPP` / `stFeed` 的静止点 | `stMachine` | 停止收尾判断 |
+
+> Hold 中继 = 报警 Hold ∨ 暂停（`stMachine.bPause`）。
 
 ## 7. HMI 软元件接口
 
@@ -254,7 +270,7 @@ tags: ["接口文档", "PLC程序"]
 | 原 | 新字段 | 说明 |
 |---|---|---|
 | D116 | `iDeviceState` | 第 4.2 节 |
-| D117 | `iAlarmNo` | 最小报警号（原程序未使用，新增） |
+| D117 | `iAlarmNo` | 最小报警号 + 1，0 = 无报警（原程序未使用，新增） |
 | D760 | `stFeed.iStep` | 小车步 |
 | M94 | `bHomeDone` | |
 | 模式灯 | `bManual…bAuto` | |
@@ -307,9 +323,9 @@ tags: ["接口文档", "PLC程序"]
 | F9~F11 | X1 / X2 / Z 伺服报警 | A | FB_1001 | 0 |
 | F12 | HMI 停止 | 提示 | FB_1001 | 0 |
 | F13~F16 | 变频器 1~4 | A | FB_1001 | 0 |
-| F20 / F21 | Z 轴前后极限（自动时） | B 取放料 | FB_1001 | 0 |
-| F22 / F23 | X2 前后极限（自动时） | B 小车 | FB_1001 | 0 |
-| F24 / F25 | X1 前后极限（自动时） | B 取放料 | FB_1001 | 0 |
+| F20 / F21 | X1 前后极限 X3 / X4（自动时） | B 取放料 | FB_1001 | 0 |
+| F22 / F23 | X2 前后极限 X5 / X6（自动时） | B 小车 | FB_1001 | 0 |
+| F24 / F25 | Z 上下极限 X7 / X10（自动时） | B 取放料 | FB_1001 | 0 |
 | F30 / F31 | 后夹爪夹紧但前夹料产品检测 1 / 2 灭（原命名交叉） | B 取放料 | FB_1003 | 5 s |
 | F32 / F33 | 前夹爪夹紧但后夹料产品检测 1 / 2 灭 | B 取放料 | FB_1003 | 5 s |
 | F34~F41 | 1 层阻挡上 1、上 2、下 1、下 2；分料上 1、上 2、下 1、下 2 | B 输送 1 | FB_1002 | 5 s |
@@ -336,3 +352,12 @@ tags: ["接口文档", "PLC程序"]
 - `ST_Io` 字段依赖 IO 表的最终版（待现场核对 X160 / X161、Y45 / Y46、X103 等，见 IO 表末尾）。
 - HMI 软元件映射（GP-Pro EX 变量名）另外成表，不在本文件范围。
 - F106 / F107 为新增号，评审时请确认可占用。
+- 编码时新增、待确认（均已在对应 FB 头注释写明）：
+  1. `iAlarmNo` = 最小 F 号 + 1（避免 F0 与“无报警”重名）。
+  2. 输送强制位分组（每层 5 位：阻挡 / 分料 / 正转 / 反转 / 慢速，跳过 M80）。
+  3. X1 手动定位的 Z 联锁取“Z ≤ 待机点 + 容差”（REQ 写法），DSN 写的“Z ≤ 0”与之不一致。
+  4. 自动速度加减步长 500、手动速度步长 5。
+  5. 输送强制位的电机三位在安全区外不放行（原程序无，安全相关新增，需安全签字）。
+  6. 回原点速度 `rHomeSpeed` 无处可放：`ST_SvHome` 没有速度字段，由轴 / 驱动器参数决定。
+  7. X160 / X161 未并入组框机安全异常（极性待现场确认）。
+  8. X130 / X131 在 X2 手动定位联锁里按“均为 1 才放行”（沿用 DSN；图纸写它们是边框掉料检测，含义待确认，Q-F）。

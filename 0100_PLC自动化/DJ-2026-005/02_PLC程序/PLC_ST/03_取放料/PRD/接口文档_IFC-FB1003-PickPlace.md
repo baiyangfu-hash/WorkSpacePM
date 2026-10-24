@@ -25,7 +25,7 @@
 | io_stMachine | ST_Machine | 模式 |
 | io_stIo | ST_Io | 物理输入输出 |
 | io_stAlarm | ST_Alarm | 报警 (本 FB 不直接写, 经 arrTrig 汇总) |
-| io_astAxis | ARRAY[1..3] OF ST_ServoAxis | 轴: 1 = Z, 2 = X1, 3 = X2 |
+| io_arrAxis | ARRAY[1..3] OF ST_ServoAxis | 轴: 1 = Z, 2 = X1, 3 = X2 |
 
 ## 附：约定
 

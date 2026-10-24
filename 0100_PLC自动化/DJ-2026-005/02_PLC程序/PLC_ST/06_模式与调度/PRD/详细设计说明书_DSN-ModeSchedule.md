@@ -6,7 +6,8 @@
 |------|-----|
 | **文档标题** | 06_模式与调度（FB_1001 / FB_1005 / FB_1006 / FB_2002）详细设计说明书 |
 | **文档版本** | V15.0.0 |
-| **关联源码** | 06_模式与调度/FB_1001_MachineMode_BufferFraming.scl / 06_模式与调度/FB_1005_HomePrepare_BufferFraming.scl / 06_模式与调度/FB_1006_ManualTeach_BufferFraming.scl / 06_模式与调度/FB_2002_StationBridge.scl |
+| **关联源码** | 06_模式与调度/FB_1001_MachineMode_BufferFraming.scl |
+| **同文档涵盖** | 06_模式与调度/FB_1005_HomePrepare_BufferFraming.scl；06_模式与调度/FB_1006_ManualTeach_BufferFraming.scl；06_模式与调度/FB_2002_StationBridge.scl |
 | **关联IFC** | 接口文档_IFC-ModeSchedule.md |
 | **编制日期** | 2026-10-24 |
 | **编制人** | Claude（用户待审） |
