@@ -67,6 +67,11 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
     gov_service = GovernanceService(workspace_root=root)
     sanitation_report = gov_service.inspect_sanitation()
 
+    # 6. GitHub 命令行（`main.py pr open` 要用；只提示，不计入 all_passed）
+    from auto_pm.application.core.pr_open_service import gh_status
+
+    gh_installed, gh_logged_in = gh_status()
+
     all_passed = py_ok and git_ok and sanitation_report.is_pure and all(dep_results.values())
 
     return {
@@ -78,6 +83,8 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
         "git_found": git_ok,
         "sanitation_pure": sanitation_report.is_pure,
         "sanitation_issues": sanitation_report.total_issues,
+        "gh_installed": gh_installed,
+        "gh_logged_in": gh_logged_in,
         "all_passed": all_passed,
     }
 
@@ -116,6 +123,14 @@ def doctor_command(workspace: str | None) -> None:
     sani_status = "[green]✅ 根目录纯净[/green]" if res["sanitation_pure"] else f"[bold yellow]⚠️ 存在 {res['sanitation_issues']} 个游离文件[/bold yellow]"
     sani_msg = "符合根目录白名单规范" if res["sanitation_pure"] else "建议运行 'auto-pm clean' 进行自动清扫"
     table.add_row("工作空间纯净度守卫", sani_status, sani_msg)
+
+    if not res["gh_installed"]:
+        gh_row = ("[yellow]⚠️ 未安装[/yellow]", "`main.py pr open` 要用 gh；没装就把分支交给用户在网页上开 PR")
+    elif not res["gh_logged_in"]:
+        gh_row = ("[yellow]⚠️ 未登录[/yellow]", "运行 `gh auth login`")
+    else:
+        gh_row = ("[green]✅ 已登录[/green]", "可用 `main.py pr open`")
+    table.add_row("GitHub 命令行 gh", *gh_row)
 
     console.print(table)
 
