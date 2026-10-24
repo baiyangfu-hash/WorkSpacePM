@@ -178,8 +178,8 @@ BEGIN
                 END_IF;
                 s_bFullIn := s_bEyesAll;
                 IF (io_stBridge.abFeedDone[1] AND io_stBridge.abFeedDone[2] OR s_bFullQ)
-                   AND s_bZStandby AND s_bEyesAll AND (NOT s_bAnyBusy) THEN
-                    // 送料交接只看: 自动 ∧ 无报警 (外层已判) ∧ 与取放料不干涉; 不看"停止收尾"
+                   AND s_bZStandby AND s_bEyesAll AND (NOT s_bAnyBusy) AND (NOT io_stMachine.bStopPending) THEN
+                    // 送料交接只在: 自动 ∧ 无报警 (含 F12 停止按下, 即 bStopPending) ∧ 与取放料不干涉
                     s_bFullIn := FALSE;
                     s_iStep := STEP_TO_FEED;
                     s_iPhase := PH_WINDOW;
