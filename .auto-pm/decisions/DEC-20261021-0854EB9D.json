@@ -1,0 +1,42 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261021-0854EB9D",
+  "project_id": "SW-2026-010",
+  "change_id": "CHG-SCPT-2026-003",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/sw_2026_010/core/io_table.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/tests/test_io_table.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-21T21:56:52.257689+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: read_io_table 按文件顺序返回全部行不去重，IoPoint 含 variable_name/address/comment/line_number",
+    "acceptance: 支持 UTF-8 BOM 与 GB18030 编码、CRLF、空行跳过、表头乱序与多余列",
+    "acceptance: 错误统一为中文 IoTableError，覆盖文件不存在/空文件/缺表头/缺必需列/解码失败",
+    "acceptance: tests/test_io_table.py 覆盖 9 类场景且 pytest 全绿",
+    "risk: CSV 方言差异：现场若为分号分隔需后续扩展契约",
+    "risk: GB18030 回退可能掩盖真实编码错误",
+    "non-goal: 查重算法与重复报告输出（归 claude:local）",
+    "non-goal: CLI 命令与退出码语义（归 claude:local）",
+    "non-goal: 修改 __main__.py、pyproject.toml 或新增依赖"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "c0819e0e1684955e078696a189606c61e836a8edfe5dbb3dc0ef645ca5f61e4b",
+      "approval_evidence_ref": "user-confirmation:20261021-SW010-IOCHECK-APPROVE",
+      "request_id": "SW-2026-010-io-duplicate-check-20261021",
+      "execution_grant": {
+        "adapter": "trae",
+        "approved_model": "DeepSeek-V4.1-Flash",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/sw_2026_010/core/io_table.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/tests/test_io_table.py"
+        ]
+      }
+    }
+  }
+}

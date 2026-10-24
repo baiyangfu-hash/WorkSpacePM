@@ -1,0 +1,21 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261021-M3D07C01",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-442",
+  "approved_scope": "SYSTEM",
+  "approved_files": [
+    "00_Infrastructure/auto_pm/deployment_manifest.json",
+    "00_Infrastructure/auto_pm/active_release.json",
+    "00_Infrastructure/auto_pm/previous_release.json",
+    "00_Infrastructure/auto_pm/releases/1.3.3-10165f9"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-21T14:02:35.411486+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "仅写入 releases/1.3.3-10165f9、deployment_manifest.json、active_release.json、previous_release.json；release 由合并提交 10165f900028d6776b9930fbac761f5485e9c4a2 以其自身 pmf_build.py 经 pmf_release_ops.sh（SHA-256 fe331979d463d4de32209bfb32c7eca8db1e17ee60a39622a92cd8c7be53e8de）构建",
+    "切换后核验任一失败即回退指针；不回滚数据库、不改历史 release/事件/Checkpoint、不合并 main、不推送"
+  ],
+  "metadata": {}
+}

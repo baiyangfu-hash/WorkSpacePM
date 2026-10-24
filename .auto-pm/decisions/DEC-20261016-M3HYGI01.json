@@ -1,0 +1,28 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261016-M3HYGI01",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-053",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".auto-pm/decisions",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/01_变更单",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/04_监控/01_变更管理/01_变更单",
+    "SYS-2026-001_WorkspaceGovernance/01_项目文档/archive",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    "0100_PLC自动化/DJ-2026-005/11_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/02_整改项/控制面事故登记台账.md"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-17T03:08:42.524410+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "严格限定卡 150 V1.0 的 565 个 owned path；文件字节必须等于卡 §5.1 的 SHA-256",
+    "不得改 §4 之外的任何文件（产品文件、其他测试、既有 CHG 原文、台账、规则、AGENTS.md、.trae、.cursor、.agent、Hook 脚本、release）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并进 main、不推送、不打 tag、不部署、不切换 release、不处置任何债务或历史失败记录"
+  ],
+  "metadata": {}
+}

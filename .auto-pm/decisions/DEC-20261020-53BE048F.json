@@ -1,0 +1,38 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261020-53BE048F",
+  "project_id": "SW-2026-010",
+  "change_id": "CHG-SCPT-2026-001",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/sw_2026_010/core/rated_current.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/sw_2026_010/cli/__main__.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/tests/test_rated_current.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-20T14:50:17.211113+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: rated-current 命令可执行：7.5 kW/380 V/0.85/0.9 输出 14.9 A",
+    "acceptance: 四个输入分别取 0 与负数共 8 个用例均返回非零退出码、输出中文错误且无 traceback",
+    "acceptance: pytest 全量通过，ruff check 与 mypy strict 对改动路径 Exit 0",
+    "risk: 输出精度按用户裁定为 1 位小数，四舍五入可能使手工复算出现末位差异",
+    "risk: 仅按 0/负数拦截，功率因数或效率大于 1 不做限制（用户裁定按默认）",
+    "non-goal: 不新增依赖，不改 pyproject.toml 与 .ruff.toml",
+    "non-goal: 不手改数据库或治理 JSON；不安装 cockpit-entry；不提交或推送"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "580ea6c36d754a4119591ec3f656bf2b78be3dbfa414ba8c68a309d7b6e3dad2",
+      "approval_evidence_ref": "user-confirmation:20261020-SW010-RATEDCURRENT-APPROVE",
+      "request_id": "SW-2026-010-rated-current-20261020",
+      "execution_grant": {
+        "adapter": "trae",
+        "approved_model": "DeepSeek-V4.1-Flash",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": []
+      }
+    }
+  }
+}
