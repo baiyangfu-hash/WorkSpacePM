@@ -5,6 +5,7 @@ IoPointsParser.parse()
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 from auto_pm.vartable.parsers.io_points_parser import IoPointsParser
@@ -124,21 +125,28 @@ class TestIoPointsParserEncoding:
 
 class TestIoPointsParserReal:
     def test_parse_real_dj_2026_005(self, real_dj_2026_005_io_points: Path) -> None:
-        """解析真实 DJ-2026-005 io_points.csv（119 行）"""
+        """解析真实 DJ-2026-005 io_points.csv：行数和首末点与文件本身核对，不写死数字。
+
+        该表会随原程序核对而改版（例如 2026-10-23 按原软元件注释重建为 146 点），
+        所以只断言解析器的结构性质：行数 = 文件数据行数、无错误、站点和信号类型齐全。
+        """
+        with real_dj_2026_005_io_points.open(encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        assert rows, "io_points.csv 不应为空"
+
         result = IoPointsParser().parse(real_dj_2026_005_io_points)
         assert result.success
         assert result.var_table is not None
-        assert result.var_table.total_count == 119
+        assert result.var_table.total_count == len(rows)
         assert result.error_count == 0
-        # 站点
+        # 站点：本体 + 至少一个扩展站
         assert "cpu" in result.var_table.stations
-        assert "remote_io_1" in result.var_table.stations
+        assert len(result.var_table.stations) > 1
         # 信号类型
         assert "DI" in result.var_table.signal_types
         assert "DO" in result.var_table.signal_types
-        # 首条目
-        assert result.var_table.entries[0].tag == "Z_Home_Sensor"
-        assert result.var_table.entries[0].address == "X0"
-        # 末条目（RIO1:Y15）
-        assert result.var_table.entries[-1].tag == "RearGrip_Release"
-        assert result.var_table.entries[-1].address == "RIO1:Y15"
+        # 首、末条目与文件首、末行一致
+        assert result.var_table.entries[0].tag == rows[0]["tag"]
+        assert result.var_table.entries[0].address == rows[0]["address"]
+        assert result.var_table.entries[-1].tag == rows[-1]["tag"]
+        assert result.var_table.entries[-1].address == rows[-1]["address"]
