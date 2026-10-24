@@ -7,6 +7,10 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 规则真源是根目录 `AGENTS.md`，通用契约见 `../shared/refs/skill_coordination.md`。本技能只做“进门定位”，不持有任何治理权，也不创建平行状态。命令都从工作区根目录执行（先切换到根目录再运行），解释器用 `.venv\Scripts\python.exe`。
 
+## 身份标记
+
+Trae 里的 AI 执行 `main.py` 命令，一律改用 `.\.trae\bin\pm-as-trae.ps1 <命令参数>`，等价于 `& ".\.venv\Scripts\python.exe" ".\main.py" <命令参数>`，只是这一条命令期间带上 `AUTO_PM_AGENT=trae:cn`，结束即还原。驾驶舱靠这个标记认出调用方是 agent（冒号后面的 `cn` 只是备注，国际版同样适用）：不带标记会被当成用户本人。下面各步里写的 `main.py` 都按这个方式运行；需要用户本人敲口令的命令（`pm approve`、`pm accept`、`pm sign-risk`）不要用这个脚本运行（带标记会被拒绝），照原有说法在终端里原样运行或交给用户。
+
 ## 进门四步
 
 1. **确认当前目录是控制根（主工作区）**：
