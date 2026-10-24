@@ -1,4 +1,4 @@
-# Manual pre-gate for a release candidate: runs the ten pytest groups of the governed gate (scripts/long_gate_nine_groups.example.json,
+# Manual pre-gate for a release candidate: runs the ten pytest groups of the governed gate (run_g2.sh of card 188 and scripts/long_gate_nine_groups.example.json,
 # the same targets and ignores) on Windows, each in its own process, with faulthandler on.  The "rest" group runs as ONE whole
 # process on purpose: a crash that only shows when the Qt tests run back to back (access violation 0xC0000005, WBS question pool 11)
 # cannot be caught by the split groups in sw008-ci.  Every group runs even when an earlier one fails, so one run lists all failures.
@@ -15,6 +15,10 @@ env:
   PROJ: "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
   QT_QPA_PLATFORM: offscreen
   PYTHONDONTWRITEBYTECODE: "1"
+  # The same environment the governed long gate gives its groups.
+  PYTHONFAULTHANDLER: "1"
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
   GIT_AUTHOR_NAME: ci
   GIT_AUTHOR_EMAIL: ci@example.invalid
   GIT_COMMITTER_NAME: ci
@@ -51,6 +55,7 @@ jobs:
         working-directory: ${{ env.PROJ }}
         run: |
           PY="$RUNNER_TEMP/venv/Scripts/python.exe"
+          export PATH="/usr/bin:/mingw64/bin:$PATH"
           run_group() {
             name="$1"; shift
             echo "::group::$name"
