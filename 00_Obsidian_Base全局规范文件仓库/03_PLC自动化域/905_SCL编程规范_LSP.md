@@ -1,13 +1,17 @@
 ---
 spec_id: LSP-905
 title: "SCL编程规范"
-version: "V1.2.1"
+version: "V1.3.0"
 domain: plc
 lifecycle: stable
 canonical_path: "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/905_SCL编程规范_LSP.md"
 replaces: [DEV-801, DEV-810]
 tags: ["SCL", "编程", "核心规范", "LSP", "DJ-2026-005实践"]
 changelog:
+  - version: V1.3.0
+    date: 2026-10-24
+    author: Claude
+    changes: 语法白名单新增 ENUM 枚举类型（§4.4）；经用户 2026-10-24 批准
   - version: V1.2.0
     date: 2026-08-25
     author: Codex
@@ -24,9 +28,9 @@ changelog:
 
 # SCL 编程规范 (Siemens LSP 兼容版)
 
-> 版本：V1.2.1
-> 状态：已验证
-> 更新日期：2026-08-26
+> 版本：V1.3.0
+> 状态：已验证（§4.4 ENUM 为新增语法，待本机插件与目标平台验证，验证前不得用于交付）
+> 更新日期：2026-10-24
 > 适用环境：Siemens LSP (VS Code)、TIA Portal、CODESYS、GX Works
 
 ---
@@ -282,6 +286,45 @@ fb_tActionTimer(IN := FALSE, PT := 500, Q => , ET => q_eElapsed);
 
 ---
 
+### 4.4 ENUM 枚举类型（V1.3.0 新增，待验证）
+
+步序、模式、状态等有限取值的变量，允许用枚举，成员带**显式数值**（便于和 HMI、测试、报警码对照），变量用 `e` 二级标识（见 §3.2）。各平台声明语法不同，**项目在方案文档里写明目标平台用哪一种**：
+
+```scl
+// 形式 A：IEC 61131-3 枚举（CODESYS / InoProShop 等）
+TYPE E_ConveyorStep :
+(
+    STEP_IDLE := 0,
+    STEP_INIT_WAIT := 1,
+    STEP_SEND_ON := 10
+);
+END_TYPE
+
+// 形式 B：TIA Portal V20+ 命名值类型（Named Value Type）
+// 必须带基础类型和默认值，类型放在软件单元的 .nvt 文件里，成员值显式给出：
+// E_ConveyorStep : Int ( STEP_IDLE := 0, STEP_INIT_WAIT := 1, STEP_SEND_ON := 10 ) := STEP_IDLE
+// 具体写法以 TIA 文档“Named value data types (S7-1500)”为准，项目落地时先在 TIA 里建一个样例确认。
+
+// 使用（形式 A 示例）
+s_eStep : E_ConveyorStep;
+CASE s_eStep OF
+    E_ConveyorStep#STEP_IDLE:
+        // 待机
+ELSE
+    s_eStep := E_ConveyorStep#STEP_IDLE;
+END_CASE;
+```
+
+约定：
+- 类型名 `E_` + 大驼峰；成员名全大写加下划线，带模块前缀；成员值必须显式给出，不得依赖默认编号。
+- CASE 仍必须有 `ELSE`（STD-850）。
+- 不得对枚举变量做算术运算；与 INT 的互转只在 HMI / 报警码出口处做，且注明。
+- **只用于支持枚举的平台**：CODESYS 系（InoProShop 等）用形式 A；TIA Portal 用形式 B（命名值类型，需 V20+），低版本 TIA 回退 `INT` + `VAR CONSTANT`。
+- **验证现状**：驾驶舱 SclLinter 已验证认得形式 A、无误报（审计 130）；Siemens 语言服务插件与目标平台编译待用户本机验证。
+- **前置验证**：Siemens 语言服务插件与驾驶舱 SclLinter 对所选形式的解析，以及目标平台能否编译，需在用户本机验证；验证不通过的项目回退为 `INT` + `VAR CONSTANT` 命名常量，数值不变。验证通过后把本节标题的“待验证”去掉。
+
+---
+
 ## 4.5 OB1 顶级调度器瘦身规约 (基于DJ-2026-005实践)
 
 1. **OB1 职责单一化**：`OB1.scl` 仅作为最高层级的程序入口，必须保持极简（**行数控制在 10 行以内**）。
@@ -419,6 +462,7 @@ plccheck --verbose .
 
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
+| V1.3.0 | 2026-10-24 | Claude | 新增 §4.4 ENUM 枚举类型（DJ-2026-005 步序用枚举；验证前置见 §4.4） |
 | V1.2.1 | 2026-08-26 | Codex | 补充 ARRAY 命名示例，明确数组变量统一使用 arr 类型标识 |
 | V1.2.0 | 2026-08-25 | Codex | 删除 METHOD 教程并改为禁用规则；统一与 plc-electrical-engineer / LSP-906 的白名单口径 |
 | V1.0.3 | 2026-06-21 | AI Assistant | 修正§4.3定时器示例: PT参数从TIME字面量(T#500ms)改为DINT类型(500), 与903/906对齐(C-01) |
