@@ -71,7 +71,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     (
         "PR 描述丢了任务卡行",
         'lines = [f"任务卡: {task_card}"]\n',
-        'lines = []\n',
+        "lines = []\n",
     ),
     (
         "PLC 改动不声明也放行",
