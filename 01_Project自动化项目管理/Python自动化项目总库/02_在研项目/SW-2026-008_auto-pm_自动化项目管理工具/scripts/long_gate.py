@@ -314,6 +314,10 @@ class ChildGroup:
     def __init__(self) -> None:
         self._job = None
         if IS_WINDOWS:
+            # Children inherit the error mode: a crashing test process ends quietly (no Windows error dialog, no
+            # beep that would block an unattended overnight run) and only leaves its exit code.
+            # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
+            ctypes.WinDLL("kernel32").SetErrorMode(0x0001 | 0x0002 | 0x8000)  # type: ignore[attr-defined]
             self._job = _win_job()
 
     def popen(self, argv: list[str], cwd: str, env: dict[str, str], out: Any) -> subprocess.Popen[bytes]:
