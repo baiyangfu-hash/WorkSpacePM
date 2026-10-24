@@ -132,7 +132,8 @@ class Drill:
 
     def _call(self, name: str, command: list[str], environment: dict[str, str] | None = None) -> Step:
         result = subprocess.run(
-            command, capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment or self._env(), timeout=600
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment or self._env(), timeout=600,
+            stdin=subprocess.DEVNULL,  # a drill command never has a keyboard: an approval that asks for a PIN must refuse, not wait
         )
         step = Step(name, result.returncode, result.stdout, result.stderr)
         self.log.append(step)

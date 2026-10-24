@@ -30,7 +30,18 @@ NO_TERMINAL = (
 
 
 def _stdin_is_tty() -> bool:
-    return sys.stdin.isatty()
+    """A real terminal.  On Windows ``isatty`` is also true for the NUL device (a character device), so a session started
+    with stdin closed would be taken for a user at a keyboard and wait for a PIN nobody can type; ask the console itself."""
+
+    if not sys.stdin.isatty():
+        return False
+    if os.name != "nt":
+        return True
+    import ctypes
+
+    mode = ctypes.c_uint32()
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined,unused-ignore]
+    return bool(kernel32.GetConsoleMode(kernel32.GetStdHandle(-10), ctypes.byref(mode)))
 
 
 def _prompt_hidden(text: str) -> str:
