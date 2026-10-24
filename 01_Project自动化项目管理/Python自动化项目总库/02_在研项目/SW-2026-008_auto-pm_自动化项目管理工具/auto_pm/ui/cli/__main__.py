@@ -74,6 +74,7 @@ from auto_pm.cli.template import template_group  # noqa: E402
 from auto_pm.cli.vartable import vartable_group  # noqa: E402
 from auto_pm.cli.workflow import workflow_group  # noqa: E402
 from auto_pm.cli.worktree import worktree_group  # noqa: E402
+from auto_pm.infrastructure.continuity_store import ContinuityStoreSchemaError  # noqa: E402
 from auto_pm.ui.cli.implementation_card import implementation_card_group  # noqa: E402
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
@@ -81,8 +82,26 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 console = Console()
 
 
+SCHEMA_ERROR_EXIT_CODE = 1
+
+
+class _CliGroup(click.Group):
+    """Top-level group that turns a database written by a newer release into one readable line.
+
+    The store already refuses to touch such a database; without this the refusal reached the terminal as a raw
+    Python traceback (TD-SW008-161).
+    """
+
+    def invoke(self, ctx: click.Context) -> object:
+        try:
+            return super().invoke(ctx)
+        except ContinuityStoreSchemaError as error:
+            click.echo(f"错误：{error}。数据库没有被改动；请换用支持这个 schema 的更新版本 auto-pm。", err=True)
+            ctx.exit(SCHEMA_ERROR_EXIT_CODE)
+
+
 @click.version_option(version=__version__, package_name="auto_pm", message="auto-pm, version %(version)s")
-@click.group(context_settings=CONTEXT_SETTINGS)
+@click.group(cls=_CliGroup, context_settings=CONTEXT_SETTINGS)
 @click.option(
     "--workspace",
     "-w",
