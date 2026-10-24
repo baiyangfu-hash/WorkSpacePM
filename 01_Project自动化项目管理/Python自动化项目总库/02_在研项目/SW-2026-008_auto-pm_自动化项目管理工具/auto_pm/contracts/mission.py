@@ -5,12 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
-from typing import Literal, Self
+from typing import Final, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
+from auto_pm.contracts.user_evidence import user_evidence_problem as user_evidence_problem
 
 
 class RestrictedAction(StrEnum):
@@ -41,6 +42,12 @@ _ALL_RESTRICTED_ACTIONS = frozenset(RestrictedAction)
 _REQUIRED_ESCALATIONS = frozenset(EscalationTrigger)
 
 
+# TD-071 decision 2: a project may hold this many open cards; the next one needs the user's word.
+OPEN_MISSION_SOFT_LIMIT: Final = 8
+# A card parked for longer than this is flagged on the board.
+PARKED_STALE_DAYS: Final = 7
+
+
 class MissionState(StrEnum):
     """Lifecycle state of a recoverable business mission."""
 
@@ -48,6 +55,7 @@ class MissionState(StrEnum):
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
     ACTIVE = "ACTIVE"
     BLOCKED = "BLOCKED"
+    PARKED = "PARKED"
     ACCEPTANCE_PENDING = "ACCEPTANCE_PENDING"
     ACCEPTED = "ACCEPTED"
     CLOSED = "CLOSED"
@@ -58,11 +66,17 @@ _ROOT_WORK_REQUIRED_STATES = frozenset(
     {
         MissionState.ACTIVE,
         MissionState.BLOCKED,
+        MissionState.PARKED,
         MissionState.ACCEPTANCE_PENDING,
         MissionState.ACCEPTED,
         MissionState.CLOSED,
     }
 )
+# Parking is a safe stop like blocking: a Mission may still be put down after its authority expired (TD-071).
+_SAFE_STOP_STATES = frozenset({MissionState.BLOCKED, MissionState.PARKED})
+
+# The user's own words (one shared rule with the planning approval): parking, unparking, switching and admission
+# releases all use it.  ``user_evidence_problem`` is re-exported from here for its existing callers.
 
 
 class InternalRoutingPolicy(BaseModel):
@@ -224,9 +238,84 @@ class Mission(BaseModel):
         if created_at < self.authority.valid_from or created_at > self.authority.expires_at:
             raise ValueError("Mission timestamps must be inside the authority validity window")
         if updated_at < self.authority.valid_from or (
-            updated_at > self.authority.expires_at and self.state is not MissionState.BLOCKED
+            updated_at > self.authority.expires_at and self.state not in _SAFE_STOP_STATES
         ):
             raise ValueError("Mission timestamps must be inside the authority validity window")
         if self.state in _ROOT_WORK_REQUIRED_STATES and self.root_work_id is None:
             raise ValueError("ACTIVE and later non-cancelled Mission states require root_work_id")
         return self
+
+
+class MissionPark(BaseModel):
+    """One "put down for now" record of a Mission's Run (TD-071); open while ``unparked_at`` is empty."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["mission-park.v1"] = "mission-park.v1"
+    park_id: str = Field(pattern=r"^PARK-[A-Z0-9-]+$")
+    run_id: str = Field(min_length=1)
+    mission_id: str = Field(min_length=1)
+    checkpoint_id: str = Field(min_length=1)
+    parked_by: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    parked_at: AwareDatetime
+    unparked_at: AwareDatetime | None = None
+    unparked_by: str | None = None
+
+    @model_validator(mode="after")
+    def _closed_together(self) -> Self:
+        if (self.unparked_at is None) != (self.unparked_by is None):
+            raise ValueError("unparked_at and unparked_by must be set together")
+        return self
+
+
+class MissionBoardColumn(StrEnum):
+    """The four columns the user sees (TD-071 design 3.1)."""
+
+    ACTIVE = "ACTIVE"  # 在干
+    WAITING = "WAITING"  # 等你
+    PARKED = "PARKED"  # 搁着
+    CLOSED = "CLOSED"  # 已关
+
+
+BOARD_COLUMN_BY_STATE: dict[MissionState, MissionBoardColumn] = {
+    MissionState.ACTIVE: MissionBoardColumn.ACTIVE,
+    MissionState.DRAFT: MissionBoardColumn.WAITING,
+    MissionState.AWAITING_APPROVAL: MissionBoardColumn.WAITING,
+    MissionState.BLOCKED: MissionBoardColumn.WAITING,
+    MissionState.ACCEPTANCE_PENDING: MissionBoardColumn.WAITING,
+    MissionState.PARKED: MissionBoardColumn.PARKED,
+    MissionState.ACCEPTED: MissionBoardColumn.CLOSED,
+    MissionState.CLOSED: MissionBoardColumn.CLOSED,
+    MissionState.CANCELLED: MissionBoardColumn.CLOSED,
+}
+
+
+class ParkedMission(BaseModel):
+    """A parked Mission together with its open park record and the summary of its park checkpoint."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mission: Mission
+    park: MissionPark
+    checkpoint_summary: str
+
+
+class MissionBoard(BaseModel):
+    """All Missions of one project grouped into the four columns; parked ones newest first."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["mission-board.v1"] = "mission-board.v1"
+    subject_project_id: str = Field(min_length=1)
+    active: tuple[Mission, ...] = ()
+    waiting: tuple[Mission, ...] = ()
+    parked: tuple[ParkedMission, ...] = ()
+    closed: tuple[Mission, ...] = ()
+    # Closed Missions that were counted but not read (a board read with a closed limit).
+    closed_hidden: int = Field(default=0, ge=0)
+
+    @property
+    def open_count(self) -> int:
+        """Missions that count against the per-project open limit (everything not closed)."""
+        return len(self.active) + len(self.waiting) + len(self.parked)

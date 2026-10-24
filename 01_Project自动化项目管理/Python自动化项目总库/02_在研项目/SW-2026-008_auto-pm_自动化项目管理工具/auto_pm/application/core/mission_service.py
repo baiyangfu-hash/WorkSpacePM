@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -12,6 +12,7 @@ from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 from auto_pm.contracts.mission import (
+    OPEN_MISSION_SOFT_LIMIT,
     AuthorityAudit,
     AuthorityEnvelope,
     InternalRoutingPolicy,
@@ -20,6 +21,8 @@ from auto_pm.contracts.mission import (
 )
 from auto_pm.contracts.pm_facade import PlanningDraft
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+
+from .mission_admission import AdmissionVerdict, admission_verdict, release_problem
 
 
 class MissionServiceError(RuntimeError):
@@ -30,9 +33,17 @@ _TRANSITIONS: dict[MissionState, frozenset[MissionState]] = {
     MissionState.DRAFT: frozenset({MissionState.AWAITING_APPROVAL, MissionState.CANCELLED}),
     MissionState.AWAITING_APPROVAL: frozenset({MissionState.ACTIVE, MissionState.CANCELLED}),
     MissionState.ACTIVE: frozenset(
-        {MissionState.BLOCKED, MissionState.ACCEPTANCE_PENDING, MissionState.CANCELLED}
+        {
+            MissionState.BLOCKED,
+            MissionState.PARKED,
+            MissionState.ACCEPTANCE_PENDING,
+            MissionState.CANCELLED,
+        }
     ),
-    MissionState.BLOCKED: frozenset({MissionState.ACTIVE, MissionState.CANCELLED}),
+    MissionState.BLOCKED: frozenset(
+        {MissionState.ACTIVE, MissionState.PARKED, MissionState.CANCELLED}
+    ),
+    MissionState.PARKED: frozenset({MissionState.ACTIVE, MissionState.CANCELLED}),
     MissionState.ACCEPTANCE_PENDING: frozenset({MissionState.ACCEPTED, MissionState.BLOCKED}),
     MissionState.ACCEPTED: frozenset({MissionState.CLOSED}),
     MissionState.CLOSED: frozenset(),
@@ -71,6 +82,8 @@ class MissionService:
         created_by: str,
         idempotency_key: str,
         root_work_id: str | None = None,
+        max_open_per_project: int = OPEN_MISSION_SOFT_LIMIT,
+        admitted_open_ids: Collection[str] | None = None,
     ) -> Mission:
         instant = self._instant()
         now = instant.isoformat()
@@ -101,7 +114,68 @@ class MissionService:
             values.pop("authority"), ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
         try:
-            return self._store.create_mission(values, idempotency_key, now)
+            return self._store.create_mission(
+                values,
+                idempotency_key,
+                now,
+                max_open_per_project=max_open_per_project,
+                admitted_open_ids=admitted_open_ids,
+            )
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+
+    def admit(
+        self,
+        *,
+        mission_id: str,
+        subject_project_id: str,
+        scope_paths: tuple[str, ...],
+        admission_release_ref: str = "",
+    ) -> tuple[int, AdmissionVerdict]:
+        """Admission of a new card (TD-071 card 3): the open limit to create it with, and the verdict to record.
+
+        A card that already exists is a retry, never refused; its verdict leaves itself out, so that a retry that now
+        brings the user's release can still record it. A new card past the soft limit, or over paths an open card also
+        changes, is refused until the user's own word is given as ``admission_release_ref``.
+        """
+
+        try:
+            # Only the open cards count and collide; the project's finished history is not read (audit 78, 5).
+            missions = self._store.list_missions(subject_project_id)
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+        others = [item for item in missions if item.mission_id != mission_id]
+        verdict = admission_verdict(others, scope_paths)
+        exists = len(others) != len(missions) or self._exists_in_project(mission_id, subject_project_id)
+        if not exists and (problem := release_problem(verdict, admission_release_ref)):
+            raise MissionServiceError(problem)
+        limit = verdict.open_count + 1 if verdict.over_limit else OPEN_MISSION_SOFT_LIMIT
+        return limit, verdict
+
+    def _exists_in_project(self, mission_id: str, subject_project_id: str) -> bool:
+        """Whether a (finished) card with this id is already stored for the project: a retry, never a new card."""
+
+        try:
+            return self._store.get_mission(mission_id).subject_project_id == subject_project_id
+        except ContinuityStoreError:
+            return False
+
+    def record_admission(self, mission_id: str, verdict: AdmissionVerdict, admission_release_ref: str) -> None:
+        """Record the user's release of a card that needed one; idempotent per card, so a retry may fill it in."""
+
+        release = admission_release_ref.strip()
+        if not verdict.needs_user_release or not release:
+            return
+        try:
+            self._store.record_mission_admission(
+                mission_id=mission_id,
+                open_count=verdict.open_count,
+                over_limit=verdict.over_limit,
+                overlaps=tuple((item.mission_id, item.paths) for item in verdict.overlaps),
+                release_ref=release,
+                idempotency_key=f"admission-release:{mission_id}",
+                now=self._timestamp(),
+            )
         except ContinuityStoreError as error:
             raise MissionServiceError(str(error)) from error
 
@@ -113,6 +187,8 @@ class MissionService:
         decision: DecisionPackageDTO,
         plan_hash: str,
         created_by: str,
+        max_open_per_project: int = OPEN_MISSION_SOFT_LIMIT,
+        admitted_open_ids: Collection[str] | None = None,
     ) -> Mission:
         """Create a strong-authority Mission from one exact planning approval."""
 
@@ -230,6 +306,8 @@ class MissionService:
             authority=authority,
             created_by=created_by,
             idempotency_key=f"planning-mission-create:{draft.request_id}",
+            max_open_per_project=max_open_per_project,
+            admitted_open_ids=admitted_open_ids,
         )
 
     def get(self, mission_id: str) -> Mission:
@@ -269,6 +347,14 @@ class MissionService:
                 raise MissionServiceError(
                     "最终验收只能由用户通过 pm accept（或驾驶舱“确认验收”）记录，不能直接推 Mission 状态"
                 )
+            if new_state is MissionState.PARKED or (
+                current.state is MissionState.PARKED and new_state is MissionState.ACTIVE
+            ):
+                raise MissionServiceError(
+                    "搁着和拿回只能走 park/unpark：它们在同一个事务里记断点、摘牌或发新租约"
+                )
+            if new_state is MissionState.ACTIVE:
+                self._assert_no_other_active(current)
             self._assert_authority_is_current(
                 current.authority,
                 instant,
@@ -302,6 +388,7 @@ class MissionService:
         if new_state in {
             MissionState.ACTIVE,
             MissionState.BLOCKED,
+            MissionState.PARKED,
             MissionState.ACCEPTANCE_PENDING,
             MissionState.ACCEPTED,
             MissionState.CLOSED,
@@ -312,6 +399,16 @@ class MissionService:
         elif requested_root_work_id is not None:
             raise MissionServiceError("DRAFT、AWAITING_APPROVAL 或 CANCELLED 不允许新增 root_work_id")
         return root_work_id
+
+    def _assert_no_other_active(self, mission: Mission) -> None:
+        """Friendly early refusal; the partial unique index on ACTIVE is the hard lock (TD-071)."""
+
+        for other in self._store.list_missions(mission.subject_project_id):
+            if other.mission_id != mission.mission_id and other.state is MissionState.ACTIVE:
+                raise MissionServiceError(
+                    f"项目里“{other.title}”（{other.mission_id}）正在干；"
+                    "请先搁着它（pm park），或用 pm switch 一步切换"
+                )
 
     def _assert_root_work_matches_project(self, subject_project_id: str, root_work_id: str) -> None:
         try:

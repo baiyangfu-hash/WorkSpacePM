@@ -15,6 +15,7 @@ Item {
     property var startBusyByMission: ({})
     property var closeBusyByMission: ({})
     property var pendingCards: []
+    property var boards: []
     property var approveBusyByRequest: ({})
     property string statusMessage: ""
     // A failed action (start, approval, acceptance, closure) stays on screen until the user dismisses it;
@@ -237,6 +238,14 @@ Item {
                     card: modelData
                     busy: root.isApproveBusy(modelData.request_id)
                     onApproveRequested: root.requestScopeApproval(modelData.request_id, modelData.plan_hash)
+                }
+            }
+
+            Repeater {
+                model: root.boards
+                delegate: Components.MissionBoard {
+                    Layout.fillWidth: true
+                    board: modelData
                 }
             }
 

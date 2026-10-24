@@ -130,8 +130,9 @@ def test_p04_an_unfinished_task_blocks_approval_until_it_ends(tmp_path: Path) ->
 
     blocked = _service(env).snapshot().pending_cards
     assert [(c.request_id, c.can_approve) for c in blocked] == [("REQ-U09C-B", False)]
-    assert "项目已有未终结的任务" in blocked[0].approve_blocked_reason
-    assert "MISSION-" not in blocked[0].approve_blocked_reason
+    # TD-071 card 3: the second card collides with the open one; the cockpit names it and points at the user's release
+    reason = blocked[0].approve_blocked_reason
+    assert "要改同一批文件" in reason and first.mission_id in reason and "pm approve --admission-release-ref" in reason
 
     _cancel(env, first.mission_id, "u09c-p04-cancel")
     freed = _service(env).snapshot().pending_cards
@@ -253,7 +254,7 @@ def test_p12_an_unfinished_task_refuses_the_approval_before_any_write(tmp_path: 
     _service(env).approve_scope("REQ-U09C-A", first_hash)
     before = _writes(env)
 
-    with pytest.raises(PmCockpitError, match="未终结的任务"):
+    with pytest.raises(PmCockpitError, match="要改同一批文件"):
         _service(env).approve_scope("REQ-U09C-B", second_hash)
 
     assert _writes(env) == before
@@ -363,3 +364,18 @@ def test_k05_the_pending_card_has_no_lease_or_internal_work_fields() -> None:
     names = set(PmCockpitPendingScopeCard.model_fields)
 
     assert not {"mission_id", "work_id", "run_id", "decision_id", "lease_token", "approval_evidence_ref"} & names
+
+
+def test_p15_a_second_card_on_other_files_is_approvable_without_a_release(tmp_path: Path) -> None:
+    """TD-071 card 3, positive control of p04: an open task alone no longer blocks the next card."""
+
+    env = _env(tmp_path)
+    first_hash = _pending(env, "REQ-U09C-A")
+    env.draft("REQ-U09C-B")
+    second_hash = env.submit("REQ-U09C-B", risks=("rb",), scope=(f"{PROJECT_ID}/docs/notes.md",)).card.plan_hash
+    env.approve("REQ-U09C-A", first_hash)
+
+    pending = _service(env).snapshot().pending_cards
+    assert [(c.request_id, c.can_approve, c.approve_blocked_reason) for c in pending] == [("REQ-U09C-B", True, "")]
+    _service(env).approve_scope("REQ-U09C-B", second_hash)
+    assert len(env.store.list_missions(PROJECT_ID)) == 2

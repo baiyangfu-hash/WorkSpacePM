@@ -34,7 +34,8 @@ from auto_pm.contracts.execution_adapter import (
     WorktreeMode,
     execution_role_for_stack,
 )
-from auto_pm.contracts.mission import Mission
+from auto_pm.contracts.lease_reclaim import lease_is_held
+from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
@@ -218,6 +219,7 @@ class ExecutionDispatchService:
             raise ExecutionDispatchError("Work scope 超出 Mission AuthorityEnvelope")
         if work.authorization_ref != mission.authority.decision_id:
             raise ExecutionDispatchError("Work 与 Mission Decision 不一致")
+        self._assert_mission_not_parked(mission)
         self._assert_parallel_capacity(mission, run_id, now)
         try:
             plan = self._worktrees.select(
@@ -275,6 +277,7 @@ class ExecutionDispatchService:
                 worktree_path=str(plan.worktree_path),
                 lease_token=lease_token,
                 lease_seconds=lease_seconds,
+                one_holder_per_project=True,
                 idempotency_key=f"execution-run:{hashlib.sha256(operation.encode('utf-8')).hexdigest()}",
             )
         except (ContinuityStoreError, ContinuityExecutionError, WorktreePolicyError, ExecutionDispatchError) as error:
@@ -346,6 +349,7 @@ class ExecutionDispatchService:
                 worktree_path=receipt.worktree_path,
                 lease_token=lease_token,
                 lease_seconds=lease_seconds,
+                one_holder_per_project=True,
                 idempotency_key=(
                     "execution-run:"
                     + hashlib.sha256(intent.operation_id.encode("utf-8")).hexdigest()
@@ -381,20 +385,44 @@ class ExecutionDispatchService:
         )
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
+    def _assert_mission_not_parked(self, mission: Mission) -> None:
+        """A parked card comes back only through ``pm unpark`` with the user's words (TD-071):
+        another READY Work of the same Mission must not start a fresh Run behind its back."""
+
+        try:
+            current = self._store.get_mission(mission.mission_id)
+            park = self._store.get_open_park(mission.mission_id)
+        except ContinuityStoreError as error:
+            raise ExecutionDispatchError(str(error)) from error
+        if current.state is MissionState.PARKED or park is not None:
+            raise ExecutionDispatchError(
+                f"{mission.mission_id} 搁着呢，不能再派新的 Run；请用户说一句后用 pm unpark 拿回来"
+            )
+
     def _assert_parallel_capacity(self, mission: Mission, run_id: str, now: datetime) -> None:
-        active = 0
+        """One held lease per project (TD-071): a parked card's fenced lease does not count, and a
+        Mission's ``max_parallel_runs`` can no longer widen the project-level limit."""
+
+        held: list[str] = []
         try:
             for work in self._store.list_works(mission.subject_project_id):
                 for run in self._store.list_runs(work.work_id):
                     if run.run_id == run_id:
                         continue
                     lease = self._store.get_lease(run.run_id)
-                    if datetime.fromisoformat(lease.expires_at) > now:
-                        active += 1
-        except ContinuityStoreError as error:
+                    if lease_is_held(
+                        lease_token=lease.lease_token,
+                        expires_at=datetime.fromisoformat(lease.expires_at),
+                        now=now,
+                    ):
+                        held.append(run.run_id)
+        except (ContinuityStoreError, ValueError) as error:
             raise ExecutionDispatchError(str(error)) from error
-        if active >= mission.authority.routing.max_parallel_runs:
-            raise ExecutionDispatchError("Mission 已达到 max_parallel_runs，拒绝隐式并发执行")
+        if held:
+            raise ExecutionDispatchError(
+                "项目里已有 Run 持有租约（" + "、".join(held) + "），同一项目同一时刻只能一张在干；"
+                "拒绝隐式并发执行（max_parallel_runs 不再放大项目上限）"
+            )
 
     @staticmethod
     def _adapter_kind(adapter: ExecutionAdapterKind | str) -> ExecutionAdapterKind:

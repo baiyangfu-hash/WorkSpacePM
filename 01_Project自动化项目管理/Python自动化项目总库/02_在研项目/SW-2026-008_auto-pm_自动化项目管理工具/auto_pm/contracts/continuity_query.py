@@ -1,7 +1,8 @@
-"""Versioned, capability-flagged query contract shared by resume, orient and the SDK (V05-A, M2).
+"""Versioned, capability-flagged query contract shared by resume, orient and the SDK (V05-A, M2; v2 with TD-071 card 3).
 
-M2 delivers only this read-only contract: parking and pre-emption are declared unsupported (full parking is M3, pre-emption also needs the V04-R1 recovery
-evidence). The block never grants execution authority and carries no lease token.
+v1 (M2) declared parking and pre-emption unsupported. v2 declares parking supported now that Missions can be parked and resumed
+(``pm park`` / ``pm unpark`` / ``pm switch``, TD-071); pre-emption of a running holder stays unsupported. The block never grants execution
+authority and carries no lease token: parking still needs the user's own words (``--approval-evidence-ref``).
 """
 
 from __future__ import annotations
@@ -10,42 +11,60 @@ from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 QUERY_SCHEMA_VERSION: Final = "continuity-query.v1"
-CAPABILITY_CONTRACT_VERSION: Final = "runtime-capabilities.v1"
+CAPABILITY_CONTRACT_VERSION: Final = "runtime-capabilities.v2"
 UNSUPPORTED_REASON = (
-    "M2 只交付版本化的只读查询合同；完整挂起属于 M3，运行中插队还须 V04-R1 的回收与 fencing 证据；查询本身不是执行授权"
+    "运行中插队不支持：不抢正在写的钥匙；插急活请先 pm park 记断点放下手上的卡，再 pm switch；查询本身不是执行授权"
 )
 
 
 class QueriedAction(StrEnum):
-    """Actions whose support is asked for but not offered in M2."""
+    """Actions whose support can be asked for."""
 
     PARK = "PARK"
     RESUME_PARKED = "RESUME_PARKED"
     PREEMPT = "PREEMPT"
 
 
+PARKING_ACTIONS: Final = (QueriedAction.PARK, QueriedAction.RESUME_PARKED)
+SUPPORTED_REASONS: Final[dict[QueriedAction, str]] = {
+    QueriedAction.PARK: "pm park 记断点放下手上的卡；放进“搁着”须带用户原话位置（--approval-evidence-ref），不带只能放进“等你”",
+    QueriedAction.RESUME_PARKED: "pm unpark / pm switch 凭断点拿回搁着的卡；拿回哪张只听用户的（--approval-evidence-ref）",
+}
+
+
 class ActionCapability(BaseModel):
-    """An explicit UNSUPPORTED answer; never an empty list, NONE or READY."""
+    """An explicit SUPPORTED or UNSUPPORTED answer; never an empty list, NONE or READY."""
 
     model_config = ConfigDict(frozen=True)
 
     action: QueriedAction
-    status: Literal["UNSUPPORTED"] = "UNSUPPORTED"
+    status: Literal["SUPPORTED", "UNSUPPORTED"] = "UNSUPPORTED"
     reason: str = UNSUPPORTED_REASON
 
 
 class RuntimeCapabilities(BaseModel):
-    """What this runtime offers; both flags are fixed to false by the M2 contract."""
+    """What this runtime offers: parking may be declared, pre-emption is fixed to false; the flags and the actions must agree."""
 
     model_config = ConfigDict(frozen=True)
 
-    contract_version: Literal["runtime-capabilities.v1"]
-    parking_supported: Literal[False] = False
+    contract_version: Literal["runtime-capabilities.v2"]
+    parking_supported: bool = False
     preemption_supported: Literal[False] = False
     actions: tuple[ActionCapability, ...]
+
+    @model_validator(mode="after")
+    def _flags_match_actions(self) -> RuntimeCapabilities:
+        for item in self.actions:
+            if item.status != "SUPPORTED":
+                continue
+            if item.action is QueriedAction.PREEMPT:
+                raise ValueError("插队（PREEMPT）在本合同里不能声明为 SUPPORTED")
+            if not self.parking_supported:
+                raise ValueError(f"{item.action.value} 声明为 SUPPORTED，但 parking_supported 为 false")
+        return self
 
 
 class ContinuityQuery(BaseModel):

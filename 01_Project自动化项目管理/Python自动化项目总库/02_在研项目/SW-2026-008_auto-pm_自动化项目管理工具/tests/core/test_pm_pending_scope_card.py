@@ -60,11 +60,11 @@ COCKPIT_REQUEST = "REQ-COCKPIT-0123456789ABCDEF0123456789ABCDEF"
 EVENT_KEYS = {"request_id", "revision", "plan_hash", "change_id", "submitted_by", "card_sha256"}
 
 
-def _grant() -> PlanningExecutionGrant:
+def _grant(scope: tuple[str, ...] = SCOPE) -> PlanningExecutionGrant:
     return PlanningExecutionGrant(
         adapter=ExecutionAdapterKind.CODEX,
         approved_model="agent-a",
-        declared_dirty_paths=SCOPE,
+        declared_dirty_paths=scope,
         plan_checklist=full_checklist(),
     )
 
@@ -133,13 +133,14 @@ class _Env:
         *,
         risks: tuple[str, ...] = ("r1",),
         submitter: str = SUBMITTER,
+        scope: tuple[str, ...] = SCOPE,
     ) -> SubmittedPlanningScopeCard:
         return self.facade.submit_planning_scope_card(
             request_id,
-            scope_paths=SCOPE,
+            scope_paths=scope,
             risks=risks,
             non_goals=("no refactor",),
-            execution_grant=_grant(),
+            execution_grant=_grant(scope),
             submitted_by=submitter,
         )
 
@@ -150,12 +151,14 @@ class _Env:
         *,
         approver: str = APPROVER,
         evidence: str = EVIDENCE,
+        release: str = "",
     ) -> PlanningApprovalResult:
         return self.facade.approve_pending_planning_scope_card(
             request_id,
             expected_plan_hash=plan_hash,
             approver=approver,
             approval_evidence_ref=evidence,
+            admission_release_ref=release,
         )
 
     def chg_status(self, change_id: str, project: str = PROJECT_ID) -> str:
@@ -261,7 +264,7 @@ def test_s01_new_table_is_appended_without_a_schema_bump(tmp_path: Path) -> None
     env = _env(tmp_path)
     tables = set(env.scalars("SELECT name FROM sqlite_master WHERE type='table'"))
     assert "planning_scope_cards" in tables
-    assert env.scalars("SELECT schema_version FROM schema_meta") == ["continuity-store.v7"]
+    assert env.scalars("SELECT schema_version FROM schema_meta") == ["continuity-store.v8"]
     assert env.count("schema_migrations") == 0
 
 

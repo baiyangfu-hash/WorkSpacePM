@@ -6,11 +6,14 @@ import hashlib
 import logging
 import secrets
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
 from auto_pm.core.continuity_query_service import ContinuityQueryService
+from auto_pm.core.mission_admission import admission_verdict
 from auto_pm.core.pm_closure_service import (
     ClosureCompletionState,
     PmClosureError,
@@ -32,16 +35,24 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionFailureCode,
     WorktreeMode,
 )
-from auto_pm.contracts.mission import Mission, MissionState
+from auto_pm.contracts.mission import (
+    OPEN_MISSION_SOFT_LIMIT,
+    PARKED_STALE_DAYS,
+    Mission,
+    MissionBoard,
+    MissionState,
+)
 from auto_pm.contracts.pm_cockpit import (
     CockpitUserAction,
     PmCockpitActivity,
+    PmCockpitBoardCard,
     PmCockpitCheckpointEvidence,
     PmCockpitCompletion,
     PmCockpitCompletionState,
     PmCockpitEvidence,
     PmCockpitEvidenceCurrency,
     PmCockpitFocus,
+    PmCockpitMissionBoard,
     PmCockpitPendingScopeCard,
     PmCockpitProjectCard,
     PmCockpitResume,
@@ -75,11 +86,8 @@ _REASON_LIMIT = 200
 _LEASE_ENVIRONMENT = "AUTO_PM_EXECUTION_LEASE_TOKEN"
 _START_READY_REASON = "等待您确认开工；确认前不会创建或启动任何执行。"
 _ALREADY_VERIFIED_MESSAGE = "该需求已执行并验证，等待验收；请直接确认验收，不要重复执行。"
-_FINISHED_MISSION_STATES = frozenset(
-    {MissionState.ACCEPTED, MissionState.CLOSED, MissionState.CANCELLED}
-)
 _APPROVER_MISSING_REASON = "未配置批准人，不能批准；请先设置环境变量 AUTO_PM_COCKPIT_APPROVER。"
-_OPEN_TASK_REASON = "项目已有未终结的任务；请先验收或取消它，再批准新的范围卡。"
+_ADMISSION_RELEASE_HINT = "。放行请在命令行用 pm approve --admission-release-ref。"
 
 
 def _clip(text: str) -> str:
@@ -102,8 +110,12 @@ class _ProjectFacts:
     started_run_ids: frozenset[str]
 
 
-_PARKING_ACTIONS = ("PARK", "RESUME_PARKED", "PREEMPT")
-_CAPABILITY_UNSUPPORTED = "挂起、恢复挂起与插队：当前版本不支持（能力查询 runtime-capabilities.v1）；驾驶舱不提供这些操作，也不会假装挂起。"
+_EXPECTED_CAPABILITIES = {"PARK": "SUPPORTED", "RESUME_PARKED": "SUPPORTED", "PREEMPT": "UNSUPPORTED"}
+_CAPABILITY_DECLARED = (
+    "挂起与拿回：支持，只在命令行做（pm park / pm unpark / pm switch），拿回哪张只听用户的；"
+    "运行中插队：不支持（能力查询 runtime-capabilities.v2）。驾驶舱只显示四栏，不提供切换按钮。"
+)
+_BOARD_CLOSED_SHOWN = 5
 _CAPABILITY_UNVERIFIED = "挂起与插队的能力查询未能确认；为安全起见这些操作保持停用，驾驶舱不会假装挂起。"
 
 
@@ -124,6 +136,7 @@ class PmCockpitService:
         facade: PmFacadeService | None = None,
         approver: str = "",
         control_root: str | Path | None = None,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         # ``workspace_root`` is where the GUI was started (the execution root, possibly a linked candidate);
         # ``control_root`` is the governed main root that owns the registry, the store and every write.
@@ -139,6 +152,7 @@ class PmCockpitService:
         self._closure_service = closure_service
         self._facade_override = facade
         self._approver = approver.strip()
+        self._now = now or (lambda: datetime.now(UTC))
 
     def _real_facade(self) -> PmFacadeService:
         """The facade of the governed control root; execution runs against the GUI's own root."""
@@ -155,16 +169,25 @@ class PmCockpitService:
         cards: list[PmCockpitProjectCard] = []
         activities: list[PmCockpitActivity] = []
         pending: list[PmCockpitPendingScopeCard] = []
+        boards: list[PmCockpitMissionBoard] = []
         notices: list[str] = [store_note] if store_note else []
         for mapping in mappings:
             if store_note:
                 cards.append(self._unavailable_card(mapping, store_note))
                 continue
             try:
-                facts = self._facts(mapping.project_id)
+                facts = self._snapshot_facts(mapping.project_id)
                 cards.append(self._card(mapping, facts))
                 activities.extend(self._activities(mapping.project_id, facts))
                 pending.extend(self._pending_cards(mapping, facts, notices))
+                boards.append(
+                    self._board(
+                        mapping,
+                        self._store.list_missions_by_board(
+                            mapping.project_id, closed_limit=_BOARD_CLOSED_SHOWN
+                        ),
+                    )
+                )
             except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
                 note = "连续性记录无法安全读取；驾驶舱没有尝试修复或重建它。"
                 notices.append(f"{mapping.project_id}: {note}")
@@ -174,7 +197,50 @@ class PmCockpitService:
             projects=tuple(cards),
             activities=tuple(activities),
             pending_cards=tuple(pending),
+            boards=tuple(boards),
             notices=tuple(dict.fromkeys(notices)),
+        )
+
+    def _board(self, mapping: WorkspaceProjectMapping, board: MissionBoard) -> PmCockpitMissionBoard:
+        """The four columns, read-only (TD-071 card 4): who is in hand, who waits for you, who is put down and why."""
+
+        now = self._now()
+
+        def plain(mission: Mission) -> PmCockpitBoardCard:
+            return PmCockpitBoardCard(
+                mission_id=mission.mission_id, title=mission.title, state_label=self._milestone(mission)
+            )
+
+        parked = []
+        for item in board.parked:
+            days = (now - item.park.parked_at).total_seconds() / 86_400
+            stale = days > PARKED_STALE_DAYS
+            note = (
+                f"为什么放下：{item.park.reason}；断点：{item.checkpoint_summary}；"
+                f"放下于 {ContinuityStore.local_time_text(item.park.parked_at.isoformat())}"
+            )
+            if stale:
+                note += f"；已搁着超过 {PARKED_STALE_DAYS} 天，请决定拿回还是作废"
+            parked.append(
+                PmCockpitBoardCard(
+                    mission_id=item.mission.mission_id,
+                    title=item.mission.title,
+                    state_label=self._milestone(item.mission),
+                    note=note,
+                    stale=stale,
+                )
+            )
+        shown_closed = board.closed[:_BOARD_CLOSED_SHOWN]
+        return PmCockpitMissionBoard(
+            project_id=mapping.project_id,
+            project_name=self._project_name(mapping),
+            open_count=board.open_count,
+            open_limit=OPEN_MISSION_SOFT_LIMIT,
+            active=tuple(plain(mission) for mission in board.active),
+            waiting=tuple(plain(mission) for mission in board.waiting),
+            parked=tuple(parked),
+            closed=tuple(plain(mission) for mission in shown_closed),
+            closed_hidden=len(board.closed) - len(shown_closed) + board.closed_hidden,
         )
 
     @staticmethod
@@ -186,12 +252,12 @@ class PmCockpitService:
             return _CAPABILITY_UNVERIFIED
         declared = {item.action.value: item.status for item in capabilities.actions}
         if (
-            capabilities.parking_supported
+            capabilities.parking_supported is not True
             or capabilities.preemption_supported
-            or declared != dict.fromkeys(_PARKING_ACTIONS, "UNSUPPORTED")
+            or declared != _EXPECTED_CAPABILITIES
         ):
             return _CAPABILITY_UNVERIFIED
-        return _CAPABILITY_UNSUPPORTED
+        return _CAPABILITY_DECLARED
 
     def evidence(self, project_id: str) -> PmCockpitEvidence:
         """Return bounded provenance for the evidence drawer, never execution credentials."""
@@ -445,12 +511,47 @@ class PmCockpitService:
         return ""
 
     def _facts(self, project_id: str) -> _ProjectFacts:
+        """The whole history of one project, for the evidence view the user opens on that project."""
+
         missions = self._store.list_missions(project_id, include_terminal=True)
         works = self._store.list_works(project_id, include_terminal=True)
         runs_by_work = {
             work.work_id: self._store.list_runs(work.work_id, include_terminal=True)
             for work in works
         }
+        return self._facts_from(missions, works, runs_by_work)
+
+    def _snapshot_facts(self, project_id: str) -> _ProjectFacts:
+        """What the default screen needs of one project, without reading its whole history (audit 78, 5).
+
+        Every open card and the latest closed one (the card shown when none is open), every unfinished Work plus the
+        shown card's root Work, and the Runs of only the Work the card shows.  The project card, the activity feed and
+        the pending cards built from these are the same as from the full history; the snapshot refreshes every project,
+        so its cost no longer grows with every card, Work and Run ever finished.
+        """
+
+        missions = self._store.list_missions(project_id, include_terminal=True, terminal_limit=1)
+        works = self._store.list_works(project_id, include_terminal=True, terminal_limit=0)
+        mission = self._primary_mission(missions)
+        root_id = mission.root_work_id if mission else None
+        if root_id and all(work.work_id != root_id for work in works):
+            try:
+                works = (self._store.get_work(root_id), *works)
+            except ContinuityStoreError:
+                pass  # the full history would not find it either; the card falls back to an unfinished Work
+        work = self._primary_work(mission, works)
+        shown = {work_id for work_id in (work.work_id if work else None, root_id) if work_id}
+        runs_by_work = {
+            work_id: self._store.list_runs(work_id, include_terminal=True) for work_id in sorted(shown)
+        }
+        return self._facts_from(missions, works, runs_by_work)
+
+    def _facts_from(
+        self,
+        missions: tuple[Mission, ...],
+        works: tuple[WorkItem, ...],
+        runs_by_work: dict[str, tuple[RunItem, ...]],
+    ) -> _ProjectFacts:
         checkpoints = tuple(
             checkpoint
             for runs in runs_by_work.values()
@@ -524,12 +625,14 @@ class PmCockpitService:
                 f"{mapping.project_id}: 待批准范围卡无法安全读取；驾驶舱没有尝试修复或重建它。"
             )
             return ()
-        if not self._approver:
-            reason = _APPROVER_MISSING_REASON
-        elif any(item.state not in _FINISHED_MISSION_STATES for item in facts.missions):
-            reason = _OPEN_TASK_REASON
-        else:
-            reason = ""
+        def blocked_reason(scope_paths: tuple[str, ...]) -> str:
+            if not self._approver:
+                return _APPROVER_MISSING_REASON
+            # TD-071 card 3: past the soft limit or over an open card's paths, the button stays off and
+            # the reason says why; the user's word is given on the command line (pm approve --admission-release-ref).
+            verdict = admission_verdict(facts.missions, scope_paths)
+            return _clip(verdict.reason() + _ADMISSION_RELEASE_HINT) if verdict.needs_user_release else ""
+
         return tuple(
             PmCockpitPendingScopeCard(
                 project_id=mapping.project_id,
@@ -549,8 +652,8 @@ class PmCockpitService:
                 submitted_by=item.submitted_by,
                 submitted_at=item.submitted_at,
                 approver=self._approver,
-                can_approve=not reason,
-                approve_blocked_reason=reason,
+                can_approve=not blocked_reason(item.card.scope_paths),
+                approve_blocked_reason=blocked_reason(item.card.scope_paths),
             )
             for item in submitted
         )
@@ -794,10 +897,22 @@ class PmCockpitService:
 
     @staticmethod
     def _primary_mission(missions: tuple[Mission, ...]) -> Mission | None:
-        terminal = {MissionState.ACCEPTED, MissionState.CLOSED, MissionState.CANCELLED}
-        return next((mission for mission in missions if mission.state not in terminal), None) or (
-            missions[0] if missions else None
-        )
+        """The card in hand first, then one waiting for the user, then a parked one (TD-071), then the latest closed."""
+
+        for wanted in (
+            {MissionState.ACTIVE},
+            {
+                MissionState.ACCEPTANCE_PENDING,
+                MissionState.BLOCKED,
+                MissionState.AWAITING_APPROVAL,
+                MissionState.DRAFT,
+            },
+            {MissionState.PARKED},
+        ):
+            found = next((mission for mission in missions if mission.state in wanted), None)
+            if found is not None:
+                return found
+        return missions[0] if missions else None
 
     @staticmethod
     def _primary_work(mission: Mission | None, works: tuple[WorkItem, ...]) -> WorkItem | None:
@@ -840,6 +955,7 @@ class PmCockpitService:
             MissionState.AWAITING_APPROVAL: "等待开工确认",
             MissionState.ACTIVE: "系统执行",
             MissionState.BLOCKED: "等待决策",
+            MissionState.PARKED: "搁着（断点已记）",
             MissionState.ACCEPTANCE_PENDING: "等待验收确认",
             MissionState.ACCEPTED: "验收已记录，待同步",
             MissionState.CLOSED: "已关闭",
