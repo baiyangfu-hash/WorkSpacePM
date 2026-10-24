@@ -79,7 +79,7 @@ tags: ["接口文档", "PLC程序"]
 
 ### 4.4 `ST_Io`
 
-输入、输出字段名按 [IO 表](015_IO分配表_IO.md) 的“符号名”列逐点对应（146 点），例如 `X_ZAxisHome`、`Y_ClampFront`。不在此重复；`工程资产/io_points.csv` 是机读版，生成 `ST_Io` 时以它为输入。
+输入、输出字段名按 [IO 表](015_IO分配表_IO.md) 的“符号名”列逐点对应（148 点），例如 `X_ZAxisHome`、`Y_ClampFront`。不在此重复；`工程资产/io_points.csv` 是机读版，生成 `ST_Io` 时以它为输入。
 
 ### 4.5 `ST_ConveyorSystem` 与 `ST_SingleLayer`
 
