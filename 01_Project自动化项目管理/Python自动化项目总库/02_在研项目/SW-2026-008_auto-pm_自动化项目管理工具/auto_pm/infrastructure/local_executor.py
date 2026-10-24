@@ -12,6 +12,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -195,7 +196,20 @@ class LocalCodexExecutor:
         prefix = tuple(command_prefix)
         if not prefix or any(not item or "\0" in item for item in prefix):
             raise LocalExecutionError("command_prefix must contain non-empty command tokens")
-        self._command_prefix = prefix
+        self._command_prefix = (self._resolve_executable(prefix[0]), *prefix[1:])
+
+    @staticmethod
+    def _resolve_executable(command: str) -> str:
+        """Resolve a bare command name through PATH and PATHEXT so Windows finds ``codex.cmd``.
+
+        ``subprocess`` without a shell only tries the literal name plus ``.exe``, so ``codex`` never matches
+        the npm shim ``codex.cmd``.  A name that carries a path, or that PATH does not know, is left as given
+        and fails at launch with the same truthful ``NOT_STARTED`` result as before.
+        """
+
+        if os.sep in command or (os.altsep and os.altsep in command):
+            return command
+        return shutil.which(command) or command
 
     def execute(self, request: LocalExecutionRequest) -> LocalExecutionResult:
         """Compatibility wrapper for the explicit ``start/handshake/wait`` lifecycle."""

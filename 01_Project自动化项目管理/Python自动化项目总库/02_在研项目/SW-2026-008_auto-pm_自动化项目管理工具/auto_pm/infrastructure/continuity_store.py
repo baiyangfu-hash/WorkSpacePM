@@ -92,6 +92,10 @@ class ContinuityStoreError(RuntimeError):
     """Raised when a continuity transaction cannot be completed safely."""
 
 
+class ContinuityStoreSchemaError(ContinuityStoreError):
+    """The database carries a schema this tool does not know, usually one written by a newer release."""
+
+
 class _TransientSidecarError(ContinuityStoreError):
     """A WAL sidecar looked unsafe at one instant.
 
@@ -978,7 +982,7 @@ class ContinuityStore:
             versions = self._schema_versions(conn)
             if versions and not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
                 rendered = ", ".join(sorted(versions))
-                raise ContinuityStoreError(f"未知或未来 Continuity Store schema: {rendered}")
+                raise ContinuityStoreSchemaError(f"未知或未来 Continuity Store schema: {rendered}")
             conn.executescript(_DDL)
             if not versions:
                 conn.execute(
@@ -6683,7 +6687,7 @@ class ContinuityStore:
             versions = self._schema_versions(conn)
             if not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
                 rendered = ", ".join(sorted(versions))
-                raise ContinuityStoreError(f"未知或未来 Continuity Store schema: {rendered}")
+                raise ContinuityStoreSchemaError(f"未知或未来 Continuity Store schema: {rendered}")
             if versions == {_LEGACY_SCHEMA_VERSION}:
                 # Strict reads must not upgrade a legacy store. It has no Mission table yet.
                 return ()
@@ -8651,7 +8655,7 @@ class ContinuityStore:
             versions = self._schema_versions(conn)
             if not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
                 rendered = ", ".join(sorted(versions))
-                raise ContinuityStoreError(f"未知或未来 Continuity Store schema: {rendered}")
+                raise ContinuityStoreSchemaError(f"未知或未来 Continuity Store schema: {rendered}")
             if versions == {_LEGACY_SCHEMA_VERSION}:
                 return MissionBoard(subject_project_id=subject_project_id)
             closed_hidden = 0

@@ -308,3 +308,19 @@ def test_timeout_is_bounded_and_preserves_a_truthful_non_success_outcome(tmp_pat
     assert result.timed_out is True
     assert result.exit_code is not None
     assert result.changed_paths == ()
+
+
+def test_bare_command_name_is_resolved_through_path_so_windows_finds_the_cmd_shim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # TD-SW008-185: Popen without a shell cannot find ``codex.cmd`` from the bare name ``codex``.
+    from auto_pm.infrastructure import local_executor
+
+    shim = str(Path("C:/tools/npm/codex.cmd"))
+    monkeypatch.setattr(local_executor.shutil, "which", lambda name: shim if name == "codex" else None)
+
+    assert LocalCodexExecutor()._command_prefix == (shim,)
+    # A name PATH does not know, and any name that already carries a path, are left exactly as given.
+    assert LocalCodexExecutor(command_prefix=("unknown-tool", "--x"))._command_prefix == ("unknown-tool", "--x")
+    explicit = str(Path("/opt/codex"))
+    assert LocalCodexExecutor(command_prefix=(explicit, "exec"))._command_prefix == (explicit, "exec")
