@@ -1,0 +1,91 @@
+# Manual pre-gate for a release candidate: runs the ten pytest groups of the governed gate (run_g2.sh of card 188 and scripts/long_gate_nine_groups.example.json,
+# the same targets and ignores) on Windows, each in its own process, with faulthandler on.  The "rest" group runs as ONE whole
+# process on purpose: a crash that only shows when the Qt tests run back to back (access violation 0xC0000005, WBS question pool 11)
+# cannot be caught by the split groups in sw008-ci.  Every group runs even when an earlier one fails, so one run lists all failures.
+# Not acceptance evidence; the governed local gate remains the gate.
+name: release-pregate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJ: "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+  QT_QPA_PLATFORM: offscreen
+  PYTHONDONTWRITEBYTECODE: "1"
+  # The same environment the governed long gate gives its groups.
+  PYTHONFAULTHANDLER: "1"
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  GIT_AUTHOR_NAME: ci
+  GIT_AUTHOR_EMAIL: ci@example.invalid
+  GIT_COMMITTER_NAME: ci
+  GIT_COMMITTER_EMAIL: ci@example.invalid
+
+jobs:
+  pregate:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Long paths (the project paths are deep and Chinese)
+        run: git config --system core.longpaths true
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the locked dependencies into a fresh virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/Scripts" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
+
+      - name: Run the ten groups
+        working-directory: ${{ env.PROJ }}
+        run: |
+          PY="$RUNNER_TEMP/venv/Scripts/python.exe"
+          export PATH="/usr/bin:/mingw64/bin:$PATH"
+          run_group() {
+            name="$1"; shift
+            echo "::group::$name"
+            start=$(date +%s)
+            code=0
+            timeout 5400 "$PY" -X faulthandler -B -m pytest -o addopts= --no-cov -p no:cacheprovider --color=no -o faulthandler_timeout=240 -v "$@" || code=$?
+            echo "::endgroup::"
+            echo "$name exit=$code seconds=$(( $(date +%s) - start ))" | tee -a "$RUNNER_TEMP/summary.txt"
+            if [ "$code" -ne 0 ]; then echo "::error::group $name failed with exit code $code"; fi
+          }
+          run_group rest tests/db tests/delivery tests/doc tests/domain tests/models tests/spec tests/utils tests/vartable \
+            tests/constraint tests/config tests/logging tests/modbus tests/e2e tests/ui \
+            tests/test_bug1_get_project_path.py tests/test_bug2_sync_changes.py tests/test_bug4_retrofit_src_path.py \
+            tests/test_bug5_scan_depth.py tests/test_fixture_health.py tests/test_import.py tests/test_pm_session_size.py \
+            tests/test_smoke.py \
+            --ignore=tests/e2e/test_closure_drill.py --ignore=tests/e2e/test_closure_drill_agent_misconduct.py \
+            --ignore=tests/e2e/test_release_pycache_drill.py --ignore=tests/e2e/test_trial_run_drill.py
+          run_group application tests/application
+          run_group plc tests/plc
+          run_group change tests/change
+          run_group contracts tests/contracts
+          run_group infrastructure tests/infrastructure
+          run_group qml_debounce_alone tests/qml/test_file_watcher_bridge.py::test_debounce_coalesces_events
+          run_group cli tests/cli
+          run_group qml tests/qml --deselect tests/qml/test_file_watcher_bridge.py::test_debounce_coalesces_events
+          run_group core tests/core
+          echo "---- summary ----"
+          cat "$RUNNER_TEMP/summary.txt"
+          if grep -vq "exit=0 " "$RUNNER_TEMP/summary.txt"; then exit 1; fi
+
+      - name: The working tree must still be clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then git status --short; exit 1; fi
