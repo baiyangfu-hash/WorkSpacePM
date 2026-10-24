@@ -14,11 +14,15 @@ import json
 import os
 import subprocess
 import sys
+import tarfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 
 from auto_pm.contracts.continuity import RunItem
+from auto_pm.domain.plc.baseline_compare import diff_failures, lint_failure_keys
+from auto_pm.domain.plc.language_service import LanguageService
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
     authority_path_parts,
@@ -162,6 +166,22 @@ class _PlcProject:
 
     root: Path
     scl_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _PlcBaseline:
+    """One PLC project as it was at the Run baseline commit (exported read-only from Git).
+
+    ``workspace`` is the temporary export root; ``project`` is the project inside it, or
+    ``None`` when the baseline cannot be used (``note`` says why), in which case every
+    current failure counts as new.
+    """
+
+    git_head: str
+    workspace: Path | None
+    project: Path | None
+    note: str = ""
+    anchor_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -1170,10 +1190,17 @@ class EvidenceCollectionService:
         before = self.collect(run)
         checker_digest = self._plc_checker_digest()
         inputs_before = self._plc_input_digests(candidate, projects)
-        gates = tuple(
-            self._run_plc_gate(candidate, name, command, root, project)
-            for (name, command, root), project in self._plc_gate_plan(candidate, projects)
-        )
+        # Judge against the Run baseline: failures that already existed when the Run
+        # started are listed but do not block; only new ones (or more of them) do.
+        with TemporaryDirectory(prefix="pmb-") as temporary:
+            baselines = {
+                project.root: self._plc_baseline(candidate, run.git_head, project, Path(temporary) / str(index))
+                for index, project in enumerate(projects)
+            }
+            gates = tuple(
+                self._run_plc_gate(candidate, name, command, root, project, baselines[project.root])
+                for (name, command, root), project in self._plc_gate_plan(candidate, projects)
+            )
         evidence_current = False
         evidence_error: str | None = None
         try:
@@ -1509,20 +1536,43 @@ class EvidenceCollectionService:
         return tuple(plan)
 
     @staticmethod
+    def _plc_baseline(
+        candidate: Path, git_head: str, project: _PlcProject, destination: Path
+    ) -> _PlcBaseline:
+        """Export one project at the Run baseline; a failed export is recorded, never fatal."""
+
+        from auto_pm.application.core.plc_baseline import (
+            PlcBaselineError,
+            baseline_anchor_note,
+            export_plc_baseline,
+        )
+
+        relative = project.root.relative_to(candidate).as_posix()
+        try:
+            exported = export_plc_baseline(candidate, git_head, relative, destination)
+            anchor = baseline_anchor_note(candidate, git_head)
+        except (PlcBaselineError, OSError, tarfile.TarError) as error:
+            return _PlcBaseline(git_head, None, None, f"开工基线取不出来（{error}），现在的失败全部按新增算")
+        if exported is None:
+            return _PlcBaseline(git_head, None, None, "开工基线上还没有这个工程，现在的失败全部按新增算")
+        return _PlcBaseline(git_head, destination, exported, anchor_note=anchor)
+
+    @staticmethod
     def _run_plc_gate(
         candidate: Path,
         name: str,
         command: tuple[str, ...],
         root: Path,
         project: _PlcProject,
+        baseline: _PlcBaseline | None = None,
     ) -> PythonQualityGate:
         """Execute one in-process PLC gate and bind its full output by digest."""
 
         try:
             if name == "plc-check":
-                output, exit_code = _plc_check_output(candidate, root)
+                output, exit_code = _plc_check_output(candidate, root, baseline)
             else:
-                output, exit_code = _scl_lint_output(root, project.scl_paths)
+                output, exit_code = _scl_lint_output(root, project.scl_paths, baseline)
         except Exception as error:
             output = f"launch error: {error}"
             exit_code = None
@@ -1817,30 +1867,86 @@ def _plc_receipt_hash(
     )
 
 
-def _plc_check_output(candidate: Path, root: Path) -> tuple[str, int | None]:
+def _plc_language_service() -> LanguageService | None:
+    """The Siemens language service the acceptance gate runs, same as ``plc check``.
+
+    A missing plugin is reported by the checker as "未验证" (warn), never as a pass.
+    """
+
+    from auto_pm.infrastructure.siemens_language_service import default_language_service
+
+    return default_language_service()
+
+
+def _with_anchor(note: str, baseline: _PlcBaseline | None) -> str:
+    """Append the "baseline is not on main" remark to whatever else the baseline note says."""
+
+    anchor = baseline.anchor_note if baseline else ""
+    return "；".join(part for part in (note, anchor) if part)
+
+
+def _baseline_title(baseline: _PlcBaseline | None) -> str:
+    head = baseline.git_head[:12] if baseline else "?"
+    return f"和 Run 开工基线 {head} 逐条比"
+
+
+def _plc_check_output(
+    candidate: Path, root: Path, baseline: _PlcBaseline | None = None
+) -> tuple[str, int | None]:
     """Run the existing project checker on a governed PLC root (read-only).
 
     The candidate worktree is the checker's workspace root, so the spec registry
     and library paths it consults come from the Run baseline, not the control root.
+    The verdict is "no new failures": the same checker also runs on the project as
+    exported from the Run baseline commit, and failures already there do not block.
     """
 
-    from auto_pm.plc.checker import PlcChecker
+    from auto_pm.application.core.plc_baseline import checked_keys
 
-    result = PlcChecker(str(candidate)).check_project(str(root))
+    service = _plc_language_service()
+    result, now, incomplete = checked_keys(candidate, root, service)
     if result.not_applicable:
         return f"PLC 检查对该工程不适用: {result.not_applicable_reason}", None
-    # Failures and warnings first: the bounded summary must never hide the reason.
+    if incomplete:
+        raise RuntimeError("Siemens 语言服务命令行没有跑完（超时或起不来），这次检查不算数")
+    base: Counter[str] | None = None
+    note = baseline.note if baseline else "没有开工基线，现在的失败全部按新增算"
+    if baseline is not None and baseline.workspace is not None and baseline.project is not None:
+        try:
+            base_result, base_keys, base_incomplete = checked_keys(
+                baseline.workspace, baseline.project, service
+            )
+            if base_incomplete:
+                note = "开工基线上 Siemens 语言服务没有跑完，现在的失败全部按新增算"
+            elif not base_result.not_applicable:
+                base = base_keys
+        except Exception as error:  # the baseline run must never hide a current failure
+            note = f"开工基线检查出错（{error}），现在的失败全部按新增算"
+    diff = diff_failures(now, base, baseline_note=_with_anchor(note, baseline))
+    # Verdict and new failures first: the bounded summary must never hide the reason.
+    lines = diff.render(_baseline_title(baseline))
+    if any(item.item == "Siemens 语言服务 check" and item.status == "warn" for item in result.items):
+        # Not a pass: AGENTS.md rule — an unfound plugin is "unverified", blocked at the delivery stage gate.
+        # Right after the verdict and the new failures, so the bounded summary keeps it.
+        lines.insert(1 + bool(diff.baseline_note) + len(diff.new), "注意：本机没找到 Siemens 插件命令行，语言服务这一层未验证（交付阶段门禁按失败处理）")
     rank = {"fail": 0, "warn": 1}
     ordered = sorted(result.items, key=lambda item: rank.get(item.status, 2))
-    lines = [f"{item.status} | {item.item} | {item.message}" for item in ordered]
+    lines.extend(f"{item.status} | {item.item} | {item.message}" for item in ordered)
     lines.append(
         f"pass={result.pass_count} warn={result.warn_count} fail={result.fail_count}"
+        f" new={len(diff.new)} known={len(diff.known)}"
     )
-    return "\n".join(lines), (1 if result.fail_count > 0 else 0)
+    return "\n".join(lines), (0 if diff.passed else 1)
 
 
-def _scl_lint_output(root: Path, scl_paths: tuple[str, ...]) -> tuple[str, int | None]:
-    """Lint exactly the owned SCL files with the existing LSP-905 linter."""
+def _scl_lint_output(
+    root: Path, scl_paths: tuple[str, ...], baseline: _PlcBaseline | None = None
+) -> tuple[str, int | None]:
+    """Lint exactly the owned SCL files with the existing LSP-905 linter.
+
+    Errors the same owned file already had at the Run baseline do not block; an
+    owned file that did not exist at the baseline has only new errors.
+    """
 
     from auto_pm.plc.scl_linter import SclLinter
 
@@ -1856,7 +1962,18 @@ def _scl_lint_output(root: Path, scl_paths: tuple[str, ...]) -> tuple[str, int |
             for violation in report.violations
         )
     lines.append(f"files={len(scl_paths)} errors={errors} warnings={warnings}")
-    return "\n".join(lines), (1 if errors > 0 else 0)
+    now = lint_failure_keys((relative, root / relative) for relative in scl_paths)
+    base: Counter[str] | None = None
+    note = baseline.note if baseline else "没有开工基线，现在的错误全部按新增算"
+    if baseline is not None and baseline.project is not None:
+        base_project = baseline.project
+        base = lint_failure_keys(
+            (relative, base_project / relative)
+            for relative in scl_paths
+            if (base_project / relative).is_file()
+        )
+    diff = diff_failures(now, base, baseline_note=_with_anchor(note, baseline))
+    return "\n".join([*diff.render(_baseline_title(baseline)), *lines]), (0 if diff.passed else 1)
 
 
 def _canonical_json_payload(payload: object) -> str:

@@ -110,6 +110,16 @@ def plc_workspace(
     return workspace, candidate, baseline
 
 
+def commit(root: Path, message: str) -> None:
+    git(root, "add", ".")
+    git(
+        root,
+        "-c", "user.name=PLC Gate Test",
+        "-c", "user.email=plc-gate@example.invalid",
+        "commit", "-m", message,
+    )
+
+
 def plc_run(candidate: Path, baseline: str, owned: tuple[str, ...]) -> RunItem:
     return RunItem(
         run_id="RUN-SW008-PMF-V01-001",
@@ -179,13 +189,15 @@ def test_p02_a_violating_owned_scl_fails_both_gates_and_names_file_and_line(
     assert "OB1/OB1.scl:3" in lint.output_summary
     assert "i_" in lint.output_summary
     assert "OB1.scl:3" in receipt.gates[0].output_summary
-    assert receipt.gates[0].output_summary.splitlines()[0].startswith("fail | ")
+    head = receipt.gates[0].output_summary.splitlines()
+    assert head[0].startswith("和 Run 开工基线 ") and "新增失败 1 条" in head[0]
+    assert head[1].startswith("new | SCL 规范 · OB1/OB1.scl [")
     with pytest.raises(EvidenceCollectionError, match="不一致"):
         service.build_checkpoint_evidence(service.collect(run), receipt)
     assert not service.plc_quality_receipt_is_current(run, candidate, receipt)
 
 
-def test_p03_a_violation_in_a_non_owned_scl_fails_the_project_gate_not_the_lint_gate(
+def test_p03_a_violation_already_in_a_non_owned_scl_at_the_baseline_does_not_block(
     tmp_path: Path,
 ) -> None:
     workspace, candidate, baseline = plc_workspace(tmp_path)
@@ -194,24 +206,21 @@ def test_p03_a_violation_in_a_non_owned_scl_fails_the_project_gate_not_the_lint_
     # Committed baseline content cannot be produced after the fact, so build it on the
     # baseline worktree itself and re-pin the Run baseline to that commit.
     (other / "OB2.scl").write_text(BAD_SCL, encoding="utf-8")
-    git(candidate, "add", ".")
-    git(
-        candidate,
-        "-c", "user.name=PLC Gate Test",
-        "-c", "user.email=plc-gate@example.invalid",
-        "commit", "-m", "pre-existing violation",
-    )
+    commit(candidate, "pre-existing violation")
     baseline = git(candidate, "rev-parse", "HEAD")
     run = plc_run(candidate, baseline, (SCL,))
 
     receipt = _service(workspace).run_plc_checkpoint_quality_gates(run, candidate)
 
-    assert receipt.status == "FAIL"
+    assert receipt.status == "PASS"
     assert [(gate.name, gate.exit_code) for gate in receipt.gates] == [
-        ("plc-check", 1),
+        ("plc-check", 0),
         ("scl-lint", 0),
     ]
-    assert "OB2.scl" in receipt.gates[0].output_summary
+    summary = receipt.gates[0].output_summary
+    assert "新增失败 0 条" in summary and "基线已有失败 1 条" in summary
+    assert "known | SCL 规范 · OB2/OB2.scl [" in summary
+    assert "fail | SCL 代码规范" in summary  # still shown, never hidden
 
 
 def test_p04_a_checker_crash_or_not_applicable_verdict_is_a_failing_receipt(

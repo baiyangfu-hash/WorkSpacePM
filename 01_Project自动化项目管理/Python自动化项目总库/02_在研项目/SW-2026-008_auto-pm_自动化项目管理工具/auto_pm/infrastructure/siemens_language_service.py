@@ -120,7 +120,7 @@ class SiemensLanguageService:
             try:
                 done = self._runner([self._binary.path, command, "."], root, env, self._timeout)
             except (OSError, subprocess.TimeoutExpired) as exc:
-                return LanguageServiceResult(command=command, available=True, exit_code=-1, error_count=1, messages=(f"命令行未能完成: {exc}",), summary=str(exc), binary=self._binary)
+                return LanguageServiceResult(command=command, available=True, exit_code=-1, error_count=1, messages=(f"命令行未能完成: {exc}",), summary=str(exc), binary=self._binary, diagnostics=("命令行未能完成",))
         text = _relative(_ANSI.sub("", (done.stdout or "") + (done.stderr or "")), root)
         lines = [ln for ln in text.splitlines() if ln.strip()]
         if command == "check":
@@ -136,6 +136,7 @@ class SiemensLanguageService:
             command=command, available=True, exit_code=done.returncode, error_count=error_count, messages=tuple(hits[:MAX_MESSAGES]),
             summary=lines[-1] if lines else "", binary=self._binary,
             cases_run=int(cases.group(1)) if cases else None, cases_total=int(cases.group(2)) if cases else None,
+            diagnostics=tuple(hits),
         )
 
 

@@ -27,6 +27,7 @@ from rich.table import Table
 from auto_pm.app_context import AppContext
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.template_service import TemplateService
+from auto_pm.domain.plc.language_service import LanguageService
 from auto_pm.plc.checker import PlcChecker
 from auto_pm.plc.models import CheckResult, RepairResult
 from auto_pm.plc.service import PlcService
@@ -104,6 +105,10 @@ def cmd_init(
 @click.option("--fix", is_flag=True, help="检查后自动修复非破坏性问题")
 @click.option("--list", "list_items", is_flag=True, help="列出所有检查项及说明")
 @click.option("--no-language-service", "no_language_service", is_flag=True, help="不运行 Siemens 语言服务（插件命令行 check/test）这一层")
+@click.option(
+    "--baseline", "baseline_rev", default=None, metavar="提交号",
+    help="和这个提交（如 Run 开工基线）上的工程逐条比：只有新增失败（或同一失败变多）才退出码 1，和验收门同一口径",
+)
 @click.pass_context
 def cmd_check(
     ctx: click.Context,
@@ -114,6 +119,7 @@ def cmd_check(
     fix: bool,
     list_items: bool,
     no_language_service: bool = False,
+    baseline_rev: str | None = None,
 ) -> None:
     """检查项目结构是否符合 LSP-907 规范，并运行 Siemens 语言服务（插件命令行）；有失败项时退出码为 1。"""
     app_ctx: AppContext = ctx.obj
@@ -156,6 +162,13 @@ def cmd_check(
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
 
+    if baseline_rev:
+        if substance or fix or check_all:
+            console.print("[red]错误: --baseline 只能和单个项目的普通检查一起用（不能加 --substance/--fix/--all）[/red]")
+            ctx.exit(1)
+        _check_against_baseline(ctx, app_ctx, proj.path, baseline_rev, language_service, output_json)
+        return
+
     if substance:
         result = svc.check_substance(proj.path)
     else:
@@ -194,6 +207,44 @@ def cmd_check(
 
     # 门禁必须能靠退出码判卷：有失败项即退出码 1（此前无论结果如何都是 0）
     if result.fail_count > 0:
+        ctx.exit(1)
+
+
+def _check_against_baseline(
+    ctx: click.Context,
+    app_ctx: AppContext,
+    project_path: str,
+    baseline_rev: str,
+    language_service: LanguageService | None,
+    output_json: bool,
+) -> None:
+    """``plc check <ID> --baseline <提交号>``：断网、没有 AI 也能复现验收门的“只拦新增失败”判定。"""
+    from pathlib import Path
+
+    from auto_pm.application.core.plc_baseline import PlcBaselineError, check_against_baseline
+
+    try:
+        result, diff = check_against_baseline(
+            Path(app_ctx.workspace_root), Path(project_path), baseline_rev, language_service
+        )
+    except (PlcBaselineError, ValueError) as error:
+        console.print(f"[red]和基线比对失败: {error}[/red]")
+        ctx.exit(1)
+    if output_json:
+        payload = {
+            "check": result.model_dump(),
+            "baseline": baseline_rev,
+            "new": list(diff.new),
+            "known": list(diff.known),
+            "fixed": list(diff.fixed),
+            "baseline_note": diff.baseline_note,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))  # noqa: T201
+    else:
+        _print_check_detail(result)
+        for line in diff.render(f"和基线 {baseline_rev} 逐条比"):
+            console.print(line, markup=False)
+    if not diff.passed:
         ctx.exit(1)
 
 
