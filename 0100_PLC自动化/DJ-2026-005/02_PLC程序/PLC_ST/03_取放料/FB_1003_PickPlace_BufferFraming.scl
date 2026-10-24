@@ -1,7 +1,7 @@
 (* ================================================================= *)
 (*  功能块名称: FB_1003_PickPlace_BufferFraming                       *)
-(*  功能描述:   取放料机构 S20~S25 状态机 (成对取料, Z + X1 两轴)     *)
-(*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V14.x)      *)
+(*  功能描述:   取放料机构 S20~S25 状态机 (2 根 / 4 根模式, Z + X1)  *)
+(*  版本号:     V15.1.0 (2026-10-24, 增加 2 根 / 4 根取料模式)        *)
 (*                                                                   *)
 (*  依据:                                                            *)
 (*    - 详细设计说明书_DSN.md 6 / 3.3; 接口文档_INT.md 4.6 / 5 / 8   *)
@@ -101,7 +101,7 @@ VAR
     (* 步与轴命令状态 *)
     s_iStep             : INT := 0;         // 0 未激活, 20~25
     s_iPhase            : INT := 0;         // 子相
-    s_iPair             : INT := 1;         // 1 = A 前位对 (3+4 层), 2 = B 后位对 (1+2 层)
+    s_iGroup             : INT := 1;         // 1 = 组 1 (2 根模式 3+4 层, 4 根模式 1~4 层), 2 = 组 2 (1+2 层)
     s_bZGo              : BOOL := FALSE;    // Z 绝对定位进行中
     s_bX1Go             : BOOL := FALSE;    // X1 绝对定位进行中
     s_rZTarget          : REAL := 0.0;      // Z 目标
@@ -119,9 +119,16 @@ VAR
     s_bReleasedAll      : BOOL := FALSE;    // 4 个松开位全亮
     s_bAnyClamped       : BOOL := FALSE;    // 任一夹紧位亮
     s_bAnyReleased      : BOOL := FALSE;    // 任一松开位亮
-    s_bPairA            : BOOL := FALSE;    // A 请求成立 (A 且 3、4 层请求)
-    s_bPairB            : BOOL := FALSE;    // B 请求成立 (B 且 1、2 层请求)
-    s_bPairReq          : BOOL := FALSE;    // 已选对的两层请求仍在
+    s_bGroupA           : BOOL := FALSE;    // 组 1 请求成立 (A 且组 1 各层请求)
+    s_bGroupB           : BOOL := FALSE;    // 组 2 请求成立 (B 且 1、2 层请求; 4 根模式不用)
+    s_bGroupReq         : BOOL := FALSE;    // 已选组的各层请求仍在
+    s_bQuad             : BOOL := FALSE;    // 生效模式 = 一次 4 根
+    s_bModeOk           : BOOL := FALSE;    // HMI 请求的模式本机支持 (4 根需要 4 个夹爪)
+    s_bModeInit         : BOOL := TRUE;     // 上电第一扫描: 把请求值同步成生效模式 (防请求值没保持而改掉保持的模式)
+    s_bGripShort        : BOOL := FALSE;    // 生效模式为 4 根但夹爪个数不足 4
+    s_bModeSwitchOk     : BOOL := FALSE;    // 允许切换: 非自动、非回原点 / 准备、取放料静止、夹爪与小车无料
+    s_bAnyProd          : BOOL := FALSE;    // 夹爪里任一产品检测亮
+    s_bFeederAny        : BOOL := FALSE;    // 小车任一光电亮
 END_VAR
 
 VAR CONSTANT
@@ -170,18 +177,66 @@ BEGIN
         s_rZErr := 0.0 - s_rZErr;
     END_IF;
     s_bZAtStandby := (s_rZErr <= io_stPP.rPosTol);
+    s_bAnyProd := io_stIo.bPPFrontProd1 OR io_stIo.bPPFrontProd2 OR io_stIo.bPPRearProd1 OR io_stIo.bPPRearProd2
+                  OR io_stIo.bPPG3Prod1 OR io_stIo.bPPG3Prod2 OR io_stIo.bPPG4Prod1 OR io_stIo.bPPG4Prod2;
+    s_bFeederAny := io_stIo.bFeederFrontEye1 OR io_stIo.bFeederFrontEye2 OR io_stIo.bFeederRearEye1 OR io_stIo.bFeederRearEye2;
+
+    // 取料模式: 请求的模式本机支持才算有效 (2 根恒支持, 4 根要 4 个夹爪); 无效只置提示位, 不占报警号
+    IF s_bModeInit THEN
+        io_stPP.iPickModeReq := io_stPP.iPickMode;
+        s_bModeInit := FALSE;
+    END_IF;
+    s_bModeOk := (io_stPP.iPickModeReq = 2) OR ((io_stPP.iPickModeReq = 4) AND (io_stPP.iGripCount >= 4));
+    s_bGripShort := (io_stPP.iPickMode = 4) AND (io_stPP.iGripCount < 4);
+    io_stPP.bModeInvalid := (NOT s_bModeOk) OR s_bGripShort;
+    // 切换只在: 非自动、非回原点 / 准备、取放料未激活、夹爪和小车都没料 (R-PP-13)
+    s_bModeSwitchOk := (NOT io_stMachine.bAuto) AND (NOT io_stMachine.bHoming) AND (NOT io_stMachine.bPrepare)
+                       AND (s_iStep = STEP_NONE) AND (NOT s_bAnyProd) AND (NOT s_bFeederAny);
+    IF s_bGripShort AND s_bModeSwitchOk THEN
+        // 夹爪个数配置变小: 能切时回到 2 根模式 (自动中不切, 提示位一直亮)
+        io_stPP.iPickMode := 2;
+    ELSIF s_bModeOk AND s_bModeSwitchOk THEN
+        io_stPP.iPickMode := io_stPP.iPickModeReq;
+    END_IF;
+    s_bQuad := (io_stPP.iPickMode = 4);
+    IF s_bQuad THEN
+        io_stPP.iGroupCount := 1;
+    ELSE
+        io_stPP.iGroupCount := 2;
+    END_IF;
+
     s_bProdAll := io_stIo.bPPFrontProd1 AND io_stIo.bPPFrontProd2 AND io_stIo.bPPRearProd1 AND io_stIo.bPPRearProd2;
     s_bClampedAll := io_stIo.bPPRearClamp1 AND io_stIo.bPPRearClamp2 AND io_stIo.bPPFrontClamp1 AND io_stIo.bPPFrontClamp2;
     s_bReleasedAll := io_stIo.bPPRearOpen1 AND io_stIo.bPPRearOpen2 AND io_stIo.bPPFrontOpen1 AND io_stIo.bPPFrontOpen2;
     s_bAnyClamped := io_stIo.bPPRearClamp1 OR io_stIo.bPPRearClamp2 OR io_stIo.bPPFrontClamp1 OR io_stIo.bPPFrontClamp2;
     s_bAnyReleased := io_stIo.bPPRearOpen1 OR io_stIo.bPPRearOpen2 OR io_stIo.bPPFrontOpen1 OR io_stIo.bPPFrontOpen2;
-    // A (前位对) = 3、4 层请求; B (后位对) = 1、2 层请求
-    s_bPairA := io_stBridge.bReqA AND io_stBridge.abLayerReq[3] AND io_stBridge.abLayerReq[4];
-    s_bPairB := io_stBridge.bReqB AND io_stBridge.abLayerReq[1] AND io_stBridge.abLayerReq[2];
-    IF s_iPair = 1 THEN
-        s_bPairReq := io_stBridge.abLayerReq[3] AND io_stBridge.abLayerReq[4];
+    IF s_bQuad THEN
+        // 4 根模式: 夹爪 3、4 的检测并入 (预留信号, 005 无此夹爪, 不会进入本模式)
+        s_bProdAll := s_bProdAll AND io_stIo.bPPG3Prod1 AND io_stIo.bPPG3Prod2 AND io_stIo.bPPG4Prod1 AND io_stIo.bPPG4Prod2;
+        s_bClampedAll := s_bClampedAll AND io_stIo.bPPG3Clamp1 AND io_stIo.bPPG3Clamp2
+                         AND io_stIo.bPPG4Clamp1 AND io_stIo.bPPG4Clamp2;
+        s_bReleasedAll := s_bReleasedAll AND io_stIo.bPPG3Open1 AND io_stIo.bPPG3Open2
+                          AND io_stIo.bPPG4Open1 AND io_stIo.bPPG4Open2;
+        s_bAnyClamped := s_bAnyClamped OR io_stIo.bPPG3Clamp1 OR io_stIo.bPPG3Clamp2
+                         OR io_stIo.bPPG4Clamp1 OR io_stIo.bPPG4Clamp2;
+        s_bAnyReleased := s_bAnyReleased OR io_stIo.bPPG3Open1 OR io_stIo.bPPG3Open2
+                          OR io_stIo.bPPG4Open1 OR io_stIo.bPPG4Open2;
+    END_IF;
+    // 取料组: 2 根模式 组 1 (A) = 3、4 层, 组 2 (B) = 1、2 层; 4 根模式只有组 1 = 1~4 层
+    IF s_bQuad THEN
+        s_bGroupA := io_stBridge.bReqA AND io_stBridge.abLayerReq[1] AND io_stBridge.abLayerReq[2]
+                     AND io_stBridge.abLayerReq[3] AND io_stBridge.abLayerReq[4];
+        s_bGroupB := FALSE;
+        s_bGroupReq := io_stBridge.abLayerReq[1] AND io_stBridge.abLayerReq[2]
+                       AND io_stBridge.abLayerReq[3] AND io_stBridge.abLayerReq[4];
     ELSE
-        s_bPairReq := io_stBridge.abLayerReq[1] AND io_stBridge.abLayerReq[2];
+        s_bGroupA := io_stBridge.bReqA AND io_stBridge.abLayerReq[3] AND io_stBridge.abLayerReq[4];
+        s_bGroupB := io_stBridge.bReqB AND io_stBridge.abLayerReq[1] AND io_stBridge.abLayerReq[2];
+        IF s_iGroup = 1 THEN
+            s_bGroupReq := io_stBridge.abLayerReq[3] AND io_stBridge.abLayerReq[4];
+        ELSE
+            s_bGroupReq := io_stBridge.abLayerReq[1] AND io_stBridge.abLayerReq[2];
+        END_IF;
     END_IF;
 
     (* 过程定时器 IN 每扫描先清零, 由所在步重新置位 (Hold / Reset 时即清零重算) *)
@@ -193,6 +248,8 @@ BEGIN
     IF io_stPP.bGripOpenReq THEN
         io_stPP.bClampFront := FALSE;
         io_stPP.bClampRear := FALSE;
+        io_stPP.bClampG3 := FALSE;
+        io_stPP.bClampG4 := FALSE;
     END_IF;
     IF io_stPP.bLiftDownReq THEN
         io_stPP.bLiftDown := TRUE;
@@ -221,9 +278,11 @@ BEGIN
 
             STEP_S20:
                 IF s_iPhase = PH_WINDOW THEN
-                    // 入口窗口: 松开两爪, 清 4 个"取料完成"
+                    // 入口窗口: 松开全部夹爪, 清 4 个"取料完成"
                     io_stPP.bClampFront := FALSE;
                     io_stPP.bClampRear := FALSE;
+                    io_stPP.bClampG3 := FALSE;
+                    io_stPP.bClampG4 := FALSE;
                     io_stPP.abPickDone[1] := FALSE;
                     io_stPP.abPickDone[2] := FALSE;
                     io_stPP.abPickDone[3] := FALSE;
@@ -241,15 +300,15 @@ BEGIN
                             s_bZGo := TRUE;
                         END_IF;
                     ELSIF NOT s_bX1Go THEN
-                        // Z 到位后: A 或 B 请求出现满 0.5 s, 且不在停止收尾中
-                        s_bABIn := (s_bPairA OR s_bPairB) AND (NOT io_stMachine.bStopPending);
+                        // Z 到位后: 组 1 (A) 或组 2 (B) 请求出现满 0.5 s, 且不在停止收尾中
+                        s_bABIn := (s_bGroupA OR s_bGroupB) AND (NOT io_stMachine.bStopPending);
                         IF s_bABQ THEN
-                            IF s_bPairA THEN
-                                s_iPair := 1;
+                            IF s_bGroupA THEN
+                                s_iGroup := 1;
                             ELSE
-                                s_iPair := 2;
+                                s_iGroup := 2;
                             END_IF;
-                            s_rX1Target := io_stPP.astPair[s_iPair].rXPick;
+                            s_rX1Target := io_stPP.astGroup[s_iGroup].rXPick;
                             s_bX1Go := TRUE;
                             s_bXStarted := TRUE;
                             s_bABIn := FALSE;
@@ -283,9 +342,9 @@ BEGIN
                             s_iStep := STEP_S22;
                             s_iPhase := PH_WAIT;
                         END_IF;
-                    ELSIF s_bReleasedAll AND (NOT s_bAnyClamped) AND s_bPairReq AND io_stIo.bPPLiftUp THEN
+                    ELSIF s_bReleasedAll AND (NOT s_bAnyClamped) AND s_bGroupReq AND io_stIo.bPPLiftUp THEN
                         // 4 松开位亮, 4 夹紧位灭, 两层请求仍在, 升降缸已在上位: Z 升到取料高度
-                        s_rZTarget := io_stPP.astPair[s_iPair].rZPick;
+                        s_rZTarget := io_stPP.astGroup[s_iGroup].rZPick;
                         s_bZGo := TRUE;
                     END_IF;
                 END_IF;
@@ -295,8 +354,15 @@ BEGIN
                 IF io_stIo.bPPLiftUp THEN
                     io_stPP.bClampFront := TRUE;
                     io_stPP.bClampRear := TRUE;
+                    IF s_bQuad THEN
+                        io_stPP.bClampG3 := TRUE;
+                        io_stPP.bClampG4 := TRUE;
+                    END_IF;
                 END_IF;
                 s_bClampIn := io_stPP.bClampFront AND io_stPP.bClampRear;
+                IF s_bQuad THEN
+                    s_bClampIn := s_bClampIn AND io_stPP.bClampG3 AND io_stPP.bClampG4;
+                END_IF;
                 IF s_bClampedAll AND (NOT s_bAnyReleased) AND (s_bProdAll OR io_stMachine.bSimulate) THEN
                     s_bClampIn := FALSE;
                     s_iStep := STEP_S23;
@@ -319,7 +385,7 @@ BEGIN
                             s_iPhase := PH_WINDOW;
                         END_IF;
                     ELSE
-                        s_rX1Target := io_stPP.astPair[s_iPair].rXPlace;
+                        s_rX1Target := io_stPP.astGroup[s_iGroup].rXPlace;
                         s_bX1Go := TRUE;
                     END_IF;
                 END_IF;
@@ -329,14 +395,19 @@ BEGIN
                 io_stPP.bLiftDown := TRUE;
                 io_stPP.bLiftUp := FALSE;
                 IF s_iPhase = PH_WINDOW THEN
-                    IF s_iPair = 1 THEN
+                    IF s_bQuad THEN
+                        io_stPP.abPickDone[1] := TRUE;
+                        io_stPP.abPickDone[2] := TRUE;
+                        io_stPP.abPickDone[3] := TRUE;
+                        io_stPP.abPickDone[4] := TRUE;
+                    ELSIF s_iGroup = 1 THEN
                         io_stPP.abPickDone[4] := TRUE;
                         io_stPP.abPickDone[3] := TRUE;
                     ELSE
                         io_stPP.abPickDone[2] := TRUE;
                         io_stPP.abPickDone[1] := TRUE;
                     END_IF;
-                    io_stPP.abFeedDone[s_iPair] := FALSE;
+                    io_stPP.abFeedDone[s_iGroup] := FALSE;
                     s_bSettleIn := TRUE;
                     IF s_bSettleQ THEN
                         s_bSettleIn := FALSE;
@@ -357,13 +428,15 @@ BEGIN
                 END_IF;
 
             STEP_S25:
-                // 松开两爪, 计时到且松开位全亮: 置"X1 送料完成", 回 S20
+                // 松开全部夹爪, 计时到且松开位全亮: 置该组"X1 送料完成", 回 S20
                 io_stPP.bClampFront := FALSE;
                 io_stPP.bClampRear := FALSE;
+                io_stPP.bClampG3 := FALSE;
+                io_stPP.bClampG4 := FALSE;
                 s_bSettleIn := TRUE;
                 IF s_bSettleQ AND s_bReleasedAll THEN
                     s_bSettleIn := FALSE;
-                    io_stPP.abFeedDone[s_iPair] := TRUE;
+                    io_stPP.abFeedDone[s_iGroup] := TRUE;
                     s_iStep := STEP_S20;
                     s_iPhase := PH_WINDOW;
                 END_IF;
@@ -414,6 +487,8 @@ BEGIN
     (* ============ 6. 夹爪 / 升降缸输出 ============ *)
     io_stIo.bQPPRearClamp := io_stPP.bClampRear;
     io_stIo.bQPPFrontClamp := io_stPP.bClampFront;
+    io_stIo.bQPPG3Clamp := io_stPP.bClampG3;        // 预留, 005 未接线
+    io_stIo.bQPPG4Clamp := io_stPP.bClampG4;        // 预留, 005 未接线
     io_stIo.bQPPLiftUp := io_stPP.bLiftUp;
     io_stIo.bQPPLiftDown := io_stPP.bLiftDown;
 
@@ -463,7 +538,7 @@ BEGIN
     (* ============ 9. 状态输出 ============ *)
     io_stPP.iStep := s_iStep;
     io_stPP.iPhase := s_iPhase;
-    io_stPP.iPair := s_iPair;
+    io_stPP.iGroup := s_iGroup;
     io_stPP.bAtRest := (s_iStep = STEP_NONE) OR ((s_iStep = STEP_S20) AND (NOT s_bXStarted));
 
 END_FUNCTION_BLOCK

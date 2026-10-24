@@ -10,9 +10,10 @@ STRUCT
     bSafeZone               : BOOL;     // 取料机构在安全区 (取放料 -> 4 层)
     abLayerReq              : ARRAY[1..4] OF BOOL;      // 各层请求取料 (4 层 -> 取放料)
     abPickDone              : ARRAY[1..4] OF BOOL;      // 各层取料完成 (取放料 -> 本层, 本层对本层)
-    bReqA                   : BOOL;     // 前位请求 A (小车 -> 取放料)
-    bReqB                   : BOOL;     // 后位请求 B (小车 -> 取放料)
-    abFeedDone              : ARRAY[1..2] OF BOOL;      // X1 前 / 后送料完成 (取放料 -> 小车)
+    bReqA                   : BOOL;     // 组 1 请求 A (小车 -> 取放料)
+    bReqB                   : BOOL;     // 组 2 请求 B (小车 -> 取放料, 4 根模式不用)
+    iGroupCount             : INT := 2;     // 取料组数: 2 根模式 2, 4 根模式 1 (取放料 -> 小车)
+    abFeedDone              : ARRAY[1..2] OF BOOL;      // X1 组 1 / 组 2 送料完成 (取放料 -> 小车)
     bFeedDoneClr            : BOOL;     // 清两个"X1 送料完成" (小车 -> 取放料, 步 2 入口一拍)
     abHoldConv              : ARRAY[1..4] OF BOOL;      // 各层保持 (报警 -> 4 层)
     bHoldPP                 : BOOL;     // 取放料保持

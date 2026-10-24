@@ -55,6 +55,7 @@ BEGIN
     (* ============ 2. 小车 <-> 取放料 ============ *)
     io_stBridge.bReqA := io_stFeed.bReqA;
     io_stBridge.bReqB := io_stFeed.bReqB;
+    io_stBridge.iGroupCount := io_stPP.iGroupCount;
     IF io_stBridge.bFeedDoneClr THEN
         io_stPP.abFeedDone[1] := FALSE;
         io_stPP.abFeedDone[2] := FALSE;

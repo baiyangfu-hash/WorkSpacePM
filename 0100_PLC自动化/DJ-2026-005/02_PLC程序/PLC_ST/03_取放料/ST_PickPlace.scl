@@ -10,12 +10,19 @@ STRUCT
     (* ------------------ 状态 ------------------ *)
     iStep                   : INT;      // 0 未激活, 20~25 = S20~S25
     iPhase                  : INT;      // 子相: 0 窗口, 1 轴运动, 2 等待转移
-    iPair                   : INT;      // 1 = 前位对 (3+4 层), 2 = 后位对 (1+2 层)
+    iGroup                  : INT;      // 当前取料组: 1 = 组 1 (2 根模式 3+4 层; 4 根模式 1~4 层), 2 = 组 2 (2 根模式 1+2 层)
     bAtRest                 : BOOL;     // 静止点 (S20 或未激活)
     bSafeZone               : BOOL;     // 输出: 取料机构在安全区 (给 Bridge)
 
+    (* ------------------ 取料模式 (2 根 / 4 根), 掉电保持由平台侧设置 ------------------ *)
+    iPickModeReq            : INT := 2;     // HMI 请求的取料模式: 2 = 一次 2 根 (005 原机), 4 = 一次 4 根
+    iGripCount              : INT := 2;     // 本机夹爪个数 (现场配置): 2 或 4; 005 为 2
+    iPickMode               : INT := 2;     // 生效的取料模式, 只在手动或待机且无料时才接受 iPickModeReq
+    iGroupCount             : INT := 2;     // 取料组数: 2 根模式 2 组, 4 根模式 1 组
+    bModeInvalid            : BOOL;         // 请求或生效 4 根模式但夹爪个数不足: 不切换或回退 2 根, 只提示 (不占报警号)
+
     (* ------------------ 点位与速度 (HMI 可写, 掉电保持) ------------------ *)
-    astPair                 : ARRAY[1..2] OF ST_PairPoint;      // [1] 前位对 A, [2] 后位对 B
+    astGroup                : ARRAY[1..2] OF ST_PickGroup;      // [1] 组 1 (原前位对 A), [2] 组 2 (原后位对 B, 4 根模式不用)
     rZStandby               : REAL := 100.0;        // D500 Z 待机点
     rZPlace                 : REAL := 0.0;          // D524 Z 放料高度 (前后位共用)
     rAutoSpeed              : REAL := 10000.0;      // D600 自动速度, 范围 10000~100000
@@ -28,9 +35,11 @@ STRUCT
 
     (* ------------------ 对外输出 ------------------ *)
     abPickDone              : ARRAY[1..4] OF BOOL;  // 各层取料完成 (本层对本层)
-    abFeedDone              : ARRAY[1..2] OF BOOL;  // X1 前 / 后送料完成
+    abFeedDone              : ARRAY[1..2] OF BOOL;  // X1 组 1 / 组 2 送料完成
     bClampFront             : BOOL;     // 前夹爪夹紧命令 (Y41, 自保持)
     bClampRear              : BOOL;     // 后夹爪夹紧命令 (Y40, 自保持)
+    bClampG3                : BOOL;     // 预留 夹爪 3 夹紧命令 (4 根模式, 未接线)
+    bClampG4                : BOOL;     // 预留 夹爪 4 夹紧命令 (4 根模式, 未接线)
     bLiftUp                 : BOOL;     // 升降缸上升命令 (Y42)
     bLiftDown               : BOOL;     // 升降缸下降命令 (Y43)
 

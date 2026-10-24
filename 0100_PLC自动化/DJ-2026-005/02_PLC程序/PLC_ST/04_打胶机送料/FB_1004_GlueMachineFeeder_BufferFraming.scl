@@ -1,7 +1,7 @@
 (* ================================================================= *)
 (*  功能块名称: FB_1004_GlueMachineFeeder_BufferFraming               *)
 (*  功能描述:   X2 送料小车 4 步 (D760) + 打胶机握手 (Y44 / Y47 / X102) *)
-(*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V14.x)      *)
+(*  版本号:     V15.1.0 (2026-10-24, 返回二选一, 取料组数)            *)
 (*                                                                   *)
 (*  依据: 详细设计说明书_DSN.md 7; 接口文档_INT.md 4.7 / 5 / 8       *)
 (*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
@@ -172,12 +172,14 @@ BEGIN
                 // 步 1: 仅当 X2 在 D512 才生成 A / B 请求; 停止收尾期间不再生成
                 IF s_bAtPick AND (NOT io_stMachine.bStopPending) THEN
                     io_stFeed.bReqA := s_bEyesNone AND (NOT io_stBridge.abFeedDone[1]);
-                    io_stFeed.bReqB := io_stIo.bFeederFrontEye1 AND io_stIo.bFeederFrontEye2
+                    // 组 2 (B) 只在 2 根模式出现; 4 根模式一次放满, 只有组 1 (A)
+                    io_stFeed.bReqB := (io_stBridge.iGroupCount >= 2)
+                                       AND io_stIo.bFeederFrontEye1 AND io_stIo.bFeederFrontEye2
                                        AND (NOT io_stIo.bFeederRearEye1) AND (NOT io_stIo.bFeederRearEye2)
                                        AND (NOT io_stBridge.abFeedDone[2]);
                 END_IF;
                 s_bFullIn := s_bEyesAll;
-                IF (io_stBridge.abFeedDone[1] AND io_stBridge.abFeedDone[2] OR s_bFullQ)
+                IF ((io_stBridge.abFeedDone[1] AND (io_stBridge.abFeedDone[2] OR (io_stBridge.iGroupCount < 2))) OR s_bFullQ)
                    AND s_bZStandby AND s_bEyesAll AND (NOT s_bAnyBusy) AND (NOT io_stMachine.bStopPending) THEN
                     // 送料交接只在: 自动 ∧ 无报警 (含 F12 停止按下, 即 bStopPending) ∧ 与取放料不干涉
                     s_bFullIn := FALSE;
@@ -263,7 +265,9 @@ BEGIN
     (* ============ 6. 报警触发 ============ *)
     // F90 / F91: 光电异常 (该侧 X1 送料完成后光电却未全亮), 1 s
     s_bF90In := ((NOT io_stIo.bFeederFrontEye1) OR (NOT io_stIo.bFeederFrontEye2)) AND io_stBridge.abFeedDone[1];
-    s_bF91In := ((NOT io_stIo.bFeederRearEye1) OR (NOT io_stIo.bFeederRearEye2)) AND io_stBridge.abFeedDone[2];
+    // 4 根模式一次放满: 组 1 放完后后位光电也应亮
+    s_bF91In := ((NOT io_stIo.bFeederRearEye1) OR (NOT io_stIo.bFeederRearEye2))
+                AND (io_stBridge.abFeedDone[2] OR ((io_stBridge.iGroupCount < 2) AND io_stBridge.abFeedDone[1]));
     io_stFeed.arrTrig[0] := s_bF90Q;
     io_stFeed.arrTrig[1] := s_bF91Q;
     io_stFeed.arrTrig[2] := FALSE;          // F107 取消 (原程序全灭超时自行返回, 不报警); 号保留

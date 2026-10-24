@@ -10,8 +10,8 @@ STRUCT
     (* ------------------ 状态 ------------------ *)
     iStep                   : INT;      // 0~3 (D760)
     bAtRest                 : BOOL;     // 静止点 (步 0 / 1)
-    bReqA                   : BOOL;     // 前位请求 A
-    bReqB                   : BOOL;     // 后位请求 B
+    bReqA                   : BOOL;     // 组 1 请求 A
+    bReqB                   : BOOL;     // 组 2 请求 B (4 根模式不用)
     bY44                    : BOOL;     // 抓料可 / 送框信号 (Y44)
     bY47                    : BOOL;     // 安全区信号: X2 在取料点 (Y47)
     bFeedPermit             : BOOL;     // 出发许可 (来自 FB_3001, 由 FB_2002 汇入)
