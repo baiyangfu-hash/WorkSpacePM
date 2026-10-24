@@ -17,6 +17,7 @@ from click.testing import CliRunner
 
 from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
 from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
+from auto_pm.contracts.mission import MissionState
 from tests.cli.test_continuity import _create_args, _invoke, _repository
 from tests.core.test_cockpit_api import APPROVER, EVIDENCE, _plan, _workspace
 from tests.core.test_mission_park_store import APPROVAL, PROJECT
@@ -104,12 +105,22 @@ def test_park_unpark_and_switch_ask_the_user_for_the_pin_and_record_its_referenc
     dump = _dump(sw.store.db_path)
     assert "user-confirmation:pin-" in dump and APPROVAL not in dump.replace("user-confirmation:pin-", "")
 
-    # a switch with a target asks for the PIN as well, before anything is written
-    switched = sw.cli("pm", "switch", "--pid", PROJECT, "--to", "MISSION-A", "--reason", "r", "--summary", "s", "--as", "agent-a")
-    assert len(asked) == 3 and "MISSION-A" in asked[2], switched.output
+    # a switch to a parked target asks for the PIN as well and picks the card up on the PIN's reference
+    again = sw.cli(
+        "pm", "park", "--mission-id", "MISSION-A", "--reason", "急活", "--summary", "OB1 又改完",
+        "--approval-evidence-ref", APPROVAL,
+    )
+    assert again.exit_code == 0, again.output
+    switched = sw.cli(
+        "pm", "switch", "--pid", PROJECT, "--to", "MISSION-A", "--reason", "r", "--summary", "s", "--as", "agent-a",
+        "--holder-pid", "none",
+    )
+    assert switched.exit_code == 0, switched.output
+    assert len(asked) == 4 and "MISSION-A" in asked[3]
+    assert sw.store.get_mission("MISSION-A").state is MissionState.ACTIVE
     # no target: only a recommendation, nothing to confirm, no prompt
     sw.cli("pm", "switch", "--pid", PROJECT)
-    assert len(asked) == 3
+    assert len(asked) == 4
 
 
 def test_a_committed_pin_does_not_stop_an_ordinary_card_that_needs_no_release(
