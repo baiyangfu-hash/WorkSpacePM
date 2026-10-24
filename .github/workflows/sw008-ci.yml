@@ -212,6 +212,48 @@ jobs:
   # not cover (qml, the other e2e files, every other directory) run on their own runners with their own timeouts.
   # Early warning only: continue-on-error keeps a failure here from blocking a merge until its known failures are sorted
   # out (WBS question pool); the failures are listed in the step log (-rf, --tb=line).
+  # The governed gate runs its "rest" group in ONE pytest process (no xdist), in the fixed shuffled order from
+  # tests/conftest.py.  An access violation (0xC0000005) seen only there (WBS question pool 11, twice) never showed in
+  # the xdist groups above, so this job replays that exact group the same way.  faulthandler names the test on a crash.
+  windows-gate-rest:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Long paths (the project paths are deep and Chinese)
+        run: git config --system core.longpaths true
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the locked dependencies into a fresh virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/Scripts" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
+
+      - name: Pytest (the gate's rest group, one process)
+        working-directory: ${{ env.PROJ }}
+        run: >-
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -X faulthandler -B -m pytest -v -p no:cacheprovider -o addopts= --no-cov
+          -o faulthandler_timeout=240 --color=no
+          tests/db tests/delivery tests/doc tests/domain tests/models tests/spec tests/utils tests/vartable
+          tests/constraint tests/config tests/logging tests/modbus tests/e2e tests/ui
+          tests/test_bug1_get_project_path.py tests/test_bug2_sync_changes.py tests/test_bug4_retrofit_src_path.py
+          tests/test_bug5_scan_depth.py tests/test_fixture_health.py tests/test_import.py tests/test_pm_session_size.py
+          tests/test_smoke.py
+          --ignore=tests/e2e/test_closure_drill.py --ignore=tests/e2e/test_closure_drill_agent_misconduct.py
+          --ignore=tests/e2e/test_release_pycache_drill.py --ignore=tests/e2e/test_trial_run_drill.py
+
   windows-extra:
     runs-on: windows-latest
     timeout-minutes: 40
