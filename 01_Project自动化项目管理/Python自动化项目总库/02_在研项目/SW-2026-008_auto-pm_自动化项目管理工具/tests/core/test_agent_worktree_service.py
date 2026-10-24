@@ -443,6 +443,11 @@ def test_list_reports_each_station(lab: Lab) -> None:
     assert (stations["claude"].size_bytes or 0) >= 4096, "占用要含 .venv"
 
 
+def _unwrapped(output: str) -> str:
+    """rich 按终端宽度折行，长路径会把一句话从中间拆开；断言前去掉所有空白再比。"""
+    return "".join(output.split())
+
+
 def test_cli_exit_codes_and_default_preview(lab: Lab) -> None:
     lab.service().open("claude", "CARD-1")
     commit(lab.station("claude"), "only-here.txt")
@@ -451,11 +456,11 @@ def test_cli_exit_codes_and_default_preview(lab: Lab) -> None:
 
     refused = runner.invoke(cli, [*base, "worktree", "close", "claude", "--no-fetch"])
     assert refused.exit_code == 1, refused.output
-    assert "还没推到 GitHub" in refused.output
+    assert _unwrapped("还没推到 GitHub") in _unwrapped(refused.output)
 
     preview = runner.invoke(cli, [*base, "worktree", "sweep", "--no-fetch"])
     assert preview.exit_code == 0, preview.output
-    assert "没删任何东西" in preview.output
+    assert _unwrapped("没删任何东西") in _unwrapped(preview.output)
 
     unknown = runner.invoke(cli, [*base, "worktree", "open", "copilot", "CARD-1"])
     assert unknown.exit_code == 2
