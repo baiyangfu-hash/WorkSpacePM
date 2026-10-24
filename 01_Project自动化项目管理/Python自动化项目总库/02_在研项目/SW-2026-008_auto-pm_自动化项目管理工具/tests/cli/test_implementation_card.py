@@ -67,7 +67,7 @@ def _control_root(root: Path) -> str:
 
     def git(*args: str) -> str:
         return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True,
-                              text=True).stdout.strip()
+                              text=True, encoding="utf-8", errors="replace").stdout.strip()
 
     git("init")
     (root / "README.md").write_text("baseline\n", encoding="utf-8")

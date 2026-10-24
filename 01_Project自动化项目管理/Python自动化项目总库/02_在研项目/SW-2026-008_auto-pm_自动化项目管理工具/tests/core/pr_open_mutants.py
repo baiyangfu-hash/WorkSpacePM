@@ -138,7 +138,7 @@ def main() -> int:
                 ],
                 cwd=PROJECT,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 check=False,
             )
             caught = result.returncode != 0

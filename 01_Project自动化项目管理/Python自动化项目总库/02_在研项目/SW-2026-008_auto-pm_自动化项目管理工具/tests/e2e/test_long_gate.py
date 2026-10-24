@@ -73,7 +73,9 @@ def test_console_tool_output_in_the_console_code_page_is_read_not_dropped(monkey
     gbk = '"映像名称","PID","会话名"\r\n"python.exe","1234","Console"\r\n'.encode("gbk")
     monkeypatch.setattr(drill.locale, "getencoding", lambda: "gbk")
     monkeypatch.setattr(drill.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=gbk, stderr=b""))
-    assert '"1234"' in drill.console_text(["tasklist"])
+    text = drill.console_text(["tasklist"])
+    assert '"1234"' in text
+    assert "映像名称" in text  # a utf-8 decode would turn the GBK header into replacement characters
     monkeypatch.setattr(drill, "WIN", True)
     assert drill.alive(1234)
     assert not drill.alive(4321)
@@ -124,7 +126,7 @@ def _step(lab: dict[str, Path], name: str, wait: float = 0.0, code: int = 0, **e
 
 
 def _run(cfg: Path, *args: str, timeout: int = 120, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([PY, "-B", str(SCRIPT), *args, "--config", str(cfg)], capture_output=True, text=True,
+    return subprocess.run([PY, "-B", str(SCRIPT), *args, "--config", str(cfg)], capture_output=True, text=True, encoding="utf-8", errors="replace",
                           timeout=timeout, check=False, env=env)
 
 
@@ -195,7 +197,7 @@ def test_session_killed_runner_keeps_going(lab: dict[str, Path]) -> None:
 
     cfg = _config(lab, [_step(lab, "rest", wait=60), _step(lab, "core")], interval=2)
     session = subprocess.Popen([PY, "-B", str(SCRIPT), "launch", "--config", str(cfg), "--wait", "60"],
-                               stdout=subprocess.PIPE, text=True, start_new_session=(os.name != "nt"))
+                               stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", start_new_session=(os.name != "nt"))
     _wait_for(lambda: _runs(lab, "rest") == 1)
     if os.name == "nt":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(session.pid)], capture_output=True, check=False)
@@ -513,7 +515,7 @@ def test_the_task_is_deleted_once_the_round_is_final(lab: dict[str, Path]) -> No
     cfg = _config(lab, [_step(lab, "rest")])
     env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
     r = subprocess.run([PY, "-B", str(SCRIPT), "run", "--config", str(cfg), "--task-name", "WSPM-LongGate-drill"],
-                       capture_output=True, text=True, env=env, timeout=120, check=False)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=120, check=False)
     assert r.returncode == 0
     assert (lab["tools"] / "schtasks.log").read_text().split() == ["/Delete", "/TN", "WSPM-LongGate-drill", "/F"]
     assert "scheduled task WSPM-LongGate-drill deleted" in (lab["out"] / "long_gate.log").read_text()
