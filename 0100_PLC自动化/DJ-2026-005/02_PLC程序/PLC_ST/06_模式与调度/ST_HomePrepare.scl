@@ -19,5 +19,10 @@ STRUCT
     bReleaseGripperLock     : BOOL;     // F80 期间禁止 Z 定位
     bGripOpenCmd            : BOOL;     // 夹爪松开命令 (RST Y40 / Y41)
     bLiftDownCmd            : BOOL;     // 升降缸下降命令
+
+    (* ------------------ 时间参数 (ms, 掉电保持, HMI 可写) ------------------ *)
+    dPrepZDelayMs           : DINT := 300;          // 准备: 夹爪松开 + 升降缸下位后, Z 动作前延时
+    dPrepX1DelayMs          : DINT := 500;          // 准备: Z 到待机点后, X1 动作前延时
+    dPrepX2DelayMs          : DINT := 1000;         // 准备: X1、Z 都到位后, X2 动作前延时
 END_STRUCT
 END_TYPE

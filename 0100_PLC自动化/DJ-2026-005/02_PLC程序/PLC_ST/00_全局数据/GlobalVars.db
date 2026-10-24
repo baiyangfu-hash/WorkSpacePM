@@ -1,79 +1,54 @@
 // ============================================================================
-// GlobalVars.db - 边框缓存机全局变量数据块
+// GlobalVars.db - 边框缓存机全局变量数据块 (V15.0.0, 2026-10-24 新设计)
 // ============================================================================
 // 功能说明:
-//   定义 DJ-2026-005 边框缓存机 PLC 控制系统的所有全局变量.
-//   作为 OB1 主程序与各功能块之间的数据交换中心, 实现统一的数据管理.
-//
-// 数据组织:
-//   - stGlobal:        全局控制信号和系统状态 (来自FB_2001_CommonAlarm)
-//   - stExternal:      外部设备交互信号 (组框机/打胶机/机器人)
-//   - stConveyor:      四层输送机系统信号 (含4层数组, ARRAY[1..4])
-//   - stPickPlace:     取放料机构信号 (含4卡槽调度与接料安全互锁)
-//   - stRecipeManager: 10组配方存储池与当前生效配方
-//   - stFeeder:        打胶机送料机构信号 (X2台车4卡槽物料检测)
-//   - astServoAxis:    3轴伺服控制数组 (Z/X1/X2)
+//   DJ-2026-005 边框缓存机的全部全局数据与功能块实例。
+//   各机构数据以结构体整块经 VAR_IN_OUT 传给功能块 (接口文档_INT.md 4.1 / 5)。
+//   点位、时间参数在各结构体的参数段, HMI 可写, 掉电保持由平台侧设置 (TEC 7)。
+//   stIo: 输入在 OB1 之前由平台硬件映射写入, 输出在 OB1 之后由平台读出
+//         (平台适配另立任务, 见技术方案 6)。
 // ============================================================================
 
 DATA_BLOCK GlobalVars
 
 VAR
     // =========================================================================
-    // 第一部分: 全局控制信号与系统状态 (FB_2001_CommonAlarm)
+    // 第一部分: 全局数据
     // =========================================================================
-    stGlobal   : ST_CommonAlarm;  // 全局控制与报警数据 (FB_2001_CommonAlarm)
+    stMachine   : ST_Machine;           // 模式、暂停、停止、状态字 (FB_1001 写)
+    stHmi       : ST_Hmi;               // HMI 命令与设定值
+    stIo        : ST_Io;                // 全部物理输入 / 输出映射
+    stAlarm     : ST_Alarm;             // 报警触发、锁存、分级输出、声光
+    stBridge    : ST_Bridge;            // 站间中继信号 (FB_2002 写)
 
     // =========================================================================
-    // 第二部分: 外部设备交互信号 (ST_ExternalDevice)
+    // 第二部分: 各机构数据
     // =========================================================================
-    stExternal : ST_ExternalDevice;  // 外部设备交互信号 (ST_ExternalDevice)
+    stHome      : ST_HomePrepare;       // 回原点 / 准备序列
+    stManual    : ST_Manual;            // 手动 / 示教
+    stConv      : ST_ConveyorSystem;    // 4 层输送 (含 astLayer[1..4])
+    stPP        : ST_PickPlace;         // 取放料
+    stFeed      : ST_Feeder;            // X2 送料小车
+    stExt       : ST_ExternalLink;      // 组框机链路 / 打胶机握手
 
     // =========================================================================
-    // 第三部分: 四层输送机系统信号 (ST_SingleLayerConveyor ARRAY[1..4])
+    // 第三部分: 伺服轴数组 (ST_ServoAxis V3.0, PLCopen MC Part 1)
+    // 轴索引: [1] = Z (升降), [2] = X1 (取放料横移), [3] = X2 (打胶机送料)
     // =========================================================================
-    stConveyor : STRUCT
-        astLayer                 : ARRAY[1..4] OF ST_SingleLayerConveyor;  // 各层输送机数据 (4 层)
-        i_bAutoMode              : BOOL := FALSE;    // 自动运行模式
-        i_bManualMode            : BOOL := FALSE;    // 手动调试模式
-        i_bStart                 : BOOL := FALSE;    // 自动循环启动
-        i_bStop                  : BOOL := FALSE;    // 停止
-        i_dSeparateTimeoutMs     : DINT := 5000;     // 分料超时时间(ms)
-        i_dDebounceMs            : DINT := 0;        // 传感器消抖(ms)
-        i_bSafetyDoorOk          : BOOL := TRUE;     // 安全门OK
-        i_bVfdFault              : BOOL := FALSE;    // 变频器故障
-        q_bRunning               : BOOL := FALSE;    // 4层 OR
-        q_bFault                 : BOOL := FALSE;    // 4层 OR
-        q_iAlarmCode             : INT := 0;         // 4层报警码 MIN
-    END_STRUCT;
+    astAxis     : ARRAY[1..3] OF ST_ServoAxis;      // 伺服轴: [1] Z, [2] X1, [3] X2
 
     // =========================================================================
-    // 第四部分: 取放料机构信号与10组配方管理器
+    // 第四部分: 功能块实例
     // =========================================================================
-    stPickPlace      : ST_PickPlace;  // 取放料机构信号 (ST_PickPlace)
-    stRecipeManager  : ST_RecipeManager;  // 配方管理器 (10 组配方)
-
-    // =========================================================================
-    // 第五部分: 打胶机送料机构信号 (ST_GlueFeeder)
-    // =========================================================================
-    stFeeder         : ST_GlueFeeder;  // 打胶机送料机构信号 (ST_GlueFeeder)
-
-    // =========================================================================
-    // 第五部分B: 伺服轴数组 (ST_ServoAxis V3.0, PLCopen MC Part 1)
-    // 轴索引: [1]=Z轴(升降) [2]=X1轴(取放料横移) [3]=X2轴(打胶机送料)
-    // =========================================================================
-    astServoAxis     : ARRAY[1..3] OF ST_ServoAxis;  // 伺服轴数组: [1]=Z轴 [2]=X1轴 [3]=X2轴
-
-    // =========================================================================
-    // 第六部分: 功能块实例
-    // =========================================================================
-    fbExternalDevice      : FB_ExternalDeviceInteraction;  // 外部设备交互功能块实例
-    fbConveyor_L1         : FB_1002_SingleLayerConveyor_BufferFraming;  // 第 1 层输送机功能块实例
-    fbConveyor_L2         : FB_1002_SingleLayerConveyor_BufferFraming;  // 第 2 层输送机功能块实例
-    fbConveyor_L3         : FB_1002_SingleLayerConveyor_BufferFraming;  // 第 3 层输送机功能块实例
-    fbConveyor_L4         : FB_1002_SingleLayerConveyor_BufferFraming;  // 第 4 层输送机功能块实例
-    fbPickPlace           : FB_1003_PickPlace_BufferFraming;  // 取放料机构功能块实例
-    fbGlueFeeder          : FB_1004_GlueMachineFeeder_BufferFraming;  // 打胶机送料功能块实例
-    fbCommonAlarm         : FB_2001_CommonAlarm_AllStation;  // 公共报警管理功能块实例
+    fbMode      : FB_1001_MachineMode_BufferFraming;            // 模式
+    fbHome      : FB_1005_HomePrepare_BufferFraming;            // 回原点 / 准备
+    fbManual    : FB_1006_ManualTeach_BufferFraming;            // 手动 / 示教
+    fbExternal  : FB_ExternalDeviceInteraction;                 // 组框机链路 (FB_3001)
+    fbBridge    : FB_2002_StationBridge;                        // 站间中继
+    fbConv      : FB_1007_ConveyorSystem_BufferFraming;         // 4 层输送 (内含 4 个 FB_1002)
+    fbPickPlace : FB_1003_PickPlace_BufferFraming;              // 取放料
+    fbFeeder    : FB_1004_GlueMachineFeeder_BufferFraming;      // 小车
+    fbAlarm     : FB_2001_CommonAlarm_AllStation;               // 报警 (最后调用)
 END_VAR
 
 END_DATA_BLOCK
