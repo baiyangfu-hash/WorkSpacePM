@@ -54,6 +54,20 @@ tags: ["接口文档", "PLC程序"]
 | `astAxis` | `ARRAY[1..3] OF ST_ServoAxis` | 轴（沿用 SysLib；编号沿用现有 GlobalVars：1 = Z、2 = X1、3 = X2） |
 | `fbMode … fbAlarm` | 各 FB 实例 | 见 OB1 |
 
+FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警最后）：
+
+| FB 类型名 | 实例名 | 说明 |
+|---|---|---|
+| FB_1001_MachineMode_BufferFraming | fbMode | 模式 |
+| FB_1005_HomePrepare_BufferFraming | fbHome | 回原点 / 准备 |
+| FB_1006_ManualTeach_BufferFraming | fbManual | 手动 / 示教 |
+| FB_ExternalDeviceInteraction | fbExternal | 组框机链路（FB_3001） |
+| FB_2002_StationBridge | fbBridge | 站间中继 |
+| FB_1007_ConveyorSystem_BufferFraming | fbConv | 4 层输送（内含 4 个 FB_1002） |
+| FB_1003_PickPlace_BufferFraming | fbPickPlace | 取放料 |
+| FB_1004_GlueMachineFeeder_BufferFraming | fbFeeder | 小车 |
+| FB_2001_CommonAlarm_AllStation | fbAlarm | 报警（最后调用） |
+
 > 轴编号沿用现有 GlobalVars（见 TEC），与原程序“轴 1 = X1、轴 2 = X2、轴 3 = Z”不同；IO 表里以信号名（`X1_*`、`X2_*`、`Z_*`）为准，**写代码时以名为准，不以编号为准**。
 
 ### 4.2 `ST_Machine`
