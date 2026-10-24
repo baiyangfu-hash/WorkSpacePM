@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,12 +35,9 @@ from auto_pm.application.core.agent_worktree_service import (
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 
 UNKNOWN_CALLER = "?"  # what caller_agent() returns when the markers name nobody on the roster
-CHG_NUMBER = re.compile(r"CHG-[A-Z]+-\d{4}-\d{3,}")
-# The wording that used to be pasted into PR bodies instead of a real CHG number.
-CHG_PLACEHOLDER = re.compile(
-    r"CHG[ -]*(?:to be registered|tbd|待登记|待补)|待登记\s*CHG|\bCHG\s*[:：]?\s*(?:tbd|待定)",
-    re.IGNORECASE,
-)
+# Whitelist: the only accepted form is CHG-<PROJECT>-YYYY-NNN in ASCII.  Any other mention of "CHG"
+# (to be registered, pending, 待申请, TBA, full-width digits or spaces ...) is refused, not matched by wording.
+CHG_NUMBER = re.compile(r"CHG-[A-Z]+-[0-9]{4}-[0-9]{3,}", re.ASCII)
 PUSH_BACKOFF_SECONDS = (2, 4, 8, 16)
 NETWORK_FAILURE = re.compile(
     r"could not resolve|connection (?:reset|refused|timed out)|timed out|unable to access|"
@@ -230,7 +228,7 @@ class PrOpenService:
                 f"分支 {plan.branch} 已有打开的 PR：{existing.stdout.strip()}；不重复开，也不改它"
             )
         station = self._stations.stations_dir / plan.agent
-        self._push(station, plan.branch)
+        self._push(station, plan.branch, plan.head_sha)
         created = self._gh(
             [
                 "pr", "create", "--base", "main", "--head", plan.branch,
@@ -306,9 +304,11 @@ class PrOpenService:
     @staticmethod
     def _chg_numbers(commits: list[tuple[str, str]]) -> tuple[str, ...]:
         for sha, message in commits:
-            if CHG_PLACEHOLDER.search(message):
+            leftover = unicodedata.normalize("NFKC", CHG_NUMBER.sub("", message))
+            if "chg" in leftover.casefold():
                 raise PrOpenRefusedError(
-                    f"提交 {sha[:8]} 的说明里写的是 CHG 占位（待登记 / to be registered）；"
+                    f"提交 {sha[:8]} 的说明里有 CHG 字样但不是合格的号（占位、待登记、写法不对都算）；"
+                    "只认 CHG-项目-年份-三位以上序号（半角，如 CHG-SCPT-2026-451）；"
                     "换成真实 CHG 号再开 PR（`git commit --amend` 或加一个带 CHG 号的提交说明）"
                 )
         found: list[str] = []
@@ -371,11 +371,13 @@ class PrOpenService:
         )
         return result.returncode, (result.stdout + result.stderr)
 
-    def _push(self, station: Path, branch: str) -> None:
+    def _push(self, station: Path, branch: str, head_sha: str) -> None:
+        # Explicit refspec: push exactly the commit that was checked, whatever remote.origin.push or push.default say.
         attempts = len(PUSH_BACKOFF_SECONDS) + 1
         for attempt in range(attempts):
-            pushed = self._git(station, "push", "-u", "origin", branch)
+            pushed = self._git(station, "push", "origin", f"{head_sha}:refs/heads/{branch}")
             if pushed.returncode == 0:
+                self._git(station, "branch", f"--set-upstream-to=origin/{branch}", branch)
                 return
             detail = _detail(pushed)
             if not NETWORK_FAILURE.search(detail):

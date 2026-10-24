@@ -40,7 +40,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "CHG 占位也放行",
-        "            if CHG_PLACEHOLDER.search(message):\n",
+        '            if "chg" in leftover.casefold():\n',
         "            if False:\n",
     ),
     ("没有 CHG 号也放行", "        if not found:\n", "        if False:\n"),
@@ -57,7 +57,11 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "            if not NETWORK_FAILURE.search(detail):\n",
         "            if False:\n",
     ),
-    ("推送失败强推", '"push", "-u", "origin", branch)', '"push", "-f", "-u", "origin", branch)'),
+    (
+        "推送失败强推",
+        '"push", "origin", f"{head_sha}:refs/heads/{branch}")',
+        '"push", "-f", "origin", f"{head_sha}:refs/heads/{branch}")',
+    ),
     (
         "退避不等待",
         "                self._sleep(PUSH_BACKOFF_SECONDS[attempt])\n",
@@ -84,6 +88,24 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "        if False:\n",
     ),
     ("声明不进描述", "        if safety_circuit:\n", "        if False:\n"),
+    (
+        "推送不用显式 refspec",
+        'self._git(station, "push", "origin", f"{head_sha}:refs/heads/{branch}")',
+        'self._git(station, "push", "origin", branch)',
+    ),
+    (
+        "占位检查不做全角归一",
+        'unicodedata.normalize("NFKC", CHG_NUMBER.sub("", message))',
+        'CHG_NUMBER.sub("", message)',
+    ),
+    (
+        "CHG 号认全角数字",
+        're.compile(r"CHG-[A-Z]+-[0-9]{4}-[0-9]{3,}", re.ASCII)',
+        're.compile(r"CHG-[A-Z]+-\\d{4}-\\d{3,}")',
+    ),
+    ("gh pr create 带无关参数", '"--body-file", "-",', '"--body-file", "-", "--fill",'),
+    ("查已有 PR 失败也往下走", "        if existing.returncode != 0:\n", "        if False:\n"),
+    ("pr create 失败只看网址", "if created.returncode != 0 or match is None:", "if match is None:"),
     ("没有证据时假装有", '["- 未提供（由审计者自行核验）"]', '["- 已验证"]'),
 )
 

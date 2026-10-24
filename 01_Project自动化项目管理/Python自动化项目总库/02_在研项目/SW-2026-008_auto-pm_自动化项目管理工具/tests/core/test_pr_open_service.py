@@ -154,10 +154,25 @@ def test_refuses_when_no_commit_carries_a_chg_number(lab: Lab) -> None:
         plan(lab)
 
 
-@pytest.mark.parametrize("wording", ["CHG to be registered", "CHG 待登记", "CHG: TBD"])
+@pytest.mark.parametrize(
+    "wording",
+    [
+        "CHG to be registered",
+        "CHG 待登记",
+        "CHG: TBD",
+        "CHG pending",
+        "CHG 待申请",
+        "CHG: TBA",
+        "CHG\u3000待登记",
+        "CHG-SCPT-２０２６-４５１",
+        "chg-scpt-2026-451",
+        "CHG-SCPT-2026-45",
+        "\uff23\uff28\uff27 待登记",
+    ],
+)
 def test_refuses_a_chg_placeholder_even_next_to_a_real_number(lab: Lab, wording: str) -> None:
     work(lab, message=f"feat: [{CHG}] do the card\n\n{wording}")
-    with pytest.raises(PrOpenRefusedError, match="占位"):
+    with pytest.raises(PrOpenRefusedError, match="不是合格的号"):
         plan(lab)
 
 
@@ -294,6 +309,61 @@ def test_an_existing_open_pr_is_not_duplicated_or_touched(lab: Lab) -> None:
         svc.open(svc.plan("claude", "CARD-1", CARD_PATH, fetch=False))
     assert lab.remote_refs() == before
     assert ("pr", "create") not in gh.used()
+
+
+def test_open_pushes_exactly_the_checked_commit_with_an_explicit_refspec(lab: Lab) -> None:
+    station = work(lab)
+    svc = service(lab)
+    checked = svc.plan("claude", "CARD-1", CARD_PATH, fetch=False)
+    commit(station, "later.txt")  # the agent kept working between the check and the push
+    svc.open(checked)
+    assert git(lab.origin, "rev-parse", "refs/heads/claude/CARD-1") == checked.head_sha
+
+
+def test_gh_pr_create_gets_exactly_the_expected_arguments(lab: Lab) -> None:
+    work(lab)
+    gh = FakeGh()
+    svc = service(lab, gh)
+    opened = svc.open(svc.plan("claude", "CARD-1", CARD_PATH, fetch=False))
+    args = next(call[0] for call in gh.calls if call[0][:2] == ("pr", "create"))
+    assert list(args) == [
+        "pr", "create", "--base", "main", "--head", "claude/CARD-1",
+        "--title", opened.plan.title, "--body-file", "-",
+    ]  # fmt: skip
+
+
+def test_a_failed_pr_list_stops_before_pushing(lab: Lab) -> None:
+    work(lab)
+
+    class BrokenList(FakeGh):
+        def __call__(self, args: Sequence[str], stdin: str | None):  # noqa: ANN204
+            if tuple(args[:2]) == ("pr", "list"):
+                return subprocess.CompletedProcess(args, 1, "", "HTTP 500")
+            return super().__call__(args, stdin)
+
+    gh = BrokenList()
+    before = lab.remote_refs()
+    svc = service(lab, gh)
+    with pytest.raises(AgentWorktreeError, match="查已有 PR 失败"):
+        svc.open(svc.plan("claude", "CARD-1", CARD_PATH, fetch=False))
+    assert lab.remote_refs() == before
+    assert ("pr", "create") not in gh.used()
+
+
+def test_pr_create_failing_is_not_success_even_if_the_output_shows_a_url(lab: Lab) -> None:
+    work(lab)
+
+    class FailsWithUrl(FakeGh):
+        def __call__(self, args: Sequence[str], stdin: str | None):  # noqa: ANN204
+            if tuple(args[:2]) == ("pr", "create"):
+                return subprocess.CompletedProcess(
+                    args, 1, "https://github.com/o/r/pull/55\n", "a pull request already exists"
+                )
+            return super().__call__(args, stdin)
+
+    svc = service(lab, FailsWithUrl())
+    with pytest.raises(AgentWorktreeError, match="开 PR 失败"):
+        svc.open(svc.plan("claude", "CARD-1", CARD_PATH, fetch=False))
 
 
 def test_a_failed_pr_create_after_the_push_says_how_to_continue(lab: Lab) -> None:
