@@ -944,7 +944,10 @@ def test_missing_evidence_refuses_the_closure_and_never_reports_completed(
     result = service.close_accepted(_CLOSE_MISSION)
 
     assert result.state is PmCockpitCompletionState.PENDING_SYNC
-    assert result.message == "无法完成收尾：必要证据或状态未就绪，已保留现场；请向 PM 说明。"
+    assert result.message == (
+        "收尾失败：必要证据或状态未就绪，这次没有写入。"
+        "验收记录已保存；请关闭驾驶舱窗口，由主执行查明原因后重试收口。"
+    )
     assert reconciler.calls == []
     assert _all_event_count(database) == before
     assert _completed_events(database) == 0

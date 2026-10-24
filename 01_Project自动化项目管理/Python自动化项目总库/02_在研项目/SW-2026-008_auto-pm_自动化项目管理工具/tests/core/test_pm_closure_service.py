@@ -346,7 +346,7 @@ def test_initialize_adds_closure_tables_to_an_existing_current_store(tmp_path: P
         }
         version = str(conn.execute("SELECT schema_version FROM schema_meta").fetchone()[0])
     assert tables == {"closure_items", "closure_steps", "closure_outbox"}
-    assert version == "continuity-store.v7"
+    assert version == "continuity-store.v8"
 
 
 def test_project_prepared_ledger_is_idempotent_without_new_closure_event(

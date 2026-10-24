@@ -33,6 +33,7 @@ from auto_pm.core.local_execution_orchestrator import (
     LocalExecutionOrchestrator,
     LocalExecutionOrchestratorError,
 )
+from auto_pm.core.mission_admission import AdmissionVerdict, admission_verdict, release_problem
 from auto_pm.core.mission_service import MissionService, MissionServiceError
 from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
@@ -588,8 +589,13 @@ class PmFacadeService:
         card: PlanningScopeCard,
         *,
         created_by: str = "PM Facade",
+        admission_release_ref: str = "",
     ) -> Mission:
-        """Materialize one Mission only from the card's persisted approval chain."""
+        """Materialize one Mission only from the card's persisted approval chain.
+
+        A Mission that does not exist yet is admitted first (TD-071 card 3): past the soft limit or
+        over paths an open card changes too, only with the user's word, which is then recorded.
+        """
 
         actual_hash = self._planning_scope_card_hash(card)
         if not hmac.compare_digest(actual_hash, card.plan_hash):
@@ -630,7 +636,13 @@ class PmFacadeService:
                 decision.change_id,
                 actual_hash,
             )
-            return cast(
+            limit, verdict = self._missions.admit(
+                mission_id=mission_id,
+                subject_project_id=card.subject_project_id,
+                scope_paths=card.scope_paths,
+                admission_release_ref=admission_release_ref,
+            )
+            mission = cast(
                 Mission,
                 self._missions.create_from_planning_approval(
                     mission_id=mission_id,
@@ -638,8 +650,12 @@ class PmFacadeService:
                     decision=decision,
                     plan_hash=actual_hash,
                     created_by=created_by,
+                    max_open_per_project=limit,
+                    admitted_open_ids=verdict.open_ids,
                 ),
             )
+            self._missions.record_admission(mission.mission_id, verdict, admission_release_ref)
+            return mission
         except (ContinuityStoreError, DecisionError, MissionServiceError) as error:
             raise PmFacadeError(str(error)) from error
 
@@ -821,9 +837,15 @@ class PmFacadeService:
         expected_plan_hash: str,
         approver: str,
         approval_evidence_ref: str,
+        admission_release_ref: str = "",
         approval_pin: str = "",
     ) -> PlanningApprovalResult:
-        """Approve one persisted card by plan hash: CHG, Decision, Mission and Work in one call."""
+        """Approve one persisted card by plan hash: CHG, Decision, Mission and Work in one call.
+
+        A new card is admitted next to the project's open cards (TD-071 card 3): past the soft limit,
+        or over paths an open card also changes, it is stopped with the reason until the user's own
+        word is given as ``admission_release_ref``; the release and the overlaps are recorded.
+        """
 
         # A refused approval must write nothing, so the human evidence is checked first.
         approver, approval_evidence_ref = self.resolve_approval(
@@ -842,10 +864,12 @@ class PmFacadeService:
                 raise PmFacadeError("该范围卡已被新修订取代，请批准最新修订")
             card = submitted.card
             self._require_card_checklist(card)
-            if not self._planning_request_is_approved(card) and self._store.list_missions(
-                card.subject_project_id
-            ):
-                raise PmFacadeError("项目已有未终结的任务；请先验收或取消它，再批准新的范围卡")
+            # A release is the user's word too: with a committed PIN it is proven for this card and this release.
+            admission_release_ref = self.prove_admission_release(
+                card, admission_release_ref, approval_pin=approval_pin
+            )
+            # Refuse before anything is written; materialize checks again and records the release.
+            self.admission_check_for_card(card, admission_release_ref)
             actual_hash = self._planning_scope_card_hash(card)
             if not hmac.compare_digest(actual_hash, card.plan_hash) or not hmac.compare_digest(
                 actual_hash, expected_plan_hash
@@ -855,7 +879,9 @@ class PmFacadeService:
             decision = self._approve_proven_planning_scope_card(
                 card, actual_hash=actual_hash, approver=approver, approval_evidence_ref=approval_evidence_ref
             )
-            mission = self.materialize_planning_mission(card)
+            mission = self.materialize_planning_mission(
+                card, admission_release_ref=admission_release_ref
+            )
             work = self.create_planning_work(card)
         except (
             ContinuityStoreError,
@@ -874,6 +900,46 @@ class PmFacadeService:
             mission_id=mission.mission_id,
             work_id=work.work_id,
         )
+
+    def admission_check(
+        self, subject_project_id: str, scope_paths: tuple[str, ...], admission_release_ref: str
+    ) -> AdmissionVerdict:
+        """Soft limit and collision check for a new card; refused without the user's word when either trips."""
+
+        try:
+            verdict = admission_verdict(self._store.list_missions(subject_project_id), scope_paths)
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+        if problem := release_problem(verdict, admission_release_ref):
+            raise PmFacadeError(problem)
+        return verdict
+
+    def admission_check_for_card(self, card: PlanningScopeCard, admission_release_ref: str) -> None:
+        """The early admission check of an approval; a retry of an already approved request is not a new card."""
+
+        if not self._planning_request_is_approved(card):
+            self.admission_check(card.subject_project_id, card.scope_paths, admission_release_ref)
+
+    def prove_admission_release(
+        self, card: PlanningScopeCard, admission_release_ref: str, *, approval_pin: str = ""
+    ) -> str:
+        """The release to record: unchanged without a committed approver PIN; with one, only the user's PIN releases.
+
+        The PIN is proven for this card's plan hash and this release text together (audit 123 item 4), so a release an
+        agent writes on its own, or one typed for another card, is refused before anything is written.
+        """
+
+        if not admission_release_ref.strip():
+            return admission_release_ref
+        try:
+            proof = ApprovalProofService(self._workspace_root).require(
+                pin=approval_pin,
+                purpose="admission-release",
+                subject=f"{card.plan_hash}\n{admission_release_ref.strip()}",
+            )
+        except ApprovalProofError as error:
+            raise PmFacadeError(str(error)) from error
+        return proof.evidence_ref if proof is not None else admission_release_ref
 
     def _planning_request_is_approved(self, card: PlanningScopeCard) -> bool:
         return any(
@@ -984,8 +1050,9 @@ class PmFacadeService:
             MissionState.CLOSED,
             MissionState.CANCELLED,
             MissionState.BLOCKED,
+            MissionState.PARKED,
         }:
-            raise PmFacadeError("该需求已验收、已结束或被阻塞，不能重复执行")
+            raise PmFacadeError("该需求已验收、已结束或被阻塞（或搁着），不能重复执行")
         if mission.state is MissionState.DRAFT:
             self.plan(mission.mission_id)
         self.approve(mission.mission_id, work.work_id)
@@ -1318,7 +1385,7 @@ class PmFacadeService:
         run_id: str = "",
         requested_action: str = "",
     ) -> ContinuityResume:
-        """The same read-only view as ``resume``, plus an explicit answer for one asked action (UNSUPPORTED in M2)."""
+        """The same read-only view as ``resume``, plus an explicit answer for one asked action (runtime-capabilities.v2)."""
         return self._query(
             project_id=project_id,
             invocation_path=invocation_path,

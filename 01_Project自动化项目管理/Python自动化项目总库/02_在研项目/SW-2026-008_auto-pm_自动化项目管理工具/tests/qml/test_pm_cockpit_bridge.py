@@ -751,8 +751,13 @@ def test_closure_failures_never_expose_exception_text_or_paths(tmp_path: Path) -
     workers[-1].run()
     bridge._poll_close_workers()
 
-    assert finished[0] == ("MISSION-A", False, "该需求尚未验收，不能收尾。")
-    assert finished[1] == ("MISSION-B", False, "无法完成收尾，已保留现场。")
+    assert finished[0] == ("MISSION-A", False, "收尾失败：该需求尚未验收，不能收尾。")
+    assert finished[1] == (
+        "MISSION-B",
+        False,
+        "收尾失败：读写账本时出错（详情已写入日志），这次没有写入。"
+        "验收记录已保存，不用重新验收；请关闭驾驶舱窗口，再由主执行重试收口。",
+    )
     assert "secret-detail" not in json.dumps(finished, ensure_ascii=False)
     assert str(tmp_path) not in json.dumps(finished, ensure_ascii=False)
 

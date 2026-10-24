@@ -18,6 +18,8 @@ from auto_pm.contracts.continuity_resume import ContinuityResume
 
 PROJECT = "SW-2026-008"
 UNSUPPORTED_ACTIONS = ("PARK", "RESUME_PARKED", "PREEMPT")
+# runtime-capabilities.v2 (TD-071 card 3): parking is supported, pre-emption is not
+DECLARED = {"PARK": "SUPPORTED", "RESUME_PARKED": "SUPPORTED", "PREEMPT": "UNSUPPORTED"}
 
 
 def _workspace(root: Path) -> Path:
@@ -80,24 +82,24 @@ def test_orient_and_resume_json_carry_the_same_query_block(tmp_path: Path) -> No
     resumed = _json(_run(tmp_path, "resume", PROJECT, "--json"))
     assert oriented == resumed
     query = oriented["query"]
-    assert (query["schema_version"], query["capabilities"]["contract_version"]) == ("continuity-query.v1", "runtime-capabilities.v1")
-    assert query["capabilities"]["parking_supported"] is False and query["capabilities"]["preemption_supported"] is False
-    assert [(a["action"], a["status"]) for a in query["capabilities"]["actions"]] == [(name, "UNSUPPORTED") for name in UNSUPPORTED_ACTIONS]
+    assert (query["schema_version"], query["capabilities"]["contract_version"]) == ("continuity-query.v1", "runtime-capabilities.v2")
+    assert query["capabilities"]["parking_supported"] is True and query["capabilities"]["preemption_supported"] is False
+    assert [(a["action"], a["status"]) for a in query["capabilities"]["actions"]] == list(DECLARED.items())
     assert query["requested_action"] is None
     assert oriented["schema_version"] == "continuity-resume.v2" and "lease_token" not in json.dumps(oriented)
 
 
 @pytest.mark.parametrize("action", UNSUPPORTED_ACTIONS)
-def test_an_asked_action_is_answered_unsupported_with_exit_zero(tmp_path: Path, action: str) -> None:
+def test_an_asked_action_is_answered_as_declared_with_exit_zero(tmp_path: Path, action: str) -> None:
     _workspace(tmp_path)
     plain = _json(_run(tmp_path, "orient", PROJECT, "--json"))
     asked = _json(_run(tmp_path, "orient", PROJECT, "--requested-action", action, "--json"))
     answer = asked["query"]["requested_action"]
     assert answer is not None
-    assert (answer["action"], answer["status"]) == (action, "UNSUPPORTED") and answer["reason"]
+    assert (answer["action"], answer["status"]) == (action, DECLARED[action]) and answer["reason"]
     assert {k: v for k, v in asked.items() if k != "query"} == {k: v for k, v in plain.items() if k != "query"}
     text = _run(tmp_path, "orient", PROJECT, "--requested-action", action)
-    assert text.exit_code == 0 and action in text.output and "UNSUPPORTED" in text.output
+    assert text.exit_code == 0 and action in text.output and f": {DECLARED[action]}（" in text.output
 
 
 @pytest.mark.parametrize("asked", ["park", "PAUSE", "NONE", "READY", "PARKED"])
@@ -110,13 +112,13 @@ def test_an_unknown_asked_action_is_refused_by_the_command_and_writes_nothing(tm
     assert not (tmp_path / ".auto-pm").exists()
 
 
-def test_the_text_output_states_the_unsupported_capabilities_for_both_commands(tmp_path: Path) -> None:
+def test_the_text_output_states_the_declared_capabilities_for_both_commands(tmp_path: Path) -> None:
     _workspace(tmp_path)
     for command in ("resume", "orient"):
         shown = _run(tmp_path, command, PROJECT)
         assert shown.exit_code == 0, shown.output
         assert "continuity-query.v1" in shown.output
-        assert "挂起: 不支持" in shown.output and "插队: 不支持" in shown.output
+        assert "挂起: 支持" in shown.output and "插队: 不支持" in shown.output and "pm park" in shown.output
 
 
 def test_neither_command_creates_or_changes_anything_in_a_workspace_without_a_store(tmp_path: Path) -> None:

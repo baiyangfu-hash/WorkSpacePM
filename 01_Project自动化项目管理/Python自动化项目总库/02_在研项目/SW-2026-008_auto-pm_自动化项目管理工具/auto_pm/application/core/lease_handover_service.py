@@ -164,6 +164,18 @@ class LeaseHandoverService:
             raise LeaseHandoverError(str(error)) from error
         return True
 
+    def _refuse_parked(self, run_id: str, action: str) -> None:
+        """Early, friendly refusal for a parked Run (TD-071 design 4.4); the store refuses again in its write transaction."""
+
+        try:
+            park = self._store.get_open_park_for_run(run_id)
+        except ContinuityStoreError as error:
+            raise LeaseHandoverError(str(error)) from error
+        if park is not None:
+            raise LeaseHandoverError(
+                f"这张卡搁着呢（{park.mission_id}，{park.reason}），{action}；请让用户说一句后用 pm unpark 拿回来"
+            )
+
     # ---------------------------------------------------------------- handoff and takeover
     def handoff(self, *, run_id: str, to_owner: str, lease_token: str, summary: str) -> HandoffOutcome:
         """Checkpoint the Run's worktree and create the handoff addressed to ``to_owner``; deterministic ids make a retry an exact replay."""
@@ -175,6 +187,7 @@ class LeaseHandoverService:
             raise LeaseHandoverError(str(error)) from error
         if run.state in _TERMINAL_RUN_STATES:
             raise LeaseHandoverError(f"Run 已是终态 {run.state.value}，不能交接")
+        self._refuse_parked(run_id, "不需要再交接（搁着时已记过断点）")
         owner = lease.owner_id
         if owner == to_owner:
             raise LeaseHandoverError("接收方必须不同于当前持有者")
@@ -221,6 +234,7 @@ class LeaseHandoverService:
         """Accept a handoff addressed to ``receiver_id`` with a token this call generates (or the wallet's, on an exact retry)."""
 
         handoff = self.get_handoff(handoff_id)
+        self._refuse_parked(handoff.run_id, "不能接手（pm takeover）")
         if handoff.to_owner != receiver_id:
             raise LeaseHandoverError(f"交接 {handoff_id} 指定的接收方是 {handoff.to_owner}，不是 {receiver_id}")
         token = self.reusable_token(handoff.run_id, receiver_id)
@@ -266,6 +280,7 @@ class LeaseHandoverService:
             raise LeaseHandoverError(str(error)) from error
         if run.state in _TERMINAL_RUN_STATES:
             raise LeaseHandoverError(f"Run 已是终态 {run.state.value}，没有可回收的租约")
+        self._refuse_parked(run_id, "搁着不是掉线，不用回收")
         if lease.owner_id == claimant_id:
             raise LeaseHandoverError("你已是当前持有者；请续租（continuity lease renew），不要回收")
         if not reason.strip():

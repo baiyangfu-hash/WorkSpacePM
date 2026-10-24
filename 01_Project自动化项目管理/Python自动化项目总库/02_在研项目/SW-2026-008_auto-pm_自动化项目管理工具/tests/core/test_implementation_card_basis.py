@@ -32,6 +32,8 @@ BC_TABLE = """# 业务变更记录
 | BC-DJ-2099-001-001 | 2099-01-01 | 主控换型 | 待补 | 待补（程序在写） | 待补 |
 | BC-DJ-2099-001-002 | 2099-01-02 | 握手改 Modbus TCP | baiyang | 已批（文档已更新） | 待补 |
 | BC-DJ-2099-001-003 | 2099-01-03 | 外部交互层 | baiyang | 已实施（未现场验证） | 待补 |
+| BC-DJ-2099-001-2099_01_000 | 2099-01-04 09:30 | 报警汇总 | baiyang | 已批 | 待补 |
+| BC-DJ-2099-001-2098_12_000 | 2099-01-04 09:30 | 编号年月写错 | baiyang | 已批 | 待补 |
 """
 
 
@@ -132,6 +134,10 @@ def test_basis_must_exist_belong_to_the_project_and_be_approved(tmp_path: Path) 
         "`BC-DJ-2099-001-099`": "业务变更记录表里没有这一条",
         "`BC-DJ-2099-002-001`": "不属于本项目",
         "`BC-DJ-2099-1`": "格式应为",
+        "`BC-DJ-2099-001-2099_13_000`": "格式应为",
+        "`BC-DJ-2099-001-2099_01_1000`": "格式应为",
+        "`BC-DJ-2099-001-2099_01_001`": "业务变更记录表里没有这一条",
+        "`BC-DJ-2099-001-2098_12_000`": "与提出时间不符",
         "`CHG-PLC-2099-001`": "不能当作依据",
         "`<BC-…>`": "占位符",
     }
@@ -139,6 +145,71 @@ def test_basis_must_exist_belong_to_the_project_and_be_approved(tmp_path: Path) 
         card = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, basis=basis)
         report = _check(tmp_path, card)
         assert not report.passed and fragment in _messages(report), (basis, _messages(report))
+
+
+def test_month_numbered_bc_is_accepted(tmp_path: Path) -> None:
+    baseline = _workspace(tmp_path)
+    card = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, basis="`BC-DJ-2099-001-2099_01_000`")
+
+    report = _check(tmp_path, card)
+
+    assert report.passed, _messages(report)
+    assert report.basis == ("BC-DJ-2099-001-2099_01_000",)
+
+
+REQ_ID = "REQ-DJ-2099-001-2099_01_000"
+
+
+def _req(root: Path, *, status: str = "已确认", version: str = "V2", drawer: str = f"{MONITOR}/00_需求核对单") -> None:
+    target = root / drawer / f"{REQ_ID}_报警汇总.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        f"# 需求核对单 {REQ_ID}：报警汇总\n\n> 状态：{status}\n\n## 8. 用户确认（由驾驶舱写入，AI 不填）\n\n"
+        f"| 项 | 内容 |\n|---|---|\n| 确认的版本 | {version} |\n| 内容指纹 | ab12 |\n",
+        encoding="utf-8",
+    )
+
+
+def test_confirmed_requirement_checklist_counts_as_basis(tmp_path: Path) -> None:
+    baseline = _workspace(tmp_path)
+    _req(tmp_path)
+    card = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, basis=f"`{REQ_ID} V2`")
+
+    report = _check(tmp_path, card)
+
+    assert report.passed, _messages(report)
+
+
+def test_requirement_checklist_basis_must_be_confirmed_for_that_version(tmp_path: Path) -> None:
+    cases = {
+        (f"`{REQ_ID} V1`", "已确认", "V2", "00_需求核对单"): "用户确认的是 V2",
+        (f"`{REQ_ID} V2`", "待核对", "（由驾驶舱写入）", "00_需求核对单"): "还没有经用户确认",
+        (f"`{REQ_ID} V2`", "待核对", "V2", "00_需求核对单"): "还没有经用户确认",
+        (f"`{REQ_ID} V2`", "已确认", "V2", "别处"): "应恰有一份",
+        (f"`{REQ_ID}`", "已确认", "V2", "00_需求核对单"): "写法应为",
+        ("`REQ-DJ-2099-002-2099_01_000 V2`", "已确认", "V2", "00_需求核对单"): "不属于本项目",
+    }
+    for index, ((basis, status, version, drawer), fragment) in enumerate(cases.items()):
+        root = tmp_path / f"case{index}"
+        root.mkdir()
+        baseline = _workspace(root)
+        _req(root, status=status, version=version, drawer=f"{MONITOR}/{drawer}")
+        card = _card(root, "CARD-DJ-2099-001-001", baseline=baseline, basis=basis)
+        report = _check(root, card)
+        assert not report.passed and fragment in _messages(report), (basis, _messages(report))
+
+
+def test_checklist_is_not_searched_as_a_requirement_document(tmp_path: Path) -> None:
+    """An unconfirmed checklist that happens to mention an item id must not stand in for the 需求说明."""
+    baseline = _workspace(tmp_path)
+    target = tmp_path / MONITOR / "00_需求核对单" / f"{REQ_ID}_报警汇总.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("| B7 | AI 自己写的条目 |\n", encoding="utf-8")
+    card = _card(tmp_path, "CARD-DJ-2099-001-001", baseline=baseline, basis="`B7`")
+
+    report = _check(tmp_path, card)
+
+    assert not report.passed and "需求条目在本项目的需求说明" in _messages(report)
 
 
 def test_implemented_bc_also_counts_as_approved(tmp_path: Path) -> None:

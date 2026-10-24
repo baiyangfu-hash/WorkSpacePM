@@ -75,13 +75,16 @@ class ContinuityResumeService:
         lease_view: LeaseView | None = None
         work_candidates: tuple[WorkItem, ...] = ()
         run_candidates: tuple[ResumeRunCandidate, ...] = ()
+        mission_candidates: tuple[Mission, ...] = ()
         db_exists = self._store.db_path.is_file()
         if db_exists:
             try:
                 missions = self._store.list_active_missions(context.subject_project_id)
-                if len(missions) == 1:
-                    mission = missions[0]
-                elif len(missions) > 1:
+                mission, mission_candidates = self._select_mission(missions, work_id)
+                if mission is None and any(
+                    candidate.state is MissionState.ACTIVE for candidate in mission_candidates
+                ):
+                    # Two ACTIVE Missions cannot exist in a v8 store: the data is damaged, never guess.
                     conflicts.append("MULTIPLE_ACTIVE_MISSIONS")
 
                 works = tuple(
@@ -101,6 +104,9 @@ class ContinuityResumeService:
                         raise ContinuityResumeError("Mission root Work 不属于当前 subject project")
                     if work.state not in EXECUTION_ACTIVE_WORK_STATES and works:
                         conflicts.append("MISSION_ROOT_NOT_EXECUTION_ACTIVE")
+                elif mission_candidates and not work_id:
+                    # Several open cards and none in hand: only the user picks the next one.
+                    pass
                 elif work_id:
                     work = self._store.get_work(work_id)
                     if work.subject_project_id != context.subject_project_id:
@@ -162,6 +168,7 @@ class ContinuityResumeService:
                         lease_view = self._lease_view(self._store.get_lease(run.run_id))
                     if (
                         run.run_id in candidate_leases
+                        and not (mission is not None and mission.state is MissionState.PARKED)
                         and datetime.fromisoformat(lease_view.expires_at)
                         <= self._now().astimezone(UTC)
                     ):
@@ -182,6 +189,8 @@ class ContinuityResumeService:
             run.state if run else None,
             checkpoint is not None,
         )
+        if mission is None and work is None and mission_candidates:
+            next_action = "AWAIT_USER_SWITCH"
         if conflicts:
             next_action = ""
         read_set = tuple(item.path for item in context.read_set) + (
@@ -204,6 +213,10 @@ class ContinuityResumeService:
         }
         if not intake.is_empty:
             seed["intake"] = intake.model_dump(mode="json")
+        if mission_candidates:
+            seed["mission_candidates"] = [
+                candidate.model_dump(mode="json") for candidate in mission_candidates
+            ]
         digest = hashlib.sha256(
             json.dumps(seed, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -212,6 +225,7 @@ class ContinuityResumeService:
             mission=mission,
             work=work,
             work_candidates=work_candidates,
+            mission_candidates=mission_candidates,
             run=run,
             run_candidates=run_candidates,
             checkpoint=checkpoint,
@@ -222,6 +236,26 @@ class ContinuityResumeService:
             intake=intake,
             evidence_id=f"RESUME-{digest[:16].upper()}",
         )
+
+    @staticmethod
+    def _select_mission(
+        missions: tuple[Mission, ...], work_id: str
+    ) -> tuple[Mission | None, tuple[Mission, ...]]:
+        """Pick the card to resume (TD-071): the one asked for by its root Work, else the ACTIVE one,
+        else the only open one.  Every other open card is returned as a candidate, never guessed."""
+
+        if len(missions) <= 1:
+            return (missions[0] if missions else None), ()
+        if work_id:
+            by_work = [candidate for candidate in missions if candidate.root_work_id == work_id]
+            if len(by_work) == 1:
+                chosen = by_work[0]
+                return chosen, tuple(m for m in missions if m.mission_id != chosen.mission_id)
+        active = [candidate for candidate in missions if candidate.state is MissionState.ACTIVE]
+        if len(active) == 1:
+            chosen = active[0]
+            return chosen, tuple(m for m in missions if m.mission_id != chosen.mission_id)
+        return None, tuple(sorted(missions, key=lambda candidate: candidate.mission_id))
 
     @staticmethod
     def _lease_view(lease: LeaseItem) -> LeaseView:
@@ -249,6 +283,8 @@ class ContinuityResumeService:
                 MissionState.DRAFT: "SUBMIT_MISSION_FOR_APPROVAL",
                 MissionState.AWAITING_APPROVAL: "AWAIT_USER_APPROVAL",
                 MissionState.BLOCKED: "RESOLVE_MISSION_BLOCKER",
+                # TD-071: only the user decides which parked card is picked back up.
+                MissionState.PARKED: "AWAIT_USER_UNPARK",
                 MissionState.ACCEPTANCE_PENDING: "AWAIT_USER_ACCEPTANCE",
             }
             if mission_state in mission_actions:

@@ -17,7 +17,8 @@ timezone-aware ISO-8601 timestamp. Two start times of different kinds, an unpars
 two precisions but differ at the finer one prove nothing: the verdict is ``UNKNOWN``, never ``PROVEN_DEAD``. Every ``datetime`` passed in must be
 timezone-aware.
 
-Nothing here edits ``expires_at``, reads or returns a lease token, or runs a process probe: callers pass in the facts they observed.
+Nothing here edits ``expires_at``, returns a lease token, or runs a process probe: callers pass in the facts they observed. The only look at a
+token is ``lease_is_held``, which reads nothing but its fence prefix (``RELEASED:`` for a terminal Run, ``PARKED:`` for a parked Mission, TD-071).
 """
 
 from __future__ import annotations
@@ -168,6 +169,26 @@ def lease_is_live(expires_at: datetime, now: datetime, grace_seconds: int = GRAC
     _require_aware(expires_at, "expires_at")
     _require_aware(now, "now")
     return now < expires_at + timedelta(seconds=grace_seconds)
+
+
+RELEASED_TOKEN_PREFIX: Final = "RELEASED:"
+PARKED_TOKEN_PREFIX: Final = "PARKED:"
+FENCED_TOKEN_PREFIXES: Final = (RELEASED_TOKEN_PREFIX, PARKED_TOKEN_PREFIX)
+
+
+def lease_token_is_fenced(lease_token: str) -> bool:
+    """A released (terminal Run) or parked (TD-071) lease row keeps its audit row but no longer has a holder."""
+
+    return lease_token.startswith(FENCED_TOKEN_PREFIXES)
+
+
+def lease_is_held(*, lease_token: str, expires_at: datetime, now: datetime, grace_seconds: int = GRACE_SECONDS) -> bool:
+    """The one test for "somebody holds this lease" (TD-071): not fenced, and still live including the grace period.
+
+    A parked Mission's lease is fenced with ``PARKED:`` and is never held, whatever its ``expires_at`` says.
+    """
+
+    return not lease_token_is_fenced(lease_token) and lease_is_live(expires_at, now, grace_seconds)
 
 
 def decide_reclaim(*, lease_expires_at: datetime, now: datetime, process: ProcessVerdict, forced_by_decision: bool = False,

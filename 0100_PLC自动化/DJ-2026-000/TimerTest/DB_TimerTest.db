@@ -1,0 +1,5 @@
+// FB_TimerTest 的背景数据块 (仿真测试用)
+DATA_BLOCK DB_TimerTest
+FB_TimerTest
+BEGIN
+END_DATA_BLOCK

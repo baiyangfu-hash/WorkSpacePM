@@ -30,6 +30,8 @@ from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query
 
 PROJECT = "SW-2026-008"
 UNSUPPORTED_ACTIONS = ("PARK", "RESUME_PARKED", "PREEMPT")
+# runtime-capabilities.v2 (TD-071 card 3): parking is supported, pre-emption is not
+DECLARED = {"PARK": "SUPPORTED", "RESUME_PARKED": "SUPPORTED", "PREEMPT": "UNSUPPORTED"}
 
 
 def _workspace(root: Path) -> Path:
@@ -89,15 +91,15 @@ def _query(root: Path, requested_action: str = "") -> ContinuityResume:
     return cast(ContinuityResume, ContinuityQueryService(root).query(project_id=PROJECT, requested_action=requested_action))
 
 
-def test_the_query_block_declares_versions_both_flags_false_and_three_unsupported_actions(tmp_path: Path) -> None:
+def test_the_query_block_declares_versions_parking_supported_and_preemption_unsupported(tmp_path: Path) -> None:
     _workspace(tmp_path)
     block = _query(tmp_path).query
     assert block is not None
     assert block.schema_version == "continuity-query.v1"
-    assert block.capabilities.contract_version == "runtime-capabilities.v1"
-    assert block.capabilities.parking_supported is False
+    assert block.capabilities.contract_version == "runtime-capabilities.v2"
+    assert block.capabilities.parking_supported is True
     assert block.capabilities.preemption_supported is False
-    assert [(a.action.value, a.status) for a in block.capabilities.actions] == [(name, "UNSUPPORTED") for name in UNSUPPORTED_ACTIONS]
+    assert [(a.action.value, a.status) for a in block.capabilities.actions] == list(DECLARED.items())
     assert all(a.reason for a in block.capabilities.actions)
     assert block.requested_action is None
     assert block.evidence_id.startswith("QUERY-")
@@ -122,12 +124,12 @@ def test_the_identity_fields_copy_the_resolved_context_and_the_producer_is_hashe
 
 
 @pytest.mark.parametrize("action", UNSUPPORTED_ACTIONS)
-def test_every_known_asked_action_is_answered_unsupported_and_changes_nothing_else(tmp_path: Path, action: str) -> None:
+def test_every_known_asked_action_is_answered_as_declared_and_changes_nothing_else(tmp_path: Path, action: str) -> None:
     _workspace(tmp_path)
     _work(tmp_path, "WORK-Q-001")
     plain, asked = _query(tmp_path), _query(tmp_path, requested_action=action)
     assert asked.query is not None and asked.query.requested_action is not None
-    assert (asked.query.requested_action.action.value, asked.query.requested_action.status) == (action, "UNSUPPORTED")
+    assert (asked.query.requested_action.action.value, asked.query.requested_action.status) == (action, DECLARED[action])
     assert asked.query.requested_action.reason
     # the answer is information only: the execution chain, the next action and the resume evidence stay exactly the same
     assert asked.model_dump(exclude={"query"}) == plain.model_dump(exclude={"query"})
@@ -201,12 +203,17 @@ def test_the_resume_v2_payload_stays_compatible_for_older_readers(tmp_path: Path
     assert "lease_token" not in resume.model_dump_json()
 
 
-def test_the_contract_cannot_express_support_or_a_ready_status() -> None:
+def test_the_contract_cannot_express_preemption_or_a_ready_status_and_the_flags_must_match_the_actions() -> None:
+    v2 = "runtime-capabilities.v2"
     with pytest.raises(ValidationError):
-        RuntimeCapabilities.model_validate({"parking_supported": True, "actions": []})
-    with pytest.raises(ValidationError):
-        RuntimeCapabilities.model_validate({"preemption_supported": True, "actions": []})
-    for status in ("READY", "NONE", "SUPPORTED", ""):
+        RuntimeCapabilities.model_validate({"contract_version": v2, "preemption_supported": True, "actions": []})
+    with pytest.raises(ValidationError, match="PREEMPT"):
+        RuntimeCapabilities.model_validate({"contract_version": v2, "parking_supported": True, "actions": [{"action": "PREEMPT", "status": "SUPPORTED"}]})
+    for action in ("PARK", "RESUME_PARKED"):  # a supported parking action needs the parking flag
+        with pytest.raises(ValidationError, match="parking_supported"):
+            RuntimeCapabilities.model_validate({"contract_version": v2, "actions": [{"action": action, "status": "SUPPORTED"}]})
+        assert RuntimeCapabilities.model_validate({"contract_version": v2, "parking_supported": True, "actions": [{"action": action, "status": "SUPPORTED"}]})
+    for status in ("READY", "NONE", "supported", ""):
         with pytest.raises(ValidationError):
             ActionCapability.model_validate({"action": "PARK", "status": status})
     with pytest.raises(ValidationError):
@@ -236,11 +243,12 @@ _BROKEN_QUERIES: list[tuple[str, tuple[str, ...], object]] = [
     ("schema-version-none", ("query", "schema_version"), None),
     ("schema-version-number", ("query", "schema_version"), 1),
     ("schema-version-upper-case", ("query", "schema_version"), "CONTINUITY-QUERY.V1"),
-    ("capability-version-v2", ("query", "capabilities", "contract_version"), "runtime-capabilities.v2"),
+    ("capability-version-v1", ("query", "capabilities", "contract_version"), "runtime-capabilities.v1"),
+    ("capability-version-v3", ("query", "capabilities", "contract_version"), "runtime-capabilities.v3"),
     ("capability-version-empty", ("query", "capabilities", "contract_version"), ""),
     ("capability-version-none", ("query", "capabilities", "contract_version"), None),
     ("capability-version-number", ("query", "capabilities", "contract_version"), 1),
-    ("capability-version-upper-case", ("query", "capabilities", "contract_version"), "RUNTIME-CAPABILITIES.V1"),
+    ("capability-version-upper-case", ("query", "capabilities", "contract_version"), "RUNTIME-CAPABILITIES.V2"),
     ("evidence-id-missing", ("query", "evidence_id"), _DELETE),
     ("capabilities-missing", ("query", "capabilities"), _DELETE),
     ("query-block-empty", ("query",), {}),
@@ -308,15 +316,15 @@ def test_a_broken_query_block_is_refused_whatever_the_reader_asks_for(tmp_path: 
 
 
 def test_a_capability_block_is_refused_without_a_valid_version_and_never_repaired() -> None:
-    legal = {"contract_version": "runtime-capabilities.v1", "actions": []}
-    assert validate_runtime_capabilities(legal).contract_version == "runtime-capabilities.v1"
-    for version in (_DELETE, None, "", "runtime-capabilities.v2", 1, "RUNTIME-CAPABILITIES.V1"):
+    legal = {"contract_version": "runtime-capabilities.v2", "actions": []}
+    assert validate_runtime_capabilities(legal).contract_version == "runtime-capabilities.v2"
+    for version in (_DELETE, None, "", "runtime-capabilities.v1", "runtime-capabilities.v3", 1, "RUNTIME-CAPABILITIES.V2"):
         broken: dict[str, Any] = {key: value for key, value in legal.items() if not (key == "contract_version" and version is _DELETE)}
         if version is not _DELETE:
             broken["contract_version"] = version
         with pytest.raises(ValueError, match="未通过校验"):
             validate_runtime_capabilities(broken)
-    for not_a_block in ("runtime-capabilities.v1", 3, None):
+    for not_a_block in ("runtime-capabilities.v2", 3, None):
         with pytest.raises(ValueError):
             validate_runtime_capabilities(not_a_block)
 
@@ -336,7 +344,7 @@ def test_model_construct_and_model_copy_cannot_get_past_the_check(tmp_path: Path
     assert broken.query is not None and not hasattr(broken.query, "schema_version")  # the object really lacks the version
     with pytest.raises(ValueError, match="未通过校验"):
         validate_query_resume(broken, require_query=True)
-    for capabilities in (_unversioned_capabilities(), _unversioned_capabilities("runtime-capabilities.v2")):
+    for capabilities in (_unversioned_capabilities(), _unversioned_capabilities("runtime-capabilities.v1")):
         with pytest.raises(ValueError, match="未通过校验"):
             validate_runtime_capabilities(capabilities)
 

@@ -171,11 +171,15 @@ class CockpitClient:
         *,
         approver: str,
         approval_evidence_ref: str,
+        admission_release_ref: str = "",
         approval_pin: str = "",
     ) -> DecisionPackageDTO:
-        """Bind the caller's human approval; the SDK never supplies an approver or evidence.
+        """Bind the caller's human approval; the SDK never supplies an approver, evidence or a release.
 
         With a committed approver PIN (gap 9) only the user's PIN approves; ``approver`` and the evidence then come from it.
+        A card that collides with an open one, or one past the soft limit, is refused before anything is written
+        unless the user's own word is given as ``admission_release_ref`` (TD-071 card 3); with a committed PIN that
+        release needs the PIN too, proven for this card and this release.  ``run`` takes it again.
         """
 
         self._require_writable()
@@ -191,6 +195,10 @@ class CockpitClient:
             DecisionService.validate_planning_approval(
                 approver, card.plan_hash, approval_evidence_ref
             )
+            admission_release_ref = self._facade.prove_admission_release(
+                card, admission_release_ref, approval_pin=approval_pin
+            )
+            self._facade.admission_check_for_card(card, admission_release_ref)
             self._approve_change(card, approver)
             return self._facade.approve_planning_scope_card(
                 card,
@@ -202,14 +210,25 @@ class CockpitClient:
         except (PmFacadeError, DecisionError, TransitionGuardError, ValueError) as error:
             raise CockpitApiError(str(error)) from error
 
-    def run(self, card: PlanningScopeCard) -> PmRunOutcome:
-        """Run the approved card in isolation and verify it up to the acceptance gate."""
+    def run(
+        self, card: PlanningScopeCard, *, admission_release_ref: str = "", approval_pin: str = ""
+    ) -> PmRunOutcome:
+        """Run the approved card in isolation and verify it up to the acceptance gate.
+
+        A release given here is the user's word like the one ``approve_plan`` takes: with a committed approver PIN it
+        needs the user's PIN for this card and this release, else it is refused before the Mission is created.
+        """
 
         self._require_writable()
         try:
             token = self._leases.get(card.plan_hash)
             if token is None:
-                mission = self._facade.materialize_planning_mission(card)
+                admission_release_ref = self._facade.prove_admission_release(
+                    card, admission_release_ref, approval_pin=approval_pin
+                )
+                mission = self._facade.materialize_planning_mission(
+                    card, admission_release_ref=admission_release_ref
+                )
                 state = ContinuityStore(self._root).get_mission(mission.mission_id).state
                 if state is MissionState.ACCEPTANCE_PENDING:
                     raise CockpitApiError(_ALREADY_VERIFIED)

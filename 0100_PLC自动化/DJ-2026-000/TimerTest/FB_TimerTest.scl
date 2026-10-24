@@ -1,0 +1,37 @@
+// ============================================================================
+// FB_TimerTest: 共享库计时器 FB_TON / FB_TONR 真实毫秒仿真测试 (只做测试, 不进项目程序)
+// ============================================================================
+// 用途: 共享库计时器改毫秒 (PR #89) 签字前, 在博图 PLCSIM 里按真实时间看
+//       FB_TON 到点、断开清零; FB_TONR 分段累计、R 清零.
+// 用法: 背景 DB 为 DB_TimerTest, OB1 只调它; 在监控表里写 i_ 输入、看 q_ 输出.
+// 只直接调用被测的两个块, 不经任何气缸/输送等功能块.
+// ============================================================================
+
+FUNCTION_BLOCK FB_TimerTest
+VAR_INPUT
+    i_dPtMs   : DINT := 10000;  // 两个计时器共用的预设值 (ms)
+    i_bTonIn  : BOOL;           // FB_TON 的 IN
+    i_bTonrIn : BOOL;           // FB_TONR 的 IN
+    i_bTonrR  : BOOL;           // FB_TONR 的 R (复位, 优先于 IN)
+END_VAR
+VAR_OUTPUT
+    q_bTonQ   : BOOL;           // FB_TON 的 Q
+    q_dTonEt  : DINT;           // FB_TON 的 ET (ms)
+    q_bTonrQ  : BOOL;           // FB_TONR 的 Q
+    q_dTonrEt : DINT;           // FB_TONR 的 ET (ms)
+END_VAR
+VAR
+    s_fbTon   : FB_TON;         // 被测: 接通延时
+    s_fbTonr  : FB_TONR;        // 被测: 保持型接通延时
+END_VAR
+
+BEGIN
+    #s_fbTon(IN := #i_bTonIn, PT := #i_dPtMs);
+    #q_bTonQ := #s_fbTon.Q;
+    #q_dTonEt := #s_fbTon.ET;
+
+    #s_fbTonr(IN := #i_bTonrIn, R := #i_bTonrR, PT := #i_dPtMs);
+    #q_bTonrQ := #s_fbTonr.Q;
+    #q_dTonrEt := #s_fbTonr.ET;
+
+END_FUNCTION_BLOCK

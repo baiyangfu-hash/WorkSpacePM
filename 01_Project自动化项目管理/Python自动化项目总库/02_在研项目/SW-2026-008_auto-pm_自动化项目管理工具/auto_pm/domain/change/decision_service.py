@@ -25,6 +25,11 @@ from auto_pm.contracts.decision_package import (
     is_canonical_decision_id,
     is_canonical_runtime_change_id,
 )
+from auto_pm.contracts.user_evidence import (
+    USER_CONFIRMATION_PREFIX,
+    is_user_confirmation,
+    names_an_agent,
+)
 from auto_pm.contracts.workspace_context import WorkspaceRegistry
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
@@ -40,11 +45,6 @@ _RUNTIME_CHANGE_STATUSES = frozenset({"approved", "implementing"})
 # Change cabinets of a registered project: the five-process-group layout and the PLC template layout.
 _CHANGE_MONITOR_DIRS = ("04_监控", "11_监控")
 _PLAN_HASH = re.compile(r"[0-9a-f]{64}\Z")
-_USER_CONFIRMATION = re.compile(r"user-confirmation:[A-Za-z0-9][A-Za-z0-9._:/-]{7,}\Z")
-_MODEL_APPROVER = re.compile(
-    r"(?:^|[-_. (])(?:ai|agent|codex|gpt|model|claude|anthropic|opus|sonnet|haiku|fable|gemini|copilot|llm|bot|assistant)(?:$|[-_. )])",
-    re.IGNORECASE,
-)
 
 
 class DecisionError(Exception):
@@ -94,9 +94,11 @@ class DecisionService:
         resolved_approver = approver.strip()
         if _PLAN_HASH.fullmatch(plan_hash) is None:
             raise DecisionValidationError("planning plan_hash 必须是 64 位小写 SHA256")
-        if _USER_CONFIRMATION.fullmatch(approval_evidence_ref) is None:
+        if not is_user_confirmation(approval_evidence_ref):
             raise DecisionValidationError("planning approval 必须引用 user-confirmation 外部证据")
-        if _MODEL_APPROVER.search(resolved_approver):
+        if names_an_agent(approval_evidence_ref.removeprefix(USER_CONFIRMATION_PREFIX)):
+            raise DecisionValidationError("planning approval 证据不允许模型或 Agent 自写")
+        if names_an_agent(resolved_approver):
             raise DecisionValidationError("planning approval 不允许模型或 Agent 自签")
         if bool(request_id) != (execution_grant is not None):
             raise DecisionValidationError(

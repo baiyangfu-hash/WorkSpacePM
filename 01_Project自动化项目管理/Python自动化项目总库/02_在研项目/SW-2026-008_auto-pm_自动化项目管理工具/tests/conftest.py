@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import tempfile
 from collections.abc import Generator
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,6 +14,11 @@ import pytest
 # 受限环境下不可写，写操作会被沙箱拦截并污染 pytest 退出码（TD 修复统一收口）。
 # 需在 auto_pm 任何 audit_log 触发前设置，故置于 conftest 顶层。
 os.environ.setdefault("AUTO_PM_AUDIT_DIR", "off")
+# 测试不调用本机真的 Siemens 插件命令行（PLC 验收门会自动去找它）；要用插件的测试自己注入替身。
+# 指向一个不存在的文件 = “未找到插件”；子进程继承这个环境变量。用户显式设置时不覆盖。
+os.environ.setdefault(
+    "AUTO_PM_SIEMENS_LSP", str(Path(tempfile.gettempdir()) / "auto-pm-tests-no-siemens-lsp.exe")
+)
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication

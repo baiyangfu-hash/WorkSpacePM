@@ -15,8 +15,12 @@ Item {
     property var startBusyByMission: ({})
     property var closeBusyByMission: ({})
     property var pendingCards: []
+    property var boards: []
     property var approveBusyByRequest: ({})
     property string statusMessage: ""
+    // A failed action (start, approval, acceptance, closure) stays on screen until the user dismisses it;
+    // statusMessage is cleared by every snapshot refresh and must never be the only place a failure is shown.
+    property string actionAlert: ""
     signal planningDraftRequested(string projectId, string objective, string acceptanceText)
     signal draftInputChanged()
     signal evidenceRequested(string projectId)
@@ -24,6 +28,7 @@ Item {
     signal acceptanceConfirmed(string missionId)
     signal syncRetryRequested(string missionId)
     signal scopeApprovalConfirmed(string requestId, string planHash)
+    signal actionAlertDismissed()
 
     function isStartBusy(missionId) {
         return missionId && startBusyByMission[missionId] === true
@@ -236,6 +241,14 @@ Item {
                 }
             }
 
+            Repeater {
+                model: root.boards
+                delegate: Components.MissionBoard {
+                    Layout.fillWidth: true
+                    board: modelData
+                }
+            }
+
             Components.ActivityTimeline {
                 Layout.fillWidth: true
                 activities: root.activities
@@ -295,6 +308,44 @@ Item {
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
+            }
+        }
+    }
+    Rectangle {
+        id: actionAlertBanner
+        objectName: "actionAlertBanner"
+        visible: root.actionAlert !== ""
+        z: 5
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Theme.spacingSm
+        color: Theme.backgroundTertiary
+        border.color: Theme.error
+        border.width: 2
+        radius: Theme.radiusMd
+        implicitHeight: alertRow.implicitHeight + Theme.spacingMd * 2
+        height: implicitHeight
+        RowLayout {
+            id: alertRow
+            anchors.fill: parent
+            anchors.margins: Theme.spacingMd
+            spacing: Theme.spacingMd
+            Text {
+                objectName: "actionAlertText"
+                text: "⚠ " + root.actionAlert
+                color: Theme.error
+                font.pixelSize: Theme.fontSizeMd
+                font.bold: true
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Components.PrimaryButton {
+                objectName: "actionAlertDismiss"
+                text: "知道了"
+                type: "ghost"
+                Layout.alignment: Qt.AlignVCenter
+                onClicked: root.actionAlertDismissed()
             }
         }
     }
