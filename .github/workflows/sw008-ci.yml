@@ -124,7 +124,7 @@ jobs:
   # drill on a real Windows runner. Same rule as above: early warning, not acceptance evidence.
   windows-cli-core:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -160,11 +160,13 @@ jobs:
 
       # 10-24: the main executor's Windows run of the "rest" files failed while the two groups above were green, because
       # nothing else ran on Windows. These groups cover the GUI e2e, the QML bridges and every other test directory.
-      - name: Pytest (qml, GUI e2e)
+      - name: Pytest (qml and the other e2e files)
         working-directory: ${{ env.PROJ }}
         run: >-
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -p no:cacheprovider -o addopts= -n 4
-          tests/qml tests/e2e/test_pmf_gui.py
+          tests/qml tests/e2e
+          --ignore=tests/e2e/test_closure_drill.py --ignore=tests/e2e/test_closure_drill_agent_misconduct.py
+          --ignore=tests/e2e/test_long_gate.py
 
       - name: Pytest (rest of the test directories)
         working-directory: ${{ env.PROJ }}
