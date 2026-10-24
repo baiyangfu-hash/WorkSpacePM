@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import locale
 import os
 import signal
 import subprocess
@@ -83,10 +84,17 @@ def wait_for(pred: Any, timeout: float) -> bool:
     return False
 
 
+def console_text(argv: list[str]) -> str:
+    """Stdout of a Windows console tool as text. tasklist and powershell write in the console code page (GBK on a
+    Chinese Windows), not UTF-8, so text=True under PYTHONUTF8=1 fails to decode and leaves stdout as None."""
+
+    raw = subprocess.run(argv, capture_output=True, check=False).stdout or b""
+    return raw.decode(locale.getencoding(), errors="replace")  # the ANSI code page, whatever PYTHONUTF8 says
+
+
 def alive(pid: int) -> bool:
     if WIN:
-        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"], capture_output=True,
-                             text=True, check=False).stdout
+        out = console_text(["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"])
         return f'"{pid}"' in out
     try:
         os.kill(pid, 0)
@@ -105,8 +113,7 @@ def ancestors(pid: int) -> list[str]:
         ps = (f"$p={pid}; $n=@(); for($i=0;$i -lt 4;$i++){{"
               "$q=(Get-CimInstance Win32_Process -Filter \"ProcessId=$p\").ParentProcessId; if(-not $q){break};"
               "$x=Get-CimInstance Win32_Process -Filter \"ProcessId=$q\"; if(-not $x){break}; $n+=$x.Name; $p=$q}; $n -join ','")
-        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
-                             check=False).stdout.strip()
+        out = console_text(["powershell", "-NoProfile", "-Command", ps]).strip()
         return [n for n in out.split(",") if n]
     names = []
     try:
