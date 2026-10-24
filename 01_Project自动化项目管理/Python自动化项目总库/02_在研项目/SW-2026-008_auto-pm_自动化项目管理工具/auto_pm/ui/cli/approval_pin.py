@@ -38,10 +38,16 @@ def _stdin_is_tty() -> bool:
     if os.name != "nt":
         return True
     import ctypes
+    from ctypes import wintypes
 
-    mode = ctypes.c_uint32()
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined,unused-ignore]
-    return bool(kernel32.GetConsoleMode(kernel32.GetStdHandle(-10), ctypes.byref(mode)))
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
+    # Without restype/argtypes ctypes treats the HANDLE as a 32-bit int, which truncates it on 64-bit Windows.
+    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+    kernel32.GetStdHandle.restype = wintypes.HANDLE
+    kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.LPDWORD]
+    kernel32.GetConsoleMode.restype = wintypes.BOOL
+    mode = wintypes.DWORD()
+    return bool(kernel32.GetConsoleMode(kernel32.GetStdHandle(wintypes.DWORD(-10)), ctypes.byref(mode)))
 
 
 def _prompt_hidden(text: str) -> str:
