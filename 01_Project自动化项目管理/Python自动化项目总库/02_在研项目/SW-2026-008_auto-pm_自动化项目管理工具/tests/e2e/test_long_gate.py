@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import locale
 import os
 import signal
 import subprocess
@@ -55,6 +56,32 @@ def _module() -> ModuleType:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _drill() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("long_gate_drill_under_test", SCRIPT.with_name("long_gate_drill.py"))
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_console_tool_output_in_the_console_code_page_is_read_not_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 2026-10-24: on a Chinese Windows with PYTHONUTF8=1, text=True could not decode tasklist's GBK output, stdout came
+    # back as None and the liveness check raised TypeError. The bytes below are what such a tasklist prints.
+    drill = _drill()
+    gbk = '"映像名称","PID","会话名"\r\n"python.exe","1234","Console"\r\n'.encode("gbk")
+    monkeypatch.setattr(drill.locale, "getencoding", lambda: "gbk")
+    monkeypatch.setattr(drill.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=gbk, stderr=b""))
+    assert '"1234"' in drill.console_text(["tasklist"])
+    monkeypatch.setattr(drill, "WIN", True)
+    assert drill.alive(1234)
+    assert not drill.alive(4321)
+    # Undecodable bytes are replaced, never an exception or a None.
+    monkeypatch.setattr(drill.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=b"\xd0\xff\xfe 99", stderr=b""))
+    assert "99" in drill.console_text(["tasklist"])
+    monkeypatch.setattr(drill.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, stdout=None, stderr=b""))
+    assert drill.console_text(["tasklist"]) == ""
 
 
 @pytest.fixture()
@@ -126,8 +153,9 @@ def _runs(lab: dict[str, Path], name: str) -> int:
 
 def _pid_alive(pid: int) -> bool:
     if os.name == "nt":
-        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
-        return str(pid) in out
+        # Bytes, then the console code page: text=True under PYTHONUTF8=1 cannot decode GBK and returns None.
+        raw = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True).stdout or b""
+        return str(pid) in raw.decode(locale.getencoding(), errors="replace")
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
