@@ -1,0 +1,83 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261022-4D278210",
+  "project_id": "DJ-2026-011",
+  "change_id": "CHG-PLC-2026-003",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001/FB_2002_BatchCounter_DJ2026011.scl",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001/PRD/接口文档_IFC-FB2002-BatchCounter.md",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/DB1/DB_BatchCounterTest.scl",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/OB1/OB1.scl",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/Test/batch_counter_test.scltest",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/程序文档/PLC变量定义文档_VAR.md",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/PRD/需求分析文档_REQ.md",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/PRD/接口文档_INT.md",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/PRD/详细设计说明书_DSN.md",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/PRD/技术方案文档_TEC.md"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-10-22T21:34:35.601188+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: PLC 全量检查退出码 0 且 Fail=0，Warn 仅保留 FB_1091 缺 IFC 这一条历史项；Siemens 语言服务 test 全部用例通过（现有 12 条加新增 7 条，预计 19/19）",
+    "acceptance: 文档存在性与一致性检查退出码 0",
+    "acceptance: 工作树 git status --short 列出的改动文件与改动声明逐个一致，恰好 10 个",
+    "acceptance: 工作树文件按字节拷回控制根后，控制根列出的交付文件与声明一致，SHA-256 逐一一致并在验收报告贴出",
+    "risk: 光电信号抖动或长亮会导致多计或漏计，需外部去抖并在 FB 内取上升沿；到数后停止累加与 SysLib FB_CTU 语义一致，若期望继续累加需改设计；新增 .scltest 若与插件语法不完全兼容会导致 Siemens test 失败；文档不同步会导致 doc check 失败",
+    "non-goal: 不改共享库 01_SharedLibraries 下任何文件",
+    "non-goal: 不改、不新建 PM_SESSION_*.md",
+    "non-goal: 不改 .plc.json、FB_1091、FB_2001",
+    "non-goal: 不修 FB_1091 缺 IFC 文档的历史 WARN",
+    "non-goal: 不做物理 IO 接线与 TIA 下载",
+    "safety-circuit: 否"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "683c0797aeeadad8573f34548185b74e14291c20ab4ce338da881a089a61f0f1",
+      "approval_evidence_ref": "user-confirmation:2026-10-22T14:32:30-07:00",
+      "request_id": "DJ-2026-011-batch-counter-20261022",
+      "execution_grant": {
+        "adapter": "trae",
+        "approved_model": "DeepSeek-V4.1-Flash",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001/FB_2002_BatchCounter_DJ2026011.scl",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001/PRD/接口文档_IFC-FB2002-BatchCounter.md",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/DB1/DB_BatchCounterTest.scl",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/OB1/OB1.scl",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/Test/batch_counter_test.scltest",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/程序文档/PLC变量定义文档_VAR.md",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/PRD/需求分析文档_REQ.md",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/PRD/接口文档_INT.md",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/PRD/详细设计说明书_DSN.md",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/PRD/技术方案文档_TEC.md"
+        ],
+        "plan_checklist": {
+          "original_request": "项目 DJ-2026-011：加一个批量计数，光电每检测到一个工件计一个，到了设定数量就输出批次完成，按复位按钮清零重新计。",
+          "safety_circuit": "否",
+          "acceptance_checks": [
+            {
+              "command": ".venv\\Scripts\\python.exe -B main.py plc check DJ-2026-011",
+              "expected_exit_code": 0
+            },
+            {
+              "command": ".venv\\Scripts\\python.exe -B main.py doc check",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "git -C .auto-pm\\worktrees\\trae status --short",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "git -C . status --short",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "工作树内 git reset --hard 到基线提交并删除分支 trae/CHG-PLC-2026-003 与工作树；控制根提交前无代码改动；若已提交则 git revert 该提交；共享库与既有 FB_1091、FB_2001 未被修改，无需回退"
+        }
+      }
+    }
+  }
+}

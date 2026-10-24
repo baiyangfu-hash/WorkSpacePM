@@ -1,0 +1,27 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261023-SETLDJ05",
+  "project_id": "DJ-2026-005",
+  "change_id": "CHG-PLC-2026-016",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-23T23:02:58.629668+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "settle_expired_run"
+      ],
+      "target_run_ids": [
+        "RUN-DJ005-ALARM-20261023"
+      ],
+      "allowed_outcomes": [
+        "CANCELLED"
+      ]
+    }
+  }
+}

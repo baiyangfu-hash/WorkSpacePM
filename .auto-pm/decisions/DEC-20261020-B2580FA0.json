@@ -1,0 +1,37 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261020-B2580FA0",
+  "project_id": "SW-2026-010",
+  "change_id": "CHG-SCPT-2026-002",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/sw_2026_010/core/rated_current.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件/tests/test_rated_current.py"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-20T21:18:08.126069+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: 效率=90、功率因数=1.5 等超上限输入被拒绝：中文报错、非零退出码、无 traceback",
+    "acceptance: 功率因数或效率恰好等于 1 时正常计算",
+    "acceptance: 原有测试与新增用例全量通过；pytest、ruff、mypy 全绿",
+    "risk: 功率因数/效率等于 1 按放行处理（用户已确认）",
+    "risk: 额定功率与线电压仍只拦截 0/负数，不新增上限",
+    "non-goal: 不改 CLI 输出格式与精度、不加依赖、不改 pyproject 配置",
+    "non-goal: 不手改数据库或治理 JSON；提交不推送"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "2306bcc7e328481cac1a9ae158f1c21fcea2113956b6b07e340cc15c7bcd32d2",
+      "approval_evidence_ref": "user-confirmation:20261020-SW010-RANGE-APPROVE",
+      "request_id": "SW-2026-010-rated-current-range-20261020",
+      "execution_grant": {
+        "adapter": "trae",
+        "approved_model": "DeepSeek-V4-Pro",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": []
+      }
+    }
+  }
+}

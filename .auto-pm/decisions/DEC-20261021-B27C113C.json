@@ -1,0 +1,40 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261021-B27C113C",
+  "project_id": "DJ-2026-011",
+  "change_id": "CHG-PLC-2026-001",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/OB1/OB1.scl",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001/FB_1091_TwoHandStart_DJ2026011.scl",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/DB1/DB_TwoHandStartTest.scl",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/Test/two_hand_start_test.scltest"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-10-21T17:53:34.166300+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: 双手 500ms 内按下并保持 -> o_bStartOutput=TRUE；任一松开 -> 立即 FALSE",
+    "acceptance: 单手持按超窗 -> o_bSyncFault=TRUE 且不输出；双手未全松 -> 不允许再启动",
+    "acceptance: LSP-905 命名、FB_TON DINT 三段式（顶部无条件批量调用）、CASE 带 ELSE",
+    "acceptance: main.py plc check DJ-2026-011 退出码 0",
+    "risk: 同步同扫按下视为满足窗口（用户已确认口径）",
+    "risk: OB1 重写保持极简调度（≤10行），原裸片段注释语义以调用区注释承接",
+    "non-goal: 不动 SysLib、PRD、PM_SESSION、.plc.json",
+    "non-goal: 不手改数据库/治理 JSON，不单独改 Run/Work 状态，不推送"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "2a404abcde886b06810b6fb36585ee35dfa766f8f8dfc509bbc97a4b3e49561f",
+      "approval_evidence_ref": "user-confirmation:20261021-DJ011-TWOHAND-APPROVE",
+      "request_id": "DJ-2026-011-two-hand-start-20261021",
+      "execution_grant": {
+        "adapter": "trae",
+        "approved_model": "Kimi-K3",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": []
+      }
+    }
+  }
+}
