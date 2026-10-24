@@ -12,8 +12,8 @@ $previous = $env:AUTO_PM_AGENT
 $env:AUTO_PM_AGENT = "trae:cn"
 try {
     & $python $entry @args
-    # 不用 exit：exit 会把调用者的交互终端一起关掉；只把退出码交给调用者的 $LASTEXITCODE
-    $global:LASTEXITCODE = $LASTEXITCODE
+    # 直接运行时用 exit 交回退出码（失败必须非 0）；只有被点号引用（. .\pm-as-trae.ps1）时才不 exit，免得关掉调用者的终端
+    if ($MyInvocation.InvocationName -ne '.') { exit $LASTEXITCODE }
 }
 finally {
     if ($null -eq $previous) {
