@@ -365,6 +365,40 @@ def test_a_diverged_remote_branch_is_never_overwritten(lab: Lab) -> None:
     assert git(lab.origin, "rev-parse", "refs/heads/claude/CARD-1") == other
 
 
+# ── 安全回路 declaration (PLC paths) ───────────────────────────────
+
+
+def commit_plc_file(station: Path) -> None:
+    folder = station / "0100_PLC自动化" / "DJ-TEST" / "02_PLC程序"
+    folder.mkdir(parents=True)
+    (folder / "FB_X.scl").write_text("// x\n", encoding="utf-8")
+    git(station, "add", "0100_PLC自动化")
+    git(station, "commit", "-q", "-m", f"feat: [{CHG}] plc")
+
+
+def test_plc_changes_must_declare_the_safety_circuit(lab: Lab) -> None:
+    commit_plc_file(work(lab))
+    with pytest.raises(PrOpenRefusedError, match="安全回路"):
+        plan(lab)
+
+
+@pytest.mark.parametrize("answer", ["是", "否"])
+def test_the_declaration_goes_into_the_body_as_its_own_line(lab: Lab, answer: str) -> None:
+    commit_plc_file(work(lab))
+    assert f"安全回路: {answer}" in plan(lab, safety_circuit=answer).body.splitlines()
+
+
+def test_a_declaration_other_than_yes_or_no_is_refused(lab: Lab) -> None:
+    work(lab)
+    with pytest.raises(PrOpenRefusedError, match="只能是 是 或 否"):
+        plan(lab, safety_circuit="也许")
+
+
+def test_non_plc_changes_need_no_declaration_and_add_no_line(lab: Lab) -> None:
+    work(lab)
+    assert "安全回路" not in plan(lab).body
+
+
 # ── the real judge (same script GitHub runs) ────────────────────────
 
 

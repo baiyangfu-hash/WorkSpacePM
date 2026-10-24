@@ -38,6 +38,12 @@ def pr_group() -> None:
 @click.option(
     "--evidence", multiple=True, help="验收证据一行（命令 => 退出码，或测试/提交号）；可重复"
 )
+@click.option(
+    "--safety-circuit",
+    type=click.Choice(["是", "否"]),
+    default=None,
+    help="是否涉及安全回路；改到 0100_PLC自动化 下的文件时必填",
+)
 @click.option("--title", default=None, help="覆盖 PR 标题；默认 [卡号] 任务卡标题")
 @click.option("--dry-run", is_flag=True, help="只做检查并显示分支、标题、描述；不推送、不开 PR")
 @click.option("--no-fetch", is_flag=True, help="断网时用本机现有的 origin/main")
@@ -48,6 +54,7 @@ def open_cmd(
     card: str,
     task_card: str,
     evidence: tuple[str, ...],
+    safety_circuit: str | None,
     title: str | None,
     dry_run: bool,
     no_fetch: bool,
@@ -58,7 +65,13 @@ def open_cmd(
     try:
         service = PrOpenService(root)
         plan = service.plan(
-            agent, card, task_card, evidence=evidence, title=title, fetch=not no_fetch
+            agent,
+            card,
+            task_card,
+            evidence=evidence,
+            safety_circuit=safety_circuit,
+            title=title,
+            fetch=not no_fetch,
         )
     except AgentWorktreeError as error:
         _fail(error)

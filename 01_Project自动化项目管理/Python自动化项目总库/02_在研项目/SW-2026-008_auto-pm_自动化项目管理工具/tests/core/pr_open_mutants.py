@@ -70,9 +70,20 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "PR 描述丢了任务卡行",
-        'lines = [f"任务卡: {task_card}", "", "## 变更单", ""]',
-        'lines = ["## 变更单", ""]',
+        'lines = [f"任务卡: {task_card}"]\n',
+        'lines = []\n',
     ),
+    (
+        "PLC 改动不声明也放行",
+        "        if touches_plc and declared is None:\n",
+        "        if False:\n",
+    ),
+    (
+        "声明值不检查",
+        "        if declared is not None and declared not in SAFETY_ANSWERS:\n",
+        "        if False:\n",
+    ),
+    ("声明不进描述", "        if safety_circuit:\n", "        if False:\n"),
     ("没有证据时假装有", '["- 未提供（由审计者自行核验）"]', '["- 已验证"]'),
 )
 

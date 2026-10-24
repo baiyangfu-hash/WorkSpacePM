@@ -48,6 +48,8 @@ NETWORK_FAILURE = re.compile(
     re.IGNORECASE,
 )
 PR_URL = re.compile(r"https?://[^\s]+/pull/(\d+)")
+PLC_TOP = "0100_PLC自动化"  # a PR touching it must carry the 安全回路 line (safety_zone_check.py)
+SAFETY_ANSWERS = ("是", "否")
 JUDGE_RELATIVE = Path("reviews") / "tools" / "pr_scope_check.py"
 
 GhRunner = Callable[[Sequence[str], "str | None"], "subprocess.CompletedProcess[str]"]
@@ -141,6 +143,7 @@ class PrOpenService:
         task_card: str,
         *,
         evidence: Sequence[str] = (),
+        safety_circuit: str | None = None,
         title: str | None = None,
         fetch: bool = True,
     ) -> PrPlan:
@@ -186,9 +189,10 @@ class PrOpenService:
             for sha, message in commits
             if not CHG_NUMBER.search(message)
         ]
+        safety_circuit = self._safety_declaration(station.path, base_sha, safety_circuit)
         card_text = self._card_at_base(task_card, base_sha)
         card_title = _card_title(card_text, task_card)
-        body = self._body(task_card, chg_numbers, commits, evidence)
+        body = self._body(task_card, chg_numbers, commits, evidence, safety_circuit)
         code, report = self._judge(station.path, base_sha, head_sha, body)
         if code != 0:
             raise PrOpenRefusedError(
@@ -262,6 +266,25 @@ class PrOpenService:
             raise PrOpenRefusedError(f"任务卡路径必须是仓库内的相对路径：{task_card}")
         return path
 
+    def _safety_declaration(self, station: Path, base_sha: str, declared: str | None) -> str | None:
+        """The 安全回路 answer is the agent's/user's call, never derived: PLC changes must state it."""
+
+        if declared is not None and declared not in SAFETY_ANSWERS:
+            raise PrOpenRefusedError(f"--safety-circuit 只能是 是 或 否，现在是：{declared}")
+        changed = self._git(station, "diff", "--name-only", "-z", f"{base_sha}...HEAD")
+        if changed.returncode != 0:
+            raise AgentWorktreeError(f"读改动文件失败：{_detail(changed)}")
+        touches_plc = any(
+            name == PLC_TOP or name.startswith(f"{PLC_TOP}/") for name in changed.stdout.split("\0")
+        )
+        if touches_plc and declared is None:
+            raise PrOpenRefusedError(
+                f"改动里有 {PLC_TOP} 下的文件，必须声明是否涉及安全回路（急停、安全门、光栅、联锁、"
+                "安全继电器、双手启动）：加 --safety-circuit 是 或 --safety-circuit 否；"
+                "填“是”要先仿真、再由用户在 PR 上写“安全签字 + 提交号”"
+            )
+        return declared
+
     def _card_at_base(self, task_card: str, base_sha: str) -> str:
         shown = self._git(self._root, "show", f"{base_sha}:{task_card}")
         if shown.returncode != 0:
@@ -305,8 +328,12 @@ class PrOpenService:
         chg_numbers: tuple[str, ...],
         commits: list[tuple[str, str]],
         evidence: Sequence[str],
+        safety_circuit: str | None,
     ) -> str:
-        lines = [f"任务卡: {task_card}", "", "## 变更单", ""]
+        lines = [f"任务卡: {task_card}"]
+        if safety_circuit:
+            lines.append(f"安全回路: {safety_circuit}")
+        lines += ["", "## 变更单", ""]
         lines += [f"- {number}" for number in chg_numbers]
         lines += ["", "## 提交", ""]
         lines += [
