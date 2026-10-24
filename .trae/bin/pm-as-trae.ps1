@@ -12,7 +12,8 @@ $previous = $env:AUTO_PM_AGENT
 $env:AUTO_PM_AGENT = "trae:cn"
 try {
     & $python $entry @args
-    exit $LASTEXITCODE
+    # 不用 exit：exit 会把调用者的交互终端一起关掉；只把退出码交给调用者的 $LASTEXITCODE
+    $global:LASTEXITCODE = $LASTEXITCODE
 }
 finally {
     if ($null -eq $previous) {
