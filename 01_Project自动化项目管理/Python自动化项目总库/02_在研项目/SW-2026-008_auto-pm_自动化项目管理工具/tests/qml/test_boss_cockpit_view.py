@@ -1285,3 +1285,115 @@ def test_destroying_the_real_window_seals_an_owning_bridge_and_only_pauses_an_em
             assert bridge.confirmStart("MISSION-X")["message"] != _SEALED["message"]
             assert bridge.startSnapshotRefresh()["message"] != _SEALED["message"]  # not sealed: the refresh may start again (it can be busy with the first refresh)
             assert _flag(bridge, "_snapshot_delivery_enabled") is True
+
+
+def test_td_closure_alert_a_failed_closure_stays_on_screen_after_the_refresh_until_dismissed(
+    qapp: QApplication,
+    qml_engine: QQmlEngine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Field case 10-22: the closure hit a read-only ledger and the message vanished with the next refresh."""
+    _core_registry(tmp_path)
+    store, database = _accepted_lineage(tmp_path)
+    reconciler = _ProjectionReconciler(ReconcileDiff())
+    closure = PmClosureService(
+        tmp_path,
+        now=lambda: datetime(2026, 9, 20, 12, 10, tzinfo=UTC),
+        store=store,
+        ledger_reconciler=reconciler,
+    )
+    monkeypatch.setattr(closure, "inject_prepared_change_substance", lambda _id: tmp_path / "CHG.md")
+    real_complete = closure.complete_closure
+    read_only = [True]
+
+    def complete(*args: Any, **kwargs: Any) -> Any:
+        if read_only[0]:
+            raise sqlite3.OperationalError("attempt to write a readonly database")
+        return real_complete(*args, **kwargs)
+
+    monkeypatch.setattr(closure, "complete_closure", complete)
+    bridge = PmCockpitBridge(
+        str(tmp_path), service=PmCockpitService(tmp_path, store=store, closure_service=closure)
+    )
+    results: list[tuple[str, bool, str]] = []
+    bridge.closureFinished.connect(lambda m, ok, msg: results.append((m, ok, msg)))
+    with _managed_boss_window(qml_engine, bridge) as window:
+        root_item = cast(Any, window).contentItem()
+
+        def pump(until: Callable[[], bool], rounds: int = 400) -> None:
+            for _ in range(rounds):
+                qapp.processEvents()
+                bridge._poll_snapshot_worker()
+                bridge._poll_close_workers()
+                if until():
+                    return
+                QTest.qWait(10)
+            raise AssertionError("condition was not reached")
+
+        def retry_button() -> QQuickItem | None:
+            found = _items_named(root_item, "retrySyncButton")
+            if not found or found[0].property("visible") is not True or found[0].property("enabled") is not True:
+                return None
+            return found[0]
+
+        def banner_visible() -> bool:
+            found = _items_named(root_item, "actionAlertBanner")
+            return bool(found) and found[0].property("visible") is True
+
+        def banner_text() -> str:
+            return str(_items_named(root_item, "actionAlertText")[0].property("text"))
+
+        assert bridge._thread_pool.waitForDone(10_000)
+        pump(lambda: retry_button() is not None and bridge._snapshot_worker is None)
+        assert not banner_visible()
+        assert QMetaObject.invokeMethod(retry_button(), "clicked")
+        assert bridge._thread_pool.waitForDone(10_000)
+        pump(lambda: len(results) == 1)
+        assert results[0][1] is False
+        assert "账本正被占用" in results[0][2]
+
+        # The closure result triggers a snapshot whose success used to blank the only message on screen.
+        assert bridge._thread_pool.waitForDone(10_000)
+        pump(lambda: bridge._snapshot_worker is None and retry_button() is not None)
+        assert window.property("statusMessage") == ""
+        assert banner_visible()
+        text = banner_text()
+        assert "收尾失败：账本正被占用" in text
+        assert "请关闭驾驶舱窗口，再由主执行重试收口" in text
+        assert _lineage_states(database)[2] == "ACCEPTED"
+
+        # A second periodic refresh does not clear it either.
+        assert bridge.requestSnapshot()["accepted"] is True
+        assert bridge._thread_pool.waitForDone(10_000)
+        pump(lambda: bridge._snapshot_worker is None)
+        assert banner_visible()
+
+        assert QMetaObject.invokeMethod(_items_named(root_item, "actionAlertDismiss")[0], "clicked")
+        pump(lambda: not banner_visible())
+
+        # Fail again, then succeed: success clears the alert for that Mission by itself.
+        assert QMetaObject.invokeMethod(retry_button(), "clicked")
+        assert bridge._thread_pool.waitForDone(10_000)
+        pump(lambda: len(results) == 2 and banner_visible())
+        assert bridge._thread_pool.waitForDone(10_000)
+        pump(lambda: bridge._snapshot_worker is None and retry_button() is not None)
+        read_only[0] = False
+        assert QMetaObject.invokeMethod(retry_button(), "clicked")
+        assert bridge._thread_pool.waitForDone(10_000)
+        pump(lambda: len(results) == 3)
+        assert results[2][1] is True
+        pump(lambda: not banner_visible())
+        assert bridge._thread_pool.waitForDone(10_000)
+        pump(lambda: bridge._snapshot_worker is None)
+
+
+def test_td_closure_alert_boss_main_keeps_every_action_failure_out_of_the_refreshed_status_line() -> None:
+    main_source = (_QML / "boss_main.qml").read_text(encoding="utf-8", errors="replace")
+    view_source = (_QML / "views" / "BossCockpitView.qml").read_text(encoding="utf-8", errors="replace")
+
+    for key in ('"close:" + missionId', '"start:" + missionId', '"approve:" + requestId', '"accept:" + missionId'):
+        assert f"root.raiseActionAlert({key}" in main_source, key
+    assert "actionAlert: root.actionAlert" in main_source
+    assert 'objectName: "actionAlertBanner"' in view_source
+    assert "signal actionAlertDismissed()" in view_source

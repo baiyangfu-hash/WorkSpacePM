@@ -60,7 +60,14 @@ _CLOSE_PREPARE_KEY = "cockpit-close-prepare:"
 _CLOSE_COMPLETE_KEY = "cockpit-close-complete:"
 _COMPLETED_MESSAGE = "已完成：变更单与台账已同步。"
 _PENDING_SYNC_MESSAGE = "台账同步未完成，已保留现场；可稍后重试。"
-_NOT_READY_MESSAGE = "无法完成收尾：必要证据或状态未就绪，已保留现场；请向 PM 说明。"
+_CLOSE_NEXT_STEP = "验收记录已保存，不用重新验收；请关闭驾驶舱窗口，再由主执行重试收口。"
+_NOT_READY_MESSAGE = (
+    "收尾失败：必要证据或状态未就绪，这次没有写入。"
+    "验收记录已保存；请关闭驾驶舱窗口，由主执行查明原因后重试收口。"
+)
+_LEDGER_BUSY_MESSAGE = "收尾失败：账本正被占用（只读或被锁），这次没有写入。" + _CLOSE_NEXT_STEP
+_CLOSE_UNEXPECTED_MESSAGE = "收尾失败：读写账本时出错（详情已写入日志），这次没有写入。" + _CLOSE_NEXT_STEP
+_LEDGER_BUSY_MARKERS = ("readonly", "read-only", "locked", "busy")
 _SYNC_PENDING_NOTE = "验收已记录，变更单与台账尚未同步完成；完成前不会显示为已完成。"
 _SYNC_COMPLETED_NOTE = "已验收并完成变更单与台账同步。"
 _UNVERIFIABLE_REASON = "无法核验验收证据：读取失败，未做任何修复。"
@@ -355,6 +362,8 @@ class PmCockpitService:
         try:
             mission = self._store.get_mission(mission_id)
         except (ContinuityStoreError, sqlite3.Error, OSError, ValueError) as error:
+            if ledger_busy(error):
+                raise PmCockpitError(_LEDGER_BUSY_MESSAGE) from error
             raise PmCockpitError("无法读取该需求，已保留现场。") from error
         if mission.state is MissionState.CLOSED:
             try:
@@ -388,7 +397,16 @@ class PmCockpitService:
             return PmCockpitCompletion(
                 mission_id=mission_id,
                 state=PmCockpitCompletionState.PENDING_SYNC,
-                message=_NOT_READY_MESSAGE,
+                message=_LEDGER_BUSY_MESSAGE if ledger_busy(error) else _NOT_READY_MESSAGE,
+            ), str(error)
+        except (ContinuityStoreError, sqlite3.Error, OSError) as error:
+            # A raw store failure (e.g. Windows handed the closure a read-only ledger) must
+            # reach the user as a failure with a next step, never as silence.
+            log.exception("Cockpit closure failed: %s", mission_id)
+            return PmCockpitCompletion(
+                mission_id=mission_id,
+                state=PmCockpitCompletionState.PENDING_SYNC,
+                message=closure_failure_message(error),
             ), str(error)
         if receipt.state is ClosureCompletionState.COMPLETED:
             return PmCockpitCompletion(
@@ -948,3 +966,24 @@ class PmCockpitService:
             path.relative_to(self._control_root)
         except ValueError as error:
             raise PmCockpitError("驾驶舱拒绝读取工作空间外的路径。") from error
+
+
+def ledger_busy(error: BaseException) -> bool:
+    """Whether ``error`` (or anything it was raised from) says the ledger was read-only or locked."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen and len(seen) < 16:
+        seen.add(id(current))
+        if isinstance(current, PermissionError):
+            return True
+        if isinstance(current, (sqlite3.OperationalError, ContinuityStoreError)):
+            text = str(current).lower()
+            if any(marker in text for marker in _LEDGER_BUSY_MARKERS):
+                return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def closure_failure_message(error: BaseException) -> str:
+    """Fixed sentence for a closure that raised: the reason class and the next step, never paths."""
+    return _LEDGER_BUSY_MESSAGE if ledger_busy(error) else _CLOSE_UNEXPECTED_MESSAGE

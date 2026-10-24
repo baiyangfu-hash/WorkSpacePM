@@ -16,10 +16,16 @@ from auto_pm.contracts.pm_cockpit import (
     PmCockpitSnapshot,
 )
 from auto_pm.contracts.pm_facade import PmIntent
-from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
+from auto_pm.core.pm_cockpit_service import (
+    PmCockpitError,
+    PmCockpitService,
+    closure_failure_message,
+)
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 
 log = logging.getLogger(__name__)
+
+_CLOSE_RESULT_MISSING = "收尾失败：没有拿到收尾结果。验收记录已保存；请关闭驾驶舱窗口，再由主执行重试收口。"
 
 
 class _StartWorker(QRunnable):
@@ -120,10 +126,11 @@ class _CloseWorker(QRunnable):
                 completion.message,
             )
         except PmCockpitError as error:
-            self.result = (False, str(error) or "无法完成收尾，已保留现场。")
-        except Exception:  # noqa: BLE001 - UI must never receive exception text or paths
+            message = str(error) or "无法读取该需求，已保留现场。"
+            self.result = (False, message if message.startswith("收尾失败") else f"收尾失败：{message}")
+        except Exception as error:  # noqa: BLE001 - UI must never receive exception text or paths
             log.exception("Mission closure failed: %s", self._mission_id)
-            self.result = (False, "无法完成收尾，已保留现场。")
+            self.result = (False, closure_failure_message(error))
         finally:
             self.done = True
 
@@ -504,7 +511,7 @@ class PmCockpitBridge(QObject):
             worker = self._close_workers.pop(mission_id)
             if not self._snapshot_delivery_enabled:
                 continue
-            completed_ok, message = worker.result or (False, "无法完成收尾，已保留现场。")
+            completed_ok, message = worker.result or (False, _CLOSE_RESULT_MISSING)
             self.closureFinished.emit(mission_id, completed_ok, message)
         if not self._close_workers:
             self._close_poll_timer.stop()
