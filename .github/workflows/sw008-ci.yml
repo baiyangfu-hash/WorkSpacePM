@@ -168,3 +168,62 @@ jobs:
       - name: The working tree must still be clean
         run: |
           if [ -n "$(git status --porcelain)" ]; then git status --short; exit 1; fi
+
+  # More Windows coverage, in parallel with the first Windows job (which alone needs 30-45 minutes): the groups it does
+  # not cover (qml, the other e2e files, every other directory) run on their own runners with their own timeouts.
+  # Early warning only: continue-on-error keeps a failure here from blocking a merge until its known failures are sorted
+  # out (WBS question pool); the failures are listed in the step log (-rf, --tb=line).
+  windows-extra:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: qml
+            targets: tests/qml
+          - group: e2e-1
+            targets: tests/e2e/test_approval_pin_drill.py tests/e2e/test_ide_lane_drill.py tests/e2e/test_pmf_chg_tracking_check.py tests/e2e/test_pmf_gate_failures.py tests/e2e/test_pmf_gate_judge.py
+          - group: e2e-2
+            targets: tests/e2e/test_pmf_handoff.py tests/e2e/test_pmf_intake.py tests/e2e/test_pmf_plc.py tests/e2e/test_pmf_python.py
+          - group: e2e-3
+            targets: tests/e2e/test_pmf_reclaim.py tests/e2e/test_pmf_recovery.py tests/e2e/test_pmf_template_plc.py tests/e2e/test_pmf_template_python.py
+          - group: e2e-4
+            targets: tests/e2e/test_pmf_tier_classifier.py tests/e2e/test_raw_requirement_drill.py tests/e2e/test_release_pycache_drill.py tests/e2e/test_trial_run_drill.py tests/e2e/test_pmf_gui.py
+          - group: rest
+            targets: --ignore=tests/e2e --ignore=tests/qml --ignore=tests/cli --ignore=tests/core tests
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Long paths (the project paths are deep and Chinese)
+        run: git config --system core.longpaths true
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the locked dependencies into a fresh virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/Scripts" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
+
+      # faulthandler_timeout prints the stack of a test that hangs for 4 minutes, so a hang names its test.
+      - name: Pytest (${{ matrix.group }})
+        timeout-minutes: 30
+        working-directory: ${{ env.PROJ }}
+        run: >-
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -rf --tb=line --durations=10 -p no:cacheprovider -o addopts=
+          -o faulthandler_timeout=240 -n 4 ${{ matrix.targets }}
+
+      - name: The working tree must still be clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then git status --short; exit 1; fi

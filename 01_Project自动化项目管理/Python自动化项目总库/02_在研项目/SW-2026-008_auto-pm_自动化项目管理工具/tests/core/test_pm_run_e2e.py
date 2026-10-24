@@ -76,6 +76,10 @@ def _git(root: Path, *args: str) -> str:
 def _build_workspace(root: Path) -> None:
     root.mkdir()
     _git(root, "init")
+    # Fixed before any file is committed: with the machine default (autocrlf=true on Git for Windows) the blobs would be
+    # LF while the working files are CRLF, and closure would take the control-root file for a stranger edit.
+    _git(root, "config", "core.autocrlf", "false")
+    _git(root, "config", "core.safecrlf", "false")
     _git(root, "config", "user.name", "U07A Test")
     _git(root, "config", "user.email", "u07a@example.invalid")
     project = root / PROJECT_ID
