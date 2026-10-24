@@ -162,19 +162,19 @@ BEGIN
         s_arrPrevTeach[s_iI] := io_stHmi.bTeach[s_iI];
     END_FOR;
     IF io_stManual.bTeachWrite[1] THEN
-        io_stPP.astPair[1].rXPick := io_arrAxis[AX_X1].rCurrentPos;     // M61 -> D510, D514
-        io_stPP.astPair[1].rZPick := io_arrAxis[AX_Z].rCurrentPos;
+        io_stPP.astGroup[1].rXPick := io_arrAxis[AX_X1].rCurrentPos;     // M61 -> D510, D514
+        io_stPP.astGroup[1].rZPick := io_arrAxis[AX_Z].rCurrentPos;
     END_IF;
     IF io_stManual.bTeachWrite[2] THEN
-        io_stPP.astPair[1].rXPlace := io_arrAxis[AX_X1].rCurrentPos;    // M62 -> D520, D524
+        io_stPP.astGroup[1].rXPlace := io_arrAxis[AX_X1].rCurrentPos;    // M62 -> D520, D524
         io_stPP.rZPlace := io_arrAxis[AX_Z].rCurrentPos;
     END_IF;
     IF io_stManual.bTeachWrite[3] THEN
-        io_stPP.astPair[2].rXPick := io_arrAxis[AX_X1].rCurrentPos;     // M63 -> D540, D544
-        io_stPP.astPair[2].rZPick := io_arrAxis[AX_Z].rCurrentPos;
+        io_stPP.astGroup[2].rXPick := io_arrAxis[AX_X1].rCurrentPos;     // M63 -> D540, D544
+        io_stPP.astGroup[2].rZPick := io_arrAxis[AX_Z].rCurrentPos;
     END_IF;
     IF io_stManual.bTeachWrite[4] THEN
-        io_stPP.astPair[2].rXPlace := io_arrAxis[AX_X1].rCurrentPos;    // M64 -> D550
+        io_stPP.astGroup[2].rXPlace := io_arrAxis[AX_X1].rCurrentPos;    // M64 -> D550
     END_IF;
     IF io_stManual.bTeachWrite[5] THEN
         io_stFeed.rPosPick := io_arrAxis[AX_X2].rCurrentPos;            // M65 -> D512
@@ -228,13 +228,13 @@ BEGIN
     END_IF;
     CASE s_iX1Req OF
         1:
-            s_rX1Target := io_stPP.astPair[1].rXPick;
+            s_rX1Target := io_stPP.astGroup[1].rXPick;
         2:
-            s_rX1Target := io_stPP.astPair[1].rXPlace;
+            s_rX1Target := io_stPP.astGroup[1].rXPlace;
         3:
-            s_rX1Target := io_stPP.astPair[2].rXPick;
+            s_rX1Target := io_stPP.astGroup[2].rXPick;
         4:
-            s_rX1Target := io_stPP.astPair[2].rXPlace;
+            s_rX1Target := io_stPP.astGroup[2].rXPlace;
     ELSE
         s_rX1Target := io_arrAxis[AX_X1].rCurrentPos;
     END_CASE;

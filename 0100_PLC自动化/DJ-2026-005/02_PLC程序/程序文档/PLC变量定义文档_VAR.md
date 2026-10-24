@@ -38,9 +38,10 @@
 | bSafeZone | BOOL | 取料机构在安全区 (取放料 -> 4 层) |
 | abLayerReq | ARRAY[1..4] OF BOOL | 各层请求取料 (4 层 -> 取放料) |
 | abPickDone | ARRAY[1..4] OF BOOL | 各层取料完成 (取放料 -> 本层, 本层对本层) |
-| bReqA | BOOL | 前位请求 A (小车 -> 取放料) |
-| bReqB | BOOL | 后位请求 B (小车 -> 取放料) |
-| abFeedDone | ARRAY[1..2] OF BOOL | X1 前 / 后送料完成 (取放料 -> 小车) |
+| bReqA | BOOL | 组 1 请求 A (小车 -> 取放料) |
+| bReqB | BOOL | 组 2 请求 B (小车 -> 取放料, 4 根模式不用) |
+| iGroupCount | INT | 取料组数: 2 根模式 2, 4 根模式 1 (取放料 -> 小车) |
+| abFeedDone | ARRAY[1..2] OF BOOL | X1 组 1 / 组 2 送料完成 (取放料 -> 小车) |
 | bFeedDoneClr | BOOL | 清两个"X1 送料完成" (小车 -> 取放料, 步 2 入口一拍) |
 | abHoldConv | ARRAY[1..4] OF BOOL | 各层保持 (报警 -> 4 层) |
 | bHoldPP | BOOL | 取放料保持 |
@@ -178,6 +179,18 @@
 | bPPFrontOpen2 | BOOL | X127 夹紧气缸前松开位2 |
 | bFrameDropEye1 | BOOL | X130 边框掉料检测1 (图纸已装, 原程序未使用) |
 | bFrameDropEye2 | BOOL | X131 边框掉料检测2 (图纸已装, 原程序未使用) |
+| bPPG3Prod1 | BOOL | 预留 夹爪3产品检测1 (4 根模式, 未接线) |
+| bPPG3Prod2 | BOOL | 预留 夹爪3产品检测2 (4 根模式, 未接线) |
+| bPPG3Clamp1 | BOOL | 预留 夹爪3夹紧位1 (4 根模式, 未接线) |
+| bPPG3Clamp2 | BOOL | 预留 夹爪3夹紧位2 (4 根模式, 未接线) |
+| bPPG3Open1 | BOOL | 预留 夹爪3松开位1 (4 根模式, 未接线) |
+| bPPG3Open2 | BOOL | 预留 夹爪3松开位2 (4 根模式, 未接线) |
+| bPPG4Prod1 | BOOL | 预留 夹爪4产品检测1 (4 根模式, 未接线) |
+| bPPG4Prod2 | BOOL | 预留 夹爪4产品检测2 (4 根模式, 未接线) |
+| bPPG4Clamp1 | BOOL | 预留 夹爪4夹紧位1 (4 根模式, 未接线) |
+| bPPG4Clamp2 | BOOL | 预留 夹爪4夹紧位2 (4 根模式, 未接线) |
+| bPPG4Open1 | BOOL | 预留 夹爪4松开位1 (4 根模式, 未接线) |
+| bPPG4Open2 | BOOL | 预留 夹爪4松开位2 (4 根模式, 未接线) |
 | bDoorL1 | BOOL | X140 左1安全门 |
 | bDoorL2 | BOOL | X141 左2安全门 |
 | bDoorL3 | BOOL | X142 左3安全门 |
@@ -222,6 +235,8 @@
 | bQConv4Sep | BOOL | Y37 四层分料气缸 |
 | bQPPRearClamp | BOOL | Y40 取料后侧气缸夹紧 |
 | bQPPFrontClamp | BOOL | Y41 取料前侧气缸夹紧 |
+| bQPPG3Clamp | BOOL | 预留 夹爪3夹紧 (4 根模式, 未接线) |
+| bQPPG4Clamp | BOOL | 预留 夹爪4夹紧 (4 根模式, 未接线) |
 | bQPPLiftUp | BOOL | Y42 气缸上升 |
 | bQPPLiftDown | BOOL | Y43 气缸下降 |
 | bQGluePickAllowed | BOOL | Y44 抓料可 |
@@ -307,7 +322,7 @@
 | bUnload | BOOL | 退料 (HMI 置位, 4 层准备完成后由 FB_1007 清除) |
 | arrTrig | ARRAY[0..8] OF BOOL | 报警触发: [0..7] 气缸位置 (F34 起, 每层 +8), [8] 缺料 (F103 起, 每高一层 -1) |
 
-### ST_PairPoint（结构体）
+### ST_PickGroup（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -321,10 +336,15 @@
 |---|---|---|
 | iStep | INT | 0 未激活, 20~25 = S20~S25 |
 | iPhase | INT | 子相: 0 窗口, 1 轴运动, 2 等待转移 |
-| iPair | INT | 1 = 前位对 (3+4 层), 2 = 后位对 (1+2 层) |
+| iGroup | INT | 当前取料组: 1 = 组 1 (2 根模式 3+4 层; 4 根模式 1~4 层), 2 = 组 2 (2 根模式 1+2 层) |
 | bAtRest | BOOL | 静止点 (S20 或未激活) |
 | bSafeZone | BOOL | 输出: 取料机构在安全区 (给 Bridge) |
-| astPair | ARRAY[1..2] OF ST_PairPoint | [1] 前位对 A, [2] 后位对 B |
+| astGroup | ARRAY[1..2] OF ST_PickGroup | [1] 组 1 (原前位对 A), [2] 组 2 (原后位对 B, 4 根模式不用) |
+| iPickModeReq | INT | HMI 请求的取料模式: 2 = 一次 2 根 (005 原机), 4 = 一次 4 根 |
+| iGripCount | INT | 本机夹爪个数 (现场配置): 2 或 4; 005 为 2 |
+| iPickMode | INT | 生效的取料模式, 只在手动或待机且无料时才接受 iPickModeReq |
+| iGroupCount | INT | 取料组数: 2 根模式 2 组, 4 根模式 1 组 |
+| bModeInvalid | BOOL | 请求 4 根模式但夹爪个数不足: 不切换, 只提示 (不占报警号) |
 | rZStandby | REAL | D500 Z 待机点 |
 | rZPlace | REAL | D524 Z 放料高度 (前后位共用) |
 | rAutoSpeed | REAL | D600 自动速度, 范围 10000~100000 |
@@ -333,9 +353,11 @@
 | dClampTimeoutMs | DINT | 夹紧超时 (F106) |
 | dCylTimeoutMs | DINT | 夹爪 / 升降缸位置报警 |
 | abPickDone | ARRAY[1..4] OF BOOL | 各层取料完成 (本层对本层) |
-| abFeedDone | ARRAY[1..2] OF BOOL | X1 前 / 后送料完成 |
+| abFeedDone | ARRAY[1..2] OF BOOL | X1 组 1 / 组 2 送料完成 |
 | bClampFront | BOOL | 前夹爪夹紧命令 (Y41, 自保持) |
 | bClampRear | BOOL | 后夹爪夹紧命令 (Y40, 自保持) |
+| bClampG3 | BOOL | 预留 夹爪 3 夹紧命令 (4 根模式, 未接线) |
+| bClampG4 | BOOL | 预留 夹爪 4 夹紧命令 (4 根模式, 未接线) |
 | bLiftUp | BOOL | 升降缸上升命令 (Y42) |
 | bLiftDown | BOOL | 升降缸下降命令 (Y43) |
 | bGripOpenReq | BOOL | 要求松开夹爪 (回原点 / 准备 / 手动) |
@@ -349,8 +371,8 @@
 |---|---|---|
 | iStep | INT | 0~3 (D760) |
 | bAtRest | BOOL | 静止点 (步 0 / 1) |
-| bReqA | BOOL | 前位请求 A |
-| bReqB | BOOL | 后位请求 B |
+| bReqA | BOOL | 组 1 请求 A |
+| bReqB | BOOL | 组 2 请求 B (4 根模式不用) |
 | bY44 | BOOL | 抓料可 / 送框信号 (Y44) |
 | bY47 | BOOL | 安全区信号: X2 在取料点 (Y47) |
 | bFeedPermit | BOOL | 出发许可 (来自 FB_3001, 由 FB_2002 汇入) |

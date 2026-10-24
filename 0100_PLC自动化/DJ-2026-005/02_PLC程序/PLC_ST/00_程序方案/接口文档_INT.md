@@ -138,8 +138,14 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 |---|---|---|
 | `iStep` | INT | 0 未激活，20~25 = S20~S25 |
 | `iPhase` | INT | 子相 0 窗口 / 1 轴运动 / 2 等待转移 |
-| `iPair` | INT | 1 = 前位对（3+4 层），2 = 后位对（1+2 层） |
-| `astPair[1..2]` | `ST_PairPoint` | `rXPick, rZPick, rXPlace` |
+| `iGroup` | INT | 当前取料组：1 = 组 1（2 根模式 3+4 层；4 根模式 1~4 层），2 = 组 2（2 根模式 1+2 层） |
+| `astGroup[1..2]` | `ST_PickGroup` | `rXPick, rZPick, rXPlace`（4 根模式只用组 1） |
+| `iPickModeReq` | INT | HMI 请求的取料模式：2 = 一次 2 根（005 原机），4 = 一次 4 根（R-PP-13） |
+| `iGripCount` | INT | 本机夹爪个数（现场配置）：2 或 4，005 为 2 |
+| `iPickMode` | INT | 生效模式，仅在非自动、非回原点 / 准备、取放料未激活、夹爪和小车无料时接受请求 |
+| `iGroupCount` | INT | 取料组数：2 根模式 2，4 根模式 1（经中继同步给小车） |
+| `bModeInvalid` | BOOL | 请求 4 根模式但夹爪不足：不切换，只提示，不占报警号 |
+| `bClampG3, bClampG4` | BOOL | 预留 夹爪 3、4 夹紧命令（4 根模式，未接线） |
 | `rZStandby` | REAL | D500 |
 | `rZPlace` | REAL | D524 |
 | `rAutoSpeed` | REAL | D600（范围 10000~100000） |
@@ -163,8 +169,8 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | `iStep` | INT | 0~3（D760） |
 | `rPosPick` | REAL | D512 |
 | `rPosFeed` | REAL | D522 |
-| `bReqA` | BOOL | 前位请求 A |
-| `bReqB` | BOOL | 后位请求 B |
+| `bReqA` | BOOL | 组 1 请求 A |
+| `bReqB` | BOOL | 组 2 请求 B（4 根模式不用） |
 | `bY44` | BOOL | 送料完成通知 / 送框信号 Y44 |
 | `bY47` | BOOL | X2 在取料点 |
 | `bFeedPermit` | BOOL | 出发许可（来自 FB_3001） |
@@ -277,7 +283,7 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | 速度设定 | D2000 / D2002 / D2004 | `rManualSpeed[1..3]` | 范围 500~5000 |
 | 自动速度 | D600 | `rAutoSpeed` | 范围 10000~100000 |
 | 待机点 | D500 | `rZStandby` | |
-| 点位寄存器 | D510~D554 | `stPP.astPair[...]`、`rPosPick/rPosFeed` | 见 7.4 |
+| 点位寄存器 | D510~D554 | `stPP.astGroup[...]`、`rPosPick/rPosFeed` | 见 7.4 |
 
 ### 7.2 PLC → HMI（状态）
 
@@ -306,10 +312,10 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | 寄存器 | 含义 | 新位置 |
 |---|---|---|
 | D500 | Z 待机点 | `rZStandby` |
-| D510 / D520 | X1 前位取 / 放 | `astPair[1].rXPick / rXPlace` |
-| D514 / D524 | Z 取 / 放 | `astPair[1].rZPick` / `rZPlace`（放共用） |
-| D540 / D550 | X1 后位取 / 放 | `astPair[2].rXPick / rXPlace` |
-| D544 | Z 后位取 | `astPair[2].rZPick` |
+| D510 / D520 | X1 前位取 / 放 | `astGroup[1].rXPick / rXPlace` |
+| D514 / D524 | Z 取 / 放 | `astGroup[1].rZPick` / `rZPlace`（放共用） |
+| D540 / D550 | X1 后位取 / 放 | `astGroup[2].rXPick / rXPlace` |
+| D544 | Z 后位取 | `astGroup[2].rZPick` |
 | D512 / D522 | X2 取 / 送 | `rPosPick / rPosFeed` |
 
 > 现场点位值是 PDF 快照；示教会覆盖。点位断电保持：放在 `GlobalVars` 的 `VAR RETAIN`（TEC 7）。

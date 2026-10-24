@@ -2,6 +2,7 @@
 
 | 版本号 | 变更日期 | 变更类型 | 变更内容 | 变更人 |
 |--------|----------|----------|----------|--------|
+| V15.1.0 | 2026-10-24 | 新增 | 取料模式 2 根 / 4 根（R-PP-13）：取料组表（`ST_PairPoint` 改名 `ST_PickGroup`，`astPair` 改 `astGroup`，`iPair` 改 `iGroup`），新增 `iPickModeReq / iGripCount / iPickMode / iGroupCount / bModeInvalid`，预留夹爪 3、4 命令与输入输出；2 根模式行为不变 | Claude |
 | V15.0.0 | 2026-10-24 | 重写 | 按新设计整体重写（取代 V7.x）：S20~S25 子相结构、成对取料、夹爪 / 升降缸统一输出、夹紧超时 F106、轴命令占有标志，接口改为 `io_stPP / io_stBridge / io_stMachine / io_stIo / io_stAlarm / io_arrAxis` | Claude |
 | V7.1.1 | 2026-05-20 | Bug修复 | 修复TC11自动模式Z轴定位测试失效: i_iPickLayer接线从o_iCurrentPickLayer(输出)改为i_iPickLayer_Input(独立输入), 断开FB内部iPickLayer(=0)覆盖导致S20→S21转换条件永远FALSE的反馈回路; GlobalVars.db新增i_iPickLayer_Input: INT字段; OB1.scl第331行接线更新 | Trae |
 | V7.0.0 | 2026-05-20 | 重构 | 删除6个间接轴请求输出(q_bZAxisHomeRequest/q_bZAxisMoveAbsReq/q_rZAxisTargetPos/q_bX1AxisHomeRequest/q_bX1AxisMoveAbsReq/q_rX1AxisTargetPos); 新增VAR_IN_OUT io_stZAxis/io_stX1Axis: ST_ServoAxis (PLCopen MC Part 1嵌套结构体); FB内直接操作stPower(使能)/stAbs(绝对定位)/stStop(急停)/stSensor(限位+报警); 接口总数从64降至56(-8); 删除4个伺服点动输入(i_bLx_ZAxis_JogUp/Down, i_bLx_X1Axis_JogFwd/Rev) | Trae |

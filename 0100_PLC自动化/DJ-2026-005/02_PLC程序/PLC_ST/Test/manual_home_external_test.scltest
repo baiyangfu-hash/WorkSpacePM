@@ -998,24 +998,24 @@ TEST_CASE "T_MAN_07_08_Teach"
     SET GlobalVars.stHmi.bManual := FALSE;
     WAIT_CYCLES 3;
 
-    SET GlobalVars.stPP.astPair[1].rXPick := 0.0;
-    SET GlobalVars.stPP.astPair[1].rZPick := 0.0;
+    SET GlobalVars.stPP.astGroup[1].rXPick := 0.0;
+    SET GlobalVars.stPP.astGroup[1].rZPick := 0.0;
     SET GlobalVars.stHmi.bManual := TRUE;
     SET GlobalVars.astAxis[2].rCurrentPos := 123.0;
     SET GlobalVars.astAxis[1].rCurrentPos := 45.0;
     SET GlobalVars.stHmi.bTeach[1] := TRUE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stPP.astPair[1].rXPick = 0.0;
+    ASSERT GlobalVars.stPP.astGroup[1].rXPick = 0.0;
     SET GlobalVars.stHmi.bTeach[1] := FALSE;
     WAIT_CYCLES 2;
     SET GlobalVars.stMachine.bHomeDone := TRUE;
     SET GlobalVars.stHmi.bTeach[1] := TRUE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stPP.astPair[1].rXPick = 123.0;
-    ASSERT GlobalVars.stPP.astPair[1].rZPick = 45.0;
+    ASSERT GlobalVars.stPP.astGroup[1].rXPick = 123.0;
+    ASSERT GlobalVars.stPP.astGroup[1].rZPick = 45.0;
     SET GlobalVars.astAxis[2].rCurrentPos := 200.0;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stPP.astPair[1].rXPick = 123.0;
+    ASSERT GlobalVars.stPP.astGroup[1].rXPick = 123.0;
 END_TEST_CASE
 
 TEST_CASE "T_MAN_11_GripAndLift"

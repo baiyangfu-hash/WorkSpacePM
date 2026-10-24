@@ -106,6 +106,18 @@ STRUCT
     bPPFrontOpen2             : BOOL;   // X127 夹紧气缸前松开位2
     bFrameDropEye1            : BOOL;   // X130 边框掉料检测1 (图纸已装, 原程序未使用)
     bFrameDropEye2            : BOOL;   // X131 边框掉料检测2 (图纸已装, 原程序未使用)
+    bPPG3Prod1                : BOOL;   // 预留 夹爪3产品检测1 (4 根模式, 未接线)
+    bPPG3Prod2                : BOOL;   // 预留 夹爪3产品检测2 (4 根模式, 未接线)
+    bPPG3Clamp1               : BOOL;   // 预留 夹爪3夹紧位1 (4 根模式, 未接线)
+    bPPG3Clamp2               : BOOL;   // 预留 夹爪3夹紧位2 (4 根模式, 未接线)
+    bPPG3Open1                : BOOL;   // 预留 夹爪3松开位1 (4 根模式, 未接线)
+    bPPG3Open2                : BOOL;   // 预留 夹爪3松开位2 (4 根模式, 未接线)
+    bPPG4Prod1                : BOOL;   // 预留 夹爪4产品检测1 (4 根模式, 未接线)
+    bPPG4Prod2                : BOOL;   // 预留 夹爪4产品检测2 (4 根模式, 未接线)
+    bPPG4Clamp1               : BOOL;   // 预留 夹爪4夹紧位1 (4 根模式, 未接线)
+    bPPG4Clamp2               : BOOL;   // 预留 夹爪4夹紧位2 (4 根模式, 未接线)
+    bPPG4Open1                : BOOL;   // 预留 夹爪4松开位1 (4 根模式, 未接线)
+    bPPG4Open2                : BOOL;   // 预留 夹爪4松开位2 (4 根模式, 未接线)
     bDoorL1                   : BOOL;   // X140 左1安全门
     bDoorL2                   : BOOL;   // X141 左2安全门
     bDoorL3                   : BOOL;   // X142 左3安全门
@@ -152,6 +164,8 @@ STRUCT
     bQConv4Sep                : BOOL;   // Y37 四层分料气缸
     bQPPRearClamp             : BOOL;   // Y40 取料后侧气缸夹紧
     bQPPFrontClamp            : BOOL;   // Y41 取料前侧气缸夹紧
+    bQPPG3Clamp               : BOOL;   // 预留 夹爪3夹紧 (4 根模式, 未接线)
+    bQPPG4Clamp               : BOOL;   // 预留 夹爪4夹紧 (4 根模式, 未接线)
     bQPPLiftUp                : BOOL;   // Y42 气缸上升
     bQPPLiftDown              : BOOL;   // Y43 气缸下降
     bQGluePickAllowed         : BOOL;   // Y44 抓料可

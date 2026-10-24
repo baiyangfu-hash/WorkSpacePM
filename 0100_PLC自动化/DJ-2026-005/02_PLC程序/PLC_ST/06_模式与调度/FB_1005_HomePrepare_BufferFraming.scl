@@ -232,7 +232,7 @@ BEGIN
                 s_bPrepX1In := NOT s_bHold;
                 IF s_bPrepX1Q THEN
                     s_bX1Go := TRUE;
-                    s_rX1Target := io_stPP.astPair[1].rXPick;
+                    s_rX1Target := io_stPP.astGroup[1].rXPick;
                     IF io_arrAxis[AX_X1].stAbs.Done THEN
                         s_bX1Go := FALSE;
                         io_stHome.iPrepStep := PR_X2;
