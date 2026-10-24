@@ -199,6 +199,35 @@ class PmCockpitPendingScopeCard(BaseModel):
         return self
 
 
+class PmCockpitBoardCard(BaseModel):
+    """One card on the four-column board; read-only, the id only travels for tracing (TD-071 card 4)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mission_id: str
+    title: str
+    state_label: str
+    note: str = ""
+    stale: bool = False
+
+
+class PmCockpitMissionBoard(BaseModel):
+    """A project's cards in the columns 在干 / 等你 / 搁着 / 已关; switching stays on the command line."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["pm-cockpit-mission-board.v1"] = "pm-cockpit-mission-board.v1"
+    project_id: str
+    project_name: str
+    open_count: int = Field(ge=0)
+    open_limit: int = Field(ge=1)
+    active: tuple[PmCockpitBoardCard, ...] = ()
+    waiting: tuple[PmCockpitBoardCard, ...] = ()
+    parked: tuple[PmCockpitBoardCard, ...] = ()
+    closed: tuple[PmCockpitBoardCard, ...] = ()
+    closed_hidden: int = Field(default=0, ge=0)
+
+
 class PmCockpitSnapshot(BaseModel):
     """A single immutable response for the safe default cockpit screen."""
 
@@ -208,4 +237,5 @@ class PmCockpitSnapshot(BaseModel):
     projects: tuple[PmCockpitProjectCard, ...]
     activities: tuple[PmCockpitActivity, ...] = ()
     pending_cards: tuple[PmCockpitPendingScopeCard, ...] = ()
+    boards: tuple[PmCockpitMissionBoard, ...] = ()
     notices: tuple[str, ...] = ()

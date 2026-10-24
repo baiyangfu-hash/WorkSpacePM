@@ -51,6 +51,7 @@ from auto_pm.infrastructure.control_root_guard import (
     clean_git_environment,
     require_governed_worktree,
 )
+from auto_pm.ui.cli.approval_pin import approval_pin_enforced
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
 
 _Command = TypeVar("_Command", bound=Callable[..., Any])
@@ -243,6 +244,11 @@ def mission_group() -> None:
 @click.option("--authority-json", required=True)
 @click.option("--created-by", required=True)
 @click.option("--idempotency-key", required=True)
+@click.option(
+    "--admission-release-ref",
+    default="",
+    help="用户原话所在的位置：新卡和开着的卡改同一批文件、或项目已开满 8 张时，有它才放行（TD-071）",
+)
 @click.pass_context
 def create_mission(
     ctx: click.Context,
@@ -254,11 +260,27 @@ def create_mission(
     authority_json: str,
     created_by: str,
     idempotency_key: str,
+    admission_release_ref: str,
 ) -> None:
-    """Create a DRAFT Mission from an explicit, validated authority envelope."""
+    """Create a DRAFT Mission from an explicit, validated authority envelope.
+
+    Admitted like ``pm approve``: past the soft limit, or over paths an open card also changes, only with the user's word.
+    """
+    # A release is the user's word: once an approver PIN is committed it is typed only through ``pm approve`` (audit 123).
+    if admission_release_ref.strip() and approval_pin_enforced(_workspace(ctx)):
+        raise click.ClickException(
+            "已启用批准口令：这条命令不收放行凭据；放行只能由用户本人在 pm approve 里输口令给出（agent 不得代填）"
+        )
     try:
         authority = AuthorityEnvelope.model_validate(json.loads(authority_json))
-        item = _mission_service(ctx, mutating=True).create(
+        service = _mission_service(ctx, mutating=True)
+        limit, verdict = service.admit(
+            mission_id=mission_id,
+            subject_project_id=project_id,
+            scope_paths=authority.scope_paths,
+            admission_release_ref=admission_release_ref,
+        )
+        item = service.create(
             mission_id=mission_id,
             subject_project_id=project_id,
             title=title,
@@ -267,7 +289,10 @@ def create_mission(
             authority=authority,
             created_by=created_by,
             idempotency_key=idempotency_key,
+            max_open_per_project=limit,
+            admitted_open_ids=verdict.open_ids,
         )
+        service.record_admission(item.mission_id, verdict, admission_release_ref)
     except (json.JSONDecodeError, ValidationError, MissionServiceError) as error:
         raise click.ClickException(str(error)) from error
     _emit(item)

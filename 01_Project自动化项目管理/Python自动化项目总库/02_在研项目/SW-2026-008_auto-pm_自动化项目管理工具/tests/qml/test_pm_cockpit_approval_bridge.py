@@ -261,7 +261,7 @@ def test_b06_an_unfinished_task_refuses_the_click_before_any_write(tmp_path: Pat
 
     _, _, finished = _click(cockpit, _SECOND)
 
-    assert finished[0][1] is False and "未终结的任务" in finished[0][2]
+    assert finished[0][1] is False and "要改同一批文件" in finished[0][2]
     assert cockpit.writes() == before
     assert second_hash == cockpit.hashes[_SECOND]
 

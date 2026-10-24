@@ -45,6 +45,8 @@ class ContinuityResume(BaseModel):
     mission: Mission | None = None
     work: WorkItem | None = None
     work_candidates: tuple[WorkItem, ...] = ()
+    # TD-071: the other open cards (parked or waiting) when the project holds more than one.
+    mission_candidates: tuple[Mission, ...] = ()
     run: RunItem | None = None
     run_candidates: tuple[ResumeRunCandidate, ...] = ()
     checkpoint: CheckpointItem | None = None

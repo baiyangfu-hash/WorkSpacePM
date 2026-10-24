@@ -15,7 +15,9 @@ from pathlib import Path
 from auto_pm.contracts import continuity_query as query_contract
 from auto_pm.contracts.continuity_query import (
     CAPABILITY_CONTRACT_VERSION,
+    PARKING_ACTIONS,
     QUERY_SCHEMA_VERSION,
+    SUPPORTED_REASONS,
     ActionCapability,
     ContinuityQuery,
     QueriedAction,
@@ -57,7 +59,14 @@ class ContinuityQueryService:
         """Declare what this runtime offers; the one place the flags are produced, for the query and the cockpit alike."""
 
         return RuntimeCapabilities(
-            contract_version=CAPABILITY_CONTRACT_VERSION, actions=tuple(ActionCapability(action=action) for action in QueriedAction)
+            contract_version=CAPABILITY_CONTRACT_VERSION,
+            parking_supported=True,
+            actions=tuple(
+                ActionCapability(action=action, status="SUPPORTED", reason=SUPPORTED_REASONS[action])
+                if action in PARKING_ACTIONS
+                else ActionCapability(action=action)
+                for action in QueriedAction
+            ),
         )
 
     def query(
@@ -69,15 +78,17 @@ class ContinuityQueryService:
         run_id: str = "",
         requested_action: str = "",
     ) -> ContinuityResume:
-        """Return Resume v2 with the query block attached; an asked action is answered UNSUPPORTED."""
+        """Return Resume v2 with the query block attached; an asked action is answered from the declared capabilities."""
 
+        capabilities = self.capabilities()
         asked: ActionCapability | None = None
         if requested_action:
             try:
-                asked = ActionCapability(action=QueriedAction(requested_action))
+                wanted = QueriedAction(requested_action)
             except ValueError as error:
                 known = ", ".join(action.value for action in QueriedAction)
                 raise ContinuityQueryError(f"未知的查询动作 {requested_action!r}；已知动作: {known}") from error
+            asked = next((item for item in capabilities.actions if item.action is wanted), ActionCapability(action=wanted))
         try:
             resume = self._resume.collect(
                 project_id=project_id,
@@ -87,7 +98,6 @@ class ContinuityQueryService:
             )
         except ContinuityResumeError as error:
             raise ContinuityQueryError(str(error)) from error
-        capabilities = self.capabilities()
         context = resume.context
         producer_path = str(Path(__file__).resolve())
         producer_sha = _producer_sha256()

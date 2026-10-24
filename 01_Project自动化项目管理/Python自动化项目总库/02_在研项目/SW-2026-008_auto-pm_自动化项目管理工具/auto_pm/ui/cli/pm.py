@@ -798,6 +798,11 @@ def inbox_reject(
     help="非模型自签的 user-confirmation 证据引用（已启用批准口令时由口令生成，可不填）",
 )
 @click.option("--owner", default="PM Facade", show_default=True, help="内部 Work owner")
+@click.option(
+    "--admission-release-ref",
+    default="",
+    help="项目开着的卡已满 8 张，或新卡和开着的卡要改同一批文件时，用户放行原话的位置",
+)
 @_checklist_options
 @_classification_options
 @click.pass_context
@@ -819,6 +824,7 @@ def approve_pm(
     approver: str,
     approval_evidence_ref: str,
     owner: str,
+    admission_release_ref: str,
     original_request: str,
     safety_circuit: str,
     checks: tuple[str, ...],
@@ -892,6 +898,7 @@ def approve_pm(
             raise click.ClickException(str(error)) from error
     approval_pin = read_approval_pin(
         _control_root_path(ctx), summary=f"批准范围卡：请求 {request_id or '(新需求)'}，方案哈希 {plan_hash[:16]}…（确认这就是你看过的那张卡）"
+        + (f"；同时放行：{admission_release_ref}" if admission_release_ref else "")
     )
     if by_hash:
         if ctx.get_parameter_source("owner") is ParameterSource.COMMANDLINE:
@@ -906,6 +913,7 @@ def approve_pm(
                 expected_plan_hash=plan_hash,
                 approver=approver,
                 approval_evidence_ref=approval_evidence_ref,
+                admission_release_ref=admission_release_ref,
                 approval_pin=approval_pin,
             )
             approved_card = short_facade.recover_planning_scope_card(result.mission_id)
@@ -972,8 +980,15 @@ def approve_pm(
         classification=classification,
         intake_item_id=intake_item_id,
     )
-    _approve_planning_change(ctx, card, approver)
     facade = _facade(ctx)
+    try:
+        admission_release_ref = facade.prove_admission_release(
+            card, admission_release_ref, approval_pin=approval_pin
+        )
+        facade.admission_check_for_card(card, admission_release_ref)
+    except PmFacadeError as error:
+        raise click.ClickException(str(error)) from error
+    _approve_planning_change(ctx, card, approver)
     try:
         facade.approve_planning_scope_card(
             card,
@@ -982,7 +997,9 @@ def approve_pm(
             approval_evidence_ref=approval_evidence_ref,
             approval_pin=approval_pin,
         )
-        facade.materialize_planning_mission(card, created_by="PM Facade")
+        facade.materialize_planning_mission(
+            card, created_by="PM Facade", admission_release_ref=admission_release_ref
+        )
         work = facade.create_planning_work(card, owner=owner)
     except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
@@ -1170,6 +1187,8 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
     )
     click.echo(f"work: {payload.work.work_id if payload.work else '-'}")
     click.echo(f"run: {payload.run.run_id if payload.run else '-'}")
+    for other in payload.mission_candidates:
+        click.echo(f"其他开着的卡: {other.mission_id} [{other.state.value}] {other.title}")
     click.echo(f"下一合法动作: {payload.next_legal_action or '-'}")
     for conflict in payload.conflicts:
         click.echo(f"冲突: {conflict}")
@@ -1191,6 +1210,7 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
         click.echo(
             f"挂起: {'支持' if query.capabilities.parking_supported else '不支持'} | "
             f"插队: {'支持' if query.capabilities.preemption_supported else '不支持'}"
+            + ("（挂起/拿回用 pm park / pm unpark / pm switch，只听用户的）" if query.capabilities.parking_supported else "")
         )
         if query.requested_action is not None:
             asked = query.requested_action
@@ -1205,7 +1225,7 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
     "--requested-action",
     type=click.Choice([action.value for action in QueriedAction]),
     default=None,
-    help="询问某个动作的能力：M2 对 PARK、RESUME_PARKED、PREEMPT 一律明确回答 UNSUPPORTED（查询不是执行授权）",
+    help="询问某个动作的能力：PARK、RESUME_PARKED 回答 SUPPORTED（用 pm park / pm unpark / pm switch，只听用户的），PREEMPT 回答 UNSUPPORTED；查询不是执行授权",
 )
 @click.option(
     "--path",
@@ -1303,3 +1323,11 @@ from auto_pm.ui.cli.pm_closure import close_pm, verify_pm  # noqa: E402
 
 pm_group.add_command(verify_pm)
 pm_group.add_command(close_pm)
+
+# Park / unpark / switch commands (TD-071): the user's words, the PIN once it is committed.
+from auto_pm.ui.cli.pm_switch import missions_pm, park_pm, switch_pm, unpark_pm  # noqa: E402
+
+pm_group.add_command(missions_pm)
+pm_group.add_command(park_pm)
+pm_group.add_command(unpark_pm)
+pm_group.add_command(switch_pm)

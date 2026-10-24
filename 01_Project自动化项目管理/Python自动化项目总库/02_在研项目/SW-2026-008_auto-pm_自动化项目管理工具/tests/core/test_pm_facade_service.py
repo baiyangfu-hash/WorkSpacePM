@@ -1178,7 +1178,7 @@ def test_planning_draft_migrates_a_v3_store_in_the_isolated_database(tmp_path: P
             "SELECT name FROM sqlite_master WHERE type='table' AND name='planning_drafts'"
         ).fetchone()
 
-    assert schema_version == "continuity-store.v7"
+    assert schema_version == "continuity-store.v8"
     assert planning_table == ("planning_drafts",)
 
 
