@@ -41,7 +41,7 @@ if not output.exists() or not output.read_bytes().startswith(b\"%PDF-\"):
         cwd=Path(__file__).parents[2],
         env=environment,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         timeout=30,
         check=False,
     )

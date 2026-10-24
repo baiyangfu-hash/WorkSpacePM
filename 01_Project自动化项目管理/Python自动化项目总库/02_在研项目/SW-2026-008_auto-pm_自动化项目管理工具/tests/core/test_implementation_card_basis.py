@@ -39,7 +39,7 @@ BC_TABLE = """# 业务变更记录
 
 def _git(root: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
     ).stdout.strip()
 
 

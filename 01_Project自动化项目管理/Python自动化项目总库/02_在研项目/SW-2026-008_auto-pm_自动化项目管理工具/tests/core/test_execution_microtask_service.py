@@ -39,7 +39,7 @@ def test_generated_microtask_directory_is_ignored_in_linked_candidate() -> None:
             cwd=source,
             check=True,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         ).stdout.strip()
     )
     generated = subprocess.run(

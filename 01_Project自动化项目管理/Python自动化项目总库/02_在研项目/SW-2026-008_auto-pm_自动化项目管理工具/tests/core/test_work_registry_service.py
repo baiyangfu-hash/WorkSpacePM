@@ -1086,7 +1086,7 @@ _H11_ADJUDICATION_REQUEST_KEYS = frozenset(
 
 def _git_out(root: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
     ).stdout.strip()
 
 

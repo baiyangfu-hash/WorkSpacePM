@@ -354,7 +354,7 @@ class TestSclParserRealSamples:
         assert first_var.comment == "组框机允许送料 上升沿"
 
     def test_real_fb_1004_feeder_fb_tonr_and_real(self) -> None:
-        """FB_1004: 验证 FB_TON 实例 + REAL 类型 (初值 := 被剥离) + // 与 (* *) 注释"""
+        """FB_1004: 验证 FB_TON 实例 + REAL 类型 (初值 := 被剥离) + // 行注释"""
         result = SclParser().parse(FB_1004_SCL)
         assert result.success
         vt = result.var_table
