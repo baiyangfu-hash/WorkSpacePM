@@ -287,7 +287,8 @@ BEGIN
             io_arrAxis[AX_Z].stHalt.Execute := FALSE;
         ELSE
             io_arrAxis[AX_Z].stAbs.Execute := FALSE;
-            io_arrAxis[AX_Z].stHalt.Execute := s_bZGo;
+            // Hold 撤销了回原点命令而轴仍在回: 补一个 Halt (只撤 Execute 不会让轴停)
+            io_arrAxis[AX_Z].stHalt.Execute := s_bZGo OR (io_arrAxis[AX_Z].stHome.Busy AND (NOT s_bHomeZ));
         END_IF;
         IF s_bX1Go AND (NOT s_bHold) THEN
             io_arrAxis[AX_X1].stAbs.Position := s_rX1Target;
@@ -296,7 +297,8 @@ BEGIN
             io_arrAxis[AX_X1].stHalt.Execute := FALSE;
         ELSE
             io_arrAxis[AX_X1].stAbs.Execute := FALSE;
-            io_arrAxis[AX_X1].stHalt.Execute := s_bX1Go;
+            // Hold 撤销了回原点命令而轴仍在回: 补一个 Halt (只撤 Execute 不会让轴停)
+            io_arrAxis[AX_X1].stHalt.Execute := s_bX1Go OR (io_arrAxis[AX_X1].stHome.Busy AND (NOT s_bHomeX1));
         END_IF;
         IF s_bX2Go AND (NOT s_bHold) THEN
             io_arrAxis[AX_X2].stAbs.Position := s_rX2Target;
@@ -305,7 +307,8 @@ BEGIN
             io_arrAxis[AX_X2].stHalt.Execute := FALSE;
         ELSE
             io_arrAxis[AX_X2].stAbs.Execute := FALSE;
-            io_arrAxis[AX_X2].stHalt.Execute := s_bX2Go;
+            // Hold 撤销了回原点命令而轴仍在回: 补一个 Halt (只撤 Execute 不会让轴停)
+            io_arrAxis[AX_X2].stHalt.Execute := s_bX2Go OR (io_arrAxis[AX_X2].stHome.Busy AND (NOT s_bHomeX2));
         END_IF;
         io_arrAxis[AX_Z].stStop.Execute := FALSE;
         io_arrAxis[AX_X1].stStop.Execute := FALSE;

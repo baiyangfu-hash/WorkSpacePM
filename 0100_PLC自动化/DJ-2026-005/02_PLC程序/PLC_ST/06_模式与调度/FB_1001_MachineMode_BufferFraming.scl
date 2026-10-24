@@ -33,6 +33,7 @@ VAR
     s_bStopReq          : BOOL := FALSE;        // 停止请求 (HMI 停止 或 触摸屏 STOP 断开)
     s_bF12Latched       : BOOL := FALSE;        // F12 已锁存
     s_bPrepared         : BOOL := FALSE;        // 准备完成标志 (PRC 的 SM8044)
+    s_bResetPrev        : BOOL := FALSE;        // 上一扫描的复位键沿 (报警汇总在本 FB 之后, 晚一拍才看得到清除结果)
 END_VAR
 
 VAR CONSTANT
@@ -111,7 +112,8 @@ BEGIN
         io_stMachine.bManual := FALSE;
 
         // 回原点: 复位键 + 未回原点 + 非自动 / 准备 + 无非提示类报警
-        IF io_stAlarm.bReset AND (NOT io_stMachine.bHomeDone) AND (NOT io_stMachine.bHoming)
+        // 复位键沿当拍与下一拍都可启动: 报警汇总在本 FB 之后, 当拍的 bAny 还是清除前的值 (R-MODE-06 一次按键)
+        IF (io_stAlarm.bReset OR s_bResetPrev) AND (NOT io_stMachine.bHomeDone) AND (NOT io_stMachine.bHoming)
            AND (NOT io_stMachine.bPrepare) AND (NOT io_stMachine.bAuto) AND (NOT io_stAlarm.bAny) THEN
             io_stMachine.bHoming := TRUE;
         END_IF;
@@ -150,6 +152,8 @@ BEGIN
             io_stMachine.bStopPending := FALSE;
         END_IF;
     END_IF;
+
+    s_bResetPrev := io_stAlarm.bReset;
 
     (* ============ 4. 设备状态字 D116 与回写 HMI ============ *)
     // 异常 8 > 暂停 10 > 自动 5 > 准备 3 > 回原点 2 > 手动 1 > 待机 6

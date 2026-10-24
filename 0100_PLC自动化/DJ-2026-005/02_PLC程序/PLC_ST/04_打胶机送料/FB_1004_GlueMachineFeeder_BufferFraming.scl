@@ -127,6 +127,11 @@ BEGIN
     io_stFeed.bReqA := FALSE;
     io_stFeed.bReqB := FALSE;
 
+    // X102 取料完成沿: 步 3 期间无论 Hold / 暂停都要锁住, 否则暂停中来的一拍会丢, 小车永远等不到
+    IF (s_iStep = STEP_SEND) AND s_bPickDoneEdge THEN
+        s_bPickDoneLatch := TRUE;
+    END_IF;
+
     (* ============ 3. 步序 ============ *)
     IF (NOT io_stMachine.bAuto) OR io_stMachine.bFault THEN
         // 非自动或异常停机: 步序回 0, 清 Y44 / Y47 与轴命令
@@ -210,9 +215,6 @@ BEGIN
             STEP_SEND:
                 // 步 3: X2 在 D522 且 4 光电全亮 -> Y44 = 1 (任一光电灭即 0); 等打胶机取走
                 io_stFeed.bY44 := s_bAtFeed AND s_bEyesAll;
-                IF s_bPickDoneEdge THEN
-                    s_bPickDoneLatch := TRUE;
-                END_IF;
                 s_bEmptyIn := s_bEyesNone;
                 IF s_bEyesNone AND s_bPickDoneLatch THEN
                     s_bEmptyIn := FALSE;
