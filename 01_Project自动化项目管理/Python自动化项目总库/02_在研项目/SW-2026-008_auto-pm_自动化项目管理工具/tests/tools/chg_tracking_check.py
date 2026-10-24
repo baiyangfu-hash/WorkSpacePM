@@ -114,6 +114,11 @@ def check(repo: Path, ref: str, folders: list[str] | None = None) -> Report:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Paths here are Chinese; a pipe on Windows defaults to the machine code page (cp1252 on a CI runner) and the report
+    # would die with UnicodeEncodeError.  Callers read this output as UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     parser.add_argument("--repo", required=True, type=Path)
     parser.add_argument("--ref", default="HEAD")
