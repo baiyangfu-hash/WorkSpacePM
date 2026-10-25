@@ -29,6 +29,13 @@ def resolve_workspace(workspace_root: str | None = None) -> str:
 EXTERNAL_RUNTIME_MARKERS = (".cache/codex-runtimes", "/codex-runtimes/")
 
 
+def _same_version(recorded: str, running: str) -> bool:
+    """Compare version numbers part by part (3.12.1 is not 3.12.14); a short record such as 3.12 matches any 3.12.x."""
+
+    wanted = recorded.split(".")[:3]
+    return running.split(".")[: len(wanted)] == wanted
+
+
 def check_venv_base(
     prefix: str | None = None,
     base_prefix: str | None = None,
@@ -66,9 +73,9 @@ def check_venv_base(
         normalized = home.replace("\\", "/").lower()
         if any(marker in normalized for marker in EXTERNAL_RUNTIME_MARKERS):
             reasons.append(
-                f"底层 Python 在别的工具的缓存目录里：{home}；那个工具更新或清理后驾驶舱和门禁会一起坏，建议用固定安装的 Python 重建 .venv"
+                f"底层 Python 在 Codex 的运行时缓存目录里（目前只认这一种工具缓存）：{home}；那个工具更新或清理后驾驶舱和门禁会一起坏，建议用固定安装的 Python 重建 .venv"
             )
-    if recorded and not running.startswith(recorded) and not recorded.startswith(running):
+    if recorded and not _same_version(recorded, running):
         reasons.append(
             f".venv 记录的版本是 {recorded}，现在实际是 {running}：底层 Python 被换过，建议重建 .venv"
         )

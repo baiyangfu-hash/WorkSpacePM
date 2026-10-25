@@ -69,6 +69,19 @@ def test_a_replaced_base_python_is_reported_as_version_drift(tmp_path: Path) -> 
     assert any("3.12.13" in reason and "3.12.14" in reason for reason in result["reasons"])  # type: ignore[attr-defined]
 
 
+def test_version_is_compared_whole_not_by_prefix(tmp_path: Path) -> None:
+    home = tmp_path / "Python312"
+    home.mkdir()
+    drifted = _check(_venv(tmp_path, home, version="3.12.1"), home, running="3.12.14")
+    assert drifted["status"] == "warn"
+
+
+def test_a_short_recorded_version_still_matches_the_same_minor(tmp_path: Path) -> None:
+    home = tmp_path / "Python312"
+    home.mkdir()
+    assert _check(_venv(tmp_path, home, version="3.12"), home, running="3.12.14")["status"] == "ok"
+
+
 def test_an_unreadable_pyvenv_cfg_is_reported_not_ignored(tmp_path: Path) -> None:
     venv = tmp_path / ".venv"
     venv.mkdir()
