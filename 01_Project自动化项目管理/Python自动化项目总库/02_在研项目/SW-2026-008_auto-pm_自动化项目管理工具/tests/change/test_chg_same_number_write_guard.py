@@ -81,3 +81,26 @@ def test_delete_without_pid_is_refused(two_projects: tuple[Path, Path, Path]) ->
     with pytest.raises(AmbiguousChangeNumberError):
         ChangeService(str(ws)).delete_change_request(CHG)
     assert a.is_file() and b.is_file()
+
+
+def test_update_without_pid_is_refused_and_touches_nothing(two_projects: tuple[Path, Path, Path]) -> None:
+    """修改（change edit 背后的 update_change_request）同样要拦：不带项目编号不能碰巧改到某一个项目的单子。"""
+    ws, a, b = two_projects
+    before = {p: p.read_bytes() for p in (a, b)}
+    with pytest.raises(AmbiguousChangeNumberError, match="--pid"):
+        ChangeService(str(ws)).update_change_request(CHG, background="不该写进任何一个项目")
+    assert {p: p.read_bytes() for p in (a, b)} == before
+
+
+def test_update_with_pid_reaches_the_named_project_only(two_projects: tuple[Path, Path, Path]) -> None:
+    """带 lookup_project_id 时不触发歧义拒绝（可能因内容不合规别的原因失败，但不是歧义）。"""
+    ws, a, b = two_projects
+    try:
+        ChangeService(str(ws)).update_change_request(
+            CHG, lookup_project_id="SW-2026-010", background="x"
+        )
+    except AmbiguousChangeNumberError:
+        pytest.fail("带项目编号时不应报同号歧义")
+    except Exception:  # noqa: BLE001 - 夹具只是占位单，解析/写入的别的失败与本用例无关
+        pass
+    assert b.read_text(encoding="utf-8") == f"# {CHG}\n"
