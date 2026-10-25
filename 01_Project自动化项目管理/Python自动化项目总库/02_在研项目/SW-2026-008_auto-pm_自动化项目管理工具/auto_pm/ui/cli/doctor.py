@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import platform
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,55 @@ def resolve_workspace(workspace_root: str | None = None) -> str:
         return os.path.abspath(workspace_root)
     from auto_pm.app_context import AppContext
     return AppContext().workspace_root
+
+
+EXTERNAL_RUNTIME_MARKERS = (".cache/codex-runtimes", "/codex-runtimes/")
+
+
+def check_venv_base(
+    prefix: str | None = None,
+    base_prefix: str | None = None,
+    running_version: str | None = None,
+) -> dict[str, Any]:
+    """The virtual environment's base interpreter: is it still there, is it ours, is it the version recorded (TD pool 31).
+
+    A ``.venv`` keeps working only while the Python it was made from stays put.  When that Python lives in another tool's
+    cache (an AI tool's runtime folder) an update or a clean-up of that tool breaks the cockpit and the gates together,
+    so the check says so while everything still works.  Read-only; ``status`` is ok / warn / info.
+    """
+
+    prefix = sys.prefix if prefix is None else prefix
+    base_prefix = sys.base_prefix if base_prefix is None else base_prefix
+    running = platform.python_version() if running_version is None else running_version
+    if os.path.normcase(os.path.abspath(prefix)) == os.path.normcase(os.path.abspath(base_prefix)):
+        return {"status": "info", "reasons": ["没有在虚拟环境里运行"], "home": ""}
+    reasons: list[str] = []
+    home = ""
+    recorded = ""
+    cfg = Path(prefix) / "pyvenv.cfg"
+    try:
+        for line in cfg.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, _, value = line.partition("=")
+            key, value = key.strip().lower(), value.strip()
+            if key == "home":
+                home = value
+            elif key in ("version", "version_info"):
+                recorded = value
+    except OSError:
+        reasons.append(f"读不到 {cfg}，无法核对底层 Python")
+    if home:
+        if not Path(home).is_dir():
+            reasons.append(f"底层 Python 目录已不存在：{home}；.venv 马上就不能用了，需要重建")
+        normalized = home.replace("\\", "/").lower()
+        if any(marker in normalized for marker in EXTERNAL_RUNTIME_MARKERS):
+            reasons.append(
+                f"底层 Python 在别的工具的缓存目录里：{home}；那个工具更新或清理后驾驶舱和门禁会一起坏，建议用固定安装的 Python 重建 .venv"
+            )
+    if recorded and not running.startswith(recorded) and not recorded.startswith(running):
+        reasons.append(
+            f".venv 记录的版本是 {recorded}，现在实际是 {running}：底层 Python 被换过，建议重建 .venv"
+        )
+    return {"status": "warn" if reasons else "ok", "reasons": reasons, "home": home}
 
 
 def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
@@ -72,6 +122,8 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
 
     gh_installed, gh_logged_in = gh_status()
 
+    venv_base = check_venv_base()
+
     all_passed = py_ok and git_ok and sanitation_report.is_pure and all(dep_results.values())
 
     return {
@@ -85,6 +137,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
         "sanitation_issues": sanitation_report.total_issues,
         "gh_installed": gh_installed,
         "gh_logged_in": gh_logged_in,
+        "venv_base": venv_base,
         "all_passed": all_passed,
     }
 
@@ -131,6 +184,12 @@ def doctor_command(workspace: str | None) -> None:
     else:
         gh_row = ("[green]✅ 已登录[/green]", "可用 `main.py pr open`")
     table.add_row("GitHub 命令行 gh", *gh_row)
+
+    venv = res["venv_base"]
+    if venv["status"] == "warn":
+        table.add_row("虚拟环境底层 Python", "[yellow]⚠️ 注意[/yellow]", "；".join(venv["reasons"]))
+    elif venv["status"] == "ok":
+        table.add_row("虚拟环境底层 Python", "[green]✅ PASS[/green]", venv["home"])
 
     console.print(table)
 
