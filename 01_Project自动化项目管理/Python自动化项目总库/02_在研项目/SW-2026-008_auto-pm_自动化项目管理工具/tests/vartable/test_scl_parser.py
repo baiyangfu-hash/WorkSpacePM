@@ -393,8 +393,8 @@ class TestSclParserRealSamples:
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_1003_PickPlace_BufferFraming"
         assert vt.metadata["var_block_count"] == 3
-        # VAR_IN_OUT(6) + VAR(89) + VAR CONSTANT(13, 常量类) = 108
-        assert vt.total_count == 108
+        # VAR_IN_OUT(6) + VAR(96) + VAR CONSTANT(13, 常量类) = 115（取料模式切换新增 7 个 VAR）
+        assert vt.total_count == 115
         assert sum(1 for e in vt.entries if e.station == "VAR_CONSTANT") == 13
         # VAR_IN_OUT 块识别 (FB_1003 与 FB_1004 是含 VAR_IN_OUT 最多的样例)
         in_out_entries = [e for e in vt.entries if e.station == "VAR_IN_OUT"]
