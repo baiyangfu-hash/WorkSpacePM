@@ -78,10 +78,8 @@ def test_known_violations_are_still_present() -> None:
 
 def test_gate_detects_a_violation(tmp_path: Path) -> None:
     (tmp_path / "domain").mkdir()
-    (tmp_path / "domain" / "bad.py").write_text("import auto_pm.infrastructure.x
-import auto_pm.contracts.y
-", encoding="utf-8")
+    bad = "import auto_pm.infrastructure.x\nimport auto_pm.contracts.y\n"
+    (tmp_path / "domain" / "bad.py").write_text(bad, encoding="utf-8")
     (tmp_path / "ui").mkdir()
-    (tmp_path / "ui" / "ok.py").write_text("from auto_pm.application import z
-", encoding="utf-8")
+    (tmp_path / "ui" / "ok.py").write_text("from auto_pm.application import z\n", encoding="utf-8")
     assert _violations(tmp_path) == {("domain/bad.py", "infrastructure")}
