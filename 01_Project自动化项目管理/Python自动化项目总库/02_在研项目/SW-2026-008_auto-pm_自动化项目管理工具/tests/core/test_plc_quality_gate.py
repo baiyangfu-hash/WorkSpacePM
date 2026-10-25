@@ -543,3 +543,24 @@ def test_p18_a_python_quality_command_that_never_ends_fails_with_a_timeout(
 
     assert gate.exit_code is None and not gate.passed
     assert "timeout" in gate.output_summary
+
+
+def test_p19_a_git_evidence_call_is_bounded_and_a_timeout_is_a_clear_collection_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    from auto_pm.application.core import evidence_collection_service as module
+
+    seen: dict[str, Any] = {}
+
+    def hung(command: list[str], **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(module.subprocess, "run", hung)
+
+    with pytest.raises(EvidenceCollectionError, match="采集超过"):
+        EvidenceCollectionService._git_output(tmp_path, "status")
+
+    assert seen["timeout"] == module._GIT_EVIDENCE_TIMEOUT_SECONDS > 0
