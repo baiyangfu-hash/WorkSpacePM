@@ -129,3 +129,20 @@ def test_script_does_not_modify_inputs(tmp_path: Path) -> None:
     before = flow.read_bytes()
     fig.main(["--diagram", str(flow)])
     assert flow.read_bytes() == before
+
+
+def test_bracket_inside_quotes_is_not_an_unbalanced_bracket(tmp_path: Path) -> None:
+    flow = _write(
+        tmp_path,
+        "f.md",
+        '```mermaid\ngraph TD\n    A["a ( b"] --> B["c ] d"]\n```\n',
+    )
+    assert [f for block in fig.extract_blocks(flow) for f in fig.check_block(block)] == []
+
+
+def test_io_prefixed_signal_is_checked_against_the_tables(tmp_path: Path) -> None:
+    flow = _write(tmp_path, "f.md", "```mermaid\ngraph TD\n    A[io_Door 开] --> B[done]\n```\n")
+    inter = _write(tmp_path, "i.md", "| 变量名 |\n|---|\n| `i_bSensor` |\n")
+    var = _write(tmp_path, "v.md", "| 名字 |\n|---|\n| `bStart` |\n")
+    findings = fig.check_documents([flow], [inter], [var])
+    assert any("io_Door" in str(item) for item in findings)
