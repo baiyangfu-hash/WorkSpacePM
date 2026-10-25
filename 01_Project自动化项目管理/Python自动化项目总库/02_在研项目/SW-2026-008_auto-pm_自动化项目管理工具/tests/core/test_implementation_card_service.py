@@ -267,6 +267,31 @@ def test_external_approval_advances_two_legal_edges_without_decision_creation(
     assert service.load("CARD-TEST-002").state is CardState.APPROVED
 
 
+def test_dispatch_rejects_an_expired_deadline_without_changing_the_card(
+    governed_candidate: tuple[Path, Path, str],
+) -> None:
+    """TD-SW008-090 余项：截止时间已过就拒绝派发，卡仍停在 APPROVED，字节不变。
+
+    与夹具改成相对时间配套：期限随真实时间漂移时测试不能静默变红，而过期这个分支要有自己的负向用例。
+    """
+    root, candidate, base = governed_candidate
+    establish_authority(root, candidate, base, running=True)
+    service = ImplementationCardService(root)
+    card = complete_draft(candidate, base)
+    expired = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+    card = card.model_copy(update={"stop_lines": card.stop_lines.model_copy(update={"deadline_utc": expired})})
+    service.create(card)
+    service.approve(card.card_id, approver="fubai", approval_evidence=card.evidence.decision_id)
+    target = service.directory / f"{card.card_id}.json"
+    original = target.read_bytes()
+    outside_before = outside_card_bytes(root)
+    with pytest.raises(ImplementationCardError, match="execution deadline has passed"):
+        service.dispatch(card.card_id)
+    assert service.load(card.card_id).state is CardState.APPROVED
+    assert target.read_bytes() == original
+    assert outside_card_bytes(root) == outside_before
+
+
 def test_checkpoint_requires_gate_receipt_and_current_bytes(tmp_path: Path) -> None:
     source = tmp_path / "project" / "file.py"
     source.parent.mkdir()
