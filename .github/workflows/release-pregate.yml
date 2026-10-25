@@ -70,7 +70,7 @@ jobs:
             tests/constraint tests/config tests/logging tests/e2e tests/ui \
             tests/test_bug1_get_project_path.py tests/test_bug2_sync_changes.py tests/test_bug4_retrofit_src_path.py \
             tests/test_bug5_scan_depth.py tests/test_fixture_health.py tests/test_import.py tests/test_pm_session_size.py \
-            tests/test_smoke.py \
+            tests/test_smoke.py tests/test_layer_import_direction.py \
             --ignore=tests/e2e/test_closure_drill.py --ignore=tests/e2e/test_closure_drill_agent_misconduct.py \
             --ignore=tests/e2e/test_release_pycache_drill.py --ignore=tests/e2e/test_trial_run_drill.py
           run_group application tests/application
