@@ -91,7 +91,7 @@ domain: plc
 
 门锁是电磁锁（得电解锁、失电锁定），门锁点只有“关好且锁住”一个，所以“门开着按复位不采纳”用“撤销解锁后 1 s 内锁住没回来就恢复解锁”实现（T11）。锁门的这一下复位不算第一次复位（那一拍门还没锁住，按第 4 节报 bit29），锁好后再按两次复位 + 启动。
 
-## 7. 调用示例（009，见 DJ-2026-009 OB1 安全部分）
+## 7. 调用示例（示例写法；项目接线以各项目自己的 OB1 为准）
 
 ```
 fbSafety(i_arrSafetyFault := arrSafetyFault, i_arrEStopOk := arrEStopOk, i_arrCurtainOk := arrCurtainOk,
@@ -107,6 +107,6 @@ fbSafety(i_arrSafetyFault := arrSafetyFault, i_arrEStopOk := arrEStopOk, i_arrCu
 
 | 层 | 做法 | 结果 |
 |:---|:---|:---|
-| 云端逻辑仿真 | `reviews/tools/st_mini_sim.py` 直接执行本 .scl，仿真时钟按真实毫秒；`reviews/tools/test_fb1030_safety_manager.py` 设计草案 T1～T13 + 边界共 25 条 + 8 种变异反证 | 33 条全过（2026-10-22） |
+| 云端逻辑仿真 | `reviews/tools/st_mini_sim.py` 直接执行本 .scl，仿真时钟按真实毫秒；`reviews/tools/test_fb1030_safety_manager.py` 设计草案 T1～T13 + 边界共 25 条 + 8 种变异反证；审计 154 后补 4 个继电器、8 扇门、8 个急停点和光栅逐个触发的参数化用例 | 全过（2026-10-25） |
 | 测试台 | `DJ-2026-000/Test/safety_manager_test.scltest`（不靠计时的 T1、T2、T7～T13 等） | 云端跑不了，本机 LSP 跑 |
 | InoProShop 仿真 | 用例单见分支说明，T1～T13 逐条（含 10 s 计时） | 待用户 D09 后做，100% 过才签字 |

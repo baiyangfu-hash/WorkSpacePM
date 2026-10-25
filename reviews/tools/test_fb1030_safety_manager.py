@@ -304,6 +304,47 @@ def test_t13_second_relay_fault(m: Machine) -> None:
     m.bring_to_run()
 
 
+@pytest.mark.parametrize("idx", range(4))
+def test_each_relay_fault_stops_and_alarms_its_own_bit(m: Machine, idx: int) -> None:
+    """4 个安全继电器逐个故障: 同一扫描停机, 只亮自己那一位 (bit24~27), 反馈恢复前复位不采纳 (审计 154)。"""
+    m.bring_to_run()
+    m.set("i_arrSafetyFault", True, idx)
+    m.scan()
+    assert not m.out("q_bSafeToRun") and m.out("q_bStopNow") and m.state == 0
+    assert m.alarm(24 + idx)
+    assert not any(m.alarm(24 + j) for j in range(4) if j != idx)
+    m.set("i_arrSafetyFault", False, idx)
+    m.bring_to_run()
+
+
+@pytest.mark.parametrize("idx", range(8))
+def test_each_door_open_stops_and_alarms_its_own_bit(m: Machine, idx: int) -> None:
+    """8 扇门逐个没关好: 运行中同一扫描停机, 只亮自己那一位 (bit8~15), 关好重新复位启动才恢复 (审计 154)。"""
+    m.bring_to_run()
+    m.set("i_arrDoorClosed", False, idx)
+    m.scan()
+    assert not m.out("q_bSafeToRun") and m.out("q_bStopNow") and m.state == 0
+    assert m.alarm(8 + idx)
+    assert not any(m.alarm(8 + j) for j in range(8) if j != idx)
+    m.set("i_arrDoorClosed", True, idx)
+    m.scan()
+    assert not m.out("q_bSafeToRun")       # 门关好本身不放行, 必须两次复位 + 启动
+    m.bring_to_run()
+
+
+@pytest.mark.parametrize("idx", range(8))
+def test_each_estop_and_curtain_point_alarms_its_own_bit(m: Machine, idx: int) -> None:
+    """8 个急停点、8 道光栅逐个触发: 只报警定位自己那一位, 本身不停机 (bit0~7、bit16~23)。"""
+    m.bring_to_run()
+    m.set("i_arrEStopOk", False, idx)
+    m.set("i_arrCurtainOk", False, idx)
+    m.scan()
+    assert m.alarm(idx) and m.alarm(16 + idx)
+    assert not any(m.alarm(j) for j in range(8) if j != idx)
+    assert not any(m.alarm(16 + j) for j in range(8) if j != idx)
+    assert m.out("q_bSafeToRun")
+
+
 # ------------------------------------------------------------------ T9～T11 门锁
 
 def test_t9_request_in_auto_ignored(m: Machine) -> None:
@@ -403,6 +444,14 @@ MUTATIONS = {
         "IF t_bFault OR NOT i_bFieldbusOk THEN",
     ),
     "启动不需要": ("s_iState := ST_WAIT_START;", "s_iState := ST_RUN;"),
+    "第 4 个继电器不监视": (
+        "FOR t_iIdx := 0 TO 3 DO\n        t_bFault := t_bFault OR",
+        "FOR t_iIdx := 0 TO 2 DO\n        t_bFault := t_bFault OR",
+    ),
+    "第 8 扇门不监视": (
+        "FOR t_iIdx := 0 TO 7 DO\n        t_bDoorsOk := t_bDoorsOk AND",
+        "FOR t_iIdx := 0 TO 6 DO\n        t_bDoorsOk := t_bDoorsOk AND",
+    ),
     "动作没停就解锁": ("ELSIF i_bMotionStopped THEN", "ELSE"),
     "门开着按复位也锁回": ("s_arrDoorStep[t_iIdx] := DOOR_UNLOCKED;\n                END_IF;\n\n            ELSE", "s_arrDoorStep[t_iIdx] := DOOR_RELOCK;\n                END_IF;\n\n            ELSE"),
 }
@@ -423,6 +472,8 @@ CHECKS = [
     test_t1_fault_stops_same_scan,
     test_t13_second_relay_fault,
     test_t11_close_door_reset_relocks_then_two_resets,
+    lambda m: test_each_relay_fault_stops_and_alarms_its_own_bit(m, 3),
+    lambda m: test_each_door_open_stops_and_alarms_its_own_bit(m, 7),
 ]
 
 
