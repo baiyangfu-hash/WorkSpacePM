@@ -33,11 +33,28 @@ class DatabaseManager:
     DB_DIR = ".auto-pm"
     DB_FILE = "index.db"
 
+    _DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
+
     def __init__(self, workspace_root: str) -> None:
         self.workspace_root = os.path.abspath(workspace_root)
+        self._reject_db_path_as_root(self.workspace_root)
         self.db_dir = os.path.join(self.workspace_root, self.DB_DIR)
         self.db_path = os.path.join(self.db_dir, self.DB_FILE)
         self._conn: sqlite3.Connection | None = None
+
+    @classmethod
+    def _reject_db_path_as_root(cls, workspace_root: str) -> None:
+        """工作空间根目录不能是数据库文件路径或 ``.auto-pm`` 目录本身（TD-SW008-183）。
+
+        否则会在它下面再建一层 ``.auto-pm/index.db``，出现 ``.auto-pm/auto-pm.db/.auto-pm/index.db`` 这种嵌套库
+        （PR #47 清掉的两个残留之一）。所有 ``-w`` 路径、GUI 切换工作空间都经过这里，在这一处拦。
+        """
+        name = os.path.basename(workspace_root.rstrip("\\/")).lower()
+        if name.endswith(cls._DB_SUFFIXES) or name == cls.DB_DIR or os.path.isfile(workspace_root):
+            raise ValueError(
+                f"工作空间根目录不能是数据库文件或 {cls.DB_DIR} 目录本身: {workspace_root}；"
+                "请指向包含 .auto-pm 的上一级目录"
+            )
 
     def _ensure_dir(self) -> None:
         """确保 DB 目录存在"""

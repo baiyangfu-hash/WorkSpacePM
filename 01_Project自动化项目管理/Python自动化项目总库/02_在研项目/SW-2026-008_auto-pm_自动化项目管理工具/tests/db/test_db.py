@@ -382,3 +382,27 @@ class TestProjectServiceCache:
         assert proj.stack == "plc"
 
         assert svc.get_project_cached("NOT-EXIST") is None
+
+
+class TestDatabaseManagerRejectsDbPathAsRoot:
+    """TD-SW008-183：数据库文件路径或 .auto-pm 目录不能当工作空间根目录"""
+
+    @pytest.mark.parametrize("name", ["auto-pm.db", "index.db", "ledger.SQLITE", ".auto-pm"])
+    def test_rejects_db_like_names(self, tmp_path: Path, name: str) -> None:
+        target = tmp_path / ".auto-pm" / name if name != ".auto-pm" else tmp_path / name
+        target.mkdir(parents=True)
+        with pytest.raises(ValueError, match="工作空间根目录"):
+            DatabaseManager(str(target))
+        assert not (target / ".auto-pm").exists()
+
+    def test_rejects_an_existing_file(self, tmp_path: Path) -> None:
+        file_path = tmp_path / "workspace"
+        file_path.write_text("x", encoding="utf-8")
+        with pytest.raises(ValueError, match="工作空间根目录"):
+            DatabaseManager(str(file_path))
+
+    def test_accepts_normal_workspaces_including_managed_worktrees(self, tmp_path: Path) -> None:
+        worktree = tmp_path / ".auto-pm" / "worktrees" / "claude"
+        worktree.mkdir(parents=True)
+        assert DatabaseManager(str(worktree)).db_path.endswith("index.db")
+        assert DatabaseManager(str(tmp_path / "not-yet-created")).db_dir.endswith(".auto-pm")

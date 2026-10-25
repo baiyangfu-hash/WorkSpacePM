@@ -77,3 +77,14 @@ def test_default_window_never_imports_legacy_write_side_effects() -> None:
         "qml_main_window",
     ):
         assert prohibited not in source
+
+
+def test_advanced_gui_refuses_a_database_path_as_workspace_without_a_traceback(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    """TD-SW008-183：`-w` 指到 .db 路径时专业工作台给人话并返回非零，不抛堆栈，也不在里面建 .auto-pm。"""
+    from auto_pm.ui.qml_main_window import run_qml_gui
+
+    bad = tmp_path / "auto-pm.db"
+    bad.mkdir()
+    assert run_qml_gui(str(bad)) == 2
+    assert "工作空间根目录不能是数据库文件" in capsys.readouterr().err
+    assert not (bad / ".auto-pm").exists()
