@@ -98,12 +98,14 @@ class TestPathHelpers:
         assert result == expected
 
     def test_get_change_requests_paths(self, tmp_path: Path) -> None:
-        """获取变更单存放目录路径（5大过程组统一路径，单元素）"""
+        """获取变更单存放目录路径候选：标准 04_监控 在前，旧布局 11_监控 在后（TD-SW008-191）"""
         paths = get_change_requests_paths(str(tmp_path))
-        assert len(paths) == 1
+        assert len(paths) == 2
         assert "04_监控" in paths[0]
         assert "01_变更管理" in paths[0]
         assert "01_变更单" in paths[0]
+        assert "11_监控" in paths[1]
+        assert paths[1].endswith(os.path.join("11_监控", "01_变更管理", "01_变更单"))
 
     def test_get_change_records_paths(self, tmp_path: Path) -> None:
         """获取变更记录存放目录路径（5大过程组统一路径，单元素）"""
