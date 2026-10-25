@@ -13,9 +13,25 @@ class ControlRootGuardError(RuntimeError):
 
 
 def clean_git_environment() -> dict[str, str]:
-    """Copy the process environment without caller-controlled Git repository overrides."""
+    """Copy the process environment without caller-controlled Git repository overrides.
 
-    return {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    The only ``GIT_`` variables that survive are ours: they switch off ``core.safecrlf`` so that Git's advisory
+    "LF will be replaced by CRLF" notice cannot masquerade as a diagnostic.  Every caller rejects any stderr output
+    as "Git facts contain diagnostics", and without this a repository whose line-ending settings differ from the
+    working copy would reject every verification (TD-SW008-050).  Real diagnostics are unaffected.
+    """
+
+    environment = {
+        key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
+    }
+    environment.update(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.safecrlf",
+            "GIT_CONFIG_VALUE_0": "false",
+        }
+    )
+    return environment
 
 
 def _canonical_key(path: Path) -> str:
