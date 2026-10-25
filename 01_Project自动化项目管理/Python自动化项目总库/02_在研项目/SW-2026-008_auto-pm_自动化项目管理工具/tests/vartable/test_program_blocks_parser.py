@@ -5,6 +5,7 @@ ProgramBlocksParser.parse()
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -154,22 +155,35 @@ class TestProgramBlocksParserFieldValidation:
         assert result.block_table.block_types == ("DB", "OB")
 
 
+def _declared_names(path: Path) -> list[str]:
+    """独立于解析器：按行扫出 yml 里每个 `- name: "…"` 条目的名字（不写死个数）。"""
+    pattern = re.compile(r'^\s*-\s+name:\s*"?([^"\s#]+)"?')
+    names: list[str] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = pattern.match(line)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
 class TestProgramBlocksParserReal:
     def test_parse_real_dj_2026_005(
         self, real_dj_2026_005_program_blocks: Path
     ) -> None:
-        """解析真实 DJ-2026-005 program_blocks.yml（7 个 block）"""
+        """解析真实 DJ-2026-005 program_blocks.yml：个数和首条与文件逐行核对，不写死数字。"""
+        declared = _declared_names(real_dj_2026_005_program_blocks)
+        assert declared, "program_blocks.yml 不应为空"
         result = ProgramBlocksParser().parse(real_dj_2026_005_program_blocks)
         assert result.success
         assert result.block_table is not None
-        assert result.block_table.total_count == 7
+        assert result.block_table.total_count == len(declared)
         assert result.error_count == 0
         # 块类型
         assert "OB" in result.block_table.block_types
         assert "DB" in result.block_table.block_types
         assert "FB" in result.block_table.block_types
         # 首条目
-        assert result.block_table.entries[0].block_name == "OB1"
+        assert result.block_table.entries[0].block_name == declared[0]
         assert result.block_table.entries[0].block_type == "OB"
         # 元数据
         assert result.block_table.metadata["project_id"] == "DJ-2026-005"
