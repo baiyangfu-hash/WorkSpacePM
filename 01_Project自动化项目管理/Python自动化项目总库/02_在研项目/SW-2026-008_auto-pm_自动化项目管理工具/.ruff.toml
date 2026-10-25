@@ -49,18 +49,6 @@ ignore = [
     "N803",  # Qt/QML 允许驼峰命名参数名
     "B008",  # Qt 模型接口（如 rowCount）允许默认参数调用 QModelIndex()
 ]
-"auto_pm/modbus/**/*.py" = [
-    "N802",  # Modbus Bridge 允许与 QML 契约相同的驼峰命名 Slot
-    "N815",  # Modbus Bridge 允许驼峰信号/槽定义
-    "N803",  # Modbus Bridge 允许驼峰参数名
-]
-"auto_pm/domain/modbus/modbus_bridge.py" = [
-    "N802",  # QML 暴露的 Modbus Slot 保持既有 camelCase 契约
-    "N815",  # QML 暴露的 Modbus Signal 保持既有 camelCase 契约
-]
-"auto_pm/domain/modbus/modbus_service.py" = [
-    "N802",  # 保持既有 Modbus/QML 公共方法契约
-]
 "auto_pm/logging/logging.py" = [
     "N802",  # Handler.handleError 允许重写 stdlib camelCase 方法
 ]

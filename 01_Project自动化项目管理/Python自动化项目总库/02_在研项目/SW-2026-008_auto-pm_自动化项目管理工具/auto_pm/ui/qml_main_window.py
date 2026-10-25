@@ -41,7 +41,6 @@ from PySide6.QtQuickControls2 import QQuickStyle
 
 from auto_pm.change.change_service import ChangeService
 from auto_pm.core.project_service import ProjectService
-from auto_pm.modbus.modbus_bridge import ModbusBridge  # Modbus 联调工坊 Bridge
 from auto_pm.ui.factories import (
     make_asset_summary_service,
     make_dashboard_service,
@@ -183,7 +182,6 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
     ai_context_bridge = AiContextBridge(workspace_root=workspace_root)
     project_model = ProjectListModel()
     var_table_model = VarTableModel()
-    modbus_bridge = ModbusBridge()  # Modbus 联调工坊 Bridge（无依赖 Service，直接实例化）
     # FileWatcherBridge：监听业务文件变化 → 后台 sync_to_cache → syncFinished 驱动 QML 刷新
     # 消除 CLI 改文件后 GUI 缓存鸿沟（CHG-SCPT-2026-141）。自建 DB 连接，不依赖共享 db。
     file_watcher_bridge = FileWatcherBridge(workspace_root)
@@ -315,7 +313,6 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
     engine.rootContext().setContextProperty("systemBridge", system_bridge)
     engine.rootContext().setContextProperty("projectModel", project_model)
     engine.rootContext().setContextProperty("varTableModel", var_table_model)
-    engine.rootContext().setContextProperty("modbusBridge", modbus_bridge)  # Modbus 联调工坊
     engine.rootContext().setContextProperty("aiContextBridge", ai_context_bridge)  # AI 上下文桥接
     engine.rootContext().setContextProperty("fileWatcherBridge", file_watcher_bridge)  # 文件监听同步
 

@@ -15,7 +15,7 @@
 | 模块分类 | 包含功能 | 成熟度等级 | 说明 |
 | :--- | :--- | :---: | :--- |
 | **Core 核心** | 项目 CRUD、PLC 规范检查、变更管理状态机、QML 桌面驾驶舱、SQLite 缓存 | `[Stable 稳定]` | 核心主线，经过长周期 dogfooding 全量回归验证 |
-| **Optional 工具箱** | Modbus TCP 联调工坊、模板增量更新、变量表多格式转换 | `[Toolbox 可选]` | 通用工坊/工具箱能力，按需使用 |
+| **Optional 工具箱** | 模板增量更新、变量表多格式转换 | `[Toolbox 可选]` | 通用工坊/工具箱能力，按需使用 |
 | **Experimental 实验性** | 约束工作流自愈系统 (Workflow Engine) | `[Experimental 实验]` | 自动守护与修复实验性扩展 |
 
 ## 环境诊断与自检 (Doctor)
@@ -274,7 +274,6 @@ auto-pm/
 ├── tests/                          # 测试（1761 项，2026-09-06 实测；含 application/change/core/db/plc/spec/qml/workflow 等）
 │   ├── plc/                        # PLC 规范检查测试
 │   ├── spec/                       # 规范中心测试（SHC-001~017）
-│   ├── modbus/                     # Modbus 通信测试
 │   └── ...                         # 其余领域测试
 ├── 01_启动/                        # 章程/立项/发布门禁
 ├── 02_规划/                        # PRD/INT/DSN/TEC/里程碑/原型
