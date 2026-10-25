@@ -472,3 +472,74 @@ def test_p16_warnings_do_not_fail_the_gate_but_stay_in_the_recorded_output(
     assert receipt.status == "PASS"
     assert "warn | .plc.json libraries" in receipt.gates[0].output_summary
     assert "fail=0" in receipt.gates[0].output_summary
+
+
+def test_p15_a_wedged_gate_fails_with_a_timeout_instead_of_hanging_the_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from auto_pm.application.core import evidence_collection_service as module
+
+    release = threading.Event()
+    workspace, candidate, baseline = plc_workspace(tmp_path)
+    run = plc_run(candidate, baseline, (SCL,))
+
+    def wedged(*_: Any, **__: Any) -> tuple[str, int | None]:
+        release.wait(30)
+        return "never", 0
+
+    monkeypatch.setattr(module, "_scl_lint_output", wedged)
+    monkeypatch.setenv("AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS", "0.3")
+    try:
+        receipt = _service(workspace).run_plc_checkpoint_quality_gates(run, candidate)
+    finally:
+        release.set()
+
+    lint = next(gate for gate in receipt.gates if gate.name == "scl-lint")
+    assert lint.exit_code is None
+    assert "timeout" in lint.output_summary and "0.3" in lint.output_summary
+    assert receipt.status == "FAIL"
+
+
+@pytest.mark.parametrize("raw", ["", "abc", "0", "-5"])
+def test_p16_an_unusable_timeout_setting_falls_back_to_the_default(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    from auto_pm.application.core import evidence_collection_service as module
+
+    monkeypatch.setenv("AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS", raw)
+
+    assert module._quality_gate_timeout_seconds() == module._QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
+
+
+def test_p17_a_gate_that_raises_still_reports_a_launch_error_not_a_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core import evidence_collection_service as module
+
+    workspace, candidate, baseline = plc_workspace(tmp_path)
+    run = plc_run(candidate, baseline, (SCL,))
+
+    def broken(*_: Any, **__: Any) -> tuple[str, int | None]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(module, "_scl_lint_output", broken)
+    receipt = _service(workspace).run_plc_checkpoint_quality_gates(run, candidate)
+
+    lint = next(gate for gate in receipt.gates if gate.name == "scl-lint")
+    assert lint.exit_code is None and "launch error: boom" in lint.output_summary
+
+
+def test_p18_a_python_quality_command_that_never_ends_fails_with_a_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    monkeypatch.setenv("AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS", "0.5")
+    gate = EvidenceCollectionService._run_quality_gate(
+        "pytest", (sys.executable, "-c", "import time; time.sleep(60)"), tmp_path, None
+    )
+
+    assert gate.exit_code is None and not gate.passed
+    assert "timeout" in gate.output_summary

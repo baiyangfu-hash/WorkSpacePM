@@ -15,7 +15,9 @@ import os
 import subprocess
 import sys
 import tarfile
+import threading
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
@@ -35,6 +37,9 @@ _C03_CHECKPOINT_PYTEST_TARGET = "tests/core/test_continuity_execution_service.py
 _PLC_CHECKPOINT_SCHEMA = "checkpoint-evidence.v3"
 _PLC_CHECK_COMMAND = "auto_pm.plc.checker.PlcChecker.check_project"
 _PLC_LINT_COMMAND = "auto_pm.plc.scl_linter.SclLinter.lint_file"
+_QUALITY_GATE_TIMEOUT_ENV = "AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS"
+_QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS = 1800.0
+_GIT_EVIDENCE_TIMEOUT_SECONDS = 600.0
 _PLC_MIXED_DOMAIN_ERROR = "Run 同时拥有 PLC 工程路径与 Python 路径；一个 Run 只验证一个领域"
 
 
@@ -995,15 +1000,21 @@ class EvidenceCollectionService:
 
     @staticmethod
     def _git_output(candidate: Path, *arguments: str) -> str:
-        result = subprocess.run(
-            ["git", "-C", str(candidate), *arguments],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            env=clean_git_environment(),
-        )
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(candidate), *arguments],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                env=clean_git_environment(),
+                timeout=_GIT_EVIDENCE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise EvidenceCollectionError(
+                f"Run worktree Git evidence 采集超过 {_GIT_EVIDENCE_TIMEOUT_SECONDS:g} 秒没有结束"
+            ) from error
         if result.returncode != 0 or result.stderr.strip():
             details = result.stderr.strip() or result.stdout.strip() or "unknown git error"
             raise EvidenceCollectionError(f"Run worktree Git evidence 采集失败: {details}")
@@ -1131,9 +1142,13 @@ class EvidenceCollectionService:
                     errors="replace",
                     check=False,
                     env=environment,
+                    timeout=_quality_gate_timeout_seconds(),
                 )
             output = f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
             exit_code: int | None = result.returncode
+        except subprocess.TimeoutExpired as error:
+            output = f"timeout: 质量门超过 {error.timeout:g} 秒没有结束，这次检查不算数"
+            exit_code = None
         except OSError as error:
             output = f"launch error: {error}"
             exit_code = None
@@ -1568,11 +1583,16 @@ class EvidenceCollectionService:
     ) -> PythonQualityGate:
         """Execute one in-process PLC gate and bind its full output by digest."""
 
-        try:
+        def judge() -> tuple[str, int | None]:
             if name == "plc-check":
-                output, exit_code = _plc_check_output(candidate, root, baseline)
-            else:
-                output, exit_code = _scl_lint_output(root, project.scl_paths, baseline)
+                return _plc_check_output(candidate, root, baseline)
+            return _scl_lint_output(root, project.scl_paths, baseline)
+
+        try:
+            output, exit_code = _run_bounded(judge, _quality_gate_timeout_seconds())
+        except _PlcGateTimeoutError as error:
+            output = f"timeout: {error}"
+            exit_code = None
         except Exception as error:
             output = f"launch error: {error}"
             exit_code = None
@@ -1888,6 +1908,49 @@ def _with_anchor(note: str, baseline: _PlcBaseline | None) -> str:
 def _baseline_title(baseline: _PlcBaseline | None) -> str:
     head = baseline.git_head[:12] if baseline else "?"
     return f"和 Run 开工基线 {head} 逐条比"
+
+
+class _PlcGateTimeoutError(Exception):
+    """Raised when an in-process PLC gate does not answer within its wall-clock bound."""
+
+
+def _quality_gate_timeout_seconds() -> float:
+    """Return the per-gate bound shared by the Python and PLC gates; ``AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS`` overrides the default."""
+
+    raw = os.environ.get(_QUALITY_GATE_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return _QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return _QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
+    return value if value > 0 else _QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
+
+
+def _run_bounded(work: Callable[[], tuple[str, int | None]], seconds: float) -> tuple[str, int | None]:
+    """Run an in-process gate on a daemon thread and fail clearly if it outlives ``seconds``.
+
+    Python cannot kill a thread, so a wedged check is abandoned (daemon, read-only) and the
+    gate is reported as not run; it can never hold the whole verification forever.
+    """
+
+    outcome: list[tuple[str, int | None]] = []
+    failure: list[BaseException] = []
+
+    def target() -> None:
+        try:
+            outcome.append(work())
+        except BaseException as error:  # re-raised on the caller's thread below
+            failure.append(error)
+
+    worker = threading.Thread(target=target, name="plc-quality-gate", daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise _PlcGateTimeoutError(f"PLC 质量门超过 {seconds:g} 秒没有结束，这次检查不算数")
+    if failure:
+        raise failure[0]
+    return outcome[0]
 
 
 def _plc_check_output(
