@@ -519,16 +519,13 @@ class PmClosureSagaCoordinator:
         project_path = self._resolve_project_path(project_id, target_chg_id)
 
         from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
-        from auto_pm.domain.change.path_resolver import find_ledger_file
+        from auto_pm.domain.change.path_resolver import default_ledger_path, find_ledger_file
 
         existing_ledger = find_ledger_file(str(project_path))
         if existing_ledger:
             self._backup_file(saga_data, Path(existing_ledger))
         else:
-            default_ledger = (
-                project_path / "04_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台账.md"
-            )
-            self._backup_file(saga_data, default_ledger)
+            self._backup_file(saga_data, Path(default_ledger_path(str(project_path))))
 
         reconciler = LedgerReconciler()
         diff = reconciler.reconcile(str(project_path))

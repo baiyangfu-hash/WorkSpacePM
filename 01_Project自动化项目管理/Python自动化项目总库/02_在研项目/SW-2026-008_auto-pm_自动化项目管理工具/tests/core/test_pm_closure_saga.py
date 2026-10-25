@@ -558,3 +558,35 @@ def test_cli_saga_commands(project_setup: Mapping[str, Any]) -> None:
     assert res_comp.exit_code == 0
     comp_json = json.loads(res_comp.output)
     assert comp_json["status"] == "compensated"
+
+
+def test_ledger_step_backs_up_legacy_layout_default_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TD-SW008-187：台账不存在时，备份用的默认路径按项目实际监控目录布局求，不写死 04_监控。"""
+    project = tmp_path / "proj"
+    (project / "11_监控").mkdir(parents=True)
+    coordinator = PmClosureSagaCoordinator(tmp_path)
+    monkeypatch.setattr(coordinator, "_resolve_target_chg_id", lambda merged: "CHG-PLC-2026-001")
+    monkeypatch.setattr(coordinator, "_resolve_project_path", lambda pid, chg: project)
+
+    class _CleanDiff:
+        is_clean = True
+
+        def summary(self) -> str:
+            return "clean"
+
+    class _FakeReconciler:
+        def reconcile(self, path: str) -> _CleanDiff:
+            return _CleanDiff()
+
+    monkeypatch.setattr(
+        "auto_pm.domain.change.ledger_reconciler.LedgerReconciler", _FakeReconciler
+    )
+    saga_data: dict[str, Any] = {"request_id": "REQ-TD187"}
+    coordinator._step_ledger_reconciled(saga_data, {"project_id": "X"})
+
+    backed_up = list(saga_data["backup_files"])
+    assert len(backed_up) == 1
+    assert "11_监控" in backed_up[0]
+    assert "04_监控" not in backed_up[0]
