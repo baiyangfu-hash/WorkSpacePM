@@ -88,7 +88,12 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
 
     # 1.8 初始化 DatabaseManager 并注入
     from auto_pm.db.connection import DatabaseManager
-    db = DatabaseManager(workspace_root)
+    try:
+        db = DatabaseManager(workspace_root)
+    except ValueError as exc:
+        # 传了数据库文件/.auto-pm 目录当工作空间（TD-SW008-183）：给一句人话，不抛堆栈
+        sys.stderr.write(f"[ERROR] {exc}\n")
+        return 2
 
     # 2. 初始化后端 Service（后端零改动约束：直接复用现有 Service）
     project_service = ProjectService(workspace_root=workspace_root, db=db)
