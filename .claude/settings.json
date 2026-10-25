@@ -11,5 +11,23 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "deny": [
+      "Edit(/.claude/**)",
+      "Edit(**/.auto-pm/continuity.db*)",
+      "Edit(**/.git/hooks/**)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push * --delete *)",
+      "Bash(git reset --hard *)",
+      "Bash(rm -rf *)",
+      "Bash(gh repo delete *)",
+      "Bash(gh repo edit *)",
+      "Bash(rm -fr *)",
+      "Bash(rm -r -f *)",
+      "Bash(git push * --force *)",
+      "Bash(git push * -f *)"
+    ]
   }
 }
