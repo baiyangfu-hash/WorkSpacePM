@@ -45,6 +45,15 @@ def _fail(error: AgentWorktreeError) -> None:
     raise SystemExit(1 if isinstance(error, StationRefusedError) else 2)
 
 
+def _progress(name: str) -> None:
+    click.echo(f"检查工位 {name} ……", err=True)
+
+
+def _interrupted() -> None:
+    click.echo("已中断", err=True)
+    raise SystemExit(130)
+
+
 def _size(value: int | None) -> str:
     return "-" if value is None else f"{value / 1024 / 1024:.0f} MB"
 
@@ -56,10 +65,11 @@ def _station_json(station: Station) -> dict[str, Any]:
         "kind": station.kind,
         "registered": station.registered,
         "branch": station.branch,
-        "dirty": len(station.dirty_paths),
-        "unpushed": station.unpushed,
-        "merged": station.merged,
-        "untouched": station.untouched,
+        "checked": station.checked,  # False: dirty/unpushed/merged/untouched were not looked at (null)
+        "dirty": len(station.dirty_paths) if station.checked else None,
+        "unpushed": station.unpushed if station.checked else None,
+        "merged": station.merged if station.checked else None,
+        "untouched": station.untouched if station.checked else None,
         "locked": station.locked,
         "size_bytes": station.size_bytes,
     }
@@ -93,15 +103,22 @@ def open_cmd(ctx: click.Context, agent: str, card: str, no_fetch: bool) -> None:
 
 @worktree_group.command("list")
 @click.option("--json", "as_json", is_flag=True, help="机器可读输出")
-@click.option("--no-size", is_flag=True, help="不统计占用大小（大目录时更快）")
+@click.option("--no-size", is_flag=True, help="不统计占用大小（大目录时更快；--deep 时才统计占用）")
+@click.option(
+    "--deep",
+    is_flag=True,
+    help="逐个工位查未提交改动、未推送提交、是否并进 main（整仓库大时要几分钟）",
+)
 @click.pass_context
-def list_cmd(ctx: click.Context, as_json: bool, no_size: bool) -> None:
-    """列出 .auto-pm/worktrees 下每个工位的分支、改动、推送、合并和占用"""
-    service = _service(ctx, measure_size=not no_size)
+def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> None:
+    """列出 .auto-pm/worktrees 下每个工位；默认只列名字、分支、路径，加 --deep 才逐个检查"""
+    service = _service(ctx, measure_size=deep and not no_size)
     try:
-        stations = service.stations()
+        stations = service.stations(deep=deep, progress=_progress if deep else None)
     except AgentWorktreeError as error:
         _fail(error)
+    except KeyboardInterrupt:
+        _interrupted()
     if as_json:
         click.echo(json.dumps([_station_json(s) for s in stations], ensure_ascii=False, indent=2))
         return
@@ -109,6 +126,18 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool) -> None:
         console.print(f"没有工位（{service.stations_dir}）")
         return
     table = Table(title="工位", show_header=True, header_style="bold cyan")
+    if not deep:
+        for column in ("工位", "类型", "分支", "路径"):
+            table.add_column(column)
+        for s in stations:
+            table.add_row(
+                s.name, s.kind if s.registered else "未登记目录", s.branch or "-", str(s.path)
+            )
+        console.print(table)
+        console.print(
+            "只列了名字、分支、路径；要看未提交、未推送、是否并进 main，加 --deep（会慢）"
+        )
+        return
     for column in ("工位", "类型", "分支", "未提交", "未推送", "并进 main", "占用（含 .venv）"):
         table.add_column(column)
     for s in stations:
@@ -155,9 +184,11 @@ def sweep_cmd(
         _fail(AgentWorktreeError("--apply 和 --dry-run 只能选一个"))
     service = _service(ctx, measure_size=False)
     try:
-        report = service.sweep(apply=apply, agent=agent, fetch=not no_fetch)
+        report = service.sweep(apply=apply, agent=agent, fetch=not no_fetch, progress=_progress)
     except AgentWorktreeError as error:
         _fail(error)
+    except KeyboardInterrupt:
+        _interrupted()
     if as_json:
         payload = {
             "applied": report.applied,
