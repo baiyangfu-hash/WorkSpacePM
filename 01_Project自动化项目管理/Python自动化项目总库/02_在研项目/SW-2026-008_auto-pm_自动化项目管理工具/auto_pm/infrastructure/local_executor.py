@@ -45,6 +45,9 @@ _JSON_SECRET = re.compile(
 )
 # cmd.exe re-parses the whole command line of a .cmd/.bat launcher (the npm shim codex.cmd), and these characters
 # there quote, chain, redirect, expand or escape: an argument that carries one can run something else (TD-SW008-185).
+# The prompt is free text, so it never goes on the command line: ``codex exec -`` reads it from stdin, where neither
+# cmd.exe nor the argument quoting rules can reinterpret it.
+_PROMPT_FROM_STDIN = "-"
 _CMD_BATCH_SUFFIXES = (".cmd", ".bat")
 _CMD_METACHARACTERS = frozenset('"&%|<>^\r\n')
 _BEARER_SECRET = re.compile(r"(?i)(\bbearer\s+)([A-Za-z0-9._~+/=-]+)")
@@ -259,13 +262,14 @@ class LocalCodexExecutor:
             process = subprocess.Popen(
                 validated.command,
                 cwd=validated.repository,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=child_environment,
             )
         except (OSError, ValueError) as error:
             return self._not_started_result(request, validated, error)
+        self._feed_prompt(process, request.prompt)
 
         control_events: queue.Queue[dict[str, object] | None] = queue.Queue()
         stdout_thread = self._drain_control_pipe(process.stdout, stdout_capture, control_events)
@@ -490,18 +494,38 @@ class LocalCodexExecutor:
             "--sandbox",
             "workspace-write",
             "--json",
-            request.prompt,
+            _PROMPT_FROM_STDIN,
         )
-        self._assert_no_cmd_metacharacters(command, request)
-        safe_command = (*command[:-1], "<redacted prompt>")
-        return _ValidatedRequest(repository, allowed_paths, command, safe_command)
+        self._assert_no_cmd_metacharacters(command)
+        return _ValidatedRequest(repository, allowed_paths, command, command)
 
     @staticmethod
-    def _assert_no_cmd_metacharacters(command: Sequence[str], request: LocalExecutionRequest) -> None:
+    def _feed_prompt(process: subprocess.Popen[bytes], prompt: str) -> None:
+        """Write the prompt to the child's stdin from a thread, so a child that never reads cannot block the caller."""
+
+        def feed() -> None:
+            pipe = process.stdin
+            if pipe is None:
+                return
+            try:
+                pipe.write(prompt.encode("utf-8"))
+            except OSError:
+                pass  # the child exited or closed stdin first; its exit status tells the story
+            finally:
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
+
+        threading.Thread(target=feed, daemon=True).start()
+
+    @staticmethod
+    def _assert_no_cmd_metacharacters(command: Sequence[str]) -> None:
         """Refuse a .cmd/.bat launcher when any argument carries a cmd.exe metacharacter; a .exe is not affected.
 
-        Windows starts a batch file through cmd.exe, which parses the arguments again.  The prompt is free text, so
-        it is checked like the rest.  The message names the argument and the characters, never the prompt itself.
+        Windows starts a batch file through cmd.exe, which parses the arguments again.  The prompt is not on the
+        command line (it goes through stdin), so what is checked is the rest that can come from the caller: the model
+        name, the repository path and any extra launcher token.  The message names the argument, not its value.
         """
 
         if not command[0].lower().endswith(_CMD_BATCH_SUFFIXES):
@@ -509,10 +533,9 @@ class LocalCodexExecutor:
         for index, argument in enumerate(command[1:], start=1):
             found = sorted(_CMD_METACHARACTERS.intersection(argument))
             if found:
-                label = "prompt" if argument is request.prompt else f"argument {index}"
                 shown = " ".join(repr(char)[1:-1] for char in found)
                 raise LocalExecutionError(
-                    f"refusing to start {Path(command[0]).name} through cmd.exe: the {label} contains "
+                    f"refusing to start {Path(command[0]).name} through cmd.exe: argument {index} contains "
                     f"cmd.exe metacharacters ({shown}); use the .exe launcher or remove them"
                 )
 

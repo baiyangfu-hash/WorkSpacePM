@@ -80,7 +80,7 @@ if "--json" not in arguments:
     raise SystemExit(14)
 
 repository = Path(arguments[arguments.index("-C") + 1])
-prompt = arguments[-1]
+prompt = sys.stdin.buffer.read().decode("utf-8") if arguments[-1] == "-" else arguments[-1]
 if "environment" in prompt and os.environ.get("AUTO_PM_TEST_LEASE"):
     raise SystemExit(19)
 if "timeout" in prompt:
@@ -150,7 +150,7 @@ def test_executes_real_helper_with_safe_command_identity_and_redacted_output(tmp
         "--sandbox",
         "workspace-write",
         "--json",
-        "<redacted prompt>",
+        "-",
     )
     assert "--dangerously-bypass-approvals-and-sandbox" not in result.command
     assert SECRET not in result.stdout
@@ -326,62 +326,116 @@ def test_bare_command_name_is_resolved_through_path_so_windows_finds_the_cmd_shi
     assert LocalCodexExecutor(command_prefix=(explicit, "exec"))._command_prefix == (explicit, "exec")
 
 
-# TD-SW008-185: a .cmd/.bat launcher (the npm shim codex.cmd) is parsed again by cmd.exe, so metacharacters in any
-# argument must be refused before a process exists.  A .exe launcher is not parsed that way and is left alone.
+# TD-SW008-185: the prompt is free text, so it travels over stdin (`codex exec -`), never on the command line where a
+# .cmd/.bat launcher (the npm shim codex.cmd) would have cmd.exe parse it again.  The arguments that remain can come
+# from the caller (model name, repository path); a .cmd/.bat launcher refuses cmd.exe metacharacters in them.
 CMD_METACHARACTERS = ['"', "&", "%", "|", "<", ">", "^", "\n", "\r"]
+HOSTILE_PROMPT = '修改 "allowed.txt" & echo 100% | type <nul > x ^ y\n第二行：中文、引号"和%PATH%'
+
+
+def _prompt_echo_helper(tmp_path: Path) -> Path:
+    path = tmp_path / "prompt_echo_helper.py"
+    path.write_text(
+        """from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+arguments = sys.argv[1:]
+repository = Path(arguments[arguments.index("-C") + 1])
+received = sys.stdin.buffer.read()
+(repository / "allowed.txt").write_bytes(received)
+print('{"type":"thread.started","thread_id":"echo-session"}')
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_prompt_reaches_the_child_over_stdin_intact_and_is_not_on_the_command_line(tmp_path: Path) -> None:
+    repository = _microtask_repository(tmp_path)
+    helper = _prompt_echo_helper(tmp_path)
+
+    result = LocalCodexExecutor(command_prefix=(sys.executable, str(helper))).execute(
+        _request(repository, HOSTILE_PROMPT)
+    )
+
+    assert result.status is LocalExecutionStatus.SUCCEEDED, result.error
+    assert (repository / "allowed.txt").read_bytes() == HOSTILE_PROMPT.encode("utf-8")
+    assert result.command[-1] == "-"
+    assert not any("echo 100%" in argument or "allowed.txt\"" in argument for argument in result.command)
+
+
+def test_a_child_that_never_reads_stdin_does_not_block_the_caller(tmp_path: Path) -> None:
+    repository = _microtask_repository(tmp_path)
+    helper = tmp_path / "deaf_helper.py"
+    helper.write_text(
+        'import sys\nprint(\'{"type":"thread.started","thread_id":"deaf"}\')\n', encoding="utf-8"
+    )
+
+    result = LocalCodexExecutor(command_prefix=(sys.executable, str(helper))).execute(
+        _request(repository, "x" * 2_000_000)
+    )
+
+    assert result.started is True
+    assert result.status is not LocalExecutionStatus.NOT_STARTED
 
 
 @pytest.mark.parametrize("launcher", ["codex.cmd", "codex.bat", "CODEX.CMD"])
 @pytest.mark.parametrize("character", CMD_METACHARACTERS)
-def test_batch_launcher_refuses_cmd_metacharacters_in_the_prompt(
+def test_batch_launcher_accepts_any_prompt_because_it_is_not_on_the_command_line(
     tmp_path: Path, launcher: str, character: str
 ) -> None:
     repository = _microtask_repository(tmp_path)
     executor = LocalCodexExecutor(command_prefix=(launcher,))
-    request = _request(repository, prompt=f"write allowed {character} calc.exe")
 
-    with pytest.raises(LocalExecutionError, match="cmd.exe metacharacters"):
-        executor.validate(request)
-    with pytest.raises(LocalExecutionError, match="cmd.exe metacharacters"):
-        executor.start(request)
+    executor.validate(_request(repository, prompt=f"write allowed {character} calc.exe"))
 
 
-def test_batch_launcher_refusal_names_the_argument_but_never_echoes_the_prompt(tmp_path: Path) -> None:
+@pytest.mark.parametrize("launcher", ["codex.cmd", "codex.bat", "CODEX.CMD"])
+@pytest.mark.parametrize("character", CMD_METACHARACTERS)
+def test_batch_launcher_refuses_cmd_metacharacters_in_the_model_name(
+    tmp_path: Path, launcher: str, character: str
+) -> None:
     repository = _microtask_repository(tmp_path)
-    executor = LocalCodexExecutor(command_prefix=("codex.cmd",))
-
-    with pytest.raises(LocalExecutionError) as caught:
-        executor.validate(_request(repository, prompt=f"secret {SECRET} & more"))
-
-    message = str(caught.value)
-    assert "the prompt" in message and "&" in message
-    assert SECRET not in message and "secret" not in message
-
-
-def test_batch_launcher_also_checks_the_other_arguments(tmp_path: Path) -> None:
-    repository = _microtask_repository(tmp_path)
-    executor = LocalCodexExecutor(command_prefix=("codex.cmd",))
+    executor = LocalCodexExecutor(command_prefix=(launcher,))
     request = LocalExecutionRequest(
         repository=repository,
         allowed_paths=("allowed.txt",),
-        model="gpt&calc",
+        model=f"gpt{character}calc",
         prompt="write allowed",
     )
 
     with pytest.raises(LocalExecutionError, match=r"argument \d+ contains cmd.exe metacharacters"):
         executor.validate(request)
+    with pytest.raises(LocalExecutionError, match="cmd.exe metacharacters"):
+        executor.start(request)
 
 
-def test_batch_launcher_accepts_a_prompt_without_metacharacters(tmp_path: Path) -> None:
-    repository = _microtask_repository(tmp_path)
+def test_batch_launcher_refuses_metacharacters_in_the_repository_path(tmp_path: Path) -> None:
+    parent = tmp_path / "a&b"
+    parent.mkdir()
+    repository = _microtask_repository(parent)
     executor = LocalCodexExecutor(command_prefix=("codex.cmd",))
 
-    executor.validate(_request(repository, prompt="write allowed: a plain sentence, with commas (and brackets)."))
+    with pytest.raises(LocalExecutionError, match="cmd.exe metacharacters"):
+        executor.validate(_request(repository))
+
+
+def test_batch_launcher_accepts_plain_arguments(tmp_path: Path) -> None:
+    repository = _microtask_repository(tmp_path)
+
+    LocalCodexExecutor(command_prefix=("codex.cmd",)).validate(_request(repository))
 
 
 @pytest.mark.parametrize("character", CMD_METACHARACTERS)
 def test_exe_launcher_is_not_affected_by_cmd_metacharacters(tmp_path: Path, character: str) -> None:
     repository = _microtask_repository(tmp_path)
-    executor = LocalCodexExecutor(command_prefix=("codex.exe",))
+    request = LocalExecutionRequest(
+        repository=repository,
+        allowed_paths=("allowed.txt",),
+        model=f"gpt{character}calc",
+        prompt="write allowed",
+    )
 
-    executor.validate(_request(repository, prompt=f"write allowed {character} text"))
+    LocalCodexExecutor(command_prefix=("codex.exe",)).validate(request)
