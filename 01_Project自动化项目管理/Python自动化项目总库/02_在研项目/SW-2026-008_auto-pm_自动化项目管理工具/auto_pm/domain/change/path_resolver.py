@@ -234,10 +234,10 @@ def monitoring_dir_name(project_path: str) -> str:
     新建台账、新建变更单、备份默认路径都按它求位置，避免给旧布局项目多造一个 ``04_监控``（TD-SW008-186、187）。
     """
     if os.path.isdir(os.path.join(project_path, PG_MONITORING_DIR)):
-        return PG_MONITORING_DIR
+        return str(PG_MONITORING_DIR)
     if os.path.isdir(os.path.join(project_path, LEGACY_MONITORING_DIR)):
         return LEGACY_MONITORING_DIR
-    return PG_MONITORING_DIR
+    return str(PG_MONITORING_DIR)
 
 
 def default_ledger_path(project_path: str) -> str:
