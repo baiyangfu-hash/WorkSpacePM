@@ -38,7 +38,9 @@ import datetime as dt, json, sys
 from pathlib import Path
 d = Path(sys.argv[1])
 n = int((d / "renew_count").read_text()) + 1 if (d / "renew_count").exists() else 1
-(d / "renew_count").write_text(str(n))
+tmp = d / "renew_count.tmp"
+tmp.write_text(str(n))
+tmp.replace(d / "renew_count")  # atomic: a reader never sees the file truncated mid-write
 exp = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)
 print(json.dumps({"version": n + 1, "expires_at": exp.isoformat()}))
 """
@@ -242,7 +244,9 @@ def main() -> int:
                   f"the runner is started by the Task Scheduler service, not the session (ancestors: {chain})")
         else:
             print(f"INFO  runner ancestors: {chain}")
-        n0 = int((tools / "renew_count").read_text())
+        n0_seen: list[int] = []
+        wait_for(lambda: n0_seen.append(int((tools / "renew_count").read_text())) or True, 10)
+        n0 = n0_seen[0]
         check(wait_for(lambda: int((tools / "renew_count").read_text()) >= n0 + 2, 30),
               "session killed: lease renewals continue inside the runner")
         if WIN:
