@@ -24,7 +24,7 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "long_gate.py"
 PY = sys.executable
 
 FAKE_RENEW = r"""
-import datetime as dt, json, sys
+import datetime as dt, json, sys, time
 from pathlib import Path
 d = Path(sys.argv[1])
 if (d / "renew_fail").exists():
@@ -32,7 +32,14 @@ if (d / "renew_fail").exists():
 n = int((d / "renew_count").read_text()) + 1 if (d / "renew_count").exists() else 1
 tmp = d / "renew_count.tmp"
 tmp.write_text(str(n))
-tmp.replace(d / "renew_count")  # atomic: a reader never sees the file truncated mid-write
+for _ in range(50):  # atomic: a reader never sees the file truncated mid-write
+    try:
+        tmp.replace(d / "renew_count")
+        break
+    except PermissionError:  # Windows: the target is open in the reader at this instant
+        time.sleep(0.02)
+else:
+    tmp.replace(d / "renew_count")
 left = 300 if (d / "renew_short").exists() else 3600
 exp = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=left)
 print(json.dumps({"run_id": "RUN-X", "owner_id": "o", "version": n + 1, "expires_at": exp.isoformat()}))
