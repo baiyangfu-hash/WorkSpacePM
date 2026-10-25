@@ -160,7 +160,8 @@ class PrOpenService:
                     f"`git fetch origin main` 失败：{_detail(fetched)}；断网时可加 --no-fetch"
                 )
         station = next(
-            (s for s in self._stations.stations() if s.name == agent and s.registered), None
+            (s for s in self._stations.stations(only=agent) if s.name == agent and s.registered),
+            None,
         )
         if station is None or station.kind != "agent":
             raise PrOpenRefusedError(

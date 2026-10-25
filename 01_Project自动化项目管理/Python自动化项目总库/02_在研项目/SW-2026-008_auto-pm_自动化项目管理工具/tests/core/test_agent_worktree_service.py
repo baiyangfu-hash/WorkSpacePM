@@ -321,6 +321,21 @@ def test_sweep_limited_to_one_agent_leaves_other_agents_alone(lab: Lab) -> None:
     assert report.done == [str(codex)]
 
 
+def test_sweep_refuses_to_judge_a_station_that_was_only_listed_lightly(lab: Lab) -> None:
+    """A light listing has no dirty/unpushed facts, so its result must never feed a deletion."""
+
+    finished_station(lab)
+    lab.merge_on_github("claude/CARD-1")
+    git(lab.root, "fetch", "-q", "origin")
+    service = lab.service()
+    shallow = service.stations(deep=False)[0]
+
+    assert not shallow.checked
+    item = service._sweep_station(shallow, None)
+
+    assert not item.remove and "没做过深检" in item.reason
+
+
 def test_sweep_keeps_a_station_whose_branch_has_another_agents_prefix(lab: Lab) -> None:
     station = lab.station("cursor")
     git(lab.root, "worktree", "add", "-q", "-b", "trae/CARD-5", str(station), "origin/main")
@@ -465,9 +480,13 @@ def test_cli_exit_codes_and_default_preview(lab: Lab) -> None:
     unknown = runner.invoke(cli, [*base, "worktree", "open", "copilot", "CARD-1"])
     assert unknown.exit_code == 2
 
-    listed = runner.invoke(cli, [*base, "worktree", "list", "--json"])
+    listed = runner.invoke(cli, [*base, "worktree", "list", "--deep", "--json"])
     assert listed.exit_code == 0, listed.output
     assert '"unpushed": 1' in listed.output
+
+    light = runner.invoke(cli, [*base, "worktree", "list", "--json"])
+    assert light.exit_code == 0, light.output
+    assert '"checked": false' in light.output and '"unpushed": null' in light.output
 
     inside = runner.invoke(cli, ["--workspace", str(lab.station("claude")), "worktree", "list"])
     assert inside.exit_code == 2
@@ -544,8 +563,8 @@ def test_sweep_rechecks_a_station_that_changed_between_listing_and_removal(
     lab.merge_on_github("claude/CARD-1")
     listed = AgentWorktreeService.stations
 
-    def list_then_change(self: AgentWorktreeService) -> list[Station]:
-        result = listed(self)
+    def list_then_change(self: AgentWorktreeService, **kwargs: Any) -> list[Station]:
+        result = listed(self, **kwargs)
         change(station)
         return result
 
@@ -690,3 +709,96 @@ def test_close_and_sweep_refuse_a_station_reached_through_a_link(lab: Lab, tmp_p
     assert report.done == []
     assert any("工位必须真在控制根" in line for line in report.failed), report.failed
     assert (elsewhere / "claude" / "CARD-1.txt").exists()
+
+
+def _forbid_work_tree_scans(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """Record every Git call; the work-tree scans (status, rev-list, reflog, merge-base) are the slow ones."""
+
+    seen: list[tuple[str, ...]] = []
+    original = AgentWorktreeService._git
+
+    def spy(self: AgentWorktreeService, *args: str, **kwargs: Any) -> Any:
+        seen.append(args)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(AgentWorktreeService, "_git", spy)
+    return seen
+
+
+SCAN_COMMANDS = ("status", "rev-list", "reflog", "merge-base")
+
+
+def test_default_listing_reads_no_work_tree(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`worktree list` without --deep must not run the per-station scans that take minutes on a big repository."""
+
+    lab.service().open("claude", "CARD-1")
+    lab.service().open("trae", "CARD-2")
+    (lab.station("trae") / "draft.txt").write_text("not committed\n", encoding="utf-8")
+    seen = _forbid_work_tree_scans(monkeypatch)
+
+    stations = {s.name: s for s in lab.service().stations(deep=False)}
+
+    assert not [call for call in seen if call and call[0] in SCAN_COMMANDS], seen
+    assert stations["claude"].branch == "claude/CARD-1"
+    assert stations["claude"].path == lab.station("claude")
+    assert not stations["trae"].checked and stations["trae"].dirty_paths == ()
+
+
+def test_deep_listing_still_finds_the_work_in_progress(lab: Lab) -> None:
+    lab.service().open("trae", "CARD-2")
+    (lab.station("trae") / "draft.txt").write_text("not committed\n", encoding="utf-8")
+    seen: list[str] = []
+
+    stations = lab.service().stations(deep=True, progress=seen.append)
+
+    assert seen == ["trae"]
+    assert stations[0].checked and stations[0].dirty_paths == ("draft.txt",)
+
+
+def test_only_one_station_is_inspected_when_asked(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lab.service().open("claude", "CARD-1")
+    lab.service().open("trae", "CARD-2")
+    inspected: list[str] = []
+
+    stations = lab.service().stations(only="trae", progress=inspected.append)
+
+    assert inspected == ["trae"] and [s.name for s in stations] == ["trae"]
+
+
+def test_cli_list_default_is_light_and_deep_is_opt_in(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lab.service().open("claude", "CARD-1")
+    commit(lab.station("claude"), "only-here.txt")
+    runner = CliRunner(env={"AUTO_PM_AGENT": ""})
+    base = ["--workspace", str(lab.root)]
+    seen = _forbid_work_tree_scans(monkeypatch)
+
+    light = runner.invoke(cli, [*base, "worktree", "list"])
+    assert light.exit_code == 0, light.output
+    assert not [call for call in seen if call and call[0] in SCAN_COMMANDS], seen
+    assert "--deep" in _unwrapped(light.output) and "claude/CARD-1" in _unwrapped(light.output)
+
+    deep = runner.invoke(cli, [*base, "worktree", "list", "--deep", "--json"])
+    assert deep.exit_code == 0, deep.output
+    assert '"unpushed": 1' in deep.output
+
+
+def test_ctrl_c_during_a_listing_prints_one_line_not_a_traceback(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lab.service().open("claude", "CARD-1")
+
+    def interrupted(self: AgentWorktreeService, **kwargs: Any) -> list[Station]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(AgentWorktreeService, "stations", interrupted)
+    runner = CliRunner(env={"AUTO_PM_AGENT": ""})
+
+    result = runner.invoke(cli, ["--workspace", str(lab.root), "worktree", "list", "--deep"])
+
+    assert result.exit_code == 130
+    assert "已中断" in result.output and "Traceback" not in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)

@@ -96,6 +96,9 @@ class Station:
     merged: bool = False
     untouched: bool = False
     size_bytes: int | None = None
+    checked: bool = (
+        True  # False: only name, branch and path were read (no status, rev-list or reflog)
+    )
 
     @property
     def agent(self) -> str:
@@ -212,18 +215,41 @@ class AgentWorktreeService:
 
     # ── list ─────────────────────────────────────────────────────────
 
-    def stations(self) -> list[Station]:
+    def stations(
+        self,
+        *,
+        deep: bool = True,
+        only: str | None = None,
+        progress: Callable[[str], None] | None = None,
+    ) -> list[Station]:
+        """Every station; ``deep=False`` reads only name, branch and path (no per-station Git scan of the work tree).
+
+        ``only`` limits the (deep) inspection to one station name; ``progress`` is called with each name before
+        its inspection, so a long scan can show where it is.
+        """
+
         self._require_main_ref()
         registered = self._worktrees()
         stations: list[Station] = []
         for path, info in registered.items():
+            if only is not None and path.name != only:
+                continue
+            if progress is not None:
+                progress(path.name)
             stations.append(
                 self._inspect(
-                    path, registered=True, branch=info.branch, head=info.head, locked=info.locked
+                    path,
+                    registered=True,
+                    branch=info.branch,
+                    head=info.head,
+                    locked=info.locked,
+                    deep=deep,
                 )
             )
         if self._stations_dir.is_dir():
             for child in sorted(self._stations_dir.iterdir()):
+                if only is not None and child.name != only:
+                    continue
                 if child.is_dir() and child.resolve() not in registered:
                     stations.append(
                         Station(
@@ -267,7 +293,12 @@ class AgentWorktreeService:
     # ── sweep ────────────────────────────────────────────────────────
 
     def sweep(
-        self, *, apply: bool = False, agent: str | None = None, fetch: bool = True
+        self,
+        *,
+        apply: bool = False,
+        agent: str | None = None,
+        fetch: bool = True,
+        progress: Callable[[str], None] | None = None,
     ) -> SweepReport:
         if agent is not None:
             self._prefix(agent)
@@ -285,7 +316,7 @@ class AgentWorktreeService:
         )
         items: list[SweepItem] = []
         plans: list[tuple[SweepItem, Station | None]] = []
-        for listed in self.stations():
+        for listed in self.stations(progress=progress):
             item = self._sweep_station(listed, agent)
             items.append(item)
             plans.append((item, listed))
@@ -321,6 +352,8 @@ class AgentWorktreeService:
             return SweepItem(
                 target, "other", False, "Git 里没有登记的目录，不是工位；不动，请人工查看"
             )
+        if not station.checked:
+            return SweepItem(target, station.kind, False, "没做过深检，不能据此判断删除；保留")
         if station.kind == "other":
             return SweepItem(
                 target, "other", False, "不在 agent 名册里、也不是 run-plan，不归本命令管"
@@ -467,9 +500,27 @@ class AgentWorktreeService:
         return int(result.stdout.strip() or "0")
 
     def _inspect(
-        self, path: Path, *, registered: bool, branch: str, head: str, locked: bool = False
+        self,
+        path: Path,
+        *,
+        registered: bool,
+        branch: str,
+        head: str,
+        locked: bool = False,
+        deep: bool = True,
     ) -> Station:
         kind = _kind(path.name)
+        if not deep:
+            return Station(
+                name=path.name,
+                path=path,
+                kind=kind,
+                registered=registered,
+                branch=branch,
+                head=head,
+                locked=locked,
+                checked=False,
+            )
         dirty: tuple[str, ...] = ()
         unpushed = 0
         merged = False
