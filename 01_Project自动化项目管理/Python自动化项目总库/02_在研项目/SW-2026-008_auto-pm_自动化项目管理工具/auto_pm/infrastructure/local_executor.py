@@ -43,6 +43,10 @@ _ASSIGNMENT_SECRET = re.compile(
 _JSON_SECRET = re.compile(
     r'(?i)("(?:api[_-]?key|token|secret|password|authorization)"\s*:\s*")([^"]+)(")'
 )
+# cmd.exe re-parses the whole command line of a .cmd/.bat launcher (the npm shim codex.cmd), and these characters
+# there quote, chain, redirect, expand or escape: an argument that carries one can run something else (TD-SW008-185).
+_CMD_BATCH_SUFFIXES = (".cmd", ".bat")
+_CMD_METACHARACTERS = frozenset('"&%|<>^\r\n')
 _BEARER_SECRET = re.compile(r"(?i)(\bbearer\s+)([A-Za-z0-9._~+/=-]+)")
 _OPENAI_KEY = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
 
@@ -488,8 +492,29 @@ class LocalCodexExecutor:
             "--json",
             request.prompt,
         )
+        self._assert_no_cmd_metacharacters(command, request)
         safe_command = (*command[:-1], "<redacted prompt>")
         return _ValidatedRequest(repository, allowed_paths, command, safe_command)
+
+    @staticmethod
+    def _assert_no_cmd_metacharacters(command: Sequence[str], request: LocalExecutionRequest) -> None:
+        """Refuse a .cmd/.bat launcher when any argument carries a cmd.exe metacharacter; a .exe is not affected.
+
+        Windows starts a batch file through cmd.exe, which parses the arguments again.  The prompt is free text, so
+        it is checked like the rest.  The message names the argument and the characters, never the prompt itself.
+        """
+
+        if not command[0].lower().endswith(_CMD_BATCH_SUFFIXES):
+            return
+        for index, argument in enumerate(command[1:], start=1):
+            found = sorted(_CMD_METACHARACTERS.intersection(argument))
+            if found:
+                label = "prompt" if argument is request.prompt else f"argument {index}"
+                shown = " ".join(repr(char)[1:-1] for char in found)
+                raise LocalExecutionError(
+                    f"refusing to start {Path(command[0]).name} through cmd.exe: the {label} contains "
+                    f"cmd.exe metacharacters ({shown}); use the .exe launcher or remove them"
+                )
 
     @staticmethod
     def _validate_limits(request: LocalExecutionRequest) -> None:
