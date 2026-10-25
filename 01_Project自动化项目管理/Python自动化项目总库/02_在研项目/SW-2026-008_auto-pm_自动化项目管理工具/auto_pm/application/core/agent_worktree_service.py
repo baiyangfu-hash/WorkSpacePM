@@ -352,6 +352,8 @@ class AgentWorktreeService:
             return SweepItem(
                 target, "other", False, "Git 里没有登记的目录，不是工位；不动，请人工查看"
             )
+        if not station.checked:
+            return SweepItem(target, station.kind, False, "没做过深检，不能据此判断删除；保留")
         if station.kind == "other":
             return SweepItem(
                 target, "other", False, "不在 agent 名册里、也不是 run-plan，不归本命令管"

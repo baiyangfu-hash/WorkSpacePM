@@ -321,6 +321,21 @@ def test_sweep_limited_to_one_agent_leaves_other_agents_alone(lab: Lab) -> None:
     assert report.done == [str(codex)]
 
 
+def test_sweep_refuses_to_judge_a_station_that_was_only_listed_lightly(lab: Lab) -> None:
+    """A light listing has no dirty/unpushed facts, so its result must never feed a deletion."""
+
+    finished_station(lab)
+    lab.merge_on_github("claude/CARD-1")
+    git(lab.root, "fetch", "-q", "origin")
+    service = lab.service()
+    shallow = service.stations(deep=False)[0]
+
+    assert not shallow.checked
+    item = service._sweep_station(shallow, None)
+
+    assert not item.remove and "没做过深检" in item.reason
+
+
 def test_sweep_keeps_a_station_whose_branch_has_another_agents_prefix(lab: Lab) -> None:
     station = lab.station("cursor")
     git(lab.root, "worktree", "add", "-q", "-b", "trae/CARD-5", str(station), "origin/main")
