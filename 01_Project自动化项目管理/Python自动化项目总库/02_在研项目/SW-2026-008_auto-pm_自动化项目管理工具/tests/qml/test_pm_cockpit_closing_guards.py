@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from auto_pm.core.pm_cockpit_service import PmCockpitService
+from auto_pm.core.pm_cockpit_service import PmCockpitCompletionState, PmCockpitService
 from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QApplication
 
@@ -184,3 +184,72 @@ def test_a_paused_cockpit_is_not_sealed_and_can_start_again(qapp: QApplication, 
     assert bridge.startSnapshotRefresh()["accepted"] is False
     assert bridge.shutdown(timeout_ms=5_000) is True
     _delete_qobject(bridge)
+
+
+def _held_service(main: Path, monkeypatch: pytest.MonkeyPatch, release: threading.Event, started: threading.Event, method: str, result: object) -> PmCockpitService:
+    """A real service whose one slow call blocks until the test lets it go, then answers with ``result``."""
+
+    service = PmCockpitService(main)
+
+    def held(*_args: object, **_kwargs: object) -> object:
+        started.set()
+        release.wait(30)
+        return result
+
+    monkeypatch.setattr(service, method, held)
+    return service
+
+
+_LATE_WORKERS: list[tuple[str, str, str, object, Callable[[PmCockpitBridge], dict[str, Any]], str, str]] = [
+    # (case id, service method, signal, service answer, queueing click, pending dict, poll method)
+    ("close", "close_accepted", "closureFinished", SimpleNamespace(state=PmCockpitCompletionState.COMPLETED, message="closed"), lambda bridge: bridge.retryClosure("MISSION-Z"), "_close_workers", "_poll_close_workers"),
+    ("approve", "approve_scope", "scopeApprovalFinished", SimpleNamespace(mission_id="MISSION-Z"), lambda bridge: bridge.approveScopeAndStart("REQ-Z", "hash-z"), "_approve_workers", "_poll_approve_workers"),
+]
+
+
+@pytest.mark.parametrize("case", _LATE_WORKERS, ids=[case[0] for case in _LATE_WORKERS])
+def test_a_close_or_approve_that_finishes_after_the_window_is_gone_publishes_nothing_and_shutdown_waits_boundedly(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: tuple[str, str, str, object, Callable[[PmCockpitBridge], dict[str, Any]], str, str]
+) -> None:
+    _name, method, signal, answer, click, pending, poll = case
+    main, _candidate = _roots(tmp_path)
+    release, started = threading.Event(), threading.Event()
+    service = _held_service(main, monkeypatch, release, started, method, answer)
+    monkeypatch.setattr(service, "start_execution", lambda _mission_id: SimpleNamespace(verified=True, message="started", receipt_status=""))
+    bridge = PmCockpitBridge(str(main), service=service)
+    published: list[tuple[object, ...]] = []
+    getattr(bridge, signal).connect(lambda *values: published.append(values))
+    try:
+        assert click(bridge)["accepted"] is True
+        assert started.wait(30)
+        assert bridge.pending_tasks(), "the held task is the unfinished item"
+        assert bridge.shutdown(timeout_ms=200) is False, "the wait is bounded: it gives up instead of hanging on the held task"
+        release.set()
+        _wait_until_idle(bridge)
+        getattr(bridge, poll)()  # one tick of the poll timer, driven by hand
+        assert published == [], "a late result of a closed cockpit is delivered to nobody"
+        assert getattr(bridge, pending) == {}
+    finally:
+        release.set()
+        _delete_qobject(bridge)
+
+
+def test_an_evidence_read_that_finishes_after_the_window_is_gone_publishes_nothing(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    main, _candidate = _roots(tmp_path)
+    release, started = threading.Event(), threading.Event()
+    service = _held_service(main, monkeypatch, release, started, "evidence", SimpleNamespace(model_dump=lambda mode="json": {}))
+    bridge = PmCockpitBridge(str(main), service=service)
+    published: list[dict[str, Any]] = []
+    bridge.evidenceFinished.connect(published.append)
+    try:
+        assert bridge.requestEvidence("SW-2026-008")["accepted"] is True
+        assert started.wait(30)
+        assert bridge.shutdown(timeout_ms=200) is False
+        release.set()
+        _wait_until_idle(bridge)
+        bridge._poll_evidence_worker()
+        assert published == []
+        assert bridge._evidence_worker is None
+    finally:
+        release.set()
+        _delete_qobject(bridge)
