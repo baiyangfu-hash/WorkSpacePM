@@ -41,13 +41,21 @@ KNOWN_VIOLATIONS = {
 }
 
 
-def _imported_modules(tree: ast.AST) -> list[str]:
+def _imported_modules(tree: ast.AST, package: list[str]) -> list[str]:
+    """Absolute dotted names imported by tree; package is the importing module's own package (with auto_pm)."""
     modules: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             modules.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            modules.append(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = package[: len(package) - node.level + 1]
+                prefix = ".".join([*base, node.module] if node.module else base)
+            else:
+                prefix = node.module or ""
+            modules.append(prefix)
+            # from auto_pm import ui imports a layer package through the name list.
+            modules.extend(f"{prefix}.{alias.name}" for alias in node.names)
     return modules
 
 
@@ -59,7 +67,8 @@ def _violations(root: Path = PACKAGE_ROOT) -> set[tuple[str, str]]:
         if len(relative.parts) < 2 or layer not in FORBIDDEN_TARGETS:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
-        for module in _imported_modules(tree):
+        package = ["auto_pm", *relative.parts[:-1]]
+        for module in _imported_modules(tree, package):
             parts = module.split(".")
             if parts[0] == "auto_pm" and len(parts) > 1 and parts[1] in FORBIDDEN_TARGETS[layer]:
                 found.add((relative.as_posix(), parts[1]))
@@ -83,3 +92,11 @@ def test_gate_detects_a_violation(tmp_path: Path) -> None:
     (tmp_path / "ui").mkdir()
     (tmp_path / "ui" / "ok.py").write_text("from auto_pm.application import z\n", encoding="utf-8")
     assert _violations(tmp_path) == {("domain/bad.py", "infrastructure")}
+
+
+def test_gate_detects_layer_name_and_relative_imports(tmp_path: Path) -> None:
+    (tmp_path / "application").mkdir()
+    (tmp_path / "application" / "a.py").write_text("from auto_pm import ui\n", encoding="utf-8")
+    (tmp_path / "domain" / "sub").mkdir(parents=True)
+    (tmp_path / "domain" / "sub" / "b.py").write_text("from ...infrastructure import store\n", encoding="utf-8")
+    assert _violations(tmp_path) == {("application/a.py", "ui"), ("domain/sub/b.py", "infrastructure")}
