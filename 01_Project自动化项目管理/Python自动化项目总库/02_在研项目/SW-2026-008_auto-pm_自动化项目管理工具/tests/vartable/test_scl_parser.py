@@ -9,6 +9,7 @@ FB_1004/FB_1003)。
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,50 @@ _REAL_SAMPLES = (
     FB_1004_SCL,
     FB_1003_SCL,
 )
+
+
+
+_BLOCK_START_RE = re.compile(r"^(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR)\b(\s+CONSTANT\b)?", re.IGNORECASE)
+_DECLARATION_RE = re.compile(r"^[A-Za-z_]\w*\s*:(?!=)")
+
+
+def _declared_per_block(path: Path) -> dict[str, int]:
+    """不经过 SclParser，直接数样例文件里每类 VAR 块声明了几个变量。
+
+    真实样例会随 DJ-2026-005 的程序修改增减变量，期望值不能手写；这里用一套和解析器无关的
+    逐行扫描（去掉 (* *) 与 // 注释，块内每条 `名字 : 类型` 算一个）当判卷依据。
+    键与解析结果的 station 一致：VAR_INPUT / VAR_IN_OUT / VAR / VAR_CONSTANT。
+    """
+    text = path.read_text(encoding="utf-8", errors="replace")
+    text = re.sub(r"\(\*.*?\*\)", "", text, flags=re.DOTALL)
+    counts: dict[str, int] = {}
+    current: str | None = None
+    for raw in text.splitlines():
+        line = raw.split("//", 1)[0].strip()
+        if not line:
+            continue
+        if current is None:
+            start = _BLOCK_START_RE.match(line)
+            if start and ":" not in line.split(None, 2)[0]:
+                current = start.group(1).upper() + ("_CONSTANT" if start.group(2) else "")
+                counts.setdefault(current, 0)
+            continue
+        if line.upper().startswith("END_VAR"):
+            current = None
+        elif _DECLARATION_RE.match(line):
+            counts[current] += 1
+    return counts
+
+
+def _declared_total(path: Path) -> int:
+    return sum(_declared_per_block(path).values())
+
+
+def _parsed_per_station(vt: object) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in vt.entries:  # type: ignore[attr-defined]
+        counts[entry.station] = counts.get(entry.station, 0) + 1
+    return counts
 
 
 @pytest.fixture
@@ -258,20 +303,19 @@ class TestSclParserRealSamples:
         assert "未识别到 VAR 块" in result.warnings[0]
 
     def test_real_fb_2001_common_alarm_var_blocks(self) -> None:
-        """FB_2001: VAR_IN_OUT(4) + VAR(20) + VAR CONSTANT(4, 单独归为常量类) = 28"""
+        """FB_2001: VAR_IN_OUT + VAR + VAR CONSTANT(单独归为常量类)，个数以样例文件逐行数出的为准"""
         result = SclParser().parse(FB_2001_SCL)
         assert result.success
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_2001_CommonAlarm_AllStation"
-        assert vt.metadata["var_block_count"] == 3
-        assert vt.total_count == 28
+        declared = _declared_per_block(FB_2001_SCL)
+        assert vt.metadata["var_block_count"] == len(declared) == 3
+        assert vt.total_count == _declared_total(FB_2001_SCL)
+        assert _parsed_per_station(vt) == declared
         # VAR CONSTANT 单独归为 VAR_CONSTANT（常量类），不与普通静态 VAR 混用
         stations = {e.station for e in vt.entries}
         assert stations == {"VAR_IN_OUT", "VAR", "VAR_CONSTANT"}
-        assert sum(1 for e in vt.entries if e.station == "VAR_IN_OUT") == 4
-        assert sum(1 for e in vt.entries if e.station == "VAR") == 20
-        assert sum(1 for e in vt.entries if e.station == "VAR_CONSTANT") == 4
         # 结构体整块传递: 4 个 VAR_IN_OUT (报警 / 模式 / 物理 IO / HMI), 带中文注释
         in_out = [(e.tag, e.signal_type) for e in vt.entries if e.station == "VAR_IN_OUT"]
         assert in_out == [
@@ -293,11 +337,11 @@ class TestSclParserRealSamples:
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_1002_SingleLayerConveyor_BufferFraming"
-        # VAR_INPUT(7) + VAR_IN_OUT(1) + VAR(67) + VAR CONSTANT(10, 常量类) = 85
-        assert vt.metadata["var_block_count"] == 4
-        assert vt.total_count == 85
-        assert sum(1 for e in vt.entries if e.station == "VAR_INPUT") == 7
-        assert sum(1 for e in vt.entries if e.station == "VAR_CONSTANT") == 10
+        # VAR_INPUT + VAR_IN_OUT + VAR + VAR CONSTANT(常量类)，个数以样例文件逐行数出的为准
+        declared = _declared_per_block(FB_1002_SCL)
+        assert vt.metadata["var_block_count"] == len(declared) == 4
+        assert vt.total_count == _declared_total(FB_1002_SCL)
+        assert _parsed_per_station(vt) == declared
         assert all(
             e.tag.startswith("STEP_")
             for e in vt.entries
@@ -326,22 +370,19 @@ class TestSclParserRealSamples:
         )
 
     def test_real_fb_external_device_interaction(self) -> None:
-        """FB_ExternalDeviceInteraction: VAR_IN_OUT(6) + VAR(7) + VAR CONSTANT(4, 常量类) = 17"""
+        """FB_ExternalDeviceInteraction: VAR_IN_OUT + VAR + VAR CONSTANT(常量类)，个数以样例文件逐行数出的为准"""
         result = SclParser().parse(FB_EXTERNAL_SCL)
         assert result.success
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_ExternalDeviceInteraction"
-        assert vt.metadata["var_block_count"] == 3
-        assert vt.total_count == 17
+        declared = _declared_per_block(FB_EXTERNAL_SCL)
+        assert vt.metadata["var_block_count"] == len(declared) == 3
+        assert vt.total_count == _declared_total(FB_EXTERNAL_SCL)
         # 各 VAR 块条目数核查
-        in_out_count = sum(1 for e in vt.entries if e.station == "VAR_IN_OUT")
-        var_count = sum(1 for e in vt.entries if e.station == "VAR")
+        assert _parsed_per_station(vt) == declared
         const_tags = [e.tag for e in vt.entries if e.station == "VAR_CONSTANT"]
-        assert in_out_count == 6
-        assert var_count == 7
         assert const_tags == ["IDX_F0", "IDX_F8", "IDX_F104", "IDX_F105"]
-        assert in_out_count + var_count + len(const_tags) == vt.total_count
         # 第一个 VAR_IN_OUT 为组框机链路结构体 (中文注释)
         io_entry = next(e for e in vt.entries if e.station == "VAR_IN_OUT")
         assert io_entry.tag == "io_stExt"
@@ -360,10 +401,9 @@ class TestSclParserRealSamples:
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_1004_GlueMachineFeeder_BufferFraming"
-        # VAR_IN_OUT(7) + VAR(37) + VAR CONSTANT(8, 常量类) = 52
-        assert vt.total_count == 52
-        assert sum(1 for e in vt.entries if e.station == "VAR_IN_OUT") == 7
-        assert sum(1 for e in vt.entries if e.station == "VAR_CONSTANT") == 8
+        # VAR_IN_OUT + VAR + VAR CONSTANT(常量类)，个数以样例文件逐行数出的为准
+        assert vt.total_count == _declared_total(FB_1004_SCL)
+        assert _parsed_per_station(vt) == _declared_per_block(FB_1004_SCL)
         # FB_TON 实例 (SysLib 共享库定时器)
         ton_entries = {e.tag: e for e in vt.entries if e.signal_type == "FB_TON"}
         assert set(ton_entries) == {
@@ -392,10 +432,10 @@ class TestSclParserRealSamples:
         vt = result.var_table
         assert vt is not None
         assert vt.metadata["fb_name"] == "FB_1003_PickPlace_BufferFraming"
-        assert vt.metadata["var_block_count"] == 3
-        # VAR_IN_OUT(6) + VAR(89) + VAR CONSTANT(13, 常量类) = 108
-        assert vt.total_count == 108
-        assert sum(1 for e in vt.entries if e.station == "VAR_CONSTANT") == 13
+        assert vt.metadata["var_block_count"] == len(_declared_per_block(FB_1003_SCL)) == 3
+        # VAR_IN_OUT + VAR + VAR CONSTANT(常量类)，个数以样例文件逐行数出的为准
+        assert vt.total_count == _declared_total(FB_1003_SCL)
+        assert _parsed_per_station(vt) == _declared_per_block(FB_1003_SCL)
         # VAR_IN_OUT 块识别 (FB_1003 与 FB_1004 是含 VAR_IN_OUT 最多的样例)
         in_out_entries = [e for e in vt.entries if e.station == "VAR_IN_OUT"]
         assert [(e.tag, e.signal_type) for e in in_out_entries] == [
@@ -445,24 +485,15 @@ class TestSclParserRealSamples:
     def test_real_var_block_identification(self) -> None:
         """验证 VAR_IN_OUT/VAR/VAR CONSTANT 块识别跨文件一致性 (结构体整块传递架构)"""
         # 5 个 FB 均为 VAR_IN_OUT 结构体 + VAR + VAR CONSTANT (常量单独成类)
-        expected_in_out = {
-            FB_2001_SCL: 4,
-            FB_EXTERNAL_SCL: 6,
-            FB_1002_SCL: 1,
-            FB_1003_SCL: 6,
-            FB_1004_SCL: 7,
-        }
-        for path, in_out_count in expected_in_out.items():
+        for path in (FB_2001_SCL, FB_EXTERNAL_SCL, FB_1002_SCL, FB_1003_SCL, FB_1004_SCL):
             vt = SclParser().parse(path).var_table
             assert vt is not None
+            declared = _declared_per_block(path)
             # FB_1002 另有 VAR_INPUT 块 (7 个 i_d*Ms 参数), 其余只有三类块
             extra = {"VAR_INPUT"} if path is FB_1002_SCL else set()
             assert set(vt.stations) == {"VAR_IN_OUT", "VAR", "VAR_CONSTANT"} | extra, path.name
-            assert vt.metadata["var_block_count"] == 3 + len(extra), path.name
-            assert (
-                sum(1 for e in vt.entries if e.station == "VAR_IN_OUT")
-                == in_out_count
-            ), path.name
+            assert vt.metadata["var_block_count"] == len(declared) == 3 + len(extra), path.name
+            assert _parsed_per_station(vt)["VAR_IN_OUT"] == declared["VAR_IN_OUT"], path.name
         # OB1 无任何 VAR 块
         r_ob1 = SclParser().parse(OB1_SCL)
         assert r_ob1.var_table is not None
