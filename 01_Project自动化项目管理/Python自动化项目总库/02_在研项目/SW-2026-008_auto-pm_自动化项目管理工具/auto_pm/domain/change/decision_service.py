@@ -225,9 +225,10 @@ class DecisionService:
             raise DecisionNotFoundError(f"未找到变更单文件: {change_id}.md{suffix}")
         if len(candidates) > 1:
             projects = sorted({str(item.project_id) for _, item in candidates})
+            files = "; ".join(f"{item.project_id}: {self._display_path(path)}" for path, item in candidates)
             raise DecisionValidationError(
                 f"变更单编号跨项目重号: {change_id}，请通过 --pid 指定项目；"
-                f"候选项目: {', '.join(projects)}"
+                f"候选项目: {', '.join(projects)}；冲突文件: {files}"
             )
         _, cr = candidates[0]
 
@@ -415,10 +416,50 @@ class DecisionService:
     def _legacy_change_candidates(
         self, change_id: str, project_id: str
     ) -> list[tuple[Path, ChangeRequest]]:
+        """Legacy (hash-less) Decision lookup; a change number is unique only inside one project (TD-SW008-034).
+
+        With a ``project_id`` that the Workspace Registry knows, only that project's own change cabinet is read
+        (the same lookup the planning and runtime Decisions use), so copies elsewhere in the workspace - backups,
+        archives, other projects - can neither be mistaken for a duplicate nor slow the search down.  Without
+        a registered project the workspace is searched as before, but archive, backup and ``.auto-pm`` directories
+        never count as candidates.
+        """
+
+        if project_id:
+            try:
+                project_root = self._registered_project_root(project_id)
+            except DecisionValidationError:
+                project_root = None
+            if project_root is not None:
+                return self._registered_project_candidate(project_root, change_id, project_id)
+        return self._workspace_search_candidates(change_id, project_id)
+
+    def _registered_project_candidate(
+        self, project_root: Path, change_id: str, project_id: str
+    ) -> list[tuple[Path, ChangeRequest]]:
+        candidate = self._project_change_candidate(project_root, change_id, label="CHG 真源")
+        if not os.path.lexists(candidate):
+            return []
+        try:
+            path = require_safe_workspace_path(self.workspace_root, candidate, label="CHG 真源")
+        except ControlRootGuardError as error:
+            raise DecisionValidationError(str(error)) from error
+        if not path.is_file():
+            return []
+        try:
+            parsed = ChgParser().parse(str(path))
+        except Exception as error:
+            log.warning("变更单候选解析失败 %s: %s", path, error)
+            return []
+        return [(path, parsed)] if parsed.project_id == project_id else []
+
+    def _workspace_search_candidates(
+        self, change_id: str, project_id: str
+    ) -> list[tuple[Path, ChangeRequest]]:
         parser = ChgParser()
         candidates: list[tuple[Path, ChangeRequest]] = []
         for path in sorted(self.workspace_root.glob(f"**/{change_id}.md")):
-            if not path.is_file() or self._is_runtime_worktree_candidate(path):
+            if not path.is_file() or self._is_runtime_worktree_candidate(path) or self._is_archived_candidate(path):
                 continue
             try:
                 parsed = parser.parse(str(path))
@@ -429,6 +470,21 @@ class DecisionService:
                 continue
             candidates.append((path, parsed))
         return candidates
+
+    def _display_path(self, path: Path) -> str:
+        try:
+            return path.resolve().relative_to(self.workspace_root.resolve()).as_posix()
+        except ValueError:
+            return str(path)
+
+    def _is_archived_candidate(self, path: Path) -> bool:
+        """A candidate under an archive, backup or ``.auto-pm`` directory (relative to the workspace) is not a source."""
+
+        try:
+            relative = path.resolve().relative_to(self.workspace_root.resolve())
+        except ValueError:
+            return False
+        return any(self._is_archive_or_backup_part(part) for part in relative.parts[:-1])
 
     def _runtime_change(
         self,
