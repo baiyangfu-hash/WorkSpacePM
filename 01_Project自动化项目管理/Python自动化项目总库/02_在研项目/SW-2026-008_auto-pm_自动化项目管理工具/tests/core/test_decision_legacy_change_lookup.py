@@ -132,3 +132,31 @@ def test_a_missing_change_in_a_registered_project_is_reported_as_missing(tmp_pat
 
     with pytest.raises(DecisionNotFoundError, match="未找到变更单文件"):
         _legacy(DecisionService(tmp_path))
+
+
+def test_a_registered_project_reads_only_its_own_change_cabinet(tmp_path: Path) -> None:
+    """Plan A: a change filed outside the project's standard cabinet is not found any more (documented behaviour change)."""
+
+    _repository(tmp_path)
+    (tmp_path / PROJECT_ROOT).mkdir(parents=True, exist_ok=True)
+    _copy_of_the_chg(tmp_path, f"{PROJECT_ROOT}/misc")  # right project, non-standard place
+
+    with pytest.raises(DecisionNotFoundError, match="未找到变更单文件"):
+        _legacy(DecisionService(tmp_path))
+
+
+def test_a_registered_cabinet_file_that_belongs_to_another_project_is_not_used(tmp_path: Path) -> None:
+    _repository(tmp_path)
+    _copy_of_the_chg(tmp_path, f"{PROJECT_ROOT}/04_监控", project_id=OTHER_PROJECT)
+
+    with pytest.raises(DecisionNotFoundError, match="未找到变更单文件"):
+        _legacy(DecisionService(tmp_path))
+
+
+def test_without_a_project_a_copy_under_the_control_directory_is_not_a_candidate(tmp_path: Path) -> None:
+    """``.auto-pm`` is excluded by name, not only because its sub-directory happens to say backup or archive."""
+
+    _repository(tmp_path, "04_监控")
+    _copy_of_the_chg(tmp_path, ".auto-pm/store/mirror")
+
+    assert _legacy(DecisionService(tmp_path), project_id="") == PROJECT_ID
