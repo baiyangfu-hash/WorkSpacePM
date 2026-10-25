@@ -32,6 +32,7 @@ from auto_pm.change.parser import ChgParser
 from auto_pm.change.path_resolver import (
     extract_domain_from_change_number,
     find_ledger_file,
+    monitoring_dir_name,
     scan_change_files,
 )
 from auto_pm.core.paths import CHANGE_REQUESTS_PATH
@@ -233,9 +234,11 @@ class ChangeFileLocator:
                 return os.path.join(base_dir, f"{change_number}.md")
         # 未匹配已有目录 → 使用5大过程组统一路径（默认创建路径）
         # CHG-SCPT-2026-146: 统一路径 04_监控/01_变更管理/01_变更单/
+        # 只有 11_监控 的旧布局项目建在 11_监控 下，不多造一个 04_监控（TD-SW008-186）
         return os.path.join(
             project_path,
-            *CHANGE_REQUESTS_PATH,
+            monitoring_dir_name(project_path),
+            *CHANGE_REQUESTS_PATH[1:],
             f"CHG-{domain}",
             f"{change_number}.md",
         )

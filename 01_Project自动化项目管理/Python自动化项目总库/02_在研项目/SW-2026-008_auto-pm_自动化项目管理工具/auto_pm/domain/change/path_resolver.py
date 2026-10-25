@@ -24,6 +24,7 @@ import re
 from auto_pm.core.paths import (
     CHANGE_RECORDS_PATH,
     CHANGE_SCAN_PATH,
+    PG_MONITORING_DIR,
     PROJECT_INIT_PATH,
 )
 
@@ -223,6 +224,32 @@ _LEDGER_FILE_PATTERNS = [
 ]
 
 
+# 模板 PLC 项目的历史监控目录名（TD-SW008-035 起与标准的 04_监控 并认）
+LEGACY_MONITORING_DIR = "11_监控"
+
+
+def monitoring_dir_name(project_path: str) -> str:
+    """项目实际在用的监控目录名：已有 ``04_监控`` 用它，只有 ``11_监控`` 就用 ``11_监控``，都没有按标准 ``04_监控``。
+
+    新建台账、新建变更单、备份默认路径都按它求位置，避免给旧布局项目多造一个 ``04_监控``（TD-SW008-186、187）。
+    """
+    if os.path.isdir(os.path.join(project_path, PG_MONITORING_DIR)):
+        return str(PG_MONITORING_DIR)
+    if os.path.isdir(os.path.join(project_path, LEGACY_MONITORING_DIR)):
+        return LEGACY_MONITORING_DIR
+    return str(PG_MONITORING_DIR)
+
+
+def default_ledger_path(project_path: str) -> str:
+    """项目没有台账时，台账应当建在哪里（按项目实际监控目录布局）。"""
+    return os.path.join(
+        project_path,
+        monitoring_dir_name(project_path),
+        *CHANGE_RECORDS_PATH[1:],
+        "01_版本变更台账.md",
+    )
+
+
 def find_ledger_file(project_path: str) -> str | None:
     """查找版本变更台账文件
 
@@ -245,7 +272,8 @@ def get_or_create_ledger_file(project_path: str) -> str | None:
     """查找或创建版本变更台账文件
 
     CHG-SCPT-2026-146: 5大过程组统一路径，破坏性切换后不再区分 PLC / Python。
-    若台账文件不存在，按统一路径自动创建（04_监控/01_变更管理/02_变更记录/01_版本变更台账.md），
+    若台账文件不存在，按项目已有的监控目录布局自动创建（标准 04_监控，只有 11_监控 的旧项目建在 11_监控 下，
+    即 <监控目录>/01_变更管理/02_变更记录/01_版本变更台账.md），
     含「变更单索引」表格骨架，供 LedgerUpdater 追加记录。
 
     Args:
@@ -260,8 +288,8 @@ def get_or_create_ledger_file(project_path: str) -> str | None:
         return existing
 
     # 2. 未找到 → 按统一路径创建
-    ledger_dir = os.path.join(project_path, _LEDGER_SEARCH_PATHS[0])
-    ledger_path = os.path.join(ledger_dir, "01_版本变更台账.md")
+    ledger_path = default_ledger_path(project_path)
+    ledger_dir = os.path.dirname(ledger_path)
 
     try:
         os.makedirs(ledger_dir, exist_ok=True)

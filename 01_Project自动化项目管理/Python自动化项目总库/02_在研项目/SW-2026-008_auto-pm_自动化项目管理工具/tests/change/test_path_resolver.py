@@ -7,10 +7,13 @@ from pathlib import Path
 import pytest
 from auto_pm.change.path_resolver import (
     PathTraversalError,
+    default_ledger_path,
     extract_domain_from_change_number,
     find_ledger_file,
     find_proj_file,
+    get_or_create_ledger_file,
     get_project_id_from_path,
+    monitoring_dir_name,
     scan_change_files,
     validate_change_number,
     validate_path_within_workspace,
@@ -172,6 +175,53 @@ class TestFindLedgerFile:
         """无台帐文件返回 None"""
         result = find_ledger_file(str(tmp_path))
         assert result is None
+
+
+class TestMonitoringLayout:
+    """新建台账、变更单与备份路径按项目实际监控目录布局求（TD-SW008-186、187）"""
+
+    def test_standard_layout_wins(self, tmp_path: Path) -> None:
+        (tmp_path / "04_监控").mkdir()
+        (tmp_path / "11_监控").mkdir()
+        assert monitoring_dir_name(str(tmp_path)) == "04_监控"
+
+    def test_legacy_only_layout(self, tmp_path: Path) -> None:
+        (tmp_path / "11_监控").mkdir()
+        assert monitoring_dir_name(str(tmp_path)) == "11_监控"
+
+    def test_neither_falls_back_to_standard(self, tmp_path: Path) -> None:
+        assert monitoring_dir_name(str(tmp_path)) == "04_监控"
+
+    def test_default_ledger_path_follows_layout(self, tmp_path: Path) -> None:
+        (tmp_path / "11_监控").mkdir()
+        expected = tmp_path / "11_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台账.md"
+        assert Path(default_ledger_path(str(tmp_path))) == expected
+
+    def test_create_ledger_in_legacy_project_does_not_make_04(self, tmp_path: Path) -> None:
+        """只有 11_监控、又没有台账的旧项目：台账建在 11_监控，不多出 04_监控。"""
+        (tmp_path / "11_监控").mkdir()
+        created = get_or_create_ledger_file(str(tmp_path))
+        assert created is not None
+        assert Path(created) == Path(default_ledger_path(str(tmp_path)))
+        assert Path(created).is_file()
+        assert not (tmp_path / "04_监控").exists()
+
+    def test_create_ledger_in_empty_project_uses_standard(self, tmp_path: Path) -> None:
+        created = get_or_create_ledger_file(str(tmp_path))
+        assert created is not None
+        assert (tmp_path / "04_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台账.md").is_file()
+
+    def test_new_change_file_path_follows_layout(self, tmp_path: Path) -> None:
+        from auto_pm.change.file_locator import ChangeFileLocator
+        from auto_pm.change.parser import ChgParser
+
+        (tmp_path / "11_监控").mkdir()
+        locator = ChangeFileLocator(str(tmp_path), ChgParser())
+        path = locator.get_change_file_path(str(tmp_path), "CHG-PLC-2026-001")
+        assert Path(path) == (
+            tmp_path / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-PLC" / "CHG-PLC-2026-001.md"
+        )
+        assert not (tmp_path / "04_监控").exists()
 
 
 class TestExtractDomainFromChangeNumber:
