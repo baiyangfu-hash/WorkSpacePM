@@ -61,6 +61,11 @@ jobs:
           python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
           python -m pip check
 
+      # Minimal start in the clean environment (TD-SW008-114): the cockpit's own health check must pass on the locked set.
+      - name: Minimal start (main.py doctor)
+        working-directory: ${{ env.PROJ }}
+        run: python main.py doctor
+
       - name: CI tools self-test (the checks must be able to fail)
         run: python -I "$PROJ/tests/tools/sw008_ci/selftest.py"
 
@@ -150,6 +155,12 @@ jobs:
           echo "$RUNNER_TEMP/venv/Scripts" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
+
+      - name: Minimal start (main.py doctor)
+        working-directory: ${{ env.PROJ }}
+        env:
+          PYTHONUTF8: "1"
+        run: '"$RUNNER_TEMP/venv/Scripts/python.exe" main.py doctor'
 
       - name: Pytest (core, sample drill)
         working-directory: ${{ env.PROJ }}
