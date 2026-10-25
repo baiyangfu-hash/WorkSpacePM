@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,7 @@ def _helper(tmp_path: Path) -> Path:
 
 import os
 import sys
+import time
 import time
 from pathlib import Path
 
@@ -339,6 +341,7 @@ def _prompt_echo_helper(tmp_path: Path) -> Path:
         """from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 arguments = sys.argv[1:]
@@ -370,15 +373,18 @@ def test_a_child_that_never_reads_stdin_does_not_block_the_caller(tmp_path: Path
     repository = _microtask_repository(tmp_path)
     helper = tmp_path / "deaf_helper.py"
     helper.write_text(
-        'import sys\nprint(\'{"type":"thread.started","thread_id":"deaf"}\')\n', encoding="utf-8"
+        'import sys, time\nprint(\'{"type":"thread.started","thread_id":"deaf"}\', flush=True)\ntime.sleep(4)\n',
+        encoding="utf-8",
     )
+    executor = LocalCodexExecutor(command_prefix=(sys.executable, str(helper)))
 
-    result = LocalCodexExecutor(command_prefix=(sys.executable, str(helper))).execute(
-        _request(repository, "x" * 2_000_000)
-    )
+    began = time.monotonic()
+    handle = executor.start(_request(repository, "x" * 2_000_000))
+    elapsed = time.monotonic() - began
 
-    assert result.started is True
-    assert result.status is not LocalExecutionStatus.NOT_STARTED
+    assert isinstance(handle, LocalExecutionHandle)
+    assert elapsed < 2.5, "a synchronous write to a child that is not reading would wait for the child to exit"
+    executor.reap(handle)
 
 
 @pytest.mark.parametrize("launcher", ["codex.cmd", "codex.bat", "CODEX.CMD"])
