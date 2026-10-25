@@ -46,6 +46,9 @@ PG_EXECUTING_DIR: Final[str] = "03_执行"
 #: 监控过程组目录（变更管理、整改项、台账对账）
 PG_MONITORING_DIR: Final[str] = "04_监控"
 
+#: 模板 PLC 项目的历史监控目录名（与标准的 04_监控 并认，TD-SW008-035/191）
+LEGACY_MONITORING_DIR: Final[str] = "11_监控"
+
 #: 收尾过程组目录（发布说明、交付清单、PM_SESSION归档）
 PG_CLOSING_DIR: Final[str] = "05_收尾"
 
@@ -157,15 +160,21 @@ def get_projects_subdir(workspace_root: str) -> str:
 
 
 def get_change_requests_paths(project_path: str) -> list[str]:
-    """获取变更单存放目录路径（5大过程组统一路径，CHG-SCPT-2026-146）
+    """获取变更单存放目录路径候选（标准 04_监控 在前，模板 PLC 项目的旧布局 11_监控 在后）
+
+    调用方取第一个存在的目录。只列 04_监控 会让只有 11_监控 的项目（如 DJ-2026-009）的变更单
+    进不了索引库（TD-SW008-191）。
 
     Args:
         project_path: 项目根目录
 
     Returns:
-        包含变更单目录绝对路径的列表（单元素，破坏性切换后不再有多路径回退）
+        变更单目录绝对路径列表（标准布局在前）
     """
-    return [os.path.join(project_path, *CHANGE_REQUESTS_PATH)]
+    return [
+        os.path.join(project_path, *CHANGE_REQUESTS_PATH),
+        os.path.join(project_path, LEGACY_MONITORING_DIR, *CHANGE_REQUESTS_PATH[1:]),
+    ]
 
 
 def get_change_records_paths(project_path: str) -> list[str]:

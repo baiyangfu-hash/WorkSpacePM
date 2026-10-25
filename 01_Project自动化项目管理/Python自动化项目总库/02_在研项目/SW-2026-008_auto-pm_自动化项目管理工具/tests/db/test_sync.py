@@ -168,6 +168,42 @@ class TestSyncChanges:
         assert count == 0
 
 
+class TestSyncChangesLegacyMonitoringLayout:
+    """TD-SW008-191：只有 11_监控 的项目，变更单也要同步进索引库"""
+
+    @staticmethod
+    def _synced_count(db: DatabaseManager, workspace: Path, monitor: str) -> int:
+        from auto_pm.change.change_service import ChangeService
+
+        project_dir = workspace / "DJ-2026-001_测试项目"
+        target = (
+            project_dir / monitor / "01_变更管理" / "01_变更单" / "CHG-SCPT" / "CHG-SCPT-2026-002.md"
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "# 变更单\n\n## 3. 变更基本信息\n### 3.0 编号与项目\n| 字段 | 内容 |\n|------|------|\n"
+            "| 变更编号 | CHG-SCPT-2026-002 |\n| 项目名称 | DJ-2026-001 |\n| 项目编号 | DJ-2026-001 |\n\n"
+            "### 3.4 申请信息\n| 字段 | 内容 |\n|------|------|\n"
+            "| 变更申请人 | fubai |\n| 变更状态 | draft |\n",
+            encoding="utf-8",
+        )
+
+        project_service = ProjectService(str(workspace))
+        sync = SyncService(db, project_service, ChangeService(str(workspace)))
+        sync._sync_projects(force_full=True)
+        return sync._sync_changes(force_full=True)
+
+    def test_legacy_11_monitoring_changes_are_synced(
+        self, db: DatabaseManager, workspace_with_project: Path
+    ) -> None:
+        assert self._synced_count(db, workspace_with_project, "11_监控") == 1
+
+    def test_standard_04_monitoring_changes_still_synced(
+        self, db: DatabaseManager, workspace_with_project: Path
+    ) -> None:
+        assert self._synced_count(db, workspace_with_project, "04_监控") == 1
+
+
 # ── _get_project_mtime 测试 ───────────────────────────
 
 
