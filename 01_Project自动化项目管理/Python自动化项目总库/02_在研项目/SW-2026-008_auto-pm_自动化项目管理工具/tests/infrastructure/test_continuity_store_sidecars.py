@@ -214,6 +214,39 @@ def test_sc07c_a_copy_the_os_refuses_is_named_in_the_busy_message(tmp_path: Path
     assert "continuity.db: PermissionError" in str(busy.value)
 
 
+def test_sc07d_a_sidecar_that_keeps_vanishing_while_it_is_read_names_the_file_in_the_busy_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hash pass opens a sidecar that SQLite deletes in between: retried, and the final BUSY says which file and why."""
+
+    store = _make_root(tmp_path)
+    (tmp_path / ".auto-pm" / "continuity.db-shm").write_bytes(b"")
+    _probe(monkeypatch)
+
+    def vanish(self: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if self.name == "continuity.db-shm" and "r" in mode:
+            raise FileNotFoundError(2, "No such file or directory", str(self))
+        return ORIGINAL_OPEN(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", vanish)
+
+    with pytest.raises(ContinuityStoreError, match="BUSY") as busy:
+        _strict_read(store)
+    assert "continuity.db-shm: FileNotFoundError" in str(busy.value)
+
+
+def test_sc07e_a_database_that_vanishes_during_the_copy_names_the_file_in_the_busy_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _make_root(tmp_path)
+    _probe(monkeypatch)
+
+    def vanish(source: Any, target: Any, **kwargs: Any) -> Any:
+        raise FileNotFoundError(2, "No such file or directory", str(source))
+
+    monkeypatch.setattr(shutil, "copyfile", vanish)
+
+    with pytest.raises(ContinuityStoreError, match="BUSY") as busy:
+        _strict_read(store)
+    assert "continuity.db: FileNotFoundError" in str(busy.value)
+
+
 def test_sc08_a_database_file_that_cannot_be_read_is_never_retried_by_the_strict_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = _make_root(tmp_path)
     probe = _probe(monkeypatch)
