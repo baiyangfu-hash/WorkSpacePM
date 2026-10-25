@@ -108,7 +108,7 @@ def step1_build_check(args):
         "main.py"
     ]
     info(f"命令: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=str(SRC_CODE), capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=str(SRC_CODE), capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     if result.returncode != 0:
         fail(f"PyInstaller 编译失败:\n{result.stderr[-800:]}")

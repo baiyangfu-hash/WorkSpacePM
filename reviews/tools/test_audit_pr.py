@@ -37,7 +37,7 @@ def run(cwd: Path, *args: str) -> str:
         "PATH": "/usr/bin:/bin",
         "HOME": str(cwd),
     }
-    return subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
 
 
 def write(repo: Path, name: str, text: str) -> None:
