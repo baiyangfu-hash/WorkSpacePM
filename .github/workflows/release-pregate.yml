@@ -72,8 +72,7 @@ jobs:
             tests/test_bug5_scan_depth.py tests/test_fixture_health.py tests/test_import.py tests/test_pm_session_size.py \
             tests/test_smoke.py \
             --ignore=tests/e2e/test_closure_drill.py --ignore=tests/e2e/test_closure_drill_agent_misconduct.py \
-            --ignore=tests/e2e/test_release_pycache_drill.py --ignore=tests/e2e/test_trial_run_drill.py \
-            --ignore=tests/e2e/test_approval_pin_drill.py
+            --ignore=tests/e2e/test_release_pycache_drill.py --ignore=tests/e2e/test_trial_run_drill.py
           run_group application tests/application
           run_group plc tests/plc
           run_group change tests/change
