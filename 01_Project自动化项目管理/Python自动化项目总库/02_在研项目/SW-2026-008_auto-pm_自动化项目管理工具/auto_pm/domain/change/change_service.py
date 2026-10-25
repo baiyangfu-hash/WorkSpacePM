@@ -585,7 +585,9 @@ class ChangeService:
             implementing → pending_acceptance → accepting → completed
                                                          ↘ implementing（返工）
         """
-        file_path = self._locator.find_change_file(change_number, project_id=project_id)
+        file_path = self._locator.find_change_file(
+            change_number, project_id=project_id, require_unique=True
+        )
         if not file_path:
             log.warning("状态流转: 变更单文件未找到 %s", change_number)
             return None
@@ -872,7 +874,7 @@ class ChangeService:
 
         # 2. 获取变更单文件
         file_path = self._locator.find_change_file(
-            change_number, project_id=lookup_project_id
+            change_number, project_id=lookup_project_id, require_unique=True
         )
         if not file_path:
             log.warning("修改变更单: 文件未找到 %s", change_number)
@@ -937,7 +939,9 @@ class ChangeService:
         Returns:
             True 删除成功，False 不存在
         """
-        file_path = self._locator.find_change_file(change_number, project_id=project_id)
+        file_path = self._locator.find_change_file(
+            change_number, project_id=project_id, require_unique=True
+        )
         file_deleted = False
 
         # 1. 删除 .md 文件
