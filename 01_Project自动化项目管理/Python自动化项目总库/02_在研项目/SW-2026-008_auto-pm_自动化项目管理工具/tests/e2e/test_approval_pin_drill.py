@@ -48,6 +48,11 @@ def commit_approver_pin(drill: Drill, pin: str = USER_PIN, approver: str = APPRO
     git(drill.root, "commit", "-q", "--no-verify", "-m", "approver pin", "--", REGISTRY_RELATIVE_PATH)
 
 
+# These seven cases type the PIN into a pseudo terminal; Windows has no os.openpty, so only they are skipped there
+# (the other seven keep their Windows coverage).
+needs_pty = pytest.mark.skipif(not hasattr(os, "openpty"), reason="os.openpty is not available on this platform")
+
+
 def cli_in_terminal(drill: Drill, typed: list[str], *arguments: str) -> Step:
     """Run one command with a terminal on its standard input and type ``typed`` into it, as a person would.
 
@@ -122,6 +127,7 @@ def test_p01_an_agent_without_a_terminal_cannot_approve_and_nothing_is_written(t
     assert ledger_snapshot(drill) == before, "被拒的批准不应写任务、决策包或变更单"
 
 
+@needs_pty
 def test_p02_a_pseudo_terminal_with_a_guessed_pin_is_refused_and_counted(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar)
     commit_approver_pin(drill)
@@ -136,6 +142,7 @@ def test_p02_a_pseudo_terminal_with_a_guessed_pin_is_refused_and_counted(tmp_pat
     assert ledger_snapshot(drill) == before
 
 
+@needs_pty
 def test_p03_the_users_pin_in_a_terminal_approves_and_names_the_user(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar)
     commit_approver_pin(drill)
@@ -150,6 +157,7 @@ def test_p03_the_users_pin_in_a_terminal_approves_and_names_the_user(tmp_path: P
     assert "user-confirmation:chat-" not in text
 
 
+@needs_pty
 def test_p04_a_key_the_agent_writes_into_the_working_tree_does_not_count(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
 
@@ -191,6 +199,7 @@ def test_p05_the_cockpit_button_and_a_script_calling_the_facade_cannot_approve_w
     assert ledger_snapshot(drill) == before
 
 
+@needs_pty
 def test_p06_final_acceptance_needs_the_users_pin_on_every_entrance(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     from auto_pm.application.core.pm_cockpit_service import PmCockpitError, PmCockpitService
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
@@ -228,6 +237,7 @@ def test_p06_final_acceptance_needs_the_users_pin_on_every_entrance(tmp_path: Pa
     assert closed.returncode == 0 and closed.json()["state"] == "COMPLETED", drill.transcript()
 
 
+@needs_pty
 def test_p07_five_wrong_pins_lock_approvals_even_for_the_right_pin(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar)
     commit_approver_pin(drill)
@@ -308,6 +318,7 @@ def test_p10_the_pin_is_looked_up_where_the_approval_is_written(tmp_path: Path, 
     assert ledger_snapshot(drill) == before
 
 
+@needs_pty
 def test_p11_generic_state_commands_are_no_side_doors(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     """Audit 72 high-3: ``continuity mission transition --to ACCEPTED`` is no acceptance; the real one records the key."""
 
@@ -358,6 +369,7 @@ def test_p12_a_folder_below_the_control_root_is_no_way_around_the_pin(tmp_path: 
     assert ledger_snapshot(drill) == before, "子目录当工作区批准了真变更单"
 
 
+@needs_pty
 def test_p13_a_card_that_cannot_be_approved_is_refused_before_the_pin_is_asked(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar)
     commit_approver_pin(drill)
