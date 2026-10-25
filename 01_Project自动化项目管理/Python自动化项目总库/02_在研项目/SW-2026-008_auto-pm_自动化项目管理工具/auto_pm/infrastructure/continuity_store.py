@@ -155,6 +155,12 @@ class _ReadSnapshotDriftError(RuntimeError):
     """Internal bounded-retry signal for a changing SQLite source snapshot."""
 
 
+def _drift_reason(name: str, error: BaseException) -> str:
+    """Name the file and the OS error behind a retried read, so a persistent BUSY says what held the file (TD-SW008-180)."""
+
+    return f"{name}: {type(error).__name__} {error}"
+
+
 class _ReadSnapshotAnomalyError(_ReadSnapshotDriftError):
     """A source sidecar was not a single-link regular file at one instant.
 
@@ -1229,10 +1235,10 @@ class ContinuityStore:
                 while chunk := stream.read(1024 * 1024):
                     digest.update(chunk)
         except FileNotFoundError as error:
-            raise _ReadSnapshotDriftError(path.name) from error
+            raise _ReadSnapshotDriftError(_drift_reason(path.name, error)) from error
         except PermissionError as error:
             if transient:
-                raise _ReadSnapshotDriftError(path.name) from error
+                raise _ReadSnapshotDriftError(_drift_reason(path.name, error)) from error
             raise ContinuityStoreError(f"Continuity Store 文件无法读取: {path.name}") from error
         except OSError as error:
             raise ContinuityStoreError(f"Continuity Store 文件无法读取: {path.name}") from error
@@ -1307,6 +1313,7 @@ class ContinuityStore:
 
         temp_root = self._validated_snapshot_temp_root()
         persistent_anomaly: str | None = None
+        last_reason = ""
         for attempt in range(_SIDECAR_ATTEMPTS):
             temporary: tempfile.TemporaryDirectory[str] | None = None
             try:
@@ -1346,10 +1353,10 @@ class ContinuityStore:
                         try:
                             shutil.copyfile(source, target)
                         except FileNotFoundError as error:
-                            raise _ReadSnapshotDriftError(source.name) from error
+                            raise _ReadSnapshotDriftError(_drift_reason(source.name, error)) from error
                         except PermissionError as error:
                             # Windows: a writer may hold a byte-range lock on the file for a moment.
-                            raise _ReadSnapshotDriftError(source.name) from error
+                            raise _ReadSnapshotDriftError(_drift_reason(source.name, error)) from error
                 copied = tuple(
                     self._file_inventory(path, required=fact[0])
                     if fact[0]
@@ -1374,6 +1381,7 @@ class ContinuityStore:
                     temporary.cleanup()
                 # only the anomaly seen on the LAST attempt can be the refusal; a later plain drift clears it
                 persistent_anomaly = str(error) if isinstance(error, _ReadSnapshotAnomalyError) else None
+                last_reason = str(error)
                 if attempt < _SIDECAR_ATTEMPTS - 1:
                     time.sleep(_SIDECAR_RETRY_SECONDS)
                 continue
@@ -1383,7 +1391,8 @@ class ContinuityStore:
                 raise
         if persistent_anomaly is not None:
             raise ContinuityStoreError(persistent_anomaly)
-        raise ContinuityStoreError("Continuity Store BUSY: 无法取得稳定只读快照")
+        detail = f"（最后一次原因：{last_reason}）" if last_reason else ""
+        raise ContinuityStoreError(f"Continuity Store BUSY: 无法取得稳定只读快照{detail}")
 
     @classmethod
     def _check_snapshot_integrity(cls, snapshot_path: Path) -> None:

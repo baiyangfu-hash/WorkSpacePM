@@ -8,6 +8,7 @@ instants deterministic; the real-process counterparts are scenarios r08 and r09 
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -183,6 +184,34 @@ def test_sc07_a_sidecar_that_stays_locked_is_refused_busy_after_bounded_retries_
         _strict_read(store)
     assert len(failed) == _SIDECAR_ATTEMPTS and probe.sleeps == _SIDECAR_ATTEMPTS - 1
     assert list(snapshot_parent.iterdir()) == []
+
+
+def test_sc07b_a_persistent_busy_names_the_file_and_the_os_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TD-SW008-180：Windows 上驾驶舱开着时的 BUSY 以前只说“取不到稳定快照”，现在要带出是哪个文件、什么系统错误。"""
+
+    store = _make_root(tmp_path)
+    (tmp_path / ".auto-pm" / "continuity.db-shm").write_bytes(b"")
+    _probe(monkeypatch)
+    _unreadable(monkeypatch, "continuity.db-shm", failures=None)
+
+    with pytest.raises(ContinuityStoreError, match="BUSY") as busy:
+        _strict_read(store)
+    assert "最后一次原因" in str(busy.value)
+    assert "continuity.db-shm" in str(busy.value) and "PermissionError" in str(busy.value)
+
+
+def test_sc07c_a_copy_the_os_refuses_is_named_in_the_busy_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _make_root(tmp_path)
+    _probe(monkeypatch)
+
+    def refuse(source: Any, target: Any, **kwargs: Any) -> Any:
+        raise PermissionError(13, "Permission denied", str(source))
+
+    monkeypatch.setattr(shutil, "copyfile", refuse)
+
+    with pytest.raises(ContinuityStoreError, match="BUSY") as busy:
+        _strict_read(store)
+    assert "continuity.db: PermissionError" in str(busy.value)
 
 
 def test_sc08_a_database_file_that_cannot_be_read_is_never_retried_by_the_strict_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
