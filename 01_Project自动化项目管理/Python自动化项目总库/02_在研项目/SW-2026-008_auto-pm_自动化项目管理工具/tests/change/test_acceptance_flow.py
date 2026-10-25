@@ -450,3 +450,63 @@ class TestAcceptanceStatusLabels:
         assert "accepting" in STATUS_FLOW["pending_acceptance"]
         assert "completed" in STATUS_FLOW["accepting"]
         assert "implementing" in STATUS_FLOW["accepting"]  # 返工路径
+
+
+# ── 11_监控 布局：流转后台账同步（TD-SW008-035） ─────────
+
+
+class TestLedgerSyncInLegacyMonitoringLayout:
+    """模板 PLC 项目的变更柜在 11_监控 下：命令行/服务流转后台账也要自动回写，不能留给 `ledger reconcile --fix`。"""
+
+    _LEDGER_SKELETON = (
+        "# 版本变更台帐\n\n## 变更单索引\n\n"
+        "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |\n"
+        "|------|----------|------|--------|----------|----------|----------|------|\n"
+    )
+
+    def _ledger(self, workspace: str, monitor: str) -> Path:
+        return Path(workspace) / "TEST-2026-001" / monitor / "01_变更管理" / "02_变更记录" / "01_版本变更台帐.md"
+
+    def _ledger_text(self, workspace: str, monitor: str) -> str:
+        return self._ledger(workspace, monitor).read_text(encoding="utf-8")
+
+    def test_transition_writes_the_ledger_under_11_monitoring(self, acceptance_workspace: str) -> None:
+        project = Path(acceptance_workspace) / "TEST-2026-001"
+        (project / "04_监控").rename(project / "11_监控")
+        self._ledger(acceptance_workspace, "11_监控").write_text(self._LEDGER_SKELETON, encoding="utf-8")
+        chg_number = "CHG-DOCU-2026-001"
+
+        cr = ChangeService(acceptance_workspace).transition_status(chg_number, "pending_acceptance", approver="张三")
+
+        assert cr is not None and cr.status == "pending_acceptance"
+        legacy = self._ledger_text(acceptance_workspace, "11_监控")
+        assert chg_number in legacy, "11_监控 布局下流转后台账没有回写"
+
+    def test_standard_layout_still_writes_the_ledger(self, acceptance_workspace: str) -> None:
+        self._ledger(acceptance_workspace, "04_监控").write_text(self._LEDGER_SKELETON, encoding="utf-8")
+        chg_number = "CHG-DOCU-2026-001"
+
+        ChangeService(acceptance_workspace).transition_status(chg_number, "pending_acceptance", approver="张三")
+
+        assert chg_number in self._ledger_text(acceptance_workspace, "04_监控")
+
+    def test_an_outer_folder_with_its_own_ledger_is_never_written(self, acceptance_workspace: str) -> None:
+        """项目在一个自己也有 04_监控 和台账的外层目录里：回写必须落到本项目的 11_监控 台账，不能跑到外层。"""
+        workspace = Path(acceptance_workspace)
+        outer = workspace / "0100_PLC"
+        outer.mkdir()
+        project = outer / "TEST-2026-001"
+        (workspace / "TEST-2026-001").rename(project)
+        (project / "04_监控").rename(project / "11_监控")
+        outer_ledger = outer / "04_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台帐.md"
+        outer_ledger.parent.mkdir(parents=True)
+        outer_ledger.write_text(self._LEDGER_SKELETON, encoding="utf-8")
+        inner_ledger = project / "11_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台帐.md"
+        inner_ledger.write_text(self._LEDGER_SKELETON, encoding="utf-8")
+        chg_number = "CHG-DOCU-2026-001"
+
+        cr = ChangeService(acceptance_workspace).transition_status(chg_number, "pending_acceptance", approver="张三")
+
+        assert cr is not None and cr.status == "pending_acceptance"
+        assert chg_number in inner_ledger.read_text(encoding="utf-8")
+        assert chg_number not in outer_ledger.read_text(encoding="utf-8"), "回写跑到了外层目录的台账"
