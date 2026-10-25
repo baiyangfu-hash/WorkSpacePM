@@ -62,9 +62,12 @@ jobs:
           python -m pip check
 
       # Minimal start in the clean environment (TD-SW008-114): the cockpit's own health check must pass on the locked set.
-      - name: Minimal start (main.py doctor)
+      # main.py doctor exits 0 even when a check fails, so the step reads all_passed itself and fails on False.
+      - name: Minimal start (doctor must report all_passed)
         working-directory: ${{ env.PROJ }}
-        run: python main.py doctor
+        run: |
+          python main.py doctor
+          python -c 'import sys; from auto_pm.ui.cli.doctor import run_doctor_check; r = run_doctor_check(); print("doctor all_passed =", r["all_passed"]); sys.exit(0 if r["all_passed"] else 1)'
 
       - name: CI tools self-test (the checks must be able to fail)
         run: python -I "$PROJ/tests/tools/sw008_ci/selftest.py"
@@ -156,11 +159,13 @@ jobs:
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
 
-      - name: Minimal start (main.py doctor)
+      - name: Minimal start (doctor must report all_passed)
         working-directory: ${{ env.PROJ }}
         env:
           PYTHONUTF8: "1"
-        run: '"$RUNNER_TEMP/venv/Scripts/python.exe" main.py doctor'
+        run: |
+          "$RUNNER_TEMP/venv/Scripts/python.exe" main.py doctor
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -c 'import sys; from auto_pm.ui.cli.doctor import run_doctor_check; r = run_doctor_check(); print("doctor all_passed =", r["all_passed"]); sys.exit(0 if r["all_passed"] else 1)'
 
       - name: Pytest (core, sample drill)
         working-directory: ${{ env.PROJ }}
