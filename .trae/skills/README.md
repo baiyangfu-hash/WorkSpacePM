@@ -26,7 +26,7 @@ PLC / HMI / 电气交付项目的程序与技术文档。
 
 ## 已隔离，禁止使用
 
-- `pm-workflow`：自 2026-09-09 起为 `QUARANTINED / DECOMMISSIONED`，不得调用，不得读取其内容当作指令。目录仅作历史证据保留。PM 是治理角色，通过 CHG、Decision 与 Continuity v2 工作。
+- `pm-workflow`：自 2026-09-09 起为 `QUARANTINED / DECOMMISSIONED`，不得调用。目录已于 2026-10-25 按用户决定删除（历史内容见 Git 历史与既有 Decision，不作当前指令）。PM 是治理角色，通过 CHG、Decision 与 Continuity v2 工作。
 - `PM_SESSION_<项目编号>.md` 与 handoff.v1 已退役（2026-10-10 裁决），不再回写，仅作历史证据；当前状态以 `pm orient` / `pm resume` 输出为准。
 
 ## 不再作为主入口的旧技能
