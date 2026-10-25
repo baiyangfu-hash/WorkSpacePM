@@ -536,3 +536,92 @@ def test_partial_output_held_open_is_copied_aside(tmp_path: Path, monkeypatch: p
     mod._keep_partial(src, dst, mod.Log(tmp_path / "log"))
     assert dst.read_text(encoding="utf-8") == "half a group\n"
     assert "copied to core.interrupted.1.txt" in (tmp_path / "log").read_text(encoding="utf-8")
+
+
+def _with_heavy_marker(cfg: Path, marker: Path) -> Path:
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    data["heavy_marker"] = str(marker)
+    cfg.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return cfg
+
+
+def test_heavy_marker_exists_while_running_and_is_removed_after_done(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "reports" / "HEAVY_GATES_RUNNING"
+    cfg = _with_heavy_marker(_config(lab, [_step(lab, "rest", wait=120)]), marker)
+    runner = _start(cfg)
+    _wait_for(lambda: _runs(lab, "rest") == 1)
+    assert marker.exists() and "pid=" in marker.read_text(encoding="utf-8")
+    (lab["tools"] / "release_rest").write_text("")
+    assert runner.wait(timeout=60) == 0
+    assert not marker.exists()
+    assert _state(lab)["result"] == "DONE"
+
+
+def test_heavy_marker_is_removed_after_a_failed_round(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "reports" / "HEAVY_GATES_RUNNING"
+    cfg = _with_heavy_marker(_config(lab, [_step(lab, "fast", code=3, stop_on_fail=True)]), marker)
+    assert _run(cfg, "run").returncode == 1
+    assert not marker.exists()
+
+
+def test_heavy_marker_is_removed_after_a_hard_stop(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "reports" / "HEAVY_GATES_RUNNING"
+    cfg = _with_heavy_marker(_config(lab, [_step(lab, "rest", wait=120)], interval=1), marker)
+    runner = _start(cfg)
+    _wait_for(lambda: _runs(lab, "rest") == 1 and marker.exists())
+    (lab["tools"] / "renew_fail").write_text("")
+    assert runner.wait(timeout=60) == 6
+    assert not marker.exists()
+
+
+def test_heavy_marker_is_removed_when_the_round_is_stopped_and_set_again_on_resume(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "reports" / "HEAVY_GATES_RUNNING"
+    cfg = _with_heavy_marker(_config(lab, [_step(lab, "core", wait=120)]), marker)
+    runner = _start(cfg)
+    _wait_for(lambda: _runs(lab, "core") == 1 and marker.exists())
+    assert _run(cfg, "stop").returncode == 0
+    assert runner.wait(timeout=60) == 7
+    assert not marker.exists()
+    resumed = _start(cfg)
+    _wait_for(lambda: _runs(lab, "core") == 2 and marker.exists())
+    (lab["tools"] / "release_core").write_text("")
+    assert resumed.wait(timeout=60) == 0
+    assert not marker.exists()
+
+
+def test_a_crashed_runner_still_clears_the_heavy_marker(lab: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    marker = lab["root"] / "reports" / "HEAVY_GATES_RUNNING"
+    cfg_path = _with_heavy_marker(_config(lab, [_step(lab, "rest")]), marker)
+    gate = _module()
+    cfg, sha = gate.load_config(cfg_path)
+    runner = gate.Runner(cfg, sha)
+
+    def boom() -> int:
+        assert marker.exists()  # set before the round body runs
+        raise RuntimeError("simulated crash")
+
+    monkeypatch.setattr(runner, "_run_locked", boom)
+    with pytest.raises(RuntimeError):
+        runner.run()
+    assert not marker.exists()
+
+
+def test_no_marker_without_root_or_setting(lab: dict[str, Path]) -> None:
+    cfg = _config(lab, [_step(lab, "rest")])
+    assert _run(cfg, "run").returncode == 0
+    assert not list(lab["root"].rglob("HEAVY_GATES_RUNNING"))
+
+
+def test_marker_defaults_under_root_and_a_relative_one_needs_a_root(lab: dict[str, Path]) -> None:
+    gate = _module()
+    data = json.loads(_config(lab, [_step(lab, "rest")]).read_text(encoding="utf-8"))
+    data["root"] = str(lab["root"] / "control")
+    path = lab["root"] / "with_root.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    cfg, _ = gate.load_config(path)
+    assert Path(cfg["heavy_marker"]) == lab["root"] / "control" / ".auto-pm" / "reports" / "HEAVY_GATES_RUNNING"
+    data.pop("root")
+    data["heavy_marker"] = "reports/HEAVY_GATES_RUNNING"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(Exception, match="heavy_marker must be absolute"):
+        gate.load_config(path)

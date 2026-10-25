@@ -49,6 +49,7 @@ STATUS_FILE = "long_gate_status.json"
 LOG_FILE = "long_gate.log"
 LOCK_FILE = "long_gate.lock"
 STOP_FILE = "STOP"
+HEAVY_MARKER_REL = ".auto-pm/reports/HEAVY_GATES_RUNNING"
 TOKEN_ENV = "LONG_GATE_LEASE_TOKEN"
 MIN_REMAINING_S = 600
 NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
@@ -178,6 +179,16 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
         raise GateError("round_timeout_s must be 10..39600 (the scheduled task stops at 12 h)")
     for k in ("done", "failed"):
         cfg.setdefault("markers", {}).setdefault(k, {})
+    marker = cfg.get("heavy_marker")
+    if marker is None and cfg["root"]:
+        marker = HEAVY_MARKER_REL
+    if marker:
+        if not isinstance(marker, str):
+            raise GateError("heavy_marker must be a path string")
+        marker = fill(marker)
+        if not Path(marker).is_absolute() and not cfg["root"]:
+            raise GateError("heavy_marker must be absolute unless config.root is set")
+        cfg["heavy_marker"] = marker if Path(marker).is_absolute() else str(Path(cfg["root"]) / marker)
     cfg.setdefault("poll_s", 15)
     if not 1 <= int(cfg["poll_s"]) <= 300:
         raise GateError("poll_s must be 1..300")
@@ -624,6 +635,7 @@ class Runner:
         if lock is None:
             _say("another long_gate runner holds this out_dir")
             return EXIT_CODES["LOCKED"]
+        self._set_heavy_marker()
         try:
             return self._run_locked()
         except Exception as error:  # noqa: BLE001 - the record must say why
@@ -631,6 +643,29 @@ class Runner:
             raise
         finally:
             self.stop_all.set()
+            self._clear_heavy_marker()
+
+    def _heavy_marker(self) -> Path | None:
+        marker = self.cfg.get("heavy_marker")
+        return Path(marker) if marker else None
+
+    def _set_heavy_marker(self) -> None:
+        """Say "heavy gates are running" for the switch pre-check; removed again on every way out of ``run``."""
+        marker = self._heavy_marker()
+        if marker is None:
+            return
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"long_gate {self.cfg['name']} pid={os.getpid()} since {iso(utc_now())}\n", encoding="utf-8", newline="\n")
+
+    def _clear_heavy_marker(self) -> None:
+        """Normal end, hard stop, STOP, crash: the runner is gone, so the next switch pre-check must not be blocked."""
+        marker = self._heavy_marker()
+        if marker is None:
+            return
+        try:
+            marker.unlink(missing_ok=True)
+        except OSError as error:
+            self.log(f"heavy marker {marker} not removed: {type(error).__name__}: {error}")
 
     def _run_locked(self) -> int:
         self.log(f"runner start pid={os.getpid()} config_sha256={self.sha}")
