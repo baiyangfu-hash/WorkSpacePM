@@ -12,8 +12,6 @@ import json
 import secrets
 from pathlib import Path
 
-import pytest
-
 from tests.e2e.test_closure_drill import (
     APPROVER,
     MAIN_DOMAIN,
@@ -26,12 +24,6 @@ from tests.e2e.test_closure_drill import (
     comment_files,
     drive_mission,
     make_drill,
-)
-
-NO_PID_DEFECT = (
-    "缺陷⑦（样件联调新发现，技术债候选，未开卡）：同一变更单号在两个项目都有时，change transition 不带 --pid 不拒绝，"
-    "按目录遍历顺序改了先找到的那个项目的单子（file_locator.find_change_file 递归取第一个命中；"
-    "先撞到另一项目的草稿单时只是碰巧因状态不合法被拒，原因也不提 --pid）"
 )
 
 
@@ -103,7 +95,6 @@ def _same_number_in_both_projects(drill) -> str:  # type: ignore[no-untyped-def]
     return sheets[0].stem
 
 
-@pytest.mark.xfail(strict=True, reason=NO_PID_DEFECT)
 def test_r03_change_without_pid_on_a_number_two_projects_share_is_refused(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
     drill = make_drill(tmp_path, benchmark_tar, second_project=True)
     shared = _same_number_in_both_projects(drill)

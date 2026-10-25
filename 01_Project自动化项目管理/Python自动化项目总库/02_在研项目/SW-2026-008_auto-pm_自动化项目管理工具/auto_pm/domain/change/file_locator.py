@@ -41,6 +41,10 @@ from auto_pm.utils.file_utils import read_file
 log = logging.getLogger(__name__)
 
 
+class AmbiguousChangeNumberError(ValueError):
+    """同一变更单号在多个项目里都有，且调用方没有用 --pid 指定项目（TD-SW008-176）。"""
+
+
 class ChangeFileLocator:
     """变更单文件路径定位器
 
@@ -241,7 +245,10 @@ class ChangeFileLocator:
         )
 
     def find_change_file(
-        self, change_number: str, project_id: str | None = None
+        self,
+        change_number: str,
+        project_id: str | None = None,
+        require_unique: bool = False,
     ) -> str | None:
         """根据变更编号查找文件
 
@@ -261,6 +268,9 @@ class ChangeFileLocator:
                        冲突时返回错误项目的文件（TD-A04）；项目定位失败或项目内没有该单
                        都返回 None，不再回退到全工作空间（M3-CHGUNIQ）。未提供时仍递归
                        全工作空间搜索并返回第一个匹配（向后兼容）。
+            require_unique: 写操作用。未提供 project_id 且同号单在多个项目里都有时，抛
+                       ``AmbiguousChangeNumberError`` 并列出候选，不再碰巧改到先遍历到的那个
+                       项目的单子（TD-SW008-176）。
         """
         domain = extract_domain_from_change_number(change_number)
         if not domain:
@@ -284,6 +294,16 @@ class ChangeFileLocator:
                     "查找变更单: project_id=%s 的项目目录内没有变更单 %s", project_id, change_number
                 )
             return result
+
+        if require_unique:
+            matches: list[str] = []
+            self._recursive_find_all(self.workspace_root, change_number, domain, 0, 5, matches)
+            if len(matches) > 1:
+                listed = "；".join(matches)
+                raise AmbiguousChangeNumberError(
+                    f"变更单号 {change_number} 在 {len(matches)} 个项目里都有，请用 --pid 指定项目。候选: {listed}"
+                )
+            return matches[0] if matches else None
 
         # 递归遍历工作空间，只在项目目录内搜索变更单文件（向后兼容）
         return self._recursive_find_change_file(
@@ -324,6 +344,34 @@ class ChangeFileLocator:
         except OSError:
             pass
         return False
+
+    def _recursive_find_all(
+        self,
+        current_dir: str,
+        change_number: str,
+        domain: str,
+        depth: int,
+        max_depth: int,
+        matches: list[str],
+    ) -> None:
+        """与 ``_recursive_find_change_file`` 同一套遍历规则，但收集全部命中（每个项目目录至多一个）。"""
+        if depth > max_depth:
+            return
+        try:
+            entries = sorted(os.listdir(current_dir))
+        except OSError:
+            return
+        if self._is_project_dir(current_dir):
+            found = self._find_change_in_project(current_dir, change_number, domain)
+            if found:
+                matches.append(found)
+            return
+        for entry in entries:
+            if entry.startswith(".") or entry.startswith("__"):
+                continue
+            entry_path = os.path.join(current_dir, entry)
+            if os.path.isdir(entry_path):
+                self._recursive_find_all(entry_path, change_number, domain, depth + 1, max_depth, matches)
 
     def _recursive_find_change_file(
         self,
