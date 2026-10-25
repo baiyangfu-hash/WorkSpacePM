@@ -48,6 +48,8 @@ def test_the_notice_is_real_without_the_guard_environment(crlf_repository: Path)
         ["git", "-C", str(crlf_repository), "diff", "--name-only"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         env=plain,
         check=False,
     )

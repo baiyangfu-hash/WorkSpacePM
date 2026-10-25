@@ -41,7 +41,7 @@ def build_exe():
     ]
     
     print(f"执行命令: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=False, text=True)
+    result = subprocess.run(cmd, capture_output=False, text=True, encoding="utf-8", errors="replace")
     
     if result.returncode == 0:
         print("\n" + "=" * 50)
