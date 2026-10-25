@@ -5,6 +5,12 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Removed
+
+- 删除驾驶舱里的 Modbus 联调工坊（`auto_pm/domain/modbus/`、`ModbusDebuggerView.qml` 及两个配套组件、侧边栏入口、`tests/modbus/`）；用户 2026-10-25 决定不再需要。DJ-2026-009 的 PLC 侧 Modbus TCP（FB_3002）与此无关，不受影响。
+
 ## [1.3.3] - 2026-09-09
 
 ### Added

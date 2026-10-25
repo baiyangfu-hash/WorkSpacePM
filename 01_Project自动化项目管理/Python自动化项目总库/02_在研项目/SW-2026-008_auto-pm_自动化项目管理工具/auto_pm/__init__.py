@@ -2,7 +2,7 @@
 
 5 大标准分层：
 1. contracts: 强类型 DTO 与接口协议
-2. domain: 核心业务领域 (plc, change, spec, vartable, modbus, models, constraint)
+2. domain: 核心业务领域 (plc, change, spec, vartable, models, constraint)
 3. infrastructure: 基础设施组件 (db, logging, utils, config)
 4. application: 门禁引擎、应用编排与外观门面 (workbench_facade, core services, delivery)
 5. ui: 表现层 (qml, bridges, cli)

@@ -67,7 +67,7 @@ jobs:
             if [ "$code" -ne 0 ]; then echo "::error::group $name failed with exit code $code"; fi
           }
           run_group rest tests/db tests/delivery tests/doc tests/domain tests/models tests/spec tests/utils tests/vartable \
-            tests/constraint tests/config tests/logging tests/modbus tests/e2e tests/ui \
+            tests/constraint tests/config tests/logging tests/e2e tests/ui \
             tests/test_bug1_get_project_path.py tests/test_bug2_sync_changes.py tests/test_bug4_retrofit_src_path.py \
             tests/test_bug5_scan_depth.py tests/test_fixture_health.py tests/test_import.py tests/test_pm_session_size.py \
             tests/test_smoke.py \

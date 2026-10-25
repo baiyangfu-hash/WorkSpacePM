@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import change, modbus, plc, project, spec, vartable
+from . import change, plc, project, spec, vartable
 
 __all__ = [
     "plc",
@@ -10,5 +10,4 @@ __all__ = [
     "project",
     "spec",
     "vartable",
-    "modbus",
 ]

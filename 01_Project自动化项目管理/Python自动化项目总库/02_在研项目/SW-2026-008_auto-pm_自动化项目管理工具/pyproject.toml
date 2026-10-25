@@ -100,8 +100,6 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 "tests/**/*.py" = ["T201"]
 "**/auto_pm/__init__.py" = ["E402"]
 "**/bridges/*.py" = ["N802", "N815", "T201"]
-"**/modbus/modbus_bridge.py" = ["N802", "N815", "T201"]
-"**/modbus/modbus_service.py" = ["N802"]
 "**/infrastructure/logging/logging.py" = ["N802"]
 
 [tool.ruff.format]

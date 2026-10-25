@@ -7,10 +7,10 @@
 // - main.qml 只保留: 全局状态 + StackLayout 路由 + 信号连接
 //
 // V1.0.0 约束（保留不变，对应 138 个 QML 测试）:
-// - currentPage 值: projectList/workspace/changeCenter/specCenter/reportCenter/templateManage/settings/platformDashboard/modbusDebugger
-// - StackLayout 9 个分支 (0-8) 和 currentIndex 映射逻辑不变
+// - currentPage 值: projectList/workspace/changeCenter/specCenter/reportCenter/templateManage/settings/platformDashboard
+// - StackLayout 8 个分支 (0-7) 和 currentIndex 映射逻辑不变
 // - view id 不变: projectListView/workspaceView/changeCenterView/specCenterView/reportView/templateView/settingsView
-// - modbusDebuggerView / platformDashboardView id 不变
+// - platformDashboardView id 不变
 // - onProjectClicked/onBackToProjectList 信号处理不变
 // - Connections { workbenchBridge.onProjectSelected } 不变
 // - Component.onCompleted 启动逻辑不变
@@ -152,7 +152,7 @@ ApplicationWindow {
             }
         }
 
-        // ── 页面内容区（StackLayout，保留 9 个分支不变）
+        // ── 页面内容区（StackLayout，保留 8 个分支不变）
         StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -166,7 +166,6 @@ ApplicationWindow {
                 if (mainWindow.currentPage === "templateManage") return 5
                 if (mainWindow.currentPage === "settings") return 6
                 if (mainWindow.currentPage === "platformDashboard") return 7
-                if (mainWindow.currentPage === "modbusDebugger") return 8
                 return 0
             }
 
@@ -231,11 +230,6 @@ ApplicationWindow {
             PlatformDashboardView {
                 id: platformDashboardView
                 onBackToProjectList: mainWindow.currentPage = "projectList"
-            }
-
-            // 8. Modbus 联调工坊
-            ModbusDebuggerView {
-                id: modbusDebuggerView
             }
         }
     }

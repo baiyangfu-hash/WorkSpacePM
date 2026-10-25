@@ -76,8 +76,8 @@ def qapp() -> Generator[QApplication, None, None]:
     yield app
 
 
-# Qt tests whose leftovers must not be freed by the cyclic garbage collector at a random later moment (see tests/modbus/conftest.py).
-_QT_TEST_PREFIXES = ("tests/modbus/", "tests/qml/", "tests/ui/", "tests/e2e/test_pmf_gui.py")
+# Qt tests whose leftovers must not be freed by the cyclic garbage collector at a random later moment (the cockpit Modbus tool that this was written for has been removed; the same rule keeps protecting the other Qt tests).
+_QT_TEST_PREFIXES = ("tests/qml/", "tests/ui/", "tests/e2e/test_pmf_gui.py")
 
 
 @pytest.fixture(autouse=True)

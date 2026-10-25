@@ -160,14 +160,6 @@ Rectangle {
                 onNavClicked: (k) => sidebar.navigateTo(k)
             }
 
-            // ═══ 轨道 5: 公共工具 (Modbus，绿色主题) ═══════════
-            SidebarNavItem {
-                pageKey: "modbusDebugger"; icon: "⚡"; label: "Modbus 联调工坊"
-                isActive: sidebar.currentPage === "modbusDebugger"
-                accentColor: Qt.rgba(0.38, 0.71, 0.51, 0.85)
-                onNavClicked: (k) => sidebar.navigateTo(k)
-            }
-
             BackendStatus {
                 Layout.fillWidth: true
                 Layout.topMargin: Theme.spacingSm

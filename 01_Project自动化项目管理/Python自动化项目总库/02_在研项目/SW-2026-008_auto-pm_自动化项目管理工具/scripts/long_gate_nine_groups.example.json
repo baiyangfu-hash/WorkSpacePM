@@ -69,7 +69,6 @@
         "tests/constraint",
         "tests/config",
         "tests/logging",
-        "tests/modbus",
         "tests/e2e",
         "tests/ui",
         "tests/test_bug1_get_project_path.py",
