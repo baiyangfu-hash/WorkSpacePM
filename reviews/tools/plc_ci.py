@@ -57,7 +57,6 @@ CHECKER_PATHS = (
     f"{SW008}/auto_pm/application/core/paths.py",
     f"{SW008}/auto_pm/domain/__init__.py",
     f"{SW008}/auto_pm/domain/change/__init__.py",
-    f"{SW008}/auto_pm/domain/modbus/__init__.py",
     f"{SW008}/auto_pm/domain/models/",
     f"{SW008}/auto_pm/domain/plc/",
     f"{SW008}/auto_pm/domain/project/__init__.py",

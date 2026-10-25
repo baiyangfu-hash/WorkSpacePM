@@ -6,7 +6,7 @@
 //   - badgeCount: 待办徽标
 //   - navEnabled: 是否可点击
 //   - isActive: 激活态（由父组件绑定）
-//   - accentColor: 特殊颜色（如 Modbus 绿色轨道）
+//   - accentColor: 特殊颜色
 
 import QtQuick
 import QtQuick.Layouts

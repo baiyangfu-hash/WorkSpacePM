@@ -5,6 +5,7 @@ CommunicationsParser.parse()
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -158,22 +159,35 @@ class TestCommunicationsParserFieldValidation:
         assert result.channel_table.protocols == ("ethernet", "fieldbus")
 
 
+def _declared_names(path: Path) -> list[str]:
+    """独立于解析器：按行扫出 yml 里每个 `- name: "…"` 条目的名字（不写死个数）。"""
+    pattern = re.compile(r'^\s*-\s+name:\s*"?([^"\s#]+)"?')
+    names: list[str] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = pattern.match(line)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
 class TestCommunicationsParserReal:
     def test_parse_real_dj_2026_005(
         self, real_dj_2026_005_communications: Path
     ) -> None:
-        """解析真实 DJ-2026-005 communications.yml（5 个 channel）"""
+        """解析真实 DJ-2026-005 communications.yml：个数和首条与文件逐行核对，不写死数字。"""
+        declared = _declared_names(real_dj_2026_005_communications)
+        assert declared, "communications.yml 不应为空"
         result = CommunicationsParser().parse(real_dj_2026_005_communications)
         assert result.success
         assert result.channel_table is not None
-        assert result.channel_table.total_count == 5
+        assert result.channel_table.total_count == len(declared)
         assert result.error_count == 0
         # 协议
         assert "ethernet" in result.channel_table.protocols
         assert "fieldbus" in result.channel_table.protocols
         assert "hardwired" in result.channel_table.protocols
         # 首条目
-        assert result.channel_table.entries[0].channel_name == "HMI"
+        assert result.channel_table.entries[0].channel_name == declared[0]
         assert result.channel_table.entries[0].protocol == "ethernet"
         # 元数据
         assert result.channel_table.metadata["project_id"] == "DJ-2026-005"

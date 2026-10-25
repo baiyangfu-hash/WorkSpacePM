@@ -21,6 +21,10 @@ os.environ.setdefault(
     "AUTO_PM_SIEMENS_LSP", str(Path(tempfile.gettempdir()) / "auto-pm-tests-no-siemens-lsp.exe")
 )
 
+# rich 按终端宽度给 console.print 折行；窄终端会把整句话拆开，字符串断言随之失败。
+# 测试一律按 200 列输出（强制覆盖，不管开发者终端多宽；子进程继承）。
+os.environ["COLUMNS"] = "200"
+
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
@@ -72,8 +76,8 @@ def qapp() -> Generator[QApplication, None, None]:
     yield app
 
 
-# Qt tests whose leftovers must not be freed by the cyclic garbage collector at a random later moment (see tests/modbus/conftest.py).
-_QT_TEST_PREFIXES = ("tests/modbus/", "tests/qml/", "tests/ui/", "tests/e2e/test_pmf_gui.py")
+# Qt tests whose leftovers must not be freed by the cyclic garbage collector at a random later moment (the cockpit Modbus tool that this was written for has been removed; the same rule keeps protecting the other Qt tests).
+_QT_TEST_PREFIXES = ("tests/qml/", "tests/ui/", "tests/e2e/test_pmf_gui.py")
 
 
 @pytest.fixture(autouse=True)
