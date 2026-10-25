@@ -666,3 +666,40 @@ class TestChapterCompleteness:
         )
         assert cr is not None
         assert cr.status == "closed"
+
+
+class TestProjectRootFromChangeFile:
+    """TD-SW008-035: 台账同步靠"变更单文件 → 项目根"，04_监控 与 11_监控 两种布局都要认到本项目这一层。"""
+
+    @staticmethod
+    def _root(change_file: Path) -> str | None:
+        return ChangeService._find_project_root_from_path(str(change_file))
+
+    def test_standard_layout_finds_the_project_with_04_monitoring(self, tmp_path: Path) -> None:
+        project = tmp_path / "SW-1"
+        chg = project / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-DOCU-2026-001.md"
+        chg.parent.mkdir(parents=True)
+
+        assert self._root(chg) == str(project)
+
+    def test_legacy_layout_finds_the_project_with_11_monitoring(self, tmp_path: Path) -> None:
+        project = tmp_path / "DJ-1"
+        chg = project / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT-2026-001.md"
+        chg.parent.mkdir(parents=True)
+
+        assert self._root(chg) == str(project)
+
+    def test_the_nearest_project_wins_when_an_outer_folder_also_has_a_monitoring_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "04_监控").mkdir()
+        project = tmp_path / "0100_PLC" / "DJ-1"
+        chg = project / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT-2026-001.md"
+        chg.parent.mkdir(parents=True)
+
+        assert self._root(chg) == str(project)
+
+    def test_a_file_outside_any_project_has_no_root(self, tmp_path: Path) -> None:
+        chg = tmp_path / "loose" / "CHG-DOCU-2026-001.md"
+        chg.parent.mkdir(parents=True)
+
+        assert self._root(chg) is None
+

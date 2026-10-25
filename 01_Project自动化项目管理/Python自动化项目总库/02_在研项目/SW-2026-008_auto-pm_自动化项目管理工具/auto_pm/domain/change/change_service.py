@@ -94,6 +94,8 @@ def _is_verification_passed(conclusion: str) -> bool:
 
 # 台帐状态文案映射（TD-T10 修复：transition 流转后自动更新台帐状态行）
 _LEDGER_STATUS_MAP = LEDGER_STATUS_MAP  # 向后兼容别名（CHG-108 缺陷 1：常量已提取到 constants.py）
+# 项目根的识别标记：标准布局 04_监控，模板 PLC 项目的历史布局 11_监控（TD-SW008-035）。
+_PROJECT_MONITOR_DIRS = (PG_MONITORING_DIR, "11_监控")
 
 
 class ChangeService:
@@ -178,8 +180,9 @@ class ChangeService:
         """
         current = os.path.dirname(os.path.abspath(file_path))
         while current and current != os.path.dirname(current):
-            # CHG-SCPT-2026-146: 5大过程组统一路径，通过监控过程组目录识别项目根
-            if os.path.isdir(os.path.join(current, PG_MONITORING_DIR)):
+            # CHG-SCPT-2026-146: 5大过程组统一路径，通过监控过程组目录识别项目根；
+            # 模板 PLC 项目的变更柜在 11_监控 下（TD-SW008-035），两种布局都认，取最近的一层。
+            if any(os.path.isdir(os.path.join(current, marker)) for marker in _PROJECT_MONITOR_DIRS):
                 return current
             current = os.path.dirname(current)
         return None
