@@ -562,9 +562,27 @@ def cmd_edit(
 @project_group.command(name="delete")
 @click.argument("project_id")
 @click.option("--confirm", is_flag=True, help="确认删除（破坏性操作）")
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
+)
 @click.pass_context
-def cmd_delete(ctx: click.Context, project_id: str, confirm: bool) -> None:
-    """删除项目（破坏性操作，需 --confirm）"""
+def cmd_delete(ctx: click.Context, project_id: str, confirm: bool, approval_evidence_ref: str) -> None:
+    """删除项目（破坏性操作）：只听用户本人，开着任务或有未提交改动时拒绝，目录先搬进回收区可搬回。"""
+    from auto_pm.application.core.approval_proof_service import (
+        ApprovalProofError,
+        ApprovalProofService,
+    )
+    from auto_pm.application.core.lease_handover_service import agent_markers
+    from auto_pm.application.core.project_delete_guard import (
+        ProjectDeleteError,
+        delete_blockers,
+        recycle_project,
+    )
+    from auto_pm.contracts.user_evidence import user_evidence_problem
+    from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
+
     app_ctx: AppContext = ctx.obj
     svc = ProjectService(app_ctx.workspace_root)
     proj = svc.get_project(project_id)
@@ -578,20 +596,55 @@ def cmd_delete(ctx: click.Context, project_id: str, confirm: bool) -> None:
         console.print("[yellow]请使用 --confirm 确认删除[/yellow]")
         ctx.exit(1)
 
-    try:
-        shutil.rmtree(proj.path)
-        # 审计日志：记录项目删除操作（破坏性操作必须审计）
-        from auto_pm.logging.audit import audit_log
-        audit_log(
-            "project_delete",
-            project_id=project_id,
-            project_name=proj.name,
-            path=proj.path,
+    markers = agent_markers(os.environ)
+    if markers:
+        console.print(
+            f"[red]拒绝: 删除项目只听用户本人，当前环境带 agent 标记（{', '.join(markers)}）。"
+            "请把完整命令交给用户，在用户自己的终端运行；agent 不得索要口令、代填或绕过。[/red]"
         )
-        console.print(f"[green]项目已删除: {proj.path}[/green]")
-    except OSError as e:
+        ctx.exit(1)
+
+    control_root = str(getattr(app_ctx, "control_root", "") or app_ctx.workspace_root)
+    blockers = delete_blockers(app_ctx.workspace_root, project_id, proj.path, control_root=control_root)
+    if blockers:
+        console.print(f"[red]拒绝: 项目 {project_id} 现在不能删除，先处理下面的事：[/red]")
+        for blocker in blockers:
+            console.print(f"  - {blocker}")
+        ctx.exit(1)
+
+    evidence = approval_evidence_ref.strip()
+    if approval_pin_enforced(control_root):
+        pin = read_approval_pin(control_root, summary=f"删除项目 {project_id}：整个目录会搬进回收区")
+        try:
+            _, evidence = ApprovalProofService(control_root).resolve(
+                pin=pin, approver="", evidence_ref=evidence, purpose="project-delete", subject=project_id
+            )
+        except ApprovalProofError as error:
+            console.print(f"[red]拒绝: {error}[/red]")
+            ctx.exit(1)
+    elif problem := user_evidence_problem(evidence):
+        console.print(f"[red]拒绝: {problem}；删除只听用户本人（--approval-evidence-ref）[/red]")
+        ctx.exit(1)
+
+    try:
+        recycled = recycle_project(app_ctx.workspace_root, proj.path, project_id)
+    except ProjectDeleteError as e:
         console.print(f"[red]删除失败: {e}[/red]")
         ctx.exit(1)
+
+    # 审计日志：记录项目删除操作（破坏性操作必须审计）
+    from auto_pm.logging.audit import audit_log
+
+    audit_log(
+        "project_delete",
+        project_id=project_id,
+        project_name=proj.name,
+        path=proj.path,
+        recycled_to=str(recycled),
+        approval_evidence_ref=evidence,
+    )
+    console.print(f"[green]项目已删除: {proj.path}[/green]")
+    console.print(f"  已搬进回收区，需要时可原样搬回: {recycled}")
 
 
 @project_group.command(name="retrofit")
@@ -829,8 +882,18 @@ def cmd_import(
         if not force:
             console.print(f"[red]错误: 目标路径已存在: {dest_path}（使用 --force 覆盖）[/red]")
             ctx.exit(1)
-        console.print(f"[yellow]强制覆盖: {dest_path}[/yellow]")
-        shutil.rmtree(dest_path, ignore_errors=True)
+        # 同类写法（TD-193 同类排查）：覆盖不再 rmtree 原目录，先整体搬进回收区，覆盖错了可以搬回
+        from auto_pm.application.core.project_delete_guard import (
+            ProjectDeleteError,
+            recycle_project,
+        )
+
+        try:
+            recycled = recycle_project(app_ctx.workspace_root, dest_path, dirname)
+        except ProjectDeleteError as e:
+            console.print(f"[red]覆盖失败: {e}[/red]")
+            ctx.exit(1)
+        console.print(f"[yellow]强制覆盖: {dest_path}（原目录已搬进回收区: {recycled}）[/yellow]")
 
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
