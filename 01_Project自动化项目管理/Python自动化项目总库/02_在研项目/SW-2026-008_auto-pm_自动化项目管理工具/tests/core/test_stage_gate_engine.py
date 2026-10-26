@@ -234,3 +234,39 @@ def test_stage_gate_handles_non_existent_project(tmp_path: Path):
     assert result.can_proceed is False
     assert result.blocker_count == 1
     assert result.items[0].id == "G-ROOT-EXIST"
+
+
+def _g4(project: Path):
+    result = StageGateEngine().evaluate_stage_transition(str(project), current_stage="monitoring", target_stage="closing")
+    return next(item for item in result.items if item.id == "G4-CHG-ALL-CLOSED")
+
+
+def _only_chg(temp_project: Path, text: str) -> Path:
+    chg_dir = temp_project / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-PLC"
+    for old in chg_dir.glob("CHG-*.md"):
+        old.unlink()
+    (chg_dir / "CHG-PLC-2026-003.md").write_text(text, encoding="utf-8")
+    return temp_project
+
+
+def test_g4_reads_the_template_status_row_of_a_real_change_order(temp_project: Path):
+    """TD-SW008-209：真实变更单的状态是表格行“| 变更状态 | closed |”，已关闭的单子不能被判成未闭环。"""
+    assert _g4(_only_chg(temp_project, "# CHG\n\n| 变更编号 | CHG-PLC-2026-003 |\n| 变更状态 | closed |\n")).passed is True
+    assert _g4(_only_chg(temp_project, "# CHG\n\n| 变更状态 | 已关闭 |\n")).passed is True
+
+
+@pytest.mark.parametrize("status", ["completed", "implementing", "approved", "draft", "pending_acceptance"])
+def test_g4_other_statuses_stay_unclosed(temp_project: Path, status: str):
+    item = _g4(_only_chg(temp_project, f"# CHG\n\n| 变更状态 | {status} |\n"))
+    assert item.passed is False and "CHG-PLC-2026-003.md" in item.message
+
+
+def test_g4_a_status_word_in_prose_or_another_row_is_not_the_status(temp_project: Path):
+    prose = "# CHG\n\n| 变更状态 | implementing |\n\n结论：此前写过 status: closed 但并未收口，状态: closed 仅为示例。\n"
+    assert _g4(_only_chg(temp_project, prose)).passed is False
+    assert _g4(_only_chg(temp_project, "# CHG\n\n没有状态字段\n")).passed is False
+
+
+def test_g4_legacy_status_lines_still_count(temp_project: Path):
+    assert _g4(_only_chg(temp_project, "# CHG\n- status: closed\n")).passed is True
+    assert _g4(_only_chg(temp_project, "# CHG\n状态: 已关闭\n")).passed is True

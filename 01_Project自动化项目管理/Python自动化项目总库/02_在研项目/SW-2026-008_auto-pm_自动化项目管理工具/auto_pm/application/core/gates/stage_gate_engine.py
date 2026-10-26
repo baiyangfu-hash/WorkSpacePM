@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from auto_pm.change.ledger_reconciler import LedgerReconciler
@@ -15,6 +16,19 @@ from auto_pm.contracts.gate_dtos import (
     StageGateResultDTO,
 )
 from auto_pm.domain.plc.language_service import LanguageService, evaluate_project
+
+# G4 reads the change order's own status field, not a substring of its text: the real files carry it as the table row
+# ``| 变更状态 | closed |`` (the template), older fixtures as a ``status:`` / ``状态:`` line (TD-SW008-209).
+_CHG_STATUS_TABLE_ROW = re.compile(r"^\s*\|\s*变更状态\s*\|\s*([^|]*?)\s*\|", re.MULTILINE)
+_CHG_STATUS_KEY_LINE = re.compile(r"^\s*(?:[-*]\s+)?(?:status|状态)\s*[:：]\s*(\S+)\s*$", re.MULTILINE | re.IGNORECASE)
+_CLOSED_CHG_STATUSES = frozenset({"closed", "已关闭"})
+
+
+def _chg_is_closed(text: str) -> bool:
+    found = _CHG_STATUS_TABLE_ROW.search(text) or _CHG_STATUS_KEY_LINE.search(text)
+    if found is None:
+        return False
+    return found.group(1).strip().strip("`*✅ ").casefold() in _CLOSED_CHG_STATUSES
 
 
 class StageGateEngine:
@@ -258,7 +272,7 @@ class StageGateEngine:
         unclosed_chgs: list[str] = []
         for cf in chg_files:
             txt = cf.read_text(encoding="utf-8", errors="ignore")
-            if "status: closed" not in txt and "状态: closed" not in txt and "状态: 已关闭" not in txt:
+            if not _chg_is_closed(txt):
                 unclosed_chgs.append(cf.name)
 
         all_chgs_closed = len(unclosed_chgs) == 0
