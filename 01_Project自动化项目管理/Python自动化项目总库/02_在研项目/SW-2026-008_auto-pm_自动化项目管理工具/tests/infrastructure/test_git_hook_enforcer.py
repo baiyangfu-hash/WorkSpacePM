@@ -631,7 +631,13 @@ def test_td194_real_test_doc_scratch_paths_stay_exempt(path: str) -> None:
 
 
 def test_td194_only_production_extensions_count() -> None:
-    assert filter_production_files(["src/a.md", "src/b.py", "src/c.SCL", "src/d.qml"]) == ["src/b.py", "src/d.qml"]
+    assert filter_production_files(["src/a.md", "src/b.py", "src/c.txt", "src/d.qml"]) == ["src/b.py", "src/d.qml"]
+
+
+def test_production_extension_match_ignores_case() -> None:
+    """Windows 上 TIA 导出的文件常是 .SCL / .ST，大写扩展名也是生产代码。"""
+    paths = ["FB/Motor.SCL", "FB/Seq.St", "src/App.PY", "ui/Main.QML"]
+    assert filter_production_files(paths) == paths
 
 
 # ---- TD-SW008-115：新增文件命中忽略规则就拒绝提交 ----
