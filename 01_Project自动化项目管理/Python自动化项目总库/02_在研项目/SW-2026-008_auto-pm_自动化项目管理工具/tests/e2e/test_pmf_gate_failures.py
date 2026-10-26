@@ -21,6 +21,7 @@ from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 import auto_pm
+from tests.git_support import git_out
 
 PID = "SW-2026-901"
 OTHER_PID = "SW-2026-902"
@@ -46,10 +47,7 @@ class Scene:
     chg: str
 
     def git(self, *args: str) -> str:
-        done = subprocess.run(
-            ["git", *args], cwd=self.repo, capture_output=True, text=True, encoding="utf-8", errors="replace", env=_environment(), check=True, timeout=180
-        )
-        return done.stdout.strip()
+        return git_out(self.repo, *args, env=_environment(), timeout=180)
 
     def product(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
