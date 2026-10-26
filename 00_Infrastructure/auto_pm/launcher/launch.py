@@ -18,6 +18,7 @@ _RELEASE_CHILD = (
 _UNSAFE_PYTHON_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE")
 _RESOLVE_ONLY_ARGUMENT = "--resolve-only"
 _PURGE_BYTECODE_ARGUMENT = "--purge-bytecode"
+_JSON_ARGUMENT = "--json"
 
 
 def _child_environment(cache_root: Path, workspace_root: Path) -> dict[str, str]:
@@ -59,7 +60,9 @@ def main(argv: list[str] | None = None, *, container: Path | None = None) -> int
             "请把这段提示原样发给维护驾驶舱的 AI 处理。",
             file=sys.stderr,
         )
-    print(f"launcher: release verified via {slot}: {release_dir}")
+    # --json promises machine-readable stdout, so the launcher's own status line must not share it.
+    status_stream = sys.stderr if _JSON_ARGUMENT in release_args else sys.stdout
+    print(f"launcher: release verified via {slot}: {release_dir}", file=status_stream)
     if os.environ.get("AUTO_PM_ENTRY_RESOLVE_ONLY") == "1" or release_args == [
         _RESOLVE_ONLY_ARGUMENT
     ]:
