@@ -82,6 +82,7 @@ class TestVartableParseCommand:
             ["parse", str(tmp_path / "not_exist.csv")],
         )
         assert result.exit_code != 0
+        assert "Invalid value for 'FILE_PATH'" in result.output
 
 
 class TestVartableDetectEncodingCommand:

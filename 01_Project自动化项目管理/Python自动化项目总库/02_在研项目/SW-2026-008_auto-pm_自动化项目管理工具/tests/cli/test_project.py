@@ -40,6 +40,7 @@ def test_project_show_not_found(cli_runner: CliRunner, tmp_workspace: Path) -> N
         ["-w", str(tmp_workspace), "project", "show", "NOT-EXIST"],
     )
     assert result.exit_code == 1
+    assert "项目不存在: NOT-EXIST" in result.output
 
 
 def test_project_show_displays_v040_metadata(cli_runner: CliRunner, tmp_path: Path) -> None:
