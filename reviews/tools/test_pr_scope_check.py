@@ -340,3 +340,38 @@ def test_s23_paths_after_a_blank_line_in_the_scope_list_are_not_authorised(repo:
     base, head = commit(repo, {"src/a.py": "a = 2\n", "src/b.py": "b = 2\n"})
     result = gate.check(repo, base, head, "可改范围\n- src/a.py\n\n- src/b.py\n")
     assert "越界：`src/b.py`" in errors(result) and "src/a.py" not in errors(result)
+
+
+# --- TD-202：PR 新增行里的密钥 ---------------------------------------------------------------------------------
+
+FAKE_PAT = "github_pat_" + "A1b2C3d4E5" * 3
+FAKE_GHP = "ghp_" + "a" * 36
+
+
+@pytest.mark.parametrize("secret", [FAKE_GHP, FAKE_PAT, "sk-" + "x" * 30, "AKIA" + "A" * 16])
+def test_s14_a_secret_in_an_added_line_fails_without_echoing_it(repo: Path, secret: str) -> None:
+    base, head = commit(repo, {"docs/guide.md": f"guide\ntoken = {secret}\n"})
+    result = gate.check(repo, base, head, "可改范围\n- docs/guide.md\n")
+    assert "疑似密钥" in errors(result) and "docs/guide.md" in errors(result)
+    assert secret not in errors(result)
+
+
+def test_s15_an_old_secret_not_in_the_diff_does_not_fail(repo: Path) -> None:
+    write(repo, "docs/guide.md", f"guide\ntoken = {FAKE_GHP}\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "old leak")
+    git(repo, "branch", "-f", "main", "HEAD")
+    base, head = commit(repo, {"docs/guide.md": f"guide\ntoken = {FAKE_GHP}\nmore\n"})
+    result = gate.check(repo, base, head, "可改范围\n- docs/guide.md\n")
+    assert "疑似密钥" not in errors(result)  # -U0：旧的密钥行不是新增行，只有新增行才算
+
+
+def test_s16_a_blob_on_the_revoked_allowlist_is_skipped(repo: Path, monkeypatch) -> None:
+    from auto_pm.domain import secret_patterns as sp
+
+    text = f"token = {FAKE_GHP}\n"
+    base, head = commit(repo, {"old/gittoken.txt": text})
+    blob = git(repo, "rev-parse", "HEAD:old/gittoken.txt").strip()
+    assert "疑似密钥" in errors(gate.check(repo, base, head, "可改范围\n- old/gittoken.txt\n"))
+    monkeypatch.setattr(sp, "ALLOWED_SECRET_BLOBS", frozenset({blob}))
+    assert "疑似密钥" not in errors(gate.check(repo, base, head, "可改范围\n- old/gittoken.txt\n"))
