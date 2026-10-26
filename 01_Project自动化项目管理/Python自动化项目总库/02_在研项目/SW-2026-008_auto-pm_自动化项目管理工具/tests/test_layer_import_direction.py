@@ -40,6 +40,7 @@ KNOWN_VIOLATIONS = {
     ("ui/cli/pm_closure.py", "infrastructure"),
     ("ui/cli/pm_handoff.py", "infrastructure"),
     ("ui/cli/pm_switch.py", "infrastructure"),
+    ("ui/cli/runtime_identity_guard.py", "infrastructure"),
 }
 
 

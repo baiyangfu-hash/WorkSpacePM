@@ -18,6 +18,8 @@ from auto_pm.infrastructure.continuity_store import ContinuityStoreError
 from tests.core.test_mission_park_store import APPROVAL
 from tests.core.test_mission_switch_service import A_FILE, Switch, sw  # noqa: F401  (fixture)
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 def _card(
     mission_id: str, state: MissionState = MissionState.DRAFT, *paths: str, title: str = ""
