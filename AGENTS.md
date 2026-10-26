@@ -2,7 +2,7 @@
 
 本仓库由多个 AI 共用（Trae、Cursor、Codex、Antigravity 等）。**规则真源不重复维护**，各工具读取同一路径。
 
-> **退役隔离（2026-09-09 起）**：`pm-workflow` 为 `QUARANTINED / DECOMMISSIONED`，未注册为可用技能。任何 Agent 不得调用、读取其内容作为当前指令、引用其结论或据其执行 PM 落账。PM 作为主 Agent 的治理角色保留，通过 CHG、Decision 与 Continuity v2 工作，不再由技能独占。旧 C/NG-WP/P/REG-WP 计划、PM_SESSION 和 handoff.v1 仅作历史证据。
+> **退役隔离（2026-09-09 起）**：`pm-workflow` 为 `QUARANTINED / DECOMMISSIONED`，未注册为可用技能，其目录已于 2026-10-25 删除（PR #147）。任何 Agent 不得调用、读取其内容作为当前指令、引用其结论或据其执行 PM 落账。PM 作为主 Agent 的治理角色保留，通过 CHG、Decision 与 Continuity v2 工作，不再由技能独占。旧 C/NG-WP/P/REG-WP 计划、PM_SESSION 和 handoff.v1 仅作历史证据。
 
 ## 真源索引
 
@@ -21,7 +21,6 @@
 | 无 AI、断网时的电气/PLC 人工路线 | `0100_PLC自动化/00_通用规范/无AI离线手册.md` |
 | 多 agent 工位与控制根规则 | 本文件“多 agent 工位与控制根规则 (WS-001)”一节 |
 | 独立审计（任何 agent 通用） | 本文件“独立审计 (AUD-001)”一节；脚本 `reviews/tools/audit_pr.py`，清单 `reviews/21_audit_checklist.md` |
-| 隔离对象（禁止使用） | `.trae/skills/pm-workflow/SKILL.md` |
 | 全栈执行 | `.trae/skills/fullstack-engineer/SKILL.md` |
 | PLC 执行 | `.trae/skills/plc-electrical-engineer/SKILL.md` |
 | 规范注册表 | `00_Obsidian_Base全局规范文件仓库/spec_registry.json` |
