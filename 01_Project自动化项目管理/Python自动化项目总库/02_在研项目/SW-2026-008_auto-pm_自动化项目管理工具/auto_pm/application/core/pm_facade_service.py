@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import secrets
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -93,6 +94,12 @@ _UNCLASSIFIED_PLAN_REFUSAL = (
 
 class PmFacadeError(RuntimeError):
     """Raised when a user-facing PM action is not legally available."""
+
+
+def _same_path_set(left: Sequence[str], right: Sequence[str]) -> bool:
+    """批准文件清单是集合语义：与书写顺序无关，但重复项也不能掩盖差异（TD-SW008-051）。"""
+
+    return sorted(left) == sorted(right)
 
 
 class PmFacadeService:
@@ -1254,7 +1261,7 @@ class PmFacadeService:
         if (
             decision.project_id != card.subject_project_id
             or decision.change_id != card.change_id
-            or decision.approved_files != list(card.scope_paths)
+            or not _same_path_set(decision.approved_files, card.scope_paths)
             or decision.approver != approver
             or decision.decision_conclusion not in {"approved", "conditionally_approved"}
             or metadata != expected_metadata
