@@ -118,11 +118,25 @@ def test_the_check_is_read_only(tmp_path: Path) -> None:
     _write(project, CHG)
     _commit(root)
     _write(project, "CHG-SCPT-2026-002.md")
-    before = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout
+    before = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    ).stdout
 
     check_project_chg_tracking(project)
 
-    after = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout
+    after = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    ).stdout
     assert after == before and "??" in after
 
 
