@@ -342,6 +342,30 @@ def test_s23_paths_after_a_blank_line_in_the_scope_list_are_not_authorised(repo:
     assert "越界：`src/b.py`" in errors(result) and "src/a.py" not in errors(result)
 
 
+# ---- 可改范围清单项整行当一条路径（路径里可以有空格） ----
+
+SPACED = "templates/PM_SESSION_{{ project_id }}.md.jinja"
+
+
+def test_s23b_a_path_with_spaces_in_the_scope_list_is_one_path(repo: Path) -> None:
+    base, head = commit(repo, {SPACED: "x\n"})
+    for item in (SPACED, f"`{SPACED}`", f"`{SPACED}` — 新增"):
+        result = gate.check(repo, base, head, f"可改范围\n- {item}\n")
+        assert result.passed, (item, errors(result))
+
+
+def test_s23c_the_first_word_of_a_spaced_path_authorises_nothing(repo: Path) -> None:
+    """旧写法把 ``a b.py`` 切成 ``a``，等于放行了另一个路径；整行当一条后 ``templates/PM_SESSION_{{`` 不再授权任何文件。"""
+    base, head = commit(repo, {"templates/PM_SESSION_{{": "x\n"})
+    result = gate.check(repo, base, head, f"可改范围\n- {SPACED}\n")
+    assert "越界：`templates/PM_SESSION_{{`" in errors(result)
+
+
+def test_s23d_declared_scope_items_are_kept_whole() -> None:
+    body = "可改范围\n- a/b c.py\n* `d e/f.py`\n- g.py\n"
+    assert gate.declared_scope(body) == ["a/b c.py", "d e/f.py", "g.py"]
+
+
 # ---- TD-SW008-115：新增文件命中忽略规则 ----
 
 
