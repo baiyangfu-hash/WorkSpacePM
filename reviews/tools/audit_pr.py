@@ -237,13 +237,12 @@ def github_json(path: str) -> dict | None:
 
 
 REQUIRED_CONTEXT = "safety-zone"
-PLC_TOP = "0100_PLC自动化"
 BAD_STATES = {"failure", "error"}
 PASSING_CONCLUSIONS = {"success", "skipped", "neutral"}
 
 
 def judge_ci(
-    runs: list[dict], check_runs: list[dict], statuses: list[dict], expected_ci: bool, touches_plc: bool
+    runs: list[dict], check_runs: list[dict], statuses: list[dict], expected_ci: bool
 ) -> tuple[str, str]:
     """Verdict over Actions runs, check runs and commit statuses. Any failing or unfinished required context is not a PASS."""
     # Only the newest run per (workflow, event, commit) counts: older ones are re-runs or were cancelled by a newer push.
@@ -282,8 +281,9 @@ def judge_ci(
         elif state != "success":
             # An unfinished `safety-zone` must not let the PR through; other pending contexts are only unverified.
             (bad if context == REQUIRED_CONTEXT else pending).append(name)
-    if touches_plc and REQUIRED_CONTEXT not in seen_contexts:
-        pending.append(f"状态 {REQUIRED_CONTEXT}（改了 {PLC_TOP} 但没有出现）")
+    if REQUIRED_CONTEXT not in seen_contexts:
+        # Same rule as pr_ready: every PR into main must show `safety-zone`; absent means the gate has not reported yet.
+        pending.append(f"状态 {REQUIRED_CONTEXT}（没有出现，safety-gate 还没跑或这个提交没触发）")
     if bad:
         status = "FAIL"
     elif pending:
@@ -488,8 +488,7 @@ def audit(
         if runs is None or check_runs is None or statuses is None:
             checks.append(Check("ci_result", "UNVERIFIED", "取不到 GitHub 的 Actions、检查项或提交状态记录（网络或限流）"))
         else:
-            touches_plc = any(f == PLC_TOP or f.startswith(f"{PLC_TOP}/") for f in info.get("files", []))
-            status, summary = judge_ci(runs, check_runs, statuses, expected_ci, touches_plc)
+            status, summary = judge_ci(runs, check_runs, statuses, expected_ci)
             checks.append(Check("ci_result", status, summary))
     else:
         checks.append(Check("ci_result", "UNVERIFIED", "离线模式，没有查 CI"))
