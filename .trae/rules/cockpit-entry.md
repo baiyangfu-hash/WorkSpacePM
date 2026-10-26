@@ -14,4 +14,4 @@ description: 驾驶舱薄入口：新会话先定位再动手；没有已授权�
 5. **不得使用**已隔离的 `pm-workflow`；`PM_SESSION` 和聊天文字都不是授权；`PM_SESSION_*.md` 已退役，不改、不新建、不列进可改范围。
 6. 目录不对、命令报错或定位结果有冲突：停下，把原话报告给用户，不要换办法绕过。
 7. **审计 PR**：照 `AGENTS.md`“独立审计 (AUD-001)”一节做。
-8. **运行驾驶舱命令要带 agent 身份**：Trae 里的 AI 执行 `main.py …` 一律用 `.\.trae\bin\pm-as-trae.ps1 <命令参数>`（例如 `.\.trae\bin\pm-as-trae.ps1 pm orient <项目编号> --json`）。它只在这一条命令期间设置 `AUTO_PM_AGENT=trae:cn`，驾驶舱靠它认出是 agent：`worktree close` 不会收别人的工位，用户本人才能签的批准和风险签字会拒绝 agent。命令只认冒号前面那段，国际版 Trae 同样用这个值。不要在终端里长期设置这个变量。
+8. **运行驾驶舱命令要带 agent 身份**：Trae 里的 AI 执行 `main.py …` 一律用 `.\.trae\bin\pm-as-trae.ps1 <命令参数>`（例如 `.\.trae\bin\pm-as-trae.ps1 pm orient <项目编号> --json`）。它只在这一条命令期间设置 `AUTO_PM_AGENT=trae:cn`，驾驶舱靠它认出是 agent：`worktree close` 不会收别人的工位，用户本人才能签的批准和风险签字会拒绝 agent。命令只认冒号前面那段，国际版 Trae 同样用这个值。不要在终端里长期设置这个变量。被执行策略挡住时请用户放行，Trae 不自己改系统设置。
