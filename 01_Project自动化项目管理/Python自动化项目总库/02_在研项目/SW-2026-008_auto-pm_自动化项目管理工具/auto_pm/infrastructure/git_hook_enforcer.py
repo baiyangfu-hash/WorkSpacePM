@@ -263,13 +263,13 @@ def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
 
 def _git_z_lines(workspace_root: Path, args: list[str]) -> list[str]:
     """运行只读 git 命令并按 NUL 切分输出；命令失败即抛错（fail-closed）。"""
-    result = subprocess.run(
+    result = run_git_bounded_text(
         ["git", *args],
+        default_timeout=120.0,
+        error_cls=StagedSnapshotError,
+        where=workspace_root,
         cwd=str(workspace_root),
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=True,
     )
     return [item for item in result.stdout.split("\0") if item]
@@ -305,8 +305,11 @@ def independent_staged_changes(workspace_root: Path) -> dict[str, tuple[str, str
     for entry in _git_z_lines(workspace_root, ["diff-files", "--raw", "-z", "--no-abbrev", "--diff-filter=A"])[1::2]:
         index_map.pop(_normalise_git_path(entry), None)
     has_head = (
-        subprocess.run(
+        run_git_bounded_text(
             ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=workspace_root,
             cwd=str(workspace_root),
             capture_output=True,
         ).returncode

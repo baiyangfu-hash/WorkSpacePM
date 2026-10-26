@@ -127,6 +127,8 @@ _CASES: list[tuple[str, Callable[[Path], object], type[Exception]]] = [
      git_hook_enforcer.StagedSnapshotError),
     ("hook_secret_scan", lambda p: git_hook_enforcer.find_staged_secrets(p),
      git_hook_enforcer.StagedSnapshotError),
+    ("hook_independent_staged_changes", lambda p: git_hook_enforcer.independent_staged_changes(p),
+     git_hook_enforcer.StagedSnapshotError),
     ("worktree_policy", lambda p: worktree_policy_service.WorktreePolicyService(p)._run_git("status"),
      worktree_policy_service.WorktreePolicyError),
 ]
