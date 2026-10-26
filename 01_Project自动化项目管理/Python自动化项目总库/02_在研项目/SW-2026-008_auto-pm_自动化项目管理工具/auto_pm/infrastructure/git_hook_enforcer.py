@@ -305,7 +305,7 @@ def filter_production_files(files: list[str]) -> list[str]:
     return [
         f
         for f in files
-        if f.replace("\\", "/").endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f)
+        if f.replace("\\", "/").lower().endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f)
     ]
 
 
