@@ -156,9 +156,88 @@ def test_an_abandoned_change_order_is_not_an_open_change_of_the_project(tmp_path
     open_changes = ProjectFactService(workspace)._collect_open_changes(Path(workspace) / "TEST-2026-001")
     assert [item.change_number for item in open_changes] == []
 
-    abandoned = SimpleNamespace(status="abandoned", apply_date="2026-01-01")
+    # 废弃的这条日期最晚：若仪表盘不排除，就会被选成“最近活跃变更”
+    abandoned = SimpleNamespace(status="abandoned", apply_date="2026-01-03")
     approved = SimpleNamespace(status="approved", apply_date="2026-01-02")
     changes = SimpleNamespace(list_all_changes=lambda project_id=None: [abandoned, approved])
     service = DashboardService(SimpleNamespace(), changes)
     assert service.get_active_change_for_project("TEST-2026-001") is approved
 
+
+
+# ── 审计 227 补的缺口 ───────────────────────────────────────
+
+
+def _ledger_text(workspace: str) -> str:
+    return next(Path(workspace).rglob("01_版本变更台账.md")).read_text(encoding="utf-8")
+
+
+def _ledger_row(workspace: str) -> str:
+    return next(line for line in _ledger_text(workspace).splitlines() if CHG in line)
+
+
+def test_create_refuses_to_overwrite_an_abandoned_change_order_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """编号生成器回退到已用编号时，已废弃的变更单文件和 closed/archived 一样不能被覆盖。"""
+    workspace = _workspace(tmp_path, "abandoned")
+    service = ChangeService(workspace)
+    before = _file(workspace).read_text(encoding="utf-8")
+    monkeypatch.setattr(service._locator, "generate_change_number", lambda *args: CHG)
+
+    with pytest.raises(ValueError, match="终态"):
+        service.create_change_request(
+            project_id="TEST-2026-001",
+            domain="DOCU",
+            business_nature="DEF",
+            impact_scope=["LOCAL"],
+            applicant="测试",
+            background="背景",
+            necessity="必要性",
+        )
+    assert _file(workspace).read_text(encoding="utf-8") == before
+
+
+def test_abandoning_writes_the_date_when_the_ledger_already_has_the_row(tmp_path: Path) -> None:
+    """台账里已经有这条的行（现有测试只走“新建行”那条路）：改状态时也要回写完成日期。"""
+    from auto_pm.change.ledger_updater import LedgerUpdater
+
+    workspace = _workspace(tmp_path, "draft")
+    ledger = str(next(Path(workspace).rglob("01_版本变更台账.md")))
+    LedgerUpdater().update(ledger, CHG, "已有行", applicant="管理员", apply_date="2026-01-01")
+    assert "已废弃" not in _ledger_row(workspace)
+
+    ChangeService(workspace).transition_status(CHG, "abandoned", approver="管理员", comment="需求取消")
+
+    row = _ledger_row(workspace)
+    assert "🚫已废弃" in row and datetime.date.today().isoformat() in row
+
+
+def test_reconcile_backfills_the_date_for_an_abandoned_change_order(tmp_path: Path) -> None:
+    """对账补建台账缺失行，和修正状态不一致两条路径，都要给已废弃的写完成日期。"""
+    from auto_pm.change.ledger_reconciler import LedgerReconciler
+    from auto_pm.change.ledger_updater import LedgerUpdater
+
+    today = datetime.date.today().isoformat()
+    project = "TEST-2026-001"
+
+    # 路径一：台账里没有这条 → 补建
+    workspace = _workspace(tmp_path / "missing", "abandoned")
+    project_path = str(Path(workspace) / project)
+    reconciler = LedgerReconciler()
+    diff = reconciler.reconcile(project_path)
+    assert diff.missing_in_ledger == [CHG]
+    reconciler.auto_fix(project_path, diff)
+    row = _ledger_row(workspace)
+    assert "🚫已废弃" in row and today in row
+
+    # 路径二：台账里是“待处理”→ 状态不一致 → 修正
+    workspace = _workspace(tmp_path / "mismatch", "abandoned")
+    project_path = str(Path(workspace) / project)
+    ledger = str(next(Path(workspace).rglob("01_版本变更台账.md")))
+    LedgerUpdater().update(ledger, CHG, "已有行", applicant="管理员", apply_date="2026-01-01")
+    diff = reconciler.reconcile(project_path)
+    assert [item[0] for item in diff.status_mismatches] == [CHG]
+    reconciler.auto_fix(project_path, diff)
+    row = _ledger_row(workspace)
+    assert "🚫已废弃" in row and today in row

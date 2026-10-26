@@ -63,7 +63,9 @@ class DashboardService:
             phase_key = project.phase or ""
             phase_counts[phase_key] = phase_counts.get(phase_key, 0) + 1
 
-        open_changes = [change for change in changes if change.status != "closed"]
+        open_changes = [
+            change for change in changes if change.status not in ("closed", "abandoned")
+        ]
         failed_project_ids, not_applicable_ids = self._collect_plc_check_stats(projects)
         recent_activities = self._collect_recent_activities(projects, changes)
         risk_hints = self._collect_risk_hints(
@@ -288,7 +290,9 @@ class DashboardService:
             sort_key = self._parse_date_to_timestamp(change.apply_date)
             if sort_key <= 0:
                 continue
-            activity_type = "success" if change.status != "closed" else "default"
+            activity_type = (
+                "default" if change.status in ("closed", "abandoned") else "success"
+            )
             activities.append(
                 (
                     (sort_key, change.change_number),
