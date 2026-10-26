@@ -33,6 +33,7 @@ def fake_lsp(tmp_path: Path) -> Path:
         f'echo "cwd=$(pwd)" >> "{report}"\n'
         f'if grep -q Counter ../../../01_SharedLibraries/SysLib/timer/FB_TON.scl; then echo stub=yes >> "{report}"; else echo stub=no >> "{report}"; fi\n'
         f'if grep -q Counter ../../../01_SharedLibraries/SysLib/timer/FB_TONR.scl; then echo stubr=yes >> "{report}"; else echo stubr=no >> "{report}"; fi\n'
+        f'echo "libscl=$(cd ../../../01_SharedLibraries/SysLib && find . -name \'*.scl\' | sed \'s|^./||\' | sort | tr \'\\n\' \',\')" >> "{report}"\n'
         "exit 0\n",
         encoding="utf-8",
     )
@@ -132,3 +133,66 @@ def test_the_hash_guard_list_also_covers_the_plc_source_files_of_the_chosen_proj
     sources = {p.resolve() for p in plc_dir.rglob("*.scl")}
 
     assert sources and sources <= guarded
+
+
+def _module():
+    spec = importlib.util.spec_from_file_location("run_plugin_test_deps", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _lib(tmp_path: Path) -> Path:
+    lib = tmp_path / "SysLib"
+    for rel, text in {
+        "a/FB_A.scl": "FUNCTION_BLOCK FB_A\nVAR\n s_t : FB_B;\nEND_VAR\n",
+        "b/FB_B.scl": "FUNCTION_BLOCK FB_B\nVAR\n s_x : ST_C;\nEND_VAR\n",
+        "c/ST_C.scl": "TYPE ST_C :\nSTRUCT\n i : INT;\nEND_STRUCT\nEND_TYPE\n",
+        "d/FB_UNUSED.scl": "FUNCTION_BLOCK FB_UNUSED\nEND_FUNCTION_BLOCK\n",
+        "e/FB_ONLY_IN_COMMENT.scl": "FUNCTION_BLOCK FB_ONLY_IN_COMMENT\nEND_FUNCTION_BLOCK\n",
+    }.items():
+        (lib / rel).parent.mkdir(parents=True, exist_ok=True)
+        (lib / rel).write_text(text, encoding="utf-8")
+    return lib
+
+
+def test_the_dependency_chain_is_followed_and_unreferenced_blocks_are_left_out(tmp_path: Path) -> None:
+    lib = _lib(tmp_path)
+    source = tmp_path / "prog.scl"
+    source.write_text(
+        "FUNCTION_BLOCK FB_P\nVAR\n s_a : fb_a;\nEND_VAR\n"
+        "// FB_ONLY_IN_COMMENT 只在注释里\n(* FB_UNUSED 也只在注释里 *)\n",
+        encoding="utf-8",
+    )
+
+    needed = _module().referenced_syslib_files([source], lib)
+
+    assert {p.name for p in needed} == {"FB_A.scl", "FB_B.scl", "ST_C.scl"}
+
+
+def test_a_project_that_references_nothing_pulls_in_no_library_block(tmp_path: Path) -> None:
+    source = tmp_path / "prog.scl"
+    source.write_text("FUNCTION_BLOCK FB_P\nEND_FUNCTION_BLOCK\n", encoding="utf-8")
+
+    assert _module().referenced_syslib_files([source], _lib(tmp_path)) == set()
+
+
+def test_the_copy_for_dj_2026_009_has_only_the_referenced_syslib_blocks(fake_lsp: Path) -> None:
+    result = _run(fake_lsp, "--project", "DJ-2026-009")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    copied = set(_report(fake_lsp)["libscl"].strip(",").split(","))
+    assert "timer/FB_TON.scl" in copied and "timer/FB_TONR.scl" in copied
+    assert not any(name.startswith("safety/") for name in copied)
+    all_lib = {p.relative_to(REPO / "0100_PLC自动化" / "01_SharedLibraries" / "SysLib").as_posix()
+               for p in (REPO / "0100_PLC自动化" / "01_SharedLibraries" / "SysLib").rglob("*.scl")}
+    assert copied < all_lib
+
+
+def test_the_copy_for_the_default_project_keeps_what_dj_2026_005_uses(fake_lsp: Path) -> None:
+    result = _run(fake_lsp)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    copied = set(_report(fake_lsp)["libscl"].strip(",").split(","))
+    assert {"timer/FB_TON.scl", "timer/FB_TONR.scl", "edge/FB_R_TRIG.scl", "edge/FB_F_TRIG.scl", "types/ST_ServoAxis.scl"} <= copied
