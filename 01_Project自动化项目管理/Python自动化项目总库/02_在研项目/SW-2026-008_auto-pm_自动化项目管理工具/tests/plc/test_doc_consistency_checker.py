@@ -46,7 +46,9 @@ def test_c02_a_difference_fails_the_check_with_variable_and_location_in_the_mess
     assert result.fail_count >= 1
 
 
-def test_c03_missing_documents_only_warn(tmp_path: Path) -> None:
+def test_c03_missing_documents_of_single_objects_only_warn(tmp_path: Path) -> None:
+    """Each object without a document is a draft to make with ``plc docs sync``; that the whole variable definition
+    file is gone is a failure of its own (TD-SW008-129, tests/plc/test_required_documents_fail.py)."""
     result = run(make(tmp_path, ifc=None, var=None))
     items = consistency(result)
     assert items and {status for _, status, _ in items} == {"warn"}
@@ -75,7 +77,7 @@ def test_c05_a_syslib_function_block_project_is_skipped(tmp_path: Path) -> None:
 def test_c06_an_unexpected_error_in_the_consistency_code_becomes_a_warning_not_a_crash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def boom(_path: str) -> list[tuple[str, str, str]]:
+    def boom(_path: str, **_options: object) -> list[tuple[str, str, str]]:
         raise RuntimeError("boom")
 
     monkeypatch.setattr("auto_pm.domain.plc.checker.consistency_items", boom)

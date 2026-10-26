@@ -1,4 +1,4 @@
-"""PR CLI：agent 收工后自动开 PR（WS-001，WBS X05 卡 C）
+"""PR CLI：agent 收工后自动开 PR（WS-001，WBS X05 卡 C）；ready 合并前只读放行检查
 
 只开不合：命令里没有合并、自动合并、改已有 PR 的路径；合并按 AUD-001 独立审计后由主执行或用户做。
 
@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -15,6 +16,7 @@ from rich.console import Console
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, AgentWorktreeError
 from auto_pm.application.core.pr_open_service import PrOpenRefusedError, PrOpenService
+from auto_pm.application.core.pr_ready_service import PrReadyService, render
 
 console = Console()
 AGENTS = click.Choice(sorted(AGENT_ROSTER))
@@ -28,7 +30,7 @@ def _fail(error: AgentWorktreeError) -> None:
 
 @click.group("pr")
 def pr_group() -> None:
-    """agent 的 PR：open（推送并开 PR，只开不合）；只在控制根执行"""
+    """agent 的 PR：open（推送并开 PR，只开不合）、ready（合并前只读放行检查）；只在控制根执行"""
 
 
 @pr_group.command("open")
@@ -44,6 +46,7 @@ def pr_group() -> None:
     default=None,
     help="是否涉及安全回路；改到 0100_PLC自动化 下的文件时必填",
 )
+@click.option("--sweep", default=None, help="修缺陷的 PR 填：根因和全库同类排查结果（写进“同类排查”一节）")
 @click.option("--title", default=None, help="覆盖 PR 标题；默认 [卡号] 任务卡标题")
 @click.option("--dry-run", is_flag=True, help="只做检查并显示分支、标题、描述；不推送、不开 PR")
 @click.option("--no-fetch", is_flag=True, help="断网时用本机现有的 origin/main")
@@ -55,6 +58,7 @@ def open_cmd(
     task_card: str,
     evidence: tuple[str, ...],
     safety_circuit: str | None,
+    sweep: str | None,
     title: str | None,
     dry_run: bool,
     no_fetch: bool,
@@ -71,6 +75,7 @@ def open_cmd(
             evidence=evidence,
             safety_circuit=safety_circuit,
             title=title,
+            sweep=sweep,
             fetch=not no_fetch,
         )
     except AgentWorktreeError as error:
@@ -95,3 +100,30 @@ def open_cmd(
         _fail(error)
     console.print(f"[green]已开 PR #{opened.number}[/green] {opened.url}", highlight=False)
     console.print("只开不合：请独立审计（AUD-001），CI 全绿、评审对话解决后再合并")
+
+
+@pr_group.command("ready")
+@click.argument("number", type=int)
+@click.option("--repo", default=None, help="owner/name；默认取 gh 当前仓库")
+@click.option(
+    "--reports-dir",
+    "reports_dirs",
+    multiple=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="再多找一个审计报告目录；可重复。默认只找控制根的 reviews/",
+)
+@click.pass_context
+def ready_cmd(ctx: click.Context, number: int, repo: str | None, reports_dirs: tuple[Path, ...]) -> None:
+    """合并前放行检查（只读）：审计报告、必过检查、safety-zone、安全签字；缺一条退出 1，不合并"""
+    app_ctx: AppContext = ctx.obj
+    root = Path(app_ctx.control_root or app_ctx.workspace_root or os.getcwd())
+    dirs = (root / "reviews", *reports_dirs)
+    try:
+        report = PrReadyService(root, report_dirs=dirs, repo=repo).check(number)
+    except AgentWorktreeError as error:
+        console.print(f"[bold red]错误[/bold red] {error}", markup=True, highlight=False)
+        raise SystemExit(2) from error
+    for line in render(report):
+        console.print(line, markup=False, highlight=False)
+    if not report.ready:
+        raise SystemExit(1)

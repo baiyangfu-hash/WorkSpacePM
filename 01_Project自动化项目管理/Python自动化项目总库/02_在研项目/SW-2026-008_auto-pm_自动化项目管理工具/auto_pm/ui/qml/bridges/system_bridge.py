@@ -115,7 +115,7 @@ class SystemBridge(QObject):
     def syncDocs(self) -> dict[str, Any]:
         """执行 Doc-as-Code 文档自省自动同步"""
         try:
-            from auto_pm.domain.doc.services import DocSyncService
+            from auto_pm.application.core.doc_services import DocSyncService
             ws = Path(os.getcwd())
             svc = DocSyncService(ws)
             logs = svc.sync_all()
@@ -128,7 +128,7 @@ class SystemBridge(QObject):
     def checkDocs(self) -> dict[str, Any]:
         """执行 Doc-as-Code 文档一致性门禁检查"""
         try:
-            from auto_pm.domain.doc.services import DocCheckService
+            from auto_pm.application.core.doc_services import DocCheckService
             ws = Path(os.getcwd())
             svc = DocCheckService(ws)
             results = svc.check_all()

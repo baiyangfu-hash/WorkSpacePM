@@ -152,6 +152,32 @@ class TestDashboardService:
         assert result.recent_activities == []
         assert result.risk_hints == ["当前未发现高优先级风险"]
 
+    def test_abandoned_change_is_not_an_open_change(
+        self,
+        project_service: ProjectService,
+        change_service: ChangeService,
+        db: DatabaseManager,
+    ) -> None:
+        """审计 227：已废弃的变更单不算“未关闭变更”，也不触发风险提示和“进行中”活动。"""
+        assert project_service._repo is not None
+        project_service._repo.upsert(_make_project_record("SW-2026-001"))
+        change_repo = ChangeRequestRepository(db)
+        change_repo.upsert(
+            _make_change_summary(
+                "CHG-PLC-2026-001", status="abandoned", apply_date="2026-06-25"
+            )
+        )
+        service = DashboardService(project_service, change_service)
+
+        result = service.get_summary()
+
+        assert result.open_change_count == 0
+        assert result.risk_hints == ["当前未发现高优先级风险"]
+        change_activities = [
+            item for item in result.recent_activities if item["title"].startswith("变更单")
+        ]
+        assert [item["type"] for item in change_activities] == ["default"]
+
     def test_get_summary_with_projects_changes_and_failed_checks(
         self,
         project_service: ProjectService,

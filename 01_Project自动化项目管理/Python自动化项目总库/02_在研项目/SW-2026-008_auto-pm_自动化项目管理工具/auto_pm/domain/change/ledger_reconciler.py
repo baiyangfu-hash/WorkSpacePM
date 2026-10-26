@@ -208,7 +208,7 @@ class LedgerReconciler:
             expected_status = LEDGER_STATUS_MAP.get(chg_cr.status, "🔄待处理")
             if expected_status != "🔄待处理":
                 complete_date = ""
-                if chg_cr.status in ("completed", "closed", "archived"):
+                if chg_cr.status in ("completed", "closed", "archived", "abandoned"):
                     complete_date = date.today().isoformat()
                 self._updater.update_status(
                     ledger_path,
@@ -224,7 +224,7 @@ class LedgerReconciler:
         for cn, expected, _actual in diff.status_mismatches:
             chg_cr = chg_meta.get(cn)
             complete_date = ""
-            if chg_cr and chg_cr.status in ("completed", "closed", "archived"):
+            if chg_cr and chg_cr.status in ("completed", "closed", "archived", "abandoned"):
                 complete_date = date.today().isoformat()
             self._updater.update_status(
                 ledger_path,

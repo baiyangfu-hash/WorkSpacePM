@@ -61,7 +61,7 @@ def test_shutdown_refuses_new_work_waits_for_the_running_worker_and_leaves_the_p
             "refresh": bridge.startSnapshotRefresh()["accepted"],
             "evidence": bridge.requestEvidence("SW-2026-008")["accepted"],
             "start": bridge.startExecution("MISSION-1")["accepted"],
-            "draft": bridge.createPlanningDraft("SW-2026-008", "goal", "criteria")["success"],
+            "draft": bridge.createPlanningDraft("SW-2026-008", "goal", "criteria", "iteration")["success"],
         }
         assert refused == {"snapshot": False, "refresh": False, "evidence": False, "start": False, "draft": False}
         assert bridge._snapshot_delivery_enabled is False and bridge._snapshot_refresh_timer.isActive() is False

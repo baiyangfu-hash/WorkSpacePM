@@ -23,7 +23,7 @@ from typing import cast
 from auto_pm.core.paths import find_prd_dir
 from auto_pm.domain.plc.language_service import LanguageService, evaluate_project
 from auto_pm.models.enums import ProjectType
-from auto_pm.plc.doc_consistency import consistency_items
+from auto_pm.plc.doc_consistency import analyze_project, consistency_items, required_document_items
 from auto_pm.plc.models import (
     _LEGACY_PROJECT_INIT_PLC_PATH,
     FB_PRD_SCAN_DIR,
@@ -317,7 +317,8 @@ class _LegacyPlcCheckerCore:
         if result.project_type in SKIP_PLC_JSON_TYPES:
             return
         try:
-            items = consistency_items(project_path)
+            analysis = analyze_project(project_path)
+            items = [*consistency_items(project_path, analysis=analysis), *required_document_items(analysis)]
         except Exception as error:
             result.add("文档一致性", "warn", f"一致性核对异常，已跳过: {error}")
             return

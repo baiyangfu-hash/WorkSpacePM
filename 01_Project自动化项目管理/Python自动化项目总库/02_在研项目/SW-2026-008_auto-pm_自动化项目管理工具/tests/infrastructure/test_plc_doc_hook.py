@@ -234,14 +234,14 @@ F01A_MARKER = f"{PLC_ROOT}/.plc.json"
 F01A_MOVE_HINT = "移动或退役请走 F01-b 的授权"
 
 
-def test_f01a_h16_marker_deletion_blocks_even_when_the_acm_snapshot_is_empty(
+def test_f01a_h16_marker_deletion_blocks_and_the_snapshot_records_the_deletion(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     head = git(repo, "rev-parse", "HEAD")
     source_before = (repo / SCL).read_bytes()
     document_before = (repo / IFC).read_bytes()
     git(repo, "rm", "--", F01A_MARKER)
-    assert not git_hook_enforcer.get_staged_snapshot(repo).paths
+    assert git_hook_enforcer.get_staged_snapshot(repo).paths == (F01A_MARKER,)  # TD-046：纯删除也在快照里
     staged_before = git(repo, "diff", "--cached", "--binary", "--no-renames")
 
     code, output = run_hook(repo, capsys)
@@ -278,7 +278,7 @@ def test_f01a_h18_an_unstaged_marker_restore_does_not_override_the_index_deletio
     marker_bytes = (repo / F01A_MARKER).read_bytes()
     git(repo, "rm", "--", F01A_MARKER)
     (repo / F01A_MARKER).write_bytes(marker_bytes)
-    assert not git_hook_enforcer.get_staged_snapshot(repo).paths
+    assert git_hook_enforcer.get_staged_snapshot(repo).paths == (F01A_MARKER,)
 
     code, output = run_hook(repo, capsys)
 
@@ -319,7 +319,7 @@ def test_f01a_h20_an_archive_marker_already_in_head_cannot_be_deleted(
     git(repo, "commit", "-q", "-m", "existing archived project")
     marker = (old / ".plc.json").relative_to(repo).as_posix()
     git(repo, "rm", "--", marker)
-    assert not git_hook_enforcer.get_staged_snapshot(repo).paths
+    assert git_hook_enforcer.get_staged_snapshot(repo).paths == (marker,)
 
     code, output = run_hook(repo, capsys)
 

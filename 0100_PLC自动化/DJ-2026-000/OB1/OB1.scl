@@ -10,6 +10,7 @@
 //   2. FB_1011_CylinderControl (单线圈/双线圈气缸)
 //   3. FB_1012_ConveyorMotor (输送电机)
 //   4. FB_1014_StationConveyor (工站输送机)
+//   5. FB_1030_SafetyManager (安全管理块, 2026-10-22)
 //
 // 变更记录:
 //   V2.0.0 (2026-06-17): 重构为SysLib测试套件
@@ -132,6 +133,30 @@ GlobalVars.StationConveyor(
     q_dwProductionCount    => GlobalVars.st_dwProductionCount,
     q_bInfeedActive        => GlobalVars.st_bInfeedActive,
     q_bIntAlarmMem         => GlobalVars.st_bIntAlarmMem
+);
+
+// ============================================================================
+// 第六部分: FB_1030_SafetyManager (安全管理块测试, 安全区)
+// ============================================================================
+GlobalVars.SafetyMgr(
+    i_arrSafetyFault := GlobalVars.sm_arrSafetyFault,
+    i_arrEStopOk     := GlobalVars.sm_arrEStopOk,
+    i_arrCurtainOk   := GlobalVars.sm_arrCurtainOk,
+    i_arrDoorClosed  := GlobalVars.sm_arrDoorClosed,
+    i_bFieldbusOk    := GlobalVars.sm_bFieldbusOk,
+    i_bResetBtn      := GlobalVars.sm_bResetBtn,
+    i_bStartBtn      := GlobalVars.sm_bStartBtn,
+    i_bAutoMode      := GlobalVars.sm_bAutoMode,
+    i_bMotionStopped := GlobalVars.sm_bMotionStopped,
+    i_arrDoorReqBtn  := GlobalVars.sm_arrDoorReqBtn,
+    q_bSafeToRun     => GlobalVars.sm_bSafeToRun,
+    q_bStopNow       => GlobalVars.sm_bStopNow,
+    q_bRunResetPulse => GlobalVars.sm_bRunResetPulse,
+    q_bStartPulse    => GlobalVars.sm_bStartPulse,
+    q_iState         => GlobalVars.sm_iState,
+    q_dwAlarm        => GlobalVars.sm_dwAlarm,
+    q_arrDoorUnlock  => GlobalVars.sm_arrDoorUnlock,
+    q_arrDoorLamp    => GlobalVars.sm_arrDoorLamp
 );
 
 END_ORGANIZATION_BLOCK

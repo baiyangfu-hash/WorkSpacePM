@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import secrets
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -43,12 +44,13 @@ from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionError,
     EvidenceCollectionService,
 )
+from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.contracts.continuity import RunState, WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.declared_dirty import declared_dirty_mismatch
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
-from auto_pm.contracts.intake import IntakeClassification
+from auto_pm.contracts.intake import IntakeClassification, IntakeKind
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.plan_checklist import plan_checklist_problems, plan_checklist_refusal
 from auto_pm.contracts.pm_facade import (
@@ -84,10 +86,20 @@ _PLANNING_CHANGE_APPROVAL_STEPS = {
 _PLANNING_CHANGE_APPROVED_STATES = frozenset(
     {"approved", "implementing", "pending_acceptance", "accepting", "completed"}
 )
+_UNCLASSIFIED_PLAN_REFUSAL = (
+    "新需求必须分类：请给出类型（iteration|bug|change|urgent|debt）或已确认的收件箱条目，"
+    "不再按旧默认（SCPT、DEF、MODULE、normal）建变更单"
+)
 
 
 class PmFacadeError(RuntimeError):
     """Raised when a user-facing PM action is not legally available."""
+
+
+def _same_path_set(left: Sequence[str], right: Sequence[str]) -> bool:
+    """批准文件清单是集合语义：与书写顺序无关，但重复项也不能掩盖差异（TD-SW008-051）。"""
+
+    return sorted(left) == sorted(right)
 
 
 class PmFacadeService:
@@ -157,6 +169,49 @@ class PmFacadeService:
         except (ContinuityStoreError, SpecViolationError) as error:
             raise PmFacadeError(str(error)) from error
 
+    def create_classified_planning_draft(self, intent: PmIntent, kind: IntakeKind) -> PlanningDraft:
+        """Persist a pre-authorization draft together with the classification the user chose.
+
+        The cockpit and the SDK file nothing under a default: a draft saved here already carries its kind, so
+        the plan built from it is filed by that kind. ``kind`` CHANGE is refused because it also needs an action.
+        """
+
+        try:
+            filing = PmIntakeService(self._store.workspace_root).classify(
+                intent.subject_project_id,
+                kind=kind,
+                change_action=None,
+                domain="",
+                impact_scope=(),
+            )
+        except PmIntakeError as error:
+            raise PmFacadeError(str(error)) from error
+        draft = self.create_planning_draft(intent)
+        try:
+            IntakeStore(self._store.workspace_root, self._store.db_path).bind_planning_classification(
+                draft.request_id, filing
+            )
+        except (ContinuityStoreError, ValueError) as error:
+            raise PmFacadeError(str(error)) from error
+        return draft
+
+    def _refuse_unclassified_plan(
+        self, project_id: str, request_id: str, filing: IntakeClassification | None
+    ) -> None:
+        """Refuse a new plan that nothing classified; only a draft whose CHG is already bound may replay."""
+
+        if filing is not None:
+            return
+        try:
+            bound = any(
+                entry.draft.request_id == request_id and entry.change_id
+                for entry in self._store.list_planning_drafts(project_id)
+            )
+        except ContinuityStoreError as error:
+            raise PmFacadeError(str(error)) from error
+        if not bound:
+            raise PmFacadeError(_UNCLASSIFIED_PLAN_REFUSAL)
+
     def create_planning_draft_change(
         self,
         intent: PmIntent,
@@ -166,13 +221,14 @@ class PmFacadeService:
     ) -> str:
         """Create or replay the one pre-authorization CHG for a PlanningDraft.
 
-        A classified request is filed under its own domain, nature, scope and urgency. Only a request
-        that nothing classified keeps the legacy filing (SCPT, DEF, MODULE, normal).
+        A request is filed under its own classified domain, nature, scope and urgency. One nothing classified is
+        refused; only the replay of a legacy draft whose CHG is already bound keeps its legacy filing.
         """
 
         filing, intake_item_id = self._planning_classification(
             intent.request_id, intent.subject_project_id, classification, intake_item_id
         )
+        self._refuse_unclassified_plan(intent.subject_project_id, intent.request_id, filing)
         draft = self.create_planning_draft(intent)
         domain = "SCPT" if filing is None else filing.domain
         classified_refs = (
@@ -410,6 +466,7 @@ class PmFacadeService:
         filing, intake_item_id = self._planning_classification(
             intent.request_id, intent.subject_project_id, classification, intake_item_id
         )
+        self._refuse_unclassified_plan(intent.subject_project_id, intent.request_id, filing)
         self._require_plan_checklist(
             execution_grant,
             scope_paths=scope_paths,
@@ -1204,7 +1261,7 @@ class PmFacadeService:
         if (
             decision.project_id != card.subject_project_id
             or decision.change_id != card.change_id
-            or decision.approved_files != list(card.scope_paths)
+            or not _same_path_set(decision.approved_files, card.scope_paths)
             or decision.approver != approver
             or decision.decision_conclusion not in {"approved", "conditionally_approved"}
             or metadata != expected_metadata

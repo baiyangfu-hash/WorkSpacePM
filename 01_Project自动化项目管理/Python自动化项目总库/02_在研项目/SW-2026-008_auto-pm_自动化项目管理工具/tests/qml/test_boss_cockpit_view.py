@@ -325,6 +325,13 @@ def test_boss_main_saves_planning_form_to_isolated_store(
         encoding="utf-8",
         errors="replace",
     )
+    project_root = tmp_path / "projects" / "SW-2026-008"
+    project_root.mkdir(parents=True)
+    (project_root / ".copier-answers.yml").write_text(
+        "project_id: SW-2026-008\nproject_name: Boss fixture\nstack: python\n",
+        encoding="utf-8",
+        errors="replace",
+    )
     store = ContinuityStore(tmp_path)
     store.initialize("2026-09-28T00:00:00+00:00", "test")
     bridge = PmCockpitBridge(str(tmp_path))
@@ -350,10 +357,18 @@ def test_boss_main_saves_planning_form_to_isolated_store(
         objective = window.findChild(QObject, "planningObjective")
         acceptance = window.findChild(QObject, "planningAcceptance")
         save = window.findChild(QObject, "savePlanningDraft")
-        assert objective is not None and acceptance is not None and save is not None
+        kind = window.findChild(QObject, "planningKind")
+        assert objective is not None and acceptance is not None and save is not None and kind is not None
         objective.setProperty("text", "Improve release verification")
         acceptance.setProperty("text", "All checks pass")
         qapp.processEvents()
+
+        # TD-SW008-070: nothing is saved before the user has chosen what kind of request this is.
+        assert kind.property("currentIndex") == -1
+        assert save.property("enabled") is False
+        kind.setProperty("currentIndex", 0)
+        qapp.processEvents()
+        assert save.property("enabled") is True
 
         assert QMetaObject.invokeMethod(save, "clicked")
         qapp.processEvents()
@@ -1254,12 +1269,12 @@ def test_closing_the_real_window_seals_the_bridge_before_the_window_is_destroyed
     bridge = PmCockpitBridge(str(tmp_path))
     with _managed_boss_window(qml_engine, bridge) as window:
         qapp.processEvents()
-        assert _is_sealed(bridge) is False and bridge.createPlanningDraft("", "", "") != _SEALED  # open: this attempt fails on its input, not on a seal
+        assert _is_sealed(bridge) is False and bridge.createPlanningDraft("", "", "", "") != _SEALED  # open: this attempt fails on its input, not on a seal
         QMetaObject.invokeMethod(window, "close")  # a real close request on the real window
         qapp.processEvents()
         assert isValid(window), "the window object still exists: only its close event has run so far"
         assert _is_sealed(bridge) is True
-        assert bridge.createPlanningDraft("SW-2026-008", "an objective", "a criterion") == _SEALED
+        assert bridge.createPlanningDraft("SW-2026-008", "an objective", "a criterion", "iteration") == _SEALED
         assert bridge.confirmStart("MISSION-X") == _SEALED
         assert bridge.startSnapshotRefresh()["accepted"] is False
 

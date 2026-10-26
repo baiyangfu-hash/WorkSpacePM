@@ -50,11 +50,17 @@ class StagedIndexEntry:
 
     path: str
     object_id: str
+    # A 新增 / C 复制 / M 修改 / T 类型变更 / D 删除；删除时 object_id 是被删掉的旧 blob（TD-046）
+    status: str = "M"
+
+    @property
+    def deleted(self) -> bool:
+        return self.status == "D"
 
 
 @dataclass(frozen=True)
 class StagedSnapshot:
-    """一次 ``git diff --cached --raw`` 读取产生的不可变暂存快照。"""
+    """一次 ``git diff --cached --raw`` 读取产生的不可变暂存快照（含删除；重命名拆成“旧路径删除 + 新路径新增”）。"""
 
     entries: tuple[StagedIndexEntry, ...]
 
@@ -81,7 +87,10 @@ def _normalise_git_path(path: str) -> str:
 
 
 def _parse_raw_index_entries(raw_output: str) -> tuple[StagedIndexEntry, ...]:
-    """解析 ``git diff --cached --raw -z --no-renames`` 的 ACM 清单。"""
+    """解析 ``git diff --cached --raw -z --no-renames`` 的清单：新增、复制、修改、类型变更和删除。
+
+    ``--no-renames`` 把重命名拆成旧路径的删除和新路径的新增，所以两端都在快照里。
+    """
     fields = raw_output.split("\0")
     if fields and fields[-1] == "":
         fields.pop()
@@ -94,10 +103,11 @@ def _parse_raw_index_entries(raw_output: str) -> tuple[StagedIndexEntry, ...]:
         if len(header_parts) != 5 or not header_parts[0].startswith(":"):
             raise StagedSnapshotError(f"暂存区 raw 快照头格式非法: {header!r}")
         status = header_parts[-1]
-        object_id = header_parts[3]
-        if status not in {"A", "C", "M"} or not object_id.strip("0"):
+        # 删除时暂存侧的 blob 全是 0，记录被删掉的旧 blob，让“删了什么”也进入快照比较
+        object_id = header_parts[2] if status == "D" else header_parts[3]
+        if status not in {"A", "C", "M", "T", "D"} or not object_id.strip("0"):
             raise StagedSnapshotError(f"暂存区 raw 快照包含不支持的状态: {status!r}")
-        entries.append(StagedIndexEntry(_normalise_git_path(path), object_id))
+        entries.append(StagedIndexEntry(_normalise_git_path(path), object_id, status))
     return tuple(entries)
 
 
@@ -219,7 +229,7 @@ def _resolve_governance_roots(
 
 
 def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
-    """冻结当前 index 的 ACM 清单及 blob 标识，不读取工作区文件内容。"""
+    """冻结当前 index 相对 HEAD 的全部改动（含删除）及 blob 标识，不读取工作区文件内容。"""
     try:
         result = subprocess.run(
             [
@@ -230,7 +240,6 @@ def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
                 "-z",
                 "--no-abbrev",
                 "--no-renames",
-                "--diff-filter=ACM",
             ],
             cwd=str(workspace_root),
             capture_output=True,
@@ -260,10 +269,10 @@ def _get_staged_snapshot_or_reject(
 
 
 def get_staged_files(workspace_root: Path) -> list[str]:
-    """获取 Git 当前暂存区的文件相对路径列表"""
+    """获取 Git 当前暂存区的改动路径列表（含删除；重命名的旧路径也在内）"""
     try:
         result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            ["git", "diff", "--cached", "--name-only", "--no-renames"],
             cwd=str(workspace_root),
             capture_output=True,
             text=True,
@@ -483,7 +492,9 @@ def _change_entry(
     matches = [
         entry
         for entry in snapshot.entries
-        if Path(entry.path).name == expected_name and _path_is_in_project(entry.path, binding)
+        if Path(entry.path).name == expected_name
+        and _path_is_in_project(entry.path, binding)
+        and not entry.deleted  # 删掉变更单不能当作“有变更单”
     ]
     if len(matches) != 1:
         raise StagedSnapshotError(f"暂存快照缺少或重复关联变更单: {expected_name}")
@@ -497,7 +508,9 @@ def _ledger_entry(snapshot: StagedSnapshot, binding: ProjectBinding) -> StagedIn
         "11_监控/01_变更管理/02_变更记录/01_版本变更台账.md",
     )
     expected_paths = {f"{binding.relative_root}/{suffix}" for suffix in ledger_suffixes}
-    matches = [entry for entry in snapshot.entries if entry.path in expected_paths]
+    matches = [
+        entry for entry in snapshot.entries if entry.path in expected_paths and not entry.deleted
+    ]
     if len(matches) != 1:
         raise StagedSnapshotError("暂存快照缺少或重复关联项目台账")
     return matches[0]
@@ -716,7 +729,38 @@ def enforce_pre_commit(
     ledger_code = _enforce_ledger_pre_commit(workspace_root, snapshot, control_root)
     plc_code = enforce_plc_docs(workspace_root, snapshot.paths)
     secret_code = _enforce_secret_scan(workspace_root)
-    return 1 if ledger_code != 0 or plc_code != 0 or secret_code != 0 else 0
+    ignored_code = _enforce_ignored_additions(workspace_root)
+    return 1 if ledger_code != 0 or plc_code != 0 or secret_code != 0 or ignored_code != 0 else 0
+
+
+def _enforce_ignored_additions(workspace_root: Path) -> int:
+    """新增的暂存文件命中仓库忽略规则（多半是 ``git add -f``）即拒绝（TD-SW008-115）。
+
+    只看状态为 A 的条目：已经入库的文件不在此列，存量不受影响。
+    """
+    from auto_pm.infrastructure.ignored_file_scan import IgnoreScanError, ignored_among
+
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=A", "--no-renames", "-z"],
+            cwd=str(workspace_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        )
+        hits = ignored_among(workspace_root, [item for item in result.stdout.split("\0") if item])
+    except (IgnoreScanError, OSError, subprocess.CalledProcessError) as exc:
+        print(f"❌ [auto-pm pre-commit] 物理拦截：忽略规则扫描失败，为防止绕过门禁已拒绝提交: {exc}")
+        return 1
+    if not hits:
+        return 0
+    print("🚨 [auto-pm pre-commit] 物理阻断：新增文件命中仓库忽略规则，不应入库：")
+    for hit in hits:
+        print(f"   {hit.path}（{hit.source} 规则 {hit.pattern}）")
+    print("   处理：`git rm --cached <路径>` 把它移出暂存区；确需入库请先向用户申请改忽略规则。")
+    return 1
 
 
 def _enforce_ledger_pre_commit(
