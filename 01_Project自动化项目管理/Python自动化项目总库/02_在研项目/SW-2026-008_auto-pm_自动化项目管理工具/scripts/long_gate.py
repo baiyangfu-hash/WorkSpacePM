@@ -686,6 +686,15 @@ class Runner:
                           "bytes_at_start": tree_fingerprint(self.cfg)}
         self.state["result"] = None
         self.state["runner_pid"] = os.getpid()
+        hold_marker = self.cfg["lease"].get("hold_until_marker")
+        if hold_marker and Path(hold_marker).exists():
+            # A marker left by an earlier round would end the hold the moment the verdict is written. Move it aside, never delete.
+            aside = Path(f"{hold_marker}.stale.{int(time.time())}")
+            try:
+                Path(hold_marker).rename(aside)
+            except OSError as error:
+                return self._refuse(f"hold_until_marker {hold_marker} already exists and cannot be moved aside ({type(error).__name__})")
+            self.log(f"old hold_until_marker moved aside to {aside}")
 
         expected = self.state.get("bytes_at_start")
         for s in self.cfg["steps"]:

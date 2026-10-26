@@ -600,3 +600,68 @@ def test_a_bad_hold_setting_is_refused_at_start(lab: dict[str, Path], bad: dict[
     cfg.write_text(json.dumps(data), encoding="utf-8")
     result = _run(cfg, "run")
     assert result.returncode != 0 and "hold" in (result.stdout + result.stderr)
+
+
+def _hold_cfg(lab: dict[str, Path], marker: Path, steps: list[dict[str, Any]]) -> Path:
+    cfg = _config(lab, steps, interval=1)
+    _with_hold(cfg, marker, 3600)
+    return cfg
+
+
+def _log(lab: dict[str, Path]) -> str:
+    return (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def test_a_stop_file_ends_the_hold(lab: dict[str, Path]) -> None:
+    cfg = _hold_cfg(lab, lab["root"] / "CLOSING_DONE", [_step(lab, "rest")])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: "holding the lease" in _log(lab))
+        assert _run(cfg, "stop").returncode == 0
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "hold ended early: STOP file" in _log(lab)
+
+
+def test_losing_the_lease_ends_the_hold(lab: dict[str, Path]) -> None:
+    cfg = _hold_cfg(lab, lab["root"] / "CLOSING_DONE", [_step(lab, "rest")])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: "holding the lease" in _log(lab))
+        (lab["tools"] / "renew_fail").write_text("")
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "hold ended early: lease lost" in _log(lab)
+
+
+def test_a_stopped_round_does_not_hold_the_lease(lab: dict[str, Path]) -> None:
+    # A STOP before the verdict ends the round as STOPPED (exit 7): no hold, even with a one-hour hold configured.
+    cfg = _hold_cfg(lab, lab["root"] / "CLOSING_DONE", [_step(lab, "core", wait=120)])
+    runner = _start(cfg)
+    _wait_for(lambda: _runs(lab, "core") == 1)
+    assert _run(cfg, "stop").returncode == 0
+    assert runner.wait(timeout=60) == 7
+    assert "holding the lease" not in _log(lab)
+
+
+def test_an_old_closing_marker_is_moved_aside_not_deleted_and_the_hold_still_waits(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "CLOSING_DONE"
+    marker.write_text("left by the last round\n", encoding="utf-8")
+    cfg = _hold_cfg(lab, marker, [_step(lab, "rest")])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: "holding the lease" in _log(lab))
+        time.sleep(2)
+        assert proc.poll() is None  # the stale marker did not release the lease
+        aside = list(lab["root"].glob("CLOSING_DONE.stale.*"))
+        assert len(aside) == 1 and aside[0].read_text(encoding="utf-8") == "left by the last round\n"
+        marker.write_text("closed\n", encoding="utf-8")
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "old hold_until_marker moved aside" in _log(lab)
