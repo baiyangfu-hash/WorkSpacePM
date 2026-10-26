@@ -476,13 +476,13 @@ TEST_CASE "TC_HD_Auto_InWork_NeedReset"
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
     ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
-    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0004;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode.%X2 = TRUE;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep <> 0;
-    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0000;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode.%X2 = FALSE;
 END_TEST_CASE
 
 // 网线还断着时按复位不清锁, 通讯恢复后再按一次才算数 (用户 2026-10-20 17:40 MST 按建议批准)
@@ -525,13 +525,13 @@ TEST_CASE "TC_HD_Auto_ResetDuringFault_KeepLock"
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
     ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
-    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0004;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode.%X2 = TRUE;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep <> 0;
-    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0000;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode.%X2 = FALSE;
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Auto_Outfeed_InWork_NeedReset"
@@ -569,13 +569,13 @@ TEST_CASE "TC_HD_Auto_Outfeed_InWork_NeedReset"
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
     ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = FALSE;
-    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0004;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode.%X2 = TRUE;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep <> 0;
-    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0000;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode.%X2 = FALSE;
 END_TEST_CASE
 
 TEST_CASE "TC_HD_Auto_Idle_AutoRecover"
@@ -686,7 +686,7 @@ TEST_CASE "TC_HD_Auto_ResetHeld_KeepLock"
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
     ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
-    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0004;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode.%X2 = TRUE;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
     WAIT_CYCLES 1;
     SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
@@ -694,5 +694,5 @@ TEST_CASE "TC_HD_Auto_ResetHeld_KeepLock"
     SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep <> 0;
-    ASSERT (GlobalVars.fbExternalDevice.q_wErrorCode AND 16#0004) = 16#0000;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode.%X2 = FALSE;
 END_TEST_CASE
