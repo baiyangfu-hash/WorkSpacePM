@@ -24,6 +24,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import IO, Any
 
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 ISOLATION_MARKER = ".codex-microtask.json"
 ISOLATION_SCHEMA_VERSION = "codex-microtask.v1"
@@ -577,16 +578,15 @@ class LocalCodexExecutor:
 
     def _git_output(self, repository: Path, *arguments: str) -> str:
         try:
-            result = subprocess.run(
+            result = run_git_bounded_text(
                 ["git", "-C", str(repository), *arguments],
+                default_timeout=_GIT_TIMEOUT_SECONDS,
+                error_cls=LocalExecutionError,
+                where=repository,
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 check=False,
-                timeout=_GIT_TIMEOUT_SECONDS,
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
+        except OSError as error:
             raise LocalExecutionError("Git validation could not be completed") from error
         if result.returncode != 0:
             raise LocalExecutionError(f"Git validation failed: {' '.join(arguments[:2])}")
