@@ -28,7 +28,7 @@ def _mission() -> Mission:
         subject_project_id="SW-2026-008",
         change_id="CHG-SCPT-2026-206",
         decision_id="DEC-20260910-5786E126",
-        scope_paths=("auto_pm/",),
+        scope_paths=("auto_pm/core/a.py",),
         allowed_child_work_kinds=frozenset({WorkKind.BUG, WorkKind.TEST}),
         routing=InternalRoutingPolicy(
             max_auto_repair_attempts=2,
@@ -93,6 +93,19 @@ def test_policy_routes_only_authorized_same_project_scope() -> None:
             mission, _finding(subject_project_id="DJ-2026-005"), NOW
         )
         is OrchestrationEscalationReason.SUBJECT_PROJECT_EXIT
+    )
+
+
+def test_policy_scope_is_exact_files_a_folder_name_does_not_authorize_what_is_inside() -> None:
+    """TD-SW008-207: the stored scope has no trailing ``/``, so it names files, never a folder prefix."""
+
+    mission = _mission()
+    authority = mission.authority.model_copy(update={"scope_paths": ("auto_pm/core",)})
+    folder_mission = mission.model_copy(update={"authority": authority})
+
+    assert (
+        OrchestrationPolicy.finding_escalation(folder_mission, _finding(), NOW)
+        is OrchestrationEscalationReason.SCOPE_EXIT
     )
 
 

@@ -10,6 +10,7 @@ from auto_pm.contracts.orchestration import (
     OrchestrationEscalationReason,
     OrchestrationFinding,
 )
+from auto_pm.infrastructure.control_root_guard import authority_paths_covered
 
 
 class OrchestrationPolicy:
@@ -40,7 +41,7 @@ class OrchestrationPolicy:
             return OrchestrationEscalationReason.AUTHORITY_EXPIRED
         if finding.kind not in authority.allowed_child_work_kinds:
             return OrchestrationEscalationReason.UNAUTHORIZED_WORK_KIND
-        if not cls._paths_covered(finding.scope_paths, authority.scope_paths):
+        if not authority_paths_covered(finding.scope_paths, authority.scope_paths):
             return OrchestrationEscalationReason.SCOPE_EXIT
         if finding.requires_physical_or_safety_decision:
             return OrchestrationEscalationReason.PHYSICAL_OR_SAFETY_DECISION
@@ -84,10 +85,3 @@ class OrchestrationPolicy:
         if attempt_count >= authority.routing.max_auto_repair_attempts:
             return OrchestrationEscalationReason.REPAIR_BUDGET_EXHAUSTED
         return None
-
-    @staticmethod
-    def _paths_covered(paths: tuple[str, ...], roots: tuple[str, ...]) -> bool:
-        return all(
-            any(path == root or path.startswith(f"{root.rstrip('/')}/") for root in roots)
-            for path in paths
-        )

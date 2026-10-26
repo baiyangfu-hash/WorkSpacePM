@@ -80,6 +80,7 @@ from auto_pm.contracts.pm_facade import (
 from auto_pm.infrastructure.continuity_internal import codec as continuity_codec
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
+    authority_path_covered,
     authority_path_parts,
     clean_git_environment,
     governed_worktree_snapshot,
@@ -676,12 +677,10 @@ class ContinuityStore:
 
     @classmethod
     def _authority_path_covered(cls, path: str, roots: tuple[str, ...]) -> bool:
-        path_parts = cls._authority_path_key(path)
+        cls._normalize_authority_path(path)
         for root in roots:
-            root_parts = cls._authority_path_key(root)
-            if path_parts[: len(root_parts)] == root_parts:
-                return True
-        return False
+            cls._normalize_authority_path(root)
+        return authority_path_covered(path, roots)
 
     @classmethod
     def _authority_path_key(cls, raw: str) -> tuple[str, ...]:
