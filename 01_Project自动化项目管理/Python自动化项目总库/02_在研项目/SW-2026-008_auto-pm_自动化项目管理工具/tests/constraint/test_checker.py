@@ -51,3 +51,41 @@ class TestConstraintChecker:
 
         assert len(violations) >= 1
         assert violations[0].constraint_id == "CST-FILE-002"
+
+
+class TestVersionSuffixScopeCoversEveryProjectDocDirectory:
+    """CST-NAME-001 的检查范围：fnmatch 的 `**` 不能跨层，所以写成 `**/<目录>/*.md`（审计 242）。"""
+
+    @staticmethod
+    def _flagged(root: Path, relative: str, *, create: bool = True) -> bool:
+        target = root / relative
+        if create:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("# doc", encoding="utf-8")
+        violations = ConstraintChecker(root).check_file(target)
+        return any(v.constraint_id == "CST-NAME-001" for v in violations)
+
+    @pytest.mark.parametrize("directory", ["00_项目管理", "00_项目基础信息", "01_启动"])
+    def test_files_directly_under_the_directory_are_checked_when_root_is_the_project(
+        self, tmp_path: Path, directory: str
+    ) -> None:
+        assert self._flagged(tmp_path, f"{directory}/设计说明书_V2.0.md")
+        assert not self._flagged(tmp_path, f"{directory}/ok.md")
+
+    @pytest.mark.parametrize("directory", ["00_项目管理", "00_项目基础信息", "01_启动"])
+    def test_nested_files_are_checked(self, tmp_path: Path, directory: str) -> None:
+        assert self._flagged(tmp_path, f"{directory}/子目录/说明_V1.1.md")
+
+    @pytest.mark.parametrize("directory", ["00_项目管理", "00_项目基础信息", "01_启动"])
+    def test_projects_below_the_workspace_root_are_checked_too(
+        self, tmp_path: Path, directory: str
+    ) -> None:
+        """工作区根在仓库根、项目在下面几层时也要检查到（用户从仓库根运行的情形）。"""
+        assert self._flagged(tmp_path, f"组/DJ-2026-001/{directory}/说明_V3.0.md")
+
+    def test_the_execution_process_directory_stays_excluded(self, tmp_path: Path) -> None:
+        assert not self._flagged(tmp_path, "01_启动/03_执行过程/记录_V1.0.md")
+        assert not self._flagged(tmp_path, "组/DJ-2026-001/00_项目管理/03_执行过程/记录_V1.0.md")
+
+    def test_unrelated_directories_are_not_checked(self, tmp_path: Path) -> None:
+        assert not self._flagged(tmp_path, "docs/说明_V1.0.md")

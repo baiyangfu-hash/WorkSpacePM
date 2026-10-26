@@ -47,10 +47,3 @@ def test_python_tool_docs_do_not_describe_the_old_initiating_directory() -> None
         if "00_项目基础信息" in path.read_text(encoding="utf-8", errors="replace")
     ]
     assert stale == []
-
-
-def test_version_suffix_constraint_covers_the_initiating_directory() -> None:
-    text = (PROJECT / "auto_pm/domain/constraint/definitions/naming_no_version_suffix.yaml").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    assert '"01_启动/**/*.md"' in text

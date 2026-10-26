@@ -5,9 +5,9 @@ type: naming
 severity: error
 scope:
   patterns:
-    - "00_项目管理/**/*.md"
-    - "00_项目基础信息/**/*.md"
-    - "01_启动/**/*.md"
+    - "**/00_项目管理/*.md"
+    - "**/00_项目基础信息/*.md"
+    - "**/01_启动/*.md"
   exclude:
     - "**/03_执行过程/**"
 rules:
