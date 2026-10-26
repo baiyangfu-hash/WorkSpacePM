@@ -127,8 +127,6 @@ _CASES: list[tuple[str, Callable[[Path], object], type[Exception]]] = [
      git_hook_enforcer.StagedSnapshotError),
     ("hook_secret_scan", lambda p: git_hook_enforcer.find_staged_secrets(p),
      git_hook_enforcer.StagedSnapshotError),
-    ("hook_independent_staged_changes", lambda p: git_hook_enforcer.independent_staged_changes(p),
-     git_hook_enforcer.StagedSnapshotError),
     ("worktree_policy", lambda p: worktree_policy_service.WorktreePolicyService(p)._run_git("status"),
      worktree_policy_service.WorktreePolicyError),
 ]
@@ -149,3 +147,27 @@ def test_project_delete_guard_treats_hung_git_as_blocking(
     monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", _hang)
     blockers = project_delete_guard.uncommitted_blockers(tmp_path, tmp_path / "p")
     assert blockers and "超时回执" in blockers[0]
+
+
+@pytest.mark.parametrize("hung", ["ls-files", "diff-files", "rev-parse", "ls-tree"])
+def test_each_git_call_of_the_independent_staged_comparison_fails_closed_on_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hung: str
+) -> None:
+    """Only one subcommand hangs; the others run for real, so swallowing that one call's timeout turns this red."""
+    real_run = subprocess.run
+    for args in (["init", "-q"], ["config", "user.email", "t@example.invalid"], ["config", "user.name", "t"]):
+        real_run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    for args in (["add", "a.txt"], ["commit", "-q", "-m", "base"]):
+        real_run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    def hang_only(command: Any, *args: Any, **kwargs: Any) -> Any:
+        if hung in command:
+            raise subprocess.TimeoutExpired("git", kwargs["timeout"])
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", hang_only)
+    with pytest.raises(git_hook_enforcer.StagedSnapshotError, match="超时回执") as caught:
+        git_hook_enforcer.independent_staged_changes(tmp_path)
+    assert hung in str(caught.value)
+
