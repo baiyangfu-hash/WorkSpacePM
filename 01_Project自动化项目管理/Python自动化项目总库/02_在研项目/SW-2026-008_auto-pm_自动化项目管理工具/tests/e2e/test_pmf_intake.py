@@ -597,6 +597,7 @@ from auto_pm.application.core.pm_facade_service import PmFacadeService
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PmIntent
 from tests.plan_checklist_support import full_checklist
+from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 facade = PmFacadeService(sys.argv[1])
 card = facade.create_planning_scope_card(
     PmIntent(subject_project_id=sys.argv[3], request_id=sys.argv[2],
@@ -605,6 +606,7 @@ card = facade.create_planning_scope_card(
     execution_grant=PlanningExecutionGrant(adapter=ExecutionAdapterKind.CODEX,
         approved_model='gpt-approved', declared_dirty_paths=('auto_pm/example.py',),
         plan_checklist=full_checklist()),
+    classification=LEGACY_EQUIVALENT_FILING,
 )
 print(card.model_dump_json())
 """

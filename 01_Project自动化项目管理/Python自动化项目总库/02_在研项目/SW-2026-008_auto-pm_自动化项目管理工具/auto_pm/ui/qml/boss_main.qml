@@ -77,9 +77,9 @@ ApplicationWindow {
         actionAlert: root.actionAlert
         onActionAlertDismissed: root.clearActionAlert(root.actionAlertKey)
         onDraftInputChanged: root.planningDraft = null
-        onPlanningDraftRequested: function(projectId, objective, acceptanceText) {
+        onPlanningDraftRequested: function(projectId, objective, acceptanceText, kind) {
             var response = pmCockpitBridge.createPlanningDraft(
-                projectId, objective, acceptanceText
+                projectId, objective, acceptanceText, kind
             )
             root.statusMessage = response.message || "草稿未保存。"
             root.planningDraft = response.success ? response.draft : null

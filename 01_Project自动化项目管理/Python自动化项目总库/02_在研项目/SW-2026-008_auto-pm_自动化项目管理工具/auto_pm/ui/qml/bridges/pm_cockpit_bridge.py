@@ -10,6 +10,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
+from auto_pm.contracts.intake import IntakeKind
 from auto_pm.contracts.pm_cockpit import (
     PmCockpitCompletionState,
     PmCockpitEvidence,
@@ -209,7 +210,7 @@ class PmCockpitBridge(QObject):
             if control_root
             else PmFacadeService(workspace_root)
         )
-        self._planning_input: tuple[str, str, tuple[str, ...]] | None = None
+        self._planning_input: tuple[str, str, tuple[str, ...], str] | None = None
         self._planning_request_id: str | None = None
         self._thread_pool = thread_pool or QThreadPool.globalInstance()
         self._start_workers: dict[str, _StartWorker] = {}
@@ -324,11 +325,11 @@ class PmCockpitBridge(QObject):
             return {"success": False, "message": str(error), "evidence": {}}
         return {"success": True, "evidence": evidence.model_dump(mode="json")}
 
-    @Slot(str, str, str, result="QVariant")
+    @Slot(str, str, str, str, result="QVariant")
     def createPlanningDraft(
-        self, project_id: str, objective: str, acceptance_text: str
+        self, project_id: str, objective: str, acceptance_text: str, kind: str
     ) -> dict[str, Any]:
-        """Persist only a validated PRE_AUTH draft; keep its request key internal."""
+        """Persist only a validated, classified PRE_AUTH draft; keep its request key internal."""
         if self._closing:
             return {"success": False, "message": "驾驶舱正在关闭。"}
         project_id = project_id.strip()
@@ -337,10 +338,14 @@ class PmCockpitBridge(QObject):
         if not project_id or not objective or not criteria:
             return {"success": False, "message": "请选择项目，并填写目标和明确验收。"}
         try:
+            intake_kind = IntakeKind(kind.strip().upper())
+        except ValueError:
+            return {"success": False, "message": "请先选择这件事的类型：迭代、缺陷、紧急或技术债。"}
+        try:
             projects = self._service.snapshot().projects
             if project_id not in {card.project_id for card in projects}:
                 return {"success": False, "message": "所选项目不在工作空间项目清单中。"}
-            current_input = (project_id, objective, criteria)
+            current_input = (project_id, objective, criteria, intake_kind.value)
             request_id = self._planning_request_id
             if current_input != self._planning_input or request_id is None:
                 request_id = f"REQ-COCKPIT-{uuid4().hex.upper()}"
@@ -352,7 +357,7 @@ class PmCockpitBridge(QObject):
             )
             self._planning_input = current_input
             self._planning_request_id = request_id
-            draft = self._facade.create_planning_draft(intent)
+            draft = self._facade.create_classified_planning_draft(intent, intake_kind)
         except (PmCockpitError, PmFacadeError, ValidationError, OSError, ValueError) as error:
             return {"success": False, "message": f"草稿未保存：{error}"}
         return {
