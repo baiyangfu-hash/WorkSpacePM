@@ -50,17 +50,11 @@ from tests.core.test_pm_facade_service import (
     _setup,
     _verified_acceptance_ready,
 )
+from tests.git_support import run_git
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    return run_git(root, *args)
 
 
 def _git_root(root: Path) -> None:

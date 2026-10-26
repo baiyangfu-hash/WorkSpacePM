@@ -33,6 +33,7 @@ from tests.core.test_continuity_execution_service import (
     _start,
     _start_evidence,
 )
+from tests.git_support import git_do
 
 ORIGINAL_DECISION = "DEC-20260910-A2TARGT1"
 FENCE_DECISION = "DEC-20260911-5C37A985"
@@ -40,7 +41,7 @@ RECOVERY_TOKEN = "recovery-secret"
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    git_do(root, *args)
 
 
 def _legacy_fence_ready(

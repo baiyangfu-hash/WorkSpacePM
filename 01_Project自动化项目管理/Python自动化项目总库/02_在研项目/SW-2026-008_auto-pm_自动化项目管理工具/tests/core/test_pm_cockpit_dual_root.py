@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -15,16 +14,13 @@ from auto_pm.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.pm_facade import PmIntent
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from tests.git_support import git_do
 
 PROJECT = "SW-2026-008"
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", "-C", str(root), "-c", "user.name=Dual Root", "-c", "user.email=dual@example.invalid", *args],
-        check=True,
-        capture_output=True,
-    )
+    git_do(root, *args, config=['user.name=Dual Root', 'user.email=dual@example.invalid'])
 
 
 def _roots(tmp_path: Path) -> tuple[Path, Path]:

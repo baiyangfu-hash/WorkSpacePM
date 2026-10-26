@@ -35,6 +35,7 @@ from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PmIntent
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 from tests.core.test_pm_run_e2e import NOT_VERIFIED_SENTENCE, VERIFIED_SENTENCE, _Env
+from tests.git_support import git_out
 from tests.plan_checklist_support import full_checklist
 from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
@@ -66,11 +67,7 @@ Mutation = Callable[[dict[str, str]], dict[str, str]]
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), "-c", "core.quotepath=false", *arguments],
-        check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    return result.stdout.strip()
+    return git_out(root, *arguments, config=['core.quotepath=false'])
 
 
 @pytest.fixture(scope="module")

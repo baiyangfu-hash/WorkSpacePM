@@ -26,6 +26,7 @@ import auto_pm
 from auto_pm.contracts.continuity import RunState, WorkKind
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.core.test_continuity_execution_service import Clock, _checkpoint, _start
+from tests.git_support import git_do
 from tests.plan_checklist_support import checklist_args, full_checklist
 
 LAUNCHER = """from auto_pm.cli.__main__ import cli
@@ -40,7 +41,7 @@ GUARDED = ("work_items", "run_items", "execution_leases", "checkpoints", "missio
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    git_do(root, *args)
 
 
 def _specs(root: Path) -> None:
