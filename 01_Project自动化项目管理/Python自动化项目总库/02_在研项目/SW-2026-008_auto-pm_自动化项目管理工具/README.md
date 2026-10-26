@@ -255,7 +255,7 @@ uv run pre-commit run --all-files
 | `AUTO_PM_COCKPIT_APPROVER` | 驾驶舱里批准范围卡时记录的批准人姓名 | 非空字符串；空值按未设 | 未设：驾驶舱拒绝批准并提示先设置 |
 | `AUTO_PM_AUTHOR` | 新建项目框架、创建项目首张变更单时记录的主设计人/申请人；两处读法不同：项目框架（`project_service`）里空串、空白都按未设，工作台建单（`workbench_use_cases`）里空串会原样使用，不会回退 | 非空字符串；工作台建单那处不要设成空串 | 项目框架处未设：依次取系统登录用户名，仍取不到记为 `unknown`；工作台建单处未设：取系统登录名 |
 | `AUTO_PM_EXECUTION_LEASE_TOKEN` | 驾驶舱启动执行端时放进环境的租约令牌，执行命令读取一次后立即从环境里移除；手工不要设 | 驾驶舱生成的令牌 | 未设：需要令牌的命令报“环境变量不存在” |
-| `AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS` | 验收时每道进程内质量门（Python、PLC）的墙钟时限，超时判该门“未运行”，不会卡住整个验证 | 大于 0 的数字；空、非数字、0 或负数一律改用默认值 | 1800 秒 |
+| `AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS` | 验收时每道进程内质量门（Python、PLC）的墙钟时限，超时判该门“未运行”，不会卡住整个验证 | 大于 0 的有限数字；空、非数字、0、负数、`nan`、`inf`、`1e400` 一律改用默认值（不会变成“永不超时”） | 1800 秒 |
 | `AUTO_PM_SIEMENS_LSP` | 指定 Siemens 语言服务可执行文件，PLC 检查优先用它 | 可执行文件的路径；路径不是文件则视为没找到，不会再往下找 | 未设：在 `~/.vscode/extensions` 下找版本号最高的 Siemens 语言服务插件；找不到算“未验证” |
 | `AUTO_PM_AUDIT_DIR` | 审计日志目录 | 目录路径；`off`、`disabled`、`none`、`0`、`false` 或空串表示关闭审计 | 未设：`~/.auto-pm/audit/`；目录建不出来时静默关闭审计，不影响退出码 |
 
