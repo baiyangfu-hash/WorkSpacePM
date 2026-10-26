@@ -780,3 +780,24 @@ def test_td100_a_file_type_change_is_a_staged_change_with_status_t(tmp_path: Pat
     _git(cand, "add", SERVICE)
     (entry,) = get_staged_snapshot(cand).entries
     assert (entry.path, entry.status, entry.mode) == (SERVICE, "T", "120000")
+
+
+def test_td100_intent_to_add_files_are_not_part_of_the_commit_and_do_not_break_it(tmp_path: Path) -> None:
+    """``git add -N`` 的占位条目不进提交：快照不含它，也不能因为它与 diff --cached 对不上而拒绝整个提交。"""
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    placeholder = cand / "01_Project/SW-2026-008/src/later.py"
+    placeholder.write_text("x = 1\n", encoding="utf-8")
+    _git(cand, "add", "-N", str(placeholder.relative_to(cand)))
+    (cand / SERVICE).write_text("def changed():\n    return 6\n", encoding="utf-8")
+    _git(cand, "add", SERVICE)
+    assert [e.path for e in get_staged_snapshot(cand).entries] == [SERVICE]
+    assert set(independent_staged_changes(cand)) == {SERVICE}
+
+
+def test_td100_a_really_staged_empty_file_is_still_checked(tmp_path: Path) -> None:
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    empty = cand / "01_Project/SW-2026-008/src/empty.py"
+    empty.write_text("", encoding="utf-8")
+    _git(cand, "add", str(empty.relative_to(cand)))
+    assert [e.path for e in get_staged_snapshot(cand).entries] == ["01_Project/SW-2026-008/src/empty.py"]
+    assert set(independent_staged_changes(cand)) == {"01_Project/SW-2026-008/src/empty.py"}

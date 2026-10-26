@@ -306,6 +306,10 @@ def independent_staged_changes(workspace_root: Path) -> dict[str, tuple[str, str
     首次提交（还没有 HEAD）时 HEAD 树视为空。
     """
     index_map = _tree_map(_git_z_lines(workspace_root, ["ls-files", "--stage", "-z"]), staged_index=True)
+    # ``git add -N`` 登记的路径在 index 里是空 blob 占位，commit 不会带上它，``diff --cached`` 也不列；
+    # 它在 ``diff-files`` 里恒为 A（工作区有、index 无内容）。真正暂存的空文件在 diff-files 里不是 A。
+    for entry in _git_z_lines(workspace_root, ["diff-files", "--raw", "-z", "--no-abbrev", "--diff-filter=A"])[1::2]:
+        index_map.pop(_normalise_git_path(entry), None)
     has_head = (
         subprocess.run(
             ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
