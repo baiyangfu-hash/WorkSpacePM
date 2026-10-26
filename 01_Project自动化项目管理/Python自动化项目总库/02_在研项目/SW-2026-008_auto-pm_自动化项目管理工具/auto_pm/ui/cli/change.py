@@ -486,11 +486,13 @@ def cmd_create(
 @click.argument("project_id")
 @click.option("--ledger-check", "ledger_check", is_flag=True, default=False,
               help="CHG-108 缺陷3: 对账门禁——校验变更单文件 vs 台账记录一致性，差异时报错退出")
+@click.option("--verbose", is_flag=True, help="提交跟踪警告列出全部文件（默认每类只列前 10 个）")
 @click.pass_context
 def cmd_verify(
     ctx: click.Context,
     project_id: str,
     ledger_check: bool,
+    verbose: bool,
 ) -> None:
     """变更单验证（CHG-108 缺陷 3：对账门禁）
 
@@ -521,8 +523,11 @@ def cmd_verify(
     console.print(f"[bold cyan]═══ 变更单对账门禁: {project_id} ═══[/bold cyan]")
     console.print(f"  [cyan]结果:[/cyan] {diff.summary()}")
 
+    from auto_pm.ui.cli.ledger import print_chg_tracking_warning
+
     if diff.is_clean:
         console.print("[green]✅ 门禁通过: 台账与变更单文件一致[/green]")
+        print_chg_tracking_warning(project_path, verbose=verbose)
         ctx.exit(0)
     else:
         console.print("[red]❌ 门禁失败: 检测到差异[/red]")
@@ -533,6 +538,7 @@ def cmd_verify(
         if diff.status_mismatches:
             console.print(f"  [red]状态不一致 {len(diff.status_mismatches)} 条[/red]")
         console.print("[dim]提示: 运行 `auto-pm ledger reconcile <PID> --fix` 自动修复缺失行和状态不一致[/dim]")
+        print_chg_tracking_warning(project_path, verbose=verbose)
         ctx.exit(2)
 
 
