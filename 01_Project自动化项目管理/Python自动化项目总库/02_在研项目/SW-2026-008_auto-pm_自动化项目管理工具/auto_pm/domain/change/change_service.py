@@ -264,7 +264,7 @@ class ChangeService:
                 if change_number and existing_cr.project_id == project_id:
                     existing_cr.file_path = file_path
                     return existing_cr
-                if existing_cr.status in ("closed", "archived"):
+                if existing_cr.status in ("closed", "archived", "abandoned"):
                     raise ValueError(
                         f"变更单文件已存在且状态为 {existing_cr.status}（终态），禁止覆盖: {file_path}"
                     )
@@ -704,7 +704,7 @@ class ChangeService:
         content = self._editor.update_status_field(content, new_status)
 
         # 2. 更新相关章节记录
-        if new_status in ("approved", "conditionally_approved", "rejected"):
+        if new_status in ("approved", "conditionally_approved", "rejected", "abandoned"):
             # 审批环节名称使用中文语义化标签（对齐 STATUS_LABELS）
             from auto_pm.change.constants import STATUS_LABELS
             status_label = STATUS_LABELS.get(new_status, new_status)
@@ -747,7 +747,7 @@ class ChangeService:
                 status_label = _LEDGER_STATUS_MAP.get(new_status, "🔄进行中")
                 # CHG-085：流转到 completed/closed/archived 时回写完成日期
                 complete_date = ""
-                if new_status in ("completed", "closed", "archived"):
+                if new_status in ("completed", "closed", "archived", "abandoned"):
                     complete_date = datetime.date.today().isoformat()
                 self._get_ledger_updater().update_status(
                     ledger_path,

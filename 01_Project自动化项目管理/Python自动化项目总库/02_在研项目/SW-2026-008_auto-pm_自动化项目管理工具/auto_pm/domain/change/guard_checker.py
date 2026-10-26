@@ -95,6 +95,14 @@ class TransitionGuardChecker:
             if not comment:
                 violations.append("驳回必须附原因(comment)")
 
+        elif target_status == "abandoned":
+            # [B10] 未开始实施的变更单废弃: 合法来源由 STATUS_FLOW 限定（implementing 及以后不可废弃）
+            # 门禁: 审批人+原因非空（废弃不可逆，原因写进审批记录）
+            if not approver:
+                violations.append("审批人(approver)不能为空")
+            if not comment:
+                violations.append("废弃必须附原因(comment)")
+
         elif target_status == "implementing":
             # [第四章] 两条路径进入 implementing:
             #   路径A: approved/conditionally_approved → implementing（首次实施）

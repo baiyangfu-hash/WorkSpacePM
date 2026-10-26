@@ -127,7 +127,7 @@ Rectangle {
         var statusOrder = [
             "draft", "submitted", "under_review", "approved",
             "implementing", "pending_acceptance", "accepting",
-            "completed", "closed", "conditionally_approved", "rejected"
+            "completed", "closed", "conditionally_approved", "rejected", "abandoned"
         ]
         var statusLabels = {
             "draft": "草稿",
@@ -141,6 +141,7 @@ Rectangle {
             "accepting": "验收中",
             "completed": "已完成",
             "closed": "已关闭",
+            "abandoned": "已废弃",
         }
         var rendered = {}
         for (var n = 0; n < statusOrder.length; n++) {

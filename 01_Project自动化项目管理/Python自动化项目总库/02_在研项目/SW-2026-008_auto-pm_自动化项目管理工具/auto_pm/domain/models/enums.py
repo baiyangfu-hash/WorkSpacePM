@@ -41,6 +41,7 @@ ChangeStatus = Literal[
     "completed",
     "closed",
     "archived",
+    "abandoned",
 ]
 
 # 技术领域（§3.1，"" 表示未设置）

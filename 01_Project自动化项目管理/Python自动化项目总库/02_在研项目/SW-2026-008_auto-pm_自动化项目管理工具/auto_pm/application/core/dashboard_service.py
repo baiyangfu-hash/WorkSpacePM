@@ -116,7 +116,7 @@ class DashboardService:
             return None
 
         active_changes = [
-            c for c in changes if c.status not in ("completed", "closed")
+            c for c in changes if c.status not in ("completed", "closed", "abandoned")
         ]
         if not active_changes:
             return None
