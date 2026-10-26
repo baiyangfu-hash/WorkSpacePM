@@ -13,14 +13,11 @@ from auto_pm.infrastructure.control_root_guard import (
     _git_optional_output,
     clean_git_environment,
 )
+from tests.git_support import git_do
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid", *args],
-        check=True,
-        capture_output=True,
-    )
+    git_do(root, *args, config=['user.name=Test', 'user.email=test@example.invalid'])
 
 
 @pytest.fixture

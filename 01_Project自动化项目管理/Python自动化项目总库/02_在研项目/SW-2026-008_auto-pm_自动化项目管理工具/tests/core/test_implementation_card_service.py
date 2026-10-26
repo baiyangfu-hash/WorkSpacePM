@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -27,12 +26,11 @@ from auto_pm.contracts.implementation_card import (
     Outcomes,
     StopLines,
 )
+from tests.git_support import git_out
 
 
 def git(root: Path, *args: str) -> str:
-    result = subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True,
-                            text=True, encoding="utf-8", errors="replace")
-    return result.stdout.strip()
+    return git_out(root, *args)
 
 
 @pytest.fixture

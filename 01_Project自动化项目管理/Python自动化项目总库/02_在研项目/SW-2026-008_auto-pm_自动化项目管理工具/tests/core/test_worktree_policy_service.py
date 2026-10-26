@@ -17,17 +17,11 @@ from auto_pm.infrastructure.control_root_guard import (
     require_governed_worktree,
     require_safe_workspace_path,
 )
+from tests.git_support import run_git
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    return run_git(root, *args)
 
 
 def _repository(root: Path) -> None:

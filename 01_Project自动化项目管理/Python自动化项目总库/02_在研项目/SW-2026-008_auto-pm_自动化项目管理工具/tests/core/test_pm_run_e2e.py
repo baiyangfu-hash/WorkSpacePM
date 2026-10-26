@@ -7,7 +7,6 @@ import logging
 import re
 import secrets
 import sqlite3
-import subprocess
 import sys
 import textwrap
 from contextlib import closing
@@ -32,6 +31,7 @@ from auto_pm.contracts.pm_facade import (
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
+from tests.git_support import git_out
 from tests.plan_checklist_support import full_checklist
 from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
@@ -64,14 +64,7 @@ GOOD_TESTS = (
 
 
 def _git(root: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    ).stdout.strip()
+    return git_out(root, *args)
 
 
 def _build_workspace(root: Path) -> None:
