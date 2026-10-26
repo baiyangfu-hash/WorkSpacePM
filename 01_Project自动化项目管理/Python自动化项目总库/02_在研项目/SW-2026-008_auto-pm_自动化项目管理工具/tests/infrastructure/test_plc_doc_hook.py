@@ -9,6 +9,7 @@ import pytest
 from auto_pm.plc import doc_consistency as dc
 
 from auto_pm.infrastructure import git_hook_enforcer, plc_doc_hook
+from tests.git_support import run_git
 from tests.plc.test_doc_consistency import IFC_DOC, VAR_DOC, build
 
 PLC_ROOT = "0100_PLC自动化/DJ-TEST-001"
@@ -18,12 +19,10 @@ VAR = f"{PLC_ROOT}/02_PLC程序/程序文档/{dc.VAR_DOC_NAME}"
 
 
 def git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=tester", "-c", "user.email=t@example.test", "-c", "core.autocrlf=false",
-         "-c", "core.quotepath=false", *args],
-        check=True, capture_output=True, text=True, encoding="utf-8",
-    )
-    return result.stdout
+    return run_git(
+        repo, *args,
+        config=["user.name=tester", "user.email=t@example.test", "core.autocrlf=false", "core.quotepath=false"],
+    ).stdout
 
 
 def read(repo: Path, rel: str) -> str:

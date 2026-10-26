@@ -25,6 +25,7 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     independent_staged_changes,
     is_excluded_from_production,
 )
+from tests.git_support import git_out
 
 SW008_ROOT = (
     "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/"
@@ -78,22 +79,7 @@ def test_control_root_mapping_rejects_unknown_project_id(
 
 
 def _git(cwd: Path, *args: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        # CalledProcessError 的文字里没有 stderr，CI 上偶发的 git 失败（如 worktree add 返回 128）就查不出原因。
-        raise RuntimeError(
-            f"git {' '.join(args)} 失败（退出码 {exc.returncode}，目录 {cwd}）:\n{exc.stderr}"
-        ) from exc
-    return result.stdout.strip()
+    return git_out(cwd, *args)
 
 
 def test_fixture_git_failure_carries_the_git_error_text(tmp_path: Path) -> None:
@@ -1002,3 +988,67 @@ def test_both_hooks_refuse_the_commit_when_the_staging_area_cannot_be_read(
     assert "无法读取 Git 暂存区" in capsys.readouterr().out
     assert enforce_commit_msg(not_a_repo, msg) == 1
     assert "无法读取 Git 暂存区" in capsys.readouterr().out
+
+
+# ---- TD-SW008-087 / TD-115：忽略规则扫描走真实 preflight 入口，拦截与超时都必须拒绝 ----
+
+
+def _ignore_preflight_scene(tmp_path: Path) -> tuple[Path, Path, Path]:
+    cand, ctrl, msg = _make_dual_root_fixture(
+        tmp_path, candidate_has_staged_code=False, candidate_ledger_clean=True
+    )
+    (cand / ".gitignore").write_text("*.zip\n", encoding="utf-8")
+    _git(cand, "add", ".gitignore")
+    _git(cand, "commit", "-qm", "ignore rules")
+    _no_chg_message(msg)
+    return cand, ctrl, msg
+
+
+def _ignore_preflight(cand: Path, ctrl: Path, msg: Path):  # type: ignore[no-untyped-def]
+    from auto_pm.cli.__main__ import cli
+    from click.testing import CliRunner
+
+    return CliRunner().invoke(
+        cli, ["-w", str(cand), "--control-root", str(ctrl), "git-hook", "preflight", str(msg)]
+    )
+
+
+def test_td115_preflight_entry_refuses_a_force_added_ignored_file(tmp_path: Path) -> None:
+    """Through ``git-hook preflight`` (the entry the real hook runs), not just the enforcer function."""
+    cand, ctrl, msg = _ignore_preflight_scene(tmp_path)
+    (cand / "pack.zip").write_text("x", encoding="utf-8")
+    _git(cand, "add", "-f", "pack.zip")
+    result = _ignore_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "新增文件命中仓库忽略规则" in result.output and "pack.zip" in result.output
+
+
+def test_td115_preflight_entry_lets_a_plain_file_through_the_ignore_scan(tmp_path: Path) -> None:
+    cand, ctrl, msg = _ignore_preflight_scene(tmp_path)
+    (cand / "notes.txt").write_text("x", encoding="utf-8")
+    _git(cand, "add", "notes.txt")
+    result = _ignore_preflight(cand, ctrl, msg)
+    assert "命中仓库忽略规则" not in result.output and "忽略规则扫描失败" not in result.output
+    assert result.exit_code == 0, result.output
+
+
+def test_td115_preflight_entry_refuses_when_the_ignore_scan_hangs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hung ``git check-ignore`` must refuse the commit with the timeout receipt, never pass it."""
+    import subprocess as sp
+
+    cand, ctrl, msg = _ignore_preflight_scene(tmp_path)
+    (cand / "notes.txt").write_text("x", encoding="utf-8")
+    _git(cand, "add", "notes.txt")
+    real_run = sp.run
+
+    def hang_on_check_ignore(command: list[str], *args: object, **kwargs: object) -> object:
+        if "check-ignore" in command:
+            raise sp.TimeoutExpired(command, kwargs["timeout"])  # type: ignore[arg-type]
+        return real_run(command, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", hang_on_check_ignore)
+    result = _ignore_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "忽略规则扫描失败" in result.output and "超时回执" in result.output

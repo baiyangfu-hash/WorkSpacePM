@@ -22,21 +22,14 @@ from auto_pm.application.core.agent_worktree_service import (
     StationRefusedError,
 )
 from auto_pm.ui.cli.__main__ import cli
+from tests.git_support import git_out
 
 AGENT_MARKER_KEYS = ("AUTO_PM_AGENT", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
 IDENTITY = ("-c", "user.name=Station Test", "-c", "user.email=station@example.invalid")
 
 
 def git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(cwd), *IDENTITY, *args],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    return result.stdout.strip()
+    return git_out(cwd, *IDENTITY, *args)
 
 
 def commit(cwd: Path, name: str, text: str = "x\n") -> str:

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import stat
-import subprocess
 from pathlib import Path, PurePosixPath
+
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 
 class ControlRootGuardError(RuntimeError):
@@ -51,12 +52,12 @@ def authority_path_parts(raw: str, *, windows: bool | None = None) -> tuple[str,
 
 
 def _git_output(root: Path, *args: str) -> str:
-    result = subprocess.run(
+    result = run_git_bounded_text(
         ["git", "-C", str(root), *args],
+        default_timeout=60.0,
+        error_cls=ControlRootGuardError,
+        where=root,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
         env=clean_git_environment(),
     )
@@ -72,12 +73,12 @@ def _git_output(root: Path, *args: str) -> str:
 
 
 def _git_optional_output(root: Path, *args: str) -> str:
-    result = subprocess.run(
+    result = run_git_bounded_text(
         ["git", "-C", str(root), *args],
+        default_timeout=60.0,
+        error_cls=ControlRootGuardError,
+        where=root,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
         env=clean_git_environment(),
     )

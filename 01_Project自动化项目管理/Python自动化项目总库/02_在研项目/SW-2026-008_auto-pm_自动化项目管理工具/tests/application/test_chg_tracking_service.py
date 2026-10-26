@@ -10,12 +10,13 @@ import pytest
 from click.testing import CliRunner, Result
 
 from auto_pm.application.core.chg_tracking_service import check_project_chg_tracking
+from tests.git_support import git_do
 
 CHG = "CHG-SCPT-2026-001.md"
 
 
 def _git(root: Path, *arguments: str) -> None:
-    subprocess.run(["git", "-C", str(root), *arguments], check=True, capture_output=True)
+    git_do(root, *arguments)
 
 
 def _repo(tmp_path: Path) -> Path:

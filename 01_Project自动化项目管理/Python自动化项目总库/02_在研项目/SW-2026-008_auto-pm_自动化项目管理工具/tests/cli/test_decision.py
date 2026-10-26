@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,10 +10,11 @@ from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.domain.change.decision_service import DecisionService, DecisionValidationError
+from tests.git_support import git_do
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    git_do(root, *args)
 
 
 def _approved_repository(root: Path) -> None:

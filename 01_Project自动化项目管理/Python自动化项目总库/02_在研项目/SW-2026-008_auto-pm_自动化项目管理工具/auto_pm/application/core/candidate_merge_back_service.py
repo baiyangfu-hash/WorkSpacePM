@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -30,6 +29,7 @@ from auto_pm.application.core.evidence_collection_service import (
 )
 from auto_pm.contracts.continuity import CheckpointItem, RunItem
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from auto_pm.infrastructure.git_timeout import run_git_bounded
 
 
 class CandidateMergeBackError(RuntimeError):
@@ -72,8 +72,11 @@ class CandidateMergeBackService:
         return tuple(sorted(set(changed) | set(untracked)))
 
     def _git_z(self, arguments: list[str]) -> tuple[str, ...]:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "-C", str(self._control_root), *arguments],
+            default_timeout=60.0,
+            error_cls=CandidateMergeBackError,
+            where=self._control_root,
             capture_output=True,
             check=False,
             env=clean_git_environment(),
@@ -147,8 +150,11 @@ class CandidateMergeBackService:
         return observed is not None and observed == baseline
 
     def _git(self, arguments: list[str], *, stdin: bytes | None = None) -> str | None:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "-C", str(self._control_root), *arguments],
+            default_timeout=60.0,
+            error_cls=CandidateMergeBackError,
+            where=self._control_root,
             input=stdin if stdin is not None else b"",
             capture_output=True,
             check=False,

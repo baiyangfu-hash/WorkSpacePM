@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from click.testing import CliRunner
 
 from auto_pm.ui.cli.implementation_card import implementation_card_group
+from tests.git_support import git_out
 
 
 def test_create_then_validate_is_read_only(tmp_path: Path) -> None:
@@ -67,11 +68,9 @@ def _markdown_card(root: Path, baseline: str, body: str = "") -> Path:
 
 
 def _control_root(root: Path) -> str:
-    import subprocess
 
     def git(*args: str) -> str:
-        return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace").stdout.strip()
+        return git_out(root, *args)
 
     git("init")
     (root / "README.md").write_text("baseline\n", encoding="utf-8")

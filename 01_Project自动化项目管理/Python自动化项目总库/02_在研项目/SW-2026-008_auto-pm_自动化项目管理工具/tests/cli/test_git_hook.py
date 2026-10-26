@@ -20,6 +20,7 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     enforce_pre_commit,
     enforce_release_ledger_gate,
 )
+from tests.git_support import git_do
 
 
 def test_git_hook_install_uses_root_active_release_launcher(tmp_path: Path) -> None:
@@ -322,15 +323,7 @@ _FIXTURE_CHG_ID = "CHG-SCPT-2026-170"
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", *args],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    git_do(repo, *args)
 
 
 def _fixture_chg_content(chg_id: str, project_id: str) -> str:

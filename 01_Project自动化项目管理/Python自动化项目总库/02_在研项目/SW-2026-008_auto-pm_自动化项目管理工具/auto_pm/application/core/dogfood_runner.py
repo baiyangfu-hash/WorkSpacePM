@@ -11,6 +11,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+
+_VENV_TIMEOUT_SECONDS = 600.0
+
 
 class DogfoodIsolationError(RuntimeError):
     """Raised when a candidate is outside the allowed dogfood boundary."""
@@ -250,14 +254,20 @@ class DogfoodRunner:
 
     def _create_environment(self, candidate: Path) -> str:
         environment = candidate / ".venv"
-        result = subprocess.run(
-            [sys.executable, "-m", "venv", str(environment)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "venv", str(environment)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=_VENV_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise DogfoodIsolationError(
+                f"创建候选独立环境超时：超过 {_VENV_TIMEOUT_SECONDS:g} 秒被终止，不算数"
+            ) from error
         if result.returncode != 0:
             raise DogfoodIsolationError(
                 f"创建候选独立环境失败: {result.stderr.strip() or result.stdout.strip()}"
@@ -299,12 +309,12 @@ class DogfoodRunner:
         return path.replace("\\", "/")
 
     def _run_git(self, path: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        return run_git_bounded_text(
             ["git", "-C", str(path), *args],
+            default_timeout=300.0,
+            error_cls=DogfoodIsolationError,
+            where=path,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=False,
         )
 

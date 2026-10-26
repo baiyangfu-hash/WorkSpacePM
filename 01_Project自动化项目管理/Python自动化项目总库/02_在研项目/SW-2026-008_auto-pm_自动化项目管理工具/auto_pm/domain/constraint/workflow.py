@@ -19,6 +19,8 @@ from auto_pm.constraint.guard import FileGuard
 from auto_pm.constraint.models import Workflow, WorkflowRun, WorkflowStep
 from auto_pm.logging.audit import audit_log
 
+_COMMAND_TIMEOUT_SECONDS = 300.0
+
 
 class WorkflowEngine:
     """工作流引擎"""
@@ -156,9 +158,18 @@ class WorkflowEngine:
             if cmd:
                 if file_path:
                     cmd = cmd.replace("{file}", str(file_path))
-                completed = subprocess.run(
-                    cmd, shell=True, cwd=str(self._workspace_root), capture_output=True
-                )
+                try:
+                    completed = subprocess.run(
+                        cmd,
+                        shell=True,
+                        cwd=str(self._workspace_root),
+                        capture_output=True,
+                        timeout=_COMMAND_TIMEOUT_SECONDS,
+                    )
+                except subprocess.TimeoutExpired as error:
+                    raise RuntimeError(
+                        f"命令执行超时：超过 {_COMMAND_TIMEOUT_SECONDS:g} 秒被终止: {cmd}"
+                    ) from error
                 if completed.returncode != 0:
                     stderr_msg = completed.stderr.decode("utf-8", errors="replace")
                     raise RuntimeError(

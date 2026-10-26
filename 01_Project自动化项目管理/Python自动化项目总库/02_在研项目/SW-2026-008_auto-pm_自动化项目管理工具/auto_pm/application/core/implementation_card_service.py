@@ -7,7 +7,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import tempfile
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -33,6 +32,7 @@ from auto_pm.infrastructure.control_root_guard import (
     require_governed_worktree,
     require_safe_workspace_path,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 
 class ImplementationCardError(RuntimeError):
@@ -218,9 +218,12 @@ class ImplementationCardService:
 
     @staticmethod
     def _git(worktree: Path, *args: str) -> str:
-        result = subprocess.run(
-            ["git", "-C", str(worktree), *args], capture_output=True, text=True,
-            encoding="utf-8", errors="replace", check=False, env=clean_git_environment(),
+        result = run_git_bounded_text(
+            ["git", "-C", str(worktree), *args],
+            default_timeout=60.0,
+            error_cls=ImplementationCardError,
+            where=worktree, capture_output=True,
+            check=False, env=clean_git_environment(),
         )
         if result.returncode or result.stderr.strip() or "\ufffd" in result.stdout:
             raise ImplementationCardError("Git fact collection failed")

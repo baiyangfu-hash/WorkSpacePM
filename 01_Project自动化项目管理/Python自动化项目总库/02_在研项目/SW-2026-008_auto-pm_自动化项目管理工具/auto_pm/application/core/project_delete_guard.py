@@ -16,6 +16,7 @@ from pathlib import Path
 
 from auto_pm.contracts.continuity import RunState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 RECYCLE_RELATIVE_DIR = Path(".auto-pm") / "recycle"
 _TERMINAL_RUN_STATES = frozenset({RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED})
@@ -54,17 +55,17 @@ def uncommitted_blockers(workspace_root: str | Path, project_path: str | Path) -
     """项目目录里没提交的改动（含未跟踪文件）；Git 读不出来也算挡住。"""
 
     try:
-        done = subprocess.run(
+        done = run_git_bounded_text(
             ["git", "status", "--porcelain", "--untracked-files=all", "--", str(project_path)],
+            default_timeout=60.0,
+            error_cls=ProjectDeleteError,
+            where=workspace_root,
             cwd=str(workspace_root),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=False,
             stdin=subprocess.DEVNULL,
         )
-    except OSError as error:
+    except (OSError, ProjectDeleteError) as error:
         return [f"读不出 Git 状态，无法确认有没有没提交的改动：{error}"]
     if done.returncode != 0:
         return [f"读不出 Git 状态，无法确认有没有没提交的改动：{done.stderr.strip()}"]

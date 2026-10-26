@@ -22,13 +22,14 @@ import auto_pm.ui.cli.pm_handoff as pm_handoff_cli
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.infrastructure import lease_wallet
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from tests.git_support import git_do
 
 RUN = "RUN-HO-001"
 WORK = "WORK-HO-001"
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    git_do(root, *args)
 
 
 @pytest.fixture
