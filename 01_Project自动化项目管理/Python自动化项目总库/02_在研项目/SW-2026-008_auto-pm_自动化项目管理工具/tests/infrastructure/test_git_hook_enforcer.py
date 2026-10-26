@@ -949,6 +949,47 @@ def test_td115_scan_handles_spaces_and_chinese_in_names(tmp_path: Path) -> None:
     assert [h.path for h in hits] == ["中文 目录/备份.bak"]
 
 
+def test_reading_the_staging_area_fails_closed_never_as_an_empty_list(tmp_path: Path) -> None:
+    """暂存区读不到时 get_staged_files 必须抛错；返回 [] 等于钩子什么都没查就放行。"""
+    from auto_pm.infrastructure.git_hook_enforcer import get_staged_files
+
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    with pytest.raises(RuntimeError, match="获取暂存区文件失败"):
+        get_staged_files(not_a_repo)
+
+
+def test_an_unreadable_staging_area_is_rejected_by_both_readers(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from auto_pm.infrastructure.git_hook_enforcer import (
+        _get_staged_files_or_reject,
+        _get_staged_snapshot_or_reject,
+    )
+
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    assert _get_staged_files_or_reject(not_a_repo, "pre-commit") is None
+    assert "无法读取 Git 暂存区" in capsys.readouterr().out
+    assert _get_staged_snapshot_or_reject(not_a_repo, "pre-commit") is None
+    assert "无法读取 Git 暂存区" in capsys.readouterr().out
+
+
+def test_both_hooks_refuse_the_commit_when_the_staging_area_cannot_be_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """钩子入口本身（不经 preflight）读不到暂存区也必须返回 1，而不是按“无改动”放行。"""
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    msg = not_a_repo / "COMMIT_EDITMSG"
+    msg.write_text("x\n", encoding="utf-8")
+
+    assert enforce_pre_commit(not_a_repo) == 1
+    assert "无法读取 Git 暂存区" in capsys.readouterr().out
+    assert enforce_commit_msg(not_a_repo, msg) == 1
+    assert "无法读取 Git 暂存区" in capsys.readouterr().out
+
+
 # ---- TD-SW008-087 / TD-115：忽略规则扫描走真实 preflight 入口，拦截与超时都必须拒绝 ----
 
 
