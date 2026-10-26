@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import subprocess
 import sys
@@ -1922,7 +1923,8 @@ def _quality_gate_timeout_seconds() -> float:
         value = float(raw)
     except ValueError:
         return _QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
-    return value if value > 0 else _QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
+    # inf（以及 1e400 这类溢出值）会让质量门永远不超时，nan 比较恒为假：都不是合法时限，退回默认。
+    return value if math.isfinite(value) and value > 0 else _QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
 
 
 def _run_bounded(work: Callable[[], tuple[str, int | None]], seconds: float) -> tuple[str, int | None]:
