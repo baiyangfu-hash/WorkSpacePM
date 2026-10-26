@@ -6,6 +6,7 @@ import ctypes
 import faulthandler
 import gc
 import json
+import math
 import os
 import sqlite3
 import subprocess
@@ -909,6 +910,8 @@ def _start_watchdog_ms(succeeds: bool, env: Mapping[str, str] | None = None) -> 
         scale = float(source.get(_WATCHDOG_SCALE_ENV, "1"))
     except ValueError:
         scale = 1.0
+    if not math.isfinite(scale):  # nan、inf、1e400 都不是合法倍数，退回默认
+        scale = 1.0
     return int(_REAL_START_BASELINE_MS[succeeds] * max(scale, 1.0))
 
 
@@ -1115,6 +1118,12 @@ def test_start_watchdog_scale_can_only_widen_the_limit() -> None:
     assert _start_watchdog_ms(True, {_WATCHDOG_SCALE_ENV: "2"}) == 2 * _start_watchdog_ms(True, {})
     assert _start_watchdog_ms(True, {_WATCHDOG_SCALE_ENV: "0.1"}) == _start_watchdog_ms(True, {})
     assert _start_watchdog_ms(True, {_WATCHDOG_SCALE_ENV: "abc"}) == _start_watchdog_ms(True, {})
+
+
+@pytest.mark.parametrize("raw", ["nan", "NaN", "inf", "-inf", "Infinity", "1e400", "-1e400", ""])
+def test_start_watchdog_scale_falls_back_to_default_when_not_a_finite_number(raw: str) -> None:
+    assert _start_watchdog_ms(True, {_WATCHDOG_SCALE_ENV: raw}) == _start_watchdog_ms(True, {})
+    assert _start_watchdog_ms(False, {_WATCHDOG_SCALE_ENV: raw}) == _start_watchdog_ms(False, {})
 
 
 def test_start_timeout_log_carries_machine_load_and_a_hint() -> None:
