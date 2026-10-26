@@ -212,6 +212,13 @@ def scope_from_body(body: str, result: Result) -> PrecheckReport | None:
     return PrecheckReport("PR 描述", "", "", ".", tuple(paths), (), ())
 
 
+def added_files(repo: Path, base: str, head: str) -> list[str]:
+    """PR 新增的路径（改名的新路径也算新增）。"""
+
+    raw = git(repo, "diff", "--name-only", "--diff-filter=A", "--no-renames", "-z", f"{base}...{head}")
+    return sorted({item for item in raw.split("\0") if item})
+
+
 def check(repo: Path, base: str, head: str, body: str) -> Result:
     result = Result()
     card = card_path_from_body(body)
@@ -253,7 +260,24 @@ def check(repo: Path, base: str, head: str, body: str) -> Result:
     plc_code = plc_docs(repo, files)
     if plc_code != 0:
         result.errors.append("PLC 文档与代码一致性检查未通过（详见上面的输出）")
+    ignored_additions(repo, base, head, result)
     return result
+
+
+def ignored_additions(repo: Path, base: str, head: str, result: Result) -> None:
+    """新增文件命中仓库忽略规则就不通过（TD-SW008-115）；只看新增，存量不受影响。"""
+
+    from auto_pm.infrastructure.ignored_file_scan import IgnoreScanError, ignored_among
+
+    try:
+        hits = ignored_among(repo, added_files(repo, base, head))
+    except (IgnoreScanError, OSError) as error:
+        result.errors.append(f"忽略规则扫描失败，不放行：{error}")
+        return
+    for hit in hits:
+        result.errors.append(
+            f"新增文件 `{hit.path}` 命中忽略规则（{hit.source} `{hit.pattern}`）：不应入库；确需入库先请用户改忽略规则"
+        )
 
 
 def plc_docs(repo: Path, files: list[str]) -> int:

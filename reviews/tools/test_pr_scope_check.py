@@ -342,6 +342,57 @@ def test_s23_paths_after_a_blank_line_in_the_scope_list_are_not_authorised(repo:
     assert "越界：`src/b.py`" in errors(result) and "src/a.py" not in errors(result)
 
 
+# ---- TD-SW008-115：新增文件命中忽略规则 ----
+
+
+def force_commit(repo: Path, files: dict[str, str]) -> tuple[str, str]:
+    for rel, text in files.items():
+        write(repo, rel, text)
+    git(repo, "add", "-f", "-A")
+    git(repo, "commit", "-q", "-m", "change")
+    return git(repo, "rev-parse", "main"), git(repo, "rev-parse", "HEAD")
+
+
+def scope_body(*paths: str) -> str:
+    return "可改范围\n" + "".join(f"- {path}\n" for path in paths)
+
+
+def test_s24_a_newly_added_file_matching_an_ignore_rule_fails(repo: Path) -> None:
+    base, head = force_commit(repo, {".gitignore": "*.zip\n", "src/pack.zip": "x"})
+    result = gate.check(repo, base, head, scope_body(".gitignore", "src/pack.zip"))
+    assert "新增文件 `src/pack.zip` 命中忽略规则" in errors(result)
+    assert ".gitignore:1" in errors(result) and "`*.zip`" in errors(result)
+
+
+def test_s25_a_tracked_file_that_now_matches_a_rule_is_not_a_new_addition(repo: Path) -> None:
+    write(repo, "src/old.zip", "v1")
+    git(repo, "add", "-f", "src/old.zip")
+    git(repo, "commit", "-q", "-m", "old")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "--ff-only", "pr")
+    git(repo, "checkout", "-q", "-b", "pr2")
+    base, head = force_commit(repo, {".gitignore": "*.zip\n", "src/old.zip": "v2"})
+    result = gate.check(repo, base, head, scope_body(".gitignore", "src/old.zip"))
+    assert "命中忽略规则" not in errors(result)
+
+
+def test_s26_a_file_re_included_by_a_negation_rule_passes(repo: Path) -> None:
+    base, head = force_commit(repo, {".gitignore": "*.zip\n!keep.zip\n", "keep.zip": "x"})
+    result = gate.check(repo, base, head, scope_body(".gitignore", "keep.zip"))
+    assert "命中忽略规则" not in errors(result)
+
+
+def test_s27_a_failing_scan_does_not_let_the_pr_through(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import auto_pm.infrastructure.ignored_file_scan as scan
+
+    def boom(*_args: object, **_kwargs: object) -> list[object]:
+        raise scan.IgnoreScanError("坏了")
+
+    monkeypatch.setattr(scan, "ignored_among", boom)
+    base, head = commit(repo, {"src/new.py": "n = 1\n"})
+    assert "忽略规则扫描失败，不放行" in errors(gate.check(repo, base, head, f"任务卡: {CARD}"))
+
+
 # --- TD-202：PR 新增行里的密钥 ---------------------------------------------------------------------------------
 
 FAKE_PAT = "github_pat_" + "A1b2C3d4E5" * 3
