@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import secrets
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -64,6 +65,11 @@ from auto_pm.contracts.pm_facade import (
     PmIntent,
     PmRunOutcome,
     SubmittedPlanningScopeCard,
+)
+from auto_pm.contracts.protected_files import (
+    PROTECTED_FILE_ENFORCEMENT,
+    protected_changes,
+    protected_files_message,
 )
 from auto_pm.domain.change.decision_service import (
     DecisionError,
@@ -1170,6 +1176,9 @@ class PmFacadeService:
             )
             if mismatch:
                 return self._not_verified(mission, run, mismatch)
+            protected_note, protected_block = self._protected_file_note(run)
+            if protected_block:
+                return self._not_verified(mission, run, protected_note)
             profile = collector.checkpoint_profile_for_run(run)
             ContinuityExecutionService(
                 self._workspace_root, store=self._store
@@ -1206,7 +1215,47 @@ class PmFacadeService:
             checkpoint_id=checkpoint_id,
             mission_state=mission.state,
             message=_VERIFIED_MESSAGE,
-        ), ""
+        ), protected_note
+
+    @staticmethod
+    def _protected_file_changes(run: Any) -> tuple[str, ...] | None:
+        """Protected paths whose content differs from the commit the Run started from; None when Git cannot say."""
+
+        worktree, base = str(run.worktree_path), str(run.git_head)
+        if not worktree or not base:
+            return None
+        names: set[str] = set()
+        try:
+            for args in (
+                ("diff", "--name-only", "--no-renames", "-z", base),
+                ("ls-files", "--others", "--exclude-standard", "-z"),
+            ):
+                done = subprocess.run(
+                    ["git", "-C", worktree, *args],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    timeout=60,
+                )
+                if done.returncode != 0:
+                    return None
+                names.update(item for item in done.stdout.split("\0") if item)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return protected_changes(names)
+
+    def _protected_file_note(self, run: Any) -> tuple[str, bool]:
+        """(message for ``pm verify``, whether it must refuse); the refusal only applies in "block" mode."""
+
+        changed = self._protected_file_changes(run)
+        if changed is None:
+            return "警告：无法核对受保护文件（读不到 Git 记录），请人工确认没有改测试或门禁脚本。", False
+        message = protected_files_message(changed, enforcement=PROTECTED_FILE_ENFORCEMENT)
+        if message:
+            log.warning("受保护文件被改动: run=%s %s", run.run_id, changed)
+        return message, bool(changed) and PROTECTED_FILE_ENFORCEMENT == "block"
 
     @staticmethod
     def _not_verified(mission: Mission, run: Any, reason: str = "") -> tuple[PmRunOutcome, str]:
