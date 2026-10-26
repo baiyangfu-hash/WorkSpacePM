@@ -35,6 +35,7 @@ def test_a_project_with_a_failing_item_exits_one(cli_runner: CliRunner, full_pro
     result = _check(cli_runner, full_project, PROJECT_ID)
 
     assert result.exit_code == 1, result.output
+    assert "接口文档" in result.output
 
 
 def test_json_output_does_not_hide_the_failure_from_the_exit_code(
@@ -70,3 +71,4 @@ def test_the_other_check_modes_keep_the_same_exit_code_rule(
     result = _check(cli_runner, full_project, PROJECT_ID, flag)
 
     assert result.exit_code == 1, result.output
+    assert "接口文档" in result.output

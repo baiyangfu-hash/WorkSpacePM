@@ -695,7 +695,9 @@ def test_td100_preflight_refuses_a_content_only_change_of_a_production_file(tmp_
     (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
     _git(cand, "add", SERVICE)
     _no_chg_message(msg)
-    assert _run_preflight(cand, ctrl, msg).exit_code != 0
+    result = _run_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "Commit Message 未绑定变更单" in result.output
 
 
 def test_td100_preflight_passes_a_content_only_change_with_a_valid_change_order(tmp_path: Path) -> None:
@@ -710,14 +712,18 @@ def test_td100_preflight_refuses_a_mode_only_change_without_a_change_order(tmp_p
     cand, ctrl, msg = _delete_scene(tmp_path)
     _git(cand, "update-index", "--chmod=+x", SERVICE)
     _no_chg_message(msg)
-    assert _run_preflight(cand, ctrl, msg).exit_code != 0
+    result = _run_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "Commit Message 未绑定变更单" in result.output
 
 
 def test_td100_preflight_refuses_a_linked_worktree_given_itself_as_control_root(tmp_path: Path) -> None:
     cand, ctrl, msg = _delete_scene(tmp_path)
     (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
     _git(cand, "add", SERVICE)
-    assert _run_preflight(cand, ctrl, msg, control_root=cand).exit_code != 0
+    result = _run_preflight(cand, ctrl, msg, control_root=cand)
+    assert result.exit_code != 0
+    assert "同仓身份校验失败" in result.output
 
 
 def test_td100_preflight_refuses_when_the_snapshot_cannot_be_read(tmp_path: Path) -> None:
@@ -725,7 +731,9 @@ def test_td100_preflight_refuses_when_the_snapshot_cannot_be_read(tmp_path: Path
     not_a_repo.mkdir()
     msg = not_a_repo / "COMMIT_EDITMSG"
     msg.write_text("x\n", encoding="utf-8")
-    assert _run_preflight(not_a_repo, not_a_repo, msg).exit_code == 1
+    result = _run_preflight(not_a_repo, not_a_repo, msg)
+    assert result.exit_code == 1
+    assert "无法读取 Git 暂存区" in result.output
 
 
 def test_td100_preflight_refuses_when_the_pre_commit_gate_blows_up(
@@ -739,7 +747,9 @@ def test_td100_preflight_refuses_when_the_pre_commit_gate_blows_up(
         raise RuntimeError("台账内部故障")
 
     monkeypatch.setattr("auto_pm.infrastructure.git_hook_enforcer._run_ledger_gate", boom)
-    assert _run_preflight(cand, ctrl, msg).exit_code != 0
+    result = _run_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "台账检查异常" in result.output
 
 
 def test_td100_independent_comparison_sees_deletions_with_the_old_mode_and_blob(tmp_path: Path) -> None:

@@ -54,3 +54,4 @@ class TestDeliveryCLI:
         p.mkdir()
         r = runner.invoke(cli, ["-w", str(p), "delivery", "package", "--version", "V1.0.1"])
         assert r.exit_code != 0
+        assert "打包失败" in r.output
