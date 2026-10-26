@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import shutil
@@ -432,6 +433,9 @@ _V5_SCHEMA_VERSION = "continuity-store.v5"
 _V6_SCHEMA_VERSION = "continuity-store.v6"
 _V7_SCHEMA_VERSION = "continuity-store.v7"
 _CURRENT_SCHEMA_VERSION = "continuity-store.v8"
+log = logging.getLogger(__name__)
+
+_FINISHED_MISSION_STATES = frozenset({"ACCEPTED", "CLOSED", "CANCELLED"})
 _KNOWN_SCHEMA_VERSIONS = frozenset(
     {
         _LEGACY_SCHEMA_VERSION,
@@ -6704,7 +6708,7 @@ class ContinuityStore:
                 rows = self._open_and_recent_rows(
                     conn, "mission_items", "mission_id", subject_project_id, terminal_limit
                 )
-                return tuple(self._get_mission(conn, str(row["mission_id"])) for row in rows)
+                return self._listed_missions(conn, rows)
             query = (
                 """SELECT mission_id FROM mission_items WHERE subject_project_id=?
                 ORDER BY updated_at DESC, mission_id"""
@@ -6714,7 +6718,34 @@ class ContinuityStore:
                 ORDER BY updated_at DESC, mission_id"""
             )
             rows = conn.execute(query, (subject_project_id,)).fetchall()
-            return tuple(self._get_mission(conn, str(row["mission_id"])) for row in rows)
+            return self._listed_missions(conn, rows)
+
+    def _listed_missions(self, conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> tuple[Mission, ...]:
+        """Read the Missions of a listing; a finished Mission whose record no longer validates is left out (TD-022).
+
+        A listing must not fail because of history: an old, finished Mission that the current model cannot read
+        is logged and skipped. An unfinished Mission that cannot be read still fails the listing, as it
+        would block real work.
+        """
+
+        missions: list[Mission] = []
+        for row in rows:
+            mission = self._get_listed_mission(conn, str(row["mission_id"]))
+            if mission is not None:
+                missions.append(mission)
+        return tuple(missions)
+
+    def _get_listed_mission(self, conn: sqlite3.Connection, mission_id: str) -> Mission | None:
+        try:
+            return self._get_mission(conn, mission_id)
+        except ValueError as error:  # pydantic's ValidationError and JSONDecodeError are both ValueErrors
+            state = conn.execute(
+                "SELECT state FROM mission_items WHERE mission_id=?", (mission_id,)
+            ).fetchone()
+            if state is None or str(state["state"]) not in _FINISHED_MISSION_STATES:
+                raise
+            log.warning("历史 Mission %s 无法按当前模型读取，已从列表中略过: %s", mission_id, error)
+            return None
 
     @staticmethod
     def _open_and_recent_rows(
@@ -8692,7 +8723,9 @@ class ContinuityStore:
             }
             parked: list[ParkedMission] = []
             for row in rows:
-                mission = self._get_mission(conn, str(row["mission_id"]))
+                mission = self._get_listed_mission(conn, str(row["mission_id"]))
+                if mission is None:
+                    continue
                 column = BOARD_COLUMN_BY_STATE[mission.state]
                 if column is not MissionBoardColumn.PARKED:
                     columns[column].append(mission)
