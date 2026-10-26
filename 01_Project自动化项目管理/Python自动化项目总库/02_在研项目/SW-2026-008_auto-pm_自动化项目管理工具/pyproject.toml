@@ -144,6 +144,7 @@ markers = [
     "unit: 单元测试",
     "integration: 集成测试",
     "slow: 慢速测试（运行时间 > 5s）",
+    "needs_quality_tools: 真实跑 ruff/mypy 子进程的质量门测试，解释器缺 dev 依赖时跳过",
 ]
 addopts = [
     "--cov=auto_pm",

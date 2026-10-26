@@ -2087,6 +2087,7 @@ def test_checkpoint_allows_new_owned_changes_and_rejects_foreign_paths(tmp_path:
         )
 
 
+@pytest.mark.needs_quality_tools
 def test_append_verified_checkpoint_builds_complete_evidence_and_replays(tmp_path: Path) -> None:
     candidate, project_root, service = _c03_auto_checkpoint_service(
         tmp_path, include_untracked_target=True
@@ -2191,6 +2192,7 @@ def test_append_verified_checkpoint_replays_unicode_owned_paths_and_rejects_stal
         _append_auto_checkpoint(service, project_root)
 
 
+@pytest.mark.needs_quality_tools
 def test_generic_checkpoint_proves_both_projects_and_rejects_stale_replay(
     tmp_path: Path,
 ) -> None:
