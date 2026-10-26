@@ -34,11 +34,21 @@ def fake_lsp(tmp_path: Path) -> Path:
         f'if grep -q Counter ../../../01_SharedLibraries/SysLib/timer/FB_TON.scl; then echo stub=yes >> "{report}"; else echo stub=no >> "{report}"; fi\n'
         f'if grep -q Counter ../../../01_SharedLibraries/SysLib/timer/FB_TONR.scl; then echo stubr=yes >> "{report}"; else echo stubr=no >> "{report}"; fi\n'
         f'echo "libscl=$(cd ../../../01_SharedLibraries/SysLib && find . -name \'*.scl\' | sed \'s|^./||\' | sort | tr \'\\n\' \',\')" >> "{report}"\n'
+        r"n=$(cat $(find . -name '*.scltest') | sed 's|//.*||' | grep -c '^[[:space:]]*TEST_CASE')" + "\n"
+        'echo "siemens-lsp test: running $n/$n cases from 1 file(s)"\n'
+        'printf "ok  \\tplc-autogen/runtime\\t0.1s\\n"\n'
         "exit 0\n",
         encoding="utf-8",
     )
     lsp.chmod(0o755)
     return lsp
+
+
+def _script(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    path.chmod(0o755)
+    return path
 
 
 def _run(lsp: Path, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -196,3 +206,79 @@ def test_the_copy_for_the_default_project_keeps_what_dj_2026_005_uses(fake_lsp: 
     assert result.returncode == 0, result.stdout + result.stderr
     copied = set(_report(fake_lsp)["libscl"].strip(",").split(","))
     assert {"timer/FB_TON.scl", "timer/FB_TONR.scl", "edge/FB_R_TRIG.scl", "edge/FB_F_TRIG.scl", "types/ST_ServoAxis.scl"} <= copied
+
+
+# 三份真实插件输出 (主执行笔记本, 2026-10-26): 失败 / 全过 / 005 全过
+RUN8_FAIL = (
+    "siemens-lsp test: running 34/34 cases from 5 file(s)\n"
+    "--- FAIL: TestUserCase029_TCMB04RcvIdShortStopAtZero (0.00s)\n"
+    "    user_tests_autogen_test.go:7949: ASSERT failed at Test/modbus_client_test.scltest:103:5 step 21: got=ABC op== expected=ABC\n"
+    "FAIL\nFAIL\tplc-autogen/runtime\t0.778s\nFAIL\n"
+)
+RUN9_OK_009 = "siemens-lsp test: running 34/34 cases from 5 file(s)\nok  \tplc-autogen/runtime\t0.633s\n"
+AUDIT293_OK_005 = "siemens-lsp test: running 61/61 cases from 3 file(s)\nok  \tplc-autogen/runtime\t0.974s\n"
+
+
+def test_real_logs_all_green_pass_the_false_green_check_when_the_count_matches() -> None:
+    check = _module().false_green_problems
+
+    assert check(RUN9_OK_009, 34) == []
+    assert check(AUDIT293_OK_005, 61) == []
+
+
+def test_a_count_that_differs_from_the_project_is_a_problem_even_when_the_plugin_says_ok() -> None:
+    check = _module().false_green_problems
+
+    assert any("不相等" in p for p in check(RUN9_OK_009, 35))
+    assert any("不相等" in p for p in check("siemens-lsp test: running 30/34 cases from 5 file(s)\nok  \tplc-autogen/runtime\t1s\n", 34))
+    assert any("不相等" in p for p in check("siemens-lsp test: running 34/30 cases from 5 file(s)\nok  \tplc-autogen/runtime\t1s\n", 34))
+
+
+def test_a_log_without_the_count_line_or_the_ok_line_is_a_problem() -> None:
+    check = _module().false_green_problems
+
+    assert any("running N/M" in p for p in check("ok  \tplc-autogen/runtime\t1s\n", 34))
+    assert any("ok  plc-autogen" in p for p in check("siemens-lsp test: running 34/34 cases from 5 file(s)\n", 34))
+    assert check("", 34)
+
+
+@pytest.mark.parametrize("marker", ["--- FAIL: TestX (0.00s)", "[build failed]", "invalid .scltest semantics"])
+def test_any_failure_marker_is_a_problem_even_with_the_count_and_ok_line(marker: str) -> None:
+    problems = _module().false_green_problems(RUN9_OK_009 + marker + "\n", 34)
+
+    assert any(marker.split(":")[0] in p for p in problems)
+
+
+def test_the_real_failing_log_is_a_problem() -> None:
+    assert _module().false_green_problems(RUN8_FAIL, 34)
+
+
+def test_test_case_count_ignores_commented_lines(tmp_path: Path) -> None:
+    (tmp_path / "Test").mkdir()
+    (tmp_path / "Test" / "a.scltest").write_text(
+        '// TEST_CASE "commented out"\nTEST_CASE "one"\nEND_TEST_CASE\n  TEST_CASE "two"\nEND_TEST_CASE\n', encoding="utf-8"
+    )
+
+    assert _module().count_test_cases(tmp_path) == 2
+
+
+def test_a_silent_plugin_with_exit_0_is_judged_failed(tmp_path: Path) -> None:
+    result = _run(_script(tmp_path, "silent-lsp", "exit 0\n"))
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "防假绿" in result.stderr
+
+
+def test_a_plugin_that_ran_fewer_cases_than_the_project_has_is_judged_failed(tmp_path: Path) -> None:
+    lsp = _script(tmp_path, "short-lsp", 'echo "siemens-lsp test: running 1/1 cases from 1 file(s)"\nprintf "ok  \\tplc-autogen/runtime\\t1s\\n"\nexit 0\n')
+
+    result = _run(lsp)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "不相等" in result.stderr
+
+
+def test_a_failing_plugin_keeps_its_own_exit_code(tmp_path: Path) -> None:
+    lsp = _script(tmp_path, "failing-lsp", 'echo "--- FAIL: TestX"\nexit 7\n')
+
+    assert _run(lsp).returncode == 7

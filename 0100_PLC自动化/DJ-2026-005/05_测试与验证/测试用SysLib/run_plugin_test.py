@@ -69,6 +69,43 @@ def referenced_syslib_files(sources: list[Path], syslib: Path) -> set[Path]:
     return needed
 
 
+_TEST_CASE = re.compile(r"^\s*TEST_CASE\b", re.MULTILINE)
+_RUNNING = re.compile(r"siemens-lsp test: running (\d+)/(\d+) cases")
+_OK_LINE = re.compile(r"^ok\s", re.MULTILINE)
+
+
+def count_test_cases(plc_dir: Path) -> int:
+    """项目 PLC_ST 下全部 .scltest 里 TEST_CASE 的总数 (注释行不算)。"""
+    total = 0
+    for path in plc_dir.rglob("*.scltest"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        total += len(_TEST_CASE.findall(re.sub(r"//[^\n]*", "", text)))
+    return total
+
+
+def false_green_problems(output: str, expected_cases: int) -> list[str]:
+    """插件退出码为 0 时再核一遍输出, 防假绿: 报出的用例数 N/M 必须都等于项目里 TEST_CASE 总数, 有 ok 行, 没有任何失败标记。
+
+    返回问题清单; 空清单才算真的全过。输出格式见 siemens-lsp test: 一行 ``running N/M cases from K file(s)``,
+    全过时只有 ``ok  plc-autogen/runtime``, 失败时每条一行 ``--- FAIL: ...``, 编译失败 ``[build failed]``,
+    语义失败 ``invalid .scltest semantics``。
+    """
+    problems: list[str] = []
+    running = _RUNNING.search(output)
+    if running is None:
+        problems.append("输出里没有 'running N/M cases' 这一行, 无法确认跑了多少用例")
+    else:
+        ran, selected = int(running.group(1)), int(running.group(2))
+        if ran != expected_cases or selected != expected_cases:
+            problems.append(f"插件报 running {ran}/{selected} 条, 项目里 TEST_CASE 共 {expected_cases} 条, 不相等")
+    if not _OK_LINE.search(output):
+        problems.append("输出里没有 'ok  plc-autogen/runtime' 这一行")
+    for marker in ("--- FAIL", "[build failed]", "invalid .scltest semantics"):
+        if marker in output:
+            problems.append(f"输出里有失败标记: {marker}")
+    return problems
+
+
 def resolve_project(value: str | None) -> Path:
     """项目目录: 不带参数用 DJ-2026-005; 带路径用该路径; 带编号在库根下按编号开头找唯一一个."""
     if not value:
@@ -149,6 +186,14 @@ def main() -> int:
         sys.stdout.write(proc.stdout)
         sys.stderr.write(proc.stderr)
         rc = proc.returncode
+        if rc == 0:
+            expected = count_test_cases(plc_dir)
+            problems = false_green_problems(proc.stdout + proc.stderr, expected)
+            if problems:
+                print("[防假绿] 插件退出码 0, 但输出核对不通过, 判失败:", *problems, sep="\n  ", file=sys.stderr)
+                rc = 1
+            else:
+                print(f"[防假绿] 插件报的用例数 = 项目 TEST_CASE 总数 = {expected}, 有 ok 行, 无失败标记")
     except FileNotFoundError as exc:
         print(f"找不到插件命令: {exc}", file=sys.stderr)
         rc = 2
