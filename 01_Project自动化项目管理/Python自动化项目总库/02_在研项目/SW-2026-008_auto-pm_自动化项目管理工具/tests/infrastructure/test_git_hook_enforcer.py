@@ -10,11 +10,17 @@ import pytest
 from auto_pm.infrastructure.git_hook_enforcer import (
     CONTROL_ROOT_FILE_BINDINGS,
     ProjectBinding,
+    StagedIndexEntry,
+    StagedSnapshot,
     StagedSnapshotError,
     _binding_for_staged_file,
+    _change_entry,
+    _ledger_entry,
+    _parse_raw_index_entries,
     enforce_commit_msg,
     enforce_pre_commit,
     filter_production_files,
+    get_staged_snapshot,
     is_excluded_from_production,
 )
 
@@ -475,6 +481,113 @@ def test_real_hook_launcher_rejects_external_control_root(tmp_path: Path) -> Non
     assert result.returncode != 0
     assert "同仓身份校验失败" in result.stdout
     assert os.path.isdir(cand)
+
+
+# --- TD-046：只删除、只重命名受控文件的提交不能绕过变更单 ---------------------------------------------------------
+
+
+def _delete_scene(tmp_path: Path, **kwargs: object) -> tuple[Path, Path, Path]:
+    """候选工位里没有任何暂存代码改动；调用方再自己 git rm / git mv。"""
+    cand, ctrl, msg = _make_dual_root_fixture(
+        tmp_path, candidate_has_staged_code=False, candidate_ledger_clean=True, **kwargs  # type: ignore[arg-type]
+    )
+    return cand, ctrl, msg
+
+
+SERVICE = "01_Project/SW-2026-008/src/service.py"
+
+
+def _no_chg_message(path: Path) -> None:
+    path.write_text("chore: tidy up\n", encoding="utf-8")
+
+
+def test_td046_deleting_a_production_file_without_a_change_order_is_refused(tmp_path: Path) -> None:
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    _git(cand, "rm", "-q", SERVICE)
+    _no_chg_message(msg)
+    assert _git(cand, "diff", "--cached", "--name-only") == SERVICE
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+
+
+def test_td046_deleting_a_production_file_with_a_valid_change_order_passes(tmp_path: Path) -> None:
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    _git(cand, "rm", "-q", SERVICE)
+    assert enforce_pre_commit(cand, control_root=ctrl) == 0
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0
+
+
+def test_td046_deleting_a_production_file_under_an_unapproved_change_order_is_refused(tmp_path: Path) -> None:
+    cand, ctrl, msg = _delete_scene(tmp_path, chg_status="draft")
+    _git(cand, "rm", "-q", SERVICE)
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+
+
+def test_td046_renaming_a_production_file_to_a_non_production_name_is_refused(tmp_path: Path) -> None:
+    """旧路径是生产代码、新路径不是：以前只看新路径，整个提交被当成纯文档放行。"""
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    _git(cand, "mv", SERVICE, "01_Project/SW-2026-008/src/service.txt")
+    _no_chg_message(msg)
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+
+
+def test_td046_renaming_a_production_file_out_of_the_project_is_refused(tmp_path: Path) -> None:
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    (cand / "elsewhere").mkdir()
+    _git(cand, "mv", SERVICE, "elsewhere/service.txt")
+    _no_chg_message(msg)
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+
+
+def test_td046_deleting_a_test_or_doc_file_still_needs_no_change_order(tmp_path: Path) -> None:
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    test_file = cand / "01_Project/SW-2026-008/tests/test_service.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_x():\n    pass\n", encoding="utf-8")
+    _git(cand, "add", str(test_file.relative_to(cand)))
+    _git(cand, "commit", "-q", "-m", "add test")
+    _git(cand, "rm", "-q", str(test_file.relative_to(cand)))
+    _no_chg_message(msg)
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0
+
+
+def test_td046_the_snapshot_records_deletions_with_the_old_blob(tmp_path: Path) -> None:
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    old_blob = _git(cand, "rev-parse", f"HEAD:{SERVICE}")
+    _git(cand, "rm", "-q", SERVICE)
+    (entry,) = get_staged_snapshot(cand).entries
+    assert (entry.path, entry.status, entry.object_id, entry.deleted) == (SERVICE, "D", old_blob, True)
+
+
+def test_td046_a_rename_is_two_entries_old_path_deleted_and_new_path_added(tmp_path: Path) -> None:
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    _git(cand, "mv", SERVICE, SERVICE.replace("service.py", "renamed.py"))
+    entries = {e.path: e.status for e in get_staged_snapshot(cand).entries}
+    assert entries == {SERVICE: "D", SERVICE.replace("service.py", "renamed.py"): "A"}
+
+
+def test_td046_a_deleted_change_order_or_ledger_is_not_evidence() -> None:
+    chg = "01_Project/SW-2026-008/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-346.md"
+    ledger = "01_Project/SW-2026-008/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+    binding = ProjectBinding("SW-2026-008", "01_Project/SW-2026-008")
+    deleted = StagedSnapshot((StagedIndexEntry(chg, "a" * 40, "D"), StagedIndexEntry(ledger, "b" * 40, "D")))
+    with pytest.raises(StagedSnapshotError, match="缺少或重复关联变更单"):
+        _change_entry(deleted, binding, "CHG-SCPT-2026-346")
+    with pytest.raises(StagedSnapshotError, match="缺少或重复关联项目台账"):
+        _ledger_entry(deleted, binding)
+    kept = StagedSnapshot((StagedIndexEntry(chg, "a" * 40, "M"),))
+    assert _change_entry(kept, binding, "CHG-SCPT-2026-346").path == chg
+
+
+@pytest.mark.parametrize("status", ["X", "R", "U"])
+def test_td046_unknown_raw_statuses_are_still_refused(status: str) -> None:
+    raw = f":100644 000000 {'a' * 40} {'b' * 40} {status}\0some/path.py\0"
+    with pytest.raises(StagedSnapshotError, match="不支持的状态"):
+        _parse_raw_index_entries(raw)
+
+
+def test_td046_a_raw_deletion_line_parses_to_a_deleted_entry() -> None:
+    raw = f":100644 000000 {'a' * 40} {'0' * 40} D\0some/path.py\0"
+    assert _parse_raw_index_entries(raw) == (StagedIndexEntry("some/path.py", "a" * 40, "D"),)
 
 
 @pytest.mark.parametrize(

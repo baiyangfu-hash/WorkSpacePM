@@ -214,3 +214,36 @@ def test_f01a_e06_real_precommit_cli_fails_closed_when_git_head_is_corrupt(tmp_p
     assert corrupt_path.read_bytes() == corrupt_before
     assert (root / ".git" / "index").read_bytes() == index_before
     assert (root / F01A_MARKER).is_file()
+
+
+PUMP_SCL = "0100_PLC自动化/DJ-TEST-001/02_PLC程序/PLC_ST/01_泵/FB_Pump.scl"
+
+
+def test_td046_a_deleted_scl_or_document_now_triggers_the_plc_document_check(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """以前纯删除的提交不在暂存快照里，PLC 文档核对根本不跑。核对规则本身对“文档还写着已删代码”只警告不拦，没有改。"""
+    from auto_pm.infrastructure.git_hook_enforcer import get_staged_snapshot
+    from auto_pm.infrastructure.plc_doc_hook import enforce_plc_docs
+
+    for target in (PUMP_SCL, IFC):
+        git(repo, "rm", "-q", "--", target)
+        snapshot = get_staged_snapshot(repo)
+        assert snapshot.paths == (target,)
+        capsys.readouterr()
+        assert enforce_plc_docs(repo, snapshot.paths) == 0
+        assert "正在核对暂存的 PLC 项目" in capsys.readouterr().out
+        git(repo, "reset", "-q", "--", target)
+        git(repo, "checkout", "-q", "--", target)
+
+
+def test_td046_deleting_only_the_interface_document_reports_it_missing(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from auto_pm.infrastructure.git_hook_enforcer import get_staged_snapshot
+    from auto_pm.infrastructure.plc_doc_hook import enforce_plc_docs
+
+    git(repo, "rm", "-q", "--", IFC)
+    capsys.readouterr()
+    enforce_plc_docs(repo, get_staged_snapshot(repo).paths)
+    assert "缺少接口文档" in capsys.readouterr().out
