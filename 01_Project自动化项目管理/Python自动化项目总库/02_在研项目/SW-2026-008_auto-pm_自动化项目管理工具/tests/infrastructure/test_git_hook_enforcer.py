@@ -17,10 +17,12 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     _change_entry,
     _ledger_entry,
     _parse_raw_index_entries,
+    _require_snapshot_matches_index,
     enforce_commit_msg,
     enforce_pre_commit,
     filter_production_files,
     get_staged_snapshot,
+    independent_staged_changes,
     is_excluded_from_production,
 )
 
@@ -587,7 +589,226 @@ def test_td046_unknown_raw_statuses_are_still_refused(status: str) -> None:
 
 def test_td046_a_raw_deletion_line_parses_to_a_deleted_entry() -> None:
     raw = f":100644 000000 {'a' * 40} {'0' * 40} D\0some/path.py\0"
-    assert _parse_raw_index_entries(raw) == (StagedIndexEntry("some/path.py", "a" * 40, "D"),)
+    assert _parse_raw_index_entries(raw) == (
+        StagedIndexEntry("some/path.py", "a" * 40, "D", "100644"),
+    )
+
+
+# ---- TD-100：同名文件只改内容 / 只改权限位，快照也必须看见；快照与独立比较不一致即拒绝 ----
+
+
+def test_td100_same_path_content_change_is_visible_with_the_new_blob(tmp_path: Path) -> None:
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    old_blob = _git(cand, "rev-parse", f"HEAD:{SERVICE}")
+    (cand / SERVICE).write_text("def changed():\n    return 2\n", encoding="utf-8")
+    _git(cand, "add", SERVICE)
+    (entry,) = get_staged_snapshot(cand).entries
+    assert (entry.path, entry.status) == (SERVICE, "M")
+    assert entry.object_id != old_blob
+    assert entry.object_id == _git(cand, "rev-parse", f":{SERVICE}")
+
+
+def test_td100_mode_only_change_is_visible_with_the_new_mode(tmp_path: Path) -> None:
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    old_blob = _git(cand, "rev-parse", f"HEAD:{SERVICE}")
+    _git(cand, "update-index", "--chmod=+x", SERVICE)
+    (entry,) = get_staged_snapshot(cand).entries
+    assert (entry.path, entry.status, entry.mode) == (SERVICE, "M", "100755")
+    assert entry.object_id == old_blob  # 内容没变，只有权限位变
+
+
+def test_td100_independent_comparison_covers_add_modify_delete_and_mode(tmp_path: Path) -> None:
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    (cand / SERVICE).write_text("def changed():\n    return 3\n", encoding="utf-8")
+    new_file = cand / "01_Project/SW-2026-008/src/new.py"
+    new_file.write_text("x = 1\n", encoding="utf-8")
+    _git(cand, "add", SERVICE, "01_Project/SW-2026-008/src/new.py")
+    changes = independent_staged_changes(cand)
+    snapshot = get_staged_snapshot(cand)
+    assert changes == {
+        e.path: (e.mode, e.object_id, e.deleted) for e in snapshot.entries
+    }
+    assert set(changes) == {SERVICE, "01_Project/SW-2026-008/src/new.py"}
+
+
+def test_td100_first_commit_without_head_is_all_additions(tmp_path: Path) -> None:
+    repo = tmp_path / "fresh"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a.py").write_text("a = 1\n", encoding="utf-8")
+    _git(repo, "add", "a.py")
+    assert set(independent_staged_changes(repo)) == {"a.py"}
+    assert [e.path for e in get_staged_snapshot(repo).entries] == ["a.py"]
+
+
+@pytest.mark.parametrize("tamper", ["blob", "mode", "missing", "extra", "deleted_flag"])
+def test_td100_a_snapshot_that_disagrees_with_the_index_is_refused(tmp_path: Path, tamper: str) -> None:
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    (cand / SERVICE).write_text("def changed():\n    return 4\n", encoding="utf-8")
+    _git(cand, "add", SERVICE)
+    (entry,) = get_staged_snapshot(cand).entries
+    forged = {
+        "blob": StagedSnapshot((StagedIndexEntry(entry.path, "c" * 40, "M", entry.mode),)),
+        "mode": StagedSnapshot((StagedIndexEntry(entry.path, entry.object_id, "M", "100755"),)),
+        "missing": StagedSnapshot(()),
+        "extra": StagedSnapshot(
+            (entry, StagedIndexEntry("other.py", entry.object_id, "A", entry.mode))
+        ),
+        "deleted_flag": StagedSnapshot((StagedIndexEntry(entry.path, entry.object_id, "D", entry.mode),)),
+    }[tamper]
+    with pytest.raises(StagedSnapshotError, match="独立比较不一致"):
+        _require_snapshot_matches_index(cand, forged)
+
+
+def test_td100_unmerged_index_entries_are_refused(tmp_path: Path) -> None:
+    """真实合并冲突留下 stage 1/2/3 条目；快照不能把它当普通改动放行。"""
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    _git(cand, "checkout", "-q", "-b", "side")
+    (cand / SERVICE).write_text("def side():\n    return 1\n", encoding="utf-8")
+    _git(cand, "commit", "-qam", "side change")
+    _git(cand, "checkout", "-q", "-")
+    (cand / SERVICE).write_text("def main_side():\n    return 2\n", encoding="utf-8")
+    _git(cand, "commit", "-qam", "main change")
+    merged = subprocess.run(
+        ["git", "merge", "side"], cwd=str(cand), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=False,
+    )
+    assert merged.returncode != 0, "测试前提：合并必须冲突"
+    with pytest.raises(StagedSnapshotError):
+        get_staged_snapshot(cand)
+
+
+
+def _run_preflight(cand: Path, ctrl: Path, msg: Path, *, control_root: Path | None = None):
+    from auto_pm.cli.__main__ import cli
+    from click.testing import CliRunner
+
+    return CliRunner().invoke(
+        cli,
+        ["-w", str(cand), "--control-root", str(control_root or ctrl), "git-hook", "preflight", str(msg)],
+    )
+
+
+def test_td100_preflight_refuses_a_content_only_change_of_a_production_file(tmp_path: Path) -> None:
+    """同名生产文件只改内容、提交说明又不绑变更单：整条 preflight 链路必须拒绝。"""
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
+    _git(cand, "add", SERVICE)
+    _no_chg_message(msg)
+    assert _run_preflight(cand, ctrl, msg).exit_code != 0
+
+
+def test_td100_preflight_passes_a_content_only_change_with_a_valid_change_order(tmp_path: Path) -> None:
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
+    _git(cand, "add", SERVICE)
+    result = _run_preflight(cand, ctrl, msg)
+    assert result.exit_code == 0, result.output
+
+
+def test_td100_preflight_refuses_a_mode_only_change_without_a_change_order(tmp_path: Path) -> None:
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    _git(cand, "update-index", "--chmod=+x", SERVICE)
+    _no_chg_message(msg)
+    assert _run_preflight(cand, ctrl, msg).exit_code != 0
+
+
+def test_td100_preflight_refuses_a_linked_worktree_given_itself_as_control_root(tmp_path: Path) -> None:
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
+    _git(cand, "add", SERVICE)
+    assert _run_preflight(cand, ctrl, msg, control_root=cand).exit_code != 0
+
+
+def test_td100_preflight_refuses_when_the_snapshot_cannot_be_read(tmp_path: Path) -> None:
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    msg = not_a_repo / "COMMIT_EDITMSG"
+    msg.write_text("x\n", encoding="utf-8")
+    assert _run_preflight(not_a_repo, not_a_repo, msg).exit_code == 1
+
+
+def test_td100_preflight_refuses_when_the_pre_commit_gate_blows_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cand, ctrl, msg = _delete_scene(tmp_path)
+    (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
+    _git(cand, "add", SERVICE)
+
+    def boom(*_args: object, **_kwargs: object) -> int:
+        raise RuntimeError("台账内部故障")
+
+    monkeypatch.setattr("auto_pm.infrastructure.git_hook_enforcer._run_ledger_gate", boom)
+    assert _run_preflight(cand, ctrl, msg).exit_code != 0
+
+
+def test_td100_independent_comparison_sees_deletions_with_the_old_mode_and_blob(tmp_path: Path) -> None:
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    old_blob = _git(cand, "rev-parse", f"HEAD:{SERVICE}")
+    _git(cand, "rm", "-q", SERVICE)
+    assert independent_staged_changes(cand) == {SERVICE: ("100644", old_blob, True)}
+
+
+def test_td100_get_staged_snapshot_runs_the_independent_comparison(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """diff --cached 的解析结果被篡改（比如漏报）时，取快照这一步本身就要拒绝。"""
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    (cand / SERVICE).write_text("def changed():\n    return 5\n", encoding="utf-8")
+    _git(cand, "add", SERVICE)
+    monkeypatch.setattr(
+        "auto_pm.infrastructure.git_hook_enforcer._parse_raw_index_entries", lambda _raw: ()
+    )
+    with pytest.raises(StagedSnapshotError, match="独立比较不一致"):
+        get_staged_snapshot(cand)
+
+
+def test_td100_get_staged_files_lists_deletions_and_the_old_path_of_a_rename(tmp_path: Path) -> None:
+    """get_staged_files 是回退路径；它若退回只看新增/修改，删除和改名的旧路径又会消失。"""
+    from auto_pm.infrastructure.git_hook_enforcer import get_staged_files
+
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    renamed = SERVICE.replace("service.py", "renamed.py")
+    _git(cand, "mv", SERVICE, renamed)
+    assert sorted(get_staged_files(cand)) == sorted([SERVICE, renamed])
+    _git(cand, "reset", "-q", "--hard")
+    _git(cand, "rm", "-q", SERVICE)
+    assert get_staged_files(cand) == [SERVICE]
+
+
+def test_td100_a_file_type_change_is_a_staged_change_with_status_t(tmp_path: Path) -> None:
+    """普通文件换成符号链接（git 状态 T）也必须进快照，不能因为状态白名单漏掉。"""
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    target = cand / SERVICE
+    target.unlink()
+    try:
+        target.symlink_to("elsewhere.py")
+    except (OSError, NotImplementedError):
+        pytest.skip("本机不能创建符号链接")
+    _git(cand, "add", SERVICE)
+    (entry,) = get_staged_snapshot(cand).entries
+    assert (entry.path, entry.status, entry.mode) == (SERVICE, "T", "120000")
+
+
+def test_td100_intent_to_add_files_are_not_part_of_the_commit_and_do_not_break_it(tmp_path: Path) -> None:
+    """``git add -N`` 的占位条目不进提交：快照不含它，也不能因为它与 diff --cached 对不上而拒绝整个提交。"""
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    placeholder = cand / "01_Project/SW-2026-008/src/later.py"
+    placeholder.write_text("x = 1\n", encoding="utf-8")
+    _git(cand, "add", "-N", str(placeholder.relative_to(cand)))
+    (cand / SERVICE).write_text("def changed():\n    return 6\n", encoding="utf-8")
+    _git(cand, "add", SERVICE)
+    assert [e.path for e in get_staged_snapshot(cand).entries] == [SERVICE]
+    assert set(independent_staged_changes(cand)) == {SERVICE}
+
+
+def test_td100_a_really_staged_empty_file_is_still_checked(tmp_path: Path) -> None:
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    empty = cand / "01_Project/SW-2026-008/src/empty.py"
+    empty.write_text("", encoding="utf-8")
+    _git(cand, "add", str(empty.relative_to(cand)))
+    assert [e.path for e in get_staged_snapshot(cand).entries] == ["01_Project/SW-2026-008/src/empty.py"]
+    assert set(independent_staged_changes(cand)) == {"01_Project/SW-2026-008/src/empty.py"}
 
 
 @pytest.mark.parametrize(

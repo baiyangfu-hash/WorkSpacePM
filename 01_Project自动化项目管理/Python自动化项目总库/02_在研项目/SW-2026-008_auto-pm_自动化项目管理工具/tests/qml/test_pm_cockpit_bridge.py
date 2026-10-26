@@ -10,7 +10,7 @@ import os
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -897,10 +897,38 @@ def _destroyed_on(events: list[tuple[str, int]], label: str) -> Callable[..., No
     return record
 
 
+# 真实成功用例正常耗时 67-75 秒（含真实质量门）；机器前台有重程序时门禁整体慢 2-3 倍（TD-SW008-135）。
+_REAL_START_BASELINE_MS = {True: 600_000, False: 5_000}
+_WATCHDOG_SCALE_ENV = "AUTO_PM_START_WATCHDOG_SCALE"
+
+
+def _start_watchdog_ms(succeeds: bool, env: Mapping[str, str] | None = None) -> int:
+    """看门狗时限：成功用例 600 秒（正常耗时的 8 倍），可用环境变量按倍数放宽，不能缩短。"""
+    source = os.environ if env is None else env
+    try:
+        scale = float(source.get(_WATCHDOG_SCALE_ENV, "1"))
+    except ValueError:
+        scale = 1.0
+    return int(_REAL_START_BASELINE_MS[succeeds] * max(scale, 1.0))
+
+
+def _load_facts() -> dict[str, object]:
+    """超时当时的机器负载，让 qml 组 124 退出不再只剩一个 git 栈。"""
+    facts: dict[str, object] = {"cpu_count": os.cpu_count()}
+    if hasattr(os, "getloadavg"):
+        facts["load_average"] = os.getloadavg()
+    facts["hint"] = (
+        "超时先看机器负载：栈停在 git 子进程只说明当时正在跑质量门，不等于 git 卡死；"
+        f"确认机器过载后可设环境变量 {_WATCHDOG_SCALE_ENV}=2 或 3 重跑"
+    )
+    return facts
+
+
 def _exit_start_timeout(
     root: Path, phase: str, timeout_ms: int, facts: dict[str, object]
 ) -> NoReturn:
     """Persist phase and live Python stacks outside pytest's captured descriptors."""
+    facts = {**_load_facts(), **facts}
     junit = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--junitxml=")), None)
     directory = Path(junit).resolve().parent if junit else root
     path = directory / f"pm-start-timeout-{os.getpid()}.log"
@@ -947,7 +975,7 @@ def _real_start_owner_refs(
         assert bridge.startExecution(mission_id)["accepted"] is True
         worker = bridge._start_workers[mission_id]
         # The existing real success E2E takes 67-75 seconds, including genuine quality gates.
-        timeout_ms = 180_000 if succeeds else 5_000
+        timeout_ms = _start_watchdog_ms(succeeds)
         if not pool.waitForDone(timeout_ms):
             _exit_start_timeout(workspace, "real-start-worker-drain", timeout_ms, {
                 "mission_id": mission_id, "succeeds": succeeds, "worker_done": worker.done,
@@ -1075,3 +1103,24 @@ def test_real_start_background_gc_never_destroys_gui_objects(
     record_property("lifecycle_child_stderr", stderr)
     assert child.returncode == 0, f"exit={child.returncode}\n{stdout}\n{stderr}"
     assert "PM_START_NATIVE_PUMP_SURVIVED" in stdout
+
+
+def test_start_watchdog_leaves_at_least_eight_times_the_normal_runtime() -> None:
+    """TD-SW008-135：正常 75 秒的用例，看门狗余量不再只有 2.4 倍。"""
+    assert _start_watchdog_ms(True, {}) >= 8 * 75_000
+    assert _start_watchdog_ms(False, {}) == 5_000
+
+
+def test_start_watchdog_scale_can_only_widen_the_limit() -> None:
+    assert _start_watchdog_ms(True, {_WATCHDOG_SCALE_ENV: "2"}) == 2 * _start_watchdog_ms(True, {})
+    assert _start_watchdog_ms(True, {_WATCHDOG_SCALE_ENV: "0.1"}) == _start_watchdog_ms(True, {})
+    assert _start_watchdog_ms(True, {_WATCHDOG_SCALE_ENV: "abc"}) == _start_watchdog_ms(True, {})
+
+
+def test_start_timeout_log_carries_machine_load_and_a_hint() -> None:
+    facts = _load_facts()
+    assert facts["cpu_count"] == os.cpu_count()
+    assert _WATCHDOG_SCALE_ENV in str(facts["hint"]) and "负载" in str(facts["hint"])
+    if hasattr(os, "getloadavg"):
+        load = facts["load_average"]
+        assert isinstance(load, tuple) and len(load) == 3
