@@ -7,8 +7,8 @@ after AUD-001.  Every missing condition is named in plain words; the exit code i
 Conditions (the user's merge rule, plus the two the project added for audit and the safety zone):
 
 1. the PR is open, not a draft, and merges into main without conflict;
-2. an audit report for this PR exists under ``reviews/`` (or a ``--reports-dir``) and the head commit it names is the
-   PR's current head, with a passing conclusion;
+2. an audit report for this PR exists under ``reviews/`` or a ``--reports-dir`` and its last
+   ``放行判定: <head first 8> 过|有条件过|不过`` line for the current head says exactly ``过``;
 3. every check run and status on the current head is successful, and ``safety-zone`` is among them;
 4. a PR that touches the safety zone carries a comment ``安全签字 <current head>`` from the named signer
    (judged by ``reviews/tools/safety_zone_check.find_signature``, the same function safety-gate uses).
@@ -32,9 +32,7 @@ from auto_pm.application.core.pr_open_service import GhRunner, default_gh
 PASSING_CONCLUSIONS = frozenset({"success", "neutral", "skipped"})
 PLC_TOP = "0100_PLC自动化"
 SAFETY_CONTEXT = "safety-zone"
-SHA_TOKEN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])")
-NEGATIVE_VERDICT = re.compile(r"不同意|不通过|未通过|不过|不能合并|不可合并")
-POSITIVE_VERDICT = re.compile(r"同意|通过|过[\s*）)、，,。；;]|过$|可以合并")
+VERDICT_LINE = re.compile(r"^\s*放行判定\s*[:：]\s*([0-9A-Fa-f]{8})\s+(有条件过|不过|过)\s*$")
 SAFETY_DECLARATION = re.compile(r"^\s*安全回路\s*[:：]\s*是\s*$", re.MULTILINE)
 WRITEBACK = re.compile(r"^##\s*建议回写\s*$(.*?)(?=^##\s|\Z)", re.MULTILINE | re.DOTALL)
 HEADER_LINES = 6
@@ -76,59 +74,57 @@ def load_safety_module(root: Path) -> ModuleType | None:
     return module
 
 
-def _head_matches(head: str, token: str) -> bool:
-    return len(token) >= 7 and head.lower().startswith(token.lower())
+def _natural_key(name: str) -> tuple[int, str]:
+    lead = re.match(r"\d+", name)
+    return (int(lead.group()) if lead else 10**9, name)
 
 
-def _verdict_line(text: str) -> str:
-    """The conclusion: the line holding 结论, or the first line under a bare ``## 结论`` heading."""
+def find_audit_report(number: int, head: str, report_dirs: Sequence[Path]) -> tuple[bool, str]:
+    """(ok, plain-words detail) from the 放行判定 lines of this PR's reports.
 
-    lines = text.splitlines()
-    for index, line in enumerate(lines):
-        if "结论" not in line:
-            continue
-        if line.strip().lstrip("#").strip().strip("*：: ") == "结论":
-            return next((nxt for nxt in lines[index + 1 :] if nxt.strip()), "")
-        return line
-    return ""
-
-
-def find_audit_report(
-    number: int, head: str, report_dirs: Sequence[Path]
-) -> tuple[bool, str]:
-    """(ok, plain-words detail).  A report belongs to the PR when its file name or first lines say ``PR #<n>``."""
+    A report belongs to the PR when its file name or first lines say ``PR #<n>``.  Only lines of the exact form
+    ``放行判定: <head first 8> 过|有条件过|不过`` count; of those naming the current head the last one decides
+    (file order by leading number, then line order), and only a plain ``过`` lets the PR through.
+    """
 
     pattern = re.compile(rf"(?i)(?:\bPR\s*#?\s*{number}\b|(?<![0-9])#{number}(?![0-9])|\bpr-?{number}(?![0-9]))")
-    stale: list[str] = []
-    negative: list[str] = []
-    for directory in report_dirs:
-        if not directory.is_dir():
+    short = head[:8].lower()
+    mine: list[tuple[str, str]] = []  # (verdict, file name) for the current head, in reading order
+    other_heads: set[str] = set()
+    seen: list[str] = []
+    candidates = [
+        path for directory in report_dirs if directory.is_dir() for path in directory.glob("*.md")
+    ]
+    for path in sorted(candidates, key=lambda item: _natural_key(item.name)):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
             continue
-        for path in sorted(directory.glob("*.md")):
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
+        head_lines = "\n".join(text.splitlines()[:HEADER_LINES])
+        if not pattern.search(path.name) and not pattern.search(head_lines):
+            continue
+        seen.append(path.name)
+        for line in text.splitlines():
+            found = VERDICT_LINE.match(line)
+            if not found:
                 continue
-            head_lines = "\n".join(text.splitlines()[:HEADER_LINES])
-            if not pattern.search(path.name) and not pattern.search(head_lines):
-                continue
-            shas = SHA_TOKEN.findall(text)
-            if not any(_head_matches(head, sha) for sha in shas):
-                named = "、".join(dict.fromkeys(sha[:8] for sha in shas[:3])) or "没有写提交号"
-                stale.append(f"{path.name}（审的是 {named}）")
-                continue
-            verdict = _verdict_line(text)
-            if NEGATIVE_VERDICT.search(verdict) or not POSITIVE_VERDICT.search(verdict):
-                negative.append(f"{path.name}（结论行：{verdict.strip()[:60] or '找不到结论行'}）")
-                continue
-            return True, f"{path.name}，审的是当前头 {head[:8]}"
-    if negative:
-        return False, "找到审计报告但结论不是通过：" + "；".join(negative)
-    if stale:
+            if found.group(1).lower() == short:
+                mine.append((found.group(2), path.name))
+            else:
+                other_heads.add(found.group(1).lower())
+    if mine:
+        verdict, name = mine[-1]
+        if verdict == "过":
+            return True, f"{name}：放行判定 {short} 过"
+        return False, f"{name} 的最后一条放行判定是“{verdict}”（头 {short}），要复审后得到“过”才放行"
+    if other_heads:
         return False, (
-            f"审计报告审的不是当前头 {head[:8]}（PR 推过新提交后要重审）：" + "；".join(stale)
+            f"报告里的放行判定写的是别的提交（{'、'.join(sorted(other_heads))}），不是当前头 {short}"
+            "（PR 推过新提交后要重审）；缺当前头的放行判定行"
         )
     searched = "、".join(str(directory) for directory in report_dirs) or "(无目录)"
+    if seen:
+        return False, f"缺放行判定行：{'、'.join(seen)} 里没有“放行判定: {short} 过|有条件过|不过”这一行"
     return False, f"没有找到 PR #{number} 的审计报告（找过：{searched}；文件名或开头要写 PR #{number}）"
 
 

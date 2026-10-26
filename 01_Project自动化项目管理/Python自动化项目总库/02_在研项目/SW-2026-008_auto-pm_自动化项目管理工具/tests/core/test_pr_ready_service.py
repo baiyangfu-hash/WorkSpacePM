@@ -12,7 +12,6 @@ from click.testing import CliRunner
 
 from auto_pm.application.core.pr_ready_service import (
     PrReadyService,
-    find_audit_report,
     judge_checks,
     render,
 )
@@ -66,7 +65,11 @@ def report_dir(tmp_path: Path, text: str, name: str = "216_audit_PR170.md") -> P
     return directory
 
 
-GOOD_REPORT = f"# 216 PR #170 审计\n\n## 结论\n\n同意，可以合并。头提交 {HEAD[:8]}\n"
+def verdict(sha: str, word: str) -> str:
+    return f"放行判定: {sha[:8]} {word}"
+
+
+GOOD_REPORT = f"# 216 PR #170 审计\n\n## 结论\n\n同意，可以合并。\n\n{verdict(HEAD, '过')}\n"
 
 
 def check(tmp_path: Path, gh: FakeGh, text: str | None = GOOD_REPORT, number: int = 170):  # noqa: ANN201
@@ -94,16 +97,67 @@ def test_r02_a_missing_audit_report_blocks_and_says_where_it_looked(tmp_path: Pa
 def test_r03_a_report_for_an_older_head_blocks(tmp_path: Path) -> None:
     report = check(tmp_path, FakeGh(), text=GOOD_REPORT.replace(HEAD[:8], OLD[:8]))
     assert failed(report) == {"独立审计报告"}
-    assert "审的不是当前头" in "\n".join(render(report))
+    assert "不是当前头" in "\n".join(render(report))
 
 
 def test_r04_a_report_for_another_pr_does_not_count(tmp_path: Path) -> None:
     assert failed(check(tmp_path, FakeGh(), number=171)) == {"独立审计报告"}
 
 
-def test_r05_a_negative_conclusion_blocks(tmp_path: Path) -> None:
-    report = check(tmp_path, FakeGh(), text=GOOD_REPORT.replace("同意，可以合并。", "不同意，有一处阻断。"))
+def test_r05_only_a_conditional_pass_is_blocked(tmp_path: Path) -> None:
+    report = check(tmp_path, FakeGh(), text=GOOD_REPORT.replace("过\n", "有条件过\n").replace(" 有条件有条件", " 有条件"))
     assert failed(report) == {"独立审计报告"}
+    assert "有条件过" in "\n".join(render(report))
+
+
+def test_r05b_a_report_without_the_verdict_line_is_blocked_with_the_exact_hint(tmp_path: Path) -> None:
+    report = check(tmp_path, FakeGh(), text="# 216 PR #170 审计\n\n结论：同意，可以合并，头 " + HEAD[:8] + "\n")
+    assert failed(report) == {"独立审计报告"}
+    assert "缺放行判定行" in "\n".join(render(report))
+
+
+def two_reports(tmp_path: Path, first: str, second: str, same_file: bool = False) -> Path:
+    directory = tmp_path / "reviews"
+    directory.mkdir(exist_ok=True)
+    head = "# {n} PR #170 审计\n\n"
+    if same_file:
+        text = head.format(n=216) + f"## 首审\n{verdict(HEAD, first)}\n\n## 复审\n{verdict(HEAD, second)}\n"
+        (directory / "216_audit_PR170.md").write_text(text, encoding="utf-8")
+    else:
+        (directory / "216_audit_PR170.md").write_text(head.format(n=216) + verdict(HEAD, first) + "\n", encoding="utf-8")
+        (directory / "220_reaudit_PR170.md").write_text(head.format(n=220) + verdict(HEAD, second) + "\n", encoding="utf-8")
+    return directory
+
+
+@pytest.mark.parametrize("same_file", [False, True])
+@pytest.mark.parametrize("first", ["有条件过", "不过"])
+def test_r05c_a_later_pass_after_a_conditional_or_failed_first_audit_lets_it_through(
+    tmp_path: Path, first: str, same_file: bool
+) -> None:
+    directory = two_reports(tmp_path, first, "过", same_file)
+    report = PrReadyService(REPO_ROOT, gh=FakeGh(), report_dirs=[directory], repo="o/r").check(170)
+    assert report.ready, render(report)
+
+
+@pytest.mark.parametrize("same_file", [False, True])
+def test_r05d_a_later_fail_after_a_pass_blocks_the_last_line_decides(tmp_path: Path, same_file: bool) -> None:
+    directory = two_reports(tmp_path, "过", "不过", same_file)
+    report = PrReadyService(REPO_ROOT, gh=FakeGh(), report_dirs=[directory], repo="o/r").check(170)
+    assert failed(report) == {"独立审计报告"}
+
+
+def test_r05e_file_order_is_by_leading_number_not_by_text(tmp_path: Path) -> None:
+    directory = tmp_path / "reviews"
+    directory.mkdir()
+    (directory / "99_audit_PR170.md").write_text(f"# PR #170\n{verdict(HEAD, '不过')}\n", encoding="utf-8")
+    (directory / "100_reaudit_PR170.md").write_text(f"# PR #170\n{verdict(HEAD, '过')}\n", encoding="utf-8")
+    assert PrReadyService(REPO_ROOT, gh=FakeGh(), report_dirs=[directory], repo="o/r").check(170).ready
+
+
+def test_r05f_verdict_lines_must_be_exact(tmp_path: Path) -> None:
+    for line in (f"放行判定: {HEAD[:8]} 过（有保留）", f"放行判定: {HEAD[:7]} 过", f"结论 放行判定: {HEAD[:8]} 过"):
+        text = f"# PR #170\n\n{line}\n"
+        assert failed(check(tmp_path, FakeGh(), text=text)) == {"独立审计报告"}, line
 
 
 def test_r06_a_failing_or_unfinished_check_blocks_by_name() -> None:
@@ -187,13 +241,6 @@ def test_r16_only_reads_are_issued_and_nothing_merges(tmp_path: Path) -> None:
         assert call[0] in {"pr", "api", "repo"}
         assert call[:2] != ("pr", "merge") and "-X" not in call and "--method" not in call
         assert not {"merge", "comment", "edit", "close", "review"} & set(call[:2])
-
-
-def test_r17_find_audit_report_accepts_a_unique_prefix_of_at_least_seven_chars(tmp_path: Path) -> None:
-    directory = report_dir(tmp_path, f"# PR #5\n\n结论：**过**，头 {HEAD[:7]}\n", "x_pr5.md")
-    assert find_audit_report(5, HEAD, [directory])[0]
-    short = report_dir(tmp_path, f"# PR #6\n\n结论：同意 {HEAD[:5]}\n", "y_pr6.md")
-    assert not find_audit_report(6, HEAD, [short])[0]
 
 
 def test_r18_cli_exit_codes_and_plain_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
