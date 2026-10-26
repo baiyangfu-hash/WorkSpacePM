@@ -66,8 +66,8 @@ TEST_CASE "TC_HB_Timeout_Step0"
     WAIT_CYCLES 5;
     ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
     ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
-    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = TRUE;
-    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = TRUE;
+    // 注: 这里不断言 bMachine_ReadyIn / bMachine_ReadyOut = TRUE。测试跑的是整个 OB1, FB_3001 置 TRUE 之后,
+    //     工位1 (FB_1001) 在未使能自动时每个周期都会把它们强制撤成 FALSE (FB_1001 第 97、98 行), 最终读到的恒为 FALSE。
     // --- 心跳输入从此不再变化。已过约 6 个周期; 再等到约 11 s (11000 周期), 还不能报故障 ---
     WAIT_CYCLES 10990;
     ASSERT GlobalVars.stExternal.stUpstream.bUpstreamComFault = FALSE;
@@ -75,8 +75,8 @@ TEST_CASE "TC_HB_Timeout_Step0"
     ASSERT GlobalVars.stExternal.bAnyComFault = FALSE;
     ASSERT GlobalVars.fbExternalDevice.q_bComAlarm = FALSE;
     ASSERT GlobalVars.fbExternalDevice.q_wErrorCode = 16#0000;
-    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = TRUE;
-    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = TRUE;
+    // 注: 这里同样不断言 bMachine_ReadyIn / bMachine_ReadyOut = TRUE。测试跑的是整个 OB1, FB_3001 置 TRUE 之后,
+    //     工位1 (FB_1001) 在未使能自动时每个周期都会把它们强制撤成 FALSE (FB_1001 第 97、98 行), 最终读到的恒为 FALSE。
     // --- 再等 1100 个周期, 共约 12.1 s: 必须已报故障, 允许信号和动作输出撤销 ---
     WAIT_CYCLES 1100;
     ASSERT GlobalVars.stExternal.stUpstream.bUpstreamComFault = TRUE;

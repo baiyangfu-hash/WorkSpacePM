@@ -81,6 +81,16 @@ def _say(msg: str) -> None:
 # ── config ───────────────────────────────────────────────
 
 
+def marker_real_path(cfg: dict[str, Any], target: Path) -> Path | None:
+    """Real path of a markers.remove entry when it stays inside config.root or config.out_dir after links are followed."""
+    try:
+        real = target.resolve()
+        bases = [Path(p).resolve() for p in (cfg.get("root"), cfg.get("out_dir")) if p]
+    except (OSError, RuntimeError):
+        return None
+    return real if any(real.is_relative_to(base) for base in bases) else None
+
+
 def load_config(path: Path) -> tuple[dict[str, Any], str]:
     raw = path.read_bytes()
     cfg = json.loads(raw.decode("utf-8-sig"))
@@ -152,6 +162,19 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
     if mode != "none" and int(lease["renew_interval_s"]) > int(lease["lease_seconds"]) - MIN_REMAINING_S - 60:
         raise GateError(f"lease.renew_interval_s must leave the {MIN_REMAINING_S} s floor plus a minute: "
                         f"at most lease_seconds - {MIN_REMAINING_S + 60}")
+    # lease.hold_until_marker: after the last step the runner keeps the lease renewed until this file appears (the closing
+    # step writes it), so the lease cannot run out between the verdict and the closing (TD-SW008-204).
+    hold = lease.get("hold_until_marker")
+    if hold is not None:
+        if mode == "none":
+            raise GateError("lease.hold_until_marker needs a lease mode other than none")
+        hold_path = Path(fill(hold)) if isinstance(hold, str) else None
+        if hold_path is None or not hold_path.is_absolute() or ".." in hold_path.parts:
+            raise GateError("lease.hold_until_marker must be an absolute path")
+        lease["hold_until_marker"] = str(hold_path)
+        lease.setdefault("hold_timeout_s", 2 * 3600)
+        if not isinstance(lease["hold_timeout_s"], int) or not 60 <= lease["hold_timeout_s"] <= 4 * 3600:
+            raise GateError("lease.hold_timeout_s must be 60..14400")
     if mode == "auto_pm":
         for k in ("run_id", "owner"):
             if not isinstance(lease.get(k), str) or not lease[k]:
@@ -178,6 +201,16 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
         raise GateError("round_timeout_s must be 10..39600 (the scheduled task stops at 12 h)")
     for k in ("done", "failed"):
         cfg.setdefault("markers", {}).setdefault(k, {})
+    # markers.remove: files some earlier script left to say "a heavy round is running"; the round that ends removes them
+    # (TD-SW008-205).  Only plain files inside the workspace root or the output folder, so a config cannot delete elsewhere.
+    remove = cfg["markers"].setdefault("remove", [])
+    if not isinstance(remove, list) or not all(isinstance(r, str) and r for r in remove):
+        raise GateError("markers.remove must be a list of file paths")
+    cfg["markers"]["remove"] = [fill(r) for r in remove]
+    for r in cfg["markers"]["remove"]:
+        target = Path(r)
+        if not target.is_absolute() or ".." in target.parts or marker_real_path(cfg, target) is None:
+            raise GateError(f"markers.remove: {r} must be an absolute path inside config.root or config.out_dir")
     cfg.setdefault("poll_s", 15)
     if not 1 <= int(cfg["poll_s"]) <= 300:
         raise GateError("poll_s must be 1..300")
@@ -603,7 +636,22 @@ class Runner:
                     target = Path(rel) if Path(rel).is_absolute() else self.out / rel
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(text.replace("{exit}", str(EXIT_CODES[result])), encoding="utf-8", newline="\n")
+        if result in FINAL:
+            for rel in self.cfg["markers"]["remove"]:
+                target = Path(rel)
+                try:
+                    # Links are followed before the check, so a link planted in root cannot point the delete elsewhere.
+                    real = marker_real_path(self.cfg, target)
+                    if real is None:
+                        self.log(f"marker {target} not removed (resolves outside the workspace)")
+                    elif real.is_file():
+                        real.unlink()
+                        self.log(f"removed leftover marker {target}")
+                except OSError as error:
+                    self.log(f"marker {target} not removed ({type(error).__name__})")
         self.log(f"result {result}" + (f": {reason}" if reason else ""))
+        if result in {"DONE", "FAILED"}:
+            self._hold_for_closing()
         self.stop_all.set()
         self.write_status()
         if result in FINAL and self.task_name:
@@ -617,6 +665,24 @@ class Runner:
             self.log(f"scheduled task {self.task_name} deleted" if code == 0
                      else f"scheduled task {self.task_name} not deleted ({code})")
         return EXIT_CODES[result]
+
+    def _hold_for_closing(self) -> None:
+        """Keep the lease renewed (the keeper thread is still running) until the closing step has written its marker."""
+        marker = self.cfg["lease"].get("hold_until_marker")
+        if not marker or not self.lease.enabled:
+            return
+        timeout = int(self.cfg["lease"]["hold_timeout_s"])
+        self.log(f"holding the lease until {marker} appears (at most {timeout} s)")
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if Path(marker).exists():
+                self.log("closing marker seen; releasing the lease")
+                return
+            if self.hard_stop.is_set() or (self.out / STOP_FILE).exists():
+                self.log("hold ended early: " + ("lease lost" if self.hard_stop.is_set() else "STOP file"))
+                return
+            time.sleep(min(float(self.cfg["poll_s"]), 1.0))
+        self.log(f"hold timed out after {timeout} s without the closing marker")
 
     def run(self) -> int:
         self.out.mkdir(parents=True, exist_ok=True)
@@ -653,6 +719,15 @@ class Runner:
                           "bytes_at_start": tree_fingerprint(self.cfg)}
         self.state["result"] = None
         self.state["runner_pid"] = os.getpid()
+        hold_marker = self.cfg["lease"].get("hold_until_marker")
+        if hold_marker and Path(hold_marker).exists():
+            # A marker left by an earlier round would end the hold the moment the verdict is written. Move it aside, never delete.
+            aside = Path(f"{hold_marker}.stale.{int(time.time())}")
+            try:
+                Path(hold_marker).rename(aside)
+            except OSError as error:
+                return self._refuse(f"hold_until_marker {hold_marker} already exists and cannot be moved aside ({type(error).__name__})")
+            self.log(f"old hold_until_marker moved aside to {aside}")
 
         expected = self.state.get("bytes_at_start")
         for s in self.cfg["steps"]:

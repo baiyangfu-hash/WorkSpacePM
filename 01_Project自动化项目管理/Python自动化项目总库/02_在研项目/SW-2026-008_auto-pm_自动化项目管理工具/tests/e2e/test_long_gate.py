@@ -111,17 +111,20 @@ def lab(tmp_path: Path) -> dict[str, Path]:
     return {"root": tmp_path, "tools": tools, "wt": wt, "out": tmp_path / "out"}
 
 
-def _config(lab: dict[str, Path], steps: list[dict[str, Any]], *, interval: int = 1, name: str = "drill") -> Path:
+def _config(
+    lab: dict[str, Path], steps: list[dict[str, Any]], *, interval: int = 1, name: str = "drill", remove: list[str] | None = None
+) -> Path:
     cfg = {
         "name": name,
         "python": PY,
         "out_dir": str(lab["out"]),
+        **({"root": str(lab["root"])} if remove else {}),
         "poll_s": 1,
         "lease": {"mode": "command", "argv": [PY, str(lab["tools"] / "renew.py"), str(lab["tools"])],
                   "renew_interval_s": interval},
         "fingerprint": {"git_worktree": str(lab["wt"])},
         "markers": {"done": {"DONE": "done\n", "gates_all.exit": "{exit}\n"},
-                    "failed": {"FAILED": "failed\n", "gates_all.exit": "{exit}\n"}},
+                    "failed": {"FAILED": "failed\n", "gates_all.exit": "{exit}\n"}, **({"remove": remove} if remove else {})},
         "steps": steps,
     }
     path = lab["root"] / "gate.json"
@@ -550,3 +553,232 @@ def test_partial_output_held_open_is_copied_aside(tmp_path: Path, monkeypatch: p
     mod._keep_partial(src, dst, mod.Log(tmp_path / "log"))
     assert dst.read_text(encoding="utf-8") == "half a group\n"
     assert "copied to core.interrupted.1.txt" in (tmp_path / "log").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("code", [0, 1])
+def test_a_heavy_round_marker_is_removed_when_the_round_ends_whatever_the_verdict(lab: dict[str, Path], code: int) -> None:
+    """TD-SW008-205：启动脚本留下的 HEAVY_GATES_RUNNING 一类标记，由结束的这一轮清掉（有组失败也清）。"""
+    marker = lab["root"] / "HEAVY_GATES_RUNNING"
+    marker.write_text("run=RUN-X\n", encoding="utf-8")
+    cfg = _config(lab, [_step(lab, "s", code=code)], remove=[str(marker)])
+
+    _run(cfg, "run")
+
+    assert not marker.exists()
+    assert "removed leftover marker" in (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def test_the_marker_stays_while_the_round_is_still_running_and_a_missing_one_is_fine(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "HEAVY_RUNNING"
+    cfg = _config(lab, [_step(lab, "slow", wait=3.0)], remove=[str(marker), str(lab["root"] / "never_existed")])
+    marker.write_text("run=RUN-X\n", encoding="utf-8")
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: (lab["out"] / "slow.started").exists())
+        assert marker.exists()
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("bad", ["relative/marker", "../escape", "/etc/passwd"])
+def test_markers_remove_refuses_paths_outside_the_workspace(lab: dict[str, Path], bad: str) -> None:
+    cfg = _config(lab, [_step(lab, "s")], remove=[bad])
+    result = _run(cfg, "run")
+    assert result.returncode != 0 and "markers.remove" in (result.stdout + result.stderr)
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("this machine cannot create symbolic links")
+
+
+def test_markers_remove_refuses_dotdot_inside_an_absolute_path(lab: dict[str, Path]) -> None:
+    cfg = _config(lab, [_step(lab, "s")], remove=[str(lab["root"] / "sub" / ".." / "HEAVY_GATES_RUNNING")])
+    result = _run(cfg, "run")
+    assert result.returncode != 0 and "markers.remove" in (result.stdout + result.stderr)
+
+
+def test_markers_remove_refuses_a_link_that_points_outside_the_workspace(lab: dict[str, Path], tmp_path_factory: pytest.TempPathFactory) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "precious.txt"
+    outside.write_text("keep\n", encoding="utf-8")
+    _symlink_or_skip(lab["root"] / "HEAVY_GATES_RUNNING", outside)
+    cfg = _config(lab, [_step(lab, "s")], remove=[str(lab["root"] / "HEAVY_GATES_RUNNING")])
+
+    result = _run(cfg, "run")
+
+    assert result.returncode != 0 and "markers.remove" in (result.stdout + result.stderr)
+    assert outside.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_a_link_planted_after_the_config_check_never_deletes_outside_files(lab: dict[str, Path], tmp_path_factory: pytest.TempPathFactory) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "precious.txt"
+    outside.write_text("keep\n", encoding="utf-8")
+    marker = lab["root"] / "HEAVY_GATES_RUNNING"
+    cfg = _config(lab, [_step(lab, "slow", wait=3.0)], remove=[str(marker)])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: (lab["out"] / "slow.started").exists())
+        _symlink_or_skip(marker, outside)
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert outside.read_text(encoding="utf-8") == "keep\n"
+    assert "resolves outside the workspace" in (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def test_the_marker_stays_when_the_round_is_only_stopped(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "HEAVY_GATES_RUNNING"
+    marker.write_text("run=RUN-X\n", encoding="utf-8")
+    cfg = _config(lab, [_step(lab, "core", wait=120)], remove=[str(marker)])
+    runner = _start(cfg)
+    _wait_for(lambda: _runs(lab, "core") == 1)
+    assert _run(cfg, "stop").returncode == 0
+    assert runner.wait(timeout=60) == 7
+    assert marker.exists()
+
+
+def test_a_directory_is_never_removed(lab: dict[str, Path]) -> None:
+    folder = lab["root"] / "HEAVY_DIR"
+    folder.mkdir()
+    (folder / "keep.txt").write_text("x", encoding="utf-8")
+    cfg = _config(lab, [_step(lab, "s")], remove=[str(folder)])
+    assert _run(cfg, "run").returncode == 0
+    assert (folder / "keep.txt").exists()
+
+
+def test_a_marker_that_cannot_be_deleted_is_only_logged(lab: dict[str, Path]) -> None:
+    # A read-only parent makes the unlink fail on POSIX; elsewhere (Windows, root) there is no cheap way to force it.
+    if os.name == "nt" or os.geteuid() == 0:
+        pytest.skip("cannot make a delete fail on this machine without an open handle")
+    stuck = lab["root"] / "locked" / "HEAVY_STUCK"
+    stuck.parent.mkdir()
+    stuck.write_text("x", encoding="utf-8")
+    cfg = _config(lab, [_step(lab, "s")], remove=[str(stuck)])
+    stuck.parent.chmod(0o500)
+    try:
+        result = _run(cfg, "run")
+    finally:
+        stuck.parent.chmod(0o700)
+    assert result.returncode == 0 and stuck.exists()
+    assert "not removed" in (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def _with_hold(cfg: Path, marker: Path, timeout: int | None = None) -> None:
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    data["lease"]["hold_until_marker"] = str(marker)
+    if timeout is not None:
+        data["lease"]["hold_timeout_s"] = timeout
+    cfg.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _renewals(lab: dict[str, Path]) -> int:
+    p = lab["tools"] / "renew_count"
+    return int(p.read_text()) if p.exists() else 0
+
+
+def test_the_lease_stays_renewed_after_the_verdict_until_the_closing_marker_appears(lab: dict[str, Path]) -> None:
+    """TD-SW008-204：判卷结束后收口还没做完时，租约不能停止续租。"""
+    marker = lab["root"] / "CLOSING_DONE"
+    cfg = _config(lab, [_step(lab, "rest")], interval=1)
+    _with_hold(cfg, marker)
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: (lab["out"] / "DONE").exists())  # the verdict markers are written first
+        before = _renewals(lab)
+        time.sleep(3.5)
+        assert proc.poll() is None  # still holding
+        assert _renewals(lab) > before  # and still renewing after the verdict
+        marker.write_text("closed\n", encoding="utf-8")
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "closing marker seen" in (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def test_without_the_hold_option_the_runner_exits_right_after_the_verdict(lab: dict[str, Path]) -> None:
+    plain = _config(lab, [_step(lab, "rest")], interval=1, name="plain")
+    started = time.monotonic()
+    assert _run(plain, "run").returncode == 0
+    assert time.monotonic() - started < 30
+
+
+@pytest.mark.parametrize("bad", [{"hold_until_marker": "relative"}, {"hold_until_marker": "/x/../y"}, {"hold_timeout_s": 5}])
+def test_a_bad_hold_setting_is_refused_at_start(lab: dict[str, Path], bad: dict[str, Any]) -> None:
+    cfg = _config(lab, [_step(lab, "s")])
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    data["lease"].update({"hold_until_marker": str(lab["root"] / "M"), **bad})
+    cfg.write_text(json.dumps(data), encoding="utf-8")
+    result = _run(cfg, "run")
+    assert result.returncode != 0 and "hold" in (result.stdout + result.stderr)
+
+
+def _hold_cfg(lab: dict[str, Path], marker: Path, steps: list[dict[str, Any]]) -> Path:
+    cfg = _config(lab, steps, interval=1)
+    _with_hold(cfg, marker, 3600)
+    return cfg
+
+
+def _log(lab: dict[str, Path]) -> str:
+    return (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def test_a_stop_file_ends_the_hold(lab: dict[str, Path]) -> None:
+    cfg = _hold_cfg(lab, lab["root"] / "CLOSING_DONE", [_step(lab, "rest")])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: "holding the lease" in _log(lab))
+        assert _run(cfg, "stop").returncode == 0
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "hold ended early: STOP file" in _log(lab)
+
+
+def test_losing_the_lease_ends_the_hold(lab: dict[str, Path]) -> None:
+    cfg = _hold_cfg(lab, lab["root"] / "CLOSING_DONE", [_step(lab, "rest")])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: "holding the lease" in _log(lab))
+        (lab["tools"] / "renew_fail").write_text("")
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "hold ended early: lease lost" in _log(lab)
+
+
+def test_a_stopped_round_does_not_hold_the_lease(lab: dict[str, Path]) -> None:
+    # A STOP before the verdict ends the round as STOPPED (exit 7): no hold, even with a one-hour hold configured.
+    cfg = _hold_cfg(lab, lab["root"] / "CLOSING_DONE", [_step(lab, "core", wait=120)])
+    runner = _start(cfg)
+    _wait_for(lambda: _runs(lab, "core") == 1)
+    assert _run(cfg, "stop").returncode == 0
+    assert runner.wait(timeout=60) == 7
+    assert "holding the lease" not in _log(lab)
+
+
+def test_an_old_closing_marker_is_moved_aside_not_deleted_and_the_hold_still_waits(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "CLOSING_DONE"
+    marker.write_text("left by the last round\n", encoding="utf-8")
+    cfg = _hold_cfg(lab, marker, [_step(lab, "rest")])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: "holding the lease" in _log(lab))
+        time.sleep(2)
+        assert proc.poll() is None  # the stale marker did not release the lease
+        aside = list(lab["root"].glob("CLOSING_DONE.stale.*"))
+        assert len(aside) == 1 and aside[0].read_text(encoding="utf-8") == "left by the last round\n"
+        marker.write_text("closed\n", encoding="utf-8")
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "old hold_until_marker moved aside" in _log(lab)

@@ -46,7 +46,7 @@ from auto_pm.infrastructure import lease_wallet, process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
-    authority_path_parts,
+    authority_path_covered,
     clean_git_environment,
     require_governed_worktree,
 )
@@ -223,15 +223,7 @@ def _git_snapshot(root: Path) -> tuple[str, tuple[str, ...]]:
 
 
 def _within(paths: tuple[str, ...], roots: tuple[str, ...]) -> list[str]:
-    return [
-        path
-        for path in paths
-        if any(
-            authority_path_parts(path)[: len(authority_path_parts(root))]
-            == authority_path_parts(root)
-            for root in roots
-        )
-    ]
+    return [path for path in paths if authority_path_covered(path, roots)]
 
 
 @click.group(name="continuity")

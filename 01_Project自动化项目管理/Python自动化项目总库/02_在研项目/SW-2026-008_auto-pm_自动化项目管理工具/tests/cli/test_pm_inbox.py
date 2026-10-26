@@ -21,6 +21,8 @@ from auto_pm.contracts.pm_facade import PlanningDraft, PmIntent
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.plan_checklist_support import checklist_args
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 # Reuse the existing PM CLI fixtures; imported dynamically so that this file is type-checked on its own.
 _pm_facade_tests = importlib.import_module("tests.cli.test_pm_facade")
 _git = _pm_facade_tests._git
