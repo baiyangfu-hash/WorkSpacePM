@@ -1283,3 +1283,47 @@ def test_adjudication_replay_accepts_h11_event_without_authority(
 
     assert replay == first
     assert _history_snapshot(tmp_path)["events"] == events
+
+
+def test_mission_derivation_rejects_a_path_outside_the_mission_authority_and_creates_nothing(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    mission_id = _mission(tmp_path)
+
+    with pytest.raises(WorkRegistryError, match="超出 Mission authority"):
+        service.create_from_mission(
+            mission_id=mission_id, owner="agent-a", scope_paths=["auto_pm/core/example.py", "auto_pm/other.py"]
+        )
+    assert service._store.list_works("SW-2026-008") == ()
+
+
+def test_mission_derivation_rejects_a_path_the_decision_no_longer_approves(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    mission_id = _mission(tmp_path, decision_id="DEC-NARROWED")
+    _decision(tmp_path, "DEC-NARROWED", "SW-2026-008", ["auto_pm/core/unrelated.py"])
+
+    with pytest.raises(WorkRegistryError, match="Decision approved_files"):
+        service.create_from_mission(
+            mission_id=mission_id, owner="agent-a", scope_paths=["auto_pm/core/example.py"]
+        )
+    assert service._store.list_works("SW-2026-008") == ()
+
+
+def test_only_governed_entries_create_write_work() -> None:
+    """TD-SW008-012: a new caller of WorkRegistryService.create_work must be reviewed, not slip in unguarded.
+
+    Governed entries today: the CLI (implementation-card precheck), Mission derivation (authority + Decision scope,
+    inside work_registry_service itself) and the Mission orchestrator (Decision scope + Mission scope escalation).
+    """
+    import re
+
+    package = Path(__file__).resolve().parents[2] / "auto_pm"
+    callers = sorted(
+        path.relative_to(package).as_posix()
+        for path in package.rglob("*.py")
+        if re.search(r"\.create_work\(", path.read_text(encoding="utf-8", errors="replace"))
+    )
+    assert callers == [
+        "application/core/mission_orchestrator.py",
+        "application/core/work_registry_service.py",
+        "ui/cli/continuity.py",
+    ]
