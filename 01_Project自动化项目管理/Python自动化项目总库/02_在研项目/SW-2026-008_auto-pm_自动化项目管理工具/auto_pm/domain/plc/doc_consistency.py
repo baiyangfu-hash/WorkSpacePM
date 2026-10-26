@@ -575,10 +575,41 @@ def analyze_project(project_path: str) -> ProjectAnalysis:
     return ProjectAnalysis(project_path, reports, var_doc, var_exists)
 
 
-def consistency_items(project_path: str) -> list[tuple[str, str, str]]:
+REQUIRED_VAR_DOC_ITEM = "变量定义文档存在性"
+
+
+def required_document_items(analysis: ProjectAnalysis) -> list[tuple[str, str, str]]:
+    """The documents a project must have at all; their absence fails the check (TD-SW008-129, user ruling B7).
+
+    ``consistency_items`` keeps a missing document per object as a warning, so a draft can be made with
+    ``plc docs sync``. A project with data blocks, structures or organization blocks whose variable definition file
+    is gone has nothing to compare them with at all: that is a failure, not a skipped check.
+    """
+
+    needing = [
+        report.obj.name
+        for report in analysis.reports
+        if report.obj.kind not in {"FB", "FC"} and report.obj.variables
+    ]
+    if analysis.var_doc_exists or not needing:
+        return []
+    shown = "、".join(needing[:3]) + ("等" if len(needing) > 3 else "")
+    return [
+        (
+            REQUIRED_VAR_DOC_ITEM,
+            "fail",
+            f"缺少变量定义文档（期望 {_rel(analysis.var_doc_path, analysis.project_path)}），"
+            f"{len(needing)} 个数据块/结构体/组织块（{shown}）无处核对；运行 plc docs sync 生成草稿，审核后运行 plc docs confirm",
+        )
+    ]
+
+
+def consistency_items(
+    project_path: str, *, analysis: ProjectAnalysis | None = None
+) -> list[tuple[str, str, str]]:
     """(item, status, message) triples for ``PlcChecker``; empty when the project has nothing to document."""
 
-    analysis = analyze_project(project_path)
+    analysis = analysis or analyze_project(project_path)
     items: list[tuple[str, str, str]] = []
     for report in analysis.reports:
         if not report.obj.variables and not report.findings:
