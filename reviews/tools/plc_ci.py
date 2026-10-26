@@ -53,6 +53,7 @@ JUDGE_FILES = (".github/workflows/plc-ci.yml", "reviews/tools/plc_ci.py", "revie
 # 推到 main 时它们变了，用新代码把所有 PLC 项目查一遍。另加锁定依赖：第三方库换版本也可能改结果
 CHECKER_PATHS = (
     f"{SW008}/auto_pm/__init__.py",
+    f"{SW008}/auto_pm/_module_alias.py",
     f"{SW008}/auto_pm/application/core/__init__.py",
     f"{SW008}/auto_pm/application/core/paths.py",
     f"{SW008}/auto_pm/domain/__init__.py",
