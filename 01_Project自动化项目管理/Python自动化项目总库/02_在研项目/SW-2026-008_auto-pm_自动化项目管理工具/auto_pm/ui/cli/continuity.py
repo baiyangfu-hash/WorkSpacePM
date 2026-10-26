@@ -6,7 +6,6 @@ import dataclasses
 import json
 import os
 import re
-import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -51,6 +50,7 @@ from auto_pm.infrastructure.control_root_guard import (
     clean_git_environment,
     require_governed_worktree,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
 
@@ -184,8 +184,11 @@ def _holder_pid(value: str) -> int | None:
 
 
 def _git(root: Path, *args: str) -> bytes:
-    result = subprocess.run(
+    result = run_git_bounded(
         ["git", "-C", str(root), *args],
+        default_timeout=60.0,
+        error_cls=click.ClickException,
+        where=root,
         capture_output=True,
         check=False,
         env=clean_git_environment(),

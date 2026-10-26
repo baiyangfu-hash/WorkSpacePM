@@ -14,6 +14,7 @@ from pathlib import Path
 
 from auto_pm.change.parser import ChgParser
 from auto_pm.domain.secret_patterns import SecretFinding, scan_unified_diff
+from auto_pm.infrastructure.git_timeout import run_git_bounded, run_git_bounded_text
 
 log = logging.getLogger(__name__)
 
@@ -118,23 +119,23 @@ def _parse_raw_index_entries(raw_output: str) -> tuple[StagedIndexEntry, ...]:
 def _resolve_git_common_dir(repo_path: Path) -> Path:
     """解析 Git 仓库的 common-dir 绝对路径。"""
     try:
-        res = subprocess.run(
+        res = run_git_bounded_text(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=repo_path,
             cwd=str(repo_path),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
         )
         if res.returncode == 0 and res.stdout.strip():
             return Path(res.stdout.strip()).resolve()
-        res2 = subprocess.run(
+        res2 = run_git_bounded_text(
             ["git", "rev-parse", "--git-common-dir"],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=repo_path,
             cwd=str(repo_path),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=True,
         )
         raw = res2.stdout.strip()
@@ -170,13 +171,13 @@ def validate_repository_roots(
             if not ctrl.is_dir():
                 raise StagedSnapshotError(f"控制根目录不存在或不是目录: {control_root}")
 
-        res_cand = subprocess.run(
+        res_cand = run_git_bounded_text(
             ["git", "rev-parse", "--show-toplevel"],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=cand,
             cwd=str(cand),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
         )
         if res_cand.returncode != 0 or not res_cand.stdout.strip():
             raise StagedSnapshotError(f"候选根目录不是 Git 工作树: {cand}")
@@ -187,13 +188,13 @@ def validate_repository_roots(
         if not ctrl_git.is_dir():
             raise StagedSnapshotError(f"控制根不是有效主仓库根目录 (.git 不是目录): {ctrl}")
 
-        res_ctrl = subprocess.run(
+        res_ctrl = run_git_bounded_text(
             ["git", "rev-parse", "--show-toplevel"],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=ctrl,
             cwd=str(ctrl),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
         )
         if res_ctrl.returncode != 0 or Path(res_ctrl.stdout.strip()).resolve() != ctrl:
             raise StagedSnapshotError(f"控制根目录不是主仓库的顶级根目录: {ctrl}")
@@ -235,7 +236,7 @@ def _resolve_governance_roots(
 def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
     """冻结当前 index 相对 HEAD 的全部改动（含删除）及 blob 标识，不读取工作区文件内容。"""
     try:
-        result = subprocess.run(
+        result = run_git_bounded_text(
             [
                 "git",
                 "diff",
@@ -245,11 +246,11 @@ def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
                 "--no-abbrev",
                 "--no-renames",
             ],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=workspace_root,
             cwd=str(workspace_root),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=True,
         )
         snapshot = StagedSnapshot(_parse_raw_index_entries(result.stdout))
@@ -262,13 +263,13 @@ def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
 
 def _git_z_lines(workspace_root: Path, args: list[str]) -> list[str]:
     """运行只读 git 命令并按 NUL 切分输出；命令失败即抛错（fail-closed）。"""
-    result = subprocess.run(
+    result = run_git_bounded_text(
         ["git", *args],
+        default_timeout=120.0,
+        error_cls=StagedSnapshotError,
+        where=workspace_root,
         cwd=str(workspace_root),
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=True,
     )
     return [item for item in result.stdout.split("\0") if item]
@@ -304,8 +305,11 @@ def independent_staged_changes(workspace_root: Path) -> dict[str, tuple[str, str
     for entry in _git_z_lines(workspace_root, ["diff-files", "--raw", "-z", "--no-abbrev", "--diff-filter=A"])[1::2]:
         index_map.pop(_normalise_git_path(entry), None)
     has_head = (
-        subprocess.run(
+        run_git_bounded_text(
             ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=workspace_root,
             cwd=str(workspace_root),
             capture_output=True,
         ).returncode
@@ -358,13 +362,13 @@ def _get_staged_snapshot_or_reject(
 def get_staged_files(workspace_root: Path) -> list[str]:
     """获取 Git 当前暂存区的改动路径列表（含删除；重命名的旧路径也在内）"""
     try:
-        result = subprocess.run(
+        result = run_git_bounded_text(
             ["git", "diff", "--cached", "--name-only", "--no-renames"],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=workspace_root,
             cwd=str(workspace_root),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=True,
         )
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]
@@ -606,8 +610,11 @@ def _ledger_entry(snapshot: StagedSnapshot, binding: ProjectBinding) -> StagedIn
 def _read_staged_blob(workspace_root: Path, entry: StagedIndexEntry) -> bytes:
     """按已冻结的 blob 标识读取内容，不重新读取 index 或工作区。"""
     try:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "cat-file", "blob", entry.object_id],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=workspace_root,
             cwd=str(workspace_root),
             capture_output=True,
             check=True,
@@ -764,13 +771,13 @@ def _validate_control_root_change_evidence(
 def find_staged_secrets(workspace_root: Path) -> list[SecretFinding]:
     """扫描暂存区新增行里的密钥；读取失败时抛 ``StagedSnapshotError``（调用方据此拒绝提交）。"""
     try:
-        result = subprocess.run(
+        result = run_git_bounded_text(
             ["git", "diff", "--cached", "-U0", "--no-renames", "--full-index", "--no-color", "--diff-filter=ACM"],
+            default_timeout=120.0,
+            error_cls=StagedSnapshotError,
+            where=workspace_root,
             cwd=str(workspace_root),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=True,
         )
     except Exception as exc:
@@ -828,13 +835,13 @@ def _enforce_ignored_additions(workspace_root: Path) -> int:
     from auto_pm.infrastructure.ignored_file_scan import IgnoreScanError, ignored_among
 
     try:
-        result = subprocess.run(
+        result = run_git_bounded_text(
             ["git", "diff", "--cached", "--name-only", "--diff-filter=A", "--no-renames", "-z"],
+            default_timeout=120.0,
+            error_cls=IgnoreScanError,
+            where=workspace_root,
             cwd=str(workspace_root),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=True,
         )
         hits = ignored_among(workspace_root, [item for item in result.stdout.split("\0") if item])

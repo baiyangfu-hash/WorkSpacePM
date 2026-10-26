@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +18,7 @@ from auto_pm.contracts.workspace_context import (
     WorkspaceProjectMapping,
     WorkspaceRegistry,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 
 class WorkspaceContextError(RuntimeError):
@@ -361,12 +361,12 @@ class WorkspaceContextService:
             return str(path.resolve())
 
     def _candidate_commit(self) -> str:
-        result = subprocess.run(
+        result = run_git_bounded_text(
             ["git", "-C", str(self._execution_root), "rev-parse", "--verify", "HEAD"],
+            default_timeout=60.0,
+            error_cls=WorkspaceContextError,
+            where=self._execution_root,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=False,
         )
         if result.returncode != 0:
