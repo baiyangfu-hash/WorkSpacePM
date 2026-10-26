@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -121,3 +122,20 @@ def python_project_factory(tmp_path: Path) -> Callable[..., Path]:
         return project_dir
 
     return _create
+
+
+@pytest.fixture
+def identity_guard_off() -> Generator[None, None, None]:
+    """For tests about something other than the runtime identity, whose fixtures have no registered project anchor.
+
+    The guard itself is covered in ``test_runtime_identity_guard.py``, which does not use this fixture.  It keeps its own
+    ``MonkeyPatch`` so a test that calls the shared ``monkeypatch.undo()`` midway does not switch the guard back on.
+    """
+    with pytest.MonkeyPatch.context() as patcher:
+        # The command line is importable under two names (``auto_pm.cli`` and ``auto_pm.ui.cli``); patch whichever is loaded.
+        for package in ("auto_pm.ui.cli", "auto_pm.cli"):
+            for module in ("pm", "pm_closure", "pm_handoff", "pm_switch"):
+                target = sys.modules.get(f"{package}.{module}")
+                if target is not None:
+                    patcher.setattr(target, "require_runtime_identity", lambda *_a, **_k: None)
+        yield

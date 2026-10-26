@@ -40,6 +40,11 @@ from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePo
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
+from auto_pm.ui.cli.runtime_identity_guard import (
+    project_of_mission,
+    project_of_planning_request,
+    require_runtime_identity,
+)
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 _KIND_CHOICES = tuple(item.value.lower() for item in IntakeKind)
@@ -160,6 +165,7 @@ def _resolve_filing(
             project_id = (
                 ContinuityStore(app_ctx.control_root).get_planning_draft(request_id).subject_project_id
             )
+        require_runtime_identity(ctx, project_id)
         classification, item_id = PmIntakeService(app_ctx.control_root).plan_classification(
             project_id,
             request_id=request_id,
@@ -181,6 +187,7 @@ def _resolve_filing(
 def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: str = "") -> None:
     try:
         _require_control_root(ctx)
+        require_runtime_identity(ctx, project_of_mission(ctx, mission_id))
         facade = _facade(ctx)
         if action == "plan":
             card = facade.plan(mission_id)
@@ -626,6 +633,7 @@ def inbox_add(
     """把一条新事项连同分诊单记入收件箱（状态 PROPOSED，等待用户确认）。"""
     try:
         service = _intake(ctx)
+        require_runtime_identity(ctx, project_id)
         classification = service.classify(
             project_id,
             kind=IntakeKind(kind.upper()),
@@ -732,7 +740,9 @@ def inbox_confirm(
 ) -> None:
     """记录用户对该分诊单的确认（须引用 user-confirmation 证据）。"""
     try:
-        item = _intake(ctx).confirm(
+        service = _intake(ctx)
+        require_runtime_identity(ctx, service.get(item_id).project_id)
+        item = service.confirm(
             item_id,
             ticket_hash=ticket_hash,
             approver=approver,
@@ -757,7 +767,9 @@ def inbox_reject(
 ) -> None:
     """记录用户对该分诊单的驳回（须引用 user-confirmation 证据）。"""
     try:
-        item = _intake(ctx).reject(
+        service = _intake(ctx)
+        require_runtime_identity(ctx, service.get(item_id).project_id)
+        item = service.reject(
             item_id,
             ticket_hash=ticket_hash,
             approver=approver,
@@ -890,6 +902,14 @@ def approve_pm(
             rollback,
         )
     )
+    # Refuse a diverged runtime before the user is asked for the PIN.
+    if by_hash:
+        # The saved card is looked up in the Continuity Store, which a linked worktree must never open.
+        try:
+            _require_control_root(ctx)
+        except WorktreePolicyError as error:
+            raise click.ClickException(str(error)) from error
+    require_runtime_identity(ctx, project_of_planning_request(ctx, request_id) if by_hash else project_id)
     if by_hash and pin_required:
         # The user should not type the PIN only to learn the saved card cannot be approved anyway.
         try:
@@ -1048,6 +1068,7 @@ def execute_pm(
         raise click.ClickException("--card-json 不是有效的 PlanningScopeCard") from error
     if request_id != card.request_id:
         raise click.ClickException("--request-id 与 PlanningScopeCard 不一致")
+    require_runtime_identity(ctx, card.subject_project_id)
     try:
         result = _facade(ctx).execute_planning_foreground(
             card,
@@ -1078,9 +1099,13 @@ def execute_pm(
 @click.pass_context
 def accept_pm(ctx: click.Context, mission_id: str) -> None:
     """记录最终用户验收；已启用批准口令时须用户本人在终端输入口令。关闭动作仍受治理门禁约束。"""
-    approval_pin = read_approval_pin(_control_root_path(ctx), summary=f"最终验收：任务 {mission_id}（确认你已经看过结果）")
     try:
         _require_control_root(ctx)
+        require_runtime_identity(ctx, project_of_mission(ctx, mission_id))
+    except WorktreePolicyError as error:
+        raise click.ClickException(str(error)) from error
+    approval_pin = read_approval_pin(_control_root_path(ctx), summary=f"最终验收：任务 {mission_id}（确认你已经看过结果）")
+    try:
         card = _facade(ctx).accept(mission_id, approval_pin=approval_pin)
     except (PmFacadeError, WorktreePolicyError) as error:
         raise click.ClickException(str(error)) from error

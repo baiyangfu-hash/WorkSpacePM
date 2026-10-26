@@ -23,11 +23,11 @@ from auto_pm.contracts.pm_cockpit import PmCockpitCompletionState
 from auto_pm.core.pm_closure_service import PmClosureError
 from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
 from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.infrastructure import lease_wallet
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.continuity import _secret_from_environment
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 
 def _echo(payload: dict[str, Any]) -> None:
@@ -41,13 +41,9 @@ def _guarded_mission(ctx: click.Context, mission_id: str) -> Mission:
     try:
         WorktreePolicyService(app_ctx.control_root).require_control_root()
         mission = ContinuityStore(app_ctx.control_root).get_mission(mission_id.strip())
-        context = WorkspaceContextService(
-            str(app_ctx.control_root), execution_root=app_ctx.workspace_root
-        ).resolve(project_id=mission.subject_project_id, start_path=app_ctx.control_root)
-    except (WorktreePolicyError, ContinuityStoreError, WorkspaceContextError, ValueError) as error:
+    except (WorktreePolicyError, ContinuityStoreError, ValueError) as error:
         raise click.ClickException(str(error)) from error
-    if context.conflicts:
-        raise click.ClickException("运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
+    require_runtime_identity(ctx, mission.subject_project_id)
     return mission
 
 
