@@ -34,7 +34,12 @@ from auto_pm.application.core.agent_worktree_service import (
     caller_agent,
 )
 from auto_pm.application.core.implementation_card_precheck import precheck_markdown_card
-from auto_pm.application.core.pr_body_builder import TD_ID, build_body, read_card_fields
+from auto_pm.application.core.pr_body_builder import (
+    TD_ID,
+    CardFields,
+    build_body,
+    read_card_fields,
+)
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 
 UNKNOWN_CALLER = "?"  # what caller_agent() returns when the markers name nobody on the roster
@@ -195,19 +200,15 @@ class PrOpenService:
         card_text = self._card_at_base(task_card, base_sha)
         fields = read_card_fields(card_text, Path(task_card).stem)
         card_title = fields.title
-        safety_circuit = self._safety_declaration(
-            station.path, base_sha, safety_circuit or fields.safety
-        )
-        if safety_circuit is None:
-            safety_circuit = "否"
-            notes.append("卡里和命令行都没声明安全回路，按“否”填；涉及急停、联锁等请加 --safety-circuit 是")
+        safety_circuit = self._card_safety(task_card, fields, safety_circuit)
+        safety_circuit = self._safety_declaration(station.path, base_sha, safety_circuit)
         subjects = " ".join(message.splitlines()[0] for _sha, message in commits if message)
         tds = tuple(dict.fromkeys([*fields.tds, *TD_ID.findall(subjects)]))
         body = build_body(
             task_card=task_card,
             fields=fields,
             scope_paths=self._card_scope(task_card, card_text),
-            safety_circuit=safety_circuit,
+            safety_circuit=str(safety_circuit),
             chg_numbers=chg_numbers,
             commits=commits,
             evidence=evidence,
@@ -287,6 +288,28 @@ class PrOpenService:
         if not path or path.startswith("/") or ".." in parts or re.match(r"^[A-Za-z]:", path):
             raise PrOpenRefusedError(f"任务卡路径必须是仓库内的相对路径：{task_card}")
         return path
+
+    @staticmethod
+    def _card_safety(task_card: str, fields: CardFields, flag: str | None) -> str:
+        """The 安全回路 answer comes from the card, verbatim; no default, no free text (audit 217)."""
+
+        if flag is not None and flag not in SAFETY_ANSWERS:
+            raise PrOpenRefusedError(f"--safety-circuit 只能是 是 或 否，现在是：{flag}")
+        if fields.safety_raw is None:
+            raise PrOpenRefusedError(
+                f"任务卡 `{task_card}` 里没有“> 安全回路：是”或“> 安全回路：否”一行；安全声明不能靠默认值，"
+                "请在卡里补上这一行（急停、安全门、光栅、联锁、安全继电器、双手启动算安全回路）"
+            )
+        if fields.safety is None:
+            raise PrOpenRefusedError(
+                f"任务卡里的安全回路写成了“{fields.safety_raw}”；这一项只能是单纯的“是”或“否”，"
+                "说明另起一行写，不要加括号或别的字"
+            )
+        if flag is not None and flag != fields.safety:
+            raise PrOpenRefusedError(
+                f"--safety-circuit {flag} 和任务卡里写的“{fields.safety}”不一致；以卡为准，要改先改卡"
+            )
+        return fields.safety
 
     def _safety_declaration(self, station: Path, base_sha: str, declared: str | None) -> str | None:
         """The 安全回路 answer is the agent's/user's call, never derived: PLC changes must state it."""

@@ -29,7 +29,8 @@ class CardFields:
     goal: str
     tds: tuple[str, ...]
     wbs: str
-    safety: str | None
+    safety: str | None  # strictly 是/否, or None
+    safety_raw: str | None = None  # the text after 安全回路： as written, None when the card has no such line
 
 
 def read_card_fields(card_text: str, fallback_title: str) -> CardFields:
@@ -37,6 +38,7 @@ def read_card_fields(card_text: str, fallback_title: str) -> CardFields:
     tds: list[str] = []
     wbs = ""
     safety: str | None = None
+    safety_raw: str | None = None
     lines = card_text.splitlines()
     for line in lines:
         if line.startswith("# ") and title == fallback_title:
@@ -50,14 +52,16 @@ def read_card_fields(card_text: str, fallback_title: str) -> CardFields:
         elif key == "WBS" and value and value != NONE_WORD:
             wbs = value.strip("`")
         elif key == "安全回路":
+            safety_raw = value
             found = _SAFETY_VALUE.match(value)
-            safety = found.group(1) if found else safety
+            safety = found.group(1) if found else None
     return CardFields(
         title=title,
         goal=_goal_sentence(lines),
         tds=tuple(dict.fromkeys(tds)),
         wbs=wbs,
         safety=safety,
+        safety_raw=safety_raw,
     )
 
 

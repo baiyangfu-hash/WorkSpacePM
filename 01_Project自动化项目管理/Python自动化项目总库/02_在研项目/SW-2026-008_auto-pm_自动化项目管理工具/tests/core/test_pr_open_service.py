@@ -30,7 +30,7 @@ REPO = PROJECT.parents[3]
 REAL_JUDGE = REPO / "reviews" / "tools" / "pr_scope_check.py"
 CARD_PATH = "cards/CARD-1.md"
 CARD_TEXT = (
-    "# CARD-1｜演示卡\n\n> 隔离基线：`WORKTREE`\n> 路径根：`.`\n\n## Owned Paths\n\n"
+    "# CARD-1｜演示卡\n\n> 安全回路：否\n> 隔离基线：`WORKTREE`\n> 路径根：`.`\n\n## Owned Paths\n\n"
     "| # | 路径 | 基线状态 |\n|---|---|---|\n| 1 | `work/done.txt` | 计划新增 |\n"
 )
 CHG = "CHG-SCPT-2026-777"
@@ -446,29 +446,73 @@ def commit_plc_file(station: Path) -> None:
     git(station, "commit", "-q", "-m", f"feat: [{CHG}] plc")
 
 
-def test_plc_changes_must_declare_the_safety_circuit(lab: Lab) -> None:
-    commit_plc_file(work(lab))
-    with pytest.raises(PrOpenRefusedError, match="安全回路"):
+def set_card_safety(lab: Lab, line: str | None) -> None:
+    """Rewrite the card on main: replace its 安全回路 line (None removes it)."""
+
+    text = CARD_TEXT.replace("> 安全回路：否\n", f"{line}\n" if line else "")
+    (lab.github / CARD_PATH).write_text(text, encoding="utf-8")
+    git(lab.github, "add", "cards")
+    git(lab.github, "commit", "-q", "--allow-empty", "-m", "card safety line")
+    git(lab.github, "push", "-q", "origin", "main")
+    git(lab.root, "pull", "-q", "origin", "main")
+
+
+def test_a_card_without_the_safety_line_is_refused_no_default(lab: Lab) -> None:
+    set_card_safety(lab, None)
+    work(lab)
+    with pytest.raises(PrOpenRefusedError, match="不能靠默认值"):
+        plan(lab)
+
+
+@pytest.mark.parametrize("written", ["是（急停联锁）", "否，未涉及", "也许", "yes", ""])
+def test_a_card_safety_value_that_is_not_plain_yes_or_no_is_refused(lab: Lab, written: str) -> None:
+    set_card_safety(lab, f"> 安全回路：{written}")
+    work(lab)
+    with pytest.raises(PrOpenRefusedError, match="单纯的“是”或“否”"):
         plan(lab)
 
 
 @pytest.mark.parametrize("answer", ["是", "否"])
-def test_the_declaration_goes_into_the_body_as_its_own_line(lab: Lab, answer: str) -> None:
+def test_the_card_declaration_goes_into_the_body_verbatim_as_its_own_line(lab: Lab, answer: str) -> None:
+    set_card_safety(lab, f"> 安全回路：{answer}")
     commit_plc_file(work(lab))
-    assert f"安全回路: {answer}" in plan(lab, safety_circuit=answer).body.splitlines()
+    body = plan(lab).body
+    assert f"安全回路: {answer}" in body.splitlines()
+    assert sum(1 for line in body.splitlines() if line.startswith("安全回路")) == 1
 
 
-def test_a_declaration_other_than_yes_or_no_is_refused(lab: Lab) -> None:
+def test_the_flag_may_repeat_the_card_but_never_contradict_it(lab: Lab) -> None:
+    set_card_safety(lab, "> 安全回路：是")
+    work(lab)
+    assert "安全回路: 是" in plan(lab, safety_circuit="是").body.splitlines()
+    with pytest.raises(PrOpenRefusedError, match="不一致"):
+        plan(lab, safety_circuit="否")
+
+
+def test_the_flag_cannot_stand_in_for_a_missing_card_line(lab: Lab) -> None:
+    set_card_safety(lab, None)
+    work(lab)
+    with pytest.raises(PrOpenRefusedError, match="不能靠默认值"):
+        plan(lab, safety_circuit="否")
+
+
+def test_a_flag_other_than_yes_or_no_is_refused(lab: Lab) -> None:
     work(lab)
     with pytest.raises(PrOpenRefusedError, match="只能是 是 或 否"):
         plan(lab, safety_circuit="也许")
 
 
-def test_non_plc_changes_need_no_declaration_and_default_to_no_with_a_note(lab: Lab) -> None:
-    work(lab)
-    result = plan(lab)
-    assert "安全回路: 否" in result.body.splitlines()
-    assert any("安全回路" in note for note in result.notes)
+def test_scope_comes_from_the_card_not_from_the_diff(lab: Lab) -> None:
+    """工位里多改了卡外的文件：可改范围仍只列卡里的路径，越界留给 pr-gate 去拒。"""
+    station = work(lab)
+    (station / "extra.txt").write_text("not in the card\n", encoding="utf-8")
+    git(station, "add", "extra.txt")
+    git(station, "commit", "-q", "-m", f"feat: [{CHG}] extra")
+    lines = plan(lab).body.splitlines()
+    start = lines.index("## 可改范围")
+    end = next(i for i in range(start + 1, len(lines)) if lines[i].startswith("## "))
+    listed = [line[2:] for line in lines[start:end] if line.startswith("- ")]
+    assert listed == ["work/done.txt"]
 
 
 # ── the real judge (same script GitHub runs) ────────────────────────
