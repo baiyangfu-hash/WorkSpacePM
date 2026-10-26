@@ -152,6 +152,19 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
     if mode != "none" and int(lease["renew_interval_s"]) > int(lease["lease_seconds"]) - MIN_REMAINING_S - 60:
         raise GateError(f"lease.renew_interval_s must leave the {MIN_REMAINING_S} s floor plus a minute: "
                         f"at most lease_seconds - {MIN_REMAINING_S + 60}")
+    # lease.hold_until_marker: after the last step the runner keeps the lease renewed until this file appears (the closing
+    # step writes it), so the lease cannot run out between the verdict and the closing (TD-SW008-204).
+    hold = lease.get("hold_until_marker")
+    if hold is not None:
+        if mode == "none":
+            raise GateError("lease.hold_until_marker needs a lease mode other than none")
+        hold_path = Path(fill(hold)) if isinstance(hold, str) else None
+        if hold_path is None or not hold_path.is_absolute() or ".." in hold_path.parts:
+            raise GateError("lease.hold_until_marker must be an absolute path")
+        lease["hold_until_marker"] = str(hold_path)
+        lease.setdefault("hold_timeout_s", 2 * 3600)
+        if not isinstance(lease["hold_timeout_s"], int) or not 60 <= lease["hold_timeout_s"] <= 4 * 3600:
+            raise GateError("lease.hold_timeout_s must be 60..14400")
     if mode == "auto_pm":
         for k in ("run_id", "owner"):
             if not isinstance(lease.get(k), str) or not lease[k]:
@@ -604,6 +617,8 @@ class Runner:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(text.replace("{exit}", str(EXIT_CODES[result])), encoding="utf-8", newline="\n")
         self.log(f"result {result}" + (f": {reason}" if reason else ""))
+        if result in {"DONE", "FAILED"}:
+            self._hold_for_closing()
         self.stop_all.set()
         self.write_status()
         if result in FINAL and self.task_name:
@@ -617,6 +632,24 @@ class Runner:
             self.log(f"scheduled task {self.task_name} deleted" if code == 0
                      else f"scheduled task {self.task_name} not deleted ({code})")
         return EXIT_CODES[result]
+
+    def _hold_for_closing(self) -> None:
+        """Keep the lease renewed (the keeper thread is still running) until the closing step has written its marker."""
+        marker = self.cfg["lease"].get("hold_until_marker")
+        if not marker or not self.lease.enabled:
+            return
+        timeout = int(self.cfg["lease"]["hold_timeout_s"])
+        self.log(f"holding the lease until {marker} appears (at most {timeout} s)")
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if Path(marker).exists():
+                self.log("closing marker seen; releasing the lease")
+                return
+            if self.hard_stop.is_set() or (self.out / STOP_FILE).exists():
+                self.log("hold ended early: " + ("lease lost" if self.hard_stop.is_set() else "STOP file"))
+                return
+            time.sleep(min(float(self.cfg["poll_s"]), 1.0))
+        self.log(f"hold timed out after {timeout} s without the closing marker")
 
     def run(self) -> int:
         self.out.mkdir(parents=True, exist_ok=True)
