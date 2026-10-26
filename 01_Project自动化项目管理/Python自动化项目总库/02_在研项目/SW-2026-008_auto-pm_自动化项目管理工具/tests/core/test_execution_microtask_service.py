@@ -398,3 +398,67 @@ def test_partial_or_drifted_repository_is_preserved_and_rejected(
     assert ContinuityStore(tmp_path).get_execution_microtask_plan(operation_id) == (
         materialized.plan
     )
+
+
+def _slow_git_env(seconds: int) -> dict[str, str]:
+    """Real git whose alias blocks, so the timeout path runs against a live subprocess."""
+    import sys
+
+    from auto_pm.infrastructure.control_root_guard import clean_git_environment
+
+    env = clean_git_environment()
+    script = f"import time; time.sleep({seconds})"
+    env.update(
+        GIT_CONFIG_COUNT="1",
+        GIT_CONFIG_KEY_0="alias.slow",
+        GIT_CONFIG_VALUE_0=f'!"{Path(sys.executable).as_posix()}" -c "{script}"',
+    )
+    return env
+
+
+def test_git_normal_command_returns_output(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--initial-branch=main")
+    out = ExecutionMicrotaskService._git_text(tmp_path, "rev-parse", "--git-dir")
+    assert out == ".git"
+
+
+def test_git_timeout_raises_explicit_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hung Git fails closed with a receipt naming command, limit and elapsed time."""
+    _git(tmp_path, "init", "--initial-branch=main")
+    monkeypatch.setenv(ExecutionMicrotaskService.GIT_TIMEOUT_ENV, "5")
+    with pytest.raises(ExecutionMicrotaskError) as info:
+        ExecutionMicrotaskService._git_bytes(tmp_path, "slow", env=_slow_git_env(60))
+    message = str(info.value)
+    assert "超时回执" in message and "git slow" in message and "5 秒" in message
+    assert "实际等待" in message
+
+
+@pytest.mark.parametrize("bad", ["abc", "0", "4", "601", "nan", "-1"])
+def test_git_timeout_override_out_of_range_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    monkeypatch.setenv(ExecutionMicrotaskService.GIT_TIMEOUT_ENV, bad)
+    with pytest.raises(ExecutionMicrotaskError, match="不可用"):
+        ExecutionMicrotaskService._git_bytes(tmp_path, "--version")
+
+
+def test_git_timeout_default_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ExecutionMicrotaskService.GIT_TIMEOUT_ENV, raising=False)
+    value = ExecutionMicrotaskService._git_timeout()
+    assert value == ExecutionMicrotaskService.GIT_TIMEOUT_DEFAULT
+    assert ExecutionMicrotaskService.GIT_TIMEOUT_MIN <= value <= ExecutionMicrotaskService.GIT_TIMEOUT_MAX
+
+
+def test_git_interrupt_is_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ctrl-C must propagate, never be converted into a green/ok result."""
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(KeyboardInterrupt):
+        ExecutionMicrotaskService._git_bytes(tmp_path, "--version")

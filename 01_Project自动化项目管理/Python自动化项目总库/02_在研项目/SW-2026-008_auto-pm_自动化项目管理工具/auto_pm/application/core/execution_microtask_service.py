@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -31,6 +32,10 @@ class ExecutionMicrotaskService:
     """Create one append-only plan before touching its deterministic standalone repository."""
 
     _MARKER = ".codex-microtask.json"
+    GIT_TIMEOUT_ENV = "AUTO_PM_GIT_TIMEOUT_SECONDS"
+    GIT_TIMEOUT_DEFAULT = 120.0
+    GIT_TIMEOUT_MIN = 5.0
+    GIT_TIMEOUT_MAX = 600.0
 
     def __init__(
         self,
@@ -424,15 +429,45 @@ class ExecutionMicrotaskService:
         value = os.path.normcase(os.path.normpath(str(path.resolve(strict=True))))
         return value.casefold() if os.name == "nt" else value
 
-    @staticmethod
-    def _git_bytes(root: Path, *args: str, env: dict[str, str] | None = None) -> bytes:
-        result = subprocess.run(
-            ["git", "-C", str(root), *args],
-            capture_output=True,
-            check=False,
-            timeout=30,
-            env=env or clean_git_environment(),
-        )
+    @classmethod
+    def _git_timeout(cls) -> float:
+        """Return the bounded per-command Git limit; an unusable override fails closed."""
+        raw = os.environ.get(cls.GIT_TIMEOUT_ENV)
+        if raw is None or not raw.strip():
+            return cls.GIT_TIMEOUT_DEFAULT
+        try:
+            value = float(raw)
+        except ValueError:
+            value = float("nan")
+        if not cls.GIT_TIMEOUT_MIN <= value <= cls.GIT_TIMEOUT_MAX:
+            raise ExecutionMicrotaskError(
+                f"{cls.GIT_TIMEOUT_ENV}={raw!r} 不可用：必须是 "
+                f"{cls.GIT_TIMEOUT_MIN:g}~{cls.GIT_TIMEOUT_MAX:g} 秒之间的数字"
+            )
+        return value
+
+    @classmethod
+    def _git_bytes(
+        cls, root: Path, *args: str, env: dict[str, str] | None = None
+    ) -> bytes:
+        limit = cls._git_timeout()
+        started = time.monotonic()
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(root), *args],
+                capture_output=True,
+                check=False,
+                timeout=limit,
+                env=env or clean_git_environment(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            elapsed = time.monotonic() - started
+            raise ExecutionMicrotaskError(
+                f"Git 命令超时回执：git {args[0] if args else ''} 在 {root} "
+                f"超过 {limit:g} 秒时限（实际等待 {elapsed:.1f} 秒）被终止，"
+                f"无法证明微任务状态；可用 {cls.GIT_TIMEOUT_ENV} 在 "
+                f"{cls.GIT_TIMEOUT_MIN:g}~{cls.GIT_TIMEOUT_MAX:g} 秒内调整后整体重做"
+            ) from exc
         if result.returncode != 0 or result.stderr:
             detail = result.stderr.decode("utf-8", errors="replace").strip()
             raise ExecutionMicrotaskError(
