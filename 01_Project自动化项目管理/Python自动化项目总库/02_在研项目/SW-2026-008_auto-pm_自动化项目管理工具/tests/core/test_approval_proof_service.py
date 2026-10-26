@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -19,13 +18,14 @@ from auto_pm.application.core.approval_proof_service import (
 )
 from auto_pm.domain.change.decision_service import DecisionService
 from auto_pm.ui.cli import approval_pin as cli_module
+from tests.git_support import git_do
 
 PIN = "relay-K1-on"
 PLAN = "a" * 64
 
 
 def _git(root: Path, *arguments: str) -> None:
-    subprocess.run(["git", "-C", str(root), *arguments], check=True, capture_output=True)
+    git_do(root, *arguments)
 
 
 @pytest.fixture

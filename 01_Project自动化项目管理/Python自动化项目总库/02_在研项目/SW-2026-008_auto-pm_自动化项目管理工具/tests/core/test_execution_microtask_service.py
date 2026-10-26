@@ -28,6 +28,7 @@ from auto_pm.contracts.execution_adapter import (
 from auto_pm.contracts.mission import InternalRoutingPolicy
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from tests.core.test_execution_adapter_service import PROJECT_PATH, _ready
+from tests.git_support import git_out
 
 
 def test_generated_microtask_directory_is_ignored_in_linked_candidate() -> None:
@@ -57,14 +58,7 @@ def test_generated_microtask_directory_is_ignored_in_linked_candidate() -> None:
 
 
 def _git(root: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    ).stdout.strip()
+    return git_out(root, *args)
 
 
 def _prepared(

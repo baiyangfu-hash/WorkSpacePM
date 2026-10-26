@@ -37,10 +37,11 @@ from auto_pm.contracts.mission import (
     MissionState,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from tests.git_support import git_do
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    git_do(root, *args)
 
 
 def _repository(root: Path) -> None:
