@@ -11,9 +11,10 @@
 计时行为未验证, 以 PLCSIM 或现场为准.
 
 用法 (在控制根或任意目录):
-    python run_plugin_test.py [--project 项目] [--lsp siemens-lsp 路径] [--keep]
+    python run_plugin_test.py [--project 项目] [--lsp siemens-lsp 路径] [--keep] [--include-untracked]
 --project 默认 DJ-2026-005 (不带这个参数时行为和以前完全一样); 可写项目编号 (如 DJ-2026-009, 在 0100_PLC自动化
 下按编号开头找唯一的项目目录) 或项目目录路径. 替身计时器始终取自本目录 timer/, 所有项目共用.
+默认只把 git 跟踪的 .scltest 放进副本, 没入库的 (例如上次留下的旧测试文件) 跳过并打警告, 避免它们让结果报红; --include-untracked 恢复全带.
 也可用环境变量 SIEMENS_LSP 指定插件命令. 退出码 = 插件 test 的退出码; 2 = 脚本自身出错.
 """
 from __future__ import annotations
@@ -74,10 +75,30 @@ _RUNNING = re.compile(r"siemens-lsp test: running (\d+)/(\d+) cases")
 _OK_LINE = re.compile(r"^ok\s", re.MULTILINE)
 
 
-def count_test_cases(plc_dir: Path) -> int:
-    """项目 PLC_ST 下全部 .scltest 里 TEST_CASE 的总数 (注释行不算)。"""
+def untracked_scltests(plc_dir: Path) -> list[Path]:
+    """plc_dir 下没被 git 跟踪的 .scltest (含被 .gitignore 忽略的)。不在 git 仓库里或没有 git 时返回空清单, 不过滤。"""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(plc_dir), "ls-files", "--others", "-z", "--", "*.scltest"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    return sorted((plc_dir / name).resolve() for name in proc.stdout.split("\0") if name)
+
+
+def count_test_cases(plc_dir: Path, skip: frozenset[Path] = frozenset()) -> int:
+    """项目 PLC_ST 下全部 .scltest 里 TEST_CASE 的总数 (注释行不算); skip 里的文件不算。"""
     total = 0
     for path in plc_dir.rglob("*.scltest"):
+        if path.resolve() in skip:
+            continue
         text = path.read_text(encoding="utf-8", errors="replace")
         total += len(_TEST_CASE.findall(re.sub(r"//[^\n]*", "", text)))
     return total
@@ -141,6 +162,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--lsp", default=os.environ.get("SIEMENS_LSP", "siemens-lsp"), help="siemens-lsp 命令")
     ap.add_argument("--keep", action="store_true", help="保留临时副本 (排查用)")
+    ap.add_argument("--include-untracked", action="store_true", help="连没入库的 .scltest 一起跑 (默认只带 git 跟踪的, 没入库的跳过并警告)")
     ap.add_argument("--project", default=None, help="项目编号或项目目录路径 (默认 DJ-2026-005)")
     args = ap.parse_args()
 
@@ -151,6 +173,10 @@ def main() -> int:
         if not need.exists():
             print(f"缺少 {need}", file=sys.stderr)
             return 2
+
+    skipped = frozenset() if args.include_untracked else frozenset(untracked_scltests(plc_dir))
+    for path in sorted(skipped):
+        print(f"[警告] 没入库的 .scltest 不进临时副本, 也不计入用例数: {path} (要连它一起跑请加 --include-untracked)", file=sys.stderr)
 
     before = _digest(_guarded_files(project))
     tmp = Path(tempfile.mkdtemp(prefix=f"plugin_test_{project.name.split('_')[0]}_"))
@@ -173,7 +199,11 @@ def main() -> int:
         (t_proj / "02_PLC程序").mkdir(parents=True)
         shutil.copy2(project / ".plc.json", t_proj / ".plc.json")
         t_plc = t_proj / "02_PLC程序" / "PLC_ST"
-        shutil.copytree(plc_dir, t_plc)
+        shutil.copytree(
+            plc_dir,
+            t_plc,
+            ignore=lambda directory, names: [n for n in names if Path(directory, n).resolve() in skipped],
+        )
         for name in SWAPPED:
             shutil.copy2(HERE / "timer" / (name + ".txt"), t_lib / "timer" / name)
 
@@ -187,7 +217,7 @@ def main() -> int:
         sys.stderr.write(proc.stderr)
         rc = proc.returncode
         if rc == 0:
-            expected = count_test_cases(plc_dir)
+            expected = count_test_cases(plc_dir, skipped)
             problems = false_green_problems(proc.stdout + proc.stderr, expected)
             if problems:
                 print("[防假绿] 插件退出码 0, 但输出核对不通过, 判失败:", *problems, sep="\n  ", file=sys.stderr)
