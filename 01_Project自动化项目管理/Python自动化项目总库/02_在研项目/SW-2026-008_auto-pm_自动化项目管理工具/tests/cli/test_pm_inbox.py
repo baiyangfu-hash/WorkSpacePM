@@ -129,14 +129,23 @@ def _plan(runner: CliRunner, root: Path, request_id: str, *extra: str) -> Result
 
 
 
-@pytest.mark.parametrize("verb", ["plan", "approve"])
+# The exact refusal each single invalid contract field must produce (``plan`` side).
+_INVALID_REASON = {
+    "scope": "scope_paths must be explicit and must not contain wildcards",
+    "risk": "risks and non_goals must be explicit",
+    "non_goal": "risks and non_goals must be explicit",
+    "grant": "declared_dirty_paths must be an exact subset of scope_paths",
+}
+
+
 @pytest.mark.parametrize("invalid", ["scope", "risk", "non_goal", "grant"])
 def test_audit_f01_cli_invalid_planning_contract_keeps_confirmed_item(
     cli_runner: CliRunner,
     root: Path,
-    verb: str,
     invalid: str,
 ) -> None:
+    """``plan`` side only; the ``approve`` side needs a saved card first (see the TD-093 test below)."""
+    verb = "plan"
     item = _item(_add(cli_runner, root))
     _decide(cli_runner, root, "confirm", item)
     scope = list(SCOPE)
@@ -161,17 +170,9 @@ def test_audit_f01_cli_invalid_planning_contract_keeps_confirmed_item(
         "--inbox-id",
         item["item_id"],
     ]
-    if verb == "approve":
-        args += [
-            "--plan-hash",
-            "a" * 64,
-            "--approver",
-            APPROVER,
-            "--approval-evidence-ref",
-            CONFIRMATION,
-        ]
     result = _run(cli_runner, root, *args)
     assert result.exit_code != 0
+    assert _INVALID_REASON[invalid] in result.output
     listed = _listed(cli_runner, root)
     assert listed[0]["status"] == "CONFIRMED" and listed[0]["plan_request_id"] == ""
     assert _count(root, "planning_draft_intake_bindings") == 0
@@ -553,3 +554,59 @@ def test_cx12_the_inbox_commands_refuse_a_linked_worktree(cli_runner: CliRunner,
     for result in results:
         assert result.exit_code != 0 and "linked worktree" in result.output, result.output
     assert not (linked / ".auto-pm").exists()
+
+
+# ``approve`` re-checks the same fields; a blank risk is stopped earlier by the plan checklist guard (field ⑥).
+_APPROVE_REASON = {
+    "scope": "scope_paths must be explicit and must not contain wildcards",
+    "risk": "计划防呆未通过，缺 1 栏：⑥风险",
+    "non_goal": "risks and non_goals must be explicit",
+    "grant": "declared_dirty_paths must be an exact subset of scope_paths",
+}
+
+
+def _approve_args(request_id: str, plan_hash: str, scope: list[str]) -> list[str]:
+    return [
+        "approve", "--project-id", PROJECT, "--request-id", request_id,
+        "--objective", "Plan the classified work", "--acceptance", "A scope card is returned.",
+        *scope, "--plan-hash", plan_hash, "--approver", APPROVER, "--approval-evidence-ref", CONFIRMATION,
+    ]
+
+
+@pytest.mark.parametrize("invalid", ["scope", "risk", "non_goal", "grant"])
+def test_td093_approve_refuses_each_invalid_contract_field_for_its_own_reason(
+    cli_runner: CliRunner, root: Path, invalid: str
+) -> None:
+    """With a legal saved card and its real hash, changing exactly one field must hit that field's own guard.
+
+    Before TD-093 the approve branch had no saved card, so every sample died on "PlanningDraft 不存在" and
+    proved nothing about the field guards.
+    """
+    request_id = "REQ-TD093"
+    item = _item(_add(cli_runner, root))
+    _decide(cli_runner, root, "confirm", item)
+    card = _json(_plan(cli_runner, root, request_id, "--inbox-id", item["item_id"]))
+    baseline = _approve_args(request_id, card["plan_hash"], list(SCOPE))
+    option, value = {
+        "scope": ("--scope", "auto_pm/*"),
+        "risk": ("--risk", " "),
+        "non_goal": ("--non-goal", " "),
+        "grant": ("--declared-dirty", "outside.py"),
+    }[invalid]
+    scope = list(SCOPE)
+    scope[scope.index(option) + 1] = value
+    before_events = _events(root)
+    before_cards = _count(root, "planning_scope_cards")
+    result = _run(cli_runner, root, *_approve_args(request_id, card["plan_hash"], scope), "--inbox-id", item["item_id"])
+    assert result.exit_code != 0
+    assert "PlanningDraft 不存在" not in result.output, result.output
+    assert _APPROVE_REASON[invalid] in result.output, result.output
+    assert _events(root) == before_events
+    assert _count(root, "planning_scope_cards") == before_cards
+    # Control: the very same saved card and hash with the legal fields is approvable, so the refusals above
+    # were caused by the one changed field and not by a missing prerequisite.
+    for state in ("submitted", "under_review", "approved"):
+        ChangeService(str(root)).transition_status(
+            card["change_id"], state, project_id=PROJECT, approver=APPROVER, comment="Human review"
+        )
+    assert _run(cli_runner, root, *baseline, "--inbox-id", item["item_id"]).exit_code == 0
