@@ -227,6 +227,7 @@ class PrOpenService:
             sweep=sweep,
             tds=tds,
             head_sha=head_sha,
+            chg_tds=self._chg_tds(task_card, chg_numbers),
         )
         code, report = self._judge(station.path, base_sha, head_sha, body)
         if code != 0:
@@ -380,6 +381,28 @@ class PrOpenService:
                 "所有提交的说明里都没有 CHG 号（形如 CHG-SCPT-2026-451）；请主执行登记变更单后，把号写进提交说明"
             )
         return tuple(found)
+
+    def _chg_tds(self, task_card: str, chg_numbers: Sequence[str]) -> tuple[str, ...]:
+        """TD numbers the change orders name; the orders live in the control root and may not be tracked, so read the disk."""
+        change_dir = next(
+            (
+                self._root / parent / "04_监控" / "01_变更管理" / "01_变更单"
+                for parent in Path(task_card).parents
+                if (self._root / parent / "04_监控" / "01_变更管理" / "01_变更单").is_dir()
+            ),
+            None,
+        )
+        if change_dir is None:
+            return ()
+        found: list[str] = []
+        for number in chg_numbers:
+            path = change_dir / f"CHG-{number.split('-')[1]}" / f"{number}.md"
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            found.extend(TD_ID.findall(text))
+        return tuple(dict.fromkeys(found))
 
     def _card_scope(self, task_card: str, card_text: str) -> list[str]:
         """The card's path table, one full path per entry (what pr-gate reads from the base copy of the card)."""

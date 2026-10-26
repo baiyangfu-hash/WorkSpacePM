@@ -122,6 +122,31 @@ def test_plan_without_evidence_says_so_instead_of_claiming_it(lab: Lab) -> None:
     assert "未提供" in plan(lab).body
 
 
+def write_chg(lab: Lab, text: str) -> None:
+    folder = lab.root / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    folder.mkdir(parents=True)
+    (folder / f"{CHG}.md").write_text(text, encoding="utf-8")
+
+
+def related_td_section(body: str) -> str:
+    return body.split("## 关联 TD", 1)[1].split("## ", 1)[0].strip()
+
+
+def test_plan_lists_the_tds_named_by_the_change_order_but_proposes_no_payoff_for_them(lab: Lab) -> None:
+    work(lab)
+    write_chg(lab, "变更单\n台账 TD-SW008-321 的一部分，同时碰到 TD-SW008-322\n")  # untracked, as in the control root
+
+    result = plan(lab)
+
+    assert related_td_section(result.body) == "TD-SW008-321、TD-SW008-322"
+    assert "TD-SW008-321 已偿还" not in result.body
+
+
+def test_plan_without_a_change_order_file_on_disk_still_plans(lab: Lab) -> None:
+    work(lab)
+    assert related_td_section(plan(lab).body) == "无"
+
+
 def test_plan_sends_nothing_and_asks_gh_nothing(lab: Lab) -> None:
     work(lab)
     gh = FakeGh()
