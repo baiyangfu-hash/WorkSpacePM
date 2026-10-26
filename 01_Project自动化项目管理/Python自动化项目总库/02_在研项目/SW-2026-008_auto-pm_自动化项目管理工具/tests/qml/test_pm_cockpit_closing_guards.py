@@ -151,7 +151,7 @@ def test_begin_shutdown_seals_every_entry_at_once_without_waiting(qapp: QApplica
     bridge.beginShutdown()  # idempotent
     assert time.monotonic() - started < 1.0, "sealing never waits for anything"
     entries: dict[str, Callable[[], dict[str, Any]]] = {
-        "createPlanningDraft": lambda: bridge.createPlanningDraft("SW-2026-008", "an objective", "a criterion"),
+        "createPlanningDraft": lambda: bridge.createPlanningDraft("SW-2026-008", "an objective", "a criterion", "iteration"),
         "confirmStart": lambda: bridge.confirmStart(mission_id),
         "startExecution": lambda: bridge.startExecution(mission_id),
         "approveScopeAndStart": lambda: bridge.approveScopeAndStart("REQ-COCKPIT-0123456789ABCDEF0123456789ABCDEF", "a-plan-hash"),

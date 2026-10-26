@@ -597,6 +597,8 @@ from auto_pm.application.core.pm_facade_service import PmFacadeService
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PmIntent
 from tests.plan_checklist_support import full_checklist
+# The refusal is lifted only to write the record an older build wrote, before every plan had to be classified.
+PmFacadeService._refuse_unclassified_plan = lambda self, *args: None
 facade = PmFacadeService(sys.argv[1])
 card = facade.create_planning_scope_card(
     PmIntent(subject_project_id=sys.argv[3], request_id=sys.argv[2],

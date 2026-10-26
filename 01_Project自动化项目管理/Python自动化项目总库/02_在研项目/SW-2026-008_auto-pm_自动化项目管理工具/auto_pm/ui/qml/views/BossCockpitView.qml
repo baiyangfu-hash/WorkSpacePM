@@ -21,7 +21,7 @@ Item {
     // A failed action (start, approval, acceptance, closure) stays on screen until the user dismisses it;
     // statusMessage is cleared by every snapshot refresh and must never be the only place a failure is shown.
     property string actionAlert: ""
-    signal planningDraftRequested(string projectId, string objective, string acceptanceText)
+    signal planningDraftRequested(string projectId, string objective, string acceptanceText, string kind)
     signal draftInputChanged()
     signal evidenceRequested(string projectId)
     signal startConfirmed(string missionId)
@@ -157,6 +157,22 @@ Item {
                         valueRole: "project_id"
                         onActivated: root.draftInputChanged()
                     }
+                    ComboBox {
+                        id: planningKind
+                        objectName: "planningKind"
+                        Layout.fillWidth: true
+                        displayText: currentIndex >= 0 ? currentText : "请先选择这件事的类型"
+                        currentIndex: -1
+                        model: [
+                            { "label": "迭代：新功能或改进", "value": "iteration" },
+                            { "label": "缺陷：修一个错", "value": "bug" },
+                            { "label": "紧急：现场急活", "value": "urgent" },
+                            { "label": "技术债：还一笔旧账", "value": "debt" }
+                        ]
+                        textRole: "label"
+                        valueRole: "value"
+                        onActivated: root.draftInputChanged()
+                    }
                     TextField {
                         id: planningObjective
                         objectName: "planningObjective"
@@ -176,11 +192,12 @@ Item {
                     Button {
                         objectName: "savePlanningDraft"
                         text: "保存规划草稿"
-                        enabled: planningProject.currentIndex >= 0
+                        enabled: planningProject.currentIndex >= 0 && planningKind.currentIndex >= 0
                         onClicked: root.planningDraftRequested(
                             planningProject.currentValue || "",
                             planningObjective.text,
-                            planningAcceptance.text
+                            planningAcceptance.text,
+                            planningKind.currentValue || ""
                         )
                     }
                     ColumnLayout {

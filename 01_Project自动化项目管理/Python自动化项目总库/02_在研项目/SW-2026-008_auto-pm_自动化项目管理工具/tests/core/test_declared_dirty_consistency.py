@@ -37,6 +37,7 @@ from tests.core.test_pm_facade_service import (
     _planning_intent,
     _setup,
 )
+from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
 # ── the shared policy ────────────────────────────────────────────────────────
 
@@ -160,14 +161,15 @@ def test_plan_refuses_before_any_durable_write(
 
     with pytest.raises(PmFacadeError, match=expected):
         if entry == "create":
-            facade.create_planning_scope_card(_planning_intent(), **arguments)
+            facade.create_planning_scope_card(_planning_intent(), **arguments, classification=LEGACY_EQUIVALENT_FILING)
         elif entry == "preview":
             facade.preview_planning_scope_card(_planning_intent(), **arguments)
         else:
             if grant is None:
                 pytest.skip("submit already requires an explicit execution_grant")
             facade.submit_planning_scope_card(
-                _planning_intent().request_id, submitted_by="unit", **arguments
+                _planning_intent().request_id, submitted_by="unit", **arguments,
+                classification=LEGACY_EQUIVALENT_FILING,
             )
 
     assert _planning_rows(database) == before
@@ -183,6 +185,7 @@ def test_plan_with_an_exact_declaration_still_succeeds(tmp_path: Path) -> None:
         risks=("Drift",),
         non_goals=("No deployment",),
         execution_grant=_EXAMPLE_GRANT,
+        classification=LEGACY_EQUIVALENT_FILING,
     )
 
     assert card.execution_grant.declared_dirty_paths == ("auto_pm/example.py",)
@@ -205,6 +208,7 @@ def test_approve_refuses_a_saved_card_whose_declaration_is_empty(
                 adapter=ExecutionAdapterKind.CODEX, approved_model="gpt-approved"
             ),
             submitted_by="legacy",
+            classification=LEGACY_EQUIVALENT_FILING,
         )
     card = submitted.card
     assert card.execution_grant.declared_dirty_paths == ()

@@ -401,7 +401,7 @@ def filter_production_files(files: list[str]) -> list[str]:
     return [
         f
         for f in files
-        if f.replace("\\", "/").endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f)
+        if f.replace("\\", "/").lower().endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f)
     ]
 
 
@@ -816,7 +816,38 @@ def enforce_pre_commit(
     ledger_code = _enforce_ledger_pre_commit(workspace_root, snapshot, control_root)
     plc_code = enforce_plc_docs(workspace_root, snapshot.paths)
     secret_code = _enforce_secret_scan(workspace_root)
-    return 1 if ledger_code != 0 or plc_code != 0 or secret_code != 0 else 0
+    ignored_code = _enforce_ignored_additions(workspace_root)
+    return 1 if ledger_code != 0 or plc_code != 0 or secret_code != 0 or ignored_code != 0 else 0
+
+
+def _enforce_ignored_additions(workspace_root: Path) -> int:
+    """新增的暂存文件命中仓库忽略规则（多半是 ``git add -f``）即拒绝（TD-SW008-115）。
+
+    只看状态为 A 的条目：已经入库的文件不在此列，存量不受影响。
+    """
+    from auto_pm.infrastructure.ignored_file_scan import IgnoreScanError, ignored_among
+
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=A", "--no-renames", "-z"],
+            cwd=str(workspace_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        )
+        hits = ignored_among(workspace_root, [item for item in result.stdout.split("\0") if item])
+    except (IgnoreScanError, OSError, subprocess.CalledProcessError) as exc:
+        print(f"❌ [auto-pm pre-commit] 物理拦截：忽略规则扫描失败，为防止绕过门禁已拒绝提交: {exc}")
+        return 1
+    if not hits:
+        return 0
+    print("🚨 [auto-pm pre-commit] 物理阻断：新增文件命中仓库忽略规则，不应入库：")
+    for hit in hits:
+        print(f"   {hit.path}（{hit.source} 规则 {hit.pattern}）")
+    print("   处理：`git rm --cached <路径>` 把它移出暂存区；确需入库请先向用户申请改忽略规则。")
+    return 1
 
 
 def _enforce_ledger_pre_commit(

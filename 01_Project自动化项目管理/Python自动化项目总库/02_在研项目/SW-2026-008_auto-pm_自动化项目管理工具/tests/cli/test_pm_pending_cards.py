@@ -27,6 +27,7 @@ from auto_pm.contracts.pm_facade import (
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.plan_checklist_support import checklist_args, full_checklist
+from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
 if TYPE_CHECKING:
     from auto_pm.application.core.mission_service import MissionService
@@ -378,7 +379,7 @@ def test_c10_refused_approvals_write_nothing(
 # --------------------------------------------------------------------------- c11: the old full-form approve is unchanged
 
 
-def test_c11_the_full_form_approve_still_works_with_and_without_a_persisted_card(
+def test_c11_the_full_form_approve_works_for_a_card_saved_by_the_cli_and_one_saved_by_the_sdk(
     cli_runner: CliRunner, tmp_path: Path
 ) -> None:
     persisted = tmp_path / "persisted"
@@ -413,14 +414,16 @@ def test_c11_the_full_form_approve_still_works_with_and_without_a_persisted_card
             declared_dirty_paths=("auto_pm/example.py",),
             plan_checklist=full_checklist(),
         ),
+        classification=LEGACY_EQUIVALENT_FILING,
     )
-    assert PmFacadeService(fresh).list_pending_planning_scope_cards(PROJECT) == ()
+    # TD-SW008-070: the SDK plan is classified too, so it saves its pending card like the command line does.
+    assert len(PmFacadeService(fresh).list_pending_planning_scope_cards(PROJECT)) == 1
 
-    unpersisted = _json(_run(cli_runner, fresh, "approve", *_planning_args(), "--plan-hash", card.plan_hash,
+    from_sdk = _json(_run(cli_runner, fresh, "approve", *_planning_args(), "--plan-hash", card.plan_hash,
                              "--approver", "fubai", "--approval-evidence-ref", EVIDENCE))
 
-    assert (unpersisted["authorization_status"], unpersisted["work_state"]) == ("AUTHORIZED", "READY")
-    assert unpersisted["plan_hash"] == card.plan_hash
+    assert (from_sdk["authorization_status"], from_sdk["work_state"]) == ("AUTHORIZED", "READY")
+    assert from_sdk["plan_hash"] == card.plan_hash
 
 
 # --------------------------------------------------------------------------- c12: no plan after approval

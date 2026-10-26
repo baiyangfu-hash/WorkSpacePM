@@ -118,17 +118,21 @@ APPROVAL_CONCLUSIONS: set[str] = {
 #                                      conditionally_approved                completed → closed
 #                                                  ↓ 驳回                        ↓ 归档
 #                                                rejected                      archived（终态）
+# 废弃（B10，用户拍板）：还没有开始实施的变更单（draft、submitted、under_review、approved、
+#   conditionally_approved、rejected）可以废弃，进入终态 abandoned，必须附原因；已经开始实施的
+#   （implementing 及以后）不能直接废弃——工作已经开始，应走返工或验收，不能一笔勾销。
 STATUS_FLOW: dict[str, set[str]] = {
-    "draft": {"submitted"},
-    "submitted": {"under_review", "draft"},
-    "under_review": {"approved", "conditionally_approved", "rejected", "submitted"},
-    "approved": {"implementing"},
-    "conditionally_approved": {"implementing"},
+    "draft": {"submitted", "abandoned"},
+    "submitted": {"under_review", "draft", "abandoned"},
+    "under_review": {"approved", "conditionally_approved", "rejected", "submitted", "abandoned"},
+    "approved": {"implementing", "abandoned"},
+    "conditionally_approved": {"implementing", "abandoned"},
     "implementing": {"pending_acceptance", "approved"},       # 实施完成→待验收；或退回已批准
     "pending_acceptance": {"accepting"},                     # 开始验收
     "accepting": {"completed", "implementing"},              # 验证通过→完成；验证不通过→返工重做
     "completed": {"closed", "archived"},
-    "rejected": {"draft"},
+    "rejected": {"draft", "abandoned"},
+    "abandoned": set(),   # 终态（已废弃：从未实施，不可再流转，也不可凭它批准决策或提交代码）
     "closed": set(),      # 终态
     "archived": set(),    # 终态（已归档，不可再流转）
 }
@@ -150,6 +154,7 @@ STATUS_LABELS: dict[str, str] = {
     "completed": "已完成",
     "closed": "已关闭",
     "archived": "已归档",
+    "abandoned": "已废弃",
 }
 
 # 阶段中文标签（供前端渲染）
@@ -175,6 +180,7 @@ LEDGER_STATUS_MAP: dict[str, str] = {
     "completed": "✅已关闭",
     "closed": "✅已关闭",
     "archived": "✅已归档",
+    "abandoned": "🚫已废弃",
 }
 
 # §3 必须包含的子章节

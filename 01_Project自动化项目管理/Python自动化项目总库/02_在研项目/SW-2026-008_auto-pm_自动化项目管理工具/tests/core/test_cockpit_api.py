@@ -39,6 +39,7 @@ from tests.core.test_pm_run_e2e import (
     _helper_source,
 )
 from tests.plan_checklist_support import full_checklist
+from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
 APPROVER = "fubai"
 EVIDENCE = "user-confirmation:U07C-E2E-001"
@@ -153,6 +154,7 @@ def _plan(client: CockpitClient, request_id: str = "REQ-U07C-E2E") -> PlanningSc
         approved_model="agent-a",
         declared_dirty_paths=(CALC, CALC_TEST),
         plan_checklist=full_checklist(),
+        classification=LEGACY_EQUIVALENT_FILING,
     )
 
 
@@ -363,6 +365,32 @@ def test_the_identity_is_rechecked_on_every_write_not_only_at_construction(tmp_p
     with pytest.raises(CockpitApiError, match=_REFUSED):
         _plan(client, "REQ-U07C-SECOND")
     assert client.identity.writable is False
+
+
+def test_a_plan_nothing_classified_is_refused_and_writes_nothing(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    client = workspace.client()
+    events_before = workspace.events()
+
+    with pytest.raises(CockpitApiError, match="新需求必须分类"):
+        client.plan(
+            request_id="REQ-TD070-SDK",
+            objective="Fix add()",
+            acceptance=("add(2, 3) == 5",),
+            scope_paths=(CALC, CALC_TEST),
+            risks=("改错文件导致回归",),
+            non_goals=("no refactor",),
+            adapter=ExecutionAdapterKind.CODEX,
+            approved_model="agent-a",
+            declared_dirty_paths=(CALC, CALC_TEST),
+            plan_checklist=full_checklist(),
+        )
+
+    assert workspace.events() == events_before
+    assert all(
+        "REQ-TD070-SDK" not in path.read_text(encoding="utf-8", errors="replace")
+        for path in workspace.root.rglob("CHG-*.md")
+    )
 
 
 def test_a_project_without_a_runtime_mapping_is_writable(tmp_path: Path) -> None:

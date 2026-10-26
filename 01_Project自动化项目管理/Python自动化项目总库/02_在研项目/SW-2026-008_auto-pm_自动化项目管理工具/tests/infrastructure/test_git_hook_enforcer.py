@@ -852,4 +852,90 @@ def test_td194_real_test_doc_scratch_paths_stay_exempt(path: str) -> None:
 
 
 def test_td194_only_production_extensions_count() -> None:
-    assert filter_production_files(["src/a.md", "src/b.py", "src/c.SCL", "src/d.qml"]) == ["src/b.py", "src/d.qml"]
+    assert filter_production_files(["src/a.md", "src/b.py", "src/c.txt", "src/d.qml"]) == ["src/b.py", "src/d.qml"]
+
+
+def test_production_extension_match_ignores_case() -> None:
+    """Windows 上 TIA 导出的文件常是 .SCL / .ST，大写扩展名也是生产代码。"""
+    paths = ["FB/Motor.SCL", "FB/Seq.St", "src/App.PY", "ui/Main.QML"]
+    assert filter_production_files(paths) == paths
+
+
+# ---- TD-SW008-115：新增文件命中忽略规则就拒绝提交 ----
+
+
+def _ignore_scene(tmp_path: Path) -> tuple[Path, Path]:
+    cand, ctrl, _msg = _make_dual_root_fixture(
+        tmp_path, candidate_has_staged_code=False, candidate_ledger_clean=True
+    )
+    (cand / ".gitignore").write_text("*.zip\n!keep.zip\n", encoding="utf-8")
+    _git(cand, "add", ".gitignore")
+    _git(cand, "commit", "-qm", "ignore rules")
+    return cand, ctrl
+
+
+def test_td115_force_added_file_matching_an_ignore_rule_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cand, ctrl = _ignore_scene(tmp_path)
+    (cand / "pack.zip").write_text("x", encoding="utf-8")
+    _git(cand, "add", "-f", "pack.zip")
+    assert enforce_pre_commit(cand, control_root=ctrl) == 1
+    out = capsys.readouterr().out
+    assert "pack.zip" in out and ".gitignore:1" in out and "git rm --cached" in out
+
+
+def test_td115_a_file_re_included_by_a_negation_rule_is_allowed(tmp_path: Path) -> None:
+    cand, ctrl = _ignore_scene(tmp_path)
+    (cand / "keep.zip").write_text("x", encoding="utf-8")
+    _git(cand, "add", "-f", "keep.zip")
+    assert enforce_pre_commit(cand, control_root=ctrl) == 0
+
+
+def test_td115_a_plain_file_is_allowed(tmp_path: Path) -> None:
+    cand, ctrl = _ignore_scene(tmp_path)
+    (cand / "notes.txt").write_text("x", encoding="utf-8")
+    _git(cand, "add", "notes.txt")
+    assert enforce_pre_commit(cand, control_root=ctrl) == 0
+
+
+def test_td115_changing_an_already_tracked_ignored_file_is_not_a_new_addition(tmp_path: Path) -> None:
+    cand, ctrl, _msg = _make_dual_root_fixture(
+        tmp_path, candidate_has_staged_code=False, candidate_ledger_clean=True
+    )
+    (cand / "old.zip").write_text("v1", encoding="utf-8")
+    _git(cand, "add", "-f", "old.zip")
+    _git(cand, "commit", "-qm", "old zip")
+    (cand / ".gitignore").write_text("*.zip\n", encoding="utf-8")
+    _git(cand, "add", ".gitignore")
+    _git(cand, "commit", "-qm", "rule after the file")
+    (cand / "old.zip").write_text("v2", encoding="utf-8")
+    _git(cand, "add", "old.zip")
+    assert enforce_pre_commit(cand, control_root=ctrl) == 0
+
+
+def test_td115_a_failing_scan_refuses_instead_of_passing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import auto_pm.infrastructure.ignored_file_scan as scan
+
+    cand, ctrl = _ignore_scene(tmp_path)
+    (cand / "plain.txt").write_text("x", encoding="utf-8")
+    _git(cand, "add", "plain.txt")
+
+    def boom(*_a: object, **_k: object) -> list[object]:
+        raise scan.IgnoreScanError("坏了")
+
+    monkeypatch.setattr(scan, "ignored_among", boom)
+    assert enforce_pre_commit(cand, control_root=ctrl) == 1
+
+
+def test_td115_scan_handles_spaces_and_chinese_in_names(tmp_path: Path) -> None:
+    from auto_pm.infrastructure.ignored_file_scan import ignored_among
+
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / ".gitignore").write_text("*.bak\n", encoding="utf-8")
+    hits = ignored_among(repo, ["中文 目录/备份.bak", "中文 目录/正常.txt"])
+    assert [h.path for h in hits] == ["中文 目录/备份.bak"]

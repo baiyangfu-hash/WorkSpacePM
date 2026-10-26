@@ -1,4 +1,4 @@
-"""Domain services for doc sync and consistency auditing."""
+"""Application services for doc sync and consistency auditing (moved from domain.doc: they drive infrastructure extractors, TD-SW008-057)."""
 from pathlib import Path
 
 from auto_pm.domain.doc.models import DocCheckResult

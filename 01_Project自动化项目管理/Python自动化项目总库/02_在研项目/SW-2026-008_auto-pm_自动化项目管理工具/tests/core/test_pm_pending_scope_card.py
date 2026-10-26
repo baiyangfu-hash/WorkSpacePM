@@ -45,6 +45,7 @@ from tests.core.test_pm_run_e2e import (
     _helper_source,
 )
 from tests.plan_checklist_support import full_checklist
+from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
@@ -110,8 +111,35 @@ class _Env:
             )
         )
 
+    def unsaved_card(self, request_id: str, *, risks: tuple[str, ...] = ("r1",)) -> PlanningScopeCard:
+        """The card of a persisted draft with its CHG and spec bindings but NOT saved, for the store-level API.
+
+        A classified ``create_planning_scope_card`` saves the pending card (TD-SW008-070); the store's own
+        ``submit_planning_scope_card`` still needs a card nothing has saved yet, so it is built from the public pieces.
+        """
+
+        draft = self.store.get_planning_draft(request_id)
+        intent = PmIntent(
+            request_id=draft.request_id,
+            subject_project_id=draft.subject_project_id,
+            objective=draft.objective,
+            acceptance_criteria=draft.acceptance_criteria,
+        )
+        change_id = self.facade.create_planning_draft_change(
+            intent, classification=LEGACY_EQUIVALENT_FILING
+        )
+        return PlanningScopeCard.from_draft(
+            draft,
+            change_id=change_id,
+            scope_paths=SCOPE,
+            risks=risks,
+            non_goals=("no refactor",),
+            spec_sources=self.facade.bind_planning_draft_specs(intent),
+            execution_grant=_grant(),
+        )
+
     def card(self, request_id: str, *, risks: tuple[str, ...] = ("r1",)) -> PlanningScopeCard:
-        """Build the card of a persisted draft without persisting it (bindings are created)."""
+        """Create the classified card of a persisted draft; the pending card is saved with its classification."""
 
         draft = self.store.get_planning_draft(request_id)
         return self.facade.create_planning_scope_card(
@@ -125,6 +153,7 @@ class _Env:
             risks=risks,
             non_goals=("no refactor",),
             execution_grant=_grant(),
+            classification=LEGACY_EQUIVALENT_FILING,
         )
 
     def submit(
@@ -142,6 +171,7 @@ class _Env:
             non_goals=("no refactor",),
             execution_grant=_grant(scope),
             submitted_by=submitter,
+            classification=LEGACY_EQUIVALENT_FILING,
         )
 
     def approve(
@@ -348,7 +378,7 @@ def test_s04_submit_appends_one_row_and_one_chained_event_and_replays_idempotent
 ) -> None:
     env = _env(tmp_path)
     env.draft("REQ-S04-001")
-    card = env.card("REQ-S04-001")
+    card = env.unsaved_card("REQ-S04-001")
     cards_before, events_before = env.state()
 
     assert env.store.submit_planning_scope_card(card, SUBMITTER) == 1
@@ -369,8 +399,7 @@ def test_s04_submit_appends_one_row_and_one_chained_event_and_replays_idempotent
     assert payload["card_sha256"] == hashlib.sha256(stored.encode("utf-8")).hexdigest()
     assert env.chain_is_intact()
 
-    replay = env.submit("REQ-S04-001")
-    assert replay.revision == 1
+    assert env.store.submit_planning_scope_card(card, SUBMITTER) == 1
     assert env.state() == (cards_before + 1, events_before + 1)
 
 
@@ -536,7 +565,7 @@ def test_s08_an_approved_request_accepts_no_further_revision(tmp_path: Path) -> 
 
     with pytest.raises(PmFacadeError, match="已批准"):
         env.submit("REQ-S08-006", risks=("late",))
-    replacement = env.card("REQ-S08-006", risks=("late",))
+    replacement = env.unsaved_card("REQ-S08-006", risks=("late",))
     with pytest.raises(ContinuityStoreError, match="已批准"):
         env.store.submit_planning_scope_card(replacement, SUBMITTER)
 
@@ -557,7 +586,7 @@ def test_s08_the_facade_requires_an_existing_draft_and_an_explicit_grant(tmp_pat
         "submitted_by": SUBMITTER,
     }
     with pytest.raises(PmFacadeError, match="execution_grant"):
-        env.facade.submit_planning_scope_card("REQ-S08-007", **arguments)
+        env.facade.submit_planning_scope_card("REQ-S08-007", **arguments, classification=LEGACY_EQUIVALENT_FILING)
     assert env.state() == before
 
 
@@ -774,6 +803,7 @@ def test_s13_another_project_never_appears_in_either_list(tmp_path: Path) -> Non
         non_goals=("n1",),
         execution_grant=_grant(),
         submitted_by=SUBMITTER,
+        classification=LEGACY_EQUIVALENT_FILING,
     )
 
     assert env.facade.list_pending_planning_scope_cards(PROJECT_ID) == (mine,)
@@ -831,7 +861,7 @@ def test_s15_cockpit_draft_to_accepted_runs_through_the_persisted_card(tmp_path:
 # --------------------------------------------------------------------------- s16: the old route is unchanged
 
 
-def test_s16_the_existing_authorization_route_works_without_any_persisted_card(tmp_path: Path) -> None:
+def test_s16_the_card_object_authorization_route_works_for_the_saved_classified_card(tmp_path: Path) -> None:
     env = _env(tmp_path)
     env.draft("REQ-S16-001")
     card = env.card("REQ-S16-001")
@@ -842,10 +872,11 @@ def test_s16_the_existing_authorization_route_works_without_any_persisted_card(t
     mission = env.facade.materialize_planning_mission(card)
     work = env.facade.create_planning_work(card)
 
-    assert env.count("planning_scope_cards") == 0
+    # TD-SW008-070: a classified plan is always saved, so the card object route no longer runs without a saved card.
+    assert env.count("planning_scope_cards") == 1
     assert env.facade.recover_planning_scope_card(mission.mission_id) == card
     assert decision.decision_id == mission.authority.decision_id
     assert work.work_id
     overview = env.facade.list_planning_drafts(PROJECT_ID)
-    assert [(item.card_revision, item.approved) for item in overview] == [(0, True)]
+    assert [(item.card_revision, item.approved) for item in overview] == [(1, True)]
     assert env.facade.list_pending_planning_scope_cards(PROJECT_ID) == ()

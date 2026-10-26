@@ -36,6 +36,7 @@ from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 from tests.core.test_pm_run_e2e import NOT_VERIFIED_SENTENCE, VERIFIED_SENTENCE, _Env
 from tests.plan_checklist_support import full_checklist
+from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_closure_service import ClosureCompletionState, PmClosureService
@@ -213,6 +214,7 @@ def plc_env(
         risks=("改错文件导致回归",),
         non_goals=("no hardware download",),
         execution_grant=grant,
+        classification=LEGACY_EQUIVALENT_FILING,
     )
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(card.change_id, state, approver="fubai", comment="human", project_id=PROJECT_ID)
