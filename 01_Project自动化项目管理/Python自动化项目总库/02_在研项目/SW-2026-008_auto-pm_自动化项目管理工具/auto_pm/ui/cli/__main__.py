@@ -25,20 +25,24 @@ import sys
 
 
 def _fix_windows_encoding() -> None:
-    """Windows 终端编码修复：强制 stdout/stderr 为 UTF-8
+    """终端编码修复：Windows 强制 stdout/stderr 为 UTF-8；所有平台输出都不因编码失败而崩溃。
 
+    GBK 等窄编码的终端遇到 emoji（提交钩子的提示里有）会抛 ``UnicodeEncodeError`` 把钩子打成异常（TD-SW008-015），
+    所以无论平台，输出流的错误处理都改成 ``replace``：显示成 ``?`` 也不能让门禁因为打印失败而改变结论。
     避免与 pytest capture 机制冲突。
     """
-    if sys.platform != "win32":
-        return
     try:
-        if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8")
-        if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
-            sys.stderr.reconfigure(encoding="utf-8")
-    except (AttributeError, OSError):
+        for stream in (sys.stdout, sys.stderr):
+            if stream is None or not hasattr(stream, "reconfigure"):
+                continue
+            if sys.platform == "win32":
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            else:
+                stream.reconfigure(errors="replace")
+    except (AttributeError, OSError, ValueError):
         # pytest capture（StringIO 无 reconfigure）或旧 Python，静默跳过
         pass
+
 
 _fix_windows_encoding()
 
