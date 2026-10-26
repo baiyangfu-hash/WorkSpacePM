@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import auto_pm
+from tests.git_support import run_git
 
 ACTIVE, PREVIOUS = "9.9.9-active", "9.9.8-previous"
 PROJECT_ID = "DJ-2026-011"
@@ -38,9 +39,7 @@ def _repository_root() -> Path:
 
 
 def _git(root: Path, *arguments: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(root), *arguments], check=True, capture_output=True, text=True, encoding="utf-8"
-    ).stdout
+    return run_git(root, *arguments).stdout
 
 
 def _container(tmp_path: Path) -> tuple[Path, Path]:

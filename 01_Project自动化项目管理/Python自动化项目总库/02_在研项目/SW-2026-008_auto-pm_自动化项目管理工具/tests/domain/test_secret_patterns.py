@@ -11,6 +11,7 @@ import pytest
 
 from auto_pm.domain import secret_patterns as sp
 from auto_pm.infrastructure.git_hook_enforcer import enforce_pre_commit
+from tests.git_support import run_git
 
 GHP = "ghp_" + "a" * 36
 PAT = "github_pat_" + "A1b2C3d4E5" * 3
@@ -86,16 +87,7 @@ def test_p08_audit_pr_patterns_stay_in_sync_with_the_shared_ones() -> None:
 
 
 def git(repo: Path, *args: str) -> str:
-    done = subprocess.run(
-        ["git", *args],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=True,
-    )
-    return done.stdout
+    return run_git(repo, *args).stdout
 
 
 @pytest.fixture

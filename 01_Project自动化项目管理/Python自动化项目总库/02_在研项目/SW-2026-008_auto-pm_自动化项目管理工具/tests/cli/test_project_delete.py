@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,22 +15,14 @@ from auto_pm.application.core import project_delete_guard as guard
 from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
 from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
 from tests.core.test_mission_park_store import PROJECT, Scene
+from tests.git_support import run_git
 
 USER_WORDS = "user-confirmation:cmsg_user_says_delete_ok"
 PIN = "relay-K1-on"
 
 
 def git(root: Path, *args: str) -> str:
-    done = subprocess.run(
-        ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t", *args],
-        cwd=str(root),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=True,
-    )
-    return done.stdout
+    return run_git(root, *args, config=["user.email=t@example.invalid", "user.name=t"]).stdout
 
 
 def project_command_module() -> Any:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import subprocess
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -19,13 +18,14 @@ from auto_pm.infrastructure.continuity_backup import (
     ContinuityBackupService,
     verify_backup_file,
 )
+from tests.git_support import git_do
 
 PROJECT = "SW-2026-008"
 
 
 def _workspace(root: Path) -> Path:
     def git(*args: str) -> None:
-        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+        git_do(root, *args)
 
     git("init")
     (root / "README.md").write_text("baseline\n", encoding="utf-8")
