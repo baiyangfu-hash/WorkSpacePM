@@ -17,19 +17,11 @@ from auto_pm.change.parser import ChgParser
 log = logging.getLogger(__name__)
 
 PRODUCTION_EXTENSIONS = (".py", ".scl", ".st", ".qml")
-EXCLUDED_PATH_KEYWORDS = (
-    "tests/",
-    "test_",
-    "tests\\",
-    "docs/",
-    "docs\\",
-    "scratch/",
-    "scratch\\",
-    ".auto-pm/",
-    ".auto-pm\\",
-    "00_Obsidian_Base",
-    "PM_SESSION_",
-)
+# 豁免只按路径段判定（TD-194）：子串匹配会把 latest_state.py、contest_logic.scl、mydocs/x.py 误当成测试或文档
+EXCLUDED_DIR_NAMES = frozenset({"tests", "docs", "scratch", ".auto-pm"})
+# 规范库目录名带中文后缀（00_Obsidian_Base全局规范文件仓库），所以按前缀
+EXCLUDED_DIR_PREFIXES = ("00_Obsidian_Base",)
+EXCLUDED_FILE_PREFIXES = ("test_", "PM_SESSION_")
 _CHG_ID_PATTERN = re.compile(r"CHG-[A-Z0-9]+-\d{4}-\d+")
 _PROJECT_ID_ROW_PATTERN = re.compile(
     r"^\|\s*(?:\*\*)?项目编号(?:\*\*)?\s*\|\s*([^|]+?)\s*\|",
@@ -296,17 +288,24 @@ def _get_staged_files_or_reject(workspace_root: Path, hook_name: str) -> list[st
         return None
 
 
+def is_excluded_from_production(path: str) -> bool:
+    """测试、文档、草稿、规范库、会话文件：按目录段和文件名前缀判定，不做子串匹配。"""
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    if not parts:
+        return False
+    *directories, name = parts
+    if any(d in EXCLUDED_DIR_NAMES or d.startswith(EXCLUDED_DIR_PREFIXES) for d in directories):
+        return True
+    return name.startswith(EXCLUDED_FILE_PREFIXES)
+
+
 def filter_production_files(files: list[str]) -> list[str]:
     """从暂存区筛选出生产代码文件"""
-    prod_files: list[str] = []
-    for f in files:
-        f_norm = f.replace("\\", "/")
-        # 排除纯文档、测试、草稿及会话文件
-        if any(keyword in f_norm for keyword in EXCLUDED_PATH_KEYWORDS):
-            continue
-        if any(f_norm.endswith(ext) for ext in PRODUCTION_EXTENSIONS):
-            prod_files.append(f)
-    return prod_files
+    return [
+        f
+        for f in files
+        if f.replace("\\", "/").endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f)
+    ]
 
 
 def _project_bindings(workspace_root: Path, projects: list[object]) -> tuple[ProjectBinding, ...]:
