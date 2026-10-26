@@ -588,3 +588,82 @@ def test_markers_remove_refuses_paths_outside_the_workspace(lab: dict[str, Path]
     cfg = _config(lab, [_step(lab, "s")], remove=[bad])
     result = _run(cfg, "run")
     assert result.returncode != 0 and "markers.remove" in (result.stdout + result.stderr)
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("this machine cannot create symbolic links")
+
+
+def test_markers_remove_refuses_dotdot_inside_an_absolute_path(lab: dict[str, Path]) -> None:
+    cfg = _config(lab, [_step(lab, "s")], remove=[str(lab["root"] / "sub" / ".." / "HEAVY_GATES_RUNNING")])
+    result = _run(cfg, "run")
+    assert result.returncode != 0 and "markers.remove" in (result.stdout + result.stderr)
+
+
+def test_markers_remove_refuses_a_link_that_points_outside_the_workspace(lab: dict[str, Path], tmp_path_factory: pytest.TempPathFactory) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "precious.txt"
+    outside.write_text("keep\n", encoding="utf-8")
+    _symlink_or_skip(lab["root"] / "HEAVY_GATES_RUNNING", outside)
+    cfg = _config(lab, [_step(lab, "s")], remove=[str(lab["root"] / "HEAVY_GATES_RUNNING")])
+
+    result = _run(cfg, "run")
+
+    assert result.returncode != 0 and "markers.remove" in (result.stdout + result.stderr)
+    assert outside.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_a_link_planted_after_the_config_check_never_deletes_outside_files(lab: dict[str, Path], tmp_path_factory: pytest.TempPathFactory) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "precious.txt"
+    outside.write_text("keep\n", encoding="utf-8")
+    marker = lab["root"] / "HEAVY_GATES_RUNNING"
+    cfg = _config(lab, [_step(lab, "slow", wait=3.0)], remove=[str(marker)])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: (lab["out"] / "slow.started").exists())
+        _symlink_or_skip(marker, outside)
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert outside.read_text(encoding="utf-8") == "keep\n"
+    assert "resolves outside the workspace" in (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def test_the_marker_stays_when_the_round_is_only_stopped(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "HEAVY_GATES_RUNNING"
+    marker.write_text("run=RUN-X\n", encoding="utf-8")
+    cfg = _config(lab, [_step(lab, "core", wait=120)], remove=[str(marker)])
+    runner = _start(cfg)
+    _wait_for(lambda: _runs(lab, "core") == 1)
+    assert _run(cfg, "stop").returncode == 0
+    assert runner.wait(timeout=60) == 7
+    assert marker.exists()
+
+
+def test_a_directory_is_never_removed(lab: dict[str, Path]) -> None:
+    folder = lab["root"] / "HEAVY_DIR"
+    folder.mkdir()
+    (folder / "keep.txt").write_text("x", encoding="utf-8")
+    cfg = _config(lab, [_step(lab, "s")], remove=[str(folder)])
+    assert _run(cfg, "run").returncode == 0
+    assert (folder / "keep.txt").exists()
+
+
+def test_a_marker_that_cannot_be_deleted_is_only_logged(lab: dict[str, Path]) -> None:
+    # A read-only parent makes the unlink fail on POSIX; elsewhere (Windows, root) there is no cheap way to force it.
+    if os.name == "nt" or os.geteuid() == 0:
+        pytest.skip("cannot make a delete fail on this machine without an open handle")
+    stuck = lab["root"] / "locked" / "HEAVY_STUCK"
+    stuck.parent.mkdir()
+    stuck.write_text("x", encoding="utf-8")
+    cfg = _config(lab, [_step(lab, "s")], remove=[str(stuck)])
+    stuck.parent.chmod(0o500)
+    try:
+        result = _run(cfg, "run")
+    finally:
+        stuck.parent.chmod(0o700)
+    assert result.returncode == 0 and stuck.exists()
+    assert "not removed" in (lab["out"] / "long_gate.log").read_text(encoding="utf-8")

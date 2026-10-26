@@ -81,6 +81,16 @@ def _say(msg: str) -> None:
 # ── config ───────────────────────────────────────────────
 
 
+def marker_real_path(cfg: dict[str, Any], target: Path) -> Path | None:
+    """Real path of a markers.remove entry when it stays inside config.root or config.out_dir after links are followed."""
+    try:
+        real = target.resolve()
+        bases = [Path(p).resolve() for p in (cfg.get("root"), cfg.get("out_dir")) if p]
+    except (OSError, RuntimeError):
+        return None
+    return real if any(real.is_relative_to(base) for base in bases) else None
+
+
 def load_config(path: Path) -> tuple[dict[str, Any], str]:
     raw = path.read_bytes()
     cfg = json.loads(raw.decode("utf-8-sig"))
@@ -184,10 +194,9 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
     if not isinstance(remove, list) or not all(isinstance(r, str) and r for r in remove):
         raise GateError("markers.remove must be a list of file paths")
     cfg["markers"]["remove"] = [fill(r) for r in remove]
-    allowed = [Path(p) for p in (cfg["root"], cfg["out_dir"]) if p]
     for r in cfg["markers"]["remove"]:
         target = Path(r)
-        if not target.is_absolute() or ".." in target.parts or not any(target.is_relative_to(base) for base in allowed):
+        if not target.is_absolute() or ".." in target.parts or marker_real_path(cfg, target) is None:
             raise GateError(f"markers.remove: {r} must be an absolute path inside config.root or config.out_dir")
     cfg.setdefault("poll_s", 15)
     if not 1 <= int(cfg["poll_s"]) <= 300:
@@ -618,8 +627,12 @@ class Runner:
             for rel in self.cfg["markers"]["remove"]:
                 target = Path(rel)
                 try:
-                    if target.is_file():
-                        target.unlink()
+                    # Links are followed before the check, so a link planted in root cannot point the delete elsewhere.
+                    real = marker_real_path(self.cfg, target)
+                    if real is None:
+                        self.log(f"marker {target} not removed (resolves outside the workspace)")
+                    elif real.is_file():
+                        real.unlink()
                         self.log(f"removed leftover marker {target}")
                 except OSError as error:
                     self.log(f"marker {target} not removed ({type(error).__name__})")
