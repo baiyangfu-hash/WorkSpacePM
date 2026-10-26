@@ -22,6 +22,8 @@ from auto_pm.cli.workflow import (
 )
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 # Reuse the existing PM CLI fixtures; imported dynamically so that this file is type-checked on its own.
 _pm_facade_tests = importlib.import_module("tests.cli.test_pm_facade")
 _git = _pm_facade_tests._git

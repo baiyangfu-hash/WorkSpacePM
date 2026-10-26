@@ -29,6 +29,8 @@ from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.plan_checklist_support import checklist_args, full_checklist
 from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 if TYPE_CHECKING:
     from auto_pm.application.core.mission_service import MissionService
     from auto_pm.application.core.pm_facade_service import PmFacadeService

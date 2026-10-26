@@ -32,6 +32,9 @@ from auto_pm.infrastructure.continuity_store import ContinuityStoreError
 from tests.core.test_continuity_execution_service import _start
 from tests.core.test_mission_park_store import APPROVAL, PROJECT, Scene
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
+
 A_FILE = "auto_pm/core/a.py"
 
 

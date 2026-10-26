@@ -24,6 +24,8 @@ from auto_pm.infrastructure import lease_wallet
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.git_support import git_do
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 RUN = "RUN-HO-001"
 WORK = "WORK-HO-001"
 

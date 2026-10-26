@@ -31,6 +31,9 @@ from tests.core.test_pm_facade_service import _audit_scene, _p10_facade
 from tests.plan_checklist_support import full_checklist
 from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
+
 SCOPE = ("DJ-2026-011/src/FB_AlarmSummary.st", "DJ-2026-011/docs/变量定义.md")
 DJ011_INTENT = PmIntent(
     request_id="REQ-DJ011-ALARM",

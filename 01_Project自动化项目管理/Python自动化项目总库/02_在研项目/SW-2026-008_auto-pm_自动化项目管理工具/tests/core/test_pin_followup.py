@@ -23,6 +23,9 @@ from tests.core.test_cockpit_api import APPROVER, EVIDENCE, _plan, _workspace
 from tests.core.test_mission_park_store import APPROVAL, PROJECT
 from tests.core.test_mission_switch_service import Switch, sw  # noqa: F401  (fixture)
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
+
 PIN = "relay-K1-on-followup"
 RELEASE = "user-confirmation:FOLLOW-B-0001"
 

@@ -7,6 +7,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from auto_pm.cli.__main__ import cli
 from auto_pm.core.mission_service import MissionService
 from auto_pm.core.work_registry_service import WorkRegistryService
@@ -17,6 +18,8 @@ from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.git_support import git_do
 from tests.plan_checklist_support import checklist_args
+
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
 
 def _git(root: Path, *args: str) -> None:

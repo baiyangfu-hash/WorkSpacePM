@@ -26,6 +26,8 @@ from tests.cli.test_pm_pending_cards import (
     _setup_planning,
 )
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 def _race_once(monkeypatch: pytest.MonkeyPatch, other_process: Any) -> None:
     """Run ``other_process`` right after the first admission check returns, before that caller creates its card."""
