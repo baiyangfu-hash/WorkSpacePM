@@ -659,16 +659,22 @@ def test_td100_a_snapshot_that_disagrees_with_the_index_is_refused(tmp_path: Pat
 
 
 def test_td100_unmerged_index_entries_are_refused(tmp_path: Path) -> None:
+    """真实合并冲突留下 stage 1/2/3 条目；快照不能把它当普通改动放行。"""
     cand, _ctrl, _msg = _delete_scene(tmp_path)
-    blob = _git(cand, "rev-parse", f"HEAD:{SERVICE}")
-    index_info = f"0 {'0' * 40}\t{SERVICE}\n100644 {blob} 2\t{SERVICE}\n"
-    subprocess.run(
-        ["git", "update-index", "--index-info"],
-        cwd=str(cand), input=index_info, text=True, encoding="utf-8", errors="replace",
-        check=True, capture_output=True,
+    _git(cand, "checkout", "-q", "-b", "side")
+    (cand / SERVICE).write_text("def side():\n    return 1\n", encoding="utf-8")
+    _git(cand, "commit", "-qam", "side change")
+    _git(cand, "checkout", "-q", "-")
+    (cand / SERVICE).write_text("def main_side():\n    return 2\n", encoding="utf-8")
+    _git(cand, "commit", "-qam", "main change")
+    merged = subprocess.run(
+        ["git", "merge", "side"], cwd=str(cand), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=False,
     )
+    assert merged.returncode != 0, "测试前提：合并必须冲突"
     with pytest.raises(StagedSnapshotError):
         get_staged_snapshot(cand)
+
 
 
 def _run_preflight(cand: Path, ctrl: Path, msg: Path, *, control_root: Path | None = None):
