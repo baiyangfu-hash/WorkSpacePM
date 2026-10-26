@@ -56,6 +56,12 @@ from auto_pm.ui.cli.implementation_card import command_tree_from_click
 
 _Command = TypeVar("_Command", bound=Callable[..., Any])
 
+def _read_stdin_text() -> str:
+    """Whole stdin as text; ``click.get_text_stream`` is deprecated (removed in click 9), ``open_file("-")`` is its public form."""
+    with click.open_file("-", "r") as stream:
+        return str(stream.read())
+
+
 def _workspace(ctx: click.Context) -> Path:
     app_ctx: AppContext = ctx.find_root().obj
     return Path(app_ctx.workspace_root).resolve()
@@ -517,7 +523,7 @@ def adjudicate_blocked_work(
     """Forward-cancel one historical BLOCKED Work under an exact adjudication Decision."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _work_service(ctx).adjudicate_blocked_work(
             target_work_id=work_id,
@@ -898,7 +904,7 @@ def fence_terminal_lease(
     """Fence one legacy terminal lease through an independently approved recovery Run."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _execution_service(ctx).fence_terminal_lease(
             target_run_id=target_run_id,
@@ -947,7 +953,7 @@ def reconcile_terminal_lease(
     """Release a lease omitted by an exact legacy v2 terminal transition."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _execution_service(ctx).reconcile_terminal_lease(
             target_run_id=target_run_id,
@@ -1019,7 +1025,7 @@ def fence_legacy_terminal(
     """Invalidate one expired legacy terminal lease token without rewriting Run history."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _execution_service(ctx).fence_legacy_terminal_lease(
             target_run_id=target_run_id,
@@ -1068,7 +1074,7 @@ def revoke_unstarted_run(
     """Revoke a live Run only when its durable record has no Popen evidence."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _execution_service(ctx).revoke_unstarted_run(
             target_run_id=target_run_id,
