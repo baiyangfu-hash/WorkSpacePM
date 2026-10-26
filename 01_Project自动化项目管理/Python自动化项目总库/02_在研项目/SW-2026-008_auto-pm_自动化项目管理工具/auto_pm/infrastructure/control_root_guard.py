@@ -52,32 +52,18 @@ def authority_path_parts(raw: str, *, windows: bool | None = None) -> tuple[str,
     return tuple(part.casefold() for part in parts) if fold else parts
 
 
-def _authority_scope_parts(raw: str, windows: bool | None) -> tuple[tuple[str, ...], bool]:
-    """Normalized parts of an authorized path and whether it names a directory (it ends with ``/``)."""
-
-    text = str(raw).replace("\\", "/")
-    is_directory = text.endswith("/")
-    return authority_path_parts(text, windows=windows), is_directory
-
-
 def authority_path_covered(path: str, roots: Iterable[str], *, windows: bool | None = None) -> bool:
     """Whether ``path`` is authorized by ``roots`` (the one scope rule every caller shares, TD-SW008-207).
 
-    A root ending with ``/`` authorizes everything inside that directory (and the directory itself, written the same
-    way); any other root is one exact file and authorizes only that file.  A directory is never covered by a file root.
-    Paths are compared by whole components after ``\\`` -> ``/``, dropping ``.`` parts and doubled slashes, with the
-    host's casing rule (case-insensitive on Windows), so ``a/b`` never authorizes ``a/bc/x``.
+    A root covers itself and everything under it; a trailing ``/`` on the root is optional.  Paths are compared by
+    whole components after ``\\`` -> ``/``, dropping ``.`` parts and doubled slashes, with the host's casing rule
+    (case-insensitive on Windows), so ``a/b`` never authorizes ``a/bc/x``.  An empty root covers nothing.
     """
 
-    path_parts, path_is_directory = _authority_scope_parts(path, windows)
+    path_parts = authority_path_parts(path, windows=windows)
     for root in roots:
-        root_parts, root_is_directory = _authority_scope_parts(root, windows)
-        if not root_parts:
-            continue
-        if root_is_directory:
-            if path_parts[: len(root_parts)] == root_parts:
-                return True
-        elif not path_is_directory and path_parts == root_parts:
+        root_parts = authority_path_parts(root, windows=windows)
+        if root_parts and path_parts[: len(root_parts)] == root_parts:
             return True
     return False
 

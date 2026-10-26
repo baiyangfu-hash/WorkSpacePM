@@ -95,7 +95,7 @@ def _setup(
         subject_project_id="SW-2026-008",
         change_id="CHG-SCPT-2026-206",
         decision_id=DECISION_ID,
-        scope_paths=("auto_pm/root.py", "auto_pm/bug.py", "auto_pm/debt.py"),
+        scope_paths=("auto_pm",),
         allowed_child_work_kinds=frozenset(
             {WorkKind.BUG, WorkKind.DEBT, WorkKind.TEST, WorkKind.GOVERNANCE}
         ),
