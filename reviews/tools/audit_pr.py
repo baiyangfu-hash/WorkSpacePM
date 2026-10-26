@@ -236,6 +236,71 @@ def github_json(path: str) -> dict | None:
         return None
 
 
+REQUIRED_CONTEXT = "safety-zone"
+PLC_TOP = "0100_PLC自动化"
+BAD_STATES = {"failure", "error"}
+PASSING_CONCLUSIONS = {"success", "skipped", "neutral"}
+
+
+def judge_ci(
+    runs: list[dict], check_runs: list[dict], statuses: list[dict], expected_ci: bool, touches_plc: bool
+) -> tuple[str, str]:
+    """Verdict over Actions runs, check runs and commit statuses. Any failing or unfinished required context is not a PASS."""
+    # Only the newest run per (workflow, event, commit) counts: older ones are re-runs or were cancelled by a newer push.
+    newest: dict[tuple, dict] = {}
+    for r in runs:
+        key = (r.get("workflow_id"), r["event"], r["head_sha"])
+        if key not in newest or r["id"] > newest[key]["id"]:
+            newest[key] = r
+    runs = sorted(newest.values(), key=lambda r: r["id"])
+    parts: list[str] = []
+    bad: list[str] = []
+    pending: list[str] = []
+    for r in runs:
+        label = f"run {r['id']}（{r['event']}，{short(r['head_sha'])}）"
+        parts.append(f"{label}: {r.get('conclusion') or r['status']}")
+        if r.get("conclusion") not in (None, *PASSING_CONCLUSIONS):
+            bad.append(label)
+        elif r["status"] != "completed":
+            pending.append(label)
+    for c in check_runs:
+        name = f"检查项 {c.get('name') or '?'}"
+        parts.append(f"{name}: {c.get('conclusion') or c.get('status')}")
+        if c.get("status") != "completed":
+            pending.append(name)
+        elif str(c.get("conclusion") or "").lower() not in PASSING_CONCLUSIONS:
+            bad.append(name)
+    seen_contexts: set[str] = set()
+    for st in statuses:
+        context = str(st.get("context") or "?")
+        seen_contexts.add(context)
+        name = f"状态 {context}"
+        state = st.get("state")
+        parts.append(f"{name}: {state}")
+        if state in BAD_STATES:
+            bad.append(name)
+        elif state != "success":
+            # An unfinished `safety-zone` must not let the PR through; other pending contexts are only unverified.
+            (bad if context == REQUIRED_CONTEXT else pending).append(name)
+    if touches_plc and REQUIRED_CONTEXT not in seen_contexts:
+        pending.append(f"状态 {REQUIRED_CONTEXT}（改了 {PLC_TOP} 但没有出现）")
+    if bad:
+        status = "FAIL"
+    elif pending:
+        status = "UNVERIFIED"
+    elif not runs and not check_runs and not statuses:
+        status = "UNVERIFIED" if expected_ci else "PASS"
+        parts.append("应当跑 CI，但没有找到任何记录（可能还在排队）" if expected_ci else "没有 CI 运行，符合预期")
+    else:
+        status = "PASS"
+    detail = ", ".join(parts)
+    if bad:
+        detail += "。不通过：" + "、".join(bad)
+    if pending:
+        detail += "。未完成或缺失：" + "、".join(pending)
+    return status, detail + "。PASS 只代表 GitHub 显示 success；verdict 和失败数要看日志（清单第 2 步）"
+
+
 # --- Checks ----------------------------------------------------------------------------------------------------
 
 
@@ -409,40 +474,23 @@ def audit(
         checks.append(Check("ci_result", "INFO", "按 --skip-ci-result 跳过（在 CI 里运行时，CI 本身的结论由必需检查负责）"))
     elif network:
         shas = [head] + ([info["merge"]] if "merge" in info else [])
-        runs = []
+        runs: list[dict] | None = []
+        check_runs: list[dict] | None = []
+        statuses: list[dict] | None = []
         for sha in shas:
             data = github_json(f"{repo}/actions/runs?head_sha={sha}&per_page=20")
-            if data is None:
-                runs = None
-                break
-            runs.extend(data.get("workflow_runs", []))
-        if runs is None:
-            checks.append(Check("ci_result", "UNVERIFIED", "取不到 GitHub Actions 记录（网络或限流）"))
-        elif not runs:
-            checks.append(
-                Check(
-                    "ci_result",
-                    "UNVERIFIED" if expected_ci else "PASS",
-                    "应当跑 CI，但没有找到运行记录（可能还在排队）" if expected_ci else "没有 CI 运行，符合预期",
-                )
-            )
+            runs = None if data is None or runs is None else runs + data.get("workflow_runs", [])
+            data = github_json(f"{repo}/commits/{sha}/check-runs?per_page=100")
+            check_runs = None if data is None or check_runs is None else check_runs + data.get("check_runs", [])
+            # Commit statuses are a separate API from Actions runs: `safety-zone` is reported only there.
+            data = github_json(f"{repo}/commits/{sha}/status?per_page=100")
+            statuses = None if data is None or statuses is None else statuses + data.get("statuses", [])
+        if runs is None or check_runs is None or statuses is None:
+            checks.append(Check("ci_result", "UNVERIFIED", "取不到 GitHub 的 Actions、检查项或提交状态记录（网络或限流）"))
         else:
-            # Only the newest run per (workflow, event, commit) counts: older ones are re-runs or were cancelled by a newer push.
-            newest: dict[tuple, dict] = {}
-            for r in runs:
-                key = (r.get("workflow_id"), r["event"], r["head_sha"])
-                if key not in newest or r["id"] > newest[key]["id"]:
-                    newest[key] = r
-            runs = sorted(newest.values(), key=lambda r: r["id"])
-            summary = ", ".join(
-                f"run {r['id']}（{r['event']}，{short(r['head_sha'])}）: {r.get('conclusion') or r['status']}" for r in runs
-            )
-            bad = [r for r in runs if r.get("conclusion") not in (None, "success", "skipped")]
-            pending = [r for r in runs if r["status"] != "completed"]
-            status = "FAIL" if bad else "UNVERIFIED" if pending else "PASS"
-            checks.append(
-                Check("ci_result", status, summary + "。PASS 只代表 GitHub 显示 success；verdict 和失败数要看日志（清单第 2 步）")
-            )
+            touches_plc = any(f == PLC_TOP or f.startswith(f"{PLC_TOP}/") for f in info.get("files", []))
+            status, summary = judge_ci(runs, check_runs, statuses, expected_ci, touches_plc)
+            checks.append(Check("ci_result", status, summary))
     else:
         checks.append(Check("ci_result", "UNVERIFIED", "离线模式，没有查 CI"))
 

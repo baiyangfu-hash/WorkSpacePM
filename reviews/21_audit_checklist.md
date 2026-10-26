@@ -35,7 +35,7 @@ python reviews/tools/audit_pr.py <PR 编号> --patch <分支>:reviews/patches/<�
 | `secrets` | 新增行里有没有令牌、API 密钥、私钥 | FAIL 立刻告诉用户（仓库是公开的），不要在报告里抄写密钥原文，只写位置 |
 | `privacy` | 邮箱、内网地址、手机号、身份证号、本机路径、`fubai`、长 base64 | 本机路径和 `fubai` 在 main 上已有约 200 个文件，属于已知基线，只报告“新增了哪一类” |
 | `ci_expected` | 改动是否落在 CI 的 `paths` 过滤范围内 | 只改文档时不会触发 CI，这是正常的 |
-| `ci_result` | GitHub 显示的 CI 结论（每个提交、每种事件只看最新一次） | PASS 只代表显示 success，失败数还要看日志（第 2 步） |
+| `ci_result` | GitHub 显示的 CI 结论：Actions 运行（每个提交、每种事件只看最新一次）、检查项、提交状态（如 `safety-zone`）三处都查 | 任何一处 failure/error 判 FAIL；`safety-zone` 未完成判 FAIL；改了 PLC 目录却没有 `safety-zone` 状态判 UNVERIFIED。PASS 只代表显示 success，失败数还要看日志（第 2 步） |
 | `patch` | PR 和“补丁应用到基线”的结果是否逐字节一致 | WARN 列出不同的文件，要查清是有意取舍还是遗漏（例：PR #3 有意去掉了启动器部分，提交信息里写明了） |
 
 ## 2. 看 CI 日志（脚本做不到，因为日志需要登录 GitHub）
