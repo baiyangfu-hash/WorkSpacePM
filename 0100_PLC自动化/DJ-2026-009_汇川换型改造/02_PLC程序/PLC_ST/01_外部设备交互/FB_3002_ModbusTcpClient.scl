@@ -127,9 +127,7 @@ BEGIN
                 END_IF;
             END_IF;
         END_FOR;
-        s_sIdBuf[s_iChar + 1] := 16#00;  // 结束符 (32 个字符满时写在第 33 字节, STRING[32] 自带)
-        // STRING 下标从 1 起，为 siemens-lsp 插件（S7 语义）要求；移植到汇川 InoProShop / CODESYS 等平台须按平台适配
-        // 按下标逐字符写入不会更新字符串当前长度 (S7 语义): 把长度截到实际字符数, 去掉结束符和多余内容
+        // 按下标逐字符写入不会更新字符串当前长度 (S7 语义): 把长度截到实际字符数 (结束符由字符串自带, 不再手写, 32 个字符满时也不越界)
         s_sIdBuf := LEFT(s_sIdBuf, s_iChar);
         io_stExternal.stUpstream.sRcvModuleID := s_sIdBuf;
     END_IF;
