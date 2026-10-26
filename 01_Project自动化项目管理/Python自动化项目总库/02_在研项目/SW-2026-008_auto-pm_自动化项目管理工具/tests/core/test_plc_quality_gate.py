@@ -513,6 +513,17 @@ def test_p16_an_unusable_timeout_setting_falls_back_to_the_default(
     assert module._quality_gate_timeout_seconds() == module._QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
 
 
+def test_p16_the_default_time_limit_is_pinned_to_1800_finite_and_positive() -> None:
+    """退回默认的前提是默认值本身有限且为正；它被改成 inf、0 或别的数，所有“退回默认”的测试都会跟着失真。"""
+    import math
+
+    from auto_pm.application.core import evidence_collection_service as module
+
+    assert module._QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS == 1800.0
+    assert math.isfinite(module._QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS)
+    assert module._QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS > 0
+
+
 def test_p17_a_gate_that_raises_still_reports_a_launch_error_not_a_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
