@@ -38,6 +38,7 @@ Rectangle {
         "accepting": "#f59e0b",
         "completed": "#10b981",
         "closed": "#10b981",
+        "abandoned": "#6b7280",
         "urgent": Theme.warning,
         "critical": Theme.error,
         "default": Theme.textSecondary

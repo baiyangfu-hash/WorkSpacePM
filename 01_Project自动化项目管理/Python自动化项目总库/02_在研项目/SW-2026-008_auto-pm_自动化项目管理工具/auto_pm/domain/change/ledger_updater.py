@@ -161,7 +161,7 @@ class LedgerUpdater:
                 # 状态列是最后一个内容列 = parts[-2]（parts[-1] 是行尾空字符串）
                 parts[-2] = f" {status} "
                 # CHG-085：closed/archived 时回写完成日期列（parts[-3]）
-                if complete_date and status in ("✅已关闭", "✅已归档"):
+                if complete_date and status in ("✅已关闭", "✅已归档", "🚫已废弃"):
                     parts[-3] = f" {complete_date} "
                     log.info("台帐完成日期已回写: %s → %s", change_number, complete_date)
                 lines[i] = "|".join(parts)
@@ -183,7 +183,7 @@ class LedgerUpdater:
             link = f"[→ {change_number}](./01_变更单/CHG-{domain}/{change_number}.md)"
             # 完成日期（仅 closed/archived 状态写入）
             complete_date_str = (
-                complete_date if complete_date and status in ("✅已关闭", "✅已归档") else ""
+                complete_date if complete_date and status in ("✅已关闭", "✅已归档", "🚫已废弃") else ""
             )
             # 构造新行（直接写入目标状态，desc 用 change_number 占位）
             new_row = (

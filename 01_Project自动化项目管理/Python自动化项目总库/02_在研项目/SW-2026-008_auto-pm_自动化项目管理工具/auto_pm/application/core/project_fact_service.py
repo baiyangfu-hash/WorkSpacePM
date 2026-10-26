@@ -37,7 +37,7 @@ _CHANGE_STATUS_RE: Final[re.Pattern[str]] = re.compile(
 )
 _SPEC_HEADING_RE: Final[re.Pattern[str]] = re.compile(r"^##\s+Spec\s+Snapshot", re.IGNORECASE)
 _TERMINAL_CHANGE_STATUSES: Final[frozenset[str]] = frozenset(
-    {"completed", "closed", "archived"}
+    {"completed", "closed", "archived", "abandoned"}
 )
 _EXCLUDED_STRUCTURE_DIRECTORIES: Final[frozenset[str]] = frozenset(
     {".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "__pycache__", "build", "coverage", "dist", "venv"}
