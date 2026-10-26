@@ -1,0 +1,241 @@
+// ============================================================================
+// heartbeat_timeout_test.scltest - 汇川换型改造 对方心跳停了 12 s 才报通讯故障测试
+// ============================================================================
+// 项目: DJ-2026-009 汇川换型改造
+// 依据: 需求说明验收项 A3 (断线判断只看对方心跳, 不看网卡; 用户 2026-10-26 确认)
+// 被测: FB_3001_ExternalInteraction (实例 GlobalVars.fbExternalDevice)
+// 补的缺口: handshake_disconnect_test 是直接把通讯故障位置 1, 没有覆盖
+//           "对方心跳停了 12 s 才报故障" 这一段; 本文件让心跳输入真的停住, 靠 FB 自己的 12 s 监视报故障.
+// 做法: 上下游心跳输入各翻一下 (12 s 计时从这个边沿重新起算) -> 把进料、出料握手推到第 N 步 ->
+//       之后不再动心跳输入 -> 11 s 时断言还没报故障 -> 12 s 之后断言报故障, 且允许信号和动作输出都撤销.
+// 三条用例: 心跳停在握手第 0、20、30 步 (进料和出料同时在同一步).
+//
+// 时间怎么算 (重要, 和别的测试不同):
+//   FB_3001 的 12 s 监视用 FB_TON. SysLib 的 FB_TON 是真实毫秒版, 内部调用平台原生 TON, 语言服务插件的
+//   测试运行时没有原生 TON (panic: STUB BUILTIN: B_TON). 所以本文件只能在 "按扫描次数计时的替身 FB_TON"
+//   下跑 (见 DJ-2026-005/05_测试与验证/测试用SysLib), 替身里 PT 按扫描周期数算:
+//   PT = 12000 -> 12000 个扫描周期; 本文件约定 1 个扫描周期 = 1 ms, 即 11 s = 11000 个周期, 12 s = 12000 个周期.
+//   这只验证 "接线和条件" (心跳不翻转 -> 报故障 -> 撤销), 不证明真实 12 s;
+//   真实 12 s 以 PLCSIM / InoProShop 仿真或现场拔网线计时为准 (用户 2026-10-23: 计时器不仿真).
+//   若换成真实时间的运行环境 (按 10 ms 一个扫描周期), 把下面两处等待各除以 10 (10990 -> 1099, 1100 -> 110).
+//
+// 信号对应:
+//   AllowInfeed          = GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed
+//   AllowOutfeed         = 程序里没有叫 bMachine_AllowOutfeed 的变量. 出料方向 "机器给下游的出料允许/请求" 是
+//                          GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq (第 6 步), 这里用它.
+//   进料动作输出         = GlobalVars.fbExternalDevice.q_bAllowInfeedAct
+//   出料动作输出         = GlobalVars.fbExternalDevice.q_bAllowOutfeedAct
+// ============================================================================
+
+// 心跳停在握手第 0 步 (进料、出料都在待机, 只广播准备好)
+TEST_CASE "TC_HB_Timeout_Step0"
+    // --- 全部输入回到初始值 ---
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bAutoMode := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_HeartbeatFromDown := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    // --- 先禁用 2 个周期 (步序清零、计时器复位), 再使能并复位 ---
+    WAIT_CYCLES 2;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    // --- 对方心跳最后一次翻转 (上下游各一下): 12 s 监视从这个边沿重新起算, 之后不再动心跳输入 ---
+    SET GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_HeartbeatFromDown := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = TRUE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = TRUE;
+    // --- 心跳输入从此不再变化。已过约 6 个周期; 再等到约 11 s (11000 周期), 还不能报故障 ---
+    WAIT_CYCLES 10990;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstreamComFault = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bDownstreamComFault = FALSE;
+    ASSERT GlobalVars.stExternal.bAnyComFault = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bComAlarm = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode = 16#0000;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = TRUE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = TRUE;
+    // --- 再等 1100 个周期, 共约 12.1 s: 必须已报故障, 允许信号和动作输出撤销 ---
+    WAIT_CYCLES 1100;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstreamComFault = TRUE;
+    ASSERT GlobalVars.stExternal.stDownstream.bDownstreamComFault = TRUE;
+    ASSERT GlobalVars.stExternal.bAnyComFault = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_bComAlarm = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_ReadyIn = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_ReadyOut = FALSE;
+END_TEST_CASE
+
+// 心跳停在握手第 20 步 (进料已允许; 出料已收到下游确认, 等下游允许)
+TEST_CASE "TC_HB_Timeout_Step20"
+    // --- 全部输入回到初始值 ---
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bAutoMode := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_HeartbeatFromDown := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    // --- 先禁用 2 个周期 (步序清零、计时器复位), 再使能并复位 ---
+    WAIT_CYCLES 2;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    // --- 对方心跳最后一次翻转 (上下游各一下): 12 s 监视从这个边沿重新起算, 之后不再动心跳输入 ---
+    SET GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_HeartbeatFromDown := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 20;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 20;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = TRUE;
+    // --- 心跳输入从此不再变化。已过约 6 个周期; 再等到约 11 s (11000 周期), 还不能报故障 ---
+    WAIT_CYCLES 10990;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstreamComFault = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bDownstreamComFault = FALSE;
+    ASSERT GlobalVars.stExternal.bAnyComFault = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bComAlarm = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode = 16#0000;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 20;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 20;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = TRUE;
+    // --- 再等 1100 个周期, 共约 12.1 s: 必须已报故障, 允许信号和动作输出撤销 ---
+    WAIT_CYCLES 1100;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstreamComFault = TRUE;
+    ASSERT GlobalVars.stExternal.stDownstream.bDownstreamComFault = TRUE;
+    ASSERT GlobalVars.stExternal.bAnyComFault = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_bComAlarm = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+END_TEST_CASE
+
+// 心跳停在握手第 30 步 (进料、出料的动作输出都已经打开)
+TEST_CASE "TC_HB_Timeout_Step30"
+    // --- 全部输入回到初始值 ---
+    SET GlobalVars.bModbusEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bEnable := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bAutoMode := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := FALSE;
+    SET GlobalVars.fbExternalDevice.i_bInfeedArrivedSens := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedArrivedAck := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_OutfeedArrived := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_HeartbeatFromDown := FALSE;
+    SET GlobalVars.stExternal.stUpstream.bUpstreamComFault := FALSE;
+    SET GlobalVars.stExternal.stDownstream.bDownstreamComFault := FALSE;
+    // --- 先禁用 2 个周期 (步序清零、计时器复位), 再使能并复位 ---
+    WAIT_CYCLES 2;
+    SET GlobalVars.fbExternalDevice.i_bEnable := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bResetCmd := FALSE;
+    WAIT_CYCLES 1;
+    // --- 对方心跳最后一次翻转 (上下游各一下): 12 s 监视从这个边沿重新起算, 之后不再动心跳输入 ---
+    SET GlobalVars.stExternal.stUpstream.bUpstream_HeartbeatFromUp := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_HeartbeatFromDown := TRUE;
+    WAIT_CYCLES 1;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyIn := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_SendModuleId := TRUE;
+    SET GlobalVars.stExternal.stUpstream.bUpstream_InfeedReq := TRUE;
+    SET GlobalVars.fbExternalDevice.i_bMachineReadyOut := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_LineReady := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_RcvModuleIdAck := TRUE;
+    SET GlobalVars.stExternal.stDownstream.bDownstream_AllowOutfeed := TRUE;
+    WAIT_CYCLES 5;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 30;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 30;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = TRUE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = TRUE;
+    // --- 心跳输入从此不再变化。已过约 6 个周期; 再等到约 11 s (11000 周期), 还不能报故障 ---
+    WAIT_CYCLES 10990;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstreamComFault = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bDownstreamComFault = FALSE;
+    ASSERT GlobalVars.stExternal.bAnyComFault = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bComAlarm = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode = 16#0000;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 30;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 30;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = TRUE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = TRUE;
+    // --- 再等 1100 个周期, 共约 12.1 s: 必须已报故障, 允许信号和动作输出撤销 ---
+    WAIT_CYCLES 1100;
+    ASSERT GlobalVars.stExternal.stUpstream.bUpstreamComFault = TRUE;
+    ASSERT GlobalVars.stExternal.stDownstream.bDownstreamComFault = TRUE;
+    ASSERT GlobalVars.stExternal.bAnyComFault = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_bComAlarm = TRUE;
+    ASSERT GlobalVars.fbExternalDevice.q_wErrorCode <> 16#0000;
+    ASSERT GlobalVars.stExternal.stUpstream.bMachine_AllowInfeed = FALSE;
+    ASSERT GlobalVars.stExternal.stDownstream.bMachine_OutfeedReq = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowInfeedAct = FALSE;
+    ASSERT GlobalVars.fbExternalDevice.q_bAllowOutfeedAct = FALSE;
+    ASSERT GlobalVars.stExternal.stUpstream.iInfeedStep = 0;
+    ASSERT GlobalVars.stExternal.stDownstream.iOutfeedStep = 0;
+END_TEST_CASE
