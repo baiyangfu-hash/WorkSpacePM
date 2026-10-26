@@ -49,6 +49,7 @@ class TestSpecCLIBoundary:
         """无效子命令 click 报错 exit_code != 0"""
         result = cli_runner.invoke(spec_group, ["invalid-subcommand"])
         assert result.exit_code != 0
+        assert "No such command 'invalid-subcommand'" in result.output
 
     def test_spec_lint_skips_registry_meta_entries(
         self, cli_runner: CliRunner, tmp_path: Path

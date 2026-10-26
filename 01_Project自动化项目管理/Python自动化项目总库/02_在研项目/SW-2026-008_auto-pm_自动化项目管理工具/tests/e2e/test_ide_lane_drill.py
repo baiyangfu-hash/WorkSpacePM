@@ -235,6 +235,7 @@ def test_i07_both_commands_refuse_inside_a_worktree(tmp_path: Path, benchmark_ta
     )
 
     assert inside.returncode != 0, inside.stdout
+    assert "控制面写命令只能在含真实 .git 目录的主 Git 工作树执行" in inside.stdout + inside.stderr
 
 
 

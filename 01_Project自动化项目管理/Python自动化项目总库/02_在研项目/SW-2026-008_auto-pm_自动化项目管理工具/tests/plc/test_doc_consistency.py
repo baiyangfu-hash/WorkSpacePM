@@ -412,3 +412,19 @@ def test_d19_sync_never_writes_one_function_blocks_rows_into_a_siblings_document
     assert [Path(p).name for p in result.created] == ["接口文档_IFC-FB_1001_InfeedBatching.md"]
     assert dc.analyze_project(str(project)).findings == []
 
+
+
+def test_d30_sync_can_be_narrowed_to_named_objects(tmp_path: Path) -> None:
+    """TD-SW008-045：只处理点名的对象，其余对象的文档不新建、不改。"""
+    whole = dc.sync_project(str(build(tmp_path / "all", ifc=None, var=None)), write=False)
+    project = build(tmp_path / "one", ifc=None, var=None)
+    narrowed = dc.sync_project(str(project), only_objects={"FB_Pump"})
+    assert 0 < narrowed.added_rows < whole.added_rows
+    assert [Path(p).name for p in narrowed.created] == [ifc_path(project).name]
+    assert not (project / "02_PLC程序" / "程序文档" / dc.VAR_DOC_NAME).exists()
+
+
+def test_d31_an_empty_object_set_changes_nothing(tmp_path: Path) -> None:
+    project = build(tmp_path, ifc=None, var=None)
+    result = dc.sync_project(str(project), only_objects=set())
+    assert result.created == [] and result.written == [] and result.added_rows == 0 and result.suggestions == []

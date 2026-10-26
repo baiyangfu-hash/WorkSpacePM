@@ -99,6 +99,7 @@ class TestPmSessionCheck:
     def test_check_no_workspace(self, runner: CliRunner) -> None:
         result = runner.invoke(pm_session_group, ["check"])
         assert result.exit_code == 1
+        assert "必须通过 -w 指定工作空间根目录" in result.output
 
 
 class TestPmSessionArchive:
@@ -162,6 +163,7 @@ class TestPmSessionArchive:
             ],
         )
         assert result.exit_code == 2
+        assert "章节 §99 不存在" in result.output
 
     def test_archive_with_custom_output(
         self, runner: CliRunner, workspace_with_pm_session: Path
@@ -212,6 +214,7 @@ class TestPmSessionView:
             ["view", "-w", str(tmp_path)],
         )
         assert result.exit_code == 2
+        assert "未找到 PM_SESSION_*.md 文件" in result.output
 
 
 class TestPmSessionGroupRegistration:

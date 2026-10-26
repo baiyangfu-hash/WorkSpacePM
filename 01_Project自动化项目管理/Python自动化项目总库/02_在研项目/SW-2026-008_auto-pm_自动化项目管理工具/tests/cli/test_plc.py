@@ -91,6 +91,7 @@ def test_plc_check_not_found(cli_runner: CliRunner, tmp_workspace: Path) -> None
         ["-w", str(tmp_workspace), "plc", "check", "NOT-EXIST"],
     )
     assert result.exit_code == 1
+    assert "项目不存在: NOT-EXIST" in result.output
 
 
 def test_plc_check_substance(cli_runner: CliRunner, tmp_path: Path) -> None:
@@ -335,6 +336,7 @@ def test_plc_init_shared_library_fails(
         ],
     )
     assert result.exit_code == 1
+    assert 'Question "library_name" is required' in result.output
 
 
 def test_plc_init_invalid_mode(
@@ -351,6 +353,7 @@ def test_plc_init_invalid_mode(
         ],
     )
     assert result.exit_code != 0
+    assert "Invalid value for '--mode'" in result.output
 
 
 def test_plc_init_existing_path(
@@ -369,6 +372,7 @@ def test_plc_init_existing_path(
         ],
     )
     assert result.exit_code == 1
+    assert "目标路径已存在" in result.output
 
 
 # ── repair 命令测试 ──────────────────────────────────────
@@ -413,6 +417,7 @@ def test_plc_repair_not_found(cli_runner: CliRunner, tmp_workspace: Path) -> Non
         ["-w", str(tmp_workspace), "plc", "repair", "NOT-EXIST"],
     )
     assert result.exit_code == 1
+    assert "项目不存在: NOT-EXIST" in result.output
 
 
 # ── standardize 命令测试 ────────────────────────────────
@@ -483,6 +488,7 @@ def test_plc_standardize_not_found(cli_runner: CliRunner, tmp_workspace: Path) -
         ["-w", str(tmp_workspace), "plc", "standardize", "NOT-EXIST"],
     )
     assert result.exit_code == 1
+    assert "项目不存在: NOT-EXIST" in result.output
 
 
 # 注：test_template_list 已迁移到 tests/cli/test_template.py（V0.5.2 步骤2 统一组织）

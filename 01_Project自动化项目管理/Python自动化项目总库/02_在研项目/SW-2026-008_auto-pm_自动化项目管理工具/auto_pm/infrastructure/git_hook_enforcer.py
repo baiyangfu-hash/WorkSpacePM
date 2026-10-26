@@ -53,6 +53,8 @@ class StagedIndexEntry:
     object_id: str
     # A 新增 / C 复制 / M 修改 / T 类型变更 / D 删除；删除时 object_id 是被删掉的旧 blob（TD-046）
     status: str = "M"
+    # 暂存侧文件模式（100644/100755/120000…）；删除时是被删掉的旧模式。空串＝调用方没给（旧测试构造）
+    mode: str = ""
 
     @property
     def deleted(self) -> bool:
@@ -108,7 +110,9 @@ def _parse_raw_index_entries(raw_output: str) -> tuple[StagedIndexEntry, ...]:
         object_id = header_parts[2] if status == "D" else header_parts[3]
         if status not in {"A", "C", "M", "T", "D"} or not object_id.strip("0"):
             raise StagedSnapshotError(f"暂存区 raw 快照包含不支持的状态: {status!r}")
-        entries.append(StagedIndexEntry(_normalise_git_path(path), object_id, status))
+        # 删除时新模式是 000000，记旧模式；其余记暂存侧新模式（只改权限位也会被看见）
+        mode = header_parts[0].lstrip(":") if status == "D" else header_parts[1]
+        entries.append(StagedIndexEntry(_normalise_git_path(path), object_id, status, mode))
     return tuple(entries)
 
 
@@ -249,10 +253,93 @@ def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
             capture_output=True,
             check=True,
         )
-        return StagedSnapshot(_parse_raw_index_entries(result.stdout))
+        snapshot = StagedSnapshot(_parse_raw_index_entries(result.stdout))
+        _require_snapshot_matches_index(workspace_root, snapshot)
+        return snapshot
     except Exception as exc:
         log.error("获取暂存区快照失败: %s", exc)
         raise StagedSnapshotError(f"获取暂存区快照失败: {exc}") from exc
+
+
+def _git_z_lines(workspace_root: Path, args: list[str]) -> list[str]:
+    """运行只读 git 命令并按 NUL 切分输出；命令失败即抛错（fail-closed）。"""
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(workspace_root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+    return [item for item in result.stdout.split("\0") if item]
+
+
+def _tree_map(lines: list[str], *, staged_index: bool) -> dict[str, tuple[str, str]]:
+    """把 ``ls-files --stage`` 或 ``ls-tree -r`` 的行解析成 {路径: (模式, blob)}。"""
+    mapping: dict[str, tuple[str, str]] = {}
+    for line in lines:
+        meta, sep, path = line.partition("\t")
+        parts = meta.split()
+        if not sep or len(parts) != 3:
+            raise StagedSnapshotError(f"git 树清单行格式非法: {line!r}")
+        if staged_index:
+            mode, object_id, stage = parts
+            if stage != "0":
+                raise StagedSnapshotError(f"暂存区存在未合并条目（stage {stage}）: {path}")
+        else:
+            mode, _kind, object_id = parts
+        mapping[_normalise_git_path(path)] = (mode, object_id)
+    return mapping
+
+
+def independent_staged_changes(workspace_root: Path) -> dict[str, tuple[str, str, bool]]:
+    """不经过 ``diff --cached`` 的第二条路：index 清单对 HEAD 树，逐路径比较。
+
+    返回 {路径: (模式, blob, 是否删除)}；删除取 HEAD 里的旧模式和旧 blob。
+    首次提交（还没有 HEAD）时 HEAD 树视为空。
+    """
+    index_map = _tree_map(_git_z_lines(workspace_root, ["ls-files", "--stage", "-z"]), staged_index=True)
+    # ``git add -N`` 登记的路径在 index 里是空 blob 占位，commit 不会带上它，``diff --cached`` 也不列；
+    # 它在 ``diff-files`` 里恒为 A（工作区有、index 无内容）。真正暂存的空文件在 diff-files 里不是 A。
+    for entry in _git_z_lines(workspace_root, ["diff-files", "--raw", "-z", "--no-abbrev", "--diff-filter=A"])[1::2]:
+        index_map.pop(_normalise_git_path(entry), None)
+    has_head = (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
+            cwd=str(workspace_root),
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+    head_map = (
+        _tree_map(_git_z_lines(workspace_root, ["ls-tree", "-r", "-z", "HEAD"]), staged_index=False)
+        if has_head
+        else {}
+    )
+    changes: dict[str, tuple[str, str, bool]] = {}
+    for path, (mode, object_id) in index_map.items():
+        if head_map.get(path) != (mode, object_id):
+            changes[path] = (mode, object_id, False)
+    for path, (mode, object_id) in head_map.items():
+        if path not in index_map:
+            changes[path] = (mode, object_id, True)
+    return changes
+
+
+def _require_snapshot_matches_index(workspace_root: Path, snapshot: StagedSnapshot) -> None:
+    """冻结快照必须与独立推导出的“index 对 HEAD”改动逐路径、逐模式、逐 blob 一致。"""
+    expected = independent_staged_changes(workspace_root)
+    actual = {
+        entry.path: (entry.mode, entry.object_id, entry.deleted) for entry in snapshot.entries
+    }
+    if actual != expected:
+        differing = sorted(
+            path for path in actual.keys() | expected.keys() if actual.get(path) != expected.get(path)
+        )
+        raise StagedSnapshotError(
+            "暂存快照与 index/HEAD 独立比较不一致: " + ", ".join(differing[:5])
+        )
 
 
 def _get_staged_snapshot_or_reject(
