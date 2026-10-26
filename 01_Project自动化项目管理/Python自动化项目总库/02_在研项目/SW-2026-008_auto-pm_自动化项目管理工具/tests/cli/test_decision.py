@@ -207,6 +207,7 @@ def test_decision_show_and_list_are_zero_write(cli_runner: CliRunner, tmp_path: 
 
     assert listed.exit_code == 0
     assert shown.exit_code == 1
+    assert "未找到决策包: DEC-20260911-5C37A985" in shown.output
     assert not (tmp_path / ".auto-pm").exists()
 
 
@@ -381,6 +382,7 @@ def test_decision_cli_rejects_unknown_outcome_value(cli_runner: CliRunner, tmp_p
     )
 
     assert result.exit_code == 2
+    assert "Invalid value for '--allow-outcome'" in result.output
     assert not (tmp_path / ".auto-pm" / "decisions" / f"{_DECISION_ID}.json").exists()
 
 
