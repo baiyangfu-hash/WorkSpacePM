@@ -15,6 +15,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from auto_pm.infrastructure.git_timeout import run_git_bounded
+
 _CHG_NAME = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3}\.md$")
 _CHANGE_FOLDER = "01_变更单"
 _SKIP_DIRS = {".git", ".auto-pm", ".venv", "node_modules", "__pycache__"}
@@ -81,11 +83,13 @@ class _GitError(Exception):
 
 
 def _git(cwd: Path, *arguments: str) -> bytes:
-    done = subprocess.run(
+    done = run_git_bounded(
         ["git", "-C", str(cwd), "-c", "core.quotePath=false", *arguments],
+        default_timeout=_GIT_TIMEOUT_SECONDS,
+        error_cls=_GitError,
+        where=cwd,
         capture_output=True,
         check=False,
-        timeout=_GIT_TIMEOUT_SECONDS,
     )
     if done.returncode != 0:
         raise _GitError(done.stderr.decode("utf-8", errors="replace").strip()[:200] or f"git {arguments[0]} 失败")

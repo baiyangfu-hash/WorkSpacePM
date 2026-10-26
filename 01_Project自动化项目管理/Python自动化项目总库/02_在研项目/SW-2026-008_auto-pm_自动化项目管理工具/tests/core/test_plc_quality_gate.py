@@ -560,7 +560,7 @@ def test_p19_a_git_evidence_call_is_bounded_and_a_timeout_is_a_clear_collection_
 
     monkeypatch.setattr(module.subprocess, "run", hung)
 
-    with pytest.raises(EvidenceCollectionError, match="采集超过"):
+    with pytest.raises(EvidenceCollectionError, match="超时回执"):
         EvidenceCollectionService._git_output(tmp_path, "status")
 
     assert seen["timeout"] == module._GIT_EVIDENCE_TIMEOUT_SECONDS > 0

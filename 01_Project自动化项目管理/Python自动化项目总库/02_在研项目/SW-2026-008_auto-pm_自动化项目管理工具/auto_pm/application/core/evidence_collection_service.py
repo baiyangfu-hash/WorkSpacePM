@@ -31,6 +31,7 @@ from auto_pm.infrastructure.control_root_guard import (
     clean_git_environment,
     governed_worktree_snapshot,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 _C03_CHECKPOINT_PYTEST_EXPRESSION = "append_verified_checkpoint"
 _C03_CHECKPOINT_PYTEST_TARGET = "tests/core/test_continuity_execution_service.py"
@@ -1001,20 +1002,17 @@ class EvidenceCollectionService:
     @staticmethod
     def _git_output(candidate: Path, *arguments: str) -> str:
         try:
-            result = subprocess.run(
+            result = run_git_bounded_text(
                 ["git", "-C", str(candidate), *arguments],
+                default_timeout=_GIT_EVIDENCE_TIMEOUT_SECONDS,
+                error_cls=EvidenceCollectionError,
+                where=candidate,
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 check=False,
                 env=clean_git_environment(),
-                timeout=_GIT_EVIDENCE_TIMEOUT_SECONDS,
             )
-        except subprocess.TimeoutExpired as error:
-            raise EvidenceCollectionError(
-                f"Run worktree Git evidence 采集超过 {_GIT_EVIDENCE_TIMEOUT_SECONDS:g} 秒没有结束"
-            ) from error
+        except OSError as error:
+            raise EvidenceCollectionError(f"Run worktree Git evidence 无法启动 git: {error}") from error
         if result.returncode != 0 or result.stderr.strip():
             details = result.stderr.strip() or result.stdout.strip() or "unknown git error"
             raise EvidenceCollectionError(f"Run worktree Git evidence 采集失败: {details}")
