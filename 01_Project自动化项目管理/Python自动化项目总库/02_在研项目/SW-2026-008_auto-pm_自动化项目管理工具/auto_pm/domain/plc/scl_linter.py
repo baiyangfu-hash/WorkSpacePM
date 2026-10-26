@@ -2,7 +2,7 @@
 
 扫描 PLC 源码中的 .scl 文件，依据 Obsidian 《905_SCL编程规范_LSP.md》
 秒级检查变量作用域前缀 (i_/o_/io_/s_)、ARRAY 类型标识 (arr)、
-语法白名单 (严禁 GOTO/REPEAT/指针) 以及状态机安全防护闭环
+语法白名单 (严禁 GOTO/REPEAT/指针)、数组下标下界从 1 起以及状态机安全防护闭环
 (CASE 缺失 ELSE 防卡死分支)。
 """
 
@@ -49,6 +49,9 @@ class SclLinter:
     TIME_LITERAL_PATTERN = re.compile(r"\b[Tt]#[0-9a-zA-Z_]+")
     CHINESE_PUNCT_PATTERN = re.compile(r"[，；：\uFF08\uFF09\u3001]")
     TIMER_MISSING_Q_PATTERN = re.compile(r"\bQ\s*=>\s*[,)]")
+    # ARRAY[下界..上界, ...]：只取字面整数下界（用常量名写的下界无法在这里求值，不报）
+    ARRAY_BOUNDS_PATTERN = re.compile(r"\bARRAY\s*\[([^\]]*)\]", re.IGNORECASE)
+    ARRAY_LOWER_BOUND_PATTERN = re.compile(r"^\s*([+-]?\d+)\s*\.\.")
 
     # 结构完整性：每个源文件至少有一个程序块或类型声明，且每个声明都有配对的 END_*（插件命令行对空文件与乱码单文件也报 0 诊断，由这里补）
     STRUCT_KEYWORDS = ("ORGANIZATION_BLOCK", "FUNCTION_BLOCK", "FUNCTION", "DATA_BLOCK", "TYPE")
@@ -312,6 +315,26 @@ class SclLinter:
                                 message=(
                                     f"数组变量 '{var_name}' 建议使用 '{expected_text}' 类型标识"
                                     "（如 s_arrMesAlarmQueue）"
+                                ),
+                                code_snippet=stripped,
+                            )
+                        )
+
+            # ------------------------------------------------------------------
+            # 2b. 数组下标下界必须为 1（Siemens 语言服务插件按 1 起；移植到实际 PLC 时按平台适配）
+            # ------------------------------------------------------------------
+            for bounds in cls.ARRAY_BOUNDS_PATTERN.findall(code_part):
+                for dimension in bounds.split(","):
+                    lower = cls.ARRAY_LOWER_BOUND_PATTERN.match(dimension)
+                    if lower is not None and int(lower.group(1)) != 1:
+                        report.violations.append(
+                            SclViolation(
+                                line_number=line_idx,
+                                rule_id="LSP-905-ARRAY-LOWER-BOUND",
+                                severity="ERROR",
+                                message=(
+                                    f"数组下标下界是 {int(lower.group(1))}，本仓库要求从 1 起（Siemens 语言服务插件的规则；"
+                                    "移植到实际 PLC 时按平台适配）"
                                 ),
                                 code_snippet=stripped,
                             )

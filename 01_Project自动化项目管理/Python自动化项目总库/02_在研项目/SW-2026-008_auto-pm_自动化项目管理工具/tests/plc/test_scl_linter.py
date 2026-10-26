@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from auto_pm.plc.scl_linter import SclLinter
 
 
@@ -17,7 +18,7 @@ def test_scl_linter_detects_valid_clean_code() -> None:
     END_VAR
     VAR
         s_iStep : INT;
-        s_arrMesAlarmQueue : ARRAY[0..9] OF INT;
+        s_arrMesAlarmQueue : ARRAY[1..10] OF INT;
     END_VAR
     BEGIN
         CASE s_iStep OF
@@ -39,7 +40,7 @@ def test_scl_linter_detects_invalid_array_type_identifier() -> None:
     FUNCTION_BLOCK FB_1001_ArrayPrefix
     VAR
         s_iStep : INT;
-        s_aiMesAlarmQueue : ARRAY[0..9] OF INT;
+        s_aiMesAlarmQueue : ARRAY[1..10] OF INT;
     END_VAR
     BEGIN
         CASE s_iStep OF
@@ -166,3 +167,52 @@ def test_scl_linter_detects_missing_timer_q() -> None:
     report = SclLinter.lint_text(missing_q_scl, file_path="missing_q.scl")
     assert not report.is_clean
     assert any(v.rule_id == "LSP-906-TIMER-MISSING-Q" for v in report.violations)
+
+
+def _array_scl(declaration: str) -> str:
+    return f"""
+    FUNCTION_BLOCK FB_1001_ArrayBound
+    VAR
+        {declaration}
+    END_VAR
+    BEGIN
+        ;
+    END_FUNCTION_BLOCK
+    """
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "s_arrQueue : ARRAY[0..9] OF INT;",
+        "s_arrQueue : ARRAY [ 0 .. 9 ] OF INT;",
+        "s_arrQueue : array[2..9] of INT;",
+        "s_arrQueue : ARRAY[-1..8] OF INT;",
+        "s_arrGrid : ARRAY[1..3, 0..4] OF INT;",
+        "s_arrGrid : ARRAY[0..3, 0..4] OF INT;",
+    ],
+)
+def test_scl_linter_rejects_array_lower_bound_other_than_one(declaration: str) -> None:
+    report = SclLinter.lint_text(_array_scl(declaration), file_path="array_bound.scl")
+
+    hits = [v for v in report.violations if v.rule_id == "LSP-905-ARRAY-LOWER-BOUND"]
+    assert hits and all(v.severity == "ERROR" for v in hits)
+    assert not report.is_clean
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "s_arrQueue : ARRAY[1..10] OF INT;",
+        "s_arrGrid : ARRAY[1..3, 1..4] OF INT;",
+        "s_arrQueue : ARRAY[1..C_SIZE] OF INT;",
+        "s_arrQueue : ARRAY[C_LOW..C_HIGH] OF INT;",
+        "s_iCount : INT;  // 注释里写 ARRAY[0..9] 不算",
+        "s_iCount : INT;  (* ARRAY[0..9] *)",
+    ],
+)
+def test_scl_linter_accepts_array_lower_bound_one_or_symbolic(declaration: str) -> None:
+    report = SclLinter.lint_text(_array_scl(declaration), file_path="array_bound.scl")
+
+    hits = [v for v in report.violations if v.rule_id == "LSP-905-ARRAY-LOWER-BOUND"]
+    assert hits == []
