@@ -28,8 +28,14 @@ from auto_pm.core.project_service import ProjectService
 console = Console()
 
 
-def print_chg_tracking_warning(project_path: Path) -> None:
-    """Warn (never fail) about change requests that exist on disk but are not in the HEAD commit (TD-SW008-113)."""
+_TRACKING_LIST_LIMIT = 10
+
+
+def print_chg_tracking_warning(project_path: Path, *, verbose: bool = False) -> None:
+    """Warn (never fail) about change requests that exist on disk but are not in the HEAD commit (TD-SW008-113).
+
+    Shows the first ten per kind with a relative path; ``verbose`` shows them all.
+    """
 
     report = check_project_chg_tracking(project_path)
     if report.skipped_reason:
@@ -42,10 +48,12 @@ def print_chg_tracking_warning(project_path: Path) -> None:
         f"[yellow]⚠ 提交跟踪警告（只提示，不影响退出码）：{len(report.untracked)} 个变更单不在 {report.ref} 提交里，"
         f"{len(report.modified)} 个与提交内容不同[/yellow]"
     )
-    for name in report.untracked:
-        console.print(f"  [yellow]未入库:[/yellow] {name}", markup=True, highlight=False)
-    for name in report.modified:
-        console.print(f"  [yellow]有改动:[/yellow] {name}", markup=True, highlight=False)
+    for label, names in (("未入库", report.untracked), ("有改动", report.modified)):
+        shown = names if verbose else names[:_TRACKING_LIST_LIMIT]
+        for name in shown:
+            console.print(f"  [yellow]{label}:[/yellow] {report.relative(name)}", markup=True, highlight=False)
+        if len(names) > len(shown):
+            console.print(f"  [yellow]…另有 {len(names) - len(shown)} 个{label}（加 --verbose 看完整清单）[/yellow]")
     console.print("[dim]提示: 变更单只存在于本机磁盘时，换电脑或误删就找不回；请和代码一起提交。后续会观察一段时间再决定是否改为拦截。[/dim]")
 
 
@@ -58,11 +66,13 @@ def ledger_group(ctx: click.Context) -> None:
 @ledger_group.command(name="reconcile")
 @click.argument("project_id")
 @click.option("--fix", "auto_fix", is_flag=True, help="自动补建缺失行 + 修复状态不一致")
+@click.option("--verbose", is_flag=True, help="提交跟踪警告列出全部文件（默认每类只列前 10 个）")
 @click.pass_context
 def cmd_reconcile(
     ctx: click.Context,
     project_id: str,
     auto_fix: bool,
+    verbose: bool,
 ) -> None:
     """对账：扫描项目 CHG 文件 vs 版本变更台账记录
 
@@ -116,39 +126,41 @@ def cmd_reconcile(
             table.add_row(cn, expected, actual)
         console.print(table)
 
-    print_chg_tracking_warning(project_path)
-
-    # 自动修复
-    if auto_fix and not diff.is_clean:
-        console.print()
-        console.print("[bold yellow]启动自动修复...[/bold yellow]")
-        reconciler.auto_fix(project_path, diff)
-        # 修复后重新对账（孤儿记录无法自动修复，会保留）
-        new_diff = reconciler.reconcile(project_path)
-        console.print()
-        console.print(f"[cyan]修复后对账:[/cyan] {new_diff.summary()}")
-        if new_diff.is_clean:
-            console.print("[green]✅ 对账完成，无差异[/green]")
+    # 提交跟踪警告放在结论之后：不管下面从哪个出口退出，最后一屏都是它
+    try:
+        # 自动修复
+        if auto_fix and not diff.is_clean:
+            console.print()
+            console.print("[bold yellow]启动自动修复...[/bold yellow]")
+            reconciler.auto_fix(project_path, diff)
+            # 修复后重新对账（孤儿记录无法自动修复，会保留）
+            new_diff = reconciler.reconcile(project_path)
+            console.print()
+            console.print(f"[cyan]修复后对账:[/cyan] {new_diff.summary()}")
+            if new_diff.is_clean:
+                console.print("[green]✅ 对账完成，无差异[/green]")
+                ctx.exit(0)
+            else:
+                # 孤儿记录需人工处理
+                if new_diff.orphan_in_ledger and not new_diff.missing_in_ledger and not new_diff.status_mismatches:
+                    console.print(
+                        "[yellow]⚠ 仅有孤儿记录（台账多余但无对应 CHG 文件），需人工审核后用 ledger remove 清理[/yellow]"
+                    )
+                else:
+                    console.print("[red]❌ 修复后仍有差异，请检查[/red]")
+                ctx.exit(2)
+        elif diff.is_clean:
+            console.print()
+            console.print("[green]✅ 对账无差异[/green]")
             ctx.exit(0)
         else:
-            # 孤儿记录需人工处理
-            if new_diff.orphan_in_ledger and not new_diff.missing_in_ledger and not new_diff.status_mismatches:
-                console.print(
-                    "[yellow]⚠ 仅有孤儿记录（台账多余但无对应 CHG 文件），需人工审核后用 ledger remove 清理[/yellow]"
-                )
-            else:
-                console.print("[red]❌ 修复后仍有差异，请检查[/red]")
+            console.print()
+            console.print(
+                f"[yellow]⚠ 检测到差异（缺失 {len(diff.missing_in_ledger)} / "
+                f"孤儿 {len(diff.orphan_in_ledger)} / "
+                f"状态不一致 {len(diff.status_mismatches)}）[/yellow]"
+            )
+            console.print("[dim]提示: 使用 --fix 自动补建缺失行和修复状态不一致（孤儿记录需人工处理）[/dim]")
             ctx.exit(2)
-    elif diff.is_clean:
-        console.print()
-        console.print("[green]✅ 对账无差异[/green]")
-        ctx.exit(0)
-    else:
-        console.print()
-        console.print(
-            f"[yellow]⚠ 检测到差异（缺失 {len(diff.missing_in_ledger)} / "
-            f"孤儿 {len(diff.orphan_in_ledger)} / "
-            f"状态不一致 {len(diff.status_mismatches)}）[/yellow]"
-        )
-        console.print("[dim]提示: 使用 --fix 自动补建缺失行和修复状态不一致（孤儿记录需人工处理）[/dim]")
-        ctx.exit(2)
+    finally:
+        print_chg_tracking_warning(project_path, verbose=verbose)

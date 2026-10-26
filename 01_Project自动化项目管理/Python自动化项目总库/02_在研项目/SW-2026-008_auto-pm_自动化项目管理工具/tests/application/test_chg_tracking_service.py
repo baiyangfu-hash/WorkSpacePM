@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from auto_pm.application.core.chg_tracking_service import check_project_chg_tracking
 
@@ -140,15 +140,9 @@ def test_the_check_is_read_only(tmp_path: Path) -> None:
     assert after == before and "??" in after
 
 
-def test_reconcile_prints_the_warning_but_keeps_its_exit_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _reconcile_with(monkeypatch: pytest.MonkeyPatch, project: Path, root: Path, *args: str) -> Result:
     from auto_pm.domain.change.ledger_reconciler import ReconcileDiff
     from auto_pm.ui.cli import ledger
-
-    root = _repo(tmp_path)
-    project = root / "SW-1"
-    _write(project, CHG)
-    _commit(root)
-    new = _write(project, "CHG-SCPT-2026-002.md")
 
     class FakeProjects:
         def __init__(self, _root: Path) -> None: ...
@@ -162,8 +156,37 @@ def test_reconcile_prints_the_warning_but_keeps_its_exit_code(tmp_path: Path, mo
 
     monkeypatch.setattr(ledger, "ProjectService", FakeProjects)
     monkeypatch.setattr(ledger, "LedgerReconciler", FakeReconciler)
+    return CliRunner().invoke(ledger.ledger_group, ["reconcile", "SW-1", *args], obj=SimpleNamespace(workspace_root=root))
 
-    result = CliRunner().invoke(ledger.ledger_group, ["reconcile", "SW-1"], obj=SimpleNamespace(workspace_root=root))
+
+def test_reconcile_prints_the_warning_after_the_conclusion_with_relative_paths_and_keeps_its_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _repo(tmp_path)
+    project = root / "SW-1"
+    _write(project, CHG)
+    _commit(root)
+    _write(project, "CHG-SCPT-2026-002.md")
+
+    result = _reconcile_with(monkeypatch, project, root)
 
     assert result.exit_code == 0, result.output
-    assert "提交跟踪警告" in result.output and new in result.output
+    output = result.output
+    assert output.index("对账无差异") < output.index("提交跟踪警告")
+    assert "未入库: 04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-002.md" in output
+    assert "SW-1/04_监控" not in output
+
+
+def test_reconcile_lists_ten_by_default_and_everything_with_verbose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _repo(tmp_path)
+    project = root / "SW-1"
+    _write(project, CHG)
+    _commit(root)
+    for number in range(2, 15):
+        _write(project, f"CHG-SCPT-2026-{number:03d}.md")
+
+    short = _reconcile_with(monkeypatch, project, root).output
+    full = _reconcile_with(monkeypatch, project, root, "--verbose").output
+
+    assert short.count("未入库: ") == 10 and "另有 3 个未入库" in short
+    assert full.count("未入库: ") == 13 and "另有" not in full

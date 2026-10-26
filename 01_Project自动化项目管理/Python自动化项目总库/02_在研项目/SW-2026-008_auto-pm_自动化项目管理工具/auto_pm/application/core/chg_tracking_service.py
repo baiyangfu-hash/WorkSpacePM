@@ -30,6 +30,14 @@ class ChgTrackingReport:
     untracked: tuple[str, ...] = ()
     modified: tuple[str, ...] = ()
     skipped_reason: str = ""
+    base: str = ""
+    """The project folder relative to the repository root; ``untracked``/``modified`` paths start with it."""
+
+    def relative(self, name: str) -> str:
+        """Return ``name`` relative to the project folder (the form people see)."""
+
+        prefix = f"{self.base}/" if self.base else ""
+        return name[len(prefix):] if prefix and name.startswith(prefix) else name
 
     @property
     def clean(self) -> bool:
@@ -63,7 +71,9 @@ def check_project_chg_tracking(project_path: str | Path, ref: str = "HEAD") -> C
             continue
         if committed.replace(b"\r\n", b"\n") != current.replace(b"\r\n", b"\n"):
             modified.append(name)
-    return ChgTrackingReport(ref=ref, checked=len(files), untracked=tuple(untracked), modified=tuple(modified))
+    return ChgTrackingReport(
+        ref=ref, checked=len(files), untracked=tuple(untracked), modified=tuple(modified), base=relative
+    )
 
 
 class _GitError(Exception):
