@@ -24,13 +24,22 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "long_gate.py"
 PY = sys.executable
 
 FAKE_RENEW = r"""
-import datetime as dt, json, sys
+import datetime as dt, json, sys, time
 from pathlib import Path
 d = Path(sys.argv[1])
 if (d / "renew_fail").exists():
     print("lease is gone", file=sys.stderr); sys.exit(1)
 n = int((d / "renew_count").read_text()) + 1 if (d / "renew_count").exists() else 1
-(d / "renew_count").write_text(str(n))
+tmp = d / "renew_count.tmp"
+tmp.write_text(str(n))
+for _ in range(50):  # atomic: a reader never sees the file truncated mid-write
+    try:
+        tmp.replace(d / "renew_count")
+        break
+    except PermissionError:  # Windows: the target is open in the reader at this instant
+        time.sleep(0.02)
+else:
+    tmp.replace(d / "renew_count")
 left = 300 if (d / "renew_short").exists() else 3600
 exp = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=left)
 print(json.dumps({"run_id": "RUN-X", "owner_id": "o", "version": n + 1, "expires_at": exp.isoformat()}))
@@ -138,8 +147,11 @@ def _start(cfg: Path) -> subprocess.Popen[bytes]:
 def _wait_for(pred: Any, timeout: float = 60) -> None:
     end = time.time() + timeout
     while time.time() < end:
-        if pred():
-            return
+        try:
+            if pred():
+                return
+        except (OSError, ValueError):  # a counter file being replaced reads as missing/empty for an instant
+            pass
         time.sleep(0.2)
     raise AssertionError("condition not reached in time")
 
@@ -204,7 +216,9 @@ def test_session_killed_runner_keeps_going(lab: dict[str, Path]) -> None:
     else:
         os.killpg(session.pid, signal.SIGKILL)  # the whole "session" process group
     session.wait(timeout=30)
-    count = int((lab["tools"] / "renew_count").read_text())
+    counts: list[int] = []
+    _wait_for(lambda: counts.append(int((lab["tools"] / "renew_count").read_text())) or True)
+    count = counts[0]
     _wait_for(lambda: int((lab["tools"] / "renew_count").read_text()) >= count + 2, timeout=30)  # renewals go on
     (lab["tools"] / "release_rest").write_text("")
     _wait_for(lambda: (lab["out"] / "DONE").exists())

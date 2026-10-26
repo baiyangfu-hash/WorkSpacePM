@@ -19,7 +19,9 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     _parse_raw_index_entries,
     enforce_commit_msg,
     enforce_pre_commit,
+    filter_production_files,
     get_staged_snapshot,
+    is_excluded_from_production,
 )
 
 SW008_ROOT = (
@@ -586,3 +588,47 @@ def test_td046_unknown_raw_statuses_are_still_refused(status: str) -> None:
 def test_td046_a_raw_deletion_line_parses_to_a_deleted_entry() -> None:
     raw = f":100644 000000 {'a' * 40} {'0' * 40} D\0some/path.py\0"
     assert _parse_raw_index_entries(raw) == (StagedIndexEntry("some/path.py", "a" * 40, "D"),)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "auto_pm/core/latest_state.py",
+        "FB/contest_logic.scl",
+        "tools/attest_signer.py",
+        "x/mydocs/y.py",
+        "SW-2026-009_英语学习助手/src/level_test_page.py",
+        "src/scratchpad/run.py",
+        "src/tests_helper/run.py",
+        "src/my.auto-pm/run.py",
+        "src/PM_SESSION/run.py",
+        "src/docs_tool.py",
+    ],
+)
+def test_td194_production_files_with_lookalike_names_are_not_exempt(path: str) -> None:
+    """子串相似但不是测试、文档目录或测试文件名的生产代码，必须仍要求变更单。"""
+    assert not is_excluded_from_production(path)
+    assert filter_production_files([path]) == [path]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/test_a.py",
+        "proj/tests/unit/helper.py",
+        "proj\\tests\\helper.py",
+        "proj/docs/gen.py",
+        "proj/scratch/try.py",
+        "proj/src/test_parser.py",
+        ".auto-pm/worktrees/x/a.py",
+        "00_Obsidian_Base全局规范文件仓库/tools/x.py",
+        "PM_SESSION_20261001.py",
+    ],
+)
+def test_td194_real_test_doc_scratch_paths_stay_exempt(path: str) -> None:
+    assert is_excluded_from_production(path)
+    assert filter_production_files([path]) == []
+
+
+def test_td194_only_production_extensions_count() -> None:
+    assert filter_production_files(["src/a.md", "src/b.py", "src/c.SCL", "src/d.qml"]) == ["src/b.py", "src/d.qml"]

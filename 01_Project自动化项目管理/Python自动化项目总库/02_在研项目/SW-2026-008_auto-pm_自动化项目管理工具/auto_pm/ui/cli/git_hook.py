@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import stat
+import sys
 from pathlib import Path
 
 import click
@@ -30,9 +31,27 @@ def _control_root(ctx: click.Context) -> Path:
     return Path(app_ctx.control_root)
 
 
+def make_stdio_encoding_safe() -> None:
+    """让钩子输出里的 emoji 在 GBK 等窄编码终端上也不抛 UnicodeEncodeError（TD-SW008-015）。
+
+    钩子（``git_hook_enforcer`` / ``plc_doc_hook``）直接 ``print`` 带 ❌⚠️🔍 的提示；终端编码编不出来时，
+    默认的 ``errors="strict"`` 会让整个提交钩子崩掉，把“提示”变成“事故”。只改错误处理方式（编不出的字符
+    换成 ``?``），不改编码本身，所以 UTF-8 终端输出一字不变。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue  # pytest capture 等没有 reconfigure 的流
+        try:
+            reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 @click.group(name="git-hook")
 def git_hook_group() -> None:
     """Git 提交硬锁物理门禁 (Git Hook Enforcer)"""
+    make_stdio_encoding_safe()
 
 
 @git_hook_group.command(name="pre-commit")
