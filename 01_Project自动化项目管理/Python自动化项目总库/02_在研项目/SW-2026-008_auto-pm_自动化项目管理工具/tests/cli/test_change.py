@@ -378,6 +378,7 @@ def test_change_create_nonexistent_project(cli_runner: CliRunner, tmp_path: Path
         ],
     )
     assert result.exit_code == 1
+    assert "项目不存在: DJ-2026-NOTEXIST" in result.output
 
 
 # ── transition 命令测试（4 用例）──────────────────────────────
@@ -420,6 +421,7 @@ def test_change_transition_invalid_status(cli_runner: CliRunner, tmp_path: Path)
         ],
     )
     assert result.exit_code != 0
+    assert "Invalid value for '--to'" in result.output
 
 
 @pytest.mark.cli

@@ -33,6 +33,7 @@ class TestCheckCommand:
         runner = CliRunner()
         result = runner.invoke(spec_group, ["check"])
         assert result.exit_code != 0
+        assert "必须通过 -w 指定工作空间根目录" in result.output
 
     def test_check_with_workspace(self, populated_workspace: Path) -> None:
         runner = CliRunner()
@@ -59,6 +60,7 @@ class TestCheckCommand:
         runner = CliRunner()
         result = runner.invoke(spec_group, ["check", "-w", "/nonexistent/path"])
         assert result.exit_code != 0
+        assert "工作空间路径不存在" in result.output
 
     def test_check_project_scope_requires_project_root(self, populated_workspace: Path) -> None:
         runner = CliRunner()
@@ -90,6 +92,7 @@ class TestCheckCommand:
             ],
         )
         assert result.exit_code == 2
+        assert "PM_SESSION markdown链接目标不存在: missing.md" in result.output
 
 
 class TestIndexCommand:
@@ -111,12 +114,14 @@ class TestIndexCommand:
         runner = CliRunner()
         result = runner.invoke(spec_group, ["index"])
         assert result.exit_code != 0
+        assert "必须通过 -w 指定工作空间根目录" in result.output
 
     def test_index_nonexistent_workspace(self) -> None:
         """工作空间路径不存在应报错退出（SystemExit 1）"""
         runner = CliRunner()
         result = runner.invoke(spec_group, ["index", "-w", "/nonexistent/path/abc"])
         assert result.exit_code != 0
+        assert "工作空间路径不存在" in result.output
 
     def test_index_pm_domain_generates_file(self, populated_workspace: Path) -> None:
         """--domain pm 应生成 PM 索引文件并实际落盘"""
@@ -169,6 +174,7 @@ class TestIndexCommand:
             ["index", "-w", str(populated_workspace), "--domain", "invalid"],
         )
         assert result.exit_code != 0
+        assert "Invalid value for '--domain'" in result.output
 
 
 class TestFrontmatterCommand:
@@ -181,12 +187,14 @@ class TestFrontmatterCommand:
         runner = CliRunner()
         result = runner.invoke(spec_group, ["frontmatter"])
         assert result.exit_code != 0
+        assert "必须通过 -w 指定工作空间根目录" in result.output
 
     def test_frontmatter_nonexistent_workspace(self) -> None:
         """工作空间路径不存在应报错退出"""
         runner = CliRunner()
         result = runner.invoke(spec_group, ["frontmatter", "-w", "/nonexistent/path/abc"])
         assert result.exit_code != 0
+        assert "工作空间路径不存在" in result.output
 
     def test_frontmatter_with_spec_id(self, populated_workspace: Path) -> None:
         """--spec-id 应只处理指定规范"""
@@ -243,12 +251,14 @@ class TestReportCommand:
         runner = CliRunner()
         result = runner.invoke(spec_group, ["report"])
         assert result.exit_code != 0
+        assert "必须通过 -w 指定工作空间根目录" in result.output
 
     def test_report_nonexistent_workspace(self) -> None:
         """工作空间路径不存在应报错退出"""
         runner = CliRunner()
         result = runner.invoke(spec_group, ["report", "-w", "/nonexistent/path/abc"])
         assert result.exit_code != 0
+        assert "工作空间路径不存在" in result.output
 
     def test_report_custom_output(self, populated_workspace: Path, tmp_path: Path) -> None:
         """-o 应将报告输出到自定义路径"""
@@ -443,6 +453,7 @@ class TestVerboseOption:
         )
         # workspace 无注册表，会触发 SHC-000 ERROR，exit_code != 0
         assert result.exit_code != 0
+        assert "SHC-000" in result.output
         data = json.loads(result.output)
         assert "summary" in data, "verbose 模式 JSON 应含 summary 字段"
         summary = data["summary"]
