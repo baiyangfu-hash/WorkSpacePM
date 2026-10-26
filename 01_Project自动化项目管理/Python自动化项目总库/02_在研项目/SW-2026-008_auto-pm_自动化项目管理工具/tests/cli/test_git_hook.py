@@ -575,6 +575,7 @@ def test_enforce_pre_commit_reports_unrelated_ledger_error_without_blocking(
     )
     # tmp_path 不是 Git 仓库（暂存快照是桩）；密钥扫描另有专门测试（tests/domain/test_secret_patterns.py）
     monkeypatch.setattr(git_hook_enforcer, "find_staged_secrets", lambda _: [])
+    monkeypatch.setattr(git_hook_enforcer, "_enforce_ignored_additions", lambda _: 0)
 
     assert enforce_pre_commit(tmp_path) == 0
     output = capsys.readouterr().out
