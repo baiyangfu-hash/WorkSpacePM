@@ -96,3 +96,39 @@ def test_the_default_project_is_unchanged() -> None:
 
     assert module.resolve_project(None).name == "DJ-2026-005"
     assert module.resolve_project("DJ-2026-005").name == "DJ-2026-005"
+
+
+def _guarded(project: str | None) -> set[Path]:
+    spec = importlib.util.spec_from_file_location("run_plugin_test_guard", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return set(module._guarded_files(module.resolve_project(project)))
+
+
+def _guard_list_entries() -> list[tuple[str | None, str]]:
+    """(项目, 保护清单里必须有的路径，相对 0100_PLC自动化)：删掉任何一项，对应的用例就变红。"""
+    p009 = "DJ-2026-009_汇川换型改造"
+    timers = ["01_SharedLibraries/SysLib/timer/FB_TON.scl", "01_SharedLibraries/SysLib/timer/FB_TONR.scl"]
+    return (
+        [("DJ-2026-009", f"{p009}/.plc.json"), ("DJ-2026-009", f"{p009}/02_PLC程序/PLC_ST/.plc.json")]
+        + [("DJ-2026-009", t) for t in timers]
+        + [(None, "DJ-2026-005/.plc.json")]
+        + [(None, t) for t in timers]
+    )
+
+
+@pytest.mark.parametrize(("project", "relative"), _guard_list_entries())
+def test_the_hash_guard_list_covers_every_file_the_run_could_touch(project: str | None, relative: str) -> None:
+    """运行前后要核对哈希的文件清单：项目根和 PLC_ST 的 .plc.json、替身要顶替的两个计时器都在里面。"""
+    expected = (REPO / "0100_PLC自动化" / relative).resolve()
+
+    assert expected in {p.resolve() for p in _guarded(project)}
+
+
+def test_the_hash_guard_list_also_covers_the_plc_source_files_of_the_chosen_project() -> None:
+    guarded = {p.resolve() for p in _guarded("DJ-2026-009")}
+    plc_dir = next((REPO / "0100_PLC自动化").glob("DJ-2026-009*")) / "02_PLC程序" / "PLC_ST"
+    sources = {p.resolve() for p in plc_dir.rglob("*.scl")}
+
+    assert sources and sources <= guarded
