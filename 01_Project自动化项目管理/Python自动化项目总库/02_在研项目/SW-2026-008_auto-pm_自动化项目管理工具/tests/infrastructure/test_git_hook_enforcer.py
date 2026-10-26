@@ -25,6 +25,7 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     independent_staged_changes,
     is_excluded_from_production,
 )
+from tests.git_support import git_out
 
 SW008_ROOT = (
     "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/"
@@ -78,22 +79,7 @@ def test_control_root_mapping_rejects_unknown_project_id(
 
 
 def _git(cwd: Path, *args: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        # CalledProcessError 的文字里没有 stderr，CI 上偶发的 git 失败（如 worktree add 返回 128）就查不出原因。
-        raise RuntimeError(
-            f"git {' '.join(args)} 失败（退出码 {exc.returncode}，目录 {cwd}）:\n{exc.stderr}"
-        ) from exc
-    return result.stdout.strip()
+    return git_out(cwd, *args)
 
 
 def test_fixture_git_failure_carries_the_git_error_text(tmp_path: Path) -> None:

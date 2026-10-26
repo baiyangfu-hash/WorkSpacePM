@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -27,3 +28,27 @@ def test_config_options_precede_the_subcommand(tmp_path: Path) -> None:
     git_do(tmp_path, "init", "-q")
 
     assert git_out(tmp_path, "config", "user.name", config=["user.name=Fixture"]) == "Fixture"
+
+
+def test_check_false_returns_a_refusal_instead_of_raising(tmp_path: Path) -> None:
+    git_do(tmp_path, "init", "-q")
+
+    refused = run_git(tmp_path, "rev-parse", "--verify", "no-such-ref", check=False)
+
+    assert refused.returncode != 0
+    assert refused.stderr
+
+
+def test_timeout_is_handed_to_the_subprocess_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def hung(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired(command, float(str(kwargs["timeout"])))
+
+    monkeypatch.setattr("tests.git_support.subprocess.run", hung)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_git(tmp_path, "status", timeout=7)
+
+    assert seen["timeout"] == 7
