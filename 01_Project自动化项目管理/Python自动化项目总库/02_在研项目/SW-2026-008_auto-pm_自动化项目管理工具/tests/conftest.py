@@ -58,7 +58,8 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     rng = random.Random(20260627)
     rng.shuffle(items)
     missing = [m for m in ("ruff", "mypy") if importlib.util.find_spec(m) is None]
-    if missing:
+    # CI 里缺依赖必须红，不能悄悄跳过（只在本地/云端临时环境跳过）。
+    if missing and not os.environ.get("CI"):
         skip = pytest.mark.skip(
             reason=f"真实质量门用 sys.executable -m ruff/mypy，当前解释器缺 {'/'.join(missing)}"
             "（uv sync 或 pip install -e .[dev]）"
