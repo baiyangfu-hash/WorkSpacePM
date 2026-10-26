@@ -428,3 +428,17 @@ def test_d31_an_empty_object_set_changes_nothing(tmp_path: Path) -> None:
     project = build(tmp_path, ifc=None, var=None)
     result = dc.sync_project(str(project), only_objects=set())
     assert result.created == [] and result.written == [] and result.added_rows == 0 and result.suggestions == []
+
+
+def test_d32_narrowing_also_filters_the_suggestions_to_the_named_objects(tmp_path: Path) -> None:
+    """TD-SW008-045：差异建议也只列点名对象的，别的对象的差异不混进提示。"""
+    messy_ifc = IFC_DOC.replace("| `i_bStart` | BOOL | 启动命令 |", "| i_bStart | INT | 起动命令 |")
+    messy_var = VAR_DOC.replace("| stCfg | ST_PumpCfg | 泵配置 |", "| stCfg | INT | 泵配置 |")
+    project = build(tmp_path, ifc=messy_ifc, var=messy_var)
+    findings = dc.analyze_project(str(project)).findings
+    assert {"FB_Pump", "GlobalVars"} <= {f.obj for f in findings if f.kind == "type"}
+
+    pump_only = dc.sync_project(str(project), write=False, only_objects={"FB_Pump"}).suggestions
+
+    assert pump_only == [f.render() for f in findings if f.obj == "FB_Pump"]
+    assert pump_only and not any("stCfg" in line for line in pump_only)

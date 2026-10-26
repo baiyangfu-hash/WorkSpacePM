@@ -425,3 +425,17 @@ def test_h30_auto_fill_only_completes_the_objects_that_blocked_the_commit(
     assert f"{dc.MARKER}新增信号" in read(repo, IFC)
     assert not fan_doc.exists()
 
+
+def test_h31_markers_only_block_gives_the_review_hint_and_writes_no_document(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """TD-SW008-045：只有待确认行拦提交时，只提示审核；同工程里没文档的 FB_Fan 不被新建。"""
+    fan_scl = f"{PLC_ROOT}/02_PLC程序/PLC_ST/01_泵/FB_Fan.scl"
+    fan_doc = repo / PLC_ROOT / "02_PLC程序/PLC_ST/01_泵/PRD/接口文档_IFC-FB_Fan.md"
+    write(repo, fan_scl, "FUNCTION_BLOCK FB_Fan\nVAR_INPUT\n    i_bOn : BOOL; // 开\nEND_VAR\nEND_FUNCTION_BLOCK\n")
+    write(repo, IFC, read(repo, IFC).replace("| 启动命令 |", f"| {dc.MARKER}启动命令 |"))
+    git(repo, "add", IFC, fan_scl)
+    code, output = run_hook(repo, capsys)
+    assert code == 1 and "审核待确认的行后运行 plc docs confirm" in output
+    assert "已按代码在工作区补全文档" not in output
+    assert not fan_doc.exists()
