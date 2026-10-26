@@ -87,6 +87,7 @@ from auto_pm.infrastructure.control_root_guard import (
     require_control_root,
     require_safe_workspace_path,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded
 
 
 class ContinuityStoreError(RuntimeError):
@@ -758,17 +759,19 @@ class ContinuityStore:
 
     def _git_bytes(self, *args: str, input_bytes: bytes | None = None) -> bytes:
         try:
-            result = subprocess.run(
+            result = run_git_bounded(
                 ["git", "-C", str(self.workspace_root), *args],
+                default_timeout=10.0,
+                error_cls=ContinuityStoreError,
+                where=self.workspace_root,
                 input=input_bytes,
                 stdin=subprocess.DEVNULL if input_bytes is None else None,
                 capture_output=True,
                 check=False,
                 shell=False,
                 env=clean_git_environment(),
-                timeout=10,
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
+        except OSError as error:
             raise ContinuityStoreError("Decision Git immutable 事实无法复核") from error
         if result.returncode != 0:
             raise ContinuityStoreError("Decision Git commit/blob 不存在或无法读取")
@@ -789,7 +792,7 @@ class ContinuityStore:
 
     def _require_paths_clean_at_head(self, *paths: str) -> None:
         try:
-            result = subprocess.run(
+            result = run_git_bounded(
                 [
                     "git",
                     "-C",
@@ -800,14 +803,16 @@ class ContinuityStore:
                     "--",
                     *paths,
                 ],
+                default_timeout=10.0,
+                error_cls=ContinuityStoreError,
+                where=self.workspace_root,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 check=False,
                 shell=False,
                 env=clean_git_environment(),
-                timeout=10,
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
+        except OSError as error:
             raise ContinuityStoreError("Decision Git clean 事实无法复核") from error
         diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
         if result.returncode == 1:

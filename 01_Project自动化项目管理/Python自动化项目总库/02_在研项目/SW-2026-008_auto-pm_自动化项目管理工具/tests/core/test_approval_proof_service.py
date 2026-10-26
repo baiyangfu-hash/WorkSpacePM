@@ -275,3 +275,38 @@ def test_work_ready_needs_authorize(root: Path) -> None:
     )
     with pytest.raises(WorkRegistryError, match="work authorize"):
         works.transition("WORK-X-1", WorkState.READY, "ready")
+
+
+def _hang(*_args: object, **kwargs: object) -> object:
+    raise subprocess.TimeoutExpired("git", kwargs["timeout"])  # type: ignore[arg-type]
+
+
+def test_a_hung_git_refuses_every_approval_with_a_timeout_receipt(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When git cannot be read in time, approvals stop: never a silent fall back to the old format check."""
+
+    service = _commit_pin(root)
+    monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", _hang)
+
+    keys, problem = service.committed_state()
+    assert keys is None
+    assert "超时回执" in problem and "所有批准一律拒绝" in problem
+
+    with pytest.raises(ApprovalProofError, match="超时回执"):
+        service.committed_keys()
+    with pytest.raises(ApprovalProofError, match="超时回执"):
+        service.require(pin=PIN, purpose="p", subject="s")
+    with pytest.raises(ApprovalProofError, match="超时回执"):
+        service.resolve(pin=PIN, approver="baiyang", evidence_ref="user-confirmation:x-12345678", purpose="p", subject="s")
+
+
+def test_a_bad_git_timeout_override_also_refuses_approvals(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.infrastructure.git_timeout import GIT_TIMEOUT_ENV
+
+    service = _commit_pin(root)
+    monkeypatch.setenv(GIT_TIMEOUT_ENV, "abc")
+    keys, problem = service.committed_state()
+    assert keys is None and "不可用" in problem

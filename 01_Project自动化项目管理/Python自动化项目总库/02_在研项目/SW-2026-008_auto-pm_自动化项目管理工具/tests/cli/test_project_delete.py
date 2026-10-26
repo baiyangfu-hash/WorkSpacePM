@@ -85,6 +85,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
 def test_d01_without_confirm_nothing_is_touched(world: World) -> None:
     result = world.run()
     assert result.exit_code == 1
+    assert "请使用 --confirm 确认删除" in result.output
     assert world.project.is_dir() and world.recycled() == []
 
 
@@ -163,6 +164,7 @@ def test_d06_an_open_mission_blocks_the_delete(
     )
     result = world.run("--confirm", "--approval-evidence-ref", USER_WORDS)
     assert result.exit_code == 1
+    assert "开着的 Mission MISSION-A" in result.output
     assert (
         "MISSION-A" in result.output and "WORK-001" in result.output and "RUN-001" in result.output
     )

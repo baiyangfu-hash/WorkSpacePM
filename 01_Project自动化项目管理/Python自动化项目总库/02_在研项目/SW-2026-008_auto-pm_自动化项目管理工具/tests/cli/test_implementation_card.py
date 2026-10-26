@@ -41,14 +41,18 @@ def test_create_then_validate_is_read_only(tmp_path: Path) -> None:
     assert "Commit evidence: `governance/evidence.md`" in review
     validation = runner.invoke(implementation_card_group, ["validate", "CARD-TEST-003"], obj=context)
     assert validation.exit_code != 0
+    assert "problem statement is incomplete or stories are forbidden" in validation.output
     assert card_path.read_bytes() == before
-    assert runner.invoke(implementation_card_group, args, obj=context).exit_code != 0
+    duplicate = runner.invoke(implementation_card_group, args, obj=context)
+    assert duplicate.exit_code != 0
+    assert "card artifacts already exist" in duplicate.output
     verification = runner.invoke(
         implementation_card_group,
         ["verify", "CARD-TEST-003", "--checkpoint-id", "CP-TEST-003",
          "--final-commit", "a" * 40], obj=context,
     )
     assert verification.exit_code != 0
+    assert "verify requires DISPATCHED card" in verification.output
     assert card_path.read_bytes() == before
 
 

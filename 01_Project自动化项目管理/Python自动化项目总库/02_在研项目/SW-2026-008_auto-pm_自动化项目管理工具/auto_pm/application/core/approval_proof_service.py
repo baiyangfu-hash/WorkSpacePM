@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from auto_pm.infrastructure.git_timeout import run_git_bounded
+
 REGISTRY_RELATIVE_PATH = "SYS-2026-001_WorkspaceGovernance/approvers.json"
 SCHEMA_VERSION = "approvers.v1"
 MIN_PIN_LENGTH = 10
@@ -230,6 +232,8 @@ class ApprovalProofService:
             shown = self._git("show", f"HEAD:{REGISTRY_RELATIVE_PATH}")
             if shown.returncode != 0:
                 return None, refuse + "git show 出错"
+        except ApprovalProofError as error:
+            return None, refuse + str(error)
         except (OSError, subprocess.SubprocessError) as error:
             return None, refuse + f"无法运行 git（{type(error).__name__}）"
         try:
@@ -241,11 +245,13 @@ class ApprovalProofService:
         """git in this root only: inherited GIT_* variables (GIT_DIR, GIT_WORK_TREE, ...) could point it elsewhere."""
 
         environment = {name: value for name, value in os.environ.items() if not name.upper().startswith("GIT_")}
-        return subprocess.run(
+        return run_git_bounded(
             ["git", "-C", str(self._root), *arguments],
+            default_timeout=30.0,
+            error_cls=ApprovalProofError,
+            where=self._root,
             capture_output=True,
             check=False,
-            timeout=30,
             env=environment,
         )
 

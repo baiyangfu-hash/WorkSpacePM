@@ -11,6 +11,8 @@ import re
 import subprocess
 from pathlib import Path, PurePosixPath
 
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+
 MOVE_RETIRE_HINT = "移动或退役请走 F01-b 的授权"
 _OBJECT_ID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 _REGULAR_MODES = frozenset({"100644", "100755"})
@@ -28,14 +30,13 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["LC_ALL"] = "C"
     try:
-        return subprocess.run(
+        return run_git_bounded_text(
             ["git", *args],
+            default_timeout=10.0,
+            error_cls=GitMarkerGuardError,
+            where=root,
             cwd=str(root),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=10,
             check=False,
             env=env,
         )

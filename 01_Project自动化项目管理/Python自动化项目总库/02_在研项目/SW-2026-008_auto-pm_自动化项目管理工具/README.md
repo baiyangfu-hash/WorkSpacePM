@@ -240,6 +240,14 @@ mypy auto_pm
 uv run pre-commit run --all-files
 ```
 
+### 影响运行与测试的环境变量
+
+| 变量 | 作用 | 取值范围 | 默认值 |
+|:---|:---|:---|:---|
+| `AUTO_PM_GIT_TIMEOUT_SECONDS` | 微任务（`execution_microtask_service`）里每条 Git 子进程的时限，超时即终止并报“Git 命令超时回执”，整体重做 | 5～600 秒的数字；超出范围、不是数字、`nan`、`inf` 一律报错拒绝（失败关闭），不会悄悄改用默认值 | 未设或为空：120 秒 |
+| `AUTO_PM_START_WATCHDOG_SCALE` | 仅测试：`tests/qml/test_pm_cockpit_bridge.py` 真实启动用例的看门狗时限倍数（基线成功用例 600 秒），机器过载时设 2 或 3 重跑；只能放大不能缩短 | 不小于 1 的有限数；小于 1 按 1，无法解析或不是有限数（`abc`、`nan`、`inf`、`1e400`）按 1 | 1（即 600 秒） |
+| `AUTO_PM_ALLOW_SKIP_QUALITY_TOOLS` | 仅测试：解释器里缺 `ruff`/`mypy` 时，是否跳过依赖真实质量门的测试（标记 `needs_quality_tools`） | 只有取值 `1` 才跳过；其他任何值等同未设 | 未设：缺依赖时这些测试判失败。笔记本和 CI 不要设，只给没装 dev 依赖的云端会话用 |
+
 ### 项目结构
 
 ```

@@ -27,6 +27,7 @@ from auto_pm.contracts.execution_adapter import (
 )
 from auto_pm.contracts.mission import InternalRoutingPolicy
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.git_timeout import GIT_TIMEOUT_ENV
 from tests.core.test_execution_adapter_service import PROJECT_PATH, _ready
 from tests.git_support import git_out
 
@@ -421,7 +422,7 @@ def test_git_timeout_raises_explicit_receipt(
 ) -> None:
     """A hung Git fails closed with a receipt naming command, limit and elapsed time."""
     _git(tmp_path, "init", "--initial-branch=main")
-    monkeypatch.setenv(ExecutionMicrotaskService.GIT_TIMEOUT_ENV, "5")
+    monkeypatch.setenv(GIT_TIMEOUT_ENV, "5")
     with pytest.raises(ExecutionMicrotaskError) as info:
         ExecutionMicrotaskService._git_bytes(tmp_path, "slow", env=_slow_git_env(60))
     message = str(info.value)
@@ -433,16 +434,9 @@ def test_git_timeout_raises_explicit_receipt(
 def test_git_timeout_override_out_of_range_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: str
 ) -> None:
-    monkeypatch.setenv(ExecutionMicrotaskService.GIT_TIMEOUT_ENV, bad)
+    monkeypatch.setenv(GIT_TIMEOUT_ENV, bad)
     with pytest.raises(ExecutionMicrotaskError, match="不可用"):
         ExecutionMicrotaskService._git_bytes(tmp_path, "--version")
-
-
-def test_git_timeout_default_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(ExecutionMicrotaskService.GIT_TIMEOUT_ENV, raising=False)
-    value = ExecutionMicrotaskService._git_timeout()
-    assert value == ExecutionMicrotaskService.GIT_TIMEOUT_DEFAULT
-    assert ExecutionMicrotaskService.GIT_TIMEOUT_MIN <= value <= ExecutionMicrotaskService.GIT_TIMEOUT_MAX
 
 
 def test_git_interrupt_is_not_swallowed(
