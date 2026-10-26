@@ -28,9 +28,14 @@ _CHG_CLOSED_STATUSES: Final[frozenset[str]] = frozenset({"closed", "已关闭", 
 
 
 def _chg_is_closed(text: str) -> bool:
-    """变更单是否已处于闭环终态；找不到状态字段按未闭环处理（fail-closed）。"""
-    match = _CHG_STATUS_TABLE_RE.search(text) or _CHG_STATUS_LINE_RE.search(text)
-    return match is not None and match.group(1).strip().strip("`*").lower() in _CHG_CLOSED_STATUSES
+    """变更单是否已处于闭环终态：至少有一个状态字段，且每个状态字段都是终态。
+
+    一份变更单里出现多个“变更状态”行时（例如正文里的示例表格），任何一行不是终态都按未闭环处理，
+    不能让先匹配到的那一行说了算；找不到状态字段同样按未闭环处理（fail-closed）。
+    """
+    values = [m.group(1) for m in _CHG_STATUS_TABLE_RE.finditer(text)]
+    values.extend(m.group(1) for m in _CHG_STATUS_LINE_RE.finditer(text))
+    return bool(values) and all(value.strip().strip("`*").strip().lower() in _CHG_CLOSED_STATUSES for value in values)
 
 
 class StageGateEngine:

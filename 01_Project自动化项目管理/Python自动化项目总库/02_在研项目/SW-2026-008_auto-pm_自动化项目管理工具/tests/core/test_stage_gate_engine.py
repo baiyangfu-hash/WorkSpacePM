@@ -278,3 +278,35 @@ def test_stage_gate_g4_ignores_closed_wording_buried_in_prose(temp_project: Path
 def test_stage_gate_g4_blocks_a_chg_with_no_status_field_at_all(temp_project: Path):
     _write_chg(temp_project, "CHG-PLC-2026-003.md", "# 变更单\n没有状态字段\n")
     assert _g4_chg_item(temp_project).passed is False
+
+
+def test_stage_gate_g4_every_status_row_must_be_terminal(temp_project: Path):
+    # 审计 285：示例表格里的 closed 行排在前面，真正的状态行是 implementing，不能让先匹配到的行说了算
+    _write_chg(
+        temp_project,
+        "CHG-PLC-2026-003.md",
+        "示例：\n| 变更状态 | closed |\n\n本单实际：\n| 变更状态 | implementing |\n",
+    )
+    assert _g4_chg_item(temp_project).passed is False
+
+
+def test_stage_gate_g4_two_terminal_status_rows_still_pass(temp_project: Path):
+    _write_chg(temp_project, "CHG-PLC-2026-003.md", "| 变更状态 | closed |\n\n复述：\n| 变更状态 | archived |\n")
+    assert _g4_chg_item(temp_project).passed is True
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "| 变更状态 | 已关闭 |",
+        "| 变更状态 | Closed |",
+        "| 变更状态 | CLOSED |",
+        "| 变更状态 | `closed` |",
+        "| 变更状态 | **closed** |",
+        "- 状态: 已关闭",
+        "- Status: Closed",
+    ],
+)
+def test_stage_gate_g4_accepts_chinese_case_and_backtick_spellings(temp_project: Path, line: str):
+    _write_chg(temp_project, "CHG-PLC-2026-003.md", line + "\n")
+    assert _g4_chg_item(temp_project).passed is True
