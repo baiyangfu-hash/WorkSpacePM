@@ -205,6 +205,7 @@ def test_restore_asks_first_and_does_nothing_on_no(tmp_path: Path) -> None:
     result = _cli(root, "continuity", "restore-backup", str(backup), input_text="n\n")
 
     assert result.exit_code != 0
+    assert "Aborted" in result.output
     assert _files_state(_ledger(root)) == before
 
 
