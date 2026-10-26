@@ -667,3 +667,118 @@ def test_a_marker_that_cannot_be_deleted_is_only_logged(lab: dict[str, Path]) ->
         stuck.parent.chmod(0o700)
     assert result.returncode == 0 and stuck.exists()
     assert "not removed" in (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def _with_hold(cfg: Path, marker: Path, timeout: int | None = None) -> None:
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    data["lease"]["hold_until_marker"] = str(marker)
+    if timeout is not None:
+        data["lease"]["hold_timeout_s"] = timeout
+    cfg.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _renewals(lab: dict[str, Path]) -> int:
+    p = lab["tools"] / "renew_count"
+    return int(p.read_text()) if p.exists() else 0
+
+
+def test_the_lease_stays_renewed_after_the_verdict_until_the_closing_marker_appears(lab: dict[str, Path]) -> None:
+    """TD-SW008-204：判卷结束后收口还没做完时，租约不能停止续租。"""
+    marker = lab["root"] / "CLOSING_DONE"
+    cfg = _config(lab, [_step(lab, "rest")], interval=1)
+    _with_hold(cfg, marker)
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: (lab["out"] / "DONE").exists())  # the verdict markers are written first
+        before = _renewals(lab)
+        time.sleep(3.5)
+        assert proc.poll() is None  # still holding
+        assert _renewals(lab) > before  # and still renewing after the verdict
+        marker.write_text("closed\n", encoding="utf-8")
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "closing marker seen" in (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def test_without_the_hold_option_the_runner_exits_right_after_the_verdict(lab: dict[str, Path]) -> None:
+    plain = _config(lab, [_step(lab, "rest")], interval=1, name="plain")
+    started = time.monotonic()
+    assert _run(plain, "run").returncode == 0
+    assert time.monotonic() - started < 30
+
+
+@pytest.mark.parametrize("bad", [{"hold_until_marker": "relative"}, {"hold_until_marker": "/x/../y"}, {"hold_timeout_s": 5}])
+def test_a_bad_hold_setting_is_refused_at_start(lab: dict[str, Path], bad: dict[str, Any]) -> None:
+    cfg = _config(lab, [_step(lab, "s")])
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    data["lease"].update({"hold_until_marker": str(lab["root"] / "M"), **bad})
+    cfg.write_text(json.dumps(data), encoding="utf-8")
+    result = _run(cfg, "run")
+    assert result.returncode != 0 and "hold" in (result.stdout + result.stderr)
+
+
+def _hold_cfg(lab: dict[str, Path], marker: Path, steps: list[dict[str, Any]]) -> Path:
+    cfg = _config(lab, steps, interval=1)
+    _with_hold(cfg, marker, 3600)
+    return cfg
+
+
+def _log(lab: dict[str, Path]) -> str:
+    return (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def test_a_stop_file_ends_the_hold(lab: dict[str, Path]) -> None:
+    cfg = _hold_cfg(lab, lab["root"] / "CLOSING_DONE", [_step(lab, "rest")])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: "holding the lease" in _log(lab))
+        assert _run(cfg, "stop").returncode == 0
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "hold ended early: STOP file" in _log(lab)
+
+
+def test_losing_the_lease_ends_the_hold(lab: dict[str, Path]) -> None:
+    cfg = _hold_cfg(lab, lab["root"] / "CLOSING_DONE", [_step(lab, "rest")])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: "holding the lease" in _log(lab))
+        (lab["tools"] / "renew_fail").write_text("")
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "hold ended early: lease lost" in _log(lab)
+
+
+def test_a_stopped_round_does_not_hold_the_lease(lab: dict[str, Path]) -> None:
+    # A STOP before the verdict ends the round as STOPPED (exit 7): no hold, even with a one-hour hold configured.
+    cfg = _hold_cfg(lab, lab["root"] / "CLOSING_DONE", [_step(lab, "core", wait=120)])
+    runner = _start(cfg)
+    _wait_for(lambda: _runs(lab, "core") == 1)
+    assert _run(cfg, "stop").returncode == 0
+    assert runner.wait(timeout=60) == 7
+    assert "holding the lease" not in _log(lab)
+
+
+def test_an_old_closing_marker_is_moved_aside_not_deleted_and_the_hold_still_waits(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "CLOSING_DONE"
+    marker.write_text("left by the last round\n", encoding="utf-8")
+    cfg = _hold_cfg(lab, marker, [_step(lab, "rest")])
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: "holding the lease" in _log(lab))
+        time.sleep(2)
+        assert proc.poll() is None  # the stale marker did not release the lease
+        aside = list(lab["root"].glob("CLOSING_DONE.stale.*"))
+        assert len(aside) == 1 and aside[0].read_text(encoding="utf-8") == "left by the last round\n"
+        marker.write_text("closed\n", encoding="utf-8")
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert "old hold_until_marker moved aside" in _log(lab)
