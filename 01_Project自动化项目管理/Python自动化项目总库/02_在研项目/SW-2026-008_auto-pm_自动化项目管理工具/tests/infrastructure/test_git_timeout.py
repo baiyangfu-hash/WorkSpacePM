@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from auto_pm.infrastructure import git_timeout
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 from auto_pm.infrastructure.git_timeout import GIT_TIMEOUT_ENV, resolve_git_timeout, run_git_bounded
 
@@ -79,6 +78,62 @@ def test_interrupt_not_swallowed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     def boom(*_a: object, **_k: object) -> None:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(git_timeout.subprocess, "run", boom)
+    monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", boom)
     with pytest.raises(KeyboardInterrupt):
         run_git_bounded(["git", "--version"], default_timeout=10.0, error_cls=_BoomError, where=tmp_path)
+
+
+def test_every_call_site_keeps_its_documented_default_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pin each site's default so a silent 30 -> 300 edit turns this red (approval chain included)."""
+    from types import SimpleNamespace
+
+    from auto_pm.application.core import (
+        approval_proof_service,
+        chg_tracking_service,
+        evidence_collection_service,
+    )
+    from auto_pm.application.core import execution_microtask_service as microtask
+    from auto_pm.infrastructure import continuity_store, local_executor, plc_git_marker_guard
+
+    monkeypatch.delenv(GIT_TIMEOUT_ENV, raising=False)
+    seen: list[tuple[str, float]] = []
+
+    class _Stop(Exception):  # noqa: N818
+        pass
+
+    def recorder(label: str):  # type: ignore[no-untyped-def]
+        def record(*_args: object, default_timeout: float, **_kwargs: object) -> None:
+            seen.append((label, default_timeout))
+            raise _Stop
+
+        return record
+
+    def probe(module: object, label: str, call) -> None:  # type: ignore[no-untyped-def]
+        for name in ("run_git_bounded", "run_git_bounded_text"):
+            if hasattr(module, name):
+                monkeypatch.setattr(module, name, recorder(label))
+        with pytest.raises(_Stop):
+            call()
+
+    store = SimpleNamespace(workspace_root=tmp_path)
+    probe(local_executor, "local_executor", lambda: local_executor.LocalCodexExecutor._git_output(None, tmp_path, "status"))  # type: ignore[arg-type]
+    probe(continuity_store, "continuity_store.bytes", lambda: continuity_store.ContinuityStore._git_bytes(store, "status"))  # type: ignore[arg-type]
+    probe(continuity_store, "continuity_store.clean", lambda: continuity_store.ContinuityStore._require_paths_clean_at_head(store, "x"))  # type: ignore[arg-type]
+    probe(plc_git_marker_guard, "plc_marker", lambda: plc_git_marker_guard._git(tmp_path, "status"))
+    probe(microtask, "microtask", lambda: microtask.ExecutionMicrotaskService._git_bytes(tmp_path, "status"))
+    probe(approval_proof_service, "approval", lambda: approval_proof_service.ApprovalProofService(tmp_path)._git("status"))
+    probe(evidence_collection_service, "evidence", lambda: evidence_collection_service.EvidenceCollectionService._git_output(tmp_path, "status"))
+    probe(chg_tracking_service, "chg", lambda: chg_tracking_service._git(tmp_path, "status"))
+
+    assert dict(seen) == {
+        "local_executor": 15.0,
+        "continuity_store.bytes": 10.0,
+        "continuity_store.clean": 10.0,
+        "plc_marker": 10.0,
+        "microtask": 120.0,
+        "approval": 30.0,
+        "evidence": 600.0,
+        "chg": 60.0,
+    }
