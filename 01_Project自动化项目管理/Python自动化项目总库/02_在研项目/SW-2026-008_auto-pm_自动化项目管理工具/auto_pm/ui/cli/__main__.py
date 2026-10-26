@@ -29,16 +29,16 @@ def _fix_windows_encoding() -> None:
 
     避免与 pytest capture 机制冲突。
     """
-    if sys.platform != "win32":
-        return
-    try:
-        if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8")
-        if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
-            sys.stderr.reconfigure(encoding="utf-8")
-    except (AttributeError, OSError):
-        # pytest capture（StringIO 无 reconfigure）或旧 Python，静默跳过
-        pass
+    if sys.platform == "win32":
+        try:
+            if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
+                sys.stdout.reconfigure(encoding="utf-8")
+            if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
+                sys.stderr.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError):
+            # pytest capture（StringIO 无 reconfigure）或旧 Python，静默跳过
+            pass
+
 
 _fix_windows_encoding()
 
