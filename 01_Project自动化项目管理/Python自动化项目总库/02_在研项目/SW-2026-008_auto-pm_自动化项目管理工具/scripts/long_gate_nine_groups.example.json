@@ -5,6 +5,7 @@
     "Group steps have stop_on_fail false: a failed group is a result for the judge, exactly as in run_g2.sh.",
     "ALL_DONE_marker writes gates/g2_candidate/ALL_DONE_marker.txt; run_g2.sh's ALL_DONE file is written by markers.done below.",
     "lease.token_file is read by the runner only and passed to `continuity lease renew` through an environment variable; it never reaches a group.",
+    "markers.remove: files the starting script left to say a heavy round is running (HEAVY_GATES_RUNNING); the round that ends removes them, pass or fail. Only plain files under root or out_dir.",
     "step_timeout_s: a hung group is killed and recorded as exit 124 (a failed group); round_timeout_s: the whole round, a final ROUND_TIMEOUT."
   ],
   "name": "card-<card>",
@@ -32,6 +33,9 @@
   "step_timeout_s": 14400,
   "round_timeout_s": 36000,
   "markers": {
+    "remove": [
+      "{root}\\.auto-pm\\reports\\HEAVY_GATES_RUNNING"
+    ],
     "done": {
       "gates/g2_candidate/ALL_DONE": "done\n",
       "gates/DONE": "done\n",

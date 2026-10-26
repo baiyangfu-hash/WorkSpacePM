@@ -1,13 +1,17 @@
 ---
 spec_id: LSP-905
 title: "SCL编程规范"
-version: "V1.3.0"
+version: "V1.4.0"
 domain: plc
 lifecycle: stable
 canonical_path: "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/905_SCL编程规范_LSP.md"
 replaces: [DEV-801, DEV-810]
 tags: ["SCL", "编程", "核心规范", "LSP", "DJ-2026-005实践"]
 changelog:
+  - version: V1.4.0
+    date: 2026-10-26
+    author: Claude
+    changes: 新增 §3.6 下标起点：STRING 字符下标从 1 起（siemens-lsp 插件的要求），ARRAY 下界统一为 1（用户裁决，与 STRING 统一风格）；移植到实际 PLC 时按平台适配；数组示例改为下界 1；经用户 2026-10-26 批准
   - version: V1.3.0
     date: 2026-10-24
     author: Claude
@@ -28,9 +32,9 @@ changelog:
 
 # SCL 编程规范 (Siemens LSP 兼容版)
 
-> 版本：V1.3.0
+> 版本：V1.4.0
 > 状态：已验证（§4.4 ENUM 为新增语法，待本机插件与目标平台验证，验证前不得用于交付）
-> 更新日期：2026-10-24
+> 更新日期：2026-10-26
 > 适用环境：Siemens LSP (VS Code)、TIA Portal、CODESYS、GX Works
 
 ---
@@ -125,7 +129,7 @@ s_rCurrentSpeed := FC_1001_CalculateSpeed(
 | `e` | `ENUM` 枚举类型 | `s_eState`, `i_eMode` |
 | `arr` | `ARRAY` 数组类型 | `s_arrSensors`, `temp_arrData`, `s_arrMesAlarmQueue` |
 
-> **数组命名补充说明**：即使数组元素类型为 `INT` / `BOOL` / `WORD`，变量名仍统一使用 `arr` 作为二级类型标识，再在语义名中体现元素含义；例如 `s_arrMesAlarmQueue : ARRAY[0..9] OF INT;`、`s_arrStationAlarmStatus : ARRAY[1..3] OF INT;`。禁止写成 `s_ai...`、`s_ab...` 之类未在本规范登记的组合缩写。
+> **数组命名补充说明**：即使数组元素类型为 `INT` / `BOOL` / `WORD`，变量名仍统一使用 `arr` 作为二级类型标识，再在语义名中体现元素含义；例如 `s_arrMesAlarmQueue : ARRAY[1..10] OF INT;`、`s_arrStationAlarmStatus : ARRAY[1..3] OF INT;`。禁止写成 `s_ai...`、`s_ab...` 之类未在本规范登记的组合缩写。
 
 ---
 
@@ -172,7 +176,7 @@ END_VAR
 VAR
     s_bInitialized : BOOL;          // 内部静态初始化标志
     s_iCurrentStep : INT;           // 状态机当前步序
-    s_arrMesAlarmQueue : ARRAY[0..9] OF INT; // 数组统一使用 arr 类型标识
+    s_arrMesAlarmQueue : ARRAY[1..10] OF INT; // 数组统一使用 arr 类型标识；下界为 1（§3.6）
     fb_tActionTimer : FB_TON;       // TON 定时器实例
 END_VAR
 
@@ -188,6 +192,22 @@ VAR
     s_iCurrentStep_V2 : INT;        // 禁止：变量名带版本号后缀
 END_VAR
 ```
+
+---
+
+### 3.6 数组与字符串的下标起点（V1.4.0 新增）
+
+**STRING 字符下标从 1 起，这是 siemens-lsp 插件的要求；ARRAY 下界统一为 1，这是用户 2026-10-26 的裁决，为与 STRING 下标统一风格（插件本身也接受从 0 起的数组）。移植到实际 PLC 时按平台适配。**
+
+| 对象 | 规定 | 示例 |
+|------|------|------|
+| `ARRAY` 声明 | 下界一律写 1，元素个数等于上界 | `s_arrMesAlarmQueue : ARRAY[1..10] OF INT;` |
+| 数组遍历 | `FOR` 从 1 到上界 | `FOR t_iIdx := 1 TO 10 DO ... END_FOR;` |
+| `STRING` 按字符读写 | 第一个字符是 `s[1]`，n 个字符的字符串到 `s[n]` 为止，不写 `s[0]` | `s_sId[1]` 是第一个字符 |
+
+- **依据**：STRING——Siemens 语言服务插件按 S7 规则解释字符下标，按 0 起写的字符串在插件 test 里会错位（DJ-2026-009 FB_3002 的 Modbus 用例实测：高字节丢失、读回少第一个字符）。ARRAY——用户 2026-10-26 裁决，为与 STRING 统一风格。
+- **移植到实际 PLC**：目标平台若按别的规则（例如 InoProShop 的 STRING 下标起点尚待在目标平台上核实），在移植时按平台适配并在项目的技术方案文档里写明适配方式；不得为迁就目标平台而在仓库源码里改回 0 起。
+- **已有代码**：碰到时按本节改写，并补插件 test 用例证明结果不变。
 
 ---
 
@@ -462,6 +482,7 @@ plccheck --verbose .
 
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
+| V1.4.0 | 2026-10-26 | Claude | 新增 §3.6 下标起点：STRING 字符下标从 1 起（siemens-lsp 要求）、ARRAY 下界为 1（用户裁决，统一风格）；移植时按平台适配；用户 2026-10-26 批准；数组示例改为下界 1 |
 | V1.3.0 | 2026-10-24 | Claude | 新增 §4.4 ENUM 枚举类型（DJ-2026-005 步序用枚举；验证前置见 §4.4） |
 | V1.2.1 | 2026-08-26 | Codex | 补充 ARRAY 命名示例，明确数组变量统一使用 arr 类型标识 |
 | V1.2.0 | 2026-08-25 | Codex | 删除 METHOD 教程并改为禁用规则；统一与 plc-electrical-engineer / LSP-906 的白名单口径 |
