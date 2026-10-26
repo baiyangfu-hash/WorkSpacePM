@@ -32,7 +32,7 @@ Copier 会依次询问以下问题：
 │   ├── logging/                 # 统一日志
 │   └── utils/                   # 通用工具
 ├── tests/                       # pytest 测试
-├── 00_项目基础信息/              # PRD 等文档
+├── 01_启动/                      # PRD 等启动文档
 ├── pyproject.toml               # hatchling 构建 + 标准化依赖
 ├── .ruff.toml                   # 210 规范对齐
 ├── .pre-commit-config.yaml      # ruff + ruff-format
