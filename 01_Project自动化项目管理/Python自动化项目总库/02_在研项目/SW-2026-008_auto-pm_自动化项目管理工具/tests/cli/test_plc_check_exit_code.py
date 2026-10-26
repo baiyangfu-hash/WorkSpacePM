@@ -27,6 +27,7 @@ def test_a_project_with_nothing_failing_exits_zero(cli_runner: CliRunner, full_p
     result = _check(cli_runner, full_project, PROJECT_ID)
 
     assert result.exit_code == 0, result.output
+    assert "缺少 接口文档_INT.md" not in result.output
 
 
 def test_a_project_with_a_failing_item_exits_one(cli_runner: CliRunner, full_project: Path) -> None:  # noqa: F811
@@ -35,7 +36,7 @@ def test_a_project_with_a_failing_item_exits_one(cli_runner: CliRunner, full_pro
     result = _check(cli_runner, full_project, PROJECT_ID)
 
     assert result.exit_code == 1, result.output
-    assert "接口文档" in result.output
+    assert "缺少 接口文档_INT.md" in result.output
 
 
 def test_json_output_does_not_hide_the_failure_from_the_exit_code(
@@ -62,13 +63,16 @@ def test_the_whole_workspace_exits_one_when_any_project_fails(
     assert _check(cli_runner, full_project, "--all").exit_code == 1
 
 
-@pytest.mark.parametrize("flag", ["--no-language-service", "--substance"])
+@pytest.mark.parametrize(
+    ("flag", "reason"),
+    [("--no-language-service", "缺少 接口文档_INT.md"), ("--substance", "文件不存在: 接口文档_INT.md")],
+)
 def test_the_other_check_modes_keep_the_same_exit_code_rule(
-    cli_runner: CliRunner, full_project: Path, flag: str  # noqa: F811
+    cli_runner: CliRunner, full_project: Path, flag: str, reason: str  # noqa: F811
 ) -> None:
     _break(full_project)
 
     result = _check(cli_runner, full_project, PROJECT_ID, flag)
 
     assert result.exit_code == 1, result.output
-    assert "接口文档" in result.output
+    assert reason in result.output
