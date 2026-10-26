@@ -566,3 +566,20 @@ def test_p19_a_git_evidence_call_is_bounded_and_a_timeout_is_a_clear_collection_
         EvidenceCollectionService._git_output(tmp_path, "status")
 
     assert seen["timeout"] == module._GIT_EVIDENCE_TIMEOUT_SECONDS > 0
+
+
+@pytest.mark.parametrize(
+    ("setting", "expected"),
+    [("", 600), ("1800", 600), ("600", 600), ("45", 45), ("45.2", 46), ("0.3", 1)],
+)
+def test_p19_the_language_service_command_never_outlives_the_gate_time_limit(
+    monkeypatch: pytest.MonkeyPatch, setting: str, expected: int
+) -> None:
+    """TD-SW008-188：门禁线程超时后收不掉，但它起的插件命令行单次调用时限取插件默认值与质量门时限中较小的一个。"""
+    from auto_pm.application.core import evidence_collection_service as module
+
+    monkeypatch.setenv("AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS", setting)
+
+    service = module._plc_language_service()
+
+    assert service is not None and service.timeout == expected

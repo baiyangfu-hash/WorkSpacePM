@@ -1892,9 +1892,14 @@ def _plc_language_service() -> LanguageService | None:
     A missing plugin is reported by the checker as "未验证" (warn), never as a pass.
     """
 
-    from auto_pm.infrastructure.siemens_language_service import default_language_service
+    from auto_pm.infrastructure.siemens_language_service import (
+        DEFAULT_TIMEOUT_SECONDS,
+        default_language_service,
+    )
 
-    return default_language_service()
+    # TD-SW008-188: 门禁线程放弃后收不掉，但它起的命令行子进程不应比门禁时限活得更久：
+    # 单次调用时限取插件默认值与质量门时限中较小的一个（至少 1 秒）。
+    return default_language_service(timeout=max(1, min(DEFAULT_TIMEOUT_SECONDS, math.ceil(_quality_gate_timeout_seconds()))))
 
 
 def _with_anchor(note: str, baseline: _PlcBaseline | None) -> str:
