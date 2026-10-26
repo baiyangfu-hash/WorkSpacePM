@@ -20,6 +20,7 @@ from auto_pm.application.core.evidence_collection_service import (
 )
 from auto_pm.contracts.continuity import RunItem, RunState
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from tests.git_support import git_out
 
 _TIMESTAMP = "2026-10-03T00:00:00+00:00"
 PROJECT = "0100_PLC/DJ-TEST-001"
@@ -35,16 +36,7 @@ _PRD_FILES = (
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), *arguments],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=clean_git_environment(),
-    )
-    return result.stdout.strip()
+    return git_out(root, *arguments, env=clean_git_environment())
 
 
 def write_plc_project(root: Path, relative: str, *, scl_dir: str = "OB1") -> Path:
@@ -548,7 +540,6 @@ def test_p18_a_python_quality_command_that_never_ends_fails_with_a_timeout(
 def test_p19_a_git_evidence_call_is_bounded_and_a_timeout_is_a_clear_collection_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import subprocess
 
     from auto_pm.application.core import evidence_collection_service as module
 
