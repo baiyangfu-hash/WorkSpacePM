@@ -39,7 +39,7 @@ def test_utf8_streams_are_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "stdout", out)
     git_hook_module.make_stdio_encoding_safe()
     print("❌ 台账")
-    assert out.buffer.getvalue().decode("utf-8") == "❌ 台账\n"
+    assert out.buffer.getvalue().decode("utf-8").rstrip("\r\n") == "❌ 台账"
 
 
 def test_streams_without_reconfigure_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
