@@ -19,25 +19,95 @@ from auto_pm.infrastructure import (
 
 PACKAGE = Path(__file__).resolve().parents[1] / "auto_pm"
 _BLOCKING_CALLS = {"run", "check_output", "check_call", "call"}
+# Popen has no timeout argument; only code that owns the process lifetime itself may start one.
+_POPEN_ALLOWED = {"infrastructure/local_executor.py": "starts the governed Codex process and terminates it itself"}
+
+
+def find_unbounded_subprocess_calls(source: str) -> list[tuple[int, str]]:
+    """(line, why) for every subprocess call that is not provably bounded.
+
+    Follows ``import subprocess as sp`` and ``from subprocess import run as r``; flags ``timeout=None``
+    and every ``Popen`` (the caller decides which files may own a Popen).
+    """
+    tree = ast.parse(source)
+    modules: set[str] = set()
+    names: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.asname or alias.name for alias in node.names if alias.name == "subprocess")
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            for alias in node.names:
+                names[alias.asname or alias.name] = alias.name
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules:
+            original = func.attr
+        elif isinstance(func, ast.Name) and func.id in names:
+            original = names[func.id]
+        else:
+            continue
+        if original == "Popen":
+            found.append((node.lineno, "Popen"))
+        elif original in _BLOCKING_CALLS:
+            timeouts = [keyword for keyword in node.keywords if keyword.arg == "timeout"]
+            if not timeouts:
+                found.append((node.lineno, f"{original} without timeout"))
+            elif isinstance(timeouts[0].value, ast.Constant) and timeouts[0].value.value is None:
+                found.append((node.lineno, f"{original} with timeout=None"))
+    return found
 
 
 def test_every_subprocess_call_in_auto_pm_has_a_timeout() -> None:
     """Root cause of TD-087: unbounded Git calls. New unbounded calls must fail this scan."""
     offenders: list[str] = []
     for path in sorted(PACKAGE.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
-        for node in ast.walk(tree):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in _BLOCKING_CALLS
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "subprocess"
-            ):
+        relative = path.relative_to(PACKAGE).as_posix()
+        for line, why in find_unbounded_subprocess_calls(path.read_text(encoding="utf-8-sig", errors="replace")):
+            if why == "Popen" and relative in _POPEN_ALLOWED:
                 continue
-            if "timeout" not in {keyword.arg for keyword in node.keywords}:
-                offenders.append(f"{path.relative_to(PACKAGE)}:{node.lineno}")
-    assert not offenders, "subprocess 调用没有 timeout（Git 请用 git_timeout.run_git_bounded*）: " + ", ".join(offenders)
+            offenders.append(f"{relative}:{line} ({why})")
+    assert not offenders, "subprocess 调用没有可证明的时限（Git 请用 git_timeout.run_git_bounded*）: " + ", ".join(offenders)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("import subprocess\nsubprocess.run(['git'])\n", "run without timeout"),
+        ("import subprocess\nsubprocess.run(['git'], timeout=None)\n", "run with timeout=None"),
+        ("import subprocess as sp\nsp.check_output(['git'])\n", "check_output without timeout"),
+        ("from subprocess import run\nrun(['git'])\n", "run without timeout"),
+        ("from subprocess import run as r\nr(['git'], timeout=None)\n", "run with timeout=None"),
+        ("import subprocess\nsubprocess.Popen(['git'])\n", "Popen"),
+        ("import subprocess as sp\nsp.Popen(['git'])\n", "Popen"),
+        ("from subprocess import Popen as P\nP(['git'])\n", "Popen"),
+    ],
+    ids=["plain", "none", "alias-module", "from-import", "from-import-alias-none", "popen", "popen-alias", "popen-from"],
+)
+def test_scan_catches_every_way_of_writing_an_unbounded_call(source: str, expected: str) -> None:
+    assert [why for _line, why in find_unbounded_subprocess_calls(source)] == [expected]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import subprocess\nsubprocess.run(['git'], timeout=5)\n",
+        "import subprocess as sp\nsp.run(['git'], timeout=limit)\n",
+        "from subprocess import run\nrun(['git'], timeout=30.0)\n",
+        "import subprocess\nsubprocess.TimeoutExpired('git', 1)\n",
+    ],
+)
+def test_scan_accepts_bounded_calls(source: str) -> None:
+    assert find_unbounded_subprocess_calls(source) == []
+
+
+def test_popen_is_only_allowed_where_the_process_lifetime_is_managed() -> None:
+    """The allowlist must not rot: every entry still exists and still starts a Popen."""
+    for relative in _POPEN_ALLOWED:
+        text = (PACKAGE / relative).read_text(encoding="utf-8-sig", errors="replace")
+        assert any(why == "Popen" for _line, why in find_unbounded_subprocess_calls(text)), relative
 
 
 def _hang(*_args: Any, **kwargs: Any) -> Any:
