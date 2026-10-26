@@ -29,6 +29,7 @@ from auto_pm.domain.change.decision_service import DecisionService, DecisionVali
 from tests.cli.test_pm_facade import _setup_planning
 from tests.core.test_pm_facade_service import _audit_scene, _p10_facade
 from tests.plan_checklist_support import full_checklist
+from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
 SCOPE = ("DJ-2026-011/src/FB_AlarmSummary.st", "DJ-2026-011/docs/变量定义.md")
 DJ011_INTENT = PmIntent(
@@ -217,6 +218,7 @@ def test_facade_refuses_the_dj011_plan_before_any_write(tmp_path: Path) -> None:
             risks=("复位逻辑改动可能影响其他报警复位",),
             non_goals=("不改安全回路",),
             execution_grant=_dj011_grant(PlanChecklist(original_request=DJ011_WORDS)),
+            classification=LEGACY_EQUIVALENT_FILING,
         )
 
     message = str(refusal.value)
@@ -234,6 +236,7 @@ def test_facade_accepts_the_same_plan_once_filled_and_records_the_safety_answer(
         risks=("复位逻辑改动可能影响其他报警复位",),
         non_goals=("不改安全回路",),
         execution_grant=_dj011_grant(_filled(safety_circuit="是"), declared=SCOPE),
+        classification=LEGACY_EQUIVALENT_FILING,
     )
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(card.change_id, state, approver="fubai", comment="human", project_id="SW-TEST-001")

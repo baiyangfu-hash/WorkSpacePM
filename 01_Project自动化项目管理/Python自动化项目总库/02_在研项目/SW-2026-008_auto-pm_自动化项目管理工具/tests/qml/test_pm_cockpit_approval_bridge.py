@@ -42,6 +42,7 @@ from tests.core.test_pm_run_e2e import (
     _helper_source,
 )
 from tests.plan_checklist_support import full_checklist
+from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 from tests.qml.test_pm_cockpit_bridge import _HoldingThreadPool
 
 _VERIFIED = "已执行并通过质量验证，等待您的最终验收。"
@@ -102,6 +103,7 @@ class _Cockpit:
                 plan_checklist=full_checklist(),
             ),
             submitted_by="PM (Claude)",
+            classification=LEGACY_EQUIVALENT_FILING,
         )
         plan_hash = str(submitted.card.plan_hash)
         self.hashes[request_id] = plan_hash

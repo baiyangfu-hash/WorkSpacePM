@@ -120,6 +120,17 @@ def _receipt(
     )
 
 
+def _python_stack(root: Path) -> None:
+    """Give the fixture project a stack, from which the chosen kind gets its technical domain."""
+    project = root / "projects" / "DJ-2026-005"
+    project.mkdir(parents=True, exist_ok=True)
+    (project / ".copier-answers.yml").write_text(
+        "project_id: DJ-2026-005\nproject_name: Bridge fixture\nstack: python\n",
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
 def _registry(root: Path) -> None:
     path = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
     path.parent.mkdir(parents=True)
@@ -177,21 +188,22 @@ def test_bridge_rejects_evidence_for_an_unregistered_project(tmp_path: Path) -> 
 
 def test_bridge_persists_pre_auth_draft_and_replays_same_input(tmp_path: Path) -> None:
     _registry(tmp_path)
+    _python_stack(tmp_path)
     _git_root(tmp_path)
     store = ContinuityStore(tmp_path)
     store.initialize("2026-09-28T00:00:00+00:00", "test")
     bridge = PmCockpitBridge(str(tmp_path))
     first = bridge.createPlanningDraft(
-        "DJ-2026-005", " Improve line throughput ", "Measure cycle time\nNo safety bypass"
+        "DJ-2026-005", " Improve line throughput ", "Measure cycle time\nNo safety bypass", "iteration"
     )
     replay = bridge.createPlanningDraft(
-        "DJ-2026-005", "Improve line throughput", "Measure cycle time\nNo safety bypass"
+        "DJ-2026-005", "Improve line throughput", "Measure cycle time\nNo safety bypass", "iteration"
     )
     changed = bridge.createPlanningDraft(
-        "DJ-2026-005", "Improve quality", "Measure cycle time\nNo safety bypass"
+        "DJ-2026-005", "Improve quality", "Measure cycle time\nNo safety bypass", "iteration"
     )
     new_session = PmCockpitBridge(str(tmp_path)).createPlanningDraft(
-        "DJ-2026-005", "Improve line throughput", "Measure cycle time\nNo safety bypass"
+        "DJ-2026-005", "Improve line throughput", "Measure cycle time\nNo safety bypass", "iteration"
     )
 
     assert all(result["success"] for result in (first, replay, changed, new_session))
@@ -211,6 +223,53 @@ def test_bridge_persists_pre_auth_draft_and_replays_same_input(tmp_path: Path) -
     assert not list(tmp_path.rglob("CHG-*.md"))
 
 
+def test_bridge_refuses_a_draft_without_a_chosen_kind_and_writes_nothing(tmp_path: Path) -> None:
+    _registry(tmp_path)
+    _python_stack(tmp_path)
+    _git_root(tmp_path)
+    store = ContinuityStore(tmp_path)
+    store.initialize("2026-09-28T00:00:00+00:00", "test")
+    bridge = PmCockpitBridge(str(tmp_path))
+
+    # TD-SW008-070: no kind, an unknown kind, or a CHANGE (which also needs an action) is never saved.
+    for kind in ("", "   ", "nonsense", "change"):
+        result = bridge.createPlanningDraft("DJ-2026-005", "Improve", "Measure cycle time", kind)
+        assert result["success"] is False, kind
+        assert "draft" not in result
+        assert "类型" in result["message"] or "草稿未保存" in result["message"], result["message"]
+
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM planning_drafts").fetchone()[0] == 0
+        bindings = conn.execute(
+            "SELECT name FROM sqlite_master WHERE name='planning_draft_intake_bindings'"
+        ).fetchone()
+        assert bindings is None or conn.execute(
+            "SELECT COUNT(*) FROM planning_draft_intake_bindings"
+        ).fetchone()[0] == 0
+
+
+def test_bridge_binds_the_chosen_kind_to_the_saved_draft(tmp_path: Path) -> None:
+    _registry(tmp_path)
+    _python_stack(tmp_path)
+    _git_root(tmp_path)
+    store = ContinuityStore(tmp_path)
+    store.initialize("2026-09-28T00:00:00+00:00", "test")
+    bridge = PmCockpitBridge(str(tmp_path))
+
+    saved = bridge.createPlanningDraft("DJ-2026-005", "Fix the jam", "No jam in 100 cycles", "bug")
+    again = bridge.createPlanningDraft("DJ-2026-005", "Fix the jam", "No jam in 100 cycles", "bug")
+    other = bridge.createPlanningDraft("DJ-2026-005", "Fix the jam", "No jam in 100 cycles", "debt")
+
+    assert saved["success"] and again["success"] and other["success"]
+    with sqlite3.connect(store.db_path) as conn:
+        kinds = sorted(
+            json.loads(row[0])["kind"]
+            for row in conn.execute("SELECT classification_json FROM planning_draft_intake_bindings")
+        )
+    # The same words with the same kind replay one draft; another kind is a different request.
+    assert kinds == ["BUG", "DEBT"]
+
+
 def test_bridge_rejects_incomplete_or_unknown_planning_input(tmp_path: Path) -> None:
     _registry(tmp_path)
     _git_root(tmp_path)
@@ -225,7 +284,7 @@ def test_bridge_rejects_incomplete_or_unknown_planning_input(tmp_path: Path) -> 
         ("UNKNOWN", "Objective", "Accepted"),
         ("DJ-2026-005", "Objective", "Same\nSame"),
     ):
-        result = bridge.createPlanningDraft(project, objective, acceptance)
+        result = bridge.createPlanningDraft(project, objective, acceptance, "iteration")
         assert result["success"] is False
         assert "draft" not in result
 

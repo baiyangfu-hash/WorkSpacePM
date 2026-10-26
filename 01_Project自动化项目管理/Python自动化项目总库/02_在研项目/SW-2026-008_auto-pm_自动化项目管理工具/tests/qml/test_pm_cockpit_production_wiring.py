@@ -69,7 +69,7 @@ def test_the_gui_goal_input_lands_in_the_control_root_and_swapped_roots_write_no
     _work(main, "WORK-WIRE-002")
     good = build_cockpit_bridge(str(candidate), control_root=str(main))
     try:
-        saved = good.createPlanningDraft(PROJECT, "dual root goal", "the goal is saved in the control root")
+        saved = good.createPlanningDraft(PROJECT, "dual root goal", "the goal is saved in the control root", "iteration")
         assert saved["success"] is True
         assert len(ContinuityStore(main).list_planning_drafts(PROJECT)) == 1
         after_good = _store_files(main)
@@ -77,7 +77,7 @@ def test_the_gui_goal_input_lands_in_the_control_root_and_swapped_roots_write_no
         _delete_qobject(good)
     swapped = build_cockpit_bridge(str(main), control_root=str(candidate))
     try:
-        refused = swapped.createPlanningDraft(PROJECT, "swapped goal", "this must be refused")
+        refused = swapped.createPlanningDraft(PROJECT, "swapped goal", "this must be refused", "iteration")
         assert refused["success"] is False
         assert _store_files(main) == after_good
         assert len(ContinuityStore(main).list_planning_drafts(PROJECT)) == 1

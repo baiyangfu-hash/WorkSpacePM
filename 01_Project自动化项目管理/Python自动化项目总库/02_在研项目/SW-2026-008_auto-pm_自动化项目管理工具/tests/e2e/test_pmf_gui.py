@@ -326,6 +326,7 @@ def _drive(
     win.named("planningProject").setProperty("currentIndex", index)
     win.named("planningObjective").setProperty("text", objective)
     win.named("planningAcceptance").setProperty("text", "\n".join(acceptance))
+    win.named("planningKind").setProperty("currentIndex", 0)
     win.shot(evidence, "1-goal-typed")
     win.click(win.named("savePlanningDraft"))
     win.pump(lambda: win.window.property("planningDraft") is not None, 30, "the saved draft")

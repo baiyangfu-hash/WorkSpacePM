@@ -51,6 +51,7 @@ from auto_pm.domain.change.decision_service import DecisionError
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.intake_store import IntakeStore
 from tests.plan_checklist_support import full_checklist
+from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
 # Plans must declare the exact files they will change (改动声明不得为空).
 _EXAMPLE_GRANT = PlanningExecutionGrant(
@@ -190,7 +191,7 @@ def test_audit_f01_invalid_contract_never_consumes(
         else:
             facade.create_planning_draft(_planning_intent())
             facade.submit_planning_scope_card(
-                _planning_intent().request_id, submitted_by="audit", **values
+                _planning_intent().request_id, submitted_by="audit", **values,
             )
     _audit_unconsumed(tmp_path, database, item)
     cold = PmFacadeService(tmp_path, store=ContinuityStore(tmp_path, database))
@@ -456,7 +457,8 @@ def test_audit_f08_saved_classified_card_approves_and_legacy_create_without_decl
     # A legacy create without any declared dirty path is now refused before any write.
     with pytest.raises(PmFacadeError, match="--declared-dirty"):
         cold.create_planning_scope_card(
-            legacy_intent, scope_paths=("legacy.py",), risks=("Risk",), non_goals=("No deployment",)
+            legacy_intent, scope_paths=("legacy.py",), risks=("Risk",), non_goals=("No deployment",),
+            classification=LEGACY_EQUIVALENT_FILING,
         )
     assert (
         _audit_count(database, "planning_scope_cards", "WHERE request_id=?", ("REQ-LEGACY",)) == 0
@@ -769,7 +771,7 @@ def _p10_facade(root: Path) -> tuple[PmFacadeService, Path, ChangeService]:
 def _p10_card(root: Path) -> tuple[PmFacadeService, PlanningScopeCard, Path]:
     """Build one approved, isolated PlanningScopeCard for fault-retry checks."""
     facade, database, changes = _p10_facade(root)
-    card = facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/example.py",), risks=("retry",), non_goals=("no execution",), execution_grant=_EXAMPLE_GRANT)
+    card = facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/example.py",), risks=("retry",), non_goals=("no execution",), execution_grant=_EXAMPLE_GRANT, classification=LEGACY_EQUIVALENT_FILING)
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(card.change_id, state, approver="fubai", comment="human", project_id="SW-TEST-001")
     return facade, card, database
@@ -793,6 +795,7 @@ def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
         risks=("dispatch drift",),
         non_goals=("no model startup",),
         execution_grant=grant,
+        classification=LEGACY_EQUIVALENT_FILING,
     )
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(
@@ -919,8 +922,8 @@ def test_p10_retries_draft_and_chg_after_post_write_interruptions(
 
     monkeypatch.setattr(facade._changes, "create_change_request", fail_after_change)
     with pytest.raises(PmFacadeError, match="injected"):
-        facade.create_planning_draft_change(_planning_intent())
-    change_id = facade.create_planning_draft_change(_planning_intent())
+        facade.create_planning_draft_change(_planning_intent(), classification=LEGACY_EQUIVALENT_FILING)
+    change_id = facade.create_planning_draft_change(_planning_intent(), classification=LEGACY_EQUIVALENT_FILING)
 
     assert draft.request_id == "REQ-P03-001" and change_id.startswith("CHG-")
     with sqlite3.connect(database) as conn:
@@ -1230,8 +1233,8 @@ def test_planning_draft_binds_one_real_chg_and_replays_without_execution(tmp_pat
         objective="Bind one reviewable change draft.",
         acceptance_criteria=("The CHG must replay exactly once.",),
     )
-    change_id = facade.create_planning_draft_change(intent)
-    replayed_change_id = facade.create_planning_draft_change(intent)
+    change_id = facade.create_planning_draft_change(intent, classification=LEGACY_EQUIVALENT_FILING)
+    replayed_change_id = facade.create_planning_draft_change(intent, classification=LEGACY_EQUIVALENT_FILING)
 
     assert replayed_change_id == change_id
     assert ChangeService(str(tmp_path)).get_change_request(change_id, "SW-TEST-001")
@@ -1333,16 +1336,18 @@ def test_planning_scope_card_is_deterministic_and_never_creates_execution(tmp_pa
     card = facade.create_planning_scope_card(
         _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("scope drift",), non_goals=("no execution",),
         execution_grant=_EXAMPLE_GRANT,
+        classification=LEGACY_EQUIVALENT_FILING,
     )
     assert facade.create_planning_scope_card(
         _planning_intent(), scope_paths=("auto_pm/example.py",), risks=("scope drift",), non_goals=("no execution",),
         execution_grant=_EXAMPLE_GRANT,
+        classification=LEGACY_EQUIVALENT_FILING,
     ) == card
     assert card.executable is False and len(card.plan_hash) == 64
     with sqlite3.connect(database) as conn:
         assert {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("mission_items", "work_items", "run_items")} == {"mission_items": 0, "work_items": 0, "run_items": 0}
     with pytest.raises(PmFacadeError, match="wildcards"):
-        facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/*",), risks=("scope drift",), non_goals=("no execution",))
+        facade.create_planning_scope_card(_planning_intent(), scope_paths=("auto_pm/*",), risks=("scope drift",), non_goals=("no execution",), classification=LEGACY_EQUIVALENT_FILING)
 
 
 def test_planning_approval_materializes_one_exact_authorized_mission(
@@ -1409,6 +1414,7 @@ def test_planning_approval_materializes_one_exact_authorized_mission(
         risks=("scope drift",),
         non_goals=("no execution",),
         execution_grant=_EXAMPLE_GRANT,
+        classification=LEGACY_EQUIVALENT_FILING,
     )
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(
@@ -1512,6 +1518,7 @@ def test_planning_scope_card_cold_replay_survives_approved_change(tmp_path: Path
         risks=("scope drift",),
         non_goals=("no execution",),
         execution_grant=_EXAMPLE_GRANT,
+        classification=LEGACY_EQUIVALENT_FILING,
     )
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(
@@ -1533,6 +1540,7 @@ def test_planning_scope_card_cold_replay_survives_approved_change(tmp_path: Path
         risks=("scope drift",),
         non_goals=("no execution",),
         execution_grant=_EXAMPLE_GRANT,
+        classification=LEGACY_EQUIVALENT_FILING,
     )
 
     assert replayed == card
@@ -1564,6 +1572,7 @@ def test_approved_planning_card_can_be_recovered_from_persisted_truth(tmp_path: 
             declared_dirty_paths=("auto_pm/example.py",),
             plan_checklist=full_checklist(),
         ),
+        classification=LEGACY_EQUIVALENT_FILING,
     )
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(
@@ -1790,6 +1799,7 @@ def _approved_run_card(root: Path) -> tuple[PmFacadeService, PlanningScopeCard]:
         risks=("unit",),
         non_goals=("no refactor",),
         execution_grant=grant,
+        classification=LEGACY_EQUIVALENT_FILING,
     )
     for state in ("submitted", "under_review", "approved"):
         changes.transition_status(
