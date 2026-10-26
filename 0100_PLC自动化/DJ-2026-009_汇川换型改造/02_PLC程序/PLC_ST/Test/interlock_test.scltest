@@ -1,12 +1,40 @@
 // ============================================================================
-// interlock_test.scltest - 汇川换型改造 安全联锁集成测试
+// interlock_test.scltest - 汇川换型改造 全局互锁 (任意报警) 集成测试
 // ============================================================================
 // 项目: DJ-2026-009 汇川换型改造
+// 被测: FB_2001_CommonAlarm_AllStation 的 o_bAnyAlarmActive (接口文档 IFC-OB1: M200 全局互锁)
+// 说明: 8 月的模板用例引用了程序里没有的 GlobalVars.stGlobal.bPowerOn / bSafetyLight (安全门、安全灯),
+//       程序里没有这两个变量, 也没有安全门逻辑, 所以不能保留原用例; 改成两条有意义的最小用例:
+//       (1) 三个工站里只要有一个报警, 全局互锁就置位, 并且只有该工站的标志置位;
+//       (2) 多个工站同时报警时, 当前报警码取最小的 (报警码越小优先级越高).
+//       这里测的是报警汇总的互锁位, 不是急停、安全门、光栅等安全回路.
 // ============================================================================
 
-TEST_CASE "TC_Interlock_SafetyDoor"
-    SET GlobalVars.stGlobal.bPowerOn := TRUE;
-    SET GlobalVars.stGlobal.bSafetyLight := FALSE;
+// 只有取放料机构报警: 全局互锁置位, 只有取放料标志置位
+TEST_CASE "TC_Interlock_AnyStationAlarm"
+    SET GlobalVars.stGlobal.i_bReset := FALSE;
+    SET GlobalVars.stGlobal.i_iConveyorAlarm := 0;
+    SET GlobalVars.stGlobal.i_iPickPlaceAlarm := 0;
+    SET GlobalVars.stGlobal.i_iFeederAlarm := 0;
     WAIT_CYCLES 2;
-    ASSERT GlobalVars.stGlobal.bSafetyLight = FALSE;
+    ASSERT GlobalVars.stGlobal.o_bAnyAlarmActive = FALSE;
+    SET GlobalVars.stGlobal.i_iPickPlaceAlarm := 2;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stGlobal.o_bAnyAlarmActive = TRUE;
+    ASSERT GlobalVars.stGlobal.o_bPickPlaceAlarmActive = TRUE;
+    ASSERT GlobalVars.stGlobal.o_bConveyorAlarmActive = FALSE;
+    ASSERT GlobalVars.stGlobal.o_bFeederAlarmActive = FALSE;
+END_TEST_CASE
+
+// 取放料 2 和打胶送料 7 同时报警: 当前报警码取最小的 2, 两个工站标志都置位
+TEST_CASE "TC_Interlock_LowestAlarmCodeWins"
+    SET GlobalVars.stGlobal.i_bReset := FALSE;
+    SET GlobalVars.stGlobal.i_iConveyorAlarm := 0;
+    SET GlobalVars.stGlobal.i_iPickPlaceAlarm := 2;
+    SET GlobalVars.stGlobal.i_iFeederAlarm := 7;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stGlobal.o_bAnyAlarmActive = TRUE;
+    ASSERT GlobalVars.stGlobal.o_iCurrentAlarmCode = 2;
+    ASSERT GlobalVars.stGlobal.o_bPickPlaceAlarmActive = TRUE;
+    ASSERT GlobalVars.stGlobal.o_bFeederAlarmActive = TRUE;
 END_TEST_CASE

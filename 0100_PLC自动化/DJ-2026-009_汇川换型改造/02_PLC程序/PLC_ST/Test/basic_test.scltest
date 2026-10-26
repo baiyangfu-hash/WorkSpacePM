@@ -1,20 +1,41 @@
 // ============================================================================
-// basic_test.scltest - 汇川换型改造 OB1主程序集成测试
+// basic_test.scltest - 汇川换型改造 OB1主程序集成测试 (公共报警汇总)
 // ============================================================================
 // 项目: DJ-2026-009 汇川换型改造
+// 被测: OB1 第3部分 FB_2001_CommonAlarm_AllStation (实例 GlobalVars.fbCommonAlarm, 数据 GlobalVars.stGlobal)
+// 说明: 8 月的模板用例引用了程序里没有的变量 (GlobalVars.stGlobal.bPowerOn / bEmergencyStop / bAutoRunning),
+//       语言服务插件只要有一份测试写错就整组拒跑, 所以改成只用 ST_CommonAlarm 里真实存在的字段.
+//       程序里没有急停和自动运行的全局变量, 原来 "急停" "自动运行" 两条无法保留, 改成下面两条有意义的最小用例:
+//       报警上来 (输送机报警码 -> 任意报警激活 + 当前报警码) 和 报警消失 (输入回 0 -> 输出回落).
+//       输入是报警码 (INT), 不是急停信号; 这里不涉及安全回路.
 // ============================================================================
 
-TEST_CASE "TC01_Global_EmergencyStop"
-    SET GlobalVars.stGlobal.bPowerOn := TRUE;
-    SET GlobalVars.stGlobal.bEmergencyStop := FALSE;
+// 输送机报警 5 上来: 任意报警激活, 当前报警码 = 5, 只有输送机的报警标志置位
+TEST_CASE "TC01_Alarm_ConveyorRaised"
+    SET GlobalVars.stGlobal.i_bReset := FALSE;
+    SET GlobalVars.stGlobal.i_iConveyorAlarm := 0;
+    SET GlobalVars.stGlobal.i_iPickPlaceAlarm := 0;
+    SET GlobalVars.stGlobal.i_iFeederAlarm := 0;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stGlobal.bEmergencyStop = FALSE;
+    ASSERT GlobalVars.stGlobal.o_bAnyAlarmActive = FALSE;
+    SET GlobalVars.stGlobal.i_iConveyorAlarm := 5;
+    WAIT_CYCLES 3;
+    ASSERT GlobalVars.stGlobal.o_bAnyAlarmActive = TRUE;
+    ASSERT GlobalVars.stGlobal.o_iCurrentAlarmCode = 5;
+    ASSERT GlobalVars.stGlobal.o_bConveyorAlarmActive = TRUE;
+    ASSERT GlobalVars.stGlobal.o_bPickPlaceAlarmActive = FALSE;
+    ASSERT GlobalVars.stGlobal.o_bFeederAlarmActive = FALSE;
 END_TEST_CASE
 
-TEST_CASE "TC02_AutoRunning_Start"
-    SET GlobalVars.stGlobal.bPowerOn := TRUE;
-    SET GlobalVars.stGlobal.bEmergencyStop := TRUE;
-    SET GlobalVars.stGlobal.bAutoRunning := TRUE;
+// 报警消失: 三个工站的报警码都回 0, 任意报警激活回落, 当前报警码回 0
+TEST_CASE "TC02_Alarm_ClearsWhenInputsReturnToZero"
+    SET GlobalVars.stGlobal.i_bReset := FALSE;
+    SET GlobalVars.stGlobal.i_iConveyorAlarm := 5;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stGlobal.bAutoRunning = TRUE;
+    ASSERT GlobalVars.stGlobal.o_bAnyAlarmActive = TRUE;
+    SET GlobalVars.stGlobal.i_iConveyorAlarm := 0;
+    WAIT_CYCLES 3;
+    ASSERT GlobalVars.stGlobal.o_bAnyAlarmActive = FALSE;
+    ASSERT GlobalVars.stGlobal.o_iCurrentAlarmCode = 0;
+    ASSERT GlobalVars.stGlobal.o_bConveyorAlarmActive = FALSE;
 END_TEST_CASE
