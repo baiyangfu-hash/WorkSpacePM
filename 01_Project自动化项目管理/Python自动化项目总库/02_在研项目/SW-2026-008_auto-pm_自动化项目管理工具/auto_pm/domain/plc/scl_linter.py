@@ -50,6 +50,11 @@ class SclLinter:
     CHINESE_PUNCT_PATTERN = re.compile(r"[，；：\uFF08\uFF09\u3001]")
     TIMER_MISSING_Q_PATTERN = re.compile(r"\bQ\s*=>\s*[,)]")
 
+    # 折叠区段：siemens-lsp 只认 REGION 名称 ... END_REGION；带 # 的写法不被支持（LSP-905 §6.3）
+    HASH_REGION_PATTERN = re.compile(r"^\s*#\s*(?:END_?REGION|REGION)\b", re.IGNORECASE)
+    REGION_OPEN_PATTERN = re.compile(r"^\s*REGION\b", re.IGNORECASE)
+    REGION_CLOSE_PATTERN = re.compile(r"^\s*END_REGION\b", re.IGNORECASE)
+
     # 结构完整性：每个源文件至少有一个程序块或类型声明，且每个声明都有配对的 END_*（插件命令行对空文件与乱码单文件也报 0 诊断，由这里补）
     STRUCT_KEYWORDS = ("ORGANIZATION_BLOCK", "FUNCTION_BLOCK", "FUNCTION", "DATA_BLOCK", "TYPE")
     STRUCT_OPEN_PATTERNS = {kw: re.compile(rf"^\s*{kw}\b", re.IGNORECASE) for kw in STRUCT_KEYWORDS}
@@ -88,6 +93,7 @@ class SclLinter:
         case_start_line = 0
         in_multiline_comment = False
         code_lines: list[str] = []
+        region_open_lines: list[int] = []
 
         for line_idx, line in enumerate(lines, start=1):
             stripped = line.strip()
@@ -183,6 +189,32 @@ class SclLinter:
                         code_snippet=stripped,
                     )
                 )
+
+            if cls.HASH_REGION_PATTERN.match(code_part):
+                report.violations.append(
+                    SclViolation(
+                        line_number=line_idx,
+                        rule_id="LSP-905-REGION-HASH",
+                        severity="ERROR",
+                        message="折叠区段 `#REGION ... #END_REGION` 不被 siemens-lsp 支持，请改写为 `REGION 名称 ... END_REGION`（LSP-905 §6.3）",
+                        code_snippet=stripped,
+                    )
+                )
+            elif cls.REGION_OPEN_PATTERN.match(code_part):
+                region_open_lines.append(line_idx)
+            elif cls.REGION_CLOSE_PATTERN.match(code_part):
+                if region_open_lines:
+                    region_open_lines.pop()
+                else:
+                    report.violations.append(
+                        SclViolation(
+                            line_number=line_idx,
+                            rule_id="LSP-905-REGION-UNBALANCED",
+                            severity="ERROR",
+                            message="END_REGION 前面没有对应的 REGION",
+                            code_snippet=stripped,
+                        )
+                    )
 
             if cls.TIMER_MISSING_Q_PATTERN.search(code_part):
                 report.violations.append(
@@ -340,6 +372,16 @@ class SclLinter:
                             )
                         )
                     in_case_block = False
+
+        for open_line in region_open_lines:
+            report.violations.append(
+                SclViolation(
+                    line_number=open_line,
+                    rule_id="LSP-905-REGION-UNBALANCED",
+                    severity="ERROR",
+                    message="REGION 没有对应的 END_REGION",
+                )
+            )
 
         # 结构完整性（LSP-905-STRUCT-*）
         opens = {kw: sum(1 for ln in code_lines if cls.STRUCT_OPEN_PATTERNS[kw].match(ln)) for kw in cls.STRUCT_KEYWORDS}

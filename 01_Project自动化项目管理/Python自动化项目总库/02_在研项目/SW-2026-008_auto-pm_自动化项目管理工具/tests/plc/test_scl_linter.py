@@ -166,3 +166,67 @@ def test_scl_linter_detects_missing_timer_q() -> None:
     report = SclLinter.lint_text(missing_q_scl, file_path="missing_q.scl")
     assert not report.is_clean
     assert any(v.rule_id == "LSP-906-TIMER-MISSING-Q" for v in report.violations)
+
+
+_REGION_FB = """
+FUNCTION_BLOCK FB_1002_Region
+VAR
+    s_iStep : INT;
+END_VAR
+BEGIN
+{body}
+END_FUNCTION_BLOCK
+"""
+
+
+def _region_rules(body: str) -> list[str]:
+    report = SclLinter.lint_text(_REGION_FB.format(body=body), file_path="region.scl")
+    return [v.rule_id for v in report.violations]
+
+
+def test_region_end_region_form_is_clean() -> None:
+    body = "    REGION 01_Input 输入映射\n        s_iStep := 1;\n    END_REGION"
+    assert _region_rules(body) == []
+
+
+def test_hash_region_is_rejected_as_unsupported_by_the_lsp() -> None:
+    body = "    #REGION 01_Input\n        s_iStep := 1;\n    #END_REGION"
+    rules = _region_rules(body)
+    assert rules.count("LSP-905-REGION-HASH") == 2
+    for variant in ("#region 01_Input", "# REGION 01_Input", "#ENDREGION", "#END_REGION"):
+        assert "LSP-905-REGION-HASH" in _region_rules(f"    {variant}")
+
+
+def test_hash_prefixed_variable_that_only_starts_with_region_is_not_a_region() -> None:
+    assert _region_rules("    #region_x := 1;") == []
+
+
+def test_unbalanced_region_is_rejected() -> None:
+    assert _region_rules("    REGION 01_A\n        s_iStep := 1;") == ["LSP-905-REGION-UNBALANCED"]
+    assert _region_rules("    s_iStep := 1;\n    END_REGION") == ["LSP-905-REGION-UNBALANCED"]
+
+
+def test_region_marker_in_comment_is_not_code() -> None:
+    assert _region_rules("    // #REGION old style\n    (* #END_REGION *)\n    s_iStep := 1;") == []
+
+
+def test_905_long_region_example_passes_the_linter() -> None:
+    """The spec's own example must stay clean; read it from the spec so the doc cannot rot."""
+
+    import re
+    from pathlib import Path
+
+    here = Path(__file__).resolve()
+    spec = next(
+        (parent / "00_Obsidian_Base全局规范文件仓库" / "03_PLC自动化域" / "905_SCL编程规范_LSP.md")
+        for parent in here.parents
+        if (parent / "00_Obsidian_Base全局规范文件仓库" / "03_PLC自动化域" / "905_SCL编程规范_LSP.md").is_file()
+    )
+    text = spec.read_text(encoding="utf-8")
+    section = text[text.index("### 6.3 折叠区段 REGION") :]
+    blocks = re.findall(r"```scl\n(.*?)```", section, re.S)
+    assert blocks
+    report = SclLinter.lint_text(blocks[0], file_path="905_example.scl")
+    assert report.violations == []
+    assert blocks[0].count("REGION ") >= 5 and "ARRAY[1..4]" in blocks[0]
+    assert "#REGION" not in blocks[0].upper()
