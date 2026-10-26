@@ -283,7 +283,7 @@ def test_open_pushes_the_branch_and_creates_the_pr_only(lab: Lab) -> None:
     args, body = create
     assert args[args.index("--head") + 1] == "claude/CARD-1"
     assert args[args.index("--base") + 1] == "main"
-    assert body is not None and body.startswith(f"任务卡: {CARD_PATH}\n")
+    assert body is not None and f"任务卡: {CARD_PATH}" in body.splitlines()
     assert gh.used() <= ALLOWED_GH, "只许查登录、查已有 PR、开 PR；不许有合并"
     assert not any("merge" in part for call in gh.calls for part in call[0])
 
@@ -464,9 +464,11 @@ def test_a_declaration_other_than_yes_or_no_is_refused(lab: Lab) -> None:
         plan(lab, safety_circuit="也许")
 
 
-def test_non_plc_changes_need_no_declaration_and_add_no_line(lab: Lab) -> None:
+def test_non_plc_changes_need_no_declaration_and_default_to_no_with_a_note(lab: Lab) -> None:
     work(lab)
-    assert "安全回路" not in plan(lab).body
+    result = plan(lab)
+    assert "安全回路: 否" in result.body.splitlines()
+    assert any("安全回路" in note for note in result.notes)
 
 
 # ── the real judge (same script GitHub runs) ────────────────────────
