@@ -521,6 +521,10 @@ def cmd_verify(
     console.print(f"[bold cyan]═══ 变更单对账门禁: {project_id} ═══[/bold cyan]")
     console.print(f"  [cyan]结果:[/cyan] {diff.summary()}")
 
+    from auto_pm.ui.cli.ledger import print_chg_tracking_warning
+
+    print_chg_tracking_warning(project_path)
+
     if diff.is_clean:
         console.print("[green]✅ 门禁通过: 台账与变更单文件一致[/green]")
         ctx.exit(0)

@@ -14,15 +14,39 @@ Commands:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 from rich.console import Console
 from rich.table import Table
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.chg_tracking_service import check_project_chg_tracking
 from auto_pm.change.ledger_reconciler import LedgerReconciler, ReconcileDiff
 from auto_pm.core.project_service import ProjectService
 
 console = Console()
+
+
+def print_chg_tracking_warning(project_path: Path) -> None:
+    """Warn (never fail) about change requests that exist on disk but are not in the HEAD commit (TD-SW008-113)."""
+
+    report = check_project_chg_tracking(project_path)
+    if report.skipped_reason:
+        console.print(f"[dim]提交跟踪检查未执行：{report.skipped_reason}[/dim]")
+        return
+    if report.clean:
+        return
+    console.print()
+    console.print(
+        f"[yellow]⚠ 提交跟踪警告（只提示，不影响退出码）：{len(report.untracked)} 个变更单不在 {report.ref} 提交里，"
+        f"{len(report.modified)} 个与提交内容不同[/yellow]"
+    )
+    for name in report.untracked:
+        console.print(f"  [yellow]未入库:[/yellow] {name}", markup=True, highlight=False)
+    for name in report.modified:
+        console.print(f"  [yellow]有改动:[/yellow] {name}", markup=True, highlight=False)
+    console.print("[dim]提示: 变更单只存在于本机磁盘时，换电脑或误删就找不回；请和代码一起提交。后续会观察一段时间再决定是否改为拦截。[/dim]")
 
 
 @click.group(name="ledger")
@@ -91,6 +115,8 @@ def cmd_reconcile(
         for cn, expected, actual in diff.status_mismatches:
             table.add_row(cn, expected, actual)
         console.print(table)
+
+    print_chg_tracking_warning(project_path)
 
     # 自动修复
     if auto_fix and not diff.is_clean:
