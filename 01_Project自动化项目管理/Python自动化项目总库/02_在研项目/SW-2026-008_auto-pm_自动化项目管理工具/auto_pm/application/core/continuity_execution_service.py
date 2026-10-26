@@ -48,6 +48,7 @@ from auto_pm.infrastructure.continuity_store import (
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
     authority_path_parts,
+    authority_paths_covered,
     governed_worktree_snapshot,
 )
 
@@ -135,7 +136,7 @@ class ContinuityExecutionService:
             )
         owned = self._normalize_paths(owned_paths)
         declared = self._normalize_paths(declared_dirty_paths, allow_empty=True)
-        if not self._paths_covered(declared, owned):
+        if not authority_paths_covered(declared, owned):
             raise ContinuityExecutionError("declared_dirty_paths 超出 owned_paths")
         try:
             return self._store.run_creation_intent_replay(
@@ -217,7 +218,7 @@ class ContinuityExecutionService:
         owned = self._normalize_paths(owned_paths)
         declared = self._normalize_paths(declared_dirty_paths, allow_empty=True)
         observed = self._normalize_paths(observed_dirty_paths, allow_empty=True)
-        if not self._paths_covered(observed, declared):
+        if not authority_paths_covered(observed, declared):
             raise ContinuityExecutionError("存在未声明的 dirty path")
         try:
             replay = self._store.run_creation_replay(
@@ -248,7 +249,7 @@ class ContinuityExecutionService:
                 raise ContinuityExecutionError("Run git_head 与受管 worktree 当前 HEAD 不一致")
             self._reject_control_root_drift(governed_worktree, owned, git_head)
             actual_observed = tuple(
-                path for path in actual_dirty if self._paths_covered((path,), owned)
+                path for path in actual_dirty if authority_paths_covered((path,), owned)
             )
             requested_dirty_keys = {authority_path_parts(path) for path in observed}
             actual_dirty_keys = {authority_path_parts(path) for path in actual_observed}
@@ -258,9 +259,9 @@ class ContinuityExecutionService:
             if work.state.value not in {"READY", "IN_PROGRESS"}:
                 raise ContinuityExecutionError("只有 READY/IN_PROGRESS Work 可以创建 Run")
             self._reject_existing_active_run(work_id, run_id)
-            if not self._paths_covered(owned, work.scope_paths):
+            if not authority_paths_covered(owned, work.scope_paths):
                 raise ContinuityExecutionError("owned_paths 超出 Work scope")
-            if not self._paths_covered(declared, owned):
+            if not authority_paths_covered(declared, owned):
                 raise ContinuityExecutionError("declared_dirty_paths 超出 owned_paths")
             values = {
                 "run_id": run_id,
@@ -348,7 +349,7 @@ class ContinuityExecutionService:
             if run.git_head != git_head:
                 raise ContinuityExecutionError("Git baseline drift")
             dirty = self._normalize_paths(dirty_paths, allow_empty=True)
-            if not self._paths_covered(dirty, run.owned_paths):
+            if not authority_paths_covered(dirty, run.owned_paths):
                 raise ContinuityExecutionError("Checkpoint 包含超出 owned_paths 的 dirty path")
             clean_evidence = tuple(item.strip() for item in evidence if item.strip())
             if not summary.strip() or not clean_evidence:
@@ -985,7 +986,7 @@ class ContinuityExecutionService:
             if target_decision.project_id != target_work.subject_project_id:
                 raise ContinuityExecutionError("目标 Decision 项目与目标 Work 不一致")
             target_approved = self._normalize_paths(target_decision.approved_files)
-            if not self._paths_covered(target_work.scope_paths, target_approved):
+            if not authority_paths_covered(target_work.scope_paths, target_approved):
                 raise ContinuityExecutionError("目标 Work scope 超出原 Decision approved_files")
 
             now = self._utc_now()
@@ -1009,13 +1010,13 @@ class ContinuityExecutionService:
             recovery_scope = self._normalize_paths(list(recovery_work.scope_paths))
             recovery_owned = self._normalize_paths(list(recovery.owned_paths))
             runtime_target = (runtime_target_path,)
-            if not self._paths_covered(runtime_target, approved):
+            if not authority_paths_covered(runtime_target, approved):
                 raise ContinuityExecutionError("Decision 未覆盖 canonical continuity.db")
-            if not self._paths_covered(recovery_scope, approved):
+            if not authority_paths_covered(recovery_scope, approved):
                 raise ContinuityExecutionError("恢复 Work scope 超出 Decision approved_files")
-            if not self._paths_covered(runtime_target, recovery_scope):
+            if not authority_paths_covered(runtime_target, recovery_scope):
                 raise ContinuityExecutionError("恢复 Work scope 未覆盖 canonical continuity.db")
-            if not self._paths_covered(runtime_target, recovery_owned):
+            if not authority_paths_covered(runtime_target, recovery_owned):
                 raise ContinuityExecutionError(
                     "恢复 Run owned_paths 未覆盖 canonical continuity.db"
                 )
@@ -1328,7 +1329,7 @@ class ContinuityExecutionService:
             if recovery_work.authorization_ref != decision_id:
                 raise ContinuityExecutionError("恢复 Work 未绑定指定 Decision")
             approved = self._normalize_paths(decision.approved_files)
-            if not self._paths_covered((runtime_target_path,), approved):
+            if not authority_paths_covered((runtime_target_path,), approved):
                 raise ContinuityExecutionError("Decision 未覆盖 canonical continuity.db")
             return self._store.fence_legacy_terminal_lease(
                 target_run_id=target_run_id,
@@ -1440,10 +1441,3 @@ class ContinuityExecutionService:
             raise ContinuityExecutionError("paths 不能为空")
         return tuple(result)
 
-    @staticmethod
-    def _paths_covered(paths: tuple[str, ...], roots: tuple[str, ...]) -> bool:
-        normalized_roots = tuple(authority_path_parts(root) for root in roots)
-        return all(
-            any(authority_path_parts(path)[: len(root)] == root for root in normalized_roots)
-            for path in paths
-        )

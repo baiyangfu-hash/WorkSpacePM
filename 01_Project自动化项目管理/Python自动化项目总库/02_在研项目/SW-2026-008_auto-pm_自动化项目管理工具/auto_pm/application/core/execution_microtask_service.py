@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
@@ -19,7 +18,11 @@ from auto_pm.contracts.execution_adapter import (
 )
 from auto_pm.contracts.mission import Mission
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
-from auto_pm.infrastructure.control_root_guard import clean_git_environment, is_link_like
+from auto_pm.infrastructure.control_root_guard import (
+    authority_paths_covered,
+    clean_git_environment,
+    is_link_like,
+)
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 
 
@@ -144,7 +147,7 @@ class ExecutionMicrotaskService:
         declared = tuple(sorted(receipt.declared_dirty_paths))
         if not declared or len(set(declared)) != len(declared):
             raise ExecutionMicrotaskError("declared_dirty_paths 必须是非空精确文件集合")
-        if not self._paths_covered(declared, receipt.owned_paths):
+        if not authority_paths_covered(declared, receipt.owned_paths):
             raise ExecutionMicrotaskError("declared_dirty_paths 超出 owned_paths")
         result: list[ExecutionMicrotaskFile] = []
         for raw in declared:
@@ -380,13 +383,6 @@ class ExecutionMicrotaskService:
             current = current / part
             if current.exists() and current.is_symlink():
                 raise ExecutionMicrotaskError("microtask repository path 含符号链接")
-
-    @staticmethod
-    def _paths_covered(paths: Iterable[str], roots: tuple[str, ...]) -> bool:
-        return all(
-            any(path == root or path.startswith(f"{root.rstrip('/')}/") for root in roots)
-            for path in paths
-        )
 
     @staticmethod
     def _marker(plan: ExecutionMicrotaskPlan) -> dict[str, object]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
 from auto_pm.infrastructure.git_timeout import run_git_bounded_text
@@ -49,6 +50,31 @@ def authority_path_parts(raw: str, *, windows: bool | None = None) -> tuple[str,
     parts = PurePosixPath(str(raw).replace("\\", "/")).parts
     fold = os.name == "nt" if windows is None else windows
     return tuple(part.casefold() for part in parts) if fold else parts
+
+
+def authority_path_covered(path: str, roots: Iterable[str], *, windows: bool | None = None) -> bool:
+    """Whether ``path`` is authorized by ``roots`` (the one scope rule every caller shares, TD-SW008-207).
+
+    A root covers itself and everything under it; a trailing ``/`` on the root is optional.  Paths are compared by
+    whole components after ``\\`` -> ``/``, dropping ``.`` parts and doubled slashes, with the host's casing rule
+    (case-insensitive on Windows), so ``a/b`` never authorizes ``a/bc/x``.  An empty root covers nothing.
+    """
+
+    path_parts = authority_path_parts(path, windows=windows)
+    for root in roots:
+        root_parts = authority_path_parts(root, windows=windows)
+        if root_parts and path_parts[: len(root_parts)] == root_parts:
+            return True
+    return False
+
+
+def authority_paths_covered(
+    paths: Iterable[str], roots: Iterable[str], *, windows: bool | None = None
+) -> bool:
+    """Whether every path is authorized by ``roots`` (see :func:`authority_path_covered`)."""
+
+    root_list = tuple(roots)
+    return all(authority_path_covered(path, root_list, windows=windows) for path in paths)
 
 
 def _git_output(root: Path, *args: str) -> str:
@@ -363,7 +389,9 @@ def require_safe_workspace_path(
 
 __all__ = [
     "ControlRootGuardError",
+    "authority_path_covered",
     "authority_path_parts",
+    "authority_paths_covered",
     "clean_git_environment",
     "governed_worktree_snapshot",
     "is_link_like",
