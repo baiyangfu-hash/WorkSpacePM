@@ -502,7 +502,7 @@ def test_p15_a_wedged_gate_fails_with_a_timeout_instead_of_hanging_the_verificat
     assert receipt.status == "FAIL"
 
 
-@pytest.mark.parametrize("raw", ["", "abc", "0", "-5"])
+@pytest.mark.parametrize("raw", ["", "abc", "0", "-5", "nan", "NaN", "inf", "-inf", "Infinity", "1e400", "-1e400"])
 def test_p16_an_unusable_timeout_setting_falls_back_to_the_default(
     monkeypatch: pytest.MonkeyPatch, raw: str
 ) -> None:
