@@ -1105,6 +1105,7 @@ def test_accept_rejects_when_the_latest_run_failed(tmp_path: Path) -> None:
         facade.accept("MISSION-C04-001")
 
 
+@pytest.mark.needs_quality_tools
 def test_acceptance_rechecks_generic_owned_paths_after_rehash(tmp_path: Path) -> None:
     _, facade, _ = _verified_acceptance_ready(tmp_path)
     run = facade._store.get_run("RUN-C04-001")

@@ -214,6 +214,7 @@ def test_evidence_content_hash_changes_for_baseline_staged_and_unstaged_content(
     assert staged_hash != unstaged_hash
 
 
+@pytest.mark.needs_quality_tools
 def test_real_python_quality_gates_run_in_run_candidate_project_root(tmp_path: Path) -> None:
     workspace, candidate, baseline = _workspace_with_candidate(tmp_path, unrelated_failure=True)
     service = EvidenceCollectionService(workspace)
@@ -246,6 +247,7 @@ def test_nonzero_real_quality_gate_cannot_report_pass(tmp_path: Path) -> None:
     assert receipt.status == "FAIL"
 
 
+@pytest.mark.needs_quality_tools
 def test_quality_receipt_becomes_invalid_when_evidence_changes(tmp_path: Path) -> None:
     workspace, candidate, baseline = _workspace_with_candidate(tmp_path)
     service = EvidenceCollectionService(workspace)
@@ -324,6 +326,7 @@ def _two_project_quality_run(tmp_path: Path) -> tuple[Path, Path, RunItem]:
     return workspace, candidate, _run(candidate, baseline, owned)
 
 
+@pytest.mark.needs_quality_tools
 def test_generic_receipt_covers_two_real_projects_and_test_only_mypy(tmp_path: Path) -> None:
     workspace, candidate, run = _two_project_quality_run(tmp_path)
     service = EvidenceCollectionService(workspace)

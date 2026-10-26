@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import importlib.util
 import json
 import os
 import random
@@ -56,6 +57,15 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """
     rng = random.Random(20260627)
     rng.shuffle(items)
+    missing = [m for m in ("ruff", "mypy") if importlib.util.find_spec(m) is None]
+    if missing:
+        skip = pytest.mark.skip(
+            reason=f"真实质量门用 sys.executable -m ruff/mypy，当前解释器缺 {'/'.join(missing)}"
+            "（uv sync 或 pip install -e .[dev]）"
+        )
+        for item in items:
+            if "needs_quality_tools" in item.keywords:
+                item.add_marker(skip)
 
 
 @pytest.fixture(scope="session")
