@@ -25,6 +25,7 @@ from auto_pm.domain.plc.baseline_compare import (
 )
 from auto_pm.domain.plc.language_service import LanguageService
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from auto_pm.infrastructure.git_timeout import run_git_bounded
 
 SPEC_REGISTRY = "00_Obsidian_Base全局规范文件仓库/spec_registry.json"
 
@@ -34,8 +35,11 @@ class PlcBaselineError(RuntimeError):
 
 
 def _git(repo: Path, *arguments: str) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
+    return run_git_bounded(
         ["git", "-c", "core.quotePath=false", "-C", str(repo), *arguments],
+        default_timeout=60.0,
+        error_cls=PlcBaselineError,
+        where=repo,
         capture_output=True,
         check=False,
         env=clean_git_environment(),

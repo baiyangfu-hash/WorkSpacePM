@@ -9,11 +9,11 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 from auto_pm.plc import doc_consistency as dc
 
 SOURCE_SUFFIXES = (".scl", ".db")
@@ -23,9 +23,12 @@ ARCHIVE_PARTS = frozenset({"archive", "_archive"})
 
 
 def _git(root: Path, args: list[str], stdin: str | None = None) -> str:
-    result = subprocess.run(
+    result = run_git_bounded_text(
         ["git", "-c", "core.quotepath=false", *args],
-        cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", check=True, input=stdin,
+        default_timeout=60.0,
+        error_cls=RuntimeError,
+        where=root,
+        cwd=str(root), capture_output=True, check=True, input=stdin,
     )
     return result.stdout
 

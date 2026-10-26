@@ -41,6 +41,7 @@ from auto_pm.application.core.pr_body_builder import (
     read_card_fields,
 )
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 UNKNOWN_CALLER = "?"  # what caller_agent() returns when the markers name nobody on the roster
 # Whitelist: the only accepted form is CHG-<PROJECT>-YYYY-NNN in ASCII.  Any other mention of "CHG"
@@ -61,6 +62,10 @@ JUDGE_RELATIVE = Path("reviews") / "tools" / "pr_scope_check.py"
 GhRunner = Callable[[Sequence[str], "str | None"], "subprocess.CompletedProcess[str]"]
 Judge = Callable[[Path, str, str, str], "tuple[int, str]"]
 Sleeper = Callable[[float], None]
+
+
+_GH_TIMEOUT_SECONDS = 120.0
+_GUARD_SCRIPT_TIMEOUT_SECONDS = 300.0
 
 
 class PrOpenRefusedError(StationRefusedError):
@@ -98,16 +103,23 @@ def default_gh(args: Sequence[str], stdin: str | None) -> subprocess.CompletedPr
         raise PrOpenRefusedError(
             "本机没有装 GitHub 命令行 `gh`；先装好并 `gh auth login`，或把分支交给用户在网页上开 PR"
         )
-    return subprocess.run(
-        [gh, *args],
-        input=stdin,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-        stdin=None if stdin is not None else subprocess.DEVNULL,
-    )
+    try:
+        return subprocess.run(
+            [gh, *args],
+            input=stdin,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            stdin=None if stdin is not None else subprocess.DEVNULL,
+            timeout=_GH_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise PrOpenRefusedError(
+            f"`gh {args[0] if args else ''}` 超过 {_GH_TIMEOUT_SECONDS:g} 秒没有结束，已终止；"
+            "网络或登录状态有问题时请先修好再整体重做"
+        ) from error
 
 
 def gh_status() -> tuple[bool, bool]:
@@ -389,26 +401,30 @@ class PrOpenService:
         if not script.is_file():
             return 2, f"找不到越界检查脚本 {script}（控制根不是 main 的最新内容？）；不放行"
         env = {**os.environ, "PR_BODY": body, "PYTHONIOENCODING": "utf-8"}
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-B",
-                str(script),
-                "--base",
-                base_sha,
-                "--head",
-                head_sha,
-                "--repo",
-                str(station),
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            env=env,
-            stdin=subprocess.DEVNULL,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(script),
+                    "--base",
+                    base_sha,
+                    "--head",
+                    head_sha,
+                    "--repo",
+                    str(station),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                timeout=_GUARD_SCRIPT_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return 2, f"越界检查脚本超过 {_GUARD_SCRIPT_TIMEOUT_SECONDS:g} 秒没有结束，已终止；不放行"
         return result.returncode, (result.stdout + result.stderr)
 
     def _push(self, station: Path, branch: str, head_sha: str) -> None:
@@ -434,12 +450,12 @@ class PrOpenService:
 
     @staticmethod
     def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        return run_git_bounded_text(
             ["git", "-C", str(cwd), *args],
+            default_timeout=300.0,
+            error_cls=PrOpenRefusedError,
+            where=cwd,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=False,
             env=clean_git_environment(),
             stdin=subprocess.DEVNULL,

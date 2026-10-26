@@ -16,6 +16,7 @@ from auto_pm.infrastructure.control_root_guard import (
     require_governed_worktree,
     require_safe_workspace_path,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 
 class WorktreePolicyError(RuntimeError):
@@ -256,12 +257,12 @@ class WorktreePolicyService:
         return result.stdout.strip()
 
     def _run_git(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        return run_git_bounded_text(
             ["git", "-C", str(cwd or self._root), *args],
+            default_timeout=300.0,
+            error_cls=WorktreePolicyError,
+            where=cwd or self._root,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=False,
             env=clean_git_environment(),
         )
