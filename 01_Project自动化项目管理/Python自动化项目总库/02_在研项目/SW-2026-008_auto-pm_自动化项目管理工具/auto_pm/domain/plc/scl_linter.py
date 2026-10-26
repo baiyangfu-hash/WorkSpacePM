@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from auto_pm.domain.plc.array_lower_bound_legacy import LEGACY_ARRAY_LOWER_BOUND
+
 
 @dataclass
 class SclViolation:
@@ -327,14 +329,16 @@ class SclLinter:
                 for dimension in bounds.split(","):
                     lower = cls.ARRAY_LOWER_BOUND_PATTERN.match(dimension)
                     if lower is not None and int(lower.group(1)) != 1:
+                        legacy = cls._is_legacy_array_lower_bound(file_path, code_part)
                         report.violations.append(
                             SclViolation(
                                 line_number=line_idx,
                                 rule_id="LSP-905-ARRAY-LOWER-BOUND",
-                                severity="ERROR",
+                                severity="WARNING" if legacy else "ERROR",
                                 message=(
                                     f"数组下标下界是 {int(lower.group(1))}，本仓库要求从 1 起（Siemens 语言服务插件的规则；"
                                     "移植到实际 PLC 时按平台适配）"
+                                    + ("。这是存量声明（改写已挂起），暂只提示不拦" if legacy else "")
                                 ),
                                 code_snippet=stripped,
                             )
@@ -394,6 +398,16 @@ class SclLinter:
         report.warnings_count = sum(1 for v in report.violations if v.severity == "WARNING")
 
         return report
+
+    @classmethod
+    def _is_legacy_array_lower_bound(cls, file_path: str, code_part: str) -> bool:
+        """这一行是不是 ``array_lower_bound_legacy`` 清单里的存量声明（路径按尾部匹配，文字去注释压缩空白后逐字比）。"""
+        posix = file_path.replace("\\", "/")
+        declaration = re.sub(r"\s+", " ", code_part.split("//")[0]).strip()
+        return any(
+            declaration == text and (posix == path or posix.endswith("/" + path))
+            for path, text in LEGACY_ARRAY_LOWER_BOUND
+        )
 
     @classmethod
     def _has_array_type_prefix(cls, current_block: str, var_name: str) -> bool:
