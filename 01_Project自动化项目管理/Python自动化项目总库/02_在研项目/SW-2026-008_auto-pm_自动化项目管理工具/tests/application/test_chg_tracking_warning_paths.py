@@ -156,3 +156,27 @@ def test_verify_without_ledger_check_exits_1_and_does_not_look_at_git(tmp_path: 
 
     assert result.exit_code == 1
     assert "提交跟踪" not in result.output
+
+
+def test_reconcile_clean_without_fix_exits_0_and_shows_the_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture = _Fixture(tmp_path, [ReconcileDiff()])
+
+    result = fixture.run_reconcile(monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    assert fixture.fix_calls == 0
+    assert result.output.index("对账无差异") < result.output.index("提交跟踪警告")
+    assert _UNTRACKED_LINE in result.output
+
+
+def test_reconcile_lists_everything_with_verbose_and_ten_without(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture = _Fixture(tmp_path, [ReconcileDiff()])
+    for number in range(3, 15):
+        _write(fixture.project, f"CHG-SCPT-2026-{number:03d}.md")
+
+    short = fixture.run_reconcile(monkeypatch)
+    full = fixture.run_reconcile(monkeypatch, "--verbose")
+
+    assert short.exit_code == 0 and full.exit_code == 0
+    assert short.output.count("未入库: ") == 10 and "另有 3 个未入库" in short.output
+    assert full.output.count("未入库: ") == 13 and "另有" not in full.output
