@@ -14,7 +14,6 @@ from auto_pm.application.core import plc_baseline, project_delete_guard, worktre
 from auto_pm.infrastructure import (
     control_root_guard,
     git_hook_enforcer,
-    git_timeout,
     ignored_file_scan,
 )
 
@@ -67,7 +66,7 @@ _CASES: list[tuple[str, Callable[[Path], object], type[Exception]]] = [
 def test_hung_git_fails_closed_with_callers_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, call: Callable[[Path], object], error: type[Exception]
 ) -> None:
-    monkeypatch.setattr(git_timeout.subprocess, "run", _hang)
+    monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", _hang)
     with pytest.raises(error, match="超时回执"):
         call(tmp_path)
 
@@ -75,6 +74,6 @@ def test_hung_git_fails_closed_with_callers_error(
 def test_project_delete_guard_treats_hung_git_as_blocking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(git_timeout.subprocess, "run", _hang)
+    monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", _hang)
     blockers = project_delete_guard.uncommitted_blockers(tmp_path, tmp_path / "p")
     assert blockers and "超时回执" in blockers[0]

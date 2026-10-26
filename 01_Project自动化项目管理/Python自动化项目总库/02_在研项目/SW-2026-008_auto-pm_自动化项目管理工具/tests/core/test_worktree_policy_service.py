@@ -360,7 +360,7 @@ def test_control_root_git_fact_rejects_success_with_permission_diagnostic(
             stderr="warning: Permission denied",
         )
 
-    monkeypatch.setattr(control_root_guard.subprocess, "run", diagnostic_result)
+    monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", diagnostic_result)
     with pytest.raises(ControlRootGuardError, match="Permission denied"):
         control_root_guard._git_optional_output(tmp_path, "diff", "--name-only")
     assert not (tmp_path / ".auto-pm").exists()
