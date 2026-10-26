@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from auto_pm.application.workbench_facade import WorkbenchFacade
@@ -546,19 +547,34 @@ def test_edit_project_exception() -> None:
     assert "IO Error" in result.message
 
 
-def test_delete_project_success() -> None:
-    """验证删除项目成功"""
-    import shutil as _shutil
+def _delete_world(tmp_path: Path) -> tuple[Path, MagicMock]:
+    """一个已提交的工作区和指向其中 ``proj`` 目录的项目服务桩。"""
+    import subprocess
+
+    root = tmp_path / "ws"
+    (root / "proj").mkdir(parents=True)
+    (root / "proj" / "a.txt").write_text("keep\n", encoding="utf-8")
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(
+            ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t", *args],
+            cwd=str(root), check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+    project = MagicMock()
+    project.path = str(root / "proj")
+    project.name = "Test Project"
+    service = MagicMock()
+    service.workspace_root = str(root)
+    service.get_project.return_value = project
+    return root, service
+
+
+def test_delete_project_success(tmp_path: Path) -> None:
+    """验证删除项目成功：目录整体搬进回收区（TD-193），不是直接删掉"""
     from unittest.mock import patch
 
-    mock_project = MagicMock()
-    mock_project.path = "/tmp/test_project"
-    mock_project.name = "Test Project"
+    root, mock_project_service = _delete_world(tmp_path)
 
-    mock_project_service = MagicMock()
-    mock_project_service.get_project.return_value = mock_project
-
-    with patch.object(_shutil, "rmtree"), patch("auto_pm.logging.audit.audit_log"):
+    with patch("auto_pm.logging.audit.audit_log"):
         facade = WorkbenchFacade(
             dashboard_service=MagicMock(),
             project_service=mock_project_service,
@@ -569,7 +585,24 @@ def test_delete_project_success() -> None:
     assert result.success is True
     assert "已删除" in result.message
     assert result.payload["project_id"] == "SW-2026-001"  # type: ignore[index]
+    assert not (root / "proj").exists()
+    (moved,) = list((root / ".auto-pm" / "recycle" / "SW-2026-001").iterdir())
+    assert (moved / "a.txt").read_text(encoding="utf-8") == "keep\n"
     mock_project_service.sync_to_cache.assert_called_once_with(force_full=True)
+
+
+def test_delete_project_refused_with_uncommitted_changes(tmp_path: Path) -> None:
+    """验证有未提交改动时拒绝删除，目录原样保留（TD-193）"""
+    root, mock_project_service = _delete_world(tmp_path)
+    (root / "proj" / "a.txt").write_text("edited\n", encoding="utf-8")
+
+    facade = WorkbenchFacade(dashboard_service=MagicMock(), project_service=mock_project_service)
+    result = facade.delete_project("SW-2026-001")
+
+    assert result.success is False
+    assert "没提交的改动" in result.message
+    assert (root / "proj" / "a.txt").read_text(encoding="utf-8") == "edited\n"
+    mock_project_service.sync_to_cache.assert_not_called()
 
 
 def test_delete_project_not_found() -> None:

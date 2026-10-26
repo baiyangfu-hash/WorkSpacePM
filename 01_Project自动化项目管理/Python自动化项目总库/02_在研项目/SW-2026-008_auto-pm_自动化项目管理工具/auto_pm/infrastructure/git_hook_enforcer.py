@@ -13,23 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from auto_pm.change.parser import ChgParser
+from auto_pm.domain.secret_patterns import SecretFinding, scan_unified_diff
 
 log = logging.getLogger(__name__)
 
 PRODUCTION_EXTENSIONS = (".py", ".scl", ".st", ".qml")
-EXCLUDED_PATH_KEYWORDS = (
-    "tests/",
-    "test_",
-    "tests\\",
-    "docs/",
-    "docs\\",
-    "scratch/",
-    "scratch\\",
-    ".auto-pm/",
-    ".auto-pm\\",
-    "00_Obsidian_Base",
-    "PM_SESSION_",
-)
+# 豁免只按路径段判定（TD-194）：子串匹配会把 latest_state.py、contest_logic.scl、mydocs/x.py 误当成测试或文档
+EXCLUDED_DIR_NAMES = frozenset({"tests", "docs", "scratch", ".auto-pm"})
+# 规范库目录名带中文后缀（00_Obsidian_Base全局规范文件仓库），所以按前缀
+EXCLUDED_DIR_PREFIXES = ("00_Obsidian_Base",)
+EXCLUDED_FILE_PREFIXES = ("test_", "PM_SESSION_")
 _CHG_ID_PATTERN = re.compile(r"CHG-[A-Z0-9]+-\d{4}-\d+")
 _PROJECT_ID_ROW_PATTERN = re.compile(
     r"^\|\s*(?:\*\*)?项目编号(?:\*\*)?\s*\|\s*([^|]+?)\s*\|",
@@ -392,17 +385,24 @@ def _get_staged_files_or_reject(workspace_root: Path, hook_name: str) -> list[st
         return None
 
 
+def is_excluded_from_production(path: str) -> bool:
+    """测试、文档、草稿、规范库、会话文件：按目录段和文件名前缀判定，不做子串匹配。"""
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    if not parts:
+        return False
+    *directories, name = parts
+    if any(d in EXCLUDED_DIR_NAMES or d.startswith(EXCLUDED_DIR_PREFIXES) for d in directories):
+        return True
+    return name.startswith(EXCLUDED_FILE_PREFIXES)
+
+
 def filter_production_files(files: list[str]) -> list[str]:
     """从暂存区筛选出生产代码文件"""
-    prod_files: list[str] = []
-    for f in files:
-        f_norm = f.replace("\\", "/")
-        # 排除纯文档、测试、草稿及会话文件
-        if any(keyword in f_norm for keyword in EXCLUDED_PATH_KEYWORDS):
-            continue
-        if any(f_norm.endswith(ext) for ext in PRODUCTION_EXTENSIONS):
-            prod_files.append(f)
-    return prod_files
+    return [
+        f
+        for f in files
+        if f.replace("\\", "/").endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f)
+    ]
 
 
 def _project_bindings(workspace_root: Path, projects: list[object]) -> tuple[ProjectBinding, ...]:
@@ -761,14 +761,48 @@ def _validate_control_root_change_evidence(
     return change_path
 
 
+def find_staged_secrets(workspace_root: Path) -> list[SecretFinding]:
+    """扫描暂存区新增行里的密钥；读取失败时抛 ``StagedSnapshotError``（调用方据此拒绝提交）。"""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--cached", "-U0", "--no-renames", "--full-index", "--no-color", "--diff-filter=ACM"],
+            cwd=str(workspace_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        )
+    except Exception as exc:
+        log.error("读取暂存区差异失败: %s", exc)
+        raise StagedSnapshotError(f"读取暂存区差异失败: {exc}") from exc
+    return scan_unified_diff(result.stdout)
+
+
+def _enforce_secret_scan(workspace_root: Path) -> int:
+    """pre-commit 密钥门禁：暂存区新增行里出现令牌、密钥或私钥即拒绝，只报类别和路径。"""
+    try:
+        findings = find_staged_secrets(workspace_root)
+    except StagedSnapshotError as exc:
+        print(f"❌ [auto-pm pre-commit] 物理拦截：无法扫描暂存区密钥，为防止泄露已拒绝提交: {exc}")
+        return 1
+    if not findings:
+        return 0
+    print("❌ [auto-pm pre-commit] 物理拦截：暂存区新增内容里发现疑似密钥，已拒绝提交（不回显原文）：")
+    for finding in findings:
+        print(f"   - {finding.path or '（未知路径）'}：{finding.label}")
+    print("   处理：把密钥从文件里移走（改用环境变量或本机钱包）；已吊销的历史 blob 才可列入 ALLOWED_SECRET_BLOBS。")
+    return 1
+
+
 def enforce_pre_commit(
     workspace_root: Path,
     staged_snapshot: StagedSnapshot | None = None,
     control_root: Path | None = None,
 ) -> int:
-    """pre-commit 门禁：先后执行台账一致性检查（原有）与 PLC 文档/代码一致性检查（V01D）。
+    """pre-commit 门禁：台账一致性（原有）、PLC 文档/代码一致性（V01D）、暂存区密钥扫描（TD-202）。
 
-    两项各自完整报告，任何一项不通过即拒绝提交。
+    三项各自完整报告，任何一项不通过即拒绝提交。
     """
     from auto_pm.infrastructure.plc_doc_hook import enforce_plc_docs
 
@@ -781,7 +815,8 @@ def enforce_pre_commit(
         return 1
     ledger_code = _enforce_ledger_pre_commit(workspace_root, snapshot, control_root)
     plc_code = enforce_plc_docs(workspace_root, snapshot.paths)
-    return 1 if ledger_code != 0 or plc_code != 0 else 0
+    secret_code = _enforce_secret_scan(workspace_root)
+    return 1 if ledger_code != 0 or plc_code != 0 or secret_code != 0 else 0
 
 
 def _enforce_ledger_pre_commit(

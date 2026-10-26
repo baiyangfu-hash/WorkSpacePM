@@ -13,7 +13,8 @@
   ``reviews/tools/audit_pr.py`` 的 ``PROTECTED_PATTERNS`` 加上裁判自己的文件（``JUDGE_PATTERNS``：本脚本、它导入的
   驾驶舱代码、安装依赖用的文件），所以 PR 改裁判、改配置、改依赖都要被点名；
 * PR 改它自己的任务卡是允许的（范围仍按基线上的卡判定），但卡本身是锁定文件时不豁免；
-* PR 改到的 PLC 文件，用提交前钩子同一套 ``enforce_plc_docs`` 核对文档与代码一致性。
+* PR 改到的 PLC 文件，用提交前钩子同一套 ``enforce_plc_docs`` 核对文档与代码一致性；
+* PR 新增行里不得出现令牌、密钥、私钥（与提交前钩子共用 ``auto_pm.domain.secret_patterns``，TD-202）。
 
 不做的事：不读也不验 CHG 单与台账（CHG 文件只在本机控制根上，CI 里查必然失败）；不写仓库，不访问网络。
 PR 描述从环境变量 ``PR_BODY`` 读入，不进入任何命令行。
@@ -49,6 +50,7 @@ for _entry in (Path(__file__).resolve().parent, SW008_ROOT / "auto_pm", SW008_RO
         sys.path.insert(0, str(_entry))
 
 from audit_pr import PROTECTED_PATTERNS, path_matches
+from auto_pm.domain.secret_patterns import scan_unified_diff
 from auto_pm.application.core.implementation_card_precheck import (
     CardPath,
     PrecheckReport,
@@ -98,6 +100,13 @@ def changed_files(repo: Path, base: str, head: str) -> list[str]:
 
     raw = git(repo, "diff", "--name-only", "--no-renames", "-z", f"{base}...{head}")
     return sorted({item for item in raw.split("\0") if item})
+
+
+def secret_findings(repo: Path, base: str, head: str) -> list[str]:
+    """PR 新增行里的令牌、密钥、私钥（只报类别和路径，不回显原文）；已吊销的历史 blob 按放行清单跳过。"""
+
+    diff = git(repo, "diff", "-U0", "--no-renames", "--full-index", "--no-color", f"{base}...{head}")
+    return [f"`{f.path or '（未知路径）'}`：{f.label}" for f in scan_unified_diff(diff)]
 
 
 def normalized(path: str) -> str | None:
@@ -237,6 +246,9 @@ def check(repo: Path, base: str, head: str, body: str) -> Result:
     for path in in_scope:
         if is_protected(path) and path not in exact:
             result.errors.append(f"锁定文件 `{path}` 必须在范围里逐字写出完整路径（目录前缀不算授权）")
+
+    for finding in secret_findings(repo, base, head):
+        result.errors.append(f"新增内容里发现疑似密钥：{finding}（把密钥移走；不回显原文）")
 
     plc_code = plc_docs(repo, files)
     if plc_code != 0:

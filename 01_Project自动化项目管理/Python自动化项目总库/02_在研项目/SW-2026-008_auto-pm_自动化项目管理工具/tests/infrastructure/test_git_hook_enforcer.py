@@ -20,8 +20,10 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     _require_snapshot_matches_index,
     enforce_commit_msg,
     enforce_pre_commit,
+    filter_production_files,
     get_staged_snapshot,
     independent_staged_changes,
+    is_excluded_from_production,
 )
 
 SW008_ROOT = (
@@ -807,3 +809,47 @@ def test_td100_a_really_staged_empty_file_is_still_checked(tmp_path: Path) -> No
     _git(cand, "add", str(empty.relative_to(cand)))
     assert [e.path for e in get_staged_snapshot(cand).entries] == ["01_Project/SW-2026-008/src/empty.py"]
     assert set(independent_staged_changes(cand)) == {"01_Project/SW-2026-008/src/empty.py"}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "auto_pm/core/latest_state.py",
+        "FB/contest_logic.scl",
+        "tools/attest_signer.py",
+        "x/mydocs/y.py",
+        "SW-2026-009_英语学习助手/src/level_test_page.py",
+        "src/scratchpad/run.py",
+        "src/tests_helper/run.py",
+        "src/my.auto-pm/run.py",
+        "src/PM_SESSION/run.py",
+        "src/docs_tool.py",
+    ],
+)
+def test_td194_production_files_with_lookalike_names_are_not_exempt(path: str) -> None:
+    """子串相似但不是测试、文档目录或测试文件名的生产代码，必须仍要求变更单。"""
+    assert not is_excluded_from_production(path)
+    assert filter_production_files([path]) == [path]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/test_a.py",
+        "proj/tests/unit/helper.py",
+        "proj\\tests\\helper.py",
+        "proj/docs/gen.py",
+        "proj/scratch/try.py",
+        "proj/src/test_parser.py",
+        ".auto-pm/worktrees/x/a.py",
+        "00_Obsidian_Base全局规范文件仓库/tools/x.py",
+        "PM_SESSION_20261001.py",
+    ],
+)
+def test_td194_real_test_doc_scratch_paths_stay_exempt(path: str) -> None:
+    assert is_excluded_from_production(path)
+    assert filter_production_files([path]) == []
+
+
+def test_td194_only_production_extensions_count() -> None:
+    assert filter_production_files(["src/a.md", "src/b.py", "src/c.SCL", "src/d.qml"]) == ["src/b.py", "src/d.qml"]
