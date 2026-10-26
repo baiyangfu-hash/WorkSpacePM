@@ -78,16 +78,28 @@ def test_control_root_mapping_rejects_unknown_project_id(
 
 
 def _git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        # CalledProcessError 的文字里没有 stderr，CI 上偶发的 git 失败（如 worktree add 返回 128）就查不出原因。
+        raise RuntimeError(
+            f"git {' '.join(args)} 失败（退出码 {exc.returncode}，目录 {cwd}）:\n{exc.stderr}"
+        ) from exc
     return result.stdout.strip()
+
+
+def test_fixture_git_failure_carries_the_git_error_text(tmp_path: Path) -> None:
+    _git(tmp_path, "init")
+    with pytest.raises(RuntimeError, match=r"worktree add .*退出码 128[\s\S]*fatal"):
+        _git(tmp_path, "worktree", "add", str(tmp_path / "wt"), "no-such-ref")
 
 
 def _fixture_chg_content(
