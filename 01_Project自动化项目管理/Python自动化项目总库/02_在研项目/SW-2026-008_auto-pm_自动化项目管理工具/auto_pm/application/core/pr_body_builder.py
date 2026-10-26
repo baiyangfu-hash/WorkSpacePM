@@ -99,6 +99,7 @@ def build_body(
     sweep: str | None,
     tds: Sequence[str],
     head_sha: str,
+    chg_tds: Sequence[str] = (),
 ) -> str:
     out: list[str] = []
     signature = signature_lines([message for _sha, message in commits])
@@ -114,7 +115,9 @@ def build_body(
     out += [f"- 提交 {sha[:8]} {message.splitlines()[0] if message else ''}" for sha, message in commits]
     out += [f"- {item}" for item in evidence] or [f"- {UNPROVIDED}"]
     out += ["", "## 同类排查", "", sweep or UNPROVIDED, ""]
-    out += ["## 关联 TD", "", "、".join(tds) if tds else NONE_WORD, ""]
+    # TDs only the change orders mention are listed but get no "已偿还" line: a CHG may name a TD it merely touches.
+    related = tuple(dict.fromkeys([*tds, *chg_tds]))
+    out += ["## 关联 TD", "", "、".join(related) if related else NONE_WORD, ""]
     out += ["## WBS", "", f"WBS: {fields.wbs}" if fields.wbs else NONE_WORD, ""]
     suggestion = (
         "；".join(f"{td} 已偿还，证据 提交号 {head_sha[:8]}（待审计与合并）" for td in tds)
