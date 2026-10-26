@@ -178,6 +178,17 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
         raise GateError("round_timeout_s must be 10..39600 (the scheduled task stops at 12 h)")
     for k in ("done", "failed"):
         cfg.setdefault("markers", {}).setdefault(k, {})
+    # markers.remove: files some earlier script left to say "a heavy round is running"; the round that ends removes them
+    # (TD-SW008-205).  Only plain files inside the workspace root or the output folder, so a config cannot delete elsewhere.
+    remove = cfg["markers"].setdefault("remove", [])
+    if not isinstance(remove, list) or not all(isinstance(r, str) and r for r in remove):
+        raise GateError("markers.remove must be a list of file paths")
+    cfg["markers"]["remove"] = [fill(r) for r in remove]
+    allowed = [Path(p) for p in (cfg["root"], cfg["out_dir"]) if p]
+    for r in cfg["markers"]["remove"]:
+        target = Path(r)
+        if not target.is_absolute() or ".." in target.parts or not any(target.is_relative_to(base) for base in allowed):
+            raise GateError(f"markers.remove: {r} must be an absolute path inside config.root or config.out_dir")
     cfg.setdefault("poll_s", 15)
     if not 1 <= int(cfg["poll_s"]) <= 300:
         raise GateError("poll_s must be 1..300")
@@ -603,6 +614,15 @@ class Runner:
                     target = Path(rel) if Path(rel).is_absolute() else self.out / rel
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(text.replace("{exit}", str(EXIT_CODES[result])), encoding="utf-8", newline="\n")
+        if result in FINAL:
+            for rel in self.cfg["markers"]["remove"]:
+                target = Path(rel)
+                try:
+                    if target.is_file():
+                        target.unlink()
+                        self.log(f"removed leftover marker {target}")
+                except OSError as error:
+                    self.log(f"marker {target} not removed ({type(error).__name__})")
         self.log(f"result {result}" + (f": {reason}" if reason else ""))
         self.stop_all.set()
         self.write_status()

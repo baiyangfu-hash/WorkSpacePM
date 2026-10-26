@@ -111,17 +111,20 @@ def lab(tmp_path: Path) -> dict[str, Path]:
     return {"root": tmp_path, "tools": tools, "wt": wt, "out": tmp_path / "out"}
 
 
-def _config(lab: dict[str, Path], steps: list[dict[str, Any]], *, interval: int = 1, name: str = "drill") -> Path:
+def _config(
+    lab: dict[str, Path], steps: list[dict[str, Any]], *, interval: int = 1, name: str = "drill", remove: list[str] | None = None
+) -> Path:
     cfg = {
         "name": name,
         "python": PY,
         "out_dir": str(lab["out"]),
+        **({"root": str(lab["root"])} if remove else {}),
         "poll_s": 1,
         "lease": {"mode": "command", "argv": [PY, str(lab["tools"] / "renew.py"), str(lab["tools"])],
                   "renew_interval_s": interval},
         "fingerprint": {"git_worktree": str(lab["wt"])},
         "markers": {"done": {"DONE": "done\n", "gates_all.exit": "{exit}\n"},
-                    "failed": {"FAILED": "failed\n", "gates_all.exit": "{exit}\n"}},
+                    "failed": {"FAILED": "failed\n", "gates_all.exit": "{exit}\n"}, **({"remove": remove} if remove else {})},
         "steps": steps,
     }
     path = lab["root"] / "gate.json"
@@ -550,3 +553,38 @@ def test_partial_output_held_open_is_copied_aside(tmp_path: Path, monkeypatch: p
     mod._keep_partial(src, dst, mod.Log(tmp_path / "log"))
     assert dst.read_text(encoding="utf-8") == "half a group\n"
     assert "copied to core.interrupted.1.txt" in (tmp_path / "log").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("code", [0, 1])
+def test_a_heavy_round_marker_is_removed_when_the_round_ends_whatever_the_verdict(lab: dict[str, Path], code: int) -> None:
+    """TD-SW008-205：启动脚本留下的 HEAVY_GATES_RUNNING 一类标记，由结束的这一轮清掉（有组失败也清）。"""
+    marker = lab["root"] / "HEAVY_GATES_RUNNING"
+    marker.write_text("run=RUN-X\n", encoding="utf-8")
+    cfg = _config(lab, [_step(lab, "s", code=code)], remove=[str(marker)])
+
+    _run(cfg, "run")
+
+    assert not marker.exists()
+    assert "removed leftover marker" in (lab["out"] / "long_gate.log").read_text(encoding="utf-8")
+
+
+def test_the_marker_stays_while_the_round_is_still_running_and_a_missing_one_is_fine(lab: dict[str, Path]) -> None:
+    marker = lab["root"] / "HEAVY_RUNNING"
+    cfg = _config(lab, [_step(lab, "slow", wait=3.0)], remove=[str(marker), str(lab["root"] / "never_existed")])
+    marker.write_text("run=RUN-X\n", encoding="utf-8")
+    proc = _start(cfg)
+    try:
+        _wait_for(lambda: (lab["out"] / "slow.started").exists())
+        assert marker.exists()
+        assert proc.wait(timeout=60) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("bad", ["relative/marker", "../escape", "/etc/passwd"])
+def test_markers_remove_refuses_paths_outside_the_workspace(lab: dict[str, Path], bad: str) -> None:
+    cfg = _config(lab, [_step(lab, "s")], remove=[bad])
+    result = _run(cfg, "run")
+    assert result.returncode != 0 and "markers.remove" in (result.stdout + result.stderr)
