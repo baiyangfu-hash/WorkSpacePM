@@ -21,14 +21,16 @@ FORBIDDEN_TARGETS = {
 }
 
 KNOWN_VIOLATIONS = {
+    # 门面引用 ui.contracts（命令/DTO/Result 契约包）。要清零须把 ui/contracts 整体搬到中立层，波及界面桥，待用户/PM 裁决。
     ("application/change_facade.py", "ui"),
     ("application/delivery_facade.py", "ui"),
     ("application/spec_facade.py", "ui"),
     ("application/system_facade.py", "ui"),
     ("application/workbench_facade.py", "ui"),
     ("application/workbench_use_cases.py", "ui"),
+    # 领域层直接调用 control_root_guard（控制根/路径安全）。要清零须改成注入的端口，DecisionService 有约 80 处构造点，另立卡。
     ("domain/change/decision_service.py", "infrastructure"),
-    ("domain/doc/services.py", "infrastructure"),
+    # CLI 是组装入口，要自己构造 ContinuityStore / 租约钱包 / 进程探针；倾向裁决保留（把规则改为“ui/cli 可引用 infrastructure”），待用户/PM 裁决。
     ("ui/cli/__main__.py", "infrastructure"),
     ("ui/cli/continuity.py", "infrastructure"),
     ("ui/cli/continuity_backup.py", "infrastructure"),
@@ -100,3 +102,9 @@ def test_gate_detects_layer_name_and_relative_imports(tmp_path: Path) -> None:
     (tmp_path / "domain" / "sub").mkdir(parents=True)
     (tmp_path / "domain" / "sub" / "b.py").write_text("from ...infrastructure import store\n", encoding="utf-8")
     assert _violations(tmp_path) == {("application/a.py", "ui"), ("domain/sub/b.py", "infrastructure")}
+
+
+def test_doc_services_live_in_the_application_layer() -> None:
+    """文档同步/核对服务驱动 infrastructure 提取器，属应用层，不能放回领域层（TD-SW008-057）。"""
+    assert (PACKAGE_ROOT / "application" / "core" / "doc_services.py").is_file()
+    assert not (PACKAGE_ROOT / "domain" / "doc" / "services.py").exists()
