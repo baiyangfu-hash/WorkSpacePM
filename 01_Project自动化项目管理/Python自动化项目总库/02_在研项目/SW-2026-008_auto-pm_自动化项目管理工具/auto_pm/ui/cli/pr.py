@@ -46,6 +46,7 @@ def pr_group() -> None:
     default=None,
     help="是否涉及安全回路；改到 0100_PLC自动化 下的文件时必填",
 )
+@click.option("--sweep", default=None, help="修缺陷的 PR 填：根因和全库同类排查结果（写进“同类排查”一节）")
 @click.option("--title", default=None, help="覆盖 PR 标题；默认 [卡号] 任务卡标题")
 @click.option("--dry-run", is_flag=True, help="只做检查并显示分支、标题、描述；不推送、不开 PR")
 @click.option("--no-fetch", is_flag=True, help="断网时用本机现有的 origin/main")
@@ -57,6 +58,7 @@ def open_cmd(
     task_card: str,
     evidence: tuple[str, ...],
     safety_circuit: str | None,
+    sweep: str | None,
     title: str | None,
     dry_run: bool,
     no_fetch: bool,
@@ -73,6 +75,7 @@ def open_cmd(
             evidence=evidence,
             safety_circuit=safety_circuit,
             title=title,
+            sweep=sweep,
             fetch=not no_fetch,
         )
     except AgentWorktreeError as error:

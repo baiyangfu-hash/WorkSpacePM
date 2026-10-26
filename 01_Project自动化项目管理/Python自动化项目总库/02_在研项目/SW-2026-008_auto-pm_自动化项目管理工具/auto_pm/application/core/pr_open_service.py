@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import unicodedata
 from collections.abc import Callable, Sequence
@@ -31,6 +32,13 @@ from auto_pm.application.core.agent_worktree_service import (
     AgentWorktreeService,
     StationRefusedError,
     caller_agent,
+)
+from auto_pm.application.core.implementation_card_precheck import precheck_markdown_card
+from auto_pm.application.core.pr_body_builder import (
+    TD_ID,
+    CardFields,
+    build_body,
+    read_card_fields,
 )
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 
@@ -143,6 +151,7 @@ class PrOpenService:
         evidence: Sequence[str] = (),
         safety_circuit: str | None = None,
         title: str | None = None,
+        sweep: str | None = None,
         fetch: bool = True,
     ) -> PrPlan:
         prefix = AGENT_ROSTER.get(agent)
@@ -188,10 +197,25 @@ class PrOpenService:
             for sha, message in commits
             if not CHG_NUMBER.search(message)
         ]
-        safety_circuit = self._safety_declaration(station.path, base_sha, safety_circuit)
         card_text = self._card_at_base(task_card, base_sha)
-        card_title = _card_title(card_text, task_card)
-        body = self._body(task_card, chg_numbers, commits, evidence, safety_circuit)
+        fields = read_card_fields(card_text, Path(task_card).stem)
+        card_title = fields.title
+        safety_circuit = self._card_safety(task_card, fields, safety_circuit)
+        safety_circuit = self._safety_declaration(station.path, base_sha, safety_circuit)
+        subjects = " ".join(message.splitlines()[0] for _sha, message in commits if message)
+        tds = tuple(dict.fromkeys([*fields.tds, *TD_ID.findall(subjects)]))
+        body = build_body(
+            task_card=task_card,
+            fields=fields,
+            scope_paths=self._card_scope(task_card, card_text),
+            safety_circuit=str(safety_circuit),
+            chg_numbers=chg_numbers,
+            commits=commits,
+            evidence=evidence,
+            sweep=sweep,
+            tds=tds,
+            head_sha=head_sha,
+        )
         code, report = self._judge(station.path, base_sha, head_sha, body)
         if code != 0:
             raise PrOpenRefusedError(
@@ -265,6 +289,28 @@ class PrOpenService:
             raise PrOpenRefusedError(f"任务卡路径必须是仓库内的相对路径：{task_card}")
         return path
 
+    @staticmethod
+    def _card_safety(task_card: str, fields: CardFields, flag: str | None) -> str:
+        """The 安全回路 answer comes from the card, verbatim; no default, no free text (audit 217)."""
+
+        if flag is not None and flag not in SAFETY_ANSWERS:
+            raise PrOpenRefusedError(f"--safety-circuit 只能是 是 或 否，现在是：{flag}")
+        if fields.safety_raw is None:
+            raise PrOpenRefusedError(
+                f"任务卡 `{task_card}` 里没有“> 安全回路：是”或“> 安全回路：否”一行；安全声明不能靠默认值，"
+                "请在卡里补上这一行（急停、安全门、光栅、联锁、安全继电器、双手启动算安全回路）"
+            )
+        if fields.safety is None:
+            raise PrOpenRefusedError(
+                f"任务卡里的安全回路写成了“{fields.safety_raw}”；这一项只能是单纯的“是”或“否”，"
+                "说明另起一行写，不要加括号或别的字"
+            )
+        if flag is not None and flag != fields.safety:
+            raise PrOpenRefusedError(
+                f"--safety-circuit {flag} 和任务卡里写的“{fields.safety}”不一致；以卡为准，要改先改卡"
+            )
+        return fields.safety
+
     def _safety_declaration(self, station: Path, base_sha: str, declared: str | None) -> str | None:
         """The 安全回路 answer is the agent's/user's call, never derived: PLC changes must state it."""
 
@@ -323,27 +369,20 @@ class PrOpenService:
             )
         return tuple(found)
 
-    @staticmethod
-    def _body(
-        task_card: str,
-        chg_numbers: tuple[str, ...],
-        commits: list[tuple[str, str]],
-        evidence: Sequence[str],
-        safety_circuit: str | None,
-    ) -> str:
-        lines = [f"任务卡: {task_card}"]
-        if safety_circuit:
-            lines.append(f"安全回路: {safety_circuit}")
-        lines += ["", "## 变更单", ""]
-        lines += [f"- {number}" for number in chg_numbers]
-        lines += ["", "## 提交", ""]
-        lines += [
-            f"- {sha[:8]} {message.splitlines()[0] if message else ''}" for sha, message in commits
-        ]
-        lines += ["", "## 验收证据", ""]
-        lines += [f"- {item}" for item in evidence] or ["- 未提供（由审计者自行核验）"]
-        lines += ["", "由 `main.py pr open` 生成；只开不合，合并按 AUD-001 独立审计。"]
-        return "\n".join(lines) + "\n"
+    def _card_scope(self, task_card: str, card_text: str) -> list[str]:
+        """The card's path table, one full path per entry (what pr-gate reads from the base copy of the card)."""
+        in_place = self._root / task_card
+        if in_place.is_file() and in_place.read_bytes() == card_text.encode("utf-8"):
+            report = precheck_markdown_card(in_place, workspace_root=self._root, command_tree={})
+        else:
+            with tempfile.TemporaryDirectory(prefix="pr_open_") as tmp:
+                copy = Path(tmp) / Path(task_card).name
+                copy.write_text(card_text, encoding="utf-8")
+                report = precheck_markdown_card(copy, workspace_root=self._root, command_tree={})
+        paths = list(dict.fromkeys(item.path for item in report.paths))
+        if not paths:
+            raise PrOpenRefusedError(f"任务卡 `{task_card}` 没有列出任何路径，写不出可改范围")
+        return paths
 
     def _run_judge(self, station: Path, base_sha: str, head_sha: str, body: str) -> tuple[int, str]:
         script = self._judge_script
@@ -405,13 +444,6 @@ class PrOpenService:
             env=clean_git_environment(),
             stdin=subprocess.DEVNULL,
         )
-
-
-def _card_title(card_text: str, task_card: str) -> str:
-    for line in card_text.splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return Path(task_card).stem
 
 
 def _detail(result: subprocess.CompletedProcess[str]) -> str:
