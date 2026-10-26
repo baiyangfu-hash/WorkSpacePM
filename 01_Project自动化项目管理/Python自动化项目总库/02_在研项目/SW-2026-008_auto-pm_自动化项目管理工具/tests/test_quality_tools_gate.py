@@ -61,7 +61,7 @@ def test_quality_gate_tests_fail_when_tools_are_missing_and_not_opted_in(tmp_pat
         result = subprocess.run(
             [sys.executable, "-m", "pytest", str(probe), "-p", "no:cacheprovider",
              "-c", str(tmp_path / "pytest.ini"), "--rootdir", str(tmp_path), "-q"],
-            capture_output=True, text=True, env={**env, **extra}, cwd=tmp_path, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env={**env, **extra}, cwd=tmp_path, check=False,
         )
         return result.stdout
 
