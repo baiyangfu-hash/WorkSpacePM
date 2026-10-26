@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Final
 
 from auto_pm.change.ledger_reconciler import LedgerReconciler
 
@@ -15,6 +17,20 @@ from auto_pm.contracts.gate_dtos import (
     StageGateResultDTO,
 )
 from auto_pm.domain.plc.language_service import LanguageService, evaluate_project
+
+# 变更单正文里记状态的位置：真实变更单用 §3.4 表格行 `| 变更状态 | closed |`；
+# 旧写法是整行 `status: closed` / `状态: closed` / `状态: 已关闭`（可带列表符号）。
+# 只认整行字段，正文里夹带的同样文字不算。
+_CHG_STATUS_TABLE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*\|\s*变更状态\s*\|\s*([^|\r\n]+?)\s*\|", re.MULTILINE)
+_CHG_STATUS_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:[-*]\s+)?(?:status|状态)\s*[:：]\s*(\S+)\s*$", re.MULTILINE | re.IGNORECASE)
+# 收口门要的是“已流转到闭环终态”：completed 只是验收通过、还没关闭，不算。
+_CHG_CLOSED_STATUSES: Final[frozenset[str]] = frozenset({"closed", "已关闭", "archived", "abandoned"})
+
+
+def _chg_is_closed(text: str) -> bool:
+    """变更单是否已处于闭环终态；找不到状态字段按未闭环处理（fail-closed）。"""
+    match = _CHG_STATUS_TABLE_RE.search(text) or _CHG_STATUS_LINE_RE.search(text)
+    return match is not None and match.group(1).strip().strip("`*").lower() in _CHG_CLOSED_STATUSES
 
 
 class StageGateEngine:
@@ -258,7 +274,7 @@ class StageGateEngine:
         unclosed_chgs: list[str] = []
         for cf in chg_files:
             txt = cf.read_text(encoding="utf-8", errors="ignore")
-            if "status: closed" not in txt and "状态: closed" not in txt and "状态: 已关闭" not in txt:
+            if not _chg_is_closed(txt):
                 unclosed_chgs.append(cf.name)
 
         all_chgs_closed = len(unclosed_chgs) == 0
