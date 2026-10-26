@@ -405,12 +405,19 @@ class WorkbenchUseCases:
 
     def delete_project(self, project_id: str) -> CommandOutcome[dict[str, Any] | None]:
         try:
-            import shutil
+            from auto_pm.application.core.project_delete_guard import (
+                delete_blockers,
+                recycle_project,
+            )
 
             project = self.project_service.get_project(project_id)
             if project is None:
                 return CommandOutcome(False, f"项目不存在: {project_id}")
-            shutil.rmtree(project.path)
+            # 与命令行同一套护栏（TD-193）：开着任务或有未提交改动时拒绝；删除是把目录搬进回收区，不是 rmtree
+            blockers = delete_blockers(self.project_service.workspace_root, project_id, project.path)
+            if blockers:
+                return CommandOutcome(False, f"项目 {project_id} 现在不能删除：" + "；".join(blockers))
+            recycled = recycle_project(self.project_service.workspace_root, project.path, project_id)
             from auto_pm.logging.audit import audit_log
 
             audit_log(
@@ -418,12 +425,13 @@ class WorkbenchUseCases:
                 project_id=project_id,
                 project_name=project.name,
                 path=project.path,
+                recycled_to=str(recycled),
             )
             self.project_service.sync_to_cache(force_full=True)
             return CommandOutcome(
                 True,
-                f"项目已删除: {project_id}",
-                {"project_id": project_id, "name": project.name},
+                f"项目已删除: {project_id}（已搬进回收区，可原样搬回: {recycled}）",
+                {"project_id": project_id, "name": project.name, "recycled_to": str(recycled)},
             )
         except Exception as exc:
             return CommandOutcome(False, str(exc))
