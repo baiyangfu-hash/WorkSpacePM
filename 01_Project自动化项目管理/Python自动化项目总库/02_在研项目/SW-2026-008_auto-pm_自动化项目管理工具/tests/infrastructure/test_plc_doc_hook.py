@@ -409,3 +409,19 @@ def test_f01a_h24_a_verified_non_git_workspace_keeps_the_old_contract(tmp_path: 
 
     assert plc_doc_hook.enforce_plc_docs(tmp_path, ()) == 0
     assert removed_index_markers(tmp_path) == ()
+
+
+def test_h30_auto_fill_only_completes_the_objects_that_blocked_the_commit(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """TD-SW008-045：被拒的是 FB_Pump，就只补 FB_Pump 的文档，同工程里没文档的 FB_Fan 不被顺手新建。"""
+    fan_scl = f"{PLC_ROOT}/02_PLC程序/PLC_ST/01_泵/FB_Fan.scl"
+    fan_doc = repo / PLC_ROOT / "02_PLC程序/PLC_ST/01_泵/PRD/接口文档_IFC-FB_Fan.md"
+    write(repo, fan_scl, "FUNCTION_BLOCK FB_Fan\nVAR_INPUT\n    i_bOn : BOOL; // 开\nEND_VAR\nEND_FUNCTION_BLOCK\n")
+    write(repo, SCL, read(repo, SCL).replace("    i_bStart : BOOL; // 启动命令\n", "    i_bStart : BOOL; // 启动命令\n    i_bNew : BOOL; // 新增信号\n"))
+    git(repo, "add", SCL, fan_scl)
+    code, output = run_hook(repo, capsys)
+    assert code == 1 and "FB_Pump.i_bNew" in output
+    assert f"{dc.MARKER}新增信号" in read(repo, IFC)
+    assert not fan_doc.exists()
+
