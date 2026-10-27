@@ -330,10 +330,43 @@ def test_s06_quoted_or_embedded_text_is_not_a_signature(repo: Path, body: str) -
     assert not gate.check(repo, base, head, [sign(head, body=body.format(sha=head[:7]))]).passed
 
 
-@pytest.mark.parametrize("body", ["安全签字：{sha}", "安全签字 `{sha}` 已看仿真", "  安全签字 {full}"])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "安全签字：{sha}",
+        "安全签字 `{sha}` 已看仿真",
+        "  安全签字 {full}",
+        # 提交号后面紧跟全角（或半角）标点：用户在 #237 上就是这样写的，之前被拒
+        "安全签字 {sha}；已看仿真",
+        "安全签字 {sha}，确认",
+        "安全签字：{sha}。",
+        "安全签字 {sha}、",
+        "安全签字 {sha}！",
+        "安全签字 `{sha}`；已看仿真",
+        "安全签字 {sha}）",
+        "安全签字 {sha};ok",
+        "安全签字 {sha}.",
+    ],
+)
 def test_s07_signature_line_variants_are_accepted(repo: Path, body: str) -> None:
     base, head = touch(repo)
     assert gate.check(repo, base, head, [sign(head, body=body.format(sha=head[:7].upper(), full=head))]).passed
+
+
+@pytest.mark.parametrize(
+    "tail",
+    ["0", "a", "确认", "_x", "0123456789abcdef0123456789abcdef01234567890"],
+)
+def test_s07b_a_longer_hash_or_glued_word_is_not_read_as_the_short_hash(repo: Path, tail: str) -> None:
+    """提交号后面紧跟字母数字下划线或汉字：那是另一个（更长的）哈希或别的词，不能只截前 7 位当签字。"""
+    base, head = touch(repo)
+    body = f"安全签字 {head[:7]}{tail}"
+    assert not gate.check(repo, base, head, [sign(head, body=body)]).passed
+
+
+def test_s07c_a_hash_of_41_hex_digits_is_not_accepted_even_if_it_starts_with_the_head(repo: Path) -> None:
+    base, head = touch(repo)
+    assert not gate.check(repo, base, head, [sign(head, body=f"安全签字 {head}0")]).passed
 
 
 def test_s08_cli_main_reads_paginated_comments_and_writes_status(repo: Path, tmp_path: Path) -> None:
