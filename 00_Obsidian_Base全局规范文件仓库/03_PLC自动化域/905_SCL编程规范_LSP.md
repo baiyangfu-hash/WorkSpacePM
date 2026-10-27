@@ -480,7 +480,7 @@ plccheck --verbose .
 | 禁止 | `#REGION` / `#END_REGION`（单独成行）；`scl_linter` 规则 `LSP-905-REGION-HASH` 报 ERROR |
 | 配对 | 每个 `REGION` 必须有 `END_REGION`；不配对 `scl_linter` 规则 `LSP-905-REGION-UNBALANCED` 报 ERROR |
 | 不得与控制结构交叉 | `REGION` 的开头和结尾必须在同一个 `IF / CASE / FOR / WHILE` 结构的同一层里：区段可以整个放在结构里面，也可以整个包住结构，**不能切开结构**（例如 `REGION` 开在 `IF` 里、`END_REGION` 写在 `END_IF` 之后）；`scl_linter` 规则 `LSP-905-REGION-CROSS-BLOCK` 报 ERROR |
-| 名称里的符号 | 名称只写编号、英文名和中文说明；**不得出现英文分号 `;` 和赋值符 `:=`**（siemens-lsp 会把它们当语句解析，后面整段解析错乱，插件测试会挂）；`scl_linter` 规则 `LSP-905-REGION-NAME-CHARS` 报 ERROR。需要分隔时用 `,` 或空格；`:`、`,`、`( )`、`/`、`=`、`<`、`>` 实测可用 |
+| 名称里的符号 | 名称只写编号、英文名和中文说明；**不得出现英文分号 `;` 和赋值符 `:=`**（siemens-lsp 会把它们当语句解析，后面整段解析错乱，插件测试会挂）；`scl_linter` 规则 `LSP-905-REGION-NAME-CHARS` 报 ERROR。需要分隔时用 `,` 或空格；`=`、`<`、`>` 也建议不用，改写成中文说法（如“等于”“小于等于”） |
 | 位置 | 只放在 `BEGIN ... END_FUNCTION_BLOCK` 的程序体里，按功能分段；声明块（`VAR ... END_VAR`）不分段 |
 | 分段顺序 | 定时器批量调用 → 输入映射 → 手动 → 自动步序 → 报警 → 输出映射（定时器调用必须在 FB 顶部、不被 IF/CASE 包裹，见 LSP-906 规则 1.6） |
 
