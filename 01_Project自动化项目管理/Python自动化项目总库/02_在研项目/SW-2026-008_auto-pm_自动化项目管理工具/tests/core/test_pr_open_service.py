@@ -122,6 +122,67 @@ def test_plan_without_evidence_says_so_instead_of_claiming_it(lab: Lab) -> None:
     assert "未提供" in plan(lab).body
 
 
+def write_chg(lab: Lab, text: str) -> None:
+    folder = lab.root / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    folder.mkdir(parents=True)
+    (folder / f"{CHG}.md").write_text(text, encoding="utf-8")
+
+
+def related_td_section(body: str) -> str:
+    return body.split("## 关联 TD", 1)[1].split("## ", 1)[0].strip()
+
+
+def test_plan_lists_the_tds_named_by_the_change_order_but_proposes_no_payoff_for_them(lab: Lab) -> None:
+    work(lab)
+    write_chg(lab, "变更单\n台账 TD-SW008-321 的一部分，同时碰到 TD-SW008-322\n")  # untracked, as in the control root
+
+    result = plan(lab)
+
+    assert related_td_section(result.body) == "TD-SW008-321、TD-SW008-322"
+    assert "TD-SW008-321 已偿还" not in result.body
+
+
+def test_plan_with_the_change_order_folder_but_not_that_file_plans_and_says_so(lab: Lab) -> None:
+    work(lab)
+    folder = lab.root / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    folder.mkdir(parents=True)
+    (folder / "CHG-SCPT-2026-001.md").write_text("TD-SW008-999\n", encoding="utf-8")  # another order, not ours
+
+    result = plan(lab)
+
+    assert related_td_section(result.body) == "无"
+    assert any(CHG in note and "找不到" in note for note in result.notes)
+
+
+def test_plan_survives_a_change_order_that_is_not_utf8_and_warns(lab: Lab) -> None:
+    work(lab)
+    folder = lab.root / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    folder.mkdir(parents=True)
+    (folder / f"{CHG}.md").write_bytes("变更单 TD-SW008-321 修复\n".encode("gbk"))
+
+    result = plan(lab)
+
+    assert "TD-SW008-321" in related_td_section(result.body)
+    assert any(CHG in note and "UTF-8" in note for note in result.notes)
+
+
+def test_plan_lists_a_td_once_however_often_the_orders_and_the_card_repeat_it(lab: Lab) -> None:
+    work(lab, message=f"fix: TD-SW008-321 [{CHG}] [CHG-SCPT-2026-778] do the card")
+    folder = lab.root / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    folder.mkdir(parents=True)
+    (folder / f"{CHG}.md").write_text("TD-SW008-321 TD-SW008-321 TD-SW008-322\n", encoding="utf-8")
+    (folder / "CHG-SCPT-2026-778.md").write_text("TD-SW008-322 TD-SW008-323\n", encoding="utf-8")
+
+    section = related_td_section(plan(lab).body)
+
+    assert section == "TD-SW008-321、TD-SW008-322、TD-SW008-323"
+
+
+def test_plan_without_a_change_order_file_on_disk_still_plans(lab: Lab) -> None:
+    work(lab)
+    assert related_td_section(plan(lab).body) == "无"
+
+
 def test_plan_sends_nothing_and_asks_gh_nothing(lab: Lab) -> None:
     work(lab)
     gh = FakeGh()

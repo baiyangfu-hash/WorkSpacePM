@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import subprocess
 import sys
@@ -31,6 +32,7 @@ from auto_pm.infrastructure.control_root_guard import (
     clean_git_environment,
     governed_worktree_snapshot,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 _C03_CHECKPOINT_PYTEST_EXPRESSION = "append_verified_checkpoint"
 _C03_CHECKPOINT_PYTEST_TARGET = "tests/core/test_continuity_execution_service.py"
@@ -1001,20 +1003,17 @@ class EvidenceCollectionService:
     @staticmethod
     def _git_output(candidate: Path, *arguments: str) -> str:
         try:
-            result = subprocess.run(
+            result = run_git_bounded_text(
                 ["git", "-C", str(candidate), *arguments],
+                default_timeout=_GIT_EVIDENCE_TIMEOUT_SECONDS,
+                error_cls=EvidenceCollectionError,
+                where=candidate,
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 check=False,
                 env=clean_git_environment(),
-                timeout=_GIT_EVIDENCE_TIMEOUT_SECONDS,
             )
-        except subprocess.TimeoutExpired as error:
-            raise EvidenceCollectionError(
-                f"Run worktree Git evidence 采集超过 {_GIT_EVIDENCE_TIMEOUT_SECONDS:g} 秒没有结束"
-            ) from error
+        except OSError as error:
+            raise EvidenceCollectionError(f"Run worktree Git evidence 无法启动 git: {error}") from error
         if result.returncode != 0 or result.stderr.strip():
             details = result.stderr.strip() or result.stdout.strip() or "unknown git error"
             raise EvidenceCollectionError(f"Run worktree Git evidence 采集失败: {details}")
@@ -1893,9 +1892,15 @@ def _plc_language_service() -> LanguageService | None:
     A missing plugin is reported by the checker as "未验证" (warn), never as a pass.
     """
 
-    from auto_pm.infrastructure.siemens_language_service import default_language_service
+    from auto_pm.infrastructure.siemens_language_service import (
+        DEFAULT_TIMEOUT_SECONDS,
+        default_language_service,
+    )
 
-    return default_language_service()
+    # TD-SW008-188（只做一半）：每次调用插件命令行的时限取插件默认值与质量门时限中较小的一个（至少 1 秒），
+    # 即单次调用最多 min(600, T) 秒。这不保证子进程不会比门禁活得更久：门禁线程放弃后收不掉，
+    # 它还可能接着再起新的子进程（每个又可活到该时限）；门禁截止时间传不下去、也取消不了，另立设计债。
+    return default_language_service(timeout=max(1, min(DEFAULT_TIMEOUT_SECONDS, math.ceil(_quality_gate_timeout_seconds()))))
 
 
 def _with_anchor(note: str, baseline: _PlcBaseline | None) -> str:
@@ -1924,7 +1929,8 @@ def _quality_gate_timeout_seconds() -> float:
         value = float(raw)
     except ValueError:
         return _QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
-    return value if value > 0 else _QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
+    # inf（以及 1e400 这类溢出值）会让质量门永远不超时，nan 比较恒为假：都不是合法时限，退回默认。
+    return value if math.isfinite(value) and value > 0 else _QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
 
 
 def _run_bounded(work: Callable[[], tuple[str, int | None]], seconds: float) -> tuple[str, int | None]:

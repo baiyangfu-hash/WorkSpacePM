@@ -24,6 +24,11 @@ for _sub in ("domain", "infrastructure", "application", "ui"):
     if os.path.isdir(_sub_path) and _sub_path not in __path__:
         __path__.append(_sub_path)
 
+# 短路径（auto_pm.core.x）与分层路径（auto_pm.application.core.x）解析成同一个模块对象（TD-SW008-056）
+from auto_pm import _module_alias  # noqa: E402 - needs the extended __path__ above
+
+_module_alias.install(_pkg_dir)
+
 # 导入 5 大标准分层
 import auto_pm.application as application  # noqa: E402 - requires __path__ extension above
 import auto_pm.contracts as contracts  # noqa: E402 - requires __path__ extension above

@@ -1,13 +1,25 @@
 ---
 spec_id: LSP-905
 title: "SCL编程规范"
-version: "V1.3.0"
+version: "V1.5.1"
 domain: plc
 lifecycle: stable
 canonical_path: "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/905_SCL编程规范_LSP.md"
 replaces: [DEV-801, DEV-810]
 tags: ["SCL", "编程", "核心规范", "LSP", "DJ-2026-005实践"]
 changelog:
+  - version: V1.5.1
+    date: 2026-10-27
+    author: Claude
+    changes: §6.3 补一条：REGION 不得与 IF/CASE/FOR/WHILE 交叉（REGION 的开头和结尾必须在同一个控制结构的同一层里，不能切开结构）；scl_linter 规则 LSP-905-REGION-CROSS-BLOCK 对应；经协调者 2026-10-27 指示
+  - version: V1.5.0
+    date: 2026-10-26
+    author: Claude
+    changes: 新增 §6.3 折叠区段：统一写 REGION 名称 ... END_REGION（siemens-lsp 支持），禁止 #REGION ... #END_REGION（插件不支持）；移植到其他 PLC 平台按平台适配；附较长程序示例（分区段，数组下标从 1）；经用户 2026-10-26 批准；博图 TIA V19 可直接用，移植按平台适配
+  - version: V1.4.0
+    date: 2026-10-26
+    author: Claude
+    changes: 新增 §3.6 下标起点：STRING 字符下标从 1 起（siemens-lsp 插件的要求），ARRAY 下界统一为 1（用户裁决，与 STRING 统一风格）；移植到实际 PLC 时按平台适配；数组示例改为下界 1；经用户 2026-10-26 批准
   - version: V1.3.0
     date: 2026-10-24
     author: Claude
@@ -28,9 +40,9 @@ changelog:
 
 # SCL 编程规范 (Siemens LSP 兼容版)
 
-> 版本：V1.3.0
+> 版本：V1.5.1
 > 状态：已验证（§4.4 ENUM 为新增语法，待本机插件与目标平台验证，验证前不得用于交付）
-> 更新日期：2026-10-24
+> 更新日期：2026-10-27
 > 适用环境：Siemens LSP (VS Code)、TIA Portal、CODESYS、GX Works
 
 ---
@@ -125,7 +137,7 @@ s_rCurrentSpeed := FC_1001_CalculateSpeed(
 | `e` | `ENUM` 枚举类型 | `s_eState`, `i_eMode` |
 | `arr` | `ARRAY` 数组类型 | `s_arrSensors`, `temp_arrData`, `s_arrMesAlarmQueue` |
 
-> **数组命名补充说明**：即使数组元素类型为 `INT` / `BOOL` / `WORD`，变量名仍统一使用 `arr` 作为二级类型标识，再在语义名中体现元素含义；例如 `s_arrMesAlarmQueue : ARRAY[0..9] OF INT;`、`s_arrStationAlarmStatus : ARRAY[1..3] OF INT;`。禁止写成 `s_ai...`、`s_ab...` 之类未在本规范登记的组合缩写。
+> **数组命名补充说明**：即使数组元素类型为 `INT` / `BOOL` / `WORD`，变量名仍统一使用 `arr` 作为二级类型标识，再在语义名中体现元素含义；例如 `s_arrMesAlarmQueue : ARRAY[1..10] OF INT;`、`s_arrStationAlarmStatus : ARRAY[1..3] OF INT;`。禁止写成 `s_ai...`、`s_ab...` 之类未在本规范登记的组合缩写。
 
 ---
 
@@ -172,7 +184,7 @@ END_VAR
 VAR
     s_bInitialized : BOOL;          // 内部静态初始化标志
     s_iCurrentStep : INT;           // 状态机当前步序
-    s_arrMesAlarmQueue : ARRAY[0..9] OF INT; // 数组统一使用 arr 类型标识
+    s_arrMesAlarmQueue : ARRAY[1..10] OF INT; // 数组统一使用 arr 类型标识；下界为 1（§3.6）
     fb_tActionTimer : FB_TON;       // TON 定时器实例
 END_VAR
 
@@ -188,6 +200,22 @@ VAR
     s_iCurrentStep_V2 : INT;        // 禁止：变量名带版本号后缀
 END_VAR
 ```
+
+---
+
+### 3.6 数组与字符串的下标起点（V1.4.0 新增）
+
+**STRING 字符下标从 1 起，这是 siemens-lsp 插件的要求；ARRAY 下界统一为 1，这是用户 2026-10-26 的裁决，为与 STRING 下标统一风格（插件本身也接受从 0 起的数组）。移植到实际 PLC 时按平台适配。**
+
+| 对象 | 规定 | 示例 |
+|------|------|------|
+| `ARRAY` 声明 | 下界一律写 1，元素个数等于上界 | `s_arrMesAlarmQueue : ARRAY[1..10] OF INT;` |
+| 数组遍历 | `FOR` 从 1 到上界 | `FOR t_iIdx := 1 TO 10 DO ... END_FOR;` |
+| `STRING` 按字符读写 | 第一个字符是 `s[1]`，n 个字符的字符串到 `s[n]` 为止，不写 `s[0]` | `s_sId[1]` 是第一个字符 |
+
+- **依据**：STRING——Siemens 语言服务插件按 S7 规则解释字符下标，按 0 起写的字符串在插件 test 里会错位（DJ-2026-009 FB_3002 的 Modbus 用例实测：高字节丢失、读回少第一个字符）。ARRAY——用户 2026-10-26 裁决，为与 STRING 统一风格。
+- **移植到实际 PLC**：目标平台若按别的规则（例如 InoProShop 的 STRING 下标起点尚待在目标平台上核实），在移植时按平台适配并在项目的技术方案文档里写明适配方式；不得为迁就目标平台而在仓库源码里改回 0 起。
+- **已有代码**：碰到时按本节改写，并补插件 test 用例证明结果不变。
 
 ---
 
@@ -442,6 +470,145 @@ plccheck --verbose .
 
 ---
 
+### 6.3 折叠区段 REGION（V1.5.0 新增）
+
+**折叠区段统一写 `REGION 名称 ... END_REGION`。这是西门子博图（TIA Portal V19 可直接使用）的格式，也是 siemens-lsp 插件支持的写法；带 `#` 的 `#REGION ... #END_REGION` 插件不支持，禁止使用。实际移植时要根据编译器平台自行适配（例如目标平台不识别 `REGION` 时，移植时改写为注释分隔线，并在项目技术方案里写明）。**
+
+| 项 | 规定 |
+|----|------|
+| 写法 | `REGION 编号_英文名 中文说明` 开头，`END_REGION` 结尾，各占一行 |
+| 禁止 | `#REGION` / `#END_REGION`（单独成行）；`scl_linter` 规则 `LSP-905-REGION-HASH` 报 ERROR |
+| 配对 | 每个 `REGION` 必须有 `END_REGION`；不配对 `scl_linter` 规则 `LSP-905-REGION-UNBALANCED` 报 ERROR |
+| 不得与控制结构交叉 | `REGION` 的开头和结尾必须在同一个 `IF / CASE / FOR / WHILE` 结构的同一层里：区段可以整个放在结构里面，也可以整个包住结构，**不能切开结构**（例如 `REGION` 开在 `IF` 里、`END_REGION` 写在 `END_IF` 之后）；`scl_linter` 规则 `LSP-905-REGION-CROSS-BLOCK` 报 ERROR |
+| 名称里的符号 | 名称只写编号、英文名和中文说明；**不得出现英文分号 `;` 和赋值符 `:=`**（siemens-lsp 会把它们当语句解析，后面整段解析错乱，插件测试会挂）；`scl_linter` 规则 `LSP-905-REGION-NAME-CHARS` 报 ERROR。需要分隔时用 `,` 或空格；`=`、`<`、`>` 也建议不用，改写成中文说法（如“等于”“小于等于”） |
+| 位置 | 只放在 `BEGIN ... END_FUNCTION_BLOCK` 的程序体里，按功能分段；声明块（`VAR ... END_VAR`）不分段 |
+| 分段顺序 | 定时器批量调用 → 输入映射 → 手动 → 自动步序 → 报警 → 输出映射（定时器调用必须在 FB 顶部、不被 IF/CASE 包裹，见 LSP-906 规则 1.6） |
+
+较长程序的完整示例（一个夹紧工位，按功能分 6 个区段，定时器用 SysLib 的 `FB_TON`、三段式调用；同时示范数组下标从 1，见 §3.6）：
+
+```scl
+FUNCTION_BLOCK FB_1010_ClampStation
+VAR_INPUT
+    i_bAutoMode : BOOL;       // 1=自动 0=手动
+    i_bStartCmd : BOOL;       // 自动启动命令
+    i_bManClamp : BOOL;       // 手动夹紧
+    i_bManRelease : BOOL;     // 手动松开
+    i_bResetCmd : BOOL;       // 报警复位
+    i_bClampedSns : BOOL;     // 夹紧到位传感器
+    i_bReleasedSns : BOOL;    // 松开到位传感器
+    i_bPartPresentSns : BOOL; // 工件在位传感器
+END_VAR
+VAR_OUTPUT
+    o_bClampValve : BOOL;     // 夹紧电磁阀
+    o_bReleaseValve : BOOL;   // 松开电磁阀
+    o_bBusy : BOOL;           // 工位忙
+    o_bAlarm : BOOL;          // 工位有报警
+END_VAR
+VAR
+    s_iStep : INT;                              // 自动步序
+    s_bClampedOk : BOOL;                        // 夹紧到位（映射后）
+    s_bReleasedOk : BOOL;                       // 松开到位（映射后）
+    s_bPartPresent : BOOL;                      // 工件在位（映射后）
+    s_bClampCmd : BOOL;                         // 夹紧命令（手动/自动合成）
+    s_bReleaseCmd : BOOL;                       // 松开命令（手动/自动合成）
+    fb_tStepTimer : FB_TON;                     // 步超时定时器（SysLib 的 FB_TON）
+    s_bStepTimeout : BOOL;                      // 步超时 Q
+    s_dStepElapsed : DINT;                      // 步已用时间 ms
+    s_arrAlarm : ARRAY[1..4] OF BOOL;           // 报警位，下标从 1 起
+END_VAR
+VAR_TEMP
+    t_iIdx : INT;                               // 报警遍历下标
+    t_bAnyAlarm : BOOL;                         // 任一报警
+END_VAR
+BEGIN
+    REGION 00_Timers 定时器批量调用 无条件每周期执行 LSP-906 1.5/1.6
+        fb_tStepTimer.PT := 3000;
+        fb_tStepTimer(IN := fb_tStepTimer.IN, PT := fb_tStepTimer.PT,
+                      Q => fb_tStepTimer.Q, ET => fb_tStepTimer.ET);
+    END_REGION
+
+    REGION 01_InputMapping 输入映射
+        s_bClampedOk := i_bClampedSns;
+        s_bReleasedOk := i_bReleasedSns;
+        s_bPartPresent := i_bPartPresentSns;
+    END_REGION
+
+    REGION 02_Manual 手动动作
+        IF NOT i_bAutoMode THEN
+            s_iStep := 0;
+            s_bClampCmd := i_bManClamp AND NOT i_bManRelease;
+            s_bReleaseCmd := i_bManRelease AND NOT i_bManClamp;
+        END_IF;
+    END_REGION
+
+    REGION 03_AutoSequence 自动步序
+        IF i_bAutoMode THEN
+            CASE s_iStep OF
+                0:  // 待机：等工件在位且收到启动
+                    s_bClampCmd := FALSE;
+                    s_bReleaseCmd := NOT s_bReleasedOk;
+                    IF i_bStartCmd AND s_bPartPresent AND s_bReleasedOk THEN
+                        s_iStep := 10;
+                    END_IF;
+                10: // 夹紧
+                    s_bClampCmd := TRUE;
+                    s_bReleaseCmd := FALSE;
+                    IF s_bClampedOk THEN
+                        s_iStep := 20;
+                    END_IF;
+                20: // 夹紧保持，等启动命令撤销后松开
+                    s_bClampCmd := TRUE;
+                    IF NOT i_bStartCmd THEN
+                        s_iStep := 30;
+                    END_IF;
+                30: // 松开
+                    s_bClampCmd := FALSE;
+                    s_bReleaseCmd := TRUE;
+                    IF s_bReleasedOk THEN
+                        s_iStep := 0;
+                    END_IF;
+            ELSE
+                s_iStep := 0;  // 非法步号回到待机
+            END_CASE;
+        END_IF;
+    END_REGION
+
+    REGION 04_Alarm 报警
+        // 步超时：10 步和 30 步各 3000 ms 内必须到位
+        fb_tStepTimer.IN := (s_iStep = 10) OR (s_iStep = 30);
+        s_bStepTimeout := fb_tStepTimer.Q;
+        s_dStepElapsed := fb_tStepTimer.ET;
+        s_arrAlarm[1] := s_bStepTimeout AND (s_iStep = 10);  // 夹紧超时
+        s_arrAlarm[2] := s_bStepTimeout AND (s_iStep = 30);  // 松开超时
+        s_arrAlarm[3] := s_bClampedOk AND s_bReleasedOk;     // 两个到位同时为真
+        s_arrAlarm[4] := FALSE;                              // 预留
+
+        t_bAnyAlarm := FALSE;
+        FOR t_iIdx := 1 TO 4 DO
+            IF s_arrAlarm[t_iIdx] THEN
+                t_bAnyAlarm := TRUE;
+            END_IF;
+        END_FOR;
+
+        IF t_bAnyAlarm THEN
+            s_iStep := 0;
+        END_IF;
+    END_REGION
+
+    REGION 05_OutputMapping 输出映射
+        // 报警时两路阀都不动作
+        o_bClampValve := s_bClampCmd AND NOT s_bReleaseCmd AND NOT t_bAnyAlarm;
+        o_bReleaseValve := s_bReleaseCmd AND NOT s_bClampCmd AND NOT t_bAnyAlarm;
+        o_bBusy := (s_iStep <> 0);
+        o_bAlarm := t_bAnyAlarm;
+    END_REGION
+END_FUNCTION_BLOCK
+```
+
+> 说明：示例需要 SysLib 的 `FB_TON`；已过本仓库 `scl_linter`（0 个问题）；siemens-lsp 插件命令行 `check` 须在装有插件的本机验证，验证前不得当作已验证的交付样板。
+
+---
+
 ## 7. 代码审查检查清单
 
 | 检查项 | 说明 |
@@ -452,6 +619,7 @@ plccheck --verbose .
 | [ ] 定时器调用完整 | IN、PT、Q、ET参数齐全 |
 | [ ] 标点符号正确 | 使用英文半角标点 |
 | [ ] 注释格式正确 | 无嵌套注释 |
+| [ ] 折叠区段写法正确 | 用 `REGION 名称 ... END_REGION`，无 `#REGION`，成对出现，且不切开 IF/CASE/FOR/WHILE（§6.3） |
 | [ ] 无GOTO/标签语法 | LSP不支持，必须用IF-ELSE替代 |
 | [ ] 语法白名单合规 | 仅使用§4明确列出的语法，无未列出的语法特性 |
 | [ ] 语法检查通过 | `plccheck`无错误 |
@@ -462,6 +630,9 @@ plccheck --verbose .
 
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
+| V1.5.1 | 2026-10-27 | Claude | §6.3 补一条：REGION 不得与 IF/CASE/FOR/WHILE 交叉（开头和结尾须在同一控制结构的同一层），对应 scl_linter 规则 LSP-905-REGION-CROSS-BLOCK；另补 REGION 名称里不得出现 `;`、`:=`（规则 LSP-905-REGION-NAME-CHARS，起因 #237 合并后 005 插件测试挂 2 条）；协调者 2026-10-27 指示 |
+| V1.5.0 | 2026-10-26 | Claude | 新增 §6.3 折叠区段 REGION ... END_REGION（siemens-lsp 支持，#REGION 不支持；移植按平台适配），附较长示例；用户 2026-10-26 批准（TIA V19 可直接用，移植按平台适配） |
+| V1.4.0 | 2026-10-26 | Claude | 新增 §3.6 下标起点：STRING 字符下标从 1 起（siemens-lsp 要求）、ARRAY 下界为 1（用户裁决，统一风格）；移植时按平台适配；用户 2026-10-26 批准；数组示例改为下界 1 |
 | V1.3.0 | 2026-10-24 | Claude | 新增 §4.4 ENUM 枚举类型（DJ-2026-005 步序用枚举；验证前置见 §4.4） |
 | V1.2.1 | 2026-08-26 | Codex | 补充 ARRAY 命名示例，明确数组变量统一使用 arr 类型标识 |
 | V1.2.0 | 2026-08-25 | Codex | 删除 METHOD 教程并改为禁用规则；统一与 plc-electrical-engineer / LSP-906 的白名单口径 |

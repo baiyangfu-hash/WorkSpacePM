@@ -25,6 +25,7 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     independent_staged_changes,
     is_excluded_from_production,
 )
+from tests.git_support import git_out
 
 SW008_ROOT = (
     "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/"
@@ -78,16 +79,13 @@ def test_control_root_mapping_rejects_unknown_project_id(
 
 
 def _git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=True,
-    )
-    return result.stdout.strip()
+    return git_out(cwd, *args)
+
+
+def test_fixture_git_failure_carries_the_git_error_text(tmp_path: Path) -> None:
+    _git(tmp_path, "init")
+    with pytest.raises(RuntimeError, match=r"worktree add .*退出码 128[\s\S]*fatal"):
+        _git(tmp_path, "worktree", "add", str(tmp_path / "wt"), "no-such-ref")
 
 
 def _fixture_chg_content(
@@ -695,7 +693,9 @@ def test_td100_preflight_refuses_a_content_only_change_of_a_production_file(tmp_
     (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
     _git(cand, "add", SERVICE)
     _no_chg_message(msg)
-    assert _run_preflight(cand, ctrl, msg).exit_code != 0
+    result = _run_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "Commit Message 未绑定变更单" in result.output
 
 
 def test_td100_preflight_passes_a_content_only_change_with_a_valid_change_order(tmp_path: Path) -> None:
@@ -710,14 +710,18 @@ def test_td100_preflight_refuses_a_mode_only_change_without_a_change_order(tmp_p
     cand, ctrl, msg = _delete_scene(tmp_path)
     _git(cand, "update-index", "--chmod=+x", SERVICE)
     _no_chg_message(msg)
-    assert _run_preflight(cand, ctrl, msg).exit_code != 0
+    result = _run_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "Commit Message 未绑定变更单" in result.output
 
 
 def test_td100_preflight_refuses_a_linked_worktree_given_itself_as_control_root(tmp_path: Path) -> None:
     cand, ctrl, msg = _delete_scene(tmp_path)
     (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
     _git(cand, "add", SERVICE)
-    assert _run_preflight(cand, ctrl, msg, control_root=cand).exit_code != 0
+    result = _run_preflight(cand, ctrl, msg, control_root=cand)
+    assert result.exit_code != 0
+    assert "同仓身份校验失败" in result.output
 
 
 def test_td100_preflight_refuses_when_the_snapshot_cannot_be_read(tmp_path: Path) -> None:
@@ -725,7 +729,9 @@ def test_td100_preflight_refuses_when_the_snapshot_cannot_be_read(tmp_path: Path
     not_a_repo.mkdir()
     msg = not_a_repo / "COMMIT_EDITMSG"
     msg.write_text("x\n", encoding="utf-8")
-    assert _run_preflight(not_a_repo, not_a_repo, msg).exit_code == 1
+    result = _run_preflight(not_a_repo, not_a_repo, msg)
+    assert result.exit_code == 1
+    assert "无法读取 Git 暂存区" in result.output
 
 
 def test_td100_preflight_refuses_when_the_pre_commit_gate_blows_up(
@@ -739,7 +745,9 @@ def test_td100_preflight_refuses_when_the_pre_commit_gate_blows_up(
         raise RuntimeError("台账内部故障")
 
     monkeypatch.setattr("auto_pm.infrastructure.git_hook_enforcer._run_ledger_gate", boom)
-    assert _run_preflight(cand, ctrl, msg).exit_code != 0
+    result = _run_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "台账检查异常" in result.output
 
 
 def test_td100_independent_comparison_sees_deletions_with_the_old_mode_and_blob(tmp_path: Path) -> None:
@@ -939,3 +947,108 @@ def test_td115_scan_handles_spaces_and_chinese_in_names(tmp_path: Path) -> None:
     (repo / ".gitignore").write_text("*.bak\n", encoding="utf-8")
     hits = ignored_among(repo, ["中文 目录/备份.bak", "中文 目录/正常.txt"])
     assert [h.path for h in hits] == ["中文 目录/备份.bak"]
+
+
+def test_reading_the_staging_area_fails_closed_never_as_an_empty_list(tmp_path: Path) -> None:
+    """暂存区读不到时 get_staged_files 必须抛错；返回 [] 等于钩子什么都没查就放行。"""
+    from auto_pm.infrastructure.git_hook_enforcer import get_staged_files
+
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    with pytest.raises(RuntimeError, match="获取暂存区文件失败"):
+        get_staged_files(not_a_repo)
+
+
+def test_an_unreadable_staging_area_is_rejected_by_both_readers(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from auto_pm.infrastructure.git_hook_enforcer import (
+        _get_staged_files_or_reject,
+        _get_staged_snapshot_or_reject,
+    )
+
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    assert _get_staged_files_or_reject(not_a_repo, "pre-commit") is None
+    assert "无法读取 Git 暂存区" in capsys.readouterr().out
+    assert _get_staged_snapshot_or_reject(not_a_repo, "pre-commit") is None
+    assert "无法读取 Git 暂存区" in capsys.readouterr().out
+
+
+def test_both_hooks_refuse_the_commit_when_the_staging_area_cannot_be_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """钩子入口本身（不经 preflight）读不到暂存区也必须返回 1，而不是按“无改动”放行。"""
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    msg = not_a_repo / "COMMIT_EDITMSG"
+    msg.write_text("x\n", encoding="utf-8")
+
+    assert enforce_pre_commit(not_a_repo) == 1
+    assert "无法读取 Git 暂存区" in capsys.readouterr().out
+    assert enforce_commit_msg(not_a_repo, msg) == 1
+    assert "无法读取 Git 暂存区" in capsys.readouterr().out
+
+
+# ---- TD-SW008-087 / TD-115：忽略规则扫描走真实 preflight 入口，拦截与超时都必须拒绝 ----
+
+
+def _ignore_preflight_scene(tmp_path: Path) -> tuple[Path, Path, Path]:
+    cand, ctrl, msg = _make_dual_root_fixture(
+        tmp_path, candidate_has_staged_code=False, candidate_ledger_clean=True
+    )
+    (cand / ".gitignore").write_text("*.zip\n", encoding="utf-8")
+    _git(cand, "add", ".gitignore")
+    _git(cand, "commit", "-qm", "ignore rules")
+    _no_chg_message(msg)
+    return cand, ctrl, msg
+
+
+def _ignore_preflight(cand: Path, ctrl: Path, msg: Path):  # type: ignore[no-untyped-def]
+    from auto_pm.cli.__main__ import cli
+    from click.testing import CliRunner
+
+    return CliRunner().invoke(
+        cli, ["-w", str(cand), "--control-root", str(ctrl), "git-hook", "preflight", str(msg)]
+    )
+
+
+def test_td115_preflight_entry_refuses_a_force_added_ignored_file(tmp_path: Path) -> None:
+    """Through ``git-hook preflight`` (the entry the real hook runs), not just the enforcer function."""
+    cand, ctrl, msg = _ignore_preflight_scene(tmp_path)
+    (cand / "pack.zip").write_text("x", encoding="utf-8")
+    _git(cand, "add", "-f", "pack.zip")
+    result = _ignore_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "新增文件命中仓库忽略规则" in result.output and "pack.zip" in result.output
+
+
+def test_td115_preflight_entry_lets_a_plain_file_through_the_ignore_scan(tmp_path: Path) -> None:
+    cand, ctrl, msg = _ignore_preflight_scene(tmp_path)
+    (cand / "notes.txt").write_text("x", encoding="utf-8")
+    _git(cand, "add", "notes.txt")
+    result = _ignore_preflight(cand, ctrl, msg)
+    assert "命中仓库忽略规则" not in result.output and "忽略规则扫描失败" not in result.output
+    assert result.exit_code == 0, result.output
+
+
+def test_td115_preflight_entry_refuses_when_the_ignore_scan_hangs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hung ``git check-ignore`` must refuse the commit with the timeout receipt, never pass it."""
+    import subprocess as sp
+
+    cand, ctrl, msg = _ignore_preflight_scene(tmp_path)
+    (cand / "notes.txt").write_text("x", encoding="utf-8")
+    _git(cand, "add", "notes.txt")
+    real_run = sp.run
+
+    def hang_on_check_ignore(command: list[str], *args: object, **kwargs: object) -> object:
+        if "check-ignore" in command:
+            raise sp.TimeoutExpired(command, kwargs["timeout"])  # type: ignore[arg-type]
+        return real_run(command, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", hang_on_check_ignore)
+    result = _ignore_preflight(cand, ctrl, msg)
+    assert result.exit_code != 0
+    assert "忽略规则扫描失败" in result.output and "超时回执" in result.output

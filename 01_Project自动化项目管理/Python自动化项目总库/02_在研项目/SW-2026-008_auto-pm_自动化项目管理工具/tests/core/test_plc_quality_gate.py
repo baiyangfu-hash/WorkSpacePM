@@ -20,6 +20,7 @@ from auto_pm.application.core.evidence_collection_service import (
 )
 from auto_pm.contracts.continuity import RunItem, RunState
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from tests.git_support import git_out
 
 _TIMESTAMP = "2026-10-03T00:00:00+00:00"
 PROJECT = "0100_PLC/DJ-TEST-001"
@@ -35,16 +36,7 @@ _PRD_FILES = (
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), *arguments],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=clean_git_environment(),
-    )
-    return result.stdout.strip()
+    return git_out(root, *arguments, env=clean_git_environment())
 
 
 def write_plc_project(root: Path, relative: str, *, scl_dir: str = "OB1") -> Path:
@@ -502,7 +494,7 @@ def test_p15_a_wedged_gate_fails_with_a_timeout_instead_of_hanging_the_verificat
     assert receipt.status == "FAIL"
 
 
-@pytest.mark.parametrize("raw", ["", "abc", "0", "-5"])
+@pytest.mark.parametrize("raw", ["", "abc", "0", "-5", "nan", "NaN", "inf", "-inf", "Infinity", "1e400", "-1e400"])
 def test_p16_an_unusable_timeout_setting_falls_back_to_the_default(
     monkeypatch: pytest.MonkeyPatch, raw: str
 ) -> None:
@@ -511,6 +503,17 @@ def test_p16_an_unusable_timeout_setting_falls_back_to_the_default(
     monkeypatch.setenv("AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS", raw)
 
     assert module._quality_gate_timeout_seconds() == module._QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS
+
+
+def test_p16_the_default_time_limit_is_pinned_to_1800_finite_and_positive() -> None:
+    """退回默认的前提是默认值本身有限且为正；它被改成 inf、0 或别的数，所有“退回默认”的测试都会跟着失真。"""
+    import math
+
+    from auto_pm.application.core import evidence_collection_service as module
+
+    assert module._QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS == 1800.0
+    assert math.isfinite(module._QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS)
+    assert module._QUALITY_GATE_TIMEOUT_DEFAULT_SECONDS > 0
 
 
 def test_p17_a_gate_that_raises_still_reports_a_launch_error_not_a_timeout(
@@ -548,7 +551,6 @@ def test_p18_a_python_quality_command_that_never_ends_fails_with_a_timeout(
 def test_p19_a_git_evidence_call_is_bounded_and_a_timeout_is_a_clear_collection_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import subprocess
 
     from auto_pm.application.core import evidence_collection_service as module
 
@@ -560,7 +562,24 @@ def test_p19_a_git_evidence_call_is_bounded_and_a_timeout_is_a_clear_collection_
 
     monkeypatch.setattr(module.subprocess, "run", hung)
 
-    with pytest.raises(EvidenceCollectionError, match="采集超过"):
+    with pytest.raises(EvidenceCollectionError, match="超时回执"):
         EvidenceCollectionService._git_output(tmp_path, "status")
 
     assert seen["timeout"] == module._GIT_EVIDENCE_TIMEOUT_SECONDS > 0
+
+
+@pytest.mark.parametrize(
+    ("setting", "expected"),
+    [("", 600), ("1800", 600), ("600", 600), ("45", 45), ("45.2", 46), ("0.3", 1)],
+)
+def test_p19_each_language_service_call_is_capped_at_the_smaller_of_default_and_gate_limit(
+    monkeypatch: pytest.MonkeyPatch, setting: str, expected: int
+) -> None:
+    """TD-SW008-188：插件命令行每次调用的时限取插件默认值与质量门时限中较小的一个（单次最多 min(600, T) 秒；门禁线程放弃后可能再起新调用，这里不管）。"""
+    from auto_pm.application.core import evidence_collection_service as module
+
+    monkeypatch.setenv("AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS", setting)
+
+    service = module._plc_language_service()
+
+    assert service is not None and service.timeout == expected

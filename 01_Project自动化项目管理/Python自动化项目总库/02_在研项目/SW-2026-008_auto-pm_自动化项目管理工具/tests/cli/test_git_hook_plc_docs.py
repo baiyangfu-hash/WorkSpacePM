@@ -13,6 +13,7 @@ from auto_pm.plc import doc_consistency as dc
 from click.testing import CliRunner
 
 import auto_pm
+from tests.git_support import run_git
 from tests.plc.test_doc_consistency import build
 
 IFC = "0100_PLC自动化/DJ-TEST-001/02_PLC程序/PLC_ST/01_泵/PRD/接口文档_IFC-FB_Pump.md"
@@ -24,9 +25,8 @@ if __name__ == "__main__":
 
 
 def git(repo: Path, *args: str, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=tester", "-c", "user.email=t@example.test", "-c", "core.autocrlf=false", *args],
-        check=check, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+    return run_git(
+        repo, *args, config=["user.name=tester", "user.email=t@example.test", "core.autocrlf=false"], check=check, env=env
     )
 
 

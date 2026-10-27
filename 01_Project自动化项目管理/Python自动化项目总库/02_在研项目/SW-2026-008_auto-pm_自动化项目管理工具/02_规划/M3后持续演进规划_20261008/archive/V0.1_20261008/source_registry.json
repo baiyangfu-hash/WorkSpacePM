@@ -1,0 +1,270 @@
+{
+  "schema": "sw008.evolution.planning_sources.v0.1",
+  "purpose": "只读规划来源快照；不是验收或执行授权",
+  "worktree_heads": {
+    "wbs6": "0b56b2f4de2b35effea7e100ab2c56bc1cec0bc7",
+    "td2": "1956dd9a003bca2dab379d7e368aaf78c60d7170",
+    "td6": "06f4ae4d0be0075df5d205765acd143f6c75e8e7",
+    "v06c": "83369f67bd9e0ee7711412326b35797a7a5fb883"
+  },
+  "limitations": [
+    "文件哈希只固定读取字节，不证明源文件已批准、未修改或已部署。",
+    "不同工作树是各自快照，不组成一条已经合并的统一基线。",
+    "只核本文列明材料及读取范围，不声称通读SW008全部文档。",
+    "当前未查询canonical continuity.db，没有确认实时Run/lease或M3完成。",
+    "未运行pytest、门禁、产品命令、真实模型或设备操作。"
+  ],
+  "sources": [
+    {
+      "id": "S01",
+      "path": "C:/Users/fubai/Documents/My_Workspace/AGENTS.md",
+      "role": "协作规则与退役隔离",
+      "readScope": "全文",
+      "tree": "control",
+      "sha256": "cd5e4d9e25c3a05af73103a6ddd64abce6626ffe2acc199c364f5c81f6ab13d8",
+      "bytes": 16506,
+      "modified": "2026-09-10T20:29:55.8931510-07:00"
+    },
+    {
+      "id": "S02",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.cursor/rules/workspace-ai-coexistence.mdc",
+      "role": "共存路由",
+      "readScope": "全文",
+      "tree": "control",
+      "sha256": "78fe8f1327b3932a9d5d2372acac484104bb47fe5b8a3dd09f72687d9aa37117",
+      "bytes": 2619,
+      "modified": "2026-09-10T20:29:49.0434154-07:00"
+    },
+    {
+      "id": "S03",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.agent/rules/project-rule.md",
+      "role": "非Trae引用入口",
+      "readScope": "全文",
+      "tree": "control",
+      "sha256": "e7e14b0a21f0a62ed0b1db757907381bcf461381bb9f12989081e3454f72037f",
+      "bytes": 1535,
+      "modified": "2026-09-10T20:29:48.9656069-07:00"
+    },
+    {
+      "id": "S04",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.trae/rules/project-rule.md",
+      "role": "全局规则",
+      "readScope": "适用条目",
+      "tree": "control",
+      "sha256": "19bc1c8661b6942cf818a2bc23c9454d3dd07037939503e8da1c92b21157dcf0",
+      "bytes": 7684,
+      "modified": "2026-09-10T20:29:49.0666060-07:00"
+    },
+    {
+      "id": "S05",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.trae/skills/shared/refs/skill_coordination.md",
+      "role": "角色与交接公共契约",
+      "readScope": "适用条目",
+      "tree": "control",
+      "sha256": "2ce0625a18caeacdbe4393d76232cd3b91880ffca9f8c0f94016fbf21d114b96",
+      "bytes": 2926,
+      "modified": "2026-09-10T20:29:49.0801737-07:00"
+    },
+    {
+      "id": "S06",
+      "path": "C:/Users/fubai/Documents/My_Workspace/SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md",
+      "role": "旧规划退役与恢复基线",
+      "readScope": "85-90等相关段落",
+      "tree": "control",
+      "sha256": "353d1daf2f9f335426dc184685710af2b1aac8568885a5e90c8582a756fab9bf",
+      "bytes": 11911,
+      "modified": "2026-09-10T20:29:55.9077815-07:00"
+    },
+    {
+      "id": "S07",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/worktrees/m2-gov-wbs6/SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md",
+      "role": "V3.0.22隔离WBS快照；不是当前全量完成状态",
+      "readScope": "276,714-719,760,770-788,798-806,935-950,971",
+      "tree": "wbs6",
+      "sha256": "41469091baa836807b5d8913e5a0678a3e38f043253b008f72cd00e1bab522d6",
+      "bytes": 206961,
+      "modified": "2026-10-06T15:22:47.3523635-07:00"
+    },
+    {
+      "id": "S08",
+      "path": "C:/Users/fubai/Documents/My_Workspace/00_Obsidian_Base全局规范文件仓库/spec_registry.json",
+      "role": "规范注册索引",
+      "readScope": "PM-033/042注册字段",
+      "tree": "control",
+      "sha256": "589685e0d19d38e04553ccb4b30f01f0bb91eea1054ff87a8c9c5b9940374380",
+      "bytes": 37295,
+      "modified": "2026-09-10T20:29:52.8899045-07:00"
+    },
+    {
+      "id": "S09",
+      "path": "C:/Users/fubai/Documents/My_Workspace/00_Obsidian_Base全局规范文件仓库/01_项目管理域/02_规划阶段/033_功能模块迭代流程标准_PM.md",
+      "role": "迭代阶段与授权",
+      "readScope": "1-100",
+      "tree": "control",
+      "sha256": "5b61ef2ca000c3df5fafc9007ce07a572885d0148353f4816402118656ac9e77",
+      "bytes": 6336,
+      "modified": "2026-09-28T08:51:34.3079785-07:00"
+    },
+    {
+      "id": "S10",
+      "path": "C:/Users/fubai/Documents/My_Workspace/00_Obsidian_Base全局规范文件仓库/01_项目管理域/04_变更管理/042_通用变更管理流程规范_PM.md",
+      "role": "变更边界",
+      "readScope": "1-100",
+      "tree": "control",
+      "sha256": "fc9baacda788dd50a999f9d5d8de0ff0b1bce949716dfb9dc8d480af32f3c287",
+      "bytes": 27160,
+      "modified": "2026-09-10T20:29:52.8398118-07:00"
+    },
+    {
+      "id": "S11",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-brief/M3_ITERATION_ADVICE_FOR_GPT.md",
+      "role": "Claude一线建议；非授权、非实测审计",
+      "readScope": "1-45",
+      "tree": "report",
+      "sha256": "134c8d9c76dadb9a8a468a8b49b200cc7fe0c4669daa0c9ce3908c55a9cb3ea1",
+      "bytes": 4863,
+      "modified": "2026-10-08T15:21:15.8051833-07:00"
+    },
+    {
+      "id": "S12",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/worktrees/m2-td2/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/M2_门禁分档与单卡规模规则_PM.md",
+      "role": "获批文本分档规则；机器分档另行实现",
+      "readScope": "1-17",
+      "tree": "td2",
+      "sha256": "8fec2229b931576e49d74ffa82c568ec3a2da8c0b995c34602078c7a02cd6e0c",
+      "bytes": 4170,
+      "modified": "2026-10-06T14:24:13.1811457-07:00"
+    },
+    {
+      "id": "S13",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/worktrees/m2-td6/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/02_整改项/活动技术债台账.md",
+      "role": "技术债历史候选快照；开工必须重核",
+      "readScope": "126,130,137-138",
+      "tree": "td6",
+      "sha256": "791aa8ef260e9b366cce0880e2426954e1a40eb13a48bca7cf0a0dda637cadea",
+      "bytes": 72091,
+      "modified": "2026-10-08T09:36:18.7513841-07:00"
+    },
+    {
+      "id": "S14",
+      "path": "C:/Users/fubai/Documents/My_Workspace/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/072_F01-1_关闭封口实施卡_PM.md",
+      "role": "暂停/销毁语义边界",
+      "readScope": "19-20,154及§11",
+      "tree": "control",
+      "sha256": "35529109574313b3d8d1d15376651fb85ca1e6a7b28d650625f3d2e5cfbff78c",
+      "bytes": 16081,
+      "modified": "2026-10-08T13:21:30.2698983-07:00"
+    },
+    {
+      "id": "S15",
+      "path": "C:/Users/fubai/Documents/My_Workspace/SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md",
+      "role": "根入口及恢复；发布号可能过时",
+      "readScope": "5,13,31,41,73-95",
+      "tree": "control",
+      "sha256": "2400f2a6275b316e95fc794ec010564373302a9b91266d034821544ac8177114",
+      "bytes": 5418,
+      "modified": "2026-09-10T20:29:55.9169605-07:00"
+    },
+    {
+      "id": "S16",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/worktrees/m2-v06c/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/tools/verdict_check.py",
+      "role": "V06C已部分补强，避免旧债重复开工",
+      "readScope": "40-125",
+      "tree": "v06c",
+      "sha256": "0f9e8057da14e33731c378b0c5f35d3a1c5b65cf8084cd5696cc2670fd603e22",
+      "bytes": 7221,
+      "modified": "2026-10-08T10:30:23.6415355-07:00"
+    },
+    {
+      "id": "S17",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m2-v06c/acceptance_receipt.txt",
+      "role": "V06C候选回执，非用户验收/部署证据",
+      "readScope": "1-12",
+      "tree": "report",
+      "sha256": "b8ddb42af64c573f6b143f3dc8bfe21bd2ee6107b7d45cea2f51f9c1cb0ce500",
+      "bytes": 850,
+      "modified": "2026-10-08T10:56:24.4534083-07:00"
+    },
+    {
+      "id": "S18",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m2-v06d/build_v06d.py",
+      "role": "V06D构建脚本边界线索，非运行证据",
+      "readScope": "135,172",
+      "tree": "report",
+      "sha256": "25c3b9c0df9f2912092f5aa34ec52a334451c438433b44828e67df756c2efbf7",
+      "bytes": 15352,
+      "modified": "2026-10-08T11:14:10.1536696-07:00"
+    },
+    {
+      "id": "S19",
+      "path": "C:/Users/fubai/Documents/My_Workspace/0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_程序方案/015_IO分配表_IO.md",
+      "role": "真实工程样本来源、IO与厂商",
+      "readScope": "9,34,54",
+      "tree": "control",
+      "sha256": "9ea365b1b173383050844ff3a1e989a8057f7c99fd35eff21c87c12289ff8545",
+      "bytes": 25838,
+      "modified": "2026-09-10T20:29:52.9221401-07:00"
+    },
+    {
+      "id": "S20",
+      "path": "C:/Users/fubai/Documents/My_Workspace/0100_PLC自动化/DJ-2026-005/05_测试与验证/测试报告/Eplan电路整改报告.md",
+      "role": "图纸/PLC差异的实际问题",
+      "readScope": "11,63-80",
+      "tree": "control",
+      "sha256": "0b062d76b8da81b6c600cea0dafcdaab34819a846124f1168c0e332ceb45fba3",
+      "bytes": 4926,
+      "modified": "2026-07-05T11:45:23.7725162-07:00"
+    },
+    {
+      "id": "S21",
+      "path": "C:/Users/fubai/Documents/My_Workspace/0100_PLC自动化/DJ-2026-005/06_文档与交付/上机复核/PLC_Handoff_Checklist_DJ-2026-005.md",
+      "role": "物理事实和上机验证的用户边界",
+      "readScope": "13-35",
+      "tree": "control",
+      "sha256": "ec34087171d23060e303f896ef79e42fceb5841db71c122d9c2daf9b508da979",
+      "bytes": 2183,
+      "modified": "2026-09-10T20:29:52.9891731-07:00"
+    },
+    {
+      "id": "S22",
+      "path": "C:/Users/fubai/Documents/My_Workspace/00_Infrastructure/auto_pm/active_release.json",
+      "role": "读取时部署指针；非未来M3结论",
+      "readScope": "全文",
+      "tree": "control",
+      "sha256": "f95ddd95888ef44659d14cfb5fd1a3d228fa762dcc86053eafb4da07d041cbb1",
+      "bytes": 200,
+      "modified": "2026-09-30T15:26:48.3290002-07:00"
+    },
+    {
+      "id": "S23",
+      "path": "C:/Users/fubai/Documents/My_Workspace/00_Infrastructure/auto_pm/launcher/launch.py",
+      "role": "启动器输出与入口线索",
+      "readScope": "43及附近",
+      "tree": "control",
+      "sha256": "e9190240b40eede8e8d00b18a6815a1c9da4c5d22168b176254b8147f64a2792",
+      "bytes": 2270,
+      "modified": "2026-09-10T20:29:49.2786210-07:00"
+    },
+    {
+      "id": "S24",
+      "path": "C:/Users/fubai/Documents/My_Workspace/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/execution_adapter.py",
+      "role": "执行身份合同的母体路径，仅定位",
+      "readScope": "15-17,57-92的身份字段与约束检索",
+      "tree": "control",
+      "sha256": "bc39533e246f8fdd39587de8976699865647098c44b8e061601f01c69e56de02",
+      "bytes": 3808,
+      "modified": "2026-09-10T20:29:53.4954833-07:00"
+    },
+    {
+      "id": "S25",
+      "path": "C:/Users/fubai/Documents/My_Workspace/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/execution_adapter_service.py",
+      "role": "解耦拟影响入口，仅定位",
+      "readScope": "64-258中executor_id/owner/lease相关检索；不代表完整服务审计",
+      "tree": "control",
+      "sha256": "f45d9008c44e6daa98e3207a8444c18be16ac5fb96277d9a1180bbfcd51b3713",
+      "bytes": 11807,
+      "modified": "2026-09-12T13:57:56.0316262-07:00"
+    }
+  ],
+  "collection_period": "2026-10-08，本次规划会话；文件mtime不是采集或批准时间"
+}

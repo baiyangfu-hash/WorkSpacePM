@@ -6,7 +6,6 @@ import dataclasses
 import json
 import os
 import re
-import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -47,14 +46,21 @@ from auto_pm.infrastructure import lease_wallet, process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
-    authority_path_parts,
+    authority_path_covered,
     clean_git_environment,
     require_governed_worktree,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
 
 _Command = TypeVar("_Command", bound=Callable[..., Any])
+
+def _read_stdin_text() -> str:
+    """Whole stdin as text; ``click.get_text_stream`` is deprecated (removed in click 9), ``open_file("-")`` is its public form."""
+    with click.open_file("-", "r") as stream:
+        return str(stream.read())
+
 
 def _workspace(ctx: click.Context) -> Path:
     app_ctx: AppContext = ctx.find_root().obj
@@ -184,8 +190,11 @@ def _holder_pid(value: str) -> int | None:
 
 
 def _git(root: Path, *args: str) -> bytes:
-    result = subprocess.run(
+    result = run_git_bounded(
         ["git", "-C", str(root), *args],
+        default_timeout=60.0,
+        error_cls=click.ClickException,
+        where=root,
         capture_output=True,
         check=False,
         env=clean_git_environment(),
@@ -214,15 +223,7 @@ def _git_snapshot(root: Path) -> tuple[str, tuple[str, ...]]:
 
 
 def _within(paths: tuple[str, ...], roots: tuple[str, ...]) -> list[str]:
-    return [
-        path
-        for path in paths
-        if any(
-            authority_path_parts(path)[: len(authority_path_parts(root))]
-            == authority_path_parts(root)
-            for root in roots
-        )
-    ]
+    return [path for path in paths if authority_path_covered(path, roots)]
 
 
 @click.group(name="continuity")
@@ -514,7 +515,7 @@ def adjudicate_blocked_work(
     """Forward-cancel one historical BLOCKED Work under an exact adjudication Decision."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _work_service(ctx).adjudicate_blocked_work(
             target_work_id=work_id,
@@ -895,7 +896,7 @@ def fence_terminal_lease(
     """Fence one legacy terminal lease through an independently approved recovery Run."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _execution_service(ctx).fence_terminal_lease(
             target_run_id=target_run_id,
@@ -944,7 +945,7 @@ def reconcile_terminal_lease(
     """Release a lease omitted by an exact legacy v2 terminal transition."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _execution_service(ctx).reconcile_terminal_lease(
             target_run_id=target_run_id,
@@ -1016,7 +1017,7 @@ def fence_legacy_terminal(
     """Invalidate one expired legacy terminal lease token without rewriting Run history."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _execution_service(ctx).fence_legacy_terminal_lease(
             target_run_id=target_run_id,
@@ -1065,7 +1066,7 @@ def revoke_unstarted_run(
     """Revoke a live Run only when its durable record has no Popen evidence."""
 
     del recovery_lease_stdin
-    recovery_lease_token = click.get_text_stream("stdin").read().strip()
+    recovery_lease_token = _read_stdin_text().strip()
     try:
         item = _execution_service(ctx).revoke_unstarted_run(
             target_run_id=target_run_id,

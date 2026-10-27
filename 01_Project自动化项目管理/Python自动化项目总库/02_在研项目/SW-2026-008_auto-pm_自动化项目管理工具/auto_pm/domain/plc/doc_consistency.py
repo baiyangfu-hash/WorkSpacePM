@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,6 +49,8 @@ _SECTION = re.compile(r"^\s*(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR_STAT|V
 _END_SECTION = re.compile(r"^\s*(END_VAR|END_STRUCT)\b", re.I)
 _STRUCT_OPEN = re.compile(r"^\s*(?:([A-Za-z_]\w*)\s*:\s*)?STRUCT\s*(?://.*)?$", re.I)
 _DECL = re.compile(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*:\s*(.*?)\s*;\s*(.*)$")
+_DECL_START = re.compile(r"^\s*[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s*(?:,|:(?!=)[^;]*)$")
+_DECL_NAME_COLON = re.compile(r"^\s*[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s*:(?!=)")
 _TRAILING_BLOCK_COMMENT = re.compile(r";\s*\(\*(.*?)\*\)\s*$")
 _BLOCK_COMMENT = re.compile(r"\(\*.*?\*\)", re.S)
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
@@ -224,16 +226,29 @@ class _ObjectBuilder:
 
 
 def parse_scl_text(text: str, path: str) -> list[CodeObject]:
-    """Parse FB/FC/OB/DB/UDT declarations; only single-line declarations are understood."""
+    """Parse FB/FC/OB/DB/UDT declarations; a declaration may continue over several lines until its ``;``."""
 
     objects: list[CodeObject] = []
     current: _ObjectBuilder | None = None
     section = ""
     prefix: list[str] = []
+    pending: tuple[int, str] | None = None  # 还没写到 `;` 的多行声明：(起始行号, 已拼接文本)
     for number, line in enumerate(_prepare_lines(text), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("//"):
             continue
+        if pending is not None:
+            # 漏写 `;`：遇到段尾，或新的一行又是“名字 :”开头（上一行不是以逗号收尾的名字表）时，上一条记无法解析，不与下一条合并
+            starts_new = not pending[1].rstrip().endswith(",") and bool(_DECL_NAME_COLON.match(line))
+            if current is not None and (starts_new or _END_OBJECT.match(line) or _END_SECTION.match(line)):
+                current.unparsed.append((pending[0], pending[1][:80]))
+                pending = None
+            else:
+                joined = f"{pending[1]} {stripped}"
+                if ";" not in line:
+                    pending = (pending[0], joined)
+                    continue
+                number, line, pending = pending[0], joined, None
         if current is None:
             header = _HEADER.match(line)
             if header:
@@ -267,6 +282,9 @@ def parse_scl_text(text: str, path: str) -> list[CodeObject]:
         if not section or section.startswith("IGNORED:"):
             continue
         declaration = _DECL.match(line)
+        if not declaration and _DECL_START.match(line):
+            pending = (number, stripped)
+            continue
         if not declaration:
             current.unparsed.append((number, stripped[:80]))
             continue
@@ -709,8 +727,20 @@ def _insert_row(buffer: _Buffer, tables: Sequence[DocTable], variable: CodeVar, 
     buffer.lines.extend([new_section_title if new_section_title.startswith("#") else f"### {new_section_title}", "", *block])
 
 
-def sync_project(project_path: str, *, write: bool = True, apply_suggestions: bool = False) -> SyncResult:
-    """Complete the documents from the code. Never touches SCL; never overwrites human text unless asked."""
+def sync_project(
+    project_path: str,
+    *,
+    write: bool = True,
+    apply_suggestions: bool = False,
+    only_objects: Collection[str] | None = None,
+) -> SyncResult:
+    """Complete the documents from the code. Never touches SCL; never overwrites human text unless asked.
+
+    ``only_objects`` narrows the work to the objects of those names (the commit hook passes the objects it just
+    refused, TD-SW008-045); ``None`` keeps the whole-project behaviour of ``plc docs sync``.
+    """
+
+    wanted = None if only_objects is None else frozenset(only_objects)
 
     analysis = analyze_project(project_path)
     result = SyncResult()
@@ -728,7 +758,7 @@ def sync_project(project_path: str, *, write: bool = True, apply_suggestions: bo
                     "## 变量表", ""]
     for report in analysis.reports:
         obj = report.obj
-        if not obj.variables:
+        if not obj.variables or (wanted is not None and obj.name not in wanted):
             continue
         if obj.kind in {"FB", "FC"}:
             module = Path(obj.path).parent
@@ -751,6 +781,8 @@ def sync_project(project_path: str, *, write: bool = True, apply_suggestions: bo
         if apply_suggestions and report.doc_state == "ok":
             _apply_suggestions(buffer, obj, report.shared_doc, result)
     for finding in analysis.findings:
+        if wanted is not None and finding.obj not in wanted:
+            continue
         if finding.kind in {"type", "direction", "comment", "doc_not_in_code", "no_comment", "doc_duplicate"}:
             result.suggestions.append(finding.render())
     if write:

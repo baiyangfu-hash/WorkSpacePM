@@ -208,3 +208,72 @@ def test_fast_forward_merge_warns_instead_of_failing(world, monkeypatch):
     info, checks = world["audit"](15, network=True)
     assert info["files"] == ["src/app.py"]
     assert status(checks, "merge_shape") == "WARN"
+
+
+# --- CI verdict: Actions runs, check runs and commit statuses --------------------------------------------------
+
+
+def _run(rid: int = 1, conclusion: str | None = "success", status_: str = "completed") -> dict:
+    return {"id": rid, "event": "pull_request", "head_sha": "a" * 40, "workflow_id": 1, "conclusion": conclusion, "status": status_}
+
+
+def test_green_actions_with_failed_safety_zone_status_does_not_pass():
+    verdict, detail = audit_pr.judge_ci([_run()], [], [{"context": "safety-zone", "state": "failure"}], True)
+    assert verdict == "FAIL"
+    assert "safety-zone" in detail
+
+
+@pytest.mark.parametrize("state", ["failure", "error"])
+def test_any_failed_or_errored_status_fails(state):
+    assert audit_pr.judge_ci([_run()], [], [{"context": "other", "state": state}], True)[0] == "FAIL"
+
+
+def test_pending_safety_zone_fails_but_other_pending_is_only_unverified():
+    assert audit_pr.judge_ci([_run()], [], [{"context": "safety-zone", "state": "pending"}], True)[0] == "FAIL"
+    assert audit_pr.judge_ci([_run()], [], [{"context": "other", "state": "pending"}], True)[0] == "UNVERIFIED"
+
+
+def test_failed_check_run_fails_and_unfinished_check_run_is_unverified():
+    bad = {"name": "lint", "status": "completed", "conclusion": "failure"}
+    running = {"name": "lint", "status": "in_progress", "conclusion": None}
+    assert audit_pr.judge_ci([_run()], [bad], [], True)[0] == "FAIL"
+    assert audit_pr.judge_ci([_run()], [running], [], True)[0] == "UNVERIFIED"
+
+
+def test_all_green_with_safety_zone_passes_and_a_missing_safety_zone_is_unverified_for_every_pr():
+    ok = [{"context": "safety-zone", "state": "success"}]
+    assert audit_pr.judge_ci([_run()], [], ok, True)[0] == "PASS"
+    # Same rule as pr_ready: a green head without `safety-zone` has not been through the gate, whatever it changed.
+    verdict, detail = audit_pr.judge_ci([_run()], [], [{"context": "other", "state": "success"}], True)
+    assert verdict == "UNVERIFIED" and "safety-zone" in detail
+    assert audit_pr.judge_ci([_run()], [], [], True)[0] == "UNVERIFIED"
+
+
+def test_statuses_alone_count_when_there_are_no_actions_runs():
+    # safety-gate is comment-triggered: its result is a status on a head that may have no workflow run at all.
+    assert audit_pr.judge_ci([], [], [{"context": "safety-zone", "state": "failure"}], False)[0] == "FAIL"
+    assert audit_pr.judge_ci([], [], [], False)[0] == "UNVERIFIED"  # nothing reported, safety-zone included
+    assert audit_pr.judge_ci([], [], [], True)[0] == "UNVERIFIED"
+
+
+def test_audit_reads_statuses_from_github(world, monkeypatch):
+    head = world["open_pr"](31, {"src/app.py": "x = 31\n"})
+    answers = {
+        "/pulls/31": {"state": "open", "head": {"sha": head}, "base": {"sha": world["base"]}},
+        "/actions/runs": {"workflow_runs": [_run() | {"head_sha": head}]},
+        "/check-runs": {"check_runs": []},
+        "/status": {"statuses": [{"context": "safety-zone", "state": "failure"}]},
+    }
+
+    def fake(path: str):
+        return next((v for k, v in answers.items() if k in path), None)
+
+    monkeypatch.setattr(audit_pr, "github_json", fake)
+    _info, checks = world["audit"](31, network=True)
+    assert status(checks, "ci_result") == "FAIL"
+    answers["/status"] = {"statuses": [{"context": "safety-zone", "state": "success"}]}
+    _info, checks = world["audit"](31, network=True)
+    assert status(checks, "ci_result") == "PASS"
+    answers["/status"] = None
+    _info, checks = world["audit"](31, network=True)
+    assert status(checks, "ci_result") == "UNVERIFIED"

@@ -13,7 +13,7 @@
 (*       和 io_stManual (手动强制位, 已由 FB_1006 按条件放行)         *)
 (*    2. 时间参数放本 FB 的 VAR CONSTANT (毫秒), 不进结构体           *)
 (*    3. 强制位 abForce 的分组为假设: 每层 5 位 (阻挡 / 分料 / 正转 / *)
-(*       反转 / 慢速), 1~2 层占 0~9, 3~4 层占 11~20 (跳过 M80);       *)
+(*       反转 / 慢速), 1~2 层占 1~10, 3~4 层占 12~21 (跳过 M80);       *)
 (*       待 HMI 工程核对                                             *)
 (* ================================================================= *)
 
@@ -49,12 +49,12 @@ VAR CONSTANT
     RELEASE_NG_MS       : DINT := 8000;         // 取走后延时, 无取料完成 (K80)
     STARVE_MS           : DINT := 10000;        // 缺料判定 (K100)
     CYL_TIMEOUT_MS      : DINT := 5000;         // 气缸位置报警 (K50)
-    F_BASE_LAYER        : INT := 34;            // 1 层气缸报警起始 F 号, 每层 +8
-    F_BASE_STARVE       : INT := 103;           // 1 层缺料 F 号, 每高一层 -1
+    F_BASE_LAYER        : INT := 34;            // 1 层气缸报警 F34 起; 下标 = F_BASE_LAYER + 每层偏移 + s_iK (s_iK 从 1 起), 每层 +8
+    F_BASE_STARVE       : INT := 104;           // 1 层缺料 F103 的下标 (F 号 + 1), 每高一层 -1
 END_VAR
 
 BEGIN
-    (* ============ 1. 一键退料 M515: 非自动下上升沿, 4 层重新初始化 ============ *)
+    REGION 01_PurgeRequest 一键退料 M515: 非自动下上升沿, 4 层重新初始化
     fb_trUnload(IN := io_stHmi.bBlinkOpt, Q => s_bUnloadEdge);
     s_bUnloadReq := io_stHmi.bBlinkOpt AND (NOT io_stMachine.bAuto);
 
@@ -91,17 +91,17 @@ BEGIN
                    AND io_stBridge.bPPAtS20 AND io_stBridge.bSafeZone AND (NOT io_stMachine.bFault);
 
     (* ---- 1 层: 输出 = 状态机命令 或 手动强制 或 上料点动 ---- *)
-    io_stIo.bQConv1Block := io_stConv.astLayer[1].bBlockDown OR io_stManual.abForce[0];
-    io_stIo.bQConv1Sep := io_stConv.astLayer[1].bSepDown OR io_stManual.abForce[1];
-    io_stIo.bQConv1Fwd := io_stConv.astLayer[1].bFwd OR io_stManual.abForce[2] OR s_arrJog[1];
-    io_stIo.bQConv1Rev := io_stConv.astLayer[1].bRev OR io_stManual.abForce[3];
-    io_stIo.bQConv1Slow := io_stConv.astLayer[1].bSlow OR io_stManual.abForce[4];
+    io_stIo.bQConv1Block := io_stConv.astLayer[1].bBlockDown OR io_stManual.abForce[1];
+    io_stIo.bQConv1Sep := io_stConv.astLayer[1].bSepDown OR io_stManual.abForce[2];
+    io_stIo.bQConv1Fwd := io_stConv.astLayer[1].bFwd OR io_stManual.abForce[3] OR s_arrJog[1];
+    io_stIo.bQConv1Rev := io_stConv.astLayer[1].bRev OR io_stManual.abForce[4];
+    io_stIo.bQConv1Slow := io_stConv.astLayer[1].bSlow OR io_stManual.abForce[5];
 
     (* ---- 1 层: 报警触发 F34~F41 (气缸), F103 (缺料) ---- *)
-    FOR s_iK := 0 TO 7 DO
+    FOR s_iK := 1 TO 8 DO
         io_stAlarm.arrTrig[F_BASE_LAYER + 0 + s_iK] := io_stConv.astLayer[1].arrTrig[s_iK];
     END_FOR;
-    io_stAlarm.arrTrig[F_BASE_STARVE - 0] := io_stConv.astLayer[1].arrTrig[8];
+    io_stAlarm.arrTrig[F_BASE_STARVE - 0] := io_stConv.astLayer[1].arrTrig[9];
 
     (* ---- 2 层: 输入搬运 ---- *)
     io_stConv.astLayer[2].bPreBlock := io_stIo.bConv2PreBlock;
@@ -136,17 +136,17 @@ BEGIN
                    AND io_stBridge.bPPAtS20 AND io_stBridge.bSafeZone AND (NOT io_stMachine.bFault);
 
     (* ---- 2 层: 输出 = 状态机命令 或 手动强制 或 上料点动 ---- *)
-    io_stIo.bQConv2Block := io_stConv.astLayer[2].bBlockDown OR io_stManual.abForce[5];
-    io_stIo.bQConv2Sep := io_stConv.astLayer[2].bSepDown OR io_stManual.abForce[6];
-    io_stIo.bQConv2Fwd := io_stConv.astLayer[2].bFwd OR io_stManual.abForce[7] OR s_arrJog[2];
-    io_stIo.bQConv2Rev := io_stConv.astLayer[2].bRev OR io_stManual.abForce[8];
-    io_stIo.bQConv2Slow := io_stConv.astLayer[2].bSlow OR io_stManual.abForce[9];
+    io_stIo.bQConv2Block := io_stConv.astLayer[2].bBlockDown OR io_stManual.abForce[6];
+    io_stIo.bQConv2Sep := io_stConv.astLayer[2].bSepDown OR io_stManual.abForce[7];
+    io_stIo.bQConv2Fwd := io_stConv.astLayer[2].bFwd OR io_stManual.abForce[8] OR s_arrJog[2];
+    io_stIo.bQConv2Rev := io_stConv.astLayer[2].bRev OR io_stManual.abForce[9];
+    io_stIo.bQConv2Slow := io_stConv.astLayer[2].bSlow OR io_stManual.abForce[10];
 
     (* ---- 2 层: 报警触发 F42~F49 (气缸), F102 (缺料) ---- *)
-    FOR s_iK := 0 TO 7 DO
+    FOR s_iK := 1 TO 8 DO
         io_stAlarm.arrTrig[F_BASE_LAYER + 8 + s_iK] := io_stConv.astLayer[2].arrTrig[s_iK];
     END_FOR;
-    io_stAlarm.arrTrig[F_BASE_STARVE - 1] := io_stConv.astLayer[2].arrTrig[8];
+    io_stAlarm.arrTrig[F_BASE_STARVE - 1] := io_stConv.astLayer[2].arrTrig[9];
 
     (* ---- 3 层: 输入搬运 ---- *)
     io_stConv.astLayer[3].bPreBlock := io_stIo.bConv3PreBlock;
@@ -181,17 +181,17 @@ BEGIN
                    AND io_stBridge.bPPAtS20 AND io_stBridge.bSafeZone AND (NOT io_stMachine.bFault);
 
     (* ---- 3 层: 输出 = 状态机命令 或 手动强制 或 上料点动 ---- *)
-    io_stIo.bQConv3Block := io_stConv.astLayer[3].bBlockDown OR io_stManual.abForce[11];
-    io_stIo.bQConv3Sep := io_stConv.astLayer[3].bSepDown OR io_stManual.abForce[12];
-    io_stIo.bQConv3Fwd := io_stConv.astLayer[3].bFwd OR io_stManual.abForce[13] OR s_arrJog[3];
-    io_stIo.bQConv3Rev := io_stConv.astLayer[3].bRev OR io_stManual.abForce[14];
-    io_stIo.bQConv3Slow := io_stConv.astLayer[3].bSlow OR io_stManual.abForce[15];
+    io_stIo.bQConv3Block := io_stConv.astLayer[3].bBlockDown OR io_stManual.abForce[12];
+    io_stIo.bQConv3Sep := io_stConv.astLayer[3].bSepDown OR io_stManual.abForce[13];
+    io_stIo.bQConv3Fwd := io_stConv.astLayer[3].bFwd OR io_stManual.abForce[14] OR s_arrJog[3];
+    io_stIo.bQConv3Rev := io_stConv.astLayer[3].bRev OR io_stManual.abForce[15];
+    io_stIo.bQConv3Slow := io_stConv.astLayer[3].bSlow OR io_stManual.abForce[16];
 
     (* ---- 3 层: 报警触发 F50~F57 (气缸), F101 (缺料) ---- *)
-    FOR s_iK := 0 TO 7 DO
+    FOR s_iK := 1 TO 8 DO
         io_stAlarm.arrTrig[F_BASE_LAYER + 16 + s_iK] := io_stConv.astLayer[3].arrTrig[s_iK];
     END_FOR;
-    io_stAlarm.arrTrig[F_BASE_STARVE - 2] := io_stConv.astLayer[3].arrTrig[8];
+    io_stAlarm.arrTrig[F_BASE_STARVE - 2] := io_stConv.astLayer[3].arrTrig[9];
 
     (* ---- 4 层: 输入搬运 ---- *)
     io_stConv.astLayer[4].bPreBlock := io_stIo.bConv4PreBlock;
@@ -226,19 +226,20 @@ BEGIN
                    AND io_stBridge.bPPAtS20 AND io_stBridge.bSafeZone AND (NOT io_stMachine.bFault);
 
     (* ---- 4 层: 输出 = 状态机命令 或 手动强制 或 上料点动 ---- *)
-    io_stIo.bQConv4Block := io_stConv.astLayer[4].bBlockDown OR io_stManual.abForce[16];
-    io_stIo.bQConv4Sep := io_stConv.astLayer[4].bSepDown OR io_stManual.abForce[17];
-    io_stIo.bQConv4Fwd := io_stConv.astLayer[4].bFwd OR io_stManual.abForce[18] OR s_arrJog[4];
-    io_stIo.bQConv4Rev := io_stConv.astLayer[4].bRev OR io_stManual.abForce[19];
-    io_stIo.bQConv4Slow := io_stConv.astLayer[4].bSlow OR io_stManual.abForce[20];
+    io_stIo.bQConv4Block := io_stConv.astLayer[4].bBlockDown OR io_stManual.abForce[17];
+    io_stIo.bQConv4Sep := io_stConv.astLayer[4].bSepDown OR io_stManual.abForce[18];
+    io_stIo.bQConv4Fwd := io_stConv.astLayer[4].bFwd OR io_stManual.abForce[19] OR s_arrJog[4];
+    io_stIo.bQConv4Rev := io_stConv.astLayer[4].bRev OR io_stManual.abForce[20];
+    io_stIo.bQConv4Slow := io_stConv.astLayer[4].bSlow OR io_stManual.abForce[21];
 
     (* ---- 4 层: 报警触发 F58~F65 (气缸), F100 (缺料) ---- *)
-    FOR s_iK := 0 TO 7 DO
+    FOR s_iK := 1 TO 8 DO
         io_stAlarm.arrTrig[F_BASE_LAYER + 24 + s_iK] := io_stConv.astLayer[4].arrTrig[s_iK];
     END_FOR;
-    io_stAlarm.arrTrig[F_BASE_STARVE - 3] := io_stConv.astLayer[4].arrTrig[8];
+    io_stAlarm.arrTrig[F_BASE_STARVE - 3] := io_stConv.astLayer[4].arrTrig[9];
+    END_REGION
 
-    (* ============ 2. 汇总 ============ *)
+    REGION 02_Summary 汇总
     io_stConv.bAllReady := io_stConv.astLayer[1].bReady AND io_stConv.astLayer[2].bReady
                            AND io_stConv.astLayer[3].bReady AND io_stConv.astLayer[4].bReady;
     io_stConv.bAnyRequest := io_stConv.astLayer[1].bRequest OR io_stConv.astLayer[2].bRequest
@@ -250,4 +251,5 @@ BEGIN
     IF s_bUnloadReq AND io_stConv.bAllReady AND (NOT s_bUnloadEdge) THEN
         io_stHmi.bBlinkOpt := FALSE;
     END_IF;
+    END_REGION
 END_FUNCTION_BLOCK

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from auto_pm.cli.__main__ import cli
 from auto_pm.core.mission_service import MissionService
 from auto_pm.core.work_registry_service import WorkRegistryService
@@ -16,11 +16,14 @@ from click.testing import CliRunner
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from tests.git_support import git_do
 from tests.plan_checklist_support import checklist_args
+
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    git_do(root, *args)
 
 
 def _repository(root: Path) -> None:

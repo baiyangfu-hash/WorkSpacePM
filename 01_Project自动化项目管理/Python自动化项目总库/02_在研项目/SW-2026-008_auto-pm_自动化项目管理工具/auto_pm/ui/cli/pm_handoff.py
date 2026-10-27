@@ -23,6 +23,7 @@ from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePo
 from auto_pm.infrastructure import process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.approval_pin import require_approval_pin
+from auto_pm.ui.cli.runtime_identity_guard import project_of_run, require_runtime_identity
 
 RISK_PHRASE = "接受风险"
 
@@ -76,6 +77,7 @@ def handoff_pm(ctx: click.Context, run_id: str, to_owner: str, summary: str, lea
     """当前持有者一条命令交接：记检查点并生成发给接手方的 handoff；交接后请停止写入。"""
 
     service = _service(ctx)
+    require_runtime_identity(ctx, project_of_run(ctx, run_id))
     try:
         owner = _store(ctx).get_lease(run_id).owner_id
     except ContinuityStoreError as error:
@@ -124,6 +126,7 @@ def takeover_pm(ctx: click.Context, handoff_id: str, receiver_id: str, lease_sec
         project_id = _store(ctx).get_work(handoff.work_id).subject_project_id
     except (LeaseHandoverError, ContinuityStoreError) as error:
         raise click.ClickException(str(error)) from error
+    require_runtime_identity(ctx, project_id)
     try:
         orient = PmFacadeService(app_ctx.control_root, execution_root=app_ctx.workspace_root).orient(
             project_id=project_id, invocation_path=None, work_id=handoff.work_id, run_id=handoff.run_id, requested_action=""
@@ -172,6 +175,7 @@ def sign_risk_pm(ctx: click.Context, run_id: str, claimant_id: str) -> None:
     if refusal:
         raise click.ClickException(refusal)
     service = _service(ctx)
+    require_runtime_identity(ctx, project_of_run(ctx, run_id))
     store = _store(ctx)
     try:
         lease = store.get_lease(run_id)

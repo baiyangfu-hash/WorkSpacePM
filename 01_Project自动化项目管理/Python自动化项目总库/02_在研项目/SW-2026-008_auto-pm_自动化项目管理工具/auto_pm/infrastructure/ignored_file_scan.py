@@ -7,10 +7,11 @@ the rule) walks straight in.  The commit hook and pr-gate both call :func:`ignor
 
 from __future__ import annotations
 
-import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 
 class IgnoreScanError(RuntimeError):
@@ -29,14 +30,14 @@ def ignored_among(repo: Path, paths: Sequence[str]) -> list[IgnoredFile]:
 
     if not paths:
         return []
-    result = subprocess.run(
+    result = run_git_bounded_text(
         ["git", "check-ignore", "--no-index", "-v", "-n", "-z", "--stdin"],
+        default_timeout=120.0,
+        error_cls=IgnoreScanError,
+        where=repo,
         cwd=str(repo),
         input="\0".join(paths) + "\0",
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
     )
     if result.returncode not in (0, 1):

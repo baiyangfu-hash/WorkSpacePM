@@ -9,11 +9,11 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from pathlib import Path, PurePosixPath
 
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 from auto_pm.plc import doc_consistency as dc
 
 SOURCE_SUFFIXES = (".scl", ".db")
@@ -23,9 +23,12 @@ ARCHIVE_PARTS = frozenset({"archive", "_archive"})
 
 
 def _git(root: Path, args: list[str], stdin: str | None = None) -> str:
-    result = subprocess.run(
+    result = run_git_bounded_text(
         ["git", "-c", "core.quotepath=false", *args],
-        cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", check=True, input=stdin,
+        default_timeout=60.0,
+        error_cls=RuntimeError,
+        where=root,
+        cwd=str(root), capture_output=True, check=True, input=stdin,
     )
     return result.stdout
 
@@ -99,11 +102,15 @@ def _report(project: str, analysis: dc.ProjectAnalysis) -> tuple[bool, list[str]
     return bool(fails or marked), lines
 
 
-def _auto_fill(workspace_root: Path, project: str, has_fails: bool) -> list[str]:
-    if not has_fails:
+def _auto_fill(workspace_root: Path, project: str, failing_objects: Collection[str] | None) -> list[str]:
+    """只为本次被拒的对象补文档（TD-SW008-045）；没有拦住项时只提示审核。"""
+
+    if failing_objects is None:
         return ["    审核待确认的行后运行 plc docs confirm，再 git add 并重新提交。"]
     try:
-        result = dc.sync_project(str(workspace_root / project) if project else str(workspace_root))
+        result = dc.sync_project(
+            str(workspace_root / project) if project else str(workspace_root), only_objects=failing_objects
+        )
     except Exception as exc:  # the commit is refused anyway; report why the draft could not be written
         return [f"    自动补全未能完成：{exc}"]
     lines = [
@@ -147,8 +154,8 @@ def enforce_plc_docs(workspace_root: Path, staged: Iterable[str]) -> int:
                 print(line)
             if project_blocked:
                 blocked = True
-                fails = any(f.severity == "fail" for f in analysis.findings)
-                for line in _auto_fill(workspace_root, project, fails):
+                failing = {f.obj for f in analysis.findings if f.severity == "fail"}
+                for line in _auto_fill(workspace_root, project, failing or None):
                     print(line)
         if blocked:
             return 1

@@ -46,7 +46,8 @@ VAR
     s_dClk01OffEt       : DINT := 0;
     s_bClk01s           : BOOL := FALSE;    // 100 ms 时钟
 
-    s_iIdx              : INT := 0;         // 扫描下标
+    s_iIdx              : INT := 0;         // 扫描下标 (从 1 起, = F 号 + 1)
+    s_iF                : INT := 0;         // 当前 F 号 = s_iIdx - 1
     s_bAnyAll           : BOOL := FALSE;    // 任一锁存 (含提示类)
     s_bBlink            : BOOL := FALSE;    // 声光闪烁条件 N
     s_iMin              : INT := 0;         // 最小锁存 F 号 + 1
@@ -54,13 +55,13 @@ END_VAR
 
 VAR CONSTANT
     NO_ALARM            : INT := 0;
-    LAST_IDX            : INT := 127;
+    LAST_IDX            : INT := 128;
     CLK1_HALF_MS        : DINT := 500;      // 1 s 时钟半周期
     CLK01_HALF_MS       : DINT := 50;       // 100 ms 时钟半周期
 END_VAR
 
 BEGIN
-    (* ============ 1. 定时器与边沿统一调用 (顶部, 无条件) ============ *)
+    REGION 00_TimersEdges 定时器与边沿统一调用 (顶部, 无条件)
     fb_trReset(IN := io_stIo.bResetButton, Q => s_bResetEdge);
     fb_tClk1On(IN := NOT s_bClk1s, PT := CLK1_HALF_MS, Q => s_bClk1OnQ, ET => s_dClk1OnEt);
     fb_tClk1Off(IN := s_bClk1s, PT := CLK1_HALF_MS, Q => s_bClk1OffQ, ET => s_dClk1OffEt);
@@ -77,18 +78,20 @@ BEGIN
     ELSIF s_bClk01OffQ THEN
         s_bClk01s := FALSE;
     END_IF;
+    END_REGION
 
-    (* ============ 2. 锁存: 触发即锁, 复位键沿且触发已消失才清 ============ *)
+    REGION 01_Latch 锁存: 触发即锁, 复位键沿且触发已消失才清
     io_stAlarm.bReset := s_bResetEdge;
-    FOR s_iIdx := 0 TO LAST_IDX DO
+    FOR s_iIdx := 1 TO LAST_IDX DO
         IF io_stAlarm.arrTrig[s_iIdx] THEN
             io_stAlarm.arrLatch[s_iIdx] := TRUE;
         ELSIF s_bResetEdge THEN
             io_stAlarm.arrLatch[s_iIdx] := FALSE;
         END_IF;
     END_FOR;
+    END_REGION
 
-    (* ============ 3. 分级汇总 ============ *)
+    REGION 02_GradeSummary 分级汇总
     io_stAlarm.bFault := FALSE;
     io_stAlarm.bAny := FALSE;
     io_stAlarm.abHoldConv[1] := FALSE;
@@ -101,73 +104,75 @@ BEGIN
     s_bAnyAll := FALSE;
     s_iMin := NO_ALARM;
 
-    FOR s_iIdx := 0 TO LAST_IDX DO
+    FOR s_iIdx := 1 TO LAST_IDX DO
+        s_iF := s_iIdx - 1;
         IF io_stAlarm.arrLatch[s_iIdx] THEN
             s_bAnyAll := TRUE;
             IF s_iMin = NO_ALARM THEN
-                s_iMin := s_iIdx + 1;       // 下标升序扫描, 第一个即最小
+                s_iMin := s_iIdx;           // 下标升序扫描, 第一个即最小 (下标 = F 号 + 1)
             END_IF;
 
             // A 类: F0~F11、F13~F16、F104 -> M8
-            IF (s_iIdx <= 11) OR ((s_iIdx >= 13) AND (s_iIdx <= 16)) OR (s_iIdx = 104) THEN
+            IF (s_iF <= 11) OR ((s_iF >= 13) AND (s_iF <= 16)) OR (s_iF = 104) THEN
                 io_stAlarm.bFault := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
             // B 类 取放料: F20 F21 F24 F25, F30~F33, F66~F75, F106
-            IF (s_iIdx = 20) OR (s_iIdx = 21) OR (s_iIdx = 24) OR (s_iIdx = 25)
-               OR ((s_iIdx >= 30) AND (s_iIdx <= 33)) OR ((s_iIdx >= 66) AND (s_iIdx <= 75))
-               OR (s_iIdx = 106) THEN
+            IF (s_iF = 20) OR (s_iF = 21) OR (s_iF = 24) OR (s_iF = 25)
+               OR ((s_iF >= 30) AND (s_iF <= 33)) OR ((s_iF >= 66) AND (s_iF <= 75))
+               OR (s_iF = 106) THEN
                 io_stAlarm.bHoldPP := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
             // B 类 小车: F22 F23, F90 F91
-            IF (s_iIdx = 22) OR (s_iIdx = 23) OR (s_iIdx = 90) OR (s_iIdx = 91) THEN
+            IF (s_iF = 22) OR (s_iF = 23) OR (s_iF = 90) OR (s_iF = 91) THEN
                 io_stAlarm.bHoldFeeder := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
             // B 类 输送 1~4 层: F34~F65 每层 8 个, F100~F103 缺料 (F103 = 1 层)
-            IF (s_iIdx >= 34) AND (s_iIdx <= 41) THEN
+            IF (s_iF >= 34) AND (s_iF <= 41) THEN
                 io_stAlarm.abHoldConv[1] := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
-            IF (s_iIdx >= 42) AND (s_iIdx <= 49) THEN
+            IF (s_iF >= 42) AND (s_iF <= 49) THEN
                 io_stAlarm.abHoldConv[2] := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
-            IF (s_iIdx >= 50) AND (s_iIdx <= 57) THEN
+            IF (s_iF >= 50) AND (s_iF <= 57) THEN
                 io_stAlarm.abHoldConv[3] := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
-            IF (s_iIdx >= 58) AND (s_iIdx <= 65) THEN
+            IF (s_iF >= 58) AND (s_iF <= 65) THEN
                 io_stAlarm.abHoldConv[4] := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
-            IF s_iIdx = 103 THEN
+            IF s_iF = 103 THEN
                 io_stAlarm.abHoldConv[1] := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
-            IF s_iIdx = 102 THEN
+            IF s_iF = 102 THEN
                 io_stAlarm.abHoldConv[2] := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
-            IF s_iIdx = 101 THEN
+            IF s_iF = 101 THEN
                 io_stAlarm.abHoldConv[3] := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
-            IF s_iIdx = 100 THEN
+            IF s_iF = 100 THEN
                 io_stAlarm.abHoldConv[4] := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
             // B 类 回原点: F80 F81
-            IF (s_iIdx = 80) OR (s_iIdx = 81) THEN
+            IF (s_iF = 80) OR (s_iF = 81) THEN
                 io_stAlarm.bHoldHome := TRUE;
                 io_stAlarm.bAny := TRUE;
             END_IF;
         END_IF;
     END_FOR;
     io_stAlarm.iAlarmNo := s_iMin;
+    END_REGION
 
-    (* ============ 4. 声光 (PRC 7.2, DSN 9) ============ *)
+    REGION 03_SoundLight 声光 (PRC 7.2, DSN 9)
     s_bBlink := ((s_bAnyAll OR io_stMachine.bPause) AND s_bClk1s)
                 OR ((io_stMachine.bHoming OR (io_stMachine.bManual AND io_stHmi.bBlinkOpt) OR io_stMachine.bPrepare)
                     AND s_bClk01s);
@@ -187,4 +192,5 @@ BEGIN
     io_stIo.bQLampRed := io_stAlarm.bLampRed;
     io_stIo.bQBuzzer := io_stAlarm.bBuzzer;
     io_stIo.bQLampResetBtn := io_stAlarm.bResetLamp;
+    END_REGION
 END_FUNCTION_BLOCK

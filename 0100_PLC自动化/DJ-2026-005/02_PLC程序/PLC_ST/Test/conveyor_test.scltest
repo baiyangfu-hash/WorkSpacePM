@@ -151,7 +151,6 @@ TEST_CASE "T_CONV_Map_Layer1"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -172,6 +171,7 @@ TEST_CASE "T_CONV_Map_Layer1"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -367,7 +367,6 @@ TEST_CASE "T_CONV_Map_Layer2"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -388,6 +387,7 @@ TEST_CASE "T_CONV_Map_Layer2"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -583,7 +583,6 @@ TEST_CASE "T_CONV_Map_Layer3"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -604,6 +603,7 @@ TEST_CASE "T_CONV_Map_Layer3"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -799,7 +799,6 @@ TEST_CASE "T_CONV_Map_Layer4"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -820,6 +819,7 @@ TEST_CASE "T_CONV_Map_Layer4"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1015,7 +1015,6 @@ TEST_CASE "T_CONV_01_02_InitRun"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1036,6 +1035,7 @@ TEST_CASE "T_CONV_01_02_InitRun"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1215,7 +1215,6 @@ TEST_CASE "T_CONV_17_PickDoneOwnLayer"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1236,6 +1235,7 @@ TEST_CASE "T_CONV_17_PickDoneOwnLayer"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1410,7 +1410,6 @@ TEST_CASE "T_MAN_09_ForceLayer2"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1431,6 +1430,7 @@ TEST_CASE "T_MAN_09_ForceLayer2"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1453,8 +1453,8 @@ TEST_CASE "T_MAN_09_ForceLayer2"
     WAIT_CYCLES 3;
 
     SET GlobalVars.stHmi.bManual := TRUE;
-    SET GlobalVars.stHmi.bConvForce[5] := TRUE;
-    SET GlobalVars.stHmi.bConvForce[7] := TRUE;
+    SET GlobalVars.stHmi.bConvForce[6] := TRUE;
+    SET GlobalVars.stHmi.bConvForce[8] := TRUE;
     WAIT_CYCLES 3;
     ASSERT GlobalVars.stIo.bQConv2Block = TRUE;
     ASSERT GlobalVars.stIo.bQConv2Fwd = TRUE;
@@ -1611,7 +1611,6 @@ TEST_CASE "T_MAN_ForceMotorNeedsSafeZone"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1632,6 +1631,7 @@ TEST_CASE "T_MAN_ForceMotorNeedsSafeZone"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1655,8 +1655,8 @@ TEST_CASE "T_MAN_ForceMotorNeedsSafeZone"
 
     SET GlobalVars.stHmi.bManual := TRUE;
     SET GlobalVars.astAxis[1].rCurrentPos := 500.0;
-    SET GlobalVars.stHmi.bConvForce[0] := TRUE;
-    SET GlobalVars.stHmi.bConvForce[2] := TRUE;
+    SET GlobalVars.stHmi.bConvForce[1] := TRUE;
+    SET GlobalVars.stHmi.bConvForce[3] := TRUE;
     WAIT_CYCLES 3;
     ASSERT GlobalVars.stBridge.bSafeZone = FALSE;
     ASSERT GlobalVars.stIo.bQConv1Block = TRUE;
@@ -1808,7 +1808,6 @@ TEST_CASE "T_PP_01_EnterS20"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1829,6 +1828,7 @@ TEST_CASE "T_PP_01_EnterS20"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2003,7 +2003,6 @@ TEST_CASE "T_PP_20_Mode4NeedsFourGrips"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2024,6 +2023,7 @@ TEST_CASE "T_PP_20_Mode4NeedsFourGrips"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2206,7 +2206,6 @@ TEST_CASE "T_PP_21_SwitchToMode4"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2227,6 +2226,7 @@ TEST_CASE "T_PP_21_SwitchToMode4"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2407,7 +2407,6 @@ TEST_CASE "T_PP_22_SwitchBlockedInAuto"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2428,6 +2427,7 @@ TEST_CASE "T_PP_22_SwitchBlockedInAuto"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2610,7 +2610,6 @@ TEST_CASE "T_PP_23_SwitchBlockedWithProduct"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2631,6 +2630,7 @@ TEST_CASE "T_PP_23_SwitchBlockedWithProduct"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2825,7 +2825,6 @@ TEST_CASE "T_PP_24_GripShrinkFallsBack"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2846,6 +2845,7 @@ TEST_CASE "T_PP_24_GripShrinkFallsBack"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;

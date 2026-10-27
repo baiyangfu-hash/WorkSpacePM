@@ -413,7 +413,7 @@ END_DATA_BLOCK
 | `q_wCurrentAlarmCode` | WORD | 0 | 最高优先级报警码 | D402 |
 | `q_wGlobalAlarmWord` | WORD | 0 | 全局报警字 | D400 |
 | `q_iAlarmCount` | INT | 0 | MES累计报警次数 | D404 |
-| `q_aMesQueue` | ARRAY[0..9] OF WORD | - | MES去重队列 | D406~D425 |
+| `q_aMesQueue` | ARRAY[1..10] OF WORD | - | MES去重队列 | D406~D425 |
 | `q_bNewAlarmPulse` | BOOL | FALSE | 新报警脉冲 | M201 |
 | `q_bLightGreen` | BOOL | FALSE | 绿灯 | Y24 |
 | `q_bLightRed` | BOOL | FALSE | 红灯 | Y25 |

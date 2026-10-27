@@ -28,6 +28,7 @@ from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.cli.approval_pin import read_approval_pin
 from auto_pm.ui.cli.continuity import _secret_from_environment
 from auto_pm.ui.cli.pm_handoff import _holder_pid
+from auto_pm.ui.cli.runtime_identity_guard import project_of_mission, require_runtime_identity
 
 
 def _root(ctx: click.Context) -> str:
@@ -165,6 +166,7 @@ def park_pm(
     """把手上这张卡记好断点放下：交出钥匙，之后谁也不能写，直到用户让人用 pm unpark 拿回来。"""
 
     service = _service(ctx, mutating=True)
+    require_runtime_identity(ctx, project_of_mission(ctx, mission_id))
     token = _secret_from_environment(lease_token_env) if lease_token_env is not None else None
     # Into "搁着" is the user's call: with a committed approver PIN the user types it here (gap 9).
     approval_pin = (
@@ -204,6 +206,7 @@ def unpark_pm(
     """凭断点把搁着的卡拿回来：先核对工作树没被动过，再发新钥匙（存本机钱包，不显示）。"""
 
     service = _service(ctx, mutating=True)
+    require_runtime_identity(ctx, project_of_mission(ctx, mission_id))
     approval_pin = read_approval_pin(_root(ctx), summary=f"拿回 {mission_id}，交给 {as_owner} 接着干")
     try:
         outcome = service.unpark(
@@ -243,6 +246,8 @@ def switch_pm(
     """插急活一步完成：把在干的卡搁着，再把目标卡拿起来；第二步失败时第一张稳稳停在“搁着”。"""
 
     service = _service(ctx, mutating=bool(to_mission_id))
+    if to_mission_id:
+        require_runtime_identity(ctx, project_id)
     approval_pin = (
         read_approval_pin(_root(ctx), summary=f"插急活：把手上的卡搁着，改干 {to_mission_id}") if to_mission_id else ""
     )

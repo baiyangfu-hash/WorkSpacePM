@@ -37,6 +37,7 @@ from auto_pm.contracts.execution_adapter import (
 from auto_pm.contracts.lease_reclaim import lease_is_held
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.control_root_guard import authority_paths_covered
 
 
 class ExecutionDispatchError(RuntimeError):
@@ -215,7 +216,7 @@ class ExecutionDispatchService:
         self._assert_adapter_authorized(mission, kind)
         if work.subject_project_id != mission.subject_project_id:
             raise ExecutionDispatchError("Work 与 Mission subject project 不一致")
-        if not self._paths_covered(work.scope_paths, mission.authority.scope_paths):
+        if not authority_paths_covered(work.scope_paths, mission.authority.scope_paths):
             raise ExecutionDispatchError("Work scope 超出 Mission AuthorityEnvelope")
         if work.authorization_ref != mission.authority.decision_id:
             raise ExecutionDispatchError("Work 与 Mission Decision 不一致")
@@ -437,13 +438,6 @@ class ExecutionDispatchService:
         if not cleaned or ":" in cleaned:
             raise ExecutionDispatchError("executor_id 必须非空且不得包含 ':'")
         return f"{adapter.value}:{cleaned}"
-
-    @staticmethod
-    def _paths_covered(paths: tuple[str, ...], roots: tuple[str, ...]) -> bool:
-        return all(
-            any(path == root or path.startswith(f"{root.rstrip('/')}/") for root in roots)
-            for path in paths
-        )
 
     @staticmethod
     def _assert_adapter_authorized(mission: Mission, adapter: ExecutionAdapterKind) -> None:

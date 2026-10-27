@@ -43,7 +43,7 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 取放料 -> 小车 / 输送 ============ *)
+    REGION 01_PickToCartConveyor 取放料到小车 / 输送
     io_stBridge.bSafeZone := io_stPP.bSafeZone;
     io_stBridge.bPPAtS20 := (io_stPP.iStep = STEP_S20);
     io_stBridge.rZStandby := io_stPP.rZStandby;
@@ -51,8 +51,9 @@ BEGIN
         io_stBridge.abPickDone[s_iIdx] := io_stPP.abPickDone[s_iIdx];
         io_stBridge.abLayerReq[s_iIdx] := io_stConv.astLayer[s_iIdx].bRequest;
     END_FOR;
+    END_REGION
 
-    (* ============ 2. 小车 <-> 取放料 ============ *)
+    REGION 02_CartPickPlace 小车与取放料互通
     io_stBridge.bReqA := io_stFeed.bReqA;
     io_stBridge.bReqB := io_stFeed.bReqB;
     io_stBridge.iGroupCount := io_stPP.iGroupCount;
@@ -62,39 +63,45 @@ BEGIN
     END_IF;
     io_stBridge.abFeedDone[1] := io_stPP.abFeedDone[1];
     io_stBridge.abFeedDone[2] := io_stPP.abFeedDone[2];
+    END_REGION
 
-    (* ============ 3. 送框许可: 不联机 或 连续送框 或 单套许可 ============ *)
+    REGION 03_FeedPermit 送框许可: 不联机 或 连续送框 或 单套许可
     io_stBridge.bFeedPermit := (NOT io_stExt.bLinkMode) OR io_stExt.bContinuous OR io_stExt.bSingle;
     io_stFeed.bFeedPermit := io_stBridge.bFeedPermit;
     io_stFeed.rAutoSpeed := io_stPP.rAutoSpeed;     // 自动速度 D600 同步给小车
+    END_REGION
 
-    (* ============ 4. Hold = 报警 Hold 或 暂停 ============ *)
+    REGION 04_Hold Hold 即 报警 Hold 或 暂停
     FOR s_iIdx := 1 TO 4 DO
         io_stBridge.abHoldConv[s_iIdx] := io_stAlarm.abHoldConv[s_iIdx] OR io_stMachine.bPause;
     END_FOR;
     io_stBridge.bHoldPP := io_stAlarm.bHoldPP OR io_stMachine.bPause;
     io_stBridge.bHoldFeeder := io_stAlarm.bHoldFeeder OR io_stMachine.bPause;
     io_stBridge.bHoldHome := io_stAlarm.bHoldHome OR io_stMachine.bPause;
+    END_REGION
 
-    (* ============ 5. 回原点 / 手动 -> 输送 / 取放料 ============ *)
+    REGION 05_HomeManual 回原点 / 手动到输送 / 取放料
     io_stBridge.bInitReqConv := io_stHome.bInitReqConv;
     io_stBridge.bReleaseGripperLock := io_stHome.bReleaseGripperLock;
     io_stPP.bGripOpenReq := io_stHome.bGripOpenCmd OR io_stManual.bGripOpenCmd;
     io_stPP.bLiftDownReq := io_stHome.bLiftDownCmd OR io_stManual.bLiftDownCmd;
     io_stPP.bLiftUpReq := io_stManual.bLiftUpCmd;
+    END_REGION
 
-    (* ============ 6. 停止收尾: 三类机构都在静止点 ============ *)
+    REGION 06_StopFinish 停止收尾: 三类机构都在静止点
     io_stMachine.bAllAtRest := io_stConv.bAllAtRest AND io_stPP.bAtRest AND io_stFeed.bAtRest;
+    END_REGION
 
-    (* ============ 7. 取放料 / 小车报警触发搬入 stAlarm ============ *)
-    FOR s_iIdx := 0 TO 3 DO
+    REGION 07_AlarmRelay 取放料 / 小车报警触发搬入 stAlarm
+    FOR s_iIdx := 1 TO 4 DO
         io_stAlarm.arrTrig[30 + s_iIdx] := io_stPP.arrTrig[s_iIdx];         // F30~F33
     END_FOR;
-    FOR s_iIdx := 0 TO 9 DO
+    FOR s_iIdx := 1 TO 10 DO
         io_stAlarm.arrTrig[66 + s_iIdx] := io_stPP.arrTrig[4 + s_iIdx];     // F66~F75
     END_FOR;
-    io_stAlarm.arrTrig[106] := io_stPP.arrTrig[14];                         // F106 夹紧超时
-    io_stAlarm.arrTrig[90] := io_stFeed.arrTrig[0];                         // F90
-    io_stAlarm.arrTrig[91] := io_stFeed.arrTrig[1];                         // F91
-    io_stAlarm.arrTrig[107] := io_stFeed.arrTrig[2];                        // F107
+    io_stAlarm.arrTrig[107] := io_stPP.arrTrig[15];                         // F106 夹紧超时
+    io_stAlarm.arrTrig[91] := io_stFeed.arrTrig[1];                         // F90
+    io_stAlarm.arrTrig[92] := io_stFeed.arrTrig[2];                         // F91
+    io_stAlarm.arrTrig[108] := io_stFeed.arrTrig[3];                        // F107
+    END_REGION
 END_FUNCTION_BLOCK

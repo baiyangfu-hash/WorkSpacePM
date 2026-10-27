@@ -6,7 +6,6 @@ Plan "实施卡与变更单定位与存放方案" §4.3/§4.4 and acceptance §6
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 from auto_pm.cli.__main__ import cli
@@ -18,6 +17,7 @@ from auto_pm.application.core.implementation_card_precheck import (
     scopes_outside_card,
 )
 from auto_pm.ui.cli.implementation_card import command_tree_of
+from tests.git_support import git_out
 
 TREE = command_tree_of(cli)
 PROJECT = "0100_PLC自动化/DJ-2099-001_测试"
@@ -38,9 +38,7 @@ BC_TABLE = """# 业务变更记录
 
 
 def _git(root: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
-    ).stdout.strip()
+    return git_out(root, *args)
 
 
 def _workspace(root: Path) -> str:

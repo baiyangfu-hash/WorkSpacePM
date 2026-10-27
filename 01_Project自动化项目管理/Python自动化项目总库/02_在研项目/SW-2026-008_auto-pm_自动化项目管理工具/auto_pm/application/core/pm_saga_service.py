@@ -34,6 +34,20 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+_CHG_REFERENCE_RE = re.compile(r"\S*CHG-\S*")
+_CLOSED_WORD_RE = re.compile(r"(?<![a-z])closed(?![a-z])")
+
+
+def _update_says_closed(update: str) -> bool:
+    """chg_updates 条目的描述是否要求把变更单关闭。
+
+    先去掉变更单编号和路径（路径里可能带 closed 字样），再按整词匹配 closed 或“已关闭”；
+    unclosed、未关闭这类否定写法不算。
+    """
+    text = _CHG_REFERENCE_RE.sub(" ", update).lower()
+    return _CLOSED_WORD_RE.search(text) is not None or "已关闭" in text
+
+
 class SagaError(HandoffError):
     """PmClosureSaga 基础异常。"""
 
@@ -701,7 +715,7 @@ class PmClosureSagaCoordinator:
             if not m:
                 continue
             chg_id = m.group(1)
-            status = "closed" if "closed" in update_str.lower() else "completed"
+            status = "closed" if _update_says_closed(update_str) else "completed"
             targets[chg_id] = status
         return targets
 

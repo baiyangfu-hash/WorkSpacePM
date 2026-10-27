@@ -95,8 +95,8 @@ class SiemensLanguageService:
         self._timeout = timeout
 
     @classmethod
-    def discover(cls, runner: Runner | None = None) -> SiemensLanguageService:
-        return cls(locate_binary(), runner=runner)
+    def discover(cls, runner: Runner | None = None, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> SiemensLanguageService:
+        return cls(locate_binary(), runner=runner, timeout=timeout)
 
     @property
     def available(self) -> bool:
@@ -105,6 +105,11 @@ class SiemensLanguageService:
     @property
     def binary(self) -> LanguageServiceBinary | None:
         return self._binary
+
+    @property
+    def timeout(self) -> int:
+        """Seconds each ``check`` / ``test`` call may run before its process is killed."""
+        return self._timeout
 
     def check(self, root: Path) -> LanguageServiceResult:
         return self._run("check", root)
@@ -140,7 +145,10 @@ class SiemensLanguageService:
         )
 
 
-def default_language_service() -> SiemensLanguageService:
-    """应用层组合根用：发现本机的命令行（可能不可用）。"""
+def default_language_service(timeout: int | None = None) -> SiemensLanguageService:
+    """应用层组合根用：发现本机的命令行（可能不可用）。
 
-    return SiemensLanguageService.discover()
+    ``timeout`` 是命令行单次调用的时限（秒），不传用 ``DEFAULT_TIMEOUT_SECONDS``。
+    """
+
+    return SiemensLanguageService.discover() if timeout is None else SiemensLanguageService.discover(timeout=timeout)

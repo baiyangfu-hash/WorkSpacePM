@@ -53,7 +53,7 @@ def test_real_conftest_fails_marked_tests_without_tools_and_skips_them_with_the_
             [
                 sys.executable, "-m", "pytest", "tests/core/test_pm_facade_service.py",
                 "-k", "rechecks_generic_owned_paths_after_rehash or confirm_start_uses_the_mission_bound",
-                "--no-cov", "-p", "no:cacheprovider", "-q",
+                "--no-cov", "-p", "no:cacheprovider", "-q", "--color=no",
             ],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             env={**env, **extra}, cwd=project, check=False,

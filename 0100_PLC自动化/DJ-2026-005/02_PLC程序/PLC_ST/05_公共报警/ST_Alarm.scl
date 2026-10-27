@@ -7,8 +7,8 @@
 
 TYPE ST_Alarm
 STRUCT
-    arrTrig                 : ARRAY[0..127] OF BOOL;    // 各机构每扫描写入的触发 (一位一写)
-    arrLatch                : ARRAY[0..127] OF BOOL;    // 自保持输出
+    arrTrig                 : ARRAY[1..128] OF BOOL;    // 各机构每扫描写入的触发 (一位一写), 下标 = F 号 + 1
+    arrLatch                : ARRAY[1..128] OF BOOL;    // 自保持输出, 下标 = F 号 + 1
     bReset                  : BOOL;     // 复位键 (X100) 上升沿, 一拍
     bFault                  : BOOL;     // 任一 A 类锁存 (-> M8)
     bAny                    : BOOL;     // 任一非提示类锁存

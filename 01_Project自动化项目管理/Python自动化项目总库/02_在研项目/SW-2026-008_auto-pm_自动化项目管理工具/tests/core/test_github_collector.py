@@ -422,3 +422,26 @@ def test_project_page_keeps_pr_rows_next_to_card_columns(tmp_path: Path) -> None
     assert gate.detail.startswith("#2 ") and gate.state == "block"
     columns = {c.name: c.cards for c in page.columns}
     assert [r[1] for r in columns["在干"]] == ["工具卡"] and [r[1] for r in columns["已关"]] == ["刚关的"]
+
+
+def test_signature_line_rule_matches_the_safety_gate_for_punctuation_after_the_hash() -> None:
+    """总控屏读签字的正则必须和 safety-gate 的判定一致（提交号后接全角标点也认，更长的哈希不认）。"""
+    repo = Path(__file__).resolve().parents[2].parents[3]
+    sys.path.insert(0, str(repo / "reviews" / "tools"))
+    import safety_zone_check as safety
+
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    samples = [
+        f"安全签字 {sha[:7]}",
+        f"安全签字 {sha[:7]}；已看仿真",
+        f"安全签字：{sha[:7]}，确认",
+        f"安全签字 `{sha[:7]}`。",
+        f"安全签字 {sha[:7]}0",
+        f"安全签字 {sha[:7]}确认",
+        f"安全签字 {sha}0",
+        "安全签字",
+        f"> 安全签字 {sha[:7]}",
+    ]
+    for line in samples:
+        assert bool(gh.SIGN_LINE.match(line)) == bool(safety.SIGN_LINE.match(line)), line
+    assert gh.SIGN_LINE.match(samples[1]) and not gh.SIGN_LINE.match(samples[6])

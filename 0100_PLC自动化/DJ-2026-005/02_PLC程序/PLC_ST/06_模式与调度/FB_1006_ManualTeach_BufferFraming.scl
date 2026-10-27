@@ -89,11 +89,12 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 定时器统一调用 (顶部) ============ *)
+    REGION 00_Timers 定时器统一调用 (顶部)
     fb_tRep(IN := s_bRepIn, PT := REPEAT_MS, Q => s_bRepQ, ET => s_dRepEt);
     s_bTick := s_bRepQ;
+    END_REGION
 
-    (* ============ 2. 派生量 ============ *)
+    REGION 01_Derived 派生量
     s_bManualOk := io_stMachine.bManual AND (NOT io_stMachine.bFault);
     s_bZLow := (io_arrAxis[AX_Z].rCurrentPos <= (io_stPP.rZStandby + io_stPP.rPosTol));
     s_bTeachOk := s_bManualOk AND io_stMachine.bHomeDone;
@@ -104,8 +105,9 @@ BEGIN
     io_stManual.bJogLockZ := NOT io_stIo.bZServoAlarm;
     io_stManual.bJogLockX1 := NOT io_stIo.bX1ServoAlarm;
     io_stManual.bJogLockX2 := NOT io_stIo.bX2ServoAlarm;
+    END_REGION
 
-    (* ============ 3. 速度加减 (带边沿 + 100 ms 重复, 夹在上下限) ============ *)
+    REGION 02_SpeedAdjust 速度加减 (带边沿 + 100 ms 重复, 夹在上下限)
     FOR s_iI := 1 TO 3 DO
         IF io_stHmi.rManualSpeed[s_iI] = 0.0 THEN
             io_stHmi.rManualSpeed[s_iI] := SPD_DEFAULT;
@@ -155,8 +157,9 @@ BEGIN
         s_bAnySpdBtn := s_bAnySpdBtn OR io_stHmi.bSpeedUp[s_iI] OR io_stHmi.bSpeedDown[s_iI];
     END_FOR;
     s_bRepIn := s_bAnySpdBtn AND (NOT s_bTick);
+    END_REGION
 
-    (* ============ 4. 示教: 手动 + 已回原点, 上升沿写当前位置 ============ *)
+    REGION 03_Teach 示教: 手动 + 已回原点, 上升沿写当前位置
     FOR s_iI := 1 TO 6 DO
         io_stManual.bTeachWrite[s_iI] := s_bTeachOk AND io_stHmi.bTeach[s_iI] AND (NOT s_arrPrevTeach[s_iI]);
         s_arrPrevTeach[s_iI] := io_stHmi.bTeach[s_iI];
@@ -182,29 +185,32 @@ BEGIN
     IF io_stManual.bTeachWrite[6] THEN
         io_stFeed.rPosFeed := io_arrAxis[AX_X2].rCurrentPos;            // M66 -> D522
     END_IF;
+    END_REGION
 
-    (* ============ 5. 夹爪松开 / 升降缸 (新增 R-MAN-07) ============ *)
+    REGION 04_GripperLift 夹爪松开 / 升降缸 (新增 R-MAN-07)
     io_stManual.bGripOpenCmd := s_bManualOk AND io_stHmi.bGripRelease;
     io_stManual.bLiftUpCmd := s_bManualOk AND io_stHmi.bLiftUp AND (NOT io_stHmi.bLiftDown);
     io_stManual.bLiftDownCmd := s_bManualOk AND io_stHmi.bLiftDown AND (NOT io_stHmi.bLiftUp);
+    END_REGION
 
-    (* ============ 6. 输送强制位放行: 手动 + 无 M8; 电机位另要求在安全区 ============ *)
-    FOR s_iI := 0 TO LAST_FORCE DO
+    REGION 05_ConveyorForce 输送强制位放行: 手动 + 无 M8 电机位另要求在安全区
+    FOR s_iI := 0 TO LAST_FORCE DO     // s_iI = 位置 0~20 (M70 起), 数组下标 = s_iI + 1
         IF s_iI = FORCE_SKIP THEN
             s_iR := 0;
-            io_stManual.abForce[s_iI] := FALSE;
+            io_stManual.abForce[s_iI + 1] := FALSE;
         ELSE
             IF s_iI < FORCE_SKIP THEN
                 s_iR := s_iI MOD 5;
             ELSE
                 s_iR := (s_iI - FORCE_SKIP - 1) MOD 5;
             END_IF;
-            io_stManual.abForce[s_iI] := s_bManualOk AND io_stHmi.bConvForce[s_iI]
+            io_stManual.abForce[s_iI + 1] := s_bManualOk AND io_stHmi.bConvForce[s_iI + 1]
                                          AND ((s_iR < 2) OR io_stBridge.bSafeZone);
         END_IF;
     END_FOR;
+    END_REGION
 
-    (* ============ 7. 轴命令: 手动持有, 离开手动撤销 ============ *)
+    REGION 06_AxisCommand 轴命令: 手动持有, 离开手动撤销
     // 定位请求: 上升沿锁入, 联锁不满足不接收; 点动或离开手动取消
     FOR s_iI := 1 TO 4 DO
         IF io_stHmi.bPosX1[s_iI] AND (NOT s_arrPrevPosX1[s_iI]) AND s_bX1PosOk THEN
@@ -279,4 +285,5 @@ BEGIN
                         OR io_arrAxis[AX_X2].stAbs.Busy OR io_arrAxis[AX_Z].stJog.Busy
                         OR io_arrAxis[AX_X1].stJog.Busy OR io_arrAxis[AX_X2].stJog.Busy;
     END_IF;
+    END_REGION
 END_FUNCTION_BLOCK

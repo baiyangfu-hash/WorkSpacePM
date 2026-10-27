@@ -151,7 +151,6 @@ TEST_CASE "T_MODE_01_Manual"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -172,6 +171,7 @@ TEST_CASE "T_MODE_01_Manual"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -345,7 +345,6 @@ TEST_CASE "T_MODE_02_ManualForcesOutOfAuto"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -366,6 +365,7 @@ TEST_CASE "T_MODE_02_ManualForcesOutOfAuto"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -543,7 +543,6 @@ TEST_CASE "T_MODE_03_HomingStart"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -564,6 +563,7 @@ TEST_CASE "T_MODE_03_HomingStart"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -737,7 +737,6 @@ TEST_CASE "T_MODE_06_AutoKeyWithoutHome"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -758,6 +757,7 @@ TEST_CASE "T_MODE_06_AutoKeyWithoutHome"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -930,7 +930,6 @@ TEST_CASE "T_MODE_07_Pause"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -951,6 +950,7 @@ TEST_CASE "T_MODE_07_Pause"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1128,7 +1128,6 @@ TEST_CASE "T_MODE_08_StopFinishesCycle"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1149,6 +1148,7 @@ TEST_CASE "T_MODE_08_StopFinishesCycle"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1177,7 +1177,7 @@ TEST_CASE "T_MODE_08_StopFinishesCycle"
     WAIT_CYCLES 8;
     ASSERT GlobalVars.stMachine.bAuto = FALSE;
     ASSERT GlobalVars.stMachine.bHomeDone = TRUE;
-    ASSERT GlobalVars.stAlarm.arrLatch[12] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[13] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = FALSE;
 END_TEST_CASE
 
@@ -1326,7 +1326,6 @@ TEST_CASE "T_MODE_10_EStop"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1347,6 +1346,7 @@ TEST_CASE "T_MODE_10_EStop"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1380,7 +1380,7 @@ TEST_CASE "T_MODE_10_EStop"
     ASSERT GlobalVars.stPP.bClampRear = FALSE;
     SET GlobalVars.stIo.bEStop := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[0] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[1] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
     ASSERT GlobalVars.stMachine.bAuto = FALSE;
     ASSERT GlobalVars.stMachine.bHomeDone = FALSE;
@@ -1535,7 +1535,6 @@ TEST_CASE "T_MODE_10B_EStopKeepsOpen"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1556,6 +1555,7 @@ TEST_CASE "T_MODE_10B_EStopKeepsOpen"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1589,7 +1589,7 @@ TEST_CASE "T_MODE_10B_EStopKeepsOpen"
     ASSERT GlobalVars.stPP.bClampRear = TRUE;
     SET GlobalVars.stIo.bEStop := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[0] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[1] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
     ASSERT GlobalVars.stMachine.bAuto = FALSE;
     ASSERT GlobalVars.stMachine.bHomeDone = FALSE;
@@ -1744,7 +1744,6 @@ TEST_CASE "T_MODE_11_Door_F1"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1765,6 +1764,7 @@ TEST_CASE "T_MODE_11_Door_F1"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1788,7 +1788,7 @@ TEST_CASE "T_MODE_11_Door_F1"
 
     SET GlobalVars.stIo.bDoorL1 := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[1] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[2] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -1937,7 +1937,6 @@ TEST_CASE "T_MODE_11_Door_F2"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -1958,6 +1957,7 @@ TEST_CASE "T_MODE_11_Door_F2"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -1981,7 +1981,7 @@ TEST_CASE "T_MODE_11_Door_F2"
 
     SET GlobalVars.stIo.bDoorL2 := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[2] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[3] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -2130,7 +2130,6 @@ TEST_CASE "T_MODE_11_Door_F3"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2151,6 +2150,7 @@ TEST_CASE "T_MODE_11_Door_F3"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2174,7 +2174,7 @@ TEST_CASE "T_MODE_11_Door_F3"
 
     SET GlobalVars.stIo.bDoorL3 := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[3] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[4] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -2323,7 +2323,6 @@ TEST_CASE "T_MODE_11_Door_F4"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2344,6 +2343,7 @@ TEST_CASE "T_MODE_11_Door_F4"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2367,7 +2367,7 @@ TEST_CASE "T_MODE_11_Door_F4"
 
     SET GlobalVars.stIo.bDoorL4 := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[4] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[5] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -2516,7 +2516,6 @@ TEST_CASE "T_MODE_11_Door_F5"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2537,6 +2536,7 @@ TEST_CASE "T_MODE_11_Door_F5"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2560,7 +2560,7 @@ TEST_CASE "T_MODE_11_Door_F5"
 
     SET GlobalVars.stIo.bDoorR1 := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[5] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[6] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -2709,7 +2709,6 @@ TEST_CASE "T_MODE_11_Door_F6"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2730,6 +2729,7 @@ TEST_CASE "T_MODE_11_Door_F6"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2753,7 +2753,7 @@ TEST_CASE "T_MODE_11_Door_F6"
 
     SET GlobalVars.stIo.bDoorR2 := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[6] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[7] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -2902,7 +2902,6 @@ TEST_CASE "T_MODE_11_Door_F7"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -2923,6 +2922,7 @@ TEST_CASE "T_MODE_11_Door_F7"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -2946,7 +2946,7 @@ TEST_CASE "T_MODE_11_Door_F7"
 
     SET GlobalVars.stIo.bDoorR3 := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[7] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[8] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -3095,7 +3095,6 @@ TEST_CASE "T_MODE_11_Door_F8"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -3116,6 +3115,7 @@ TEST_CASE "T_MODE_11_Door_F8"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -3139,7 +3139,7 @@ TEST_CASE "T_MODE_11_Door_F8"
 
     SET GlobalVars.stIo.bDoorR4 := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[8] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[9] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -3288,7 +3288,6 @@ TEST_CASE "T_MODE_12_bX1ServoAlarm_F9"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -3309,6 +3308,7 @@ TEST_CASE "T_MODE_12_bX1ServoAlarm_F9"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -3332,7 +3332,7 @@ TEST_CASE "T_MODE_12_bX1ServoAlarm_F9"
 
     SET GlobalVars.stIo.bX1ServoAlarm := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[9] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[10] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -3481,7 +3481,6 @@ TEST_CASE "T_MODE_12_bX2ServoAlarm_F10"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -3502,6 +3501,7 @@ TEST_CASE "T_MODE_12_bX2ServoAlarm_F10"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -3525,7 +3525,7 @@ TEST_CASE "T_MODE_12_bX2ServoAlarm_F10"
 
     SET GlobalVars.stIo.bX2ServoAlarm := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[10] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[11] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -3674,7 +3674,6 @@ TEST_CASE "T_MODE_12_bZServoAlarm_F11"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -3695,6 +3694,7 @@ TEST_CASE "T_MODE_12_bZServoAlarm_F11"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -3718,7 +3718,7 @@ TEST_CASE "T_MODE_12_bZServoAlarm_F11"
 
     SET GlobalVars.stIo.bZServoAlarm := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[11] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[12] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -3867,7 +3867,6 @@ TEST_CASE "T_MODE_12_bVfd1Alarm_F13"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -3888,6 +3887,7 @@ TEST_CASE "T_MODE_12_bVfd1Alarm_F13"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -3911,7 +3911,7 @@ TEST_CASE "T_MODE_12_bVfd1Alarm_F13"
 
     SET GlobalVars.stIo.bVfd1Alarm := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[13] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[14] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -4060,7 +4060,6 @@ TEST_CASE "T_MODE_12_bVfd2Alarm_F14"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -4081,6 +4080,7 @@ TEST_CASE "T_MODE_12_bVfd2Alarm_F14"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -4104,7 +4104,7 @@ TEST_CASE "T_MODE_12_bVfd2Alarm_F14"
 
     SET GlobalVars.stIo.bVfd2Alarm := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[14] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[15] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -4253,7 +4253,6 @@ TEST_CASE "T_MODE_12_bVfd3Alarm_F15"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -4274,6 +4273,7 @@ TEST_CASE "T_MODE_12_bVfd3Alarm_F15"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -4297,7 +4297,7 @@ TEST_CASE "T_MODE_12_bVfd3Alarm_F15"
 
     SET GlobalVars.stIo.bVfd3Alarm := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[15] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[16] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -4446,7 +4446,6 @@ TEST_CASE "T_MODE_12_bVfd4Alarm_F16"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -4467,6 +4466,7 @@ TEST_CASE "T_MODE_12_bVfd4Alarm_F16"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -4490,7 +4490,7 @@ TEST_CASE "T_MODE_12_bVfd4Alarm_F16"
 
     SET GlobalVars.stIo.bVfd4Alarm := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[16] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[17] = TRUE;
     ASSERT GlobalVars.stMachine.bFault = TRUE;
 END_TEST_CASE
 
@@ -4639,7 +4639,6 @@ TEST_CASE "T_MODE_13_14_ResetNeedsCauseGone"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -4660,6 +4659,7 @@ TEST_CASE "T_MODE_13_14_ResetNeedsCauseGone"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -4686,15 +4686,15 @@ TEST_CASE "T_MODE_13_14_ResetNeedsCauseGone"
     SET GlobalVars.stIo.bResetButton := TRUE;
     WAIT_CYCLES 3;
     SET GlobalVars.stIo.bResetButton := FALSE;
-    ASSERT GlobalVars.stAlarm.arrLatch[13] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[14] = TRUE;
     ASSERT GlobalVars.stMachine.bHoming = FALSE;
     SET GlobalVars.stIo.bVfd1Alarm := TRUE;
     WAIT_CYCLES 2;
-    ASSERT GlobalVars.stAlarm.arrLatch[13] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[14] = TRUE;
     SET GlobalVars.stIo.bResetButton := TRUE;
     WAIT_CYCLES 3;
     SET GlobalVars.stIo.bResetButton := FALSE;
-    ASSERT GlobalVars.stAlarm.arrLatch[13] = FALSE;
+    ASSERT GlobalVars.stAlarm.arrLatch[14] = FALSE;
     ASSERT GlobalVars.stMachine.bFault = FALSE;
     ASSERT GlobalVars.stMachine.bHoming = TRUE;
 END_TEST_CASE
@@ -4844,7 +4844,6 @@ TEST_CASE "T_MODE_16_Standby"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -4865,6 +4864,7 @@ TEST_CASE "T_MODE_16_Standby"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -5034,7 +5034,6 @@ TEST_CASE "T_ALM_01_02_LatchAndClear"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -5055,6 +5054,7 @@ TEST_CASE "T_ALM_01_02_LatchAndClear"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -5080,11 +5080,11 @@ TEST_CASE "T_ALM_01_02_LatchAndClear"
     WAIT_CYCLES 3;
     SET GlobalVars.stIo.bVfd2Alarm := TRUE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[14] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[15] = TRUE;
     SET GlobalVars.stIo.bResetButton := TRUE;
     WAIT_CYCLES 3;
     SET GlobalVars.stIo.bResetButton := FALSE;
-    ASSERT GlobalVars.stAlarm.arrLatch[14] = FALSE;
+    ASSERT GlobalVars.stAlarm.arrLatch[15] = FALSE;
 END_TEST_CASE
 
 TEST_CASE "T_ALM_04_LimitOnlyInAuto"
@@ -5232,7 +5232,6 @@ TEST_CASE "T_ALM_04_LimitOnlyInAuto"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -5253,6 +5252,7 @@ TEST_CASE "T_ALM_04_LimitOnlyInAuto"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -5278,8 +5278,8 @@ TEST_CASE "T_ALM_04_LimitOnlyInAuto"
     SET GlobalVars.stIo.bX1LimitFwd := FALSE;
     SET GlobalVars.stIo.bZLimitUp := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[20] = FALSE;
-    ASSERT GlobalVars.stAlarm.arrLatch[24] = FALSE;
+    ASSERT GlobalVars.stAlarm.arrLatch[21] = FALSE;
+    ASSERT GlobalVars.stAlarm.arrLatch[25] = FALSE;
     ASSERT GlobalVars.stMachine.bFault = FALSE;
 END_TEST_CASE
 
@@ -5428,7 +5428,6 @@ TEST_CASE "T_ALM_05_09_MinAlarmNo"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -5449,6 +5448,7 @@ TEST_CASE "T_ALM_05_09_MinAlarmNo"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -5625,7 +5625,6 @@ TEST_CASE "T_ALM_06_ClassBFault"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -5646,6 +5645,7 @@ TEST_CASE "T_ALM_06_ClassBFault"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -5671,14 +5671,14 @@ TEST_CASE "T_ALM_06_ClassBFault"
     WAIT_CYCLES 6;
     SET GlobalVars.stIo.bX1LimitFwd := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[20] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[21] = TRUE;
     ASSERT GlobalVars.stAlarm.bHoldPP = TRUE;
     ASSERT GlobalVars.stAlarm.bHoldFeeder = FALSE;
     ASSERT GlobalVars.stAlarm.abHoldConv[1] = FALSE;
     ASSERT GlobalVars.stMachine.bFault = FALSE;
     SET GlobalVars.stIo.bX2LimitFwd := FALSE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[22] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[23] = TRUE;
     ASSERT GlobalVars.stAlarm.bHoldFeeder = TRUE;
 END_TEST_CASE
 
@@ -5827,7 +5827,6 @@ TEST_CASE "T_ALM_06_ClassHint"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -5848,6 +5847,7 @@ TEST_CASE "T_ALM_06_ClassHint"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;
@@ -5871,7 +5871,7 @@ TEST_CASE "T_ALM_06_ClassHint"
 
     SET GlobalVars.stHmi.bStop := TRUE;
     WAIT_CYCLES 3;
-    ASSERT GlobalVars.stAlarm.arrLatch[12] = TRUE;
+    ASSERT GlobalVars.stAlarm.arrLatch[13] = TRUE;
     ASSERT GlobalVars.stAlarm.bAny = FALSE;
     ASSERT GlobalVars.stMachine.bFault = FALSE;
 END_TEST_CASE
@@ -6021,7 +6021,6 @@ TEST_CASE "T_ALM_07_Lamps"
     SET GlobalVars.stHmi.bFeedBtn[4] := FALSE;
     SET GlobalVars.stHmi.bPosX2[1] := FALSE;
     SET GlobalVars.stHmi.bPosX2[2] := FALSE;
-    SET GlobalVars.stHmi.bConvForce[0] := FALSE;
     SET GlobalVars.stHmi.bConvForce[1] := FALSE;
     SET GlobalVars.stHmi.bConvForce[2] := FALSE;
     SET GlobalVars.stHmi.bConvForce[3] := FALSE;
@@ -6042,6 +6041,7 @@ TEST_CASE "T_ALM_07_Lamps"
     SET GlobalVars.stHmi.bConvForce[18] := FALSE;
     SET GlobalVars.stHmi.bConvForce[19] := FALSE;
     SET GlobalVars.stHmi.bConvForce[20] := FALSE;
+    SET GlobalVars.stHmi.bConvForce[21] := FALSE;
     SET GlobalVars.stExt.bPeerSafetyFault := FALSE;
     SET GlobalVars.stExt.bPeerPermit := FALSE;
     SET GlobalVars.stExt.bLinkFail := FALSE;

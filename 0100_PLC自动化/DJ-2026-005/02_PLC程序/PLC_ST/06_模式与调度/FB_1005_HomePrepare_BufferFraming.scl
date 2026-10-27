@@ -92,12 +92,13 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 定时器统一调用 (顶部, 无条件) ============ *)
+    REGION 00_Timers 定时器统一调用 (顶部, 无条件)
     fb_tPrepZ(IN := s_bPrepZIn, PT := io_stHome.dPrepZDelayMs, Q => s_bPrepZQ, ET => s_dPrepZEt);
     fb_tPrepX1(IN := s_bPrepX1In, PT := io_stHome.dPrepX1DelayMs, Q => s_bPrepX1Q, ET => s_dPrepX1Et);
     fb_tPrepX2(IN := s_bPrepX2In, PT := io_stHome.dPrepX2DelayMs, Q => s_bPrepX2Q, ET => s_dPrepX2Et);
+    END_REGION
 
-    (* ============ 2. 派生量 ============ *)
+    REGION 01_Derived 派生量
     s_bHold := io_stBridge.bHoldHome OR io_stAlarm.bAny;
     s_bAnyProd := io_stIo.bPPFrontProd1 OR io_stIo.bPPFrontProd2 OR io_stIo.bPPRearProd1 OR io_stIo.bPPRearProd2;
     s_bAnyEye := io_stIo.bFeederFrontEye1 OR io_stIo.bFeederFrontEye2 OR io_stIo.bFeederRearEye1 OR io_stIo.bFeederRearEye2;
@@ -109,15 +110,17 @@ BEGIN
     s_bPrepZIn := FALSE;
     s_bPrepX1In := FALSE;
     s_bPrepX2In := FALSE;
+    END_REGION
 
-    (* ============ 3. F80 / F81: 回原点时夹爪 / 小车有料 (不进 M8, 回原点 Hold) ============ *)
+    REGION 02_GripCartMaterial F80 / F81: 回原点时夹爪 / 小车有料 (不进 M8, 回原点 Hold)
     s_bF80 := io_stMachine.bHoming AND s_bAnyProd;
     s_bF81 := io_stMachine.bHoming AND s_bAnyEye;
-    io_stAlarm.arrTrig[80] := s_bF80;
-    io_stAlarm.arrTrig[81] := s_bF81;
+    io_stAlarm.arrTrig[81] := s_bF80;
+    io_stAlarm.arrTrig[82] := s_bF81;
     io_stHome.bReleaseGripperLock := s_bF80;        // F80 期间禁止 Z 定位 (取放料读)
+    END_REGION
 
-    (* ============ 4. 序列 ============ *)
+    REGION 03_Sequence 序列
     io_stHome.bGripOpenCmd := FALSE;
     io_stHome.bLiftDownCmd := FALSE;
     io_stHome.bPrepareDone := FALSE;
@@ -266,8 +269,9 @@ BEGIN
             io_stHome.iPrepStep := PR_IDLE;
         END_CASE;
     END_IF;
+    END_REGION
 
-    (* ============ 5. 轴命令: 回原点 / 准备期间持有, 离开时撤销 ============ *)
+    REGION 04_AxisCommand 轴命令: 回原点 / 准备期间持有, 离开时撤销
     FOR s_iAx := AX_Z TO AX_X2 DO
         io_arrAxis[s_iAx].stPower.Enable := NOT io_stMachine.bFault;
         io_arrAxis[s_iAx].stReset.Execute := io_stAlarm.bReset;
@@ -324,4 +328,5 @@ BEGIN
                         OR io_arrAxis[AX_X2].stAbs.Busy OR io_arrAxis[AX_Z].stHome.Busy
                         OR io_arrAxis[AX_X1].stHome.Busy OR io_arrAxis[AX_X2].stHome.Busy;
     END_IF;
+    END_REGION
 END_FUNCTION_BLOCK

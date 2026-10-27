@@ -3,7 +3,7 @@
 Field report (D08, Trae CN): running plain ``python`` against ``releases/<id>`` leaves ``__pycache__`` there; the stable
 launcher's exact-tree check then rejects the active slot and quietly runs the previous release.  This drill builds a real
 two-slot container from the current source and the real stable launcher, and records what a user or agent can notice.
-Since the launcher fix a cache folder alone stops the launcher (exit 4) with the purge command; real payload damage\nstill falls back to the previous release, now with a warning.  Strict xfails name what should happen and wait for a card.
+Since the launcher fix a cache folder alone stops the launcher (exit 4) with the purge command; real payload damage\nstill falls back to the previous release, now with a warning.  The write refusal under runtime-identity divergence is pinned by c04 (TD-SW008-174).
 """
 
 from __future__ import annotations
@@ -16,9 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 import auto_pm
+from tests.git_support import run_git
 
 ACTIVE, PREVIOUS = "9.9.9-active", "9.9.8-previous"
 PROJECT_ID = "DJ-2026-011"
@@ -27,10 +26,6 @@ SILENT_FALLBACK = (
     "现象（技术债候选，未开卡）：活动槽被拒、退回上一版时，启动器退出码 0、stderr 为空，只在 stdout 打一行“verified via "
     "previous_release.json”，被拒的原因（未登记目录 __pycache__）被丢掉；用户和 agent 都不会注意到"
 )
-WRITES_DESPITE_DIVERGENCE = (
-    "现象（技术债候选，未开卡）：运行身份分歧（RUNTIME_IDENTITY_DIVERGENCE）时，pm orient 会报冲突，"
-    "但命令行写命令（如 pm inbox add）照样写库；只有薄 SDK 会拒绝"
-)
 
 
 def _repository_root() -> Path:
@@ -38,9 +33,7 @@ def _repository_root() -> Path:
 
 
 def _git(root: Path, *arguments: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(root), *arguments], check=True, capture_output=True, text=True, encoding="utf-8"
-    ).stdout
+    return run_git(root, *arguments).stdout
 
 
 def _container(tmp_path: Path) -> tuple[Path, Path]:
@@ -160,7 +153,6 @@ def test_c03_falling_back_to_the_previous_release_is_reported_loudly_with_its_re
     assert "警告" in resolved.stderr and "previous" in resolved.stderr
 
 
-@pytest.mark.xfail(strict=True, reason=WRITES_DESPITE_DIVERGENCE)
 def test_c04_a_write_command_refuses_while_the_runtime_identity_diverges(tmp_path: Path) -> None:
     workspace, container = _container(tmp_path)
     _tamper(container)

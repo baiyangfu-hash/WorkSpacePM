@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.git_support import git_do
 from tests.tools import tier_classifier as tc
 
 PROJECT = Path(__file__).resolve().parents[2]
@@ -185,7 +186,7 @@ def test_the_classifier_agrees_with_the_tier_of_every_approved_card(rules: tc.Ru
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "core.autocrlf=false", *args], check=True, capture_output=True)
+    git_do(repo, *args, config=['user.name=t', 'user.email=t@example.invalid', 'core.autocrlf=false'])
 
 
 def _repo_with_changes(tmp_path: Path) -> Path:

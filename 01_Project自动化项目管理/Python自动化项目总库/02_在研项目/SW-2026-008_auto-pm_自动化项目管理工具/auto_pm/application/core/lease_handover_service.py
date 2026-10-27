@@ -39,7 +39,7 @@ from auto_pm.infrastructure import lease_wallet, process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
-    authority_path_parts,
+    authority_path_covered,
     governed_worktree_snapshot,
 )
 
@@ -197,8 +197,7 @@ class LeaseHandoverService:
             _worktree, git_head, dirty = governed_worktree_snapshot(self._root, run.worktree_path, allow_external_linked=True)
         except ControlRootGuardError as error:
             raise LeaseHandoverError(str(error)) from error
-        owned = [authority_path_parts(path) for path in run.owned_paths]
-        in_scope = [path for path in dirty if any(authority_path_parts(path)[: len(root)] == root for root in owned)]
+        in_scope = [path for path in dirty if authority_path_covered(path, run.owned_paths)]
         digest = hashlib.sha256(f"{run_id}\x00{owner}\x00{to_owner}\x00{lease.version}".encode()).hexdigest()[:16].upper()
         try:
             checkpoint = self._execution.checkpoint(

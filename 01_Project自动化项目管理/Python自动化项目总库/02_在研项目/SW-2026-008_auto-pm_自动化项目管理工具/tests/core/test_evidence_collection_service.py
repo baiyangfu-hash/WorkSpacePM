@@ -15,21 +15,13 @@ from auto_pm.application.core.evidence_collection_service import (
 )
 from auto_pm.contracts.continuity import RunItem, RunState
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from tests.git_support import git_out
 
 _TIMESTAMP = "2026-09-19T00:00:00+00:00"
 
 
 def _git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), *arguments],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=clean_git_environment(),
-    )
-    return result.stdout.strip()
+    return git_out(root, *arguments, env=clean_git_environment())
 
 
 def _workspace_with_candidate(

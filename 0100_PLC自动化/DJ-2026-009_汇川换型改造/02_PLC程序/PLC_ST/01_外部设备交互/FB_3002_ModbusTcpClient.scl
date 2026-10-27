@@ -15,6 +15,10 @@ FUNCTION_BLOCK FB_3002_ModbusTcpClient
  *   链路断开时读侧变量保持最后值不刷新, 心跳因此停止翻转,
  *   由 FB_3001 现有的 12s 心跳超时照常报通讯故障. 本块不直接改握手状态.
  *
+ * STRING 按字符取下标: 下标从 1 起 (第 1 个字符是 s[1])。这是 siemens-lsp 插件 (S7 语义) 的要求;
+ *   移植到汇川 InoProShop / CODESYS 等平台须按平台适配 (这类平台字符下标可能从 0 起)。
+ *   适配点: 本文件里所有 s_sIdBuf[...] 的下标 (组件 ID 解包 3 处、封包 2 处), 数组下标不受影响。
+ *
  * 寄存器地址取自契约 V0.3 我方提议版, 未经对方签字, 见下方 VAR CONSTANT.
  * ============================================================================== *)
 VAR_INPUT
@@ -110,7 +114,7 @@ BEGIN
                 IF s_byHi = 16#00 THEN
                     s_bIdEnd := TRUE;
                 ELSE
-                    s_sIdBuf[s_iChar] := s_byHi;
+                    s_sIdBuf[s_iChar + 1] := s_byHi;  // STRING 下标从 1 起，为 siemens-lsp 插件（S7 语义）要求；移植到汇川 InoProShop / CODESYS 等平台须按平台适配
                     s_iChar := s_iChar + 1;
                 END_IF;
             END_IF;
@@ -118,12 +122,13 @@ BEGIN
                 IF s_byLo = 16#00 THEN
                     s_bIdEnd := TRUE;
                 ELSE
-                    s_sIdBuf[s_iChar] := s_byLo;
+                    s_sIdBuf[s_iChar + 1] := s_byLo;  // STRING 下标从 1 起，为 siemens-lsp 插件（S7 语义）要求；移植到汇川 InoProShop / CODESYS 等平台须按平台适配
                     s_iChar := s_iChar + 1;
                 END_IF;
             END_IF;
         END_FOR;
-        s_sIdBuf[s_iChar] := 16#00;  // 结束符 (32 个字符满时写在第 33 字节, STRING[32] 自带)
+        // 按下标逐字符写入不会更新字符串当前长度 (S7 语义): 把长度截到实际字符数 (结束符由字符串自带, 不再手写, 32 个字符满时也不越界)
+        s_sIdBuf := LEFT(s_sIdBuf, s_iChar);
         io_stExternal.stUpstream.sRcvModuleID := s_sIdBuf;
     END_IF;
 
@@ -182,10 +187,10 @@ BEGIN
         s_byHi := 16#00;
         s_byLo := 16#00;
         IF (2 * s_iReg) < s_iChar THEN
-            s_byHi := s_sIdBuf[2 * s_iReg];
+            s_byHi := s_sIdBuf[2 * s_iReg + 1];  // STRING 下标从 1 起，为 siemens-lsp 插件（S7 语义）要求；移植到汇川 InoProShop / CODESYS 等平台须按平台适配
         END_IF;
         IF (2 * s_iReg + 1) < s_iChar THEN
-            s_byLo := s_sIdBuf[2 * s_iReg + 1];
+            s_byLo := s_sIdBuf[2 * s_iReg + 2];  // STRING 下标从 1 起，为 siemens-lsp 插件（S7 语义）要求；移植到汇川 InoProShop / CODESYS 等平台须按平台适配
         END_IF;
         io_arrDownWrite[REG_ID_START + s_iReg] := SHL(BYTE_TO_WORD(s_byHi), 8) OR BYTE_TO_WORD(s_byLo);
     END_FOR;

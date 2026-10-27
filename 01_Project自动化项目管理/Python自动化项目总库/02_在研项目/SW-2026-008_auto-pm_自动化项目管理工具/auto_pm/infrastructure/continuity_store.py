@@ -80,6 +80,7 @@ from auto_pm.contracts.pm_facade import (
 from auto_pm.infrastructure.continuity_internal import codec as continuity_codec
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
+    authority_path_covered,
     authority_path_parts,
     clean_git_environment,
     governed_worktree_snapshot,
@@ -87,6 +88,7 @@ from auto_pm.infrastructure.control_root_guard import (
     require_control_root,
     require_safe_workspace_path,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded
 
 
 class ContinuityStoreError(RuntimeError):
@@ -675,12 +677,10 @@ class ContinuityStore:
 
     @classmethod
     def _authority_path_covered(cls, path: str, roots: tuple[str, ...]) -> bool:
-        path_parts = cls._authority_path_key(path)
+        cls._normalize_authority_path(path)
         for root in roots:
-            root_parts = cls._authority_path_key(root)
-            if path_parts[: len(root_parts)] == root_parts:
-                return True
-        return False
+            cls._normalize_authority_path(root)
+        return authority_path_covered(path, roots)
 
     @classmethod
     def _authority_path_key(cls, raw: str) -> tuple[str, ...]:
@@ -758,17 +758,19 @@ class ContinuityStore:
 
     def _git_bytes(self, *args: str, input_bytes: bytes | None = None) -> bytes:
         try:
-            result = subprocess.run(
+            result = run_git_bounded(
                 ["git", "-C", str(self.workspace_root), *args],
+                default_timeout=10.0,
+                error_cls=ContinuityStoreError,
+                where=self.workspace_root,
                 input=input_bytes,
                 stdin=subprocess.DEVNULL if input_bytes is None else None,
                 capture_output=True,
                 check=False,
                 shell=False,
                 env=clean_git_environment(),
-                timeout=10,
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
+        except OSError as error:
             raise ContinuityStoreError("Decision Git immutable 事实无法复核") from error
         if result.returncode != 0:
             raise ContinuityStoreError("Decision Git commit/blob 不存在或无法读取")
@@ -789,7 +791,7 @@ class ContinuityStore:
 
     def _require_paths_clean_at_head(self, *paths: str) -> None:
         try:
-            result = subprocess.run(
+            result = run_git_bounded(
                 [
                     "git",
                     "-C",
@@ -800,14 +802,16 @@ class ContinuityStore:
                     "--",
                     *paths,
                 ],
+                default_timeout=10.0,
+                error_cls=ContinuityStoreError,
+                where=self.workspace_root,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 check=False,
                 shell=False,
                 env=clean_git_environment(),
-                timeout=10,
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
+        except OSError as error:
             raise ContinuityStoreError("Decision Git clean 事实无法复核") from error
         diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
         if result.returncode == 1:

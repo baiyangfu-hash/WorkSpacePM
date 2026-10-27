@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -15,15 +14,14 @@ from auto_pm.application.core.candidate_merge_back_service import (
 )
 from auto_pm.application.core.evidence_collection_service import EvidenceCollection
 from auto_pm.contracts.continuity import CheckpointItem, RunItem, RunState
+from tests.git_support import git_out
 
 TARGET = "proj/src/block.scl"
 OTHER = "proj/src/other.scl"
 
 
 def _git(root: Path, *arguments: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(root), *arguments], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
-    ).stdout.strip()
+    return git_out(root, *arguments)
 
 
 def _repository(tmp_path: Path, *, attributes: str = "") -> tuple[Path, Path, str]:

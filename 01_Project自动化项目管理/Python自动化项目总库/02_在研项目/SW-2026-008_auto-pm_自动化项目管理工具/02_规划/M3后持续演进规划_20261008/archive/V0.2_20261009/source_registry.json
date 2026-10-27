@@ -1,0 +1,170 @@
+{
+  "schema": "sw008.evolution.planning_sources.v0.2",
+  "version": "V0.2",
+  "date": "2026-10-09",
+  "purpose": "路线修订的证据定位；不是正式执行授权、当前状态镜像或产品验收",
+  "assembled_at_utc": "2026-10-09T15:53:00Z",
+  "history": {
+    "directory": "archive/V0.1_20261008",
+    "registry": "archive/V0.1_20261008/source_registry.json",
+    "ids": "S01-S25",
+    "meaning": "原字节归档的历史快照，未重新赋予当前状态；旧版manifest包含7个文件，其本身另核"
+  },
+  "limitations": [
+    "只读来源，写入范围仅本规划包；未运行产品命令/测试或读写治理DB。",
+    "哈希证明文件读取身份，不证明最新批准、完成、部署或运行状态。",
+    "K10等可变来源为读取快照；K15/K16为固定Git对象，不宣称当前最新。",
+    "本次仅核与路线修订有关片段，不声称通读全部SW008文档。"
+  ],
+  "sources": [
+    {
+      "id": "K01",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/ROUTE_CORRECTION_FOR_CLAUDE_20261009.md",
+      "note": "用户已接受方向与12问交接；本次修订直接依据",
+      "sha256": "7e7a878280021ff066c892ee7a239c25ec161feb83937b4bb8e14e2778e62365",
+      "bytes": 28631,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K02",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/WBS_REVISION_PROPOSAL_20261009.md",
+      "note": "Claude V0.1提案；已复核待修订，不是获批实施方案",
+      "sha256": "8db9033ffe97e54c4a3b5b1be8020728e65cb6c4b567b9dfbd74986038411236",
+      "bytes": 16474,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K03",
+      "path": "C:/Users/fubai/Documents/My_Workspace/AGENTS.md",
+      "note": "现行协作规则；未修改",
+      "sha256": "cd5e4d9e25c3a05af73103a6ddd64abce6626ffe2acc199c364f5c81f6ab13d8",
+      "bytes": 16506,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K04",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.cursor/rules/workspace-ai-coexistence.mdc",
+      "note": "适用路由；未修改",
+      "sha256": "78fe8f1327b3932a9d5d2372acac484104bb47fe5b8a3dd09f72687d9aa37117",
+      "bytes": 2619,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K05",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.agent/rules/project-rule.md",
+      "note": "跨工具入口；未修改",
+      "sha256": "e7e14b0a21f0a62ed0b1db757907381bcf461381bb9f12989081e3454f72037f",
+      "bytes": 1535,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K06",
+      "path": "C:/Users/fubai/Documents/My_Workspace/00_Infrastructure/auto_pm/releases/1.3.3-a808fa8/auto_pm/contracts/workspace_context.py",
+      "note": "实际文件已有配置/有效发布身份等字段；非进程证明",
+      "sha256": "b0fabc6119e4cb7e0164d80ff94aba9317659d14c3ccf034d13db4c3d22cbcbd",
+      "bytes": 2096,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K07",
+      "path": "C:/Users/fubai/Documents/My_Workspace/00_Infrastructure/auto_pm/releases/1.3.3-a808fa8/auto_pm/contracts/continuity_resume.py",
+      "note": "已有候选Work/Run集合，不能直接等同项目概览",
+      "sha256": "997f993f02c6f1d43b3c5b9b49f6165f87a46a8442f43d6f2c451ec8772e4400",
+      "bytes": 1548,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K08",
+      "path": "C:/Users/fubai/Documents/My_Workspace/00_Infrastructure/auto_pm/releases/1.3.3-a808fa8/auto_pm/infrastructure/continuity_store.py",
+      "note": "单项目一个未终结Mission的现有schema声明；未查询生产DB",
+      "sha256": "9577040ef2cf50d87c5d7e83a85053711b10e0b3c7d5f6ea8874953cd13a259d",
+      "bytes": 315807,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K09",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.vscode/tasks.json",
+      "note": "当前任务入口只有检查/修复等；任务菜单不等于Agent自动加载",
+      "sha256": "e8f76a88821d21957e67027bcbee753cb53d8413c01bc00a2320a0bf7ce01e73",
+      "bytes": 1215,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K10",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/STATE_CURRENT.md",
+      "note": "可变状态自述；077/TD7收口需独立证据，页眉日期不作实时性保证",
+      "sha256": "fc49e06d996c57440d1e567c6f1504b7c08874718104c12b024d9107b59b6bd6",
+      "bytes": 63737,
+      "evidence_type": "mutable_status_self_report",
+      "later_observation": {
+        "observed_at_utc": "2026-10-09T15:58:28.056059+00:00",
+        "sha256": "7ef8de6dac1f272626a8016672ee0a8d1d2e3265c000c353e5c2633672c302d4",
+        "bytes": 65772,
+        "read_scope": "286-291",
+        "statement": "08:55新增自述：078正式门禁已开始；不等于本次独立核实授权、进程或结果。",
+        "supersedes_current_state_interpretation": true,
+        "preserves_original_snapshot_hash": true
+      }
+    },
+    {
+      "id": "K11",
+      "path": "C:/Users/fubai/Documents/My_Workspace/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/077_M2-GOV-RULE_门禁分档规则修订实施卡_PM.md",
+      "note": "范围及分档规则；不延长旧授权",
+      "sha256": "1ac7d8a4dbde32cf7d107b7ca6b277fe64289520bc73f676e465e11ebd3e5044",
+      "bytes": 12229,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K12",
+      "path": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/ROLES_AND_BOUNDARIES_FOR_GPT_REVIEW_20261009.md",
+      "note": "用户原始诉求与12问",
+      "sha256": "68eeb7624554eee089db3625ee96aea238145903f7907fdeab569342aae99af1",
+      "bytes": 9369,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K13",
+      "path": "C:/Users/fubai/Documents/My_Workspace/00_Infrastructure/auto_pm/active_release.json",
+      "note": "仅部署指针文件",
+      "sha256": "f95ddd95888ef44659d14cfb5fd1a3d228fa762dcc86053eafb4da07d041cbb1",
+      "bytes": 200,
+      "evidence_type": "local_file_snapshot"
+    },
+    {
+      "id": "K14",
+      "path": "C:/Users/fubai/Documents/My_Workspace/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/M3后持续演进规划_20261008/archive/V0.1_20261008/SHA256SUMS.txt",
+      "note": "旧版7文件的校验清单，归档后原样保留",
+      "sha256": "213cc22d5d28c3febd7fb088c0e344b047540eec7be59866299ed0c463c85b99",
+      "bytes": 629,
+      "evidence_type": "local_file_snapshot"
+    }
+  ],
+  "git_sources": [
+    {
+      "id": "K15",
+      "repository": "C:/Users/fubai/Documents/My_Workspace",
+      "commit": "a538f942f1995f1ec3e50ad45c624bdc123c6bc3",
+      "path": "SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md",
+      "note": "V3.0.23固定提交；非当前批准链审计",
+      "sha256": "f00d4451f2e7a12241950278bdeabd19a655ab371912a434ba0d30c2615c8aa1",
+      "bytes": 233369,
+      "blob": "66b1f4108b56457ce662be7f021509ee2aadbfb8",
+      "file_version": "V3.0.23",
+      "evidence_type": "immutable_git_object",
+      "approval_chain_verified": false
+    },
+    {
+      "id": "K16",
+      "repository": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/worktrees/m2-rule",
+      "commit": "a0ac852badd1ae6bc4a533f8f4e66a641b79126d",
+      "path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/M2_门禁分档与单卡规模规则_PM.md",
+      "note": "077提交中的V1.1规则；保留原分档和完整门禁要求",
+      "sha256": "50832ea79cdd4e485272f43c3045e2de0d149fd45a7301cf0ebcfa58d0b44423",
+      "bytes": 10574,
+      "blob": "88f48df2113dd88e110c0c66ad955d6851c73aa3",
+      "file_version": "V1.1追加规则",
+      "evidence_type": "immutable_git_object",
+      "approval_chain_verified": false
+    }
+  ]
+}

@@ -148,7 +148,7 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 定时器统一调用 (顶部, 无条件) ============ *)
+    REGION 00_Timers 定时器统一调用 (顶部, 无条件)
     fb_tSettle(IN := s_bSettleIn, PT := io_stPP.dSettleMs, Q => s_bSettleQ, ET => s_dSettleEt);
     fb_tAB(IN := s_bABIn, PT := io_stPP.dSettleMs, Q => s_bABQ, ET => s_dABEt);
     fb_tClamp(IN := s_bClampIn, PT := io_stPP.dClampTimeoutMs, Q => s_bClampQ, ET => s_dClampEt);
@@ -166,8 +166,9 @@ BEGIN
     fb_tF73(IN := s_bF73In, PT := io_stPP.dCylTimeoutMs, Q => s_bF73Q, ET => s_dF73Et);
     fb_tF74(IN := s_bF74In, PT := io_stPP.dCylTimeoutMs, Q => s_bF74Q, ET => s_dF74Et);
     fb_tF75(IN := s_bF75In, PT := io_stPP.dCylTimeoutMs, Q => s_bF75Q, ET => s_dF75Et);
+    END_REGION
 
-    (* ============ 2. 派生量 ============ *)
+    REGION 01_Derived 派生量
     s_bHold := io_stBridge.bHoldPP;
     s_bAnyBusy := io_arrAxis[AX_Z].stAbs.Busy OR io_arrAxis[AX_Z].stJog.Busy OR io_arrAxis[AX_Z].stHome.Busy
                   OR io_arrAxis[AX_X1].stAbs.Busy OR io_arrAxis[AX_X1].stJog.Busy OR io_arrAxis[AX_X1].stHome.Busy
@@ -243,8 +244,9 @@ BEGIN
     s_bSettleIn := FALSE;
     s_bABIn := FALSE;
     s_bClampIn := FALSE;
+    END_REGION
 
-    (* ============ 3. 其他机构对夹爪 / 升降缸的要求 (回原点 / 准备 / 手动) ============ *)
+    REGION 02_ModuleRequests 其他机构对夹爪 / 升降缸的要求 (回原点 / 准备 / 手动)
     IF io_stPP.bGripOpenReq THEN
         io_stPP.bClampFront := FALSE;
         io_stPP.bClampRear := FALSE;
@@ -258,8 +260,9 @@ BEGIN
         io_stPP.bLiftUp := TRUE;
         io_stPP.bLiftDown := FALSE;
     END_IF;
+    END_REGION
 
-    (* ============ 4. 步序 ============ *)
+    REGION 03_Sequence 步序
     IF (NOT io_stMachine.bAuto) OR io_stMachine.bFault THEN
         // 非自动或异常停机: 步序回 0, 轴命令清除; 夹爪和升降缸不动 (R-PP-09)
         s_iStep := STEP_NONE;
@@ -449,8 +452,9 @@ BEGIN
             s_bX1Go := FALSE;
         END_CASE;
     END_IF;
+    END_REGION
 
-    (* ============ 5. 轴命令: 自动模式持有, Hold 时 Halt, 离开自动时撤销 ============ *)
+    REGION 04_AxisCommand 轴命令: 自动模式持有, Hold 时 Halt, 离开自动时撤销
     IF io_stMachine.bAuto AND (NOT io_stMachine.bFault) THEN
         s_bAxisOwned := TRUE;
         IF s_bZGo AND (NOT s_bHold) THEN
@@ -483,23 +487,26 @@ BEGIN
         io_arrAxis[AX_X1].stHalt.Execute := io_arrAxis[AX_X1].stAbs.Busy;
         s_bAxisOwned := io_stMachine.bFault OR io_arrAxis[AX_Z].stAbs.Busy OR io_arrAxis[AX_X1].stAbs.Busy;
     END_IF;
+    END_REGION
 
-    (* ============ 6. 夹爪 / 升降缸输出 ============ *)
+    REGION 05_GripperLiftOutput 夹爪 / 升降缸输出
     io_stIo.bQPPRearClamp := io_stPP.bClampRear;
     io_stIo.bQPPFrontClamp := io_stPP.bClampFront;
     io_stIo.bQPPG3Clamp := io_stPP.bClampG3;        // 预留, 005 未接线
     io_stIo.bQPPG4Clamp := io_stPP.bClampG4;        // 预留, 005 未接线
     io_stIo.bQPPLiftUp := io_stPP.bLiftUp;
     io_stIo.bQPPLiftDown := io_stPP.bLiftDown;
+    END_REGION
 
-    (* ============ 7. 安全区 (R-CONV-03): 自动 = 不在 S22 / S23; 其余模式 = Z <= 待机点 ============ *)
+    REGION 06_SafeZone 安全区 (R-CONV-03): 自动时不在 S22 / S23 其余模式 Z 不高于待机点
     IF io_stMachine.bAuto THEN
         io_stPP.bSafeZone := (s_iStep <> STEP_S22) AND (s_iStep <> STEP_S23);
     ELSE
         io_stPP.bSafeZone := (io_arrAxis[AX_Z].rCurrentPos <= (io_stPP.rZStandby + io_stPP.rPosTol));
     END_IF;
+    END_REGION
 
-    (* ============ 8. 报警触发 ============ *)
+    REGION 07_AlarmTrigger 报警触发
     // F30 / F31: 后夹爪夹紧命令 ON 但前夹料产品检测 1 / 2 灭 (原程序命名交叉, 保持); 本机模拟时不报
     s_bF30In := io_stPP.bClampRear AND (NOT io_stIo.bPPFrontProd1) AND (NOT io_stMachine.bSimulate);
     s_bF31In := io_stPP.bClampRear AND (NOT io_stIo.bPPFrontProd2) AND (NOT io_stMachine.bSimulate);
@@ -519,26 +526,28 @@ BEGIN
     // F74 / F75: 升降缸上升 / 下降命令后上位 / 下位未到
     s_bF74In := io_stPP.bLiftUp AND (NOT io_stIo.bPPLiftUp);
     s_bF75In := io_stPP.bLiftDown AND (NOT io_stIo.bPPLiftDown);
-    io_stPP.arrTrig[0] := s_bF30Q;
-    io_stPP.arrTrig[1] := s_bF31Q;
-    io_stPP.arrTrig[2] := s_bF32Q;
-    io_stPP.arrTrig[3] := s_bF33Q;
-    io_stPP.arrTrig[4] := s_bF66Q;
-    io_stPP.arrTrig[5] := s_bF67Q;
-    io_stPP.arrTrig[6] := s_bF68Q;
-    io_stPP.arrTrig[7] := s_bF69Q;
-    io_stPP.arrTrig[8] := s_bF70Q;
-    io_stPP.arrTrig[9] := s_bF71Q;
-    io_stPP.arrTrig[10] := s_bF72Q;
-    io_stPP.arrTrig[11] := s_bF73Q;
-    io_stPP.arrTrig[12] := s_bF74Q;
-    io_stPP.arrTrig[13] := s_bF75Q;
-    io_stPP.arrTrig[14] := s_bClampQ;       // F106 夹紧超时 (只报警, 停在 S22 等待)
+    io_stPP.arrTrig[1] := s_bF30Q;
+    io_stPP.arrTrig[2] := s_bF31Q;
+    io_stPP.arrTrig[3] := s_bF32Q;
+    io_stPP.arrTrig[4] := s_bF33Q;
+    io_stPP.arrTrig[5] := s_bF66Q;
+    io_stPP.arrTrig[6] := s_bF67Q;
+    io_stPP.arrTrig[7] := s_bF68Q;
+    io_stPP.arrTrig[8] := s_bF69Q;
+    io_stPP.arrTrig[9] := s_bF70Q;
+    io_stPP.arrTrig[10] := s_bF71Q;
+    io_stPP.arrTrig[11] := s_bF72Q;
+    io_stPP.arrTrig[12] := s_bF73Q;
+    io_stPP.arrTrig[13] := s_bF74Q;
+    io_stPP.arrTrig[14] := s_bF75Q;
+    io_stPP.arrTrig[15] := s_bClampQ;       // F106 夹紧超时 (只报警, 停在 S22 等待)
+    END_REGION
 
-    (* ============ 9. 状态输出 ============ *)
+    REGION 08_StatusOutput 状态输出
     io_stPP.iStep := s_iStep;
     io_stPP.iPhase := s_iPhase;
     io_stPP.iGroup := s_iGroup;
     io_stPP.bAtRest := (s_iStep = STEP_NONE) OR ((s_iStep = STEP_S20) AND (NOT s_bXStarted));
+    END_REGION
 
 END_FUNCTION_BLOCK

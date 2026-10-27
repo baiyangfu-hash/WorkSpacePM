@@ -2071,3 +2071,29 @@ def test_rehearsal_c11_f08_preview_is_physically_read_only_under_delete_journal(
     )
     assert replay == card
     assert _rehearsal_database_inventory(database) == before
+
+
+def test_verify_refuses_a_protected_file_change_in_block_mode_and_never_writes_the_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TD-SW008-201: "改测试文件让测试变绿" must stop the verification once the gate is switched from warn to block."""
+    _missions, facade, execution = _unverified_run_ready(tmp_path)
+    execution.transition_run(
+        "RUN-GATE-001", RunState.VERIFYING, "gate-test", "gate-lease", "gate-run-verifying"
+    )
+    written: list[object] = []
+    monkeypatch.setattr(
+        ContinuityExecutionService, "append_verified_checkpoint", lambda *_a, **_k: written.append(1)
+    )
+    monkeypatch.setattr(
+        PmFacadeService, "_protected_file_changes", staticmethod(lambda _run: ("tests/test_pm.py",))
+    )
+    monkeypatch.setattr("auto_pm.application.core.pm_facade_service.PROTECTED_FILE_ENFORCEMENT", "block")
+    before = _gate_event_count(tmp_path)
+
+    outcome, reason = facade.verify_for_acceptance_with_reason("MISSION-PM-001", lease_token="gate-lease")
+
+    assert outcome.verified is False
+    assert "tests/test_pm.py" in reason and "受保护文件" in reason
+    assert written == []
+    assert _gate_event_count(tmp_path) == before

@@ -27,6 +27,7 @@ from auto_pm.infrastructure.control_root_guard import (
     require_control_root,
     require_safe_workspace_path,
 )
+from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 # WS-001 station and branch prefix table.  An agent not listed here is registered by the user first.
 AGENT_ROSTER: dict[str, str] = {
@@ -648,13 +649,13 @@ class AgentWorktreeService:
     def _git(
         self, *args: str, cwd: Path | None = None, stdin: str | None = None
     ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        return run_git_bounded_text(
             ["git", "-C", str(cwd or self._root), *args],
+            default_timeout=300.0,
+            error_cls=AgentWorktreeError,
+            where=cwd or self._root,
             input=stdin,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=False,
             env=clean_git_environment(),
         )

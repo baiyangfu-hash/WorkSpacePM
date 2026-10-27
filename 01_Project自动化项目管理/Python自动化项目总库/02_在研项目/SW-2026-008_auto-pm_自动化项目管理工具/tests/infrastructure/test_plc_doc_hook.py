@@ -9,6 +9,7 @@ import pytest
 from auto_pm.plc import doc_consistency as dc
 
 from auto_pm.infrastructure import git_hook_enforcer, plc_doc_hook
+from tests.git_support import run_git
 from tests.plc.test_doc_consistency import IFC_DOC, VAR_DOC, build
 
 PLC_ROOT = "0100_PLC自动化/DJ-TEST-001"
@@ -18,12 +19,10 @@ VAR = f"{PLC_ROOT}/02_PLC程序/程序文档/{dc.VAR_DOC_NAME}"
 
 
 def git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=tester", "-c", "user.email=t@example.test", "-c", "core.autocrlf=false",
-         "-c", "core.quotepath=false", *args],
-        check=True, capture_output=True, text=True, encoding="utf-8",
-    )
-    return result.stdout
+    return run_git(
+        repo, *args,
+        config=["user.name=tester", "user.email=t@example.test", "core.autocrlf=false", "core.quotepath=false"],
+    ).stdout
 
 
 def read(repo: Path, rel: str) -> str:
@@ -409,3 +408,33 @@ def test_f01a_h24_a_verified_non_git_workspace_keeps_the_old_contract(tmp_path: 
 
     assert plc_doc_hook.enforce_plc_docs(tmp_path, ()) == 0
     assert removed_index_markers(tmp_path) == ()
+
+
+def test_h30_auto_fill_only_completes_the_objects_that_blocked_the_commit(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """TD-SW008-045：被拒的是 FB_Pump，就只补 FB_Pump 的文档，同工程里没文档的 FB_Fan 不被顺手新建。"""
+    fan_scl = f"{PLC_ROOT}/02_PLC程序/PLC_ST/01_泵/FB_Fan.scl"
+    fan_doc = repo / PLC_ROOT / "02_PLC程序/PLC_ST/01_泵/PRD/接口文档_IFC-FB_Fan.md"
+    write(repo, fan_scl, "FUNCTION_BLOCK FB_Fan\nVAR_INPUT\n    i_bOn : BOOL; // 开\nEND_VAR\nEND_FUNCTION_BLOCK\n")
+    write(repo, SCL, read(repo, SCL).replace("    i_bStart : BOOL; // 启动命令\n", "    i_bStart : BOOL; // 启动命令\n    i_bNew : BOOL; // 新增信号\n"))
+    git(repo, "add", SCL, fan_scl)
+    code, output = run_hook(repo, capsys)
+    assert code == 1 and "FB_Pump.i_bNew" in output
+    assert f"{dc.MARKER}新增信号" in read(repo, IFC)
+    assert not fan_doc.exists()
+
+
+def test_h31_markers_only_block_gives_the_review_hint_and_writes_no_document(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """TD-SW008-045：只有待确认行拦提交时，只提示审核；同工程里没文档的 FB_Fan 不被新建。"""
+    fan_scl = f"{PLC_ROOT}/02_PLC程序/PLC_ST/01_泵/FB_Fan.scl"
+    fan_doc = repo / PLC_ROOT / "02_PLC程序/PLC_ST/01_泵/PRD/接口文档_IFC-FB_Fan.md"
+    write(repo, fan_scl, "FUNCTION_BLOCK FB_Fan\nVAR_INPUT\n    i_bOn : BOOL; // 开\nEND_VAR\nEND_FUNCTION_BLOCK\n")
+    write(repo, IFC, read(repo, IFC).replace("| 启动命令 |", f"| {dc.MARKER}启动命令 |"))
+    git(repo, "add", IFC, fan_scl)
+    code, output = run_hook(repo, capsys)
+    assert code == 1 and "审核待确认的行后运行 plc docs confirm" in output
+    assert "已按代码在工作区补全文档" not in output
+    assert not fan_doc.exists()

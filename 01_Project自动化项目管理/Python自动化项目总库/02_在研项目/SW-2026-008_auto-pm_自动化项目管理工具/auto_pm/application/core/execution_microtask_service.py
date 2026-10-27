@@ -5,8 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
-from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
@@ -20,7 +18,12 @@ from auto_pm.contracts.execution_adapter import (
 )
 from auto_pm.contracts.mission import Mission
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
-from auto_pm.infrastructure.control_root_guard import clean_git_environment, is_link_like
+from auto_pm.infrastructure.control_root_guard import (
+    authority_paths_covered,
+    clean_git_environment,
+    is_link_like,
+)
+from auto_pm.infrastructure.git_timeout import run_git_bounded
 
 
 class ExecutionMicrotaskError(RuntimeError):
@@ -31,6 +34,7 @@ class ExecutionMicrotaskService:
     """Create one append-only plan before touching its deterministic standalone repository."""
 
     _MARKER = ".codex-microtask.json"
+    GIT_TIMEOUT_DEFAULT = 120.0
 
     def __init__(
         self,
@@ -143,7 +147,7 @@ class ExecutionMicrotaskService:
         declared = tuple(sorted(receipt.declared_dirty_paths))
         if not declared or len(set(declared)) != len(declared):
             raise ExecutionMicrotaskError("declared_dirty_paths 必须是非空精确文件集合")
-        if not self._paths_covered(declared, receipt.owned_paths):
+        if not authority_paths_covered(declared, receipt.owned_paths):
             raise ExecutionMicrotaskError("declared_dirty_paths 超出 owned_paths")
         result: list[ExecutionMicrotaskFile] = []
         for raw in declared:
@@ -381,13 +385,6 @@ class ExecutionMicrotaskService:
                 raise ExecutionMicrotaskError("microtask repository path 含符号链接")
 
     @staticmethod
-    def _paths_covered(paths: Iterable[str], roots: tuple[str, ...]) -> bool:
-        return all(
-            any(path == root or path.startswith(f"{root.rstrip('/')}/") for root in roots)
-            for path in paths
-        )
-
-    @staticmethod
     def _marker(plan: ExecutionMicrotaskPlan) -> dict[str, object]:
         return {
             "schema_version": "codex-microtask.v1",
@@ -424,13 +421,17 @@ class ExecutionMicrotaskService:
         value = os.path.normcase(os.path.normpath(str(path.resolve(strict=True))))
         return value.casefold() if os.name == "nt" else value
 
-    @staticmethod
-    def _git_bytes(root: Path, *args: str, env: dict[str, str] | None = None) -> bytes:
-        result = subprocess.run(
+    @classmethod
+    def _git_bytes(
+        cls, root: Path, *args: str, env: dict[str, str] | None = None
+    ) -> bytes:
+        result = run_git_bounded(
             ["git", "-C", str(root), *args],
+            default_timeout=cls.GIT_TIMEOUT_DEFAULT,
+            error_cls=ExecutionMicrotaskError,
+            where=root,
             capture_output=True,
             check=False,
-            timeout=30,
             env=env or clean_git_environment(),
         )
         if result.returncode != 0 or result.stderr:

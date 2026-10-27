@@ -17,17 +17,11 @@ from auto_pm.infrastructure.control_root_guard import (
     require_governed_worktree,
     require_safe_workspace_path,
 )
+from tests.git_support import run_git
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    return run_git(root, *args)
 
 
 def _repository(root: Path) -> None:
@@ -360,7 +354,7 @@ def test_control_root_git_fact_rejects_success_with_permission_diagnostic(
             stderr="warning: Permission denied",
         )
 
-    monkeypatch.setattr(control_root_guard.subprocess, "run", diagnostic_result)
+    monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", diagnostic_result)
     with pytest.raises(ControlRootGuardError, match="Permission denied"):
         control_root_guard._git_optional_output(tmp_path, "diff", "--name-only")
     assert not (tmp_path / ".auto-pm").exists()

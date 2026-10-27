@@ -412,3 +412,95 @@ def test_d19_sync_never_writes_one_function_blocks_rows_into_a_siblings_document
     assert [Path(p).name for p in result.created] == ["接口文档_IFC-FB_1001_InfeedBatching.md"]
     assert dc.analyze_project(str(project)).findings == []
 
+
+
+def test_d30_sync_can_be_narrowed_to_named_objects(tmp_path: Path) -> None:
+    """TD-SW008-045：只处理点名的对象，其余对象的文档不新建、不改。"""
+    whole = dc.sync_project(str(build(tmp_path / "all", ifc=None, var=None)), write=False)
+    project = build(tmp_path / "one", ifc=None, var=None)
+    narrowed = dc.sync_project(str(project), only_objects={"FB_Pump"})
+    assert 0 < narrowed.added_rows < whole.added_rows
+    assert [Path(p).name for p in narrowed.created] == [ifc_path(project).name]
+    assert not (project / "02_PLC程序" / "程序文档" / dc.VAR_DOC_NAME).exists()
+
+
+def test_d31_an_empty_object_set_changes_nothing(tmp_path: Path) -> None:
+    project = build(tmp_path, ifc=None, var=None)
+    result = dc.sync_project(str(project), only_objects=set())
+    assert result.created == [] and result.written == [] and result.added_rows == 0 and result.suggestions == []
+
+
+def test_d32_narrowing_also_filters_the_suggestions_to_the_named_objects(tmp_path: Path) -> None:
+    """TD-SW008-045：差异建议也只列点名对象的，别的对象的差异不混进提示。"""
+    messy_ifc = IFC_DOC.replace("| `i_bStart` | BOOL | 启动命令 |", "| i_bStart | INT | 起动命令 |")
+    messy_var = VAR_DOC.replace("| stCfg | ST_PumpCfg | 泵配置 |", "| stCfg | INT | 泵配置 |")
+    project = build(tmp_path, ifc=messy_ifc, var=messy_var)
+    findings = dc.analyze_project(str(project)).findings
+    assert {"FB_Pump", "GlobalVars"} <= {f.obj for f in findings if f.kind == "type"}
+
+    pump_only = dc.sync_project(str(project), write=False, only_objects={"FB_Pump"}).suggestions
+
+    assert pump_only == [f.render() for f in findings if f.obj == "FB_Pump"]
+    assert pump_only and not any("stCfg" in line for line in pump_only)
+
+
+def test_multiline_declarations_are_joined_until_semicolon_and_keep_their_first_line_number() -> None:
+    text = """FUNCTION_BLOCK FB_M
+VAR_INPUT
+    i_aSteps : ARRAY[1..4] OF
+        INT;  // 步号表
+    i_bGo,
+    i_bStop : BOOL; // 启停
+END_VAR
+VAR_OUTPUT
+    s_tCfg : TON_CFG := (
+        PT := T#1s);
+    s_iOk : INT; // 后面照常
+END_VAR
+END_FUNCTION_BLOCK
+"""
+    (fb,) = dc.parse_scl_text(text, "fb.scl")
+    got = [(v.name, v.type, v.comment, v.line) for v in fb.variables]
+    assert got[:3] == [
+        ("i_aSteps", "ARRAY[1..4] OF INT", "步号表", 3),
+        ("i_bGo", "BOOL", "启停", 5),
+        ("i_bStop", "BOOL", "启停", 5),
+    ]
+    assert [name for name, *_ in got[3:]] == ["s_tCfg", "s_iOk"]
+    assert fb.unparsed == ()
+
+
+def test_declaration_that_never_reaches_a_semicolon_is_reported_not_swallowed() -> None:
+    text = """FUNCTION_BLOCK FB_N
+VAR_INPUT
+    i_bA : BOOL
+END_VAR
+VAR_OUTPUT
+    o_bB : BOOL; // 正常
+END_VAR
+END_FUNCTION_BLOCK
+"""
+    (fb,) = dc.parse_scl_text(text, "fb.scl")
+    assert [v.name for v in fb.variables] == ["o_bB"]
+    assert [number for number, _ in fb.unparsed] == [3]
+
+
+def test_missing_semicolon_does_not_swallow_the_next_variable() -> None:
+    text = """FUNCTION_BLOCK FB_S
+VAR_INPUT
+    i_bA : BOOL
+    i_bB : INT; // 乙
+    i_bC : BOOL; // 丙
+END_VAR
+END_FUNCTION_BLOCK
+"""
+    (fb,) = dc.parse_scl_text(text, "fb.scl")
+    assert [(v.name, v.type, v.comment) for v in fb.variables] == [("i_bB", "INT", "乙"), ("i_bC", "BOOL", "丙")]
+    assert [number for number, _ in fb.unparsed] == [3]
+
+
+def test_name_list_ending_with_comma_still_continues_onto_the_next_line() -> None:
+    text = "FUNCTION_BLOCK FB_L\nVAR_INPUT\n    i_bA,\n    i_bB : BOOL; // 两个\nEND_VAR\nEND_FUNCTION_BLOCK\n"
+    (fb,) = dc.parse_scl_text(text, "fb.scl")
+    assert [v.name for v in fb.variables] == ["i_bA", "i_bB"]
+    assert fb.unparsed == ()

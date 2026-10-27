@@ -14,3 +14,11 @@ SysLib 的 `FB_TON` / `FB_TONR`（真实毫秒版）内部调用平台原生 `TO
 ```
 python 0100_PLC自动化/DJ-2026-005/05_测试与验证/测试用SysLib/run_plugin_test.py --lsp <siemens-lsp 路径>
 ```
+
+默认跑 DJ-2026-005。要跑别的项目，加 `--project`（写项目编号，如 DJ-2026-009，或项目目录路径）；替身计时器仍用本目录的，所有项目共用：
+
+```
+python 0100_PLC自动化/DJ-2026-005/05_测试与验证/测试用SysLib/run_plugin_test.py --project DJ-2026-009 --lsp <siemens-lsp 路径>
+```
+
+注意：替身按**扫描次数**计时（1 个扫描周期 = 1 个计时单位），带计时的用例（如 DJ-2026-009 的 `heartbeat_timeout_test.scltest`）里的等待周期数要按这个口径写。

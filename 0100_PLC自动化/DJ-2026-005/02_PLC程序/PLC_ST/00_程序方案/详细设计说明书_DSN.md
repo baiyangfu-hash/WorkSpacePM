@@ -260,7 +260,7 @@ F 号映射：1 层 F34~F41（阻挡上 1 = F34，阻挡上 2 = F35，阻挡下 
 
 ## 9. 报警与声光（FB_2001，R-ALM-*）
 
-- 接口：`io_stAlarm` 持有 `arrTrig[0..127]`（各机构每扫描写入，一位一写）和 `arrLatch[0..127]`（输出）。
+- 接口：`io_stAlarm` 持有 `arrTrig[1..128]`（各机构每扫描写入，一位一写）和 `arrLatch[1..128]`（输出），下标 = F 号 + 1（F0 在下标 1）。
 - 锁存：`trig` → `latch := TRUE`；复位键上升沿 ∧ ¬`trig` → `latch := FALSE`（原因消失后才可清）。
 - 分类表（INT 第 9 节）：A（M8）、B 输送 n、B 取放料、B 小车、B 回原点、提示。输出：`o_bFault`（A 任一）、`o_bHoldConv[1..4]`、`o_bHoldPP`、`o_bHoldFeeder`、`o_bHoldHome`、`o_bAnyAlarm`（非提示任一）、`o_iAlarmNo`（最小 F 号，给 HMI D117）。
 - 声光输出（沿用 PRC 7.2）：

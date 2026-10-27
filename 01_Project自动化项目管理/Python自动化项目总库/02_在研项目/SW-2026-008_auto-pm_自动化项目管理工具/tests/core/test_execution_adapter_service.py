@@ -49,6 +49,7 @@ from auto_pm.contracts.mission import (
     MissionState,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from tests.git_support import git_do
 
 PROJECT_ID = "SW-TEST-001"
 PROJECT_PATH = f"{PROJECT_ID}/README.md"
@@ -56,14 +57,7 @@ DECISION_ID = "DEC-20260910-A5TEST01"
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    git_do(root, *args)
 
 
 def _workspace(root: Path) -> None:
