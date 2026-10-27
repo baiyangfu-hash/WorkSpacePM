@@ -498,7 +498,7 @@ BEGIN
     io_stIo.bQPPLiftDown := io_stPP.bLiftDown;
     END_REGION
 
-    REGION 06_SafeZone 安全区 (R-CONV-03): 自动时不在 S22 / S23，其余模式 Z 不高于待机点
+    REGION 06_SafeZone 安全区 (R-CONV-03): 自动时不在 S22 / S23 其余模式 Z 不高于待机点
     IF io_stMachine.bAuto THEN
         io_stPP.bSafeZone := (s_iStep <> STEP_S22) AND (s_iStep <> STEP_S23);
     ELSE
