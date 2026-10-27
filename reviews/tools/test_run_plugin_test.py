@@ -282,3 +282,58 @@ def test_a_failing_plugin_keeps_its_own_exit_code(tmp_path: Path) -> None:
     lsp = _script(tmp_path, "failing-lsp", 'echo "--- FAIL: TestX"\nexit 7\n')
 
     assert _run(lsp).returncode == 7
+
+
+def _git_repo_with_scltests(tmp_path: Path) -> tuple[Path, Path, Path]:
+    plc = tmp_path / "repo" / "PLC_ST"
+    plc.mkdir(parents=True)
+    tracked = plc / "tracked.scltest"
+    stray = plc / "stray.scltest"
+    tracked.write_text("TEST_CASE a\n", encoding="utf-8")
+    stray.write_text("TEST_CASE b\nTEST_CASE c\n", encoding="utf-8")
+    ignored = plc / "ignored.scltest"
+    ignored.write_text("TEST_CASE d\n", encoding="utf-8")
+    (tmp_path / "repo" / ".gitignore").write_text("ignored.scltest\n", encoding="utf-8")
+    env = ["git", "-C", str(tmp_path / "repo")]
+    subprocess.run([*env, "init", "-q"], check=True)
+    subprocess.run([*env, "add", "PLC_ST/tracked.scltest", ".gitignore"], check=True)
+    return plc, stray, ignored
+
+
+def test_untracked_scltests_are_found_including_the_ignored_ones(tmp_path: Path) -> None:
+    plc, stray, ignored = _git_repo_with_scltests(tmp_path)
+
+    found = _module().untracked_scltests(plc)
+
+    assert set(found) == {stray.resolve(), ignored.resolve()}
+
+
+def test_outside_a_git_repository_nothing_is_filtered(tmp_path: Path) -> None:
+    plc = tmp_path / "PLC_ST"
+    plc.mkdir()
+    (plc / "a.scltest").write_text("TEST_CASE a\n", encoding="utf-8")
+
+    assert _module().untracked_scltests(plc) == []
+
+
+def test_skipped_files_do_not_count_as_test_cases(tmp_path: Path) -> None:
+    plc, stray, ignored = _git_repo_with_scltests(tmp_path)
+    module = _module()
+
+    assert module.count_test_cases(plc) == 4
+    assert module.count_test_cases(plc, frozenset({stray.resolve(), ignored.resolve()})) == 1
+
+
+def test_a_run_warns_about_untracked_scltests_and_leaves_them_out_of_the_copy(fake_lsp: Path) -> None:
+    plc = next((REPO / "0100_PLC自动化").glob("DJ-2026-009*")) / "02_PLC程序" / "PLC_ST"
+    stray = plc / "zz_stray_untracked.scltest"
+    stray.write_text("TEST_CASE zz_stray\n", encoding="utf-8")
+    try:
+        result = _run(fake_lsp, "--project", "DJ-2026-009")
+        included = _run(fake_lsp, "--project", "DJ-2026-009", "--include-untracked")
+    finally:
+        stray.unlink()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "没入库的 .scltest" in result.stderr and "zz_stray_untracked.scltest" in result.stderr
+    assert "没入库的 .scltest" not in included.stderr
