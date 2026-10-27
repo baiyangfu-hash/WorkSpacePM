@@ -442,3 +442,44 @@ def test_d32_narrowing_also_filters_the_suggestions_to_the_named_objects(tmp_pat
 
     assert pump_only == [f.render() for f in findings if f.obj == "FB_Pump"]
     assert pump_only and not any("stCfg" in line for line in pump_only)
+
+
+def test_multiline_declarations_are_joined_until_semicolon_and_keep_their_first_line_number() -> None:
+    text = """FUNCTION_BLOCK FB_M
+VAR_INPUT
+    i_aSteps : ARRAY[1..4] OF
+        INT;  // 步号表
+    i_bGo,
+    i_bStop : BOOL; // 启停
+END_VAR
+VAR_OUTPUT
+    s_tCfg : TON_CFG := (
+        PT := T#1s);
+    s_iOk : INT; // 后面照常
+END_VAR
+END_FUNCTION_BLOCK
+"""
+    (fb,) = dc.parse_scl_text(text, "fb.scl")
+    got = [(v.name, v.type, v.comment, v.line) for v in fb.variables]
+    assert got[:3] == [
+        ("i_aSteps", "ARRAY[1..4] OF INT", "步号表", 3),
+        ("i_bGo", "BOOL", "启停", 5),
+        ("i_bStop", "BOOL", "启停", 5),
+    ]
+    assert [name for name, *_ in got[3:]] == ["s_tCfg", "s_iOk"]
+    assert fb.unparsed == ()
+
+
+def test_declaration_that_never_reaches_a_semicolon_is_reported_not_swallowed() -> None:
+    text = """FUNCTION_BLOCK FB_N
+VAR_INPUT
+    i_bA : BOOL
+END_VAR
+VAR_OUTPUT
+    o_bB : BOOL; // 正常
+END_VAR
+END_FUNCTION_BLOCK
+"""
+    (fb,) = dc.parse_scl_text(text, "fb.scl")
+    assert [v.name for v in fb.variables] == ["o_bB"]
+    assert [number for number, _ in fb.unparsed] == [3]

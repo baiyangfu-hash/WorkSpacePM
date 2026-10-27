@@ -49,6 +49,7 @@ _SECTION = re.compile(r"^\s*(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR_STAT|V
 _END_SECTION = re.compile(r"^\s*(END_VAR|END_STRUCT)\b", re.I)
 _STRUCT_OPEN = re.compile(r"^\s*(?:([A-Za-z_]\w*)\s*:\s*)?STRUCT\s*(?://.*)?$", re.I)
 _DECL = re.compile(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*:\s*(.*?)\s*;\s*(.*)$")
+_DECL_START = re.compile(r"^\s*[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s*(?:,|:(?!=)[^;]*)$")
 _TRAILING_BLOCK_COMMENT = re.compile(r";\s*\(\*(.*?)\*\)\s*$")
 _BLOCK_COMMENT = re.compile(r"\(\*.*?\*\)", re.S)
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
@@ -224,16 +225,27 @@ class _ObjectBuilder:
 
 
 def parse_scl_text(text: str, path: str) -> list[CodeObject]:
-    """Parse FB/FC/OB/DB/UDT declarations; only single-line declarations are understood."""
+    """Parse FB/FC/OB/DB/UDT declarations; a declaration may continue over several lines until its ``;``."""
 
     objects: list[CodeObject] = []
     current: _ObjectBuilder | None = None
     section = ""
     prefix: list[str] = []
+    pending: tuple[int, str] | None = None  # 还没写到 `;` 的多行声明：(起始行号, 已拼接文本)
     for number, line in enumerate(_prepare_lines(text), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("//"):
             continue
+        if pending is not None:
+            if current is not None and (_END_OBJECT.match(line) or _END_SECTION.match(line)):
+                current.unparsed.append((pending[0], pending[1][:80]))
+                pending = None
+            else:
+                joined = f"{pending[1]} {stripped}"
+                if ";" not in line:
+                    pending = (pending[0], joined)
+                    continue
+                number, line, pending = pending[0], joined, None
         if current is None:
             header = _HEADER.match(line)
             if header:
@@ -267,6 +279,9 @@ def parse_scl_text(text: str, path: str) -> list[CodeObject]:
         if not section or section.startswith("IGNORED:"):
             continue
         declaration = _DECL.match(line)
+        if not declaration and _DECL_START.match(line):
+            pending = (number, stripped)
+            continue
         if not declaration:
             current.unparsed.append((number, stripped[:80]))
             continue
