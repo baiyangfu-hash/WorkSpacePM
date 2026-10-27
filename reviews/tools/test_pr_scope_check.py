@@ -366,6 +366,15 @@ def test_s23d_declared_scope_items_are_kept_whole() -> None:
     assert gate.declared_scope(body) == ["a/b c.py", "d e/f.py", "g.py"]
 
 
+def test_s23e_two_backtick_spans_on_one_line_take_only_the_first() -> None:
+    """一行里有两段反引号时只认第一段，不能把两段连同中间的反引号拼成一条乱路径。"""
+    assert gate.declared_scope("可改范围\n- `a.py` `b.py`\n") == ["a.py"]
+
+
+def test_s23f_whitespace_inside_backticks_is_stripped() -> None:
+    assert gate.declared_scope("可改范围\n- ` a b.py `\n") == ["a b.py"]
+
+
 # ---- TD-SW008-115：新增文件命中忽略规则 ----
 
 
