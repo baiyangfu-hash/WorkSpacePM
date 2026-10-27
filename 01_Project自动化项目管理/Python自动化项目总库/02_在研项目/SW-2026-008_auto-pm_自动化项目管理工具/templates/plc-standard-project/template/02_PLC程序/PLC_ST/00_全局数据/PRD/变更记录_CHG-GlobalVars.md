@@ -60,7 +60,7 @@
 | 3 | o_i当前报警代码 | o_iCurrentAlarmCode | INT | HMI文本显示用 |
 | 4 | o_b任何报警激活 | o_bAnyAlarmActive | BOOL | 所有工站停止互锁 |
 | 5 | o_iMES报警计数 | o_iMESAlarmCount | INT | MES累计计数 |
-| 6 | o_iMES报警队列 | o_iMESAlarmQueue | ARRAY[0..9] OF INT | 最近10条去重记录 |
+| 6 | o_iMES报警队列 | o_iMESAlarmQueue | ARRAY[1..10] OF INT | 最近10条去重记录 |
 | 7 | o_b新报警标志 | o_bNewAlarmFlag | BOOL | 触发MES上传 |
 | 8 | o_i工站报警状态 | o_iStationAlarmStatus | ARRAY[1..3] OF INT | 三工站报警数组 |
 | 9 | o_b输送机报警激活 | o_bConveyorAlarmActive | BOOL | 输送机工站标志 |

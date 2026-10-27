@@ -80,7 +80,7 @@ FB_2001_CommonAlarm_AllStation 是一个**纯逻辑功能块**，作为边框缓
 │    ├─ q_wCurrentAlarmCode  WORD     → 主控 → D120 (HMI文本显示)         │
 │    ├─ q_wGlobalAlarmWord   WORD     → 主控 → D400 (HMI报警灯指示)       │
 │    ├─ q_iAlarmCount        INT      → 主控 → D404 (MES累计统计)         │
-│    ├─ q_aMesQueue[0..9]    WORD[10] → 主控 → D406~D425 (MES队列)        │
+│    ├─ q_aMesQueue[1..10]    WORD[10] → 主控 → D406~D425 (MES队列)        │
 │    ├─ q_bNewAlarmPulse     BOOL     → 主控 (单周期脉冲, 触发MES上传)     │
 │    ├─ q_bLightGreen        BOOL      → IO → Y24 (绿灯-正常运行)           │
 │    ├─ q_bLightRed          BOOL      → IO → Y25 (红灯-故障)               │
@@ -203,7 +203,7 @@ bPrevAnyAlarm := bAnyAlarm;
 环形队列操作流程:
 
 检测到新报警(bAnyAlarm AND bNewAlarmPulse)时:
-  1. 去重检查: 遍历队列[0..9], 检查iAlarmCode是否已存在
+  1. 去重检查: 遍历队列[1..10], 检查iAlarmCode是否已存在
   2. 若已存在 → 跳过, 不入队
   3. 若不存在 → 写入aMesQueue[iQueueIndex], iQueueIndex++
   4. iQueueIndex溢出处理: IF iQueueIndex > 9 THEN iQueueIndex := 0;
@@ -216,7 +216,7 @@ bPrevAnyAlarm := bAnyAlarm;
   - iAlarmCode := 0; wGlobalAlarmWord := 0
   - iAlarmCount := 0; iQueueIndex := 0
   - bNewAlarmPulse := FALSE; bPrevAnyAlarm := FALSE
-  - aMesQueue[0..9]全部清零
+  - aMesQueue[1..10]全部清零
   - 蜂鸣器: tR:=TRUE 停止
   - RETURN (跳过本周期后续所有逻辑)
 ```
@@ -259,7 +259,7 @@ END_IF;
 | **D120** | WORD (16bit) | q_wCurrentAlarmCode | 当前最高优先级报警码数值(HMI文本显示) |
 | **D400** | WORD (16bit) | q_wGlobalAlarmWord | 报警码WORD形式(非零即有报警) |
 | **D404** | INT (16bit) | q_iAlarmCount | 自上次复位以来的累计报警次数 |
-| **D406~D425** | 10×INT (160bit) | q_aMesQueue[0..9] | MES报警环形队列(按写入顺序, 最新覆盖最旧) |
+| **D406~D425** | 10×INT (160bit) | q_aMesQueue[1..10] | MES报警环形队列(按写入顺序, 最新覆盖最旧) |
 
 ---
 

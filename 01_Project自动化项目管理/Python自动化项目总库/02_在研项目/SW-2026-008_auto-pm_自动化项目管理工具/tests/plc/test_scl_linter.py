@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from auto_pm.plc.scl_linter import SclLinter
 
 
@@ -17,7 +18,7 @@ def test_scl_linter_detects_valid_clean_code() -> None:
     END_VAR
     VAR
         s_iStep : INT;
-        s_arrMesAlarmQueue : ARRAY[0..9] OF INT;
+        s_arrMesAlarmQueue : ARRAY[1..10] OF INT;
     END_VAR
     BEGIN
         CASE s_iStep OF
@@ -39,7 +40,7 @@ def test_scl_linter_detects_invalid_array_type_identifier() -> None:
     FUNCTION_BLOCK FB_1001_ArrayPrefix
     VAR
         s_iStep : INT;
-        s_aiMesAlarmQueue : ARRAY[0..9] OF INT;
+        s_aiMesAlarmQueue : ARRAY[1..10] OF INT;
     END_VAR
     BEGIN
         CASE s_iStep OF
@@ -166,6 +167,109 @@ def test_scl_linter_detects_missing_timer_q() -> None:
     report = SclLinter.lint_text(missing_q_scl, file_path="missing_q.scl")
     assert not report.is_clean
     assert any(v.rule_id == "LSP-906-TIMER-MISSING-Q" for v in report.violations)
+
+
+def _array_scl(declaration: str) -> str:
+    return f"""
+    FUNCTION_BLOCK FB_1001_ArrayBound
+    VAR
+        {declaration}
+    END_VAR
+    BEGIN
+        ;
+    END_FUNCTION_BLOCK
+    """
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "s_arrQueue : ARRAY[0..9] OF INT;",
+        "s_arrQueue : ARRAY [ 0 .. 9 ] OF INT;",
+        "s_arrQueue : array[2..9] of INT;",
+        "s_arrQueue : ARRAY[-1..8] OF INT;",
+        "s_arrGrid : ARRAY[1..3, 0..4] OF INT;",
+        "s_arrGrid : ARRAY[0..3, 0..4] OF INT;",
+    ],
+)
+def test_scl_linter_rejects_array_lower_bound_other_than_one(declaration: str) -> None:
+    report = SclLinter.lint_text(_array_scl(declaration), file_path="array_bound.scl")
+
+    hits = [v for v in report.violations if v.rule_id == "LSP-905-ARRAY-LOWER-BOUND"]
+    assert hits and all(v.severity == "ERROR" for v in hits)
+    assert not report.is_clean
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "s_arrQueue : ARRAY[1..10] OF INT;",
+        "s_arrGrid : ARRAY[1..3, 1..4] OF INT;",
+        "s_arrQueue : ARRAY[1..C_SIZE] OF INT;",
+        "s_arrQueue : ARRAY[C_LOW..C_HIGH] OF INT;",
+        "s_iCount : INT;  // 注释里写 ARRAY[0..9] 不算",
+        "s_iCount : INT;  (* ARRAY[0..9] *)",
+    ],
+)
+def test_scl_linter_accepts_array_lower_bound_one_or_symbolic(declaration: str) -> None:
+    report = SclLinter.lint_text(_array_scl(declaration), file_path="array_bound.scl")
+
+    hits = [v for v in report.violations if v.rule_id == "LSP-905-ARRAY-LOWER-BOUND"]
+    assert hits == []
+
+
+_LEGACY_FILE = "0100_PLC自动化/01_SharedLibraries/SysLib/log/FC_LogMsg.scl"
+_LEGACY_DECL = "LogBuffer   : ARRAY[0..31] OF STRING[256];"
+
+
+def _lower_bound_hits(declaration: str, file_path: str) -> list[str]:
+    text = f"FUNCTION_BLOCK FB_1003_Legacy\nVAR\n    {declaration}\nEND_VAR\nBEGIN\nEND_FUNCTION_BLOCK\n"
+    report = SclLinter.lint_text(text, file_path=file_path)
+    return [v.severity for v in report.violations if v.rule_id == "LSP-905-ARRAY-LOWER-BOUND"]
+
+
+def test_listed_legacy_declaration_is_only_a_warning() -> None:
+    assert _lower_bound_hits(_LEGACY_DECL, _LEGACY_FILE) == ["WARNING"]
+    assert _lower_bound_hits(_LEGACY_DECL + "  // 注释变了也还是同一条", "C:\\repo\\" + _LEGACY_FILE.replace("/", "\\")) == [
+        "WARNING"
+    ]
+
+
+def test_new_or_changed_declarations_stay_errors() -> None:
+    assert _lower_bound_hits(_LEGACY_DECL, "0100_PLC自动化/DJ-9999/02_PLC程序/PLC_ST/New.scl") == ["ERROR"]
+    assert _lower_bound_hits("LogBuffer   : ARRAY[0..63] OF STRING[256];", _LEGACY_FILE) == ["ERROR"]
+    assert _lower_bound_hits(_LEGACY_DECL, "") == ["ERROR"]
+
+
+def test_repository_plc_sources_have_no_new_array_lower_bound_errors() -> None:
+    """全仓库已入库的 PLC 源码：下界非 1 的只允许是清单里的存量（WARNING），清单外的新增一律 ERROR。"""
+
+    import subprocess
+    from pathlib import Path
+
+    here = Path(__file__).resolve()
+    repo = next(p for p in here.parents if (p / "0100_PLC自动化").is_dir())
+    names = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "-z", "--", "0100_PLC自动化"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.split("\0")
+    errors: list[str] = []
+    warnings = 0
+    for name in names:
+        if not name.endswith(".scl"):
+            continue
+        report = SclLinter.lint_text((repo / name).read_text(encoding="utf-8", errors="replace"), file_path=name)
+        for v in report.violations:
+            if v.rule_id == "LSP-905-ARRAY-LOWER-BOUND":
+                if v.severity == "ERROR":
+                    errors.append(f"{name}:{v.line_number}")
+                else:
+                    warnings += 1
+    assert errors == []
+    assert warnings > 0  # 清单不是摆设：存量还在时它们确实被识别为 WARNING
 
 
 _REGION_FB = """
