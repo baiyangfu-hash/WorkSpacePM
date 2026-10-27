@@ -68,6 +68,7 @@ from auto_pm.cli.pr import pr_group  # noqa: E402
 from auto_pm.cli.project import project_group  # noqa: E402
 from auto_pm.cli.prototype import prototype_cmd  # noqa: E402
 from auto_pm.cli.python import python_group  # noqa: E402
+from auto_pm.cli.role import role_group  # noqa: E402
 from auto_pm.cli.session import pm_session_group  # noqa: E402
 from auto_pm.cli.spec import spec_group  # noqa: E402
 from auto_pm.cli.template import template_group  # noqa: E402
@@ -158,6 +159,7 @@ cli.add_command(dogfood_group)
 cli.add_command(clean_cmd)
 cli.add_command(worktree_group)
 cli.add_command(pr_group)
+cli.add_command(role_group)
 
 
 if __name__ == "__main__":

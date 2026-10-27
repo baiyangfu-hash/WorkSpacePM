@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "id": "engineer-python",
+  "title": "编程工程师（Python 上位机）",
+  "kind": "engineer",
+  "domain": "python",
+  "legacy_names": [
+    "fullstack-engineer"
+  ],
+  "required_specs": [
+    "DEV-300",
+    "DEV-210",
+    "DEV-216",
+    "DEV-218"
+  ],
+  "allowed_commands": [
+    "pm resume",
+    "python check",
+    "pytest",
+    "ruff check",
+    "mypy",
+    "continuity checkpoint",
+    "pm handoff"
+  ],
+  "gates": [
+    "main.py python check <PID>",
+    "python -m pytest --no-cov -q",
+    "python -m ruff check <owned_paths>",
+    "python -m mypy <owned_paths>"
+  ],
+  "receipt_fields": [
+    "PASS",
+    "FAIL",
+    "NOT_RUN",
+    "既有债务",
+    "checkpoint_id"
+  ],
+  "owned_paths_patterns": [
+    "**/*.py",
+    "**/*.qml",
+    "**/tests/**"
+  ],
+  "owned_paths_note": "仅为申请范围的上限，实际可改范围以 Work 的 owned paths 为准",
+  "enforcement": {
+    "claude_code": "待生成 hooks 与 permissions.deny（后续卡）",
+    "trae": "仅说明文字，无机器拦截",
+    "cursor": "仅说明文字，无机器拦截"
+  },
+  "legacy": {
+    "mode": "body-equal",
+    "source": ".trae/skills/fullstack-engineer/SKILL.md",
+    "refs": ".trae/skills/fullstack-engineer/refs"
+  }
+}
