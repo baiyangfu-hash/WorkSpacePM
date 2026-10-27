@@ -53,6 +53,7 @@ class SclLinter:
     TIMER_MISSING_Q_PATTERN = re.compile(r"\bQ\s*=>\s*[,)]")
     # ARRAY[下界..上界, ...]：只取字面整数下界（用常量名写的下界无法在这里求值，不报）
     ARRAY_BOUNDS_PATTERN = re.compile(r"\bARRAY\s*\[([^\]]*)\]", re.IGNORECASE)
+    ARRAY_UNCLOSED_PATTERN = re.compile(r"\bARRAY\s*\[[^\]]*$", re.IGNORECASE)
     ARRAY_LOWER_BOUND_PATTERN = re.compile(r"^\s*([+-]?\d+)\s*\.\.")
 
     # 折叠区段：siemens-lsp 只认 REGION 名称 ... END_REGION；带 # 的写法不被支持（LSP-905 §6.3）
@@ -104,6 +105,7 @@ class SclLinter:
         in_multiline_comment = False
         code_lines: list[str] = []
         region_open_lines: list[int] = []
+        array_pending: tuple[int, str] | None = None  # 下标没写完 `]` 就换行的 ARRAY：(起始行号, 已拼接文字)
         block_stack: list[tuple[str, int]] = []  # (IF/CASE/FOR/WHILE/REGION, 开头所在行)，REGION 与控制结构必须整段嵌套
 
         for line_idx, line in enumerate(lines, start=1):
@@ -377,14 +379,25 @@ class SclLinter:
             # ------------------------------------------------------------------
             # 2b. 数组下标下界必须为 1（Siemens 语言服务插件按 1 起；移植到实际 PLC 时按平台适配）
             # ------------------------------------------------------------------
-            for bounds in cls.ARRAY_BOUNDS_PATTERN.findall(code_part):
+            bounds_line, bounds_text = line_idx, code_part
+            bounds_ready = True
+            if array_pending is not None:
+                # 上一行的 ARRAY[ 还没写到 ]：拼上本行，写到 ] 才检查，行号记起始行
+                bounds_line, bounds_text = array_pending[0], f"{array_pending[1]} {code_part}"
+                bounds_ready = "]" in code_part
+                array_pending = None if bounds_ready else (bounds_line, bounds_text)
+            else:
+                unclosed = cls.ARRAY_UNCLOSED_PATTERN.search(code_part)
+                if unclosed:
+                    array_pending = (line_idx, code_part[unclosed.start() :])  # 本行已写完的 ARRAY[..] 上面照常查，只拼没写完的这个
+            for bounds in cls.ARRAY_BOUNDS_PATTERN.findall(bounds_text) if bounds_ready else []:
                 for dimension in bounds.split(","):
                     lower = cls.ARRAY_LOWER_BOUND_PATTERN.match(dimension)
                     if lower is not None and int(lower.group(1)) != 1:
-                        legacy = cls._is_legacy_array_lower_bound(file_path, code_part)
+                        legacy = cls._is_legacy_array_lower_bound(file_path, bounds_text)
                         report.violations.append(
                             SclViolation(
-                                line_number=line_idx,
+                                line_number=bounds_line,
                                 rule_id="LSP-905-ARRAY-LOWER-BOUND",
                                 severity="WARNING" if legacy else "ERROR",
                                 message=(
