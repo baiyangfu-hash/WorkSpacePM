@@ -294,3 +294,30 @@ def test_keywords_in_region_names_comments_and_longer_words_do_not_count() -> No
         "    END_REGION"
     )
     assert _cross(body) == []
+
+
+def test_keywords_inside_string_literals_do_not_count() -> None:
+    body = (
+        "    REGION 01_a\n        s_sMsg := 'IF x THEN';\n        s_sMsg := 'WAITING FOR PART';\n"
+        "        s_sMsg := 'it''s a CASE OF WHILE';\n    END_REGION"
+    )
+    assert _cross(body) == []
+
+
+def test_region_cut_through_for_and_while_is_rejected() -> None:
+    for_body = "    REGION 01_a\n        FOR s_iStep := 1 TO 3 DO\n            s_iStep := 2;\n    END_REGION\n        END_FOR;"
+    while_body = "    REGION 01_a\n        WHILE s_iStep < 3 DO\n            s_iStep := 2;\n    END_REGION\n        END_WHILE;"
+    assert _cross(for_body) == ["LSP-905-REGION-CROSS-BLOCK"]
+    assert _cross(while_body) == ["LSP-905-REGION-CROSS-BLOCK"]
+
+
+def test_lowercase_keywords_are_recognized_when_a_region_cuts_a_structure() -> None:
+    body = "    region 01_a\n        if s_iStep = 1 then\n            s_iStep := 2;\n    end_region\n        end_if;"
+    assert _cross(body) == ["LSP-905-REGION-CROSS-BLOCK"]
+
+
+def test_one_crossing_is_reported_once_and_the_next_region_is_judged_on_its_own() -> None:
+    cut = "    REGION 01_a\n        IF s_iStep = 1 THEN\n            s_iStep := 2;\n    END_REGION\n        END_IF;\n"
+    good = "    REGION 02_b\n        IF s_iStep = 3 THEN\n            s_iStep := 4;\n        END_IF;\n    END_REGION"
+    assert _cross(cut + good) == ["LSP-905-REGION-CROSS-BLOCK"]
+    assert _cross(good + "\n" + cut) == ["LSP-905-REGION-CROSS-BLOCK"]

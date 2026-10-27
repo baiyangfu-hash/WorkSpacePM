@@ -55,6 +55,7 @@ class SclLinter:
     REGION_OPEN_PATTERN = re.compile(r"^\s*REGION\b", re.IGNORECASE)
     REGION_CLOSE_PATTERN = re.compile(r"^\s*END_REGION\b", re.IGNORECASE)
     # 控制结构的开头/结尾记号（END_IF 等里的 IF 前面是下划线，\b 不会误认；ELSIF 同理）
+    STRING_LITERAL_PATTERN = re.compile(r"'(?:[^']|'')*'")
     BLOCK_TOKEN_PATTERN = re.compile(r"\b(END_)?(IF|CASE|FOR|WHILE)\b", re.IGNORECASE)
 
     # 结构完整性：每个源文件至少有一个程序块或类型声明，且每个声明都有配对的 END_*（插件命令行对空文件与乱码单文件也报 0 诊断，由这里补）
@@ -436,7 +437,8 @@ class SclLinter:
         if cls.REGION_CLOSE_PATTERN.match(code_part):
             cls._close_block("REGION", stripped, line_idx, block_stack, report)
             return
-        for match in cls.BLOCK_TOKEN_PATTERN.finditer(code_part):
+        without_strings = cls.STRING_LITERAL_PATTERN.sub("''", code_part)  # 报警文本里的 'WAITING FOR PART' 不是结构
+        for match in cls.BLOCK_TOKEN_PATTERN.finditer(without_strings):
             kind = match.group(2).upper()
             if match.group(1):
                 cls._close_block(kind, stripped, line_idx, block_stack, report)
