@@ -360,6 +360,9 @@ def test_s07_signature_line_variants_are_accepted(repo: Path, body: str) -> None
 def test_s07b_a_longer_hash_or_glued_word_is_not_read_as_the_short_hash(repo: Path, tail: str) -> None:
     """提交号后面紧跟字母数字下划线或汉字：那是另一个（更长的）哈希或别的词，不能只截前 7 位当签字。"""
     base, head = touch(repo)
+    if len(tail) == 1 and tail in "0123456789abcdef" and head[7] == tail:
+        # 多出来的十六进制位刚好等于真提交号的第 8 位时，8 位串本身就是合法前缀，会被接受；换一位避开，防止随机失败
+        tail = "0" if tail != "0" else "a"
     body = f"安全签字 {head[:7]}{tail}"
     assert not gate.check(repo, base, head, [sign(head, body=body)]).passed
 
