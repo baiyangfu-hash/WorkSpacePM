@@ -124,7 +124,7 @@ def test_unknown_spec_fails_and_missing_registry_is_unverified(tmp_path: Path) -
     roles, workspace = _workspace(tmp_path)
     _edit_config(roles, lambda data: data.update(required_specs=["DEV-300", "NOPE-999"]))
     assert ("RP-006", FAIL) in _codes(roles, workspace)
-    assert _codes(roles, None) == {("RP-006", UNVERIFIED)}
+    assert _codes(roles, None) == {("RP-006", UNVERIFIED), ("RP-008", UNVERIFIED)}
     assert RolePackService(roles, None).check().ok
 
 
@@ -155,12 +155,43 @@ def test_refs_drift_and_missing_ref(tmp_path: Path) -> None:
     assert ("RP-008", FAIL) in _codes(roles, workspace)
 
 
-def test_equivalence_is_skipped_once_old_skill_is_retired(tmp_path: Path) -> None:
+def test_retired_flag_skips_equivalence(tmp_path: Path) -> None:
     roles, workspace = _workspace(tmp_path)
     (roles / "engineer-demo" / "SKILL.md").write_text(_skill("engineer-demo", OLD_BODY + "- 新增\n"), encoding="utf-8")
+    for path in sorted((workspace / ".trae" / "skills" / "demo-skill").rglob("*"), reverse=True):
+        path.unlink() if path.is_file() else path.rmdir()
+    _edit_config(roles, lambda data: data["legacy"].update(retired=True))
+    assert _codes(roles, workspace) == set()
+
+
+def test_wrong_source_path_is_a_failure_not_a_silent_skip(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    (roles / "engineer-demo" / "SKILL.md").write_text(_skill("engineer-demo", OLD_BODY + "- 改坏\n"), encoding="utf-8")
+    _edit_config(roles, lambda data: data["legacy"].update(source=".trae/skills/demo-skil/SKILL.md"))
+    assert ("RP-008", FAIL) in _codes(roles, workspace)
+
+
+def test_wrong_refs_path_is_a_failure_not_a_silent_skip(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    (roles / "engineer-demo" / "refs" / "note.md").write_text("改坏\n", encoding="utf-8")
+    _edit_config(roles, lambda data: data["legacy"].update(refs=".trae/skills/demo-skill/ref"))
+    assert ("RP-008", FAIL) in _codes(roles, workspace)
+
+
+def test_unknown_mode_or_shape_is_a_failure(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    _edit_config(roles, lambda data: data["legacy"].update(mode="body-equl"))
+    assert ("RP-008", FAIL) in _codes(roles, workspace)
+    _edit_config(roles, lambda data: data.update(legacy="oops"))
+    assert ("RP-008", FAIL) in _codes(roles, workspace)
+
+
+def test_no_old_skills_directory_or_no_workspace_is_unverified_not_passed_silently(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    assert ("RP-008", UNVERIFIED) in _codes(roles, None)
     for path in sorted((workspace / ".trae").rglob("*"), reverse=True):
         path.unlink() if path.is_file() else path.rmdir()
-    assert _codes(roles, workspace) == set()
+    assert ("RP-008", UNVERIFIED) in _codes(roles, workspace)
 
 
 def test_section_contained_mode(tmp_path: Path) -> None:

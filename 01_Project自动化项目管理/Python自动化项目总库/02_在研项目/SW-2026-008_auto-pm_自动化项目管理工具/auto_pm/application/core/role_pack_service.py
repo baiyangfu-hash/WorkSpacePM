@@ -18,7 +18,8 @@ code so a card or an audit can quote it:
 * RP-005 a legacy name is claimed by two packs
 * RP-006 a required spec id is not in spec_registry.json (UNVERIFIED when the registry is absent)
 * RP-007 a relative ``.md`` pointer inside a pack does not resolve
-* RP-008 the pack differs from the old skill it replaces (skipped once the old skill is retired)
+* RP-008 the pack differs from the old skill it replaces, or the old skill cannot be found
+  (only ``\"retired\": true`` in role.json skips it; no workspace gives UNVERIFIED)
 """
 
 from __future__ import annotations
@@ -46,6 +47,8 @@ REQUIRED_KEYS = (
     "owned_paths_patterns",
     "enforcement",
 )
+OLD_SKILLS_RELPATH = ".trae/skills"
+LEGACY_MODES = frozenset({"body-equal", "section-contained"})
 SPEC_REGISTRY_RELPATH = "00_Obsidian_Base全局规范文件仓库/spec_registry.json"
 # Only pointers that start like a relative path are followed; bare file names in prose are not.
 MD_POINTER = re.compile(r"(?:\.\./|\./|refs/)[\w./\-]+\.md")
@@ -229,16 +232,38 @@ class RolePackService:
                     self._add(result, "RP-007", pack.name, f"{source.name} 里的指针 {pointer} 找不到")
 
     def _check_equivalence(self, pack: Path, config: dict[str, Any], result: RoleCheckResult) -> None:
-        """RP-008: the pack says what the old skill said; skipped once the old skill is retired."""
+        """RP-008: the pack says what the old skill said.
+
+        A missing old skill is told apart from a retired one: only ``"retired": true`` in role.json
+        switches the comparison off, so a mistyped path can never make the check pass silently.
+        """
         legacy = config.get("legacy")
-        if not isinstance(legacy, dict) or self.workspace_root is None:
+        if legacy is None or not (pack / "SKILL.md").is_file():
             return
-        source = self.workspace_root / str(legacy.get("source", ""))
-        if not source.is_file() or not (pack / "SKILL.md").is_file():
+        if not isinstance(legacy, dict):
+            self._add(result, "RP-008", pack.name, "role.json 的 legacy 必须是对象")
+            return
+        if legacy.get("retired") is True:
+            return
+        root = self.workspace_root
+        if root is None or not (root / OLD_SKILLS_RELPATH).is_dir():
+            self._add(result, "RP-008", pack.name, "找不到旧技能目录 .trae/skills，与旧技能的一致性未核对", UNVERIFIED)
+            return
+        source = root / str(legacy.get("source", ""))
+        if not source.is_file():
+            self._add(
+                result,
+                "RP-008",
+                pack.name,
+                f"旧技能 {legacy.get('source')} 不存在；路径写错请改正，已退役请在 role.json 的 legacy 里写 \"retired\": true",
+            )
+            return
+        mode = legacy.get("mode")
+        if mode not in LEGACY_MODES:
+            self._add(result, "RP-008", pack.name, f"legacy.mode {mode!r} 不认识，只认 {sorted(LEGACY_MODES)}")
             return
         _, old_body = split_front_matter(_read(source))
         _, new_body = split_front_matter(_read(pack / "SKILL.md"))
-        mode = legacy.get("mode")
         if mode == "body-equal" and old_body != new_body:
             self._add(result, "RP-008", pack.name, f"正文与旧技能 {legacy.get('source')} 不逐字一致")
         elif mode == "section-contained":
@@ -250,11 +275,12 @@ class RolePackService:
                 self._add(result, "RP-008", pack.name, f"正文没有逐字包含旧技能从 {heading!r} 起的内容")
         refs = legacy.get("refs")
         if refs:
-            self._check_refs_equal(pack, self.workspace_root / str(refs), result)
+            self._check_refs_equal(pack, root / str(refs), result)
 
     def _check_refs_equal(self, pack: Path, old_refs: Path, result: RoleCheckResult) -> None:
         """Every file of the old refs/ exists in the pack with the same text."""
         if not old_refs.is_dir():
+            self._add(result, "RP-008", pack.name, f"旧技能的 refs 目录 {old_refs.name} 不存在；路径写错请改正，已退役请写 retired")
             return
         for old in sorted(old_refs.rglob("*")):
             if not old.is_file():
