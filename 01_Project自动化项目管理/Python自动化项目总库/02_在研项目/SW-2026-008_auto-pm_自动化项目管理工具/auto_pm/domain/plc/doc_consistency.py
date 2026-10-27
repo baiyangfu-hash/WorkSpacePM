@@ -50,6 +50,7 @@ _END_SECTION = re.compile(r"^\s*(END_VAR|END_STRUCT)\b", re.I)
 _STRUCT_OPEN = re.compile(r"^\s*(?:([A-Za-z_]\w*)\s*:\s*)?STRUCT\s*(?://.*)?$", re.I)
 _DECL = re.compile(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*:\s*(.*?)\s*;\s*(.*)$")
 _DECL_START = re.compile(r"^\s*[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s*(?:,|:(?!=)[^;]*)$")
+_DECL_NAME_COLON = re.compile(r"^\s*[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s*:(?!=)")
 _TRAILING_BLOCK_COMMENT = re.compile(r";\s*\(\*(.*?)\*\)\s*$")
 _BLOCK_COMMENT = re.compile(r"\(\*.*?\*\)", re.S)
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
@@ -237,7 +238,9 @@ def parse_scl_text(text: str, path: str) -> list[CodeObject]:
         if not stripped or stripped.startswith("//"):
             continue
         if pending is not None:
-            if current is not None and (_END_OBJECT.match(line) or _END_SECTION.match(line)):
+            # 漏写 `;`：遇到段尾，或新的一行又是“名字 :”开头（上一行不是以逗号收尾的名字表）时，上一条记无法解析，不与下一条合并
+            starts_new = not pending[1].rstrip().endswith(",") and bool(_DECL_NAME_COLON.match(line))
+            if current is not None and (starts_new or _END_OBJECT.match(line) or _END_SECTION.match(line)):
                 current.unparsed.append((pending[0], pending[1][:80]))
                 pending = None
             else:

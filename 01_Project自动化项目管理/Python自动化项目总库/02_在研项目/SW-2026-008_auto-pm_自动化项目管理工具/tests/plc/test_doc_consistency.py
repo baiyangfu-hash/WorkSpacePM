@@ -483,3 +483,24 @@ END_FUNCTION_BLOCK
     (fb,) = dc.parse_scl_text(text, "fb.scl")
     assert [v.name for v in fb.variables] == ["o_bB"]
     assert [number for number, _ in fb.unparsed] == [3]
+
+
+def test_missing_semicolon_does_not_swallow_the_next_variable() -> None:
+    text = """FUNCTION_BLOCK FB_S
+VAR_INPUT
+    i_bA : BOOL
+    i_bB : INT; // 乙
+    i_bC : BOOL; // 丙
+END_VAR
+END_FUNCTION_BLOCK
+"""
+    (fb,) = dc.parse_scl_text(text, "fb.scl")
+    assert [(v.name, v.type, v.comment) for v in fb.variables] == [("i_bB", "INT", "乙"), ("i_bC", "BOOL", "丙")]
+    assert [number for number, _ in fb.unparsed] == [3]
+
+
+def test_name_list_ending_with_comma_still_continues_onto_the_next_line() -> None:
+    text = "FUNCTION_BLOCK FB_L\nVAR_INPUT\n    i_bA,\n    i_bB : BOOL; // 两个\nEND_VAR\nEND_FUNCTION_BLOCK\n"
+    (fb,) = dc.parse_scl_text(text, "fb.scl")
+    assert [v.name for v in fb.variables] == ["i_bA", "i_bB"]
+    assert fb.unparsed == ()
