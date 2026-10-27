@@ -1,44 +1,40 @@
 {
   "schema_version": 1,
-  "id": "engineer-python",
-  "title": "编程工程师（Python 上位机）",
+  "id": "plc-electrical-engineer",
+  "title": "编程工程师（PLC）",
   "kind": "engineer",
-  "domain": "python",
-  "legacy_names": [
-    "fullstack-engineer"
-  ],
+  "domain": "plc",
+  "legacy_names": [],
   "required_specs": [
-    "DEV-300",
-    "DEV-210",
-    "DEV-216",
-    "DEV-218"
+    "LSP-905",
+    "LSP-906",
+    "LSP-907",
+    "STD-830",
+    "STD-840",
+    "STD-850",
+    "STD-860"
   ],
   "allowed_commands": [
     "pm resume",
-    "python check",
-    "pytest",
-    "ruff check",
-    "mypy",
+    "plc check",
+    "doc check",
     "continuity checkpoint",
     "pm handoff"
   ],
   "gates": [
-    "main.py python check <PID>",
-    "python -m pytest --no-cov -q",
-    "python -m ruff check <owned_paths>",
-    "python -m mypy <owned_paths>"
+    "main.py plc check <PID>",
+    "main.py doc check"
   ],
   "receipt_fields": [
     "PASS",
     "FAIL",
     "NOT_RUN",
-    "既有债务",
+    "外部编译 NOT_RUN（用户未导入博图/InoProShop 时）",
     "checkpoint_id"
   ],
   "owned_paths_patterns": [
-    "**/*.py",
-    "**/*.qml",
-    "**/tests/**"
+    "**/*.scl",
+    "**/*.st"
   ],
   "owned_paths_note": "仅为申请范围的上限，实际可改范围以 Work 的 owned paths 为准",
   "enforcement": {
@@ -48,7 +44,7 @@
   },
   "legacy": {
     "mode": "body-equal",
-    "source": ".trae/skills/fullstack-engineer/SKILL.md",
-    "refs": ".trae/skills/fullstack-engineer/refs"
+    "source": ".trae/skills/plc-electrical-engineer/SKILL.md",
+    "refs": ".trae/skills/plc-electrical-engineer/refs"
   }
 }

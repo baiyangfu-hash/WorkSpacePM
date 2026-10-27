@@ -1,5 +1,5 @@
 ---
-name: engineer-plc
+name: plc-electrical-engineer
 description: "执行已授权的 PLC、SCL/ST 与电气接口任务；支持只读 Grooming 和带 Work/Run/lease 的 Execution。"
 ---
 

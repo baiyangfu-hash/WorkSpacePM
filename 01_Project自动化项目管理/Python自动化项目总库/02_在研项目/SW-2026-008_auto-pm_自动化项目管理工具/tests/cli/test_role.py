@@ -16,7 +16,7 @@ pytestmark = pytest.mark.usefixtures("identity_guard_off")
 def test_role_list_names_the_shipped_packs(tmp_path: Path, cli_runner: CliRunner) -> None:
     result = cli_runner.invoke(cli, ["-w", str(tmp_path), "role", "list"])
     assert result.exit_code == 0, result.output
-    assert result.output.split() == ["engineer-plc", "engineer-python", "product-pm"]
+    assert result.output.split() == ["fullstack-engineer", "plc-electrical-engineer", "product-pm"]
 
 
 def test_role_check_json_without_a_workspace_is_ok_but_unverified(tmp_path: Path, cli_runner: CliRunner) -> None:
