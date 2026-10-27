@@ -59,6 +59,8 @@ class SclLinter:
     HASH_REGION_PATTERN = re.compile(r"^\s*#\s*(?:END_?REGION|REGION)\b", re.IGNORECASE)
     REGION_OPEN_PATTERN = re.compile(r"^\s*REGION\b", re.IGNORECASE)
     REGION_CLOSE_PATTERN = re.compile(r"^\s*END_REGION\b", re.IGNORECASE)
+    # REGION 名称里 `;`、`:=` 会让 siemens-lsp 把名称当语句解析，后面整段错乱（005 插件测试 2 条因此挂过）
+    REGION_NAME_FORBIDDEN_PATTERN = re.compile(r";|:=")
     # 控制结构的开头/结尾记号（END_IF 等里的 IF 前面是下划线，\b 不会误认；ELSIF 同理）
     STRING_LITERAL_PATTERN = re.compile(r"'(?:[^']|'')*'")
     BLOCK_TOKEN_PATTERN = re.compile(r"\b(END_)?(IF|CASE|FOR|WHILE)\b", re.IGNORECASE)
@@ -211,6 +213,17 @@ class SclLinter:
                 )
             elif cls.REGION_OPEN_PATTERN.match(code_part):
                 region_open_lines.append(line_idx)
+                forbidden = cls.REGION_NAME_FORBIDDEN_PATTERN.search(code_part)
+                if forbidden:
+                    report.violations.append(
+                        SclViolation(
+                            line_number=line_idx,
+                            rule_id="LSP-905-REGION-NAME-CHARS",
+                            severity="ERROR",
+                            message=f"REGION 名称里不许出现 `{forbidden.group(0)}`（siemens-lsp 会把它当语句或注释解析，造成后续解析错乱），请改用 `,` 或空格（LSP-905 §6.3）",
+                            code_snippet=stripped,
+                        )
+                    )
             elif cls.REGION_CLOSE_PATTERN.match(code_part):
                 if region_open_lines:
                     region_open_lines.pop()
