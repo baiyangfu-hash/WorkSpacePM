@@ -2,7 +2,7 @@
 
 扫描 PLC 源码中的 .scl 文件，依据 Obsidian 《905_SCL编程规范_LSP.md》
 秒级检查变量作用域前缀 (i_/o_/io_/s_)、ARRAY 类型标识 (arr)、
-语法白名单 (严禁 GOTO/REPEAT/指针) 以及状态机安全防护闭环
+语法白名单 (严禁 GOTO/REPEAT/指针)、数组下标下界从 1 起以及状态机安全防护闭环
 (CASE 缺失 ELSE 防卡死分支)。
 """
 
@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from auto_pm.domain.plc.array_lower_bound_legacy import LEGACY_ARRAY_LOWER_BOUND
 
 
 @dataclass
@@ -49,6 +51,9 @@ class SclLinter:
     TIME_LITERAL_PATTERN = re.compile(r"\b[Tt]#[0-9a-zA-Z_]+")
     CHINESE_PUNCT_PATTERN = re.compile(r"[，；：\uFF08\uFF09\u3001]")
     TIMER_MISSING_Q_PATTERN = re.compile(r"\bQ\s*=>\s*[,)]")
+    # ARRAY[下界..上界, ...]：只取字面整数下界（用常量名写的下界无法在这里求值，不报）
+    ARRAY_BOUNDS_PATTERN = re.compile(r"\bARRAY\s*\[([^\]]*)\]", re.IGNORECASE)
+    ARRAY_LOWER_BOUND_PATTERN = re.compile(r"^\s*([+-]?\d+)\s*\.\.")
 
     # 折叠区段：siemens-lsp 只认 REGION 名称 ... END_REGION；带 # 的写法不被支持（LSP-905 §6.3）
     HASH_REGION_PATTERN = re.compile(r"^\s*#\s*(?:END_?REGION|REGION)\b", re.IGNORECASE)
@@ -357,6 +362,28 @@ class SclLinter:
                         )
 
             # ------------------------------------------------------------------
+            # 2b. 数组下标下界必须为 1（Siemens 语言服务插件按 1 起；移植到实际 PLC 时按平台适配）
+            # ------------------------------------------------------------------
+            for bounds in cls.ARRAY_BOUNDS_PATTERN.findall(code_part):
+                for dimension in bounds.split(","):
+                    lower = cls.ARRAY_LOWER_BOUND_PATTERN.match(dimension)
+                    if lower is not None and int(lower.group(1)) != 1:
+                        legacy = cls._is_legacy_array_lower_bound(file_path, code_part)
+                        report.violations.append(
+                            SclViolation(
+                                line_number=line_idx,
+                                rule_id="LSP-905-ARRAY-LOWER-BOUND",
+                                severity="WARNING" if legacy else "ERROR",
+                                message=(
+                                    f"数组下标下界是 {int(lower.group(1))}，本仓库要求从 1 起（Siemens 语言服务插件的规则；"
+                                    "移植到实际 PLC 时按平台适配）"
+                                    + ("。这是存量声明（改写已挂起），暂只提示不拦" if legacy else "")
+                                ),
+                                code_snippet=stripped,
+                            )
+                        )
+
+            # ------------------------------------------------------------------
             # 3. 状态机 CASE/OF 完整性与安全闭环检查 (LSP-905 §4)
             # ------------------------------------------------------------------
             if re.search(r"\bCASE\b.*\bOF\b", stripped, re.IGNORECASE):
@@ -479,6 +506,16 @@ class SclLinter:
                     )
                 )
             del block_stack[opener_index:]
+
+    @classmethod
+    def _is_legacy_array_lower_bound(cls, file_path: str, code_part: str) -> bool:
+        """这一行是不是 ``array_lower_bound_legacy`` 清单里的存量声明（路径按尾部匹配，文字去注释压缩空白后逐字比）。"""
+        posix = file_path.replace("\\", "/")
+        declaration = re.sub(r"\s+", " ", code_part.split("//")[0]).strip()
+        return any(
+            declaration == text and (posix == path or posix.endswith("/" + path))
+            for path, text in LEGACY_ARRAY_LOWER_BOUND
+        )
 
     @classmethod
     def _has_array_type_prefix(cls, current_block: str, var_name: str) -> bool:
