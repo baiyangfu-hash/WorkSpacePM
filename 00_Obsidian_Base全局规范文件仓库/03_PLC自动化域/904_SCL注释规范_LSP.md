@@ -17,7 +17,7 @@ changelog:
 
 > 版本：V1.3.0
 > 状态：已验证
-> 更新日期：2026-05-29
+> 更新日期：2026-10-26
 > 适用环境：Siemens LSP (VS Code)、TIA Portal、CODESYS、GX Works
 
 ---

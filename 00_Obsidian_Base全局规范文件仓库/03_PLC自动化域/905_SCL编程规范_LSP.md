@@ -476,9 +476,9 @@ plccheck --verbose .
 | 禁止 | `#REGION` / `#END_REGION`（单独成行）；`scl_linter` 规则 `LSP-905-REGION-HASH` 报 ERROR |
 | 配对 | 每个 `REGION` 必须有 `END_REGION`；不配对 `scl_linter` 规则 `LSP-905-REGION-UNBALANCED` 报 ERROR |
 | 位置 | 只放在 `BEGIN ... END_FUNCTION_BLOCK` 的程序体里，按功能分段；声明块（`VAR ... END_VAR`）不分段 |
-| 分段顺序 | 输入映射 → 手动 → 自动步序 → 报警 → 输出映射 |
+| 分段顺序 | 定时器批量调用 → 输入映射 → 手动 → 自动步序 → 报警 → 输出映射（定时器调用必须在 FB 顶部、不被 IF/CASE 包裹，见 LSP-906 规则 1.6） |
 
-较长程序的完整示例（一个夹紧工位，按功能分 5 个区段；同时示范数组下标从 1，见 §3.6）：
+较长程序的完整示例（一个夹紧工位，按功能分 6 个区段，定时器用 SysLib 的 `FB_TON`、三段式调用；同时示范数组下标从 1，见 §3.6）：
 
 ```scl
 FUNCTION_BLOCK FB_1010_ClampStation
@@ -505,7 +505,7 @@ VAR
     s_bPartPresent : BOOL;                      // 工件在位（映射后）
     s_bClampCmd : BOOL;                         // 夹紧命令（手动/自动合成）
     s_bReleaseCmd : BOOL;                       // 松开命令（手动/自动合成）
-    s_fbStepTimer : TON;                        // 步超时定时器
+    fb_tStepTimer : FB_TON;                     // 步超时定时器（SysLib 的 FB_TON）
     s_bStepTimeout : BOOL;                      // 步超时 Q
     s_dStepElapsed : DINT;                      // 步已用时间 ms
     s_arrAlarm : ARRAY[1..4] OF BOOL;           // 报警位，下标从 1 起
@@ -515,6 +515,12 @@ VAR_TEMP
     t_bAnyAlarm : BOOL;                         // 任一报警
 END_VAR
 BEGIN
+    REGION 00_Timers 定时器批量调用 无条件每周期执行 LSP-906 1.5/1.6
+        fb_tStepTimer.PT := 3000;
+        fb_tStepTimer(IN := fb_tStepTimer.IN, PT := fb_tStepTimer.PT,
+                      Q => fb_tStepTimer.Q, ET => fb_tStepTimer.ET);
+    END_REGION
+
     REGION 01_InputMapping 输入映射
         s_bClampedOk := i_bClampedSns;
         s_bReleasedOk := i_bReleasedSns;
@@ -563,8 +569,9 @@ BEGIN
 
     REGION 04_Alarm 报警
         // 步超时：10 步和 30 步各 3000 ms 内必须到位
-        s_fbStepTimer(IN := (s_iStep = 10) OR (s_iStep = 30), PT := 3000,
-                      Q => s_bStepTimeout, ET => s_dStepElapsed);
+        fb_tStepTimer.IN := (s_iStep = 10) OR (s_iStep = 30);
+        s_bStepTimeout := fb_tStepTimer.Q;
+        s_dStepElapsed := fb_tStepTimer.ET;
         s_arrAlarm[1] := s_bStepTimeout AND (s_iStep = 10);  // 夹紧超时
         s_arrAlarm[2] := s_bStepTimeout AND (s_iStep = 30);  // 松开超时
         s_arrAlarm[3] := s_bClampedOk AND s_bReleasedOk;     // 两个到位同时为真
@@ -592,7 +599,7 @@ BEGIN
 END_FUNCTION_BLOCK
 ```
 
-> 说明：示例已过本仓库 `scl_linter`（0 个问题）；siemens-lsp 插件命令行 `check` 须在装有插件的本机验证，验证前不得当作已验证的交付样板。
+> 说明：示例需要 SysLib 的 `FB_TON`；已过本仓库 `scl_linter`（0 个问题）；siemens-lsp 插件命令行 `check` 须在装有插件的本机验证，验证前不得当作已验证的交付样板。
 
 ---
 

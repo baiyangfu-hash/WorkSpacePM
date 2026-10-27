@@ -228,5 +228,18 @@ def test_905_long_region_example_passes_the_linter() -> None:
     assert blocks
     report = SclLinter.lint_text(blocks[0], file_path="905_example.scl")
     assert report.violations == []
-    assert blocks[0].count("REGION ") >= 5 and "ARRAY[1..4]" in blocks[0]
+    example = blocks[0]
+    assert example.count("REGION ") >= 6 and "ARRAY[1..4]" in example
+    # 定时器写法与 LSP-905 §2 / LSP-906 §1 一致：FB_TON、fb_ 前缀、调用集中在 FB 顶部第一个区段里
+    assert ": FB_TON;" in example and ": TON;" not in example
+    assert "s_fb" not in example
+    first_region_end = example.index("END_REGION")
+    assert example.index("fb_tStepTimer(") < first_region_end
+    assert example.count("fb_tStepTimer(") == 1
     assert "#REGION" not in blocks[0].upper()
+
+
+def test_lowercase_region_opener_is_paired_and_hash_inside_block_comment_is_ignored() -> None:
+    assert _region_rules("    region 01_a\n        s_iStep := 1;\n    END_REGION") == []
+    assert _region_rules("    region 01_a\n        s_iStep := 1;") == ["LSP-905-REGION-UNBALANCED"]
+    assert _region_rules("    (*\n    #REGION old\n    #END_REGION\n    *)\n    s_iStep := 1;") == []
