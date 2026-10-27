@@ -227,12 +227,47 @@ def test_shipped_packs_pass_and_match_old_skills() -> None:
     assert result.findings == [], [vars(item) for item in result.findings]
 
 
+RED_LINE_HEADING = "## 红线（AUD-001）"
+RED_LINE_PHRASES = (
+    "做和审必须是不同会话",
+    "Claude-Session",
+    "审计者不往被审分支推提交",
+    "不推 `main`",
+    "不合并",
+    "不改被审 PR 的标题和描述",
+)
+
+
+def missing_red_lines(skill_text: str) -> list[str]:
+    """Red lines the body of a test-engineer SKILL.md lacks; the front matter does not count."""
+    _, body = split_front_matter(skill_text)
+    start = body.find(RED_LINE_HEADING)
+    if start == -1:
+        return [RED_LINE_HEADING]
+    end = body.find("\n## ", start + len(RED_LINE_HEADING))
+    section = body[start : end if end != -1 else len(body)]
+    return [phrase for phrase in RED_LINE_PHRASES if phrase not in section]
+
+
 def test_test_engineer_keeps_the_audit_red_lines() -> None:
-    """AUD-001 must stay written into the pack: different session, no pushing to the audited branch, reviews/ only."""
+    """AUD-001 must stay written into the body of the pack, not only into the front matter description."""
     pack = default_roles_dir() / "test-engineer"
     text = (pack / "SKILL.md").read_text(encoding="utf-8")
-    assert "做和审必须是不同会话" in text
-    assert "审计者不往被审分支推提交" in text
+    assert missing_red_lines(text) == []
     assert "放行判定:" in text
     config = json.loads((pack / "role.json").read_text(encoding="utf-8"))
     assert config["owned_paths_patterns"] == ["reviews/**"]
+
+
+def test_red_line_check_catches_each_mutation() -> None:
+    """The check itself must go red when a red line is removed from the body (audit 322 mutations)."""
+    text = (default_roles_dir() / "test-engineer" / "SKILL.md").read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert RED_LINE_HEADING in text
+    # The whole section removed: the front matter still repeats two phrases, which must not save it.
+    start = text.index(RED_LINE_HEADING)
+    end = text.index("\n## ", start + 1)
+    assert missing_red_lines(text[:start] + text[end + 1 :]) == [RED_LINE_HEADING]
+    # One phrase removed from the section, each in turn.
+    for phrase in RED_LINE_PHRASES:
+        damaged = text[:start] + text[start:end].replace(phrase, "") + text[end:]
+        assert missing_red_lines(damaged) == [phrase], phrase
