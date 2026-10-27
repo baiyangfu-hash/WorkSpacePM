@@ -17,6 +17,7 @@ import hashlib
 import os
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from auto_pm.contracts.lease_reclaim import ProcessFingerprint, ProcessObservation
@@ -255,6 +256,36 @@ def observe(pid: int) -> ProcessObservation | None:
 
     observed = _observe_with_name(pid)
     return observed[0] if observed is not None else None
+
+
+def start_time_to_datetime(start_time: str | None) -> datetime | None:
+    """Turn the raw ``ProcessObservation.start_time`` into an aware UTC time; ``None`` when it cannot be converted.
+
+    Windows records the creation ``FILETIME`` (100 ns ticks since 1601-01-01 UTC); Linux records field 22 of ``/proc/<pid>/stat`` (clock ticks
+    since boot), which needs the boot time from ``/proc/stat``.  Other platforms and unreadable inputs give ``None`` (the caller reports UNKNOWN).
+    """
+
+    if start_time is None or not start_time.isdigit():
+        return None
+    ticks = int(start_time)
+    if sys.platform == "win32":
+        try:
+            return datetime(1601, 1, 1, tzinfo=UTC) + timedelta(microseconds=ticks // 10)
+        except OverflowError:
+            return None
+    elif sys.platform.startswith("linux"):
+        try:
+            boot = next(
+                int(line.split()[1])
+                for line in Path("/proc/stat").read_text(encoding="utf-8", errors="replace").splitlines()
+                if line.startswith("btime ")
+            )
+            hertz = os.sysconf("SC_CLK_TCK")
+        except (OSError, StopIteration, ValueError, IndexError):
+            return None
+        return datetime.fromtimestamp(boot + ticks / hertz, tz=UTC)
+    else:
+        return None
 
 
 def fingerprint(pid: int) -> ProcessFingerprint | None:
