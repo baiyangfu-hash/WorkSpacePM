@@ -11,7 +11,6 @@ from auto_pm.application.core.role_pack_service import (
     FAIL,
     UNVERIFIED,
     RolePackService,
-    default_roles_dir,
     split_front_matter,
 )
 
@@ -211,6 +210,13 @@ def test_front_matter_split_handles_crlf_and_none() -> None:
     assert split_front_matter("no front matter") == ({}, "no front matter")
 
 
+def test_empty_or_missing_library_does_not_pass(tmp_path: Path) -> None:
+    for service in (RolePackService(workspace_root=tmp_path), RolePackService(None, None)):
+        result = service.check()
+        assert not result.ok and result.roles == []
+        assert [(item.code, item.level) for item in result.findings] == [("RP-001", FAIL)]
+
+
 def _real_workspace() -> Path | None:
     for parent in Path(__file__).resolve().parents:
         if (parent / ".trae" / "skills").is_dir() and (parent / "00_Obsidian_Base全局规范文件仓库").is_dir():
@@ -221,7 +227,7 @@ def _real_workspace() -> Path | None:
 def test_shipped_packs_pass_and_match_old_skills() -> None:
     workspace = _real_workspace()
     assert workspace is not None, "测试必须在完整工作区里跑：找不到 .trae/skills 与规范库"
-    result = RolePackService(default_roles_dir(), workspace).check()
+    result = RolePackService(workspace_root=workspace).check()
     assert result.roles == ["fullstack-engineer", "plc-electrical-engineer", "product-pm"]
     # Nothing may stay unverified: the registry and the old skills were both read.
     assert result.findings == [], [vars(item) for item in result.findings]

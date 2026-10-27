@@ -1,6 +1,7 @@
 """Role pack check (role-pack card 1): the cockpit keeps the job descriptions, agents only borrow them.
 
-A role pack is a directory under ``auto_pm/roles/<role-id>/``::
+The library is the tracked, tool-neutral directory ``roles/`` at the workspace root (no IDE and no
+cockpit release owns it).  A role pack is a directory ``roles/<role-id>/``::
 
     SKILL.md    job description for people and for tools that load skills (Trae, Cursor)
     role.json   machine config: required specs, allowed commands, gates, receipt fields
@@ -11,7 +12,7 @@ A role pack is a directory under ``auto_pm/roles/<role-id>/``::
 The check is read-only and never needs the ledger, so it also runs offline.  Each finding carries a
 code so a card or an audit can quote it:
 
-* RP-001 a required file is missing
+* RP-001 the roles/ directory has no pack, or a required file of a pack is missing
 * RP-002 role.json is not valid or lacks a key
 * RP-003 role id is not the directory name or uses a character that breaks Windows paths
 * RP-004 SKILL.md front matter name differs from the id, or has no description
@@ -30,9 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import auto_pm
-
 ROLE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+ROLES_DIRNAME = "roles"
 SHARED_DIR = "shared"
 REQUIRED_KEYS = (
     "schema_version",
@@ -86,9 +86,9 @@ class RoleCheckResult:
         }
 
 
-def default_roles_dir() -> Path:
-    """Directory that holds the packs shipped inside the cockpit package."""
-    return Path(auto_pm.__file__).resolve().parent / "roles"
+def default_roles_dir(workspace_root: Path) -> Path:
+    """The role library of a workspace: ``roles/`` at its root."""
+    return Path(workspace_root) / ROLES_DIRNAME
 
 
 def split_front_matter(text: str) -> tuple[dict[str, str], str]:
@@ -115,12 +115,15 @@ class RolePackService:
     """Check the role packs of one cockpit against themselves, the spec registry and the old skills."""
 
     def __init__(self, roles_dir: Path | None = None, workspace_root: Path | None = None) -> None:
-        self.roles_dir = Path(roles_dir) if roles_dir else default_roles_dir()
         self.workspace_root = Path(workspace_root) if workspace_root else None
+        if roles_dir:
+            self.roles_dir: Path | None = Path(roles_dir)
+        else:
+            self.roles_dir = default_roles_dir(self.workspace_root) if self.workspace_root else None
 
     def role_dirs(self) -> list[Path]:
         """Pack directories, sorted by name; ``shared`` is not a role."""
-        if not self.roles_dir.is_dir():
+        if self.roles_dir is None or not self.roles_dir.is_dir():
             return []
         return sorted(
             child for child in self.roles_dir.iterdir() if child.is_dir() and child.name != SHARED_DIR
@@ -131,6 +134,9 @@ class RolePackService:
         result = RoleCheckResult()
         spec_ids = self._load_spec_ids()
         claimed: dict[str, str] = {}
+        if not self.role_dirs():
+            # An empty library must not pass: that would be the same silent pass as a mistyped path.
+            self._add(result, "RP-001", "-", f"找不到角色库或里面没有角色包：{self.roles_dir or '未指定工作区'}")
         for pack in self.role_dirs():
             result.roles.append(pack.name)
             config = self._check_files_and_config(pack, result)
@@ -220,7 +226,7 @@ class RolePackService:
     def _check_pointers(self, pack: Path, result: RoleCheckResult) -> None:
         """RP-007: relative ``.md`` pointers in SKILL.md and refs/ resolve and stay inside roles/."""
         sources = [pack / "SKILL.md", *sorted((pack / "refs").glob("*.md"))]
-        roles_root = self.roles_dir.resolve()
+        roles_root = self.roles_dir.resolve() if self.roles_dir else pack.parent.resolve()
         for source in sources:
             if not source.is_file():
                 continue
