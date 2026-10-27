@@ -60,7 +60,7 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 定时器与边沿统一调用 (顶部, 无条件) ============ *)
+    REGION 00_TimersEdges 定时器与边沿统一调用 (顶部, 无条件)
     fb_trReset(IN := io_stIo.bResetButton, Q => s_bResetEdge);
     fb_tClk1On(IN := NOT s_bClk1s, PT := CLK1_HALF_MS, Q => s_bClk1OnQ, ET => s_dClk1OnEt);
     fb_tClk1Off(IN := s_bClk1s, PT := CLK1_HALF_MS, Q => s_bClk1OffQ, ET => s_dClk1OffEt);
@@ -77,8 +77,9 @@ BEGIN
     ELSIF s_bClk01OffQ THEN
         s_bClk01s := FALSE;
     END_IF;
+    END_REGION
 
-    (* ============ 2. 锁存: 触发即锁, 复位键沿且触发已消失才清 ============ *)
+    REGION 01_Latch 锁存: 触发即锁, 复位键沿且触发已消失才清
     io_stAlarm.bReset := s_bResetEdge;
     FOR s_iIdx := 0 TO LAST_IDX DO
         IF io_stAlarm.arrTrig[s_iIdx] THEN
@@ -87,8 +88,9 @@ BEGIN
             io_stAlarm.arrLatch[s_iIdx] := FALSE;
         END_IF;
     END_FOR;
+    END_REGION
 
-    (* ============ 3. 分级汇总 ============ *)
+    REGION 02_GradeSummary 分级汇总
     io_stAlarm.bFault := FALSE;
     io_stAlarm.bAny := FALSE;
     io_stAlarm.abHoldConv[1] := FALSE;
@@ -166,8 +168,9 @@ BEGIN
         END_IF;
     END_FOR;
     io_stAlarm.iAlarmNo := s_iMin;
+    END_REGION
 
-    (* ============ 4. 声光 (PRC 7.2, DSN 9) ============ *)
+    REGION 03_SoundLight 声光 (PRC 7.2, DSN 9)
     s_bBlink := ((s_bAnyAll OR io_stMachine.bPause) AND s_bClk1s)
                 OR ((io_stMachine.bHoming OR (io_stMachine.bManual AND io_stHmi.bBlinkOpt) OR io_stMachine.bPrepare)
                     AND s_bClk01s);
@@ -187,4 +190,5 @@ BEGIN
     io_stIo.bQLampRed := io_stAlarm.bLampRed;
     io_stIo.bQBuzzer := io_stAlarm.bBuzzer;
     io_stIo.bQLampResetBtn := io_stAlarm.bResetLamp;
+    END_REGION
 END_FUNCTION_BLOCK

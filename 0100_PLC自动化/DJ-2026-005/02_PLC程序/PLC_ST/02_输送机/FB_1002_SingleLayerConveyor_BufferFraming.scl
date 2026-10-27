@@ -129,7 +129,7 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 定时器统一调用 (顶部, 无条件) ============ *)
+    REGION 00_Timers 定时器统一调用 (顶部, 无条件)
     fb_tInitRev(IN := s_bInitRevIn, PT := i_dInitRevMs, Q => s_bInitRevQ, ET => s_dInitRevEt);
     fb_tPreBlock(IN := s_bPreBlockIn, PT := i_dPreBlockMs, Q => s_bPreBlockQ, ET => s_dPreBlockEt);
     fb_tSlowFeed(IN := s_bSlowFeedIn, PT := i_dSlowFeedMs, Q => s_bSlowFeedQ, ET => s_dSlowFeedEt);
@@ -144,8 +144,9 @@ BEGIN
     fb_tSepDn1(IN := s_bSepDn1In, PT := i_dCylTimeoutMs, Q => s_bSepDn1Q, ET => s_dSepDn1Et);
     fb_tSepDn2(IN := s_bSepDn2In, PT := i_dCylTimeoutMs, Q => s_bSepDn2Q, ET => s_dSepDn2Et);
     fb_trUnload(IN := io_stLayer.bUnload, Q => s_bUnloadEdge);
+    END_REGION
 
-    (* ============ 2. 本扫描派生量 ============ *)
+    REGION 01_Derived 本扫描派生量
     s_bBothPick := io_stLayer.bPick1 AND io_stLayer.bPick2;
     s_bAnyPick := io_stLayer.bPick1 OR io_stLayer.bPick2;
     s_bPosAllOk := (NOT io_stLayer.bBlkUp1) AND (NOT io_stLayer.bBlkUp2)
@@ -159,8 +160,9 @@ BEGIN
     s_bSlowFeedIn := FALSE;
     s_bReleaseIn := FALSE;
     s_dReleasePt := i_dReleaseNgMs;
+    END_REGION
 
-    (* ============ 3. 异常停机 / 退料上升沿: 整层复位 (R-CONV-08) ============ *)
+    REGION 02_FaultResetSequence 异常停机 / 退料上升沿整层复位 (R-CONV-08), 否则本层未 Hold 时步序执行
     IF io_stLayer.bReset OR s_bUnloadEdge THEN
         s_iStep := STEP_IDLE;
         s_bFwd := FALSE;
@@ -172,8 +174,6 @@ BEGIN
         io_stLayer.bSepDown := FALSE;       // 分料升起
         io_stLayer.bReady := FALSE;
         io_stLayer.bRequest := FALSE;
-
-    (* ============ 4. 本层未 Hold: 步序执行 ============ *)
     ELSIF NOT io_stLayer.bHold THEN
         CASE s_iStep OF
             STEP_IDLE:
@@ -323,8 +323,9 @@ BEGIN
             s_iStep := STEP_IDLE;
         END_CASE;
     END_IF;
+    END_REGION
 
-    (* ============ 5. 电机输出: Hold 或不在安全区一律切断 (R-CONV-03/04) ============ *)
+    REGION 03_MotorOutput 电机输出: Hold 或不在安全区一律切断 (R-CONV-03/04)
     s_bOutFwd := s_bFwd AND (NOT io_stLayer.bHold) AND io_stLayer.bSafeZone;
     s_bOutRev := s_bRev AND (NOT io_stLayer.bHold) AND io_stLayer.bSafeZone;
     // 满料减速: 满料 1、2 同亮且正转时立即慢速, 条件消失立即撤销 (R-CONV-02)
@@ -333,12 +334,14 @@ BEGIN
     io_stLayer.bRev := s_bOutRev;
     // 慢速只在有方向时输出 (变频器约定: 单独慢速不转动)
     io_stLayer.bSlow := (s_bSlow OR s_bFullSlow) AND (s_bOutFwd OR s_bOutRev);
+    END_REGION
 
-    (* ============ 6. 缺料 (R-CONV-05): 正转连续 10 s 既没到阻挡前又没到取料位 ============ *)
+    REGION 04_NoMaterialAlarm 缺料 (R-CONV-05): 正转连续 10 s 既没到阻挡前又没到取料位
     s_bStarveIn := s_bOutFwd AND (NOT io_stLayer.bPreBlock) AND (NOT s_bBothPick);
     io_stLayer.arrTrig[8] := s_bStarveQ;
+    END_REGION
 
-    (* ============ 7. 气缸位置报警 (R-CONV-06): 命令后 i_dCylTimeoutMs 位置未到 ============ *)
+    REGION 05_CylinderAlarm 气缸位置报警 (R-CONV-06): 命令后 i_dCylTimeoutMs 位置未到
     s_bBlkUp1In := (NOT io_stLayer.bBlockDown) AND (NOT io_stLayer.bBlkUp1);
     s_bBlkUp2In := (NOT io_stLayer.bBlockDown) AND (NOT io_stLayer.bBlkUp2);
     s_bBlkDn1In := io_stLayer.bBlockDown AND (NOT io_stLayer.bBlkDn1);
@@ -355,9 +358,11 @@ BEGIN
     io_stLayer.arrTrig[5] := s_bSepUp2Q;
     io_stLayer.arrTrig[6] := s_bSepDn1Q;
     io_stLayer.arrTrig[7] := s_bSepDn2Q;
+    END_REGION
 
-    (* ============ 8. 状态输出 ============ *)
+    REGION 06_StatusOutput 状态输出
     io_stLayer.iStep := s_iStep;
     io_stLayer.bAtRest := (s_iStep = STEP_IDLE);
+    END_REGION
 
 END_FUNCTION_BLOCK
