@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "ui-designer",
+  "title": "UI 设计师",
+  "kind": "designer",
+  "legacy_names": [],
+  "required_specs": [
+    "STD-909",
+    "STD-910",
+    "STD-911",
+    "DEV-301",
+    "DEV-216"
+  ],
+  "allowed_commands": [
+    "pm resume",
+    "prototype check",
+    "doc check",
+    "continuity checkpoint",
+    "pm handoff"
+  ],
+  "gates": [
+    "main.py prototype check --pid <PID>",
+    "main.py doc check"
+  ],
+  "receipt_fields": [
+    "PASS",
+    "FAIL",
+    "NOT_RUN",
+    "画面与点表对照",
+    "checkpoint_id"
+  ],
+  "owned_paths_patterns": [
+    "**/*.html",
+    "**/*.css",
+    "**/*.js",
+    "**/*.qml"
+  ],
+  "owned_paths_note": "仅为申请范围的上限，实际可改范围以 Work 的 owned paths 为准",
+  "enforcement": {
+    "claude_code": "待生成 hooks 与 permissions.deny（后续卡）",
+    "trae": "仅说明文字，无机器拦截",
+    "cursor": "仅说明文字，无机器拦截"
+  },
+  "legacy": {
+    "retired": true,
+    "note": "新建岗位，没有旧技能可对照"
+  }
+}

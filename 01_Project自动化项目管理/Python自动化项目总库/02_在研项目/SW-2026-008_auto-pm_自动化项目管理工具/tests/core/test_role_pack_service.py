@@ -222,6 +222,17 @@ def test_shipped_packs_pass_and_match_old_skills() -> None:
     workspace = _real_workspace()
     assert workspace is not None, "测试必须在完整工作区里跑：找不到 .trae/skills 与规范库"
     result = RolePackService(default_roles_dir(), workspace).check()
-    assert result.roles == ["fullstack-engineer", "plc-electrical-engineer", "product-pm"]
+    assert result.roles == ["fullstack-engineer", "plc-electrical-engineer", "product-pm", "test-engineer", "ui-designer"]
     # Nothing may stay unverified: the registry and the old skills were both read.
     assert result.findings == [], [vars(item) for item in result.findings]
+
+
+def test_test_engineer_keeps_the_audit_red_lines() -> None:
+    """AUD-001 must stay written into the pack: different session, no pushing to the audited branch, reviews/ only."""
+    pack = default_roles_dir() / "test-engineer"
+    text = (pack / "SKILL.md").read_text(encoding="utf-8")
+    assert "做和审必须是不同会话" in text
+    assert "审计者不往被审分支推提交" in text
+    assert "放行判定:" in text
+    config = json.loads((pack / "role.json").read_text(encoding="utf-8"))
+    assert config["owned_paths_patterns"] == ["reviews/**"]
