@@ -480,6 +480,7 @@ plccheck --verbose .
 | 禁止 | `#REGION` / `#END_REGION`（单独成行）；`scl_linter` 规则 `LSP-905-REGION-HASH` 报 ERROR |
 | 配对 | 每个 `REGION` 必须有 `END_REGION`；不配对 `scl_linter` 规则 `LSP-905-REGION-UNBALANCED` 报 ERROR |
 | 不得与控制结构交叉 | `REGION` 的开头和结尾必须在同一个 `IF / CASE / FOR / WHILE` 结构的同一层里：区段可以整个放在结构里面，也可以整个包住结构，**不能切开结构**（例如 `REGION` 开在 `IF` 里、`END_REGION` 写在 `END_IF` 之后）；`scl_linter` 规则 `LSP-905-REGION-CROSS-BLOCK` 报 ERROR |
+| 名称里的符号 | 名称只写编号、英文名和中文说明；**不得出现英文分号 `;` 和赋值符 `:=`**（siemens-lsp 会把它们当语句解析，后面整段解析错乱，插件测试会挂）；`scl_linter` 规则 `LSP-905-REGION-NAME-CHARS` 报 ERROR。需要分隔时用 `,` 或空格；`:`、`,`、`( )`、`/`、`=`、`<`、`>` 实测可用 |
 | 位置 | 只放在 `BEGIN ... END_FUNCTION_BLOCK` 的程序体里，按功能分段；声明块（`VAR ... END_VAR`）不分段 |
 | 分段顺序 | 定时器批量调用 → 输入映射 → 手动 → 自动步序 → 报警 → 输出映射（定时器调用必须在 FB 顶部、不被 IF/CASE 包裹，见 LSP-906 规则 1.6） |
 
@@ -629,7 +630,7 @@ END_FUNCTION_BLOCK
 
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
-| V1.5.1 | 2026-10-27 | Claude | §6.3 补一条：REGION 不得与 IF/CASE/FOR/WHILE 交叉（开头和结尾须在同一控制结构的同一层），对应 scl_linter 规则 LSP-905-REGION-CROSS-BLOCK；协调者 2026-10-27 指示 |
+| V1.5.1 | 2026-10-27 | Claude | §6.3 补一条：REGION 不得与 IF/CASE/FOR/WHILE 交叉（开头和结尾须在同一控制结构的同一层），对应 scl_linter 规则 LSP-905-REGION-CROSS-BLOCK；另补 REGION 名称里不得出现 `;`、`:=`（规则 LSP-905-REGION-NAME-CHARS，起因 #237 合并后 005 插件测试挂 2 条）；协调者 2026-10-27 指示 |
 | V1.5.0 | 2026-10-26 | Claude | 新增 §6.3 折叠区段 REGION ... END_REGION（siemens-lsp 支持，#REGION 不支持；移植按平台适配），附较长示例；用户 2026-10-26 批准（TIA V19 可直接用，移植按平台适配） |
 | V1.4.0 | 2026-10-26 | Claude | 新增 §3.6 下标起点：STRING 字符下标从 1 起（siemens-lsp 要求）、ARRAY 下界为 1（用户裁决，统一风格）；移植时按平台适配；用户 2026-10-26 批准；数组示例改为下界 1 |
 | V1.3.0 | 2026-10-24 | Claude | 新增 §4.4 ENUM 枚举类型（DJ-2026-005 步序用枚举；验证前置见 §4.4） |
