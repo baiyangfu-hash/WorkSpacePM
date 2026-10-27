@@ -425,3 +425,14 @@ def test_one_crossing_is_reported_once_and_the_next_region_is_judged_on_its_own(
     good = "    REGION 02_b\n        IF s_iStep = 3 THEN\n            s_iStep := 4;\n        END_IF;\n    END_REGION"
     assert _cross(cut + good) == ["LSP-905-REGION-CROSS-BLOCK"]
     assert _cross(good + "\n" + cut) == ["LSP-905-REGION-CROSS-BLOCK"]
+
+
+@pytest.mark.parametrize("name", ["01_A 取料; 放料", "01_A 令 s_x := 1"])
+def test_region_name_with_statement_or_comment_symbols_is_rejected(name: str) -> None:
+    body = f"    REGION {name}\n        s_iStep := 1;\n    END_REGION"
+    assert _region_rules(body) == ["LSP-905-REGION-NAME-CHARS"]
+
+
+def test_region_name_with_ordinary_punctuation_is_fine() -> None:
+    body = "    REGION 06_SafeZone 安全区 (R-CONV-03): 自动 = 不在 S22 / S23, Z <= 待机点\n        s_iStep := 1;\n    END_REGION"
+    assert _region_rules(body) == []
