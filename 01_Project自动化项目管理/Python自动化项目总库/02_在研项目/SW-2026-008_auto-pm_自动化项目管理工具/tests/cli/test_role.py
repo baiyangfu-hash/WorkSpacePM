@@ -31,7 +31,7 @@ def test_role_check_exits_1_when_a_pack_is_broken(
     tmp_path: Path, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     roles = tmp_path / "roles"
-    (roles / "bad:pack").mkdir(parents=True)
+    (roles / "Bad_Pack").mkdir(parents=True)
     monkeypatch.setattr("auto_pm.application.core.role_pack_service.default_roles_dir", lambda: roles)
     result = cli_runner.invoke(cli, ["-w", str(tmp_path), "role", "check"])
     assert result.exit_code == 1
