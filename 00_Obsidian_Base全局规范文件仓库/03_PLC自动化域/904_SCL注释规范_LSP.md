@@ -1,18 +1,23 @@
 ---
 spec_id: LSP-904
 title: "SCL注释规范"
-version: "V1.2.0"
+version: "V1.3.0"
 domain: plc
 lifecycle: stable
 canonical_path: "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/904_SCL注释规范_LSP.md"
 tags: ["SCL", "注释", "LSP"]
+changelog:
+  - version: V1.3.0
+    date: 2026-10-26
+    author: Claude
+    changes: region 折叠标记改为 REGION 名称 ... END_REGION（博图 TIA V19 可直接用，siemens-lsp 支持；移植按平台适配）；经用户 2026-10-26 批准
 ---
 
 # SCL 注释规范 (Siemens LSP Go-Gen 兼容版)
 
-> 版本：V1.2.0
+> 版本：V1.3.0
 > 状态：已验证
-> 更新日期：2026-05-29
+> 更新日期：2026-10-26
 > 适用环境：Siemens LSP (VS Code)、TIA Portal、CODESYS、GX Works
 
 ---
@@ -47,7 +52,7 @@ tags: ["SCL", "注释", "LSP"]
 | 状态机步骤说明 | `(* *)` | 状态步序需多行关联性描述，换行可读性高 |
 | 函数头部 | `//` | 简洁函数说明（3-5行），与下方代码紧凑衔接 |
 | 临时/调试注释 | `//` | 快速标记，易增易删 |
-| region 折叠标记 | `(* #region ... *)` | 固定模板格式 |
+| region 折叠标记 | `REGION 名称 ... END_REGION` | 固定模板格式（西门子博图 TIA V19 可直接用，也是 siemens-lsp 支持的写法） |
 
 ```scl
 // ✅ 正确示范：变量用 //，逻辑用 (* *)
@@ -405,10 +410,12 @@ IF Condition THEN    // [条件说明]
 
 ### 7.4 region 折叠标记模板
 
+**折叠区段统一写 `REGION 名称 ... END_REGION`。这是西门子博图（TIA Portal V19 可直接使用）的格式，也是 siemens-lsp 插件支持的写法；带 `#` 的 `#REGION ... #END_REGION` 与注释包裹的 `(* #region *)` 旧模板均不再使用。实际移植时要根据编译器平台自行适配。** 详见 LSP-905 §6.3（含较长示例）。
+
 ```scl
-(* #region [编号]_[区域名称] [简要说明])
+REGION [编号]_[区域名称] [简要说明]
 ... 代码 ...
-(* #endregion [编号]_[区域名称] *)
+END_REGION
 ```
 
 ---
@@ -455,8 +462,9 @@ IF Condition THEN    // [条件说明]
 # 注意: 此检测需人工确认是否真的在注释内部
 \([^*]*\*\)
 
-# 检测非标准的region格式
-//#region
+# 检测非标准的region格式（带 # 的写法不被支持，应写成 REGION ... END_REGION）
+^\s*#\s*(END_?)?REGION
+//\s*#\s*(end)?region
 ```
 
 ### 9.3 VS Code 任务配置
@@ -485,6 +493,7 @@ IF Condition THEN    // [条件说明]
 
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
+| V1.3.0 | 2026-10-26 | Claude | region 折叠标记改为 `REGION 名称 ... END_REGION`（博图 TIA V19 / siemens-lsp 支持；移植按平台适配），不再用 `(* #region *)`；用户 2026-10-26 批准 |
 | **V1.2.0** | **2026-05-29** | **AI Assistant** | **新增: §2.0注释类型分工规则（变量/行内→//，逻辑/流程块→(* *)）; 更新§1核心规则表和§4注释密度建议表对齐新规则** |
 | **V1.1.0** | **2026-05-05** | **AI Assistant** | **新增: 注释内容禁止含(*或*)规则(基于FB_1001实际案例); 新增高危案例2; 更新检查清单; 新增正则检测模式** |
 | V1.0.0 | 2026-05-02 | AI Assistant | 初始版本, 基于DJ-2026-005 SysLib库验证通过 |
