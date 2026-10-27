@@ -48,15 +48,17 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 联机 / 连续送框: 取自 HMI ============ *)
+    REGION 01_OnlineContinuous 联机 / 连续送框: 取自 HMI
     io_stExt.bLinkMode := io_stHmi.bLinkMode;
     io_stExt.bContinuous := io_stHmi.bContinuousSend;
+    END_REGION
 
-    (* ============ 2. 边沿 ============ *)
+    REGION 02_Edges 边沿
     fb_trPermitUp(IN := io_stExt.bLinkMode AND io_stExt.bPeerPermit, Q => s_bPermitUp);
     fb_tfPermitDn(IN := io_stExt.bLinkMode AND io_stExt.bPeerPermit, Q => s_bPermitDn);
+    END_REGION
 
-    (* ============ 3. 单套送框许可 M510 ============ *)
+    REGION 03_SingleFeedPermit 单套送框许可 M510
     // 联机且允许送料上升沿置位; 下降沿、小车 Y44 成立、不联机时复位 (复位优先)
     IF s_bPermitUp THEN
         io_stExt.bSingle := TRUE;
@@ -65,8 +67,9 @@ BEGIN
         io_stExt.bSingle := FALSE;
     END_IF;
     io_stHmi.bSingleSend := io_stExt.bSingle;
+    END_REGION
 
-    (* ============ 4. 本机安全异常 -> 组框机 (R5000.0 / Y45 / Y46) ============ *)
+    REGION 04_LocalSafetyFault 本机安全异常 -> 组框机 (R5000.0 / Y45 / Y46)
     s_bLocalSafety := FALSE;
     FOR s_iI := IDX_F0 TO IDX_F8 DO
         IF io_stAlarm.arrLatch[s_iI] THEN
@@ -74,17 +77,20 @@ BEGIN
         END_IF;
     END_FOR;
     io_stExt.bLinkSafetyOut := s_bLocalSafety;
+    END_REGION
 
-    (* ============ 5. 组框机安全异常 / 通讯异常 ============ *)
+    REGION 05_UpstreamFault 组框机安全异常 / 通讯异常
     s_bPeerFault := io_stExt.bLinkMode AND (NOT io_stExt.bLinkFail) AND io_stExt.bPeerSafetyFault;
     io_stExt.arrTrig[0] := s_bPeerFault;                                    // F104 (A 类)
     io_stExt.arrTrig[1] := io_stExt.bLinkMode AND io_stExt.bLinkFail;       // F105 (提示)
     io_stAlarm.arrTrig[IDX_F104] := io_stExt.arrTrig[0];
     io_stAlarm.arrTrig[IDX_F105] := io_stExt.arrTrig[1];
+    END_REGION
 
-    (* ============ 6. 输出 Y45 / Y46: 组框机安全异常 或 本机安全异常 ============ *)
+    REGION 06_OutputMapping 输出 Y45 / Y46: 组框机安全异常 或 本机安全异常
     io_stExt.bY45 := s_bPeerFault OR s_bLocalSafety;
     io_stExt.bY46 := s_bPeerFault OR s_bLocalSafety;
     io_stIo.bQFramePause := io_stExt.bY45;
     io_stIo.bQFrameEStop := io_stExt.bY46;
+    END_REGION
 END_FUNCTION_BLOCK

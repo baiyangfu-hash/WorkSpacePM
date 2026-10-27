@@ -49,15 +49,16 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 边沿与派生量 ============ *)
+    REGION 01_EdgesDerived 边沿与派生量
     fb_trAutoKey(IN := io_stHmi.bAutoRun, Q => s_bAutoKey);
     s_bStopReq := io_stHmi.bStop OR (NOT io_stIo.bHmiStopButton);
     s_bF12Latched := io_stAlarm.arrLatch[IDX_STOP];
     io_stMachine.bPause := io_stHmi.bPause;
     io_stMachine.bFault := io_stAlarm.bFault;
     io_stMachine.bPrepareDone := FALSE;
+    END_REGION
 
-    (* ============ 2. 机器级报警触发 (电平, 每扫描全部重写) ============ *)
+    REGION 02_MachineAlarm 机器级报警触发 (电平, 每扫描全部重写)
     // 常闭点: 字段 1 = 正常, 0 = 动作
     io_stAlarm.arrTrig[0] := NOT io_stIo.bEStop;                    // F0 急停 X101
     io_stAlarm.arrTrig[1] := NOT io_stIo.bDoorL1;                   // F1~F8 安全门 X140~X147
@@ -83,8 +84,9 @@ BEGIN
     io_stAlarm.arrTrig[23] := (NOT io_stIo.bX2LimitRev) AND io_stMachine.bAuto;     // F23 X2 后极限
     io_stAlarm.arrTrig[24] := (NOT io_stIo.bZLimitUp) AND io_stMachine.bAuto;       // F24 Z 上极限
     io_stAlarm.arrTrig[25] := (NOT io_stIo.bZLimitDown) AND io_stMachine.bAuto;     // F25 Z 下极限
+    END_REGION
 
-    (* ============ 3. 模式 ============ *)
+    REGION 03_Mode 模式
     IF io_stAlarm.bFault THEN
         // M8: 清所有序列与"已回原点", 手动也强制退出 (异常存在期间进不了手动)
         io_stMachine.bManual := FALSE;
@@ -154,8 +156,9 @@ BEGIN
     END_IF;
 
     s_bResetPrev := io_stAlarm.bReset;
+    END_REGION
 
-    (* ============ 4. 设备状态字 D116 与回写 HMI ============ *)
+    REGION 04_StatusWord 设备状态字 D116 与回写 HMI
     // 异常 8 > 暂停 10 > 自动 5 > 准备 3 > 回原点 2 > 手动 1 > 待机 6
     IF io_stMachine.bFault THEN
         io_stMachine.iDeviceState := DEV_FAULT;
@@ -174,4 +177,5 @@ BEGIN
     END_IF;
     io_stHmi.iDeviceState := io_stMachine.iDeviceState;
     io_stHmi.iAlarmNo := io_stAlarm.iAlarmNo;
+    END_REGION
 END_FUNCTION_BLOCK

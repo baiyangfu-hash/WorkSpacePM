@@ -84,15 +84,16 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 定时器统一调用 ============ *)
+    REGION 00_Timers 定时器统一调用
     fb_tSettle(IN := s_bSettleIn, PT := io_stFeed.dSettleMs, Q => s_bSettleQ, ET => s_dSettleEt);
     fb_tFull(IN := s_bFullIn, PT := io_stFeed.dFeedFullMs, Q => s_bFullQ, ET => s_dFullEt);
     fb_tEmpty(IN := s_bEmptyIn, PT := io_stFeed.dFeedEmptyMs, Q => s_bEmptyQ, ET => s_dEmptyEt);
     fb_tF90(IN := s_bF90In, PT := io_stFeed.dEyeAlarmMs, Q => s_bF90Q, ET => s_dF90Et);
     fb_tF91(IN := s_bF91In, PT := io_stFeed.dEyeAlarmMs, Q => s_bF91Q, ET => s_dF91Et);
     fb_trPickDone(IN := io_stIo.bGluePickDone, Q => s_bPickDoneEdge);
+    END_REGION
 
-    (* ============ 2. 派生量 ============ *)
+    REGION 01_Derived 派生量
     s_bHold := io_stBridge.bHoldFeeder;
     // 组框机安全异常 (联机 ∧ 通讯正常 ∧ 对方安全异常): 禁止 X2 定位与转移 (R-EXT-03)
     s_bBlock := io_stExt.bLinkMode AND (NOT io_stExt.bLinkFail) AND io_stExt.bPeerSafetyFault;
@@ -131,8 +132,9 @@ BEGIN
     IF (s_iStep = STEP_SEND) AND s_bPickDoneEdge THEN
         s_bPickDoneLatch := TRUE;
     END_IF;
+    END_REGION
 
-    (* ============ 3. 步序 ============ *)
+    REGION 02_Sequence 步序
     IF (NOT io_stMachine.bAuto) OR io_stMachine.bFault THEN
         // 非自动或异常停机: 步序回 0, 清 Y44 / Y47 与轴命令
         s_iStep := STEP_HOME;
@@ -235,8 +237,9 @@ BEGIN
             s_bX2Go := FALSE;
         END_CASE;
     END_IF;
+    END_REGION
 
-    (* ============ 4. 轴命令: 自动模式持有, Hold / 组框机异常时 Halt, 离开自动时撤销 ============ *)
+    REGION 03_AxisCommand 轴命令: 自动模式持有, Hold / 组框机异常时 Halt, 离开自动时撤销
     IF io_stMachine.bAuto AND (NOT io_stMachine.bFault) THEN
         s_bAxisOwned := TRUE;
         IF s_bX2Go AND (NOT s_bHold) AND (NOT s_bBlock) THEN
@@ -255,14 +258,16 @@ BEGIN
         io_arrAxis[AX_X2].stHalt.Execute := io_arrAxis[AX_X2].stAbs.Busy;
         s_bAxisOwned := io_stMachine.bFault OR io_arrAxis[AX_X2].stAbs.Busy;
     END_IF;
+    END_REGION
 
-    (* ============ 5. Y47 安全区信号: X2 在 D512 且不在驱动且自动 (与步号无关) ============ *)
+    REGION 04_SafeZoneSignal Y47 安全区信号: X2 在 D512 且不在驱动且自动 (与步号无关)
     io_stFeed.bY47 := s_bAtPick AND (NOT io_arrAxis[AX_X2].stAbs.Busy) AND io_stMachine.bAuto
                       AND (NOT io_stMachine.bFault);
     io_stIo.bQGluePickAllowed := io_stFeed.bY44;
     io_stIo.bQGlueSafeZone := io_stFeed.bY47;
+    END_REGION
 
-    (* ============ 6. 报警触发 ============ *)
+    REGION 05_AlarmTrigger 报警触发
     // F90 / F91: 光电异常 (该侧 X1 送料完成后光电却未全亮), 1 s
     s_bF90In := ((NOT io_stIo.bFeederFrontEye1) OR (NOT io_stIo.bFeederFrontEye2)) AND io_stBridge.abFeedDone[1];
     // 4 根模式一次放满: 组 1 放完后后位光电也应亮
@@ -271,9 +276,11 @@ BEGIN
     io_stFeed.arrTrig[0] := s_bF90Q;
     io_stFeed.arrTrig[1] := s_bF91Q;
     io_stFeed.arrTrig[2] := FALSE;          // F107 取消 (原程序全灭超时自行返回, 不报警); 号保留
+    END_REGION
 
-    (* ============ 7. 状态输出 ============ *)
+    REGION 06_StatusOutput 状态输出
     io_stFeed.iStep := s_iStep;
     io_stFeed.bAtRest := (s_iStep = STEP_HOME) OR (s_iStep = STEP_WAIT_FULL);
+    END_REGION
 
 END_FUNCTION_BLOCK

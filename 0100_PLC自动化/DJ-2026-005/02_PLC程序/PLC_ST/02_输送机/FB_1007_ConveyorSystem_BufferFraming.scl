@@ -54,7 +54,7 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    (* ============ 1. 一键退料 M515: 非自动下上升沿, 4 层重新初始化 ============ *)
+    REGION 01_PurgeRequest 一键退料 M515: 非自动下上升沿, 4 层重新初始化
     fb_trUnload(IN := io_stHmi.bBlinkOpt, Q => s_bUnloadEdge);
     s_bUnloadReq := io_stHmi.bBlinkOpt AND (NOT io_stMachine.bAuto);
 
@@ -237,8 +237,9 @@ BEGIN
         io_stAlarm.arrTrig[F_BASE_LAYER + 24 + s_iK] := io_stConv.astLayer[4].arrTrig[s_iK];
     END_FOR;
     io_stAlarm.arrTrig[F_BASE_STARVE - 3] := io_stConv.astLayer[4].arrTrig[8];
+    END_REGION
 
-    (* ============ 2. 汇总 ============ *)
+    REGION 02_Summary 汇总
     io_stConv.bAllReady := io_stConv.astLayer[1].bReady AND io_stConv.astLayer[2].bReady
                            AND io_stConv.astLayer[3].bReady AND io_stConv.astLayer[4].bReady;
     io_stConv.bAnyRequest := io_stConv.astLayer[1].bRequest OR io_stConv.astLayer[2].bRequest
@@ -250,4 +251,5 @@ BEGIN
     IF s_bUnloadReq AND io_stConv.bAllReady AND (NOT s_bUnloadEdge) THEN
         io_stHmi.bBlinkOpt := FALSE;
     END_IF;
+    END_REGION
 END_FUNCTION_BLOCK
