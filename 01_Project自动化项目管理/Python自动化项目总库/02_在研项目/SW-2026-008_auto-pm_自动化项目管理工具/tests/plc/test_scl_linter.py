@@ -454,3 +454,9 @@ def test_array_bounds_split_over_lines_with_lower_bound_one_are_fine() -> None:
 
 def test_closed_array_on_the_line_is_checked_even_when_a_second_one_continues_on_the_next_line() -> None:
     assert _array_rules("    s_arrA : STRUCT a : ARRAY[0..3] OF INT; b : ARRAY[\n  1..2] OF INT; END_STRUCT;") == [(3, "LSP-905-ARRAY-LOWER-BOUND", "ERROR")]
+
+
+def test_state_is_cleared_after_a_multiline_array_closes() -> None:
+    body = "    s_arrA : ARRAY[\n        0..9\n    ] OF INT;\n    s_iX : INT;\n    s_arrB : ARRAY[0..2] OF INT;\n    s_arrC : ARRAY[1..2] OF INT;"
+    # 只有第 3 行（多行数组起始行）和第 7 行（单行数组）各报一次；中间的普通变量和后面合法数组不受拼接状态影响
+    assert _array_rules(body) == [(3, "LSP-905-ARRAY-LOWER-BOUND", "ERROR"), (7, "LSP-905-ARRAY-LOWER-BOUND", "ERROR")]
