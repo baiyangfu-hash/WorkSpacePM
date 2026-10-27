@@ -42,7 +42,7 @@ changelog:
 
 > 版本：V1.5.1
 > 状态：已验证（§4.4 ENUM 为新增语法，待本机插件与目标平台验证，验证前不得用于交付）
-> 更新日期：2026-10-26
+> 更新日期：2026-10-27
 > 适用环境：Siemens LSP (VS Code)、TIA Portal、CODESYS、GX Works
 
 ---
