@@ -69,7 +69,7 @@ BEGIN
     io_stHmi.bSingleSend := io_stExt.bSingle;
     END_REGION
 
-    REGION 04_LocalSafetyFault 本机安全异常 -> 组框机 (R5000.0 / Y45 / Y46)
+    REGION 04_LocalSafetyFault 本机安全异常送组框机 (R5000.0 / Y45 / Y46)
     s_bLocalSafety := FALSE;
     FOR s_iI := IDX_F0 TO IDX_F8 DO
         IF io_stAlarm.arrLatch[s_iI] THEN
