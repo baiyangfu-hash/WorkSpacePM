@@ -15,8 +15,7 @@ from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.application.core.execution_recovery_status import judge_started_process
-from auto_pm.infrastructure import process_probe
+from auto_pm.application.core.execution_recovery_status import inspect_started_process
 
 
 @click.command(name="recover-status")
@@ -31,9 +30,7 @@ def recover_status_pm(ctx: click.Context, operation_id: str) -> None:
         receipt, run, evidence = service.resolve_started_run(operation_id)
     except ContinuityExecutionError as error:
         raise click.ClickException(f"运行身份不可恢复，必须 BLOCKED/待恢复：{error}") from error
-    observation = process_probe.observe(evidence.process_id)
-    created_at = process_probe.start_time_to_datetime(observation.start_time) if observation is not None else None
-    status = judge_started_process(evidence, observation, created_at)
+    status, created_at = inspect_started_process(evidence)
     click.echo(
         json.dumps(
             {

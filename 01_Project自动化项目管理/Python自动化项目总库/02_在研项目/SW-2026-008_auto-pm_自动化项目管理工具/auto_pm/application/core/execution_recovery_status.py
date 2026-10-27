@@ -14,6 +14,7 @@ from enum import Enum
 
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.contracts.lease_reclaim import ProcessObservation
+from auto_pm.infrastructure import process_probe
 
 # Clock and tick rounding between the process table and the executor's own timestamp.
 START_SKEW = timedelta(seconds=2)
@@ -50,3 +51,11 @@ def judge_started_process(
     if created_at > evidence.started_at + START_SKEW:
         return RecoveryStatus(RecoveryVerdict.PID_REUSED, "该进程号现在属于更晚创建的进程，原执行进程已不在")
     return RecoveryStatus(RecoveryVerdict.ALIVE, "进程仍在运行，创建时刻不晚于记录的启动时刻")
+
+
+def inspect_started_process(evidence: ExecutionStartEvidence) -> tuple[RecoveryStatus, datetime | None]:
+    """Observe the recorded executor process on this host and judge it; also returns the creation time that was read (``None`` if unavailable)."""
+
+    observation = process_probe.observe(evidence.process_id)
+    created_at = process_probe.start_time_to_datetime(observation.start_time) if observation is not None else None
+    return judge_started_process(evidence, observation, created_at), created_at
