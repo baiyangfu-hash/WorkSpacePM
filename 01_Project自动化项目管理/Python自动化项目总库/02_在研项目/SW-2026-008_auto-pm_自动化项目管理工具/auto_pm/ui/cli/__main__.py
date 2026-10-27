@@ -68,7 +68,6 @@ from auto_pm.cli.pr import pr_group  # noqa: E402
 from auto_pm.cli.project import project_group  # noqa: E402
 from auto_pm.cli.prototype import prototype_cmd  # noqa: E402
 from auto_pm.cli.python import python_group  # noqa: E402
-from auto_pm.cli.role import role_group  # noqa: E402
 from auto_pm.cli.session import pm_session_group  # noqa: E402
 from auto_pm.cli.spec import spec_group  # noqa: E402
 from auto_pm.cli.template import template_group  # noqa: E402
@@ -77,6 +76,7 @@ from auto_pm.cli.workflow import workflow_group  # noqa: E402
 from auto_pm.cli.worktree import worktree_group  # noqa: E402
 from auto_pm.infrastructure.continuity_store import ContinuityStoreSchemaError  # noqa: E402
 from auto_pm.ui.cli.implementation_card import implementation_card_group  # noqa: E402
+from auto_pm.ui.cli.role import role_group  # noqa: E402
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 

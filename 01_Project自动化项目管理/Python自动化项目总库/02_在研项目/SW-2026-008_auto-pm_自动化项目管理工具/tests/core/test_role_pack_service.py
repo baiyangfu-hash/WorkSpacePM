@@ -220,9 +220,8 @@ def _real_workspace() -> Path | None:
 
 def test_shipped_packs_pass_and_match_old_skills() -> None:
     workspace = _real_workspace()
+    assert workspace is not None, "测试必须在完整工作区里跑：找不到 .trae/skills 与规范库"
     result = RolePackService(default_roles_dir(), workspace).check()
     assert result.roles == ["engineer-plc", "engineer-python", "product-pm"]
-    assert result.ok, [vars(item) for item in result.findings]
-    if workspace is not None:
-        # In a full workspace nothing may stay unverified: the registry and the old skills were both read.
-        assert result.findings == []
+    # Nothing may stay unverified: the registry and the old skills were both read.
+    assert result.findings == [], [vars(item) for item in result.findings]
