@@ -59,6 +59,9 @@ class SclLinter:
     HASH_REGION_PATTERN = re.compile(r"^\s*#\s*(?:END_?REGION|REGION)\b", re.IGNORECASE)
     REGION_OPEN_PATTERN = re.compile(r"^\s*REGION\b", re.IGNORECASE)
     REGION_CLOSE_PATTERN = re.compile(r"^\s*END_REGION\b", re.IGNORECASE)
+    # 控制结构的开头/结尾记号（END_IF 等里的 IF 前面是下划线，\b 不会误认；ELSIF 同理）
+    STRING_LITERAL_PATTERN = re.compile(r"'(?:[^']|'')*'")
+    BLOCK_TOKEN_PATTERN = re.compile(r"\b(END_)?(IF|CASE|FOR|WHILE)\b", re.IGNORECASE)
 
     # 结构完整性：每个源文件至少有一个程序块或类型声明，且每个声明都有配对的 END_*（插件命令行对空文件与乱码单文件也报 0 诊断，由这里补）
     STRUCT_KEYWORDS = ("ORGANIZATION_BLOCK", "FUNCTION_BLOCK", "FUNCTION", "DATA_BLOCK", "TYPE")
@@ -99,6 +102,7 @@ class SclLinter:
         in_multiline_comment = False
         code_lines: list[str] = []
         region_open_lines: list[int] = []
+        block_stack: list[tuple[str, int]] = []  # (IF/CASE/FOR/WHILE/REGION, 开头所在行)，REGION 与控制结构必须整段嵌套
 
         for line_idx, line in enumerate(lines, start=1):
             stripped = line.strip()
@@ -220,6 +224,9 @@ class SclLinter:
                             code_snippet=stripped,
                         )
                     )
+
+            if not cls.HASH_REGION_PATTERN.match(code_part):
+                cls._track_region_nesting(code_part, stripped, line_idx, block_stack, report)
 
             if cls.TIMER_MISSING_Q_PATTERN.search(code_part):
                 report.violations.append(
@@ -440,6 +447,65 @@ class SclLinter:
         report.warnings_count = sum(1 for v in report.violations if v.severity == "WARNING")
 
         return report
+
+    @classmethod
+    def _track_region_nesting(
+        cls,
+        code_part: str,
+        stripped: str,
+        line_idx: int,
+        block_stack: list[tuple[str, int]],
+        report: SclLintReport,
+    ) -> None:
+        """REGION 与 IF/CASE/FOR/WHILE 必须整段嵌套：REGION 的开头或结尾不能落在一个控制结构中间（反过来也不行）。"""
+        if cls.REGION_OPEN_PATTERN.match(code_part):
+            block_stack.append(("REGION", line_idx))
+            return
+        if cls.REGION_CLOSE_PATTERN.match(code_part):
+            cls._close_block("REGION", stripped, line_idx, block_stack, report)
+            return
+        without_strings = cls.STRING_LITERAL_PATTERN.sub("''", code_part)  # 报警文本里的 'WAITING FOR PART' 不是结构
+        for match in cls.BLOCK_TOKEN_PATTERN.finditer(without_strings):
+            kind = match.group(2).upper()
+            if match.group(1):
+                cls._close_block(kind, stripped, line_idx, block_stack, report)
+            else:
+                block_stack.append((kind, line_idx))
+
+    @classmethod
+    def _close_block(
+        cls,
+        kind: str,
+        stripped: str,
+        line_idx: int,
+        block_stack: list[tuple[str, int]],
+        report: SclLintReport,
+    ) -> None:
+        if not block_stack or block_stack[-1][0] == kind:
+            if block_stack:
+                block_stack.pop()
+            return
+        positions = [i for i, (name, _) in enumerate(block_stack) if name == kind]
+        if positions:
+            # 栈顶不是要关的那个：中间夹着没关的东西，REGION 与控制结构交叉
+            opener_index = positions[-1]
+            crossing = block_stack[opener_index + 1 :]
+            involves_region = kind == "REGION" or any(name == "REGION" for name, _ in crossing)
+            if involves_region:
+                names = "、".join(f"{name}（第 {at} 行）" for name, at in crossing)
+                report.violations.append(
+                    SclViolation(
+                        line_number=line_idx,
+                        rule_id="LSP-905-REGION-CROSS-BLOCK",
+                        severity="ERROR",
+                        message=(
+                            f"END_{kind} 与 {names} 交叉：REGION 的开头和结尾必须在同一个 IF/CASE/FOR/WHILE 结构的同一层里，"
+                            "不能切开结构（LSP-905 §6.3）"
+                        ),
+                        code_snippet=stripped,
+                    )
+                )
+            del block_stack[opener_index:]
 
     @classmethod
     def _is_legacy_array_lower_bound(cls, file_path: str, code_part: str) -> bool:

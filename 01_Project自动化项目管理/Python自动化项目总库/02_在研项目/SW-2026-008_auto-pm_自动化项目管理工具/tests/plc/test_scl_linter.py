@@ -347,3 +347,81 @@ def test_lowercase_region_opener_is_paired_and_hash_inside_block_comment_is_igno
     assert _region_rules("    region 01_a\n        s_iStep := 1;\n    END_REGION") == []
     assert _region_rules("    region 01_a\n        s_iStep := 1;") == ["LSP-905-REGION-UNBALANCED"]
     assert _region_rules("    (*\n    #REGION old\n    #END_REGION\n    *)\n    s_iStep := 1;") == []
+
+
+def _cross(body: str) -> list[str]:
+    return [r for r in _region_rules(body) if r == "LSP-905-REGION-CROSS-BLOCK"]
+
+
+def test_region_fully_inside_or_around_control_structures_is_fine() -> None:
+    inside = "    IF s_iStep = 1 THEN\n        REGION 01_a\n            s_iStep := 2;\n        END_REGION\n    END_IF;"
+    around = "    REGION 01_a\n        IF s_iStep = 1 THEN\n            s_iStep := 2;\n        END_IF;\n    END_REGION"
+    case = (
+        "    REGION 01_a\n        CASE s_iStep OF\n            1:\n                REGION 02_b\n"
+        "                    s_iStep := 2;\n                END_REGION\n            ELSE\n                s_iStep := 0;\n"
+        "        END_CASE;\n    END_REGION"
+    )
+    loops = "    REGION 01_a\n        FOR s_iStep := 1 TO 3 DO\n            s_iStep := s_iStep;\n        END_FOR;\n    END_REGION"
+    for body in (inside, around, case, loops):
+        assert _cross(body) == [], body
+
+
+def test_region_end_inside_an_if_is_rejected() -> None:
+    body = "    REGION 01_a\n        IF s_iStep = 1 THEN\n            s_iStep := 2;\n    END_REGION\n    END_IF;"
+    assert _cross(body) == ["LSP-905-REGION-CROSS-BLOCK"]
+
+
+def test_region_start_inside_an_if_that_ends_before_the_region_is_rejected() -> None:
+    body = "    IF s_iStep = 1 THEN\n        REGION 01_a\n            s_iStep := 2;\n    END_IF;\n    END_REGION"
+    assert _cross(body) == ["LSP-905-REGION-CROSS-BLOCK"]
+
+
+def test_region_cut_through_a_case_is_rejected() -> None:
+    body = (
+        "    REGION 01_a\n        CASE s_iStep OF\n            1:\n                s_iStep := 2;\n"
+        "            ELSE\n                s_iStep := 0;\n    END_REGION\n        END_CASE;"
+    )
+    assert _cross(body) == ["LSP-905-REGION-CROSS-BLOCK"]
+
+
+def test_same_depth_but_different_structures_is_still_a_crossing() -> None:
+    body = (
+        "    IF s_iStep = 1 THEN\n        REGION 01_a\n            s_iStep := 2;\n    END_IF;\n"
+        "    IF s_iStep = 3 THEN\n        END_REGION\n        s_iStep := 4;\n    END_IF;"
+    )
+    assert "LSP-905-REGION-CROSS-BLOCK" in _cross(body)
+
+
+def test_keywords_in_region_names_comments_and_longer_words_do_not_count() -> None:
+    body = (
+        "    REGION 01_If_Case_For 处理 IF 和 CASE\n        // IF in a comment\n        s_iElsif := 1;\n"
+        "    END_REGION"
+    )
+    assert _cross(body) == []
+
+
+def test_keywords_inside_string_literals_do_not_count() -> None:
+    body = (
+        "    REGION 01_a\n        s_sMsg := 'IF x THEN';\n        s_sMsg := 'WAITING FOR PART';\n"
+        "        s_sMsg := 'it''s a CASE OF WHILE';\n    END_REGION"
+    )
+    assert _cross(body) == []
+
+
+def test_region_cut_through_for_and_while_is_rejected() -> None:
+    for_body = "    REGION 01_a\n        FOR s_iStep := 1 TO 3 DO\n            s_iStep := 2;\n    END_REGION\n        END_FOR;"
+    while_body = "    REGION 01_a\n        WHILE s_iStep < 3 DO\n            s_iStep := 2;\n    END_REGION\n        END_WHILE;"
+    assert _cross(for_body) == ["LSP-905-REGION-CROSS-BLOCK"]
+    assert _cross(while_body) == ["LSP-905-REGION-CROSS-BLOCK"]
+
+
+def test_lowercase_keywords_are_recognized_when_a_region_cuts_a_structure() -> None:
+    body = "    region 01_a\n        if s_iStep = 1 then\n            s_iStep := 2;\n    end_region\n        end_if;"
+    assert _cross(body) == ["LSP-905-REGION-CROSS-BLOCK"]
+
+
+def test_one_crossing_is_reported_once_and_the_next_region_is_judged_on_its_own() -> None:
+    cut = "    REGION 01_a\n        IF s_iStep = 1 THEN\n            s_iStep := 2;\n    END_REGION\n        END_IF;\n"
+    good = "    REGION 02_b\n        IF s_iStep = 3 THEN\n            s_iStep := 4;\n        END_IF;\n    END_REGION"
+    assert _cross(cut + good) == ["LSP-905-REGION-CROSS-BLOCK"]
+    assert _cross(good + "\n" + cut) == ["LSP-905-REGION-CROSS-BLOCK"]
