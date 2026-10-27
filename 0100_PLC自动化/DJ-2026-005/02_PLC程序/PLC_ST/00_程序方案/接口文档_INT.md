@@ -90,7 +90,7 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 
 字段与原软元件对应关系见第 7 节，此处只列字段名：
 
-`bManual, bAutoRun, bStop, bPause, bMute, bPrepareKey, bTeach[1..6], bJog[1..6], bSpeedUp[1..3], bSpeedDown[1..3], bPosX1[1..4], bPosX2[1..2], bGripRelease, bLiftUp, bLiftDown, bConvForce[0..20], bFeedBtn[1..4], bAutoSpeedUp, bAutoSpeedDown, bSingleSend(M510 回读), bLinkMode(M501), bContinuousSend(M502), rManualSpeed[1..3], rAutoSpeed, iAlarmNo, iDeviceState`。
+`bManual, bAutoRun, bStop, bPause, bMute, bPrepareKey, bTeach[1..6], bJog[1..6], bSpeedUp[1..3], bSpeedDown[1..3], bPosX1[1..4], bPosX2[1..2], bGripRelease, bLiftUp, bLiftDown, bConvForce[1..21], bFeedBtn[1..4], bAutoSpeedUp, bAutoSpeedDown, bSingleSend(M510 回读), bLinkMode(M501), bContinuousSend(M502), rManualSpeed[1..3], rAutoSpeed, iAlarmNo, iDeviceState`。
 
 ### 4.4 `ST_Io`
 
@@ -130,7 +130,7 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | | `iStep` | INT | 出 | 当前步（供 HMI / 测试） |
 | | `bAtRest` | BOOL | 出 | 静止点（步 0），停止收尾判断用（2026-10-24 编码时补） |
 | 双向 | `bUnload` | BOOL | 进出 | 退料（原 `VAR_IN_OUT 退料`） |
-| 报警触发 | `arrTrig[0..8]` | ARRAY OF BOOL | 出 | 8 个气缸位置报警触发 + 1 个缺料触发，由 FB_1007 映射到 F 号（第 9 节） |
+| 报警触发 | `arrTrig[1..9]` | ARRAY OF BOOL | 出 | 8 个气缸位置报警触发 + 1 个缺料触发，由 FB_1007 映射到 F 号（第 9 节） |
 
 ### 4.6 `ST_PickPlace`
 
@@ -158,7 +158,7 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | `rPosTol` | REAL | 位置判定容差（脉冲，待现场整定） |
 | `dSettleMs, dClampTimeoutMs, dCylTimeoutMs` | DINT | 窗口 500、夹紧超时 5000（F106）、气缸位置报警 5000 |
 | `bGripOpenReq, bLiftUpReq, bLiftDownReq` | BOOL | 回原点 / 准备 / 手动对夹爪、升降缸的要求（FB_2002 汇入；Y40~Y43 只由 FB_1003 写） |
-| 报警触发 | `arrTrig[0..15]` | BOOL | [0..3] F30~F33，[4..11] F66~F73，[12..13] F74~F75，[14] F106，[15] 预留 |
+| 报警触发 | `arrTrig[1..16]` | BOOL | [1..4] F30~F33，[5..12] F66~F73，[13..14] F74~F75，[15] F106，[16] 预留 |
 
 > 传感器直接读 `stIo`（不再复制进本结构体）：夹紧 / 松开位 X64~X67、X124~X127，升降缸 X70 / X71，产品检测 X60~X63。
 
@@ -178,7 +178,7 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | `rAutoSpeed` | REAL | 自动速度 D600（FB_2002 由取放料同步） |
 | `rPosTol` | REAL | 位置判定容差（脉冲，待现场整定） |
 | `dSettleMs, dFeedFullMs, dFeedEmptyMs, dEyeAlarmMs` | DINT | 窗口 500、光电全亮 10000、光电全灭持续超时 10000（与 X102 二选一返回）、光电异常 1000 |
-| `arrTrig[0..4]` | BOOL | [0] F90，[1] F91，[2] F107（已取消，恒 FALSE），[3..4] 预留；F22 / F23（X2 极限）由 FB_1001 直接写 |
+| `arrTrig[1..5]` | BOOL | [1] F90，[2] F91，[3] F107（已取消，恒 FALSE），[4..5] 预留；F22 / F23（X2 极限）由 FB_1001 直接写 |
 
 > 4 个小车光电 X72~X75 直接读 `stIo`。步 3 的 X102（取料完成）上升沿在步内锁存。
 
@@ -194,14 +194,14 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | `bPeerPermit` | BOOL | 组框机 → 本机：允许送料 | R5011.0 |
 | `bLinkFail` | BOOL | 通讯异常 | SB49 ∨ SB6A ∨ SB0A1 |
 | `bY45, bY46` | BOOL | 组框机暂停 / 急停输出 | Y45/Y46 |
-| `arrTrig[0..1]` | BOOL | F104、F105 |
+| `arrTrig[1..2]` | BOOL | [1] F104、[2] F105 |
 
 ### 4.9 `ST_Alarm`
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `arrTrig` | `ARRAY[0..127] OF BOOL` | 各机构每扫描写入触发（一位一写） |
-| `arrLatch` | `ARRAY[0..127] OF BOOL` | 自保持输出 |
+| `arrTrig` | `ARRAY[1..128] OF BOOL` | 各机构每扫描写入触发（一位一写），下标 = F 号 + 1 |
+| `arrLatch` | `ARRAY[1..128] OF BOOL` | 自保持输出，下标 = F 号 + 1 |
 | `bReset` | BOOL | 复位键（X100）上升沿 |
 | `bFault` | BOOL | 任一 A 类 → M8 |
 | `bAny` | BOOL | 任一非提示类 |
@@ -213,7 +213,7 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 ### 4.10 `ST_HomePrepare` / `ST_Manual` / `ST_Bridge`
 
 - `ST_HomePrepare`：`iHomeStep, iPrepStep, bPreprocessDone, bAxisInitDone, bHomeDoneZ, bHomeDoneX1, bHomeDoneX2, bPrepareDone, bInitReqConv, bReleaseGripperLock, bGripOpenCmd, bLiftDownCmd, dPrepZDelayMs(300), dPrepX1DelayMs(500), dPrepX2DelayMs(1000)`。
-- `ST_Manual`：`bJogLockZ/X1/X2`（轴禁止 = 该轴伺服报警）、`abForce[0..20]`（输送强制位，已按模式 / 安全区放行）、`bTeachWrite[1..6]`、`bGripOpenCmd, bLiftUpCmd, bLiftDownCmd`、`arrTrig[0..1]`（保留）。
+- `ST_Manual`：`bJogLockZ/X1/X2`（轴禁止 = 该轴伺服报警）、`abForce[1..21]`（输送强制位，已按模式 / 安全区放行）、`bTeachWrite[1..6]`、`bGripOpenCmd, bLiftUpCmd, bLiftDownCmd`、`arrTrig[1..2]`（保留）。
 - `ST_Bridge`：第 6 节全部中继信号。
 
 ## 5. FB 接口（`VAR_IN_OUT` 整体传递）
@@ -275,7 +275,7 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | X2 定位 | M166 / M167 | `bPosX2[1..2]` | D512 / D522 |
 | 示教 | M61~M66 | `bTeach[1..6]` | |
 | 夹爪松开（新增） | M67 | `bGripRelease` | |
-| 输送强制 | M70~M90（M80 除外） | `bConvForce[0..20]` | 阻挡 / 分料 / 正反转 / 慢速 |
+| 输送强制 | M70~M90（M80 除外） | `bConvForce[1..21]` | 阻挡 / 分料 / 正反转 / 慢速 |
 | 上料按钮 | M250~M253 | `bFeedBtn[1..4]` | |
 | 自动速度加减 | M700 / M701 | `bAutoSpeedUp/Down` | |
 | 送框模式 | M501 / M502 | `bLinkMode / bContinuousSend` | |

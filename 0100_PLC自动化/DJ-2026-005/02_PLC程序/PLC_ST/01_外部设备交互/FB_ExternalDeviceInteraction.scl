@@ -41,10 +41,10 @@ VAR
 END_VAR
 
 VAR CONSTANT
-    IDX_F0              : INT := 0;
-    IDX_F8              : INT := 8;
-    IDX_F104            : INT := 104;
-    IDX_F105            : INT := 105;
+    IDX_F0              : INT := 1;           // 下标 = F 号 + 1
+    IDX_F8              : INT := 9;
+    IDX_F104            : INT := 105;
+    IDX_F105            : INT := 106;
 END_VAR
 
 BEGIN
@@ -81,10 +81,10 @@ BEGIN
 
     REGION 05_UpstreamFault 组框机安全异常 / 通讯异常
     s_bPeerFault := io_stExt.bLinkMode AND (NOT io_stExt.bLinkFail) AND io_stExt.bPeerSafetyFault;
-    io_stExt.arrTrig[0] := s_bPeerFault;                                    // F104 (A 类)
-    io_stExt.arrTrig[1] := io_stExt.bLinkMode AND io_stExt.bLinkFail;       // F105 (提示)
-    io_stAlarm.arrTrig[IDX_F104] := io_stExt.arrTrig[0];
-    io_stAlarm.arrTrig[IDX_F105] := io_stExt.arrTrig[1];
+    io_stExt.arrTrig[1] := s_bPeerFault;                                    // F104 (A 类)
+    io_stExt.arrTrig[2] := io_stExt.bLinkMode AND io_stExt.bLinkFail;       // F105 (提示)
+    io_stAlarm.arrTrig[IDX_F104] := io_stExt.arrTrig[1];
+    io_stAlarm.arrTrig[IDX_F105] := io_stExt.arrTrig[2];
     END_REGION
 
     REGION 06_OutputMapping 输出 Y45 / Y46: 组框机安全异常 或 本机安全异常

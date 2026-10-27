@@ -73,7 +73,7 @@
 | bGripRelease | BOOL | 夹爪松开 (M67, 新增) |
 | bLiftUp | BOOL | 升降缸上升 (新增, 待 HMI 核对) |
 | bLiftDown | BOOL | 升降缸下降 (新增, 待 HMI 核对) |
-| bConvForce | ARRAY[0..20] OF BOOL | 输送强制位 M70~M90 (M80 除外) |
+| bConvForce | ARRAY[1..21] OF BOOL | 输送强制位 M70~M90 (M80 除外), 下标 = 位置 + 1 |
 | bFeedBtn | ARRAY[1..4] OF BOOL | 上料按钮 M250~M253 |
 | bAutoSpeedUp | BOOL | 自动速度加 (M700) |
 | bAutoSpeedDown | BOOL | 自动速度减 (M701) |
@@ -275,7 +275,7 @@
 | bLinkFail | BOOL | 通讯异常 (SB49 / SB6A / SB0A1 合并, 平台写入) |
 | bY45 | BOOL | 组框机暂停输出 (Y45) |
 | bY46 | BOOL | 组框机急停输出 (Y46) |
-| arrTrig | ARRAY[0..1] OF BOOL | [0] F104 组框机安全异常, [1] F105 通讯异常 |
+| arrTrig | ARRAY[1..2] OF BOOL | [1] F104 组框机安全异常, [2] F105 通讯异常 |
 
 ### ST_ConveyorSystem（结构体）
 
@@ -320,7 +320,7 @@
 | bAtRest | BOOL | 静止点 (步 0), 供停止收尾判断 |
 | iStep | INT | 当前步 (供 HMI / 测试) |
 | bUnload | BOOL | 退料 (HMI 置位, 4 层准备完成后由 FB_1007 清除) |
-| arrTrig | ARRAY[0..8] OF BOOL | 报警触发: [0..7] 气缸位置 (F34 起, 每层 +8), [8] 缺料 (F103 起, 每高一层 -1) |
+| arrTrig | ARRAY[1..9] OF BOOL | 报警触发: [1..8] 气缸位置 (F34 起, 每层 +8), [9] 缺料 (F103 起, 每高一层 -1) |
 
 ### ST_PickGroup（结构体）
 
@@ -363,7 +363,7 @@
 | bGripOpenReq | BOOL | 要求松开夹爪 (回原点 / 准备 / 手动) |
 | bLiftUpReq | BOOL | 要求升降缸上升 (手动) |
 | bLiftDownReq | BOOL | 要求升降缸下降 (回原点 / 准备 / 手动) |
-| arrTrig | ARRAY[0..15] OF BOOL | 报警触发: [0..3] F30~F33, [4..11] F66~F73, [12..13] F74~F75, [14] F106, [15] 预留 |
+| arrTrig | ARRAY[1..16] OF BOOL | 报警触发: [1..4] F30~F33, [5..12] F66~F73, [13..14] F74~F75, [15] F106, [16] 预留 |
 
 ### ST_Feeder（结构体）
 
@@ -384,14 +384,14 @@
 | dFeedFullMs | DINT | 4 光电全亮计时 (步 1) |
 | dFeedEmptyMs | DINT | 光电全灭持续超时, 与 X102 二选一返回 |
 | dEyeAlarmMs | DINT | 光电异常报警 (F90 / F91) |
-| arrTrig | ARRAY[0..4] OF BOOL | 报警触发: [0] F90, [1] F91, [2] F107 已取消, [3..4] 预留 |
+| arrTrig | ARRAY[1..5] OF BOOL | 报警触发: [1] F90, [2] F91, [3] F107 已取消, [4..5] 预留 |
 
 ### ST_Alarm（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| arrTrig | ARRAY[0..127] OF BOOL | 各机构每扫描写入的触发 (一位一写) |
-| arrLatch | ARRAY[0..127] OF BOOL | 自保持输出 |
+| arrTrig | ARRAY[1..128] OF BOOL | 各机构每扫描写入的触发 (一位一写), 下标 = F 号 + 1 |
+| arrLatch | ARRAY[1..128] OF BOOL | 自保持输出, 下标 = F 号 + 1 |
 | bReset | BOOL | 复位键 (X100) 上升沿, 一拍 |
 | bFault | BOOL | 任一 A 类锁存 (-> M8) |
 | bAny | BOOL | 任一非提示类锁存 |
@@ -433,9 +433,9 @@
 | bJogLockZ | BOOL | Z 轴点动禁止 |
 | bJogLockX1 | BOOL | X1 轴点动禁止 |
 | bJogLockX2 | BOOL | X2 轴点动禁止 |
-| abForce | ARRAY[0..20] OF BOOL | 输送强制位 (已按条件放行) |
+| abForce | ARRAY[1..21] OF BOOL | 输送强制位 (已按条件放行), 下标 = 位置 + 1 |
 | bTeachWrite | ARRAY[1..6] OF BOOL | 示教写入脉冲 |
 | bGripOpenCmd | BOOL | 手动夹爪松开命令 |
 | bLiftUpCmd | BOOL | 手动升降缸上升命令 |
 | bLiftDownCmd | BOOL | 手动升降缸下降命令 |
-| arrTrig | ARRAY[0..1] OF BOOL | 报警触发 (保留) |
+| arrTrig | ARRAY[1..2] OF BOOL | 报警触发 (保留) |

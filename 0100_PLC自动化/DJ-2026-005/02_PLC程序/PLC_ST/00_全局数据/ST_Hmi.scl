@@ -26,7 +26,7 @@ STRUCT
     bGripRelease            : BOOL;     // 夹爪松开 (M67, 新增)
     bLiftUp                 : BOOL;     // 升降缸上升 (新增, 待 HMI 核对)
     bLiftDown               : BOOL;     // 升降缸下降 (新增, 待 HMI 核对)
-    bConvForce              : ARRAY[0..20] OF BOOL;     // 输送强制位 M70~M90 (M80 除外)
+    bConvForce              : ARRAY[1..21] OF BOOL;     // 输送强制位 M70~M90 (M80 除外), 下标 = 位置 + 1
     bFeedBtn                : ARRAY[1..4] OF BOOL;      // 上料按钮 M250~M253
     bAutoSpeedUp            : BOOL;     // 自动速度加 (M700)
     bAutoSpeedDown          : BOOL;     // 自动速度减 (M701)

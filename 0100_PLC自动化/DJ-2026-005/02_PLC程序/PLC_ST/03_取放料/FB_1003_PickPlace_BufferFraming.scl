@@ -526,21 +526,21 @@ BEGIN
     // F74 / F75: 升降缸上升 / 下降命令后上位 / 下位未到
     s_bF74In := io_stPP.bLiftUp AND (NOT io_stIo.bPPLiftUp);
     s_bF75In := io_stPP.bLiftDown AND (NOT io_stIo.bPPLiftDown);
-    io_stPP.arrTrig[0] := s_bF30Q;
-    io_stPP.arrTrig[1] := s_bF31Q;
-    io_stPP.arrTrig[2] := s_bF32Q;
-    io_stPP.arrTrig[3] := s_bF33Q;
-    io_stPP.arrTrig[4] := s_bF66Q;
-    io_stPP.arrTrig[5] := s_bF67Q;
-    io_stPP.arrTrig[6] := s_bF68Q;
-    io_stPP.arrTrig[7] := s_bF69Q;
-    io_stPP.arrTrig[8] := s_bF70Q;
-    io_stPP.arrTrig[9] := s_bF71Q;
-    io_stPP.arrTrig[10] := s_bF72Q;
-    io_stPP.arrTrig[11] := s_bF73Q;
-    io_stPP.arrTrig[12] := s_bF74Q;
-    io_stPP.arrTrig[13] := s_bF75Q;
-    io_stPP.arrTrig[14] := s_bClampQ;       // F106 夹紧超时 (只报警, 停在 S22 等待)
+    io_stPP.arrTrig[1] := s_bF30Q;
+    io_stPP.arrTrig[2] := s_bF31Q;
+    io_stPP.arrTrig[3] := s_bF32Q;
+    io_stPP.arrTrig[4] := s_bF33Q;
+    io_stPP.arrTrig[5] := s_bF66Q;
+    io_stPP.arrTrig[6] := s_bF67Q;
+    io_stPP.arrTrig[7] := s_bF68Q;
+    io_stPP.arrTrig[8] := s_bF69Q;
+    io_stPP.arrTrig[9] := s_bF70Q;
+    io_stPP.arrTrig[10] := s_bF71Q;
+    io_stPP.arrTrig[11] := s_bF72Q;
+    io_stPP.arrTrig[12] := s_bF73Q;
+    io_stPP.arrTrig[13] := s_bF74Q;
+    io_stPP.arrTrig[14] := s_bF75Q;
+    io_stPP.arrTrig[15] := s_bClampQ;       // F106 夹紧超时 (只报警, 停在 S22 等待)
     END_REGION
 
     REGION 08_StatusOutput 状态输出

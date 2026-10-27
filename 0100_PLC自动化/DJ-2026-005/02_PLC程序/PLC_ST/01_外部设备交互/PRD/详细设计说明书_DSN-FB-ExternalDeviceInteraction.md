@@ -21,6 +21,6 @@
 
 1. `FB_R_TRIG / FB_F_TRIG` 取允许送料的上升 / 下降沿。
 2. 本机安全异常 = F0~F8 任一锁存；Y45 与 Y46 目前同一条件（本机安全异常 或 组框机安全异常）。
-3. F104 / F105 触发同时写 `stExt.arrTrig` 与 `stAlarm.arrTrig[104 / 105]`。
+3. F104 / F105 触发同时写 `stExt.arrTrig` 与 `stAlarm.arrTrig[105 / 106]`（下标 = F 号 + 1）。
 
 ### 源码头部说明

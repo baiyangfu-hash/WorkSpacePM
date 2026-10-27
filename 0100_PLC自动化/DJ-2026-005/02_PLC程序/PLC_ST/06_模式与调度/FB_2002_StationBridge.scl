@@ -93,15 +93,15 @@ BEGIN
     END_REGION
 
     REGION 07_AlarmRelay 取放料 / 小车报警触发搬入 stAlarm
-    FOR s_iIdx := 0 TO 3 DO
+    FOR s_iIdx := 1 TO 4 DO
         io_stAlarm.arrTrig[30 + s_iIdx] := io_stPP.arrTrig[s_iIdx];         // F30~F33
     END_FOR;
-    FOR s_iIdx := 0 TO 9 DO
+    FOR s_iIdx := 1 TO 10 DO
         io_stAlarm.arrTrig[66 + s_iIdx] := io_stPP.arrTrig[4 + s_iIdx];     // F66~F75
     END_FOR;
-    io_stAlarm.arrTrig[106] := io_stPP.arrTrig[14];                         // F106 夹紧超时
-    io_stAlarm.arrTrig[90] := io_stFeed.arrTrig[0];                         // F90
-    io_stAlarm.arrTrig[91] := io_stFeed.arrTrig[1];                         // F91
-    io_stAlarm.arrTrig[107] := io_stFeed.arrTrig[2];                        // F107
+    io_stAlarm.arrTrig[107] := io_stPP.arrTrig[15];                         // F106 夹紧超时
+    io_stAlarm.arrTrig[91] := io_stFeed.arrTrig[1];                         // F90
+    io_stAlarm.arrTrig[92] := io_stFeed.arrTrig[2];                         // F91
+    io_stAlarm.arrTrig[108] := io_stFeed.arrTrig[3];                        // F107
     END_REGION
 END_FUNCTION_BLOCK
