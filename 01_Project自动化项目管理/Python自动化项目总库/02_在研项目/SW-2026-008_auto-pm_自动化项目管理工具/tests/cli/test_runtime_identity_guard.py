@@ -46,6 +46,7 @@ NOT_WRITE_COMMANDS = frozenset(
         "missions",
         "orient",
         "pending",
+        "recover-status",
         "resume",
         "workflow",
     }

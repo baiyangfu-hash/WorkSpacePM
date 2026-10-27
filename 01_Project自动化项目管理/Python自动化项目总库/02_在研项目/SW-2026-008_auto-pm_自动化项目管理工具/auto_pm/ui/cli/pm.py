@@ -1356,3 +1356,8 @@ pm_group.add_command(missions_pm)
 pm_group.add_command(park_pm)
 pm_group.add_command(unpark_pm)
 pm_group.add_command(switch_pm)
+
+# Read-only restart reconciliation of a started Run's executor process (TD-SW008-074 step 1).
+from auto_pm.ui.cli.pm_recover import recover_status_pm  # noqa: E402
+
+pm_group.add_command(recover_status_pm)
