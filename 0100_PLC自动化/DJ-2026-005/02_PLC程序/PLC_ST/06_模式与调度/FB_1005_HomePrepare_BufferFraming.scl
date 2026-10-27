@@ -115,8 +115,8 @@ BEGIN
     REGION 02_GripCartMaterial F80 / F81: 回原点时夹爪 / 小车有料 (不进 M8, 回原点 Hold)
     s_bF80 := io_stMachine.bHoming AND s_bAnyProd;
     s_bF81 := io_stMachine.bHoming AND s_bAnyEye;
-    io_stAlarm.arrTrig[80] := s_bF80;
-    io_stAlarm.arrTrig[81] := s_bF81;
+    io_stAlarm.arrTrig[81] := s_bF80;
+    io_stAlarm.arrTrig[82] := s_bF81;
     io_stHome.bReleaseGripperLock := s_bF80;        // F80 期间禁止 Z 定位 (取放料读)
     END_REGION
 

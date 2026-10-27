@@ -10,11 +10,11 @@ STRUCT
     bJogLockZ               : BOOL;     // Z 轴点动禁止
     bJogLockX1              : BOOL;     // X1 轴点动禁止
     bJogLockX2              : BOOL;     // X2 轴点动禁止
-    abForce                 : ARRAY[0..20] OF BOOL;     // 输送强制位 (已按条件放行)
+    abForce                 : ARRAY[1..21] OF BOOL;     // 输送强制位 (已按条件放行), 下标 = 位置 + 1
     bTeachWrite             : ARRAY[1..6] OF BOOL;      // 示教写入脉冲
     bGripOpenCmd            : BOOL;     // 手动夹爪松开命令
     bLiftUpCmd              : BOOL;     // 手动升降缸上升命令
     bLiftDownCmd            : BOOL;     // 手动升降缸下降命令
-    arrTrig                 : ARRAY[0..1] OF BOOL;      // 报警触发 (保留)
+    arrTrig                 : ARRAY[1..2] OF BOOL;      // 报警触发 (保留)
 END_STRUCT
 END_TYPE

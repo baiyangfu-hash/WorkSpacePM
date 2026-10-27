@@ -16,6 +16,6 @@ STRUCT
     bLinkFail               : BOOL;     // 通讯异常 (SB49 / SB6A / SB0A1 合并, 平台写入)
     bY45                    : BOOL;     // 组框机暂停输出 (Y45)
     bY46                    : BOOL;     // 组框机急停输出 (Y46)
-    arrTrig                 : ARRAY[0..1] OF BOOL;      // [0] F104 组框机安全异常, [1] F105 通讯异常
+    arrTrig                 : ARRAY[1..2] OF BOOL;      // [1] F104 组框机安全异常, [2] F105 通讯异常
 END_STRUCT
 END_TYPE

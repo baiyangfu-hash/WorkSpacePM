@@ -194,17 +194,17 @@ BEGIN
     END_REGION
 
     REGION 05_ConveyorForce 输送强制位放行: 手动 + 无 M8 电机位另要求在安全区
-    FOR s_iI := 0 TO LAST_FORCE DO
+    FOR s_iI := 0 TO LAST_FORCE DO     // s_iI = 位置 0~20 (M70 起), 数组下标 = s_iI + 1
         IF s_iI = FORCE_SKIP THEN
             s_iR := 0;
-            io_stManual.abForce[s_iI] := FALSE;
+            io_stManual.abForce[s_iI + 1] := FALSE;
         ELSE
             IF s_iI < FORCE_SKIP THEN
                 s_iR := s_iI MOD 5;
             ELSE
                 s_iR := (s_iI - FORCE_SKIP - 1) MOD 5;
             END_IF;
-            io_stManual.abForce[s_iI] := s_bManualOk AND io_stHmi.bConvForce[s_iI]
+            io_stManual.abForce[s_iI + 1] := s_bManualOk AND io_stHmi.bConvForce[s_iI + 1]
                                          AND ((s_iR < 2) OR io_stBridge.bSafeZone);
         END_IF;
     END_FOR;

@@ -338,7 +338,7 @@ BEGIN
 
     REGION 04_NoMaterialAlarm 缺料 (R-CONV-05): 正转连续 10 s 既没到阻挡前又没到取料位
     s_bStarveIn := s_bOutFwd AND (NOT io_stLayer.bPreBlock) AND (NOT s_bBothPick);
-    io_stLayer.arrTrig[8] := s_bStarveQ;
+    io_stLayer.arrTrig[9] := s_bStarveQ;
     END_REGION
 
     REGION 05_CylinderAlarm 气缸位置报警 (R-CONV-06): 命令后 i_dCylTimeoutMs 位置未到
@@ -350,14 +350,14 @@ BEGIN
     s_bSepUp2In := (NOT io_stLayer.bSepDown) AND (NOT io_stLayer.bSepUp2);
     s_bSepDn1In := io_stLayer.bSepDown AND (NOT io_stLayer.bSepDn1);
     s_bSepDn2In := io_stLayer.bSepDown AND (NOT io_stLayer.bSepDn2);
-    io_stLayer.arrTrig[0] := s_bBlkUp1Q;
-    io_stLayer.arrTrig[1] := s_bBlkUp2Q;
-    io_stLayer.arrTrig[2] := s_bBlkDn1Q;
-    io_stLayer.arrTrig[3] := s_bBlkDn2Q;
-    io_stLayer.arrTrig[4] := s_bSepUp1Q;
-    io_stLayer.arrTrig[5] := s_bSepUp2Q;
-    io_stLayer.arrTrig[6] := s_bSepDn1Q;
-    io_stLayer.arrTrig[7] := s_bSepDn2Q;
+    io_stLayer.arrTrig[1] := s_bBlkUp1Q;
+    io_stLayer.arrTrig[2] := s_bBlkUp2Q;
+    io_stLayer.arrTrig[3] := s_bBlkDn1Q;
+    io_stLayer.arrTrig[4] := s_bBlkDn2Q;
+    io_stLayer.arrTrig[5] := s_bSepUp1Q;
+    io_stLayer.arrTrig[6] := s_bSepUp2Q;
+    io_stLayer.arrTrig[7] := s_bSepDn1Q;
+    io_stLayer.arrTrig[8] := s_bSepDn2Q;
     END_REGION
 
     REGION 06_StatusOutput 状态输出

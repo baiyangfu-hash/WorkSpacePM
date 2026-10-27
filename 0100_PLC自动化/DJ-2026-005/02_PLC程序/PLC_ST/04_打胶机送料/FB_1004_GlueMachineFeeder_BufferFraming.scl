@@ -273,9 +273,9 @@ BEGIN
     // 4 根模式一次放满: 组 1 放完后后位光电也应亮
     s_bF91In := ((NOT io_stIo.bFeederRearEye1) OR (NOT io_stIo.bFeederRearEye2))
                 AND (io_stBridge.abFeedDone[2] OR ((io_stBridge.iGroupCount < 2) AND io_stBridge.abFeedDone[1]));
-    io_stFeed.arrTrig[0] := s_bF90Q;
-    io_stFeed.arrTrig[1] := s_bF91Q;
-    io_stFeed.arrTrig[2] := FALSE;          // F107 取消 (原程序全灭超时自行返回, 不报警); 号保留
+    io_stFeed.arrTrig[1] := s_bF90Q;
+    io_stFeed.arrTrig[2] := s_bF91Q;
+    io_stFeed.arrTrig[3] := FALSE;          // F107 取消 (原程序全灭超时自行返回, 不报警); 号保留
     END_REGION
 
     REGION 06_StatusOutput 状态输出
