@@ -43,7 +43,7 @@ VAR CONSTANT
 END_VAR
 
 BEGIN
-    REGION 01_PickToCartConveyor 取放料 -> 小车 / 输送
+    REGION 01_PickToCartConveyor 取放料到小车 / 输送
     io_stBridge.bSafeZone := io_stPP.bSafeZone;
     io_stBridge.bPPAtS20 := (io_stPP.iStep = STEP_S20);
     io_stBridge.rZStandby := io_stPP.rZStandby;
@@ -53,7 +53,7 @@ BEGIN
     END_FOR;
     END_REGION
 
-    REGION 02_CartPickPlace 小车 <-> 取放料
+    REGION 02_CartPickPlace 小车与取放料互通
     io_stBridge.bReqA := io_stFeed.bReqA;
     io_stBridge.bReqB := io_stFeed.bReqB;
     io_stBridge.iGroupCount := io_stPP.iGroupCount;
@@ -71,7 +71,7 @@ BEGIN
     io_stFeed.rAutoSpeed := io_stPP.rAutoSpeed;     // 自动速度 D600 同步给小车
     END_REGION
 
-    REGION 04_Hold Hold = 报警 Hold 或 暂停
+    REGION 04_Hold Hold 即 报警 Hold 或 暂停
     FOR s_iIdx := 1 TO 4 DO
         io_stBridge.abHoldConv[s_iIdx] := io_stAlarm.abHoldConv[s_iIdx] OR io_stMachine.bPause;
     END_FOR;
@@ -80,7 +80,7 @@ BEGIN
     io_stBridge.bHoldHome := io_stAlarm.bHoldHome OR io_stMachine.bPause;
     END_REGION
 
-    REGION 05_HomeManual 回原点 / 手动 -> 输送 / 取放料
+    REGION 05_HomeManual 回原点 / 手动到输送 / 取放料
     io_stBridge.bInitReqConv := io_stHome.bInitReqConv;
     io_stBridge.bReleaseGripperLock := io_stHome.bReleaseGripperLock;
     io_stPP.bGripOpenReq := io_stHome.bGripOpenCmd OR io_stManual.bGripOpenCmd;

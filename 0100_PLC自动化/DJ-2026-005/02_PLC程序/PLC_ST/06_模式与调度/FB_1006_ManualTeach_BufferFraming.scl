@@ -193,7 +193,7 @@ BEGIN
     io_stManual.bLiftDownCmd := s_bManualOk AND io_stHmi.bLiftDown AND (NOT io_stHmi.bLiftUp);
     END_REGION
 
-    REGION 05_ConveyorForce 输送强制位放行: 手动 + 无 M8; 电机位另要求在安全区
+    REGION 05_ConveyorForce 输送强制位放行: 手动 + 无 M8 电机位另要求在安全区
     FOR s_iI := 0 TO LAST_FORCE DO
         IF s_iI = FORCE_SKIP THEN
             s_iR := 0;
