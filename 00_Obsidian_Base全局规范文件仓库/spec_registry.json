@@ -581,7 +581,7 @@
       "title": "SCL编程规范",
       "number": "905",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/905_SCL编程规范_LSP.md",
-      "version": "V1.5.0",
+      "version": "V1.5.1",
       "type_prefix": "LSP",
       "domain": "plc",
       "lifecycle": "stable",
