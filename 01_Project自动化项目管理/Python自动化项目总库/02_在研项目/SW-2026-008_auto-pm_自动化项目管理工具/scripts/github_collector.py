@@ -64,7 +64,7 @@ DEFAULT_WORKFLOWS: dict[str, tuple[str, ...] | None] = {
 SIGNERS = {"baiyangfu-hash": 246858089}
 PLAN_LINE = re.compile(r"^\s*(?:\*\*)?(?:④\s*)?(?:是否涉及)?安全回路(?:\*\*)?\s*[:：]\s*(.*?)\s*$")
 PLAN_CHOICES = ("是", "否")
-SIGN_LINE = re.compile(r"^\s*安全签字\s*[:：]?\s*`?([0-9a-fA-F]{7,40})`?(?:\s.*)?$")
+SIGN_LINE = re.compile(r"^\s*安全签字\s*[:：]?\s*`?([0-9a-fA-F]{7,40})`?(?:\s.*|[，。；：！、）】」』,;.!)\]].*)?$")
 
 AUDIT_FILE = re.compile(r"^(\d+)_.*\.md$")
 AUDIT_PR_LINE = re.compile(r"^\s*(?:#\s.*?|-\s*(?:PR|对象)\s*[：:]\s*)PR\s*#?\s*(\d+)|^\s*-\s*PR\s*[：:]\s*#?\s*(\d+)")
