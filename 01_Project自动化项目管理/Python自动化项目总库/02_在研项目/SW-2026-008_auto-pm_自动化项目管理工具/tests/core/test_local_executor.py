@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -159,7 +160,7 @@ def test_executes_real_helper_with_safe_command_identity_and_redacted_output(tmp
 
 
 def test_child_environment_excludes_one_time_lease_capability(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = _microtask_repository(tmp_path)
     helper = _helper(tmp_path)
@@ -314,10 +315,9 @@ def test_bare_command_name_is_resolved_through_path_so_windows_finds_the_cmd_shi
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # TD-SW008-185: Popen without a shell cannot find ``codex.cmd`` from the bare name ``codex``.
-    from auto_pm.infrastructure import local_executor
 
     shim = str(Path("C:/tools/npm/codex.cmd"))
-    monkeypatch.setattr(local_executor.shutil, "which", lambda name: shim if name == "codex" else None)
+    monkeypatch.setattr(shutil, "which", lambda name: shim if name == "codex" else None)
 
     assert LocalCodexExecutor()._command_prefix == (shim,)
     # A name PATH does not know, and any name that already carries a path, are left exactly as given.
