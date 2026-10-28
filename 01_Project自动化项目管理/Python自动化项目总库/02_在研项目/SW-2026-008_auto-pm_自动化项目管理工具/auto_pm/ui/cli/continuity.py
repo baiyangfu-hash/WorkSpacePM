@@ -54,11 +54,13 @@ from auto_pm.infrastructure.git_timeout import run_git_bounded
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
 from auto_pm.ui.cli.runtime_identity_guard import (
+    WARNINGS_FIELD,
     project_of_checkpoint,
     project_of_handoff,
     project_of_mission,
     project_of_run,
     project_of_work,
+    recorded_warnings,
     require_runtime_identity,
     warn_runtime_identity,
 )
@@ -134,7 +136,14 @@ def _orchestrator(ctx: click.Context) -> MissionOrchestrator:
 
 
 def _emit(item: BaseModel) -> None:
-    click.echo(item.model_dump_json(indent=2))
+    warnings = recorded_warnings(click.get_current_context(silent=True))
+    if not warnings:
+        click.echo(item.model_dump_json(indent=2))
+        return
+    # A recovery command that ran despite a runtime-identity conflict says so in its receipt, not only on stderr.
+    payload = item.model_dump(mode="json")
+    payload[WARNINGS_FIELD] = warnings
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _secret_from_environment(variable_name: str) -> str:
@@ -1155,6 +1164,8 @@ def reclaim_run(
             wallet_path=outcome.lease.wallet_path,
             holder_process_recorded=outcome.lease.holder_process_recorded,
         )
+    if recorded_warnings(ctx):
+        payload[WARNINGS_FIELD] = recorded_warnings(ctx)
     click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
     ctx.exit(RECLAIM_EXIT_CODES[outcome.decision.value])
 

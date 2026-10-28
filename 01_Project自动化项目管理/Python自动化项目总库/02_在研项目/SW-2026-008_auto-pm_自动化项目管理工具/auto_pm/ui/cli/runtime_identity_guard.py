@@ -30,8 +30,23 @@ def require_runtime_identity(ctx: click.Context, project_id: str) -> None:
         raise click.ClickException("运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
 
 
+WARNINGS_META_KEY = "runtime_identity_warnings"
+WARNINGS_FIELD = "runtime_identity_warnings"
+
+
+def recorded_warnings(ctx: click.Context | None) -> list[str]:
+    """The identity warnings this command invocation raised, for its JSON receipt (empty when there were none)."""
+
+    return list(ctx.find_root().meta.get(WARNINGS_META_KEY, [])) if ctx is not None else []
+
+
+def _warn(ctx: click.Context, text: str) -> None:
+    click.echo(text, err=True)
+    ctx.find_root().meta.setdefault(WARNINGS_META_KEY, []).append(text)
+
+
 def warn_runtime_identity(ctx: click.Context, project_id: str | Callable[[], str]) -> None:
-    """Recovery commands never refuse (they are what repairs a broken runtime); a conflict is only reported on stderr.
+    """Recovery commands never refuse (they are what repairs a broken runtime); a conflict is reported on stderr and in the JSON receipt.
 
     ``project_id`` may be a callable so that a failed lookup (the very Run being repaired may be unreadable) also only warns.
     """
@@ -43,10 +58,10 @@ def warn_runtime_identity(ctx: click.Context, project_id: str | Callable[[], str
             str(app_ctx.control_root), execution_root=app_ctx.workspace_root
         ).resolve(project_id=resolved, start_path=app_ctx.control_root)
     except (WorkspaceContextError, click.ClickException) as error:
-        click.echo(f"警告：运行身份无法核对，恢复命令照常执行：{error}", err=True)
+        _warn(ctx, f"警告：运行身份无法核对，命令照常执行：{error}")
         return
     if context.conflicts:
-        click.echo("警告：运行身份有冲突，恢复命令照常执行：" + "；".join(context.conflicts), err=True)
+        _warn(ctx, "警告：运行身份有冲突，命令照常执行：" + "；".join(context.conflicts))
 
 
 def project_of_mission(ctx: click.Context, mission_id: str) -> str:

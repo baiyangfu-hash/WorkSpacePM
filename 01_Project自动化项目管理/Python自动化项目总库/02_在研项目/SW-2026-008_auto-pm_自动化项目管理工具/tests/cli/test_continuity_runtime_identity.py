@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import click
 import pytest
 from click.testing import CliRunner
+from pydantic import BaseModel
 
 from auto_pm.ui.cli import continuity
 from auto_pm.ui.cli.__main__ import cli
@@ -198,3 +199,32 @@ def test_an_unresolvable_project_only_warns(monkeypatch: pytest.MonkeyPatch, tmp
     ctx = click.Context(click.Command("x"), obj=SimpleNamespace(control_root=tmp_path, workspace_root=tmp_path))
     guard.warn_runtime_identity(ctx, lookup)
     assert "无法核对" in capsys.readouterr().err
+
+
+def test_a_warning_reaches_the_json_receipt_and_a_clean_run_adds_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+
+    from auto_pm.ui.cli import runtime_identity_guard as guard
+
+    class _Service:
+        def __init__(self, *_a: object, **_k: object) -> None: ...
+
+        def resolve(self, **_k: object) -> SimpleNamespace:
+            return SimpleNamespace(conflicts=("发布指针与载入包不一致",))
+
+    class _Receipt(BaseModel):
+        run_id: str
+
+    monkeypatch.setattr(guard, "WorkspaceContextService", _Service)
+    ctx = click.Context(click.Command("x"), obj=SimpleNamespace(control_root=tmp_path, workspace_root=tmp_path))
+    with ctx:
+        continuity._emit(_Receipt(run_id="R-1"))
+        assert "runtime_identity_warnings" not in json.loads(capsys.readouterr().out)
+        guard.warn_runtime_identity(ctx, "P-1")
+        capsys.readouterr()
+        continuity._emit(_Receipt(run_id="R-1"))
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["run_id"] == "R-1"
+    assert receipt["runtime_identity_warnings"] == ["警告：运行身份有冲突，命令照常执行：发布指针与载入包不一致"]
