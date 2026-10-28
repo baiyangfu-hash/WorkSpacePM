@@ -108,12 +108,8 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
     # 2.2 启动时自动执行项目台账对账自愈（自愈机制）
     try:
         from auto_pm.change.ledger_reconciler import LedgerReconciler
-        reconciler = LedgerReconciler()
-        for proj in project_service.list_projects():
-            try:
-                reconciler.auto_fix(proj.path)
-            except Exception as e:
-                sys.stderr.write(f"[WARNING] 项目 {proj.project_id} 启动自动对账失败: {e}\n")
+        from auto_pm.ui.ledger_self_heal import heal_project_ledgers
+        heal_project_ledgers(workspace_root, project_service.list_projects(), LedgerReconciler(), "启动")
     except Exception as exc:
         sys.stderr.write(f"[WARNING] 启动时自动对账失败: {exc}\n")
 
@@ -214,12 +210,8 @@ def run_qml_gui(workspace_root: str, debug: bool = False) -> int:
             # 自动对账自愈
             try:
                 from auto_pm.change.ledger_reconciler import LedgerReconciler
-                reconciler = LedgerReconciler()
-                for proj in new_project_service.list_projects():
-                    try:
-                        reconciler.auto_fix(proj.path)
-                    except Exception as e:
-                        sys.stderr.write(f"[WARNING] 项目 {proj.project_id} 切换自动对账失败: {e}\n")
+                from auto_pm.ui.ledger_self_heal import heal_project_ledgers
+                heal_project_ledgers(new_path, new_project_service.list_projects(), LedgerReconciler(), "切换")
             except Exception as exc:
                 sys.stderr.write(f"[WARNING] 切换时自动对账失败: {exc}\n")
 
