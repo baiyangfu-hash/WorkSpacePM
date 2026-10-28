@@ -110,6 +110,10 @@ class _TransientSidecarError(ContinuityStoreError):
 _SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 _SIDECAR_ATTEMPTS = 6
 _SIDECAR_RETRY_SECONDS = 0.025
+# How long a writer waits for another writer's transaction. The holder re-checks the Run worktree with git
+# (HEAD and status) while it owns the lock, which takes seconds on a loaded Windows runner; 5 s was too short
+# and a second writer failed with "database is locked" (TD-SW008-214 follow-up). Waiting longer only delays.
+_WRITE_LOCK_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -1113,13 +1117,13 @@ class ContinuityStore:
     def _transaction(self) -> Iterator[sqlite3.Connection]:
         self._require_control_root()
         db_path = self._validated_db_path()
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = sqlite3.connect(db_path, timeout=_WRITE_LOCK_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         try:
             self._validated_db_path()
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
-            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute(f"PRAGMA busy_timeout={int(_WRITE_LOCK_TIMEOUT_SECONDS * 1000)}")
             conn.execute("BEGIN IMMEDIATE")
             self._validated_db_path()
             yield conn

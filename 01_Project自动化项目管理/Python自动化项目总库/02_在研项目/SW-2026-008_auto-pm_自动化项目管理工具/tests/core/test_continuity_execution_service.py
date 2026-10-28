@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
@@ -44,6 +45,7 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionStartEvidence,
 )
 from auto_pm.domain.change.decision_service import DecisionService
+from auto_pm.infrastructure import continuity_store
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
@@ -1891,6 +1893,47 @@ def test_concurrent_same_run_and_key_returns_one_exact_replay(
             conn.execute("SELECT COUNT(*) FROM events WHERE event_type='RUN_CREATED'").fetchone()[0]
             == 1
         )
+
+
+def _hold_write_lock_then_contend(store: ContinuityStore, hold_seconds: float) -> None:
+    """Open a write transaction on one thread, then open a second one on the main thread."""
+
+    holding = threading.Event()
+
+    def holder() -> None:
+        with store._transaction():
+            holding.set()
+            time.sleep(hold_seconds)
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    assert holding.wait(timeout=10)
+    try:
+        with store._transaction():
+            pass
+    finally:
+        thread.join(timeout=10)
+
+
+def test_second_writer_waits_for_a_slow_lock_holder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The holder's git re-check can take seconds on a loaded runner; the other writer must wait, not fail."""
+
+    _, service = _services(tmp_path, Clock())
+    monkeypatch.setattr(continuity_store, "_WRITE_LOCK_TIMEOUT_SECONDS", 5.0)
+    _hold_write_lock_then_contend(service._store, hold_seconds=1.0)
+
+
+def test_second_writer_gives_up_after_the_write_lock_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wait is bounded by the constant: a holder that outlasts it still ends in a refusal."""
+
+    _, service = _services(tmp_path, Clock())
+    monkeypatch.setattr(continuity_store, "_WRITE_LOCK_TIMEOUT_SECONDS", 0.2)
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        _hold_write_lock_then_contend(service._store, hold_seconds=1.5)
 
 
 def test_terminal_sibling_with_future_lease_does_not_block_new_run(tmp_path: Path) -> None:
