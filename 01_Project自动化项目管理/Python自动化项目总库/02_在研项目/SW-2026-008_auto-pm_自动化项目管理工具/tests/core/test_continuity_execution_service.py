@@ -1934,9 +1934,10 @@ def test_write_transaction_waits_thirty_seconds_by_default(tmp_path: Path, monke
 
     def spy(*args: Any, **kwargs: Any) -> sqlite3.Connection:
         seen.append(kwargs.get("timeout", 5.0))
-        return real_connect(*args, **kwargs)
+        connection: sqlite3.Connection = real_connect(*args, **kwargs)
+        return connection
 
-    monkeypatch.setattr(continuity_store.sqlite3, "connect", spy)
+    monkeypatch.setattr(sqlite3, "connect", spy)
     with service._store._transaction() as conn:
         busy_ms = conn.execute("PRAGMA busy_timeout").fetchone()[0]
     assert seen == [30.0]
