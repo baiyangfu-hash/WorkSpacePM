@@ -42,6 +42,7 @@ from auto_pm.core.constants import (
 from auto_pm.core.paths import WORKSPACE_PROJECTS_SUBDIR
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.template_service import TemplateService
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
 
@@ -550,6 +551,7 @@ def cmd_edit(
         )
         return
 
+    require_runtime_identity(ctx, project_id)
     try:
         svc.update_project_meta(project_id, **kwargs)
         console.print(f"[green]项目元数据已更新: {project_id}[/green]")
@@ -737,6 +739,9 @@ def cmd_snapshot(
     if proj is None:
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
+
+    if not dry_run:
+        require_runtime_identity(ctx, project_id)
 
     # 定位 PM_SESSION 文件
     pm_session_path = os.path.join(proj.path, f"PM_SESSION_{project_id}.md")
@@ -1002,6 +1007,7 @@ def cmd_hooks_install(ctx: click.Context, project_id: str) -> None:
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
 
+    require_runtime_identity(ctx, project_id)
     result = svc.install_git_hooks(proj.path)
     if result["success"]:
         console.print(f"[green]{result['message']}[/green]")
@@ -1023,6 +1029,7 @@ def cmd_hooks_uninstall(ctx: click.Context, project_id: str) -> None:
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
 
+    require_runtime_identity(ctx, project_id)
     result = svc.uninstall_git_hooks(proj.path)
     if result["success"]:
         console.print(f"[green]{result['message']}[/green]")

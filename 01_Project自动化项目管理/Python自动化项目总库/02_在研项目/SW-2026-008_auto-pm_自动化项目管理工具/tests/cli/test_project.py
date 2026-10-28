@@ -10,6 +10,8 @@ from auto_pm.cli.__main__ import cli
 from auto_pm.plc.spec_snapshot import parse_spec_snapshot
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 def test_project_list_via_main(cli_runner: CliRunner, tmp_workspace: Path) -> None:
     """通过主入口测试 project list"""
