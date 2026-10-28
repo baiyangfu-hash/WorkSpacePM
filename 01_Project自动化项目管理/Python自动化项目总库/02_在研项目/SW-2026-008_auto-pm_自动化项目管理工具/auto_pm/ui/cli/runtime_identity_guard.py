@@ -201,3 +201,20 @@ def require_runtime_identity_for_delivery(ctx: click.Context, project_root: str 
         raise click.ClickException(f"无法读取 Workspace Registry，不能确定控制项目，已拒绝写入: {error}") from error
     if context.conflicts:
         raise click.ClickException("运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
+
+
+def require_runtime_identity_for_card(ctx: click.Context, card_id: str) -> None:
+    """Refuse an implementation-card write when the runtime identity of the card's project has a conflict.
+
+    A card that cannot be read has no project to check; the command then reports the missing or broken card itself,
+    before it writes anything.
+    """
+
+    from auto_pm.application.core.implementation_card_service import ImplementationCardService
+
+    app_ctx: AppContext = ctx.find_root().obj
+    try:
+        project_id = ImplementationCardService(Path(app_ctx.control_root)).load(card_id).project_id
+    except Exception:  # noqa: BLE001 - the command's own read reports the real reason
+        return
+    require_runtime_identity(ctx, project_id)

@@ -22,6 +22,7 @@ from auto_pm.core.project_service import ProjectService
 from auto_pm.plc import cycle_plan as cp
 from auto_pm.plc import doc_consistency as dc
 from auto_pm.plc import milestones as ms
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 
 def _resolve(ctx: click.Context, project_id: str | None, project_path: str | None) -> str:
@@ -34,6 +35,15 @@ def _resolve(ctx: click.Context, project_id: str | None, project_path: str | Non
     if project is None:
         raise click.ClickException(f"项目不存在: {project_id}")
     return str(project.path)
+
+
+def _require_identity(ctx: click.Context, project_id: str | None, project_path: str | None) -> None:
+    """Refuse a write on a registered project whose runtime identity has a conflict.
+
+    ``--project-path`` names an isolated copy chosen by the caller, not a registered project, so it is not checked.
+    """
+    if project_id and not project_path:
+        require_runtime_identity(ctx, project_id)
 
 
 _ID = click.argument("project_id", required=False)
@@ -113,6 +123,8 @@ def cmd_check(ctx: click.Context, project_id: str | None, project_path: str | No
 def cmd_sync(ctx: click.Context, project_id: str | None, project_path: str | None,
              dry_run: bool, apply_suggestions: bool) -> None:
     """按 SCL 代码补全接口文档与变量定义文档（只写文档，从不写 SCL；补入的行带“待确认”标记）。"""
+    if not dry_run:
+        _require_identity(ctx, project_id, project_path)
     path = _resolve(ctx, project_id, project_path)
     result = dc.sync_project(path, write=not dry_run, apply_suggestions=apply_suggestions)
     prefix = "（预览，未写文件）" if dry_run else ""
@@ -133,6 +145,7 @@ def cmd_sync(ctx: click.Context, project_id: str | None, project_path: str | Non
 @click.pass_context
 def cmd_confirm(ctx: click.Context, project_id: str | None, project_path: str | None) -> None:
     """去掉已与代码对上的行上的“待确认”标记；仍与代码不一致的行保持标记。"""
+    _require_identity(ctx, project_id, project_path)
     path = _resolve(ctx, project_id, project_path)
     result = dc.confirm_project(path)
     click.echo(f"已确认 {result.confirmed} 行")
@@ -154,6 +167,8 @@ def cmd_confirm(ctx: click.Context, project_id: str | None, project_path: str | 
 def cmd_plan(ctx: click.Context, project_id: str | None, project_path: str | None, start_text: str,
              main_type: str, addons: tuple[str, ...], scale: str, spec_path: str | None, write: bool) -> None:
     """按项目周期规范推里程碑计划日期。默认只显示；加 --write 才写，且只填空着的计划日期。"""
+    if write:
+        _require_identity(ctx, project_id, project_path)
     path = _resolve(ctx, project_id, project_path)
     try:
         start = _dt.date.fromisoformat(start_text)

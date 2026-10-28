@@ -5,11 +5,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.domain.plc import doc_consistency as dc
+from tests.identity_support import guard_off
 from tests.plc.test_doc_consistency import FB_SCL, IFC_DOC, VAR_DOC, build, ifc_path, var_path
+
+
+@pytest.fixture(autouse=True)
+def _identity_guard_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    guard_off(monkeypatch, "plc.docs")
 
 
 def project_in_workspace(workspace: Path, *, ifc: str | None = IFC_DOC, var: str | None = VAR_DOC) -> Path:

@@ -110,3 +110,32 @@ def test_a_v2_block_that_does_not_declare_parking_is_not_shown_as_supported(tmp_
     monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(lambda: all_unsupported))
     notice = PmCockpitService(main).snapshot().notices[-1]
     assert "未能确认" in notice and "挂起与拿回：支持" not in notice
+
+
+def test_a_keyboard_interrupt_from_the_producer_still_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """宽捕获只到 Exception：用户中断不能被吞成“未能确认”（审计 326 的漏网变异：放宽成 BaseException）。"""
+    main, _candidate = _roots(tmp_path)
+    _work(main, "WORK-CAP-KI")
+
+    def interrupted() -> RuntimeCapabilities:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(interrupted))
+    with pytest.raises(KeyboardInterrupt):
+        PmCockpitService(main).snapshot()
+
+
+def test_a_failing_producer_leaves_a_warning_in_the_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """宽捕获把程序错误变成永久“未能确认”，所以必须留一行带堆栈的 warning 供排查（审计 326 P3）。"""
+    main, _candidate = _roots(tmp_path)
+    _work(main, "WORK-CAP-LOG")
+
+    def broken() -> RuntimeCapabilities:
+        raise RuntimeError("renamed symbol")
+
+    monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(broken))
+    with caplog.at_level("WARNING"):
+        PmCockpitService(main).snapshot()
+    assert any(r.levelname == "WARNING" and r.exc_info and "renamed symbol" in str(r.exc_info[1]) for r in caplog.records)

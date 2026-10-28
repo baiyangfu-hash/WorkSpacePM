@@ -249,6 +249,7 @@ class PmCockpitService:
         try:
             capabilities = validate_runtime_capabilities(ContinuityQueryService.capabilities())
         except Exception:  # 共用生产者抛什么都按“未能确认”处理（卡 060：抛错时快照不崩、操作保持停用）
+            log.warning("能力声明读取失败，按未能确认处理", exc_info=True)
             return _CAPABILITY_UNVERIFIED
         declared = {item.action.value: item.status for item in capabilities.actions}
         if (

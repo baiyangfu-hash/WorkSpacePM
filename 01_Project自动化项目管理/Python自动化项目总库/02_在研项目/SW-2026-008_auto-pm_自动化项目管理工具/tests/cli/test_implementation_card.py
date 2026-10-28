@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from auto_pm.ui.cli.implementation_card import implementation_card_group
 from tests.git_support import git_out
+
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
 
 def test_create_then_validate_is_read_only(tmp_path: Path) -> None:
