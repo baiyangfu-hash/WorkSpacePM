@@ -673,7 +673,8 @@ class TestProjectRootFromChangeFile:
 
     @staticmethod
     def _root(change_file: Path) -> str | None:
-        return ChangeService._find_project_root_from_path(str(change_file))
+        root: str | None = ChangeService._find_project_root_from_path(str(change_file))
+        return root
 
     def test_standard_layout_finds_the_project_with_04_monitoring(self, tmp_path: Path) -> None:
         project = tmp_path / "SW-1"

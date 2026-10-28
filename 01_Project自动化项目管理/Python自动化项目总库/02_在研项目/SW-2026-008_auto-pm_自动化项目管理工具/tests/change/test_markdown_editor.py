@@ -26,7 +26,7 @@ class TestChangeMarkdownEditor:
             background="测试",
             necessity="测试",
         )
-        return ChgGenerator().render(cr)
+        return str(ChgGenerator().render(cr))
 
     def test_append_to_verification_table_v2(self) -> None:
         """测试三节结构下追加验证项到 §10.1 末尾（M1-2）
