@@ -57,11 +57,12 @@ def warn_runtime_identity(ctx: click.Context, project_id: str | Callable[[], str
         context = WorkspaceContextService(
             str(app_ctx.control_root), execution_root=app_ctx.workspace_root
         ).resolve(project_id=resolved, start_path=app_ctx.control_root)
-    except (WorkspaceContextError, click.ClickException) as error:
+        conflicts = tuple(context.conflicts)
+    except Exception as error:  # the guard's own failure must never stop a command that repairs a broken runtime
         _warn(ctx, f"警告：运行身份无法核对，命令照常执行：{error}")
         return
-    if context.conflicts:
-        _warn(ctx, "警告：运行身份有冲突，命令照常执行：" + "；".join(context.conflicts))
+    if conflicts:
+        _warn(ctx, "警告：运行身份有冲突，命令照常执行：" + "；".join(conflicts))
 
 
 def project_of_mission(ctx: click.Context, mission_id: str) -> str:

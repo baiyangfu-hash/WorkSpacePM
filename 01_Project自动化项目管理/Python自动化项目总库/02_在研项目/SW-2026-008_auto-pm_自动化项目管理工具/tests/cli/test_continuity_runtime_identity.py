@@ -6,6 +6,7 @@ lock the repair path: they report the conflict on stderr and still run.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -228,3 +229,79 @@ def test_a_warning_reaches_the_json_receipt_and_a_clean_run_adds_nothing(
     receipt = json.loads(capsys.readouterr().out)
     assert receipt["run_id"] == "R-1"
     assert receipt["runtime_identity_warnings"] == ["警告：运行身份有冲突，命令照常执行：发布指针与载入包不一致"]
+
+
+class _Receipt(BaseModel):
+    run_id: str = "R-1"
+
+
+class _Anything:
+    """A service whose every method answers with a plain receipt, and a reclaim outcome the command can print."""
+
+    def __getattr__(self, name: str) -> object:
+        if name == "reclaim":
+            return lambda **_k: SimpleNamespace(
+                decision=SimpleNamespace(value="RECLAIMED"), reason="r", exit_path="p", holder_owner_id="o", lease_expires_at="2026-10-28T00:00:00+00:00",
+                process_verdict=None, wait_seconds=0, lease=None,
+            )
+        if name == "record_holder":
+            return lambda *_a, **_k: True
+        return lambda *_a, **_k: _Receipt()
+
+
+def _receipt_of(command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, conflicts: tuple[str, ...]) -> dict[str, object]:
+    from auto_pm.ui.cli import runtime_identity_guard as guard
+
+    class _Context:
+        def __init__(self, *_a: object, **_k: object) -> None: ...
+
+        def resolve(self, **_k: object) -> SimpleNamespace:
+            return SimpleNamespace(conflicts=conflicts)
+
+    monkeypatch.setattr(guard, "WorkspaceContextService", _Context)
+    monkeypatch.setattr(continuity, "project_of_run", lambda _ctx, _id: "P-RUN")
+    monkeypatch.setattr(continuity, "project_of_work", lambda _ctx, _id: "P-WORK")
+    monkeypatch.setattr(continuity, "_lease_token", lambda *_a, **_k: "T")
+    monkeypatch.setattr(continuity, "_read_stdin_text", lambda: "T")
+    monkeypatch.setattr(continuity.ContinuityStore, "local_time_text", staticmethod(lambda value: str(value)))
+    for name in ("_work_service", "_execution_service", "_handover", "_require_mutation_root"):
+        monkeypatch.setattr(continuity, name, lambda *_a, **_k: _Anything())
+    cmd = _walk(_continuity_group())[command]
+    args = [*_required_args(cmd), *EXTRA_ARGS.get(command, [])]
+    result = CliRunner().invoke(cmd, args, obj=SimpleNamespace(control_root=tmp_path, workspace_root=tmp_path))
+    assert "Traceback" not in result.output, result.output
+    return json.loads(result.stdout)
+
+
+@pytest.mark.parametrize("command", sorted(RECOVERY))
+def test_every_warn_only_command_puts_the_warning_in_its_receipt(
+    command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    receipt = _receipt_of(command, monkeypatch, tmp_path, conflicts=("发布指针与载入包不一致",))
+    assert receipt["runtime_identity_warnings"] == ["警告：运行身份有冲突，命令照常执行：发布指针与载入包不一致"]
+
+
+@pytest.mark.parametrize("command", sorted(RECOVERY))
+def test_a_warn_only_command_without_a_conflict_has_no_warning_field(
+    command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    assert "runtime_identity_warnings" not in _receipt_of(command, monkeypatch, tmp_path, conflicts=())
+
+
+@pytest.mark.parametrize("failure", [OSError("registry unreadable"), RuntimeError("boom"), AttributeError("odd")], ids=type)
+def test_a_guard_that_fails_unexpectedly_only_warns(
+    failure: Exception, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from auto_pm.ui.cli import runtime_identity_guard as guard
+
+    class _Broken:
+        def __init__(self, *_a: object, **_k: object) -> None: ...
+
+        def resolve(self, **_k: object) -> SimpleNamespace:
+            raise failure
+
+    monkeypatch.setattr(guard, "WorkspaceContextService", _Broken)
+    ctx = click.Context(click.Command("x"), obj=SimpleNamespace(control_root=tmp_path, workspace_root=tmp_path))
+    guard.warn_runtime_identity(ctx, "P-1")
+    assert "无法核对" in capsys.readouterr().err
+    assert guard.recorded_warnings(ctx)

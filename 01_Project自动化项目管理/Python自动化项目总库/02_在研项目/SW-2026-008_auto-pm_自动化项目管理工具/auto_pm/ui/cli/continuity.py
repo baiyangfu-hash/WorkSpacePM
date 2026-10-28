@@ -1309,7 +1309,10 @@ def record_holder(
         raise click.ClickException(str(error)) from error
     if not recorded:
         raise click.ClickException(f"进程 {pid} 不在运行或读不到启动时间，未记录")
-    click.echo(json.dumps({"run_id": run_id, "owner_id": owner_id, "holder_pid": pid, "recorded": True}, ensure_ascii=False))
+    receipt: dict[str, object] = {"run_id": run_id, "owner_id": owner_id, "holder_pid": pid, "recorded": True}
+    if recorded_warnings(ctx):
+        receipt[WARNINGS_FIELD] = recorded_warnings(ctx)
+    click.echo(json.dumps(receipt, ensure_ascii=False))
 
 
 @continuity_group.group(name="checkpoint")
