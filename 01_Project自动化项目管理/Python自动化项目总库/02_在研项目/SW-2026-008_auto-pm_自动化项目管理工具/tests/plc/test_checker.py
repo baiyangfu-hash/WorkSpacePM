@@ -7,8 +7,9 @@ import os
 from pathlib import Path
 
 import pytest
-from auto_pm.plc.checker import PlcChecker
-from auto_pm.plc.models import STD_DIRS
+
+from auto_pm.domain.plc.checker import PlcChecker
+from auto_pm.domain.plc.models import STD_DIRS
 
 # ── Fixtures ──────────────────────────────────────────
 
@@ -617,8 +618,9 @@ class TestCheckItemsList:
 
     def test_plc_check_list_cli(self, tmp_path: Path) -> None:
         """plc check --list 应输出检查项清单表格"""
-        from auto_pm.cli.__main__ import cli
         from click.testing import CliRunner
+
+        from auto_pm.ui.cli.__main__ import cli
 
         runner = CliRunner()
         result = runner.invoke(
