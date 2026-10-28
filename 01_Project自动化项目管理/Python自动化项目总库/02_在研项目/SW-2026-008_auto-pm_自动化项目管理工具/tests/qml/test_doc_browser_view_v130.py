@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 from PySide6.QtCore import QUrl
 from PySide6.QtQml import QQmlComponent, QQmlEngine
@@ -18,7 +19,7 @@ def _load_qml(engine: QQmlEngine, path: Path) -> object:
         raise AssertionError(f"加载 QML 失败 {path.name}:\n{errors}")
     obj = component.create()
     assert obj is not None, f"实例化 QML 失败: {path.name}"
-    obj._component_ref = component
+    cast(Any, obj)._component_ref = component
     return obj
 
 def _to_variant(value: object) -> object:

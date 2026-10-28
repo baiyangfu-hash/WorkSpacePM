@@ -9,12 +9,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import click
 import pytest
 from click.testing import CliRunner
 from pydantic import BaseModel
 
+from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.cli import continuity
 from auto_pm.ui.cli.__main__ import cli
 
@@ -129,7 +131,7 @@ def _invoke(command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, re
             raise click.ClickException("运行身份未通过校验，已拒绝写入：测试")
 
     def warn(_ctx: click.Context, project: object) -> None:
-        asked.append(project() if callable(project) else project)
+        asked.append(str(project() if callable(project) else project))
 
     monkeypatch.setattr(continuity, "require_runtime_identity", require)
     monkeypatch.setattr(continuity, "warn_runtime_identity", warn)
@@ -263,14 +265,14 @@ def _receipt_of(command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *
     monkeypatch.setattr(continuity, "project_of_work", lambda _ctx, _id: "P-WORK")
     monkeypatch.setattr(continuity, "_lease_token", lambda *_a, **_k: "T")
     monkeypatch.setattr(continuity, "_read_stdin_text", lambda: "T")
-    monkeypatch.setattr(continuity.ContinuityStore, "local_time_text", staticmethod(lambda value: str(value)))
+    monkeypatch.setattr(ContinuityStore, "local_time_text", staticmethod(lambda value: str(value)))
     for name in ("_work_service", "_execution_service", "_handover", "_require_mutation_root"):
         monkeypatch.setattr(continuity, name, lambda *_a, **_k: _Anything())
     cmd = _walk(_continuity_group())[command]
     args = [*_required_args(cmd), *EXTRA_ARGS.get(command, [])]
     result = CliRunner().invoke(cmd, args, obj=SimpleNamespace(control_root=tmp_path, workspace_root=tmp_path))
     assert "Traceback" not in result.output, result.output
-    return json.loads(result.stdout)
+    return cast(dict[str, object], json.loads(result.stdout))
 
 
 @pytest.mark.parametrize("command", sorted(RECOVERY))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -51,7 +52,7 @@ def _obj(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(control_root=tmp_path, workspace_root=str(tmp_path), templates_dir=str(tmp_path))
 
 
-def _refuse(asked: list[str]):  # noqa: ANN202
+def _refuse(asked: list[str]) -> Callable[[click.Context, str], None]:
     def refuse(_ctx: click.Context, project: str) -> None:
         asked.append(project)
         raise click.ClickException("运行身份未通过校验，已拒绝写入：测试")

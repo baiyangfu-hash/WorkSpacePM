@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from auto_pm.cli.__main__ import cli
@@ -48,7 +49,7 @@ def _check(workspace: Path, monkeypatch: pytest.MonkeyPatch, service: FakeServic
     return CliRunner().invoke(cli, ["-w", str(workspace), "plc", "check", "DJ-2026-901", "--json", *flags], catch_exceptions=False)
 
 
-def _item(output: str, name: str) -> dict | None:
+def _item(output: str, name: str) -> dict[str, Any] | None:
     data = json.loads(output[output.index("{"):])
     return next((i for i in data["items"] if i["item"] == name), None)
 
