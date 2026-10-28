@@ -21,6 +21,7 @@ from auto_pm.application.core.agent_worktree_service import AgentWorktreeError
 from auto_pm.application.core.pr_open_service import (
     PrOpenRefusedError,
     PrOpenService,
+    PrPlan,
 )
 from auto_pm.ui.cli.__main__ import cli
 from tests.core.test_agent_worktree_service import AGENT_MARKER_KEYS, Lab, commit, git
@@ -98,7 +99,7 @@ def service(lab: Lab, gh: FakeGh | None = None, **kwargs: object) -> PrOpenServi
     return PrOpenService(lab.root, gh=gh or FakeGh(), **kwargs)  # type: ignore[arg-type]
 
 
-def plan(lab: Lab, svc: PrOpenService | None = None, **kwargs: object):  # noqa: ANN201
+def plan(lab: Lab, svc: PrOpenService | None = None, **kwargs: object) -> PrPlan:
     return (svc or service(lab)).plan("claude", "CARD-1", CARD_PATH, fetch=False, **kwargs)  # type: ignore[arg-type]
 
 
@@ -397,7 +398,7 @@ def test_a_failed_pr_list_stops_before_pushing(lab: Lab) -> None:
     work(lab)
 
     class BrokenList(FakeGh):
-        def __call__(self, args: Sequence[str], stdin: str | None):  # noqa: ANN204
+        def __call__(self, args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
             if tuple(args[:2]) == ("pr", "list"):
                 return subprocess.CompletedProcess(args, 1, "", "HTTP 500")
             return super().__call__(args, stdin)
@@ -415,7 +416,7 @@ def test_pr_create_failing_is_not_success_even_if_the_output_shows_a_url(lab: La
     work(lab)
 
     class FailsWithUrl(FakeGh):
-        def __call__(self, args: Sequence[str], stdin: str | None):  # noqa: ANN204
+        def __call__(self, args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
             if tuple(args[:2]) == ("pr", "create"):
                 return subprocess.CompletedProcess(
                     args, 1, "https://github.com/o/r/pull/55\n", "a pull request already exists"
@@ -431,7 +432,7 @@ def test_a_failed_pr_create_after_the_push_says_how_to_continue(lab: Lab) -> Non
     work(lab)
 
     class BrokenCreate(FakeGh):
-        def __call__(self, args: Sequence[str], stdin: str | None):  # noqa: ANN204
+        def __call__(self, args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
             if tuple(args[:2]) == ("pr", "create"):
                 return subprocess.CompletedProcess(args, 1, "", "HTTP 502")
             return super().__call__(args, stdin)
