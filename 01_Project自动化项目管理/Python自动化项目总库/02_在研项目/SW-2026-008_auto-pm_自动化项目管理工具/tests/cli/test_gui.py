@@ -5,24 +5,26 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 from auto_pm.cli import gui as gui_module
 from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 
-def test_gui_defaults_to_the_read_only_boss_cockpit(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_gui_defaults_to_the_read_only_boss_cockpit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[tuple[str, str]] = []
+
+    def run_boss(workspace: str, debug: bool) -> int:
+        calls.append(("boss", workspace))
+        return 0
+
+    def run_legacy(workspace: str, debug: bool) -> int:
+        calls.append(("legacy", workspace))
+        return 0
+
     monkeypatch.setattr(gui_module, "_install_crash_handler", lambda: None)
-    monkeypatch.setattr(
-        gui_module,
-        "_run_boss_cockpit",
-        lambda workspace, debug: calls.append(("boss", workspace)) or 0,
-    )
-    monkeypatch.setattr(
-        gui_module,
-        "_run_qml_gui",
-        lambda workspace, debug: calls.append(("legacy", workspace)) or 0,
-    )
+    monkeypatch.setattr(gui_module, "_run_boss_cockpit", run_boss)
+    monkeypatch.setattr(gui_module, "_run_qml_gui", run_legacy)
 
     result = CliRunner().invoke(cli, ["-w", str(tmp_path), "gui"])
 
@@ -30,13 +32,20 @@ def test_gui_defaults_to_the_read_only_boss_cockpit(monkeypatch, tmp_path: Path)
     assert calls == [("boss", str(tmp_path))]
 
 
-def test_gui_opens_the_old_workbench_only_when_explicitly_requested(
-    monkeypatch, tmp_path: Path
-) -> None:  # type: ignore[no-untyped-def]
+def test_gui_opens_the_old_workbench_only_when_explicitly_requested(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[str] = []
+
+    def run_boss(workspace: str, debug: bool) -> int:
+        calls.append("boss")
+        return 0
+
+    def run_legacy(workspace: str, debug: bool) -> int:
+        calls.append("legacy")
+        return 0
+
     monkeypatch.setattr(gui_module, "_install_crash_handler", lambda: None)
-    monkeypatch.setattr(gui_module, "_run_boss_cockpit", lambda workspace, debug: calls.append("boss") or 0)
-    monkeypatch.setattr(gui_module, "_run_qml_gui", lambda workspace, debug: calls.append("legacy") or 0)
+    monkeypatch.setattr(gui_module, "_run_boss_cockpit", run_boss)
+    monkeypatch.setattr(gui_module, "_run_qml_gui", run_legacy)
 
     result = CliRunner().invoke(cli, ["-w", str(tmp_path), "gui", "--advanced"])
 

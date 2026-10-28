@@ -12,7 +12,7 @@ def _identity_guard_off(monkeypatch: pytest.MonkeyPatch) -> None:
     guard_off(monkeypatch, "prototype")
 
 
-def test_cli_prototype_flow():
+def test_cli_prototype_flow() -> None:
     runner = CliRunner()
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Test prototype init CLI
