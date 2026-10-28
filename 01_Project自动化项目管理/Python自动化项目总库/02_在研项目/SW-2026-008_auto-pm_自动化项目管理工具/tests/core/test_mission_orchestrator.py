@@ -7,10 +7,9 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from auto_pm.core.mission_orchestrator import MissionOrchestrator
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.work_registry_service import WorkRegistryService
-
+from auto_pm.application.core.mission_orchestrator import MissionOrchestrator
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind, WorkState
 from auto_pm.contracts.mission import (
     AuthorityAudit,

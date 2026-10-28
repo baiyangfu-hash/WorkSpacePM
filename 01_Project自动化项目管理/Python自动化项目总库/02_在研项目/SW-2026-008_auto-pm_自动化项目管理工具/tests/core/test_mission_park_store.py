@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core.mission_service import MissionService, MissionServiceError
 
+from auto_pm.application.core.mission_service import MissionService, MissionServiceError
 from auto_pm.contracts.continuity import RunState, WorkKind
 from auto_pm.contracts.lease_reclaim import (
     GRACE_SECONDS,
@@ -825,9 +825,8 @@ def test_administrative_settlement_refuses_a_parked_run_even_after_its_old_expir
 
 
 def test_views_that_map_every_mission_state_know_parked(scene: Scene) -> None:
-    from auto_pm.core.continuity_resume_service import ContinuityResumeService
-    from auto_pm.core.pm_cockpit_service import PmCockpitService
-
+    from auto_pm.application.core.continuity_resume_service import ContinuityResumeService
+    from auto_pm.application.core.pm_cockpit_service import PmCockpitService
     from auto_pm.contracts.continuity import WorkState
 
     scene.park()

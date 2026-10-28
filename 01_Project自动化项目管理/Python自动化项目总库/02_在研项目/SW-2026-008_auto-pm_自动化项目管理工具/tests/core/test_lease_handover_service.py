@@ -15,16 +15,16 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.core.continuity_execution_service import (
+
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.lease_handover_service import (
+from auto_pm.application.core.lease_handover_service import (
     LeaseHandoverError,
     LeaseHandoverService,
     agent_markers,
 )
-
 from auto_pm.contracts.continuity import RunState
 from auto_pm.contracts.lease_reclaim import (
     GRACE_SECONDS,
