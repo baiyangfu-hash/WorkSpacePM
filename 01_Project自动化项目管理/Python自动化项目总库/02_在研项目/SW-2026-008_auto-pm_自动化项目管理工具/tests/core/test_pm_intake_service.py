@@ -34,7 +34,7 @@ from tests.core.test_continuity_execution_service import Clock, _checkpoint, _se
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 else:
-    from auto_pm.core.pm_intake_service import PmIntakeError, PmIntakeService
+    from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 
 PYTHON_PROJECT = "SW-2026-901"
 PLC_PROJECT = "DJ-2026-902"

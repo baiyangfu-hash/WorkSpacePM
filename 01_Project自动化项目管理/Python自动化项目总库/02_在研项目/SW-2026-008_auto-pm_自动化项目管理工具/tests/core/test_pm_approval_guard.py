@@ -28,7 +28,7 @@ from tests.core.test_pm_run_e2e import PROJECT_ID
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_facade_service import PmFacadeError
 else:
-    from auto_pm.core.pm_facade_service import PmFacadeError
+    from auto_pm.application.core.pm_facade_service import PmFacadeError
 
 _REFUSAL = "要改同一批文件"
 RELEASE = "user-confirmation:TD071-CARD3-RELEASE"
@@ -195,7 +195,7 @@ def test_g07_a_retry_of_a_released_approval_is_not_blocked_by_its_own_mission(tm
 
 
 def test_g08_the_release_does_not_let_a_card_start_while_another_is_active(tmp_path: Path) -> None:
-    from auto_pm.core.mission_service import MissionServiceError
+    from auto_pm.application.core.mission_service import MissionServiceError
 
     env, first_hash, second_hash = _two_requests(tmp_path)
     first = env.approve("REQ-GUARD-A", first_hash)

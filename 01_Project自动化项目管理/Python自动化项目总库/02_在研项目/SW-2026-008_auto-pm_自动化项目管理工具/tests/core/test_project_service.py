@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.core.project_service import ProjectService
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ChangeRequestRepository
-from auto_pm.models import ChangeSummary, ProjectInfo, ProjectRecord
+
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.domain.models import ChangeSummary, ProjectInfo, ProjectRecord
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import ChangeRequestRepository
 
 
 def test_list_projects(tmp_workspace: Path) -> None:
