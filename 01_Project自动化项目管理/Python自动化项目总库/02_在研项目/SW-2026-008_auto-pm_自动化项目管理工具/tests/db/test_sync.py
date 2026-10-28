@@ -7,9 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from auto_pm.core.project_service import ProjectService
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.sync import SyncService
+
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.sync import SyncService
 
 # ── Fixtures ──────────────────────────────────────────
 
@@ -154,7 +155,7 @@ class TestSyncChanges:
         self, db: DatabaseManager, workspace_with_project: Path
     ) -> None:
         """有 ChangeService 时同步变更单"""
-        from auto_pm.change.change_service import ChangeService
+        from auto_pm.domain.change.change_service import ChangeService
 
         project_service = ProjectService(str(workspace_with_project))
         change_service = ChangeService(str(workspace_with_project))
@@ -173,7 +174,7 @@ class TestSyncChangesLegacyMonitoringLayout:
 
     @staticmethod
     def _synced_count(db: DatabaseManager, workspace: Path, monitor: str) -> int:
-        from auto_pm.change.change_service import ChangeService
+        from auto_pm.domain.change.change_service import ChangeService
 
         project_dir = workspace / "DJ-2026-001_测试项目"
         target = (
@@ -311,7 +312,7 @@ class TestScannerVersionChg085:
         self, db: DatabaseManager, workspace_with_project: Path
     ) -> None:
         """DB 中 scanner_version 不匹配时增量同步强制重扫"""
-        from auto_pm.db.sync import SCANNER_VERSION
+        from auto_pm.infrastructure.db.sync import SCANNER_VERSION
 
         project_service = ProjectService(str(workspace_with_project))
         # 用 v1 版本同步（模拟旧版 scanner 缓存）
