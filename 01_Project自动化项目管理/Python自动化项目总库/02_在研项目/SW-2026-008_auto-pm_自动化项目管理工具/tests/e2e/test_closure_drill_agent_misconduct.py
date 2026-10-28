@@ -25,7 +25,10 @@ from tests.e2e.test_closure_drill import (
     drive_mission,
     make_drill,
 )
-from tests.e2e.test_pmf_plc import PROJECT_ID, benchmark_tar  # noqa: F401 - module fixture re-used by name
+from tests.e2e.test_pmf_plc import (  # noqa: F401 - module fixture re-used by name
+    PROJECT_ID,
+    benchmark_tar,
+)
 
 
 def _store(root: Path):  # type: ignore[no-untyped-def]
