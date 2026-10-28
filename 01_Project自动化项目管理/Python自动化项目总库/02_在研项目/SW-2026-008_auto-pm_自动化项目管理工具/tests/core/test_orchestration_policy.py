@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from auto_pm.core.orchestration_policy import OrchestrationPolicy
-
+from auto_pm.application.core.orchestration_policy import OrchestrationPolicy
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.mission import (
     AuthorityAudit,
