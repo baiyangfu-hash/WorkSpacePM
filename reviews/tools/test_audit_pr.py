@@ -277,3 +277,31 @@ def test_audit_reads_statuses_from_github(world, monkeypatch):
     answers["/status"] = None
     _info, checks = world["audit"](31, network=True)
     assert status(checks, "ci_result") == "UNVERIFIED"
+
+
+def _cut_the_network(work: Path) -> None:
+    run(work, "remote", "set-url", "origin", str(work.parent / "no-such-remote.git"))
+
+
+def test_offline_audit_uses_local_refs_and_does_not_fetch(world, monkeypatch):
+    head = world["open_pr"](40, {"src/app.py": "x = 2\n"})
+    world["audit"](40)  # online once: leaves refs/audit/pr-40 and origin/main in the clone
+    _cut_the_network(world["work"])
+    info, _ = audit_pr.audit(40, repo="x/y", remote="origin", network=False, fetch=False, cwd=str(world["work"]), patch=None, patch_base=None)
+    assert info["head"] == head
+    monkeypatch.chdir(world["work"])
+    assert audit_pr.main(["40", "--offline", "--skip-ci-result"]) in (0, 1)  # never 2: no fetch was tried
+
+
+def test_offline_audit_without_local_refs_says_what_is_missing(world):
+    world["open_pr"](41, {"src/app.py": "x = 2\n"})
+    _cut_the_network(world["work"])
+    with pytest.raises(audit_pr.GitError, match="refs/audit/pr-41"):
+        audit_pr.audit(41, repo="x/y", remote="origin", network=False, fetch=False, cwd=str(world["work"]), patch=None, patch_base=None)
+
+
+def test_online_audit_still_fetches_so_a_dead_network_is_an_error(world):
+    world["open_pr"](42, {"src/app.py": "x = 2\n"})
+    _cut_the_network(world["work"])
+    with pytest.raises(audit_pr.GitError):
+        world["audit"](42)
