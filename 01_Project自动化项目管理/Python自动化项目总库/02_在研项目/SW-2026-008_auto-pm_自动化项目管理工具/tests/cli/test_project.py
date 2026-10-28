@@ -875,6 +875,9 @@ class TestDocRefresh:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        from tests.identity_support import guard_off
+
+        guard_off(monkeypatch, "doc")  # the scratch workspace has no registered project anchor
         monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
         _write_spec_registry(tmp_path)
         dest_dir = tmp_path / "0100_项目"
