@@ -391,6 +391,19 @@ def test_r02_a_controller_that_dies_is_not_replaced_by_a_guess_and_the_session_i
     assert len(_events(scene.root, "EXECUTION_START_CLAIMED")) == 1
 
 
+def _drop_runtime_root(root: Path) -> None:
+    """This scene's launcher is not a deployed release, so the runtime identity of a write cannot be verified (TD-SW008-214).
+
+    The test is about the lease-expiry defence, not about the identity guard: leave the project registered without a runtime root.
+    """
+
+    registry = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
+    payload = json.loads(registry.read_text(encoding="utf-8"))
+    for project in payload["projects"]:
+        project.pop("runtime_root", None)
+    registry.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def test_r03_an_expired_lease_never_turns_into_success(scene: Scene) -> None:
     _short_lease_dispatch(scene.root, "OP-V04-R03")
     controller = scene.controller("OP-V04-R03")
@@ -411,6 +424,7 @@ def test_r03_an_expired_lease_never_turns_into_success(scene: Scene) -> None:
     assert not _events(scene.root, "RUN_TRANSITIONED", controller.run_id)
     resumed = ContinuityResumeService(scene.root).collect(project_id=PROJECT_ID, invocation_path=scene.root)
     assert "LEASE_EXPIRED" in resumed.conflicts and resumed.next_legal_action == ""
+    _drop_runtime_root(scene.root)
     events_before = _query(scene.root, "SELECT rowid, event_type, aggregate_id FROM events ORDER BY rowid")
     renewal = scene.command(
         "lease", "renew", "--run-id", controller.run_id, "--owner", lease.owner_id, "--lease-token-env", "V04_LEASE_TOKEN",
