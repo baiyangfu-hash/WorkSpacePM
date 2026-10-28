@@ -13,10 +13,9 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.pm_facade_service import PmFacadeError
 from click.testing import CliRunner
 
+from auto_pm.application.core.pm_facade_service import PmFacadeError
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.plan_checklist import (
     AcceptanceCheck,
@@ -26,6 +25,7 @@ from auto_pm.contracts.plan_checklist import (
 )
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PmIntent
 from auto_pm.domain.change.decision_service import DecisionService, DecisionValidationError
+from auto_pm.ui.cli.__main__ import cli
 from tests.cli.test_pm_facade import _setup_planning
 from tests.core.test_pm_facade_service import _audit_scene, _p10_facade
 from tests.plan_checklist_support import full_checklist

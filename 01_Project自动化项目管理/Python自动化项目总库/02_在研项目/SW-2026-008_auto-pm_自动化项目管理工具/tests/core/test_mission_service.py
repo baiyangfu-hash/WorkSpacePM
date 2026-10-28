@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from auto_pm.core.mission_service import MissionService, MissionServiceError
-from auto_pm.core.work_registry_service import WorkRegistryService
 
+from auto_pm.application.core.mission_service import MissionService, MissionServiceError
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.mission import (
     OPEN_MISSION_SOFT_LIMIT,

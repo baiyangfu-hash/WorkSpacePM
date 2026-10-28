@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
 
 from auto_pm.application.core.implementation_card_precheck import (
     CommandNode,
@@ -15,6 +14,7 @@ from auto_pm.application.core.implementation_card_precheck import (
     resolve_command,
     scopes_outside_card,
 )
+from auto_pm.ui.cli.__main__ import cli
 from auto_pm.ui.cli.implementation_card import command_tree_of
 from tests.git_support import git_out
 
