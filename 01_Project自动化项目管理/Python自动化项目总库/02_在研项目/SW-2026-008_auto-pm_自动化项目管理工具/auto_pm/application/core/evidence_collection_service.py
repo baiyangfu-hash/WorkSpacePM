@@ -1640,19 +1640,42 @@ class EvidenceCollectionService:
         return tuple(digests)
 
     @staticmethod
-    def _plc_checker_digest() -> str:
-        """Fingerprint the checker package bytes that produced the verdict."""
+    def _plc_checker_files() -> list[tuple[str, Path]]:
+        """List the files whose bytes decide the PLC verdict: the checker package plus the modules outside it that it relies on.
+
+        Outside the package the verdict depends on exactly two modules (measured from ``sys.modules`` after importing
+        the checker): ``find_prd_dir`` and its constants (``ext/paths.py``), and ``CheckResult.add`` / ``all_pass``, which
+        turn items into pass/warn/fail counts (``ext/models_plc.py``). ``ProjectType`` is a ``Literal`` constant only.
+
+        Boundary (TD-SW008-033): inputs outside the project roots that Git ignores are not bound; they are
+        covered, if at all, by the per-project input digests.
+        """
 
         from auto_pm.plc import checker as plc_checker
+
+        from auto_pm.application.core.paths import find_prd_dir
+        from auto_pm.domain.models.plc import CheckResult
 
         location = getattr(plc_checker, "__file__", None)
         if not location:
             raise EvidenceCollectionError("PLC 检查器位置无法确定")
         package = Path(location).resolve().parent
+        files = [(path.name, path) for path in sorted(package.glob("*.py"))]
+        for label, owner in (("ext/paths.py", find_prd_dir), ("ext/models_plc.py", CheckResult)):
+            module_file = getattr(sys.modules.get(owner.__module__), "__file__", None)
+            if not module_file:
+                raise EvidenceCollectionError(f"PLC 检查器依赖的模块位置无法确定: {label}")
+            files.append((label, Path(module_file).resolve()))
+        return files
+
+    @staticmethod
+    def _plc_checker_digest() -> str:
+        """Fingerprint the checker package bytes (and the modules it depends on) that produced the verdict."""
+
         return _sha256_payload(
             [
-                (path.name, hashlib.sha256(path.read_bytes()).hexdigest())
-                for path in sorted(package.glob("*.py"))
+                (name, hashlib.sha256(path.read_bytes()).hexdigest())
+                for name, path in EvidenceCollectionService._plc_checker_files()
             ]
         )
 
