@@ -613,3 +613,19 @@ def test_p17_the_bound_models_module_really_holds_the_pass_fail_counting() -> No
     path = dict(EvidenceCollectionService._plc_checker_files())["ext/models_plc.py"]
     text = path.read_text(encoding="utf-8")
     assert "class CheckResult" in text and "def add" in text and "all_pass" in text
+
+
+@pytest.mark.parametrize(
+    ("module_name", "label"),
+    [("auto_pm.application.core.paths", "ext/paths.py"), ("auto_pm.domain.models.plc", "ext/models_plc.py")],
+)
+def test_p15_an_unlocatable_bound_module_raises_instead_of_silently_dropping_out_of_the_digest(
+    monkeypatch: pytest.MonkeyPatch, module_name: str, label: str
+) -> None:
+    """拿不到所绑模块的位置就报错，不能悄悄少绑一个文件让指纹变弱（审计 325 的漏网变异）。"""
+    import sys
+
+    EvidenceCollectionService._plc_checker_files()  # 先确保模块已加载
+    monkeypatch.setattr(sys.modules[module_name], "__file__", None)
+    with pytest.raises(EvidenceCollectionError, match=label):
+        EvidenceCollectionService._plc_checker_files()
