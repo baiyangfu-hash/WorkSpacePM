@@ -22,6 +22,7 @@ import pytest
 import auto_pm
 from auto_pm.contracts.continuity import HandoffV2, LeaseItem, RunState
 from tests.core.test_continuity_execution_service import Clock, _checkpoint, _services, _start
+from tests.workspace_support import register_project
 
 if TYPE_CHECKING:
     from auto_pm.application.core.continuity_execution_service import (
@@ -122,6 +123,7 @@ def scene(tmp_path: Path) -> Scene:
     root = tmp_path / "ws"
     root.mkdir()
     _, service = _services(root, clock)
+    register_project(root, "SW-2026-008")
     _start(service, lease_token=TOKEN_A)
     service.transition_run(RUN_ID, RunState.RUNNING, OWNER_A, TOKEN_A, "to-running")
     (root / "main.py").write_text(LAUNCHER, encoding="utf-8")

@@ -7,6 +7,8 @@ these helpers give each write command the same refusal, keyed by the project the
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import click
 
 from auto_pm.app_context import AppContext
@@ -28,6 +30,25 @@ def require_runtime_identity(ctx: click.Context, project_id: str) -> None:
         raise click.ClickException("运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
 
 
+def warn_runtime_identity(ctx: click.Context, project_id: str | Callable[[], str]) -> None:
+    """Recovery commands never refuse (they are what repairs a broken runtime); a conflict is only reported on stderr.
+
+    ``project_id`` may be a callable so that a failed lookup (the very Run being repaired may be unreadable) also only warns.
+    """
+
+    try:
+        resolved = project_id() if callable(project_id) else project_id
+        app_ctx: AppContext = ctx.find_root().obj
+        context = WorkspaceContextService(
+            str(app_ctx.control_root), execution_root=app_ctx.workspace_root
+        ).resolve(project_id=resolved, start_path=app_ctx.control_root)
+    except (WorkspaceContextError, click.ClickException) as error:
+        click.echo(f"警告：运行身份无法核对，恢复命令照常执行：{error}", err=True)
+        return
+    if context.conflicts:
+        click.echo("警告：运行身份有冲突，恢复命令照常执行：" + "；".join(context.conflicts), err=True)
+
+
 def project_of_mission(ctx: click.Context, mission_id: str) -> str:
     """The project a Mission belongs to, for commands that are given only a Mission."""
 
@@ -45,6 +66,38 @@ def project_of_run(ctx: click.Context, run_id: str) -> str:
     store = ContinuityStore(app_ctx.control_root)
     try:
         return store.get_work(store.get_run(run_id.strip()).work_id).subject_project_id
+    except (ContinuityStoreError, ValueError) as error:
+        raise click.ClickException(str(error)) from error
+
+
+def project_of_work(ctx: click.Context, work_id: str) -> str:
+    """The project a Work item belongs to."""
+
+    app_ctx: AppContext = ctx.find_root().obj
+    try:
+        return ContinuityStore(app_ctx.control_root).get_work(work_id.strip()).subject_project_id
+    except (ContinuityStoreError, ValueError) as error:
+        raise click.ClickException(str(error)) from error
+
+
+def project_of_checkpoint(ctx: click.Context, checkpoint_id: str) -> str:
+    """The project a checkpoint belongs to (checkpoint -> Run -> Work)."""
+
+    app_ctx: AppContext = ctx.find_root().obj
+    store = ContinuityStore(app_ctx.control_root)
+    try:
+        return store.get_work(store.get_run(store.get_checkpoint(checkpoint_id.strip()).run_id).work_id).subject_project_id
+    except (ContinuityStoreError, ValueError) as error:
+        raise click.ClickException(str(error)) from error
+
+
+def project_of_handoff(ctx: click.Context, handoff_id: str) -> str:
+    """The project a v2 handoff belongs to (handoff -> Work)."""
+
+    app_ctx: AppContext = ctx.find_root().obj
+    store = ContinuityStore(app_ctx.control_root)
+    try:
+        return store.get_work(store.get_handoff(handoff_id.strip()).work_id).subject_project_id
     except (ContinuityStoreError, ValueError) as error:
         raise click.ClickException(str(error)) from error
 

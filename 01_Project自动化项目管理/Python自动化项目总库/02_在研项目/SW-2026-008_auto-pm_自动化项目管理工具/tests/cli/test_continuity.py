@@ -39,6 +39,9 @@ from auto_pm.contracts.mission import (
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.git_support import git_do
 
+# These tests are about something other than the runtime identity; their fixtures have no registered project anchor.
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 def _git(root: Path, *args: str) -> None:
     git_do(root, *args)

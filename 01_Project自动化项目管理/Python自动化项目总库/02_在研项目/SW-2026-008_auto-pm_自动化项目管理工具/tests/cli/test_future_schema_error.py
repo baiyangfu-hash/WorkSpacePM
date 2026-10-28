@@ -13,6 +13,9 @@ from click.testing import CliRunner
 
 import auto_pm.infrastructure.continuity_store as store_module
 
+# These tests are about something other than the runtime identity; their fixtures have no registered project anchor.
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 def _repository(root: Path) -> None:
     subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True)
