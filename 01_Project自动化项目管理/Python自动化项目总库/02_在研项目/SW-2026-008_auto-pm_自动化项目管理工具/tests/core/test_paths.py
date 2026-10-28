@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from auto_pm.core.paths import (
+from auto_pm.application.core.paths import (
     CHANGE_RECORDS_PATH,
     CHANGE_REQUESTS_PATH,
     CHANGE_SCAN_PATH,

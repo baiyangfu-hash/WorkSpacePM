@@ -7,14 +7,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import auto_pm.core.microtask_projection_service as projection_module
 import pytest
-from auto_pm.core.execution_supervisor_service import ExecutionSupervisorService
-from auto_pm.core.microtask_projection_service import (
+
+import auto_pm.application.core.microtask_projection_service as projection_module
+from auto_pm.application.core.execution_supervisor_service import ExecutionSupervisorService
+from auto_pm.application.core.microtask_projection_service import (
     MicrotaskProjectionError,
     MicrotaskProjectionService,
 )
-
 from auto_pm.contracts.execution_adapter import (
     ExecutionProjectionFile,
     ExecutionStartEvidence,
