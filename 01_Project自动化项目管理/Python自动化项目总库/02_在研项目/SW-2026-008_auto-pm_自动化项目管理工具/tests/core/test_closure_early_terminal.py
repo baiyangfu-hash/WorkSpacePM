@@ -14,15 +14,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from auto_pm.change.ledger_reconciler import ReconcileDiff
-from auto_pm.core.pm_closure_service import (
+
+from auto_pm.application.core.pm_closure_service import (
     ClosureCompletionState,
     PmClosureError,
     PmClosureService,
 )
-
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.mission import MissionState
+from auto_pm.domain.change.ledger_reconciler import ReconcileDiff
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from tests.core.test_pm_closure_service import (
     _DECISION_ID,
