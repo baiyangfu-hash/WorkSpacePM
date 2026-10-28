@@ -155,3 +155,39 @@ def test_plc_docs_writes_are_refused_but_previews_and_isolated_copies_are_not(
     CliRunner().invoke(docs_group, ["confirm", "--project-path", str(tmp_path)], obj=_obj(tmp_path))
     assert asked == []
     assert calls == ["sync", "confirm"]  # the preview and the isolated copy did run
+
+
+def test_ingest_stage_only_does_not_ask_the_guard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """--stage-only fills only the isolated .ingest_staging area, so a conflict must not stop it."""
+
+    asked: list[str] = []
+    monkeypatch.setattr(plc_cli, "require_runtime_identity", _refuse(asked))
+
+    class _Plc:
+        def __init__(self, *_a: object, **_k: object) -> None: ...
+
+        def resolve_project_path(self, project_id: str) -> str:
+            return str(tmp_path / project_id)
+
+    monkeypatch.setattr(plc_cli, "PlcService", _Plc)
+    monkeypatch.setattr(
+        "auto_pm.application.plc.ingest_service.PlcIngestService",
+        lambda *_a, **_k: SimpleNamespace(
+            ingest_to_staging=lambda **_kw: SimpleNamespace(total_variables=0, total_alarms=0, total_servos=0, total_ios=0)
+        ),
+    )
+    result = CliRunner().invoke(plc_group, ["ingest", "--src", "x", "--pid", "P-1", "--stage-only"], obj=_obj(tmp_path))
+    assert asked == []
+    assert "已拒绝写入" not in result.output
+    assert result.exit_code == 0
+
+
+def test_plc_docs_plan_on_an_isolated_copy_does_not_ask_the_guard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from auto_pm.ui.cli.plc import docs as docs_cli
+    from auto_pm.ui.cli.plc.docs import docs_group
+
+    asked: list[str] = []
+    monkeypatch.setattr(docs_cli, "require_runtime_identity", _refuse(asked))
+    args = ["plan", "P-1", "--project-path", str(tmp_path), "--start", "2026-01-01", "--type", docs_cli.cp.MAIN_TYPES[0], "--scale", "单机", "--write"]
+    CliRunner().invoke(docs_group, args, obj=_obj(tmp_path))
+    assert asked == []
