@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from auto_pm.config.app_config import AutoPmConfig
+from auto_pm.infrastructure.config.app_config import AutoPmConfig
 
 
 def test_settings() -> None:
