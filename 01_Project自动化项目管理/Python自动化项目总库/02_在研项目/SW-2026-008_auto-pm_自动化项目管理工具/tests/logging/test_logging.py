@@ -5,7 +5,8 @@ from io import StringIO
 from unittest.mock import Mock
 
 import pytest
-from auto_pm.logging.logging import setup_logger
+
+from auto_pm.infrastructure.logging.logging import setup_logger
 
 
 def _mock_app_name() -> str:

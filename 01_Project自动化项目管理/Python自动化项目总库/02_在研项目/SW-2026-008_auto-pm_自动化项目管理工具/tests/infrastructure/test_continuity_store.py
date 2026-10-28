@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core.work_registry_service import WorkRegistryService
 
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkState
 from auto_pm.contracts.pm_facade import PlanningDraft, PmIntent
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
