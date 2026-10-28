@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core import pm_facade_service as facade_module
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
-from auto_pm.core.pm_facade_service import PmFacadeError
 
+from auto_pm.application.core import pm_facade_service as facade_module
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.application.core.pm_facade_service import PmFacadeError
 from auto_pm.contracts.continuity import RunState
 from auto_pm.contracts.declared_dirty import (
     DECLARED_DIRTY_MISMATCH,

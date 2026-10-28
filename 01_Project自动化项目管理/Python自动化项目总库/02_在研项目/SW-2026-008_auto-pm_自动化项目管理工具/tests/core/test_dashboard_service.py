@@ -13,12 +13,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.core.dashboard_service import DashboardService
-from auto_pm.core.project_service import ProjectService
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ChangeRequestRepository
-from auto_pm.models import ChangeSummary, ProjectRecord
+
+from auto_pm.application.core.dashboard_service import DashboardService
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.models import ChangeSummary, ProjectRecord
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import ChangeRequestRepository
 
 
 class _FakeCheckResult:
