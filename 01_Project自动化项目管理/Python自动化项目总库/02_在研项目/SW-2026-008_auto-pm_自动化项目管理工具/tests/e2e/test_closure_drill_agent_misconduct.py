@@ -11,20 +11,21 @@ from __future__ import annotations
 import json
 import secrets
 from pathlib import Path
+from typing import Any, cast
 
 from tests.e2e.test_closure_drill import (
     APPROVER,
     MAIN_DOMAIN,
-    PROJECT_ID,
     SECOND,
     SECOND_ID,
+    Drill,
     assert_closed_and_clean,
-    benchmark_tar,  # noqa: F401 - module fixture re-used by name
     close_mission,
     comment_files,
     drive_mission,
     make_drill,
 )
+from tests.e2e.test_pmf_plc import PROJECT_ID, benchmark_tar  # noqa: F401 - module fixture re-used by name
 
 
 def _store(root: Path):  # type: ignore[no-untyped-def]
@@ -33,8 +34,8 @@ def _store(root: Path):  # type: ignore[no-untyped-def]
     return ContinuityStore(root)
 
 
-def _card(drill, request_id: str) -> dict:  # type: ignore[no-untyped-def,type-arg]
-    return json.loads((drill.tools / f"card-{request_id}.json").read_text(encoding="utf-8"))
+def _card(drill: Drill, request_id: str) -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads((drill.tools / f"card-{request_id}.json").read_text(encoding="utf-8")))
 
 
 def test_r01_by_the_book_orient_shows_no_conflict_and_the_mission_closes(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
@@ -92,7 +93,7 @@ def _same_number_in_both_projects(drill) -> str:  # type: ignore[no-untyped-def]
     assert created.returncode == 0, drill.transcript()
     sheets = sorted((drill.root / SECOND).glob(f"**/CHG-{MAIN_DOMAIN}-*.md"))
     assert len(sheets) == 1, sheets
-    return sheets[0].stem
+    return str(sheets[0].stem)
 
 
 def test_r03_change_without_pid_on_a_number_two_projects_share_is_refused(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811
