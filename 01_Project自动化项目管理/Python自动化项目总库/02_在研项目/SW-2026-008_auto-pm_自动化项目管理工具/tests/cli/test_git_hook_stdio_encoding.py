@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 from auto_pm.cli import git_hook as git_hook_module
@@ -30,8 +31,8 @@ def test_make_stdio_encoding_safe_lets_the_hook_prints_through(monkeypatch: pyte
     git_hook_module.make_stdio_encoding_safe()
     print("❌ [auto-pm ledger gate] 台账对账不一致")
     print("⚠️ [auto-pm pre-commit] 无关提示", file=sys.stderr)
-    assert "台账对账不一致".encode("gbk") in out.buffer.getvalue()
-    assert b"?" in out.buffer.getvalue()  # emoji 换成 ?，汉字原样
+    assert "台账对账不一致".encode("gbk") in cast(io.BytesIO, out.buffer).getvalue()
+    assert b"?" in cast(io.BytesIO, out.buffer).getvalue()  # emoji 换成 ?，汉字原样
 
 
 def test_utf8_streams_are_untouched(monkeypatch: pytest.MonkeyPatch) -> None:

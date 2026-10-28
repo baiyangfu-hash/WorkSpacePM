@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 
 def register_project(root: Path, project_id: str, folder: str | None = None) -> None:
@@ -24,7 +25,7 @@ def register_project(root: Path, project_id: str, folder: str | None = None) -> 
         anchor.write_text(f"project_id: {project_id}\nproject_name: Fixture\nstack: python\n", encoding="utf-8")
     registry = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
     registry.parent.mkdir(parents=True, exist_ok=True)
-    payload = (
+    payload: dict[str, Any] = (
         json.loads(registry.read_text(encoding="utf-8"))
         if registry.exists()
         else {"schema_version": "workspace-registry.v1", "projects": []}

@@ -1362,7 +1362,7 @@ def test_td_closure_alert_a_failed_closure_stays_on_screen_after_the_refresh_unt
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: retry_button() is not None and bridge._snapshot_worker is None)
         assert not banner_visible()
-        assert QMetaObject.invokeMethod(retry_button(), "clicked")
+        assert QMetaObject.invokeMethod(cast(QObject, retry_button()), "clicked")
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: len(results) == 1)
         assert results[0][1] is False
@@ -1388,13 +1388,13 @@ def test_td_closure_alert_a_failed_closure_stays_on_screen_after_the_refresh_unt
         pump(lambda: not banner_visible())
 
         # Fail again, then succeed: success clears the alert for that Mission by itself.
-        assert QMetaObject.invokeMethod(retry_button(), "clicked")
+        assert QMetaObject.invokeMethod(cast(QObject, retry_button()), "clicked")
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: len(results) == 2 and banner_visible())
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: bridge._snapshot_worker is None and retry_button() is not None)
         read_only[0] = False
-        assert QMetaObject.invokeMethod(retry_button(), "clicked")
+        assert QMetaObject.invokeMethod(cast(QObject, retry_button()), "clicked")
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: len(results) == 3)
         assert results[2][1] is True

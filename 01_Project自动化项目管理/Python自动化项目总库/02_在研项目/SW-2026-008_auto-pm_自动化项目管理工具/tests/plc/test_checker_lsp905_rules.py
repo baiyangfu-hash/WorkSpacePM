@@ -3,7 +3,7 @@
 from auto_pm.domain.plc.scl_linter import SclLinter
 
 
-def test_goto_syntax_violation():
+def test_goto_syntax_violation() -> None:
     scl_code = """
 FUNCTION_BLOCK FB_Test
 VAR
@@ -19,7 +19,7 @@ END_FUNCTION_BLOCK
     assert any("GOTO" in rid for rid in rule_ids)
 
 
-def test_repeat_syntax_violation():
+def test_repeat_syntax_violation() -> None:
     scl_code = """
 FUNCTION_BLOCK FB_Test
 VAR
@@ -36,7 +36,7 @@ END_FUNCTION_BLOCK
     assert any("REPEAT" in rid for rid in rule_ids)
 
 
-def test_pointer_syntax_violation():
+def test_pointer_syntax_violation() -> None:
     scl_code = """
 FUNCTION_BLOCK FB_Test
 VAR
@@ -49,7 +49,7 @@ END_FUNCTION_BLOCK
     assert any("POINTER" in rid for rid in rule_ids)
 
 
-def test_time_literal_violation():
+def test_time_literal_violation() -> None:
     scl_code = """
 FUNCTION_BLOCK FB_Test
 VAR
@@ -63,7 +63,7 @@ END_FUNCTION_BLOCK
     assert any("TIME" in rid or "TIMER" in rid for rid in rule_ids)
 
 
-def test_case_no_else_violation():
+def test_case_no_else_violation() -> None:
     scl_code = """
 FUNCTION_BLOCK FB_StateMachine
 VAR
@@ -82,7 +82,7 @@ END_FUNCTION_BLOCK
     assert any("CASE" in rid or "ELSE" in rid for rid in rule_ids)
 
 
-def test_var_prefix_violations():
+def test_var_prefix_violations() -> None:
     scl_code = """
 FUNCTION_BLOCK FB_PrefixTest
 VAR_INPUT
@@ -101,7 +101,7 @@ END_FUNCTION_BLOCK
     assert any("PREFIX" in rid or "VAR" in rid for rid in rule_ids)
 
 
-def test_clean_scl_passes():
+def test_clean_scl_passes() -> None:
     clean_code = """
 FUNCTION_BLOCK FB_PerfectBlock
 VAR_INPUT

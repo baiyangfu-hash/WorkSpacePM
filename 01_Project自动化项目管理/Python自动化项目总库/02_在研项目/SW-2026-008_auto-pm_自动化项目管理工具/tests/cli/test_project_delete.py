@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -180,7 +181,7 @@ def test_d08_unreadable_git_state_is_not_a_green_light(
     def broken(*args: Any, **kwargs: Any) -> Any:
         raise OSError("no git")
 
-    monkeypatch.setattr(guard.subprocess, "run", broken)
+    monkeypatch.setattr(subprocess, "run", broken)
     result = world.run("--confirm", "--approval-evidence-ref", USER_WORDS)
     assert result.exit_code == 1 and "读不出 Git 状态" in result.output and world.project.is_dir()
 

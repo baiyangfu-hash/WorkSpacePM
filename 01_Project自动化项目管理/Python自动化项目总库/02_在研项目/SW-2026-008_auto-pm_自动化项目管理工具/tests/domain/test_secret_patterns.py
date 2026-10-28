@@ -137,6 +137,6 @@ def test_p12_pre_commit_rejects_when_the_diff_cannot_be_read(
             raise OSError("boom")
         return real(cmd, *args, **kwargs)
 
-    monkeypatch.setattr(hook.subprocess, "run", broken)
+    monkeypatch.setattr(subprocess, "run", broken)
     assert hook._enforce_secret_scan(repo) == 1
     assert "无法扫描暂存区密钥" in capsys.readouterr().out

@@ -7,7 +7,7 @@ from pathlib import Path
 from auto_pm.application.plc.ingest_service import PlcIngestService
 
 
-def test_plc_ingest_service_basic():
+def test_plc_ingest_service_basic() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         ws = Path(tmp_dir)
         src_dir = ws / "src_autoshop"

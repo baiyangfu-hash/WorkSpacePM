@@ -1,11 +1,12 @@
 """Matrix unit tests for PlcChecker (LSP-907 / PM-042 / CHG-SCPT-2026-163)."""
 
 import json
+from pathlib import Path
 
 from auto_pm.domain.plc.checker import PlcChecker
 
 
-def test_python_project_skipped(tmp_path):
+def test_python_project_skipped(tmp_path: Path) -> None:
     # Python project with pyproject.toml should be marked not_applicable
     (tmp_path / "pyproject.toml").write_text("[project]\nname='test-py'\n", encoding="utf-8")
     checker = PlcChecker(str(tmp_path))
@@ -14,7 +15,7 @@ def test_python_project_skipped(tmp_path):
     assert "Python 项目" in res.not_applicable_reason
 
 
-def test_plc_json_missing_fields(tmp_path):
+def test_plc_json_missing_fields(tmp_path: Path) -> None:
     # .plc.json missing version and description
     plc_json = tmp_path / ".plc.json"
     plc_json.write_text(json.dumps({"name": "TestPLC"}), encoding="utf-8")
@@ -27,7 +28,7 @@ def test_plc_json_missing_fields(tmp_path):
     assert any(".plc.json" in item for item in fail_items)
 
 
-def test_pm_session_line_count_thresholds(tmp_path):
+def test_pm_session_line_count_thresholds(tmp_path: Path) -> None:
     # Test line count threshold warning (>150)
     plc_json = tmp_path / ".plc.json"
     plc_json.write_text(json.dumps({"name": "TestPLC", "description": "desc", "version": "1.0.0"}), encoding="utf-8")
@@ -42,7 +43,7 @@ def test_pm_session_line_count_thresholds(tmp_path):
     assert any("PM_SESSION" in item for item in warn_items)
 
 
-def test_prd_docs_detection(tmp_path):
+def test_prd_docs_detection(tmp_path: Path) -> None:
     # Test PRD standard set under PRD/
     plc_json = tmp_path / ".plc.json"
     plc_json.write_text(json.dumps({"name": "TestPLC", "description": "desc", "version": "1.0.0"}), encoding="utf-8")
@@ -61,7 +62,7 @@ def test_prd_docs_detection(tmp_path):
     assert any("PRD" in item for item in passed_items)
 
 
-def test_scl_compliance_integration(tmp_path):
+def test_scl_compliance_integration(tmp_path: Path) -> None:
     # Test SCL compliance check under 02_PLC程序
     plc_json = tmp_path / ".plc.json"
     plc_json.write_text(json.dumps({"name": "TestPLC", "description": "desc", "version": "1.0.0"}), encoding="utf-8")
