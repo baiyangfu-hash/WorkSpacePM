@@ -1641,7 +1641,11 @@ class EvidenceCollectionService:
 
     @staticmethod
     def _plc_checker_files() -> list[tuple[str, Path]]:
-        """List the files whose bytes decide the PLC verdict: the checker package plus the modules it calls into.
+        """List the files whose bytes decide the PLC verdict: the checker package plus the modules outside it that it relies on.
+
+        Outside the package the verdict depends on exactly two modules (measured from ``sys.modules`` after importing
+        the checker): ``find_prd_dir`` and its constants (``ext/paths.py``), and ``CheckResult.add`` / ``all_pass``, which
+        turn items into pass/warn/fail counts (``ext/models_plc.py``). ``ProjectType`` is a ``Literal`` constant only.
 
         Boundary (TD-SW008-033): inputs outside the project roots that Git ignores are not bound; they are
         covered, if at all, by the per-project input digests.
@@ -1650,15 +1654,18 @@ class EvidenceCollectionService:
         from auto_pm.plc import checker as plc_checker
 
         from auto_pm.application.core.paths import find_prd_dir
+        from auto_pm.domain.models.plc import CheckResult
 
         location = getattr(plc_checker, "__file__", None)
         if not location:
             raise EvidenceCollectionError("PLC 检查器位置无法确定")
         package = Path(location).resolve().parent
         files = [(path.name, path) for path in sorted(package.glob("*.py"))]
-        # 检查器按 find_prd_dir 找接口文档；它不在 plc 包里，改了它同样会改判卷结果。
-        prd_module = Path(find_prd_dir.__code__.co_filename).resolve()
-        files.append((f"ext/{prd_module.name}", prd_module))
+        for label, owner in (("ext/paths.py", find_prd_dir), ("ext/models_plc.py", CheckResult)):
+            module_file = getattr(sys.modules.get(owner.__module__), "__file__", None)
+            if not module_file:
+                raise EvidenceCollectionError(f"PLC 检查器依赖的模块位置无法确定: {label}")
+            files.append((label, Path(module_file).resolve()))
         return files
 
     @staticmethod
