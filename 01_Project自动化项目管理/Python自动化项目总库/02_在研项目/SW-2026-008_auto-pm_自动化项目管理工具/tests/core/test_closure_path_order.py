@@ -14,8 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from auto_pm.core.pm_closure_service import PmClosureError, PmClosureService
 
+from auto_pm.application.core.pm_closure_service import PmClosureError, PmClosureService
 from tests.core.test_pm_closure_service import (
     _CHECKPOINT_ID,
     _MISSION_ID,

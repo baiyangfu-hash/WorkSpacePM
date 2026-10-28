@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.core.ai_handoff_service import (
+
+from auto_pm.application.core.ai_handoff_service import (
     AiHandoffService,
     HandoffConflictError,
     HandoffError,

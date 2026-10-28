@@ -17,7 +17,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from auto_pm.change.ledger_reconciler import LedgerReconciler
 
 import auto_pm
 from auto_pm.api import CockpitApiError, CockpitClient
@@ -27,6 +26,7 @@ from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_cockpit import PmCockpitCompletionState
 from auto_pm.contracts.pm_facade import PlanningScopeCard, PmRunOutcome
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 from tests.core.test_pm_run_e2e import (
