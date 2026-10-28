@@ -212,7 +212,7 @@ def test_the_window_entry_point_returns_and_the_process_exits_with_a_global_pool
     env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
     started = time.monotonic()
     completed = subprocess.run(
-        [sys.executable, "-I", str(script), str(main)],
+        [sys.executable, str(script), str(main)],
         capture_output=True,
         text=True,
         encoding="utf-8",
