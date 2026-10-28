@@ -148,6 +148,11 @@ class WorkspaceContextService:
             conflicts=conflicts,
         )
 
+    def registered_project_ids(self) -> tuple[str, ...]:
+        """Read-only list of the project ids the Workspace Registry declares."""
+
+        return tuple(self._load_registry()[1])
+
     def _load_registry(
         self,
     ) -> tuple[WorkspaceRegistry, dict[str, WorkspaceProjectMapping]]:

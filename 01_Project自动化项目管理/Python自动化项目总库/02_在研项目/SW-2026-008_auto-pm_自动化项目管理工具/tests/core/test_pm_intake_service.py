@@ -347,7 +347,7 @@ def test_sv04_a_missing_evidence_file_or_unknown_project_is_refused_without_a_tr
             proposed_by="pm-test",
         )
     assert (desk.events(), desk.tables()) == before
-    assert desk.propose(ticket=desk.ticket(evidence=("file:README.md", "cmd:git status --short", "chg:CHG-SCPT-2026-378")))
+    assert desk.propose(ticket=desk.ticket(evidence=("file:README.md", "cmd:git status --short")))
 
 
 def test_sv05_a_safety_emergency_must_declare_the_safe_impact_scope(desk: Desk) -> None:
@@ -603,3 +603,95 @@ def test_sv15_recording_confirming_and_planning_never_touch_execution_state(tmp_
     service.confirm(item.item_id, ticket_hash=item.ticket_hash, approver=APPROVER, approval_evidence_ref=CONFIRMATION)
     service.list_items("SW-2026-008")
     assert snapshot() == before and run_events() == before_events
+
+
+# ---- TD-SW008-072：取证里的 chg / commit / ledger 入箱时只读核验确实存在 ----
+
+
+class _KnownChanges:
+    """Stands in for the change service: only the listed numbers exist, and the first lookup may be project-scoped."""
+
+    def __init__(self, known: set[str], *, only_unscoped: bool = False) -> None:
+        self.known = known
+        self.only_unscoped = only_unscoped
+        self.calls: list[tuple[str, str | None]] = []
+
+    def next_change_number(self, project_id: str, domain: str) -> str:
+        return "CHG-SCPT-2026-900"
+
+    def get_change_request(self, change_number: str, project_id: str | None = None) -> object | None:
+        self.calls.append((change_number, project_id))
+        if self.only_unscoped and project_id is not None:
+            return None
+        return object() if change_number in self.known else None
+
+
+def _head(root: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_td072_a_cited_change_request_must_exist(desk: Desk) -> None:
+    before = (desk.events(), desk.tables())
+    with pytest.raises(PmIntakeError, match="取证变更单不存在"):
+        desk.propose(ticket=desk.ticket(evidence=("file:README.md", "chg:CHG-SCPT-2026-378")))
+    assert (desk.events(), desk.tables()) == before
+
+
+def test_td072_a_known_change_request_is_accepted_and_looked_up_project_first_then_anywhere(tmp_path: Path) -> None:
+    desk = _build_desk(tmp_path)
+    changes = _KnownChanges({"CHG-SCPT-2026-378"})
+    desk.service = PmIntakeService(tmp_path, change_service=changes)  # type: ignore[arg-type]
+    assert desk.propose(ticket=desk.ticket(evidence=("chg:CHG-SCPT-2026-378",)))
+    assert changes.calls == [("CHG-SCPT-2026-378", PYTHON_PROJECT)]
+    elsewhere = _KnownChanges({"CHG-SCPT-2026-379"}, only_unscoped=True)
+    desk.service = PmIntakeService(tmp_path, change_service=elsewhere)  # type: ignore[arg-type]
+    assert desk.propose(ticket=desk.ticket(evidence=("chg:CHG-SCPT-2026-379",)), title="别的项目的变更单")
+    assert elsewhere.calls == [("CHG-SCPT-2026-379", PYTHON_PROJECT), ("CHG-SCPT-2026-379", None)]
+
+
+def test_td072_a_cited_commit_must_be_a_commit_of_this_repository(desk: Desk) -> None:
+    head = _head(desk.root)
+    assert desk.propose(ticket=desk.ticket(evidence=(f"commit:{head}",)))
+    assert desk.propose(ticket=desk.ticket(evidence=(f"commit:{head[:7]}",)), title="短号也行")
+    with pytest.raises(PmIntakeError, match="取证提交不存在"):
+        desk.propose(ticket=desk.ticket(evidence=("commit:deadbeef",)), title="不存在的提交")
+    blob = subprocess.run(
+        ["git", "-C", str(desk.root), "rev-parse", "HEAD:README.md"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    with pytest.raises(PmIntakeError, match="取证提交不存在"):
+        desk.propose(ticket=desk.ticket(evidence=(f"commit:{blob}",)), title="不是提交的对象")
+
+
+def test_td072_a_cited_ledger_row_must_exist_in_the_project_ledger_folder(desk: Desk) -> None:
+    folder = desk.root / PYTHON_PROJECT / "04_监控" / "02_整改项"
+    (folder / "archive").mkdir(parents=True)
+    (folder / "活动技术债台账.md").write_text(
+        "| ID | 说明 |\n|---|---|\n| TD-SW901-001 | 活动条目 |\n正文里提到 TD-SW901-099 但不是表格行\n", encoding="utf-8"
+    )
+    (folder / "archive" / "已偿还.md").write_text("| TD-SW901-002 | 已偿还条目 |\n", encoding="utf-8")
+    for ledger_id in ("TD-SW901-001", "TD-SW901-002"):
+        assert desk.propose(ticket=desk.ticket(evidence=(f"ledger:{ledger_id}",)), title=f"引用 {ledger_id}")
+    for missing in ("TD-SW901-003", "TD-SW901-099"):
+        with pytest.raises(PmIntakeError, match="取证台账行不存在"):
+            desk.propose(ticket=desk.ticket(evidence=(f"ledger:{missing}",)), title=f"引用 {missing}")
+
+
+def test_td072_a_project_without_a_ledger_folder_refuses_ledger_evidence(desk: Desk) -> None:
+    with pytest.raises(PmIntakeError, match="取证台账行不存在"):
+        desk.propose(ticket=desk.ticket(evidence=("ledger:TD-SW901-001",)))
+
+
+def test_td072_cmd_evidence_is_still_only_a_claim(desk: Desk) -> None:
+    assert desk.propose(ticket=desk.ticket(evidence=("cmd:python -m this_does_not_exist",)))
+
+
+def test_td072_a_ledger_row_is_found_in_the_project_its_id_names_even_when_another_project_cites_it(desk: Desk) -> None:
+    folder = desk.root / PYTHON_PROJECT / "04_监控" / "02_整改项"
+    folder.mkdir(parents=True)
+    (folder / "活动技术债台账.md").write_text("| TD-SW901-007 | 驾驶舱债 |\n", encoding="utf-8")
+    # SW901 = SW-2026-901；PLC 项目引用它的债
+    assert desk.propose(project=PLC_PROJECT, kind=IntakeKind.BUG, ticket=desk.ticket(evidence=("ledger:TD-SW901-007",)))
+    with pytest.raises(PmIntakeError, match="取证台账行不存在"):
+        desk.propose(project=PLC_PROJECT, ticket=desk.ticket(evidence=("ledger:TD-SW901-008",)), title="没有这行")
