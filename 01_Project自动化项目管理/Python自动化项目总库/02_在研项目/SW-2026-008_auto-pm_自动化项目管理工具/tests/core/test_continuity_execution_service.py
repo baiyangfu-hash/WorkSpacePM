@@ -1925,6 +1925,24 @@ def test_second_writer_waits_for_a_slow_lock_holder(
     _hold_write_lock_then_contend(service._store, hold_seconds=1.0)
 
 
+def test_write_transaction_waits_thirty_seconds_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the shipped wait: connect timeout and busy_timeout are both 30 s (5 s made a second writer fail)."""
+
+    _, service = _services(tmp_path, Clock())
+    seen: list[float] = []
+    real_connect = sqlite3.connect
+
+    def spy(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        seen.append(kwargs.get("timeout", 5.0))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(continuity_store.sqlite3, "connect", spy)
+    with service._store._transaction() as conn:
+        busy_ms = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert seen == [30.0]
+    assert busy_ms == 30_000
+
+
 def test_second_writer_gives_up_after_the_write_lock_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
