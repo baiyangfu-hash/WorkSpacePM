@@ -1,5 +1,6 @@
 # 判卷脚本测试（TD-SW008-228）：reviews/tools 下的审计、越界检查、安全区检查等脚本自带测试，以前没有任何检查在跑它们。
-# 每个 PR 都运行（好设成必过检查）：没碰 reviews/tools 时只做一步判断，报“不适用（N/A）”后通过，不装依赖。
+# 每个 PR 都完整运行（好设成必过检查）：这些测试还会读 .github/ 下的 PR 模板与 pr-gate、safety-gate 工作流、0100_PLC自动化 下的 PLC 源码，
+# 改那些文件的 PR 不碰 reviews/tools，按“没碰就不适用”判断会假绿（审计 366），所以不做范围判断。
 # test_plc_ci.py 已由 plc-ci 负责，这里不重复跑。它是提前报警，不替代审计，结果也不是任何卡的验收证据。
 # 说明：项目文件夹 plans/技术债方案_TD228_判卷脚本测试接进CI_20261028.md。
 name: reviews-tools-ci
@@ -42,42 +43,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Does this change touch the judge scripts?
-        id: scope
-        env:
-          EVENT: ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          if [ "$EVENT" != pull_request ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! git cat-file -e "$PR_BASE^{commit}" 2>/dev/null; then
-            echo "::warning::cannot find the PR base $PR_BASE; running the tests (fail closed)"
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only "$PR_BASE" HEAD | grep -E '^(reviews/tools/|\.github/workflows/reviews-tools-ci\.yml$|00_Infrastructure/auto_pm/environment/requirements-lock-py312-win\.txt$)' > /dev/null; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "N/A: this change does not touch reviews/tools; nothing to test."
-          fi
-
       - uses: actions/setup-python@v5
-        if: steps.scope.outputs.run == 'true'
         with:
           python-version: "3.12"
 
       - name: Install the locked dependencies
-        if: steps.scope.outputs.run == 'true'
         run: |
           python -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
           python -m pip check
 
       # test_plc_ci.py is run by plc-ci.  -o addopts= drops the cockpit's coverage options; reviews/tools has no pytest config of its own.
       - name: Judge-script tests
-        if: steps.scope.outputs.run == 'true'
         run: |
           python -m pytest -q -p no:cacheprovider -p no:pytest-qt -o addopts= \
             --ignore=reviews/tools/test_plc_ci.py \
