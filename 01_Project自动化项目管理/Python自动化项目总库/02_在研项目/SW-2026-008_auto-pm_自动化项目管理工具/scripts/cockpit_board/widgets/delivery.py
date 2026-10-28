@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from cockpit_board.viewmodel import Cell, GithubVM, PrRow
 from cockpit_board.widgets import common as c
-from PySide6.QtWidgets import QFrame
+from PySide6.QtWidgets import QFrame, QLabel
 
 
-def cell_chip(cell: Cell):  # noqa: ANN201
+def cell_chip(cell: Cell) -> QLabel:
     item = c.chip(cell.text, cell.sev)
     if cell.tip:
         item.setToolTip(cell.tip)

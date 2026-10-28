@@ -15,9 +15,11 @@ import hashlib
 import re
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 PROBE_TIMEOUT = 3
 CHECK_TIMEOUT = 600
@@ -43,7 +45,7 @@ def _now_text() -> str:
     return datetime.now().strftime("%H:%M")
 
 
-def probe_online(root: Path, runner=subprocess.run) -> bool:  # noqa: ANN001
+def probe_online(root: Path, runner: Callable[..., Any] = subprocess.run) -> bool:
     try:
         result = runner(
             ["git", "ls-remote", "--exit-code", "origin", "HEAD"],
@@ -51,7 +53,7 @@ def probe_online(root: Path, runner=subprocess.run) -> bool:  # noqa: ANN001
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    return result.returncode == 0
+    return bool(result.returncode == 0)
 
 
 CHECKS = {
@@ -61,7 +63,7 @@ CHECKS = {
 }
 
 
-def run_check(root: Path, worktree: Path, project_id: str, key: str, runner=subprocess.run) -> Receipt:  # noqa: ANN001
+def run_check(root: Path, worktree: Path, project_id: str, key: str, runner: Callable[..., Any] = subprocess.run) -> Receipt:
     label, args = CHECKS[key]
     command = ["python", "-B", str(root / "main.py"), "-w", str(worktree), *args, project_id]
     shown = " ".join(command)
