@@ -7,11 +7,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.work_registry_service import WorkRegistryService
 from click.testing import CliRunner
 
 import auto_pm.infrastructure.continuity_store as store_module
+from auto_pm.application.core.work_registry_service import WorkRegistryService
+from auto_pm.ui.cli.__main__ import cli
 
 # These tests are about something other than the runtime identity; their fixtures have no registered project anchor.
 pytestmark = pytest.mark.usefixtures("identity_guard_off")

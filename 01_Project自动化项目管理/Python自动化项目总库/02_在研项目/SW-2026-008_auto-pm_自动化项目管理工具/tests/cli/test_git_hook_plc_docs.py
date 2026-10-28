@@ -8,11 +8,11 @@ import sys
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.plc import doc_consistency as dc
 from click.testing import CliRunner
 
 import auto_pm
+from auto_pm.domain.plc import doc_consistency as dc
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import run_git
 from tests.plc.test_doc_consistency import build
 
