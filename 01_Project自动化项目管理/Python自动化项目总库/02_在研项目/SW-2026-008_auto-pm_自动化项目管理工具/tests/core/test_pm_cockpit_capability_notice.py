@@ -50,6 +50,22 @@ def test_a_producer_that_raises_also_fails_closed(tmp_path: Path, monkeypatch: p
     assert "未能确认" in notice and "不支持" not in notice
 
 
+@pytest.mark.parametrize("error", [RuntimeError("boom"), OSError("disk"), KeyError("k"), AttributeError("a"), TypeError("t")])
+def test_any_exception_from_the_producer_fails_closed_not_only_type_and_value_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """卡 060 写的是“生产者抛错时快照不崩”，不是只有 TypeError/ValueError（TD-SW008-094 ②）。"""
+    main, _candidate = _roots(tmp_path)
+    _work(main, "WORK-CAP-ANY")
+
+    def broken() -> RuntimeCapabilities:
+        raise error
+
+    monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(broken))
+    notice = PmCockpitService(main).snapshot().notices[-1]
+    assert "未能确认" in notice and "保持停用" in notice and "挂起与拿回：支持" not in notice
+
+
 def test_the_query_block_is_built_from_the_same_producer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     main, _candidate = _roots(tmp_path)
     _work(main, "WORK-CAP-004")

@@ -248,7 +248,7 @@ class PmCockpitService:
         """Say what the shared query declares about parking and pre-emption; anything unexpected keeps them off."""
         try:
             capabilities = validate_runtime_capabilities(ContinuityQueryService.capabilities())
-        except (TypeError, ValueError):
+        except Exception:  # 共用生产者抛什么都按“未能确认”处理（卡 060：抛错时快照不崩、操作保持停用）
             return _CAPABILITY_UNVERIFIED
         declared = {item.action.value: item.status for item in capabilities.actions}
         if (
