@@ -628,7 +628,8 @@ class _KnownChanges:
 
 def _head(root: Path) -> str:
     return subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     ).stdout.strip()
 
 
@@ -658,7 +659,8 @@ def test_td072_a_cited_commit_must_be_a_commit_of_this_repository(desk: Desk) ->
     with pytest.raises(PmIntakeError, match="取证提交不存在"):
         desk.propose(ticket=desk.ticket(evidence=("commit:deadbeef",)), title="不存在的提交")
     blob = subprocess.run(
-        ["git", "-C", str(desk.root), "rev-parse", "HEAD:README.md"], check=True, capture_output=True, text=True
+        ["git", "-C", str(desk.root), "rev-parse", "HEAD:README.md"], check=True, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     ).stdout.strip()
     with pytest.raises(PmIntakeError, match="取证提交不存在"):
         desk.propose(ticket=desk.ticket(evidence=(f"commit:{blob}",)), title="不是提交的对象")
