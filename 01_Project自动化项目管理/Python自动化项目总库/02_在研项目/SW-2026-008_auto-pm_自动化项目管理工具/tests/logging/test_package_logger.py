@@ -10,9 +10,9 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from auto_pm.logging.logging import PACKAGE_LOGGER_NAME, setup_logger
 
 from auto_pm.app_context import AppContext
+from auto_pm.infrastructure.logging.logging import PACKAGE_LOGGER_NAME, setup_logger
 
 _PACKAGE_DIR = Path(__file__).resolve().parents[2] / "auto_pm"
 

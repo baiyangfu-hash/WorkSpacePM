@@ -381,8 +381,9 @@ def _install_real_hooks(primary: Path) -> dict[str, str]:
     import os
     import sys
 
-    from auto_pm.cli.__main__ import cli
     from click.testing import CliRunner
+
+    from auto_pm.ui.cli.__main__ import cli
 
     source_root = Path(__file__).resolve().parents[2]
     (primary / "main.py").write_text(
@@ -678,8 +679,9 @@ def test_td100_unmerged_index_entries_are_refused(tmp_path: Path) -> None:
 
 
 def _run_preflight(cand: Path, ctrl: Path, msg: Path, *, control_root: Path | None = None):
-    from auto_pm.cli.__main__ import cli
     from click.testing import CliRunner
+
+    from auto_pm.ui.cli.__main__ import cli
 
     return CliRunner().invoke(
         cli,
@@ -1005,8 +1007,9 @@ def _ignore_preflight_scene(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 def _ignore_preflight(cand: Path, ctrl: Path, msg: Path):  # type: ignore[no-untyped-def]
-    from auto_pm.cli.__main__ import cli
     from click.testing import CliRunner
+
+    from auto_pm.ui.cli.__main__ import cli
 
     return CliRunner().invoke(
         cli, ["-w", str(cand), "--control-root", str(ctrl), "git-hook", "preflight", str(msg)]

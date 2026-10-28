@@ -6,8 +6,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from auto_pm.plc import doc_consistency as dc
 
+from auto_pm.domain.plc import doc_consistency as dc
 from auto_pm.infrastructure import git_hook_enforcer, plc_doc_hook
 from tests.git_support import run_git
 from tests.plc.test_doc_consistency import IFC_DOC, VAR_DOC, build
