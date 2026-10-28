@@ -7,10 +7,10 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.core.pm_cockpit_service import PmCockpitService
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.work_registry_service import WorkRegistryService
 
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.pm_facade import PmIntent
 from auto_pm.infrastructure.continuity_store import ContinuityStore

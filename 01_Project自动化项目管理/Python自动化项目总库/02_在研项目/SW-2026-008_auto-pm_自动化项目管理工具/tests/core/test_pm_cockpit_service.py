@@ -10,14 +10,17 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.change.ledger_reconciler import ReconcileDiff
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.pm_closure_service import PmClosureService
-from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService, _ProjectFacts
-from auto_pm.core.pm_facade_service import PmFacadeService
-from auto_pm.core.work_registry_service import WorkRegistryService
 
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.pm_closure_service import PmClosureService
+from auto_pm.application.core.pm_cockpit_service import (
+    PmCockpitError,
+    PmCockpitService,
+    _ProjectFacts,
+)
+from auto_pm.application.core.pm_facade_service import PmFacadeService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import RunItem, RunState, WorkItem, WorkKind, WorkState
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 from auto_pm.contracts.mission import (
@@ -36,6 +39,7 @@ from auto_pm.contracts.pm_cockpit import (
     PmCockpitFocus,
     PmCockpitResumeState,
 )
+from auto_pm.domain.change.ledger_reconciler import ReconcileDiff
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.core.test_pm_closure_service import _MISSION_ID as _CLOSE_MISSION
 from tests.core.test_pm_closure_service import _RUN_ID as _CLOSE_RUN
