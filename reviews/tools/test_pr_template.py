@@ -53,7 +53,7 @@ def test_t03_the_scope_heading_is_exactly_the_one_pr_gate_reads() -> None:
 
 
 def test_t04_the_scope_placeholders_are_list_items_pr_gate_reads_and_stop_at_the_next_heading() -> None:
-    assert gate.declared_scope(text()) == ["<完整路径", "<完整路径"]
+    assert gate.declared_scope(text()) == ["<完整路径 1>", "<完整路径 2>"]
 
 
 def test_t05_the_template_never_contains_a_line_that_parses_as_a_task_card() -> None:

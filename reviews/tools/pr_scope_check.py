@@ -60,7 +60,9 @@ from auto_pm.application.core.implementation_card_precheck import (
 
 CARD_LINE = re.compile(r"^\s*任务卡\s*[:：]\s*`?([^`\s]+)`?\s*$")
 SCOPE_HEADER = re.compile(r"^\s*(?:#+\s*)?可改范围\s*[:：]?\s*$")
-SCOPE_ITEM = re.compile(r"^\s*[-*]\s+`?([^`\s]+)`?")
+# 清单项：反引号包起来的取反引号里面整段（后面可跟说明）；没包的整行就是一条路径。路径里允许有空格
+# （如 ``PM_SESSION_{{ project_id }}.md.jinja``），绝不能按空格切成多条。
+SCOPE_ITEM = re.compile(r"^\s*[-*]\s+(?:`([^`]+)`.*|(\S.*?))\s*$")
 # 裁判自己的文件：改它们等于改判卷规则，必须逐字点名（与 PROTECTED_PATTERNS 一样处理）
 _SW008 = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
 JUDGE_PATTERNS = (
@@ -151,7 +153,7 @@ def declared_scope(body: str) -> list[str]:
             break
         match = SCOPE_ITEM.match(line)
         if match:
-            items.append(match.group(1))
+            items.append((match.group(1) or match.group(2)).strip())
     return items
 
 
