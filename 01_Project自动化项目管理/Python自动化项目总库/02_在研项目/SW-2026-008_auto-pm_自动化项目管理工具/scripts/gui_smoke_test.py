@@ -384,7 +384,7 @@ class GuiTestRunner(QObject):
         window = self._get_root_window()
         if not window:
             return False
-        dialog = window.findChild(QObject, "templateApplyDialog")
+        dialog: Any = window.findChild(QObject, "templateApplyDialog")
         if dialog:
             dialog.open(self.target_project_id, self.target_project_id)
         self._take_screenshot(
@@ -399,7 +399,7 @@ class GuiTestRunner(QObject):
         window = self._get_root_window()
         if not window:
             return False
-        dialog = window.findChild(QObject, "newChangeDialog")
+        dialog: Any = window.findChild(QObject, "newChangeDialog")
         if dialog:
             dialog.open()
         self._take_screenshot(
@@ -414,7 +414,7 @@ class GuiTestRunner(QObject):
         window = self._get_root_window()
         if not window:
             return False
-        dialog = window.findChild(QObject, "projectEditDialog")
+        dialog: Any = window.findChild(QObject, "projectEditDialog")
         if dialog:
             dialog.open(self.target_project_id, self.target_project_id, {})
         self._take_screenshot(
@@ -429,7 +429,7 @@ class GuiTestRunner(QObject):
         window = self._get_root_window()
         if not window:
             return False
-        dialog = window.findChild(QObject, "deleteConfirmDialog")
+        dialog: Any = window.findChild(QObject, "deleteConfirmDialog")
         if dialog:
             dialog.open(self.target_project_id, self.target_project_id)
         self._take_screenshot(
@@ -444,7 +444,7 @@ class GuiTestRunner(QObject):
         window = self._get_root_window()
         if not window:
             return False
-        dialog = window.findChild(QObject, "pmInitializeConfirmDialog")
+        dialog: Any = window.findChild(QObject, "pmInitializeConfirmDialog")
         if dialog:
             dialog.open(self.target_project_id, self.target_project_id)
         self._take_screenshot(
@@ -459,7 +459,7 @@ class GuiTestRunner(QObject):
         window = self._get_root_window()
         if not window:
             return False
-        dialog = window.findChild(QObject, "pmSessionArchiveDialog")
+        dialog: Any = window.findChild(QObject, "pmSessionArchiveDialog")
         if dialog:
             dialog.open(self.target_project_id)
         self._take_screenshot(
@@ -474,7 +474,7 @@ class GuiTestRunner(QObject):
         window = self._get_root_window()
         if not window:
             return False
-        dialog = window.findChild(QObject, "aboutDialog")
+        dialog: Any = window.findChild(QObject, "aboutDialog")
         if dialog:
             dialog.open()
         self._take_screenshot(
