@@ -131,3 +131,64 @@ def test_the_approval_pin_is_still_asked_before_the_identity_check(monkeypatch: 
 
     assert result.exit_code != 0
     assert order == ["pin", "identity"]
+
+
+def _guard_lookup(monkeypatch: pytest.MonkeyPatch, change: object) -> list[tuple[str, Path | None]]:
+    asked: list[tuple[str, Path | None]] = []
+
+    class _Service:
+        def __init__(self, *_a: object, **_k: object) -> None: ...
+
+        def get_change_request(self, number: str, project_id: str | None = None) -> object:
+            return change
+
+    def require(_ctx: click.Context, project: str, start_path: Path | None = None) -> None:
+        asked.append((project, start_path))
+
+    monkeypatch.setattr("auto_pm.domain.change.change_service.ChangeService", _Service)
+    monkeypatch.setattr(guard, "require_runtime_identity", require)
+    return asked
+
+
+def test_a_change_order_found_without_a_project_is_checked_by_the_folder_it_lives_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    order = SimpleNamespace(project_id="", file_path=str(tmp_path / "DJ-2026-009_x" / "11_监控" / "CHG-PLC-2026-001.md"))
+    asked = _guard_lookup(monkeypatch, order)
+    guard.require_runtime_identity_for_change(_Ctx(tmp_path).click, "CHG-PLC-2026-001", None)
+    assert asked == [("", tmp_path / "DJ-2026-009_x" / "11_监控")]
+
+
+def test_a_found_change_order_whose_folder_names_no_project_is_refused_with_a_hint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    order = SimpleNamespace(project_id="", file_path=str(tmp_path / "stray" / "CHG-1.md"))
+    _guard_lookup(monkeypatch, order)
+
+    def unresolved(_ctx: click.Context, project: str, start_path: Path | None = None) -> None:
+        raise click.ClickException("调用目录未解析到项目；请提供项目编号或从项目目录执行命令")
+
+    monkeypatch.setattr(guard, "require_runtime_identity", unresolved)
+    with pytest.raises(click.ClickException, match="--pid"):
+        guard.require_runtime_identity_for_change(_Ctx(tmp_path).click, "CHG-1", None)
+
+
+def test_a_found_change_order_with_neither_project_nor_path_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _guard_lookup(monkeypatch, SimpleNamespace(project_id="", file_path=""))
+    with pytest.raises(click.ClickException, match="--pid"):
+        guard.require_runtime_identity_for_change(_Ctx(tmp_path).click, "CHG-1", None)
+
+
+def test_an_identity_conflict_found_through_the_folder_is_refused_as_such(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _guard_lookup(monkeypatch, SimpleNamespace(project_id="", file_path=str(tmp_path / "p" / "CHG-1.md")))
+
+    def conflicted(_ctx: click.Context, project: str, start_path: Path | None = None) -> None:
+        raise click.ClickException("运行身份未通过校验，已拒绝写入：测试")
+
+    monkeypatch.setattr(guard, "require_runtime_identity", conflicted)
+    with pytest.raises(click.ClickException, match="运行身份未通过校验"):
+        guard.require_runtime_identity_for_change(_Ctx(tmp_path).click, "CHG-1", None)
