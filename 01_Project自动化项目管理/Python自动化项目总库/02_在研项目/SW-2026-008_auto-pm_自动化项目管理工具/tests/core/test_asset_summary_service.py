@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.core.asset_summary_service import AssetSummaryService
+from auto_pm.application.core.asset_summary_service import AssetSummaryService
 
 
 def _write_asset_files(asset_dir: Path) -> None:

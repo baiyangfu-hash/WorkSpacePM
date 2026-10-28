@@ -15,18 +15,21 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.core.continuity_execution_service import (
+
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.pm_session_projection_service import (
+from auto_pm.application.core.continuity_resume_service import (
+    ContinuityResumeError,
+    ContinuityResumeService,
+)
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.pm_session_projection_service import (
     PmSessionProjectionError,
     PmSessionProjectionService,
 )
-from auto_pm.core.work_registry_service import WorkRegistryService
-
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,

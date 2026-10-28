@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from auto_pm.core.continuity_adapter import ContinuityAdapter
 from click.testing import CliRunner
 
+from auto_pm.application.core.continuity_adapter import ContinuityAdapter
 from auto_pm.ui.cli.__main__ import cli
 
 

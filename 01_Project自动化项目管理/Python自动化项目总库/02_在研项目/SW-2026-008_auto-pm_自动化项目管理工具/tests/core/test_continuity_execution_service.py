@@ -19,17 +19,17 @@ from typing import Any
 from unittest.mock import Mock
 
 import pytest
-from auto_pm.core.continuity_execution_service import (
+
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.work_registry_service import WorkRegistryService
-
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionService,
     PythonQualityGate,
     PythonQualityReceipt,
 )
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import CheckpointItem, RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
