@@ -451,8 +451,7 @@ def test_validate_and_dispatch_are_intercepted_by_the_same_precheck(
 ) -> None:
     """M2-GOV-IC02 (card 027 §5.3, §6 G3): structured cards reuse the Markdown precheck rules."""
 
-    from auto_pm.cli.__main__ import cli
-
+    from auto_pm.ui.cli.__main__ import cli
     from auto_pm.ui.cli.implementation_card import command_tree_of
 
     tree = command_tree_of(cli)

@@ -10,8 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.core.mission_service import MissionService, MissionServiceError
 
+from auto_pm.application.core.mission_service import MissionService, MissionServiceError
 from auto_pm.contracts.mission import MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.core.test_mission_service import _authority, _service

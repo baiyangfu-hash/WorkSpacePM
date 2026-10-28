@@ -13,22 +13,25 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.continuity_execution_service import ContinuityExecutionError
-from auto_pm.core.execution_adapter_service import ExecutionDispatchError, ExecutionDispatchService
-from auto_pm.core.lease_handover_service import (
+from click.testing import CliRunner
+
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
+from auto_pm.application.core.execution_adapter_service import (
+    ExecutionDispatchError,
+    ExecutionDispatchService,
+)
+from auto_pm.application.core.lease_handover_service import (
     AGENT_MARKERS,
     LeaseHandoverError,
     LeaseHandoverService,
 )
-from auto_pm.core.mission_switch_service import MissionSwitchError, MissionSwitchService
-from click.testing import CliRunner
-
+from auto_pm.application.core.mission_switch_service import MissionSwitchError, MissionSwitchService
 from auto_pm.contracts.continuity import RunState, WorkKind
 from auto_pm.contracts.lease_reclaim import PARKED_TOKEN_PREFIX
 from auto_pm.contracts.mission import MissionState
 from auto_pm.infrastructure import lease_wallet
 from auto_pm.infrastructure.continuity_store import ContinuityStoreError
+from auto_pm.ui.cli.__main__ import cli
 from tests.core.test_continuity_execution_service import _start
 from tests.core.test_mission_park_store import APPROVAL, PROJECT, Scene
 
@@ -417,7 +420,7 @@ def test_park_record_survives_a_raw_sqlite_look(sw: Switch) -> None:
 
 
 def test_resume_picks_the_card_in_hand_and_lists_the_others(sw: Switch) -> None:
-    from auto_pm.core.continuity_resume_service import ContinuityResumeService
+    from auto_pm.application.core.continuity_resume_service import ContinuityResumeService
 
     sw.b_in_hand()
     missions = sw.store.list_active_missions(PROJECT)
