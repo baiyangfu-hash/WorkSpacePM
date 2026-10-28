@@ -11,6 +11,8 @@ from click.testing import CliRunner, Result
 from auto_pm.domain.change.ledger_reconciler import ReconcileDiff
 from tests.application.test_chg_tracking_service import CHG, _commit, _repo, _write
 
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 _UNTRACKED_LINE = "未入库: 04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-002.md"
 _MISSING = ReconcileDiff(missing_in_ledger=["CHG-SCPT-2026-002"])
 _ORPHAN = ReconcileDiff(orphan_in_ledger=["CHG-SCPT-2026-777"])

@@ -24,6 +24,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.application.core.chg_tracking_service import check_project_chg_tracking
 from auto_pm.change.ledger_reconciler import LedgerReconciler, ReconcileDiff
 from auto_pm.core.project_service import ProjectService
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
 
@@ -94,6 +95,10 @@ def cmd_reconcile(
     if project_path is None:
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
+
+    if auto_fix:
+        # Only --fix writes the ledger; the plain report stays a read.
+        require_runtime_identity(ctx, project_id)
 
     reconciler = LedgerReconciler()
     diff: ReconcileDiff = reconciler.reconcile(project_path)
