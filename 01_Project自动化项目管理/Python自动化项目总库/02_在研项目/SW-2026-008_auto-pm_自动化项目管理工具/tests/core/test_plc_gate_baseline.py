@@ -255,7 +255,7 @@ def test_b08_the_baseline_export_brings_shared_libraries_and_leaves_the_worktree
 
 
 def test_b09_failure_keys_ignore_counts_and_count_repeats() -> None:
-    from auto_pm.plc.models import CheckResult
+    from auto_pm.domain.plc.models import CheckResult
 
     base = CheckResult(project_path="/p")
     base.add("PM_SESSION", "fail", "PM_SESSION 超过 300 行（312 行）")
@@ -303,11 +303,11 @@ def test_b11_plc_check_baseline_reproduces_the_verdict_offline(tmp_path: Path, m
     """``plc check <ID> --baseline <提交号>``：用户不靠 AI、断网也能自己复现验收门的判定。"""
     import json
 
-    from auto_pm.cli.__main__ import cli
     from click.testing import CliRunner
 
     import auto_pm.infrastructure.siemens_language_service as module
     from auto_pm.application.core.template_service import TemplateService
+    from auto_pm.ui.cli.__main__ import cli
 
     templates = Path(__file__).resolve().parents[2] / "templates"
     root = tmp_path / "ws"
@@ -349,7 +349,7 @@ def test_b12_keys_match_the_plc_ci_rule_so_ci_and_acceptance_never_disagree(
     import importlib.util
     import sys
 
-    from auto_pm.plc.checker import PlcChecker
+    from auto_pm.domain.plc.checker import PlcChecker
 
     repo = Path(__file__).resolve().parents[6]
     script = repo / "reviews" / "tools" / "plc_ci.py"
@@ -535,7 +535,7 @@ def test_b21_a_baseline_export_that_fails_counts_everything_as_new(
 
 
 def test_b22_when_a_failure_cannot_be_expanded_the_whole_item_is_the_key(tmp_path: Path) -> None:
-    from auto_pm.plc.models import CheckResult
+    from auto_pm.domain.plc.models import CheckResult
 
     result = CheckResult(project_path=str(tmp_path))
     result.add("SCL 代码规范", "fail", "发现 2 个规范错误")
@@ -575,10 +575,10 @@ def _cli_workspace(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _plc_check_baseline(root: Path, monkeypatch: pytest.MonkeyPatch, fake: FakeSiemensLsp):  # type: ignore[no-untyped-def]
-    from auto_pm.cli.__main__ import cli
     from click.testing import CliRunner
 
     import auto_pm.infrastructure.siemens_language_service as module
+    from auto_pm.ui.cli.__main__ import cli
 
     monkeypatch.setattr(module, "default_language_service", lambda: fake)
     return CliRunner().invoke(

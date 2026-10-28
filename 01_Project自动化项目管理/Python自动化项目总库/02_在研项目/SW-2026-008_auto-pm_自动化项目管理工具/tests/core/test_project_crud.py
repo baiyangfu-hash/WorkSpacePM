@@ -14,9 +14,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.project_service import ProjectService
 from click.testing import CliRunner
+
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.ui.cli.__main__ import cli
 
 # ── retrofit_project_by_path 测试 ────────────────────────
 

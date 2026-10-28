@@ -16,10 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.ledger_reconciler import LedgerReconciler
-from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
 
+from auto_pm.application.core.local_execution_orchestrator import LocalExecutionOrchestrator
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import MissionState
@@ -29,6 +27,8 @@ from auto_pm.contracts.pm_facade import (
     PmIntent,
     PmRunOutcome,
 )
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 from tests.git_support import git_out
@@ -42,8 +42,8 @@ if TYPE_CHECKING:
     )
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 else:
-    from auto_pm.core.pm_closure_service import ClosureCompletionState, PmClosureService
-    from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
+    from auto_pm.application.core.pm_closure_service import ClosureCompletionState, PmClosureService
+    from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 
 PROJECT_ID = "SW-TEST-001"
 CALC = f"{PROJECT_ID}/src/calc.py"

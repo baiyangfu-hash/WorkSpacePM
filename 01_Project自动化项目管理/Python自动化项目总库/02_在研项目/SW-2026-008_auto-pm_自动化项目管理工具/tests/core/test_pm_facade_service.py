@@ -14,24 +14,23 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.core.continuity_execution_service import (
+
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.mission_service import MissionService, MissionServiceError
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
-from auto_pm.core.workspace_context_service import WorkspaceContextService
-
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionService,
     PythonQualityGate,
     PythonQualityReceipt,
     _quality_receipt_hash,
 )
+from auto_pm.application.core.mission_service import MissionService, MissionServiceError
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.application.core.pm_facade_service import PmFacadeService as PlanningFacade
 from auto_pm.application.core.pm_intake_service import PmIntakeService
+from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
+from auto_pm.application.core.workspace_context_service import WorkspaceContextService
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
@@ -47,6 +46,7 @@ from auto_pm.contracts.pm_facade import (
     PmIntent,
     PmRunOutcome,
 )
+from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.domain.change.decision_service import DecisionError
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.intake_store import IntakeStore

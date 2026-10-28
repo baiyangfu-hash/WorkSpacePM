@@ -218,8 +218,8 @@ def test_p03_a_violation_already_in_a_non_owned_scl_at_the_baseline_does_not_blo
 def test_p04_a_checker_crash_or_not_applicable_verdict_is_a_failing_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from auto_pm.plc.checker import PlcChecker
-    from auto_pm.plc.models import CheckResult
+    from auto_pm.domain.plc.checker import PlcChecker
+    from auto_pm.domain.plc.models import CheckResult
 
     workspace, candidate, baseline = plc_workspace(tmp_path)
     run = plc_run(candidate, baseline, (INT_DOC,))
