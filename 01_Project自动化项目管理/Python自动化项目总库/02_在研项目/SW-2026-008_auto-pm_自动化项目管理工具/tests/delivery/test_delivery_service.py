@@ -4,8 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.delivery.constants import DIR_DELIVERY, DIR_EXECUTABLE, DIR_PACKAGE, MB
-from auto_pm.delivery.delivery_service import DeliveryService
+
+from auto_pm.application.delivery.constants import DIR_DELIVERY, DIR_EXECUTABLE, DIR_PACKAGE, MB
+from auto_pm.application.delivery.delivery_service import DeliveryService
 
 
 @pytest.fixture
