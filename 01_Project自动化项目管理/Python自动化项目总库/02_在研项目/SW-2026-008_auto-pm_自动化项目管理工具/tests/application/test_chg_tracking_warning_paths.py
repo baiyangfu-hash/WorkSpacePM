@@ -33,9 +33,8 @@ class _Fixture:
         self.project_found = project_found
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import auto_pm.change.ledger_reconciler as reconciler_module
-        import auto_pm.core.project_service as project_module
-
+        import auto_pm.application.core.project_service as project_module
+        import auto_pm.domain.change.ledger_reconciler as reconciler_module
         from auto_pm.ui.cli import ledger
 
         fixture = self

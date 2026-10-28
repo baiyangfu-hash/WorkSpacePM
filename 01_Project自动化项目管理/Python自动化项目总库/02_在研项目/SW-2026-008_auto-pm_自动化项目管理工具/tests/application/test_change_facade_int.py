@@ -12,14 +12,14 @@ from __future__ import annotations
 import shutil
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
-from auto_pm.models import ApprovalRecord
-from auto_pm.models.change import ChangeSummary, ImpactAnalysis
-from auto_pm.models.project import ProjectRecord
 
 from auto_pm.application.change_facade import ChangeFacade
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.models import ApprovalRecord
+from auto_pm.domain.models.change import ChangeSummary, ImpactAnalysis
+from auto_pm.domain.models.project import ProjectRecord
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import ChangeRequestRepository, ProjectRepository
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ def change_facade_with_db(temp_workspace) -> None:  # type: ignore[misc, no-unty
     # 注意：save_approval_record 签名为 (change_number, to_status, approver, comment, from_status)
     # 不接收 transition_date（由 DB 自动填充 datetime.now()），但为了测试断言可控，
     # 我们直接用 ApprovalHistoryRepository.insert 写入完整记录
-    from auto_pm.db.repository import ApprovalHistoryRepository
+    from auto_pm.infrastructure.db.repository import ApprovalHistoryRepository
 
     approval_repo = ApprovalHistoryRepository(db)
     # 注意：approval_history 表外键约束 FOREIGN KEY (project_id, change_number)
@@ -131,7 +131,7 @@ def change_facade_with_db(temp_workspace) -> None:  # type: ignore[misc, no-unty
     # 不从 DB 缓存读取。集成测试不构造 CHG-*.md 文件（涉及 ChgGenerator 复杂度高），
     # 故 mock 该方法返回基于 DB 记录构造的 ChangeRequest，其他方法（list_approval_history /
     # get_impact_analysis）保持真实走 DB Repository。
-    from auto_pm.change.constants import ChangeRequest
+    from auto_pm.domain.change.constants import ChangeRequest
 
     mock_cr = ChangeRequest(
         change_number="CHG-2026-001",
