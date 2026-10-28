@@ -37,6 +37,10 @@ from auto_pm.change.constants import (
 from auto_pm.change.track_classifier import ChangeTrack, ChangeTrackClassifier
 from auto_pm.models import ChangeRequest
 from auto_pm.ui.cli.approval_pin import require_approval_pin
+from auto_pm.ui.cli.runtime_identity_guard import (
+    require_runtime_identity,
+    require_runtime_identity_for_change,
+)
 
 console = Console()
 
@@ -439,6 +443,7 @@ def cmd_create(
     retrofit: bool,
 ) -> None:
     """创建变更单（生成 CHG-*.md 文件并更新台帐）"""
+    require_runtime_identity(ctx, project_id)
     app_ctx: AppContext = ctx.obj
     svc = ChangeService(app_ctx.workspace_root)
 
@@ -576,6 +581,8 @@ def cmd_transition(
         )
         if proof is not None:
             approver = proof.approver
+    # After the approval PIN (audit 72): a PIN refusal comes first, as it always did; no write happens before this check.
+    require_runtime_identity_for_change(ctx, change_number, pid)
     svc = ChangeService(app_ctx.workspace_root)
 
     try:
@@ -645,6 +652,7 @@ def cmd_edit(
     constraint_impacts/domain_impacts 两个 dict 字段因 CLI 输入繁琐，
     留给 GUI EditChangeDialog 编辑（见 spec.md M3.5-8 说明）。
     """
+    require_runtime_identity_for_change(ctx, change_number, pid)
     app_ctx: AppContext = ctx.obj
     svc = ChangeService(app_ctx.workspace_root)
 

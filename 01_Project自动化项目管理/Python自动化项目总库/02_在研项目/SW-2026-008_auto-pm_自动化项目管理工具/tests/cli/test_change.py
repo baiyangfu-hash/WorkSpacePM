@@ -33,6 +33,9 @@ from auto_pm.change.change_service import ChangeService
 from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
+# These tests are about something other than the runtime identity; their fixtures have no registered project anchor.
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 logger = logging.getLogger(__name__)
 
 # ── 测试隔离：记录本模块创建的变更单，autouse fixture 在每个测试后清理 ──

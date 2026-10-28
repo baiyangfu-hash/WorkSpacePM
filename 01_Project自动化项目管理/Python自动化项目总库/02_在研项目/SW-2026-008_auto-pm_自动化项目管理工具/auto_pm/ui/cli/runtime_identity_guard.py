@@ -118,6 +118,27 @@ def project_of_handoff(ctx: click.Context, handoff_id: str) -> str:
         raise click.ClickException(str(error)) from error
 
 
+def require_runtime_identity_for_change(ctx: click.Context, change_number: str, project_id: str | None) -> None:
+    """Guard a command that is given a change number and maybe a project.
+
+    The project comes from ``--pid`` or from the change order itself.  A change order that cannot be found (or is ambiguous) has
+    no project to check: the command reports that itself and writes nothing, so there is nothing to refuse.
+    """
+
+    from auto_pm.domain.change.change_service import ChangeService
+
+    resolved = (project_id or "").strip()
+    if not resolved:
+        app_ctx: AppContext = ctx.find_root().obj
+        try:
+            change = ChangeService(app_ctx.workspace_root).get_change_request(change_number)
+        except Exception:  # ambiguous or unreadable: the command itself reports it, and it writes nothing
+            return
+        resolved = getattr(change, "project_id", "") if change is not None else ""
+    if resolved:
+        require_runtime_identity(ctx, resolved)
+
+
 def project_of_planning_request(ctx: click.Context, request_id: str) -> str:
     """The project a saved planning request (draft) belongs to."""
 
