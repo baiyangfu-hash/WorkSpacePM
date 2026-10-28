@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from click.testing import Result
 
 from auto_pm.infrastructure.git_hook_enforcer import (
     CONTROL_ROOT_FILE_BINDINGS,
@@ -677,7 +678,7 @@ def test_td100_unmerged_index_entries_are_refused(tmp_path: Path) -> None:
 
 
 
-def _run_preflight(cand: Path, ctrl: Path, msg: Path, *, control_root: Path | None = None):
+def _run_preflight(cand: Path, ctrl: Path, msg: Path, *, control_root: Path | None = None) -> Result:
     from auto_pm.cli.__main__ import cli
     from click.testing import CliRunner
 

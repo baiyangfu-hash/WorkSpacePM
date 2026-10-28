@@ -1,10 +1,12 @@
+from pathlib import Path
+
 from auto_pm.infrastructure.doc.extractors.bridge_ast_extractor import BridgeAstExtractor
 from auto_pm.infrastructure.doc.extractors.cli_ast_extractor import CliAstExtractor
 from auto_pm.infrastructure.doc.extractors.gate_ast_extractor import GateAstExtractor
 from auto_pm.infrastructure.doc.injector.marker_injector import MarkdownMarkerInjector
 
 
-def test_cli_ast_extractor(tmp_path):
+def test_cli_ast_extractor(tmp_path: Path) -> None:
     cli_file = tmp_path / "test_cmd.py"
     cli_file.write_text('''
 def cmd_run(arg1, arg2):
@@ -16,7 +18,7 @@ def cmd_run(arg1, arg2):
     assert cmds[0].group == "test_cmd"
     assert "Run test command description" in cmds[0].doc
 
-def test_bridge_ast_extractor(tmp_path):
+def test_bridge_ast_extractor(tmp_path: Path) -> None:
     bridge_file = tmp_path / "system_bridge.py"
     bridge_file.write_text('''
 class SystemBridge:
@@ -29,7 +31,7 @@ class SystemBridge:
     assert methods[0].bridge_name == "system_bridge"
     assert methods[0].method_name == "on_refresh"
 
-def test_gate_ast_extractor(tmp_path):
+def test_gate_ast_extractor(tmp_path: Path) -> None:
     checker_file = tmp_path / "checker.py"
     checker_file.write_text('''
 class Checker:
@@ -41,7 +43,7 @@ class Checker:
     assert len(rules) == 1
     assert rules[0].rule_id == "GATE-PRDS"
 
-def test_marker_injector(tmp_path):
+def test_marker_injector(tmp_path: Path) -> None:
     doc_file = tmp_path / "test_doc.md"
     doc_file.write_text('''# Doc
 <!-- AUTO_DOC_START: TEST_TAG -->

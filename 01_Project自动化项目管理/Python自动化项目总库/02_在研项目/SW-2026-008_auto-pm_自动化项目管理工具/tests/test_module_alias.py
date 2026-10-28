@@ -6,6 +6,7 @@ import importlib
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -27,8 +28,8 @@ def test_a01_short_and_layered_paths_are_one_module_object(short: str, layered: 
 
 
 def test_a02_a_patch_through_one_path_is_seen_through_the_other() -> None:
-    short = importlib.import_module("auto_pm.core.pr_open_service")
-    layered = importlib.import_module("auto_pm.application.core.pr_open_service")
+    short: Any = importlib.import_module("auto_pm.core.pr_open_service")
+    layered: Any = importlib.import_module("auto_pm.application.core.pr_open_service")
     sentinel = object()
     original = layered.JUDGE_RELATIVE
     try:

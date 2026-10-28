@@ -191,7 +191,7 @@ class TestSyncChangesLegacyMonitoringLayout:
         project_service = ProjectService(str(workspace))
         sync = SyncService(db, project_service, ChangeService(str(workspace)))
         sync._sync_projects(force_full=True)
-        return sync._sync_changes(force_full=True)
+        return int(sync._sync_changes(force_full=True))
 
     def test_legacy_11_monitoring_changes_are_synced(
         self, db: DatabaseManager, workspace_with_project: Path
