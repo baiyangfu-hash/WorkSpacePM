@@ -26,6 +26,7 @@ from auto_pm.core.paths import PYTHON_REQUIRED_DIRS
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.python_service import derive_package_name
 from auto_pm.core.template_service import TemplateService
+from auto_pm.ui.cli.runtime_identity_guard import warn_runtime_identity
 
 console = Console()
 
@@ -222,6 +223,9 @@ def cmd_repair(
         )
         ctx.exit(1)
 
+    if not dry_run:
+        # Repair is what mends a broken project: warn only.
+        warn_runtime_identity(ctx, project_id)
     from auto_pm.core.python_service import PythonProjectService
     package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     templates_dir = os.path.join(package_dir, "templates")
