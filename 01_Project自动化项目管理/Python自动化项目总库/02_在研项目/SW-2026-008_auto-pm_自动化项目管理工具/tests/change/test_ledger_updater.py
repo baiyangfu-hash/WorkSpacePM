@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.change.ledger_updater import LedgerUpdater
+from auto_pm.domain.change.ledger_updater import LedgerUpdater
 
 
 class TestLedgerUpdaterUpdate:

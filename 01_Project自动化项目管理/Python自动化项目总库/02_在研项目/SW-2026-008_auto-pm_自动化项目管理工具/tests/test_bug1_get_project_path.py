@@ -11,7 +11,8 @@ import os
 from pathlib import Path
 
 import pytest
-from auto_pm.change.change_service import ChangeService
+
+from auto_pm.domain.change.change_service import ChangeService
 
 
 @pytest.fixture
