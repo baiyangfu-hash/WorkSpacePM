@@ -16,7 +16,7 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -160,7 +160,7 @@ def _wait_for(pred: Any, timeout: float = 60) -> None:
 
 
 def _state(lab: dict[str, Path]) -> dict[str, Any]:
-    return json.loads((lab["out"] / "long_gate_state.json").read_text(encoding="utf-8"))
+    return cast(dict[str, Any], json.loads((lab["out"] / "long_gate_state.json").read_text(encoding="utf-8")))
 
 
 def _runs(lab: dict[str, Path], name: str) -> int:
@@ -220,7 +220,12 @@ def test_session_killed_runner_keeps_going(lab: dict[str, Path]) -> None:
         os.killpg(session.pid, signal.SIGKILL)  # the whole "session" process group
     session.wait(timeout=30)
     counts: list[int] = []
-    _wait_for(lambda: counts.append(int((lab["tools"] / "renew_count").read_text())) or True)
+
+    def _record_count() -> bool:
+        counts.append(int((lab["tools"] / "renew_count").read_text()))
+        return True
+
+    _wait_for(_record_count)
     count = counts[0]
     _wait_for(lambda: int((lab["tools"] / "renew_count").read_text()) >= count + 2, timeout=30)  # renewals go on
     (lab["tools"] / "release_rest").write_text("")
@@ -389,7 +394,12 @@ def test_task_xml_runs_on_battery_at_normal_priority_without_trigger() -> None:
                        r"C:\WS\out", r"PC\fubai")
     root = ET.fromstring(xml.split("?>", 1)[1])
     ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
-    get = lambda path: root.find(path, ns).text  # noqa: E731
+
+    def get(path: str) -> str:
+        node = root.find(path, ns)
+        assert node is not None and node.text is not None, path
+        return node.text
+
     assert get("t:Settings/t:DisallowStartIfOnBatteries") == "false"
     assert get("t:Settings/t:StopIfGoingOnBatteries") == "false"
     assert get("t:Settings/t:Priority") == "4"
@@ -410,7 +420,7 @@ def test_config_validation_rejects_relative_out_dir(tmp_path: Path) -> None:
 def test_interval_must_leave_the_ten_minute_floor(tmp_path: Path) -> None:
     mod = _module()
     p = tmp_path / "c.json"
-    base = {"name": "x", "out_dir": str(tmp_path / "o"), "steps": [{"name": "a", "argv": ["x"]}],
+    base: dict[str, Any] = {"name": "x", "out_dir": str(tmp_path / "o"), "steps": [{"name": "a", "argv": ["x"]}],
             "fingerprint": {"git_worktree": str(tmp_path)},
             "lease": {"mode": "command", "argv": ["x"], "lease_seconds": 3600, "renew_interval_s": 3000}}
     p.write_text(json.dumps(base), encoding="utf-8")
@@ -434,7 +444,7 @@ def test_a_due_renewal_runs_before_the_floor_is_judged(tmp_path: Path) -> None:
             self.expires_at = mod.utc_now() + dt.timedelta(seconds=590)  # below the floor, renewal due
 
         def remaining_s(self) -> float:
-            return (self.expires_at - mod.utc_now()).total_seconds()
+            return float((self.expires_at - mod.utc_now()).total_seconds())
 
         def renew(self) -> None:
             self.expires_at = mod.utc_now() + dt.timedelta(seconds=3600)
