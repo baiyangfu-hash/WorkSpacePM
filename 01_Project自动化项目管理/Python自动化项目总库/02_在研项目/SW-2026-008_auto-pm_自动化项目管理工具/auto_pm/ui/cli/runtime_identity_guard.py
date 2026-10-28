@@ -8,6 +8,7 @@ these helpers give each write command the same refusal, keyed by the project the
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import click
 
@@ -16,14 +17,17 @@ from auto_pm.core.workspace_context_service import WorkspaceContextError, Worksp
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
-def require_runtime_identity(ctx: click.Context, project_id: str) -> None:
-    """Refuse the write (``ClickException``) when the runtime identity for ``project_id`` has any conflict."""
+def require_runtime_identity(ctx: click.Context, project_id: str, start_path: Path | None = None) -> None:
+    """Refuse the write (``ClickException``) when the runtime identity for ``project_id`` has any conflict.
+
+    With an empty ``project_id`` the project is derived from the directory ``start_path`` (a change order's own folder).
+    """
 
     app_ctx: AppContext = ctx.find_root().obj
     try:
         context = WorkspaceContextService(
             str(app_ctx.control_root), execution_root=app_ctx.workspace_root
-        ).resolve(project_id=project_id, start_path=app_ctx.control_root)
+        ).resolve(project_id=project_id, start_path=start_path or app_ctx.control_root)
     except WorkspaceContextError as error:
         raise click.ClickException(str(error)) from error
     if context.conflicts:
@@ -116,6 +120,45 @@ def project_of_handoff(ctx: click.Context, handoff_id: str) -> str:
         return store.get_work(store.get_handoff(handoff_id.strip()).work_id).subject_project_id
     except (ContinuityStoreError, ValueError) as error:
         raise click.ClickException(str(error)) from error
+
+
+def require_runtime_identity_for_change(ctx: click.Context, change_number: str, project_id: str | None) -> None:
+    """Guard a command that is given a change number and maybe a project.
+
+    The project comes from ``--pid``, else from the change order itself, else from the folder the order lives in.  A change order
+    that cannot be found (or is ambiguous) has no project to check: the command reports that itself and writes nothing.  A change
+    order that *is* found but names no project must still be checked, or it would be a way around the guard: its project is taken
+    from its folder, and when even that fails the command is refused with a hint to give ``--pid``.
+    """
+
+    from auto_pm.domain.change.change_service import ChangeService
+
+    resolved = (project_id or "").strip()
+    if resolved:
+        require_runtime_identity(ctx, resolved)
+        return
+    app_ctx: AppContext = ctx.find_root().obj
+    try:
+        change = ChangeService(app_ctx.workspace_root).get_change_request(change_number)
+    except Exception:  # ambiguous or unreadable: the command itself reports it, and it writes nothing
+        return
+    if change is None:
+        return
+    resolved = (getattr(change, "project_id", "") or "").strip()
+    if resolved:
+        require_runtime_identity(ctx, resolved)
+        return
+    file_path = (getattr(change, "file_path", "") or "").strip()
+    if not file_path:
+        raise click.ClickException(f"变更单 {change_number} 没有标明所属项目，无法校验运行身份；请补 --pid")
+    path = Path(file_path)
+    folder = (path if path.is_absolute() else Path(app_ctx.workspace_root) / path).parent
+    try:
+        require_runtime_identity(ctx, "", start_path=folder)
+    except click.ClickException as error:
+        if "运行身份未通过校验" in error.message:
+            raise
+        raise click.ClickException(f"变更单 {change_number} 没有标明所属项目，也推不出所在项目（{error.message}）；请补 --pid") from error
 
 
 def project_of_planning_request(ctx: click.Context, request_id: str) -> str:
