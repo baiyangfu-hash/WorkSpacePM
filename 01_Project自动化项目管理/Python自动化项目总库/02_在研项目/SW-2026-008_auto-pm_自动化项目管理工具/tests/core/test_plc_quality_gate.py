@@ -583,3 +583,22 @@ def test_p19_each_language_service_call_is_capped_at_the_smaller_of_default_and_
     service = module._plc_language_service()
 
     assert service is not None and service.timeout == expected
+
+
+def test_p15_checker_digest_covers_the_package_and_the_find_prd_dir_module() -> None:
+    names = [name for name, _ in EvidenceCollectionService._plc_checker_files()]
+    assert "checker.py" in names and "doc_consistency.py" in names
+    assert "ext/paths.py" in names
+
+
+def test_p16_changing_the_find_prd_dir_module_changes_the_checker_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = EvidenceCollectionService._plc_checker_files()
+    paths_copy = tmp_path / "paths.py"
+    paths_copy.write_bytes(dict(real)["ext/paths.py"].read_bytes())
+    patched = [(name, paths_copy if name == "ext/paths.py" else path) for name, path in real]
+    monkeypatch.setattr(EvidenceCollectionService, "_plc_checker_files", staticmethod(lambda: patched))
+    before = EvidenceCollectionService._plc_checker_digest()
+    paths_copy.write_bytes(paths_copy.read_bytes() + b"\n# changed\n")
+    assert EvidenceCollectionService._plc_checker_digest() != before
