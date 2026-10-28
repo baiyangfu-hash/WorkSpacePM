@@ -415,6 +415,13 @@ def test_region_cut_through_for_and_while_is_rejected() -> None:
     assert _cross(while_body) == ["LSP-905-REGION-CROSS-BLOCK"]
 
 
+def test_region_cut_through_repeat_is_rejected_and_whole_repeat_inside_is_fine() -> None:
+    cut = "    REGION 01_a\n        REPEAT\n            s_iStep := 2;\n    END_REGION\n        UNTIL s_iStep > 3 END_REPEAT;"
+    whole = "    REGION 01_a\n        REPEAT\n            s_iStep := 2;\n        UNTIL s_iStep > 3 END_REPEAT;\n    END_REGION"
+    assert _cross(cut) == ["LSP-905-REGION-CROSS-BLOCK"]
+    assert _cross(whole) == []
+
+
 def test_lowercase_keywords_are_recognized_when_a_region_cuts_a_structure() -> None:
     body = "    region 01_a\n        if s_iStep = 1 then\n            s_iStep := 2;\n    end_region\n        end_if;"
     assert _cross(body) == ["LSP-905-REGION-CROSS-BLOCK"]
