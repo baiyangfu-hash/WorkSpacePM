@@ -1,7 +1,7 @@
 import os
 import tempfile
 
-from auto_pm.core.prototype_service import PrototypeService
+from auto_pm.application.core.prototype_service import PrototypeService
 
 
 def test_prototype_init_and_bundle() -> None:

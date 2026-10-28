@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core.continuity_query_service import ContinuityQueryService
-from auto_pm.core.pm_cockpit_service import PmCockpitService
 
+from auto_pm.application.core.continuity_query_service import ContinuityQueryService
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
 from auto_pm.contracts.continuity_query import ActionCapability, QueriedAction, RuntimeCapabilities
 from tests.core.test_pm_cockpit_dual_root import PROJECT, _roots, _work
 

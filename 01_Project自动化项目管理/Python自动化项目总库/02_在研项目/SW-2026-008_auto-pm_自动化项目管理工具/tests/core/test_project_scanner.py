@@ -9,7 +9,8 @@ import json
 from pathlib import Path
 
 import yaml
-from auto_pm.core.project_scanner import ProjectScanner
+
+from auto_pm.application.core.project_scanner import ProjectScanner
 
 
 class TestScan:
@@ -414,7 +415,7 @@ class TestBackwardCompatibility:
 
     def test_project_service_delegates_to_scanner(self, tmp_path: Path) -> None:
         """ProjectService 内部委托给 ProjectScanner"""
-        from auto_pm.core.project_service import ProjectService
+        from auto_pm.application.core.project_service import ProjectService
 
         project_dir = tmp_path / "SW-2026-001_项目"
         project_dir.mkdir()
@@ -482,7 +483,7 @@ class TestStackFallback:
         self, tmp_path: Path
     ) -> None:
         """stack 已为 plc/python 时不应被路径推断覆盖"""
-        from auto_pm.models import ProjectInfo
+        from auto_pm.domain.models import ProjectInfo
 
         scanner = ProjectScanner(str(tmp_path))
         info = ProjectInfo(
@@ -499,7 +500,7 @@ class TestStackFallback:
         self, tmp_path: Path
     ) -> None:
         """stack=unknown 时应按路径推断"""
-        from auto_pm.models import ProjectInfo
+        from auto_pm.domain.models import ProjectInfo
 
         scanner = ProjectScanner(str(tmp_path))
         info = ProjectInfo(
