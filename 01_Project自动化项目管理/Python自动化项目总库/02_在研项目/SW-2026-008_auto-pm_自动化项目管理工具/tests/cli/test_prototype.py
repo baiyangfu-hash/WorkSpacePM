@@ -1,7 +1,15 @@
 import tempfile
 
+import pytest
 from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
+
+from tests.identity_support import guard_off
+
+
+@pytest.fixture(autouse=True)
+def _identity_guard_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    guard_off(monkeypatch, "prototype")
 
 
 def test_cli_prototype_flow():

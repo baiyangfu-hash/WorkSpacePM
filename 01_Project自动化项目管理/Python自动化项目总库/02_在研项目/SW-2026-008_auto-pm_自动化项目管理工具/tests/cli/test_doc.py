@@ -13,8 +13,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
+
+from tests.identity_support import guard_off
+
+
+@pytest.fixture(autouse=True)
+def _identity_guard_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    guard_off(monkeypatch, "doc")
 
 
 def _setup_legacy_doc_workspace(tmp_path: Path) -> Path:
