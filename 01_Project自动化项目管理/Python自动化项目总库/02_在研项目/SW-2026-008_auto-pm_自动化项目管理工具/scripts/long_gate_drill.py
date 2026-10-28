@@ -252,7 +252,11 @@ def main() -> int:
         else:
             print(f"INFO  runner ancestors: {chain}")
         n0_seen: list[int] = []
-        wait_for(lambda: n0_seen.append(int((tools / "renew_count").read_text())) or True, 10)
+        def read_renew_count() -> bool:
+            n0_seen.append(int((tools / "renew_count").read_text()))
+            return True
+
+        wait_for(read_renew_count, 10)
         n0 = n0_seen[0]
         check(wait_for(lambda: int((tools / "renew_count").read_text()) >= n0 + 2, 30),
               "session killed: lease renewals continue inside the runner")

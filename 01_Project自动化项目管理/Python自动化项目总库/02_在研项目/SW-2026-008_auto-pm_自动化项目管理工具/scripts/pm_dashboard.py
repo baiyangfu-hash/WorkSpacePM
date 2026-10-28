@@ -31,8 +31,9 @@ import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
+from typing import Any
 
 REGISTRY_RELATIVE = Path("SYS-2026-001_WorkspaceGovernance") / "workspace_registry.json"
 DB_RELATIVE = Path(".auto-pm") / "continuity.db"
@@ -278,7 +279,7 @@ def copy_ledger_connection(root: Path, db_path: Path) -> Iterator[sqlite3.Connec
 
 @contextmanager
 def store_ledger_connection(
-    root: Path, db_path: Path, store_factory: Callable[..., object] | None = None
+    root: Path, db_path: Path, store_factory: Callable[..., Any] | None = None
 ) -> Iterator[sqlite3.Connection]:
     """复用 ContinuityStore 的严格只读快照读法；只调 _read_connection，不 initialize、不建表。"""
     if store_factory is None:
@@ -925,7 +926,7 @@ def _e(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-def _when(moment: datetime | None, offset: timezone) -> str:
+def _when(moment: datetime | None, offset: tzinfo) -> str:
     return moment.astimezone(offset).strftime("%m-%d %H:%M") if moment else "—"
 
 
@@ -950,7 +951,7 @@ def _recent_closed(project: Project, now: datetime) -> list[MissionInfo]:
     ]
 
 
-def render_pm(board: Board, offset: timezone) -> str:
+def render_pm(board: Board, offset: tzinfo) -> str:
     now = board.generated_at
     parts = ['<section id="pm" class="view">']
     parts.append(f"<div><h2>要你定（最多 {MAX_DECISIONS} 件，最久的排前面）</h2>")
@@ -1009,7 +1010,7 @@ def render_pm(board: Board, offset: timezone) -> str:
     return "".join(parts)
 
 
-def _pm_table(projects: list[Project], now: datetime, offset: timezone) -> str:
+def _pm_table(projects: list[Project], now: datetime, offset: tzinfo) -> str:
     if not projects:
         return '<div class="none">没有。</div>'
     rows = [
@@ -1123,7 +1124,7 @@ def recent_events(
     return events[:limit]
 
 
-def render_dev(board: Board, offset: timezone) -> str:
+def render_dev(board: Board, offset: tzinfo) -> str:
     now = board.generated_at
     parts = ['<section id="dev" class="view">']
     shown = [
@@ -1199,7 +1200,7 @@ def render_dev(board: Board, offset: timezone) -> str:
     return "".join(parts)
 
 
-def _dev_card(mission: MissionInfo, now: datetime, offset: timezone) -> str:
+def _dev_card(mission: MissionInfo, now: datetime, offset: tzinfo) -> str:
     lines = [
         f'<div class="card"><span class="t">{_e(_short(mission.title, 70))}{_example_tag(mission.example)}</span>',
         f'<span class="small mono">{_e(mission.mission_id)} · {_e(STATE_LABEL.get(mission.state, mission.state))}</span>',
@@ -1226,7 +1227,7 @@ def _dev_card(mission: MissionInfo, now: datetime, offset: timezone) -> str:
     return "".join(lines)
 
 
-def render_page(board: Board, offset: timezone, fragment: bool = False) -> str:
+def render_page(board: Board, offset: tzinfo, fragment: bool = False) -> str:
     title = "多项目安灯板"
     note = "含示例卡（标“示例”的不是真数据）" if board.example else ""
     body = (
@@ -1284,7 +1285,7 @@ def main(argv: list[str] | None = None) -> int:
     offset = (
         timezone(timedelta(hours=args.utc_offset))
         if args.utc_offset is not None
-        else datetime.now().astimezone().tzinfo
+        else datetime.now().astimezone().tzinfo or UTC
     )
     board = build_board(root, db_path, now, use_git=not args.no_git, use_legacy=not args.no_legacy,
                         ledger_reader=args.ledger_reader)

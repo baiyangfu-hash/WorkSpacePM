@@ -26,6 +26,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 # ── 配置 ──────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ DEFAULT_TIMEOUT = 600  # 10 分钟
 # ── 测试模式定义 ──────────────────────────────────────────
 
 
-TEST_MODES = {
+TEST_MODES: dict[str, dict[str, Any]] = {
     "smoke": {
         "desc": "冒烟测试（核心功能快速验证）",
         "cmd": [
