@@ -7,6 +7,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,7 +24,7 @@ NOW = base.NOW
 OFFSET = timezone(timedelta(hours=-7))
 
 
-def _board(tmp_path: Path, missions: list[tuple[str, str, str, float]]) -> pd.Board:
+def _board(tmp_path: Path, missions: list[tuple[str, str, str, float]]) -> Any:
     root, db = base._workspace(tmp_path, missions)
     return pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
 
@@ -277,13 +278,13 @@ def test_bc_append_refuses_when_the_file_changed_after_preview(tmp_path: Path) -
 
 
 def test_probe_offline_on_timeout_and_run_check_receipt(tmp_path: Path) -> None:
-    def timeout(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
+    def timeout(*_args: Any, **_kwargs: Any) -> Any:
         raise subprocess.TimeoutExpired("git", actions.PROBE_TIMEOUT)
 
     assert actions.probe_online(tmp_path, runner=timeout) is False
     calls: list[list[str]] = []
 
-    def fake(command, **_kwargs):  # noqa: ANN001, ANN003, ANN202
+    def fake(command: Any, **_kwargs: Any) -> Any:
         calls.append(command)
         return subprocess.CompletedProcess(command, 1, "Fail=1", "")
 

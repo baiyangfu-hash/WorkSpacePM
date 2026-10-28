@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -560,7 +560,7 @@ def test_p19_a_git_evidence_call_is_bounded_and_a_timeout_is_a_clear_collection_
         seen.update(kwargs)
         raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
-    monkeypatch.setattr(module.subprocess, "run", hung)
+    monkeypatch.setattr(subprocess, "run", hung)
 
     with pytest.raises(EvidenceCollectionError, match="超时回执"):
         EvidenceCollectionService._git_output(tmp_path, "status")
@@ -582,7 +582,7 @@ def test_p19_each_language_service_call_is_capped_at_the_smaller_of_default_and_
 
     service = module._plc_language_service()
 
-    assert service is not None and service.timeout == expected
+    assert service is not None and cast(Any, service).timeout == expected
 
 
 def test_p15_checker_digest_covers_the_package_and_the_find_prd_dir_module() -> None:

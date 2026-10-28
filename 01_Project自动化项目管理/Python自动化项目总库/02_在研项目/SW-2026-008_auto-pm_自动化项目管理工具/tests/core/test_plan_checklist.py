@@ -188,7 +188,7 @@ def test_a_grant_without_checklist_serializes_exactly_as_before() -> None:
 
 
 def test_decision_accepts_only_the_old_or_the_checklist_grant_shape() -> None:
-    base = {"adapter": "codex", "approved_model": "m", "required_worktree_mode": "ISOLATED", "declared_dirty_paths": []}
+    base: dict[str, object] = {"adapter": "codex", "approved_model": "m", "required_worktree_mode": "ISOLATED", "declared_dirty_paths": []}
     for grant in (base, {**base, "plan_checklist": {}}):
         DecisionService.validate_planning_approval(
             "fubai", "a" * 64, "user-confirmation:chat-20261022-unit", request_id="REQ-1", execution_grant=grant
