@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import auto_pm.core.microtask_projection_service as projection_module
 import pytest
@@ -25,7 +26,7 @@ from tests.core.test_execution_microtask_service import _prepared
 _LEASE_TOKEN = "must-never-persist"
 
 
-def _running_plan(root: Path, operation_id: str, *, additional_path: str = ""):
+def _running_plan(root: Path, operation_id: str, *, additional_path: str = "") -> tuple[Any, Any]:
     dispatch = _prepared(
         root, operation_id=operation_id, additional_path=additional_path
     )
@@ -159,7 +160,7 @@ def test_new_file_projection_failure_removes_file_and_created_directories(
 
 
 def test_mid_batch_replace_failure_rolls_back_and_proves_clean_baseline(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     operation_id = "OP-E08CD-PROJECTION-ROLLBACK"
     materialized, _claim = _running_plan(tmp_path, operation_id)
@@ -191,7 +192,7 @@ def test_mid_batch_replace_failure_rolls_back_and_proves_clean_baseline(
     real_replace = projection_module.os.replace
     calls = 0
 
-    def fail_second_replace(source, destination) -> None:
+    def fail_second_replace(source: str, destination: str) -> None:
         nonlocal calls
         calls += 1
         if calls == 2:

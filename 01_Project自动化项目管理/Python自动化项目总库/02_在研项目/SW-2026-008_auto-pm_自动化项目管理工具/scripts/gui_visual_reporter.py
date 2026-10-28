@@ -194,9 +194,9 @@ class AIAnalysisInput:
     screenshot_count: int
     total_bugs: int
     total_visual_issues: int
-    bugs: list[dict] = field(default_factory=list)
-    visual_issues: list[dict] = field(default_factory=list)
-    widget_snapshot: list[dict] = field(default_factory=list)
+    bugs: list[dict[str, Any]] = field(default_factory=list)
+    visual_issues: list[dict[str, Any]] = field(default_factory=list)
+    widget_snapshot: list[dict[str, Any]] = field(default_factory=list)
     source_file_hints: dict[str, str] = field(default_factory=dict)  # widget_path → source_file
     op_log: list[str] = field(default_factory=list)
 
@@ -216,19 +216,19 @@ class VisualReporter:
     ) -> None:
         self.project_root = project_root
         self.screenshot_dir = screenshot_dir
-        self._bugs: list[dict] = []
-        self._visual_issues: list[dict] = []
+        self._bugs: list[dict[str, Any]] = []
+        self._visual_issues: list[dict[str, Any]] = []
         self._op_log: list[str] = []
         self._screenshots: list[str] = []
-        self._widget_snapshot: list[dict] = []
+        self._widget_snapshot: list[dict[str, Any]] = []
         self._timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # ── 数据注入 ──────────────────────────────────────────
 
-    def add_bugs(self, bugs: list[dict]) -> None:
+    def add_bugs(self, bugs: list[dict[str, Any]]) -> None:
         self._bugs = bugs
 
-    def add_visual_issues(self, visual_issues: list[dict]) -> None:
+    def add_visual_issues(self, visual_issues: list[dict[str, Any]]) -> None:
         self._visual_issues = visual_issues
 
     def add_op_log(self, op_log: list[str]) -> None:
@@ -243,7 +243,7 @@ class VisualReporter:
                 for p in screenshot_dir.glob("*.png")
             )
 
-    def add_widget_snapshot(self, widget_snapshot: list[dict]) -> None:
+    def add_widget_snapshot(self, widget_snapshot: list[dict[str, Any]]) -> None:
         """注入来自 gui_plc_full_test.py 的 widget_snapshot"""
         self._widget_snapshot = widget_snapshot
 
@@ -342,7 +342,7 @@ class VisualReporter:
             )
         return structured
 
-    def _build_ai_input(self, structured: list[StructuredIssue]) -> dict:
+    def _build_ai_input(self, structured: list[StructuredIssue]) -> dict[str, Any]:
         """构建给多模态 AI 的完整分析输入"""
         # 构建 source_file_hints: widget_path → source_file
         source_hints: dict[str, str] = {}

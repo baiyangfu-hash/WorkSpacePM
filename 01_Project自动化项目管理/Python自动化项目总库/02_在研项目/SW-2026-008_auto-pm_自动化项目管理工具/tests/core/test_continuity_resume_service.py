@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -14,18 +15,21 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.core.continuity_execution_service import (
+
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.pm_session_projection_service import (
+from auto_pm.application.core.continuity_resume_service import (
+    ContinuityResumeError,
+    ContinuityResumeService,
+)
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.pm_session_projection_service import (
     PmSessionProjectionError,
     PmSessionProjectionService,
 )
-from auto_pm.core.work_registry_service import WorkRegistryService
-
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
@@ -36,7 +40,6 @@ from auto_pm.contracts.decision_package import (
 )
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
-from auto_pm.infrastructure import continuity_store as continuity_store_module
 from auto_pm.infrastructure.continuity_store import (
     ContinuityStore,
     ContinuityStoreError,
@@ -936,13 +939,13 @@ def _snapshot_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _count_copies(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     copied: list[str] = []
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
 
     def counting(source: Path, target: Path) -> object:
         copied.append(Path(source).name)
         return original(source, target)
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", counting)
+    monkeypatch.setattr(shutil, "copyfile", counting)
     return copied
 
 
@@ -968,7 +971,7 @@ def test_td105_a_write_that_starts_while_the_strict_read_copies_is_never_refused
     _work(tmp_path, "WORK-001")
     _snapshot_temp(tmp_path, monkeypatch)
     db_path = tmp_path / ".auto-pm" / "continuity.db"
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
     writes: list[str] = []
 
     def copy_with_a_concurrent_write(source: Path, target: Path) -> object:
@@ -977,7 +980,7 @@ def test_td105_a_write_that_starts_while_the_strict_read_copies_is_never_refused
             _write_title(db_path, writes[0])
         return original(source, target)
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", copy_with_a_concurrent_write)
+    monkeypatch.setattr(shutil, "copyfile", copy_with_a_concurrent_write)
 
     work = ContinuityStore(tmp_path).get_work("WORK-001")
 
@@ -1123,7 +1126,7 @@ def test_td105_a_new_copy_that_fails_the_integrity_check_is_refused_without_resi
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     snapshot_parent = _snapshot_temp(tmp_path, monkeypatch)
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
 
     def corrupting(source: Path, target: Path) -> object:
         result = original(source, target)
@@ -1133,7 +1136,7 @@ def test_td105_a_new_copy_that_fails_the_integrity_check_is_refused_without_resi
             Path(target).write_bytes(bytes(data))
         return result
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", corrupting)
+    monkeypatch.setattr(shutil, "copyfile", corrupting)
 
     with pytest.raises(ContinuityStoreError):
         ContinuityStore(tmp_path).get_work("WORK-001")
@@ -1165,7 +1168,7 @@ def test_a_permission_error_while_copying_counts_as_drift_and_is_retried(
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     temp_parent = _snapshot_temp(tmp_path, monkeypatch)
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
     refused: list[str] = []
 
     def held_once(source: Path, target: Path) -> object:
@@ -1174,7 +1177,7 @@ def test_a_permission_error_while_copying_counts_as_drift_and_is_retried(
             raise PermissionError(32, "The process cannot access the file because it is being used by another process")
         return original(source, target)
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", held_once)
+    monkeypatch.setattr(shutil, "copyfile", held_once)
 
     assert ContinuityStore(tmp_path).get_work("WORK-001").title == "WORK-001"
     assert refused == ["continuity.db"]
@@ -1189,7 +1192,7 @@ def test_a_copy_whose_bytes_differ_from_the_source_is_taken_again(
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     _snapshot_temp(tmp_path, monkeypatch)
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
     copies: list[str] = []
 
     def torn_once(source: Path, target: Path) -> object:
@@ -1203,7 +1206,7 @@ def test_a_copy_whose_bytes_differ_from_the_source_is_taken_again(
                 stream.write(bytes([byte[0] ^ 0xFF]))
         return result
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", torn_once)
+    monkeypatch.setattr(shutil, "copyfile", torn_once)
 
     assert ContinuityStore(tmp_path).get_work("WORK-001").title == "WORK-001"
     assert copies.count("continuity.db") == 2

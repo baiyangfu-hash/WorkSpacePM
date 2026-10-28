@@ -12,6 +12,7 @@ import os
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -110,7 +111,7 @@ def dj005(tmp_path: Path) -> tuple[Path, Path, str]:
     return workspace, candidate, git(candidate, "rev-parse", "HEAD")
 
 
-def gate(tmp_path: Path, alarm_text: str, *, extra: dict[str, str] | None = None, owned: tuple[str, ...] = (ALARM,)):
+def gate(tmp_path: Path, alarm_text: str, *, extra: dict[str, str] | None = None, owned: tuple[str, ...] = (ALARM,)) -> Any:
     workspace, candidate, baseline = dj005(tmp_path)
     (candidate / ALARM).write_text(alarm_text, encoding="utf-8")
     for relative, text in (extra or {}).items():
@@ -469,7 +470,7 @@ def test_b18_a_baseline_check_that_errors_counts_everything_as_new(
     real = plc_baseline.checked_keys
     calls: list[Path] = []
 
-    def flaky(workspace: Path, project: Path, service: object):  # type: ignore[no-untyped-def]
+    def flaky(workspace: Path, project: Path, service: Any):  # type: ignore[no-untyped-def]
         calls.append(project)
         if len(calls) == 2:
             raise RuntimeError("baseline exploded")
@@ -503,7 +504,7 @@ def test_b20_a_baseline_that_is_not_applicable_counts_everything_as_new(
     real = plc_baseline.checked_keys
     calls: list[Path] = []
 
-    def baseline_not_applicable(workspace: Path, project: Path, service: object):  # type: ignore[no-untyped-def]
+    def baseline_not_applicable(workspace: Path, project: Path, service: Any):  # type: ignore[no-untyped-def]
         calls.append(project)
         result, keys, incomplete = real(workspace, project, service)
         if len(calls) == 2:

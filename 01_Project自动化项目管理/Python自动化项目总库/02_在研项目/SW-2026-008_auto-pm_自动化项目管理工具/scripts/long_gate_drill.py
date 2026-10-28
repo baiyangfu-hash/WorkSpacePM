@@ -26,7 +26,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 HERE = Path(__file__).resolve().parent
 GATE = HERE / "long_gate.py"
@@ -216,7 +216,7 @@ def main() -> int:
         return len(p.read_text().splitlines()) if p.exists() else 0
 
     def status() -> dict[str, Any]:
-        return json.loads((out / "long_gate_status.json").read_text(encoding="utf-8"))
+        return cast(dict[str, Any], json.loads((out / "long_gate_status.json").read_text(encoding="utf-8")))
 
     try:
         # 1. the old way, for comparison

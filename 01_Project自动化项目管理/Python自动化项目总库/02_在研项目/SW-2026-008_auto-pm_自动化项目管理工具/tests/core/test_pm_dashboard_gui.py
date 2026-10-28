@@ -16,6 +16,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
 
 import pytest
 
@@ -26,6 +27,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QAbstractButton,
     QAbstractSpinBox,
+    QApplication,
     QCheckBox,
     QComboBox,
     QFrame,
@@ -33,6 +35,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QLineEdit,
     QPlainTextEdit,
     QTextEdit,
+    QWidget,
 )
 
 from tests.core import test_pm_dashboard as base  # noqa: E402 - 复用原型测试的假工作空间
@@ -58,23 +61,24 @@ def _load() -> ModuleType:
 
 gui = _load()
 sys.path.insert(0, str(PACKAGE.parent))
+import pm_dashboard as pd_module  # noqa: E402
 from cockpit_board import app as app_module  # noqa: E402
 from cockpit_board import policy
 
 
 def _options(root: Path, db: Path, **extra: object) -> argparse.Namespace:
-    options = gui.parse_options(
+    options = cast(argparse.Namespace, gui.parse_options(
         ["--root", str(root), "--db", str(db), "--now", NOW.isoformat(), "--no-git", "--no-net",
          "--station-project", "DJ-2026-101", "--source-version", "1.3.3", "--effective-version", "1.3.3"]
         + ["--no-legacy"] * (not extra.pop("legacy", False))
         + ["--utc-offset", "-7", "--github-cache", str(root.parent / "github_cache_test.json")]
-    )
+    ))
     for key, value in extra.items():
         setattr(options, key, value)
     return options
 
 
-def _window(qapp, root: Path, db: Path, **extra: object):  # noqa: ANN001, ANN202
+def _window(qapp: QApplication, root: Path, db: Path, **extra: object) -> Any:
     options = _options(root, db, **extra)
     window = gui.CockpitWindow(options)
     window.show_board(gui.load_board(options, use_legacy=not options.no_legacy))
@@ -82,16 +86,16 @@ def _window(qapp, root: Path, db: Path, **extra: object):  # noqa: ANN001, ANN20
     return window
 
 
-def _buttons(widget) -> list[QAbstractButton]:  # noqa: ANN001
+def _buttons(widget: QWidget) -> list[QAbstractButton]:
     # 去掉安全区自查的勾选框和表格左上角自带的无字小按钮
     return [b for b in widget.findChildren(QAbstractButton) if not isinstance(b, QCheckBox) and b.text()]
 
 
-def _texts(widget) -> list[str]:  # noqa: ANN001
+def _texts(widget: QWidget) -> list[str]:
     return [label.text() for label in widget.findChildren(QLabel)]
 
 
-def _inside(widget, name: str) -> bool:  # noqa: ANN001
+def _inside(widget: QWidget, name: str) -> bool:
     parent = widget.parentWidget()
     while parent is not None and parent.objectName() != name:
         parent = parent.parentWidget()
@@ -102,7 +106,7 @@ def _files(root: Path) -> dict[str, int]:
     return {str(path): path.stat().st_mtime_ns for path in root.rglob("*") if path.is_file()}
 
 
-def test_pm_board_is_read_only(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+def test_pm_board_is_read_only(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "AWAITING_APPROVAL", "待批准", 1)])
     window = _window(qapp, root, db, examples=True)
     window.open_project("DJ-2026-101")  # 项目详情页也要画出来一起清点
@@ -128,7 +132,7 @@ def test_pm_board_is_read_only(qapp, tmp_path: Path) -> None:  # noqa: ANN001
     window.close()
 
 
-def test_station_buttons_are_listed_and_gated(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+def test_station_buttons_are_listed_and_gated(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
     window = _window(qapp, root, db)
     window.set_mode("ws")
@@ -150,7 +154,7 @@ def test_station_buttons_are_listed_and_gated(qapp, tmp_path: Path) -> None:  # 
     window.close()
 
 
-def test_window_and_screenshot_never_write_the_workspace(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+def test_window_and_screenshot_never_write_the_workspace(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
     before = _files(root)
     window = _window(qapp, root, db)
@@ -171,7 +175,7 @@ def test_window_and_screenshot_never_write_the_workspace(qapp, tmp_path: Path) -
     ]
 
 
-def test_bc_write_only_after_preview_and_appends_one_line(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+def test_bc_write_only_after_preview_and_appends_one_line(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
     relative = Path("0100_PLC自动化") / "DJ-2026-101_甲" / "11_监控" / "01_变更管理" / "02_变更记录" / "02_业务变更记录.md"
     control = root / relative  # 控制根 main 上的那份：永远不写
@@ -235,7 +239,7 @@ def test_bc_write_only_after_preview_and_appends_one_line(qapp, tmp_path: Path) 
     window.close()
 
 
-def test_checks_show_unchecked_not_zero(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+def test_checks_show_unchecked_not_zero(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [])
     window = _window(qapp, root, db)
     values = [label for label in window.home.findChildren(QLabel) if label.objectName() == "check"]
@@ -250,7 +254,7 @@ def test_checks_show_unchecked_not_zero(qapp, tmp_path: Path) -> None:  # noqa: 
     window.close()
 
 
-def test_ledger_text_is_shown_as_plain_text(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+def test_ledger_text_is_shown_as_plain_text(qapp: QApplication, tmp_path: Path) -> None:
     sneaky = '<a href="file:///C:/">点我</a><b>粗</b>'
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", sneaky, 0.1)])
     window = _window(qapp, root, db)
@@ -266,9 +270,9 @@ def test_ledger_text_is_shown_as_plain_text(qapp, tmp_path: Path) -> None:  # no
     window.close()
 
 
-def test_fast_read_first_and_legacy_never_before_td105(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+def test_fast_read_first_and_legacy_never_before_td105(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACCEPTANCE_PENDING", "握手断线", 1)])
-    assert db == root / app_module.pd.DB_RELATIVE
+    assert db == root / pd_module.DB_RELATIVE
     base._FakeLegacyService.calls = []
     options = _options(root, db, legacy=True, legacy_factory=base._FakeLegacyService)
     window = gui.CockpitWindow(options)
@@ -284,7 +288,7 @@ def test_fast_read_first_and_legacy_never_before_td105(qapp, tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize("reader", ["copy", "store"])
-def test_read_failure_keeps_the_window_alive(qapp, tmp_path: Path, reader: str) -> None:  # noqa: ANN001
+def test_read_failure_keeps_the_window_alive(qapp: QApplication, tmp_path: Path, reader: str) -> None:
     """账本坏了：copy 读法报 sqlite 的 DatabaseError，store 读法报 Store 包过的 ContinuityStoreError；窗口都不挂。"""
     root, db = base._workspace(tmp_path, [])
     db.write_bytes(b"not a database")
@@ -306,13 +310,13 @@ def test_ledger_reader_flag_reaches_build_board(tmp_path: Path, monkeypatch: pyt
     options = _options(root, db)
     assert options.ledger_reader == "auto"
     seen: list[str] = []
-    real = app_module.pd.build_board
+    real = pd_module.build_board
 
-    def spy(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+    def spy(*args: Any, **kwargs: Any) -> Any:
         seen.append(kwargs["ledger_reader"])
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(app_module.pd, "build_board", spy)
+    monkeypatch.setattr(pd_module, "build_board", spy)
     gui.load_board(options, use_legacy=False)
     options = gui.parse_options(["--root", str(root), "--no-git", "--no-legacy", "--no-net", "--ledger-reader", "store"])
     board = gui.load_board(options, use_legacy=False)
@@ -366,7 +370,7 @@ def test_process_and_file_writes_live_only_in_actions() -> None:
     assert len(re.findall(WRITES, app_source)) == 1
 
 
-def test_github_block_shows_as_of_and_never_green_when_stale(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+def test_github_block_shows_as_of_and_never_green_when_stale(qapp: QApplication, tmp_path: Path) -> None:
     import github_collector as gh
 
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])

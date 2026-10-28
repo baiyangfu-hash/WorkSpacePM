@@ -31,7 +31,6 @@ from tests.e2e.test_closure_drill import (
     MAIN_DOMAIN,
     ORIGINAL_WORDS,
     PLAN_CHECKLIST,
-    PROJECT_ID,
     Drill,
     Step,
     assert_closed_and_clean,
@@ -42,6 +41,7 @@ from tests.e2e.test_closure_drill import (
 )
 from tests.e2e.test_pmf_plc import (
     PROJECT,
+    PROJECT_ID,
     benchmark_tar,  # noqa: F401 - module fixture re-used by name
     git,
 )

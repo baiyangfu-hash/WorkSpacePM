@@ -10,6 +10,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -281,7 +282,7 @@ class _FakeStore:
         _FakeStore.calls.append(f"init {root.name} {db_path.name}")
         self.db_path = db_path
 
-    def _read_connection(self):  # noqa: ANN202
+    def _read_connection(self) -> Any:
         _FakeStore.calls.append("_read_connection")
         return pd.copy_ledger_connection(self.db_path.parent, self.db_path)  # 真 Store 也是先拷快照再开
 

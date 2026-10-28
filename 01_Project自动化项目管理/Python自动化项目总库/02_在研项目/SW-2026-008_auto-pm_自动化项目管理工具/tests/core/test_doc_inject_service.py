@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from auto_pm.core.doc_inject_service import DocInjectService
-from auto_pm.models import ProjectInfo
+
+from auto_pm.application.core.doc_inject_service import DocInjectService
+from auto_pm.domain.models import ProjectInfo
 
 
 def _setup_legacy_doc_project(tmp_path: Path) -> tuple[ProjectInfo, Path, Path]:

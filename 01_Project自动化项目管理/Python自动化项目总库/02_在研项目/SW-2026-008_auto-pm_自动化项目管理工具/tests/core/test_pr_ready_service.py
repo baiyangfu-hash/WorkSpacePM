@@ -6,6 +6,7 @@ import json
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -21,8 +22,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2].parents[3]
 HEAD = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 OLD = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
 SIGNER = {"login": "baiyangfu-hash", "id": 246858089}
-GOOD_RUNS = [{"name": "sw008-ci", "status": "completed", "conclusion": "success"}]
-GOOD_STATUS = {"statuses": [{"context": "safety-zone", "state": "success"}]}
+GOOD_RUNS: list[dict[str, object]] = [{"name": "sw008-ci", "status": "completed", "conclusion": "success"}]
+GOOD_STATUS: dict[str, object] = {"statuses": [{"context": "safety-zone", "state": "success"}]}
 
 
 class FakeGh:
@@ -72,12 +73,12 @@ def verdict(sha: str, word: str) -> str:
 GOOD_REPORT = f"# 216 PR #170 审计\n\n## 结论\n\n同意，可以合并。\n\n{verdict(HEAD, '过')}\n"
 
 
-def check(tmp_path: Path, gh: FakeGh, text: str | None = GOOD_REPORT, number: int = 170):  # noqa: ANN201
+def check(tmp_path: Path, gh: FakeGh, text: str | None = GOOD_REPORT, number: int = 170) -> Any:
     directory = report_dir(tmp_path, text) if text is not None else tmp_path / "reviews"
     return PrReadyService(REPO_ROOT, gh=gh, report_dirs=[directory], repo="o/r").check(number)
 
 
-def failed(report) -> set[str]:  # noqa: ANN001
+def failed(report: Any) -> set[str]:
     return {item.name for item in report.items if not item.ok}
 
 

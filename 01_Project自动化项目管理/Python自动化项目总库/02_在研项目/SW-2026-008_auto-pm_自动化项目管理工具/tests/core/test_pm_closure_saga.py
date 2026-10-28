@@ -603,7 +603,7 @@ def test_ledger_step_backs_up_legacy_layout_default_path(
         ("04_监控/closed_items/CHG-PLC/CHG-PLC-2026-001.md: completed", "completed"),
     ],
 )
-def test_chg_update_target_status_matches_closed_as_a_whole_word(tmp_path: Path, update: str, expected: str):
+def test_chg_update_target_status_matches_closed_as_a_whole_word(tmp_path: Path, update: str, expected: str) -> None:
     # TD-SW008-209 同类：原先子串判断，"unclosed" 也会被当成 closed
     coordinator = PmClosureSagaCoordinator(tmp_path)
     targets = coordinator._resolve_all_chg_targets({"chg_updates": [update]})

@@ -7,12 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from auto_pm.application.core import candidate_merge_back_service as module
 from auto_pm.application.core.candidate_merge_back_service import (
     CandidateMergeBackError,
     CandidateMergeBackService,
 )
-from auto_pm.application.core.evidence_collection_service import EvidenceCollection
+from auto_pm.application.core.evidence_collection_service import (
+    EvidenceCollection,
+    EvidenceCollectionService,
+)
 from auto_pm.contracts.continuity import CheckpointItem, RunItem, RunState
 from tests.git_support import git_out
 
@@ -52,7 +54,7 @@ def _lineage(
         run_id="RUN-1", git_head=head, worktree_path=str(worktree), staged_paths=(), unstaged_paths=changed,
         untracked_paths=(), untracked_content_hashes=(), staged_diff="", unstaged_diff="diff",
     )
-    monkeypatch.setattr(module.EvidenceCollectionService, "collect", lambda self, run: collection)
+    monkeypatch.setattr(EvidenceCollectionService, "collect", lambda self, run: collection)
     run = RunItem(
         run_id="RUN-1", work_id="WORK-1", state=RunState.VERIFYING, executor_id="trae:cn", adapter="trae",
         owned_paths=changed, declared_dirty_paths=changed, git_head=head, worktree_path=str(worktree),
