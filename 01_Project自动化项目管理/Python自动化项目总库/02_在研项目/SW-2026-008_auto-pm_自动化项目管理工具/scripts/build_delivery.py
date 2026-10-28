@@ -24,6 +24,7 @@ import sys
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 # ============================================================
 # 配置区
@@ -64,17 +65,17 @@ class C:
     BLUE = "\033[94m"
     BOLD = "\033[1m"
 
-def ok(msg): print(f"{C.GREEN}[PASS]{C.RESET} {msg}")
-def fail(msg): print(f"{C.RED}[FAIL]{C.RESET} {msg}")
-def warn(msg): print(f"{C.YELLOW}[WARN]{C.RESET} {msg}")
-def info(msg): print(f"{C.BLUE}[INFO]{C.RESET}  {msg}")
-def skip(msg): print(f"[SKIP]  {msg}")
-def header(msg): print(f"\n{C.BOLD}{'='*60}{C.RESET}\n{C.BOLD}=== {msg} ==={C.RESET}\n{C.BOLD}{'='*60}{C.RESET}")
+def ok(msg: str) -> None: print(f"{C.GREEN}[PASS]{C.RESET} {msg}")
+def fail(msg: str) -> None: print(f"{C.RED}[FAIL]{C.RESET} {msg}")
+def warn(msg: str) -> None: print(f"{C.YELLOW}[WARN]{C.RESET} {msg}")
+def info(msg: str) -> None: print(f"{C.BLUE}[INFO]{C.RESET}  {msg}")
+def skip(msg: str) -> None: print(f"[SKIP]  {msg}")
+def header(msg: str) -> None: print(f"\n{C.BOLD}{'='*60}{C.RESET}\n{C.BOLD}=== {msg} ==={C.RESET}\n{C.BOLD}{'='*60}{C.RESET}")
 
 # ============================================================
 # Step 1: 编译检查
 # ============================================================
-def step1_build_check(args):
+def step1_build_check(args: argparse.Namespace) -> bool:
     header("Step 1: 编译检查")
     exe_src = SRC_CODE / "dist" / "auto-pm" / EXE_NAME
 
@@ -125,7 +126,7 @@ def step1_build_check(args):
 # ============================================================
 # Step 2: 更新交付物目录
 # ============================================================
-def step2_update_delivery(args):
+def step2_update_delivery(args: argparse.Namespace) -> tuple[bool, list[Path]]:
     header("Step 2: 更新06_交付物/")
     copied = []
 
@@ -183,7 +184,7 @@ def step2_update_delivery(args):
 # ============================================================
 # Step 3: 交付物目录校验
 # ============================================================
-def step3_verify_delivery():
+def step3_verify_delivery() -> bool:
     header("Step 3: 交付物目录校验")
     checks_passed = 0
     checks_total = 4
@@ -237,7 +238,7 @@ def step3_verify_delivery():
 # ============================================================
 # Step 4: 打包zip (强制Python zipfile)
 # ============================================================
-def step4_package(args):
+def step4_package(args: argparse.Namespace) -> Path | None:
     header("Step 4: 打包zip (Python zipfile.ZIP_DEFLATED)")
     date_str = datetime.now().strftime("%Y%m%d")
     zip_name = f"{PRODUCT_NAME}_{args.version}_{date_str}.zip"
@@ -277,13 +278,13 @@ def step4_package(args):
 # ============================================================
 # Step 5: ZIP校验 (7项CHK)
 # ============================================================
-def step5_verify_zip(zip_path):
+def step5_verify_zip(zip_path: Path | None) -> bool:
     header("Step 5: ZIP校验 (7项CHK)")
     if not zip_path or not zip_path.exists():
         fail("无有效 zip 路径")
         return False
 
-    results = {"pass": [], "warn": [], "fail": []}
+    results: dict[str, list[str]] = {"pass": [], "warn": [], "fail": []}
 
     with zipfile.ZipFile(str(zip_path), 'r') as zf:
         names = zf.namelist()
@@ -366,7 +367,7 @@ def step5_verify_zip(zip_path):
 # ============================================================
 # Step 6: 输出报告
 # ============================================================
-def step6_report(results):
+def step6_report(results: dict[str, Any]) -> bool:
     header("Step 6: 构建报告")
 
     all_pass = all(results.values())
@@ -392,7 +393,7 @@ def step6_report(results):
 # ============================================================
 # Main
 # ============================================================
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="SW-2026-008 交付物构建工具 — 基于 220_Python项目打包规范_V2.3.0"
     )

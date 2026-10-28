@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from auto_pm.core.constants import (
+from auto_pm.application.core.constants import (
     BUSINESS_LINE_CODES,
     BUSINESS_LINE_LABELS,
     BUSINESS_LINE_OPTIONS,
@@ -167,7 +167,7 @@ class TestNoDuplicateDefinitions:
         # 检查 project_service.py 模块不再有硬编码的 template_map
         import inspect
 
-        from auto_pm.core.project_service import ProjectService
+        from auto_pm.application.core.project_service import ProjectService
 
         source = inspect.getsource(ProjectService)
         # 不应包含硬编码的 template_map 定义
@@ -179,7 +179,7 @@ class TestNoDuplicateDefinitions:
         """cli/project.py 使用 constants 而非硬编码"""
         import inspect
 
-        from auto_pm.cli import project as project_module
+        from auto_pm.ui.cli import project as project_module
 
         source = inspect.getsource(project_module)
         # 不应包含硬编码的 template_map 定义

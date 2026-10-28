@@ -9,8 +9,9 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from auto_pm.core.continuity_execution_service import ContinuityExecutionError
-from auto_pm.core.execution_supervisor_service import (
+
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
+from auto_pm.application.core.execution_supervisor_service import (
     ExecutionCollectedOutcome,
     ExecutionCollectionPendingError,
     ExecutionLeasePolicy,
@@ -19,7 +20,6 @@ from auto_pm.core.execution_supervisor_service import (
     LeaseCapability,
     LeaseRenewalOutcome,
 )
-
 from auto_pm.contracts.continuity import LeaseRenewalReceipt, RunState
 from auto_pm.contracts.execution_adapter import (
     ExecutionActivityStage,

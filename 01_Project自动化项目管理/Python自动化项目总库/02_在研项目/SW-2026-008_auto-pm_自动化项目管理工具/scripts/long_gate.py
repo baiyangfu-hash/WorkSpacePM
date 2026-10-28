@@ -39,7 +39,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from xml.sax.saxutils import escape
 
 IS_WINDOWS = os.name == "nt"
@@ -132,7 +132,7 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
             if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
                 raise GateError(f"step {sname}: argv must be a non-empty list of strings")
             step["argv"] = [fill(a) for a in argv]
-            step["cwd"] = fill(step.get("cwd", cfg["root"] or cfg["out_dir"]))
+            step["cwd"] = fill(cast(str, step.get("cwd", cfg["root"] or cfg["out_dir"])))
         else:
             write = step["write"]
             if not isinstance(write, str):
@@ -478,7 +478,7 @@ class Lease:
 
     @property
     def enabled(self) -> bool:
-        return self.cfg["mode"] != "none"
+        return bool(self.cfg["mode"] != "none")
 
     def remaining_s(self) -> float | None:
         if self.expires_at is None:
