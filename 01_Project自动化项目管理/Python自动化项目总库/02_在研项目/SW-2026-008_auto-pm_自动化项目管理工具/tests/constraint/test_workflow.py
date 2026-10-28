@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.constraint.workflow import WorkflowEngine
+
+from auto_pm.domain.constraint.workflow import WorkflowEngine
 
 
 @pytest.fixture

@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from auto_pm.models import ChangeRequest
 
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
@@ -22,6 +21,7 @@ from auto_pm.domain.change.decision_service import (
     DecisionService,
     DecisionValidationError,
 )
+from auto_pm.domain.models import ChangeRequest
 
 
 @pytest.fixture(autouse=True)

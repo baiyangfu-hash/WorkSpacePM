@@ -8,7 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.constraint.guard import BOM, FileGuard
+
+from auto_pm.domain.constraint.guard import BOM, FileGuard
 
 
 class TestFileGuardSnapshot:

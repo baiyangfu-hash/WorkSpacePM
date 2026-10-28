@@ -14,14 +14,15 @@ import os
 from pathlib import Path
 
 import pytest
-from auto_pm.core.project_service import ProjectService
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import (
+
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.domain.models import ChangeSummary, ProjectRecord
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import (
     ChangeRequestRepository,
     ProjectRepository,
     ScanLogRepository,
 )
-from auto_pm.models import ChangeSummary, ProjectRecord
 
 # ── DatabaseManager 测试 ──────────────────────────────
 
