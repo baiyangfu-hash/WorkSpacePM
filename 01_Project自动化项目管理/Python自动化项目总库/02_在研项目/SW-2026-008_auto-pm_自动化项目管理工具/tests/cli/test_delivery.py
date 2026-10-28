@@ -9,6 +9,17 @@ from auto_pm.delivery.constants import MB
 from click.testing import CliRunner
 
 
+@pytest.fixture(autouse=True)
+def _identity_guard_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These scratch workspaces have no registered project; the guard is covered in test_delivery_runtime_identity.py."""
+    import sys
+
+    for package in ("auto_pm.ui.cli", "auto_pm.cli"):
+        target = sys.modules.get(f"{package}.delivery")
+        if target is not None:
+            monkeypatch.setattr(target, "require_runtime_identity_for_delivery", lambda *_a, **_k: None)
+
+
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()

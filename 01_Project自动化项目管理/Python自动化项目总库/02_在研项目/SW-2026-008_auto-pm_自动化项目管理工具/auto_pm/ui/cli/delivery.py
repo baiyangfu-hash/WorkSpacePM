@@ -22,6 +22,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.delivery.archive_manager import ArchiveManager
 from auto_pm.delivery.constants import DEFAULT_ARCHIVE_KEEP, DEFAULT_PRODUCT_NAME
 from auto_pm.delivery.delivery_service import DeliveryService
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_delivery
 
 console = Console()
 
@@ -81,6 +82,7 @@ def cmd_build(
     else:
         root = app_ctx.workspace_root
 
+    require_runtime_identity_for_delivery(ctx, project_root)
     svc = DeliveryService(root)
 
     console.print(f"[cyan]▶ 构建交付物: {version}[/cyan]")
@@ -153,6 +155,8 @@ def cmd_package(
     else:
         root = app_ctx.workspace_root
 
+    if not verify_only:
+        require_runtime_identity_for_delivery(ctx, project_root)
     svc = DeliveryService(root)
 
     console.print(f"[cyan]▶ 打包交付物: {version}[/cyan]")
@@ -266,6 +270,8 @@ def cmd_archive_clean(
     else:
         root = app_ctx.workspace_root
 
+    if not dry_run:
+        require_runtime_identity_for_delivery(ctx, project_root)
     am = ArchiveManager(root)
     removed = am.clean_archives(archive_type=archive_type, keep=keep, dry_run=dry_run)
 

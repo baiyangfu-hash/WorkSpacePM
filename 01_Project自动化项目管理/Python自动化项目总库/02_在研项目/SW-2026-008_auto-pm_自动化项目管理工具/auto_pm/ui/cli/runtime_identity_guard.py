@@ -126,3 +126,35 @@ def project_of_planning_request(ctx: click.Context, request_id: str) -> str:
         return ContinuityStore(app_ctx.control_root).get_planning_draft(request_id).subject_project_id
     except (ContinuityStoreError, ValueError) as error:
         raise click.ClickException(str(error)) from error
+
+
+def require_runtime_identity_for_delivery(ctx: click.Context, project_root: str | None) -> None:
+    """Refuse a delivery write unless the runtime identity of the project it delivers is clean.
+
+    ``--project-root`` names a project directory (its anchor says which project); without it the workspace root is
+    used, which belongs to no project, so the workspace's control project stands for it.
+    """
+
+    from collections import Counter
+    from pathlib import Path
+
+    from auto_pm.contracts.workspace_context import WorkspaceRegistry
+
+    app_ctx: AppContext = ctx.find_root().obj
+    service = WorkspaceContextService(str(app_ctx.control_root), execution_root=app_ctx.workspace_root)
+    try:
+        if project_root:
+            context = service.resolve(project_id="", start_path=Path(project_root))
+        else:
+            registry_path = Path(app_ctx.control_root) / WorkspaceContextService._DEFAULT_REGISTRY
+            registry = WorkspaceRegistry.model_validate_json(registry_path.read_text(encoding="utf-8", errors="replace"))
+            shared = Counter(item.control_project_id for item in registry.projects if item.control_project_id)
+            if not shared:
+                raise click.ClickException("Workspace Registry 没有声明控制项目，无法校验运行身份，已拒绝写入")
+            context = service.resolve(project_id=shared.most_common(1)[0][0], start_path=app_ctx.control_root)
+    except WorkspaceContextError as error:
+        raise click.ClickException(str(error)) from error
+    except (OSError, ValueError) as error:
+        raise click.ClickException(f"无法读取 Workspace Registry，不能确定控制项目，已拒绝写入: {error}") from error
+    if context.conflicts:
+        raise click.ClickException("运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
