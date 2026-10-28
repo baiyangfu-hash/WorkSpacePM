@@ -346,7 +346,7 @@ def test_control_root_git_fact_rejects_success_with_permission_diagnostic(
 ) -> None:
     _repository(tmp_path)
 
-    def diagnostic_result(*_args, **_kwargs):
+    def diagnostic_result(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args=[],
             returncode=0,
