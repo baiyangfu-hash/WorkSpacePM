@@ -220,7 +220,7 @@ def open_ledger_read_only(db_path: Path) -> sqlite3.Connection:
     return connection
 
 
-def _tables(connection: sqlite3.Connection) -> set:
+def _tables(connection: sqlite3.Connection) -> set[str]:
     rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     return {row[0] for row in rows}
 
@@ -419,7 +419,7 @@ def read_ledger(
     return missions, attention
 
 
-def _latest_run(connection: sqlite3.Connection, work_id: str, tables: set) -> RunInfo | None:
+def _latest_run(connection: sqlite3.Connection, work_id: str, tables: set[str]) -> RunInfo | None:
     row = connection.execute(
         "SELECT run_id, state, executor_id, worktree_path, updated_at FROM run_items "
         "WHERE work_id = ? ORDER BY updated_at DESC LIMIT 1",
@@ -723,7 +723,8 @@ def build_board(
             if use_git:
                 project.last_commit = git_last_commit(root, project.root)
     pending: list[Decision] = []
-    legacy_note, legacy_notices = "", []
+    legacy_note = ""
+    legacy_notices: list[str] = []
     # 老后台只认 <root>/.auto-pm/continuity.db；--db 指到别处时不混用两份账本。
     default_db = (root / DB_RELATIVE).resolve()
     if use_legacy and db_path is not None and db_path.is_file() and db_path.resolve() == default_db:

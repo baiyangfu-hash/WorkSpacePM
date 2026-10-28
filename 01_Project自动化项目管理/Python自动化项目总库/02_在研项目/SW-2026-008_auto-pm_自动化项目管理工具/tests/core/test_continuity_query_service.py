@@ -11,13 +11,16 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from auto_pm.core.continuity_query_service import ContinuityQueryError, ContinuityQueryService
-from auto_pm.core.continuity_resume_service import ContinuityResumeService
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.work_registry_service import WorkRegistryService
 from pydantic import ValidationError
 
 from auto_pm.api import CockpitApiError, CockpitClient
+from auto_pm.application.core.continuity_query_service import (
+    ContinuityQueryError,
+    ContinuityQueryService,
+)
+from auto_pm.application.core.continuity_resume_service import ContinuityResumeService
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts import continuity_query as query_contract
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.continuity_query import (

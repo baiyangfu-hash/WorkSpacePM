@@ -19,13 +19,14 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 # 插入 auto_pm 路径以导入 GovernanceService
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from auto_pm.core.governance_service import GovernanceService
 
 
-def run_ruff(workspace: str) -> dict:
+def run_ruff(workspace: str) -> dict[str, Any]:
     """运行 ruff check . 并解析错误数"""
     result = subprocess.run(
         [sys.executable, "-m", "ruff", "check", ".", "--output-format=json"],
@@ -42,7 +43,7 @@ def run_ruff(workspace: str) -> dict:
     return {"errors": len(violations)}
 
 
-def run_mypy(workspace: str) -> dict:
+def run_mypy(workspace: str) -> dict[str, Any]:
     """运行 mypy auto_pm/ 并解析错误数"""
     result = subprocess.run(
         [sys.executable, "-m", "mypy", "auto_pm/"],
@@ -64,7 +65,7 @@ def run_mypy(workspace: str) -> dict:
     return {"errors": errors, "files": files}
 
 
-def run_pytest(workspace: str) -> dict:
+def run_pytest(workspace: str) -> dict[str, Any]:
     """运行 pytest --no-cov -q -m "not gui" 并解析结果"""
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "--no-cov", "-q", "-m", "not gui"],
@@ -87,7 +88,7 @@ def run_pytest(workspace: str) -> dict:
     }
 
 
-def run_sanitation(workspace: str) -> dict:
+def run_sanitation(workspace: str) -> dict[str, Any]:
     """运行工作空间根目录纯净度检查"""
     service = GovernanceService(workspace_root=workspace)
     report = service.inspect_sanitation()
