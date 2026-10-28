@@ -169,3 +169,20 @@ def project_of_planning_request(ctx: click.Context, request_id: str) -> str:
         return ContinuityStore(app_ctx.control_root).get_planning_draft(request_id).subject_project_id
     except (ContinuityStoreError, ValueError) as error:
         raise click.ClickException(str(error)) from error
+
+
+def require_runtime_identity_for_card(ctx: click.Context, card_id: str) -> None:
+    """Refuse an implementation-card write when the runtime identity of the card's project has a conflict.
+
+    A card that cannot be read has no project to check; the command then reports the missing or broken card itself,
+    before it writes anything.
+    """
+
+    from auto_pm.application.core.implementation_card_service import ImplementationCardService
+
+    app_ctx: AppContext = ctx.find_root().obj
+    try:
+        project_id = ImplementationCardService(Path(app_ctx.control_root)).load(card_id).project_id
+    except Exception:  # noqa: BLE001 - the command's own read reports the real reason
+        return
+    require_runtime_identity(ctx, project_id)
