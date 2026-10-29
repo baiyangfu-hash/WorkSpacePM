@@ -28,6 +28,7 @@ from pathlib import Path
 TEXT_SUFFIXES = (
     ".md", ".py", ".json", ".yml", ".yaml", ".txt", ".scl", ".st", ".toml", ".html", ".qml", ".csv",
     ".ps1", ".bat", ".mdc", ".jinja", ".sh", ".cfg", ".ini", ".xml", ".gitignore", ".gitattributes",
+    ".scltest", ".js", ".css", ".j2", ".mmd",
 )  # fmt: skip
 REPLACEMENT = chr(0xFFFD)  # written as chr() so that this file does not contain the character it looks for
 ALLOWLIST = Path(__file__).resolve().parent / "encoding_allowlist.txt"
