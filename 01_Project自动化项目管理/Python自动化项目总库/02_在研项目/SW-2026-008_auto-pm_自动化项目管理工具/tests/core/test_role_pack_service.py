@@ -249,7 +249,7 @@ def test_mojibake_file_is_reported(tmp_path: Path) -> None:
 
 def test_replacement_character_is_reported_in_shared(tmp_path: Path) -> None:
     roles, workspace = _workspace(tmp_path)
-    (roles / "shared" / "refs" / "skill_coordination.md").write_text("共享�契约\n", encoding="utf-8")
+    (roles / "shared" / "refs" / "skill_coordination.md").write_text("共享\ufffd契约\n", encoding="utf-8")
     assert ("RP-009", FAIL) in _codes(roles, workspace)
 
 
