@@ -30,7 +30,7 @@ def _listed_files(workspace_root: Path) -> tuple[set[str], str]:
         ids = document["ids"]
         if not isinstance(ids, list) or not all(isinstance(item, str) for item in ids):
             raise ValueError("`ids` must be a list of strings")
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, TypeError) as error:
         return set(), f"{type(error).__name__}: {error}"
     return {f"{PROJECT_RELATIVE}/{item.split('::', 1)[0]}" for item in ids}, ""
 

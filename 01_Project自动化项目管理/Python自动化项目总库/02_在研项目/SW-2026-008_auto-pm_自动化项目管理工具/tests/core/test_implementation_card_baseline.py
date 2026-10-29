@@ -90,7 +90,11 @@ def test_a_repository_without_a_baseline_file_judges_nothing(tmp_path: Path) -> 
     assert _baseline(report) == []
 
 
-@pytest.mark.parametrize("text", ["{not json", '{"ids": "nope"}', '{"ids": [1]}', "{}"], ids=["syntax", "not-a-list", "not-strings", "no-ids"])
+@pytest.mark.parametrize(
+    "text",
+    ["{not json", '{"ids": "nope"}', '{"ids": [1]}', "{}", "[]", "null"],
+    ids=["syntax", "not-a-list", "not-strings", "no-ids", "root-is-list", "root-is-null"],
+)
 def test_an_unreadable_baseline_is_refused_when_the_card_changes_a_test_not_skipped(tmp_path: Path, text: str) -> None:
     report = _report(tmp_path, [LISTED], baseline_text=text)
 
