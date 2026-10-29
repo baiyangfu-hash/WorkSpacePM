@@ -11,12 +11,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.vartable.parsers.autoshop_parser import AutoshopParser
-from auto_pm.vartable.parsers.base_parser import BaseParser
-from auto_pm.vartable.parsers.codesys_parser import CodesysParser
-from auto_pm.vartable.parsers.intdoc_parser import IntDocParser
-from auto_pm.vartable.parsers.scl_parser import SclParser
-from auto_pm.vartable.parsers.work3_parser import Work3Parser
+
+from auto_pm.domain.vartable.parsers.autoshop_parser import AutoshopParser
+from auto_pm.domain.vartable.parsers.base_parser import BaseParser
+from auto_pm.domain.vartable.parsers.codesys_parser import CodesysParser
+from auto_pm.domain.vartable.parsers.intdoc_parser import IntDocParser
+from auto_pm.domain.vartable.parsers.scl_parser import SclParser
+from auto_pm.domain.vartable.parsers.work3_parser import Work3Parser
 
 
 class TestBaseParserAbstract:

@@ -15,9 +15,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from auto_pm.cli.__main__ import cli
-from auto_pm.models import ProjectInfo
 from click.testing import CliRunner
+
+from auto_pm.domain.models import ProjectInfo
+from auto_pm.ui.cli.__main__ import cli
 
 
 def _make_plc_project(workspace: Path, project_id: str, name: str) -> Path:

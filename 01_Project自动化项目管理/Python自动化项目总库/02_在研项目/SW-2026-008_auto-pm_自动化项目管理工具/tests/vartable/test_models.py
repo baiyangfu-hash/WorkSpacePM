@@ -5,7 +5,7 @@ VarEntry / VarTable / ParseResult / ParseError
 
 from __future__ import annotations
 
-from auto_pm.vartable.models import ParseError, ParseResult, VarEntry, VarTable
+from auto_pm.domain.vartable.models import ParseError, ParseResult, VarEntry, VarTable
 
 
 class TestVarEntry:
