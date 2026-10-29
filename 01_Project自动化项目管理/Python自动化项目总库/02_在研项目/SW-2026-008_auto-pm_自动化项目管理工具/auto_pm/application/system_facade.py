@@ -18,13 +18,13 @@ import logging
 from pathlib import Path
 
 import yaml
-from auto_pm.core.protocols import (
+
+from auto_pm.application.core.protocols import (
     PmSessionServiceProtocol,
     ProjectServiceProtocol,
     TemplateServiceProtocol,
 )
-from auto_pm.models import ProjectInfo
-
+from auto_pm.domain.models import ProjectInfo
 from auto_pm.ui.contracts.dto.system_dto import (
     ApplyTemplateResultDTO,
     PmSessionArchiveResultDTO,

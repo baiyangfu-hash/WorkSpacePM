@@ -14,11 +14,10 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from auto_pm.core.project_scanner import ProjectScanner
-from auto_pm.core.workspace_context_service import WorkspaceContextService
-from auto_pm.models import ProjectInfo
-
+from auto_pm.application.core.project_scanner import ProjectScanner
+from auto_pm.application.core.workspace_context_service import WorkspaceContextService
 from auto_pm.contracts.workspace_context import WorkspaceProjectMapping, WorkspaceRegistry
+from auto_pm.domain.models import ProjectInfo
 
 
 class WorkspaceRegistryError(RuntimeError):

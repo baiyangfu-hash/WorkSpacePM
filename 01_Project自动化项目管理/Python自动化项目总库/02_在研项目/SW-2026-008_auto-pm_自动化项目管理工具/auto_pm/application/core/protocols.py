@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from auto_pm.models import (
+from auto_pm.domain.models import (
     ChangeRequest,
     ChangeSummary,
     ProjectInfo,
