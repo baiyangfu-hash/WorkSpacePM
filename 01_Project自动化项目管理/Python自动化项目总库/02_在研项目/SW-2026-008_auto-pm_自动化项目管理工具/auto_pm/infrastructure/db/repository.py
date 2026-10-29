@@ -18,13 +18,13 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.models import (
+from auto_pm.domain.models import (
     ApprovalRecord,
     ChangeSummary,
     ImpactAnalysis,
     ProjectRecord,
 )
+from auto_pm.infrastructure.db.connection import DatabaseManager
 
 
 class ProjectRepository:

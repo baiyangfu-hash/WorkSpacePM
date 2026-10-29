@@ -13,8 +13,8 @@ from typing import Any
 
 import yaml
 
-from auto_pm.spec.core.config import WorkspaceConfig
-from auto_pm.spec.core.registry import SpecRegistry
+from auto_pm.domain.spec.core.config import WorkspaceConfig
+from auto_pm.domain.spec.core.registry import SpecRegistry
 
 log = logging.getLogger(__name__)
 

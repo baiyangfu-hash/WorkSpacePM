@@ -22,11 +22,11 @@ from __future__ import annotations
 import logging
 import os
 
+from auto_pm.domain.plc.checker import PlcChecker
 from auto_pm.domain.plc.language_service import LanguageService
-from auto_pm.plc.checker import PlcChecker
-from auto_pm.plc.models import CheckResult, RepairResult, StandardizeResult
-from auto_pm.plc.repairer import PlcRepairer
-from auto_pm.plc.substance_checker import SubstanceChecker
+from auto_pm.domain.plc.models import CheckResult, RepairResult, StandardizeResult
+from auto_pm.domain.plc.repairer import PlcRepairer
+from auto_pm.domain.plc.substance_checker import SubstanceChecker
 
 log = logging.getLogger(__name__)
 
