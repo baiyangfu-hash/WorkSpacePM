@@ -704,3 +704,19 @@ def test_w04_a_pr_that_does_not_merge_cleanly_into_main_is_refused(repo: Path) -
     _main, head = commit(repo, {DOC: "PR 改的说明\n"})
     result = gate.check(repo, git(repo, "rev-parse", "main"), head)
     assert not result.passed and any("冲突" in v for v in result.violations), result
+
+
+def test_t90_invalid_bytes_in_a_diff_are_reported_and_the_verdict_is_unchanged(repo: Path, capsys) -> None:
+    zone_edit = edit_feed("ESTOP_OK AND i_bSafetyOk", "ESTOP_OK AND i_bSafetyOk AND i_bPart")
+    (repo / FEED).write_bytes(zone_edit.encode("utf-8") + "// 中文注释\n".encode("gbk"))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "change")
+    result = gate.check(repo, git(repo, "rev-parse", "main"), git(repo, "rev-parse", "HEAD"))
+    assert "非法 UTF-8" in capsys.readouterr().err  # 坏字节必须明说
+    assert "@安全区 区段" in reasons(result) and not result.passed  # 安全区改动照样要签字
+
+
+def test_t91_clean_utf8_prints_no_warning(repo: Path, capsys) -> None:
+    base, head = commit(repo, {FEED: edit_feed("nTimeout := 10;", "nTimeout := 11;")})
+    gate.check(repo, base, head)
+    assert capsys.readouterr().err == ""

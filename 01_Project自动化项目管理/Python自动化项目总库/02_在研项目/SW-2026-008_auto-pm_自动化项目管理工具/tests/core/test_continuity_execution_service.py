@@ -15,7 +15,7 @@ from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -140,7 +140,7 @@ def _start(service: ContinuityExecutionService, **changes: Any) -> Any:
         encoding="utf-8",
         errors="replace",
     ).stdout.strip()
-    values = {
+    values: dict[str, Any] = {
         "run_id": "RUN-001",
         "work_id": "WORK-001",
         "executor_id": "agent-a",
@@ -159,7 +159,7 @@ def _start(service: ContinuityExecutionService, **changes: Any) -> Any:
 
 
 def _start_evidence(service: ContinuityExecutionService, **changes: Any) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "run_id": "RUN-001",
         "owner_id": "agent-a",
         "lease_token": "lease-secret",
@@ -175,7 +175,7 @@ def _start_evidence(service: ContinuityExecutionService, **changes: Any) -> Any:
 
 
 def _checkpoint(service: ContinuityExecutionService, **changes: Any) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "checkpoint_id": "CP-001",
         "run_id": "RUN-001",
         "owner_id": "agent-a",
@@ -336,7 +336,7 @@ def _c03_auto_checkpoint_service(
 def _append_auto_checkpoint(
     service: ContinuityExecutionService, project_root: Path, **changes: Any
 ) -> Any:
-    values: dict[str, object] = {
+    values: dict[str, Any] = {
         "checkpoint_id": "CP-AUTO-001",
         "run_id": "RUN-001",
         "owner_id": "agent-a",
@@ -635,7 +635,7 @@ def _settlement_ready(
 
 
 def _settle(service: ContinuityExecutionService, **changes: Any) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "target_run_id": "RUN-TARGET",
         "recovery_run_id": "RUN-RECOVERY",
         "recovery_owner_id": "recovery-agent",
@@ -828,7 +828,7 @@ def _legacy_terminal_lease_ready(
 def _fence_terminal_lease(
     service: ContinuityExecutionService, event_id: str, lease_version: int, **changes: Any
 ) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "target_run_id": "RUN-TARGET",
         "expected_settlement_event_id": event_id,
         "expected_target_lease_version": lease_version,
@@ -905,7 +905,7 @@ def _legacy_v2_terminal_transition_ready(
 def _reconcile_terminal_lease(
     service: ContinuityExecutionService, event_id: str, lease_version: int, **changes: Any
 ) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "target_run_id": "RUN-TARGET",
         "expected_terminal_event_id": event_id,
         "expected_target_lease_version": lease_version,
@@ -1791,7 +1791,7 @@ def test_start_run_exact_replay_survives_removed_linked_worktree(tmp_path: Path)
 )
 def test_start_run_replay_rejects_semantic_drift(
     tmp_path: Path,
-    changes: dict[str, object],
+    changes: dict[str, Any],
 ) -> None:
     clock = Clock()
     _, service = _services(tmp_path, clock)
@@ -2328,7 +2328,7 @@ def test_append_verified_checkpoint_rejects_store_collision_return(
     observed_keys: list[str] = []
 
     def collision_return(
-        values: dict[str, object], idempotency_key: str, _now: str, **_lease: object
+        values: dict[str, Any], idempotency_key: str, _now: str, **_lease: object
     ) -> CheckpointItem:
         observed_keys.append(idempotency_key)
         return CheckpointItem(
@@ -2889,7 +2889,7 @@ def test_terminal_lease_fence_rejects_wrong_target_or_uncertain_evidence(
     service, event_id, lease_version = _legacy_terminal_lease_ready(
         tmp_path, clock, target_start_claim=fact == "start_claim"
     )
-    changes: dict[str, object] = {}
+    changes: dict[str, Any] = {}
     if fact == "event_id":
         changes["expected_settlement_event_id"] = "EVT-0000000000000000"
     elif fact == "lease_version":
@@ -4042,8 +4042,8 @@ def test_service_reconciles_operation_receipt_run_and_started_identity(tmp_path:
 
     actual_receipt, run, actual_evidence = service.resolve_started_run("operation-e06-1")
 
-    assert actual_receipt is receipt
-    assert run is store.get_run.return_value
+    assert cast(object, actual_receipt) is receipt
+    assert cast(object, run) is store.get_run.return_value
     assert actual_evidence is evidence
     store.get_run_started_evidence.assert_called_once_with("RUN-001")
 

@@ -100,20 +100,26 @@ class GitError(RuntimeError):
     pass
 
 
+def decode(data: bytes, what: str) -> str:
+    """严格 UTF-8 解码；坏字节不静默吞掉：在标准错误明说，再用替身字符继续。判定逻辑不变（替身字符不会让任何一行逃出判定）。"""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        print(f"警告：{what} 含非法 UTF-8 字节（第 {error.start} 字节），已用替身字符继续；请另跑 encoding_check", file=sys.stderr)
+        return data.decode("utf-8", errors="replace")
+
+
 def git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-c", "core.quotepath=false", *args],
         cwd=str(repo),
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
         stdin=subprocess.DEVNULL,
     )
     if result.returncode != 0:
-        raise GitError(f"git {' '.join(args)}: {result.stderr.strip()}")
-    return result.stdout
+        raise GitError(f"git {' '.join(args)}: {result.stderr.decode('utf-8', errors='replace').strip()}")
+    return decode(result.stdout, f"git {args[0]} 输出")
 
 
 def show(repo: Path, rev: str, path: str) -> str | None:
@@ -144,17 +150,15 @@ def merged_tree(repo: Path, base: str, head: str) -> str:
         ["git", "-c", "core.quotepath=false", "merge-tree", "--write-tree", "--no-messages", base, head],
         cwd=str(repo),
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
         stdin=subprocess.DEVNULL,
     )
+    out = decode(result.stdout, "git merge-tree 输出")
     if result.returncode == 1:
-        raise MergeConflictError(result.stdout.strip())
+        raise MergeConflictError(out.strip())
     if result.returncode != 0:
-        raise GitError(f"git merge-tree --write-tree: {result.stderr.strip()}（需要 git 2.38 以上）")
-    return result.stdout.split()[0]
+        raise GitError(f"git merge-tree --write-tree: {result.stderr.decode('utf-8', errors='replace').strip()}（需要 git 2.38 以上）")
+    return out.split()[0]
 
 
 # ---------------------------------------------------------------- 文件归属
@@ -785,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
     print(report)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a", encoding="utf-8", errors="replace") as handle:
+        with open(summary, "a", encoding="utf-8") as handle:
             handle.write(report)
     if args.status_out:
         state, description = status(result)
