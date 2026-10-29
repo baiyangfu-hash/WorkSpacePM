@@ -3,22 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 from cockpit_board.viewmodel import SEV_LABEL, Issue, waited
 from cockpit_board.widgets import common as c
 from PySide6.QtWidgets import QButtonGroup, QVBoxLayout, QWidget
 
 
-def issue_card(issue: Issue, now, on_project: Callable[[str], None] | None) -> QWidget:  # noqa: ANN001
+def issue_card(issue: Issue, now: datetime, on_project: Callable[[str], None] | None) -> QWidget:
     frame, layout = c.card(issue.sev)
     frame.setProperty("sev", issue.sev)
     head = c.hrow(c.chip(SEV_LABEL[issue.sev], issue.sev), c.label(issue.project_id, "mono", wrap=False),
                   c.label(issue.title, "section"), 1)
     if issue.example:
-        head.layout().insertWidget(3, c.example_tag())
+        c.insert_widget(head, 3, c.example_tag())
     layout.addWidget(head)
     layout.addWidget(c.label(issue.detail, "muted"))
-    foot = [c.label("谁动手：" + issue.who, "small", wrap=False), c.label(waited(now, issue.since), "small", wrap=False),
+    foot: list[QWidget | int] = [c.label("谁动手：" + issue.who, "small", wrap=False), c.label(waited(now, issue.since), "small", wrap=False),
             c.label("依据：" + issue.basis, "small", wrap=False), 1]
     if on_project is not None:
         see = c.button("看项目", "", "打开这个项目")
@@ -36,17 +37,18 @@ class IssuesPage(QWidget):
         self.on_project = on_project
         self.filter = "all"
         self.issues: list[Issue] = []
-        self.now = None
+        self.now: datetime | None = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        self.scroll, self.layout_ = c.page()
-        outer.addWidget(self.scroll)
+        self.scroll_area, self.layout_ = c.page()
+        outer.addWidget(self.scroll_area)
 
     def set_filter(self, key: str) -> None:
         self.filter = key
-        self.render(self.issues, self.now)
+        if self.now is not None:  # 还没画过就没有“现在”，等第一次 show_view
+            self.show_view(self.issues, self.now)
 
-    def render(self, issues: list[Issue], now) -> None:  # noqa: ANN001
+    def show_view(self, issues: list[Issue], now: datetime) -> None:
         self.issues, self.now = issues, now
         c.clear(self.layout_)
         lay = self.layout_
@@ -54,7 +56,7 @@ class IssuesPage(QWidget):
         counts = {key: sum(1 for i in issues if key == "all" or i.sev == key) for key, _ in self.FILTERS}
         group = QButtonGroup(self)
         group.setExclusive(True)
-        buttons = []
+        buttons: list[QWidget | int] = []
         for key, text in self.FILTERS:
             item = c.button(text, "tab", f"只看{text}（{counts[key]} 条）")
             item.setCheckable(True)

@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from auto_pm.cli import git_hook as git_hook_module
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
+
+from auto_pm.ui.cli import git_hook as git_hook_module
+from auto_pm.ui.cli.__main__ import cli
 
 
 def _gbk_stream() -> io.TextIOWrapper:

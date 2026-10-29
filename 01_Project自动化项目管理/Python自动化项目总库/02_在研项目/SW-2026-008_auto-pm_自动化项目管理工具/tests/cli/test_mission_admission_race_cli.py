@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core.mission_service import MissionService
 from click.testing import CliRunner
 
+from auto_pm.application.core.mission_service import MissionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.cli.test_continuity import _create_args, _invoke, _repository
 from tests.cli.test_pm_pending_cards import (

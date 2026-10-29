@@ -46,6 +46,7 @@ PROTECTED_PATTERNS = (
     "*DEC-*",
     "*_WBS_PM.md",
     "*台账*",
+    "roles/*",
 )
 
 # Hard failures: anything that looks like a live secret.
@@ -345,14 +346,22 @@ def audit(
     patch_base: str | None,
     network: bool,
     ci_result: bool = True,
+    fetch: bool = True,
     cwd: str | None = None,
 ) -> tuple[dict, list[Check]]:
-    git("fetch", "-q", remote, "main", f"+refs/pull/{pr}/head:refs/audit/pr-{pr}", cwd=cwd)
+    if fetch:
+        git("fetch", "-q", remote, "main", f"+refs/pull/{pr}/head:refs/audit/pr-{pr}", cwd=cwd)
+    else:
+        for ref in (f"refs/audit/pr-{pr}", f"{remote}/main"):
+            if not git_ok("rev-parse", "--verify", "-q", f"{ref}^{{commit}}", cwd=cwd):
+                raise GitError(f"离线模式不取远程，但本地没有 {ref}；联网时先不带 --offline 运行一次")
     main_ref = f"{remote}/main"
     head = git("rev-parse", f"refs/audit/pr-{pr}", cwd=cwd).strip()
     main = git("rev-parse", main_ref, cwd=cwd).strip()
     info = {"pr": pr, "head": head, "main": main}
     checks: list[Check] = []
+    if not fetch:
+        checks.append(Check("local_refs", "UNVERIFIED", "离线模式：PR 头和 main 取自本地已有的引用，可能不是最新；联网时不带 --offline 重跑"))
 
     meta = github_json(f"{repo}/pulls/{pr}") if network else None
     pr_base = None
@@ -537,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--remote", default="origin")
     parser.add_argument("--patch", help="要对比的审阅补丁")
     parser.add_argument("--patch-base", help="补丁基于的提交")
-    parser.add_argument("--offline", action="store_true", help="不访问 GitHub 接口")
+    parser.add_argument("--offline", action="store_true", help="不访问网络：不查 GitHub 接口，也不 git fetch（要求本地已有 refs/audit/pr-N 和 <remote>/main）")
     parser.add_argument("--skip-ci-result", action="store_true", help="不查 CI 结论（在 CI 里运行时使用）")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     args = parser.parse_args(argv)
@@ -549,6 +558,7 @@ def main(argv: list[str] | None = None) -> int:
             patch=args.patch,
             patch_base=args.patch_base,
             network=not args.offline,
+            fetch=not args.offline,
             ci_result=not args.skip_ci_result,
         )
     except GitError as exc:
