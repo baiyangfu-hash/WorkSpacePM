@@ -84,7 +84,7 @@ def _commit_card(root: Path, when: str | None = None) -> str:
         env=env,
     )
     return subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
     ).stdout.strip()
 
 
