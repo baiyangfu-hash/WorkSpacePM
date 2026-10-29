@@ -34,8 +34,8 @@ import io
 from datetime import UTC, datetime
 from pathlib import Path
 
-from auto_pm.vartable.models import ParseError, ParseResult, VarEntry, VarTable
-from auto_pm.vartable.utils.encoding import read_file_with_detection
+from auto_pm.domain.vartable.models import ParseError, ParseResult, VarEntry, VarTable
+from auto_pm.domain.vartable.utils.encoding import read_file_with_detection
 
 # io_points.csv 必须 7 列（与 AssetSummaryService._IO_REQUIRED_COLUMNS 对齐）
 REQUIRED_COLUMNS: tuple[str, ...] = (

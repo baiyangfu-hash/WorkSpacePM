@@ -27,8 +27,8 @@ from __future__ import annotations
 import abc
 from pathlib import Path
 
-from auto_pm.vartable.models import ParseError, ParseResult
-from auto_pm.vartable.utils.encoding import read_file_with_detection
+from auto_pm.domain.vartable.models import ParseError, ParseResult
+from auto_pm.domain.vartable.utils.encoding import read_file_with_detection
 
 
 class BaseParser(abc.ABC):

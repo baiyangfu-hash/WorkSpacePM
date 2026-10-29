@@ -7,20 +7,20 @@ V2.3 Week2 T08-T11：
 - T11 format_detector: 格式自动识别 + 工厂
 """
 
-from auto_pm.vartable.parsers.autoshop_parser import AutoshopParser
-from auto_pm.vartable.parsers.base_parser import BaseParser
-from auto_pm.vartable.parsers.codesys_parser import CodesysParser
-from auto_pm.vartable.parsers.communications_parser import CommunicationsParser
-from auto_pm.vartable.parsers.format_detector import (
+from auto_pm.domain.vartable.parsers.autoshop_parser import AutoshopParser
+from auto_pm.domain.vartable.parsers.base_parser import BaseParser
+from auto_pm.domain.vartable.parsers.codesys_parser import CodesysParser
+from auto_pm.domain.vartable.parsers.communications_parser import CommunicationsParser
+from auto_pm.domain.vartable.parsers.format_detector import (
     detect_format,
     get_parser_for_format,
     list_supported_formats,
 )
-from auto_pm.vartable.parsers.intdoc_parser import IntDocParser
-from auto_pm.vartable.parsers.io_points_parser import IoPointsParser
-from auto_pm.vartable.parsers.program_blocks_parser import ProgramBlocksParser
-from auto_pm.vartable.parsers.scl_parser import SclParser
-from auto_pm.vartable.parsers.work3_parser import Work3Parser
+from auto_pm.domain.vartable.parsers.intdoc_parser import IntDocParser
+from auto_pm.domain.vartable.parsers.io_points_parser import IoPointsParser
+from auto_pm.domain.vartable.parsers.program_blocks_parser import ProgramBlocksParser
+from auto_pm.domain.vartable.parsers.scl_parser import SclParser
+from auto_pm.domain.vartable.parsers.work3_parser import Work3Parser
 
 __all__ = [
     "AutoshopParser",
