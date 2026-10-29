@@ -1,0 +1,14 @@
+# 编码检查的已知问题登记：<路径><TAB><blob id><TAB><原因>。内容一变（blob id 变了）本行自动失效，改坏的文件会被拦。
+# 新增本行要说明为什么不能改成 UTF-8；能改的文件不要登记。
+.auto-pm/reports/spec_check_report.txt	1e9106c2239cb178b066c86f2317e4a7862b78fe	PowerShell 重定向留下的 UTF-16 报告，历史证据，不改
+.auto-pm/reports/spec_check_report_final.txt	4687e2a1243b4f3148a2dbb70754d4e2320a515d	PowerShell 重定向留下的 UTF-16 报告，历史证据，不改
+.auto-pm/reports/spec_check_report_full.txt	1e9106c2239cb178b066c86f2317e4a7862b78fe	PowerShell 重定向留下的 UTF-16 报告，历史证据，不改
+.auto-pm/reports/spec_check_report_new.txt	95d81c4ac8cf9de41648864bd1d8abe07455bfc6	PowerShell 重定向留下的 UTF-16 报告，历史证据，不改
+.trae/skills/plc-electrical-engineer/refs/siemens-lsp-and-testing.md	025da1b6c266f661d69e3b2d324d4b97cc902c0f	已知损坏（第 6795 字节起混入非法字节，PR #249 查出）；改 .trae/ 要用户点头，修好后删本行
+00_Infrastructure/auto_pm/tests/vartable/samples/Autoshop-FB变量表导出.csv	cb53c9550cf6534b358ebfb189a4e7c2ee85985b	导出样例本来就是 GBK 或 UTF-16（测试夹具），不改
+00_Infrastructure/auto_pm/tests/vartable/samples/Work-FB变量表导出.csv	f376c9e4591ba4ae481f86cc9321415cda93a99c	导出样例本来就是 GBK 或 UTF-16（测试夹具），不改
+0100_PLC自动化/DJ-2026-009_汇川换型改造/01_需求与设计/13_软件方案/012_DJ-2026-009_需求规格说明书_REQ.md	02835e5a836f1d5510a8f3031504bfc531f06df5	GBK 编码的旧文档（PLC 事项挂起中），修好后删本行
+01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/infrastructure/test_plc_git_marker_guard.py	579a2a3b1fde641b3f364a727f032723f2568543	测试数据里故意写了 U+FFFD，用来验证“有损解码被拒”
+01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/samples/Autoshop-FB变量表导出.csv	cb53c9550cf6534b358ebfb189a4e7c2ee85985b	导出样例本来就是 GBK 或 UTF-16（测试夹具），不改
+01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/vartable/samples/Work-FB变量表导出.csv	f376c9e4591ba4ae481f86cc9321415cda93a99c	导出样例本来就是 GBK 或 UTF-16（测试夹具），不改
+01_Project自动化项目管理/Python自动化项目总库/03_归档/01_历史工具原型/SW-2026-005_PLC项目管理工具/01_项目文档/02_规划过程/ui_prototype_dashboard.html	399ff9dd65afea08698602bc47aa25b72dcc543e	归档的历史原型页，不改
