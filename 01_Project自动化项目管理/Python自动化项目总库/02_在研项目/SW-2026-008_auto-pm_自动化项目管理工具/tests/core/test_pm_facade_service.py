@@ -2088,7 +2088,8 @@ def test_verify_refuses_a_protected_file_change_in_block_mode_and_never_writes_t
     monkeypatch.setattr(
         PmFacadeService, "_protected_file_changes", staticmethod(lambda _run: ("tests/test_pm.py",))
     )
-    monkeypatch.setattr("auto_pm.application.core.pm_facade_service.PROTECTED_FILE_ENFORCEMENT", "block")
+    # The Run in this fixture is created now, i.e. after the cut-over; a Run created before it would only be warned.
+    monkeypatch.setattr("auto_pm.contracts.protected_files.PROTECTED_BLOCK_FROM", "2020-01-01T00:00:00+00:00")
     before = _gate_event_count(tmp_path)
 
     outcome, reason = facade.verify_for_acceptance_with_reason("MISSION-PM-001", lease_token="gate-lease")
