@@ -2,7 +2,7 @@
 
 The rule document says the tier comes from the highest-risk real path and is never chosen by the executor. A hand-written card declares it in a header line
 ``> 档次：文档档；…`` (also written ``**核心档**`` or just ``核心``). When that line is present, the card's path table (paths marked runtime state are not
-changes and are left out) is run through ``tests/tools/tier_classifier.py`` and a lower declared tier is refused. A card without the line is not judged here.
+changes and are left out) is run through ``tests/tools/tier_classifier.py`` and a lower declared tier is refused. A card without the line is refused when it is new (first committed at or after ``CARD_TIER_REQUIRED_FROM``) and not judged when it is old.
 The classifier is loaded by file path so the product package does not import the test tree; if it cannot be loaded while a tier is declared, that is refused
 too (fail closed), never skipped.
 """
@@ -11,13 +11,19 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import subprocess
 from collections.abc import Iterable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
 CLASSIFIER_RELATIVE = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/tools/tier_classifier.py"
 _DECLARED = re.compile(r"^>\s*档次[：:]\s*[*`\s]*(文档|测试|产品|核心)")
 _TIER_OF = {"文档": "docs", "测试": "tests", "产品": "product", "核心": "core"}
+# A card first committed at or after this time must declare its tier (coordinator ruling, user's go-ahead 2026-10-29).  Cards committed earlier were written
+# before the declaration was checked and stay exempt.  The time is the card file's first commit in Git, not anything the card says about itself; a card
+# that was never committed, or whose history cannot be read, counts as new (fail closed).
+CARD_TIER_REQUIRED_FROM = "2026-10-30T00:00:00+00:00"
 _LABEL_OF = {"docs": "文档档", "tests": "测试档", "product": "产品档", "core": "核心档"}
 
 
@@ -30,6 +36,31 @@ def declared_tiers(lines: Sequence[str]) -> list[str]:
             match = _DECLARED.match(line)
             result.append(_TIER_OF[match.group(1)] if match else "")
     return result
+
+
+def card_is_new(card_file: Path) -> bool:
+    """True when the card was first committed at or after ``CARD_TIER_REQUIRED_FROM`` or that cannot be established."""
+
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(card_file.parent), "log", "--diff-filter=A", "--format=%cI", "--", card_file.name],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdin=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+        )
+        stamps = [line.strip() for line in done.stdout.splitlines() if line.strip()]
+        if done.returncode != 0 or not stamps:
+            return True
+        first = min(datetime.fromisoformat(stamp) for stamp in stamps)
+        if first.tzinfo is None:
+            first = first.replace(tzinfo=UTC)
+        return first >= datetime.fromisoformat(CARD_TIER_REQUIRED_FROM)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return True
 
 
 def _load_classifier(workspace_root: Path) -> ModuleType:
@@ -46,12 +77,14 @@ def _load_classifier(workspace_root: Path) -> ModuleType:
 
 
 def tier_findings(
-    lines: Sequence[str], change_paths: Iterable[str], *, workspace_root: Path
+    lines: Sequence[str], change_paths: Iterable[str], *, workspace_root: Path, card_file: Path | None = None
 ) -> list[tuple[str, str, str]]:
     """``(rule, subject, message)`` findings; empty when the card declares no tier or declares one that is not lower than the computed tier."""
 
     declared = declared_tiers(lines)
     if not declared:
+        if card_file is not None and card_is_new(card_file):
+            return [("tier", "档次", "新卡头部必须写 `> 档次：文档档/测试档/产品档/核心档`（2026-10-30 起新提交的卡不写档次即拒）")]
         return []
     if len(declared) > 1:
         return [("tier", "档次", f"头部字段 `档次：` 出现 {len(declared)} 次，只能写一次")]

@@ -67,8 +67,56 @@ def test_a_matching_doc_declaration_passes(tmp_path: Path) -> None:
     assert _tier_findings(_report(tmp_path, "文档档；只改台账一个文件", [DOC])) == []
 
 
-def test_a_card_without_a_declaration_is_not_judged_here(tmp_path: Path) -> None:
-    assert _tier_findings(_report(tmp_path, None, [DOC, CODE])) == []
+def _commit_card(root: Path, when: str) -> None:
+    """Commit card.md with the given commit date, as a card that reached main at that time."""
+    import os
+    import subprocess
+
+    env = {**os.environ, "GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when}
+    subprocess.run(["git", "-C", str(root), "add", "card.md"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-m", "card"],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+def test_a_new_card_without_a_declaration_is_refused(tmp_path: Path) -> None:
+    (finding,) = _tier_findings(_report(tmp_path, None, [DOC, CODE]))  # card.md was never committed: new
+    assert "新卡头部必须写" in finding.message
+
+
+def test_a_card_committed_after_the_cut_over_without_a_declaration_is_refused(tmp_path: Path) -> None:
+    _report(tmp_path, None, [DOC])
+    _commit_card(tmp_path, "2026-11-05T12:00:00+00:00")
+    card = tmp_path / "card.md"
+    report = precheck_markdown_card(card, workspace_root=tmp_path, command_tree=TREE)
+    (finding,) = _tier_findings(report)
+    assert "新卡头部必须写" in finding.message
+
+
+def test_an_old_card_without_a_declaration_is_exempt(tmp_path: Path) -> None:
+    _report(tmp_path, None, [DOC])
+    _commit_card(tmp_path, "2026-10-20T12:00:00+00:00")
+    report = precheck_markdown_card(tmp_path / "card.md", workspace_root=tmp_path, command_tree=TREE)
+    assert _tier_findings(report) == []
+
+
+def test_a_card_that_has_a_declaration_is_judged_whatever_its_age(tmp_path: Path) -> None:
+    _report(tmp_path, "文档档", [DOC, CODE])
+    _commit_card(tmp_path, "2026-10-20T12:00:00+00:00")
+    report = precheck_markdown_card(tmp_path / "card.md", workspace_root=tmp_path, command_tree=TREE)
+    assert len(_tier_findings(report)) == 1 and "核心档" in _tier_findings(report)[0].message
+
+
+def test_a_card_whose_git_history_cannot_be_read_counts_as_new(tmp_path: Path) -> None:
+    from auto_pm.application.core.implementation_card_tier import card_is_new
+
+    loose = tmp_path / "not-a-repo"
+    loose.mkdir()
+    (loose / "card.md").write_text("x\n", encoding="utf-8")
+    assert card_is_new(loose / "card.md") is True
 
 
 @pytest.mark.parametrize("declared", ["只改测试；按核心流程跑", "部署演练", ""])

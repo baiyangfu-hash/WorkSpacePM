@@ -421,6 +421,7 @@ def precheck_markdown_card(
             lines,
             [item.path for item in paths if item.state != BASELINE_RUNTIME],
             workspace_root=workspace_root,
+            card_file=card_file,
         )
     )
     if new_format:
