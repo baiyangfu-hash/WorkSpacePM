@@ -67,9 +67,9 @@ from auto_pm.contracts.pm_facade import (
     SubmittedPlanningScopeCard,
 )
 from auto_pm.contracts.protected_files import (
-    PROTECTED_FILE_ENFORCEMENT,
-    protected_changes,
+    enforcement_for_run,
     protected_files_message,
+    unauthorised_protected_changes,
 )
 from auto_pm.domain.change.decision_service import (
     DecisionError,
@@ -1225,10 +1225,12 @@ class PmFacadeService:
         if not worktree or not base:
             return None
         names: set[str] = set()
+        added: set[str] = set()
         try:
-            for args in (
-                ("diff", "--name-only", "--no-renames", "-z", base),
-                ("ls-files", "--others", "--exclude-standard", "-z"),
+            for args, is_added in (
+                (("diff", "--name-only", "--no-renames", "-z", base), False),
+                (("diff", "--name-only", "--no-renames", "--diff-filter=A", "-z", base), True),
+                (("ls-files", "--others", "--exclude-standard", "-z"), True),
             ):
                 done = subprocess.run(
                     ["git", "-C", worktree, *args],
@@ -1241,10 +1243,13 @@ class PmFacadeService:
                 )
                 if done.returncode != 0:
                     return None
-                names.update(item for item in done.stdout.split("\0") if item)
+                found = {item for item in done.stdout.split("\0") if item}
+                names.update(found)
+                if is_added:
+                    added.update(found)
         except (OSError, subprocess.SubprocessError):
             return None
-        return protected_changes(names)
+        return unauthorised_protected_changes(names, getattr(run, "owned_paths", ()) or (), added)
 
     def _protected_file_note(self, run: Any) -> tuple[str, bool]:
         """(message for ``pm verify``, whether it must refuse); the refusal only applies in "block" mode."""
@@ -1252,10 +1257,11 @@ class PmFacadeService:
         changed = self._protected_file_changes(run)
         if changed is None:
             return "警告：无法核对受保护文件（读不到 Git 记录），请人工确认没有改测试或门禁脚本。", False
-        message = protected_files_message(changed, enforcement=PROTECTED_FILE_ENFORCEMENT)
+        enforcement = enforcement_for_run(getattr(run, "created_at", ""))
+        message = protected_files_message(changed, enforcement=enforcement)
         if message:
             log.warning("受保护文件被改动: run=%s %s", run.run_id, changed)
-        return message, bool(changed) and PROTECTED_FILE_ENFORCEMENT == "block"
+        return message, bool(changed) and enforcement == "block"
 
     @staticmethod
     def _not_verified(mission: Mission, run: Any, reason: str = "") -> tuple[PmRunOutcome, str]:
