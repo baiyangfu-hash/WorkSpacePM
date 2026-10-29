@@ -24,9 +24,9 @@
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -57,7 +57,8 @@ def parse_trigger(name: str, text: str) -> Trigger | None:
     """读出工作流的 ``pull_request`` 触发规则；没有这个触发（含只有 pull_request_target）返回 ``None``。"""
     lines = text.splitlines()
     start = next((i for i, line in enumerate(lines) if line.strip().rstrip(":") == "pull_request" and line.strip().endswith(":")), None)
-    inline = next((line for line in lines if line.strip().startswith("on:") and "pull_request" in line and "_target" not in line), None)
+    # ``pull_request`` 作为独立的词出现（``pull_request_target`` 不算）；``on: [pull_request_target, pull_request]`` 也要认出来
+    inline = next((line for line in lines if line.strip().startswith("on:") and re.search(r"\bpull_request\b", line)), None)
     if start is None:
         # ``on: [pull_request, push]`` 之类行内写法：读不懂路径，按每个 PR 都该跑算
         return Trigger(name, True) if inline is not None else None
@@ -90,14 +91,31 @@ def parse_trigger(name: str, text: str) -> Trigger | None:
     return Trigger(name, always, tuple(paths))
 
 
+def _glob_regex(pattern: str) -> re.Pattern[str]:
+    """GitHub ``paths:`` 通配转正则：``**/`` 可匹配零层目录，``**`` 跨目录，``*`` 和 ``?`` 不跨目录。"""
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("".join(out))
+
+
 def path_matches(path: str, pattern: str) -> bool:
-    """GitHub ``paths:`` 的通配：``**`` 跨目录，``*`` 不跨目录。"""
-    if pattern.endswith("/**"):
-        return path.startswith(pattern[:-2])
-    if "**" in pattern:
-        head, _, tail = pattern.partition("**")
-        return path.startswith(head) and fnmatch.fnmatchcase(path, head + "*" + tail)
-    return fnmatch.fnmatchcase(path, pattern) and path.count("/") == pattern.count("/")
+    return _glob_regex(pattern).fullmatch(path) is not None
 
 
 def load_triggers(workflows_dir: Path) -> list[Trigger]:

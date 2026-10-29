@@ -46,6 +46,9 @@ def test_sw008_ci_is_expected_only_when_its_paths_change() -> None:
         ("on:\n  pull_request:\n    paths-ignore:\n      - docs/**\n", agg.Trigger("w.yml", True)),
         ("on:\n  pull_request:\n    paths: [a, b]\n", agg.Trigger("w.yml", True)),
         ("on: [pull_request, push]\n", agg.Trigger("w.yml", True)),
+        ("on: [pull_request_target, pull_request]\n", agg.Trigger("w.yml", True)),  # 审计 402 P2-1
+        ("on: [pull_request_target]\n", None),
+        ("on: pull_request\n", agg.Trigger("w.yml", True)),
     ],
 )
 def test_parse_trigger(text: str, expected: agg.Trigger | None) -> None:
@@ -139,3 +142,23 @@ def test_the_workflow_runs_from_the_base_and_never_checks_out_the_pr_head() -> N
     assert "github.event.pull_request.base.ref" in text
     assert "head.ref" not in text and "refs/pull/" not in text  # PR 头不检出
     assert "contents: read" in text and "secrets." not in text
+
+
+@pytest.mark.parametrize(
+    ("path", "pattern", "expected"),
+    [
+        ("foo.md", "**/foo.md", True),  # 审计 402 P2-2：``**/`` 也匹配根目录
+        ("a/b/foo.md", "**/foo.md", True),
+        ("a/foo.mdx", "**/foo.md", False),
+        ("a/b.txt", "a/*.txt", True),
+        ("a/c/b.txt", "a/*.txt", False),  # ``*`` 不跨目录
+        ("a/c/b.txt", "a/**", True),
+        ("a", "a/**", False),
+        (".github/workflows/x.yml", ".github/workflows/x.yml", True),
+        (".github/workflows/xyml", ".github/workflows/x.yml", False),  # ``.`` 是字面点
+        ("a/b.c", "a/?.c", True),
+        ("a/bb.c", "a/?.c", False),
+    ],
+)
+def test_path_matches_follows_the_github_glob(path: str, pattern: str, expected: bool) -> None:
+    assert agg.path_matches(path, pattern) is expected
