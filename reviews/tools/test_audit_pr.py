@@ -315,6 +315,17 @@ def test_roles_library_is_a_protected_path(world):
     assert "roles/product-pm/SKILL.md" in detail
 
 
+@pytest.mark.parametrize(
+    "path",
+    [".trae/skills/x/SKILL.md", ".cursor/rules/a.mdc", ".agent/rules/project-rule.md", ".claude/settings.json", "CLAUDE.md"],
+)
+def test_agent_rule_files_are_protected_paths(world, path):
+    world["open_pr"](60, {path: "x\n"})
+    _, checks = world["audit"](60)
+    assert status(checks, "protected_paths") == "WARN"
+    assert path in next(c.detail for c in checks if c.id == "protected_paths")
+
+
 def test_offline_audit_says_the_refs_may_be_stale(world):
     world["open_pr"](51, {"src/app.py": "x = 2\n"})
     world["audit"](51)
