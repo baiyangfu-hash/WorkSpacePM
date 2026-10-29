@@ -305,3 +305,20 @@ def test_online_audit_still_fetches_so_a_dead_network_is_an_error(world):
     _cut_the_network(world["work"])
     with pytest.raises(audit_pr.GitError):
         world["audit"](42)
+
+
+def test_roles_library_is_a_protected_path(world):
+    world["open_pr"](50, {"roles/product-pm/SKILL.md": "x\n"})
+    _, checks = world["audit"](50)
+    detail = next(c.detail for c in checks if c.id == "protected_paths")
+    assert status(checks, "protected_paths") == "WARN"
+    assert "roles/product-pm/SKILL.md" in detail
+
+
+def test_offline_audit_says_the_refs_may_be_stale(world):
+    world["open_pr"](51, {"src/app.py": "x = 2\n"})
+    world["audit"](51)
+    _, checks = audit_pr.audit(51, repo="x/y", remote="origin", network=False, fetch=False, cwd=str(world["work"]), patch=None, patch_base=None)
+    assert status(checks, "local_refs") == "UNVERIFIED"
+    _, online = world["audit"](51)
+    assert status(online, "local_refs") is None

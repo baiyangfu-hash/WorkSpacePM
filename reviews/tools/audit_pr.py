@@ -46,6 +46,7 @@ PROTECTED_PATTERNS = (
     "*DEC-*",
     "*_WBS_PM.md",
     "*台账*",
+    "roles/*",
 )
 
 # Hard failures: anything that looks like a live secret.
@@ -359,6 +360,8 @@ def audit(
     main = git("rev-parse", main_ref, cwd=cwd).strip()
     info = {"pr": pr, "head": head, "main": main}
     checks: list[Check] = []
+    if not fetch:
+        checks.append(Check("local_refs", "UNVERIFIED", "离线模式：PR 头和 main 取自本地已有的引用，可能不是最新；联网时不带 --offline 重跑"))
 
     meta = github_json(f"{repo}/pulls/{pr}") if network else None
     pr_base = None
