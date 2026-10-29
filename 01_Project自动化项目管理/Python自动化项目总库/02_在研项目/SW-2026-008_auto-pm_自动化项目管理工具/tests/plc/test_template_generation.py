@@ -13,7 +13,8 @@ import os
 from pathlib import Path
 
 import pytest
-from auto_pm.core.template_service import TemplateService
+
+from auto_pm.application.core.template_service import TemplateService
 
 
 class TestTemplateGeneration:
@@ -77,7 +78,7 @@ class TestTemplateGeneration:
         self, template_service: TemplateService
     ) -> None:
         """plc-standard-project 模板含 12 个标准目录（CHG-SCPT-2026-146: 01_启动 替代 00_项目管理）"""
-        from auto_pm.plc.models import PM_DIR_CANDIDATES, STD_DIRS
+        from auto_pm.domain.plc.models import PM_DIR_CANDIDATES, STD_DIRS
 
         path = template_service.get_template_path("plc-standard-project")
         template_dir = os.path.join(path, "template")

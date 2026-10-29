@@ -19,11 +19,12 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-from auto_pm.models import ProjectInfo
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, QThread
 from PySide6.QtQml import QQmlEngine
 from PySide6.QtWidgets import QApplication
 from shiboken6 import isValid
+
+from auto_pm.domain.models import ProjectInfo
 
 if TYPE_CHECKING:
     pass

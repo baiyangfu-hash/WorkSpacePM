@@ -10,8 +10,9 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.spec import spec_group
 from click.testing import CliRunner
+
+from auto_pm.ui.cli.spec import spec_group
 
 
 class TestCLIGroup:

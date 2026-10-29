@@ -8,16 +8,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.spec.core.checker_base import (
+
+from auto_pm.domain.spec.core.checker_base import (
     DocIndexValidityChecker,
     Severity,
     TestCountConsistencyChecker,
     VerificationStatusChecker,
     VersionConsistencyChecker,
 )
-from auto_pm.spec.core.config import WorkspaceConfig
-from auto_pm.spec.core.registry import SpecRegistry
-from auto_pm.spec.core.scanner import SpecScanner
+from auto_pm.domain.spec.core.config import WorkspaceConfig
+from auto_pm.domain.spec.core.registry import SpecRegistry
+from auto_pm.domain.spec.core.scanner import SpecScanner
 
 # ── Fixture ──────────────────────────────────────────────
 
