@@ -357,7 +357,7 @@ def test_newly_covered_suffixes_are_checked(world):
 def test_decode_reports_invalid_bytes_instead_of_swallowing_them(capsys):
     assert audit_pr.decode("中文".encode("utf-8"), "x") == "中文"
     assert capsys.readouterr().err == ""
-    assert "�" in audit_pr.decode("中文".encode("gbk"), "git diff 输出")
+    assert chr(0xFFFD) in audit_pr.decode("中文".encode("gbk"), "git diff 输出")
     assert "非法 UTF-8" in capsys.readouterr().err
 
 
