@@ -9,17 +9,22 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
+from auto_pm.application.core.approval_proof_service import ApprovalProofError, ApprovalProofService
+from auto_pm.application.core.lease_handover_service import agent_markers
 from auto_pm.contracts.continuity import RunState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 RECYCLE_RELATIVE_DIR = Path(".auto-pm") / "recycle"
 _TERMINAL_RUN_STATES = frozenset({RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED})
+_PROJECT_ID_PREFIX = re.compile(r"^([A-Z]{2,4}-\d{4}-\d{3})")
 
 
 class ProjectDeleteError(RuntimeError):
@@ -89,6 +94,31 @@ def delete_blockers(
     return open_work_blockers(control_root or workspace_root, project_id) + uncommitted_blockers(
         workspace_root, project_path
     )
+
+
+def overwrite_blockers(control_root: str | Path, directory_name: str) -> list[str]:
+    """``project import --force`` 要覆盖的目录对应的项目还开着任务时的原因；目录名不带项目编号则账本里不会有它的任务。"""
+
+    match = _PROJECT_ID_PREFIX.match(directory_name)
+    return open_work_blockers(control_root, match.group(1)) if match else []
+
+
+def surface_identity_problem(control_root: str | Path, environ: Mapping[str, str]) -> str:
+    """界面（没有口令输入口）发起删除时的拒绝原因；空表示可以继续。
+
+    带 agent 标记的环境一律拒绝；已启用批准口令时，界面无法验证用户本人，也拒绝并请用户到自己的终端用 ``project delete``。
+    读不出批准口令配置时同样拒绝（不放行）。
+    """
+
+    markers = agent_markers(environ)
+    if markers:
+        return f"删除项目只听用户本人，当前环境带 agent 标记（{', '.join(markers)}）；请用户在自己的界面或终端操作"
+    try:
+        if ApprovalProofService(control_root).enforced():
+            return "已启用批准口令，界面不能代替口令；请用户在自己的终端运行 project delete <项目编号> --confirm"
+    except ApprovalProofError as error:
+        return f"读不出批准口令配置，不放行：{error}"
+    return ""
 
 
 def recycle_project(

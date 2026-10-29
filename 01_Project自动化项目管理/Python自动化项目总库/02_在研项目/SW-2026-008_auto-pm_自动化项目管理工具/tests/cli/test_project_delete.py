@@ -278,3 +278,68 @@ def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
     assert (dest / "new.txt").is_file() and not (dest / "old.txt").exists()
     (moved,) = list((world.root / ".auto-pm" / "recycle" / source.name).iterdir())
     assert (moved / "old.txt").read_text(encoding="utf-8") == "old\n"
+
+
+def _import_force_world(world: World, monkeypatch: pytest.MonkeyPatch, name: str) -> tuple[Path, Path]:
+    from auto_pm.application.core.paths import WORKSPACE_PROJECTS_SUBDIR
+    from auto_pm.application.core.project_service import ProjectService
+
+    monkeypatch.setattr(project_command_module(), "ProjectService", ProjectService)
+    source = world.root.parent / "incoming" / name
+    source.mkdir(parents=True)
+    (source / "new.txt").write_text("new\n", encoding="utf-8")
+    dest = world.root / WORKSPACE_PROJECTS_SUBDIR / name
+    dest.mkdir(parents=True)
+    (dest / "old.txt").write_text("old\n", encoding="utf-8")
+    return source, dest
+
+
+def _import_force(world: World, source: Path) -> Any:
+    return CliRunner().invoke(
+        cli, ["-w", str(world.root), "project", "import", str(source), "--force"], catch_exceptions=False
+    )
+
+
+@pytest.mark.parametrize("marker", ["AUTO_PM_AGENT", "CLAUDECODE", "CODEX_THREAD_ID"])
+def test_d14_import_force_is_refused_in_an_agent_environment_and_changes_nothing(
+    world: World, monkeypatch: pytest.MonkeyPatch, marker: str
+) -> None:
+    source, dest = _import_force_world(world, monkeypatch, "SW-2026-123_X")
+    monkeypatch.setenv(marker, "1")
+    result = _import_force(world, source)
+    assert result.exit_code == 1 and "只听用户本人" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists() and world.recycled() == []
+    assert not (world.root / ".auto-pm" / "recycle" / source.name).exists()
+
+
+def test_d15_import_force_is_refused_while_the_project_still_has_open_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+    scene = Scene(tmp_path / "ws")  # MISSION-A 开着，RUN-001 在跑
+    world = World.__new__(World)
+    world.root, world.project, world.audit = scene.root, scene.root / "proj", []
+    source, dest = _import_force_world(world, monkeypatch, f"{PROJECT}_X")
+    result = _import_force(world, source)
+    assert result.exit_code == 1 and "开着的 Mission MISSION-A" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists()
+    assert not (scene.root / ".auto-pm" / "recycle").exists()
+
+
+def test_d16_overwrite_blockers_ignore_a_directory_without_a_project_number(tmp_path: Path) -> None:
+    scene = Scene(tmp_path / "ws")
+    assert guard.overwrite_blockers(scene.root, "scratch_dir") == []
+    assert guard.overwrite_blockers(scene.root, f"{PROJECT}_X")
+
+
+def test_d17_the_surface_identity_gate_refuses_agents_and_a_committed_pin(
+    tmp_path: Path, committed_pin: None
+) -> None:
+    assert "只听用户本人" in guard.surface_identity_problem(tmp_path, {"CLAUDECODE": "1"})
+    assert "批准口令" in guard.surface_identity_problem(tmp_path, {})
+
+
+def test_d18_the_surface_identity_gate_lets_the_user_through_without_a_pin(tmp_path: Path) -> None:
+    assert guard.surface_identity_problem(tmp_path, {}) == ""
+    assert guard.surface_identity_problem(tmp_path, {"CLAUDECODE": ""}) == ""
