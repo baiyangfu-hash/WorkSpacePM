@@ -12,6 +12,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from auto_pm.spec.core.checker_base import CheckResult
 from auto_pm.spec.core.registry import SpecRegistry
@@ -44,7 +45,7 @@ class BoundedHealingTracker:
             self.tracker_file.parent.mkdir(parents=True, exist_ok=True)
 
         now = time.time()
-        data: dict = {"retries": 0, "last_reset": now}
+        data: dict[str, Any] = {"retries": 0, "last_reset": now}
         if self.tracker_file.exists():
             try:
                 loaded = json.loads(self.tracker_file.read_text(encoding="utf-8"))
