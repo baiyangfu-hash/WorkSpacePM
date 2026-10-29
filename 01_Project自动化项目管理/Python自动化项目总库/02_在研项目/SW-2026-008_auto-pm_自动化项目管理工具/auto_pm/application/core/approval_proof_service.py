@@ -206,7 +206,7 @@ class ApprovalProofService:
         refuse = f"读不到 Git 里已提交的批准人登记文件（{REGISTRY_RELATIVE_PATH}），为安全起见所有批准一律拒绝："
         try:
             top = self._git("rev-parse", "--show-toplevel")
-            if top.returncode != 0 or Path(top.stdout.decode("utf-8", "replace").strip()).resolve() != self._root:
+            if top.returncode != 0 or Path(top.stdout.decode("utf-8").strip()).resolve() != self._root:
                 return None, refuse + "Git 仓库不是这个控制根"
             head = self._git("rev-parse", "--verify", "-q", "HEAD^{commit}")
             if head.returncode != 0:
@@ -236,10 +236,14 @@ class ApprovalProofService:
             return None, refuse + str(error)
         except (OSError, subprocess.SubprocessError) as error:
             return None, refuse + f"无法运行 git（{type(error).__name__}）"
+        except UnicodeDecodeError:
+            return None, refuse + "Git 输出的路径不是合法 UTF-8"
         try:
-            return parse_registry(shown.stdout.decode("utf-8", errors="replace")), ""
+            return parse_registry(shown.stdout.decode("utf-8")), ""
         except ApprovalProofError as error:
             return None, str(error)
+        except UnicodeDecodeError:
+            return None, refuse + "登记文件不是合法 UTF-8"
 
     def _git(self, *arguments: str) -> subprocess.CompletedProcess[bytes]:
         """git in this root only: inherited GIT_* variables (GIT_DIR, GIT_WORK_TREE, ...) could point it elsewhere."""
