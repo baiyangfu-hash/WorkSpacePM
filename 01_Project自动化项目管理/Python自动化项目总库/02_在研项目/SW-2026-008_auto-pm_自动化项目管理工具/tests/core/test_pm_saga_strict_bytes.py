@@ -39,6 +39,19 @@ def test_backup_and_rollback_round_trip_a_utf8_file_exactly(tmp_path: Path) -> N
     assert target.read_bytes() == original.encode("utf-8")
 
 
+def test_rollback_keeps_crlf_line_endings_byte_for_byte(tmp_path: Path) -> None:
+    coordinator = PmClosureSagaCoordinator(tmp_path)
+    target = tmp_path / "CHG-3.md"
+    original = "| 变更状态 | draft |\r\n中文\r\n".encode()
+    target.write_bytes(original)
+    saga_data: dict = {"request_id": "REQ-STRICT-3"}
+    coordinator._backup_file(saga_data, target)
+    target.write_bytes(b"changed\n")
+    coordinator._save_saga_log(saga_data)
+    coordinator.compensate_saga("REQ-STRICT-3")
+    assert target.read_bytes() == original
+
+
 def test_saga_log_with_invalid_bytes_is_unreadable_not_repaired(tmp_path: Path) -> None:
     coordinator = PmClosureSagaCoordinator(tmp_path)
     coordinator.saga_log_dir.mkdir(parents=True, exist_ok=True)

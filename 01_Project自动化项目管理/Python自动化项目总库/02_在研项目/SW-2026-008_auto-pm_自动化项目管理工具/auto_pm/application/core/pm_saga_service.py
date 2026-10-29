@@ -253,7 +253,7 @@ class PmClosureSagaCoordinator:
                         pass
             else:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                target_path.write_text(str(original_content), encoding="utf-8")
+                target_path.write_bytes(str(original_content).encode("utf-8"))
                 restored.append(f"restored:{path_str}")
 
         saga_data["status"] = SagaStatus.COMPENSATED.value
@@ -377,7 +377,7 @@ class PmClosureSagaCoordinator:
         if key in backup_files:
             return
         if path.is_file():
-            backup_files[key] = path.read_text(encoding="utf-8")
+            backup_files[key] = path.read_bytes().decode("utf-8")
         else:
             backup_files[key] = None
         saga_data["backup_files"] = backup_files
