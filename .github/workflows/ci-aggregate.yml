@@ -1,0 +1,46 @@
+# 汇总检查（可设为必过检查）：按 PR 改动的路径算出哪些 CI 工作流该跑（sw008-ci、plc-ci、reviews-tools-ci 等），
+# 等它们在 PR 头上跑完；该跑的没出现、失败或取消，本检查就不通过。这样“没触发”不会假绿，设成必过也不会因路径过滤永远等不到。
+# 判断全部取自 PR 基线（main），PR 改不了它：
+# - pull_request_target：GitHub 用 main 上的这份工作流；
+# - 脚本和工作流清单取自基线的检出，PR 头里的任何东西都不检出、不执行。
+# 不设 paths 过滤：必过检查必须对每个 PR 都报告结果。说明见 reviews/tools/ci_aggregate.py 文件头。
+name: ci-aggregate
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+# 只读令牌：读取运行记录和 PR 文件列表；没有任何步骤用到密钥。
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: ci-aggregate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      # 裁判是基线分支的当前状态（与 pr-gate 同理，不用事件里可能过期的 base.sha）
+      - name: Check out the PR base (the judge)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Wait for the workflows this PR should run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python -I reviews/tools/ci_aggregate.py --repo "$REPO" --pr "$PR_NUMBER" --head "$HEAD_SHA"
