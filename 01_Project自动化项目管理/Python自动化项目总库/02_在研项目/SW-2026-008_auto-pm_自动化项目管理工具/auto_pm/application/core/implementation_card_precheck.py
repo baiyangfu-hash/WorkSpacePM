@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from auto_pm.application.core import implementation_card_basis as basis
+from auto_pm.application.core import implementation_card_tier as card_tier
 from auto_pm.contracts.implementation_card import ImplementationCard
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 
@@ -401,6 +402,14 @@ def precheck_markdown_card(
     findings.extend(
         _path_findings(
             paths, baseline=baseline, workspace_root=workspace_root, baseline_valid=not baseline_findings
+        )
+    )
+    findings.extend(
+        PrecheckFinding(rule, subject, message)
+        for rule, subject, message in card_tier.tier_findings(
+            lines,
+            [item.path for item in paths if item.state != BASELINE_RUNTIME],
+            workspace_root=workspace_root,
         )
     )
     if new_format:
