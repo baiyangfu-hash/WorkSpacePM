@@ -888,10 +888,28 @@ def cmd_import(
             console.print(f"[red]错误: 目标路径已存在: {dest_path}（使用 --force 覆盖）[/red]")
             ctx.exit(1)
         # 同类写法（TD-193 同类排查）：覆盖不再 rmtree 原目录，先整体搬进回收区，覆盖错了可以搬回
+        from auto_pm.application.core.lease_handover_service import agent_markers
         from auto_pm.application.core.project_delete_guard import (
             ProjectDeleteError,
+            overwrite_blockers,
             recycle_project,
         )
+
+        # TD-208：覆盖等于把现有项目整个换掉，与 project delete 同一道门——agent 环境拒绝、项目还开着任务时拒绝
+        markers = agent_markers(os.environ)
+        if markers:
+            console.print(
+                f"[red]拒绝: --force 覆盖只听用户本人，当前环境带 agent 标记（{', '.join(markers)}）。"
+                "请把完整命令交给用户，在用户自己的终端运行。[/red]"
+            )
+            ctx.exit(1)
+        control_root = str(getattr(app_ctx, "control_root", "") or app_ctx.workspace_root)
+        blockers = overwrite_blockers(control_root, dirname)
+        if blockers:
+            console.print(f"[red]拒绝: {dirname} 还开着任务，不能覆盖，先处理下面的事：[/red]")
+            for blocker in blockers:
+                console.print(f"  - {blocker}")
+            ctx.exit(1)
 
         try:
             recycled = recycle_project(app_ctx.workspace_root, dest_path, dirname)

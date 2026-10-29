@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from auto_pm.application.workbench_facade import WorkbenchFacade
 
 
@@ -568,9 +570,19 @@ def _delete_world(tmp_path: Path) -> tuple[Path, MagicMock]:
     return root, service
 
 
-def test_delete_project_success(tmp_path: Path) -> None:
+def _as_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """界面删除现在认 agent 标记（TD-208）；这些用例模拟用户本人的环境。"""
+    from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+
+    for name in AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_delete_project_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """验证删除项目成功：目录整体搬进回收区（TD-193），不是直接删掉"""
     from unittest.mock import patch
+
+    _as_user(monkeypatch)
 
     root, mock_project_service = _delete_world(tmp_path)
 
@@ -591,8 +603,43 @@ def test_delete_project_success(tmp_path: Path) -> None:
     mock_project_service.sync_to_cache.assert_called_once_with(force_full=True)
 
 
-def test_delete_project_refused_with_uncommitted_changes(tmp_path: Path) -> None:
+def test_delete_project_refused_in_an_agent_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TD-208：界面删除与命令行同一道身份门，带 agent 标记时拒绝，目录与账本都不动"""
+    _as_user(monkeypatch)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    root, mock_project_service = _delete_world(tmp_path)
+
+    facade = WorkbenchFacade(dashboard_service=MagicMock(), project_service=mock_project_service)
+    result = facade.delete_project("SW-2026-001")
+
+    assert result.success is False
+    assert "只听用户本人" in result.message
+    assert (root / "proj" / "a.txt").is_file() and not (root / ".auto-pm" / "recycle").exists()
+    mock_project_service.sync_to_cache.assert_not_called()
+
+
+def test_delete_project_refused_when_an_approval_pin_is_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TD-208：已启用批准口令时界面没有口令输入口，不能代替口令"""
+    from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
+
+    _as_user(monkeypatch)
+    key = make_key("baiyang", "relay-K1-on", n=2**10)
+    monkeypatch.setattr(ApprovalProofService, "committed_state", lambda self: ([key], ""))
+    root, mock_project_service = _delete_world(tmp_path)
+
+    facade = WorkbenchFacade(dashboard_service=MagicMock(), project_service=mock_project_service)
+    result = facade.delete_project("SW-2026-001")
+
+    assert result.success is False
+    assert "批准口令" in result.message
+    assert (root / "proj" / "a.txt").is_file() and not (root / ".auto-pm" / "recycle").exists()
+
+
+def test_delete_project_refused_with_uncommitted_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """验证有未提交改动时拒绝删除，目录原样保留（TD-193）"""
+    _as_user(monkeypatch)
     root, mock_project_service = _delete_world(tmp_path)
     (root / "proj" / "a.txt").write_text("edited\n", encoding="utf-8")
 
