@@ -17,10 +17,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 import auto_pm
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_out
 from tests.workspace_support import register_project
 

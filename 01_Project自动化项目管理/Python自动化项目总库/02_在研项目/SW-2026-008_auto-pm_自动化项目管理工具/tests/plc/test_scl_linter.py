@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from auto_pm.plc.scl_linter import SclLinter
+
+from auto_pm.domain.plc.scl_linter import SclLinter
 
 
 def test_scl_linter_detects_valid_clean_code() -> None:

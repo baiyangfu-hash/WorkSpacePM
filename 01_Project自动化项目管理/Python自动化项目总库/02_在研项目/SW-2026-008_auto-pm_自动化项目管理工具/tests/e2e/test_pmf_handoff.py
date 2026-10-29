@@ -30,7 +30,7 @@ if TYPE_CHECKING:
         ContinuityExecutionService,
     )
 else:
-    from auto_pm.core.continuity_execution_service import (
+    from auto_pm.application.core.continuity_execution_service import (
         ContinuityExecutionError,
         ContinuityExecutionService,
     )

@@ -26,10 +26,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
-from auto_pm.core.continuity_resume_service import ContinuityResumeService
 
 import auto_pm
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.application.core.continuity_resume_service import ContinuityResumeService
 from auto_pm.contracts.continuity import RunState
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 from auto_pm.contracts.mission import InternalRoutingPolicy

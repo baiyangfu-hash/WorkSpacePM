@@ -7,11 +7,11 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.plc import cycle_plan as cp
-from auto_pm.plc import milestones as ms
 from click.testing import CliRunner
 
+from auto_pm.domain.plc import cycle_plan as cp
+from auto_pm.domain.plc import milestones as ms
+from auto_pm.ui.cli.__main__ import cli
 from tests.plc.test_milestones import FILLED, write
 
 ROOT = Path(__file__).resolve().parents[6]

@@ -258,7 +258,7 @@ def comment_files(root: Path, marker: str, project: str = PROJECT) -> dict[str, 
 
 
 def change_status(root: Path, project_id: str, change_id: str) -> str:
-    from auto_pm.change.change_service import ChangeService
+    from auto_pm.domain.change.change_service import ChangeService
 
     change = ChangeService(str(root)).get_change_request(change_id, project_id=project_id)
     assert change is not None, change_id

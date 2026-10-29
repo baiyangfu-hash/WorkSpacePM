@@ -31,20 +31,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.ledger_reconciler import LedgerReconciler
-from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
-from auto_pm.core.pm_cockpit_service import PmCockpitService
-from auto_pm.plc import doc_consistency as dc
 from PySide6.QtCore import QMetaObject, QObject, QUrl
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtWidgets import QApplication
 
+from auto_pm.application.core.local_execution_orchestrator import LocalExecutionOrchestrator
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
+from auto_pm.domain.plc import doc_consistency as dc
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import (
     LocalCodexExecutor,
@@ -74,7 +74,7 @@ from tests.qml.test_boss_cockpit_view import _items_named, _texts
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_facade_service import PmFacadeService
 else:
-    from auto_pm.core.pm_facade_service import PmFacadeService
+    from auto_pm.application.core.pm_facade_service import PmFacadeService
 
 _QML = Path(__file__).resolve().parents[2] / "auto_pm" / "ui" / "qml" / "boss_main.qml"
 MODEL = "gpt-6.1-sol"

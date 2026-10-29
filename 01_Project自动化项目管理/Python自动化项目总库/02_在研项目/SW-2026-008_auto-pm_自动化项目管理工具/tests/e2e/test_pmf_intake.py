@@ -18,12 +18,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
-from auto_pm.core.work_registry_service import WorkRegistryService
 
 import auto_pm
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import RunState, WorkKind
+from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from tests.core.test_continuity_execution_service import Clock, _checkpoint, _start
 from tests.git_support import git_do

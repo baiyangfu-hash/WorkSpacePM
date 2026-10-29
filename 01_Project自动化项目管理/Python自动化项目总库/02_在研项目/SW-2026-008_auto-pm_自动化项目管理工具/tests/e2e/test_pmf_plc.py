@@ -23,15 +23,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.ledger_reconciler import LedgerReconciler
-from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
-from auto_pm.plc import doc_consistency as dc
 
+from auto_pm.application.core.local_execution_orchestrator import LocalExecutionOrchestrator
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PmIntent
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
+from auto_pm.domain.plc import doc_consistency as dc
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 from tests.core.test_pm_run_e2e import NOT_VERIFIED_SENTENCE, VERIFIED_SENTENCE, _Env
@@ -43,8 +43,8 @@ if TYPE_CHECKING:
     from auto_pm.application.core.pm_closure_service import ClosureCompletionState, PmClosureService
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 else:
-    from auto_pm.core.pm_closure_service import ClosureCompletionState, PmClosureService
-    from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
+    from auto_pm.application.core.pm_closure_service import ClosureCompletionState, PmClosureService
+    from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 
 PIN_COMMIT = "1e1ef760c6f9c8814dbe47d681da760c887d28ee"
 PIN_TREE = "ae8ff3a787936702a6d5df5ce3aadaecc3cb4eed"

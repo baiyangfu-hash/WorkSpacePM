@@ -18,9 +18,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.core.lease_handover_service import AGENT_MARKERS
 
 import auto_pm
+from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
 from auto_pm.contracts.continuity import RunState
 from auto_pm.infrastructure import lease_wallet, process_probe
 from tests.core.test_continuity_execution_service import Clock, _services
