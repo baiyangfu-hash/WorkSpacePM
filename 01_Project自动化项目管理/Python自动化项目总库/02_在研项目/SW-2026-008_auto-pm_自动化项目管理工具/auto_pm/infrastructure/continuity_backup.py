@@ -253,8 +253,8 @@ def verify_backup_file(path: str | Path) -> LedgerReport:
     extra: list[str] = []
     if manifest.is_file():
         try:
-            recorded = json.loads(manifest.read_text(encoding="utf-8", errors="replace"))
-        except json.JSONDecodeError:
+            recorded = json.loads(manifest.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
             extra.append(f"清单文件 {manifest.name} 无法读取")
         else:
             if recorded.get("sha256") != digest:
