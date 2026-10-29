@@ -53,3 +53,36 @@ def test_recording_a_failure_appends_to_a_readable_log_without_moving_anything(t
     assert list(service.failure_dir.glob("*.corrupt-*")) == []
     assert [e["event_id"] for e in json.loads(path.read_text(encoding="utf-8"))["events"]][0] == "first"
     assert len(service.list_failure_events(REQ)) == 2
+
+
+def test_a_log_with_the_wrong_shape_is_unreadable_too_and_is_kept_aside_on_write(tmp_path: Path) -> None:
+    service, path = _service(tmp_path)
+    for index, text in enumerate(('[1, 2, 3]', '{"events": "boom", "note": "keep me"}')):
+        path.write_text(text, encoding="utf-8")
+        events = service.list_failure_events(REQ)
+        assert len(events) == 1 and events[0]["error_type"] == "FailureLogUnreadable"
+
+        service._record_failure(REQ, RuntimeError("boom"), phase="close")
+        kept = sorted(service.failure_dir.glob(f"{REQ}.corrupt-*.json"))
+        assert len(kept) == index + 1
+        assert text in {k.read_text(encoding="utf-8") for k in kept}  # 原内容原样留底
+        assert [e["error_type"] for e in json.loads(path.read_text(encoding="utf-8"))["events"]] == [
+            "FailureLogUnreadable",
+            "RuntimeError",
+        ]
+
+
+def test_a_bad_byte_inside_a_string_value_is_not_silently_replaced(tmp_path: Path) -> None:
+    """替换成 U+FFFD 后仍是合法 JSON，证据已被改动却显示正常——必须按读不懂处理。"""
+    service, path = _service(tmp_path)
+    old = b'{"events": [{"event_id": "a", "error": "caf\\xff"}]}'.replace(b"\\xff", b"\xff")
+    path.write_bytes(old)
+    assert old.decode("utf-8", errors="replace")  # 前提：替换后本是合法文本
+    assert json.loads(old.decode("utf-8", errors="replace"))["events"]
+
+    events = service.list_failure_events(REQ)
+    assert len(events) == 1 and events[0]["error_type"] == "FailureLogUnreadable"
+
+    service._record_failure(REQ, RuntimeError("boom"), phase="close")
+    kept = list(service.failure_dir.glob(f"{REQ}.corrupt-*.json"))
+    assert len(kept) == 1 and kept[0].read_bytes() == old

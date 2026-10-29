@@ -536,6 +536,8 @@ class AiHandoffService:
             return []
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or not isinstance(payload.get("events", []), list):
+                raise ValueError("失败日志形状不对（顶层不是对象，或 events 不是列表）")
         except (OSError, ValueError) as error:  # UnicodeDecodeError / JSONDecodeError 都是 ValueError
             # 日志存在却读不懂，不能当成“没有失败”：给看板一条可见的失败事件。
             return [
@@ -548,8 +550,7 @@ class AiHandoffService:
                     "retryable": False,
                 }
             ]
-        events = payload.get("events") if isinstance(payload, dict) else None
-        return list(events) if isinstance(events, list) else []
+        return list(payload.get("events", []))
 
     def retry_close(
         self,
@@ -1347,8 +1348,9 @@ class AiHandoffService:
             if path.is_file():
                 try:
                     loaded = json.loads(path.read_text(encoding="utf-8"))
-                    if isinstance(loaded, dict):
-                        existing.update(loaded)
+                    if not isinstance(loaded, dict) or not isinstance(loaded.get("events", []), list):
+                        raise ValueError("失败日志形状不对（顶层不是对象，或 events 不是列表）")
+                    existing.update(loaded)
                 except (OSError, ValueError):
                     # 旧日志读不懂：原样改名留底，不覆盖、不删除，再记一条事件说明
                     lost = f"{path.stem}.corrupt-{uuid.uuid4().hex[:8]}.json"
