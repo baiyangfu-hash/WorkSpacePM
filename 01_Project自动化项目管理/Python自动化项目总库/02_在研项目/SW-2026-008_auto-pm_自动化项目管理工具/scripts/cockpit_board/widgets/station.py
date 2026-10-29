@@ -77,8 +77,8 @@ class StationPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        self.scroll, self.layout_ = c.page()
-        outer.addWidget(self.scroll, 1)
+        self.scroll_area, self.layout_ = c.page()
+        outer.addWidget(self.scroll_area, 1)
         self.drawer = QFrame()
         self.drawer.setObjectName("idbar")
         self.drawer_layout = QVBoxLayout(self.drawer)
@@ -88,7 +88,7 @@ class StationPage(QWidget):
 
     # ------------------------------------------------ 画
 
-    def render(self, vm: StationVM) -> None:
+    def show_view(self, vm: StationVM) -> None:
         self.vm = vm
         c.clear(self.layout_)
         lay = self.layout_
@@ -106,11 +106,11 @@ class StationPage(QWidget):
             frame = QFrame()
             frame.setObjectName("bar")
             frame.setProperty("sev", "risk")
-            inner = QHBoxLayout(frame)
-            inner.addWidget(c.label(vm.banner), 1)
+            banner_row = QHBoxLayout(frame)
+            banner_row.addWidget(c.label(vm.banner), 1)
             ok = c.button("知道了", "", "关掉这条提示")
             ok.clicked.connect(self._dismiss)
-            inner.addWidget(ok)
+            banner_row.addWidget(ok)
             lay.addWidget(frame)
 
         lay.addWidget(c.section("接着干", "上次干到哪、下一步、要打开的文件、人工工位分支"))
@@ -179,7 +179,7 @@ class StationPage(QWidget):
         if step.number == 5 and self.commit_text:
             inner.addWidget(pre(self.commit_text))
         if step.buttons:
-            widgets = []
+            widgets: list[QWidget | int] = []
             for text, key, enabled, reason in step.buttons:
                 enabled = enabled and not (key == "bc_write" and not self.bc_preview_text)
                 reason = reason if not enabled else ""
@@ -227,7 +227,7 @@ class StationPage(QWidget):
         grid = QGridLayout()
         grid.setHorizontalSpacing(theme.SPACE)
         grid.setVerticalSpacing(theme.SPACE // 2)
-        self.bc_inputs: dict[str, QLineEdit | QComboBox] = {}
+        self.bc_inputs = {}
         for row, (key, label, hint) in enumerate(BC_FIELDS):
             grid.addWidget(c.label(label, "muted", wrap=False), row, 0)
             if key in BC_CHOICES:
@@ -289,7 +289,7 @@ class StationPage(QWidget):
         self.bc_preview_text = preview.line if preview else ""
         self.bc_note = note or (BC_NOTE_READY if preview else BC_NOTE_EMPTY)
         if self.vm is not None:
-            self.render(self.vm)
+            self.show_view(self.vm)
 
     def set_commit_text(self, text: str) -> None:
         self.commit_text = text
@@ -301,4 +301,4 @@ class StationPage(QWidget):
     def _dismiss(self) -> None:
         self.banner_dismissed = True
         if self.vm is not None:
-            self.render(self.vm)
+            self.show_view(self.vm)
