@@ -2,6 +2,7 @@
 # 每个 PR 都完整运行（好设成必过检查）：这些测试还会读 .github/ 下的 PR 模板与 pr-gate、safety-gate 工作流、0100_PLC自动化 下的 PLC 源码，
 # 改那些文件的 PR 不碰 reviews/tools，按“没碰就不适用”判断会假绿（审计 366），所以不做范围判断。
 # 包括 test_plc_ci.py（33 个测试约 16 秒；plc-ci 只在改 PLC 或检查代码时才跑，改 plc_ci.py 的 PR 以前合并前没人检验，审计 366 P3）。它是提前报警，不替代审计，结果也不是任何卡的验收证据。
+# 另有一步“文本编码检查”（审计 368）：PR 改动的文本文件必须是严格 UTF-8、无乱码；push 到 main 和手动运行查全仓。只用标准库，不依赖下面装的包。
 # 说明：项目文件夹 plans/技术债方案_TD228_判卷脚本测试接进CI_20261028.md。
 name: reviews-tools-ci
 
@@ -46,6 +47,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      # 审计 368：错误编码的文件会让 GitHub 把整页显示成乱码，而 errors=replace 会把坏字节悄悄抹掉。已知的历史遗留登记在 reviews/tools/encoding_allowlist.txt（按文件内容登记）。
+      - name: Text encoding check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            python reviews/tools/encoding_check.py --base "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" --head "$HEAD_SHA"
+          else
+            python reviews/tools/encoding_check.py --all --head HEAD
+          fi
 
       - name: Install the locked dependencies
         run: |
