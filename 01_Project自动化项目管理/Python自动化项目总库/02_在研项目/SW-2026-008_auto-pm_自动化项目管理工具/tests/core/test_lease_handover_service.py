@@ -13,6 +13,7 @@ import threading
 from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -350,7 +351,7 @@ def test_the_store_refuses_a_reclaim_without_its_exact_authority(scene: Scene, v
 def test_an_exact_reclaim_replay_changes_nothing(scene: Scene) -> None:
     scene.expire()
     lease = scene.store.get_lease(RUN)
-    arguments = dict(
+    arguments: dict[str, Any] = dict(
         run_id=RUN, expected_owner_id="agent-a", expected_lease_version=lease.version, claimant_id="agent-b", new_token="t" * 64,
         lease_seconds=900, process_verdict=ProcessVerdict.PROVEN_DEAD, risk_acceptance_id="", reason="test", idempotency_key="replay-1",
     )
