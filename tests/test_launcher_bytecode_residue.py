@@ -195,3 +195,40 @@ def test_launcher_purge_argument_cleans_and_verifies_without_starting(
     assert "已清除 1 处" in captured.out
     assert "release verified via active_release.json" in captured.out
     assert captured.err == ""
+
+
+def _run_launcher_capturing_child(
+    root: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    import launch  # type: ignore[import-not-found]
+
+    class _Done:
+        returncode = 0
+
+    monkeypatch.setattr(launch.subprocess, "run", lambda *_a, **_k: _Done())
+    assert launcher_main(args, container=root) == 0
+
+
+def test_json_runs_keep_the_launcher_status_line_off_stdout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # TD-SW008-031: `plc check --json` and every other --json command must leave stdout parseable.
+    root = _container(tmp_path)
+
+    _run_launcher_capturing_child(root, monkeypatch, ["plc", "check", "DJ-2026-005", "--json"])
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "release verified via active_release.json" in captured.err
+
+
+def test_plain_runs_still_print_the_launcher_status_line_on_stdout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _container(tmp_path)
+
+    _run_launcher_capturing_child(root, monkeypatch, ["plc", "check", "DJ-2026-005"])
+
+    captured = capsys.readouterr()
+    assert "release verified via active_release.json" in captured.out
+    assert captured.err == ""
