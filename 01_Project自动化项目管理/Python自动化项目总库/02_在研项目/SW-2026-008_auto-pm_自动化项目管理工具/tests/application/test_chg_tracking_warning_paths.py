@@ -138,7 +138,18 @@ def test_verify_ledger_check_fails_with_exit_2_and_still_shows_the_warning(tmp_p
 
     assert result.exit_code == 2, result.output
     assert result.output.index("门禁失败") < result.output.index("提交跟踪（")
+    assert "拦截，退出码 2" in result.output and "未提交，请先提交" in result.output  # the red diff does not hide why the tracking also blocks
     assert _UNTRACKED_LINE in result.output
+
+
+def test_verify_ledger_check_in_a_folder_without_commits_says_the_check_was_skipped_and_does_not_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _Fixture(tmp_path, [ReconcileDiff()], commit=False).run_verify(monkeypatch, "--ledger-check")
+
+    assert result.exit_code == 0, result.output  # Git cannot answer: skipped is said out loud, never a block
+    assert "提交跟踪检查未执行" in result.output
+    assert "提交跟踪（" not in result.output
 
 
 def test_verify_lists_everything_with_verbose_and_ten_without(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
