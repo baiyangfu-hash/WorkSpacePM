@@ -253,7 +253,7 @@ class PmClosureSagaCoordinator:
                         pass
             else:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                target_path.write_text(str(original_content), encoding="utf-8", errors="replace")
+                target_path.write_bytes(str(original_content).encode("utf-8"))
                 restored.append(f"restored:{path_str}")
 
         saga_data["status"] = SagaStatus.COMPENSATED.value
@@ -377,7 +377,7 @@ class PmClosureSagaCoordinator:
         if key in backup_files:
             return
         if path.is_file():
-            backup_files[key] = path.read_text(encoding="utf-8", errors="replace")
+            backup_files[key] = path.read_bytes().decode("utf-8")
         else:
             backup_files[key] = None
         saga_data["backup_files"] = backup_files
@@ -507,13 +507,13 @@ class PmClosureSagaCoordinator:
             chg_file = self._find_chg_file(chg_id)
             if chg_file is not None and chg_file.is_file():
                 self._backup_file(saga_data, chg_file)
-                content = chg_file.read_text(encoding="utf-8", errors="replace")
+                content = chg_file.read_text(encoding="utf-8")
                 content = editor.update_status_field(content, target_status)
                 if target_status in ("completed", "closed"):
                     content = editor.update_verification_conclusion(
                         content, "全部通过,可关闭"
                     )
-                chg_file.write_text(content, encoding="utf-8", errors="replace")
+                chg_file.write_text(content, encoding="utf-8")
                 transitions[chg_id] = target_status
 
         self._mark_step_done(
@@ -582,7 +582,7 @@ class PmClosureSagaCoordinator:
 
         fb_path.parent.mkdir(parents=True, exist_ok=True)
         temp_fb = fb_path.parent / f".{fb_path.name}.{uuid.uuid4().hex}.tmp"
-        with temp_fb.open("w", encoding="utf-8", errors="replace", newline="\n") as stream:
+        with temp_fb.open("w", encoding="utf-8", newline="\n") as stream:
             json.dump(feedback_data, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
         temp_fb.replace(fb_path)
@@ -607,7 +607,7 @@ class PmClosureSagaCoordinator:
 
         if pm_session_file is not None and pm_session_file.is_file():
             self._backup_file(saga_data, pm_session_file)
-            content = pm_session_file.read_text(encoding="utf-8", errors="replace")
+            content = pm_session_file.read_text(encoding="utf-8")
             request_id = str(merged.get("request_id", ""))
             now_iso = datetime.now(UTC).isoformat()
             closure_line = (
@@ -624,7 +624,7 @@ class PmClosureSagaCoordinator:
                 )
             else:
                 content = content.rstrip() + f"\n\n## 8. Handoff Notes\n{closure_line}"
-            pm_session_file.write_text(content, encoding="utf-8", errors="replace")
+            pm_session_file.write_text(content, encoding="utf-8")
 
         self._mark_step_done(
             saga_data,
@@ -666,7 +666,7 @@ class PmClosureSagaCoordinator:
         self.saga_log_dir.mkdir(parents=True, exist_ok=True)
         target = self.saga_log_path(request_id)
         temp_path = self.saga_log_dir / f".{target.name}.{uuid.uuid4().hex}.tmp"
-        with temp_path.open("w", encoding="utf-8", errors="replace", newline="\n") as stream:
+        with temp_path.open("w", encoding="utf-8", newline="\n") as stream:
             json.dump(saga_data, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
             stream.flush()
@@ -679,10 +679,10 @@ class PmClosureSagaCoordinator:
         if not path.is_file():
             return None
         try:
-            raw = path.read_text(encoding="utf-8", errors="replace")
+            raw = path.read_text(encoding="utf-8")
             payload = json.loads(raw)
             return payload if isinstance(payload, dict) else None
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return None
 
     def _resolve_target_chg_id(self, merged: Mapping[str, Any]) -> str:
