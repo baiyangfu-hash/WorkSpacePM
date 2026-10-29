@@ -191,7 +191,11 @@ class ContinuityResumeService:
         )
         if mission is None and work is None and mission_candidates:
             next_action = "AWAIT_USER_SWITCH"
-        if conflicts:
+        if conflicts == ["LEASE_EXPIRED"]:
+            # 只有租约过期这一个冲突时唯一合法的出口是结算过期 Run（continuity run settle-expired）；
+            # 留空会让人卡在“续租说已过期、回收说你是持有者”的死锁里。不推荐新建替代 Run。
+            next_action = "SETTLE_EXPIRED_RUN"
+        elif conflicts:
             next_action = ""
         read_set = tuple(item.path for item in context.read_set) + (
             (str(self._store.db_path),) if db_exists else ()

@@ -415,7 +415,7 @@ def test_resume_must_not_recommend_replacement_for_expired_nonterminal_run(
 
     assert result.run and result.run.run_id == "RUN-001"
     assert result.conflicts == ("LEASE_EXPIRED",)
-    assert result.next_legal_action == ""
+    assert result.next_legal_action == "SETTLE_EXPIRED_RUN"  # 不留空，也不推荐新建替代 Run
     payload = result.model_dump(mode="json")
     assert "lease_token" not in payload
     assert "lease-secret" not in json.dumps(payload, ensure_ascii=False)
@@ -1235,3 +1235,4 @@ def test_a_write_that_lands_after_the_copy_but_before_the_second_inventory_is_re
 
     assert ContinuityStore(tmp_path).get_work("WORK-001").title == "written after the copy"
     assert copied_inventories == ["continuity.db"]
+
