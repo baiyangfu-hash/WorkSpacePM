@@ -136,6 +136,18 @@ def test_run_gives_up_after_the_deadline() -> None:
     assert code == 1 and "超过" in report
 
 
+def test_default_deadline_covers_a_slow_sw008_ci_and_the_job_outlives_it() -> None:
+    """首批实跑：sw008-ci 排队时跑了 53 分钟，旧的 45 分钟上限把它误判成红。"""
+    import inspect
+    import re
+
+    deadline_min = inspect.signature(agg.run).parameters["deadline"].default / 60
+    assert deadline_min >= 90
+    text = (WORKFLOWS / agg.SELF).read_text(encoding="utf-8")
+    timeout = int(re.search(r"timeout-minutes:\s*(\d+)", text).group(1))
+    assert timeout > deadline_min  # 先由脚本自己判超时，不被 runner 强杀后无结论
+
+
 def test_the_workflow_runs_from_the_base_and_never_checks_out_the_pr_head() -> None:
     text = (WORKFLOWS / agg.SELF).read_text(encoding="utf-8")
     assert "pull_request_target:" in text and "paths:" not in text  # 每个 PR 都报告，才能设必过
