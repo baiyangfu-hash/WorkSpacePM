@@ -31,6 +31,8 @@ PROTECTED_PATTERNS = (
     "00_Infrastructure/auto_pm/*",
     ".auto-pm/*",
     ".trae/*",
+    ".cursor/rules/*",
+    ".agent/rules/*",
     "roles/*",
     ".claude/*",
     "*.mdc",

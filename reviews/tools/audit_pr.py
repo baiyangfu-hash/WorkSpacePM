@@ -39,6 +39,11 @@ MERGE_SEARCH_LIMIT = 500
 # Paths a reviewer must call out when a PR touches them (see the handoff, section 1).
 PROTECTED_PATTERNS = (
     "AGENTS.md",
+    "CLAUDE.md",
+    ".trae/*",
+    ".cursor/rules/*",
+    ".agent/rules/*",
+    ".claude/*",
     ".github/workflows/*",
     "00_Obsidian_Base*",
     "00_Infrastructure/auto_pm/*",

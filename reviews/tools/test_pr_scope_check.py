@@ -474,3 +474,12 @@ def test_s17_non_utf8_bytes_in_a_diff_are_reported_not_swallowed(repo: Path, cap
 def test_s18_clean_utf8_output_prints_no_warning(repo: Path, capsys) -> None:
     gate.git(repo, "log", "-1", "--format=%s")
     assert capsys.readouterr().err == ""
+
+
+def test_agent_rule_directories_are_locked_so_a_directory_scope_is_not_enough(repo: Path) -> None:
+    write(repo, ".trae/skills/x/SKILL.md", "rule\n")
+    base, head = commit(repo)
+    result = gate.check(repo, base, head, "## 可改范围\n- .trae\n")
+    assert "锁定文件 `.trae/skills/x/SKILL.md`" in errors(result)
+    named = gate.check(repo, base, head, "## 可改范围\n- .trae/skills/x/SKILL.md\n")
+    assert "锁定文件" not in errors(named)
