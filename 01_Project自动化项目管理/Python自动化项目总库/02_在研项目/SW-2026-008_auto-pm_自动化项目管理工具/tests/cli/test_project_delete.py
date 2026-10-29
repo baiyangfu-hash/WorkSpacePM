@@ -343,3 +343,16 @@ def test_d17_the_surface_identity_gate_refuses_agents_and_a_committed_pin(
 def test_d18_the_surface_identity_gate_lets_the_user_through_without_a_pin(tmp_path: Path) -> None:
     assert guard.surface_identity_problem(tmp_path, {}) == ""
     assert guard.surface_identity_problem(tmp_path, {"CLAUDECODE": ""}) == ""
+
+
+def test_d19_an_unreadable_approval_pin_config_is_not_a_green_light(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core.approval_proof_service import ApprovalProofError
+
+    def broken(self: ApprovalProofService) -> bool:
+        raise ApprovalProofError("口令配置损坏")
+
+    monkeypatch.setattr(ApprovalProofService, "enforced", broken)
+    problem = guard.surface_identity_problem(tmp_path, {})
+    assert "读不出批准口令配置" in problem and "口令配置损坏" in problem
