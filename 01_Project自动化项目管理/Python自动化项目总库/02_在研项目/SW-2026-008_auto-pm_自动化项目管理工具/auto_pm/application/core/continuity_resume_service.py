@@ -25,7 +25,11 @@ from auto_pm.contracts.continuity_resume import (
 )
 from auto_pm.contracts.intake import IntakeSummary
 from auto_pm.contracts.mission import Mission, MissionState
-from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.continuity_store import (
+    LEASE_RENEWAL_RED_COUNT,
+    ContinuityStore,
+    ContinuityStoreError,
+)
 from auto_pm.infrastructure.intake_store import IntakeStore
 
 from .workspace_context_service import WorkspaceContextError, WorkspaceContextService
@@ -68,6 +72,7 @@ class ContinuityResumeService:
             raise ContinuityResumeError(str(error)) from error
 
         conflicts = list(context.conflicts)
+        hold_warnings: list[str] = []
         mission: Mission | None = None
         work = None
         run = None
@@ -173,6 +178,13 @@ class ContinuityResumeService:
                         <= self._now().astimezone(UTC)
                     ):
                         conflicts.append("LEASE_EXPIRED")
+                    hold = self._store.lease_hold_status(run.run_id)
+                    renewals = int(str(hold["renewals"]))
+                    if renewals >= LEASE_RENEWAL_RED_COUNT:
+                        hold_warnings.append(
+                            f"续租 {renewals} 次（≥{LEASE_RENEWAL_RED_COUNT}）：这个 Run 卡住了或开得太久，"
+                            f"持有上限 {hold['hold_end']}；请先查原因，别无限续"
+                        )
             except (ContinuityStoreError, sqlite3.Error) as error:
                 raise ContinuityResumeError(f"Continuity Store 无法读取: {error}") from error
 
@@ -236,6 +248,7 @@ class ContinuityResumeService:
             checkpoint=checkpoint,
             lease=lease_view,
             conflicts=tuple(conflicts),
+            hold_warnings=tuple(hold_warnings),
             next_legal_action=next_action,
             read_set=read_set,
             intake=intake,

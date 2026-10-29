@@ -6269,7 +6269,7 @@ class ContinuityStore:
     def lease_hold_status(self, run_id: str) -> dict[str, object]:
         """Read-only: hold deadline and how many times the lease was renewed (for orient and the CLI)."""
         run_id = self._validated_run_text(run_id, label="run_id")
-        with self._transaction() as conn:
+        with self._read_connection() as conn:
             run = self._get_run(conn, run_id)
             renewals = conn.execute(
                 "SELECT COUNT(*) FROM events WHERE aggregate_type='run' AND aggregate_id=? "
