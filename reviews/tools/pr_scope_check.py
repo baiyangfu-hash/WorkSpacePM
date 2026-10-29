@@ -68,6 +68,7 @@ _SW008 = "01_Project自动化项目管理/Python自动化项目总库/02_在研�
 JUDGE_PATTERNS = (
     "reviews/tools/pr_scope_check.py",
     "reviews/tools/audit_pr.py",
+    "reviews/tools/ci_aggregate.py",
     "reviews/tools/safety_zone_check.py",
     "requirements.txt",
     f"{_SW008}/pyproject.toml",

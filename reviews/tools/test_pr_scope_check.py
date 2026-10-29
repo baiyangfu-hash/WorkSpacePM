@@ -483,3 +483,12 @@ def test_agent_rule_directories_are_locked_so_a_directory_scope_is_not_enough(re
     assert "锁定文件 `.trae/skills/x/SKILL.md`" in errors(result)
     named = gate.check(repo, base, head, "## 可改范围\n- .trae/skills/x/SKILL.md\n")
     assert "锁定文件" not in errors(named)
+
+
+def test_the_ci_aggregate_judge_is_locked_so_a_directory_scope_is_not_enough(repo: Path) -> None:
+    write(repo, "reviews/tools/ci_aggregate.py", "x = 1\n")
+    base, head = commit(repo)
+    result = gate.check(repo, base, head, "## 可改范围\n- reviews/tools\n")
+    assert "锁定文件 `reviews/tools/ci_aggregate.py`" in errors(result)
+    named = gate.check(repo, base, head, "## 可改范围\n- reviews/tools/ci_aggregate.py\n")
+    assert "锁定文件" not in errors(named)
