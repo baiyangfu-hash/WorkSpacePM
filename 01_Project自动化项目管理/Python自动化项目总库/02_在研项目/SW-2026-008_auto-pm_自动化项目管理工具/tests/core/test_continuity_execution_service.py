@@ -2298,8 +2298,16 @@ def test_generic_checkpoint_rejects_each_real_second_project_gate_failure(
             'def value() -> int:\n    return "wrong"\n',
             encoding="utf-8", errors="replace",
         )
-    with pytest.raises(ContinuityExecutionError, match="质量收据为 PASS"):
+    with pytest.raises(ContinuityExecutionError, match="质量收据为 PASS") as refused:
         _append_auto_checkpoint(service, candidate, profile="generic")
+    # 失败信息要点名是哪一道检查红了，并把完整收据落盘（Trae 对比测试：只说“要求 PASS”，看不出是谁红）
+    message = str(refused.value)
+    assert f"[{failing_gate}]" in message and "完整收据：" in message
+    reports = list((service._root / ".auto-pm" / "reports" / "quality-failures").glob("*.json"))
+    assert len(reports) == 1
+    saved = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert saved["status"] == "FAIL"
+    assert any(gate["exit_code"] not in (0, None) and gate["name"] == failing_gate for gate in saved["gates"])
     with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
         service._store.get_checkpoint("CP-AUTO-001")
 

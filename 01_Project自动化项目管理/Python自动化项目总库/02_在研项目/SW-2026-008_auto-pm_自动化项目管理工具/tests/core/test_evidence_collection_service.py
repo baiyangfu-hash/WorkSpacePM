@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,10 @@ import pytest
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionError,
     EvidenceCollectionService,
+    PythonQualityGate,
+    PythonQualityReceipt,
+    quality_failure_summary,
+    write_quality_failure_report,
 )
 from auto_pm.contracts.continuity import RunItem, RunState
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
@@ -375,3 +380,38 @@ def test_generic_quality_rejects_candidate_head_drift_before_tools(tmp_path: Pat
         EvidenceCollectionService(workspace).run_generic_checkpoint_quality_gates(
             drifted, candidate
         )
+
+
+def _failed_receipt(*, exit_code: int | None, evidence_current: bool = True, evidence_error: str | None = None):  # type: ignore[no-untyped-def]
+    gates = (
+        PythonQualityGate("ruff", ("ruff", "check"), "/p", 0, "d1", "All checks passed!"),
+        PythonQualityGate("mypy", ("mypy", "x.py"), "/p", exit_code, "d2", "x.py:3: error: bad type\n" * 200),
+    )
+    return PythonQualityReceipt(
+        run_id="RUN-X", baseline_git_head="h", candidate_path="/c", project_root="/p", evidence_hash="e",
+        gates=gates, evidence_current=evidence_current, evidence_error=evidence_error, content_hash="c",
+    )
+
+
+def test_quality_failure_summary_names_only_the_failed_gates_with_a_bounded_excerpt() -> None:
+    text = quality_failure_summary(_failed_receipt(exit_code=1), excerpt_chars=100)
+    assert "[mypy] 退出码 1" in text and "error: bad type" in text and "[ruff]" not in text
+    assert len(text) < 300  # 输出被截断，不会把整份日志塞进报错
+    assert "未能启动或超时" in quality_failure_summary(_failed_receipt(exit_code=None))
+
+
+def test_quality_failure_summary_reports_evidence_drift_even_when_every_gate_passed() -> None:
+    receipt = _failed_receipt(exit_code=0, evidence_current=False, evidence_error="质量门执行期间 Run evidence 已变化")
+    text = quality_failure_summary(receipt)
+    assert "[evidence] 质量门执行期间 Run evidence 已变化" in text and "[mypy]" not in text
+
+
+def test_the_failure_report_is_written_as_utf8_json_and_an_unwritable_dir_never_raises(tmp_path: Path) -> None:
+    path = write_quality_failure_report(_failed_receipt(exit_code=1), tmp_path / "reports" / "quality-failures")
+    assert path is not None and path.name.startswith("RUN-X-")
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["status"] == "FAIL" and saved["gates"][1]["exit_code"] == 1
+
+    blocker = tmp_path / "file"
+    blocker.write_text("x", encoding="utf-8")
+    assert write_quality_failure_report(_failed_receipt(exit_code=1), blocker / "sub") is None

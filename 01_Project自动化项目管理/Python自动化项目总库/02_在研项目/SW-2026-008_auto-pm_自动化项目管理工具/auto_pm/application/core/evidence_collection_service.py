@@ -19,7 +19,8 @@ import tarfile
 import threading
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 
@@ -2092,6 +2093,47 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def quality_failure_summary(receipt: PythonQualityReceipt | PlcQualityReceipt, *, excerpt_chars: int = 600) -> str:
+    """Which gate failed and why, in words: the failing gates (name, exit code, output excerpt) and any evidence drift.
+
+    A failing receipt used to say only "要求质量收据为 PASS"; nobody could tell ruff from mypy from pytest from a drifted evidence hash.
+    """
+
+    parts: list[str] = []
+    for gate in receipt.gates:
+        if gate.passed:
+            continue
+        code = "未能启动或超时" if gate.exit_code is None else f"退出码 {gate.exit_code}"
+        excerpt = gate.output_summary.strip()
+        if len(excerpt) > excerpt_chars:
+            excerpt = excerpt[:excerpt_chars] + "…"
+        parts.append(f"[{gate.name}] {code}\n{excerpt}")
+    if not receipt.evidence_current:
+        parts.append(f"[evidence] {receipt.evidence_error or 'Run evidence 与质量门前不一致'}")
+    if not receipt.gates:
+        parts.append("[gates] 没有任何质量门被执行")
+    return "\n".join(parts) if parts else "（收据状态非 PASS，但未发现失败项）"
+
+
+def write_quality_failure_report(
+    receipt: PythonQualityReceipt | PlcQualityReceipt, reports_root: Path
+) -> Path | None:
+    """Persist a failing receipt as JSON under ``reports_root`` (``.auto-pm/reports/quality-failures``); ``None`` when it cannot be written.
+
+    Writing is best effort and never changes the verdict: the caller still refuses the checkpoint either way.
+    """
+
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    path = reports_root / f"{receipt.run_id}-{stamp}.json"
+    try:
+        reports_root.mkdir(parents=True, exist_ok=True)
+        payload = {"status": receipt.status, **asdict(receipt)}
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    except (OSError, ValueError, TypeError):
+        return None
+    return path
+
+
 def _safe_output_summary(output: str) -> str:
     """Keep a bounded, normalized diagnostic while the digest proves full output."""
 
@@ -2108,4 +2150,6 @@ __all__ = [
     "PlcQualityReceipt",
     "PythonQualityGate",
     "PythonQualityReceipt",
+    "quality_failure_summary",
+    "write_quality_failure_report",
 ]
