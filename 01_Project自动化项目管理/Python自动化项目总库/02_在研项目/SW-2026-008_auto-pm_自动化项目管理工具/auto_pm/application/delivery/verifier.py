@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from auto_pm.delivery.constants import (
+from auto_pm.application.delivery.constants import (
     CHK_DOC_MIN_COUNT,
     CHK_EXE_MAX_MB,
     CHK_EXE_MIN_MB,

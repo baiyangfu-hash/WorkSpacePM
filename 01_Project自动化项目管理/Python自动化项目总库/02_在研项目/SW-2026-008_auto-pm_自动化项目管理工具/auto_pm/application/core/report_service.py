@@ -177,8 +177,8 @@ class ReportService:
             raise RuntimeError("未注入 workspace_root，无法生成规范报告")
 
         # 延迟导入避免循环依赖
-        from auto_pm.spec.core.config import DEFAULT_REGISTRY_PATH
-        from auto_pm.spec.core.registry import SpecRegistry
+        from auto_pm.domain.spec.core.config import DEFAULT_REGISTRY_PATH
+        from auto_pm.domain.spec.core.registry import SpecRegistry
 
         registry = SpecRegistry(Path(self._workspace_root), registry_path=DEFAULT_REGISTRY_PATH)
         if not registry.load():
@@ -251,7 +251,7 @@ class ReportService:
             raise RuntimeError("未注入 DatabaseManager，无法生成扫描报告")
 
         # 延迟导入避免循环依赖
-        from auto_pm.db.repository import ScanLogRepository
+        from auto_pm.infrastructure.db.repository import ScanLogRepository
 
         repo = ScanLogRepository(self._db)
         latest = repo.get_latest()

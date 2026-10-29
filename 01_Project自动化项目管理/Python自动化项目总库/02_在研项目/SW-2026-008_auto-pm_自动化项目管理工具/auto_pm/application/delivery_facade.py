@@ -14,14 +14,13 @@ Service bug 修复（阶段 C）：
 - Bug #2/#3: refresh_asset_summary/get_asset_summary 改为接收 project_id，调 build_summary
 """
 
-from auto_pm.core.protocols import (
+from auto_pm.application.core.protocols import (
     AssetSummaryServiceProtocol,
     DocRefreshServiceProtocol,
     ProjectServiceProtocol,
     ReportServiceProtocol,
 )
-from auto_pm.models import ProjectInfo
-
+from auto_pm.domain.models import ProjectInfo
 from auto_pm.ui.contracts.dto.delivery_dto import (
     AssetSummaryDTO,
     ChangeReportDTO,

@@ -13,8 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from auto_pm.delivery.archive_manager import ArchiveManager
-from auto_pm.delivery.constants import (
+from auto_pm.application.delivery.archive_manager import ArchiveManager
+from auto_pm.application.delivery.constants import (
     DEFAULT_PRODUCT_NAME,
     DIR_DELIVERY,
     DIR_EXECUTABLE,
@@ -23,7 +23,7 @@ from auto_pm.delivery.constants import (
     MB,
     PACKAGE_NAME_TEMPLATE,
 )
-from auto_pm.delivery.verifier import DeliveryVerifier
+from auto_pm.application.delivery.verifier import DeliveryVerifier
 
 
 class DeliveryService:

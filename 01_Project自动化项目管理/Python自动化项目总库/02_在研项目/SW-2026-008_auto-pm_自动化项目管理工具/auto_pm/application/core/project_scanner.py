@@ -23,10 +23,11 @@ import os
 import re
 
 import yaml
-from auto_pm.core.asset_summary_service import AssetSummaryService
-from auto_pm.models import ProjectInfo
-from auto_pm.models.enums import Stack
-from auto_pm.models.project import extract_business_line
+
+from auto_pm.application.core.asset_summary_service import AssetSummaryService
+from auto_pm.domain.models import ProjectInfo
+from auto_pm.domain.models.enums import Stack
+from auto_pm.domain.models.project import extract_business_line
 
 log = logging.getLogger(__name__)
 
