@@ -24,7 +24,7 @@ concurrency:
 jobs:
   aggregate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 110
     steps:
       # 裁判是基线分支的当前状态（与 pr-gate 同理，不用事件里可能过期的 base.sha）
       - name: Check out the PR base (the judge)

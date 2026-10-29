@@ -198,7 +198,7 @@ def run(
     *,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
-    deadline: float = 45 * 60,
+    deadline: float = 100 * 60,
     grace: float = 12 * 60,
     interval: float = 30,
 ) -> tuple[int, str]:
