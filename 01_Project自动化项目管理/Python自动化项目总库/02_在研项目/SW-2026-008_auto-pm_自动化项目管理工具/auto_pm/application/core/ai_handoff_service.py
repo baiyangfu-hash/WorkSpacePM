@@ -833,9 +833,9 @@ class AiHandoffService:
 
     def _read_valid(self, path: Path) -> dict[str, Any] | None:
         try:
-            raw = path.read_text(encoding="utf-8", errors="replace")
+            raw = path.read_text(encoding="utf-8")
             payload = json.loads(raw)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return None
         if not isinstance(payload, dict):
             return None
@@ -1289,7 +1289,6 @@ class AiHandoffService:
             with temp_path.open(
                 "w",
                 encoding="utf-8",
-                errors="replace",
                 newline="\n",
             ) as stream:
                 json.dump(payload, stream, ensure_ascii=False, indent=2)
@@ -1311,7 +1310,6 @@ class AiHandoffService:
             with temp_path.open(
                 "w",
                 encoding="utf-8",
-                errors="replace",
                 newline="\n",
             ) as stream:
                 json.dump(dict(result), stream, ensure_ascii=False, indent=2)
@@ -1362,7 +1360,6 @@ class AiHandoffService:
                 with temp_path.open(
                     "w",
                     encoding="utf-8",
-                    errors="replace",
                     newline="\n",
                 ) as stream:
                     json.dump(existing, stream, ensure_ascii=False, indent=2)
