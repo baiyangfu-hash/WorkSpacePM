@@ -424,9 +424,9 @@ def test_r03_an_expired_lease_never_turns_into_success(scene: Scene) -> None:
     assert not _events(scene.root, "RUN_TRANSITIONED", controller.run_id)
     resumed = ContinuityResumeService(scene.root).collect(project_id=PROJECT_ID, invocation_path=scene.root)
     assert "LEASE_EXPIRED" in resumed.conflicts
-    # 现场只有 LEASE_EXPIRED 一个冲突时给 SETTLE_EXPIRED_RUN（见 test_continuity_resume_service）；这里还并存
+    # 现场只有 LEASE_EXPIRED 一个冲突时给 RECLAIM_EXPIRED_RUN（见 test_continuity_resume_service）；这里还并存
     # RUNTIME_IDENTITY_UNVERIFIED，多冲突并存仍保守地不给动作。
-    assert resumed.next_legal_action == ("" if len(resumed.conflicts) > 1 else "SETTLE_EXPIRED_RUN")
+    assert resumed.next_legal_action == ("" if len(resumed.conflicts) > 1 else "RECLAIM_EXPIRED_RUN")
     _drop_runtime_root(scene.root)
     events_before = _query(scene.root, "SELECT rowid, event_type, aggregate_id FROM events ORDER BY rowid")
     renewal = scene.command(

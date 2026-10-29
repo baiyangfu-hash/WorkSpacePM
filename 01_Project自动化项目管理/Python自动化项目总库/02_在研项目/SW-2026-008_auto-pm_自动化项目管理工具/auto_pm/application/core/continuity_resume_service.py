@@ -192,9 +192,10 @@ class ContinuityResumeService:
         if mission is None and work is None and mission_candidates:
             next_action = "AWAIT_USER_SWITCH"
         if conflicts == ["LEASE_EXPIRED"]:
-            # 只有租约过期这一个冲突时唯一合法的出口是结算过期 Run（continuity run settle-expired）；
-            # 留空会让人卡在“续租说已过期、回收说你是持有者”的死锁里。不推荐新建替代 Run。
-            next_action = "SETTLE_EXPIRED_RUN"
+            # 只有租约过期这一个冲突时的出口是回收（continuity run reclaim）：申请人必须换一个名字（原持有者续租被拒、
+            # 自己回收自己也被拒），原持有者进程判不出时还须用户本人 pm sign-risk 签字。settle-expired 要另开恢复
+            # Work/Run 和运行态 Decision，不是执行端的常规出口。留空会让人卡在续租/回收互相踢皮球里。
+            next_action = "RECLAIM_EXPIRED_RUN"
         elif conflicts:
             next_action = ""
         read_set = tuple(item.path for item in context.read_set) + (
