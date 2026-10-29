@@ -14,9 +14,11 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import github_collector as gh  # noqa: E402 - scripts/github_collector.py 数据层（GitHub，只读）
@@ -629,7 +631,7 @@ def _gh_evidence(github: GithubVM | None, rows: list[PrRow]) -> list[EvidenceRow
                 return "na" if sev == "hint" else sev
         return "ok"
 
-    def line(pick) -> str:  # noqa: ANN001
+    def line(pick: Callable[[Any], Any]) -> str:
         return "；".join(f"#{r.number} {pick(r).text}" for r in rows) + f" · {github.as_of}"
 
     return [

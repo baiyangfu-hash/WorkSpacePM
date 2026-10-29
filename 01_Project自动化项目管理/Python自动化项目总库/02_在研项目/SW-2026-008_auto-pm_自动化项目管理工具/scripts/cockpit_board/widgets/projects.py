@@ -39,7 +39,7 @@ class ProjectsPage(QWidget):
         layout.addWidget(self.table, 1)
         self.cards: list[ProjectCard] = []
 
-    def render(self, cards: list[ProjectCard]) -> None:
+    def show_view(self, cards: list[ProjectCard]) -> None:
         self.cards = cards
         self.table.setRowCount(len(cards))
         for row, card in enumerate(cards):
