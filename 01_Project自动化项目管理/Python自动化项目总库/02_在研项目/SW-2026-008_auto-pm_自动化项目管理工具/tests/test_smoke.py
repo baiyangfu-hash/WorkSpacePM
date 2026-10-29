@@ -37,27 +37,27 @@ class TestCoreImports:
 
     def test_import_project_service(self) -> None:
         """ProjectService 可导入"""
-        from auto_pm.core.project_service import ProjectService
+        from auto_pm.application.core.project_service import ProjectService
         assert ProjectService is not None
 
     def test_import_change_service(self) -> None:
         """ChangeService 可导入"""
-        from auto_pm.change.change_service import ChangeService
+        from auto_pm.domain.change.change_service import ChangeService
         assert ChangeService is not None
 
     def test_import_report_service(self) -> None:
         """ReportService 可导入"""
-        from auto_pm.core.report_service import ReportService
+        from auto_pm.application.core.report_service import ReportService
         assert ReportService is not None
 
     def test_import_plc_service(self) -> None:
         """PlcService 可导入"""
-        from auto_pm.plc.service import PlcService
+        from auto_pm.domain.plc.service import PlcService
         assert PlcService is not None
 
     def test_import_protocols(self) -> None:
         """Protocol 接口可导入"""
-        from auto_pm.core.protocols import (
+        from auto_pm.application.core.protocols import (
             ChangeServiceProtocol,
             PlcServiceProtocol,
             ProjectServiceProtocol,
@@ -68,7 +68,7 @@ class TestCoreImports:
 
     def test_import_paths_constants(self) -> None:
         """路径常量可导入"""
-        from auto_pm.core.paths import (
+        from auto_pm.application.core.paths import (
             WORKSPACE_PROJECTS_SUBDIR,
             get_projects_subdir,
         )
@@ -77,7 +77,7 @@ class TestCoreImports:
 
     def test_import_constants(self) -> None:
         """业务常量可导入"""
-        from auto_pm.core.constants import (
+        from auto_pm.application.core.constants import (
             BUSINESS_LINE_OPTIONS,
             STACK_TEMPLATE_MAP,
             get_template_name,
@@ -96,36 +96,36 @@ class TestStatusFlow:
 
     def test_status_flow_defined(self) -> None:
         """STATUS_FLOW 已定义"""
-        from auto_pm.change.constants import STATUS_FLOW
+        from auto_pm.domain.change.constants import STATUS_FLOW
         assert "draft" in STATUS_FLOW
         assert "completed" in STATUS_FLOW
         assert "archived" in STATUS_FLOW
 
     def test_acceptance_flow_valid(self) -> None:
         """验收流程状态流转合法"""
-        from auto_pm.change.constants import validate_status_transition
+        from auto_pm.domain.change.constants import validate_status_transition
         validate_status_transition("implementing", "pending_acceptance")
         validate_status_transition("pending_acceptance", "accepting")
         validate_status_transition("accepting", "completed")
 
     def test_archive_flow_valid(self) -> None:
         """归档流程状态流转合法"""
-        from auto_pm.change.constants import validate_status_transition
+        from auto_pm.domain.change.constants import validate_status_transition
         validate_status_transition("completed", "archived")
 
     def test_rework_flow_valid(self) -> None:
         """返工路径状态流转合法"""
-        from auto_pm.change.constants import validate_status_transition
+        from auto_pm.domain.change.constants import validate_status_transition
         validate_status_transition("accepting", "implementing")
 
     def test_archived_is_terminal(self) -> None:
         """archived 是终态"""
-        from auto_pm.change.constants import STATUS_FLOW
+        from auto_pm.domain.change.constants import STATUS_FLOW
         assert STATUS_FLOW["archived"] == set()
 
     def test_status_labels_exist(self) -> None:
         """状态标签存在"""
-        from auto_pm.change.constants import STATUS_LABELS
+        from auto_pm.domain.change.constants import STATUS_LABELS
         assert STATUS_LABELS["draft"] == "草稿"
         assert STATUS_LABELS["completed"] == "已完成"
         assert STATUS_LABELS["archived"] == "已归档"
@@ -140,21 +140,21 @@ class TestProjectServiceBasic:
 
     def test_instantiation(self, tmp_path: Path) -> None:
         """ProjectService 可实例化"""
-        from auto_pm.core.project_service import ProjectService
+        from auto_pm.application.core.project_service import ProjectService
         svc = ProjectService(str(tmp_path))
         assert svc is not None
         assert svc.workspace_root == str(tmp_path)
 
     def test_scanner_instantiation(self, tmp_path: Path) -> None:
         """ProjectScanner 可实例化"""
-        from auto_pm.core.project_scanner import ProjectScanner
+        from auto_pm.application.core.project_scanner import ProjectScanner
         scanner = ProjectScanner(str(tmp_path))
         assert scanner is not None
         assert scanner.workspace_root == str(tmp_path)
 
     def test_list_projects_empty(self, tmp_path: Path) -> None:
         """空工作空间返回空列表"""
-        from auto_pm.core.project_service import ProjectService
+        from auto_pm.application.core.project_service import ProjectService
         svc = ProjectService(str(tmp_path))
         projects = svc.list_projects()
         assert projects == []
@@ -169,13 +169,13 @@ class TestChangeServiceBasic:
 
     def test_instantiation(self, tmp_path: Path) -> None:
         """ChangeService 可实例化"""
-        from auto_pm.change.change_service import ChangeService
+        from auto_pm.domain.change.change_service import ChangeService
         svc = ChangeService(str(tmp_path))
         assert svc is not None
 
     def test_list_all_changes_empty(self, tmp_path: Path) -> None:
         """空工作空间返回空变更列表"""
-        from auto_pm.change.change_service import ChangeService
+        from auto_pm.domain.change.change_service import ChangeService
         svc = ChangeService(str(tmp_path))
         changes = svc.list_all_changes()
         assert changes == []
@@ -190,9 +190,9 @@ class TestReportServiceBasic:
 
     def test_report_types(self) -> None:
         """支持 4 种报告类型"""
-        from auto_pm.change.change_service import ChangeService
-        from auto_pm.core.project_service import ProjectService
-        from auto_pm.core.report_service import ReportService
+        from auto_pm.application.core.project_service import ProjectService
+        from auto_pm.application.core.report_service import ReportService
+        from auto_pm.domain.change.change_service import ChangeService
 
         ps = ProjectService.__new__(ProjectService)
         cs = ChangeService.__new__(ChangeService)
@@ -214,15 +214,15 @@ class TestDatabaseBasic:
 
     def test_database_manager_instantiation(self, tmp_path: Path) -> None:
         """DatabaseManager 可实例化"""
-        from auto_pm.db.connection import DatabaseManager
+        from auto_pm.infrastructure.db.connection import DatabaseManager
         db = DatabaseManager(str(tmp_path))
         assert db is not None
         db.init_schema()
 
     def test_repositories_instantiation(self, tmp_path: Path) -> None:
         """Repository 可实例化"""
-        from auto_pm.db.connection import DatabaseManager
-        from auto_pm.db.repository import (
+        from auto_pm.infrastructure.db.connection import DatabaseManager
+        from auto_pm.infrastructure.db.repository import (
             ChangeRequestRepository,
             ProjectRepository,
             ScanLogRepository,
@@ -249,13 +249,14 @@ class TestCLIEntry:
 
     def test_cli_module_importable(self) -> None:
         """CLI 模块可导入"""
-        from auto_pm.cli.__main__ import cli
+        from auto_pm.ui.cli.__main__ import cli
         assert callable(cli)
 
     def test_cli_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         """CLI --help 正常工作"""
-        from auto_pm.cli.__main__ import cli
         from click.testing import CliRunner
+
+        from auto_pm.ui.cli.__main__ import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0

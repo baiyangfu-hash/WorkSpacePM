@@ -8,7 +8,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from auto_pm.vartable.parsers.io_points_parser import IoPointsParser
+from auto_pm.domain.vartable.parsers.io_points_parser import IoPointsParser
 
 
 class TestIoPointsParserBasic:

@@ -9,7 +9,8 @@ import re
 from pathlib import Path
 
 import pytest
-from auto_pm.vartable.parsers.communications_parser import CommunicationsParser
+
+from auto_pm.domain.vartable.parsers.communications_parser import CommunicationsParser
 
 # 真实 DJ-2026-005 communications.yml 路径（只读，不修改）
 DJ_2026_005_COMMUNICATIONS = (

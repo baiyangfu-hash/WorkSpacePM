@@ -8,7 +8,8 @@ import time
 from pathlib import Path
 
 import pytest
-from auto_pm.utils.file_utils import (
+
+from auto_pm.infrastructure.utils.file_utils import (
     StaleFileError,
     get_mtime,
     read_file,

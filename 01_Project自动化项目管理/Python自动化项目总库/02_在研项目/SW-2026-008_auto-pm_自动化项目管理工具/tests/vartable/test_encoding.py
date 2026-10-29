@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.vartable.utils.encoding import (
+from auto_pm.domain.vartable.utils.encoding import (
     SUPPORTED_ENCODINGS,
     detect_encoding,
     normalize_encoding,

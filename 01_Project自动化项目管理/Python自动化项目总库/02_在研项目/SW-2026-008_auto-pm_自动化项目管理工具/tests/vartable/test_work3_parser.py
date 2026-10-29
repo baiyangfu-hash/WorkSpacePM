@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.vartable.parsers.work3_parser import Work3Parser
+from auto_pm.domain.vartable.parsers.work3_parser import Work3Parser
 
 
 class TestWork3ParserDetectFormat:
