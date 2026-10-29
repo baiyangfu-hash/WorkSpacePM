@@ -992,7 +992,7 @@ def test_run_start_cli_replays_only_provable_legacy_receipt(
     # Legacy Runs (only provable with an empty declaration) predate the
     # empty-declaration refusal, so the first start bypasses that new rule.
     with monkeypatch.context() as legacy:
-        for module in (continuity_cli, sys.modules.get("auto_pm.cli.continuity", continuity_cli)):
+        for module in (continuity_cli, sys.modules["auto_pm.cli.continuity"]):
             legacy.setattr(module, "declared_dirty_problem", lambda *_a, **_k: "")
         first = _invoke(cli_runner, tmp_path, args)
     assert first.exit_code == 0, first.output

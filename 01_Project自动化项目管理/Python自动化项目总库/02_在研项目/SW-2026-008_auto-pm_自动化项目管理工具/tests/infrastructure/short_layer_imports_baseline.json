@@ -56,6 +56,7 @@
  "auto_pm/infrastructure/logging/audit.py": 1,
  "auto_pm/infrastructure/plc_doc_hook.py": 1,
  "auto_pm/ui/boss_qml_window.py": 2,
+ "auto_pm/ui/cli/__main__.py": 26,
  "auto_pm/ui/cli/change.py": 7,
  "auto_pm/ui/cli/continuity.py": 7,
  "auto_pm/ui/cli/ledger.py": 2,

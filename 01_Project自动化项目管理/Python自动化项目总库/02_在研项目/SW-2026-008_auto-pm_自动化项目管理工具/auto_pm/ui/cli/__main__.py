@@ -48,34 +48,34 @@ from rich.console import Console  # noqa: E402
 
 from auto_pm import __version__  # noqa: E402
 from auto_pm.app_context import AppContext  # noqa: E402
+from auto_pm.cli.change import change_group  # noqa: E402
+from auto_pm.cli.clean import clean_cmd  # noqa: E402
+from auto_pm.cli.constraint import constraint_group  # noqa: E402
+from auto_pm.cli.continuity import continuity_group  # noqa: E402
+from auto_pm.cli.continuity_backup import BACKUP_COMMANDS  # noqa: E402
+from auto_pm.cli.decision import decision_group  # noqa: E402
+from auto_pm.cli.delivery import delivery_group  # noqa: E402
+from auto_pm.cli.doc import doc_group  # noqa: E402
+from auto_pm.cli.doctor import doctor_command  # noqa: E402
+from auto_pm.cli.dogfood import dogfood_group  # noqa: E402
+from auto_pm.cli.git_hook import git_hook_group  # noqa: E402
+from auto_pm.cli.gui import gui_command  # noqa: E402
+from auto_pm.cli.handoff import handoff_group  # noqa: E402
+from auto_pm.cli.ledger import ledger_group  # noqa: E402
+from auto_pm.cli.plc import plc_group  # noqa: E402
+from auto_pm.cli.pm import context_group, pm_group  # noqa: E402
+from auto_pm.cli.pr import pr_group  # noqa: E402
+from auto_pm.cli.project import project_group  # noqa: E402
+from auto_pm.cli.prototype import prototype_cmd  # noqa: E402
+from auto_pm.cli.python import python_group  # noqa: E402
+from auto_pm.cli.session import pm_session_group  # noqa: E402
+from auto_pm.cli.spec import spec_group  # noqa: E402
+from auto_pm.cli.template import template_group  # noqa: E402
+from auto_pm.cli.vartable import vartable_group  # noqa: E402
+from auto_pm.cli.workflow import workflow_group  # noqa: E402
+from auto_pm.cli.worktree import worktree_group  # noqa: E402
 from auto_pm.infrastructure.continuity_store import ContinuityStoreSchemaError  # noqa: E402
-from auto_pm.ui.cli.change import change_group  # noqa: E402
-from auto_pm.ui.cli.clean import clean_cmd  # noqa: E402
-from auto_pm.ui.cli.constraint import constraint_group  # noqa: E402
-from auto_pm.ui.cli.continuity import continuity_group  # noqa: E402
-from auto_pm.ui.cli.continuity_backup import BACKUP_COMMANDS  # noqa: E402
-from auto_pm.ui.cli.decision import decision_group  # noqa: E402
-from auto_pm.ui.cli.delivery import delivery_group  # noqa: E402
-from auto_pm.ui.cli.doc import doc_group  # noqa: E402
-from auto_pm.ui.cli.doctor import doctor_command  # noqa: E402
-from auto_pm.ui.cli.dogfood import dogfood_group  # noqa: E402
-from auto_pm.ui.cli.git_hook import git_hook_group  # noqa: E402
-from auto_pm.ui.cli.gui import gui_command  # noqa: E402
-from auto_pm.ui.cli.handoff import handoff_group  # noqa: E402
 from auto_pm.ui.cli.implementation_card import implementation_card_group  # noqa: E402
-from auto_pm.ui.cli.ledger import ledger_group  # noqa: E402
-from auto_pm.ui.cli.plc import plc_group  # noqa: E402
-from auto_pm.ui.cli.pm import context_group, pm_group  # noqa: E402
-from auto_pm.ui.cli.pr import pr_group  # noqa: E402
-from auto_pm.ui.cli.project import project_group  # noqa: E402
-from auto_pm.ui.cli.prototype import prototype_cmd  # noqa: E402
-from auto_pm.ui.cli.python import python_group  # noqa: E402
-from auto_pm.ui.cli.session import pm_session_group  # noqa: E402
-from auto_pm.ui.cli.spec import spec_group  # noqa: E402
-from auto_pm.ui.cli.template import template_group  # noqa: E402
-from auto_pm.ui.cli.vartable import vartable_group  # noqa: E402
-from auto_pm.ui.cli.workflow import workflow_group  # noqa: E402
-from auto_pm.ui.cli.worktree import worktree_group  # noqa: E402
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 
