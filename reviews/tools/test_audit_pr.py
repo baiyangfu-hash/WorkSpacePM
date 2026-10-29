@@ -322,3 +322,33 @@ def test_offline_audit_says_the_refs_may_be_stale(world):
     assert status(checks, "local_refs") == "UNVERIFIED"
     _, online = world["audit"](51)
     assert status(online, "local_refs") is None
+
+
+def test_invalid_utf8_in_a_changed_text_file_fails(world):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "enc", world["base"])
+    (work / "docs").mkdir(exist_ok=True)
+    (work / "docs/gbk.md").write_bytes("中文说明\n".encode("gbk"))
+    head = commit(work, "gbk")
+    run(work, "push", "-q", "-f", "origin", f"{head}:refs/pull/30/head")
+    run(work, "checkout", "-q", "main")
+    _, checks = world["audit"](30)
+    assert status(checks, "text_encoding") == "FAIL"
+    assert "docs/gbk.md" in next(c.detail for c in checks if c.id == "text_encoding")
+
+
+def test_clean_text_and_non_text_files_pass_the_encoding_check(world):
+    world["open_pr"](31, {"docs/ok.md": "中文 ä ö ü 日本語\n"})
+    _, checks = world["audit"](31)
+    assert status(checks, "text_encoding") == "PASS"
+
+
+def test_newly_covered_suffixes_are_checked(world):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "enc2", world["base"])
+    (work / "a.scltest").write_bytes(b"ok \xff\xfe bad\n")
+    head = commit(work, "scltest")
+    run(work, "push", "-q", "-f", "origin", f"{head}:refs/pull/32/head")
+    run(work, "checkout", "-q", "main")
+    _, checks = world["audit"](32)
+    assert status(checks, "text_encoding") == "FAIL"

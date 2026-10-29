@@ -30,6 +30,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 DEFAULT_REPO = "baiyangfu-hash/WorkSpacePM"
 WORKFLOW_FILE = ".github/workflows/sw008-ci.yml"
@@ -337,6 +338,21 @@ def scan_privacy(lines: list[tuple[str, str]]) -> list[Check]:
     return checks
 
 
+def scan_encoding(files: list[str], head: str, cwd: str | None = None) -> Check:
+    """PR 改动的文本文件必须是严格 UTF-8、没有乱码（审计 368）；坏字节在这里判 FAIL，不被 errors=replace 抹掉。"""
+    import encoding_check
+
+    try:
+        findings, skipped = encoding_check.check(Path(cwd or "."), head, files, encoding_check.load_allowlist())
+    except encoding_check.GitError as exc:
+        return Check("text_encoding", "UNVERIFIED", f"取不到文件内容：{exc}")
+    scanned = sum(1 for f in files if encoding_check.is_text_path(f))
+    if findings:
+        detail = "; ".join(f"{f.path}:{f.line} {f.reason}" for f in findings[:5]) + ("…" if len(findings) > 5 else "")
+        return Check("text_encoding", "FAIL", f"{len(findings)} 个文件不是干净的 UTF-8 文本：{detail}")
+    return Check("text_encoding", "PASS", f"{scanned} 个文本文件严格 UTF-8 解码通过，无乱码特征（登记在案的已知问题 {len(skipped)} 个）")
+
+
 def audit(
     pr: int,
     *,
@@ -468,6 +484,7 @@ def audit(
             )
 
         checks.extend(scan_privacy(added_lines(base, head, cwd=cwd)))
+        checks.append(scan_encoding(files, head, cwd=cwd))
 
         patterns = ci_path_patterns(head, cwd=cwd)
         expected_ci = True if patterns is None else any(path_matches(f, p) for f in files for p in patterns)
