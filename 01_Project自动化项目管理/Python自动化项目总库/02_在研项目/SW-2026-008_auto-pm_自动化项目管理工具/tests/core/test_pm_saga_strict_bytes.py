@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from auto_pm.application.core.pm_saga_service import PmClosureSagaCoordinator
+from auto_pm.application.core.pm_saga_service import PmClosureSagaCoordinator, SagaExecutionError
 
 
 def test_backup_of_a_file_with_invalid_bytes_is_refused_before_anything_is_changed(tmp_path: Path) -> None:
@@ -58,6 +58,28 @@ def test_saga_log_with_invalid_bytes_is_unreadable_not_repaired(tmp_path: Path) 
     log = coordinator.saga_log_path("REQ-STRICT-2")
     # valid JSON once the bad byte is "repaired": exactly the case that used to slip through
     log.write_bytes(b'{"request_id": "REQ-STRICT-2", "backup_files": {"x": "a\xff"}}')
-    assert coordinator._load_saga_log("REQ-STRICT-2") is None
+    with pytest.raises(SagaExecutionError, match="无法读取"):
+        coordinator._load_saga_log("REQ-STRICT-2")
     log.write_bytes(json.dumps({"request_id": "REQ-STRICT-2"}).encode())
     assert coordinator._load_saga_log("REQ-STRICT-2") == {"request_id": "REQ-STRICT-2"}
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b'{"request_id": "REQ-STRICT-4", "status": "completed", "note": "a\xff"}',  # completed log with a bad byte
+        b'{"request_id": "REQ-STRICT-4", "status": "compl',  # truncated JSON
+        b'["not", "an", "object"]',
+    ],
+)
+def test_an_existing_but_unreadable_saga_log_is_an_error_never_a_missing_log(tmp_path: Path, content: bytes) -> None:
+    """A completed saga whose log cannot be read must not look like a saga that never ran (it would lose idempotency)."""
+    coordinator = PmClosureSagaCoordinator(tmp_path)
+    coordinator.saga_log_dir.mkdir(parents=True, exist_ok=True)
+    coordinator.saga_log_path("REQ-STRICT-4").write_bytes(content)
+
+    with pytest.raises(SagaExecutionError, match="Saga 事务日志存在"):
+        coordinator.get_saga_status("REQ-STRICT-4")
+    with pytest.raises(SagaExecutionError, match="Saga 事务日志存在"):
+        coordinator.compensate_saga("REQ-STRICT-4")
+    assert coordinator.get_saga_status("REQ-NO-LOG") is None  # a log that does not exist is still just absent

@@ -678,12 +678,15 @@ class PmClosureSagaCoordinator:
         path = self.saga_log_path(request_id)
         if not path.is_file():
             return None
+        # 日志文件存在却读不了，不能当成"没有日志"：已完成的事务会因此丢掉幂等保护，被重新执行。
         try:
             raw = path.read_text(encoding="utf-8")
             payload = json.loads(raw)
-            return payload if isinstance(payload, dict) else None
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return None
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise SagaExecutionError(f"Saga 事务日志存在但无法读取，拒绝当作没有日志: {path.name}") from error
+        if not isinstance(payload, dict):
+            raise SagaExecutionError(f"Saga 事务日志存在但内容不是对象，拒绝当作没有日志: {path.name}")
+        return payload
 
     def _resolve_target_chg_id(self, merged: Mapping[str, Any]) -> str:
         """解析主要目标变更单编号。"""
