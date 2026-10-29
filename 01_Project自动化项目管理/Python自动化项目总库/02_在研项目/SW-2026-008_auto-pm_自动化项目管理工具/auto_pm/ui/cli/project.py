@@ -561,6 +561,33 @@ def cmd_edit(
         ctx.exit(1)
 
 
+def _user_proof_or_exit(
+    ctx: click.Context, control_root: str, *, summary: str, purpose: str, subject: str, evidence_ref: str, action: str
+) -> str:
+    """破坏性命令的最后一道门：已启用批准口令时在终端输入口令，否则要用户原话证据；不满足就退出，返回证据。"""
+    from auto_pm.application.core.approval_proof_service import (
+        ApprovalProofError,
+        ApprovalProofService,
+    )
+    from auto_pm.contracts.user_evidence import user_evidence_problem
+    from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
+
+    evidence = evidence_ref.strip()
+    if approval_pin_enforced(control_root):
+        pin = read_approval_pin(control_root, summary=summary)
+        try:
+            _, evidence = ApprovalProofService(control_root).resolve(
+                pin=pin, approver="", evidence_ref=evidence, purpose=purpose, subject=subject
+            )
+        except ApprovalProofError as error:
+            console.print(f"[red]拒绝: {error}[/red]")
+            ctx.exit(1)
+    elif problem := user_evidence_problem(evidence):
+        console.print(f"[red]拒绝: {problem}；{action}只听用户本人（--approval-evidence-ref）[/red]")
+        ctx.exit(1)
+    return evidence
+
+
 @project_group.command(name="delete")
 @click.argument("project_id")
 @click.option("--confirm", is_flag=True, help="确认删除（破坏性操作）")
@@ -572,18 +599,12 @@ def cmd_edit(
 @click.pass_context
 def cmd_delete(ctx: click.Context, project_id: str, confirm: bool, approval_evidence_ref: str) -> None:
     """删除项目（破坏性操作）：只听用户本人，开着任务或有未提交改动时拒绝，目录先搬进回收区可搬回。"""
-    from auto_pm.application.core.approval_proof_service import (
-        ApprovalProofError,
-        ApprovalProofService,
-    )
     from auto_pm.application.core.lease_handover_service import agent_markers
     from auto_pm.application.core.project_delete_guard import (
         ProjectDeleteError,
         delete_blockers,
         recycle_project,
     )
-    from auto_pm.contracts.user_evidence import user_evidence_problem
-    from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
 
     app_ctx: AppContext = ctx.obj
     svc = ProjectService(app_ctx.workspace_root)
@@ -614,19 +635,15 @@ def cmd_delete(ctx: click.Context, project_id: str, confirm: bool, approval_evid
             console.print(f"  - {blocker}")
         ctx.exit(1)
 
-    evidence = approval_evidence_ref.strip()
-    if approval_pin_enforced(control_root):
-        pin = read_approval_pin(control_root, summary=f"删除项目 {project_id}：整个目录会搬进回收区")
-        try:
-            _, evidence = ApprovalProofService(control_root).resolve(
-                pin=pin, approver="", evidence_ref=evidence, purpose="project-delete", subject=project_id
-            )
-        except ApprovalProofError as error:
-            console.print(f"[red]拒绝: {error}[/red]")
-            ctx.exit(1)
-    elif problem := user_evidence_problem(evidence):
-        console.print(f"[red]拒绝: {problem}；删除只听用户本人（--approval-evidence-ref）[/red]")
-        ctx.exit(1)
+    evidence = _user_proof_or_exit(
+        ctx,
+        control_root,
+        summary=f"删除项目 {project_id}：整个目录会搬进回收区",
+        purpose="project-delete",
+        subject=project_id,
+        evidence_ref=approval_evidence_ref,
+        action="删除",
+    )
 
     try:
         recycled = recycle_project(app_ctx.workspace_root, proj.path, project_id)
@@ -872,6 +889,11 @@ _PROJECTS_SUBDIR = WORKSPACE_PROJECTS_SUBDIR  # M3-Iter6: 从 core.paths 读取
     default=None,
     help="指定业务线（默认从项目编号前缀推断）",
 )
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="--force 覆盖时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
+)
 @click.pass_context
 def cmd_import(
     ctx: click.Context,
@@ -879,6 +901,7 @@ def cmd_import(
     move: bool,
     force: bool,
     business_line: str | None,
+    approval_evidence_ref: str,
 ) -> None:
     """导入外部项目目录到工作空间的 02_在研项目/ 下"""
     app_ctx: AppContext = ctx.obj
@@ -896,6 +919,7 @@ def cmd_import(
             ProjectDeleteError,
             overwrite_blockers,
             recycle_project,
+            uncommitted_blockers,
         )
 
         # TD-208：覆盖等于把现有项目整个换掉，与 project delete 同一道门——agent 环境拒绝、项目还开着任务时拒绝
@@ -907,12 +931,23 @@ def cmd_import(
             )
             ctx.exit(1)
         control_root = str(getattr(app_ctx, "control_root", "") or app_ctx.workspace_root)
-        blockers = overwrite_blockers(control_root, dirname)
+        blockers = overwrite_blockers(control_root, dirname) + uncommitted_blockers(
+            app_ctx.workspace_root, dest_path
+        )
         if blockers:
-            console.print(f"[red]拒绝: {dirname} 还开着任务，不能覆盖，先处理下面的事：[/red]")
+            console.print(f"[red]拒绝: {dirname} 现在不能覆盖，先处理下面的事：[/red]")
             for blocker in blockers:
                 console.print(f"  - {blocker}")
             ctx.exit(1)
+        _user_proof_or_exit(
+            ctx,
+            control_root,
+            summary=f"覆盖已有项目目录 {dirname}：原目录会搬进回收区",
+            purpose="project-import-force",
+            subject=dirname,
+            evidence_ref=approval_evidence_ref,
+            action="覆盖",
+        )
 
         try:
             recycled = recycle_project(app_ctx.workspace_root, dest_path, dirname)
