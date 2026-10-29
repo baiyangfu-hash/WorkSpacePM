@@ -561,6 +561,65 @@ def cmd_edit(
         ctx.exit(1)
 
 
+def _user_only_destructive_gate(
+    ctx: click.Context,
+    app_ctx: AppContext,
+    *,
+    project_id: str,
+    project_path: str,
+    summary: str,
+    purpose: str,
+    approval_evidence_ref: str,
+) -> str:
+    """会毁掉项目目录内容的命令共用的三道门：①不是 agent；②没有开着的任务、没有未提交改动；③用户本人的口令或原话。
+
+    通过时返回审计用的批准凭据；任何一道不过就退出命令（目录一个字节都没动）。删除项目和 ``import --force`` 覆盖都走这里。
+    """
+    from auto_pm.application.core.approval_proof_service import (
+        ApprovalProofError,
+        ApprovalProofService,
+    )
+    from auto_pm.application.core.lease_handover_service import agent_markers
+    from auto_pm.application.core.project_delete_guard import delete_blockers
+    from auto_pm.contracts.user_evidence import user_evidence_problem
+    from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
+
+    markers = agent_markers(os.environ)
+    if markers:
+        console.print(
+            f"[red]拒绝: {purpose_label(purpose)}只听用户本人，当前环境带 agent 标记（{', '.join(markers)}）。"
+            "请把完整命令交给用户，在用户自己的终端运行；agent 不得索要口令、代填或绕过。[/red]"
+        )
+        ctx.exit(1)
+
+    control_root = str(getattr(app_ctx, "control_root", "") or app_ctx.workspace_root)
+    blockers = delete_blockers(app_ctx.workspace_root, project_id, project_path, control_root=control_root)
+    if blockers:
+        console.print(f"[red]拒绝: 项目 {project_id} 现在不能{purpose_label(purpose)}，先处理下面的事：[/red]")
+        for blocker in blockers:
+            console.print(f"  - {blocker}")
+        ctx.exit(1)
+
+    evidence = approval_evidence_ref.strip()
+    if approval_pin_enforced(control_root):
+        pin = read_approval_pin(control_root, summary=summary)
+        try:
+            _, evidence = ApprovalProofService(control_root).resolve(
+                pin=pin, approver="", evidence_ref=evidence, purpose=purpose, subject=project_id
+            )
+        except ApprovalProofError as error:
+            console.print(f"[red]拒绝: {error}[/red]")
+            ctx.exit(1)
+    elif problem := user_evidence_problem(evidence):
+        console.print(f"[red]拒绝: {problem}；{purpose_label(purpose)}只听用户本人（--approval-evidence-ref）[/red]")
+        ctx.exit(1)
+    return evidence
+
+
+def purpose_label(purpose: str) -> str:
+    return {"project-delete": "删除项目", "project-import-force": "覆盖已有项目目录"}.get(purpose, purpose)
+
+
 @project_group.command(name="delete")
 @click.argument("project_id")
 @click.option("--confirm", is_flag=True, help="确认删除（破坏性操作）")
@@ -572,18 +631,10 @@ def cmd_edit(
 @click.pass_context
 def cmd_delete(ctx: click.Context, project_id: str, confirm: bool, approval_evidence_ref: str) -> None:
     """删除项目（破坏性操作）：只听用户本人，开着任务或有未提交改动时拒绝，目录先搬进回收区可搬回。"""
-    from auto_pm.application.core.approval_proof_service import (
-        ApprovalProofError,
-        ApprovalProofService,
-    )
-    from auto_pm.application.core.lease_handover_service import agent_markers
     from auto_pm.application.core.project_delete_guard import (
         ProjectDeleteError,
-        delete_blockers,
         recycle_project,
     )
-    from auto_pm.contracts.user_evidence import user_evidence_problem
-    from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
 
     app_ctx: AppContext = ctx.obj
     svc = ProjectService(app_ctx.workspace_root)
@@ -598,35 +649,15 @@ def cmd_delete(ctx: click.Context, project_id: str, confirm: bool, approval_evid
         console.print("[yellow]请使用 --confirm 确认删除[/yellow]")
         ctx.exit(1)
 
-    markers = agent_markers(os.environ)
-    if markers:
-        console.print(
-            f"[red]拒绝: 删除项目只听用户本人，当前环境带 agent 标记（{', '.join(markers)}）。"
-            "请把完整命令交给用户，在用户自己的终端运行；agent 不得索要口令、代填或绕过。[/red]"
-        )
-        ctx.exit(1)
-
-    control_root = str(getattr(app_ctx, "control_root", "") or app_ctx.workspace_root)
-    blockers = delete_blockers(app_ctx.workspace_root, project_id, proj.path, control_root=control_root)
-    if blockers:
-        console.print(f"[red]拒绝: 项目 {project_id} 现在不能删除，先处理下面的事：[/red]")
-        for blocker in blockers:
-            console.print(f"  - {blocker}")
-        ctx.exit(1)
-
-    evidence = approval_evidence_ref.strip()
-    if approval_pin_enforced(control_root):
-        pin = read_approval_pin(control_root, summary=f"删除项目 {project_id}：整个目录会搬进回收区")
-        try:
-            _, evidence = ApprovalProofService(control_root).resolve(
-                pin=pin, approver="", evidence_ref=evidence, purpose="project-delete", subject=project_id
-            )
-        except ApprovalProofError as error:
-            console.print(f"[red]拒绝: {error}[/red]")
-            ctx.exit(1)
-    elif problem := user_evidence_problem(evidence):
-        console.print(f"[red]拒绝: {problem}；删除只听用户本人（--approval-evidence-ref）[/red]")
-        ctx.exit(1)
+    evidence = _user_only_destructive_gate(
+        ctx,
+        app_ctx,
+        project_id=project_id,
+        project_path=proj.path,
+        summary=f"删除项目 {project_id}：整个目录会搬进回收区",
+        purpose="project-delete",
+        approval_evidence_ref=approval_evidence_ref,
+    )
 
     try:
         recycled = recycle_project(app_ctx.workspace_root, proj.path, project_id)
@@ -861,7 +892,12 @@ _PROJECTS_SUBDIR = WORKSPACE_PROJECTS_SUBDIR  # M3-Iter6: 从 core.paths 读取
 @project_group.command(name="import")
 @click.argument("path", type=click.Path(exists=True, file_okay=False))
 @click.option("--move", is_flag=True, help="移动而非复制（默认复制）")
-@click.option("--force", is_flag=True, help="强制覆盖已存在的目标目录")
+@click.option("--force", is_flag=True, help="强制覆盖已存在的目标目录（只听用户本人；开着任务或有未提交改动时拒绝）")
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="覆盖已有目录时，用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
+)
 @click.option(
     "--business-line",
     "-bl",
@@ -875,6 +911,7 @@ def cmd_import(
     path: str,
     move: bool,
     force: bool,
+    approval_evidence_ref: str,
     business_line: str | None,
 ) -> None:
     """导入外部项目目录到工作空间的 02_在研项目/ 下"""
@@ -892,7 +929,18 @@ def cmd_import(
             ProjectDeleteError,
             recycle_project,
         )
+        from auto_pm.application.core.project_scanner import ProjectScanner
 
+        # TD-208：覆盖等于毁掉原目录，和删除项目走同一套门：不是 agent、没有开着的任务和未提交改动、要用户本人的原话或口令
+        _user_only_destructive_gate(
+            ctx,
+            app_ctx,
+            project_id=ProjectScanner.extract_id_from_dirname(dest_path),
+            project_path=dest_path,
+            summary=f"覆盖已有项目目录 {dirname}：原目录会搬进回收区",
+            purpose="project-import-force",
+            approval_evidence_ref=approval_evidence_ref,
+        )
         try:
             recycled = recycle_project(app_ctx.workspace_root, dest_path, dirname)
         except ProjectDeleteError as e:

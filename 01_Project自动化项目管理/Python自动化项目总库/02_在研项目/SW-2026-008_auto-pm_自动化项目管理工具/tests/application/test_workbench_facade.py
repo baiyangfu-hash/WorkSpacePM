@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from auto_pm.application.workbench_facade import WorkbenchFacade
 
 
@@ -545,6 +547,15 @@ def test_edit_project_exception() -> None:
 
     assert result.success is False
     assert "IO Error" in result.message
+
+
+@pytest.fixture(autouse=True)
+def _no_agent_markers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """删除项目只认用户本人的环境（TD-208）；测试要不受跑测试的 agent 环境变量影响。"""
+    from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+
+    for name in AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
 
 
 def _delete_world(tmp_path: Path) -> tuple[Path, MagicMock]:

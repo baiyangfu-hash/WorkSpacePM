@@ -405,6 +405,7 @@ class WorkbenchUseCases:
 
     def delete_project(self, project_id: str) -> CommandOutcome[dict[str, Any] | None]:
         try:
+            from auto_pm.application.core.lease_handover_service import agent_markers
             from auto_pm.application.core.project_delete_guard import (
                 delete_blockers,
                 recycle_project,
@@ -413,6 +414,14 @@ class WorkbenchUseCases:
             project = self.project_service.get_project(project_id)
             if project is None:
                 return CommandOutcome(False, f"项目不存在: {project_id}")
+            # TD-208：界面和 SDK 的删除没有口令输入，所以只认没有 agent 标记的环境（用户自己点界面）；agent 经 SDK 调进来一律拒绝
+            markers = agent_markers(os.environ)
+            if markers:
+                return CommandOutcome(
+                    False,
+                    f"拒绝删除项目 {project_id}：删除项目只听用户本人，当前环境带 agent 标记（{', '.join(markers)}）。"
+                    "请用户在界面里点，或在自己的终端用 project delete。",
+                )
             # 与命令行同一套护栏（TD-193）：开着任务或有未提交改动时拒绝；删除是把目录搬进回收区，不是 rmtree
             blockers = delete_blockers(self.project_service.workspace_root, project_id, project.path)
             if blockers:

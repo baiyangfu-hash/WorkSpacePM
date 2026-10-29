@@ -253,28 +253,86 @@ def test_d12_two_deletes_of_the_same_id_never_overwrite_each_other(tmp_path: Pat
     )
 
 
-def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
-    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _import_setup(world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, commit: bool = True):
     from auto_pm.application.core.paths import WORKSPACE_PROJECTS_SUBDIR
     from auto_pm.application.core.project_service import ProjectService
 
     monkeypatch.setattr(project_command_module(), "ProjectService", ProjectService)
-
     source = tmp_path / "incoming" / "SW-2026-123_X"
     source.mkdir(parents=True)
     (source / "new.txt").write_text("new\n", encoding="utf-8")
     dest = world.root / WORKSPACE_PROJECTS_SUBDIR / source.name
     dest.mkdir(parents=True)
     (dest / "old.txt").write_text("old\n", encoding="utf-8")
+    if commit:
+        git(world.root, "add", "-A")
+        git(world.root, "commit", "-q", "-m", "old project")
+    return source, dest
 
-    result = CliRunner().invoke(
+
+def _import_force(world: World, source: Path, *extra: str) -> Any:
+    return CliRunner().invoke(
         cli,
-        ["-w", str(world.root), "project", "import", str(source), "--force"],
+        ["-w", str(world.root), "project", "import", str(source), "--force", *extra],
         catch_exceptions=False,
     )
+
+
+def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, dest = _import_setup(world, tmp_path, monkeypatch)
+    result = _import_force(world, source, "--approval-evidence-ref", USER_WORDS)
 
     assert result.exit_code == 0, result.output
     assert (dest / "new.txt").is_file() and not (dest / "old.txt").exists()
     (moved,) = list((world.root / ".auto-pm" / "recycle" / source.name).iterdir())
     assert (moved / "old.txt").read_text(encoding="utf-8") == "old\n"
+
+
+@pytest.mark.parametrize("marker", ["AUTO_PM_AGENT", "CLAUDECODE", "CODEX_THREAD_ID"])
+def test_d14_import_force_is_refused_in_an_agent_environment(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, marker: str
+) -> None:
+    source, dest = _import_setup(world, tmp_path, monkeypatch)
+    monkeypatch.setenv(marker, "1")
+    result = _import_force(world, source, "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code != 0 and "只听用户本人" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists()
+
+
+@pytest.mark.parametrize("words", [None, "yes please", "user-confirmation:claude_said_ok"])
+def test_d15_import_force_needs_the_users_own_words(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, words: str | None
+) -> None:
+    source, dest = _import_setup(world, tmp_path, monkeypatch)
+    extra = [] if words is None else ["--approval-evidence-ref", words]
+    result = _import_force(world, source, *extra)
+    assert result.exit_code != 0 and "只听用户本人" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists()
+
+
+def test_d16_import_force_refuses_to_cover_uncommitted_changes(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, dest = _import_setup(world, tmp_path, monkeypatch, commit=False)
+    result = _import_force(world, source, "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code != 0 and "没提交的改动" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists()
+    assert not (world.root / ".auto-pm" / "recycle").exists()
+
+
+def test_d17_the_ui_delete_is_refused_in_an_agent_environment(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.workbench_use_cases import WorkbenchUseCases
+
+    monkeypatch.setenv("CLAUDECODE", "1")
+    uc = WorkbenchUseCases.__new__(WorkbenchUseCases)
+    uc.project_service = SimpleNamespace(
+        get_project=lambda pid: SimpleNamespace(path=str(world.project), name="Demo")
+    )
+    uc.workspace_root = world.root
+    outcome = uc.delete_project(PROJECT)
+    assert outcome.success is False and "只听用户本人" in outcome.message
+    assert world.project.is_dir() and world.recycled() == []
