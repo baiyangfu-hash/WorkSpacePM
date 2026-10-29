@@ -149,6 +149,26 @@ def test_legal_card_passes_and_reports_resolved_paths_and_commands(tmp_path: Pat
     assert report.baseline == baseline and len(report.card_sha256) == 64
 
 
+@pytest.mark.parametrize("char", ["\x00", "\x07", "\x1b", "\x7f", "\r"], ids=["nul", "bel", "esc", "del", "lone-cr"])
+def test_control_characters_in_the_card_text_are_refused_with_the_line_number(tmp_path: Path, char: str) -> None:
+    baseline = _repository(tmp_path, (f"{PROJECT}/auto_pm/a.py",))
+    card = _card(tmp_path, baseline=baseline, rows=[("auto_pm/a.py", "存在")], body=f"lease domain{char}prefix")
+
+    report = _check(tmp_path, card)
+
+    assert not report.passed
+    assert "control_char:第 " in _messages(report) and "行" in _messages(report)
+
+
+def test_tabs_and_crlf_line_endings_are_not_control_character_findings(tmp_path: Path) -> None:
+    baseline = _repository(tmp_path, (f"{PROJECT}/auto_pm/a.py",))
+    card = _card(tmp_path, baseline=baseline, rows=[("auto_pm/a.py", "存在")], body="tab\there\r\nnext line")
+
+    report = _check(tmp_path, card)
+
+    assert "control_char" not in _messages(report)
+
+
 @pytest.mark.parametrize(
     ("invocation", "fragment"),
     [
