@@ -1236,3 +1236,23 @@ def test_a_write_that_lands_after_the_copy_but_before_the_second_inventory_is_re
     assert ContinuityStore(tmp_path).get_work("WORK-001").title == "written after the copy"
     assert copied_inventories == ["continuity.db"]
 
+
+
+def test_an_expired_lease_plus_another_conflict_still_gives_no_next_action(tmp_path: Path) -> None:
+    """RECLAIM_EXPIRED_RUN 只在租约过期是唯一冲突时给；并存别的冲突（如身份未核实）仍留空（预审 #350）。"""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _run(tmp_path)
+    service = ContinuityResumeService(tmp_path, now=lambda: datetime(2026, 9, 9, 12, 16, tzinfo=UTC))
+    real_resolve = service._contexts.resolve
+
+    def resolve_with_identity_conflict(**kwargs: object) -> object:
+        context = real_resolve(**kwargs)  # type: ignore[arg-type]
+        return context.model_copy(update={"conflicts": (*context.conflicts, "RUNTIME_IDENTITY_UNVERIFIED")})
+
+    service._contexts.resolve = resolve_with_identity_conflict  # type: ignore[method-assign,assignment]
+
+    result = service.collect(project_id="SW-2026-008")
+
+    assert set(result.conflicts) == {"LEASE_EXPIRED", "RUNTIME_IDENTITY_UNVERIFIED"}
+    assert result.next_legal_action == ""

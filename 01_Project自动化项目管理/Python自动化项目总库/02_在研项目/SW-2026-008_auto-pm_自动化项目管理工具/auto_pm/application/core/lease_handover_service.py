@@ -281,6 +281,14 @@ class LeaseHandoverService:
             raise LeaseHandoverError(f"Run 已是终态 {run.state.value}，没有可回收的租约")
         self._refuse_parked(run_id, "搁着不是掉线，不用回收")
         if lease.owner_id == claimant_id:
+            expired_at = datetime.fromisoformat(lease.expires_at)
+            if expired_at.tzinfo is not None and not lease_is_live(expired_at, self._now()):
+                # 续租已被“lease 已过期”拒掉，只告诉人“请续租”是死胡同：说明真正的出口。
+                raise LeaseHandoverError(
+                    "你已是当前持有者且租约已过期，续租会被拒；自己回收自己也不行。出路：换一个申请人名字回收"
+                    f"（continuity run reclaim --claimant <新名字>）；原持有者进程判不出时，由用户本人先运行 "
+                    f"`main.py pm sign-risk --run-id {run_id} --claimant <新名字>` 签字"
+                )
             raise LeaseHandoverError("你已是当前持有者；请续租（continuity lease renew），不要回收")
         if not reason.strip():
             raise LeaseHandoverError("回收原因不能为空")
