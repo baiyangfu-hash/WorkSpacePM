@@ -86,15 +86,17 @@ def git(repo: Path, *args: str) -> str:
         ["git", "-c", "core.quotepath=false", *args],
         cwd=str(repo),
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
         stdin=subprocess.DEVNULL,
     )
     if result.returncode != 0:
-        raise GitError(f"git {' '.join(args)}: {result.stderr.strip()}")
-    return result.stdout
+        raise GitError(f"git {' '.join(args)}: {result.stderr.decode('utf-8', errors='replace').strip()}")
+    try:
+        return result.stdout.decode("utf-8")
+    except UnicodeDecodeError as error:
+        # 不静默吞坏字节：改动里有非 UTF-8 内容（如 GBK 文件）时，先明说，再用替身字符继续检查
+        print(f"警告：git {args[0]} 输出含非法 UTF-8 字节（第 {error.start} 字节），已用替身字符继续；请另跑 encoding 检查", file=sys.stderr)
+        return result.stdout.decode("utf-8", errors="replace")
 
 
 def changed_files(repo: Path, base: str, head: str) -> list[str]:
@@ -326,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     print(report)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a", encoding="utf-8", errors="replace") as handle:
+        with open(summary, "a", encoding="utf-8") as handle:
             handle.write(report)
     return 0 if result.passed else 1
 
