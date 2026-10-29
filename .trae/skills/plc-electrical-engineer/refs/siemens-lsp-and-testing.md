@@ -129,7 +129,7 @@ END_TEST_CASE
 2. **文档与注释达标检测**：运行 `auto-pm doc check` 验证注释率与核心文档非空。
 3. **SCL 源码查阅**：先通过 `view_file` 阅读目标 `.scl` 声明，核对极性与类型。
 4. **.scltest 用例审查与测试**：运行 `auto-pm plc test <PID>` 审查 `Test/` 目录下 `.scltest` 文件的测试覆盖率与重置段。
-5. **台账对账**：若涉及变更，运行 `auto-pm ledger reconcile <PID>` 确保闭环。��（Scan Cycles），在控制台中直接打印逐条 `TEST_CASE` 的 PASS/FAIL 日志。
+5. **台账对账**：若涉及变更，运行 `auto-pm ledger reconcile <PID>` 确保闭环。
 
 ---
 
