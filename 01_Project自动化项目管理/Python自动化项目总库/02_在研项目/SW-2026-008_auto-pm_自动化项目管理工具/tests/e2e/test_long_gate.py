@@ -458,6 +458,79 @@ def test_a_due_renewal_runs_before_the_floor_is_judged(tmp_path: Path) -> None:
     assert not hard.is_set(), keeper.reason
 
 
+class _EarlyWakeClock:
+    """A fake wall clock whose `stop.wait(timeout)` returns a little EARLY, as a coarse Windows timer does."""
+
+    def __init__(self, mod: ModuleType, early_s: float, ticks: int) -> None:
+        import datetime as dt
+
+        self._dt = dt
+        self.now = dt.datetime(2026, 10, 28, 12, 0, 0, tzinfo=dt.UTC)
+        self.early_s, self.ticks = early_s, ticks
+        self.mod = mod
+
+    def utc_now(self) -> Any:
+        return self.now
+
+    def is_set(self) -> bool:
+        return False
+
+    def wait(self, timeout: float) -> bool:
+        if self.ticks <= 0:
+            return True
+        self.ticks -= 1
+        self.now += self._dt.timedelta(seconds=timeout - self.early_s)
+        return False
+
+
+def _run_keeper_on_fake_clock(
+    mod: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, early_s: float, interval_s: int, lease_left_s: float
+) -> tuple[Any, list[int]]:
+    import datetime as dt
+    import threading
+
+    clock = _EarlyWakeClock(mod, early_s=early_s, ticks=1)
+    monkeypatch.setattr(mod, "utc_now", clock.utc_now)
+    renewals: list[int] = []
+
+    class FakeLease:
+        cfg = {"renew_interval_s": interval_s}
+
+        def __init__(self) -> None:
+            self.expires_at = clock.now + dt.timedelta(seconds=lease_left_s)
+
+        def remaining_s(self) -> float:
+            return float((self.expires_at - clock.now).total_seconds())
+
+        def renew(self) -> None:
+            renewals.append(1)
+            self.expires_at = clock.now + dt.timedelta(seconds=3600)
+
+    hard, stop = threading.Event(), clock
+    keeper = mod.LeaseKeeper(FakeLease(), hard, cast(Any, stop), mod.Log(tmp_path / "log"))
+    keeper.run()  # synchronous: one tick, then the fake stop says stop
+    return keeper, renewals
+
+
+def test_a_renewal_due_on_the_very_first_tick_is_not_missed_when_the_timer_wakes_early(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The wait(1) tick returned 10 ms early (Windows timer granularity), so by the wall clock the renewal is "not yet due".
+    # The keeper must still renew first, instead of judging the 600 s floor on a lease that is 590 s from expiry.
+    mod = _module()
+    keeper, renewals = _run_keeper_on_fake_clock(mod, monkeypatch, tmp_path, early_s=0.01, interval_s=1, lease_left_s=590)
+    assert renewals == [1]
+    assert keeper.reason is None
+
+
+def test_the_floor_is_not_loosened_when_no_renewal_is_due(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Renewal is 100 s away, so the lease really is below the floor and the keeper must still stop the gate.
+    mod = _module()
+    keeper, renewals = _run_keeper_on_fake_clock(mod, monkeypatch, tmp_path, early_s=0.01, interval_s=100, lease_left_s=590)
+    assert renewals == []
+    assert keeper.reason is not None and "(< 600)" in keeper.reason
+
+
 def test_concurrent_status_writes_do_not_crash(tmp_path: Path) -> None:
     import threading
 
