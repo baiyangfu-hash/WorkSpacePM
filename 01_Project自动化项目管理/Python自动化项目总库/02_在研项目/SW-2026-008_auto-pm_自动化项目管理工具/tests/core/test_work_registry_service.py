@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
 from auto_pm.contracts.continuity import (
     EXECUTION_ACTIVE_WORK_STATES,
     POST_ACCEPTANCE_WORK_STATES,
