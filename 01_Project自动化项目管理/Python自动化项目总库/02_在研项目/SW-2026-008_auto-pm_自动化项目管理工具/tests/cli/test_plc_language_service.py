@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.application.core.template_service import TemplateService
 from auto_pm.domain.plc.language_service import LanguageServiceBinary, LanguageServiceResult
+from auto_pm.ui.cli.__main__ import cli
 
 BINARY = LanguageServiceBinary(path="x", version="2.17.2", sha256="0" * 64)
 TEMPLATES = Path(__file__).resolve().parents[2] / "templates"

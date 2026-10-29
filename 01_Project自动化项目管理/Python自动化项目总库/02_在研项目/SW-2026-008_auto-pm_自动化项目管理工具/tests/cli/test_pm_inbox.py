@@ -13,12 +13,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner, Result
 
 from auto_pm.contracts.pm_facade import PlanningDraft, PmIntent
+from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.ui.cli.__main__ import cli
 from tests.plan_checklist_support import checklist_args
 
 pytestmark = pytest.mark.usefixtures("identity_guard_off")

@@ -252,7 +252,7 @@ def test_an_unverified_runtime_identity_also_refuses_the_write(monkeypatch: pyte
 
 
 def test_an_unresolvable_identity_refuses_the_write(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from auto_pm.core.workspace_context_service import WorkspaceContextError
+    from auto_pm.application.core.workspace_context_service import WorkspaceContextError
 
     code, output = _invoke_guard(monkeypatch, tmp_path, WorkspaceContextError("Workspace Registry 不存在"))
 
