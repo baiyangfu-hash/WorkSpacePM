@@ -408,3 +408,12 @@ def test_checker_paths_cover_every_loaded_module(project: str) -> None:
 def test_vartable_parser_change_is_a_checker_change() -> None:
     assert plc_ci.is_checker(f"{plc_ci.SW008}/auto_pm/domain/vartable/parsers/scl_parser.py")
     assert not plc_ci.is_checker(f"{plc_ci.SW008}/auto_pm/ui/cli/project.py")
+
+
+def test_scl_source_with_invalid_utf8_is_reported_not_swallowed(pr, capsys) -> None:
+    head, run = pr
+    bad = head / D009 / SAMPLE_DIR / "FB_CiBad.scl"
+    bad.write_bytes(SAMPLE_SCL.replace("FB_CiSample", "FB_CiBad").encode("utf-8") + "// 中文\n".encode("gbk"))
+    code, out = run(capsys)
+    assert code == 1
+    assert f"SCL 编码 · {SAMPLE_DIR}/FB_CiBad.scl：不是合法 UTF-8" in out
