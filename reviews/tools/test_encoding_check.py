@@ -80,7 +80,7 @@ def test_double_encoded_chinese_fails(repo, codec):
 
 
 def test_replacement_character_and_c1_control_and_nul_fail(repo):
-    head = repo["change"]({"a.md": "bad�name\n".encode(), "b.md": "x\u0085y\n".encode("utf-8"), "c.txt": b"a\x00b"})
+    head = repo["change"]({"a.md": f"bad{chr(0xFFFD)}name\n".encode(), "b.md": "x\u0085y\n".encode("utf-8"), "c.txt": b"a\x00b"})
     findings, _ = repo["audit"](head)
     assert sorted(f.path for f in findings) == ["a.md", "b.md", "c.txt"]
 

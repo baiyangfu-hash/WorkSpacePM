@@ -29,6 +29,7 @@ TEXT_SUFFIXES = (
     ".md", ".py", ".json", ".yml", ".yaml", ".txt", ".scl", ".st", ".toml", ".html", ".qml", ".csv",
     ".ps1", ".bat", ".mdc", ".jinja", ".sh", ".cfg", ".ini", ".xml", ".gitignore", ".gitattributes",
 )  # fmt: skip
+REPLACEMENT = chr(0xFFFD)  # written as chr() so that this file does not contain the character it looks for
 ALLOWLIST = Path(__file__).resolve().parent / "encoding_allowlist.txt"
 
 # cp1252 renders bytes 0x80..0x9f as these characters; Latin-1 renders them as C1 controls (caught separately).
@@ -89,7 +90,7 @@ def inspect(path: str, data: bytes) -> Finding | None:
     except UnicodeDecodeError as error:
         return Finding(path, line_of(data, error.start), f"不是合法 UTF-8（第 {error.start} 字节起，原始字节 {data[error.start:error.start + 4].hex()}）")
     for number, line in enumerate(text.split("\n"), 1):
-        if "�" in line:
+        if REPLACEMENT in line:
             return Finding(path, number, "含 U+FFFD 替换字符（曾经被有损解码过）")
         if _C1.search(line):
             return Finding(path, number, "含 C1 控制字符 U+0080～U+009F（Latin-1 误读的特征）")
