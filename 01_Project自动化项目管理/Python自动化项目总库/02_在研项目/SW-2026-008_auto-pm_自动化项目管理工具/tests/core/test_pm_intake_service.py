@@ -680,6 +680,13 @@ def test_td072_a_cited_ledger_row_must_exist_in_the_project_ledger_folder(desk: 
             desk.propose(ticket=desk.ticket(evidence=(f"ledger:{missing}",)), title=f"引用 {missing}")
 
 
+def test_td072_a_ledger_row_is_found_in_the_legacy_monitoring_folder_of_a_template_plc_project(desk: Desk) -> None:
+    folder = desk.root / PLC_PROJECT / "11_监控" / "02_整改项"
+    folder.mkdir(parents=True)
+    (folder / "活动技术债台账.md").write_text("| TD-SW901-011 | 旧布局项目的债 |\n", encoding="utf-8")
+    assert desk.propose(project=PLC_PROJECT, kind=IntakeKind.BUG, ticket=desk.ticket(evidence=("ledger:TD-SW901-011",)))
+
+
 def test_td072_a_project_without_a_ledger_folder_refuses_ledger_evidence(desk: Desk) -> None:
     with pytest.raises(PmIntakeError, match="取证台账行不存在"):
         desk.propose(ticket=desk.ticket(evidence=("ledger:TD-SW901-001",)))

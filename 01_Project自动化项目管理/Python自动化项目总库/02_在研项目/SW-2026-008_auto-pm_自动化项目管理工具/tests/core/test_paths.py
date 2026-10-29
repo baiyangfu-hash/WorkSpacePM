@@ -26,6 +26,7 @@ from auto_pm.application.core.paths import (
     WORKSPACE_PROJECTS_SUBDIR,
     get_change_records_paths,
     get_change_requests_paths,
+    get_monitoring_paths,
     get_prd_dir,
     get_projects_subdir,
 )
@@ -106,6 +107,14 @@ class TestPathHelpers:
         assert "01_变更单" in paths[0]
         assert "11_监控" in paths[1]
         assert paths[1].endswith(os.path.join("11_监控", "01_变更管理", "01_变更单"))
+
+    def test_get_monitoring_paths(self, tmp_path: Path) -> None:
+        """监控目录下子路径的候选：标准 04_监控 在前，旧布局 11_监控 在后"""
+        paths = get_monitoring_paths(str(tmp_path), "02_整改项")
+        assert paths == [
+            os.path.join(str(tmp_path), "04_监控", "02_整改项"),
+            os.path.join(str(tmp_path), "11_监控", "02_整改项"),
+        ]
 
     def test_get_change_records_paths(self, tmp_path: Path) -> None:
         """获取变更记录存放目录路径（5大过程组统一路径，单元素）"""

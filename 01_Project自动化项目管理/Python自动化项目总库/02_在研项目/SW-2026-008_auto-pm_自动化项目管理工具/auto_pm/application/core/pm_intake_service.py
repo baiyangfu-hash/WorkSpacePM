@@ -10,6 +10,7 @@ from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import SpecViolationError, validate_domain, validate_impact_scope
 from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
 
+from auto_pm.application.core.paths import get_monitoring_paths
 from auto_pm.contracts.intake import (
     DEFAULT_IMPACT_SCOPE,
     OPEN_INTAKE_STATUSES,
@@ -314,7 +315,7 @@ class PmIntakeService:
         raise PmIntakeError(f"取证台账行不存在: {ledger_id}")
 
     def _ledger_directories(self, project_id: str, ledger_id: str) -> list[Path]:
-        """The ``04_监控/02_整改项`` folders that can hold the row: the subject project's, the control project's and the owner's.
+        """The ``04_监控/02_整改项`` (or legacy ``11_监控/02_整改项``) folders that can hold the row: the subject project's, the control project's and the owner's.
 
         The owner is the registered project a ``TD-SW008-066`` style id names (``SW008`` = ``SW-<year>-008``).
         """
@@ -326,9 +327,10 @@ class PmIntakeService:
             candidates = [project_id, context.control_project_id, *self._ledger_owner_projects(service, ledger_id)]
             for item in dict.fromkeys(identifier for identifier in candidates if identifier):
                 subject = service.resolve(project_id=item, start_path=self._root).subject
-                directory = (self._root / subject.path / "04_监控" / "02_整改项").resolve()
-                if directory.is_dir() and directory not in directories:
-                    directories.append(directory)
+                for candidate in get_monitoring_paths(str(self._root / subject.path), "02_整改项"):
+                    directory = Path(candidate).resolve()
+                    if directory.is_dir() and directory not in directories:
+                        directories.append(directory)
         except WorkspaceContextError as error:
             raise PmIntakeError(f"取证台账所在项目无法确定: {error}") from error
         return directories

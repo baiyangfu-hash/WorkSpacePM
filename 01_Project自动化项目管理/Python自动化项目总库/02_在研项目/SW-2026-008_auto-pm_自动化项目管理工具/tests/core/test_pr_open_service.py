@@ -143,6 +143,28 @@ def test_plan_lists_the_tds_named_by_the_change_order_but_proposes_no_payoff_for
     assert "TD-SW008-321 已偿还" not in result.body
 
 
+def test_plan_reads_the_change_order_of_a_project_that_only_has_the_legacy_monitoring_folder(lab: Lab) -> None:
+    work(lab)
+    folder = lab.root / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    folder.mkdir(parents=True)
+    (folder / f"{CHG}.md").write_text("变更单\n关联 TD-SW008-321\n", encoding="utf-8")
+
+    result = plan(lab)
+
+    assert related_td_section(result.body) == "TD-SW008-321"
+    assert not any("找不到" in note for note in result.notes)
+
+
+def test_plan_finds_the_order_in_the_legacy_folder_when_the_standard_folder_exists_but_lacks_it(lab: Lab) -> None:
+    work(lab)
+    (lab.root / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT").mkdir(parents=True)
+    folder = lab.root / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    folder.mkdir(parents=True)
+    (folder / f"{CHG}.md").write_text("TD-SW008-322\n", encoding="utf-8")
+
+    assert related_td_section(plan(lab).body) == "TD-SW008-322"
+
+
 def test_plan_with_the_change_order_folder_but_not_that_file_plans_and_says_so(lab: Lab) -> None:
     work(lab)
     folder = lab.root / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"

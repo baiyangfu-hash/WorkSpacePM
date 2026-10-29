@@ -34,6 +34,7 @@ from auto_pm.application.core.agent_worktree_service import (
     caller_agent,
 )
 from auto_pm.application.core.implementation_card_precheck import precheck_markdown_card
+from auto_pm.application.core.paths import get_change_requests_paths
 from auto_pm.application.core.pr_body_builder import (
     TD_ID,
     CardFields,
@@ -390,20 +391,27 @@ class PrOpenService:
         The orders live in the control root and may not be tracked, so read the disk.  A missing or unreadable order
         never stops the PR: it only means fewer TDs are listed, and the note says which order and why.
         """
-        change_dir = next(
+        change_dirs = next(
             (
-                self._root / parent / "04_监控" / "01_变更管理" / "01_变更单"
+                existing
                 for parent in Path(task_card).parents
-                if (self._root / parent / "04_监控" / "01_变更管理" / "01_变更单").is_dir()
+                if (
+                    existing := [
+                        Path(candidate)
+                        for candidate in get_change_requests_paths(str(self._root / parent))
+                        if Path(candidate).is_dir()
+                    ]
+                )
             ),
             None,
         )
-        if change_dir is None:
+        if change_dirs is None:
             return (), []
         found: list[str] = []
         notes: list[str] = []
         for number in chg_numbers:
-            path = change_dir / f"CHG-{number.split('-')[1]}" / f"{number}.md"
+            relative = Path(f"CHG-{number.split('-')[1]}") / f"{number}.md"
+            path = next((found_path for d in change_dirs if (found_path := d / relative).is_file()), change_dirs[0] / relative)
             try:
                 raw = path.read_bytes()
             except FileNotFoundError:

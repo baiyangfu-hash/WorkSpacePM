@@ -177,6 +177,24 @@ def get_change_requests_paths(project_path: str) -> list[str]:
     ]
 
 
+def get_monitoring_paths(project_path: str, *tail: str) -> list[str]:
+    """项目监控目录下某个子路径的候选（标准 04_监控 在前，旧布局 11_监控 在后）
+
+    只认 04_监控 写死的读取点会读不到只有 11_监控 的项目（TD-SW008-191 同类）；调用方遍历候选取存在的。
+
+    Args:
+        project_path: 项目根目录
+        *tail: 监控目录之下的子路径，如 ``("02_整改项",)``
+
+    Returns:
+        绝对路径列表（标准布局在前）
+    """
+    return [
+        os.path.join(project_path, monitoring, *tail)
+        for monitoring in (PG_MONITORING_DIR, LEGACY_MONITORING_DIR)
+    ]
+
+
 def get_change_records_paths(project_path: str) -> list[str]:
     """获取变更记录存放目录路径（5大过程组统一路径，CHG-SCPT-2026-146）
 
