@@ -10,17 +10,18 @@ import os
 from pathlib import Path
 
 import pytest
-from auto_pm.cli import workflow as workflow_module
-from auto_pm.cli.__main__ import cli
-from auto_pm.cli.pm import pm_group
-from auto_pm.cli.workflow import (
+from click.testing import CliRunner
+
+from auto_pm.ui.cli import workflow as workflow_module
+from auto_pm.ui.cli.__main__ import cli
+from auto_pm.ui.cli.pm import pm_group
+from auto_pm.ui.cli.workflow import (
     list_workflows,
     run_workflow,
     workflow_group,
     workflow_history,
     workflow_status,
 )
-from click.testing import CliRunner
 
 pytestmark = pytest.mark.usefixtures("identity_guard_off")
 

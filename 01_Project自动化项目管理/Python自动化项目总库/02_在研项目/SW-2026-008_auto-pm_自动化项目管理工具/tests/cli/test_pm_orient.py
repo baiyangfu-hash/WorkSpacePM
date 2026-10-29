@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.pm_facade_service import PmFacadeService
 from click.testing import CliRunner, Result
 
+from auto_pm.application.core.pm_facade_service import PmFacadeService
 from auto_pm.contracts.continuity_query import ContinuityQuery
 from auto_pm.contracts.continuity_resume import ContinuityResume
+from auto_pm.ui.cli.__main__ import cli
 
 PROJECT = "SW-2026-008"
 UNSUPPORTED_ACTIONS = ("PARK", "RESUME_PARKED", "PREEMPT")

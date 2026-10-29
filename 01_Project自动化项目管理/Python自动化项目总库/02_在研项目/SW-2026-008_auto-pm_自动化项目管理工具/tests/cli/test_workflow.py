@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from auto_pm.cli.workflow import workflow_group
 from click.testing import CliRunner
+
+from auto_pm.ui.cli.workflow import workflow_group
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch

@@ -9,12 +9,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.application.core import project_delete_guard as guard
 from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
 from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+from auto_pm.ui.cli.__main__ import cli
 from tests.core.test_mission_park_store import PROJECT, Scene
 from tests.git_support import run_git
 
@@ -256,8 +256,8 @@ def test_d12_two_deletes_of_the_same_id_never_overwrite_each_other(tmp_path: Pat
 def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
     world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from auto_pm.core.paths import WORKSPACE_PROJECTS_SUBDIR
-    from auto_pm.core.project_service import ProjectService
+    from auto_pm.application.core.paths import WORKSPACE_PROJECTS_SUBDIR
+    from auto_pm.application.core.project_service import ProjectService
 
     monkeypatch.setattr(project_command_module(), "ProjectService", ProjectService)
 

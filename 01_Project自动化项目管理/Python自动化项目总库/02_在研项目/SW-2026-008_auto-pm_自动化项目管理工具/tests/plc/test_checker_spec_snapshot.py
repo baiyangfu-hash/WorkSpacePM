@@ -14,8 +14,8 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-from auto_pm.plc.checker import PlcChecker
-from auto_pm.plc.models import CheckItem
+from auto_pm.domain.plc.checker import PlcChecker
+from auto_pm.domain.plc.models import CheckItem
 
 # ── 辅助常量 ──────────────────────────────────────────
 

@@ -8,14 +8,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.work_registry_service import WorkRegistryService
 from click.testing import CliRunner
 
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_do
 from tests.plan_checklist_support import checklist_args
 
