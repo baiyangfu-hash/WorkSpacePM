@@ -11,10 +11,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.doc_inject_service import DocInjectService
+from auto_pm.application.core.doc_refresh_service import DocRefreshService
 from auto_pm.application.core.doc_services import DocCheckService, DocSyncService
-from auto_pm.core.doc_inject_service import DocInjectService
-from auto_pm.core.doc_refresh_service import DocRefreshService
-from auto_pm.core.project_service import ProjectService
+from auto_pm.application.core.project_service import ProjectService
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()

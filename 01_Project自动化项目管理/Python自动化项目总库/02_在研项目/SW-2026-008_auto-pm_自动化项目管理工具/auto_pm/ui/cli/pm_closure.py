@@ -18,12 +18,15 @@ from typing import Any
 import click
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.pm_closure_service import PmClosureError
+from auto_pm.application.core.pm_cockpit_service import PmCockpitError, PmCockpitService
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
+from auto_pm.application.core.worktree_policy_service import (
+    WorktreePolicyError,
+    WorktreePolicyService,
+)
 from auto_pm.contracts.mission import Mission
 from auto_pm.contracts.pm_cockpit import PmCockpitCompletionState
-from auto_pm.core.pm_closure_service import PmClosureError
-from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.infrastructure import lease_wallet
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.continuity import _secret_from_environment

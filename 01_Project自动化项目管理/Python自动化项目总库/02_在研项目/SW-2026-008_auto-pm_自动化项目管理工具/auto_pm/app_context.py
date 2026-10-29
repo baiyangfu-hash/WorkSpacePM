@@ -12,8 +12,8 @@ from __future__ import annotations
 import os
 
 from auto_pm import __app_name__
-from auto_pm.config.app_config import AutoPmConfig
-from auto_pm.logging.logging import PACKAGE_LOGGER_NAME, setup_logger
+from auto_pm.infrastructure.config.app_config import AutoPmConfig
+from auto_pm.infrastructure.logging.logging import PACKAGE_LOGGER_NAME, setup_logger
 
 
 class AppContext:
@@ -34,7 +34,7 @@ class AppContext:
         if not workspace_root:
             workspace_root = os.environ.get("AUTO_PM_WORKSPACE", "")
         if not workspace_root:
-            from auto_pm.core.paths import get_config_file_path
+            from auto_pm.application.core.paths import get_config_file_path
             cfg_file = get_config_file_path()
             if os.path.isfile(cfg_file):
                 try:
