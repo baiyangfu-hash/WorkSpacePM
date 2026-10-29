@@ -131,7 +131,7 @@ def test_a_blank_command_does_not_count() -> None:
 def test_safety_circuit_accepts_only_yes_or_no() -> None:
     assert _problems(_filled(safety_circuit="是")) == ()
     with pytest.raises(ValueError):
-        PlanChecklist(safety_circuit="不确定")  # type: ignore[arg-type]
+        PlanChecklist(safety_circuit="不确定")
     assert [problem[0] for problem in _problems(_filled(safety_circuit=""))] == ["④"]
 
 

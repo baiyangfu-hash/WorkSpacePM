@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
-from typing import cast
 
 from auto_pm.application.core.pm_cockpit_service import PmCockpitService
 from auto_pm.contracts.mission import OPEN_MISSION_SOFT_LIMIT, MissionState
@@ -22,7 +21,7 @@ MAPPING = WorkspaceProjectMapping(
 
 def _board(scene: Switch) -> PmCockpitMissionBoard:
     service = PmCockpitService(scene.root, store=scene.store, now=scene.clock)
-    return cast(PmCockpitMissionBoard, service._board(MAPPING, scene.store.list_missions_by_board(PROJECT)))
+    return service._board(MAPPING, scene.store.list_missions_by_board(PROJECT))
 
 
 def test_a_parked_card_shows_why_it_was_put_down_and_where_it_stopped(sw: Switch) -> None:  # noqa: F811

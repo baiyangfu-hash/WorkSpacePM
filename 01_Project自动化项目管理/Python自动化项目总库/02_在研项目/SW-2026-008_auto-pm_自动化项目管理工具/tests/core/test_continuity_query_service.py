@@ -91,7 +91,7 @@ def _snapshot(root: Path) -> dict[str, str]:
 
 
 def _query(root: Path, requested_action: str = "") -> ContinuityResume:
-    return cast(ContinuityResume, ContinuityQueryService(root).query(project_id=PROJECT, requested_action=requested_action))
+    return ContinuityQueryService(root).query(project_id=PROJECT, requested_action=requested_action)
 
 
 def test_the_query_block_declares_versions_parking_supported_and_preemption_unsupported(tmp_path: Path) -> None:
