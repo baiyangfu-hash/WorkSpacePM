@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.plc.generator import (
+from auto_pm.domain.plc.generator import (
     ProcessMatrix,
     ProcessMatrixParser,
     ProcessMatrixStep,
