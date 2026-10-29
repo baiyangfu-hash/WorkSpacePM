@@ -83,7 +83,7 @@ def _control_root(root: Path) -> str:
 
 
 def test_precheck_command_passes_a_valid_card_and_is_read_only(tmp_path: Path) -> None:
-    from auto_pm.cli.__main__ import cli
+    from auto_pm.ui.cli.__main__ import cli
 
     baseline = _control_root(tmp_path)
     card = _markdown_card(tmp_path, baseline, "`main.py continuity work create --work-id W`")
@@ -100,7 +100,7 @@ def test_precheck_command_passes_a_valid_card_and_is_read_only(tmp_path: Path) -
 
 
 def test_precheck_command_exits_nonzero_with_findings(tmp_path: Path) -> None:
-    from auto_pm.cli.__main__ import cli
+    from auto_pm.ui.cli.__main__ import cli
 
     baseline = _control_root(tmp_path)
     card = _markdown_card(tmp_path, baseline, "`main.py doc check --strict`")

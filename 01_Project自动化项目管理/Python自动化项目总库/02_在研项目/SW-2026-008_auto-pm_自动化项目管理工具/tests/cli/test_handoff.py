@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.ai_handoff_service import AiHandoffService
 from click.testing import CliRunner
+
+from auto_pm.application.core.ai_handoff_service import AiHandoffService
+from auto_pm.ui.cli.__main__ import cli
 
 
 def test_handoff_cli_create_list_show(tmp_path: Path) -> None:

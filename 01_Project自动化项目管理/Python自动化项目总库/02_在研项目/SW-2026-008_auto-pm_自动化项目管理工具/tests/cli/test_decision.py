@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.domain.change.decision_service import DecisionService, DecisionValidationError
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_do
 
 pytestmark = pytest.mark.usefixtures("identity_guard_off")

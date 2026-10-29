@@ -6,9 +6,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from auto_pm.cli import gui as gui_module
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
+
+from auto_pm.ui.cli import gui as gui_module
+from auto_pm.ui.cli.__main__ import cli
 
 
 def test_gui_defaults_to_the_read_only_boss_cockpit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
