@@ -322,3 +322,77 @@ def test_offline_audit_says_the_refs_may_be_stale(world):
     assert status(checks, "local_refs") == "UNVERIFIED"
     _, online = world["audit"](51)
     assert status(online, "local_refs") is None
+
+
+def test_invalid_utf8_in_a_changed_text_file_fails(world):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "enc", world["base"])
+    (work / "docs").mkdir(exist_ok=True)
+    (work / "docs/gbk.md").write_bytes("中文说明\n".encode("gbk"))
+    head = commit(work, "gbk")
+    run(work, "push", "-q", "-f", "origin", f"{head}:refs/pull/30/head")
+    run(work, "checkout", "-q", "main")
+    _, checks = world["audit"](30)
+    assert status(checks, "text_encoding") == "FAIL"
+    assert "docs/gbk.md" in next(c.detail for c in checks if c.id == "text_encoding")
+
+
+def test_clean_text_and_non_text_files_pass_the_encoding_check(world):
+    world["open_pr"](31, {"docs/ok.md": "中文 ä ö ü 日本語\n"})
+    _, checks = world["audit"](31)
+    assert status(checks, "text_encoding") == "PASS"
+
+
+def test_newly_covered_suffixes_are_checked(world):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "enc2", world["base"])
+    (work / "a.scltest").write_bytes(b"ok \xff\xfe bad\n")
+    head = commit(work, "scltest")
+    run(work, "push", "-q", "-f", "origin", f"{head}:refs/pull/32/head")
+    run(work, "checkout", "-q", "main")
+    _, checks = world["audit"](32)
+    assert status(checks, "text_encoding") == "FAIL"
+
+
+def test_decode_reports_invalid_bytes_instead_of_swallowing_them(capsys):
+    assert audit_pr.decode("中文".encode("utf-8"), "x") == "中文"
+    assert capsys.readouterr().err == ""
+    assert chr(0xFFFD) in audit_pr.decode("中文".encode("gbk"), "git diff 输出")
+    assert "非法 UTF-8" in capsys.readouterr().err
+
+
+def test_git_output_with_invalid_bytes_warns(world, capsys):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "gbk", world["base"])
+    (work / "docs").mkdir(exist_ok=True)
+    (work / "docs/gbk.md").write_bytes("中文说明\n".encode("gbk"))
+    commit(work, "gbk")
+    out = audit_pr.git("diff", "--no-color", f"{world['base']}..HEAD", cwd=str(work))
+    assert "docs/gbk.md" in out
+    assert "非法 UTF-8" in capsys.readouterr().err
+
+
+def test_patch_with_invalid_bytes_is_applied_byte_for_byte(world, tmp_path):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "gbkpatch", world["base"])
+    (work / "gbk.txt").write_bytes("中文\n".encode("gbk"))
+    commit(work, "gbk")
+    patch = tmp_path / "p.patch"
+    patch.write_bytes(audit_pr.git_bytes("diff", "--binary", f"{world['base']}..HEAD", cwd=str(work)))
+    tree = audit_pr.patch_tree(str(patch), world["base"], cwd=str(work))
+    assert audit_pr.git_bytes("show", f"{tree}:gbk.txt", cwd=str(work)) == "中文\n".encode("gbk")
+
+
+def test_github_reply_that_is_not_utf8_counts_as_unavailable(monkeypatch):
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"a": "\xff"}'
+
+    monkeypatch.setattr(audit_pr.urllib.request, "urlopen", lambda *a, **k: Reply())
+    assert audit_pr.github_json("x/y") is None

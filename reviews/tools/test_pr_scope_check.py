@@ -459,3 +459,18 @@ def test_s16_a_blob_on_the_revoked_allowlist_is_skipped(repo: Path, monkeypatch)
     assert "疑似密钥" in errors(gate.check(repo, base, head, "可改范围\n- old/gittoken.txt\n"))
     monkeypatch.setattr(sp, "ALLOWED_SECRET_BLOBS", frozenset({blob}))
     assert "疑似密钥" not in errors(gate.check(repo, base, head, "可改范围\n- old/gittoken.txt\n"))
+
+
+def test_s17_non_utf8_bytes_in_a_diff_are_reported_not_swallowed(repo: Path, capsys) -> None:
+    (repo / "docs").mkdir(exist_ok=True)
+    (repo / "docs/gbk.md").write_bytes("中文说明\n".encode("gbk"))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "gbk")
+    out = gate.git(repo, "diff", "main...HEAD")
+    assert "docs/gbk.md" in out  # 仍能继续检查
+    assert "非法 UTF-8" in capsys.readouterr().err  # 但必须明说
+
+
+def test_s18_clean_utf8_output_prints_no_warning(repo: Path, capsys) -> None:
+    gate.git(repo, "log", "-1", "--format=%s")
+    assert capsys.readouterr().err == ""

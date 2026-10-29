@@ -432,7 +432,7 @@ def test_candidate_intent_replay_requires_original_clean_head(
         capture_output=True,
     )
     dispatch = ExecutionDispatchService(control, execution_root=candidate)
-    request = dict(
+    request: dict[str, Any] = dict(
         mission=missions.get("MISSION-A5-001"),
         work_id="WORK-A5-001",
         run_id="RUN-A5-RECONCILE",
@@ -573,7 +573,7 @@ def _prepare(root: Path, **overrides: Any) -> ExecutionDispatchResult:
         "stack": "python",
         "force_isolation": True,
     }
-    dispatch = overrides.pop("dispatch", ExecutionDispatchService(root))
+    dispatch: ExecutionDispatchService = overrides.pop("dispatch", ExecutionDispatchService(root))
     values.update(overrides)
     return dispatch.prepare(**values)
 

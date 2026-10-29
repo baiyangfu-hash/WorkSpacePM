@@ -292,7 +292,7 @@ def test_progress_requires_trusted_started_evidence_and_ignores_unrelated_blocke
         update={"state": WorkState.IN_PROGRESS}
     )
     run = store.get_run("RUN-COCKPIT-001")
-    runs = {work.work_id: (run,)}
+    runs: dict[str, tuple[RunItem, ...]] = {work.work_id: (run,)}
 
     assert PmCockpitService._progress(mission, work, runs, frozenset()) == "系统执行"
     assert PmCockpitService._progress(
