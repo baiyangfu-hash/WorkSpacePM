@@ -1320,9 +1320,11 @@ class PmFacadeService:
     def _effective_spec_sources(self) -> tuple[tuple[str, str, str], ...]:
         registry_path = self._workspace_root / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
         try:
-            payload = json.loads(registry_path.read_text(encoding="utf-8", errors="replace"))
+            payload = json.loads(registry_path.read_text(encoding="utf-8"))
         except FileNotFoundError as error:
             raise PmFacadeError(f"规范注册表不存在: {registry_path}") from error
+        except UnicodeDecodeError as error:
+            raise PmFacadeError(f"规范注册表不是合法 UTF-8，拒绝当作有效规范来源: {registry_path}") from error
         except json.JSONDecodeError as error:
             raise PmFacadeError(f"规范注册表 JSON 无效: {error.msg}") from error
         specs = payload.get("specs") if isinstance(payload, dict) else None
