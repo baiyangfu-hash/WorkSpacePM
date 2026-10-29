@@ -162,7 +162,8 @@ def test_control_characters_in_the_card_text_are_refused_with_the_line_number(tm
 
 def test_tabs_and_crlf_line_endings_are_not_control_character_findings(tmp_path: Path) -> None:
     baseline = _repository(tmp_path, (f"{PROJECT}/auto_pm/a.py",))
-    card = _card(tmp_path, baseline=baseline, rows=[("auto_pm/a.py", "存在")], body="tab\there\r\nnext line")
+    card = _card(tmp_path, baseline=baseline, rows=[("auto_pm/a.py", "存在")], body="tab\there\nnext line")
+    card.write_bytes(card.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))  # every line ends CRLF whatever the platform's text mode did
 
     report = _check(tmp_path, card)
 
