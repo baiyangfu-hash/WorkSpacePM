@@ -14,6 +14,12 @@ from tests.git_support import git_out
 
 pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
+@pytest.fixture(autouse=True)
+def _cards_here_predate_the_tier_cutover(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests build throw-away cards that carry no tier line; treat them as cards from before the cut-over (the rule has its own tests)."""
+    monkeypatch.setattr("auto_pm.application.core.implementation_card_tier.card_is_new", lambda _card: False)
+
+
 
 def test_create_then_validate_is_read_only(tmp_path: Path) -> None:
     runner = CliRunner()

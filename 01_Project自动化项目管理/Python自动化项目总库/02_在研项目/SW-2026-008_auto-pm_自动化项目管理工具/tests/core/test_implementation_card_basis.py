@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from auto_pm.application.core.implementation_card_precheck import (
@@ -35,6 +36,12 @@ BC_TABLE = """# 业务变更记录
 | BC-DJ-2099-001-2099_01_000 | 2099-01-04 09:30 | 报警汇总 | baiyang | 已批 | 待补 |
 | BC-DJ-2099-001-2098_12_000 | 2099-01-04 09:30 | 编号年月写错 | baiyang | 已批 | 待补 |
 """
+
+@pytest.fixture(autouse=True)
+def _cards_here_predate_the_tier_cutover(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests build throw-away cards that carry no tier line; treat them as cards from before the cut-over (the rule has its own tests)."""
+    monkeypatch.setattr("auto_pm.application.core.implementation_card_tier.card_is_new", lambda _card: False)
+
 
 
 def _git(root: Path, *args: str) -> str:

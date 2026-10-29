@@ -21,6 +21,12 @@ from tests.git_support import git_out
 TREE: dict[str, CommandNode] = command_tree_of(cli)
 PROJECT = "SW-TEST_project"
 
+@pytest.fixture(autouse=True)
+def _cards_here_predate_the_tier_cutover(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests build throw-away cards that carry no tier line; treat them as cards from before the cut-over (the rule has its own tests)."""
+    monkeypatch.setattr("auto_pm.application.core.implementation_card_tier.card_is_new", lambda _card: False)
+
+
 
 def _git(root: Path, *args: str) -> str:
     return git_out(root, *args)
