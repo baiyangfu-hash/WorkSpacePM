@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from auto_pm.core.pm_cockpit_service import PmCockpitService
 from PySide6.QtCore import QThreadPool, QTimer, qInstallMessageHandler
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
 from shiboken6 import isValid
 
 import auto_pm.ui.boss_qml_window as boss_window
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
 from auto_pm.contracts.pm_cockpit import PmCockpitSnapshot
 from auto_pm.ui.boss_qml_window import build_cockpit_bridge, shutdown_cockpit
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge

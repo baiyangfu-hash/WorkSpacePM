@@ -4,10 +4,11 @@ from pathlib import Path
 
 import pytest
 import yaml
-from auto_pm.spec.services.check_svc import CheckService
-from auto_pm.spec.services.frontmatter_svc import FrontmatterService
-from auto_pm.spec.services.index_svc import IndexService
-from auto_pm.spec.services.report_svc import ReportService
+
+from auto_pm.domain.spec.services.check_svc import CheckService
+from auto_pm.domain.spec.services.frontmatter_svc import FrontmatterService
+from auto_pm.domain.spec.services.index_svc import IndexService
+from auto_pm.domain.spec.services.report_svc import ReportService
 
 
 class TestCheckService:
@@ -21,7 +22,7 @@ class TestCheckService:
         assert output.exit_code in (0, 1, 2)
 
     def test_run_with_severity_filter(self, populated_workspace: Path) -> None:
-        from auto_pm.spec.core.checker_base import Severity
+        from auto_pm.domain.spec.core.checker_base import Severity
 
         svc = CheckService(populated_workspace)
         output = svc.run(min_severity=Severity.ERROR)

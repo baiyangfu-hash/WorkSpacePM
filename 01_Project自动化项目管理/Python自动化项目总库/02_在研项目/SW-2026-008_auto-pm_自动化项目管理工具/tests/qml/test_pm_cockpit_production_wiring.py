@@ -7,14 +7,14 @@ import time
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.config.app_config import AutoPmConfig
 from click.testing import CliRunner
 from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QApplication
 
+from auto_pm.infrastructure.config.app_config import AutoPmConfig
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.boss_qml_window import build_cockpit_bridge
+from auto_pm.ui.cli.__main__ import cli
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
 from tests.core.test_pm_cockpit_dual_root import PROJECT, _roots, _store_files, _work
 from tests.qml.conftest import _delete_qobject
