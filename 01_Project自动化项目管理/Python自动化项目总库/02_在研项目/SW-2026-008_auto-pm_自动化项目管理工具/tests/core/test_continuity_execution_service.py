@@ -52,6 +52,7 @@ from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityS
 class Clock:
     def __init__(self) -> None:
         self.value = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
+        self.start = self.value
 
     def __call__(self) -> datetime:
         return self.value
@@ -4204,3 +4205,71 @@ def test_a_write_that_presents_no_epoch_is_accepted_during_the_compatibility_per
 def _event_count(root: Path) -> int:
     with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
         return int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+
+
+def _renew_until_cap(service: ContinuityExecutionService, clock: Clock, hours: float, tag: str = "a") -> None:
+    """Keep the lease alive with 15-minute renewals until ``hours`` after creation."""
+    renewed = 0
+    while clock.value < clock.start + timedelta(hours=hours):
+        clock.value += timedelta(minutes=14)
+        lease = service._store.get_lease("RUN-001")
+        service.renew_lease(
+            "RUN-001", "agent-a", "lease-secret", 900, f"cap-renew-{tag}-{renewed}", expected_version=lease.version
+        )
+        renewed += 1
+
+
+def test_lease_renewal_is_refused_after_the_three_hour_hold_cap(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    _renew_until_cap(service, clock, 2.9)
+    clock.value = clock.start + timedelta(hours=3, minutes=1)
+    with pytest.raises(ContinuityExecutionError, match="过期"):
+        service.renew_lease("RUN-001", "agent-a", "lease-secret", 900, "after-cap")
+    # A lease that outlives the cap (granted before the cap existed) is still refused for the cap itself.
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.execute(
+            "UPDATE execution_leases SET expires_at=? WHERE run_id='RUN-001'",
+            ((clock.value + timedelta(hours=1)).isoformat(),),
+        )
+    lease = service._store.get_lease("RUN-001")
+    with pytest.raises(ContinuityExecutionError, match="总时长上限"):
+        service.renew_lease(
+            "RUN-001", "agent-a", "lease-secret", 900, "after-cap-live", expected_version=lease.version
+        )
+    status = service.lease_hold_status("RUN-001")
+    assert status["hold_end"] == (clock.start + timedelta(hours=3)).isoformat()
+
+
+def test_last_renewal_before_the_cap_is_clamped_to_the_cap(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    _renew_until_cap(service, clock, 2.9)
+    lease = service._store.get_lease("RUN-001")
+    assert datetime.fromisoformat(lease.expires_at) <= clock.start + timedelta(hours=3)
+
+
+def test_extend_hold_lets_a_run_renew_past_three_hours_and_is_idempotent(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    _renew_until_cap(service, clock, 2.5)
+    first = service.extend_lease_hold("RUN-001", 7_200, "user-confirmation:2026-10-29-16:00", "extend-1")
+    replay = service.extend_lease_hold("RUN-001", 7_200, "user-confirmation:2026-10-29-16:00", "extend-1")
+    assert first == replay
+    assert first["hold_end"] == (clock.start + timedelta(hours=5)).isoformat()
+    _renew_until_cap(service, clock, 3.5, "b")
+    assert service.lease_hold_status("RUN-001")["renewals"] >= 15
+
+
+@pytest.mark.parametrize("extra", [0, 59, 43_201])
+def test_extend_hold_rejects_out_of_range_and_missing_evidence(tmp_path: Path, extra: int) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    with pytest.raises(ContinuityExecutionError, match="extra_seconds"):
+        service.extend_lease_hold("RUN-001", extra, "user-confirmation:2026-10-29-16:00", f"ext-{extra}")
+    with pytest.raises(ContinuityExecutionError, match="用户证据"):
+        service.extend_lease_hold("RUN-001", 3_600, "  ", "ext-no-evidence")

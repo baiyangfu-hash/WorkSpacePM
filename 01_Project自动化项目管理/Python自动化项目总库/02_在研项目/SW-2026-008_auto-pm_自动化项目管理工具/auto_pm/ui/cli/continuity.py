@@ -1275,6 +1275,47 @@ def renew_lease(
     _emit(item)
 
 
+@lease_group.command(name="extend-hold")
+@click.option("--run-id", required=True)
+@click.option("--extra-seconds", type=click.IntRange(60, 43_200), required=True, help="在默认 3 小时上限之外再加多少秒")
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
+)
+@click.option("--idempotency-key", required=True)
+@click.pass_context
+def extend_lease_hold(
+    ctx: click.Context, run_id: str, extra_seconds: int, approval_evidence_ref: str, idempotency_key: str
+) -> None:
+    """Raise one Run's total lease-hold cap (default 3 h). Only the user may do this."""
+    from auto_pm.application.core.approval_proof_service import (
+        ApprovalProofError,
+        ApprovalProofService,
+    )
+    from auto_pm.contracts.user_evidence import user_evidence_problem
+    from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
+
+    _require_mutation_root(ctx)
+    control_root = str(_workspace(ctx))
+    evidence = approval_evidence_ref.strip()
+    if approval_pin_enforced(control_root):
+        pin = read_approval_pin(control_root, summary=f"延长 {run_id} 的租约持有上限 {extra_seconds} 秒")
+        try:
+            _, evidence = ApprovalProofService(control_root).resolve(
+                pin=pin, approver="", evidence_ref=evidence, purpose="lease-extend-hold", subject=run_id
+            )
+        except ApprovalProofError as error:
+            raise click.ClickException(str(error)) from error
+    elif problem := user_evidence_problem(evidence):
+        raise click.ClickException(f"{problem}；延长持有上限只听用户本人（--approval-evidence-ref）")
+    try:
+        result = _execution_service(ctx).extend_lease_hold(run_id, extra_seconds, evidence, idempotency_key)
+    except ContinuityExecutionError as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @lease_group.command(name="record-holder")
 @click.option("--run-id", required=True)
 @click.option("--owner", "owner_id", required=True)

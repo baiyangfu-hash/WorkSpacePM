@@ -123,6 +123,11 @@ _SIDECAR_RETRY_SECONDS = 0.025
 # (HEAD and status) while it owns the lock, which takes seconds on a loaded Windows runner; 5 s was too short
 # and a second writer failed with "database is locked" (TD-SW008-214 follow-up). Waiting longer only delays.
 _WRITE_LOCK_TIMEOUT_SECONDS = 30.0
+# A Run may keep renewing its lease for at most this long after creation; only the user extends it (extend_lease_hold).
+LEASE_HOLD_CAP_SECONDS = 3 * 3_600
+LEASE_HOLD_MAX_EXTENSION_SECONDS = 12 * 3_600
+# Renewals beyond this count are flagged red in `pm orient`: a lease that needs this many renewals is a stuck Run.
+LEASE_RENEWAL_RED_COUNT = 10
 
 
 @dataclass(frozen=True)
@@ -6209,7 +6214,13 @@ class ContinuityStore:
                 raise ContinuityStoreError("lease 已过期")
             if expected_version is not None and current.version != expected_version:
                 raise ContinuityStoreError("lease version 冲突")
-            expires_at = (observed_at + timedelta(seconds=lease_seconds)).isoformat()
+            hold_end = self._lease_hold_end(conn, run)
+            if observed_at >= hold_end:
+                raise ContinuityStoreError(
+                    f"本 Run 持有租约已达总时长上限（{hold_end.isoformat()}），拒绝续租；"
+                    "要继续只能由用户本人用 lease extend-hold 延长，或收口后重开"
+                )
+            expires_at = min(observed_at + timedelta(seconds=lease_seconds), hold_end).isoformat()
             event_time = observed_at.isoformat()
             cursor = conn.execute(
                 """UPDATE execution_leases SET expires_at=?, version=version+1, updated_at=?
@@ -6241,6 +6252,70 @@ class ContinuityStore:
                 aggregate_type="run",
             )
             return self._get_lease(conn, run_id)
+
+    def _lease_hold_end(self, conn: sqlite3.Connection, run: RunItem) -> datetime:
+        """Latest moment a Run may keep renewing: creation + default cap + every user-approved extension."""
+        extra = 0
+        for row in conn.execute(
+            "SELECT payload_json FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+            "AND event_type='LEASE_HOLD_EXTENDED'",
+            (run.run_id,),
+        ):
+            extra += int(json.loads(row[0]).get("extra_seconds", 0))
+        return self._aware_timestamp(run.created_at, "run") + timedelta(
+            seconds=LEASE_HOLD_CAP_SECONDS + extra
+        )
+
+    def lease_hold_status(self, run_id: str) -> dict[str, object]:
+        """Read-only: hold deadline and how many times the lease was renewed (for orient and the CLI)."""
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._transaction() as conn:
+            run = self._get_run(conn, run_id)
+            renewals = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+                "AND event_type='LEASE_RENEWED'",
+                (run_id,),
+            ).fetchone()[0]
+            return {
+                "run_id": run_id,
+                "hold_end": self._lease_hold_end(conn, run).isoformat(),
+                "renewals": int(renewals),
+            }
+
+    def extend_lease_hold(
+        self,
+        run_id: str,
+        extra_seconds: int,
+        evidence_ref: str,
+        idempotency_key: str,
+    ) -> dict[str, object]:
+        """Raise one Run's total-hold cap. Only the user may call this (the CLI checks the proof)."""
+        run_id = self._validated_run_text(run_id, label="run_id")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(extra_seconds) is not int or not 60 <= extra_seconds <= LEASE_HOLD_MAX_EXTENSION_SECONDS:
+            raise ContinuityStoreError(
+                f"extra_seconds 必须在 60 到 {LEASE_HOLD_MAX_EXTENSION_SECONDS} 之间"
+            )
+        if not evidence_ref.strip():
+            raise ContinuityStoreError("延长持有上限必须带用户证据")
+        with self._transaction() as conn:
+            run = self._get_run(conn, run_id)
+            if self._event_by_key(conn, idempotency_key) is None:
+                now = self._utc_now().isoformat()
+                self._append_event(
+                    conn,
+                    run_id,
+                    "LEASE_HOLD_EXTENDED",
+                    {
+                        "schema_version": "lease-hold-extended.v1",
+                        "extra_seconds": extra_seconds,
+                        "evidence_ref": evidence_ref.strip(),
+                    },
+                    idempotency_key,
+                    now,
+                    aggregate_type="run",
+                )
+            return {"run_id": run.run_id, "hold_end": self._lease_hold_end(conn, run).isoformat()}
 
     def transfer_lease(
         self,

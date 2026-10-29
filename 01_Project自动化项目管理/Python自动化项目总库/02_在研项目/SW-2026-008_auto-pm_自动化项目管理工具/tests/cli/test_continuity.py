@@ -1878,3 +1878,48 @@ def test_mission_cli_create_is_admitted_like_pm_approve(cli_runner: CliRunner, t
     # a retry of the same card is not a new card
     assert _invoke(cli_runner, tmp_path, _create_args("MISSION-CLI-B")).exit_code == 0
     assert len(store.list_missions("SW-TEST-001")) == 2
+
+
+def test_lease_extend_hold_cli_accepts_only_user_evidence(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _repository(tmp_path)
+    works = WorkRegistryService(tmp_path)
+    works.initialize("test")
+    works.create_work(
+        work_id="WORK-CLI-HOLD",
+        subject_project_id="SW-TEST-001",
+        kind=WorkKind.GOVERNANCE,
+        title="hold",
+        owner="architect",
+        scope_paths=["README.md"],
+        source_fingerprint="sha256:hold",
+        idempotency_key="hold-work",
+        read_only=True,
+    )
+    ContinuityExecutionService(tmp_path).start_run(
+        run_id="RUN-CLI-HOLD",
+        work_id="WORK-CLI-HOLD",
+        executor_id="agent-a",
+        adapter="codex",
+        owned_paths=["README.md"],
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+        git_head=_head(tmp_path),
+        worktree_path=str(tmp_path),
+        lease_token="hold-secret",
+        lease_seconds=900,
+        idempotency_key="hold-run",
+    )
+    base = ["lease", "extend-hold", "--run-id", "RUN-CLI-HOLD", "--extra-seconds", "3600", "--idempotency-key"]
+
+    for bad in ("", "claude: ok", "user-confirmation:claude-wrote-this"):
+        refused = _invoke(cli_runner, tmp_path, [*base, f"hold-bad-{len(bad)}", "--approval-evidence-ref", bad])
+        assert refused.exit_code == 1, bad
+        assert "只听用户本人" in refused.output
+
+    ok = _invoke(
+        cli_runner,
+        tmp_path,
+        [*base, "hold-ok", "--approval-evidence-ref", "user-confirmation:2026-10-29-16:00"],
+    )
+    assert ok.exit_code == 0, ok.output
+    assert json.loads(ok.output)["run_id"] == "RUN-CLI-HOLD"
