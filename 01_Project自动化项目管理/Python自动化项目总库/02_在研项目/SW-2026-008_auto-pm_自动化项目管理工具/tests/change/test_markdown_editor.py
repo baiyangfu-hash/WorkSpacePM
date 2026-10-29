@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from auto_pm.change.constants import ChangeRequest
-from auto_pm.change.generator import ChgGenerator
-from auto_pm.change.markdown_editor import ChangeMarkdownEditor
+from auto_pm.domain.change.constants import ChangeRequest
+from auto_pm.domain.change.generator import ChgGenerator
+from auto_pm.domain.change.markdown_editor import ChangeMarkdownEditor
 
 
 class TestChangeMarkdownEditor:

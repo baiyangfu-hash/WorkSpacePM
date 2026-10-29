@@ -12,9 +12,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.spec.core.checker_base import HealthChecker
 
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.spec.core.checker_base import HealthChecker
 from tests.change.test_acceptance_flow import _build_chg_with_implementation
 
 PID = "TEST-2026-001"
