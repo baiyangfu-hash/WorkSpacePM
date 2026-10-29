@@ -45,6 +45,9 @@
   "legacy": {
     "mode": "body-equal",
     "source": ".trae/skills/plc-electrical-engineer/SKILL.md",
-    "refs": ".trae/skills/plc-electrical-engineer/refs"
+    "refs": ".trae/skills/plc-electrical-engineer/refs",
+    "known_diffs": {
+      "refs/siemens-lsp-and-testing.md": "旧文件第 132 行末尾有一段损坏字节（非法 UTF-8 的残片），角色库副本已删去残片；旧文件待 .trae 放开后同样修复"
+    }
   }
 }

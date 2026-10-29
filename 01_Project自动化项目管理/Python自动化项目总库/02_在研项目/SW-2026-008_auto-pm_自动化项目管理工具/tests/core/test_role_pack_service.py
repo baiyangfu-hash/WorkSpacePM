@@ -283,3 +283,36 @@ def test_red_line_check_catches_each_mutation() -> None:
     for phrase in RED_LINE_PHRASES:
         damaged = text[:start] + text[start:end].replace(phrase, "") + text[end:]
         assert missing_red_lines(damaged) == [phrase], phrase
+
+
+def test_invalid_utf8_file_is_reported(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    (roles / "engineer-demo" / "refs" / "note.md").write_bytes("笔记\n".encode() + b"\xe7\x9c\x9c\x9c\n")
+    assert ("RP-009", FAIL) in _codes(roles, workspace)
+
+
+def test_mojibake_file_is_reported(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    garbled = "笔记\n".encode().decode("latin-1")
+    (roles / "engineer-demo" / "refs" / "note.md").write_text(garbled, encoding="utf-8")
+    codes = _codes(roles, workspace)
+    assert ("RP-009", FAIL) in codes
+
+
+def test_replacement_character_is_reported_in_shared(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    (roles / "shared" / "refs" / "skill_coordination.md").write_text("共享�契约\n", encoding="utf-8")
+    assert ("RP-009", FAIL) in _codes(roles, workspace)
+
+
+def test_known_diff_is_accepted_only_while_the_old_file_is_broken(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    old_note = workspace / ".trae" / "skills" / "demo-skill" / "refs" / "note.md"
+    old_note.write_bytes("笔记\n".encode() + b"\x9c\x9c\n")
+    (roles / "engineer-demo" / "refs" / "note.md").write_text("笔记\n", encoding="utf-8")
+    assert ("RP-008", FAIL) in _codes(roles, workspace)
+    _edit_config(roles, lambda data: data["legacy"].update(known_diffs={"refs/note.md": "旧文件损坏"}))
+    assert _codes(roles, workspace) == set()
+    # Once the old file is repaired the exemption is not needed any more, so a difference is a real one.
+    old_note.write_text("别的内容\n", encoding="utf-8")
+    assert ("RP-008", FAIL) in _codes(roles, workspace)
