@@ -484,7 +484,7 @@ class WorkRegistryService:
             raise WorkRegistryError(f"Decision 不存在: {decision_id}")
         try:
             return DecisionPackageDTO.from_dict(
-                json.loads(path.read_text(encoding="utf-8", errors="replace"))
+                json.loads(path.read_text(encoding="utf-8"))
             )
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
             raise WorkRegistryError(f"Decision 无法读取: {decision_id}") from error

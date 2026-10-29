@@ -306,8 +306,8 @@ class PmIntakeService:
         for directory in self._ledger_directories(project_id, ledger_id):
             for path in sorted(directory.rglob("*.md")):
                 try:
-                    text = path.read_text(encoding="utf-8", errors="replace")
-                except OSError as error:
+                    text = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError) as error:
                     raise PmIntakeError(f"取证台账无法读取: {path.name}") from error
                 if row.search(text):
                     return

@@ -97,8 +97,14 @@ def find_audit_report(number: int, head: str, report_dirs: Sequence[Path]) -> tu
     ]
     for path in sorted(candidates, key=lambda item: _natural_key(item.name)):
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = path.read_text(encoding="utf-8")
         except OSError:
+            continue
+        except UnicodeDecodeError:
+            # An unreadable report must never be quoted as a verdict; it only matters when it is this PR's own report.
+            guessed = path.read_text(encoding="utf-8", errors="replace")
+            if pattern.search(path.name) or pattern.search("\n".join(guessed.splitlines()[:HEADER_LINES])):
+                return False, f"{path.name} 不是合法 UTF-8，拒绝采信其中的放行判定"
             continue
         head_lines = "\n".join(text.splitlines()[:HEADER_LINES])
         if not pattern.search(path.name) and not pattern.search(head_lines):

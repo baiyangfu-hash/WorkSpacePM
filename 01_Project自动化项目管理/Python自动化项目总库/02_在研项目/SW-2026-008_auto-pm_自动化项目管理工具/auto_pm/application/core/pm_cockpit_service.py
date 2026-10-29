@@ -494,7 +494,7 @@ class PmCockpitService:
             raise PmCockpitError("工作空间项目清单不存在，驾驶舱已保持只读并停止加载。")
         try:
             registry = WorkspaceRegistry.model_validate_json(
-                self._registry_path.read_text(encoding="utf-8", errors="replace")
+                self._registry_path.read_text(encoding="utf-8")
             )
         except (OSError, ValueError) as error:
             raise PmCockpitError("工作空间项目清单格式无效，驾驶舱没有猜测项目归属。") from error
