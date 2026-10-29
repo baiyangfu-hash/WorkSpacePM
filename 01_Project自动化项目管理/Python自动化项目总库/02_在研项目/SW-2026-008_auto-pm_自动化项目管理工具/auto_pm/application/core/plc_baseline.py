@@ -144,7 +144,7 @@ def checked_keys(
 ) -> tuple[CheckResult, Counter[str], bool]:
     """跑一次 ``PlcChecker``（插件每个范围只跑一次），返回结果、逐条失败键、插件是否没跑完。"""
 
-    from auto_pm.plc.checker import PlcChecker
+    from auto_pm.domain.plc.checker import PlcChecker
 
     recorder = RecordingLanguageService(service, project) if service is not None else None
     result = PlcChecker(str(workspace), language_service=recorder).check_project(str(project))

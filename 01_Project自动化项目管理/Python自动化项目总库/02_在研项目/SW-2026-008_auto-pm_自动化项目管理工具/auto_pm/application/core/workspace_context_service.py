@@ -9,8 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from auto_pm.core.project_scanner import ProjectScanner
-
+from auto_pm.application.core.project_scanner import ProjectScanner
 from auto_pm.contracts.workspace_context import (
     ContextEvidence,
     ContextProject,

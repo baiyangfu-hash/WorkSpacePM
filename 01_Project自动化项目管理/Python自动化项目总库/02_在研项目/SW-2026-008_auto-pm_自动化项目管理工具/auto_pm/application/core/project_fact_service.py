@@ -12,9 +12,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
-from auto_pm.core.project_service import ProjectService
 from pydantic import ValidationError
 
+from auto_pm.application.core.project_service import ProjectService
 from auto_pm.contracts.project_fact_snapshot import (
     AvailableCheckFact,
     CodeStructureFact,

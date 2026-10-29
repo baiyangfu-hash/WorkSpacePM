@@ -22,9 +22,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from auto_pm.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
-
 from auto_pm.application.core.approval_proof_service import ApprovalProofError, ApprovalProofService
+from auto_pm.application.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
 from auto_pm.contracts.continuity import RunItem, RunState
 from auto_pm.contracts.mission import (
     Mission,

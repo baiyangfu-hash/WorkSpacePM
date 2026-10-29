@@ -19,11 +19,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from auto_pm.core.continuity_execution_service import (
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-
 from auto_pm.contracts.continuity import CheckpointItem, HandoffV2, LeaseItem, RunState
 from auto_pm.contracts.lease_reclaim import (
     GRACE_SECONDS,
