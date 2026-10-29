@@ -1,4 +1,4 @@
-"""TD-SW008-213: every exit of ``ledger reconcile`` (diff, ``--fix``, orphans) and ``change verify --ledger-check`` shows the commit-tracking warning and keeps its own exit code."""
+"""TD-SW008-213/113: every exit of ``ledger reconcile`` (diff, ``--fix``, orphans) and ``change verify --ledger-check`` shows the commit-tracking report. ``reconcile`` only warns (closure never commits, so a red there would be the norm); ``verify --ledger-check`` blocks a change request that is in no commit."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def test_reconcile_with_differences_exits_2_and_still_shows_the_warning_last(tmp
     result = _Fixture(tmp_path, [_MISSING]).run_reconcile(monkeypatch)
 
     assert result.exit_code == 2, result.output
-    assert result.output.index("检测到差异") < result.output.index("提交跟踪警告")
+    assert result.output.index("检测到差异") < result.output.index("提交跟踪（")
     assert _UNTRACKED_LINE in result.output
 
 
@@ -85,7 +85,7 @@ def test_reconcile_fix_that_cleans_up_exits_0_and_shows_the_warning(tmp_path: Pa
 
     assert result.exit_code == 0, result.output
     assert fixture.fix_calls == 1
-    assert result.output.index("对账完成，无差异") < result.output.index("提交跟踪警告")
+    assert result.output.index("对账完成，无差异") < result.output.index("提交跟踪（")
     assert _UNTRACKED_LINE in result.output
 
 
@@ -96,7 +96,7 @@ def test_reconcile_fix_left_with_orphans_exits_2_and_shows_the_warning(tmp_path:
 
     assert result.exit_code == 2, result.output
     assert fixture.fix_calls == 1
-    assert result.output.index("仅有孤儿记录") < result.output.index("提交跟踪警告")
+    assert result.output.index("仅有孤儿记录") < result.output.index("提交跟踪（")
     assert _UNTRACKED_LINE in result.output
 
 
@@ -104,7 +104,7 @@ def test_reconcile_fix_that_cannot_repair_everything_exits_2_and_shows_the_warni
     result = _Fixture(tmp_path, [_MISSING, _MISSING]).run_reconcile(monkeypatch, "--fix")
 
     assert result.exit_code == 2, result.output
-    assert result.output.index("修复后仍有差异") < result.output.index("提交跟踪警告")
+    assert result.output.index("修复后仍有差异") < result.output.index("提交跟踪（")
 
 
 def test_reconcile_for_an_unknown_project_exits_1_without_a_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,14 +121,15 @@ def test_reconcile_in_a_folder_without_commits_says_the_check_was_skipped_and_ke
 
     assert result.exit_code == 2
     assert "提交跟踪检查未执行" in result.output
-    assert "提交跟踪警告" not in result.output
+    assert "提交跟踪（" not in result.output
 
 
-def test_verify_ledger_check_passes_with_exit_0_and_shows_the_warning_after_the_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_verify_ledger_check_blocks_with_exit_2_when_a_change_request_is_in_no_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     result = _Fixture(tmp_path, [ReconcileDiff()]).run_verify(monkeypatch, "--ledger-check")
 
-    assert result.exit_code == 0, result.output
-    assert result.output.index("门禁通过") < result.output.index("提交跟踪警告")
+    assert result.exit_code == 2, result.output  # the ledger matches, but CHG-...-002 is in no commit (TD-SW008-113)
+    assert "拦截，退出码 2" in result.output and "未提交，请先提交" in result.output
+    assert result.output.index("门禁通过") < result.output.index("提交跟踪（")
     assert _UNTRACKED_LINE in result.output
 
 
@@ -136,8 +137,19 @@ def test_verify_ledger_check_fails_with_exit_2_and_still_shows_the_warning(tmp_p
     result = _Fixture(tmp_path, [_MISSING]).run_verify(monkeypatch, "--ledger-check")
 
     assert result.exit_code == 2, result.output
-    assert result.output.index("门禁失败") < result.output.index("提交跟踪警告")
+    assert result.output.index("门禁失败") < result.output.index("提交跟踪（")
+    assert "拦截，退出码 2" in result.output and "未提交，请先提交" in result.output  # the red diff does not hide why the tracking also blocks
     assert _UNTRACKED_LINE in result.output
+
+
+def test_verify_ledger_check_in_a_folder_without_commits_says_the_check_was_skipped_and_does_not_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _Fixture(tmp_path, [ReconcileDiff()], commit=False).run_verify(monkeypatch, "--ledger-check")
+
+    assert result.exit_code == 0, result.output  # Git cannot answer: skipped is said out loud, never a block
+    assert "提交跟踪检查未执行" in result.output
+    assert "提交跟踪（" not in result.output
 
 
 def test_verify_lists_everything_with_verbose_and_ten_without(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,7 +178,7 @@ def test_reconcile_clean_without_fix_exits_0_and_shows_the_warning(tmp_path: Pat
 
     assert result.exit_code == 0, result.output
     assert fixture.fix_calls == 0
-    assert result.output.index("对账无差异") < result.output.index("提交跟踪警告")
+    assert result.output.index("对账无差异") < result.output.index("提交跟踪（")
     assert _UNTRACKED_LINE in result.output
 
 
@@ -181,3 +193,33 @@ def test_reconcile_lists_everything_with_verbose_and_ten_without(tmp_path: Path,
     assert short.exit_code == 0 and full.exit_code == 0
     assert short.output.count("未入库: ") == 10 and "另有 3 个未入库" in short.output
     assert full.output.count("未入库: ") == 13 and "另有" not in full.output
+
+
+def test_verify_ledger_check_passes_with_exit_0_once_every_change_request_is_committed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture = _Fixture(tmp_path, [ReconcileDiff()])
+    blocked = fixture.run_verify(monkeypatch, "--ledger-check")
+    _commit(fixture.root)  # the second change request goes into a commit too
+
+    passed = fixture.run_verify(monkeypatch, "--ledger-check")
+
+    assert blocked.exit_code == 2 and passed.exit_code == 0, blocked.output + passed.output
+    assert "提交跟踪（" not in passed.output
+
+
+def test_reconcile_stays_exit_0_but_says_plainly_that_the_change_request_is_uncommitted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result = _Fixture(tmp_path, [ReconcileDiff()]).run_reconcile(monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    assert "未提交，请先提交" in result.output and "只提示，不影响退出码" in result.output and "拦截" not in result.output.replace("提交前 `change verify --ledger-check` 会拦截", "")
+
+
+def test_a_change_request_that_only_differs_from_the_commit_does_not_block_verify(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture = _Fixture(tmp_path, [ReconcileDiff()])
+    _commit(fixture.root)
+    changed = next(fixture.project.rglob("CHG-SCPT-2026-002.md"))
+    changed.write_text(changed.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8")
+
+    result = fixture.run_verify(monkeypatch, "--ledger-check")
+
+    assert result.exit_code == 0, result.output
+    assert "只提示，不影响退出码" in result.output
