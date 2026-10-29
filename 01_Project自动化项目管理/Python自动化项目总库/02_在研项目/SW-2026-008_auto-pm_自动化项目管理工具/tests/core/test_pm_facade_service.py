@@ -1117,7 +1117,7 @@ def test_acceptance_rechecks_generic_owned_paths_after_rehash(tmp_path: Path) ->
     assert receipt.status == "PASS"
     collection = collector.collect(run)
     serialized = collector.build_checkpoint_evidence(collection, receipt)
-    assert facade._acceptance_evidence_is_current(serialized, collection, run, tmp_path)
+    assert facade._acceptance_evidence_is_current(serialized, collection, run, str(tmp_path))
 
     envelope = json.loads(serialized)
     envelope["quality_receipt"]["owned_python_paths"] = [
@@ -1131,7 +1131,7 @@ def test_acceptance_rechecks_generic_owned_paths_after_rehash(tmp_path: Path) ->
         {key: value for key, value in envelope.items() if key != "envelope_hash"}
     )
     forged = facade._canonical_json(envelope)
-    assert not facade._acceptance_evidence_is_current(forged, collection, run, tmp_path)
+    assert not facade._acceptance_evidence_is_current(forged, collection, run, str(tmp_path))
 
 
 def test_confirm_start_uses_the_mission_bound_work_without_an_internal_id(tmp_path: Path) -> None:
