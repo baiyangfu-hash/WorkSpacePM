@@ -4210,7 +4210,7 @@ def _event_count(root: Path) -> int:
 def _renew_until_cap(service: ContinuityExecutionService, clock: Clock, hours: float, tag: str = "a") -> None:
     """Keep the lease alive with 15-minute renewals until ``hours`` after creation."""
     renewed = 0
-    while clock.value < clock.start + timedelta(hours=hours):
+    while clock.value + timedelta(minutes=14) <= clock.start + timedelta(hours=hours):
         clock.value += timedelta(minutes=14)
         lease = service._store.get_lease("RUN-001")
         service.renew_lease(
@@ -4259,7 +4259,7 @@ def test_extend_hold_lets_a_run_renew_past_three_hours_and_is_idempotent(tmp_pat
     first = service.extend_lease_hold("RUN-001", 7_200, "user-confirmation:2026-10-29-16:00", "extend-1")
     replay = service.extend_lease_hold("RUN-001", 7_200, "user-confirmation:2026-10-29-16:00", "extend-1")
     assert first == replay
-    assert first["hold_end"] == (clock.start + timedelta(hours=5)).isoformat()
+    assert first.hold_end == (clock.start + timedelta(hours=5)).isoformat()
     _renew_until_cap(service, clock, 3.5, "b")
     assert service.lease_hold_status("RUN-001")["renewals"] >= 15
 

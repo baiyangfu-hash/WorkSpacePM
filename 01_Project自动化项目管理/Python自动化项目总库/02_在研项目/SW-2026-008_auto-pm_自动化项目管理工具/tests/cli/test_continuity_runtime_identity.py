@@ -47,6 +47,7 @@ RECOVERY = {
     "run revoke-unstarted": "P-RUN",
     "run reclaim": "P-RUN",
     "lease renew": "P-RUN",
+    "lease extend-hold": "P-RUN",
     "lease record-holder": "P-RUN",
 }
 # Reads, or ledger-level backup commands that belong to no single project.
@@ -88,7 +89,10 @@ def test_every_continuity_command_is_classified() -> None:
 
 
 # Options a command needs beyond the required ones to get past its own usage checks.
-EXTRA_ARGS = {"lease renew": ["--lease-wallet"]}
+EXTRA_ARGS = {
+    "lease renew": ["--lease-wallet"],
+    "lease extend-hold": ["--approval-evidence-ref", "user-confirmation:2026-10-29-16:00"],
+}
 
 
 def _required_args(command: click.Command) -> list[str]:

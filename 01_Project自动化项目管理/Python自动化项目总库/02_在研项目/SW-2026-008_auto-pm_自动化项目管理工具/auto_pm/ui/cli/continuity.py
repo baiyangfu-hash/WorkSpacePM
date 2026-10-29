@@ -1296,6 +1296,8 @@ def extend_lease_hold(
     from auto_pm.contracts.user_evidence import user_evidence_problem
     from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
 
+    # Like a renewal, this keeps a Run alive and carries its own user proof, so a runtime-identity conflict only warns.
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, run_id))
     _require_mutation_root(ctx)
     control_root = str(_workspace(ctx))
     evidence = approval_evidence_ref.strip()
@@ -1313,7 +1315,7 @@ def extend_lease_hold(
         result = _execution_service(ctx).extend_lease_hold(run_id, extra_seconds, evidence, idempotency_key)
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
-    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    _emit(result)
 
 
 @lease_group.command(name="record-holder")
