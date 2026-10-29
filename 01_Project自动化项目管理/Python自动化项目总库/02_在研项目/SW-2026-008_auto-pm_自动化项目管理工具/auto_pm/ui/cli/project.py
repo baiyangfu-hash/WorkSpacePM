@@ -664,6 +664,9 @@ def cmd_retrofit(ctx: click.Context, project_id: str) -> None:
 
     # 1. 补全 .copier-answers.yml
     copier_answers_path = os.path.join(proj.path, ".copier-answers.yml")
+    # TD-230：项目锚点已经在，运行身份就能解析，有冲突时先拒绝再写；锚点还没有时这条命令正是在建锚点，身份此时无从核对
+    if os.path.isfile(copier_answers_path):
+        require_runtime_identity(ctx, project_id)
     if os.path.isfile(copier_answers_path):
         console.print("[yellow]项目已有 .copier-answers.yml，跳过[/yellow]")
     else:
