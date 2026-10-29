@@ -13,6 +13,7 @@ import hmac
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -2124,9 +2125,13 @@ def write_quality_failure_report(
     """
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    path = reports_root / f"{receipt.run_id}-{stamp}.json"
+    # run_id 来自账本，不当作可信路径：只留字母数字和 ._-，再核对最终落点必须直接在 reports_root 下（预审 425）。
+    safe_run_id = re.sub(r"[^A-Za-z0-9._-]", "_", receipt.run_id)[:120] or "run"
+    path = reports_root / f"{safe_run_id}-{stamp}.json"
     try:
         reports_root.mkdir(parents=True, exist_ok=True)
+        if path.resolve().parent != reports_root.resolve():
+            return None
         payload = {"status": receipt.status, **asdict(receipt)}
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     except (OSError, ValueError, TypeError):

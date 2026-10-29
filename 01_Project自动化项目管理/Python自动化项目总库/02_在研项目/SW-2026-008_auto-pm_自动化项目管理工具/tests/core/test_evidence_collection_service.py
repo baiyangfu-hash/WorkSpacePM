@@ -415,3 +415,17 @@ def test_the_failure_report_is_written_as_utf8_json_and_an_unwritable_dir_never_
     blocker = tmp_path / "file"
     blocker.write_text("x", encoding="utf-8")
     assert write_quality_failure_report(_failed_receipt(exit_code=1), blocker / "sub") is None
+
+
+@pytest.mark.parametrize("hostile", ["../../escape", "..\\..\\escape", "a/b", "/abs/evil", "RUN:*?<>|", ".."])
+def test_the_failure_report_never_leaves_its_directory_whatever_the_run_id_says(tmp_path: Path, hostile: str) -> None:
+    """run_id 来自账本，带分隔符或 ../ 也只能落在 quality-failures/ 里面（预审 425）。"""
+    receipt = _failed_receipt(exit_code=1)
+    object.__setattr__(receipt, "run_id", hostile)
+    root = tmp_path / "reports" / "quality-failures"
+
+    path = write_quality_failure_report(receipt, root)
+
+    assert path is not None and path.parent.resolve() == root.resolve()
+    assert path.exists() and not (tmp_path / "escape-").exists()
+    assert sorted(p.name for p in tmp_path.rglob("*.json")) == [path.name]  # 整个临时目录里只有这一个文件
