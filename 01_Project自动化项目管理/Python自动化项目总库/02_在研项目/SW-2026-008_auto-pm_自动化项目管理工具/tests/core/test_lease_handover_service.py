@@ -405,3 +405,23 @@ def test_handoff_then_takeover_moves_the_run_and_the_receiver_never_sees_a_token
 def test_a_handoff_to_the_holder_itself_or_of_a_finished_run_is_refused(scene: Scene) -> None:
     with pytest.raises(LeaseHandoverError, match="不同"):
         scene.service.handoff(run_id=RUN, to_owner="agent-a", lease_token="lease-secret", summary="x")
+
+
+def test_case3_the_holder_reclaiming_their_own_live_lease_is_told_to_renew(scene: Scene) -> None:
+    with pytest.raises(LeaseHandoverError, match="请续租"):
+        scene.reclaim("agent-a")
+
+
+def test_case3_the_holder_reclaiming_their_own_expired_lease_is_told_the_real_way_out(scene: Scene) -> None:
+    """续租会被“已过期”拒，只说“请续租”是死胡同：必须点明换名回收和用户签字（现场死锁，预审 #350）。"""
+    scene.record_holder()
+    scene.expire()
+    events = scene.events()
+
+    with pytest.raises(LeaseHandoverError) as refused:
+        scene.reclaim("agent-a")
+
+    message = str(refused.value)
+    assert "已过期" in message and "换一个申请人名字" in message and "sign-risk" in message
+    assert "不要回收" not in message
+    assert scene.events() == events and scene.store.get_lease(RUN).owner_id == "agent-a"
