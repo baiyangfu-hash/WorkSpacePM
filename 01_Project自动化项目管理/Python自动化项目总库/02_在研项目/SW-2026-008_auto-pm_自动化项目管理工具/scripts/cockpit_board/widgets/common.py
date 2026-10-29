@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from cockpit_board import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -119,6 +122,14 @@ def page() -> tuple[QScrollArea, QVBoxLayout]:
     return scroll, layout
 
 
+def insert_widget(holder: QWidget, index: int, widget: QWidget) -> None:
+    """往 hrow 造出来的一行里插控件；那一行没有盒布局就直接报错，不悄悄丢掉。"""
+    layout = holder.layout()
+    if not isinstance(layout, QBoxLayout):
+        raise TypeError("insert_widget: 这一行没有盒布局")
+    layout.insertWidget(index, widget)
+
+
 def grid(columns: int) -> tuple[QWidget, QGridLayout]:
     holder = QWidget()
     layout = QGridLayout(holder)
@@ -129,7 +140,7 @@ def grid(columns: int) -> tuple[QWidget, QGridLayout]:
     return holder, layout
 
 
-def fill_grid(layout: QGridLayout, widgets: list[QWidget], columns: int) -> None:
+def fill_grid(layout: QGridLayout, widgets: Sequence[QWidget], columns: int) -> None:
     for index, widget in enumerate(widgets):
         widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         layout.addWidget(widget, index // columns, index % columns)
@@ -138,12 +149,16 @@ def fill_grid(layout: QGridLayout, widgets: list[QWidget], columns: int) -> None
 def clear(layout: QLayout) -> None:
     while layout.count():
         item = layout.takeAt(0)
+        if item is None:  # count() > 0 时取不到就别空转
+            break
         widget = item.widget()
         if widget is not None:
             widget.setParent(None)  # 立刻摘下来，不等事件循环，否则截图里新旧画面叠在一起
             widget.deleteLater()
-        elif item.layout() is not None:
-            clear(item.layout())
+        else:
+            child = item.layout()
+            if child is not None:
+                clear(child)
 
 
 def kv(rows: list[tuple[str, str]]) -> QWidget:

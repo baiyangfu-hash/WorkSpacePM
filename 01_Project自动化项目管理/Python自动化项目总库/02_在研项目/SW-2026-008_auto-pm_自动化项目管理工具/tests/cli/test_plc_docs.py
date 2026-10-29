@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.domain.plc import doc_consistency as dc
+from auto_pm.ui.cli.__main__ import cli
 from tests.identity_support import guard_off
 from tests.plc.test_doc_consistency import FB_SCL, IFC_DOC, VAR_DOC, build, ifc_path, var_path
 

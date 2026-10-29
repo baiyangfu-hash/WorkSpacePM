@@ -11,8 +11,11 @@ import argparse
 import sys
 import tempfile
 import traceback
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -71,7 +74,7 @@ class ActionRunner(QThread):
     done = Signal(object)
     probed = Signal(bool)
 
-    def __init__(self, job, parent: QObject | None) -> None:  # noqa: ANN001
+    def __init__(self, job: Callable[[], Any], parent: QObject | None) -> None:
         super().__init__(parent)
         self.job = job
 
@@ -216,7 +219,7 @@ class CockpitWindow(QMainWindow):
         card = next((p for p in self.home_vm.hot + self.home_vm.rest if p.project_id == project_id), None)
         if card is None:
             return
-        self.project.render(vm.project_vm(self.board, card, self.offset, self.online, self.home_vm.github),
+        self.project.show_view(vm.project_vm(self.board, card, self.offset, self.online, self.home_vm.github),
                             self.board.generated_at, self.online)
         self.goto("project")
 
@@ -304,15 +307,15 @@ class CockpitWindow(QMainWindow):
         self.home_vm = vm.home_vm(board, self.offset, self.online, not self.options.no_git, self.github)
         now = board.generated_at
         self.home.show_board(self.home_vm, now)
-        self.issues.render(vm.all_issues(self.home_vm), now)
-        self.projects.render(self.home_vm.hot + self.home_vm.rest)
+        self.issues.show_view(vm.all_issues(self.home_vm), now)
+        self.projects.show_view(self.home_vm.hot + self.home_vm.rest)
         identity = {
             "source": self.options.source_version, "configured": self.options.source_version,
             "effective": self.options.effective_version, "control_root": "是" if (self.options.root / pd.REGISTRY_RELATIVE).is_file() else "否",
             "collected": vm.fmt(now, self.offset),
         }
         self.station.set_bc_time((self.options.now or datetime.now(UTC)).astimezone(self.offset).strftime("%Y-%m-%d %H:%M"))
-        self.station.render(vm.station_vm(board, self.home_vm.hot + self.home_vm.rest, self.online, identity,
+        self.station.show_view(vm.station_vm(board, self.home_vm.hot + self.home_vm.rest, self.online, identity,
                                           self.options.manual_branch, [], GAP9_MERGED))
         for key, button in self.net_buttons.items():
             button.setChecked((key == "on") == bool(self.online))
@@ -347,14 +350,14 @@ class CockpitWindow(QMainWindow):
             self.station.add_receipt(actions.Receipt(when.strftime("%H:%M"), "写入 BC 行（预览）", f"append {record.name} ← {preview.columns[0][1]}", 0, True))
             return
         elif key == "bc_write":
-            record, line, digest = self._bc_record(), self.station.bc_preview_text, self.bc_digest
-            if not record or not line.startswith("|") or digest is None:
+            write_record, write_line, write_digest = self._bc_record(), self.station.bc_preview_text, self.bc_digest
+            if not write_record or not write_line.startswith("|") or write_digest is None:
                 self.status.setText("先预览，再写入")
                 return
             # 一次预览只写一次：先清掉预览，“写入”按钮立刻变灰，连点也不会写第二行
             self.bc_digest = None
             self.station.set_bc_preview(None, "已提交写入，结果看底部控制台；要再记一行请重新预览。")
-            job = lambda: actions.bc_append(record, line, digest)  # noqa: E731
+            job = partial(actions.bc_append, write_record, write_line, write_digest)
         elif key == "bc_open":
             record = self._bc_record()
             self.status.setText("文件：" + str(record) if record else self._bc_missing())
@@ -433,7 +436,8 @@ def _dark_mode(app: QApplication) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     options = parse_options(argv)
-    app = QApplication.instance() or QApplication(sys.argv[:1])
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication(sys.argv[:1])
     app.setStyleSheet(theme.build_qss(theme.DARK if _dark_mode(app) else theme.LIGHT))
     window = CockpitWindow(options)
     if not options.station_project:

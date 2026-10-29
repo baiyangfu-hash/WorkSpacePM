@@ -16,9 +16,10 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from auto_pm.cli import write_ai_context
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
+
+from auto_pm.ui.cli import write_ai_context
+from auto_pm.ui.cli.__main__ import cli
 
 
 class TestWriteAiContext:

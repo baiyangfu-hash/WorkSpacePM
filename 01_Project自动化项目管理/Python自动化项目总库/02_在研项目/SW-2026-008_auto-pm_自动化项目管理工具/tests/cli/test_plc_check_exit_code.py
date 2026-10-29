@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner, Result
 
+from auto_pm.ui.cli.__main__ import cli
 from tests.plc.test_checker import full_project  # noqa: F401  (pytest fixture: every check passes)
 
 PROJECT_ID = "DJ-2026-FULL"

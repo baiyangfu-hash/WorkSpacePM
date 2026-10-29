@@ -13,14 +13,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.work_registry_service import WorkRegistryService
 from click import ClickException
 from click.testing import CliRunner, Result
 
 import auto_pm.ui.cli.continuity as continuity_cli
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import RunItem, RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
@@ -37,6 +36,7 @@ from auto_pm.contracts.mission import (
     MissionState,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_do
 
 # These tests are about something other than the runtime identity; their fixtures have no registered project anchor.
