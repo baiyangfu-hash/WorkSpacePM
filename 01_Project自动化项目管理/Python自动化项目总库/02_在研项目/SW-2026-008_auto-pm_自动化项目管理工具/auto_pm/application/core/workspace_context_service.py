@@ -430,8 +430,8 @@ class WorkspaceContextService:
     @staticmethod
     def _read_text(path: Path) -> str:
         try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except OSError as error:
+            return path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
             raise WorkspaceContextError(f"无法读取文件: {path}") from error
 
     def _require_workspace_path(self, path: Path, label: str) -> None:

@@ -165,7 +165,7 @@ def _bc_rows(record: Path) -> dict[str, tuple[str, str]]:
     """``{BC id: (状态, 提出时间)}``; the raise time is "" when the table has neither 提出时间 nor 提出日期."""
     rows: dict[str, tuple[str, str]] = {}
     head: list[str] = []
-    for line in record.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in record.read_text(encoding="utf-8").splitlines():
         if not line.lstrip().startswith("|"):
             head = []
             continue
@@ -203,7 +203,10 @@ def _req_checklist_finding(item: str, project_dir: Path, pid: str) -> BasisFindi
     )
     if len(files) != 1:
         return BasisFinding("basis", item, f"本项目 {REQ_DRAWER}/ 里应恰有一份 {req_id}，实际 {len(files)} 份")
-    text = files[0].read_text(encoding="utf-8", errors="replace")
+    try:
+        text = files[0].read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return BasisFinding("basis", item, "需求核对单不是合法 UTF-8，不能当依据")
     confirmed = _REQ_CONFIRMED_VERSION.search(text)
     if not re.search(r"^> 状态：已确认\s*$", text, re.MULTILINE) or confirmed is None:
         return BasisFinding("basis", item, "需求核对单还没有经用户确认（第 8 节未由驾驶舱写入）")
@@ -333,7 +336,12 @@ def _basis_rule(
                 BasisFinding("basis", "02_业务变更记录.md", "本项目变更管理柜里没有业务变更记录表")
             )
         else:
-            rows = _bc_rows(record)
+            try:
+                rows = _bc_rows(record)
+            except UnicodeDecodeError:
+                findings.append(BasisFinding("basis", "02_业务变更记录.md", "业务变更记录表不是合法 UTF-8，不能当依据"))
+                bc_ids = []
+                rows = {}
             for item in bc_ids:
                 if not item.startswith(f"BC-{pid}-"):
                     continue
@@ -365,7 +373,12 @@ def _basis_rule(
             doc_files.append(resolved)
     if items:
         search = doc_files or _req_files(project_dir)
-        texts = [path.read_text(encoding="utf-8", errors="replace") for path in search]
+        texts: list[str] = []
+        for path in search:
+            try:
+                texts.append(path.read_text(encoding="utf-8"))
+            except UnicodeDecodeError:
+                findings.append(BasisFinding("basis", path.name, "需求说明不是合法 UTF-8，不能当依据"))
         for item in items:
             pattern = re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(item)}(?![A-Za-z0-9_-])")
             if not any(pattern.search(text) for text in texts):
