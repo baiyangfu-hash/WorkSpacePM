@@ -21,6 +21,10 @@ code so a card or an audit can quote it:
 * RP-007 a relative ``.md`` pointer inside a pack does not resolve
 * RP-008 the pack differs from the old skill it replaces, or the old skill cannot be found
   (only ``\"retired\": true`` in role.json skips it; no workspace gives UNVERIFIED)
+* RP-009 a text file of the library is not valid UTF-8 or shows mojibake (U+FFFD, C1 controls,
+  UTF-8 read as Latin-1); a ref that differs from the old skill only because the old file is
+  itself broken is listed under ``legacy.known_diffs`` and is accepted only while the old file is
+  still not valid UTF-8
 """
 
 from __future__ import annotations
@@ -52,6 +56,10 @@ LEGACY_MODES = frozenset({"body-equal", "section-contained"})
 SPEC_REGISTRY_RELPATH = "00_Obsidian_Base全局规范文件仓库/spec_registry.json"
 # Only pointers that start like a relative path are followed; bare file names in prose are not.
 MD_POINTER = re.compile(r"(?:\.\./|\./|refs/)[\w./\-]+\.md")
+
+# Signs of UTF-8 text that was read as Latin-1/CP1252 and saved again, or of bytes lost on the way.
+MOJIBAKE = re.compile("\ufffd|[\u0080-\u009f]|[\u00c2\u00c3][\u0080-\u00bf]|\u00e2\u20ac")
+TEXT_SUFFIXES = frozenset({".md", ".json"})
 
 FAIL = "FAIL"
 UNVERIFIED = "UNVERIFIED"
@@ -111,6 +119,14 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _is_utf8(path: Path) -> bool:
+    try:
+        path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 class RolePackService:
     """Check the role packs of one cockpit against themselves, the spec registry and the old skills."""
 
@@ -146,8 +162,27 @@ class RolePackService:
             self._check_legacy_names(pack, config, claimed, result)
             self._check_specs(pack, config, spec_ids, result)
             self._check_pointers(pack, result)
+            self._check_encoding(pack, result)
             self._check_equivalence(pack, config, result)
+        if self.roles_dir is not None and (self.roles_dir / SHARED_DIR).is_dir():
+            self._check_encoding(self.roles_dir / SHARED_DIR, result)
         return result
+
+    def _check_encoding(self, folder: Path, result: RoleCheckResult) -> None:
+        """RP-009: every text file decodes as UTF-8 and shows no mojibake."""
+        for path in sorted(folder.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
+                continue
+            relative = path.relative_to(folder).as_posix()
+            try:
+                text = path.read_bytes().decode("utf-8")
+            except UnicodeDecodeError as error:
+                self._add(result, "RP-009", folder.name, f"{relative} 不是合法 UTF-8（第 {error.start} 字节处），文件已损坏")
+                continue
+            hit = MOJIBAKE.search(text)
+            if hit:
+                line = text.count("\n", 0, hit.start()) + 1
+                self._add(result, "RP-009", folder.name, f"{relative} 第 {line} 行有乱码特征 {hit.group()!r}（UTF-8 被当成别的编码存过）")
 
     def _add(self, result: RoleCheckResult, code: str, role: str, message: str, level: str = FAIL) -> None:
         result.findings.append(RoleFinding(code=code, level=level, role=role, message=message))
@@ -281,9 +316,12 @@ class RolePackService:
                 self._add(result, "RP-008", pack.name, f"正文没有逐字包含旧技能从 {heading!r} 起的内容")
         refs = legacy.get("refs")
         if refs:
-            self._check_refs_equal(pack, root / str(refs), result)
+            known = legacy.get("known_diffs") or {}
+            self._check_refs_equal(pack, root / str(refs), result, known if isinstance(known, dict) else {})
 
-    def _check_refs_equal(self, pack: Path, old_refs: Path, result: RoleCheckResult) -> None:
+    def _check_refs_equal(
+        self, pack: Path, old_refs: Path, result: RoleCheckResult, known_diffs: dict[str, Any]
+    ) -> None:
         """Every file of the old refs/ exists in the pack with the same text."""
         if not old_refs.is_dir():
             self._add(result, "RP-008", pack.name, f"旧技能的 refs 目录 {old_refs.name} 不存在；路径写错请改正，已退役请写 retired")
@@ -296,4 +334,7 @@ class RolePackService:
             if not new.is_file():
                 self._add(result, "RP-008", pack.name, f"refs/{relative.as_posix()} 缺失（旧技能里有）")
             elif _read(new).replace("\r\n", "\n") != _read(old).replace("\r\n", "\n"):
-                self._add(result, "RP-008", pack.name, f"refs/{relative.as_posix()} 与旧技能不一致")
+                name = f"refs/{relative.as_posix()}"
+                if name in known_diffs and not _is_utf8(old):
+                    continue  # the old file is itself broken (RP-009 would fail it); the repaired copy may differ
+                self._add(result, "RP-008", pack.name, f"{name} 与旧技能不一致")
