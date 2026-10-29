@@ -423,6 +423,13 @@ def test_region_cut_through_repeat_is_rejected_and_whole_repeat_inside_is_fine()
     assert _cross(whole) == []
 
 
+def test_lowercase_repeat_is_recognized_when_a_region_cuts_it() -> None:
+    cut = "    region 01_a\n        repeat\n            s_iStep := 2;\n    end_region\n        until s_iStep > 3 end_repeat;"
+    whole = "    region 01_a\n        repeat\n            s_iStep := 2;\n        until s_iStep > 3 end_repeat;\n    end_region"
+    assert _cross(cut) == ["LSP-905-REGION-CROSS-BLOCK"]
+    assert _cross(whole) == []
+
+
 def test_lowercase_keywords_are_recognized_when_a_region_cuts_a_structure() -> None:
     body = "    region 01_a\n        if s_iStep = 1 then\n            s_iStep := 2;\n    end_region\n        end_if;"
     assert _cross(body) == ["LSP-905-REGION-CROSS-BLOCK"]
@@ -468,3 +475,41 @@ def test_state_is_cleared_after_a_multiline_array_closes() -> None:
     body = "    s_arrA : ARRAY[\n        0..9\n    ] OF INT;\n    s_iX : INT;\n    s_arrB : ARRAY[0..2] OF INT;\n    s_arrC : ARRAY[1..2] OF INT;"
     # 只有第 3 行（多行数组起始行）和第 7 行（单行数组）各报一次；中间的普通变量和后面合法数组不受拼接状态影响
     assert _array_rules(body) == [(3, "LSP-905-ARRAY-LOWER-BOUND", "ERROR"), (7, "LSP-905-ARRAY-LOWER-BOUND", "ERROR")]
+
+
+def test_array_bounds_split_over_three_or_more_lines_are_checked_and_comment_semicolons_do_not_cut_them() -> None:
+    # 三行以上续行：下界在中间行，仍按起始行报；续行末尾的 // 注释里带分号不能把拼接截断
+    three = "    s_arrA : ARRAY[\n        0..4,  // 先列 a; 再列 b\n        1..2\n    ] OF INT;"
+    assert _array_rules(three) == [(3, "LSP-905-ARRAY-LOWER-BOUND", "ERROR")]
+    four = "    s_arrA : ARRAY[\n        1..4,\n        1..2,\n        0..3\n    ] OF INT;"
+    assert _array_rules(four) == [(3, "LSP-905-ARRAY-LOWER-BOUND", "ERROR")]
+    assert _array_rules("    s_arrA : ARRAY[\n        1..4,  // a; b\n        1..2\n    ] OF INT;") == []
+
+
+def test_every_legacy_array_entry_still_matches_a_real_declaration() -> None:
+    """存量清单只许变短：条目对应的声明改成 1 起（或文件删了/改名）后必须同时从清单删掉，不留不再生效的死项（TD-236）。"""
+
+    import re
+    import subprocess
+    from pathlib import Path
+
+    from auto_pm.domain.plc.array_lower_bound_legacy import LEGACY_ARRAY_LOWER_BOUND
+
+    here = Path(__file__).resolve()
+    repo = next(p for p in here.parents if (p / "0100_PLC自动化").is_dir())
+    names = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "-z", "--", "0100_PLC自动化"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.split("\0")
+    declarations: set[tuple[str, str]] = set()
+    for name in names:
+        if not name.endswith(".scl"):
+            continue
+        relative = name.removeprefix("0100_PLC自动化/")
+        for line in (repo / name).read_text(encoding="utf-8", errors="replace").splitlines():
+            declarations.add((relative, re.sub(r"\s+", " ", line.split("//")[0]).strip()))
+    dead = sorted(entry for entry in LEGACY_ARRAY_LOWER_BOUND if entry not in declarations)
+    assert dead == [], f"清单里有不再对应任何声明的死项，请删除：{dead}"
