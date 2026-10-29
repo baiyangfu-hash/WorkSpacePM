@@ -40,7 +40,10 @@ WORKTREE_BASELINE = "WORKTREE"
 _FULL_SHA = re.compile(r"[0-9a-f]{40}")
 _PLACEHOLDER = re.compile(r"<[^<>\n]*>|待回写|\bTBD\b")
 # NUL, BEL and the other C0 controls (tab, LF and CR excepted) plus a lone CR: what a shell pipe or heredoc turns an escaped backslash into (TD-SW008-128).
-_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\r(?!\n)")
+# Also the invisible ones that change what a reader sees or where a line ends: NEL, LS/PS and the bidirectional marks and overrides (TD-SW008-239).
+_CONTROL_CHARS = re.compile(
+    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x85\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]|\r(?!\n)"
+)
 _HEADER = re.compile(r"^>\s*(隔离基线|路径根)：(.*)$")
 _BACKTICK = re.compile(r"`([^`]+)`")
 _MAIN_PY = re.compile(r"main\.py[ \t]+([^`\n|]+)")
