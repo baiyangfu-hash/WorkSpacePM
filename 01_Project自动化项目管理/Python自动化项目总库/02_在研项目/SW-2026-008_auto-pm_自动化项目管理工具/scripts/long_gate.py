@@ -51,6 +51,9 @@ LOCK_FILE = "long_gate.lock"
 STOP_FILE = "STOP"
 TOKEN_ENV = "LONG_GATE_LEASE_TOKEN"
 MIN_REMAINING_S = 600
+# `Event.wait(1)` can return a few ms early on a coarse (Windows) timer; a renewal due within this slack counts as due.
+# It only brings a renewal forward, it does not touch the MIN_REMAINING_S floor.
+RENEW_EARLY_SLACK_S = 0.25
 NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 # Final results are never re-run; the others resume on the next `run`.
@@ -554,7 +557,7 @@ class LeaseKeeper(threading.Thread):
         self.next_at = utc_now() + dt.timedelta(seconds=interval)
         while not self._stop_evt.wait(1):
             # A due renewal goes first, so the floor below judges the lease as renewed.
-            if utc_now() >= self.next_at:
+            if utc_now() + dt.timedelta(seconds=RENEW_EARLY_SLACK_S) >= self.next_at:
                 try:
                     self.lease.renew()
                 except Exception as error:  # noqa: BLE001 - any failure is a hard stop
