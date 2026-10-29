@@ -13,10 +13,11 @@ import os
 from pathlib import Path
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
-from auto_pm.models import ChangeSummary, ProjectRecord
+
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.models import ChangeSummary, ProjectRecord
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import ChangeRequestRepository, ProjectRepository
 
 # ── 共享测试数据 ──────────────────────────────────────
 
@@ -401,7 +402,7 @@ class TestUpdateChangeRequest:
 
     def test_update_invalid_urgency_raises(self, workspace_with_chg: str) -> None:
         """urgency 值不合法 → 抛 SpecViolationError"""
-        from auto_pm.change.constants import SpecViolationError
+        from auto_pm.domain.change.constants import SpecViolationError
 
         svc = ChangeService(workspace_with_chg)
         with pytest.raises(SpecViolationError, match="紧急程度"):
@@ -577,8 +578,8 @@ class TestCrossProjectFilter:
     ) -> None:
         """提供 project_id=TEST-2026-001 → 返回项目 A 的文件"""
         workspace, file_a, _ = workspace_with_cross_project_chg
-        from auto_pm.change.file_locator import ChangeFileLocator
-        from auto_pm.change.parser import ChgParser
+        from auto_pm.domain.change.file_locator import ChangeFileLocator
+        from auto_pm.domain.change.parser import ChgParser
 
         locator = ChangeFileLocator(workspace, ChgParser())
         result = locator.find_change_file(
@@ -592,8 +593,8 @@ class TestCrossProjectFilter:
     ) -> None:
         """提供 project_id=TEST-2026-002 → 返回项目 B 的文件"""
         workspace, _, file_b = workspace_with_cross_project_chg
-        from auto_pm.change.file_locator import ChangeFileLocator
-        from auto_pm.change.parser import ChgParser
+        from auto_pm.domain.change.file_locator import ChangeFileLocator
+        from auto_pm.domain.change.parser import ChgParser
 
         locator = ChangeFileLocator(workspace, ChgParser())
         result = locator.find_change_file(
@@ -607,8 +608,8 @@ class TestCrossProjectFilter:
     ) -> None:
         """不提供 project_id → 向后兼容，递归搜索返回第一个匹配"""
         workspace, file_a, _ = workspace_with_cross_project_chg
-        from auto_pm.change.file_locator import ChangeFileLocator
-        from auto_pm.change.parser import ChgParser
+        from auto_pm.domain.change.file_locator import ChangeFileLocator
+        from auto_pm.domain.change.parser import ChgParser
 
         locator = ChangeFileLocator(workspace, ChgParser())
         result = locator.find_change_file("CHG-DOCU-2026-001")
@@ -670,8 +671,8 @@ class TestCrossProjectFilter:
     ) -> None:
         """项目 A 定位成功但没有该单 → 返回 None，不拿项目 B 的同号单（M3-CHGUNIQ）"""
         workspace, file_a, file_b = workspace_with_cross_project_chg
-        from auto_pm.change.file_locator import ChangeFileLocator
-        from auto_pm.change.parser import ChgParser
+        from auto_pm.domain.change.file_locator import ChangeFileLocator
+        from auto_pm.domain.change.parser import ChgParser
 
         os.remove(file_a)
         locator = ChangeFileLocator(workspace, ChgParser())
@@ -684,8 +685,8 @@ class TestCrossProjectFilter:
     ) -> None:
         """project_id 不存在 → 不回退到全工作空间，返回 None（M3-CHGUNIQ）"""
         workspace, _, _ = workspace_with_cross_project_chg
-        from auto_pm.change.file_locator import ChangeFileLocator
-        from auto_pm.change.parser import ChgParser
+        from auto_pm.domain.change.file_locator import ChangeFileLocator
+        from auto_pm.domain.change.parser import ChgParser
 
         locator = ChangeFileLocator(workspace, ChgParser())
         result = locator.find_change_file(

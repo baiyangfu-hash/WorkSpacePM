@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import get_args
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.constants import (
+
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.constants import (
     ALL_STATUSES,
     LEDGER_STATUS_MAP,
     STATUS_FLOW,
@@ -21,9 +22,8 @@ from auto_pm.change.constants import (
     TransitionGuardError,
     validate_status_transition,
 )
-from auto_pm.change.ledger_updater import INDEX_TABLE_SECTION
-from auto_pm.models.enums import ChangeStatus
-
+from auto_pm.domain.change.ledger_updater import INDEX_TABLE_SECTION
+from auto_pm.domain.models.enums import ChangeStatus
 from auto_pm.infrastructure.git_hook_enforcer import enforce_commit_msg
 from tests.infrastructure.test_git_hook_enforcer import _make_dual_root_fixture
 
@@ -200,7 +200,7 @@ def test_create_refuses_to_overwrite_an_abandoned_change_order_file(
 
 def test_abandoning_writes_the_date_when_the_ledger_already_has_the_row(tmp_path: Path) -> None:
     """台账里已经有这条的行（现有测试只走“新建行”那条路）：改状态时也要回写完成日期。"""
-    from auto_pm.change.ledger_updater import LedgerUpdater
+    from auto_pm.domain.change.ledger_updater import LedgerUpdater
 
     workspace = _workspace(tmp_path, "draft")
     ledger = str(next(Path(workspace).rglob("01_版本变更台账.md")))
@@ -215,8 +215,8 @@ def test_abandoning_writes_the_date_when_the_ledger_already_has_the_row(tmp_path
 
 def test_reconcile_backfills_the_date_for_an_abandoned_change_order(tmp_path: Path) -> None:
     """对账补建台账缺失行，和修正状态不一致两条路径，都要给已废弃的写完成日期。"""
-    from auto_pm.change.ledger_reconciler import LedgerReconciler
-    from auto_pm.change.ledger_updater import LedgerUpdater
+    from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
+    from auto_pm.domain.change.ledger_updater import LedgerUpdater
 
     today = datetime.date.today().isoformat()
     project = "TEST-2026-001"

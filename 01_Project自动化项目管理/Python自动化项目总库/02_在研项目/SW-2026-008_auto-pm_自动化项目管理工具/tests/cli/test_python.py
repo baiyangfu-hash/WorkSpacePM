@@ -21,9 +21,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.python_service import derive_package_name
 from click.testing import CliRunner
+
+from auto_pm.application.core.python_service import derive_package_name
+from auto_pm.ui.cli.__main__ import cli
 
 
 def _make_python_project(

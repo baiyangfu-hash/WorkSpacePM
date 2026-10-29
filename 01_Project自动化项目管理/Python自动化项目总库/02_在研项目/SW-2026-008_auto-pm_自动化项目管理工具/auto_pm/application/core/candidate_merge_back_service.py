@@ -84,7 +84,11 @@ class CandidateMergeBackService:
         if result.returncode != 0:
             message = result.stderr.decode("utf-8", errors="replace").strip()
             raise CandidateMergeBackError(f"无法核对控制根: {message or 'git 失败'}")
-        return tuple(item for item in result.stdout.decode("utf-8", errors="replace").split("\0") if item)
+        try:
+            listing = result.stdout.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise CandidateMergeBackError("无法核对控制根: Git 输出的路径不是合法 UTF-8") from error
+        return tuple(item for item in listing.split("\0") if item)
 
     def merge_back(self, run: RunItem, checkpoint: CheckpointItem) -> MergeBackReceipt:
         if not self.is_isolated(run):
@@ -162,7 +166,10 @@ class CandidateMergeBackService:
         )
         if result.returncode != 0:
             return None
-        return result.stdout.decode("utf-8", errors="replace").strip() or None
+        try:
+            return result.stdout.decode("utf-8").strip() or None
+        except UnicodeDecodeError:
+            return None
 
 
 def _same_path(left: Path, right: Path) -> bool:

@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.change.path_resolver import (
+
+from auto_pm.domain.change.path_resolver import (
     PathTraversalError,
     default_ledger_path,
     extract_domain_from_change_number,
@@ -212,8 +213,8 @@ class TestMonitoringLayout:
         assert (tmp_path / "04_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台账.md").is_file()
 
     def test_new_change_file_path_follows_layout(self, tmp_path: Path) -> None:
-        from auto_pm.change.file_locator import ChangeFileLocator
-        from auto_pm.change.parser import ChgParser
+        from auto_pm.domain.change.file_locator import ChangeFileLocator
+        from auto_pm.domain.change.parser import ChgParser
 
         (tmp_path / "11_监控").mkdir()
         locator = ChangeFileLocator(str(tmp_path), ChgParser())

@@ -1,9 +1,9 @@
 import tempfile
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
+from auto_pm.ui.cli.__main__ import cli
 from tests.identity_support import guard_off
 
 
