@@ -20,12 +20,11 @@ from typing import Literal, NoReturn, cast
 from weakref import ReferenceType, ref
 
 import pytest
-from auto_pm.change.ledger_reconciler import ReconcileDiff
-from auto_pm.core.pm_closure_service import PmClosureService
-from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from PySide6.QtCore import QRunnable, Qt, QThreadPool, QTimer
 from PySide6.QtWidgets import QApplication
 
+from auto_pm.application.core.pm_closure_service import PmClosureService
+from auto_pm.application.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_cockpit import (
     PmCockpitCompletion,
@@ -35,6 +34,7 @@ from auto_pm.contracts.pm_cockpit import (
     PmCockpitSnapshot,
 )
 from auto_pm.contracts.pm_facade import PmConfirmationCard, PmConfirmationKind, PmRunOutcome
+from auto_pm.domain.change.ledger_reconciler import ReconcileDiff
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge, _StartWorker
 from tests.core.test_pm_closure_service import _MISSION_ID as _CLOSE_MISSION

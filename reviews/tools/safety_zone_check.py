@@ -82,6 +82,7 @@ SIGNERS = {"baiyangfu-hash": 246858089}
 PLAN_LINE = re.compile(r"^\s*(?:\*\*)?(?:④\s*)?(?:是否涉及)?安全回路(?:\*\*)?\s*[:：]\s*(.*?)\s*$")
 PLAN_CHOICES = ("是", "否")
 PLAN_KEY = "计划栏④（是否涉及安全回路）"
+UNMARKED_REASON = "项目在基线上还没有安全区清单（未标定）：改任何 PLC 程序都按安全区处理"
 DEFAULT_REPO = "baiyangfu-hash/WorkSpacePM"
 SW008_ROOT = TOOL_ROOT / "01_Project自动化项目管理" / "Python自动化项目总库" / "02_在研项目" / "SW-2026-008_auto-pm_自动化项目管理工具"
 SIGN_LINE = re.compile(r"^\s*安全签字\s*[:：]?\s*`?([0-9a-fA-F]{7,40})`?(?:\s.*|[，。；：！、）】」』,;.!)\]].*)?$")
@@ -415,6 +416,7 @@ class Result:
     notes: list[str] = field(default_factory=list)
     plan: str | None = None
     plan_mismatch: bool = False
+    unmarked_only: bool = False
 
     def touch(self, root: str, reason: str) -> None:
         reasons = self.touched.setdefault(root, [])
@@ -516,8 +518,16 @@ def apply_plan(result: Result, plan: str | None, source: str) -> None:
     if plan == "是":
         result.touch(PLAN_KEY, f"{source}填了“是”（涉及安全回路）：不论改到哪些文件都要安全签字")
     elif plan == "否" and result.touched:
-        result.plan_mismatch = True
-        result.touch(PLAN_KEY, f"{source}填了“否”，但本 PR 改到了安全区（见上）：计划与改动不一致，按安全区处理")
+        if all(reason == UNMARKED_REASON for reasons in result.touched.values() for reason in reasons):
+            # “否”是作者声明“不涉及安全回路”；项目未标定时机器无法确认，只能保守地按安全区处理。两者是两回事，不是矛盾（TD-SW008-223）：说清楚，判定不变。
+            result.unmarked_only = True
+            result.touch(
+                PLAN_KEY,
+                f"{source}填了“否”：与本检查不矛盾——“否”是你声明不涉及安全回路，而项目还没标定安全区清单，机器无法确认，只能保守按安全区处理；标定清单后同类改动可免签",
+            )
+        else:
+            result.plan_mismatch = True
+            result.touch(PLAN_KEY, f"{source}填了“否”，但本 PR 改到了安全区（见上）：计划与改动不一致，按安全区处理")
 
 
 def check(
@@ -556,7 +566,7 @@ def check(
                 result.touch(root, f"改了安全区清单 `{path}`")
                 continue
             if not base_zone.marked and is_code(path):
-                result.touch(root, "项目在基线上还没有安全区清单（未标定）：改任何 PLC 程序都按安全区处理")
+                result.touch(root, UNMARKED_REASON)
             if any(fnmatch.fnmatchcase(path.removeprefix(f"{root}/"), p) or fnmatch.fnmatchcase(path, p) for p in zone.files):
                 result.touch(root, f"`{path}` 整个文件在安全区清单里")
             touched_lines(repo, base, head, path, zone, result)
@@ -692,6 +702,8 @@ def status(result: Result) -> tuple[str, str]:
         return "success", "碰了安全区，已有本人对当前提交的有效签字"
     if result.plan_mismatch:
         return "failure", "计划填“否”却碰了安全区：等用户在 PR 上评论“安全签字 <头提交号>”"
+    if result.unmarked_only:
+        return "failure", "项目未标定安全区清单，改 PLC 程序一律保守按安全区处理（与计划填“否”不矛盾）：等用户在 PR 上评论“安全签字 <头提交号>”"
     if result.plan == "是" and list(result.touched) == [PLAN_KEY]:
         return "failure", "计划填了涉及安全回路：等用户在 PR 上评论“安全签字 <头提交号>”"
     return "failure", "碰了安全区：等用户在 PR 上评论“安全签字 <头提交号>”"

@@ -503,9 +503,9 @@ def cmd_verify(
 
     \b
     --ledger-check: 对账门禁，检测台账与 CHG 文件的一致性
-      退出码 0 = 对账无差异（门禁通过）
+      退出码 0 = 对账无差异，且所有变更单都已在 HEAD 提交里（门禁通过）
       退出码 1 = 项目不存在
-      退出码 2 = 有差异（门禁失败，需用 ledger reconcile --fix 修复）
+      退出码 2 = 有差异（门禁失败，需用 ledger reconcile --fix 修复），或有变更单未提交（先提交再验证）
     """
     if not ledger_check:
         console.print("[yellow]请指定验证项，目前支持: --ledger-check[/yellow]")
@@ -528,12 +528,11 @@ def cmd_verify(
     console.print(f"[bold cyan]═══ 变更单对账门禁: {project_id} ═══[/bold cyan]")
     console.print(f"  [cyan]结果:[/cyan] {diff.summary()}")
 
-    from auto_pm.ui.cli.ledger import print_chg_tracking_warning
+    from auto_pm.ui.cli.ledger import exit_with_tracking, print_chg_tracking_warning
 
     if diff.is_clean:
         console.print("[green]✅ 门禁通过: 台账与变更单文件一致[/green]")
-        print_chg_tracking_warning(project_path, verbose=verbose)
-        ctx.exit(0)
+        exit_with_tracking(ctx, 0, project_path, verbose=verbose, block=True)
     else:
         console.print("[red]❌ 门禁失败: 检测到差异[/red]")
         if diff.missing_in_ledger:
@@ -543,7 +542,7 @@ def cmd_verify(
         if diff.status_mismatches:
             console.print(f"  [red]状态不一致 {len(diff.status_mismatches)} 条[/red]")
         console.print("[dim]提示: 运行 `auto-pm ledger reconcile <PID> --fix` 自动修复缺失行和状态不一致[/dim]")
-        print_chg_tracking_warning(project_path, verbose=verbose)
+        print_chg_tracking_warning(project_path, verbose=verbose, block=True)
         ctx.exit(2)
 
 

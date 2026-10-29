@@ -26,6 +26,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from auto_pm.application.core import implementation_card_baseline as card_baseline
 from auto_pm.application.core import implementation_card_basis as basis
 from auto_pm.application.core import implementation_card_tier as card_tier
 from auto_pm.contracts.implementation_card import ImplementationCard
@@ -425,6 +426,14 @@ def precheck_markdown_card(
             [item.path for item in paths if item.state != BASELINE_RUNTIME],
             workspace_root=workspace_root,
             card_file=card_file,
+        )
+    )
+    findings.extend(
+        PrecheckFinding(rule, subject, message)
+        for rule, subject, message in card_baseline.baseline_findings(
+            lines,
+            [item.path for item in paths if item.state != BASELINE_RUNTIME],
+            workspace_root=workspace_root,
         )
     )
     if new_format:

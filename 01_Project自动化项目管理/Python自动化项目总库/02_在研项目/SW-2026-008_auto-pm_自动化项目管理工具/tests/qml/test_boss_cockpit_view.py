@@ -17,9 +17,6 @@ from typing import TYPE_CHECKING, Any, NoReturn, cast
 from weakref import ref
 
 import pytest
-from auto_pm.change.ledger_reconciler import ReconcileDiff
-from auto_pm.core.pm_closure_service import PmClosureService
-from auto_pm.core.pm_cockpit_service import PmCockpitService
 from PySide6.QtCore import (
     Q_ARG,
     QMetaObject,
@@ -38,6 +35,9 @@ from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 from shiboken6 import isValid
 
+from auto_pm.application.core.pm_closure_service import PmClosureService
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
+from auto_pm.domain.change.ledger_reconciler import ReconcileDiff
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
 from tests.core.test_pm_closure_service import (

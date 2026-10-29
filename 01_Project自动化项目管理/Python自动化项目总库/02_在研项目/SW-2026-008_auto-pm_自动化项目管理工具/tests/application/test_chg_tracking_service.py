@@ -173,7 +173,7 @@ def test_reconcile_prints_the_warning_after_the_conclusion_with_relative_paths_a
 
     assert result.exit_code == 0, result.output
     output = result.output
-    assert output.index("对账无差异") < output.index("提交跟踪警告")
+    assert output.index("对账无差异") < output.index("提交跟踪（")
     assert "未入库: 04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-002.md" in output
     assert "SW-1/04_监控" not in output
 
