@@ -162,6 +162,17 @@ def test_a_protected_file_is_allowed_only_when_the_approved_scope_names_it_verba
     assert unauthorised_protected_changes(["tests/test_a.py"], [], ["tests/test_a.py"]) == ("tests/test_a.py",)
 
 
+def test_a_new_conftest_or_test_helper_is_not_a_new_test() -> None:  # 预审 405
+    owned = ["tests/new"]
+    for helper in ("tests/new/conftest.py", "tests/new/helpers.py", "tests/new/fixtures/data.py", "tests/new/__init__.py"):
+        assert unauthorised_protected_changes([helper], owned, [helper]) == (helper,)
+    # the same directory still admits real new test modules
+    for module in ("tests/new/test_x.py", "tests/new/sub/x_test.py"):
+        assert unauthorised_protected_changes([module], owned, [module]) == ()
+    # and naming the conftest verbatim authorises it
+    assert unauthorised_protected_changes(["tests/new/conftest.py"], ["tests/new/conftest.py"], ["tests/new/conftest.py"]) == ()
+
+
 def test_a_new_run_without_a_declaration_is_blocked_end_to_end(tmp_path: Path) -> None:
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_a.py").write_text("assert 1 == 2\n", encoding="utf-8")

@@ -92,8 +92,9 @@ def protected_files_message(
     return f"{head}：{shown}。请核对这些改动是任务本身需要的，而不是为了让检查通过。"
 
 
-# New test files may live in a directory the approved scope names; editing an existing protected file needs its own path named.
-_TEST_PATTERNS = ("tests/*", "*/tests/*", "test_*.py", "*_test.py", "conftest.py")
+# Only a new test module (``test_*.py`` / ``*_test.py``) may live in a directory the approved scope names.  ``conftest.py`` and helper files
+# under ``tests/`` can change what every test does, so they need their own path named like any other protected file.
+_NEW_TEST_PATTERNS = ("test_*.py", "*_test.py")
 
 
 def enforcement_for_run(created_at: object) -> str:
@@ -109,9 +110,8 @@ def enforcement_for_run(created_at: object) -> str:
 
 
 def _is_test_path(path: str) -> bool:
-    normal = _normal(path)
-    base = normal.rsplit("/", 1)[-1]
-    return any(fnmatch.fnmatchcase(normal, p) or fnmatch.fnmatchcase(base, p) for p in _TEST_PATTERNS)
+    base = _normal(path).rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatchcase(base, p) for p in _NEW_TEST_PATTERNS)
 
 
 def unauthorised_protected_changes(
