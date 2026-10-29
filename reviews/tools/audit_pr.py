@@ -83,20 +83,24 @@ class GitError(RuntimeError):
     pass
 
 
-def git(*args: str, cwd: str | None = None, env: dict[str, str] | None = None, check: bool = True) -> str:
-    result = subprocess.run(
-        ["git", "-c", "core.quotepath=off", *args],
-        cwd=cwd,
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+def decode(data: bytes, what: str) -> str:
+    """严格 UTF-8 解码；遇到坏字节不静默吞掉：在标准错误明说，再用替身字符继续（text_encoding 检查另会判 FAIL）。"""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        print(f"警告：{what} 含非法 UTF-8 字节（第 {error.start} 字节），已用替身字符继续", file=sys.stderr)
+        return data.decode("utf-8", errors="replace")
+
+
+def git_bytes(*args: str, cwd: str | None = None, env: dict[str, str] | None = None, check: bool = True) -> bytes:
+    result = subprocess.run(["git", "-c", "core.quotepath=off", *args], cwd=cwd, env=env, capture_output=True, check=False)
     if check and result.returncode != 0:
-        raise GitError(f"git {' '.join(args)}: {result.stderr.strip()}")
+        raise GitError(f"git {' '.join(args)}: {result.stderr.decode('utf-8', errors='replace').strip()}")
     return result.stdout
+
+
+def git(*args: str, cwd: str | None = None, env: dict[str, str] | None = None, check: bool = True) -> str:
+    return decode(git_bytes(*args, cwd=cwd, env=env, check=check), f"git {args[0]} 输出")
 
 
 def git_ok(*args: str, cwd: str | None = None) -> bool:
@@ -126,12 +130,9 @@ def merge_result_tree(ours: str, theirs: str, cwd: str | None = None) -> tuple[b
         ["git", "-c", "core.quotepath=off", "merge-tree", "--write-tree", "--name-only", ours, theirs],
         cwd=cwd,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
     )
-    lines = result.stdout.strip().splitlines()
+    lines = decode(result.stdout, "git merge-tree 输出").strip().splitlines()
     if result.returncode == 0:
         return True, lines[0]
     if result.returncode == 1:
@@ -142,7 +143,7 @@ def merge_result_tree(ours: str, theirs: str, cwd: str | None = None) -> tuple[b
                 break
             names.append(line)
         return False, ", ".join(names) or "冲突"
-    raise GitError(f"git merge-tree: {result.stderr.strip()}")
+    raise GitError(f"git merge-tree: {result.stderr.decode('utf-8', errors='replace').strip()}")
 
 
 def changed_files(base: str, head: str, cwd: str | None = None) -> list[str]:
@@ -211,8 +212,8 @@ def patch_tree(patch: str, base: str, cwd: str | None = None) -> str:
         env = dict(os.environ, GIT_INDEX_FILE=os.path.join(tmp, "index"))
         patch_file = os.path.abspath(patch) if os.path.exists(patch) else os.path.join(tmp, "patch")
         if not os.path.exists(patch):
-            with open(patch_file, "w", encoding="utf-8", errors="replace", newline="") as handle:
-                handle.write(git("show", patch, cwd=cwd))
+            with open(patch_file, "wb") as handle:
+                handle.write(git_bytes("show", patch, cwd=cwd))  # 原样字节写出，补丁里的坏字节也要逐字节比较
         git("read-tree", base, cwd=cwd, env=env)
         git("apply", "--cached", "--whitespace=nowarn", patch_file, cwd=cwd, env=env)
         return git("write-tree", cwd=cwd, env=env).strip()
@@ -233,8 +234,8 @@ def github_json(path: str) -> dict | None:
     request = urllib.request.Request(f"https://api.github.com/repos/{path}", headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
-            return json.loads(response.read().decode("utf-8", errors="replace"))
-    except (urllib.error.URLError, TimeoutError, ValueError):
+            return json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError):  # UnicodeDecodeError 是 ValueError：读不懂就当取不到，判 UNVERIFIED
         return None
 
 
