@@ -8,9 +8,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from auto_pm.change.constants import ChangeRequest, TransitionGuardError
 
 from auto_pm.application.core.pm_closure_service import PmClosureError, PmClosureService
+from auto_pm.domain.change.constants import ChangeRequest, TransitionGuardError
 from auto_pm.domain.change.guard_checker import TransitionGuardChecker
 from auto_pm.domain.change.substance_checker import SubstanceChecker
 from auto_pm.domain.change.substance_injector import SubstanceInjectionError, SubstanceInjector

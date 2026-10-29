@@ -8,8 +8,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.session import pm_session_group
 from click.testing import CliRunner
+
+from auto_pm.ui.cli.session import pm_session_group
 
 SAMPLE_PM_SESSION = """# PM_SESSION_TEST
 

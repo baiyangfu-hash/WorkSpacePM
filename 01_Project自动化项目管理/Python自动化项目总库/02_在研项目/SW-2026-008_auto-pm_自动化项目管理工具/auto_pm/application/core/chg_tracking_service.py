@@ -51,13 +51,16 @@ def check_project_chg_tracking(project_path: str | Path, ref: str = "HEAD") -> C
 
     project = Path(project_path).resolve()
     try:
-        top = Path(_git(project, "rev-parse", "--show-toplevel").decode("utf-8", errors="replace").strip()).resolve()
+        top = Path(_git(project, "rev-parse", "--show-toplevel").decode("utf-8").strip()).resolve()
         _git(top, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
         relative = project.relative_to(top).as_posix()
         listing = _git(top, "ls-tree", "-r", "-z", "--name-only", ref, "--", relative or ".")
     except (OSError, ValueError, subprocess.SubprocessError, _GitError) as error:
         return ChgTrackingReport(ref=ref, skipped_reason=f"无法用 Git 检查（{error}）")
-    tracked = {name for name in listing.decode("utf-8", errors="replace").split("\0") if name}
+    try:
+        tracked = {name for name in listing.decode("utf-8").split("\0") if name}
+    except UnicodeDecodeError as error:
+        return ChgTrackingReport(ref=ref, skipped_reason=f"无法用 Git 检查（{error}）")
     files = sorted(_change_files(project, top))
     untracked: list[str] = []
     modified: list[str] = []

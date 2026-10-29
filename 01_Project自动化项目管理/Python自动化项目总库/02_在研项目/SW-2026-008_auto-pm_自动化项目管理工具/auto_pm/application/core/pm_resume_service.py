@@ -144,8 +144,8 @@ class PmResumeService:
     @staticmethod
     def _read_text(path: Path) -> str:
         try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except OSError as error:
+            return path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
             raise PmResumeError(f"无法读取 PM_SESSION: {path}") from error
 
     @staticmethod

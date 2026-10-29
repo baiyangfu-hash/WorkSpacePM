@@ -9,9 +9,11 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 from auto_pm.cli.__main__ import cli
 from auto_pm.models import ProjectInfo
@@ -130,8 +132,11 @@ class TestRetrofitPythonSrcPath:
 class TestRetrofitSkipExisting:
     """retrofit 在已有 .copier-answers.yml 时跳过"""
 
-    def test_retrofit_skips_when_answers_exist(self, tmp_path: Path) -> None:
+    def test_retrofit_skips_when_answers_exist(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """项目已有 .copier-answers.yml 时应跳过"""
+        # 锚点已在时 retrofit 先核对运行身份（TD-230）；这个裸临时工作区没有登记表，这里只测“跳过”本身
+        project_module = sys.modules[cli.commands["project"].commands["retrofit"].callback.__module__]  # type: ignore[union-attr]
+        monkeypatch.setattr(project_module, "require_runtime_identity", lambda _ctx, _project: None)
         workspace = tmp_path
         project_id = "DJ-2026-002"
         project_dir = _make_plc_project(workspace, project_id, "已有项目")

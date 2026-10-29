@@ -95,6 +95,15 @@ class ContinuityStoreError(RuntimeError):
     """Raised when a continuity transaction cannot be completed safely."""
 
 
+def _decode_git_path(raw: bytes) -> str:
+    """Strict UTF-8: a path with invalid bytes must fail the comparison, not be repaired into a look-alike."""
+
+    try:
+        return raw.decode("utf-8").strip()
+    except UnicodeDecodeError as error:
+        raise ContinuityStoreError("Git 输出的路径不是合法 UTF-8，拒绝比对") from error
+
+
 class ContinuityStoreSchemaError(ContinuityStoreError):
     """The database carries a schema this tool does not know, usually one written by a newer release."""
 
@@ -869,7 +878,7 @@ class ContinuityStore:
         recovery_path = f".auto-pm/decisions/{recovery_decision_id}.json"
         for path in (target_path, recovery_path):
             tracked = self._git_bytes("ls-files", "--error-unmatch", "--", path)
-            if tracked.decode("utf-8", errors="replace").strip() != path:
+            if _decode_git_path(tracked) != path:
                 raise ContinuityStoreError("Decision 文件必须在当前 Git index 中精确跟踪")
         self._require_paths_clean_at_head(target_path, recovery_path)
 
@@ -981,7 +990,7 @@ class ContinuityStore:
         try:
             self._require_control_root()
             tracked = self._git_bytes("ls-files", "--error-unmatch", "--", path)
-            if tracked.decode("utf-8", errors="replace").strip() != path:
+            if _decode_git_path(tracked) != path:
                 raise ContinuityStoreError("Decision 未被精确跟踪")
             self._require_paths_clean_at_head(path)
         except ContinuityStoreError:

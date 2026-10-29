@@ -19,10 +19,11 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
-from auto_pm.models.change import ChangeSummary
-from auto_pm.models.project import ProjectRecord
+
+from auto_pm.domain.models.change import ChangeSummary
+from auto_pm.domain.models.project import ProjectRecord
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import ChangeRequestRepository, ProjectRepository
 
 
 @pytest.fixture

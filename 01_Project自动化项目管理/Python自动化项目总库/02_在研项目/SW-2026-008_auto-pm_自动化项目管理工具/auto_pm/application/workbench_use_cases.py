@@ -408,11 +408,16 @@ class WorkbenchUseCases:
             from auto_pm.application.core.project_delete_guard import (
                 delete_blockers,
                 recycle_project,
+                surface_identity_problem,
             )
 
             project = self.project_service.get_project(project_id)
             if project is None:
                 return CommandOutcome(False, f"项目不存在: {project_id}")
+            # 界面删除与命令行同一道身份门（TD-208）：agent 环境、已启用批准口令时都拒绝，不靠界面按钮默认只有用户点
+            problem = surface_identity_problem(self.project_service.workspace_root, os.environ)
+            if problem:
+                return CommandOutcome(False, f"拒绝删除项目 {project_id}：{problem}")
             # 与命令行同一套护栏（TD-193）：开着任务或有未提交改动时拒绝；删除是把目录搬进回收区，不是 rmtree
             blockers = delete_blockers(self.project_service.workspace_root, project_id, project.path)
             if blockers:

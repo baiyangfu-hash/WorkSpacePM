@@ -30,7 +30,7 @@ def spec_facade_real(spec_registry_workspace: Path) -> SpecFacade:
     - SpecCenterAdapter(workspace=spec_registry_workspace)
     - spec_registry.json 含 2 条规范（plc 文件存在 / python 文件 missing）
     """
-    from auto_pm.spec.services.check_svc import CheckService
+    from auto_pm.domain.spec.services.check_svc import CheckService
 
     check_service = CheckService(workspace=spec_registry_workspace)
     center_service = SpecCenterAdapter(workspace=spec_registry_workspace)

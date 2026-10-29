@@ -9,8 +9,9 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.vartable import vartable_group
 from click.testing import CliRunner
+
+from auto_pm.ui.cli.vartable import vartable_group
 
 SAMPLE_IO_POINTS_CSV = """station,signal_type,address,tag,signal_name,device,comment
 cpu,DI,X0,Z_Home_Sensor,Z轴原点传感器,Z轴伺服原点开关 B16,P35/EFS1/16.7

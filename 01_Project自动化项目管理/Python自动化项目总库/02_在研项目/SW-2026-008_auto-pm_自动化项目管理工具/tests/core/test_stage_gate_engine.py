@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core.gates import StageGateEngine
 
+from auto_pm.application.core.gates import StageGateEngine
 from auto_pm.contracts.gate_dtos import StageGateResultDTO
 
 

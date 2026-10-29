@@ -7,9 +7,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 
 import auto_pm.infrastructure.control_root_guard as control_root_guard
+from auto_pm.application.core.worktree_policy_service import (
+    WorktreePolicyError,
+    WorktreePolicyService,
+)
 from auto_pm.contracts.execution_adapter import WorktreeMode
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,

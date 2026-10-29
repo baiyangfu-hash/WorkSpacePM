@@ -9,9 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.file_locator import AmbiguousChangeNumberError, ChangeFileLocator
-from auto_pm.change.parser import ChgParser
+
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.file_locator import AmbiguousChangeNumberError, ChangeFileLocator
+from auto_pm.domain.change.parser import ChgParser
 
 CHG = "CHG-SCPT-2026-002"
 

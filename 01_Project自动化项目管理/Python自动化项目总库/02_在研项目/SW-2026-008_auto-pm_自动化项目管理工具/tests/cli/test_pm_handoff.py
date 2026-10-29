@@ -12,16 +12,16 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.lease_handover_service import AGENT_MARKERS
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.work_registry_service import WorkRegistryService
 from click.testing import CliRunner, Result
 
 import auto_pm.ui.cli.pm_handoff as pm_handoff_cli
+from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.infrastructure import lease_wallet
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_do
 
 pytestmark = pytest.mark.usefixtures("identity_guard_off")

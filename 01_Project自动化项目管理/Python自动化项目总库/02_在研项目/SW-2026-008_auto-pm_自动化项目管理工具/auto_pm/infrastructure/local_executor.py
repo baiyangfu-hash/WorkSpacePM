@@ -556,8 +556,8 @@ class LocalCodexExecutor:
         if not marker.is_file() or marker.is_symlink():
             raise LocalExecutionError(f"missing committed isolation marker: {ISOLATION_MARKER}")
         try:
-            marker_data = json.loads(marker.read_text(encoding="utf-8", errors="replace"))
-        except json.JSONDecodeError as error:
+            marker_data = json.loads(marker.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise LocalExecutionError("isolation marker is not valid JSON") from error
         if (
             not isinstance(marker_data, dict)

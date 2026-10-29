@@ -7,9 +7,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from auto_pm.core.workspace_registry_service import WorkspaceRegistryError, WorkspaceRegistryService
 from click.testing import CliRunner
 
+from auto_pm.application.core.workspace_registry_service import (
+    WorkspaceRegistryError,
+    WorkspaceRegistryService,
+)
 from auto_pm.ui.cli.__main__ import cli
 
 CONTROL = "SYS-2026-001"

@@ -731,8 +731,8 @@ class ContinuityExecutionService:
         except ValueError as error:
             raise ContinuityExecutionError("legacy handoff 必须位于工作空间内") from error
         try:
-            payload = json.loads(candidate.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, json.JSONDecodeError) as error:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ContinuityExecutionError("legacy handoff 无法读取") from error
         if payload.get("schema_version") != "handoff.v1":
             raise ContinuityExecutionError("未知 handoff schema")
