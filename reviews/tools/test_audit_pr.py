@@ -392,7 +392,7 @@ def test_github_reply_that_is_not_utf8_counts_as_unavailable(monkeypatch):
             return False
 
         def read(self):
-            return b"\xff\xfe{}"
+            return b'{"a": "\xff"}'
 
     monkeypatch.setattr(audit_pr.urllib.request, "urlopen", lambda *a, **k: Reply())
     assert audit_pr.github_json("x/y") is None
