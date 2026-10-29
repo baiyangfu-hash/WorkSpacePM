@@ -440,10 +440,25 @@ def test_p04_plan_no_mismatch_covers_every_way_of_touching_the_zone(repo: Path, 
     assert gate.check(repo, base, head, plan="否").plan_mismatch
 
 
-def test_p05_plan_no_on_an_unmarked_project_is_a_mismatch(tmp_path: Path) -> None:
+def test_p05_plan_no_on_an_unmarked_project_is_not_a_mismatch_but_still_needs_the_signature(tmp_path: Path) -> None:
+    """TD-SW008-223: “否” (the author says no safety circuit) and “unmarked, so treated as safety zone” are two different things; same verdict, honest wording."""
+
     repo = make_repo(tmp_path, marked=False)
     base, head = commit(repo, {FEED: edit_feed("nTimeout := 10;\n// @", "nTimeout := 15;\n// @")})
-    assert gate.check(repo, base, head, plan="否").plan_mismatch
+    result = gate.check(repo, base, head, plan="否")
+    assert result.unmarked_only and not result.plan_mismatch and not result.passed  # the verdict is unchanged
+    assert "不矛盾" in "\n".join(result.touched[gate.PLAN_KEY])
+    state, description = gate.status(result)
+    assert state == "failure" and "未标定" in description and "不矛盾" in description and "却碰了安全区" not in description
+    assert gate.check(repo, base, head, [sign(head)], plan="否").passed
+    assert gate.check(repo, base, head).touched.keys() == result.touched.keys() - {gate.PLAN_KEY}  # without a plan line the same file is judged the same way
+
+
+def test_p05b_plan_no_on_an_unmarked_project_that_also_edits_the_manifest_is_still_a_mismatch(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path, marked=False)
+    base, head = commit(repo, {FEED: edit_feed("nTimeout := 10;\n// @", "nTimeout := 15;\n// @"), MANIFEST: MANIFEST_SRC + "  - EXTRA_OK\n"})
+    result = gate.check(repo, base, head, plan="否")
+    assert result.plan_mismatch and not result.unmarked_only
 
 
 def test_p06_plan_no_and_zone_untouched_passes(repo: Path) -> None:
