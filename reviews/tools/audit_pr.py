@@ -339,6 +339,26 @@ def scan_privacy(lines: list[tuple[str, str]]) -> list[Check]:
     return checks
 
 
+COMPLETION_CLAIM = re.compile(r"已完成|已修复|已偿还|已解决|已落地|已关闭|已搞定|已修好")
+COMMIT_ID = re.compile(r"(?<![0-9A-Za-z])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}(?![0-9A-Za-z])")
+
+
+def scan_completion_evidence(body: str | None) -> Check:
+    """FIX-001 第 3 条：PR 描述写“已完成”之类，必须附提交号（7 位以上十六进制）或明写“未核实”。只报 WARN，不改通过/失败。"""
+    if body is None:
+        return Check("completion_evidence", "UNVERIFIED", "取不到 PR 描述，没法核“完成”是否附了证据")
+    claims = sorted(set(COMPLETION_CLAIM.findall(body)))
+    if not claims:
+        return Check("completion_evidence", "PASS", "PR 描述里没有“已完成”类的断言")
+    if COMMIT_ID.search(body) or "未核实" in body:
+        return Check("completion_evidence", "PASS", "断言“" + "、".join(claims) + "”附了提交号或写明未核实")
+    return Check(
+        "completion_evidence",
+        "WARN",
+        "PR 描述写了“" + "、".join(claims) + "”，但没有提交号（7 位以上十六进制）也没有“未核实”字样（FIX-001 第 3 条），审计者需在报告里点名",
+    )
+
+
 def scan_encoding(files: list[str], head: str, cwd: str | None = None) -> Check:
     """PR 改动的文本文件必须是严格 UTF-8、没有乱码（审计 368）；坏字节在这里判 FAIL，不被 errors=replace 抹掉。"""
     import encoding_check
@@ -382,8 +402,10 @@ def audit(
 
     meta = github_json(f"{repo}/pulls/{pr}") if network else None
     pr_base = None
+    pr_body: str | None = None
     if meta:
         info["title"] = meta.get("title")
+        pr_body = meta.get("body") or ""
         state = "merged" if meta.get("merged_at") else meta.get("state", "unknown")
         pr_base = (meta.get("base") or {}).get("sha")
     else:
@@ -395,6 +417,7 @@ def audit(
     if found or on_main:
         state = "merged"
     info["state"] = state
+    checks.append(scan_completion_evidence(pr_body))
 
     base: str | None = main
     if state == "merged":

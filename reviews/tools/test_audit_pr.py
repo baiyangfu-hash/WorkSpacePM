@@ -396,3 +396,30 @@ def test_github_reply_that_is_not_utf8_counts_as_unavailable(monkeypatch):
 
     monkeypatch.setattr(audit_pr.urllib.request, "urlopen", lambda *a, **k: Reply())
     assert audit_pr.github_json("x/y") is None
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (None, "UNVERIFIED"),
+        ("只是说明，没有断言", "PASS"),
+        ("本卡已修复，见提交 16488b08", "PASS"),
+        ("已完成，但验证未核实", "PASS"),
+        ("已完成", "WARN"),
+        ("已偿还；words deadbeef only letters", "WARN"),  # 纯字母不算提交号
+        ("已修复 abc12", "WARN"),  # 不足 7 位
+    ],
+)
+def test_completion_claim_needs_evidence(body, expected):
+    assert audit_pr.scan_completion_evidence(body).status == expected
+
+
+def test_audit_warns_when_pr_body_claims_done_without_evidence(world, monkeypatch):
+    head = world["open_pr"](50, {"src/app.py": "x = 50\n"})
+    meta = {"state": "open", "head": {"sha": head}, "base": {"sha": world["base"]}, "body": "已完成"}
+    monkeypatch.setattr(audit_pr, "github_json", lambda path: meta if path.endswith("/pulls/50") else None)
+    _info, checks = world["audit"](50, network=True)
+    assert status(checks, "completion_evidence") == "WARN"
+    meta["body"] = "已完成，提交 1a2b3c4d"
+    _info, checks = world["audit"](50, network=True)
+    assert status(checks, "completion_evidence") == "PASS"
