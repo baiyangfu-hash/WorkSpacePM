@@ -33,13 +33,13 @@ from typing import Any
 
 import yaml
 
-from auto_pm.vartable.models import (
+from auto_pm.domain.vartable.models import (
     BlockEntry,
     BlockTable,
     ParseError,
     ParseResult,
 )
-from auto_pm.vartable.utils.encoding import read_file_with_detection
+from auto_pm.domain.vartable.utils.encoding import read_file_with_detection
 
 # program_blocks.yml 必需字段（与 AssetSummaryService._BLOCK_REQUIRED_KEYS 对齐）
 REQUIRED_KEYS: tuple[str, ...] = ("name", "type", "path", "responsibility")

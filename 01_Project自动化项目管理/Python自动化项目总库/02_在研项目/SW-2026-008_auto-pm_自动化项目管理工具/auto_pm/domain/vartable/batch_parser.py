@@ -27,8 +27,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.vartable.models import FormatType, ParseResult
-from auto_pm.vartable.parsers.format_detector import (
+from auto_pm.domain.vartable.models import FormatType, ParseResult
+from auto_pm.domain.vartable.parsers.format_detector import (
     detect_format,
     get_parser_for_format,
 )

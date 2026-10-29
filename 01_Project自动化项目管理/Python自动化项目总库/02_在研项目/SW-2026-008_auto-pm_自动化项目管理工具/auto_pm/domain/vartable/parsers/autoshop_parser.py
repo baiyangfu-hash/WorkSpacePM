@@ -27,8 +27,8 @@ import io
 from datetime import UTC, datetime
 from pathlib import Path
 
-from auto_pm.vartable.models import ParseError, ParseResult, VarEntry, VarTable
-from auto_pm.vartable.parsers.base_parser import BaseParser
+from auto_pm.domain.vartable.models import ParseError, ParseResult, VarEntry, VarTable
+from auto_pm.domain.vartable.parsers.base_parser import BaseParser
 
 SOURCE_FORMAT = "autoshop"
 
@@ -69,8 +69,8 @@ class AutoshopParser(BaseParser):
         Returns:
             True 表示是 Autoshop 格式（.asc/.asn 扩展名或内容含中文列名）
         """
-        from auto_pm.vartable.models import FormatType
-        from auto_pm.vartable.parsers.format_detector import detect_format
+        from auto_pm.domain.vartable.models import FormatType
+        from auto_pm.domain.vartable.parsers.format_detector import detect_format
 
         return bool(detect_format(file_path) == FormatType.AUTOSHOP)
 
