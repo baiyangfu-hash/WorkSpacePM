@@ -2059,3 +2059,34 @@ def test_lease_commands_explain_the_idempotency_key(cli_runner: CliRunner, comma
     result = cli_runner.invoke(cli, ["continuity", "lease", command, "--help"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "防重复的键" in result.output and "换新的" in result.output
+
+
+def test_run_with_renewal_kills_the_command_when_the_keepalive_gives_up(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import auto_pm.application.core.lease_keepalive as keepalive_module
+    from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
+
+    _hold_run(tmp_path)
+    marker = tmp_path / "survived.txt"
+    original_init = keepalive_module.LeaseKeepAlive.__init__
+    real_renew = keepalive_module.LeaseKeepAlive._renew_once
+    calls = {"n": 0}
+
+    def fast_init(self: object, *args: object, **kwargs: object) -> None:
+        original_init(self, *args, interval_seconds=0.05, **kwargs)  # type: ignore[arg-type]
+
+    def renew_once_then_refuse(self: keepalive_module.LeaseKeepAlive) -> None:
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise ContinuityExecutionError("租约已过期")
+        real_renew(self)
+
+    monkeypatch.setattr(keepalive_module.LeaseKeepAlive, "__init__", fast_init)
+    monkeypatch.setattr(keepalive_module.LeaseKeepAlive, "_renew_once", renew_once_then_refuse)
+    monkeypatch.setattr(keepalive_module.LeaseKeepAlive, "_remaining_seconds", lambda self: 0.0)
+    code = f"import time; time.sleep(60); open({str(marker)!r}, 'w').write('x')"
+    result = _wrap(cli_runner, tmp_path, [sys.executable, "-c", code])
+    assert result.exit_code == 125, result.output
+    assert "命令已被终止" in result.output
+    assert not marker.exists()

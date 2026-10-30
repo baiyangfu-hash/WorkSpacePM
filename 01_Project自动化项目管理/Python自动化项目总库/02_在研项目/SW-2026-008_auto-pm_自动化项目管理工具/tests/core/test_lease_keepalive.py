@@ -125,11 +125,14 @@ def test_the_keepalive_gives_up_only_when_the_lease_is_nearly_gone(tmp_path: Pat
 
     monkeypatch.setattr(service, "renew_lease", switchable)
     monkeypatch.setattr("auto_pm.application.core.lease_keepalive.MAX_RETRY_SECONDS", 0.02)
-    with _keepalive(service) as keepalive:
+    gave_up: list[str] = []
+    with _keepalive(service, on_give_up=lambda: gave_up.append("called")) as keepalive:
         _wait_for(lambda: keepalive.renewals >= 1)
+        assert gave_up == []
         state["fail"] = True
         _wait_for(lambda: state["attempts"] >= 4)  # still plenty of lease: keeps retrying, no error yet
         assert keepalive.error == ""
         clock.value += timedelta(seconds=880)  # 20 s left: below the give-up floor
         _wait_for(lambda: bool(keepalive.error))
     assert keepalive.error == "ledger busy"
+    assert gave_up == ["called"]
