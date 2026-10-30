@@ -852,14 +852,12 @@ def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
         return marker
 
     monkeypatch.setattr(facade._execution, "prepare", fake_prepare)
-    assert (
-        facade.prepare_planning_execution(
-            card,
-            expected_plan_hash=card.plan_hash,
-            lease_token="one-time-secret",
-        )
-        is marker
+    prepared: Any = facade.prepare_planning_execution(
+        card,
+        expected_plan_hash=card.plan_hash,
+        lease_token="one-time-secret",
     )
+    assert prepared is marker
     active = facade._store.get_mission(first_mission.mission_id)
     assert active.state is MissionState.ACTIVE
     assert active.root_work_id == first_work.work_id
