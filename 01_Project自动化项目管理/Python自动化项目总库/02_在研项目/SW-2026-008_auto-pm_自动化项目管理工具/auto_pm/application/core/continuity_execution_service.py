@@ -23,6 +23,7 @@ from auto_pm.application.core.evidence_collection_service import (
 from auto_pm.contracts.continuity import (
     CheckpointItem,
     HandoffV2,
+    LeaseHoldReceipt,
     LeaseItem,
     LeaseRenewalReceipt,
     RunItem,
@@ -324,6 +325,21 @@ class ContinuityExecutionService:
                 version=lease.version,
                 updated_at=lease.updated_at,
             )
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def extend_lease_hold(
+        self, run_id: str, extra_seconds: int, evidence_ref: str, idempotency_key: str
+    ) -> LeaseHoldReceipt:
+        try:
+            result = self._store.extend_lease_hold(run_id, extra_seconds, evidence_ref, idempotency_key)
+            return LeaseHoldReceipt(run_id=str(result["run_id"]), hold_end=str(result["hold_end"]))
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def lease_hold_status(self, run_id: str) -> dict[str, object]:
+        try:
+            return self._store.lease_hold_status(run_id)
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 

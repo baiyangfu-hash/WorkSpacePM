@@ -1217,6 +1217,8 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
     click.echo(f"下一合法动作: {payload.next_legal_action or '-'}")
     for conflict in payload.conflicts:
         click.echo(f"冲突: {conflict}")
+    for warning in payload.hold_warnings:
+        click.echo(f"🔴 {warning}")
     if not payload.intake.is_empty:
         click.echo(
             f"收件箱: 待确认 {payload.intake.awaiting_confirmation} 条 | "

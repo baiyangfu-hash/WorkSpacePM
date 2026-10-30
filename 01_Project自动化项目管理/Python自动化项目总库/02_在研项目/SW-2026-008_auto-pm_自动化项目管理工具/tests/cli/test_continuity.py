@@ -1878,3 +1878,112 @@ def test_mission_cli_create_is_admitted_like_pm_approve(cli_runner: CliRunner, t
     # a retry of the same card is not a new card
     assert _invoke(cli_runner, tmp_path, _create_args("MISSION-CLI-B")).exit_code == 0
     assert len(store.list_missions("SW-TEST-001")) == 2
+
+
+def _hold_run(tmp_path: Path) -> None:
+    _repository(tmp_path)
+    works = WorkRegistryService(tmp_path)
+    works.initialize("test")
+    works.create_work(
+        work_id="WORK-CLI-HOLD",
+        subject_project_id="SW-TEST-001",
+        kind=WorkKind.GOVERNANCE,
+        title="hold",
+        owner="architect",
+        scope_paths=["README.md"],
+        source_fingerprint="sha256:hold",
+        idempotency_key="hold-work",
+        read_only=True,
+    )
+    ContinuityExecutionService(tmp_path).start_run(
+        run_id="RUN-CLI-HOLD",
+        work_id="WORK-CLI-HOLD",
+        executor_id="agent-a",
+        adapter="codex",
+        owned_paths=["README.md"],
+        declared_dirty_paths=[],
+        observed_dirty_paths=[],
+        git_head=_head(tmp_path),
+        worktree_path=str(tmp_path),
+        lease_token="hold-secret",
+        lease_seconds=900,
+        idempotency_key="hold-run",
+    )
+
+
+def test_lease_extend_hold_cli_accepts_only_user_evidence(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _hold_run(tmp_path)
+    base = [
+        "lease",
+        "extend-hold",
+        "--run-id",
+        "RUN-CLI-HOLD",
+        "--extra-seconds",
+        "3600",
+        "--idempotency-key",
+    ]
+
+    for bad in ("", "claude: ok", "user-confirmation:claude-wrote-this"):
+        refused = _invoke(
+            cli_runner, tmp_path, [*base, f"hold-bad-{len(bad)}", "--approval-evidence-ref", bad]
+        )
+        assert refused.exit_code == 1, bad
+        assert "只听用户本人" in refused.output
+
+    ok = _invoke(
+        cli_runner,
+        tmp_path,
+        [*base, "hold-ok", "--approval-evidence-ref", "user-confirmation:2026-10-29-16:00"],
+    )
+    assert ok.exit_code == 0, ok.output
+    assert json.loads(ok.output)["run_id"] == "RUN-CLI-HOLD"
+
+
+def test_lease_extend_hold_cli_with_a_committed_pin_needs_the_pin_not_the_evidence_text(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import auto_pm.ui.cli.approval_pin as approval_pin
+    from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
+
+    _hold_run(tmp_path)
+    pin = "relay-K1-on"
+    key = make_key("baiyang", pin, n=2**10)
+    monkeypatch.setattr(ApprovalProofService, "committed_state", lambda self: ([key], ""))
+    before = ContinuityExecutionService(tmp_path).lease_hold_status("RUN-CLI-HOLD")["hold_end"]
+    args = [
+        "lease",
+        "extend-hold",
+        "--run-id",
+        "RUN-CLI-HOLD",
+        "--extra-seconds",
+        "3600",
+        "--approval-evidence-ref",
+        "user-confirmation:2026-10-29-16:00",
+        "--idempotency-key",
+    ]
+
+    # No terminal: a well-formed user-confirmation string alone must not extend anything.
+    refused = _invoke(cli_runner, tmp_path, [*args, "hold-pin-1"])
+    assert refused.exit_code == 1, refused.output
+    assert (
+        ContinuityExecutionService(tmp_path).lease_hold_status("RUN-CLI-HOLD")["hold_end"] == before
+    )
+
+    # A terminal with a wrong PIN: still nothing.
+    monkeypatch.setattr(approval_pin, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr(approval_pin, "_prompt_hidden", lambda text: "wrong-pin-123")
+    wrong = _invoke(cli_runner, tmp_path, [*args, "hold-pin-2"])
+    assert wrong.exit_code == 1, wrong.output
+    assert (
+        ContinuityExecutionService(tmp_path).lease_hold_status("RUN-CLI-HOLD")["hold_end"] == before
+    )
+
+    # The right PIN extends.
+    monkeypatch.setattr(approval_pin, "_prompt_hidden", lambda text: pin)
+    ok = _invoke(cli_runner, tmp_path, [*args, "hold-pin-3"])
+    assert ok.exit_code == 0, ok.output
+    assert (
+        ContinuityExecutionService(tmp_path).lease_hold_status("RUN-CLI-HOLD")["hold_end"] != before
+    )

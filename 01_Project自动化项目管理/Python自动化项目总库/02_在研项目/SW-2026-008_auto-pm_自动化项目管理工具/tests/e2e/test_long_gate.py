@@ -388,6 +388,77 @@ def test_auto_pm_renewal_never_writes_the_token(lab: dict[str, Path]) -> None:
     assert "renewal ok version=8" in (lab["out"] / "long_gate.log").read_text()
 
 
+def _auto_pm_lab(lab: dict[str, Path], main_py: str, lease_extra: dict[str, Any]) -> Path:
+    import sqlite3
+
+    root = lab["root"] / "control"
+    (root / ".auto-pm").mkdir(parents=True)
+    con = sqlite3.connect(root / ".auto-pm" / "continuity.db")
+    con.execute("create table execution_leases (run_id text, version integer)")
+    con.execute("insert into execution_leases values ('RUN-SW008-X-001', 7)")
+    con.commit()
+    con.close()
+    (lab["root"] / "token.txt").write_text("tok\n", encoding="utf-8")
+    (root / "main.py").write_text(main_py, encoding="utf-8")
+    cfg_path = _config(lab, [{"name": "ok", "argv": ["{python}", "-c", "print(1)"]}])
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    cfg["root"] = str(root)
+    cfg["lease"] = {"mode": "auto_pm", "run_id": "RUN-SW008-X-001", "owner": "o",
+                    "token_file": str(lab["root"] / "token.txt"), "renew_interval_s": 1200, **lease_extra}
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+    return cfg_path
+
+
+FAKE_MAIN = (
+    "import datetime as dt, json, sys\n"
+    "a = sys.argv[1:]\n"
+    "open('../calls.log', 'a').write(' '.join(a[:3]) + '\\n')\n"
+    "if a[2] == 'extend-hold':\n"
+    "    assert a[a.index('--extra-seconds') + 1] == '36000', a\n"
+    "    assert a[a.index('--approval-evidence-ref') + 1] == 'user-confirmation:msg-42', a\n"
+    "    assert a[a.index('--idempotency-key') + 1] == 'run-sw008-x-001-gate-hold', a\n"
+    "    print(json.dumps({'run_id': 'RUN-SW008-X-001'})); sys.exit(0)\n"
+    "exp = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)).isoformat()\n"
+    "print(json.dumps({'version': 8, 'expires_at': exp}))\n"
+)
+
+
+def test_dispatch_approval_extends_the_hold_once_before_the_first_renewal(lab: dict[str, Path]) -> None:
+    cfg = _auto_pm_lab(lab, FAKE_MAIN, {"dispatch_approval_ref": "user-confirmation:msg-42"})
+    r = _run(cfg, "run")
+    assert r.returncode == 0, (lab["out"] / "long_gate.log").read_text()
+    calls = (lab["root"] / "calls.log").read_text().splitlines()
+    assert calls[:2] == ["continuity lease extend-hold", "continuity lease renew"]
+    assert calls.count("continuity lease extend-hold") == 1
+
+
+def test_without_dispatch_approval_no_extension_is_requested(lab: dict[str, Path]) -> None:
+    cfg = _auto_pm_lab(lab, FAKE_MAIN, {})
+    assert _run(cfg, "run").returncode == 0
+    assert "extend-hold" not in (lab["root"] / "calls.log").read_text()
+
+
+def test_refused_extension_stops_the_gate_before_any_step(lab: dict[str, Path]) -> None:
+    refuse = "import sys\nif sys.argv[3] == 'extend-hold':\n    print('只听用户本人', file=sys.stderr); sys.exit(1)\n"
+    cfg = _auto_pm_lab(lab, refuse, {"dispatch_approval_ref": "user-confirmation:msg-42"})
+    assert _run(cfg, "run").returncode != 0
+    assert _state(lab)["result"] == "LEASE_FAILED_AT_START"
+    assert not (lab["out"] / "ok.exit").exists()
+
+
+@pytest.mark.parametrize("bad", ["", "claude-said-ok", 7])
+def test_dispatch_approval_must_be_a_user_confirmation_string(tmp_path: Path, bad: object) -> None:
+    mod = _module()
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({"name": "x", "out_dir": str(tmp_path / "o"), "root": str(tmp_path), "python": "p",
+                             "fingerprint": {"git_worktree": str(tmp_path)},
+                             "lease": {"mode": "auto_pm", "run_id": "R", "owner": "o", "wallet": True,
+                                       "dispatch_approval_ref": bad},
+                             "steps": [{"name": "a", "argv": ["x"]}]}), encoding="utf-8")
+    with pytest.raises(mod.GateError, match="dispatch_approval_ref"):
+        mod.load_config(p)
+
+
 def test_task_xml_runs_on_battery_at_normal_priority_without_trigger() -> None:
     mod = _module()
     xml = mod.task_xml(r"C:\WS\.venv\Scripts\pythonw.exe", '-B "C:\\a b\\long_gate.py" run --config "C:\\中文\\g.json"',
