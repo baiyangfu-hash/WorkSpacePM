@@ -139,3 +139,27 @@ def test_control_root_drift_lists_modified_and_untracked_owned_files_only(tmp_pa
     drift = CandidateMergeBackService(control).control_root_drift(("proj/src",), head)
 
     assert drift == ("proj/src/block.scl", "proj/src/loose.scl")
+
+
+@pytest.mark.parametrize(
+    ("current", "baseline", "observed", "expected"),
+    [
+        (None, None, None, True),  # 两边都没有这个文件：视为仍是起点版本
+        (None, "abc", None, False),  # 起点有、控制根里被删了
+        (b"new", None, None, False),  # 起点没有、控制根里多出来：不是起点版本（不能因 None==None 放行）
+        (b"x", "abc", None, False),  # 起点有、读控制根文件的哈希失败（None）：不能当相等
+        (b"x", "abc", "abc", True),
+        (b"x", "abc", "def", False),
+    ],
+)
+def test_the_baseline_check_never_treats_two_unreadable_values_as_equal(
+    monkeypatch: pytest.MonkeyPatch, current: bytes | None, baseline: str | None, observed: str | None, expected: bool
+) -> None:
+    """审计 380 P3：`_equals_baseline` 里“哈希读不出来”（None）与“起点没有此文件”（None）不能被当成相等而放行。"""
+    service = object.__new__(CandidateMergeBackService)
+
+    def fake_git(arguments: list[str], *, stdin: bytes | None = None) -> str | None:
+        return baseline if arguments[0] == "rev-parse" else observed
+
+    monkeypatch.setattr(service, "_git", fake_git)
+    assert service._equals_baseline("proj/a.scl", current, "HEAD0") is expected
