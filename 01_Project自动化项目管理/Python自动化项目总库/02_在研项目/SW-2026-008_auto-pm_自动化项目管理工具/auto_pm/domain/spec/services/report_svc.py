@@ -12,14 +12,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from auto_pm.spec.core.config import (
+from auto_pm.domain.spec.core.config import (
     DOMAIN_LABELS,
     DOMAIN_ORDER,
     LIFECYCLE_ICONS,
     SUB_DOMAIN_ORDER,
     WorkspaceConfig,
 )
-from auto_pm.spec.core.registry import SpecRegistry
+from auto_pm.domain.spec.core.registry import SpecRegistry
 
 
 @dataclass

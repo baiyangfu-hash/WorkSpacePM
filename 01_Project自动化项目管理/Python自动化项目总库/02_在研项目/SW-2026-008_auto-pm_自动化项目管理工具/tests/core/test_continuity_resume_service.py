@@ -1256,3 +1256,32 @@ def test_an_expired_lease_plus_another_conflict_still_gives_no_next_action(tmp_p
 
     assert set(result.conflicts) == {"LEASE_EXPIRED", "RUNTIME_IDENTITY_UNVERIFIED"}
     assert result.next_legal_action == ""
+
+
+def _renew_times(tmp_path: Path, times: int) -> None:
+    """Renew RUN-001's lease ``times`` times, 10 minutes apart, starting 10 minutes after the Run began."""
+    clock = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
+    store = ContinuityStore(tmp_path, _clock=lambda: clock)
+    for index in range(times):
+        clock = clock + timedelta(minutes=10)
+        version = store.get_lease("RUN-001").version
+        store.renew_lease(
+            "RUN-001", "agent-a", "lease-secret", 900, f"renew-{index}", expected_version=version
+        )
+
+
+def test_ten_renewals_put_a_red_flag_in_orient_but_nine_do_not(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _run(tmp_path)
+    _renew_times(tmp_path, 9)
+    service = ContinuityResumeService(tmp_path, now=lambda: datetime(2026, 9, 9, 13, 31, tzinfo=UTC))
+    assert service.collect(project_id="SW-2026-008").hold_warnings == ()
+
+    store = ContinuityStore(tmp_path, _clock=lambda: datetime(2026, 9, 9, 13, 30, tzinfo=UTC))
+    store.renew_lease(
+        "RUN-001", "agent-a", "lease-secret", 900, "renew-9", expected_version=store.get_lease("RUN-001").version
+    )
+    warnings = service.collect(project_id="SW-2026-008").hold_warnings
+    assert len(warnings) == 1 and "续租 10 次" in warnings[0]
+    assert service.collect(project_id="SW-2026-008").conflicts == ()  # a flag, not a block

@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from auto_pm.plc import milestones as ms
+from auto_pm.domain.plc import milestones as ms
 
 SPEC_RELATIVE = Path("0100_PLC自动化") / "00_通用规范" / "项目周期规范.md"
 MAIN_TYPES = ("纯电气", "机电协作")

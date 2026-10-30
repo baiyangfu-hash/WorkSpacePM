@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from auto_pm.logging.logging import _SilentTimedRotatingFileHandler
+from auto_pm.infrastructure.logging.logging import _SilentTimedRotatingFileHandler
 
 # AUTO_PM_AUDIT_DIR 设为以下值时禁用审计日志（不创建目录、不写文件）
 _AUDIT_DISABLED_VALUES = {"off", "disabled", "none", "0", "false", ""}
