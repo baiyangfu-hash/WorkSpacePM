@@ -16,12 +16,11 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from PySide6.QtCore import QObject, Slot
 
-from auto_pm.application.core.ai_handoff_service import ENTRY_SKILL
-from auto_pm.core.ai_handoff_service import AiHandoffService
+from auto_pm.application.core.ai_handoff_service import ENTRY_SKILL, AiHandoffService
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +239,7 @@ class AiContextBridge(QObject):
     @Slot(str, result="QVariant")
     def listPendingHandoffs(self, project_id: str = "") -> list[dict[str, Any]]:
         """Expose pending executor handoffs for the cockpit work queue."""
-        return cast(list[dict[str, Any]], self._handoff_service().list_pending(project_id))
+        return self._handoff_service().list_pending(project_id)
 
     @Slot(str, str, str, str, str, str, str, str, result="QVariant")
     def writePmClosureContext(

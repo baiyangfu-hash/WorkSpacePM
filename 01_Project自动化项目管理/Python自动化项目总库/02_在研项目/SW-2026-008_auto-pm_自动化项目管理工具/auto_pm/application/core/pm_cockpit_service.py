@@ -10,17 +10,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 
-from auto_pm.core.continuity_query_service import ContinuityQueryService
-from auto_pm.core.mission_admission import admission_verdict
-from auto_pm.core.pm_closure_service import (
+from auto_pm.application.core.continuity_query_service import ContinuityQueryService
+from auto_pm.application.core.mission_admission import admission_verdict
+from auto_pm.application.core.pm_closure_service import (
     ClosureCompletionState,
     PmClosureError,
     PmClosureService,
 )
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.contracts.continuity import (
     CheckpointItem,
     RunItem,
@@ -336,10 +334,7 @@ class PmCockpitService:
     def confirm_start(self, mission_id: str) -> PmConfirmationCard:
         """Apply the first human confirmation without exposing root Work identifiers."""
         try:
-            return cast(
-                PmConfirmationCard,
-                self._real_facade().confirm_start(mission_id),
-            )
+            return self._real_facade().confirm_start(mission_id)
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
@@ -364,15 +359,12 @@ class PmCockpitService:
         facade = self._facade_override or self._real_facade()
         try:
             card = facade.recover_planning_scope_card(mission_id)
-            return cast(
-                PmRunOutcome,
-                facade.run_approved_planning(
+            return facade.run_approved_planning(
                     card,
                     expected_plan_hash=card.plan_hash,
                     lease_token=secrets.token_urlsafe(32),
                     lease_token_environment=_LEASE_ENVIRONMENT,
-                ),
-            )
+                )
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
@@ -386,15 +378,12 @@ class PmCockpitService:
             raise PmCockpitError(_APPROVER_MISSING_REASON)
         facade = self._facade_override or self._real_facade()
         try:
-            return cast(
-                PlanningApprovalResult,
-                facade.approve_pending_planning_scope_card(
+            return facade.approve_pending_planning_scope_card(
                     request_id,
                     expected_plan_hash=plan_hash,
                     approver=self._approver,
                     approval_evidence_ref=self._approval_evidence(plan_hash),
-                ),
-            )
+                )
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
@@ -407,10 +396,7 @@ class PmCockpitService:
     def confirm_acceptance(self, mission_id: str) -> PmConfirmationCard:
         """Apply final user acceptance after the existing verification gate has opened."""
         try:
-            return cast(
-                PmConfirmationCard,
-                self._real_facade().accept(mission_id),
-            )
+            return self._real_facade().accept(mission_id)
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 

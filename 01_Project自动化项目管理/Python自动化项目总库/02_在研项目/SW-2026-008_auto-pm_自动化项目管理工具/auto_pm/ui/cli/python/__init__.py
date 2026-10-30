@@ -15,17 +15,17 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, cast
+from typing import Any
 
 import click
 from rich.console import Console
 from rich.table import Table
 
 from auto_pm.app_context import AppContext
-from auto_pm.core.paths import PYTHON_REQUIRED_DIRS
-from auto_pm.core.project_service import ProjectService
-from auto_pm.core.python_service import derive_package_name
-from auto_pm.core.template_service import TemplateService
+from auto_pm.application.core.paths import PYTHON_REQUIRED_DIRS
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.application.core.python_service import derive_package_name
+from auto_pm.application.core.template_service import TemplateService
 from auto_pm.ui.cli.runtime_identity_guard import warn_runtime_identity
 
 console = Console()
@@ -226,7 +226,7 @@ def cmd_repair(
     if not dry_run:
         # Repair is what mends a broken project: warn only.
         warn_runtime_identity(ctx, project_id)
-    from auto_pm.core.python_service import PythonProjectService
+    from auto_pm.application.core.python_service import PythonProjectService
     package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     templates_dir = os.path.join(package_dir, "templates")
     py_svc = PythonProjectService(app_ctx.workspace_root, templates_dir=templates_dir)
@@ -244,11 +244,11 @@ def cmd_repair(
 
 def _check_python_project(project_path: str, project_id: str) -> dict[str, Any]:
     """检查单个 Python 项目规范"""
-    from auto_pm.core.python_service import PythonProjectService
+    from auto_pm.application.core.python_service import PythonProjectService
     package_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     templates_dir = os.path.join(package_dir, "templates")
     svc = PythonProjectService(os.path.dirname(project_path), templates_dir=templates_dir)
-    return cast(dict[str, Any], svc.check_project_spec(project_path, project_id))
+    return svc.check_project_spec(project_path, project_id)
 
 
 def _is_python_project(project_path: str) -> bool:
