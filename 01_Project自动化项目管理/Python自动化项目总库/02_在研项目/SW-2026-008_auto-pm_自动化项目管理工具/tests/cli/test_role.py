@@ -24,8 +24,7 @@ def _real_workspace() -> Path:
 def test_role_list_names_the_library_packs(cli_runner: CliRunner) -> None:
     result = cli_runner.invoke(cli, ["-w", str(_real_workspace()), "role", "list"])
     assert result.exit_code == 0, result.output
-    names = result.output.split()
-    assert {"fullstack-engineer", "plc-electrical-engineer", "product-pm"} <= set(names)
+    assert result.output.split() == ["fullstack-engineer", "plc-electrical-engineer", "product-pm", "test-engineer", "ui-designer"]
 
 
 def test_role_check_json_on_the_real_library_is_clean(cli_runner: CliRunner) -> None:
