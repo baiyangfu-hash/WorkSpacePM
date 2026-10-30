@@ -6205,8 +6205,9 @@ class ContinuityStore:
             observed_at = self._utc_now()
             run = self._get_run(conn, run_id)
             self._refuse_if_parked(conn, run_id, "不能续租")
-            if run.state not in {RunState.READY, RunState.RUNNING}:
-                raise ContinuityStoreError("只有 READY 或 RUNNING Run 可以续租")
+            # VERIFYING is the holder still working (one verify takes ~15 min); owner and token are checked below as always.
+            if run.state not in {RunState.READY, RunState.RUNNING, RunState.VERIFYING}:
+                raise ContinuityStoreError("只有 READY、RUNNING 或 VERIFYING Run 可以续租")
             current = self._get_lease(conn, run_id)
             if current.owner_id != owner_id or current.lease_token != lease_token:
                 raise ContinuityStoreError("lease ownership 不匹配")
