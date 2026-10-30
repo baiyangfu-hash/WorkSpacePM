@@ -23,6 +23,7 @@ from auto_pm.contracts.intake import (
     parse_evidence,
 )
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
+from auto_pm.domain.change.path_resolver import monitoring_dir_name
 from auto_pm.infrastructure.continuity_store import ContinuityStoreError
 from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 from auto_pm.infrastructure.intake_store import IntakeStore
@@ -326,7 +327,8 @@ class PmIntakeService:
             candidates = [project_id, context.control_project_id, *self._ledger_owner_projects(service, ledger_id)]
             for item in dict.fromkeys(identifier for identifier in candidates if identifier):
                 subject = service.resolve(project_id=item, start_path=self._root).subject
-                directory = (self._root / subject.path / "04_监控" / "02_整改项").resolve()
+                project_root = self._root / subject.path
+                directory = (project_root / monitoring_dir_name(str(project_root)) / "02_整改项").resolve()
                 if directory.is_dir() and directory not in directories:
                     directories.append(directory)
         except WorkspaceContextError as error:
