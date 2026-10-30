@@ -1,0 +1,3 @@
+# F28 最短复现
+.venv/bin/python main.py continuity run start ... --declared-dirty README.md ...
+# → Error: declared_dirty_paths 超出 owned_paths（范围外文件永远无法声明）
