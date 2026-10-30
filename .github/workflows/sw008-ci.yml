@@ -104,7 +104,7 @@ jobs:
 
       - name: Mypy (win32 platform, as the product runs on Windows)
         working-directory: ${{ env.PROJ }}
-        run: python -m mypy --platform win32 --no-incremental --cache-dir=/dev/null auto_pm
+        run: python -m mypy --platform win32 --no-incremental --cache-dir=/dev/null auto_pm tests
 
       - name: Pytest
         id: pytest

@@ -38,7 +38,7 @@ def test_the_facade_refuses_when_the_status_step_returns_no_change(monkeypatch: 
 def test_the_sdk_refuses_when_the_status_step_returns_no_change(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cockpit_api, "ChangeService", _Changes)
     client = object.__new__(cockpit_api.CockpitClient)
-    client._root = tmp_path  # type: ignore[attr-defined]
+    client._root = tmp_path
     with pytest.raises(cockpit_api.CockpitApiError, match="不可批准"):
         client._approve_change(CARD, "user")  # type: ignore[arg-type]
 

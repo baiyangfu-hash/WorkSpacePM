@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 from pydantic import BaseModel
 
+from auto_pm.infrastructure import lease_wallet
 from auto_pm.ui.cli import pm_closure
 
 
@@ -52,7 +53,7 @@ def _wire(monkeypatch: pytest.MonkeyPatch, events: list[str], *, keepalive_error
     monkeypatch.setattr(pm_closure, "PmFacadeService", _Facade)
     monkeypatch.setattr(pm_closure, "ContinuityExecutionService", lambda *_a, **_k: object())
     monkeypatch.setattr(pm_closure, "LeaseKeepAlive", _KeepAlive)
-    monkeypatch.setattr(pm_closure.lease_wallet, "load", lambda *_a, **_k: "TOKEN")
+    monkeypatch.setattr(lease_wallet, "load", lambda *_a, **_k: "TOKEN")
 
 
 def _verify(tmp_path: Path) -> Any:

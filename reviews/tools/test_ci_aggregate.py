@@ -185,3 +185,12 @@ def test_sw008_ci_runs_on_push_only_for_main_but_still_on_every_pr_and_by_hand()
     pr_block = on_block[on_block.index("\n  pull_request:\n") : on_block.index("\n  workflow_dispatch:")]
     assert "branches: [main]" in pr_block and "paths:" in pr_block  # PR 那一轮不变
     assert "\n  workflow_dispatch:" in on_block  # 手动触发（受保护清单改动要手动跑）仍可用
+
+
+def test_sw008_ci_mypy_step_checks_tests_as_well_as_the_product() -> None:
+    """tests/ 的类型存量清零后，CI 的 mypy 步骤要连测试一起查，否则新写的测试可以带着类型错误合进去（pm verify 的通用门禁本来就查）。"""
+    text = (WORKFLOWS / "sw008-ci.yml").read_text(encoding="utf-8")
+    step = text[text.index("      - name: Mypy") : text.index("      - name: Pytest")]
+    command = next(line for line in step.splitlines() if "python -m mypy" in line)
+    assert command.split()[-2:] == ["auto_pm", "tests"]
+    assert "--platform win32" in command and "continue-on-error" not in step
