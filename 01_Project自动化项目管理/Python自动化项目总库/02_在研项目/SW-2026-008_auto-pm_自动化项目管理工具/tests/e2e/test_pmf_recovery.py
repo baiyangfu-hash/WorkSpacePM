@@ -599,7 +599,7 @@ def _fake_kernel32(handle: int, exit_call_ok: int, exit_code: int) -> SimpleName
     ids=["no-such-process", "api-failure-on-open", "api-failure-on-exit-code", "real-exit", "still-active"],
 )
 def test_v04t_an_api_failure_is_unknown_and_never_an_exit(handle: int, last_error: int, exit_call_ok: int, exit_code: int, expected: str) -> None:
-    ctypes.set_last_error(last_error)
+    ctypes.set_last_error(last_error)  # type: ignore[attr-defined,unused-ignore]  # Windows only
     assert _process_state(4242, _fake_kernel32(handle, exit_call_ok, exit_code)) == expected
 
 

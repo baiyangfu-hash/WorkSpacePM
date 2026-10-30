@@ -62,7 +62,7 @@ def cli_in_terminal(drill: Drill, typed: list[str], *arguments: str) -> Step:
     """
 
     command = [sys.executable, str(drill.tools / "launcher.py"), "-w", str(drill.root), *arguments]
-    master, slave = os.openpty()
+    master, slave = os.openpty()  # type: ignore[attr-defined,unused-ignore]
     stderr = b""
     try:
         process = subprocess.Popen(

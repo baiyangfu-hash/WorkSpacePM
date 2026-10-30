@@ -212,9 +212,9 @@ def _install_fake_codex(tools: Path) -> None:
     source = tools / "codex-source"
     source.mkdir()
     (source / "codex").write_text("#!python\n" + FAKE_CODEX, encoding="utf-8")
-    maker = ScriptMaker(str(source), str(tools))
-    maker.executable = sys.executable
-    made = maker.make("codex")
+    maker = ScriptMaker(str(source), str(tools))  # type: ignore[no-untyped-call]
+    maker.executable = sys.executable  # type: ignore[assignment]
+    made = maker.make("codex")  # type: ignore[no-untyped-call]
     assert [Path(path).name for path in made] == ["codex.exe"], made
 
 

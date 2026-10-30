@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +10,8 @@ import click
 import pytest
 from click.testing import CliRunner
 
+from auto_pm.domain.plc import cycle_plan as cp
+from auto_pm.domain.plc import doc_consistency as dc
 from auto_pm.ui.cli import plc as plc_cli
 from auto_pm.ui.cli import python as python_cli
 from auto_pm.ui.cli.plc import plc_group
@@ -50,7 +53,7 @@ def _obj(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(control_root=tmp_path, workspace_root=str(tmp_path), templates_dir=str(tmp_path))
 
 
-def _refuse(asked: list[str]):  # noqa: ANN202
+def _refuse(asked: list[str]) -> Callable[[click.Context, str], None]:
     def refuse(_ctx: click.Context, project: str) -> None:
         asked.append(project)
         raise click.ClickException("运行身份未通过校验，已拒绝写入：测试")
@@ -133,16 +136,16 @@ def test_plc_docs_writes_are_refused_but_previews_and_isolated_copies_are_not(
     monkeypatch.setattr(docs_cli, "require_runtime_identity", _refuse(asked))
     monkeypatch.setattr(docs_cli, "ProjectService", _Projects)
 
-    def recorder(name: str):  # noqa: ANN202
+    def recorder(name: str) -> Callable[..., None]:
         def call(*_a: object, **_k: object) -> None:
             calls.append(name)
             raise RuntimeError("stop here")  # CliRunner turns this into a non-zero exit; only the call matters
 
         return call
 
-    monkeypatch.setattr(docs_cli.dc, "sync_project", recorder("sync"))
-    monkeypatch.setattr(docs_cli.dc, "confirm_project", recorder("confirm"))
-    plan = ["plan", "P-1", "--start", "2026-01-01", "--type", docs_cli.cp.MAIN_TYPES[0], "--scale", "单机", "--write"]
+    monkeypatch.setattr(dc, "sync_project", recorder("sync"))
+    monkeypatch.setattr(dc, "confirm_project", recorder("confirm"))
+    plan = ["plan", "P-1", "--start", "2026-01-01", "--type", cp.MAIN_TYPES[0], "--scale", "单机", "--write"]
     for args in (["sync", "P-1"], ["confirm", "P-1"], plan):
         result = CliRunner().invoke(docs_group, args, obj=_obj(tmp_path))
         assert result.exit_code != 0
@@ -188,6 +191,6 @@ def test_plc_docs_plan_on_an_isolated_copy_does_not_ask_the_guard(monkeypatch: p
 
     asked: list[str] = []
     monkeypatch.setattr(docs_cli, "require_runtime_identity", _refuse(asked))
-    args = ["plan", "P-1", "--project-path", str(tmp_path), "--start", "2026-01-01", "--type", docs_cli.cp.MAIN_TYPES[0], "--scale", "单机", "--write"]
+    args = ["plan", "P-1", "--project-path", str(tmp_path), "--start", "2026-01-01", "--type", cp.MAIN_TYPES[0], "--scale", "单机", "--write"]
     CliRunner().invoke(docs_group, args, obj=_obj(tmp_path))
     assert asked == []

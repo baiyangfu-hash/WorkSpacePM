@@ -16,8 +16,9 @@ import pytest
 from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QApplication
 
-from auto_pm.application.core.pm_cockpit_service import PmCockpitCompletionState, PmCockpitService
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
 from auto_pm.contracts.mission import MissionState
+from auto_pm.contracts.pm_cockpit import PmCockpitCompletionState
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
 from tests.core.test_pm_cockpit_dual_root import _roots, _work
 from tests.core.test_pm_facade_service import _setup
