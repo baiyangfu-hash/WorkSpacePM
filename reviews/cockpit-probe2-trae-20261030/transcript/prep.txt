@@ -1,0 +1,23 @@
+# 准备阶段命令（2026-10-30，MST；只记录未走 cmdlines.log 的引导命令）
+
+- `git status --short` → 空输出，exit 0
+- `git branch --show-current` → `trae/cockpit-probe-20261030`，exit 0
+- `git log --oneline -5` → 顶部 `91017e5f feat: update workspace`，exit 0
+- `git rev-parse --is-shallow-repository` → `true`，exit 0
+- `git fetch origin main` → `* branch main -> FETCH_HEAD`，exit 0
+- `git fetch --unshallow` → 空输出，exit 0
+- `git rev-parse --is-shallow-repository`（再查）→ `false`，exit 0
+- `git rev-parse --short origin/main` → `fatal: Needed a single revision`，exit 128（单分支克隆没有 origin/main 引用，符合预期）
+- `git show --stat --oneline 91017e5f` → 28 文件 / 935 行，含 `0100_项目/.../ZZ-2026-901_cockpit_probe_fake/*` 与 `.auto-pm/decisions/DEC-20261030-*.json`，exit 0（平台自动提交的一轮假项目，未带入本轮分支）
+- `git ls-remote origin main` → `17b5faf5edcefec142e4ac637afffc7eaf0f8448 refs/heads/main`，exit 0
+- `ls 00_Infrastructure/auto_pm/releases/` → 1.2.3-813105c … 1.3.3-d8f7c8b（**无 1.3.3-8d7d387**），exit 0
+- `cat 00_Infrastructure/auto_pm/active_release.json` → `"release_id": "1.3.3-d8f7c8b"`，exit 0
+- `git switch -c trae/cockpit-probe2-trae-20261030 FETCH_HEAD` → 切到 17b5faf5，exit 0
+- `git status --short` → 空，exit 0
+- `ls -la .auto-pm/` → 无 continuity.db（只有 ai_feedback.json / artifacts / decisions / reports），exit 0
+- `python3 --version` → 3.14.8；`python3.12 --version` → 3.12.3，exit 0
+- `PIP_INDEX_URL=https://pypi.org/simple sh 00_Infrastructure/auto_pm/environment/setup_env.sh` → 建 .venv、按锁定文件装齐、`[成功] 环境就绪`，exit 0（Qt 运行库缺失为警告）
+- `main.py --resolve-only` → `release verified via active_release.json: .../1.3.3-d8f7c8b`，exit 0
+- `main.py --version` → `auto-pm, version 1.3.3`，exit 0
+- `PYTHONPATH=00_Infrastructure/auto_pm -m auto_pm --version` → `1.2.4`，exit 0（main 根源码比发布快照旧）
+- `PYTHONPATH=<SW-2026-008 项目> -m auto_pm --version` → `1.3.3`，exit 0

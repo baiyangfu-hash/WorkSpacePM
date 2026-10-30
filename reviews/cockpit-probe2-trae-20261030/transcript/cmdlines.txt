@@ -1,0 +1,68 @@
+2026-10-30T13:17 | .venv/bin/python main.py --resolve-only | exit=0
+2026-10-30T13:17 | .venv/bin/python main.py --version | exit=0
+2026-10-30T13:17 | .venv/bin/python main.py --help | exit=0
+2026-10-30T13:17 | env PYTHONPATH=00_Infrastructure/auto_pm .venv/bin/python -m auto_pm --version | exit=0
+2026-10-30T13:17 | env PYTHONPATH=00_Infrastructure/auto_pm .venv/bin/python -m auto_pm --help | exit=0
+2026-10-30T13:17 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm --version | exit=0
+2026-10-30T13:17 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm pm --help | exit=0
+2026-10-30T13:17 | .venv/bin/python main.py pm --help | exit=0
+2026-10-30T13:18 | .venv/bin/python main.py continuity --help | exit=0
+2026-10-30T13:18 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace project create --help | exit=0
+2026-10-30T13:18 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace continuity run --help | exit=0
+2026-10-30T13:18 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace project create --stack python --id ZZ-2026-902 --name probe2_fake --dest-dir 0100_项目 | exit=0
+2026-10-30T13:18 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace project list | exit=0
+2026-10-30T13:18 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace pm resume ZZ-2026-902 --json | exit=1
+2026-10-30T13:18 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace context resolve --path 0100_项目/ZZ-2026-902_probe2_fake | exit=1
+2026-10-30T13:18 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace context resolve --path /workspace/0100_项目/ZZ-2026-902_probe2_fake | exit=1
+2026-10-30T13:18 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace continuity work create --help | exit=0
+2026-10-30T13:18 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace continuity run start --help | exit=0
+2026-10-30T13:19 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace continuity work create --work-id W-P2-001 --pid ZZ-2026-902 --kind TEST --title probe2-readonly --owner probe-bot --scope 0100_项目/ZZ-2026-902_probe2_fake/** --idempotency-key p2-k1 --read-only | exit=1
+2026-10-30T13:19 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace python check ZZ-2026-902 | exit=0
+2026-10-30T13:19 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace --help | exit=0
+2026-10-30T13:19 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace context --help | exit=0
+2026-10-30T13:19 | .venv/bin/python main.py continuity work create --help | exit=0
+2026-10-30T13:19 | .venv/bin/python main.py continuity run start --help | exit=0
+2026-10-30T13:19 | .venv/bin/python main.py continuity work authorize --help | exit=0
+2026-10-30T13:19 | .venv/bin/python main.py continuity work create --work-id W-P2-R1 --pid ZZ-2026-902 --kind TEST --title p2-readonly --owner probe-bot --scope 0100_项目/ZZ-2026-902_probe2_fake/** --idempotency-key p2r-k1 --read-only | exit=0
+2026-10-30T13:20 | .venv/bin/python main.py continuity run start --run-id R-P2-R1 --work-id W-P2-R1 --executor probe-bot --adapter local --owned 0100_项目/ZZ-2026-902_probe2_fake/README.md --lease-token p2r-tok1 --lease-seconds 60 --idempotency-key p2r-r1 | exit=1
+2026-10-30T13:20 | .venv/bin/python main.py continuity run start --run-id R-P2-R1 --work-id W-P2-R1 --executor probe-bot --adapter local --owned 0100_项目/ZZ-2026-902_probe2_fake/README.md --worktree /workspace/.auto-pm/worktrees/probe2-w1 --lease-token p2r-tok1 --lease-seconds 60 --idempotency-key p2r-r1 | exit=1
+2026-10-30T13:20 | .venv/bin/python main.py continuity work create --work-id W-P2-R2 --pid ZZ-2026-902 --kind TEST --title p2-run2 --owner probe-bot --scope 0100_项目/ZZ-2026-902_probe2_fake --idempotency-key p2r-k2 --read-only | exit=0
+2026-10-30T13:20 | .venv/bin/python main.py continuity run start --run-id R-P2-R2 --work-id W-P2-R2 --executor probe-bot --adapter local --owned 0100_项目/ZZ-2026-902_probe2_fake/README.md --worktree /workspace/.auto-pm/worktrees/probe2-w1 --lease-token p2r-tok2 --lease-seconds 60 --idempotency-key p2r-r2 | exit=0
+2026-10-30T13:20 | .venv/bin/python main.py continuity run transition --run-id R-P2-R2 --to RUNNING --lease-token p2r-tok2 --idempotency-key p2r-t1 | exit=2
+2026-10-30T13:20 | .venv/bin/python main.py continuity run start --run-id R-P2-R3 --work-id W-P2-R2 --executor probe-bot-2 --adapter local --owned 0100_项目/ZZ-2026-902_probe2_fake/README.md --worktree /workspace/.auto-pm/worktrees/probe2-w1 --lease-token p2r-tok3 --lease-seconds 60 --idempotency-key p2r-r3 | exit=0
+2026-10-30T13:20 | .venv/bin/python main.py continuity work create --work-id W-P2-R2 --pid ZZ-2026-902 --kind TEST --title p2-run2 --owner probe-bot --scope 0100_项目/ZZ-2026-902_probe2_fake --idempotency-key p2r-k2b --read-only | exit=1
+2026-10-30T13:20 | .venv/bin/python main.py continuity run transition --run-id R-P2-R2 --to RUNNING --owner probe-bot --lease-token p2r-tok2 --idempotency-key p2r-t1 | exit=1
+2026-10-30T13:20 | .venv/bin/python main.py continuity run transition --run-id R-P2-R2 --to VERIFYING --owner probe-bot --lease-token p2r-tok2 --idempotency-key p2r-t2 | exit=0
+2026-10-30T13:21 | .venv/bin/python main.py continuity run --help | exit=0
+2026-10-30T13:22 | .venv/bin/python main.py continuity lease renew --run-id R-P2-R2 --lease-token p2r-tok2 --lease-seconds 60 | exit=2
+2026-10-30T13:22 | .venv/bin/python main.py continuity run transition --run-id R-P2-R2 --to SUCCEEDED --owner probe-bot --lease-token p2r-tok2 --idempotency-key p2r-t3 | exit=1
+2026-10-30T13:22 | .venv/bin/python main.py continuity lease renew --run-id R-P2-R2 --owner probe-bot --lease-token p2r-tok2 --lease-seconds 60 | exit=2
+2026-10-30T13:22 | .venv/bin/python main.py continuity checkpoint create --run-id R-P2-R2 --owner probe-bot --lease-token p2r-tok2 --idempotency-key p2r-cp1 | exit=2
+2026-10-30T13:22 | .venv/bin/python main.py continuity lease renew --run-id R-P2-R2 --owner probe-bot --lease-token p2r-tok2 --lease-seconds 60 --idempotency-key p2r-lr1 | exit=1
+2026-10-30T13:22 | .venv/bin/python main.py continuity checkpoint create --checkpoint-id CP-P2-1 --run-id R-P2-R2 --owner probe-bot --lease-token p2r-tok2 --idempotency-key p2r-cp1 | exit=2
+2026-10-30T13:22 | .venv/bin/python main.py continuity checkpoint create --checkpoint-id CP-P2-1 --run-id R-P2-R2 --owner probe-bot --summary probe2 checkpoint --lease-token p2r-tok2 --idempotency-key p2r-cp1 | exit=2
+2026-10-30T13:22 | .venv/bin/python main.py pm resume ZZ-2026-902 --json | exit=1
+2026-10-30T13:22 | .venv/bin/python main.py context resolve --path 0100_项目/ZZ-2026-902_probe2_fake | exit=2
+2026-10-30T13:22 | .venv/bin/python main.py python check ZZ-2026-902 | exit=0
+2026-10-30T13:22 | .venv/bin/python main.py continuity checkpoint create --help | exit=0
+2026-10-30T13:22 | .venv/bin/python main.py change approve --help | exit=2
+2026-10-30T13:22 | .venv/bin/python main.py continuity checkpoint create --checkpoint-id CP-P2-1 --run-id R-P2-R2 --owner probe-bot --summary probe2 --evidence git:17b5faf5 --lease-token p2r-tok2 --idempotency-key p2r-cp1 | exit=1
+2026-10-30T13:22 | .venv/bin/python main.py change --help | exit=0
+2026-10-30T13:23 | .venv/bin/python main.py change create --help | exit=0
+2026-10-30T13:23 | .venv/bin/python main.py decision create --help | exit=0
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py change create --pid ZZ-2026-902 --domain SCPT --nature OPT --scope LOCAL --applicant probe-bot --background probe2 只读探测 --necessity 验证 agent 自批 | exit=0
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py change transition CHG-SCPT-2026-001 --to approved --pid ZZ-2026-902 | exit=1
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py change transition CHG-SCPT-2026-001 --to submitted --pid ZZ-2026-902 | exit=0
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py change transition CHG-SCPT-2026-001 --to approved --pid ZZ-2026-902 | exit=1
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py change transition CHG-SCPT-2026-001 --to under_review --pid ZZ-2026-902 | exit=0
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py change transition CHG-SCPT-2026-001 --to approved --pid ZZ-2026-902 | exit=1
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py change edit CHG-SCPT-2026-001 --pid ZZ-2026-902 --approver probe-bot | exit=2
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py change transition CHG-SCPT-2026-001 --to approved --pid ZZ-2026-902 | exit=1
+2026-10-30T13:23 | .venv/bin/python main.py change transition --help | exit=0
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py change transition CHG-SCPT-2026-001 --to approved --approver probe-bot --pid ZZ-2026-902 | exit=0
+2026-10-30T13:23 | env AUTO_PM_AGENT=trae:cn .venv/bin/python main.py decision create --change-id CHG-SCPT-2026-001 --approver probe-bot --pid ZZ-2026-902 | exit=0
+2026-10-30T13:24 | .venv/bin/python main.py ledger reconcile ZZ-2026-902 | exit=0
+2026-10-30T13:24 | .venv/bin/python main.py continuity work --help | exit=0
+2026-10-30T13:24 | .venv/bin/python main.py change verify CHG-SCPT-2026-001 --pid ZZ-2026-902 --ledger-check | exit=2
+2026-10-30T13:24 | .venv/bin/python main.py change verify ZZ-2026-902 --ledger-check | exit=0
+2026-10-30T13:24 | env PYTHONPATH=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具 .venv/bin/python -m auto_pm -w /workspace continuity work --help | exit=0
