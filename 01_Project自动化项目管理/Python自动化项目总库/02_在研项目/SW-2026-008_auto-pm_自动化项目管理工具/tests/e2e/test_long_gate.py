@@ -602,6 +602,20 @@ def test_the_floor_is_not_loosened_when_no_renewal_is_due(tmp_path: Path, monkey
     assert keeper.reason is not None and "(< 600)" in keeper.reason
 
 
+def test_the_early_wake_slack_is_a_small_fixed_window_with_an_inclusive_edge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 续租提前量只补 Windows 计时器的粗糙度（早醒），不是“提前续租”：到期还差 0.25 秒（含）才算到期，再差一点就不续。
+    mod = _module()
+    assert mod.RENEW_EARLY_SLACK_S == 0.25
+    # 唤醒早了 0.25 秒：离到期正好差 0.25 秒，边界含在内，要续。
+    keeper, renewals = _run_keeper_on_fake_clock(mod, monkeypatch, tmp_path, early_s=0.25, interval_s=1, lease_left_s=590)
+    assert renewals == [1] and keeper.reason is None
+    # 唤醒早了 0.26 秒：离到期差 0.26 秒，超过提前量，不能续；租约在 600 秒下限之下，必须照旧拦停。
+    keeper, renewals = _run_keeper_on_fake_clock(mod, monkeypatch, tmp_path, early_s=0.26, interval_s=1, lease_left_s=590)
+    assert renewals == [] and keeper.reason is not None and "(< 600)" in keeper.reason
+
+
 def test_concurrent_status_writes_do_not_crash(tmp_path: Path) -> None:
     import threading
 
