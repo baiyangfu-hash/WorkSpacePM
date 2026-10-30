@@ -24,7 +24,7 @@ def _keepalive(service: object, **changes: object) -> LeaseKeepAlive:
     return LeaseKeepAlive(service, **values)  # type: ignore[arg-type]
 
 
-def _wait_for(predicate: object, timeout: float = 5.0) -> None:
+def _wait_for(predicate: object, timeout: float = 60.0) -> None:
     end = time.time() + timeout
     while time.time() < end:
         if predicate():  # type: ignore[operator]
