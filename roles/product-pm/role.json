@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "product-pm",
+  "title": "产品型项目经理",
+  "kind": "manager",
+  "legacy_names": [],
+  "required_specs": [
+    "PM-033",
+    "PM-042"
+  ],
+  "allowed_commands": [
+    "pm orient",
+    "pm resume",
+    "pm inbox add",
+    "pm inbox list",
+    "pm inbox show",
+    "pm inbox confirm",
+    "pm plan",
+    "pm approve",
+    "pm confirm-start",
+    "pm verify",
+    "pm close",
+    "pm handoff",
+    "pm takeover",
+    "ledger reconcile",
+    "doc check"
+  ],
+  "gates": [
+    "main.py doc check",
+    "main.py ledger reconcile <PID>"
+  ],
+  "receipt_fields": [
+    "需求原文",
+    "可改范围",
+    "验收标准与命令退出码",
+    "是否涉及安全回路",
+    "风险",
+    "回退办法",
+    "需要用户决定的点"
+  ],
+  "owned_paths_patterns": [],
+  "owned_paths_note": "项目经理不写业务代码，不占 owned paths",
+  "enforcement": {
+    "claude_code": "待生成 hooks 与 permissions.deny（后续卡）",
+    "trae": "仅说明文字，无机器拦截",
+    "cursor": "仅说明文字，无机器拦截"
+  },
+  "legacy": {
+    "mode": "section-contained",
+    "source": ".trae/skills/cockpit-entry/SKILL.md",
+    "from_heading": "## 没有已授权的 Work 之前，只能用这些只读命令"
+  }
+}

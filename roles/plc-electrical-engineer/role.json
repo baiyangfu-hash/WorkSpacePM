@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "plc-electrical-engineer",
+  "title": "编程工程师（PLC）",
+  "kind": "engineer",
+  "domain": "plc",
+  "legacy_names": [],
+  "required_specs": [
+    "LSP-905",
+    "LSP-906",
+    "LSP-907",
+    "STD-830",
+    "STD-840",
+    "STD-850",
+    "STD-860"
+  ],
+  "allowed_commands": [
+    "pm resume",
+    "plc check",
+    "doc check",
+    "continuity checkpoint",
+    "pm handoff"
+  ],
+  "gates": [
+    "main.py plc check <PID>",
+    "main.py doc check"
+  ],
+  "receipt_fields": [
+    "PASS",
+    "FAIL",
+    "NOT_RUN",
+    "外部编译 NOT_RUN（用户未导入博图/InoProShop 时）",
+    "checkpoint_id"
+  ],
+  "owned_paths_patterns": [
+    "**/*.scl",
+    "**/*.st"
+  ],
+  "owned_paths_note": "仅为申请范围的上限，实际可改范围以 Work 的 owned paths 为准",
+  "enforcement": {
+    "claude_code": "待生成 hooks 与 permissions.deny（后续卡）",
+    "trae": "仅说明文字，无机器拦截",
+    "cursor": "仅说明文字，无机器拦截"
+  },
+  "legacy": {
+    "mode": "body-equal",
+    "source": ".trae/skills/plc-electrical-engineer/SKILL.md",
+    "refs": ".trae/skills/plc-electrical-engineer/refs",
+    "known_diffs": {
+      "refs/siemens-lsp-and-testing.md": "旧文件第 132 行末尾有一段损坏字节（非法 UTF-8 的残片），角色库副本已删去残片；旧文件待 .trae 放开后同样修复"
+    }
+  }
+}
