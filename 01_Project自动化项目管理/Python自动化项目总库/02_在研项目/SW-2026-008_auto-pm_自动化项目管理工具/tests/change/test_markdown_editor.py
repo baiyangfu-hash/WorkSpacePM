@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from auto_pm.change.constants import ChangeRequest
-from auto_pm.change.generator import ChgGenerator
-from auto_pm.change.markdown_editor import ChangeMarkdownEditor
+from auto_pm.domain.change.constants import ChangeRequest
+from auto_pm.domain.change.generator import ChgGenerator
+from auto_pm.domain.change.markdown_editor import ChangeMarkdownEditor
 
 
 class TestChangeMarkdownEditor:
@@ -26,7 +26,7 @@ class TestChangeMarkdownEditor:
             background="测试",
             necessity="测试",
         )
-        return ChgGenerator().render(cr)
+        return str(ChgGenerator().render(cr))
 
     def test_append_to_verification_table_v2(self) -> None:
         """测试三节结构下追加验证项到 §10.1 末尾（M1-2）

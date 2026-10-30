@@ -30,14 +30,22 @@ import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 DEFAULT_REPO = "baiyangfu-hash/WorkSpacePM"
 WORKFLOW_FILE = ".github/workflows/sw008-ci.yml"
 MERGE_SEARCH_LIMIT = 500
 
 # Paths a reviewer must call out when a PR touches them (see the handoff, section 1).
+# approvers.json 是批准口令的校验值：换掉它等于换掉用户的签字钥匙。
 PROTECTED_PATTERNS = (
     "AGENTS.md",
+    "CLAUDE.md",
+    ".trae/*",
+    ".cursor/rules/*",
+    ".agent/rules/*",
+    ".claude/*",
+    "SYS-2026-001_WorkspaceGovernance/approvers.json",
     ".github/workflows/*",
     "00_Obsidian_Base*",
     "00_Infrastructure/auto_pm/*",
@@ -46,6 +54,7 @@ PROTECTED_PATTERNS = (
     "*DEC-*",
     "*_WBS_PM.md",
     "*台账*",
+    "roles/*",
 )
 
 # Hard failures: anything that looks like a live secret.
@@ -81,20 +90,24 @@ class GitError(RuntimeError):
     pass
 
 
-def git(*args: str, cwd: str | None = None, env: dict[str, str] | None = None, check: bool = True) -> str:
-    result = subprocess.run(
-        ["git", "-c", "core.quotepath=off", *args],
-        cwd=cwd,
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+def decode(data: bytes, what: str) -> str:
+    """严格 UTF-8 解码；遇到坏字节不静默吞掉：在标准错误明说，再用替身字符继续（text_encoding 检查另会判 FAIL）。"""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        print(f"警告：{what} 含非法 UTF-8 字节（第 {error.start} 字节），已用替身字符继续", file=sys.stderr)
+        return data.decode("utf-8", errors="replace")
+
+
+def git_bytes(*args: str, cwd: str | None = None, env: dict[str, str] | None = None, check: bool = True) -> bytes:
+    result = subprocess.run(["git", "-c", "core.quotepath=off", *args], cwd=cwd, env=env, capture_output=True, check=False)
     if check and result.returncode != 0:
-        raise GitError(f"git {' '.join(args)}: {result.stderr.strip()}")
+        raise GitError(f"git {' '.join(args)}: {result.stderr.decode('utf-8', errors='replace').strip()}")
     return result.stdout
+
+
+def git(*args: str, cwd: str | None = None, env: dict[str, str] | None = None, check: bool = True) -> str:
+    return decode(git_bytes(*args, cwd=cwd, env=env, check=check), f"git {args[0]} 输出")
 
 
 def git_ok(*args: str, cwd: str | None = None) -> bool:
@@ -124,12 +137,9 @@ def merge_result_tree(ours: str, theirs: str, cwd: str | None = None) -> tuple[b
         ["git", "-c", "core.quotepath=off", "merge-tree", "--write-tree", "--name-only", ours, theirs],
         cwd=cwd,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
     )
-    lines = result.stdout.strip().splitlines()
+    lines = decode(result.stdout, "git merge-tree 输出").strip().splitlines()
     if result.returncode == 0:
         return True, lines[0]
     if result.returncode == 1:
@@ -140,7 +150,7 @@ def merge_result_tree(ours: str, theirs: str, cwd: str | None = None) -> tuple[b
                 break
             names.append(line)
         return False, ", ".join(names) or "冲突"
-    raise GitError(f"git merge-tree: {result.stderr.strip()}")
+    raise GitError(f"git merge-tree: {result.stderr.decode('utf-8', errors='replace').strip()}")
 
 
 def changed_files(base: str, head: str, cwd: str | None = None) -> list[str]:
@@ -209,8 +219,8 @@ def patch_tree(patch: str, base: str, cwd: str | None = None) -> str:
         env = dict(os.environ, GIT_INDEX_FILE=os.path.join(tmp, "index"))
         patch_file = os.path.abspath(patch) if os.path.exists(patch) else os.path.join(tmp, "patch")
         if not os.path.exists(patch):
-            with open(patch_file, "w", encoding="utf-8", errors="replace", newline="") as handle:
-                handle.write(git("show", patch, cwd=cwd))
+            with open(patch_file, "wb") as handle:
+                handle.write(git_bytes("show", patch, cwd=cwd))  # 原样字节写出，补丁里的坏字节也要逐字节比较
         git("read-tree", base, cwd=cwd, env=env)
         git("apply", "--cached", "--whitespace=nowarn", patch_file, cwd=cwd, env=env)
         return git("write-tree", cwd=cwd, env=env).strip()
@@ -231,8 +241,8 @@ def github_json(path: str) -> dict | None:
     request = urllib.request.Request(f"https://api.github.com/repos/{path}", headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
-            return json.loads(response.read().decode("utf-8", errors="replace"))
-    except (urllib.error.URLError, TimeoutError, ValueError):
+            return json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError):  # UnicodeDecodeError 是 ValueError：读不懂就当取不到，判 UNVERIFIED
         return None
 
 
@@ -336,6 +346,41 @@ def scan_privacy(lines: list[tuple[str, str]]) -> list[Check]:
     return checks
 
 
+COMPLETION_CLAIM = re.compile(r"已完成|已修复|已偿还|已解决|已落地|已关闭|已搞定|已修好")
+COMMIT_ID = re.compile(r"(?<![0-9A-Za-z])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}(?![0-9A-Za-z])")
+
+
+def scan_completion_evidence(body: str | None) -> Check:
+    """FIX-001 第 3 条：PR 描述写“已完成”之类，必须附提交号（7 位以上十六进制）或明写“未核实”。只报 WARN，不改通过/失败。"""
+    if body is None:
+        return Check("completion_evidence", "UNVERIFIED", "取不到 PR 描述，没法核“完成”是否附了证据")
+    claims = sorted(set(COMPLETION_CLAIM.findall(body)))
+    if not claims:
+        return Check("completion_evidence", "PASS", "PR 描述里没有“已完成”类的断言")
+    if COMMIT_ID.search(body) or "未核实" in body:
+        return Check("completion_evidence", "PASS", "断言“" + "、".join(claims) + "”附了提交号或写明未核实")
+    return Check(
+        "completion_evidence",
+        "WARN",
+        "PR 描述写了“" + "、".join(claims) + "”，但没有提交号（7 位以上十六进制）也没有“未核实”字样（FIX-001 第 3 条），审计者需在报告里点名",
+    )
+
+
+def scan_encoding(files: list[str], head: str, cwd: str | None = None) -> Check:
+    """PR 改动的文本文件必须是严格 UTF-8、没有乱码（审计 368）；坏字节在这里判 FAIL，不被 errors=replace 抹掉。"""
+    import encoding_check
+
+    try:
+        findings, skipped = encoding_check.check(Path(cwd or "."), head, files, encoding_check.load_allowlist())
+    except encoding_check.GitError as exc:
+        return Check("text_encoding", "UNVERIFIED", f"取不到文件内容：{exc}")
+    scanned = sum(1 for f in files if encoding_check.is_text_path(f))
+    if findings:
+        detail = "; ".join(f"{f.path}:{f.line} {f.reason}" for f in findings[:5]) + ("…" if len(findings) > 5 else "")
+        return Check("text_encoding", "FAIL", f"{len(findings)} 个文件不是干净的 UTF-8 文本：{detail}")
+    return Check("text_encoding", "PASS", f"{scanned} 个文本文件严格 UTF-8 解码通过，无乱码特征（登记在案的已知问题 {len(skipped)} 个）")
+
+
 def audit(
     pr: int,
     *,
@@ -345,19 +390,29 @@ def audit(
     patch_base: str | None,
     network: bool,
     ci_result: bool = True,
+    fetch: bool = True,
     cwd: str | None = None,
 ) -> tuple[dict, list[Check]]:
-    git("fetch", "-q", remote, "main", f"+refs/pull/{pr}/head:refs/audit/pr-{pr}", cwd=cwd)
+    if fetch:
+        git("fetch", "-q", remote, "main", f"+refs/pull/{pr}/head:refs/audit/pr-{pr}", cwd=cwd)
+    else:
+        for ref in (f"refs/audit/pr-{pr}", f"{remote}/main"):
+            if not git_ok("rev-parse", "--verify", "-q", f"{ref}^{{commit}}", cwd=cwd):
+                raise GitError(f"离线模式不取远程，但本地没有 {ref}；联网时先不带 --offline 运行一次")
     main_ref = f"{remote}/main"
     head = git("rev-parse", f"refs/audit/pr-{pr}", cwd=cwd).strip()
     main = git("rev-parse", main_ref, cwd=cwd).strip()
     info = {"pr": pr, "head": head, "main": main}
     checks: list[Check] = []
+    if not fetch:
+        checks.append(Check("local_refs", "UNVERIFIED", "离线模式：PR 头和 main 取自本地已有的引用，可能不是最新；联网时不带 --offline 重跑"))
 
     meta = github_json(f"{repo}/pulls/{pr}") if network else None
     pr_base = None
+    pr_body: str | None = None
     if meta:
         info["title"] = meta.get("title")
+        pr_body = meta.get("body") or ""
         state = "merged" if meta.get("merged_at") else meta.get("state", "unknown")
         pr_base = (meta.get("base") or {}).get("sha")
     else:
@@ -369,6 +424,7 @@ def audit(
     if found or on_main:
         state = "merged"
     info["state"] = state
+    checks.append(scan_completion_evidence(pr_body))
 
     base: str | None = main
     if state == "merged":
@@ -459,6 +515,7 @@ def audit(
             )
 
         checks.extend(scan_privacy(added_lines(base, head, cwd=cwd)))
+        checks.append(scan_encoding(files, head, cwd=cwd))
 
         patterns = ci_path_patterns(head, cwd=cwd)
         expected_ci = True if patterns is None else any(path_matches(f, p) for f in files for p in patterns)
@@ -537,7 +594,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--remote", default="origin")
     parser.add_argument("--patch", help="要对比的审阅补丁")
     parser.add_argument("--patch-base", help="补丁基于的提交")
-    parser.add_argument("--offline", action="store_true", help="不访问 GitHub 接口")
+    parser.add_argument("--offline", action="store_true", help="不访问网络：不查 GitHub 接口，也不 git fetch（要求本地已有 refs/audit/pr-N 和 <remote>/main）")
     parser.add_argument("--skip-ci-result", action="store_true", help="不查 CI 结论（在 CI 里运行时使用）")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     args = parser.parse_args(argv)
@@ -549,6 +606,7 @@ def main(argv: list[str] | None = None) -> int:
             patch=args.patch,
             patch_base=args.patch_base,
             network=not args.offline,
+            fetch=not args.offline,
             ci_result=not args.skip_ci_result,
         )
     except GitError as exc:

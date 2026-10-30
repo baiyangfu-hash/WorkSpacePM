@@ -13,10 +13,9 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.pm_facade_service import PmFacadeError
 from click.testing import CliRunner
 
+from auto_pm.application.core.pm_facade_service import PmFacadeError
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.plan_checklist import (
     AcceptanceCheck,
@@ -26,6 +25,7 @@ from auto_pm.contracts.plan_checklist import (
 )
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PmIntent
 from auto_pm.domain.change.decision_service import DecisionService, DecisionValidationError
+from auto_pm.ui.cli.__main__ import cli
 from tests.cli.test_pm_facade import _setup_planning
 from tests.core.test_pm_facade_service import _audit_scene, _p10_facade
 from tests.plan_checklist_support import full_checklist
@@ -131,7 +131,7 @@ def test_a_blank_command_does_not_count() -> None:
 def test_safety_circuit_accepts_only_yes_or_no() -> None:
     assert _problems(_filled(safety_circuit="是")) == ()
     with pytest.raises(ValueError):
-        PlanChecklist(safety_circuit="不确定")  # type: ignore[arg-type]
+        PlanChecklist(safety_circuit="不确定")
     assert [problem[0] for problem in _problems(_filled(safety_circuit=""))] == ["④"]
 
 
@@ -188,7 +188,7 @@ def test_a_grant_without_checklist_serializes_exactly_as_before() -> None:
 
 
 def test_decision_accepts_only_the_old_or_the_checklist_grant_shape() -> None:
-    base = {"adapter": "codex", "approved_model": "m", "required_worktree_mode": "ISOLATED", "declared_dirty_paths": []}
+    base: dict[str, object] = {"adapter": "codex", "approved_model": "m", "required_worktree_mode": "ISOLATED", "declared_dirty_paths": []}
     for grant in (base, {**base, "plan_checklist": {}}):
         DecisionService.validate_planning_approval(
             "fubai", "a" * 64, "user-confirmation:chat-20261022-unit", request_id="REQ-1", execution_grant=grant

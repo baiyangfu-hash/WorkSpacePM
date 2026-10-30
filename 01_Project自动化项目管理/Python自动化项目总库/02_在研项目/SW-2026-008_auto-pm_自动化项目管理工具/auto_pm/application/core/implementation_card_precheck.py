@@ -26,7 +26,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from auto_pm.application.core import implementation_card_baseline as card_baseline
 from auto_pm.application.core import implementation_card_basis as basis
+from auto_pm.application.core import implementation_card_tier as card_tier
 from auto_pm.contracts.implementation_card import ImplementationCard
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 
@@ -38,6 +40,11 @@ WORKTREE_BASELINE = "WORKTREE"
 
 _FULL_SHA = re.compile(r"[0-9a-f]{40}")
 _PLACEHOLDER = re.compile(r"<[^<>\n]*>|待回写|\bTBD\b")
+# NUL, BEL and the other C0 controls (tab, LF and CR excepted) plus a lone CR: what a shell pipe or heredoc turns an escaped backslash into (TD-SW008-128).
+# Also the invisible ones that change what a reader sees or where a line ends: NEL, LS/PS and the bidirectional marks and overrides (TD-SW008-239).
+_CONTROL_CHARS = re.compile(
+    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x85\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]|\r(?!\n)"
+)
 _HEADER = re.compile(r"^>\s*(隔离基线|路径根)：(.*)$")
 _BACKTICK = re.compile(r"`([^`]+)`")
 _MAIN_PY = re.compile(r"main\.py[ \t]+([^`\n|]+)")
@@ -369,6 +376,15 @@ def precheck_markdown_card(
             str(card_file), digest, "", "", (), (),
             (PrecheckFinding("header", str(card_file), "卡片不是合法 UTF-8"),),
         )
+    control = _CONTROL_CHARS.search(text)
+    if control is not None:
+        findings.append(
+            PrecheckFinding(
+                "control_char",
+                f"第 {text.count(chr(10), 0, control.start()) + 1} 行",
+                f"卡文含控制字符 U+{ord(control.group()):04X}（多半是 shell 折叠了反斜杠），冻结前必须清掉",
+            )
+        )
     lines = text.splitlines()
     header = _machine_header(lines)
     basis_header = basis.parse_header(lines)
@@ -401,6 +417,23 @@ def precheck_markdown_card(
     findings.extend(
         _path_findings(
             paths, baseline=baseline, workspace_root=workspace_root, baseline_valid=not baseline_findings
+        )
+    )
+    findings.extend(
+        PrecheckFinding(rule, subject, message)
+        for rule, subject, message in card_tier.tier_findings(
+            lines,
+            [item.path for item in paths if item.state != BASELINE_RUNTIME],
+            workspace_root=workspace_root,
+            card_file=card_file,
+        )
+    )
+    findings.extend(
+        PrecheckFinding(rule, subject, message)
+        for rule, subject, message in card_baseline.baseline_findings(
+            lines,
+            [item.path for item in paths if item.state != BASELINE_RUNTIME],
+            workspace_root=workspace_root,
         )
     )
     if new_format:

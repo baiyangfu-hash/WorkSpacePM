@@ -19,8 +19,15 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
+
+from auto_pm.ui.cli.__main__ import cli
+from tests.identity_support import guard_off
+
+
+@pytest.fixture(autouse=True)
+def _identity_guard_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    guard_off(monkeypatch, "template")
 
 # ── list 命令测试（1 用例，从 test_plc.py 迁移）──────────────────────────────
 

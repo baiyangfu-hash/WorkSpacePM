@@ -21,8 +21,9 @@ from rich.console import Console
 from rich.table import Table
 
 from auto_pm.app_context import AppContext
-from auto_pm.core.project_service import ProjectService
-from auto_pm.core.template_service import TemplateService
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.application.core.template_service import TemplateService
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
 
@@ -71,6 +72,7 @@ def cmd_update(
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
 
+    require_runtime_identity(ctx, project_id)
     tpl_svc = TemplateService(app_ctx.templates_dir)
     try:
         tpl_svc.update_template(proj.path, overwrite=overwrite)

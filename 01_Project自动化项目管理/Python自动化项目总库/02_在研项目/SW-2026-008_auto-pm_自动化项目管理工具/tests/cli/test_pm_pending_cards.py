@@ -14,8 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner, Result
 
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
@@ -25,7 +23,9 @@ from auto_pm.contracts.pm_facade import (
     PlanningExecutionGrant,
     PmIntent,
 )
+from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.ui.cli.__main__ import cli
 from tests.plan_checklist_support import checklist_args, full_checklist
 from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
@@ -35,8 +35,8 @@ if TYPE_CHECKING:
     from auto_pm.application.core.mission_service import MissionService
     from auto_pm.application.core.pm_facade_service import PmFacadeService
 else:
-    from auto_pm.core.mission_service import MissionService
-    from auto_pm.core.pm_facade_service import PmFacadeService
+    from auto_pm.application.core.mission_service import MissionService
+    from auto_pm.application.core.pm_facade_service import PmFacadeService
 
 # Reuse the existing PM CLI fixtures; imported dynamically so that this file is type-checked on its own.
 _pm_facade_tests = importlib.import_module("tests.cli.test_pm_facade")

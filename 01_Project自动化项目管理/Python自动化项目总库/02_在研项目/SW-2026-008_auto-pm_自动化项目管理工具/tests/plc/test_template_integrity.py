@@ -8,8 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.core.template_service import TemplateService
-
+from auto_pm.application.core.template_service import TemplateService
 from auto_pm.domain.plc.checker import PlcChecker
 
 

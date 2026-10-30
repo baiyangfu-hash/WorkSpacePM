@@ -212,9 +212,9 @@ def _install_fake_codex(tools: Path) -> None:
     source = tools / "codex-source"
     source.mkdir()
     (source / "codex").write_text("#!python\n" + FAKE_CODEX, encoding="utf-8")
-    maker = ScriptMaker(str(source), str(tools))
-    maker.executable = sys.executable
-    made = maker.make("codex")
+    maker = ScriptMaker(str(source), str(tools))  # type: ignore[no-untyped-call]
+    maker.executable = sys.executable  # type: ignore[assignment]
+    made = maker.make("codex")  # type: ignore[no-untyped-call]
     assert [Path(path).name for path in made] == ["codex.exe"], made
 
 
@@ -258,7 +258,7 @@ def comment_files(root: Path, marker: str, project: str = PROJECT) -> dict[str, 
 
 
 def change_status(root: Path, project_id: str, change_id: str) -> str:
-    from auto_pm.change.change_service import ChangeService
+    from auto_pm.domain.change.change_service import ChangeService
 
     change = ChangeService(str(root)).get_change_request(change_id, project_id=project_id)
     assert change is not None, change_id

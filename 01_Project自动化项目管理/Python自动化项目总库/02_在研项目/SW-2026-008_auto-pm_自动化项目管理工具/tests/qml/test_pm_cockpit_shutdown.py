@@ -5,16 +5,16 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
-from auto_pm.core.pm_cockpit_service import PmCockpitService
 from PySide6.QtCore import QThreadPool, QTimer, qInstallMessageHandler
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
 from shiboken6 import isValid
 
 import auto_pm.ui.boss_qml_window as boss_window
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
 from auto_pm.contracts.pm_cockpit import PmCockpitSnapshot
 from auto_pm.ui.boss_qml_window import build_cockpit_bridge, shutdown_cockpit
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
@@ -34,7 +34,7 @@ def _blocking_service(root: Path, monkeypatch: pytest.MonkeyPatch, started: thre
         if threading.current_thread() is not threading.main_thread():  # only the pool worker waits
             started.set()
             release.wait(30)
-        return cast(PmCockpitSnapshot, real_snapshot())
+        return real_snapshot()
 
     monkeypatch.setattr(service, "snapshot", blocking_snapshot)
     return service
@@ -170,3 +170,58 @@ def test_the_window_entry_point_reports_a_task_that_is_still_running(
     finally:
         assert built[0].shutdown(timeout_ms=10_000) is True
         _delete_qobject(built[0])
+
+
+_ENTRY_SCRIPT = """
+import sys
+import time
+from PySide6.QtCore import QRunnable, QThreadPool, QTimer
+from PySide6.QtGui import QGuiApplication
+
+import auto_pm.ui.boss_qml_window as window
+
+
+class _Sleeper(QRunnable):
+    def run(self) -> None:  # a global-pool task that outlives the window, like a worker a view started
+        time.sleep(3)
+
+
+app = QGuiApplication(sys.argv)
+QThreadPool.globalInstance().start(_Sleeper())
+QTimer.singleShot(500, app.quit)
+code = window.run_boss_cockpit(sys.argv[1])
+print("RETURNED", code, flush=True)
+"""
+
+
+def test_the_window_entry_point_returns_and_the_process_exits_with_a_global_pool_task_running(tmp_path: Path) -> None:
+    """TD-SW008-094 ①: the real entry point in a real process, not the shutdown function with the bridge held by the test.
+
+    The entry point must come back with exit code 0 and the process must then end on its own while a global-pool task
+    is still sleeping (the process-level 60-second exit claim, bounded here at 60 seconds).
+    """
+
+    import os
+    import subprocess
+    import sys
+
+    main, _candidate = _roots(tmp_path)
+    _work(main, "WORK-SHUT-PROC")
+    script = tmp_path / "entry_probe.py"
+    script.write_text(_ENTRY_SCRIPT, encoding="utf-8")
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    started = time.monotonic()
+    completed = subprocess.run(
+        [sys.executable, str(script), str(main)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+        env={**env, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)},
+        check=False,
+    )
+    elapsed = time.monotonic() - started
+    assert completed.returncode == 0, completed.stderr
+    assert "RETURNED 0" in completed.stdout
+    assert elapsed < 60

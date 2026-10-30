@@ -51,5 +51,5 @@ class PmSessionProjectionService:
             resolved.relative_to(subject_root)
         except ValueError as error:
             raise PmSessionProjectionError("PM_SESSION 投影目标必须位于 subject project 内") from error
-        resolved.write_text(self.render(resume), encoding="utf-8", errors="replace")
+        resolved.write_text(self.render(resume), encoding="utf-8")
         return resolved

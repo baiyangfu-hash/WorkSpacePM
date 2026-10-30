@@ -5,9 +5,9 @@ from __future__ import annotations
 import os
 import re
 
-from auto_pm.change.constants import ChangeRequest
-from auto_pm.change.document_contract import CLOSURE_REQUIRED_SECTIONS
-from auto_pm.change.generator import ChgGenerator
+from auto_pm.domain.change.constants import ChangeRequest
+from auto_pm.domain.change.document_contract import CLOSURE_REQUIRED_SECTIONS
+from auto_pm.domain.change.generator import ChgGenerator
 
 
 class TestChgGenerator:

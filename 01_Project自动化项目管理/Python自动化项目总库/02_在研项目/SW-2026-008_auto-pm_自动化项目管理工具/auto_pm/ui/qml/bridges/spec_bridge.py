@@ -135,7 +135,7 @@ class SpecBridge(QObject):
     def generateSclFromMatrix(self, md_text: str, output_path: str) -> dict[str, Any]:
         """根据 Markdown 工艺矩阵离线生成 Siemens SCL 状态机源码"""
         try:
-            from auto_pm.plc.generator import ProcessMatrixParser, SclGenerator
+            from auto_pm.domain.plc.generator import ProcessMatrixParser, SclGenerator
 
             matrix = ProcessMatrixParser.parse_markdown(md_text)
             gen = SclGenerator()
@@ -154,7 +154,7 @@ class SpecBridge(QObject):
     def checkSclCodeCompliance(self, file_path: str) -> dict[str, Any]:
         """对单个 .scl 文件按 LSP-905 运行代码规范排查"""
         try:
-            from auto_pm.plc.scl_linter import SclLinter
+            from auto_pm.domain.plc.scl_linter import SclLinter
 
             report = SclLinter.lint_file(file_path)
             violations_data = [

@@ -33,13 +33,13 @@ from typing import Any
 
 import yaml
 
-from auto_pm.vartable.models import (
+from auto_pm.domain.vartable.models import (
     ChannelEntry,
     ChannelTable,
     ParseError,
     ParseResult,
 )
-from auto_pm.vartable.utils.encoding import read_file_with_detection
+from auto_pm.domain.vartable.utils.encoding import read_file_with_detection
 
 # communications.yml 必需字段（与 AssetSummaryService._CHANNEL_REQUIRED_KEYS 对齐）
 REQUIRED_KEYS: tuple[str, ...] = ("name", "protocol", "role", "endpoint", "notes")

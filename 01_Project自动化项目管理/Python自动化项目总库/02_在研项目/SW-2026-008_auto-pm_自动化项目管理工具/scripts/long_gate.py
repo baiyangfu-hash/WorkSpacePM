@@ -39,7 +39,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from xml.sax.saxutils import escape
 
 IS_WINDOWS = os.name == "nt"
@@ -51,6 +51,12 @@ LOCK_FILE = "long_gate.lock"
 STOP_FILE = "STOP"
 TOKEN_ENV = "LONG_GATE_LEASE_TOKEN"
 MIN_REMAINING_S = 600
+# A gate dispatched with the user's approval may hold its Run's lease 13 h in total: the 3 h default plus this one extension.
+# Fixed on purpose: the config cannot ask for more, and only one extension is ever requested per Run.
+HOLD_EXTENSION_S = 10 * 3600
+# `Event.wait(1)` can return a few ms early on a coarse (Windows) timer; a renewal due within this slack counts as due.
+# It only brings a renewal forward, it does not touch the MIN_REMAINING_S floor.
+RENEW_EARLY_SLACK_S = 0.25
 NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 # Final results are never re-run; the others resume on the next `run`.
@@ -132,7 +138,7 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
             if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
                 raise GateError(f"step {sname}: argv must be a non-empty list of strings")
             step["argv"] = [fill(a) for a in argv]
-            step["cwd"] = fill(step.get("cwd", cfg["root"] or cfg["out_dir"]))
+            step["cwd"] = fill(cast(str, step.get("cwd", cfg["root"] or cfg["out_dir"])))
         else:
             write = step["write"]
             if not isinstance(write, str):
@@ -185,6 +191,12 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
             raise GateError("lease: give exactly one of token_file or wallet: true")
         if "token_file" in lease:
             lease["token_file"] = fill(lease["token_file"])
+    approval = lease.get("dispatch_approval_ref")
+    if approval is not None:
+        if mode != "auto_pm":
+            raise GateError("lease.dispatch_approval_ref needs lease mode auto_pm")
+        if not isinstance(approval, str) or not approval.startswith("user-confirmation:"):
+            raise GateError("lease.dispatch_approval_ref must be the user's dispatch approval: user-confirmation:<message id>")
     if mode == "command":
         argv = lease.get("argv")
         if not isinstance(argv, list) or not argv:
@@ -478,7 +490,7 @@ class Lease:
 
     @property
     def enabled(self) -> bool:
-        return self.cfg["mode"] != "none"
+        return bool(self.cfg["mode"] != "none")
 
     def remaining_s(self) -> float | None:
         if self.expires_at is None:
@@ -526,6 +538,27 @@ class Lease:
         # Only these three facts are logged; the receipt is never copied out whole.
         self.log(f"renewal ok version={version} expires_at={iso(expires)}")
 
+    def extend_hold(self) -> None:
+        """Once, before the first renewal: use the user's dispatch approval to lift this Run's 3 h hold cap to 13 h.
+
+        Without ``lease.dispatch_approval_ref`` nothing is requested and the default cap applies. The idempotency key is
+        fixed per Run, so a resumed runner replays the same extension instead of adding another.
+        """
+        approval = self.cfg.get("dispatch_approval_ref")
+        if self.cfg["mode"] != "auto_pm" or not approval:
+            return
+        run_id = self.cfg["run_id"]
+        argv = [self.python, "-B", "main.py", "continuity", "lease", "extend-hold", "--run-id", run_id,
+                "--extra-seconds", str(HOLD_EXTENSION_S), "--approval-evidence-ref", approval,
+                "--idempotency-key", f"{run_id.lower()}-gate-hold"]
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        r = subprocess.run(argv, cwd=self.root, env=env, capture_output=True, check=False, timeout=300,
+                           creationflags=0x08000000 if IS_WINDOWS else 0)
+        if r.returncode != 0:
+            tail = (r.stderr.decode("utf-8", errors="replace").strip().splitlines() or [""])[-1]
+            raise GateError(f"hold extension exit {r.returncode}: {tail[:300]}")
+        self.log(f"hold extension ok +{HOLD_EXTENSION_S}s")
+
     def _current_version(self) -> int:
         db = Path(self.root) / ".auto-pm" / "continuity.db"
         con = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=30)
@@ -554,7 +587,7 @@ class LeaseKeeper(threading.Thread):
         self.next_at = utc_now() + dt.timedelta(seconds=interval)
         while not self._stop_evt.wait(1):
             # A due renewal goes first, so the floor below judges the lease as renewed.
-            if utc_now() >= self.next_at:
+            if utc_now() + dt.timedelta(seconds=RENEW_EARLY_SLACK_S) >= self.next_at:
                 try:
                     self.lease.renew()
                 except Exception as error:  # noqa: BLE001 - any failure is a hard stop
@@ -747,6 +780,7 @@ class Runner:
         self.save()
 
         try:
+            self.lease.extend_hold()
             self.lease.renew()
         except Exception as error:  # noqa: BLE001
             return self.finish("LEASE_FAILED_AT_START", f"first renewal failed: {error}")

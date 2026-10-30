@@ -6,15 +6,15 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.pm_facade_service import PmFacadeService
 from click.testing import CliRunner, Result
 
+from auto_pm.application.core.pm_facade_service import PmFacadeService
 from auto_pm.contracts.continuity_query import ContinuityQuery
 from auto_pm.contracts.continuity_resume import ContinuityResume
+from auto_pm.ui.cli.__main__ import cli
 
 PROJECT = "SW-2026-008"
 UNSUPPORTED_ACTIONS = ("PARK", "RESUME_PARKED", "PREEMPT")
@@ -133,7 +133,7 @@ def test_neither_command_creates_or_changes_anything_in_a_workspace_without_a_st
 def _replaced_answer(root: Path, kind: str) -> ContinuityResume:
     """What a replaced or regressed facade could hand to the command: a Resume that was never validated."""
 
-    good = cast(ContinuityResume, PmFacadeService(root).resume(project_id=PROJECT))
+    good = PmFacadeService(root).resume(project_id=PROJECT)
     assert good.query is not None
     if kind == "legal":
         return good

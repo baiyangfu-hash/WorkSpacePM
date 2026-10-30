@@ -15,7 +15,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.e2e.test_closure_drill import Drill, assert_closed_and_clean, comment_files, make_drill
+from tests.e2e.test_closure_drill import (
+    Drill,
+    Step,
+    assert_closed_and_clean,
+    comment_files,
+    make_drill,
+)
 from tests.e2e.test_pmf_plc import (
     PROJECT_ID,
     benchmark_tar,  # noqa: F401 - module fixture re-used by name
@@ -77,7 +83,7 @@ class Lane:
         )
         assert moved.returncode == 0, self.drill.transcript()
 
-    def verify(self):  # type: ignore[no-untyped-def]
+    def verify(self) -> Step:
         return self.drill.cli("pm", "verify", "--mission-id", self.mission_id, "--lease-wallet")
 
     def accept(self) -> None:
@@ -85,7 +91,7 @@ class Lane:
         accepted = self.drill.cli("pm", "accept", "--mission-id", self.mission_id)
         assert accepted.returncode == 0, self.drill.transcript()
 
-    def close(self):  # type: ignore[no-untyped-def]
+    def close(self) -> Step:
         return self.drill.cli("pm", "close", "--mission-id", self.mission_id)
 
     def walk_to_acceptance(self) -> None:

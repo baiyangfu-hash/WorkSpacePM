@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.application.core import project_delete_guard as guard
 from auto_pm.application.core.approval_proof_service import ApprovalProofService, make_key
 from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+from auto_pm.ui.cli.__main__ import cli
 from tests.core.test_mission_park_store import PROJECT, Scene
 from tests.git_support import run_git
 
@@ -27,7 +28,7 @@ def git(root: Path, *args: str) -> str:
 
 def project_command_module() -> Any:
     """``cli`` 实际调用的那份 project 命令模块（``auto_pm.cli`` 是 ``auto_pm.ui.cli`` 的别名，各有一份模块对象）。"""
-    return sys.modules[cli.commands["project"].commands["delete"].callback.__module__]  # type: ignore[union-attr]
+    return sys.modules[cli.commands["project"].commands["delete"].callback.__module__]  # type: ignore[attr-defined]
 
 
 class World:
@@ -180,7 +181,7 @@ def test_d08_unreadable_git_state_is_not_a_green_light(
     def broken(*args: Any, **kwargs: Any) -> Any:
         raise OSError("no git")
 
-    monkeypatch.setattr(guard.subprocess, "run", broken)
+    monkeypatch.setattr(subprocess, "run", broken)
     result = world.run("--confirm", "--approval-evidence-ref", USER_WORDS)
     assert result.exit_code == 1 and "读不出 Git 状态" in result.output and world.project.is_dir()
 
@@ -255,8 +256,8 @@ def test_d12_two_deletes_of_the_same_id_never_overwrite_each_other(tmp_path: Pat
 def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
     world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from auto_pm.core.paths import WORKSPACE_PROJECTS_SUBDIR
-    from auto_pm.core.project_service import ProjectService
+    from auto_pm.application.core.paths import WORKSPACE_PROJECTS_SUBDIR
+    from auto_pm.application.core.project_service import ProjectService
 
     monkeypatch.setattr(project_command_module(), "ProjectService", ProjectService)
 
@@ -266,10 +267,12 @@ def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
     dest = world.root / WORKSPACE_PROJECTS_SUBDIR / source.name
     dest.mkdir(parents=True)
     (dest / "old.txt").write_text("old\n", encoding="utf-8")
+    git(world.root, "add", "-A")
+    git(world.root, "commit", "-q", "-m", "old project")
 
     result = CliRunner().invoke(
         cli,
-        ["-w", str(world.root), "project", "import", str(source), "--force"],
+        ["-w", str(world.root), "project", "import", str(source), "--force", "--approval-evidence-ref", USER_WORDS],
         catch_exceptions=False,
     )
 
@@ -277,3 +280,119 @@ def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
     assert (dest / "new.txt").is_file() and not (dest / "old.txt").exists()
     (moved,) = list((world.root / ".auto-pm" / "recycle" / source.name).iterdir())
     assert (moved / "old.txt").read_text(encoding="utf-8") == "old\n"
+
+
+def _import_force_world(world: World, monkeypatch: pytest.MonkeyPatch, name: str) -> tuple[Path, Path]:
+    from auto_pm.application.core.paths import WORKSPACE_PROJECTS_SUBDIR
+    from auto_pm.application.core.project_service import ProjectService
+
+    monkeypatch.setattr(project_command_module(), "ProjectService", ProjectService)
+    source = world.root.parent / "incoming" / name
+    source.mkdir(parents=True)
+    (source / "new.txt").write_text("new\n", encoding="utf-8")
+    dest = world.root / WORKSPACE_PROJECTS_SUBDIR / name
+    dest.mkdir(parents=True)
+    (dest / "old.txt").write_text("old\n", encoding="utf-8")
+    return source, dest
+
+
+def _import_force(world: World, source: Path, *extra: str) -> Any:
+    return CliRunner().invoke(
+        cli, ["-w", str(world.root), "project", "import", str(source), "--force", *extra], catch_exceptions=False
+    )
+
+
+@pytest.mark.parametrize("marker", ["AUTO_PM_AGENT", "CLAUDECODE", "CODEX_THREAD_ID"])
+def test_d14_import_force_is_refused_in_an_agent_environment_and_changes_nothing(
+    world: World, monkeypatch: pytest.MonkeyPatch, marker: str
+) -> None:
+    source, dest = _import_force_world(world, monkeypatch, "SW-2026-123_X")
+    monkeypatch.setenv(marker, "1")
+    result = _import_force(world, source)
+    assert result.exit_code == 1 and "只听用户本人" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists() and world.recycled() == []
+    assert not (world.root / ".auto-pm" / "recycle" / source.name).exists()
+
+
+def test_d15_import_force_is_refused_while_the_project_still_has_open_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+    scene = Scene(tmp_path / "ws")  # MISSION-A 开着，RUN-001 在跑
+    world = World.__new__(World)
+    world.root, world.project, world.audit = scene.root, scene.root / "proj", []
+    source, dest = _import_force_world(world, monkeypatch, f"{PROJECT}_X")
+    result = _import_force(world, source)
+    assert result.exit_code == 1 and "开着的 Mission MISSION-A" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists()
+    assert not (scene.root / ".auto-pm" / "recycle").exists()
+
+
+def test_d16_overwrite_blockers_ignore_a_directory_without_a_project_number(tmp_path: Path) -> None:
+    scene = Scene(tmp_path / "ws")
+    assert guard.overwrite_blockers(scene.root, "scratch_dir") == []
+    assert guard.overwrite_blockers(scene.root, f"{PROJECT}_X")
+
+
+def test_d17_the_surface_identity_gate_refuses_agents_and_a_committed_pin(
+    tmp_path: Path, committed_pin: None
+) -> None:
+    assert "只听用户本人" in guard.surface_identity_problem(tmp_path, {"CLAUDECODE": "1"})
+    assert "批准口令" in guard.surface_identity_problem(tmp_path, {})
+
+
+def test_d18_the_surface_identity_gate_lets_the_user_through_without_a_pin(tmp_path: Path) -> None:
+    assert guard.surface_identity_problem(tmp_path, {}) == ""
+    assert guard.surface_identity_problem(tmp_path, {"CLAUDECODE": ""}) == ""
+
+
+def test_d19_an_unreadable_approval_pin_config_is_not_a_green_light(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core.approval_proof_service import ApprovalProofError
+
+    def broken(self: ApprovalProofService) -> bool:
+        raise ApprovalProofError("口令配置损坏")
+
+    monkeypatch.setattr(ApprovalProofService, "enforced", broken)
+    problem = guard.surface_identity_problem(tmp_path, {})
+    assert "读不出批准口令配置" in problem and "口令配置损坏" in problem
+
+
+def _commit_all(root: Path) -> None:
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "old project")
+
+
+@pytest.mark.parametrize("words", [None, "yes please", "user-confirmation:x", "user-confirmation:claude_said_ok"])
+def test_d20_import_force_needs_the_users_own_words(
+    world: World, monkeypatch: pytest.MonkeyPatch, words: str | None
+) -> None:
+    source, dest = _import_force_world(world, monkeypatch, "SW-2026-123_X")
+    _commit_all(world.root)
+    extra = [] if words is None else ["--approval-evidence-ref", words]
+    result = _import_force(world, source, *extra)
+    assert result.exit_code == 1 and "只听用户本人" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists()
+    assert not (world.root / ".auto-pm" / "recycle" / source.name).exists()
+
+
+def test_d21_import_force_refuses_to_cover_uncommitted_changes(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, dest = _import_force_world(world, monkeypatch, "SW-2026-123_X")  # old.txt 没提交
+    result = _import_force(world, source, "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 1 and "没提交的改动" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists()
+    assert not (world.root / ".auto-pm" / "recycle" / source.name).exists()
+
+
+def test_d22_import_force_with_a_committed_pin_ignores_the_evidence_text_and_needs_the_pin(
+    world: World, monkeypatch: pytest.MonkeyPatch, committed_pin: None
+) -> None:
+    source, dest = _import_force_world(world, monkeypatch, "SW-2026-123_X")
+    _commit_all(world.root)
+    result = _import_force(world, source, "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 1 and "用户本人在自己的终端" in result.output
+    assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists()

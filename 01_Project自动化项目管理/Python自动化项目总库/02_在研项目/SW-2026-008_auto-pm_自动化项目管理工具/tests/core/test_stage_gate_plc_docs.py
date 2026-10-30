@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.plc import doc_consistency as dc
 
 from auto_pm.application.core.gates.stage_gate_engine import StageGateEngine
 from auto_pm.contracts.gate_dtos import GateCheckItemDTO, StageGateResultDTO
+from auto_pm.domain.plc import doc_consistency as dc
 from tests.plc.test_doc_consistency import IFC_DOC, VAR_DOC, build
 
 ITEM = "G4-PLC-DOC-CODE-CONSISTENT"

@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from auto_pm.plc.spec_snapshot import (
+from auto_pm.domain.plc.spec_snapshot import (
     DriftItem,
     compare_versions,
     load_spec_registry,

@@ -254,10 +254,6 @@ class TestFixtureHealth:
         """测试目录"""
         return Path(__file__).parent
 
-    @pytest.fixture(autouse=True)
-    def _setup(self, tests_dir: Path) -> None:
-        self.tests_dir = tests_dir
-
     def test_all_fixtures_have_project_markers(self, tests_dir: Path) -> None:
         """扫描使用 ChangeService 的测试文件，确保创建项目目录的 fixture 同时创建了项目标志文件。
 

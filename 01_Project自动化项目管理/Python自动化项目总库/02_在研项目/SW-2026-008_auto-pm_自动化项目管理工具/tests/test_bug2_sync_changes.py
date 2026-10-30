@@ -13,10 +13,11 @@ import os
 from pathlib import Path
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.core.project_service import ProjectService
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.sync import SyncService
+
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.sync import SyncService
 
 # ── Fixtures ──────────────────────────────────────────
 

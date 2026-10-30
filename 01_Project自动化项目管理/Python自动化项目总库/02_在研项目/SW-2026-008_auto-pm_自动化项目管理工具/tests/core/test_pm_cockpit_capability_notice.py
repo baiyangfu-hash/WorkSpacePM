@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core.continuity_query_service import ContinuityQueryService
-from auto_pm.core.pm_cockpit_service import PmCockpitService
 
+from auto_pm.application.core.continuity_query_service import ContinuityQueryService
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
 from auto_pm.contracts.continuity_query import ActionCapability, QueriedAction, RuntimeCapabilities
 from tests.core.test_pm_cockpit_dual_root import PROJECT, _roots, _work
 
@@ -48,6 +48,22 @@ def test_a_producer_that_raises_also_fails_closed(tmp_path: Path, monkeypatch: p
         notices = (f"snapshot raised: {error}",)
     notice = notices[-1]
     assert "未能确认" in notice and "不支持" not in notice
+
+
+@pytest.mark.parametrize("error", [RuntimeError("boom"), OSError("disk"), KeyError("k"), AttributeError("a"), TypeError("t")])
+def test_any_exception_from_the_producer_fails_closed_not_only_type_and_value_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """卡 060 写的是“生产者抛错时快照不崩”，不是只有 TypeError/ValueError（TD-SW008-094 ②）。"""
+    main, _candidate = _roots(tmp_path)
+    _work(main, "WORK-CAP-ANY")
+
+    def broken() -> RuntimeCapabilities:
+        raise error
+
+    monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(broken))
+    notice = PmCockpitService(main).snapshot().notices[-1]
+    assert "未能确认" in notice and "保持停用" in notice and "挂起与拿回：支持" not in notice
 
 
 def test_the_query_block_is_built_from_the_same_producer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,3 +110,32 @@ def test_a_v2_block_that_does_not_declare_parking_is_not_shown_as_supported(tmp_
     monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(lambda: all_unsupported))
     notice = PmCockpitService(main).snapshot().notices[-1]
     assert "未能确认" in notice and "挂起与拿回：支持" not in notice
+
+
+def test_a_keyboard_interrupt_from_the_producer_still_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """宽捕获只到 Exception：用户中断不能被吞成“未能确认”（审计 326 的漏网变异：放宽成 BaseException）。"""
+    main, _candidate = _roots(tmp_path)
+    _work(main, "WORK-CAP-KI")
+
+    def interrupted() -> RuntimeCapabilities:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(interrupted))
+    with pytest.raises(KeyboardInterrupt):
+        PmCockpitService(main).snapshot()
+
+
+def test_a_failing_producer_leaves_a_warning_in_the_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """宽捕获把程序错误变成永久“未能确认”，所以必须留一行带堆栈的 warning 供排查（审计 326 P3）。"""
+    main, _candidate = _roots(tmp_path)
+    _work(main, "WORK-CAP-LOG")
+
+    def broken() -> RuntimeCapabilities:
+        raise RuntimeError("renamed symbol")
+
+    monkeypatch.setattr(ContinuityQueryService, "capabilities", staticmethod(broken))
+    with caplog.at_level("WARNING"):
+        PmCockpitService(main).snapshot()
+    assert any(r.levelname == "WARNING" and r.exc_info and "renamed symbol" in str(r.exc_info[1]) for r in caplog.records)

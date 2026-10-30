@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner, Result
 
 from auto_pm.infrastructure.continuity_backup import (
@@ -18,6 +17,7 @@ from auto_pm.infrastructure.continuity_backup import (
     ContinuityBackupService,
     verify_backup_file,
 )
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_do
 
 PROJECT = "SW-2026-008"

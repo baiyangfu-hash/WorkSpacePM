@@ -59,10 +59,10 @@ def main(argv: list[str] | None = None, *, container: Path | None = None) -> int
             "请把这段提示原样发给维护驾驶舱的 AI 处理。",
             file=sys.stderr,
         )
-    print(f"launcher: release verified via {slot}: {release_dir}")
-    if os.environ.get("AUTO_PM_ENTRY_RESOLVE_ONLY") == "1" or release_args == [
-        _RESOLVE_ONLY_ARGUMENT
-    ]:
+    resolve_only = os.environ.get("AUTO_PM_ENTRY_RESOLVE_ONLY") == "1" or release_args == [_RESOLVE_ONLY_ARGUMENT]
+    # Only the resolve/purge modes answer on stdout; a real run keeps stdout for the release, so `--json` output stays parseable (TD-SW008-031).
+    print(f"launcher: release verified via {slot}: {release_dir}", file=sys.stdout if resolve_only else sys.stderr)
+    if resolve_only:
         return 0
     command = [sys.executable, "-B", "-I", "-c", _RELEASE_CHILD, str(release_dir)]
     command.extend(release_args)

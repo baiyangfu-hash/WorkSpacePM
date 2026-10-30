@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
 
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
 from auto_pm.contracts.continuity import (
     EXECUTION_ACTIVE_WORK_STATES,
     POST_ACCEPTANCE_WORK_STATES,
@@ -78,9 +78,7 @@ def _decision(root: Path, decision_id: str, project_id: str, files: list[str]) -
 
 
 def _planned(service: WorkRegistryService, work_id: str = "WORK-001") -> WorkItem:
-    return cast(
-        WorkItem,
-        service.create_work(
+    return service.create_work(
             work_id=work_id,
             subject_project_id="SW-2026-008",
             kind=WorkKind.WBS,
@@ -89,8 +87,7 @@ def _planned(service: WorkRegistryService, work_id: str = "WORK-001") -> WorkIte
             scope_paths=["auto_pm/core/example.py"],
             source_fingerprint="sha256:abc",
             idempotency_key=f"create-{work_id}",
-        ),
-    )
+        )
 
 
 def _mission(
@@ -202,7 +199,7 @@ def test_scope_conflicts_only_consider_execution_active_overlaps(
     service.transition(existing.work_id, existing_state, "settle-existing")
 
     def create_direct() -> WorkItem:
-        return cast(WorkItem, service.create_work(
+        return service.create_work(
             work_id="WORK-DIRECT",
             subject_project_id="SW-2026-008",
             kind=WorkKind.GOVERNANCE,
@@ -212,7 +209,7 @@ def test_scope_conflicts_only_consider_execution_active_overlaps(
             source_fingerprint="sha256:direct",
             idempotency_key="create-direct",
             read_only=True,
-        ))
+        )
 
     # Direct Work creation remains available for governed recovery chains;
     # scope exclusion belongs to Mission-derived child Work selection.
@@ -829,7 +826,7 @@ def _adjudicate(works: WorkRegistryService, **changes: Any) -> WorkItem:
         "idempotency_key": "adjudicate-target-work",
     }
     values.update(changes)
-    return cast(WorkItem, works.adjudicate_blocked_work(**values))
+    return works.adjudicate_blocked_work(**values)
 
 
 def _history_snapshot(root: Path) -> dict[str, list[tuple[Any, ...]]]:

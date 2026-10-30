@@ -195,3 +195,27 @@ def test_launcher_purge_argument_cleans_and_verifies_without_starting(
     assert "已清除 1 处" in captured.out
     assert "release verified via active_release.json" in captured.out
     assert captured.err == ""
+
+
+def test_a_real_run_keeps_stdout_clean_for_the_release_and_only_resolve_answers_on_stdout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _container(tmp_path)
+
+    class _Finished:
+        returncode = 0
+
+    import launch  # type: ignore[import-not-found]
+
+    monkeypatch.delenv("AUTO_PM_ENTRY_RESOLVE_ONLY", raising=False)
+    monkeypatch.setattr(launch.subprocess, "run", lambda *_a, **_k: _Finished())
+
+    assert launcher_main(["plc", "check", "X", "--json"], container=root) == 0
+    run = capsys.readouterr()
+    assert run.out == ""
+    assert "release verified via active_release.json" in run.err
+
+    assert launcher_main(["--resolve-only"], container=root) == 0
+    resolved = capsys.readouterr()
+    assert "release verified via active_release.json" in resolved.out
+    assert resolved.err == ""

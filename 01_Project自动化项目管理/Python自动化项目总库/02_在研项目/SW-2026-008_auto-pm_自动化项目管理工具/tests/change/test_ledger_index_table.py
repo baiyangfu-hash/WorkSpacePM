@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.ledger_reconciler import LedgerReconciler
-from auto_pm.change.ledger_updater import LedgerUpdater
-
 from auto_pm.application.core.template_service import TemplateService
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
+from auto_pm.domain.change.ledger_updater import LedgerUpdater
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 PID = "DJ-2026-901"

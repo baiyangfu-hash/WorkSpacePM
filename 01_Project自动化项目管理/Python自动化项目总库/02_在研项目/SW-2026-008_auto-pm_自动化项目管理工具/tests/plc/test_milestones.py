@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.plc import milestones as ms
+from auto_pm.domain.plc import milestones as ms
 
 ROOT = Path(__file__).resolve().parents[6]
 TEMPLATE = ROOT / "0100_PLC自动化" / "00_通用规范" / "项目文档模板" / "11_里程碑表模板.md"

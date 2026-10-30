@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -34,7 +35,7 @@ from tests.core.test_local_execution_orchestrator import (
 
 
 @pytest.fixture
-def started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str, Any]:
     operation_id = "OP-TD075-REAL"
     dispatch, microtask = _inputs(tmp_path, operation_id)
     monkeypatch.setenv(_LEASE_ENV, _LEASE_TOKEN)
@@ -49,7 +50,7 @@ def started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return tmp_path, operation_id, dispatch.receipt
 
 
-def test_a_really_dispatched_run_carries_the_receipt_owner_not_the_bare_executor(started) -> None:
+def test_a_really_dispatched_run_carries_the_receipt_owner_not_the_bare_executor(started: tuple[Path, str, Any]) -> None:
     root, _operation, receipt = started
     store = ContinuityStore(root)
     run = store.get_run(receipt.run_id)
@@ -61,7 +62,7 @@ def test_a_really_dispatched_run_carries_the_receipt_owner_not_the_bare_executor
 
 
 def test_resolve_started_run_accepts_the_real_run_and_refuses_a_bare_executor_owner(
-    started,
+    started: tuple[Path, str, Any],
 ) -> None:
     root, operation_id, receipt = started
     resolved_receipt, run, evidence = ContinuityExecutionService(root).resolve_started_run(
@@ -80,7 +81,7 @@ def test_resolve_started_run_accepts_the_real_run_and_refuses_a_bare_executor_ow
         ContinuityExecutionService(root).resolve_started_run(operation_id)
 
 
-def test_supervisor_recovers_the_real_session_and_blocks_a_different_one(started) -> None:
+def test_supervisor_recovers_the_real_session_and_blocks_a_different_one(started: tuple[Path, str, Any]) -> None:
     root, operation_id, _receipt = started
     _, _, evidence = ContinuityExecutionService(root).resolve_started_run(operation_id)
     supervisor = ExecutionSupervisorService(root)

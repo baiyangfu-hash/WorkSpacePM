@@ -77,7 +77,7 @@ class MermaidBlock:
 
 
 def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8-sig", errors="replace")
+    return path.read_text(encoding="utf-8-sig")
 
 
 def extract_blocks(path: Path) -> list[MermaidBlock]:
@@ -206,9 +206,16 @@ def check_documents(
     findings: list[Finding] = []
     known: set[str] = set()
     for path in [*interfaces, *variables]:
-        known |= table_names(path)
+        try:
+            known |= table_names(path)
+        except UnicodeDecodeError:
+            findings.append(Finding(path.as_posix(), 1, "parse", "文件不是合法 UTF-8，信号对照读不了这份表"))
     for diagram in diagrams:
-        blocks = extract_blocks(diagram)
+        try:
+            blocks = extract_blocks(diagram)
+        except UnicodeDecodeError:
+            findings.append(Finding(diagram.as_posix(), 1, "parse", "文件不是合法 UTF-8，读不了其中的图"))
+            continue
         if not blocks:
             findings.append(Finding(diagram.as_posix(), 1, "parse", "文档里没有 mermaid 图"))
         for block in blocks:

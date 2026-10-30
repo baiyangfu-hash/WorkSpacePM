@@ -9,8 +9,9 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from auto_pm.core.continuity_execution_service import ContinuityExecutionError
-from auto_pm.core.execution_supervisor_service import (
+
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
+from auto_pm.application.core.execution_supervisor_service import (
     ExecutionCollectedOutcome,
     ExecutionCollectionPendingError,
     ExecutionLeasePolicy,
@@ -19,7 +20,6 @@ from auto_pm.core.execution_supervisor_service import (
     LeaseCapability,
     LeaseRenewalOutcome,
 )
-
 from auto_pm.contracts.continuity import LeaseRenewalReceipt, RunState
 from auto_pm.contracts.execution_adapter import (
     ExecutionActivityStage,
@@ -46,17 +46,21 @@ def test_short_lease_policy_keeps_first_and_subsequent_real_renewals_bounded(tmp
         datetime.fromisoformat(lease.expires_at), "lease-secret",
     )
     policy = ExecutionLeasePolicy(seconds)
+    renew_before = policy.renew_before_seconds
+    renewal_interval = policy.renewal_interval_seconds
+    assert renew_before is not None
+    assert renewal_interval is not None
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
-    assert 0 < policy.renewal_interval_seconds < policy.renew_before_seconds < seconds
+    assert 0 < renewal_interval < renew_before < seconds
     early = supervisor.renew_if_due(
-        capability, lease_seconds=seconds, renew_before_seconds=policy.renew_before_seconds,
+        capability, lease_seconds=seconds, renew_before_seconds=renew_before,
         idempotency_key="early", now=clock(),
     )
     assert early.receipt is None
     for cycle in range(2):
-        clock.value = capability.expires_at - timedelta(seconds=policy.renew_before_seconds)
+        clock.value = capability.expires_at - timedelta(seconds=renew_before)
         outcome = supervisor.renew_if_due(
-            capability, lease_seconds=seconds, renew_before_seconds=policy.renew_before_seconds,
+            capability, lease_seconds=seconds, renew_before_seconds=renew_before,
             idempotency_key=f"renew-{cycle}", now=clock(),
         )
         assert outcome.receipt is not None
@@ -306,7 +310,7 @@ def test_supervisor_uses_exit_truth_and_renews_at_wait_boundaries(
     execution = Mock()
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
     capability = _capability()
-    supervisor.renew_if_due = Mock(
+    supervisor.renew_if_due = Mock(  # type: ignore[method-assign]
         side_effect=[
             LeaseRenewalOutcome(capability=capability, receipt=None),
             LeaseRenewalOutcome(capability=capability, receipt=None),
@@ -344,7 +348,7 @@ def test_supervisor_does_not_verify_when_collect_or_renew_fails(tmp_path: Path) 
     execution = Mock()
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
     capability = _capability()
-    supervisor.renew_if_due = Mock(side_effect=ExecutionSupervisorError("lease 自动续租失败"))
+    supervisor.renew_if_due = Mock(side_effect=ExecutionSupervisorError("lease 自动续租失败"))  # type: ignore[method-assign]
 
     with pytest.raises(ExecutionSupervisorError, match="自动续租失败"):
         supervisor.wait_for_completion(
@@ -356,7 +360,7 @@ def test_supervisor_does_not_verify_when_collect_or_renew_fails(tmp_path: Path) 
         )
     execution.transition_run.assert_not_called()
 
-    supervisor.renew_if_due = Mock(return_value=LeaseRenewalOutcome(capability, None))
+    supervisor.renew_if_due = Mock(return_value=LeaseRenewalOutcome(capability, None))  # type: ignore[method-assign]
     with pytest.raises(ExecutionSupervisorError, match="collect 失败"):
         supervisor.wait_for_completion(
             capability,
@@ -374,7 +378,7 @@ def test_collect_only_never_transitions_and_finalize_requires_projection_receipt
     execution = Mock()
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
     capability = _capability()
-    supervisor.renew_if_due = Mock(
+    supervisor.renew_if_due = Mock(  # type: ignore[method-assign]
         return_value=LeaseRenewalOutcome(capability=capability, receipt=None)
     )
     result = _result(status=LocalExecutionStatus.SUCCEEDED, exit_code=0)
@@ -420,7 +424,7 @@ def test_periodic_renewal_failure_reaps_real_child_and_stays_pending(tmp_path: P
     execution = Mock()
     supervisor = ExecutionSupervisorService(tmp_path, execution=execution)
     capability = _capability()
-    supervisor.renew_if_due = Mock(
+    supervisor.renew_if_due = Mock(  # type: ignore[method-assign]
         side_effect=[
             LeaseRenewalOutcome(capability=capability, receipt=None),
             ExecutionSupervisorError("lease 自动续租失败"),

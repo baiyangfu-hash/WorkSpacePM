@@ -16,8 +16,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.constants import (
+
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.constants import (
     SpecViolationError,
     validate_status_transition,
 )
@@ -181,12 +182,12 @@ class TestArchiveStatusFlow:
 
     def test_archived_is_terminal_state(self) -> None:
         """archived 是终态，无合法的下一状态"""
-        from auto_pm.change.constants import STATUS_FLOW
+        from auto_pm.domain.change.constants import STATUS_FLOW
         assert STATUS_FLOW["archived"] == set()
 
     def test_closed_is_terminal_state(self) -> None:
         """closed 是终态，无合法的下一状态"""
-        from auto_pm.change.constants import STATUS_FLOW
+        from auto_pm.domain.change.constants import STATUS_FLOW
         assert STATUS_FLOW["closed"] == set()
 
     def test_archived_to_any_invalid(self) -> None:
@@ -334,7 +335,7 @@ class TestArchiveStatusLabels:
 
     def test_status_labels_exist(self) -> None:
         """归档流程状态标签存在"""
-        from auto_pm.change.constants import STATUS_LABELS
+        from auto_pm.domain.change.constants import STATUS_LABELS
 
         assert STATUS_LABELS["completed"] == "已完成"
         assert STATUS_LABELS["archived"] == "已归档"
@@ -342,7 +343,7 @@ class TestArchiveStatusLabels:
 
     def test_status_flow_includes_archive_states(self) -> None:
         """STATUS_FLOW 包含归档流程状态"""
-        from auto_pm.change.constants import STATUS_FLOW
+        from auto_pm.domain.change.constants import STATUS_FLOW
 
         assert "completed" in STATUS_FLOW
         assert "archived" in STATUS_FLOW

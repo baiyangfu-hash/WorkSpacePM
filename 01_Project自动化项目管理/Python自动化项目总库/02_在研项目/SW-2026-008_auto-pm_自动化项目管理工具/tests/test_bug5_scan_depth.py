@@ -18,8 +18,8 @@ import inspect
 import json
 from pathlib import Path
 
-from auto_pm.core.project_service import ProjectService
-from auto_pm.plc.checker import PlcChecker
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.domain.plc.checker import PlcChecker
 
 
 def _make_plc_project(parent: Path, name: str) -> Path:

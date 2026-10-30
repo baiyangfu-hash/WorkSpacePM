@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
 
 from auto_pm.application.core.implementation_card_precheck import (
     CommandNode,
@@ -15,11 +14,18 @@ from auto_pm.application.core.implementation_card_precheck import (
     resolve_command,
     scopes_outside_card,
 )
+from auto_pm.ui.cli.__main__ import cli
 from auto_pm.ui.cli.implementation_card import command_tree_of
 from tests.git_support import git_out
 
 TREE: dict[str, CommandNode] = command_tree_of(cli)
 PROJECT = "SW-TEST_project"
+
+@pytest.fixture(autouse=True)
+def _cards_here_predate_the_tier_cutover(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests build throw-away cards that carry no tier line; treat them as cards from before the cut-over (the rule has its own tests)."""
+    monkeypatch.setattr("auto_pm.application.core.implementation_card_tier.card_is_new", lambda _card: False)
+
 
 
 def _git(root: Path, *args: str) -> str:
@@ -147,6 +153,31 @@ def test_legal_card_passes_and_reports_resolved_paths_and_commands(tmp_path: Pat
     assert [item.path for item in report.paths] == [f"{PROJECT}/auto_pm/a.py", f"{PROJECT}/auto_pm/new.py"]
     assert report.commands == ("continuity work create", "ledger reconcile")
     assert report.baseline == baseline and len(report.card_sha256) == 64
+
+
+@pytest.mark.parametrize(
+    "char",
+    ["\x00", "\x07", "\x1b", "\x7f", "\r", "\x85", "\u2028", "\u2029", "\u202e", "\u2066", "\u200f", "\u061c"],
+    ids=["nul", "bel", "esc", "del", "lone-cr", "nel", "ls", "ps", "rlo", "lri", "rlm", "alm"],
+)
+def test_control_characters_in_the_card_text_are_refused_with_the_line_number(tmp_path: Path, char: str) -> None:
+    baseline = _repository(tmp_path, (f"{PROJECT}/auto_pm/a.py",))
+    card = _card(tmp_path, baseline=baseline, rows=[("auto_pm/a.py", "存在")], body=f"lease domain{char}prefix")
+
+    report = _check(tmp_path, card)
+
+    assert not report.passed
+    assert "control_char:第 " in _messages(report) and "行" in _messages(report)
+
+
+def test_tabs_and_crlf_line_endings_are_not_control_character_findings(tmp_path: Path) -> None:
+    baseline = _repository(tmp_path, (f"{PROJECT}/auto_pm/a.py",))
+    card = _card(tmp_path, baseline=baseline, rows=[("auto_pm/a.py", "存在")], body="tab\there\nnext line")
+    card.write_bytes(card.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))  # every line ends CRLF whatever the platform's text mode did
+
+    report = _check(tmp_path, card)
+
+    assert "control_char" not in _messages(report)
 
 
 @pytest.mark.parametrize(

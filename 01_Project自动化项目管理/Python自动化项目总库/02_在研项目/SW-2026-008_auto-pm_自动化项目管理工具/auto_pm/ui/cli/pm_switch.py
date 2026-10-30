@@ -15,15 +15,18 @@ import click
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
-from auto_pm.contracts.mission import PARKED_STALE_DAYS, Mission, MissionBoard
-from auto_pm.core.mission_switch_service import (
+from auto_pm.application.core.mission_switch_service import (
     MissionSwitchError,
     MissionSwitchService,
     ParkOutcome,
     UnparkOutcome,
 )
-from auto_pm.core.work_registry_service import WorkRegistryService
-from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
+from auto_pm.application.core.worktree_policy_service import (
+    WorktreePolicyError,
+    WorktreePolicyService,
+)
+from auto_pm.contracts.mission import PARKED_STALE_DAYS, Mission, MissionBoard
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.cli.approval_pin import read_approval_pin
 from auto_pm.ui.cli.continuity import _secret_from_environment

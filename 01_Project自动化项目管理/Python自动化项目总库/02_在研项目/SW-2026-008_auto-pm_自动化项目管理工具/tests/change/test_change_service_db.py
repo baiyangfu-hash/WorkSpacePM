@@ -13,9 +13,10 @@ import os
 from collections.abc import Generator
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ChangeRequestRepository
+
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import ChangeRequestRepository
 
 
 @pytest.fixture
@@ -202,8 +203,8 @@ class TestChangeServiceDBIntegration:
         svc, db = svc_with_db
 
         repo = ChangeRequestRepository(db)
-        from auto_pm.db.repository import ProjectRepository
-        from auto_pm.models import ChangeSummary, ProjectRecord
+        from auto_pm.domain.models import ChangeSummary, ProjectRecord
+        from auto_pm.infrastructure.db.repository import ProjectRepository
         # 插入项目记录以满足外键约束
         ProjectRepository(db).upsert(
             ProjectRecord(
@@ -272,7 +273,7 @@ class TestChangeServiceDBIntegration:
         assert changes_p2[0].status == "closed"
 
         # 验证 get_impact_analysis 隔离性
-        from auto_pm.models import ImpactAnalysis
+        from auto_pm.domain.models import ImpactAnalysis
         ia1 = ImpactAnalysis(project_id="TEST-2026-001", change_number="CHG-PLC-2026-999", risk_level="low")
         ia2 = ImpactAnalysis(project_id="TEST-2026-002", change_number="CHG-PLC-2026-999", risk_level="high")
         repo.save_impact_analysis(ia1)

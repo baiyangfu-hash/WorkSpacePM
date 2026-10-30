@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from typing import Any, TypeVar
 
-from auto_pm.core.protocols import (
+from auto_pm.application.core.protocols import (
     AssetSummaryServiceProtocol,
     DashboardServiceProtocol,
     ProjectServiceProtocol,
     TemplateServiceProtocol,
 )
-
 from auto_pm.application.workbench_use_cases import (
     CommandOutcome,
     QueryOutcome,

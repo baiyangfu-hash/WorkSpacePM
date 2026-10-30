@@ -13,8 +13,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from auto_pm.models.plc import CheckResult
-from auto_pm.plc.repairer import PlcRepairer
+from auto_pm.domain.models.plc import CheckResult
+from auto_pm.domain.plc.repairer import PlcRepairer
 
 # ── 测试数据 ──────────────────────────────────────────
 

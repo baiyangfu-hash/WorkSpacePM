@@ -11,7 +11,8 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from auto_pm.core.prototype_service import PrototypeService
+from auto_pm.application.core.prototype_service import PrototypeService
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
 
@@ -39,6 +40,7 @@ def bundle_cmd(ctx: click.Context, pid: str, version: str | None, output: str | 
     if ctx.obj and hasattr(ctx.obj, "workspace_root"):
         workspace_root = ctx.obj.workspace_root
 
+    require_runtime_identity(ctx, pid)
     proj_dir = _resolve_project_dir(workspace_root, pid)
     service = PrototypeService(workspace_root)
     res = service.bundle(proj_dir, version=version, output_filename=output)
@@ -81,6 +83,7 @@ def archive_cmd(ctx: click.Context, pid: str, version: str) -> None:
     if ctx.obj and hasattr(ctx.obj, "workspace_root"):
         workspace_root = ctx.obj.workspace_root
 
+    require_runtime_identity(ctx, pid)
     proj_dir = _resolve_project_dir(workspace_root, pid)
     service = PrototypeService(workspace_root)
     res = service.archive(proj_dir, version=version)
@@ -105,6 +108,7 @@ def init_cmd(ctx: click.Context, pid: str, template: str, topology: str) -> None
     if ctx.obj and hasattr(ctx.obj, "workspace_root"):
         workspace_root = ctx.obj.workspace_root
 
+    require_runtime_identity(ctx, pid)
     proj_dir = _resolve_project_dir(workspace_root, pid)
     service = PrototypeService(workspace_root)
     res = service.init(proj_dir, template=template, topology=topology)

@@ -9,7 +9,7 @@ from typing import Any
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.core.ai_handoff_service import (
+from auto_pm.application.core.ai_handoff_service import (
     PM_ACTOR,
     AiHandoffService,
     HandoffError,

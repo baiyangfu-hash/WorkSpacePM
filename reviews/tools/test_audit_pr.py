@@ -277,3 +277,171 @@ def test_audit_reads_statuses_from_github(world, monkeypatch):
     answers["/status"] = None
     _info, checks = world["audit"](31, network=True)
     assert status(checks, "ci_result") == "UNVERIFIED"
+
+
+def _cut_the_network(work: Path) -> None:
+    run(work, "remote", "set-url", "origin", str(work.parent / "no-such-remote.git"))
+
+
+def test_offline_audit_uses_local_refs_and_does_not_fetch(world, monkeypatch):
+    head = world["open_pr"](40, {"src/app.py": "x = 2\n"})
+    world["audit"](40)  # online once: leaves refs/audit/pr-40 and origin/main in the clone
+    _cut_the_network(world["work"])
+    info, _ = audit_pr.audit(40, repo="x/y", remote="origin", network=False, fetch=False, cwd=str(world["work"]), patch=None, patch_base=None)
+    assert info["head"] == head
+    monkeypatch.chdir(world["work"])
+    assert audit_pr.main(["40", "--offline", "--skip-ci-result"]) in (0, 1)  # never 2: no fetch was tried
+
+
+def test_offline_audit_without_local_refs_says_what_is_missing(world):
+    world["open_pr"](41, {"src/app.py": "x = 2\n"})
+    _cut_the_network(world["work"])
+    with pytest.raises(audit_pr.GitError, match="refs/audit/pr-41"):
+        audit_pr.audit(41, repo="x/y", remote="origin", network=False, fetch=False, cwd=str(world["work"]), patch=None, patch_base=None)
+
+
+def test_online_audit_still_fetches_so_a_dead_network_is_an_error(world):
+    world["open_pr"](42, {"src/app.py": "x = 2\n"})
+    _cut_the_network(world["work"])
+    with pytest.raises(audit_pr.GitError):
+        world["audit"](42)
+
+
+def test_roles_library_is_a_protected_path(world):
+    world["open_pr"](50, {"roles/product-pm/SKILL.md": "x\n"})
+    _, checks = world["audit"](50)
+    detail = next(c.detail for c in checks if c.id == "protected_paths")
+    assert status(checks, "protected_paths") == "WARN"
+    assert "roles/product-pm/SKILL.md" in detail
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".trae/skills/x/SKILL.md", ".cursor/rules/a.mdc", ".agent/rules/project-rule.md", ".claude/settings.json", "CLAUDE.md"],
+)
+def test_agent_rule_files_are_protected_paths(world, path):
+    world["open_pr"](60, {path: "x\n"})
+    _, checks = world["audit"](60)
+    assert status(checks, "protected_paths") == "WARN"
+    assert path in next(c.detail for c in checks if c.id == "protected_paths")
+
+
+def test_the_approver_pin_registry_is_a_protected_path_but_a_similar_name_is_not(world):
+    """批准口令的校验值被换掉 = 用户的签字钥匙被换掉：改它的 PR 必须被点名（批准口令方案）。"""
+    world["open_pr"](61, {"SYS-2026-001_WorkspaceGovernance/approvers.json": "{}\n"})
+    _, checks = world["audit"](61)
+    assert status(checks, "protected_paths") == "WARN"
+    assert "SYS-2026-001_WorkspaceGovernance/approvers.json" in next(c.detail for c in checks if c.id == "protected_paths")
+    world["open_pr"](62, {"SYS-2026-001_WorkspaceGovernance/approvers.md": "x\n"})
+    _, other = world["audit"](62)
+    assert status(other, "protected_paths") is None
+
+
+def test_offline_audit_says_the_refs_may_be_stale(world):
+    world["open_pr"](51, {"src/app.py": "x = 2\n"})
+    world["audit"](51)
+    _, checks = audit_pr.audit(51, repo="x/y", remote="origin", network=False, fetch=False, cwd=str(world["work"]), patch=None, patch_base=None)
+    assert status(checks, "local_refs") == "UNVERIFIED"
+    _, online = world["audit"](51)
+    assert status(online, "local_refs") is None
+
+
+def test_invalid_utf8_in_a_changed_text_file_fails(world):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "enc", world["base"])
+    (work / "docs").mkdir(exist_ok=True)
+    (work / "docs/gbk.md").write_bytes("中文说明\n".encode("gbk"))
+    head = commit(work, "gbk")
+    run(work, "push", "-q", "-f", "origin", f"{head}:refs/pull/30/head")
+    run(work, "checkout", "-q", "main")
+    _, checks = world["audit"](30)
+    assert status(checks, "text_encoding") == "FAIL"
+    assert "docs/gbk.md" in next(c.detail for c in checks if c.id == "text_encoding")
+
+
+def test_clean_text_and_non_text_files_pass_the_encoding_check(world):
+    world["open_pr"](31, {"docs/ok.md": "中文 ä ö ü 日本語\n"})
+    _, checks = world["audit"](31)
+    assert status(checks, "text_encoding") == "PASS"
+
+
+def test_newly_covered_suffixes_are_checked(world):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "enc2", world["base"])
+    (work / "a.scltest").write_bytes(b"ok \xff\xfe bad\n")
+    head = commit(work, "scltest")
+    run(work, "push", "-q", "-f", "origin", f"{head}:refs/pull/32/head")
+    run(work, "checkout", "-q", "main")
+    _, checks = world["audit"](32)
+    assert status(checks, "text_encoding") == "FAIL"
+
+
+def test_decode_reports_invalid_bytes_instead_of_swallowing_them(capsys):
+    assert audit_pr.decode("中文".encode("utf-8"), "x") == "中文"
+    assert capsys.readouterr().err == ""
+    assert chr(0xFFFD) in audit_pr.decode("中文".encode("gbk"), "git diff 输出")
+    assert "非法 UTF-8" in capsys.readouterr().err
+
+
+def test_git_output_with_invalid_bytes_warns(world, capsys):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "gbk", world["base"])
+    (work / "docs").mkdir(exist_ok=True)
+    (work / "docs/gbk.md").write_bytes("中文说明\n".encode("gbk"))
+    commit(work, "gbk")
+    out = audit_pr.git("diff", "--no-color", f"{world['base']}..HEAD", cwd=str(work))
+    assert "docs/gbk.md" in out
+    assert "非法 UTF-8" in capsys.readouterr().err
+
+
+def test_patch_with_invalid_bytes_is_applied_byte_for_byte(world, tmp_path):
+    work = world["work"]
+    run(work, "checkout", "-q", "-B", "gbkpatch", world["base"])
+    (work / "gbk.txt").write_bytes("中文\n".encode("gbk"))
+    commit(work, "gbk")
+    patch = tmp_path / "p.patch"
+    patch.write_bytes(audit_pr.git_bytes("diff", "--binary", f"{world['base']}..HEAD", cwd=str(work)))
+    tree = audit_pr.patch_tree(str(patch), world["base"], cwd=str(work))
+    assert audit_pr.git_bytes("show", f"{tree}:gbk.txt", cwd=str(work)) == "中文\n".encode("gbk")
+
+
+def test_github_reply_that_is_not_utf8_counts_as_unavailable(monkeypatch):
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"a": "\xff"}'
+
+    monkeypatch.setattr(audit_pr.urllib.request, "urlopen", lambda *a, **k: Reply())
+    assert audit_pr.github_json("x/y") is None
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (None, "UNVERIFIED"),
+        ("只是说明，没有断言", "PASS"),
+        ("本卡已修复，见提交 16488b08", "PASS"),
+        ("已完成，但验证未核实", "PASS"),
+        ("已完成", "WARN"),
+        ("已偿还；words deadbeef only letters", "WARN"),  # 纯字母不算提交号
+        ("已修复 abc12", "WARN"),  # 不足 7 位
+    ],
+)
+def test_completion_claim_needs_evidence(body, expected):
+    assert audit_pr.scan_completion_evidence(body).status == expected
+
+
+def test_audit_warns_when_pr_body_claims_done_without_evidence(world, monkeypatch):
+    head = world["open_pr"](50, {"src/app.py": "x = 50\n"})
+    meta = {"state": "open", "head": {"sha": head}, "base": {"sha": world["base"]}, "body": "已完成"}
+    monkeypatch.setattr(audit_pr, "github_json", lambda path: meta if path.endswith("/pulls/50") else None)
+    _info, checks = world["audit"](50, network=True)
+    assert status(checks, "completion_evidence") == "WARN"
+    meta["body"] = "已完成，提交 1a2b3c4d"
+    _info, checks = world["audit"](50, network=True)
+    assert status(checks, "completion_evidence") == "PASS"

@@ -6,13 +6,13 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from auto_pm.core.pm_closure_service import PmClosureError
-from auto_pm.core.pm_cockpit_service import (
+
+from auto_pm.application.core.pm_closure_service import PmClosureError
+from auto_pm.application.core.pm_cockpit_service import (
     PmCockpitError,
     closure_failure_message,
     ledger_busy,
 )
-
 from auto_pm.contracts.pm_cockpit import PmCockpitCompletionState
 from auto_pm.infrastructure.continuity_store import ContinuityStoreError
 from tests.core.test_pm_closure_service import _MISSION_ID as _CLOSE_MISSION

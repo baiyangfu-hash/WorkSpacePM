@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.spec.core.config import WorkspaceConfig
+
+from auto_pm.domain.spec.core.config import WorkspaceConfig
 
 
 @pytest.fixture

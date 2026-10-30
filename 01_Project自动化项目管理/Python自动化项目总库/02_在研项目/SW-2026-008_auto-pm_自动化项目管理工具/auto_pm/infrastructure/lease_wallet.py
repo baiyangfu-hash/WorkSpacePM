@@ -63,7 +63,7 @@ def find(control_root: str | Path, run_id: str) -> dict[str, object] | None:
     if not target.is_file():
         return None
     try:
-        record = json.loads(target.read_text(encoding="utf-8", errors="replace"))
+        record = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise LeaseWalletError(f"钱包文件无法读取: {target.name}") from error
     if (

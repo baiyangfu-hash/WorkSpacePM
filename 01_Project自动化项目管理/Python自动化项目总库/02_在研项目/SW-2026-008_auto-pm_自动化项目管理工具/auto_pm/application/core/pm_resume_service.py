@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from auto_pm.core.ai_handoff_service import AiHandoffService
-from auto_pm.core.project_fact_service import ProjectFactService
-
+from auto_pm.application.core.ai_handoff_service import AiHandoffService
+from auto_pm.application.core.project_fact_service import ProjectFactService
 from auto_pm.contracts.pm_resume_context import PmResumeContext, ResumeHandoff
 from auto_pm.contracts.project_fact_snapshot import FileFingerprint
 
@@ -144,8 +144,8 @@ class PmResumeService:
     @staticmethod
     def _read_text(path: Path) -> str:
         try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except OSError as error:
+            return path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
             raise PmResumeError(f"无法读取 PM_SESSION: {path}") from error
 
     @staticmethod
@@ -171,7 +171,7 @@ class PmResumeService:
         return rows[: self.MAX_ACTIVE_WBS]
 
     @staticmethod
-    def _active_changes(content: str, open_changes: list[object]) -> list[str]:
+    def _active_changes(content: str, open_changes: Sequence[object]) -> list[str]:
         known = {str(getattr(change, "change_number", "")) for change in open_changes}
         mentioned = set(re.findall(r"CHG-[A-Z]+-\d{4}-\d{3}", content))
         return sorted(number for number in known if number in mentioned) or sorted(known)[:3]
@@ -180,7 +180,7 @@ class PmResumeService:
     def _read_set(
         control_session: Path,
         subject_session: Path,
-        open_changes: list[object],
+        open_changes: Sequence[object],
         changes: list[str],
     ) -> list[str]:
         result = [str(control_session)]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -14,18 +15,21 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.core.continuity_execution_service import (
+
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.continuity_resume_service import ContinuityResumeError, ContinuityResumeService
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.pm_session_projection_service import (
+from auto_pm.application.core.continuity_resume_service import (
+    ContinuityResumeError,
+    ContinuityResumeService,
+)
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.pm_session_projection_service import (
     PmSessionProjectionError,
     PmSessionProjectionService,
 )
-from auto_pm.core.work_registry_service import WorkRegistryService
-
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
@@ -36,7 +40,6 @@ from auto_pm.contracts.decision_package import (
 )
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, MissionState
-from auto_pm.infrastructure import continuity_store as continuity_store_module
 from auto_pm.infrastructure.continuity_store import (
     ContinuityStore,
     ContinuityStoreError,
@@ -412,7 +415,7 @@ def test_resume_must_not_recommend_replacement_for_expired_nonterminal_run(
 
     assert result.run and result.run.run_id == "RUN-001"
     assert result.conflicts == ("LEASE_EXPIRED",)
-    assert result.next_legal_action == ""
+    assert result.next_legal_action == "RECLAIM_EXPIRED_RUN"  # 不留空，也不推荐新建替代 Run
     payload = result.model_dump(mode="json")
     assert "lease_token" not in payload
     assert "lease-secret" not in json.dumps(payload, ensure_ascii=False)
@@ -936,13 +939,13 @@ def _snapshot_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _count_copies(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     copied: list[str] = []
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
 
     def counting(source: Path, target: Path) -> object:
         copied.append(Path(source).name)
         return original(source, target)
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", counting)
+    monkeypatch.setattr(shutil, "copyfile", counting)
     return copied
 
 
@@ -968,7 +971,7 @@ def test_td105_a_write_that_starts_while_the_strict_read_copies_is_never_refused
     _work(tmp_path, "WORK-001")
     _snapshot_temp(tmp_path, monkeypatch)
     db_path = tmp_path / ".auto-pm" / "continuity.db"
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
     writes: list[str] = []
 
     def copy_with_a_concurrent_write(source: Path, target: Path) -> object:
@@ -977,7 +980,7 @@ def test_td105_a_write_that_starts_while_the_strict_read_copies_is_never_refused
             _write_title(db_path, writes[0])
         return original(source, target)
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", copy_with_a_concurrent_write)
+    monkeypatch.setattr(shutil, "copyfile", copy_with_a_concurrent_write)
 
     work = ContinuityStore(tmp_path).get_work("WORK-001")
 
@@ -1123,7 +1126,7 @@ def test_td105_a_new_copy_that_fails_the_integrity_check_is_refused_without_resi
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     snapshot_parent = _snapshot_temp(tmp_path, monkeypatch)
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
 
     def corrupting(source: Path, target: Path) -> object:
         result = original(source, target)
@@ -1133,7 +1136,7 @@ def test_td105_a_new_copy_that_fails_the_integrity_check_is_refused_without_resi
             Path(target).write_bytes(bytes(data))
         return result
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", corrupting)
+    monkeypatch.setattr(shutil, "copyfile", corrupting)
 
     with pytest.raises(ContinuityStoreError):
         ContinuityStore(tmp_path).get_work("WORK-001")
@@ -1165,7 +1168,7 @@ def test_a_permission_error_while_copying_counts_as_drift_and_is_retried(
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     temp_parent = _snapshot_temp(tmp_path, monkeypatch)
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
     refused: list[str] = []
 
     def held_once(source: Path, target: Path) -> object:
@@ -1174,7 +1177,7 @@ def test_a_permission_error_while_copying_counts_as_drift_and_is_retried(
             raise PermissionError(32, "The process cannot access the file because it is being used by another process")
         return original(source, target)
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", held_once)
+    monkeypatch.setattr(shutil, "copyfile", held_once)
 
     assert ContinuityStore(tmp_path).get_work("WORK-001").title == "WORK-001"
     assert refused == ["continuity.db"]
@@ -1189,7 +1192,7 @@ def test_a_copy_whose_bytes_differ_from_the_source_is_taken_again(
     _workspace(tmp_path)
     _work(tmp_path, "WORK-001")
     _snapshot_temp(tmp_path, monkeypatch)
-    original = continuity_store_module.shutil.copyfile
+    original = shutil.copyfile
     copies: list[str] = []
 
     def torn_once(source: Path, target: Path) -> object:
@@ -1203,7 +1206,7 @@ def test_a_copy_whose_bytes_differ_from_the_source_is_taken_again(
                 stream.write(bytes([byte[0] ^ 0xFF]))
         return result
 
-    monkeypatch.setattr(continuity_store_module.shutil, "copyfile", torn_once)
+    monkeypatch.setattr(shutil, "copyfile", torn_once)
 
     assert ContinuityStore(tmp_path).get_work("WORK-001").title == "WORK-001"
     assert copies.count("continuity.db") == 2
@@ -1232,3 +1235,53 @@ def test_a_write_that_lands_after_the_copy_but_before_the_second_inventory_is_re
 
     assert ContinuityStore(tmp_path).get_work("WORK-001").title == "written after the copy"
     assert copied_inventories == ["continuity.db"]
+
+
+
+def test_an_expired_lease_plus_another_conflict_still_gives_no_next_action(tmp_path: Path) -> None:
+    """RECLAIM_EXPIRED_RUN 只在租约过期是唯一冲突时给；并存别的冲突（如身份未核实）仍留空（预审 #350）。"""
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _run(tmp_path)
+    service = ContinuityResumeService(tmp_path, now=lambda: datetime(2026, 9, 9, 12, 16, tzinfo=UTC))
+    real_resolve = service._contexts.resolve
+
+    def resolve_with_identity_conflict(**kwargs: object) -> object:
+        context = real_resolve(**kwargs)  # type: ignore[arg-type]
+        return context.model_copy(update={"conflicts": (*context.conflicts, "RUNTIME_IDENTITY_UNVERIFIED")})
+
+    service._contexts.resolve = resolve_with_identity_conflict  # type: ignore[method-assign,assignment]
+
+    result = service.collect(project_id="SW-2026-008")
+
+    assert set(result.conflicts) == {"LEASE_EXPIRED", "RUNTIME_IDENTITY_UNVERIFIED"}
+    assert result.next_legal_action == ""
+
+
+def _renew_times(tmp_path: Path, times: int) -> None:
+    """Renew RUN-001's lease ``times`` times, 10 minutes apart, starting 10 minutes after the Run began."""
+    clock = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
+    store = ContinuityStore(tmp_path, _clock=lambda: clock)
+    for index in range(times):
+        clock = clock + timedelta(minutes=10)
+        version = store.get_lease("RUN-001").version
+        store.renew_lease(
+            "RUN-001", "agent-a", "lease-secret", 900, f"renew-{index}", expected_version=version
+        )
+
+
+def test_ten_renewals_put_a_red_flag_in_orient_but_nine_do_not(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _run(tmp_path)
+    _renew_times(tmp_path, 9)
+    service = ContinuityResumeService(tmp_path, now=lambda: datetime(2026, 9, 9, 13, 31, tzinfo=UTC))
+    assert service.collect(project_id="SW-2026-008").hold_warnings == ()
+
+    store = ContinuityStore(tmp_path, _clock=lambda: datetime(2026, 9, 9, 13, 30, tzinfo=UTC))
+    store.renew_lease(
+        "RUN-001", "agent-a", "lease-secret", 900, "renew-9", expected_version=store.get_lease("RUN-001").version
+    )
+    warnings = service.collect(project_id="SW-2026-008").hold_warnings
+    assert len(warnings) == 1 and "续租 10 次" in warnings[0]
+    assert service.collect(project_id="SW-2026-008").conflicts == ()  # a flag, not a block

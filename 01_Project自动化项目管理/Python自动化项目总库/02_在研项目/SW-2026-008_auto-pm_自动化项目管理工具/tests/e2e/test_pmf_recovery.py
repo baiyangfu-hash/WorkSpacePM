@@ -26,10 +26,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
-from auto_pm.core.continuity_resume_service import ContinuityResumeService
 
 import auto_pm
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.application.core.continuity_resume_service import ContinuityResumeService
 from auto_pm.contracts.continuity import RunState
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
 from auto_pm.contracts.mission import InternalRoutingPolicy
@@ -391,6 +391,19 @@ def test_r02_a_controller_that_dies_is_not_replaced_by_a_guess_and_the_session_i
     assert len(_events(scene.root, "EXECUTION_START_CLAIMED")) == 1
 
 
+def _drop_runtime_root(root: Path) -> None:
+    """This scene's launcher is not a deployed release, so the runtime identity of a write cannot be verified (TD-SW008-214).
+
+    The test is about the lease-expiry defence, not about the identity guard: leave the project registered without a runtime root.
+    """
+
+    registry = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
+    payload = json.loads(registry.read_text(encoding="utf-8"))
+    for project in payload["projects"]:
+        project.pop("runtime_root", None)
+    registry.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def test_r03_an_expired_lease_never_turns_into_success(scene: Scene) -> None:
     _short_lease_dispatch(scene.root, "OP-V04-R03")
     controller = scene.controller("OP-V04-R03")
@@ -410,7 +423,11 @@ def test_r03_an_expired_lease_never_turns_into_success(scene: Scene) -> None:
     assert store.get_run(controller.run_id).state is RunState.RUNNING, "an abandoned Run is neither succeeded nor failed by silence"
     assert not _events(scene.root, "RUN_TRANSITIONED", controller.run_id)
     resumed = ContinuityResumeService(scene.root).collect(project_id=PROJECT_ID, invocation_path=scene.root)
-    assert "LEASE_EXPIRED" in resumed.conflicts and resumed.next_legal_action == ""
+    assert "LEASE_EXPIRED" in resumed.conflicts
+    # 现场只有 LEASE_EXPIRED 一个冲突时给 RECLAIM_EXPIRED_RUN（见 test_continuity_resume_service）；这里还并存
+    # RUNTIME_IDENTITY_UNVERIFIED，多冲突并存仍保守地不给动作。
+    assert resumed.next_legal_action == ("" if len(resumed.conflicts) > 1 else "RECLAIM_EXPIRED_RUN")
+    _drop_runtime_root(scene.root)
     events_before = _query(scene.root, "SELECT rowid, event_type, aggregate_id FROM events ORDER BY rowid")
     renewal = scene.command(
         "lease", "renew", "--run-id", controller.run_id, "--owner", lease.owner_id, "--lease-token-env", "V04_LEASE_TOKEN",
@@ -582,7 +599,7 @@ def _fake_kernel32(handle: int, exit_call_ok: int, exit_code: int) -> SimpleName
     ids=["no-such-process", "api-failure-on-open", "api-failure-on-exit-code", "real-exit", "still-active"],
 )
 def test_v04t_an_api_failure_is_unknown_and_never_an_exit(handle: int, last_error: int, exit_call_ok: int, exit_code: int, expected: str) -> None:
-    ctypes.set_last_error(last_error)
+    ctypes.set_last_error(last_error)  # type: ignore[attr-defined,unused-ignore]  # Windows only
     assert _process_state(4242, _fake_kernel32(handle, exit_call_ok, exit_code)) == expected
 
 

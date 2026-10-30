@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -16,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.bounded_command import run_until_done_or_stopped
 from auto_pm.application.core.implementation_card_precheck import (
     format_findings,
     precheck_markdown_card,
@@ -53,6 +55,17 @@ from auto_pm.infrastructure.control_root_guard import (
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
+from auto_pm.ui.cli.runtime_identity_guard import (
+    WARNINGS_FIELD,
+    project_of_checkpoint,
+    project_of_handoff,
+    project_of_mission,
+    project_of_run,
+    project_of_work,
+    recorded_warnings,
+    require_runtime_identity,
+    warn_runtime_identity,
+)
 
 _Command = TypeVar("_Command", bound=Callable[..., Any])
 
@@ -125,7 +138,14 @@ def _orchestrator(ctx: click.Context) -> MissionOrchestrator:
 
 
 def _emit(item: BaseModel) -> None:
-    click.echo(item.model_dump_json(indent=2))
+    warnings = recorded_warnings(click.get_current_context(silent=True))
+    if not warnings:
+        click.echo(item.model_dump_json(indent=2))
+        return
+    # A recovery command that ran despite a runtime-identity conflict says so in its receipt, not only on stderr.
+    payload = item.model_dump(mode="json")
+    payload[WARNINGS_FIELD] = warnings
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _secret_from_environment(variable_name: str) -> str:
@@ -267,6 +287,7 @@ def create_mission(
 
     Admitted like ``pm approve``: past the soft limit, or over paths an open card also changes, only with the user's word.
     """
+    require_runtime_identity(ctx, project_id)
     # A release is the user's word: once an approver PIN is committed it is typed only through ``pm approve`` (audit 123).
     if admission_release_ref.strip() and approval_pin_enforced(_workspace(ctx)):
         raise click.ClickException(
@@ -329,6 +350,7 @@ def transition_mission(
     idempotency_key: str,
 ) -> None:
     """Apply one legal Mission transition using optimistic locking."""
+    require_runtime_identity(ctx, project_of_mission(ctx, mission_id))
     try:
         item = _mission_service(ctx, mutating=True).transition(
             mission_id=mission_id,
@@ -386,6 +408,7 @@ def create_work(
     precheck in this very process (no receipt file is trusted, no bypass switch exists), and
     its scope must stay inside the card's path table (card 027 §5.4).
     """
+    require_runtime_identity(ctx, project_id)
     try:
         _require_mutation_root(ctx)
         if not read_only:
@@ -437,6 +460,7 @@ def authorize_work(
     ctx: click.Context, work_id: str, decision_id: str, idempotency_key: str
 ) -> None:
     """Authorize PLANNED Work with a matching Decision package."""
+    require_runtime_identity(ctx, project_of_work(ctx, work_id))
     try:
         item = _work_service(ctx).authorize(work_id, decision_id, idempotency_key)
     except WorkRegistryError as error:
@@ -453,6 +477,7 @@ def authorize_work(
 @click.pass_context
 def transition_work(ctx: click.Context, work_id: str, new_state: str, idempotency_key: str) -> None:
     """Apply one legal Work state transition."""
+    require_runtime_identity(ctx, project_of_work(ctx, work_id))
     try:
         item = _work_service(ctx).transition(work_id, WorkState(new_state), idempotency_key)
     except WorkRegistryError as error:
@@ -513,6 +538,7 @@ def adjudicate_blocked_work(
     idempotency_key: str,
 ) -> None:
     """Forward-cancel one historical BLOCKED Work under an exact adjudication Decision."""
+    warn_runtime_identity(ctx, lambda: project_of_work(ctx, work_id))
 
     del recovery_lease_stdin
     recovery_lease_token = _read_stdin_text().strip()
@@ -550,6 +576,7 @@ def relate_work(
     idempotency_key: str,
 ) -> None:
     """Create one typed relation between Work items."""
+    require_runtime_identity(ctx, project_of_work(ctx, from_work))
     try:
         _work_service(ctx).add_relation(from_work, to_work, relation, idempotency_key)
     except WorkRegistryError as error:
@@ -594,6 +621,7 @@ def report_finding(
     external_action: bool,
 ) -> None:
     """Route a typed internal finding without creating a hidden parallel queue."""
+    require_runtime_identity(ctx, project_id)
     try:
         finding = OrchestrationFinding(
             finding_id=finding_id,
@@ -631,6 +659,7 @@ def report_repair(
     elapsed_seconds: int,
 ) -> None:
     """Record an adapter-observed repair attempt against the explicit A3 budget."""
+    require_runtime_identity(ctx, project_of_mission(ctx, mission_id))
     try:
         attempt = RepairAttempt(
             attempt_id=attempt_id,
@@ -692,6 +721,7 @@ def start_run(
     idempotency_key: str,
 ) -> None:
     """Start a Run after independently observing Git HEAD and owned-path dirtiness."""
+    require_runtime_identity(ctx, project_of_work(ctx, work_id))
     _require_mutation_root(ctx)
     if lease_wallet:
         if lease_token is not None or lease_token_env is not None:
@@ -799,6 +829,7 @@ def transition_run(
     idempotency_key: str,
 ) -> None:
     """Apply one legal Run state transition under an active lease."""
+    require_runtime_identity(ctx, project_of_run(ctx, run_id))
     lease_token = _lease_token(
         ctx, argv_value=lease_token, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
     )
@@ -841,6 +872,7 @@ def settle_expired_run(
     idempotency_key: str,
 ) -> None:
     """Settle one abandoned Run through an explicit live recovery authority."""
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, target_run_id))
 
     recovery_lease_token = _lease_token(
         ctx,
@@ -894,6 +926,7 @@ def fence_terminal_lease(
     idempotency_key: str,
 ) -> None:
     """Fence one legacy terminal lease through an independently approved recovery Run."""
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, target_run_id))
 
     del recovery_lease_stdin
     recovery_lease_token = _read_stdin_text().strip()
@@ -943,6 +976,7 @@ def reconcile_terminal_lease(
     idempotency_key: str,
 ) -> None:
     """Release a lease omitted by an exact legacy v2 terminal transition."""
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, target_run_id))
 
     del recovery_lease_stdin
     recovery_lease_token = _read_stdin_text().strip()
@@ -1015,6 +1049,7 @@ def fence_legacy_terminal(
     idempotency_key: str,
 ) -> None:
     """Invalidate one expired legacy terminal lease token without rewriting Run history."""
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, target_run_id))
 
     del recovery_lease_stdin
     recovery_lease_token = _read_stdin_text().strip()
@@ -1064,6 +1099,7 @@ def revoke_unstarted_run(
     idempotency_key: str,
 ) -> None:
     """Revoke a live Run only when its durable record has no Popen evidence."""
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, target_run_id))
 
     del recovery_lease_stdin
     recovery_lease_token = _read_stdin_text().strip()
@@ -1100,6 +1136,7 @@ def reclaim_run(
     Exit 0 = taken over (new token in the local wallet); 1 = refused (live lease or holder alive); 3 = PENDING (the holder's process
     cannot be identified: only the user's own `pm sign-risk` opens it).  A refusal and PENDING write nothing.
     """
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, run_id))
 
     _require_mutation_root(ctx)
     service = _handover(ctx)
@@ -1129,6 +1166,8 @@ def reclaim_run(
             wallet_path=outcome.lease.wallet_path,
             holder_process_recorded=outcome.lease.holder_process_recorded,
         )
+    if recorded_warnings(ctx):
+        payload[WARNINGS_FIELD] = recorded_warnings(ctx)
     click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
     ctx.exit(RECLAIM_EXIT_CODES[outcome.decision.value])
 
@@ -1170,6 +1209,7 @@ def prepare_dispatch(
     idempotency_key: str,
 ) -> None:
     """Allocate a local Run and emit only a desensitized PREPARED receipt."""
+    require_runtime_identity(ctx, project_of_work(ctx, work_id))
 
     lease_token = _lease_token(ctx, argv_value=lease_token, env_name=lease_token_env)
     try:
@@ -1203,7 +1243,11 @@ def lease_group() -> None:
 @click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
 @click.option("--expected-version", type=click.IntRange(min=1), required=True)
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
-@click.option("--idempotency-key", required=True)
+@click.option(
+    "--idempotency-key",
+    required=True,
+    help="防重复的键：同一次续租重试用同一个，下一次续租必须换新的，例如 <run-id>-renew-v<当前版本号>",
+)
 @click.pass_context
 def renew_lease(
     ctx: click.Context,
@@ -1216,6 +1260,8 @@ def renew_lease(
     idempotency_key: str,
 ) -> None:
     """Renew a lease held by the same owner and token."""
+    # Keep-alive: refusing a renewal would let the lease expire and force the recovery path, so a conflict only warns.
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, run_id))
     if (lease_token_env is None) == (not lease_wallet):
         raise click.UsageError("必须且只能给出一个口令来源：--lease-token-env 或 --lease-wallet")
     lease_token = _lease_token(
@@ -1233,6 +1279,118 @@ def renew_lease(
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
     _emit(item)
+
+
+@lease_group.command(name="run-with-renewal", context_settings={"ignore_unknown_options": True})
+@click.option("--run-id", required=True)
+@click.option("--owner", "owner_id", required=True)
+@click.option("--lease-token-env", default=None, metavar="ENV_NAME")
+@click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option(
+    "--timeout-seconds",
+    type=click.IntRange(1, 43_200),
+    default=14_400,
+    show_default=True,
+    help="命令最长跑多久；超时就杀掉命令并以 124 退出（长命令也必须有时限）",
+)
+@click.argument("command", nargs=-1, required=True, type=click.UNPROCESSED)
+@click.pass_context
+def run_with_renewal(
+    ctx: click.Context,
+    run_id: str,
+    owner_id: str,
+    lease_token_env: str | None,
+    lease_wallet: bool,
+    lease_seconds: int,
+    timeout_seconds: int,
+    command: tuple[str, ...],
+) -> None:
+    """Run one command (after --) and renew the Run's lease every third of its length until it exits.
+
+    For long foreground commands such as a full pytest: the lease cannot run out while it runs. Only renews; the 3 h
+    total-hold cap still applies. The first renewal must succeed or the command is not started. The command inherits the
+    environment without the lease token, and its exit code is returned.
+    """
+    from auto_pm.application.core.lease_keepalive import LeaseKeepAlive, LeaseKeepAliveError
+
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, run_id))
+    if (lease_token_env is None) == (not lease_wallet):
+        raise click.UsageError("必须且只能给出一个口令来源：--lease-token-env 或 --lease-wallet")
+    token = _lease_token(
+        ctx, argv_value=None, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
+    )
+    child_env = {key: value for key, value in os.environ.items() if key != lease_token_env}
+    gave_up = threading.Event()
+    try:
+        with LeaseKeepAlive(
+            _execution_service(ctx),
+            run_id=run_id,
+            owner_id=owner_id,
+            token=token,
+            lease_seconds=lease_seconds,
+            on_give_up=gave_up.set,
+        ) as keepalive:
+            outcome = run_until_done_or_stopped(list(command), child_env, timeout_seconds, gave_up)
+            returncode = outcome.returncode
+            if outcome.stopped_by == "stop":
+                click.echo("续租已放弃（租约快过期或被拒），命令已被终止；请先检查租约再决定是否重跑", err=True)
+            elif outcome.stopped_by == "timeout":
+                click.echo(f"命令超过 {timeout_seconds} 秒仍未结束，已被终止", err=True)
+    except LeaseKeepAliveError as error:
+        raise click.ClickException(str(error)) from error
+    except OSError as error:
+        raise click.ClickException(f"命令无法启动：{error}") from error
+    if keepalive.error:
+        click.echo(f"警告：命令运行期间续租中断（{keepalive.error}）；请先检查租约再继续", err=True)
+    ctx.exit(returncode)
+
+
+@lease_group.command(name="extend-hold")
+@click.option("--run-id", required=True)
+@click.option("--extra-seconds", type=click.IntRange(60, 43_200), required=True, help="在默认 3 小时上限之外再加多少秒")
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
+)
+@click.option(
+    "--idempotency-key",
+    required=True,
+    help="防重复的键：同一次延长重试用同一个，再次延长必须换新的，例如 <run-id>-hold-<序号>",
+)
+@click.pass_context
+def extend_lease_hold(
+    ctx: click.Context, run_id: str, extra_seconds: int, approval_evidence_ref: str, idempotency_key: str
+) -> None:
+    """Raise one Run's total lease-hold cap (default 3 h). Only the user may do this."""
+    from auto_pm.application.core.approval_proof_service import (
+        ApprovalProofError,
+        ApprovalProofService,
+    )
+    from auto_pm.contracts.user_evidence import user_evidence_problem
+    from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
+
+    # Like a renewal, this keeps a Run alive and carries its own user proof, so a runtime-identity conflict only warns.
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, run_id))
+    _require_mutation_root(ctx)
+    control_root = str(_workspace(ctx))
+    evidence = approval_evidence_ref.strip()
+    if approval_pin_enforced(control_root):
+        pin = read_approval_pin(control_root, summary=f"延长 {run_id} 的租约持有上限 {extra_seconds} 秒")
+        try:
+            _, evidence = ApprovalProofService(control_root).resolve(
+                pin=pin, approver="", evidence_ref=evidence, purpose="lease-extend-hold", subject=run_id
+            )
+        except ApprovalProofError as error:
+            raise click.ClickException(str(error)) from error
+    elif problem := user_evidence_problem(evidence):
+        raise click.ClickException(f"{problem}；延长持有上限只听用户本人（--approval-evidence-ref）")
+    try:
+        result = _execution_service(ctx).extend_lease_hold(run_id, extra_seconds, evidence, idempotency_key)
+    except ContinuityExecutionError as error:
+        raise click.ClickException(str(error)) from error
+    _emit(result)
 
 
 @lease_group.command(name="record-holder")
@@ -1253,6 +1411,8 @@ def record_holder(
     idempotency_key: str,
 ) -> None:
     """Record the holder's long-lived process (for example a renewal loop) so that a later reclaim can prove it gone."""
+    # Keep-alive: refusing a renewal would let the lease expire and force the recovery path, so a conflict only warns.
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, run_id))
 
     lease_token = _lease_token(
         ctx, argv_value=lease_token, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
@@ -1267,7 +1427,10 @@ def record_holder(
         raise click.ClickException(str(error)) from error
     if not recorded:
         raise click.ClickException(f"进程 {pid} 不在运行或读不到启动时间，未记录")
-    click.echo(json.dumps({"run_id": run_id, "owner_id": owner_id, "holder_pid": pid, "recorded": True}, ensure_ascii=False))
+    receipt: dict[str, object] = {"run_id": run_id, "owner_id": owner_id, "holder_pid": pid, "recorded": True}
+    if recorded_warnings(ctx):
+        receipt[WARNINGS_FIELD] = recorded_warnings(ctx)
+    click.echo(json.dumps(receipt, ensure_ascii=False))
 
 
 @continuity_group.group(name="checkpoint")
@@ -1297,6 +1460,7 @@ def create_checkpoint(
     idempotency_key: str,
 ) -> None:
     """Checkpoint current Git baseline and dirty paths from the Run worktree."""
+    require_runtime_identity(ctx, project_of_run(ctx, run_id))
     lease_token = _lease_token(
         ctx, argv_value=lease_token, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
     )
@@ -1346,6 +1510,7 @@ def create_handoff(
     idempotency_key: str,
 ) -> None:
     """Create an immutable handoff.v2 from an active lease and checkpoint."""
+    require_runtime_identity(ctx, project_of_checkpoint(ctx, checkpoint_id))
     lease_token = _lease_token(ctx, argv_value=lease_token, env_name=lease_token_env)
     try:
         item = _execution_service(ctx).create_handoff(
@@ -1381,6 +1546,7 @@ def accept_handoff(
     idempotency_key: str,
 ) -> None:
     """Atomically transfer the Run lease to the named receiver."""
+    require_runtime_identity(ctx, project_of_handoff(ctx, handoff_id))
     new_lease_token = _lease_token(
         ctx,
         argv_value=new_lease_token,

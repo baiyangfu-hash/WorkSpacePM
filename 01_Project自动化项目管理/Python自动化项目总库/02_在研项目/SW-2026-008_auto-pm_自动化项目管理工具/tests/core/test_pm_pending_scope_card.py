@@ -18,9 +18,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
 
+from auto_pm.application.core.local_execution_orchestrator import LocalExecutionOrchestrator
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_facade import (
@@ -32,6 +31,7 @@ from auto_pm.contracts.pm_facade import (
     PmIntent,
     SubmittedPlanningScopeCard,
 )
+from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 from tests.core.test_pm_run_e2e import (
@@ -50,7 +50,7 @@ from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 else:
-    from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
+    from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 
 OTHER_PROJECT = "SW-OTHER-001"
 SCOPE = (CALC, CALC_TEST)

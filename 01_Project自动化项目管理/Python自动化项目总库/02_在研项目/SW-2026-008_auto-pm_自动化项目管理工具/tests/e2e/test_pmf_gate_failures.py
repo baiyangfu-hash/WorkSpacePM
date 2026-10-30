@@ -17,11 +17,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 import auto_pm
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_out
+from tests.workspace_support import register_project
 
 PID = "SW-2026-901"
 OTHER_PID = "SW-2026-902"
@@ -84,6 +85,7 @@ def _build(tmp_path: Path, final_state: str = "implementing") -> Scene:
     (repo / f"{PID}_fixture" / "src").mkdir(parents=True)
     (repo / f"{PID}_fixture" / ".copier-answers.yml").write_text(f"project_id: {PID}\nproject_name: gate fixture\nstack: python\n", encoding="utf-8")
     (repo / f"{PID}_fixture" / "src" / "service.py").write_text("VALUE = 1\n", encoding="utf-8")
+    register_project(repo, PID, f"{PID}_fixture")
     (repo / "main.py").write_text(LAUNCHER, encoding="utf-8")
     (repo / ".gitignore").write_text("main.py\n.auto-pm/\n", encoding="utf-8")
     scene = Scene(repo, "")
@@ -120,6 +122,8 @@ def _build_two(tmp_path: Path) -> tuple[Scene, str]:
         (repo / folder / "src").mkdir(parents=True)
         (repo / folder / ".copier-answers.yml").write_text(f"project_id: {pid}\nproject_name: gate fixture {pid}\nstack: python\n", encoding="utf-8")
         (repo / folder / "src" / "service.py").write_text("VALUE = 1\n", encoding="utf-8")
+    for pid, folder in ((PID, f"{PID}_fixture"), (OTHER_PID, f"{OTHER_PID}_other")):
+        register_project(repo, pid, folder)
     (repo / "main.py").write_text(LAUNCHER, encoding="utf-8")
     (repo / ".gitignore").write_text("main.py\n.auto-pm/\n", encoding="utf-8")
     scene = Scene(repo, "")

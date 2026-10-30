@@ -6,8 +6,9 @@ import os
 from pathlib import Path
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.constants import (
+
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.constants import (
     SpecViolationError,
     validate_business_nature,
     validate_domain,
@@ -15,7 +16,7 @@ from auto_pm.change.constants import (
     validate_status_transition,
     validate_urgency,
 )
-from auto_pm.change.document_contract import CLOSURE_REQUIRED_SECTIONS
+from auto_pm.domain.change.document_contract import CLOSURE_REQUIRED_SECTIONS
 
 
 class TestChangeService:
@@ -602,7 +603,7 @@ class TestChapterCompleteness:
 
     def test_transition_to_closed_blocked_when_incomplete(self, tmp_path: Path) -> None:
         """章节不完整时流转 closed 抛 TransitionGuardError"""
-        from auto_pm.change.constants import TransitionGuardError
+        from auto_pm.domain.change.constants import TransitionGuardError
 
         project_id = "TEST-2026-001"
         project_path = tmp_path / project_id
@@ -673,7 +674,8 @@ class TestProjectRootFromChangeFile:
 
     @staticmethod
     def _root(change_file: Path) -> str | None:
-        return ChangeService._find_project_root_from_path(str(change_file))
+        root: str | None = ChangeService._find_project_root_from_path(str(change_file))
+        return root
 
     def test_standard_layout_finds_the_project_with_04_monitoring(self, tmp_path: Path) -> None:
         project = tmp_path / "SW-1"

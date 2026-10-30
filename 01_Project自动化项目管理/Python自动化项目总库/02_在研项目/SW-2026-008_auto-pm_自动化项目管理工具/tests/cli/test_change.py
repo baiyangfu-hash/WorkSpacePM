@@ -29,9 +29,13 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
+
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.ui.cli.__main__ import cli
+
+# These tests are about something other than the runtime identity; their fixtures have no registered project anchor.
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +63,7 @@ def _cleanup_test_changes(tmp_path: Path) -> Generator[None, None, None]:
             if fp and fp.exists():
                 project_path = cs._find_project_root_from_path(str(fp))
                 if project_path:
-                    from auto_pm.change.path_resolver import find_ledger_file
+                    from auto_pm.domain.change.path_resolver import find_ledger_file
 
                     ledger_path = find_ledger_file(project_path)
                     if ledger_path:

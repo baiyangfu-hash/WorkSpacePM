@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 
 import pytest
-from auto_pm.change.parser import ChgParser
-from auto_pm.utils.file_utils import write_file
+
+from auto_pm.domain.change.parser import ChgParser
+from auto_pm.infrastructure.utils.file_utils import write_file
 
 
 class TestChgParser:

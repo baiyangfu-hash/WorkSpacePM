@@ -12,9 +12,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
-from auto_pm.core.project_service import ProjectService
 from pydantic import ValidationError
 
+from auto_pm.application.core.project_service import ProjectService
 from auto_pm.contracts.project_fact_snapshot import (
     AvailableCheckFact,
     CodeStructureFact,
@@ -484,7 +484,7 @@ class ProjectFactService:
     @staticmethod
     def _read_text(path: Path) -> str:
         try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except OSError as error:
+            return path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
             raise ProjectFactError(f"无法读取文本事实源: {path}") from error
 

@@ -4,7 +4,10 @@
 name: sw008-ci
 
 on:
+  # push 只留给 main：分支上有 PR 时 pull_request 那一轮（测合并结果）就够，两个触发同时开会让每次推送都跑两遍全量，
+  # Windows 分片排队到 80 分钟以上。没开 PR 的分支推送不再跑本检查；要验证时手动 workflow_dispatch。
   push:
+    branches: [main]
     paths:
       - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/**"
       - "00_Infrastructure/auto_pm/environment/**"
@@ -101,7 +104,7 @@ jobs:
 
       - name: Mypy (win32 platform, as the product runs on Windows)
         working-directory: ${{ env.PROJ }}
-        run: python -m mypy --platform win32 --no-incremental --cache-dir=/dev/null auto_pm
+        run: python -m mypy --platform win32 --no-incremental --cache-dir=/dev/null auto_pm tests
 
       - name: Pytest
         id: pytest

@@ -13,8 +13,9 @@ from datetime import UTC, datetime
 
 import pytest
 import yaml
-from auto_pm.vartable.converter import SUPPORTED_OUTPUT_FORMATS, VariableConverter
-from auto_pm.vartable.models import (
+
+from auto_pm.domain.vartable.converter import SUPPORTED_OUTPUT_FORMATS, VariableConverter
+from auto_pm.domain.vartable.models import (
     BlockEntry,
     BlockTable,
     ChannelEntry,

@@ -26,8 +26,8 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from auto_pm.vartable.models import ParseResult, VarEntry, VarTable
-from auto_pm.vartable.parsers.base_parser import BaseParser
+from auto_pm.domain.vartable.models import ParseResult, VarEntry, VarTable
+from auto_pm.domain.vartable.parsers.base_parser import BaseParser
 
 SOURCE_FORMAT = "intdoc"
 
@@ -65,8 +65,8 @@ class IntDocParser(BaseParser):
         Returns:
             True 表示是 INT doc 格式（内容含 ### VAR_INPUT/VAR_OUTPUT 区段标题）
         """
-        from auto_pm.vartable.models import FormatType
-        from auto_pm.vartable.parsers.format_detector import detect_format
+        from auto_pm.domain.vartable.models import FormatType
+        from auto_pm.domain.vartable.parsers.format_detector import detect_format
 
         return bool(detect_format(file_path) == FormatType.INTDOC)
 

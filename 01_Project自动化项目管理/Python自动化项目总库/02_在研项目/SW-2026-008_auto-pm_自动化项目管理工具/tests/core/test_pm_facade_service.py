@@ -14,24 +14,23 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.core.continuity_execution_service import (
+
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.mission_service import MissionService, MissionServiceError
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
-from auto_pm.core.workspace_context_service import WorkspaceContextService
-
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionService,
     PythonQualityGate,
     PythonQualityReceipt,
     _quality_receipt_hash,
 )
+from auto_pm.application.core.mission_service import MissionService, MissionServiceError
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.application.core.pm_facade_service import PmFacadeService as PlanningFacade
 from auto_pm.application.core.pm_intake_service import PmIntakeService
+from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
+from auto_pm.application.core.workspace_context_service import WorkspaceContextService
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
@@ -47,6 +46,7 @@ from auto_pm.contracts.pm_facade import (
     PmIntent,
     PmRunOutcome,
 )
+from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.domain.change.decision_service import DecisionError
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.intake_store import IntakeStore
@@ -852,14 +852,12 @@ def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
         return marker
 
     monkeypatch.setattr(facade._execution, "prepare", fake_prepare)
-    assert (
-        facade.prepare_planning_execution(
-            card,
-            expected_plan_hash=card.plan_hash,
-            lease_token="one-time-secret",
-        )
-        is marker
+    prepared: Any = facade.prepare_planning_execution(
+        card,
+        expected_plan_hash=card.plan_hash,
+        lease_token="one-time-secret",
     )
+    assert prepared is marker
     active = facade._store.get_mission(first_mission.mission_id)
     assert active.state is MissionState.ACTIVE
     assert active.root_work_id == first_work.work_id
@@ -1117,7 +1115,7 @@ def test_acceptance_rechecks_generic_owned_paths_after_rehash(tmp_path: Path) ->
     assert receipt.status == "PASS"
     collection = collector.collect(run)
     serialized = collector.build_checkpoint_evidence(collection, receipt)
-    assert facade._acceptance_evidence_is_current(serialized, collection, run, tmp_path)
+    assert facade._acceptance_evidence_is_current(serialized, collection, run, str(tmp_path))
 
     envelope = json.loads(serialized)
     envelope["quality_receipt"]["owned_python_paths"] = [
@@ -1131,7 +1129,7 @@ def test_acceptance_rechecks_generic_owned_paths_after_rehash(tmp_path: Path) ->
         {key: value for key, value in envelope.items() if key != "envelope_hash"}
     )
     forged = facade._canonical_json(envelope)
-    assert not facade._acceptance_evidence_is_current(forged, collection, run, tmp_path)
+    assert not facade._acceptance_evidence_is_current(forged, collection, run, str(tmp_path))
 
 
 def test_confirm_start_uses_the_mission_bound_work_without_an_internal_id(tmp_path: Path) -> None:
@@ -2088,7 +2086,8 @@ def test_verify_refuses_a_protected_file_change_in_block_mode_and_never_writes_t
     monkeypatch.setattr(
         PmFacadeService, "_protected_file_changes", staticmethod(lambda _run: ("tests/test_pm.py",))
     )
-    monkeypatch.setattr("auto_pm.application.core.pm_facade_service.PROTECTED_FILE_ENFORCEMENT", "block")
+    # The Run in this fixture is created now, i.e. after the cut-over; a Run created before it would only be warned.
+    monkeypatch.setattr("auto_pm.contracts.protected_files.PROTECTED_BLOCK_FROM", "2020-01-01T00:00:00+00:00")
     before = _gate_event_count(tmp_path)
 
     outcome, reason = facade.verify_for_acceptance_with_reason("MISSION-PM-001", lease_token="gate-lease")

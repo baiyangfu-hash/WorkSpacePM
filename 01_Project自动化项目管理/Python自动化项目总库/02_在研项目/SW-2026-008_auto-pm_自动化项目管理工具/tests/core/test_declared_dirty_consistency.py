@@ -15,10 +15,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core import pm_facade_service as facade_module
-from auto_pm.core.continuity_execution_service import ContinuityExecutionService
-from auto_pm.core.pm_facade_service import PmFacadeError
 
+from auto_pm.application.core import pm_facade_service as facade_module
+from auto_pm.application.core.continuity_execution_service import (
+    ContinuityExecutionError,
+    ContinuityExecutionService,
+)
+from auto_pm.application.core.pm_facade_service import PmFacadeError
 from auto_pm.contracts.continuity import RunState
 from auto_pm.contracts.declared_dirty import (
     DECLARED_DIRTY_MISMATCH,
@@ -340,7 +343,7 @@ def test_verify_with_a_matching_declaration_reaches_the_quality_gate(
 
     def append(_self: Any, **_kwargs: Any) -> None:
         called.append("append")
-        raise facade_module.ContinuityExecutionError("simulated quality failure")
+        raise ContinuityExecutionError("simulated quality failure")
 
     monkeypatch.setattr(ContinuityExecutionService, "append_verified_checkpoint", append)
 

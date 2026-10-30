@@ -9,14 +9,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core.execution_adapter_service import (
+
+from auto_pm.application.core.execution_adapter_service import (
     ExecutionDispatchResult,
 )
-from auto_pm.core.execution_adapter_service import (
+from auto_pm.application.core.execution_adapter_service import (
     LeaseCapability as DispatchLeaseCapability,
 )
-from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
-
+from auto_pm.application.core.local_execution_orchestrator import LocalExecutionOrchestrator
 from auto_pm.contracts.execution_adapter import (
     ExecutionActivityStage,
     ExecutionFailureCode,

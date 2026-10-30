@@ -9,7 +9,7 @@ from typing import Any
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.core.dogfood_runner import DogfoodIsolationError, DogfoodRunner
+from auto_pm.application.core.dogfood_runner import DogfoodIsolationError, DogfoodRunner
 
 
 def _workspace(ctx: click.Context) -> Path:

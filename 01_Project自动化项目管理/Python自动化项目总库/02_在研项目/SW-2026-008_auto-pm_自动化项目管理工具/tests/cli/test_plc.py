@@ -6,8 +6,9 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
+
+from auto_pm.ui.cli.__main__ import cli
 
 
 def _make_plc_project(
@@ -447,8 +448,11 @@ def test_plc_standardize_preview(cli_runner: CliRunner, tmp_path: Path) -> None:
     assert (prd_dir / "接口文档_IFC-001.md").exists()
 
 
-def test_plc_standardize_apply(cli_runner: CliRunner, tmp_path: Path) -> None:
+def test_plc_standardize_apply(cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """测试 plc standardize <ID> --apply（执行重命名）"""
+    from tests.identity_support import guard_off
+
+    guard_off(monkeypatch, "plc")  # the scratch workspace has no registered project anchor
     project_id = "DJ-2026-APPLY"
     project_dir = _make_plc_project(
         tmp_path,

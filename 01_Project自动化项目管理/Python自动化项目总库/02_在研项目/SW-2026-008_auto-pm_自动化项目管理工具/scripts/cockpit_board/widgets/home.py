@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 from cockpit_board import theme
 from cockpit_board.viewmodel import Check, Decision, HomeVM, ProjectCard, waited
@@ -14,11 +15,11 @@ from PySide6.QtWidgets import QFrame, QVBoxLayout, QWidget
 CARD_COLUMNS = 3
 
 
-def decision_card(item: Decision, now, on_project: Callable[[str], None], on_copy: Callable[[str], None]) -> QFrame:  # noqa: ANN001
+def decision_card(item: Decision, now: datetime, on_project: Callable[[str], None], on_copy: Callable[[str], None]) -> QFrame:
     frame, layout = c.card(item.sev)
     head = c.hrow(c.label(item.project_id, "mono", wrap=False), c.label(item.ask, "section"), 1)
     if item.example:
-        head.layout().insertWidget(2, c.example_tag())
+        c.insert_widget(head, 2, c.example_tag())
     layout.addWidget(head)
     layout.addWidget(c.label(item.why, "muted"))
     reply = c.label(item.reply, "mono", wrap=False)
@@ -84,11 +85,11 @@ class HomePage(QWidget):
         self.fold_open = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        self.scroll, self.layout_ = c.page()
-        outer.addWidget(self.scroll)
+        self.scroll_area, self.layout_ = c.page()
+        outer.addWidget(self.scroll_area)
         self.vm: HomeVM | None = None
 
-    def render(self, vm: HomeVM, now) -> None:  # noqa: ANN001
+    def show_view(self, vm: HomeVM, now: datetime) -> None:
         self.vm = vm
         c.clear(self.layout_)
         lay = self.layout_
@@ -144,7 +145,7 @@ class HomePage(QWidget):
             for stamp, pid, text, example in vm.activity:
                 row = c.hrow(c.label(stamp, "mono", wrap=False), c.label(pid, "mono", wrap=False), c.label(text), 1)
                 if example:
-                    row.layout().insertWidget(3, c.example_tag())
+                    c.insert_widget(row, 3, c.example_tag())
                 inner.addWidget(row)
         else:
             inner.addWidget(c.label("这 7 天账本和变更记录里都没有新动静。", "muted"))
@@ -162,8 +163,8 @@ class HomePage(QWidget):
     def _toggle(self) -> None:
         self.fold_open = not self.fold_open
         if self.vm is not None:
-            self.render(self.vm, self.vm_now)
+            self.show_view(self.vm, self.vm_now)
 
-    def show_board(self, vm: HomeVM, now) -> None:  # noqa: ANN001
+    def show_board(self, vm: HomeVM, now: datetime) -> None:
         self.vm_now = now
-        self.render(vm, now)
+        self.show_view(vm, now)

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.spec.core.checker_base import (
+from auto_pm.domain.spec.core.checker_base import (
     HealthChecker,
     Severity,
     SkillContractDriftChecker,
 )
-from auto_pm.spec.core.registry import SpecRegistry
-from auto_pm.spec.core.scanner import SpecScanner
-from auto_pm.spec.core.skill_contracts import SKILL_CONTRACTS
+from auto_pm.domain.spec.core.registry import SpecRegistry
+from auto_pm.domain.spec.core.scanner import SpecScanner
+from auto_pm.domain.spec.core.skill_contracts import SKILL_CONTRACTS
 
 
 def _write_correct_skill_docs(workspace: Path) -> None:

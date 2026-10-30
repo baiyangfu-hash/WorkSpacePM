@@ -25,7 +25,11 @@ from auto_pm.contracts.continuity_resume import (
 )
 from auto_pm.contracts.intake import IntakeSummary
 from auto_pm.contracts.mission import Mission, MissionState
-from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.continuity_store import (
+    LEASE_RENEWAL_RED_COUNT,
+    ContinuityStore,
+    ContinuityStoreError,
+)
 from auto_pm.infrastructure.intake_store import IntakeStore
 
 from .workspace_context_service import WorkspaceContextError, WorkspaceContextService
@@ -68,6 +72,7 @@ class ContinuityResumeService:
             raise ContinuityResumeError(str(error)) from error
 
         conflicts = list(context.conflicts)
+        hold_warnings: list[str] = []
         mission: Mission | None = None
         work = None
         run = None
@@ -173,6 +178,13 @@ class ContinuityResumeService:
                         <= self._now().astimezone(UTC)
                     ):
                         conflicts.append("LEASE_EXPIRED")
+                    hold = self._store.lease_hold_status(run.run_id)
+                    renewals = int(str(hold["renewals"]))
+                    if renewals >= LEASE_RENEWAL_RED_COUNT:
+                        hold_warnings.append(
+                            f"续租 {renewals} 次（≥{LEASE_RENEWAL_RED_COUNT}）：这个 Run 卡住了或开得太久，"
+                            f"持有上限 {hold['hold_end']}；请先查原因，别无限续"
+                        )
             except (ContinuityStoreError, sqlite3.Error) as error:
                 raise ContinuityResumeError(f"Continuity Store 无法读取: {error}") from error
 
@@ -191,7 +203,12 @@ class ContinuityResumeService:
         )
         if mission is None and work is None and mission_candidates:
             next_action = "AWAIT_USER_SWITCH"
-        if conflicts:
+        if conflicts == ["LEASE_EXPIRED"]:
+            # 只有租约过期这一个冲突时的出口是回收（continuity run reclaim）：申请人必须换一个名字（原持有者续租被拒、
+            # 自己回收自己也被拒），原持有者进程判不出时还须用户本人 pm sign-risk 签字。settle-expired 要另开恢复
+            # Work/Run 和运行态 Decision，不是执行端的常规出口。留空会让人卡在续租/回收互相踢皮球里。
+            next_action = "RECLAIM_EXPIRED_RUN"
+        elif conflicts:
             next_action = ""
         read_set = tuple(item.path for item in context.read_set) + (
             (str(self._store.db_path),) if db_exists else ()
@@ -231,6 +248,7 @@ class ContinuityResumeService:
             checkpoint=checkpoint,
             lease=lease_view,
             conflicts=tuple(conflicts),
+            hold_warnings=tuple(hold_warnings),
             next_legal_action=next_action,
             read_set=read_set,
             intake=intake,

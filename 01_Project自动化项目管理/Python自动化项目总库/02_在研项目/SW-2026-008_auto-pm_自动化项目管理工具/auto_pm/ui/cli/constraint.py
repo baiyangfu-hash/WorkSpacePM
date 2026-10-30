@@ -34,9 +34,9 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from auto_pm.constraint.guard import FileGuard
-from auto_pm.constraint.loader import ConstraintLoader, ConstraintLoadError
-from auto_pm.constraint.models import Constraint, Violation
+from auto_pm.domain.constraint.guard import FileGuard
+from auto_pm.domain.constraint.loader import ConstraintLoader, ConstraintLoadError
+from auto_pm.domain.constraint.models import Constraint, Violation
 
 console = Console()
 

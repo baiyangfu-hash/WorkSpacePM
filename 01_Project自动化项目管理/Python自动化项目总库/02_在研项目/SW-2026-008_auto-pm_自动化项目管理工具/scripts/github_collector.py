@@ -33,6 +33,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import Path
+from typing import Any
 
 API = "https://api.github.com"
 DEFAULT_REPO = "baiyangfu-hash/WorkSpacePM"
@@ -389,7 +390,7 @@ def plan_declaration(body: str | None) -> tuple[str | None, str]:
     return values[0], ""
 
 
-def find_signature(comments: list[dict], head_sha: str) -> tuple[str | None, str]:
+def find_signature(comments: list[dict[str, Any]], head_sha: str) -> tuple[str | None, str]:
     """返回（签到的提交号，没签上的原因）。只认指定签字人本人手写、签的是当前头提交的。"""
     notes: list[str] = []
     for comment in comments:
@@ -412,7 +413,7 @@ def find_signature(comments: list[dict], head_sha: str) -> tuple[str | None, str
     return None, "；".join(notes)
 
 
-def safety_of(body: str | None, comments: list[dict] | None, head_sha: str, plc: bool) -> Safety:
+def safety_of(body: str | None, comments: list[dict[str, Any]] | None, head_sha: str, plc: bool) -> Safety:
     plan, problem = plan_declaration(body)
     if problem:
         return Safety("undeclared", None, problem)
@@ -433,7 +434,7 @@ def safety_of(body: str | None, comments: list[dict] | None, head_sha: str, plc:
 # ---------------------------------------------------------------- CI
 
 
-def _run_state(run: dict) -> tuple[str, str]:
+def _run_state(run: dict[str, Any]) -> tuple[str, str]:
     status, conclusion = run.get("status"), run.get("conclusion")
     if status != "completed":
         return "running", "在跑"
@@ -446,9 +447,9 @@ def _run_state(run: dict) -> tuple[str, str]:
     return "notrun", f"没跑（{conclusion or '无结论'}）"
 
 
-def latest_runs(runs: list[dict]) -> dict[str, dict]:
+def latest_runs(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """每个工作流名取最新的一次（run_number 大的、建得晚的）。"""
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     for run in runs:
         name = str(run.get("name") or "")
         key = (str(run.get("created_at") or ""), int(run.get("run_number") or 0))
@@ -458,7 +459,7 @@ def latest_runs(runs: list[dict]) -> dict[str, dict]:
     return out
 
 
-def ci_states(runs: list[dict] | None, expected: set[str], known: Iterable[str]) -> list[CiState]:
+def ci_states(runs: list[dict[str, Any]] | None, expected: set[str], known: Iterable[str]) -> list[CiState]:
     names = sorted(set(known) | expected | set(latest_runs(runs or [])))
     if runs is None:
         return [CiState(n, "unknown", "没读到") if n in expected else CiState(n, "na", "路径没碰到") for n in names]
@@ -499,7 +500,7 @@ def _header(headers: Mapping[str, str], name: str) -> str:
 
 
 class Api:
-    def __init__(self, fetch: Fetch, token: str, etags: dict[str, list]) -> None:
+    def __init__(self, fetch: Fetch, token: str, etags: dict[str, list[Any]]) -> None:
         self.fetch = fetch
         self.token = token
         self.etags = etags  # {url: [etag, 正文 JSON]}；不含令牌
@@ -553,11 +554,11 @@ def default_cache_path(repo: str, env: Mapping[str, str] = os.environ) -> Path:
     return Path(base) / "WorkSpacePM" / "cockpit" / f"github_{repo.replace('/', '_')}.json"
 
 
-def _audit_from(raw: dict) -> Audit:
+def _audit_from(raw: dict[str, Any]) -> Audit:
     return Audit(**raw)
 
 
-def _pull_from(raw: dict) -> PullInfo:
+def _pull_from(raw: dict[str, Any]) -> PullInfo:
     raw = dict(raw)
     raw["ci"] = [CiState(**c) for c in raw.get("ci", [])]
     raw["safety"] = Safety(**raw["safety"])
@@ -565,15 +566,15 @@ def _pull_from(raw: dict) -> PullInfo:
     return PullInfo(**raw)
 
 
-def load_cache(path: Path) -> tuple[dict[str, list], Snapshot | None]:
+def load_cache(path: Path) -> tuple[dict[str, list[Any]], Snapshot | None]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
         return {}, None
     if not isinstance(raw, dict) or raw.get("version") != CACHE_VERSION:
         return {}, None
-    etags = raw.get("etags") if isinstance(raw.get("etags"), dict) else {}
-    snap = raw.get("snapshot")
+    etags: Any = raw.get("etags") if isinstance(raw.get("etags"), dict) else {}
+    snap: Any = raw.get("snapshot")
     try:
         snapshot = Snapshot(
             repo=snap["repo"],
@@ -590,7 +591,7 @@ def load_cache(path: Path) -> tuple[dict[str, list], Snapshot | None]:
     return etags, snapshot
 
 
-def save_cache(path: Path, etags: dict[str, list], snapshot: Snapshot) -> None:
+def save_cache(path: Path, etags: dict[str, list[Any]], snapshot: Snapshot) -> None:
     """写缓存：先写临时文件再替换，写一半断电也不坏。令牌不进缓存。审计结论每次现读，也不进缓存。"""
     snap = asdict(snapshot)
     snap.pop("audits", None)

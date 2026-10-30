@@ -11,10 +11,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.doc_inject_service import DocInjectService
+from auto_pm.application.core.doc_refresh_service import DocRefreshService
 from auto_pm.application.core.doc_services import DocCheckService, DocSyncService
-from auto_pm.core.doc_inject_service import DocInjectService
-from auto_pm.core.doc_refresh_service import DocRefreshService
-from auto_pm.core.project_service import ProjectService
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
 
@@ -91,6 +92,8 @@ def doc_inject_cmd(ctx: click.Context, project_id: str, dry_run: bool, json_outp
         console.print(f"[bold red]错误：[/bold red]未找到项目 '{project_id}'（项目不存在）")
         raise click.exceptions.Exit(1)
 
+    if not dry_run:
+        require_runtime_identity(ctx, project_id)
     service = DocInjectService(workspace_root=str(workspace_root))
     result = service.inject_markers(project, dry_run=dry_run)
 
@@ -131,6 +134,8 @@ def doc_refresh_cmd(ctx: click.Context, project_id: str, dry_run: bool, json_out
         console.print(f"[bold red]错误：[/bold red]未找到项目 '{project_id}'（项目不存在）")
         raise click.exceptions.Exit(1)
 
+    if not dry_run:
+        require_runtime_identity(ctx, project_id)
     service = DocRefreshService(workspace_root=str(workspace_root))
     result = service.refresh_project_documents(project, dry_run=dry_run)
 

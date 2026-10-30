@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.core.pm_resume_service import PmResumeService
-from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
 from click.testing import CliRunner
 
+from auto_pm.application.core.pm_resume_service import PmResumeService
+from auto_pm.application.core.workspace_context_service import (
+    WorkspaceContextError,
+    WorkspaceContextService,
+)
 from auto_pm.ui.cli.__main__ import cli
 
 

@@ -8,13 +8,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
-from auto_pm.core.protocols import (
+from auto_pm.application.core.protocols import (
     AssetSummaryServiceProtocol,
     DashboardServiceProtocol,
     ProjectServiceProtocol,
     TemplateServiceProtocol,
 )
-
 from auto_pm.contracts.gate_dtos import ProcessGroupStage
 from auto_pm.domain.project.state_machine import build_change_state_machine
 from auto_pm.ui.contracts.dto.workbench_dto import (
@@ -292,8 +291,8 @@ class WorkbenchUseCases:
         try:
             if not self.template_service:
                 return CommandOutcome(False, "TemplateService 未注入")
-            from auto_pm.core.constants import get_template_name
-            from auto_pm.core.paths import get_default_projects_dir
+            from auto_pm.application.core.constants import get_template_name
+            from auto_pm.application.core.paths import get_default_projects_dir
 
             dest_root = os.path.abspath(dest_dir) if dest_dir else get_default_projects_dir()
             project_dir = f"{project_id}_{project_name}"
@@ -325,7 +324,7 @@ class WorkbenchUseCases:
                     pass
             self.project_service.sync_to_cache(force_full=True)
             try:
-                from auto_pm.logging.audit import audit_log
+                from auto_pm.infrastructure.logging.audit import audit_log
 
                 audit_log(
                     "project_create",
@@ -354,7 +353,7 @@ class WorkbenchUseCases:
 
     def detect_project(self, path: str) -> CommandOutcome[dict[str, Any] | None]:
         try:
-            from auto_pm.core.project_scanner import ProjectScanner
+            from auto_pm.application.core.project_scanner import ProjectScanner
 
             scanner = ProjectScanner(self.project_service.workspace_root)
             project = scanner.try_identify_project(path)
@@ -374,7 +373,7 @@ class WorkbenchUseCases:
 
     def import_project(self, src_path: str) -> CommandOutcome[dict[str, Any] | None]:
         try:
-            from auto_pm.core.project_scanner import ProjectScanner
+            from auto_pm.application.core.project_scanner import ProjectScanner
 
             dest_path = self.project_service.import_project(src_path)
             scanner = ProjectScanner(self.project_service.workspace_root)
@@ -408,17 +407,22 @@ class WorkbenchUseCases:
             from auto_pm.application.core.project_delete_guard import (
                 delete_blockers,
                 recycle_project,
+                surface_identity_problem,
             )
 
             project = self.project_service.get_project(project_id)
             if project is None:
                 return CommandOutcome(False, f"项目不存在: {project_id}")
+            # 界面删除与命令行同一道身份门（TD-208）：agent 环境、已启用批准口令时都拒绝，不靠界面按钮默认只有用户点
+            problem = surface_identity_problem(self.project_service.workspace_root, os.environ)
+            if problem:
+                return CommandOutcome(False, f"拒绝删除项目 {project_id}：{problem}")
             # 与命令行同一套护栏（TD-193）：开着任务或有未提交改动时拒绝；删除是把目录搬进回收区，不是 rmtree
             blockers = delete_blockers(self.project_service.workspace_root, project_id, project.path)
             if blockers:
                 return CommandOutcome(False, f"项目 {project_id} 现在不能删除：" + "；".join(blockers))
             recycled = recycle_project(self.project_service.workspace_root, project.path, project_id)
-            from auto_pm.logging.audit import audit_log
+            from auto_pm.infrastructure.logging.audit import audit_log
 
             audit_log(
                 "project_delete",
@@ -438,7 +442,7 @@ class WorkbenchUseCases:
 
     def save_workspace_root(self, workspace_root: str) -> CommandOutcome[dict[str, Any]]:
         try:
-            from auto_pm.core.paths import get_config_file_path
+            from auto_pm.application.core.paths import get_config_file_path
 
             workspace_root = os.path.abspath(workspace_root)
             if not os.path.isdir(workspace_root):
@@ -568,7 +572,7 @@ class WorkbenchUseCases:
         target_stage: ProcessGroupStage = "planning",
     ) -> CommandOutcome[dict[str, Any] | None]:
         try:
-            from auto_pm.core.gates import StageGateEngine
+            from auto_pm.application.core.gates import StageGateEngine
 
             project = self.project_service.get_project(project_id)
             if not project:

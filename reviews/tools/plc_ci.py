@@ -104,12 +104,17 @@ def context(source, line_number):
         previous -= 1
     return " / ".join(reversed(picked))
 scl = []
+bad_encoding = []
 for root, _, files in os.walk(project):
     for name in sorted(files):
         if name.lower().endswith(".scl"):
             path = os.path.join(root, name)
             rel = os.path.relpath(path, project).replace(os.sep, "/")
             try:
+                source = open(path, encoding="utf-8").read().splitlines()
+            except UnicodeDecodeError as error:
+                # 只为显示上下文才用替身字符读；坏字节本身单独报告，不能静默吞掉
+                bad_encoding.append({"file": rel, "offset": error.start})
                 source = open(path, encoding="utf-8", errors="replace").read().splitlines()
             except OSError:
                 source = []
@@ -121,6 +126,7 @@ print(json.dumps({
     "check": result.model_dump(),
     "docs": [asdict(f) for f in analysis.findings],
     "scl": scl,
+    "encoding": bad_encoding,
 }, ensure_ascii=False))
 """
 
@@ -282,6 +288,8 @@ def failure_keys(data: dict) -> Counter:
         # 与验收门 baseline_compare.code_suffix 同一写法，测试 b12 锁两边一致。
         code = " ".join(str(v.get("code", "")).split())[:300]
         keys[f"SCL 规范 · {v['file']} [{v['rule']}] {v['message']}" + (f" | 代码: {code}" if code else "")] += 1
+    for e in data.get("encoding", []):
+        keys[f"SCL 编码 · {e['file']}：不是合法 UTF-8"] += 1
     return keys
 
 

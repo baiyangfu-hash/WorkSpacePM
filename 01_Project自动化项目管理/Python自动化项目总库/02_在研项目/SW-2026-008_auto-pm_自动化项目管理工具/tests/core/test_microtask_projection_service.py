@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
-import auto_pm.core.microtask_projection_service as projection_module
 import pytest
-from auto_pm.core.execution_supervisor_service import ExecutionSupervisorService
-from auto_pm.core.microtask_projection_service import (
+
+from auto_pm.application.core.execution_supervisor_service import ExecutionSupervisorService
+from auto_pm.application.core.microtask_projection_service import (
     MicrotaskProjectionError,
     MicrotaskProjectionService,
 )
-
 from auto_pm.contracts.execution_adapter import (
     ExecutionProjectionFile,
     ExecutionStartEvidence,
@@ -25,7 +26,7 @@ from tests.core.test_execution_microtask_service import _prepared
 _LEASE_TOKEN = "must-never-persist"
 
 
-def _running_plan(root: Path, operation_id: str, *, additional_path: str = ""):
+def _running_plan(root: Path, operation_id: str, *, additional_path: str = "") -> tuple[Any, Any]:
     dispatch = _prepared(
         root, operation_id=operation_id, additional_path=additional_path
     )
@@ -137,7 +138,7 @@ def test_new_file_projection_failure_removes_file_and_created_directories(
         ),
     ]
     service = MicrotaskProjectionService(tmp_path)
-    real_replace = projection_module.os.replace
+    real_replace = os.replace
     calls = 0
 
     def fail_second_replace(source: Path, target_path: Path) -> None:
@@ -147,7 +148,7 @@ def test_new_file_projection_failure_removes_file_and_created_directories(
             raise OSError("injected second replace")
         real_replace(source, target_path)
 
-    monkeypatch.setattr(projection_module.os, "replace", fail_second_replace)
+    monkeypatch.setattr(os, "replace", fail_second_replace)
     with pytest.raises(MicrotaskProjectionError, match="clean baseline"):
         service._apply_batch_with_rollback(
             target, plan, prepared, tuple(item[4] for item in prepared)
@@ -159,7 +160,7 @@ def test_new_file_projection_failure_removes_file_and_created_directories(
 
 
 def test_mid_batch_replace_failure_rolls_back_and_proves_clean_baseline(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     operation_id = "OP-E08CD-PROJECTION-ROLLBACK"
     materialized, _claim = _running_plan(tmp_path, operation_id)
@@ -167,7 +168,7 @@ def test_mid_batch_replace_failure_rolls_back_and_proves_clean_baseline(
     target = Path(plan.source_worktree_path)
     # The project directory is identified by the approved path, not the worktree name.
     relative_paths = (PROJECT_PATH, f"{Path(PROJECT_PATH).parent.as_posix()}/.copier-answers.yml")
-    prepared = []
+    prepared: list[tuple[Path, bytes, bytes | None, int, ExecutionProjectionFile]] = []
     baseline_by_path: dict[Path, bytes] = {}
     for index, relative in enumerate(relative_paths, start=1):
         destination = target / relative
@@ -188,17 +189,17 @@ def test_mid_batch_replace_failure_rolls_back_and_proves_clean_baseline(
             )
         )
     service = MicrotaskProjectionService(tmp_path)
-    real_replace = projection_module.os.replace
+    real_replace = os.replace
     calls = 0
 
-    def fail_second_replace(source, destination) -> None:
+    def fail_second_replace(source: str, destination: str) -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
             raise OSError("injected mid-batch replace failure")
         real_replace(source, destination)
 
-    monkeypatch.setattr(projection_module.os, "replace", fail_second_replace)
+    monkeypatch.setattr(os, "replace", fail_second_replace)
     with pytest.raises(MicrotaskProjectionError, match="回滚到 clean baseline"):
         service._apply_batch_with_rollback(
             target,

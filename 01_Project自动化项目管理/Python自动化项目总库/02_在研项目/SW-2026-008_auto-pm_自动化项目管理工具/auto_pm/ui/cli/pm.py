@@ -12,8 +12,17 @@ import click
 from click.core import ParameterSource
 
 from auto_pm.app_context import AppContext
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.constants import TransitionGuardError
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
+from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
+from auto_pm.application.core.pm_resume_service import PmResumeError, PmResumeService
+from auto_pm.application.core.workspace_context_service import (
+    WorkspaceContextError,
+    WorkspaceContextService,
+)
+from auto_pm.application.core.worktree_policy_service import (
+    WorktreePolicyError,
+    WorktreePolicyService,
+)
 from auto_pm.contracts.continuity_query import QueriedAction
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
@@ -32,11 +41,8 @@ from auto_pm.contracts.plan_checklist import (
     parse_acceptance_check,
 )
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PlanningScopeCard, PmIntent
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.pm_intake_service import PmIntakeError, PmIntakeService
-from auto_pm.core.pm_resume_service import PmResumeError, PmResumeService
-from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
-from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.constants import TransitionGuardError
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
@@ -255,9 +261,7 @@ def _planning_scope_card(
         build = (
             facade.preview_planning_scope_card if preview_only else facade.create_planning_scope_card
         )
-        return cast(
-            PlanningScopeCard,
-            build(
+        return build(
                 intent,
                 scope_paths=scope_paths,
                 risks=risks,
@@ -270,8 +274,7 @@ def _planning_scope_card(
                 ),
                 classification=classification,
                 intake_item_id=intake_item_id,
-            ),
-        )
+            )
     except (PmFacadeError, ValueError, WorktreePolicyError) as error:
         raise click.ClickException(str(error)) from error
 
@@ -325,7 +328,7 @@ def _submit_scope_card(
         )
     except (PmFacadeError, ValueError, WorktreePolicyError) as error:
         raise click.ClickException(str(error)) from error
-    return cast(PlanningScopeCard, submitted.card)
+    return submitted.card
 
 
 def _emit_plan_approval(card: PlanningScopeCard, work_state: str) -> None:
@@ -368,14 +371,16 @@ def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approv
             )
     except (TransitionGuardError, ValueError) as error:
         raise click.ClickException(str(error)) from error
-    if change.status not in {
+    if change is None or change.status not in {
         "approved",
         "implementing",
         "pending_acceptance",
         "accepting",
         "completed",
     }:
-        raise click.ClickException(f"PlanningScopeCard 绑定的 CHG 不可批准: {change.status}")
+        raise click.ClickException(
+            f"PlanningScopeCard 绑定的 CHG 不可批准: {change.status if change else '状态流转后读不到 CHG'}"
+        )
 
 
 @pm_group.command(name="plan")
@@ -1217,6 +1222,8 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
     click.echo(f"下一合法动作: {payload.next_legal_action or '-'}")
     for conflict in payload.conflicts:
         click.echo(f"冲突: {conflict}")
+    for warning in payload.hold_warnings:
+        click.echo(f"🔴 {warning}")
     if not payload.intake.is_empty:
         click.echo(
             f"收件箱: 待确认 {payload.intake.awaiting_confirmation} 条 | "

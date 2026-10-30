@@ -9,8 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from auto_pm.core.project_scanner import ProjectScanner
-
+from auto_pm.application.core.project_scanner import ProjectScanner
 from auto_pm.contracts.workspace_context import (
     ContextEvidence,
     ContextProject,
@@ -147,6 +146,11 @@ class WorkspaceContextService:
             evidence_id=evidence_id,
             conflicts=conflicts,
         )
+
+    def registered_project_ids(self) -> tuple[str, ...]:
+        """Read-only list of the project ids the Workspace Registry declares."""
+
+        return tuple(self._load_registry()[1])
 
     def _load_registry(
         self,
@@ -425,8 +429,8 @@ class WorkspaceContextService:
     @staticmethod
     def _read_text(path: Path) -> str:
         try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except OSError as error:
+            return path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
             raise WorkspaceContextError(f"无法读取文件: {path}") from error
 
     def _require_workspace_path(self, path: Path, label: str) -> None:

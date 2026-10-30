@@ -15,8 +15,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.delivery.archive_manager import ArchiveManager
-from auto_pm.delivery.constants import (
+
+from auto_pm.application.delivery.archive_manager import ArchiveManager
+from auto_pm.application.delivery.constants import (
     ARCHIVE_INFO_FILENAME,
     ARCHIVE_MANIFEST_FILENAME,
     DIR_ARCHIVE,

@@ -167,8 +167,10 @@ def identity_guard_off() -> Generator[None, None, None]:
     with pytest.MonkeyPatch.context() as patcher:
         # The command line is importable under two names (``auto_pm.cli`` and ``auto_pm.ui.cli``); patch whichever is loaded.
         for package in ("auto_pm.ui.cli", "auto_pm.cli"):
-            for module in ("pm", "pm_closure", "pm_handoff", "pm_switch"):
+            for module in ("pm", "pm_closure", "pm_handoff", "pm_switch", "continuity", "change", "decision", "implementation_card", "ledger", "project"):
                 target = sys.modules.get(f"{package}.{module}")
                 if target is not None:
-                    patcher.setattr(target, "require_runtime_identity", lambda *_a, **_k: None)
+                    for name in ("require_runtime_identity", "warn_runtime_identity", "require_runtime_identity_for_change", "require_runtime_identity_for_card"):
+                        if hasattr(target, name):
+                            patcher.setattr(target, name, lambda *_a, **_k: None)
         yield

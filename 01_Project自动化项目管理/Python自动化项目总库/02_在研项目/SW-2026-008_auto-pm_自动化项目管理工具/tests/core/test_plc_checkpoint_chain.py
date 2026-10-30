@@ -13,18 +13,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
-from auto_pm.core.work_registry_service import WorkRegistryService
 
 from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
+from auto_pm.application.core.local_execution_orchestrator import LocalExecutionOrchestrator
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import RunState, WorkKind
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PmIntent
+from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 from tests.core.test_continuity_execution_service import Clock, _start
@@ -45,7 +45,7 @@ from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 if TYPE_CHECKING:
     from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 else:
-    from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
+    from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 
 PLC_PROJECT_ID = "DJ-TEST-001"
 EDITED_SCL = GOOD_SCL + "// V01 edit\n"

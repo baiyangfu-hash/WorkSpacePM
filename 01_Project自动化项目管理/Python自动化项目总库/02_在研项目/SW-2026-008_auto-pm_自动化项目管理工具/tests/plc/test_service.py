@@ -8,8 +8,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from auto_pm.core.protocols import PlcServiceProtocol
-from auto_pm.plc.service import PlcService
+from auto_pm.application.core.protocols import PlcServiceProtocol
+from auto_pm.domain.plc.service import PlcService
 
 
 class TestPlcServiceProtocolConformance:

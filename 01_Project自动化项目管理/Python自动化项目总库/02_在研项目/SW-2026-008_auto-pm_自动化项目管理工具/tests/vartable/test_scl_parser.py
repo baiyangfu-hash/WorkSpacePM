@@ -13,7 +13,8 @@ import re
 from pathlib import Path
 
 import pytest
-from auto_pm.vartable.parsers.scl_parser import SclParser
+
+from auto_pm.domain.vartable.parsers.scl_parser import SclParser
 
 # 工作空间根目录（从 tests/vartable 推导：7 级父目录）
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[6]
@@ -268,7 +269,7 @@ class TestSclParserVarConstant:
         import csv
         import io
 
-        from auto_pm.vartable.converter import VariableConverter
+        from auto_pm.domain.vartable.converter import VariableConverter
 
         f = tmp_path / "fb_demo.scl"
         f.write_text(self._FB_TEXT, encoding="utf-8")
