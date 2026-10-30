@@ -1,9 +1,9 @@
 # 驾驶舱探测 findings（trae, 20261030）
 
-- 开始时间：2026-10-29 18:55 MST；本批更新时间：2026-10-29 19:26 MST（探测进行中）
+- 开始时间：2026-10-29 18:55 MST；结束时间：2026-10-29 19:34 MST（探测完成）
 - 环境：Linux 沙箱 / Ubuntu 24.04 / 发布版 1.3.3-d8f7c8b / Python 3.12.3 (.venv)
 - 操作对象：一次性假项目 **ZZ-2026-901**（PROBE-0001 被 ID 格式门禁拒绝，见 F3；ZZ-2026-901 为符合文档格式且明显非真实的替身，不与任何真实项目撞号）
-- 命令全文与退出码见 `transcript/`（s00–s15）；每条发现的最短复现见 `repro/`
+- 命令全文与退出码见 `transcript/`（s00–s17）；每条发现的最短复现见 `repro/`
 - 时间均为 MST（UTC-7）；证据里机器时间戳保留 Z
 
 ## 发现清单
@@ -37,6 +37,7 @@
 | F27 | 声明范围 | P1 | 受管工作树存在 owned 之外、未声明的脏文件（README.md）→ run start 照样放行 RUNNING（help 声称 "independently observing ... owned-path dirtiness" 未覆盖范围外脏文件） | 是 | start 时对范围外脏文件警告或拒绝 |
 | F28 | 声明范围 | P1 | `--declared-dirty README.md`（范围外文件）报「declared_dirty_paths 超出 owned_paths」——声明机制只能声明 owned 之内，与 F27 合并 = 范围外改动既不可声明也不可观测（语义倒置） | 是 | declared-dirty 应允许 owned 之外并在 verify 拦截 |
 | F29 | 规则自洽 | P1 | `python check` 门禁强制「PM_SESSION 文件 ✓」（J3），治理却宣布 PM_SESSION 退役且禁止新建（F7 生成器还在建）——按治理删除会致门禁红：三处互相矛盾（生成器建 / 门禁查 / 治理禁） | 是 | 三处对齐到同一决定 |
+| F30 | 门禁口径 | P1 | commit-msg「生产代码关联单据强校验」只有本地钩子一层：CI pr-gate 只做 Scope check（PLC 文件才复跑 pre-commit 同套文档/代码一致性，不校验提交信息），ci-aggregate 只聚合测试类工作流；而本地钩子默认不装（F13）——默认路径上该门禁三层全失守 | 是 | CI 补提交信息校验，或环境引导装钩子 + doctor 查钩子 |
 
 撤销/更正：原 F4（resume 报错 exit 0）撤销——管道掩盖退出码，复测 exit=1 行为正确。原「Linux 无引导脚本」更正入 F1。
 
@@ -65,8 +66,21 @@ Work：PLANNED→(authorize)→READY→IN_PROGRESS→VERIFYING→ACCEPTED→CLOS
 | 同 id 重复 | A5、E5 | **误导**（裸 sqlite 栈） |
 | 相对路径存在却报不存在 | F10/F18、J8 | **误导** |
 | 不存在项目 | B1（change 能）/ A2（work 不拦） | 一能一漏 |
+| 不存在项目（python check） | K4 | 能（「错误: 项目不存在」exit 1——与 F14 work 层不拦形成同族对照） |
+| pm context 多余位置参数 | K5 | 能（click 标准 Usage + 提示；但兼容入口不收项目编号，只能 `--help` 自查） |
 | pm * 死路 | s13 | 不能（只给 Usage） |
 | git-hook pre-commit 手动跑 | J7 | 能过但零输出（不可观测） |
+
+## 探测5 门禁口径对照表（本地命令 / Git 钩子 / CI）
+
+| 层 | 载体 | 触发时机 | 实际跑什么 | 范围与缝隙 |
+|----|------|----------|-----------|-----------|
+| 本地命令门禁 | `pm verify`（Run 租约内）、`plc check`、`python check`、`doc check` | 仅当 agent/用户手动运行 | 领域门禁 + 门禁证据 checkpoint | 无强制时机：不跑也能提交、推送；`python check` 对不存在项目正确拒绝（K4） |
+| Git 钩子 | pre-commit、commit-msg | `git commit`（钩子已装才生效） | pre-commit：文档/代码一致性（手动跑零输出，J7）；commit-msg：生产代码关联单据强校验（K3） | 全新克隆仅 `*.sample`，默认不装（F13）；setup_env.sh 只补执行位不安装；不关联单据的提交在默认路径可入库（F30） |
+| CI：pr-gate.yml | `pull_request_target → main` | PR 打开/更新/编辑 | Scope check（pr_scope_check.py，裁判取自 main 基线，PR 头只当数据）；改到 PLC 文件时复跑 pre-commit 同套文档/代码一致性 | 不校验提交信息 → commit-msg 校验无 CI 对应层（F30） |
+| CI：ci-aggregate.yml | `pull_request_target → main` | PR 打开/更新/重开 | 按改动路径算出该跑的工作流（sw008-ci、plc-ci、reviews-tools-ci 等），没触发/失败/取消即不过 | 防「没触发假绿」设计良好；不覆盖提交信息校验（F30） |
+
+口径缝隙结论：**本地过、CI 不查**——提交信息与单据的关联校验只有钩子层，且钩子默认不装（F30）；**CI 查、本地不强制**——scope check 与聚合测试只在 PR 层生效，本地直推 main 是否被拦取决于 GitHub 分支保护设置（不在本探测范围，未验证）。另注：`decision list` 不带项目过滤即列出全部项目的决策包（含真实项目编号与审批人列）——本地单用户 CLI 可接受，多 agent 共机时信息边界偏弱，只记录（K6）。
 
 ## 探测7 Linux/Windows 差异（只记录）
 
@@ -84,13 +98,19 @@ Work：PLANNED→(authorize)→READY→IN_PROGRESS→VERIFYING→ACCEPTED→CLOS
 - [x] Mission 全流程（受 F12 限制：17 条命令全死路取证；change/decision/continuity 链路正测通过）
 - [x] 插急活（park/unpark/switch/missions 均不存在——并入 F12）
 - [x] 受保护文件与改动声明（F27/F28）
-- [x] 门禁口径对照（F13/F26/F29；J1–J10）
+- [x] 门禁口径对照（F13/F26/F29/F30；J1–J10；本地/钩子/CI 对照表见上）
 - [x] 错误信息质量（打分表见上）
 - [x] Linux/Windows 差异（见上）
 
-## 结束时填写（尚未结束）
+## 结束信息（2026-10-29 19:34 MST 收尾）
 
-- 结束时间：-
-- 发现计数：P0 x / P1 x / P2 x
-- 未做探测项：-
-- 总命令数：-
+- 开始时间：2026-10-29 18:55 MST；结束时间：2026-10-29 19:34 MST（总时长约 39 分钟，未触及 16 小时 / 积分停止条件）
+- 发现计数：共 **28** 条——**P0 × 4**（F9、F14、F17、F21）、**P1 × 19**（F3、F6、F7、F8、F10、F12、F13、F15、F16、F18、F19、F20、F22、F24、F25、F27、F28、F29、F30）、**P2 × 5**（F1、F2、F11、F23、F26）；另撤销 1 条（原 F4，管道掩盖退出码）
+- 未做探测项：
+  - 探测2 的 **accept 环节**：按任务要求不执行（验收必须用户本人做）；其前各环节因 `pm *` 命令在 1.3.3 不存在（F12），改由 change/decision/continuity 链路完成「故意做错」取证（缺参、错编号、重复、乱序均已覆盖）；
+  - 探测3 **插急活四栏**（park/unpark/switch/missions）：命令在 1.3.3 不存在，无法测（F12）；8 张上限、撞车放行、凭据格式校验均无从触发；
+  - 探测4 的「改**受保护清单**里的文件」：与任务红线（不改受保护路径）冲突，未执行；只测了 owned 范围外文件与 declared-dirty（F27/F28）；
+  - 探测7 的 **Windows 侧行为**：无 Windows 环境，未实测，仅源码/文档层记录；
+  - CI 必需检查与分支保护设置：需 GitHub 设置页或接口，按红线未查。
+- 总命令数：**197** 条（transcript s00–s17 中带 `[exit=` 记录的命令；另有少量 git/环境查看类命令未逐条编号）
+- 遗留运行态（有意保留作证据，未清理）：假项目 `0100_项目/ZZ-2026-901/`、工作树 `.auto-pm/worktrees/trae-probe-w1` 与 `/tmp/probe-wt-out`、continuity.db 中的 W/R-PROBE-* 记录（R-PROBE-001 为过期死锁样本）。
