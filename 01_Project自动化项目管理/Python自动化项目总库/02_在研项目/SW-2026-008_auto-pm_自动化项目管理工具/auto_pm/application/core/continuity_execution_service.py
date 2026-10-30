@@ -19,6 +19,8 @@ from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionService,
     PlcQualityReceipt,
     PythonQualityReceipt,
+    quality_failure_summary,
+    write_quality_failure_report,
 )
 from auto_pm.contracts.continuity import (
     CheckpointItem,
@@ -483,7 +485,14 @@ class ContinuityExecutionService:
                 receipt = collector.run_generic_checkpoint_quality_gates(run, project_root)
             domain = "PLC" if profile == "plc" else "Python"
             if receipt.status != "PASS":
-                raise ContinuityExecutionError(f"自动 Checkpoint 要求 {domain} 质量收据为 PASS")
+                report = write_quality_failure_report(
+                    receipt, self._root / ".auto-pm" / "reports" / "quality-failures"
+                )
+                where = f"\n完整收据：{report}" if report is not None else "\n（收据未能落盘）"
+                raise ContinuityExecutionError(
+                    f"自动 Checkpoint 要求 {domain} 质量收据为 PASS；失败项：\n"
+                    f"{quality_failure_summary(receipt)}{where}"
+                )
             if (
                 profile == "c03"
                 and isinstance(receipt, PythonQualityReceipt)
