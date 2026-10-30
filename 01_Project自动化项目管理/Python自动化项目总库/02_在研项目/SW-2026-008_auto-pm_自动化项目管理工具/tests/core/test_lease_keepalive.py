@@ -84,3 +84,52 @@ def test_a_refusal_in_the_middle_ends_the_loop_and_is_reported_not_raised(tmp_pa
         clock.value += timedelta(hours=4)  # lease dead and far past the 3 h hold cap
         _wait_for(lambda: bool(keepalive.error))
     assert "过期" in keepalive.error or "上限" in keepalive.error
+
+
+def test_a_transient_failure_does_not_end_the_keepalive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
+
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    real = service.renew_lease
+    calls = {"n": 0}
+
+    def flaky(*args: object, **kwargs: object) -> object:
+        calls["n"] += 1
+        if 2 <= calls["n"] <= 3:  # the entry renewal (1) works; the next two attempts fail, then it recovers
+            raise ContinuityExecutionError("lease version 冲突")
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(service, "renew_lease", flaky)
+    monkeypatch.setattr("auto_pm.application.core.lease_keepalive.MAX_RETRY_SECONDS", 0.02)
+    with _keepalive(service) as keepalive:
+        _wait_for(lambda: keepalive.renewals >= 3)
+    assert calls["n"] >= 5 and keepalive.error == ""
+
+
+def test_the_keepalive_gives_up_only_when_the_lease_is_nearly_gone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
+
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    real = service.renew_lease
+    state = {"fail": False, "attempts": 0}
+
+    def switchable(*args: object, **kwargs: object) -> object:
+        if state["fail"]:
+            state["attempts"] += 1
+            raise ContinuityExecutionError("ledger busy")
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(service, "renew_lease", switchable)
+    monkeypatch.setattr("auto_pm.application.core.lease_keepalive.MAX_RETRY_SECONDS", 0.02)
+    with _keepalive(service) as keepalive:
+        _wait_for(lambda: keepalive.renewals >= 1)
+        state["fail"] = True
+        _wait_for(lambda: state["attempts"] >= 4)  # still plenty of lease: keeps retrying, no error yet
+        assert keepalive.error == ""
+        clock.value += timedelta(seconds=880)  # 20 s left: below the give-up floor
+        _wait_for(lambda: bool(keepalive.error))
+    assert keepalive.error == "ledger busy"

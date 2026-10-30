@@ -328,6 +328,9 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def now_utc(self) -> datetime:
+        return self._utc_now()
+
     def current_lease(self, run_id: str) -> LeaseItem:
         try:
             return self._store.get_lease(run_id)

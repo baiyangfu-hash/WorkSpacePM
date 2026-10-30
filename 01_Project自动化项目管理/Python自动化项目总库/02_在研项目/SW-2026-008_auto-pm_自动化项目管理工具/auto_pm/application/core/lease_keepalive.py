@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 from types import TracebackType
 
 from auto_pm.application.core.continuity_execution_service import (
@@ -11,6 +12,9 @@ from auto_pm.application.core.continuity_execution_service import (
 )
 
 DEFAULT_LEASE_SECONDS = 900
+# A failed renewal is retried until the lease has less than this left; only then is the loop given up.
+GIVE_UP_REMAINING_SECONDS = 60
+MAX_RETRY_SECONDS = 10.0
 
 
 class LeaseKeepAliveError(RuntimeError):
@@ -61,13 +65,27 @@ class LeaseKeepAlive:
         )
         self.renewals += 1
 
+    def _remaining_seconds(self) -> float:
+        lease = self._execution.current_lease(self._run_id)
+        return (datetime.fromisoformat(lease.expires_at) - self._execution.now_utc()).total_seconds()
+
     def _loop(self) -> None:
-        while not self._stop.wait(self._interval):
+        wait = self._interval
+        while not self._stop.wait(wait):
             try:
                 self._renew_once()
+                wait = self._interval
             except ContinuityExecutionError as error:
-                self.error = str(error)
-                return
+                # One failed attempt (a busy ledger, a lost race on the lease version) must not end the keep-alive: retry
+                # soon, and give up only when the lease is nearly gone or can no longer be read.
+                try:
+                    remaining = self._remaining_seconds()
+                except ContinuityExecutionError:
+                    remaining = 0.0
+                if remaining < GIVE_UP_REMAINING_SECONDS:
+                    self.error = str(error)
+                    return
+                wait = min(self._interval, MAX_RETRY_SECONDS)
 
     def __enter__(self) -> LeaseKeepAlive:
         try:
