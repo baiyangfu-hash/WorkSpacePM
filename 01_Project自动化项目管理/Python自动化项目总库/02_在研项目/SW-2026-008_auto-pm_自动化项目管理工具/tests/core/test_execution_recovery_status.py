@@ -65,6 +65,38 @@ def test_the_skew_boundary_is_inclusive_and_one_microsecond_later_is_a_reused_pi
     assert judge_started_process(_evidence(), observation, later).verdict is RecoveryVerdict.PID_REUSED
 
 
+@pytest.mark.parametrize("seconds_later", [3, 30, 200, 86_400])
+def test_a_process_created_more_than_the_skew_after_the_recorded_start_is_a_reused_pid(seconds_later: int) -> None:
+    """2 秒容差之外（3 秒到一整天）一律判进程号被复用，不会因为“差得不多”被当成原进程。"""
+    observation = ProcessObservation(pid_exists=True)
+    created = NOW + timedelta(seconds=seconds_later)
+    assert judge_started_process(_evidence(), observation, created).verdict is RecoveryVerdict.PID_REUSED
+
+
+@pytest.mark.parametrize("seconds_before", [3, 3_600, 86_400 * 30])
+def test_a_process_created_any_time_before_the_recorded_start_is_alive(seconds_before: int) -> None:
+    observation = ProcessObservation(pid_exists=True)
+    created = NOW - timedelta(seconds=seconds_before)
+    assert judge_started_process(_evidence(), observation, created).verdict is RecoveryVerdict.ALIVE
+
+
+# 2026-10-27 12:00:00 UTC 的 Windows FILETIME：1970 到 1601 的差 116444736000000000 个 100 纳秒 + Unix 秒数 1793102400 × 10^7
+FILETIME_NOW = "134375760000000000"
+
+
+def test_a_windows_creation_filetime_converts_to_the_exact_utc_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert process_probe.start_time_to_datetime(FILETIME_NOW) == NOW
+    assert process_probe.start_time_to_datetime(str(int(FILETIME_NOW) + 15_000_000)) == NOW + timedelta(seconds=1.5)
+    assert process_probe.start_time_to_datetime("0") == datetime(1601, 1, 1, tzinfo=UTC)
+
+
+def test_a_filetime_beyond_the_year_9999_cannot_be_converted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """越界不抛错，返回 None（上层报 UNKNOWN，不是崩溃也不是 DEAD）。"""
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert process_probe.start_time_to_datetime("9" * 30) is None
+
+
 def test_the_start_time_converter_refuses_input_it_cannot_read() -> None:
     assert process_probe.start_time_to_datetime(None) is None
     assert process_probe.start_time_to_datetime("not-a-number") is None

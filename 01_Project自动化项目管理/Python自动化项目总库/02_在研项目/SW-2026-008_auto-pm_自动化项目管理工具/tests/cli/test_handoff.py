@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from auto_pm.application.core.ai_handoff_service import AiHandoffService
@@ -447,3 +448,20 @@ def test_handoff_cli_execution_requires_decision_id(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1
     assert "必须绑定 decision_id" in result.output
+
+
+def _unreadable_saga_log(tmp_path: Path, request_id: str) -> None:
+    coordinator = AiHandoffService(tmp_path).saga_coordinator
+    coordinator.saga_log_dir.mkdir(parents=True, exist_ok=True)
+    coordinator.saga_log_path(request_id).write_bytes(b'{"request_id": "x", "status": "compl')  # truncated JSON
+
+
+@pytest.mark.parametrize("subcommand", ["status", "resume", "compensate"])
+def test_a_saga_command_on_an_unreadable_log_exits_with_a_clear_message_not_a_traceback(tmp_path: Path, subcommand: str) -> None:
+    """审计 392 P3：坏日志是“报错退出”，不能带 Python 堆栈退出，也不能当成没有日志。"""
+    _unreadable_saga_log(tmp_path, "REQ-BAD-LOG")
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "handoff", "saga", subcommand, "REQ-BAD-LOG"])
+    assert result.exit_code == 1, result.output
+    assert "Saga 事务日志存在但无法读取" in result.output
+    assert "Traceback" not in result.output
+    assert isinstance(result.exception, SystemExit)  # click 的正常退出，不是未捕获的异常
