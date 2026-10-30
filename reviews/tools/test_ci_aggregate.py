@@ -174,3 +174,14 @@ def test_the_workflow_runs_from_the_base_and_never_checks_out_the_pr_head() -> N
 )
 def test_path_matches_follows_the_github_glob(path: str, pattern: str, expected: bool) -> None:
     assert agg.path_matches(path, pattern) is expected
+
+
+def test_sw008_ci_runs_on_push_only_for_main_but_still_on_every_pr_and_by_hand() -> None:
+    """push 对所有分支开着时，每个 PR 的每次推送都跑两遍全量（push 与 pull_request 两个并发组），Windows 分片排队 80 分钟以上。"""
+    text = (WORKFLOWS / "sw008-ci.yml").read_text(encoding="utf-8")
+    on_block = text[text.index("\non:\n") : text.index("\npermissions:")]
+    push_block = on_block[on_block.index("\n  push:\n") : on_block.index("\n  pull_request:\n")]
+    assert "    branches: [main]" in push_block  # 没开 PR 的分支推送不再跑；main 每个提交仍要有结论
+    pr_block = on_block[on_block.index("\n  pull_request:\n") : on_block.index("\n  workflow_dispatch:")]
+    assert "branches: [main]" in pr_block and "paths:" in pr_block  # PR 那一轮不变
+    assert "\n  workflow_dispatch:" in on_block  # 手动触发（受保护清单改动要手动跑）仍可用
