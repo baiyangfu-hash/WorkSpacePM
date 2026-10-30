@@ -162,6 +162,13 @@ def takeover_pm(ctx: click.Context, handoff_id: str, receiver_id: str, lease_sec
     )
 
 
+def _shown(typed: str, limit: int = 40) -> str:
+    """The user's wrong input echoed back in a bounded, single-line form (the phrase and the Run id are not secrets)."""
+
+    flat = " ".join(typed.split())
+    return flat if len(flat) <= limit else flat[:limit] + "…"
+
+
 @click.command(name="sign-risk")
 @click.option("--run-id", required=True)
 @click.option("--claimant", "claimant_id", required=True, help="将要接手的 agent 身份")
@@ -185,12 +192,27 @@ def sign_risk_pm(ctx: click.Context, run_id: str, claimant_id: str) -> None:
     click.echo(f"Run {run_id} 现在由 {lease.owner_id} 持有，租约到 {ContinuityStore.local_time_text(lease.expires_at)}（本机时间）。")
     click.echo(f"原持有者进程判定：{verdict.value}" + ("（没有记录进程）" if recorded is None else f"（记录的 pid {recorded.pid}）"))
     click.echo(f"签署后，{claimant_id} 可以在租约失效后接手；如果原持有者其实还在干活，它之后的写入会全部被拒绝。")
-    typed_run = click.prompt("请输入 Run 编号确认", default="", show_default=False)
+    if claimant_id == lease.owner_id:
+        click.echo(
+            f"提醒：申请人 {claimant_id} 与当前持有者同名，回收会被拒（“你已是当前持有者”），这份签字用不上。"
+            "请按 Ctrl+C 退出，换一个新名字作为 --claimant 再签署。"
+        )
+    click.echo("接下来有两次输入（口令开启时另有第三次）：")
+    click.echo(f"  第 1 次：把上面“Run”后面那一整串编号原样输入，即 {run_id}（不要只输一部分，也不要输申请人名字）")
+    click.echo(f"  第 2 次：输入这四个字：{RISK_PHRASE}")
+    click.echo("  输错不会签署任何东西，直接重新运行同一条命令即可。")
+    typed_run = click.prompt(f"第 1 次（共 2 次）请输入 Run 编号 {run_id}", default="", show_default=False)
     if typed_run.strip() != run_id:
-        raise click.ClickException("Run 编号不一致，未签署")
-    typed_phrase = click.prompt(f"请输入“{RISK_PHRASE}”四个字", default="", show_default=False)
+        raise click.ClickException(
+            f"Run 编号不一致，未签署。你输入的是“{_shown(typed_run)}”，应当是“{run_id}”（命令里 --run-id 后面的整串）。"
+            "请重新运行同一条命令。"
+        )
+    typed_phrase = click.prompt(f"第 2 次（共 2 次）请输入“{RISK_PHRASE}”四个字", default="", show_default=False)
     if typed_phrase.strip() != RISK_PHRASE:
-        raise click.ClickException("未输入“接受风险”，未签署")
+        raise click.ClickException(
+            f"未输入“{RISK_PHRASE}”，未签署。你输入的是“{_shown(typed_phrase)}”，应当是这四个字：{RISK_PHRASE}。"
+            "请重新运行同一条命令。"
+        )
     # A pseudo terminal and a cleared environment pass the checks above; the user's PIN (gap 9) does not.
     proof = require_approval_pin(
         ctx.find_root().obj.control_root, summary=f"签署接受风险：Run {run_id} → {claimant_id}", purpose="sign-risk", subject=f"{run_id}:{claimant_id}"
