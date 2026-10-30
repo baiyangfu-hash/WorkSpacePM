@@ -13,8 +13,8 @@ import tempfile
 from collections.abc import Collection, Iterable
 from pathlib import Path, PurePosixPath
 
+from auto_pm.domain.plc import doc_consistency as dc
 from auto_pm.infrastructure.git_timeout import run_git_bounded_text
-from auto_pm.plc import doc_consistency as dc
 
 SOURCE_SUFFIXES = (".scl", ".db")
 EXPORT_SUFFIXES = (".scl", ".db", ".md", ".json")

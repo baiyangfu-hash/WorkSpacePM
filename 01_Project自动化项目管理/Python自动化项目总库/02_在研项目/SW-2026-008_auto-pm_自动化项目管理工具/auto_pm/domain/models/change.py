@@ -15,7 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from auto_pm.models.enums import (
+from auto_pm.domain.models.enums import (
     BusinessNature,
     ChangeStatus,
     Domain,

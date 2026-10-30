@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from auto_pm.spec.core.checker_base import CheckResult
-from auto_pm.spec.core.registry import SpecRegistry
-from auto_pm.spec.core.scanner import SpecScanner
+from auto_pm.domain.spec.core.checker_base import CheckResult
+from auto_pm.domain.spec.core.registry import SpecRegistry
+from auto_pm.domain.spec.core.scanner import SpecScanner
 
 log = logging.getLogger(__name__)
 
