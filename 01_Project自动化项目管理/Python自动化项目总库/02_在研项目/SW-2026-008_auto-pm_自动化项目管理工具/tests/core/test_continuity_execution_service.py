@@ -4269,7 +4269,8 @@ def test_extend_hold_lets_a_run_renew_past_three_hours_and_is_idempotent(tmp_pat
     assert first == replay
     assert first.hold_end == (clock.start + timedelta(hours=5)).isoformat()
     _renew_until_cap(service, clock, 3.5, "b")
-    assert service.lease_hold_status("RUN-001")["renewals"] >= 15
+    renewals = service.lease_hold_status("RUN-001")["renewals"]
+    assert isinstance(renewals, int) and renewals >= 15
 
 
 @pytest.mark.parametrize("extra", [0, 59, 43_201])

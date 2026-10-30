@@ -1061,10 +1061,10 @@ def _probe_real_start_background_gc(root: Path) -> None:
     assert events == before and collector_ids[0] != gui
     assert bridge_ref() is None and pool_ref() is None
     if os.name == "nt":
-        post = ctypes.WinDLL("user32", use_last_error=True).PostThreadMessageW
+        post = ctypes.WinDLL("user32", use_last_error=True).PostThreadMessageW  # type: ignore[attr-defined,unused-ignore]
         post.argtypes = [ctypes.c_ulong, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
         post.restype = ctypes.c_int
-        assert post(gui, 0, 0, 0), ctypes.get_last_error()
+        assert post(gui, 0, 0, 0), ctypes.get_last_error()  # type: ignore[attr-defined,unused-ignore]
     app.processEvents()
     print("PM_START_NATIVE_PUMP_SURVIVED", flush=True)
 
