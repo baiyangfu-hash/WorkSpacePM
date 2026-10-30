@@ -250,6 +250,7 @@ uv run pre-commit run --all-files
 | `AUTO_PM_START_WATCHDOG_SCALE` | 仅测试：`tests/qml/test_pm_cockpit_bridge.py` 真实启动用例的看门狗时限倍数（基线成功用例 600 秒），机器过载时设 2 或 3 重跑；只能放大不能缩短 | 不小于 1 的有限数；小于 1 按 1，无法解析或不是有限数（`abc`、`nan`、`inf`、`1e400`）按 1 | 1（即 600 秒） |
 | `AUTO_PM_ALLOW_SKIP_QUALITY_TOOLS` | 仅测试：解释器里缺 `ruff`/`mypy` 时，是否跳过依赖真实质量门的测试（标记 `needs_quality_tools`） | 只有取值 `1` 才跳过；其他任何值等同未设 | 未设：缺依赖时这些测试判失败。笔记本和 CI 不要设，只给没装 dev 依赖的云端会话用 |
 | `AUTO_PM_WORKSPACE` | 工作空间根目录，等同全局选项 `-w`；`-w` 和它都没有时，先读工具根目录（本工具所在目录）下的 `.auto-pm-workspace` 配置文件（内容是工作空间路径，相对路径按该文件所在目录换算；文件为空或读不了就跳过），再没有才从当前目录往上找 | 目录路径 | 未设：当前目录 |
+| `AUTO_PM_CALLER_CWD` | 调用者所在目录，由启动器设置（启动器让发布目录当进程工作目录）；命令行里的相对路径参数按它换算，不按发布目录。直接 `python main.py` 运行时不设，相对路径按当前目录 | 目录路径 | 未设：当前目录 |
 | `AUTO_PM_CONTROL_ROOT` | PM 控制面根目录，等同全局选项 `--control-root`；在工位（`.auto-pm/worktrees/<agent>`）里提交时必须指向控制根 | 目录路径 | 未设：与工作空间根相同 |
 | `AUTO_PM_AGENT` | 声明“我是哪个 agent”。有它（或 `CLAUDECODE`、`CODEX_*` 等 agent 环境标记）时，驾驶舱按 agent 对待：不能代用户签风险、不能收别人的工位；用户自己的终端不要设 | `名字` 或 `名字:变体`（如 `trae:cn`，冒号前一段按名册匹配，不分大小写） | 未设：按用户本人终端处理；名字不在名册里或几个标记互相矛盾，按“未知调用方”一律拒绝 |
 | `AUTO_PM_COCKPIT_APPROVER` | 驾驶舱里批准范围卡时记录的批准人姓名 | 非空字符串；空值按未设 | 未设：驾驶舱拒绝批准并提示先设置 |

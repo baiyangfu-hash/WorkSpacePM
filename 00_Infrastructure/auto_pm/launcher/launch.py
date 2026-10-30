@@ -18,6 +18,7 @@ _RELEASE_CHILD = (
 _UNSAFE_PYTHON_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE")
 _RESOLVE_ONLY_ARGUMENT = "--resolve-only"
 _PURGE_BYTECODE_ARGUMENT = "--purge-bytecode"
+_CALLER_CWD_ENV = "AUTO_PM_CALLER_CWD"
 
 
 def _child_environment(cache_root: Path, workspace_root: Path) -> dict[str, str]:
@@ -68,10 +69,13 @@ def main(argv: list[str] | None = None, *, container: Path | None = None) -> int
     command.extend(release_args)
     cache_root = resolved_container / ".auto-pm" / "runtime-cache" / "ruff"
     workspace_root = resolved_container.parent.parent
+    environment = _child_environment(cache_root, workspace_root)
+    # The release runs with its own folder as the working directory; relative path arguments must still mean the caller's folder (TD-SW008-232).
+    environment[_CALLER_CWD_ENV] = os.getcwd()
     return subprocess.run(
         command,
         cwd=release_dir,
-        env=_child_environment(cache_root, workspace_root),
+        env=environment,
         check=False,
     ).returncode
 

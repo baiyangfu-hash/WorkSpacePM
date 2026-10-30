@@ -38,6 +38,7 @@ from auto_pm.application.core.pm_session_service import (
     PmSessionParser,
     generate_view,
 )
+from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()
 
@@ -115,7 +116,7 @@ def pm_session_group() -> None:
 @click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
 @click.option(
     "--project-root",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="项目根目录（未指定时使用 -w 作为项目根）",
 )
@@ -210,7 +211,7 @@ def cmd_check(
 @click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
 @click.option(
     "--project-root",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="项目根目录（未指定时使用 -w 作为项目根）",
 )
@@ -229,7 +230,7 @@ def cmd_check(
 )
 @click.option(
     "--archive-file",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="归档文件路径（未指定时自动生成）",
 )
@@ -460,7 +461,7 @@ def _cmd_archive_auto(
 @click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
 @click.option(
     "--project-root",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="项目根目录（未指定时使用 -w 作为项目根）",
 )
@@ -468,7 +469,7 @@ def _cmd_archive_auto(
 @click.option(
     "--output",
     "-o",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="输出文件路径（未指定时输出到 stdout）",
 )

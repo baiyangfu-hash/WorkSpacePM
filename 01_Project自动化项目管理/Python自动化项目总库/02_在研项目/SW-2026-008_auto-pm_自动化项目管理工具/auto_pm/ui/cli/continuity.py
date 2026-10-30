@@ -54,6 +54,7 @@ from auto_pm.infrastructure.control_root_guard import (
 )
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced
+from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
 from auto_pm.ui.cli.runtime_identity_guard import (
     WARNINGS_FIELD,
@@ -381,7 +382,7 @@ def work_group() -> None:
 @click.option("--read-only", is_flag=True)
 @click.option(
     "--card-file",
-    type=click.Path(dir_okay=False, path_type=Path),
+    type=CallerPath(dir_okay=False, path_type=Path),
     default=None,
     help=(
         "Implementation card that must pass the pre-start precheck; required for write Work. "
@@ -686,7 +687,7 @@ def run_group() -> None:
 @click.option("--owned", "owned_paths", multiple=True, required=True)
 @click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
 @click.option(
-    "--worktree", type=click.Path(exists=True, file_okay=False, path_type=Path), default=None
+    "--worktree", type=CallerPath(exists=True, file_okay=False, path_type=Path), default=None
 )
 @click.option("--lease-token", default=None, help="已弃用：口令会留在进程列表里；请用 --lease-token-env 或 --lease-wallet")
 @click.option("--lease-token-env", default=None, metavar="ENV_NAME", help="从该环境变量读取口令（读后即清除）")

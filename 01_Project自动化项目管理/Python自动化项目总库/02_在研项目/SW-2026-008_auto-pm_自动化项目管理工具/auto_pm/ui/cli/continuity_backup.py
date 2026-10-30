@@ -15,6 +15,7 @@ from auto_pm.infrastructure.continuity_backup import (
     verify_backup_file,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStoreError
+from auto_pm.ui.cli.caller_path import CallerPath
 
 
 def _service(ctx: click.Context) -> ContinuityBackupService:
@@ -75,7 +76,7 @@ def backup_command(ctx: click.Context, keep: int | None, as_json: bool) -> None:
 
 
 @click.command(name="verify-backup")
-@click.argument("backup_file", required=False, type=click.Path(path_type=Path))
+@click.argument("backup_file", required=False, type=CallerPath(path_type=Path))
 @click.option("--json", "as_json", is_flag=True, help="以 JSON 输出结果。")
 @click.pass_context
 def verify_backup_command(ctx: click.Context, backup_file: Path | None, as_json: bool) -> None:
@@ -95,7 +96,7 @@ def verify_backup_command(ctx: click.Context, backup_file: Path | None, as_json:
 
 
 @click.command(name="restore-backup")
-@click.argument("backup_file", type=click.Path(path_type=Path))
+@click.argument("backup_file", type=CallerPath(path_type=Path))
 @click.option("--yes", is_flag=True, help="不再询问，直接恢复。")
 @click.pass_context
 def restore_backup_command(ctx: click.Context, backup_file: Path, yes: bool) -> None:

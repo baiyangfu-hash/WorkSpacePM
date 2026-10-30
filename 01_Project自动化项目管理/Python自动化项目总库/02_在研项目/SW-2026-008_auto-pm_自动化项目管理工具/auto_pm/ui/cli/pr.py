@@ -17,6 +17,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, AgentWorktreeError
 from auto_pm.application.core.pr_open_service import PrOpenRefusedError, PrOpenService
 from auto_pm.application.core.pr_ready_service import PrReadyService, render
+from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()
 AGENTS = click.Choice(sorted(AGENT_ROSTER))
@@ -109,7 +110,7 @@ def open_cmd(
     "--reports-dir",
     "reports_dirs",
     multiple=True,
-    type=click.Path(file_okay=False, path_type=Path),
+    type=CallerPath(file_okay=False, path_type=Path),
     help="再多找一个审计报告目录；可重复。默认只找控制根的 reviews/",
 )
 @click.pass_context

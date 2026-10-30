@@ -161,6 +161,23 @@ def test_a_tampered_event_in_the_copy_is_reported_by_position_and_fails(tmp_path
     assert "SHA-256" in result.output
 
 
+def test_verify_backup_takes_a_relative_path_from_the_callers_folder_not_the_release_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # TD-SW008-232: the launcher runs the release in its own folder and tells it where the caller is.
+    root = _workspace(tmp_path)
+    _create_work(root, "WORK-BK-001")
+    assert _cli(root, "continuity", "backup").exit_code == 0
+    backup = _only_backup(root)
+    release = tmp_path / "release-folder"
+    release.mkdir()
+    monkeypatch.chdir(release)
+    monkeypatch.setenv("AUTO_PM_CALLER_CWD", str(backup.parent))
+
+    result = _cli(root, "continuity", "verify-backup", backup.name)
+
+    assert result.exit_code == 0, result.output
+    assert "备份校验：" in result.output
+
+
 def test_verify_backup_without_an_argument_checks_the_live_ledger_read_only(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
     _create_work(root, "WORK-BK-001")

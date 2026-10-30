@@ -37,6 +37,7 @@ from rich.table import Table
 from auto_pm.domain.constraint.guard import FileGuard
 from auto_pm.domain.constraint.loader import ConstraintLoader, ConstraintLoadError
 from auto_pm.domain.constraint.models import Constraint, Violation
+from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()
 
@@ -200,7 +201,7 @@ def check_constraints(
 
 
 @constraint_group.command("guard")
-@click.argument("file", type=click.Path(exists=True))
+@click.argument("file", type=CallerPath(exists=True))
 @click.pass_context
 def guard_file(ctx: click.Context, file: str) -> None:
     """文件操作前登记哈希快照
@@ -225,7 +226,7 @@ def guard_file(ctx: click.Context, file: str) -> None:
 
 
 @constraint_group.command("verify")
-@click.argument("file", type=click.Path(exists=True))
+@click.argument("file", type=CallerPath(exists=True))
 @click.pass_context
 def verify_file(ctx: click.Context, file: str) -> None:
     """文件操作后验证哈希一致性

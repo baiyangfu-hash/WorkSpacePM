@@ -29,6 +29,7 @@ from auto_pm.domain.spec.services.fix_svc import FixResult, can_auto_fix
 from auto_pm.domain.spec.services.frontmatter_svc import FrontmatterService
 from auto_pm.domain.spec.services.index_svc import IndexService
 from auto_pm.domain.spec.services.report_svc import ReportService
+from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()
 
@@ -140,13 +141,13 @@ def spec_group() -> None:
 @click.option("--scope", type=click.Choice(CHECK_SCOPES), default="workspace", help="检查范围")
 @click.option(
     "--project-root",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     help="项目根目录，scope=project 时必填",
 )
 @click.option(
     "--config",
     "config_path",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="工作空间配置文件路径(YAML，含 spec_dirs/registry_path/output_paths)",
 )
@@ -333,7 +334,7 @@ def _output_check_table(
 @click.option(
     "--config",
     "config_path",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="工作空间配置文件路径(YAML，含 spec_dirs/registry_path/output_paths)",
 )
@@ -373,7 +374,7 @@ def cmd_index(
 @click.option(
     "--config",
     "config_path",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="工作空间配置文件路径(YAML，含 spec_dirs/registry_path/output_paths)",
 )
@@ -473,7 +474,7 @@ def cmd_frontmatter(
 @click.option(
     "--config",
     "config_path",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="工作空间配置文件路径(YAML，含 spec_dirs/registry_path/output_paths)",
 )
@@ -516,7 +517,7 @@ def cmd_report(
 @click.option(
     "--config",
     "config_path",
-    type=click.Path(path_type=Path),
+    type=CallerPath(path_type=Path),
     default=None,
     help="工作空间配置文件路径",
 )
@@ -728,7 +729,7 @@ def cmd_lint(
 
 @spec_group.command("sync")
 @click.option("-w", "--workspace", default=None, help="工作空间根目录（未指定时回退全局 -w）")
-@click.option("--config", "config_path", default=None, type=click.Path(), help="工作空间配置文件路径")
+@click.option("--config", "config_path", default=None, type=CallerPath(), help="工作空间配置文件路径")
 @click.pass_context
 def sync(ctx: click.Context, workspace: str | None, config_path: str | None) -> None:
     """一键全量同步与重构 Obsidian 全局规范仓库 (DEV-030 V2.2.0)

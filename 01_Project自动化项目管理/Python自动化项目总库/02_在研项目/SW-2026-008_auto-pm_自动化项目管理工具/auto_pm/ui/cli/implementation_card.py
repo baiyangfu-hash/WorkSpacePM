@@ -27,6 +27,7 @@ from auto_pm.contracts.implementation_card import (
     StopLines,
 )
 from auto_pm.ui.cli.approval_pin import require_approval_pin
+from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import (
     require_runtime_identity,
     require_runtime_identity_for_card,
@@ -136,7 +137,7 @@ def create_card(
 @click.option(
     "--card-file",
     required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    type=CallerPath(exists=True, dir_okay=False, path_type=Path),
     help="Markdown implementation card to precheck (read-only)",
 )
 @click.option("--pid", "project_id", default=None, help="Project the Work will be created for")
@@ -162,7 +163,7 @@ def precheck_card(ctx: click.Context, card_file: Path, project_id: str | None) -
 @click.option(
     "--project-dir",
     required=True,
-    type=click.Path(file_okay=False, path_type=Path),
+    type=CallerPath(file_okay=False, path_type=Path),
     help="Project directory (control-root relative); only its own change cabinet is read",
 )
 @click.pass_context

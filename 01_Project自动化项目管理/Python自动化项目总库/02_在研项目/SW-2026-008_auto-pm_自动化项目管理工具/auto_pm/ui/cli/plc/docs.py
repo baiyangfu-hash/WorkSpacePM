@@ -22,6 +22,7 @@ from auto_pm.application.core.project_service import ProjectService
 from auto_pm.domain.plc import cycle_plan as cp
 from auto_pm.domain.plc import doc_consistency as dc
 from auto_pm.domain.plc import milestones as ms
+from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 
@@ -47,7 +48,7 @@ def _require_identity(ctx: click.Context, project_id: str | None, project_path: 
 
 
 _ID = click.argument("project_id", required=False)
-_PATH = click.option("--project-path", type=click.Path(file_okay=False, exists=True), default=None,
+_PATH = click.option("--project-path", type=CallerPath(file_okay=False, exists=True), default=None,
                      help="直接指定项目目录（用于隔离副本）")
 
 
@@ -160,7 +161,7 @@ def cmd_confirm(ctx: click.Context, project_id: str | None, project_path: str | 
 @click.option("--type", "main_type", required=True, type=click.Choice(list(cp.MAIN_TYPES)), help="主类型")
 @click.option("--with", "addons", multiple=True, type=click.Choice(list(cp.ADDONS)), help="附加项，可写多次")
 @click.option("--scale", required=True, help="规模（按规范里的规模表：单机 / 小线 / 整线）")
-@click.option("--spec", "spec_path", type=click.Path(dir_okay=False, exists=True), default=None,
+@click.option("--spec", "spec_path", type=CallerPath(dir_okay=False, exists=True), default=None,
               help="周期规范文件（默认在项目上级目录里找 0100_PLC自动化/00_通用规范/项目周期规范.md）")
 @click.option("--write", is_flag=True, help="把推算日期写进里程碑表里空着的计划日期（已有日期不改）")
 @click.pass_context

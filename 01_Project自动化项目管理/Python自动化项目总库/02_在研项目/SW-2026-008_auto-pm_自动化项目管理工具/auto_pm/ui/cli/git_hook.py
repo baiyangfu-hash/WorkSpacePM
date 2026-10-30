@@ -17,6 +17,7 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     enforce_release_ledger_gate,
     get_staged_snapshot,
 )
+from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()
 
@@ -76,7 +77,7 @@ def cmd_release_gate(ctx: click.Context) -> None:
 
 
 @git_hook_group.command(name="commit-msg")
-@click.argument("msg_file", type=click.Path(exists=True))
+@click.argument("msg_file", type=CallerPath(exists=True))
 @click.pass_context
 def cmd_commit_msg(ctx: click.Context, msg_file: str) -> None:
     """执行 commit-msg 生产代码关联单据强校验。"""
@@ -88,7 +89,7 @@ def cmd_commit_msg(ctx: click.Context, msg_file: str) -> None:
 
 
 @git_hook_group.command(name="preflight")
-@click.argument("msg_file", type=click.Path(exists=True, path_type=Path))
+@click.argument("msg_file", type=CallerPath(exists=True, path_type=Path))
 @click.pass_context
 def cmd_preflight(ctx: click.Context, msg_file: Path) -> None:
     """以同一个不可变暂存快照执行提交前只读预检。"""
