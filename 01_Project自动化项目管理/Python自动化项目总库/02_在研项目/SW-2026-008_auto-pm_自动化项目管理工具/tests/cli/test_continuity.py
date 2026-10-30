@@ -1987,3 +1987,10 @@ def test_lease_extend_hold_cli_with_a_committed_pin_needs_the_pin_not_the_eviden
     assert (
         ContinuityExecutionService(tmp_path).lease_hold_status("RUN-CLI-HOLD")["hold_end"] != before
     )
+
+
+@pytest.mark.parametrize("command", ["renew", "extend-hold"])
+def test_lease_commands_explain_the_idempotency_key(cli_runner: CliRunner, command: str) -> None:
+    result = cli_runner.invoke(cli, ["continuity", "lease", command, "--help"], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "防重复的键" in result.output and "换新的" in result.output
