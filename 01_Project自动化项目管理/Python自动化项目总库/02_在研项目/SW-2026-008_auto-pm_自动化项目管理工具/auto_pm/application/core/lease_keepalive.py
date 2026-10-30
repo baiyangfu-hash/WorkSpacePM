@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from datetime import datetime
 from types import TracebackType
 
@@ -27,7 +28,8 @@ class LeaseKeepAlive:
     Only renews: the total-hold cap (``extend-hold``) is untouched, so a renewal refused at the cap stops the loop and is
     reported through :attr:`error` — it never raises into the caller's command. ``strict`` makes the *first* renewal
     mandatory (a command that cannot keep its lease should not start); ``pm verify`` uses ``strict=False`` because it
-    carries its own lease checks.
+    carries its own lease checks. ``on_give_up`` is called (from the keep-alive thread) when the loop gives up, so a caller
+    that runs a command can stop it instead of letting it run on without a lease.
     """
 
     def __init__(
@@ -40,6 +42,7 @@ class LeaseKeepAlive:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         interval_seconds: float | None = None,
         strict: bool = True,
+        on_give_up: Callable[[], None] | None = None,
     ) -> None:
         self._execution = execution
         self._run_id = run_id
@@ -48,6 +51,7 @@ class LeaseKeepAlive:
         self._lease_seconds = lease_seconds
         self._interval = interval_seconds if interval_seconds is not None else lease_seconds / 3
         self._strict = strict
+        self._on_give_up = on_give_up
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.error: str = ""
@@ -67,7 +71,9 @@ class LeaseKeepAlive:
 
     def _remaining_seconds(self) -> float:
         lease = self._execution.current_lease(self._run_id)
-        return (datetime.fromisoformat(lease.expires_at) - self._execution.now_utc()).total_seconds()
+        return (
+            datetime.fromisoformat(lease.expires_at) - self._execution.now_utc()
+        ).total_seconds()
 
     def _loop(self) -> None:
         wait = self._interval
@@ -84,6 +90,8 @@ class LeaseKeepAlive:
                     remaining = 0.0
                 if remaining < GIVE_UP_REMAINING_SECONDS:
                     self.error = str(error)
+                    if self._on_give_up is not None:
+                        self._on_give_up()
                     return
                 wait = min(self._interval, MAX_RETRY_SECONDS)
 

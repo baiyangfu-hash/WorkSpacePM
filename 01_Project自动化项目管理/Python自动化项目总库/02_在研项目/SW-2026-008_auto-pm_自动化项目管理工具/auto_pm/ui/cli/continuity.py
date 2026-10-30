@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -16,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.bounded_command import run_until_done_or_stopped
 from auto_pm.application.core.implementation_card_precheck import (
     format_findings,
     precheck_markdown_card,
@@ -1310,8 +1312,6 @@ def run_with_renewal(
     total-hold cap still applies. The first renewal must succeed or the command is not started. The command inherits the
     environment without the lease token, and its exit code is returned.
     """
-    import subprocess
-
     from auto_pm.application.core.lease_keepalive import LeaseKeepAlive, LeaseKeepAliveError
 
     warn_runtime_identity(ctx, lambda: project_of_run(ctx, run_id))
@@ -1321,17 +1321,22 @@ def run_with_renewal(
         ctx, argv_value=None, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
     )
     child_env = {key: value for key, value in os.environ.items() if key != lease_token_env}
+    gave_up = threading.Event()
     try:
         with LeaseKeepAlive(
-            _execution_service(ctx), run_id=run_id, owner_id=owner_id, token=token, lease_seconds=lease_seconds
+            _execution_service(ctx),
+            run_id=run_id,
+            owner_id=owner_id,
+            token=token,
+            lease_seconds=lease_seconds,
+            on_give_up=gave_up.set,
         ) as keepalive:
-            try:
-                returncode = subprocess.run(  # noqa: S603
-                    list(command), env=child_env, check=False, timeout=timeout_seconds
-                ).returncode
-            except subprocess.TimeoutExpired:
+            outcome = run_until_done_or_stopped(list(command), child_env, timeout_seconds, gave_up)
+            returncode = outcome.returncode
+            if outcome.stopped_by == "stop":
+                click.echo("续租已放弃（租约快过期或被拒），命令已被终止；请先检查租约再决定是否重跑", err=True)
+            elif outcome.stopped_by == "timeout":
                 click.echo(f"命令超过 {timeout_seconds} 秒仍未结束，已被终止", err=True)
-                returncode = 124
     except LeaseKeepAliveError as error:
         raise click.ClickException(str(error)) from error
     except OSError as error:
