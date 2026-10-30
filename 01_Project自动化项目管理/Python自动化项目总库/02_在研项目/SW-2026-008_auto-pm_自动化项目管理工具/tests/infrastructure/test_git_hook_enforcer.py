@@ -100,6 +100,8 @@ def test_release_tree_files_are_attributed_to_sw008_not_exempted(
         "00_Infrastructure/auto_pm/releases.py",
         "00_Infrastructure/other/releases/x.py",
         "releases/x.py",
+        "sub/00_Infrastructure/auto_pm/releases/1.3.3-8d7d387/x.py",  # 前缀嵌在更深一层，不在仓库根
+        "00_Infrastructure/auto_pm/releases",  # 目录本身（没有斜杠和版本子目录）
     ],
 )
 def test_only_the_release_tree_prefix_is_bound_other_infrastructure_stays_rejected(
