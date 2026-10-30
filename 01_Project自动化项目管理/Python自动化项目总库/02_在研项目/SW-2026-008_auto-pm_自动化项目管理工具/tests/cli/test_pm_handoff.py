@@ -10,6 +10,7 @@ import subprocess
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner, Result
@@ -121,7 +122,7 @@ def test_writes_take_the_token_from_the_wallet_or_an_environment_variable_and_ex
     ],
 )
 def test_every_command_that_carries_a_token_accepts_it_from_the_environment(path: tuple[str, ...], env_option: str) -> None:
-    command = cli
+    command: Any = cli  # click 的 Command 没有 .commands，逐层往下取子命令
     for name in ("continuity", *path):
         command = command.commands[name]
     options = {option for parameter in command.params for option in parameter.opts}
@@ -226,6 +227,41 @@ def test_reclaim_command_refuses_a_live_lease_then_waits_for_the_user_then_takes
     outcome = json.loads(taken.output)
     assert outcome["decision"] == "ALLOW" and outcome["owner_id"] == "agent-b" and outcome["process_verdict"] == "UNKNOWN"
     assert lease_wallet.load(root, run_id=RUN, owner_id="agent-b") not in taken.output
+
+
+@pytest.mark.parametrize(
+    ("typed", "why"),
+    [
+        ("agent-b\n接受风险\n", "第 1 次输了申请人名字，不是 Run 编号"),
+        (f"{RUN[:-2]}\n接受风险\n", "第 1 次只输了 Run 编号的一部分"),
+        ("\n接受风险\n", "第 1 次直接回车"),
+        (f"{RUN}\n同意\n", "第 2 次输了别的词"),
+        (f"{RUN}\n接受\n", "第 2 次只输了两个字"),
+        (f"{RUN}\n\n", "第 2 次直接回车"),
+        (f"接受风险\n{RUN}\n", "两次顺序输反"),
+    ],
+)
+def test_sign_risk_with_a_wrong_input_signs_nothing_and_the_reclaim_stays_pending(
+    root: Path, monkeypatch: pytest.MonkeyPatch, typed: str, why: str
+) -> None:
+    """两次输入里任何一次不对都不能签：不写风险签字事件，回收仍卡在 PENDING（预审 428 P3：这两道校验原先没有反例测试）。"""
+    import sqlite3
+    from contextlib import closing
+
+    assert _start(root).exit_code == 0
+    _expire(root)
+    reclaim = ("continuity", "run", "reclaim", "--run-id", RUN, "--claimant", "agent-b", "--reason", "power loss", "--holder-pid", "none")
+    assert _invoke(root, *reclaim).exit_code == 3
+    monkeypatch.setattr(pm_handoff_cli, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr(pm_handoff_cli, "_stdout_is_tty", lambda: True)
+
+    refused = _invoke(root, "pm", "sign-risk", "--run-id", RUN, "--claimant", "agent-b", input_text=typed)
+
+    assert refused.exit_code == 1 and "未签署" in refused.output, why
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        signed = conn.execute("SELECT COUNT(*) FROM events WHERE event_type='RECLAIM_RISK_ACCEPTED'").fetchone()[0]
+    assert signed == 0, why
+    assert _invoke(root, *reclaim).exit_code == 3, why  # 仍然等用户签字
 
 
 def test_record_holder_records_an_explicit_live_process(root: Path) -> None:
