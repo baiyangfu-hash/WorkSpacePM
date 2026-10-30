@@ -4273,3 +4273,43 @@ def test_extend_hold_rejects_out_of_range_and_missing_evidence(tmp_path: Path, e
         service.extend_lease_hold("RUN-001", extra, "user-confirmation:2026-10-29-16:00", f"ext-{extra}")
     with pytest.raises(ContinuityExecutionError, match="用户证据"):
         service.extend_lease_hold("RUN-001", 3_600, "  ", "ext-no-evidence")
+
+
+def _verifying_run(tmp_path: Path, clock: Clock) -> ContinuityExecutionService:
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    started = _start_evidence(service)
+    service.transition_run(started.run_id, RunState.VERIFYING, "agent-a", "lease-secret", "to-verifying")
+    return service
+
+
+def test_the_holder_can_renew_while_the_run_is_verifying(tmp_path: Path) -> None:
+    clock = Clock()
+    service = _verifying_run(tmp_path, clock)
+    clock.value += timedelta(minutes=10)
+    lease = service._store.get_lease("RUN-001")
+    renewed = service.renew_lease(
+        "RUN-001", "agent-a", "lease-secret", 900, "renew-in-verify", expected_version=lease.version
+    )
+    assert renewed.version == lease.version + 1
+    assert renewed.expires_at == (clock() + timedelta(seconds=900)).isoformat()
+
+
+def test_verifying_renewal_still_needs_the_owner_a_live_lease_and_the_hold_cap(tmp_path: Path) -> None:
+    clock = Clock()
+    service = _verifying_run(tmp_path, clock)
+    with pytest.raises(ContinuityExecutionError, match="ownership"):
+        service.renew_lease("RUN-001", "agent-b", "lease-secret", 900, "other-owner")
+    with pytest.raises(ContinuityExecutionError, match="ownership"):
+        service.renew_lease("RUN-001", "agent-a", "wrong-secret", 900, "other-token")
+    clock.value += timedelta(seconds=901)
+    with pytest.raises(ContinuityExecutionError, match="过期"):
+        service.renew_lease("RUN-001", "agent-a", "lease-secret", 900, "expired-in-verify")
+
+
+def test_a_finished_run_still_cannot_renew(tmp_path: Path) -> None:
+    clock = Clock()
+    service = _verifying_run(tmp_path, clock)
+    service.transition_run("RUN-001", RunState.SUCCEEDED, "agent-a", "lease-secret", "finish-verified")
+    with pytest.raises(ContinuityExecutionError, match="READY、RUNNING 或 VERIFYING"):
+        service.renew_lease("RUN-001", "agent-a", "lease-secret", 900, "renew-after-done")
