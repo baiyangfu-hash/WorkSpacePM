@@ -326,6 +326,17 @@ def test_agent_rule_files_are_protected_paths(world, path):
     assert path in next(c.detail for c in checks if c.id == "protected_paths")
 
 
+def test_the_approver_pin_registry_is_a_protected_path_but_a_similar_name_is_not(world):
+    """批准口令的校验值被换掉 = 用户的签字钥匙被换掉：改它的 PR 必须被点名（批准口令方案）。"""
+    world["open_pr"](61, {"SYS-2026-001_WorkspaceGovernance/approvers.json": "{}\n"})
+    _, checks = world["audit"](61)
+    assert status(checks, "protected_paths") == "WARN"
+    assert "SYS-2026-001_WorkspaceGovernance/approvers.json" in next(c.detail for c in checks if c.id == "protected_paths")
+    world["open_pr"](62, {"SYS-2026-001_WorkspaceGovernance/approvers.md": "x\n"})
+    _, other = world["audit"](62)
+    assert status(other, "protected_paths") is None
+
+
 def test_offline_audit_says_the_refs_may_be_stale(world):
     world["open_pr"](51, {"src/app.py": "x = 2\n"})
     world["audit"](51)

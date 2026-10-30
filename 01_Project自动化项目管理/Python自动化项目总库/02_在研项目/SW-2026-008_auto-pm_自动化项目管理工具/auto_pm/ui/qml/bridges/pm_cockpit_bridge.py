@@ -10,6 +10,12 @@ from uuid import uuid4
 from pydantic import ValidationError
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
+from auto_pm.application.core.pm_cockpit_service import (
+    PmCockpitError,
+    PmCockpitService,
+    closure_failure_message,
+)
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.contracts.intake import IntakeKind
 from auto_pm.contracts.pm_cockpit import (
     PmCockpitCompletionState,
@@ -17,12 +23,6 @@ from auto_pm.contracts.pm_cockpit import (
     PmCockpitSnapshot,
 )
 from auto_pm.contracts.pm_facade import PmIntent
-from auto_pm.core.pm_cockpit_service import (
-    PmCockpitError,
-    PmCockpitService,
-    closure_failure_message,
-)
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 
 log = logging.getLogger(__name__)
 

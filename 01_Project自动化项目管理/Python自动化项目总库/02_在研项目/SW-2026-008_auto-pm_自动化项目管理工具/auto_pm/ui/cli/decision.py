@@ -10,12 +10,15 @@ from rich.console import Console
 from rich.table import Table
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.worktree_policy_service import (
+    WorktreePolicyError,
+    WorktreePolicyService,
+)
 from auto_pm.contracts.decision_package import (
     RuntimeDecisionAction,
     RuntimeDecisionCapability,
     RuntimeDecisionOutcome,
 )
-from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.domain.change.decision_service import (
     DecisionError,
     DecisionService,

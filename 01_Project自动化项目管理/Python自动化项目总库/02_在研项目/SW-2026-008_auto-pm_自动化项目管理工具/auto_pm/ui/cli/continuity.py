@@ -1241,7 +1241,11 @@ def lease_group() -> None:
 @click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
 @click.option("--expected-version", type=click.IntRange(min=1), required=True)
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
-@click.option("--idempotency-key", required=True)
+@click.option(
+    "--idempotency-key",
+    required=True,
+    help="防重复的键：同一次续租重试用同一个，下一次续租必须换新的，例如 <run-id>-renew-v<当前版本号>",
+)
 @click.pass_context
 def renew_lease(
     ctx: click.Context,
@@ -1345,7 +1349,11 @@ def run_with_renewal(
     default="",
     help="用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
 )
-@click.option("--idempotency-key", required=True)
+@click.option(
+    "--idempotency-key",
+    required=True,
+    help="防重复的键：同一次延长重试用同一个，再次延长必须换新的，例如 <run-id>-hold-<序号>",
+)
 @click.pass_context
 def extend_lease_hold(
     ctx: click.Context, run_id: str, extra_seconds: int, approval_evidence_ref: str, idempotency_key: str

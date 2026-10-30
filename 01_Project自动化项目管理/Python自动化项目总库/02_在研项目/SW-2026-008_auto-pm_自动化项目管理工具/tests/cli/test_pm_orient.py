@@ -6,7 +6,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from click.testing import CliRunner, Result
@@ -133,7 +133,7 @@ def test_neither_command_creates_or_changes_anything_in_a_workspace_without_a_st
 def _replaced_answer(root: Path, kind: str) -> ContinuityResume:
     """What a replaced or regressed facade could hand to the command: a Resume that was never validated."""
 
-    good = cast(ContinuityResume, PmFacadeService(root).resume(project_id=PROJECT))
+    good = PmFacadeService(root).resume(project_id=PROJECT)
     assert good.query is not None
     if kind == "legal":
         return good

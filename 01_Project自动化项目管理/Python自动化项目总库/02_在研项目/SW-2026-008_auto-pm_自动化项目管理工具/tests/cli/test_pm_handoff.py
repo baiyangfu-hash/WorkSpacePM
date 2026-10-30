@@ -208,6 +208,15 @@ def test_reclaim_command_refuses_a_live_lease_then_waits_for_the_user_then_takes
     monkeypatch.setattr(pm_handoff_cli, "_stdout_is_tty", lambda: True)
     mistyped = _invoke(root, "pm", "sign-risk", "--run-id", RUN, "--claimant", "agent-b", input_text=f"{RUN}\n同意\n")
     assert mistyped.exit_code == 1 and "未签署" in mistyped.output
+    # 提示要把两次输入各要什么写明白，输错时说清楚输入了什么、应当是什么、怎么重来（对比测试：第一次要整串 Run 编号，易输错）
+    assert f"第 1 次：把上面“Run”后面那一整串编号原样输入，即 {RUN}" in mistyped.output
+    assert "第 2 次：输入这四个字：接受风险" in mistyped.output
+    assert "你输入的是“同意”，应当是这四个字：接受风险" in mistyped.output and "重新运行同一条命令" in mistyped.output
+    wrong_run = _invoke(root, "pm", "sign-risk", "--run-id", RUN, "--claimant", "agent-b", input_text="agent-b\n接受风险\n")
+    assert wrong_run.exit_code == 1 and f"应当是“{RUN}”" in wrong_run.output and "你输入的是“agent-b”" in wrong_run.output
+    same_name = _invoke(root, "pm", "sign-risk", "--run-id", RUN, "--claimant", "agent-a", input_text=f"{RUN}\n同意\n")
+    assert "与当前持有者同名，回收会被拒" in same_name.output and "换一个新名字" in same_name.output
+    assert "同名" not in mistyped.output  # 申请人和持有者不同名时不提醒
     signed = _invoke(root, "pm", "sign-risk", "--run-id", RUN, "--claimant", "agent-b", input_text=f"{RUN}\n接受风险\n")
     assert signed.exit_code == 0, signed.output
     assert '"signature_id": "RISK-' in signed.output

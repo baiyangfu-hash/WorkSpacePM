@@ -20,12 +20,15 @@ import click
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
 from auto_pm.application.core.lease_keepalive import LeaseKeepAlive
+from auto_pm.application.core.pm_closure_service import PmClosureError
+from auto_pm.application.core.pm_cockpit_service import PmCockpitError, PmCockpitService
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
+from auto_pm.application.core.worktree_policy_service import (
+    WorktreePolicyError,
+    WorktreePolicyService,
+)
 from auto_pm.contracts.mission import Mission
 from auto_pm.contracts.pm_cockpit import PmCockpitCompletionState
-from auto_pm.core.pm_closure_service import PmClosureError
-from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.infrastructure import lease_wallet
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.continuity import _secret_from_environment
@@ -51,10 +54,19 @@ def _guarded_mission(ctx: click.Context, mission_id: str) -> Mission:
 
 @click.command(name="verify")
 @click.option("--mission-id", required=True, help="要做质量验证的 Mission")
-@click.option("--lease-wallet", "use_wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令（推荐）")
-@click.option("--lease-token-env", default=None, metavar="ENV_NAME", help="口令所在环境变量；读取后立即删除")
+@click.option(
+    "--lease-wallet",
+    "use_wallet",
+    is_flag=True,
+    help="从本机钱包读取本 Run 当前持有者的口令（推荐）",
+)
+@click.option(
+    "--lease-token-env", default=None, metavar="ENV_NAME", help="口令所在环境变量；读取后立即删除"
+)
 @click.pass_context
-def verify_pm(ctx: click.Context, mission_id: str, use_wallet: bool, lease_token_env: str | None) -> None:
+def verify_pm(
+    ctx: click.Context, mission_id: str, use_wallet: bool, lease_token_env: str | None
+) -> None:
     """质量验证：对最新 VERIFYING 的 Run 生成系统证据检查点，通过后进入“等待用户验收”。"""
 
     if use_wallet == (lease_token_env is not None):
@@ -82,7 +94,11 @@ def verify_pm(ctx: click.Context, mission_id: str, use_wallet: bool, lease_token
     # One verify runs ~15 min: keep the Run's lease alive meanwhile. Not strict: verify has its own lease checks, and a
     # refused renewal (for example at the 3 h hold cap) is reported in the result instead of blocking it.
     keepalive = LeaseKeepAlive(
-        ContinuityExecutionService(app_ctx.control_root), run_id=run_id, owner_id=owner_id, token=token, strict=False
+        ContinuityExecutionService(app_ctx.control_root),
+        run_id=run_id,
+        owner_id=owner_id,
+        token=token,
+        strict=False,
     )
     try:
         with keepalive:

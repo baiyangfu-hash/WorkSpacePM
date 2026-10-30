@@ -2052,3 +2052,10 @@ def test_run_with_renewal_kills_a_command_that_outlives_its_time_limit(cli_runne
         catch_exceptions=False,
     )  # fmt: skip
     assert result.exit_code == 124, result.output
+
+
+@pytest.mark.parametrize("command", ["renew", "extend-hold"])
+def test_lease_commands_explain_the_idempotency_key(cli_runner: CliRunner, command: str) -> None:
+    result = cli_runner.invoke(cli, ["continuity", "lease", command, "--help"], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "防重复的键" in result.output and "换新的" in result.output

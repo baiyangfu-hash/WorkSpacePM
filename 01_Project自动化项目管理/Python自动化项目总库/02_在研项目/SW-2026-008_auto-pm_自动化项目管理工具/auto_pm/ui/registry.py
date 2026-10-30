@@ -11,12 +11,7 @@ Facade Registry 装配器"""
 from typing import Any, TypedDict
 
 from auto_pm.application.change_facade import ChangeFacade
-from auto_pm.application.delivery_facade import DeliveryFacade
-from auto_pm.application.spec_facade import SpecFacade
-from auto_pm.application.system_facade import SystemFacade
-from auto_pm.application.workbench_facade import WorkbenchFacade
-from auto_pm.change.ledger_reconciler import LedgerReconciler
-from auto_pm.core.protocols import (
+from auto_pm.application.core.protocols import (
     AssetSummaryServiceProtocol,
     ChangeServiceProtocol,
     DashboardServiceProtocol,
@@ -28,6 +23,11 @@ from auto_pm.core.protocols import (
     SpecCheckServiceProtocol,
     TemplateServiceProtocol,
 )
+from auto_pm.application.delivery_facade import DeliveryFacade
+from auto_pm.application.spec_facade import SpecFacade
+from auto_pm.application.system_facade import SystemFacade
+from auto_pm.application.workbench_facade import WorkbenchFacade
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 
 
 class ServiceContainer(TypedDict):
