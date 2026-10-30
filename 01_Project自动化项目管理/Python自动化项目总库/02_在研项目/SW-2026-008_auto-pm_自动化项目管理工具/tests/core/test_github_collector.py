@@ -303,7 +303,7 @@ def test_rate_limited_half_way_stops_calling_and_marks_rest_unknown(tmp_path: Pa
     # 一个红的都没读到，但有没读全的：不许说 0
     assert checks["gate_red"].state == "unchecked" and checks["gate_red"].text == "没检查"
     assert checks["safety_unsigned"].state == "unchecked"
-    rows = {r.number: r for r in home.github.rows}  # type: ignore[union-attr]
+    rows = {r.number: r for r in home.github.rows}
     assert rows[2].gate.text == "未知" and rows[2].gate.sev == "na" and rows[2].projects == ["未知"]
 
 
@@ -327,9 +327,9 @@ def test_partial_failure_only_marks_the_failed_piece(tmp_path: Path) -> None:
     checks = {c.key: c for c in home.checks}
     assert checks["gate_red"].state == "number" and checks["gate_red"].value == 1
     assert "1 个没读全" in checks["gate_red"].note
-    rows = {r.number: r for r in home.github.rows}  # type: ignore[union-attr]
+    rows = {r.number: r for r in home.github.rows}
     assert rows[1].gate.text == "未知" and rows[1].gate.sev == "na" and "PR #1 CI" in rows[1].note
-    assert all(cell.text == "未知" and cell.sev == "na" for _n, cell in home.github.main_ci)  # type: ignore[union-attr]
+    assert all(cell.text == "未知" and cell.sev == "na" for _n, cell in home.github.main_ci)
 
 
 def test_files_unread_means_ci_and_safety_unknown_not_not_applicable(tmp_path: Path) -> None:

@@ -134,8 +134,8 @@ def test_a_write_without_an_epoch_is_accepted_with_a_warning_only_in_the_compati
 
 def test_a_non_positive_or_non_integer_presented_epoch_is_refused_in_every_period() -> None:
     for bad in (0, -5, True):
-        assert not check_write_epoch(3, bad).accepted  # type: ignore[arg-type]
-        assert not check_write_epoch(3, bad, compatibility_period=False).accepted  # type: ignore[arg-type]
+        assert not check_write_epoch(3, bad).accepted
+        assert not check_write_epoch(3, bad, compatibility_period=False).accepted
     with pytest.raises(ValueError):
         check_write_epoch(0, 1)
 

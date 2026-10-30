@@ -7,7 +7,6 @@ import subprocess
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -68,7 +67,7 @@ def _create(
     mission_id: str = "MISSION-SW008-A1",
     root_work_id: str | None = None,
 ) -> Mission:
-    return cast(Mission, service.create(
+    return service.create(
         mission_id=mission_id,
         subject_project_id="SW-2026-008",
         title="Mission truth",
@@ -78,7 +77,7 @@ def _create(
         created_by="Codex PM",
         idempotency_key=f"create-{mission_id}",
         root_work_id=root_work_id,
-    ))
+    )
 
 
 def _work(root: Path) -> None:

@@ -18,10 +18,10 @@ from dataclasses import asdict
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.core.project_service import ProjectService
-from auto_pm.plc import cycle_plan as cp
-from auto_pm.plc import doc_consistency as dc
-from auto_pm.plc import milestones as ms
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.domain.plc import cycle_plan as cp
+from auto_pm.domain.plc import doc_consistency as dc
+from auto_pm.domain.plc import milestones as ms
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 

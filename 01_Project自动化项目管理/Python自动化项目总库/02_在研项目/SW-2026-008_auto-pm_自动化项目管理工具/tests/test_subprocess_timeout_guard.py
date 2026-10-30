@@ -20,7 +20,10 @@ from auto_pm.infrastructure import (
 PACKAGE = Path(__file__).resolve().parents[1] / "auto_pm"
 _BLOCKING_CALLS = {"run", "check_output", "check_call", "call"}
 # Popen has no timeout argument; only code that owns the process lifetime itself may start one.
-_POPEN_ALLOWED = {"infrastructure/local_executor.py": "starts the governed Codex process and terminates it itself"}
+_POPEN_ALLOWED = {
+    "infrastructure/local_executor.py": "starts the governed Codex process and terminates it itself",
+    "application/core/bounded_command.py": "polls its own deadline and a stop event, then terminates the command itself",
+}
 
 
 def find_unbounded_subprocess_calls(source: str) -> list[tuple[int, str]]:
@@ -34,7 +37,9 @@ def find_unbounded_subprocess_calls(source: str) -> list[tuple[int, str]]:
     names: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            modules.update(alias.asname or alias.name for alias in node.names if alias.name == "subprocess")
+            modules.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "subprocess"
+            )
         elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
             for alias in node.names:
                 names[alias.asname or alias.name] = alias.name
@@ -43,7 +48,11 @@ def find_unbounded_subprocess_calls(source: str) -> list[tuple[int, str]]:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules:
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id in modules
+        ):
             original = func.attr
         elif isinstance(func, ast.Name) and func.id in names:
             original = names[func.id]
@@ -65,11 +74,16 @@ def test_every_subprocess_call_in_auto_pm_has_a_timeout() -> None:
     offenders: list[str] = []
     for path in sorted(PACKAGE.rglob("*.py")):
         relative = path.relative_to(PACKAGE).as_posix()
-        for line, why in find_unbounded_subprocess_calls(path.read_text(encoding="utf-8-sig", errors="replace")):
+        for line, why in find_unbounded_subprocess_calls(
+            path.read_text(encoding="utf-8-sig", errors="replace")
+        ):
             if why == "Popen" and relative in _POPEN_ALLOWED:
                 continue
             offenders.append(f"{relative}:{line} ({why})")
-    assert not offenders, "subprocess 调用没有可证明的时限（Git 请用 git_timeout.run_git_bounded*）: " + ", ".join(offenders)
+    assert not offenders, (
+        "subprocess 调用没有可证明的时限（Git 请用 git_timeout.run_git_bounded*）: "
+        + ", ".join(offenders)
+    )
 
 
 @pytest.mark.parametrize(
@@ -84,7 +98,16 @@ def test_every_subprocess_call_in_auto_pm_has_a_timeout() -> None:
         ("import subprocess as sp\nsp.Popen(['git'])\n", "Popen"),
         ("from subprocess import Popen as P\nP(['git'])\n", "Popen"),
     ],
-    ids=["plain", "none", "alias-module", "from-import", "from-import-alias-none", "popen", "popen-alias", "popen-from"],
+    ids=[
+        "plain",
+        "none",
+        "alias-module",
+        "from-import",
+        "from-import-alias-none",
+        "popen",
+        "popen-alias",
+        "popen-from",
+    ],
 )
 def test_scan_catches_every_way_of_writing_an_unbounded_call(source: str, expected: str) -> None:
     assert [why for _line, why in find_unbounded_subprocess_calls(source)] == [expected]
@@ -115,26 +138,48 @@ def _hang(*_args: Any, **kwargs: Any) -> Any:
 
 
 _CASES: list[tuple[str, Callable[[Path], object], type[Exception]]] = [
-    ("control_root_git_output", lambda p: control_root_guard._git_output(p, "status"),
-     control_root_guard.ControlRootGuardError),
-    ("control_root_optional_output", lambda p: control_root_guard._git_optional_output(p, "status"),
-     control_root_guard.ControlRootGuardError),
-    ("ignored_file_scan", lambda p: ignored_file_scan.ignored_among(p, ["a.txt"]),
-     ignored_file_scan.IgnoreScanError),
+    (
+        "control_root_git_output",
+        lambda p: control_root_guard._git_output(p, "status"),
+        control_root_guard.ControlRootGuardError,
+    ),
+    (
+        "control_root_optional_output",
+        lambda p: control_root_guard._git_optional_output(p, "status"),
+        control_root_guard.ControlRootGuardError,
+    ),
+    (
+        "ignored_file_scan",
+        lambda p: ignored_file_scan.ignored_among(p, ["a.txt"]),
+        ignored_file_scan.IgnoreScanError,
+    ),
     ("plc_baseline", lambda p: plc_baseline._git(p, "status"), plc_baseline.PlcBaselineError),
     ("hook_staged_files", lambda p: git_hook_enforcer.get_staged_files(p), RuntimeError),
-    ("hook_staged_snapshot", lambda p: git_hook_enforcer.get_staged_snapshot(p),
-     git_hook_enforcer.StagedSnapshotError),
-    ("hook_secret_scan", lambda p: git_hook_enforcer.find_staged_secrets(p),
-     git_hook_enforcer.StagedSnapshotError),
-    ("worktree_policy", lambda p: worktree_policy_service.WorktreePolicyService(p)._run_git("status"),
-     worktree_policy_service.WorktreePolicyError),
+    (
+        "hook_staged_snapshot",
+        lambda p: git_hook_enforcer.get_staged_snapshot(p),
+        git_hook_enforcer.StagedSnapshotError,
+    ),
+    (
+        "hook_secret_scan",
+        lambda p: git_hook_enforcer.find_staged_secrets(p),
+        git_hook_enforcer.StagedSnapshotError,
+    ),
+    (
+        "worktree_policy",
+        lambda p: worktree_policy_service.WorktreePolicyService(p)._run_git("status"),
+        worktree_policy_service.WorktreePolicyError,
+    ),
 ]
 
 
 @pytest.mark.parametrize(("name", "call", "error"), _CASES, ids=[case[0] for case in _CASES])
 def test_hung_git_fails_closed_with_callers_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, call: Callable[[Path], object], error: type[Exception]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    call: Callable[[Path], object],
+    error: type[Exception],
 ) -> None:
     monkeypatch.setattr("auto_pm.infrastructure.git_timeout.subprocess.run", _hang)
     with pytest.raises(error, match="超时回执"):
@@ -155,7 +200,11 @@ def test_each_git_call_of_the_independent_staged_comparison_fails_closed_on_its_
 ) -> None:
     """Only one subcommand hangs; the others run for real, so swallowing that one call's timeout turns this red."""
     real_run = subprocess.run
-    for args in (["init", "-q"], ["config", "user.email", "t@example.invalid"], ["config", "user.name", "t"]):
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "t@example.invalid"],
+        ["config", "user.name", "t"],
+    ):
         real_run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
     (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
     for args in (["add", "a.txt"], ["commit", "-q", "-m", "base"]):
@@ -170,4 +219,3 @@ def test_each_git_call_of_the_independent_staged_comparison_fails_closed_on_its_
     with pytest.raises(git_hook_enforcer.StagedSnapshotError, match="超时回执") as caught:
         git_hook_enforcer.independent_staged_changes(tmp_path)
     assert hung in str(caught.value)
-

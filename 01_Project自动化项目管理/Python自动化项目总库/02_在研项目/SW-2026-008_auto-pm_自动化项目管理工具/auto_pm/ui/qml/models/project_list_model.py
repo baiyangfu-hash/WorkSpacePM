@@ -35,7 +35,7 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from auto_pm.models import ProjectInfo
+from auto_pm.domain.models import ProjectInfo
 
 
 class ProjectListModel(QAbstractListModel):

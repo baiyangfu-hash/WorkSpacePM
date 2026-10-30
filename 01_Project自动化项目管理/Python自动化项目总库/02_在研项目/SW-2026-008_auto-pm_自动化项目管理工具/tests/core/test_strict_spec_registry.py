@@ -11,7 +11,7 @@ from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeSe
 
 def _facade(root: Path) -> PmFacadeService:
     facade = object.__new__(PmFacadeService)
-    facade._workspace_root = root  # type: ignore[attr-defined]
+    facade._workspace_root = root
     return facade
 
 

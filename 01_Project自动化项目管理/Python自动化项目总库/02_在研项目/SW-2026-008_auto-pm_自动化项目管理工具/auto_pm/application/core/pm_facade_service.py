@@ -12,40 +12,37 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.constants import (
-    ChangeRequest,
-    SpecViolationError,
-    validate_business_nature,
-    validate_domain,
-    validate_impact_scope,
-    validate_urgency,
-)
-from auto_pm.core.continuity_execution_service import (
+from auto_pm.application.core.approval_proof_service import ApprovalProofError, ApprovalProofService
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.continuity_query_service import ContinuityQueryError, ContinuityQueryService
-from auto_pm.core.execution_adapter_service import (
-    ExecutionDispatchError,
-    ExecutionDispatchResult,
-    ExecutionDispatchService,
+from auto_pm.application.core.continuity_query_service import (
+    ContinuityQueryError,
+    ContinuityQueryService,
 )
-from auto_pm.core.local_execution_orchestrator import (
-    LocalExecutionOrchestrator,
-    LocalExecutionOrchestratorError,
-)
-from auto_pm.core.mission_admission import AdmissionVerdict, admission_verdict, release_problem
-from auto_pm.core.mission_service import MissionService, MissionServiceError
-from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
-
-from auto_pm.application.core.approval_proof_service import ApprovalProofError, ApprovalProofService
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollection,
     EvidenceCollectionError,
     EvidenceCollectionService,
 )
+from auto_pm.application.core.execution_adapter_service import (
+    ExecutionDispatchError,
+    ExecutionDispatchResult,
+    ExecutionDispatchService,
+)
+from auto_pm.application.core.local_execution_orchestrator import (
+    LocalExecutionOrchestrator,
+    LocalExecutionOrchestratorError,
+)
+from auto_pm.application.core.mission_admission import (
+    AdmissionVerdict,
+    admission_verdict,
+    release_problem,
+)
+from auto_pm.application.core.mission_service import MissionService, MissionServiceError
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
+from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
 from auto_pm.contracts.continuity import RunState, WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
@@ -70,6 +67,15 @@ from auto_pm.contracts.protected_files import (
     enforcement_for_run,
     protected_files_message,
     unauthorised_protected_changes,
+)
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.constants import (
+    ChangeRequest,
+    SpecViolationError,
+    validate_business_nature,
+    validate_domain,
+    validate_impact_scope,
+    validate_urgency,
 )
 from auto_pm.domain.change.decision_service import (
     DecisionError,
@@ -705,9 +711,7 @@ class PmFacadeService:
                 scope_paths=card.scope_paths,
                 admission_release_ref=admission_release_ref,
             )
-            mission = cast(
-                Mission,
-                self._missions.create_from_planning_approval(
+            mission = self._missions.create_from_planning_approval(
                     mission_id=mission_id,
                     draft=draft,
                     decision=decision,
@@ -715,8 +719,7 @@ class PmFacadeService:
                     created_by=created_by,
                     max_open_per_project=limit,
                     admitted_open_ids=verdict.open_ids,
-                ),
-            )
+                )
             self._missions.record_admission(mission.mission_id, verdict, admission_release_ref)
             return mission
         except (ContinuityStoreError, DecisionError, MissionServiceError) as error:
@@ -735,12 +738,9 @@ class PmFacadeService:
                 card.request_id, decision_id, card.change_id, actual_hash
             )
             self._missions.get(mission_id)
-            return cast(
-                WorkItem,
-                self._works.create_from_mission(
+            return self._works.create_from_mission(
                     mission_id=mission_id, owner=owner, scope_paths=list(card.scope_paths)
-                ),
-            )
+                )
         except (ContinuityStoreError, MissionServiceError, WorkRegistryError) as error:
             raise PmFacadeError(str(error)) from error
 
@@ -807,14 +807,11 @@ class PmFacadeService:
         )
         try:
             microtask = self._execution.prepare_microtask(dispatch.intent.operation_id)
-            return cast(
-                ForegroundExecutionReceipt,
-                self._local_orchestrator.execute(
+            return self._local_orchestrator.execute(
                     dispatch=dispatch,
                     microtask=microtask,
                     lease_token_environment=lease_token_environment,
-                ),
-            )
+                )
         except (ExecutionDispatchError, LocalExecutionOrchestratorError) as error:
             raise PmFacadeError(str(error)) from error
 
@@ -1025,8 +1022,8 @@ class PmFacadeService:
                 comment=f"user approved planning scope {card.plan_hash}",
                 project_id=card.subject_project_id,
             )
-        if change.status not in _PLANNING_CHANGE_APPROVED_STATES:
-            raise PmFacadeError(f"PlanningScopeCard 绑定的 CHG 不可批准: {change.status}")
+        if change is None or change.status not in _PLANNING_CHANGE_APPROVED_STATES:
+            raise PmFacadeError(f"PlanningScopeCard 绑定的 CHG 不可批准: {change.status if change else '状态流转后读不到 CHG'}")
 
     def recover_planning_scope_card(self, mission_id: str) -> PlanningScopeCard:
         """Rebuild the exact approved card from persisted, independently bound facts."""
@@ -1743,7 +1740,7 @@ class PmFacadeService:
 
     def _mission(self, mission_id: str) -> Mission:
         try:
-            return cast(Mission, self._missions.get(mission_id))
+            return self._missions.get(mission_id)
         except MissionServiceError as error:
             raise PmFacadeError(str(error)) from error
 
@@ -1766,17 +1763,14 @@ class PmFacadeService:
         if evidence.startswith("user-confirmation:"):
             key += f":{evidence}"
         try:
-            return cast(
-                Mission,
-                self._missions.transition(
+            return self._missions.transition(
                     mission_id=mission.mission_id,
                     expected_version=mission.version,
                     new_state=new_state,
                     root_work_id=root_work_id,
                     idempotency_key=key,
                     acceptance_evidence=evidence,
-                ),
-            )
+                )
         except MissionServiceError as error:
             raise PmFacadeError(str(error)) from error
 

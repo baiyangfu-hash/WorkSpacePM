@@ -6,7 +6,7 @@
 from pathlib import Path
 from typing import Any
 
-from auto_pm.core.pm_session_service import ARCHIVE_DIR_NAME, ARCHIVE_DIR_PARENT
+from auto_pm.application.core.pm_session_service import ARCHIVE_DIR_NAME, ARCHIVE_DIR_PARENT
 
 
 def make_spec_check_service(workspace_root: str) -> Any | None:
@@ -15,7 +15,7 @@ def make_spec_check_service(workspace_root: str) -> Any | None:
     返回 None 表示工作空间无 spec_registry.json，SpecService 不可用。
     """
     try:
-        from auto_pm.spec.services.check_svc import CheckService
+        from auto_pm.domain.spec.services.check_svc import CheckService
 
         workspace = Path(workspace_root)
         if not workspace.exists():
@@ -31,7 +31,7 @@ def make_spec_index_service(workspace_root: str) -> Any | None:
     返回 None 表示工作空间无 spec_registry.json 或构造失败。
     """
     try:
-        from auto_pm.spec.services.index_svc import IndexService
+        from auto_pm.domain.spec.services.index_svc import IndexService
 
         workspace = Path(workspace_root)
         if not workspace.exists():
@@ -47,7 +47,7 @@ def make_spec_report_service(workspace_root: str) -> Any | None:
     返回 None 表示工作空间无 spec_registry.json 或构造失败。
     """
     try:
-        from auto_pm.spec.services.report_svc import ReportService
+        from auto_pm.domain.spec.services.report_svc import ReportService
 
         workspace = Path(workspace_root)
         if not workspace.exists():
@@ -63,7 +63,7 @@ def make_spec_frontmatter_service(workspace_root: str) -> Any | None:
     返回 None 表示工作空间无 spec_registry.json 或构造失败。
     """
     try:
-        from auto_pm.spec.services.frontmatter_svc import FrontmatterService
+        from auto_pm.domain.spec.services.frontmatter_svc import FrontmatterService
 
         workspace = Path(workspace_root)
         if not workspace.exists():
@@ -94,7 +94,7 @@ def make_report_service(
         ReportService 实例或 None（构造失败时）
     """
     try:
-        from auto_pm.core.report_service import ReportService
+        from auto_pm.application.core.report_service import ReportService
 
         return ReportService(
             project_service=project_service,
@@ -139,7 +139,7 @@ def make_pm_session_service(workspace_root: str) -> Any | None:
         PmSessionViewAggregator 实例或 None
     """
     try:
-        from auto_pm.core.pm_session_service import (
+        from auto_pm.application.core.pm_session_service import (
             MAX_FILE_LINES,
             MAX_FILE_SIZE_KB,
             PmSessionArchiveService,
@@ -291,7 +291,7 @@ def make_dashboard_service(
         DashboardService 实例或 None
     """
     try:
-        from auto_pm.core.dashboard_service import DashboardService
+        from auto_pm.application.core.dashboard_service import DashboardService
 
         return DashboardService(
             project_service=project_service,
@@ -312,7 +312,7 @@ def make_asset_summary_service() -> Any | None:
         AssetSummaryService 实例或 None
     """
     try:
-        from auto_pm.core.asset_summary_service import AssetSummaryService
+        from auto_pm.application.core.asset_summary_service import AssetSummaryService
 
         return AssetSummaryService()
     except Exception:  # noqa: BLE001
@@ -329,7 +329,7 @@ def make_doc_refresh_service(workspace_root: str) -> Any | None:
         DocRefreshService 实例或 None
     """
     try:
-        from auto_pm.core.doc_refresh_service import DocRefreshService
+        from auto_pm.application.core.doc_refresh_service import DocRefreshService
 
         return DocRefreshService(workspace_root=workspace_root)
     except Exception:  # noqa: BLE001

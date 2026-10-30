@@ -60,6 +60,11 @@ def test_tests_gate_scripts_rules_and_infrastructure_are_protected_and_product_c
     )
 
 
+def test_the_approver_pin_registry_is_protected_and_a_lookalike_is_not() -> None:
+    registry = "SYS-2026-001_WorkspaceGovernance/approvers.json"
+    assert protected_changes([registry, "SYS-2026-001_WorkspaceGovernance/approvers.md", "docs/approvers.json"]) == (registry,)
+
+
 def test_windows_slashes_and_a_leading_dot_slash_do_not_hide_a_protected_path() -> None:
     assert protected_changes(["tests\\core\\test_x.py", "./.trae/rules/a.md"]) == (".trae/rules/a.md", "tests/core/test_x.py")
 

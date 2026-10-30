@@ -20,8 +20,6 @@ from auto_pm.application.core.worktree_policy_service import (
     WorktreePolicyError,
     WorktreePolicyService,
 )
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.constants import TransitionGuardError
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
@@ -36,6 +34,8 @@ from auto_pm.contracts.pm_facade import (
     PmIntent,
     PmRunOutcome,
 )
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.constants import TransitionGuardError
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -313,8 +313,8 @@ class CockpitClient:
                 comment=f"user approved planning scope {card.plan_hash}",
                 project_id=card.subject_project_id,
             )
-        if change.status not in _APPROVED_STATES:
-            raise CockpitApiError(f"PlanningScopeCard 绑定的 CHG 不可批准: {change.status}")
+        if change is None or change.status not in _APPROVED_STATES:
+            raise CockpitApiError(f"PlanningScopeCard 绑定的 CHG 不可批准: {change.status if change else '状态流转后读不到 CHG'}")
 
 
 __all__ = ["CockpitApiError", "CockpitClient", "CockpitIdentity"]

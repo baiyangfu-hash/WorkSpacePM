@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -16,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.bounded_command import run_until_done_or_stopped
 from auto_pm.application.core.implementation_card_precheck import (
     format_findings,
     precheck_markdown_card,
@@ -1241,7 +1243,11 @@ def lease_group() -> None:
 @click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
 @click.option("--expected-version", type=click.IntRange(min=1), required=True)
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
-@click.option("--idempotency-key", required=True)
+@click.option(
+    "--idempotency-key",
+    required=True,
+    help="防重复的键：同一次续租重试用同一个，下一次续租必须换新的，例如 <run-id>-renew-v<当前版本号>",
+)
 @click.pass_context
 def renew_lease(
     ctx: click.Context,
@@ -1275,6 +1281,71 @@ def renew_lease(
     _emit(item)
 
 
+@lease_group.command(name="run-with-renewal", context_settings={"ignore_unknown_options": True})
+@click.option("--run-id", required=True)
+@click.option("--owner", "owner_id", required=True)
+@click.option("--lease-token-env", default=None, metavar="ENV_NAME")
+@click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option(
+    "--timeout-seconds",
+    type=click.IntRange(1, 43_200),
+    default=14_400,
+    show_default=True,
+    help="命令最长跑多久；超时就杀掉命令并以 124 退出（长命令也必须有时限）",
+)
+@click.argument("command", nargs=-1, required=True, type=click.UNPROCESSED)
+@click.pass_context
+def run_with_renewal(
+    ctx: click.Context,
+    run_id: str,
+    owner_id: str,
+    lease_token_env: str | None,
+    lease_wallet: bool,
+    lease_seconds: int,
+    timeout_seconds: int,
+    command: tuple[str, ...],
+) -> None:
+    """Run one command (after --) and renew the Run's lease every third of its length until it exits.
+
+    For long foreground commands such as a full pytest: the lease cannot run out while it runs. Only renews; the 3 h
+    total-hold cap still applies. The first renewal must succeed or the command is not started. The command inherits the
+    environment without the lease token, and its exit code is returned.
+    """
+    from auto_pm.application.core.lease_keepalive import LeaseKeepAlive, LeaseKeepAliveError
+
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, run_id))
+    if (lease_token_env is None) == (not lease_wallet):
+        raise click.UsageError("必须且只能给出一个口令来源：--lease-token-env 或 --lease-wallet")
+    token = _lease_token(
+        ctx, argv_value=None, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
+    )
+    child_env = {key: value for key, value in os.environ.items() if key != lease_token_env}
+    gave_up = threading.Event()
+    try:
+        with LeaseKeepAlive(
+            _execution_service(ctx),
+            run_id=run_id,
+            owner_id=owner_id,
+            token=token,
+            lease_seconds=lease_seconds,
+            on_give_up=gave_up.set,
+        ) as keepalive:
+            outcome = run_until_done_or_stopped(list(command), child_env, timeout_seconds, gave_up)
+            returncode = outcome.returncode
+            if outcome.stopped_by == "stop":
+                click.echo("续租已放弃（租约快过期或被拒），命令已被终止；请先检查租约再决定是否重跑", err=True)
+            elif outcome.stopped_by == "timeout":
+                click.echo(f"命令超过 {timeout_seconds} 秒仍未结束，已被终止", err=True)
+    except LeaseKeepAliveError as error:
+        raise click.ClickException(str(error)) from error
+    except OSError as error:
+        raise click.ClickException(f"命令无法启动：{error}") from error
+    if keepalive.error:
+        click.echo(f"警告：命令运行期间续租中断（{keepalive.error}）；请先检查租约再继续", err=True)
+    ctx.exit(returncode)
+
+
 @lease_group.command(name="extend-hold")
 @click.option("--run-id", required=True)
 @click.option("--extra-seconds", type=click.IntRange(60, 43_200), required=True, help="在默认 3 小时上限之外再加多少秒")
@@ -1283,7 +1354,11 @@ def renew_lease(
     default="",
     help="用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
 )
-@click.option("--idempotency-key", required=True)
+@click.option(
+    "--idempotency-key",
+    required=True,
+    help="防重复的键：同一次延长重试用同一个，再次延长必须换新的，例如 <run-id>-hold-<序号>",
+)
 @click.pass_context
 def extend_lease_hold(
     ctx: click.Context, run_id: str, extra_seconds: int, approval_evidence_ref: str, idempotency_key: str

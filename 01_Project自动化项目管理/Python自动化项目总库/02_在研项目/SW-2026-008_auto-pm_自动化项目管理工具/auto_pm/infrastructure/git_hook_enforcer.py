@@ -39,6 +39,9 @@ _VALID_CHANGE_STATUSES = (
     "closed",
 )
 CONTROL_ROOT_FILE_BINDINGS = {"main.py": "SW-2026-008"}
+# 控制根下不属于任何注册项目目录、但随 SW-2026-008 发版的目录树：发布树（发版同步指针时会暂存其中的 .py）。
+# 归到 SW-2026-008 而不是豁免：这些文件仍要跟着 SW-2026-008 的变更单走，钩子的判定没有放松。
+CONTROL_ROOT_PREFIX_BINDINGS = {"00_Infrastructure/auto_pm/releases/": "SW-2026-008"}
 
 
 class StagedSnapshotError(RuntimeError):
@@ -445,6 +448,10 @@ def _binding_for_staged_file(
         raise StagedSnapshotError(f"暂存生产文件归属未知或不唯一: {path}")
 
     control_root_project_id = CONTROL_ROOT_FILE_BINDINGS.get(path)
+    if not control_root_project_id:
+        control_root_project_id = next(
+            (pid for prefix, pid in CONTROL_ROOT_PREFIX_BINDINGS.items() if path.startswith(prefix)), None
+        )
     if control_root_project_id:
         control_matches = [
             binding for binding in bindings if binding.project_id == control_root_project_id

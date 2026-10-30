@@ -187,7 +187,7 @@ def _kill(pid: int) -> None:
     if os.name == "nt":
         subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, check=False)
     else:
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, signal.SIGKILL)  # type: ignore[attr-defined,unused-ignore]
 
 
 def test_full_round_writes_the_run_g2_layout_and_renews_first(lab: dict[str, Path]) -> None:
@@ -217,7 +217,7 @@ def test_session_killed_runner_keeps_going(lab: dict[str, Path]) -> None:
     if os.name == "nt":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(session.pid)], capture_output=True, check=False)
     else:
-        os.killpg(session.pid, signal.SIGKILL)  # the whole "session" process group
+        os.killpg(session.pid, signal.SIGKILL)  # type: ignore[attr-defined,unused-ignore]  # the whole "session" process group
     session.wait(timeout=30)
     counts: list[int] = []
 
@@ -808,7 +808,7 @@ def test_a_directory_is_never_removed(lab: dict[str, Path]) -> None:
 
 def test_a_marker_that_cannot_be_deleted_is_only_logged(lab: dict[str, Path]) -> None:
     # A read-only parent makes the unlink fail on POSIX; elsewhere (Windows, root) there is no cheap way to force it.
-    if os.name == "nt" or os.geteuid() == 0:
+    if os.name == "nt" or os.geteuid() == 0:  # type: ignore[attr-defined,unused-ignore]
         pytest.skip("cannot make a delete fail on this machine without an open handle")
     stuck = lab["root"] / "locked" / "HEAVY_STUCK"
     stuck.parent.mkdir()

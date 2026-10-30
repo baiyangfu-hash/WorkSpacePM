@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from auto_pm.core.governance_service import GovernanceService
+from auto_pm.application.core.governance_service import GovernanceService
 
 console = Console()
 

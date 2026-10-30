@@ -11,7 +11,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from auto_pm.core.prototype_service import PrototypeService
+from auto_pm.application.core.prototype_service import PrototypeService
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()

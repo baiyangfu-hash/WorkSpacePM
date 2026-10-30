@@ -8,23 +8,24 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 
-from auto_pm.core.continuity_execution_service import (
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.execution_microtask_service import (
+from auto_pm.application.core.execution_microtask_service import (
     ExecutionMicrotaskError,
     ExecutionMicrotaskService,
 )
-from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
-from auto_pm.core.worktree_policy_service import (
+from auto_pm.application.core.workspace_context_service import (
+    WorkspaceContextError,
+    WorkspaceContextService,
+)
+from auto_pm.application.core.worktree_policy_service import (
     WorktreePlan,
     WorktreePolicyError,
     WorktreePolicyService,
 )
-
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ExecutionDispatchReceipt,
@@ -141,10 +142,7 @@ class ExecutionDispatchService:
         """Validate the reserved intent's microtask without starting a provider."""
 
         try:
-            return cast(
-                ExecutionMicrotaskMaterialization,
-                self._microtasks.prepare(operation_id),
-            )
+            return self._microtasks.prepare(operation_id)
         except ExecutionMicrotaskError as error:
             raise ExecutionDispatchError(str(error)) from error
 

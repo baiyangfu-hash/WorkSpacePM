@@ -19,9 +19,9 @@ from rich.console import Console
 from rich.table import Table
 
 from auto_pm.app_context import AppContext
-from auto_pm.delivery.archive_manager import ArchiveManager
-from auto_pm.delivery.constants import DEFAULT_ARCHIVE_KEEP, DEFAULT_PRODUCT_NAME
-from auto_pm.delivery.delivery_service import DeliveryService
+from auto_pm.application.delivery.archive_manager import ArchiveManager
+from auto_pm.application.delivery.constants import DEFAULT_ARCHIVE_KEEP, DEFAULT_PRODUCT_NAME
+from auto_pm.application.delivery.delivery_service import DeliveryService
 
 console = Console()
 
