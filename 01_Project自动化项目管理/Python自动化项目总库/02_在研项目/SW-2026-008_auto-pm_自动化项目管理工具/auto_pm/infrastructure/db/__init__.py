@@ -9,8 +9,12 @@
 
 from typing import Any
 
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository, ScanLogRepository
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import (
+    ChangeRequestRepository,
+    ProjectRepository,
+    ScanLogRepository,
+)
 
 __all__ = [
     "DatabaseManager",
@@ -28,7 +32,7 @@ def __getattr__(name: str) -> Any:
     通过 __init__.py 的立即导入会形成循环。使用 PEP 562 延迟导入。
     """
     if name == "SyncService":
-        from auto_pm.db.sync import SyncService
+        from auto_pm.infrastructure.db.sync import SyncService
 
         return SyncService
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

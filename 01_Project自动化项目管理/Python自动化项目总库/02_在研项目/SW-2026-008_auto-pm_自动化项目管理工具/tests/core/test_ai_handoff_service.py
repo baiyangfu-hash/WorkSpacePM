@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.core.ai_handoff_service import (
+
+from auto_pm.application.core.ai_handoff_service import (
     AiHandoffService,
     HandoffConflictError,
     HandoffError,
@@ -287,7 +288,8 @@ def test_preflight_validates_identity_without_consuming(tmp_path) -> None:  # ty
 
     assert report["ok"] is True
     assert report["already_consumed"] is False
-    assert service.get_pending("AI-20260901-PREFLIGHT")["status"] == "pending"
+    pending = service.get_pending("AI-20260901-PREFLIGHT")
+    assert pending is not None and pending["status"] == "pending"
 
 
 def test_failed_atomic_write_is_logged_and_retryable(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

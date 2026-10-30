@@ -27,6 +27,10 @@ from auto_pm.contracts.implementation_card import (
     StopLines,
 )
 from auto_pm.ui.cli.approval_pin import require_approval_pin
+from auto_pm.ui.cli.runtime_identity_guard import (
+    require_runtime_identity,
+    require_runtime_identity_for_card,
+)
 
 
 def _service(ctx: click.Context) -> ImplementationCardService:
@@ -101,6 +105,7 @@ def create_card(
     max_healing_attempts: int, deadline_utc: str, quota_stop_remaining_percent: int,
 ) -> None:
     """Create JSON and Markdown review artifacts with explicit TODO fields."""
+    require_runtime_identity(ctx, project_id)
     try:
         card = ImplementationCard(
             card_id=card_id, project_id=project_id, wbs_item_id=wbs_item_id,
@@ -201,6 +206,8 @@ def approve_card(ctx: click.Context, card_id: str, approver: str, approval_evide
     )
     if proof is not None:
         approver, approval_evidence = proof.approver, proof.evidence_ref
+    # After the approval PIN (audit 72): a refusal must never precede the PIN prompt.
+    require_runtime_identity_for_card(ctx, card_id)
     try:
         card = _service(ctx).approve(card_id, approver=approver, approval_evidence=approval_evidence)
         _emit({"card_id": card.card_id, "state": card.state.value})
@@ -213,6 +220,7 @@ def approve_card(ctx: click.Context, card_id: str, approver: str, approval_evide
 @click.pass_context
 def dispatch_card(ctx: click.Context, card_id: str) -> None:
     """Emit the checked execution package; do not launch an executor."""
+    require_runtime_identity_for_card(ctx, card_id)
     try:
         _emit(_service(ctx).dispatch(card_id, command_tree=command_tree_from_click(ctx)))
     except (ImplementationCardError, ValueError, OSError) as error:
@@ -226,6 +234,7 @@ def dispatch_card(ctx: click.Context, card_id: str) -> None:
 @click.pass_context
 def verify_card(ctx: click.Context, card_id: str, checkpoint_id: str, final_commit: str) -> None:
     """Validate current-byte terminal evidence; no merge or deployment."""
+    require_runtime_identity_for_card(ctx, card_id)
     try:
         card = _service(ctx).verify(card_id, checkpoint_id=checkpoint_id, final_commit=final_commit)
         _emit({"card_id": card.card_id, "state": card.state.value})

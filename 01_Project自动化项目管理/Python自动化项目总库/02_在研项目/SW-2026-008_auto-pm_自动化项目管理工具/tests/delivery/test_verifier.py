@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.delivery.verifier import CheckResult, DeliveryVerifier, VerificationReport
+from auto_pm.application.delivery.verifier import CheckResult, DeliveryVerifier, VerificationReport
 
 
 class TestVerificationReport:

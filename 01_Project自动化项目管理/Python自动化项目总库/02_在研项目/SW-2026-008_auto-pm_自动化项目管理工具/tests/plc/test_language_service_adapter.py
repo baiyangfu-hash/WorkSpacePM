@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,7 +18,9 @@ from auto_pm.infrastructure import siemens_language_service as sls
 BINARY = LanguageServiceBinary(path="siemens-lsp.exe", version="9.9.9", sha256="0" * 64)
 
 
-def _runner(returncode: int, stdout: str = "", stderr: str = "", seen: list[dict] | None = None):  # type: ignore[no-untyped-def]
+def _runner(
+    returncode: int, stdout: str = "", stderr: str = "", seen: list[dict[str, Any]] | None = None
+) -> Callable[[list[str], Path, Mapping[str, str], int], subprocess.CompletedProcess[str]]:
     def run(args: list[str], cwd: Path, env: Mapping[str, str], timeout: int) -> subprocess.CompletedProcess[str]:
         if seen is not None:
             seen.append({"args": args, "cwd": cwd, "env": dict(env), "timeout": timeout})
@@ -67,7 +70,7 @@ def test_ls04_the_environment_variable_overrides_discovery(tmp_path: Path) -> No
 
 
 def test_ls05_exit_zero_without_errors_passes_and_runs_in_the_project_root(tmp_path: Path) -> None:
-    seen: list[dict] = []
+    seen: list[dict[str, Any]] = []
     service = sls.SiemensLanguageService(BINARY, runner=_runner(0, "check metrics: files analyzed 10, diagnostics 0\n", seen=seen))
     result = service.check(tmp_path)
     assert result.passed and result.error_count == 0 and result.exit_code == 0

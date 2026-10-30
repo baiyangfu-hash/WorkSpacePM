@@ -11,15 +11,15 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.core.execution_adapter_service import (
+
+from auto_pm.application.core.execution_adapter_service import (
     ExecutionDispatchError,
     ExecutionDispatchService,
 )
-from auto_pm.core.execution_microtask_service import (
+from auto_pm.application.core.execution_microtask_service import (
     ExecutionMicrotaskError,
     ExecutionMicrotaskService,
 )
-
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ExecutionMicrotaskPlan,

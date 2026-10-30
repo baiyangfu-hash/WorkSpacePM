@@ -13,9 +13,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ProjectRepository
-from auto_pm.models import Project, ProjectRecord, extract_business_line
+
+from auto_pm.domain.models import Project, ProjectRecord, extract_business_line
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import ProjectRepository
 
 # ── extract_business_line 函数测试 ──────────────────────
 

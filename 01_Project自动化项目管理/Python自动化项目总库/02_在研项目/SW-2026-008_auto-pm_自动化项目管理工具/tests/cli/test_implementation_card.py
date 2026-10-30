@@ -6,10 +6,19 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from auto_pm.ui.cli.implementation_card import implementation_card_group
 from tests.git_support import git_out
+
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
+@pytest.fixture(autouse=True)
+def _cards_here_predate_the_tier_cutover(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests build throw-away cards that carry no tier line; treat them as cards from before the cut-over (the rule has its own tests)."""
+    monkeypatch.setattr("auto_pm.application.core.implementation_card_tier.card_is_new", lambda _card: False)
+
 
 
 def test_create_then_validate_is_read_only(tmp_path: Path) -> None:
@@ -80,7 +89,7 @@ def _control_root(root: Path) -> str:
 
 
 def test_precheck_command_passes_a_valid_card_and_is_read_only(tmp_path: Path) -> None:
-    from auto_pm.cli.__main__ import cli
+    from auto_pm.ui.cli.__main__ import cli
 
     baseline = _control_root(tmp_path)
     card = _markdown_card(tmp_path, baseline, "`main.py continuity work create --work-id W`")
@@ -97,7 +106,7 @@ def test_precheck_command_passes_a_valid_card_and_is_read_only(tmp_path: Path) -
 
 
 def test_precheck_command_exits_nonzero_with_findings(tmp_path: Path) -> None:
-    from auto_pm.cli.__main__ import cli
+    from auto_pm.ui.cli.__main__ import cli
 
     baseline = _control_root(tmp_path)
     card = _markdown_card(tmp_path, baseline, "`main.py doc check --strict`")

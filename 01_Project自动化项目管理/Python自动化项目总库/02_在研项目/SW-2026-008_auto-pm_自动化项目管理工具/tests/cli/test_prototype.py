@@ -1,10 +1,18 @@
 import tempfile
 
-from auto_pm.cli.__main__ import cli
+import pytest
 from click.testing import CliRunner
 
+from auto_pm.ui.cli.__main__ import cli
+from tests.identity_support import guard_off
 
-def test_cli_prototype_flow():
+
+@pytest.fixture(autouse=True)
+def _identity_guard_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    guard_off(monkeypatch, "prototype")
+
+
+def test_cli_prototype_flow() -> None:
     runner = CliRunner()
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Test prototype init CLI

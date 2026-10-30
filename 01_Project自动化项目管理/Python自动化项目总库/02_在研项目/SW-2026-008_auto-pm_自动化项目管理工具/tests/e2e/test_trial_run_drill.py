@@ -31,7 +31,6 @@ from tests.e2e.test_closure_drill import (
     MAIN_DOMAIN,
     ORIGINAL_WORDS,
     PLAN_CHECKLIST,
-    PROJECT_ID,
     Drill,
     Step,
     assert_closed_and_clean,
@@ -42,6 +41,7 @@ from tests.e2e.test_closure_drill import (
 )
 from tests.e2e.test_pmf_plc import (
     PROJECT,
+    PROJECT_ID,
     benchmark_tar,  # noqa: F401 - module fixture re-used by name
     git,
 )
@@ -186,7 +186,7 @@ def test_t02d_the_complete_plan_closes_and_keeps_the_safety_answer(tmp_path: Pat
     result = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-TRIAL-T02D", files=files, declared=tuple(files))
 
     assert_closed_and_clean(drill, result, PROJECT_ID)
-    from auto_pm.core.pm_facade_service import PmFacadeService
+    from auto_pm.application.core.pm_facade_service import PmFacadeService
 
     checklist = PmFacadeService(drill.root).recover_planning_scope_card(result.mission_id).execution_grant.plan_checklist
     assert checklist is not None and checklist.safety_circuit == "否" and checklist.original_request == ORIGINAL_WORDS

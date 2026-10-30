@@ -296,7 +296,8 @@ def _plugin_workspace(tmp_path: Path) -> Path:
 def test_v09_the_generated_project_passes_the_plugin_check_and_test(tmp_path: Path, plugin_service: SiemensLanguageService) -> None:
     report = evaluate_project(plugin_service, _plugin_workspace(tmp_path))
     assert report.check.passed, report.check.messages
-    assert report.test is not None and report.test.passed, report.test.messages
+    assert report.test is not None
+    assert report.test.passed, report.test.messages
     assert (report.test.cases_run, report.test.cases_total) == (2, 2)
 
 

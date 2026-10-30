@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.change.ledger_reconciler import ReconcileDiff
-from auto_pm.core.pm_closure_service import (
+
+from auto_pm.application.core.pm_closure_service import (
     ClosureCompletionState,
     ClosurePreparation,
     ClosureState,
@@ -22,9 +22,9 @@ from auto_pm.core.pm_closure_service import (
     PmClosureError,
     PmClosureService,
 )
-
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope, Mission, MissionState
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler, ReconcileDiff
 from auto_pm.domain.change.substance_injector import SubstanceInjector
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
@@ -205,7 +205,7 @@ def _lineage_states(database: Path) -> tuple[str, str, str, str, int, str, int, 
     )
 
 
-class _ProjectionReconciler:
+class _ProjectionReconciler(LedgerReconciler):
     def __init__(self, result: ReconcileDiff | Exception) -> None:
         self.result = result
         self.calls: list[tuple[str, str]] = []

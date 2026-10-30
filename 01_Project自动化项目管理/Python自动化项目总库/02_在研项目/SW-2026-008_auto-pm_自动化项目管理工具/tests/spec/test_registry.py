@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from auto_pm.spec.core.registry import SpecInfo, SpecRegistry
+from auto_pm.domain.spec.core.registry import SpecInfo, SpecRegistry
 
 
 class TestSpecRegistryLoad:

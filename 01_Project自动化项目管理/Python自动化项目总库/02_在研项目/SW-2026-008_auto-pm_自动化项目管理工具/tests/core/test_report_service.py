@@ -15,12 +15,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.change.change_service import ChangeService
-from auto_pm.core.project_service import ProjectService
-from auto_pm.core.report_service import ReportService
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ChangeRequestRepository
-from auto_pm.models import ChangeSummary, ProjectRecord
+
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.application.core.report_service import ReportService
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.models import ChangeSummary, ProjectRecord
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import ChangeRequestRepository
 
 # ── fixtures ─────────────────────────────────────────────
 
@@ -573,7 +574,7 @@ class TestGetScanReport:
         self, tmp_path: Path, db: DatabaseManager
     ) -> None:
         """有扫描日志时返回最近一条"""
-        from auto_pm.db.repository import ScanLogRepository
+        from auto_pm.infrastructure.db.repository import ScanLogRepository
 
         repo = ScanLogRepository(db)
         repo.insert(

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.vartable.parsers.intdoc_parser import IntDocParser
+from auto_pm.domain.vartable.parsers.intdoc_parser import IntDocParser
 
 
 class TestIntDocParserDetectFormat:

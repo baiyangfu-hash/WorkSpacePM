@@ -16,7 +16,7 @@ from typing import Any
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QPersistentModelIndex, Qt
 
-from auto_pm.models import ProjectInfo
+from auto_pm.domain.models import ProjectInfo
 
 
 class ProjectModel(QAbstractListModel):

@@ -60,12 +60,15 @@ from auto_pm.application.core.implementation_card_precheck import (
 
 CARD_LINE = re.compile(r"^\s*任务卡\s*[:：]\s*`?([^`\s]+)`?\s*$")
 SCOPE_HEADER = re.compile(r"^\s*(?:#+\s*)?可改范围\s*[:：]?\s*$")
-SCOPE_ITEM = re.compile(r"^\s*[-*]\s+`?([^`\s]+)`?")
+# 清单项：反引号包起来的取反引号里面整段（后面可跟说明）；没包的整行就是一条路径。路径里允许有空格
+# （如 ``PM_SESSION_{{ project_id }}.md.jinja``），绝不能按空格切成多条。
+SCOPE_ITEM = re.compile(r"^\s*[-*]\s+(?:`([^`]+)`.*|(\S.*?))\s*$")
 # 裁判自己的文件：改它们等于改判卷规则，必须逐字点名（与 PROTECTED_PATTERNS 一样处理）
 _SW008 = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
 JUDGE_PATTERNS = (
     "reviews/tools/pr_scope_check.py",
     "reviews/tools/audit_pr.py",
+    "reviews/tools/ci_aggregate.py",
     "reviews/tools/safety_zone_check.py",
     "requirements.txt",
     f"{_SW008}/pyproject.toml",
@@ -84,15 +87,17 @@ def git(repo: Path, *args: str) -> str:
         ["git", "-c", "core.quotepath=false", *args],
         cwd=str(repo),
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
         stdin=subprocess.DEVNULL,
     )
     if result.returncode != 0:
-        raise GitError(f"git {' '.join(args)}: {result.stderr.strip()}")
-    return result.stdout
+        raise GitError(f"git {' '.join(args)}: {result.stderr.decode('utf-8', errors='replace').strip()}")
+    try:
+        return result.stdout.decode("utf-8")
+    except UnicodeDecodeError as error:
+        # 不静默吞坏字节：改动里有非 UTF-8 内容（如 GBK 文件）时，先明说，再用替身字符继续检查
+        print(f"警告：git {args[0]} 输出含非法 UTF-8 字节（第 {error.start} 字节），已用替身字符继续；请另跑 encoding 检查", file=sys.stderr)
+        return result.stdout.decode("utf-8", errors="replace")
 
 
 def changed_files(repo: Path, base: str, head: str) -> list[str]:
@@ -151,7 +156,7 @@ def declared_scope(body: str) -> list[str]:
             break
         match = SCOPE_ITEM.match(line)
         if match:
-            items.append(match.group(1))
+            items.append((match.group(1) or match.group(2)).strip())
     return items
 
 
@@ -324,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     print(report)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a", encoding="utf-8", errors="replace") as handle:
+        with open(summary, "a", encoding="utf-8") as handle:
             handle.write(report)
     return 0 if result.passed else 1
 

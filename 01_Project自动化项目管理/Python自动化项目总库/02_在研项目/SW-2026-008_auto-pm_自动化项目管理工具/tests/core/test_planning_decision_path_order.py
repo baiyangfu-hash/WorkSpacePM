@@ -5,8 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 
 _GRANT = {"grant": "x"}

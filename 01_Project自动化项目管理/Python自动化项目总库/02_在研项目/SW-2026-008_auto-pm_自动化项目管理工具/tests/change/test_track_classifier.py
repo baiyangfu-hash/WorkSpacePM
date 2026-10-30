@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from auto_pm.change.track_classifier import ChangeTrack, ChangeTrackClassifier
+from auto_pm.domain.change.track_classifier import ChangeTrack, ChangeTrackClassifier
 
 
 def test_classify_quick_track() -> None:

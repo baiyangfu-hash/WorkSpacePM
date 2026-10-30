@@ -14,8 +14,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from auto_pm.models import ProjectInfo
-
+from auto_pm.domain.models import ProjectInfo
 from auto_pm.ui.qml.models.project_list_model import ProjectListModel
 
 if TYPE_CHECKING:

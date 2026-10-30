@@ -39,6 +39,9 @@ _VALID_CHANGE_STATUSES = (
     "closed",
 )
 CONTROL_ROOT_FILE_BINDINGS = {"main.py": "SW-2026-008"}
+# 控制根下不属于任何注册项目目录、但随 SW-2026-008 发版的目录树：发布树（发版同步指针时会暂存其中的 .py）。
+# 归到 SW-2026-008 而不是豁免：这些文件仍要跟着 SW-2026-008 的变更单走，钩子的判定没有放松。
+CONTROL_ROOT_PREFIX_BINDINGS = {"00_Infrastructure/auto_pm/releases/": "SW-2026-008"}
 
 
 class StagedSnapshotError(RuntimeError):
@@ -445,6 +448,10 @@ def _binding_for_staged_file(
         raise StagedSnapshotError(f"暂存生产文件归属未知或不唯一: {path}")
 
     control_root_project_id = CONTROL_ROOT_FILE_BINDINGS.get(path)
+    if not control_root_project_id:
+        control_root_project_id = next(
+            (pid for prefix, pid in CONTROL_ROOT_PREFIX_BINDINGS.items() if path.startswith(prefix)), None
+        )
     if control_root_project_id:
         control_matches = [
             binding for binding in bindings if binding.project_id == control_root_project_id
@@ -681,8 +688,11 @@ def _validate_staged_change_evidence(
     _require_working_tree_match(change_entry, change_blob, change_path)
     _require_working_tree_match(ledger_entry, ledger_blob, ledger_path)
 
-    change_content = change_blob.decode("utf-8", errors="replace")
-    ledger_content = ledger_blob.decode("utf-8", errors="replace")
+    try:
+        change_content = change_blob.decode("utf-8")
+        ledger_content = ledger_blob.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise StagedSnapshotError(f"暂存变更单或项目台账不是合法 UTF-8，拒绝提交: {chg_id}") from exc
     staged_project_id = _staged_change_project_id(change_content, chg_id)
     if staged_project_id != binding.project_id:
         raise StagedSnapshotError(
@@ -743,8 +753,8 @@ def _validate_control_root_change_evidence(
         raise StagedSnapshotError(f"控制根缺少关联变更单文件: {chg_id}.md (项目 {binding.project_id})")
 
     try:
-        change_content = change_path.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
+        change_content = change_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
         raise StagedSnapshotError(f"无法读取控制根变更单 {change_path}: {exc}") from exc
 
     chg_pid = _staged_change_project_id(change_content, chg_id)
@@ -758,8 +768,8 @@ def _validate_control_root_change_evidence(
         raise StagedSnapshotError(f"控制根缺少项目版本变更台账: {binding.project_id}")
 
     try:
-        ledger_content = ledger_path.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
+        ledger_content = ledger_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
         raise StagedSnapshotError(f"无法读取控制根项目台账 {ledger_path}: {exc}") from exc
 
     if chg_id not in ledger_content:
@@ -969,6 +979,7 @@ def enforce_commit_msg(
             print(f"❌ [auto-pm commit-msg] 未找到提交信息文件: {commit_msg_file}")
             return 1
 
+        # 提交说明的编码归用户的编辑器/终端管：这里只认其中的 ASCII 变更单号，严格解码会把合法的 GBK 说明整条拒掉。
         msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()
 
         # 匹配变更单号，如 CHG-SCPT-2026-170, CHG-PLC-2026-012

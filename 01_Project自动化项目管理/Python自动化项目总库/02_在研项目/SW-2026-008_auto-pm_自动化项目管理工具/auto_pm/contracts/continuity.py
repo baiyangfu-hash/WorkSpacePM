@@ -125,6 +125,16 @@ class LeaseItem(BaseModel):
     updated_at: str
 
 
+class LeaseHoldReceipt(BaseModel):
+    """Public proof of one Run's current total-hold deadline (after a user extension or a status read)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: Literal["lease-hold-receipt.v1"] = "lease-hold-receipt.v1"
+    run_id: str
+    hold_end: str
+
+
 class LeaseRenewalReceipt(BaseModel):
     """Public, secret-free proof that one lease renewal committed."""
 

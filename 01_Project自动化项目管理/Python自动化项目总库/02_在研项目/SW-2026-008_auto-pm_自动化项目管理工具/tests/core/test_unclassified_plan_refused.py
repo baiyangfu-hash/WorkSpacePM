@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
 
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.contracts.intake import IntakeClassification, IntakeKind
 from auto_pm.contracts.pm_facade import PlanningScopeCard
 from auto_pm.infrastructure.intake_store import IntakeStore

@@ -19,10 +19,13 @@ from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionService,
     PlcQualityReceipt,
     PythonQualityReceipt,
+    quality_failure_summary,
+    write_quality_failure_report,
 )
 from auto_pm.contracts.continuity import (
     CheckpointItem,
     HandoffV2,
+    LeaseHoldReceipt,
     LeaseItem,
     LeaseRenewalReceipt,
     RunItem,
@@ -327,6 +330,30 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def now_utc(self) -> datetime:
+        return self._utc_now()
+
+    def current_lease(self, run_id: str) -> LeaseItem:
+        try:
+            return self._store.get_lease(run_id)
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def extend_lease_hold(
+        self, run_id: str, extra_seconds: int, evidence_ref: str, idempotency_key: str
+    ) -> LeaseHoldReceipt:
+        try:
+            result = self._store.extend_lease_hold(run_id, extra_seconds, evidence_ref, idempotency_key)
+            return LeaseHoldReceipt(run_id=str(result["run_id"]), hold_end=str(result["hold_end"]))
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
+    def lease_hold_status(self, run_id: str) -> dict[str, object]:
+        try:
+            return self._store.lease_hold_status(run_id)
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
     def checkpoint(
         self,
         *,
@@ -467,7 +494,14 @@ class ContinuityExecutionService:
                 receipt = collector.run_generic_checkpoint_quality_gates(run, project_root)
             domain = "PLC" if profile == "plc" else "Python"
             if receipt.status != "PASS":
-                raise ContinuityExecutionError(f"自动 Checkpoint 要求 {domain} 质量收据为 PASS")
+                report = write_quality_failure_report(
+                    receipt, self._root / ".auto-pm" / "reports" / "quality-failures"
+                )
+                where = f"\n完整收据：{report}" if report is not None else "\n（收据未能落盘）"
+                raise ContinuityExecutionError(
+                    f"自动 Checkpoint 要求 {domain} 质量收据为 PASS；失败项：\n"
+                    f"{quality_failure_summary(receipt)}{where}"
+                )
             if (
                 profile == "c03"
                 and isinstance(receipt, PythonQualityReceipt)
@@ -731,8 +765,8 @@ class ContinuityExecutionService:
         except ValueError as error:
             raise ContinuityExecutionError("legacy handoff 必须位于工作空间内") from error
         try:
-            payload = json.loads(candidate.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, json.JSONDecodeError) as error:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ContinuityExecutionError("legacy handoff 无法读取") from error
         if payload.get("schema_version") != "handoff.v1":
             raise ContinuityExecutionError("未知 handoff schema")

@@ -12,7 +12,8 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.plc.service import PlcService
+
+from auto_pm.domain.plc.service import PlcService
 
 
 class TestE2ePlcWorkflow:

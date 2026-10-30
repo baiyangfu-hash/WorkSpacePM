@@ -13,18 +13,19 @@ import threading
 from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
-from auto_pm.core.continuity_execution_service import (
+
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.lease_handover_service import (
+from auto_pm.application.core.lease_handover_service import (
     LeaseHandoverError,
     LeaseHandoverService,
     agent_markers,
 )
-
 from auto_pm.contracts.continuity import RunState
 from auto_pm.contracts.lease_reclaim import (
     GRACE_SECONDS,
@@ -350,7 +351,7 @@ def test_the_store_refuses_a_reclaim_without_its_exact_authority(scene: Scene, v
 def test_an_exact_reclaim_replay_changes_nothing(scene: Scene) -> None:
     scene.expire()
     lease = scene.store.get_lease(RUN)
-    arguments = dict(
+    arguments: dict[str, Any] = dict(
         run_id=RUN, expected_owner_id="agent-a", expected_lease_version=lease.version, claimant_id="agent-b", new_token="t" * 64,
         lease_seconds=900, process_verdict=ProcessVerdict.PROVEN_DEAD, risk_acceptance_id="", reason="test", idempotency_key="replay-1",
     )
@@ -404,3 +405,23 @@ def test_handoff_then_takeover_moves_the_run_and_the_receiver_never_sees_a_token
 def test_a_handoff_to_the_holder_itself_or_of_a_finished_run_is_refused(scene: Scene) -> None:
     with pytest.raises(LeaseHandoverError, match="不同"):
         scene.service.handoff(run_id=RUN, to_owner="agent-a", lease_token="lease-secret", summary="x")
+
+
+def test_case3_the_holder_reclaiming_their_own_live_lease_is_told_to_renew(scene: Scene) -> None:
+    with pytest.raises(LeaseHandoverError, match="请续租"):
+        scene.reclaim("agent-a")
+
+
+def test_case3_the_holder_reclaiming_their_own_expired_lease_is_told_the_real_way_out(scene: Scene) -> None:
+    """续租会被“已过期”拒，只说“请续租”是死胡同：必须点明换名回收和用户签字（现场死锁，预审 #350）。"""
+    scene.record_holder()
+    scene.expire()
+    events = scene.events()
+
+    with pytest.raises(LeaseHandoverError) as refused:
+        scene.reclaim("agent-a")
+
+    message = str(refused.value)
+    assert "已过期" in message and "换一个申请人名字" in message and "sign-risk" in message
+    assert "不要回收" not in message
+    assert scene.events() == events and scene.store.get_lease(RUN).owner_id == "agent-a"

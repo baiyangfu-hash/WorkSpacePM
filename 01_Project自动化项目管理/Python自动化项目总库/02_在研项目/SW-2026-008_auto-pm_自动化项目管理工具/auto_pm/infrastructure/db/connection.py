@@ -18,7 +18,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from auto_pm.db.schema import INDEX_DDL, TABLE_DDL, migrate_schema
+from auto_pm.infrastructure.db.schema import INDEX_DDL, TABLE_DDL, migrate_schema
 
 log = logging.getLogger(__name__)
 

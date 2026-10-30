@@ -17,9 +17,6 @@ from typing import TYPE_CHECKING, Any, NoReturn, cast
 from weakref import ref
 
 import pytest
-from auto_pm.change.ledger_reconciler import ReconcileDiff
-from auto_pm.core.pm_closure_service import PmClosureService
-from auto_pm.core.pm_cockpit_service import PmCockpitService
 from PySide6.QtCore import (
     Q_ARG,
     QMetaObject,
@@ -38,6 +35,9 @@ from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 from shiboken6 import isValid
 
+from auto_pm.application.core.pm_closure_service import PmClosureService
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
+from auto_pm.domain.change.ledger_reconciler import ReconcileDiff
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge
 from tests.core.test_pm_closure_service import (
@@ -1362,7 +1362,7 @@ def test_td_closure_alert_a_failed_closure_stays_on_screen_after_the_refresh_unt
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: retry_button() is not None and bridge._snapshot_worker is None)
         assert not banner_visible()
-        assert QMetaObject.invokeMethod(retry_button(), "clicked")
+        assert QMetaObject.invokeMethod(cast(QObject, retry_button()), "clicked")
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: len(results) == 1)
         assert results[0][1] is False
@@ -1388,13 +1388,13 @@ def test_td_closure_alert_a_failed_closure_stays_on_screen_after_the_refresh_unt
         pump(lambda: not banner_visible())
 
         # Fail again, then succeed: success clears the alert for that Mission by itself.
-        assert QMetaObject.invokeMethod(retry_button(), "clicked")
+        assert QMetaObject.invokeMethod(cast(QObject, retry_button()), "clicked")
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: len(results) == 2 and banner_visible())
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: bridge._snapshot_worker is None and retry_button() is not None)
         read_only[0] = False
-        assert QMetaObject.invokeMethod(retry_button(), "clicked")
+        assert QMetaObject.invokeMethod(cast(QObject, retry_button()), "clicked")
         assert bridge._thread_pool.waitForDone(10_000)
         pump(lambda: len(results) == 3)
         assert results[2][1] is True

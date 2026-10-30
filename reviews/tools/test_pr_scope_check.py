@@ -342,6 +342,39 @@ def test_s23_paths_after_a_blank_line_in_the_scope_list_are_not_authorised(repo:
     assert "越界：`src/b.py`" in errors(result) and "src/a.py" not in errors(result)
 
 
+# ---- 可改范围清单项整行当一条路径（路径里可以有空格） ----
+
+SPACED = "templates/PM_SESSION_{{ project_id }}.md.jinja"
+
+
+def test_s23b_a_path_with_spaces_in_the_scope_list_is_one_path(repo: Path) -> None:
+    base, head = commit(repo, {SPACED: "x\n"})
+    for item in (SPACED, f"`{SPACED}`", f"`{SPACED}` — 新增"):
+        result = gate.check(repo, base, head, f"可改范围\n- {item}\n")
+        assert result.passed, (item, errors(result))
+
+
+def test_s23c_the_first_word_of_a_spaced_path_authorises_nothing(repo: Path) -> None:
+    """旧写法把 ``a b.py`` 切成 ``a``，等于放行了另一个路径；整行当一条后 ``templates/PM_SESSION_{{`` 不再授权任何文件。"""
+    base, head = commit(repo, {"templates/PM_SESSION_{{": "x\n"})
+    result = gate.check(repo, base, head, f"可改范围\n- {SPACED}\n")
+    assert "越界：`templates/PM_SESSION_{{`" in errors(result)
+
+
+def test_s23d_declared_scope_items_are_kept_whole() -> None:
+    body = "可改范围\n- a/b c.py\n* `d e/f.py`\n- g.py\n"
+    assert gate.declared_scope(body) == ["a/b c.py", "d e/f.py", "g.py"]
+
+
+def test_s23e_two_backtick_spans_on_one_line_take_only_the_first() -> None:
+    """一行里有两段反引号时只认第一段，不能把两段连同中间的反引号拼成一条乱路径。"""
+    assert gate.declared_scope("可改范围\n- `a.py` `b.py`\n") == ["a.py"]
+
+
+def test_s23f_whitespace_inside_backticks_is_stripped() -> None:
+    assert gate.declared_scope("可改范围\n- ` a b.py `\n") == ["a b.py"]
+
+
 # ---- TD-SW008-115：新增文件命中忽略规则 ----
 
 
@@ -426,3 +459,36 @@ def test_s16_a_blob_on_the_revoked_allowlist_is_skipped(repo: Path, monkeypatch)
     assert "疑似密钥" in errors(gate.check(repo, base, head, "可改范围\n- old/gittoken.txt\n"))
     monkeypatch.setattr(sp, "ALLOWED_SECRET_BLOBS", frozenset({blob}))
     assert "疑似密钥" not in errors(gate.check(repo, base, head, "可改范围\n- old/gittoken.txt\n"))
+
+
+def test_s17_non_utf8_bytes_in_a_diff_are_reported_not_swallowed(repo: Path, capsys) -> None:
+    (repo / "docs").mkdir(exist_ok=True)
+    (repo / "docs/gbk.md").write_bytes("中文说明\n".encode("gbk"))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "gbk")
+    out = gate.git(repo, "diff", "main...HEAD")
+    assert "docs/gbk.md" in out  # 仍能继续检查
+    assert "非法 UTF-8" in capsys.readouterr().err  # 但必须明说
+
+
+def test_s18_clean_utf8_output_prints_no_warning(repo: Path, capsys) -> None:
+    gate.git(repo, "log", "-1", "--format=%s")
+    assert capsys.readouterr().err == ""
+
+
+def test_agent_rule_directories_are_locked_so_a_directory_scope_is_not_enough(repo: Path) -> None:
+    write(repo, ".trae/skills/x/SKILL.md", "rule\n")
+    base, head = commit(repo)
+    result = gate.check(repo, base, head, "## 可改范围\n- .trae\n")
+    assert "锁定文件 `.trae/skills/x/SKILL.md`" in errors(result)
+    named = gate.check(repo, base, head, "## 可改范围\n- .trae/skills/x/SKILL.md\n")
+    assert "锁定文件" not in errors(named)
+
+
+def test_the_ci_aggregate_judge_is_locked_so_a_directory_scope_is_not_enough(repo: Path) -> None:
+    write(repo, "reviews/tools/ci_aggregate.py", "x = 1\n")
+    base, head = commit(repo)
+    result = gate.check(repo, base, head, "## 可改范围\n- reviews/tools\n")
+    assert "锁定文件 `reviews/tools/ci_aggregate.py`" in errors(result)
+    named = gate.check(repo, base, head, "## 可改范围\n- reviews/tools/ci_aggregate.py\n")
+    assert "锁定文件" not in errors(named)

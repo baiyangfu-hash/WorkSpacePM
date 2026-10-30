@@ -31,6 +31,7 @@ from auto_pm.domain.plc.language_service import LanguageService
 from auto_pm.plc.checker import PlcChecker
 from auto_pm.plc.models import CheckResult, RepairResult
 from auto_pm.plc.service import PlcService
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity, warn_runtime_identity
 
 from .docs import docs_group
 
@@ -172,6 +173,9 @@ def cmd_check(
     if substance:
         result = svc.check_substance(proj.path)
     else:
+        if fix:
+            # --fix repairs the way plc repair does (it may restore the flag files the identity reads): warn only.
+            warn_runtime_identity(ctx, project_id)
         result = svc.check(proj.path, fix=fix)
 
     # V0.4.1 Step 3: Python 项目不适用 PLC 检查时输出友好提示
@@ -265,6 +269,9 @@ def cmd_repair(
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
 
+    if not dry_run:
+        # Repair is what mends a broken project (it may be restoring the very flag files the identity reads): warn only.
+        warn_runtime_identity(ctx, project_id)
     svc = PlcService(app_ctx.workspace_root)
     result = svc.repair(
         proj.path, dry_run=dry_run, rename_confirm=rename_confirm
@@ -283,6 +290,9 @@ def cmd_ingest(ctx: click.Context, source_dir: str, project_id: str, stage_only:
     app_ctx: AppContext = ctx.obj
     ws = app_ctx.workspace_root
 
+    if not stage_only:
+        # --stage-only only fills the isolated .ingest_staging area; the formal project assets are written otherwise.
+        require_runtime_identity(ctx, project_id)
     plc_svc = PlcService(workspace_root=ws)
     try:
         target_path = plc_svc.resolve_project_path(project_id)
@@ -335,6 +345,7 @@ def cmd_promote(ctx: click.Context, project_id: str) -> None:
     app_ctx: AppContext = ctx.obj
     ws = app_ctx.workspace_root
 
+    require_runtime_identity(ctx, project_id)
     plc_svc = PlcService(workspace_root=ws)
     try:
         target_path = plc_svc.resolve_project_path(project_id)
@@ -376,6 +387,8 @@ def cmd_standardize(
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
 
+    if apply:
+        require_runtime_identity(ctx, project_id)
     svc = PlcService(app_ctx.workspace_root)
     result = svc.standardize(proj.path, dry_run=not apply)
 

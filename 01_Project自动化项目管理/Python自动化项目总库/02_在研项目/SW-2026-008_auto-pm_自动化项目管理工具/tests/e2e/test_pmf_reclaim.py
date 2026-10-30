@@ -18,12 +18,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.core.lease_handover_service import AGENT_MARKERS
 
 import auto_pm
+from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
 from auto_pm.contracts.continuity import RunState
 from auto_pm.infrastructure import lease_wallet, process_probe
 from tests.core.test_continuity_execution_service import Clock, _services
+from tests.workspace_support import register_project
 
 LAUNCHER = """from auto_pm.cli.__main__ import cli
 
@@ -91,6 +92,7 @@ def scene(tmp_path: Path) -> Scene:
     root = tmp_path / "ws"
     root.mkdir()
     _services(root, Clock())  # git repository, schema and WORK-001 (scope auto_pm/core/a.py, tests/test_a.py)
+    register_project(root, "SW-2026-008")
     (root / "main.py").write_text(LAUNCHER, encoding="utf-8")
     return Scene(root)
 

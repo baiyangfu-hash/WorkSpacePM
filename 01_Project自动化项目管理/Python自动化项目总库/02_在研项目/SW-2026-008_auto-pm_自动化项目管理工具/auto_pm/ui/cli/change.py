@@ -37,6 +37,10 @@ from auto_pm.change.constants import (
 from auto_pm.change.track_classifier import ChangeTrack, ChangeTrackClassifier
 from auto_pm.models import ChangeRequest
 from auto_pm.ui.cli.approval_pin import require_approval_pin
+from auto_pm.ui.cli.runtime_identity_guard import (
+    require_runtime_identity,
+    require_runtime_identity_for_change,
+)
 
 console = Console()
 
@@ -439,6 +443,7 @@ def cmd_create(
     retrofit: bool,
 ) -> None:
     """创建变更单（生成 CHG-*.md 文件并更新台帐）"""
+    require_runtime_identity(ctx, project_id)
     app_ctx: AppContext = ctx.obj
     svc = ChangeService(app_ctx.workspace_root)
 
@@ -498,9 +503,9 @@ def cmd_verify(
 
     \b
     --ledger-check: 对账门禁，检测台账与 CHG 文件的一致性
-      退出码 0 = 对账无差异（门禁通过）
+      退出码 0 = 对账无差异，且所有变更单都已在 HEAD 提交里（门禁通过）
       退出码 1 = 项目不存在
-      退出码 2 = 有差异（门禁失败，需用 ledger reconcile --fix 修复）
+      退出码 2 = 有差异（门禁失败，需用 ledger reconcile --fix 修复），或有变更单未提交（先提交再验证）
     """
     if not ledger_check:
         console.print("[yellow]请指定验证项，目前支持: --ledger-check[/yellow]")
@@ -523,12 +528,11 @@ def cmd_verify(
     console.print(f"[bold cyan]═══ 变更单对账门禁: {project_id} ═══[/bold cyan]")
     console.print(f"  [cyan]结果:[/cyan] {diff.summary()}")
 
-    from auto_pm.ui.cli.ledger import print_chg_tracking_warning
+    from auto_pm.ui.cli.ledger import exit_with_tracking, print_chg_tracking_warning
 
     if diff.is_clean:
         console.print("[green]✅ 门禁通过: 台账与变更单文件一致[/green]")
-        print_chg_tracking_warning(project_path, verbose=verbose)
-        ctx.exit(0)
+        exit_with_tracking(ctx, 0, project_path, verbose=verbose, block=True)
     else:
         console.print("[red]❌ 门禁失败: 检测到差异[/red]")
         if diff.missing_in_ledger:
@@ -538,7 +542,7 @@ def cmd_verify(
         if diff.status_mismatches:
             console.print(f"  [red]状态不一致 {len(diff.status_mismatches)} 条[/red]")
         console.print("[dim]提示: 运行 `auto-pm ledger reconcile <PID> --fix` 自动修复缺失行和状态不一致[/dim]")
-        print_chg_tracking_warning(project_path, verbose=verbose)
+        print_chg_tracking_warning(project_path, verbose=verbose, block=True)
         ctx.exit(2)
 
 
@@ -576,6 +580,8 @@ def cmd_transition(
         )
         if proof is not None:
             approver = proof.approver
+    # After the approval PIN (audit 72): a PIN refusal comes first, as it always did; no write happens before this check.
+    require_runtime_identity_for_change(ctx, change_number, pid)
     svc = ChangeService(app_ctx.workspace_root)
 
     try:
@@ -645,6 +651,7 @@ def cmd_edit(
     constraint_impacts/domain_impacts 两个 dict 字段因 CLI 输入繁琐，
     留给 GUI EditChangeDialog 编辑（见 spec.md M3.5-8 说明）。
     """
+    require_runtime_identity_for_change(ctx, change_number, pid)
     app_ctx: AppContext = ctx.obj
     svc = ChangeService(app_ctx.workspace_root)
 

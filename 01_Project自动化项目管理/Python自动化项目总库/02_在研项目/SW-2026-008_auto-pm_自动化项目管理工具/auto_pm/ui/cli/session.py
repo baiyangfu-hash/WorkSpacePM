@@ -28,7 +28,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from auto_pm.core.pm_session_service import (
+from auto_pm.application.core.pm_session_service import (
     ARCHIVE_DIR_NAME,
     ARCHIVE_DIR_PARENT,
     MAX_FILE_LINES,

@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import QUrl
 from PySide6.QtQml import QQmlComponent, QQmlEngine
@@ -44,7 +44,7 @@ def _load_component(engine: QQmlEngine, qml_file: Path) -> object:
         raise AssertionError(f"加载 QML 组件失败 {qml_file.name}:\n{errors}")
     obj = component.create()
     assert obj is not None, f"创建 QML 组件实例失败: {qml_file.name}"
-    obj._component_ref = component
+    cast(Any, obj)._component_ref = component
     return obj
 
 

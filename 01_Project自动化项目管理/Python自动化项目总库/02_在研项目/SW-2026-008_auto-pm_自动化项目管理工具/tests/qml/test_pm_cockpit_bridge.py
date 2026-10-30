@@ -20,12 +20,11 @@ from typing import Literal, NoReturn, cast
 from weakref import ReferenceType, ref
 
 import pytest
-from auto_pm.change.ledger_reconciler import ReconcileDiff
-from auto_pm.core.pm_closure_service import PmClosureService
-from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from PySide6.QtCore import QRunnable, Qt, QThreadPool, QTimer
 from PySide6.QtWidgets import QApplication
 
+from auto_pm.application.core.pm_closure_service import PmClosureService
+from auto_pm.application.core.pm_cockpit_service import PmCockpitError, PmCockpitService
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_cockpit import (
     PmCockpitCompletion,
@@ -35,6 +34,7 @@ from auto_pm.contracts.pm_cockpit import (
     PmCockpitSnapshot,
 )
 from auto_pm.contracts.pm_facade import PmConfirmationCard, PmConfirmationKind, PmRunOutcome
+from auto_pm.domain.change.ledger_reconciler import ReconcileDiff
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge, _StartWorker
 from tests.core.test_pm_closure_service import _MISSION_ID as _CLOSE_MISSION
@@ -1061,10 +1061,10 @@ def _probe_real_start_background_gc(root: Path) -> None:
     assert events == before and collector_ids[0] != gui
     assert bridge_ref() is None and pool_ref() is None
     if os.name == "nt":
-        post = ctypes.WinDLL("user32", use_last_error=True).PostThreadMessageW
+        post = ctypes.WinDLL("user32", use_last_error=True).PostThreadMessageW  # type: ignore[attr-defined,unused-ignore]
         post.argtypes = [ctypes.c_ulong, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
         post.restype = ctypes.c_int
-        assert post(gui, 0, 0, 0), ctypes.get_last_error()
+        assert post(gui, 0, 0, 0), ctypes.get_last_error()  # type: ignore[attr-defined,unused-ignore]
     app.processEvents()
     print("PM_START_NATIVE_PUMP_SURVIVED", flush=True)
 

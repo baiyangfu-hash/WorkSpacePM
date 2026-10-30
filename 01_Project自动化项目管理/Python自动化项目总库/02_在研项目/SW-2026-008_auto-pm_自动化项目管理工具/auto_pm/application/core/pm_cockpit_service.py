@@ -10,17 +10,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 
-from auto_pm.core.continuity_query_service import ContinuityQueryService
-from auto_pm.core.mission_admission import admission_verdict
-from auto_pm.core.pm_closure_service import (
+from auto_pm.application.core.continuity_query_service import ContinuityQueryService
+from auto_pm.application.core.mission_admission import admission_verdict
+from auto_pm.application.core.pm_closure_service import (
     ClosureCompletionState,
     PmClosureError,
     PmClosureService,
 )
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.contracts.continuity import (
     CheckpointItem,
     RunItem,
@@ -248,7 +246,8 @@ class PmCockpitService:
         """Say what the shared query declares about parking and pre-emption; anything unexpected keeps them off."""
         try:
             capabilities = validate_runtime_capabilities(ContinuityQueryService.capabilities())
-        except (TypeError, ValueError):
+        except Exception:  # 共用生产者抛什么都按“未能确认”处理（卡 060：抛错时快照不崩、操作保持停用）
+            log.warning("能力声明读取失败，按未能确认处理", exc_info=True)
             return _CAPABILITY_UNVERIFIED
         declared = {item.action.value: item.status for item in capabilities.actions}
         if (
@@ -335,10 +334,7 @@ class PmCockpitService:
     def confirm_start(self, mission_id: str) -> PmConfirmationCard:
         """Apply the first human confirmation without exposing root Work identifiers."""
         try:
-            return cast(
-                PmConfirmationCard,
-                self._real_facade().confirm_start(mission_id),
-            )
+            return self._real_facade().confirm_start(mission_id)
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
@@ -363,15 +359,12 @@ class PmCockpitService:
         facade = self._facade_override or self._real_facade()
         try:
             card = facade.recover_planning_scope_card(mission_id)
-            return cast(
-                PmRunOutcome,
-                facade.run_approved_planning(
+            return facade.run_approved_planning(
                     card,
                     expected_plan_hash=card.plan_hash,
                     lease_token=secrets.token_urlsafe(32),
                     lease_token_environment=_LEASE_ENVIRONMENT,
-                ),
-            )
+                )
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
@@ -385,15 +378,12 @@ class PmCockpitService:
             raise PmCockpitError(_APPROVER_MISSING_REASON)
         facade = self._facade_override or self._real_facade()
         try:
-            return cast(
-                PlanningApprovalResult,
-                facade.approve_pending_planning_scope_card(
+            return facade.approve_pending_planning_scope_card(
                     request_id,
                     expected_plan_hash=plan_hash,
                     approver=self._approver,
                     approval_evidence_ref=self._approval_evidence(plan_hash),
-                ),
-            )
+                )
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
@@ -406,10 +396,7 @@ class PmCockpitService:
     def confirm_acceptance(self, mission_id: str) -> PmConfirmationCard:
         """Apply final user acceptance after the existing verification gate has opened."""
         try:
-            return cast(
-                PmConfirmationCard,
-                self._real_facade().accept(mission_id),
-            )
+            return self._real_facade().accept(mission_id)
         except PmFacadeError as error:
             raise PmCockpitError(str(error)) from error
 
@@ -493,7 +480,7 @@ class PmCockpitService:
             raise PmCockpitError("工作空间项目清单不存在，驾驶舱已保持只读并停止加载。")
         try:
             registry = WorkspaceRegistry.model_validate_json(
-                self._registry_path.read_text(encoding="utf-8", errors="replace")
+                self._registry_path.read_text(encoding="utf-8")
             )
         except (OSError, ValueError) as error:
             raise PmCockpitError("工作空间项目清单格式无效，驾驶舱没有猜测项目归属。") from error

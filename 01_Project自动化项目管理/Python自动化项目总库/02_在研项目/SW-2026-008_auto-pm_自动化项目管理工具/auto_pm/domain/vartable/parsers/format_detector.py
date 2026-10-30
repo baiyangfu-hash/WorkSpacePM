@@ -27,8 +27,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from auto_pm.vartable.models import FormatType
-from auto_pm.vartable.utils.encoding import read_file_with_detection
+from auto_pm.domain.vartable.models import FormatType
+from auto_pm.domain.vartable.utils.encoding import read_file_with_detection
 
 # 扩展名 → FormatType 直接映射（优先级最高）
 _EXTENSION_MAP: dict[str, FormatType] = {
@@ -200,14 +200,14 @@ def get_parser_for_format(fmt: FormatType) -> type | None:
     工厂模式：调用方拿到类后实例化并调用 parse()
     """
     # 延迟导入避免循环依赖
-    from auto_pm.vartable.parsers.autoshop_parser import AutoshopParser
-    from auto_pm.vartable.parsers.codesys_parser import CodesysParser
-    from auto_pm.vartable.parsers.communications_parser import CommunicationsParser
-    from auto_pm.vartable.parsers.intdoc_parser import IntDocParser
-    from auto_pm.vartable.parsers.io_points_parser import IoPointsParser
-    from auto_pm.vartable.parsers.program_blocks_parser import ProgramBlocksParser
-    from auto_pm.vartable.parsers.scl_parser import SclParser
-    from auto_pm.vartable.parsers.work3_parser import Work3Parser
+    from auto_pm.domain.vartable.parsers.autoshop_parser import AutoshopParser
+    from auto_pm.domain.vartable.parsers.codesys_parser import CodesysParser
+    from auto_pm.domain.vartable.parsers.communications_parser import CommunicationsParser
+    from auto_pm.domain.vartable.parsers.intdoc_parser import IntDocParser
+    from auto_pm.domain.vartable.parsers.io_points_parser import IoPointsParser
+    from auto_pm.domain.vartable.parsers.program_blocks_parser import ProgramBlocksParser
+    from auto_pm.domain.vartable.parsers.scl_parser import SclParser
+    from auto_pm.domain.vartable.parsers.work3_parser import Work3Parser
 
     parser_map: dict[FormatType, type] = {
         FormatType.AUTOSHOP: AutoshopParser,

@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
-from auto_pm.core.template_service import TemplateService
 
+from auto_pm.application.core.template_service import TemplateService
 from auto_pm.domain.plc import doc_consistency as dc
 from auto_pm.domain.plc.checker import PlcChecker
 from auto_pm.domain.plc.models import CheckResult

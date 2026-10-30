@@ -5,12 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 
-from auto_pm.core.mission_service import MissionService, MissionServiceError
-from auto_pm.core.orchestration_policy import OrchestrationPolicy
-from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
-
+from auto_pm.application.core.mission_service import MissionService, MissionServiceError
+from auto_pm.application.core.orchestration_policy import OrchestrationPolicy
+from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
 from auto_pm.contracts.continuity import WorkItem, WorkKind, WorkState
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.contracts.orchestration import (
@@ -259,7 +257,7 @@ class MissionOrchestrator:
         idempotency_key: str,
     ) -> WorkItem | OrchestrationOutcome:
         try:
-            parent = cast(WorkItem, self._works.get_work(finding.parent_work_id))
+            parent = self._works.get_work(finding.parent_work_id)
         except WorkRegistryError:
             return self._escalate(
                 mission=mission,
@@ -328,16 +326,13 @@ class MissionOrchestrator:
         if mission.state is MissionState.BLOCKED:
             return mission
         try:
-            return cast(
-                Mission,
-                self._missions.transition(
+            return self._missions.transition(
                     mission_id=mission.mission_id,
                     expected_version=mission.version,
                     new_state=MissionState.BLOCKED,
                     root_work_id=mission.root_work_id,
                     idempotency_key=idempotency_key,
-                ),
-            )
+                )
         except MissionServiceError as error:
             raise MissionOrchestratorError(str(error)) from error
 
@@ -394,7 +389,7 @@ class MissionOrchestrator:
 
     def _mission(self, mission_id: str) -> Mission:
         try:
-            return cast(Mission, self._missions.get(mission_id))
+            return self._missions.get(mission_id)
         except MissionServiceError as error:
             raise MissionOrchestratorError(str(error)) from error
 
@@ -411,7 +406,7 @@ class MissionOrchestrator:
         if not mission.root_work_id:
             return False
         try:
-            return cast(bool, self._works.is_reachable(work.work_id, mission.root_work_id))
+            return self._works.is_reachable(work.work_id, mission.root_work_id)
         except WorkRegistryError:
             return False
 

@@ -5,8 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from pathlib import Path
 
-from auto_pm.core.pm_cockpit_service import PmCockpitService
-
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
 from auto_pm.contracts.mission import OPEN_MISSION_SOFT_LIMIT, MissionState
 from auto_pm.contracts.pm_cockpit import PmCockpitMissionBoard
 from auto_pm.contracts.workspace_context import WorkspaceProjectMapping

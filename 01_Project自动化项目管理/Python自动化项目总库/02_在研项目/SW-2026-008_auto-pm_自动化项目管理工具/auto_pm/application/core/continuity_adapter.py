@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from auto_pm.core.continuity_resume_service import ContinuityResumeService
+from auto_pm.application.core.continuity_resume_service import ContinuityResumeService
 
 
 class ContinuityAdapter:
@@ -32,4 +32,4 @@ class ContinuityAdapter:
             work_id=work_id,
             run_id=run_id,
         )
-        return cast(dict[str, Any], payload.model_dump(mode="json"))
+        return payload.model_dump(mode="json")

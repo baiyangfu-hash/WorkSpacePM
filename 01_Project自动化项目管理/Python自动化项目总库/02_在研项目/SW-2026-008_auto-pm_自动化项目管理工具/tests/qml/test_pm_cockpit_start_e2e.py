@@ -13,16 +13,16 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from auto_pm.change.ledger_reconciler import LedgerReconciler
-from auto_pm.core.local_execution_orchestrator import LocalExecutionOrchestrator
-from auto_pm.core.pm_cockpit_service import PmCockpitError, PmCockpitService
-from auto_pm.core.pm_facade_service import PmFacadeService
 from PySide6.QtCore import QThreadPool
 
 from auto_pm.api import CockpitClient
+from auto_pm.application.core.local_execution_orchestrator import LocalExecutionOrchestrator
+from auto_pm.application.core.pm_cockpit_service import PmCockpitError, PmCockpitService
+from auto_pm.application.core.pm_facade_service import PmFacadeService
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.pm_cockpit import CockpitUserAction
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.local_executor import LocalCodexExecutor
 from auto_pm.ui.qml.bridges.pm_cockpit_bridge import PmCockpitBridge

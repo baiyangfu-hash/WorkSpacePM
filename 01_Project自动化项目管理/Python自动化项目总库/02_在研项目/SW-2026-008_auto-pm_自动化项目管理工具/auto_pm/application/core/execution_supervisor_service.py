@@ -8,13 +8,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
 
-from auto_pm.core.continuity_execution_service import (
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-
 from auto_pm.contracts.continuity import LeaseRenewalReceipt, RunItem, RunState
 from auto_pm.contracts.execution_adapter import (
     ExecutionActivityStage,
@@ -133,16 +131,13 @@ class ExecutionSupervisorService:
         """CAS-map canonical evidence; reap the current child before any retry."""
 
         try:
-            return cast(
-                RunItem,
-                self._execution.record_start_evidence(
+            return self._execution.record_start_evidence(
                     run_id=run_id,
                     owner_id=owner_id,
                     lease_token=lease_token,
                     evidence=evidence,
                     idempotency_key=idempotency_key,
-                ),
-            )
+                )
         except ContinuityExecutionError as error:
             try:
                 reap_current()
@@ -187,17 +182,14 @@ class ExecutionSupervisorService:
         if capability.expires_at - observed_at > timedelta(seconds=renew_before_seconds):
             return LeaseRenewalOutcome(capability=capability, receipt=None)
         try:
-            receipt = cast(
-                LeaseRenewalReceipt,
-                self._execution.renew_lease(
+            receipt = self._execution.renew_lease(
                     capability.run_id,
                     capability.owner_id,
                     capability.token,
                     lease_seconds,
                     idempotency_key,
                     expected_version=capability.version,
-                ),
-            )
+                )
         except ContinuityExecutionError as error:
             raise ExecutionSupervisorError("lease 自动续租失败") from error
         try:
@@ -420,9 +412,7 @@ class ExecutionSupervisorService:
         """Record a pre-handshake local start failure without inventing RUN_STARTED."""
 
         try:
-            return cast(
-                RunItem,
-                self._execution.transition_run(
+            return self._execution.transition_run(
                     capability.run_id,
                     RunState.FAILED,
                     capability.owner_id,
@@ -432,8 +422,7 @@ class ExecutionSupervisorService:
                         stage=ExecutionActivityStage.FAILED,
                         code=failure_code,
                     ),
-                ),
-            )
+                )
         except ContinuityExecutionError as error:
             raise ExecutionSupervisorError("pre-handshake failure 无法安全落账") from error
 
@@ -465,7 +454,7 @@ class ExecutionSupervisorService:
             or observed_started_at != evidence.started_at
         ):
             raise ExecutionSupervisorError("运行身份不可恢复，必须 BLOCKED/待恢复")
-        return cast(ExecutionStartEvidence, evidence)
+        return evidence
 
     @staticmethod
     def _completion_disposition(result: LocalExecutionResult) -> str:

@@ -10,6 +10,7 @@ import re
 import sys
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from tests.core import test_pm_dashboard as base
 
@@ -81,7 +82,7 @@ def _repo(tmp_path: Path) -> Path:
     return root
 
 
-def _run(name: str, sha: str, conclusion: str | None, number: int = 1) -> dict:
+def _run(name: str, sha: str, conclusion: str | None, number: int = 1) -> dict[str, Any]:
     return {
         "name": name, "head_sha": sha, "status": "completed" if conclusion else "in_progress",
         "conclusion": conclusion, "run_number": number, "created_at": f"2026-10-22T10:0{number}:00Z",
@@ -89,7 +90,7 @@ def _run(name: str, sha: str, conclusion: str | None, number: int = 1) -> dict:
     }
 
 
-def _signature(sha: str, login: str = "baiyangfu-hash", uid: int = 246858089, app: bool = False) -> dict:
+def _signature(sha: str, login: str = "baiyangfu-hash", uid: int = 246858089, app: bool = False) -> dict[str, Any]:
     return {"body": f"仿真过了\n安全签字 {sha[:8]}", "user": {"login": login, "id": uid},
             "performed_via_github_app": {"slug": "bot"} if app else None, "html_url": "c"}
 
@@ -127,7 +128,7 @@ class FakeGitHub:
         self.table = table
         self.calls: list[tuple[str, dict[str, str]]] = []
 
-    def __call__(self, url: str, headers: dict[str, str]):  # noqa: ANN204
+    def __call__(self, url: str, headers: dict[str, str]) -> Any:
         self.calls.append((url, dict(headers)))
         value = self.table.get(url, (404, {}, b"{}"))
         if isinstance(value, Exception):
@@ -140,7 +141,7 @@ class FakeGitHub:
         return 200, {"ETag": etag}, json.dumps(value).encode("utf-8")
 
 
-def _collect(tmp_path: Path, fake: FakeGitHub | None, when: datetime = NOW, token: bool = True, **kw: object):
+def _collect(tmp_path: Path, fake: FakeGitHub | None, when: datetime = NOW, token: bool = True, **kw: Any) -> Any:
     root = tmp_path / "repo" if (tmp_path / "repo").is_dir() else _repo(tmp_path)
     env = {"GITHUB_TOKEN": TOKEN} if token else {}
     return gh.collect(REPO, root, [root / "reviews"], tmp_path / "cache" / "github.json", when,
@@ -302,7 +303,7 @@ def test_rate_limited_half_way_stops_calling_and_marks_rest_unknown(tmp_path: Pa
     # 一个红的都没读到，但有没读全的：不许说 0
     assert checks["gate_red"].state == "unchecked" and checks["gate_red"].text == "没检查"
     assert checks["safety_unsigned"].state == "unchecked"
-    rows = {r.number: r for r in home.github.rows}  # type: ignore[union-attr]
+    rows = {r.number: r for r in home.github.rows}
     assert rows[2].gate.text == "未知" and rows[2].gate.sev == "na" and rows[2].projects == ["未知"]
 
 
@@ -326,9 +327,9 @@ def test_partial_failure_only_marks_the_failed_piece(tmp_path: Path) -> None:
     checks = {c.key: c for c in home.checks}
     assert checks["gate_red"].state == "number" and checks["gate_red"].value == 1
     assert "1 个没读全" in checks["gate_red"].note
-    rows = {r.number: r for r in home.github.rows}  # type: ignore[union-attr]
+    rows = {r.number: r for r in home.github.rows}
     assert rows[1].gate.text == "未知" and rows[1].gate.sev == "na" and "PR #1 CI" in rows[1].note
-    assert all(cell.text == "未知" and cell.sev == "na" for _n, cell in home.github.main_ci)  # type: ignore[union-attr]
+    assert all(cell.text == "未知" and cell.sev == "na" for _n, cell in home.github.main_ci)
 
 
 def test_files_unread_means_ci_and_safety_unknown_not_not_applicable(tmp_path: Path) -> None:

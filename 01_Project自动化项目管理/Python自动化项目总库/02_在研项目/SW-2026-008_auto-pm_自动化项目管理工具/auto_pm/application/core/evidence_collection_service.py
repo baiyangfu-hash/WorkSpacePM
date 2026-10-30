@@ -13,13 +13,15 @@ import hmac
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tarfile
 import threading
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 
@@ -1640,19 +1642,41 @@ class EvidenceCollectionService:
         return tuple(digests)
 
     @staticmethod
-    def _plc_checker_digest() -> str:
-        """Fingerprint the checker package bytes that produced the verdict."""
+    def _plc_checker_files() -> list[tuple[str, Path]]:
+        """List the files whose bytes decide the PLC verdict: the checker package plus the modules outside it that it relies on.
 
-        from auto_pm.plc import checker as plc_checker
+        Outside the package the verdict depends on exactly two modules (measured from ``sys.modules`` after importing
+        the checker): ``find_prd_dir`` and its constants (``ext/paths.py``), and ``CheckResult.add`` / ``all_pass``, which
+        turn items into pass/warn/fail counts (``ext/models_plc.py``). ``ProjectType`` is a ``Literal`` constant only.
+
+        Boundary (TD-SW008-033): inputs outside the project roots that Git ignores are not bound; they are
+        covered, if at all, by the per-project input digests.
+        """
+
+        from auto_pm.application.core.paths import find_prd_dir
+        from auto_pm.domain.models.plc import CheckResult
+        from auto_pm.domain.plc import checker as plc_checker
 
         location = getattr(plc_checker, "__file__", None)
         if not location:
             raise EvidenceCollectionError("PLC 检查器位置无法确定")
         package = Path(location).resolve().parent
+        files = [(path.name, path) for path in sorted(package.glob("*.py"))]
+        for label, owner in (("ext/paths.py", find_prd_dir), ("ext/models_plc.py", CheckResult)):
+            module_file = getattr(sys.modules.get(owner.__module__), "__file__", None)
+            if not module_file:
+                raise EvidenceCollectionError(f"PLC 检查器依赖的模块位置无法确定: {label}")
+            files.append((label, Path(module_file).resolve()))
+        return files
+
+    @staticmethod
+    def _plc_checker_digest() -> str:
+        """Fingerprint the checker package bytes (and the modules it depends on) that produced the verdict."""
+
         return _sha256_payload(
             [
-                (path.name, hashlib.sha256(path.read_bytes()).hexdigest())
-                for path in sorted(package.glob("*.py"))
+                (name, hashlib.sha256(path.read_bytes()).hexdigest())
+                for name, path in EvidenceCollectionService._plc_checker_files()
             ]
         )
 
@@ -2017,7 +2041,7 @@ def _scl_lint_output(
     owned file that did not exist at the baseline has only new errors.
     """
 
-    from auto_pm.plc.scl_linter import SclLinter
+    from auto_pm.domain.plc.scl_linter import SclLinter
 
     errors = 0
     warnings = 0
@@ -2069,6 +2093,51 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def quality_failure_summary(receipt: PythonQualityReceipt | PlcQualityReceipt, *, excerpt_chars: int = 600) -> str:
+    """Which gate failed and why, in words: the failing gates (name, exit code, output excerpt) and any evidence drift.
+
+    A failing receipt used to say only "要求质量收据为 PASS"; nobody could tell ruff from mypy from pytest from a drifted evidence hash.
+    """
+
+    parts: list[str] = []
+    for gate in receipt.gates:
+        if gate.passed:
+            continue
+        code = "未能启动或超时" if gate.exit_code is None else f"退出码 {gate.exit_code}"
+        excerpt = gate.output_summary.strip()
+        if len(excerpt) > excerpt_chars:
+            excerpt = excerpt[:excerpt_chars] + "…"
+        parts.append(f"[{gate.name}] {code}\n{excerpt}")
+    if not receipt.evidence_current:
+        parts.append(f"[evidence] {receipt.evidence_error or 'Run evidence 与质量门前不一致'}")
+    if not receipt.gates:
+        parts.append("[gates] 没有任何质量门被执行")
+    return "\n".join(parts) if parts else "（收据状态非 PASS，但未发现失败项）"
+
+
+def write_quality_failure_report(
+    receipt: PythonQualityReceipt | PlcQualityReceipt, reports_root: Path
+) -> Path | None:
+    """Persist a failing receipt as JSON under ``reports_root`` (``.auto-pm/reports/quality-failures``); ``None`` when it cannot be written.
+
+    Writing is best effort and never changes the verdict: the caller still refuses the checkpoint either way.
+    """
+
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    # run_id 来自账本，不当作可信路径：只留字母数字和 ._-，再核对最终落点必须直接在 reports_root 下（预审 425）。
+    safe_run_id = re.sub(r"[^A-Za-z0-9._-]", "_", receipt.run_id)[:120] or "run"
+    path = reports_root / f"{safe_run_id}-{stamp}.json"
+    try:
+        reports_root.mkdir(parents=True, exist_ok=True)
+        if path.resolve().parent != reports_root.resolve():
+            return None
+        payload = {"status": receipt.status, **asdict(receipt)}
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    except (OSError, ValueError, TypeError):
+        return None
+    return path
+
+
 def _safe_output_summary(output: str) -> str:
     """Keep a bounded, normalized diagnostic while the digest proves full output."""
 
@@ -2085,4 +2154,6 @@ __all__ = [
     "PlcQualityReceipt",
     "PythonQualityGate",
     "PythonQualityReceipt",
+    "quality_failure_summary",
+    "write_quality_failure_report",
 ]

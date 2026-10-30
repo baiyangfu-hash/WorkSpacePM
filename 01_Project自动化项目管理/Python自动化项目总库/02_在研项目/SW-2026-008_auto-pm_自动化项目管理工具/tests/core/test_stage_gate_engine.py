@@ -1,10 +1,11 @@
 """tests.core.test_stage_gate_engine - StageGateEngine 单元测试套件"""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
-from auto_pm.core.gates import StageGateEngine
 
+from auto_pm.application.core.gates import StageGateEngine
 from auto_pm.contracts.gate_dtos import StageGateResultDTO
 
 
@@ -64,7 +65,7 @@ def temp_project(tmp_path: Path) -> Path:
     return proj
 
 
-def test_stage_gate_g1_initiating_to_planning(temp_project: Path):
+def test_stage_gate_g1_initiating_to_planning(temp_project: Path) -> None:
     engine = StageGateEngine()
     result = engine.evaluate_stage_transition(
         str(temp_project), current_stage="initiating", target_stage="planning"
@@ -75,7 +76,7 @@ def test_stage_gate_g1_initiating_to_planning(temp_project: Path):
     assert result.passed_checks == 2
 
 
-def test_stage_gate_g1_blocks_when_no_pm_session(tmp_path: Path):
+def test_stage_gate_g1_blocks_when_no_pm_session(tmp_path: Path) -> None:
     empty_proj = tmp_path / "Empty_Project"
     empty_proj.mkdir()
 
@@ -88,7 +89,7 @@ def test_stage_gate_g1_blocks_when_no_pm_session(tmp_path: Path):
     assert any(item.id == "G1-PM-SESSION" and not item.passed for item in result.items)
 
 
-def test_stage_gate_g2_planning_to_executing(temp_project: Path):
+def test_stage_gate_g2_planning_to_executing(temp_project: Path) -> None:
     engine = StageGateEngine()
     result = engine.evaluate_stage_transition(
         str(temp_project), current_stage="planning", target_stage="executing"
@@ -99,7 +100,7 @@ def test_stage_gate_g2_planning_to_executing(temp_project: Path):
     assert any(item.id == "G2-INT-FROZEN" and item.passed for item in result.items)
 
 
-def test_stage_gate_g3_executing_to_monitoring(temp_project: Path):
+def test_stage_gate_g3_executing_to_monitoring(temp_project: Path) -> None:
     engine = StageGateEngine()
     result = engine.evaluate_stage_transition(
         str(temp_project), current_stage="executing", target_stage="monitoring"
@@ -109,7 +110,7 @@ def test_stage_gate_g3_executing_to_monitoring(temp_project: Path):
     assert any(item.id == "G3-SRC-EXISTS" and item.passed for item in result.items)
 
 
-def test_stage_gate_g3_blocks_when_no_pm_closure(tmp_path: Path):
+def test_stage_gate_g3_blocks_when_no_pm_closure(tmp_path: Path) -> None:
     proj = tmp_path / "DJ-2026-998_无落账"
     proj.mkdir()
     (proj / "PM_SESSION_DJ-2026-998.md").write_text(
@@ -129,7 +130,7 @@ def test_stage_gate_g3_blocks_when_no_pm_closure(tmp_path: Path):
     assert any(item.id == "G3-PM-CLOSURE" and not item.passed for item in result.items)
 
 
-def test_stage_gate_g3_blocks_when_ledger_missing(tmp_path: Path):
+def test_stage_gate_g3_blocks_when_ledger_missing(tmp_path: Path) -> None:
     """有 CHG 文件（新路径）但台账缺失 → G3-PM-CLOSURE 未通过"""
     proj = tmp_path / "DJ-2026-997_缺台账"
     proj.mkdir()
@@ -159,7 +160,7 @@ def test_stage_gate_g3_blocks_when_ledger_missing(tmp_path: Path):
     assert any(item.id == "G3-PM-CLOSURE" and not item.passed for item in result.items)
 
 
-def test_stage_gate_g3_blocks_when_no_skill_handoff(tmp_path: Path):
+def test_stage_gate_g3_blocks_when_no_skill_handoff(tmp_path: Path) -> None:
     """台账完整但 PM_SESSION §8 无 skill_handoff → G3-PM-CLOSURE 未通过"""
     proj = tmp_path / "DJ-2026-996_缺回写"
     proj.mkdir()
@@ -200,7 +201,7 @@ def test_stage_gate_g3_blocks_when_no_skill_handoff(tmp_path: Path):
     assert any(item.id == "G3-PM-CLOSURE" and not item.passed for item in result.items)
 
 
-def test_stage_gate_g4_monitoring_to_closing(temp_project: Path):
+def test_stage_gate_g4_monitoring_to_closing(temp_project: Path) -> None:
     engine = StageGateEngine()
     result = engine.evaluate_stage_transition(
         str(temp_project), current_stage="monitoring", target_stage="closing"
@@ -209,7 +210,7 @@ def test_stage_gate_g4_monitoring_to_closing(temp_project: Path):
     assert result.blocker_count == 0
 
 
-def test_stage_gate_g4_blocks_unclosed_chg(temp_project: Path):
+def test_stage_gate_g4_blocks_unclosed_chg(temp_project: Path) -> None:
     # 添加一个未关闭的变更单
     chg_dir = temp_project / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-PLC"
     (chg_dir / "CHG-PLC-2026-002.md").write_text(
@@ -225,7 +226,7 @@ def test_stage_gate_g4_blocks_unclosed_chg(temp_project: Path):
     assert any(item.id == "G4-CHG-ALL-CLOSED" and not item.passed for item in result.items)
 
 
-def test_stage_gate_handles_non_existent_project(tmp_path: Path):
+def test_stage_gate_handles_non_existent_project(tmp_path: Path) -> None:
     non_exist = tmp_path / "Non_Exist_12345"
     engine = StageGateEngine()
     result = engine.evaluate_stage_transition(
@@ -236,7 +237,7 @@ def test_stage_gate_handles_non_existent_project(tmp_path: Path):
     assert result.items[0].id == "G-ROOT-EXIST"
 
 
-def _g4_chg_item(project: Path):
+def _g4_chg_item(project: Path) -> Any:
     result = StageGateEngine().evaluate_stage_transition(str(project), current_stage="monitoring", target_stage="closing")
     return next(item for item in result.items if item.id == "G4-CHG-ALL-CLOSED")
 
@@ -246,26 +247,26 @@ def _write_chg(project: Path, name: str, body: str) -> None:
     (chg_dir / name).write_text(body, encoding="utf-8")
 
 
-def test_stage_gate_g4_accepts_the_real_chg_table_status_field(temp_project: Path):
+def test_stage_gate_g4_accepts_the_real_chg_table_status_field(temp_project: Path) -> None:
     # TD-SW008-209：真实变更单的状态在 `| 变更状态 | closed |` 表格行里，不是 `status: closed` 文字
     _write_chg(temp_project, "CHG-PLC-2026-003.md", "# 变更单\n\n| 字段 | 内容 |\n|------|------|\n| 变更状态 | closed |\n")
     assert _g4_chg_item(temp_project).passed is True
 
 
 @pytest.mark.parametrize("status", ["archived", "abandoned"])
-def test_stage_gate_g4_accepts_other_terminal_closed_states(temp_project: Path, status: str):
+def test_stage_gate_g4_accepts_other_terminal_closed_states(temp_project: Path, status: str) -> None:
     _write_chg(temp_project, "CHG-PLC-2026-003.md", f"| 变更状态 | {status} |\n")
     assert _g4_chg_item(temp_project).passed is True
 
 
 @pytest.mark.parametrize("status", ["completed", "implementing", "pending_acceptance", "draft"])
-def test_stage_gate_g4_blocks_every_non_closed_table_status(temp_project: Path, status: str):
+def test_stage_gate_g4_blocks_every_non_closed_table_status(temp_project: Path, status: str) -> None:
     # completed 只是验收通过、还没关闭，仍要拦
     _write_chg(temp_project, "CHG-PLC-2026-003.md", f"| 变更状态 | {status} |\n")
     assert _g4_chg_item(temp_project).passed is False
 
 
-def test_stage_gate_g4_ignores_closed_wording_buried_in_prose(temp_project: Path):
+def test_stage_gate_g4_ignores_closed_wording_buried_in_prose(temp_project: Path) -> None:
     # 旧写法按子串匹配，正文里随手写一句 “status: closed” 就会误放行
     _write_chg(
         temp_project,
@@ -275,12 +276,12 @@ def test_stage_gate_g4_ignores_closed_wording_buried_in_prose(temp_project: Path
     assert _g4_chg_item(temp_project).passed is False
 
 
-def test_stage_gate_g4_blocks_a_chg_with_no_status_field_at_all(temp_project: Path):
+def test_stage_gate_g4_blocks_a_chg_with_no_status_field_at_all(temp_project: Path) -> None:
     _write_chg(temp_project, "CHG-PLC-2026-003.md", "# 变更单\n没有状态字段\n")
     assert _g4_chg_item(temp_project).passed is False
 
 
-def test_stage_gate_g4_every_status_row_must_be_terminal(temp_project: Path):
+def test_stage_gate_g4_every_status_row_must_be_terminal(temp_project: Path) -> None:
     # 审计 285：示例表格里的 closed 行排在前面，真正的状态行是 implementing，不能让先匹配到的行说了算
     _write_chg(
         temp_project,
@@ -290,7 +291,7 @@ def test_stage_gate_g4_every_status_row_must_be_terminal(temp_project: Path):
     assert _g4_chg_item(temp_project).passed is False
 
 
-def test_stage_gate_g4_two_terminal_status_rows_still_pass(temp_project: Path):
+def test_stage_gate_g4_two_terminal_status_rows_still_pass(temp_project: Path) -> None:
     _write_chg(temp_project, "CHG-PLC-2026-003.md", "| 变更状态 | closed |\n\n复述：\n| 变更状态 | archived |\n")
     assert _g4_chg_item(temp_project).passed is True
 
@@ -307,6 +308,6 @@ def test_stage_gate_g4_two_terminal_status_rows_still_pass(temp_project: Path):
         "- Status: Closed",
     ],
 )
-def test_stage_gate_g4_accepts_chinese_case_and_backtick_spellings(temp_project: Path, line: str):
+def test_stage_gate_g4_accepts_chinese_case_and_backtick_spellings(temp_project: Path, line: str) -> None:
     _write_chg(temp_project, "CHG-PLC-2026-003.md", line + "\n")
     assert _g4_chg_item(temp_project).passed is True

@@ -21,6 +21,7 @@ from auto_pm.application.core.agent_worktree_service import AgentWorktreeError
 from auto_pm.application.core.pr_open_service import (
     PrOpenRefusedError,
     PrOpenService,
+    PrPlan,
 )
 from auto_pm.ui.cli.__main__ import cli
 from tests.core.test_agent_worktree_service import AGENT_MARKER_KEYS, Lab, commit, git
@@ -98,7 +99,7 @@ def service(lab: Lab, gh: FakeGh | None = None, **kwargs: object) -> PrOpenServi
     return PrOpenService(lab.root, gh=gh or FakeGh(), **kwargs)  # type: ignore[arg-type]
 
 
-def plan(lab: Lab, svc: PrOpenService | None = None, **kwargs: object):  # noqa: ANN201
+def plan(lab: Lab, svc: PrOpenService | None = None, **kwargs: object) -> PrPlan:
     return (svc or service(lab)).plan("claude", "CARD-1", CARD_PATH, fetch=False, **kwargs)  # type: ignore[arg-type]
 
 
@@ -140,6 +141,25 @@ def test_plan_lists_the_tds_named_by_the_change_order_but_proposes_no_payoff_for
 
     assert related_td_section(result.body) == "TD-SW008-321、TD-SW008-322"
     assert "TD-SW008-321 已偿还" not in result.body
+
+
+def test_plan_lists_the_tds_when_the_project_keeps_its_change_orders_under_11_monitoring(lab: Lab) -> None:
+    work(lab)
+    folder = lab.root / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    folder.mkdir(parents=True)
+    (folder / f"{CHG}.md").write_text("TD-SW008-451\n", encoding="utf-8")
+
+    assert related_td_section(plan(lab).body) == "TD-SW008-451"
+
+
+def test_plan_prefers_04_monitoring_over_11_monitoring_when_both_hold_the_order(lab: Lab) -> None:
+    work(lab)
+    legacy = lab.root / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    legacy.mkdir(parents=True)
+    (legacy / f"{CHG}.md").write_text("TD-SW008-461\n", encoding="utf-8")
+    write_chg(lab, "TD-SW008-462\n")
+
+    assert related_td_section(plan(lab).body) == "TD-SW008-462"
 
 
 def test_plan_with_the_change_order_folder_but_not_that_file_plans_and_says_so(lab: Lab) -> None:
@@ -397,7 +417,7 @@ def test_a_failed_pr_list_stops_before_pushing(lab: Lab) -> None:
     work(lab)
 
     class BrokenList(FakeGh):
-        def __call__(self, args: Sequence[str], stdin: str | None):  # noqa: ANN204
+        def __call__(self, args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
             if tuple(args[:2]) == ("pr", "list"):
                 return subprocess.CompletedProcess(args, 1, "", "HTTP 500")
             return super().__call__(args, stdin)
@@ -415,7 +435,7 @@ def test_pr_create_failing_is_not_success_even_if_the_output_shows_a_url(lab: La
     work(lab)
 
     class FailsWithUrl(FakeGh):
-        def __call__(self, args: Sequence[str], stdin: str | None):  # noqa: ANN204
+        def __call__(self, args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
             if tuple(args[:2]) == ("pr", "create"):
                 return subprocess.CompletedProcess(
                     args, 1, "https://github.com/o/r/pull/55\n", "a pull request already exists"
@@ -431,7 +451,7 @@ def test_a_failed_pr_create_after_the_push_says_how_to_continue(lab: Lab) -> Non
     work(lab)
 
     class BrokenCreate(FakeGh):
-        def __call__(self, args: Sequence[str], stdin: str | None):  # noqa: ANN204
+        def __call__(self, args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
             if tuple(args[:2]) == ("pr", "create"):
                 return subprocess.CompletedProcess(args, 1, "", "HTTP 502")
             return super().__call__(args, stdin)

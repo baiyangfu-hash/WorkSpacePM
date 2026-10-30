@@ -7,9 +7,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 
 import auto_pm.infrastructure.control_root_guard as control_root_guard
+from auto_pm.application.core.worktree_policy_service import (
+    WorktreePolicyError,
+    WorktreePolicyService,
+)
 from auto_pm.contracts.execution_adapter import WorktreeMode
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
@@ -346,7 +349,7 @@ def test_control_root_git_fact_rejects_success_with_permission_diagnostic(
 ) -> None:
     _repository(tmp_path)
 
-    def diagnostic_result(*_args, **_kwargs):
+    def diagnostic_result(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args=[],
             returncode=0,

@@ -8,14 +8,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from auto_pm.cli.__main__ import cli
-from auto_pm.core.mission_service import MissionService
-from auto_pm.core.work_registry_service import WorkRegistryService
 from click.testing import CliRunner
 
+from auto_pm.application.core.mission_service import MissionService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.contracts.mission import AuthorityAudit, AuthorityEnvelope
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_do
 from tests.plan_checklist_support import checklist_args
 
@@ -255,7 +255,7 @@ def test_pm_approve_materializes_one_authorized_chain_without_internal_ids(
 def test_pm_execute_consumes_env_secret_and_emits_foreground_receipt(
     cli_runner: CliRunner,
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _setup_planning(tmp_path)
     planned = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "plan", *_planning_args()])
@@ -273,12 +273,12 @@ def test_pm_execute_consumes_env_secret_and_emits_foreground_receipt(
     class _Facade:
         @staticmethod
         def execute_planning_foreground(
-            card,
+            card: object,
             *,
             expected_plan_hash: str,
             lease_token: str,
             lease_token_environment: str,
-        ):
+        ) -> _Receipt:
             captured.update(
                 card=card,
                 expected_plan_hash=expected_plan_hash,
@@ -323,14 +323,14 @@ def test_pm_execute_consumes_env_secret_and_emits_foreground_receipt(
 def test_pm_execute_rejects_mismatched_request_before_dispatch(
     cli_runner: CliRunner,
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _setup_planning(tmp_path)
     planned = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "plan", *_planning_args()])
     card_payload = json.loads(planned.output)
     called = False
 
-    def fail_if_called(_ctx):
+    def fail_if_called(_ctx: object) -> None:
         nonlocal called
         called = True
         raise AssertionError("dispatch must not be reached")

@@ -6,9 +6,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from click.testing import Result
 
 from auto_pm.infrastructure.git_hook_enforcer import (
     CONTROL_ROOT_FILE_BINDINGS,
+    CONTROL_ROOT_PREFIX_BINDINGS,
     ProjectBinding,
     StagedIndexEntry,
     StagedSnapshot,
@@ -76,6 +78,47 @@ def test_control_root_mapping_rejects_unknown_project_id(
     monkeypatch.setitem(CONTROL_ROOT_FILE_BINDINGS, "main.py", "SW-9999-999")
     with pytest.raises(StagedSnapshotError, match="归属未知或不唯一"):
         _binding_for_staged_file("main.py", bindings)
+
+
+RELEASE_TREE = "00_Infrastructure/auto_pm/releases/1.3.3-8d7d387"
+
+
+def test_release_tree_files_are_attributed_to_sw008_not_exempted(
+    bindings: tuple[ProjectBinding, ProjectBinding],
+) -> None:
+    """发布树里的 .py 归 SW-2026-008（仍要跟它的变更单走），而不是被钩子放过。"""
+    path = f"{RELEASE_TREE}/auto_pm/infrastructure/git_hook_enforcer.py"
+    assert filter_production_files([path]) == [path]  # 仍算生产文件，没有被豁免
+    assert _binding_for_staged_file(path, bindings).project_id == "SW-2026-008"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "00_Infrastructure/auto_pm/auto_pm/app_context.py",  # 同在基础设施下，但不是发布树
+        "00_Infrastructure/auto_pm/releases_extra/x.py",  # 前缀相似的目录
+        "00_Infrastructure/auto_pm/releases.py",
+        "00_Infrastructure/other/releases/x.py",
+        "releases/x.py",
+        "sub/00_Infrastructure/auto_pm/releases/1.3.3-8d7d387/x.py",  # 前缀嵌在更深一层，不在仓库根
+        "00_Infrastructure/auto_pm/releases",  # 目录本身（没有斜杠和版本子目录）
+    ],
+)
+def test_only_the_release_tree_prefix_is_bound_other_infrastructure_stays_rejected(
+    bindings: tuple[ProjectBinding, ProjectBinding], path: str
+) -> None:
+    with pytest.raises(StagedSnapshotError, match="归属未知或不唯一"):
+        _binding_for_staged_file(path, bindings)
+
+
+def test_release_tree_binding_to_an_unregistered_project_is_rejected(
+    bindings: tuple[ProjectBinding, ProjectBinding], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """映射写错项目编号时不能凭空造出归属。"""
+    prefix = next(iter(CONTROL_ROOT_PREFIX_BINDINGS))
+    monkeypatch.setitem(CONTROL_ROOT_PREFIX_BINDINGS, prefix, "SW-9999-999")
+    with pytest.raises(StagedSnapshotError, match="归属未知或不唯一"):
+        _binding_for_staged_file(f"{RELEASE_TREE}/auto_pm/x.py", bindings)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -381,8 +424,9 @@ def _install_real_hooks(primary: Path) -> dict[str, str]:
     import os
     import sys
 
-    from auto_pm.cli.__main__ import cli
     from click.testing import CliRunner
+
+    from auto_pm.ui.cli.__main__ import cli
 
     source_root = Path(__file__).resolve().parents[2]
     (primary / "main.py").write_text(
@@ -677,9 +721,10 @@ def test_td100_unmerged_index_entries_are_refused(tmp_path: Path) -> None:
 
 
 
-def _run_preflight(cand: Path, ctrl: Path, msg: Path, *, control_root: Path | None = None):
-    from auto_pm.cli.__main__ import cli
+def _run_preflight(cand: Path, ctrl: Path, msg: Path, *, control_root: Path | None = None) -> Result:
     from click.testing import CliRunner
+
+    from auto_pm.ui.cli.__main__ import cli
 
     return CliRunner().invoke(
         cli,
@@ -1005,8 +1050,9 @@ def _ignore_preflight_scene(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 def _ignore_preflight(cand: Path, ctrl: Path, msg: Path):  # type: ignore[no-untyped-def]
-    from auto_pm.cli.__main__ import cli
     from click.testing import CliRunner
+
+    from auto_pm.ui.cli.__main__ import cli
 
     return CliRunner().invoke(
         cli, ["-w", str(cand), "--control-root", str(ctrl), "git-hook", "preflight", str(msg)]

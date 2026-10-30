@@ -17,13 +17,13 @@
 - enums.py: Literal 类型定义
 """
 
-from auto_pm.models.change import (
+from auto_pm.domain.models.change import (
     ApprovalRecord,
     ChangeRequest,
     ChangeSummary,
     ImpactAnalysis,
 )
-from auto_pm.models.dto import (
+from auto_pm.domain.models.dto import (
     ApiResponse,
     DashboardSummaryDTO,
     ProjectCreateRequest,
@@ -33,7 +33,7 @@ from auto_pm.models.dto import (
     ProjectUpdateRequest,
     ScanResult,
 )
-from auto_pm.models.plc import (
+from auto_pm.domain.models.plc import (
     CheckItem,
     CheckResult,
     RenamePlan,
@@ -41,7 +41,7 @@ from auto_pm.models.plc import (
     RepairResult,
     StandardizeResult,
 )
-from auto_pm.models.project import (
+from auto_pm.domain.models.project import (
     BusinessLine,
     Project,
     ProjectInfo,

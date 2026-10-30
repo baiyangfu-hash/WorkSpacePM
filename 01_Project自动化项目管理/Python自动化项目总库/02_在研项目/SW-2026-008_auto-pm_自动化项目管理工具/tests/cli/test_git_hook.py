@@ -11,7 +11,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.infrastructure import git_hook_enforcer
@@ -20,6 +19,7 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     enforce_pre_commit,
     enforce_release_ledger_gate,
 )
+from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_do
 
 

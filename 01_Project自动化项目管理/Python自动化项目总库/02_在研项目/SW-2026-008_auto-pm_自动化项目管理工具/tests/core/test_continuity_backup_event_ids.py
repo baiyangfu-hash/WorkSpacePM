@@ -8,10 +8,10 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.infrastructure.continuity_backup import inspect_connection
+from auto_pm.ui.cli.__main__ import cli
 from tests.cli.test_continuity_backup import PROJECT, _cli, _create_work, _ledger, _workspace
 from tests.core.test_lease_handover_service import RUN, Scene
 

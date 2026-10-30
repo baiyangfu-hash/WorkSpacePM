@@ -22,13 +22,13 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from auto_pm.spec.core.checker_base import CheckResult, Severity
-from auto_pm.spec.core.config import CHECK_SCOPES, WorkspaceConfig, load_config
-from auto_pm.spec.services.check_svc import CheckService
-from auto_pm.spec.services.fix_svc import FixResult, can_auto_fix
-from auto_pm.spec.services.frontmatter_svc import FrontmatterService
-from auto_pm.spec.services.index_svc import IndexService
-from auto_pm.spec.services.report_svc import ReportService
+from auto_pm.domain.spec.core.checker_base import CheckResult, Severity
+from auto_pm.domain.spec.core.config import CHECK_SCOPES, WorkspaceConfig, load_config
+from auto_pm.domain.spec.services.check_svc import CheckService
+from auto_pm.domain.spec.services.fix_svc import FixResult, can_auto_fix
+from auto_pm.domain.spec.services.frontmatter_svc import FrontmatterService
+from auto_pm.domain.spec.services.index_svc import IndexService
+from auto_pm.domain.spec.services.report_svc import ReportService
 
 console = Console()
 
@@ -544,7 +544,7 @@ def cmd_lint(
     # 加载 spec_registry.json
     registry_path = ws / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
     if ws_config and hasattr(ws_config, "registry_path") and ws_config.registry_path:
-        registry_path = ws_config.registry_path
+        registry_path = Path(ws_config.registry_path)
 
     if not registry_path.exists():
         console.print(f"[red]错误: 找不到 spec_registry.json: {registry_path}[/red]")

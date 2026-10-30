@@ -34,7 +34,7 @@ if sys.platform == "win32" and sys.stdout is not None:
     except (AttributeError, OSError):
         pass
 
-from auto_pm.cli.__main__ import cli  # noqa: E402
+from auto_pm.ui.cli.__main__ import cli  # noqa: E402
 
 if __name__ == "__main__" or __name__ == "auto_pm.__main__":
     if len(sys.argv) == 1:

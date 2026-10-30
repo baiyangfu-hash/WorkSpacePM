@@ -52,6 +52,8 @@ class ContinuityResume(BaseModel):
     checkpoint: CheckpointItem | None = None
     lease: LeaseView | None = None
     conflicts: tuple[str, ...] = ()
+    # Red flags that do not block any action (for example a lease renewed over and over); shown by pm orient / pm resume.
+    hold_warnings: tuple[str, ...] = ()
     next_legal_action: str = ""
     read_set: tuple[str, ...] = ()
     intake: IntakeSummary = Field(default_factory=IntakeSummary)

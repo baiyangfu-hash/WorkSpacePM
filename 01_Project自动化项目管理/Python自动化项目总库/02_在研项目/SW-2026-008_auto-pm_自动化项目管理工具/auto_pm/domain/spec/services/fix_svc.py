@@ -12,10 +12,11 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from auto_pm.spec.core.checker_base import CheckResult
-from auto_pm.spec.core.registry import SpecRegistry
-from auto_pm.spec.core.scanner import SpecScanner
+from auto_pm.domain.spec.core.checker_base import CheckResult
+from auto_pm.domain.spec.core.registry import SpecRegistry
+from auto_pm.domain.spec.core.scanner import SpecScanner
 
 log = logging.getLogger(__name__)
 
@@ -43,14 +44,24 @@ class BoundedHealingTracker:
         if not self.tracker_file.parent.exists():
             self.tracker_file.parent.mkdir(parents=True, exist_ok=True)
 
-        data = {"retries": 0, "last_reset": time.time()}
+        now = time.time()
+        data: dict[str, Any] = {"retries": 0, "last_reset": now}
         if self.tracker_file.exists():
             try:
-                data = json.loads(self.tracker_file.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+                loaded = json.loads(self.tracker_file.read_text(encoding="utf-8"))
+                if not isinstance(loaded, dict) or not isinstance(loaded.get("retries"), int):
+                    raise ValueError("retry tracker 内容不是 {retries: 整数}")
+                data = loaded
+            except (OSError, ValueError):  # UnicodeDecodeError / JSONDecodeError 都是 ValueError
+                # 读不懂计数文件不能当成“还没重试过”（那样删掉或写坏文件就能无限重试）：按已用完处理，
+                # 24 小时从文件修改时间起算后自动恢复。
+                try:
+                    stamp = self.tracker_file.stat().st_mtime
+                except OSError:
+                    stamp = now
+                log.warning("retry tracker 无法读取，按重试次数已用完处理: %s", self.tracker_file)
+                data = {"retries": 3, "last_reset": stamp}
 
-        now = time.time()
         # Reset tracker every 24 hours
         if now - data.get("last_reset", 0) > 86400:
             data = {"retries": 0, "last_reset": now}

@@ -11,8 +11,8 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
-from auto_pm.core.pm_cockpit_service import _BOARD_CLOSED_SHOWN, PmCockpitService
 
+from auto_pm.application.core.pm_cockpit_service import _BOARD_CLOSED_SHOWN, PmCockpitService
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.contracts.mission import MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError

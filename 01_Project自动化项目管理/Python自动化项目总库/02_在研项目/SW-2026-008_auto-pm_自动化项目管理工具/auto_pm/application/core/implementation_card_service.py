@@ -177,10 +177,10 @@ class ImplementationCardService:
         if target.exists() or markdown.exists():
             raise ImplementationCardError("card artifacts already exist")
         template_path = Path(__file__).resolve().parents[2] / "templates" / "governance" / "implementation_card.md.jinja"
-        source = template_path.read_text(encoding="utf-8", errors="replace")
+        source = template_path.read_text(encoding="utf-8")
         rendered = Environment(undefined=StrictUndefined, autoescape=False).from_string(source).render(card=card)
         self._write(card, None)
-        markdown.write_text(rendered, encoding="utf-8", errors="replace")
+        markdown.write_text(rendered, encoding="utf-8")
         return target, markdown
 
     def approve(self, card_id: str, *, approver: str, approval_evidence: str) -> ImplementationCard:

@@ -64,7 +64,7 @@ class SclLinter:
     REGION_NAME_FORBIDDEN_PATTERN = re.compile(r";|:=")
     # 控制结构的开头/结尾记号（END_IF 等里的 IF 前面是下划线，\b 不会误认；ELSIF 同理）
     STRING_LITERAL_PATTERN = re.compile(r"'(?:[^']|'')*'")
-    BLOCK_TOKEN_PATTERN = re.compile(r"\b(END_)?(IF|CASE|FOR|WHILE)\b", re.IGNORECASE)
+    BLOCK_TOKEN_PATTERN = re.compile(r"\b(END_)?(IF|CASE|FOR|WHILE|REPEAT)\b", re.IGNORECASE)
 
     # 结构完整性：每个源文件至少有一个程序块或类型声明，且每个声明都有配对的 END_*（插件命令行对空文件与乱码单文件也报 0 诊断，由这里补）
     STRUCT_KEYWORDS = ("ORGANIZATION_BLOCK", "FUNCTION_BLOCK", "FUNCTION", "DATA_BLOCK", "TYPE")
@@ -483,7 +483,7 @@ class SclLinter:
         block_stack: list[tuple[str, int]],
         report: SclLintReport,
     ) -> None:
-        """REGION 与 IF/CASE/FOR/WHILE 必须整段嵌套：REGION 的开头或结尾不能落在一个控制结构中间（反过来也不行）。"""
+        """REGION 与 IF/CASE/FOR/WHILE/REPEAT 必须整段嵌套：REGION 的开头或结尾不能落在一个控制结构中间（反过来也不行）。"""
         if cls.REGION_OPEN_PATTERN.match(code_part):
             block_stack.append(("REGION", line_idx))
             return
@@ -525,7 +525,7 @@ class SclLinter:
                         rule_id="LSP-905-REGION-CROSS-BLOCK",
                         severity="ERROR",
                         message=(
-                            f"END_{kind} 与 {names} 交叉：REGION 的开头和结尾必须在同一个 IF/CASE/FOR/WHILE 结构的同一层里，"
+                            f"END_{kind} 与 {names} 交叉：REGION 的开头和结尾必须在同一个 IF/CASE/FOR/WHILE/REPEAT 结构的同一层里，"
                             "不能切开结构（LSP-905 §6.3）"
                         ),
                         code_snippet=stripped,

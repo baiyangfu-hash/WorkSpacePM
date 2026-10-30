@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 from cockpit_board.viewmodel import PHASES, ProjectVM
 from cockpit_board.widgets import common as c
@@ -21,19 +22,19 @@ class ProjectPage(QWidget):
         self.on_back, self.on_copy = on_back, on_copy
         self.tab = "overview"
         self.vm: ProjectVM | None = None
-        self.now = None
+        self.now: datetime | None = None
         self.online: bool | None = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        self.scroll, self.layout_ = c.page()
-        outer.addWidget(self.scroll)
+        self.scroll_area, self.layout_ = c.page()
+        outer.addWidget(self.scroll_area)
 
     def set_tab(self, key: str) -> None:
         self.tab = key
-        if self.vm is not None:
-            self.render(self.vm, self.now, self.online)
+        if self.vm is not None and self.now is not None:
+            self.show_view(self.vm, self.now, self.online)
 
-    def render(self, vm: ProjectVM, now, online: bool | None) -> None:  # noqa: ANN001
+    def show_view(self, vm: ProjectVM, now: datetime, online: bool | None) -> None:
         self.vm, self.now, self.online = vm, now, online
         c.clear(self.layout_)
         lay, card = self.layout_, vm.card
@@ -57,7 +58,7 @@ class ProjectPage(QWidget):
         lay.addWidget(c.hrow(*buttons, 1))
         getattr(self, "_" + self.tab)(vm, now)
 
-    def _overview(self, vm: ProjectVM, now) -> None:  # noqa: ANN001
+    def _overview(self, vm: ProjectVM, now: datetime) -> None:
         lay = self.layout_
         if vm.card.decisions:
             lay.addWidget(c.section("要你出手"))
@@ -79,11 +80,11 @@ class ProjectPage(QWidget):
         for stamp, text, who, example in vm.activity:
             row = c.hrow(c.label(stamp, "mono", wrap=False), c.label(text), c.label(who, "small", wrap=False), 1)
             if example:
-                row.layout().insertWidget(2, c.example_tag())
+                c.insert_widget(row, 2, c.example_tag())
             inner.addWidget(row)
         lay.addWidget(frame)
 
-    def _board(self, vm: ProjectVM, _now) -> None:  # noqa: ANN001
+    def _board(self, vm: ProjectVM, _now: datetime) -> None:
         holder, grid = c.grid(len(vm.columns))
         widgets = []
         for column in vm.columns:
@@ -98,7 +99,7 @@ class ProjectPage(QWidget):
                 box, box_layout = c.card()
                 head = c.hrow(c.label(mission_id, "mono", wrap=False), 1)
                 if example:
-                    head.layout().insertWidget(1, c.example_tag())
+                    c.insert_widget(head, 1, c.example_tag())
                 box_layout.addWidget(head)
                 box_layout.addWidget(c.label(title))
                 box_layout.addWidget(c.label(meta, "small"))
@@ -109,7 +110,7 @@ class ProjectPage(QWidget):
         self.layout_.addWidget(holder)
         self.layout_.addWidget(c.label("四栏照挂起设计稿：在干 = ACTIVE；等你 = 草稿 / 待批 / 待验收 / 卡住；已关 = 近 14 天验收或收口的。", "small"))
 
-    def _evidence(self, vm: ProjectVM, _now) -> None:  # noqa: ANN001
+    def _evidence(self, vm: ProjectVM, _now: datetime) -> None:
         frame, inner = c.card()
         inner.addWidget(c.label("机器检查结果", "section"))
         inner.addWidget(c.label("这页回答“AI 说做完了，到底过没过”。每一行三态：过 / 没过 / 没检查。没检查的灰色，不算过。", "small"))
@@ -120,7 +121,7 @@ class ProjectPage(QWidget):
             inner.addWidget(line)
         self.layout_.addWidget(frame)
 
-    def _changes(self, vm: ProjectVM, _now) -> None:  # noqa: ANN001
+    def _changes(self, vm: ProjectVM, _now: datetime) -> None:
         frame, inner = c.card()
         inner.addWidget(c.hrow(c.label("编号", "q", wrap=False), c.label("日期", "q", wrap=False), c.label("类型", "q", wrap=False),
                                c.label("改了什么", "q"), c.label("状态", "q", wrap=False)))
@@ -133,7 +134,7 @@ class ProjectPage(QWidget):
         self.layout_.addWidget(frame)
         self.layout_.addWidget(c.label("BC = 业务变更（客户改需求、领导砍需求、参数变化），CARD = 实施卡，CHG = 收口变更单。三种合一张表。", "small"))
 
-    def _io(self, vm: ProjectVM, _now) -> None:  # noqa: ANN001
+    def _io(self, vm: ProjectVM, _now: datetime) -> None:
         frame, inner = c.card()
         inner.addWidget(c.label("它在等谁", "section"))
         inner.addWidget(c.label("依赖栏来自计划防呆七栏（PR #36 合并后才有数据）；现在没有。", "muted"))
@@ -146,7 +147,7 @@ class ProjectPage(QWidget):
         else:
             self.layout_.addWidget(github_block(vm.github, vm.prs, "没有改到这个项目的开着的 PR。"))
 
-    def _recipe(self, vm: ProjectVM, _now) -> None:  # noqa: ANN001
+    def _recipe(self, vm: ProjectVM, _now: datetime) -> None:
         frame, inner = c.card()
         inner.addWidget(c.label("这个项目照哪份规范和模板干活", "section"))
         inner.addWidget(c.kv(vm.recipe))

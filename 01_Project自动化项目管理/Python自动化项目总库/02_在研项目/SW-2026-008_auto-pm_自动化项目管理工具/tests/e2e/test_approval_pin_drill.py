@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -61,7 +62,7 @@ def cli_in_terminal(drill: Drill, typed: list[str], *arguments: str) -> Step:
     """
 
     command = [sys.executable, str(drill.tools / "launcher.py"), "-w", str(drill.root), *arguments]
-    master, slave = os.openpty()
+    master, slave = os.openpty()  # type: ignore[attr-defined,unused-ignore]
     stderr = b""
     try:
         process = subprocess.Popen(
@@ -109,7 +110,7 @@ def _planned_card(drill: Drill, request_id: str) -> dict[str, str]:
 
     card, approved = _approve_from_one_sentence(drill, request_id)
     assert approved.returncode != 0, "已提交批准口令，agent 不带口令的批准却被接受了"
-    return card
+    return cast(dict[str, str], card)
 
 
 def test_p01_an_agent_without_a_terminal_cannot_approve_and_nothing_is_written(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811

@@ -10,9 +10,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from auto_pm.core.mission_admission import admission_verdict, scope_overlaps
-from auto_pm.core.pm_cockpit_service import PmCockpitService
 
+from auto_pm.application.core.mission_admission import admission_verdict, scope_overlaps
+from auto_pm.application.core.pm_cockpit_service import PmCockpitService
 from auto_pm.contracts.mission import OPEN_MISSION_SOFT_LIMIT, Mission, MissionState
 from auto_pm.infrastructure.continuity_store import ContinuityStoreError
 from tests.core.test_mission_park_store import APPROVAL

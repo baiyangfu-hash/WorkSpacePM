@@ -1,10 +1,10 @@
 import os
 import tempfile
 
-from auto_pm.core.prototype_service import PrototypeService
+from auto_pm.application.core.prototype_service import PrototypeService
 
 
-def test_prototype_init_and_bundle():
+def test_prototype_init_and_bundle() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         service = PrototypeService(tmp_dir)
 
@@ -19,7 +19,7 @@ def test_prototype_init_and_bundle():
         assert os.path.exists(bundle_res.output_path)
         assert "V1.0.0" in bundle_res.output_path
 
-def test_prototype_check():
+def test_prototype_check() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         service = PrototypeService(tmp_dir)
         service.init(tmp_dir, template="industrial-hmi")
@@ -29,7 +29,7 @@ def test_prototype_check():
         assert len(check_res.errors) == 0
 
 
-def test_prototype_detects_broken_link_and_missing_func():
+def test_prototype_detects_broken_link_and_missing_func() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         service = PrototypeService(tmp_dir)
         service.init(tmp_dir, template="industrial-hmi")

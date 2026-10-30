@@ -28,8 +28,8 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from auto_pm.vartable.models import ParseResult, VarEntry, VarTable
-from auto_pm.vartable.parsers.base_parser import BaseParser
+from auto_pm.domain.vartable.models import ParseResult, VarEntry, VarTable
+from auto_pm.domain.vartable.parsers.base_parser import BaseParser
 
 SOURCE_FORMAT = "scl"
 
@@ -88,8 +88,8 @@ class SclParser(BaseParser):
         Returns:
             True 表示是 SCL 格式（.scl/.awl 扩展名或内容含 FUNCTION_BLOCK/VAR 关键字）
         """
-        from auto_pm.vartable.models import FormatType
-        from auto_pm.vartable.parsers.format_detector import detect_format
+        from auto_pm.domain.vartable.models import FormatType
+        from auto_pm.domain.vartable.parsers.format_detector import detect_format
 
         return bool(detect_format(file_path) == FormatType.SCL)
 

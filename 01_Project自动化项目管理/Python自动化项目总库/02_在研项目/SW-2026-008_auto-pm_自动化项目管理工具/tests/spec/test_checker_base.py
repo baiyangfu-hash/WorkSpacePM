@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.spec.core.checker_base import (
+from auto_pm.domain.spec.core.checker_base import (
     CheckResult,
     DriftWarningChecker,
     DuplicateChecker,
@@ -17,9 +17,9 @@ from auto_pm.spec.core.checker_base import (
     UnlistedSpecChecker,
     VersionMismatchChecker,
 )
-from auto_pm.spec.core.config import WorkspaceConfig
-from auto_pm.spec.core.registry import SpecRegistry
-from auto_pm.spec.core.scanner import SpecScanner
+from auto_pm.domain.spec.core.config import WorkspaceConfig
+from auto_pm.domain.spec.core.registry import SpecRegistry
+from auto_pm.domain.spec.core.scanner import SpecScanner
 
 
 class TestDuplicateChecker:
@@ -271,7 +271,7 @@ class TestNumberConflictChecker:
         reg = SpecRegistry(populated_workspace)
         reg.load()
         # 人工注入跨前缀冲突：TOOL-906 与 LSP-906 共享编号 906
-        from auto_pm.spec.core.registry import SpecInfo
+        from auto_pm.domain.spec.core.registry import SpecInfo
         reg._specs["TOOL-906"] = SpecInfo(spec_id="TOOL-906", number="906", type_prefix="TOOL", title="Mermaid规范")
         reg._specs["LSP-906"] = SpecInfo(spec_id="LSP-906", number="906", type_prefix="LSP", title="PLC错误预防")
         scanner = SpecScanner(populated_workspace)
@@ -287,7 +287,7 @@ class TestNumberConflictChecker:
         """相同 type_prefix 不同编号，不应报冲突"""
         reg = SpecRegistry(populated_workspace)
         reg.load()
-        from auto_pm.spec.core.registry import SpecInfo
+        from auto_pm.domain.spec.core.registry import SpecInfo
         reg._specs["LSP-901"] = SpecInfo(spec_id="LSP-901", number="901", type_prefix="LSP", title="A")
         reg._specs["LSP-902"] = SpecInfo(spec_id="LSP-902", number="902", type_prefix="LSP", title="B")
         scanner = SpecScanner(populated_workspace)

@@ -39,15 +39,15 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from auto_pm.vartable.batch_parser import BatchParser
-from auto_pm.vartable.converter import SUPPORTED_OUTPUT_FORMATS, VariableConverter
-from auto_pm.vartable.models import FormatType, ParseResult
-from auto_pm.vartable.parsers.format_detector import (
+from auto_pm.domain.vartable.batch_parser import BatchParser
+from auto_pm.domain.vartable.converter import SUPPORTED_OUTPUT_FORMATS, VariableConverter
+from auto_pm.domain.vartable.models import FormatType, ParseResult
+from auto_pm.domain.vartable.parsers.format_detector import (
     detect_format,
     get_parser_for_format,
     list_supported_formats,
 )
-from auto_pm.vartable.utils.encoding import SUPPORTED_ENCODINGS, detect_encoding
+from auto_pm.domain.vartable.utils.encoding import SUPPORTED_ENCODINGS, detect_encoding
 
 console = Console()
 

@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from auto_pm.cli.constraint import constraint_group
-from auto_pm.constraint.guard import BOM
 from click.testing import CliRunner
+
+from auto_pm.domain.constraint.guard import BOM
+from auto_pm.ui.cli.constraint import constraint_group
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch

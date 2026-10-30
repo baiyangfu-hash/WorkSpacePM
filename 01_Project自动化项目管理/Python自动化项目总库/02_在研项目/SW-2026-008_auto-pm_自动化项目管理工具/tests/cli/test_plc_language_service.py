@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
-from auto_pm.cli.__main__ import cli
 from click.testing import CliRunner
 
 from auto_pm.application.core.template_service import TemplateService
 from auto_pm.domain.plc.language_service import LanguageServiceBinary, LanguageServiceResult
+from auto_pm.ui.cli.__main__ import cli
 
 BINARY = LanguageServiceBinary(path="x", version="2.17.2", sha256="0" * 64)
 TEMPLATES = Path(__file__).resolve().parents[2] / "templates"
@@ -48,7 +49,7 @@ def _check(workspace: Path, monkeypatch: pytest.MonkeyPatch, service: FakeServic
     return CliRunner().invoke(cli, ["-w", str(workspace), "plc", "check", "DJ-2026-901", "--json", *flags], catch_exceptions=False)
 
 
-def _item(output: str, name: str) -> dict | None:
+def _item(output: str, name: str) -> dict[str, Any] | None:
     data = json.loads(output[output.index("{"):])
     return next((i for i in data["items"] if i["item"] == name), None)
 

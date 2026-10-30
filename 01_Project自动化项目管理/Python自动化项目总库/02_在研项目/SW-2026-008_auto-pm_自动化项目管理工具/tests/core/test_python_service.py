@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.core.python_service import PythonProjectService
+from auto_pm.application.core.python_service import PythonProjectService
 
 
 def test_python_project_check_not_ok(tmp_path: Path) -> None:

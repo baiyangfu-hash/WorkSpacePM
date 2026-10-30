@@ -8,7 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from auto_pm.vartable.batch_parser import BatchParser
+
+from auto_pm.domain.vartable.batch_parser import BatchParser
 
 
 def _create_scl_file(dir_path: Path, name: str = "fb.scl") -> Path:

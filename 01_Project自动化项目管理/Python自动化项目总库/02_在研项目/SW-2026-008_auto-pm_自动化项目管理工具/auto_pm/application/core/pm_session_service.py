@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from auto_pm.core.paths import PG_CLOSING_DIR
+from auto_pm.application.core.paths import PG_CLOSING_DIR
 
 # 章节标题正则：## N. Title（N 为数字）
 SECTION_HEADER_PATTERN = re.compile(r"^##\s+(\d+)\.\s+(.+)$")

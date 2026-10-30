@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.vartable.parsers.codesys_parser import CodesysParser
+from auto_pm.domain.vartable.parsers.codesys_parser import CodesysParser
 
 
 class TestCodesysParserDetectFormat:

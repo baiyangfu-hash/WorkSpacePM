@@ -9,26 +9,27 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
-from auto_pm.core.continuity_execution_service import (
+
+from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
-from auto_pm.core.work_registry_service import WorkRegistryService
-
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionService,
     PythonQualityGate,
     PythonQualityReceipt,
 )
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import CheckpointItem, RunState, WorkKind, WorkState
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
@@ -44,12 +45,14 @@ from auto_pm.contracts.execution_adapter import (
     ExecutionStartEvidence,
 )
 from auto_pm.domain.change.decision_service import DecisionService
+from auto_pm.infrastructure import continuity_store
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 
 class Clock:
     def __init__(self) -> None:
         self.value = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
+        self.start = self.value
 
     def __call__(self) -> datetime:
         return self.value
@@ -138,7 +141,7 @@ def _start(service: ContinuityExecutionService, **changes: Any) -> Any:
         encoding="utf-8",
         errors="replace",
     ).stdout.strip()
-    values = {
+    values: dict[str, Any] = {
         "run_id": "RUN-001",
         "work_id": "WORK-001",
         "executor_id": "agent-a",
@@ -157,7 +160,7 @@ def _start(service: ContinuityExecutionService, **changes: Any) -> Any:
 
 
 def _start_evidence(service: ContinuityExecutionService, **changes: Any) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "run_id": "RUN-001",
         "owner_id": "agent-a",
         "lease_token": "lease-secret",
@@ -173,7 +176,7 @@ def _start_evidence(service: ContinuityExecutionService, **changes: Any) -> Any:
 
 
 def _checkpoint(service: ContinuityExecutionService, **changes: Any) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "checkpoint_id": "CP-001",
         "run_id": "RUN-001",
         "owner_id": "agent-a",
@@ -334,7 +337,7 @@ def _c03_auto_checkpoint_service(
 def _append_auto_checkpoint(
     service: ContinuityExecutionService, project_root: Path, **changes: Any
 ) -> Any:
-    values: dict[str, object] = {
+    values: dict[str, Any] = {
         "checkpoint_id": "CP-AUTO-001",
         "run_id": "RUN-001",
         "owner_id": "agent-a",
@@ -633,7 +636,7 @@ def _settlement_ready(
 
 
 def _settle(service: ContinuityExecutionService, **changes: Any) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "target_run_id": "RUN-TARGET",
         "recovery_run_id": "RUN-RECOVERY",
         "recovery_owner_id": "recovery-agent",
@@ -826,7 +829,7 @@ def _legacy_terminal_lease_ready(
 def _fence_terminal_lease(
     service: ContinuityExecutionService, event_id: str, lease_version: int, **changes: Any
 ) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "target_run_id": "RUN-TARGET",
         "expected_settlement_event_id": event_id,
         "expected_target_lease_version": lease_version,
@@ -903,7 +906,7 @@ def _legacy_v2_terminal_transition_ready(
 def _reconcile_terminal_lease(
     service: ContinuityExecutionService, event_id: str, lease_version: int, **changes: Any
 ) -> Any:
-    values = {
+    values: dict[str, Any] = {
         "target_run_id": "RUN-TARGET",
         "expected_terminal_event_id": event_id,
         "expected_target_lease_version": lease_version,
@@ -1789,7 +1792,7 @@ def test_start_run_exact_replay_survives_removed_linked_worktree(tmp_path: Path)
 )
 def test_start_run_replay_rejects_semantic_drift(
     tmp_path: Path,
-    changes: dict[str, object],
+    changes: dict[str, Any],
 ) -> None:
     clock = Clock()
     _, service = _services(tmp_path, clock)
@@ -1891,6 +1894,66 @@ def test_concurrent_same_run_and_key_returns_one_exact_replay(
             conn.execute("SELECT COUNT(*) FROM events WHERE event_type='RUN_CREATED'").fetchone()[0]
             == 1
         )
+
+
+def _hold_write_lock_then_contend(store: ContinuityStore, hold_seconds: float) -> None:
+    """Open a write transaction on one thread, then open a second one on the main thread."""
+
+    holding = threading.Event()
+
+    def holder() -> None:
+        with store._transaction():
+            holding.set()
+            time.sleep(hold_seconds)
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    assert holding.wait(timeout=10)
+    try:
+        with store._transaction():
+            pass
+    finally:
+        thread.join(timeout=10)
+
+
+def test_second_writer_waits_for_a_slow_lock_holder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The holder's git re-check can take seconds on a loaded runner; the other writer must wait, not fail."""
+
+    _, service = _services(tmp_path, Clock())
+    monkeypatch.setattr(continuity_store, "_WRITE_LOCK_TIMEOUT_SECONDS", 5.0)
+    _hold_write_lock_then_contend(service._store, hold_seconds=1.0)
+
+
+def test_write_transaction_waits_thirty_seconds_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the shipped wait: connect timeout and busy_timeout are both 30 s (5 s made a second writer fail)."""
+
+    _, service = _services(tmp_path, Clock())
+    seen: list[float] = []
+    real_connect = sqlite3.connect
+
+    def spy(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        seen.append(kwargs.get("timeout", 5.0))
+        connection: sqlite3.Connection = real_connect(*args, **kwargs)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", spy)
+    with service._store._transaction() as conn:
+        busy_ms = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert seen == [30.0]
+    assert busy_ms == 30_000
+
+
+def test_second_writer_gives_up_after_the_write_lock_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wait is bounded by the constant: a holder that outlasts it still ends in a refusal."""
+
+    _, service = _services(tmp_path, Clock())
+    monkeypatch.setattr(continuity_store, "_WRITE_LOCK_TIMEOUT_SECONDS", 0.2)
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        _hold_write_lock_then_contend(service._store, hold_seconds=1.5)
 
 
 def test_terminal_sibling_with_future_lease_does_not_block_new_run(tmp_path: Path) -> None:
@@ -2236,8 +2299,16 @@ def test_generic_checkpoint_rejects_each_real_second_project_gate_failure(
             'def value() -> int:\n    return "wrong"\n',
             encoding="utf-8", errors="replace",
         )
-    with pytest.raises(ContinuityExecutionError, match="质量收据为 PASS"):
+    with pytest.raises(ContinuityExecutionError, match="质量收据为 PASS") as refused:
         _append_auto_checkpoint(service, candidate, profile="generic")
+    # 失败信息要点名是哪一道检查红了，并把完整收据落盘（Trae 对比测试：只说“要求 PASS”，看不出是谁红）
+    message = str(refused.value)
+    assert f"[{failing_gate}]" in message and "完整收据：" in message
+    reports = list((service._root / ".auto-pm" / "reports" / "quality-failures").glob("*.json"))
+    assert len(reports) == 1
+    saved = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert saved["status"] == "FAIL"
+    assert any(gate["exit_code"] not in (0, None) and gate["name"] == failing_gate for gate in saved["gates"])
     with pytest.raises(ContinuityStoreError, match="Checkpoint 不存在"):
         service._store.get_checkpoint("CP-AUTO-001")
 
@@ -2266,7 +2337,7 @@ def test_append_verified_checkpoint_rejects_store_collision_return(
     observed_keys: list[str] = []
 
     def collision_return(
-        values: dict[str, object], idempotency_key: str, _now: str, **_lease: object
+        values: dict[str, Any], idempotency_key: str, _now: str, **_lease: object
     ) -> CheckpointItem:
         observed_keys.append(idempotency_key)
         return CheckpointItem(
@@ -2827,7 +2898,7 @@ def test_terminal_lease_fence_rejects_wrong_target_or_uncertain_evidence(
     service, event_id, lease_version = _legacy_terminal_lease_ready(
         tmp_path, clock, target_start_claim=fact == "start_claim"
     )
-    changes: dict[str, object] = {}
+    changes: dict[str, Any] = {}
     if fact == "event_id":
         changes["expected_settlement_event_id"] = "EVT-0000000000000000"
     elif fact == "lease_version":
@@ -3980,8 +4051,8 @@ def test_service_reconciles_operation_receipt_run_and_started_identity(tmp_path:
 
     actual_receipt, run, actual_evidence = service.resolve_started_run("operation-e06-1")
 
-    assert actual_receipt is receipt
-    assert run is store.get_run.return_value
+    assert cast(object, actual_receipt) is receipt
+    assert cast(object, run) is store.get_run.return_value
     assert actual_evidence is evidence
     store.get_run_started_evidence.assert_called_once_with("RUN-001")
 
@@ -4142,3 +4213,72 @@ def test_a_write_that_presents_no_epoch_is_accepted_during_the_compatibility_per
 def _event_count(root: Path) -> int:
     with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
         return int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+
+
+def _renew_until_cap(service: ContinuityExecutionService, clock: Clock, hours: float, tag: str = "a") -> None:
+    """Keep the lease alive with 15-minute renewals until ``hours`` after creation."""
+    renewed = 0
+    while clock.value + timedelta(minutes=14) <= clock.start + timedelta(hours=hours):
+        clock.value += timedelta(minutes=14)
+        lease = service._store.get_lease("RUN-001")
+        service.renew_lease(
+            "RUN-001", "agent-a", "lease-secret", 900, f"cap-renew-{tag}-{renewed}", expected_version=lease.version
+        )
+        renewed += 1
+
+
+def test_lease_renewal_is_refused_after_the_three_hour_hold_cap(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    _renew_until_cap(service, clock, 2.9)
+    clock.value = clock.start + timedelta(hours=3, minutes=1)
+    with pytest.raises(ContinuityExecutionError, match="过期"):
+        service.renew_lease("RUN-001", "agent-a", "lease-secret", 900, "after-cap")
+    # A lease that outlives the cap (granted before the cap existed) is still refused for the cap itself.
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.execute(
+            "UPDATE execution_leases SET expires_at=? WHERE run_id='RUN-001'",
+            ((clock.value + timedelta(hours=1)).isoformat(),),
+        )
+    lease = service._store.get_lease("RUN-001")
+    with pytest.raises(ContinuityExecutionError, match="总时长上限"):
+        service.renew_lease(
+            "RUN-001", "agent-a", "lease-secret", 900, "after-cap-live", expected_version=lease.version
+        )
+    status = service.lease_hold_status("RUN-001")
+    assert status["hold_end"] == (clock.start + timedelta(hours=3)).isoformat()
+
+
+def test_last_renewal_before_the_cap_is_clamped_to_the_cap(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    _renew_until_cap(service, clock, 2.9)
+    lease = service._store.get_lease("RUN-001")
+    assert datetime.fromisoformat(lease.expires_at) <= clock.start + timedelta(hours=3)
+
+
+def test_extend_hold_lets_a_run_renew_past_three_hours_and_is_idempotent(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    _renew_until_cap(service, clock, 2.5)
+    first = service.extend_lease_hold("RUN-001", 7_200, "user-confirmation:2026-10-29-16:00", "extend-1")
+    replay = service.extend_lease_hold("RUN-001", 7_200, "user-confirmation:2026-10-29-16:00", "extend-1")
+    assert first == replay
+    assert first.hold_end == (clock.start + timedelta(hours=5)).isoformat()
+    _renew_until_cap(service, clock, 3.5, "b")
+    renewals = service.lease_hold_status("RUN-001")["renewals"]
+    assert isinstance(renewals, int) and renewals >= 15
+
+
+@pytest.mark.parametrize("extra", [0, 59, 43_201])
+def test_extend_hold_rejects_out_of_range_and_missing_evidence(tmp_path: Path, extra: int) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    with pytest.raises(ContinuityExecutionError, match="extra_seconds"):
+        service.extend_lease_hold("RUN-001", extra, "user-confirmation:2026-10-29-16:00", f"ext-{extra}")
+    with pytest.raises(ContinuityExecutionError, match="用户证据"):
+        service.extend_lease_hold("RUN-001", 3_600, "  ", "ext-no-evidence")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auto_pm.spec.core.scanner import SpecScanner
+from auto_pm.domain.spec.core.scanner import SpecScanner
 
 
 class TestSpecScannerScanAll:

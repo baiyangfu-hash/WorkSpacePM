@@ -9,7 +9,8 @@ import os
 from pathlib import Path
 
 import pytest
-from auto_pm.core.pm_session_service import (
+
+from auto_pm.application.core.pm_session_service import (
     DEPRECATED_SECTIONS,
     MAX_FILE_LINES,
     MAX_FILE_SIZE_KB,
