@@ -1987,3 +1987,52 @@ def test_lease_extend_hold_cli_with_a_committed_pin_needs_the_pin_not_the_eviden
     assert (
         ContinuityExecutionService(tmp_path).lease_hold_status("RUN-CLI-HOLD")["hold_end"] != before
     )
+
+
+def _wrap(cli_runner: CliRunner, tmp_path: Path, command: list[str], *, token: str = "hold-secret") -> Result:
+    return cli_runner.invoke(
+        cli,
+        [
+            "-w", str(tmp_path), "continuity", "lease", "run-with-renewal",
+            "--run-id", "RUN-CLI-HOLD", "--owner", "agent-a", "--lease-token-env", "HOLD_TOKEN", "--",
+            *command,
+        ],
+        env={"HOLD_TOKEN": token},
+        catch_exceptions=False,
+    )
+
+
+def test_run_with_renewal_returns_the_commands_exit_code_and_renews_first(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _hold_run(tmp_path)
+    service = ContinuityExecutionService(tmp_path)
+    before = service.current_lease("RUN-CLI-HOLD").version
+    result = _wrap(cli_runner, tmp_path, [sys.executable, "-c", "import sys; sys.exit(7)"])
+    assert result.exit_code == 7, result.output
+    assert service.current_lease("RUN-CLI-HOLD").version == before + 1
+
+
+def test_run_with_renewal_does_not_start_the_command_when_the_first_renewal_fails(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    _hold_run(tmp_path)
+    marker = tmp_path / "ran.txt"
+    result = _wrap(
+        cli_runner,
+        tmp_path,
+        [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('x')"],
+        token="not-the-token",
+    )
+    assert result.exit_code == 1
+    assert "命令没有启动" in result.output
+    assert not marker.exists()
+
+
+def test_run_with_renewal_never_hands_the_lease_token_to_the_command(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _hold_run(tmp_path)
+    dump = tmp_path / "env.txt"
+    code = f"import os; open({str(dump)!r}, 'w').write(os.environ.get('HOLD_TOKEN', 'absent'))"
+    result = _wrap(cli_runner, tmp_path, [sys.executable, "-c", code])
+    assert result.exit_code == 0, result.output
+    assert dump.read_text() == "absent"

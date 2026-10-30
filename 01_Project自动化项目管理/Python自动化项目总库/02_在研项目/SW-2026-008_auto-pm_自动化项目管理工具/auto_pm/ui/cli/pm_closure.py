@@ -18,6 +18,8 @@ from typing import Any
 import click
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.application.core.lease_keepalive import LeaseKeepAlive
 from auto_pm.contracts.mission import Mission
 from auto_pm.contracts.pm_cockpit import PmCockpitCompletionState
 from auto_pm.core.pm_closure_service import PmClosureError
@@ -77,15 +79,23 @@ def verify_pm(ctx: click.Context, mission_id: str, use_wallet: bool, lease_token
             token = lease_wallet.load(app_ctx.control_root, run_id=run_id, owner_id=owner_id)
         except lease_wallet.LeaseWalletError as error:
             raise click.ClickException(str(error)) from error
+    # One verify runs ~15 min: keep the Run's lease alive meanwhile. Not strict: verify has its own lease checks, and a
+    # refused renewal (for example at the 3 h hold cap) is reported in the result instead of blocking it.
+    keepalive = LeaseKeepAlive(
+        ContinuityExecutionService(app_ctx.control_root), run_id=run_id, owner_id=owner_id, token=token, strict=False
+    )
     try:
-        outcome, reason = PmFacadeService(
-            app_ctx.control_root, execution_root=app_ctx.workspace_root
-        ).verify_for_acceptance_with_reason(mission.mission_id, lease_token=token)
+        with keepalive:
+            outcome, reason = PmFacadeService(
+                app_ctx.control_root, execution_root=app_ctx.workspace_root
+            ).verify_for_acceptance_with_reason(mission.mission_id, lease_token=token)
     except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
     payload = outcome.model_dump(mode="json")
     if reason:
         payload["reason"] = reason
+    if keepalive.error:
+        payload["lease_keepalive_warning"] = keepalive.error
     _echo(payload)
     if not outcome.verified:
         ctx.exit(1)

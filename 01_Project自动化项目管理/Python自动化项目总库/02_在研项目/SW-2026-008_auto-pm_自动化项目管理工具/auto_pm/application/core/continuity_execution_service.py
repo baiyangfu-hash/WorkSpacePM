@@ -328,6 +328,12 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def current_lease(self, run_id: str) -> LeaseItem:
+        try:
+            return self._store.get_lease(run_id)
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
     def extend_lease_hold(
         self, run_id: str, extra_seconds: int, evidence_ref: str, idempotency_key: str
     ) -> LeaseHoldReceipt:
