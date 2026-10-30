@@ -163,13 +163,13 @@ def test_ingest_stage_only_does_not_ask_the_guard(monkeypatch: pytest.MonkeyPatc
     asked: list[str] = []
     monkeypatch.setattr(plc_cli, "require_runtime_identity", _refuse(asked))
 
-    class _Plc:
+    class _Projects:
         def __init__(self, *_a: object, **_k: object) -> None: ...
 
-        def resolve_project_path(self, project_id: str) -> str:
-            return str(tmp_path / project_id)
+        def get_project(self, project_id: str) -> SimpleNamespace:
+            return SimpleNamespace(path=str(tmp_path / project_id))
 
-    monkeypatch.setattr(plc_cli, "PlcService", _Plc)
+    monkeypatch.setattr(plc_cli, "ProjectService", _Projects)
     monkeypatch.setattr(
         "auto_pm.application.plc.ingest_service.PlcIngestService",
         lambda *_a, **_k: SimpleNamespace(
