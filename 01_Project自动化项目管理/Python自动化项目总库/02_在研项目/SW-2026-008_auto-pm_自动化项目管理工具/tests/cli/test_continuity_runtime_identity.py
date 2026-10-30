@@ -50,6 +50,8 @@ RECOVERY = {
     "lease extend-hold": "P-RUN",
     "lease record-holder": "P-RUN",
 }
+# Runs someone else's command with the lease kept alive: the child owns stdout, so a conflict is only warned on stderr.
+WRAPPERS = {"lease run-with-renewal": "P-RUN"}
 # Reads, or ledger-level backup commands that belong to no single project.
 EXEMPT = frozenset(
     {
@@ -84,14 +86,16 @@ def test_every_continuity_command_is_classified() -> None:
     """A new command fails here until someone decides whether it needs the identity guard."""
 
     found = set(_walk(_continuity_group()))
-    assert found == set(GUARDED) | set(RECOVERY) | EXEMPT
+    assert found == set(GUARDED) | set(RECOVERY) | set(WRAPPERS) | EXEMPT
     assert not (set(GUARDED) & set(RECOVERY)) and not ((set(GUARDED) | set(RECOVERY)) & EXEMPT)
+    assert not (set(WRAPPERS) & (set(GUARDED) | set(RECOVERY) | EXEMPT))
 
 
 # Options a command needs beyond the required ones to get past its own usage checks.
 EXTRA_ARGS = {
     "lease renew": ["--lease-wallet"],
     "lease extend-hold": ["--approval-evidence-ref", "user-confirmation:2026-10-29-16:00"],
+    "lease run-with-renewal": ["--lease-wallet", "--", "true"],
 }
 
 
@@ -166,6 +170,17 @@ def test_a_refused_identity_stops_a_guarded_command_before_it_writes(
     assert asked == [GUARDED[command]]
     assert touched == []
     assert isinstance(result.exception, click.ClickException)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("command", sorted(WRAPPERS))
+def test_a_lease_wrapper_is_never_refused_by_the_identity(
+    command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result, asked, touched = _invoke(command, monkeypatch, tmp_path, refuse=True)
+
+    assert asked == [WRAPPERS[command]]
+    assert touched, f"{command} did not reach its service"
+    assert not isinstance(result.exception, click.ClickException)  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize("command", sorted(RECOVERY))

@@ -1279,6 +1279,68 @@ def renew_lease(
     _emit(item)
 
 
+@lease_group.command(name="run-with-renewal", context_settings={"ignore_unknown_options": True})
+@click.option("--run-id", required=True)
+@click.option("--owner", "owner_id", required=True)
+@click.option("--lease-token-env", default=None, metavar="ENV_NAME")
+@click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option(
+    "--timeout-seconds",
+    type=click.IntRange(1, 43_200),
+    default=14_400,
+    show_default=True,
+    help="命令最长跑多久；超时就杀掉命令并以 124 退出（长命令也必须有时限）",
+)
+@click.argument("command", nargs=-1, required=True, type=click.UNPROCESSED)
+@click.pass_context
+def run_with_renewal(
+    ctx: click.Context,
+    run_id: str,
+    owner_id: str,
+    lease_token_env: str | None,
+    lease_wallet: bool,
+    lease_seconds: int,
+    timeout_seconds: int,
+    command: tuple[str, ...],
+) -> None:
+    """Run one command (after --) and renew the Run's lease every third of its length until it exits.
+
+    For long foreground commands such as a full pytest: the lease cannot run out while it runs. Only renews; the 3 h
+    total-hold cap still applies. The first renewal must succeed or the command is not started. The command inherits the
+    environment without the lease token, and its exit code is returned.
+    """
+    import subprocess
+
+    from auto_pm.application.core.lease_keepalive import LeaseKeepAlive, LeaseKeepAliveError
+
+    warn_runtime_identity(ctx, lambda: project_of_run(ctx, run_id))
+    if (lease_token_env is None) == (not lease_wallet):
+        raise click.UsageError("必须且只能给出一个口令来源：--lease-token-env 或 --lease-wallet")
+    token = _lease_token(
+        ctx, argv_value=None, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
+    )
+    child_env = {key: value for key, value in os.environ.items() if key != lease_token_env}
+    try:
+        with LeaseKeepAlive(
+            _execution_service(ctx), run_id=run_id, owner_id=owner_id, token=token, lease_seconds=lease_seconds
+        ) as keepalive:
+            try:
+                returncode = subprocess.run(  # noqa: S603
+                    list(command), env=child_env, check=False, timeout=timeout_seconds
+                ).returncode
+            except subprocess.TimeoutExpired:
+                click.echo(f"命令超过 {timeout_seconds} 秒仍未结束，已被终止", err=True)
+                returncode = 124
+    except LeaseKeepAliveError as error:
+        raise click.ClickException(str(error)) from error
+    except OSError as error:
+        raise click.ClickException(f"命令无法启动：{error}") from error
+    if keepalive.error:
+        click.echo(f"警告：命令运行期间续租中断（{keepalive.error}）；请先检查租约再继续", err=True)
+    ctx.exit(returncode)
+
+
 @lease_group.command(name="extend-hold")
 @click.option("--run-id", required=True)
 @click.option("--extra-seconds", type=click.IntRange(60, 43_200), required=True, help="在默认 3 小时上限之外再加多少秒")
