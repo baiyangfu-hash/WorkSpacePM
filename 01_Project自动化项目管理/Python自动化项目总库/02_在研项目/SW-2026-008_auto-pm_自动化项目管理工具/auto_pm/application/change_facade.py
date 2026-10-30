@@ -9,10 +9,9 @@ Change Facade 接口层"""
 
 from typing import Any
 
-from auto_pm.change.ledger_reconciler import LedgerReconciler, ReconcileDiff
-from auto_pm.core.protocols import ChangeServiceProtocol, ProjectServiceProtocol
-from auto_pm.models import ChangeRequest, ChangeSummary
-
+from auto_pm.application.core.protocols import ChangeServiceProtocol, ProjectServiceProtocol
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler, ReconcileDiff
+from auto_pm.domain.models import ChangeRequest, ChangeSummary
 from auto_pm.ui.contracts.commands.change_commands import (
     CreateChangeCommand,
     TransitionChangeCommand,

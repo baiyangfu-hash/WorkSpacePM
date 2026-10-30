@@ -758,8 +758,8 @@ class PmClosureSagaCoordinator:
                     curr = curr.parent
 
         try:
-            from auto_pm.change.file_locator import ChangeFileLocator
-            from auto_pm.change.parser import ChgParser
+            from auto_pm.domain.change.file_locator import ChangeFileLocator
+            from auto_pm.domain.change.parser import ChgParser
 
             locator = ChangeFileLocator(str(self._workspace_root), ChgParser())
             path_str = locator.get_project_path(project_id)

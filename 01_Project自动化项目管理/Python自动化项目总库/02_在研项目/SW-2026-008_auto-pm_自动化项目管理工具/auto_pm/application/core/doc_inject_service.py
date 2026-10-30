@@ -27,9 +27,9 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from auto_pm.core.doc_refresh_service import DocRefreshService
-from auto_pm.models import ProjectInfo
-from auto_pm.utils.file_utils import StaleFileError, read_file_snapshot, write_file
+from auto_pm.application.core.doc_refresh_service import DocRefreshService
+from auto_pm.domain.models import ProjectInfo
+from auto_pm.infrastructure.utils.file_utils import StaleFileError, read_file_snapshot, write_file
 
 log = logging.getLogger(__name__)
 

@@ -15,9 +15,9 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from auto_pm.models.change import ChangeSummary
-from auto_pm.models.enums import Stack
-from auto_pm.models.project import BusinessLine, Project
+from auto_pm.domain.models.change import ChangeSummary
+from auto_pm.domain.models.enums import Stack
+from auto_pm.domain.models.project import BusinessLine, Project
 
 T = TypeVar("T")
 

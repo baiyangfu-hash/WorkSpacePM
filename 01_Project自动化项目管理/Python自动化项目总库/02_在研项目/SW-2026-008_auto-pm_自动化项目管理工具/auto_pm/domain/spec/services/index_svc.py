@@ -11,13 +11,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from auto_pm.spec.core.config import (
+from auto_pm.domain.spec.core.config import (
     AUTO_GENERATED_HEADER,
     CORE_IDS,
     DOMAIN_CONFIG,
     WorkspaceConfig,
 )
-from auto_pm.spec.core.registry import SpecRegistry
+from auto_pm.domain.spec.core.registry import SpecRegistry
 
 
 @dataclass

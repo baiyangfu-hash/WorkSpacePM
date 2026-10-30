@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from auto_pm.models.enums import CheckStatus, DocType, ProjectType, RepairStatus
+from auto_pm.domain.models.enums import CheckStatus, DocType, ProjectType, RepairStatus
 
 
 class CheckItem(BaseModel):

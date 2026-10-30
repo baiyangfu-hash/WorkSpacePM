@@ -1651,10 +1651,9 @@ class EvidenceCollectionService:
         covered, if at all, by the per-project input digests.
         """
 
-        from auto_pm.plc import checker as plc_checker
-
         from auto_pm.application.core.paths import find_prd_dir
         from auto_pm.domain.models.plc import CheckResult
+        from auto_pm.domain.plc import checker as plc_checker
 
         location = getattr(plc_checker, "__file__", None)
         if not location:
@@ -2040,7 +2039,7 @@ def _scl_lint_output(
     owned file that did not exist at the baseline has only new errors.
     """
 
-    from auto_pm.plc.scl_linter import SclLinter
+    from auto_pm.domain.plc.scl_linter import SclLinter
 
     errors = 0
     warnings = 0
