@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 from subprocess import TimeoutExpired
+from typing import Any
 
 import pytest
 
@@ -42,7 +43,7 @@ def _report(root: Path, declared: str | None, paths: list[str], *, install: bool
     return precheck_markdown_card(card, workspace_root=root, command_tree=TREE)
 
 
-def _tier_findings(report) -> list:  # type: ignore[no-untyped-def]
+def _tier_findings(report: Any) -> list[Any]:
     return [item for item in report.findings if item.rule == "tier"]
 
 
@@ -163,7 +164,7 @@ def test_a_git_that_is_missing_or_hangs_counts_as_new_not_as_old(
     def broken(*_args: object, **_kwargs: object) -> None:
         raise failure
 
-    monkeypatch.setattr(tier.subprocess, "run", broken)
+    monkeypatch.setattr("subprocess.run", broken)
     assert tier.card_is_new(tmp_path / "card.md") is True
     (finding,) = _tier_findings(_recheck(tmp_path))
     assert "新卡头部必须写" in finding.message

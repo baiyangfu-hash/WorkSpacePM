@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from PySide6.QtCore import QThreadPool, QTimer, qInstallMessageHandler
@@ -34,7 +34,7 @@ def _blocking_service(root: Path, monkeypatch: pytest.MonkeyPatch, started: thre
         if threading.current_thread() is not threading.main_thread():  # only the pool worker waits
             started.set()
             release.wait(30)
-        return cast(PmCockpitSnapshot, real_snapshot())
+        return real_snapshot()
 
     monkeypatch.setattr(service, "snapshot", blocking_snapshot)
     return service
