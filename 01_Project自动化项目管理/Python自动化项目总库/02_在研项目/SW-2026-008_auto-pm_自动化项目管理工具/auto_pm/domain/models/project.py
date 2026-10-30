@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from auto_pm.models.enums import ProjectPhase, ProjectSource, Stack
+from auto_pm.domain.models.enums import ProjectPhase, ProjectSource, Stack
 
 # 业务线类型（"" 表示未设置）
 BusinessLine = Literal["SW", "DJ", "ZD", "XT", "WX", ""]

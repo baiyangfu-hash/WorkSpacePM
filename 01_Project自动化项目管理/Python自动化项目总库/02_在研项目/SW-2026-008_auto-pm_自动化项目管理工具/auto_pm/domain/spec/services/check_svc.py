@@ -9,11 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from auto_pm.spec.core.checker_base import CheckResult, HealthChecker, Severity
-from auto_pm.spec.core.config import WorkspaceConfig
-from auto_pm.spec.core.registry import SpecRegistry
-from auto_pm.spec.core.scanner import SpecScanner
-from auto_pm.spec.services.fix_svc import FixResult, FixService
+from auto_pm.domain.spec.core.checker_base import CheckResult, HealthChecker, Severity
+from auto_pm.domain.spec.core.config import WorkspaceConfig
+from auto_pm.domain.spec.core.registry import SpecRegistry
+from auto_pm.domain.spec.core.scanner import SpecScanner
+from auto_pm.domain.spec.services.fix_svc import FixResult, FixService
 
 
 @dataclass

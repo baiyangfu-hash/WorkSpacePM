@@ -9,13 +9,12 @@ import re
 from pathlib import Path
 from typing import Final
 
-from auto_pm.change.ledger_reconciler import LedgerReconciler
-
 from auto_pm.contracts.gate_dtos import (
     GateCheckItemDTO,
     ProcessGroupStage,
     StageGateResultDTO,
 )
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 from auto_pm.domain.plc.language_service import LanguageService, evaluate_project
 
 # 变更单正文里记状态的位置：真实变更单用 §3.4 表格行 `| 变更状态 | closed |`；
@@ -325,7 +324,7 @@ class StageGateEngine:
                 )
             return None
         try:
-            from auto_pm.plc import doc_consistency as dc
+            from auto_pm.domain.plc import doc_consistency as dc
 
             analysis = dc.analyze_project(str(p))
         except Exception as exc:

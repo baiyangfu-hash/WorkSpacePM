@@ -8,20 +8,19 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from auto_pm.core.execution_adapter_service import ExecutionDispatchResult
-from auto_pm.core.execution_supervisor_service import (
+from auto_pm.application.core.execution_adapter_service import ExecutionDispatchResult
+from auto_pm.application.core.execution_supervisor_service import (
     ExecutionCollectionPendingError,
     ExecutionLeasePolicy,
     ExecutionSupervisorError,
     ExecutionSupervisorService,
     LeaseCapability,
 )
-from auto_pm.core.microtask_projection_service import (
+from auto_pm.application.core.microtask_projection_service import (
     MicrotaskProjectionError,
     MicrotaskProjectionIndeterminateError,
     MicrotaskProjectionService,
 )
-
 from auto_pm.contracts.continuity import LeaseItem, RunState
 from auto_pm.contracts.execution_adapter import (
     ExecutionFailureCode,

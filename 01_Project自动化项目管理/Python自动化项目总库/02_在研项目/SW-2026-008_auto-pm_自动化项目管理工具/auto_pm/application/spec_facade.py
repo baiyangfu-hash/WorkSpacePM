@@ -12,12 +12,11 @@ M4 第 1 批重构：从"转发层"升级为"用例编排层"，返回带类型 
 
 from typing import Any
 
-from auto_pm.core.protocols import (
+from auto_pm.application.core.protocols import (
     ProjectServiceProtocol,
     SpecCenterServiceProtocol,
     SpecCheckServiceProtocol,
 )
-
 from auto_pm.ui.contracts.dto.spec_dto import (
     SpecCenterEntryDTO,
     SpecCenterOverviewDTO,
@@ -61,7 +60,7 @@ class SpecFacade:
             if project_id and self._project_service:
                 proj = self._project_service.get_project(project_id)
                 if proj and proj.stack == "python":
-                    from auto_pm.core.python_service import PythonProjectService
+                    from auto_pm.application.core.python_service import PythonProjectService
                     py_svc = PythonProjectService(self._project_service.workspace_root)
                     check_res = py_svc.check_project_spec(proj.path, project_id)
                     results = [
@@ -83,7 +82,7 @@ class SpecFacade:
                     )
                     return CommandResult(success=True, message="Success", payload=dto)
                 elif proj and proj.stack == "plc":
-                    from auto_pm.plc.checker import PlcChecker
+                    from auto_pm.domain.plc.checker import PlcChecker
                     plc_checker = PlcChecker(self._project_service.workspace_root)
                     plc_check_res = plc_checker.check_project(proj.path)
                     results = [
@@ -140,7 +139,7 @@ class SpecFacade:
                 return CommandResult(success=False, message=f"Project {project_id} not found", payload=None)
 
             if proj.stack == "python":
-                from auto_pm.core.python_service import PythonProjectService
+                from auto_pm.application.core.python_service import PythonProjectService
                 py_svc = PythonProjectService(self._project_service.workspace_root)
                 repaired_items = py_svc.repair_project_spec(proj.path, project_id, dry_run=False)
                 return CommandResult(

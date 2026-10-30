@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from auto_pm.plc.doc_consistency import Finding
+from auto_pm.domain.plc.doc_consistency import Finding
 
 STAGES = ("需求", "设计", "编程", "仿真", "现场", "收尾")
 STATUSES = ("未开始", "进行中", "已完成", "不适用")
