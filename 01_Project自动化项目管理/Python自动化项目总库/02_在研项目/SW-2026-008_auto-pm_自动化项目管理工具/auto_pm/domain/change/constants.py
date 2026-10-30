@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from auto_pm.models import ChangeRequest, ChangeSummary  # noqa: F401
+from auto_pm.domain.models import ChangeRequest, ChangeSummary  # noqa: F401
 
 # 显式导出（mypy strict 模式要求）
 __all__ = [

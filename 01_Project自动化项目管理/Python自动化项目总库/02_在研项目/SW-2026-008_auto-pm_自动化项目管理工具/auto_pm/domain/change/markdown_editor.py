@@ -22,8 +22,8 @@ import logging
 import re
 from typing import Any
 
-from auto_pm.change.constants import URGENCY_LEVELS
-from auto_pm.change.document_contract import heading_pattern
+from auto_pm.domain.change.constants import URGENCY_LEVELS
+from auto_pm.domain.change.document_contract import heading_pattern
 
 log = logging.getLogger(__name__)
 

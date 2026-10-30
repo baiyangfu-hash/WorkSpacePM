@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from auto_pm.change.constants import (
+from auto_pm.domain.change.constants import (
     ChangeRequest,
     TransitionGuardError,
 )

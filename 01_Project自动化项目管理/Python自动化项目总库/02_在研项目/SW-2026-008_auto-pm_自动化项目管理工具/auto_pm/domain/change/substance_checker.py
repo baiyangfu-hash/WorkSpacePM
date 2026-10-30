@@ -21,8 +21,8 @@ import logging
 import re
 from pathlib import Path
 
-from auto_pm.change.constants import ChangeRequest
-from auto_pm.change.parser import ChgParser
+from auto_pm.domain.change.constants import ChangeRequest
+from auto_pm.domain.change.parser import ChgParser
 
 log = logging.getLogger(__name__)
 

@@ -27,7 +27,7 @@ from typing import Any
 
 import yaml
 
-from auto_pm.constraint.models import (
+from auto_pm.domain.constraint.models import (
     Constraint,
     ConstraintRule,
     ConstraintScope,

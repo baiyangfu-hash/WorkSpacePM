@@ -18,32 +18,35 @@ from pydantic import BaseModel, ValidationError
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.bounded_command import run_until_done_or_stopped
+from auto_pm.application.core.continuity_execution_service import (
+    ContinuityExecutionError,
+    ContinuityExecutionService,
+)
+from auto_pm.application.core.execution_adapter_service import (
+    ExecutionDispatchError,
+    ExecutionDispatchService,
+)
 from auto_pm.application.core.implementation_card_precheck import (
     format_findings,
     precheck_markdown_card,
     scopes_outside_card,
+)
+from auto_pm.application.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
+from auto_pm.application.core.mission_orchestrator import (
+    MissionOrchestrator,
+    MissionOrchestratorError,
+)
+from auto_pm.application.core.mission_service import MissionService, MissionServiceError
+from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
+from auto_pm.application.core.worktree_policy_service import (
+    WorktreePolicyError,
+    WorktreePolicyService,
 )
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
 from auto_pm.contracts.declared_dirty import declared_dirty_problem
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import AuthorityEnvelope, MissionState
 from auto_pm.contracts.orchestration import OrchestrationFinding, RepairAttempt
-from auto_pm.core.continuity_execution_service import (
-    ContinuityExecutionError,
-    ContinuityExecutionService,
-)
-from auto_pm.core.execution_adapter_service import (
-    ExecutionDispatchError,
-    ExecutionDispatchService,
-)
-from auto_pm.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
-from auto_pm.core.mission_orchestrator import (
-    MissionOrchestrator,
-    MissionOrchestratorError,
-)
-from auto_pm.core.mission_service import MissionService, MissionServiceError
-from auto_pm.core.work_registry_service import WorkRegistryError, WorkRegistryService
-from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
 from auto_pm.infrastructure import lease_wallet, process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.infrastructure.control_root_guard import (
