@@ -28,7 +28,6 @@
  "auto_pm/infrastructure/db/sync.py": 8,
  "auto_pm/infrastructure/git_hook_enforcer.py": 4,
  "auto_pm/ui/boss_qml_window.py": 2,
- "auto_pm/ui/cli/__main__.py": 26,
  "auto_pm/ui/cli/change.py": 7,
  "auto_pm/ui/cli/continuity.py": 7,
  "auto_pm/ui/cli/plc/__init__.py": 8,
