@@ -1,0 +1,15 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261030-85B8EED1",
+  "project_id": "ZZ-2026-901",
+  "change_id": "CHG-SPEC-2026-001",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    "0100_项目/ZZ-2026-901_cockpit_probe_fake/cockpit_probe_fake/__init__.py"
+  ],
+  "approver": "cockpit-probe-bot",
+  "approved_at": "2026-10-30T02:13:23.900532+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {}
+}

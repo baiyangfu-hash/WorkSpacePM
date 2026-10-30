@@ -1,0 +1,10 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_src_path: /workspace/00_Infrastructure/auto_pm/releases/1.3.3-d8f7c8b/templates/python-tool
+author: fubai
+cli_command: cockpit-probe-fake
+description: cockpit-probe 一次性假项目，只用于命令探测
+package_name: cockpit_probe_fake
+project_id: ZZ-2026-901
+project_name: cockpit_probe_fake
+version: V1.0.0
+
