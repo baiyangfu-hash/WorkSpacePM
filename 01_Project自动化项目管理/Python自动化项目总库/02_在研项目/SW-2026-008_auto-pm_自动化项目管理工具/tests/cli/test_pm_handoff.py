@@ -239,6 +239,10 @@ def test_reclaim_command_refuses_a_live_lease_then_waits_for_the_user_then_takes
         (f"{RUN}\n接受\n", "第 2 次只输了两个字"),
         (f"{RUN}\n\n", "第 2 次直接回车"),
         (f"接受风险\n{RUN}\n", "两次顺序输反"),
+        (f"{RUN}x\n接受风险\n", "第 1 次 Run 编号后面多输了一个字"),
+        (f"{RUN}0\n接受风险\n", "第 1 次 Run 编号后面多输了一个数字"),
+        (f"{RUN}\n接受风险吧\n", "第 2 次后面多输了一个字"),
+        (f"{RUN}\n接受风险!\n", "第 2 次后面多输了一个符号"),
     ],
 )
 def test_sign_risk_with_a_wrong_input_signs_nothing_and_the_reclaim_stays_pending(
