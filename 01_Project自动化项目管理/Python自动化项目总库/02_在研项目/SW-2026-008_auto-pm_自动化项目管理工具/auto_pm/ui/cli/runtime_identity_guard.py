@@ -13,7 +13,10 @@ from pathlib import Path
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
+from auto_pm.application.core.workspace_context_service import (
+    WorkspaceContextError,
+    WorkspaceContextService,
+)
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
 

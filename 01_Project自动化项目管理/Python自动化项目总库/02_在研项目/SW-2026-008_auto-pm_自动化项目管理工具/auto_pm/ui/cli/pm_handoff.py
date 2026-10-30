@@ -16,10 +16,13 @@ import click
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
-from auto_pm.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
-from auto_pm.core.pm_facade_service import PmFacadeError, PmFacadeService
-from auto_pm.core.work_registry_service import WorkRegistryService
-from auto_pm.core.worktree_policy_service import WorktreePolicyError, WorktreePolicyService
+from auto_pm.application.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
+from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
+from auto_pm.application.core.worktree_policy_service import (
+    WorktreePolicyError,
+    WorktreePolicyService,
+)
 from auto_pm.infrastructure import process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.approval_pin import require_approval_pin

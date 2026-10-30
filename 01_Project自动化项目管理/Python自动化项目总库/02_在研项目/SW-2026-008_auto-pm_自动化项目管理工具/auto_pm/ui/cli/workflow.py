@@ -12,8 +12,8 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from auto_pm.cli.pm import pm_group
-from auto_pm.constraint.workflow import WorkflowEngine
+from auto_pm.domain.constraint.workflow import WorkflowEngine
+from auto_pm.ui.cli.pm import pm_group
 
 console = Console()
 
