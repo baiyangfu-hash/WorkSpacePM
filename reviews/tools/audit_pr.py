@@ -37,6 +37,7 @@ WORKFLOW_FILE = ".github/workflows/sw008-ci.yml"
 MERGE_SEARCH_LIMIT = 500
 
 # Paths a reviewer must call out when a PR touches them (see the handoff, section 1).
+# approvers.json 是批准口令的校验值：换掉它等于换掉用户的签字钥匙。
 PROTECTED_PATTERNS = (
     "AGENTS.md",
     "CLAUDE.md",
@@ -44,6 +45,7 @@ PROTECTED_PATTERNS = (
     ".cursor/rules/*",
     ".agent/rules/*",
     ".claude/*",
+    "SYS-2026-001_WorkspaceGovernance/approvers.json",
     ".github/workflows/*",
     "00_Obsidian_Base*",
     "00_Infrastructure/auto_pm/*",
