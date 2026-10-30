@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -280,6 +281,19 @@ def cmd_repair(
     _print_repair_result(result)
 
 
+def _registered_project_path(ctx: click.Context, workspace_root: str | Path, project_id: str) -> str:
+    """Where the project really lives, as the other plc commands find it; an unknown id stops the command.
+
+    Never invent ``0100_PLC自动化/<id>``: real project folders carry a name (``DJ-2026-009_汇川换型改造``), so a guessed path
+    would create a stray folder beside the real one and write the ingest there.
+    """
+    proj = ProjectService(workspace_root).get_project(project_id)
+    if proj is None:
+        console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
+        ctx.exit(1)
+    return str(proj.path)
+
+
 @plc_group.command(name="ingest")
 @click.option("--src", "source_dir", required=True, help="PLC 源工程根目录绝对/相对路径")
 @click.option("--pid", "project_id", required=True, help="目标 PLC 项目编号 (如 DJ-2026-009)")
@@ -293,11 +307,7 @@ def cmd_ingest(ctx: click.Context, source_dir: str, project_id: str, stage_only:
     if not stage_only:
         # --stage-only only fills the isolated .ingest_staging area; the formal project assets are written otherwise.
         require_runtime_identity(ctx, project_id)
-    plc_svc = PlcService(workspace_root=ws)
-    try:
-        target_path = plc_svc.resolve_project_path(project_id)
-    except Exception:
-        target_path = os.path.join(ws, "0100_PLC自动化", project_id)
+    target_path = _registered_project_path(ctx, ws, project_id)
 
     from auto_pm.application.plc.ingest_service import PlcIngestService
 
@@ -346,11 +356,7 @@ def cmd_promote(ctx: click.Context, project_id: str) -> None:
     ws = app_ctx.workspace_root
 
     require_runtime_identity(ctx, project_id)
-    plc_svc = PlcService(workspace_root=ws)
-    try:
-        target_path = plc_svc.resolve_project_path(project_id)
-    except Exception:
-        target_path = os.path.join(ws, "0100_PLC自动化", project_id)
+    target_path = _registered_project_path(ctx, ws, project_id)
 
     from auto_pm.application.plc.ingest_service import PlcIngestService
 
