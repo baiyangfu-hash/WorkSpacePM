@@ -6,10 +6,10 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-from auto_pm.change.change_service import ChangeService
-from auto_pm.change.constants import SpecViolationError, validate_domain, validate_impact_scope
-from auto_pm.core.workspace_context_service import WorkspaceContextError, WorkspaceContextService
-
+from auto_pm.application.core.workspace_context_service import (
+    WorkspaceContextError,
+    WorkspaceContextService,
+)
 from auto_pm.contracts.intake import (
     DEFAULT_IMPACT_SCOPE,
     OPEN_INTAKE_STATUSES,
@@ -21,6 +21,12 @@ from auto_pm.contracts.intake import (
     TriageTicket,
     UrgentCriterion,
     parse_evidence,
+)
+from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.constants import (
+    SpecViolationError,
+    validate_domain,
+    validate_impact_scope,
 )
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.domain.change.path_resolver import monitoring_dir_name

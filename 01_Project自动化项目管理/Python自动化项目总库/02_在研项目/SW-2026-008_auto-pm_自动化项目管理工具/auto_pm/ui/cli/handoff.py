@@ -590,7 +590,10 @@ def saga_group() -> None:
 def saga_status(ctx: click.Context, request_id: str, as_json: bool) -> None:
     """查看 handoff PM 收口 Saga 事务状态与检查点。"""
     service = AiHandoffService(_workspace(ctx))
-    payload = service.get_saga_status(request_id)
+    try:
+        payload = service.get_saga_status(request_id)
+    except HandoffError as error:
+        _handle_error(error)
     if payload is None:
         raise click.ClickException(f"找不到 Saga 事务日志: {request_id}")
     if as_json:

@@ -643,11 +643,11 @@ def test_td072_a_cited_change_request_must_exist(desk: Desk) -> None:
 def test_td072_a_known_change_request_is_accepted_and_looked_up_project_first_then_anywhere(tmp_path: Path) -> None:
     desk = _build_desk(tmp_path)
     changes = _KnownChanges({"CHG-SCPT-2026-378"})
-    desk.service = PmIntakeService(tmp_path, change_service=changes)
+    desk.service = PmIntakeService(tmp_path, change_service=changes)  # type: ignore[arg-type]
     assert desk.propose(ticket=desk.ticket(evidence=("chg:CHG-SCPT-2026-378",)))
     assert changes.calls == [("CHG-SCPT-2026-378", PYTHON_PROJECT)]
     elsewhere = _KnownChanges({"CHG-SCPT-2026-379"}, only_unscoped=True)
-    desk.service = PmIntakeService(tmp_path, change_service=elsewhere)
+    desk.service = PmIntakeService(tmp_path, change_service=elsewhere)  # type: ignore[arg-type]
     assert desk.propose(ticket=desk.ticket(evidence=("chg:CHG-SCPT-2026-379",)), title="别的项目的变更单")
     assert elsewhere.calls == [("CHG-SCPT-2026-379", PYTHON_PROJECT), ("CHG-SCPT-2026-379", None)]
 

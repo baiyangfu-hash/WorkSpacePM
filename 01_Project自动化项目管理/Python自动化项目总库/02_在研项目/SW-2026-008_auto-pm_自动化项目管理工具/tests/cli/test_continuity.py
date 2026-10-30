@@ -992,8 +992,7 @@ def test_run_start_cli_replays_only_provable_legacy_receipt(
     # Legacy Runs (only provable with an empty declaration) predate the
     # empty-declaration refusal, so the first start bypasses that new rule.
     with monkeypatch.context() as legacy:
-        for module in (continuity_cli, sys.modules["auto_pm.cli.continuity"]):
-            legacy.setattr(module, "declared_dirty_problem", lambda *_a, **_k: "")
+        legacy.setattr(continuity_cli, "declared_dirty_problem", lambda *_a, **_k: "")
         first = _invoke(cli_runner, tmp_path, args)
     assert first.exit_code == 0, first.output
     _replace_run_created_event_with_legacy_payload(tmp_path, "RUN-CLI-LEGACY")
@@ -1436,7 +1435,7 @@ def test_work_adjudication_evidence_cli_prints_bindings_without_mutation(
             assert work_id == "WORK-X"
             return evidence, "o" * 64
 
-    monkeypatch.setattr("auto_pm.cli.continuity.WorkRegistryService", _Service)
+    monkeypatch.setattr("auto_pm.ui.cli.continuity.WorkRegistryService", _Service)
     result = CliRunner().invoke(
         cli, ["-w", str(tmp_path), "continuity", "work", "adjudication-evidence", "--work-id", "WORK-X"]
     )
@@ -1465,7 +1464,7 @@ def test_work_adjudicate_cli_reads_recovery_token_from_stdin_only(
             return _Item()
 
     service = _Service()
-    monkeypatch.setattr("auto_pm.cli.continuity._work_service", lambda _ctx: service)
+    monkeypatch.setattr("auto_pm.ui.cli.continuity._work_service", lambda _ctx: service)
 
     base = [
         "-w",
@@ -1541,7 +1540,7 @@ def test_legacy_terminal_evidence_cli_prints_bindings(
             assert run_id == "RUN-X"
             return evidence
 
-    monkeypatch.setattr("auto_pm.cli.continuity.ContinuityExecutionService", _Service)
+    monkeypatch.setattr("auto_pm.ui.cli.continuity.ContinuityExecutionService", _Service)
     result = CliRunner().invoke(
         cli, ["-w", str(tmp_path), "continuity", "run", "legacy-terminal-evidence", "--run-id", "RUN-X"]
     )
@@ -1568,7 +1567,7 @@ def test_fence_legacy_terminal_cli_reads_recovery_token_from_stdin_only(
             return _Item()
 
     service = _Service()
-    monkeypatch.setattr("auto_pm.cli.continuity._execution_service", lambda _ctx: service)
+    monkeypatch.setattr("auto_pm.ui.cli.continuity._execution_service", lambda _ctx: service)
     base = [
         "-w",
         str(tmp_path),
