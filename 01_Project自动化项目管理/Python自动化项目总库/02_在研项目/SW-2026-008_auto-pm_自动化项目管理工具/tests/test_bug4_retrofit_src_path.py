@@ -136,7 +136,7 @@ class TestRetrofitSkipExisting:
     def test_retrofit_skips_when_answers_exist(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """项目已有 .copier-answers.yml 时应跳过"""
         # 锚点已在时 retrofit 先核对运行身份（TD-230）；这个裸临时工作区没有登记表，这里只测“跳过”本身
-        project_module = sys.modules[cli.commands["project"].commands["retrofit"].callback.__module__]  # type: ignore[union-attr]
+        project_module = sys.modules[cli.commands["project"].commands["retrofit"].callback.__module__]  # type: ignore[attr-defined]
         monkeypatch.setattr(project_module, "require_runtime_identity", lambda _ctx, _project: None)
         workspace = tmp_path
         project_id = "DJ-2026-002"

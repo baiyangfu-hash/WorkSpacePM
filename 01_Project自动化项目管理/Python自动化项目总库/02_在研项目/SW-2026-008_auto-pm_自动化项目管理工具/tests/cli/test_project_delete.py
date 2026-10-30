@@ -28,7 +28,7 @@ def git(root: Path, *args: str) -> str:
 
 def project_command_module() -> Any:
     """``cli`` 实际调用的那份 project 命令模块（``auto_pm.cli`` 是 ``auto_pm.ui.cli`` 的别名，各有一份模块对象）。"""
-    return sys.modules[cli.commands["project"].commands["delete"].callback.__module__]  # type: ignore[union-attr]
+    return sys.modules[cli.commands["project"].commands["delete"].callback.__module__]  # type: ignore[attr-defined]
 
 
 class World:
