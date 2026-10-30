@@ -1281,6 +1281,13 @@ def renew_lease(
 @click.option("--lease-token-env", default=None, metavar="ENV_NAME")
 @click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option(
+    "--timeout-seconds",
+    type=click.IntRange(1, 43_200),
+    default=14_400,
+    show_default=True,
+    help="命令最长跑多久；超时就杀掉命令并以 124 退出（长命令也必须有时限）",
+)
 @click.argument("command", nargs=-1, required=True, type=click.UNPROCESSED)
 @click.pass_context
 def run_with_renewal(
@@ -1290,6 +1297,7 @@ def run_with_renewal(
     lease_token_env: str | None,
     lease_wallet: bool,
     lease_seconds: int,
+    timeout_seconds: int,
     command: tuple[str, ...],
 ) -> None:
     """Run one command (after --) and renew the Run's lease every third of its length until it exits.
@@ -1313,7 +1321,13 @@ def run_with_renewal(
         with LeaseKeepAlive(
             _execution_service(ctx), run_id=run_id, owner_id=owner_id, token=token, lease_seconds=lease_seconds
         ) as keepalive:
-            returncode = subprocess.run(list(command), env=child_env, check=False).returncode  # noqa: S603
+            try:
+                returncode = subprocess.run(  # noqa: S603
+                    list(command), env=child_env, check=False, timeout=timeout_seconds
+                ).returncode
+            except subprocess.TimeoutExpired:
+                click.echo(f"命令超过 {timeout_seconds} 秒仍未结束，已被终止", err=True)
+                returncode = 124
     except LeaseKeepAliveError as error:
         raise click.ClickException(str(error)) from error
     except OSError as error:

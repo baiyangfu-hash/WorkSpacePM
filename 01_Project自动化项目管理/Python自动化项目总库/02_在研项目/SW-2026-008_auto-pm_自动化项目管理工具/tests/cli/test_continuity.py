@@ -2036,3 +2036,19 @@ def test_run_with_renewal_never_hands_the_lease_token_to_the_command(cli_runner:
     result = _wrap(cli_runner, tmp_path, [sys.executable, "-c", code])
     assert result.exit_code == 0, result.output
     assert dump.read_text() == "absent"
+
+
+def test_run_with_renewal_kills_a_command_that_outlives_its_time_limit(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _hold_run(tmp_path)
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w", str(tmp_path), "continuity", "lease", "run-with-renewal",
+            "--run-id", "RUN-CLI-HOLD", "--owner", "agent-a", "--lease-token-env", "HOLD_TOKEN",
+            "--timeout-seconds", "1", "--",
+            sys.executable, "-c", "import time; time.sleep(300)",
+        ],
+        env={"HOLD_TOKEN": "hold-secret"},
+        catch_exceptions=False,
+    )  # fmt: skip
+    assert result.exit_code == 124, result.output
