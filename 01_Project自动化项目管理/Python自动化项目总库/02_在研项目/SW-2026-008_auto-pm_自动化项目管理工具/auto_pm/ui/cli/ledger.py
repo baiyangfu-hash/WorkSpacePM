@@ -22,8 +22,8 @@ from rich.table import Table
 
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.chg_tracking_service import check_project_chg_tracking
-from auto_pm.change.ledger_reconciler import LedgerReconciler, ReconcileDiff
-from auto_pm.core.project_service import ProjectService
+from auto_pm.application.core.project_service import ProjectService
+from auto_pm.domain.change.ledger_reconciler import LedgerReconciler, ReconcileDiff
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
@@ -180,4 +180,4 @@ def cmd_reconcile(
             f"状态不一致 {len(diff.status_mismatches)}）[/yellow]"
         )
         console.print("[dim]提示: 使用 --fix 自动补建缺失行和修复状态不一致（孤儿记录需人工处理）[/dim]")
-    exit_with_tracking(ctx, exit_code, project_path, verbose=verbose)
+    exit_with_tracking(ctx, exit_code, Path(project_path), verbose=verbose)

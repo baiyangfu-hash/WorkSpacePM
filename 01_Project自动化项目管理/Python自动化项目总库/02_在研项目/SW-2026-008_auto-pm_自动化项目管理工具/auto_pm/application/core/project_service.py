@@ -27,14 +27,15 @@ from datetime import datetime
 from typing import Any, cast
 
 import yaml
-from auto_pm.core.constants import get_template_name
-from auto_pm.core.paths import PROJECT_INIT_PATH, WORKSPACE_PROJECTS_SUBDIR
-from auto_pm.core.project_scanner import ProjectScanner
-from auto_pm.db.connection import DatabaseManager
-from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
-from auto_pm.models import ProjectInfo, ProjectListItem, ProjectRecord
-from auto_pm.models.project import extract_business_line
-from auto_pm.utils.file_utils import StaleFileError, get_mtime, write_file
+
+from auto_pm.application.core.constants import get_template_name
+from auto_pm.application.core.paths import PROJECT_INIT_PATH, WORKSPACE_PROJECTS_SUBDIR
+from auto_pm.application.core.project_scanner import ProjectScanner
+from auto_pm.domain.models import ProjectInfo, ProjectListItem, ProjectRecord
+from auto_pm.domain.models.project import extract_business_line
+from auto_pm.infrastructure.db.connection import DatabaseManager
+from auto_pm.infrastructure.db.repository import ChangeRequestRepository, ProjectRepository
+from auto_pm.infrastructure.utils.file_utils import StaleFileError, get_mtime, write_file
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ class ProjectService:
         Returns:
             项目列表，按 project_id 排序
         """
-        return cast(list[ProjectInfo], self._scanner.scan(scan_depth=scan_depth))
+        return self._scanner.scan(scan_depth=scan_depth)
 
     def list_projects_cached(self) -> list[ProjectInfo]:
         """从 DB 缓存读取项目列表（不扫描文件系统）
@@ -845,12 +846,12 @@ class ProjectService:
             raise RuntimeError("未注入 DatabaseManager，无法同步缓存")
 
         # 延迟导入避免循环依赖
-        from auto_pm.change.change_service import ChangeService
-        from auto_pm.db.sync import SyncService
+        from auto_pm.domain.change.change_service import ChangeService
+        from auto_pm.infrastructure.db.sync import SyncService
 
         change_service = ChangeService(workspace_root=self.workspace_root, db=self.db)
         sync = SyncService(self.db, self, change_service=change_service)
-        return cast(dict[str, Any], sync.sync(force_full=force_full))
+        return sync.sync(force_full=force_full)
 
     def get_last_sync_time(self) -> str:
         """获取上次同步时间（M3-Iter5：UI 层不再直接访问 Repository）
@@ -861,7 +862,7 @@ class ProjectService:
         if self.db is None:
             return "—"
         try:
-            from auto_pm.db.repository import ScanLogRepository
+            from auto_pm.infrastructure.db.repository import ScanLogRepository
 
             repo = ScanLogRepository(self.db)
             latest = repo.get_latest()
@@ -1026,17 +1027,17 @@ class ProjectService:
     @staticmethod
     def _extract_id_from_dirname(project_path: str) -> str:
         """[已委托] 从目录名提取项目编号（向后兼容包装）"""
-        return cast(str, ProjectScanner.extract_id_from_dirname(project_path))
+        return ProjectScanner.extract_id_from_dirname(project_path)
 
     @staticmethod
     def _infer_stack(src_path: str) -> str:
         """[已委托] 根据模板源路径推断技术栈（向后兼容包装）"""
-        return cast(str, ProjectScanner.infer_stack(src_path))
+        return ProjectScanner.infer_stack(src_path)
 
     @staticmethod
     def _get_project_mtime(project_path: str) -> float:
         """[已委托] 获取项目标志文件的 mtime（向后兼容包装）"""
-        return cast(float, ProjectScanner.get_project_mtime(project_path))
+        return ProjectScanner.get_project_mtime(project_path)
 
     def is_git_hooks_installed(self, project_path: str) -> bool:
         """检查指定项目是否已安装 auto-pm Git 提交门禁钩子"""
