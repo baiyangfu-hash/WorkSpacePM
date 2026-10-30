@@ -15,6 +15,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from auto_pm.application.core.governance_service import GovernanceService
+from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()
 
@@ -150,7 +151,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
 
 
 @click.command("doctor")
-@click.option("-w", "--workspace", type=click.Path(exists=True), help="工作空间根目录")
+@click.option("-w", "--workspace", type=CallerPath(exists=True), help="工作空间根目录")
 def doctor_command(workspace: str | None) -> None:
     """执行 auto-pm 环境与依赖健康诊断"""
     console.print(Panel.fit("[bold blue]auto-pm 环境与依赖健康诊断[/bold blue]", border_style="blue"))

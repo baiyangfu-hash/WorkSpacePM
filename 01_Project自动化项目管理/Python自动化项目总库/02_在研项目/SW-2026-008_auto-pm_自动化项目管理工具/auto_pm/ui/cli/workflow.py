@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from auto_pm.domain.constraint.workflow import WorkflowEngine
+from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.pm import pm_group
 
 console = Console()
@@ -81,7 +82,7 @@ def list_workflows(ctx: click.Context) -> None:
 
 @workflow_group.command(name="run", help="运行指定工作流")
 @click.argument("name")
-@click.option("--file", "-f", "file_path", type=click.Path(exists=True), help="目标文件路径")
+@click.option("--file", "-f", "file_path", type=CallerPath(exists=True), help="目标文件路径")
 @click.pass_context
 def run_workflow(ctx: click.Context, name: str, file_path: str | None) -> None:
     workspace_root = _resolve_workspace(ctx)

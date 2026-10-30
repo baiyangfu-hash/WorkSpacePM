@@ -42,6 +42,7 @@ from auto_pm.core.constants import (
 from auto_pm.core.paths import WORKSPACE_PROJECTS_SUBDIR
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.template_service import TemplateService
+from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
@@ -879,7 +880,7 @@ _PROJECTS_SUBDIR = WORKSPACE_PROJECTS_SUBDIR  # M3-Iter6: 从 core.paths 读取
 
 
 @project_group.command(name="import")
-@click.argument("path", type=click.Path(exists=True, file_okay=False))
+@click.argument("path", type=CallerPath(exists=True, file_okay=False))
 @click.option("--move", is_flag=True, help="移动而非复制（默认复制）")
 @click.option("--force", is_flag=True, help="强制覆盖已存在的目标目录")
 @click.option(

@@ -48,6 +48,7 @@ from auto_pm.domain.vartable.parsers.format_detector import (
     list_supported_formats,
 )
 from auto_pm.domain.vartable.utils.encoding import SUPPORTED_ENCODINGS, detect_encoding
+from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()
 
@@ -134,7 +135,7 @@ def vartable_group() -> None:
     default="table",
     help="输出格式",
 )
-@click.argument("file_path", type=click.Path(exists=True, dir_okay=False, resolve_path=True))
+@click.argument("file_path", type=CallerPath(exists=True, dir_okay=False, resolve_path=True))
 def parse_command(file_path: str, fmt: str | None, output_fmt: str) -> None:
     """解析变量表文件，输出条目详情。
 
@@ -329,7 +330,7 @@ def _print_channel_table_detail(result: ParseResult) -> None:
 
 @vartable_group.command(name="detect-encoding")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text", help="输出格式")
-@click.argument("file_path", type=click.Path(exists=True, dir_okay=False, resolve_path=True))
+@click.argument("file_path", type=CallerPath(exists=True, dir_okay=False, resolve_path=True))
 def detect_encoding_command(file_path: str, fmt: str) -> None:
     """检测文件编码。
 
@@ -409,7 +410,7 @@ def list_formats_command(fmt: str) -> None:
 
 @vartable_group.command(name="detect-format")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text", help="输出格式")
-@click.argument("file_path", type=click.Path(exists=True, dir_okay=False, resolve_path=True))
+@click.argument("file_path", type=CallerPath(exists=True, dir_okay=False, resolve_path=True))
 def detect_format_command(file_path: str, fmt: str) -> None:
     """识别文件格式。
 
@@ -455,11 +456,11 @@ def detect_format_command(file_path: str, fmt: str) -> None:
 @click.option(
     "--output",
     "output_path",
-    type=click.Path(dir_okay=False, resolve_path=True),
+    type=CallerPath(dir_okay=False, resolve_path=True),
     default=None,
     help="输出文件路径（默认输出到 stdout）",
 )
-@click.argument("file_path", type=click.Path(exists=True, dir_okay=False, resolve_path=True))
+@click.argument("file_path", type=CallerPath(exists=True, dir_okay=False, resolve_path=True))
 def convert_command(
     file_path: str,
     fmt: str | None,
@@ -523,7 +524,7 @@ def convert_command(
     default="table",
     help="输出格式",
 )
-@click.argument("dir_path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.argument("dir_path", type=CallerPath(exists=True, file_okay=False, resolve_path=True))
 def batch_parse_command(dir_path: str, recursive: bool, output_fmt: str) -> None:
     """批量解析目录下多个变量表文件。
 

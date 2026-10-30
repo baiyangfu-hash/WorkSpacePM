@@ -10,6 +10,7 @@ import click
 
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.dogfood_runner import DogfoodIsolationError, DogfoodRunner
+from auto_pm.ui.cli.caller_path import CallerPath
 
 
 def _workspace(ctx: click.Context) -> Path:
@@ -47,12 +48,12 @@ def dogfood_group() -> None:
 @click.option(
     "--candidate-path",
     required=True,
-    type=click.Path(file_okay=False, path_type=Path),
+    type=CallerPath(file_okay=False, path_type=Path),
     help="新候选 worktree 路径（必须位于 .auto-pm/worktrees/）",
 )
 @click.option(
     "--stable-path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=CallerPath(exists=True, file_okay=False, path_type=Path),
     default=None,
     help="稳定控制面路径，默认是工作空间根目录",
 )
@@ -85,12 +86,12 @@ def prepare_dogfood(
 @click.option(
     "--candidate-path",
     required=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=CallerPath(exists=True, file_okay=False, path_type=Path),
     help="候选 worktree 路径（必须位于 .auto-pm/worktrees/）",
 )
 @click.option(
     "--stable-path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=CallerPath(exists=True, file_okay=False, path_type=Path),
     default=None,
     help="稳定控制面路径，默认是工作空间根目录",
 )
@@ -117,12 +118,12 @@ def inspect_dogfood(
 @click.option(
     "--candidate-path",
     required=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=CallerPath(exists=True, file_okay=False, path_type=Path),
     help="候选 worktree 路径（必须位于 .auto-pm/worktrees/）",
 )
 @click.option(
     "--stable-path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=CallerPath(exists=True, file_okay=False, path_type=Path),
     default=None,
     help="稳定控制面路径，默认是工作空间根目录",
 )

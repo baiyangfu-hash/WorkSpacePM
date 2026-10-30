@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -106,6 +107,8 @@ def test_main_pins_child_to_workspace_owning_container(
     assert isinstance(environment, dict)
     assert environment["AUTO_PM_WORKSPACE"] == str(workspace_root)
     assert captured["cwd"] == container / "releases" / "1.2.4-test"
+    # relative path arguments keep meaning the caller's folder although the release runs in its own (TD-SW008-232)
+    assert environment["AUTO_PM_CALLER_CWD"] == os.getcwd()
 
 
 def test_release_child_reports_the_entry_as_main_py_not_dash_c(tmp_path: Path) -> None:
