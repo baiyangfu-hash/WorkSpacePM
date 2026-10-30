@@ -143,6 +143,25 @@ def test_plan_lists_the_tds_named_by_the_change_order_but_proposes_no_payoff_for
     assert "TD-SW008-321 已偿还" not in result.body
 
 
+def test_plan_lists_the_tds_when_the_project_keeps_its_change_orders_under_11_monitoring(lab: Lab) -> None:
+    work(lab)
+    folder = lab.root / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    folder.mkdir(parents=True)
+    (folder / f"{CHG}.md").write_text("TD-SW008-451\n", encoding="utf-8")
+
+    assert related_td_section(plan(lab).body) == "TD-SW008-451"
+
+
+def test_plan_prefers_04_monitoring_over_11_monitoring_when_both_hold_the_order(lab: Lab) -> None:
+    work(lab)
+    legacy = lab.root / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    legacy.mkdir(parents=True)
+    (legacy / f"{CHG}.md").write_text("TD-SW008-461\n", encoding="utf-8")
+    write_chg(lab, "TD-SW008-462\n")
+
+    assert related_td_section(plan(lab).body) == "TD-SW008-462"
+
+
 def test_plan_with_the_change_order_folder_but_not_that_file_plans_and_says_so(lab: Lab) -> None:
     work(lab)
     folder = lab.root / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"

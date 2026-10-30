@@ -34,12 +34,14 @@ from auto_pm.application.core.agent_worktree_service import (
     caller_agent,
 )
 from auto_pm.application.core.implementation_card_precheck import precheck_markdown_card
+from auto_pm.application.core.paths import PG_MONITORING_DIR
 from auto_pm.application.core.pr_body_builder import (
     TD_ID,
     CardFields,
     build_body,
     read_card_fields,
 )
+from auto_pm.domain.change.path_resolver import LEGACY_MONITORING_DIR
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
@@ -392,9 +394,10 @@ class PrOpenService:
         """
         change_dir = next(
             (
-                self._root / parent / "04_监控" / "01_变更管理" / "01_变更单"
+                self._root / parent / monitoring / "01_变更管理" / "01_变更单"
                 for parent in Path(task_card).parents
-                if (self._root / parent / "04_监控" / "01_变更管理" / "01_变更单").is_dir()
+                for monitoring in (PG_MONITORING_DIR, LEGACY_MONITORING_DIR)
+                if (self._root / parent / monitoring / "01_变更管理" / "01_变更单").is_dir()
             ),
             None,
         )
