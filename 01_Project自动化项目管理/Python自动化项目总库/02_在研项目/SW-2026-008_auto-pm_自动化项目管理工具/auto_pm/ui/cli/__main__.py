@@ -49,6 +49,7 @@ from rich.console import Console  # noqa: E402
 from auto_pm import __version__  # noqa: E402
 from auto_pm.app_context import AppContext  # noqa: E402
 from auto_pm.infrastructure.continuity_store import ContinuityStoreSchemaError  # noqa: E402
+from auto_pm.ui.cli.caller_path import anchor_to_caller  # noqa: E402
 from auto_pm.ui.cli.change import change_group  # noqa: E402
 from auto_pm.ui.cli.clean import clean_cmd  # noqa: E402
 from auto_pm.ui.cli.constraint import constraint_group  # noqa: E402
@@ -124,9 +125,10 @@ def cli(ctx: click.Context, workspace: str | None, control_root: str | None) -> 
     """
     ctx.ensure_object(AppContext)
     app_ctx: AppContext = ctx.obj
+    # The launcher runs the release from its own folder: a relative -w / --control-root means "from where the user typed the command".
     if workspace:
-        app_ctx.workspace_root = os.path.abspath(workspace)
-    app_ctx.control_root = os.path.abspath(control_root) if control_root else app_ctx.workspace_root
+        app_ctx.workspace_root = os.path.abspath(anchor_to_caller(workspace))
+    app_ctx.control_root = os.path.abspath(anchor_to_caller(control_root)) if control_root else app_ctx.workspace_root
 
 
 # 挂载子命令组

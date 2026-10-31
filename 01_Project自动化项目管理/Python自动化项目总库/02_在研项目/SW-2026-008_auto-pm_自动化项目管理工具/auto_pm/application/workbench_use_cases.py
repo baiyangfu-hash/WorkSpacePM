@@ -292,9 +292,15 @@ class WorkbenchUseCases:
             if not self.template_service:
                 return CommandOutcome(False, "TemplateService 未注入")
             from auto_pm.application.core.constants import get_template_name
-            from auto_pm.application.core.paths import get_default_projects_dir
+            from auto_pm.application.core.paths import (
+                ProjectDestinationError,
+                resolve_project_destination,
+            )
 
-            dest_root = os.path.abspath(dest_dir) if dest_dir else get_default_projects_dir()
+            try:
+                dest_root = resolve_project_destination(self.project_service.workspace_root, stack, dest_dir or None)
+            except ProjectDestinationError as error:
+                return CommandOutcome(False, str(error))
             project_dir = f"{project_id}_{project_name}"
             dest_path = os.path.abspath(os.path.join(dest_root, project_dir))
             if os.path.exists(dest_path):

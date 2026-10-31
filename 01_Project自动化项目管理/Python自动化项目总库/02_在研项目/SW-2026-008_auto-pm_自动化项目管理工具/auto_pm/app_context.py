@@ -52,7 +52,8 @@ class AppContext:
                     pass
         if not workspace_root:
             # 向上攀爬搜寻包含关键特征标识的顶级工作空间根目录
-            curr = os.path.abspath(os.getcwd())
+            # Started through the launcher the process sits in the release folder; the user's own folder is AUTO_PM_CALLER_CWD.
+            curr = os.path.abspath(os.environ.get("AUTO_PM_CALLER_CWD") or os.getcwd())
             while True:
                 anchors = [
                     ".auto-pm",
