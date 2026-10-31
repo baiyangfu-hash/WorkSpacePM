@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any
 
 
 def _fix_windows_encoding() -> None:
@@ -93,6 +94,17 @@ class _CliGroup(click.Group):
     The store already refuses to touch such a database; without this the refusal reached the terminal as a raw
     Python traceback (TD-SW008-161).
     """
+
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        """Never let click expand wildcards in the arguments on Windows (F20).
+
+        click globs every argument itself on Windows, so ``--scope 目录/**`` turned into a list of file names and
+        failed with "unexpected extra arguments".  Neither cmd.exe nor PowerShell expands wildcards, and the Work scope
+        rule (``dir/**``) wants the pattern text as typed.
+        """
+
+        kwargs.setdefault("windows_expand_args", False)
+        return super().main(*args, **kwargs)
 
     def invoke(self, ctx: click.Context) -> object:
         try:

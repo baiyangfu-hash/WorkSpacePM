@@ -45,9 +45,19 @@ def _canonical_key(path: Path) -> str:
 
 
 def authority_path_parts(raw: str, *, windows: bool | None = None) -> tuple[str, ...]:
-    """Return component-aware authority identity using host-appropriate casing."""
+    """Return component-aware authority identity using host-appropriate casing.
+
+    A trailing ``/**`` (or ``/**/*``) means "everything below" and names the same authority as the directory itself, since a
+    root already covers everything under it (F20): ``dir/**`` is ``dir``.  A pattern that is nothing but ``**`` names no
+    directory, so it names no authority at all and covers nothing.  Wildcards anywhere else are not supported and stay
+    literal text, which never matches a real file.
+    """
 
     parts = PurePosixPath(str(raw).replace("\\", "/")).parts
+    if parts[-2:] == ("**", "*"):
+        parts = parts[:-2]
+    while parts and parts[-1] == "**":
+        parts = parts[:-1]
     fold = os.name == "nt" if windows is None else windows
     return tuple(part.casefold() for part in parts) if fold else parts
 
