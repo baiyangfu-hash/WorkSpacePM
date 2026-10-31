@@ -29,9 +29,13 @@ from auto_pm.domain.spec.services.fix_svc import FixResult, can_auto_fix
 from auto_pm.domain.spec.services.frontmatter_svc import FrontmatterService
 from auto_pm.domain.spec.services.index_svc import IndexService
 from auto_pm.domain.spec.services.report_svc import ReportService
+from auto_pm.ui.cli.approval_pin import refuse_agent_approval
 from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()
+
+# Obsidian 规范库只能由用户批准后改写（AGENTS.md 知识库迭代铁律）；agent 会话没有用户原话凭据就拒绝。
+SPEC_WRITE_ACTION = "改写 Obsidian 规范库（索引、frontmatter、自动修复）"
 
 _SEVERITY_ICONS = {Severity.ERROR: "🔴", Severity.WARNING: "🟡", Severity.INFO: "🟢"}
 _SEVERITY_COLORS = {Severity.ERROR: "red", Severity.WARNING: "yellow", Severity.INFO: "green"}
@@ -153,6 +157,12 @@ def spec_group() -> None:
 )
 @click.option("--quiet", is_flag=True, help="只输出 ERROR 级别结果 + 退出码")
 @click.option("--verbose", "-v", is_flag=True, help="显示详细 diff 信息（版本差异/文件路径等）")
+@click.option(
+    "--approval-evidence-ref",
+    "approval_evidence_ref",
+    default="",
+    help="agent 会话改写规范库时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
+)
 @click.pass_context
 def cmd_check(
     ctx: click.Context,
@@ -167,8 +177,11 @@ def cmd_check(
     config_path: Path | None,
     quiet: bool,
     verbose: bool,
+    approval_evidence_ref: str,
 ) -> None:
-    """运行规范健康检查（SHC-001~010）"""
+    """运行规范健康检查（SHC-001~010）；--fix 会改写规范库文件"""
+    if auto_fix and not dry_run:
+        refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
     ws = _resolve_workspace(workspace, ctx)
     ws_config = _load_ws_config(config_path, ws)
 
@@ -339,11 +352,23 @@ def _output_check_table(
     help="工作空间配置文件路径(YAML，含 spec_dirs/registry_path/output_paths)",
 )
 @click.option("--quiet", is_flag=True, help="只输出错误信息，不输出成功生成结果")
+@click.option(
+    "--approval-evidence-ref",
+    "approval_evidence_ref",
+    default="",
+    help="agent 会话改写规范库时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
+)
 @click.pass_context
 def cmd_index(
-    ctx: click.Context, workspace: str | None, domain: str, config_path: Path | None, quiet: bool
+    ctx: click.Context,
+    workspace: str | None,
+    domain: str,
+    config_path: Path | None,
+    quiet: bool,
+    approval_evidence_ref: str,
 ) -> None:
-    """生成规范索引文件"""
+    """生成规范索引文件（会改写规范库里的索引文件）"""
+    refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
     ws = _resolve_workspace(workspace, ctx)
     ws_config = _load_ws_config(config_path, ws)
     svc = IndexService(ws, config=ws_config)
@@ -379,6 +404,12 @@ def cmd_index(
     help="工作空间配置文件路径(YAML，含 spec_dirs/registry_path/output_paths)",
 )
 @click.option("--quiet", is_flag=True, help="只输出错误信息，不输出扫描/预览结果")
+@click.option(
+    "--approval-evidence-ref",
+    "approval_evidence_ref",
+    default="",
+    help="agent 会话改写规范库时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
+)
 @click.pass_context
 def cmd_frontmatter(
     ctx: click.Context,
@@ -387,11 +418,14 @@ def cmd_frontmatter(
     spec_id: str | None,
     config_path: Path | None,
     quiet: bool,
+    approval_evidence_ref: str,
 ) -> None:
     """检查/同步规范 frontmatter
 
     默认仅预览将添加的 frontmatter；使用 --fix 实际写入。
     """
+    if fix:
+        refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
     ws = _resolve_workspace(workspace, ctx)
     ws_config = _load_ws_config(config_path, ws)
     svc = FrontmatterService(ws, config=ws_config)
@@ -730,14 +764,23 @@ def cmd_lint(
 @spec_group.command("sync")
 @click.option("-w", "--workspace", default=None, help="工作空间根目录（未指定时回退全局 -w）")
 @click.option("--config", "config_path", default=None, type=CallerPath(), help="工作空间配置文件路径")
+@click.option(
+    "--approval-evidence-ref",
+    "approval_evidence_ref",
+    default="",
+    help="agent 会话改写规范库时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
+)
 @click.pass_context
-def sync(ctx: click.Context, workspace: str | None, config_path: str | None) -> None:
+def sync(
+    ctx: click.Context, workspace: str | None, config_path: str | None, approval_evidence_ref: str
+) -> None:
     """一键全量同步与重构 Obsidian 全局规范仓库 (DEV-030 V2.2.0)
 
     流水线原子操作：
     1. 重新生成 00_INDEX_全局规范索引.md 及各业务线通用规范 README
     2. 执行全局规范健康检查 (SHC-001~014)
     """
+    refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
     ws = _resolve_workspace(workspace, ctx)
     ws_config = _load_ws_config(Path(config_path) if config_path else None, ws)
     unicode_output = _supports_unicode_output()
