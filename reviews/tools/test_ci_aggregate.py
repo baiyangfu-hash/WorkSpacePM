@@ -194,3 +194,13 @@ def test_sw008_ci_mypy_step_checks_tests_as_well_as_the_product() -> None:
     command = next(line for line in step.splitlines() if "python -m mypy" in line)
     assert command.split()[-2:] == ["auto_pm", "tests"]
     assert "--platform win32" in command and "continue-on-error" not in step
+
+
+def test_root_tests_workflow_also_runs_the_sw010_project_tests_with_its_own_dependencies() -> None:
+    """SW-2026-010（驾驶舱 A6 验证套件）的 tests/ 此前没有任何 CI 在跑；root-tests 作业补跑，并装上它需要的 click、rich。"""
+    text = (WORKFLOWS / "root-tests.yml").read_text(encoding="utf-8")
+    assert "SW-2026-010_驾驶舱A6Python验证套件" in text
+    step = text[text.index("      - name: SW-2026-010 project tests") :]
+    assert "working-directory:" in step and "-m pytest" in step and step.rstrip().endswith("tests")
+    install = next(line for line in text.splitlines() if "pip install pytest" in line)
+    assert "click==" in install and "rich==" in install
