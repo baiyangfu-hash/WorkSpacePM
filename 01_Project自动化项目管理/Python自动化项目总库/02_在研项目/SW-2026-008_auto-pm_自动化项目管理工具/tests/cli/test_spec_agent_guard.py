@@ -27,12 +27,12 @@ WRITING = {
     "sync": ["sync"],
     "frontmatter --fix": ["frontmatter", "--fix"],
     "check --fix": ["check", "--fix"],
+    "report (default path is inside the library)": ["report"],
 }
 NOT_WRITING = {
     "check": ["check"],
     "check --fix --dry-run": ["check", "--fix", "--dry-run"],
     "frontmatter (preview)": ["frontmatter"],
-    "report": ["report"],
 }
 
 
@@ -109,4 +109,29 @@ def test_previews_and_read_only_commands_are_not_refused_in_an_agent_session(
     monkeypatch.setenv("CLAUDECODE", "1")
     result = _run(NOT_WRITING[name])
     assert "agent 会话" not in result.output  # type: ignore[attr-defined]
+    assert untouched
+
+
+def test_report_into_the_library_needs_the_users_evidence(
+    monkeypatch: pytest.MonkeyPatch, untouched: list[str], tmp_path: Path
+) -> None:
+    monkeypatch.setenv("CLAUDECODE", "1")
+    inside = tmp_path / spec_cli.SPEC_LIBRARY_DIR / "sub" / "r.md"
+    for target in (inside, tmp_path / spec_cli.SPEC_LIBRARY_DIR / "r.md"):
+        result = _run(["report", "-w", str(tmp_path), "-o", str(target)])
+        assert result.exit_code != 0 and "agent 会话" in result.output  # type: ignore[attr-defined]
+    assert untouched == []
+    ok = _run(["report", "-w", str(tmp_path), "-o", str(inside), "--approval-evidence-ref", GOOD_EVIDENCE])
+    assert "agent 会话" not in ok.output  # type: ignore[attr-defined]
+    assert untouched
+
+
+def test_report_outside_the_library_is_not_refused_in_an_agent_session(
+    monkeypatch: pytest.MonkeyPatch, untouched: list[str], tmp_path: Path
+) -> None:
+    monkeypatch.setenv("CLAUDECODE", "1")
+    # 名字相近的兄弟目录不是规范库
+    for target in (tmp_path / "out.md", tmp_path / (spec_cli.SPEC_LIBRARY_DIR + "_copy") / "r.md"):
+        result = _run(["report", "-w", str(tmp_path), "-o", str(target)])
+        assert "agent 会话" not in result.output  # type: ignore[attr-defined]
     assert untouched

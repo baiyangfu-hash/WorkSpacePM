@@ -35,6 +35,7 @@ from auto_pm.ui.cli.caller_path import CallerPath
 console = Console()
 
 # Obsidian 规范库只能由用户批准后改写（AGENTS.md 知识库迭代铁律）；agent 会话没有用户原话凭据就拒绝。
+SPEC_LIBRARY_DIR = "00_Obsidian_Base全局规范文件仓库"
 SPEC_WRITE_ACTION = "改写 Obsidian 规范库（索引、frontmatter、自动修复）"
 
 _SEVERITY_ICONS = {Severity.ERROR: "🔴", Severity.WARNING: "🟡", Severity.INFO: "🟢"}
@@ -495,6 +496,16 @@ def cmd_frontmatter(
         )
 
 
+def _report_lands_in_library(ws: Path, output: str | None) -> bool:
+    """报告会不会落进规范库目录（默认路径就在库里）。"""
+    if not output:
+        return True
+    library = (ws / SPEC_LIBRARY_DIR).resolve()
+    target = Path(output).expanduser()
+    target = (target if target.is_absolute() else Path.cwd() / target).resolve()
+    return target == library or library in target.parents
+
+
 @spec_group.command(name="report")
 @click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
 @click.option("--output", "-o", default=None, help="输出文件路径")
@@ -513,6 +524,12 @@ def cmd_frontmatter(
     help="工作空间配置文件路径(YAML，含 spec_dirs/registry_path/output_paths)",
 )
 @click.option("--quiet", is_flag=True, help="成功时不输出，仅失败时输出错误")
+@click.option(
+    "--approval-evidence-ref",
+    "approval_evidence_ref",
+    default="",
+    help="agent 会话把报告写进规范库目录（不带 --output 或 --output 指向规范库内）时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
+)
 @click.pass_context
 def cmd_report(
     ctx: click.Context,
@@ -521,9 +538,13 @@ def cmd_report(
     fmt: str,
     config_path: Path | None,
     quiet: bool,
+    approval_evidence_ref: str,
 ) -> None:
     """生成规范元数据汇总报告"""
     ws = _resolve_workspace(workspace, ctx)
+    # 不带 --output 时报告默认写进规范库目录；--output 指到规范库里同样是写规范库
+    if _report_lands_in_library(ws, output):
+        refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
     ws_config = _load_ws_config(config_path, ws)
     svc = ReportService(ws, config=ws_config)
     output_path = Path(output) if output else None
