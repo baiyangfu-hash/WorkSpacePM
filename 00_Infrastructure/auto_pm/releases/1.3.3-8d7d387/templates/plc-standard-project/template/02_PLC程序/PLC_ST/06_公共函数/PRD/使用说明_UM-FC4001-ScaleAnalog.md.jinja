@@ -1,0 +1,26 @@
+# FC_4001_ScaleAnalog 使用说明书
+
+> **项目编号**: {{ project_id }}  
+> **函数**: `FC_4001_ScaleAnalog`  
+> **版本号**: {{ version }}  
+> **编制人**: {{ author }}  
+> **更新日期**: {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }}  
+> **规范依据**: DEV-001 / LSP-905 / LSP-907  
+
+---
+
+## 1. 调用方法
+
+FC 没有实例，直接在调用处使用返回值（示例：在某个工位 FB 内把压力传感器的原始值换算为 0~10 bar）：
+```scl
+s_rPressureBar := FC_4001_ScaleAnalog(i_iRawValue := i_iPressureRaw, i_rEngLow := 0.0, i_rEngHigh := 10.0);
+```
+
+调用了本 FC 的块，要把本 FC 登记到方案级 `00_程序方案/接口文档_INT.md` 的“FC 调用表”。
+
+---
+
+## 2. 注意事项
+
+1. 原始值超出 0..27648 时按边界处理，不会外推；需要断线或超量程诊断时，由调用方在换算之前自行判断；
+2. 本 FC 不读写全局变量，也不保存状态，可以在任意周期、任意块里重复调用。

@@ -1,0 +1,28 @@
+# {{ project_name }} 详细设计说明书
+
+> **项目编号**: {{ project_id }}  
+> **项目名称**: {{ project_name }}  
+> **版本号**: {{ version }}  
+> **编制人**: {{ author }}  
+> **更新日期**: {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }}  
+> **规范依据**: DEV-001 / LSP-907 / PROJ-016  
+
+---
+
+## 1. 软件架构体系
+
+系统采用 5 层整洁架构：
+1. **硬件抽象层 (HAL)**: 传感器、气缸磁簧消抖与电磁阀驱动；
+2. **设备控制层 (Device)**: `FB_1001_Station1`、`FB_3001_ExternalInteraction`；
+3. **报警诊断层 (Diagnostics)**: `FB_2001_CommonAlarm_AllStation`；
+4. **全局总线层 (Bus)**: `GlobalVars.db`；
+5. **组织调度层 (OB)**: `OB1.scl`。
+
+---
+
+## 2. 状态机与防错安全机制
+
+工位 1 状态机遵循严格的前置互锁判定：
+- 仅当安全门关闭且气压正常时允许自动运转；
+- 气缸动作超时采用 `FB_TONR` + `DINT` 毫秒计时器判定；
+- 模式禁用或报警时，内部子功能块维持末尾单点扫描，杜绝双重调用。

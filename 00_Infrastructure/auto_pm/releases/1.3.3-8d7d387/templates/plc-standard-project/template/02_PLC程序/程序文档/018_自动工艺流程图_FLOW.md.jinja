@@ -1,0 +1,42 @@
+---
+spec_id: FLOW-018
+title: "{{ project_name }} 自动工艺流程图 (FLOW)"
+project_id: "{{ project_id }}"
+version: "V1.0.0"
+domain: plc
+---
+
+# 自动工艺流程图 - {{ project_id }} {{ project_name }}
+
+## 1. 全机自动运行主流程
+
+```mermaid
+flowchart TD
+    Start([上电复位 / 原点回归完成]) --> WaitAuto[等待自动启动指令]
+    WaitAuto --> CheckCond{启动前置条件检查}
+    CheckCond --正常--> Infeed[工位 1: 进料与输送]
+    Infeed --> RobotPick[工位 2: 机械手取料]
+    RobotPick --> ProcessAux[工位 3: 辅助工艺处理]
+    ProcessAux --> RobotPlace[工位 2: 机械手放料与码垛]
+    RobotPlace --> AlignCheck[工位 4: 纠偏与对齐]
+    AlignCheck --> CycleCheck{整批/整托完成?}
+    CycleCheck --否--> Infeed
+    CycleCheck --是--> Outfeed[出料放行 / 通知下游]
+    Outfeed --> End([工单完成])
+```
+
+## 2. 各工位状态机步序定义
+
+### 2.1 工位 1 状态机
+- **Step 0**: 待机就绪
+- **Step 1**: 检测来料
+- **Step 2**: 输送推进
+- **Step 3**: 到位阻挡并输出准备就绪信号
+
+### 2.2 工位 2 (移载机械手) 状态机
+- **Step 10**: 待机位置
+- **Step 11**: 移动至取料位 (X/Z)
+- **Step 12**: 夹爪夹紧 / 吸附
+- **Step 13**: 提升并平移至放料位
+- **Step 14**: 下降并释放工件
+- **Step 15**: 返回安全待机位

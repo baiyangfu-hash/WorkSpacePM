@@ -1,0 +1,27 @@
+---
+project_id: {{ project_id }}
+project_name: {{ project_name }}
+project_type: {{ project_type | default('single_machine') }}
+business_line: {{ business_line }}
+created_date: 2026-08-23
+author: PM_Workflow
+version: {{ version | default('V1.0.0') }}
+status: approved
+---
+
+# 项目立项表 - {{ project_id }} {{ project_name }}
+
+## 1. 项目基本信息
+
+- **项目编号**：`{{ project_id }}`
+- **项目名称**：`{{ project_name }}`
+- **项目定性**：工业自动化标准单机/产线控制系统
+- **技术栈**：{{ plc_vendor | default('Siemens') }} {{ plc_model | default('S7-1500') }} PLC (SCL 结构化文本) + 工业暗黑 SCADA HMI 原型
+- **架构标准**：遵循 STD-901 架构规范与 DJ-2026-005 标杆工程（全工站结构体整块传递 Struct Chunk Passing、GlobalVars.db 数据总线）。
+- **设计产能指标**：
+  - 标准设计节拍：≤ 30s/周期；
+  - 运行模式：支持全自动、单步调试、手动点动、自动寻原点、排空清线、周期暂停 8 大 OMAC 模式 (STD-830)。
+
+## 2. 设备物理构成与工位规划
+- **1#工位 动作机构**：包含主动作气缸与输送电机；
+- **5#工位 公共报警与状态机**：OMAC 8 大模式状态机与汽车级毫秒级首出报警矩阵 (STD-860)。

@@ -1,0 +1,7 @@
+name: "file-modify"
+description: "文件预检防护与修改编排工作流"
+steps:
+  - name: "文件前置快照登记"
+    action: "guard"
+  - name: "编码检测"
+    action: "check_encoding"
