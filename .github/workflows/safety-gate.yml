@@ -33,7 +33,10 @@ concurrency:
 
 jobs:
   safety:
-    if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+    # A fresh event on a PR that is already merged or closed (e.g. its description edited afterwards) has nothing left to judge: skip the job (grey), not green.
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open')
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.issue.state == 'open')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -51,6 +54,14 @@ jobs:
             echo "head_sha=$(jq -r .head.sha "$RUNNER_TEMP/pr.json")"
             echo "state=$(jq -r .state "$RUNNER_TEMP/pr.json")"
           } >> "$GITHUB_OUTPUT"
+
+      # A re-run of an old run, or a PR merged while this job ran, reads state `closed` here.  Passing quietly would look like "the re-run passed"
+      # although nothing was judged and no `safety-zone` status was written (TD-SW008-222), so the job fails and says why.
+      - name: Refuse to judge a PR that is no longer open
+        if: steps.pr.outputs.state != 'open'
+        run: |
+          echo "::error::PR #$PR_NUMBER 已合并或已关闭，安全区检查没有重新判定，也没有写 safety-zone 状态；合并前最后一次的 safety-zone 状态才是结论。"
+          exit 1
 
       - name: Mark the check pending
         if: steps.pr.outputs.base_ref == 'main' && steps.pr.outputs.state == 'open'
@@ -114,8 +125,9 @@ jobs:
             -f state="$(jq -r .state "$RUNNER_TEMP/status.json")" \
             -f description="$(jq -r .description "$RUNNER_TEMP/status.json")" > /dev/null
 
+      # Not for a closed PR: its last real `safety-zone` status must stay as it was, and the refusal above is not an error of the check itself.
       - name: Report an error status
-        if: failure() && steps.pr.outputs.head_sha
+        if: failure() && steps.pr.outputs.head_sha && steps.pr.outputs.state == 'open'
         env:
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         run: |
