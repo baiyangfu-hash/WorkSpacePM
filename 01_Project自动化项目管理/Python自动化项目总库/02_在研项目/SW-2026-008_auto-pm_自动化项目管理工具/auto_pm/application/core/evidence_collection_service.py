@@ -1923,7 +1923,7 @@ def _plc_language_service() -> LanguageService | None:
 
     # TD-SW008-188：每次调用插件命令行的时限取插件默认值与质量门时限中较小的一个（至少 1 秒），
     # 即单次调用最多 min(600, T) 秒。门禁超时被放弃时，它起的命令行子进程连同子孙进程由 _run_bounded 收掉，
-    # 此后线程再起新的子进程也会被拒（TD-SW008-188，process_scope）；线程本身仍只能自己结束。
+    # 此后线程再起新的子进程也会被拒（TD-SW008-188，process_scope）；线程本身会被注入中止异常，纯 Python 的活立刻停，卡在 C 调用里的才会遗留（记数并写进超时信息）。
     return default_language_service(timeout=max(1, min(DEFAULT_TIMEOUT_SECONDS, math.ceil(_quality_gate_timeout_seconds()))))
 
 
@@ -1963,10 +1963,17 @@ def _run_bounded(work: Callable[[], tuple[str, int | None]], seconds: float) -> 
     Python cannot kill a thread, so a wedged check is abandoned (daemon, read-only) and the
     gate is reported as not run; it can never hold the whole verification forever.  The child
     processes it started (the Siemens command line) are killed with their process trees and
-    none may start afterwards (TD-SW008-188); the thread itself still just ends on its own.
+    none may start afterwards (TD-SW008-188).  The thread itself gets an exception raised in it
+    (``reclaim_thread``): pure-Python work ends at once; a thread stuck inside one C call stays
+    behind, is counted in ``leaked_threads`` and the timeout message says so.
     """
 
-    from auto_pm.infrastructure.process_scope import ProcessScope
+    from auto_pm.infrastructure.process_scope import (
+        GateAbandonedError,
+        ProcessScope,
+        leaked_threads,
+        reclaim_thread,
+    )
 
     outcome: list[tuple[str, int | None]] = []
     failure: list[BaseException] = []
@@ -1975,16 +1982,27 @@ def _run_bounded(work: Callable[[], tuple[str, int | None]], seconds: float) -> 
     def target() -> None:
         scope.enter()
         try:
-            outcome.append(work())
-        except BaseException as error:  # re-raised on the caller's thread below
-            failure.append(error)
+            try:
+                outcome.append(work())
+            except GateAbandonedError:  # the supervisor gave up on this gate (TD-SW008-188): stop quietly
+                return
+            except BaseException as error:  # re-raised on the caller's thread below
+                failure.append(error)
+        except GateAbandonedError:  # raised while the handler above was running
+            return
 
     worker = threading.Thread(target=target, name="plc-quality-gate", daemon=True)
     worker.start()
     worker.join(seconds)
     if worker.is_alive():
         scope.cancel()
-        raise _PlcGateTimeoutError(f"PLC 质量门超过 {seconds:g} 秒没有结束，这次检查不算数")
+        message = f"PLC 质量门超过 {seconds:g} 秒没有结束，这次检查不算数"
+        if reclaim_thread(worker):
+            raise _PlcGateTimeoutError(f"{message}（检查线程已中止）")
+        raise _PlcGateTimeoutError(
+            f"{message}（检查线程卡在无法中断的调用里，已放弃但仍在后台；这个进程里累计遗留 {len(leaked_threads())} 个，"
+            "反复出现请重启驾驶舱进程）"
+        )
     if failure:
         raise failure[0]
     return outcome[0]

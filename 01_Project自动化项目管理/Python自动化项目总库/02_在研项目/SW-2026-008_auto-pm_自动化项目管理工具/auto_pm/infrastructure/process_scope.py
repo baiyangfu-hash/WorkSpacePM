@@ -10,23 +10,91 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import ctypes
 import os
 import signal
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-__all__ = ["GateCancelledError", "ProcessScope", "current_scope", "kill_process_tree", "run_in_scope"]
+__all__ = [
+    "GateAbandonedError",
+    "GateCancelledError",
+    "ProcessScope",
+    "current_scope",
+    "kill_process_tree",
+    "leaked_threads",
+    "reclaim_thread",
+    "run_in_scope",
+]
 
 _SCOPE: contextvars.ContextVar[ProcessScope | None] = contextvars.ContextVar("auto_pm_process_scope", default=None)
 _REAP_SECONDS = 5
+RECLAIM_GRACE_SECONDS = 3.0
+_RECLAIM_RETRY_SECONDS = 0.1
+_SETTLE_SECONDS = 0.5
 _WINDOWS = sys.platform == "win32"
 
 
 class GateCancelledError(OSError):
     """The gate was abandoned after its time limit; no further child process may start."""
+
+
+class GateAbandonedError(BaseException):  # noqa: N818 - deliberately not an Exception: ``except Exception`` in the checked code must not swallow it
+    """Raised inside an abandoned gate's thread by ``reclaim_thread`` so that pure-Python work stops at its next bytecode."""
+
+
+_LEAKED: list[threading.Thread] = []
+_LEAKED_LOCK = threading.Lock()
+
+
+def _raise_in_thread(thread: threading.Thread) -> bool:
+    """Ask the interpreter to raise ``GateAbandonedError`` in ``thread`` at its next bytecode; False if that was not possible."""
+
+    ident = thread.ident
+    if ident is None or not thread.is_alive():
+        return False
+    api = ctypes.pythonapi.PyThreadState_SetAsyncExc
+    changed = int(api(ctypes.c_ulong(ident), ctypes.py_object(GateAbandonedError)))
+    if changed > 1:  # more than one thread state matched: take it back, never hit an innocent thread
+        api(ctypes.c_ulong(ident), None)
+        return False
+    return changed == 1
+
+
+def reclaim_thread(thread: threading.Thread, grace: float | None = None) -> bool:
+    """Stop an abandoned gate thread if it can be stopped; True when it has ended.
+
+    Python cannot kill a thread, but it can raise an exception in one: pure-Python work (loops, string handling) ends at its next bytecode.
+    A call stuck inside C code (a regular-expression backtrack, a blocking system call) only ends when that call returns, so the thread
+    may outlive ``grace``; it is then remembered in ``leaked_threads`` instead of being silently forgotten.
+    """
+
+    deadline = time.monotonic() + max(0.0, RECLAIM_GRACE_SECONDS if grace is None else grace)
+    # first let the scope's own cancel run its course: a thread waiting on a killed child unwinds by itself with GateCancelledError
+    thread.join(_SETTLE_SECONDS)
+    while thread.is_alive():
+        _raise_in_thread(thread)
+        thread.join(_RECLAIM_RETRY_SECONDS)
+        if time.monotonic() >= deadline:
+            break
+    if thread.is_alive():
+        with _LEAKED_LOCK:
+            if thread not in _LEAKED:
+                _LEAKED.append(thread)
+        return False
+    return True
+
+
+def leaked_threads() -> list[threading.Thread]:
+    """Abandoned gate threads that are still running (threads that have since ended are dropped from the list)."""
+
+    with _LEAKED_LOCK:
+        _LEAKED[:] = [thread for thread in _LEAKED if thread.is_alive()]
+        return list(_LEAKED)
 
 
 def kill_process_tree(process: subprocess.Popen[str]) -> None:
