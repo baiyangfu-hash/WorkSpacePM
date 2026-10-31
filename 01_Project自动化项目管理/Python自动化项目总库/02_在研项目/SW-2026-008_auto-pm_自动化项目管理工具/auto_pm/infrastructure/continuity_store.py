@@ -6299,6 +6299,9 @@ class ContinuityStore:
             )
         if not evidence_ref.strip():
             raise ContinuityStoreError("延长持有上限必须带用户证据")
+        # CLI 入口已校验；存储层同样校验，绕过 CLI 直接调接口的脚本也写不进伪造凭据（反重力审计 SEC-005）
+        if problem := user_evidence_problem(evidence_ref.strip()):
+            raise ContinuityStoreError(f"{problem}；延长持有上限只听用户本人")
         with self._transaction() as conn:
             run = self._get_run(conn, run_id)
             if self._event_by_key(conn, idempotency_key) is None:
@@ -6376,7 +6379,15 @@ class ContinuityStore:
                 raise ContinuityStoreError("Handoff 源 owner 已失去 lease")
             if self._aware_timestamp(current.expires_at, "Handoff lease") <= observed_at:
                 raise ContinuityStoreError("Handoff lease 已过期")
-            expires_at = (observed_at + timedelta(seconds=lease_seconds)).isoformat()
+            # 移交和续租一样受总持有时长上限约束，否则 A→B→A 接力能无限续命（反重力审计 SEC-001）；
+            # 回收（reclaim）是用户签字过的恢复通道，不在此限
+            hold_end = self._lease_hold_end(conn, self._get_run(conn, handoff.run_id))
+            if observed_at >= hold_end:
+                raise ContinuityStoreError(
+                    f"本 Run 持有租约已达总时长上限（{hold_end.isoformat()}），拒绝移交；"
+                    "要继续只能由用户本人用 lease extend-hold 延长，或收口后重开"
+                )
+            expires_at = min(observed_at + timedelta(seconds=lease_seconds), hold_end).isoformat()
             event_time = observed_at.isoformat()
             cursor = conn.execute(
                 """UPDATE execution_leases

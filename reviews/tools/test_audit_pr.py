@@ -516,3 +516,11 @@ def test_main_exits_2_when_git_hangs(monkeypatch, capsys):
     monkeypatch.setattr(audit_pr.subprocess, "run", _hang)
     assert audit_pr.main(["1", "--offline", "--skip-ci-result"]) == 2
     assert "超过" in capsys.readouterr().err
+
+
+def test_an_unreadable_ci_workflow_means_ci_is_expected(tmp_path):
+    """反重力审计 SEC-002：读不到 CI 配置不能被读成“这个 PR 不需要 CI”。"""
+    run(tmp_path, "init", "-q", "-b", "main")
+    write(tmp_path, "a.txt", "x\n")
+    sha = commit(tmp_path, "no workflow here")
+    assert audit_pr.ci_path_patterns(sha, cwd=str(tmp_path)) is None

@@ -202,7 +202,7 @@ def ci_path_patterns(ref: str, cwd: str | None = None) -> list[str] | None:
     try:
         text = git("show", f"{ref}:{WORKFLOW_FILE}", cwd=cwd)
     except GitError:
-        return []
+        return None  # 读不到 CI 配置就按“每个 PR 都该跑”处理，宁严勿松（反重力审计 SEC-002）
     lines = text.splitlines()
     start = next((i for i, line in enumerate(lines) if line.strip() == "pull_request:"), None)
     if start is None:
@@ -322,8 +322,10 @@ def judge_ci(
     elif pending:
         status = "UNVERIFIED"
     elif not runs and not check_runs and not statuses:
-        status = "UNVERIFIED" if expected_ci else "PASS"
-        parts.append("应当跑 CI，但没有找到任何记录（可能还在排队）" if expected_ci else "没有 CI 运行，符合预期")
+        # 走不到：没有任何记录时 safety-zone 一定缺失，上面的 pending 已判 UNVERIFIED。留这一支只为把“无记录必不为 PASS”
+        # 钉死，哪怕将来有人改动 safety-zone 那条规则（反重力审计 SEC-002）。
+        status = "UNVERIFIED"
+        parts.append("没有找到任何 CI 记录（可能还在排队）" + ("" if expected_ci else "；按路径过滤本不该触发，仍须人工确认"))
     else:
         status = "PASS"
     detail = ", ".join(parts)
