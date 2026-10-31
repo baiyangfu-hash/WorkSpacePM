@@ -242,6 +242,37 @@ def test_new_or_changed_declarations_stay_errors() -> None:
     assert _lower_bound_hits(_LEGACY_DECL, "") == ["ERROR"]
 
 
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        "X" + _LEGACY_FILE.removeprefix("0100_PLC自动化/"),  # a name glued in front of the listed path is another folder
+        "0100_PLC自动化/" + "X" + _LEGACY_FILE.removeprefix("0100_PLC自动化/"),
+        _LEGACY_FILE + "/Other.scl",  # the listed path as a middle segment is not the listed file
+        _LEGACY_FILE.replace("FC_LogMsg.scl", "FC_LogMsg2.scl"),  # a neighbour in the same folder
+        _LEGACY_FILE.replace("FC_LogMsg.scl", "fc_logmsg.scl"),  # the match is case sensitive
+        _LEGACY_FILE.replace(".scl", ".scl.bak"),
+    ],
+    ids=["glued-prefix", "glued-after-root", "middle-segment", "neighbour-file", "case", "other-suffix"],
+)
+def test_legacy_match_is_by_whole_path_segments_only(file_path: str) -> None:
+    # TD-SW008-217: the list matches by path tail; a near miss must stay an ERROR, never ride on the warning
+    assert _lower_bound_hits(_LEGACY_DECL, file_path) == ["ERROR"]
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "LogBuffer   : ARRAY[0..31] OF STRING[256];  x := 1;",  # something else on the same line
+        "logbuffer   : ARRAY[0..31] OF STRING[256];",
+        "LogBuffer   : ARRAY[0..31] OF STRING[255];",
+        "LogBuffer   : ARRAY [0 .. 31] OF STRING[256];",  # only runs of blanks are squeezed; new blanks inside the brackets are an edit
+    ],
+    ids=["trailing-code", "name-case", "element-type", "spacing-in-brackets"],
+)
+def test_legacy_match_needs_the_declaration_text_to_be_the_same(declaration: str) -> None:
+    assert _lower_bound_hits(declaration, _LEGACY_FILE) == ["ERROR"]
+
+
 def test_repository_plc_sources_have_no_new_array_lower_bound_errors() -> None:
     """全仓库已入库的 PLC 源码：下界非 1 的只允许是清单里的存量（WARNING），清单外的新增一律 ERROR。"""
 
