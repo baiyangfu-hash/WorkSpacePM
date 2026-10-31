@@ -45,6 +45,8 @@ PROTECTED_PATTERNS = (
     ".cursor/rules/*",
     ".agent/rules/*",
     ".claude/*",
+    ".agents/skills.json",
+    "docs/handover/*",
     "SYS-2026-001_WorkspaceGovernance/approvers.json",
     ".github/workflows/*",
     "00_Obsidian_Base*",
