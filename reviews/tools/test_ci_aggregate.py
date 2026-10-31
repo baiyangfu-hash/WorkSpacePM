@@ -200,7 +200,18 @@ def test_root_tests_workflow_also_runs_the_sw010_project_tests_with_its_own_depe
     """SW-2026-010（驾驶舱 A6 验证套件）的 tests/ 此前没有任何 CI 在跑；root-tests 作业补跑，并装上它需要的 click、rich。"""
     text = (WORKFLOWS / "root-tests.yml").read_text(encoding="utf-8")
     assert "SW-2026-010_驾驶舱A6Python验证套件" in text
-    step = text[text.index("      - name: SW-2026-010 project tests") :]
+    step = text[text.index("      - name: SW-2026-010 project tests") :].split("\n\n")[0]
     assert "working-directory:" in step and "-m pytest" in step and step.rstrip().endswith("tests")
     install = next(line for line in text.splitlines() if "pip install pytest" in line)
     assert "click==" in install and "rich==" in install
+
+
+def test_root_tests_workflow_also_runs_the_sw009_project_tests_on_the_offscreen_qt_platform() -> None:
+    """SW-2026-009（驾驶舱的测试样件）的 tests/ 此前没有 CI；其中有 QML 联调测试，必须装 PySide6 并用离屏平台，否则收集阶段就崩。"""
+    text = (WORKFLOWS / "root-tests.yml").read_text(encoding="utf-8")
+    deps = text[text.index("      - name: SW-2026-009 project dependencies") :].split("\n\n")[0]
+    assert "PySide6" in deps and "==" in deps and "requests==" in deps and "cefrpy==" in deps
+    step = text[text.index("      - name: SW-2026-009 project tests") :].split("\n\n")[0]
+    assert "SW-2026-009_英语学习助手" in step and "working-directory:" in step
+    assert "QT_QPA_PLATFORM: offscreen" in step and "-m pytest" in step
+    assert step.rstrip().endswith("tests") and "continue-on-error" not in step
