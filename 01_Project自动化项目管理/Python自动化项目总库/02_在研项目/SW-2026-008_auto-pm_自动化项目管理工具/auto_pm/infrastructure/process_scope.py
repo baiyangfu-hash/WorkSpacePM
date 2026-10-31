@@ -42,7 +42,10 @@ def kill_process_tree(process: subprocess.Popen[str]) -> None:
                 timeout=30,
             )
         else:
-            os.killpg(process.pid, signal.SIGKILL)
+            killpg = getattr(os, "killpg", None)  # POSIX only; looked up by name so the Windows type check sees no missing attribute
+            sigkill = getattr(signal, "SIGKILL", None)
+            if killpg is not None and sigkill is not None:
+                killpg(process.pid, sigkill)
     with contextlib.suppress(OSError):
         process.kill()
 
