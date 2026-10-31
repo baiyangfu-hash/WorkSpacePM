@@ -11,6 +11,7 @@ import ast
 import json
 import typing
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -121,6 +122,7 @@ def test_the_workbench_create_path_refuses_a_bad_prefix_too(tmp_path: Path) -> N
 
     cases = WorkbenchUseCases.__new__(WorkbenchUseCases)
     typing.cast(typing.Any, cases).template_service = object()
+    cases.project_service = SimpleNamespace(workspace_root=str(tmp_path))
     outcome = cases.create_project("ZZ-2026-904", "x", "python", "", "", dest_dir=str(tmp_path / "p"))
     assert outcome.success is False and "不是合法业务线" in outcome.message
     assert not (tmp_path / "p").exists()
