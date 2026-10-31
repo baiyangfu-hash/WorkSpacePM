@@ -94,6 +94,15 @@ def test_a_broken_local_pointer_is_a_failure_not_a_guess(repo: Path) -> None:
     assert result["status"] == "fail" and "release_id" in result["reasons"][0]
 
 
+@pytest.mark.parametrize("name", ["active_release.json", "previous_release.json", "deployment_manifest.json"])
+@pytest.mark.parametrize("damage", [b"{not json", b"\xff\xfe\x00bad bytes", b'["a list"]'])
+def test_a_damaged_local_pointer_never_passes_silently(repo: Path, name: str, damage: bytes) -> None:
+    (repo / POINTER_DIR / name).write_bytes(damage)
+    result = check_release_pointers(str(repo))
+    assert result["status"] == "fail"
+    assert any(name in reason and "读不出来" in reason for reason in result["reasons"])
+
+
 def test_the_doctor_command_exits_nonzero_when_the_pointers_lag(repo: Path) -> None:
     from click.testing import CliRunner
 

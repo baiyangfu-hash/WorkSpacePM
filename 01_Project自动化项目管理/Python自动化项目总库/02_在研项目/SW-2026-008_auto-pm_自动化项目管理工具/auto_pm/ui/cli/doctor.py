@@ -123,13 +123,22 @@ def check_release_pointers(root: str, ref: str | None = None) -> dict[str, Any]:
     """
 
     base = Path(root) / POINTER_DIR
+    if not (base / "active_release.json").exists():
+        return {"status": "info", "reasons": ["本机没有 active_release.json（不是控制根或还没部署）"], "ref": ""}
     local = {name: _json_object(_read_local(base / name)) for name in POINTER_FILES}
-    if local["active_release.json"] is None:
-        return {"status": "info", "reasons": ["本机没有可读的 active_release.json（不是控制根或还没部署）"], "ref": ""}
+    unreadable = [name for name in POINTER_FILES if local[name] is None and (base / name).exists()]
+    active = local["active_release.json"]
+    if unreadable or active is None:
+        return {
+            "status": "fail",
+            "reasons": [f"本机 {name} 读不出来（不是有效的 JSON 或含坏字节），不能判断部署的是哪个版本" for name in unreadable]
+            or ["本机 active_release.json 读不出来"],
+            "ref": "",
+        }
     if ref is None:
         ref = "origin/main" if _git_show(root, "origin/main", f"{POINTER_DIR}/active_release.json") is not None else "HEAD"
     reasons: list[str] = []
-    deployed = local["active_release.json"].get("release_id")
+    deployed = active.get("release_id")
     if not isinstance(deployed, str) or not deployed:
         return {"status": "fail", "reasons": ["本机 active_release.json 缺少 release_id"], "ref": ref}
     if ".test." in deployed:
