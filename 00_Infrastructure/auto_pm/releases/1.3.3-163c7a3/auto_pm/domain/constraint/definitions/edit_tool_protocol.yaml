@@ -1,0 +1,13 @@
+id: "CST-EDIT-001"
+name: "遵循 Edit 工具微操协议"
+description: "代码修改必须采用 Edit/Write 工具，避免超长全量覆盖"
+type: workflow
+severity: error
+scope:
+  patterns:
+    - "auto_pm/**/*.py"
+    - "auto_pm/**/*.qml"
+rules:
+  - type: "edit_protocol"
+    description: "使用精准差分替换"
+auto_fix: false
