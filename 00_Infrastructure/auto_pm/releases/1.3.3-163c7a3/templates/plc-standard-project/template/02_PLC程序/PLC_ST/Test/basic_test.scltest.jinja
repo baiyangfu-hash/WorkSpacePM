@@ -1,0 +1,15 @@
+// ============================================================================
+// basic_test.scltest - {{ project_name }} OB1主程序集成测试
+// ============================================================================
+// 项目: {{ project_id }} {{ project_name }}
+// ============================================================================
+
+TEST_CASE "TC01_Alarm_Raised_And_Reset"
+    SET GlobalVars.stGlobal.i_iConveyorAlarm := 3;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stGlobal.o_bAnyAlarmActive = TRUE;
+    SET GlobalVars.stGlobal.i_iConveyorAlarm := 0;
+    SET GlobalVars.stGlobal.i_bReset := TRUE;
+    WAIT_CYCLES 2;
+    ASSERT GlobalVars.stGlobal.o_bAnyAlarmActive = FALSE;
+END_TEST_CASE

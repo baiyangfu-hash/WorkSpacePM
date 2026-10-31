@@ -1,0 +1,440 @@
+"""Mission lifecycle service backed only by the Continuity Store."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Callable, Collection
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from auto_pm.contracts.continuity import WorkKind
+from auto_pm.contracts.decision_package import DecisionPackageDTO
+from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
+from auto_pm.contracts.mission import (
+    OPEN_MISSION_SOFT_LIMIT,
+    AuthorityAudit,
+    AuthorityEnvelope,
+    InternalRoutingPolicy,
+    Mission,
+    MissionState,
+)
+from auto_pm.contracts.pm_facade import PlanningDraft
+from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+
+from .mission_admission import AdmissionVerdict, admission_verdict, release_problem
+
+
+class MissionServiceError(RuntimeError):
+    """Raised when a Mission request cannot be safely authorized or persisted."""
+
+
+_TRANSITIONS: dict[MissionState, frozenset[MissionState]] = {
+    MissionState.DRAFT: frozenset({MissionState.AWAITING_APPROVAL, MissionState.CANCELLED}),
+    MissionState.AWAITING_APPROVAL: frozenset({MissionState.ACTIVE, MissionState.CANCELLED}),
+    MissionState.ACTIVE: frozenset(
+        {
+            MissionState.BLOCKED,
+            MissionState.PARKED,
+            MissionState.ACCEPTANCE_PENDING,
+            MissionState.CANCELLED,
+        }
+    ),
+    MissionState.BLOCKED: frozenset(
+        {MissionState.ACTIVE, MissionState.PARKED, MissionState.CANCELLED}
+    ),
+    MissionState.PARKED: frozenset({MissionState.ACTIVE, MissionState.CANCELLED}),
+    MissionState.ACCEPTANCE_PENDING: frozenset({MissionState.ACCEPTED, MissionState.BLOCKED}),
+    MissionState.ACCEPTED: frozenset({MissionState.CLOSED}),
+    MissionState.CLOSED: frozenset(),
+    MissionState.CANCELLED: frozenset(),
+}
+
+
+class MissionService:
+    """Create and advance one explicit, user-authorized Mission at a time."""
+
+    def __init__(
+        self,
+        workspace_root: str | Path,
+        now: Callable[[], datetime] | None = None,
+        *,
+        store: ContinuityStore | None = None,
+    ) -> None:
+        self._store = store or ContinuityStore(workspace_root)
+        self._now = now or (lambda: datetime.now(UTC))
+
+    def initialize(self, tool_version: str) -> None:
+        try:
+            self._store.initialize(self._timestamp(), tool_version)
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+
+    def create(
+        self,
+        *,
+        mission_id: str,
+        subject_project_id: str,
+        title: str,
+        objective: str,
+        acceptance_criteria: list[str],
+        authority: AuthorityEnvelope,
+        created_by: str,
+        idempotency_key: str,
+        root_work_id: str | None = None,
+        max_open_per_project: int = OPEN_MISSION_SOFT_LIMIT,
+        admitted_open_ids: Collection[str] | None = None,
+    ) -> Mission:
+        instant = self._instant()
+        now = instant.isoformat()
+        self._assert_authority_is_current(authority, instant)
+        if subject_project_id != authority.subject_project_id:
+            raise MissionServiceError("Mission 与 AuthorityEnvelope subject project 不匹配")
+        resolved_root_work_id = root_work_id.strip() if root_work_id else None
+        if resolved_root_work_id:
+            self._assert_root_work_matches_project(subject_project_id, resolved_root_work_id)
+        mission = Mission(
+            mission_id=mission_id,
+            subject_project_id=subject_project_id,
+            title=title,
+            objective=objective,
+            acceptance_criteria=tuple(acceptance_criteria),
+            authority=authority,
+            root_work_id=resolved_root_work_id,
+            created_by=created_by,
+            created_at=instant,
+            updated_at=instant,
+        )
+        values = mission.model_dump(mode="json")
+        values.pop("schema_version")
+        values["acceptance_criteria_json"] = json.dumps(
+            values.pop("acceptance_criteria"), ensure_ascii=False, separators=(",", ":")
+        )
+        values["authority_json"] = json.dumps(
+            values.pop("authority"), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        try:
+            return self._store.create_mission(
+                values,
+                idempotency_key,
+                now,
+                max_open_per_project=max_open_per_project,
+                admitted_open_ids=admitted_open_ids,
+            )
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+
+    def admit(
+        self,
+        *,
+        mission_id: str,
+        subject_project_id: str,
+        scope_paths: tuple[str, ...],
+        admission_release_ref: str = "",
+    ) -> tuple[int, AdmissionVerdict]:
+        """Admission of a new card (TD-071 card 3): the open limit to create it with, and the verdict to record.
+
+        A card that already exists is a retry, never refused; its verdict leaves itself out, so that a retry that now
+        brings the user's release can still record it. A new card past the soft limit, or over paths an open card also
+        changes, is refused until the user's own word is given as ``admission_release_ref``.
+        """
+
+        try:
+            # Only the open cards count and collide; the project's finished history is not read (audit 78, 5).
+            missions = self._store.list_missions(subject_project_id)
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+        others = [item for item in missions if item.mission_id != mission_id]
+        verdict = admission_verdict(others, scope_paths)
+        exists = len(others) != len(missions) or self._exists_in_project(mission_id, subject_project_id)
+        if not exists and (problem := release_problem(verdict, admission_release_ref)):
+            raise MissionServiceError(problem)
+        limit = verdict.open_count + 1 if verdict.over_limit else OPEN_MISSION_SOFT_LIMIT
+        return limit, verdict
+
+    def _exists_in_project(self, mission_id: str, subject_project_id: str) -> bool:
+        """Whether a (finished) card with this id is already stored for the project: a retry, never a new card."""
+
+        try:
+            return self._store.get_mission(mission_id).subject_project_id == subject_project_id
+        except ContinuityStoreError:
+            return False
+
+    def record_admission(self, mission_id: str, verdict: AdmissionVerdict, admission_release_ref: str) -> None:
+        """Record the user's release of a card that needed one; idempotent per card, so a retry may fill it in."""
+
+        release = admission_release_ref.strip()
+        if not verdict.needs_user_release or not release:
+            return
+        try:
+            self._store.record_mission_admission(
+                mission_id=mission_id,
+                open_count=verdict.open_count,
+                over_limit=verdict.over_limit,
+                overlaps=tuple((item.mission_id, item.paths) for item in verdict.overlaps),
+                release_ref=release,
+                idempotency_key=f"admission-release:{mission_id}",
+                now=self._timestamp(),
+            )
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+
+    def create_from_planning_approval(
+        self,
+        *,
+        mission_id: str,
+        draft: PlanningDraft,
+        decision: DecisionPackageDTO,
+        plan_hash: str,
+        created_by: str,
+        max_open_per_project: int = OPEN_MISSION_SOFT_LIMIT,
+        admitted_open_ids: Collection[str] | None = None,
+    ) -> Mission:
+        """Create a strong-authority Mission from one exact planning approval."""
+
+        approval = decision.metadata.get("planning_approval")
+        if not isinstance(approval, dict) or approval.get("plan_hash") != plan_hash:
+            raise MissionServiceError("Decision 未绑定指定 PlanningScopeCard plan_hash")
+        expected_approval_keys = {
+            "schema_version",
+            "plan_hash",
+            "approval_evidence_ref",
+            "request_id",
+            "execution_grant",
+        }
+        if set(approval) != expected_approval_keys or approval.get("schema_version") != "planning-approval.v2":
+            raise MissionServiceError("Decision planning metadata schema 不精确")
+        if approval.get("request_id") != draft.request_id:
+            raise MissionServiceError("Decision 与 PlanningDraft request_id 不一致")
+        grant = approval.get("execution_grant")
+        base_grant_keys = {
+            "adapter",
+            "approved_model",
+            "required_worktree_mode",
+            "declared_dirty_paths",
+        }
+        if not isinstance(grant, dict) or set(grant) not in (
+            base_grant_keys,
+            base_grant_keys | {"plan_checklist"},
+        ):
+            raise MissionServiceError("Decision execution_grant schema 不精确")
+        try:
+            adapter_raw = grant["adapter"]
+            worktree_raw = grant["required_worktree_mode"]
+            approved_model = grant["approved_model"]
+            dirty_raw = grant["declared_dirty_paths"]
+            if (
+                not isinstance(adapter_raw, str)
+                or not isinstance(worktree_raw, str)
+                or not isinstance(approved_model, str)
+                or not isinstance(dirty_raw, list)
+                or any(not isinstance(path, str) for path in dirty_raw)
+            ):
+                raise TypeError("execution_grant")
+            adapter = ExecutionAdapterKind(adapter_raw)
+            worktree_mode = WorktreeMode(worktree_raw)
+            declared_dirty_paths = tuple(dirty_raw)
+        except (KeyError, TypeError, ValueError) as error:
+            raise MissionServiceError("Decision execution_grant 无法规范化") from error
+        if worktree_mode is not WorktreeMode.ISOLATED:
+            raise MissionServiceError("Planning approval 只允许 ISOLATED worktree")
+        if (
+            decision.project_id != draft.subject_project_id
+            or decision.decision_conclusion not in {"approved", "conditionally_approved"}
+            or not decision.change_id
+            or not decision.decision_id
+            or not decision.approver
+            or tuple(decision.approved_files) == ()
+        ):
+            raise MissionServiceError("Decision 不是可物化 Mission 的真实批准")
+        try:
+            parsed_approved_at = datetime.fromisoformat(decision.approved_at)
+        except (TypeError, ValueError) as error:
+            raise MissionServiceError("Decision approved_at 必须是带时区时间") from error
+        if parsed_approved_at.tzinfo is None:
+            raise MissionServiceError("Decision approved_at 必须是带时区时间")
+        approved_at = parsed_approved_at.astimezone(UTC)
+        instant = self._instant()
+        if approved_at > instant:
+            raise MissionServiceError("Decision approved_at 晚于当前时间，拒绝物化 Mission")
+        source_payload = {
+            "decision": decision.to_dict(),
+            "plan_hash": plan_hash,
+        }
+        source_hash = hashlib.sha256(
+            json.dumps(
+                source_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        envelope_hash = hashlib.sha256(
+            f"{draft.request_id}\n{decision.decision_id}\n{plan_hash}".encode()
+        ).hexdigest()
+        authority = AuthorityEnvelope(
+            envelope_id=f"AUTH-{envelope_hash[:16].upper()}",
+            subject_project_id=draft.subject_project_id,
+            change_id=decision.change_id,
+            decision_id=decision.decision_id,
+            authorization_source="CHG_DECISION",
+            scope_paths=tuple(decision.approved_files),
+            allowed_child_work_kinds=frozenset({WorkKind.WBS}),
+            routing=InternalRoutingPolicy(
+                allow_execution_branch_changes=True,
+                allowed_execution_adapters=frozenset({adapter}),
+                approved_model=approved_model,
+                required_worktree_mode=worktree_mode,
+                declared_dirty_paths=declared_dirty_paths,
+            ),
+            valid_from=approved_at,
+            expires_at=instant + timedelta(days=30),
+            audit=AuthorityAudit(
+                created_by=created_by,
+                created_at=instant,
+                approved_by=decision.approver,
+                approved_at=approved_at,
+                source_fingerprint=f"sha256:{source_hash}",
+            ),
+        )
+        return self.create(
+            mission_id=mission_id,
+            subject_project_id=draft.subject_project_id,
+            title=draft.objective,
+            objective=draft.objective,
+            acceptance_criteria=list(draft.acceptance_criteria),
+            authority=authority,
+            created_by=created_by,
+            idempotency_key=f"planning-mission-create:{draft.request_id}",
+            max_open_per_project=max_open_per_project,
+            admitted_open_ids=admitted_open_ids,
+        )
+
+    def get(self, mission_id: str) -> Mission:
+        try:
+            return self._store.get_mission(mission_id)
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+
+    def transition(
+        self,
+        *,
+        mission_id: str,
+        expected_version: int,
+        new_state: MissionState,
+        root_work_id: str | None,
+        idempotency_key: str,
+        acceptance_evidence: str = "",
+    ) -> Mission:
+        """Apply one legal transition.
+
+        ACCEPTED is the user's final acceptance: it needs ``acceptance_evidence``, which only the Facade's ``accept``
+        supplies after its quality gate and the user's approval PIN.  A generic transition (``continuity mission
+        transition --to ACCEPTED``) is refused, so the PIN cannot be walked around (audit 72, high-3).
+        """
+        try:
+            current = self._store.get_mission(mission_id)
+            instant = self._instant()
+            if new_state is MissionState.CLOSED:
+                raise MissionServiceError(
+                    "Mission 只能由收口关闭（界面确认验收 / pm close），不能直接流转到 CLOSED"
+                )
+            if new_state not in _TRANSITIONS[current.state]:
+                raise MissionServiceError(
+                    f"Mission 不允许从 {current.state.value} 流转到 {new_state.value}"
+                )
+            if new_state is MissionState.ACCEPTED and not acceptance_evidence.strip():
+                raise MissionServiceError(
+                    "最终验收只能由用户通过 pm accept（或驾驶舱“确认验收”）记录，不能直接推 Mission 状态"
+                )
+            if new_state is MissionState.PARKED or (
+                current.state is MissionState.PARKED and new_state is MissionState.ACTIVE
+            ):
+                raise MissionServiceError(
+                    "搁着和拿回只能走 park/unpark：它们在同一个事务里记断点、摘牌或发新租约"
+                )
+            if new_state is MissionState.ACTIVE:
+                self._assert_no_other_active(current)
+            self._assert_authority_is_current(
+                current.authority,
+                instant,
+                allow_safe_block=new_state is MissionState.BLOCKED,
+            )
+            resolved_root_work_id = self._resolve_root_work(current, new_state, root_work_id)
+            return self._store.transition_mission(
+                mission_id,
+                expected_version,
+                new_state,
+                resolved_root_work_id,
+                idempotency_key,
+                instant.isoformat(),
+            )
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+
+    def _resolve_root_work(
+        self,
+        mission: Mission,
+        new_state: MissionState,
+        requested_root_work_id: str | None,
+    ) -> str | None:
+        root_work_id = requested_root_work_id or mission.root_work_id
+        if (
+            requested_root_work_id
+            and mission.root_work_id
+            and requested_root_work_id != mission.root_work_id
+        ):
+            raise MissionServiceError("Mission 已绑定 root_work_id，拒绝在生命周期中更换")
+        if new_state in {
+            MissionState.ACTIVE,
+            MissionState.BLOCKED,
+            MissionState.PARKED,
+            MissionState.ACCEPTANCE_PENDING,
+            MissionState.ACCEPTED,
+            MissionState.CLOSED,
+        }:
+            if not root_work_id:
+                raise MissionServiceError("目标 Mission 状态必须绑定 root_work_id")
+            self._assert_root_work_matches_project(mission.subject_project_id, root_work_id)
+        elif requested_root_work_id is not None:
+            raise MissionServiceError("DRAFT、AWAITING_APPROVAL 或 CANCELLED 不允许新增 root_work_id")
+        return root_work_id
+
+    def _assert_no_other_active(self, mission: Mission) -> None:
+        """Friendly early refusal; the partial unique index on ACTIVE is the hard lock (TD-071)."""
+
+        for other in self._store.list_missions(mission.subject_project_id):
+            if other.mission_id != mission.mission_id and other.state is MissionState.ACTIVE:
+                raise MissionServiceError(
+                    f"项目里“{other.title}”（{other.mission_id}）正在干；"
+                    "请先搁着它（pm park），或用 pm switch 一步切换"
+                )
+
+    def _assert_root_work_matches_project(self, subject_project_id: str, root_work_id: str) -> None:
+        try:
+            work = self._store.get_work(root_work_id)
+        except ContinuityStoreError as error:
+            raise MissionServiceError(str(error)) from error
+        if work.subject_project_id != subject_project_id:
+            raise MissionServiceError("root Work 不属于当前 Mission 的 subject project")
+
+    @staticmethod
+    def _assert_authority_is_current(
+        authority: AuthorityEnvelope,
+        instant: datetime,
+        *,
+        allow_safe_block: bool = False,
+    ) -> None:
+        if (
+            instant < authority.valid_from or instant > authority.expires_at
+        ) and not allow_safe_block:
+            raise MissionServiceError("AuthorityEnvelope 已过期或尚未生效，拒绝 Mission 写入")
+
+    def _timestamp(self) -> str:
+        return self._instant().isoformat()
+
+    def _instant(self) -> datetime:
+        value = self._now()
+        if value.tzinfo is None:
+            raise MissionServiceError("Mission now 必须是带时区时间")
+        return value.astimezone(UTC)

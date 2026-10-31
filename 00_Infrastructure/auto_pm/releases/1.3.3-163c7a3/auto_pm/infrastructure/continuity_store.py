@@ -1,0 +1,8953 @@
+"""SQLite continuity store, isolated from the rebuildable index database."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import logging
+import os
+import re
+import shutil
+import sqlite3
+import stat
+import subprocess
+import tempfile
+import threading
+import time
+from collections.abc import Callable, Collection, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path, PurePosixPath
+from typing import Any, cast
+
+from auto_pm.contracts.continuity import (
+    EXECUTION_ACTIVE_WORK_STATES,
+    CheckpointItem,
+    HandoffV2,
+    LeaseItem,
+    RunItem,
+    RunState,
+    WorkItem,
+    WorkState,
+)
+from auto_pm.contracts.decision_package import (
+    DecisionPackageDTO,
+    RuntimeDecisionAction,
+    RuntimeDecisionOutcome,
+    is_canonical_decision_id,
+    is_canonical_runtime_change_id,
+)
+from auto_pm.contracts.execution_adapter import (
+    ExecutionActivity,
+    ExecutionActivityStage,
+    ExecutionFailure,
+    ExecutionFailureCode,
+    ExecutionIntent,
+    ExecutionMicrotaskPlan,
+    ExecutionProjectionReceipt,
+    ExecutionStartClaim,
+    ExecutionStartEvidence,
+)
+from auto_pm.contracts.lease_reclaim import (
+    GRACE_SECONDS,
+    PARKED_TOKEN_PREFIX,
+    ProcessFingerprint,
+    ProcessVerdict,
+    check_write_epoch,
+    lease_is_held,
+    lease_is_live,
+    lease_token_is_fenced,
+)
+from auto_pm.contracts.mission import (
+    BOARD_COLUMN_BY_STATE,
+    Mission,
+    MissionBoard,
+    MissionBoardColumn,
+    MissionPark,
+    MissionState,
+    ParkedMission,
+    user_evidence_problem,
+)
+from auto_pm.contracts.orchestration import OrchestrationOutcome
+from auto_pm.contracts.pm_facade import (
+    PlanningDraft,
+    PlanningDraftOverview,
+    PlanningScopeCard,
+    SubmittedPlanningScopeCard,
+)
+from auto_pm.infrastructure.continuity_internal import codec as continuity_codec
+from auto_pm.infrastructure.control_root_guard import (
+    ControlRootGuardError,
+    authority_path_covered,
+    authority_path_parts,
+    clean_git_environment,
+    governed_worktree_snapshot,
+    is_link_like,
+    require_control_root,
+    require_safe_workspace_path,
+)
+from auto_pm.infrastructure.git_timeout import run_git_bounded
+
+
+class ContinuityStoreError(RuntimeError):
+    """Raised when a continuity transaction cannot be completed safely."""
+
+
+def _decode_git_path(raw: bytes) -> str:
+    """Strict UTF-8: a path with invalid bytes must fail the comparison, not be repaired into a look-alike."""
+
+    try:
+        return raw.decode("utf-8").strip()
+    except UnicodeDecodeError as error:
+        raise ContinuityStoreError("Git 输出的路径不是合法 UTF-8，拒绝比对") from error
+
+
+class ContinuityStoreSchemaError(ContinuityStoreError):
+    """The database carries a schema this tool does not know, usually one written by a newer release."""
+
+
+class _TransientSidecarError(ContinuityStoreError):
+    """A WAL sidecar looked unsafe at one instant.
+
+    SQLite creates and deletes ``-wal``, ``-shm`` and ``-journal`` while other processes use the database, so a
+    path check can meet a half-created or delete-pending file; only an anomaly that persists is a real refusal.
+    """
+
+
+_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
+_SIDECAR_ATTEMPTS = 6
+_SIDECAR_RETRY_SECONDS = 0.025
+# How long a writer waits for another writer's transaction. The holder re-checks the Run worktree with git
+# (HEAD and status) while it owns the lock, which takes seconds on a loaded Windows runner; 5 s was too short
+# and a second writer failed with "database is locked" (TD-SW008-214 follow-up). Waiting longer only delays.
+_WRITE_LOCK_TIMEOUT_SECONDS = 30.0
+# A Run may keep renewing its lease for at most this long after creation; only the user extends it (extend_lease_hold).
+LEASE_HOLD_CAP_SECONDS = 3 * 3_600
+LEASE_HOLD_MAX_EXTENSION_SECONDS = 12 * 3_600
+# Renewals beyond this count are flagged red in `pm orient`: a lease that needs this many renewals is a stuck Run.
+LEASE_RENEWAL_RED_COUNT = 10
+
+
+@dataclass(frozen=True)
+class LegacyTerminalLeaseEvidence:
+    """Read-only facts a Decision must bind before one legacy terminal lease is fenced."""
+
+    run_id: str
+    work_id: str
+    state: str
+    version: int
+    lease_version: int
+    lease_expires_at: str
+    lease_released: bool
+    terminal_evidence_kind: str
+    event_types: tuple[str, ...]
+    event_set_sha256: str
+    checkpoint_set_sha256: str
+    blockers: tuple[str, ...]
+
+    @property
+    def fenceable(self) -> bool:
+        return not self.blockers
+
+
+@dataclass(frozen=True)
+class WorkAdjudicationEvidence:
+    """Read-only facts a Decision must bind before one BLOCKED Work may be adjudicated."""
+
+    work_id: str
+    state: str
+    version: int
+    authorization_ref: str
+    run_states: tuple[tuple[str, str, int], ...]
+    lease_states: tuple[tuple[str, int, bool], ...]
+    run_set_sha256: str
+    lease_set_sha256: str
+    blockers: tuple[str, ...]
+
+    @property
+    def adjudicable(self) -> bool:
+        return not self.blockers
+
+
+
+class _ReadSnapshotDriftError(RuntimeError):
+    """Internal bounded-retry signal for a changing SQLite source snapshot."""
+
+
+def _drift_reason(name: str, error: BaseException) -> str:
+    """Name the file and the OS error behind a retried read, so a persistent BUSY says what held the file (TD-SW008-180)."""
+
+    return f"{name}: {type(error).__name__} {error}"
+
+
+class _ReadSnapshotAnomalyError(_ReadSnapshotDriftError):
+    """A source sidecar was not a single-link regular file at one instant.
+
+    SQLite creates, truncates and deletes ``-wal``, ``-shm`` and ``-journal`` while another process runs a transaction, so the inventory can meet
+    such a file at the wrong instant (the same instants the path check in ``_validated_db_path`` already tolerates). It is retried like any other
+    drift; the message is the refusal that is raised when the anomaly persists through every bounded attempt.
+    """
+
+
+_FileInventory = tuple[bool, int, int, int, int, str]
+_StoreInventory = tuple[_FileInventory, _FileInventory, _FileInventory, _FileInventory]
+# The identity of the snapshot copy: (exists, size, mtime_ns, dev, ino) of the copied database and WAL.
+_CopyStamp = tuple[tuple[bool, int, int, int, int], tuple[bool, int, int, int, int]]
+
+
+@dataclass
+class _ReadSnapshot:
+    """One verified off-workspace copy of the database and WAL, reused while the source bytes stay the same (TD-105).
+
+    ``source`` holds the database, WAL and journal facts (the ``-shm`` index is left out: SQLite rewrites it on every
+    connection without changing the content). ``users`` counts open strict-read connections on the copy; a retired copy
+    is deleted when the last one closes.
+    """
+
+    temporary: tempfile.TemporaryDirectory[str]
+    path: Path
+    source: tuple[_FileInventory, _FileInventory, _FileInventory]
+    copy_stamp: _CopyStamp
+    users: int = 0
+    retired: bool = False
+
+
+_DDL = """
+CREATE TABLE IF NOT EXISTS schema_meta (
+    schema_version TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    tool_version TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    from_version TEXT NOT NULL,
+    to_version TEXT NOT NULL,
+    applied_at TEXT NOT NULL,
+    tool_version TEXT NOT NULL,
+    PRIMARY KEY (from_version, to_version)
+);
+CREATE TABLE IF NOT EXISTS work_items (
+    work_id TEXT PRIMARY KEY,
+    subject_project_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    state TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    read_only INTEGER NOT NULL CHECK (read_only IN (0, 1)),
+    authorization_ref TEXT NOT NULL,
+    scope_json TEXT NOT NULL,
+    scope_hash TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS work_relations (
+    from_work_id TEXT NOT NULL REFERENCES work_items(work_id),
+    to_work_id TEXT NOT NULL REFERENCES work_items(work_id),
+    relation TEXT NOT NULL,
+    created_event_id TEXT NOT NULL,
+    PRIMARY KEY (from_work_id, to_work_id, relation)
+);
+CREATE TABLE IF NOT EXISTS run_items (
+    run_id TEXT PRIMARY KEY,
+    work_id TEXT NOT NULL REFERENCES work_items(work_id),
+    state TEXT NOT NULL,
+    executor_id TEXT NOT NULL,
+    adapter TEXT NOT NULL,
+    owned_paths_json TEXT NOT NULL,
+    declared_dirty_paths_json TEXT NOT NULL,
+    git_head TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS execution_leases (
+    run_id TEXT PRIMARY KEY REFERENCES run_items(run_id),
+    owner_id TEXT NOT NULL,
+    lease_token TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS checkpoints (
+    checkpoint_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES run_items(run_id),
+    sequence INTEGER NOT NULL,
+    summary TEXT NOT NULL,
+    git_head TEXT NOT NULL,
+    dirty_paths_json TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (run_id, sequence)
+);
+CREATE TABLE IF NOT EXISTS handoffs_v2 (
+    handoff_id TEXT PRIMARY KEY,
+    work_id TEXT NOT NULL REFERENCES work_items(work_id),
+    run_id TEXT NOT NULL REFERENCES run_items(run_id),
+    checkpoint_id TEXT NOT NULL REFERENCES checkpoints(checkpoint_id),
+    from_owner TEXT NOT NULL,
+    to_owner TEXT NOT NULL,
+    owned_paths_json TEXT NOT NULL,
+    git_head TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    lease_expires_at TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS events (
+    event_id TEXT PRIMARY KEY,
+    aggregate_type TEXT NOT NULL,
+    aggregate_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    previous_hash TEXT NOT NULL,
+    event_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS mission_items (
+    mission_id TEXT PRIMARY KEY,
+    subject_project_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    state TEXT NOT NULL,
+    root_work_id TEXT,
+    acceptance_criteria_json TEXT NOT NULL,
+    authority_json TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS planning_drafts (
+    request_id TEXT PRIMARY KEY,
+    subject_project_id TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    acceptance_criteria_json TEXT NOT NULL,
+    input_fingerprint TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS planning_draft_chg_bindings (
+    request_id TEXT PRIMARY KEY REFERENCES planning_drafts(request_id),
+    change_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS planning_draft_spec_bindings (
+    request_id TEXT NOT NULL REFERENCES planning_drafts(request_id),
+    spec_id TEXT NOT NULL,
+    canonical_path TEXT NOT NULL,
+    version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (request_id, spec_id)
+);
+CREATE TABLE IF NOT EXISTS planning_draft_decision_bindings (
+    request_id TEXT PRIMARY KEY REFERENCES planning_drafts(request_id),
+    decision_id TEXT NOT NULL UNIQUE,
+    change_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    approver TEXT NOT NULL,
+    approval_evidence_ref TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS closure_items (
+    closure_id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL UNIQUE REFERENCES mission_items(mission_id),
+    work_id TEXT NOT NULL REFERENCES work_items(work_id),
+    run_id TEXT NOT NULL REFERENCES run_items(run_id),
+    checkpoint_id TEXT NOT NULL REFERENCES checkpoints(checkpoint_id),
+    change_id TEXT NOT NULL,
+    decision_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS closure_steps (
+    step_id TEXT PRIMARY KEY,
+    closure_id TEXT NOT NULL REFERENCES closure_items(closure_id),
+    sequence INTEGER NOT NULL,
+    step_kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    attempt_count INTEGER NOT NULL,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (closure_id, sequence),
+    UNIQUE (closure_id, step_kind)
+);
+CREATE TABLE IF NOT EXISTS closure_outbox (
+    outbox_id TEXT PRIMARY KEY,
+    closure_id TEXT NOT NULL REFERENCES closure_items(closure_id),
+    step_id TEXT NOT NULL REFERENCES closure_steps(step_id),
+    artifact_kind TEXT NOT NULL,
+    target_path TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    published_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (closure_id, step_id, artifact_kind)
+);
+CREATE INDEX IF NOT EXISTS idx_work_project_state
+ON work_items(subject_project_id, state);
+CREATE INDEX IF NOT EXISTS idx_events_aggregate
+ON events(aggregate_type, aggregate_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_runs_work_state ON run_items(work_id, state);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_run ON checkpoints(run_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_mission_project_state
+ON mission_items(subject_project_id, state);
+CREATE INDEX IF NOT EXISTS idx_planning_drafts_project_state
+ON planning_drafts(subject_project_id, state);
+CREATE INDEX IF NOT EXISTS idx_closure_state ON closure_items(state);
+CREATE INDEX IF NOT EXISTS idx_closure_steps_state ON closure_steps(closure_id, state, sequence);
+CREATE INDEX IF NOT EXISTS idx_closure_outbox_pending
+ON closure_outbox(published_at, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_mission_per_project
+ON mission_items(subject_project_id)
+WHERE state = 'ACTIVE';
+CREATE TABLE IF NOT EXISTS run_parks (
+    park_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES run_items(run_id),
+    mission_id TEXT NOT NULL REFERENCES mission_items(mission_id),
+    checkpoint_id TEXT NOT NULL REFERENCES checkpoints(checkpoint_id),
+    parked_by TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    parked_at TEXT NOT NULL,
+    unparked_at TEXT,
+    unparked_by TEXT,
+    CHECK ((unparked_at IS NULL) = (unparked_by IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_run_parks_mission
+ON run_parks(mission_id, unparked_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_park_per_run
+ON run_parks(run_id) WHERE unparked_at IS NULL;
+"""
+# v7 and earlier enforced "one open Mission per project"; v8 keeps only "one ACTIVE Mission per
+# project" in the database (TD-071).  The old index is dropped by the v7 -> v8 migration.
+_V7_OPEN_MISSION_INDEX = "idx_one_open_mission_per_project"
+
+_PLANNING_SCOPE_CARDS_DDL = """
+CREATE TABLE IF NOT EXISTS planning_scope_cards (
+    request_id TEXT NOT NULL REFERENCES planning_drafts(request_id),
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    plan_hash TEXT NOT NULL,
+    change_id TEXT NOT NULL,
+    card_json TEXT NOT NULL,
+    submitted_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (request_id, revision),
+    UNIQUE (request_id, plan_hash)
+);
+"""
+_DDL += _PLANNING_SCOPE_CARDS_DDL
+
+_LEGACY_SCHEMA_VERSION = "continuity-store.v2"
+_V3_SCHEMA_VERSION = "continuity-store.v3"
+_V4_SCHEMA_VERSION = "continuity-store.v4"
+_V5_SCHEMA_VERSION = "continuity-store.v5"
+_V6_SCHEMA_VERSION = "continuity-store.v6"
+_V7_SCHEMA_VERSION = "continuity-store.v7"
+_CURRENT_SCHEMA_VERSION = "continuity-store.v8"
+log = logging.getLogger(__name__)
+
+_FINISHED_MISSION_STATES = frozenset({"ACCEPTED", "CLOSED", "CANCELLED"})
+_KNOWN_SCHEMA_VERSIONS = frozenset(
+    {
+        _LEGACY_SCHEMA_VERSION,
+        _V3_SCHEMA_VERSION,
+        _V4_SCHEMA_VERSION,
+        _V5_SCHEMA_VERSION,
+        _V6_SCHEMA_VERSION,
+        _V7_SCHEMA_VERSION,
+        _CURRENT_SCHEMA_VERSION,
+    }
+)
+_CANONICAL_RUNTIME_DB = ".auto-pm/continuity.db"
+_FULL_GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
+_RUN_CREATION_REQUEST_FIELDS = frozenset(
+    {
+        "run_id",
+        "work_id",
+        "executor_id",
+        "adapter",
+        "owned_paths",
+        "declared_dirty_paths",
+        "observed_dirty_paths",
+        "git_head",
+        "worktree_path",
+        "lease_seconds",
+    }
+)
+_LEGACY_RUN_CREATION_FIELDS = frozenset(
+    {
+        "run_id",
+        "work_id",
+        "state",
+        "executor_id",
+        "adapter",
+        "owned_paths_json",
+        "declared_dirty_paths_json",
+        "git_head",
+        "worktree_path",
+        "version",
+        "created_at",
+        "updated_at",
+    }
+)
+_SETTLEMENT_REQUEST_FIELDS = frozenset(
+    {
+        "schema_version",
+        "action",
+        "target_run_id",
+        "recovery_run_id",
+        "recovery_owner_id",
+        "decision_id",
+        "outcome",
+        "reason",
+    }
+)
+_STORE_RUN_TRANSITIONS = {
+    RunState.READY: {
+        RunState.RUNNING,
+        RunState.BLOCKED,
+        RunState.FAILED,
+        RunState.CANCELLED,
+    },
+    RunState.RUNNING: {RunState.BLOCKED, RunState.PENDING, RunState.VERIFYING, RunState.FAILED},
+    RunState.BLOCKED: {RunState.RUNNING, RunState.CANCELLED},
+    RunState.PENDING: {RunState.BLOCKED, RunState.FAILED, RunState.CANCELLED},
+    RunState.VERIFYING: {RunState.RUNNING, RunState.SUCCEEDED, RunState.FAILED},
+    RunState.SUCCEEDED: set(),
+    RunState.FAILED: set(),
+    RunState.CANCELLED: set(),
+}
+
+
+class ContinuityStore:
+    """Transactional persistence for Work state and its append-only events."""
+
+    def __init__(
+        self,
+        workspace_root: str | Path,
+        db_path: str | Path | None = None,
+        *,
+        _clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        root = Path(workspace_root).resolve()
+        selected = Path(db_path) if db_path is not None else root / ".auto-pm" / "continuity.db"
+        self.workspace_root = root
+        self._clock = _clock or (lambda: datetime.now(UTC))
+        try:
+            self.db_path = require_safe_workspace_path(
+                root,
+                selected,
+                label="Continuity Store path",
+            )
+        except ControlRootGuardError as error:
+            raise ContinuityStoreError(str(error)) from error
+        self._read_snapshot: _ReadSnapshot | None = None
+        self._read_snapshot_lock = threading.Lock()
+
+    def _utc_now(self) -> datetime:
+        current = self._clock()
+        if not isinstance(current, datetime) or current.tzinfo is None:
+            raise ContinuityStoreError("Continuity Store clock 必须返回带时区 datetime")
+        return current.astimezone(UTC)
+
+    def _require_control_root(self) -> None:
+        try:
+            require_control_root(self.workspace_root)
+        except ControlRootGuardError as error:
+            raise ContinuityStoreError(str(error)) from error
+
+    def _validated_db_path(self) -> Path:
+        """Validate the database path and its sidecars; a sidecar anomaly is retried briefly, the database itself never."""
+
+        for attempt in range(_SIDECAR_ATTEMPTS):
+            try:
+                return self._validated_db_path_once()
+            except _TransientSidecarError as error:
+                if attempt == _SIDECAR_ATTEMPTS - 1:
+                    raise ContinuityStoreError(str(error)) from error
+                time.sleep(_SIDECAR_RETRY_SECONDS)
+        raise AssertionError("unreachable")  # pragma: no cover - the loop always returns or raises
+
+    def _validated_db_path_once(self) -> Path:
+        try:
+            db_path = require_safe_workspace_path(
+                self.workspace_root,
+                self.db_path,
+                label="Continuity Store path",
+            )
+            sidecars: list[Path] = []
+            for suffix in _SIDECAR_SUFFIXES:
+                try:
+                    sidecars.append(
+                        require_safe_workspace_path(
+                            self.workspace_root,
+                            Path(f"{db_path}{suffix}"),
+                            label=f"Continuity Store sidecar {suffix}",
+                        )
+                    )
+                except ControlRootGuardError as error:
+                    raise _TransientSidecarError(str(error)) from error
+            for checked in [db_path, *sidecars]:
+                is_sidecar = checked is not db_path
+                try:
+                    metadata = checked.stat()
+                except FileNotFoundError:
+                    continue
+                except OSError as error:
+                    if is_sidecar:
+                        raise _TransientSidecarError(
+                            f"Continuity Store sidecar 暂时无法读取: {checked.name}"
+                        ) from error
+                    raise
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                    message = f"Continuity Store DB/sidecar 必须是唯一链接的普通文件: {checked.name}"
+                    raise (_TransientSidecarError(message) if is_sidecar else ContinuityStoreError(message))
+            return db_path
+        except ControlRootGuardError as error:
+            raise ContinuityStoreError(str(error)) from error
+
+    def _validated_run_snapshot(
+        self,
+        path: object,
+        git_head: object,
+        owned_paths: tuple[str, ...],
+        declared_dirty_paths: tuple[str, ...],
+        observed_dirty_paths: tuple[str, ...],
+    ) -> Path:
+        if not isinstance(path, (str, Path)) or not isinstance(git_head, str):
+            raise ContinuityStoreError("Run worktree_path 与 git_head 类型非法")
+        try:
+            worktree, actual_head, actual_dirty = governed_worktree_snapshot(
+                self.workspace_root,
+                path,
+                allow_external_linked=True,
+            )
+        except ControlRootGuardError as error:
+            raise ContinuityStoreError(str(error)) from error
+        if actual_head != git_head:
+            raise ContinuityStoreError("Run git_head 与受管 worktree 当前 HEAD 不一致")
+        actual_observed = tuple(
+            dirty
+            for dirty in actual_dirty
+            if any(self._authority_path_covered(dirty, (owned,)) for owned in owned_paths)
+        )
+        if {self._authority_path_key(path) for path in actual_observed} != {
+            self._authority_path_key(path) for path in observed_dirty_paths
+        }:
+            raise ContinuityStoreError("Run observed_dirty_paths 与受管 worktree 不一致")
+        if not all(
+            self._authority_path_covered(path, declared_dirty_paths)
+            for path in observed_dirty_paths
+        ):
+            raise ContinuityStoreError("存在未声明的 dirty path")
+        if not all(
+            self._authority_path_covered(path, owned_paths) for path in declared_dirty_paths
+        ):
+            raise ContinuityStoreError("declared_dirty_paths 超出 owned_paths")
+        return worktree
+
+    @classmethod
+    def _run_paths(cls, value: object, *, label: str, allow_empty: bool) -> tuple[str, ...]:
+        if not isinstance(value, (list, tuple)) or any(not isinstance(item, str) for item in value):
+            raise ContinuityStoreError(f"Run {label} 必须是字符串数组")
+        normalized_items: list[str] = []
+        seen: set[tuple[str, ...]] = set()
+        for item in value:
+            normalized_item = cls._normalize_authority_path(item)
+            key = cls._authority_path_key(normalized_item)
+            if key not in seen:
+                seen.add(key)
+                normalized_items.append(normalized_item)
+        normalized = tuple(normalized_items)
+        if not normalized and not allow_empty:
+            raise ContinuityStoreError(f"Run {label} 不能为空")
+        return normalized
+
+    def runtime_target_path(self) -> str:
+        """Return the only workspace-relative database target eligible for settlement."""
+
+        db_path = self._validated_db_path()
+        try:
+            relative = db_path.relative_to(self.workspace_root).as_posix()
+        except ValueError as error:  # pragma: no cover - constructor already guards this
+            raise ContinuityStoreError("continuity.db 必须位于工作空间内") from error
+        if self._authority_path_key(relative) != self._authority_path_key(_CANONICAL_RUNTIME_DB):
+            raise ContinuityStoreError("过期 Run 结算只能作用于 canonical .auto-pm/continuity.db")
+        return _CANONICAL_RUNTIME_DB
+
+    @classmethod
+    def authority_paths_hash(cls, paths: tuple[str, ...]) -> str:
+        """Hash normalized persisted authority paths without filesystem access."""
+
+        normalized = tuple(cls._normalize_authority_path(path) for path in paths)
+        return hashlib.sha256(
+            json.dumps(normalized, ensure_ascii=False, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    @classmethod
+    def _authority_path_covered(cls, path: str, roots: tuple[str, ...]) -> bool:
+        cls._normalize_authority_path(path)
+        for root in roots:
+            cls._normalize_authority_path(root)
+        return authority_path_covered(path, roots)
+
+    @classmethod
+    def _authority_path_key(cls, raw: str) -> tuple[str, ...]:
+        return authority_path_parts(cls._normalize_authority_path(raw))
+
+    @staticmethod
+    def _normalize_authority_path(raw: str) -> str:
+        text = str(raw).replace("\\", "/")
+        raw_segments = text.split("/")
+        path = PurePosixPath(text)
+        if (
+            path.is_absolute()
+            or (path.parts and path.parts[0].endswith(":"))
+            or any(part in {".", ".."} for part in raw_segments)
+            or str(path) in {"", "."}
+            or any(part != part.rstrip(" .") for part in path.parts)
+        ):
+            raise ContinuityStoreError(f"非法 authority path: {raw}")
+        return path.as_posix()
+
+    @staticmethod
+    def _validate_settlement_authority_identity(
+        *,
+        target_decision_id: str,
+        target_decision_sha256: str,
+        target_change_id: str,
+        decision_id: str,
+        decision_sha256: str,
+        decision_change_id: str,
+        decision_project_id: str,
+    ) -> None:
+        if not is_canonical_decision_id(target_decision_id) or not is_canonical_decision_id(
+            decision_id
+        ):
+            raise ContinuityStoreError("目标与恢复 Work 必须绑定 canonical Decision ID")
+        if target_decision_id == decision_id:
+            raise ContinuityStoreError("恢复 Decision 不得复用目标 Work 的授权链")
+        if not is_canonical_runtime_change_id(
+            target_change_id
+        ) or not is_canonical_runtime_change_id(decision_change_id):
+            raise ContinuityStoreError("目标与恢复 Decision 必须绑定 canonical CHG ID")
+        if target_change_id == decision_change_id:
+            raise ContinuityStoreError("恢复 CHG 必须独立于目标 Work 的原 CHG")
+        if (
+            not isinstance(decision_project_id, str)
+            or not decision_project_id
+            or decision_project_id != decision_project_id.strip()
+        ):
+            raise ContinuityStoreError("Decision project_id 必须是规范非空字符串")
+        for digest in (target_decision_sha256, decision_sha256):
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise ContinuityStoreError("Decision SHA256 格式非法")
+
+    def _decision_snapshot(self, decision_id: str) -> tuple[DecisionPackageDTO, str]:
+        """Re-read an immutable Decision through the canonical safe-path reader."""
+
+        from auto_pm.domain.change.decision_service import DecisionError, DecisionService
+
+        try:
+            return DecisionService(self.workspace_root).get_decision_with_sha256(decision_id)
+        except DecisionError as error:
+            raise ContinuityStoreError(
+                f"Decision immutable snapshot 无法复核: {decision_id}"
+            ) from error
+
+    @staticmethod
+    def _validate_recovery_git_head(git_head: object) -> str:
+        if not isinstance(git_head, str) or _FULL_GIT_COMMIT.fullmatch(git_head) is None:
+            raise ContinuityStoreError("恢复 Run git_head 必须是完整小写 Git commit OID")
+        return git_head
+
+    def _git_bytes(self, *args: str, input_bytes: bytes | None = None) -> bytes:
+        try:
+            result = run_git_bounded(
+                ["git", "-C", str(self.workspace_root), *args],
+                default_timeout=10.0,
+                error_cls=ContinuityStoreError,
+                where=self.workspace_root,
+                input=input_bytes,
+                stdin=subprocess.DEVNULL if input_bytes is None else None,
+                capture_output=True,
+                check=False,
+                shell=False,
+                env=clean_git_environment(),
+            )
+        except OSError as error:
+            raise ContinuityStoreError("Decision Git immutable 事实无法复核") from error
+        if result.returncode != 0:
+            raise ContinuityStoreError("Decision Git commit/blob 不存在或无法读取")
+        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+        if diagnostic:
+            raise ContinuityStoreError(f"Decision Git 事实包含诊断: {diagnostic[:1000]}")
+        return result.stdout
+
+    @staticmethod
+    def _git_object_id(raw: bytes, *, label: str) -> str:
+        try:
+            object_id = raw.decode("ascii", errors="strict").strip()
+        except UnicodeDecodeError as error:
+            raise ContinuityStoreError(f"{label} 不是规范 ASCII Git object OID") from error
+        if _FULL_GIT_COMMIT.fullmatch(object_id) is None:
+            raise ContinuityStoreError(f"{label} 不是完整小写 Git object OID")
+        return object_id
+
+    def _require_paths_clean_at_head(self, *paths: str) -> None:
+        try:
+            result = run_git_bounded(
+                [
+                    "git",
+                    "-C",
+                    str(self.workspace_root),
+                    "diff",
+                    "--quiet",
+                    "HEAD",
+                    "--",
+                    *paths,
+                ],
+                default_timeout=10.0,
+                error_cls=ContinuityStoreError,
+                where=self.workspace_root,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                check=False,
+                shell=False,
+                env=clean_git_environment(),
+            )
+        except OSError as error:
+            raise ContinuityStoreError("Decision Git clean 事实无法复核") from error
+        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+        if result.returncode == 1:
+            raise ContinuityStoreError(
+                "Decision immutable snapshot 未跟踪或相对恢复 Run git_head 存在脏改漂移"
+            )
+        if result.returncode != 0:
+            raise ContinuityStoreError(
+                f"Decision Git clean 事实无法复核: {diagnostic[:1000]}"
+            )
+        if diagnostic:
+            raise ContinuityStoreError(f"Decision Git clean 事实包含诊断: {diagnostic[:1000]}")
+
+    def _decision_git_snapshots(
+        self,
+        *,
+        recovery_git_head: str,
+        target_decision_id: str,
+        target_decision_sha256: str,
+        recovery_decision_id: str,
+        recovery_decision_sha256: str,
+        require_current_head: bool,
+    ) -> tuple[DecisionPackageDTO, DecisionPackageDTO]:
+        """Bind both current Decision byte snapshots to the recovery Run commit."""
+
+        head = self._validate_recovery_git_head(recovery_git_head)
+        self._require_control_root()
+        try:
+            resolved_head = (
+                self._git_bytes("rev-parse", "--verify", f"{head}^{{commit}}")
+                .decode("ascii", errors="strict")
+                .strip()
+            )
+        except UnicodeDecodeError as error:
+            raise ContinuityStoreError("恢复 Run git_head 不是规范 ASCII commit OID") from error
+        if resolved_head != head:
+            raise ContinuityStoreError("恢复 Run git_head 不是完整 commit OID")
+        if require_current_head:
+            try:
+                current_head = (
+                    self._git_bytes("rev-parse", "--verify", "HEAD^{commit}")
+                    .decode("ascii", errors="strict")
+                    .strip()
+                )
+            except UnicodeDecodeError as error:
+                raise ContinuityStoreError("当前 Git HEAD 不是规范 commit OID") from error
+            if current_head != head:
+                raise ContinuityStoreError("首次结算要求当前 Git HEAD 精确匹配恢复 Run git_head")
+
+        target_path = f".auto-pm/decisions/{target_decision_id}.json"
+        recovery_path = f".auto-pm/decisions/{recovery_decision_id}.json"
+        for path in (target_path, recovery_path):
+            tracked = self._git_bytes("ls-files", "--error-unmatch", "--", path)
+            if _decode_git_path(tracked) != path:
+                raise ContinuityStoreError("Decision 文件必须在当前 Git index 中精确跟踪")
+        self._require_paths_clean_at_head(target_path, recovery_path)
+
+        target_before, target_before_sha256 = self._decision_snapshot(target_decision_id)
+        recovery_before, recovery_before_sha256 = self._decision_snapshot(recovery_decision_id)
+        for path, expected_sha256, current_sha256 in (
+            (target_path, target_decision_sha256, target_before_sha256),
+            (recovery_path, recovery_decision_sha256, recovery_before_sha256),
+        ):
+            try:
+                current_bytes = (self.workspace_root / path).read_bytes()
+            except OSError as error:
+                raise ContinuityStoreError("Decision 当前工作树字节无法读取") from error
+            if hashlib.sha256(current_bytes).hexdigest() != current_sha256:
+                raise ContinuityStoreError("Decision 文件在 Git 映射期间发生漂移")
+            head_blob_oid = self._git_object_id(
+                self._git_bytes("rev-parse", "--verify", f"{head}:{path}"),
+                label="Decision HEAD blob",
+            )
+            current_blob_oid = self._git_object_id(
+                self._git_bytes(
+                    "hash-object",
+                    "--stdin",
+                    f"--path={path}",
+                    input_bytes=current_bytes,
+                ),
+                label="Decision 当前工作树 clean blob",
+            )
+            if current_blob_oid != head_blob_oid or current_sha256 != expected_sha256:
+                raise ContinuityStoreError("Decision 字节未绑定恢复 Run git_head 的 immutable blob")
+
+        target_after, target_after_sha256 = self._decision_snapshot(target_decision_id)
+        recovery_after, recovery_after_sha256 = self._decision_snapshot(recovery_decision_id)
+        if (
+            target_after_sha256 != target_before_sha256
+            or recovery_after_sha256 != recovery_before_sha256
+            or target_after != target_before
+            or recovery_after != recovery_before
+        ):
+            raise ContinuityStoreError("Decision 或 Git HEAD 在结算复核期间发生漂移")
+        if require_current_head:
+            try:
+                final_head = (
+                    self._git_bytes("rev-parse", "--verify", "HEAD^{commit}")
+                    .decode("ascii", errors="strict")
+                    .strip()
+                )
+            except UnicodeDecodeError as error:
+                raise ContinuityStoreError("当前 Git HEAD 不是规范 commit OID") from error
+            if final_head != head:
+                raise ContinuityStoreError("首次结算复核期间 Git HEAD 发生漂移")
+        return target_after, recovery_after
+
+    def _control_root_decision_binding(
+        self,
+        *,
+        recovery: RunItem,
+        original_decision_id: str,
+        original_decision_sha256: str,
+        decision_id: str,
+        decision_sha256: str,
+        label: str,
+    ) -> dict[str, str]:
+        """Bind the original and the runtime Decision bytes to the recovery Run's control-root commit.
+
+        Same strength as ``settle_expired_run``: the recovery Run must live in the control-root
+        main worktree, the current HEAD must equal its ``git_head`` on first execution, and both
+        Decision files must be tracked, clean and byte-identical to that commit's blobs.
+        """
+
+        try:
+            recovery_worktree = Path(recovery.worktree_path).resolve(strict=True)
+        except OSError as error:
+            raise ContinuityStoreError(f"{label}的恢复 Run worktree_path 无法规范化") from error
+        if recovery_worktree != self.workspace_root:
+            raise ContinuityStoreError(f"{label}的恢复 Run 必须位于控制根主工作树")
+        self._decision_git_snapshots(
+            recovery_git_head=recovery.git_head,
+            target_decision_id=original_decision_id,
+            target_decision_sha256=original_decision_sha256,
+            recovery_decision_id=decision_id,
+            recovery_decision_sha256=decision_sha256,
+            require_current_head=True,
+        )
+
+        def head_blob(decision: str) -> str:
+            return self._git_object_id(
+                self._git_bytes(
+                    "rev-parse",
+                    "--verify",
+                    f"{recovery.git_head}:.auto-pm/decisions/{decision}.json",
+                ),
+                label="Decision HEAD blob",
+            )
+
+        return {
+            "schema_version": "decision-git-binding.v1",
+            "git_head": recovery.git_head,
+            "original_decision_id": original_decision_id,
+            "original_decision_blob": head_blob(original_decision_id),
+            "decision_id": decision_id,
+            "decision_blob": head_blob(decision_id),
+        }
+
+    def decision_git_binding_issues(self, decision_id: str) -> tuple[str, ...]:
+        """Read-only diagnostic: is one Decision file tracked and clean at the control-root HEAD?"""
+
+        path = f".auto-pm/decisions/{decision_id}.json"
+        try:
+            self._require_control_root()
+            tracked = self._git_bytes("ls-files", "--error-unmatch", "--", path)
+            if _decode_git_path(tracked) != path:
+                raise ContinuityStoreError("Decision 未被精确跟踪")
+            self._require_paths_clean_at_head(path)
+        except ContinuityStoreError:
+            return (
+                f"Decision {decision_id} 未被控制根 Git 跟踪或相对 HEAD 有改动；首次执行前须先提交原 "
+                "Decision 与本次运行态 Decision，再在该提交上创建恢复 Run，并在首次执行完成前保持 HEAD 不前移",
+            )
+        return ()
+
+    def initialize(self, now: str, tool_version: str) -> None:
+        self._require_control_root()
+        db_path = self._validated_db_path()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        migrated = False
+        with self._transaction() as conn:
+            versions = self._schema_versions(conn)
+            if versions and not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
+                rendered = ", ".join(sorted(versions))
+                raise ContinuityStoreSchemaError(f"未知或未来 Continuity Store schema: {rendered}")
+            conn.executescript(_DDL)
+            if not versions:
+                conn.execute(
+                    "INSERT INTO schema_meta VALUES (?, ?, ?)",
+                    (_CURRENT_SCHEMA_VERSION, now, tool_version),
+                )
+            elif versions == {_LEGACY_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_V3_SCHEMA_VERSION, _LEGACY_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_LEGACY_SCHEMA_VERSION, _V3_SCHEMA_VERSION, now, tool_version),
+                )
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_V4_SCHEMA_VERSION, _V3_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V3_SCHEMA_VERSION, _V4_SCHEMA_VERSION, now, tool_version),
+                )
+                versions = {_V4_SCHEMA_VERSION}
+            if versions == {_V3_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_V4_SCHEMA_VERSION, _V3_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V3_SCHEMA_VERSION, _V4_SCHEMA_VERSION, now, tool_version),
+                )
+                versions = {_V4_SCHEMA_VERSION}
+            if versions == {_V4_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_V5_SCHEMA_VERSION, _V4_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V4_SCHEMA_VERSION, _V5_SCHEMA_VERSION, now, tool_version),
+                )
+                versions = {_V5_SCHEMA_VERSION}
+            if versions == {_V5_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_V6_SCHEMA_VERSION, _V5_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V5_SCHEMA_VERSION, _V6_SCHEMA_VERSION, now, tool_version),
+                )
+                versions = {_V6_SCHEMA_VERSION}
+            if versions == {_V6_SCHEMA_VERSION}:
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_V7_SCHEMA_VERSION, _V6_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V6_SCHEMA_VERSION, _V7_SCHEMA_VERSION, now, tool_version),
+                )
+                versions = {_V7_SCHEMA_VERSION}
+            if versions == {_V7_SCHEMA_VERSION}:
+                # TD-071: the old rule (at most one open Mission) is stricter than the new one (at
+                # most one ACTIVE), so no existing row can violate the index created by _DDL above.
+                conn.execute(f"DROP INDEX IF EXISTS {_V7_OPEN_MISSION_INDEX}")
+                conn.execute(
+                    "UPDATE schema_meta SET schema_version=? WHERE schema_version=?",
+                    (_CURRENT_SCHEMA_VERSION, _V7_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
+                    (_V7_SCHEMA_VERSION, _CURRENT_SCHEMA_VERSION, now, tool_version),
+                )
+                migrated = True
+        if migrated:
+            self._checkpoint_completed_migration()
+
+    def _checkpoint_completed_migration(self) -> None:
+        """Make a completed migration visible to strict immutable readers before return."""
+        self._require_control_root()
+        db_path = self._validated_db_path()
+        conn = sqlite3.connect(db_path, timeout=5.0)
+        try:
+            self._validated_db_path()
+            result = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            self._validated_db_path()
+            if result is None or int(result[0]) != 0:
+                raise ContinuityStoreError("Continuity Store 迁移后 WAL 无法安全合并")
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _schema_versions(conn: sqlite3.Connection) -> set[str]:
+        metadata = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'"
+        ).fetchone()
+        if metadata is None:
+            tables = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+            if tables:
+                raise ContinuityStoreError("Continuity Store 缺少 schema_meta，拒绝推断迁移")
+            return set()
+        rows = conn.execute("SELECT schema_version FROM schema_meta").fetchall()
+        versions = {str(row[0]) for row in rows}
+        if not versions:
+            raise ContinuityStoreError("Continuity Store schema_meta 为空，拒绝推断迁移")
+        return versions
+
+    @contextmanager
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
+        self._require_control_root()
+        db_path = self._validated_db_path()
+        conn = sqlite3.connect(db_path, timeout=_WRITE_LOCK_TIMEOUT_SECONDS)
+        conn.row_factory = sqlite3.Row
+        try:
+            self._validated_db_path()
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute(f"PRAGMA busy_timeout={int(_WRITE_LOCK_TIMEOUT_SECONDS * 1000)}")
+            conn.execute("BEGIN IMMEDIATE")
+            self._validated_db_path()
+            yield conn
+            self._validated_db_path()
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @contextmanager
+    def _read_connection(self) -> Iterator[sqlite3.Connection]:
+        """Read one byte-stable off-workspace snapshot without touching source sidecars."""
+
+        db_path = self._validated_db_path()
+        snapshot = self._acquire_read_snapshot(db_path)
+        conn: sqlite3.Connection | None = None
+        try:
+            try:
+                conn = self._open_snapshot(snapshot.path)
+            except sqlite3.Error as error:
+                raise ContinuityStoreError("Continuity Store 严格只读快照无法打开") from error
+            yield conn
+        except sqlite3.Error as error:
+            raise ContinuityStoreError("Continuity Store 严格只读查询失败") from error
+        finally:
+            if conn is not None:
+                conn.rollback()
+                conn.close()
+            self._release_read_snapshot(snapshot)
+
+    @staticmethod
+    def _open_snapshot(snapshot_path: Path) -> sqlite3.Connection:
+        conn = sqlite3.connect(
+            f"{snapshot_path.as_uri()}?mode=ro&cache=private",
+            uri=True,
+            timeout=5.0,
+        )
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("BEGIN")
+        except sqlite3.Error:
+            conn.close()
+            raise
+        return conn
+
+    @staticmethod
+    def _copy_stamp(snapshot_path: Path) -> _CopyStamp:
+        def stamp(path: Path) -> tuple[bool, int, int, int, int]:
+            try:
+                metadata = path.stat()
+            except FileNotFoundError:
+                return (False, 0, 0, 0, 0)
+            return (
+                True,
+                int(metadata.st_size),
+                int(metadata.st_mtime_ns),
+                int(metadata.st_dev),
+                int(metadata.st_ino),
+            )
+
+        return stamp(snapshot_path), stamp(Path(f"{snapshot_path}-wal"))
+
+    def _acquire_read_snapshot(self, db_path: Path) -> _ReadSnapshot:
+        """Hand out the cached copy while the source bytes are unchanged, otherwise take and verify a new one."""
+
+        with self._read_snapshot_lock:
+            snapshot = self._stable_read_snapshot(db_path, self._read_snapshot)
+            if snapshot is not self._read_snapshot:
+                self._retire_read_snapshot()
+                self._read_snapshot = snapshot
+            snapshot.users += 1
+            return snapshot
+
+    def _release_read_snapshot(self, snapshot: _ReadSnapshot) -> None:
+        with self._read_snapshot_lock:
+            snapshot.users -= 1
+            if snapshot.retired and snapshot.users == 0:
+                snapshot.temporary.cleanup()
+
+    def _retire_read_snapshot(self) -> None:
+        """Drop the cached copy; it is deleted now, or when its last open connection closes."""
+
+        snapshot = self._read_snapshot
+        self._read_snapshot = None
+        if snapshot is None or snapshot.retired:
+            return
+        snapshot.retired = True
+        if snapshot.users == 0:
+            snapshot.temporary.cleanup()
+
+    def close_read_snapshot(self) -> None:
+        """Delete the cached strict-read copy now instead of when the store is garbage collected."""
+
+        with self._read_snapshot_lock:
+            self._retire_read_snapshot()
+
+    @staticmethod
+    def _file_inventory(path: Path, *, required: bool, transient: bool = False) -> _FileInventory:
+        """Hash one file; with ``transient`` (a source sidecar) a permission error while reading means another process holds it for the moment and counts as drift."""
+
+        try:
+            metadata = path.stat()
+        except FileNotFoundError:
+            if required:
+                raise ContinuityStoreError(f"Continuity Store 必需文件不存在: {path.name}")
+            return (False, 0, 0, 0, 0, "")
+        except OSError as error:
+            raise ContinuityStoreError(f"Continuity Store 文件无法读取: {path.name}") from error
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            message = f"Continuity Store 路径必须是唯一链接的普通文件: {path.name}"
+            if transient:
+                raise _ReadSnapshotAnomalyError(message)
+            raise ContinuityStoreError(message)
+        digest = hashlib.sha256()
+        try:
+            with path.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024):
+                    digest.update(chunk)
+        except FileNotFoundError as error:
+            raise _ReadSnapshotDriftError(_drift_reason(path.name, error)) from error
+        except PermissionError as error:
+            if transient:
+                raise _ReadSnapshotDriftError(_drift_reason(path.name, error)) from error
+            raise ContinuityStoreError(f"Continuity Store 文件无法读取: {path.name}") from error
+        except OSError as error:
+            raise ContinuityStoreError(f"Continuity Store 文件无法读取: {path.name}") from error
+        return (
+            True,
+            int(metadata.st_size),
+            int(metadata.st_mtime_ns),
+            int(metadata.st_dev),
+            int(metadata.st_ino),
+            digest.hexdigest(),
+        )
+
+    @classmethod
+    def _source_inventory(cls, db_path: Path) -> _StoreInventory:
+        facts = (
+            cls._file_inventory(db_path, required=True),
+            cls._file_inventory(Path(f"{db_path}-wal"), required=False, transient=True),
+            cls._file_inventory(Path(f"{db_path}-shm"), required=False, transient=True),
+            cls._file_inventory(Path(f"{db_path}-journal"), required=False, transient=True),
+        )
+        if facts[3][0] and facts[3][1] > 0:
+            raise ContinuityStoreError(
+                "Continuity Store 存在非空 rollback journal，拒绝严格只读读取"
+            )
+        return facts
+
+    @staticmethod
+    def _content_inventory(fact: _FileInventory) -> tuple[bool, int, str]:
+        return fact[0], fact[1], fact[5]
+
+    @staticmethod
+    def _path_is_within(path: Path, parent: Path) -> bool:
+        path_key = os.path.normcase(os.path.normpath(str(path)))
+        parent_key = os.path.normcase(os.path.normpath(str(parent)))
+        try:
+            common = os.path.commonpath((path_key, parent_key))
+        except ValueError:
+            return False
+        if os.name == "nt":
+            return common.casefold() == parent_key.casefold()
+        return common == parent_key
+
+    def _validated_snapshot_temp_root(self) -> Path:
+        raw = Path(os.path.abspath(tempfile.gettempdir()))
+        cursor = Path(raw.anchor)
+        try:
+            for part in raw.parts[1:]:
+                cursor /= part
+                if is_link_like(cursor):
+                    raise ContinuityStoreError(
+                        "Continuity Store 严格只读临时根不得经过 reparse path"
+                    )
+            resolved = raw.resolve(strict=True)
+        except OSError as error:
+            raise ContinuityStoreError("Continuity Store 严格只读临时根不可用") from error
+        if not resolved.is_dir() or self._path_is_within(resolved, self.workspace_root):
+            raise ContinuityStoreError("Continuity Store 严格只读临时根必须位于 workspace 外")
+        return resolved
+
+    def _stable_read_snapshot(
+        self,
+        db_path: Path,
+        cached: _ReadSnapshot | None,
+    ) -> _ReadSnapshot:
+        """Copy a stable DB/WAL byte set with bounded fail-closed retries; reuse ``cached`` when nothing changed.
+
+        The source is only ever opened for reading with the default sharing, so a writer in another process can always
+        open the database while the copy is taken (TD-105: an earlier Windows share-deny handle turned that writer's open
+        into a read-only one and its transaction failed with "readonly database"). A write that lands during the copy is
+        caught by the before/after inventory and retried, never copied half-way.
+        """
+
+        temp_root = self._validated_snapshot_temp_root()
+        persistent_anomaly: str | None = None
+        last_reason = ""
+        for attempt in range(_SIDECAR_ATTEMPTS):
+            temporary: tempfile.TemporaryDirectory[str] | None = None
+            try:
+                # Revalidate every acquisition attempt so a late reparse swap fails closed.
+                if self._validated_db_path() != db_path:
+                    raise ContinuityStoreError("Continuity Store path 在读取期间发生漂移")
+                before = self._source_inventory(db_path)
+                content = (before[0], before[1], before[3])
+                if (
+                    cached is not None
+                    and cached.source == content
+                    and self._copy_stamp(cached.path) == cached.copy_stamp
+                ):
+                    return cached
+                temporary = tempfile.TemporaryDirectory(
+                    prefix="auto-pm-continuity-read-",
+                    dir=temp_root,
+                )
+                snapshot_dir = Path(temporary.name)
+                snapshot_path = snapshot_dir / db_path.name
+                resolved_snapshot_dir = snapshot_dir.resolve(strict=True)
+                if (
+                    is_link_like(snapshot_dir)
+                    or not self._path_is_within(resolved_snapshot_dir, temp_root)
+                    or self._path_is_within(resolved_snapshot_dir, self.workspace_root)
+                ):
+                    raise ContinuityStoreError("Continuity Store 严格只读快照临时路径越界")
+                source_paths = (db_path, Path(f"{db_path}-wal"))
+                snapshot_paths = (snapshot_path, Path(f"{snapshot_path}-wal"))
+                for source, target, fact in zip(
+                    source_paths,
+                    snapshot_paths,
+                    before[:2],
+                    strict=True,
+                ):
+                    if fact[0]:
+                        try:
+                            shutil.copyfile(source, target)
+                        except FileNotFoundError as error:
+                            raise _ReadSnapshotDriftError(_drift_reason(source.name, error)) from error
+                        except PermissionError as error:
+                            # Windows: a writer may hold a byte-range lock on the file for a moment.
+                            raise _ReadSnapshotDriftError(_drift_reason(source.name, error)) from error
+                copied = tuple(
+                    self._file_inventory(path, required=fact[0])
+                    if fact[0]
+                    else self._file_inventory(path, required=False)
+                    for path, fact in zip(snapshot_paths, before[:2], strict=True)
+                )
+                after = self._source_inventory(db_path)
+                if before != after or any(
+                    self._content_inventory(copied_fact) != self._content_inventory(source_fact)
+                    for copied_fact, source_fact in zip(copied, before[:2], strict=True)
+                ):
+                    raise _ReadSnapshotDriftError("source changed during snapshot")
+                self._check_snapshot_integrity(snapshot_path)
+                return _ReadSnapshot(
+                    temporary=temporary,
+                    path=snapshot_path,
+                    source=content,
+                    copy_stamp=self._copy_stamp(snapshot_path),
+                )
+            except _ReadSnapshotDriftError as error:
+                if temporary is not None:
+                    temporary.cleanup()
+                # only the anomaly seen on the LAST attempt can be the refusal; a later plain drift clears it
+                persistent_anomaly = str(error) if isinstance(error, _ReadSnapshotAnomalyError) else None
+                last_reason = str(error)
+                if attempt < _SIDECAR_ATTEMPTS - 1:
+                    time.sleep(_SIDECAR_RETRY_SECONDS)
+                continue
+            except Exception:
+                if temporary is not None:
+                    temporary.cleanup()
+                raise
+        if persistent_anomaly is not None:
+            raise ContinuityStoreError(persistent_anomaly)
+        detail = f"（最后一次原因：{last_reason}）" if last_reason else ""
+        raise ContinuityStoreError(f"Continuity Store BUSY: 无法取得稳定只读快照{detail}")
+
+    @classmethod
+    def _check_snapshot_integrity(cls, snapshot_path: Path) -> None:
+        """Run ``quick_check`` once on a new copy; a reused copy was checked when it was taken."""
+
+        try:
+            conn = cls._open_snapshot(snapshot_path)
+        except sqlite3.Error as error:
+            raise ContinuityStoreError("Continuity Store 严格只读快照无法打开") from error
+        try:
+            integrity = conn.execute("PRAGMA quick_check").fetchall()
+        except sqlite3.Error as error:
+            raise ContinuityStoreError("Continuity Store 严格只读查询失败") from error
+        finally:
+            conn.rollback()
+            conn.close()
+        if len(integrity) != 1 or str(integrity[0][0]) != "ok":
+            raise ContinuityStoreError("Continuity Store 严格只读快照完整性检查失败")
+
+    def create_work(self, values: dict[str, Any], idempotency_key: str, now: str) -> WorkItem:
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_id"] != values["work_id"]:
+                    raise ContinuityStoreError("idempotency_key 已用于其他 Work")
+                return self._get_work(conn, values["work_id"])
+            columns = ",".join(values)
+            placeholders = ",".join("?" for _ in values)
+            conn.execute(
+                f"INSERT INTO work_items ({columns}) VALUES ({placeholders})",
+                tuple(values.values()),
+            )
+            self._append_event(
+                conn, values["work_id"], "WORK_CREATED", values, idempotency_key, now
+            )
+            return self._get_work(conn, values["work_id"])
+
+    def create_planning_draft(self, draft: PlanningDraft) -> PlanningDraft:
+        """Persist one pre-authorization draft with request-keyed replay protection."""
+
+        now = self._utc_now().isoformat()
+        with self._transaction() as conn:
+            existing = conn.execute(
+                "SELECT * FROM planning_drafts WHERE request_id=?", (draft.request_id,)
+            ).fetchone()
+            if existing is not None:
+                persisted = self._get_planning_draft(existing)
+                if not hmac.compare_digest(persisted.input_fingerprint, draft.input_fingerprint):
+                    raise ContinuityStoreError(
+                        "request_id 已绑定不同输入，拒绝覆盖既有 PlanningDraft"
+                    )
+                return persisted
+
+            values = {
+                "request_id": draft.request_id,
+                "subject_project_id": draft.subject_project_id,
+                "objective": draft.objective,
+                "acceptance_criteria_json": json.dumps(
+                    draft.acceptance_criteria, ensure_ascii=False, separators=(",", ":")
+                ),
+                "input_fingerprint": draft.input_fingerprint,
+                "state": draft.state,
+                "created_at": now,
+                "updated_at": now,
+            }
+            self._insert_mapping(conn, "planning_drafts", values)
+            self._append_event(
+                conn,
+                draft.request_id,
+                "PLANNING_DRAFT_CREATED",
+                draft.model_dump(mode="json"),
+                f"planning-draft-create:{draft.request_id}:{draft.input_fingerprint}",
+                now,
+                aggregate_type="planning_draft",
+            )
+            return draft
+
+    def reserve_planning_draft_change(self, request_id: str, change_id: str) -> str:
+        """Bind one draft to exactly one CHG identifier before its file is created.
+
+        The durable reservation makes a failed file write safely retryable: later
+        calls receive the original identifier instead of allocating a second CHG.
+        CHG numbers are issued per project, but this binding table is unique across the
+        workspace; when another draft (of any project) already holds the candidate, the
+        next higher number of the same series is taken instead of refusing.
+        """
+
+        now = self._utc_now().isoformat()
+        with self._transaction() as conn:
+            if conn.execute(
+                "SELECT 1 FROM planning_drafts WHERE request_id=?", (request_id,)
+            ).fetchone() is None:
+                raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+            existing = conn.execute(
+                "SELECT change_id FROM planning_draft_chg_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if existing is not None:
+                return str(existing["change_id"])
+            change_id = self._first_unbound_change_id(conn, change_id)
+            conn.execute(
+                "INSERT INTO planning_draft_chg_bindings VALUES (?, ?, ?)",
+                (request_id, change_id, now),
+            )
+            self._append_event(
+                conn,
+                request_id,
+                "PLANNING_DRAFT_CHG_RESERVED",
+                {"request_id": request_id, "change_id": change_id},
+                f"planning-draft-chg-reserve:{request_id}",
+                now,
+                aggregate_type="planning_draft",
+            )
+            return change_id
+
+    @staticmethod
+    def _first_unbound_change_id(conn: sqlite3.Connection, candidate: str) -> str:
+        """The candidate, or the next number of its series that no draft has bound yet."""
+
+        prefix, _, number = candidate.rpartition("-")
+        if not prefix or not number.isdigit():
+            raise ContinuityStoreError(f"候选 CHG 编号格式非法: {candidate}")
+        sequence = int(number)
+        while True:
+            change_id = f"{prefix}-{sequence:0{len(number)}d}"
+            taken = conn.execute(
+                "SELECT 1 FROM planning_draft_chg_bindings WHERE change_id=?", (change_id,)
+            ).fetchone()
+            if taken is None:
+                return change_id
+            sequence += 1
+
+    def bind_planning_draft_specs(
+        self, request_id: str, specs: tuple[tuple[str, str, str], ...]
+    ) -> tuple[tuple[str, str, str], ...]:
+        """Persist the effective spec sources for one pre-authorization draft."""
+
+        if not specs:
+            raise ContinuityStoreError("PlanningDraft 必须绑定至少一条有效规范")
+        now = self._utc_now().isoformat()
+        with self._transaction() as conn:
+            if conn.execute(
+                "SELECT 1 FROM planning_drafts WHERE request_id=?", (request_id,)
+            ).fetchone() is None:
+                raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+            existing = conn.execute(
+                """SELECT spec_id, canonical_path, version
+                FROM planning_draft_spec_bindings WHERE request_id=? ORDER BY spec_id""",
+                (request_id,),
+            ).fetchall()
+            if existing:
+                return tuple((str(row["spec_id"]), str(row["canonical_path"]), str(row["version"])) for row in existing)
+            for spec_id, canonical_path, version in specs:
+                conn.execute(
+                    "INSERT INTO planning_draft_spec_bindings VALUES (?, ?, ?, ?, ?)",
+                    (request_id, spec_id, canonical_path, version, now),
+                )
+            self._append_event(
+                conn,
+                request_id,
+                "PLANNING_DRAFT_SPECS_BOUND",
+                {"request_id": request_id, "specs": specs},
+                f"planning-draft-spec-bind:{request_id}",
+                now,
+                aggregate_type="planning_draft",
+            )
+            return specs
+
+    def reserve_planning_draft_decision(
+        self,
+        request_id: str,
+        change_id: str,
+        plan_hash: str,
+        approver: str,
+        approval_evidence_ref: str,
+    ) -> str:
+        """Reserve one immutable Decision identity for one exact human approval."""
+
+        if re.fullmatch(r"[0-9a-f]{64}", plan_hash) is None:
+            raise ContinuityStoreError("PlanningScopeCard plan_hash 必须是 64 位小写 SHA256")
+        values = (change_id, plan_hash, approver, approval_evidence_ref)
+        if any(not value or value != value.strip() for value in values):
+            raise ContinuityStoreError("Planning Decision 绑定字段必须是规范非空字符串")
+        now = self._utc_now()
+        with self._transaction() as conn:
+            bound_change = conn.execute(
+                "SELECT change_id FROM planning_draft_chg_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if bound_change is None or str(bound_change["change_id"]) != change_id:
+                raise ContinuityStoreError("PlanningDraft 未绑定指定真实 CHG")
+            spec_count = conn.execute(
+                "SELECT COUNT(*) FROM planning_draft_spec_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()[0]
+            if int(spec_count) == 0:
+                raise ContinuityStoreError("PlanningDraft 尚未绑定真实规范版本")
+            existing = conn.execute(
+                "SELECT * FROM planning_draft_decision_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if existing is not None:
+                persisted = (
+                    str(existing["change_id"]),
+                    str(existing["plan_hash"]),
+                    str(existing["approver"]),
+                    str(existing["approval_evidence_ref"]),
+                )
+                if persisted != values:
+                    raise ContinuityStoreError("PlanningDraft 已绑定不同批准，拒绝覆盖")
+                return str(existing["decision_id"])
+            identity = "\n".join((request_id, *values)).encode("utf-8")
+            decision_id = f"DEC-{now:%Y%m%d}-{hashlib.sha256(identity).hexdigest()[:8].upper()}"
+            conn.execute(
+                "INSERT INTO planning_draft_decision_bindings VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (request_id, decision_id, *values, now.isoformat()),
+            )
+            self._append_event(
+                conn,
+                request_id,
+                "PLANNING_DECISION_RESERVED",
+                {
+                    "request_id": request_id,
+                    "decision_id": decision_id,
+                    "change_id": change_id,
+                    "plan_hash": plan_hash,
+                    "approver": approver,
+                    "approval_evidence_ref": approval_evidence_ref,
+                },
+                f"planning-decision-reserve:{request_id}",
+                now.isoformat(),
+                aggregate_type="planning_draft",
+            )
+            return decision_id
+
+    def get_planning_draft(self, request_id: str) -> PlanningDraft:
+        """Read one persisted pre-authorization draft without changing store state."""
+
+        with self._read_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM planning_drafts WHERE request_id=?", (request_id,)
+            ).fetchone()
+            if row is None:
+                raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+            return self._get_planning_draft(row)
+
+    def get_planning_draft_specs(
+        self, request_id: str
+    ) -> tuple[tuple[str, str, str], ...]:
+        """Read the immutable spec bindings used to hash one planning card."""
+
+        with self._read_connection() as conn:
+            if conn.execute(
+                "SELECT 1 FROM planning_drafts WHERE request_id=?", (request_id,)
+            ).fetchone() is None:
+                raise ContinuityStoreError(f"PlanningDraft 不存在: {request_id}")
+            rows = conn.execute(
+                """SELECT spec_id, canonical_path, version
+                FROM planning_draft_spec_bindings WHERE request_id=? ORDER BY spec_id""",
+                (request_id,),
+            ).fetchall()
+        if not rows:
+            raise ContinuityStoreError("PlanningDraft 尚未绑定真实规范版本")
+        return tuple(
+            (str(row["spec_id"]), str(row["canonical_path"]), str(row["version"]))
+            for row in rows
+        )
+
+    def get_planning_draft_decision_id(
+        self, request_id: str, change_id: str, plan_hash: str
+    ) -> str:
+        """Return the Decision bound to this exact draft, CHG, and plan hash."""
+
+        with self._read_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM planning_draft_decision_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                raise ContinuityStoreError("PlanningDraft 尚未绑定用户批准的 Decision")
+            if str(row["change_id"]) != change_id or not hmac.compare_digest(
+                str(row["plan_hash"]), plan_hash
+            ):
+                raise ContinuityStoreError("PlanningDraft 的 CHG 或 plan_hash 与批准事实不一致")
+            return str(row["decision_id"])
+
+    def resolve_planning_draft_mission_id(
+        self,
+        request_id: str,
+        decision_id: str,
+        change_id: str,
+        plan_hash: str,
+    ) -> str:
+        """Resolve one deterministic Mission identity from an exact approved chain."""
+
+        if re.fullmatch(r"[0-9a-f]{64}", plan_hash) is None:
+            raise ContinuityStoreError("PlanningScopeCard plan_hash 必须是 64 位小写 SHA256")
+        values = (decision_id, change_id, plan_hash)
+        with self._read_connection() as conn:
+            approved = conn.execute(
+                "SELECT * FROM planning_draft_decision_bindings WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if approved is None:
+                raise ContinuityStoreError("PlanningDraft 尚未绑定用户批准的 Decision")
+            persisted_approval = (
+                str(approved["decision_id"]),
+                str(approved["change_id"]),
+                str(approved["plan_hash"]),
+            )
+            if persisted_approval != values:
+                raise ContinuityStoreError("Mission 输入与 PlanningDraft 批准链不一致")
+            identity = "\n".join((request_id, *values)).encode("utf-8")
+            return f"MISSION-{hashlib.sha256(identity).hexdigest()[:16].upper()}"
+
+    def submit_planning_scope_card(self, card: PlanningScopeCard, submitted_by: str) -> int:
+        """Persist a scope-card revision using the same operation as classified planning."""
+        with self._transaction() as conn:
+            return self._submit_planning_scope_card(conn, card, submitted_by)
+
+    def _submit_planning_scope_card(
+        self,
+        conn: sqlite3.Connection,
+        card: PlanningScopeCard,
+        submitted_by: str,
+        *,
+        allow_approved_replay: bool = False,
+    ) -> int:
+        """Validate and persist a card inside the caller's transaction; never commit here."""
+
+        if (
+            not submitted_by
+            or submitted_by != submitted_by.strip()
+            or len(submitted_by) > 80
+            or not submitted_by.isprintable()
+        ):
+            raise ContinuityStoreError("submitted_by 必须是 80 字符以内的规范可打印文本")
+        card_json = json.dumps(
+            card.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        )
+        now = self._utc_now().isoformat()
+        conn.execute(_PLANNING_SCOPE_CARDS_DDL)
+        draft_row = conn.execute(
+            "SELECT * FROM planning_drafts WHERE request_id=?", (card.request_id,)
+        ).fetchone()
+        if draft_row is None:
+            raise ContinuityStoreError(f"PlanningDraft 不存在: {card.request_id}")
+        draft = self._planning_draft_from_row(draft_row)
+        bound = conn.execute(
+            "SELECT change_id FROM planning_draft_chg_bindings WHERE request_id=?",
+            (card.request_id,),
+        ).fetchone()
+        if bound is None or str(bound["change_id"]) != card.change_id:
+            raise ContinuityStoreError("范围卡的 CHG 与草稿绑定不一致")
+        specs = tuple(
+            (str(row["spec_id"]), str(row["canonical_path"]), str(row["version"]))
+            for row in conn.execute(
+                """SELECT spec_id, canonical_path, version
+                FROM planning_draft_spec_bindings WHERE request_id=? ORDER BY spec_id""",
+                (card.request_id,),
+            ).fetchall()
+        )
+        if specs != card.spec_sources:
+            raise ContinuityStoreError("范围卡的规范来源与草稿绑定不一致")
+        if self._rebuilt_planning_scope_card(draft, card) != card:
+            raise ContinuityStoreError("范围卡内容与 plan_hash 或草稿不一致")
+        approval = conn.execute(
+            "SELECT change_id, plan_hash FROM planning_draft_decision_bindings WHERE request_id=?",
+            (card.request_id,),
+        ).fetchone()
+        approved = approval is not None
+        if approved and not allow_approved_replay:
+            raise ContinuityStoreError("该请求已批准，拒绝再提交范围卡")
+        if approval is not None and (
+            str(approval["change_id"]) != card.change_id
+            or not hmac.compare_digest(str(approval["plan_hash"]), card.plan_hash)
+        ):
+            raise ContinuityStoreError("该请求已批准，拒绝恢复不同的范围卡")
+        same = conn.execute(
+            "SELECT revision, card_json FROM planning_scope_cards WHERE request_id=? AND plan_hash=?",
+            (card.request_id, card.plan_hash),
+        ).fetchone()
+        if same is not None:
+            if not hmac.compare_digest(
+                str(same["card_json"]).encode("utf-8"), card_json.encode("utf-8")
+            ):
+                raise ContinuityStoreError("同一 plan_hash 对应不同的范围卡内容")
+            return int(same["revision"])
+        if approved:
+            raise ContinuityStoreError("该请求已批准，拒绝再提交范围卡")
+        latest = conn.execute(
+            "SELECT COALESCE(MAX(revision), 0) FROM planning_scope_cards WHERE request_id=?",
+            (card.request_id,),
+        ).fetchone()[0]
+        revision = int(latest) + 1
+        conn.execute(
+            "INSERT INTO planning_scope_cards VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (card.request_id, revision, card.plan_hash, card.change_id, card_json, submitted_by, now),
+        )
+        self._append_event(
+            conn,
+            card.request_id,
+            "PLANNING_SCOPE_CARD_SUBMITTED",
+            {
+                "request_id": card.request_id,
+                "revision": revision,
+                "plan_hash": card.plan_hash,
+                "change_id": card.change_id,
+                "submitted_by": submitted_by,
+                "card_sha256": hashlib.sha256(card_json.encode("utf-8")).hexdigest(),
+            },
+            f"planning-scope-card-submit:{card.request_id}:{card.plan_hash}",
+            now,
+            aggregate_type="planning_draft",
+        )
+        return revision
+
+    def list_pending_planning_scope_cards(
+        self, subject_project_id: str
+    ) -> tuple[SubmittedPlanningScopeCard, ...]:
+        """List the newest scope card of every not yet approved request of one project."""
+
+        with self._read_connection() as conn:
+            if not self._table_exists(conn, "planning_scope_cards"):
+                return ()
+            rows = conn.execute(
+                """SELECT c.* FROM planning_scope_cards c
+                JOIN planning_drafts d ON d.request_id = c.request_id
+                WHERE d.subject_project_id=?
+                AND c.revision = (SELECT MAX(revision) FROM planning_scope_cards
+                                  WHERE request_id = c.request_id)
+                AND NOT EXISTS (SELECT 1 FROM planning_draft_decision_bindings b
+                                WHERE b.request_id = c.request_id)
+                ORDER BY c.created_at, c.request_id""",
+                (subject_project_id,),
+            ).fetchall()
+            return tuple(
+                self._submitted_planning_scope_card(conn, row, latest_revision=int(row["revision"]))
+                for row in rows
+            )
+
+    def get_submitted_planning_scope_card(
+        self, request_id: str, plan_hash: str
+    ) -> SubmittedPlanningScopeCard:
+        """Read one exact scope card revision, approved or not."""
+
+        if re.fullmatch(r"[0-9a-f]{64}", plan_hash) is None:
+            raise ContinuityStoreError("PlanningScopeCard plan_hash 必须是 64 位小写 SHA256")
+        with self._read_connection() as conn:
+            if not self._table_exists(conn, "planning_scope_cards"):
+                raise ContinuityStoreError(f"范围卡不存在: {request_id}")
+            row = conn.execute(
+                "SELECT * FROM planning_scope_cards WHERE request_id=? AND plan_hash=?",
+                (request_id, plan_hash),
+            ).fetchone()
+            if row is None:
+                raise ContinuityStoreError(f"范围卡不存在: {request_id}")
+            latest = conn.execute(
+                "SELECT MAX(revision) FROM planning_scope_cards WHERE request_id=?", (request_id,)
+            ).fetchone()[0]
+            return self._submitted_planning_scope_card(conn, row, latest_revision=int(latest))
+
+    def list_planning_drafts(self, subject_project_id: str) -> tuple[PlanningDraftOverview, ...]:
+        """List every planning draft of one project with the stage its scope card has reached."""
+
+        with self._read_connection() as conn:
+            has_cards = self._table_exists(conn, "planning_scope_cards")
+            overviews: list[PlanningDraftOverview] = []
+            for row in conn.execute(
+                "SELECT * FROM planning_drafts WHERE subject_project_id=? ORDER BY created_at, request_id",
+                (subject_project_id,),
+            ).fetchall():
+                request_id = str(row["request_id"])
+                bound = conn.execute(
+                    "SELECT change_id FROM planning_draft_chg_bindings WHERE request_id=?",
+                    (request_id,),
+                ).fetchone()
+                revision = 0
+                if has_cards:
+                    revision = int(
+                        conn.execute(
+                            "SELECT COALESCE(MAX(revision), 0) FROM planning_scope_cards WHERE request_id=?",
+                            (request_id,),
+                        ).fetchone()[0]
+                    )
+                approved = conn.execute(
+                    "SELECT 1 FROM planning_draft_decision_bindings WHERE request_id=?",
+                    (request_id,),
+                ).fetchone()
+                try:
+                    overviews.append(
+                        PlanningDraftOverview(
+                            draft=self._planning_draft_from_row(row),
+                            created_at=str(row["created_at"]),
+                            change_id="" if bound is None else str(bound["change_id"]),
+                            card_revision=revision,
+                            approved=approved is not None,
+                        )
+                    )
+                except ValueError as error:
+                    raise ContinuityStoreError(f"PlanningDraft 记录无法读取: {request_id}") from error
+            return tuple(overviews)
+
+    @staticmethod
+    def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+        return (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+            ).fetchone()
+            is not None
+        )
+
+    @staticmethod
+    def _planning_draft_from_row(row: sqlite3.Row) -> PlanningDraft:
+        try:
+            return ContinuityStore._get_planning_draft(row)
+        except ValueError as error:
+            raise ContinuityStoreError(f"PlanningDraft 记录无法读取: {row['request_id']}") from error
+
+    @staticmethod
+    def _rebuilt_planning_scope_card(draft: PlanningDraft, card: PlanningScopeCard) -> PlanningScopeCard:
+        """Rebuild a card from its own fields and the persisted draft; the hash is recomputed."""
+
+        try:
+            return PlanningScopeCard.from_draft(
+                draft,
+                change_id=card.change_id,
+                scope_paths=card.scope_paths,
+                risks=card.risks,
+                non_goals=card.non_goals,
+                spec_sources=card.spec_sources,
+                execution_grant=card.execution_grant,
+            )
+        except ValueError as error:
+            raise ContinuityStoreError("范围卡内容不合法") from error
+
+    def _submitted_planning_scope_card(
+        self, conn: sqlite3.Connection, row: sqlite3.Row, *, latest_revision: int
+    ) -> SubmittedPlanningScopeCard:
+        """Decode and verify one stored revision; any mismatch fails the whole read."""
+
+        request_id = str(row["request_id"])
+        draft_row = conn.execute(
+            "SELECT * FROM planning_drafts WHERE request_id=?", (request_id,)
+        ).fetchone()
+        if draft_row is None:
+            raise ContinuityStoreError(f"范围卡记录没有对应草稿: {request_id}")
+        draft = self._planning_draft_from_row(draft_row)
+        try:
+            card = PlanningScopeCard.model_validate(json.loads(str(row["card_json"])))
+            if (
+                card.request_id != request_id
+                or card.plan_hash != str(row["plan_hash"])
+                or card.change_id != str(row["change_id"])
+                or self._rebuilt_planning_scope_card(draft, card) != card
+            ):
+                raise ContinuityStoreError(f"范围卡记录与其内容不一致: {request_id}")
+            return SubmittedPlanningScopeCard(
+                card=card,
+                objective=draft.objective,
+                revision=int(row["revision"]),
+                superseded=int(row["revision"]) < latest_revision,
+                submitted_by=str(row["submitted_by"]),
+                submitted_at=str(row["created_at"]),
+            )
+        except ValueError as error:
+            raise ContinuityStoreError(f"范围卡记录无法读取: {request_id}") from error
+
+    def create_mission(
+        self,
+        values: dict[str, Any],
+        idempotency_key: str,
+        now: str,
+        *,
+        max_open_per_project: int = 1,
+        admitted_open_ids: Collection[str] | None = None,
+    ) -> Mission:
+        """Persist one Mission and its append-only creation event atomically.
+
+        Since v8 the database only forbids a second ACTIVE Mission per project (TD-071).  How many
+        Missions may be open at once is a service rule checked here, inside the write transaction;
+        the default keeps the old one-open-Mission rule until the entry gates are opened (TD-071 card 3).
+
+        ``admitted_open_ids`` are the open Missions the caller's admission check (limit and path collisions) was made
+        over.  When given, a Mission opened in the project since that check refuses this one, so two approvals racing
+        past the same check cannot both create cards; a retry checks again against what is open now.
+        """
+        if type(max_open_per_project) is not int or max_open_per_project < 1:
+            raise ContinuityStoreError("max_open_per_project 必须是正整数")
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if (
+                    existing["aggregate_type"] != "mission"
+                    or existing["aggregate_id"] != values["mission_id"]
+                ):
+                    raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
+                return self._get_mission(conn, values["mission_id"])
+            open_count = int(
+                conn.execute(
+                    """SELECT COUNT(*) FROM mission_items WHERE subject_project_id=?
+                    AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED')""",
+                    (values["subject_project_id"],),
+                ).fetchone()[0]
+            )
+            if open_count >= max_open_per_project:
+                raise ContinuityStoreError(
+                    "同一项目已有未终结 Mission，拒绝并发创建"
+                    if max_open_per_project == 1
+                    else f"同一项目开着的 Mission 已达上限 {max_open_per_project} 张，拒绝再开"
+                )
+            if admitted_open_ids is not None:
+                opened_since = sorted(
+                    str(row["mission_id"])
+                    for row in conn.execute(
+                        """SELECT mission_id FROM mission_items WHERE subject_project_id=?
+                        AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED') AND mission_id<>?""",
+                        (values["subject_project_id"], values["mission_id"]),
+                    ).fetchall()
+                    if str(row["mission_id"]) not in admitted_open_ids
+                )
+                if opened_since:
+                    raise ContinuityStoreError(
+                        "准入检查之后项目里又开了新卡（"
+                        + "、".join(opened_since)
+                        + "），没有建卡；请重新执行，会按现在开着的卡重新检查上限和撞车"
+                    )
+            try:
+                self._insert_mapping(conn, "mission_items", values)
+            except sqlite3.IntegrityError as error:
+                raise ContinuityStoreError("Mission 已存在或与项目在干 Mission 冲突，拒绝创建") from error
+            self._append_event(
+                conn,
+                values["mission_id"],
+                "MISSION_CREATED",
+                values,
+                idempotency_key,
+                now,
+                aggregate_type="mission",
+            )
+            return self._get_mission(conn, values["mission_id"])
+
+    def transition_mission(
+        self,
+        mission_id: str,
+        expected_version: int,
+        new_state: MissionState,
+        root_work_id: str | None,
+        idempotency_key: str,
+        now: str,
+    ) -> Mission:
+        """Advance a Mission with optimistic locking and an immutable event."""
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if (
+                    existing["aggregate_type"] != "mission"
+                    or existing["aggregate_id"] != mission_id
+                ):
+                    raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
+                return self._get_mission(conn, mission_id)
+            if new_state is MissionState.PARKED:
+                raise ContinuityStoreError("搁着只能走 park_mission：要在同一事务里记断点并摘牌")
+            current_state = conn.execute(
+                "SELECT state FROM mission_items WHERE mission_id=?", (mission_id,)
+            ).fetchone()
+            open_park = (
+                self._open_park_row(conn, "mission_id", mission_id)
+                if self._table_exists(conn, "run_parks")
+                else None
+            )
+            if new_state is MissionState.ACTIVE and (
+                open_park is not None
+                or (
+                    current_state is not None
+                    and current_state["state"] == MissionState.PARKED.value
+                )
+            ):
+                raise ContinuityStoreError("拿回搁着的卡只能走 unpark_mission：要核对断点并发新租约")
+            if open_park is not None and new_state is MissionState.CANCELLED:
+                # TD-071 design 7.1: a parked card that is called off ends its Run and closes its
+                # park record in the same transaction, so nothing is left half-held.
+                self._end_parked_run(conn, open_park, idempotency_key, now)
+            try:
+                cursor = conn.execute(
+                    """UPDATE mission_items
+                    SET state=?, root_work_id=?, version=version+1, updated_at=?
+                    WHERE mission_id=? AND version=?""",
+                    (new_state.value, root_work_id, now, mission_id, expected_version),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ContinuityStoreError(
+                    "项目里已有一张在干（ACTIVE）的 Mission；同一时刻只能有一张在干"
+                ) from error
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            self._append_event(
+                conn,
+                mission_id,
+                "MISSION_TRANSITIONED",
+                {"state": new_state.value, "root_work_id": root_work_id},
+                idempotency_key,
+                now,
+                aggregate_type="mission",
+            )
+            return self._get_mission(conn, mission_id)
+
+    def transition(
+        self,
+        work_id: str,
+        expected_version: int,
+        new_state: str,
+        authorization_ref: str,
+        idempotency_key: str,
+        now: str,
+    ) -> WorkItem:
+        try:
+            destination = WorkState(new_state)
+        except (TypeError, ValueError) as error:
+            raise ContinuityStoreError("Work 目标状态非法") from error
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if self._work_transition_from_event(existing) != (
+                    work_id,
+                    destination,
+                    authorization_ref,
+                ):
+                    raise ContinuityStoreError("idempotency_key 已绑定不同 Work 状态迁移")
+                return self._get_work(conn, work_id)
+            if destination in {WorkState.VERIFYING, WorkState.ACCEPTED, WorkState.CLOSED}:
+                self._refuse_while_closure_prepared(conn, "work_id", work_id, "Work")
+            cursor = conn.execute(
+                """UPDATE work_items SET state=?, authorization_ref=?, version=version+1,
+                updated_at=? WHERE work_id=? AND version=?""",
+                (destination.value, authorization_ref, now, work_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Work 不存在或版本冲突")
+            payload = {"state": destination.value, "authorization_ref": authorization_ref}
+            self._append_event(conn, work_id, "WORK_TRANSITIONED", payload, idempotency_key, now)
+            return self._get_work(conn, work_id)
+
+    def work_adjudication_evidence(self, work_id: str) -> WorkAdjudicationEvidence:
+        """Read the exact adjudication facts of one Work without opening a write transaction."""
+
+        work_id = self._validated_run_text(work_id, label="work_id")
+        with self._read_connection() as conn:
+            return self._work_adjudication_facts(conn, work_id)
+
+    def _work_adjudication_facts(
+        self, conn: sqlite3.Connection, work_id: str
+    ) -> WorkAdjudicationEvidence:
+        work = self._get_work(conn, work_id)
+        run_rows = conn.execute(
+            "SELECT run_id, state, version FROM run_items WHERE work_id=? ORDER BY run_id",
+            (work_id,),
+        ).fetchall()
+        runs = tuple((str(row[0]), str(row[1]), int(row[2])) for row in run_rows)
+        leases: list[tuple[str, int, bool]] = []
+        for run_id, _state, _version in runs:
+            row = conn.execute(
+                "SELECT lease_token, version FROM execution_leases WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                leases.append((run_id, 0, False))
+            else:
+                leases.append((run_id, int(row[1]), str(row[0]).startswith("RELEASED:")))
+        blockers: list[str] = []
+        if work.state is not WorkState.BLOCKED:
+            blockers.append(f"Work 不是 BLOCKED: {work.state.value}")
+        if work.read_only:
+            blockers.append("只读 Work 不适用行政裁决")
+        terminal = {RunState.SUCCEEDED.value, RunState.FAILED.value, RunState.CANCELLED.value}
+        blockers.extend(
+            f"非终态 Run: {run_id}" for run_id, state, _version in runs if state not in terminal
+        )
+        blockers.extend(
+            f"lease 未释放或缺失: {run_id}" for run_id, _version, released in leases if not released
+        )
+
+        def digest(rows: list[list[object]]) -> str:
+            return hashlib.sha256(
+                json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode()
+            ).hexdigest()
+
+        return WorkAdjudicationEvidence(
+            work_id=work.work_id,
+            state=work.state.value,
+            version=work.version,
+            authorization_ref=work.authorization_ref,
+            run_states=runs,
+            lease_states=tuple(leases),
+            run_set_sha256=digest([list(item) for item in runs]),
+            lease_set_sha256=digest([list(item) for item in leases]),
+            blockers=tuple(blockers),
+        )
+
+    def legacy_terminal_lease_evidence(self, run_id: str) -> LegacyTerminalLeaseEvidence:
+        """Read the exact legacy-terminal facts of one Run without opening a write transaction."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            return self._legacy_terminal_lease_facts(conn, run_id)
+
+    def _legacy_terminal_lease_facts(
+        self, conn: sqlite3.Connection, run_id: str
+    ) -> LegacyTerminalLeaseEvidence:
+        run = self._get_run(conn, run_id)
+        lease = self._get_lease(conn, run_id)
+        event_rows = conn.execute(
+            "SELECT event_id, event_type, event_hash, payload_json FROM events "
+            "WHERE aggregate_type='run' AND aggregate_id=? ORDER BY rowid",
+            (run_id,),
+        ).fetchall()
+        checkpoint_rows = conn.execute(
+            "SELECT checkpoint_id, sequence, git_head, dirty_paths_json, evidence_json "
+            "FROM checkpoints WHERE run_id=? ORDER BY sequence",
+            (run_id,),
+        ).fetchall()
+
+        def digest(rows: list[list[object]]) -> str:
+            return hashlib.sha256(
+                json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode()
+            ).hexdigest()
+
+        kind = "NONE"
+        for row in event_rows:
+            event_type = str(row[1])
+            if event_type == "RUN_EXPIRED_SETTLED":
+                kind = "RUN_EXPIRED_SETTLED"
+                continue
+            if event_type != "RUN_TRANSITIONED":
+                continue
+            try:
+                payload = json.loads(str(row[3]))
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            reached = payload.get("new_state", payload.get("state"))
+            if reached == run.state.value:
+                kind = (
+                    "RUN_TRANSITIONED_V2"
+                    if payload.get("schema_version") == "run-transition.v2"
+                    else "RUN_TRANSITIONED_LEGACY"
+                )
+        terminal = {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}
+        released = lease.lease_token.startswith("RELEASED:")
+        blockers: list[str] = []
+        if run.state not in terminal:
+            blockers.append(f"Run 不是终态: {run.state.value}")
+        if released:
+            blockers.append("lease 已释放")
+        if self._aware_timestamp(lease.expires_at, "目标 Run lease") > self._utc_now():
+            blockers.append("lease 尚未过期")
+        if kind == "NONE":
+            blockers.append("缺少可绑定的终态证据事件")
+        return LegacyTerminalLeaseEvidence(
+            run_id=run.run_id,
+            work_id=run.work_id,
+            state=run.state.value,
+            version=run.version,
+            lease_version=lease.version,
+            lease_expires_at=lease.expires_at,
+            lease_released=released,
+            terminal_evidence_kind=kind,
+            event_types=tuple(str(row[1]) for row in event_rows),
+            event_set_sha256=digest([[str(row[0]), str(row[1]), str(row[2])] for row in event_rows]),
+            checkpoint_set_sha256=digest(
+                [
+                    [
+                        str(row[0]),
+                        int(row[1]),
+                        str(row[2]),
+                        hashlib.sha256(str(row[3]).encode()).hexdigest(),
+                        hashlib.sha256(str(row[4]).encode()).hexdigest(),
+                    ]
+                    for row in checkpoint_rows
+                ]
+            ),
+            blockers=tuple(blockers),
+        )
+
+    def fence_legacy_terminal_lease(
+        self,
+        *,
+        target_run_id: str,
+        expected_run_state: str,
+        expected_run_version: int,
+        expected_lease_version: int,
+        expected_terminal_evidence_kind: str,
+        expected_event_set_sha256: str,
+        expected_checkpoint_set_sha256: str,
+        recovery_run_id: str,
+        expected_recovery_run_version: int,
+        expected_recovery_lease_version: int,
+        recovery_work_id: str,
+        expected_recovery_work_version: int,
+        expected_recovery_work_scope_hash: str,
+        expected_recovery_owned_paths_hash: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        decision_sha256: str,
+        decision_change_id: str,
+        decision_project_id: str,
+        decision_approved_paths: tuple[str, ...],
+        runtime_target_path: str,
+        reason: str,
+        idempotency_key: str,
+        original_decision_id: str,
+        original_decision_sha256: str,
+    ) -> RunItem:
+        """Invalidate one expired legacy terminal lease token without touching Run history.
+
+        Only the lease row is fenced (RELEASED marker) and one audit event is appended; the
+        Run row, its Checkpoints and every earlier event stay byte-identical. On first execution
+        the target Work's original Decision and the fence Decision are bound to the recovery
+        Run's control-root commit; the binding is audited under ``authority`` and never enters
+        ``request``, so replays of events written before this binding remain equivalent.
+        """
+
+        texts = {
+            "target_run_id": target_run_id,
+            "expected_run_state": expected_run_state,
+            "expected_terminal_evidence_kind": expected_terminal_evidence_kind,
+            "expected_event_set_sha256": expected_event_set_sha256,
+            "expected_checkpoint_set_sha256": expected_checkpoint_set_sha256,
+            "recovery_run_id": recovery_run_id,
+            "recovery_work_id": recovery_work_id,
+            "recovery_owner_id": recovery_owner_id,
+            "recovery_lease_token": recovery_lease_token,
+            "decision_id": decision_id,
+            "decision_sha256": decision_sha256,
+            "decision_change_id": decision_change_id,
+            "decision_project_id": decision_project_id,
+            "reason": reason,
+        }
+        for label, value in texts.items():
+            self._validated_run_text(value, label=label)
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        versions = (
+            expected_run_version,
+            expected_lease_version,
+            expected_recovery_run_version,
+            expected_recovery_lease_version,
+            expected_recovery_work_version,
+        )
+        if any(type(version) is not int or version < 1 for version in versions):
+            raise ContinuityStoreError("围栏目标与恢复链版本必须是正整数")
+        if recovery_lease_token in reason:
+            raise ContinuityStoreError("围栏原因不得包含恢复 lease token")
+        request = {
+            "schema_version": "legacy-terminal-lease-fence-request.v1",
+            "target_run_id": target_run_id,
+            "expected_run_state": expected_run_state,
+            "expected_run_version": expected_run_version,
+            "expected_lease_version": expected_lease_version,
+            "expected_terminal_evidence_kind": expected_terminal_evidence_kind,
+            "expected_event_set_sha256": expected_event_set_sha256,
+            "expected_checkpoint_set_sha256": expected_checkpoint_set_sha256,
+            "recovery_run_id": recovery_run_id,
+            "expected_recovery_run_version": expected_recovery_run_version,
+            "expected_recovery_lease_version": expected_recovery_lease_version,
+            "recovery_work_id": recovery_work_id,
+            "expected_recovery_work_version": expected_recovery_work_version,
+            "recovery_owner_id": recovery_owner_id,
+            "decision_id": decision_id,
+            "decision_sha256": decision_sha256,
+            "reason": reason,
+        }
+        token_fingerprint = self._lease_token_fingerprint(recovery_lease_token)
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="旧终态 lease 围栏")
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["aggregate_id"] != target_run_id
+                    or existing["event_type"] != "RUN_LEGACY_LEASE_FENCED"
+                    or payload.get("schema_version") != "legacy-terminal-lease-fence.v1"
+                    or payload.get("request") != request
+                    or payload.get("recovery_token_sha256") != token_fingerprint
+                ):
+                    raise ContinuityStoreError("idempotency_key 的旧终态 lease 围栏语义不一致")
+                return self._get_run(conn, target_run_id)
+
+            if target_run_id == recovery_run_id:
+                raise ContinuityStoreError("围栏目标 Run 与恢复 Run 必须不同")
+            event_time = self._utc_now().isoformat()
+            facts = self._legacy_terminal_lease_facts(conn, target_run_id)
+            target = self._get_run(conn, target_run_id)
+            target_lease = self._get_lease(conn, target_run_id)
+            target_work = self._get_work(conn, target.work_id)
+            if facts.blockers:
+                raise ContinuityStoreError("Run 不满足旧终态 lease 围栏前置: " + "; ".join(facts.blockers))
+            if (
+                target.state.value != expected_run_state
+                or target.version != expected_run_version
+                or target_lease.version != expected_lease_version
+            ):
+                raise ContinuityStoreError("目标 Run 状态、版本或 lease epoch 冲突")
+            if (
+                facts.terminal_evidence_kind != expected_terminal_evidence_kind
+                or facts.event_set_sha256 != expected_event_set_sha256
+                or facts.checkpoint_set_sha256 != expected_checkpoint_set_sha256
+            ):
+                raise ContinuityStoreError("目标 Run 的事件/Checkpoint 摘要与围栏绑定不一致")
+
+            recovery = self._get_run(conn, recovery_run_id)
+            recovery_lease = self._get_lease(conn, recovery_run_id)
+            recovery_work = self._get_work(conn, recovery_work_id)
+            if (
+                recovery.state is not RunState.RUNNING
+                or recovery.work_id != recovery_work_id
+                or recovery.version != expected_recovery_run_version
+                or recovery_lease.version != expected_recovery_lease_version
+                or recovery_lease.owner_id != recovery_owner_id
+                or not hmac.compare_digest(recovery_lease.lease_token, recovery_lease_token)
+                or self._aware_timestamp(recovery_lease.expires_at, "恢复 lease")
+                <= self._utc_now()
+            ):
+                raise ContinuityStoreError("恢复 Run/lease 不具备围栏权限")
+            if (
+                recovery_work.read_only
+                or recovery_work.state is not WorkState.IN_PROGRESS
+                or recovery_work.version != expected_recovery_work_version
+                or recovery_work.authorization_ref != decision_id
+                or recovery_work.work_id == target_work.work_id
+                or self.authority_paths_hash(recovery_work.scope_paths)
+                != expected_recovery_work_scope_hash
+                or self.authority_paths_hash(recovery.owned_paths)
+                != expected_recovery_owned_paths_hash
+            ):
+                raise ContinuityStoreError("恢复 Work 不具备围栏权限或授权链已漂移")
+            if (
+                target_work.subject_project_id != recovery_work.subject_project_id
+                or target_work.subject_project_id != decision_project_id
+            ):
+                raise ContinuityStoreError("围栏目标、恢复 Work 与 Decision 必须属于同一项目")
+            approved = tuple(decision_approved_paths)
+            if (
+                not self._authority_path_covered(runtime_target_path, approved)
+                or not self._authority_path_covered(
+                    runtime_target_path, tuple(recovery_work.scope_paths)
+                )
+                or not self._authority_path_covered(
+                    runtime_target_path, tuple(recovery.owned_paths)
+                )
+            ):
+                raise ContinuityStoreError("围栏权限链未覆盖 canonical continuity.db")
+            self._validated_run_text(original_decision_id, label="original_decision_id")
+            self._validated_run_text(original_decision_sha256, label="original_decision_sha256")
+            if target_work.authorization_ref != original_decision_id:
+                raise ContinuityStoreError("目标 Work 的原授权引用与围栏绑定不一致")
+            authority = self._control_root_decision_binding(
+                recovery=recovery,
+                original_decision_id=original_decision_id,
+                original_decision_sha256=original_decision_sha256,
+                decision_id=decision_id,
+                decision_sha256=decision_sha256,
+                label="旧终态 lease 围栏",
+            )
+
+            release = self._release_lease_in_transaction(
+                conn,
+                lease=target_lease,
+                event_time=event_time,
+                reason="legacy-terminal-fence",
+            )
+            self._append_event(
+                conn,
+                target_run_id,
+                "RUN_LEGACY_LEASE_FENCED",
+                {
+                    "schema_version": "legacy-terminal-lease-fence.v1",
+                    "request": request,
+                    "recovery_token_sha256": token_fingerprint,
+                    "decision_change_id": decision_change_id,
+                    "decision_project_id": decision_project_id,
+                    "target": {
+                        "state": target.state.value,
+                        "version": target.version,
+                        "lease_epoch": release["lease_epoch"],
+                        "terminal_evidence_kind": facts.terminal_evidence_kind,
+                        "event_types": list(facts.event_types),
+                    },
+                    "lease_release": release,
+                    "authority": authority,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, target_run_id)
+
+    def adjudication_replay_original_id(
+        self, *, target_work_id: str, idempotency_key: str
+    ) -> str | None:
+        """Return the original Decision bound by an existing adjudication key, if any."""
+
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, idempotency_key)
+            if row is None:
+                return None
+            payload = self._validated_event_payload(row, label="Work 行政裁决")
+            request = payload.get("request")
+            original = request.get("expected_original_decision_id") if isinstance(
+                request, dict
+            ) else None
+            if (
+                row["aggregate_type"] != "work"
+                or row["aggregate_id"] != target_work_id
+                or row["event_type"] != "WORK_ADJUDICATED"
+                or not isinstance(original, str)
+            ):
+                raise ContinuityStoreError("idempotency_key 的 Work 行政裁决语义不一致")
+            return original
+
+    def adjudicate_blocked_work(
+        self,
+        *,
+        target_work_id: str,
+        expected_work_version: int,
+        expected_original_decision_id: str,
+        original_decision_sha256: str,
+        expected_run_set_sha256: str,
+        expected_lease_set_sha256: str,
+        recovery_run_id: str,
+        expected_recovery_run_version: int,
+        expected_recovery_lease_version: int,
+        recovery_work_id: str,
+        expected_recovery_work_version: int,
+        expected_recovery_work_scope_hash: str,
+        expected_recovery_owned_paths_hash: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        decision_sha256: str,
+        decision_change_id: str,
+        decision_project_id: str,
+        decision_approved_paths: tuple[str, ...],
+        runtime_target_path: str,
+        outcome: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> WorkItem:
+        """Forward-cancel one historical BLOCKED Work under a live, independent authority chain.
+
+        The Work row, its Runs, leases, Checkpoints and prior events are never rewritten:
+        the only mutations are the Work CAS transition and one appended adjudication event.
+        On first execution the original and the adjudication Decision are bound to the recovery
+        Run's control-root commit (audited under ``authority``, never inside ``request``).
+        """
+
+        texts = {
+            "target_work_id": target_work_id,
+            "expected_original_decision_id": expected_original_decision_id,
+            "original_decision_sha256": original_decision_sha256,
+            "expected_run_set_sha256": expected_run_set_sha256,
+            "expected_lease_set_sha256": expected_lease_set_sha256,
+            "recovery_run_id": recovery_run_id,
+            "recovery_work_id": recovery_work_id,
+            "recovery_owner_id": recovery_owner_id,
+            "recovery_lease_token": recovery_lease_token,
+            "decision_id": decision_id,
+            "decision_sha256": decision_sha256,
+            "decision_change_id": decision_change_id,
+            "decision_project_id": decision_project_id,
+            "reason": reason,
+        }
+        for label, value in texts.items():
+            self._validated_run_text(value, label=label)
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        versions = (
+            expected_work_version,
+            expected_recovery_run_version,
+            expected_recovery_lease_version,
+            expected_recovery_work_version,
+        )
+        if any(type(version) is not int or version < 1 for version in versions):
+            raise ContinuityStoreError("裁决目标与恢复链版本必须是正整数")
+        if outcome != WorkState.CANCELLED.value:
+            raise ContinuityStoreError("Work 行政裁决只能前向结算为 CANCELLED")
+        if recovery_lease_token in reason:
+            raise ContinuityStoreError("裁决原因不得包含恢复 lease token")
+        request = {
+            "schema_version": "work-adjudication-request.v1",
+            "target_work_id": target_work_id,
+            "expected_work_version": expected_work_version,
+            "expected_original_decision_id": expected_original_decision_id,
+            "original_decision_sha256": original_decision_sha256,
+            "expected_run_set_sha256": expected_run_set_sha256,
+            "expected_lease_set_sha256": expected_lease_set_sha256,
+            "recovery_run_id": recovery_run_id,
+            "expected_recovery_run_version": expected_recovery_run_version,
+            "expected_recovery_lease_version": expected_recovery_lease_version,
+            "recovery_work_id": recovery_work_id,
+            "expected_recovery_work_version": expected_recovery_work_version,
+            "recovery_owner_id": recovery_owner_id,
+            "decision_id": decision_id,
+            "decision_sha256": decision_sha256,
+            "outcome": outcome,
+            "reason": reason,
+        }
+        token_fingerprint = self._lease_token_fingerprint(recovery_lease_token)
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="Work 行政裁决")
+                if (
+                    existing["aggregate_type"] != "work"
+                    or existing["aggregate_id"] != target_work_id
+                    or existing["event_type"] != "WORK_ADJUDICATED"
+                    or payload.get("schema_version") != "work-adjudication.v1"
+                    or payload.get("request") != request
+                    or payload.get("recovery_token_sha256") != token_fingerprint
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 Work 行政裁决语义不一致")
+                return self._get_work(conn, target_work_id)
+
+            if target_work_id == recovery_work_id:
+                raise ContinuityStoreError("裁决目标 Work 与恢复 Work 必须不同")
+            event_time = self._utc_now().isoformat()
+            facts = self._work_adjudication_facts(conn, target_work_id)
+            target = self._get_work(conn, target_work_id)
+            if facts.blockers:
+                raise ContinuityStoreError("Work 不满足行政裁决前置: " + "; ".join(facts.blockers))
+            if (
+                target.version != expected_work_version
+                or target.authorization_ref != expected_original_decision_id
+            ):
+                raise ContinuityStoreError("目标 Work 版本或原授权引用冲突")
+            if (
+                facts.run_set_sha256 != expected_run_set_sha256
+                or facts.lease_set_sha256 != expected_lease_set_sha256
+            ):
+                raise ContinuityStoreError("目标 Work 的 Run/lease 摘要与裁决绑定不一致")
+
+            recovery = self._get_run(conn, recovery_run_id)
+            recovery_lease = self._get_lease(conn, recovery_run_id)
+            recovery_work = self._get_work(conn, recovery_work_id)
+            if (
+                recovery.state is not RunState.RUNNING
+                or recovery.work_id != recovery_work_id
+                or recovery.version != expected_recovery_run_version
+                or recovery_lease.version != expected_recovery_lease_version
+                or recovery_lease.owner_id != recovery_owner_id
+                or not hmac.compare_digest(recovery_lease.lease_token, recovery_lease_token)
+                or self._aware_timestamp(recovery_lease.expires_at, "恢复 lease")
+                <= self._utc_now()
+            ):
+                raise ContinuityStoreError("恢复 Run/lease 不具备裁决权限")
+            if (
+                recovery_work.read_only
+                or recovery_work.state is not WorkState.IN_PROGRESS
+                or recovery_work.version != expected_recovery_work_version
+                or recovery_work.authorization_ref != decision_id
+                or self.authority_paths_hash(recovery_work.scope_paths)
+                != expected_recovery_work_scope_hash
+                or self.authority_paths_hash(recovery.owned_paths)
+                != expected_recovery_owned_paths_hash
+            ):
+                raise ContinuityStoreError("恢复 Work 不具备裁决权限或授权链已漂移")
+            if (
+                target.subject_project_id != recovery_work.subject_project_id
+                or target.subject_project_id != decision_project_id
+            ):
+                raise ContinuityStoreError("裁决目标、恢复 Work 与 Decision 必须属于同一项目")
+            approved = tuple(decision_approved_paths)
+            if (
+                not self._authority_path_covered(runtime_target_path, approved)
+                or not self._authority_path_covered(
+                    runtime_target_path, tuple(recovery_work.scope_paths)
+                )
+                or not self._authority_path_covered(
+                    runtime_target_path, tuple(recovery.owned_paths)
+                )
+            ):
+                raise ContinuityStoreError("裁决权限链未覆盖 canonical continuity.db")
+            authority = self._control_root_decision_binding(
+                recovery=recovery,
+                original_decision_id=expected_original_decision_id,
+                original_decision_sha256=original_decision_sha256,
+                decision_id=decision_id,
+                decision_sha256=decision_sha256,
+                label="行政裁决",
+            )
+
+            cursor = conn.execute(
+                """UPDATE work_items SET state=?, authorization_ref=?, version=version+1,
+                updated_at=? WHERE work_id=? AND version=? AND state=?""",
+                (
+                    WorkState.CANCELLED.value,
+                    decision_id,
+                    event_time,
+                    target_work_id,
+                    expected_work_version,
+                    WorkState.BLOCKED.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("目标 Work 行政裁决 CAS 冲突")
+            self._append_event(
+                conn,
+                target_work_id,
+                "WORK_ADJUDICATED",
+                {
+                    "schema_version": "work-adjudication.v1",
+                    "request": request,
+                    "recovery_token_sha256": token_fingerprint,
+                    "decision_change_id": decision_change_id,
+                    "decision_project_id": decision_project_id,
+                    "original_decision_sha256": original_decision_sha256,
+                    "target": {
+                        "previous_state": WorkState.BLOCKED.value,
+                        "previous_version": expected_work_version,
+                        "previous_authorization_ref": expected_original_decision_id,
+                        "cancelled_version": expected_work_version + 1,
+                        "run_states": [list(item) for item in facts.run_states],
+                        "lease_states": [list(item) for item in facts.lease_states],
+                    },
+                    "authority": authority,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="work",
+            )
+            return self._get_work(conn, target_work_id)
+
+    def add_relation(
+        self,
+        from_work_id: str,
+        to_work_id: str,
+        relation: str,
+        event_id: str,
+        idempotency_key: str,
+        now: str,
+    ) -> None:
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_id"] != from_work_id:
+                    raise ContinuityStoreError("idempotency_key 已用于其他 Work")
+                return
+            self._get_work(conn, from_work_id)
+            self._get_work(conn, to_work_id)
+            conn.execute(
+                "INSERT INTO work_relations VALUES (?, ?, ?, ?)",
+                (from_work_id, to_work_id, relation, event_id),
+            )
+            self._append_event(
+                conn,
+                from_work_id,
+                "WORK_RELATION_ADDED",
+                {"to_work_id": to_work_id, "relation": relation},
+                idempotency_key,
+                now,
+                event_id,
+            )
+
+    def list_work_relations(self) -> tuple[tuple[str, str, str], ...]:
+        """Return the persisted directed Work Graph without opening a write transaction."""
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                """SELECT from_work_id, to_work_id, relation
+                FROM work_relations ORDER BY rowid"""
+            ).fetchall()
+        return tuple((str(row[0]), str(row[1]), str(row[2])) for row in rows)
+
+    def event_aggregate_for_key(self, idempotency_key: str) -> tuple[str, str] | None:
+        """Read an idempotency binding before applying higher-level graph checks."""
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, idempotency_key)
+            if row is None:
+                return None
+            return str(row["aggregate_type"]), str(row["aggregate_id"])
+
+    def work_transition_for_key(
+        self, idempotency_key: str
+    ) -> tuple[str, WorkState, str] | None:
+        """Read the exact semantic binding of an existing Work transition key."""
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, idempotency_key)
+            if row is None:
+                return None
+            return self._work_transition_from_event(row)
+
+    @classmethod
+    def _execution_intent_key(cls, operation_id: str) -> str:
+        """Reserve a separate namespace in the existing unique event-key index."""
+        operation_id = cls._validated_idempotency_key(operation_id)
+        digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        return f"execution-intent:{digest}"
+
+    @classmethod
+    def _execution_intent_from_event(
+        cls, row: sqlite3.Row, operation_id: str
+    ) -> ExecutionIntent:
+        """Reject malformed or substituted reservations before returning a receipt."""
+        try:
+            intent = ExecutionIntent.model_validate_json(str(row["payload_json"]))
+        except ValueError as error:
+            raise ContinuityStoreError("ExecutionIntent payload 无法读取") from error
+        if (
+            row["aggregate_type"] != "execution_intent"
+            or row["event_type"] != "EXECUTION_INTENT_PREPARED"
+            or row["aggregate_id"] != operation_id
+            or intent.operation_id != operation_id
+            or row["idempotency_key"] != cls._execution_intent_key(operation_id)
+        ):
+            raise ContinuityStoreError("ExecutionIntent 事件身份不一致")
+        return intent
+
+    def get_execution_intent(self, operation_id: str) -> ExecutionIntent | None:
+        """Read the durable intent without deriving state from a Run or worktree."""
+        key = self._execution_intent_key(operation_id)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, key)
+            return None if row is None else self._execution_intent_from_event(row, operation_id)
+
+    def reserve_execution_intent(
+        self, intent: ExecutionIntent
+    ) -> tuple[ExecutionIntent, bool]:
+        """Atomically claim one operation; only the committed winner may dispatch.
+
+        Existing append-only Continuity events are the single source of truth.
+        Their UNIQUE idempotency key is the operation reservation, so no auxiliary
+        file, in-memory registry, or schema migration is needed.
+        """
+        intent = ExecutionIntent.model_validate(intent.model_dump())
+        key = self._execution_intent_key(intent.operation_id)
+        try:
+            with self._transaction() as conn:
+                row = self._event_by_key(conn, key)
+                if row is not None:
+                    existing = self._execution_intent_from_event(row, intent.operation_id)
+                    if (
+                        existing.request_sha256 != intent.request_sha256
+                        or existing.receipt != intent.receipt
+                    ):
+                        raise ContinuityStoreError("operation_id 已绑定不同载荷")
+                    return existing, False
+                receipt = intent.receipt
+                work = self._get_work(conn, receipt.work_id)
+                if work.state not in {WorkState.READY, WorkState.IN_PROGRESS}:
+                    raise ContinuityStoreError("只有 READY/IN_PROGRESS Work 可以准备执行")
+                if work.subject_project_id != receipt.subject_project_id or not all(
+                    self._authority_path_covered(path, work.scope_paths)
+                    for path in receipt.owned_paths
+                ):
+                    raise ContinuityStoreError("ExecutionIntent 超出 Work 授权")
+                if conn.execute(
+                    "SELECT 1 FROM run_items WHERE run_id=?", (receipt.run_id,)
+                ).fetchone() is not None:
+                    raise ContinuityStoreError("run_id 已存在，拒绝建立无原始 intent 的派发")
+                rows = conn.execute(
+                    "SELECT * FROM events WHERE aggregate_type='execution_intent'"
+                ).fetchall()
+                for other_row in rows:
+                    other = self._execution_intent_from_event(
+                        other_row, str(other_row["aggregate_id"])
+                    )
+                    if other.receipt.run_id == receipt.run_id:
+                        raise ContinuityStoreError("run_id 已绑定其他 operation_id")
+                self._append_event(
+                    conn,
+                    intent.operation_id,
+                    "EXECUTION_INTENT_PREPARED",
+                    intent.model_dump(mode="json"),
+                    key,
+                    intent.created_at.isoformat(),
+                    aggregate_type="execution_intent",
+                )
+            return intent, True
+        except sqlite3.Error as error:
+            raise ContinuityStoreError("ExecutionIntent 持久化失败") from error
+
+    @classmethod
+    def _execution_microtask_key(cls, operation_id: str) -> str:
+        operation_id = cls._validated_idempotency_key(operation_id)
+        digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        return f"execution-microtask-plan:{digest}"
+
+    @classmethod
+    def _execution_microtask_from_event(
+        cls, row: sqlite3.Row, operation_id: str
+    ) -> ExecutionMicrotaskPlan:
+        try:
+            plan = ExecutionMicrotaskPlan.model_validate_json(str(row["payload_json"]))
+        except ValueError as error:
+            raise ContinuityStoreError("ExecutionMicrotaskPlan payload 无法读取") from error
+        if (
+            row["aggregate_type"] != "execution_microtask_plan"
+            or row["event_type"] != "EXECUTION_MICROTASK_PLANNED"
+            or row["aggregate_id"] != operation_id
+            or plan.operation_id != operation_id
+            or row["idempotency_key"] != cls._execution_microtask_key(operation_id)
+        ):
+            raise ContinuityStoreError("ExecutionMicrotaskPlan 事件身份不一致")
+        return plan
+
+    def get_execution_microtask_plan(
+        self, operation_id: str
+    ) -> ExecutionMicrotaskPlan | None:
+        """Read one append-only microtask plan without consulting repository state."""
+
+        key = self._execution_microtask_key(operation_id)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, key)
+            return (
+                None
+                if row is None
+                else self._execution_microtask_from_event(row, operation_id)
+            )
+
+    def reserve_execution_microtask_plan(
+        self, plan: ExecutionMicrotaskPlan
+    ) -> tuple[ExecutionMicrotaskPlan, bool]:
+        """Commit the unique plan before any standalone repository side effect."""
+
+        plan = ExecutionMicrotaskPlan.model_validate(plan.model_dump())
+        key = self._execution_microtask_key(plan.operation_id)
+        try:
+            with self._transaction() as conn:
+                intent_row = self._event_by_key(
+                    conn, self._execution_intent_key(plan.operation_id)
+                )
+                if intent_row is None:
+                    raise ContinuityStoreError("ExecutionMicrotaskPlan 缺少 ExecutionIntent")
+                intent = self._execution_intent_from_event(intent_row, plan.operation_id)
+                receipt = intent.receipt
+                run_row = conn.execute(
+                    "SELECT run_id FROM run_items WHERE run_id=?", (plan.run_id,)
+                ).fetchone()
+                run = self._get_run(conn, plan.run_id) if run_row is not None else None
+                mission = self._get_mission(conn, plan.mission_id)
+                work = self._get_work(conn, receipt.work_id)
+                routing = mission.authority.routing
+                if run is not None and run.state is not RunState.READY:
+                    raise ContinuityStoreError("只有 READY Run 可以规划未启动微任务")
+                if (
+                    work.subject_project_id != receipt.subject_project_id
+                    or work.authorization_ref != mission.authority.decision_id
+                    or work.scope_paths != receipt.owned_paths
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan Work 授权不一致")
+                if (
+                    plan.mission_id != receipt.mission_id
+                    or plan.mission_id != mission.mission_id
+                    or mission.subject_project_id != receipt.subject_project_id
+                    or mission.root_work_id != receipt.work_id
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan Mission/Intent 身份不一致")
+                if (
+                    not routing.approved_model
+                    or plan.approved_model != routing.approved_model
+                    or plan.approved_model != receipt.executor_id
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan approved_model 授权不一致")
+                if plan.objective != mission.objective:
+                    raise ContinuityStoreError("MicrotaskPlan objective 与 Mission 不一致")
+                if plan.owned_paths != receipt.owned_paths or plan.owned_paths != mission.authority.scope_paths or (
+                    run is not None and run.owned_paths != plan.owned_paths
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan owned_paths 授权不一致")
+                if plan.declared_dirty_paths != receipt.declared_dirty_paths or plan.declared_dirty_paths != routing.declared_dirty_paths or (
+                    run is not None and run.declared_dirty_paths != plan.declared_dirty_paths
+                ):
+                    raise ContinuityStoreError(
+                        "MicrotaskPlan declared_dirty_paths 授权不一致"
+                    )
+                if (
+                    plan.run_id != receipt.run_id
+                    or (run is not None and (
+                        run.run_id != receipt.run_id
+                        or run.work_id != receipt.work_id
+                        or run.executor_id != receipt.owner_id
+                        or run.adapter != receipt.adapter.value
+                    ))
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan ExecutionIntent/Run 身份不一致")
+                if (
+                    plan.baseline_git_head != receipt.git_head
+                    or plan.source_worktree_path != receipt.worktree_path
+                    or (run is not None and (
+                        plan.baseline_git_head != run.git_head
+                        or plan.source_worktree_path != run.worktree_path
+                    ))
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan candidate 基线不一致")
+                manifest_paths = tuple(item.path for item in plan.manifest)
+                if manifest_paths != tuple(sorted(plan.declared_dirty_paths)):
+                    raise ContinuityStoreError(
+                        "MicrotaskPlan manifest 必须精确等于 declared_dirty_paths"
+                    )
+                row = self._event_by_key(conn, key)
+                if row is not None:
+                    existing = self._execution_microtask_from_event(row, plan.operation_id)
+                    if existing != plan:
+                        raise ContinuityStoreError("microtask operation_id 已绑定不同载荷")
+                    return existing, False
+                target = Path(plan.repository_path).resolve()
+                allowed_roots = (
+                    self.workspace_root,
+                    Path(receipt.worktree_path),
+                )
+                if not any(
+                    target.is_relative_to((base / ".auto-pm" / "microtasks").resolve())
+                    for base in allowed_roots
+                ):
+                    raise ContinuityStoreError("MicrotaskPlan repository_path 越界")
+                self._append_event(
+                    conn,
+                    plan.operation_id,
+                    "EXECUTION_MICROTASK_PLANNED",
+                    plan.model_dump(mode="json"),
+                    key,
+                    plan.created_at.isoformat(),
+                    aggregate_type="execution_microtask_plan",
+                )
+            return plan, True
+        except sqlite3.Error as error:
+            raise ContinuityStoreError("ExecutionMicrotaskPlan 持久化失败") from error
+
+    @classmethod
+    def _execution_start_claim_key(cls, operation_id: str) -> str:
+        operation_id = cls._validated_idempotency_key(operation_id)
+        digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        return f"execution-start-claim:{digest}"
+
+    @classmethod
+    def _execution_start_claim_from_event(
+        cls, row: sqlite3.Row, operation_id: str
+    ) -> ExecutionStartClaim:
+        try:
+            claim = ExecutionStartClaim.model_validate_json(str(row["payload_json"]))
+        except ValueError as error:
+            raise ContinuityStoreError("ExecutionStartClaim payload 无法读取") from error
+        if (
+            row["aggregate_type"] != "execution_start_claim"
+            or row["aggregate_id"] != operation_id
+            or row["event_type"] != "EXECUTION_START_CLAIMED"
+            or row["idempotency_key"] != cls._execution_start_claim_key(operation_id)
+            or claim.operation_id != operation_id
+        ):
+            raise ContinuityStoreError("ExecutionStartClaim 事件身份不一致")
+        return claim
+
+    def get_execution_start_claim(self, operation_id: str) -> ExecutionStartClaim | None:
+        """Read the permanent start winner; its existence forbids another Popen."""
+
+        key = self._execution_start_claim_key(operation_id)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, key)
+            return (
+                None
+                if row is None
+                else self._execution_start_claim_from_event(row, operation_id)
+            )
+
+    def claim_execution_start(
+        self,
+        *,
+        operation_id: str,
+        run_id: str,
+        expected_run_version: int,
+        owner_id: str,
+        lease_token: str,
+        plan_request_sha256: str,
+        marker_sha256: str,
+        repository_path: str,
+        microtask_commit: str,
+    ) -> tuple[ExecutionStartClaim, bool]:
+        """Atomically choose the sole normal-path process starter before Popen."""
+
+        operation_id = self._validated_idempotency_key(operation_id)
+        run_id = self._validated_run_text(run_id, label="run_id")
+        owner_id = self._validated_run_text(owner_id, label="start claim owner")
+        lease_token = self._validated_run_text(lease_token, label="lease token")
+        if type(expected_run_version) is not int or expected_run_version < 1:
+            raise ContinuityStoreError("start claim expected_run_version 必须是正整数")
+        request = {
+            "operation_id": operation_id,
+            "run_id": run_id,
+            "expected_run_version": expected_run_version,
+            "owner_id": owner_id,
+            "plan_request_sha256": plan_request_sha256,
+            "marker_sha256": marker_sha256,
+            "repository_path": repository_path,
+            "microtask_commit": microtask_commit,
+        }
+        claim_hash = ExecutionMicrotaskPlan._hash(request)
+        key = self._execution_start_claim_key(operation_id)
+        with self._transaction() as conn:
+            existing_row = self._event_by_key(conn, key)
+            if existing_row is not None:
+                existing = self._execution_start_claim_from_event(
+                    existing_row, operation_id
+                )
+                existing_request = existing.model_dump(mode="json", exclude={"claimed_at"})
+                existing_request.pop("schema_version")
+                existing_request.pop("claim_sha256")
+                if existing_request != request or existing.claim_sha256 != claim_hash:
+                    raise ContinuityStoreError("operation_id 已绑定不同启动 claim")
+                return existing, False
+            plan_row = self._event_by_key(conn, self._execution_microtask_key(operation_id))
+            if plan_row is None:
+                raise ContinuityStoreError("启动 claim 缺少 ExecutionMicrotaskPlan")
+            plan = self._execution_microtask_from_event(plan_row, operation_id)
+            if (
+                plan.run_id != run_id
+                or plan.request_sha256 != plan_request_sha256
+                or plan.marker_sha256 != marker_sha256
+                or plan.repository_path != repository_path
+            ):
+                raise ContinuityStoreError("启动 claim 与 MicrotaskPlan 不一致")
+            intent_row = self._event_by_key(conn, self._execution_intent_key(operation_id))
+            if intent_row is None:
+                raise ContinuityStoreError("启动 claim 缺少 ExecutionIntent")
+            intent = self._execution_intent_from_event(intent_row, operation_id)
+            run = self._get_run(conn, run_id)
+            if (
+                run.state is not RunState.READY
+                or run.version != expected_run_version
+                or run.run_id != intent.receipt.run_id
+                or run.executor_id != owner_id
+                or intent.receipt.owner_id != owner_id
+            ):
+                raise ContinuityStoreError("启动 claim 的 READY Run/version/owner 不一致")
+            lease = self._get_lease(conn, run_id)
+            if lease.owner_id != owner_id or lease.lease_token != lease_token:
+                raise ContinuityStoreError("启动 claim lease ownership 不匹配")
+            if self._aware_timestamp(lease.expires_at, "lease") <= self._utc_now():
+                raise ContinuityStoreError("启动 claim lease 已过期")
+            claimed_at = self._utc_now()
+            claim = ExecutionStartClaim(
+                **request,
+                claim_sha256=claim_hash,
+                claimed_at=claimed_at,
+            )
+            self._append_event(
+                conn,
+                operation_id,
+                "EXECUTION_START_CLAIMED",
+                claim.model_dump(mode="json"),
+                key,
+                claimed_at.isoformat(),
+                aggregate_type="execution_start_claim",
+            )
+            return claim, True
+
+    @classmethod
+    def _execution_projection_key(cls, operation_id: str) -> str:
+        operation_id = cls._validated_idempotency_key(operation_id)
+        digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        return f"execution-projection:{digest}"
+
+    @classmethod
+    def _execution_projection_from_event(
+        cls, row: sqlite3.Row, operation_id: str
+    ) -> ExecutionProjectionReceipt:
+        try:
+            receipt = ExecutionProjectionReceipt.model_validate_json(
+                str(row["payload_json"])
+            )
+        except ValueError as error:
+            raise ContinuityStoreError("ExecutionProjectionReceipt 无法读取") from error
+        if (
+            row["aggregate_type"] != "execution_projection"
+            or row["aggregate_id"] != operation_id
+            or row["event_type"] != "EXECUTION_PROJECTED"
+            or row["idempotency_key"] != cls._execution_projection_key(operation_id)
+            or receipt.operation_id != operation_id
+        ):
+            raise ContinuityStoreError("ExecutionProjectionReceipt 事件身份不一致")
+        return receipt
+
+    def get_execution_projection(
+        self, operation_id: str
+    ) -> ExecutionProjectionReceipt | None:
+        """Read one append-only projection receipt."""
+
+        key = self._execution_projection_key(operation_id)
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, key)
+            return (
+                None
+                if row is None
+                else self._execution_projection_from_event(row, operation_id)
+            )
+
+    def record_execution_projection(
+        self, receipt: ExecutionProjectionReceipt
+    ) -> tuple[ExecutionProjectionReceipt, bool]:
+        """Append the unique projection proof after all candidate writes verify."""
+
+        receipt = ExecutionProjectionReceipt.model_validate(receipt.model_dump())
+        key = self._execution_projection_key(receipt.operation_id)
+        with self._transaction() as conn:
+            existing_row = self._event_by_key(conn, key)
+            if existing_row is not None:
+                existing = self._execution_projection_from_event(
+                    existing_row, receipt.operation_id
+                )
+                if existing != receipt:
+                    raise ContinuityStoreError("operation_id 已绑定不同投影回执")
+                return existing, False
+            claim_row = self._event_by_key(
+                conn, self._execution_start_claim_key(receipt.operation_id)
+            )
+            plan_row = self._event_by_key(
+                conn, self._execution_microtask_key(receipt.operation_id)
+            )
+            if claim_row is None or plan_row is None:
+                raise ContinuityStoreError("投影回执缺少 start claim 或 MicrotaskPlan")
+            claim = self._execution_start_claim_from_event(
+                claim_row, receipt.operation_id
+            )
+            plan = self._execution_microtask_from_event(
+                plan_row, receipt.operation_id
+            )
+            run = self._get_run(conn, receipt.run_id)
+            if run.state is not RunState.RUNNING:
+                raise ContinuityStoreError("只有 RUNNING Run 可以登记投影回执")
+            if (
+                claim.run_id != receipt.run_id
+                or plan.run_id != receipt.run_id
+                or plan.repository_path != receipt.source_repository
+                or claim.microtask_commit != receipt.source_commit
+                or plan.source_worktree_path != receipt.target_worktree
+                or plan.baseline_git_head != receipt.baseline_git_head
+            ):
+                raise ContinuityStoreError("投影回执与 claim/Plan 不一致")
+            manifest = {
+                item.path: (
+                    "0" * 64
+                    if item.baseline_state == "ABSENT"
+                    else item.content_sha256
+                )
+                for item in plan.manifest
+            }
+            files = {item.path: item.baseline_sha256 for item in receipt.files}
+            if files != manifest:
+                raise ContinuityStoreError("投影回执文件集合或 baseline hash 不一致")
+            event_time = self._utc_now().isoformat()
+            self._append_event(
+                conn,
+                receipt.operation_id,
+                "EXECUTION_PROJECTED",
+                receipt.model_dump(mode="json"),
+                key,
+                event_time,
+                aggregate_type="execution_projection",
+            )
+            return receipt, True
+
+    def get_orchestration_outcome(
+        self, mission_id: str, idempotency_key: str
+    ) -> OrchestrationOutcome | None:
+        """Read a prior idempotent outcome when a caller retries the same command."""
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, idempotency_key)
+            if row is None:
+                return None
+            if row["aggregate_type"] != "mission" or row["aggregate_id"] != mission_id:
+                raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
+            if not str(row["event_type"]).startswith("ORCHESTRATION_"):
+                raise ContinuityStoreError("idempotency_key 不属于编排事件")
+            return self._decode_orchestration_outcome(row["payload_json"])
+
+    def list_orchestration_outcomes(self, mission_id: str) -> tuple[OrchestrationOutcome, ...]:
+        """Load append-only A3 outcomes in their original causal order."""
+        with self._read_connection() as conn:
+            self._get_mission(conn, mission_id)
+            rows = conn.execute(
+                """SELECT payload_json FROM events
+                WHERE aggregate_type='mission' AND aggregate_id=?
+                AND event_type LIKE 'ORCHESTRATION_%' ORDER BY rowid""",
+                (mission_id,),
+            ).fetchall()
+        return tuple(self._decode_orchestration_outcome(row[0]) for row in rows)
+
+    def record_orchestration_outcome(
+        self,
+        outcome: OrchestrationOutcome,
+        idempotency_key: str,
+        now: str,
+    ) -> OrchestrationOutcome:
+        """Append one replayable orchestration outcome on the owning Mission aggregate."""
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if (
+                    existing["aggregate_type"] != "mission"
+                    or existing["aggregate_id"] != outcome.mission_id
+                ):
+                    raise ContinuityStoreError("idempotency_key 已用于其他聚合对象")
+                if not str(existing["event_type"]).startswith("ORCHESTRATION_"):
+                    raise ContinuityStoreError("idempotency_key 不属于编排事件")
+                return self._decode_orchestration_outcome(existing["payload_json"])
+            self._get_mission(conn, outcome.mission_id)
+            self._append_event(
+                conn,
+                outcome.mission_id,
+                f"ORCHESTRATION_{outcome.action.value}",
+                outcome.model_dump(mode="json"),
+                idempotency_key,
+                now,
+                aggregate_type="mission",
+            )
+            return outcome
+
+    def get_work(self, work_id: str) -> WorkItem:
+        with self._read_connection() as conn:
+            return self._get_work(conn, work_id)
+
+    def get_mission(self, mission_id: str) -> Mission:
+        with self._read_connection() as conn:
+            return self._get_mission(conn, mission_id)
+
+    def has_completed_closure(self, mission_id: str) -> bool:
+        """True only when the Mission was closed by the C05-C08 closure (gap 8: a CLOSED state alone is no proof)."""
+        with self._read_connection() as conn:
+            row = conn.execute(
+                "SELECT state FROM closure_items WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+        return row is not None and row["state"] == "COMPLETED"
+
+    def prepare_closure(
+        self,
+        mission_id: str,
+        idempotency_key: str,
+        now: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Atomically bind one accepted Mission to its first recoverable closure step.
+
+        C05 only prepares durable state.  The queued CHANGE_SUBSTANCE artifact is
+        intentionally not published here; C06 and later stages own all external
+        mutations and terminal lifecycle transitions.
+        """
+
+        mission_id = self._validated_run_text(mission_id, label="mission_id")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        event_time = self._aware_timestamp(now, "closure prepare").isoformat()
+        request = {
+            "schema_version": "closure-prepare-request.v1",
+            "mission_id": mission_id,
+        }
+        canonical_request = json.dumps(
+            request,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+
+        try:
+            with self._transaction() as conn:
+                existing = self._event_by_key(conn, idempotency_key)
+                if existing is not None:
+                    return self._closure_preparation_from_event(
+                        conn,
+                        existing,
+                        request=request,
+                        request_hash=request_hash,
+                    )
+
+                mission = self._get_mission(conn, mission_id)
+                if mission.state is not MissionState.ACCEPTED:
+                    raise ContinuityStoreError("只有已验收 Mission 可以准备 v2 收口")
+                # TD-071: closure writes the project ledgers, so one project closes one Mission at a time.
+                busy = conn.execute(
+                    """SELECT c.closure_id, c.mission_id FROM closure_items c
+                    JOIN mission_items m ON m.mission_id = c.mission_id
+                    WHERE m.subject_project_id=? AND c.state='PREPARED' AND c.mission_id<>?
+                    LIMIT 1""",
+                    (mission.subject_project_id, mission_id),
+                ).fetchone()
+                if busy is not None:
+                    raise ContinuityStoreError(
+                        f"项目里另一张卡 {busy['mission_id']} 正在收口（{busy['closure_id']}）；"
+                        "同一项目一次只收口一张，等它收完再收这张"
+                    )
+                if mission.root_work_id is None:
+                    raise ContinuityStoreError("已验收 Mission 缺少根 Work")
+                work = self._get_work(conn, mission.root_work_id)
+                if work.subject_project_id != mission.subject_project_id:
+                    raise ContinuityStoreError("Mission 与根 Work subject project 不一致")
+                if work.state is not WorkState.IN_PROGRESS:
+                    raise ContinuityStoreError("C05 只能绑定尚未由 C08 收口的 IN_PROGRESS Work")
+                if work.authorization_ref != mission.authority.decision_id:
+                    raise ContinuityStoreError("根 Work 与 Mission Decision 授权不一致")
+
+                run_row = conn.execute(
+                    """SELECT run_id FROM run_items WHERE work_id=?
+                    ORDER BY updated_at DESC, run_id DESC LIMIT 1""",
+                    (work.work_id,),
+                ).fetchone()
+                if run_row is None:
+                    raise ContinuityStoreError("已验收 Mission 的根 Work 缺少 Run")
+                run = self._get_run(conn, str(run_row["run_id"]))
+                if run.state is not RunState.VERIFYING:
+                    raise ContinuityStoreError("C05 要求最新 Run 仍处于 VERIFYING")
+
+                checkpoint_row = conn.execute(
+                    """SELECT checkpoint_id FROM checkpoints WHERE run_id=?
+                    ORDER BY sequence DESC LIMIT 1""",
+                    (run.run_id,),
+                ).fetchone()
+                if checkpoint_row is None:
+                    raise ContinuityStoreError("已验收 Run 缺少 Checkpoint")
+                checkpoint = self._get_checkpoint(conn, str(checkpoint_row["checkpoint_id"]))
+                if (
+                    checkpoint.git_head != run.git_head
+                    or sorted(checkpoint.dirty_paths) != sorted(run.declared_dirty_paths)
+                    or not checkpoint.evidence
+                ):
+                    raise ContinuityStoreError("最新 Checkpoint 未绑定 Run 当前验证证据")
+
+                identity = {
+                    "mission_id": mission.mission_id,
+                    "work_id": work.work_id,
+                    "run_id": run.run_id,
+                    "checkpoint_id": checkpoint.checkpoint_id,
+                    "change_id": mission.authority.change_id,
+                    "decision_id": mission.authority.decision_id,
+                }
+                identity_text = json.dumps(
+                    identity,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                identity_hash = hashlib.sha256(identity_text.encode("utf-8")).hexdigest()
+                closure_id = f"CLOSURE-{identity_hash[:24].upper()}"
+                step_id = f"CSTEP-{identity_hash[8:32].upper()}"
+                outbox_id = f"OUTBOX-{identity_hash[16:40].upper()}"
+                closure = {
+                    "closure_id": closure_id,
+                    **identity,
+                    "state": "PREPARED",
+                    "request_hash": request_hash,
+                    "version": 1,
+                    "created_at": event_time,
+                    "updated_at": event_time,
+                }
+                step = {
+                    "step_id": step_id,
+                    "closure_id": closure_id,
+                    "sequence": 1,
+                    "step_kind": "CHANGE_SUBSTANCE",
+                    "state": "PENDING",
+                    "attempt_count": 0,
+                    "last_error": None,
+                    "created_at": event_time,
+                    "updated_at": event_time,
+                }
+                outbox_payload = {
+                    "schema_version": "closure-outbox.v1",
+                    "closure_id": closure_id,
+                    "step_id": step_id,
+                    "mission_id": mission.mission_id,
+                    "change_id": mission.authority.change_id,
+                    "checkpoint_id": checkpoint.checkpoint_id,
+                    "operation": "CHANGE_SUBSTANCE",
+                }
+                canonical_outbox_payload = json.dumps(
+                    outbox_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                outbox = {
+                    "outbox_id": outbox_id,
+                    "closure_id": closure_id,
+                    "step_id": step_id,
+                    "artifact_kind": "CHANGE_SUBSTANCE",
+                    "target_path": f"change://{mission.authority.change_id}",
+                    "payload_json": canonical_outbox_payload,
+                    "payload_hash": hashlib.sha256(
+                        canonical_outbox_payload.encode("utf-8")
+                    ).hexdigest(),
+                    "published_at": None,
+                    "created_at": event_time,
+                }
+                event_payload = {
+                    "schema_version": "closure-prepared.v1",
+                    "request": request,
+                    "request_hash": request_hash,
+                    "closure": closure,
+                    "step": step,
+                    "outbox": outbox,
+                }
+                self._insert_mapping(conn, "closure_items", closure)
+                self._insert_mapping(conn, "closure_steps", step)
+                self._insert_mapping(conn, "closure_outbox", outbox)
+                self._append_event(
+                    conn,
+                    closure_id,
+                    "CLOSURE_PREPARED",
+                    event_payload,
+                    idempotency_key,
+                    event_time,
+                    aggregate_type="closure",
+                )
+                return self._closure_preparation_from_event(
+                    conn,
+                    self._event_by_key(conn, idempotency_key),
+                    request=request,
+                    request_hash=request_hash,
+                )
+        except sqlite3.IntegrityError as error:
+            raise ContinuityStoreError("收口准备身份已被不同请求占用") from error
+
+    def get_closure_preparation(self, closure_id: str) -> dict[str, dict[str, Any]]:
+        """Read one closure preparation without publishing its pending outbox."""
+
+        closure_id = self._validated_run_text(closure_id, label="closure_id")
+        with self._read_connection() as conn:
+            return self._get_closure_preparation(conn, closure_id)
+
+    def closure_completion_context(
+        self,
+        closure_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Resolve exact replay or prepared input in one stable execution transaction."""
+
+        closure_id = self._validated_run_text(closure_id, label="closure_id")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                return {
+                    "completion": self._closure_completion_from_event(
+                        conn,
+                        existing,
+                        closure_id=closure_id,
+                    )
+                }
+            return {"preparation": self._get_closure_preparation(conn, closure_id)}
+
+    def finalize_closure(
+        self,
+        closure_id: str,
+        projection_receipt: dict[str, Any],
+        idempotency_key: str,
+        now: str,
+    ) -> dict[str, Any]:
+        """Atomically close the accepted lineage after a successful required projection."""
+
+        closure_id = self._validated_run_text(closure_id, label="closure_id")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        event_time = self._aware_timestamp(now, "closure finalize").isoformat()
+        expected_projection_keys = {
+            "closure_id",
+            "change_id",
+            "state",
+            "pending_reason",
+        }
+        if (
+            not isinstance(projection_receipt, dict)
+            or set(projection_receipt) != expected_projection_keys
+            or projection_receipt.get("closure_id") != closure_id
+            or projection_receipt.get("state") != "PROJECTED"
+            or projection_receipt.get("pending_reason") is not None
+        ):
+            raise ContinuityStoreError("C08 仅接受当前 Closure 的成功必要投影回执")
+
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                return self._closure_completion_from_event(
+                    conn,
+                    existing,
+                    closure_id=closure_id,
+                    projection_receipt=projection_receipt,
+                )
+
+            preparation = self._get_closure_preparation(conn, closure_id)
+            closure = preparation["closure"]
+            step = preparation["step"]
+            outbox = preparation["outbox"]
+            if projection_receipt.get("change_id") != closure["change_id"]:
+                raise ContinuityStoreError("投影回执 change_id 与 Closure 授权链不一致")
+
+            run = self._get_run(conn, str(closure["run_id"]))
+            work = self._get_work(conn, str(closure["work_id"]))
+            mission = self._get_mission(conn, str(closure["mission_id"]))
+            if (
+                run.work_id != work.work_id
+                or mission.root_work_id != work.work_id
+                or work.subject_project_id != mission.subject_project_id
+                or work.authorization_ref != mission.authority.decision_id
+                or mission.authority.change_id != closure["change_id"]
+                or mission.authority.decision_id != closure["decision_id"]
+            ):
+                raise ContinuityStoreError("Closure 的 Run/Work/Mission 授权链已漂移")
+            adopted = self._early_terminal_lineage(conn, closure, run, work)
+            if adopted is None and run.state is not RunState.VERIFYING:
+                raise ContinuityStoreError("C08 要求 Run 仍处于 VERIFYING")
+            if adopted is None and work.state is not WorkState.IN_PROGRESS:
+                raise ContinuityStoreError("C08 要求 Work 仍处于 IN_PROGRESS")
+            if mission.state is not MissionState.ACCEPTED:
+                raise ContinuityStoreError("C08 要求 Mission 已 ACCEPTED 且尚未关闭")
+
+            latest_run = conn.execute(
+                """SELECT run_id FROM run_items WHERE work_id=?
+                ORDER BY updated_at DESC, run_id DESC LIMIT 1""",
+                (work.work_id,),
+            ).fetchone()
+            latest_checkpoint = conn.execute(
+                """SELECT checkpoint_id FROM checkpoints WHERE run_id=?
+                ORDER BY sequence DESC LIMIT 1""",
+                (run.run_id,),
+            ).fetchone()
+            if latest_run is None or str(latest_run["run_id"]) != run.run_id:
+                raise ContinuityStoreError("Closure Run 已不是 Work 的最新 Run")
+            if (
+                latest_checkpoint is None
+                or str(latest_checkpoint["checkpoint_id"]) != closure["checkpoint_id"]
+            ):
+                raise ContinuityStoreError("Closure Checkpoint 已不是 Run 的最新证据")
+
+            if adopted is not None:
+                self._append_event(
+                    conn,
+                    closure_id,
+                    "CLOSURE_LINEAGE_ADOPTED",
+                    {
+                        "schema_version": "closure-lineage-adopted.v1",
+                        "run_id": run.run_id,
+                        "work_id": work.work_id,
+                        **adopted,
+                    },
+                    f"{idempotency_key}:lineage-adopted",
+                    event_time,
+                    aggregate_type="closure",
+                )
+            else:
+                run_result_version = run.version + 1
+                run_cursor = conn.execute(
+                    """UPDATE run_items SET state='SUCCEEDED', version=version+1, updated_at=?
+                    WHERE run_id=? AND state='VERIFYING' AND version=?""",
+                    (event_time, run.run_id, run.version),
+                )
+                if run_cursor.rowcount != 1:
+                    raise ContinuityStoreError("Run 收口出现版本冲突")
+                release = self._release_lease_in_transaction(
+                    conn,
+                    lease=self._get_lease(conn, run.run_id),
+                    event_time=event_time,
+                    reason="terminal:SUCCEEDED",
+                )
+                self._append_event(
+                    conn,
+                    run.run_id,
+                    "RUN_TRANSITIONED",
+                    {
+                        "schema_version": "run-transition.v3",
+                        "expected_version": run.version,
+                        "new_state": RunState.SUCCEEDED.value,
+                        "result_version": run_result_version,
+                        "lease_release": release,
+                    },
+                    f"{idempotency_key}:run-succeeded",
+                    event_time,
+                    aggregate_type="run",
+                )
+
+                work_version = work.version
+                for destination, suffix in (
+                    (WorkState.VERIFYING, "work-verifying"),
+                    (WorkState.ACCEPTED, "work-accepted"),
+                    (WorkState.CLOSED, "work-closed"),
+                ):
+                    cursor = conn.execute(
+                        """UPDATE work_items SET state=?, version=version+1, updated_at=?
+                        WHERE work_id=? AND version=?""",
+                        (destination.value, event_time, work.work_id, work_version),
+                    )
+                    if cursor.rowcount != 1:
+                        raise ContinuityStoreError("Work 收口出现版本冲突")
+                    work_version += 1
+                    self._append_event(
+                        conn,
+                        work.work_id,
+                        "WORK_TRANSITIONED",
+                        {
+                            "state": destination.value,
+                            "authorization_ref": work.authorization_ref,
+                        },
+                        f"{idempotency_key}:{suffix}",
+                        event_time,
+                    )
+
+            mission_cursor = conn.execute(
+                """UPDATE mission_items SET state='CLOSED', version=version+1, updated_at=?
+                WHERE mission_id=? AND state='ACCEPTED' AND version=?""",
+                (event_time, mission.mission_id, mission.version),
+            )
+            if mission_cursor.rowcount != 1:
+                raise ContinuityStoreError("Mission 收口出现版本冲突")
+            self._append_event(
+                conn,
+                mission.mission_id,
+                "MISSION_TRANSITIONED",
+                {"state": MissionState.CLOSED.value, "root_work_id": work.work_id},
+                f"{idempotency_key}:mission-closed",
+                event_time,
+                aggregate_type="mission",
+            )
+
+            closure_cursor = conn.execute(
+                """UPDATE closure_items SET state='COMPLETED', version=version+1, updated_at=?
+                WHERE closure_id=? AND state='PREPARED' AND version=1""",
+                (event_time, closure_id),
+            )
+            step_cursor = conn.execute(
+                """UPDATE closure_steps
+                SET state='COMPLETED', attempt_count=attempt_count+1, updated_at=?
+                WHERE step_id=? AND state='PENDING' AND attempt_count=0""",
+                (event_time, step["step_id"]),
+            )
+            outbox_cursor = conn.execute(
+                """UPDATE closure_outbox SET published_at=?
+                WHERE outbox_id=? AND published_at IS NULL""",
+                (event_time, outbox["outbox_id"]),
+            )
+            if (
+                closure_cursor.rowcount != 1
+                or step_cursor.rowcount != 1
+                or outbox_cursor.rowcount != 1
+            ):
+                raise ContinuityStoreError("Closure 步骤或投影 outbox 收口出现版本冲突")
+
+            receipt = {
+                "closure_id": closure_id,
+                "state": "COMPLETED",
+                "projection_state": "PROJECTED",
+                "run_id": run.run_id,
+                "run_state": RunState.SUCCEEDED.value,
+                "work_id": work.work_id,
+                "work_state": WorkState.CLOSED.value,
+                "mission_id": mission.mission_id,
+                "mission_state": MissionState.CLOSED.value,
+                "pending_reason": None,
+            }
+            self._append_event(
+                conn,
+                closure_id,
+                "CLOSURE_COMPLETED",
+                {
+                    "schema_version": "closure-completed.v1",
+                    "projection_receipt": projection_receipt,
+                    "receipt": receipt,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="closure",
+            )
+            return self._closure_completion_from_event(
+                conn,
+                self._event_by_key(conn, idempotency_key),
+                closure_id=closure_id,
+                projection_receipt=projection_receipt,
+            )
+
+    @staticmethod
+    def _lexical_run_worktree(raw: object, *, base: Path | None = None) -> str:
+        if not isinstance(raw, str) or raw != raw.strip() or not raw:
+            raise ContinuityStoreError("Run worktree_path 必须是规范非空路径")
+        raw_segments = raw.replace("\\", "/").split("/")
+        if any(part in {".", ".."} for part in raw_segments):
+            raise ContinuityStoreError("Run worktree_path 包含非 canonical 点路径段")
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            if base is None:
+                raise ContinuityStoreError("Run worktree_path 必须是绝对路径")
+            candidate = base / candidate
+        normalized = Path(os.path.abspath(os.path.normpath(str(candidate))))
+        if any(part != part.rstrip(" .") for part in normalized.parts):
+            raise ContinuityStoreError("Run worktree_path 包含非法路径段")
+        return str(normalized)
+
+    def _canonical_run_worktree(self, raw: object) -> str:
+        lexical = self._lexical_run_worktree(raw, base=self.workspace_root)
+        try:
+            return str(Path(lexical).resolve(strict=True))
+        except (OSError, RuntimeError) as error:
+            raise ContinuityStoreError("Run worktree_path 无法解析") from error
+
+    @staticmethod
+    def _validated_idempotency_key(raw: object) -> str:
+        if (
+            not isinstance(raw, str)
+            or raw != raw.strip()
+            or not 1 <= len(raw) <= 255
+            or any(not character.isprintable() for character in raw)
+        ):
+            raise ContinuityStoreError("idempotency_key 必须是 1 到 255 个 canonical 可打印字符")
+        return raw
+
+    @staticmethod
+    def _validated_run_text(raw: object, *, label: str) -> str:
+        if (
+            not isinstance(raw, str)
+            or raw != raw.strip()
+            or not raw
+            or any(not character.isprintable() for character in raw)
+        ):
+            raise ContinuityStoreError(f"Run {label} 必须是 canonical 非空可打印文本")
+        return raw
+
+    @classmethod
+    def _validated_run_creation_inputs(
+        cls,
+        *,
+        run_id: object,
+        work_id: object,
+        executor_id: object,
+        adapter: object,
+        owned_paths: object,
+        declared_dirty_paths: object,
+        git_head: object | None,
+        lease_token: object,
+        lease_seconds: object,
+    ) -> tuple[str, str, str, str, tuple[str, ...], tuple[str, ...], str | None, str, int]:
+        canonical_run_id = cls._validated_run_text(run_id, label="run_id")
+        canonical_work_id = cls._validated_run_text(work_id, label="work_id")
+        canonical_executor = cls._validated_run_text(executor_id, label="executor_id")
+        canonical_adapter = cls._validated_run_text(adapter, label="adapter")
+        canonical_owned = cls._run_paths(owned_paths, label="owned_paths", allow_empty=False)
+        canonical_declared = cls._run_paths(
+            declared_dirty_paths,
+            label="declared_dirty_paths",
+            allow_empty=True,
+        )
+        if not all(
+            cls._authority_path_covered(path, canonical_owned) for path in canonical_declared
+        ):
+            raise ContinuityStoreError("declared_dirty_paths 超出 owned_paths")
+        canonical_head: str | None = None
+        if git_head is not None:
+            canonical_head = cls._validated_run_text(git_head, label="git_head")
+            if _FULL_GIT_COMMIT.fullmatch(canonical_head) is None:
+                raise ContinuityStoreError("Run git_head 必须是完整小写 Git commit OID")
+        canonical_token = cls._validated_run_text(lease_token, label="lease_token")
+        if type(lease_seconds) is not int or not 60 <= lease_seconds <= 86_400:
+            raise ContinuityStoreError("lease_seconds 必须在 60 到 86400 之间")
+        return (
+            canonical_run_id,
+            canonical_work_id,
+            canonical_executor,
+            canonical_adapter,
+            canonical_owned,
+            canonical_declared,
+            canonical_head,
+            canonical_token,
+            lease_seconds,
+        )
+
+    @staticmethod
+    def _run_creation_request(
+        *,
+        run_id: str,
+        work_id: str,
+        executor_id: str,
+        adapter: str,
+        owned_paths: tuple[str, ...],
+        declared_dirty_paths: tuple[str, ...],
+        observed_dirty_paths: tuple[str, ...],
+        git_head: str,
+        worktree_path: str,
+        lease_seconds: int,
+    ) -> dict[str, object]:
+        return {
+            "run_id": run_id,
+            "work_id": work_id,
+            "executor_id": executor_id,
+            "adapter": adapter,
+            "owned_paths": list(owned_paths),
+            "declared_dirty_paths": list(declared_dirty_paths),
+            "observed_dirty_paths": list(observed_dirty_paths),
+            "git_head": git_head,
+            "worktree_path": worktree_path,
+            "lease_seconds": lease_seconds,
+        }
+
+    @staticmethod
+    def _run_creation_request_hash(request: dict[str, object]) -> str:
+        return continuity_codec.run_creation_request_hash(request)
+
+    @staticmethod
+    def _lease_token_fingerprint(lease_token: str) -> str:
+        return continuity_codec.lease_token_fingerprint(lease_token)
+
+    def run_creation_replay(
+        self,
+        *,
+        run_id: str,
+        work_id: str,
+        executor_id: str,
+        adapter: str,
+        owned_paths: tuple[str, ...],
+        declared_dirty_paths: tuple[str, ...],
+        observed_dirty_paths: tuple[str, ...],
+        git_head: str,
+        worktree_path: str,
+        lease_token: str,
+        lease_seconds: int,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        """Replay an exact Run start without consulting mutable Git/lease time facts."""
+
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        (
+            run_id,
+            work_id,
+            executor_id,
+            adapter,
+            owned_paths,
+            declared_dirty_paths,
+            validated_head,
+            lease_token,
+            lease_seconds,
+        ) = self._validated_run_creation_inputs(
+            run_id=run_id,
+            work_id=work_id,
+            executor_id=executor_id,
+            adapter=adapter,
+            owned_paths=owned_paths,
+            declared_dirty_paths=declared_dirty_paths,
+            git_head=git_head,
+            lease_token=lease_token,
+            lease_seconds=lease_seconds,
+        )
+        assert validated_head is not None
+        observed_dirty_paths = self._run_paths(
+            observed_dirty_paths,
+            label="observed_dirty_paths",
+            allow_empty=True,
+        )
+        if not all(
+            self._authority_path_covered(path, declared_dirty_paths)
+            for path in observed_dirty_paths
+        ):
+            raise ContinuityStoreError("存在未声明的 dirty path")
+        canonical_worktree = self._lexical_run_worktree(
+            worktree_path,
+            base=self.workspace_root,
+        )
+        request = self._run_creation_request(
+            run_id=run_id,
+            work_id=work_id,
+            executor_id=executor_id,
+            adapter=adapter,
+            owned_paths=owned_paths,
+            declared_dirty_paths=declared_dirty_paths,
+            observed_dirty_paths=observed_dirty_paths,
+            git_head=validated_head,
+            worktree_path=canonical_worktree,
+            lease_seconds=lease_seconds,
+        )
+        request_hash = self._run_creation_request_hash(request)
+        with self._read_connection() as conn:
+            return self._run_creation_replay(
+                conn,
+                run_id=run_id,
+                executor_id=executor_id,
+                lease_token=lease_token,
+                request=request,
+                request_hash=request_hash,
+                idempotency_key=idempotency_key,
+            )
+
+    def run_creation_intent_replay(
+        self,
+        *,
+        run_id: str,
+        work_id: str,
+        executor_id: str,
+        adapter: str,
+        owned_paths: tuple[str, ...],
+        declared_dirty_paths: tuple[str, ...],
+        worktree_path: str,
+        lease_token: str,
+        lease_seconds: int,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        """Replay CLI user intent while ignoring newly observed Git snapshot facts."""
+
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        (
+            run_id,
+            work_id,
+            executor_id,
+            adapter,
+            owned_paths,
+            declared_dirty_paths,
+            _validated_head,
+            lease_token,
+            lease_seconds,
+        ) = self._validated_run_creation_inputs(
+            run_id=run_id,
+            work_id=work_id,
+            executor_id=executor_id,
+            adapter=adapter,
+            owned_paths=owned_paths,
+            declared_dirty_paths=declared_dirty_paths,
+            git_head=None,
+            lease_token=lease_token,
+            lease_seconds=lease_seconds,
+        )
+        canonical_worktree = self._lexical_run_worktree(
+            worktree_path,
+            base=self.workspace_root,
+        )
+        expected_intent = {
+            "run_id": run_id,
+            "work_id": work_id,
+            "executor_id": executor_id,
+            "adapter": adapter,
+            "owned_paths": list(owned_paths),
+            "declared_dirty_paths": list(declared_dirty_paths),
+            "worktree_path": canonical_worktree,
+            "lease_seconds": lease_seconds,
+        }
+        with self._read_connection() as conn:
+            row = self._event_by_key(conn, idempotency_key)
+            if row is None:
+                return None
+            try:
+                payload = json.loads(str(row["payload_json"]))
+            except (TypeError, json.JSONDecodeError) as error:
+                raise ContinuityStoreError("Run 创建事件 payload 无法读取") from error
+            if not isinstance(payload, dict):
+                raise ContinuityStoreError("Run 创建事件 payload 顶层必须是对象")
+            recorded_request: dict[str, object]
+            recorded_hash: str
+            if set(payload) == _LEGACY_RUN_CREATION_FIELDS:
+                recorded_request = self._legacy_run_creation_request_from_payload(
+                    payload,
+                    lease_seconds=lease_seconds,
+                )
+                recorded_hash = self._run_creation_request_hash(recorded_request)
+            else:
+                request_value = payload.get("request")
+                hash_value = payload.get("request_hash")
+                if not isinstance(request_value, dict) or not isinstance(hash_value, str):
+                    raise ContinuityStoreError("Run 创建事件 request 无法读取")
+                recorded_request = cast(dict[str, object], request_value)
+                recorded_hash = hash_value
+            replay = self._run_creation_replay(
+                conn,
+                run_id=run_id,
+                executor_id=executor_id,
+                lease_token=lease_token,
+                request=recorded_request,
+                request_hash=recorded_hash,
+                idempotency_key=idempotency_key,
+            )
+            recorded_intent = {key: recorded_request.get(key) for key in expected_intent}
+            if recorded_intent != expected_intent:
+                raise ContinuityStoreError("idempotency_key 的 Run 创建用户意图不一致")
+            return replay
+
+    def create_run(
+        self,
+        values: dict[str, Any],
+        lease: dict[str, Any],
+        observed_dirty_paths: tuple[str, ...],
+        lease_seconds: int,
+        idempotency_key: str,
+        *,
+        one_holder_per_project: bool = False,
+    ) -> RunItem:
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        try:
+            raw_owned_paths = json.loads(str(values.get("owned_paths_json")))
+            raw_declared_dirty_paths = json.loads(str(values.get("declared_dirty_paths_json")))
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ContinuityStoreError("Run path authority JSON 无法读取") from error
+        (
+            run_id,
+            work_id,
+            executor_id,
+            adapter,
+            owned_paths,
+            declared_dirty_paths,
+            git_head,
+            lease_token,
+            lease_seconds,
+        ) = self._validated_run_creation_inputs(
+            run_id=values.get("run_id"),
+            work_id=values.get("work_id"),
+            executor_id=values.get("executor_id"),
+            adapter=values.get("adapter"),
+            owned_paths=raw_owned_paths,
+            declared_dirty_paths=raw_declared_dirty_paths,
+            git_head=values.get("git_head"),
+            lease_token=lease.get("lease_token"),
+            lease_seconds=lease_seconds,
+        )
+        assert git_head is not None
+        observed_paths = self._run_paths(
+            observed_dirty_paths,
+            label="observed_dirty_paths",
+            allow_empty=True,
+        )
+        if not all(
+            self._authority_path_covered(path, declared_dirty_paths) for path in observed_paths
+        ):
+            raise ContinuityStoreError("存在未声明的 dirty path")
+        if lease.get("run_id") != run_id:
+            raise ContinuityStoreError("Run 与 lease 身份不一致")
+        if lease.get("owner_id") != executor_id:
+            raise ContinuityStoreError("Run executor 与 lease owner 不一致")
+        if lease.get("version") != 1:
+            raise ContinuityStoreError("新 lease 初始版本必须是 1")
+        canonical_worktree = self._canonical_run_worktree(values.get("worktree_path"))
+        request = self._run_creation_request(
+            run_id=run_id,
+            work_id=work_id,
+            executor_id=executor_id,
+            adapter=adapter,
+            owned_paths=owned_paths,
+            declared_dirty_paths=declared_dirty_paths,
+            observed_dirty_paths=observed_paths,
+            git_head=git_head,
+            worktree_path=canonical_worktree,
+            lease_seconds=lease_seconds,
+        )
+        request_hash = self._run_creation_request_hash(request)
+        with self._read_connection() as conn:
+            replay = self._run_creation_replay(
+                conn,
+                run_id=run_id,
+                executor_id=executor_id,
+                lease_token=lease_token,
+                request=request,
+                request_hash=request_hash,
+                idempotency_key=idempotency_key,
+            )
+        if replay is not None:
+            return replay
+        if lease_seconds > 3_600:
+            raise ContinuityStoreError("新 Run lease_seconds 必须在 60 到 3600 之间")
+        initial_worktree = self._validated_run_snapshot(
+            canonical_worktree,
+            values.get("git_head"),
+            owned_paths,
+            declared_dirty_paths,
+            observed_paths,
+        )
+        stored_values = dict(values)
+        stored_values.update(
+            run_id=run_id,
+            work_id=work_id,
+            executor_id=executor_id,
+            adapter=adapter,
+            git_head=git_head,
+        )
+        stored_values["worktree_path"] = str(initial_worktree)
+        stored_values["owned_paths_json"] = json.dumps(owned_paths, ensure_ascii=False)
+        stored_values["declared_dirty_paths_json"] = json.dumps(
+            declared_dirty_paths,
+            ensure_ascii=False,
+        )
+        with self._transaction() as conn:
+            replay = self._run_creation_replay(
+                conn,
+                run_id=stored_values["run_id"],
+                executor_id=stored_values["executor_id"],
+                lease_token=lease_token,
+                request=request,
+                request_hash=request_hash,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                return replay
+            final_worktree = self._validated_run_snapshot(
+                stored_values["worktree_path"],
+                stored_values["git_head"],
+                owned_paths,
+                declared_dirty_paths,
+                observed_paths,
+            )
+            if str(final_worktree) != stored_values["worktree_path"]:
+                raise ContinuityStoreError("Run worktree canonical identity 发生漂移")
+            if stored_values.get("state") != RunState.READY.value:
+                raise ContinuityStoreError("新 Run 初始状态必须是 READY")
+            if stored_values.get("version") != 1:
+                raise ContinuityStoreError("新 Run 初始版本必须是 1")
+            existing_run = conn.execute(
+                "SELECT 1 FROM run_items WHERE run_id=?",
+                (stored_values["run_id"],),
+            ).fetchone()
+            if existing_run is not None:
+                raise ContinuityStoreError("Run 已存在；精确重放必须使用原 idempotency_key")
+            observed_at = self._utc_now()
+            now = observed_at.isoformat()
+            stored_values["created_at"] = now
+            stored_values["updated_at"] = now
+            work = self._get_work(conn, stored_values["work_id"])
+            if work.state not in {WorkState.READY, WorkState.IN_PROGRESS}:
+                raise ContinuityStoreError("只有 READY/IN_PROGRESS Work 可以创建 Run")
+            if not all(
+                self._authority_path_covered(path, work.scope_paths) for path in owned_paths
+            ):
+                raise ContinuityStoreError("owned_paths 超出 Work scope")
+            stored_lease = dict(lease)
+            stored_lease["run_id"] = stored_values["run_id"]
+            stored_lease["owner_id"] = stored_values["executor_id"]
+            stored_lease["lease_token"] = lease_token
+            stored_lease["expires_at"] = (
+                observed_at + timedelta(seconds=lease_seconds)
+            ).isoformat()
+            stored_lease["version"] = 1
+            stored_lease["updated_at"] = now
+            active_sibling = conn.execute(
+                """SELECT run_id FROM run_items
+                WHERE work_id=? AND run_id<>?
+                AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+                LIMIT 1""",
+                (stored_values["work_id"], stored_values["run_id"]),
+            ).fetchone()
+            if active_sibling is not None:
+                raise ContinuityStoreError(
+                    "Work 已有非终态 Run" + self._holder_notice(conn, str(active_sibling[0]))
+                )
+            # TD-071: a parked card's other Works start again only through pm unpark.
+            parked = self._parked_mission_of_work(conn, work)
+            if parked is not None:
+                raise ContinuityStoreError(
+                    f"{parked} 搁着呢，不能再起新的 Run；请用户说一句后用 pm unpark 拿回来"
+                )
+            # For a dispatch the one-card-per-project limit is enforced here, inside the
+            # transaction that writes the Run and its lease, so two overlapping dispatches cannot
+            # both pass the preflight count.
+            held = (
+                self._project_held_lease_run_ids(conn, work.subject_project_id, observed_at)
+                if one_holder_per_project
+                else ()
+            )
+            if held:
+                raise ContinuityStoreError(
+                    "项目里已有 Run 持有租约（" + "、".join(held) + "），同一项目同一时刻只能一张在干"
+                )
+            self._insert_mapping(conn, "run_items", stored_values)
+            self._insert_mapping(conn, "execution_leases", stored_lease)
+            self._append_event(
+                conn,
+                stored_values["run_id"],
+                "RUN_CREATED",
+                {
+                    "schema_version": "run-created.v2",
+                    "request_hash": request_hash,
+                    "request": request,
+                    "lease_token_sha256": self._lease_token_fingerprint(lease_token),
+                    "created_at": now,
+                    "lease_expires_at": stored_lease["expires_at"],
+                },
+                idempotency_key,
+                now,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, stored_values["run_id"])
+
+    def transition_run(
+        self,
+        run_id: str,
+        expected_version: int,
+        new_state: str,
+        idempotency_key: str,
+        now: str,
+        *,
+        owner_id: str,
+        lease_token: str,
+        expected_epoch: int | None = None,
+        failure: ExecutionFailure | None = None,
+    ) -> RunItem:
+        del now
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        run_id = self._validated_run_text(run_id, label="run_id")
+        try:
+            destination = RunState(new_state)
+        except (TypeError, ValueError) as error:
+            raise ContinuityStoreError("Run 目标状态非法") from error
+        if type(expected_version) is not int or expected_version < 1:
+            raise ContinuityStoreError("Run expected_version 必须是正整数")
+        failure_states = {RunState.BLOCKED, RunState.PENDING, RunState.FAILED}
+        if failure is not None and destination not in failure_states:
+            raise ContinuityStoreError("结构化失败原因只能绑定 BLOCKED/PENDING/FAILED")
+        failure_payload = failure.model_dump(mode="json") if failure is not None else None
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                try:
+                    payload = json.loads(str(existing["payload_json"]))
+                except (TypeError, json.JSONDecodeError) as error:
+                    raise ContinuityStoreError("Run 迁移事件 payload 无法读取") from error
+                v2_payload = {
+                    "schema_version": "run-transition.v2",
+                    "expected_version": expected_version,
+                    "new_state": destination.value,
+                    "result_version": expected_version + 1,
+                }
+                v3_is_valid = (
+                    payload.get("schema_version") == "run-transition.v3"
+                    and payload.get("expected_version") == expected_version
+                    and payload.get("new_state") == destination.value
+                    and payload.get("result_version") == expected_version + 1
+                    and isinstance(payload.get("lease_release"), dict)
+                    and set(payload) == {
+                        "schema_version",
+                        "expected_version",
+                        "new_state",
+                        "result_version",
+                        "lease_release",
+                    }
+                )
+                v4_expected_keys = {
+                    "schema_version",
+                    "expected_version",
+                    "new_state",
+                    "result_version",
+                    "failure",
+                }
+                if destination in {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}:
+                    v4_expected_keys.add("lease_release")
+                v4_is_valid = (
+                    failure_payload is not None
+                    and payload.get("schema_version") == "run-transition.v4"
+                    and payload.get("expected_version") == expected_version
+                    and payload.get("new_state") == destination.value
+                    and payload.get("result_version") == expected_version + 1
+                    and payload.get("failure") == failure_payload
+                    and set(payload) == v4_expected_keys
+                    and (
+                        "lease_release" not in v4_expected_keys
+                        or isinstance(payload.get("lease_release"), dict)
+                    )
+                )
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["aggregate_id"] != run_id
+                    or existing["event_type"] != "RUN_TRANSITIONED"
+                    or (payload != v2_payload and not v3_is_valid and not v4_is_valid)
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 Run 迁移语义不一致")
+                return self._get_run(conn, run_id)
+            current = self._get_run(conn, run_id)
+            if current.version != expected_version:
+                raise ContinuityStoreError("Run 不存在或版本冲突")
+            if destination not in _STORE_RUN_TRANSITIONS[current.state]:
+                raise ContinuityStoreError(f"非法 Run 状态迁移: {current.state} -> {destination}")
+            if destination is RunState.SUCCEEDED:
+                self._refuse_while_closure_prepared(conn, "run_id", run_id, "Run")
+            self._require_lease_in_tx(conn, run_id=run_id, owner_id=owner_id, lease_token=lease_token, expected_epoch=expected_epoch)
+            if destination not in {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}:
+                sibling = conn.execute(
+                    """SELECT run_id FROM run_items
+                    WHERE work_id=? AND run_id<>?
+                    AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+                    LIMIT 1""",
+                    (current.work_id, run_id),
+                ).fetchone()
+                if sibling is not None:
+                    raise ContinuityStoreError("Work 已有其他非终态 Run")
+            event_time = self._utc_now().isoformat()
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND version=?""",
+                (destination.value, event_time, run_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Run 不存在或版本冲突")
+            transition_payload: dict[str, object] = {
+                "schema_version": "run-transition.v2",
+                "expected_version": expected_version,
+                "new_state": destination.value,
+                "result_version": expected_version + 1,
+            }
+            if destination in {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}:
+                lease = self._get_lease(conn, run_id)
+                release = self._release_lease_in_transaction(
+                    conn,
+                    lease=lease,
+                    event_time=event_time,
+                    reason=f"terminal:{destination.value}",
+                )
+                transition_payload = {
+                    "schema_version": "run-transition.v3",
+                    "expected_version": expected_version,
+                    "new_state": destination.value,
+                    "result_version": expected_version + 1,
+                    "lease_release": release,
+                }
+            if failure_payload is not None:
+                transition_payload = {
+                    **transition_payload,
+                    "schema_version": "run-transition.v4",
+                    "failure": failure_payload,
+                }
+            self._append_event(
+                conn,
+                run_id,
+                "RUN_TRANSITIONED",
+                transition_payload,
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, run_id)
+
+    @classmethod
+    def _release_lease_in_transaction(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        lease: LeaseItem,
+        event_time: str,
+        reason: str,
+    ) -> dict[str, object]:
+        """Fence a terminal lease without deleting its audit row or changing expiry time."""
+
+        if lease.lease_token.startswith("RELEASED:"):
+            raise ContinuityStoreError("终态 lease 已释放，拒绝重复 fencing")
+        marker_seed = f"{lease.run_id}\0{lease.version}\0{reason}\0{event_time}".encode()
+        marker = "RELEASED:" + hashlib.sha256(marker_seed).hexdigest()
+        cursor = conn.execute(
+            """UPDATE execution_leases SET lease_token=?, version=version+1, updated_at=?
+            WHERE run_id=? AND lease_token=? AND version=?""",
+            (marker, event_time, lease.run_id, lease.lease_token, lease.version),
+        )
+        if cursor.rowcount != 1:
+            raise ContinuityStoreError("终态 lease 释放 CAS 冲突")
+        return {
+            "reason": reason,
+            "released_at": event_time,
+            "lease_epoch": lease.version + 1,
+        }
+
+    def revoke_unstarted_run(
+        self,
+        *,
+        target_run_id: str,
+        expected_target_version: int,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_work_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Cancel a live Run only when a distinct recovery chain proves it never started."""
+
+        target_run_id = self._validated_run_text(target_run_id, label="target_run_id")
+        recovery_run_id = self._validated_run_text(recovery_run_id, label="recovery_run_id")
+        recovery_work_id = self._validated_run_text(recovery_work_id, label="recovery_work_id")
+        recovery_owner_id = self._validated_run_text(recovery_owner_id, label="recovery_owner_id")
+        recovery_lease_token = self._validated_run_text(
+            recovery_lease_token, label="recovery lease token"
+        )
+        decision_id = self._validated_run_text(decision_id, label="decision_id")
+        reason = self._validated_run_text(reason, label="revoke reason")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if (
+            type(expected_target_version) is not int
+            or type(expected_target_lease_version) is not int
+            or expected_target_version < 1
+            or expected_target_lease_version < 1
+        ):
+            raise ContinuityStoreError("目标 Run/lease 版本必须是正整数")
+        request = {
+            "schema_version": "unstarted-run-revocation-request.v1",
+            "target_run_id": target_run_id,
+            "expected_target_version": expected_target_version,
+            "expected_target_lease_version": expected_target_lease_version,
+            "recovery_run_id": recovery_run_id,
+            "recovery_work_id": recovery_work_id,
+            "recovery_owner_id": recovery_owner_id,
+            "decision_id": decision_id,
+            "reason": reason,
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="未启动 Run 撤销")
+                replay_schema = {
+                    "RUN_LEASE_REVOKED": "unstarted-run-revoked.v1",
+                    "RUN_REVOCATION_PENDING": "run-revocation-pending.v1",
+                }.get(str(existing["event_type"]))
+                recorded_request = payload.get("request")
+                recorded_target = payload.get("target")
+                if not isinstance(recorded_request, dict) or not isinstance(recorded_target, dict):
+                    raise ContinuityStoreError("未启动 Run 撤销重放事件缺少请求或目标版本")
+                recorded_run_version = recorded_request.get("expected_target_version")
+                recorded_lease_version = recorded_request.get("expected_target_lease_version")
+                result_run_version = recorded_target.get(
+                    "cancelled_version", recorded_target.get("pending_version")
+                )
+                release = payload.get("lease_release")
+                result_lease_version = (
+                    release.get("lease_epoch") if isinstance(release, dict) else recorded_lease_version
+                )
+                request_without_versions = {
+                    key: value
+                    for key, value in request.items()
+                    if key not in {"expected_target_version", "expected_target_lease_version"}
+                }
+                recorded_without_versions = {
+                    key: value
+                    for key, value in recorded_request.items()
+                    if key not in {"expected_target_version", "expected_target_lease_version"}
+                }
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["aggregate_id"] != target_run_id
+                    or replay_schema is None
+                    or payload.get("schema_version") != replay_schema
+                    or request_without_versions != recorded_without_versions
+                    or expected_target_version not in {recorded_run_version, result_run_version}
+                    or expected_target_lease_version
+                    not in {recorded_lease_version, result_lease_version}
+                    or payload.get("recovery_token_sha256")
+                    != self._lease_token_fingerprint(recovery_lease_token)
+                ):
+                    raise ContinuityStoreError("idempotency_key 的未启动 Run 撤销语义不一致")
+                return self._get_run(conn, target_run_id)
+            if target_run_id == recovery_run_id:
+                raise ContinuityStoreError("目标 Run 与恢复 Run 必须不同")
+            event_time = self._utc_now().isoformat()
+            target = self._get_run(conn, target_run_id)
+            target_lease = self._get_lease(conn, target_run_id)
+            recovery = self._get_run(conn, recovery_run_id)
+            recovery_lease = self._get_lease(conn, recovery_run_id)
+            recovery_work = self._get_work(conn, recovery_work_id)
+            if target.state not in {RunState.READY, RunState.RUNNING, RunState.VERIFYING}:
+                raise ContinuityStoreError("只有活跃 Run 可以受控撤销")
+            if target.version != expected_target_version:
+                raise ContinuityStoreError("目标 Run 版本冲突")
+            if target_lease.version != expected_target_lease_version:
+                raise ContinuityStoreError("目标 lease epoch 冲突")
+            if self._aware_timestamp(target_lease.expires_at, "目标 Run lease") <= self._utc_now():
+                raise ContinuityStoreError("目标 Run lease 已到期；必须走 settle_expired_run")
+            if (
+                recovery.state is not RunState.RUNNING
+                or recovery.work_id != recovery_work_id
+                or recovery_work.read_only
+                or recovery_work.state is not WorkState.IN_PROGRESS
+                or recovery_lease.owner_id != recovery_owner_id
+                or recovery_lease.lease_token != recovery_lease_token
+                or self._aware_timestamp(recovery_lease.expires_at, "恢复 lease") <= self._utc_now()
+            ):
+                raise ContinuityStoreError("恢复 Work/Run/lease 不具备撤销权限")
+            started = conn.execute(
+                "SELECT 1 FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+                "AND event_type IN ('RUN_STARTED', 'EXECUTION_START_CLAIMED') LIMIT 1",
+                (target_run_id,),
+            ).fetchone()
+            checkpoint = conn.execute(
+                "SELECT 1 FROM checkpoints WHERE run_id=? LIMIT 1", (target_run_id,)
+            ).fetchone()
+            if started is not None or checkpoint is not None:
+                cursor = conn.execute(
+                    """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                    WHERE run_id=? AND state=? AND version=?""",
+                    (
+                        RunState.PENDING.value,
+                        event_time,
+                        target_run_id,
+                        target.state.value,
+                        target.version,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ContinuityStoreError("目标 Run PENDING CAS 冲突")
+                self._append_event(
+                    conn,
+                    target_run_id,
+                    "RUN_REVOCATION_PENDING",
+                    {
+                        "schema_version": "run-revocation-pending.v1",
+                        "request": request,
+                        "recovery_token_sha256": self._lease_token_fingerprint(
+                            recovery_lease_token
+                        ),
+                        "target": {
+                            "previous_state": target.state.value,
+                            "previous_version": target.version,
+                            "pending_version": target.version + 1,
+                        },
+                        "reason": "Durable start evidence exists; child reaping is unproven.",
+                    },
+                    idempotency_key,
+                    event_time,
+                    aggregate_type="run",
+                )
+                return self._get_run(conn, target_run_id)
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND state=? AND version=?""",
+                (
+                    RunState.CANCELLED.value,
+                    event_time,
+                    target_run_id,
+                    target.state.value,
+                    target.version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("目标 Run 撤销 CAS 冲突")
+            release = self._release_lease_in_transaction(
+                conn,
+                lease=target_lease,
+                event_time=event_time,
+                reason="recovery:unstarted",
+            )
+            self._append_event(
+                conn,
+                target_run_id,
+                "RUN_LEASE_REVOKED",
+                {
+                    "schema_version": "unstarted-run-revoked.v1",
+                    "request": request,
+                    "recovery_token_sha256": self._lease_token_fingerprint(recovery_lease_token),
+                    "target": {
+                        "previous_state": target.state.value,
+                        "previous_version": target.version,
+                        "cancelled_version": target.version + 1,
+                        "lease_epoch": release["lease_epoch"],
+                    },
+                    "lease_release": release,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, target_run_id)
+
+    def record_run_started(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        owner_id: str,
+        lease_token: str,
+        evidence: ExecutionStartEvidence,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Append safe startup evidence and CAS-transition one READY Run to RUNNING."""
+
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        run_id = self._validated_run_text(run_id, label="run_id")
+        if type(expected_version) is not int or expected_version < 1:
+            raise ContinuityStoreError("Run expected_version 必须是正整数")
+        if not isinstance(owner_id, str) or not owner_id or owner_id != owner_id.strip():
+            raise ContinuityStoreError("启动证据 owner 必须是 canonical 非空文本")
+        if not isinstance(lease_token, str) or not lease_token or lease_token != lease_token.strip():
+            raise ContinuityStoreError("启动证据 lease_token 必须是 canonical 非空文本")
+        request = {
+            "schema_version": "run-started.v1",
+            "owner_id": owner_id,
+            "evidence": evidence.model_dump(mode="json"),
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                existing_payload = json.loads(str(existing["payload_json"]))
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["aggregate_id"] != run_id
+                    or existing["event_type"] != "RUN_STARTED"
+                    or {
+                        "schema_version": existing_payload.get("schema_version"),
+                        "owner_id": existing_payload.get("owner_id"),
+                        "evidence": existing_payload.get("evidence"),
+                    }
+                    != request
+                ):
+                    raise ContinuityStoreError("idempotency_key 的启动证据语义不一致")
+                return self._get_run(conn, run_id)
+            payload = {
+                **request,
+                "expected_version": expected_version,
+                "result_version": expected_version + 1,
+            }
+            current = self._get_run(conn, run_id)
+            if current.version != expected_version or current.state is not RunState.READY:
+                raise ContinuityStoreError("Run 不存在、非 READY 或版本冲突")
+            if current.executor_id != owner_id:
+                raise ContinuityStoreError("启动证据 owner 与 Run executor 不一致")
+            lease = self._get_lease(conn, run_id)
+            if lease.owner_id != owner_id or lease.lease_token != lease_token:
+                raise ContinuityStoreError("启动证据 lease ownership 不匹配")
+            try:
+                expires_at = datetime.fromisoformat(lease.expires_at)
+            except ValueError as error:
+                raise ContinuityStoreError("启动证据 lease 到期时间非法") from error
+            if expires_at.tzinfo is None or expires_at.astimezone(UTC) <= self._utc_now():
+                raise ContinuityStoreError("启动证据 lease 已过期")
+            event_time = self._utc_now().isoformat()
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND version=? AND state=?""",
+                (RunState.RUNNING.value, event_time, run_id, expected_version, RunState.READY.value),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Run READY 到 RUNNING CAS 失败")
+            self._append_event(
+                conn,
+                run_id,
+                "RUN_STARTED",
+                payload,
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, run_id)
+
+    @staticmethod
+    def _expired_run_settlement_request(
+        *,
+        target_run_id: str,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        decision_id: str,
+        outcome: str,
+        reason: str,
+    ) -> dict[str, object]:
+        """Build the caller-owned settlement request; derived authority facts stay separate."""
+
+        return {
+            "schema_version": "expired-run-settlement-request.v2",
+            "action": "settle_expired_run",
+            "target_run_id": target_run_id,
+            "recovery_run_id": recovery_run_id,
+            "recovery_owner_id": recovery_owner_id,
+            "decision_id": decision_id,
+            "outcome": outcome,
+            "reason": reason,
+        }
+
+    @staticmethod
+    def _settlement_request_hash(request: dict[str, object]) -> str:
+        return continuity_codec.settlement_request_hash(request)
+
+    @staticmethod
+    def _validated_settlement_text(*, reason: object, idempotency_key: object) -> tuple[str, str]:
+        if not isinstance(reason, str):
+            raise ContinuityStoreError("结算原因类型非法")
+        normalized_reason = reason.strip()
+        if (
+            reason != normalized_reason
+            or not normalized_reason
+            or len(normalized_reason) > 1000
+            or any(not character.isprintable() for character in normalized_reason)
+        ):
+            raise ContinuityStoreError("结算原因必须是 1 到 1000 个字符的规范文本")
+        if not isinstance(idempotency_key, str):
+            raise ContinuityStoreError("idempotency_key 类型非法")
+        normalized_key = idempotency_key.strip()
+        if (
+            idempotency_key != normalized_key
+            or not normalized_key
+            or len(normalized_key) > 255
+            or any(not character.isprintable() for character in normalized_key)
+        ):
+            raise ContinuityStoreError("idempotency_key 必须是 1 到 255 个字符的规范文本")
+        return normalized_reason, normalized_key
+
+    @classmethod
+    def _validated_settlement_caller_inputs(
+        cls,
+        *,
+        target_run_id: object,
+        recovery_run_id: object,
+        recovery_owner_id: object,
+        recovery_lease_token: object,
+        decision_id: object,
+        outcome: object,
+        reason: object,
+        idempotency_key: object,
+    ) -> tuple[str, str, str, str, str, str, str, str]:
+        reason, idempotency_key = cls._validated_settlement_text(
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        labels = (
+            ("目标 Run", target_run_id),
+            ("恢复 Run", recovery_run_id),
+            ("恢复 owner", recovery_owner_id),
+            ("Decision", decision_id),
+        )
+        for label, value in labels:
+            if (
+                not isinstance(value, str)
+                or value != value.strip()
+                or not 1 <= len(value) <= 255
+                or any(not character.isprintable() for character in value)
+            ):
+                raise ContinuityStoreError(f"{label} 必须是 canonical 非空可打印文本")
+        canonical_target_run_id = cast(str, target_run_id)
+        canonical_recovery_run_id = cast(str, recovery_run_id)
+        canonical_recovery_owner_id = cast(str, recovery_owner_id)
+        canonical_decision_id = cast(str, decision_id)
+        if (
+            not isinstance(recovery_lease_token, str)
+            or recovery_lease_token != recovery_lease_token.strip()
+            or not 1 <= len(recovery_lease_token) <= 1000
+            or any(not character.isprintable() for character in recovery_lease_token)
+        ):
+            raise ContinuityStoreError("恢复 lease token 必须是 canonical 非空可打印文本")
+        if not isinstance(outcome, str) or outcome != RunState.CANCELLED.value:
+            raise ContinuityStoreError("过期 Run 只能前向结算为 CANCELLED")
+        if not is_canonical_decision_id(canonical_decision_id):
+            raise ContinuityStoreError("运行态结算 Decision ID 必须是 canonical")
+        if canonical_target_run_id == canonical_recovery_run_id:
+            raise ContinuityStoreError("目标 Run 与恢复 Run 必须不同")
+        if recovery_lease_token in reason:
+            raise ContinuityStoreError("结算原因不得包含恢复 lease token")
+        return (
+            canonical_target_run_id,
+            canonical_recovery_run_id,
+            canonical_recovery_owner_id,
+            recovery_lease_token,
+            canonical_decision_id,
+            outcome,
+            reason,
+            idempotency_key,
+        )
+
+    def expired_run_settlement_replay(
+        self,
+        *,
+        target_run_id: str,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        outcome: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        """Replay a durable receipt before consulting any mutable authority facts."""
+
+        (
+            target_run_id,
+            recovery_run_id,
+            recovery_owner_id,
+            recovery_lease_token,
+            decision_id,
+            outcome,
+            reason,
+            idempotency_key,
+        ) = self._validated_settlement_caller_inputs(
+            target_run_id=target_run_id,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            outcome=outcome,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        request = self._expired_run_settlement_request(
+            target_run_id=target_run_id,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            decision_id=decision_id,
+            outcome=outcome,
+            reason=reason,
+        )
+        request_hash = self._settlement_request_hash(request)
+        with self._read_connection() as conn:
+            return self._expired_run_settlement_replay(
+                conn,
+                recovery_lease_token=recovery_lease_token,
+                request=request,
+                request_hash=request_hash,
+                idempotency_key=idempotency_key,
+            )
+
+    def settle_expired_run(
+        self,
+        *,
+        target_run_id: str,
+        expected_target_state: str,
+        expected_target_version: int,
+        expected_target_lease_version: int,
+        expected_target_work_id: str,
+        expected_target_work_version: int,
+        expected_target_work_scope_hash: str,
+        recovery_run_id: str,
+        expected_recovery_run_version: int,
+        recovery_work_id: str,
+        expected_recovery_work_version: int,
+        expected_recovery_work_scope_hash: str,
+        expected_recovery_owned_paths_hash: str,
+        expected_recovery_git_head: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        expected_recovery_lease_version: int,
+        target_decision_id: str,
+        target_decision_sha256: str,
+        target_change_id: str,
+        decision_id: str,
+        decision_sha256: str,
+        decision_change_id: str,
+        decision_project_id: str,
+        decision_approved_paths: tuple[str, ...],
+        runtime_target_path: str,
+        outcome: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Atomically settle one abandoned Run and fence its former lease."""
+
+        (
+            target_run_id,
+            recovery_run_id,
+            recovery_owner_id,
+            recovery_lease_token,
+            decision_id,
+            outcome,
+            reason,
+            idempotency_key,
+        ) = self._validated_settlement_caller_inputs(
+            target_run_id=target_run_id,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            outcome=outcome,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        self._validate_recovery_git_head(expected_recovery_git_head)
+        self._validate_settlement_authority_identity(
+            target_decision_id=target_decision_id,
+            target_decision_sha256=target_decision_sha256,
+            target_change_id=target_change_id,
+            decision_id=decision_id,
+            decision_sha256=decision_sha256,
+            decision_change_id=decision_change_id,
+            decision_project_id=decision_project_id,
+        )
+        request = self._expired_run_settlement_request(
+            target_run_id=target_run_id,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            decision_id=decision_id,
+            outcome=outcome,
+            reason=reason,
+        )
+        request_hash = self._settlement_request_hash(request)
+        actual_runtime_target = self.runtime_target_path()
+        if self._authority_path_key(runtime_target_path) != self._authority_path_key(
+            actual_runtime_target
+        ):
+            raise ContinuityStoreError("结算运行态目标与实际 Continuity Store 不一致")
+        with self._transaction() as conn:
+            replay = self._expired_run_settlement_replay(
+                conn,
+                recovery_lease_token=recovery_lease_token,
+                request=request,
+                request_hash=request_hash,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                return replay
+            observed_at = self._utc_now()
+            event_time = observed_at.isoformat()
+            if target_run_id == recovery_run_id:
+                raise ContinuityStoreError("目标 Run 与恢复 Run 必须不同")
+            if outcome != RunState.CANCELLED.value:
+                raise ContinuityStoreError("过期 Run 只能前向结算为 CANCELLED")
+
+            target = self._get_run(conn, target_run_id)
+            target_lease = self._get_lease(conn, target_run_id)
+            recovery = self._get_run(conn, recovery_run_id)
+            recovery_lease = self._get_lease(conn, recovery_run_id)
+            recovery_work = self._get_work(conn, recovery_work_id)
+            target_work = self._get_work(conn, target.work_id)
+
+            if target.work_id == recovery.work_id:
+                raise ContinuityStoreError("目标 Run 与恢复 Run 必须属于独立 Work")
+            if target.work_id != expected_target_work_id:
+                raise ContinuityStoreError("目标 Run 的 Work lineage 发生漂移")
+            if target_work.version != expected_target_work_version:
+                raise ContinuityStoreError("目标 Work 版本冲突")
+            actual_target_scope_hash = self.authority_paths_hash(target_work.scope_paths)
+            if (
+                target_work.scope_hash != actual_target_scope_hash
+                or actual_target_scope_hash != expected_target_work_scope_hash
+            ):
+                raise ContinuityStoreError("目标 Work scope 事实或哈希冲突")
+            terminal = {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED}
+            if target.state in terminal:
+                raise ContinuityStoreError("目标 Run 已处于终态")
+            self._refuse_if_parked(conn, target_run_id, "租约到期不等于过期，不能行政结算")
+            if (
+                target.state.value != expected_target_state
+                or target.version != expected_target_version
+            ):
+                raise ContinuityStoreError("目标 Run 状态或版本冲突")
+            if target_lease.version != expected_target_lease_version:
+                raise ContinuityStoreError("目标 Run lease 版本冲突")
+            if self._aware_timestamp(target_lease.expires_at, "目标 Run lease") > observed_at:
+                raise ContinuityStoreError("目标 Run lease 尚未过期")
+
+            if recovery.state is not RunState.RUNNING:
+                raise ContinuityStoreError("恢复 Run 必须处于 RUNNING")
+            if recovery.version != expected_recovery_run_version:
+                raise ContinuityStoreError("恢复 Run 版本冲突")
+            if recovery.git_head != expected_recovery_git_head:
+                raise ContinuityStoreError("恢复 Run git_head 事实发生漂移")
+            try:
+                recovery_worktree = Path(recovery.worktree_path).resolve(strict=True)
+            except OSError as error:
+                raise ContinuityStoreError("恢复 Run worktree_path 无法规范化") from error
+            if recovery_worktree != self.workspace_root:
+                raise ContinuityStoreError("运行库行政结算的恢复 Run 必须位于控制根主工作树")
+            if recovery.work_id != recovery_work_id:
+                raise ContinuityStoreError("恢复 Run 与恢复 Work 不匹配")
+            if recovery_work.version != expected_recovery_work_version:
+                raise ContinuityStoreError("恢复 Work 版本冲突")
+            actual_scope_hash = self.authority_paths_hash(recovery_work.scope_paths)
+            if (
+                recovery_work.scope_hash != actual_scope_hash
+                or actual_scope_hash != expected_recovery_work_scope_hash
+            ):
+                raise ContinuityStoreError("恢复 Work scope 事实或哈希冲突")
+            actual_owned_paths_hash = self.authority_paths_hash(recovery.owned_paths)
+            if actual_owned_paths_hash != expected_recovery_owned_paths_hash:
+                raise ContinuityStoreError("恢复 Run owned_paths 事实冲突")
+            if recovery_work.read_only or recovery_work.state is not WorkState.IN_PROGRESS:
+                raise ContinuityStoreError("恢复 Work 必须是 IN_PROGRESS 写入型 Work")
+            if target_work.read_only or not is_canonical_decision_id(target_work.authorization_ref):
+                raise ContinuityStoreError("目标 Work 必须绑定 canonical immutable Decision")
+            if not is_canonical_decision_id(recovery_work.authorization_ref):
+                raise ContinuityStoreError("恢复 Work 必须绑定 canonical immutable Decision")
+            if recovery_work.authorization_ref != decision_id:
+                raise ContinuityStoreError("恢复 Work 未绑定指定 Decision")
+            if target_work.authorization_ref != target_decision_id:
+                raise ContinuityStoreError("目标 Work 的 Decision 授权事实发生漂移")
+            if target_decision_id == decision_id:
+                raise ContinuityStoreError("恢复 Decision 不得复用目标 Work 的授权链")
+            target_decision, recovery_decision = self._decision_git_snapshots(
+                recovery_git_head=recovery.git_head,
+                target_decision_id=target_decision_id,
+                target_decision_sha256=target_decision_sha256,
+                recovery_decision_id=decision_id,
+                recovery_decision_sha256=decision_sha256,
+                require_current_head=True,
+            )
+            if target_decision.change_id != target_change_id:
+                raise ContinuityStoreError("目标 Decision immutable snapshot 发生漂移")
+            if target_decision.decision_conclusion not in {
+                "approved",
+                "conditionally_approved",
+            }:
+                raise ContinuityStoreError("目标 Work 的原 Decision 未批准")
+            if recovery_decision.change_id != decision_change_id:
+                raise ContinuityStoreError("恢复 Decision immutable snapshot 发生漂移")
+            capability = recovery_decision.runtime_capability
+            if (
+                recovery_decision.decision_conclusion != "approved"
+                or recovery_decision.conditions
+                or capability is None
+                or RuntimeDecisionAction.SETTLE_EXPIRED_RUN
+                not in capability.allowed_runtime_actions
+                or target_run_id not in capability.target_run_ids
+                or RuntimeDecisionOutcome.CANCELLED not in capability.allowed_outcomes
+            ):
+                raise ContinuityStoreError("恢复 Decision 未提供有效的无条件结算 capability")
+            if target_decision.change_id == recovery_decision.change_id:
+                raise ContinuityStoreError("恢复 CHG 必须独立于目标 Work 的原 CHG")
+            if (
+                recovery_work.subject_project_id != decision_project_id
+                or target_work.subject_project_id != decision_project_id
+                or recovery_decision.project_id != decision_project_id
+                or target_decision.project_id != decision_project_id
+            ):
+                raise ContinuityStoreError("目标/恢复 Work 与 Decision 项目事实不一致")
+            target_approved_paths = tuple(
+                dict.fromkeys(
+                    self._normalize_authority_path(path) for path in target_decision.approved_files
+                )
+            )
+            actual_recovery_approved_paths = tuple(
+                dict.fromkeys(
+                    self._normalize_authority_path(path)
+                    for path in recovery_decision.approved_files
+                )
+            )
+            if actual_recovery_approved_paths != decision_approved_paths:
+                raise ContinuityStoreError("恢复 Decision approved_files 事实发生漂移")
+            if not all(
+                self._authority_path_covered(path, target_approved_paths)
+                for path in target_work.scope_paths
+            ):
+                raise ContinuityStoreError("目标 Work scope 超出原 Decision approved_files")
+            if not all(
+                self._authority_path_covered(path, actual_recovery_approved_paths)
+                for path in recovery_work.scope_paths
+            ):
+                raise ContinuityStoreError("恢复 Work scope 超出 Decision approved_files")
+            if not all(
+                self._authority_path_covered(path, recovery_work.scope_paths)
+                for path in recovery.owned_paths
+            ):
+                raise ContinuityStoreError("恢复 Run owned_paths 超出恢复 Work scope")
+            if not self._authority_path_covered(actual_runtime_target, decision_approved_paths):
+                raise ContinuityStoreError("Decision 未覆盖 canonical continuity.db")
+            if not self._authority_path_covered(actual_runtime_target, recovery_work.scope_paths):
+                raise ContinuityStoreError("恢复 Work scope 未覆盖 canonical continuity.db")
+            if not self._authority_path_covered(actual_runtime_target, recovery.owned_paths):
+                raise ContinuityStoreError("恢复 Run owned_paths 未覆盖 canonical continuity.db")
+            if (
+                recovery_lease.version != expected_recovery_lease_version
+                or recovery_lease.owner_id != recovery_owner_id
+                or recovery_lease.lease_token != recovery_lease_token
+            ):
+                raise ContinuityStoreError("恢复 lease owner、token 或版本冲突")
+            if self._aware_timestamp(recovery_lease.expires_at, "恢复 Run lease") <= observed_at:
+                raise ContinuityStoreError("恢复 Run lease 已过期")
+
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND state=? AND version=?""",
+                (
+                    outcome,
+                    event_time,
+                    target_run_id,
+                    expected_target_state,
+                    expected_target_version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("目标 Run CAS 冲突")
+            release = self._release_lease_in_transaction(
+                conn,
+                lease=target_lease,
+                event_time=event_time,
+                reason="recovery:expired",
+            )
+            payload = {
+                "schema_version": "expired-run-settlement.v3",
+                "request_hash": request_hash,
+                "request": request,
+                "recovery_token_sha256": self._lease_token_fingerprint(recovery_lease_token),
+                "runtime_target_path": actual_runtime_target,
+                "outcome": outcome,
+                "reason": reason,
+                "target": {
+                    "run_id": target.run_id,
+                    "work_id": target_work.work_id,
+                    "work_version": target_work.version,
+                    "work_scope_hash": actual_target_scope_hash,
+                    "previous_state": target.state.value,
+                    "previous_version": target.version,
+                    "settled_state": outcome,
+                    "settled_version": target.version + 1,
+                    "lease_version": target_lease.version,
+                    "lease_expires_at": target_lease.expires_at,
+                },
+                "recovery": {
+                    "run_id": recovery.run_id,
+                    "run_version": recovery.version,
+                    "work_id": recovery_work.work_id,
+                    "work_version": recovery_work.version,
+                    "work_scope_hash": recovery_work.scope_hash,
+                    "owned_paths_hash": actual_owned_paths_hash,
+                    "lease_version": recovery_lease.version,
+                    "owner_id": recovery_lease.owner_id,
+                    "git_head": recovery.git_head,
+                },
+                "authority": {
+                    "project_id": decision_project_id,
+                    "target": {
+                        "decision_id": target_decision_id,
+                        "decision_sha256": target_decision_sha256,
+                        "change_id": target_change_id,
+                    },
+                    "recovery": {
+                        "decision_id": decision_id,
+                        "decision_sha256": decision_sha256,
+                        "change_id": decision_change_id,
+                    },
+                },
+                "lease_release": release,
+            }
+            self._append_event(
+                conn,
+                target_run_id,
+                "RUN_EXPIRED_SETTLED",
+                payload,
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, target_run_id)
+
+    @classmethod
+    def _terminal_lease_fence_request(
+        cls,
+        *,
+        target_run_id: str,
+        expected_settlement_event_id: str,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        decision_id: str,
+        reason: str,
+    ) -> dict[str, object]:
+        return {
+            "schema_version": "terminal-lease-fence-request.v1",
+            "action": RuntimeDecisionAction.FENCE_TERMINAL_LEASE.value,
+            "target_run_id": target_run_id,
+            "expected_settlement_event_id": expected_settlement_event_id,
+            "expected_target_lease_version": expected_target_lease_version,
+            "recovery_run_id": recovery_run_id,
+            "recovery_owner_id": recovery_owner_id,
+            "decision_id": decision_id,
+            "outcome": RunState.CANCELLED.value,
+            "reason": reason,
+        }
+
+    @classmethod
+    def _validated_terminal_lease_fence_inputs(
+        cls,
+        *,
+        target_run_id: str,
+        expected_settlement_event_id: str,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> dict[str, object]:
+        (
+            target_run_id, recovery_run_id, recovery_owner_id, recovery_lease_token,
+            decision_id, _outcome, reason, idempotency_key,
+        ) = cls._validated_settlement_caller_inputs(
+            target_run_id=target_run_id,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            outcome=RunState.CANCELLED.value,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        if (
+            not isinstance(expected_settlement_event_id, str)
+            or re.fullmatch(r"EVT-[0-9A-F]{16}", expected_settlement_event_id) is None
+            or type(expected_target_lease_version) is not int
+            or expected_target_lease_version < 1
+        ):
+            raise ContinuityStoreError("原结算事件 ID 或目标 lease version 非法")
+        return cls._terminal_lease_fence_request(
+            target_run_id=target_run_id,
+            expected_settlement_event_id=expected_settlement_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            decision_id=decision_id,
+            reason=reason,
+        )
+
+    @classmethod
+    def _terminal_lease_fence_replay(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        request: dict[str, object],
+        recovery_lease_token: str,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        row = cls._event_by_key(conn, idempotency_key)
+        if row is None:
+            return None
+        payload = cls._validated_event_payload(row, label="终态 lease 补偿")
+        release = payload.get("lease_release")
+        target = payload.get("target")
+        if (
+            row["aggregate_type"] != "run"
+            or row["aggregate_id"] != request["target_run_id"]
+            or row["event_type"] != "RUN_TERMINAL_LEASE_FENCED"
+            or set(payload)
+            != {"schema_version", "request_hash", "request", "recovery_token_sha256",
+                "settlement_event_hash", "target", "recovery", "authority", "lease_release"}
+            or payload.get("schema_version") != "terminal-lease-fence.v1"
+            or payload.get("request") != request
+            or payload.get("request_hash") != cls._settlement_request_hash(request)
+            or not isinstance(target, dict)
+            or not isinstance(release, dict)
+            or set(release) != {"reason", "released_at", "lease_epoch"}
+            or release.get("reason") != "recovery:terminal-lease"
+            or release.get("released_at") != row["created_at"]
+            or type(release.get("lease_epoch")) is not int
+            or release["lease_epoch"] != cast(int, request["expected_target_lease_version"]) + 1
+            or target.get("run_id") != request["target_run_id"]
+            or target.get("settlement_event_id") != request["expected_settlement_event_id"]
+            or target.get("previous_lease_version") != request["expected_target_lease_version"]
+            or target.get("state") != RunState.CANCELLED.value
+        ):
+            raise ContinuityStoreError("idempotency_key 的终态 lease 补偿语义不一致")
+        if not hmac.compare_digest(
+            str(payload.get("recovery_token_sha256")),
+            cls._lease_token_fingerprint(recovery_lease_token),
+        ):
+            raise ContinuityStoreError("终态 lease 补偿恢复 token identity 不匹配")
+        original = conn.execute(
+            "SELECT * FROM events WHERE event_id=?",
+            (request["expected_settlement_event_id"],),
+        ).fetchone()
+        if (
+            original is None
+            or original["aggregate_type"] != "run"
+            or original["aggregate_id"] != request["target_run_id"]
+            or original["event_type"] != "RUN_EXPIRED_SETTLED"
+            or original["event_hash"] != payload.get("settlement_event_hash")
+        ):
+            raise ContinuityStoreError("补偿回执引用的原结算事件不存在或已漂移")
+        original_payload = cls._validated_event_payload(original, label="原结算")
+        original_request = original_payload.get("request")
+        if (
+            original_payload.get("schema_version") != "expired-run-settlement.v2"
+            or not isinstance(original_request, dict)
+        ):
+            raise ContinuityStoreError("补偿回执引用的原结算 schema 不合法")
+        cls._expired_run_settlement_replay(
+            conn,
+            recovery_lease_token=None,
+            request=original_request,
+            request_hash=cls._settlement_request_hash(original_request),
+            idempotency_key=str(original["idempotency_key"]),
+        )
+        run = cls._get_run(conn, str(request["target_run_id"]))
+        lease = cls._get_lease(conn, run.run_id)
+        if (
+            run.state is not RunState.CANCELLED
+            or run.work_id != target.get("work_id")
+            or run.version != target.get("run_version")
+            or lease.version != release["lease_epoch"]
+            or not lease.lease_token.startswith("RELEASED:")
+        ):
+            raise ContinuityStoreError("终态 lease 补偿回执与当前 Run/lease 不一致")
+        return run
+
+    def terminal_lease_fence_replay(
+        self,
+        *,
+        target_run_id: str,
+        expected_settlement_event_id: str,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        request = self._validated_terminal_lease_fence_inputs(
+            target_run_id=target_run_id,
+            expected_settlement_event_id=expected_settlement_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        with self._read_connection() as conn:
+            return self._terminal_lease_fence_replay(
+                conn, request=request, recovery_lease_token=recovery_lease_token,
+                idempotency_key=idempotency_key,
+            )
+
+    def fence_terminal_lease(
+        self,
+        *,
+        target_run_id: str,
+        expected_target_run_version: int,
+        expected_target_lease_version: int,
+        expected_settlement_event_id: str,
+        recovery_run_id: str,
+        expected_recovery_run_version: int,
+        expected_recovery_work_version: int,
+        expected_recovery_lease_version: int,
+        expected_recovery_git_head: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        decision_sha256: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Fence one legacy CANCELLED Run lease under a new recovery authority."""
+
+        request = self._validated_terminal_lease_fence_inputs(
+            target_run_id=target_run_id,
+            expected_settlement_event_id=expected_settlement_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        for label, version in (
+            ("目标 Run", expected_target_run_version),
+            ("恢复 Run", expected_recovery_run_version),
+            ("恢复 Work", expected_recovery_work_version),
+            ("恢复 lease", expected_recovery_lease_version),
+        ):
+            if type(version) is not int or version < 1:
+                raise ContinuityStoreError(f"{label} version 必须是正整数")
+        self._validate_recovery_git_head(expected_recovery_git_head)
+        if not isinstance(decision_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", decision_sha256) is None:
+            raise ContinuityStoreError("恢复 Decision SHA-256 非法")
+        if recovery_lease_token in reason:
+            raise ContinuityStoreError("补偿原因不得包含恢复 lease token")
+
+        with self._transaction() as conn:
+            replay = self._terminal_lease_fence_replay(
+                conn, request=request, recovery_lease_token=recovery_lease_token,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                return replay
+            observed_at = self._utc_now()
+            event_time = observed_at.isoformat()
+            target = self._get_run(conn, target_run_id)
+            target_lease = self._get_lease(conn, target_run_id)
+            target_work = self._get_work(conn, target.work_id)
+            recovery = self._get_run(conn, recovery_run_id)
+            recovery_lease = self._get_lease(conn, recovery_run_id)
+            recovery_work = self._get_work(conn, recovery.work_id)
+            if target.state is not RunState.CANCELLED or target.version != expected_target_run_version:
+                raise ContinuityStoreError("仅允许补偿指定 CANCELLED 目标 Run 的原版本")
+            if (
+                target_lease.version != expected_target_lease_version
+                or target_lease.lease_token.startswith("RELEASED:")
+                or self._aware_timestamp(target_lease.expires_at, "目标 Run lease") > observed_at
+                or target_lease.lease_token in reason
+            ):
+                raise ContinuityStoreError("目标旧 lease 不符合未释放的过期 epoch")
+            rows = conn.execute(
+                "SELECT rowid, * FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+                "AND event_type='RUN_EXPIRED_SETTLED'",
+                (target_run_id,),
+            ).fetchall()
+            if len(rows) != 1 or rows[0]["event_id"] != expected_settlement_event_id:
+                raise ContinuityStoreError("原 RUN_EXPIRED_SETTLED 事件缺失、不唯一或 ID 冲突")
+            settlement_row = rows[0]
+            preceding = conn.execute(
+                "SELECT event_hash FROM events WHERE rowid<? ORDER BY rowid DESC LIMIT 1",
+                (settlement_row["rowid"],),
+            ).fetchone()
+            later_target_event = conn.execute(
+                "SELECT 1 FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+                "AND rowid>? LIMIT 1",
+                (target_run_id, settlement_row["rowid"]),
+            ).fetchone()
+            if (
+                settlement_row["previous_hash"] != (str(preceding[0]) if preceding else "")
+                or later_target_event is not None
+            ):
+                raise ContinuityStoreError("原结算事件链或后续目标事件证据不明确")
+            settlement = self._validated_event_payload(settlement_row, label="原结算")
+            settlement_request = settlement.get("request")
+            if (
+                settlement.get("schema_version") != "expired-run-settlement.v2"
+                or not isinstance(settlement_request, dict)
+                or self._expired_run_settlement_replay(
+                    conn,
+                    recovery_lease_token=None,
+                    request=settlement_request,
+                    request_hash=self._settlement_request_hash(settlement_request),
+                    idempotency_key=str(settlement_row["idempotency_key"]),
+                ) != target
+            ):
+                raise ContinuityStoreError("目标不是可验证的旧版过期结算终态")
+            settled_target = cast(dict[str, object], settlement["target"])
+            settled_recovery = cast(dict[str, object], settlement["recovery"])
+            settled_authority = cast(dict[str, object], settlement["authority"])
+            original_target_authority = cast(dict[str, object], settled_authority["target"])
+            original_recovery_authority = cast(dict[str, object], settled_authority["recovery"])
+            if (
+                settled_target["previous_state"] != RunState.RUNNING.value
+                or settled_target["lease_version"] != target_lease.version
+                or settled_target["lease_expires_at"] != target_lease.expires_at
+                or settled_target["work_id"] != target_work.work_id
+                or settled_target["work_version"] != target_work.version
+                or settled_target["work_scope_hash"] != self.authority_paths_hash(target_work.scope_paths)
+                or target_work.scope_hash != settled_target["work_scope_hash"]
+                or target_work.authorization_ref != original_target_authority["decision_id"]
+            ):
+                raise ContinuityStoreError("原结算与目标 Run/Work/lease 事实不一致")
+            started = conn.execute(
+                "SELECT 1 FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+                "AND event_type IN ('RUN_STARTED', 'EXECUTION_START_CLAIMED') LIMIT 1",
+                (target_run_id,),
+            ).fetchone()
+            checkpoint = conn.execute(
+                "SELECT 1 FROM checkpoints WHERE run_id=? LIMIT 1", (target_run_id,)
+            ).fetchone()
+            if started is not None or checkpoint is not None:
+                raise ContinuityStoreError("原目标存在启动或 Checkpoint 证据，拒绝补偿")
+            if (
+                recovery.state is not RunState.RUNNING
+                or recovery.version != expected_recovery_run_version
+                or recovery.git_head != expected_recovery_git_head
+                or recovery_work.version != expected_recovery_work_version
+                or recovery_work.state is not WorkState.IN_PROGRESS
+                or recovery_work.read_only
+                or recovery.work_id in {target.work_id, settled_recovery["work_id"]}
+                or recovery.run_id == settled_recovery["run_id"]
+                or recovery.executor_id != recovery_owner_id
+            ):
+                raise ContinuityStoreError("独立恢复 Work/Run 状态或 CAS 事实不合法")
+            try:
+                recovery_worktree = Path(recovery.worktree_path).resolve(strict=True)
+            except OSError as error:
+                raise ContinuityStoreError("恢复 Run worktree_path 无法规范化") from error
+            if recovery_worktree != self.workspace_root:
+                raise ContinuityStoreError("租约补偿的恢复 Run 必须位于控制根主工作树")
+            if (
+                recovery_lease.version != expected_recovery_lease_version
+                or recovery_lease.owner_id != recovery_owner_id
+                or recovery_lease.lease_token != recovery_lease_token
+                or self._aware_timestamp(recovery_lease.expires_at, "恢复 Run lease") <= observed_at
+            ):
+                raise ContinuityStoreError("恢复 Run 活租约 owner、token、epoch 或期限冲突")
+            if not is_canonical_decision_id(recovery_work.authorization_ref):
+                raise ContinuityStoreError("恢复 Work 未绑定 canonical Decision")
+            if recovery_work.authorization_ref != decision_id:
+                raise ContinuityStoreError("恢复 Work 未绑定指定 Decision")
+            original_decision, decision = self._decision_git_snapshots(
+                recovery_git_head=recovery.git_head,
+                target_decision_id=str(original_recovery_authority["decision_id"]),
+                target_decision_sha256=str(original_recovery_authority["decision_sha256"]),
+                recovery_decision_id=decision_id,
+                recovery_decision_sha256=decision_sha256,
+                require_current_head=True,
+            )
+            target_decision, target_decision_sha256 = self._decision_snapshot(
+                str(original_target_authority["decision_id"])
+            )
+            if (
+                target_decision_sha256 != original_target_authority["decision_sha256"]
+                or target_decision.change_id != original_target_authority["change_id"]
+                or original_decision.change_id != original_recovery_authority["change_id"]
+                or decision.decision_id in {
+                    target_decision.decision_id, original_decision.decision_id
+                }
+                or decision.change_id in {
+                    target_decision.change_id, original_decision.change_id
+                }
+                or not is_canonical_runtime_change_id(decision.change_id)
+                or decision.decision_conclusion != "approved"
+                or decision.conditions
+            ):
+                raise ContinuityStoreError("补偿 Decision/CHG 必须独立且无条件批准")
+            capability = decision.runtime_capability
+            if (
+                capability is None
+                or capability.allowed_runtime_actions
+                != (RuntimeDecisionAction.FENCE_TERMINAL_LEASE,)
+                or capability.target_run_ids != (target_run_id,)
+                or capability.allowed_outcomes != (RuntimeDecisionOutcome.CANCELLED,)
+            ):
+                raise ContinuityStoreError("补偿 Decision capability 未精确绑定 action/target/outcome")
+            if (
+                decision.project_id != target_work.subject_project_id
+                or decision.project_id != recovery_work.subject_project_id
+                or decision.project_id != settled_authority["project_id"]
+                or target_decision.project_id != decision.project_id
+                or original_decision.project_id != decision.project_id
+            ):
+                raise ContinuityStoreError("补偿 Decision 与目标/恢复项目不一致")
+            approved = tuple(
+                dict.fromkeys(self._normalize_authority_path(path) for path in decision.approved_files)
+            )
+            original_approved = tuple(
+                dict.fromkeys(
+                    self._normalize_authority_path(path) for path in target_decision.approved_files
+                )
+            )
+            runtime_target = self.runtime_target_path()
+            if (
+                not all(self._authority_path_covered(path, original_approved) for path in target_work.scope_paths)
+                or not all(self._authority_path_covered(path, approved) for path in recovery_work.scope_paths)
+                or not all(self._authority_path_covered(path, recovery_work.scope_paths) for path in recovery.owned_paths)
+                or not self._authority_path_covered(runtime_target, approved)
+                or not self._authority_path_covered(runtime_target, recovery_work.scope_paths)
+                or not self._authority_path_covered(runtime_target, recovery.owned_paths)
+                or recovery_work.scope_hash != self.authority_paths_hash(recovery_work.scope_paths)
+            ):
+                raise ContinuityStoreError("补偿 Decision/Work/Run 未覆盖 canonical continuity.db")
+            release = self._release_lease_in_transaction(
+                conn, lease=target_lease, event_time=event_time, reason="recovery:terminal-lease"
+            )
+            self._append_event(
+                conn,
+                target_run_id,
+                "RUN_TERMINAL_LEASE_FENCED",
+                {
+                    "schema_version": "terminal-lease-fence.v1",
+                    "request_hash": self._settlement_request_hash(request),
+                    "request": request,
+                    "recovery_token_sha256": self._lease_token_fingerprint(recovery_lease_token),
+                    "settlement_event_hash": settlement_row["event_hash"],
+                    "target": {
+                        "run_id": target_run_id,
+                        "work_id": target.work_id,
+                        "state": target.state.value,
+                        "run_version": target.version,
+                        "settlement_event_id": expected_settlement_event_id,
+                        "previous_lease_version": target_lease.version,
+                    },
+                    "recovery": {
+                        "run_id": recovery_run_id,
+                        "work_id": recovery.work_id,
+                        "run_version": recovery.version,
+                        "work_version": recovery_work.version,
+                        "lease_version": recovery_lease.version,
+                        "owner_id": recovery_owner_id,
+                        "git_head": recovery.git_head,
+                    },
+                    "authority": {
+                        "project_id": decision.project_id,
+                        "decision_id": decision_id,
+                        "decision_sha256": decision_sha256,
+                        "change_id": decision.change_id,
+                    },
+                    "lease_release": release,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, target_run_id)
+
+    @classmethod
+    def _terminal_lease_reconciliation_request(
+        cls,
+        *,
+        target_run_id: str,
+        expected_terminal_event_id: str,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        decision_id: str,
+        reason: str,
+    ) -> dict[str, object]:
+        return {
+            "schema_version": "terminal-lease-reconciliation-request.v1",
+            "action": RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE.value,
+            "target_run_id": target_run_id,
+            "expected_terminal_event_id": expected_terminal_event_id,
+            "expected_target_lease_version": expected_target_lease_version,
+            "recovery_run_id": recovery_run_id,
+            "recovery_owner_id": recovery_owner_id,
+            "decision_id": decision_id,
+            "outcome": RuntimeDecisionOutcome.RELEASED.value,
+            "reason": reason,
+        }
+
+    @classmethod
+    def _validated_terminal_lease_reconciliation_inputs(
+        cls,
+        *,
+        target_run_id: object,
+        expected_terminal_event_id: object,
+        expected_target_lease_version: object,
+        recovery_run_id: object,
+        recovery_owner_id: object,
+        recovery_lease_token: object,
+        decision_id: object,
+        reason: object,
+        idempotency_key: object,
+    ) -> dict[str, object]:
+        normalized_reason, _ = cls._validated_settlement_text(
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        labels = (
+            ("目标 Run", target_run_id),
+            ("恢复 Run", recovery_run_id),
+            ("恢复 owner", recovery_owner_id),
+            ("Decision", decision_id),
+        )
+        for label, value in labels:
+            if (
+                not isinstance(value, str)
+                or value != value.strip()
+                or not 1 <= len(value) <= 255
+                or any(not character.isprintable() for character in value)
+            ):
+                raise ContinuityStoreError(f"{label} 必须是 canonical 非空可打印文本")
+        if (
+            not isinstance(recovery_lease_token, str)
+            or recovery_lease_token != recovery_lease_token.strip()
+            or not 1 <= len(recovery_lease_token) <= 1000
+            or any(not character.isprintable() for character in recovery_lease_token)
+        ):
+            raise ContinuityStoreError("恢复 lease token 必须是 canonical 非空可打印文本")
+        if (
+            not isinstance(expected_terminal_event_id, str)
+            or re.fullmatch(r"EVT-[0-9A-F]{16}", expected_terminal_event_id) is None
+            or type(expected_target_lease_version) is not int
+            or expected_target_lease_version < 1
+        ):
+            raise ContinuityStoreError("原终态事件 ID 或目标 lease version 非法")
+        canonical_target_run_id = cast(str, target_run_id)
+        canonical_recovery_run_id = cast(str, recovery_run_id)
+        canonical_decision_id = cast(str, decision_id)
+        if canonical_target_run_id == canonical_recovery_run_id:
+            raise ContinuityStoreError("目标 Run 与恢复 Run 必须不同")
+        if not is_canonical_decision_id(canonical_decision_id):
+            raise ContinuityStoreError("运行态补偿 Decision ID 必须是 canonical")
+        if recovery_lease_token in normalized_reason:
+            raise ContinuityStoreError("补偿原因不得包含恢复 lease token")
+        return cls._terminal_lease_reconciliation_request(
+            target_run_id=canonical_target_run_id,
+            expected_terminal_event_id=expected_terminal_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=canonical_recovery_run_id,
+            recovery_owner_id=cast(str, recovery_owner_id),
+            decision_id=canonical_decision_id,
+            reason=normalized_reason,
+        )
+
+    @classmethod
+    def _terminal_lease_reconciliation_replay(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        request: dict[str, object],
+        recovery_lease_token: str,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        row = cls._event_by_key(conn, idempotency_key)
+        if row is None:
+            return None
+        payload = cls._validated_event_payload(row, label="终态 lease 对账")
+        target = payload.get("target")
+        release = payload.get("lease_release")
+        if (
+            row["aggregate_type"] != "run"
+            or row["aggregate_id"] != request["target_run_id"]
+            or row["event_type"] != "RUN_TERMINAL_LEASE_RECONCILED"
+            or set(payload)
+            != {
+                "schema_version",
+                "request_hash",
+                "request",
+                "recovery_token_sha256",
+                "terminal_event_hash",
+                "target",
+                "recovery",
+                "authority",
+                "lease_release",
+            }
+            or payload.get("schema_version") != "terminal-lease-reconciliation.v1"
+            or payload.get("request") != request
+            or payload.get("request_hash") != cls._settlement_request_hash(request)
+            or not isinstance(target, dict)
+            or not isinstance(release, dict)
+            or set(release) != {"reason", "released_at", "lease_epoch"}
+            or release.get("reason") != "recovery:terminal-transition-v2"
+            or release.get("released_at") != row["created_at"]
+            or release.get("lease_epoch")
+            != cast(int, request["expected_target_lease_version"]) + 1
+            or target.get("run_id") != request["target_run_id"]
+            or target.get("terminal_event_id") != request["expected_terminal_event_id"]
+            or target.get("previous_lease_version")
+            != request["expected_target_lease_version"]
+        ):
+            raise ContinuityStoreError("idempotency_key 的终态 lease 对账语义不一致")
+        if not hmac.compare_digest(
+            str(payload.get("recovery_token_sha256")),
+            cls._lease_token_fingerprint(recovery_lease_token),
+        ):
+            raise ContinuityStoreError("终态 lease 对账恢复 token identity 不匹配")
+        terminal_row = conn.execute(
+            "SELECT * FROM events WHERE event_id=?",
+            (request["expected_terminal_event_id"],),
+        ).fetchone()
+        if (
+            terminal_row is None
+            or terminal_row["aggregate_type"] != "run"
+            or terminal_row["aggregate_id"] != request["target_run_id"]
+            or terminal_row["event_type"] != "RUN_TRANSITIONED"
+            or terminal_row["event_hash"] != payload.get("terminal_event_hash")
+        ):
+            raise ContinuityStoreError("对账回执引用的原终态事件不存在或已漂移")
+        run = cls._get_run(conn, str(request["target_run_id"]))
+        lease = cls._get_lease(conn, run.run_id)
+        if (
+            run.work_id != target.get("work_id")
+            or run.state.value != target.get("state")
+            or run.version != target.get("run_version")
+            or lease.version != release["lease_epoch"]
+            or not lease.lease_token.startswith("RELEASED:")
+        ):
+            raise ContinuityStoreError("终态 lease 对账回执与当前 Run/lease 不一致")
+        return run
+
+    def terminal_lease_reconciliation_replay(
+        self,
+        *,
+        target_run_id: str,
+        expected_terminal_event_id: str,
+        expected_target_lease_version: int,
+        recovery_run_id: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        request = self._validated_terminal_lease_reconciliation_inputs(
+            target_run_id=target_run_id,
+            expected_terminal_event_id=expected_terminal_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        with self._read_connection() as conn:
+            return self._terminal_lease_reconciliation_replay(
+                conn,
+                request=request,
+                recovery_lease_token=recovery_lease_token,
+                idempotency_key=idempotency_key,
+            )
+
+    def reconcile_terminal_lease(
+        self,
+        *,
+        target_run_id: str,
+        expected_target_state: str,
+        expected_target_run_version: int,
+        expected_target_lease_version: int,
+        expected_terminal_event_id: str,
+        target_decision_id: str,
+        target_decision_sha256: str,
+        target_change_id: str,
+        recovery_run_id: str,
+        expected_recovery_run_version: int,
+        expected_recovery_work_version: int,
+        expected_recovery_lease_version: int,
+        expected_recovery_git_head: str,
+        recovery_owner_id: str,
+        recovery_lease_token: str,
+        decision_id: str,
+        decision_sha256: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> RunItem:
+        """Release only the expired lease omitted by one exact legacy v2 transition."""
+
+        request = self._validated_terminal_lease_reconciliation_inputs(
+            target_run_id=target_run_id,
+            expected_terminal_event_id=expected_terminal_event_id,
+            expected_target_lease_version=expected_target_lease_version,
+            recovery_run_id=recovery_run_id,
+            recovery_owner_id=recovery_owner_id,
+            recovery_lease_token=recovery_lease_token,
+            decision_id=decision_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        if expected_target_state not in {
+            RunState.SUCCEEDED.value,
+            RunState.FAILED.value,
+            RunState.CANCELLED.value,
+        }:
+            raise ContinuityStoreError("目标 Run 必须是明确终态")
+        for label, version in (
+            ("目标 Run", expected_target_run_version),
+            ("恢复 Run", expected_recovery_run_version),
+            ("恢复 Work", expected_recovery_work_version),
+            ("恢复 lease", expected_recovery_lease_version),
+        ):
+            if type(version) is not int or version < 1:
+                raise ContinuityStoreError(f"{label} version 必须是正整数")
+        self._validate_recovery_git_head(expected_recovery_git_head)
+        for digest in (target_decision_sha256, decision_sha256):
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ContinuityStoreError("Decision SHA-256 非法")
+
+        with self._transaction() as conn:
+            replay = self._terminal_lease_reconciliation_replay(
+                conn,
+                request=request,
+                recovery_lease_token=recovery_lease_token,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                return replay
+            observed_at = self._utc_now()
+            event_time = observed_at.isoformat()
+            target = self._get_run(conn, target_run_id)
+            target_lease = self._get_lease(conn, target_run_id)
+            target_work = self._get_work(conn, target.work_id)
+            recovery = self._get_run(conn, recovery_run_id)
+            recovery_lease = self._get_lease(conn, recovery_run_id)
+            recovery_work = self._get_work(conn, recovery.work_id)
+            if (
+                target.state.value != expected_target_state
+                or target.version != expected_target_run_version
+                or target_lease.version != expected_target_lease_version
+                or target_lease.lease_token.startswith("RELEASED:")
+                or self._aware_timestamp(target_lease.expires_at, "目标 Run lease") > observed_at
+                or target_lease.lease_token in reason
+            ):
+                raise ContinuityStoreError("目标终态 Run 或未释放过期 lease 事实发生漂移")
+            terminal_row = conn.execute(
+                "SELECT rowid, * FROM events WHERE event_id=?",
+                (expected_terminal_event_id,),
+            ).fetchone()
+            if (
+                terminal_row is None
+                or terminal_row["aggregate_type"] != "run"
+                or terminal_row["aggregate_id"] != target_run_id
+                or terminal_row["event_type"] != "RUN_TRANSITIONED"
+            ):
+                raise ContinuityStoreError("指定的原终态 RUN_TRANSITIONED 事件不存在")
+            preceding = conn.execute(
+                "SELECT event_hash FROM events WHERE rowid<? ORDER BY rowid DESC LIMIT 1",
+                (terminal_row["rowid"],),
+            ).fetchone()
+            later_target_event = conn.execute(
+                "SELECT 1 FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+                "AND rowid>? LIMIT 1",
+                (target_run_id, terminal_row["rowid"]),
+            ).fetchone()
+            terminal_payload = self._validated_event_payload(
+                terminal_row, label="原终态迁移"
+            )
+            if (
+                terminal_row["previous_hash"] != (str(preceding[0]) if preceding else "")
+                or later_target_event is not None
+                or set(terminal_payload)
+                != {"schema_version", "expected_version", "new_state", "result_version"}
+                or terminal_payload.get("schema_version") != "run-transition.v2"
+                or terminal_payload.get("expected_version") != target.version - 1
+                or terminal_payload.get("result_version") != target.version
+                or terminal_payload.get("new_state") != target.state.value
+            ):
+                raise ContinuityStoreError("原终态迁移不是唯一且可验证的 legacy v2 证据")
+            if (
+                recovery.state is not RunState.RUNNING
+                or recovery.version != expected_recovery_run_version
+                or recovery.git_head != expected_recovery_git_head
+                or recovery_work.version != expected_recovery_work_version
+                or recovery_work.state is not WorkState.IN_PROGRESS
+                or recovery_work.read_only
+                or recovery.work_id == target.work_id
+                or recovery.executor_id != recovery_owner_id
+            ):
+                raise ContinuityStoreError("独立恢复 Work/Run 状态或 CAS 事实不合法")
+            try:
+                recovery_worktree = Path(recovery.worktree_path).resolve(strict=True)
+            except OSError as error:
+                raise ContinuityStoreError("恢复 Run worktree_path 无法规范化") from error
+            if recovery_worktree != self.workspace_root:
+                raise ContinuityStoreError("租约对账的恢复 Run 必须位于控制根主工作树")
+            if (
+                recovery_lease.version != expected_recovery_lease_version
+                or recovery_lease.owner_id != recovery_owner_id
+                or recovery_lease.lease_token != recovery_lease_token
+                or self._aware_timestamp(recovery_lease.expires_at, "恢复 Run lease") <= observed_at
+            ):
+                raise ContinuityStoreError("恢复 Run 活租约 owner、token、epoch 或期限冲突")
+            if (
+                target_work.authorization_ref != target_decision_id
+                or recovery_work.authorization_ref != decision_id
+                or target_decision_id == decision_id
+            ):
+                raise ContinuityStoreError("目标与恢复 Work 的 Decision 绑定不合法")
+            target_decision, decision = self._decision_git_snapshots(
+                recovery_git_head=recovery.git_head,
+                target_decision_id=target_decision_id,
+                target_decision_sha256=target_decision_sha256,
+                recovery_decision_id=decision_id,
+                recovery_decision_sha256=decision_sha256,
+                require_current_head=True,
+            )
+            if (
+                target_decision.change_id != target_change_id
+                or decision.change_id == target_change_id
+                or not is_canonical_runtime_change_id(decision.change_id)
+                or decision.decision_conclusion != "approved"
+                or decision.conditions
+                or decision.project_id != target_work.subject_project_id
+                or decision.project_id != recovery_work.subject_project_id
+                or target_decision.project_id != decision.project_id
+            ):
+                raise ContinuityStoreError("恢复 Decision/CHG 必须独立、同项目且无条件批准")
+            capability = decision.runtime_capability
+            if (
+                capability is None
+                or capability.allowed_runtime_actions
+                != (RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE,)
+                or capability.target_run_ids != (target_run_id,)
+                or capability.allowed_outcomes != (RuntimeDecisionOutcome.RELEASED,)
+            ):
+                raise ContinuityStoreError("恢复 Decision capability 未精确绑定 action/target/outcome")
+            approved = tuple(
+                dict.fromkeys(
+                    self._normalize_authority_path(path) for path in decision.approved_files
+                )
+            )
+            runtime_target = self.runtime_target_path()
+            if (
+                not all(
+                    self._authority_path_covered(path, approved)
+                    for path in recovery_work.scope_paths
+                )
+                or not all(
+                    self._authority_path_covered(path, recovery_work.scope_paths)
+                    for path in recovery.owned_paths
+                )
+                or not self._authority_path_covered(runtime_target, approved)
+                or not self._authority_path_covered(runtime_target, recovery_work.scope_paths)
+                or not self._authority_path_covered(runtime_target, recovery.owned_paths)
+                or recovery_work.scope_hash
+                != self.authority_paths_hash(recovery_work.scope_paths)
+            ):
+                raise ContinuityStoreError("恢复 Decision/Work/Run 未覆盖 canonical continuity.db")
+            release = self._release_lease_in_transaction(
+                conn,
+                lease=target_lease,
+                event_time=event_time,
+                reason="recovery:terminal-transition-v2",
+            )
+            self._append_event(
+                conn,
+                target_run_id,
+                "RUN_TERMINAL_LEASE_RECONCILED",
+                {
+                    "schema_version": "terminal-lease-reconciliation.v1",
+                    "request_hash": self._settlement_request_hash(request),
+                    "request": request,
+                    "recovery_token_sha256": self._lease_token_fingerprint(
+                        recovery_lease_token
+                    ),
+                    "terminal_event_hash": terminal_row["event_hash"],
+                    "target": {
+                        "run_id": target_run_id,
+                        "work_id": target.work_id,
+                        "state": target.state.value,
+                        "run_version": target.version,
+                        "terminal_event_id": expected_terminal_event_id,
+                        "previous_lease_version": target_lease.version,
+                    },
+                    "recovery": {
+                        "run_id": recovery_run_id,
+                        "work_id": recovery.work_id,
+                        "run_version": recovery.version,
+                        "work_version": recovery_work.version,
+                        "lease_version": recovery_lease.version,
+                        "owner_id": recovery_owner_id,
+                        "git_head": recovery.git_head,
+                    },
+                    "authority": {
+                        "project_id": decision.project_id,
+                        "decision_id": decision_id,
+                        "decision_sha256": decision_sha256,
+                        "change_id": decision.change_id,
+                    },
+                    "lease_release": release,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_run(conn, target_run_id)
+
+    def renew_lease(
+        self,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        lease_seconds: int,
+        idempotency_key: str,
+        *,
+        expected_version: int | None = None,
+    ) -> LeaseItem:
+        run_id = self._validated_run_text(run_id, label="run_id")
+        owner_id = self._validated_run_text(owner_id, label="lease owner")
+        lease_token = self._validated_run_text(lease_token, label="lease token")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(lease_seconds) is not int or not 60 <= lease_seconds <= 86_400:
+            raise ContinuityStoreError("lease_seconds 必须在 60 到 86400 之间")
+        if expected_version is not None and (
+            type(expected_version) is not int or expected_version < 1
+        ):
+            raise ContinuityStoreError("expected_version 必须是正整数")
+        legacy_request = {
+            "schema_version": "lease-renew-request.v2",
+            "run_id": run_id,
+            "owner_id": owner_id,
+            "lease_seconds": lease_seconds,
+            "lease_token_sha256": self._lease_token_fingerprint(lease_token),
+        }
+        request = {
+            **legacy_request,
+            "schema_version": "lease-renew-request.v3",
+            "expected_version": expected_version,
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="lease 续租")
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["aggregate_id"] != run_id
+                    or existing["event_type"] != "LEASE_RENEWED"
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 lease 续租语义不一致")
+                schema_version = payload.get("schema_version")
+                if schema_version == "lease-renewed.v3":
+                    if (
+                        set(payload)
+                        != {
+                            "schema_version",
+                            "request",
+                            "expires_at",
+                            "version",
+                            "updated_at",
+                        }
+                        or payload.get("request") != request
+                    ):
+                        raise ContinuityStoreError(
+                            "idempotency_key 的 lease 续租语义不一致"
+                        )
+                    updated_at = str(payload["updated_at"])
+                elif schema_version == "lease-renewed.v2":
+                    if (
+                        expected_version is not None
+                        or set(payload)
+                        != {"schema_version", "request", "expires_at", "version"}
+                        or payload.get("request") != legacy_request
+                    ):
+                        raise ContinuityStoreError(
+                            "idempotency_key 的 lease 续租语义不一致"
+                        )
+                    updated_at = str(existing["created_at"])
+                else:
+                    raise ContinuityStoreError("idempotency_key 的 lease 续租语义不一致")
+                return LeaseItem(
+                    run_id=run_id,
+                    owner_id=owner_id,
+                    lease_token=lease_token,
+                    expires_at=str(payload["expires_at"]),
+                    version=cast(int, payload["version"]),
+                    updated_at=updated_at,
+                )
+            if lease_seconds > 3_600:
+                raise ContinuityStoreError("新 lease 续租 lease_seconds 必须在 60 到 3600 之间")
+            observed_at = self._utc_now()
+            run = self._get_run(conn, run_id)
+            self._refuse_if_parked(conn, run_id, "不能续租")
+            # VERIFYING is the holder still working (one verify takes ~15 min); owner and token are checked below as always.
+            if run.state not in {RunState.READY, RunState.RUNNING, RunState.VERIFYING}:
+                raise ContinuityStoreError("只有 READY、RUNNING 或 VERIFYING Run 可以续租")
+            current = self._get_lease(conn, run_id)
+            if current.owner_id != owner_id or current.lease_token != lease_token:
+                raise ContinuityStoreError("lease ownership 不匹配")
+            if self._aware_timestamp(current.expires_at, "lease") <= observed_at:
+                raise ContinuityStoreError("lease 已过期")
+            if expected_version is not None and current.version != expected_version:
+                raise ContinuityStoreError("lease version 冲突")
+            hold_end = self._lease_hold_end(conn, run)
+            if observed_at >= hold_end:
+                raise ContinuityStoreError(
+                    f"本 Run 持有租约已达总时长上限（{hold_end.isoformat()}），拒绝续租；"
+                    "要继续只能由用户本人用 lease extend-hold 延长，或收口后重开"
+                )
+            expires_at = min(observed_at + timedelta(seconds=lease_seconds), hold_end).isoformat()
+            event_time = observed_at.isoformat()
+            cursor = conn.execute(
+                """UPDATE execution_leases SET expires_at=?, version=version+1, updated_at=?
+                WHERE run_id=? AND owner_id=? AND lease_token=? AND version=?""",
+                (
+                    expires_at,
+                    event_time,
+                    run_id,
+                    owner_id,
+                    lease_token,
+                    current.version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("lease owner、token 或版本冲突")
+            self._append_event(
+                conn,
+                run_id,
+                "LEASE_RENEWED",
+                {
+                    "schema_version": "lease-renewed.v3",
+                    "request": request,
+                    "expires_at": expires_at,
+                    "version": current.version + 1,
+                    "updated_at": event_time,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_lease(conn, run_id)
+
+    def _lease_hold_end(self, conn: sqlite3.Connection, run: RunItem) -> datetime:
+        """Latest moment a Run may keep renewing: creation + default cap + every user-approved extension."""
+        extra = 0
+        for row in conn.execute(
+            "SELECT payload_json FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+            "AND event_type='LEASE_HOLD_EXTENDED'",
+            (run.run_id,),
+        ):
+            extra += int(json.loads(row[0]).get("extra_seconds", 0))
+        return self._aware_timestamp(run.created_at, "run") + timedelta(
+            seconds=LEASE_HOLD_CAP_SECONDS + extra
+        )
+
+    def lease_hold_status(self, run_id: str) -> dict[str, object]:
+        """Read-only: hold deadline and how many times the lease was renewed (for orient and the CLI)."""
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            run = self._get_run(conn, run_id)
+            renewals = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE aggregate_type='run' AND aggregate_id=? "
+                "AND event_type='LEASE_RENEWED'",
+                (run_id,),
+            ).fetchone()[0]
+            return {
+                "run_id": run_id,
+                "hold_end": self._lease_hold_end(conn, run).isoformat(),
+                "renewals": int(renewals),
+            }
+
+    def extend_lease_hold(
+        self,
+        run_id: str,
+        extra_seconds: int,
+        evidence_ref: str,
+        idempotency_key: str,
+    ) -> dict[str, object]:
+        """Raise one Run's total-hold cap. Only the user may call this (the CLI checks the proof)."""
+        run_id = self._validated_run_text(run_id, label="run_id")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(extra_seconds) is not int or not 60 <= extra_seconds <= LEASE_HOLD_MAX_EXTENSION_SECONDS:
+            raise ContinuityStoreError(
+                f"extra_seconds 必须在 60 到 {LEASE_HOLD_MAX_EXTENSION_SECONDS} 之间"
+            )
+        if not evidence_ref.strip():
+            raise ContinuityStoreError("延长持有上限必须带用户证据")
+        with self._transaction() as conn:
+            run = self._get_run(conn, run_id)
+            if self._event_by_key(conn, idempotency_key) is None:
+                now = self._utc_now().isoformat()
+                self._append_event(
+                    conn,
+                    run_id,
+                    "LEASE_HOLD_EXTENDED",
+                    {
+                        "schema_version": "lease-hold-extended.v1",
+                        "extra_seconds": extra_seconds,
+                        "evidence_ref": evidence_ref.strip(),
+                    },
+                    idempotency_key,
+                    now,
+                    aggregate_type="run",
+                )
+            return {"run_id": run.run_id, "hold_end": self._lease_hold_end(conn, run).isoformat()}
+
+    def transfer_lease(
+        self,
+        handoff_id: str,
+        receiver_id: str,
+        new_token: str,
+        lease_seconds: int,
+        idempotency_key: str,
+    ) -> LeaseItem:
+        handoff_id = self._validated_run_text(handoff_id, label="handoff_id")
+        receiver_id = self._validated_run_text(receiver_id, label="receiver_id")
+        new_token = self._validated_run_text(new_token, label="new lease token")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(lease_seconds) is not int or not 60 <= lease_seconds <= 86_400:
+            raise ContinuityStoreError("lease_seconds 必须在 60 到 86400 之间")
+        request = {
+            "schema_version": "lease-transfer-request.v2",
+            "handoff_id": handoff_id,
+            "receiver_id": receiver_id,
+            "lease_seconds": lease_seconds,
+            "new_token_sha256": self._lease_token_fingerprint(new_token),
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="lease 移交")
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["event_type"] != "LEASE_TRANSFERRED"
+                    or not isinstance(payload, dict)
+                    or set(payload)
+                    != {
+                        "schema_version",
+                        "request",
+                        "run_id",
+                        "from_owner",
+                        "expires_at",
+                        "version",
+                    }
+                    or payload.get("schema_version") != "lease-transferred.v2"
+                    or payload.get("request") != request
+                    or existing["aggregate_id"] != payload.get("run_id")
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 lease 移交语义不一致")
+                return self._get_lease(conn, str(payload["run_id"]))
+            if lease_seconds > 3_600:
+                raise ContinuityStoreError("新 lease 移交 lease_seconds 必须在 60 到 3600 之间")
+            handoff = self._validated_handoff_receipt(conn, handoff_id)
+            if handoff.to_owner != receiver_id:
+                raise ContinuityStoreError("接收方与 Handoff to_owner 不一致")
+            self._refuse_if_parked(conn, handoff.run_id, "不能接手（pm takeover）")
+            current = self._get_lease(conn, handoff.run_id)
+            if lease_token_is_fenced(current.lease_token):
+                raise ContinuityStoreError("Handoff 源 lease 已摘牌，拒绝移交")
+            observed_at = self._utc_now()
+            if current.owner_id != handoff.from_owner:
+                raise ContinuityStoreError("Handoff 源 owner 已失去 lease")
+            if self._aware_timestamp(current.expires_at, "Handoff lease") <= observed_at:
+                raise ContinuityStoreError("Handoff lease 已过期")
+            expires_at = (observed_at + timedelta(seconds=lease_seconds)).isoformat()
+            event_time = observed_at.isoformat()
+            cursor = conn.execute(
+                """UPDATE execution_leases
+                SET owner_id=?, lease_token=?, expires_at=?, version=version+1, updated_at=?
+                WHERE run_id=? AND owner_id=? AND version=?""",
+                (
+                    receiver_id,
+                    new_token,
+                    expires_at,
+                    event_time,
+                    handoff.run_id,
+                    handoff.from_owner,
+                    current.version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("lease transfer owner 或版本冲突")
+            self._append_event(
+                conn,
+                handoff.run_id,
+                "LEASE_TRANSFERRED",
+                {
+                    "schema_version": "lease-transferred.v2",
+                    "request": request,
+                    "run_id": handoff.run_id,
+                    "from_owner": handoff.from_owner,
+                    "expires_at": expires_at,
+                    "version": current.version + 1,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_lease(conn, handoff.run_id)
+
+    def create_checkpoint(
+        self,
+        values: dict[str, Any],
+        idempotency_key: str,
+        now: str,
+        *,
+        owner_id: str,
+        lease_token: str,
+        expected_epoch: int | None = None,
+    ) -> CheckpointItem:
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if existing["aggregate_id"] != values["run_id"]:
+                    raise ContinuityStoreError("idempotency_key 已用于其他 Run")
+                return self._get_checkpoint(conn, values["checkpoint_id"])
+            self._get_run(conn, values["run_id"])
+            self._require_lease_in_tx(
+                conn, run_id=values["run_id"], owner_id=owner_id, lease_token=lease_token, expected_epoch=expected_epoch
+            )
+            stored = dict(values)
+            row = conn.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM checkpoints WHERE run_id=?",
+                (values["run_id"],),
+            ).fetchone()
+            stored["sequence"] = int(row[0])
+            self._insert_mapping(conn, "checkpoints", stored)
+            self._append_event(
+                conn,
+                values["run_id"],
+                "CHECKPOINT_CREATED",
+                stored,
+                idempotency_key,
+                now,
+                event_id=values["checkpoint_id"],
+                aggregate_type="run",
+            )
+            return self._get_checkpoint(conn, values["checkpoint_id"])
+
+    def create_handoff(
+        self,
+        *,
+        handoff_id: str,
+        checkpoint_id: str,
+        from_owner: str,
+        to_owner: str,
+        lease_token: str,
+        idempotency_key: str,
+    ) -> HandoffV2:
+        handoff_id = self._validated_run_text(handoff_id, label="handoff_id")
+        checkpoint_id = self._validated_run_text(checkpoint_id, label="checkpoint_id")
+        from_owner = self._validated_run_text(from_owner, label="from_owner")
+        to_owner = self._validated_run_text(to_owner, label="to_owner")
+        lease_token = self._validated_run_text(lease_token, label="lease token")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if from_owner == to_owner:
+            raise ContinuityStoreError("Handoff 接收 owner 必须不同于源 owner")
+        request = {
+            "schema_version": "handoff-create-request.v2",
+            "handoff_id": handoff_id,
+            "checkpoint_id": checkpoint_id,
+            "from_owner": from_owner,
+            "to_owner": to_owner,
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="Handoff 创建")
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["event_type"] != "HANDOFF_CREATED"
+                    or not isinstance(payload, dict)
+                    or set(payload)
+                    != {
+                        "schema_version",
+                        "request",
+                        "lease_token_sha256",
+                        "handoff",
+                    }
+                    or payload.get("schema_version") != "handoff-created.v2"
+                    or payload.get("request") != request
+                    or not hmac.compare_digest(
+                        str(payload.get("lease_token_sha256")),
+                        self._lease_token_fingerprint(lease_token),
+                    )
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 Handoff 创建语义不一致")
+                return self._validated_handoff_receipt(conn, handoff_id)
+            checkpoint = self._get_checkpoint(conn, checkpoint_id)
+            run = self._get_run(conn, checkpoint.run_id)
+            self._refuse_if_parked(conn, run.run_id, "不需要再交接（搁着时已记过断点）")
+            lease = self._get_lease(conn, run.run_id)
+            observed_at = self._utc_now()
+            if lease.owner_id != from_owner or lease.lease_token != lease_token:
+                raise ContinuityStoreError("Handoff lease ownership 不匹配")
+            if self._aware_timestamp(lease.expires_at, "Handoff lease") <= observed_at:
+                raise ContinuityStoreError("Handoff lease 已过期")
+            if checkpoint.git_head != run.git_head:
+                raise ContinuityStoreError("Handoff checkpoint 与 Run baseline 不一致")
+            event_time = observed_at.isoformat()
+            unsigned = {
+                "handoff_id": handoff_id,
+                "work_id": run.work_id,
+                "run_id": run.run_id,
+                "checkpoint_id": checkpoint.checkpoint_id,
+                "from_owner": from_owner,
+                "to_owner": to_owner,
+                "owned_paths_json": json.dumps(run.owned_paths, ensure_ascii=False),
+                "git_head": run.git_head,
+                "worktree_path": run.worktree_path,
+                "lease_expires_at": lease.expires_at,
+                "created_at": event_time,
+            }
+            canonical = json.dumps(
+                unsigned,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            values = {
+                **unsigned,
+                "snapshot_hash": hashlib.sha256(canonical.encode()).hexdigest(),
+            }
+            self._insert_mapping(conn, "handoffs_v2", values)
+            handoff = self._get_handoff(conn, handoff_id)
+            self._append_event(
+                conn,
+                run.run_id,
+                "HANDOFF_CREATED",
+                {
+                    "schema_version": "handoff-created.v2",
+                    "request": request,
+                    "lease_token_sha256": self._lease_token_fingerprint(lease_token),
+                    "handoff": handoff.model_dump(mode="json"),
+                },
+                idempotency_key,
+                event_time,
+                event_id=handoff_id,
+                aggregate_type="run",
+            )
+            return handoff
+
+    def get_run(self, run_id: str) -> RunItem:
+        with self._read_connection() as conn:
+            return self._get_run(conn, run_id)
+
+    def find_run(self, run_id: str) -> RunItem | None:
+        """Return a Run only when it exists; never hide a corrupt persisted Run."""
+
+        with self._read_connection() as conn:
+            row = conn.execute("SELECT run_id FROM run_items WHERE run_id=?", (run_id,)).fetchone()
+            return self._get_run(conn, run_id) if row is not None else None
+
+    def get_lease(self, run_id: str) -> LeaseItem:
+        with self._read_connection() as conn:
+            return self._get_lease(conn, run_id)
+
+    def get_run_started_evidence(self, run_id: str) -> tuple[str, ExecutionStartEvidence]:
+        """Read exactly one trusted startup record for one Run from Continuity."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                """SELECT payload_json FROM events
+                WHERE aggregate_type='run' AND aggregate_id=? AND event_type='RUN_STARTED'
+                ORDER BY created_at, event_id""",
+                (run_id,),
+            ).fetchall()
+        if len(rows) != 1:
+            raise ContinuityStoreError("RUN_STARTED 证据缺失或不唯一")
+        try:
+            payload = json.loads(str(rows[0]["payload_json"]))
+            owner_id = payload["owner_id"]
+            evidence = ExecutionStartEvidence.model_validate(payload["evidence"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ContinuityStoreError("RUN_STARTED 证据损坏") from error
+        if (
+            payload.get("schema_version") != "run-started.v1"
+            or not isinstance(owner_id, str)
+            or not owner_id
+            or owner_id != owner_id.strip()
+        ):
+            raise ContinuityStoreError("RUN_STARTED 证据身份不合法")
+        return owner_id, evidence
+
+    def list_run_activities(self, run_id: str) -> tuple[ExecutionActivity, ...]:
+        """Return redacted Run activity only after validating each event chain link."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        event_types = (
+            "RUN_CREATED",
+            "EXECUTION_START_CLAIMED",
+            "RUN_STARTED",
+            "EXECUTION_PROJECTED",
+            "CHECKPOINT_CREATED",
+            "RUN_TRANSITIONED",
+            "RUN_LEASE_REVOKED",
+        )
+        placeholders = ",".join("?" for _ in event_types)
+        activities: list[ExecutionActivity] = []
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                f"""SELECT rowid, * FROM events WHERE event_type IN ({placeholders})
+                ORDER BY rowid""",
+                event_types,
+            ).fetchall()
+            for row in rows:
+                try:
+                    payload = json.loads(str(row["payload_json"]))
+                except (TypeError, json.JSONDecodeError) as error:
+                    raise ContinuityStoreError("执行活动事件 payload 无法读取") from error
+                request = payload.get("request")
+                payload_run_id = payload.get("run_id")
+                request_run_id = request.get("run_id") if isinstance(request, dict) else None
+                belongs = (
+                    row["aggregate_type"] == "run" and row["aggregate_id"] == run_id
+                ) or payload_run_id == run_id or request_run_id == run_id
+                if not belongs:
+                    continue
+                previous = conn.execute(
+                    "SELECT event_hash FROM events WHERE rowid<? ORDER BY rowid DESC LIMIT 1",
+                    (row["rowid"],),
+                ).fetchone()
+                expected_previous = str(previous["event_hash"]) if previous else ""
+                canonical = json.dumps(
+                    payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                )
+                expected_hash = hashlib.sha256(
+                    (
+                        f"{expected_previous}|{row['aggregate_id']}|{row['event_type']}|"
+                        f"{canonical}|{row['created_at']}"
+                    ).encode()
+                ).hexdigest()
+                expected_event_id = f"EVT-{expected_hash[:16].upper()}"
+                event_identity_valid = (
+                    row["event_type"] == "CHECKPOINT_CREATED"
+                    or row["event_id"] == expected_event_id
+                )
+                if (
+                    row["previous_hash"] != expected_previous
+                    or row["event_hash"] != expected_hash
+                    or not event_identity_valid
+                ):
+                    raise ContinuityStoreError("执行活动事件哈希链不一致")
+                stage = self._activity_stage(str(row["event_type"]), payload)
+                if stage is None:
+                    continue
+                failure: ExecutionFailure | None = None
+                if stage in {
+                    ExecutionActivityStage.BLOCKED,
+                    ExecutionActivityStage.PENDING,
+                    ExecutionActivityStage.FAILED,
+                }:
+                    raw_failure = payload.get("failure")
+                    if raw_failure is None:
+                        failure = ExecutionFailure(
+                            stage=stage,
+                            code=ExecutionFailureCode.LEGACY_UNKNOWN,
+                        )
+                    else:
+                        try:
+                            failure = ExecutionFailure.model_validate(raw_failure)
+                        except (TypeError, ValueError) as error:
+                            raise ContinuityStoreError("结构化执行失败原因损坏") from error
+                        if failure.stage is not stage:
+                            raise ContinuityStoreError("结构化执行失败阶段与迁移状态不一致")
+                activities.append(
+                    ExecutionActivity(
+                        event_id=str(row["event_id"]),
+                        run_id=run_id,
+                        operation_id=(
+                            str(payload["operation_id"])
+                            if isinstance(payload.get("operation_id"), str)
+                            else ""
+                        ),
+                        event_type=str(row["event_type"]),
+                        stage=stage,
+                        occurred_at=datetime.fromisoformat(str(row["created_at"])),
+                        event_hash=str(row["event_hash"]),
+                        failure=failure,
+                    )
+                )
+        return tuple(activities)
+
+    @staticmethod
+    def _activity_stage(
+        event_type: str, payload: dict[str, object]
+    ) -> ExecutionActivityStage | None:
+        allowed_schemas: dict[str, set[object]] = {
+            "RUN_CREATED": {None, "run.v1", "run-created.v2"},
+            "EXECUTION_START_CLAIMED": {"execution-start-claim.v1"},
+            "RUN_STARTED": {"run-started.v1"},
+            "EXECUTION_PROJECTED": {"execution-projection-receipt.v1"},
+            "CHECKPOINT_CREATED": {None, "checkpoint.v1"},
+            "RUN_TRANSITIONED": {
+                None,
+                "run-transition.v2",
+                "run-transition.v3",
+                "run-transition.v4",
+            },
+            "RUN_LEASE_REVOKED": {"unstarted-run-revoked.v1"},
+        }
+        if payload.get("schema_version") not in allowed_schemas[event_type]:
+            raise ContinuityStoreError("执行活动事件 schema 版本未知")
+        direct = {
+            "RUN_CREATED": ExecutionActivityStage.READY,
+            "EXECUTION_START_CLAIMED": ExecutionActivityStage.STARTING,
+            "RUN_STARTED": ExecutionActivityStage.RUNNING,
+            "EXECUTION_PROJECTED": ExecutionActivityStage.PROJECTED,
+            "CHECKPOINT_CREATED": ExecutionActivityStage.CHECKPOINTED,
+            "RUN_LEASE_REVOKED": ExecutionActivityStage.CANCELLED,
+        }
+        if event_type in direct:
+            return direct[event_type]
+        if event_type != "RUN_TRANSITIONED":
+            return None
+        try:
+            state = payload.get("new_state", payload.get("state"))
+            return ExecutionActivityStage(str(state))
+        except (KeyError, ValueError) as error:
+            raise ContinuityStoreError("Run 迁移事件缺少可识别阶段") from error
+
+    def get_checkpoint(self, checkpoint_id: str) -> CheckpointItem:
+        with self._read_connection() as conn:
+            return self._get_checkpoint(conn, checkpoint_id)
+
+    def get_handoff(self, handoff_id: str) -> HandoffV2:
+        with self._read_connection() as conn:
+            return self._get_handoff(conn, handoff_id)
+
+    def list_works(
+        self,
+        subject_project_id: str,
+        *,
+        include_terminal: bool = False,
+        terminal_limit: int | None = None,
+    ) -> tuple[WorkItem, ...]:
+        """List execution-active Work by default, or complete history on request.
+
+        With ``include_terminal`` and a ``terminal_limit``, every Work that is not finished (accepted, closed or
+        cancelled) is listed but only the ``terminal_limit`` most recent finished ones, so a screen that refreshes
+        every project does not read each project's whole history (audit 78, 5).
+        """
+        with self._read_connection() as conn:
+            if include_terminal and terminal_limit is not None:
+                rows = self._open_and_recent_rows(
+                    conn, "work_items", "work_id", subject_project_id, terminal_limit
+                )
+            elif include_terminal:
+                rows = conn.execute(
+                    """SELECT work_id FROM work_items WHERE subject_project_id=?
+                    ORDER BY updated_at DESC, work_id""",
+                    (subject_project_id,),
+                ).fetchall()
+            else:
+                states = tuple(sorted(state.value for state in EXECUTION_ACTIVE_WORK_STATES))
+                placeholders = ",".join("?" for _ in states)
+                rows = conn.execute(
+                    f"""SELECT work_id FROM work_items WHERE subject_project_id=?
+                    AND state IN ({placeholders})
+                    ORDER BY updated_at DESC, work_id""",
+                    (subject_project_id, *states),
+                ).fetchall()
+            return tuple(self._get_work(conn, str(row["work_id"])) for row in rows)
+
+    def list_missions(
+        self,
+        subject_project_id: str,
+        *,
+        include_terminal: bool = False,
+        terminal_limit: int | None = None,
+    ) -> tuple[Mission, ...]:
+        """List project Missions through the immutable reader, including history on request.
+
+        With ``include_terminal`` and a ``terminal_limit``, every open Mission is listed but only the
+        ``terminal_limit`` most recently updated finished ones (audit 78, 5).
+        """
+        with self._read_connection() as conn:
+            versions = self._schema_versions(conn)
+            if not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
+                rendered = ", ".join(sorted(versions))
+                raise ContinuityStoreSchemaError(f"未知或未来 Continuity Store schema: {rendered}")
+            if versions == {_LEGACY_SCHEMA_VERSION}:
+                # Strict reads must not upgrade a legacy store. It has no Mission table yet.
+                return ()
+            if include_terminal and terminal_limit is not None:
+                rows = self._open_and_recent_rows(
+                    conn, "mission_items", "mission_id", subject_project_id, terminal_limit
+                )
+                return self._listed_missions(conn, rows)
+            query = (
+                """SELECT mission_id FROM mission_items WHERE subject_project_id=?
+                ORDER BY updated_at DESC, mission_id"""
+                if include_terminal
+                else """SELECT mission_id FROM mission_items WHERE subject_project_id=?
+                AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
+                ORDER BY updated_at DESC, mission_id"""
+            )
+            rows = conn.execute(query, (subject_project_id,)).fetchall()
+            return self._listed_missions(conn, rows)
+
+    def _listed_missions(self, conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> tuple[Mission, ...]:
+        """Read the Missions of a listing; a finished Mission whose record no longer validates is left out (TD-022).
+
+        A listing must not fail because of history: an old, finished Mission that the current model cannot read
+        is logged and skipped. An unfinished Mission that cannot be read still fails the listing, as it
+        would block real work.
+        """
+
+        missions: list[Mission] = []
+        for row in rows:
+            mission = self._get_listed_mission(conn, str(row["mission_id"]))
+            if mission is not None:
+                missions.append(mission)
+        return tuple(missions)
+
+    def _get_listed_mission(self, conn: sqlite3.Connection, mission_id: str) -> Mission | None:
+        try:
+            return self._get_mission(conn, mission_id)
+        except ValueError as error:  # pydantic's ValidationError and JSONDecodeError are both ValueErrors
+            state = conn.execute(
+                "SELECT state FROM mission_items WHERE mission_id=?", (mission_id,)
+            ).fetchone()
+            if state is None or str(state["state"]) not in _FINISHED_MISSION_STATES:
+                raise
+            log.warning("历史 Mission %s 无法按当前模型读取，已从列表中略过: %s", mission_id, error)
+            return None
+
+    @staticmethod
+    def _open_and_recent_rows(
+        conn: sqlite3.Connection, table: str, id_column: str, subject_project_id: str, terminal_limit: int
+    ) -> list[sqlite3.Row]:
+        """Ids of every unfinished row of a project plus its ``terminal_limit`` most recent finished ones, newest first.
+
+        ``table`` and ``id_column`` are fixed by the callers (Missions and Work share the same three finished states).
+        """
+
+        if type(terminal_limit) is not int or terminal_limit < 0:
+            raise ContinuityStoreError("terminal_limit 必须是非负整数")
+        if (table, id_column) not in {("mission_items", "mission_id"), ("work_items", "work_id")}:
+            raise ContinuityStoreError(f"不支持的历史截取: {table}")
+        return conn.execute(
+            f"""SELECT {id_column}, updated_at FROM {table} WHERE subject_project_id=?
+            AND state NOT IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
+            UNION ALL
+            SELECT {id_column}, updated_at FROM (
+                SELECT {id_column}, updated_at FROM {table} WHERE subject_project_id=?
+                AND state IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
+                ORDER BY updated_at DESC, {id_column} LIMIT ?
+            )
+            ORDER BY updated_at DESC, {id_column}""",
+            (subject_project_id, subject_project_id, terminal_limit),
+        ).fetchall()
+
+    def list_active_missions(self, subject_project_id: str) -> tuple[Mission, ...]:
+        """Compatibility view for callers that need only live Missions."""
+        return self.list_missions(subject_project_id)
+
+    def list_runs(self, work_id: str, *, include_terminal: bool = False) -> tuple[RunItem, ...]:
+        """List Work Runs without changing the default active-run behaviour."""
+        with self._read_connection() as conn:
+            query = (
+                """SELECT run_id FROM run_items WHERE work_id=?
+                ORDER BY updated_at DESC, run_id"""
+                if include_terminal
+                else """SELECT run_id FROM run_items WHERE work_id=?
+                AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+                ORDER BY updated_at DESC, run_id"""
+            )
+            rows = conn.execute(query, (work_id,)).fetchall()
+            return tuple(self._get_run(conn, str(row["run_id"])) for row in rows)
+
+    def latest_checkpoint(self, run_id: str) -> CheckpointItem | None:
+        with self._read_connection() as conn:
+            row = conn.execute(
+                """SELECT checkpoint_id FROM checkpoints WHERE run_id=?
+                ORDER BY sequence DESC LIMIT 1""",
+                (run_id,),
+            ).fetchone()
+            return self._get_checkpoint(conn, str(row["checkpoint_id"])) if row else None
+
+    @staticmethod
+    def _event_by_key(conn: sqlite3.Connection, key: str) -> sqlite3.Row | None:
+        row = conn.execute("SELECT * FROM events WHERE idempotency_key=?", (key,)).fetchone()
+        return cast(sqlite3.Row | None, row)
+
+    @classmethod
+    def _work_transition_from_event(
+        cls, row: sqlite3.Row
+    ) -> tuple[str, WorkState, str]:
+        if row["aggregate_type"] != "work" or row["event_type"] != "WORK_TRANSITIONED":
+            raise ContinuityStoreError("idempotency_key 不属于 Work 状态迁移")
+        payload = cls._validated_event_payload(row, label="Work 迁移")
+        if set(payload) != {"state", "authorization_ref"}:
+            raise ContinuityStoreError("Work 迁移事件 payload 语义不完整")
+        state = payload["state"]
+        authorization_ref = payload["authorization_ref"]
+        if not isinstance(state, str) or not isinstance(authorization_ref, str):
+            raise ContinuityStoreError("Work 迁移事件 payload 字段类型非法")
+        try:
+            destination = WorkState(state)
+        except ValueError as error:
+            raise ContinuityStoreError("Work 迁移事件 payload 状态非法") from error
+        return str(row["aggregate_id"]), destination, authorization_ref
+
+    @staticmethod
+    def _validated_event_payload(row: sqlite3.Row, *, label: str) -> dict[str, object]:
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ContinuityStoreError(f"{label} 事件 payload 无法读取") from error
+        if not isinstance(payload, dict):
+            raise ContinuityStoreError(f"{label} 事件 payload 顶层必须是对象")
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        expected_hash = hashlib.sha256(
+            (
+                f"{row['previous_hash']}|{row['aggregate_id']}|{row['event_type']}|"
+                f"{canonical}|{row['created_at']}"
+            ).encode()
+        ).hexdigest()
+        if row["event_hash"] != expected_hash or (
+            row["event_id"] != f"EVT-{expected_hash[:16].upper()}"
+            and row["event_type"] not in {"CHECKPOINT_CREATED", "HANDOFF_CREATED"}
+        ):
+            raise ContinuityStoreError(f"{label} 事件 hash 或 identity 非法")
+        return cast(dict[str, object], payload)
+
+    @classmethod
+    def _validated_handoff_receipt(
+        cls,
+        conn: sqlite3.Connection,
+        handoff_id: str,
+    ) -> HandoffV2:
+        handoff = cls._get_handoff(conn, handoff_id)
+        row = conn.execute("SELECT * FROM events WHERE event_id=?", (handoff_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError("Handoff 缺少不可变创建回执")
+        payload = cls._validated_event_payload(row, label="Handoff 创建")
+        request = payload.get("request")
+        token_fingerprint = payload.get("lease_token_sha256")
+        if (
+            row["aggregate_type"] != "run"
+            or row["aggregate_id"] != handoff.run_id
+            or row["event_type"] != "HANDOFF_CREATED"
+            or set(payload) != {"schema_version", "request", "lease_token_sha256", "handoff"}
+            or payload.get("schema_version") != "handoff-created.v2"
+            or not isinstance(request, dict)
+            or request
+            != {
+                "schema_version": "handoff-create-request.v2",
+                "handoff_id": handoff.handoff_id,
+                "checkpoint_id": handoff.checkpoint_id,
+                "from_owner": handoff.from_owner,
+                "to_owner": handoff.to_owner,
+            }
+            or payload.get("handoff") != handoff.model_dump(mode="json")
+            or not isinstance(token_fingerprint, str)
+            or re.fullmatch(r"[0-9a-f]{64}", token_fingerprint) is None
+        ):
+            raise ContinuityStoreError("Handoff 创建回执身份或 schema 非法")
+        unsigned = {
+            "handoff_id": handoff.handoff_id,
+            "work_id": handoff.work_id,
+            "run_id": handoff.run_id,
+            "checkpoint_id": handoff.checkpoint_id,
+            "from_owner": handoff.from_owner,
+            "to_owner": handoff.to_owner,
+            "owned_paths_json": json.dumps(handoff.owned_paths, ensure_ascii=False),
+            "git_head": handoff.git_head,
+            "worktree_path": handoff.worktree_path,
+            "lease_expires_at": handoff.lease_expires_at,
+            "created_at": handoff.created_at,
+        }
+        canonical = json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if handoff.snapshot_hash != hashlib.sha256(canonical.encode()).hexdigest():
+            raise ContinuityStoreError("Handoff snapshot_hash 非法")
+        return handoff
+
+    @classmethod
+    def _legacy_run_creation_request_from_payload(
+        cls,
+        payload: dict[str, object],
+        *,
+        lease_seconds: int,
+    ) -> dict[str, object]:
+        if set(payload) != _LEGACY_RUN_CREATION_FIELDS:
+            raise ContinuityStoreError("LEGACY_REPLAY_UNPROVABLE: Run 创建事件 schema 未知")
+        try:
+            owned_raw = json.loads(str(payload["owned_paths_json"]))
+            declared_raw = json.loads(str(payload["declared_dirty_paths_json"]))
+            (
+                run_id,
+                work_id,
+                executor_id,
+                adapter,
+                owned_paths,
+                declared_dirty_paths,
+                git_head,
+                _token,
+                lease_seconds,
+            ) = cls._validated_run_creation_inputs(
+                run_id=payload["run_id"],
+                work_id=payload["work_id"],
+                executor_id=payload["executor_id"],
+                adapter=payload["adapter"],
+                owned_paths=owned_raw,
+                declared_dirty_paths=declared_raw,
+                git_head=payload["git_head"],
+                lease_token="legacy-proof-placeholder",
+                lease_seconds=lease_seconds,
+            )
+            worktree = cls._lexical_run_worktree(payload["worktree_path"])
+        except (KeyError, TypeError, json.JSONDecodeError) as error:
+            raise ContinuityStoreError(
+                "LEGACY_REPLAY_UNPROVABLE: Run 创建事件无法规范化"
+            ) from error
+        if (
+            payload.get("state") != RunState.RUNNING.value
+            or payload.get("version") != 1
+            or payload.get("created_at") != payload.get("updated_at")
+            or list(owned_paths) != owned_raw
+            or list(declared_dirty_paths) != declared_raw
+            or worktree != payload.get("worktree_path")
+            or declared_dirty_paths
+        ):
+            raise ContinuityStoreError(
+                "LEGACY_REPLAY_UNPROVABLE: 原 observed dirty paths 或创建语义无法证明"
+            )
+        assert git_head is not None
+        return cls._run_creation_request(
+            run_id=run_id,
+            work_id=work_id,
+            executor_id=executor_id,
+            adapter=adapter,
+            owned_paths=owned_paths,
+            declared_dirty_paths=declared_dirty_paths,
+            observed_dirty_paths=(),
+            git_head=git_head,
+            worktree_path=worktree,
+            lease_seconds=lease_seconds,
+        )
+
+    @classmethod
+    def _legacy_run_creation_replay(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        row: sqlite3.Row,
+        payload: dict[str, object],
+        executor_id: str,
+        lease_token: str,
+        request: dict[str, object],
+    ) -> RunItem:
+        lease_seconds_value = request["lease_seconds"]
+        if type(lease_seconds_value) is not int:
+            raise ContinuityStoreError("LEGACY_REPLAY_UNPROVABLE: lease 时长无法证明")
+        lease_seconds = lease_seconds_value
+        recorded_request = cls._legacy_run_creation_request_from_payload(
+            payload,
+            lease_seconds=lease_seconds,
+        )
+        if recorded_request != request:
+            raise ContinuityStoreError("idempotency_key 的旧版 Run 创建请求语义不一致")
+        cls._validated_event_payload(row, label="旧版 Run 创建")
+        created_at = cls._aware_timestamp(str(payload["created_at"]), "旧版 Run created_at")
+        if str(row["created_at"]) != payload["created_at"]:
+            raise ContinuityStoreError("LEGACY_REPLAY_UNPROVABLE: 事件创建时间不一致")
+        run = cls._get_run(conn, str(payload["run_id"]))
+        lease = cls._get_lease(conn, run.run_id)
+        try:
+            lease_updated_at = cls._aware_timestamp(
+                lease.updated_at,
+                "旧版 Run lease updated_at",
+            )
+            lease_expires_at = cls._aware_timestamp(
+                lease.expires_at,
+                "旧版 Run lease expires_at",
+            )
+        except ContinuityStoreError as error:
+            raise ContinuityStoreError(
+                "LEGACY_REPLAY_UNPROVABLE: lease 创建身份无法证明"
+            ) from error
+        if (
+            lease.version != 1
+            or lease.owner_id != executor_id
+            or lease.lease_token != lease_token
+            or lease_updated_at != created_at
+            or lease_expires_at - created_at != timedelta(seconds=lease_seconds)
+        ):
+            raise ContinuityStoreError(
+                "LEGACY_REPLAY_UNPROVABLE: lease 已续租、移交或 token 无法证明"
+            )
+        if (
+            run.work_id != payload["work_id"]
+            or run.executor_id != payload["executor_id"]
+            or run.adapter != payload["adapter"]
+            or list(run.owned_paths) != request["owned_paths"]
+            or list(run.declared_dirty_paths) != request["declared_dirty_paths"]
+            or run.git_head != payload["git_head"]
+            or run.worktree_path != payload["worktree_path"]
+            or run.created_at != payload["created_at"]
+        ):
+            raise ContinuityStoreError("LEGACY_REPLAY_UNPROVABLE: 当前 Run 与创建事件身份不一致")
+        return run
+
+    @classmethod
+    def _run_creation_replay(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        run_id: str,
+        executor_id: str,
+        lease_token: str,
+        request: dict[str, object],
+        request_hash: str,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        row = cls._event_by_key(conn, idempotency_key)
+        if row is None:
+            return None
+        if (
+            row["aggregate_type"] != "run"
+            or row["aggregate_id"] != run_id
+            or row["event_type"] != "RUN_CREATED"
+        ):
+            raise ContinuityStoreError("idempotency_key 已用于其他语义")
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ContinuityStoreError("Run 创建事件 payload 无法读取") from error
+        if not isinstance(payload, dict):
+            raise ContinuityStoreError("Run 创建事件 payload 顶层必须是对象")
+        if set(payload) == _LEGACY_RUN_CREATION_FIELDS:
+            return cls._legacy_run_creation_replay(
+                conn,
+                row=row,
+                payload=payload,
+                executor_id=executor_id,
+                lease_token=lease_token,
+                request=request,
+            )
+        recorded_request = payload.get("request")
+        if (
+            set(payload)
+            != {
+                "schema_version",
+                "request_hash",
+                "request",
+                "lease_token_sha256",
+                "created_at",
+                "lease_expires_at",
+            }
+            or payload.get("schema_version") != "run-created.v2"
+            or not isinstance(recorded_request, dict)
+            or set(recorded_request) != _RUN_CREATION_REQUEST_FIELDS
+        ):
+            raise ContinuityStoreError("Run 创建事件 payload schema 无效")
+        try:
+            (
+                recorded_run_id,
+                recorded_work_id,
+                recorded_executor,
+                recorded_adapter,
+                recorded_owned,
+                recorded_declared,
+                recorded_head,
+                _validated_token,
+                recorded_lease_seconds,
+            ) = cls._validated_run_creation_inputs(
+                run_id=recorded_request["run_id"],
+                work_id=recorded_request["work_id"],
+                executor_id=recorded_request["executor_id"],
+                adapter=recorded_request["adapter"],
+                owned_paths=recorded_request["owned_paths"],
+                declared_dirty_paths=recorded_request["declared_dirty_paths"],
+                git_head=recorded_request["git_head"],
+                lease_token=lease_token,
+                lease_seconds=recorded_request["lease_seconds"],
+            )
+            recorded_observed = cls._run_paths(
+                recorded_request["observed_dirty_paths"],
+                label="observed_dirty_paths",
+                allow_empty=True,
+            )
+            recorded_worktree = cls._lexical_run_worktree(recorded_request["worktree_path"])
+            created_at = cls._aware_timestamp(
+                str(payload.get("created_at")),
+                "Run 创建事件 created_at",
+            )
+            lease_expires_at = cls._aware_timestamp(
+                str(payload.get("lease_expires_at")),
+                "Run 创建事件 lease_expires_at",
+            )
+        except (KeyError, TypeError) as error:
+            raise ContinuityStoreError("Run 创建事件 request 无法读取") from error
+        if (
+            list(recorded_owned) != recorded_request["owned_paths"]
+            or list(recorded_declared) != recorded_request["declared_dirty_paths"]
+            or list(recorded_observed) != recorded_request["observed_dirty_paths"]
+            or not all(
+                cls._authority_path_covered(path, recorded_declared) for path in recorded_observed
+            )
+            or recorded_worktree != recorded_request["worktree_path"]
+            or lease_expires_at - created_at != timedelta(seconds=recorded_lease_seconds)
+        ):
+            raise ContinuityStoreError("Run 创建事件 request 非 canonical 或时间语义无效")
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        expected_event_hash = hashlib.sha256(
+            (
+                f"{row['previous_hash']}|{row['aggregate_id']}|{row['event_type']}|"
+                f"{canonical}|{row['created_at']}"
+            ).encode()
+        ).hexdigest()
+        if (
+            row["event_hash"] != expected_event_hash
+            or row["event_id"] != f"EVT-{expected_event_hash[:16].upper()}"
+            or payload.get("request_hash") != request_hash
+            or recorded_request != request
+            or cls._run_creation_request_hash(recorded_request) != request_hash
+            or payload.get("created_at") != row["created_at"]
+        ):
+            raise ContinuityStoreError("idempotency_key 的 Run 创建请求语义不一致")
+        if not hmac.compare_digest(
+            str(payload.get("lease_token_sha256")),
+            cls._lease_token_fingerprint(lease_token),
+        ):
+            raise ContinuityStoreError("Run 创建 lease token identity 不匹配")
+        run = cls._get_run(conn, run_id)
+        if (
+            recorded_run_id != run_id
+            or recorded_executor != executor_id
+            or run.work_id != recorded_work_id
+            or run.executor_id != recorded_executor
+            or run.adapter != recorded_adapter
+            or list(run.owned_paths) != request["owned_paths"]
+            or list(run.declared_dirty_paths) != request["declared_dirty_paths"]
+            or run.git_head != recorded_head
+            or run.worktree_path != recorded_worktree
+            or run.created_at != payload["created_at"]
+        ):
+            raise ContinuityStoreError("Run 创建事件与当前 Run immutable identity 不一致")
+        return run
+
+    @classmethod
+    def _expired_run_settlement_replay(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        recovery_lease_token: str | None,
+        request: dict[str, object],
+        request_hash: str,
+        idempotency_key: str,
+    ) -> RunItem | None:
+        row = cls._event_by_key(conn, idempotency_key)
+        if row is None:
+            return None
+        target_run_id = request.get("target_run_id")
+        if (
+            row["aggregate_type"] != "run"
+            or row["aggregate_id"] != target_run_id
+            or row["event_type"] != "RUN_EXPIRED_SETTLED"
+        ):
+            raise ContinuityStoreError("idempotency_key 已用于其他语义")
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ContinuityStoreError("结算事件 payload 无法读取") from error
+        if not isinstance(payload, dict):
+            raise ContinuityStoreError("结算事件 payload 顶层必须是对象")
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        expected_event_hash = hashlib.sha256(
+            (
+                f"{row['previous_hash']}|{row['aggregate_id']}|{row['event_type']}|"
+                f"{canonical}|{row['created_at']}"
+            ).encode()
+        ).hexdigest()
+        if (
+            row["event_hash"] != expected_event_hash
+            or row["event_id"] != f"EVT-{expected_event_hash[:16].upper()}"
+        ):
+            raise ContinuityStoreError("结算事件 hash 或 identity 非法")
+        recorded_request = payload.get("request")
+        target = payload.get("target")
+        recovery = payload.get("recovery")
+        authority = payload.get("authority")
+        target_authority = authority.get("target") if isinstance(authority, dict) else None
+        recovery_authority = authority.get("recovery") if isinstance(authority, dict) else None
+        schema_version = payload.get("schema_version")
+        lease_release = payload.get("lease_release")
+        expected_fields = {
+            "schema_version", "request_hash", "request", "recovery_token_sha256",
+            "runtime_target_path", "outcome", "reason", "target", "recovery", "authority",
+        }
+        if schema_version == "expired-run-settlement.v3":
+            expected_fields.add("lease_release")
+        sha256_fields = (
+            payload.get("request_hash"),
+            payload.get("recovery_token_sha256"),
+            target.get("work_scope_hash") if isinstance(target, dict) else None,
+            recovery.get("work_scope_hash") if isinstance(recovery, dict) else None,
+            recovery.get("owned_paths_hash") if isinstance(recovery, dict) else None,
+            target_authority.get("decision_sha256") if isinstance(target_authority, dict) else None,
+            recovery_authority.get("decision_sha256")
+            if isinstance(recovery_authority, dict)
+            else None,
+        )
+        if (
+            set(payload) != expected_fields
+            or schema_version not in {"expired-run-settlement.v2", "expired-run-settlement.v3"}
+            or not isinstance(recorded_request, dict)
+            or set(recorded_request) != _SETTLEMENT_REQUEST_FIELDS
+            or recorded_request.get("schema_version") != "expired-run-settlement-request.v2"
+            or recorded_request.get("action") != "settle_expired_run"
+            or cls._settlement_request_hash(recorded_request) != payload.get("request_hash")
+            or payload.get("runtime_target_path") != _CANONICAL_RUNTIME_DB
+            or payload.get("outcome") != RunState.CANCELLED.value
+            or payload.get("outcome") != recorded_request.get("outcome")
+            or not isinstance(payload.get("reason"), str)
+            or not payload["reason"]
+            or payload.get("reason") != recorded_request.get("reason")
+            or not isinstance(target, dict)
+            or set(target)
+            != {
+                "run_id",
+                "work_id",
+                "work_version",
+                "work_scope_hash",
+                "previous_state",
+                "previous_version",
+                "settled_state",
+                "settled_version",
+                "lease_version",
+                "lease_expires_at",
+            }
+            or target.get("run_id") != recorded_request.get("target_run_id")
+            or not isinstance(target.get("work_id"), str)
+            or not target["work_id"]
+            or type(target.get("work_version")) is not int
+            or not isinstance(target.get("previous_state"), str)
+            or type(target.get("previous_version")) is not int
+            or target.get("settled_state") != RunState.CANCELLED.value
+            or type(target.get("settled_version")) is not int
+            or target["settled_version"] != target["previous_version"] + 1
+            or type(target.get("lease_version")) is not int
+            or not isinstance(target.get("lease_expires_at"), str)
+            or not isinstance(recovery, dict)
+            or set(recovery)
+            != {
+                "run_id",
+                "run_version",
+                "work_id",
+                "work_version",
+                "work_scope_hash",
+                "owned_paths_hash",
+                "lease_version",
+                "owner_id",
+                "git_head",
+            }
+            or not isinstance(recovery.get("run_id"), str)
+            or not recovery["run_id"]
+            or recovery.get("run_id") != recorded_request.get("recovery_run_id")
+            or not isinstance(recovery.get("work_id"), str)
+            or not recovery["work_id"]
+            or type(recovery.get("run_version")) is not int
+            or type(recovery.get("work_version")) is not int
+            or type(recovery.get("lease_version")) is not int
+            or not isinstance(recovery.get("owner_id"), str)
+            or recovery.get("owner_id") != recorded_request.get("recovery_owner_id")
+            or not isinstance(recovery.get("git_head"), str)
+            or _FULL_GIT_COMMIT.fullmatch(recovery["git_head"]) is None
+            or not isinstance(authority, dict)
+            or set(authority) != {"project_id", "target", "recovery"}
+            or not isinstance(authority.get("project_id"), str)
+            or not authority["project_id"]
+            or authority["project_id"] != authority["project_id"].strip()
+            or not isinstance(target_authority, dict)
+            or set(target_authority) != {"decision_id", "decision_sha256", "change_id"}
+            or not is_canonical_decision_id(target_authority.get("decision_id"))
+            or not is_canonical_runtime_change_id(target_authority.get("change_id"))
+            or not isinstance(recovery_authority, dict)
+            or set(recovery_authority) != {"decision_id", "decision_sha256", "change_id"}
+            or not is_canonical_decision_id(recovery_authority.get("decision_id"))
+            or not is_canonical_runtime_change_id(recovery_authority.get("change_id"))
+            or recovery_authority.get("decision_id") != recorded_request.get("decision_id")
+            or target_authority["decision_id"] == recovery_authority["decision_id"]
+            or target_authority["change_id"] == recovery_authority["change_id"]
+            or any(
+                not isinstance(value, str)
+                or len(value) != 64
+                or any(character not in "0123456789abcdef" for character in value)
+                for value in sha256_fields
+            )
+        ):
+            raise ContinuityStoreError("结算事件 payload 身份或 schema 非法")
+        if schema_version == "expired-run-settlement.v3" and (
+            not isinstance(lease_release, dict)
+            or set(lease_release) != {"reason", "released_at", "lease_epoch"}
+            or lease_release.get("reason") != "recovery:expired"
+            or lease_release.get("released_at") != row["created_at"]
+            or type(lease_release.get("lease_epoch")) is not int
+            or lease_release["lease_epoch"] != target["lease_version"] + 1
+        ):
+            raise ContinuityStoreError("结算事件 lease release 回执非法")
+        if recorded_request != request or payload.get("request_hash") != request_hash:
+            raise ContinuityStoreError("idempotency_key 的结算请求语义不一致")
+        if recovery_lease_token is not None and not hmac.compare_digest(
+            str(payload.get("recovery_token_sha256")),
+            cls._lease_token_fingerprint(recovery_lease_token),
+        ):
+            raise ContinuityStoreError("结算恢复 lease token identity 不匹配")
+        cls._aware_timestamp(target["lease_expires_at"], "结算事件目标 lease")
+        run = cls._get_run(conn, str(target_run_id))
+        if (
+            run.work_id != target["work_id"]
+            or run.state.value != target["settled_state"]
+            or run.version != target["settled_version"]
+        ):
+            raise ContinuityStoreError("结算事件与 Run 当前状态不一致")
+        if schema_version == "expired-run-settlement.v3":
+            lease = cls._get_lease(conn, str(target_run_id))
+            if (
+                lease.version != cast(dict[str, object], lease_release)["lease_epoch"]
+                or not lease.lease_token.startswith("RELEASED:")
+            ):
+                raise ContinuityStoreError("结算事件与已释放 lease 不一致")
+        return run
+
+    @staticmethod
+    def _aware_timestamp(raw: str, label: str) -> datetime:
+        try:
+            value = datetime.fromisoformat(raw)
+        except ValueError as error:
+            raise ContinuityStoreError(f"{label} 时间戳非法") from error
+        if value.tzinfo is None:
+            raise ContinuityStoreError(f"{label} 时间戳必须包含时区")
+        return value.astimezone(UTC)
+
+    @staticmethod
+    def _refuse_while_closure_prepared(
+        conn: sqlite3.Connection, column: str, value: str, label: str
+    ) -> None:
+        """Once a closure is prepared, only C08 may move its Run/Work to the end."""
+
+        assert column in {"run_id", "work_id"}
+        row = conn.execute(
+            f"SELECT closure_id FROM closure_items WHERE {column}=? AND state='PREPARED'",
+            (value,),
+        ).fetchone()
+        if row is not None:
+            raise ContinuityStoreError(
+                f"收口 {row['closure_id']} 已准备：{label} 的终态只能由 close_accepted 一步推进"
+            )
+
+    @classmethod
+    def _early_terminal_lineage(
+        cls,
+        conn: sqlite3.Connection,
+        closure: dict[str, Any],
+        run: RunItem,
+        work: WorkItem,
+    ) -> dict[str, str] | None:
+        """Facts of a Run SUCCEEDED and a Work CLOSED that were reached by hand after
+        this closure was prepared (before the guard existed); None when not both."""
+
+        if run.state is not RunState.SUCCEEDED or work.state is not WorkState.CLOSED:
+            return None
+        prepared_at = datetime.fromisoformat(str(closure["created_at"]))
+        facts: dict[str, str] = {}
+        for aggregate_type, aggregate_id, event_type, key, terminal in (
+            ("run", run.run_id, "RUN_TRANSITIONED", "new_state", RunState.SUCCEEDED.value),
+            ("work", work.work_id, "WORK_TRANSITIONED", "state", WorkState.CLOSED.value),
+        ):
+            row = conn.execute(
+                """SELECT event_id, payload_json, created_at FROM events
+                WHERE aggregate_type=? AND aggregate_id=? AND event_type=?
+                ORDER BY rowid DESC LIMIT 1""",
+                (aggregate_type, aggregate_id, event_type),
+            ).fetchone()
+            try:
+                payload = json.loads(str(row["payload_json"])) if row is not None else {}
+                reached_at = datetime.fromisoformat(str(row["created_at"])) if row else None
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ContinuityStoreError("C08 无法读取提前终态的迁移事件") from error
+            if reached_at is None or payload.get(key) != terminal or reached_at < prepared_at:
+                raise ContinuityStoreError(
+                    "C08 只接纳收口准备之后由同一 Run/Work 到达的提前终态"
+                )
+            facts[f"{aggregate_type}_terminal_event_id"] = str(row["event_id"])
+        return facts
+
+    @classmethod
+    def _closure_completion_from_event(
+        cls,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row | None,
+        *,
+        closure_id: str,
+        projection_receipt: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if row is None:
+            raise ContinuityStoreError("C08 收口事件未能原子落库")
+        payload = cls._validated_event_payload(row, label="C08 收口")
+        if (
+            row["aggregate_type"] != "closure"
+            or row["aggregate_id"] != closure_id
+            or row["event_type"] != "CLOSURE_COMPLETED"
+            or set(payload) != {"schema_version", "projection_receipt", "receipt"}
+            or payload.get("schema_version") != "closure-completed.v1"
+        ):
+            raise ContinuityStoreError("idempotency_key 的 C08 收口语义不一致")
+        recorded_projection = payload.get("projection_receipt")
+        receipt = payload.get("receipt")
+        if not isinstance(recorded_projection, dict) or not isinstance(receipt, dict):
+            raise ContinuityStoreError("C08 收口事件载荷损坏")
+        if projection_receipt is not None and recorded_projection != projection_receipt:
+            raise ContinuityStoreError("idempotency_key 已绑定不同投影回执")
+        expected_receipt_keys = {
+            "closure_id",
+            "state",
+            "projection_state",
+            "run_id",
+            "run_state",
+            "work_id",
+            "work_state",
+            "mission_id",
+            "mission_state",
+            "pending_reason",
+        }
+        if (
+            set(receipt) != expected_receipt_keys
+            or receipt.get("closure_id") != closure_id
+            or receipt.get("state") != "COMPLETED"
+            or receipt.get("projection_state") != "PROJECTED"
+            or receipt.get("run_state") != RunState.SUCCEEDED.value
+            or receipt.get("work_state") != WorkState.CLOSED.value
+            or receipt.get("mission_state") != MissionState.CLOSED.value
+            or receipt.get("pending_reason") is not None
+            or recorded_projection.get("closure_id") != closure_id
+            or recorded_projection.get("state") != "PROJECTED"
+            or recorded_projection.get("pending_reason") is not None
+        ):
+            raise ContinuityStoreError("C08 收口事件终态不合法")
+
+        closure = conn.execute(
+            "SELECT * FROM closure_items WHERE closure_id=?",
+            (closure_id,),
+        ).fetchone()
+        step = conn.execute(
+            "SELECT * FROM closure_steps WHERE closure_id=?",
+            (closure_id,),
+        ).fetchone()
+        outbox = conn.execute(
+            "SELECT * FROM closure_outbox WHERE closure_id=?",
+            (closure_id,),
+        ).fetchone()
+        if (
+            closure is None
+            or step is None
+            or outbox is None
+            or closure["state"] != "COMPLETED"
+            or closure["version"] != 2
+            or step["state"] != "COMPLETED"
+            or step["attempt_count"] != 1
+            or outbox["published_at"] is None
+        ):
+            raise ContinuityStoreError("C08 收口事件与 Closure 当前状态不一致")
+
+        run = cls._get_run(conn, str(receipt["run_id"]))
+        work = cls._get_work(conn, str(receipt["work_id"]))
+        mission = cls._get_mission(conn, str(receipt["mission_id"]))
+        if (
+            run.state is not RunState.SUCCEEDED
+            or work.state is not WorkState.CLOSED
+            or mission.state is not MissionState.CLOSED
+            or closure["run_id"] != run.run_id
+            or closure["work_id"] != work.work_id
+            or closure["mission_id"] != mission.mission_id
+            or recorded_projection.get("change_id") != closure["change_id"]
+        ):
+            raise ContinuityStoreError("C08 收口事件与 Run/Work/Mission 当前终态不一致")
+        return cast(dict[str, Any], receipt)
+
+    @classmethod
+    def _closure_preparation_from_event(
+        cls,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row | None,
+        *,
+        request: dict[str, str],
+        request_hash: str,
+    ) -> dict[str, dict[str, Any]]:
+        if row is None:
+            raise ContinuityStoreError("收口准备事件未能原子落库")
+        payload = cls._validated_event_payload(row, label="收口准备")
+        if (
+            row["aggregate_type"] != "closure"
+            or row["event_type"] != "CLOSURE_PREPARED"
+            or set(payload)
+            != {"schema_version", "request", "request_hash", "closure", "step", "outbox"}
+            or payload.get("schema_version") != "closure-prepared.v1"
+            or payload.get("request") != request
+            or not hmac.compare_digest(str(payload.get("request_hash")), request_hash)
+        ):
+            raise ContinuityStoreError("idempotency_key 的收口准备语义不一致")
+        closure = payload.get("closure")
+        step = payload.get("step")
+        outbox = payload.get("outbox")
+        if not all(isinstance(item, dict) for item in (closure, step, outbox)):
+            raise ContinuityStoreError("收口准备事件载荷损坏")
+        closure_id = str(cast(dict[str, Any], closure).get("closure_id", ""))
+        if row["aggregate_id"] != closure_id:
+            raise ContinuityStoreError("收口准备事件聚合身份不一致")
+        persisted = cls._get_closure_preparation(conn, closure_id)
+        expected = {
+            "closure": cast(dict[str, Any], closure),
+            "step": cast(dict[str, Any], step),
+            "outbox": cast(dict[str, Any], outbox),
+        }
+        if persisted != expected:
+            raise ContinuityStoreError("收口准备事件与原子状态不一致")
+        return persisted
+
+    @staticmethod
+    def _get_closure_preparation(
+        conn: sqlite3.Connection,
+        closure_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        closure_row = conn.execute(
+            "SELECT * FROM closure_items WHERE closure_id=?",
+            (closure_id,),
+        ).fetchone()
+        if closure_row is None:
+            raise ContinuityStoreError(f"Closure 不存在: {closure_id}")
+        step_rows = conn.execute(
+            "SELECT * FROM closure_steps WHERE closure_id=? ORDER BY sequence",
+            (closure_id,),
+        ).fetchall()
+        outbox_rows = conn.execute(
+            "SELECT * FROM closure_outbox WHERE closure_id=? ORDER BY created_at, outbox_id",
+            (closure_id,),
+        ).fetchall()
+        if len(step_rows) != 1 or len(outbox_rows) != 1:
+            raise ContinuityStoreError("C05 Closure 必须精确包含一个准备步骤和一个 outbox")
+        closure = dict(closure_row)
+        step = dict(step_rows[0])
+        outbox = dict(outbox_rows[0])
+        if (
+            closure["state"] != "PREPARED"
+            or closure["version"] != 1
+            or step["closure_id"] != closure_id
+            or step["sequence"] != 1
+            or step["step_kind"] != "CHANGE_SUBSTANCE"
+            or step["state"] != "PENDING"
+            or step["attempt_count"] != 0
+            or outbox["closure_id"] != closure_id
+            or outbox["step_id"] != step["step_id"]
+            or outbox["artifact_kind"] != "CHANGE_SUBSTANCE"
+            or outbox["published_at"] is not None
+        ):
+            raise ContinuityStoreError("C05 Closure 准备状态损坏或已越过后续阶段")
+        try:
+            decoded_payload = json.loads(str(outbox["payload_json"]))
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ContinuityStoreError("Closure outbox payload 无法读取") from error
+        canonical_payload = json.dumps(
+            decoded_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if (
+            canonical_payload != outbox["payload_json"]
+            or not hmac.compare_digest(
+                hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest(),
+                str(outbox["payload_hash"]),
+            )
+        ):
+            raise ContinuityStoreError("Closure outbox payload hash 不一致")
+        return {"closure": closure, "step": step, "outbox": outbox}
+
+    @staticmethod
+    def _get_work(conn: sqlite3.Connection, work_id: str) -> WorkItem:
+        row = conn.execute("SELECT * FROM work_items WHERE work_id=?", (work_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Work 不存在: {work_id}")
+        data = dict(row)
+        data["read_only"] = bool(data["read_only"])
+        data["scope_paths"] = tuple(json.loads(data.pop("scope_json")))
+        return WorkItem.model_validate(data)
+
+    @staticmethod
+    def _get_mission(conn: sqlite3.Connection, mission_id: str) -> Mission:
+        row = conn.execute(
+            "SELECT * FROM mission_items WHERE mission_id=?", (mission_id,)
+        ).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Mission 不存在: {mission_id}")
+        data = dict(row)
+        data["acceptance_criteria"] = tuple(json.loads(data.pop("acceptance_criteria_json")))
+        data["authority"] = json.loads(data.pop("authority_json"))
+        return Mission.model_validate(data)
+
+    @staticmethod
+    def _get_planning_draft(row: sqlite3.Row) -> PlanningDraft:
+        data = dict(row)
+        data["acceptance_criteria"] = tuple(json.loads(data.pop("acceptance_criteria_json")))
+        data.pop("created_at")
+        data.pop("updated_at")
+        return PlanningDraft.model_validate(data)
+
+    @staticmethod
+    def _get_run(conn: sqlite3.Connection, run_id: str) -> RunItem:
+        row = conn.execute("SELECT * FROM run_items WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Run 不存在: {run_id}")
+        data = dict(row)
+        data["owned_paths"] = tuple(json.loads(data.pop("owned_paths_json")))
+        data["declared_dirty_paths"] = tuple(json.loads(data.pop("declared_dirty_paths_json")))
+        return RunItem.model_validate(data)
+
+    @staticmethod
+    def _get_lease(conn: sqlite3.Connection, run_id: str) -> LeaseItem:
+        row = conn.execute("SELECT * FROM execution_leases WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Run lease 不存在: {run_id}")
+        return LeaseItem.model_validate(dict(row))
+
+    @staticmethod
+    def _grant_epoch(conn: sqlite3.Connection, run_id: str) -> int:
+        """The epoch of the lease token now installed on a Run: the lease version at which the token was granted.
+
+        Only an event that installs a new token changes it (a Run creation grants version 1, a transfer grants the version it produces); a renewal raises the
+        lease version but never the epoch (V04-R1: ``lease_reclaim.LeaseEvent``).  Read in the caller's write transaction.
+        """
+
+        row = conn.execute(
+            """SELECT event_type, payload_json FROM events
+            WHERE aggregate_id=?
+            AND event_type IN ('RUN_CREATED', 'LEASE_TRANSFERRED', 'LEASE_RECLAIMED', 'RUN_UNPARKED')
+            ORDER BY rowid DESC LIMIT 1""",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Run 没有 lease 授予事件: {run_id}")
+        if row["event_type"] == "RUN_CREATED":
+            return 1
+        try:  # a transfer, a reclaim and an unpark (TD-071) record the lease version they produce: that version is the new epoch
+            version = json.loads(str(row["payload_json"])).get("version")
+        except (TypeError, ValueError, AttributeError) as error:
+            raise ContinuityStoreError("lease 移交事件 payload 无法读取") from error
+        if type(version) is not int or version < 2:
+            raise ContinuityStoreError("lease 移交事件缺少合法的授予版本")
+        return version
+
+    def get_grant_epoch(self, run_id: str) -> int:
+        """Read-only: the epoch a holder presents with its writes (see ``_grant_epoch``)."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            self._get_run(conn, run_id)
+            return self._grant_epoch(conn, run_id)
+
+    @staticmethod
+    def local_time_text(raw: str) -> str:
+        """An ISO timestamp shown in this machine's local time with its offset (the user reads Arizona time); the raw text when it cannot be parsed."""
+
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            return str(raw)
+        if parsed.tzinfo is None:
+            return str(raw)
+        return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+
+    def _holder_notice(self, conn: sqlite3.Connection, run_id: str) -> str:
+        """Who holds a Run's lease and until when, for refusal messages (case 1 of the storage acceptance cases); never the token."""
+
+        try:
+            lease = self._get_lease(conn, run_id)
+            epoch = str(self._grant_epoch(conn, run_id))
+        except ContinuityStoreError:
+            return f"：Run {run_id}"
+        return (
+            f"：Run {run_id} 正由 {lease.owner_id} 持有（epoch {epoch}），租约到 "
+            f"{self.local_time_text(lease.expires_at)}（本机时间，另有 {GRACE_SECONDS} 秒宽限）；"
+            "请等对方交接（pm handoff），或租约过期后再回收（continuity run reclaim）"
+        )
+
+    _RECLAIMABLE_RUN_STATES = frozenset(
+        {RunState.READY, RunState.RUNNING, RunState.BLOCKED, RunState.PENDING, RunState.VERIFYING}
+    )
+
+    def record_holder_process(
+        self,
+        *,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        fingerprint: ProcessFingerprint,
+        idempotency_key: str,
+    ) -> None:
+        """Record the holder's long-lived process for the CURRENT grant epoch (used only by a later reclaim; never a precondition of any write)."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        owner_id = self._validated_run_text(owner_id, label="lease owner")
+        lease_token = self._validated_run_text(lease_token, label="lease token")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        record = {
+            "host_id": self._validated_run_text(fingerprint.host_id, label="host_id"),
+            "pid": fingerprint.pid,
+            "start_time": self._validated_run_text(fingerprint.start_time, label="start_time"),
+            "image_sha256": fingerprint.image_sha256,
+            "cmdline_sha256": fingerprint.cmdline_sha256,
+        }
+        if type(fingerprint.pid) is not int or fingerprint.pid <= 0:
+            raise ContinuityStoreError("持有者进程 pid 必须是正整数")
+        for label in ("image_sha256", "cmdline_sha256"):
+            value = record[label]
+            if value is not None and (not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None):
+                raise ContinuityStoreError(f"{label} 必须是 64 位小写十六进制或空")
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="持有者进程")
+                if (
+                    existing["event_type"] != "HOLDER_PROCESS_RECORDED"
+                    or existing["aggregate_id"] != run_id
+                    or payload.get("owner_id") != owner_id
+                    or payload.get("process") != record
+                ):
+                    raise ContinuityStoreError("idempotency_key 的持有者进程记录语义不一致")
+                return
+            run = self._get_run(conn, run_id)
+            if run.state not in self._RECLAIMABLE_RUN_STATES:
+                raise ContinuityStoreError("只有非终态 Run 可以记录持有者进程")
+            self._require_lease_in_tx(conn, run_id=run_id, owner_id=owner_id, lease_token=lease_token, expected_epoch=None)
+            now = self._utc_now().isoformat()
+            self._append_event(
+                conn,
+                run_id,
+                "HOLDER_PROCESS_RECORDED",
+                {
+                    "schema_version": "holder-process.v1",
+                    "run_id": run_id,
+                    "owner_id": owner_id,
+                    "epoch": self._grant_epoch(conn, run_id),
+                    "process": record,
+                    "lease_token_sha256": self._lease_token_fingerprint(lease_token),
+                    "recorded_at": now,
+                },
+                idempotency_key,
+                now,
+                aggregate_type="run",
+            )
+
+    @staticmethod
+    def _current_holder_process(conn: sqlite3.Connection, run_id: str, owner_id: str, epoch: int) -> ProcessFingerprint | None:
+        rows = conn.execute(
+            """SELECT payload_json FROM events
+            WHERE aggregate_type='run' AND aggregate_id=? AND event_type='HOLDER_PROCESS_RECORDED'
+            ORDER BY rowid DESC""",
+            (run_id,),
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(str(row["payload_json"]))
+                process = payload["process"]
+                if payload.get("owner_id") != owner_id or payload.get("epoch") != epoch:
+                    continue
+                return ProcessFingerprint(
+                    host_id=str(process["host_id"]),
+                    pid=int(process["pid"]),
+                    start_time=str(process["start_time"]),
+                    image_sha256=process.get("image_sha256"),
+                    cmdline_sha256=process.get("cmdline_sha256"),
+                )
+            except (TypeError, ValueError, KeyError, AttributeError):
+                return None  # a malformed record proves nothing: the reclaim then sees UNKNOWN
+        return None
+
+    def holder_process(self, run_id: str) -> ProcessFingerprint | None:
+        """Read-only: the recorded process of the current holder in the current epoch, or ``None`` (then a reclaim sees UNKNOWN)."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            lease = self._get_lease(conn, run_id)
+            return self._current_holder_process(conn, run_id, lease.owner_id, self._grant_epoch(conn, run_id))
+
+    def record_reclaim_risk_acceptance(
+        self,
+        *,
+        run_id: str,
+        claimant_id: str,
+        signer: str,
+        method: str,
+        idempotency_key: str,
+    ) -> str:
+        """Record the user's own acceptance of the risk of reclaiming a Run whose holder process cannot be identified (PENDING exit).
+
+        It binds the Run, the claimant, the current holder, the grant epoch and the lease version: a renewal or any change of ownership after
+        the signature voids it. The caller (``pm sign-risk``) refuses non-interactive and agent sessions; the store records, it does not judge.
+        """
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        claimant_id = self._validated_run_text(claimant_id, label="claimant")
+        signer = self._validated_run_text(signer, label="signer")
+        method = self._validated_run_text(method, label="method")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        with self._transaction() as conn:
+            run = self._get_run(conn, run_id)
+            if run.state not in self._RECLAIMABLE_RUN_STATES:
+                raise ContinuityStoreError("只有非终态 Run 可以签署回收风险")
+            lease = self._get_lease(conn, run_id)
+            if lease.owner_id == claimant_id:
+                raise ContinuityStoreError("回收方已是当前持有者，无需签署")
+            epoch = self._grant_epoch(conn, run_id)
+            payload = {
+                "schema_version": "reclaim-risk-accepted.v1",
+                "run_id": run_id,
+                "claimant_id": claimant_id,
+                "holder_owner_id": lease.owner_id,
+                "epoch": epoch,
+                "lease_version": lease.version,
+                "signer": signer,
+                "method": method,
+            }
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                stored = self._validated_event_payload(existing, label="回收风险签署")
+                if existing["event_type"] != "RECLAIM_RISK_ACCEPTED" or {k: stored.get(k) for k in payload} != payload:
+                    raise ContinuityStoreError("idempotency_key 的回收风险签署语义不一致")
+                return str(existing["event_id"])
+            now = self._utc_now().isoformat()
+            digest = hashlib.sha256(
+                json.dumps({**payload, "signed_at": now}, sort_keys=True, ensure_ascii=False).encode()
+            ).hexdigest()[:16].upper()
+            event_id = f"RISK-{digest}"
+            self._append_event(
+                conn,
+                run_id,
+                "RECLAIM_RISK_ACCEPTED",
+                {**payload, "signed_at": now},
+                idempotency_key,
+                now,
+                event_id=event_id,
+                aggregate_type="run",
+            )
+            return event_id
+
+    @staticmethod
+    def _current_risk_acceptance(
+        conn: sqlite3.Connection, run_id: str, claimant_id: str, holder_owner_id: str, epoch: int, lease_version: int
+    ) -> str | None:
+        rows = conn.execute(
+            """SELECT event_id, payload_json FROM events
+            WHERE aggregate_type='run' AND aggregate_id=? AND event_type='RECLAIM_RISK_ACCEPTED'
+            ORDER BY rowid DESC""",
+            (run_id,),
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(str(row["payload_json"]))
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(payload, dict)
+                and payload.get("claimant_id") == claimant_id
+                and payload.get("holder_owner_id") == holder_owner_id
+                and payload.get("epoch") == epoch
+                and payload.get("lease_version") == lease_version
+            ):
+                return str(row["event_id"])
+        return None
+
+    def reclaim_risk_acceptance(self, run_id: str, claimant_id: str) -> str | None:
+        """Read-only: the id of a still-valid risk acceptance for this claimant (same holder, epoch and lease version), or ``None``."""
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        with self._read_connection() as conn:
+            lease = self._get_lease(conn, run_id)
+            return self._current_risk_acceptance(
+                conn, run_id, claimant_id, lease.owner_id, self._grant_epoch(conn, run_id), lease.version
+            )
+
+    def reclaim_lease(
+        self,
+        *,
+        run_id: str,
+        expected_owner_id: str,
+        expected_lease_version: int,
+        claimant_id: str,
+        new_token: str,
+        lease_seconds: int,
+        process_verdict: ProcessVerdict,
+        risk_acceptance_id: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> LeaseItem:
+        """Install a new holder on a started Run whose lease is no longer live (expired plus grace) - V04-R1 case 3.
+
+        Allowed only for ``PROVEN_DEAD`` or for ``UNKNOWN`` with a still-valid user risk acceptance; ``ALIVE`` and a live lease are refused here
+        again INSIDE the write transaction, so a renewal or a transfer between the caller's check and this write cannot be overtaken.  The lease
+        version is raised by one and that version is the new epoch (``_grant_epoch``); the old token is gone with the overwritten row.
+        """
+
+        run_id = self._validated_run_text(run_id, label="run_id")
+        expected_owner_id = self._validated_run_text(expected_owner_id, label="expected owner")
+        claimant_id = self._validated_run_text(claimant_id, label="claimant")
+        new_token = self._validated_run_text(new_token, label="new lease token")
+        reason = self._validated_run_text(reason, label="reason")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(expected_lease_version) is not int or expected_lease_version < 1:
+            raise ContinuityStoreError("expected_lease_version 必须是正整数")
+        if type(lease_seconds) is not int or not 60 <= lease_seconds <= 3_600:
+            raise ContinuityStoreError("回收后的 lease_seconds 必须在 60 到 3600 之间")
+        if claimant_id == expected_owner_id:
+            raise ContinuityStoreError("回收方不得是当前持有者；持有者请续租")
+        if new_token in reason:
+            raise ContinuityStoreError("回收原因不得包含 lease token")
+        if process_verdict is ProcessVerdict.ALIVE:
+            raise ContinuityStoreError("持有者进程仍在运行，拒绝回收")
+        if process_verdict is ProcessVerdict.UNKNOWN and not risk_acceptance_id:
+            raise ContinuityStoreError("持有者进程无法判断：须用户本人签署接受风险（pm sign-risk）后才能回收")
+        if process_verdict is ProcessVerdict.PROVEN_DEAD and risk_acceptance_id:
+            raise ContinuityStoreError("持有者进程已证明不在时不需要风险签署")
+        request = {
+            "schema_version": "lease-reclaim-request.v1",
+            "run_id": run_id,
+            "expected_owner_id": expected_owner_id,
+            "expected_lease_version": expected_lease_version,
+            "claimant_id": claimant_id,
+            "lease_seconds": lease_seconds,
+            "process_verdict": process_verdict.value,
+            "risk_acceptance_id": risk_acceptance_id,
+            "reason": reason,
+            "new_token_sha256": self._lease_token_fingerprint(new_token),
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="lease 回收")
+                if (
+                    existing["aggregate_type"] != "run"
+                    or existing["aggregate_id"] != run_id
+                    or existing["event_type"] != "LEASE_RECLAIMED"
+                    or payload.get("schema_version") != "lease-reclaimed.v1"
+                    or payload.get("request") != request
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 lease 回收语义不一致")
+                return self._get_lease(conn, run_id)
+            run = self._get_run(conn, run_id)
+            self._refuse_if_parked(conn, run_id, "搁着不是掉线，不用回收")
+            if run.state not in self._RECLAIMABLE_RUN_STATES:
+                raise ContinuityStoreError(f"只有非终态 Run 可以回收租约（当前 {run.state.value}）")
+            current = self._get_lease(conn, run_id)
+            if current.owner_id != expected_owner_id or current.version != expected_lease_version:
+                raise ContinuityStoreError("lease 持有者或版本在回收判定之后已变化，拒绝回收" + self._holder_notice(conn, run_id))
+            observed_at = self._utc_now()
+            expires = self._aware_timestamp(current.expires_at, "lease")
+            if lease_is_live(expires, observed_at):
+                raise ContinuityStoreError("租约仍有效（含宽限期），拒绝回收" + self._holder_notice(conn, run_id))
+            if process_verdict is ProcessVerdict.UNKNOWN:
+                valid = self._current_risk_acceptance(
+                    conn, run_id, claimant_id, current.owner_id, self._grant_epoch(conn, run_id), current.version
+                )
+                if valid is None or not hmac.compare_digest(valid, risk_acceptance_id):
+                    raise ContinuityStoreError("风险签署不存在或已失效（持有者、epoch 或租约版本已变化），请用户重新签署")
+            new_expires = (observed_at + timedelta(seconds=lease_seconds)).isoformat()
+            event_time = observed_at.isoformat()
+            cursor = conn.execute(
+                """UPDATE execution_leases
+                SET owner_id=?, lease_token=?, expires_at=?, version=version+1, updated_at=?
+                WHERE run_id=? AND owner_id=? AND version=?""",
+                (claimant_id, new_token, new_expires, event_time, run_id, expected_owner_id, expected_lease_version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("lease 回收 owner 或版本冲突")
+            self._append_event(
+                conn,
+                run_id,
+                "LEASE_RECLAIMED",
+                {
+                    "schema_version": "lease-reclaimed.v1",
+                    "request": request,
+                    "run_id": run_id,
+                    "from_owner": expected_owner_id,
+                    "to_owner": claimant_id,
+                    "previous_expires_at": current.expires_at,
+                    "expires_at": new_expires,
+                    "version": expected_lease_version + 1,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="run",
+            )
+            return self._get_lease(conn, run_id)
+
+    # ---- TD-071: park / unpark (one ACTIVE Mission per project, the others put down with a checkpoint) ----
+
+    _PARKABLE_MISSION_STATES = frozenset({MissionState.ACTIVE, MissionState.BLOCKED})
+    _PARKABLE_RUN_STATES = frozenset({RunState.RUNNING, RunState.BLOCKED})
+
+    def _validated_park_paths(self, raw: object, *, label: str) -> tuple[str, ...]:
+        if not isinstance(raw, (tuple, list)) or any(not isinstance(item, str) for item in raw):
+            raise ContinuityStoreError(f"{label} 必须是路径列表")
+        normalized = tuple(self._normalize_authority_path(item) for item in raw)
+        if len(set(normalized)) != len(normalized):
+            raise ContinuityStoreError(f"{label} 含重复路径")
+        return tuple(sorted(normalized))
+
+    @staticmethod
+    def _park_marker(lease: LeaseItem, park_id: str, event_time: str) -> str:
+        seed = f"{lease.run_id}\0{lease.version}\0park:{park_id}\0{event_time}".encode()
+        return PARKED_TOKEN_PREFIX + hashlib.sha256(seed).hexdigest()
+
+    @staticmethod
+    def _get_mission_park(conn: sqlite3.Connection, park_id: str) -> MissionPark:
+        row = conn.execute("SELECT * FROM run_parks WHERE park_id=?", (park_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"搁着记录不存在: {park_id}")
+        return MissionPark.model_validate(dict(row))
+
+    @staticmethod
+    def _open_park_row(conn: sqlite3.Connection, column: str, value: str) -> sqlite3.Row | None:
+        assert column in {"run_id", "mission_id"}
+        row = conn.execute(
+            f"SELECT * FROM run_parks WHERE {column}=? AND unparked_at IS NULL",
+            (value,),
+        ).fetchone()
+        return cast(sqlite3.Row | None, row)
+
+    def _refuse_if_parked(self, conn: sqlite3.Connection, run_id: str, action: str) -> None:
+        """A parked Run is not lost or expired: every lease action other than unpark is refused."""
+
+        if self._table_exists(conn, "run_parks") and self._open_park_row(conn, "run_id", run_id):
+            raise ContinuityStoreError(f"这张卡搁着呢，{action}；请用 pm unpark 拿回来")
+
+    def _project_held_lease_run_ids(
+        self, conn: sqlite3.Connection, subject_project_id: str, observed_at: datetime
+    ) -> tuple[str, ...]:
+        rows = conn.execute(
+            """SELECT l.run_id, l.lease_token, l.expires_at FROM execution_leases l
+            JOIN run_items r ON r.run_id = l.run_id
+            JOIN work_items w ON w.work_id = r.work_id
+            WHERE w.subject_project_id=?
+            AND r.state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+            ORDER BY l.run_id""",
+            (subject_project_id,),
+        ).fetchall()
+        return tuple(
+            str(row["run_id"])
+            for row in rows
+            if lease_is_held(
+                lease_token=str(row["lease_token"]),
+                expires_at=self._aware_timestamp(str(row["expires_at"]), "lease"),
+                now=observed_at,
+            )
+        )
+
+    def _parked_mission_of_work(self, conn: sqlite3.Connection, work: WorkItem) -> str | None:
+        """The parked Mission whose Decision authorizes ``work``, if any (TD-071): a parked card's
+        other Works start again only through ``pm unpark``."""
+
+        if not self._table_exists(conn, "run_parks"):
+            return None
+        rows = conn.execute(
+            """SELECT DISTINCT m.mission_id, m.authority_json FROM mission_items m
+            JOIN run_parks p ON p.mission_id = m.mission_id
+            WHERE p.unparked_at IS NULL AND m.subject_project_id=?
+            ORDER BY m.mission_id""",
+            (work.subject_project_id,),
+        ).fetchall()
+        for row in rows:
+            try:
+                decision_id = json.loads(str(row["authority_json"])).get("decision_id")
+            except (json.JSONDecodeError, AttributeError) as error:
+                raise ContinuityStoreError("Mission authority JSON 无法读取") from error
+            if decision_id == work.authorization_ref:
+                return str(row["mission_id"])
+        return None
+
+    def _single_live_run_of_mission(self, conn: sqlite3.Connection, mission: Mission) -> RunItem:
+        if mission.root_work_id is None:
+            raise ContinuityStoreError("Mission 缺少根 Work，无法搁着")
+        rows = conn.execute(
+            """SELECT run_id FROM run_items WHERE work_id=?
+            AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')""",
+            (mission.root_work_id,),
+        ).fetchall()
+        if len(rows) != 1:
+            raise ContinuityStoreError(
+                f"Mission 根 Work 必须恰有 1 个未终结 Run 才能搁着（实际 {len(rows)} 个）"
+            )
+        return self._get_run(conn, str(rows[0]["run_id"]))
+
+    def park_mission(
+        self,
+        *,
+        mission_id: str,
+        expected_mission_version: int,
+        park_id: str,
+        checkpoint_id: str,
+        owner_id: str,
+        lease_token: str,
+        reason: str,
+        summary: str,
+        git_head: str,
+        dirty_paths: tuple[str, ...] | list[str],
+        idempotency_key: str,
+        target_state: MissionState = MissionState.PARKED,
+        approval_evidence_ref: str = "",
+    ) -> MissionPark:
+        """Put an ACTIVE or BLOCKED Mission down in one transaction (TD-071 design 4.2).
+
+        ``target_state`` PARKED ("搁着") needs the user's own words (``approval_evidence_ref``,
+        design 7.2).  Without them an agent may only stop its own ACTIVE card into BLOCKED
+        ("等你"): same checkpoint, same fenced lease, same park record, and only the user picks it
+        back up (unpark).
+
+        Checks the caller still holds the Run's lease, writes a park checkpoint (where it got to and
+        what is next), fences the lease with ``PARKED:`` (row kept, expiry untouched), moves the Run
+        RUNNING -> BLOCKED and the Mission to PARKED, and records one open ``run_parks`` row.  Any
+        failure writes nothing.
+        """
+
+        mission_id = self._validated_run_text(mission_id, label="mission_id")
+        park_id = self._validated_run_text(park_id, label="park_id")
+        checkpoint_id = self._validated_run_text(checkpoint_id, label="checkpoint_id")
+        owner_id = self._validated_run_text(owner_id, label="lease owner")
+        lease_token = self._validated_run_text(lease_token, label="lease token")
+        reason = self._validated_run_text(reason, label="搁着原因")
+        summary = self._validated_run_text(summary, label="断点摘要")
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(expected_mission_version) is not int or expected_mission_version < 1:
+            raise ContinuityStoreError("expected_mission_version 必须是正整数")
+        if not isinstance(git_head, str) or not _FULL_GIT_COMMIT.fullmatch(git_head):
+            raise ContinuityStoreError("断点 git_head 必须是 40 位提交号")
+        if lease_token in reason or lease_token in summary:
+            raise ContinuityStoreError("搁着原因和断点摘要不得包含 lease token")
+        paths = self._validated_park_paths(dirty_paths, label="断点改动文件")
+        if target_state not in {MissionState.PARKED, MissionState.BLOCKED}:
+            raise ContinuityStoreError("搁着的目标状态只能是 PARKED（搁着）或 BLOCKED（等你）")
+        approval_evidence_ref = approval_evidence_ref.strip() if isinstance(approval_evidence_ref, str) else ""
+        if target_state is MissionState.PARKED and not approval_evidence_ref:
+            raise ContinuityStoreError(
+                "放进“搁着”要用户一句话（--approval-evidence-ref）；agent 自己只能把卡放进“等你”"
+            )
+        if approval_evidence_ref and (problem := user_evidence_problem(approval_evidence_ref)):
+            raise ContinuityStoreError(problem)
+        if approval_evidence_ref and lease_token in approval_evidence_ref:
+            raise ContinuityStoreError("用户授权凭据不得包含 lease token")
+        try:
+            MissionPark(
+                park_id=park_id,
+                run_id="RUN",
+                mission_id=mission_id,
+                checkpoint_id=checkpoint_id,
+                parked_by=owner_id,
+                reason=reason,
+                parked_at=self._utc_now(),
+            )
+        except ValueError as error:
+            raise ContinuityStoreError("park_id 格式非法（应为 PARK-…）") from error
+        request = {
+            "schema_version": "mission-park-request.v1",
+            "mission_id": mission_id,
+            "expected_mission_version": expected_mission_version,
+            "park_id": park_id,
+            "checkpoint_id": checkpoint_id,
+            "owner_id": owner_id,
+            "reason": reason,
+            "summary": summary,
+            "git_head": git_head,
+            "dirty_paths": list(paths),
+            "lease_token_sha256": self._lease_token_fingerprint(lease_token),
+            "target_state": target_state.value,
+            "approval_evidence_ref": approval_evidence_ref,
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="Mission 搁着")
+                if (
+                    existing["aggregate_type"] != "mission"
+                    or existing["aggregate_id"] != mission_id
+                    or existing["event_type"] != "MISSION_PARKED"
+                    or payload.get("schema_version") != "mission-parked.v1"
+                    or payload.get("request") != request
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 Mission 搁着语义不一致")
+                return self._get_mission_park(conn, park_id)
+            mission = self._get_mission(conn, mission_id)
+            if mission.version != expected_mission_version:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            if mission.state not in self._PARKABLE_MISSION_STATES:
+                raise ContinuityStoreError(
+                    f"只有在干（ACTIVE）或卡住（BLOCKED）的 Mission 可以搁着（当前 {mission.state.value}）"
+                )
+            if target_state is MissionState.BLOCKED and mission.state is not MissionState.ACTIVE:
+                raise ContinuityStoreError("只有在干的卡可以放进“等你”")
+            run = self._single_live_run_of_mission(conn, mission)
+            if run.state not in self._PARKABLE_RUN_STATES:
+                raise ContinuityStoreError(
+                    f"只有 RUNNING 或 BLOCKED 的 Run 可以搁着（当前 {run.state.value}）"
+                )
+            self._refuse_while_closure_prepared(conn, "run_id", run.run_id, "Run")
+            if self._open_park_row(conn, "run_id", run.run_id) is not None:
+                raise ContinuityStoreError("这个 Run 已有未拿回的搁着记录")
+            lease = self._require_lease_in_tx(
+                conn, run_id=run.run_id, owner_id=owner_id, lease_token=lease_token, expected_epoch=None
+            )
+            if git_head != run.git_head:
+                raise ContinuityStoreError("断点 git_head 与 Run 基线不一致（Git baseline drift）")
+            allowed = (*run.owned_paths, *run.declared_dirty_paths)
+            outside = [path for path in paths if not self._authority_path_covered(path, allowed)]
+            if outside:
+                raise ContinuityStoreError("断点改动文件超出本卡范围: " + ", ".join(outside))
+            observed_at = self._utc_now()
+            event_time = observed_at.isoformat()
+
+            sequence = int(
+                conn.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM checkpoints WHERE run_id=?",
+                    (run.run_id,),
+                ).fetchone()[0]
+            )
+            checkpoint_values = {
+                "checkpoint_id": checkpoint_id,
+                "run_id": run.run_id,
+                "summary": summary,
+                "git_head": git_head,
+                "dirty_paths_json": json.dumps(list(paths), ensure_ascii=False),
+                "evidence_json": json.dumps(
+                    [f"park:{park_id}", f"reason:{reason}"], ensure_ascii=False
+                ),
+                "created_at": event_time,
+                "sequence": sequence,
+            }
+            self._insert_mapping(conn, "checkpoints", checkpoint_values)
+            self._append_event(
+                conn,
+                run.run_id,
+                "CHECKPOINT_CREATED",
+                checkpoint_values,
+                f"{idempotency_key}#checkpoint",
+                event_time,
+                event_id=checkpoint_id,
+                aggregate_type="run",
+            )
+
+            marker = self._park_marker(lease, park_id, event_time)
+            cursor = conn.execute(
+                """UPDATE execution_leases SET lease_token=?, version=version+1, updated_at=?
+                WHERE run_id=? AND lease_token=? AND version=?""",
+                (marker, event_time, run.run_id, lease.lease_token, lease.version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("搁着摘牌 CAS 冲突")
+            run_to = RunState.BLOCKED
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND version=?""",
+                (run_to.value, event_time, run.run_id, run.version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Run 不存在或版本冲突")
+            self._append_event(
+                conn,
+                run.run_id,
+                "RUN_PARKED",
+                {
+                    "schema_version": "run-parked.v1",
+                    "run_id": run.run_id,
+                    "park_id": park_id,
+                    "from_state": run.state.value,
+                    "new_state": run_to.value,
+                    "result_version": run.version + 1,
+                    "lease_owner": lease.owner_id,
+                    "lease_epoch_fenced": lease.version + 1,
+                },
+                f"{idempotency_key}#run",
+                event_time,
+                aggregate_type="run",
+            )
+            cursor = conn.execute(
+                """UPDATE mission_items SET state=?, version=version+1, updated_at=?
+                WHERE mission_id=? AND version=?""",
+                (target_state.value, event_time, mission_id, mission.version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            self._insert_mapping(
+                conn,
+                "run_parks",
+                {
+                    "park_id": park_id,
+                    "run_id": run.run_id,
+                    "mission_id": mission_id,
+                    "checkpoint_id": checkpoint_id,
+                    "parked_by": owner_id,
+                    "reason": reason,
+                    "parked_at": event_time,
+                    "unparked_at": None,
+                    "unparked_by": None,
+                },
+            )
+            self._append_event(
+                conn,
+                mission_id,
+                "MISSION_PARKED",
+                {
+                    "schema_version": "mission-parked.v1",
+                    "request": request,
+                    "run_id": run.run_id,
+                    "from_state": mission.state.value,
+                    "new_state": target_state.value,
+                    "result_version": mission.version + 1,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="mission",
+            )
+            # Built inside the transaction, so a bad row rolls the whole park back.
+            return self._get_mission_park(conn, park_id)
+
+    def unpark_mission(
+        self,
+        *,
+        mission_id: str,
+        expected_mission_version: int,
+        new_owner_id: str,
+        new_token: str,
+        lease_seconds: int,
+        observed_git_head: str,
+        observed_dirty_paths: tuple[str, ...] | list[str],
+        approval_evidence_ref: str,
+        idempotency_key: str,
+    ) -> tuple[MissionPark, LeaseItem]:
+        """Pick a parked Mission back up (TD-071 design 4.3); only the user may decide this.
+
+        Refuses unless the project has no other ACTIVE Mission and no other held lease, the
+        Mission's authority is still current, and the worktree is exactly as the park checkpoint left
+        it (same HEAD, same changed files).  Grants a new lease (a new epoch) to ``new_owner_id``,
+        who may differ from the one who parked it, moves Run BLOCKED -> RUNNING and Mission
+        PARKED -> ACTIVE, and closes the park record.  ``approval_evidence_ref`` points at the
+        user's own words and is recorded in the event.
+        """
+
+        mission_id = self._validated_run_text(mission_id, label="mission_id")
+        new_owner_id = self._validated_run_text(new_owner_id, label="new lease owner")
+        new_token = self._validated_run_text(new_token, label="new lease token")
+        approval_evidence_ref = self._validated_run_text(
+            approval_evidence_ref, label="用户授权凭据"
+        )
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        if type(expected_mission_version) is not int or expected_mission_version < 1:
+            raise ContinuityStoreError("expected_mission_version 必须是正整数")
+        if type(lease_seconds) is not int or not 60 <= lease_seconds <= 3_600:
+            raise ContinuityStoreError("拿回后的 lease_seconds 必须在 60 到 3600 之间")
+        if lease_token_is_fenced(new_token):
+            raise ContinuityStoreError("新 lease token 不得使用保留前缀")
+        if new_token in approval_evidence_ref:
+            raise ContinuityStoreError("用户授权凭据不得包含 lease token")
+        if problem := user_evidence_problem(approval_evidence_ref):
+            raise ContinuityStoreError(problem)
+        if not isinstance(observed_git_head, str) or not _FULL_GIT_COMMIT.fullmatch(observed_git_head):
+            raise ContinuityStoreError("工作树 HEAD 必须是 40 位提交号")
+        observed_paths = self._validated_park_paths(observed_dirty_paths, label="工作树改动文件")
+        request = {
+            "schema_version": "mission-unpark-request.v1",
+            "mission_id": mission_id,
+            "expected_mission_version": expected_mission_version,
+            "new_owner_id": new_owner_id,
+            "lease_seconds": lease_seconds,
+            "observed_git_head": observed_git_head,
+            "observed_dirty_paths": list(observed_paths),
+            "approval_evidence_ref": approval_evidence_ref,
+            "new_token_sha256": self._lease_token_fingerprint(new_token),
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                payload = self._validated_event_payload(existing, label="Mission 拿回")
+                if (
+                    existing["aggregate_type"] != "mission"
+                    or existing["aggregate_id"] != mission_id
+                    or existing["event_type"] != "MISSION_UNPARKED"
+                    or payload.get("schema_version") != "mission-unparked.v1"
+                    or payload.get("request") != request
+                ):
+                    raise ContinuityStoreError("idempotency_key 的 Mission 拿回语义不一致")
+                park = self._get_mission_park(conn, str(payload["park_id"]))
+                return park, self._get_lease(conn, park.run_id)
+            mission = self._get_mission(conn, mission_id)
+            if mission.version != expected_mission_version:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            if mission.state not in {MissionState.PARKED, MissionState.BLOCKED} or (
+                mission.state is MissionState.BLOCKED
+                and self._open_park_row(conn, "mission_id", mission_id) is None
+            ):
+                raise ContinuityStoreError(
+                    f"只有搁着（PARKED）或带断点等你的 Mission 可以拿回（当前 {mission.state.value}）"
+                )
+            observed_at = self._utc_now()
+            if not mission.authority.valid_from <= observed_at <= mission.authority.expires_at:
+                raise ContinuityStoreError("Mission 授权已过期或尚未生效，不能拿回开干；请先重新批准范围")
+            park_row = self._open_park_row(conn, "mission_id", mission_id)
+            if park_row is None:
+                raise ContinuityStoreError("搁着的 Mission 缺少未拿回的搁着记录（数据不一致）")
+            park = MissionPark.model_validate(dict(park_row))
+            run = self._get_run(conn, park.run_id)
+            if run.state is not RunState.BLOCKED:
+                raise ContinuityStoreError(f"搁着的 Run 应为 BLOCKED（当前 {run.state.value}）")
+            lease = self._get_lease(conn, run.run_id)
+            if not lease.lease_token.startswith(PARKED_TOKEN_PREFIX):
+                raise ContinuityStoreError("搁着的 Run 租约没有处于摘牌状态（数据不一致）")
+            other_active = conn.execute(
+                """SELECT mission_id, title FROM mission_items
+                WHERE subject_project_id=? AND state='ACTIVE' AND mission_id<>?""",
+                (mission.subject_project_id, mission_id),
+            ).fetchone()
+            if other_active is not None:
+                raise ContinuityStoreError(
+                    f"项目里“{other_active['title']}”（{other_active['mission_id']}）正在干；"
+                    "请先搁着它（pm park），或用 pm switch 一步切换"
+                )
+            held = [
+                run_id
+                for run_id in self._project_held_lease_run_ids(
+                    conn, mission.subject_project_id, observed_at
+                )
+                if run_id != run.run_id
+            ]
+            if held:
+                raise ContinuityStoreError(
+                    "项目里还有别的 Run 持有租约，不能再拿回一张开干: " + ", ".join(held)
+                )
+            checkpoint = self._get_checkpoint(conn, park.checkpoint_id)
+            problems: list[str] = []
+            if observed_git_head != checkpoint.git_head:
+                problems.append(
+                    f"HEAD 变了：断点 {checkpoint.git_head[:12]}，现在 {observed_git_head[:12]}"
+                )
+            recorded = set(checkpoint.dirty_paths)
+            observed = set(observed_paths)
+            if observed - recorded:
+                problems.append("多出改动: " + ", ".join(sorted(observed - recorded)))
+            if recorded - observed:
+                problems.append("少了改动: " + ", ".join(sorted(recorded - observed)))
+            if problems:
+                raise ContinuityStoreError(
+                    "搁着期间这张卡的工作树被动过，拒绝拿回：" + "；".join(problems)
+                )
+            event_time = observed_at.isoformat()
+            new_expires = (observed_at + timedelta(seconds=lease_seconds)).isoformat()
+            cursor = conn.execute(
+                """UPDATE execution_leases
+                SET owner_id=?, lease_token=?, expires_at=?, version=version+1, updated_at=?
+                WHERE run_id=? AND lease_token=? AND version=?""",
+                (
+                    new_owner_id,
+                    new_token,
+                    new_expires,
+                    event_time,
+                    run.run_id,
+                    lease.lease_token,
+                    lease.version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("拿回发新租约 CAS 冲突")
+            cursor = conn.execute(
+                """UPDATE run_items SET state=?, version=version+1, updated_at=?
+                WHERE run_id=? AND version=?""",
+                (RunState.RUNNING.value, event_time, run.run_id, run.version),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Run 不存在或版本冲突")
+            self._append_event(
+                conn,
+                run.run_id,
+                "RUN_UNPARKED",
+                {
+                    "schema_version": "run-unparked.v1",
+                    "run_id": run.run_id,
+                    "park_id": park.park_id,
+                    "from_owner": lease.owner_id,
+                    "to_owner": new_owner_id,
+                    "new_state": RunState.RUNNING.value,
+                    "result_version": run.version + 1,
+                    "expires_at": new_expires,
+                    # The lease version this grant produces: the new epoch (see _grant_epoch).
+                    "version": lease.version + 1,
+                },
+                f"{idempotency_key}#run",
+                event_time,
+                aggregate_type="run",
+            )
+            try:
+                cursor = conn.execute(
+                    """UPDATE mission_items SET state=?, version=version+1, updated_at=?
+                    WHERE mission_id=? AND version=?""",
+                    (MissionState.ACTIVE.value, event_time, mission_id, mission.version),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ContinuityStoreError(
+                    "项目里已有一张在干（ACTIVE）的 Mission；同一时刻只能有一张在干"
+                ) from error
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("Mission 不存在或版本冲突")
+            cursor = conn.execute(
+                """UPDATE run_parks SET unparked_at=?, unparked_by=?
+                WHERE park_id=? AND unparked_at IS NULL""",
+                (event_time, new_owner_id, park.park_id),
+            )
+            if cursor.rowcount != 1:
+                raise ContinuityStoreError("搁着记录已被拿回（并发冲突）")
+            self._append_event(
+                conn,
+                mission_id,
+                "MISSION_UNPARKED",
+                {
+                    "schema_version": "mission-unparked.v1",
+                    "request": request,
+                    "park_id": park.park_id,
+                    "run_id": run.run_id,
+                    "result_version": mission.version + 1,
+                },
+                idempotency_key,
+                event_time,
+                aggregate_type="mission",
+            )
+            return self._get_mission_park(conn, park.park_id), self._get_lease(conn, run.run_id)
+
+    def _end_parked_run(
+        self, conn: sqlite3.Connection, park_row: sqlite3.Row, idempotency_key: str, now: str
+    ) -> None:
+        park = MissionPark.model_validate(dict(park_row))
+        run = self._get_run(conn, park.run_id)
+        if run.state is not RunState.BLOCKED:
+            raise ContinuityStoreError(f"搁着的 Run 应为 BLOCKED（当前 {run.state.value}）")
+        lease = self._get_lease(conn, run.run_id)
+        release = self._release_lease_in_transaction(
+            conn, lease=lease, event_time=now, reason=f"cancelled-while-parked:{park.park_id}"
+        )
+        cursor = conn.execute(
+            """UPDATE run_items SET state=?, version=version+1, updated_at=?
+            WHERE run_id=? AND version=?""",
+            (RunState.CANCELLED.value, now, run.run_id, run.version),
+        )
+        if cursor.rowcount != 1:
+            raise ContinuityStoreError("Run 不存在或版本冲突")
+        cursor = conn.execute(
+            """UPDATE run_parks SET unparked_at=?, unparked_by=?
+            WHERE park_id=? AND unparked_at IS NULL""",
+            (now, "CANCELLED", park.park_id),
+        )
+        if cursor.rowcount != 1:
+            raise ContinuityStoreError("搁着记录已被拿回（并发冲突）")
+        self._append_event(
+            conn,
+            run.run_id,
+            "RUN_PARK_CANCELLED",
+            {
+                "schema_version": "run-park-cancelled.v1",
+                "run_id": run.run_id,
+                "park_id": park.park_id,
+                "new_state": RunState.CANCELLED.value,
+                "result_version": run.version + 1,
+                "lease_release": release,
+            },
+            f"{idempotency_key}#parked-run",
+            now,
+            aggregate_type="run",
+        )
+
+    def record_mission_admission(
+        self,
+        *,
+        mission_id: str,
+        open_count: int,
+        over_limit: bool,
+        overlaps: tuple[tuple[str, tuple[str, ...]], ...],
+        release_ref: str,
+        idempotency_key: str,
+        now: str,
+    ) -> None:
+        """Record that the user released a new card past the open limit or over overlapping paths (TD-071 decisions 2, 3)."""
+
+        mission_id = self._validated_run_text(mission_id, label="mission_id")
+        release_ref = self._validated_run_text(release_ref, label="用户放行凭据")
+        if problem := user_evidence_problem(release_ref):
+            raise ContinuityStoreError(problem)
+        idempotency_key = self._validated_idempotency_key(idempotency_key)
+        payload = {
+            "schema_version": "mission-admission-released.v1",
+            "mission_id": mission_id,
+            "open_count": open_count,
+            "over_limit": over_limit,
+            "overlaps": [
+                {"mission_id": other, "paths": list(paths)} for other, paths in overlaps
+            ],
+            "release_ref": release_ref,
+        }
+        with self._transaction() as conn:
+            existing = self._event_by_key(conn, idempotency_key)
+            if existing is not None:
+                if (
+                    existing["event_type"] != "MISSION_ADMISSION_RELEASED"
+                    or self._validated_event_payload(existing, label="放行记录") != payload
+                ):
+                    raise ContinuityStoreError("idempotency_key 的放行记录语义不一致")
+                return
+            self._get_mission(conn, mission_id)
+            self._append_event(
+                conn,
+                mission_id,
+                "MISSION_ADMISSION_RELEASED",
+                payload,
+                idempotency_key,
+                now,
+                aggregate_type="mission",
+            )
+
+    def list_mission_overlaps(self, mission_id: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """Cards whose overlapping paths the user released together with this one, from either side."""
+
+        found: dict[str, set[str]] = {}
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM events WHERE event_type='MISSION_ADMISSION_RELEASED' ORDER BY rowid"
+            ).fetchall()
+        for row in rows:
+            payload = json.loads(str(row["payload_json"]))
+            owner = str(payload.get("mission_id", ""))
+            for item in payload.get("overlaps", []):
+                other = str(item.get("mission_id", ""))
+                paths = {str(path) for path in item.get("paths", [])}
+                if owner == mission_id:
+                    found.setdefault(other, set()).update(paths)
+                elif other == mission_id:
+                    found.setdefault(owner, set()).update(paths)
+        return tuple((other, tuple(sorted(paths))) for other, paths in sorted(found.items()))
+
+    def get_open_park_for_run(self, run_id: str) -> MissionPark | None:
+        """The open park record of a Run, if its Mission is parked (or waiting with a checkpoint)."""
+
+        with self._read_connection() as conn:
+            if not self._table_exists(conn, "run_parks"):
+                return None
+            row = self._open_park_row(conn, "run_id", run_id)
+            return MissionPark.model_validate(dict(row)) if row is not None else None
+
+    def get_open_park(self, mission_id: str) -> MissionPark | None:
+        """The open park record of a Mission, if it is parked."""
+
+        with self._read_connection() as conn:
+            if not self._table_exists(conn, "run_parks"):
+                return None
+            row = self._open_park_row(conn, "mission_id", mission_id)
+            return MissionPark.model_validate(dict(row)) if row is not None else None
+
+    def list_missions_by_board(
+        self, subject_project_id: str, *, closed_limit: int | None = None
+    ) -> MissionBoard:
+        """Group the Missions of a project into the four board columns (TD-071 design 5.5).
+
+        Every open Mission is read.  With ``closed_limit`` only that many of the most recently closed ones are read and
+        the rest are only counted (``closed_hidden``), so the cockpit's refresh does not grow with every card ever
+        closed (audit 78, 5).  Without it the whole history is read, as ``pm missions`` shows it.
+        """
+
+        with self._read_connection() as conn:
+            versions = self._schema_versions(conn)
+            if not versions.issubset(_KNOWN_SCHEMA_VERSIONS):
+                rendered = ", ".join(sorted(versions))
+                raise ContinuityStoreSchemaError(f"未知或未来 Continuity Store schema: {rendered}")
+            if versions == {_LEGACY_SCHEMA_VERSION}:
+                return MissionBoard(subject_project_id=subject_project_id)
+            closed_hidden = 0
+            if closed_limit is None:
+                rows = conn.execute(
+                    """SELECT mission_id FROM mission_items WHERE subject_project_id=?
+                    ORDER BY updated_at DESC, mission_id""",
+                    (subject_project_id,),
+                ).fetchall()
+            else:
+                rows = self._open_and_recent_rows(
+                    conn, "mission_items", "mission_id", subject_project_id, closed_limit
+                )
+                closed_total = int(
+                    conn.execute(
+                        """SELECT COUNT(*) FROM mission_items WHERE subject_project_id=?
+                        AND state IN ('ACCEPTED', 'CLOSED', 'CANCELLED')""",
+                        (subject_project_id,),
+                    ).fetchone()[0]
+                )
+                closed_hidden = max(closed_total - closed_limit, 0)
+            has_parks = self._table_exists(conn, "run_parks")
+            columns: dict[MissionBoardColumn, list[Mission]] = {
+                column: [] for column in MissionBoardColumn
+            }
+            parked: list[ParkedMission] = []
+            for row in rows:
+                mission = self._get_listed_mission(conn, str(row["mission_id"]))
+                if mission is None:
+                    continue
+                column = BOARD_COLUMN_BY_STATE[mission.state]
+                if column is not MissionBoardColumn.PARKED:
+                    columns[column].append(mission)
+                    continue
+                park_row = (
+                    self._open_park_row(conn, "mission_id", mission.mission_id)
+                    if has_parks
+                    else None
+                )
+                if park_row is None:
+                    raise ContinuityStoreError(
+                        f"搁着的 Mission 缺少未拿回的搁着记录（数据不一致）: {mission.mission_id}"
+                    )
+                park = MissionPark.model_validate(dict(park_row))
+                checkpoint = self._get_checkpoint(conn, park.checkpoint_id)
+                parked.append(
+                    ParkedMission(mission=mission, park=park, checkpoint_summary=checkpoint.summary)
+                )
+            # Last put down, first suggested back (design 7.1).
+            parked.sort(key=lambda item: (item.park.parked_at, item.park.park_id), reverse=True)
+            return MissionBoard(
+                subject_project_id=subject_project_id,
+                active=tuple(columns[MissionBoardColumn.ACTIVE]),
+                waiting=tuple(columns[MissionBoardColumn.WAITING]),
+                parked=tuple(parked),
+                closed=tuple(columns[MissionBoardColumn.CLOSED]),
+                closed_hidden=closed_hidden,
+            )
+
+    def _require_lease_in_tx(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        expected_epoch: int | None,
+    ) -> LeaseItem:
+        """Check the holder, the expiry and (when presented) the epoch INSIDE the write transaction, so a transfer cannot slip in between the check and the write.
+
+        The service layer keeps its own earlier check for a friendly early failure; this one is the one that cannot be raced (``BEGIN IMMEDIATE``).  A call that
+        presents no epoch is accepted during the compatibility period (``check_write_epoch`` default).
+        """
+
+        lease = self._get_lease(conn, run_id)
+        if lease_token_is_fenced(lease_token) or lease_token_is_fenced(lease.lease_token):
+            if lease.lease_token.startswith(PARKED_TOKEN_PREFIX):
+                raise ContinuityStoreError("这张卡搁着呢，租约已摘牌；请用 pm unpark 拿回来")
+            raise ContinuityStoreError("lease 已释放（摘牌口令不能当作持有凭据）")
+        if lease.owner_id != owner_id or lease.lease_token != lease_token:
+            raise ContinuityStoreError(
+                "lease ownership 不匹配（租约可能已被移交或回收，你持有的口令已失效）"
+                + self._holder_notice(conn, run_id)
+            )
+        if self._aware_timestamp(lease.expires_at, "lease") <= self._utc_now():
+            raise ContinuityStoreError("lease 已过期")
+        if expected_epoch is not None:  # no epoch presented: accepted during the compatibility period, and the grant event is not even read
+            verdict = check_write_epoch(self._grant_epoch(conn, run_id), expected_epoch)
+            if not verdict.accepted:
+                raise ContinuityStoreError(f"lease epoch 拒绝（{verdict.verdict.value}）: {verdict.reason}")
+        return lease
+
+    @staticmethod
+    def _get_checkpoint(conn: sqlite3.Connection, checkpoint_id: str) -> CheckpointItem:
+        row = conn.execute(
+            "SELECT * FROM checkpoints WHERE checkpoint_id=?", (checkpoint_id,)
+        ).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Checkpoint 不存在: {checkpoint_id}")
+        data = dict(row)
+        data["dirty_paths"] = tuple(json.loads(data.pop("dirty_paths_json")))
+        data["evidence"] = tuple(json.loads(data.pop("evidence_json")))
+        return CheckpointItem.model_validate(data)
+
+    @staticmethod
+    def _get_handoff(conn: sqlite3.Connection, handoff_id: str) -> HandoffV2:
+        row = conn.execute("SELECT * FROM handoffs_v2 WHERE handoff_id=?", (handoff_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"Handoff 不存在: {handoff_id}")
+        data = dict(row)
+        data["owned_paths"] = tuple(json.loads(data.pop("owned_paths_json")))
+        return HandoffV2.model_validate(data)
+
+    @staticmethod
+    def _decode_orchestration_outcome(payload_json: str) -> OrchestrationOutcome:
+        try:
+            return OrchestrationOutcome.model_validate(json.loads(payload_json))
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ContinuityStoreError("编排事件无法读取") from error
+
+    @staticmethod
+    def _insert_mapping(conn: sqlite3.Connection, table: str, values: dict[str, Any]) -> None:
+        columns = ",".join(values)
+        placeholders = ",".join("?" for _ in values)
+        conn.execute(
+            f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(values.values())
+        )
+
+    @staticmethod
+    def _append_event(
+        conn: sqlite3.Connection,
+        aggregate_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        idempotency_key: str,
+        now: str,
+        event_id: str = "",
+        aggregate_type: str = "work",
+    ) -> None:
+        previous = conn.execute(
+            "SELECT event_hash FROM events ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        previous_hash = str(previous[0]) if previous else ""
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        event_hash = hashlib.sha256(
+            f"{previous_hash}|{aggregate_id}|{event_type}|{canonical}|{now}".encode()
+        ).hexdigest()
+        resolved_event_id = event_id or f"EVT-{event_hash[:16].upper()}"
+        conn.execute(
+            "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                resolved_event_id,
+                aggregate_type,
+                aggregate_id,
+                event_type,
+                canonical,
+                previous_hash,
+                event_hash,
+                now,
+                idempotency_key,
+            ),
+        )
