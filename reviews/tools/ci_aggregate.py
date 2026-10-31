@@ -10,7 +10,7 @@
   本工作流自己也不算；
 * ``pull_request:`` 没有 ``paths:`` → 每个 PR 都该跑；有 ``paths:`` → 改动文件命中其中任一条才该跑；
   写法读不懂（行内列表、``paths-ignore``）一律按“该跑”处理，只会更严；
-* 该跑的工作流在 PR 头上必须有运行记录（pull_request 或手动 workflow_dispatch 都算），且最新一次结论是 success/skipped/neutral；
+* 该跑的工作流在 PR 头上必须有运行记录（pull_request 或手动 workflow_dispatch 都算），且最新一次结论是 success/neutral（skipped 不算过）；
   失败、取消 → 不通过；还在跑 → 继续等；一直没出现（超过宽限时间）→ 不通过。
 * 取不到 GitHub 的记录（网络、限流）→ 不通过（宁可挡住，也不假绿）。
 
@@ -36,7 +36,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SELF = "ci-aggregate.yml"
-PASSING = {"success", "skipped", "neutral"}
+# skipped 不算过：该跑的工作流整体被跳过（配错过滤条件、作业级 if 写错）时，不能当成“跑过且绿”放行（反重力审计 SEC-004，用户授权协调者裁决）。
+# 现有 pull_request 工作流都没有作业级 if，没有哪一个会合法地整体 skipped。
+PASSING = {"success", "neutral"}
 RUN_EVENTS = {"pull_request", "workflow_dispatch"}
 
 

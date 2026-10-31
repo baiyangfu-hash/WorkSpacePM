@@ -57,7 +57,7 @@ def test_parse_trigger(text: str, expected: agg.Trigger | None) -> None:
 
 def test_judge_passes_only_when_every_expected_workflow_succeeded() -> None:
     expected = ["a.yml", "b.yml"]
-    assert agg.judge(expected, [_run("a.yml", 1), _run("b.yml", 2, conclusion="skipped")], elapsed=0, grace=60)[0] == "pass"
+    assert agg.judge(expected, [_run("a.yml", 1), _run("b.yml", 2, conclusion="neutral")], elapsed=0, grace=60)[0] == "pass"
     assert agg.judge(expected, [_run("a.yml", 1), _run("b.yml", 2, conclusion="failure")], elapsed=0, grace=60)[0] == "fail"
     assert agg.judge(expected, [_run("a.yml", 1), _run("b.yml", 2, conclusion="cancelled")], elapsed=0, grace=60)[0] == "fail"
     assert agg.judge(expected, [_run("a.yml", 1), _run("b.yml", 2, status="in_progress", conclusion=None)], elapsed=0, grace=60)[0] == "wait"
@@ -216,3 +216,20 @@ def test_root_tests_workflow_also_runs_the_sw009_project_tests_on_the_offscreen_
     assert "SW-2026-009_英语学习助手" in step and "working-directory:" in step
     assert "QT_QPA_PLATFORM: offscreen" in step and "-m pytest" in step
     assert step.rstrip().endswith("tests") and "continue-on-error" not in step
+
+
+def test_a_skipped_expected_workflow_is_not_a_pass() -> None:
+    """反重力审计 SEC-004：该跑的工作流整体被跳过，不能当成绿灯。"""
+    verdict, notes = agg.judge(["a.yml"], [_run("a.yml", 1, conclusion="skipped")], elapsed=0, grace=60)
+    assert verdict == "fail"
+    assert any("skipped" in note for note in notes)
+
+
+def test_no_tracked_workflow_has_a_job_level_if() -> None:
+    """skipped 不算过的前提：被汇总盯着的工作流没有作业级 if，不会合法地整体 skipped。写了作业级 if 就要回头改这个口径。"""
+    import yaml
+
+    for trigger in agg.load_triggers(WORKFLOWS):
+        data = yaml.safe_load((WORKFLOWS / trigger.workflow).read_text(encoding="utf-8"))
+        jobs = data.get("jobs") or {}
+        assert all("if" not in (job or {}) for job in jobs.values()), trigger.workflow

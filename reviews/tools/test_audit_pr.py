@@ -494,3 +494,33 @@ def test_audit_warns_when_pr_body_claims_done_without_evidence(world, monkeypatc
     meta["body"] = "已完成，提交 1a2b3c4d"
     _info, checks = world["audit"](50, network=True)
     assert status(checks, "completion_evidence") == "PASS"
+
+
+def _hang(*args, **kwargs):
+    """Stand-in for subprocess.run when git never returns: honours the timeout the caller asked for."""
+    assert kwargs.get("timeout"), "每个 git 调用都必须带时限（审计 REL-001）"
+    raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+
+def test_a_hung_git_call_times_out_instead_of_hanging(monkeypatch, tmp_path):
+    monkeypatch.setattr(audit_pr.subprocess, "run", _hang)
+    with pytest.raises(audit_pr.GitTimeout):
+        audit_pr.git("status", cwd=str(tmp_path))
+    with pytest.raises(audit_pr.GitTimeout):
+        audit_pr.git_ok("rev-parse", "HEAD", cwd=str(tmp_path))  # 超时不能被读成“不是祖先”之类的 False
+    with pytest.raises(audit_pr.GitTimeout):
+        audit_pr.merge_result_tree("a", "b", cwd=str(tmp_path))
+
+
+def test_main_exits_2_when_git_hangs(monkeypatch, capsys):
+    monkeypatch.setattr(audit_pr.subprocess, "run", _hang)
+    assert audit_pr.main(["1", "--offline", "--skip-ci-result"]) == 2
+    assert "超过" in capsys.readouterr().err
+
+
+def test_an_unreadable_ci_workflow_means_ci_is_expected(tmp_path):
+    """反重力审计 SEC-002：读不到 CI 配置不能被读成“这个 PR 不需要 CI”。"""
+    run(tmp_path, "init", "-q", "-b", "main")
+    write(tmp_path, "a.txt", "x\n")
+    sha = commit(tmp_path, "no workflow here")
+    assert audit_pr.ci_path_patterns(sha, cwd=str(tmp_path)) is None

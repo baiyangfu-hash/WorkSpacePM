@@ -1445,12 +1445,7 @@ class ContinuityStore:
                 if existing["aggregate_id"] != values["work_id"]:
                     raise ContinuityStoreError("idempotency_key 已用于其他 Work")
                 return self._get_work(conn, values["work_id"])
-            columns = ",".join(values)
-            placeholders = ",".join("?" for _ in values)
-            conn.execute(
-                f"INSERT INTO work_items ({columns}) VALUES ({placeholders})",
-                tuple(values.values()),
-            )
+            self._insert_new(conn, "work_items", values, what=f"Work {values['work_id']} ")
             self._append_event(
                 conn, values["work_id"], "WORK_CREATED", values, idempotency_key, now
             )
@@ -4272,8 +4267,8 @@ class ContinuityStore:
                 raise ContinuityStoreError(
                     "项目里已有 Run 持有租约（" + "、".join(held) + "），同一项目同一时刻只能一张在干"
                 )
-            self._insert_mapping(conn, "run_items", stored_values)
-            self._insert_mapping(conn, "execution_leases", stored_lease)
+            self._insert_new(conn, "run_items", stored_values, what=f"Run {stored_values['run_id']} ")
+            self._insert_new(conn, "execution_leases", stored_lease, what=f"Run {stored_values['run_id']} 的租约")
             self._append_event(
                 conn,
                 stored_values["run_id"],
@@ -6299,6 +6294,9 @@ class ContinuityStore:
             )
         if not evidence_ref.strip():
             raise ContinuityStoreError("延长持有上限必须带用户证据")
+        # CLI 入口已校验；存储层同样校验，绕过 CLI 直接调接口的脚本也写不进伪造凭据（反重力审计 SEC-005）
+        if problem := user_evidence_problem(evidence_ref.strip()):
+            raise ContinuityStoreError(f"{problem}；延长持有上限只听用户本人")
         with self._transaction() as conn:
             run = self._get_run(conn, run_id)
             if self._event_by_key(conn, idempotency_key) is None:
@@ -6376,7 +6374,15 @@ class ContinuityStore:
                 raise ContinuityStoreError("Handoff 源 owner 已失去 lease")
             if self._aware_timestamp(current.expires_at, "Handoff lease") <= observed_at:
                 raise ContinuityStoreError("Handoff lease 已过期")
-            expires_at = (observed_at + timedelta(seconds=lease_seconds)).isoformat()
+            # 移交和续租一样受总持有时长上限约束，否则 A→B→A 接力能无限续命（反重力审计 SEC-001）；
+            # 回收（reclaim）是用户签字过的恢复通道，不在此限
+            hold_end = self._lease_hold_end(conn, self._get_run(conn, handoff.run_id))
+            if observed_at >= hold_end:
+                raise ContinuityStoreError(
+                    f"本 Run 持有租约已达总时长上限（{hold_end.isoformat()}），拒绝移交；"
+                    "要继续只能由用户本人用 lease extend-hold 延长，或收口后重开"
+                )
+            expires_at = min(observed_at + timedelta(seconds=lease_seconds), hold_end).isoformat()
             event_time = observed_at.isoformat()
             cursor = conn.execute(
                 """UPDATE execution_leases
@@ -6438,7 +6444,7 @@ class ContinuityStore:
                 (values["run_id"],),
             ).fetchone()
             stored["sequence"] = int(row[0])
-            self._insert_mapping(conn, "checkpoints", stored)
+            self._insert_new(conn, "checkpoints", stored, what=f"Checkpoint {values['checkpoint_id']} ")
             self._append_event(
                 conn,
                 values["run_id"],
@@ -6535,7 +6541,7 @@ class ContinuityStore:
                 **unsigned,
                 "snapshot_hash": hashlib.sha256(canonical.encode()).hexdigest(),
             }
-            self._insert_mapping(conn, "handoffs_v2", values)
+            self._insert_new(conn, "handoffs_v2", values, what=f"Handoff {handoff_id} ")
             handoff = self._get_handoff(conn, handoff_id)
             self._append_event(
                 conn,
@@ -8916,6 +8922,21 @@ class ContinuityStore:
         conn.execute(
             f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(values.values())
         )
+
+    @classmethod
+    def _insert_new(cls, conn: sqlite3.Connection, table: str, values: dict[str, Any], *, what: str) -> None:
+        """Insert a record that must not exist yet; a clash is a clean ``ContinuityStoreError``, never a raw ``sqlite3.IntegrityError``.
+
+        A creator that is retried with the *same* idempotency key replays before it gets here.  Reaching a unique constraint means
+        the id (or another unique column) is already taken by a record made under a different idempotency key.
+        """
+
+        try:
+            cls._insert_mapping(conn, table, values)
+        except sqlite3.IntegrityError as error:
+            raise ContinuityStoreError(
+                f"{what}已存在或与已有记录冲突（{error}）。重试同一次创建要沿用原来的幂等键；要新建请换一个编号"
+            ) from error
 
     @staticmethod
     def _append_event(

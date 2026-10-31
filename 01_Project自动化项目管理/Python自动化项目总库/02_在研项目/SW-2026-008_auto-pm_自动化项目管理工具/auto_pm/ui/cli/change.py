@@ -36,7 +36,7 @@ from auto_pm.change.constants import (
 )
 from auto_pm.change.track_classifier import ChangeTrack, ChangeTrackClassifier
 from auto_pm.models import ChangeRequest
-from auto_pm.ui.cli.approval_pin import require_approval_pin
+from auto_pm.ui.cli.approval_pin import refuse_agent_approval, require_approval_pin
 from auto_pm.ui.cli.runtime_identity_guard import (
     require_runtime_identity,
     require_runtime_identity_for_change,
@@ -559,6 +559,12 @@ def cmd_verify(
     help="允许部分验证闭环（CHG-085：§10.1 存在未通过项时，标注待验证项后允许流转到 completed）",
 )
 @click.option("--pid", default=None, help="项目编号（跨项目单号冲突时必填，TD-A04 修复）")
+@click.option(
+    "--approval-evidence-ref",
+    "approval_evidence_ref",
+    default="",
+    help="agent 会话批准（--to approved）时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
+)
 @click.pass_context
 def cmd_transition(
     ctx: click.Context,
@@ -569,10 +575,14 @@ def cmd_transition(
     verification_conclusion: str,
     allow_partial_verification: bool,
     pid: str | None,
+    approval_evidence_ref: str,
 ) -> None:
     """状态流转（更新变更单章节并持久化状态）；批准（approved）在已启用批准口令时须用户本人在终端输入口令。"""
     app_ctx: AppContext = ctx.obj
     if new_status == "approved":
+        # Before anything else, and whether or not a PIN is committed: an agent session approves only with the user's
+        # own words as evidence (F16; the user chose "A" on 2026-10-31).
+        refuse_agent_approval(f"批准变更单 {change_number}", approval_evidence_ref)
         # The PIN is looked up in the very root ChangeService writes to (audit 72, high-2).
         proof = require_approval_pin(
             app_ctx.workspace_root, summary=f"批准变更单 {change_number}", purpose="change-approve", subject=f"{pid or ''}:{change_number}",
@@ -604,6 +614,7 @@ def cmd_transition(
             change_number=change_number,
             new_status=new_status,
             approver=approver or "",
+            approval_evidence_ref=approval_evidence_ref,
         )
         console.print(f"[green]状态流转成功: {change_number}[/green]")
         console.print(f"  新状态: {STATUS_LABELS.get(cr.status, cr.status)}")

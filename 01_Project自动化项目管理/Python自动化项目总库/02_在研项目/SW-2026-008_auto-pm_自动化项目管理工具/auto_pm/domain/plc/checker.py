@@ -244,7 +244,8 @@ class _LegacyPlcCheckerCore:
         scl_files: list[str] = []
         for root, _, files in os.walk(project_path):
             for file in files:
-                if file.lower().endswith(".scl"):
+                # .db / .udt 只查“数组下界从 1 起”一条（TD-SW008-217），其余规则对声明文件不适用
+                if SclLinter.is_lintable(file):
                     scl_files.append(os.path.join(root, file))
 
         if not scl_files:
@@ -272,7 +273,7 @@ class _LegacyPlcCheckerCore:
         elif total_warnings > 0:
             result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议")
         else:
-            result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl 文件 100% 遵从 LSP-905 命名与安全闭环规范")
+            result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl/.db/.udt 文件 100% 遵从 LSP-905 命名与安全闭环规范")
 
     def _check_language_service(self, project_path: str, result: CheckResult) -> None:
         """运行插件命令行的 ``check``（以及有 ``.scltest`` 时的 ``test``）。

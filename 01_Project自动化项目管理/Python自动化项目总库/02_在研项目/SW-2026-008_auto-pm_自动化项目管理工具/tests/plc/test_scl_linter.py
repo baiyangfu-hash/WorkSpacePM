@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from auto_pm.domain.plc.scl_linter import SclLinter
@@ -537,10 +539,129 @@ def test_every_legacy_array_entry_still_matches_a_real_declaration() -> None:
     ).stdout.split("\0")
     declarations: set[tuple[str, str]] = set()
     for name in names:
-        if not name.endswith(".scl"):
+        if not name.endswith((".scl", ".db", ".udt")):
             continue
         relative = name.removeprefix("0100_PLC自动化/")
         for line in (repo / name).read_text(encoding="utf-8", errors="replace").splitlines():
             declarations.add((relative, re.sub(r"\s+", " ", line.split("//")[0]).strip()))
     dead = sorted(entry for entry in LEGACY_ARRAY_LOWER_BOUND if entry not in declarations)
     assert dead == [], f"清单里有不再对应任何声明的死项，请删除：{dead}"
+
+
+# ── TD-SW008-217：数组下界检查扩到 .db / .udt（用户 2026-10-31 “全部按推荐”） ─────────────────────────────
+
+DB_TEXT = """DATA_BLOCK "GlobalVars"
+VAR
+    Counts : ARRAY[0..9] OF INT;
+    iBadName : INT;
+    arrOk : ARRAY[1..4] OF BOOL;
+END_VAR
+BEGIN
+END_DATA_BLOCK
+"""
+
+
+def _lint_disk(tmp_path: Path, name: str, text: str | bytes) -> object:
+    target = tmp_path / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(text, bytes):
+        target.write_bytes(text)
+    else:
+        target.write_text(text, encoding="utf-8")
+    return SclLinter.lint_file(target)
+
+
+@pytest.mark.parametrize("name", ["GlobalVars.db", "Types/UDT_Axis.udt", "GlobalVars.DB"])
+def test_a_new_zero_based_array_in_db_or_udt_is_an_error(tmp_path: Path, name: str) -> None:
+    report = _lint_disk(tmp_path, name, DB_TEXT)
+    assert [(v.rule_id, v.severity) for v in report.violations] == [("LSP-905-ARRAY-LOWER-BOUND", "ERROR")]  # type: ignore[attr-defined]
+    assert report.errors_count == 1 and report.warnings_count == 0 and report.total_violations == 1  # type: ignore[attr-defined]
+
+
+def test_a_db_is_not_held_to_the_scl_naming_rules(tmp_path: Path) -> None:
+    """.db 只查数组下界；变量名前缀这类 .scl 规则对声明文件不适用，不能误报。"""
+    clean = DB_TEXT.replace("0..9", "1..9")
+    report = _lint_disk(tmp_path, "GlobalVars.db", clean)
+    assert report.violations == []  # type: ignore[attr-defined]
+    assert SclLinter.lint_text(clean, file_path="GlobalVars.scl").violations  # 同样的文本按 .scl 查是有别的违规的
+
+
+def test_the_twelve_existing_zero_based_arrays_in_db_files_are_only_warnings() -> None:
+    """用户拍板：现有 12 处（DJ-2026-000 样例 8 处、DJ-2026-009 4 处）按存量只提示、不拦。"""
+    import subprocess
+    from pathlib import Path
+
+    here = Path(__file__).resolve()
+    repo = next(p for p in here.parents if (p / "0100_PLC自动化").is_dir())
+    names = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "-z", "--", "0100_PLC自动化"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.split("\0")
+    severities: list[str] = []
+    for name in names:
+        if name.endswith((".db", ".udt")):
+            severities += [v.severity for v in SclLinter.lint_file(repo / name).violations]
+    assert severities == ["WARNING"] * 12
+
+
+def test_a_listed_declaration_in_another_db_is_still_an_error() -> None:
+    declaration = "Hmibutton : ARRAY[0..9] OF BOOL;"
+    listed = "0100_PLC自动化/DJ-2026-000/DB1/GlobalVars.db"
+    text = f"DATA_BLOCK X\nVAR\n    {declaration}\nEND_VAR\nEND_DATA_BLOCK\n"
+    assert [v.severity for v in SclLinter.lint_text(text, file_path=listed).violations if v.rule_id == "LSP-905-ARRAY-LOWER-BOUND"] == ["WARNING"]
+    other = "0100_PLC自动化/DJ-2026-000/DB2/GlobalVars.db"
+    assert [v.severity for v in SclLinter.lint_text(text, file_path=other).violations if v.rule_id == "LSP-905-ARRAY-LOWER-BOUND"] == ["ERROR"]
+
+
+def test_a_binary_or_gbk_db_is_not_a_read_failure(tmp_path: Path) -> None:
+    """别的项目里的 .db 可能是 SQLite 数据库，老 PLC 文件可能是 GBK：看不懂的字节不报“读取失败”，看得懂的 ASCII 声明照查。"""
+    binary = _lint_disk(tmp_path, "app.db", b"SQLite format 3\x00\xff\xfe\x80\x81" * 20)
+    assert binary.violations == []  # type: ignore[attr-defined]
+    gbk = ("// 全局变量\n" + DB_TEXT).encode("gbk")
+    report = _lint_disk(tmp_path, "gbk.db", gbk)
+    assert [v.rule_id for v in report.violations] == ["LSP-905-ARRAY-LOWER-BOUND"]  # type: ignore[attr-defined]
+
+
+def test_a_scl_file_that_is_not_utf8_is_still_reported(tmp_path: Path) -> None:
+    """.scl 仍按 UTF-8 严格读（DEV-ENC-001）：写坏了要报出来，不被 .db 的宽松读法带松。"""
+    report = _lint_disk(tmp_path, "OB1.scl", "// 注释\n".encode("gbk"))
+    assert [v.rule_id for v in report.violations] == ["FILE-READ-ERROR"]  # type: ignore[attr-defined]
+
+
+def test_is_lintable_covers_scl_db_and_udt_only() -> None:
+    assert all(SclLinter.is_lintable(n) for n in ("A.scl", "b.DB", "dir/C.udt", Path("x") / "D.SCL"))
+    assert not any(SclLinter.is_lintable(n) for n in ("A.st", "B.awl", "C.db.bak", "udt", "D.md"))
+
+
+def test_plc_check_and_baseline_compare_scan_db_files_too(tmp_path: Path) -> None:
+    """项目级检查（plc check）和与开工基线对比用的逐条键都要看到 .db 里新增的 0 起数组。"""
+    from auto_pm.domain.plc.baseline_compare import scl_failure_keys
+
+    project = tmp_path / "DJ-2026-777_测试"
+    (project / "00_全局数据").mkdir(parents=True)
+    (project / "00_全局数据" / "GlobalVars.db").write_text(DB_TEXT, encoding="utf-8")
+    keys = scl_failure_keys(str(project))
+    assert len(keys) == 1
+    (only,) = keys
+    assert "00_全局数据/GlobalVars.db" in only and "LSP-905-ARRAY-LOWER-BOUND" in only
+
+
+def test_the_project_check_item_fails_on_a_new_zero_based_array_in_a_db(tmp_path: Path) -> None:
+    from auto_pm.domain.plc.checker import PlcChecker
+    from auto_pm.domain.plc.models import CheckResult
+
+    project = tmp_path / "DJ-2026-777_测试"
+    project.mkdir()
+    (project / "GlobalVars.db").write_text(DB_TEXT, encoding="utf-8")
+    result = CheckResult(project_path=str(project))
+    PlcChecker(str(tmp_path))._check_scl_code_compliance(str(project), result)
+    (item,) = [i for i in result.items if i.item == "SCL 代码规范"]
+    assert item.status == "fail" and "GlobalVars.db" in item.message
+    (project / "GlobalVars.db").write_text(DB_TEXT.replace("0..9", "1..9"), encoding="utf-8")
+    result = CheckResult(project_path=str(project))
+    PlcChecker(str(tmp_path))._check_scl_code_compliance(str(project), result)
+    (item,) = [i for i in result.items if i.item == "SCL 代码规范"]
+    assert item.status == "pass"

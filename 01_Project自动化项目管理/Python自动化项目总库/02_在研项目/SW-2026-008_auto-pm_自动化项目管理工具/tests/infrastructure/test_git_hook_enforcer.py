@@ -92,6 +92,21 @@ def test_release_tree_files_are_attributed_to_sw008_not_exempted(
     assert _binding_for_staged_file(path, bindings).project_id == "SW-2026-008"
 
 
+@pytest.mark.parametrize("path", ["reviews/tools/audit_pr.py", "reviews/tools/safety_zone_check.py"])
+def test_review_tools_are_attributed_to_sw008_not_rejected_as_unowned(
+    bindings: tuple[ProjectBinding, ProjectBinding], path: str
+) -> None:
+    """反重力审计 BUG-003：裁判脚本仍算生产文件、要跟变更单走，但不再因为“归属未知”被钩子误拦。"""
+    assert filter_production_files([path]) == [path]
+    assert _binding_for_staged_file(path, bindings).project_id == "SW-2026-008"
+
+
+@pytest.mark.parametrize("path", ["reviews.py", "xreviews/tools/a.py", "sub/reviews/tools/a.py", "reviews"])
+def test_only_the_top_level_reviews_tree_is_bound(bindings: tuple[ProjectBinding, ProjectBinding], path: str) -> None:
+    with pytest.raises(StagedSnapshotError, match="归属未知或不唯一"):
+        _binding_for_staged_file(path, bindings)
+
+
 @pytest.mark.parametrize(
     "path",
     [

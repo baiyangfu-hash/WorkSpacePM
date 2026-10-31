@@ -4322,3 +4322,43 @@ def test_a_finished_run_still_cannot_renew(tmp_path: Path) -> None:
     service.transition_run("RUN-001", RunState.SUCCEEDED, "agent-a", "lease-secret", "finish-verified")
     with pytest.raises(ContinuityExecutionError, match="READY、RUNNING 或 VERIFYING"):
         service.renew_lease("RUN-001", "agent-a", "lease-secret", 900, "renew-after-done")
+
+
+def test_a_transfer_near_the_cap_is_clamped_to_the_cap(tmp_path: Path) -> None:
+    """反重力审计 SEC-001：交接给的新租约不能越过 3 小时总持有上限。"""
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    _checkpoint(service)
+    _renew_until_cap(service, clock, 2.9)
+    lease = _transfer_to_agent_b(service)
+    assert lease.owner_id == "agent-b"
+    assert datetime.fromisoformat(lease.expires_at) <= clock.start + timedelta(hours=3)
+
+
+def test_a_transfer_is_refused_once_the_hold_cap_is_reached(tmp_path: Path) -> None:
+    """持有上限到了，即使旧租约还有效（旧数据里可能有），也不能靠交接换一份新租约。"""
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    _checkpoint(service)
+    _renew_until_cap(service, clock, 2.9)
+    clock.value = clock.start + timedelta(hours=3, minutes=1)
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.execute(
+            "UPDATE execution_leases SET expires_at=? WHERE run_id='RUN-001'", ((clock.value + timedelta(hours=1)).isoformat(),)
+        )
+    with pytest.raises(ContinuityExecutionError, match="总时长上限"):
+        _transfer_to_agent_b(service)
+    assert service._store.get_lease("RUN-001").owner_id == "agent-a"
+
+
+@pytest.mark.parametrize("forged", ["agent-wrote-this", "user-confirmation:x", "user-confirmation:written-by-claude-agent"])
+def test_extend_hold_checks_the_user_evidence_format_in_the_store_too(tmp_path: Path, forged: str) -> None:
+    """反重力审计 SEC-005：绕过 CLI 直接调接口，也写不进不是用户原话的凭据。"""
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    with pytest.raises(ContinuityExecutionError, match="用户"):
+        service.extend_lease_hold("RUN-001", 3_600, forged, "forged-ext")
+    assert service.lease_hold_status("RUN-001")["hold_end"] == (clock.start + timedelta(hours=3)).isoformat()

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any
 
 
 def _fix_windows_encoding() -> None:
@@ -49,6 +50,7 @@ from rich.console import Console  # noqa: E402
 from auto_pm import __version__  # noqa: E402
 from auto_pm.app_context import AppContext  # noqa: E402
 from auto_pm.infrastructure.continuity_store import ContinuityStoreSchemaError  # noqa: E402
+from auto_pm.ui.cli.caller_path import anchor_to_caller  # noqa: E402
 from auto_pm.ui.cli.change import change_group  # noqa: E402
 from auto_pm.ui.cli.clean import clean_cmd  # noqa: E402
 from auto_pm.ui.cli.constraint import constraint_group  # noqa: E402
@@ -93,6 +95,17 @@ class _CliGroup(click.Group):
     Python traceback (TD-SW008-161).
     """
 
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        """Never let click expand wildcards in the arguments on Windows (F20).
+
+        click globs every argument itself on Windows, so ``--scope 目录/**`` turned into a list of file names and
+        failed with "unexpected extra arguments".  Neither cmd.exe nor PowerShell expands wildcards, and the Work scope
+        rule (``dir/**``) wants the pattern text as typed.
+        """
+
+        kwargs.setdefault("windows_expand_args", False)
+        return super().main(*args, **kwargs)
+
     def invoke(self, ctx: click.Context) -> object:
         try:
             return super().invoke(ctx)
@@ -124,9 +137,10 @@ def cli(ctx: click.Context, workspace: str | None, control_root: str | None) -> 
     """
     ctx.ensure_object(AppContext)
     app_ctx: AppContext = ctx.obj
+    # The launcher runs the release from its own folder: a relative -w / --control-root means "from where the user typed the command".
     if workspace:
-        app_ctx.workspace_root = os.path.abspath(workspace)
-    app_ctx.control_root = os.path.abspath(control_root) if control_root else app_ctx.workspace_root
+        app_ctx.workspace_root = os.path.abspath(anchor_to_caller(workspace))
+    app_ctx.control_root = os.path.abspath(anchor_to_caller(control_root)) if control_root else app_ctx.workspace_root
 
 
 # 挂载子命令组

@@ -427,10 +427,13 @@ def scope_only(targets: list[Target], notes: list[str]) -> int:
 
 
 def changed_files(head: Path, base_sha: str, head_sha: str) -> list[str]:
-    proc = subprocess.run(
-        ["git", "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", f"{base_sha}...{head_sha}"],
-        cwd=str(head), capture_output=True, text=True, encoding="utf-8", check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", f"{base_sha}...{head_sha}"],
+            cwd=str(head), capture_output=True, text=True, encoding="utf-8", check=False, timeout=300,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("git diff 超过 300 秒没有返回") from error
     if proc.returncode != 0:
         raise RuntimeError(f"git diff 失败：{proc.stderr.strip()}")
     return [line for line in proc.stdout.splitlines() if line]

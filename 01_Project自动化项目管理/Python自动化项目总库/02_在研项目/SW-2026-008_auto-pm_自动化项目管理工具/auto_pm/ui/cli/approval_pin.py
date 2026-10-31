@@ -22,6 +22,7 @@ from auto_pm.application.core.approval_proof_service import (
     pin_problem,
 )
 from auto_pm.application.core.lease_handover_service import agent_markers
+from auto_pm.contracts.user_evidence import user_evidence_problem
 
 NO_TERMINAL = (
     "已启用批准口令：这一步必须由用户本人在自己的终端运行这条命令并输入口令（当前不是交互终端）。"
@@ -52,6 +53,36 @@ def _stdin_is_tty() -> bool:
 
 def _prompt_hidden(text: str) -> str:
     return str(click.prompt(text, hide_input=True, default="", show_default=False, err=True))
+
+
+def refuse_agent_approval(action: str, evidence_ref: str = "") -> None:
+    """Refuse (``ClickException``) when the session carries an agent marker and no user evidence backs the approval.
+
+    The approval PIN only protects a root that has one committed; without it the old format check lets any caller write
+    any approver name, so an agent could approve its own change order or decision package (Trae probe F16).  This
+    refusal does not depend on the PIN.  The user ruled (A, 2026-10-31): same as ``pm approve``, an agent session may
+    go ahead when it passes ``--approval-evidence-ref user-confirmation:<the user's message>`` in the form
+    ``user_evidence_problem`` accepts (the standing pre-authorisation of 2026-10-18 depends on it); with none, or one
+    that looks agent-written, it is refused.  With a committed PIN the user still types it in a terminal afterwards.
+    Best effort, like the other agent-marker refusals: the markers are environment variables (single-user trust model).
+    """
+
+    markers = agent_markers(os.environ)
+    if not markers:
+        return
+    if evidence_ref.strip():
+        problem = user_evidence_problem(evidence_ref.strip())
+        if not problem:
+            return
+        detail = f"给的凭据不被接受：{problem}"
+    else:
+        detail = "没有带用户原话凭据"
+    raise click.ClickException(
+        f"这是 agent 会话（{'、'.join(markers)}），不能{action}：{detail}。"
+        "批准只听用户本人：请带上 --approval-evidence-ref user-confirmation:<用户那条消息的时间或编号>"
+        "（只能引用用户真说过的话，不得自编），或把完整命令交给用户在自己的终端运行；"
+        "已启用批准口令时还要用户本人输入口令，agent 不得索要口令、代填或绕过"
+    )
 
 
 def control_root(ctx: click.Context) -> Path:

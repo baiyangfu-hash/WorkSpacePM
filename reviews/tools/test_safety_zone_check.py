@@ -761,3 +761,19 @@ def test_w06_a_fresh_event_on_a_closed_pr_skips_the_job_instead_of_running_it_gr
     condition = " ".join(str(_safety_job()["if"]).split())
     assert "github.event.pull_request.state == 'open'" in condition
     assert "github.event.issue.state == 'open'" in condition
+
+
+def test_a_hung_git_or_gh_call_is_a_timeout_not_a_missing_file(monkeypatch, tmp_path) -> None:
+    def hang(*args, **kwargs):
+        assert kwargs.get("timeout"), "每个 git/gh 调用都必须带时限（审计 REL-001）"
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(gate.subprocess, "run", hang)
+    with pytest.raises(gate.GitTimeout):
+        gate.git(tmp_path, "status")
+    with pytest.raises(gate.GitTimeout):
+        gate.show(tmp_path, "HEAD", "a.txt")  # show 把 GitError 当“没有这个文件”；超时不能走这条宽松路径
+    with pytest.raises(gate.GitTimeout):
+        gate.merged_tree(tmp_path, "a", "b")
+    with pytest.raises(gate.GitTimeout):
+        gate.gh_json("repos/x/y")

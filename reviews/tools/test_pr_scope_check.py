@@ -492,3 +492,15 @@ def test_the_ci_aggregate_judge_is_locked_so_a_directory_scope_is_not_enough(rep
     assert "锁定文件 `reviews/tools/ci_aggregate.py`" in errors(result)
     named = gate.check(repo, base, head, "## 可改范围\n- reviews/tools/ci_aggregate.py\n")
     assert "锁定文件" not in errors(named)
+
+
+def test_a_hung_git_call_exits_2_instead_of_hanging(monkeypatch, repo, capsys) -> None:
+    def hang(*args, **kwargs):
+        assert kwargs.get("timeout"), "每个 git 调用都必须带时限（审计 REL-001）"
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(gate.subprocess, "run", hang)
+    with pytest.raises(gate.GitTimeout):
+        gate.git(repo, "status")
+    assert gate.main(["--base", "main", "--head", "pr", "--repo", str(repo)]) == 2
+    assert "超过" in capsys.readouterr().err
