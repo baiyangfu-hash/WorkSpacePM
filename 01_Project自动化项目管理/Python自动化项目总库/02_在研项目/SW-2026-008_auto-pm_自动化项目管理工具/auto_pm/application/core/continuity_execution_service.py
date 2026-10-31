@@ -13,6 +13,7 @@ from auto_pm.application.core.candidate_merge_back_service import (
     CandidateMergeBackError,
     CandidateMergeBackService,
 )
+from auto_pm.application.core.docs_checkpoint import DocsQualityReceipt
 from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollection,
     EvidenceCollectionError,
@@ -64,6 +65,7 @@ _AUTO_CHECKPOINT_SCHEMAS = {
     "c03": "checkpoint-evidence.v1",
     "generic": "checkpoint-evidence.v2",
     "plc": "checkpoint-evidence.v3",
+    "docs": "checkpoint-evidence.v4",
 }
 
 _RUN_TRANSITIONS = {
@@ -433,6 +435,8 @@ class ContinuityExecutionService:
                 collector.validate_generic_checkpoint_project_root(run, project_root)
             elif profile == "plc":
                 collector.validate_plc_checkpoint_project_root(run, project_root)
+            elif profile == "docs":
+                collector.validate_docs_checkpoint_project_root(run, project_root)
             else:
                 raise EvidenceCollectionError(f"未知自动 Checkpoint profile: {profile}")
         except EvidenceCollectionError as error:
@@ -485,14 +489,16 @@ class ContinuityExecutionService:
             )
 
         try:
-            receipt: PythonQualityReceipt | PlcQualityReceipt
+            receipt: PythonQualityReceipt | PlcQualityReceipt | DocsQualityReceipt
             if profile == "plc":
                 receipt = collector.run_plc_checkpoint_quality_gates(run, project_root)
+            elif profile == "docs":
+                receipt = collector.run_docs_checkpoint_quality_gates(run, project_root)
             elif profile == "c03":
                 receipt = collector.run_c03_checkpoint_quality_gates(run, project_root)
             else:
                 receipt = collector.run_generic_checkpoint_quality_gates(run, project_root)
-            domain = "PLC" if profile == "plc" else "Python"
+            domain = {"plc": "PLC", "docs": "文档"}.get(profile, "Python")
             if receipt.status != "PASS":
                 report = write_quality_failure_report(
                     receipt, self._root / ".auto-pm" / "reports" / "quality-failures"
@@ -512,6 +518,10 @@ class ContinuityExecutionService:
                 )
             if isinstance(receipt, PlcQualityReceipt):
                 receipt_is_current = collector.plc_quality_receipt_is_current(
+                    run, project_root, receipt
+                )
+            elif isinstance(receipt, DocsQualityReceipt):
+                receipt_is_current = collector.docs_quality_receipt_is_current(
                     run, project_root, receipt
                 )
             else:

@@ -43,6 +43,11 @@ from auto_pm.core.constants import (
 from auto_pm.core.paths import WORKSPACE_PROJECTS_SUBDIR
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.template_service import TemplateService
+from auto_pm.domain.models.project import (
+    VALID_BUSINESS_LINES,
+    InvalidBusinessLineError,
+    resolve_business_line,
+)
 from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
@@ -105,7 +110,7 @@ def project_group(ctx: click.Context) -> None:
 @click.option(
     "--business-line",
     "-bl",
-    type=click.Choice(["SW", "DJ", "ZD", "XT", "WX"]),
+    type=click.Choice(list(VALID_BUSINESS_LINES)),
     default=None,
     help="按业务线筛选（从项目编号前缀提取）",
 )
@@ -207,7 +212,7 @@ def cmd_list(
 @click.option(
     "--business-line",
     "-bl",
-    type=click.Choice(["SW", "DJ", "ZD", "XT", "WX"]),
+    type=click.Choice(list(VALID_BUSINESS_LINES)),
     default=None,
     help="指定业务线（默认从项目编号前缀推断，不一致时警告）",
 )
@@ -296,15 +301,14 @@ def cmd_create(
         console.print("[red]错误: 必须提供 --id 或 --auto-id[/red]")
         ctx.exit(1)
 
-    # 业务线推断：未指定时从项目编号前缀提取
-    if business_line is None:
-        business_line = project_id.split("-", 1)[0] if "-" in project_id else ""
-    else:
-        inferred = project_id.split("-", 1)[0] if "-" in project_id else ""
-        if inferred != business_line:
-            console.print(
-                f"[yellow]提示: 指定业务线 {business_line} 与项目编号前缀 {inferred} 不一致[/yellow]"
-            )
+    # 业务线推断：未指定时从项目编号前缀提取；前缀不在白名单直接拒绝，不落盘（D2）
+    try:
+        business_line, notice = resolve_business_line(project_id, business_line)
+    except InvalidBusinessLineError as e:
+        console.print(f"[red]错误: {e}[/red]")
+        ctx.exit(1)
+    if notice:
+        console.print(f"[yellow]提示: {notice}[/yellow]")
 
     if stack == "plc" and project_type is None:
         default_project_types = {
@@ -509,7 +513,7 @@ def cmd_show(ctx: click.Context, project_id: str, output_json: bool) -> None:
 @click.option(
     "--business-line",
     "-bl",
-    type=click.Choice(["SW", "DJ", "ZD", "XT", "WX"]),
+    type=click.Choice(list(VALID_BUSINESS_LINES)),
     default=None,
     help="更新业务线（写入 .copier-answers.yml 覆盖从编号前缀提取的值）",
 )
@@ -876,7 +880,7 @@ _PROJECTS_SUBDIR = WORKSPACE_PROJECTS_SUBDIR  # M3-Iter6: 从 core.paths 读取
 @click.option(
     "--business-line",
     "-bl",
-    type=click.Choice(["SW", "DJ", "ZD", "XT", "WX"]),
+    type=click.Choice(list(VALID_BUSINESS_LINES)),
     default=None,
     help="指定业务线（默认从项目编号前缀推断）",
 )
@@ -899,6 +903,16 @@ def cmd_import(
     source_path = os.path.abspath(path)
     dirname = os.path.basename(source_path)
     dest_path = os.path.join(app_ctx.workspace_root, _PROJECTS_SUBDIR, dirname)
+
+    # 先校验、后落盘（D2）：指定了业务线时，编号前缀必须在白名单；放在任何复制、移动、覆盖之前
+    if business_line is not None:
+        try:
+            _, notice = resolve_business_line(ProjectService._extract_id_from_dirname(source_path), business_line)
+        except InvalidBusinessLineError as e:
+            console.print(f"[red]错误: {e}[/red]")
+            ctx.exit(1)
+        if notice:
+            console.print(f"[yellow]提示: {notice}[/yellow]")
 
     if os.path.exists(dest_path):
         if not force:
@@ -971,12 +985,6 @@ def cmd_import(
         console.print(f"[yellow]补全元数据失败: {e}[/yellow]")
 
     project_id = ProjectService._extract_id_from_dirname(dest_path)
-    if business_line is not None:
-        inferred = project_id.split("-", 1)[0] if "-" in project_id else ""
-        if inferred != business_line:
-            console.print(
-                f"[yellow]提示: 指定业务线 {business_line} 与项目编号前缀 {inferred} 不一致[/yellow]"
-            )
 
     console.print(f"  项目编号: {project_id}")
     console.print(f"  导入路径: {dest_path}")
@@ -1028,6 +1036,11 @@ def cmd_register(ctx: click.Context, project_id: str, project_path: str | None, 
         return
     if result.written:
         console.print(f"[green]项目已登记: {mapping.project_id}[/green]")
+        console.print(
+            "[yellow]提示: 登记表 SYS-2026-001_WorkspaceGovernance/workspace_registry.json 已改动、尚未提交。"
+            "开 Run 之前请先把它提交（在控制根），再从新的提交建 .auto-pm/worktrees/ 下的隔离工位；"
+            "否则这处改动会被当成范围外的改动，pm verify 会拒绝。[/yellow]"
+        )
     else:
         console.print(f"[yellow]预览（--dry-run，未写入）: {mapping.project_id}[/yellow]")
     console.print(f"  项目目录: {mapping.project_root}")

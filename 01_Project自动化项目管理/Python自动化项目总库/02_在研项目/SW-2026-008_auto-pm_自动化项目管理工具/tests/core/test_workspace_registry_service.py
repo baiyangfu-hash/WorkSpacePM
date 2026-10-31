@@ -223,3 +223,16 @@ def test_every_failure_after_writing_restores_the_registry(
 
     assert registry.read_bytes() == before
     assert not registry.with_name(registry.name + ".tmp").exists()
+
+
+def test_d3_registering_tells_the_user_to_commit_the_registry_before_opening_a_run(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _anchor(tmp_path / "0100_PLC自动化" / "DJ-2026-009", "DJ-2026-009")
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
+
+    code, output = _cli(tmp_path, "project", "register", "DJ-2026-009")
+
+    assert code == 0, output
+    assert "尚未提交" in output and "隔离工位" in output
+    _, dry = _cli(tmp_path, "project", "register", "DJ-2026-009", "--dry-run")
+    assert "尚未提交" not in dry  # nothing was written, nothing to warn about
