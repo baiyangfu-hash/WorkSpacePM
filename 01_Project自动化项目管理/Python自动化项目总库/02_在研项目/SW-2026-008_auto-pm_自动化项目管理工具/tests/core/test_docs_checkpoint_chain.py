@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from auto_pm.application.core import docs_checkpoint
 from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
@@ -126,11 +127,89 @@ def test_d05_non_utf8_fails_the_encoding_gate(tmp_path: Path) -> None:
 def test_d06_the_docs_profile_refuses_code_files_so_it_is_no_way_around_the_gates(tmp_path: Path) -> None:
     candidate, service = _docs_service(tmp_path, owned=(DOC, "tools/helper.py"))
 
-    with pytest.raises(ContinuityExecutionError, match="不收代码类文件"):
+    with pytest.raises(ContinuityExecutionError, match="只收文档/图纸/配置类文件"):
         _append_docs(service, candidate)
     # An owned directory that holds a code file is refused the same way.
     candidate, service = _docs_service(tmp_path / "dir", owned=("tools",), text=None)
-    with pytest.raises(ContinuityExecutionError, match="不收代码类文件"):
+    with pytest.raises(ContinuityExecutionError, match="只收文档/图纸/配置类文件"):
+        _append_docs(service, candidate)
+
+
+REFUSED_NAMES = (
+    "tools/q.sql", "tools/a.rb", "tools/a.go", "tools/A.java", "tools/a.rs", "tools/a.php",
+    "tools/a.pl", "tools/a.lua", "tools/a.vb", "tools/a.exe", "tools/a.dll", "tools/a.pyc",
+    "tools/a.ps1", "tools/a.scl", "tools/a.st", "tools/a.bat", "tools/Makefile", "tools/Dockerfile",
+)
+
+
+@pytest.mark.parametrize("name", REFUSED_NAMES)
+def test_d06b_only_known_document_suffixes_are_accepted_everything_else_is_refused(
+    tmp_path: Path, name: str
+) -> None:
+    candidate, service = _docs_service(tmp_path, owned=(DOC, name))
+    (candidate / name).parent.mkdir(parents=True, exist_ok=True)
+    (candidate / name).write_bytes(b"echo not a document\n")
+
+    with pytest.raises(ContinuityExecutionError, match="只收文档/图纸/配置类文件"):
+        _append_docs(service, candidate)
+    assert service._store.latest_checkpoint("RUN-001") is None
+
+
+def test_d06c_binary_office_and_drawing_files_are_accepted_by_digest_only(tmp_path: Path) -> None:
+    candidate, service = _docs_service(tmp_path, owned=(DOC, "drawings/a.dwg", "docs/b.pdf"))
+    for name in ("drawings/a.dwg", "docs/b.pdf"):
+        (candidate / name).parent.mkdir(parents=True, exist_ok=True)
+        (candidate / name).write_bytes(b"\x00\xff binary payload \x00")
+
+    checkpoint = _append_docs(service, candidate)
+
+    receipt = json.loads(checkpoint.evidence[0])["quality_receipt"]
+    assert {item["path"] for item in receipt["input_digests"]} == {DOC, "drawings/a.dwg", "docs/b.pdf"}
+    assert receipt["gates"][0]["exit_code"] == 0  # NUL in binary files is not a text problem
+
+
+def test_d05b_a_nul_byte_in_a_markdown_file_fails_the_encoding_gate(tmp_path: Path) -> None:
+    candidate, service = _docs_service(tmp_path, text=None)
+    (candidate / DOC).write_bytes(b"# title\nbody\x00more\n")
+
+    with pytest.raises(ContinuityExecutionError, match="docs-encoding"):
+        _append_docs(service, candidate)
+    assert service._store.latest_checkpoint("RUN-001") is None
+
+
+def test_d07b_a_gitignored_owned_file_is_bound_by_its_input_digest(tmp_path: Path) -> None:
+    ignored = "specs/ignored.md"
+    candidate, service = _docs_service(tmp_path, owned=(DOC, ignored))
+    exclude = service._root / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text(ignored + "\n", encoding="utf-8")
+    (candidate / ignored).write_text("# 被忽略的文档\n", encoding="utf-8")
+    collector = EvidenceCollectionService(service._root)
+    run = service._store.get_run("RUN-001")
+    first = _append_docs(service, candidate)
+    git_view = collector.collect(run).content_hash
+    assert _append_docs(service, candidate) == first  # untouched: replays
+
+    (candidate / ignored).write_text("# 被忽略的文档\n\n悄悄改了一行\n", encoding="utf-8")
+
+    # Git cannot see the edit at all ...
+    assert collector.collect(run).content_hash == git_view
+    # ... so only the per-file input digest can stop the stored checkpoint from replaying.
+    with pytest.raises(ContinuityExecutionError, match="identity.*不一致"):
+        _append_docs(service, candidate)
+
+
+def test_d07c_a_stored_checkpoint_dies_when_the_checker_rules_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate, service = _docs_service(tmp_path)
+    first = _append_docs(service, candidate)
+    assert _append_docs(service, candidate) == first
+
+    # Same documents, same Git evidence, but the rules that produced the verdict changed.
+    monkeypatch.setattr(docs_checkpoint, "checker_digest", lambda: "f" * 64)
+
+    with pytest.raises(ContinuityExecutionError, match="identity.*不一致"):
         _append_docs(service, candidate)
 
 

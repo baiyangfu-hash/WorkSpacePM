@@ -8,8 +8,9 @@ Python 档要求 Run 拥有 ``.py`` 文件才能跑 pytest/Ruff/Mypy；PLC 档�
   与 ``docs-syntax``（``.json``/``.toml``/``.yaml`` 能解析，任何文本里没有遗留的合并冲突标记）。
 * 收据绑定：owned 范围内每个文件的字节摘要（含 Git 看不见的被忽略文件）和本模块源码摘要，
   任一变化，已存的 Checkpoint 都不能重放。
-* 不留旁路：owned 范围（含目录里的文件）出现代码类后缀（``.py``、``.ps1``、``.scl`` 等）时，
-  文档档拒绝——它们必须走 Python/PLC 档，不能借文档档绕过真正的测试。
+* 不留旁路（白名单）：owned 范围（含目录里的文件）只允许已知的文档/图纸/配置后缀；
+  其它一切（``.py``、``.ps1``、``.scl``、``.sql``、``.exe``、无后缀文件……）文档档都拒绝——
+  它们必须走 Python/PLC 档，不能借文档档绕过真正的测试。
 """
 
 from __future__ import annotations
@@ -52,14 +53,17 @@ TEXT_SUFFIXES = frozenset(
         ".cfg", ".xml", ".html", ".htm", ".css", ".svg",
     }
 )
-# 代码类后缀：必须走 Python/PLC 档，文档档一律拒绝（防止借文档档绕开真正的门禁）。
-CODE_SUFFIXES = frozenset(
+# 只摘要不解码的文档/图纸/办公文件后缀（二进制）。
+BINARY_DOC_SUFFIXES = frozenset(
     {
-        ".py", ".pyw", ".pyi", ".ps1", ".psm1", ".sh", ".bash", ".bat", ".cmd", ".js", ".mjs",
-        ".cjs", ".ts", ".tsx", ".jsx", ".qml", ".scl", ".st", ".awl", ".cs", ".c", ".h",
-        ".cpp", ".hpp", ".vbs",
+        ".pdf", ".doc", ".docx", ".dot", ".dotx", ".xls", ".xlsx", ".xlsm", ".ppt", ".pptx",
+        ".vsd", ".vsdx", ".dwg", ".dxf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
+        ".ico", ".zip",
     }
 )
+# 白名单：文档档只收这些后缀。其余一律拒绝（含无后缀文件、.py/.ps1/.scl/.sql/.go/.exe/.dll/.pyc…），
+# 代码和未知类型必须走 Python/PLC 档，不能借文档档绕开真正的门禁。
+DOCS_ALLOWED_SUFFIXES = TEXT_SUFFIXES | BINARY_DOC_SUFFIXES
 _CONFLICT_MARKER = re.compile(r"^(?:<{7}|>{7})(?: |$)", re.MULTILINE)
 
 
@@ -120,10 +124,11 @@ def docs_targets(run: RunItem, candidate: Path, anchor: Path) -> DocsTargets:
         for path in files:
             name = path.relative_to(candidate).as_posix()
             suffix = path.suffix.lower()
-            if suffix in CODE_SUFFIXES:
+            if suffix not in DOCS_ALLOWED_SUFFIXES:
+                shown = suffix or "无后缀"
                 raise EvidenceCollectionError(
-                    f"文档验证档不收代码类文件（{suffix}）: {name}；代码必须走 Python/PLC 验证档，"
-                    "请把 scope 拆开（文档一张卡、代码一张卡）"
+                    f"文档验证档只收文档/图纸/配置类文件，不收（{shown}）: {name}；代码和未知类型必须走 "
+                    "Python/PLC 验证档，请把 scope 拆开（文档一张卡、代码一张卡）"
                 )
             digests[name] = _file_digest(path)
             if suffix in TEXT_SUFFIXES and not path.is_symlink():
