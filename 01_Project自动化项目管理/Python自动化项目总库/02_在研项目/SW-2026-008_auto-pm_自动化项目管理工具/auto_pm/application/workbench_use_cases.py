@@ -15,6 +15,7 @@ from auto_pm.application.core.protocols import (
     TemplateServiceProtocol,
 )
 from auto_pm.contracts.gate_dtos import ProcessGroupStage
+from auto_pm.domain.models.project import InvalidBusinessLineError, resolve_business_line
 from auto_pm.domain.project.state_machine import build_change_state_machine
 from auto_pm.ui.contracts.dto.workbench_dto import (
     ClearCacheResultDTO,
@@ -307,8 +308,10 @@ class WorkbenchUseCases:
                 return CommandOutcome(False, f"目标路径已存在: {dest_path}")
 
             template_name = get_template_name(stack, mode if stack == "plc" else "")
-            if not business_line:
-                business_line = project_id.split("-", 1)[0] if "-" in project_id else ""
+            try:
+                business_line, _ = resolve_business_line(project_id, business_line or None)
+            except InvalidBusinessLineError as error:
+                return CommandOutcome(False, str(error))
             os.makedirs(dest_root, exist_ok=True)
             self.template_service.copy_template(
                 template_name,

@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 from auto_pm.contracts.continuity import RunItem
 from auto_pm.domain.plc.baseline_compare import diff_failures, lint_failure_keys
@@ -35,6 +36,9 @@ from auto_pm.infrastructure.control_root_guard import (
     governed_worktree_snapshot,
 )
 from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+
+if TYPE_CHECKING:
+    from auto_pm.application.core.docs_checkpoint import DocsQualityReceipt
 
 _C03_CHECKPOINT_PYTEST_EXPRESSION = "append_verified_checkpoint"
 _C03_CHECKPOINT_PYTEST_TARGET = "tests/core/test_continuity_execution_service.py"
@@ -618,7 +622,8 @@ class EvidenceCollectionService:
 
     @staticmethod
     def build_checkpoint_evidence(
-        collection: EvidenceCollection, receipt: PythonQualityReceipt | PlcQualityReceipt
+        collection: EvidenceCollection,
+        receipt: PythonQualityReceipt | PlcQualityReceipt | DocsQualityReceipt,
     ) -> str:
         """Build one immutable, canonical evidence envelope for an auto checkpoint.
 
@@ -630,6 +635,10 @@ class EvidenceCollectionService:
 
         if isinstance(receipt, PlcQualityReceipt):
             return EvidenceCollectionService._build_plc_checkpoint_evidence(collection, receipt)
+        if not isinstance(receipt, PythonQualityReceipt):
+            from auto_pm.application.core import docs_checkpoint
+
+            return docs_checkpoint.build_evidence(collection, receipt)
         expected_receipt_hash = _quality_receipt_hash(
             run_id=receipt.run_id,
             baseline_git_head=receipt.baseline_git_head,
@@ -695,6 +704,12 @@ class EvidenceCollectionService:
             )
         if isinstance(envelope, dict) and envelope.get("schema_version") == _PLC_CHECKPOINT_SCHEMA:
             return EvidenceCollectionService._plc_checkpoint_evidence_is_current(
+                serialized, envelope, collection, run, project_root
+            )
+        if isinstance(envelope, dict) and envelope.get("schema_version") == "checkpoint-evidence.v4":
+            from auto_pm.application.core import docs_checkpoint
+
+            return docs_checkpoint.evidence_is_current(
                 serialized, envelope, collection, run, project_root
             )
         expected_keys = {
@@ -879,7 +894,11 @@ class EvidenceCollectionService:
         except ControlRootGuardError as error:
             raise EvidenceCollectionError(str(error)) from error
         if observed_head != run.git_head:
-            raise EvidenceCollectionError("Run git_head 与受管 worktree 当前 HEAD 不一致")
+            raise EvidenceCollectionError(
+                "Run git_head 与受管 worktree 当前 HEAD 不一致；Run 开工之后工作树里提交过或换过分支，"
+                "这个 Run 的证据作废。验证前不要在 Run 的工作树里提交；"
+                "处理：把该 Run 转 FAILED，在当前 HEAD 上用 continuity run start 开新 Run，再 pm verify"
+            )
         return candidate, observed_head
 
     def _dirty_snapshot(self, candidate: Path, baseline: str) -> _DirtySnapshot:
@@ -926,6 +945,10 @@ class EvidenceCollectionService:
                 rendered = ", ".join(foreign)
                 raise EvidenceCollectionError(
                     f"Run {label} dirty path 超出 owned_paths: {rendered}"
+                    "；这些文件不在本卡范围，验证不会放行。常见来源：Run 的工作树就是控制根，"
+                    "而 project register 等命令在控制根留下了未提交的改动（如 workspace_registry.json）。"
+                    "处理：还原或暂存这些文件，或把 Run 开在 .auto-pm/worktrees/ 下的隔离工位"
+                    "（工位里不带控制根的未提交改动）"
                 )
 
     @staticmethod
@@ -1166,11 +1189,14 @@ class EvidenceCollectionService:
     # -- PLC static quality profile (V01) ---------------------------------
 
     def checkpoint_profile_for_run(self, run: RunItem) -> str:
-        """Return ``"plc"`` for Runs inside a PLC project, else ``"generic"``.
+        """Return ``"plc"`` for Runs inside a PLC project, ``"generic"`` for Runs owning a
+        Python file, and ``"docs"`` for Runs that own neither (documents, drawings, config).
 
         A Run is verified in exactly one domain: owning both PLC project paths
         and Python paths outside any PLC project is refused instead of letting
-        one domain's gate silently ignore the other's files.
+        one domain's gate silently ignore the other's files.  The ``docs`` profile
+        exists so a document-only card still has a legal way to the acceptance
+        gate (D1); it refuses code files itself, so it is no way around the others.
         """
 
         candidate, _ = self._verified_candidate(run)
@@ -1180,7 +1206,36 @@ class EvidenceCollectionService:
             entry.plc_root is None and entry.relative.suffix == ".py" for entry in entries
         ):
             raise EvidenceCollectionError(_PLC_MIXED_DOMAIN_ERROR)
-        return "plc" if has_plc else "generic"
+        if has_plc:
+            return "plc"
+        if any(entry.relative.suffix == ".py" for entry in entries):
+            return "generic"
+        return "docs"
+
+    def validate_docs_checkpoint_project_root(self, run: RunItem, project_root: str | Path) -> Path:
+        """Require every owned path to sit under the supplied root and hold no code file."""
+
+        from auto_pm.application.core import docs_checkpoint
+
+        return docs_checkpoint.validate_project_root(self, run, project_root)
+
+    def run_docs_checkpoint_quality_gates(
+        self, run: RunItem, project_root: str | Path
+    ) -> DocsQualityReceipt:
+        """Run the document encoding and syntax gates on the Run candidate."""
+
+        from auto_pm.application.core import docs_checkpoint
+
+        return docs_checkpoint.run_gates(self, run, project_root)
+
+    def docs_quality_receipt_is_current(
+        self, run: RunItem, project_root: str | Path, receipt: DocsQualityReceipt
+    ) -> bool:
+        """Return whether a docs receipt still describes the current Run and inputs."""
+
+        from auto_pm.application.core import docs_checkpoint
+
+        return docs_checkpoint.receipt_is_current(self, run, project_root, receipt)
 
     def validate_plc_checkpoint_project_root(
         self, run: RunItem, project_root: str | Path
@@ -2100,7 +2155,7 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def quality_failure_summary(receipt: PythonQualityReceipt | PlcQualityReceipt, *, excerpt_chars: int = 600) -> str:
+def quality_failure_summary(receipt: PythonQualityReceipt | PlcQualityReceipt | DocsQualityReceipt, *, excerpt_chars: int = 600) -> str:
     """Which gate failed and why, in words: the failing gates (name, exit code, output excerpt) and any evidence drift.
 
     A failing receipt used to say only "要求质量收据为 PASS"; nobody could tell ruff from mypy from pytest from a drifted evidence hash.
@@ -2123,7 +2178,7 @@ def quality_failure_summary(receipt: PythonQualityReceipt | PlcQualityReceipt, *
 
 
 def write_quality_failure_report(
-    receipt: PythonQualityReceipt | PlcQualityReceipt, reports_root: Path
+    receipt: PythonQualityReceipt | PlcQualityReceipt | DocsQualityReceipt, reports_root: Path
 ) -> Path | None:
     """Persist a failing receipt as JSON under ``reports_root`` (``.auto-pm/reports/quality-failures``); ``None`` when it cannot be written.
 
