@@ -1,0 +1,21 @@
+# 准备阶段命令（2026-10-31，MST）
+
+- `git status --short` → 空，exit 0
+- `git branch --show-current` → `trae/cockpit-probe-20261030`，exit 0
+- `git fetch origin main` → `* branch main -> FETCH_HEAD`，exit 0
+- `git fetch --unshallow` → 空输出，exit 0
+- `git rev-parse --is-shallow-repository` → `false`，exit 0
+- `git ls-remote origin main` → `bf22a6212a2caa87d6064a206b54c819553dd765`，exit 0
+- `git switch -c trae/cockpit-probe4-20261031 FETCH_HEAD`（首次落在旧 FETCH_HEAD `73a7ef09`），exit 0
+- `git fetch origin main`（再取）→ `FETCH_HEAD = bf22a621`，exit 0
+- `git switch -C trae/cockpit-probe4-20261031 FETCH_HEAD` → 重设到 `bf22a621`，exit 0
+- `git ls-tree --name-only FETCH_HEAD 00_Infrastructure/auto_pm/releases/` → 含 `1.3.3-163c7a3`、`1.3.3-8d7d387`，exit 0
+- `grep release_id active_release.json` → `"release_id": "1.3.3-163c7a3"`，exit 0
+- `PIP_INDEX_URL=https://pypi.org/simple sh 00_Infrastructure/auto_pm/environment/setup_env.sh` → `[成功] 环境就绪`，exit 0（Qt 运行库警告）
+- `.venv/bin/python main.py --resolve-only` → `release verified via active_release.json: .../releases/1.3.3-163c7a3`，exit 0
+- `.venv/bin/python main.py --version` → `auto-pm, version 1.3.3`，exit 0
+
+沙箱工作区（仅 /tmp，探测后已删除）：
+- `mkdir -p /tmp/probe4-ws/0100_项目 /tmp/probe4-ws/SYS-2026-001_WorkspaceGovernance && cp -r /workspace/0100_项目/ZZ-2026-903_probe4_fake /tmp/probe4-ws/0100_项目/`，exit 0
+- 写入最小 `workspace_registry.json`（仅 ZZ-2026-903，project_root/development_root 指向复制后的项目），exit 0
+- `git init && git add -A && git commit` → `7599f97 probe sandbox baseline`，exit 0
