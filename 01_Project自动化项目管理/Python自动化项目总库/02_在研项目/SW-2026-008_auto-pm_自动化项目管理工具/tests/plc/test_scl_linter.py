@@ -650,7 +650,8 @@ def test_plc_check_and_baseline_compare_scan_db_files_too(tmp_path: Path) -> Non
 
 
 def test_the_project_check_item_fails_on_a_new_zero_based_array_in_a_db(tmp_path: Path) -> None:
-    from auto_pm.domain.plc.checker import CheckResult, PlcChecker
+    from auto_pm.domain.plc.checker import PlcChecker
+    from auto_pm.domain.plc.models import CheckResult
 
     project = tmp_path / "DJ-2026-777_测试"
     project.mkdir()
