@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -42,7 +43,9 @@ def _heartbeat_is_dead(path: Path) -> bool:
 
 
 def test_without_a_scope_the_runner_behaves_like_subprocess_run(tmp_path: Path) -> None:
-    done = run_in_scope([sys.executable, "-c", "print('héllo'); import sys; sys.stderr.write('e'); sys.exit(3)"], tmp_path, {}, 30)
+    # the child writes UTF-8 whatever the console code page is (Windows runners default to cp1252); the runner decodes UTF-8
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    done = run_in_scope([sys.executable, "-c", "print('héllo'); import sys; sys.stderr.write('e'); sys.exit(3)"], tmp_path, env, 30)
 
     assert (done.returncode, done.stdout.strip(), done.stderr) == (3, "héllo", "e")
 
