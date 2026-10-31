@@ -23,7 +23,7 @@ from auto_pm.contracts.continuity import WorkKind
 from auto_pm.infrastructure import lease_wallet
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.cli.__main__ import cli
-from tests.git_support import git_do
+from tests.git_support import git_do, run_worktree
 
 pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
@@ -60,7 +60,7 @@ def _invoke(root: Path, *args: str, env: dict[str, str] | None = None, input_tex
 def _start(root: Path, owner: str = "agent-a", run_id: str = RUN, key: str = "start-1") -> Result:
     return _invoke(
         root, "continuity", "run", "start", "--run-id", run_id, "--work-id", WORK, "--executor", owner, "--adapter", "codex",
-        "--owned", "README.md", "--declared-dirty", "README.md", "--lease-wallet", "--holder-pid", "none", "--idempotency-key", key,
+        "--owned", "README.md", "--declared-dirty", "README.md", "--worktree", str(run_worktree(root)), "--lease-wallet", "--holder-pid", "none", "--idempotency-key", key,
     )
 
 
