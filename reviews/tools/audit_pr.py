@@ -99,6 +99,12 @@ def decode(data: bytes, what: str) -> str:
         return data.decode("utf-8", errors="replace")
 
 
+# 真离线开关：audit(..., network=False, fetch=False) 期间为 True。此时不许碰 GitHub 接口（碰了就是缺陷，直接报错），
+# 且整个进程（含 encoding_check 等同包工具里的 git 子进程）带 GIT_NO_LAZY_FETCH=1，部分克隆不许偷偷补取对象。
+_OFFLINE = False
+_OFFLINE_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}
+
+
 def git_bytes(*args: str, cwd: str | None = None, env: dict[str, str] | None = None, check: bool = True) -> bytes:
     result = subprocess.run(["git", "-c", "core.quotepath=off", *args], cwd=cwd, env=env, capture_output=True, check=False)
     if check and result.returncode != 0:
@@ -234,6 +240,8 @@ def tree_diff(left: str, right: str, cwd: str | None = None) -> list[str]:
 
 
 def github_json(path: str) -> dict | None:
+    if _OFFLINE:
+        raise GitError(f"离线审计不许访问 GitHub 接口（audit_pr 的缺陷）：{path}")
     headers = {"Accept": "application/vnd.github+json"}
     # In GitHub Actions the job token lifts the anonymous rate limit; the token is only sent to api.github.com.
     if os.environ.get("GITHUB_TOKEN"):
@@ -381,7 +389,7 @@ def scan_encoding(files: list[str], head: str, cwd: str | None = None) -> Check:
     return Check("text_encoding", "PASS", f"{scanned} 个文本文件严格 UTF-8 解码通过，无乱码特征（登记在案的已知问题 {len(skipped)} 个）")
 
 
-def audit(
+def _audit(
     pr: int,
     *,
     repo: str,
@@ -567,6 +575,39 @@ def audit(
                     Check("patch", "WARN", "以下文件和补丁结果不同（可能是有意取舍，需在报告里说明）：" + ", ".join(diff[:10]))
                 )
     return info, checks
+
+
+def audit(
+    pr: int,
+    *,
+    repo: str,
+    remote: str,
+    patch: str | None,
+    patch_base: str | None,
+    network: bool,
+    ci_result: bool = True,
+    fetch: bool = True,
+    cwd: str | None = None,
+) -> tuple[dict, list[Check]]:
+    """Run the audit; with ``network=False, fetch=False`` it is genuinely offline (see ``_OFFLINE``)."""
+    global _OFFLINE
+    previous_flag, previous_env = _OFFLINE, {k: os.environ.get(k) for k in _OFFLINE_ENV}
+    offline = not network and not fetch
+    _OFFLINE = offline
+    if offline:
+        os.environ.update(_OFFLINE_ENV)
+    try:
+        return _audit(
+            pr, repo=repo, remote=remote, patch=patch, patch_base=patch_base, network=network, ci_result=ci_result, fetch=fetch, cwd=cwd
+        )
+    finally:
+        _OFFLINE = previous_flag
+        if offline:
+            for key, old in previous_env.items():
+                if old is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = old
 
 
 def render(info: dict, checks: list[Check]) -> str:
