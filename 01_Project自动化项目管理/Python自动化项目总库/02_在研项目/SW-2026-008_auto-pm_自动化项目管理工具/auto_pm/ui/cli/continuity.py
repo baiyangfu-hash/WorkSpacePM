@@ -764,6 +764,11 @@ def start_run(
     if problem:
         raise click.ClickException(problem)
     root = _governed_worktree(ctx, requested_worktree)
+    if root.resolve() == _workspace(ctx).resolve():
+        raise click.ClickException(
+            "Run 的工作树不能是控制根本身（AGENTS.md WS-001：控制根只跑驾驶舱命令、不写业务代码）。"
+            "请用 git worktree add 在 .auto-pm/worktrees/<agent> 下开隔离工位，再用 --worktree 指向它"
+        )
     git_head, all_dirty = _git_snapshot(root)
     observed = _within(all_dirty, owned)
     try:
