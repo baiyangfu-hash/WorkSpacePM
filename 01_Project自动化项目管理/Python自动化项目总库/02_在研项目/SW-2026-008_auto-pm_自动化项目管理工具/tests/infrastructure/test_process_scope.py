@@ -122,3 +122,39 @@ def test_a_gate_that_runs_out_of_time_kills_its_children_through_the_real_superv
     while not seen and time.monotonic() < deadline:
         time.sleep(0.05)
     assert seen and isinstance(seen[0], GateCancelledError)
+
+
+class _FakeProcess:
+    pid = 4242
+
+    def __init__(self) -> None:
+        self.killed = False
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def test_a_taskkill_that_hangs_does_not_escape_and_the_direct_child_is_still_killed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # reviewer finding (reviews/457): on Windows a stuck taskkill raised TimeoutExpired out of the cleanup, hiding the gate's own timeout
+    # error and skipping the kill; both the hang and a failure to start taskkill must be absorbed and fall back to killing the child
+    from auto_pm.infrastructure import process_scope as module
+
+    monkeypatch.setattr(module, "_WINDOWS", True)
+
+    def hang(command: list[str], **_kwargs: object) -> object:
+        raise subprocess.TimeoutExpired(command, 30)
+
+    monkeypatch.setattr(subprocess, "run", hang)
+    stuck = _FakeProcess()
+    module.kill_process_tree(stuck)  # type: ignore[arg-type]
+
+    assert stuck.killed
+
+    def missing(command: list[str], **_kwargs: object) -> object:
+        raise FileNotFoundError(command[0])
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    absent = _FakeProcess()
+    module.kill_process_tree(absent)  # type: ignore[arg-type]
+
+    assert absent.killed

@@ -32,8 +32,9 @@ class GateCancelledError(OSError):
 def kill_process_tree(process: subprocess.Popen[str]) -> None:
     """Kill ``process`` and everything it started; a process that is already gone is not an error."""
 
-    with contextlib.suppress(OSError):
-        if sys.platform == "win32":
+    # taskkill that hangs or fails must not escape (its TimeoutExpired is not an OSError) and must not stop the fallback kill below
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        if _WINDOWS:
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(process.pid)],
                 capture_output=True,
