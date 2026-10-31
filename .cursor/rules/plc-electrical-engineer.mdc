@@ -6,7 +6,7 @@ alwaysApply: false
 
 # PLC Electrical Engineer（Cursor）
 
-进入 PLC 域工作前，读取 `.trae/skills/plc-electrical-engineer/SKILL.md` 与 `skill_coordination.md`。
+进入 PLC 域工作前，读取 `roles/plc-electrical-engineer/SKILL.md` 与 `skill_coordination.md`。
 
 ## 必须遵循
 

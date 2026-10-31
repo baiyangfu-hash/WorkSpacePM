@@ -45,8 +45,7 @@
     "cursor": "仅说明文字，无机器拦截"
   },
   "legacy": {
-    "mode": "body-equal",
-    "source": ".trae/skills/fullstack-engineer/SKILL.md",
-    "refs": ".trae/skills/fullstack-engineer/refs"
+    "retired": true,
+    "note": "旧技能副本已于 2026-10-31 换成 .trae/skills 下的指路牌，正本只在 roles/"
   }
 }

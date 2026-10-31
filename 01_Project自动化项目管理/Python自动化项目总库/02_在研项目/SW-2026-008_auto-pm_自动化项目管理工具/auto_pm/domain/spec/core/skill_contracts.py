@@ -52,6 +52,6 @@ SKILL_CONTRACTS: tuple[SkillContract, ...] = (
         severity=Severity.WARNING,
         code_truths=(),
         literals=("ruff check", "mypy", "pytest --no-cov -q", "改动文件"),
-        doc_relpaths=(".trae/skills/fullstack-engineer/SKILL.md",),
+        doc_relpaths=("roles/fullstack-engineer/SKILL.md",),
     ),
 )

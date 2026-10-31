@@ -14,15 +14,15 @@
 | Claude Code 入口（纯引用） | `CLAUDE.md` |
 | 技能注册表 | `.agents/skills.json` |
 | 全局开发规则 | `.trae/rules/project-rule.md` |
-| 跨技能公共契约 | `.trae/skills/shared/refs/skill_coordination.md` |
+| 跨技能公共契约 | `roles/shared/refs/skill_coordination.md` |
 | 治理基线 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
 | 当前计划与状态投影 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md`（以其“当前投影”为准；上一行的 26 号总计划是治理基线与历史依据） |
 | 日常迭代操作手册 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md` |
 | 无 AI、断网时的电气/PLC 人工路线 | `0100_PLC自动化/00_通用规范/无AI离线手册.md` |
 | 多 agent 工位与控制根规则 | 本文件“多 agent 工位与控制根规则 (WS-001)”一节 |
 | 独立审计（任何 agent 通用） | 本文件“独立审计 (AUD-001)”一节；脚本 `reviews/tools/audit_pr.py`，清单 `reviews/21_audit_checklist.md` |
-| 全栈执行 | `.trae/skills/fullstack-engineer/SKILL.md` |
-| PLC 执行 | `.trae/skills/plc-electrical-engineer/SKILL.md` |
+| 全栈执行 | `roles/fullstack-engineer/SKILL.md` |
+| PLC 执行 | `roles/plc-electrical-engineer/SKILL.md` |
 | 规范注册表 | `00_Obsidian_Base全局规范文件仓库/spec_registry.json` |
 | 跨语言 SRE 规范 | `00_Obsidian_Base全局规范文件仓库/04_驾驶舱与全栈域/300_高级语言与工业上位机系统_Google_SRE工程可靠性规范_DEV.md` |
 
