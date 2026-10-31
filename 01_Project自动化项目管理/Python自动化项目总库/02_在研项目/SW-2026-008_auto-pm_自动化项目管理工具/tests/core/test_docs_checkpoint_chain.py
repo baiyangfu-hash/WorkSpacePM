@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -26,7 +27,7 @@ DOC = "specs/plc.md"
 EDITED_DOC = "# 规范\n\n新增一行说明。\n"
 
 
-def _service_for(tmp_path: Path, owned: tuple[str, ...]):
+def _service_for(tmp_path: Path, owned: tuple[str, ...]) -> tuple[Path, ContinuityExecutionService]:
     workspace, candidate, baseline = plc_workspace(tmp_path, extra=(DOC, "tools/helper.py"))
     clock = Clock()
     work = WorkRegistryService(workspace, now=lambda: clock().isoformat())
@@ -56,14 +57,16 @@ def _service_for(tmp_path: Path, owned: tuple[str, ...]):
     return candidate, service
 
 
-def _docs_service(tmp_path: Path, *, owned: tuple[str, ...] = (DOC,), text: str | None = EDITED_DOC):
+def _docs_service(
+    tmp_path: Path, *, owned: tuple[str, ...] = (DOC,), text: str | None = EDITED_DOC
+) -> tuple[Path, ContinuityExecutionService]:
     candidate, service = _service_for(tmp_path, owned)
     if text is not None:
         (candidate / DOC).write_text(text, encoding="utf-8")
     return candidate, service
 
 
-def _append_docs(service, root: Path, **changes):
+def _append_docs(service: ContinuityExecutionService, root: Path, **changes: Any) -> Any:
     return _append_plc(service, root, profile="docs", checkpoint_id="CP-DOCS-001", **changes)
 
 

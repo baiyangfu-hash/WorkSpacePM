@@ -120,7 +120,7 @@ def test_the_workbench_create_path_refuses_a_bad_prefix_too(tmp_path: Path) -> N
     from auto_pm.application.workbench_use_cases import WorkbenchUseCases  # noqa: PLC0415
 
     cases = WorkbenchUseCases.__new__(WorkbenchUseCases)
-    cases.template_service = object()  # type: ignore[attr-defined]
+    typing.cast(typing.Any, cases).template_service = object()
     outcome = cases.create_project("ZZ-2026-904", "x", "python", "", "", dest_dir=str(tmp_path / "p"))
     assert outcome.success is False and "不是合法业务线" in outcome.message
     assert not (tmp_path / "p").exists()
