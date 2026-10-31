@@ -21,7 +21,7 @@ from auto_pm.application.core.microtask_projection_service import (
     MicrotaskProjectionIndeterminateError,
     MicrotaskProjectionService,
 )
-from auto_pm.contracts.continuity import LeaseItem, RunState
+from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS, LeaseItem, RunState
 from auto_pm.contracts.execution_adapter import (
     ExecutionFailureCode,
     ExecutionMicrotaskMaterialization,
@@ -76,7 +76,7 @@ class LocalExecutionOrchestrator:
         dispatch: ExecutionDispatchResult,
         microtask: ExecutionMicrotaskMaterialization,
         lease_token_environment: str,
-        lease_seconds: int = 900,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
         renew_before_seconds: int | None = None,
         renewal_interval_seconds: float | None = None,
         handshake_timeout_seconds: float = 60.0,

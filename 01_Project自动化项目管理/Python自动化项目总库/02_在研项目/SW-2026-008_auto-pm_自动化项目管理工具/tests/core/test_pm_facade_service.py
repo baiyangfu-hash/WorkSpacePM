@@ -31,7 +31,7 @@ from auto_pm.application.core.pm_facade_service import PmFacadeService as Planni
 from auto_pm.application.core.pm_intake_service import PmIntakeService
 from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
 from auto_pm.application.core.workspace_context_service import WorkspaceContextService
-from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS, RunState, WorkKind, WorkState
 from auto_pm.contracts.execution_adapter import (
     ExecutionAdapterKind,
     ForegroundExecutionReceipt,
@@ -866,7 +866,7 @@ def test_approved_card_cold_start_recovers_one_exact_mission_and_root_work(
     assert captured["executor_id"] == "gpt-approved"
     assert captured["force_isolation"] is True
     assert captured["lease_token"] == "one-time-secret"
-    assert captured["lease_seconds"] == 900
+    assert captured["lease_seconds"] == DEFAULT_LEASE_SECONDS
 
     microtask = object()
     saga_receipt = object()

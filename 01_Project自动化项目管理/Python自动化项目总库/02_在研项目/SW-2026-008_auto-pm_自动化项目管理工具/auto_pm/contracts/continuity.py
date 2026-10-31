@@ -7,6 +7,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+# 租约默认秒数的唯一来源：CLI 选项与服务默认值都引用它，避免 900/1800 两套口径。
+DEFAULT_LEASE_SECONDS = 1800
+
 
 class WorkState(StrEnum):
     PLANNED = "PLANNED"

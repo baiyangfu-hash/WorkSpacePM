@@ -43,7 +43,7 @@ from auto_pm.application.core.mission_admission import (
 from auto_pm.application.core.mission_service import MissionService, MissionServiceError
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
-from auto_pm.contracts.continuity import RunState, WorkItem, WorkState
+from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS, RunState, WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.declared_dirty import declared_dirty_mismatch
@@ -127,7 +127,7 @@ class PmFacadeService:
         decision_service: DecisionService | None = None,
         execution_service: ExecutionDispatchService | None = None,
         local_orchestrator: LocalExecutionOrchestrator | None = None,
-        planning_lease_seconds: int = 900,
+        planning_lease_seconds: int = DEFAULT_LEASE_SECONDS,
     ) -> None:
         if type(planning_lease_seconds) is not int or not 60 <= planning_lease_seconds <= 3600:
             raise PmFacadeError("planning_lease_seconds 必须在 60 到 3600 之间")

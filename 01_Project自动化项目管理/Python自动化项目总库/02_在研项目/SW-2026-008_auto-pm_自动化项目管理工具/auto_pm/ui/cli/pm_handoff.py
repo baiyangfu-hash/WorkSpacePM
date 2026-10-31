@@ -23,6 +23,7 @@ from auto_pm.application.core.worktree_policy_service import (
     WorktreePolicyError,
     WorktreePolicyService,
 )
+from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS
 from auto_pm.infrastructure import process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.approval_pin import require_approval_pin
@@ -116,7 +117,7 @@ def handoff_pm(ctx: click.Context, run_id: str, to_owner: str, summary: str, lea
 @click.command(name="takeover")
 @click.option("--handoff-id", required=True)
 @click.option("--as", "receiver_id", required=True, help="你自己的 agent 身份，必须与交接指定的接收方一致")
-@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option("--holder-pid", default="auto", show_default=True, help="记录你的长驻进程：auto（调用本命令的 shell 或 IDE）、none 或 pid")
 @click.pass_context
 def takeover_pm(ctx: click.Context, handoff_id: str, receiver_id: str, lease_seconds: int, holder_pid: str) -> None:
