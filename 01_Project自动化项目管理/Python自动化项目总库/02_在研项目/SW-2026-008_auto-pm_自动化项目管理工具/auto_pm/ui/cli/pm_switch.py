@@ -26,6 +26,7 @@ from auto_pm.application.core.worktree_policy_service import (
     WorktreePolicyError,
     WorktreePolicyService,
 )
+from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS
 from auto_pm.contracts.mission import PARKED_STALE_DAYS, Mission, MissionBoard
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.cli.approval_pin import read_approval_pin
@@ -200,7 +201,7 @@ def park_pm(
 @click.option("--mission-id", required=True)
 @click.option("--as", "as_owner", required=True, help="拿回来接着干的 agent 身份，可以不是放下它的那个")
 @click.option("--approval-evidence-ref", default="", help="用户原话所在的位置（拿回哪张只听用户的；已启用批准口令时由口令代替）")
-@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option("--holder-pid", default="auto", show_default=True, help="记录你的长驻进程：auto、none 或 pid")
 @click.pass_context
 def unpark_pm(
@@ -232,7 +233,7 @@ def unpark_pm(
 @click.option("--summary", default="", help="手上这张的断点：干到哪了、下一步做什么")
 @click.option("--as", "as_owner", default="", help="拿起目标卡的 agent 身份")
 @click.option("--approval-evidence-ref", default="", help="用户原话所在的位置（切换只听用户的）")
-@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option("--holder-pid", default="auto", show_default=True)
 @click.pass_context
 def switch_pm(

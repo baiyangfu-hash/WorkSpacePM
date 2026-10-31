@@ -24,7 +24,7 @@ from pathlib import Path
 
 from auto_pm.application.core.approval_proof_service import ApprovalProofError, ApprovalProofService
 from auto_pm.application.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
-from auto_pm.contracts.continuity import RunItem, RunState
+from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS, RunItem, RunState
 from auto_pm.contracts.mission import (
     Mission,
     MissionBoard,
@@ -199,7 +199,7 @@ class MissionSwitchService:
         mission_id: str,
         as_owner: str,
         approval_evidence_ref: str,
-        lease_seconds: int = 900,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
         holder_pid: int | None = None,
         approval_pin: str = "",
     ) -> UnparkOutcome:
@@ -290,7 +290,7 @@ class MissionSwitchService:
         summary: str,
         as_owner: str,
         approval_evidence_ref: str,
-        lease_seconds: int = 900,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
         holder_pid: int | None = None,
         approval_pin: str = "",
     ) -> SwitchOutcome:

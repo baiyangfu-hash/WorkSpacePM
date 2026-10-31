@@ -42,7 +42,7 @@ from auto_pm.application.core.worktree_policy_service import (
     WorktreePolicyError,
     WorktreePolicyService,
 )
-from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS, RunState, WorkKind, WorkState
 from auto_pm.contracts.declared_dirty import declared_dirty_problem
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.mission import AuthorityEnvelope, MissionState
@@ -705,7 +705,7 @@ def run_group() -> None:
     show_default=True,
     help="与 --lease-wallet 一起：记录持有者的长驻进程（auto=调用本命令的 shell 或 IDE；none=不记录；或给出 pid），供日后回收判定",
 )
-@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def start_run(
@@ -1129,7 +1129,7 @@ RECLAIM_EXIT_CODES = {"ALLOW": 0, "REFUSE_LIVE_LEASE": 1, "REFUSE_PROCESS_ALIVE"
 @click.option("--run-id", required=True)
 @click.option("--claimant", "claimant_id", required=True, help="接手的 agent 身份（将成为新持有者）")
 @click.option("--reason", required=True, help="为什么要回收（写进事件）")
-@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option("--holder-pid", default="auto", show_default=True, help="接手后记录新持有者的长驻进程：auto、none 或 pid")
 @click.pass_context
 def reclaim_run(
@@ -1193,7 +1193,7 @@ def dispatch_group() -> None:
 @click.option("--executor", "executor_id", required=True)
 @click.option("--lease-token", default=None, help="已弃用：口令会留在进程列表里；请用 --lease-token-env")
 @click.option("--lease-token-env", default=None, metavar="ENV_NAME", help="从该环境变量读取口令（读后即清除）")
-@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option("--stack", default=None, help="已验证项目技术栈；省略时从 Workspace Registry 读取。")
 @click.option("--force-isolation", is_flag=True, help="即使控制工作树干净也创建隔离分支。")
 @click.option("--idempotency-key", required=True)
@@ -1246,7 +1246,7 @@ def lease_group() -> None:
 @click.option("--lease-token-env", default=None, metavar="ENV_NAME")
 @click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
 @click.option("--expected-version", type=click.IntRange(min=1), required=True)
-@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option(
     "--idempotency-key",
     required=True,
@@ -1290,7 +1290,7 @@ def renew_lease(
 @click.option("--owner", "owner_id", required=True)
 @click.option("--lease-token-env", default=None, metavar="ENV_NAME")
 @click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
-@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option(
     "--timeout-seconds",
     type=click.IntRange(1, 43_200),
@@ -1537,7 +1537,7 @@ def create_handoff(
     "--new-lease-token", default=None, help="已弃用：口令会留在进程列表里；请用 --new-lease-token-env（或直接用 pm takeover）"
 )
 @click.option("--new-lease-token-env", default=None, metavar="ENV_NAME", help="从该环境变量读取新口令（读后即清除）")
-@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=900, show_default=True)
+@click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def accept_handoff(
