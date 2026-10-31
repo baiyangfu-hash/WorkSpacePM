@@ -293,6 +293,55 @@ def test_offline_audit_uses_local_refs_and_does_not_fetch(world, monkeypatch):
     assert audit_pr.main(["40", "--offline", "--skip-ci-result"]) in (0, 1)  # never 2: no fetch was tried
 
 
+def _spy_git_env(monkeypatch):
+    """Record the effective GIT_NO_LAZY_FETCH of every subprocess started (this module's and encoding_check's alike)."""
+    import os
+
+    seen: list[tuple[list, str | None]] = []
+    real_run = audit_pr.subprocess.run
+
+    def spy(cmd, *a, **kw):
+        env = kw.get("env")
+        seen.append((cmd, (env if env is not None else os.environ).get("GIT_NO_LAZY_FETCH")))
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(audit_pr.subprocess, "run", spy)
+    return seen
+
+
+def test_offline_audit_is_really_offline(world, monkeypatch):
+    """真离线：不碰 GitHub 接口，且每个 git 子进程都带 GIT_NO_LAZY_FETCH（部分克隆不许偷偷补取对象）。"""
+    world["open_pr"](43, {"src/app.py": "x = 2\n"})
+    world["audit"](43)
+    seen = _spy_git_env(monkeypatch)
+
+    def no_http(*a, **kw):
+        raise AssertionError("离线审计不许发 HTTP 请求")
+
+    monkeypatch.setattr(audit_pr.urllib.request, "urlopen", no_http)
+    audit_pr.audit(43, repo="x/y", remote="origin", network=False, fetch=False, cwd=str(world["work"]), patch=None, patch_base=None)
+    assert len(seen) > 3
+    assert [cmd for cmd, flag in seen if flag != "1"] == []
+    assert audit_pr._OFFLINE is False
+    import os
+
+    assert os.environ.get("GIT_NO_LAZY_FETCH") != "1"  # 审计结束后环境复位，不影响后续在线审计
+
+
+def test_offline_switch_makes_a_github_call_an_error(monkeypatch):
+    monkeypatch.setattr(audit_pr, "_OFFLINE", True)
+    with pytest.raises(audit_pr.GitError, match="离线审计"):
+        audit_pr.github_json("x/y/pulls/1")
+
+
+def test_online_audit_does_not_set_the_offline_switches(world, monkeypatch):
+    world["open_pr"](44, {"src/app.py": "x = 2\n"})
+    seen = _spy_git_env(monkeypatch)
+    world["audit"](44)
+    assert seen
+    assert [cmd for cmd, flag in seen if flag == "1"] == []
+
+
 def test_offline_audit_without_local_refs_says_what_is_missing(world):
     world["open_pr"](41, {"src/app.py": "x = 2\n"})
     _cut_the_network(world["work"])
