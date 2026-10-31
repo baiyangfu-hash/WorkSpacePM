@@ -42,6 +42,8 @@ PROTECTED_PATTERNS = (
     ".agent/rules/*",
     "roles/*",
     ".claude/*",
+    ".agents/skills.json",
+    "docs/handover/*",
     "SYS-2026-001_WorkspaceGovernance/approvers.json",
     "*.mdc",
     "*CHG-*",
