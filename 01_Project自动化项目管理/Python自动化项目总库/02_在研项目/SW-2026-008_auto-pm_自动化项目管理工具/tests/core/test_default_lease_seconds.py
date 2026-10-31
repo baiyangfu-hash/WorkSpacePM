@@ -13,6 +13,7 @@ from auto_pm.application.core.pm_facade_service import PmFacadeService
 from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS
 from auto_pm.ui.cli.continuity import continuity_group
 from auto_pm.ui.cli.pm_handoff import takeover_pm
+from auto_pm.ui.cli.pm_switch import switch_pm, unpark_pm
 
 _NAMES = ("lease_seconds", "planning_lease_seconds")
 
@@ -49,6 +50,10 @@ def test_service_signatures_use_the_constant() -> None:
 
 def test_cli_options_use_the_constant() -> None:
     defaults = _cli_defaults(continuity_group)
-    defaults.update(_cli_defaults(takeover_pm))
-    assert len(defaults) >= 5
+    for cmd in (takeover_pm, unpark_pm, switch_pm):
+        defaults.update(_cli_defaults(cmd))
+    assert {"/switch:lease_seconds", "/unpark:lease_seconds", "/takeover:lease_seconds"} <= {
+        k.split(":")[0] + ":" + k.split(":")[1] for k in defaults
+    }
+    assert len(defaults) >= 7
     assert {k: v for k, v in defaults.items() if v != DEFAULT_LEASE_SECONDS} == {}
