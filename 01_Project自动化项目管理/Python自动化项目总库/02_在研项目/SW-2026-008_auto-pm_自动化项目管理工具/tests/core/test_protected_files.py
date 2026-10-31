@@ -140,8 +140,26 @@ def test_note_warns_for_an_old_run_and_blocks_a_new_one(monkeypatch: pytest.Monk
     monkeypatch.setattr(PmFacadeService, "_protected_file_changes", staticmethod(lambda _run: ()))
     assert facade._protected_file_note(new) == ("", False)
     monkeypatch.setattr(PmFacadeService, "_protected_file_changes", staticmethod(lambda _run: None))
+    # TD-SW008-225：读不出 Git 记录 = 没有证据。新 Run 判不过（不再放过），老 Run 仍只警告。
     note, block = facade._protected_file_note(new)
-    assert "无法核对" in note and block is False
+    assert "无法核对" in note and "警告" not in note and block is True
+    note, block = facade._protected_file_note(old)
+    assert "无法核对" in note and "警告" in note and block is False
+    # 创建时间读不出来的 Run 按新 Run 处理（与 enforcement_for_run 一致）。
+    note, block = facade._protected_file_note(SimpleNamespace(run_id="RUN-Z", created_at="不是时间"))
+    assert block is True
+
+
+def test_an_unreadable_git_record_refuses_verification_end_to_end(tmp_path: Path) -> None:
+    """真的 Git 读不出来（工作树不是 Git 仓库）：新 Run 的 pm verify 路径拿到“拦截”，而不是一句警告。"""
+    facade = PmFacadeService.__new__(PmFacadeService)
+    broken = SimpleNamespace(
+        run_id="RUN-N", worktree_path=str(tmp_path), git_head="a" * 40, created_at="2026-11-01T00:00:00+00:00", owned_paths=()
+    )
+    note, block = facade._protected_file_note(broken)
+    assert block is True and "不能证明" in note
+    old = SimpleNamespace(**{**vars(broken), "run_id": "RUN-O", "created_at": "2026-10-01T00:00:00+00:00"})
+    assert facade._protected_file_note(old)[1] is False
 
 
 def test_the_cut_over_comes_from_the_ledger_creation_time_and_unreadable_counts_as_new() -> None:
