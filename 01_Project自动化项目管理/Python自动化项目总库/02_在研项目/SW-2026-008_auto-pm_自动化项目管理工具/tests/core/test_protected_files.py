@@ -213,3 +213,16 @@ def test_a_new_run_without_a_declaration_is_blocked_end_to_end(tmp_path: Path) -
     old = SimpleNamespace(worktree_path=str(tmp_path), git_head=head, run_id="R", owned_paths=("auto_pm",), created_at="2026-10-20T00:00:00+00:00")
     note, block = facade._protected_file_note(old)
     assert block is False and "警告" in note
+
+
+def test_the_handover_rules_and_the_skill_registry_are_protected_and_nearby_names_are_not() -> None:
+    """TD-SW008-262: the rule files written for the next model, and the skill registry, are on the list."""
+
+    assert protected_changes(
+        ["docs/handover/02_必须用户亲口同意的事.md", "docs/handover/10_PLC工作规矩.md", ".agents/skills.json"]
+    ) == (
+        ".agents/skills.json",
+        "docs/handover/02_必须用户亲口同意的事.md",
+        "docs/handover/10_PLC工作规矩.md",
+    )
+    assert protected_changes(["docs/notes.md", ".agents/teamwork/progress.md", ".agents/skills.json.bak", "handover/x.md"]) == ()

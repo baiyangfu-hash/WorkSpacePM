@@ -375,6 +375,22 @@ def test_agent_rule_files_are_protected_paths(world, path):
     assert path in next(c.detail for c in checks if c.id == "protected_paths")
 
 
+@pytest.mark.parametrize("path", ["docs/handover/02_必须用户亲口同意的事.md", "docs/handover/90_new.md", ".agents/skills.json"])
+def test_the_handover_rules_and_the_skill_registry_are_protected_paths(world, path):
+    """给接手模型的规矩文件和技能注册表被改，PR 必须被点名（TD-SW008-262）。"""
+    world["open_pr"](63, {path: "x\n"})
+    _, checks = world["audit"](63)
+    assert status(checks, "protected_paths") == "WARN"
+    assert path in next(c.detail for c in checks if c.id == "protected_paths")
+
+
+@pytest.mark.parametrize("path", ["docs/notes.md", ".agents/teamwork/progress.md", ".agents/skills.json.bak", "handover/x.md"])
+def test_nearby_names_are_not_protected_by_the_handover_rule(world, path):
+    world["open_pr"](64, {path: "x\n"})
+    _, checks = world["audit"](64)
+    assert status(checks, "protected_paths") is None
+
+
 def test_the_approver_pin_registry_is_a_protected_path_but_a_similar_name_is_not(world):
     """批准口令的校验值被换掉 = 用户的签字钥匙被换掉：改它的 PR 必须被点名（批准口令方案）。"""
     world["open_pr"](61, {"SYS-2026-001_WorkspaceGovernance/approvers.json": "{}\n"})
