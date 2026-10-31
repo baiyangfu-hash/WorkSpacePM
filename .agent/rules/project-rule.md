@@ -14,11 +14,11 @@ alwaysApply: true
 | 用途 | 绝对路径 |
 |:---|:---|
 | **全局开发规则** | `.trae/rules/project-rule.md` |
-| **跨技能公共契约** | `.trae/skills/shared/refs/skill_coordination.md` |
+| **跨技能公共契约** | `roles/shared/refs/skill_coordination.md` |
 | **治理基线** | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
 | **当前计划与状态投影** | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md`（以其“当前投影”为准） |
-| **PLC 电气工程** | `.trae/skills/plc-electrical-engineer/SKILL.md` |
-| **全栈高级语言** | `.trae/skills/fullstack-engineer/SKILL.md` |
+| **PLC 电气工程** | `roles/plc-electrical-engineer/SKILL.md` |
+| **全栈高级语言** | `roles/fullstack-engineer/SKILL.md` |
 | **Obsidian 规范注册表** | `00_Obsidian_Base全局规范文件仓库/spec_registry.json` |
 | **全局协作入口** | `AGENTS.md` |
 | **工位与控制根规则** | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”：每台电脑 1 个控制根，每个 agent 一个工位 `.auto-pm/worktrees/<agent>` |

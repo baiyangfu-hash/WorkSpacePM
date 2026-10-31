@@ -4,10 +4,10 @@
       "path": "../.trae/skills/cockpit-entry"
     },
     {
-      "path": "../.trae/skills/fullstack-engineer"
+      "path": "../roles/fullstack-engineer"
     },
     {
-      "path": "../.trae/skills/plc-electrical-engineer"
+      "path": "../roles/plc-electrical-engineer"
     }
   ]
 }

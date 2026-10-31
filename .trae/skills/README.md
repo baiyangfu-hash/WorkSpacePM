@@ -2,6 +2,8 @@
 
 规则真源是根目录 `AGENTS.md`。可用技能以 `.agents/skills.json` 的登记为准（`cockpit-entry`、`fullstack-engineer`、`plc-electrical-engineer`）；另有未登记的维护技能 `find-skills`。
 
+> **正本在 `roles/`（驾驶舱公共角色库）**：`fullstack-engineer`、`plc-electrical-engineer` 和公共契约 `shared` 的正文与参考资料只存在于 `roles/`；本目录下同名的三个目录只剩一页指路牌，不得再放正文。
+
 ## 第一入口
 
 ### `cockpit-entry`（驾驶舱薄入口）

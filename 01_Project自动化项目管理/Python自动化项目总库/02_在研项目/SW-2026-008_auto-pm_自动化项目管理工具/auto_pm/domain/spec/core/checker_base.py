@@ -1122,7 +1122,7 @@ class SkillContractDriftChecker(BaseChecker):
     """SHC-017: 技能文档↔代码契约漂移对账器（CHG-SCPT-2026-167）
 
     以「代码为唯一真源」动态提取关键常量，校验技能文档
-    （<workspace>/.trae/skills/**）是否仍包含这些值；漂移即报 SHC-017。
+    （<workspace>/roles/**）是否仍包含这些值；漂移即报 SHC-017。
     """
 
     def check(
