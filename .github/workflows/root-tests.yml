@@ -1,5 +1,6 @@
 # 仓库根 tests/ 全量：启动器、发布入口、批处理守护、PLC 模板对齐等。
 # 这些测试此前只有 bat-guard、gitignore-guard 各跑自己一个文件，其余（启动器字节码残留、发布入口、tests/plc/*）没有任何 CI 在跑。
+# 同一作业再跑 SW-2026-010（驾驶舱 A6 验证套件）自己的 tests/：它也没有任何 CI 在跑。
 # 只增加覆盖，不改任何已有检查的判定。每个 PR 和 main 推送都跑（不设 paths 过滤），几秒钟。
 name: root-tests
 
@@ -36,7 +37,11 @@ jobs:
 
       # 版本与 requirements-lock-py312-win.txt 一致；tests/plc 的模板对齐测试要导入驾驶舱的 domain 层（pydantic、PyYAML）。
       - name: Install test dependencies
-        run: python -m pip install pytest==9.1.1 pydantic==2.13.4 pydantic-settings==2.15.0 PyYAML==6.0.3
+        run: python -m pip install pytest==9.1.1 pydantic==2.13.4 pydantic-settings==2.15.0 PyYAML==6.0.3 click==8.4.2 rich==15.0.0
 
       - name: Repo-root tests
+        run: python -m pytest -q -p no:cacheprovider -o addopts= tests
+
+      - name: SW-2026-010 project tests
+        working-directory: 01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-010_驾驶舱A6Python验证套件
         run: python -m pytest -q -p no:cacheprovider -o addopts= tests
