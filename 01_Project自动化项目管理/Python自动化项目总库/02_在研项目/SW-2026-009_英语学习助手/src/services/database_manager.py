@@ -11,10 +11,11 @@ DB_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'app.db')
 
 class DatabaseManager:
     """线程安全的 SQLite 数据库管理器"""
-    _local = threading.local()
-
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path or DB_PATH
+        # 每个实例自己的线程本地连接。若放在类上，所有实例共用一份，
+        # 第二个实例（例如测试里指向临时库）会悄悄沿用第一个实例开的连接，写进真库。
+        self._local = threading.local()
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.init_tables()
 
