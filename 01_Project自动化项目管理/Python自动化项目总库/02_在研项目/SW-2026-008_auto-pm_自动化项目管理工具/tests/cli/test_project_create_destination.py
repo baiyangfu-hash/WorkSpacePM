@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from auto_pm.application.core.paths import ProjectDestinationError, resolve_project_destination
 from auto_pm.ui.cli.__main__ import cli
@@ -14,7 +14,7 @@ from auto_pm.ui.cli.__main__ import cli
 RELEASE = Path("00_Infrastructure") / "auto_pm" / "releases" / "1.3.3-aaaaaaa"
 
 
-def _create(args: list[str], *, workspace: Path | None) -> object:
+def _create(args: list[str], *, workspace: Path | None) -> Result:
     base = ["-w", str(workspace)] if workspace else []
     return CliRunner().invoke(
         cli,
@@ -54,26 +54,26 @@ def test_a_relative_dest_dir_means_the_users_folder_not_the_release_folder(
     launched: dict[str, Path],
 ) -> None:
     result = _create(["--dest-dir", "out"], workspace=launched["workspace"])
-    assert result.exit_code == 0, result.output  # type: ignore[attr-defined]
-    assert str(launched["caller"] / "out" / "SW-2026-901_落点") in result.output.replace("\n", "")  # type: ignore[attr-defined]
-    assert str(launched["release"]) not in result.output.replace("\n", "")  # type: ignore[attr-defined]
+    assert result.exit_code == 0, result.output
+    assert str(launched["caller"] / "out" / "SW-2026-901_落点") in result.output.replace("\n", "")
+    assert str(launched["release"]) not in result.output.replace("\n", "")
 
 
 def test_a_dest_dir_inside_the_release_tree_is_refused(launched: dict[str, Path]) -> None:
     result = _create(
         ["--dest-dir", str(launched["release"] / "mine")], workspace=launched["workspace"]
     )
-    assert result.exit_code == 1  # type: ignore[attr-defined]
-    assert "发布目录" in result.output  # type: ignore[attr-defined]
+    assert result.exit_code == 1
+    assert "发布目录" in result.output
     assert not (launched["release"] / "mine").exists()
 
 
 def test_without_dest_dir_the_project_goes_below_the_workspace(launched: dict[str, Path]) -> None:
     result = _create([], workspace=launched["workspace"])
-    assert result.exit_code == 0, result.output  # type: ignore[attr-defined]
+    assert result.exit_code == 0, result.output
     assert str(launched["workspace"] / "0100_项目" / "SW-2026-901_落点") in result.output.replace(
         "\n", ""
-    )  # type: ignore[attr-defined]
+    )
 
 
 def test_a_relative_workspace_means_the_users_folder_too(launched: dict[str, Path]) -> None:
@@ -149,6 +149,6 @@ def test_the_workbench_window_uses_the_same_rule(tmp_path: Path) -> None:
     release_like.mkdir(parents=True)
     uc = WorkbenchUseCases.__new__(WorkbenchUseCases)
     uc.template_service = object()  # type: ignore[assignment]
-    uc.project_service = SimpleNamespace(workspace_root=str(release_like))  # type: ignore[assignment]
+    uc.project_service = SimpleNamespace(workspace_root=str(release_like))
     outcome = uc.create_project("SW-2026-902", "窗", "python", "", "SW", "")
     assert outcome.success is False and "发布目录" in outcome.message
