@@ -735,3 +735,29 @@ def test_t91_clean_utf8_prints_no_warning(repo: Path, capsys) -> None:
     base, head = commit(repo, {FEED: edit_feed("nTimeout := 10;", "nTimeout := 11;")})
     gate.check(repo, base, head)
     assert capsys.readouterr().err == ""
+
+
+def _safety_job() -> dict:
+    yaml = pytest.importorskip("yaml")
+    workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "safety-gate.yml"
+    return yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]["safety"]
+
+
+def test_w05_a_rerun_on_a_merged_or_closed_pr_fails_loudly_and_writes_no_status() -> None:
+    # TD-SW008-222: the guarded steps were skipped on a closed PR, the job ended green and nothing was written, so a re-run looked like a pass
+    job = _safety_job()
+    steps = job["steps"]
+    names = [step.get("name", "") for step in steps]
+    refuse = steps[names.index("Refuse to judge a PR that is no longer open")]
+    assert refuse["if"] == "steps.pr.outputs.state != 'open'" and "exit 1" in refuse["run"]
+    assert names.index("Refuse to judge a PR that is no longer open") < names.index("Mark the check pending")
+    # nothing may write a `safety-zone` status unless the PR is open: the pending mark, the verdict and the error report are all guarded
+    for step in steps:
+        if "context=safety-zone" in step.get("run", ""):
+            assert "steps.pr.outputs.state == 'open'" in step.get("if", ""), step.get("name")
+
+
+def test_w06_a_fresh_event_on_a_closed_pr_skips_the_job_instead_of_running_it_green() -> None:
+    condition = " ".join(str(_safety_job()["if"]).split())
+    assert "github.event.pull_request.state == 'open'" in condition
+    assert "github.event.issue.state == 'open'" in condition
