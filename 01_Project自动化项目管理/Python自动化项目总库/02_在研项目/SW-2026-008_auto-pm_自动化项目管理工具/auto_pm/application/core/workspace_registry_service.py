@@ -14,10 +14,13 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from auto_pm.application.core.project_scanner import ProjectScanner
+from pydantic import ValidationError
+
+from auto_pm.application.core.project_scanner import ProjectScanner, first_problem
 from auto_pm.application.core.workspace_context_service import WorkspaceContextService
 from auto_pm.contracts.workspace_context import WorkspaceProjectMapping, WorkspaceRegistry
 from auto_pm.domain.models import ProjectInfo
+from auto_pm.domain.models.project import VALID_BUSINESS_LINES
 
 
 class WorkspaceRegistryError(RuntimeError):
@@ -131,13 +134,25 @@ class WorkspaceRegistryService:
             raise WorkspaceRegistryError("不能把工作区根目录登记为项目")
         if any(self._is_archive_or_backup_part(part) for part in relative.parts):
             raise WorkspaceRegistryError(f"不能登记归档、备份或 .auto-pm 下的目录: {relative.as_posix()}")
-        info = self._scanner.try_identify_project(str(path))
+        try:
+            info = self._scanner.try_identify_project(str(path))
+        except ValidationError as error:
+            raise WorkspaceRegistryError(
+                f"项目元数据无效（{first_problem(error)}），"
+                f"请先修正 {relative.as_posix()} 下的 .copier-answers.yml / .plc.json"
+            ) from error
         if info is None:
             raise WorkspaceRegistryError(
                 f"目录缺少项目锚点（.copier-answers.yml / .plc.json / PM_SESSION）: {relative.as_posix()}"
             )
         if info.project_id != project_id:
             raise WorkspaceRegistryError(f"目录锚点的项目编号不一致: {info.project_id} != {project_id}")
+        declared = (info.extra or {}).get("business_line")
+        if declared and declared not in VALID_BUSINESS_LINES:
+            raise WorkspaceRegistryError(
+                f"项目 {project_id} 在 .copier-answers.yml 里写的业务线 {declared!r} 不在白名单"
+                f"（{'、'.join(VALID_BUSINESS_LINES)}），不登记；请先改成合法业务线或删掉这一行"
+            )
         return relative.as_posix()
 
     def _unique_project_directory(self, project_id: str) -> Path:
@@ -149,6 +164,12 @@ class WorkspaceRegistryService:
         self._scanner._scan(str(self._workspace_root), found, depth=0, max_depth=4)
         directories = sorted({Path(info.path).resolve() for info in found if info.project_id == project_id})
         if not directories:
+            for skipped, problem in self._scanner.skipped_invalid:
+                if project_id in Path(skipped).name:
+                    raise WorkspaceRegistryError(
+                        f"项目元数据无效（{problem}），请先修正 {self._display(Path(skipped))} 下的 "
+                        ".copier-answers.yml / .plc.json"
+                    )
             raise WorkspaceRegistryError(f"工作区内找不到项目目录: {project_id}（可用 --path 指定）")
         if len(directories) > 1:
             listed = "、".join(self._display(path) for path in directories)
