@@ -65,6 +65,8 @@ DEFAULT_WORKFLOWS: dict[str, tuple[str, ...] | None] = {
 SIGNERS = {"baiyangfu-hash": 246858089}
 PLAN_LINE = re.compile(r"^\s*(?:\*\*)?(?:④\s*)?(?:是否涉及)?安全回路(?:\*\*)?\s*[:：]\s*(.*?)\s*$")
 PLAN_CHOICES = ("是", "否")
+# 签字至少 12 位，与 reviews/tools/safety_zone_check.py 的 MIN_SIGN_LEN 一致（TD-SW008-215；测试里有一致性断言）。
+MIN_SIGN_LEN = 12
 SIGN_LINE = re.compile(r"^\s*安全签字\s*[:：]?\s*`?([0-9a-fA-F]{7,40})`?(?:\s.*|[，。；：！、）】」』,;.!)\]].*)?$")
 
 AUDIT_FILE = re.compile(r"^(\d+)_.*\.md$")
@@ -398,6 +400,10 @@ def find_signature(comments: list[dict[str, Any]], head_sha: str) -> tuple[str |
         shas = [m.group(1).lower() for m in (SIGN_LINE.match(line) for line in body.splitlines()) if m]
         if not shas:
             continue
+        if all(len(sha) < MIN_SIGN_LEN for sha in shas):
+            notes.append(f"签字不足 {MIN_SIGN_LEN} 位，不认")
+            continue
+        shas = [sha for sha in shas if len(sha) >= MIN_SIGN_LEN]
         user = comment.get("user") or {}
         login, uid = user.get("login"), user.get("id")
         if login not in SIGNERS or SIGNERS[login] != uid:

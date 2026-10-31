@@ -91,7 +91,7 @@ def _run(name: str, sha: str, conclusion: str | None, number: int = 1) -> dict[s
 
 
 def _signature(sha: str, login: str = "baiyangfu-hash", uid: int = 246858089, app: bool = False) -> dict[str, Any]:
-    return {"body": f"仿真过了\n安全签字 {sha[:8]}", "user": {"login": login, "id": uid},
+    return {"body": f"仿真过了\n安全签字 {sha[:12]}", "user": {"login": login, "id": uid},
             "performed_via_github_app": {"slug": "bot"} if app else None, "html_url": "c"}
 
 
@@ -446,3 +446,18 @@ def test_signature_line_rule_matches_the_safety_gate_for_punctuation_after_the_h
     for line in samples:
         assert bool(gh.SIGN_LINE.match(line)) == bool(safety.SIGN_LINE.match(line)), line
     assert gh.SIGN_LINE.match(samples[1]) and not gh.SIGN_LINE.match(samples[6])
+    # TD-SW008-215：最少位数两边必须同一个数（总控屏不能显示“已签”而 safety-gate 不认）
+    assert gh.MIN_SIGN_LEN == safety.MIN_SIGN_LEN == 12
+
+
+def test_a_signature_shorter_than_12_digits_does_not_count_on_the_board_either() -> None:
+    """TD-SW008-215：7 位前缀可被碰撞；总控屏和 safety-gate 一样，短于 12 位不算已签。"""
+    head = "0123456789abcdef0123456789abcdef01234567"
+    signer = {"login": "baiyangfu-hash", "id": 246858089}
+    for length in (7, 8, 11):
+        comment = {"body": f"安全签字 {head[:length]}", "user": signer, "performed_via_github_app": None}
+        signed, why = gh.find_signature([comment], head)
+        assert signed is None and "12 位" in why, length
+    for length in (12, 20, 40):
+        comment = {"body": f"安全签字 {head[:length]}", "user": signer, "performed_via_github_app": None}
+        assert gh.find_signature([comment], head) == (head[:8], ""), length

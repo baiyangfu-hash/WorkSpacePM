@@ -216,16 +216,23 @@ def test_r11_a_plc_change_without_a_signature_blocks(tmp_path: Path) -> None:
 
 
 def test_r12_a_signature_for_an_old_head_blocks(tmp_path: Path) -> None:
-    assert failed(check(tmp_path, plc_pr([signed(OLD[:10])]))) == {"安全签字"}
+    assert failed(check(tmp_path, plc_pr([signed(OLD[:12])]))) == {"安全签字"}
 
 
 def test_r13_a_signature_for_the_current_head_by_the_signer_passes(tmp_path: Path) -> None:
-    assert check(tmp_path, plc_pr([signed(HEAD[:10])])).ready
+    assert check(tmp_path, plc_pr([signed(HEAD[:12])])).ready
+
+
+def test_r13b_a_signature_of_10_digits_no_longer_counts(tmp_path: Path) -> None:
+    """TD-SW008-215：与 safety-gate 同一个口径，短于 12 位不认。"""
+    report = check(tmp_path, plc_pr([signed(HEAD[:10])]))
+    assert failed(report) == {"安全签字"}
+    assert "不足 12 位" in "".join(item.detail for item in report.items)
 
 
 def test_r14_a_signature_by_someone_else_blocks(tmp_path: Path) -> None:
     other = {"login": "someone", "id": 1}
-    assert failed(check(tmp_path, plc_pr([signed(HEAD[:10], other)]))) == {"安全签字"}
+    assert failed(check(tmp_path, plc_pr([signed(HEAD[:12], other)]))) == {"安全签字"}
 
 
 def test_r15_a_declared_yes_needs_the_signature_even_without_plc_files(tmp_path: Path) -> None:
