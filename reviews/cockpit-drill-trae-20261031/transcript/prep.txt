@@ -1,0 +1,16 @@
+# 准备与观察命令（2026-10-31，MST）
+
+- `git status --short` → 空，exit 0
+- `git fetch origin main` → `* branch main -> FETCH_HEAD`，exit 0
+- `git fetch --unshallow` → `fatal: --unshallow on a complete repository does not make sense`，exit 128（仓库已完整）
+- `git ls-remote origin main` → `4c71830ee128c40f1c8fdac8569f43de3af2cbfb`，exit 0
+- `git switch -c trae/cockpit-drill-20261031 FETCH_HEAD` → `4c71830e`，exit 0
+- `.venv/bin/python main.py --resolve-only` → `../../releases/1.3.3-163c7a3`，exit 0
+- `rsync -a --exclude=.venv --exclude=.git --exclude='*.pyc' /workspace/ /tmp/drill-ws/` → 328M，exit 0
+- 沙箱 `git init && git add -A && git commit -m "drill baseline"` → `f291536`，exit 0
+- 沙箱 `git worktree add --detach .auto-pm/worktrees/drill-w1 HEAD` → `1bd3de9`，exit 0
+
+沙箱内统一用：
+`cd /tmp/drill-ws && /workspace/.venv/bin/python main.py <命令>`（入口脚本取自沙箱，使发布指针与运行身份校验都落在沙箱）
+
+运行身份提示（记录，非缺陷结论）：直接 `PYTHONPATH=<宿主发布目录> python -m auto_pm -w /tmp/drill-ws` 执行写命令会被拒 `运行身份未通过校验，已拒绝写入：RUNTIME_IDENTITY_UNVERIFIED`（exit 1）；改用沙箱自带 `main.py` 后正常。
