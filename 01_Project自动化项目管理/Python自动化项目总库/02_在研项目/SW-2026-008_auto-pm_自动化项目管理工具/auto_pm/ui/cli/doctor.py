@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import platform
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -83,6 +85,90 @@ def check_venv_base(
     return {"status": "warn" if reasons else "ok", "reasons": reasons, "home": home}
 
 
+POINTER_DIR = "00_Infrastructure/auto_pm"
+POINTER_FILES = ("active_release.json", "previous_release.json", "deployment_manifest.json")
+
+
+def _git_show(root: str, ref: str, relative: str) -> str | None:
+    """File content at a Git ref, or None when the ref or the file is not there.  Strict UTF-8: a bad byte is a failure, not a guess."""
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", root, "show", f"{ref}:{relative}"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        return result.stdout.decode("utf-8") if result.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return None
+
+
+def _json_object(text: str | None) -> dict[str, Any] | None:
+    if text is None:
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def check_release_pointers(root: str, ref: str | None = None) -> dict[str, Any]:
+    """Do the three release pointer files on main match the release deployed on this machine (TD-244)?
+
+    After a release switch the pointers change on this machine, and nothing carries them into Git until someone commits
+    them.  Fresh clones then read an old release.  Read-only.  ``status`` is ok / fail / info; a release id that contains
+    ``.test.`` is a test build and never counts as the deployed release.
+    """
+
+    base = Path(root) / POINTER_DIR
+    if not (base / "active_release.json").exists():
+        return {"status": "info", "reasons": ["本机没有 active_release.json（不是控制根或还没部署）"], "ref": ""}
+    local = {name: _json_object(_read_local(base / name)) for name in POINTER_FILES}
+    unreadable = [name for name in POINTER_FILES if local[name] is None and (base / name).exists()]
+    active = local["active_release.json"]
+    if unreadable or active is None:
+        return {
+            "status": "fail",
+            "reasons": [f"本机 {name} 读不出来（不是有效的 JSON 或含坏字节），不能判断部署的是哪个版本" for name in unreadable]
+            or ["本机 active_release.json 读不出来"],
+            "ref": "",
+        }
+    if ref is None:
+        ref = "origin/main" if _git_show(root, "origin/main", f"{POINTER_DIR}/active_release.json") is not None else "HEAD"
+    reasons: list[str] = []
+    deployed = active.get("release_id")
+    if not isinstance(deployed, str) or not deployed:
+        return {"status": "fail", "reasons": ["本机 active_release.json 缺少 release_id"], "ref": ref}
+    if ".test." in deployed:
+        reasons.append(f"本机已部署的版本 {deployed} 是测试构建（版本号含 .test.），不能当作已部署版本")
+    committed = {name: _json_object(_git_show(root, ref, f"{POINTER_DIR}/{name}")) for name in POINTER_FILES}
+    for name in ("active_release.json", "previous_release.json"):
+        mine, theirs = local[name], committed[name]
+        if mine is None:
+            continue
+        if theirs is None:
+            reasons.append(f"{ref} 上读不到 {name}")
+        elif theirs.get("release_id") != mine.get("release_id"):
+            reasons.append(f"{name}：{ref} 上是 {theirs.get('release_id')}，本机是 {mine.get('release_id')}；发版后的指针还没入库")
+    manifest = committed["deployment_manifest.json"]
+    if manifest is None:
+        reasons.append(f"{ref} 上读不到 deployment_manifest.json")
+    else:
+        releases = manifest.get("releases")
+        if not isinstance(releases, dict) or deployed not in releases:
+            reasons.append(f"deployment_manifest.json：{ref} 上没有本机已部署的版本 {deployed}")
+    return {"status": "fail" if reasons else "ok", "reasons": reasons, "ref": ref}
+
+
+def _read_local(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
     """执行综合环境健康诊断
 
@@ -131,8 +217,15 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
     gh_installed, gh_logged_in = gh_status()
 
     venv_base = check_venv_base()
+    release_pointers = check_release_pointers(root)
 
-    all_passed = py_ok and git_ok and sanitation_report.is_pure and all(dep_results.values())
+    all_passed = (
+        py_ok
+        and git_ok
+        and sanitation_report.is_pure
+        and all(dep_results.values())
+        and release_pointers["status"] != "fail"
+    )
 
     return {
         "workspace_root": str(root),
@@ -146,6 +239,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
         "gh_installed": gh_installed,
         "gh_logged_in": gh_logged_in,
         "venv_base": venv_base,
+        "release_pointers": release_pointers,
         "all_passed": all_passed,
     }
 
@@ -199,7 +293,17 @@ def doctor_command(workspace: str | None) -> None:
     elif venv["status"] == "ok":
         table.add_row("虚拟环境底层 Python", "[green]✅ PASS[/green]", venv["home"])
 
+    pointers = res["release_pointers"]
+    if pointers["status"] == "fail":
+        table.add_row("发布指针与本机部署", "[bold red]❌ FAIL[/bold red]", "；".join(pointers["reasons"]))
+    elif pointers["status"] == "ok":
+        table.add_row("发布指针与本机部署", "[green]✅ PASS[/green]", f"{pointers['ref']} 上的三个指针与本机一致")
+
     console.print(table)
+
+    if pointers["status"] == "fail":
+        console.print("\n[bold red]发布指针落后于本机部署：把三个指针文件走变更单提交进 main，再重跑 doctor。[/bold red]\n")
+        raise SystemExit(1)
 
     if res["all_passed"]:
         console.print("\n[bold green]🎉 恭喜！当前环境一切正常，可顺畅运行与开发 auto-pm！[/bold green]\n")
