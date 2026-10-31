@@ -1252,9 +1252,13 @@ class PmFacadeService:
         """(message for ``pm verify``, whether it must refuse); the refusal only applies in "block" mode."""
 
         changed = self._protected_file_changes(run)
-        if changed is None:
-            return "警告：无法核对受保护文件（读不到 Git 记录），请人工确认没有改测试或门禁脚本。", False
         enforcement = enforcement_for_run(getattr(run, "created_at", ""))
+        if changed is None:
+            # TD-SW008-225（用户 2026-10-31 “全部按推荐”）：读不出 Git 记录就当没有证据；新 Run 判不过，
+            # 10-30 之前批准的老 Run 仍只警告（它们是在没有授权字段的规则下批的）。
+            if enforcement == "block":
+                return "无法核对受保护文件（读不到 Git 记录），不能证明没有改测试或门禁脚本；请先修好工作树的 Git 再验证。", True
+            return "警告：无法核对受保护文件（读不到 Git 记录），请人工确认没有改测试或门禁脚本。", False
         message = protected_files_message(changed, enforcement=enforcement)
         if message:
             log.warning("受保护文件被改动: run=%s %s", run.run_id, changed)
