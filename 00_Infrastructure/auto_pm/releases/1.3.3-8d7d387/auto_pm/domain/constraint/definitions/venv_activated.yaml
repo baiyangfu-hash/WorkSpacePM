@@ -1,0 +1,12 @@
+id: "CST-ENV-001"
+name: "命令执行需激活虚拟环境"
+description: "Python CLI 与测试命令需在 .venv 激活环境中运行"
+type: env
+severity: warning
+scope:
+  patterns:
+    - "**/*.py"
+rules:
+  - type: "check_venv"
+    description: "检测 sys.prefix 是否属于虚拟环境"
+auto_fix: false

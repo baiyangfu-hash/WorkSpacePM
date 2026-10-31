@@ -1,0 +1,6 @@
+flowchart TD
+    Start([上电复位 / 各轴回原点完成]) --> AutoCheck{OMAC 切入 AUTO 模式?}
+    AutoCheck --是--> Station1[工位1 动作机构: 进料与动作执行]
+    Station1 --> StationDone{工序完成?}
+    StationDone --是--> NextStation[后续工序 / 出料]
+    NextStation --> End([单周期完工])
