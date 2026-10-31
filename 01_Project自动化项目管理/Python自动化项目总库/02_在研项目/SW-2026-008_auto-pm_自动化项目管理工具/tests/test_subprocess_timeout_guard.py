@@ -23,6 +23,7 @@ _BLOCKING_CALLS = {"run", "check_output", "check_call", "call"}
 _POPEN_ALLOWED = {
     "infrastructure/local_executor.py": "starts the governed Codex process and terminates it itself",
     "application/core/bounded_command.py": "polls its own deadline and a stop event, then terminates the command itself",
+    "infrastructure/process_scope.py": "communicate() with the caller's timeout; on timeout or cancel it kills the whole process tree itself",
 }
 
 

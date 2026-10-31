@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from auto_pm.domain.plc.language_service import LanguageServiceBinary, LanguageServiceResult
+from auto_pm.infrastructure.process_scope import run_in_scope
 
 ENV_BINARY = "AUTO_PM_SIEMENS_LSP"
 EXTENSION_PREFIX = "dynamicengineering.dynamic-siemens-language-support-"
@@ -75,7 +76,8 @@ def locate_binary(env: Mapping[str, str] | None = None, home: Path | None = None
 
 
 def _default_runner(args: list[str], cwd: Path, env: Mapping[str, str], timeout: int) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=str(cwd), env=dict(env), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, check=False)
+    # TD-SW008-188：命令行起在门禁的进程范围里，门禁超时被放弃时连同它的子孙进程一起收掉
+    return run_in_scope(args, cwd, env, timeout)
 
 
 def _relative(text: str, root: Path) -> str:
