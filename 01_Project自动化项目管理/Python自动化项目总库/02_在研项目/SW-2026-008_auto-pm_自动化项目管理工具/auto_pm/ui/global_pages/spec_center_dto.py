@@ -21,14 +21,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from auto_pm.spec.core.checker_base import CheckResult, Severity
-from auto_pm.spec.core.registry import SpecInfo
-from auto_pm.spec.services.fix_svc import FixResult
-from auto_pm.spec.services.frontmatter_svc import FrontmatterItem
+from auto_pm.domain.spec.core.checker_base import CheckResult, Severity
+from auto_pm.domain.spec.core.registry import SpecInfo
+from auto_pm.domain.spec.services.fix_svc import FixResult
+from auto_pm.domain.spec.services.frontmatter_svc import FrontmatterItem
 
 if TYPE_CHECKING:
-    from auto_pm.spec.core.config import WorkspaceConfig
-    from auto_pm.spec.core.registry import SpecRegistry
+    from auto_pm.domain.spec.core.config import WorkspaceConfig
+    from auto_pm.domain.spec.core.registry import SpecRegistry
 
 
 # ── Tab1 概览 DTO ────────────────────────────────────────
@@ -277,7 +277,7 @@ def build_health_output_dto(
         HealthCheckOutputDTO
     """
     # 延迟导入避免循环依赖
-    from auto_pm.spec.services.fix_svc import can_auto_fix
+    from auto_pm.domain.spec.services.fix_svc import can_auto_fix
 
     dto_results = [to_health_check_result_dto(r, can_auto_fix(r)) for r in results]
     return HealthCheckOutputDTO(
@@ -374,11 +374,11 @@ class SpecCenterAdapter:
         workspace: Path,
         config: WorkspaceConfig | None = None,
     ) -> None:
-        from auto_pm.spec.core.config import WorkspaceConfig
-        from auto_pm.spec.services.check_svc import CheckService
-        from auto_pm.spec.services.frontmatter_svc import FrontmatterService
-        from auto_pm.spec.services.index_svc import IndexService
-        from auto_pm.spec.services.report_svc import ReportService
+        from auto_pm.domain.spec.core.config import WorkspaceConfig
+        from auto_pm.domain.spec.services.check_svc import CheckService
+        from auto_pm.domain.spec.services.frontmatter_svc import FrontmatterService
+        from auto_pm.domain.spec.services.index_svc import IndexService
+        from auto_pm.domain.spec.services.report_svc import ReportService
 
         self.workspace = workspace
         self.config = config or WorkspaceConfig(workspace=workspace)
@@ -442,7 +442,7 @@ class SpecCenterAdapter:
         dry_run: bool = False,
     ) -> HealthCheckOutputDTO:
         """运行健康检查，返回 DTO"""
-        from auto_pm.spec.core.checker_base import Severity
+        from auto_pm.domain.spec.core.checker_base import Severity
 
         out = self.check_service.run(
             check_ids=check_ids,
@@ -477,7 +477,7 @@ class SpecCenterAdapter:
         Returns:
             (modified_count, skipped_count, error_count)
         """
-        from auto_pm.spec.services.frontmatter_svc import FrontmatterItem
+        from auto_pm.domain.spec.services.frontmatter_svc import FrontmatterItem
 
         # DTO → FrontmatterItem（apply 需要 FrontmatterItem）
         raw_items: list[FrontmatterItem] = []
@@ -555,11 +555,11 @@ class SpecCenterAdapter:
     def set_workspace(self, workspace: Path) -> None:
         """切换工作空间（重建所有 Service）"""
         self.workspace = workspace
-        from auto_pm.spec.core.config import WorkspaceConfig
-        from auto_pm.spec.services.check_svc import CheckService
-        from auto_pm.spec.services.frontmatter_svc import FrontmatterService
-        from auto_pm.spec.services.index_svc import IndexService
-        from auto_pm.spec.services.report_svc import ReportService
+        from auto_pm.domain.spec.core.config import WorkspaceConfig
+        from auto_pm.domain.spec.services.check_svc import CheckService
+        from auto_pm.domain.spec.services.frontmatter_svc import FrontmatterService
+        from auto_pm.domain.spec.services.index_svc import IndexService
+        from auto_pm.domain.spec.services.report_svc import ReportService
 
         self.config = WorkspaceConfig(workspace=workspace)
         self.index_service = IndexService(workspace, config=self.config)
