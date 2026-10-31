@@ -1,6 +1,6 @@
 """SCL 代码规范静态检查器 (Siemens LSP-905 规范)
 
-扫描 PLC 源码中的 .scl 文件，依据 Obsidian 《905_SCL编程规范_LSP.md》
+扫描 PLC 源码中的 .scl 文件（``.db`` / ``.udt`` 文件只查“数组下标下界从 1 起”这一条，TD-SW008-217），依据 Obsidian 《905_SCL编程规范_LSP.md》
 秒级检查变量作用域前缀 (i_/o_/io_/s_)、ARRAY 类型标识 (arr)、
 语法白名单 (严禁 GOTO/REPEAT/指针)、数组下标下界从 1 起以及状态机安全防护闭环
 (CASE 缺失 ELSE 防卡死分支)。
@@ -43,6 +43,16 @@ class SclLintReport:
 
 class SclLinter:
     """SCL 静态规范检查器引擎"""
+
+    # .scl 全量检查；.db / .udt 里只有声明、没有逻辑，只查数组下界（其余规则按 .scl 的写法套用会误报）
+    SOURCE_SUFFIXES = (".scl",)
+    ARRAY_ONLY_SUFFIXES = (".db", ".udt")
+    ARRAY_LOWER_BOUND_RULE = "LSP-905-ARRAY-LOWER-BOUND"
+
+    @classmethod
+    def is_lintable(cls, name: str | Path) -> bool:
+        """Whether ``lint_file`` has something to check in this file (by suffix, case-insensitive)."""
+        return str(name).lower().endswith(cls.SOURCE_SUFFIXES + cls.ARRAY_ONLY_SUFFIXES)
 
     # 语法黑名单与工控错误预防正则（LSP-905 / LSP-906）
     GOTO_PATTERN = re.compile(r"\bGOTO\b", re.IGNORECASE)
@@ -398,7 +408,7 @@ class SclLinter:
                         report.violations.append(
                             SclViolation(
                                 line_number=bounds_line,
-                                rule_id="LSP-905-ARRAY-LOWER-BOUND",
+                                rule_id=cls.ARRAY_LOWER_BOUND_RULE,
                                 severity="WARNING" if legacy else "ERROR",
                                 message=(
                                     f"数组下标下界是 {int(lower.group(1))}，本仓库要求从 1 起（Siemens 语言服务插件的规则；"
@@ -551,14 +561,28 @@ class SclLinter:
         return any(var_name.startswith(prefix) for prefix in expected_prefixes)
 
     @classmethod
+    def _keep_only_array_lower_bound(cls, report: SclLintReport) -> None:
+        """``.db`` / ``.udt``：只留数组下界这一条，计数跟着重算。"""
+        report.violations = [v for v in report.violations if v.rule_id == cls.ARRAY_LOWER_BOUND_RULE]
+        report.total_violations = len(report.violations)
+        report.errors_count = sum(1 for v in report.violations if v.severity == "ERROR")
+        report.warnings_count = sum(1 for v in report.violations if v.severity == "WARNING")
+
+    @classmethod
     def lint_file(cls, file_path: Path | str) -> SclLintReport:
-        """扫描磁盘上的 .scl 文件"""
+        """扫描磁盘上的 .scl 文件；.db / .udt 只查数组下界"""
         path = Path(file_path)
         if not path.exists():
             return SclLintReport(file_path=str(path))
         try:
-            content = path.write_text(encoding="utf-8") if False else path.read_text(encoding="utf-8")
-            return cls.lint_text(content, file_path=str(path))
+            array_only = path.suffix.lower() in cls.ARRAY_ONLY_SUFFIXES
+            # .db 不一定是 PLC 声明（别的项目里有 SQLite 数据库），也可能是 GBK 老文件：这两类只看看得懂的 ASCII 声明，
+            # 不能因为解不了码就报“读取失败”；.scl 仍按 UTF-8 严格读（DEV-ENC-001：写坏了要报出来）。
+            content = path.read_text(encoding="utf-8", errors="replace" if array_only else "strict")
+            report = cls.lint_text(content, file_path=str(path))
+            if array_only:
+                cls._keep_only_array_lower_bound(report)
+            return report
         except Exception as exc:
             rep = SclLintReport(file_path=str(path))
             rep.violations.append(
