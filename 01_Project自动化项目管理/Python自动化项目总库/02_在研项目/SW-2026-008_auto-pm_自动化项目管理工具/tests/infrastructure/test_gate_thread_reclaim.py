@@ -28,7 +28,11 @@ def _clean_leak_list() -> Iterator[None]:
 
 
 def _gate_threads() -> list[threading.Thread]:
-    return [thread for thread in threading.enumerate() if thread.name == _GATE_THREAD and thread.is_alive()]
+    return [
+        thread
+        for thread in threading.enumerate()
+        if thread.name == _GATE_THREAD and thread.is_alive()
+    ]
 
 
 def _wait_until_gone(seconds: float = 10.0) -> bool:
@@ -61,7 +65,9 @@ def test_a_loop_that_swallows_ordinary_exceptions_is_still_stopped() -> None:
     def work() -> tuple[str, int | None]:
         while True:
             try:
-                while True:  # nearly all of the time is spent inside the try, so the stop lands there
+                while (
+                    True
+                ):  # nearly all of the time is spent inside the try, so the stop lands there
                     sum(range(10))
             except Exception:
                 pass
@@ -73,7 +79,9 @@ def test_a_loop_that_swallows_ordinary_exceptions_is_still_stopped() -> None:
     assert leaked_threads() == []
 
 
-def test_a_thread_stuck_in_a_c_call_is_counted_and_the_message_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_thread_stuck_in_a_c_call_is_counted_and_the_message_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(process_scope, "RECLAIM_GRACE_SECONDS", 0.3)
     blocker = threading.Event()
 
