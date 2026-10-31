@@ -54,6 +54,23 @@ def _prompt_hidden(text: str) -> str:
     return str(click.prompt(text, hide_input=True, default="", show_default=False, err=True))
 
 
+def refuse_agent_approval(action: str) -> None:
+    """Refuse (``ClickException``) when the session carries an agent marker: an approval is the user's own act.
+
+    The approval PIN only protects a root that has one committed; without it the old format check lets any caller write
+    any approver name, so an agent could approve its own change order or decision package (Trae probe F16).  This
+    refusal does not depend on the PIN: the command is for the user's own terminal, which has no agent marker.  Best
+    effort, like the other agent-marker refusals: the markers are environment variables (single-user trust model).
+    """
+
+    markers = agent_markers(os.environ)
+    if markers:
+        raise click.ClickException(
+            f"这是 agent 会话（{'、'.join(markers)}），不能{action}：批准只听用户本人。"
+            "请把完整命令交给用户，在用户自己的终端运行（已启用批准口令时还要输入口令）；agent 不得索要口令、代填或绕过"
+        )
+
+
 def control_root(ctx: click.Context) -> Path:
     app_ctx: AppContext = ctx.find_root().obj
     return Path(getattr(app_ctx, "control_root", None) or app_ctx.workspace_root)

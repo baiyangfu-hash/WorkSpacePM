@@ -23,7 +23,7 @@ from auto_pm.domain.change.decision_service import (
     DecisionError,
     DecisionService,
 )
-from auto_pm.ui.cli.approval_pin import require_approval_pin
+from auto_pm.ui.cli.approval_pin import refuse_agent_approval, require_approval_pin
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_change
 
 console = Console()
@@ -155,6 +155,8 @@ def create_decision(
     as_json: bool,
 ) -> None:
     """从已批准的变更单创建结构化决策包（已启用批准口令时须用户本人在终端输入口令）。"""
+    # Before the PIN and whether or not one is committed: an agent session never issues a decision package (F16).
+    refuse_agent_approval(f"签发变更单 {change_id} 的决策包")
     proof = require_approval_pin(
         _workspace(ctx), summary=f"签发决策包：变更单 {change_id}，批准人 {approver}", purpose="decision", subject=change_id,
         approver=approver,

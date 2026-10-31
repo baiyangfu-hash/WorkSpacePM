@@ -36,7 +36,7 @@ from auto_pm.change.constants import (
 )
 from auto_pm.change.track_classifier import ChangeTrack, ChangeTrackClassifier
 from auto_pm.models import ChangeRequest
-from auto_pm.ui.cli.approval_pin import require_approval_pin
+from auto_pm.ui.cli.approval_pin import refuse_agent_approval, require_approval_pin
 from auto_pm.ui.cli.runtime_identity_guard import (
     require_runtime_identity,
     require_runtime_identity_for_change,
@@ -573,6 +573,8 @@ def cmd_transition(
     """状态流转（更新变更单章节并持久化状态）；批准（approved）在已启用批准口令时须用户本人在终端输入口令。"""
     app_ctx: AppContext = ctx.obj
     if new_status == "approved":
+        # Before anything else, and whether or not a PIN is committed: an agent session never approves (F16).
+        refuse_agent_approval(f"批准变更单 {change_number}")
         # The PIN is looked up in the very root ChangeService writes to (audit 72, high-2).
         proof = require_approval_pin(
             app_ctx.workspace_root, summary=f"批准变更单 {change_number}", purpose="change-approve", subject=f"{pid or ''}:{change_number}",
