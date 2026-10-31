@@ -90,6 +90,21 @@ class GitError(RuntimeError):
     pass
 
 
+GIT_TIMEOUT_SECONDS = 300  # 一条 git 命令最长等多久；超时按“出错”处理（退出码 2），不让裁判脚本在索引锁等处无限挂住（审计 REL-001）
+
+
+class GitTimeout(RuntimeError):
+    """git 命令超时。与 GitError 分开：调用方里“GitError＝没有这个文件”的宽松处理不会把超时当成“没有”。"""
+
+
+def run_git(command: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """``subprocess.run`` 加上时限；超时抛 GitTimeout。"""
+    try:
+        return subprocess.run(command, timeout=GIT_TIMEOUT_SECONDS, **kwargs)
+    except subprocess.TimeoutExpired as error:
+        raise GitTimeout(f"{' '.join(command[:6])} 超过 {GIT_TIMEOUT_SECONDS} 秒没有返回（索引锁或网络卡住？）") from error
+
+
 def decode(data: bytes, what: str) -> str:
     """严格 UTF-8 解码；遇到坏字节不静默吞掉：在标准错误明说，再用替身字符继续（text_encoding 检查另会判 FAIL）。"""
     try:
@@ -106,7 +121,7 @@ _OFFLINE_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}
 
 
 def git_bytes(*args: str, cwd: str | None = None, env: dict[str, str] | None = None, check: bool = True) -> bytes:
-    result = subprocess.run(["git", "-c", "core.quotepath=off", *args], cwd=cwd, env=env, capture_output=True, check=False)
+    result = run_git(["git", "-c", "core.quotepath=off", *args], cwd=cwd, env=env, capture_output=True, check=False)
     if check and result.returncode != 0:
         raise GitError(f"git {' '.join(args)}: {result.stderr.decode('utf-8', errors='replace').strip()}")
     return result.stdout
@@ -117,7 +132,7 @@ def git(*args: str, cwd: str | None = None, env: dict[str, str] | None = None, c
 
 
 def git_ok(*args: str, cwd: str | None = None) -> bool:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, check=False).returncode == 0
+    return run_git(["git", *args], cwd=cwd, capture_output=True, check=False).returncode == 0
 
 
 def short(sha: str) -> str:
@@ -139,7 +154,7 @@ def find_merge_commit(head: str, main_ref: str, cwd: str | None = None) -> tuple
 
 def merge_result_tree(ours: str, theirs: str, cwd: str | None = None) -> tuple[bool, str]:
     """Return (clean, tree or conflict text) for merging ``theirs`` into ``ours`` without touching anything."""
-    result = subprocess.run(
+    result = run_git(
         ["git", "-c", "core.quotepath=off", "merge-tree", "--write-tree", "--name-only", ours, theirs],
         cwd=cwd,
         capture_output=True,
@@ -380,7 +395,7 @@ def scan_encoding(files: list[str], head: str, cwd: str | None = None) -> Check:
 
     try:
         findings, skipped = encoding_check.check(Path(cwd or "."), head, files, encoding_check.load_allowlist())
-    except encoding_check.GitError as exc:
+    except (encoding_check.GitError, encoding_check.GitTimeout) as exc:
         return Check("text_encoding", "UNVERIFIED", f"取不到文件内容：{exc}")
     scanned = sum(1 for f in files if encoding_check.is_text_path(f))
     if findings:
@@ -650,7 +665,7 @@ def main(argv: list[str] | None = None) -> int:
             fetch=not args.offline,
             ci_result=not args.skip_ci_result,
         )
-    except GitError as exc:
+    except (GitError, GitTimeout) as exc:
         print(f"audit_pr: {exc}", file=sys.stderr)
         return 2
     if args.json:

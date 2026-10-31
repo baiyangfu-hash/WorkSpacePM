@@ -44,6 +44,13 @@ class GitError(RuntimeError):
     pass
 
 
+GIT_TIMEOUT_SECONDS = 300  # 一条 git 命令最长等多久；超时按“出错”处理（退出码 2），不让裁判脚本在索引锁等处无限挂住（审计 REL-001）
+
+
+class GitTimeout(RuntimeError):
+    """git 命令超时。与 GitError 分开：调用方里“GitError＝没有这个文件”的宽松处理不会把超时当成“没有”。"""
+
+
 @dataclass
 class Finding:
     path: str
@@ -52,7 +59,12 @@ class Finding:
 
 
 def git(repo: Path, *args: str) -> bytes:
-    result = subprocess.run(["git", "-c", "core.quotepath=off", *args], cwd=repo, capture_output=True, check=False)
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=off", *args], cwd=repo, capture_output=True, check=False, timeout=GIT_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired as error:
+        raise GitTimeout(f"git {' '.join(args[:4])} 超过 {GIT_TIMEOUT_SECONDS} 秒没有返回") from error
     if result.returncode != 0:
         raise GitError(f"git {' '.join(args)}: {result.stderr.decode('utf-8', 'replace').strip()}")
     return result.stdout
@@ -158,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         paths = all_paths(repo, args.head) if args.all else changed_paths(repo, args.base, args.head)
         findings, skipped = check(repo, args.head, paths, load_allowlist(args.allowlist))
-    except (GitError, ValueError) as error:
+    except (GitError, GitTimeout, ValueError) as error:
         print(f"encoding_check: {error}", file=sys.stderr)
         return 2
     print(render(findings, skipped, sum(1 for p in paths if is_text_path(p))))
