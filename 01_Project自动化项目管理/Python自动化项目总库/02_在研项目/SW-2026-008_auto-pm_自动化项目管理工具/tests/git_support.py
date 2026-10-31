@@ -59,3 +59,16 @@ def git_out(
 def git_do(root: Path, *args: str, config: Sequence[str] = (), env: Mapping[str, str] | None = None) -> None:
     """Run a Git command for its effect; the output is not needed."""
     run_git(root, *args, config=config, env=env)
+
+
+def run_worktree(root: Path, name: str = "claude") -> Path:
+    """The isolated Run workstation ``root/.auto-pm/worktrees/<name>`` (AGENTS.md WS-001), created once on ``HEAD``.
+
+    ``continuity run start`` refuses the control root itself as a Run's worktree, so a test that starts a Run through the
+    real command line passes this path as ``--worktree``.
+    """
+    path = root / ".auto-pm" / "worktrees" / name
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        run_git(root, "worktree", "add", "-b", f"{name}/test-run", str(path), "HEAD")
+    return path

@@ -24,6 +24,7 @@ from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
 from auto_pm.contracts.continuity import RunState
 from auto_pm.infrastructure import lease_wallet, process_probe
 from tests.core.test_continuity_execution_service import Clock, _services
+from tests.git_support import run_worktree
 from tests.workspace_support import register_project
 
 LAUNCHER = """from auto_pm.cli.__main__ import cli
@@ -100,7 +101,7 @@ def scene(tmp_path: Path) -> Scene:
 def _start(scene: Scene, owner: str, holder_pid: int, run_id: str = RUN) -> subprocess.CompletedProcess[str]:
     return scene.agent(
         "run", "start", "--run-id", run_id, "--work-id", "WORK-001", "--executor", owner, "--adapter", "codex", "--owned", "auto_pm/core/a.py",
-        "--declared-dirty", "auto_pm/core/a.py",
+        "--declared-dirty", "auto_pm/core/a.py", "--worktree", str(run_worktree(scene.root)),
         "--lease-wallet", "--holder-pid", str(holder_pid), "--lease-seconds", "60", "--idempotency-key", f"start-{owner}",
     )
 
