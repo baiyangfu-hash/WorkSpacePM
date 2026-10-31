@@ -21,6 +21,30 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtCore import QUrl
 from ui.qml_bridge import QmlBridge
 
+import shutil
+from pathlib import Path
+
+import pytest
+
+import cefr_tagger
+import course_manager
+import services.database_manager as database_manager
+
+
+@pytest.fixture(autouse=True)
+def isolated_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """联调测试读写的是 data/app.db 的临时副本，不能改动已入库的那份。"""
+    copy = tmp_path / "app.db"
+    shutil.copyfile(database_manager.DB_PATH, copy)
+    monkeypatch.setattr(database_manager, "DB_PATH", str(copy))
+    monkeypatch.setattr(cefr_tagger, "DB_PATH", str(copy))
+    monkeypatch.setattr(course_manager, "DB_PATH", str(copy))
+    monkeypatch.setattr(database_manager, "_db_manager_instance", None)
+    yield
+    manager = database_manager._db_manager_instance
+    if manager is not None:
+        manager.close()
+
 
 def test_qml_bridge_and_switching():
     print("=" * 60)
