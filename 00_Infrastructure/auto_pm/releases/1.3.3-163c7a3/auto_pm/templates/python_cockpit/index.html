@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python 桌面驾驶舱原型 (STD-911)</title>
+    <!-- Google Fonts & Phosphor Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Ambient Glow Orbs -->
+    <div class="ambient-layer">
+        <div class="orb-indigo"></div>
+        <div class="orb-cyan"></div>
+    </div>
+
+    <!-- App Container -->
+    <div class="app-container">
+        <!-- 1. Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-badge">
+                    <i class="ph-bold ph-gauge"></i>
+                </div>
+                <div class="app-title-box">
+                    <h1 id="app-name">Auto PM Cockpit</h1>
+                    <span id="app-ver">V1.0.0 (STD-911)</span>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-item active" data-view="workspace">
+                    <i class="ph-bold ph-folder"></i>
+                    <span>项目工作区</span>
+                </div>
+                <div class="nav-item" data-view="dashboard">
+                    <i class="ph-bold ph-chart-pie-slice"></i>
+                    <span>状态机看板</span>
+                </div>
+                <div class="nav-item" data-view="changes">
+                    <i class="ph-bold ph-git-commit"></i>
+                    <span>变更中心</span>
+                </div>
+                <div class="nav-item" data-view="modbus">
+                    <i class="ph-bold ph-cpu"></i>
+                    <span>Modbus / 通信</span>
+                </div>
+                <div class="nav-item" data-view="specs">
+                    <i class="ph-bold ph-book-open"></i>
+                    <span>规范与质检</span>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <span>Python 3.12 · PySide6</span>
+                <i class="ph-bold ph-shield-check" style="color: var(--success);" title="环境健康"></i>
+            </div>
+        </aside>
+
+        <!-- 2. Main Area -->
+        <div class="main-wrapper">
+            <!-- Header -->
+            <header class="top-header">
+                <div class="breadcrumb">
+                    <span id="current-project-name">SW-2026-008</span>
+                    <i class="ph-bold ph-caret-right"></i>
+                    <span class="active-node" id="current-view-title">项目工作区</span>
+                </div>
+
+                <div class="header-actions">
+                    <div class="status-pill">
+                        <div class="dot"></div>
+                        <span>ONLINE</span>
+                    </div>
+                    <button class="btn btn-secondary" id="btn-refresh">
+                        <i class="ph-bold ph-arrows-clockwise"></i>
+                        <span>刷新</span>
+                    </button>
+                    <button class="btn btn-primary" id="btn-action">
+                        <i class="ph-bold ph-play"></i>
+                        <span>执行命令</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- View Stack -->
+            <main class="content-area">
+                <!-- View 1: Workspace -->
+                <section class="view-panel active" id="view-workspace">
+                    <div class="card">
+                        <div class="card-title">
+                            <span>关键核心指标 (KPI)</span>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">实时聚合</span>
+                        </div>
+                        <div class="kpi-grid">
+                            <div class="kpi-card">
+                                <span class="kpi-label">活跃变更单</span>
+                                <span class="kpi-val" style="color: var(--primary);">03</span>
+                            </div>
+                            <div class="kpi-card">
+                                <span class="kpi-label">通过测试数</span>
+                                <span class="kpi-val" style="color: var(--success);">1,477</span>
+                            </div>
+                            <div class="kpi-card">
+                                <span class="kpi-label">门禁合规率</span>
+                                <span class="kpi-val" style="color: var(--secondary);">100%</span>
+                            </div>
+                            <div class="kpi-card">
+                                <span class="kpi-label">HMI / 原型绑定</span>
+                                <span class="kpi-val" style="color: var(--warning);">已就绪</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">
+                            <span>系统交互控制台 (Terminal Log)</span>
+                            <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="clearConsole()">清空</button>
+                        </div>
+                        <div class="console-box" id="console-output">
+[12:00:01] [INFO] PySide6 WorkbenchBridge connected.
+[12:00:02] [INFO] Loaded project context: SW-2026-008_auto-pm.
+[12:00:03] [PASS] Spec check SHC-011, SHC-012 passed (0 errors).
+[12:00:04] [READY] Prototype STD-911 initialized. Ready for interaction.
+                        </div>
+                    </div>
+                </section>
+
+                <!-- View 2: Dashboard -->
+                <section class="view-panel" id="view-dashboard">
+                    <div class="card">
+                        <div class="card-title">
+                            <span>变更状态机流转 (State Machine)</span>
+                        </div>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 12px;">
+                            当前主线变更单：<strong style="color: var(--primary);">CHG-SCPT-2026-146</strong> (实施中 5/9)
+                        </p>
+                        <div style="background: var(--surface-elevated); padding: 16px; border-radius: var(--radius-md); border: 1px solid var(--glass-border);">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">
+                                <span>1.Draft</span>
+                                <span>2.Submitted</span>
+                                <span>3.Review</span>
+                                <span>4.Approved</span>
+                                <span style="color: var(--primary); font-weight: 700;">5.Implementing</span>
+                                <span>6.Pending</span>
+                                <span>7.Accepting</span>
+                                <span>8.Done</span>
+                                <span>9.Closed</span>
+                            </div>
+                            <div style="height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+                                <div style="width: 55%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--secondary));"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- View 3: Changes -->
+                <section class="view-panel" id="view-changes">
+                    <div class="card">
+                        <div class="card-title">
+                            <span>变更单列表 (Change Center)</span>
+                        </div>
+                        <p style="color: var(--text-muted); font-size: 0.85rem;">演示变更单全生命周期追踪与台账对账。</p>
+                    </div>
+                </section>
+
+                <!-- View 4: Modbus -->
+                <section class="view-panel" id="view-modbus">
+                    <div class="card">
+                        <div class="card-title">
+                            <span>PLC / Modbus 通信工具 (SCADA Monitor)</span>
+                        </div>
+                        <p style="color: var(--text-muted); font-size: 0.85rem;">PLC 通信数据块监控与寄存器读写调试。</p>
+                    </div>
+                </section>
+
+                <!-- View 5: Specs -->
+                <section class="view-panel" id="view-specs">
+                    <div class="card">
+                        <div class="card-title">
+                            <span>规范中心 (Spec Compliance Center)</span>
+                        </div>
+                        <p style="color: var(--text-muted); font-size: 0.85rem;">STD-909 / STD-910 / STD-911 规范索引与静态健康检查。</p>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
