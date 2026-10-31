@@ -119,7 +119,7 @@ STD_PRD_DOCS: Final[list[str]] = [
 
 # ── 默认项目存放目录（V1.0.1 新增） ─────────────────────────
 
-#: 默认项目存放目录名（相对于 auto-pm 工具目录）
+#: 默认项目存放目录名（相对于工作区）
 DEFAULT_PROJECTS_DIRNAME: Final[str] = "0100_项目"
 
 
@@ -139,19 +139,48 @@ def get_config_file_path() -> str:
     return os.path.join(tool_dir, ".auto-pm-workspace")
 
 
-def get_default_projects_dir() -> str:
-    """获取默认项目存放根目录（auto-pm 工具目录下的 0100_项目/）
+#: 工具自己的发布目录（相对工作区）。项目绝不能创建在它下面：回退到旧版本时会连项目一起被换掉（N1）。
+RELEASES_RELATIVE_PARTS: Final[tuple[str, ...]] = ("00_Infrastructure", "auto_pm", "releases")
 
-    通过 paths.py 文件位置推断 auto-pm 工具目录，不依赖 workspace_root 配置。
-    项目默认创建在此目录下，用户可通过 GUI/CLI 指定其他目录覆盖。
+_PYTHON_RESEARCH_RELATIVE_PATH: Final[tuple[str, ...]] = (
+    "01_Project自动化项目管理",
+    "Python自动化项目总库",
+    "02_在研项目",
+)
 
-    Returns:
-        默认项目存放根目录绝对路径
+
+class ProjectDestinationError(ValueError):
+    """The place a new project was asked to go is not acceptable; nothing was created."""
+
+
+def _inside_releases(path: str) -> bool:
+    parts = [part.lower() for part in os.path.normpath(os.path.realpath(path)).replace("\\", "/").split("/") if part]
+    wanted = [part.lower() for part in RELEASES_RELATIVE_PARTS]
+    return any(parts[i : i + len(wanted)] == wanted for i in range(len(parts) - len(wanted) + 1))
+
+
+def resolve_project_destination(workspace_root: str, stack: str, dest_dir: str | None = None) -> str:
+    """The folder a new project is created in - the one rule for the command line and the workbench window.
+
+    ``dest_dir`` (already anchored to where the user typed the command) wins; otherwise PLC projects go to
+    ``0100_PLC自动化`` and the others to the Python research folder, or ``0100_项目`` when the workspace has none -
+    always below ``workspace_root``, never below the folder of the release that happens to be running.  A folder
+    inside the tool's own ``releases`` tree is refused whoever asked for it.
     """
-    # paths.py 位于 auto_pm/core/paths.py
-    # 工具目录 = auto_pm/ 的上级目录
-    tool_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    return os.path.join(tool_dir, DEFAULT_PROJECTS_DIRNAME)
+
+    if dest_dir:
+        root = os.path.abspath(dest_dir)
+    elif stack == "plc":
+        root = os.path.join(workspace_root, "0100_PLC自动化")
+    else:
+        research_root = os.path.join(workspace_root, *_PYTHON_RESEARCH_RELATIVE_PATH)
+        root = research_root if os.path.isdir(research_root) else os.path.join(workspace_root, DEFAULT_PROJECTS_DIRNAME)
+    if _inside_releases(root):
+        raise ProjectDestinationError(
+            f"项目不能创建在工具的发布目录里（{root}）：回退版本时会连项目一起被换掉。"
+            "请用 -w 指定工作区，或用 --dest-dir 指向工作区里的目录"
+        )
+    return root
 
 
 def get_projects_subdir(workspace_root: str) -> str:

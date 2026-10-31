@@ -121,3 +121,15 @@ def test_all_mode_scans_every_text_file(repo):
 def test_the_real_allowlist_parses_and_names_existing_columns():
     entries = encoding_check.load_allowlist()
     assert entries and all(len(blob) == 40 for blob in entries.values())
+
+
+def test_a_hung_git_call_exits_2_and_is_not_read_as_clean(monkeypatch, repo, capsys):
+    def hang(*args, **kwargs):
+        assert kwargs.get("timeout"), "每个 git 调用都必须带时限（审计 REL-001）"
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(encoding_check.subprocess, "run", hang)
+    with pytest.raises(encoding_check.GitTimeout):
+        encoding_check.git(repo["dir"], "status")
+    assert encoding_check.main(["--repo", str(repo["dir"]), "--all", "--head", "HEAD"]) == 2
+    assert "超过" in capsys.readouterr().err

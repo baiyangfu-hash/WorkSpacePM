@@ -136,12 +136,12 @@ def _source_line(project_path: str, diagnostic: str) -> str:
 
 
 def scl_failure_keys(project_path: str) -> Counter[str]:
-    """工程里全部 .scl 的规范错误，逐条（与 ``PlcChecker`` 的“SCL 代码规范”一项扫同一批文件）。"""
+    """工程里全部 .scl（及 .db / .udt 的数组下界）的规范错误，逐条（与 ``PlcChecker`` 的“SCL 代码规范”一项扫同一批文件）。"""
 
     keys: Counter[str] = Counter()
     for root, _, files in os.walk(project_path):
         for name in sorted(files):
-            if not name.lower().endswith(".scl"):
+            if not SclLinter.is_lintable(name):  # .scl 全查，.db / .udt 只查数组下界
                 continue
             path = os.path.join(root, name)
             relative = os.path.relpath(path, project_path).replace(os.sep, "/")

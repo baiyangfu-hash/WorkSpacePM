@@ -31,6 +31,7 @@ from rich.table import Table
 from yaml import dump as yaml_dump
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.paths import ProjectDestinationError, resolve_project_destination
 from auto_pm.core.constants import (
     EQUIPMENT_TYPE_CODES,
     PLC_VENDOR_CODES,
@@ -51,24 +52,6 @@ from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
-
-_PYTHON_RESEARCH_RELATIVE_PATH = (
-    "01_Project自动化项目管理",
-    "Python自动化项目总库",
-    "02_在研项目",
-)
-
-
-def _default_project_destination(workspace_root: str, stack: str) -> str:
-    """Resolve the user-facing default project category without hard-coding a host path."""
-    if stack == "plc":
-        return os.path.join(workspace_root, "0100_PLC自动化")
-
-    research_root = os.path.join(workspace_root, *_PYTHON_RESEARCH_RELATIVE_PATH)
-    if os.path.isdir(research_root):
-        return research_root
-    return os.path.join(workspace_root, "0100_项目")
-
 
 def _format_asset_summary_status(status: str) -> str:
     mapping = {
@@ -264,7 +247,13 @@ def cmd_list(
     help="PLC 品牌（如 Siemens/Mitsubishi）",
 )
 @click.option("--plc-model", default=None, help="PLC 型号（如 S7-1200）")
-@click.option("--dest-dir", "dest_dir", default=None, help="项目存放目录（默认: 动态解析到工作区分类目录）")
+@click.option(
+    "--dest-dir",
+    "dest_dir",
+    type=CallerPath(file_okay=False),
+    default=None,
+    help="项目存放目录（默认: 工作区分类目录；相对路径按你敲命令时所在的目录算，不能在发布目录里）",
+)
 @click.option("--base-project", "base_project", default=None, help="溯源父项目（例如用于改造类项目时传入原项目编号）")
 @click.option("--dry-run", is_flag=True, help="仅预览，不实际创建")
 @click.pass_context
@@ -333,10 +322,11 @@ def cmd_create(
     template_name = get_template_name(stack, mode if stack == "plc" else "")
 
     # 默认项目存放目录：优先使用工作区下的分类目录，废除写死在 auto-pm 源码包的逻辑
-    if dest_dir:
-        dest_root = os.path.abspath(dest_dir)
-    else:
-        dest_root = _default_project_destination(app_ctx.workspace_root, stack)
+    try:
+        dest_root = resolve_project_destination(app_ctx.workspace_root, stack, dest_dir)
+    except ProjectDestinationError as error:
+        console.print(f"[red]错误: {error}[/red]")
+        ctx.exit(1)
 
     # 目标路径
     project_dir = f"{project_id}_{project_name}"

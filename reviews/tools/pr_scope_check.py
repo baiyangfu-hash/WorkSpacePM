@@ -82,14 +82,25 @@ class GitError(RuntimeError):
     pass
 
 
+GIT_TIMEOUT_SECONDS = 300  # 一条 git 命令最长等多久；超时按“出错”处理（退出码 2），不让裁判脚本在索引锁等处无限挂住（审计 REL-001）
+
+
+class GitTimeout(RuntimeError):
+    """git 命令超时。与 GitError 分开：调用方里“GitError＝没有这个文件”的宽松处理不会把超时当成“没有”。"""
+
+
 def git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-c", "core.quotepath=false", *args],
-        cwd=str(repo),
-        capture_output=True,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", *args],
+            cwd=str(repo),
+            capture_output=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise GitTimeout(f"git {' '.join(args[:4])} 超过 {GIT_TIMEOUT_SECONDS} 秒没有返回") from error
     if result.returncode != 0:
         raise GitError(f"git {' '.join(args)}: {result.stderr.decode('utf-8', errors='replace').strip()}")
     try:
@@ -322,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = check(repo, args.base, args.head, body)
         files = changed_files(repo, args.base, args.head)
-    except GitError as error:
+    except (GitError, GitTimeout) as error:
         print(f"git 出错：{error}", file=sys.stderr)
         return 2
     report = render(result, files)

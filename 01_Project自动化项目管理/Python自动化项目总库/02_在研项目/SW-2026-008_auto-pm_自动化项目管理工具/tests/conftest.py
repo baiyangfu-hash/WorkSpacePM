@@ -85,6 +85,21 @@ def qapp() -> Generator[QApplication, None, None]:
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_agent_markers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test never inherits "I am an agent" from the shell that started pytest.
+
+    Approvals, project deletion and the PIN setup refuse a session that carries an agent marker (CLAUDECODE, AUTO_PM_AGENT,
+    CODEX_*).  Run from inside an agent session, every test that approves something would fail for that reason alone, and
+    the same test would pass in CI.  A test that needs a marker sets it itself with ``monkeypatch.setenv``.
+    """
+
+    from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+
+    for name in AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+
+
 # Qt tests whose leftovers must not be freed by the cyclic garbage collector at a random later moment (the cockpit Modbus tool that this was written for has been removed; the same rule keeps protecting the other Qt tests).
 _QT_TEST_PREFIXES = ("tests/qml/", "tests/ui/", "tests/e2e/test_pmf_gui.py")
 
