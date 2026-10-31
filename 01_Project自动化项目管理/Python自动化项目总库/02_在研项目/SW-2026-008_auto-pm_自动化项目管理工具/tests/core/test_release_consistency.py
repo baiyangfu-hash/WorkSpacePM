@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from auto_pm.infrastructure.release_consistency import check_release_consistency
+from auto_pm.application.core.release_consistency import check_release_consistency
 
 BASE = Path("00_Infrastructure") / "auto_pm"
 OLD = "1.3.1-aaaaaaa"

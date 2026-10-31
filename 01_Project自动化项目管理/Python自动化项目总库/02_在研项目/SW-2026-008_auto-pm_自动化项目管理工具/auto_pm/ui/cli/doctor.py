@@ -17,7 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from auto_pm.application.core.governance_service import GovernanceService
-from auto_pm.infrastructure.release_consistency import check_release_consistency
+from auto_pm.application.core.release_consistency import check_release_consistency
 from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()

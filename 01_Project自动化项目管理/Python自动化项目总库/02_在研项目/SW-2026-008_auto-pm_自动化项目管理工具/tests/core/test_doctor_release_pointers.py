@@ -106,7 +106,7 @@ def test_a_damaged_local_pointer_never_passes_silently(repo: Path, name: str, da
 def test_the_doctor_command_exits_nonzero_when_the_pointers_lag(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from click.testing import CliRunner
 
-    # This fixture only has pointers; the record cross-check has its own tests (tests/infrastructure/test_release_consistency.py).
+    # This fixture only has pointers; the record cross-check has its own tests (tests/core/test_release_consistency.py).
     monkeypatch.setattr("auto_pm.ui.cli.doctor.check_release_consistency", lambda root: {"status": "info", "failures": [], "warnings": []})
 
     from auto_pm.ui.cli.doctor import doctor_command
