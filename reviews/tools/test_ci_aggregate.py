@@ -210,6 +210,7 @@ def test_root_tests_workflow_also_runs_the_sw009_project_tests_on_the_offscreen_
     """SW-2026-009（驾驶舱的测试样件）的 tests/ 此前没有 CI；其中有 QML 联调测试，必须装 PySide6 并用离屏平台，否则收集阶段就崩。"""
     text = (WORKFLOWS / "root-tests.yml").read_text(encoding="utf-8")
     deps = text[text.index("      - name: SW-2026-009 project dependencies") :].split("\n\n")[0]
+    assert "libegl1" in deps, "Qt 离屏平台也要系统的 libEGL，runner 镜像没有"
     assert "PySide6" in deps and "==" in deps and "requests==" in deps and "cefrpy==" in deps
     step = text[text.index("      - name: SW-2026-009 project tests") :].split("\n\n")[0]
     assert "SW-2026-009_英语学习助手" in step and "working-directory:" in step
