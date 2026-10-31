@@ -138,6 +138,12 @@ def decision_group() -> None:
     multiple=True,
     type=click.Choice([item.value for item in RuntimeDecisionOutcome]),
 )
+@click.option(
+    "--approval-evidence-ref",
+    "approval_evidence_ref",
+    default="",
+    help="agent 会话签发时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
+)
 @click.option("--json-output", "as_json", is_flag=True, help="以 JSON 输出")
 @click.pass_context
 def create_decision(
@@ -152,11 +158,13 @@ def create_decision(
     target_run_ids: tuple[str, ...],
     target_work_ids: tuple[str, ...],
     runtime_outcomes: tuple[str, ...],
+    approval_evidence_ref: str,
     as_json: bool,
 ) -> None:
     """从已批准的变更单创建结构化决策包（已启用批准口令时须用户本人在终端输入口令）。"""
-    # Before the PIN and whether or not one is committed: an agent session never issues a decision package (F16).
-    refuse_agent_approval(f"签发变更单 {change_id} 的决策包")
+    # Before the PIN and whether or not one is committed: an agent session issues a decision package only with the
+    # user's own words as evidence (F16; the user chose "A" on 2026-10-31).
+    refuse_agent_approval(f"签发变更单 {change_id} 的决策包", approval_evidence_ref)
     proof = require_approval_pin(
         _workspace(ctx), summary=f"签发决策包：变更单 {change_id}，批准人 {approver}", purpose="decision", subject=change_id,
         approver=approver,

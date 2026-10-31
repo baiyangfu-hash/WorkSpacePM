@@ -1,10 +1,15 @@
-"""F16: an agent session cannot approve a change order or issue a decision package, with or without an approval PIN."""
+"""F16: an agent session cannot approve a change order or issue a decision package on its own, with or without a PIN.
+
+The user's ruling (A, 2026-10-31): like ``pm approve``, an agent session goes ahead only with a well-formed
+``--approval-evidence-ref user-confirmation:<the user's message>``; with none, or one an agent wrote, it is refused.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -44,20 +49,30 @@ def _obj(tmp_path: Path) -> SimpleNamespace:
     )
 
 
-def _approve(tmp_path: Path) -> object:
+def _approve(tmp_path: Path, *extra: str) -> object:
     return CliRunner().invoke(
         change_group,
-        ["transition", "CHG-1", "--to", "approved", "--approver", "probe-bot"],
+        ["transition", "CHG-1", "--to", "approved", "--approver", "probe-bot", *extra],
         obj=_obj(tmp_path),
     )
 
 
-def _decide(tmp_path: Path) -> object:
+def _decide(tmp_path: Path, *extra: str) -> object:
     return CliRunner().invoke(
         decision_group,
-        ["create", "--change-id", "CHG-1", "--approver", "probe-bot"],
+        ["create", "--change-id", "CHG-1", "--approver", "probe-bot", *extra],
         obj=_obj(tmp_path),
     )
+
+
+GOOD_EVIDENCE = "user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7t1rGHHJbj"
+BAD_EVIDENCE = (
+    "yes",  # not the user-confirmation form
+    "user-confirmation:short",  # under 8 characters
+    "user-confirmation:claude-says-it-is-ok",  # names an agent
+    "user-confirmation:codex/auto-approved",
+    "   ",  # blank is the same as none
+)
 
 
 @pytest.mark.parametrize("marker", AGENT_MARKERS)
@@ -106,3 +121,66 @@ def test_an_empty_marker_is_not_an_agent_session(
 ) -> None:
     monkeypatch.setenv("AUTO_PM_AGENT", "  ")
     assert "agent 会话" not in _approve(tmp_path).output  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("marker", AGENT_MARKERS)
+def test_an_agent_with_the_users_evidence_reaches_the_service(
+    marker: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, untouched: list[str]
+) -> None:
+    monkeypatch.setenv(marker, "1")
+    result = _approve(tmp_path, "--approval-evidence-ref", GOOD_EVIDENCE)
+    assert "agent 会话" not in result.output  # type: ignore[attr-defined]
+    assert untouched  # not refused: the command went on to the service
+
+
+def test_an_agent_with_the_users_evidence_reaches_decision_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, untouched: list[str]
+) -> None:
+    reached: list[str] = []
+    monkeypatch.setattr(decision_cli, "require_approval_pin", lambda *a, **k: reached.append("pin"))
+    monkeypatch.setenv("CLAUDECODE", "1")
+    result = _decide(tmp_path, "--approval-evidence-ref", GOOD_EVIDENCE)
+    assert "agent 会话" not in result.output  # type: ignore[attr-defined]
+    assert reached == ["pin"]  # past the agent refusal, on to the PIN step
+
+
+@pytest.mark.parametrize("evidence", BAD_EVIDENCE)
+def test_an_agent_with_bad_evidence_is_still_refused(
+    evidence: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, untouched: list[str]
+) -> None:
+    monkeypatch.setenv("CLAUDECODE", "1")
+    for result in (
+        _approve(tmp_path, "--approval-evidence-ref", evidence),
+        _decide(tmp_path, "--approval-evidence-ref", evidence),
+    ):
+        assert result.exit_code != 0  # type: ignore[attr-defined]
+        assert "agent 会话" in result.output  # type: ignore[attr-defined]
+    assert untouched == []
+
+
+def test_the_refusal_tells_the_agent_how_to_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, untouched: list[str]
+) -> None:
+    monkeypatch.setenv("CLAUDECODE", "1")
+    output = _approve(tmp_path).output  # type: ignore[attr-defined]
+    assert "--approval-evidence-ref user-confirmation:" in output
+    assert "没有带用户原话凭据" in output
+
+
+def test_an_agent_with_evidence_still_meets_the_pin_when_one_is_committed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, untouched: list[str]
+) -> None:
+    """The evidence only lifts this agent-marker refusal; a committed PIN is still asked for afterwards."""
+
+    seen: list[str] = []
+
+    def _pin(*_a: object, **kwargs: object) -> None:
+        seen.append(str(kwargs.get("purpose")))
+        raise click.ClickException("需要口令")
+
+    monkeypatch.setattr(change_cli, "require_approval_pin", _pin)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    result = _approve(tmp_path, "--approval-evidence-ref", GOOD_EVIDENCE)
+    assert seen == ["change-approve"]
+    assert "需要口令" in result.output  # type: ignore[attr-defined]
+    assert untouched == []
