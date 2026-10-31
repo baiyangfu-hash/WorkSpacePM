@@ -41,7 +41,8 @@ _VALID_CHANGE_STATUSES = (
 CONTROL_ROOT_FILE_BINDINGS = {"main.py": "SW-2026-008"}
 # 控制根下不属于任何注册项目目录、但随 SW-2026-008 发版的目录树：发布树（发版同步指针时会暂存其中的 .py）。
 # 归到 SW-2026-008 而不是豁免：这些文件仍要跟着 SW-2026-008 的变更单走，钩子的判定没有放松。
-CONTROL_ROOT_PREFIX_BINDINGS = {"00_Infrastructure/auto_pm/releases/": "SW-2026-008"}
+# reviews/ 是裁判与审计脚本（reviews/tools/*.py）和审计报告，同属 SW-2026-008 的治理面，改它们也要跟变更单走（反重力审计 BUG-003，用户授权协调者裁决）。
+CONTROL_ROOT_PREFIX_BINDINGS = {"00_Infrastructure/auto_pm/releases/": "SW-2026-008", "reviews/": "SW-2026-008"}
 
 
 class StagedSnapshotError(RuntimeError):

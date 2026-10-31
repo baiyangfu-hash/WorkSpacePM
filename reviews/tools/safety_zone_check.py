@@ -101,6 +101,13 @@ class GitError(RuntimeError):
     pass
 
 
+GIT_TIMEOUT_SECONDS = 300  # 一条 git 命令最长等多久；超时按“出错”处理（退出码 2），不让裁判脚本在索引锁等处无限挂住（审计 REL-001）
+
+
+class GitTimeout(RuntimeError):
+    """git 命令超时。与 GitError 分开：调用方里“GitError＝没有这个文件”的宽松处理不会把超时当成“没有”。"""
+
+
 def decode(data: bytes, what: str) -> str:
     """严格 UTF-8 解码；坏字节不静默吞掉：在标准错误明说，再用替身字符继续。判定逻辑不变（替身字符不会让任何一行逃出判定）。"""
     try:
@@ -111,13 +118,17 @@ def decode(data: bytes, what: str) -> str:
 
 
 def git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-c", "core.quotepath=false", *args],
-        cwd=str(repo),
-        capture_output=True,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", *args],
+            cwd=str(repo),
+            capture_output=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise GitTimeout(f"git {' '.join(args[:4])} 超过 {GIT_TIMEOUT_SECONDS} 秒没有返回") from error
     if result.returncode != 0:
         raise GitError(f"git {' '.join(args)}: {result.stderr.decode('utf-8', errors='replace').strip()}")
     return decode(result.stdout, f"git {args[0]} 输出")
@@ -147,13 +158,17 @@ def merged_tree(repo: Path, base: str, head: str) -> str:
     one two-dot diff (audit 107): reading the base side at the merge base instead missed zones main marked after the fork (107b),
     and reading it at main's head against a three-dot diff numbered removed lines by the wrong file (107).
     """
-    result = subprocess.run(
-        ["git", "-c", "core.quotepath=false", "merge-tree", "--write-tree", "--no-messages", base, head],
-        cwd=str(repo),
-        capture_output=True,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "merge-tree", "--write-tree", "--no-messages", base, head],
+            cwd=str(repo),
+            capture_output=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise GitTimeout(f"git merge-tree 超过 {GIT_TIMEOUT_SECONDS} 秒没有返回") from error
     out = decode(result.stdout, "git merge-tree 输出")
     if result.returncode == 1:
         raise MergeConflictError(out.strip())
@@ -668,8 +683,11 @@ def reconcile(recorded: str | None, declared: str | None, decision_id: str) -> t
 
 
 def gh_json(*args: str) -> Any:
-    result = subprocess.run(["gh", "api", *args], capture_output=True, text=True, encoding="utf-8", check=False,
-                            stdin=subprocess.DEVNULL)
+    try:
+        result = subprocess.run(["gh", "api", *args], capture_output=True, text=True, encoding="utf-8", check=False,
+                                stdin=subprocess.DEVNULL, timeout=GIT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        raise GitTimeout(f"gh api 超过 {GIT_TIMEOUT_SECONDS} 秒没有返回") from error
     if result.returncode != 0:
         raise GitError(f"gh api {' '.join(args)}: {result.stderr.strip()}")
     return json.loads(result.stdout)
@@ -794,7 +812,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
         result.notes += decision_notes
         head_sha = git(repo, "rev-parse", f"{head}^{{commit}}").strip()
-    except (GitError, DecisionReadError, ValueError, KeyError) as error:
+    except (GitError, GitTimeout, DecisionReadError, ValueError, KeyError) as error:
         print(f"出错：{error}", file=sys.stderr)
         return 2
     report = render(result, head_sha)
