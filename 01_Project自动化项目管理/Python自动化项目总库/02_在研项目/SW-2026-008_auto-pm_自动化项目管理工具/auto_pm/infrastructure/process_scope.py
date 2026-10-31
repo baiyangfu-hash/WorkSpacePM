@@ -1,0 +1,139 @@
+"""Child processes started inside one bounded gate, so a timeout can take them down with it (TD-SW008-188).
+
+A gate that outlives its time limit is abandoned on its thread (Python cannot kill a thread).  Without this module the plugin command line it
+had started kept running, and the abandoned thread could start the next one.  ``ProcessScope`` is entered by the gate's worker thread;
+``run_in_scope`` (used by the Siemens runner) registers every child there; the supervisor calls ``cancel`` on timeout, which kills the whole
+process tree of every registered child and makes later starts fail at once.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import contextvars
+import os
+import signal
+import subprocess
+import sys
+import threading
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+__all__ = ["GateCancelledError", "ProcessScope", "current_scope", "kill_process_tree", "run_in_scope"]
+
+_SCOPE: contextvars.ContextVar[ProcessScope | None] = contextvars.ContextVar("auto_pm_process_scope", default=None)
+_REAP_SECONDS = 5
+_WINDOWS = sys.platform == "win32"
+
+
+class GateCancelledError(OSError):
+    """The gate was abandoned after its time limit; no further child process may start."""
+
+
+def kill_process_tree(process: subprocess.Popen[str]) -> None:
+    """Kill ``process`` and everything it started; a process that is already gone is not an error."""
+
+    with contextlib.suppress(OSError):
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+    with contextlib.suppress(OSError):
+        process.kill()
+
+
+class ProcessScope:
+    """The live children of one gate run; thread safe."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._children: set[subprocess.Popen[str]] = set()
+        self._cancelled = False
+
+    @property
+    def cancelled(self) -> bool:
+        with self._lock:
+            return self._cancelled
+
+    def enter(self) -> contextvars.Token[ProcessScope | None]:
+        """Make this the scope of the calling thread (the gate's worker thread)."""
+
+        return _SCOPE.set(self)
+
+    def register(self, process: subprocess.Popen[str]) -> None:
+        with self._lock:
+            cancelled = self._cancelled
+            if not cancelled:
+                self._children.add(process)
+        if cancelled:  # cancel() ran between the start and the registration: this child must not survive
+            kill_process_tree(process)
+            raise GateCancelledError("门禁已超时被放弃，不再启动新的子进程")
+
+    def release(self, process: subprocess.Popen[str]) -> None:
+        with self._lock:
+            self._children.discard(process)
+
+    def cancel(self) -> int:
+        """Kill every registered child's process tree and refuse later starts; returns how many children were killed."""
+
+        with self._lock:
+            self._cancelled = True
+            children = list(self._children)
+            self._children.clear()
+        for child in children:
+            kill_process_tree(child)
+        return len(children)
+
+
+def current_scope() -> ProcessScope | None:
+    return _SCOPE.get()
+
+
+def _start(args: list[str], cwd: Path, env: Mapping[str, str]) -> subprocess.Popen[str]:
+    """Start ``args`` as the leader of its own process group, so the whole tree can be killed later."""
+
+    return subprocess.Popen(  # noqa: S603 - fixed argument list, no shell
+        args,
+        cwd=str(cwd),
+        env=dict(env),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if _WINDOWS else 0,
+        start_new_session=not _WINDOWS,
+    )
+
+
+def run_in_scope(
+    args: Sequence[str], cwd: Path, env: Mapping[str, str], timeout: float
+) -> subprocess.CompletedProcess[str]:
+    """``subprocess.run`` with the same text settings, whose child is killed with its whole tree on timeout or when the scope is cancelled."""
+
+    scope = current_scope()
+    if scope is not None and scope.cancelled:
+        raise GateCancelledError("门禁已超时被放弃，不再启动新的子进程")
+    process = _start(list(args), cwd, env)
+    if scope is not None:
+        scope.register(process)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        kill_process_tree(process)
+        with contextlib.suppress(subprocess.TimeoutExpired, OSError, ValueError):
+            process.communicate(timeout=_REAP_SECONDS)  # a grandchild that survived must not hold the read forever
+        raise subprocess.TimeoutExpired(list(args), timeout, output=error.output, stderr=error.stderr) from error
+    except BaseException:
+        kill_process_tree(process)
+        raise
+    finally:
+        if scope is not None:
+            scope.release(process)
+    if scope is not None and scope.cancelled:
+        raise GateCancelledError("门禁已超时被放弃，这次命令行结果不算数")
+    return subprocess.CompletedProcess(list(args), process.returncode, stdout, stderr)

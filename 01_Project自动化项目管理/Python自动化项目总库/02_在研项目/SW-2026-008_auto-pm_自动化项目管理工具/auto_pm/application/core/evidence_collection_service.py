@@ -1921,9 +1921,9 @@ def _plc_language_service() -> LanguageService | None:
         default_language_service,
     )
 
-    # TD-SW008-188（只做一半）：每次调用插件命令行的时限取插件默认值与质量门时限中较小的一个（至少 1 秒），
-    # 即单次调用最多 min(600, T) 秒。这不保证子进程不会比门禁活得更久：门禁线程放弃后收不掉，
-    # 它还可能接着再起新的子进程（每个又可活到该时限）；门禁截止时间传不下去、也取消不了，另立设计债。
+    # TD-SW008-188：每次调用插件命令行的时限取插件默认值与质量门时限中较小的一个（至少 1 秒），
+    # 即单次调用最多 min(600, T) 秒。门禁超时被放弃时，它起的命令行子进程连同子孙进程由 _run_bounded 收掉，
+    # 此后线程再起新的子进程也会被拒（TD-SW008-188，process_scope）；线程本身仍只能自己结束。
     return default_language_service(timeout=max(1, min(DEFAULT_TIMEOUT_SECONDS, math.ceil(_quality_gate_timeout_seconds()))))
 
 
@@ -1961,13 +1961,19 @@ def _run_bounded(work: Callable[[], tuple[str, int | None]], seconds: float) -> 
     """Run an in-process gate on a daemon thread and fail clearly if it outlives ``seconds``.
 
     Python cannot kill a thread, so a wedged check is abandoned (daemon, read-only) and the
-    gate is reported as not run; it can never hold the whole verification forever.
+    gate is reported as not run; it can never hold the whole verification forever.  The child
+    processes it started (the Siemens command line) are killed with their process trees and
+    none may start afterwards (TD-SW008-188); the thread itself still just ends on its own.
     """
+
+    from auto_pm.infrastructure.process_scope import ProcessScope
 
     outcome: list[tuple[str, int | None]] = []
     failure: list[BaseException] = []
+    scope = ProcessScope()
 
     def target() -> None:
+        scope.enter()
         try:
             outcome.append(work())
         except BaseException as error:  # re-raised on the caller's thread below
@@ -1977,6 +1983,7 @@ def _run_bounded(work: Callable[[], tuple[str, int | None]], seconds: float) -> 
     worker.start()
     worker.join(seconds)
     if worker.is_alive():
+        scope.cancel()
         raise _PlcGateTimeoutError(f"PLC 质量门超过 {seconds:g} 秒没有结束，这次检查不算数")
     if failure:
         raise failure[0]
