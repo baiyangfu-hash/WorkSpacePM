@@ -366,7 +366,7 @@ def heal_files(
 
     # 未指定模式
     console.print("[yellow]请指定 --file <path> 或 --all[/yellow]")
-    console.print("示例: auto-pm constraint heal --file PM_SESSION_SW-2026-008.md")
+    console.print("示例: auto-pm constraint heal --file docs/example.md")
     console.print("示例: auto-pm constraint heal --all --dry-run")
 
 

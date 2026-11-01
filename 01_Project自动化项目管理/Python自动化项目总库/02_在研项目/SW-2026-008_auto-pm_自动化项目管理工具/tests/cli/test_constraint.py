@@ -143,3 +143,15 @@ class TestConstraintCLI:
         assert result_all.exit_code == 0
         assert "修复 1 个文件" in result_all.output
         assert bad_file2.read_bytes() == b"# Bad2"
+
+    def test_heal_without_a_mode_gives_examples_that_do_not_name_the_retired_pm_session(
+        self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch
+    ) -> None:
+        """TD-SW008-266 S5：PM_SESSION 已退役（AGENTS.md），命令示例不再把它当要修的文件。"""
+        monkeypatch.setattr("auto_pm.cli.constraint._resolve_workspace", lambda ctx: temp_workspace)
+
+        result = cli_runner.invoke(constraint_group, ["heal"])
+
+        assert "请指定 --file" in result.output
+        assert "constraint heal --file" in result.output and "constraint heal --all --dry-run" in result.output
+        assert "PM_SESSION" not in result.output
