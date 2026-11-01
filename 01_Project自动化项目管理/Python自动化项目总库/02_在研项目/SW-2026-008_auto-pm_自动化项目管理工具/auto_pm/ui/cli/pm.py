@@ -11,10 +11,12 @@ from typing import Any, TypeVar, cast
 import click
 from click.core import ParameterSource
 
+from auto_pm import __version__
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.application.core.pm_resume_service import PmResumeError, PmResumeService
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.application.core.workspace_context_service import (
     WorkspaceContextError,
     WorkspaceContextService,
@@ -173,6 +175,7 @@ def _resolve_filing(
                 ContinuityStore(app_ctx.control_root).get_planning_draft(request_id).subject_project_id
             )
         require_runtime_identity(ctx, project_id)
+        _ensure_continuity_store(ctx)  # after the identity check: a refused caller must not create anything
         classification, item_id = PmIntakeService(app_ctx.control_root).plan_classification(
             project_id,
             request_id=request_id,
@@ -569,6 +572,18 @@ def inbox_group() -> None:
     """收件箱：新需求、bug、想法先入箱并附分诊单；入箱不改变当前焦点。"""
 
 
+def _ensure_continuity_store(ctx: click.Context) -> None:
+    """Create the Continuity Store on first use of a writing PM command (D6).
+
+    A fresh clone has no ``.auto-pm/continuity.db`` and ``pm inbox add`` used to refuse with "尚未初始化"
+    while offering no command to fix it.  Initialising is idempotent (it only adds what is missing) and,
+    like ``pm park`` / ``pm handoff``, runs only after the control-root check.
+    """
+
+    app_ctx: AppContext = ctx.find_root().obj
+    WorkRegistryService(app_ctx.control_root).initialize(__version__)
+
+
 def _intake(ctx: click.Context) -> PmIntakeService:
     app_ctx: AppContext = ctx.find_root().obj
     _require_control_root(ctx)
@@ -640,6 +655,7 @@ def inbox_add(
     try:
         service = _intake(ctx)
         require_runtime_identity(ctx, project_id)
+        _ensure_continuity_store(ctx)  # first use of a fresh clone (D6); only after the identity check
         classification = service.classify(
             project_id,
             kind=IntakeKind(kind.upper()),

@@ -17,6 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from auto_pm.application.core.governance_service import GovernanceService
+from auto_pm.application.core.release_consistency import check_release_consistency
 from auto_pm.ui.cli.caller_path import CallerPath
 
 console = Console()
@@ -218,6 +219,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
 
     venv_base = check_venv_base()
     release_pointers = check_release_pointers(root)
+    release_consistency = check_release_consistency(root)
 
     all_passed = (
         py_ok
@@ -225,6 +227,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
         and sanitation_report.is_pure
         and all(dep_results.values())
         and release_pointers["status"] != "fail"
+        and release_consistency["status"] != "fail"
     )
 
     return {
@@ -240,6 +243,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
         "gh_logged_in": gh_logged_in,
         "venv_base": venv_base,
         "release_pointers": release_pointers,
+        "release_consistency": release_consistency,
         "all_passed": all_passed,
     }
 
@@ -299,10 +303,22 @@ def doctor_command(workspace: str | None) -> None:
     elif pointers["status"] == "ok":
         table.add_row("发布指针与本机部署", "[green]✅ PASS[/green]", f"{pointers['ref']} 上的三个指针与本机一致")
 
+    consistency = res["release_consistency"]
+    if consistency["status"] == "fail":
+        table.add_row("发布记录互相核对", "[bold red]❌ FAIL[/bold red]", "；".join(consistency["failures"]))
+    elif consistency["status"] == "warn":
+        table.add_row("发布记录互相核对", "[yellow]⚠️ 注意[/yellow]", "；".join(consistency["warnings"]))
+    elif consistency["status"] == "ok":
+        table.add_row("发布记录互相核对", "[green]✅ PASS[/green]", "manifest、载荷目录、release_meta、标注记录、Git 提交互相一致")
+
     console.print(table)
 
     if pointers["status"] == "fail":
         console.print("\n[bold red]发布指针落后于本机部署：把三个指针文件走变更单提交进 main，再重跑 doctor。[/bold red]\n")
+        raise SystemExit(1)
+
+    if consistency["status"] == "fail":
+        console.print("\n[bold red]发布记录自相矛盾：不要靠改 manifest 或载荷字节消除，走变更单在 release_annotations.json 里更正。[/bold red]\n")
         raise SystemExit(1)
 
     if res["all_passed"]:

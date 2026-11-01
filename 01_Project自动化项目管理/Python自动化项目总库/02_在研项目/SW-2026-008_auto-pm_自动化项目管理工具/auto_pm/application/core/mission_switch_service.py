@@ -367,7 +367,14 @@ class MissionSwitchService:
             raise MissionSwitchError(f"{mission.mission_id} 还没绑定 Work，没有可搁着的执行")
         runs = [run for run in self._store.list_runs(mission.root_work_id) if run.state in _LIVE_RUN_STATES]
         if len(runs) != 1:
-            raise MissionSwitchError(f"{mission.mission_id} 必须恰有 1 个未终结 Run 才能搁着（实际 {len(runs)} 个）")
+            hint = (
+                "；上一个 Run 已结束，先在同一 Work 上用 continuity run start 开一个新 Run 再搁着"
+                if not runs
+                else ""
+            )
+            raise MissionSwitchError(
+                f"{mission.mission_id} 必须恰有 1 个未终结 Run 才能搁着（实际 {len(runs)} 个）{hint}"
+            )
         return runs[0]
 
     def _snapshot(self, run: RunItem) -> tuple[str, list[str]]:

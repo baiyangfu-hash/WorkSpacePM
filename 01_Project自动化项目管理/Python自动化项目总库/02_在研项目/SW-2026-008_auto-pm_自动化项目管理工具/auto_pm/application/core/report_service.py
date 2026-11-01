@@ -28,6 +28,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from auto_pm.domain.models.project import VALID_BUSINESS_LINES
+
 log = logging.getLogger(__name__)
 
 
@@ -44,7 +46,7 @@ class ReportService:
     # 固定统计维度（确保返回结构稳定，未知值额外追加 key）
     _STACK_KEYS: list[str] = ["plc", "python", "unknown"]
     _PHASE_KEYS: list[str] = ["developing", "commissioning", "production", "archived"]
-    _BL_KEYS: list[str] = ["SW", "DJ", "ZD", "XT", "WX"]
+    _BL_KEYS: list[str] = list(VALID_BUSINESS_LINES)
 
     # 报告类型枚举
     REPORT_PROJECT: str = "project"

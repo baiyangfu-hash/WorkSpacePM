@@ -1188,7 +1188,13 @@ class PmFacadeService:
                 profile=profile,
             )
         except (ContinuityExecutionError, EvidenceCollectionError) as error:
-            log.exception("质量验证未通过: mission=%s run=%s", mission.mission_id, run.run_id)
+            # An expected refusal is a sentence for the user, not a stack trace on the terminal (D1/D3/D4):
+            # the traceback stays available at DEBUG.
+            log.warning(
+                "质量验证未通过: mission=%s run=%s: %s",
+                mission.mission_id, run.run_id, error,
+                exc_info=log.isEnabledFor(logging.DEBUG),
+            )
             # The cockpit keeps its fixed sentence here (as before); only ``pm verify`` prints the reason.
             outcome, _ = self._not_verified(mission, run)
             return outcome, str(error)
@@ -1628,6 +1634,7 @@ class PmFacadeService:
             if isinstance(envelope, dict) and envelope.get("schema_version") in {
                 "checkpoint-evidence.v2",
                 "checkpoint-evidence.v3",
+                "checkpoint-evidence.v4",
             }:
                 return EvidenceCollectionService.checkpoint_evidence_is_current(
                     serialized, collection, run, project_root

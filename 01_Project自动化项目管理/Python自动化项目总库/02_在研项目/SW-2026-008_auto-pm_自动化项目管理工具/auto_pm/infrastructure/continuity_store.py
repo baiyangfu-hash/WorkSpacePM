@@ -8118,7 +8118,9 @@ class ContinuityStore:
     # ---- TD-071: park / unpark (one ACTIVE Mission per project, the others put down with a checkpoint) ----
 
     _PARKABLE_MISSION_STATES = frozenset({MissionState.ACTIVE, MissionState.BLOCKED})
-    _PARKABLE_RUN_STATES = frozenset({RunState.RUNNING, RunState.BLOCKED})
+    # VERIFYING is parkable (D5): a card stuck in verification must be able to put the key down; the Run goes
+    # to BLOCKED and ``unpark`` brings it back as RUNNING, so it is verified afresh.
+    _PARKABLE_RUN_STATES = frozenset({RunState.RUNNING, RunState.BLOCKED, RunState.VERIFYING})
 
     def _validated_park_paths(self, raw: object, *, label: str) -> tuple[str, ...]:
         if not isinstance(raw, (tuple, list)) or any(not isinstance(item, str) for item in raw):
@@ -8210,6 +8212,8 @@ class ContinuityStore:
         if len(rows) != 1:
             raise ContinuityStoreError(
                 f"Mission 根 Work 必须恰有 1 个未终结 Run 才能搁着（实际 {len(rows)} 个）"
+                + ("；上一个 Run 已结束（FAILED/CANCELLED/SUCCEEDED），先在同一 Work 上用 "
+                   "continuity run start 开一个新 Run 再搁着" if not rows else "")
             )
         return self._get_run(conn, str(rows[0]["run_id"]))
 
@@ -8321,7 +8325,7 @@ class ContinuityStore:
             run = self._single_live_run_of_mission(conn, mission)
             if run.state not in self._PARKABLE_RUN_STATES:
                 raise ContinuityStoreError(
-                    f"只有 RUNNING 或 BLOCKED 的 Run 可以搁着（当前 {run.state.value}）"
+                    f"只有 RUNNING、BLOCKED 或 VERIFYING 的 Run 可以搁着（当前 {run.state.value}）"
                 )
             self._refuse_while_closure_prepared(conn, "run_id", run.run_id, "Run")
             if self._open_park_row(conn, "run_id", run.run_id) is not None:

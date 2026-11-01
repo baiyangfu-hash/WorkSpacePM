@@ -838,3 +838,36 @@ def test_views_that_map_every_mission_state_know_parked(scene: Scene) -> None:
         MissionState.PARKED, WorkState.IN_PROGRESS, RunState.BLOCKED, True
     )
     assert action == "AWAIT_USER_UNPARK"
+
+
+# ------------------------------------------------------------------ D5: a card stuck in verification
+
+
+def test_d5_a_run_in_verifying_can_be_parked_and_comes_back_running(scene: Scene) -> None:
+    scene.execution.transition_run(
+        "RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "to-verifying"
+    )
+
+    park = scene.park(idempotency_key="park-verifying")
+
+    assert scene.store.get_mission("MISSION-A").state is MissionState.PARKED
+    assert scene.store.get_run("RUN-001").state is RunState.BLOCKED
+    assert park.mission_id == "MISSION-A"
+    scene.unpark()
+    # Back as RUNNING: the work is verified afresh, the old VERIFYING state is not resurrected.
+    assert scene.store.get_run("RUN-001").state is RunState.RUNNING
+    assert scene.store.get_mission("MISSION-A").state is MissionState.ACTIVE
+
+
+def test_d5_with_no_live_run_the_refusal_says_how_to_get_one(scene: Scene) -> None:
+    scene.execution.transition_run(
+        "RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "to-verifying"
+    )
+    scene.execution.transition_run(
+        "RUN-001", RunState.FAILED, "agent-a", "lease-secret", "to-failed"
+    )
+    before = scene.snapshot()
+
+    with pytest.raises(ContinuityStoreError, match=r"实际 0 个.*continuity run start"):
+        scene.park()
+    assert scene.snapshot() == before

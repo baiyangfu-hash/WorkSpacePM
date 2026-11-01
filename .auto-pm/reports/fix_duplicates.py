@@ -1,7 +1,12 @@
 ﻿import re
 import os
+import sys
+from pathlib import Path
 
-with open('c:/Users/fubai/Documents/My_Workspace/spec_check_report_full.txt', 'r', encoding='utf-16') as f:
+# 报告文件默认就是本脚本旁边的 spec_check_report_full.txt；也可以把路径作为第一个参数传入（不写死本机路径）。
+REPORT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().with_name('spec_check_report_full.txt')
+
+with open(REPORT, 'r', encoding='utf-16', errors='replace') as f:
     text = f.read()
 
 duplicates = re.findall(r'文件列表:\s*(.*?)\n\s+建议', text, re.DOTALL)

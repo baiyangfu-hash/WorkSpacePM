@@ -32,7 +32,7 @@ from auto_pm.application.core.constants import get_template_name
 from auto_pm.application.core.paths import PROJECT_INIT_PATH, WORKSPACE_PROJECTS_SUBDIR
 from auto_pm.application.core.project_scanner import ProjectScanner
 from auto_pm.domain.models import ProjectInfo, ProjectListItem, ProjectRecord
-from auto_pm.domain.models.project import extract_business_line
+from auto_pm.domain.models.project import VALID_BUSINESS_LINES, extract_business_line
 from auto_pm.infrastructure.db.connection import DatabaseManager
 from auto_pm.infrastructure.db.repository import ChangeRequestRepository, ProjectRepository
 from auto_pm.infrastructure.utils.file_utils import StaleFileError, get_mtime, write_file
@@ -219,6 +219,10 @@ class ProjectService:
         """
         import datetime
 
+        if business_line not in VALID_BUSINESS_LINES:
+            raise ValueError(
+                f"业务线 {business_line!r} 不合法（{'、'.join(VALID_BUSINESS_LINES)}），不生成项目编号"
+            )
         year = datetime.datetime.now().year
         prefix = f"{business_line}-{year}-"
         max_seq = 0

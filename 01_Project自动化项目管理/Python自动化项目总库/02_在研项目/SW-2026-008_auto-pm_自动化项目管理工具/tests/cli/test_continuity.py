@@ -37,7 +37,7 @@ from auto_pm.contracts.mission import (
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 from auto_pm.ui.cli.__main__ import cli
-from tests.git_support import git_do
+from tests.git_support import git_do, run_worktree
 
 # These tests are about something other than the runtime identity; their fixtures have no registered project anchor.
 pytestmark = pytest.mark.usefixtures("identity_guard_off")
@@ -705,6 +705,8 @@ def test_continuity_cli_runs_checkpoint_and_handoff_v2(
             "README.md",
             "--declared-dirty",
             "README.md",
+            "--worktree",
+            str(run_worktree(tmp_path)),
             "--lease-token",
             "lease-a",
             "--lease-seconds",
@@ -727,7 +729,7 @@ def test_continuity_cli_runs_checkpoint_and_handoff_v2(
         idempotency_key="run-start-evidence",
     )
 
-    (tmp_path / "README.md").write_text("changed\n", encoding="utf-8")
+    (run_worktree(tmp_path) / "README.md").write_text("changed\n", encoding="utf-8")
     checkpoint = _invoke(
         cli_runner,
         tmp_path,
@@ -901,6 +903,8 @@ def test_run_start_cli_exact_replay_survives_dirty_tree_and_successor_commit(
         "README.md",
         "--declared-dirty",
         "README.md",
+        "--worktree",
+        str(run_worktree(tmp_path)),
         "--lease-token",
         "cli-replay-secret",
         "--lease-seconds",
@@ -912,14 +916,14 @@ def test_run_start_cli_exact_replay_survives_dirty_tree_and_successor_commit(
     first = _invoke(cli_runner, tmp_path, start_args)
     assert first.exit_code == 0, first.output
     first_payload = json.loads(first.output)
-    (tmp_path / "README.md").write_text("dirty after start\n", encoding="utf-8")
+    (run_worktree(tmp_path) / "README.md").write_text("dirty after start\n", encoding="utf-8")
 
     dirty_replay = _invoke(cli_runner, tmp_path, start_args)
     assert dirty_replay.exit_code == 0, dirty_replay.output
     assert json.loads(dirty_replay.output) == first_payload
-    _git(tmp_path, "add", "--", "README.md")
+    _git(run_worktree(tmp_path), "add", "--", "README.md")
     _git(
-        tmp_path,
+        run_worktree(tmp_path),
         "-c",
         "user.name=Continuity Test",
         "-c",
@@ -982,6 +986,8 @@ def test_run_start_cli_replays_only_provable_legacy_receipt(
         "codex",
         "--owned",
         "README.md",
+        "--worktree",
+        str(run_worktree(tmp_path)),
         "--lease-token",
         "legacy-secret",
         "--lease-seconds",
@@ -1792,6 +1798,7 @@ def _declaration_start(cli_runner: CliRunner, root: Path, *extra: str) -> Result
         [
             "run", "start", "--run-id", "RUN-CLI-DECL", "--work-id", "WORK-CLI-DECL",
             "--executor", "agent-a", "--adapter", "codex", *extra,
+            "--worktree", str(run_worktree(root)),
             "--lease-token", "decl-secret", "--lease-seconds", "900",
             "--idempotency-key", "run-start-decl",
         ],
@@ -1849,6 +1856,38 @@ def test_run_start_accepts_a_file_that_only_resembles_pm_session(
         cli_runner, tmp_path, "--owned", lookalike, "--declared-dirty", lookalike
     )
 
+    assert started.exit_code == 0, started.output
+
+
+@pytest.mark.parametrize("how", ["omitted", "explicit"])
+def test_run_start_refuses_the_control_root_as_the_run_worktree(
+    cli_runner: CliRunner, tmp_path: Path, how: str
+) -> None:
+    """AGENTS.md WS-001: the control root only runs cockpit commands; a Run belongs on an isolated worktree."""
+    _declaration_work(cli_runner, tmp_path, "README.md")
+    where = {
+        "omitted": [],
+        "explicit": ["--worktree", str(tmp_path)],
+    }[how]
+
+    refused = _invoke(
+        cli_runner,
+        tmp_path,
+        [
+            "run", "start", "--run-id", "RUN-CLI-CTRL", "--work-id", "WORK-CLI-DECL",
+            "--executor", "agent-a", "--adapter", "codex", "--owned", "README.md",
+            "--declared-dirty", "README.md", *where,
+            "--lease-token", "ctrl-secret", "--lease-seconds", "900",
+            "--idempotency-key", "run-start-ctrl",
+        ],
+    )
+
+    assert refused.exit_code == 1
+    assert "控制根" in refused.output and ".auto-pm/worktrees" in refused.output
+    assert _run_count(tmp_path) == 0
+    started = _declaration_start(
+        cli_runner, tmp_path, "--owned", "README.md", "--declared-dirty", "README.md"
+    )  # the same card starts normally on the isolated workstation
     assert started.exit_code == 0, started.output
 
 

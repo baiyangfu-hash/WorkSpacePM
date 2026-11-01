@@ -23,13 +23,24 @@ import os
 import re
 
 import yaml
+from pydantic import ValidationError
 
 from auto_pm.application.core.asset_summary_service import AssetSummaryService
 from auto_pm.domain.models import ProjectInfo
 from auto_pm.domain.models.enums import Stack
-from auto_pm.domain.models.project import extract_business_line
+from auto_pm.domain.models.project import VALID_BUSINESS_LINES, extract_business_line
 
 log = logging.getLogger(__name__)
+
+
+def first_problem(error: ValidationError) -> str:
+    """一句人话：哪个字段、什么问题（不带 pydantic 的整页栈）。"""
+
+    details = error.errors()
+    if not details:
+        return "元数据无效"
+    field = ".".join(str(part) for part in details[0]["loc"]) or "?"
+    return f"字段 {field} 的值无效（{details[0]['msg']}）"
 
 
 class ProjectScanner:
@@ -46,6 +57,8 @@ class ProjectScanner:
     def __init__(self, workspace_root: str) -> None:
         self.workspace_root = os.path.abspath(workspace_root)
         self._asset_summary_service = AssetSummaryService()
+        # 扫描时因元数据无效被跳过的目录：(目录, 一句话原因)。写入口（如登记）据此给出准确的人话。
+        self.skipped_invalid: list[tuple[str, str]] = []
 
     # 来源优先级（数值越小优先级越高）
     _SOURCE_PRIORITY: dict[str, int] = {
@@ -69,7 +82,11 @@ class ProjectScanner:
         """
         raw_results: list[ProjectInfo] = []
         # Check workspace root itself (auto-pm project itself)
-        root_info = self.try_identify_project(self.workspace_root)
+        try:
+            root_info = self.try_identify_project(self.workspace_root)
+        except ValidationError as error:
+            log.warning("跳过元数据无效的工作区根项目: %s", first_problem(error))
+            root_info = None
         if root_info is not None:
             raw_results.append(root_info)
         self._scan(self.workspace_root, raw_results, depth=0, max_depth=scan_depth)
@@ -264,8 +281,16 @@ class ProjectScanner:
             src_path = answers.get("_src_path", "")
             stack = self.infer_stack(src_path)
 
-        # 业务线：优先从 answers 读取，否则从 project_id 提取
+        # 业务线：优先从 answers 读取，否则从 project_id 提取。
+        # answers 里写了白名单以外的值（如旧版 project create 把编号前缀 ZZ 原样写进来）时不能让整个扫描崩：
+        # 退回按编号提取，原值仍留在 info.extra["business_line"]，由登记等写入口决定是否拒绝（D2）。
         business_line = answers.get("business_line", "") or extract_business_line(project_id)
+        if business_line and business_line not in VALID_BUSINESS_LINES:
+            log.warning(
+                "项目 %s 的 business_line=%r 不在白名单（%s），按编号前缀推断",
+                project_id or project_path, business_line, "/".join(VALID_BUSINESS_LINES),
+            )
+            business_line = extract_business_line(project_id)
         # V0.3.7: 防 None（copier 模板未填字段会写 null，Pydantic str 字段拒绝 None）
         project_type = answers.get("project_type", "") or ""
         equipment_type = answers.get("equipment_type", "") or ""
@@ -626,8 +651,14 @@ class ProjectScanner:
             if "归档" in entry or "archive" in entry.lower() or "trash" in entry.lower():
                 continue
 
-            # 判断是否是项目目录
-            info = self.try_identify_project(entry_path)
+            # 判断是否是项目目录；一个项目的元数据坏了只跳过它，不能拖垮整个工作区的扫描（D2）
+            try:
+                info = self.try_identify_project(entry_path)
+            except ValidationError as error:
+                problem = first_problem(error)
+                log.warning("跳过元数据无效的项目目录 %s: %s", entry_path, problem)
+                self.skipped_invalid.append((entry_path, problem))
+                continue
             if info is not None:
                 results.append(info)
             else:

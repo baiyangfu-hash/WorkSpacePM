@@ -8,8 +8,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$NODE = "C:\Users\fubai\.trae-cn\binaries\node\versions\24.13.0\node.exe"
-$MMDC = "C:\Users\fubai\.trae-cn\binaries\node\global\mmdc.cmd"
+# 不写死用户名：从当前用户目录推出；需要时可用环境变量 MERMAID_MMDC 指定 mmdc.cmd
+$TRAE_NODE = Join-Path $env:USERPROFILE ".trae-cn\binaries\node"
+$NODE = Join-Path $TRAE_NODE "versions\24.13.0\node.exe"
+if ($env:MERMAID_MMDC) { $MMDC = $env:MERMAID_MMDC } else { $MMDC = Join-Path $TRAE_NODE "global\mmdc.cmd" }
 
 if (-not (Test-Path $MMDC)) {
     Write-Host "[ERROR] mmdc not found. Run install first." -ForegroundColor Red

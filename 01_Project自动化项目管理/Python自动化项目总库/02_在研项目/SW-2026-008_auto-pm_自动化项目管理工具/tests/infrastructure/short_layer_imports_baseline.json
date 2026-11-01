@@ -1,4 +1,5 @@
 {
+ "auto_pm/application/core/evidence_collection_service.py": 2,
  "auto_pm/domain/change/change_service.py": 24,
  "auto_pm/domain/change/decision_service.py": 3,
  "auto_pm/domain/change/file_locator.py": 5,
@@ -26,5 +27,20 @@
  "auto_pm/ui/cli/project.py": 15,
  "auto_pm/ui/qml/bridges/delivery_bridge.py": 2,
  "auto_pm/ui/qml/bridges/file_watcher_bridge.py": 3,
- "auto_pm/ui/qml_main_window.py": 6
+ "auto_pm/ui/qml_main_window.py": 6,
+ "scripts/diag_change_cross_project_bug.py": 2,
+ "scripts/gui_smoke_test.py": 3,
+ "scripts/verify_m7_gui.py": 2,
+ "tests/application/test_workbench_facade.py": 4,
+ "tests/cli/test_constraint.py": 6,
+ "tests/cli/test_git_hook.py": 10,
+ "tests/cli/test_pm_facade.py": 2,
+ "tests/cli/test_project_delete.py": 1,
+ "tests/cli/test_workflow.py": 3,
+ "tests/cli/test_workflow_compat.py": 2,
+ "tests/conftest.py": 1,
+ "tests/core/test_workspace_registry_service.py": 1,
+ "tests/identity_support.py": 1,
+ "tests/test_bug4_retrofit_src_path.py": 2,
+ "tests/test_module_alias.py": 9
 }
