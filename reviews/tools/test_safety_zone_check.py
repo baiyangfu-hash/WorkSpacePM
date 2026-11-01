@@ -108,7 +108,7 @@ def commit(repo: Path, files: dict[str, str | None]) -> tuple[str, str]:
 def sign(head: str, user: dict | None = None, app: dict | None = None, body: str | None = None) -> dict:
     return {
         "id": 1,
-        "body": body if body is not None else f"安全签字 {head[:7]}\n已看仿真记录：急停全过",
+        "body": body if body is not None else f"安全签字 {head[:12]}\n已看仿真记录：急停全过",
         "user": user or USER,
         "performed_via_github_app": app,
     }
@@ -327,7 +327,7 @@ def test_s05_comment_posted_through_an_app_does_not_count(repo: Path) -> None:
 @pytest.mark.parametrize("body", ["> 安全签字 {sha}", "请用户写 安全签字 {sha}", "安全签字"])
 def test_s06_quoted_or_embedded_text_is_not_a_signature(repo: Path, body: str) -> None:
     base, head = touch(repo)
-    assert not gate.check(repo, base, head, [sign(head, body=body.format(sha=head[:7]))]).passed
+    assert not gate.check(repo, base, head, [sign(head, body=body.format(sha=head[:12]))]).passed
 
 
 @pytest.mark.parametrize(
@@ -350,7 +350,7 @@ def test_s06_quoted_or_embedded_text_is_not_a_signature(repo: Path, body: str) -
 )
 def test_s07_signature_line_variants_are_accepted(repo: Path, body: str) -> None:
     base, head = touch(repo)
-    assert gate.check(repo, base, head, [sign(head, body=body.format(sha=head[:7].upper(), full=head))]).passed
+    assert gate.check(repo, base, head, [sign(head, body=body.format(sha=head[:12].upper(), full=head))]).passed
 
 
 @pytest.mark.parametrize(
@@ -358,12 +358,12 @@ def test_s07_signature_line_variants_are_accepted(repo: Path, body: str) -> None
     ["0", "a", "确认", "_x", "0123456789abcdef0123456789abcdef01234567890"],
 )
 def test_s07b_a_longer_hash_or_glued_word_is_not_read_as_the_short_hash(repo: Path, tail: str) -> None:
-    """提交号后面紧跟字母数字下划线或汉字：那是另一个（更长的）哈希或别的词，不能只截前 7 位当签字。"""
+    """提交号后面紧跟字母数字下划线或汉字：那是另一个（更长的）哈希或别的词，不能只截前 12 位当签字。"""
     base, head = touch(repo)
-    if len(tail) == 1 and tail in "0123456789abcdef" and head[7] == tail:
+    if len(tail) == 1 and tail in "0123456789abcdef" and head[12] == tail:
         # 多出来的十六进制位刚好等于真提交号的第 8 位时，8 位串本身就是合法前缀，会被接受；换一位避开，防止随机失败
         tail = "0" if tail != "0" else "a"
-    body = f"安全签字 {head[:7]}{tail}"
+    body = f"安全签字 {head[:12]}{tail}"
     assert not gate.check(repo, base, head, [sign(head, body=body)]).passed
 
 
@@ -777,3 +777,25 @@ def test_a_hung_git_or_gh_call_is_a_timeout_not_a_missing_file(monkeypatch, tmp_
         gate.merged_tree(tmp_path, "a", "b")
     with pytest.raises(gate.GitTimeout):
         gate.gh_json("repos/x/y")
+
+
+@pytest.mark.parametrize("length", [7, 8, 9, 10, 11])
+def test_s11_a_signature_shorter_than_12_digits_is_refused_with_a_clear_note(repo: Path, length: int) -> None:
+    """TD-SW008-215：7 位前缀只有 28 位，可被碰撞；短于 12 位一律不认，并告诉用户该写什么。"""
+    base, head = touch(repo)
+    result = gate.check(repo, base, head, [sign(head, body=f"安全签字 {head[:length]}")])
+    assert not result.passed and result.signature is None
+    assert any("不足 12 位" in n and head[:12] in n for n in result.notes)
+
+
+@pytest.mark.parametrize("length", [12, 13, 20, 40])
+def test_s12_a_signature_of_12_digits_or_more_is_accepted(repo: Path, length: int) -> None:
+    base, head = touch(repo)
+    assert gate.check(repo, base, head, [sign(head, body=f"安全签字 {head[:length]}")]).passed
+
+
+def test_s13_the_prompt_for_a_missing_signature_asks_for_12_digits(repo: Path) -> None:
+    base, head = touch(repo)
+    result = gate.check(repo, base, head, [])
+    assert not result.passed
+    assert f"安全签字 {head[:12]}" in gate.render(result, head)
