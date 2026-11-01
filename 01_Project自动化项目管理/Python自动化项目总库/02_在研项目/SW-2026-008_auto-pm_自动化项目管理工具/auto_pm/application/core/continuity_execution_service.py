@@ -48,6 +48,7 @@ from auto_pm.infrastructure.continuity_store import (
     ContinuityStore,
     ContinuityStoreError,
     LegacyTerminalLeaseEvidence,
+    RunNotFoundError,
 )
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
@@ -59,6 +60,26 @@ from auto_pm.infrastructure.control_root_guard import (
 
 class ContinuityExecutionError(RuntimeError):
     """Raised when execution continuity would become ambiguous or unsafe."""
+
+
+class StartedRunLookupError(ContinuityExecutionError):
+    """A started-run lookup found nothing it may trust; ``kind`` says why so callers never match on the message text.
+
+    ``NO_SUCH_OPERATION`` / ``NO_SUCH_RUN``: the id is not in the ledger.  ``NOT_ACTIVE``: the Run exists but is not RUNNING or
+    VERIFYING (``run_state`` and ``run_id`` say which).  ``RECORD_MISMATCH``: the start record is missing, duplicated, or belongs
+    to someone else.
+    """
+
+    NO_SUCH_OPERATION = "NO_SUCH_OPERATION"
+    NO_SUCH_RUN = "NO_SUCH_RUN"
+    NOT_ACTIVE = "NOT_ACTIVE"
+    RECORD_MISMATCH = "RECORD_MISMATCH"
+
+    def __init__(self, kind: str, message: str, *, run_id: str = "", run_state: str = "") -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.run_id = run_id
+        self.run_state = run_state
 
 
 _AUTO_CHECKPOINT_SCHEMAS = {
@@ -856,19 +877,30 @@ class ContinuityExecutionService:
         try:
             intent = self._store.get_execution_intent(operation_id)
             if intent is None:
-                raise ContinuityExecutionError("ExecutionIntent 不存在")
+                raise StartedRunLookupError(
+                    StartedRunLookupError.NO_SUCH_OPERATION, "ExecutionIntent 不存在"
+                )
             receipt = intent.receipt
             run = self._store.get_run(receipt.run_id)
-            if (
-                run.work_id != receipt.work_id
-                or run.executor_id != receipt.owner_id
-                or run.state not in {RunState.RUNNING, RunState.VERIFYING}
-            ):
-                raise ContinuityExecutionError("ExecutionIntent 与活动 Run 身份不一致")
+            if run.work_id != receipt.work_id or run.executor_id != receipt.owner_id:
+                raise StartedRunLookupError(
+                    StartedRunLookupError.RECORD_MISMATCH, "ExecutionIntent 与活动 Run 身份不一致"
+                )
+            if run.state not in {RunState.RUNNING, RunState.VERIFYING}:
+                raise StartedRunLookupError(
+                    StartedRunLookupError.NOT_ACTIVE,
+                    "ExecutionIntent 与活动 Run 身份不一致",  # the historical text, kept for callers that print it
+                    run_id=run.run_id,
+                    run_state=run.state.value,
+                )
             owner_id, evidence = self._store.get_run_started_evidence(receipt.run_id)
             if owner_id != receipt.owner_id:
-                raise ContinuityExecutionError("RUN_STARTED owner 与派发回执不一致")
+                raise StartedRunLookupError(
+                    StartedRunLookupError.RECORD_MISMATCH, "RUN_STARTED owner 与派发回执不一致"
+                )
             return receipt, run, evidence
+        except RunNotFoundError as error:
+            raise StartedRunLookupError(StartedRunLookupError.NO_SUCH_RUN, str(error)) from error
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
@@ -881,11 +913,20 @@ class ContinuityExecutionService:
         try:
             run = self._store.get_run(run_id)
             if run.state not in {RunState.RUNNING, RunState.VERIFYING}:
-                raise ContinuityExecutionError(f"Run 当前是 {run.state.value}，不是 RUNNING/VERIFYING，没有可核对的执行进程")
+                raise StartedRunLookupError(
+                    StartedRunLookupError.NOT_ACTIVE,
+                    f"Run 当前是 {run.state.value}，不是 RUNNING/VERIFYING，没有可核对的执行进程",
+                    run_id=run.run_id,
+                    run_state=run.state.value,
+                )
             owner_id, evidence = self._store.get_run_started_evidence(run_id)
             if owner_id != run.executor_id:
-                raise ContinuityExecutionError("RUN_STARTED owner 与 Run 的执行者不一致")
+                raise StartedRunLookupError(
+                    StartedRunLookupError.RECORD_MISMATCH, "RUN_STARTED owner 与 Run 的执行者不一致"
+                )
             return run, evidence
+        except RunNotFoundError as error:
+            raise StartedRunLookupError(StartedRunLookupError.NO_SUCH_RUN, str(error)) from error
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 

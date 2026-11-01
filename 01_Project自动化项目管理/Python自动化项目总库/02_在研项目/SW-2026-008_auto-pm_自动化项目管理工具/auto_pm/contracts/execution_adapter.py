@@ -72,6 +72,8 @@ class ExecutionFailureCode(StrEnum):
     EXECUTOR_FAILED = "EXECUTOR_FAILED"
     PROJECTION_FAILED = "PROJECTION_FAILED"
     LEGACY_UNKNOWN = "LEGACY_UNKNOWN"
+    # The executor process is gone after the controller restarted (pm recover --apply); not "terminated by us".
+    EXECUTOR_LOST = "EXECUTOR_LOST"
 
 
 class ExecutionFailure(BaseModel):
