@@ -371,6 +371,26 @@ def test_cx02_a_ticket_that_is_not_professional_enough_leaves_no_trace(
     assert _listed(cli_runner, root) == []
 
 
+@pytest.mark.parametrize(
+    ("overrides", "flag"),
+    [({"evidence": None}, "--evidence"), ({"alternative": None}, "--alternative")],
+    ids=["evidence", "alternative"],
+)
+def test_td261_d7_a_missing_required_list_is_named_in_plain_words(
+    cli_runner: CliRunner, root: Path, overrides: dict[str, Any], flag: str
+) -> None:
+    result = _add(cli_runner, root, **overrides)
+    assert result.exit_code != 0
+    assert f"入箱必须带 {flag}" in result.output
+    assert "ValidationError" not in result.output and "a triage ticket needs" not in result.output
+
+
+def test_td261_d7_the_help_marks_the_two_required_lists(cli_runner: CliRunner, root: Path) -> None:
+    result = _run(cli_runner, root, "inbox", "add", "--help")
+    flat = " ".join(result.output.split())
+    assert "【必填，至少一条】取证" in flat and "【必填，至少一个】备选方案" in flat
+
+
 @pytest.mark.parametrize("action", ["add", "modify", "reduce", "freeze", "remove"])
 def test_cx03_a_feature_change_is_not_only_an_addition(cli_runner: CliRunner, root: Path, action: str) -> None:
     item = _item(_add(cli_runner, root, kind="change", change_action=action, request_id=f"REQ-ACT-{action}", title=f"功能变更：{action}"))
@@ -612,3 +632,8 @@ def test_td093_approve_refuses_each_invalid_contract_field_for_its_own_reason(
             card["change_id"], state, project_id=PROJECT, approver=APPROVER, comment="Human review"
         )
     assert _run(cli_runner, root, *baseline, "--inbox-id", item["item_id"]).exit_code == 0
+
+
+def test_td261_d11_plan_help_says_a_confirmed_inbox_item_needs_no_retyping(cli_runner: CliRunner, root: Path) -> None:
+    result = _run(cli_runner, root, "plan", "--help")
+    assert "分类（--kind 等）直接取自条目，不用重填" in " ".join(result.output.split())

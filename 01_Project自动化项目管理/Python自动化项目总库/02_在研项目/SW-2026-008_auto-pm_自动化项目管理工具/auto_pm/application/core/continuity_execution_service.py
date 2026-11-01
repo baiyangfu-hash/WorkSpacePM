@@ -251,7 +251,10 @@ class ContinuityExecutionService:
                 allow_external_linked=True,
             )
             if actual_head != git_head:
-                raise ContinuityExecutionError("Run git_head 与受管 worktree 当前 HEAD 不一致")
+                raise ContinuityExecutionError(
+                    f"Run git_head 与受管 worktree 当前 HEAD 不一致：--git-head 给的是 {git_head}，工位现在是 {actual_head}。"
+                    "处理：把 --git-head 改成工位当前的提交号（在工位里运行 git rev-parse HEAD）再开工"
+                )
             self._reject_control_root_drift(governed_worktree, owned, git_head)
             actual_observed = tuple(
                 path for path in actual_dirty if authority_paths_covered((path,), owned)

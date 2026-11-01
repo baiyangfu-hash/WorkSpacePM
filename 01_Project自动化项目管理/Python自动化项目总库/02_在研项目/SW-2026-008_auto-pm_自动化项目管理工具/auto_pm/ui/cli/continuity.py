@@ -1250,7 +1250,12 @@ def lease_group() -> None:
 @click.option("--owner", "owner_id", required=True)
 @click.option("--lease-token-env", default=None, metavar="ENV_NAME")
 @click.option("--lease-wallet", is_flag=True, help="从本机钱包读取本 Run 当前持有者的口令")
-@click.option("--expected-version", type=click.IntRange(min=1), required=True)
+@click.option(
+    "--expected-version",
+    type=click.IntRange(min=1),
+    required=True,
+    help="租约现在的版本号：开工回执或上一次续租回执里的 version；每续租成功一次加 1。填错时报错会告诉你当前是多少",
+)
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option(
     "--idempotency-key",

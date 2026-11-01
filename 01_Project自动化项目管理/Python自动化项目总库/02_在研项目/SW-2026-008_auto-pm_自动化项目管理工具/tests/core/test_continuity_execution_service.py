@@ -1999,6 +1999,35 @@ def test_expired_or_wrong_owner_lease_fails_closed(tmp_path: Path) -> None:
         service.renew_lease("RUN-001", "agent-a", "lease-secret", 60, "expired")
 
 
+def test_td261_d8_a_wrong_lease_version_says_what_the_current_one_is(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    current = service._store.get_lease("RUN-001").version
+
+    with pytest.raises(ContinuityExecutionError, match="lease version 冲突") as caught:
+        service.renew_lease("RUN-001", "agent-a", "lease-secret", 60, "stale-version", expected_version=current + 5)
+
+    text = str(caught.value)
+    assert f"现在的版本号是 {current}" in text and f"你给的是 {current + 5}" in text and "--expected-version" in text
+    assert service._store.get_lease("RUN-001").version == current  # a refused renewal changes nothing
+
+
+def test_td261_d4_a_stale_git_head_at_start_names_both_commits_and_the_way_out(tmp_path: Path) -> None:
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    actual = subprocess.run(
+        ["git", "-C", str(service._root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8"
+    ).stdout.strip()
+    stale = "0" * 40
+
+    with pytest.raises(ContinuityExecutionError, match="不一致") as caught:
+        _start(service, git_head=stale)
+
+    text = str(caught.value)
+    assert stale in text and actual in text and "git rev-parse HEAD" in text
+
+
 @pytest.mark.parametrize("seconds", [3_601, 86_400])
 def test_new_run_and_renewal_reject_old_unbounded_duration(
     tmp_path: Path, seconds: int
