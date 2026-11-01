@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import auto_pm.application.core.worktree_policy_service as policy_module
 import auto_pm.infrastructure.control_root_guard as control_root_guard
 from auto_pm.application.core.worktree_policy_service import (
     WorktreePolicyError,
@@ -109,6 +110,43 @@ def test_a_clean_linked_worktree_is_a_workstation_and_is_reused(tmp_path: Path) 
     assert plan.worktree_path == linked.resolve()
     assert plan.branch_name == ""
     assert plan.origin_dirty_paths == ()
+
+
+@pytest.mark.parametrize(
+    "guard_says",
+    ["Git 控制根事实包含诊断: warning: x", "Git 控制根事实采集失败: boom", "Git 控制目录无法安全规范化"],
+)
+def test_a_failing_control_root_guard_never_hands_the_control_root_to_a_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, guard_says: str
+) -> None:
+    """Audit 480 (a): the guard failing for any reason but "this is a linked worktree" must refuse, not allow."""
+    _repository(tmp_path)
+
+    def broken(_root: object) -> None:
+        raise ControlRootGuardError(guard_says)
+
+    monkeypatch.setattr(policy_module, "require_control_root", broken)
+
+    with pytest.raises(WorktreePolicyError, match="无法确认是否为控制根"):
+        WorktreePolicyService(tmp_path).select(run_id="RUN-SW008-A5-001", allow_branch_creation=False)
+
+
+def test_a_real_workstation_is_recognized_by_its_git_directories_not_by_the_guard_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _repository(tmp_path)
+    service = WorktreePolicyService(tmp_path)
+    linked = service.materialize(
+        service.select(run_id="RUN-SW008-A5-LINKED2", allow_branch_creation=True)
+    ).worktree_path
+
+    def broken(_root: object) -> None:
+        raise ControlRootGuardError("any wording at all")
+
+    monkeypatch.setattr(policy_module, "require_control_root", broken)
+    plan = WorktreePolicyService(linked).select(run_id="RUN-SW008-A5-002", allow_branch_creation=False)
+
+    assert plan.worktree_mode is WorktreeMode.CURRENT  # Git itself proves it: git-dir differs from common-dir
 
 
 def test_dirty_controlled_worktree_creates_an_isolated_branch_without_touching_parent(

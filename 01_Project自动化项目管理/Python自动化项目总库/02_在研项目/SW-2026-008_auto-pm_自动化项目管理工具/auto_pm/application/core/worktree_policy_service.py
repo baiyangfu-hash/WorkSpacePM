@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -80,8 +81,8 @@ class WorktreePolicyService:
                 branch_name=self._current_branch(),
                 origin_dirty_paths=(),
             )
-        on_control_root = self._is_control_root()
-        if not dirty_paths and not force_isolation and not on_control_root:
+        # Asked only when CURRENT is on the table, so a forced/dirty isolation keeps failing at materialize() as before.
+        if not dirty_paths and not force_isolation and not self._is_control_root():
             return WorktreePlan(
                 worktree_mode=WorktreeMode.CURRENT,
                 worktree_path=self._root,
@@ -193,12 +194,21 @@ class WorktreePolicyService:
             raise WorktreePolicyError(str(error)) from error
 
     def _is_control_root(self) -> bool:
-        """True for the primary Git worktree; False for a linked (isolated) one."""
+        """True for the primary Git worktree; False only for a provable linked (isolated) one.
+
+        Fail closed: the guard also raises for Git failures, timeouts, stderr diagnostics and uncanonicalizable
+        control directories.  Those say nothing about being a workstation, so they must never read as "not the
+        control root" (that would hand the control root to a Run); only an exact git-dir != common-dir does.
+        """
 
         try:
             require_control_root(self._root)
-        except ControlRootGuardError:
-            return False
+        except ControlRootGuardError as error:
+            git_dir = self._git_output("rev-parse", "--path-format=absolute", "--absolute-git-dir")
+            common_dir = self._git_output("rev-parse", "--path-format=absolute", "--git-common-dir")
+            if os.path.normcase(str(Path(git_dir).resolve())) != os.path.normcase(str(Path(common_dir).resolve())):
+                return False
+            raise WorktreePolicyError(f"无法确认是否为控制根，拒绝放行: {error}") from error
         return True
 
     def _require_root_git_worktree(self) -> None:
