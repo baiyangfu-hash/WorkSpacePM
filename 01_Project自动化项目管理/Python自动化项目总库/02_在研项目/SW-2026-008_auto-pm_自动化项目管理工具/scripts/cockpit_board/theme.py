@@ -150,7 +150,10 @@ QTableWidget, QTreeWidget, QListWidget {{ background: {t.card}; border: 1px soli
 QHeaderView::section {{ background: {t.card2}; color: {t.fg2}; border: none;
     border-bottom: 1px solid {t.line}; padding: 5px 8px; font-size: {FONT_SIZE_SMALL_PT}pt; }}
 QCheckBox {{ spacing: 6px; }}
-QFrame#bc_form QLineEdit, QFrame#bc_form QComboBox {{ background: {t.card}; border: 1px solid {t.line2}; border-radius: 4px; padding: 3px 6px; }}
+QFrame#bc_form QLineEdit, QFrame#bc_form QComboBox, QFrame#tool_form QLineEdit, QFrame#tool_form QComboBox {{
+    background: {t.card}; border: 1px solid {t.line2}; border-radius: 4px; padding: 3px 6px; }}
+QPlainTextEdit#tool_output {{ background: {t.card2}; border: 1px solid {t.line}; border-radius: 4px; padding: 6px;
+    font-family: {font_css(MONO_STACK)}; }}
 QFrame#pre {{ background: {t.card2}; border: 1px solid {t.line}; border-radius: 4px; }}
 QToolTip {{ background: {t.card}; color: {t.fg}; border: 1px solid {t.line2}; }}
 {"".join(sem)}

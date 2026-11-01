@@ -1,0 +1,408 @@
+"""工程工具页：变更单（看、建、转状态）、决策（看）、变量表（IO 查重），以及“打开高级工作台”。
+
+界面是命令行的另一层皮：每个按钮对应 tool_actions.TOOLS 白名单里的一条命令，命令和退出码都进“最近动作”。
+会写文件的（建变更单、转状态）先点“预览命令”，看过整条命令再点运行；表单一改，预览作废。
+批准类状态（已批准、有条件批准）这里不提供，只在终端里由你本人做。
+真正起子进程的是 tool_actions.py，这里只发请求、收回执。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from cockpit_board import iocheck, theme, tool_actions
+from cockpit_board.actions import Receipt
+from cockpit_board.widgets import common as c
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+TABS = (("change", "变更单"), ("decision", "决策"), ("vartable", "变量表"))
+DOMAIN_ZH = {"ELEC": "电气", "MECH": "机械", "PLC": "PLC", "HMI": "HMI", "SCPT": "脚本", "DOCU": "文档", "SAFE": "安全", "SPEC": "规范"}
+NATURE_ZH = {"REQ": "需求变更", "DEF": "缺陷修复", "OPT": "优化", "CFG": "配置调整", "EMRG": "紧急处理"}
+SCOPE_ZH = {"LOCAL": "局部", "MODULE": "模块", "SYSTEM": "系统", "CROSS": "跨系统", "SAFE": "安全"}
+URGENCY_ZH = {"normal": "普通", "urgent": "紧急", "critical": "特急"}
+ALL_STATUSES = "（全部状态）"
+PICK = "（请选择）"
+NO_PROJECT = "（没有登记的项目）"
+
+
+class _Job(QThread):
+    done = Signal(object)
+
+    def __init__(self, job: Callable[[], Any]) -> None:
+        super().__init__()
+        self._job = job
+
+    def run(self) -> None:
+        try:
+            self.done.emit(self._job())
+        except tool_actions.ToolError as error:
+            self.done.emit(error)
+        except Exception as error:  # noqa: BLE001 - 任何意外都变成回执里的一行字，窗口不挂
+            self.done.emit(tool_actions.ToolResult(Receipt("", "意外错误", "", None, False, f"{type(error).__name__}: {error}")))
+
+
+class ToolsPage(QWidget):
+    """root＝控制根；runner / opener 可换成假的（测试用）；threaded=False 时在当前线程里直接跑。"""
+
+    def __init__(
+        self,
+        root: Path,
+        runner: Callable[..., Any] = tool_actions.run_tool,
+        opener: Callable[[Path], Receipt] = tool_actions.open_workbench,
+        threaded: bool = True,
+    ) -> None:
+        super().__init__()
+        self.root, self.runner, self.opener, self.threaded = root, runner, opener, threaded
+        self.receipts: list[Receipt] = []
+        self.project_roots: dict[str, str] = {}
+        self.preview: tuple[str, dict[str, Any]] | None = None
+        self.preview_text = ""
+        self._jobs: list[_Job] = []
+        self.write_buttons: dict[str, QPushButton] = {}
+        self.inputs: dict[str, QLineEdit | QComboBox] = {}
+        self.scope_boxes: dict[str, QCheckBox] = {}
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area, self.layout_ = c.page()
+        outer.addWidget(self.scroll_area)
+        self.project_box = QComboBox()
+        self.project_box.setObjectName("tool_project")
+        self.project_box.currentIndexChanged.connect(self._clear_preview)
+        self.pages: dict[str, QWidget] = {}
+        self.output = QPlainTextEdit()
+        self.output.setObjectName("tool_output")
+        self.output.setReadOnly(True)
+        self.output.setMinimumHeight(200)
+        self.output.setPlainText("还没有运行。点上面的按钮，命令的输出显示在这里。")
+        self.note = c.label("", "small")
+        self.receipts_holder = QWidget()
+        self.receipts_layout = QVBoxLayout(self.receipts_holder)
+        self.receipts_layout.setContentsMargins(0, 0, 0, 0)
+        self._build()
+        self.set_projects([])
+
+    # ------------------------------------------------ 搭
+
+    def _build(self) -> None:
+        lay = self.layout_
+        lay.addWidget(c.section("工程工具", "常用的几项；每个按钮都对应一条命令行，命令和退出码记在下面“最近动作”"))
+        tabs = QButtonGroup(self)
+        self.tab_buttons: dict[str, QPushButton] = {}
+        items: list[QWidget | int] = []
+        for key, text in TABS:
+            tab = c.button(text, "tab", text)
+            tab.setCheckable(True)
+            tab.clicked.connect(lambda _checked=False, k=key: self.select_tab(k))
+            tabs.addButton(tab)
+            self.tab_buttons[key] = tab
+            items.append(tab)
+        items.append(1)
+        self.workbench_button = c.button("打开高级工作台", "", "另起一个窗口：变量表、规范中心、模板、交付包、Modbus 调试等其余工具在那里")
+        self.workbench_button.clicked.connect(self.open_workbench)
+        items.append(self.workbench_button)
+        lay.addWidget(c.hrow(*items))
+        lay.addWidget(self._boxed(c.hrow(c.label("项目", "muted", wrap=False), self.project_box, 1)))
+        for (key, _text), builder in zip(TABS, (self._change_tab, self._decision_tab, self._vartable_tab), strict=True):
+            self.pages[key] = builder()  # 三页都放进布局，选哪页就显示哪页（不用 QStackedWidget：它按最高那页撑高，其余页会被拉出大空白）
+            lay.addWidget(self.pages[key])
+        lay.addWidget(self.note)
+        lay.addWidget(c.section("输出", "命令的原样输出；失败也照实显示，不吞"))
+        lay.addWidget(self.output)
+        lay.addWidget(c.section("最近动作", "命令 + 退出码；rc 0＝成功，其余＝失败或没跑成"))
+        lay.addWidget(self.receipts_holder)
+        lay.addWidget(c.label("这里永远没有：批准、合并、删除、切换发布、替你签字。批准变更单只在终端里由你本人做。", "small"))
+        self.select_tab("change")
+
+    def _form(self) -> tuple[QFrame, QGridLayout]:
+        frame, layout = c.inner("tool_form")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(theme.SPACE)
+        grid.setVerticalSpacing(theme.SPACE // 2)
+        grid.setColumnStretch(1, 1)
+        holder = QWidget()
+        holder.setLayout(grid)
+        layout.addWidget(holder)
+        return frame, grid
+
+    def _boxed(self, *rows: QWidget) -> QFrame:
+        """一块 tool_form 底的区域：输入框、下拉框的样式只在这样的框里生效（theme.py 里按它的名字配色，明暗都看得清）。"""
+        frame, layout = c.inner("tool_form")
+        for row in rows:
+            layout.addWidget(row)
+        return frame
+
+    def _edit(self, key: str, hint: str = "") -> QLineEdit:
+        edit = QLineEdit()
+        edit.setObjectName("tool_" + key)
+        edit.setPlaceholderText(hint)
+        edit.textChanged.connect(self._clear_preview)
+        self.inputs[key] = edit
+        return edit
+
+    def _combo(self, key: str, choices: dict[str, str], blank: str = "") -> QComboBox:
+        box = QComboBox()
+        box.setObjectName("tool_" + key)
+        if blank:
+            box.addItem(blank, "")
+        for value, text in choices.items():
+            box.addItem(f"{text}（{value}）", value)
+        box.currentIndexChanged.connect(self._clear_preview)
+        self.inputs[key] = box
+        return box
+
+    def _change_tab(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        # 看
+        lay.addWidget(c.section("看变更单", "只读"))
+        status = self._combo("status", {s: tool_actions.STATUS_LABELS_ZH[s] for s in tool_actions.CHANGE_STATUSES}, ALL_STATUSES)
+        show_number = self._edit("show_number", "变更单号，例如 CHG-DJ-2026-001")
+        list_button = c.button("列出变更单", "", "change list <项目> --full")
+        list_button.clicked.connect(lambda: self.run("change_list", {"pid": self.pid(), "status": self._value("status")}))
+        show_button = c.button("查看这张", "", "change show <单号> --pid <项目>")
+        show_button.clicked.connect(lambda: self.run("change_show", {"pid": self.pid(), "number": self._value("show_number")}))
+        lay.addWidget(self._boxed(c.hrow(status, list_button, 1, show_number, show_button)))
+        # 建
+        lay.addWidget(c.section("建一张变更单", "先预览命令，看过再创建；创建会在项目里生成变更单文件并更新台账"))
+        frame, grid = self._form()
+        rows: list[tuple[str, QWidget]] = [
+            ("技术领域", self._combo("domain", DOMAIN_ZH, PICK)),
+            ("业务性质", self._combo("nature", NATURE_ZH, PICK)),
+        ]
+        scope_row = QWidget()
+        scope_lay = QGridLayout(scope_row)
+        scope_lay.setContentsMargins(0, 0, 0, 0)
+        for index, (value, text) in enumerate(SCOPE_ZH.items()):
+            box = QCheckBox(f"{text}（{value}）")
+            box.setObjectName("tool_scope_" + value)
+            box.toggled.connect(self._clear_preview)
+            self.scope_boxes[value] = box
+            scope_lay.addWidget(box, 0, index)
+        rows += [
+            ("影响范围（可多选）", scope_row),
+            ("紧急程度", self._combo("urgency", URGENCY_ZH)),
+            ("申请人", self._edit("applicant", "提出改动的人，例如 张工（客户设备科）")),
+            ("变更背景", self._edit("background", "现在是什么情况")),
+            ("变更必要性", self._edit("necessity", "为什么要改")),
+            ("参考依据", self._edit("references", "可不填：图纸、邮件、会议纪要")),
+        ]
+        for index, (label, widget) in enumerate(rows):
+            grid.addWidget(c.label(label, "muted", wrap=False), index, 0)
+            grid.addWidget(widget, index, 1)
+        lay.addWidget(frame)
+        lay.addWidget(self._preview_row("change_create", "创建变更单", self._create_params))
+        # 转状态
+        lay.addWidget(c.section("转状态", "批准类（已批准、有条件批准）不在这里：只在终端里由你本人做，有口令要输口令"))
+        frame, grid = self._form()
+        targets = {s: tool_actions.STATUS_LABELS_ZH[s] for s in tool_actions.CHANGE_TARGETS}
+        rows = [
+            ("变更单号", self._edit("number", "例如 CHG-DJ-2026-001")),
+            ("转到", self._combo("to", targets)),
+            ("意见 / 原因", self._edit("comment", "废弃必须写原因")),
+            ("实施人", self._edit("approver", "可不填")),
+            ("验证结论", self._edit("verification_conclusion", "转到“已完成”必须写")),
+        ]
+        for index, (label, widget) in enumerate(rows):
+            grid.addWidget(c.label(label, "muted", wrap=False), index, 0)
+            grid.addWidget(widget, index, 1)
+        lay.addWidget(frame)
+        lay.addWidget(self._preview_row("change_transition", "转状态", self._transition_params))
+        return page
+
+    def _decision_tab(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(c.section("决策包", "只读：列出、查看。新建决策包要用户本人在终端里输口令，这里不提供"))
+        change_id = self._edit("decision_change", "按变更单号筛选，可不填")
+        list_button = c.button("列出决策", "", "decision list [--pid <项目>] [--change-id <变更单>]")
+        list_button.clicked.connect(lambda: self.run("decision_list", {"pid": self.pid(), "change_id": self._value("decision_change")}))
+        show_id = self._edit("decision_id", "决策编号，例如 DEC-20260923-XXXX")
+        show_button = c.button("查看这个决策", "", "decision show <编号>")
+        show_button.clicked.connect(lambda: self.run("decision_show", {"decision_id": self._value("decision_id")}))
+        lay.addWidget(self._boxed(c.hrow(change_id, list_button), c.hrow(show_id, show_button)))
+        return page
+
+    def _vartable_tab(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(c.section("变量表 / IO 查重", "读入 IO 点表，报告重复的地址和重复的变量名；只读，不改文件"))
+        path = self._edit("vartable_file", "io_points.csv 等变量表文件的完整路径")
+        pick = c.button("选择文件…", "", "在文件夹里选一个变量表文件")
+        pick.clicked.connect(self.choose_file)
+        find = c.button("在项目里找", "", "在当前项目的文件夹里找 io_points.csv")
+        find.clicked.connect(self.find_in_project)
+        check = c.button("查重", "", "vartable parse <文件> --output-format json，再数重复")
+        check.clicked.connect(self.check_duplicates)
+        lay.addWidget(self._boxed(c.hrow(path), c.hrow(pick, find, 1, check)))
+        lay.addWidget(c.label("比较规则：地址去掉前面的 % 和空格、不分大小写；不同站里的同名同址不算重复；空地址、空变量名单独数。", "small"))
+        return page
+
+    def _preview_row(self, key: str, run_text: str, params: Callable[[], dict[str, Any]]) -> QWidget:
+        preview = c.button("预览命令", "", "只显示要运行的整条命令，不运行")
+        preview.clicked.connect(lambda: self.preview_command(key, params()))
+        write = c.button(run_text, "", "先点“预览命令”，看过再点", enabled=False)
+        write.clicked.connect(self.run_preview)
+        self.write_buttons[key] = write
+        return c.hrow(preview, write, 1)
+
+    # ------------------------------------------------ 取值
+
+    def _value(self, key: str) -> str:
+        widget = self.inputs[key]
+        return str(widget.currentData() or "") if isinstance(widget, QComboBox) else widget.text().strip()
+
+    def pid(self) -> str:
+        return str(self.project_box.currentData() or "")
+
+    def _create_params(self) -> dict[str, Any]:
+        return {
+            "pid": self.pid(), "domain": self._value("domain"), "nature": self._value("nature"),
+            "scope": [value for value, box in self.scope_boxes.items() if box.isChecked()],
+            "urgency": self._value("urgency"), "applicant": self._value("applicant"), "background": self._value("background"),
+            "necessity": self._value("necessity"), "references": self._value("references"),
+        }
+
+    def _transition_params(self) -> dict[str, Any]:
+        return {
+            "pid": self.pid(), "number": self._value("number"), "to": self._value("to"), "comment": self._value("comment"),
+            "approver": self._value("approver"), "verification_conclusion": self._value("verification_conclusion"),
+        }
+
+    # ------------------------------------------------ 数据进来
+
+    def set_projects(self, projects: list[tuple[str, str]]) -> None:
+        """(项目编号, 项目相对路径)；账本读完后调。原来选的项目还在就保持。"""
+        previous = self.pid()
+        self.project_roots = dict(projects)
+        self.project_box.blockSignals(True)
+        self.project_box.clear()
+        if not projects:
+            self.project_box.addItem(NO_PROJECT, "")
+        for project_id, _root in projects:
+            self.project_box.addItem(project_id, project_id)
+        index = self.project_box.findData(previous) if previous else -1
+        self.project_box.setCurrentIndex(max(index, 0))
+        self.project_box.blockSignals(False)
+        self._clear_preview()
+
+    # ------------------------------------------------ 动作
+
+    def select_tab(self, key: str) -> None:
+        for name, button in self.tab_buttons.items():
+            button.setChecked(name == key)
+        for name, page in self.pages.items():
+            page.setVisible(name == key)
+        self._clear_preview()
+
+    def _clear_preview(self, *_args: object) -> None:
+        self.preview, self.preview_text = None, ""
+        for button in self.write_buttons.values():
+            button.setEnabled(False)
+
+    def preview_command(self, key: str, params: dict[str, Any]) -> None:
+        self._clear_preview()
+        try:
+            args = tool_actions.build_command(key, params)
+        except tool_actions.ToolError as error:
+            self.note.setText("没法预览：" + str(error))
+            return
+        self.preview, self.preview_text = (key, params), tool_actions.shown_command(args)
+        self.write_buttons[key].setEnabled(True)
+        self.note.setText("要运行的命令（在控制根里）：" + self.preview_text + "\n确认无误再点运行；表单再改，预览作废。")
+        self.output.setPlainText("预览，还没有运行：\n" + self.preview_text)
+
+    def run_preview(self) -> None:
+        if self.preview is None:
+            self.note.setText("先点“预览命令”")
+            return
+        key, params = self.preview
+        self._clear_preview()  # 一次预览只运行一次，连点也不会重复写
+        self.run(key, params)
+
+    def run(self, key: str, params: dict[str, Any]) -> None:
+        try:
+            tool_actions.build_command(key, params)  # 先在界面线程里验一遍：缺栏马上提示，不起线程
+        except tool_actions.ToolError as error:
+            self.note.setText("没法运行：" + str(error))
+            return
+        self.note.setText("正在运行……")
+        self._dispatch(lambda: self.runner(self.root, key, params), key)
+
+    def _dispatch(self, job: Callable[[], Any], key: str) -> None:
+        if not self.threaded:
+            self._finish(job(), key)
+            return
+        thread = _Job(job)
+        thread.done.connect(lambda result, k=key: self._finish(result, k))
+        thread.finished.connect(lambda: self._jobs.remove(thread))
+        self._jobs.append(thread)
+        thread.start()
+
+    def _finish(self, result: Any, key: str) -> None:
+        if isinstance(result, tool_actions.ToolError):
+            self.note.setText("没法运行：" + str(result))
+            return
+        receipt = result.receipt
+        text = receipt.output or "（命令没有输出）"
+        if key == "vartable_parse" and receipt.rc == 0:
+            text = self._duplicate_report(result.stdout) + "\n\n—— 命令原样输出 ——\n" + text
+        self.output.setPlainText(f"{receipt.command}\n退出码：{receipt.rc_text}\n\n{text}")
+        self.note.setText("")
+        self.add_receipt(receipt)
+
+    def _duplicate_report(self, stdout: str) -> str:
+        try:
+            return iocheck.render_report(iocheck.find_duplicates(iocheck.extract_entries(stdout)))
+        except iocheck.IoCheckError as error:
+            return "没法查重：" + str(error)
+
+    def add_receipt(self, receipt: Receipt) -> None:
+        self.receipts.insert(0, receipt)
+        c.clear(self.receipts_layout)
+        for item in self.receipts[:8]:
+            sev = "ok" if item.rc == 0 else ("na" if item.rc is None else "block")
+            self.receipts_layout.addWidget(c.hrow(
+                c.label(item.when, "mono", wrap=False), c.label(item.action, "", wrap=False),
+                c.label(item.command, "mono"), 1, c.chip(item.rc_text, sev)))
+
+    # -- 变量表
+
+    def choose_file(self) -> None:
+        start = str(self.root / self.project_roots.get(self.pid(), ""))
+        name, _filter = QFileDialog.getOpenFileName(self, "选一个变量表文件", start, "变量表 (*.csv *.yml *.yaml *.scl *.asc *.wr3 *.xlsx);;全部文件 (*)")
+        if name:
+            self.inputs["vartable_file"].setText(name)  # type: ignore[union-attr]
+
+    def find_in_project(self) -> None:
+        project_root = self.root / self.project_roots.get(self.pid(), "")
+        found = tool_actions.find_io_tables(project_root)
+        if not found:
+            self.note.setText(f"在 {self.pid() or '当前项目'} 里没找到 io_points.csv，请点“选择文件…”手动选。")
+            return
+        self.inputs["vartable_file"].setText(str(found[0]))  # type: ignore[union-attr]
+        more = f"（共 {len(found)} 个，填了第一个）" if len(found) > 1 else ""
+        self.note.setText(f"找到 {found[0].relative_to(self.root) if found[0].is_relative_to(self.root) else found[0]}{more}")
+
+    def check_duplicates(self) -> None:
+        self.run("vartable_parse", {"file": self._value("vartable_file")})
+
+    def open_workbench(self) -> None:
+        self._dispatch(lambda: tool_actions.ToolResult(self.opener(self.root)), "workbench")
