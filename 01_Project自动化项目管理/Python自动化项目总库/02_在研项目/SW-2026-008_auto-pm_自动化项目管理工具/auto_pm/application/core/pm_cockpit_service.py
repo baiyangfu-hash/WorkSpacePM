@@ -721,6 +721,7 @@ class PmCockpitService:
             ExecutionFailureCode.EXECUTOR_FAILED: "执行器报告失败",
             ExecutionFailureCode.PROJECTION_FAILED: "结果投影失败",
             ExecutionFailureCode.LEGACY_UNKNOWN: "历史原因未记录",
+            ExecutionFailureCode.EXECUTOR_LOST: "执行进程已不在（主控重启后核对）",
         }
         success = {
             ExecutionActivityStage.PROJECTED,

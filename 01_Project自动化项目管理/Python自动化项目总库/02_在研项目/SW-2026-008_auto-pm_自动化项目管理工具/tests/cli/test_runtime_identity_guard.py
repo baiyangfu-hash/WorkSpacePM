@@ -27,6 +27,7 @@ WRITE_COMMANDS = frozenset(
         "inbox reject",
         "park",
         "plan",
+        "recover",
         "sign-risk",
         "switch",
         "takeover",
@@ -46,7 +47,6 @@ NOT_WRITE_COMMANDS = frozenset(
         "missions",
         "orient",
         "pending",
-        "recover",
         "recover-status",
         "resume",
         "workflow",
@@ -114,6 +114,8 @@ CASES = (
     _Case("plan", ("--mission-id", "M-1"), "P-MISSION"),
     _Case("plan", (*NEW_REQUEST, "--kind", "iteration"), "P-NEW", "new-request"),
     _Case("plan", ("--request-id", "REQ-1", "--scope", "f.py", "--risk", "r", "--non-goal", "n", "--adapter", "manual", "--approved-model", "m", "--kind", "iteration"), "P-DRAFT", "draft"),
+    _Case("recover", ("--run-id", "R-1", "--apply", "--lease-wallet"), "P-RUN", "run"),
+    _Case("recover", ("--operation-id", "OP-1", "--apply", "--lease-wallet"), "P-RUN", "recover-by-operation"),
     _Case("sign-risk", ("--run-id", "R-1", "--claimant", "claude:local"), "P-RUN", "run"),
     _Case("switch", ("--pid", "P-SWITCH", "--to", "M-2"), "P-SWITCH", "switch"),
     _Case("takeover", ("--handoff-id", "HO-1", "--as", "claude:local"), "P-HANDOFF", "takeover"),
@@ -134,7 +136,7 @@ def test_a_refused_identity_stops_every_write_command_before_it_writes(
 
     Source matching cannot tell a live guard call from dead code, a comment, or a call that names the wrong project.
     """
-    from auto_pm.ui.cli import pm, pm_closure, pm_handoff, pm_switch
+    from auto_pm.ui.cli import pm, pm_closure, pm_handoff, pm_recover, pm_switch
 
     touched: list[str] = []
     asked: list[str] = []
@@ -146,11 +148,19 @@ def test_a_refused_identity_stops_every_write_command_before_it_writes(
     def untouchable(label: str) -> _Untouchable:
         return _Untouchable(touched, label)
 
-    for module in (pm, pm_closure, pm_handoff, pm_switch):
+    for module in (pm, pm_closure, pm_handoff, pm_recover, pm_switch):
         monkeypatch.setattr(module, "require_runtime_identity", refuse)
     for module in (pm, pm_switch):
         monkeypatch.setattr(module, "project_of_mission", lambda _ctx, _mission_id: "P-MISSION")
     monkeypatch.setattr(pm_handoff, "project_of_run", lambda _ctx, _run_id: "P-RUN")
+    monkeypatch.setattr(pm_recover, "project_of_run", lambda _ctx, _run_id: "P-RUN")
+    # reading is allowed before the guard (the operation id has to be turned into a Run first); writing is not
+    reading = SimpleNamespace(resolve_started_run=lambda _operation_id: (SimpleNamespace(run_id="R-1"), None, None))
+    monkeypatch.setattr(
+        pm_recover,
+        "ContinuityExecutionService",
+        lambda *_a, **_k: reading if case.setup == "recover-by-operation" else untouchable("execution service"),
+    )
     monkeypatch.setattr(pm, "_require_control_root", lambda _ctx: None)
     monkeypatch.setattr(pm, "_facade", lambda _ctx: untouchable("facade"))
     monkeypatch.setattr(pm, "_control_root_path", lambda _ctx: tmp_path)
