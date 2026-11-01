@@ -171,18 +171,26 @@ def approver_pin_status(ctx: click.Context, as_json: bool) -> None:
     service = ApprovalProofService(control_root(ctx))
     try:
         committed, problem = service.committed_state()
+    except ApprovalProofError as error:
+        if not as_json:
+            raise click.ClickException(str(error)) from error
+        # 已提交的登记读不出批准人：所有批准一律拒绝。给界面一个明确的 suspended，而不是一个读不懂的失败。
+        _echo_status_json("suspended", str(error), [], False)
+        return
+    # 状态只以已提交的为准；工作区那份读不出来只说明“和已提交的不一致”，不能把已生效说成暂停。
+    working_problem = ""
+    try:
         working = service.working_keys()
     except ApprovalProofError as error:
         if not as_json:
             raise click.ClickException(str(error)) from error
-        # 登记文件坏到读不出批准人：所有批准一律拒绝。给界面一个明确的 suspended，而不是一个读不懂的失败。
-        _echo_status_json("suspended", str(error), [], False)
-        return
+        working, working_problem = None, str(error)
     committed_ids = {key.key_id for key in committed or []}
-    mismatch = {key.key_id for key in working} != committed_ids
+    mismatch = working is None or {key.key_id for key in working} != committed_ids
     if as_json:
         state = "suspended" if problem else "not_enabled" if committed is None else "enforced"
-        _echo_status_json(state, problem, [{"approver": key.approver, "key_id": key.key_id} for key in committed or []], mismatch)
+        note = "；".join(part for part in (problem, ("工作区登记文件读不出：" + working_problem) if working_problem else "") if part)
+        _echo_status_json(state, note, [{"approver": key.approver, "key_id": key.key_id} for key in committed or []], mismatch)
         return
     if problem:
         click.echo("批准口令：所有批准暂停。" + problem)

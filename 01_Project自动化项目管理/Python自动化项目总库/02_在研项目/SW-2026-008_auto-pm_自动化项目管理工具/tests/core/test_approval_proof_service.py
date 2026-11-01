@@ -264,6 +264,20 @@ def test_cli_status_json_reports_suspended_when_the_committed_registry_is_broken
     assert plain.exit_code != 0 and "一律拒绝" in plain.output
 
 
+def test_cli_status_json_keeps_enforced_when_only_the_working_file_is_broken(root: Path) -> None:
+    """HEAD 里的登记是好的、只有工作区那份坏了：状态仍以已提交的为准（enforced），并标出不一致和原因。"""
+    service = _commit_pin(root)
+    key = service.working_keys()[0]
+    (root / REGISTRY_RELATIVE_PATH).write_text('{"schema_version": "approvers.v1", "approvers": []}', encoding="utf-8")
+    result = CliRunner().invoke(cli_module.approver_pin_status, ["--json"], obj=_Obj(root))
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["state"] == "enforced" and payload["approvers"] == [{"approver": "baiyang", "key_id": key.key_id}]
+    assert payload["working_tree_differs_from_committed"] is True and "工作区登记文件读不出" in payload["problem"]
+    plain = CliRunner().invoke(cli_module.approver_pin_status, [], obj=_Obj(root))  # 文字路径行为不变：照旧报错退出
+    assert plain.exit_code != 0
+
+
 def test_cli_status_json_reports_suspended_when_git_state_is_unreadable(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """读不到 Git 里已提交的登记（committed_state 给出原因而不是抛错）：同样是 suspended，原因原样带出，文字输出不变。"""
     monkeypatch.setattr(ApprovalProofService, "committed_state", lambda self: (None, "读不到 Git 里已提交的批准人登记文件：HEAD 不指向任何提交"))
