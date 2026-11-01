@@ -143,9 +143,11 @@ class HomePage(QWidget):
         frame, inner = c.card()
         if vm.activity:
             for stamp, pid, text, example in vm.activity:
-                row = c.hrow(c.label(stamp, "mono", wrap=False), c.label(pid, "mono", wrap=False), c.label(text), 1)
+                text_label = c.label(text)
+                row = c.hrow(c.label(stamp, "mono", wrap=False), c.label(pid, "mono", wrap=False), text_label)
+                c.fill(row, text_label)  # 文字吃满剩余宽度；行尾不放弹簧，否则文字被挤成一窄列
                 if example:
-                    c.insert_widget(row, 3, c.example_tag())
+                    c.insert_widget(row, 2, c.example_tag())
                 inner.addWidget(row)
         else:
             inner.addWidget(c.label("这 7 天账本和变更记录里都没有新动静。", "muted"))

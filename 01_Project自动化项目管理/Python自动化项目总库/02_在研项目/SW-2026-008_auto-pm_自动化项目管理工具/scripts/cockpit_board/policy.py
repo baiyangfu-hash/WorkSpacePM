@@ -15,8 +15,9 @@ STATION_BUTTONS = PM_BUTTONS | frozenset({
     "看卡和变更记录", "收起控制台", "展开控制台",
 })
 
-# 永远灰着的（缺口⑨合并前）和永远不加的。
-GATED_UNTIL_GAP9 = frozenset({"批准范围", "开工"})
+# 灰着的和永远不加的。缺口⑨（批准口令防冒签）已在 main，但界面里的“批准范围 / 开工”还没接上口令弹窗
+# 和同一条命令（pm approve / pm confirm-start），接上之前一直灰；接线后由 app.DECISION_BUTTONS_WIRED 打开。
+GATED_UNTIL_WIRED = frozenset({"批准范围", "开工"})
 NEVER = ("合并", "删除", "切换发布", "代签", "签字", "no-verify", "全量门禁", "启动 codex", "codex", "执行")
 
 # 按钮文字和提示里不许出现的词（项目经理看板）。

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -219,6 +220,32 @@ def test_cli_prompt_only_when_enforced_and_only_in_a_terminal(root: Path, monkey
     monkeypatch.setattr(cli_module, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr(cli_module, "_prompt_hidden", lambda text: "typed-pin")
     assert "pin=typed-pin" in runner.invoke(_probe, obj=_Obj(root)).output
+
+
+def test_cli_status_json_reports_the_three_states_without_secrets(root: Path) -> None:
+    runner = CliRunner()
+
+    def status() -> dict[str, object]:
+        result = runner.invoke(cli_module.approver_pin_status, ["--json"], obj=_Obj(root))
+        assert result.exit_code == 0, result.output
+        return json.loads(result.output)  # type: ignore[no-any-return]
+
+    off = status()
+    assert off["schema_version"] == "approver-pin-status.v1"
+    assert off["state"] == "not_enabled" and off["approvers"] == [] and off["working_tree_differs_from_committed"] is False
+    service = _commit_pin(root)
+    on = status()
+    key = service.working_keys()[0]
+    assert on["state"] == "enforced" and on["approvers"] == [{"approver": "baiyang", "key_id": key.key_id}]
+    assert PIN not in json.dumps(on) and "hash" not in json.dumps(on).lower()  # 只给人名和编号，不给口令或校验值
+    # 工作区登记文件被换掉但没提交：只有提交后的算数，状态仍是已生效，同时标出不一致
+    service.write_working_keys([make_key("intruder", "another-pin-123", n=2**10)])
+    changed = status()
+    assert changed["state"] == "enforced" and changed["working_tree_differs_from_committed"] is True
+    assert [item["approver"] for item in changed["approvers"]] == ["baiyang"]  # type: ignore[attr-defined]
+    # 不带 --json 的原有文字输出不变
+    text = runner.invoke(cli_module.approver_pin_status, [], obj=_Obj(root)).output
+    assert "批准口令：已生效；批准人 baiyang" in text and "注意：工作区里的登记文件与已提交的不一致" in text
 
 
 def test_cli_init_is_refused_for_agents_and_rotation_needs_the_old_pin(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

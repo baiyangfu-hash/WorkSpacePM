@@ -6,6 +6,7 @@ agent has no way to pass a PIN along; a session without a terminal is refused at
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -144,8 +145,9 @@ def approver_pin_group() -> None:
 
 
 @approver_pin_group.command(name="status")
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON，给界面和脚本读（只含批准人名和口令编号，不含口令或校验值）")
 @click.pass_context
-def approver_pin_status(ctx: click.Context) -> None:
+def approver_pin_status(ctx: click.Context, as_json: bool) -> None:
     """只读：批准口令是否已生效（以 Git 已提交的登记文件为准）。"""
 
     service = ApprovalProofService(control_root(ctx))
@@ -154,14 +156,32 @@ def approver_pin_status(ctx: click.Context) -> None:
         working = service.working_keys()
     except ApprovalProofError as error:
         raise click.ClickException(str(error)) from error
+    committed_ids = {key.key_id for key in committed or []}
+    mismatch = {key.key_id for key in working} != committed_ids
+    if as_json:
+        state = "suspended" if problem else "not_enabled" if committed is None else "enforced"
+        click.echo(
+            json.dumps(
+                {
+                    "schema_version": "approver-pin-status.v1",
+                    # enforced＝已生效；not_enabled＝未生效（批准只做格式检查）；suspended＝读不到已提交的登记，所有批准暂停
+                    "state": state,
+                    "problem": problem,
+                    "approvers": [{"approver": key.approver, "key_id": key.key_id} for key in committed or []],
+                    "working_tree_differs_from_committed": mismatch,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
     if problem:
         click.echo("批准口令：所有批准暂停。" + problem)
     elif committed is None:
         click.echo("批准口令：未生效（Git HEAD 里没有 " + REGISTRY_RELATIVE_PATH + "），批准只做格式检查")
     else:
         click.echo("批准口令：已生效；批准人 " + "、".join(f"{key.approver}（{key.key_id}）" for key in committed))
-    committed_ids = {key.key_id for key in committed or []}
-    if {key.key_id for key in working} != committed_ids:
+    if mismatch:
         click.echo("注意：工作区里的登记文件与已提交的不一致；只有提交后的内容算数")
 
 

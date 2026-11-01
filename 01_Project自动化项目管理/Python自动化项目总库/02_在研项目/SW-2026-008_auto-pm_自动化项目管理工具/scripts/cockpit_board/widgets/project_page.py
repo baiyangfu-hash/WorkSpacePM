@@ -78,7 +78,9 @@ class ProjectPage(QWidget):
         if not vm.activity:
             inner.addWidget(c.label("无", "muted"))
         for stamp, text, who, example in vm.activity:
-            row = c.hrow(c.label(stamp, "mono", wrap=False), c.label(text), c.label(who, "small", wrap=False), 1)
+            text_label = c.label(text)
+            row = c.hrow(c.label(stamp, "mono", wrap=False), text_label, c.label(who, "small", wrap=False))
+            c.fill(row, text_label)  # 文字吃满剩余宽度；行里不放弹簧，否则文字被挤成一窄列
             if example:
                 c.insert_widget(row, 2, c.example_tag())
             inner.addWidget(row)
