@@ -16,6 +16,9 @@ from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import run_git
 from tests.plc.test_doc_consistency import build
 
+# These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_remaining_groups_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 IFC = "0100_PLC自动化/DJ-TEST-001/02_PLC程序/PLC_ST/01_泵/PRD/接口文档_IFC-FB_Pump.md"
 LAUNCHER = """from auto_pm.cli.__main__ import cli
 

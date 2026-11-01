@@ -15,6 +15,7 @@ from rich.table import Table
 from auto_pm.domain.constraint.workflow import WorkflowEngine
 from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.pm import pm_group
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 
@@ -85,6 +86,7 @@ def list_workflows(ctx: click.Context) -> None:
 @click.option("--file", "-f", "file_path", type=CallerPath(exists=True), help="目标文件路径")
 @click.pass_context
 def run_workflow(ctx: click.Context, name: str, file_path: str | None) -> None:
+    require_runtime_identity_for_workspace(ctx)
     workspace_root = _resolve_workspace(ctx)
     engine = WorkflowEngine(workspace_root)
 
