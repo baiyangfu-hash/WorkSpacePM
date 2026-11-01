@@ -136,7 +136,8 @@ def test_spec_report_output_is_checked_against_the_caller_folder(launched: Path,
 
     CliRunner().invoke(spec.spec_group, ["report", "-o", "out/report.md"], obj=AppContext())
 
-    assert seen == [str(launched / "out" / "report.md")]
+    # compared as paths: on Windows the typed ``out/report.md`` keeps its forward slash inside the anchored string
+    assert [Path(item) for item in seen] == [launched / "out" / "report.md"]
 
 
 def test_delivery_project_root_is_the_caller_folder(launched: Path, monkeypatch: pytest.MonkeyPatch) -> None:
