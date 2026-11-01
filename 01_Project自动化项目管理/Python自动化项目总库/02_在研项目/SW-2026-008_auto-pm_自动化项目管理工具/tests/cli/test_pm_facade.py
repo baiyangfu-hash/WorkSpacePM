@@ -288,7 +288,7 @@ def test_pm_execute_consumes_env_secret_and_emits_foreground_receipt(
             )
             return _Receipt()
 
-    monkeypatch.setattr("auto_pm.cli.pm._facade", lambda _ctx: _Facade())
+    monkeypatch.setattr("auto_pm.ui.cli.pm._facade", lambda _ctx: _Facade())
     result = cli_runner.invoke(
         cli,
         [
@@ -335,7 +335,7 @@ def test_pm_execute_rejects_mismatched_request_before_dispatch(
         called = True
         raise AssertionError("dispatch must not be reached")
 
-    monkeypatch.setattr("auto_pm.cli.pm._facade", fail_if_called)
+    monkeypatch.setattr("auto_pm.ui.cli.pm._facade", fail_if_called)
     result = cli_runner.invoke(
         cli,
         [

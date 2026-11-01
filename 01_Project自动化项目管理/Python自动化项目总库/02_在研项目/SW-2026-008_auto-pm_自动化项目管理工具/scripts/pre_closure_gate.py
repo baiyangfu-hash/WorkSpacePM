@@ -23,7 +23,7 @@ from typing import Any
 
 # 插入 auto_pm 路径以导入 GovernanceService
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from auto_pm.core.governance_service import GovernanceService
+from auto_pm.application.core.governance_service import GovernanceService
 
 
 def run_ruff(workspace: str) -> dict[str, Any]:

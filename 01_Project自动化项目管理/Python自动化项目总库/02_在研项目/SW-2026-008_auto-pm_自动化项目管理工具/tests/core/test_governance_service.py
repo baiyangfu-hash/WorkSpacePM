@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from auto_pm.core.governance_service import ROOT_WHITELIST, GovernanceService
+from auto_pm.application.core.governance_service import ROOT_WHITELIST, GovernanceService
 
 
 def test_governance_service_init(tmp_path: Path) -> None:

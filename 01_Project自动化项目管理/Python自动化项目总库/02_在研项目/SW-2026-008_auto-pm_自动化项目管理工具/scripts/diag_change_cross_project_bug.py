@@ -19,8 +19,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from auto_pm.change.file_locator import ChangeFileLocator  # noqa: E402
-from auto_pm.change.parser import ChgParser  # noqa: E402
+from auto_pm.domain.change.file_locator import ChangeFileLocator  # noqa: E402
+from auto_pm.domain.change.parser import ChgParser  # noqa: E402
 
 
 def _make_project(workspace: Path, project_id: str, chg_number: str, status: str) -> Path:
