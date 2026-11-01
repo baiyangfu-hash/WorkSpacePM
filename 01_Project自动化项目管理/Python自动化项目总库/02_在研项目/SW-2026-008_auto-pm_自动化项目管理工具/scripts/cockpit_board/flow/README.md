@@ -29,7 +29,7 @@
 - 会写文件的（建变更单、转状态）先点“预览命令”，看过整条命令再点运行；表单一改，预览作废；一次预览只运行一次。
 - 批准类状态（已批准、有条件批准）和新建决策包**不在界面里**：只在终端里由用户本人做（有口令要输口令）。
 - 命令失败不吞：退出码和输出原样显示。
-- 接线：`ToolsPage(root)` 和 `FlowPage()` 加进 `app.py` 的页面栈；账本读完后调 `tools.set_projects([(项目编号, 相对路径)])` 和 `flow.show_cards(flowgraph.card_positions(board.projects))`。
+- 接线（已完成，在 `app.py`）：`ToolsPage(root)` 和 `FlowPage()` 在页面栈里，顶栏多“流程图”“工具”两个入口（文字在 `tool_policy.NAV_BUTTONS`）；`_render` 里调 `_feed_flow_and_tools`：`tools.set_projects([(项目编号, 相对路径)])` 和 `flow.show_cards(flowgraph.card_positions(board.projects))`，数据没变就不重填；`--screenshot` 多出“流程图”“工具”两张。
 
 ## 常见改动怎么做
 
