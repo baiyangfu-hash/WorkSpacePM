@@ -1,7 +1,7 @@
 """主窗口：顶栏（页面、模式、网络）、后台读取、把 viewmodel 交给各画面。
 
 读取只读：账本由 pm_dashboard 拷到临时目录后 mode=ro + query_only；老后台只在手动“重新读取”且
-TD-105 合并后才调 snapshot()（见 LEGACY_ALLOWED）。工程工位的动作走 actions.py，在后台线程跑。
+老后台 snapshot() 只在 TD-105 合并后接入（见 LEGACY_ALLOWED，已打开）。工程工位的动作走 actions.py，在后台线程跑。
 GitHub（PR、门禁、安全签字、审计）走 scripts/github_collector.py，只 GET，在后台线程跑；读不到画面显示“未知”。
 """
 
@@ -45,9 +45,11 @@ from cockpit_board.widgets.station import StationPage  # noqa: E402
 
 WINDOW_TITLE = "驾驶舱总控屏"
 AUTO_REFRESH_MINUTES = 10
-# TD-105（Windows 禁写锁）合并前不调老后台 snapshot()；合并后改 True，且只在手动“重新读取”时调。
-LEGACY_ALLOWED = False
-GAP9_MERGED = False  # 缺口⑨防冒签合并后，“批准范围 / 开工”才开放
+# TD-105（Windows 禁写锁）已于 PR #82 合并：先快读出第一版，再在后台接老驾驶舱后台 snapshot() 的措辞（只读）。
+# 只在首次加载和手动“重新读取”时接，10 分钟定时刷新不接（auto_reload）。--no-legacy 可关；老后台出任何问题都退回只读账本数据，不让窗口挂。
+LEGACY_ALLOWED = True
+# 缺口⑨（批准口令防冒签）已合并；“批准范围 / 开工”还没在界面里接上口令弹窗和同一条命令，接线（S1）之前一律灰着。
+DECISION_BUTTONS_WIRED = False
 
 
 # ---------------------------------------------------------------- 后台线程
@@ -158,7 +160,8 @@ class CockpitWindow(QMainWindow):
 
         self.timer = QTimer(self)
         self.timer.setInterval(AUTO_REFRESH_MINUTES * 60 * 1000)
-        self.timer.timeout.connect(self.reload)
+        self.timer.timeout.connect(self.auto_reload)
+        self._legacy_this_round = False  # 本轮读完后要不要再接老后台：只有首次加载和手动“重新读取”才要
 
     def _topbar(self) -> QFrame:
         bar = QFrame()
@@ -243,9 +246,14 @@ class CockpitWindow(QMainWindow):
 
     # ------------------------------------------------ 读取
 
-    def reload(self) -> None:
+    def auto_reload(self) -> None:
+        """10 分钟一次的定时刷新：只快读，不调老后台（老后台约 20 秒，只在首次加载和手动“重新读取”时调）。"""
+        self.reload(with_legacy=False)
+
+    def reload(self, _checked: bool = False, *, with_legacy: bool = True) -> None:
         if any(t.isRunning() for t in self._threads):
             return
+        self._legacy_this_round = with_legacy
         self.refresh_button.setEnabled(False)
         self.status.setText("正在读取……")
         self._start(use_legacy=False)
@@ -269,7 +277,7 @@ class CockpitWindow(QMainWindow):
 
     def _on_loaded(self, board: pd.Board, with_legacy: bool) -> None:
         self.show_board(board)
-        if not with_legacy and LEGACY_ALLOWED and not self.options.no_legacy:
+        if not with_legacy and self._legacy_this_round and LEGACY_ALLOWED and not self.options.no_legacy:
             self.status.setText("正在接老驾驶舱后台的措辞（约 20 秒），先看这一版……")
             self._start(use_legacy=True)
             return
@@ -316,7 +324,7 @@ class CockpitWindow(QMainWindow):
         }
         self.station.set_bc_time((self.options.now or datetime.now(UTC)).astimezone(self.offset).strftime("%Y-%m-%d %H:%M"))
         self.station.show_view(vm.station_vm(board, self.home_vm.hot + self.home_vm.rest, self.online, identity,
-                                          self.options.manual_branch, [], GAP9_MERGED))
+                                          self.options.manual_branch, [], DECISION_BUTTONS_WIRED))
         for key, button in self.net_buttons.items():
             button.setChecked((key == "on") == bool(self.online))
         if self.stack.currentWidget() is self.project and self.project.vm is not None:

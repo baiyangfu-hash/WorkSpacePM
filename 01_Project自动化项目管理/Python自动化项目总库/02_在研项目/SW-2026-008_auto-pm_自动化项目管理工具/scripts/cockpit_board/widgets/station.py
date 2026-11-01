@@ -1,6 +1,6 @@
 """工程工位：身份条、错误横条、接着干、人工路线六步、安全区自查、回来要补记、控制台抽屉。
 
-按钮只做本机的事；写文件只有“写入 BC 行”（用户 10-22 批准，带预览）；批准 / 开工灰到缺口⑨合并。
+按钮只做本机的事；写文件只有“写入 BC 行”（用户 10-22 批准，带预览）；批准 / 开工灰到界面接上批准口令（见 app.DECISION_BUTTONS_WIRED）。
 真正起子进程、写文件的代码在 actions.py，这里只发信号。
 """
 
@@ -154,7 +154,7 @@ class StationPage(QWidget):
                                 "绕过联锁只限你本人在命令提示符里做。详见 0100_PLC自动化/00_通用规范/无AI离线手册.md", "small"))
         lay.addWidget(frame)
         lay.addWidget(c.label("工程工位是你当工程师时的页面；项目经理看板仍然只读。写文件只有“写入 BC 行”一处；"
-                              "批准 / 开工要等缺口⑨合并；合并、删除、切换、代签永远不加。", "small"))
+                              "批准 / 开工要等界面接上批准口令；现在在终端运行 pm approve。合并、删除、切换、代签永远不加。", "small"))
         self._render_drawer()
 
     def _step(self, step: Step, vm: StationVM) -> QFrame:

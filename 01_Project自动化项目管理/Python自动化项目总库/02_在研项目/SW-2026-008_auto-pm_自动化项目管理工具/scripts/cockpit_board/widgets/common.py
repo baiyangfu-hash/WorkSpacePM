@@ -130,6 +130,15 @@ def insert_widget(holder: QWidget, index: int, widget: QWidget) -> None:
     layout.insertWidget(index, widget)
 
 
+def fill(holder: QWidget, widget: QWidget) -> None:
+    """让 hrow 里这一格吃掉这一行剩下的宽度。长文字（会换行的标签）放在行尾又后面跟了弹簧时，
+    弹簧会把标签挤成窄窄一列；用这个把剩余宽度判给文字，行里就不要再放弹簧。"""
+    layout = holder.layout()
+    if not isinstance(layout, QBoxLayout):
+        raise TypeError("fill: 这一行没有盒布局")
+    layout.setStretchFactor(widget, 1)
+
+
 def grid(columns: int) -> tuple[QWidget, QGridLayout]:
     holder = QWidget()
     layout = QGridLayout(holder)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -219,6 +220,71 @@ def test_cli_prompt_only_when_enforced_and_only_in_a_terminal(root: Path, monkey
     monkeypatch.setattr(cli_module, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr(cli_module, "_prompt_hidden", lambda text: "typed-pin")
     assert "pin=typed-pin" in runner.invoke(_probe, obj=_Obj(root)).output
+
+
+def test_cli_status_json_reports_the_three_states_without_secrets(root: Path) -> None:
+    runner = CliRunner()
+
+    def status() -> dict[str, object]:
+        result = runner.invoke(cli_module.approver_pin_status, ["--json"], obj=_Obj(root))
+        assert result.exit_code == 0, result.output
+        return json.loads(result.output)  # type: ignore[no-any-return]
+
+    off = status()
+    assert off["schema_version"] == "approver-pin-status.v1"
+    assert off["state"] == "not_enabled" and off["approvers"] == [] and off["working_tree_differs_from_committed"] is False
+    service = _commit_pin(root)
+    on = status()
+    key = service.working_keys()[0]
+    assert on["state"] == "enforced" and on["approvers"] == [{"approver": "baiyang", "key_id": key.key_id}]
+    assert PIN not in json.dumps(on) and "hash" not in json.dumps(on).lower()  # 只给人名和编号，不给口令或校验值
+    # 工作区登记文件被换掉但没提交：只有提交后的算数，状态仍是已生效，同时标出不一致
+    service.write_working_keys([make_key("intruder", "another-pin-123", n=2**10)])
+    changed = status()
+    assert changed["state"] == "enforced" and changed["working_tree_differs_from_committed"] is True
+    assert [item["approver"] for item in changed["approvers"]] == ["baiyang"]  # type: ignore[attr-defined]
+    # 不带 --json 的原有文字输出不变
+    text = runner.invoke(cli_module.approver_pin_status, [], obj=_Obj(root)).output
+    assert "批准口令：已生效；批准人 baiyang" in text and "注意：工作区里的登记文件与已提交的不一致" in text
+
+
+def test_cli_status_json_reports_suspended_when_the_committed_registry_is_broken(root: Path) -> None:
+    """已提交的登记文件坏了：所有批准暂停，--json 给 suspended 和原因，批准人列表为空，不把它说成“未生效”。"""
+    (root / REGISTRY_RELATIVE_PATH).parent.mkdir(parents=True)
+    (root / REGISTRY_RELATIVE_PATH).write_text('{"schema_version": "approvers.v1", "approvers": []}', encoding="utf-8")
+    _git(root, "add", REGISTRY_RELATIVE_PATH)
+    _git(root, "commit", "-q", "-m", "empty")
+    result = CliRunner().invoke(cli_module.approver_pin_status, ["--json"], obj=_Obj(root))
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["state"] == "suspended" and payload["approvers"] == []
+    assert "一律拒绝" in payload["problem"]
+    # 不带 --json 的文字路径行为不变：照旧报错退出
+    plain = CliRunner().invoke(cli_module.approver_pin_status, [], obj=_Obj(root))
+    assert plain.exit_code != 0 and "一律拒绝" in plain.output
+
+
+def test_cli_status_json_keeps_enforced_when_only_the_working_file_is_broken(root: Path) -> None:
+    """HEAD 里的登记是好的、只有工作区那份坏了：状态仍以已提交的为准（enforced），并标出不一致和原因。"""
+    service = _commit_pin(root)
+    key = service.working_keys()[0]
+    (root / REGISTRY_RELATIVE_PATH).write_text('{"schema_version": "approvers.v1", "approvers": []}', encoding="utf-8")
+    result = CliRunner().invoke(cli_module.approver_pin_status, ["--json"], obj=_Obj(root))
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["state"] == "enforced" and payload["approvers"] == [{"approver": "baiyang", "key_id": key.key_id}]
+    assert payload["working_tree_differs_from_committed"] is True and "工作区登记文件读不出" in payload["problem"]
+    plain = CliRunner().invoke(cli_module.approver_pin_status, [], obj=_Obj(root))  # 文字路径行为不变：照旧报错退出
+    assert plain.exit_code != 0
+
+
+def test_cli_status_json_reports_suspended_when_git_state_is_unreadable(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """读不到 Git 里已提交的登记（committed_state 给出原因而不是抛错）：同样是 suspended，原因原样带出，文字输出不变。"""
+    monkeypatch.setattr(ApprovalProofService, "committed_state", lambda self: (None, "读不到 Git 里已提交的批准人登记文件：HEAD 不指向任何提交"))
+    payload = json.loads(CliRunner().invoke(cli_module.approver_pin_status, ["--json"], obj=_Obj(root)).output)
+    assert payload["state"] == "suspended" and payload["approvers"] == [] and "HEAD 不指向任何提交" in payload["problem"]
+    text = CliRunner().invoke(cli_module.approver_pin_status, [], obj=_Obj(root)).output
+    assert "批准口令：所有批准暂停。读不到 Git" in text
 
 
 def test_cli_init_is_refused_for_agents_and_rotation_needs_the_old_pin(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

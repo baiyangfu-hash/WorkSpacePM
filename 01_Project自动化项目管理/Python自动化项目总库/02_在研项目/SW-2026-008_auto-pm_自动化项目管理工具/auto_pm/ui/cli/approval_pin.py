@@ -6,6 +6,7 @@ agent has no way to pass a PIN along; a session without a terminal is refused at
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -143,25 +144,61 @@ def approver_pin_group() -> None:
     """用户本人的批准口令：设置后，批准范围和最终验收都要在终端输入口令，agent 造不出来。"""
 
 
+def _echo_status_json(state: str, problem: str, approvers: list[dict[str, str]], mismatch: bool) -> None:
+    """enforced＝已生效；not_enabled＝未生效（批准只做格式检查）；suspended＝读不到可信的已提交登记，所有批准暂停。"""
+
+    click.echo(
+        json.dumps(
+            {
+                "schema_version": "approver-pin-status.v1",
+                "state": state,
+                "problem": problem,
+                "approvers": approvers,
+                "working_tree_differs_from_committed": mismatch,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
 @approver_pin_group.command(name="status")
+@click.option("--json", "as_json", is_flag=True, help="输出 JSON，给界面和脚本读（只含批准人名和口令编号，不含口令或校验值）")
 @click.pass_context
-def approver_pin_status(ctx: click.Context) -> None:
+def approver_pin_status(ctx: click.Context, as_json: bool) -> None:
     """只读：批准口令是否已生效（以 Git 已提交的登记文件为准）。"""
 
     service = ApprovalProofService(control_root(ctx))
     try:
         committed, problem = service.committed_state()
+    except ApprovalProofError as error:
+        if not as_json:
+            raise click.ClickException(str(error)) from error
+        # 已提交的登记读不出批准人：所有批准一律拒绝。给界面一个明确的 suspended，而不是一个读不懂的失败。
+        _echo_status_json("suspended", str(error), [], False)
+        return
+    # 状态只以已提交的为准；工作区那份读不出来只说明“和已提交的不一致”，不能把已生效说成暂停。
+    working_problem = ""
+    try:
         working = service.working_keys()
     except ApprovalProofError as error:
-        raise click.ClickException(str(error)) from error
+        if not as_json:
+            raise click.ClickException(str(error)) from error
+        working, working_problem = None, str(error)
+    committed_ids = {key.key_id for key in committed or []}
+    mismatch = working is None or {key.key_id for key in working} != committed_ids
+    if as_json:
+        state = "suspended" if problem else "not_enabled" if committed is None else "enforced"
+        note = "；".join(part for part in (problem, ("工作区登记文件读不出：" + working_problem) if working_problem else "") if part)
+        _echo_status_json(state, note, [{"approver": key.approver, "key_id": key.key_id} for key in committed or []], mismatch)
+        return
     if problem:
         click.echo("批准口令：所有批准暂停。" + problem)
     elif committed is None:
         click.echo("批准口令：未生效（Git HEAD 里没有 " + REGISTRY_RELATIVE_PATH + "），批准只做格式检查")
     else:
         click.echo("批准口令：已生效；批准人 " + "、".join(f"{key.approver}（{key.key_id}）" for key in committed))
-    committed_ids = {key.key_id for key in committed or []}
-    if {key.key_id for key in working} != committed_ids:
+    if mismatch:
         click.echo("注意：工作区里的登记文件与已提交的不一致；只有提交后的内容算数")
 
 

@@ -2,7 +2,7 @@
 
 项目经理看板只读（按钮只在 policy.PM_BUTTONS 里）、工程工位按钮只在 policy.STATION_BUTTONS 里且
 批准 / 开工 / 提交灰着、输入框只在 BC 表单里、不写工作空间、纯文本标签、没检查显示“没检查”不显示 0、
-先快读再接老后台（TD-105 前永远不接）、读失败窗口不挂、双击 bat 不在 releases/ 里、
+先快读再接老后台（TD-105 已合并，默认接；--no-legacy 可关）、读失败窗口不挂、双击 bat 不在 releases/ 里、
 子进程和写文件只在 actions.py；GitHub 区块显示“数据截至”，没真读到时一格绿都没有。
 """
 
@@ -139,11 +139,11 @@ def test_station_buttons_are_listed_and_gated(qapp: QApplication, tmp_path: Path
     qapp.processEvents()
     buttons = {b.text(): b for b in _buttons(window.station)}
     assert set(buttons) <= policy.STATION_BUTTONS, set(buttons) - policy.STATION_BUTTONS
-    for text in buttons:  # 工位的提示文字可以解释“缺口⑨合并后才开放”，按钮本身不许带禁用词
+    for text in buttons:  # 工位的提示文字可以解释“要等接上批准口令才开放”，按钮本身不许带禁用词
         assert not any(word in text.lower() for word in policy.STATION_FORBIDDEN_WORDS), text
     for text in ("批准范围", "开工", "提交"):
         assert not buttons[text].isEnabled(), text
-    assert not app_module.GAP9_MERGED and not app_module.LEGACY_ALLOWED
+    assert not app_module.DECISION_BUTTONS_WIRED  # 界面还没接口令弹窗和同一条命令（S1），批准 / 开工一直灰
     # 离线：推送、开 PR 灰；本机检查可点
     assert not buttons["推送 manual/ 分支"].isEnabled() and not buttons["打开 GitHub 开 PR"].isEnabled()
     assert buttons["重新跑 plc check"].isEnabled()
@@ -151,6 +151,25 @@ def test_station_buttons_are_listed_and_gated(qapp: QApplication, tmp_path: Path
     assert not buttons["写入 02_业务变更记录.md"].isEnabled()
     for word in policy.NEVER:
         assert not any(word.lower() in text.lower() for text in buttons), word
+    window.close()
+
+
+def test_recent_activity_text_is_not_squeezed_into_a_narrow_column(qapp: QApplication, tmp_path: Path) -> None:
+    """“最近发生了什么”的说明文字要吃满行宽：行尾曾放了弹簧，把长说明挤成窄窄一列、示例标签被拉高。"""
+    long_title = "握手中途断线撤销允许信号并补写回读校验和超时处理"
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", long_title, 0.1)])
+    window = _window(qapp, root, db)
+    window.resize(1360, 900)
+    window.show()
+    qapp.processEvents()
+    for page in (window.home,):
+        label = next(item for item in page.findChildren(QLabel) if item.text().startswith("在干：") and long_title[:6] in item.text())
+        assert label.width() > 400, label.width()  # 窄一列时只有 100 来像素
+        assert label.height() < 40, label.height()  # 没被挤成好几行
+    window.open_project("DJ-2026-101")
+    qapp.processEvents()
+    label = next(item for item in window.project.findChildren(QLabel) if item.text().startswith("在干：") and long_title[:6] in item.text())
+    assert label.width() > 400 and label.height() < 40, (label.width(), label.height())
     window.close()
 
 
@@ -270,7 +289,9 @@ def test_ledger_text_is_shown_as_plain_text(qapp: QApplication, tmp_path: Path) 
     window.close()
 
 
-def test_fast_read_first_and_legacy_never_before_td105(qapp: QApplication, tmp_path: Path) -> None:
+def test_fast_read_first_then_legacy_wording(qapp: QApplication, tmp_path: Path) -> None:
+    """TD-105 已合并：先快读出第一版（不带老后台），读完再接老后台措辞；--no-legacy 时永远不接。"""
+    assert app_module.LEGACY_ALLOWED
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACCEPTANCE_PENDING", "握手断线", 1)])
     assert db == root / pd_module.DB_RELATIVE
     base._FakeLegacyService.calls = []
@@ -281,8 +302,45 @@ def test_fast_read_first_and_legacy_never_before_td105(qapp: QApplication, tmp_p
     window.reload()
     assert started == [False]  # 先快读，不带老后台
     window._on_loaded(gui.load_board(options, use_legacy=False), False)
-    assert base._FakeLegacyService.calls == []  # TD-105 合并前（LEGACY_ALLOWED=False）永远不调 snapshot()
+    assert started == [False, True]  # 第一版出来后才接老后台
+    assert not window.refresh_button.isEnabled()  # 老后台读完前“重新读取”仍灰着，防重入
+    window._on_loaded(gui.load_board(options, use_legacy=True), True)  # 老后台那一版回来
+    assert started == [False, True]
+    assert window.refresh_button.isEnabled()
+    assert base._FakeLegacyService.calls == ["snapshot"]  # 只调只读的 snapshot()，别的方法一个不碰
+    window.close()
+
+
+def test_timer_refresh_never_calls_the_old_backend(qapp: QApplication, tmp_path: Path) -> None:
+    """10 分钟定时刷新只快读；老后台（约 20 秒）只在首次加载和手动“重新读取”时接。钉住定时器接线本身。"""
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACCEPTANCE_PENDING", "握手断线", 1)])
+    base._FakeLegacyService.calls = []
+    options = _options(root, db, legacy=True, legacy_factory=base._FakeLegacyService)
+    window = gui.CockpitWindow(options)
+    started: list[bool] = []
+    window._start = lambda use_legacy: started.append(use_legacy)
+    window.timer.timeout.emit()  # 定时器到点，走的是真接线
     assert started == [False]
+    window._on_loaded(gui.load_board(options, use_legacy=False), False)
+    assert started == [False] and window.refresh_button.isEnabled()
+    assert base._FakeLegacyService.calls == []
+    window.refresh_button.click()  # 手动“重新读取”：快读后才接老后台
+    assert started == [False, False]
+    window._on_loaded(gui.load_board(options, use_legacy=False), False)
+    assert started == [False, False, True]
+    window.close()
+
+
+def test_no_legacy_flag_never_touches_the_old_backend(qapp: QApplication, tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACCEPTANCE_PENDING", "握手断线", 1)])
+    base._FakeLegacyService.calls = []
+    options = _options(root, db, legacy_factory=base._FakeLegacyService)  # 默认带 --no-legacy
+    window = gui.CockpitWindow(options)
+    started: list[bool] = []
+    window._start = lambda use_legacy: started.append(use_legacy)
+    window.reload()
+    window._on_loaded(gui.load_board(options, use_legacy=False), False)
+    assert started == [False] and base._FakeLegacyService.calls == []
     assert window.refresh_button.isEnabled()
     window.close()
 

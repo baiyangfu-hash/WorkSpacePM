@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -109,11 +110,12 @@ def test_station_gating(tmp_path: Path) -> None:
     buttons = {text: (enabled, reason) for step in station.steps for text, _key, enabled, reason in step.buttons}
     for text in ("推送 manual/ 分支", "打开 GitHub 开 PR"):
         assert buttons[text][0] is False and "离线" in buttons[text][1]
-    for text in policy.GATED_UNTIL_GAP9:
-        assert buttons[text][0] is False and "缺口⑨" in buttons[text][1]
+    for text in policy.GATED_UNTIL_WIRED:
+        # 灰着时必须说清现在去终端用哪条命令，不许再写“缺口⑨合并后”这种早已过期的理由
+        assert buttons[text][0] is False and "main.py pm " in buttons[text][1] and "缺口" not in buttons[text][1]
     assert buttons["提交"][0] is False
     assert buttons["重新跑 plc check"][0] is True
-    # 在线 + ⑨已合：推送和批准开放，开工仍不启动 agent（只是按钮可用）
+    # 在线 + 界面已接好批准口令：批准和开工开放（开工仍不启动 agent，只是按钮可用）
     station = vm.station_vm(board, home.hot + home.rest, True, {"source": "a", "effective": "a"}, "manual/x", [], True)
     buttons = {text: (enabled, reason) for step in station.steps for text, _k, enabled, reason in step.buttons}
     assert buttons["批准范围"][0] and buttons["开工"][0]
@@ -123,6 +125,68 @@ def test_station_gating(tmp_path: Path) -> None:
     assert not station.warn
     # 只有登记的客户项目进“接着干”
     assert [p[0].project_id for p in station.projects] == ["DJ-2026-101"]
+
+
+# ---------------------------------------------------------------- 搁着栏读账本里的断点（TD-071）
+
+PARKS_DDL = (
+    "CREATE TABLE run_parks (park_id TEXT PRIMARY KEY, run_id TEXT, mission_id TEXT, checkpoint_id TEXT, "
+    "parked_by TEXT, reason TEXT, parked_at TEXT, unparked_at TEXT, unparked_by TEXT)"
+)
+
+
+def _columns(board: Any) -> dict[str, Any]:
+    home = vm.home_vm(board, OFFSET, online=False, use_git=False)
+    card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
+    return {col.name: col for col in vm.project_vm(board, card, OFFSET, False).columns}
+
+
+def test_parked_column_shows_reason_and_breakpoint_from_the_ledger(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "PARKED", "HMI 报警页改版", 2)])
+    connection = sqlite3.connect(db)
+    connection.execute(PARKS_DDL)
+    # 一条已拿回的旧记录（不该显示）和一条还开着的当前记录
+    connection.execute(
+        "INSERT INTO run_parks VALUES ('P-old','RUN-0','MISSION-0','CK-0','Trae','旧原因','2026-10-01T00:00:00+00:00',"
+        "'2026-10-02T00:00:00+00:00','user')"
+    )
+    connection.execute(
+        "INSERT INTO run_parks VALUES ('P-now','RUN-0','MISSION-0','CK-0','Trae','客户急改 IO 表','2026-10-20T00:00:00+00:00',NULL,NULL)"
+    )
+    connection.commit()
+    connection.close()
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    parked = _columns(board)["搁着"]
+    assert [row[0] for row in parked.cards] == ["MISSION-0"]
+    meta = parked.cards[0][2]
+    assert "原因：客户急改 IO 表" in meta and "断点：干到一半" in meta and "旧原因" not in meta
+    assert "TD-071" not in parked.note and "还没有" not in parked.note  # 过期的“账本里还没有 PARKED”提示已去掉
+
+
+def test_parked_column_with_only_an_unparked_old_record_has_no_breakpoint(tmp_path: Path) -> None:
+    """搁着的卡只有一条已拿回的旧挂起记录（没有开着的）：不把旧原因和旧断点当成现在的显示出来。"""
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "PARKED", "HMI 报警页改版", 2)])
+    connection = sqlite3.connect(db)
+    connection.execute(PARKS_DDL)
+    connection.execute(
+        "INSERT INTO run_parks VALUES ('P-old','RUN-0','MISSION-0','CK-0','Trae','旧原因','2026-10-01T00:00:00+00:00',"
+        "'2026-10-02T00:00:00+00:00','user')"
+    )
+    connection.commit()
+    connection.close()
+    parked = _columns(pd.build_board(root, db, NOW, use_git=False, use_legacy=False))["搁着"]
+    assert [row[0] for row in parked.cards] == ["MISSION-0"]
+    assert "旧原因" not in parked.cards[0][2] and "断点" not in parked.cards[0][2] and "原因" not in parked.cards[0][2]
+
+
+def test_parked_column_without_a_park_record_or_table_still_renders(tmp_path: Path) -> None:
+    # 老账本没有 run_parks 表、也可能没有记录：卡照样出现在搁着栏，只是没有断点；空栏写“没有搁着的卡”
+    board = _board(tmp_path, [("DJ-2026-101", "PARKED", "HMI 报警页改版", 2), ("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    columns = _columns(board)
+    assert [row[0] for row in columns["搁着"].cards] == ["MISSION-0"]
+    assert "断点" not in columns["搁着"].cards[0][2] and columns["搁着"].note == ""
+    empty = _columns(_board(tmp_path / "x", [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)]))
+    assert empty["搁着"].cards == [] and empty["搁着"].note == "没有搁着的卡"
 
 
 # ---------------------------------------------------------------- 主题令牌
@@ -299,5 +363,5 @@ def test_policy_never_list_is_not_in_station_buttons() -> None:
     lowered = {text.lower() for text in policy.STATION_BUTTONS}
     for word in ("合并", "删除", "切换发布", "no-verify", "codex", "全量门禁"):
         assert not any(word in text for text in lowered), word
-    assert policy.GATED_UNTIL_GAP9 <= policy.STATION_BUTTONS
+    assert policy.GATED_UNTIL_WIRED <= policy.STATION_BUTTONS
     assert policy.PM_BUTTONS <= policy.STATION_BUTTONS

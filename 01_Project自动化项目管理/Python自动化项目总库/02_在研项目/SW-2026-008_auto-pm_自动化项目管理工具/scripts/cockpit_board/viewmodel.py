@@ -754,8 +754,13 @@ def project_vm(
                     bits.append("租约到 " + fmt(m.run.lease_expires, offset))
             if m.change_id:
                 bits.append(m.change_id)
+            if m.column == "搁着":
+                if m.park_reason:
+                    bits.append("原因：" + pd._short(m.park_reason, 40))
+                if m.park_summary:
+                    bits.append("断点：" + pd._short(m.park_summary, 60))
             card_rows.append((m.mission_id, pd._short(m.title, 70), " · ".join(bits), m.example))
-        note = "PARKED 状态账本里还没有，TD-071 合并后才有数据" if name == "搁着" else ""
+        note = "没有搁着的卡" if name == "搁着" and not card_rows else ""
         columns.append(BoardColumn(name, note, card_rows))
     evidence = [
         EvidenceRow(
@@ -813,7 +818,7 @@ def station_vm(
     identity: dict[str, str],
     manual_branch: str,
     safety_hits: list[str],
-    gap9_merged: bool = False,
+    decisions_wired: bool = False,
 ) -> StationVM:
     off = online is False
     projects = []
@@ -845,8 +850,8 @@ def station_vm(
             # 推送 / 开 PR 本版只给提示不做：在命令提示符里 git push，到 GitHub 网页开 PR
             [("推送 manual/ 分支", "push", False, dis_off[1] if off else "本版不做：在命令提示符里 git push -u origin manual/…"),
              ("打开 GitHub 开 PR", "open_pr", False, dis_off[1] if off else "本版不做：推送后到 GitHub 网页开 PR"),
-             ("批准范围", "approve", gap9_merged, "缺口⑨防冒签合并后才开放：批准只写一条凭据"),
-             ("开工", "start", gap9_merged, "缺口⑨合并后才开放，且和批准分开；不启动任何 agent")],
+             ("批准范围", "approve", decisions_wired, "界面里的批准要等接上批准口令弹窗才开放；现在请在终端运行 main.py pm approve"),
+             ("开工", "start", decisions_wired, "界面里的开工要等接线后才开放，且和批准分开；不启动任何 agent；现在请运行 main.py pm confirm-start")],
         ),
     ]
     records = []

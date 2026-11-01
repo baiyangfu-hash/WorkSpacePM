@@ -53,7 +53,7 @@ DEFAULT_TOOL_PROJECTS = (
     "DJ-2026-011",
 )
 
-# Mission 状态 -> 看板四栏（Mission挂起状态设计稿 §3.1）。PARKED 是设计稿新增的状态，代码里还没有。
+# Mission 状态 -> 看板四栏（Mission挂起状态设计稿 §3.1）。PARKED（搁着）账本里已有（TD-071，auto_pm.contracts.mission）。
 COLUMN_OF_STATE = {
     "ACTIVE": "在干",
     "DRAFT": "等你",
@@ -115,6 +115,9 @@ class MissionInfo:
     closure_state: str = ""
     run: RunInfo | None = None
     example: bool = False
+    # 搁着的卡才有：放下的原因和断点（干到哪、下一步做什么），读自账本 run_parks + checkpoints。
+    park_reason: str = ""
+    park_summary: str = ""
 
     @property
     def column(self) -> str:
@@ -361,6 +364,8 @@ def read_ledger(
         )
         if row["root_work_id"] and "run_items" in tables:
             mission.run = _latest_run(connection, row["root_work_id"], tables)
+        if mission.state == "PARKED":
+            mission.park_reason, mission.park_summary = _open_park(connection, mission.mission_id, tables)
         missions.append(mission)
 
     if "run_items" in tables and "execution_leases" in tables:
@@ -418,6 +423,20 @@ def read_ledger(
                 )
             )
     return missions, attention
+
+
+def _open_park(connection: sqlite3.Connection, mission_id: str, tables: set[str]) -> tuple[str, str]:
+    """搁着的卡当前这条挂起记录：(原因, 断点摘要)。老账本没有 run_parks 表或没有记录就给两个空串，不报错。"""
+    if "run_parks" not in tables:
+        return "", ""
+    summary_column = "c.summary" if "checkpoints" in tables else "''"
+    join = "LEFT JOIN checkpoints c ON c.checkpoint_id = p.checkpoint_id " if "checkpoints" in tables else ""
+    row = connection.execute(
+        f"SELECT p.reason, {summary_column} AS summary FROM run_parks p {join}"
+        "WHERE p.mission_id = ? AND p.unparked_at IS NULL ORDER BY p.parked_at DESC LIMIT 1",
+        (mission_id,),
+    ).fetchone()
+    return (row["reason"] or "", row["summary"] or "") if row else ("", "")
 
 
 def _latest_run(connection: sqlite3.Connection, work_id: str, tables: set[str]) -> RunInfo | None:
