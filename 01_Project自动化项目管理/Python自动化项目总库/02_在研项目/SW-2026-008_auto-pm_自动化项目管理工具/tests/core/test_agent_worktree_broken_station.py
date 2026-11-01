@@ -153,6 +153,9 @@ def test_sweep_never_removes_a_broken_station(lab: Lab) -> None:
     assert not item.remove and "没有 .git" in item.reason
     assert station.is_dir()
     assert report.failed == []
+    # the sweep also leaves it flagged in `list`: nobody has cleaned it, a person still has to look
+    listed = {s.name: s for s in lab.service().stations(deep=False)}
+    assert "没有 .git" in listed[station.name].broken
 
 
 def test_a_directory_git_does_not_know_and_that_has_no_git_is_flagged_too(lab: Lab) -> None:
