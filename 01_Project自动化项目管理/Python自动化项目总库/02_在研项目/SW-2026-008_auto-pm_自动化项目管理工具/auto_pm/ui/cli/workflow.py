@@ -48,9 +48,15 @@ class _WorkflowGroup(click.Group):
 
 
 def _resolve_workspace(ctx: click.Context) -> Path:
-    if ctx.obj and isinstance(ctx.obj, dict) and "workspace" in ctx.obj:
-        return Path(ctx.obj["workspace"])
-    return Path.cwd()
+    """The workspace of the root command (``-w`` / discovered from the caller's folder); the process folder only when run without the root group.
+
+    The old lookup read ``ctx.obj["workspace"]`` but the root group stores an ``AppContext``, so ``-w`` was ignored and, started through the
+    launcher, the engine looked for workflows in the release folder (TD-SW008-253 class).
+    """
+
+    root_obj = ctx.find_root().obj
+    workspace_root = getattr(root_obj, "workspace_root", "") if root_obj is not None else ""
+    return Path(workspace_root) if workspace_root else Path.cwd()
 
 
 @click.group(name="workflow", cls=_WorkflowGroup, help="工作流编排与执行管理")

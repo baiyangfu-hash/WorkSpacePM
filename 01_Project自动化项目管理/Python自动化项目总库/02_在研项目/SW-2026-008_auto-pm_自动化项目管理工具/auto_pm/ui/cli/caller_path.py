@@ -26,6 +26,16 @@ def anchor_to_caller(value: str | os.PathLike[str]) -> str | os.PathLike[str]:
     return Path(joined) if isinstance(value, os.PathLike) else joined
 
 
+def caller_cwd_default() -> str | None:
+    """The caller's own directory when the launcher exported it, else ``None`` (the callee then falls back to the process directory as before).
+
+    For options whose documented default is "the current directory" and whose value is handed to code that would otherwise read ``Path.cwd()``,
+    i.e. the release folder when started through the launcher.  Use as ``default=caller_cwd_default`` (click calls it at parse time).
+    """
+
+    return os.environ.get(CALLER_CWD_ENV) or None
+
+
 class CallerPath(click.Path):
     """``click.Path`` that resolves a relative argument against the caller's directory."""
 

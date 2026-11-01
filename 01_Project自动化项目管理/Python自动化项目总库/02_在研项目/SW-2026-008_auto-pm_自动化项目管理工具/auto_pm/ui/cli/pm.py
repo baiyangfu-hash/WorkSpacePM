@@ -48,7 +48,7 @@ from auto_pm.domain.change.constants import TransitionGuardError
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
-from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.caller_path import CallerPath, caller_cwd_default
 from auto_pm.ui.cli.runtime_identity_guard import (
     project_of_mission,
     project_of_planning_request,
@@ -1185,7 +1185,7 @@ def resume_pm(
             try:
                 project_id = (
                     WorkspaceContextService(app_ctx.workspace_root)
-                    .resolve(start_path=start_path)
+                    .resolve(start_path=start_path or caller_cwd_default())
                     .subject.project_id
                 )
             except WorkspaceContextError as error:
@@ -1346,8 +1346,8 @@ def _emit_context(ctx: click.Context, project_id: str, start_path: str | None) -
     "--path",
     "start_path",
     type=CallerPath(exists=True, file_okay=False, path_type=str),
-    default=None,
-    help="待解析的目录（默认：当前目录）",
+    default=caller_cwd_default,
+    help="待解析的目录（默认：你敲命令的目录）",
 )
 @click.pass_context
 def resolve_context(ctx: click.Context, project_id: str, start_path: str | None) -> None:
@@ -1361,8 +1361,8 @@ def resolve_context(ctx: click.Context, project_id: str, start_path: str | None)
     "--path",
     "start_path",
     type=CallerPath(exists=True, file_okay=False, path_type=str),
-    default=None,
-    help="待解析的目录（默认：当前目录）",
+    default=caller_cwd_default,
+    help="待解析的目录（默认：你敲命令的目录）",
 )
 @click.pass_context
 def resolve_context_compat(ctx: click.Context, project_id: str, start_path: str | None) -> None:
