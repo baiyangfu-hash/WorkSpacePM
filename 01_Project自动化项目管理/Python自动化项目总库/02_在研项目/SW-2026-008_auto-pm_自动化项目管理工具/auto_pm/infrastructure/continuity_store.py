@@ -634,7 +634,12 @@ class ContinuityStore:
         except ControlRootGuardError as error:
             raise ContinuityStoreError(str(error)) from error
         if actual_head != git_head:
-            raise ContinuityStoreError("Run git_head 与受管 worktree 当前 HEAD 不一致")
+            raise ContinuityStoreError(
+                f"Run git_head 与受管 worktree 当前 HEAD 不一致：Run 记的是 {git_head}，工位现在是 {actual_head}。"
+                "开工时填错提交号的，改成工位当前的提交号（git rev-parse HEAD）重新开工；"
+                "Run 开工之后工作树里提交过或换过分支的，这个 Run 的证据作废（验证前不要在 Run 的工作树里提交），"
+                "处理：把该 Run 转 FAILED，在当前 HEAD 上用 continuity run start 开新 Run"
+            )
         actual_observed = tuple(
             dirty
             for dirty in actual_dirty
@@ -6209,7 +6214,10 @@ class ContinuityStore:
             if self._aware_timestamp(current.expires_at, "lease") <= observed_at:
                 raise ContinuityStoreError("lease 已过期")
             if expected_version is not None and current.version != expected_version:
-                raise ContinuityStoreError("lease version 冲突")
+                raise ContinuityStoreError(
+                    f"lease version 冲突：这个租约现在的版本号是 {current.version}，你给的是 {expected_version}。"
+                    f"处理：把 --expected-version 改成 {current.version} 再续租（每续租成功一次版本号加 1，回执里的 version 就是下一次要填的）"
+                )
             hold_end = self._lease_hold_end(conn, run)
             if observed_at >= hold_end:
                 raise ContinuityStoreError(
