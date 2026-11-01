@@ -39,7 +39,6 @@ KNOWN_VIOLATIONS = {
     ("ui/cli/pm.py", "infrastructure"),
     ("ui/cli/pm_closure.py", "infrastructure"),
     ("ui/cli/pm_handoff.py", "infrastructure"),
-    ("ui/cli/pm_recover.py", "infrastructure"),  # --apply 读本机租约钱包，和 pm_closure 同一类组装入口
     ("ui/cli/pm_switch.py", "infrastructure"),
     ("ui/cli/runtime_identity_guard.py", "infrastructure"),
 }

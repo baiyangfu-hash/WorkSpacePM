@@ -203,6 +203,8 @@ def test_a_gone_process_says_to_check_the_computer_first(verdict: RecoveryVerdic
         observed_created_at=None,
     )
     assert "先确认你就在跑执行代理的那台电脑上" in text
+    # a container or another system user cannot see the executor's process either: the same false "gone" (review 505 a)
+    assert "容器" in text and "另一个系统用户" in text and "不要 --apply" in text
 
 
 def test_the_state_in_the_text_is_the_ledgers_real_state_not_a_fixed_word() -> None:
@@ -334,7 +336,12 @@ def test_apply_settles_a_dead_executor_as_executor_lost_and_only_that(
     assert result.exit_code == 0, result.output
     assert "已把 RUN-001 在账上记为失败" in result.output and "EXECUTOR_LOST" in result.output
     assert "没有动工位里的任何文件，也没有开新 Run" in result.output
-    assert " MST" in result.output and "+00:00" not in result.output  # the evidence line is in MST too
+    assert " MST" in result.output and "+00:00" not in result.output  # the evidence lines are in MST too
+    # the failure record keeps only the code, so the evidence is printed in full for the change record (review 505 b)
+    assert "请把以下 4 行贴进这个 Run 的变更单或报告" in result.output
+    for label in ("账本记的进程号:", "账本记的启动时刻:", "这台电脑观察到的进程创建时刻:", "判定结论: DEAD"):
+        assert label in result.output
+    assert f"账本记的进程号: {child.pid}" in result.output
     after = _events(tmp_path)
     added = set(after) - set(before)
     assert set(before) <= set(after) and len(added) == 1  # exactly one new event, nothing rewritten
@@ -545,3 +552,59 @@ def test_the_write_key_names_the_run_and_the_executor_process_so_a_retry_cannot_
 
     assert _apply(tmp_path, "--run-id", "RUN-001", monkeypatch=monkeypatch).exit_code == 0
     assert keys == [f"executor-lost:RUN-001:{child.pid}:{started_at.isoformat()}"]
+
+
+# ---- --lease-wallet (the recommended way to give the token; review 505 d) ------------------------------------------------
+
+
+def _save_wallet(root: Path, service: Any, token: str) -> None:
+    from auto_pm.infrastructure import lease_wallet
+
+    lease = service.current_lease("RUN-001")
+    lease_wallet.save(root, run_id="RUN-001", owner_id=lease.owner_id, lease_token=token, epoch=1)
+
+
+def test_apply_with_the_wallet_settles_the_run_using_the_token_saved_there(
+    tmp_path: Path, child: subprocess.Popen[bytes]
+) -> None:
+    service = _running_run(tmp_path, child.pid, datetime.now(UTC), lease_is_live=True)
+    child.kill()
+    child.wait(30)
+    _save_wallet(tmp_path, service, "lease-secret")
+
+    result = _recover(tmp_path, "--run-id", "RUN-001", "--apply", "--lease-wallet")
+
+    assert result.exit_code == 0, result.output
+    assert service._store.get_run("RUN-001").state.value == "FAILED"
+
+
+def test_apply_with_the_wallet_uses_the_wallets_token_not_a_fixed_one(
+    tmp_path: Path, child: subprocess.Popen[bytes]
+) -> None:
+    """A wallet that holds a token the ledger does not recognise must be refused: the token really comes from the wallet."""
+    service = _running_run(tmp_path, child.pid, datetime.now(UTC), lease_is_live=True)
+    child.kill()
+    child.wait(30)
+    _save_wallet(tmp_path, service, "some-other-token")
+    before = _events(tmp_path)
+
+    result = _recover(tmp_path, "--run-id", "RUN-001", "--apply", "--lease-wallet")
+
+    assert result.exit_code != 0 and "已拒绝落账" in result.output
+    assert _events(tmp_path) == before
+    assert service._store.get_run("RUN-001").state.value == "RUNNING"
+
+
+def test_apply_with_the_wallet_but_no_wallet_entry_is_refused_and_changes_nothing(
+    tmp_path: Path, child: subprocess.Popen[bytes]
+) -> None:
+    service = _running_run(tmp_path, child.pid, datetime.now(UTC), lease_is_live=True)
+    child.kill()
+    child.wait(30)
+    before = _events(tmp_path)
+
+    result = _recover(tmp_path, "--run-id", "RUN-001", "--apply", "--lease-wallet")
+
+    assert result.exit_code != 0 and "已拒绝落账" in result.output and "钱包" in result.output
+    assert _events(tmp_path) == before
+    assert service._store.get_run("RUN-001").state.value == "RUNNING"

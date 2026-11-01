@@ -24,13 +24,13 @@ from auto_pm.application.core.execution_recovery_status import (
     RecoveryVerdict,
     inspect_started_process,
 )
+from auto_pm.application.core.lease_handover_service import LeaseHandoverError, LeaseHandoverService
 from auto_pm.contracts.continuity import RunState
 from auto_pm.contracts.execution_adapter import (
     ExecutionActivityStage,
     ExecutionFailure,
     ExecutionFailureCode,
 )
-from auto_pm.infrastructure import lease_wallet
 from auto_pm.ui.cli.continuity import _secret_from_environment
 from auto_pm.ui.cli.runtime_identity_guard import project_of_run, require_runtime_identity
 
@@ -141,6 +141,7 @@ def plain_report(
         body = [
             f"现在的情况: 记录里的执行进程已经不在了（多半是主控或电脑重启时被带走），但账上这个 Run 还写着 {run_state}，没有人在干活。",
             "先确认你就在跑执行代理的那台电脑上：在别的电脑上敲，进程号不存在，也会得到这个结论，那是误判，不要照着办。",
+            "执行代理如果跑在容器（Docker/WSL 等）里，或用的是另一个系统用户，这台电脑也看不到它的进程，同样会误判成已不在：这种情况这个结论不可信，不要 --apply。",
             f"工位里可能留着它没做完的半成品，先别清理。{'进程号已被别的无关进程占用，驾驶舱不会去碰它。' if verdict is RecoveryVerdict.PID_REUSED else ''}",
             "下一步: 先别自己开新 Run。把这个 Run 在账上记为失败（只改账本，不动工位）要持有它的租约口令，敲："
             f"python main.py pm recover --run-id {run_id} --apply --lease-wallet",
@@ -234,11 +235,15 @@ def recover_pm(
         )
         return
     if wrote:
-        seen = f"进程创建时刻 {mst_text(created_at)}" if created_at is not None else "已没有这个进程"
+        seen = mst_text(created_at) if created_at is not None else "没读到（这台电脑上已没有这个进程）"
         click.echo(
             f"已把 {run_id} 在账上记为失败（失败原因 {ExecutionFailureCode.EXECUTOR_LOST.value}：执行进程已不在）。\n"
-            f"依据: 账本记的进程号 {evidence.process_id}、启动时刻 {mst_text(evidence.started_at)}；这台电脑现在看到的: {seen}；结论 {status.verdict.value}。\n"
             "没有动工位里的任何文件，也没有开新 Run。\n"
+            "账上的失败记录里只有失败原因代码，下面这些依据只在这次输出里：请把以下 4 行贴进这个 Run 的变更单或报告，事后才查得到当时为什么判定进程已不在。\n"
+            f"  账本记的进程号: {evidence.process_id}\n"
+            f"  账本记的启动时刻: {mst_text(evidence.started_at)}\n"
+            f"  这台电脑观察到的进程创建时刻: {seen}\n"
+            f"  判定结论: {status.verdict.value}（{status.reason}）\n"
             "下一步: 向用户报告并请用户批准开新 Run 接着干；新 Run 开工时把工位里留下的未提交改动用 --declared-dirty 声明。"
         )
         return
@@ -280,8 +285,9 @@ def _apply_executor_lost(
         if lease_token_env is not None:
             token = _secret_from_environment(lease_token_env)
         else:
-            token = lease_wallet.load(Path(ctx.find_root().obj.control_root), run_id=run_id, owner_id=lease.owner_id)
-    except lease_wallet.LeaseWalletError as error:
+            # the wallet is read through the application layer (never straight from infrastructure)
+            token = LeaseHandoverService(Path(ctx.find_root().obj.control_root)).token_for(run_id, lease.owner_id)
+    except LeaseHandoverError as error:
         raise click.ClickException(f"已拒绝落账：{error}；只有持有这个 Run 租约的人才能记它失败") from error
     except ContinuityExecutionError as error:
         raise click.ClickException(f"已拒绝落账：读不到这个 Run 的租约：{error}") from error
