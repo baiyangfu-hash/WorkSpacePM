@@ -499,3 +499,53 @@ def test_decisions_tab_reads_only_read_commands_and_lists_buttons_by_state(qapp:
     assert {"确认验收", "收口"} <= texts
     assert "批准口令：未生效" in " ".join(_texts(window.decisions.page))
     window.close()
+
+
+def _wait_threads(window: Any, qapp: QApplication) -> None:
+    for _ in range(200):
+        for thread in list(window._threads):
+            thread.wait(2000)
+        qapp.processEvents()
+        if not window._threads:
+            break
+
+
+def test_timer_round_does_not_refresh_the_decisions_page_but_manual_reload_does(qapp: QApplication, tmp_path: Path) -> None:
+    """#455 预审 514 a：10 分钟定时那一轮只快读，不连决定页一起读；手动“重新读取”才读。"""
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db, no_github=True)
+    refreshed: list[int] = []
+    window.decisions.refresh = lambda *_a: refreshed.append(1)
+    window.goto("decisions")
+    assert refreshed == [1]  # 打开页签：读一次
+    window.auto_reload()  # 定时刷新
+    _wait_threads(window, qapp)
+    assert refreshed == [1]
+    window.reload()  # 手动“重新读取”
+    _wait_threads(window, qapp)
+    assert refreshed == [1, 1]
+    window.close()
+
+
+def test_decisions_page_reads_at_most_the_project_limit(qapp: QApplication, tmp_path: Path) -> None:
+    """#455 预审 514 b：一次最多读 DECISION_PROJECT_LIMIT 个项目，按“有开着的卡的项目在前”的顺序截断，不重复。"""
+    from types import SimpleNamespace
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db)
+    limit = app_module.DECISION_PROJECT_LIMIT
+
+    def project(index: int, column: str) -> Any:
+        mission = SimpleNamespace(column=column, state="ACTIVE" if column == "在干" else "CLOSED")
+        return SimpleNamespace(project_id=f"DJ-2026-{200 + index}", missions=[mission])
+
+    window.board = SimpleNamespace(projects=[project(i, "已关" if i == 0 else "在干") for i in range(limit + 5)])
+    window.home_vm = None
+    got: list[Any] = []
+    window.decisions.refresh = lambda ids, missions: got.append((list(ids), list(missions)))
+    window._refresh_decisions()
+    ids, missions = got[0]
+    assert len(ids) == limit and len(set(ids)) == limit
+    assert ids[0] == "DJ-2026-201" and "DJ-2026-200" not in ids  # 只有已关的卡的项目不读
+    assert len(missions) == limit + 5  # 看板里的卡全部交给页面，只有“要读的项目”被截断
+    window.close()

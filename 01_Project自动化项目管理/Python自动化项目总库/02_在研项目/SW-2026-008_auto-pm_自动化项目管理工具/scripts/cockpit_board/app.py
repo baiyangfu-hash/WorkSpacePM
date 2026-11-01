@@ -302,6 +302,10 @@ class CockpitWindow(QMainWindow):
         self.status.setText("")
         self.refresh_button.setEnabled(True)
         self.timer.start()
+        # “决定”页开着时，只在首次加载和手动“重新读取”这一轮才连它一起读（每个项目 2 条只读命令，较慢）；
+        # 10 分钟定时那一轮只快读（#450 的约定）。写命令成功后走 reload()，也是手动轮。
+        if self._legacy_this_round and self.stack.currentWidget() is self.decisions.page:
+            self._refresh_decisions()
 
     def _on_failed(self, message: str) -> None:
         self.status.setText("这次没读成：" + pd._short(message, 80))
@@ -349,8 +353,6 @@ class CockpitWindow(QMainWindow):
             self.open_project(self.project.vm.card.project_id)
         if self.stack.currentWidget() in (self.home, self.station):
             self.goto("home")
-        elif self.stack.currentWidget() is self.decisions.page:
-            self._refresh_decisions()
 
     # ------------------------------------------------ 工程工位动作
 
