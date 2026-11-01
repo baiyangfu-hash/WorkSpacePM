@@ -81,23 +81,35 @@ def test_close_refuses_a_station_whose_directory_is_gone_and_changes_nothing(lab
     _directory_gone(lab)
     before = _registered(lab)
 
-    with pytest.raises(StationRefusedError, match="目录不见了"):
+    with pytest.raises(StationRefusedError, match="目录不见了") as caught:
         lab.service().close("claude", fetch=False)
+
+    assert "close 不动它" in str(caught.value)
 
     assert _registered(lab) == before  # the registration is left for a person to prune
 
 
-def test_sweep_does_not_treat_a_station_whose_directory_is_gone_as_removable(lab: Lab) -> None:
+def test_sweep_apply_only_prunes_the_registration_of_a_station_whose_directory_is_gone(lab: Lab) -> None:
+    """Decided by the coordinator: close leaves it alone; ``sweep --apply`` ends with ``git worktree prune``, which clears
+    the registration of a directory that no longer exists.  Nothing on disk is lost; the station is never "removed"."""
+
     station = _directory_gone(lab)
+    other = lab.root / ".auto-pm" / "worktrees" / "kept"
+    other.mkdir(parents=True)
+    (other / "keep.txt").write_text("x\n", encoding="utf-8")
+
+    plan = lab.service().sweep(apply=False, fetch=False)
+    item = next(i for i in plan.items if i.target == str(station))
+    assert not item.remove and "目录不见了" in item.reason
+    assert station.name in _registered(lab) or str(station) in _registered(lab)  # a dry run changes nothing
 
     report = lab.service().sweep(apply=True, fetch=False)
 
-    item = next(i for i in report.items if i.target == str(station))
-    assert not item.remove and "目录不见了" in item.reason
-    assert report.failed == [] and str(station) not in report.done
-    assert not station.exists()  # nothing was recreated or written there
-    # Note: ``sweep --apply`` ends with a plain ``git worktree prune``, which also drops this stale registration.  That is
-    # old behaviour (nothing on disk is lost) and is not pinned here; whether it should wait for a person is open.
+    assert report.failed == [] and str(station) not in report.done  # it was not "removed", only its stale registration went
+    assert str(station) not in _registered(lab)
+    assert not station.exists()
+    assert (other / "keep.txt").is_file()  # nothing else on disk is touched
+    assert "目录不见了" in item.reason and "sweep --apply" in item.reason  # the hint says exactly this
 
 
 def test_pruning_as_the_hint_says_makes_the_gone_station_disappear_from_the_list(lab: Lab) -> None:
