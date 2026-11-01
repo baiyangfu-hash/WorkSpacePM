@@ -416,7 +416,8 @@ def test_process_and_file_writes_live_only_in_actions() -> None:
             assert forbidden not in source, (path.name, forbidden)
         if path.name != "policy.py":  # 规矩文件列的是禁用词本身
             assert "no-verify" not in source, path.name
-        if path.name != "actions.py":
+        # 起子进程的只有 actions.py（决定类按钮）和 tool_actions.py（工程工具）；后者另有 test_cockpit_board_tools 逐文件数
+        if path.name not in ("actions.py", "tool_actions.py"):
             assert "subprocess" not in source, path.name
         if path.name not in ("actions.py", "app.py"):
             assert not re.search(WRITES, source), path.name
