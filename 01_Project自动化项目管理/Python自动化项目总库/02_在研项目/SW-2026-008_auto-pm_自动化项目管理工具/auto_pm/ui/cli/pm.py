@@ -105,7 +105,11 @@ def _classification_options(function: _F) -> _F:
         click.option(
             "--impact-scope", "impact_scope", multiple=True, help="影响范围，可重复；缺省 MODULE"
         ),
-        click.option("--inbox-id", default="", help="把一条已确认的收件箱条目转为本计划"),
+        click.option(
+            "--inbox-id",
+            default="",
+            help="把一条已确认的收件箱条目转为本计划；分类（--kind 等）直接取自条目，不用重填",
+        ),
     )
     for option in reversed(options):
         function = option(function)
@@ -610,7 +614,7 @@ def _emit_item(item_json: dict[str, Any], *, created: bool | None = None) -> Non
 @click.option("--affects", required=True, help="影响了什么（项目、WBS 行、文件、依赖）")
 @click.option("--duplicate-check", required=True, help="查重做了什么、结论是什么")
 @click.option("--duplicate-of", "duplicate_of", multiple=True, help="与之重复的条目、台账或变更单编号")
-@click.option("--evidence", "evidence", multiple=True, help="取证，可重复：file:|cmd:|ledger:|chg:|commit:")
+@click.option("--evidence", "evidence", multiple=True, help="【必填，至少一条】取证，可重复：file:|cmd:|ledger:|chg:|commit:")
 @click.option(
     "--urgent-criterion",
     type=click.Choice(_CRITERION_CHOICES, case_sensitive=False),
@@ -624,7 +628,7 @@ def _emit_item(item_json: dict[str, Any], *, created: bool | None = None) -> Non
     help="建议处置：interrupt_now|after_current|inbox_wait|reject",
 )
 @click.option("--rationale", required=True, help="建议的理由")
-@click.option("--alternative", "alternatives", multiple=True, help="备选方案，至少一个")
+@click.option("--alternative", "alternatives", multiple=True, help="【必填，至少一个】备选方案，可重复")
 @click.option("--cost-risk", required=True, help="成本与风险估计")
 @click.option("--ask", "decisions_for_user", multiple=True, help="需要用户决定的点，可重复")
 @click.option("--proposed-by", default="pm-cli", show_default=True, help="提出者标识")
@@ -655,6 +659,9 @@ def inbox_add(
     try:
         service = _intake(ctx)
         require_runtime_identity(ctx, project_id)
+        missing = [flag for flag, values in (("--evidence", evidence), ("--alternative", alternatives)) if not values]
+        if missing:  # said in plain words before anything is created, instead of a raw validation dump
+            raise click.ClickException(f"入箱必须带 {'、'.join(missing)}（各至少一个）；--evidence 的写法见 --help")
         _ensure_continuity_store(ctx)  # first use of a fresh clone (D6); only after the identity check
         classification = service.classify(
             project_id,

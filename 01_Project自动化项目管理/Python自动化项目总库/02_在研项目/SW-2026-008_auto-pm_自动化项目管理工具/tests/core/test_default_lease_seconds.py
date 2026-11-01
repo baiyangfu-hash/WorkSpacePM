@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+import re
+from pathlib import Path
 from typing import Any
 
 import click
@@ -57,3 +59,22 @@ def test_cli_options_use_the_constant() -> None:
     }
     assert len(defaults) >= 7
     assert {k: v for k, v in defaults.items() if v != DEFAULT_LEASE_SECONDS} == {}
+
+
+def _handover_doc() -> Path | None:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "docs" / "handover" / "22_门禁发版与长任务.md"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def test_handover_manual_states_the_real_default_lease_minutes() -> None:
+    """交接手册写的“默认租约 N 分钟”必须等于常量（TD-261 D9：手册曾写 15 分钟，常量早已是 30）。"""
+
+    doc = _handover_doc()
+    assert doc is not None, "找不到 docs/handover/22_门禁发版与长任务.md：本测试必须在仓库内运行"
+    text = doc.read_text(encoding="utf-8")
+    claims = re.findall(r"默认租约\s*(\d+)\s*分钟", text)
+    assert claims, "手册里没有“默认租约 N 分钟”这句：改了写法请同步本测试"
+    assert {int(c) for c in claims} == {DEFAULT_LEASE_SECONDS // 60}

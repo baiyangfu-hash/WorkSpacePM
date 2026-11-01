@@ -214,7 +214,7 @@ def test_every_failure_after_writing_restores_the_registry(
         raise failure
 
     monkeypatch.setattr(
-        "auto_pm.core.workspace_registry_service.WorkspaceContextService.resolve", broken_resolve
+        "auto_pm.application.core.workspace_registry_service.WorkspaceContextService.resolve", broken_resolve
     )
 
     expected: type[BaseException] = KeyboardInterrupt if isinstance(failure, KeyboardInterrupt) else WorkspaceRegistryError
