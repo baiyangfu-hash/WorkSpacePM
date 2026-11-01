@@ -11,6 +11,7 @@ from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
+from auto_pm.infrastructure.keep_awake import keep_system_awake
 
 DEFAULT_LEASE_SECONDS = 900
 # A failed renewal is retried until the lease has less than this left; only then is the loop given up.
@@ -76,6 +77,12 @@ class LeaseKeepAlive:
         ).total_seconds()
 
     def _loop(self) -> None:
+        # A laptop that sleeps suspends this thread too, the lease runs out, and the long command's whole result is void
+        # (TD-SW008-160). The request is made here and released here: it belongs to the thread that lives as long as the block.
+        with keep_system_awake():
+            self._renew_until_stopped()
+
+    def _renew_until_stopped(self) -> None:
         wait = self._interval
         while not self._stop.wait(wait):
             try:

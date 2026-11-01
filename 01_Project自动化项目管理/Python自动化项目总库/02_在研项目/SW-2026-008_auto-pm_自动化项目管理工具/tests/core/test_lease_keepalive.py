@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -136,3 +139,32 @@ def test_the_keepalive_gives_up_only_when_the_lease_is_nearly_gone(tmp_path: Pat
         _wait_for(lambda: bool(keepalive.error))
     assert keepalive.error == "ledger busy"
     assert gave_up == ["called"]
+
+
+def test_the_machine_is_kept_awake_for_the_block_by_the_keepalive_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TD-SW008-160: a sleeping laptop suspends the keep-alive and the lease runs out.
+
+    The request must be made, and released, by the thread that lives as long as the block (the OS ties it to the thread).
+    """
+
+    events: list[tuple[str, int]] = []
+
+    @contextmanager
+    def recording() -> Iterator[bool]:
+        events.append(("on", threading.get_ident()))
+        try:
+            yield True
+        finally:
+            events.append(("off", threading.get_ident()))
+
+    monkeypatch.setattr("auto_pm.application.core.lease_keepalive.keep_system_awake", recording)
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=900)
+    with _keepalive(service) as keepalive:
+        _wait_for(lambda: keepalive.renewals >= 2)
+        assert [kind for kind, _ in events] == ["on"]
+    assert [kind for kind, _ in events] == ["on", "off"]
+    assert events[0][1] == events[1][1] != threading.get_ident()
