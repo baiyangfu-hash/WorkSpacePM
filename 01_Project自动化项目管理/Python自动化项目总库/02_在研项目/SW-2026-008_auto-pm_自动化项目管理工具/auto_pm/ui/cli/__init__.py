@@ -25,6 +25,7 @@ def write_ai_context(
     *,
     entry_mode: str = "direct",
     active_page: str = "workspace",
+    project_path: str | Path | None = None,
 ) -> bool:
     """写入 AI 上下文文件（.auto-pm/ai_context.json）
 
@@ -37,6 +38,7 @@ def write_ai_context(
         project_name: 项目名称
         stack: 技术栈（plc/python）
         phase: 项目阶段
+        project_path: 项目目录；只有目录里真有 ``PM_SESSION_<编号>.md`` 才写引用（该文件已退役，不再凭空编造）
 
     Returns:
         True 表示写入成功
@@ -52,7 +54,8 @@ def write_ai_context(
         intent = "project_followup"
         target_skill = ENTRY_SKILL
 
-    session_ref = f"PM_SESSION_{project_id}.md" if project_id else ""
+    session_name = f"PM_SESSION_{project_id}.md" if project_id else ""
+    session_ref = session_name if session_name and project_path and (Path(project_path) / session_name).is_file() else ""
     context = {
         "generated_at": datetime.now(UTC).isoformat(),
         "source": "auto-pm CLI",

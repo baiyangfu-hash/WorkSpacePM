@@ -65,9 +65,28 @@ class TestWriteAiContext:
         }
         assert content["active_change"] is None
         assert content["active_page"] == "workspace"
-        assert content["product_context"]["goal_ref"] == "PM_SESSION_DJ-2026-005.md#product-goal"
-        assert content["product_context"]["hypothesis_ref"] == "PM_SESSION_DJ-2026-005.md#hypothesis-ledger"
+        # TD-SW008-266 S4: no PM_SESSION file in the project -> no invented reference to one.
+        assert content["product_context"]["goal_ref"] == ""
+        assert content["product_context"]["hypothesis_ref"] == ""
         assert content["product_context"]["active_hypothesis"] == {}
+
+    def test_write_ai_context_refs_the_pm_session_only_when_the_project_has_one(self, tmp_path: Path) -> None:
+        """较早建立的项目仍有 PM_SESSION：引用照旧；没有的项目留空（TD-SW008-266 S4）"""
+        older = tmp_path / "older"
+        older.mkdir()
+        (older / "PM_SESSION_DJ-2026-005.md").write_text("# PM_SESSION\n", encoding="utf-8")
+        newer = tmp_path / "newer"
+        newer.mkdir()
+
+        write_ai_context(str(tmp_path), "DJ-2026-005", "输送线", "plc", "developing", project_path=older)
+        ctx_file = tmp_path / ".auto-pm" / "ai_context.json"
+        refs = json.loads(ctx_file.read_text(encoding="utf-8"))["product_context"]
+        assert refs["goal_ref"] == "PM_SESSION_DJ-2026-005.md#product-goal"
+        assert refs["hypothesis_ref"] == "PM_SESSION_DJ-2026-005.md#hypothesis-ledger"
+
+        write_ai_context(str(tmp_path), "DJ-2026-005", "输送线", "plc", "developing", project_path=newer)
+        refs = json.loads(ctx_file.read_text(encoding="utf-8"))["product_context"]
+        assert refs["goal_ref"] == "" and refs["hypothesis_ref"] == ""
 
     def test_write_ai_context_silent_degradation(self, tmp_path: Path) -> None:
         """写入失败时应返回 False，不抛异常（静默降级）"""
