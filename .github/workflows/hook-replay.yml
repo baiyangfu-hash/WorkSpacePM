@@ -8,13 +8,15 @@
 # - pull_request_target：GitHub 用 main 上的这份工作流，而不是 PR 里改过的版本；
 # - 脚本和它导入的 auto_pm 都取自基线检出；
 # - PR 头只拉成 git 对象，脚本用 git show 当数据读，其中的任何文件都不导入、不执行、不安装。
+# PR 描述（用户 2026-11-01 裁决：云端 PR 的提交说明常常不写单号，认描述里的变更单号或“任务卡: 路径”一行）只经环境变量 PR_BODY
+# 传给脚本，不进命令行、不插进 shell；脚本把它当数据读。
 # 不设 paths 过滤：以后要设必过检查，就必须对每个 PR 都报告结果。
 name: hook-replay
 
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]  # edited：改 PR 描述（补单号或任务卡）后要重新复跑
 
 # 只读令牌；没有任何步骤用到密钥。
 permissions:
@@ -59,6 +61,7 @@ jobs:
       - name: Replay the commit-msg hook
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
           GIT_CONFIG_COUNT: "3"
           GIT_CONFIG_KEY_0: filter.lfs.smudge
           GIT_CONFIG_VALUE_0: ""
