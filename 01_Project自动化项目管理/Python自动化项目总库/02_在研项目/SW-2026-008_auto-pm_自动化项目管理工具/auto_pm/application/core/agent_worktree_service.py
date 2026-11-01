@@ -279,6 +279,9 @@ class AgentWorktreeService:
             )
         path = self._stations_dir / agent
         registered = self._worktrees()
+        if not path.exists() and path.resolve() in registered:
+            # Registered but the directory is gone: refuse like any broken station, with the reason that tells what to do.
+            raise StationRefusedError(f"工位 {path} 不能收：{_broken_reason(path)}")
         info = registered.get(path.resolve()) if path.exists() else None
         if info is None:
             raise StationRefusedError(
@@ -696,7 +699,7 @@ def _broken_reason(path: Path) -> str:
     """
 
     if not path.is_dir():
-        return "目录不见了，Git 里还留着登记；人工确认后用 `git worktree prune` 清掉登记"
+        return "目录不见了，Git 里还留着登记；close 不动它，sweep --apply 会顺带用 `git worktree prune` 清掉这种目录已不存在的登记（不丢东西），也可以自己敲 `git worktree prune`"
     if not (path / ".git").exists():
         return (
             "目录里没有 .git，已经不是工作树（多半是删到一半）；不要在里面跑 git，"
