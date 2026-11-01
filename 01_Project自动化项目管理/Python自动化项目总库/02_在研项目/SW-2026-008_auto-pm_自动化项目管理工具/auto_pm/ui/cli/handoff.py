@@ -14,11 +14,37 @@ from auto_pm.application.core.ai_handoff_service import (
     AiHandoffService,
     HandoffError,
 )
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity, warn_runtime_identity
 
 
 def _workspace(ctx: click.Context) -> Path:
     app_ctx: AppContext = ctx.find_root().obj
     return Path(app_ctx.workspace_root).resolve()
+
+
+def _project_of_request(ctx: click.Context, request_id: str) -> str:
+    """The project a handoff request belongs to; raises when the request cannot be read (the caller decides what that means)."""
+
+    try:
+        payload = AiHandoffService(_workspace(ctx)).get_request(request_id)
+    except HandoffError as error:
+        raise click.ClickException(str(error)) from error
+    if payload is None or not str(payload.get("project_id", "")).strip():
+        raise click.ClickException(f"找不到 handoff 或它没有项目编号: {request_id}")
+    return str(payload["project_id"])
+
+
+def _require_identity_for_request(ctx: click.Context, request_id: str) -> None:
+    """TD-SW008-214: a write on an existing request is refused when the runtime identity of its project conflicts.
+
+    A request that cannot be found has no project to check: the command reports that itself and writes nothing.
+    """
+
+    try:
+        project_id = _project_of_request(ctx, request_id)
+    except click.ClickException:
+        return
+    require_runtime_identity(ctx, project_id)
 
 
 def _json_output(payload: Any) -> None:
@@ -106,6 +132,7 @@ def create_handoff(
     as_json: bool,
 ) -> None:
     """创建交接请求，默认状态为 pending。"""
+    require_runtime_identity(ctx, project_id)
     service = AiHandoffService(_workspace(ctx))
     try:
         payload = service.create_request(
@@ -250,6 +277,7 @@ def claim_handoff(
     as_json: bool,
 ) -> None:
     """领取一个待执行 handoff；manual 只表示可领取，不代表启动 IDE。"""
+    _require_identity_for_request(ctx, request_id)
     service = AiHandoffService(_workspace(ctx))
     try:
         payload = service.claim_request(
@@ -273,6 +301,7 @@ def claim_handoff(
 @click.pass_context
 def start_handoff(ctx: click.Context, request_id: str, executor_id: str, as_json: bool) -> None:
     """将已领取 handoff 标记为执行中。"""
+    _require_identity_for_request(ctx, request_id)
     service = AiHandoffService(_workspace(ctx))
     try:
         payload = service.start_request(request_id, executor_id=executor_id)
@@ -304,6 +333,7 @@ def heartbeat_handoff(
     as_json: bool,
 ) -> None:
     """续租执行 handoff，防止工作队列将其判定为失联。"""
+    _require_identity_for_request(ctx, request_id)
     service = AiHandoffService(_workspace(ctx))
     try:
         payload = service.heartbeat_request(
@@ -333,6 +363,7 @@ def submit_handoff_result(
     as_json: bool,
 ) -> None:
     """提交执行回执；成功后仅 PM 可调用 close 消费结果。"""
+    _require_identity_for_request(ctx, request_id)
     root = _workspace(ctx)
     service = AiHandoffService(root)
     try:
@@ -363,6 +394,7 @@ def fail_handoff(
     as_json: bool,
 ) -> None:
     """由租约持有者报告执行失败，保留请求供 PM 处理。"""
+    _require_identity_for_request(ctx, request_id)
     service = AiHandoffService(_workspace(ctx))
     try:
         payload = service.fail_request(request_id, executor_id=executor_id, reason=reason)
@@ -380,6 +412,8 @@ def fail_handoff(
 @click.pass_context
 def timeout_handoffs(ctx: click.Context, project_id: str, as_json: bool) -> None:
     """将租约到期的 claimed/in_progress 请求显式标记为 expired。"""
+    if project_id:  # recovery command: a conflict is reported, never a refusal
+        warn_runtime_identity(ctx, project_id)
     service = AiHandoffService(_workspace(ctx))
     try:
         payload = service.expire_stale_requests(project_id)
@@ -405,6 +439,7 @@ def requeue_handoff(
     as_json: bool,
 ) -> None:
     """由 PM 显式将失联或失败请求重新置为待领取。"""
+    warn_runtime_identity(ctx, lambda: _project_of_request(ctx, request_id))  # recovery: warn, never refuse
     service = AiHandoffService(_workspace(ctx))
     try:
         payload = service.requeue_request(request_id, pm_id=pm_id, reason=reason)
@@ -531,6 +566,7 @@ def close_handoff(
                     f"--pid 只能解析唯一 pending handoff，当前找到 {len(pending)} 个"
                 )
             request_id = str(pending[0]["request_id"])
+        _require_identity_for_request(ctx, request_id)
 
         result: dict[str, Any] = {}
         if result_file:
@@ -620,6 +656,7 @@ def saga_status(ctx: click.Context, request_id: str, as_json: bool) -> None:
 @click.pass_context
 def saga_resume(ctx: click.Context, request_id: str, actor: str, as_json: bool) -> None:
     """从断点恢复并继续执行未完成的 Saga 步骤。"""
+    warn_runtime_identity(ctx, lambda: _project_of_request(ctx, request_id))  # recovery: warn, never refuse
     service = AiHandoffService(_workspace(ctx))
     try:
         payload = service.resume_saga(request_id, actor=actor)
@@ -640,6 +677,7 @@ def saga_resume(ctx: click.Context, request_id: str, actor: str, as_json: bool) 
 @click.pass_context
 def saga_compensate(ctx: click.Context, request_id: str, actor: str, as_json: bool) -> None:
     """补偿回滚已失败或需撤销的 Saga 事务，恢复所有修改文件。"""
+    warn_runtime_identity(ctx, lambda: _project_of_request(ctx, request_id))  # recovery: warn, never refuse
     service = AiHandoffService(_workspace(ctx))
     try:
         payload = service.compensate_saga(request_id, actor=actor)

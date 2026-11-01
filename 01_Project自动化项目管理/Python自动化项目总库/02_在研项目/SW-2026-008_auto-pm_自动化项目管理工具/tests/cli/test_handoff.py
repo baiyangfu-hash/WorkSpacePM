@@ -11,6 +11,9 @@ from click.testing import CliRunner
 from auto_pm.application.core.ai_handoff_service import AiHandoffService
 from auto_pm.ui.cli.__main__ import cli
 
+# These tests are about the handoff lifecycle; the runtime-identity guard has its own test (test_handoff_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 def test_handoff_cli_create_list_show(tmp_path: Path) -> None:
     runner = CliRunner()
