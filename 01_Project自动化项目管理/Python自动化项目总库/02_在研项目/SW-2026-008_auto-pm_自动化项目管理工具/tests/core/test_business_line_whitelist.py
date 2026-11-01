@@ -36,7 +36,9 @@ def test_the_literal_type_and_the_tuple_cannot_drift_apart() -> None:
     assert set(typing.get_args(BusinessLine)) == {*VALID_BUSINESS_LINES, ""}
 
 
-@pytest.mark.parametrize("project_id", ["ZZ-2026-904", "SYS-2026-001", "nohyphen", "", "-2026-001", "sw-2026-001"])
+@pytest.mark.parametrize(
+    "project_id", ["ZZ-2026-904", "SYS-2026-001", "nohyphen", "", "-2026-001", "sw-2026-001"]
+)
 def test_an_id_prefix_outside_the_whitelist_is_refused(project_id: str) -> None:
     with pytest.raises(InvalidBusinessLineError, match="不是合法业务线"):
         resolve_business_line(project_id)
@@ -58,8 +60,20 @@ def test_project_create_refuses_a_bad_prefix_before_writing_anything(tmp_path: P
     destination = tmp_path / "projects"
     result = CliRunner().invoke(
         cli,
-        ["-w", str(tmp_path), "project", "create", "--stack", "python", "--id", "ZZ-2026-904",
-         "--name", "drill_py_fake", "--dest-dir", str(destination)],
+        [
+            "-w",
+            str(tmp_path),
+            "project",
+            "create",
+            "--stack",
+            "python",
+            "--id",
+            "ZZ-2026-904",
+            "--name",
+            "drill_py_fake",
+            "--dest-dir",
+            str(destination),
+        ],
     )
 
     assert result.exit_code != 0
@@ -70,18 +84,34 @@ def test_project_create_refuses_a_bad_prefix_before_writing_anything(tmp_path: P
 def test_a_dry_run_create_also_refuses_a_bad_prefix(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         cli,
-        ["-w", str(tmp_path), "project", "create", "--stack", "python", "--id", "ZZ-2026-904",
-         "--name", "x", "--dest-dir", str(tmp_path / "p"), "--dry-run"],
+        [
+            "-w",
+            str(tmp_path),
+            "project",
+            "create",
+            "--stack",
+            "python",
+            "--id",
+            "ZZ-2026-904",
+            "--name",
+            "x",
+            "--dest-dir",
+            str(tmp_path / "p"),
+            "--dry-run",
+        ],
     )
     assert result.exit_code != 0 and "不是合法业务线" in result.output
 
 
-def test_a_project_with_a_bad_business_line_does_not_block_other_registrations(tmp_path: Path) -> None:
+def test_a_project_with_a_bad_business_line_does_not_block_other_registrations(
+    tmp_path: Path,
+) -> None:
     registry = _workspace(tmp_path)
     _anchor(tmp_path / "0100_PLC自动化" / "DJ-2026-009", "DJ-2026-009")
     bad = _anchor(tmp_path / "0100_项目" / "ZZ-2026-904_drill", "ZZ-2026-904")
     (bad / ".copier-answers.yml").write_text(
-        "project_id: ZZ-2026-904\nproject_name: drill\nstack: python\nbusiness_line: ZZ\n", encoding="utf-8"
+        "project_id: ZZ-2026-904\nproject_name: drill\nstack: python\nbusiness_line: ZZ\n",
+        encoding="utf-8",
     )
     service = WorkspaceRegistryService(tmp_path)
 
@@ -91,11 +121,14 @@ def test_a_project_with_a_bad_business_line_does_not_block_other_registrations(t
     assert "DJ-2026-009" in registry.read_text(encoding="utf-8")
 
 
-def test_the_bad_project_itself_gets_a_plain_sentence_and_the_registry_is_untouched(tmp_path: Path) -> None:
+def test_the_bad_project_itself_gets_a_plain_sentence_and_the_registry_is_untouched(
+    tmp_path: Path,
+) -> None:
     registry = _workspace(tmp_path)
     bad = _anchor(tmp_path / "0100_项目" / "ZZ-2026-904_drill", "ZZ-2026-904")
     (bad / ".copier-answers.yml").write_text(
-        "project_id: ZZ-2026-904\nproject_name: drill\nstack: python\nbusiness_line: ZZ\n", encoding="utf-8"
+        "project_id: ZZ-2026-904\nproject_name: drill\nstack: python\nbusiness_line: ZZ\n",
+        encoding="utf-8",
     )
     before = registry.read_bytes()
 
@@ -123,7 +156,9 @@ def test_the_workbench_create_path_refuses_a_bad_prefix_too(tmp_path: Path) -> N
     cases = WorkbenchUseCases.__new__(WorkbenchUseCases)
     typing.cast(typing.Any, cases).template_service = object()
     cases.project_service = SimpleNamespace(workspace_root=str(tmp_path))
-    outcome = cases.create_project("ZZ-2026-904", "x", "python", "", "", dest_dir=str(tmp_path / "p"))
+    outcome = cases.create_project(
+        "ZZ-2026-904", "x", "python", "", "", dest_dir=str(tmp_path / "p")
+    )
     assert outcome.success is False and "不是合法业务线" in outcome.message
     assert not (tmp_path / "p").exists()
 
@@ -143,13 +178,19 @@ def test_the_whitelist_has_exactly_one_copy_in_the_source() -> None:
     for path in sorted(PACKAGE.rglob("*.py")):
         if path.relative_to(PACKAGE).as_posix() == "domain/models/project.py":
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        tree = ast.parse(path.read_bytes(), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-                values = {e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+                values = {
+                    e.value
+                    for e in node.elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                }
                 if wanted <= values:
                     offenders.append(f"{path.relative_to(PACKAGE).as_posix()}:{node.lineno}")
-    assert offenders == [], "业务线白名单只允许在 domain/models/project.py 里有一份: " + ", ".join(offenders)
+    assert offenders == [], "业务线白名单只允许在 domain/models/project.py 里有一份: " + ", ".join(
+        offenders
+    )
 
 
 def test_every_prefix_inference_goes_through_the_checked_helper() -> None:
@@ -157,9 +198,13 @@ def test_every_prefix_inference_goes_through_the_checked_helper() -> None:
 
     offenders = []
     for path in sorted(PACKAGE.rglob("*.py")):
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_bytes().decode(
+            "utf-8-sig"
+        )  # strict: a file that is not UTF-8 fails here instead of being read as ?
         for number, line in enumerate(text.splitlines(), 1):
-            if 'project_id.split("-", 1)[0]' in line and "business_line =" in line.replace("  ", " "):
+            if 'project_id.split("-", 1)[0]' in line and "business_line =" in line.replace(
+                "  ", " "
+            ):
                 offenders.append(f"{path.relative_to(PACKAGE).as_posix()}:{number}")
     assert offenders == []
     assert json.dumps(sorted(VALID_BUSINESS_LINES))
