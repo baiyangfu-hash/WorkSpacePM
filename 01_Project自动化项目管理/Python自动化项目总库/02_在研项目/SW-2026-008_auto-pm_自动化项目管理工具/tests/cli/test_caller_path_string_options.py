@@ -181,6 +181,48 @@ def test_context_resolve_starts_from_the_caller_folder_by_default(launched: Path
     assert starts == [str(launched), str(launched)]
 
 
+def _spy_context_service(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    from auto_pm.ui.cli import pm
+
+    starts: list[Any] = []
+
+    class Spy:
+        def __init__(self, *_: Any, **__: Any) -> None:
+            pass
+
+        def resolve(self, project_id: str = "", start_path: Any = None) -> Any:
+            starts.append(start_path)
+            raise pm.WorkspaceContextError("spy")
+
+    monkeypatch.setattr(pm, "WorkspaceContextService", Spy)
+    return starts
+
+
+def test_resume_legacy_v1_finds_the_project_from_the_caller_folder(launched: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a project id the legacy path asks the context service where to start; ``None`` there means ``Path.cwd()``, i.e. the release folder."""
+
+    from auto_pm.ui.cli import pm
+
+    starts = _spy_context_service(monkeypatch)
+    (launched / "proj").mkdir()
+
+    CliRunner().invoke(pm.pm_group, ["resume", "--legacy-v1"], obj=AppContext())
+    CliRunner().invoke(pm.pm_group, ["resume", "--legacy-v1", "--path", "proj"], obj=AppContext())
+
+    assert starts == [str(launched), str(launched / "proj")]  # an explicit --path still wins
+
+
+def test_resume_legacy_v1_keeps_the_process_folder_without_the_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.ui.cli import pm
+
+    monkeypatch.delenv(CALLER_CWD_ENV, raising=False)
+    starts = _spy_context_service(monkeypatch)
+
+    CliRunner().invoke(pm.pm_group, ["resume", "--legacy-v1"], obj=AppContext())
+
+    assert starts == [None]
+
+
 def test_context_resolve_keeps_the_process_folder_without_the_launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from auto_pm.ui.cli import pm
 
