@@ -5,6 +5,8 @@
     bc_next_id()       按 02_业务变更记录.md 里同年月用过的最大序号给下一个 BC 编号（每月从 000 起）。
     bc_preview()       按目标表头（11 栏）和用户填的表单生成整行，不写；没填好就拒绝。
     bc_append()        只往表末追加一行；写前读一遍、写后校验除最后一行外字节不变。
+    run_cli()          “决定”页的按钮：在控制根跑同一条 `main.py pm …` 命令，回执带命令和退出码（见 decisions.py）。
+    open_console()     批准口令已生效时，同一条命令在新的终端窗口里跑，口令由用户在那个窗口里输入。
 
 永远没有：合并、删除、切换发布、代签、绕过提交钩子、启动任何 agent。
 """
@@ -12,10 +14,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
+import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -223,3 +227,50 @@ def bc_append(record: Path, line: str, expected_digest: str | None = None) -> Re
     if not after.startswith(before) or after[len(before):] != sep + (line + "\n").encode("utf-8"):
         return Receipt(_now_text(), "写入 BC 行", f"追加写校验失败：{record.name} 写入期间被别人改了，请人工核对", 1)
     return Receipt(_now_text(), "写入 BC 行", f"append {record.name} ← {line.split('|')[1].strip()}", 0)
+
+
+# ---------------------------------------------------------------- “决定”页：同一条命令行，换一层皮
+#
+# 按钮拼出的参数见 decisions.build_args()。这里只负责“在控制根运行 main.py <参数>”：
+#   * 不带任何 agent 标记、不加任何绕过选项；环境原样继承（agent 启动的界面会被命令按 agent 会话处理）；
+#   * stdin 关掉：命令要口令时立刻回“必须在终端里输入”，不会挂住界面；
+#   * 退出码和原文输出原样进回执，界面不改写、不吞掉。
+
+NEEDS_TERMINAL_HINT = "必须由用户本人在自己的终端"
+
+
+def cli_command(root: Path, args: Sequence[str]) -> list[str]:
+    return [sys.executable, "-B", str(root / "main.py"), *args]
+
+
+def needs_terminal(receipt: Receipt) -> bool:
+    """命令说“要口令、不是交互终端”：界面改用 open_console 在新终端窗口里再运行同一条命令。"""
+    return receipt.rc not in (0, None) and NEEDS_TERMINAL_HINT in receipt.output
+
+
+def run_cli(root: Path, label: str, args: Sequence[str], runner: Callable[..., Any] = subprocess.run,
+            timeout: int = CHECK_TIMEOUT) -> Receipt:
+    command = cli_command(root, args)
+    shown = " ".join(f'"{item}"' if " " in item or not item else item for item in command)
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    try:
+        result = runner(command, cwd=str(root), capture_output=True, encoding="utf-8", errors="replace",  # lenient-decode: 命令输出只用于显示
+                        timeout=timeout, check=False, stdin=subprocess.DEVNULL, env=env)
+    except (OSError, subprocess.SubprocessError) as error:
+        return Receipt(_now_text(), label, shown, None, False, f"{type(error).__name__}: {error}")
+    return Receipt(_now_text(), label, shown, result.returncode, False, (result.stdout or "") + (result.stderr or ""))
+
+
+def open_console(root: Path, label: str, args: Sequence[str], opener: Callable[..., Any] = subprocess.Popen) -> Receipt:
+    """在新的终端窗口里运行同一条命令（只在 Windows 有效）；界面看不到退出码，回执 rc 为“未验证”，
+    用户在那个窗口里看结果，回来点“重新读取”。"""
+    command = cli_command(root, args)
+    shown = subprocess.list2cmdline(command)
+    new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    if os.name != "nt" or not new_console:
+        return Receipt(_now_text(), label, shown, None, False, "这台电脑没有可弹出的终端窗口：请把上面的命令复制到终端里运行")
+    try:
+        opener(["cmd", "/c", f"{shown} & pause"], cwd=str(root), creationflags=new_console)
+    except OSError as error:
+        return Receipt(_now_text(), label, shown, None, False, f"{type(error).__name__}: {error}")
+    return Receipt(_now_text(), label, shown, None, False, "已在新的终端窗口打开：在那里输入口令、看到结果后，回到这里点“重新读取”")
