@@ -29,7 +29,7 @@ PR 改了 ``io_points.csv`` 里涉及安全点的行。
   合并前由主执行在本机加 ``--decision DEC-…`` 跑一次：批准记录为“是”而 PR 描述没写“是”，判不通过（先改 PR 描述，
   让 GitHub 上的硬锁也接上）；批准记录的值同样按上面两条判定。
 
-签字：PR 页面上一条评论，某一行写 ``安全签字 <PR 头提交号，至少 7 位>``。只认 ``SIGNERS`` 里的账号（登录名和数字 ID
+签字：PR 页面上一条评论，某一行写 ``安全签字 <PR 头提交号，至少 12 位>``。只认 ``SIGNERS`` 里的账号（登录名和数字 ID
 都要对上），经由 GitHub App 发出的评论不算，提交号不是当前头提交的不算（签完再推新提交，签字自动作废）。
 已知漏洞：本机 agent 用用户已登录的 ``gh`` 命令行代发评论，机器分不出来——见说明文档。
 
@@ -85,6 +85,9 @@ PLAN_KEY = "计划栏④（是否涉及安全回路）"
 UNMARKED_REASON = "项目在基线上还没有安全区清单（未标定）：改任何 PLC 程序都按安全区处理"
 DEFAULT_REPO = "baiyangfu-hash/WorkSpacePM"
 SW008_ROOT = TOOL_ROOT / "01_Project自动化项目管理" / "Python自动化项目总库" / "02_在研项目" / "SW-2026-008_auto-pm_自动化项目管理工具"
+# 签字至少 12 位（48 位）：7 位只有 28 位，攻击者在 PR 头上反复改提交内容几亿次就能撞出同前缀的头，拿用户对别的提交的签字复用（TD-215）。
+# 正则仍收 7 位起，是为了对写短了的签字给出明确提示，而不是当作“没签”。
+MIN_SIGN_LEN = 12
 SIGN_LINE = re.compile(r"^\s*安全签字\s*[:：]?\s*`?([0-9a-fA-F]{7,40})`?(?:\s.*|[，。；：！、）】」』,;.!)\]].*)?$")
 REGION_START = re.compile(r"@安全区\s*开始")
 REGION_END = re.compile(r"@安全区\s*结束")
@@ -614,6 +617,13 @@ def find_signature(comments: list[dict[str, Any]], head_sha: str, result: Result
         shas = [m.group(1).lower() for m in (SIGN_LINE.match(line) for line in body.splitlines()) if m]
         if not shas:
             continue
+        short = [sha for sha in shas if len(sha) < MIN_SIGN_LEN]
+        shas = [sha for sha in shas if len(sha) >= MIN_SIGN_LEN]
+        if short and not shas:
+            result.notes.append(
+                f"评论 {comment.get('html_url') or comment.get('id')}：签字 {', '.join(short)} 不足 {MIN_SIGN_LEN} 位，不认；请写 `安全签字 {head_sha[:MIN_SIGN_LEN]}`"
+            )
+            continue
         user = comment.get("user") or {}
         login, uid = user.get("login"), user.get("id")
         where = f"评论 {comment.get('html_url') or comment.get('id')}（{login}）"
@@ -746,7 +756,7 @@ def render(result: Result, head: str) -> str:
     lines += [f"- ❌ {v}" for v in result.violations]
     lines += [f"- ℹ️ {n}" for n in result.notes]
     if result.needs_signature and not result.signature and not result.violations:
-        lines += ["", f"用户本人在 PR 页面（网页或手机 App 手写）评论一行：`安全签字 {head[:7]}`，本检查会自动重跑。"]
+        lines += ["", f"用户本人在 PR 页面（网页或手机 App 手写）评论一行：`安全签字 {head[:12]}`，本检查会自动重跑。"]
     return "\n".join(lines) + "\n"
 
 
