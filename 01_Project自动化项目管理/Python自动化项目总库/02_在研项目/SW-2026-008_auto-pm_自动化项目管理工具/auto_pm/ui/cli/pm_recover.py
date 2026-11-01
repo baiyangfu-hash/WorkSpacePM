@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import click
@@ -56,14 +57,44 @@ def recover_status_pm(ctx: click.Context, operation_id: str) -> None:
     )
 
 
+MST = timezone(timedelta(hours=-7), "MST")
+
+
+def mst_text(moment: datetime) -> str:
+    """A moment as the user reads it (MST, UTC-7); the judgement itself still compares timezone-aware UTC values."""
+
+    return moment.astimezone(MST).strftime("%Y-%m-%d %H:%M:%S MST")
+
+
+def plain_refusal(error: ContinuityExecutionError, *, run_id: str, operation_id: str) -> str:
+    """Say in plain words why there is nothing to check, and what to type next; the technical text stays at the end for the record."""
+
+    text = str(error)
+    if operation_id and "不存在" in text:
+        head = f"账本里没有操作编号 {operation_id} 的派发记录。确认编号抄对了；不知道编号就改用 --run-id，Run 编号用 python main.py pm orient 看。"
+    elif "Run 当前是" in text:
+        head = (
+            f"{run_id or '这个 Run'} 现在不在 RUNNING 状态（{text.split('Run 当前是 ', 1)[1].split('，', 1)[0]}），"
+            "没有正在跑的执行进程可核对，不用对账。想看当前是哪个 Run、该做什么，敲 python main.py pm orient。"
+        )
+    elif "不存在" in text:
+        head = f"账本里没有 {run_id or '这个'} Run。Run 编号用 python main.py pm orient 看。"
+    else:
+        head = (
+            "账本里这个 Run 的启动记录对不上（缺失、重复或属于别的执行者），无法判断执行进程是谁的。"
+            "这是账本层面的问题：不要自己改，把这句原样报告用户。"
+        )
+    return f"{head}\n（技术原因：{text}）"
+
+
 def plain_report(
     *,
     run_id: str,
     run_state: str,
     process_id: int,
     status: RecoveryStatus,
-    recorded_started_at: str,
-    observed_created_at: str | None,
+    recorded_started_at: datetime,
+    observed_created_at: datetime | None,
 ) -> str:
     """The text a person (or another agent) reads: what is happening now, then exactly what to type next.
 
@@ -73,14 +104,14 @@ def plain_report(
     verdict = status.verdict
     header = [
         f"Run: {run_id}（账上状态 {run_state}）",
-        f"账本记的执行进程: 进程号 {process_id}，启动时刻 {recorded_started_at}",
-        f"这台电脑现在看到的: {'进程创建时刻 ' + observed_created_at if observed_created_at else '没有读到这个进程的创建时刻'}",
+        f"账本记的执行进程: 进程号 {process_id}，启动时刻 {mst_text(recorded_started_at)}",
+        f"这台电脑现在看到的: {'进程创建时刻 ' + mst_text(observed_created_at) if observed_created_at else '没有读到这个进程的创建时刻'}",
         f"结论: {verdict.value}（{status.reason}）",
         "",
     ]
     if verdict is RecoveryVerdict.ALIVE:
         body = [
-            "现在的情况: 执行进程还在运行，没有丢。账上 RUNNING 是对的。",
+            f"现在的情况: 执行进程还在运行，没有丢。账上写 {run_state} 是对的。",
             "下一步: 什么都不用敲。等它自己结束；想中途停掉它，要问用户，驾驶舱不替你结束进程。",
         ]
     elif verdict is RecoveryVerdict.UNKNOWN:
@@ -90,7 +121,8 @@ def plain_report(
         ]
     else:
         body = [
-            "现在的情况: 记录里的执行进程已经不在了（多半是主控或电脑重启时被带走），但账上这个 Run 还写着在运行，没有人在干活。",
+            f"现在的情况: 记录里的执行进程已经不在了（多半是主控或电脑重启时被带走），但账上这个 Run 还写着 {run_state}，没有人在干活。",
+            "先确认你就在跑执行代理的那台电脑上：在别的电脑上敲，进程号不存在，也会得到这个结论，那是误判，不要照着办。",
             f"工位里可能留着它没做完的半成品，先别清理。{'进程号已被别的无关进程占用，驾驶舱不会去碰它。' if verdict is RecoveryVerdict.PID_REUSED else ''}",
             "下一步: 先停下，把上面这几行报告用户，不要自己开新 Run。把这个 Run 记为失败的命令（pm recover --apply）随下一个版本提供；在那之前不要用底层 continuity 命令硬改。",
         ]
@@ -119,7 +151,7 @@ def recover_pm(ctx: click.Context, operation_id: str, run_id: str, as_json: bool
         else:
             run, evidence = service.resolve_started_run_by_run_id(run_id)
     except ContinuityExecutionError as error:
-        raise click.ClickException(f"运行身份不可恢复，必须 BLOCKED/待恢复：{error}") from error
+        raise click.ClickException(plain_refusal(error, run_id=run_id, operation_id=operation_id)) from error
     status, created_at = inspect_started_process(evidence)
     recorded = evidence.started_at.isoformat()
     observed = created_at.isoformat() if created_at is not None else None
@@ -147,7 +179,7 @@ def recover_pm(ctx: click.Context, operation_id: str, run_id: str, as_json: bool
             run_state=run.state.value,
             process_id=evidence.process_id,
             status=status,
-            recorded_started_at=recorded,
-            observed_created_at=observed,
+            recorded_started_at=evidence.started_at,
+            observed_created_at=created_at,
         )
     )

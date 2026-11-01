@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
 from auto_pm.application.core.execution_recovery_status import RecoveryStatus, RecoveryVerdict
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.ui.cli import pm as pm_module
@@ -86,6 +87,8 @@ def test_a_killed_executor_is_reported_dead_with_the_next_step_in_plain_words(
     assert "结论: DEAD" in result.output
     assert "现在的情况: 记录里的执行进程已经不在了" in result.output
     assert "不要自己开新 Run" in result.output
+    assert "先确认你就在跑执行代理的那台电脑上" in result.output  # on another computer the pid is missing too: a false DEAD
+    assert " MST" in result.output and "+00:00" not in result.output  # the user reads MST
     assert "工位里可能留着它没做完的半成品，先别清理" in result.output
     assert _events(tmp_path) == before
     assert service._store.get_run("RUN-001").state.value == "RUNNING"  # reporting does not settle the Run
@@ -122,7 +125,9 @@ def test_a_run_that_is_not_running_is_refused_with_its_real_state(tmp_path: Path
     result = _recover(tmp_path, "--run-id", "RUN-001")
 
     assert result.exit_code != 0
-    assert "READY" in result.output and "BLOCKED" in result.output
+    assert "现在不在 RUNNING 状态（READY）" in result.output and "不用对账" in result.output
+    assert "python main.py pm orient" in result.output
+    assert "BLOCKED" not in result.output  # no jargon from recover-status
 
 
 def test_an_unknown_run_is_refused(tmp_path: Path) -> None:
@@ -131,6 +136,8 @@ def test_an_unknown_run_is_refused(tmp_path: Path) -> None:
     result = _recover(tmp_path, "--run-id", "RUN-NOPE")
 
     assert result.exit_code != 0
+    assert "没有 RUN-NOPE" in result.output and "python main.py pm orient" in result.output
+    assert "BLOCKED" not in result.output
 
 
 @pytest.mark.parametrize("args", [[], ["--operation-id", "OP-1", "--run-id", "RUN-001"]])
@@ -156,11 +163,39 @@ def test_each_verdict_has_its_own_plain_next_step(verdict: RecoveryVerdict, must
         run_state="RUNNING",
         process_id=7,
         status=RecoveryStatus(verdict, "原因"),
-        recorded_started_at="2026-11-01T00:00:00+00:00",
+        recorded_started_at=datetime(2026, 11, 1, 17, 0, tzinfo=UTC),
         observed_created_at=None,
     )
     assert must_say in text and must_not_say not in text
     assert "现在的情况:" in text and "下一步:" in text
+    assert "2026-11-01 10:00:00 MST" in text  # 17:00 UTC is 10:00 MST
+
+
+@pytest.mark.parametrize("verdict", [RecoveryVerdict.DEAD, RecoveryVerdict.PID_REUSED])
+def test_a_gone_process_says_to_check_the_computer_first(verdict: RecoveryVerdict) -> None:
+    text = pm_recover.plain_report(
+        run_id="RUN-9",
+        run_state="RUNNING",
+        process_id=7,
+        status=RecoveryStatus(verdict, "原因"),
+        recorded_started_at=datetime(2026, 11, 1, 17, 0, tzinfo=UTC),
+        observed_created_at=None,
+    )
+    assert "先确认你就在跑执行代理的那台电脑上" in text
+
+
+def test_the_state_in_the_text_is_the_ledgers_real_state_not_a_fixed_word() -> None:
+    """A VERIFYING Run must not be described as RUNNING."""
+    for verdict in (RecoveryVerdict.ALIVE, RecoveryVerdict.DEAD):
+        text = pm_recover.plain_report(
+            run_id="RUN-9",
+            run_state="VERIFYING",
+            process_id=7,
+            status=RecoveryStatus(verdict, "原因"),
+            recorded_started_at=datetime(2026, 11, 1, 17, 0, tzinfo=UTC),
+            observed_created_at=None,
+        )
+        assert "VERIFYING" in text and "RUNNING" not in text
 
 
 def _resume_stub(run_state: str | None) -> Any:
@@ -189,3 +224,50 @@ def test_orient_points_a_running_run_at_pm_recover_and_only_that(capsys: pytest.
 
     pm_module._echo_resume_text(_resume_stub(None))
     assert "pm recover" not in capsys.readouterr().out
+
+
+def test_operation_id_finds_the_run_through_the_dispatch_receipt(
+    tmp_path: Path, child: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Run in the answer must be the one named by the receipt (a fake dispatch: the receipt lookup is stubbed, the rest is real)."""
+    _running_run(tmp_path, child.pid, datetime.now(UTC))
+    run = SimpleNamespace(state=SimpleNamespace(value="RUNNING"))
+    evidence = ExecutionStartEvidence(process_id=child.pid, session_id="s", started_at=datetime.now(UTC))
+    monkeypatch.setattr(
+        ContinuityExecutionService,
+        "resolve_started_run",
+        lambda _self, operation_id: (SimpleNamespace(run_id="RUN-FROM-RECEIPT"), run, evidence),
+    )
+
+    result = _recover(tmp_path, "--operation-id", "OP-1")
+
+    assert result.exit_code == 0, result.output
+    assert "Run: RUN-FROM-RECEIPT" in result.output and "结论: ALIVE" in result.output
+
+
+def test_an_unknown_operation_id_is_explained_in_plain_words(tmp_path: Path) -> None:
+    _services(tmp_path, Clock())
+
+    result = _recover(tmp_path, "--operation-id", "OP-NOPE")
+
+    assert result.exit_code != 0
+    assert "没有操作编号 OP-NOPE 的派发记录" in result.output and "--run-id" in result.output
+    assert "BLOCKED" not in result.output
+
+
+def test_a_start_record_owned_by_someone_else_is_refused(
+    tmp_path: Path, child: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The process on record must belong to the Run's own executor; otherwise we would judge somebody else's process."""
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    _running_run(tmp_path, child.pid, datetime.now(UTC))
+    real = ContinuityStore.get_run_started_evidence
+    monkeypatch.setattr(
+        ContinuityStore, "get_run_started_evidence", lambda self, run_id: ("someone-else", real(self, run_id)[1])
+    )
+
+    result = _recover(tmp_path, "--run-id", "RUN-001")
+
+    assert result.exit_code != 0
+    assert "启动记录对不上" in result.output and "原样报告用户" in result.output
