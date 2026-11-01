@@ -74,7 +74,8 @@ def test_a_new_template_project_is_registered_and_pm_orient_then_knows_it(tmp_pa
     code, output = _cli(tmp_path, "pm", "orient", "DJ-2026-009", "--json")
     assert code != 0 and "项目未登记到 Workspace Registry" in output
     # TD-SW008-266 F9: the error names the next step instead of leaving the reader to find it.
-    assert "project register DJ-2026-009" in " ".join(output.split())
+    flat = " ".join(output.split())
+    assert "project register DJ-2026-009" in flat and "agent 请勿自行登记" in flat
 
     code, output = _cli(tmp_path, "project", "register", "DJ-2026-009")
     assert code == 0, output

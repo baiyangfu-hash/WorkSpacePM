@@ -343,6 +343,7 @@ def test_project_create_points_to_the_register_step_without_writing_the_registry
     assert result.exit_code == 0, result.output
     assert "project register SW-2026-011" in output
     assert "pm verify" in output  # why the registry change must be committed first
+    assert "agent 请勿自行登记" in output  # registering is for the user or the main executor (AGENTS.md: governance files)
     assert registry.read_bytes() == before  # create itself never registers (the registry is a governance file)
 
 

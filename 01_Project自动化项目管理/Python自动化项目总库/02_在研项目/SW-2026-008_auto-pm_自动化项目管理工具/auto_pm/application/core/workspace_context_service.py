@@ -181,8 +181,8 @@ class WorkspaceContextService:
         if mapping is None:
             raise WorkspaceContextError(
                 f"项目未登记到 Workspace Registry: {project_id}。"
-                f"处理：在控制根运行 main.py project register {project_id}（可先加 --dry-run 预览）；"
-                "登记表会留下未提交改动，请先提交再开 Run，否则 pm verify 会拒绝"
+                f"处理：由用户或主执行在控制根登记（main.py project register {project_id}，可先加 --dry-run 预览），"
+                "agent 请勿自行登记；登记表会留下未提交改动，提交后才能开 Run，否则 pm verify 会拒绝"
             )
         return mapping
 
