@@ -56,6 +56,25 @@ def card_is_new(card_file: Path) -> bool:
         return True
 
 
+def frozen_commit_readable(card_file: Path) -> bool:
+    """True when ``CARD_TIER_FROZEN_COMMIT`` exists in the repository around ``card_file``; False when it cannot be read (shallow clone, not a repository, git failing)."""
+
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(card_file.parent), "cat-file", "-e", f"{CARD_TIER_FROZEN_COMMIT}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",  # lenient-decode: only the exit code is used
+            stdin=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+        )
+        return done.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _load_classifier(workspace_root: Path) -> ModuleType:
     source = workspace_root / CLASSIFIER_RELATIVE
     spec = importlib.util.spec_from_file_location("_card_tier_classifier", source)
@@ -77,7 +96,14 @@ def tier_findings(
     declared = declared_tiers(lines)
     if not declared:
         if card_file is not None and card_is_new(card_file):
-            return [("tier", "档次", "新卡头部必须写 `> 档次：文档档/测试档/产品档/核心档`（不在冻结提交里的卡不写档次即拒）")]
+            message = "新卡头部必须写 `> 档次：文档档/测试档/产品档/核心档`（不在冻结提交里的卡不写档次即拒）"
+            if not frozen_commit_readable(card_file):
+                # 浅克隆里读不到冻结提交，每张卡（包括老卡）都会被当成新卡拒：说清原因和办法，别让人去改卡
+                message += (
+                    f"。这个克隆里读不到冻结提交 {CARD_TIER_FROZEN_COMMIT[:8]}（多半是浅克隆或历史不全），"
+                    "所以老卡也被当成新卡拒了：先取完整历史（git fetch --unshallow）再重试，不要为此改卡"
+                )
+            return [("tier", "档次", message)]
         return []
     if len(declared) > 1:
         return [("tier", "档次", f"头部字段 `档次：` 出现 {len(declared)} 次，只能写一次")]
