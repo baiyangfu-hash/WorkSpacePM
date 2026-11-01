@@ -148,7 +148,7 @@ class TestConstraintCLI:
         self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch
     ) -> None:
         """TD-SW008-266 S5：PM_SESSION 已退役（AGENTS.md），命令示例不再把它当要修的文件。"""
-        monkeypatch.setattr("auto_pm.cli.constraint._resolve_workspace", lambda ctx: temp_workspace)
+        monkeypatch.setattr("auto_pm.ui.cli.constraint._resolve_workspace", lambda ctx: temp_workspace)
 
         result = cli_runner.invoke(constraint_group, ["heal"])
 
