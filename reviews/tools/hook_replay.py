@@ -12,7 +12,7 @@
 * 合并提交不查（它自己没有新代码，代码在被合并的提交里）。
 * 云端 PR 的提交说明常常不写变更单号（用户 2026-11-01 裁决：认 PR 描述）：提交说明里没有单号时，退而看 PR 描述——
   描述里恰有一个 ``CHG-…`` 就按它做上面 3、4 两项证据检查；没有则看描述里的 ``任务卡: <路径>`` 一行，
-  读 **PR 基线上** 那张卡的 ``变更单：`` 头部（``CHG-…`` 照样查证据，``无`` 视为卡已声明不需要变更单）。
+  读 **PR 基线上** 那张卡的 ``变更单：`` 头部（``CHG-…`` 照样查证据；``无`` 不算，钩子本来就要求生产代码绑定变更单）。
   提交说明里自己写了单号的，仍以提交说明为准。
 
 只报警，不判通过/失败（方案“第一步”）：默认退出码 0，结果写进作业摘要和 ``::warning::`` 标注，用来观察两周的误报；
@@ -62,7 +62,7 @@ class Finding:
 
 @dataclass(frozen=True)
 class PrBinding:
-    """PR 描述给出的整体绑定：``chg`` 是要查证据的变更单号（空串 = 不需要，``via`` 说明来源），``problem`` 非空 = 描述写得不合格。"""
+    """PR 描述给出的整体绑定：``chg`` 是要查证据的变更单号（``via`` 说明来源），``problem`` 非空 = 描述写得不合格。"""
 
     chg: str = ""
     via: str = ""
@@ -212,7 +212,8 @@ def pr_binding(repo: Path, base: str, body: str) -> PrBinding:
     if header.change_id and card_basis.CHG_ID.fullmatch(header.change_id):
         return PrBinding(chg=header.change_id, via=f"任务卡 {card}（变更单 {header.change_id}）")
     if card_basis._first_value(header.change[0]) == card_basis.NO_CHANGE:
-        return PrBinding(via=f"任务卡 {card}（卡声明不需要变更单）")
+        # 与本机 commit-msg 钩子一致：含生产代码的提交必须绑定变更单，任务卡写“无”不能替代（卡的“无”只对不动生产代码的卡成立）。
+        return PrBinding(problem=f"任务卡 {card} 的 `变更单：` 写的是 `无`，但含生产代码的提交必须绑定一张变更单")
     return PrBinding(problem=f"任务卡 {card} 的 `变更单：` 既不是变更单号也不是 `无`: {header.change[0]}")
 
 
@@ -233,15 +234,13 @@ def replay(
         chgs = tuple(dict.fromkeys(hook._CHG_ID_PATTERN.findall(message)))
         via = ""
         problem = ""
-        no_evidence_needed = False  # 任务卡声明不需要变更单：绑定成立，没有证据可查
         if not chgs and overall.present:
             if overall.problem:
                 problem = f"提交说明没有变更单号，PR 描述的绑定也不合格: {overall.problem}"
             else:
                 via = overall.via
-                chgs = (overall.chg,) if overall.chg else ()
-                no_evidence_needed = not overall.chg
-        if problem or no_evidence_needed:
+                chgs = (overall.chg,)
+        if problem:
             pass
         elif not chgs:
             problem = f"含生产代码（{production[0]} 等 {len(production)} 个）但提交说明没有绑定变更单号，PR 描述里也没有变更单号或任务卡"

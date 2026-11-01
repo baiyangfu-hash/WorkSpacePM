@@ -277,13 +277,13 @@ def test_a_task_card_whose_change_number_has_no_evidence_is_reported(repo: Path)
     assert "找不到变更单文件" in finding.problem
 
 
-def test_a_task_card_that_declares_no_change_order_binds_without_evidence(repo: Path) -> None:
+def test_a_task_card_that_declares_no_change_order_does_not_cover_production_code(repo: Path) -> None:
+    """与本机钩子一致：含生产代码的提交必须绑定变更单，卡里写“无”不能替代。"""
     commit(repo, "card", {CARD: card_text("> 变更单：`无`")})
     base = git(repo, "rev-parse", "HEAD")
     commit(repo, "feat: no number", {CODE: "x = 1\n"})
     (finding,) = run_body(repo, base, f"任务卡: {CARD}")
-    assert finding.problem == ""
-    assert "不需要变更单" in finding.via
+    assert "写的是 `无`" in finding.problem and finding.via == ""
 
 
 def test_a_task_card_that_exists_only_in_the_pr_head_does_not_count(repo: Path) -> None:
@@ -297,6 +297,7 @@ def test_a_task_card_that_exists_only_in_the_pr_head_does_not_count(repo: Path) 
     ("card", "expected"),
     [
         ("# 旧式卡，没有头部\n", "头部有 0 行"),
+        (card_text(f"> 变更单：`{CHG}`\n> 变更单：`CHG-DOCU-2026-901`"), "头部有 2 行"),
         (card_text("> 变更单：`待补`"), "既不是变更单号也不是"),
     ],
 )
