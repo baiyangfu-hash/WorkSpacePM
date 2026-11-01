@@ -1038,7 +1038,7 @@ class AiHandoffService:
             if not update_str:
                 continue
             # 优先匹配规范格式 CHG-{DOMAIN}-{YYYY}-{XXX}，防止形如 .../CHG-SPEC/CHG-SPEC-2026-001.md 被误截为 CHG-SPEC
-            m = re.search(r"(CHG-[A-Za-z]+-\d{4}-\d{3})", update_str)
+            m = re.search(r"(CHG-[A-Za-z]+-\d{4}-\d{3,})", update_str)
             if not m:
                 file_stem = Path(update_str.split(":")[0].strip()).stem
                 m = re.search(r"(CHG-[A-Za-z0-9_-]+)", file_stem)

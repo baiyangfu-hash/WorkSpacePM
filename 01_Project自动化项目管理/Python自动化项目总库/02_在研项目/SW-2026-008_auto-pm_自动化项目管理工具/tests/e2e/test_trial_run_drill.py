@@ -246,7 +246,7 @@ def test_t04_every_file_the_cockpit_generates_is_one_the_skill_says_to_commit(tm
     assert_closed_and_clean(drill, result, PROJECT_ID)
 
     generated = [path for path in _uncommitted(drill.root) if path not in files]
-    sheet = re.compile(rf"/CHG-{MAIN_DOMAIN}-\d{{4}}-\d{{3}}\.md$")
+    sheet = re.compile(rf"/CHG-{MAIN_DOMAIN}-\d{{4}}-\d{{3,}}\.md$")
     ledger = re.compile(r"/[^/]*版本变更台账\.md$")
     unnamed = [path for path in generated if not (sheet.search(path) or ledger.search(path))]
     assert unnamed == [], f"驾驶舱生成了技能没提到的文件，agent 会不知道交不交: {unnamed}"

@@ -389,13 +389,13 @@ class ChgParser:
         例: CHG-DOCU-2026-001.md → CHG-DOCU-2026-001
         """
         basename = os.path.splitext(os.path.basename(file_path))[0]
-        if re.match(r"CHG-[A-Z]+-\d{4}-\d{3}", basename):
+        if re.match(r"CHG-[A-Z]+-\d{4}-\d{3,}", basename):
             return basename
         return ""
 
     def _extract_change_number_from_content(self, content: str) -> str:
         """从内容中提取变更编号"""
-        match = re.search(r"CHG-[A-Z]+-\d{4}-\d{3}", content)
+        match = re.search(r"CHG-[A-Z]+-\d{4}-\d{3,}", content)
         return match.group(0) if match else ""
 
     def _extract_project_id_from_content(self, content: str) -> str:
@@ -565,7 +565,7 @@ class ChgParser:
             related_chg = ""
             # 提取关联变更单号（CHG-xxx 格式）
             for cell in cells:
-                chg_match = re.search(r"(CHG-[A-Z]+-\d{4}-\d{3})", cell)
+                chg_match = re.search(r"(CHG-[A-Z]+-\d{4}-\d{3,})", cell)
                 if chg_match:
                     related_chg = chg_match.group(1)
                     break
@@ -604,7 +604,7 @@ class ChgParser:
             if re.match(r"^\|[\s\-:|]+\|$", line):
                 continue
             # 在表格行中查找 CHG-xxx 格式的变更单号
-            matches = re.findall(r"CHG-[A-Z]+-\d{4}-\d{3}", line)
+            matches = re.findall(r"CHG-[A-Z]+-\d{4}-\d{3,}", line)
             for m in matches:
                 if m not in changes and not m.endswith("______"):
                     changes.append(m)

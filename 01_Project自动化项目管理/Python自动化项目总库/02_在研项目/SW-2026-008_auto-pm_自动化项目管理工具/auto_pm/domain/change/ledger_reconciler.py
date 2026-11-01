@@ -73,7 +73,7 @@ class ReconcileDiff:
 
 
 # 变更编号正则（与 path_resolver._CHANGE_NUMBER_PATTERN 对齐）
-_CHANGE_NUMBER_RE = re.compile(r"CHG-[A-Z]+-\d{4}-\d{3}")
+_CHANGE_NUMBER_RE = re.compile(r"CHG-[A-Z]+-\d{4}-\d{3,}")
 
 
 class LedgerReconciler:

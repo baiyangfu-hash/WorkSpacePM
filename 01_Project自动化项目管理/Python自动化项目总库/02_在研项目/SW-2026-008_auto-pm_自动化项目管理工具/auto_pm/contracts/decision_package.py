@@ -16,7 +16,7 @@ from typing import Any
 SCHEMA_VERSION = "decision_package.v1"
 RUNTIME_CAPABILITY_KEY = "runtime_capability"
 DECISION_ID_PATTERN = re.compile(r"DEC-[0-9]{8}-[A-Z0-9]{8}\Z")
-RUNTIME_CHANGE_ID_PATTERN = re.compile(r"CHG-[A-Z][A-Z0-9]*-[0-9]{4}-[0-9]{3}\Z")
+RUNTIME_CHANGE_ID_PATTERN = re.compile(r"CHG-[A-Z][A-Z0-9]*-[0-9]{4}-[0-9]{3,}\Z")
 
 
 def is_canonical_decision_id(value: object) -> bool:

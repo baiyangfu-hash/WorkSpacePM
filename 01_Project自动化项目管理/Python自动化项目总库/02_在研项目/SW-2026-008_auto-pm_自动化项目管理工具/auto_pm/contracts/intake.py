@@ -86,10 +86,10 @@ _TICKET_HASH = re.compile(r"[0-9a-f]{64}\Z")
 _DOMAIN = re.compile(r"[A-Z]{3,4}\Z")
 _SCOPE = re.compile(r"[A-Z]{3,6}\Z")
 _LEDGER_ID = re.compile(r"TD-[A-Z0-9]+-\d{3,}\Z")
-_CHG_ID = re.compile(r"CHG-[A-Z]{3,4}-\d{4}-\d{3}\Z")
+_CHG_ID = re.compile(r"CHG-[A-Z]{3,4}-\d{4}-\d{3,}\Z")
 _COMMIT = re.compile(r"[0-9a-f]{7,40}\Z")
 _DUPLICATE_REF = re.compile(
-    r"(?:INBOX-[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+-\d{4}|TD-[A-Z0-9]+-\d{3,}|CHG-[A-Z]{3,4}-\d{4}-\d{3})\Z"
+    r"(?:INBOX-[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+-\d{4}|TD-[A-Z0-9]+-\d{3,}|CHG-[A-Z]{3,4}-\d{4}-\d{3,})\Z"
 )
 _MAX_SHORT = 200
 _MAX_LONG = 2000

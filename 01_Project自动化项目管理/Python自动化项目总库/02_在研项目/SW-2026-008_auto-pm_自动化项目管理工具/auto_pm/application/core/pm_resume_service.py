@@ -173,7 +173,7 @@ class PmResumeService:
     @staticmethod
     def _active_changes(content: str, open_changes: Sequence[object]) -> list[str]:
         known = {str(getattr(change, "change_number", "")) for change in open_changes}
-        mentioned = set(re.findall(r"CHG-[A-Z]+-\d{4}-\d{3}", content))
+        mentioned = set(re.findall(r"CHG-[A-Z]+-\d{4}-\d{3,}", content))
         return sorted(number for number in known if number in mentioned) or sorted(known)[:3]
 
     @staticmethod
