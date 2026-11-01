@@ -105,7 +105,19 @@ def test_after_the_cancel_no_new_child_is_started(tmp_path: Path) -> None:
     assert not marker.exists()
 
 
-def test_a_gate_that_runs_out_of_time_kills_its_children_through_the_real_supervisor(tmp_path: Path) -> None:
+def test_a_gate_that_runs_out_of_time_kills_its_children_through_the_real_supervisor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The supervisor's cancel kills the tree and the worker unwinds by itself with ``GateCancelledError``.
+
+    ``reclaim_thread`` gives that cooperative unwind ``_SETTLE_SECONDS`` before it injects ``GateAbandonedError`` into the thread.  On a
+    loaded Windows runner the unwind (pipes closing after ``taskkill``) sometimes took longer than the default half second, the injection
+    won, and the worker ended with ``GateAbandonedError`` instead (CI of integration batch four).  Both endings are correct for the
+    product; this test is about the cooperative one, and the injection fallback has its own tests (``test_gate_thread_reclaim.py``).  So
+    the settle window is made long enough here that the injection cannot pre-empt the unwind, instead of weakening the assertion.
+    """
+
+    from auto_pm.infrastructure import process_scope as module
+
+    monkeypatch.setattr(module, "_SETTLE_SECONDS", 60.0)
     beat = tmp_path / "beat.txt"
     seen: list[BaseException] = []
 
