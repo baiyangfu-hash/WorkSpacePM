@@ -27,11 +27,12 @@ _POPEN_ALLOWED = {
 }
 
 
-def find_unbounded_subprocess_calls(source: str) -> list[tuple[int, str]]:
+def find_unbounded_subprocess_calls(source: str | bytes) -> list[tuple[int, str]]:
     """(line, why) for every subprocess call that is not provably bounded.
 
     Follows ``import subprocess as sp`` and ``from subprocess import run as r``; flags ``timeout=None``
-    and every ``Popen`` (the caller decides which files may own a Popen).
+    and every ``Popen`` (the caller decides which files may own a Popen).  Pass the raw bytes of a file: a BOM or coding cookie is
+    then Python's business, and a file that cannot be parsed raises (and fails the test) instead of being skipped.
     """
     tree = ast.parse(source)
     modules: set[str] = set()
@@ -75,9 +76,7 @@ def test_every_subprocess_call_in_auto_pm_has_a_timeout() -> None:
     offenders: list[str] = []
     for path in sorted(PACKAGE.rglob("*.py")):
         relative = path.relative_to(PACKAGE).as_posix()
-        for line, why in find_unbounded_subprocess_calls(
-            path.read_text(encoding="utf-8-sig", errors="replace")
-        ):
+        for line, why in find_unbounded_subprocess_calls(path.read_bytes()):
             if why == "Popen" and relative in _POPEN_ALLOWED:
                 continue
             offenders.append(f"{relative}:{line} ({why})")
@@ -127,11 +126,20 @@ def test_scan_accepts_bounded_calls(source: str) -> None:
     assert find_unbounded_subprocess_calls(source) == []
 
 
+def test_the_scan_reads_bytes_so_a_bom_is_fine_and_a_broken_file_fails() -> None:
+    bom = b"\xef\xbb\xbf" + "import subprocess\nsubprocess.run(['x'])  # \u4e2d\u6587\n".encode()
+    assert [why for _line, why in find_unbounded_subprocess_calls(bom)] != []
+    with pytest.raises(SyntaxError):
+        find_unbounded_subprocess_calls(b"subprocess.run(['x'\n")
+
+
 def test_popen_is_only_allowed_where_the_process_lifetime_is_managed() -> None:
     """The allowlist must not rot: every entry still exists and still starts a Popen."""
     for relative in _POPEN_ALLOWED:
-        text = (PACKAGE / relative).read_text(encoding="utf-8-sig", errors="replace")
-        assert any(why == "Popen" for _line, why in find_unbounded_subprocess_calls(text)), relative
+        source = (PACKAGE / relative).read_bytes()
+        assert any(why == "Popen" for _line, why in find_unbounded_subprocess_calls(source)), (
+            relative
+        )
 
 
 def _hang(*_args: Any, **kwargs: Any) -> Any:

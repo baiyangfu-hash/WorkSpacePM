@@ -18,6 +18,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "auto_pm"
 BASELINE = Path(__file__).with_name("short_layer_imports_baseline.json")
@@ -30,7 +32,11 @@ DOTTED_PATH = re.compile(r"auto_pm\.([A-Za-z_]\w*)(?:\.[A-Za-z_]\w*)*")
 def short_names() -> frozenset[str]:
     """Names importable as ``auto_pm.<name>`` only because the layer directories are on the package path."""
 
-    direct = {p.stem if p.is_file() else p.name for p in PACKAGE.iterdir() if not p.name.startswith(("_", "."))}
+    direct = {
+        p.stem if p.is_file() else p.name
+        for p in PACKAGE.iterdir()
+        if not p.name.startswith(("_", "."))
+    }
     found: set[str] = set()
     for layer in LAYERS:
         for child in (PACKAGE / layer).iterdir():
@@ -47,17 +53,22 @@ def _logger_name_nodes(tree: ast.AST) -> set[int]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and node.args:
             func = node.func
-            name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else func.id
+                if isinstance(func, ast.Name)
+                else ""
+            )
             if name == "getLogger":
                 found.add(id(node.args[0]))
     return found
 
 
 def count_short_imports(path: Path, names: frozenset[str]) -> int:
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-    except SyntaxError:
-        return 0
+    # Parsed from the raw bytes (BOM / coding cookie are Python's business); a file that cannot be parsed raises and fails the
+    # test, naming the file -- counting it as 0 would let it hide any number of short imports.
+    tree = ast.parse(path.read_bytes(), filename=str(path))
     total = 0
     logger_names = _logger_name_nodes(tree)
     for node in ast.walk(tree):
@@ -101,6 +112,18 @@ def test_the_short_name_list_is_what_the_layers_provide() -> None:
     names = short_names()
     assert {"core", "change", "db"} <= names
     assert not names & {"application", "domain", "infrastructure", "ui", "contracts", "api"}
+
+
+def test_a_file_with_a_bom_is_parsed_and_a_broken_one_fails_instead_of_counting_as_zero(
+    tmp_path: Path,
+) -> None:
+    bom = tmp_path / "bom.py"
+    bom.write_bytes(b"\xef\xbb\xbf" + "import auto_pm.core.x  # \u4e2d\u6587\n".encode())
+    assert count_short_imports(bom, frozenset({"core"})) == 1
+    broken = tmp_path / "broken.py"
+    broken.write_bytes(b"import auto_pm.core.x(\n")
+    with pytest.raises(SyntaxError):
+        count_short_imports(broken, frozenset({"core"}))
 
 
 def test_a_short_import_is_counted_and_a_layered_one_is_not(tmp_path: Path) -> None:
@@ -169,12 +192,17 @@ def test_the_baseline_is_tight_so_converted_imports_cannot_come_back() -> None:
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     counts = current_counts()
     slack = {p: (b, counts.get(p, 0)) for p, b in baseline.items() if counts.get(p, 0) < b}
-    assert not slack, "基线比实际宽松，请运行 --write 收紧：" + "；".join(f"{p} 基线 {b} 实际 {c}" for p, (b, c) in sorted(slack.items()))
+    assert not slack, "基线比实际宽松，请运行 --write 收紧：" + "；".join(
+        f"{p} 基线 {b} 实际 {c}" for p, (b, c) in sorted(slack.items())
+    )
 
 
 if __name__ == "__main__":
     if "--write" in sys.argv:
-        BASELINE.write_text(json.dumps(current_counts(), ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        BASELINE.write_text(
+            json.dumps(current_counts(), ensure_ascii=False, indent=1, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         print(f"wrote {BASELINE}")
     else:
         print(json.dumps(current_counts(), ensure_ascii=False, indent=1, sort_keys=True))
