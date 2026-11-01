@@ -18,6 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.workspace_context_service import WorkspaceContextError
 from auto_pm.ui.cli import delivery, spec
 from auto_pm.ui.cli.__main__ import cli
 from auto_pm.ui.cli.caller_path import CALLER_CWD_ENV, CallerPath, caller_cwd_default
@@ -172,7 +173,7 @@ def test_context_resolve_starts_from_the_caller_folder_by_default(launched: Path
 
         def resolve(self, project_id: str = "", start_path: Any = None) -> Any:
             starts.append(start_path)
-            raise pm.WorkspaceContextError("spy")
+            raise WorkspaceContextError("spy")
 
     monkeypatch.setattr(pm, "WorkspaceContextService", Spy)
 
@@ -193,7 +194,7 @@ def _spy_context_service(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
         def resolve(self, project_id: str = "", start_path: Any = None) -> Any:
             starts.append(start_path)
-            raise pm.WorkspaceContextError("spy")
+            raise WorkspaceContextError("spy")
 
     monkeypatch.setattr(pm, "WorkspaceContextService", Spy)
     return starts
@@ -236,7 +237,7 @@ def test_context_resolve_keeps_the_process_folder_without_the_launcher(tmp_path:
 
         def resolve(self, project_id: str = "", start_path: Any = None) -> Any:
             starts.append(start_path)
-            raise pm.WorkspaceContextError("spy")
+            raise WorkspaceContextError("spy")
 
     monkeypatch.setattr(pm, "WorkspaceContextService", Spy)
 
