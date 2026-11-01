@@ -18,6 +18,7 @@ from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, AgentW
 from auto_pm.application.core.pr_open_service import PrOpenRefusedError, PrOpenService
 from auto_pm.application.core.pr_ready_service import PrReadyService, render
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 AGENTS = click.Choice(sorted(AGENT_ROSTER))
@@ -65,6 +66,8 @@ def open_cmd(
     no_fetch: bool,
 ) -> None:
     """为 AGENT 的工位 <前缀><CARD> 推送分支并开 PR（只开不合）"""
+    if not dry_run:  # --dry-run pushes nothing and opens nothing
+        require_runtime_identity_for_workspace(ctx)
     app_ctx: AppContext = ctx.obj
     root = app_ctx.control_root or app_ctx.workspace_root or os.getcwd()
     try:

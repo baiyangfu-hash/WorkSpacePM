@@ -1,7 +1,7 @@
 """TD-SW008-214: no command-line command can appear without a decision about the runtime-identity guard.
 
-Thirteen command groups (``pm``, ``change``, ``continuity``, ``decision``, ``handoff``, ``implementation-card``, ``ledger``,
-``plc``, ``python``, ``project``, ``doc``, ``prototype``, ``template``) have their own test that lists every command as guarded or not.
+Fifteen command groups (``pm``, ``change``, ``continuity``, ``decision``, ``handoff``, ``implementation-card``, ``ledger``,
+``plc``, ``pr``, ``worktree``, ``python``, ``project``, ``doc``, ``prototype``, ``template``) have their own test that lists every command as guarded or not.
 The other groups had nothing: a new write command there reached the ledger or a project folder with no identity check and no
 test noticing.  This test walks the whole command tree and applies one rule to every command outside those twelve groups:
 
@@ -37,10 +37,12 @@ CLASSIFIED_GROUPS = frozenset(
         "ledger",
         "plc",
         "pm",
+        "pr",
         "project",
         "prototype",
         "python",
         "template",
+        "worktree",
     }
 )
 
@@ -81,10 +83,6 @@ UNDECIDED: dict[str, tuple[str, ...]] = {
         "check",
         "view",
     ),
-    "pr": (
-        "open",
-        "ready",
-    ),
     "role": (
         "check",
         "list",
@@ -115,12 +113,6 @@ UNDECIDED: dict[str, tuple[str, ...]] = {
         "resume",
         "run",
         "status",
-    ),
-    "worktree": (
-        "close",
-        "list",
-        "open",
-        "sweep",
     ),
 }
 
