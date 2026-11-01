@@ -29,8 +29,11 @@ from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 CLASSIFIED_GROUPS = frozenset(
     {
         "change",
+        "clean",
+        "constraint",
         "continuity",
         "decision",
+        "delivery",
         "doc",
         "handoff",
         "implementation-card",
@@ -41,29 +44,16 @@ CLASSIFIED_GROUPS = frozenset(
         "project",
         "prototype",
         "python",
+        "spec",
         "template",
+        "vartable",
         "worktree",
     }
 )
 
 # Today's commands in the other groups with no identity guard and no decision yet (TD-SW008-214: allow list still open).
 UNDECIDED: dict[str, tuple[str, ...]] = {
-    "clean": ("",),
-    "constraint": (
-        "check",
-        "guard",
-        "heal",
-        "list",
-        "verify",
-    ),
     "context": ("resolve",),
-    "delivery": (
-        "archive clean",
-        "archive list",
-        "build",
-        "package",
-        "status",
-    ),
     "doctor": ("",),
     "dogfood": (
         "inspect",
@@ -86,23 +76,6 @@ UNDECIDED: dict[str, tuple[str, ...]] = {
     "role": (
         "check",
         "list",
-    ),
-    "spec": (
-        "check",
-        "frontmatter",
-        "index",
-        "lint",
-        "report",
-        "sync",
-    ),
-    "vartable": (
-        "batch-parse",
-        "convert",
-        "detect-encoding",
-        "detect-format",
-        "list-encodings",
-        "list-formats",
-        "parse",
     ),
     "workflow": (
         "confirm-start",

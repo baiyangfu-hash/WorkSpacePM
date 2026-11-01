@@ -19,6 +19,9 @@ from auto_pm import __version__
 from auto_pm.ui.cli.__main__ import cli
 from auto_pm.ui.cli.spec import spec_group
 
+# These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_workspace_writers_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 @pytest.mark.cli
 class TestSpecCLIBoundary:

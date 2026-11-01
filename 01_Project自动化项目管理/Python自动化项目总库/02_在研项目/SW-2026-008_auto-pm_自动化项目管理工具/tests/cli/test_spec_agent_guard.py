@@ -18,6 +18,9 @@ from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
 from auto_pm.ui.cli import spec as spec_cli
 from auto_pm.ui.cli.spec import spec_group
 
+# These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_workspace_writers_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 GOOD_EVIDENCE = "user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7t1rGHHJbj"
 BAD_EVIDENCE = ("yes", "user-confirmation:short", "user-confirmation:claude-says-ok-now", "  ")
 

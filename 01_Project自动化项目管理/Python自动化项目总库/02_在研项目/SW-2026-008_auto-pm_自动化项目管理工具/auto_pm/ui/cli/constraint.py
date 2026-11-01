@@ -38,6 +38,7 @@ from auto_pm.domain.constraint.guard import FileGuard
 from auto_pm.domain.constraint.loader import ConstraintLoader, ConstraintLoadError
 from auto_pm.domain.constraint.models import Constraint, Violation
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 
@@ -208,6 +209,7 @@ def guard_file(ctx: click.Context, file: str) -> None:
 
     FILE: 要守护的文件路径
     """
+    require_runtime_identity_for_workspace(ctx)
     workspace = _resolve_workspace(ctx)
     fp = Path(file).resolve()
 
@@ -270,6 +272,8 @@ def heal_files(
     支持单文件修复（--file）和全量扫描修复（--all）。
     使用 --dry-run 预览将要修复的内容。
     """
+    if not dry_run:
+        require_runtime_identity_for_workspace(ctx)
     workspace = _resolve_workspace(ctx)
     guard = FileGuard(workspace)
 

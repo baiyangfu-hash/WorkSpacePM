@@ -15,6 +15,9 @@ from click.testing import CliRunner
 from auto_pm.domain.constraint.guard import BOM
 from auto_pm.ui.cli.constraint import constraint_group
 
+# These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_workspace_writers_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
