@@ -133,7 +133,7 @@ def spec_group() -> None:
 
 
 @spec_group.command(name="check")
-@click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
+@click.option("--workspace", "-w", default=None, type=CallerPath(file_okay=False), help="工作空间根目录（未指定时回退全局 -w）")
 @click.option("--fix", "auto_fix", is_flag=True, help="自动修复可修复的问题（SHC-002/007）")
 @click.option("--dry-run", is_flag=True, help="仅预览修复操作，不实际修改文件")
 @click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table", help="输出格式")
@@ -340,7 +340,7 @@ def _output_check_table(
 
 
 @spec_group.command(name="index")
-@click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
+@click.option("--workspace", "-w", default=None, type=CallerPath(file_okay=False), help="工作空间根目录（未指定时回退全局 -w）")
 @click.option(
     "--domain",
     type=click.Choice(["pm", "plc", "python", "all"]),
@@ -397,7 +397,7 @@ def cmd_index(
 
 
 @spec_group.command(name="frontmatter")
-@click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
+@click.option("--workspace", "-w", default=None, type=CallerPath(file_okay=False), help="工作空间根目录（未指定时回退全局 -w）")
 @click.option("--fix", is_flag=True, help="实际执行写入（默认仅预览）")
 @click.option("--spec-id", default=None, help="只处理指定规范")
 @click.option(
@@ -511,8 +511,8 @@ def _report_lands_in_library(ws: Path, output: str | None) -> bool:
 
 
 @spec_group.command(name="report")
-@click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
-@click.option("--output", "-o", default=None, help="输出文件路径")
+@click.option("--workspace", "-w", default=None, type=CallerPath(file_okay=False), help="工作空间根目录（未指定时回退全局 -w）")
+@click.option("--output", "-o", default=None, type=CallerPath(dir_okay=False), help="输出文件路径")
 @click.option(
     "--format",
     "fmt",
@@ -564,7 +564,7 @@ def cmd_report(
 
 
 @spec_group.command(name="lint")
-@click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
+@click.option("--workspace", "-w", default=None, type=CallerPath(file_okay=False), help="工作空间根目录（未指定时回退全局 -w）")
 @click.option(
     "--rule",
     "-r",
@@ -788,7 +788,7 @@ def cmd_lint(
 
 
 @spec_group.command("sync")
-@click.option("-w", "--workspace", default=None, help="工作空间根目录（未指定时回退全局 -w）")
+@click.option("-w", "--workspace", default=None, type=CallerPath(file_okay=False), help="工作空间根目录（未指定时回退全局 -w）")
 @click.option("--config", "config_path", default=None, type=CallerPath(), help="工作空间配置文件路径")
 @click.option(
     "--approval-evidence-ref",

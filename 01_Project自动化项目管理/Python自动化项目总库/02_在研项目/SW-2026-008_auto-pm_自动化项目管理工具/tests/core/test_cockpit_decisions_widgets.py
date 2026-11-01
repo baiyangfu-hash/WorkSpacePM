@@ -68,7 +68,7 @@ def test_page_draws_a_button_per_decision_and_only_whitelisted_words(qapp: QAppl
                              _mission("M4", "ACCEPTED", "已关")], {}, {}, "off")
     page.show_view(vm)
     buttons = _texts(page, QPushButton)
-    assert {"搁着", "确认验收", "收口", "重新读取"} <= set(buttons)
+    assert {"搁着", "确认验收", "收口"} <= set(buttons)
     assert set(buttons) <= decisions.DECISION_BUTTONS
     everything = " ".join(_texts(page, QLabel) + buttons)
     for word in decisions.NEVER_WORDS:
@@ -225,3 +225,27 @@ def test_controller_with_a_live_pin_opens_a_terminal_instead_of_capturing(qapp: 
     _wait(controller, qapp)
     assert opened == [("确认验收", ["pm", "accept", "--mission-id", "M3"])]
     assert not any(c[:2] == ["pm", "accept"] for c in fake.calls)  # 没有在后台悄悄再跑一遍
+
+
+def test_controller_does_not_stack_reads_and_survives_a_job_that_raises(qapp: QApplication, tmp_path: Path) -> None:
+    """#455 预审 514：上一轮没读完不叠新一批；后台任务抛错要显示出来，“读取中”标记不能卡死。"""
+    calls: list[list[str]] = []
+    boom = {"on": True}
+
+    def runner(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(command[3:])
+        if boom["on"]:
+            raise RuntimeError("读管道炸了")
+        return subprocess.CompletedProcess(command, 0, "{}", "")
+
+    controller = DecisionController(tmp_path, lambda _t: None, lambda: None, runner=runner, now=lambda: NOW)
+    controller.refresh(["DJ-1"], [])
+    controller.refresh(["DJ-1"], [])  # 第一轮还在读：第二次直接忽略
+    _wait(controller, qapp)
+    assert controller.page.failure is not None and "读管道炸了" in controller.page.failure.output
+    assert controller._reading is False
+    boom["on"] = False
+    before = len(calls)
+    controller.refresh(["DJ-1"], [])  # 出错后能再读
+    _wait(controller, qapp)
+    assert len(calls) > before

@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from cockpit_board import actions, flowgraph, theme  # noqa: E402
 from cockpit_board import viewmodel as vm
+from cockpit_board.decision_controller import DecisionController  # noqa: E402
 from cockpit_board.widgets import common as c  # noqa: E402
 from cockpit_board.widgets.flow import FlowPage  # noqa: E402
 from cockpit_board.widgets.home import HomePage  # noqa: E402
@@ -47,11 +48,12 @@ from cockpit_board.widgets.tools import ToolsPage  # noqa: E402
 
 WINDOW_TITLE = "驾驶舱总控屏"
 AUTO_REFRESH_MINUTES = 10
+DECISION_PROJECT_LIMIT = 12  # “决定”页一次最多读这么多个项目的待批准卡和收件箱
 # TD-105（Windows 禁写锁）已于 PR #82 合并：先快读出第一版，再在后台接老驾驶舱后台 snapshot() 的措辞（只读）。
 # 只在首次加载和手动“重新读取”时接，10 分钟定时刷新不接（auto_reload）。--no-legacy 可关；老后台出任何问题都退回只读账本数据，不让窗口挂。
 LEGACY_ALLOWED = True
 # 缺口⑨（批准口令防冒签）已合并；“批准范围 / 开工”还没在界面里接上口令弹窗和同一条命令，接线（S1）之前一律灰着。
-DECISION_BUTTONS_WIRED = False
+DECISION_BUTTONS_WIRED = True
 
 
 # ---------------------------------------------------------------- 后台线程
@@ -155,10 +157,13 @@ class CockpitWindow(QMainWindow):
         self.project = ProjectPage(lambda: self.goto("home"), self.copy_text)
         self.station = StationPage(self.open_project, self.copy_text)
         self.station.action.connect(self.run_action)
+        # “决定”页：每个按钮背后是同一条 main.py pm … 命令，见 decisions.py / DECISIONS.md；
+        # 命令成功后让窗口重读账本，页面本身只在被打开或手动重读时才去读待批准卡和收件箱（每个项目起 2 条只读命令，较慢）。
+        self.decisions = DecisionController(options.root, self.copy_text, self.reload)
         self.flow = FlowPage()
         self.tools = ToolsPage(options.root)
         self._flow_tools_key: object = None  # 上次喂给流程图页和工具页的数据；没变就不重填，免得打断正在填的表单
-        for page in (self.home, self.issues, self.projects, self.project, self.station, self.flow, self.tools):
+        for page in (self.home, self.issues, self.projects, self.project, self.station, self.decisions.page, self.flow, self.tools):
             self.stack.addWidget(page)
         outer.addWidget(self.stack, 1)
         self.setCentralWidget(central)
@@ -176,8 +181,9 @@ class CockpitWindow(QMainWindow):
         row.addWidget(c.label("驾驶舱", "title", wrap=False))
         self.page_buttons: dict[str, object] = {}
         group = QButtonGroup(self)
-        # 流程图、工具两页和今天 / 问题 / 全部项目并排；文字在 tool_policy.NAV_BUTTONS 里
-        for key, text in (("home", "今天"), ("issues", "问题"), ("projects", "全部项目"), ("flow", "流程图"), ("tools", "工具")):
+        # 流程图、工具两页和今天 / 问题 / 全部项目 / 决定并排；“流程图”“工具”的文字在 tool_policy.NAV_BUTTONS 里
+        for key, text in (("home", "今天"), ("issues", "问题"), ("projects", "全部项目"), ("decisions", "决定"),
+                          ("flow", "流程图"), ("tools", "工具")):
             item = c.button(text, "tab", text)
             item.setCheckable(True)
             item.clicked.connect(lambda _checked=False, k=key: self.goto(k))
@@ -217,10 +223,24 @@ class CockpitWindow(QMainWindow):
 
     def goto(self, key: str) -> None:
         page = {"home": self.station if self.mode == "ws" else self.home, "issues": self.issues,
-                "projects": self.projects, "project": self.project, "flow": self.flow, "tools": self.tools}[key]
+                "projects": self.projects, "project": self.project, "decisions": self.decisions.page,
+                "flow": self.flow, "tools": self.tools}[key]
         self.stack.setCurrentWidget(page)
         for name, button in self.page_buttons.items():
             button.setChecked(name == key)  # type: ignore[attr-defined]
+        if key == "decisions":
+            self._refresh_decisions()
+
+    def _refresh_decisions(self) -> None:
+        """把看板里的卡和要读只读命令的项目交给“决定”页：有开着的卡的项目，加上今天页上最热的几个（可能有待批准的范围卡）。"""
+        if self.board is None:
+            return
+        wanted = [p.project_id for p in self.board.projects if any(m.column != "已关" or m.state == "ACCEPTED" for m in p.missions)]
+        if self.home_vm is not None:
+            wanted += [p.project_id for p in self.home_vm.hot]
+        project_ids = list(dict.fromkeys(wanted))[:DECISION_PROJECT_LIMIT]
+        missions = [m for p in self.board.projects for m in p.missions]
+        self.decisions.refresh(project_ids, missions)
 
     def open_project(self, project_id: str) -> None:
         if self.board is None or self.home_vm is None:
@@ -290,6 +310,10 @@ class CockpitWindow(QMainWindow):
         self.status.setText("")
         self.refresh_button.setEnabled(True)
         self.timer.start()
+        # “决定”页开着时，只在首次加载和手动“重新读取”这一轮才连它一起读（每个项目 2 条只读命令，较慢）；
+        # 10 分钟定时那一轮只快读（#450 的约定）。写命令成功后走 reload()，也是手动轮。
+        if self._legacy_this_round and self.stack.currentWidget() is self.decisions.page:
+            self._refresh_decisions()
 
     def _on_failed(self, message: str) -> None:
         self.status.setText("这次没读成：" + pd._short(message, 80))
@@ -387,6 +411,10 @@ class CockpitWindow(QMainWindow):
         elif key == "bc_open":
             record = self._bc_record()
             self.status.setText("文件：" + str(record) if record else self._bc_missing())
+            return
+        elif key in ("approve", "start"):
+            # 批准范围、开工在“决定”页做：要选哪张卡、看到等价命令、再确认；这里只负责带用户过去
+            self.goto("decisions")
             return
         else:
             self.status.setText("这个动作本版不做：" + key)

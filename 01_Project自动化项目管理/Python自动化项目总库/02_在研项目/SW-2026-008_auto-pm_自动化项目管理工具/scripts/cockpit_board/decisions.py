@@ -128,7 +128,7 @@ BY_KEY = {item.key: item for item in DECISIONS}
 
 # 决定页上允许出现的按钮文字，另加弹窗里的两个确认键。测试按它清点。
 DECISION_BUTTONS = frozenset({item.label for item in DECISIONS}) | frozenset({
-    "重新读取", "确认并运行", "在终端窗口里运行", "取消", "知道了", "复制命令", "展开控制台", "收起控制台",
+    "确认并运行", "在终端窗口里运行", "取消", "知道了", "复制命令", "展开控制台", "收起控制台",
 })
 # 永远不加的动作（同 policy.NEVER，另加几条本页特有的）；按钮文字、对话框文字里都不许出现。
 NEVER_WORDS = (*policy.NEVER, "启动 agent", "强推")

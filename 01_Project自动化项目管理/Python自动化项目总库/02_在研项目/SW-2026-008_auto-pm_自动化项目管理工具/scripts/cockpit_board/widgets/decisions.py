@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QPlainTextEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -113,12 +112,12 @@ class ConfirmDialog(QDialog):
 
 class DecisionsPage(QWidget):
     run_requested = Signal(object, object, object, bool)  # Decision, Target, values, 是否改走终端窗口
-    reload_requested = Signal()
 
     def __init__(self, on_copy: Callable[[str], None],
                  preview: Callable[[Decision, Target, Mapping[str, str], str, bool], str]) -> None:
         """``preview(decision, target, values, approver, pin_enforced)`` 拼等价命令，由 app 提供，页面不碰 actions。"""
         super().__init__()
+        self.setObjectName("decisions_page")
         self.on_copy, self.preview = on_copy, preview
         self.vm = DecisionsVM()
         self.receipts: list[Receipt] = []
@@ -150,8 +149,7 @@ class DecisionsPage(QWidget):
         if self.failure is not None:
             lay.addWidget(self._failure_bar(self.failure))
         lay.addWidget(c.label(vm.pin_text or PIN_TEXT["unknown"], "small"))
-        lay.addWidget(c.hrow(c.label("批准人", "muted", wrap=False), self.approver_input, c.button("重新读取"), spacing=theme.SPACE))
-        self._wire_reload()
+        lay.addWidget(c.hrow(c.label("批准人", "muted", wrap=False), self.approver_input, spacing=theme.SPACE))
         if not vm.cards:
             lay.addWidget(c.label("现在没有要你决定的事。", "muted"))
         column = ""
@@ -165,11 +163,6 @@ class DecisionsPage(QWidget):
             lay.addWidget(c.label("还没有运行过。", "muted"))
         for receipt in reversed(self.receipts[-RECEIPT_LIMIT:]):
             lay.addWidget(self._receipt(receipt))
-
-    def _wire_reload(self) -> None:
-        for button in self.findChildren(QPushButton):
-            if button.text() == "重新读取":
-                button.clicked.connect(self.reload_requested.emit)
 
     def _card(self, card: CardVM) -> QFrame:
         frame, inner = c.card(card.sev)
