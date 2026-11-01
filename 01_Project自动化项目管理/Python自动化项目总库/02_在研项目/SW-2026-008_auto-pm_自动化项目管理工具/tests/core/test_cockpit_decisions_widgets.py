@@ -68,7 +68,7 @@ def test_page_draws_a_button_per_decision_and_only_whitelisted_words(qapp: QAppl
                              _mission("M4", "ACCEPTED", "已关")], {}, {}, "off")
     page.show_view(vm)
     buttons = _texts(page, QPushButton)
-    assert {"搁着", "确认验收", "收口", "重新读取"} <= set(buttons)
+    assert {"搁着", "确认验收", "收口"} <= set(buttons)
     assert set(buttons) <= decisions.DECISION_BUTTONS
     everything = " ".join(_texts(page, QLabel) + buttons)
     for word in decisions.NEVER_WORDS:

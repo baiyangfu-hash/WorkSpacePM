@@ -44,7 +44,6 @@ class DecisionController(QObject):
         self._jobs: list[QThread] = []
         self.page = DecisionsPage(on_copy, self.preview)
         self.page.run_requested.connect(self.run_decision)
-        self.page.reload_requested.connect(self.on_changed)
 
     # ------------------------------------------------ 拼命令（对话框实时调）
 

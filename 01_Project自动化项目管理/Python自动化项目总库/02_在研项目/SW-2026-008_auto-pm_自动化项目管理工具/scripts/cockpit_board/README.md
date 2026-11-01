@@ -27,7 +27,7 @@
 | `policy.py` | 按钮白名单、永不加的词、禁用词 | **加按钮先改这里**，再改页面；永远不加：合并、删除、切换发布、代签、绕过钩子、启动 agent |
 | `viewmodel.py` | 纯判定：把账本和文件夹读出的 `pm_dashboard.Board` 变成各页要显示的数据 | 无界面代码，可以直接单测 |
 | `actions.py` | **整个包里唯一允许起子进程、写文件的地方** | 新动作加在这里，回执（命令 + 退出码）统一用 `Receipt` |
-| `widgets/` | 各页的控件：`home` 今天、`issues` 问题、`projects` 全部项目、`project_page` 项目页六页签、`station` 工程工位、`delivery` GitHub 块、`common` 小零件 | 只画，不判定；长文字行用 `common.fill`，行里不要再放弹簧 |
+| `widgets/` | 各页的控件：`decisions` 决定页、`home` 今天、`issues` 问题、`projects` 全部项目、`project_page` 项目页六页签、`station` 工程工位、`delivery` GitHub 块、`common` 小零件 | 只画，不判定；长文字行用 `common.fill`，行里不要再放弹簧 |
 | `app.py` | 主窗口、后台线程、两个开关常量 | 见下 |
 | `../pm_dashboard.py` | 只读账本和项目文件夹（先拷到临时目录再 `mode=ro` 读） | 账本只读，绝不写 |
 | `../github_collector.py` | 只 GET 的 GitHub 采集（PR、门禁、安全签字、审计） | 读不到就显示“未知”，不显示绿 |
@@ -35,7 +35,7 @@
 两个开关常量（都在 `app.py`）：
 
 - `LEGACY_ALLOWED = True`：TD-105（Windows 禁写锁，PR #82）已合并。窗口先快读出第一版，再在后台接老驾驶舱后台 `snapshot()` 的措辞（只读，约 20 秒）；只在首次加载和手动“重新读取”时接，10 分钟定时刷新只快读（`auto_reload`）；读不到就退回只读账本数据。
-- `DECISION_BUTTONS_WIRED = False`：缺口⑨（批准口令防冒签）已合并，但界面里的“批准范围 / 开工”还没接上口令弹窗和同一条命令，所以仍灰着，灰着时提示用户去终端运行 `main.py pm approve` / `pm confirm-start`。S1 接线并通过测试后才改成 `True`。**不要为了让按钮亮起来而改成 `True`。**
+- `DECISION_BUTTONS_WIRED = True`：S1b 已把“决定”页接进主窗口（顶栏“决定”页签，控制器 `decision_controller.py`，按钮↔命令对照表见 `DECISIONS.md`）。工位里的“批准范围 / 开工”亮着，点它们只是带你去“决定”页。改回 `False` 会让它们重新灰着，提示用户去终端运行命令。
 
 ## 3. 画面规矩（用户 2026-10-22、10-23 已定，不要改）
 
@@ -54,9 +54,10 @@
 | 预览 / 写入 02_业务变更记录.md | 无命令：`actions.bc_preview` / `actions.bc_append` | 只往表末追加一行，写前读一遍、写后校验除末行外字节不变；写前必须先预览 |
 | 复制、看项目、展开、重新读取等 | 无命令，只读界面操作 | — |
 | 推送 manual/ 分支、打开 GitHub 开 PR、提交 | 本版不做，灰着，提示去命令提示符做 | — |
-| 批准范围、开工 | 灰着（见 `DECISION_BUTTONS_WIRED`） | — |
+| 批准范围、开工（工位里） | 不运行命令，跳到“决定”页（见 `DECISION_BUTTONS_WIRED`） | — |
+| “决定”页的 9 个按钮 | 见 `DECISIONS.md`：每个按钮一条 `main.py pm …` 命令 | 命令 + 退出码 + 原文，失败红条常驻 |
 
-## 5. 决定类按钮对应的命令（S1 要接的“按钮 ↔ 命令”清单）
+## 5. 决定类按钮对应的命令（S1 已接，对照表以 `DECISIONS.md` 为准；下表是 S0 时整理的全景）
 
 下表是读 `auto_pm/ui/cli/` 源码整理的，参数以各命令的 `--help` 为准。**界面只能调用这些现成命令，不能新造绕过它们的路。**
 所有写命令都在控制根运行；输出格式列里“JSON”表示不加任何参数就打印 JSON；退出码 0 成功，非 0 失败，原因在输出的 `reason` 或错误文字里，界面原样显示，不静默。
