@@ -108,3 +108,8 @@ def test_the_workspace_guard_asks_about_the_cockpit_project(
     )
     guard.require_runtime_identity_for_workspace(click.Context(click.Command("x")))
     assert asked == [COCKPIT_PROJECT_ID]
+
+
+def test_the_cockpit_project_id_is_pinned() -> None:
+    """The assertion above compares the guard with the constant itself; this pins the constant, so a typo cannot pass both."""
+    assert COCKPIT_PROJECT_ID == "SW-2026-008"
