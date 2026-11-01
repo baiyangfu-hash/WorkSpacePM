@@ -1241,6 +1241,12 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
         click.echo(f"冲突: {conflict}")
     for warning in payload.hold_warnings:
         click.echo(f"🔴 {warning}")
+    if payload.run is not None and payload.run.state.value == "RUNNING":
+        # TD-SW008-074: after a controller restart the ledger still says RUNNING even when the executor process is gone.
+        click.echo(
+            f"提示: 账上 {payload.run.run_id} 在运行。如果刚重启过主控，想确认执行进程还在不在，"
+            f"敲 python main.py pm recover --run-id {payload.run.run_id}（只读，不改账、不结束任何进程）"
+        )
     if not payload.intake.is_empty:
         click.echo(
             f"收件箱: 待确认 {payload.intake.awaiting_confirmation} 条 | "
@@ -1382,6 +1388,7 @@ pm_group.add_command(unpark_pm)
 pm_group.add_command(switch_pm)
 
 # Read-only restart reconciliation of a started Run's executor process (TD-SW008-074 step 1).
-from auto_pm.ui.cli.pm_recover import recover_status_pm  # noqa: E402
+from auto_pm.ui.cli.pm_recover import recover_pm, recover_status_pm  # noqa: E402
 
 pm_group.add_command(recover_status_pm)
+pm_group.add_command(recover_pm)

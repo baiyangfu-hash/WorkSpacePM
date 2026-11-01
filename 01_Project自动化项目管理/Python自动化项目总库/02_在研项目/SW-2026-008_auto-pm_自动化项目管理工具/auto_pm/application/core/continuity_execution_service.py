@@ -869,6 +869,23 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def resolve_started_run_by_run_id(self, run_id: str) -> tuple[RunItem, ExecutionStartEvidence]:
+        """Same trusted lookup as :meth:`resolve_started_run`, for a caller that knows the Run but not the operation id.
+
+        Only an active (RUNNING / VERIFYING) Run with exactly one RUN_STARTED record qualifies; anything else is refused.
+        """
+
+        try:
+            run = self._store.get_run(run_id)
+            if run.state not in {RunState.RUNNING, RunState.VERIFYING}:
+                raise ContinuityExecutionError(f"Run 当前是 {run.state.value}，不是 RUNNING/VERIFYING，没有可核对的执行进程")
+            owner_id, evidence = self._store.get_run_started_evidence(run_id)
+            if owner_id != run.executor_id:
+                raise ContinuityExecutionError("RUN_STARTED owner 与 Run 的执行者不一致")
+            return run, evidence
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
     def revoke_unstarted_run(
         self,
         *,
