@@ -18,7 +18,20 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QComboBox, QPushButton  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QAbstractSpinBox,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDial,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QRadioButton,
+    QSlider,
+    QTextEdit,
+    QWidget,
+)
 
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = TOOL_ROOT / "scripts"
@@ -322,6 +335,51 @@ def test_page_buttons_are_all_in_the_whitelist_and_none_is_forbidden(qapp: QAppl
     for text in texts:
         assert not any(word in text for word in tool_policy.TOOL_FORBIDDEN_WORDS), text
     assert policy.NEVER and set(policy.NEVER) <= set(tool_policy.TOOL_FORBIDDEN_WORDS)
+
+
+# 工具页里能输入、能选的控件，一个不多一个不少（审计往页里塞一个游离输入框，这条要红）。
+# 加字段是有意的改动：在 tool_actions.build_command 里加参数，同时改这份名单。
+EXPECTED_CONTROLS = {
+    # 看变更单、建变更单、转状态
+    "tool_project", "tool_status", "tool_show_number",
+    "tool_domain", "tool_nature", "tool_urgency", "tool_applicant", "tool_background", "tool_necessity", "tool_references",
+    "tool_scope_LOCAL", "tool_scope_MODULE", "tool_scope_SYSTEM", "tool_scope_CROSS", "tool_scope_SAFE",
+    "tool_number", "tool_to", "tool_comment", "tool_approver", "tool_verification_conclusion",
+    # 看决策、变量表查重
+    "tool_decision_change", "tool_decision_id", "tool_vartable_file",
+    # 输出框（只读）
+    "tool_output",
+}
+CONTROL_KINDS = (QLineEdit, QComboBox, QPlainTextEdit, QTextEdit, QAbstractSpinBox, QSlider, QDial, QCheckBox, QRadioButton)
+
+
+def _controls(page: QWidget) -> list[QWidget]:
+    found: list[QWidget] = []
+    for kind in CONTROL_KINDS:
+        found += page.findChildren(kind)
+    return found
+
+
+def _inside(widget: QWidget, name: str) -> bool:
+    parent = widget.parentWidget()
+    while parent is not None and parent.objectName() != name:
+        parent = parent.parentWidget()
+    return parent is not None
+
+
+def test_page_controls_are_exactly_the_expected_list_and_all_in_forms(qapp: QApplication, tmp_path: Path) -> None:
+    page = _page(tmp_path)
+    controls = _controls(page)
+    names = [w.objectName() for w in controls]
+    assert sorted(names) == sorted(EXPECTED_CONTROLS), set(names) ^ EXPECTED_CONTROLS  # 多一个、少一个、重名都红
+    for widget in controls:
+        if widget is page.output:
+            assert isinstance(widget, QPlainTextEdit) and widget.isReadOnly()  # 输出框只读，不是输入口
+        else:
+            assert _inside(widget, "tool_form"), widget.objectName()  # 其余全在 tool_form 框里（深色模式靠它着色）
+    # 每个输入口都登记在页面里：能读到值的只有这几个，没有“看不见、读不到”的旁路
+    registered = {id(w) for w in page.inputs.values()} | {id(w) for w in page.scope_boxes.values()} | {id(page.project_box), id(page.output)}
+    assert {id(w) for w in controls} == registered
 
 
 def test_transition_dropdown_never_offers_approval(qapp: QApplication, tmp_path: Path) -> None:

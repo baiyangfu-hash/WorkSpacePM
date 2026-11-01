@@ -163,6 +163,27 @@ def test_flow_and_tools_pages_are_wired_and_fed_from_the_ledger(qapp: QApplicati
     window.close()
 
 
+def test_unchanged_data_does_not_refill_flow_and_tools_but_changed_data_does(qapp: QApplication, tmp_path: Path) -> None:
+    """定时刷新、GitHub 或联网状态回来都会重画；数据没变就不能重填，否则用户刚点的“预览命令”会被冲掉。"""
+    root, db = base._workspace(tmp_path / "a", [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db)
+    params = {"pid": "DJ-2026-101", "number": "CHG-DJ-2026-101-001", "to": "submitted"}
+    window.tools.preview_command("change_transition", params)
+    assert window.tools.preview is not None
+    window.flow.card_box.setCurrentIndex(1)
+    chosen = window.flow.card_box.currentData()
+    for _ in range(3):  # 不变的数据重画多次
+        window._render()
+    assert window.tools.preview is not None  # 预览还在，还能点“转状态”
+    assert window.flow.card_box.currentData() == chosen
+    # 数据真变了（换了一张任务）：重填，旧预览作废（项目或任务变了，旧命令不能再点）
+    root2, db2 = base._workspace(tmp_path / "b", [("DJ-2026-101", "ACTIVE", "改了名的任务", 0.1)])
+    window.show_board(gui.load_board(_options(root2, db2), use_legacy=False))
+    assert window.tools.preview is None
+    assert any("改了名的任务" in window.flow.card_box.itemText(i) for i in range(window.flow.card_box.count()))
+    window.close()
+
+
 def test_station_buttons_are_listed_and_gated(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
     window = _window(qapp, root, db)
