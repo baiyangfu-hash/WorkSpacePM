@@ -10,6 +10,10 @@
   3. 该变更单文件存在、写的项目编号与归属一致、状态是合法执行态；
   4. 该项目的版本变更台账里出现这个变更单号。
 * 合并提交不查（它自己没有新代码，代码在被合并的提交里）。
+* 云端 PR 的提交说明常常不写变更单号（用户 2026-11-01 裁决：认 PR 描述）：提交说明里没有单号时，退而看 PR 描述——
+  描述里恰有一个 ``CHG-…`` 就按它做上面 3、4 两项证据检查；没有则看描述里的 ``任务卡: <路径>`` 一行，
+  读 **PR 基线上** 那张卡的 ``变更单：`` 头部（``CHG-…`` 照样查证据；``无`` 不算，钩子本来就要求生产代码绑定变更单）。
+  提交说明里自己写了单号的，仍以提交说明为准。
 
 只报警，不判通过/失败（方案“第一步”）：默认退出码 0，结果写进作业摘要和 ``::warning::`` 标注，用来观察两周的误报；
 ``--enforce`` 才在有警告时退出 1（转必过检查前不得启用，需用户点头）。退出码 2 = 用法或 Git 出错。
@@ -22,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -37,8 +42,10 @@ for _entry in (Path(__file__).resolve().parent, SW008_ROOT):
         sys.path.insert(0, str(_entry))
 
 # 这些是钩子模块的私有函数：复用是本脚本的目的（同一套判定），钩子改名时 test_hook_replay 的导入会先变红。
+from auto_pm.application.core import implementation_card_basis as card_basis
 from auto_pm.domain.change.parser import ChgParser
 from auto_pm.infrastructure import git_hook_enforcer as hook
+from pr_scope_check import card_path_from_body, normalized
 
 CHANGE_DIRS = ("04_监控", "11_监控")
 LEDGER_TAIL = "01_变更管理/02_变更记录/01_版本变更台账.md"
@@ -50,6 +57,20 @@ class Finding:
     commit: str
     subject: str
     problem: str  # 空串 = 通过
+    via: str = ""  # 通过时的绑定来源：空串 = 提交说明自带；否则是“PR 描述单号”“任务卡 …”之类，只用于显示
+
+
+@dataclass(frozen=True)
+class PrBinding:
+    """PR 描述给出的整体绑定：``chg`` 是要查证据的变更单号（``via`` 说明来源），``problem`` 非空 = 描述写得不合格。"""
+
+    chg: str = ""
+    via: str = ""
+    problem: str = ""
+
+    @property
+    def present(self) -> bool:
+        return bool(self.chg or self.via or self.problem)
 
 
 class GitError(RuntimeError):
@@ -125,7 +146,7 @@ def check_evidence(repo: Path, refs: tuple[str, ...], binding: object, chg_id: s
     pid = binding.project_id  # type: ignore[attr-defined]
     change = _first(repo, refs, root, CHANGE_TAIL, f"{chg_id}.md")
     if change is None:
-        return f"项目 {pid} 下找不到变更单文件 {chg_id}.md"
+        return f"项目 {pid} 下找不到变更单文件 {chg_id}.md（本 PR 和基线都没有；若变更单稍后由主执行随另一个 PR 补入，属报警期已知情形）"
     ref, path = change
     try:
         content = read_blob(repo, ref, path)
@@ -164,9 +185,44 @@ def check_evidence(repo: Path, refs: tuple[str, ...], binding: object, chg_id: s
     return ""
 
 
-def replay(repo: Path, base: str, head: str, bindings: tuple[object, ...]) -> list[Finding]:
-    """对 base..head 里每个有生产代码的非合并提交复跑钩子判定。"""
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def pr_binding(repo: Path, base: str, body: str) -> PrBinding:
+    """从 PR 描述读整体绑定：先认描述里恰一个变更单号，再认 ``任务卡: <路径>``（读基线上的卡）。描述里的 HTML 注释（模板说明）不算。"""
+    text = _HTML_COMMENT.sub("", body)
+    chgs = tuple(dict.fromkeys(hook._CHG_ID_PATTERN.findall(text)))
+    if len(chgs) == 1:
+        return PrBinding(chg=chgs[0], via=f"PR 描述里的变更单 {chgs[0]}")
+    if len(chgs) > 1:
+        return PrBinding(problem=f"PR 描述里写了 {len(chgs)} 个变更单号（{'、'.join(chgs)}），必须且只能一个")
+    raw_card = card_path_from_body(text)
+    if raw_card is None:
+        return PrBinding()
+    card = normalized(raw_card)
+    if card is None:
+        return PrBinding(problem=f"PR 描述里的任务卡路径不是仓库内的相对路径: {raw_card}")
+    try:
+        content = read_blob(repo, base, card)
+    except (GitError, UnicodeDecodeError):
+        return PrBinding(problem=f"PR 描述里的任务卡 {card} 在 PR 基线上读不到（卡要先合入 main 才算数）")
+    header = card_basis.parse_header(content.splitlines())
+    if len(header.change) != 1:
+        return PrBinding(problem=f"任务卡 {card} 的 `变更单：` 头部有 {len(header.change)} 行，必须恰好一行（没有就写 `无`）")
+    if header.change_id and card_basis.CHG_ID.fullmatch(header.change_id):
+        return PrBinding(chg=header.change_id, via=f"任务卡 {card}（变更单 {header.change_id}）")
+    if card_basis._first_value(header.change[0]) == card_basis.NO_CHANGE:
+        # 与本机 commit-msg 钩子一致：含生产代码的提交必须绑定变更单，任务卡写“无”不能替代（卡的“无”只对不动生产代码的卡成立）。
+        return PrBinding(problem=f"任务卡 {card} 的 `变更单：` 写的是 `无`，但含生产代码的提交必须绑定一张变更单")
+    return PrBinding(problem=f"任务卡 {card} 的 `变更单：` 既不是变更单号也不是 `无`: {header.change[0]}")
+
+
+def replay(
+    repo: Path, base: str, head: str, bindings: tuple[object, ...], pr_body: str = ""
+) -> list[Finding]:
+    """对 base..head 里每个有生产代码的非合并提交复跑钩子判定；提交说明没有单号时按 PR 描述的整体绑定补位。"""
     findings: list[Finding] = []
+    overall = pr_binding(repo, base, pr_body) if pr_body else PrBinding()
     evidence_cache: dict[tuple[str, str], str] = {}
     for commit in commits_in(repo, base, head):
         production = hook.filter_production_files(commit_files(repo, commit))
@@ -176,9 +232,18 @@ def replay(repo: Path, base: str, head: str, bindings: tuple[object, ...]) -> li
         subject = message.strip().splitlines()[0] if message.strip() else ""
         short = commit[:8]
         chgs = tuple(dict.fromkeys(hook._CHG_ID_PATTERN.findall(message)))
+        via = ""
         problem = ""
-        if not chgs:
-            problem = f"含生产代码（{production[0]} 等 {len(production)} 个）但提交说明没有绑定变更单号"
+        if not chgs and overall.present:
+            if overall.problem:
+                problem = f"提交说明没有变更单号，PR 描述的绑定也不合格: {overall.problem}"
+            else:
+                via = overall.via
+                chgs = (overall.chg,)
+        if problem:
+            pass
+        elif not chgs:
+            problem = f"含生产代码（{production[0]} 等 {len(production)} 个）但提交说明没有绑定变更单号，PR 描述里也没有变更单号或任务卡"
         elif len(chgs) != 1:
             problem = f"提交说明绑定了 {len(chgs)} 个变更单（{'、'.join(chgs)}），必须且只能一个"
         else:
@@ -197,7 +262,7 @@ def replay(repo: Path, base: str, head: str, bindings: tuple[object, ...]) -> li
                         binding = next(b for b in bindings if b.project_id == pid)  # type: ignore[attr-defined]
                         evidence_cache[key] = check_evidence(repo, (head, base), binding, chgs[0])
                     problem = evidence_cache[key]
-        findings.append(Finding(short, plain(subject), plain(problem)))
+        findings.append(Finding(short, plain(subject), plain(problem), plain(via) if not problem else ""))
     return findings
 
 
@@ -210,7 +275,8 @@ def render(findings: list[Finding]) -> str:
         "",
     ]
     for f in findings:
-        lines.append(f"- {'⚠️' if f.problem else '✅'} `{f.commit}` {f.subject}" + (f" — {f.problem}" if f.problem else ""))
+        tail = f" — {f.problem}" if f.problem else (f"（经{f.via}）" if f.via else "")
+        lines.append(f"- {'⚠️' if f.problem else '✅'} `{f.commit}` {f.subject}{tail}")
     if not findings:
         lines.append("没有含生产代码的提交，无需复跑。")
     return "\n".join(lines) + "\n"
@@ -232,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     repo = Path(args.repo).resolve()
     try:
-        findings = replay(repo, args.base, args.head, build_bindings(repo))
+        findings = replay(repo, args.base, args.head, build_bindings(repo), os.environ.get("PR_BODY", ""))
     except (GitError, OSError, subprocess.SubprocessError) as exc:
         print(f"hook-replay 无法运行（未核实，不是通过）: {exc}", file=sys.stderr)
         return 2

@@ -207,3 +207,130 @@ def test_the_unknown_project_warning_mentions_new_projects(repo: Path) -> None:
 def test_the_script_uses_the_layered_import_paths() -> None:
     source = Path(replay_mod.__file__).read_text(encoding="utf-8")
     assert "auto_pm.core." not in source and "auto_pm.change." not in source
+
+
+# ---- PR 描述里的单号或任务卡（用户 2026-11-01 裁决） ----
+
+CARD = "docs/cards/CARD-SW-TEST-001-001.md"
+CHG = "CHG-DOCU-2026-900"
+EVIDENCE = {f"{CHG_DIR}/{CHG}.md": change_text(), LEDGER: f"| {CHG} |\n"}
+
+
+def card_text(change_line: str = f"> 变更单：`{CHG}`") -> str:
+    return f"# 卡\n\n> 依据：`BC-SW-TEST-001-2026_11_001`\n{change_line}\n> 状态：`PLANNED`\n"
+
+
+def run_body(repo: Path, base: str, body: str) -> list[replay_mod.Finding]:
+    return replay_mod.replay(repo, base, "HEAD", BINDINGS, body)
+
+
+def test_one_change_number_in_the_pr_body_covers_commits_without_a_number(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number in the message", {CODE: "x = 1\n", **EVIDENCE})
+    (finding,) = run_body(repo, base, f"## 做了什么\n依据变更单 {CHG}\n")
+    assert finding.problem == ""
+    assert CHG in finding.via
+
+
+def test_the_change_number_from_the_pr_body_still_needs_its_evidence(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number in the message", {CODE: "x = 1\n"})
+    (finding,) = run_body(repo, base, f"变更单 {CHG}")
+    assert "找不到变更单文件" in finding.problem
+
+
+def test_two_change_numbers_in_the_pr_body_are_reported(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n", **EVIDENCE})
+    (finding,) = run_body(repo, base, "CHG-DOCU-2026-900 和 CHG-DOCU-2026-901")
+    assert "PR 描述里写了 2 个变更单号" in finding.problem
+
+
+def test_a_change_number_inside_an_html_comment_of_the_template_does_not_count(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n", **EVIDENCE})
+    (finding,) = run_body(repo, base, f"<!-- 例如 {CHG} -->\n## 做了什么\n")
+    assert "PR 描述里也没有变更单号或任务卡" in finding.problem
+
+
+def test_the_number_in_the_commit_message_wins_over_the_pr_body(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: CHG-DOCU-2026-777", {CODE: "x = 1\n", **EVIDENCE})
+    (finding,) = run_body(repo, base, f"变更单 {CHG}")
+    assert "CHG-DOCU-2026-777.md" in finding.problem and finding.via == ""
+
+
+def test_a_task_card_on_the_base_with_a_change_number_binds_the_pr(repo: Path) -> None:
+    commit(repo, "card", {CARD: card_text(), **EVIDENCE})
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n"})
+    (finding,) = run_body(repo, base, f"任务卡: {CARD}\n")
+    assert finding.problem == ""
+    assert CARD in finding.via
+
+
+def test_a_task_card_whose_change_number_has_no_evidence_is_reported(repo: Path) -> None:
+    commit(repo, "card", {CARD: card_text()})
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n"})
+    (finding,) = run_body(repo, base, f"任务卡: {CARD}")
+    assert "找不到变更单文件" in finding.problem
+
+
+def test_a_task_card_that_declares_no_change_order_does_not_cover_production_code(repo: Path) -> None:
+    """与本机钩子一致：含生产代码的提交必须绑定变更单，卡里写“无”不能替代。"""
+    commit(repo, "card", {CARD: card_text("> 变更单：`无`")})
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n"})
+    (finding,) = run_body(repo, base, f"任务卡: {CARD}")
+    assert "写的是 `无`" in finding.problem and finding.via == ""
+
+
+def test_a_task_card_that_exists_only_in_the_pr_head_does_not_count(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n", CARD: card_text("> 变更单：`无`")})
+    (finding,) = run_body(repo, base, f"任务卡: {CARD}")
+    assert "在 PR 基线上读不到" in finding.problem
+
+
+@pytest.mark.parametrize(
+    ("card", "expected"),
+    [
+        ("# 旧式卡，没有头部\n", "头部有 0 行"),
+        (card_text(f"> 变更单：`{CHG}`\n> 变更单：`CHG-DOCU-2026-901`"), "头部有 2 行"),
+        (card_text("> 变更单：`待补`"), "既不是变更单号也不是"),
+    ],
+)
+def test_a_task_card_without_a_usable_change_order_header_is_reported(repo: Path, card: str, expected: str) -> None:
+    commit(repo, "card", {CARD: card})
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n"})
+    (finding,) = run_body(repo, base, f"任务卡: {CARD}")
+    assert expected in finding.problem
+
+
+def test_a_task_card_path_that_escapes_the_repository_is_reported(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n"})
+    (finding,) = run_body(repo, base, "任务卡: ../../etc/passwd")
+    assert "不是仓库内的相对路径" in finding.problem
+
+
+def test_the_report_says_which_binding_a_passing_commit_used(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n", **EVIDENCE})
+    text = replay_mod.render(run_body(repo, base, f"变更单 {CHG}"))
+    assert "✅" in text and "经PR 描述里的变更单" in text
+
+
+def test_main_reads_the_pr_body_from_the_environment_not_the_command_line(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: no number", {CODE: "x = 1\n", **EVIDENCE})
+    monkeypatch.setattr(replay_mod, "build_bindings", lambda _repo: BINDINGS)
+    argv = ["--base", base, "--head", "HEAD", "--repo", str(repo), "--enforce"]
+    monkeypatch.delenv("PR_BODY", raising=False)
+    assert replay_mod.main(argv) == 1
+    monkeypatch.setenv("PR_BODY", f"变更单 {CHG}")
+    assert replay_mod.main(argv) == 0
