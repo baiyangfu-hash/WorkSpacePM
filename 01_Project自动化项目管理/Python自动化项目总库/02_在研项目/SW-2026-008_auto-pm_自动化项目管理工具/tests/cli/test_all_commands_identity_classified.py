@@ -10,7 +10,8 @@ every command outside ``CLASSIFIED_GROUPS``:
 
 A new command that is none of these fails here; a listed command that has since been guarded must be removed from its list,
 so the lists can only shrink.  Entering a command in ``READ_ONLY`` or ``UNDECIDED`` is a decision for the person who approves
-the card, not a way past the test: this file is a protected test path and shows up in the PR scope check.
+the card, not a way past the test: any change to this file has to be listed in the PR's 可改范围 (the pr-gate scope check fails
+without it), so the reviewer sees it.  It is not on the audit script's PROTECTED_PATTERNS list; the reviewer reads the diff of this file.
 """
 
 from __future__ import annotations
@@ -56,7 +57,7 @@ CLASSIFIED_GROUPS = frozenset(
 )
 
 # TD-SW008-214 is closed: no command is left undecided.  The dict stays so that the ratchet below keeps its shape; a name may
-# only be added here with the approval of the card that does it (this file is a protected test path).
+# only be added here with the approval of the card that does it (a change to this file must be listed in the PR's 可改范围).
 UNDECIDED: dict[str, tuple[str, ...]] = {}
 
 # Commands in groups that have no write path at all, decided as read-only on 2026-11-01 (user: "按推荐").  They need no

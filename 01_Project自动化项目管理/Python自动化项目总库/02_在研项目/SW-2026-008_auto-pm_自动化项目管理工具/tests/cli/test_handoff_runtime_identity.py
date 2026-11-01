@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -132,3 +133,32 @@ def test_handoff_reads_ask_the_guard_nothing(
 ) -> None:
     _invoke(tmp_path, argv)
     assert seen["required"] == [] and seen["warned"] == []
+
+
+@pytest.mark.parametrize("damage", ["no-project-id", "not-json"])
+def test_the_guard_lets_an_unreadable_request_through_only_because_the_write_fails_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    """Audit 494 f: ``_require_identity_for_request`` fails open when the request cannot be read or has no project id.
+
+    That is safe only while the write path reads the request through the same validation and refuses it.  This runs the real
+    service on a damaged request file: the guard is not asked, and the command still fails with the request file untouched.
+    If the write path ever stops refusing such a request, this goes red and the guard must be made to refuse instead.
+    """
+    asked: list[str] = []
+    monkeypatch.setattr(handoff_cli, "require_runtime_identity", lambda _ctx, project: asked.append(project))
+    service = AiHandoffService(tmp_path)
+    created = service.create_request("P-1", "fullstack-engineer", "s", request_id="AI-20261101-F494")
+    path = Path(created["file"]) if "file" in created else service._find_request_path("AI-20261101-F494")
+    if damage == "no-project-id":
+        payload = {key: value for key, value in service.get_request("AI-20261101-F494").items() if key not in {"project_id", "file"}}  # type: ignore[union-attr]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    else:
+        path.write_text("{ not json", encoding="utf-8")
+    before = path.read_bytes()
+
+    result = _invoke(tmp_path, ["claim", "AI-20261101-F494", "--executor-id", "e"])
+
+    assert asked == []  # nothing to check: the request has no readable project
+    assert result.exit_code != 0  # and the write itself refuses it
+    assert path.read_bytes() == before

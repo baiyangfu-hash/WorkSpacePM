@@ -56,6 +56,8 @@ class AiHandoffService:
     )
     STATUS_ORDER = ("pending", "claimed", "in_progress", "completed", "failed", "expired", "consumed")
     ACTIVE_STATUSES = frozenset({"pending", "claimed", "in_progress", "completed"})
+    # 15 minutes: the legacy handoff.v1 default (``handoff claim`` / ``--lease-seconds``).  It is NOT the cockpit-wide Run lease of
+    # 1800 seconds, which tests/core/test_default_lease_seconds.py pins; handoff.v1 is a historical path and was left unchanged.
     DEFAULT_LEASE_SECONDS = 900
     REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,79}$")
     LOCK_STALE_SECONDS = 300

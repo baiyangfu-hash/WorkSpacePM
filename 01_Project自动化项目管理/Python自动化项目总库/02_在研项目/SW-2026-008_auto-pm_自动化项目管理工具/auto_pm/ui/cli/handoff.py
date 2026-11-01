@@ -38,6 +38,10 @@ def _require_identity_for_request(ctx: click.Context, request_id: str) -> None:
     """TD-SW008-214: a write on an existing request is refused when the runtime identity of its project conflicts.
 
     A request that cannot be found has no project to check: the command reports that itself and writes nothing.
+
+    This fails open on purpose, and only because it is safe: when the request cannot be read, or has no project id, the write that
+    follows reads the same request through the same service and fails the same way, so nothing is written.  A request that *can* be
+    read always has its project checked.  If the write path ever stops reading the request first, this must refuse instead.
     """
 
     try:
