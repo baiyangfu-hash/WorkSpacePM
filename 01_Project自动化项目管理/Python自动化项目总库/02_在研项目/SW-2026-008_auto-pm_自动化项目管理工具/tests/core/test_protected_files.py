@@ -222,7 +222,8 @@ def _control_root_with_a_station(tmp_path: Path) -> tuple[Path, Path, str]:
     (root / "tests").mkdir(parents=True)
     (root / "tests" / "test_a.py").write_text("assert 1 == 2\n", encoding="utf-8")
     (root / "product.py").write_text("V = 1\n", encoding="utf-8")
-    (root / ".gitignore").write_text(".auto-pm/\n", encoding="utf-8")  # as in the real control root: stations are not part of it
+    # As in the real .gitignore: only the stations (and local state) are ignored, never all of .auto-pm/.
+    (root / ".gitignore").write_text(".auto-pm/worktrees/\n.auto-pm/*.db\n", encoding="utf-8")
     _git(root, "init", "-q")
     _git(root, "add", ".")
     _git(root, "commit", "-qm", "base")
@@ -249,6 +250,33 @@ def test_an_edit_in_the_isolated_station_is_blocked_unless_the_scope_names_the_f
     _git(station, "add", ".")
     _git(station, "commit", "-qm", "station work")  # committing in the station does not hide it
     assert PmFacadeService._protected_file_changes(SimpleNamespace(owned_paths=("product.py",), **new_run)) == ("tests/test_a.py",)
+
+
+def test_a_protected_file_added_and_committed_in_the_station_is_still_blocked(tmp_path: Path) -> None:
+    """A new test file has no counterpart in the start commit, so only the "added since the start commit" diff can see it.
+
+    Kills the mutation that measures that diff from ``HEAD`` instead of the Run's start commit: once the file is committed in the
+    station a ``HEAD`` base shows nothing added, so the file would be judged as an edit and the scope exception below would break.
+    """
+
+    root, station, head = _control_root_with_a_station(tmp_path)
+    (station / "tests" / "test_new.py").write_text("assert True\n", encoding="utf-8")
+    base = {"worktree_path": str(station), "git_head": head, "run_id": "R", "created_at": "2026-11-02T00:00:00+00:00"}
+    outside = SimpleNamespace(owned_paths=("product.py",), **base)  # the scope does not cover tests/
+    inside = SimpleNamespace(owned_paths=("tests/",), **base)  # the scope names the tests directory
+
+    for stage in ("untracked", "staged", "committed"):
+        if stage == "staged":
+            _git(station, "add", ".")
+        if stage == "committed":
+            _git(station, "commit", "-qm", "add a test")  # HEAD no longer differs from the working tree
+        assert PmFacadeService._protected_file_changes(outside) == ("tests/test_new.py",), stage
+        assert PmFacadeService._protected_file_changes(inside) == (), stage  # a NEW test under an owned directory is allowed
+
+    (station / "tests" / "test_a.py").write_text("assert 1 == 1\n", encoding="utf-8")  # editing an existing test is not
+    assert PmFacadeService._protected_file_changes(inside) == ("tests/test_a.py",)
+    note, block = PmFacadeService.__new__(PmFacadeService)._protected_file_note(outside)
+    assert block is True and "tests/test_new.py" in note
 
 
 def test_the_control_root_is_not_mixed_into_a_station_run(tmp_path: Path) -> None:
