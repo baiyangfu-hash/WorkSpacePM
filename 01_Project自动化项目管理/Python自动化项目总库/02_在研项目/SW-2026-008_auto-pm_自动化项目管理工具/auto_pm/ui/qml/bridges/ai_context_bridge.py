@@ -76,13 +76,11 @@ class AiContextBridge(QObject):
             return found
         return None
 
-    def _extract_active_hypothesis(self, project_id: str, change_number: str = "") -> dict[str, str]:
+    def _extract_active_hypothesis(self, project_id: str, session_file: Path | None) -> dict[str, str]:
         hyp_id = ""
         statement = ""
         expected_signal = ""
         success_metric = ""
-
-        session_file = self._find_session_file(project_id)
 
         if session_file is not None:
             try:
@@ -117,7 +115,7 @@ class AiContextBridge(QObject):
             # TD-SW008-266 S4: name the file only when it exists; a retired PM_SESSION must not be invented as a reference.
             found = self._find_session_file(project_id)
             session_ref = found.name if found is not None else ""
-            active_hyp = self._extract_active_hypothesis(project_id, change_number)
+            active_hyp = self._extract_active_hypothesis(project_id, found)
             return {
                 "goal_ref": f"{session_ref}#product-goal" if session_ref else "",
                 "hypothesis_ref": f"{session_ref}#hypothesis-ledger" if session_ref and active_hyp.get("id") else "",

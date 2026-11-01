@@ -16,6 +16,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from auto_pm.ui.cli import write_ai_context
@@ -136,6 +137,29 @@ class TestCliAutoGenerateAiContext:
         assert content["active_project"]["id"] == "DJ-2026-TEST"
         assert content["source"] == "auto-pm CLI"
         assert content["target_skill"] == "plc-electrical-engineer"
+
+    @pytest.mark.parametrize("command", [("plc", "check"), ("project", "show")])
+    def test_commands_pass_the_project_directory_so_an_existing_pm_session_is_referenced(
+        self, cli_runner: CliRunner, tmp_workspace: Path, command: tuple[str, str]
+    ) -> None:
+        """TD-SW008-266 S4：命令把项目目录交给 write_ai_context，较早建立的项目（目录里有 PM_SESSION）引用照旧；
+
+        目录没有传下去的话，老项目的引用会悄悄变空；传了而文件不在，则留空。
+        """
+        ctx_file = tmp_workspace / ".auto-pm" / "ai_context.json"
+        session = tmp_workspace / "DJ-2026-TEST_测试项目" / "PM_SESSION_DJ-2026-TEST.md"
+        assert session.is_file()  # the fixture project is an older one: it has the file
+
+        cli_runner.invoke(cli, ["-w", str(tmp_workspace), *command, "DJ-2026-TEST"], catch_exceptions=False)
+        refs = json.loads(ctx_file.read_text(encoding="utf-8"))["product_context"]
+        assert refs["goal_ref"] == "PM_SESSION_DJ-2026-TEST.md#product-goal"
+        assert refs["hypothesis_ref"] == "PM_SESSION_DJ-2026-TEST.md#hypothesis-ledger"
+
+        session.unlink()
+        ctx_file.unlink()
+        cli_runner.invoke(cli, ["-w", str(tmp_workspace), *command, "DJ-2026-TEST"], catch_exceptions=False)
+        refs = json.loads(ctx_file.read_text(encoding="utf-8"))["product_context"]
+        assert refs["goal_ref"] == "" and refs["hypothesis_ref"] == ""
 
     def test_plc_check_python_project_no_ai_context(
         self, cli_runner: CliRunner, python_project_factory: Callable[..., Path]
