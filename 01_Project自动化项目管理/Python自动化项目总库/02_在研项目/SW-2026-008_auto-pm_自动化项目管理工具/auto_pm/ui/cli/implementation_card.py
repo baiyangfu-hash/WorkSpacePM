@@ -84,7 +84,7 @@ def implementation_card_group() -> None:
               help="Repeat WBS:<workspace-relative-path> once and FILE:<path> as needed")
 @click.option("--intent", type=click.Choice([item.value for item in IntentType]), required=True)
 @click.option("--base-commit", required=True)
-@click.option("--worktree", required=True)
+@click.option("--worktree", required=True, type=CallerPath(file_okay=False))
 @click.option("--owned-path", "owned_paths", multiple=True, required=True)
 @click.option("--commit-evidence-path", "commit_evidence_paths", multiple=True, required=True)
 @click.option("--planned-new-path", "planned_new_paths", multiple=True,

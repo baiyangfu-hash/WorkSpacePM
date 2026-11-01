@@ -114,7 +114,7 @@ def pm_session_group() -> None:
 
 
 @pm_session_group.command(name="check")
-@click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
+@click.option("--workspace", "-w", default=None, type=CallerPath(file_okay=False), help="工作空间根目录（未指定时回退全局 -w）")
 @click.option(
     "--project-root",
     type=CallerPath(path_type=Path),
@@ -209,7 +209,7 @@ def cmd_check(
 
 
 @pm_session_group.command(name="archive")
-@click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
+@click.option("--workspace", "-w", default=None, type=CallerPath(file_okay=False), help="工作空间根目录（未指定时回退全局 -w）")
 @click.option(
     "--project-root",
     type=CallerPath(path_type=Path),
@@ -461,7 +461,7 @@ def _cmd_archive_auto(
 
 
 @pm_session_group.command(name="view")
-@click.option("--workspace", "-w", default=None, help="工作空间根目录（未指定时回退全局 -w）")
+@click.option("--workspace", "-w", default=None, type=CallerPath(file_okay=False), help="工作空间根目录（未指定时回退全局 -w）")
 @click.option(
     "--project-root",
     type=CallerPath(path_type=Path),

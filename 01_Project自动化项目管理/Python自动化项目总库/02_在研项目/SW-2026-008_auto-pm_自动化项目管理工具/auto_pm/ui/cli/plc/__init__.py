@@ -31,6 +31,7 @@ from auto_pm.domain.plc.language_service import LanguageService
 from auto_pm.plc.checker import PlcChecker
 from auto_pm.plc.models import CheckResult, RepairResult
 from auto_pm.plc.service import PlcService
+from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity, warn_runtime_identity
 
 from .docs import docs_group
@@ -281,7 +282,7 @@ def cmd_repair(
 
 
 @plc_group.command(name="ingest")
-@click.option("--src", "source_dir", required=True, help="PLC 源工程根目录绝对/相对路径")
+@click.option("--src", "source_dir", required=True, type=CallerPath(file_okay=False), help="PLC 源工程根目录绝对/相对路径（相对路径按你敲命令的目录算）")
 @click.option("--pid", "project_id", required=True, help="目标 PLC 项目编号 (如 DJ-2026-009)")
 @click.option("--stage-only", is_flag=True, help="仅提取至 .ingest_staging 暂存区，不污染正式工程")
 @click.pass_context

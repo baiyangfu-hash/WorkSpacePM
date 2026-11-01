@@ -22,6 +22,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.application.delivery.archive_manager import ArchiveManager
 from auto_pm.application.delivery.constants import DEFAULT_ARCHIVE_KEEP, DEFAULT_PRODUCT_NAME
 from auto_pm.application.delivery.delivery_service import DeliveryService
+from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
@@ -47,10 +48,10 @@ def delivery_group(ctx: click.Context) -> None:
 @click.option("--version", required=True, help="目标版本号（如 V1.0.1）")
 @click.option("--skip-pyinstaller", is_flag=True, default=True, help="跳过 PyInstaller 编译（默认跳过）")
 @click.option("--auto-package", is_flag=True, default=False, help="构建后自动打包 ZIP")
-@click.option("--dist-dir", default=None, help="PyInstaller 输出目录（默认 dist/{product_name}）")
+@click.option("--dist-dir", default=None, type=CallerPath(file_okay=False), help="PyInstaller 输出目录（默认 dist/{product_name}）")
 @click.option("--product-name", default=DEFAULT_PRODUCT_NAME, help="产品名称")
 @click.option("--summary", default="", help="变更摘要")
-@click.option("--project-root", "-p", default=None, help="项目根目录（默认自动检测）")
+@click.option("--project-root", "-p", default=None, type=CallerPath(file_okay=False), help="项目根目录（默认自动检测）")
 @click.pass_context
 def cmd_build(
     ctx: click.Context,
@@ -127,7 +128,7 @@ def cmd_build(
 @click.option("--product-name", default=DEFAULT_PRODUCT_NAME, help="产品名称")
 @click.option("--verify-only", is_flag=True, default=False, help="仅验证已有 ZIP")
 @click.option("--summary", default="", help="变更摘要")
-@click.option("--project-root", "-p", default=None, help="项目根目录（默认自动检测）")
+@click.option("--project-root", "-p", default=None, type=CallerPath(file_okay=False), help="项目根目录（默认自动检测）")
 @click.pass_context
 def cmd_package(
     ctx: click.Context,
@@ -196,7 +197,7 @@ def archive_group(ctx: click.Context) -> None:
 @archive_group.command(name="list")
 @click.option("--type", "archive_type", type=click.Choice(["delivery", "package"]),
               default="delivery", help="归档类型")
-@click.option("--project-root", "-p", default=None, help="项目根目录（默认自动检测）")
+@click.option("--project-root", "-p", default=None, type=CallerPath(file_okay=False), help="项目根目录（默认自动检测）")
 @click.pass_context
 def cmd_archive_list(
     ctx: click.Context,
@@ -248,7 +249,7 @@ def cmd_archive_list(
               default="delivery", help="归档类型")
 @click.option("--keep", type=int, default=DEFAULT_ARCHIVE_KEEP, help=f"保留最近 N 个（默认 {DEFAULT_ARCHIVE_KEEP}）")
 @click.option("--dry-run", is_flag=True, default=False, help="预览模式，不实际删除")
-@click.option("--project-root", "-p", default=None, help="项目根目录（默认自动检测）")
+@click.option("--project-root", "-p", default=None, type=CallerPath(file_okay=False), help="项目根目录（默认自动检测）")
 @click.pass_context
 def cmd_archive_clean(
     ctx: click.Context,
@@ -293,7 +294,7 @@ def cmd_archive_clean(
 
 
 @delivery_group.command(name="status")
-@click.option("--project-root", "-p", default=None, help="项目根目录（默认自动检测）")
+@click.option("--project-root", "-p", default=None, type=CallerPath(file_okay=False), help="项目根目录（默认自动检测）")
 @click.pass_context
 def cmd_status(
     ctx: click.Context,
