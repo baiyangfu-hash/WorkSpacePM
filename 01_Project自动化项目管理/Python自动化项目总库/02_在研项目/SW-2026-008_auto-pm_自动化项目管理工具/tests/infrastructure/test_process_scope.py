@@ -12,7 +12,12 @@ from pathlib import Path
 import pytest
 
 from auto_pm.application.core import evidence_collection_service as ecs
-from auto_pm.infrastructure.process_scope import GateCancelledError, ProcessScope, run_in_scope
+from auto_pm.infrastructure.process_scope import (
+    GateAbandonedError,
+    GateCancelledError,
+    ProcessScope,
+    run_in_scope,
+)
 
 # The child starts a grandchild that touches a heartbeat file every 50 ms, then waits; the heartbeat stops only when the whole tree is gone.
 _GRANDCHILD = "import pathlib, sys, time\nbeat = pathlib.Path(sys.argv[1])\nwhile True:\n    beat.write_text(str(time.time()))\n    time.sleep(0.05)\n"
@@ -106,20 +111,28 @@ def test_after_the_cancel_no_new_child_is_started(tmp_path: Path) -> None:
 
 
 def test_a_gate_that_runs_out_of_time_kills_its_children_through_the_real_supervisor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The supervisor's cancel kills the tree and the worker unwinds by itself with ``GateCancelledError``.
+    """After the time limit the whole tree is dead and the worker thread has ended with one of the two abandon errors.
 
-    ``reclaim_thread`` gives that cooperative unwind ``_SETTLE_SECONDS`` before it injects ``GateAbandonedError`` into the thread.  On a
-    loaded Windows runner the unwind (pipes closing after ``taskkill``) sometimes took longer than the default half second, the injection
-    won, and the worker ended with ``GateAbandonedError`` instead (CI of integration batch four).  Both endings are correct for the
-    product; this test is about the cooperative one, and the injection fallback has its own tests (``test_gate_thread_reclaim.py``).  So
-    the settle window is made long enough here that the injection cannot pre-empt the unwind, instead of weakening the assertion.
+    Which error the worker sees first depends on scheduling: the scope's cancel makes a worker waiting on the killed child raise
+    ``GateCancelledError``, while ``reclaim_thread`` injects ``GateAbandonedError`` once the half-second settle window is over.  On a loaded
+    Windows runner the injection sometimes wins (CI of integration batch four).  Both are correct for the product (``_run_bounded`` treats
+    them alike, and the tree is killed either way), so the type is not what this test pins.  What it does pin: the direct child was
+    killed, the grandchild's heartbeat stopped, and the worker ended with one of the two.
     """
 
     from auto_pm.infrastructure import process_scope as module
 
-    monkeypatch.setattr(module, "_SETTLE_SECONDS", 60.0)
     beat = tmp_path / "beat.txt"
     seen: list[BaseException] = []
+    started: list[subprocess.Popen[str]] = []
+    real_start = module._start
+
+    def recording_start(args: list[str], cwd: Path, env: object) -> subprocess.Popen[str]:
+        process = real_start(args, cwd, env)  # type: ignore[arg-type]
+        started.append(process)
+        return process
+
+    monkeypatch.setattr(module, "_start", recording_start)
 
     def work() -> tuple[str, int | None]:
         try:
@@ -132,11 +145,13 @@ def test_a_gate_that_runs_out_of_time_kills_its_children_through_the_real_superv
     with pytest.raises(ecs._PlcGateTimeoutError):
         ecs._run_bounded(work, 3)
 
-    assert _heartbeat_is_dead(beat)
+    assert len(started) == 1 and beat.exists()  # one tree was started and its grandchild really ran before the limit
+    assert started[0].wait(timeout=30) is not None  # the direct child was killed, not left running
+    assert _heartbeat_is_dead(beat)  # and so was the grandchild
     deadline = time.monotonic() + 30
     while not seen and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert seen and isinstance(seen[0], GateCancelledError)
+    assert seen and isinstance(seen[0], (GateCancelledError, GateAbandonedError))
 
 
 class _FakeProcess:
