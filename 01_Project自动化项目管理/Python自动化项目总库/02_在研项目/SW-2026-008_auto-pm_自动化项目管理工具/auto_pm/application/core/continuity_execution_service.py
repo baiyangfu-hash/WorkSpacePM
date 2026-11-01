@@ -106,6 +106,16 @@ _RUN_TRANSITIONS = {
 }
 
 
+def _worktree_is_the_control_root(worktree: Path, root: Path) -> bool:
+    """A Run's edits must never land in the control root itself (AGENTS.md WS-001); only an isolated station may carry a Run.
+
+    A module-level function so the test suite, whose throw-away repositories use their own root as the station, can switch it off
+    in one place (``tests/conftest.py``); ``test_run_start_control_root_guard.py`` runs it for real.
+    """
+
+    return worktree.resolve() == root.resolve()
+
+
 class ContinuityExecutionService:
     """Maintain one recoverable execution chain without using adapter state as truth."""
 
@@ -271,6 +281,11 @@ class ContinuityExecutionService:
                 worktree_path,
                 allow_external_linked=True,
             )
+            if _worktree_is_the_control_root(governed_worktree, self._root):
+                raise ContinuityExecutionError(
+                    "Run 的工作树不能是控制根本身（AGENTS.md WS-001：控制根只跑驾驶舱命令、不写业务代码）。"
+                    "请用 git worktree add 在 .auto-pm/worktrees/<agent> 下开隔离工位，再用 --worktree 指向它"
+                )
             if actual_head != git_head:
                 raise ContinuityExecutionError(
                     f"Run git_head 与受管 worktree 当前 HEAD 不一致：--git-head 给的是 {git_head}，工位现在是 {actual_head}。"

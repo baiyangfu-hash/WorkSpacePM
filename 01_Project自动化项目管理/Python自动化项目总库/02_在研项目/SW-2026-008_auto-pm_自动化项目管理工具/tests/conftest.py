@@ -6,7 +6,7 @@ import os
 import random
 import sys
 import tempfile
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -112,6 +112,35 @@ def _process_table_of_this_host_is_complete(monkeypatch: pytest.MonkeyPatch) -> 
     from auto_pm.infrastructure import process_probe
 
     monkeypatch.setattr(process_probe, "_view_problem", lambda: "")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _runs_may_start_in_the_test_repo() -> Generator[Callable[[Path, Path], bool], None, None]:
+    """Throw-away test repositories use their own root as the Run's station; the real rule is tested on its own.
+
+    ``ContinuityExecutionService.start_run`` refuses a worktree that is the control root (WS-001, TD-SW008-267).  Hundreds of
+    fixtures build a repository in ``tmp_path`` and start the Run right there, which is the one thing production forbids, so the
+    rule is off for the whole session (module- and class-scoped fixtures start Runs too, before any per-test fixture could act)
+    except in tests that request ``control_root_guard_on`` (``test_run_start_control_root_guard.py``).  Yields the real rule for it.
+    """
+
+    from auto_pm.application.core import continuity_execution_service
+
+    real = continuity_execution_service._worktree_is_the_control_root
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(continuity_execution_service, "_worktree_is_the_control_root", lambda _worktree, _root: False)
+        yield real
+
+
+@pytest.fixture
+def control_root_guard_on(
+    monkeypatch: pytest.MonkeyPatch, _runs_may_start_in_the_test_repo: Callable[[Path, Path], bool]
+) -> None:
+    """Put the production rule back after the autouse fixture above switched it off."""
+
+    from auto_pm.application.core import continuity_execution_service
+
+    monkeypatch.setattr(continuity_execution_service, "_worktree_is_the_control_root", _runs_may_start_in_the_test_repo)
 
 
 # Qt tests whose leftovers must not be freed by the cyclic garbage collector at a random later moment (the cockpit Modbus tool that this was written for has been removed; the same rule keeps protecting the other Qt tests).
