@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import auto_pm.application.core.worktree_policy_service as policy_module
 import auto_pm.infrastructure.control_root_guard as control_root_guard
 from auto_pm.application.core.worktree_policy_service import (
     WorktreePolicyError,
@@ -83,17 +84,69 @@ def _directory_link(link: Path, target: Path) -> None:
         link.symlink_to(target, target_is_directory=True)
 
 
-def test_clean_controlled_worktree_is_reused_without_branch_authority(tmp_path: Path) -> None:
+def test_a_clean_control_root_is_never_the_run_worktree(tmp_path: Path) -> None:
+    """TD-SW008-267 (AGENTS.md WS-001): the control root only runs cockpit commands, even when it is clean."""
     _repository(tmp_path)
 
-    plan = WorktreePolicyService(tmp_path).select(
-        run_id="RUN-SW008-A5-001", allow_branch_creation=False
-    )
+    with pytest.raises(WorktreePolicyError, match="控制根不能作 Run 工作树"):
+        WorktreePolicyService(tmp_path).select(run_id="RUN-SW008-A5-001", allow_branch_creation=False)
+
+    plan = WorktreePolicyService(tmp_path).select(run_id="RUN-SW008-A5-001", allow_branch_creation=True)
+    assert plan.worktree_mode is WorktreeMode.ISOLATED
+    assert plan.worktree_path != tmp_path.resolve()
+    assert plan.worktree_path.is_relative_to(tmp_path.resolve() / ".auto-pm" / "worktrees")
+
+
+def test_a_clean_linked_worktree_is_a_workstation_and_is_reused(tmp_path: Path) -> None:
+    _repository(tmp_path)
+    service = WorktreePolicyService(tmp_path)
+    linked = service.materialize(
+        service.select(run_id="RUN-SW008-A5-LINKED", allow_branch_creation=True)
+    ).worktree_path
+
+    plan = WorktreePolicyService(linked).select(run_id="RUN-SW008-A5-001", allow_branch_creation=False)
 
     assert plan.worktree_mode is WorktreeMode.CURRENT
-    assert plan.worktree_path == tmp_path.resolve()
+    assert plan.worktree_path == linked.resolve()
     assert plan.branch_name == ""
     assert plan.origin_dirty_paths == ()
+
+
+@pytest.mark.parametrize(
+    "guard_says",
+    ["Git 控制根事实包含诊断: warning: x", "Git 控制根事实采集失败: boom", "Git 控制目录无法安全规范化"],
+)
+def test_a_failing_control_root_guard_never_hands_the_control_root_to_a_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, guard_says: str
+) -> None:
+    """Audit 480 (a): the guard failing for any reason but "this is a linked worktree" must refuse, not allow."""
+    _repository(tmp_path)
+
+    def broken(_root: object) -> None:
+        raise ControlRootGuardError(guard_says)
+
+    monkeypatch.setattr(policy_module, "require_control_root", broken)
+
+    with pytest.raises(WorktreePolicyError, match="无法确认是否为控制根"):
+        WorktreePolicyService(tmp_path).select(run_id="RUN-SW008-A5-001", allow_branch_creation=False)
+
+
+def test_a_real_workstation_is_recognized_by_its_git_directories_not_by_the_guard_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _repository(tmp_path)
+    service = WorktreePolicyService(tmp_path)
+    linked = service.materialize(
+        service.select(run_id="RUN-SW008-A5-LINKED2", allow_branch_creation=True)
+    ).worktree_path
+
+    def broken(_root: object) -> None:
+        raise ControlRootGuardError("any wording at all")
+
+    monkeypatch.setattr(policy_module, "require_control_root", broken)
+    plan = WorktreePolicyService(linked).select(run_id="RUN-SW008-A5-002", allow_branch_creation=False)
+
+    assert plan.worktree_mode is WorktreeMode.CURRENT  # Git itself proves it: git-dir differs from common-dir
 
 
 def test_dirty_controlled_worktree_creates_an_isolated_branch_without_touching_parent(
@@ -151,7 +204,7 @@ def test_control_root_guard_accepts_primary_and_rejects_linked_worktree(tmp_path
 
     linked_plan = WorktreePolicyService(linked).select(
         run_id="RUN-SW008-LINKED-CURRENT", allow_branch_creation=False
-    )
+    )  # a linked worktree is itself a workstation: CURRENT stays allowed there
     assert linked_plan.worktree_path == linked.resolve()
     with pytest.raises(WorktreePolicyError, match="linked worktree"):
         WorktreePolicyService(linked).require_control_root()

@@ -243,6 +243,29 @@ def test_prepare_refuses_a_parked_mission_before_any_worktree_or_run(
     assert dispatch._store.list_runs("WORK-A5-001") == ()
 
 
+def test_prepare_never_hands_a_clean_control_root_to_a_run_as_its_worktree(tmp_path: Path) -> None:
+    """TD-SW008-267 (AGENTS.md WS-001): a clean tree and no branch authority used to mean CURRENT = the control root."""
+    routing = InternalRoutingPolicy(
+        allow_execution_branch_changes=False,
+        allowed_execution_adapters=frozenset({ExecutionAdapterKind.CODEX}),
+        max_parallel_runs=1,
+    )
+    missions, _, dispatch = _ready(tmp_path, routing=routing)
+    _git(tmp_path, "add", ".")  # the decision file written by _ready would otherwise make the tree dirty
+    _git(tmp_path, "-c", "user.name=Adapter Test", "-c", "user.email=adapter@example.invalid", "commit", "-m", "decision")
+    before = _counts(tmp_path)
+
+    with pytest.raises(ExecutionDispatchError, match="控制根不能作 Run 工作树"):
+        dispatch.prepare(
+            mission=missions.get("MISSION-A5-001"), work_id="WORK-A5-001", run_id="RUN-A5-CTRL",
+            adapter=ExecutionAdapterKind.CODEX, executor_id="agent-a", lease_token="codex-lease-secret",
+            lease_seconds=900, idempotency_key="dispatch-ctrl", stack="python",
+        )
+
+    assert _counts(tmp_path) == before
+    assert dispatch._store.list_runs("WORK-A5-001") == ()
+
+
 def test_prepare_asks_the_store_for_one_held_lease_per_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -80,7 +81,8 @@ class WorktreePolicyService:
                 branch_name=self._current_branch(),
                 origin_dirty_paths=(),
             )
-        if not dirty_paths and not force_isolation:
+        # Asked only when CURRENT is on the table, so a forced/dirty isolation keeps failing at materialize() as before.
+        if not dirty_paths and not force_isolation and not self._is_control_root():
             return WorktreePlan(
                 worktree_mode=WorktreeMode.CURRENT,
                 worktree_path=self._root,
@@ -89,7 +91,15 @@ class WorktreePolicyService:
                 origin_dirty_paths=(),
             )
         if not allow_branch_creation:
-            reason = "存在未声明改动" if dirty_paths else "请求了隔离工作树"
+            # AGENTS.md WS-001: the control root only runs cockpit commands, never a Run's edits, so a clean control
+            # root no longer buys CURRENT mode (TD-SW008-267); a linked worktree is already a workstation.
+            reason = (
+                "存在未声明改动"
+                if dirty_paths
+                else "请求了隔离工作树"
+                if force_isolation
+                else "控制根不能作 Run 工作树，需要隔离工位"
+            )
             raise WorktreePolicyError(f"{reason}，但 AuthorityEnvelope 未授权执行分支变更")
         branch_name = self._branch_name(run_id)
         target = self._target_path(run_id)
@@ -182,6 +192,24 @@ class WorktreePolicyService:
                 require_control_root(self._root)
         except ControlRootGuardError as error:
             raise WorktreePolicyError(str(error)) from error
+
+    def _is_control_root(self) -> bool:
+        """True for the primary Git worktree; False only for a provable linked (isolated) one.
+
+        Fail closed: the guard also raises for Git failures, timeouts, stderr diagnostics and uncanonicalizable
+        control directories.  Those say nothing about being a workstation, so they must never read as "not the
+        control root" (that would hand the control root to a Run); only an exact git-dir != common-dir does.
+        """
+
+        try:
+            require_control_root(self._root)
+        except ControlRootGuardError as error:
+            git_dir = self._git_output("rev-parse", "--path-format=absolute", "--absolute-git-dir")
+            common_dir = self._git_output("rev-parse", "--path-format=absolute", "--git-common-dir")
+            if os.path.normcase(str(Path(git_dir).resolve())) != os.path.normcase(str(Path(common_dir).resolve())):
+                return False
+            raise WorktreePolicyError(f"无法确认是否为控制根，拒绝放行: {error}") from error
+        return True
 
     def _require_root_git_worktree(self) -> None:
         try:
