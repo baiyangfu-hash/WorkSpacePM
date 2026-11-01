@@ -100,6 +100,20 @@ def _no_ambient_agent_markers(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _process_table_of_this_host_is_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests that kill a child and expect "dead" must not depend on how the machine that runs them mounts /proc.
+
+    A container, WSL or a ``hidepid`` mount makes the probe answer "could not observe" for a missing process on purpose
+    (``process_probe.procfs_view_problem``).  Those cases are tested in ``test_process_probe.py`` with a fake /proc; every
+    other test sees a complete table.
+    """
+
+    from auto_pm.infrastructure import process_probe
+
+    monkeypatch.setattr(process_probe, "_view_problem", lambda: "")
+
+
 # Qt tests whose leftovers must not be freed by the cyclic garbage collector at a random later moment (the cockpit Modbus tool that this was written for has been removed; the same rule keeps protecting the other Qt tests).
 _QT_TEST_PREFIXES = ("tests/qml/", "tests/ui/", "tests/e2e/test_pmf_gui.py")
 

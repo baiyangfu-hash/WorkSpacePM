@@ -608,3 +608,15 @@ def test_apply_with_the_wallet_but_no_wallet_entry_is_refused_and_changes_nothin
     assert result.exit_code != 0 and "已拒绝落账" in result.output and "钱包" in result.output
     assert _events(tmp_path) == before
     assert service._store.get_run("RUN-001").state.value == "RUNNING"
+
+
+def test_unknown_names_the_usual_causes_so_a_reader_does_not_read_it_as_dead() -> None:
+    text = pm_recover.plain_report(
+        run_id="RUN-9",
+        run_state="RUNNING",
+        process_id=7,
+        status=RecoveryStatus(RecoveryVerdict.UNKNOWN, "原因"),
+        recorded_started_at=datetime(2026, 11, 1, 17, 0, tzinfo=UTC),
+        observed_created_at=None,
+    )
+    assert "容器" in text and "WSL" in text and "hidepid" in text and "不等于已经结束" in text
