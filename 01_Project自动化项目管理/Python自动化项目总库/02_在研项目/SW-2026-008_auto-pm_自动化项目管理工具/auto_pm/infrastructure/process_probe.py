@@ -6,6 +6,9 @@ turns into ``UNKNOWN``: a process nobody could identify is never reported as dea
 - Windows: ``OpenProcess`` with the limited query right; error 87 (no such process) proves absence, error 5 (access denied) proves presence with an
   unknown start time; the start time is the creation ``FILETIME`` as a decimal tick count; image and command line are hashed, never stored.
 - Linux: ``/proc/<pid>/stat`` field 22 (start time in clock ticks since boot), ``/proc/<pid>/exe`` and ``/proc/<pid>/cmdline``.
+  A missing ``/proc/<pid>`` proves absence only when this host's ``/proc`` can show every process (``procfs_view_problem``): with no
+  usable ``/proc``, a ``hidepid`` mount that hides other users' processes, or under WSL (which cannot see Windows processes) the same
+  gap looks identical to a dead process, so it is reported as "could not observe" (``None``) and the contract answers ``UNKNOWN``.
 - Other platforms: nothing can be observed (``None``).
 
 The host identity is a hash of the machine id (``MachineGuid`` on Windows, ``/etc/machine-id`` on Linux); the raw id is never stored.
@@ -205,11 +208,66 @@ if sys.platform == "win32":
             _KERNEL32.CloseHandle(snapshot)
 
 
+_PROC_ROOT = Path("/proc")
+_HIDEPID_OFF = frozenset({"0", "off"})
+
+
+def _read_strict(path: Path) -> str | None:
+    """A procfs text file decoded strictly; ``None`` when it cannot be read or is not valid UTF-8 (the caller then does not trust the view)."""
+
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def procfs_view_problem(proc: Path = _PROC_ROOT, *, own_pid: int | None = None) -> str:
+    """Why this host's ``/proc`` cannot be trusted to show every process; an empty string when it can.
+
+    A missing ``/proc/<pid>`` means "dead" only if the table that was searched is the complete one.  Three cases look exactly like death:
+    ``/proc`` is absent or belongs to another PID namespace (the caller's own pid is not in it), it is mounted with ``hidepid`` so other
+    users' processes are invisible, or the host is WSL (the executor may be a Windows process the Linux side cannot see).
+    A process in a *different* container that this ``/proc`` does see as a separate namespace cannot be detected from here (the start
+    evidence records no namespace), so the operator-facing text still warns about it.
+    """
+
+    pid = os.getpid() if own_pid is None else own_pid
+    own_stat = _read_strict(proc / "self" / "stat")
+    if own_stat is None:
+        return "/proc 读不到（没挂载或不是这台电脑的进程表）"
+    if own_stat.split(" ", 1)[0] != str(pid):
+        return "/proc 里看不到本进程自己，它属于另一个进程号命名空间（例如容器）"
+    if not (proc / "1").exists():
+        return "/proc 里看不到 1 号进程，进程表被限制了"
+    mountinfo = _read_strict(proc / "self" / "mountinfo")
+    if mountinfo is None:
+        return "读不到 /proc 的挂载选项，不能排除 hidepid"
+    for line in mountinfo.splitlines():
+        head, _, tail = line.partition(" - ")
+        fields = head.split()
+        if len(fields) > 4 and fields[4] == str(proc) and tail.split(" ", 1)[0] == "proc":
+            for option in (*fields[5].split(","), *tail.replace(" ", ",").split(",")):
+                if option.startswith("hidepid=") and option.split("=", 1)[1] not in _HIDEPID_OFF:
+                    return "/proc 用 hidepid 挂载，看不到别的用户的进程"
+    release = (_read_strict(proc / "sys" / "kernel" / "osrelease") or "").casefold()
+    if "microsoft" in release or "wsl" in release:
+        return "这是 WSL，看不到 Windows 一侧的进程"
+    return ""
+
+
+def _view_problem() -> str:
+    """The question ``_linux_observe`` asks about this host; one seam so a test can fix the answer without touching ``/proc``."""
+
+    return procfs_view_problem(_PROC_ROOT)
+
+
 def _linux_observe(pid: int) -> tuple[ProcessObservation, str | None] | None:
-    base = Path("/proc") / str(pid)
+    base = _PROC_ROOT / str(pid)
     try:
         stat = (base / "stat").read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
+        if _view_problem():
+            return None  # absent from a table that may not show it: not proof of death
         return ProcessObservation(pid_exists=False), None
     except OSError:
         return None
