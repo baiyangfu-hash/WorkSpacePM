@@ -50,7 +50,12 @@ def _heartbeat_is_dead(path: Path) -> bool:
 def test_without_a_scope_the_runner_behaves_like_subprocess_run(tmp_path: Path) -> None:
     # the child writes UTF-8 whatever the console code page is (Windows runners default to cp1252); the runner decodes UTF-8
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-    done = run_in_scope([sys.executable, "-c", "print('héllo'); import sys; sys.stderr.write('e'); sys.exit(3)"], tmp_path, env, 30)
+    done = run_in_scope(
+        [sys.executable, "-c", "print('héllo'); import sys; sys.stderr.write('e'); sys.exit(3)"],
+        tmp_path,
+        env,
+        30,
+    )
 
     assert (done.returncode, done.stdout.strip(), done.stderr) == (3, "héllo", "e")
 
@@ -65,7 +70,9 @@ def test_a_timeout_kills_the_child_and_its_grandchild(tmp_path: Path) -> None:
     assert _heartbeat_is_dead(beat)
 
 
-def test_cancelling_the_scope_kills_the_running_tree_and_the_call_reports_cancelled(tmp_path: Path) -> None:
+def test_cancelling_the_scope_kills_the_running_tree_and_the_call_reports_cancelled(
+    tmp_path: Path,
+) -> None:
     beat = tmp_path / "beat.txt"
     scope = ProcessScope()
     outcome: list[BaseException] = []
@@ -98,7 +105,16 @@ def test_after_the_cancel_no_new_child_is_started(tmp_path: Path) -> None:
     def worker() -> None:
         scope.enter()
         try:
-            run_in_scope([sys.executable, "-c", f"import pathlib; pathlib.Path({str(marker)!r}).write_text('x')"], tmp_path, {}, 30)
+            run_in_scope(
+                [
+                    sys.executable,
+                    "-c",
+                    f"import pathlib; pathlib.Path({str(marker)!r}).write_text('x')",
+                ],
+                tmp_path,
+                {},
+                30,
+            )
         except BaseException as error:
             errors.append(error)
 
@@ -110,7 +126,58 @@ def test_after_the_cancel_no_new_child_is_started(tmp_path: Path) -> None:
     assert not marker.exists()
 
 
-def test_a_gate_that_runs_out_of_time_kills_its_children_through_the_real_supervisor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_cancel_between_the_child_start_and_its_registration_still_kills_the_whole_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TD-SW008-251: the race branch of ``register`` -- ``cancel`` ran after the child started but before it was registered.
+
+    ``cancel`` only kills the children it already knows, so this child would be missed.  ``register`` has to notice the cancel, kill the
+    child's tree itself and refuse the call; otherwise the tree would run on for as long as it likes.
+    """
+
+    from auto_pm.infrastructure import process_scope as module
+
+    beat = tmp_path / "beat.txt"
+    scope = ProcessScope()
+    real_start = module._start
+    started: list[subprocess.Popen[str]] = []
+
+    def start_then_cancel(args: list[str], cwd: Path, env: object) -> subprocess.Popen[str]:
+        process = real_start(args, cwd, env)  # type: ignore[arg-type]
+        started.append(process)
+        _wait_for(
+            beat
+        )  # the grandchild is running, so there is a whole tree to kill (and a heartbeat that can stop)
+        assert scope.cancel() == 0  # the child is not registered yet, so the cancel cannot see it
+        return process
+
+    monkeypatch.setattr(module, "_start", start_then_cancel)
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        scope.enter()
+        try:
+            run_in_scope(_tree_command(beat), tmp_path, {}, 120)
+        except BaseException as error:
+            errors.append(error)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(60)
+
+    assert not thread.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], GateCancelledError)
+    assert (
+        len(started) == 1 and started[0].wait(timeout=30) is not None
+    )  # the direct child is gone, not left running
+    assert _heartbeat_is_dead(
+        beat
+    )  # the grandchild was alive before the cancel; it has to stop with the tree, not be left running
+
+
+def test_a_gate_that_runs_out_of_time_kills_its_children_through_the_real_supervisor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """After the time limit the whole tree is dead and the worker thread has ended with one of the two abandon errors.
 
     Which error the worker sees first depends on scheduling: the scope's cancel makes a worker waiting on the killed child raise
@@ -145,7 +212,9 @@ def test_a_gate_that_runs_out_of_time_kills_its_children_through_the_real_superv
     with pytest.raises(ecs._PlcGateTimeoutError):
         ecs._run_bounded(work, 3)
 
-    assert len(started) == 1 and beat.exists()  # one tree was started and its grandchild really ran before the limit
+    assert (
+        len(started) == 1 and beat.exists()
+    )  # one tree was started and its grandchild really ran before the limit
     assert started[0].wait(timeout=30) is not None  # the direct child was killed, not left running
     assert _heartbeat_is_dead(beat)  # and so was the grandchild
     deadline = time.monotonic() + 30
@@ -164,7 +233,9 @@ class _FakeProcess:
         self.killed = True
 
 
-def test_a_taskkill_that_hangs_does_not_escape_and_the_direct_child_is_still_killed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_taskkill_that_hangs_does_not_escape_and_the_direct_child_is_still_killed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # reviewer finding (reviews/457): on Windows a stuck taskkill raised TimeoutExpired out of the cleanup, hiding the gate's own timeout
     # error and skipping the kill; both the hang and a failure to start taskkill must be absorbed and fall back to killing the child
     from auto_pm.infrastructure import process_scope as module

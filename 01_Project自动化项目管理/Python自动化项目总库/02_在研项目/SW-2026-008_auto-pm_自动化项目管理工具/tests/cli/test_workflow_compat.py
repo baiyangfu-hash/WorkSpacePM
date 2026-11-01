@@ -86,9 +86,15 @@ def test_a_delegated_action_behaves_exactly_like_the_pm_command(
         assert actual.output == expected.output, arguments
 
     assert expected.exit_code == 1
-    assert json.loads(cli_runner.invoke(
-        cli, ["-w", str(via_workflow), "workflow", "confirm-start", "--mission-id", _MISSION]
-    ).output)["mission_state"] == "ACTIVE"
+    assert (
+        json.loads(
+            cli_runner.invoke(
+                cli,
+                ["-w", str(via_workflow), "workflow", "confirm-start", "--mission-id", _MISSION],
+            ).output
+        )["mission_state"]
+        == "ACTIVE"
+    )
 
 
 def test_delegated_actions_keep_every_pm_guard(
@@ -100,7 +106,9 @@ def test_delegated_actions_keep_every_pm_guard(
     linked = tmp_path / "linked"
     _git(root, "worktree", "add", "--detach", str(linked), "HEAD")
 
-    refused = cli_runner.invoke(cli, ["-w", str(linked), "workflow", "plan", "--mission-id", _MISSION])
+    refused = cli_runner.invoke(
+        cli, ["-w", str(linked), "workflow", "plan", "--mission-id", _MISSION]
+    )
 
     assert refused.exit_code == 1
     assert "linked worktree" in refused.output
@@ -144,7 +152,9 @@ def test_delegated_actions_keep_every_pm_guard(
     assert reached is False
 
 
-@pytest.mark.parametrize("action", ["handoff", "close", "start", "workflow", "rollback", "zz-garbage"])
+@pytest.mark.parametrize(
+    "action", ["handoff", "close", "start", "workflow", "rollback", "zz-garbage"]
+)
 def test_an_unknown_old_action_is_refused_without_touching_anything(
     cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str
 ) -> None:
@@ -197,7 +207,7 @@ def test_help_lists_all_commands_and_delegated_help_matches_pm(
 
 def test_the_module_does_not_revive_the_old_write_state_machine() -> None:
     source_path = Path(workflow_module.__file__)
-    source = source_path.read_text(encoding="utf-8", errors="replace")
+    source = source_path.read_bytes()
     imported: list[str] = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
@@ -208,7 +218,7 @@ def test_the_module_does_not_revive_the_old_write_state_machine() -> None:
 
     forbidden = ("ai_handoff_service", "pm_saga_service", "handoff")
     assert not [name for name in imported if any(token in name for token in forbidden)]
-    assert "pm-workflow" not in source
+    assert b"pm-workflow" not in source
 
 
 def test_registration_and_the_pm_display_alias_are_unchanged(
