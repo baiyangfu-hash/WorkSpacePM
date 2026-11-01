@@ -14,8 +14,9 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
+import click
 import pytest
 
 pytest.importorskip("PySide6")
@@ -101,9 +102,9 @@ def test_diff_tables_catches_a_missing_extra_or_changed_edge(graphs: dict[str, G
 
 def test_edge_commands_name_real_cli_commands(graphs: dict[str, Graph]) -> None:
     """线上标的 pm 命令必须是真有的子命令（防标错、防命令改名后图还留着旧名）。"""
-    from auto_pm.cli.__main__ import cli
+    from auto_pm.ui.cli.__main__ import cli
 
-    pm = cli.commands["pm"].commands
+    pm = cast("click.Group", cli.commands["pm"]).commands
     for graph in graphs.values():
         for edge in graph.edges:
             match = re.match(r"^pm (\S+)$", edge.label)

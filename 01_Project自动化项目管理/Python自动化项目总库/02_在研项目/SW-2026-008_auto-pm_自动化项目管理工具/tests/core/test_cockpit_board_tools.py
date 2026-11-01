@@ -46,7 +46,7 @@ def _create(**changes: Any) -> dict[str, Any]:
 
 
 def _cli() -> Any:
-    from auto_pm.cli.__main__ import cli
+    from auto_pm.ui.cli.__main__ import cli
 
     return cli
 
