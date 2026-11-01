@@ -456,6 +456,7 @@ def _unwrapped(output: str) -> str:
     return "".join(output.split())
 
 
+@pytest.mark.usefixtures("identity_guard_off")  # about exit codes and the preview; the guard is tested in test_station_runtime_identity.py
 def test_cli_exit_codes_and_default_preview(lab: Lab) -> None:
     lab.service().open("claude", "CARD-1")
     commit(lab.station("claude"), "only-here.txt")
