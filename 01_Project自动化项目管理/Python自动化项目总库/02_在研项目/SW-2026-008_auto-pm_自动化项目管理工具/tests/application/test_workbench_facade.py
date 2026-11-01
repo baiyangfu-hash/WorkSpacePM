@@ -385,7 +385,7 @@ def test_get_settings_summary_with_db() -> None:
     assert result.success is True
     assert result.payload.db_available is True  # type: ignore[union-attr]
     assert result.payload.project_count == 5  # type: ignore[union-attr]
-    assert "auto_pm.db" in result.payload.db_path  # type: ignore[union-attr]
+    assert result.payload.db_path.endswith("/auto_pm.db")  # type: ignore[union-attr]
     assert result.payload.last_sync == "2026-07-07 10:00"  # type: ignore[union-attr]
 
 
@@ -586,7 +586,7 @@ def test_delete_project_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
     root, mock_project_service = _delete_world(tmp_path)
 
-    with patch("auto_pm.logging.audit.audit_log"):
+    with patch("auto_pm.infrastructure.logging.audit.audit_log"):
         facade = WorkbenchFacade(
             dashboard_service=MagicMock(),
             project_service=mock_project_service,
@@ -690,7 +690,7 @@ def test_save_workspace_root_success_with_runtime_reload(tmp_path, monkeypatch) 
     # 回归修复：测试残留导致 GUI 启动读到空 pytest 临时目录，整个界面变空架子
     _isolated_cfg = tmp_path / ".auto-pm-workspace"
     monkeypatch.setattr(
-        "auto_pm.core.paths.get_config_file_path",
+        "auto_pm.application.core.paths.get_config_file_path",
         lambda: str(_isolated_cfg),
     )
 
@@ -725,7 +725,7 @@ def test_save_workspace_root_partial_success_when_runtime_reload_fails(tmp_path,
     # 回归修复：测试残留导致 GUI 启动读到空 pytest 临时目录，整个界面变空架子
     _isolated_cfg = tmp_path / ".auto-pm-workspace"
     monkeypatch.setattr(
-        "auto_pm.core.paths.get_config_file_path",
+        "auto_pm.application.core.paths.get_config_file_path",
         lambda: str(_isolated_cfg),
     )
 

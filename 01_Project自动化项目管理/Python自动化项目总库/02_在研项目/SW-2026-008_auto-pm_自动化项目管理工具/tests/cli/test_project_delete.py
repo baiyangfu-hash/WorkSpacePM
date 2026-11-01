@@ -53,7 +53,7 @@ class World:
         )
         self.audit: list[dict[str, Any]] = []
         monkeypatch.setattr(
-            "auto_pm.logging.audit.audit_log",
+            "auto_pm.infrastructure.logging.audit.audit_log",
             lambda action, **details: self.audit.append({"action": action, **details}),
         )
 

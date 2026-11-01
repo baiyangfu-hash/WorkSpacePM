@@ -548,10 +548,9 @@ def main() -> int:
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
     QQuickStyle.setStyle("Basic")
 
-    from auto_pm.change.change_service import ChangeService
-    from auto_pm.core.project_service import ProjectService
-    from auto_pm.db.connection import DatabaseManager
-
+    from auto_pm.application.core.project_service import ProjectService
+    from auto_pm.domain.change.change_service import ChangeService
+    from auto_pm.infrastructure.db.connection import DatabaseManager
     from auto_pm.ui.factories import (
         make_asset_summary_service,
         make_dashboard_service,

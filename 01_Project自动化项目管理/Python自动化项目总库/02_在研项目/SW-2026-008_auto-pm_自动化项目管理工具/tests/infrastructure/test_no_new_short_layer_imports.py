@@ -170,9 +170,19 @@ def test_prose_logger_names_and_layered_paths_in_strings_are_not_counted(tmp_pat
     assert count_short_imports(sample, names) == 0
 
 
-def test_scripts_are_scanned_too() -> None:
+def test_scripts_are_scanned_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``scripts/`` is in the scan list, and a short import placed there is counted.
+
+    This used to assert that some real script still had short imports; once every script was converted that could only fail,
+    so the check now plants its own sample under a temporary ``scripts/`` instead of depending on what the repo contains.
+    """
+
     assert ROOT / "scripts" in SCANNED
-    assert any(path.startswith("scripts/") for path in current_counts())
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "sample.py").write_text("from auto_pm.core.x import a\n", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+    monkeypatch.setattr(sys.modules[__name__], "SCANNED", (tmp_path / "scripts",))
+    assert current_counts() == {"scripts/sample.py": 1}
 
 
 def test_no_file_uses_more_short_layer_imports_than_the_baseline() -> None:

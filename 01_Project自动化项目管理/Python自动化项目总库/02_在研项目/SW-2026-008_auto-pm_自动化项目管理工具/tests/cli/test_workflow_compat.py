@@ -127,7 +127,7 @@ def test_delegated_actions_keep_every_pm_guard(
         reached = True
         raise AssertionError("dispatch must not be reached")
 
-    monkeypatch.setattr("auto_pm.cli.pm._facade", tripwire)
+    monkeypatch.setattr("auto_pm.ui.cli.pm._facade", tripwire)
     mismatch = cli_runner.invoke(
         cli,
         [
@@ -225,7 +225,7 @@ def test_registration_and_the_pm_display_alias_are_unchanged(
     cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert cli.commands["workflow"] is workflow_group
-    monkeypatch.setattr("auto_pm.cli.workflow._resolve_workspace", lambda _ctx: tmp_path)
+    monkeypatch.setattr("auto_pm.ui.cli.workflow._resolve_workspace", lambda _ctx: tmp_path)
 
     listed = cli_runner.invoke(cli, ["-w", str(tmp_path), "workflow", "list"])
     alias = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "workflow"])

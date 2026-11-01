@@ -62,7 +62,7 @@ class TestRetrofitPlcSrcPath:
 class TestRetrofitPythonSrcPath:
     """retrofit 对 Python 项目的 _src_path 推断"""
 
-    @patch("auto_pm.cli.project.ProjectService")
+    @patch("auto_pm.ui.cli.project.ProjectService")
     def test_retrofit_python_writes_python_tool(
         self, mock_svc_class: MagicMock, tmp_path: Path
     ) -> None:
@@ -99,7 +99,7 @@ class TestRetrofitPythonSrcPath:
         # 修复后: templates/python-tool（正确）
         assert answers["_src_path"] == "templates/python-tool"
 
-    @patch("auto_pm.cli.project.ProjectService")
+    @patch("auto_pm.ui.cli.project.ProjectService")
     def test_retrofit_python_not_python_standard(
         self, mock_svc_class: MagicMock, tmp_path: Path
     ) -> None:
