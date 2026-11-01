@@ -323,6 +323,29 @@ def test_project_create_python_chinese_name_uses_id_package_in_research_director
     assert "package_name: sw_2026_010" in answers
 
 
+def test_project_create_points_to_the_register_step_without_writing_the_registry(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TD-SW008-266 F9：create 成功后指路 project register，但自己不写登记表（方案 A）。"""
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    registry = tmp_path / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text('{"projects": []}\n', encoding="utf-8")
+    before = registry.read_bytes()
+
+    result = cli_runner.invoke(
+        cli,
+        ["-w", str(tmp_path), "project", "create", "--stack", "python", "--id", "SW-2026-011", "--name", "登记指路验证"],
+        catch_exceptions=False,
+    )
+
+    output = " ".join(result.output.split())  # the console wraps long lines
+    assert result.exit_code == 0, result.output
+    assert "project register SW-2026-011" in output
+    assert "pm verify" in output  # why the registry change must be committed first
+    assert registry.read_bytes() == before  # create itself never registers (the registry is a governance file)
+
+
 def test_project_create_python_falls_back_when_research_directory_is_absent(
     cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

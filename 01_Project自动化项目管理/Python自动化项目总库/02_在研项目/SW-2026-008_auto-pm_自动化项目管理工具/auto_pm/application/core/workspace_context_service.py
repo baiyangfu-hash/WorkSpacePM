@@ -179,7 +179,11 @@ class WorkspaceContextService:
     ) -> WorkspaceProjectMapping:
         mapping = mappings.get(project_id)
         if mapping is None:
-            raise WorkspaceContextError(f"项目未登记到 Workspace Registry: {project_id}")
+            raise WorkspaceContextError(
+                f"项目未登记到 Workspace Registry: {project_id}。"
+                f"处理：在控制根运行 main.py project register {project_id}（可先加 --dry-run 预览）；"
+                "登记表会留下未提交改动，请先提交再开 Run，否则 pm verify 会拒绝"
+            )
         return mapping
 
     def _project_from_mapping(self, mapping: WorkspaceProjectMapping) -> tuple[Path, Any]:
