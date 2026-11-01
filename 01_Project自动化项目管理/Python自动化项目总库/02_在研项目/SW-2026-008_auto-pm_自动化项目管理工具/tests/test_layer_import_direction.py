@@ -69,7 +69,7 @@ def _violations(root: Path = PACKAGE_ROOT) -> set[tuple[str, str]]:
         layer = relative.parts[0]
         if len(relative.parts) < 2 or layer not in FORBIDDEN_TARGETS:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        tree = ast.parse(path.read_bytes(), filename=str(path))
         package = ["auto_pm", *relative.parts[:-1]]
         for module in _imported_modules(tree, package):
             parts = module.split(".")
@@ -101,8 +101,13 @@ def test_gate_detects_layer_name_and_relative_imports(tmp_path: Path) -> None:
     (tmp_path / "application").mkdir()
     (tmp_path / "application" / "a.py").write_text("from auto_pm import ui\n", encoding="utf-8")
     (tmp_path / "domain" / "sub").mkdir(parents=True)
-    (tmp_path / "domain" / "sub" / "b.py").write_text("from ...infrastructure import store\n", encoding="utf-8")
-    assert _violations(tmp_path) == {("application/a.py", "ui"), ("domain/sub/b.py", "infrastructure")}
+    (tmp_path / "domain" / "sub" / "b.py").write_text(
+        "from ...infrastructure import store\n", encoding="utf-8"
+    )
+    assert _violations(tmp_path) == {
+        ("application/a.py", "ui"),
+        ("domain/sub/b.py", "infrastructure"),
+    }
 
 
 def test_doc_services_live_in_the_application_layer() -> None:

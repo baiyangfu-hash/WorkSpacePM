@@ -28,8 +28,7 @@ def _workspace_root() -> Path:
 def test_package_source_has_no_quarantined_skill_literal() -> None:
     offenders: list[str] = []
     for source_path in sorted(PACKAGE_ROOT.rglob("*.py")):
-        source = source_path.read_text(encoding="utf-8-sig", errors="replace")
-        for node in ast.walk(ast.parse(source)):
+        for node in ast.walk(ast.parse(source_path.read_bytes(), filename=str(source_path))):
             if isinstance(node, ast.Constant) and node.value == QUARANTINED_SKILL:
                 offenders.append(f"{source_path.relative_to(PACKAGE_ROOT)}:{node.lineno}")
     assert offenders == []
@@ -39,14 +38,14 @@ def test_templates_do_not_name_quarantined_skill() -> None:
     offenders = [
         str(path.relative_to(TEMPLATES_ROOT))
         for path in sorted(TEMPLATES_ROOT.rglob("*"))
-        if path.is_file() and QUARANTINED_SKILL in path.read_text(encoding="utf-8", errors="replace")
+        if path.is_file() and QUARANTINED_SKILL.encode("utf-8") in path.read_bytes()
     ]
     assert offenders == []
 
 
 def test_entry_skill_is_registered_and_pm_workflow_is_not() -> None:
     root = _workspace_root()
-    registry = json.loads((root / ".agents" / "skills.json").read_text(encoding="utf-8", errors="replace"))
+    registry = json.loads((root / ".agents" / "skills.json").read_bytes())
     registered = {Path(entry["path"]).name for entry in registry["entries"]}
 
     assert ENTRY_SKILL in registered
