@@ -311,6 +311,26 @@ def test_fast_read_first_then_legacy_wording(qapp: QApplication, tmp_path: Path)
     window.close()
 
 
+def test_timer_refresh_never_calls_the_old_backend(qapp: QApplication, tmp_path: Path) -> None:
+    """10 分钟定时刷新只快读；老后台（约 20 秒）只在首次加载和手动“重新读取”时接。钉住定时器接线本身。"""
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACCEPTANCE_PENDING", "握手断线", 1)])
+    base._FakeLegacyService.calls = []
+    options = _options(root, db, legacy=True, legacy_factory=base._FakeLegacyService)
+    window = gui.CockpitWindow(options)
+    started: list[bool] = []
+    window._start = lambda use_legacy: started.append(use_legacy)
+    window.timer.timeout.emit()  # 定时器到点，走的是真接线
+    assert started == [False]
+    window._on_loaded(gui.load_board(options, use_legacy=False), False)
+    assert started == [False] and window.refresh_button.isEnabled()
+    assert base._FakeLegacyService.calls == []
+    window.refresh_button.click()  # 手动“重新读取”：快读后才接老后台
+    assert started == [False, False]
+    window._on_loaded(gui.load_board(options, use_legacy=False), False)
+    assert started == [False, False, True]
+    window.close()
+
+
 def test_no_legacy_flag_never_touches_the_old_backend(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACCEPTANCE_PENDING", "握手断线", 1)])
     base._FakeLegacyService.calls = []

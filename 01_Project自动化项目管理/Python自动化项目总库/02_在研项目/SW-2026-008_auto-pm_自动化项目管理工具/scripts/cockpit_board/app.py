@@ -46,7 +46,7 @@ from cockpit_board.widgets.station import StationPage  # noqa: E402
 WINDOW_TITLE = "驾驶舱总控屏"
 AUTO_REFRESH_MINUTES = 10
 # TD-105（Windows 禁写锁）已于 PR #82 合并：先快读出第一版，再在后台接老驾驶舱后台 snapshot() 的措辞（只读）。
-# 命令行 --no-legacy 可关；老后台出任何问题都退回只读账本数据，不让窗口挂。
+# 只在首次加载和手动“重新读取”时接，10 分钟定时刷新不接（auto_reload）。--no-legacy 可关；老后台出任何问题都退回只读账本数据，不让窗口挂。
 LEGACY_ALLOWED = True
 # 缺口⑨（批准口令防冒签）已合并；“批准范围 / 开工”还没在界面里接上口令弹窗和同一条命令，接线（S1）之前一律灰着。
 DECISION_BUTTONS_WIRED = False
@@ -160,7 +160,8 @@ class CockpitWindow(QMainWindow):
 
         self.timer = QTimer(self)
         self.timer.setInterval(AUTO_REFRESH_MINUTES * 60 * 1000)
-        self.timer.timeout.connect(self.reload)
+        self.timer.timeout.connect(self.auto_reload)
+        self._legacy_this_round = False  # 本轮读完后要不要再接老后台：只有首次加载和手动“重新读取”才要
 
     def _topbar(self) -> QFrame:
         bar = QFrame()
@@ -245,9 +246,14 @@ class CockpitWindow(QMainWindow):
 
     # ------------------------------------------------ 读取
 
-    def reload(self) -> None:
+    def auto_reload(self) -> None:
+        """10 分钟一次的定时刷新：只快读，不调老后台（老后台约 20 秒，只在首次加载和手动“重新读取”时调）。"""
+        self.reload(with_legacy=False)
+
+    def reload(self, _checked: bool = False, *, with_legacy: bool = True) -> None:
         if any(t.isRunning() for t in self._threads):
             return
+        self._legacy_this_round = with_legacy
         self.refresh_button.setEnabled(False)
         self.status.setText("正在读取……")
         self._start(use_legacy=False)
@@ -271,7 +277,7 @@ class CockpitWindow(QMainWindow):
 
     def _on_loaded(self, board: pd.Board, with_legacy: bool) -> None:
         self.show_board(board)
-        if not with_legacy and LEGACY_ALLOWED and not self.options.no_legacy:
+        if not with_legacy and self._legacy_this_round and LEGACY_ALLOWED and not self.options.no_legacy:
             self.status.setText("正在接老驾驶舱后台的措辞（约 20 秒），先看这一版……")
             self._start(use_legacy=True)
             return

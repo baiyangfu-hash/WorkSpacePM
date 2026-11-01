@@ -248,6 +248,31 @@ def test_cli_status_json_reports_the_three_states_without_secrets(root: Path) ->
     assert "批准口令：已生效；批准人 baiyang" in text and "注意：工作区里的登记文件与已提交的不一致" in text
 
 
+def test_cli_status_json_reports_suspended_when_the_committed_registry_is_broken(root: Path) -> None:
+    """已提交的登记文件坏了：所有批准暂停，--json 给 suspended 和原因，批准人列表为空，不把它说成“未生效”。"""
+    (root / REGISTRY_RELATIVE_PATH).parent.mkdir(parents=True)
+    (root / REGISTRY_RELATIVE_PATH).write_text('{"schema_version": "approvers.v1", "approvers": []}', encoding="utf-8")
+    _git(root, "add", REGISTRY_RELATIVE_PATH)
+    _git(root, "commit", "-q", "-m", "empty")
+    result = CliRunner().invoke(cli_module.approver_pin_status, ["--json"], obj=_Obj(root))
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["state"] == "suspended" and payload["approvers"] == []
+    assert "一律拒绝" in payload["problem"]
+    # 不带 --json 的文字路径行为不变：照旧报错退出
+    plain = CliRunner().invoke(cli_module.approver_pin_status, [], obj=_Obj(root))
+    assert plain.exit_code != 0 and "一律拒绝" in plain.output
+
+
+def test_cli_status_json_reports_suspended_when_git_state_is_unreadable(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """读不到 Git 里已提交的登记（committed_state 给出原因而不是抛错）：同样是 suspended，原因原样带出，文字输出不变。"""
+    monkeypatch.setattr(ApprovalProofService, "committed_state", lambda self: (None, "读不到 Git 里已提交的批准人登记文件：HEAD 不指向任何提交"))
+    payload = json.loads(CliRunner().invoke(cli_module.approver_pin_status, ["--json"], obj=_Obj(root)).output)
+    assert payload["state"] == "suspended" and payload["approvers"] == [] and "HEAD 不指向任何提交" in payload["problem"]
+    text = CliRunner().invoke(cli_module.approver_pin_status, [], obj=_Obj(root)).output
+    assert "批准口令：所有批准暂停。读不到 Git" in text
+
+
 def test_cli_init_is_refused_for_agents_and_rotation_needs_the_old_pin(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
     for name in ("AUTO_PM_AGENT", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "CODEX_THREAD_ID"):

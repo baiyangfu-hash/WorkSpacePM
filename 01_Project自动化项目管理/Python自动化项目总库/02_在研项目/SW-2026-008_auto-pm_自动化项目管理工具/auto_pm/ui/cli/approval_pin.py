@@ -144,6 +144,24 @@ def approver_pin_group() -> None:
     """用户本人的批准口令：设置后，批准范围和最终验收都要在终端输入口令，agent 造不出来。"""
 
 
+def _echo_status_json(state: str, problem: str, approvers: list[dict[str, str]], mismatch: bool) -> None:
+    """enforced＝已生效；not_enabled＝未生效（批准只做格式检查）；suspended＝读不到可信的已提交登记，所有批准暂停。"""
+
+    click.echo(
+        json.dumps(
+            {
+                "schema_version": "approver-pin-status.v1",
+                "state": state,
+                "problem": problem,
+                "approvers": approvers,
+                "working_tree_differs_from_committed": mismatch,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
 @approver_pin_group.command(name="status")
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON，给界面和脚本读（只含批准人名和口令编号，不含口令或校验值）")
 @click.pass_context
@@ -155,25 +173,16 @@ def approver_pin_status(ctx: click.Context, as_json: bool) -> None:
         committed, problem = service.committed_state()
         working = service.working_keys()
     except ApprovalProofError as error:
-        raise click.ClickException(str(error)) from error
+        if not as_json:
+            raise click.ClickException(str(error)) from error
+        # 登记文件坏到读不出批准人：所有批准一律拒绝。给界面一个明确的 suspended，而不是一个读不懂的失败。
+        _echo_status_json("suspended", str(error), [], False)
+        return
     committed_ids = {key.key_id for key in committed or []}
     mismatch = {key.key_id for key in working} != committed_ids
     if as_json:
         state = "suspended" if problem else "not_enabled" if committed is None else "enforced"
-        click.echo(
-            json.dumps(
-                {
-                    "schema_version": "approver-pin-status.v1",
-                    # enforced＝已生效；not_enabled＝未生效（批准只做格式检查）；suspended＝读不到已提交的登记，所有批准暂停
-                    "state": state,
-                    "problem": problem,
-                    "approvers": [{"approver": key.approver, "key_id": key.key_id} for key in committed or []],
-                    "working_tree_differs_from_committed": mismatch,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        _echo_status_json(state, problem, [{"approver": key.approver, "key_id": key.key_id} for key in committed or []], mismatch)
         return
     if problem:
         click.echo("批准口令：所有批准暂停。" + problem)

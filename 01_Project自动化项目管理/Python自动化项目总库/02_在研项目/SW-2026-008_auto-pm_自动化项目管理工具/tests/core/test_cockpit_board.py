@@ -163,6 +163,22 @@ def test_parked_column_shows_reason_and_breakpoint_from_the_ledger(tmp_path: Pat
     assert "TD-071" not in parked.note and "还没有" not in parked.note  # 过期的“账本里还没有 PARKED”提示已去掉
 
 
+def test_parked_column_with_only_an_unparked_old_record_has_no_breakpoint(tmp_path: Path) -> None:
+    """搁着的卡只有一条已拿回的旧挂起记录（没有开着的）：不把旧原因和旧断点当成现在的显示出来。"""
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "PARKED", "HMI 报警页改版", 2)])
+    connection = sqlite3.connect(db)
+    connection.execute(PARKS_DDL)
+    connection.execute(
+        "INSERT INTO run_parks VALUES ('P-old','RUN-0','MISSION-0','CK-0','Trae','旧原因','2026-10-01T00:00:00+00:00',"
+        "'2026-10-02T00:00:00+00:00','user')"
+    )
+    connection.commit()
+    connection.close()
+    parked = _columns(pd.build_board(root, db, NOW, use_git=False, use_legacy=False))["搁着"]
+    assert [row[0] for row in parked.cards] == ["MISSION-0"]
+    assert "旧原因" not in parked.cards[0][2] and "断点" not in parked.cards[0][2] and "原因" not in parked.cards[0][2]
+
+
 def test_parked_column_without_a_park_record_or_table_still_renders(tmp_path: Path) -> None:
     # 老账本没有 run_parks 表、也可能没有记录：卡照样出现在搁着栏，只是没有断点；空栏写“没有搁着的卡”
     board = _board(tmp_path, [("DJ-2026-101", "PARKED", "HMI 报警页改版", 2), ("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
