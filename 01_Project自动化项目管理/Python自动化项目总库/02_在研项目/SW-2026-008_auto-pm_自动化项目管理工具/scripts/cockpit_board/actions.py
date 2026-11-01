@@ -261,13 +261,18 @@ def run_cli(root: Path, label: str, args: Sequence[str], runner: Callable[..., A
     return Receipt(_now_text(), label, shown, result.returncode, False, (result.stdout or "") + (result.stderr or ""))
 
 
+def console_flag() -> int:
+    """Windows 的 CREATE_NEW_CONSOLE；别的系统返回 0（没有可弹的终端窗口）。测试替换这一处，不去改全局 os.name。"""
+    return int(getattr(subprocess, "CREATE_NEW_CONSOLE", 0)) if os.name == "nt" else 0
+
+
 def open_console(root: Path, label: str, args: Sequence[str], opener: Callable[..., Any] = subprocess.Popen) -> Receipt:
     """在新的终端窗口里运行同一条命令（只在 Windows 有效）；界面看不到退出码，回执 rc 为“未验证”，
     用户在那个窗口里看结果，回来点“重新读取”。"""
     command = cli_command(root, args)
     shown = subprocess.list2cmdline(command)
-    new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-    if os.name != "nt" or not new_console:
+    new_console = console_flag()
+    if not new_console:
         return Receipt(_now_text(), label, shown, None, False, "这台电脑没有可弹出的终端窗口：请把上面的命令复制到终端里运行")
     try:
         opener(["cmd", "/c", f"{shown} & pause"], cwd=str(root), creationflags=new_console)

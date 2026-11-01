@@ -36,7 +36,7 @@ VALUES = {"reason": "客户急改", "summary": "干到第3步，下一步写 IO"
 
 
 def _args(decision: decisions.Decision, *, pin: bool = False, approver: str = "baiyang", values: dict[str, str] | None = None) -> list[str]:
-    return decisions.build_args(decision, TARGET, values or VALUES, approver=approver, pin_enforced=pin, now=NOW)
+    return list(decisions.build_args(decision, TARGET, values or VALUES, approver=approver, pin_enforced=pin, now=NOW))
 
 
 def _resolve(args: list[str]) -> tuple[click.Command, list[str]]:
@@ -232,18 +232,24 @@ def test_needs_terminal_detects_the_pin_refusal() -> None:
 
 
 def test_open_console_off_windows_says_so_and_runs_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(actions.os, "name", "posix")
+    monkeypatch.setattr(actions, "console_flag", lambda: 0)
     called: list[Any] = []
-    receipt = actions.open_console(tmp_path, "批准范围", ("pm", "approve"), opener=lambda *a, **k: called.append(a))
+
+    def opener(*a: Any, **_k: Any) -> None:
+        called.append(a)
+
+    receipt = actions.open_console(tmp_path, "批准范围", ("pm", "approve"), opener=opener)
     assert called == [] and receipt.rc is None and "复制" in receipt.output
 
 
 def test_open_console_on_windows_opens_a_new_console_with_the_same_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(actions.os, "name", "nt")
-    monkeypatch.setattr(actions.subprocess, "CREATE_NEW_CONSOLE", 16, raising=False)
+    monkeypatch.setattr(actions, "console_flag", lambda: 16)
     called: list[Any] = []
-    receipt = actions.open_console(tmp_path, "确认验收", ("pm", "accept", "--mission-id", "M-1"),
-                                   opener=lambda *a, **k: called.append((a, k)))
+
+    def opener(*a: Any, **k: Any) -> None:
+        called.append((a, k))
+
+    receipt = actions.open_console(tmp_path, "确认验收", ("pm", "accept", "--mission-id", "M-1"), opener=opener)
     (command,), kwargs = called[0]
     assert command[:2] == ["cmd", "/c"] and "pm accept --mission-id M-1" in command[2] and kwargs["creationflags"] == 16
     assert receipt.rc is None and "新的终端窗口" in receipt.output

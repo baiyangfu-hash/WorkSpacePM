@@ -16,7 +16,13 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QFrame,
+    QLabel,
+    QPlainTextEdit,
+    QPushButton,
+)
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -41,11 +47,19 @@ def _mission(mid: str, state: str, column: str) -> Any:
 
 
 def _preview(decision: decisions.Decision, target: decisions.Target, values: Any, approver: str, pin: bool) -> str:
-    return decisions.shown_command(decisions.build_args(decision, target, values, approver=approver, pin_enforced=pin, now=NOW))
+    return str(decisions.shown_command(decisions.build_args(decision, target, values, approver=approver, pin_enforced=pin, now=NOW)))
 
 
-def _texts(page: DecisionsPage, kind: type) -> list[str]:
-    return [w.text() for w in page.findChildren(kind)]  # type: ignore[attr-defined]
+def _texts(page: DecisionsPage, kind: type[QLabel] | type[QPushButton]) -> list[str]:
+    return [str(w.text()) for w in page.findChildren(kind)]
+
+
+def _fill(dialog: ConfirmDialog, key: str, text: str) -> None:
+    box = dialog.inputs[key]
+    if isinstance(box, QPlainTextEdit):
+        box.setPlainText(text)
+    else:
+        box.setText(text)
 
 
 def test_page_draws_a_button_per_decision_and_only_whitelisted_words(qapp: QApplication) -> None:
@@ -73,8 +87,8 @@ def test_dialog_shows_the_equivalent_command_and_blocks_until_filled(qapp: QAppl
     target = decisions.Target(project_id="DJ-1", mission_id="M1", title="标题M1")
     dialog = page.open_dialog(decisions.BY_KEY["park"], target, run=False)
     assert not dialog.run_button.isEnabled() and "还没填" in dialog.problem.text()
-    dialog.inputs["reason"].setText("客户急改")  # type: ignore[union-attr]
-    dialog.inputs["summary"].setPlainText("干到第3步")  # type: ignore[union-attr]
+    _fill(dialog, "reason", "客户急改")
+    _fill(dialog, "summary", "干到第3步")
     assert dialog.run_button.isEnabled()
     assert "pm park --mission-id M1" in dialog.command_label.text()
     assert dialog.run_button.text() == "确认并运行" and not dialog.via_terminal
@@ -196,8 +210,12 @@ def test_controller_learns_the_pin_is_on_when_the_command_says_so(qapp: QApplica
 def test_controller_with_a_live_pin_opens_a_terminal_instead_of_capturing(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeCli(pin_text="批准口令：已生效；批准人 baiyang（ab12cd34）")
     opened: list[Any] = []
-    monkeypatch.setattr(actions, "open_console", lambda root, label, args, **_k: opened.append((label, list(args))) or
-                        actions.Receipt("13:40", label, "cmd", None, False, "已在新的终端窗口打开"))
+
+    def fake_console(_root: Path, label: str, args: Any, **_k: Any) -> actions.Receipt:
+        opened.append((label, list(args)))
+        return actions.Receipt("13:40", label, "cmd", None, False, "已在新的终端窗口打开")
+
+    monkeypatch.setattr(actions, "open_console", fake_console)
     controller = DecisionController(tmp_path, lambda _t: None, lambda: None, runner=fake, now=lambda: NOW)
     controller.refresh(["DJ-1"], [_mission("M3", "ACCEPTANCE_PENDING", "等你")])
     _wait(controller, qapp)
