@@ -31,9 +31,11 @@ from cockpit_board import flowgraph, theme, tool_policy  # noqa: E402
 from cockpit_board.flowgraph import CardPosition, Graph, GraphError  # noqa: E402
 from cockpit_board.widgets.flow import FlowGraphWidget, FlowPage  # noqa: E402
 
-from auto_pm.application.core.continuity_execution_service import _RUN_TRANSITIONS  # noqa: E402
-from auto_pm.application.core.mission_service import _TRANSITIONS as MISSION_TRANSITIONS  # noqa: E402
-from auto_pm.application.core.work_registry_service import _TRANSITIONS as WORK_TRANSITIONS  # noqa: E402
+from auto_pm.application.core import (  # noqa: E402
+    continuity_execution_service,
+    mission_service,
+    work_registry_service,
+)
 from auto_pm.contracts.continuity import RunState, WorkState  # noqa: E402
 from auto_pm.contracts.mission import MissionState  # noqa: E402
 from auto_pm.domain.change.constants import STATUS_FLOW  # noqa: E402
@@ -68,14 +70,15 @@ def test_there_are_four_graphs(graphs: dict[str, Graph]) -> None:
 
 
 @pytest.mark.parametrize(("graph_id", "table"), [
-    ("mission", MISSION_TRANSITIONS), ("work", WORK_TRANSITIONS), ("run", _RUN_TRANSITIONS), ("change", STATUS_FLOW),
+    ("mission", mission_service._TRANSITIONS), ("work", work_registry_service._TRANSITIONS),
+    ("run", continuity_execution_service._RUN_TRANSITIONS), ("change", STATUS_FLOW),
 ])
 def test_graph_matches_the_real_state_machine(graphs: dict[str, Graph], graph_id: str, table: dict[Any, Any]) -> None:
     assert diff_tables(graphs[graph_id], table) == []
 
 
 def test_run_tables_in_service_and_store_are_the_same_so_one_graph_is_enough() -> None:
-    assert _as_names(_RUN_TRANSITIONS) == _as_names(_STORE_RUN_TRANSITIONS)
+    assert _as_names(continuity_execution_service._RUN_TRANSITIONS) == _as_names(_STORE_RUN_TRANSITIONS)
 
 
 def test_nodes_are_exactly_the_enum_members(graphs: dict[str, Graph]) -> None:
@@ -85,15 +88,15 @@ def test_nodes_are_exactly_the_enum_members(graphs: dict[str, Graph]) -> None:
 
 def test_diff_tables_catches_a_missing_extra_or_changed_edge(graphs: dict[str, Graph]) -> None:
     mission = graphs["mission"]
-    dropped = dict(MISSION_TRANSITIONS)
-    dropped[MissionState.ACTIVE] = frozenset(MISSION_TRANSITIONS[MissionState.ACTIVE] - {MissionState.PARKED})
+    dropped = dict(mission_service._TRANSITIONS)
+    dropped[MissionState.ACTIVE] = frozenset(mission_service._TRANSITIONS[MissionState.ACTIVE] - {MissionState.PARKED})
     assert any("ACTIVE" in p for p in diff_tables(mission, dropped))
-    extra = dict(MISSION_TRANSITIONS)
+    extra = dict(mission_service._TRANSITIONS)
     extra[MissionState.CLOSED] = frozenset({MissionState.ACTIVE})
     assert any("CLOSED" in p for p in diff_tables(mission, extra))
-    removed = {k: v for k, v in MISSION_TRANSITIONS.items() if k is not MissionState.PARKED}
+    removed = {k: v for k, v in mission_service._TRANSITIONS.items() if k is not MissionState.PARKED}
     assert any("图里有" in p for p in diff_tables(mission, removed))
-    assert diff_tables(mission, MISSION_TRANSITIONS) == []
+    assert diff_tables(mission, mission_service._TRANSITIONS) == []
 
 
 def test_edge_commands_name_real_cli_commands(graphs: dict[str, Graph]) -> None:
