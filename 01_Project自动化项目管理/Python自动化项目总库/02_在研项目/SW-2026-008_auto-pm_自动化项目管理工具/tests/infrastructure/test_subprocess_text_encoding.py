@@ -17,8 +17,11 @@ def _is_truthy_keyword(call: ast.Call, name: str) -> bool:
     return False
 
 
-def _unencoded_text_calls(source: str) -> list[int]:
-    """文本模式（text / universal_newlines）却没有 encoding 的 subprocess 调用所在行；带 ``**kwargs`` 的调用不判。"""
+def _unencoded_text_calls(source: str | bytes) -> list[int]:
+    """文本模式（text / universal_newlines）却没有 encoding 的 subprocess 调用所在行；带 ``**kwargs`` 的调用不判。
+
+    源码按字节交给 ``ast.parse``：带 BOM 的文件照常解析，解析失败直接抛错让测试变红，不当作“没有违规”。
+    """
     lines: list[int] = []
     for node in ast.walk(ast.parse(source)):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
@@ -46,10 +49,9 @@ def test_no_text_mode_subprocess_without_encoding() -> None:
         for path in sorted((PROJECT_ROOT / directory).rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
-            source = path.read_text(encoding="utf-8-sig", errors="replace")
+            relative = path.relative_to(PROJECT_ROOT).as_posix()
             offenders.extend(
-                f"{path.relative_to(PROJECT_ROOT).as_posix()}:{line}"
-                for line in _unencoded_text_calls(source)
+                f"{relative}:{line}" for line in _unencoded_text_calls(path.read_bytes())
             )
     assert not offenders, f"文本模式 subprocess 缺 encoding（DEV-ENC-001）：{offenders}"
 
@@ -72,3 +74,18 @@ def test_detector_flags_missing_encoding_and_accepts_the_fixed_forms() -> None:
     assert (
         _unencoded_text_calls("import subprocess\nsubprocess.run(['x'], text=True, **kw)\n") == []
     )
+
+
+def test_a_file_with_a_bom_is_parsed_and_still_checked() -> None:
+    sample = (
+        b"\xef\xbb\xbf"
+        + "import subprocess\nsubprocess.run(['x'], text=True)\n# \u4e2d\u6587\n".encode()
+    )
+    assert _unencoded_text_calls(sample) == [2]
+
+
+def test_a_file_that_cannot_be_parsed_fails_instead_of_counting_as_clean() -> None:
+    import pytest
+
+    with pytest.raises(SyntaxError):
+        _unencoded_text_calls(b"subprocess.run(['x'], text=True\n")
