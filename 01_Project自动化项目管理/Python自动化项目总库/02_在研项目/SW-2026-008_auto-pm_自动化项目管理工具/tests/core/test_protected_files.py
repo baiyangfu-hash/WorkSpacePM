@@ -215,6 +215,55 @@ def test_a_new_run_without_a_declaration_is_blocked_end_to_end(tmp_path: Path) -
     assert block is False and "警告" in note
 
 
+def _control_root_with_a_station(tmp_path: Path) -> tuple[Path, Path, str]:
+    """A real control root with a committed test, and the isolated station AGENTS.md WS-001 gives a Run (``git worktree add``)."""
+
+    root = tmp_path / "control"
+    (root / "tests").mkdir(parents=True)
+    (root / "tests" / "test_a.py").write_text("assert 1 == 2\n", encoding="utf-8")
+    (root / "product.py").write_text("V = 1\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".auto-pm/\n", encoding="utf-8")  # as in the real control root: stations are not part of it
+    _git(root, "init", "-q")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "base")
+    head = _git(root, "rev-parse", "HEAD")
+    station = root / ".auto-pm" / "worktrees" / "claude"
+    _git(root, "worktree", "add", "-q", "--detach", str(station), head)
+    return root, station, head
+
+
+def test_an_edit_in_the_isolated_station_is_blocked_unless_the_scope_names_the_file(tmp_path: Path) -> None:
+    """TD-SW008-201 remainder: the drill in a real linked worktree, not only in a plain repository."""
+
+    root, station, head = _control_root_with_a_station(tmp_path)
+    (station / "tests" / "test_a.py").write_text("assert 1 == 1\n", encoding="utf-8")  # edited to go green, inside the station
+    (station / "product.py").write_text("V = 2\n", encoding="utf-8")
+    facade = PmFacadeService.__new__(PmFacadeService)
+    new_run = {"git_head": head, "run_id": "R", "created_at": "2026-11-02T00:00:00+00:00", "worktree_path": str(station)}
+
+    note, block = facade._protected_file_note(SimpleNamespace(owned_paths=("product.py",), **new_run))
+    assert block is True and "tests/test_a.py" in note and "product.py" not in note
+
+    assert facade._protected_file_note(SimpleNamespace(owned_paths=("product.py", "tests/test_a.py"), **new_run)) == ("", False)
+
+    _git(station, "add", ".")
+    _git(station, "commit", "-qm", "station work")  # committing in the station does not hide it
+    assert PmFacadeService._protected_file_changes(SimpleNamespace(owned_paths=("product.py",), **new_run)) == ("tests/test_a.py",)
+
+
+def test_the_control_root_is_not_mixed_into_a_station_run(tmp_path: Path) -> None:
+    """A Run is judged by its own station: a protected file edited in the control root is another Run's business, and vice versa."""
+
+    root, station, head = _control_root_with_a_station(tmp_path)
+    (root / "tests" / "test_a.py").write_text("assert True\n", encoding="utf-8")  # the control root is dirty
+    run = SimpleNamespace(worktree_path=str(station), git_head=head, run_id="R", owned_paths=("product.py",))
+
+    assert PmFacadeService._protected_file_changes(run) == ()
+    assert PmFacadeService._protected_file_changes(SimpleNamespace(worktree_path=str(root), git_head=head, run_id="R2", owned_paths=())) == (
+        "tests/test_a.py",
+    )
+
+
 def test_the_handover_rules_and_the_skill_registry_are_protected_and_nearby_names_are_not() -> None:
     """TD-SW008-262: the rule files written for the next model, and the skill registry, are on the list."""
 
