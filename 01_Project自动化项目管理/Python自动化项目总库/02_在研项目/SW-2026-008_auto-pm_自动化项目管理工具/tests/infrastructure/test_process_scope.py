@@ -105,6 +105,49 @@ def test_after_the_cancel_no_new_child_is_started(tmp_path: Path) -> None:
     assert not marker.exists()
 
 
+def test_a_cancel_between_the_child_start_and_its_registration_still_kills_the_whole_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TD-SW008-251: the race branch of ``register`` -- ``cancel`` ran after the child started but before it was registered.
+
+    ``cancel`` only kills the children it already knows, so this child would be missed.  ``register`` has to notice the cancel, kill the
+    child's tree itself and refuse the call; otherwise the tree would run on for as long as it likes.
+    """
+
+    from auto_pm.infrastructure import process_scope as module
+
+    beat = tmp_path / "beat.txt"
+    scope = ProcessScope()
+    real_start = module._start
+    started: list[subprocess.Popen[str]] = []
+
+    def start_then_cancel(args: list[str], cwd: Path, env: object) -> subprocess.Popen[str]:
+        process = real_start(args, cwd, env)  # type: ignore[arg-type]
+        started.append(process)
+        assert scope.cancel() == 0  # the child is not registered yet, so the cancel cannot see it
+        return process
+
+    monkeypatch.setattr(module, "_start", start_then_cancel)
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        scope.enter()
+        try:
+            run_in_scope(_tree_command(beat), tmp_path, {}, 120)
+        except BaseException as error:
+            errors.append(error)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(60)
+
+    assert not thread.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], GateCancelledError)
+    assert len(started) == 1 and started[0].wait(timeout=30) is not None  # the direct child is gone, not left running
+    if beat.exists():  # the grandchild may or may not have written before the kill; if it did, it must have stopped with the tree
+        assert _heartbeat_is_dead(beat)
+
+
 def test_a_gate_that_runs_out_of_time_kills_its_children_through_the_real_supervisor(tmp_path: Path) -> None:
     beat = tmp_path / "beat.txt"
     seen: list[BaseException] = []
