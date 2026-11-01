@@ -146,7 +146,7 @@ def check_evidence(repo: Path, refs: tuple[str, ...], binding: object, chg_id: s
     pid = binding.project_id  # type: ignore[attr-defined]
     change = _first(repo, refs, root, CHANGE_TAIL, f"{chg_id}.md")
     if change is None:
-        return f"项目 {pid} 下找不到变更单文件 {chg_id}.md"
+        return f"项目 {pid} 下找不到变更单文件 {chg_id}.md（本 PR 和基线都没有；若变更单稍后由主执行随另一个 PR 补入，属报警期已知情形）"
     ref, path = change
     try:
         content = read_blob(repo, ref, path)
