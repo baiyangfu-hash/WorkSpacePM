@@ -100,6 +100,7 @@ class Station:
     checked: bool = (
         True  # False: only name, branch and path were read (no status, rev-list or reflog)
     )
+    broken: str = ""  # why this directory is no longer a usable work tree (empty: it is one)
 
     @property
     def agent(self) -> str:
@@ -254,7 +255,11 @@ class AgentWorktreeService:
                 if child.is_dir() and child.resolve() not in registered:
                     stations.append(
                         Station(
-                            name=child.name, path=child, kind=_kind(child.name), registered=False
+                            name=child.name,
+                            path=child,
+                            kind=_kind(child.name),
+                            registered=False,
+                            broken=_broken_reason(child),
                         )
                     )
         return sorted(stations, key=lambda s: s.name)
@@ -349,6 +354,8 @@ class AgentWorktreeService:
 
     def _sweep_station(self, station: Station, agent: str | None) -> SweepItem:
         target = str(station.path)
+        if station.broken:
+            return SweepItem(target, station.kind, False, station.broken)
         if not station.registered:
             return SweepItem(
                 target, "other", False, "Git 里没有登记的目录，不是工位；不动，请人工查看"
@@ -411,6 +418,8 @@ class AgentWorktreeService:
     # ── shared checks and actions ───────────────────────────────────
 
     def _refusal(self, station: Station) -> str:
+        if station.broken:
+            return station.broken
         if station.locked:
             return "工位被 git worktree lock 锁着，不动"
         if not station.branch:
@@ -451,7 +460,10 @@ class AgentWorktreeService:
             raise StationRefusedError(f"工位 {station.path} 上又有了没并进 main 的提交，不删")
         removed = self._git("worktree", "remove", str(station.path))
         if removed.returncode != 0:
-            raise AgentWorktreeError(f"删工作树失败：{_detail(removed)}")
+            # Windows can fail halfway ("拒绝访问") and leave a directory that is no longer a work tree.
+            leftover = _broken_reason(station.path)
+            warning = f"。注意：{leftover}；用 `worktree list` 看现状，人工处理" if leftover else ""
+            raise AgentWorktreeError(f"删工作树失败：{_detail(removed)}{warning}")
         deleted = False
         note = "本地分支保留（已推送、还没并进 main）"
         if station.kind == "run-plan":
@@ -511,6 +523,21 @@ class AgentWorktreeService:
         deep: bool = True,
     ) -> Station:
         kind = _kind(path.name)
+        broken = _broken_reason(path)
+        if broken:
+            # Never run Git inside it: with no ``.git`` of its own, Git walks up and answers for the control root
+            # (a ``git add -A`` there once staged 7960 files of the control root -- TD-SW008-206).
+            return Station(
+                name=path.name,
+                path=path,
+                kind=kind,
+                registered=registered,
+                branch=branch,
+                head=head,
+                locked=locked,
+                checked=False,
+                broken=broken,
+            )
         if not deep:
             return Station(
                 name=path.name,
@@ -659,6 +686,23 @@ class AgentWorktreeService:
             check=False,
             env=clean_git_environment(),
         )
+
+
+def _broken_reason(path: Path) -> str:
+    """Why ``path`` can no longer be treated as a work tree ("" when it still is one).
+
+    A linked work tree always has a ``.git`` file of its own. Without it Git, run inside the directory, walks up and answers
+    for the control root instead -- so such a directory must never be asked anything, and nobody should work in it.
+    """
+
+    if not path.is_dir():
+        return "目录不见了，Git 里还留着登记；人工确认后用 `git worktree prune` 清掉登记"
+    if not (path / ".git").exists():
+        return (
+            "目录里没有 .git，已经不是工作树（多半是删到一半）；不要在里面跑 git，"
+            "命令会落到上层的控制根；人工查看后再处理"
+        )
+    return ""
 
 
 def _kind(name: str) -> str:

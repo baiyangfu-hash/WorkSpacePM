@@ -64,6 +64,7 @@ def _station_json(station: Station) -> dict[str, Any]:
         "path": str(station.path),
         "kind": station.kind,
         "registered": station.registered,
+        "broken": station.broken,  # non-empty: the directory is no longer a work tree (never run git in it)
         "branch": station.branch,
         "checked": station.checked,  # False: dirty/unpushed/merged/untouched were not looked at (null)
         "dirty": len(station.dirty_paths) if station.checked else None,
@@ -73,6 +74,21 @@ def _station_json(station: Station) -> dict[str, Any]:
         "locked": station.locked,
         "size_bytes": station.size_bytes,
     }
+
+
+def _kind_label(station: Any) -> str:
+    if station.broken:
+        return "残缺目录"
+    return station.kind if station.registered else "未登记目录"
+
+
+def _print_broken_hint(stations: list[Any]) -> None:
+    broken = [s for s in stations if s.broken]
+    if not broken:
+        return
+    console.print("[red]有已经不是工作树的残缺目录，不要在里面跑 git（命令会落到控制根）：[/red]")
+    for s in broken:
+        console.print(f"  {s.path}：{s.broken}", markup=False, highlight=False)
 
 
 @click.group("worktree")
@@ -130,10 +146,9 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
         for column in ("工位", "类型", "分支", "路径"):
             table.add_column(column)
         for s in stations:
-            table.add_row(
-                s.name, s.kind if s.registered else "未登记目录", s.branch or "-", str(s.path)
-            )
+            table.add_row(s.name, _kind_label(s), s.branch or "-", str(s.path))
         console.print(table)
+        _print_broken_hint(stations)
         console.print(
             "只列了名字、分支、路径；要看未提交、未推送、是否并进 main，加 --deep（会慢）"
         )
@@ -141,7 +156,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
     for column in ("工位", "类型", "分支", "未提交", "未推送", "并进 main", "占用（含 .venv）"):
         table.add_column(column)
     for s in stations:
-        kind = s.kind if s.registered else "未登记目录"
+        kind = _kind_label(s)
         merged = "空工位" if s.untouched else ("是" if s.merged else "否")
         table.add_row(
             s.name,
@@ -153,6 +168,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
             _size(s.size_bytes),
         )
     console.print(table)
+    _print_broken_hint(stations)
 
 
 @worktree_group.command("close")
