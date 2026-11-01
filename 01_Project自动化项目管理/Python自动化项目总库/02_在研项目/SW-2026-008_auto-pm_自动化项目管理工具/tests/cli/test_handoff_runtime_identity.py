@@ -135,30 +135,51 @@ def test_handoff_reads_ask_the_guard_nothing(
     assert seen["required"] == [] and seen["warned"] == []
 
 
+REQUEST_ID = "AI-20261101-F494"
+# every write command that asks the guard through ``_require_identity_for_request`` (``create`` has no request yet)
+GUARDED_BY_REQUEST = {
+    "claim": ["claim", REQUEST_ID, "--executor-id", "e"],
+    "start": ["start", REQUEST_ID, "--executor-id", "e"],
+    "heartbeat": ["heartbeat", REQUEST_ID, "--executor-id", "e"],
+    "fail": ["fail", REQUEST_ID, "--executor-id", "e", "--reason", "r"],
+    "close": ["close", REQUEST_ID],
+    "result-submit": ["result-submit", REQUEST_ID, "--executor-id", "e", "--result-file", "result.json"],
+}
+
+
+def test_the_damaged_request_test_covers_every_command_guarded_by_request() -> None:
+    assert set(GUARDED_BY_REQUEST) == set(WRITES) - {"create"}
+
+
+@pytest.mark.parametrize("command", sorted(GUARDED_BY_REQUEST))
 @pytest.mark.parametrize("damage", ["no-project-id", "not-json"])
 def test_the_guard_lets_an_unreadable_request_through_only_because_the_write_fails_too(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str, command: str
 ) -> None:
     """Audit 494 f: ``_require_identity_for_request`` fails open when the request cannot be read or has no project id.
 
     That is safe only while the write path reads the request through the same validation and refuses it.  This runs the real
-    service on a damaged request file: the guard is not asked, and the command still fails with the request file untouched.
-    If the write path ever stops refusing such a request, this goes red and the guard must be made to refuse instead.
+    service on a damaged request file, for each guarded write command: the guard is not asked, and the command still fails
+    (not as a usage error) with the request file untouched.  If a write path ever stops refusing such a request, this goes red
+    and the guard must be made to refuse instead.
     """
     asked: list[str] = []
     monkeypatch.setattr(handoff_cli, "require_runtime_identity", lambda _ctx, project: asked.append(project))
     service = AiHandoffService(tmp_path)
-    created = service.create_request("P-1", "fullstack-engineer", "s", request_id="AI-20261101-F494")
-    path = Path(created["file"]) if "file" in created else service._find_request_path("AI-20261101-F494")
+    service.create_request("P-1", "fullstack-engineer", "s", request_id=REQUEST_ID)
+    path = service._find_request_path(REQUEST_ID)
     if damage == "no-project-id":
-        payload = {key: value for key, value in service.get_request("AI-20261101-F494").items() if key not in {"project_id", "file"}}  # type: ignore[union-attr]
+        good = service.get_request(REQUEST_ID)
+        assert good is not None
+        payload = {key: value for key, value in good.items() if key not in {"project_id", "file"}}
         path.write_text(json.dumps(payload), encoding="utf-8")
     else:
         path.write_text("{ not json", encoding="utf-8")
+    (tmp_path / "result.json").write_text("{}", encoding="utf-8")
     before = path.read_bytes()
 
-    result = _invoke(tmp_path, ["claim", "AI-20261101-F494", "--executor-id", "e"])
+    result = _invoke(tmp_path, GUARDED_BY_REQUEST[command])
 
     assert asked == []  # nothing to check: the request has no readable project
-    assert result.exit_code != 0  # and the write itself refuses it
+    assert result.exit_code not in (0, 2), result.output  # the write itself refuses it, and it is not a usage error
     assert path.read_bytes() == before

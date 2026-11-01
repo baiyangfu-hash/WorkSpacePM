@@ -13,7 +13,8 @@ from auto_pm.application.core.continuity_execution_service import (
 )
 
 # The keep-alive wrapper's own default lease length (15 minutes).  It is NOT the cockpit-wide Run lease of 1800 seconds pinned by
-# tests/core/test_default_lease_seconds.py; callers that renew a real Run pass that Run's own lease length.
+# tests/core/test_default_lease_seconds.py.  ``lease run-with-renewal`` passes the Run's own lease length; ``pm verify`` does not and
+# uses this default.
 DEFAULT_LEASE_SECONDS = 900
 # A failed renewal is retried until the lease has less than this left; only then is the loop given up.
 GIVE_UP_REMAINING_SECONDS = 60
