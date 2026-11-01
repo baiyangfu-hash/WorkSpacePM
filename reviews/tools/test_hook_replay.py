@@ -5,6 +5,7 @@ Run with:  python -m pytest reviews/tools/test_hook_replay.py -q -p no:cacheprov
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -164,3 +165,45 @@ def test_warnings_do_not_fail_the_job_unless_enforced(repo: Path, monkeypatch: p
 def test_unusable_git_input_is_exit_2_not_a_pass(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(replay_mod, "build_bindings", lambda _repo: BINDINGS)
     assert replay_mod.main(["--base", "nope", "--head", "HEAD", "--repo", str(repo)]) == 2
+
+
+def test_a_non_utf8_file_name_is_a_warning_not_a_crash(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    folder = repo / ROOT / "auto_pm"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / os.fsdecode(b"\xff\xfe_bad.py")).write_text("x = 1\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "feat: no number")
+    (finding,) = run(repo, base)
+    assert "没有绑定变更单号" in finding.problem
+
+
+def test_control_characters_in_names_and_titles_cannot_become_workflow_commands(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "fix\n::error::injected", {f"{ROOT}/auto_pm/a\n::warning::evil%0A.py": "x = 1\n"})
+    monkeypatch.setattr(replay_mod, "build_bindings", lambda _repo: BINDINGS)
+    assert replay_mod.main(["--base", base, "--head", "HEAD", "--repo", str(repo), "--ci"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    commands = [line for line in lines if line.startswith("::")]
+    assert commands == [line for line in commands if line.startswith("::warning title=hook-replay::")]
+    assert len(commands) == 1
+    assert "\\x0a" in "\n".join(lines)
+
+
+def test_command_data_escapes_percent_and_line_breaks() -> None:
+    assert replay_mod.command_data("a%b\r\nc") == "a%25b\\x0d\\x0ac"
+    assert "\n" not in replay_mod.plain("x\ny") and "\x1b" not in replay_mod.plain("\x1b[31m")
+
+
+def test_the_unknown_project_warning_mentions_new_projects(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "feat: CHG-DOCU-2026-900", {"elsewhere/app.py": "x = 1\n"})
+    (finding,) = run(repo, base)
+    assert "新注册" in finding.problem
+
+
+def test_the_script_uses_the_layered_import_paths() -> None:
+    source = Path(replay_mod.__file__).read_text(encoding="utf-8")
+    assert "auto_pm.core." not in source and "auto_pm.change." not in source

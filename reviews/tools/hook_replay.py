@@ -37,7 +37,7 @@ for _entry in (Path(__file__).resolve().parent, SW008_ROOT):
         sys.path.insert(0, str(_entry))
 
 # 这些是钩子模块的私有函数：复用是本脚本的目的（同一套判定），钩子改名时 test_hook_replay 的导入会先变红。
-from auto_pm.change.parser import ChgParser
+from auto_pm.domain.change.parser import ChgParser
 from auto_pm.infrastructure import git_hook_enforcer as hook
 
 CHANGE_DIRS = ("04_监控", "11_监控")
@@ -54,6 +54,21 @@ class Finding:
 
 class GitError(RuntimeError):
     pass
+
+
+def decode_name(raw: bytes) -> str:
+    """文件名按 UTF-8 解码；PR 里有非 UTF-8 的文件名时不抛错，坏字节换成 U+FFFD（只用于判扩展名和显示）。"""
+    return raw.decode("utf-8", errors="replace")  # lenient-decode: 文件名只用来判扩展名和显示，抛错会让报警作业变红
+
+
+def plain(text: str) -> str:
+    """把控制字符（含换行、回车、ESC）换成可见的 ``\\xNN`` / ``\\n``，文件名和提交标题里的它们不得进入输出。"""
+    return "".join(ch if ch.isprintable() else f"\\x{ord(ch):02x}" if ord(ch) < 256 else f"\\u{ord(ch):04x}" for ch in text)
+
+
+def command_data(text: str) -> str:
+    """GitHub 工作流命令（``::warning::``）的消息体转义：``%`` ``\\r`` ``\\n`` 必须转义，否则内容能被当成新命令。"""
+    return plain(text).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
 def git(repo: Path, *args: str) -> bytes:
@@ -75,7 +90,7 @@ def commits_in(repo: Path, base: str, head: str) -> list[str]:
 
 def commit_files(repo: Path, commit: str) -> list[str]:
     raw = git(repo, "diff-tree", "-r", "--root", "--no-commit-id", "--name-only", "--no-renames", "--diff-filter=ACMRT", "-z", commit)
-    return [item.decode("utf-8") for item in raw.split(b"\0") if item]
+    return [decode_name(item) for item in raw.split(b"\0") if item]
 
 
 def commit_message(repo: Path, commit: str) -> str:
@@ -84,7 +99,7 @@ def commit_message(repo: Path, commit: str) -> str:
 
 def tree_paths(repo: Path, ref: str, prefix: str) -> list[str]:
     raw = git(repo, "ls-tree", "-r", "--name-only", "-z", ref, "--", prefix)
-    return [item.decode("utf-8") for item in raw.split(b"\0") if item]
+    return [decode_name(item) for item in raw.split(b"\0") if item]
 
 
 def read_blob(repo: Path, ref: str, path: str) -> str:
@@ -170,7 +185,8 @@ def replay(repo: Path, base: str, head: str, bindings: tuple[object, ...]) -> li
             try:
                 owners = {hook._binding_for_staged_file(path, bindings).project_id for path in production}  # type: ignore[arg-type]
             except hook.StagedSnapshotError as exc:
-                problem = str(exc)
+                # 裁判是基线检出：本 PR 新注册的项目基线还不认识，这里会误报；报警期的已知情形，写进提示免得被当成缺陷。
+                problem = f"{exc}（若本 PR 新注册了这个项目，基线还不认识它，属报警期已知误报）"
             else:
                 if len(owners) != 1:
                     problem = f"生产代码归属多个项目: {'、'.join(sorted(owners))}"
@@ -181,7 +197,7 @@ def replay(repo: Path, base: str, head: str, bindings: tuple[object, ...]) -> li
                         binding = next(b for b in bindings if b.project_id == pid)  # type: ignore[attr-defined]
                         evidence_cache[key] = check_evidence(repo, (head, base), binding, chgs[0])
                     problem = evidence_cache[key]
-        findings.append(Finding(short, subject, problem))
+        findings.append(Finding(short, plain(subject), plain(problem)))
     return findings
 
 
@@ -201,7 +217,7 @@ def render(findings: list[Finding]) -> str:
 
 
 def build_bindings(repo: Path) -> tuple[object, ...]:
-    from auto_pm.core.project_service import ProjectService
+    from auto_pm.application.core.project_service import ProjectService
 
     return hook._project_bindings(repo, list(ProjectService(str(repo)).list_projects()))
 
@@ -225,7 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     bad = [f for f in findings if f.problem]
     if args.ci:
         if bad:  # 一条汇总标注，细节在作业摘要里：报警期云端 PR 几乎每个提交都有警告，逐条标注会淹没真正的信息
-            print(f"::warning title=hook-replay::{len(bad)}/{len(findings)} 个含生产代码的提交没有通过提交钩子的变更单绑定检查（报警期，不拦合并，明细见作业摘要）")
+            note = f"{len(bad)}/{len(findings)} 个含生产代码的提交没有通过提交钩子的变更单绑定检查（报警期，不拦合并，明细见作业摘要）"
+            print(f"::warning title=hook-replay::{command_data(note)}")
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
             with open(summary, "a", encoding="utf-8") as handle:
