@@ -102,3 +102,36 @@ def test_supervisor_recovers_the_real_session_and_blocks_a_different_one(started
             observed_started_at=evidence.started_at,
             is_process_alive=lambda _pid: True,
         )
+
+
+def test_recover_by_operation_id_on_a_finished_run_is_calm_not_a_ledger_alarm(started: tuple[Path, str, Any]) -> None:
+    """TD-SW008-074 (review 444 P3): a really dispatched Run that has since finished is not a ledger fault.
+
+    The old wording told the reader to "report this sentence to the user as a ledger problem"; the lookup now says why (NOT_ACTIVE),
+    and ``pm recover`` answers with the Run's real state and where to look instead.
+    """
+    from types import SimpleNamespace
+
+    from click.testing import CliRunner
+
+    from auto_pm.application.core.continuity_execution_service import StartedRunLookupError
+    from auto_pm.ui.cli import pm_recover
+
+    root, operation_id, receipt = started
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.execute("UPDATE run_items SET state='SUCCEEDED' WHERE run_id=?", (receipt.run_id,))
+
+    with pytest.raises(StartedRunLookupError) as typed:
+        ContinuityExecutionService(root).resolve_started_run(operation_id)
+    assert typed.value.kind == StartedRunLookupError.NOT_ACTIVE and typed.value.run_state == "SUCCEEDED"
+
+    result = CliRunner().invoke(
+        pm_recover.recover_pm,
+        ["--operation-id", operation_id],
+        obj=SimpleNamespace(workspace_root=root, control_root=root),
+    )
+
+    assert result.exit_code != 0
+    assert f"{receipt.run_id} 现在是 SUCCEEDED，已经不在运行" in result.output and "不用对账" in result.output
+    assert "python main.py pm orient" in result.output
+    assert "原样报告用户" not in result.output

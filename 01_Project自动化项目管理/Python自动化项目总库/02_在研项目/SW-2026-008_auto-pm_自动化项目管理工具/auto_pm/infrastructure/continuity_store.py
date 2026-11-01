@@ -95,6 +95,10 @@ class ContinuityStoreError(RuntimeError):
     """Raised when a continuity transaction cannot be completed safely."""
 
 
+class RunNotFoundError(ContinuityStoreError):
+    """The Run id is not in the ledger (a typed form of the old plain message, so callers need not match its text)."""
+
+
 def _decode_git_path(raw: bytes) -> str:
     """Strict UTF-8: a path with invalid bytes must fail the comparison, not be repaired into a look-alike."""
 
@@ -7740,7 +7744,7 @@ class ContinuityStore:
     def _get_run(conn: sqlite3.Connection, run_id: str) -> RunItem:
         row = conn.execute("SELECT * FROM run_items WHERE run_id=?", (run_id,)).fetchone()
         if row is None:
-            raise ContinuityStoreError(f"Run 不存在: {run_id}")
+            raise RunNotFoundError(f"Run 不存在: {run_id}")
         data = dict(row)
         data["owned_paths"] = tuple(json.loads(data.pop("owned_paths_json")))
         data["declared_dirty_paths"] = tuple(json.loads(data.pop("declared_dirty_paths_json")))
