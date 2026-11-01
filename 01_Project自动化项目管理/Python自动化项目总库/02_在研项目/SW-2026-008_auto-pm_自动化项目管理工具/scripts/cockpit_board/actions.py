@@ -266,16 +266,25 @@ def console_flag() -> int:
     return int(getattr(subprocess, "CREATE_NEW_CONSOLE", 0)) if os.name == "nt" else 0
 
 
+# 新终端窗口里跑的小包装：把同一条命令当子进程跑完，再等用户按回车，好让用户看清结果。
+# 命令的每个参数都当 argv 原样传进来（sys.argv[1:]），没有任何 shell 参与，参数里的 " & | ^ % 都只是普通字符。
+_CONSOLE_WRAPPER = (
+    "import subprocess, sys\n"
+    "code = subprocess.call(sys.argv[1:])\n"
+    "input('\\n命令已结束，退出码 %s。看完按回车关闭这个窗口……' % code)\n"
+)
+
+
 def open_console(root: Path, label: str, args: Sequence[str], opener: Callable[..., Any] = subprocess.Popen) -> Receipt:
     """在新的终端窗口里运行同一条命令（只在 Windows 有效）；界面看不到退出码，回执 rc 为“未验证”，
-    用户在那个窗口里看结果，回来点“重新读取”。"""
+    用户在那个窗口里看结果，回来点“重新读取”。不经过 cmd：直接起 Python 小包装，参数按列表传。"""
     command = cli_command(root, args)
     shown = subprocess.list2cmdline(command)
     new_console = console_flag()
     if not new_console:
         return Receipt(_now_text(), label, shown, None, False, "这台电脑没有可弹出的终端窗口：请把上面的命令复制到终端里运行")
     try:
-        opener(["cmd", "/c", f"{shown} & pause"], cwd=str(root), creationflags=new_console)
+        opener([sys.executable, "-B", "-c", _CONSOLE_WRAPPER, *command], cwd=str(root), creationflags=new_console)
     except OSError as error:
         return Receipt(_now_text(), label, shown, None, False, f"{type(error).__name__}: {error}")
     return Receipt(_now_text(), label, shown, None, False, "已在新的终端窗口打开：在那里输入口令、看到结果后，回到这里点“重新读取”")

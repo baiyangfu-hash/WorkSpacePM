@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -62,7 +63,7 @@ class Decision:
 
 _SWITCH_FIELDS = (
     Field("reason", "手上这张为什么先放下", "例如：客户急改 IO 表"),
-    Field("summary", "手上这张的断点", "干到哪了、下一步做什么", multiline=True),
+    Field("summary", "手上这张的断点", "干到哪了、下一步做什么（一行，不换行）"),
     Field("as_owner", "谁来干急活", "接手的 agent 身份，例如 claude:cloud 或 trae:cn"),
 )
 
@@ -95,7 +96,7 @@ DECISIONS: tuple[Decision, ...] = (
         "把这张卡记好断点放进“搁着”：交出钥匙，之后谁也不能往它的工作树里写，直到你拿回。",
         ("pm", "park"), states=frozenset({"ACTIVE"}), pin=True, user_words=True,
         fields=(Field("reason", "为什么先放下", "例如：客户急改 IO 表"),
-                Field("summary", "断点", "干到哪了、下一步做什么", multiline=True)),
+                Field("summary", "断点", "干到哪了、下一步做什么（一行，不换行）")),
     ),
     Decision(
         "unpark", "拿回", "mission",
@@ -176,6 +177,39 @@ def _need(value: str, label: str) -> str:
     return value.strip()
 
 
+# 进命令行的每一个值都先过白名单或黑名单，再拼参数。运行时命令是按“参数列表”直接起的，不经过任何 shell，
+# 这些检查是第二道：编号和哈希来自账本，自由文本来自用户，复制出去的命令也不能在终端里变样。
+_IDENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")  # 项目、任务、请求、条目编号
+_HASH = re.compile(r"[A-Za-z0-9]{8,128}")  # 范围卡哈希、条目哈希
+_OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,63}")  # agent 身份，如 claude:cloud
+_FREE_FORBIDDEN = re.compile(r"[\x00-\x1f\x7f\"%^$`]")  # 控制字符（含换行）和会让复制出去的命令变样的 " % ^ $ `
+_FREE_MAX = 500
+
+
+def _ident(value: str, label: str) -> str:
+    value = _need(value, label)
+    if not _IDENT.fullmatch(value):
+        raise DecisionError(f"{label}“{value[:40]}”格式不对（只允许字母、数字和 . _ : -），不运行")
+    return value
+
+
+def _hash(value: str, label: str) -> str:
+    value = _need(value, label)
+    if not _HASH.fullmatch(value):
+        raise DecisionError(f"{label}格式不对（只允许 8～128 位字母数字），不运行")
+    return value
+
+
+def _free(value: str, label: str) -> str:
+    """用户自由填的字：不许换行和其他控制字符，不许出现 \" % ^ $ `（& 和 | 在命令里只是普通字符，允许）。"""
+    value = value.strip()
+    if _FREE_FORBIDDEN.search(value):
+        raise DecisionError(f"“{label}”里有不能用的字符（换行、双引号 \" 和 % ^ $ `），请改掉再运行")
+    if len(value) > _FREE_MAX:
+        raise DecisionError(f"“{label}”太长（最多 {_FREE_MAX} 字）")
+    return value
+
+
 def missing_fields(decision: Decision, values: Mapping[str, str]) -> list[str]:
     return [item.label for item in decision.fields if item.required and not str(values.get(item.key, "")).strip()]
 
@@ -195,31 +229,35 @@ def build_args(
     if missing:
         raise DecisionError("还没填：" + "、".join(missing))
     args = list(decision.command)
-    value = {key: str(text).strip() for key, text in values.items()}
+    labels = {item.key: item.label for item in decision.fields}
+    value = {key: _free(str(text), labels.get(key, key)) for key, text in values.items()}
+    if value.get("as_owner") and not _OWNER.fullmatch(value["as_owner"]):
+        raise DecisionError("“谁来干”只允许字母、数字和 . _ : @ -，例如 claude:cloud 或 trae:cn")
+    approver = _free(approver, "批准人")
     evidence = ""
     if decision.user_words:
         subject = target.mission_id or target.request_id or target.item_id
         evidence = click_evidence(decision.key, subject, now)
 
     if decision.key == "approve_card":
-        args += ["--request-id", _need(target.request_id, "范围卡请求编号"), "--plan-hash", _need(target.plan_hash, "范围卡哈希")]
+        args += ["--request-id", _ident(target.request_id, "范围卡请求编号"), "--plan-hash", _hash(target.plan_hash, "范围卡哈希")]
         if not pin_enforced:  # 口令生效时批准人和凭据由口令决定，不再传
             args += ["--approver", _need(approver, "批准人（你的名字）"), "--approval-evidence-ref", evidence]
         if value.get("admission_release_ref"):
             args += ["--admission-release-ref", value["admission_release_ref"]]
     elif decision.key in ("begin_work", "accept", "close"):
-        args += ["--mission-id", _need(target.mission_id, "任务编号")]
+        args += ["--mission-id", _ident(target.mission_id, "任务编号")]
     elif decision.key == "park":
-        args += ["--mission-id", _need(target.mission_id, "任务编号"), "--reason", value["reason"], "--summary", value["summary"],
+        args += ["--mission-id", _ident(target.mission_id, "任务编号"), "--reason", value["reason"], "--summary", value["summary"],
                  "--approval-evidence-ref", evidence]  # 有凭据才进“搁着”；没有只进“等你”
     elif decision.key == "unpark":
-        args += ["--mission-id", _need(target.mission_id, "任务编号"), "--as", value["as_owner"], "--approval-evidence-ref", evidence]
+        args += ["--mission-id", _ident(target.mission_id, "任务编号"), "--as", value["as_owner"], "--approval-evidence-ref", evidence]
     elif decision.key == "switch":
-        args += ["--pid", _need(target.project_id, "项目编号"), "--to", _need(target.mission_id, "要改干的任务编号"),
+        args += ["--pid", _ident(target.project_id, "项目编号"), "--to", _ident(target.mission_id, "要改干的任务编号"),
                  "--reason", value["reason"], "--summary", value["summary"], "--as", value["as_owner"],
                  "--approval-evidence-ref", evidence]
     elif decision.key in ("inbox_confirm", "inbox_reject"):
-        args += [_need(target.item_id, "收件箱条目编号"), "--ticket-hash", _need(target.ticket_hash, "条目哈希"),
+        args += [_ident(target.item_id, "收件箱条目编号"), "--ticket-hash", _hash(target.ticket_hash, "条目哈希"),
                  "--approver", _need(approver, "批准人（你的名字）"), "--approval-evidence-ref", evidence]
         if value.get("note"):
             args += ["--note", value["note"]]
@@ -228,10 +266,13 @@ def build_args(
     return args
 
 
+_SHELL_SAFE = re.compile(r"[A-Za-z0-9._:/@=+,-]+")
+
+
 def shown_command(args: Sequence[str]) -> str:
     """给人看的等价命令（控制台抽屉、对话框里的“复制命令”）。含空格的参数加引号。"""
 
-    parts = [f'"{item}"' if (" " in item or not item) else item for item in args]
+    parts = [item if _SHELL_SAFE.fullmatch(item) else f'"{item}"' for item in args]
     return "main.py " + " ".join(parts)
 
 

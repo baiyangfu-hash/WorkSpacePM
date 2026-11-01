@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -244,6 +245,7 @@ def test_open_console_off_windows_says_so_and_runs_nothing(tmp_path: Path, monke
 
 def test_open_console_on_windows_opens_a_new_console_with_the_same_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(actions, "console_flag", lambda: 16)
+    monkeypatch.setattr(actions.sys, "executable", "C:\\Python 312\\python.exe")
     called: list[Any] = []
 
     def opener(*a: Any, **k: Any) -> None:
@@ -251,7 +253,9 @@ def test_open_console_on_windows_opens_a_new_console_with_the_same_command(tmp_p
 
     receipt = actions.open_console(tmp_path, "确认验收", ("pm", "accept", "--mission-id", "M-1"), opener=opener)
     (command,), kwargs = called[0]
-    assert command[:2] == ["cmd", "/c"] and "pm accept --mission-id M-1" in command[2] and kwargs["creationflags"] == 16
+    assert "cmd" not in command[0].lower() and command[1:3] == ["-B", "-c"]  # 不经过 shell
+    assert command[4:] == actions.cli_command(tmp_path, ("pm", "accept", "--mission-id", "M-1"))  # 同一条命令，参数一项不拆不并
+    assert kwargs["creationflags"] == 16
     assert receipt.rc is None and "新的终端窗口" in receipt.output
 
 
@@ -263,3 +267,95 @@ def test_guide_lists_every_button_and_its_command() -> None:
     for d in DECISIONS_ALL:
         assert d.label in text, f"DECISIONS.md 没写按钮“{d.label}”"
         assert " ".join(d.command) in text, f"DECISIONS.md 没写 {d.key} 的命令 {' '.join(d.command)}"
+
+
+# ---------------------------------------------------------------- 注入：每个进命令行的值都过白名单/黑名单（预审 510 a）
+
+HOSTILE = ['x" & calc', "100%PATH%", "a ^ b", "$(rm -rf /)", "`id`", "第一行\n第二行", "a\rb", "a\x00b", "x" * 501]
+PASS_THROUGH = ["a & b", "a | b", "a&b"]  # & 和 | 在命令里只是普通字符：放行，但必须原样作为单个参数
+FREE_TEXT_KEYS = {"park": ("reason", "summary"), "switch": ("reason", "summary"), "inbox_reject": ("note",),
+                  "inbox_confirm": ("note",), "approve_card": ("admission_release_ref",)}
+
+
+@pytest.mark.parametrize("bad", HOSTILE)
+def test_hostile_free_text_is_refused_before_any_command_is_built(bad: str) -> None:
+    for key, fields in FREE_TEXT_KEYS.items():
+        for field in fields:
+            with pytest.raises(decisions.DecisionError):
+                _args(decisions.BY_KEY[key], values={**VALUES, field: bad})
+    with pytest.raises(decisions.DecisionError):  # 批准人也一样
+        _args(decisions.BY_KEY["approve_card"], approver=bad)
+
+
+@pytest.mark.parametrize("ok", PASS_THROUGH)
+def test_ampersand_and_pipe_are_plain_characters_and_stay_one_argument(ok: str) -> None:
+    for key, fields in FREE_TEXT_KEYS.items():
+        for field in fields:
+            assert ok in _args(decisions.BY_KEY[key], values={**VALUES, field: ok})
+    assert ok in _args(decisions.BY_KEY["approve_card"], approver=ok)
+
+
+@pytest.mark.parametrize("bad", ['claude" & calc', "claude cloud", "a&b", "x|y", "a^b", "%PATH%", "a\nb", ""])
+def test_agent_identity_is_a_whitelist(bad: str) -> None:
+    with pytest.raises(decisions.DecisionError):
+        _args(decisions.BY_KEY["unpark"], values={**VALUES, "as_owner": bad})
+    for good in ("claude:cloud", "trae:cn", "claude-code"):
+        assert good in _args(decisions.BY_KEY["unpark"], values={**VALUES, "as_owner": good})
+
+
+@pytest.mark.parametrize("bad", ['M-1" & calc', "M 1", "M-1&x", "M-1|x", "M^1", "%X%", "M-1\nM-2", "-M1", ""])
+def test_ids_from_the_ledger_are_a_whitelist(bad: str) -> None:
+    cases: list[tuple[str, Callable[[str], decisions.Target]]] = [
+        ("close", lambda b: decisions.Target(mission_id=b)),
+        ("switch", lambda b: decisions.Target(project_id="DJ-1", mission_id=b)),
+        ("switch", lambda b: decisions.Target(project_id=b, mission_id="M-1")),
+        ("approve_card", lambda b: decisions.Target(request_id=b, plan_hash="a" * 64)),
+        ("inbox_confirm", lambda b: decisions.Target(item_id=b, ticket_hash="b" * 64)),
+    ]
+    for key, make in cases:
+        with pytest.raises(decisions.DecisionError):
+            decisions.build_args(decisions.BY_KEY[key], make(bad), VALUES, approver="baiyang", pin_enforced=False, now=NOW)
+
+
+@pytest.mark.parametrize("bad", ['a" & calc', "a b", "a&b", "a|b", "a^b", "%X%", "abc", "", "a" * 129])
+def test_hashes_are_a_whitelist(bad: str) -> None:
+    with pytest.raises(decisions.DecisionError):
+        decisions.build_args(decisions.BY_KEY["approve_card"], decisions.Target(request_id="R1", plan_hash=bad), VALUES,
+                             approver="baiyang", pin_enforced=False, now=NOW)
+    with pytest.raises(decisions.DecisionError):
+        decisions.build_args(decisions.BY_KEY["inbox_reject"], decisions.Target(item_id="I1", ticket_hash=bad), VALUES,
+                             approver="baiyang", pin_enforced=False, now=NOW)
+
+
+def test_ampersand_and_pipe_stay_one_argument_and_the_copied_command_quotes_them() -> None:
+    values = {**VALUES, "reason": "客户 A & B | C", "summary": "x&y"}
+    args = _args(decisions.BY_KEY["park"], values=values)
+    assert args[args.index("--reason") + 1] == "客户 A & B | C" and args[args.index("--summary") + 1] == "x&y"
+    shown = decisions.shown_command(args)
+    assert '"客户 A & B | C"' in shown and '"x&y"' in shown  # 复制到终端也被引号包住
+
+
+def test_open_console_never_goes_through_a_shell_even_with_hostile_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(actions, "console_flag", lambda: 16)
+    seen: list[list[str]] = []
+
+    def opener(command: list[str], **_k: Any) -> None:
+        seen.append(command)
+
+    hostile = ["pm", "park", "--reason", 'x" & calc | echo ^ %PATH%']
+    actions.open_console(tmp_path, "搁着", hostile, opener=opener)
+    (command,) = seen
+    assert command[-len(hostile):] == hostile  # 恶意参数原样是 argv 里的一项
+    assert not any("cmd" == Path(item).stem.lower() for item in command[:1]) and "/c" not in command
+    assert "shell" not in actions._CONSOLE_WRAPPER.lower() and "os.system" not in actions._CONSOLE_WRAPPER
+
+
+def test_run_cli_never_uses_a_shell(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
+
+    def runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.update(command=command, **kwargs)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    actions.run_cli(tmp_path, "搁着", ("pm", "park", "--reason", 'x" & calc'), runner=runner)
+    assert isinstance(seen["command"], list) and not seen.get("shell") and seen["command"][-1] == 'x" & calc'
