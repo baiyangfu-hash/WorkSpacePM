@@ -241,7 +241,7 @@ git worktree remove .auto-pm/worktrees/claude    # 收工：分支已推送、�
    - **验证与生成的绝对隔离**：在编写自动化验证脚本或门禁（如 `--verify` 命令）时，必须确保验证逻辑完全处于只读（Read-Only）上下文中。严禁在执行断言之前意外触发文件生成或覆写动作，导致“自己检查自己刚刚生成的文件”从而掩盖用户的破坏性篡改。
 
 ## 文件编码与读写铁律 (DEV-ENC-001)
-在执行 Python 脚本读写工作区内的文本或 Markdown 文件时，**必须显式声明 `encoding="utf-8", errors="replace"`**。这是为了防止由于中文字符、GBK 终端历史遗留导致的 UnicodeDecodeError，保证全栈工具链在各种极端环境下的鲁棒性。
+在执行 Python 脚本读写工作区内的文本或 Markdown 文件时，**必须显式声明 `encoding="utf-8", errors="replace"`**。这是为了防止由于中文字符、GBK 终端历史遗留导致的 UnicodeDecodeError，保证全栈工具链在各种极端环境下的鲁棒性。新增 `errors="replace"` 须同行写明理由，由棘轮测试检查；只管脚本，不管 `auto_pm` 包。
 
 ## 子代理零负担自闭环约束 (Execution Loop)
 执行代理在向 PM 或用户通过 `send_message` 回复之前，必须**强制进行自我门禁校验**（如 `main.py doc check`、`main.py plc check <PID>` 或 `pytest`）。如果运行结果不是 Exit Code 0，且系统未达到防死循环上限（Bounded Healing），**绝对禁止返回半成品**。必须内部消化错误并重试，违者视为严重破坏零负担铁律。
