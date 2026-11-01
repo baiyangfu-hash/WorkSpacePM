@@ -29,7 +29,11 @@ class _Job(QThread):
         self.job = job
 
     def run(self) -> None:
-        self.done.emit(self.job())
+        try:
+            result = self.job()
+        except Exception as error:  # noqa: BLE001 - 后台任务出任何错都交回主线程显示，不让“读取中”标记卡死、也不静默
+            result = error
+        self.done.emit(result)
 
 
 class DecisionController(QObject):
@@ -39,12 +43,12 @@ class DecisionController(QObject):
         self.root, self.on_changed, self.now = root, on_changed, now
         self.runner = runner  # 测试注入；None 用 actions 里的默认运行器
         self.pin_mode = "unknown"
+        self._reading = False
         self.missions: Sequence[Any] = ()
         self.project_ids: Sequence[str] = ()
         self._jobs: list[QThread] = []
         self.page = DecisionsPage(on_copy, self.preview)
         self.page.run_requested.connect(self.run_decision)
-        self.page.reload_requested.connect(self.on_changed)
 
     # ------------------------------------------------ 拼命令（对话框实时调）
 
@@ -57,6 +61,9 @@ class DecisionController(QObject):
 
     def refresh(self, project_ids: Sequence[str], missions: Sequence[Any]) -> None:
         self.project_ids, self.missions = tuple(project_ids), tuple(missions)
+        if self._reading:  # 上一轮还没读完：不叠起新的一批命令，读完后页面用的就是上一轮读到的
+            return
+        self._reading = True
         self._spawn(self._read_all, self._read_done)
 
     def _read_all(self) -> tuple[str, dict[str, list[decisions.Target]], dict[str, list[decisions.Target]]]:
@@ -71,7 +78,14 @@ class DecisionController(QObject):
             inbox[pid] = decisions.parse_inbox(got.output, pid) if got.rc == 0 else []
         return pin, pending, inbox
 
+    def _failed(self, label: str, error: Exception) -> None:
+        self.page.add_receipt(actions.Receipt(self.now().strftime("%H:%M"), label, "(未运行)", 1, False, f"{type(error).__name__}: {error}"))
+
     def _read_done(self, result: Any) -> None:
+        self._reading = False
+        if isinstance(result, Exception):
+            self._failed("读决定页数据", result)
+            return
         pin, pending, inbox = result
         self.pin_mode = pin
         vm = decisions.build_vm(self.missions, pending, inbox, pin)
@@ -94,7 +108,10 @@ class DecisionController(QObject):
             job = lambda: actions.run_cli(self.root, decision.label, args, **extra)  # noqa: E731
         self._spawn(job, self._run_done)
 
-    def _run_done(self, receipt: actions.Receipt) -> None:
+    def _run_done(self, receipt: actions.Receipt | Exception) -> None:
+        if isinstance(receipt, Exception):
+            self._failed("运行决定", receipt)
+            return
         self.page.add_receipt(receipt)
         if actions.needs_terminal(receipt):
             self.pin_mode = "enforced"  # 命令说口令已生效：下次点同一个按钮就改走终端窗口

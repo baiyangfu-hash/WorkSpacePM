@@ -125,9 +125,11 @@ def test_pm_board_is_read_only(qapp: QApplication, tmp_path: Path) -> None:
     for kind in (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox):
         for page in (window.home, window.issues, window.projects, window.project):
             assert page.findChildren(kind) == [], kind.__name__
-        # 整个窗口里唯一能打字的地方：工程工位第 4 步的 BC 表单
+        # 整个窗口里能打字的地方只有两处：工程工位第 4 步的 BC 表单，和“决定”页顶上的“批准人”一栏
+        # （决定页的其余输入都在点按钮后才弹出的确认对话框里，对话框不是主窗口的内容）
         for widget in window.findChildren(kind):
-            assert _inside(widget, "bc_form"), (kind.__name__, widget.objectName())
+            assert _inside(widget, "bc_form") or (_inside(widget, "decisions_page") and widget.objectName() == "approver"), (
+                kind.__name__, widget.objectName())
     assert window.projects.table.editTriggers() == window.projects.table.EditTrigger.NoEditTriggers
     window.close()
 
@@ -135,15 +137,24 @@ def test_pm_board_is_read_only(qapp: QApplication, tmp_path: Path) -> None:
 def test_station_buttons_are_listed_and_gated(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
     window = _window(qapp, root, db)
+    window._refresh_decisions = lambda: None  # 本测试只看工位按钮；决定页读命令的接线在 test_decisions_tab_* 里测
     window.set_mode("ws")
     qapp.processEvents()
     buttons = {b.text(): b for b in _buttons(window.station)}
     assert set(buttons) <= policy.STATION_BUTTONS, set(buttons) - policy.STATION_BUTTONS
     for text in buttons:  # 工位的提示文字可以解释“要等接上批准口令才开放”，按钮本身不许带禁用词
         assert not any(word in text.lower() for word in policy.STATION_FORBIDDEN_WORDS), text
-    for text in ("批准范围", "开工", "提交"):
+    for text in ("提交",):
         assert not buttons[text].isEnabled(), text
-    assert not app_module.DECISION_BUTTONS_WIRED  # 界面还没接口令弹窗和同一条命令（S1），批准 / 开工一直灰
+    # S1b 已接线：批准范围 / 开工亮着，点它们只是带你去“决定”页，不在这里直接运行任何命令
+    assert app_module.DECISION_BUTTONS_WIRED
+    for text in ("批准范围", "开工"):
+        assert buttons[text].isEnabled(), text
+        buttons[text].click()
+        assert window.stack.currentWidget() is window.decisions.page
+        window.set_mode("ws")
+        qapp.processEvents()
+        buttons = {b.text(): b for b in _buttons(window.station)}
     # 离线：推送、开 PR 灰；本机检查可点
     assert not buttons["推送 manual/ 分支"].isEnabled() and not buttons["打开 GitHub 开 PR"].isEnabled()
     assert buttons["重新跑 plc check"].isEnabled()
@@ -458,4 +469,84 @@ def test_github_block_shows_as_of_and_never_green_when_stale(qapp: QApplication,
             if not green:
                 assert all(lab.text() in ("未知", "没审计记录") and lab.property("sev") == "na" for lab in chips)
                 assert any("3 小时前" in t for t in texts), texts
+    window.close()
+
+
+def test_decisions_tab_reads_only_read_commands_and_lists_buttons_by_state(qapp: QApplication, tmp_path: Path) -> None:
+    """“决定”页签：打开时用只读命令读口令状态、待批准卡、收件箱；每个状态出现对应按钮；点按钮才会运行写命令。"""
+    import subprocess
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACCEPTANCE_PENDING", "待验收", 1), ("DJ-2026-101", "ACCEPTED", "已验收", 2)])
+    window = _window(qapp, root, db)
+    calls: list[list[str]] = []
+
+    def fake(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(command[3:])
+        return subprocess.CompletedProcess(command, 0, "批准口令：未生效（Git HEAD 里没有 x）" if "approver-pin" in command else "{}", "")
+
+    window.decisions.runner = fake
+    window.goto("decisions")
+    for _ in range(100):
+        for job in list(window.decisions._jobs):
+            job.wait(2000)
+        qapp.processEvents()
+        if not window.decisions._jobs:
+            break
+    assert window.stack.currentWidget() is window.decisions.page
+    assert ["pm", "approver-pin", "status"] in calls
+    assert ["pm", "pending", "--project-id", "DJ-2026-101"] in calls and ["pm", "inbox", "list", "--project-id", "DJ-2026-101"] in calls
+    assert all(c[:2] in (["pm", "approver-pin"], ["pm", "pending"], ["pm", "inbox"]) for c in calls)  # 只读命令，没有任何写命令
+    texts = {b.text() for b in _buttons(window.decisions.page)}
+    assert {"确认验收", "收口"} <= texts
+    assert "批准口令：未生效" in " ".join(_texts(window.decisions.page))
+    window.close()
+
+
+def _wait_threads(window: Any, qapp: QApplication) -> None:
+    for _ in range(200):
+        for thread in list(window._threads):
+            thread.wait(2000)
+        qapp.processEvents()
+        if not window._threads:
+            break
+
+
+def test_timer_round_does_not_refresh_the_decisions_page_but_manual_reload_does(qapp: QApplication, tmp_path: Path) -> None:
+    """#455 预审 514 a：10 分钟定时那一轮只快读，不连决定页一起读；手动“重新读取”才读。"""
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db, no_github=True)
+    refreshed: list[int] = []
+    window.decisions.refresh = lambda *_a: refreshed.append(1)
+    window.goto("decisions")
+    assert refreshed == [1]  # 打开页签：读一次
+    window.auto_reload()  # 定时刷新
+    _wait_threads(window, qapp)
+    assert refreshed == [1]
+    window.reload()  # 手动“重新读取”
+    _wait_threads(window, qapp)
+    assert refreshed == [1, 1]
+    window.close()
+
+
+def test_decisions_page_reads_at_most_the_project_limit(qapp: QApplication, tmp_path: Path) -> None:
+    """#455 预审 514 b：一次最多读 DECISION_PROJECT_LIMIT 个项目，按“有开着的卡的项目在前”的顺序截断，不重复。"""
+    from types import SimpleNamespace
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db)
+    limit = app_module.DECISION_PROJECT_LIMIT
+
+    def project(index: int, column: str) -> Any:
+        mission = SimpleNamespace(column=column, state="ACTIVE" if column == "在干" else "CLOSED")
+        return SimpleNamespace(project_id=f"DJ-2026-{200 + index}", missions=[mission])
+
+    window.board = SimpleNamespace(projects=[project(i, "已关" if i == 0 else "在干") for i in range(limit + 5)])
+    window.home_vm = None
+    got: list[Any] = []
+    window.decisions.refresh = lambda ids, missions: got.append((list(ids), list(missions)))
+    window._refresh_decisions()
+    ids, missions = got[0]
+    assert len(ids) == limit and len(set(ids)) == limit
+    assert ids[0] == "DJ-2026-201" and "DJ-2026-200" not in ids  # 只有已关的卡的项目不读
+    assert len(missions) == limit + 5  # 看板里的卡全部交给页面，只有“要读的项目”被截断
     window.close()

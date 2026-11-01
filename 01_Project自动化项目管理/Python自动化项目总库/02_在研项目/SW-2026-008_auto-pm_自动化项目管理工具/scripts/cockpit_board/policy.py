@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 # 项目经理看板：只读。窗口里允许出现的按钮文字只有这些。
-PM_BUTTONS = frozenset({"重新读取", "今天", "问题", "全部项目", "项目经理", "工程工位", "在线", "离线",
+PM_BUTTONS = frozenset({"重新读取", "今天", "问题", "全部项目", "决定", "项目经理", "工程工位", "在线", "离线",
                         "复制", "看项目", "‹ 今天", "展开", "收起",
                         "概览", "卡片", "证据", "变更记录", "依赖与交付", "规范与模板",
                         "全部", "阻塞", "风险", "提醒"})
@@ -15,8 +15,8 @@ STATION_BUTTONS = PM_BUTTONS | frozenset({
     "看卡和变更记录", "收起控制台", "展开控制台",
 })
 
-# 灰着的和永远不加的。缺口⑨（批准口令防冒签）已在 main，但界面里的“批准范围 / 开工”还没接上口令弹窗
-# 和同一条命令（pm approve / pm confirm-start），接上之前一直灰；接线后由 app.DECISION_BUTTONS_WIRED 打开。
+# 工位里的“批准范围 / 开工”是去“决定”页的入口（S1b 接线，app.DECISION_BUTTONS_WIRED = True）；
+# 真正的批准、开工、验收等按钮和它们的命令见 decisions.py。DECISION_BUTTONS_WIRED 为 False 时它们灰着。
 GATED_UNTIL_WIRED = frozenset({"批准范围", "开工"})
 NEVER = ("合并", "删除", "切换发布", "代签", "签字", "no-verify", "全量门禁", "启动 codex", "codex", "执行")
 

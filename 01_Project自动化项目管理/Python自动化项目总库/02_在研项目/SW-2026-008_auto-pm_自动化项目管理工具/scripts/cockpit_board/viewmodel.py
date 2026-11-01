@@ -869,5 +869,10 @@ def station_vm(
         ("采集", identity.get("collected", "—")),
     ]
     warn = off or identity.get("source", "") != identity.get("configured", identity.get("source", ""))
-    banner = "当前离线：推送、开 PR、批准、开工都已灰化并写明原因；本机检查、记 BC、复制提交说明照常可用。" if off else ""
+    if not off:
+        banner = ""
+    elif decisions_wired:  # 批准、开工只写本机账本，不需要网，离线照常可用
+        banner = "当前离线：推送、开 PR 已灰化并写明原因；本机检查、记 BC、批准、开工、复制提交说明照常可用。"
+    else:
+        banner = "当前离线：推送、开 PR、批准、开工都已灰化并写明原因；本机检查、记 BC、复制提交说明照常可用。"
     return StationVM(ident, warn, bool(online), banner, projects, steps, records, safety_hits)
