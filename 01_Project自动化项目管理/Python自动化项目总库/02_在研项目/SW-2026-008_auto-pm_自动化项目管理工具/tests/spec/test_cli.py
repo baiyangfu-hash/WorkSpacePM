@@ -14,6 +14,9 @@ from click.testing import CliRunner
 
 from auto_pm.ui.cli.spec import spec_group
 
+# These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_workspace_writers_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 class TestCLIGroup:
     def test_help(self) -> None:

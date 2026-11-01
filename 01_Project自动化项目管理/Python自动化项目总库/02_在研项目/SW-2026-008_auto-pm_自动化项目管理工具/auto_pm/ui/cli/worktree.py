@@ -24,6 +24,7 @@ from auto_pm.application.core.agent_worktree_service import (
     Station,
     StationRefusedError,
 )
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 AGENTS = click.Choice(sorted(AGENT_ROSTER))
@@ -87,6 +88,7 @@ def worktree_group() -> None:
 @click.pass_context
 def open_cmd(ctx: click.Context, agent: str, card: str, no_fetch: bool) -> None:
     """为 AGENT 开工位，分支 <前缀><CARD>，从最新 origin/main 起"""
+    require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
     try:
         station = service.open(agent, card, fetch=not no_fetch)
@@ -161,6 +163,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
 @click.pass_context
 def close_cmd(ctx: click.Context, agent: str, no_fetch: bool) -> None:
     """收 AGENT 的工位：无未提交改动、提交都已推送才删；已并进 main 的再删本地分支"""
+    require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
     try:
         result = service.close(agent, fetch=not no_fetch)
@@ -182,6 +185,8 @@ def sweep_cmd(
     """清理已并进 main 的工位、远程已删的本地分支、已结束 Run 的 run-plan-* 残留；默认只列"""
     if apply and dry_run:
         _fail(AgentWorktreeError("--apply 和 --dry-run 只能选一个"))
+    if apply:  # the default is a listing: it deletes nothing, so it asks the guard nothing
+        require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
     try:
         report = service.sweep(apply=apply, agent=agent, fetch=not no_fetch, progress=_progress)

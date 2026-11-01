@@ -11,6 +11,7 @@ import click
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.dogfood_runner import DogfoodIsolationError, DogfoodRunner
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 
 def _workspace(ctx: click.Context) -> Path:
@@ -70,6 +71,7 @@ def prepare_dogfood(
     as_json: bool,
 ) -> None:
     """从干净稳定树创建候选 worktree，不覆盖已有目录。"""
+    require_runtime_identity_for_workspace(ctx)
     try:
         payload = DogfoodRunner(_workspace(ctx)).prepare_candidate(
             candidate_path,
@@ -140,6 +142,8 @@ def review_dogfood(
     as_json: bool,
 ) -> None:
     """从稳定控制面外部复核候选，候选不能生成自己的放行结论。"""
+    if write_report:  # --no-report writes nothing
+        require_runtime_identity_for_workspace(ctx)
     try:
         payload = DogfoodRunner(_workspace(ctx)).review(
             candidate_path,

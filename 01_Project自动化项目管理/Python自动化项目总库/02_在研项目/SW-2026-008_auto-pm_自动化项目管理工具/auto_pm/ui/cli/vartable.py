@@ -49,6 +49,7 @@ from auto_pm.domain.vartable.parsers.format_detector import (
 )
 from auto_pm.domain.vartable.utils.encoding import SUPPORTED_ENCODINGS, detect_encoding
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 
@@ -461,7 +462,9 @@ def detect_format_command(file_path: str, fmt: str) -> None:
     help="输出文件路径（默认输出到 stdout）",
 )
 @click.argument("file_path", type=CallerPath(exists=True, dir_okay=False, resolve_path=True))
+@click.pass_context
 def convert_command(
+    ctx: click.Context,
     file_path: str,
     fmt: str | None,
     output_fmt: str,
@@ -479,6 +482,8 @@ def convert_command(
     auto-pm vartable convert path/to/file.scl --output-format yaml --output out.yaml
     auto-pm vartable convert path/to/program_blocks.yml --output-format json
     """
+    if output_path:  # without --output the result goes to stdout and nothing is written
+        require_runtime_identity_for_workspace(ctx)
     result = _parse_with_format(file_path, fmt)
 
     if not result.success:

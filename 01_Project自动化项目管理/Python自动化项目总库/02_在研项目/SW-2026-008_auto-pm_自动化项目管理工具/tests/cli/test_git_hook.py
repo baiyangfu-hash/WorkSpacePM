@@ -22,6 +22,9 @@ from auto_pm.infrastructure.git_hook_enforcer import (
 from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_do
 
+# These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_remaining_groups_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 def test_git_hook_install_uses_root_active_release_launcher(tmp_path: Path) -> None:
     (tmp_path / ".git" / "hooks").mkdir(parents=True)

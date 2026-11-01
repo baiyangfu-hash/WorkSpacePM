@@ -37,6 +37,17 @@ def require_runtime_identity(ctx: click.Context, project_id: str, start_path: Pa
         raise click.ClickException("运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
 
 
+# The runtime (release pointer and loaded package) is one folder shared by every registered project, so a command that
+# belongs to no project (opening a station, opening a PR, building a delivery ...) is checked against the cockpit's own project.
+COCKPIT_PROJECT_ID = "SW-2026-008"
+
+
+def require_runtime_identity_for_workspace(ctx: click.Context) -> None:
+    """Guard a write command that belongs to the whole workspace, not to one project (TD-SW008-214)."""
+
+    require_runtime_identity(ctx, COCKPIT_PROJECT_ID)
+
+
 WARNINGS_META_KEY = "runtime_identity_warnings"
 WARNINGS_FIELD = "runtime_identity_warnings"
 

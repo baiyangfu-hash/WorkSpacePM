@@ -9,6 +9,9 @@ from click.testing import CliRunner
 from auto_pm.application.delivery.constants import MB
 from auto_pm.ui.cli.__main__ import cli
 
+# These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_workspace_writers_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 
 @pytest.fixture
 def runner() -> CliRunner:

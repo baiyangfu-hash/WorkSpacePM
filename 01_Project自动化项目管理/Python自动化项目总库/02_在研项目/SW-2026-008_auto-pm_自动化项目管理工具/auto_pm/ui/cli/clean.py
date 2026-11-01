@@ -11,6 +11,7 @@ from rich.table import Table
 
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.governance_service import GovernanceService
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 
@@ -48,5 +49,6 @@ def clean_cmd(ctx: click.Context, cache: bool, dry_run: bool) -> None:
         console.print("[yellow]🔍 处于 --dry-run 模式，未实际删除文件。[/yellow]")
         return
 
+    require_runtime_identity_for_workspace(ctx)
     cleaned = service.clean_workspace(clean_cache=cache)
     console.print(Panel(f"[bold green]✅ 清理完成！已清除 {len(cleaned)} 个游离临时文件与缓存。[/bold green]", title="Clean 完成"))

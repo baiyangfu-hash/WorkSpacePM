@@ -39,6 +39,7 @@ from auto_pm.application.core.pm_session_service import (
     generate_view,
 )
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 
@@ -267,6 +268,8 @@ def cmd_archive(
     §8 特殊处理（CHG-109）：--keep-recent N 表示保留最新 N 条 skill_handoff 条目，
     current_state* 和归档说明始终保留，其余旧 skill_handoff 条目归档。
     """
+    if not dry_run:
+        require_runtime_identity_for_workspace(ctx)
     ws = _resolve_workspace(workspace, ctx)
 
     if auto_mode:
@@ -486,6 +489,8 @@ def cmd_view(
     提取 §2 Current Focus + §3 Status Summary + §9 Next Actions，
     生成简洁的只读 markdown 视图。
     """
+    if output:  # without --output the view goes to stdout and nothing is written
+        require_runtime_identity_for_workspace(ctx)
     ws = _resolve_workspace(workspace, ctx)
     root = project_root if project_root else ws
     try:

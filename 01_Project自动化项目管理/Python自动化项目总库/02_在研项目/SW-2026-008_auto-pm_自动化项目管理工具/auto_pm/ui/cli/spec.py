@@ -31,6 +31,7 @@ from auto_pm.domain.spec.services.index_svc import IndexService
 from auto_pm.domain.spec.services.report_svc import ReportService
 from auto_pm.ui.cli.approval_pin import refuse_agent_approval
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 
@@ -183,6 +184,7 @@ def cmd_check(
     """运行规范健康检查（SHC-001~010）；--fix 会改写规范库文件"""
     if auto_fix and not dry_run:
         refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
+        require_runtime_identity_for_workspace(ctx)
     ws = _resolve_workspace(workspace, ctx)
     ws_config = _load_ws_config(config_path, ws)
 
@@ -370,6 +372,7 @@ def cmd_index(
 ) -> None:
     """生成规范索引文件（会改写规范库里的索引文件）"""
     refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
+    require_runtime_identity_for_workspace(ctx)
     ws = _resolve_workspace(workspace, ctx)
     ws_config = _load_ws_config(config_path, ws)
     svc = IndexService(ws, config=ws_config)
@@ -427,6 +430,7 @@ def cmd_frontmatter(
     """
     if fix:
         refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
+        require_runtime_identity_for_workspace(ctx)
     ws = _resolve_workspace(workspace, ctx)
     ws_config = _load_ws_config(config_path, ws)
     svc = FrontmatterService(ws, config=ws_config)
@@ -545,6 +549,7 @@ def cmd_report(
     # 不带 --output 时报告默认写进规范库目录；--output 指到规范库里同样是写规范库
     if _report_lands_in_library(ws, output):
         refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
+        require_runtime_identity_for_workspace(ctx)
     ws_config = _load_ws_config(config_path, ws)
     svc = ReportService(ws, config=ws_config)
     output_path = Path(output) if output else None
@@ -802,6 +807,7 @@ def sync(
     2. 执行全局规范健康检查 (SHC-001~014)
     """
     refuse_agent_approval(SPEC_WRITE_ACTION, approval_evidence_ref)
+    require_runtime_identity_for_workspace(ctx)
     ws = _resolve_workspace(workspace, ctx)
     ws_config = _load_ws_config(Path(config_path) if config_path else None, ws)
     unicode_output = _supports_unicode_output()

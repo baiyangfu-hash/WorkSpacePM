@@ -1,16 +1,16 @@
 """TD-SW008-214: no command-line command can appear without a decision about the runtime-identity guard.
 
-Twelve command groups (``pm``, ``change``, ``continuity``, ``decision``, ``implementation-card``, ``ledger``, ``plc``,
-``python``, ``project``, ``doc``, ``prototype``, ``template``) have their own test that lists every command as guarded or not.
-The other groups had nothing: a new write command there reached the ledger or a project folder with no identity check and no
-test noticing.  This test walks the whole command tree and applies one rule to every command outside those twelve groups:
+Every command group is either in ``CLASSIFIED_GROUPS`` (it has its own test, ``tests/cli/test_*_runtime_identity.py``, that
+lists every command as guarded, warn-only or read-only) or its commands are walked here.  This test applies one rule to
+every command outside ``CLASSIFIED_GROUPS``:
 
 * its callback calls ``require_runtime_identity*`` or ``warn_runtime_identity`` - guarded, nothing to record; or
-* it is listed in ``UNDECIDED`` below, the frozen list of today's commands that the open debt TD-SW008-214 has not decided yet.
+* it is listed in ``READ_ONLY`` below: a group with no write path at all, decided once and written down; or
+* it is listed in ``UNDECIDED``, the frozen list of commands nobody has decided yet.  The debt is closed, so it is empty.
 
-A new command that is neither fails here; a listed command that has since been guarded must be removed from the list, so
-the list can only shrink.  Entering a command in ``UNDECIDED`` is a decision for the person who approves the card, not a
-way past the test: this file is a protected test path and shows up in the PR scope check.
+A new command that is none of these fails here; a listed command that has since been guarded must be removed from its list,
+so the lists can only shrink.  Entering a command in ``READ_ONLY`` or ``UNDECIDED`` is a decision for the person who approves
+the card, not a way past the test: this file is a protected test path and shows up in the PR scope check.
 """
 
 from __future__ import annotations
@@ -29,117 +29,43 @@ from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 CLASSIFIED_GROUPS = frozenset(
     {
         "change",
+        "clean",
+        "constraint",
         "continuity",
         "decision",
+        "delivery",
         "doc",
+        "dogfood",
+        "git-hook",
+        "handoff",
         "implementation-card",
         "ledger",
         "plc",
         "pm",
+        "pm-session",
+        "pr",
         "project",
         "prototype",
         "python",
+        "spec",
         "template",
+        "vartable",
+        "workflow",
+        "worktree",
     }
 )
 
-# Today's commands in the other groups with no identity guard and no decision yet (TD-SW008-214: allow list still open).
-UNDECIDED: dict[str, tuple[str, ...]] = {
-    "clean": ("",),
-    "constraint": (
-        "check",
-        "guard",
-        "heal",
-        "list",
-        "verify",
-    ),
-    "context": ("resolve",),
-    "delivery": (
-        "archive clean",
-        "archive list",
-        "build",
-        "package",
-        "status",
-    ),
-    "doctor": ("",),
-    "dogfood": (
-        "inspect",
-        "prepare",
-        "review",
-    ),
-    "git-hook": (
-        "commit-msg",
-        "install",
-        "pre-commit",
-        "preflight",
-        "release-gate",
-    ),
-    "gui": ("",),
-    "handoff": (
-        "claim",
-        "close",
-        "create",
-        "fail",
-        "failures",
-        "heartbeat",
-        "list",
-        "preflight",
-        "queue",
-        "requeue",
-        "result-submit",
-        "saga compensate",
-        "saga resume",
-        "saga status",
-        "show",
-        "start",
-        "timeout",
-    ),
-    "pm-session": (
-        "archive",
-        "check",
-        "view",
-    ),
-    "pr": (
-        "open",
-        "ready",
-    ),
-    "role": (
-        "check",
-        "list",
-    ),
-    "spec": (
-        "check",
-        "frontmatter",
-        "index",
-        "lint",
-        "report",
-        "sync",
-    ),
-    "vartable": (
-        "batch-parse",
-        "convert",
-        "detect-encoding",
-        "detect-format",
-        "list-encodings",
-        "list-formats",
-        "parse",
-    ),
-    "workflow": (
-        "confirm-start",
-        "context",
-        "history",
-        "list",
-        "plan",
-        "resume",
-        "run",
-        "status",
-    ),
-    "worktree": (
-        "close",
-        "list",
-        "open",
-        "sweep",
-    ),
+# TD-SW008-214 is closed: no command is left undecided.  The dict stays so that the ratchet below keeps its shape; a name may
+# only be added here with the approval of the card that does it (this file is a protected test path).
+UNDECIDED: dict[str, tuple[str, ...]] = {}
+
+# Commands in groups that have no write path at all, decided as read-only on 2026-11-01 (user: "按推荐").  They need no
+# identity guard; a command that later gets one must leave this list, and one that starts to write must get a guard.
+READ_ONLY: dict[str, tuple[str, ...]] = {
+    "context": ("resolve",),  # prints the identity card; it is the check itself
+    "doctor": ("",),  # environment diagnosis, prints only
+    "gui": ("",),  # opens the cockpit window; every write inside goes through the guarded services
+    "role": ("check", "list"),  # reads the role pack registry
 }
 
 GUARD_CALL = re.compile(r"\b(?:require_runtime_identity\w*|warn_runtime_identity)\b")
@@ -169,11 +95,15 @@ def _undecided() -> set[str]:
     return {f"{group} {sub}".strip() for group, subs in UNDECIDED.items() for sub in subs}
 
 
+def _read_only() -> set[str]:
+    return {f"{group} {sub}".strip() for group, subs in READ_ONLY.items() for sub in subs}
+
+
 def _unknown() -> list[str]:
     return sorted(
         name
         for name, command in _outside_classified_groups().items()
-        if not _guarded(command) and name not in _undecided()
+        if not _guarded(command) and name not in _undecided() and name not in _read_only()
     )
 
 
@@ -182,9 +112,9 @@ def test_every_command_outside_the_classified_groups_is_guarded_or_listed() -> N
 
     unknown = _unknown()
     assert not unknown, (
-        "这些命令既没有运行身份校验，也不在 UNDECIDED 里："
+        "这些命令既没有运行身份校验，也不在 READ_ONLY 里："
         + "、".join(unknown)
-        + "。写账、写项目文件的命令加 require_runtime_identity*；只读的在 UNDECIDED 登记，并在 PR 里写明理由（TD-SW008-214）。"
+        + "。写账、写项目文件的命令加 require_runtime_identity*；只读的在 READ_ONLY 登记，并在 PR 里写明理由（TD-SW008-214）。"
     )
 
 
@@ -207,16 +137,17 @@ def test_the_undecided_list_only_names_commands_that_exist_and_are_still_unguard
     """The list is a ratchet: a command that got its guard (or was removed) must leave it."""
 
     present = _outside_classified_groups()
-    gone = sorted(name for name in _undecided() if name not in present)
-    assert not gone, "UNDECIDED 里有已不存在的命令（请删掉）：" + "、".join(gone)
-    now_guarded = sorted(name for name in _undecided() if _guarded(present[name]))
-    assert not now_guarded, "这些命令已经有运行身份校验，请从 UNDECIDED 里删掉：" + "、".join(
-        now_guarded
-    )
+    for label, names in (("UNDECIDED", _undecided()), ("READ_ONLY", _read_only())):
+        gone = sorted(name for name in names if name not in present)
+        assert not gone, f"{label} 里有已不存在的命令（请删掉）：" + "、".join(gone)
+        now_guarded = sorted(name for name in names if _guarded(present[name]))
+        assert not now_guarded, f"这些命令已经有运行身份校验，请从 {label} 里删掉：" + "、".join(
+            now_guarded
+        )
 
 
 def test_a_classified_group_is_not_also_in_the_undecided_list() -> None:
-    assert not CLASSIFIED_GROUPS & set(UNDECIDED)
+    assert not CLASSIFIED_GROUPS & (set(UNDECIDED) | set(READ_ONLY))
 
 
 def test_every_top_level_group_is_either_classified_or_covered_here() -> None:

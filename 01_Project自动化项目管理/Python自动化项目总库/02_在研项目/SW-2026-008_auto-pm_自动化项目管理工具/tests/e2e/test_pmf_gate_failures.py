@@ -24,6 +24,9 @@ from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_out
 from tests.workspace_support import register_project
 
+# These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_remaining_groups_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 PID = "SW-2026-901"
 OTHER_PID = "SW-2026-902"
 LAUNCHER = """from auto_pm.cli.__main__ import cli

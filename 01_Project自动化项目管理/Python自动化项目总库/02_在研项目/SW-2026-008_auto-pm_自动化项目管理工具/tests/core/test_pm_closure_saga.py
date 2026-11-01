@@ -506,6 +506,7 @@ def test_close_with_saga_integration(project_setup: Mapping[str, Any]) -> None:
     assert saga_status["status"] == "completed"
 
 
+@pytest.mark.usefixtures("identity_guard_off")  # this test parses stdout as JSON; the identity warning goes to stderr (see test_handoff_runtime_identity.py)
 def test_cli_saga_commands(project_setup: Mapping[str, Any]) -> None:
     """测试 handoff saga status/resume/compensate CLI 命令组。"""
     ws = project_setup["workspace_root"]

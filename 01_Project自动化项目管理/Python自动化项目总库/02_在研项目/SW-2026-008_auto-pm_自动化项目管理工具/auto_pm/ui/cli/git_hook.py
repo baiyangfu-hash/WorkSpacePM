@@ -18,6 +18,7 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     get_staged_snapshot,
 )
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 
@@ -113,6 +114,7 @@ def cmd_preflight(ctx: click.Context, msg_file: Path) -> None:
 @click.pass_context
 def cmd_install(ctx: click.Context) -> None:
     """安装/激活工作区 Git 物理门禁钩子 (.git/hooks/pre-commit 与 commit-msg)。"""
+    require_runtime_identity_for_workspace(ctx)
     ws = _workspace(ctx)
     git_dir = ws / ".git"
     if not git_dir.is_dir():

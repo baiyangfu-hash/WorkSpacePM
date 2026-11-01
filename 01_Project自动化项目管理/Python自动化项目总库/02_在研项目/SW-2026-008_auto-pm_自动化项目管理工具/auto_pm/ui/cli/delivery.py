@@ -22,6 +22,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.application.delivery.archive_manager import ArchiveManager
 from auto_pm.application.delivery.constants import DEFAULT_ARCHIVE_KEEP, DEFAULT_PRODUCT_NAME
 from auto_pm.application.delivery.delivery_service import DeliveryService
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 
@@ -74,6 +75,7 @@ def cmd_build(
       auto-pm delivery build --version V1.0.1 --skip-pyinstaller
       auto-pm delivery build --version V1.0.1 --auto-package
     """
+    require_runtime_identity_for_workspace(ctx)
     app_ctx: AppContext = ctx.obj
 
     if project_root:
@@ -146,6 +148,8 @@ def cmd_package(
       auto-pm delivery package --version V1.0.1
       auto-pm delivery package --version V1.0.1 --verify-only
     """
+    if not verify_only:  # --verify-only only reads an existing ZIP
+        require_runtime_identity_for_workspace(ctx)
     app_ctx: AppContext = ctx.obj
 
     if project_root:
@@ -259,6 +263,8 @@ def cmd_archive_clean(
       auto-pm delivery archive clean --keep 3 --dry-run
       auto-pm delivery archive clean --type package --keep 5
     """
+    if not dry_run:
+        require_runtime_identity_for_workspace(ctx)
     app_ctx: AppContext = ctx.obj
 
     if project_root:

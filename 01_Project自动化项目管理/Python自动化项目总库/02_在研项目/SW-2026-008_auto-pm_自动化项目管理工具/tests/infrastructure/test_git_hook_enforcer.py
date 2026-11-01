@@ -29,6 +29,9 @@ from auto_pm.infrastructure.git_hook_enforcer import (
 )
 from tests.git_support import git_out
 
+# These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_remaining_groups_runtime_identity.py).
+pytestmark = pytest.mark.usefixtures("identity_guard_off")
+
 SW008_ROOT = (
     "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/"
     "SW-2026-008_auto-pm_自动化项目管理工具"
