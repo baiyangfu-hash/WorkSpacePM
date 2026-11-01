@@ -34,7 +34,7 @@ from auto_pm.core.paths import (
 _PROJECT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-]+$")
 
 # change_number 允许的格式：CHG-{DOMAIN}-{YYYY}-{XXX}
-_CHANGE_NUMBER_PATTERN = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3}$")
+_CHANGE_NUMBER_PATTERN = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3,}$")
 
 
 class PathTraversalError(ValueError):

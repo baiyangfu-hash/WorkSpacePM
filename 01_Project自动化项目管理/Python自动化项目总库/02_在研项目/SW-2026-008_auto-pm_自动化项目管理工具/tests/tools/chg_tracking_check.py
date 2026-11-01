@@ -24,7 +24,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CHG_NAME = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3}\.md$")
+CHG_NAME = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3,}\.md$")
 DEFAULT_FOLDER = "01_变更单"
 SKIP_DIRS = {".git", ".auto-pm", ".venv", "node_modules", "__pycache__"}
 

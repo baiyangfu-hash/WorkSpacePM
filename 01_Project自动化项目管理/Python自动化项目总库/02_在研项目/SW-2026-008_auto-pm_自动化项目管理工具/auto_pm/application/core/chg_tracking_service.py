@@ -17,7 +17,7 @@ from pathlib import Path
 
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 
-_CHG_NAME = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3}\.md$")
+_CHG_NAME = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3,}\.md$")
 _CHANGE_FOLDER = "01_变更单"
 _SKIP_DIRS = {".git", ".auto-pm", ".venv", "node_modules", "__pycache__"}
 _GIT_TIMEOUT_SECONDS = 60.0
