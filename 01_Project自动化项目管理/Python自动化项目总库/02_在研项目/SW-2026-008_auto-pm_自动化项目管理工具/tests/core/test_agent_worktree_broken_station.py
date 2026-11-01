@@ -7,6 +7,7 @@ walks up and answers for the control root, so a ``git add -A`` there staged 7960
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,68 @@ def _half_deleted(lab: Lab, agent: str = "claude", card: str = "CARD-1") -> Path
     lab.merge_on_github(f"{agent}/{card}")
     (station / ".git").unlink()
     return station
+
+
+def _directory_gone(lab: Lab, agent: str = "claude", card: str = "CARD-1") -> Path:
+    """A clean, pushed, merged station whose directory was deleted by hand: Git still has it registered."""
+
+    station = finished_station(lab, agent, card)
+    lab.merge_on_github(f"{agent}/{card}")
+    shutil.rmtree(station)
+    return station
+
+
+def _registered(lab: Lab) -> str:
+    return subprocess.run(
+        ["git", "-C", str(lab.root), "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    ).stdout
+
+
+def test_a_station_whose_directory_is_gone_is_reported_broken_with_the_prune_hint(lab: Lab) -> None:
+    station = _directory_gone(lab)
+    assert str(station.name) in _registered(lab) or station.as_posix() in _registered(lab)  # the registration is still there
+
+    listed = {s.name: s for s in lab.service().stations()}
+
+    gone = listed["claude"]
+    assert gone.path == station and gone.registered
+    assert "目录不见了" in gone.broken and "git worktree prune" in gone.broken
+    assert not gone.checked  # nothing was asked of Git about a directory that is not there
+
+
+def test_close_refuses_a_station_whose_directory_is_gone_and_changes_nothing(lab: Lab) -> None:
+    _directory_gone(lab)
+    before = _registered(lab)
+
+    with pytest.raises(StationRefusedError, match="目录不见了"):
+        lab.service().close("claude", fetch=False)
+
+    assert _registered(lab) == before  # the registration is left for a person to prune
+
+
+def test_sweep_does_not_treat_a_station_whose_directory_is_gone_as_removable(lab: Lab) -> None:
+    station = _directory_gone(lab)
+
+    report = lab.service().sweep(apply=True, fetch=False)
+
+    item = next(i for i in report.items if i.target == str(station))
+    assert not item.remove and "目录不见了" in item.reason
+    assert report.failed == [] and str(station) not in report.done
+    assert not station.exists()  # nothing was recreated or written there
+    # Note: ``sweep --apply`` ends with a plain ``git worktree prune``, which also drops this stale registration.  That is
+    # old behaviour (nothing on disk is lost) and is not pinned here; whether it should wait for a person is open.
+
+
+def test_pruning_as_the_hint_says_makes_the_gone_station_disappear_from_the_list(lab: Lab) -> None:
+    _directory_gone(lab)
+    subprocess.run(["git", "-C", str(lab.root), "worktree", "prune"], check=True, capture_output=True)
+
+    assert "claude" not in {s.name for s in lab.service().stations()}
 
 
 def test_a_station_without_its_own_git_is_reported_broken_and_git_is_not_run_in_it(

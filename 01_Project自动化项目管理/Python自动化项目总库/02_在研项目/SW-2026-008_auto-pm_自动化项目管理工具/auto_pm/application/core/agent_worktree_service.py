@@ -279,6 +279,9 @@ class AgentWorktreeService:
             )
         path = self._stations_dir / agent
         registered = self._worktrees()
+        if not path.exists() and path.resolve() in registered:
+            # Registered but the directory is gone: refuse like any broken station, with the reason that tells what to do.
+            raise StationRefusedError(f"工位 {path} 不能收：{_broken_reason(path)}")
         info = registered.get(path.resolve()) if path.exists() else None
         if info is None:
             raise StationRefusedError(
