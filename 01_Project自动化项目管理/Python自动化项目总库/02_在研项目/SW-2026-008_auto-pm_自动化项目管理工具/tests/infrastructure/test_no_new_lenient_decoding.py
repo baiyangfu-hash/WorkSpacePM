@@ -16,10 +16,14 @@ TD-SW008-237: it only stops the debt from growing while the existing uses are re
 from __future__ import annotations
 
 import ast
+import io
 import json
 import re
 import sys
+import tokenize
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "auto_pm"
@@ -50,16 +54,18 @@ def _lenient_calls(tree: ast.AST) -> list[ast.Call]:
 
 
 def count_lenient_decodes(path: Path) -> int:
-    """Lenient decodes in ``path`` that carry no written reason."""
+    """Lenient decodes in ``path`` that carry no written reason.
 
-    source = path.read_text(
-        encoding="utf-8", errors="replace"
-    )  # lenient-decode: reading source text for a static scan, nothing is written back
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return 0
-    lines = source.splitlines()
+    The file is parsed from its raw bytes, so a BOM or a coding cookie is handled by Python itself.  A file that cannot be parsed or
+    decoded raises (and fails the test, naming the file): counting it as 0 would let it hide any number of lenient decodes.
+    """
+
+    data = path.read_bytes()
+    tree = ast.parse(data, filename=str(path))
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(data).readline)
+    lines = data.decode(
+        encoding
+    ).splitlines()  # strict: ast.parse above already accepted these bytes
     total = 0
     for call in _lenient_calls(tree):
         end = call.end_lineno or call.lineno
@@ -67,6 +73,18 @@ def count_lenient_decodes(path: Path) -> int:
             continue
         total += 1
     return total
+
+
+def over_baseline(counts: dict[str, int], baseline: dict[str, int]) -> dict[str, tuple[int, int]]:
+    """Files that use more lenient decodes than allowed: ``{path: (now, allowed)}``; a file not in the baseline is allowed none."""
+
+    return {p: (n, baseline.get(p, 0)) for p, n in counts.items() if n > baseline.get(p, 0)}
+
+
+def slack_baseline(counts: dict[str, int], baseline: dict[str, int]) -> dict[str, tuple[int, int]]:
+    """Files whose baseline is looser than reality: ``{path: (baseline, now)}``; a baselined file now gone or clean counts as 0."""
+
+    return {p: (b, counts.get(p, 0)) for p, b in baseline.items() if counts.get(p, 0) < b}
 
 
 def current_counts() -> dict[str, int]:
@@ -132,13 +150,47 @@ def test_the_scan_covers_the_package_and_finds_the_known_uses() -> None:
     assert sum(counts.values()) >= 20
 
 
+def test_a_file_with_a_bom_is_parsed_and_counted(tmp_path: Path) -> None:
+    sample = tmp_path / "s.py"
+    sample.write_bytes(
+        b"\xef\xbb\xbf"
+        + (
+            "a = p.read_text(encoding='utf-8', errors='replace')\n"
+            "b = p.read_text(encoding='utf-8', errors='replace')  # lenient-decode: reviewed\n"
+            "c = '\u4e2d\u6587'\n"
+        ).encode("utf-8")
+    )
+    assert count_lenient_decodes(sample) == 1
+
+
+def test_a_file_that_cannot_be_parsed_fails_instead_of_counting_as_zero(tmp_path: Path) -> None:
+    broken = tmp_path / "broken.py"
+    broken.write_bytes(b"a = p.read_text(errors='replace'\n")  # unclosed parenthesis
+    with pytest.raises(SyntaxError):
+        count_lenient_decodes(broken)
+    undecodable = tmp_path / "undecodable.py"
+    undecodable.write_bytes(b"# -*- coding: utf-8 -*-\nx = '\xff\xfe'\n")
+    with pytest.raises(SyntaxError):
+        count_lenient_decodes(undecodable)
+
+
+def test_over_baseline_flags_growth_and_unlisted_files_using_synthetic_counts() -> None:
+    baseline = {"a.py": 2, "b.py": 1, "gone.py": 3}
+    counts = {"a.py": 3, "b.py": 1, "new.py": 1}
+    assert over_baseline(counts, baseline) == {"a.py": (3, 2), "new.py": (1, 0)}
+    assert over_baseline({"a.py": 2, "b.py": 0}, baseline) == {}  # equal or lower is fine
+
+
+def test_slack_baseline_flags_loose_entries_using_synthetic_counts() -> None:
+    baseline = {"a.py": 2, "b.py": 1, "gone.py": 3}
+    counts = {"a.py": 1, "b.py": 1, "new.py": 1}
+    assert slack_baseline(counts, baseline) == {"a.py": (2, 1), "gone.py": (3, 0)}
+    assert slack_baseline({"a.py": 2, "b.py": 1, "gone.py": 3, "extra.py": 5}, baseline) == {}
+
+
 def test_no_file_uses_more_lenient_decodes_than_the_baseline() -> None:
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-    over = {
-        path: (n, baseline.get(path, 0))
-        for path, n in current_counts().items()
-        if n > baseline.get(path, 0)
-    }
+    over = over_baseline(current_counts(), baseline)
     assert not over, (
         '新增了宽松解码（errors="replace"/"ignore"，坏字节会被悄悄换成问号或丢掉）。请改成严格解码并报告读不了的内容；'
         "确需保留就在同一行写 `# lenient-decode: <理由>`（理由不能为空）："
@@ -148,8 +200,7 @@ def test_no_file_uses_more_lenient_decodes_than_the_baseline() -> None:
 
 def test_the_baseline_is_tight_so_reviewed_uses_cannot_come_back() -> None:
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-    counts = current_counts()
-    slack = {p: (b, counts.get(p, 0)) for p, b in baseline.items() if counts.get(p, 0) < b}
+    slack = slack_baseline(current_counts(), baseline)
     assert not slack, (
         "基线比实际宽松（有的宽松解码已改严格或已写理由），请运行 `python tests/infrastructure/test_no_new_lenient_decoding.py --write` 收紧："
         + "；".join(f"{p} 基线 {b} 实际 {c}" for p, (b, c) in sorted(slack.items()))
