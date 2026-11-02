@@ -500,6 +500,8 @@ class PmClosureSagaCoordinator:
         transitions: dict[str, str] = {}
         target_chgs = self._resolve_all_chg_targets(merged)
         from auto_pm.domain.change.markdown_editor import ChangeMarkdownEditor
+        from auto_pm.domain.change.parser import ChgParser
+        from auto_pm.domain.change.status_journal import record_transition
 
         editor = ChangeMarkdownEditor()
 
@@ -509,6 +511,17 @@ class PmClosureSagaCoordinator:
                 self._backup_file(saga_data, chg_file)
                 content = chg_file.read_text(encoding="utf-8")
                 content = editor.update_status_field(content, target_status)
+                # 这里直接改 §3.4，不经 ChangeService.transition_status：自己记一行流转（先记录、后写文件，记录写不进即终止），
+                # 否则提交钩子找不到这次 completed/closed 的流转依据。
+                record_transition(
+                    self._workspace_root,
+                    change_number=chg_id,
+                    project_id=str(merged.get("project_id", "")),
+                    from_status=str(ChgParser().parse(str(chg_file)).status or ""),
+                    to_status=target_status,
+                    approver=str(merged.get("executor_id", "") or "pm-saga"),
+                    comment="pm saga 自动流转",
+                )
                 if target_status in ("completed", "closed"):
                     content = editor.update_verification_conclusion(
                         content, "全部通过,可关闭"
