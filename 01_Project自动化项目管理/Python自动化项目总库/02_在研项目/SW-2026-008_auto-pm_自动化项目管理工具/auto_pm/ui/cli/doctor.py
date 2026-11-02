@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from auto_pm.application.core.agent_worktree_service import MAX_STATIONS, RELEASE_FREE_PLACES
 from auto_pm.application.core.governance_service import GovernanceService
 from auto_pm.application.core.release_consistency import check_release_consistency
 from auto_pm.ui.cli.caller_path import CallerPath
@@ -208,6 +209,36 @@ def check_release_pointers(root: str, ref: str | None = None) -> dict[str, Any]:
     return {"status": "fail" if reasons else "ok", "reasons": reasons, "ref": ref, "pr_head": pr_head}
 
 
+def check_worktree_floor(root: str) -> dict[str, Any]:
+    """Before a release: at most ``MAX_STATIONS - RELEASE_FREE_PLACES`` directories under ``.auto-pm/worktrees``.
+
+    Counts directories (registered with Git or not): the ``m3-*`` leftovers are what piles up.  Read-only.  ``status`` is
+    ok / fail / info; a root without ``.auto-pm/worktrees`` (a cloud checkout, a fresh clone) is info, never a failure.
+    """
+
+    limit = MAX_STATIONS - RELEASE_FREE_PLACES
+    folder = Path(root) / ".auto-pm" / "worktrees"
+    if not folder.is_dir():
+        return {"status": "info", "count": 0, "limit": limit, "names": [], "reasons": []}
+    try:
+        names = sorted(child.name for child in folder.iterdir() if child.is_dir())
+    except OSError as error:
+        return {"status": "info", "count": 0, "limit": limit, "names": [], "reasons": [f"读不了 {folder}：{error}"]}
+    if len(names) > limit:
+        return {
+            "status": "fail",
+            "count": len(names),
+            "limit": limit,
+            "names": names,
+            "reasons": [
+                f".auto-pm/worktrees 下有 {len(names)} 个目录，发版前最多 {limit} 个"
+                f"（上限 {MAX_STATIONS}，发版自己要占 {RELEASE_FREE_PLACES} 个）；先 `worktree list --deep` 看哪些做完了，"
+                "再 `worktree close` / `worktree sweep`"
+            ],
+        }
+    return {"status": "ok", "count": len(names), "limit": limit, "names": names, "reasons": []}
+
+
 def _read_local(path: Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
@@ -265,6 +296,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
     venv_base = check_venv_base()
     release_pointers = check_release_pointers(root)
     release_consistency = check_release_consistency(root)
+    worktree_floor = check_worktree_floor(root)
 
     all_passed = (
         py_ok
@@ -273,6 +305,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
         and all(dep_results.values())
         and release_pointers["status"] != "fail"
         and release_consistency["status"] != "fail"
+        and worktree_floor["status"] != "fail"
     )
 
     return {
@@ -289,6 +322,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
         "venv_base": venv_base,
         "release_pointers": release_pointers,
         "release_consistency": release_consistency,
+        "worktree_floor": worktree_floor,
         "all_passed": all_passed,
     }
 
@@ -356,6 +390,12 @@ def doctor_command(workspace: str | None) -> None:
     elif consistency["status"] == "ok":
         table.add_row("发布记录互相核对", "[green]✅ PASS[/green]", "manifest、载荷目录、release_meta、标注记录、Git 提交互相一致")
 
+    floor = res["worktree_floor"]
+    if floor["status"] == "fail":
+        table.add_row("工位目录数（发版前置）", "[bold red]❌ FAIL[/bold red]", "；".join(floor["reasons"]))
+    elif floor["status"] == "ok":
+        table.add_row("工位目录数（发版前置）", "[green]✅ PASS[/green]", f"{floor['count']} 个，发版前最多 {floor['limit']} 个")
+
     console.print(table)
 
     if pointers["status"] == "fail":
@@ -364,6 +404,10 @@ def doctor_command(workspace: str | None) -> None:
 
     if consistency["status"] == "fail":
         console.print("\n[bold red]发布记录自相矛盾：不要靠改 manifest 或载荷字节消除，走变更单在 release_annotations.json 里更正。[/bold red]\n")
+        raise SystemExit(1)
+
+    if floor["status"] == "fail":
+        console.print("\n[bold red]工位目录太多，先回收再发版（删除只认用户亲口说“收”）。[/bold red]\n")
         raise SystemExit(1)
 
     if res["all_passed"]:

@@ -45,6 +45,9 @@ MAIN_REF = "refs/remotes/origin/main"
 # WS-001 / problem pool item 33 rule 4: at most this many directories under ``.auto-pm/worktrees`` at one time.
 # Counted by directory, not by roster: the unregistered shells and ``m3-*`` leftovers are exactly what piles up.
 MAX_STATIONS = 8
+# A release (switching the deployed version) opens one more work tree of its own, so before a release at most
+# ``MAX_STATIONS - RELEASE_FREE_PLACES`` directories may be left: ``doctor`` fails above that.
+RELEASE_FREE_PLACES = 1
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 RunStateLookup = Callable[[str], str | None]
