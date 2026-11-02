@@ -450,6 +450,11 @@ def cmd_create(
         console.print(f"  PLC 型号: {plc_model or '-'}")
         if library_name:
             console.print(f"  库名称: {library_name}")
+        # TD-SW008-266 F9：create 不碰治理文件，登记是单独一步（pm orient / 批准 / 开 Work 都要先登记）
+        console.print(
+            f"[cyan]下一步:[/cyan] 由用户或主执行在控制根登记（main.py project register {project_id}，"
+            "可先加 --dry-run 预览），agent 请勿自行登记；登记表会留下未提交改动，提交后才能开 Run，否则 pm verify 会拒绝"
+        )
     except FileNotFoundError as e:
         console.print(f"[red]错误: 模板不存在 - {e}[/red]")
         ctx.exit(1)
