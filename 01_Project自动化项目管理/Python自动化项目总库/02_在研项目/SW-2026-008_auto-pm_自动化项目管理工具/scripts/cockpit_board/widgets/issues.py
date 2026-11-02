@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 
 from cockpit_board.viewmodel import SEV_LABEL, Issue, waited
@@ -38,6 +38,7 @@ class IssuesPage(QWidget):
         self.filter = "all"
         self.issues: list[Issue] = []
         self.now: datetime | None = None
+        self.notes: tuple[str, ...] = ()
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         self.scroll_area, self.layout_ = c.page()
@@ -46,13 +47,15 @@ class IssuesPage(QWidget):
     def set_filter(self, key: str) -> None:
         self.filter = key
         if self.now is not None:  # 还没画过就没有“现在”，等第一次 show_view
-            self.show_view(self.issues, self.now)
+            self.show_view(self.issues, self.now, self.notes)
 
-    def show_view(self, issues: list[Issue], now: datetime) -> None:
-        self.issues, self.now = issues, now
+    def show_view(self, issues: list[Issue], now: datetime, notes: Sequence[str] = ()) -> None:
+        self.issues, self.now, self.notes = issues, now, tuple(notes)
         c.clear(self.layout_)
         lay = self.layout_
         lay.addWidget(c.section("问题", "阻塞 = 不处理会延期；风险 = 要留意，还不挡路；提醒 = 排班时顺手处理。每条写明谁动手、依据是什么。"))
+        for note in self.notes:  # 哪一类没检查、条数不含它：放在计数前面，空白不能被当成“没有”
+            lay.addWidget(c.label("没检查：" + note, "small"))
         counts = {key: sum(1 for i in issues if key == "all" or i.sev == key) for key, _ in self.FILTERS}
         group = QButtonGroup(self)
         group.setExclusive(True)

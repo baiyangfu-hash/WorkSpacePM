@@ -159,6 +159,34 @@ def test_parse_inbox_only_proposed() -> None:
     assert [t.item_id for t in decisions.parse_inbox(text, "DJ-1")] == ["I1"]
 
 
+BANNER = "launcher: release verified via active_release.json: C:/ws/00_Infrastructure/auto_pm/releases/1.3.3-6a9f127\n"
+
+
+def _banner_after(body: str) -> str:
+    return body + "\n" + BANNER
+
+
+def _banner_before(body: str) -> str:
+    return BANNER + body
+
+
+def _plain(body: str) -> str:
+    return body
+
+
+def test_json_reads_survive_the_launcher_banner() -> None:
+    """真实命令输出＝stdout 的 JSON 后面接 stderr 的启动器横幅；整段交 json.loads 会失败，页面就一片“没有”。"""
+    pending = json.dumps({"cards": [{"card": {"request_id": "R1", "plan_hash": "h1"}, "objective": "改 IO"}]}, indent=2)
+    inbox = json.dumps({"items": [{"item_id": "I1", "ticket_hash": "t1", "title": "加报警", "status": "PROPOSED"}]}, indent=2)
+    for wrap in (_banner_after, _banner_before, _plain):
+        assert [t.request_id for t in decisions.parse_pending(wrap(pending), "DJ-1")] == ["R1"]
+        assert [t.item_id for t in decisions.parse_inbox(wrap(inbox), "DJ-1")] == ["I1"]
+        assert decisions.read_failure("读待批准范围卡", "x", 0, wrap(pending), key="cards") is None
+    # 没有 JSON 的输出照旧当“读不懂”，不因为容错变成“没有”
+    assert decisions._json(BANNER + "Error: 出错了") == {}
+    assert decisions.read_failure("读收件箱", "x", 0, BANNER, key="items") is not None
+
+
 # ---------------------------------------------------------------- 版面数据
 
 

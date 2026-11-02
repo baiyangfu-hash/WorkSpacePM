@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from click.testing import CliRunner
 
+from auto_pm.domain.change.status_journal import record_transition
 from auto_pm.infrastructure import git_hook_enforcer
 from auto_pm.infrastructure.git_hook_enforcer import (
     enforce_commit_msg,
@@ -419,6 +420,13 @@ def _staged_snapshot_fixture(
         unknown_file.parent.mkdir()
         unknown_file.write_text("VALUE = 3\n", encoding="utf-8")
         _git(repo, "add", str(unknown_file.relative_to(repo)))
+
+    # The change order is staged as closed; its status needs the journal rows a real ``change transition`` would have written
+    # (TD audit 524, point 3).  The fixture is about snapshot mechanics, so it supplies the row and nothing else.
+    for source, target in (("under_review", "approved"), ("approved", "closed")):
+        record_transition(
+            repo, change_number=_FIXTURE_CHG_ID, project_id=_FIXTURE_PROJECT_ID, from_status=source, to_status=target
+        )
 
     message_file = repo / "COMMIT_EDITMSG"
     message_file.write_text(f"feat: [{_FIXTURE_CHG_ID}] snapshot test\n", encoding="utf-8")

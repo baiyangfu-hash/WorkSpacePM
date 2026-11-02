@@ -198,6 +198,8 @@ class HomeVM:
     activity: list[tuple[str, str, str, bool]]  # (时间, 项目, 说明, 示例)
     notes: list[str]
     github: GithubVM | None = None
+    extra_issues: list[Issue] = field(default_factory=list)  # 归不到任何一张项目卡的问题（PR 只改了仓库公共文件等）
+    issue_notes: list[str] = field(default_factory=list)  # 问题页顶上要说的：哪些没检查、条数不含它们
 
 
 @dataclass
@@ -205,7 +207,7 @@ class Step:
     number: int
     title: str
     detail: str
-    state: str  # done / cur / todo
+    state: str  # done / cur / todo / unk（没核对：界面不知道，不冒充）
     command: str = ""
     buttons: list[tuple[str, str, bool, str]] = field(default_factory=list)  # (文字, 动作键, 可用, 原因)
 
@@ -565,6 +567,49 @@ def github_decisions(snapshot: gh.Snapshot | None) -> list[Decision]:
     return out
 
 
+def _red_checks(pull: gh.PullInfo) -> str:
+    names = [c.workflow for c in pull.ci if c.state == "fail"]
+    return "、".join(names) if names else "合起来看是红"
+
+
+def github_issues(snapshot: gh.Snapshot | None) -> list[Issue]:
+    """开着的 PR 门禁红 → 问题页“风险”档（门禁红不是用户要定的事，是作者线程要修的事）。
+
+    只在这次真读到时给；没读到（断网、限流、只有缓存）不凭旧数据报警，也不给 0——这一点由 ``github_issue_notes`` 在问题页上说明。
+    """
+
+    if snapshot is None or not snapshot.fresh:
+        return []
+    out = []
+    for pull in snapshot.pulls:
+        if pull.gate != "fail":
+            continue
+        pid = next((p for p in pull.projects if p != gh.SHARED), gh.SHARED)
+        draft = "（草稿）" if pull.draft else ""
+        out.append(
+            Issue(
+                "risk", pid, f"PR #{pull.number} 门禁红{draft}", f"红的检查：{_red_checks(pull)}；{pd._short(pull.title, 50)}",
+                f"PR 作者线程修（{pull.author}）", "GitHub 检查结果（check-runs）；按 PR 改到的项目归属",
+                pd.parse_time(pull.updated_at),
+            )
+        )
+    return out
+
+
+def github_issue_notes(snapshot: gh.Snapshot | None) -> list[str]:
+    """问题页顶上的说明：GitHub 这一类没读到或没读全时，必须告诉用户“这页的条数不含它”，不能让空白当成没有。"""
+    if snapshot is None or snapshot.state == "disabled":
+        return ["GitHub 没开采集：PR 门禁红、安全区待签这类问题没检查，这页的条数不含它们。"]
+    if not snapshot.fresh:
+        why = GITHUB_HEADLINE.get(snapshot.state, "没读成").split("：")[0]
+        return [f"GitHub 这次没读到（{why}）：PR 门禁红、安全区待签这类问题没检查，这页的条数不含它们。"]
+    unknown = [p.number for p in snapshot.pulls if p.gate == "unknown"]
+    if unknown:
+        shown = "、".join(f"#{n}" for n in unknown[:6]) + ("…" if len(unknown) > 6 else "")
+        return [f"{len(unknown)} 个 PR 的检查没读全（{shown}）：它们红不红不知道，没算进这页的条数。"]
+    return []
+
+
 def _gh_checks(snapshot: gh.Snapshot | None) -> tuple[Check, Check]:
     """门禁红的分支、安全区待签：没真读到就是没检查 / 断网未知；读到一部分且遇到未知，0 不许出现。"""
     if snapshot is None or not snapshot.fresh:
@@ -689,6 +734,13 @@ def home_vm(
     pr_decisions = github_decisions(github)
     for card in cards:
         card.decisions += [d for d in pr_decisions if d.project_id == card.project_id]
+    by_card = {c.project_id: c for c in cards}
+    extra_issues: list[Issue] = []
+    for issue in github_issues(github):
+        if issue.project_id in by_card:
+            by_card[issue.project_id].issues.append(issue)
+        else:
+            extra_issues.append(issue)
     known = {c.project_id for c in cards}
     decisions = sorted(
         [*(d for c in cards for d in c.decisions), *(d for d in pr_decisions if d.project_id not in known)],
@@ -722,13 +774,15 @@ def home_vm(
         activity=activity,
         notes=notes,
         github=github_vm(github, now, offset),
+        extra_issues=extra_issues,
+        issue_notes=github_issue_notes(github),
     )
 
 
 def all_issues(home: HomeVM) -> list[Issue]:
     far = datetime.max.replace(tzinfo=UTC)
     return sorted(
-        (i for c in home.hot + home.rest for i in c.issues),
+        (*(i for c in home.hot + home.rest for i in c.issues), *home.extra_issues),
         key=lambda i: (-SEV_RANK[i.sev], i.since or far),
     )
 
@@ -826,18 +880,19 @@ def station_vm(
         if card.tool or not card.registered:
             continue
         project = next(p for p in board.projects if p.project_id == card.project_id)
-        files = [project.root + "/", f"PM_SESSION_{card.project_id}.md"]
+        files = [project.root + "/"]  # PM_SESSION 已于 2026-10-10 退役，不再引导去打开它
         files += [f"{project.root}/…/03_实施卡/{c.card_id}.md" for c in project.cards[:2]]
         safety = any("安全" in c.what or "安全" in c.status for c in project.changes) or bool(
             safety_hits and card.project_id in safety_hits[0]
         )
         left = card.now_step or card.now_card
-        nxt = "照实施卡的未勾项接着做" if project.cards else "先在 PM_SESSION 写明要做什么"
+        nxt = "照实施卡的未勾项接着做" if project.cards else "没有实施卡：先在第 4 步记一行业务变更（BC），再开卡"
         projects.append((card, left, nxt, files, f"manual/{card.project_id.lower()}", safety))
     dis_off = (not off, "离线：读不到 origin")
     steps = [
-        Step(1, *STEP_TITLES[0], "done", f"git switch -c {manual_branch} origin/main"),
-        Step(2, *STEP_TITLES[1], "cur"),
+        # 开分支、改程序都是人在本机做的事，界面没有去核对，所以写“没核对”，不冒充“已完成 / 进行中”
+        Step(1, *STEP_TITLES[0], "unk", f"git switch -c {manual_branch} origin/main"),
+        Step(2, *STEP_TITLES[1], "unk"),
         Step(
             3, *STEP_TITLES[2], "todo", "",
             [("重新跑 plc check", "plc_check", True, ""), ("plc docs check", "docs_check", True, ""),

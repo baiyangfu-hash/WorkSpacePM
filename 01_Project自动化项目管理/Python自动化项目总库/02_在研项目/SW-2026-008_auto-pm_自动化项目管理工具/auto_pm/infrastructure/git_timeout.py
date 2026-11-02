@@ -33,6 +33,26 @@ def resolve_git_timeout(
     return value
 
 
+def no_window_flag(*, windows: bool | None = None) -> int:
+    """Windows ``CREATE_NO_WINDOW``; 0 elsewhere. ``windows`` lets tests pick the system without touching ``os.name``."""
+    on_windows = os.name == "nt" if windows is None else windows
+    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if on_windows else 0
+
+
+def _hidden_window(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Return ``kwargs`` with the no-console-window flag added when Git's output is captured.
+
+    A background ``git`` started from a GUI would otherwise flash a console window each time. The flag is added
+    only when stdout is redirected: ``CREATE_NO_WINDOW`` gives the child its own hidden console, so an
+    un-redirected ``git`` would lose its output instead of printing to the user's terminal.
+    """
+    flag = no_window_flag()
+    redirected = bool(kwargs.get("capture_output")) or kwargs.get("stdout") is not None
+    if not flag or not redirected:
+        return kwargs
+    return {**kwargs, "creationflags": int(kwargs.get("creationflags", 0)) | flag}
+
+
 def _run_bounded(
     command: Sequence[str],
     *,
@@ -53,7 +73,7 @@ def _run_bounded(
         raise error_cls(str(error)) from error
     started = time.monotonic()
     try:
-        return subprocess.run(list(command), timeout=limit, **kwargs)
+        return subprocess.run(list(command), timeout=limit, **_hidden_window(kwargs))
     except subprocess.TimeoutExpired as error:
         verb = next((part for part in command[1:] if not part.startswith("-") and part != str(where)), "")
         raise error_cls(

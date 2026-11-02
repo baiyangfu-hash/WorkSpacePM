@@ -46,6 +46,7 @@ from auto_pm.change.path_resolver import find_ledger_file, get_or_create_ledger_
 from auto_pm.core.paths import PG_MONITORING_DIR
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
+from auto_pm.domain.change.status_journal import record_transition
 from auto_pm.models import ApprovalRecord
 from auto_pm.models.change import ImpactAnalysis
 from auto_pm.models.project import ProjectRecord
@@ -125,8 +126,11 @@ class ChangeService:
     # update_change_request 禁止修改的字段（受保护）
     _PROTECTED_FIELDS: set[str] = {"change_number", "project_id", "status"}
 
-    def __init__(self, workspace_root: str, db: DatabaseManager | None = None) -> None:
+    def __init__(self, workspace_root: str, db: DatabaseManager | None = None, journal_root: str | None = None) -> None:
         self.workspace_root = workspace_root
+        # 流转记录（status_journal）写到哪个根：默认就是工作区根——驾驶舱命令只在控制根运行，提交钩子读的也是控制根。
+        # 与 DB 缓存无关：命令行、pm 命令、SDK 都不带 DB，审批历史表写不进去，提交钩子靠这份记录核对 §3.4 状态行。
+        self._journal_root = journal_root or workspace_root
         self._parser = ChgParser()
         # 延迟导入，避免循环依赖
         self._generator: ChgGenerator | None = None
@@ -286,6 +290,9 @@ class ChangeService:
 
         # 渲染并保存
         content = self._get_generator().render(cr)
+        if retrofit:
+            # retrofit 直接以 closed 落地，不经流转命令：这一条就是它的流转记录（先记录、后写文件，记录失败即终止）
+            self._record_transition(cr.project_id, resolved_change_number, "", initial_status, applicant, "retrofit")
         write_file(file_path, content)
         cr.file_path = file_path
         log.info("变更单文件已保存: %s", file_path)
@@ -337,6 +344,27 @@ class ChangeService:
             log.debug("DB 缓存和影响分析已写入: %s", resolved_change_number)
 
         return cr
+
+    def _record_transition(
+        self, project_id: str, change_number: str, from_status: str, to_status: str, approver: str, comment: str
+    ) -> None:
+        """Append one row to the transition journal; any failure stops the operation (nothing has been written yet)."""
+
+        try:
+            record_transition(
+                self._journal_root,
+                change_number=change_number,
+                project_id=project_id,
+                from_status=from_status,
+                to_status=to_status,
+                approver=approver,
+                comment=comment,
+            )
+        except Exception as exc:
+            log.exception("流转记录写入失败: %s %s→%s", change_number, from_status, to_status)
+            raise TransitionGuardError(
+                f"变更单 {change_number} 的流转记录写不进 {self._journal_root}（{exc}），已终止，变更单文件没有改动"
+            ) from exc
 
     def list_change_requests(
         self,
@@ -721,10 +749,18 @@ class ChangeService:
         # completed: §10 已在门禁前写入
         # pending_acceptance / accepting: 无额外章节需要写入
 
+        # 先记流转、后写文件；记录写不进就终止（文件没动，不会出现“状态已改、记录没有”的半状态）。
+        self._record_transition(
+            current_cr.project_id, change_number, current_cr.status, new_status, approver, comment
+        )
         try:
             write_file(file_path, content, expected_mtime=original_mtime)
         except StaleFileError as exc:
             log.error("状态流转: 文件已被外部修改，取消写入 %s: %s", file_path, exc)
+            # 文件没改成：追加一行把状态记回原状态，让记录的最后一条仍与文件一致
+            self._record_transition(
+                current_cr.project_id, change_number, new_status, current_cr.status, approver, "文件写入失败，流转撤回"
+            )
             return None
 
         # M2-3 T52: 同步写入审批历史到 DB（每次流转追加一条记录）

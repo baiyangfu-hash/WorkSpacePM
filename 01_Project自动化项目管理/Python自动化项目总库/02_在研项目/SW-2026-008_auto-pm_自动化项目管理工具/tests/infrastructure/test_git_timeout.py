@@ -8,8 +8,14 @@ from pathlib import Path
 
 import pytest
 
+from auto_pm.infrastructure import git_timeout
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
-from auto_pm.infrastructure.git_timeout import GIT_TIMEOUT_ENV, resolve_git_timeout, run_git_bounded
+from auto_pm.infrastructure.git_timeout import (
+    GIT_TIMEOUT_ENV,
+    resolve_git_timeout,
+    run_git_bounded,
+    run_git_bounded_text,
+)
 
 
 class _BoomError(RuntimeError):
@@ -137,3 +143,56 @@ def test_every_call_site_keeps_its_documented_default_timeout(
         "evidence": 600.0,
         "chg": 60.0,
     }
+
+
+# ---------------------------------------------------------------- 后台 git 不弹黑窗口（S3 试用 11-01：点“重新读取”弹出好几个窗口）
+
+CREATE_NO_WINDOW = 0x08000000
+
+
+def _spy_run(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    seen: list[dict[str, object]] = []
+
+    def fake(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        seen.append(dict(kwargs))
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    return seen
+
+
+def test_captured_git_gets_no_window_flag_on_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(git_timeout, "no_window_flag", lambda: CREATE_NO_WINDOW)
+    seen = _spy_run(monkeypatch)
+    run_git_bounded(["git", "status"], default_timeout=30.0, error_cls=_BoomError, where=tmp_path, capture_output=True)
+    run_git_bounded_text(["git", "status"], default_timeout=30.0, error_cls=_BoomError, where=tmp_path, stdout=subprocess.PIPE)
+    assert [call["creationflags"] for call in seen] == [CREATE_NO_WINDOW, CREATE_NO_WINDOW]
+
+
+def test_no_window_flag_keeps_the_callers_own_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(git_timeout, "no_window_flag", lambda: CREATE_NO_WINDOW)
+    seen = _spy_run(monkeypatch)
+    run_git_bounded(["git", "gc"], default_timeout=30.0, error_cls=_BoomError, where=tmp_path, capture_output=True,
+                    creationflags=0x200)
+    assert seen[0]["creationflags"] == CREATE_NO_WINDOW | 0x200
+
+
+def test_uncaptured_git_keeps_its_terminal_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """不重定向输出的 git 不加标志：CREATE_NO_WINDOW 会让它的输出丢掉，而不是打到用户的终端。"""
+    monkeypatch.setattr(git_timeout, "no_window_flag", lambda: CREATE_NO_WINDOW)
+    seen = _spy_run(monkeypatch)
+    run_git_bounded(["git", "gc"], default_timeout=30.0, error_cls=_BoomError, where=tmp_path)
+    assert "creationflags" not in seen[0]
+
+
+def test_other_systems_pass_kwargs_through_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(git_timeout, "no_window_flag", lambda: 0)
+    seen = _spy_run(monkeypatch)
+    run_git_bounded(["git", "status"], default_timeout=30.0, error_cls=_BoomError, where=tmp_path, capture_output=True)
+    assert "creationflags" not in seen[0]
+
+
+def test_no_window_flag_is_the_windows_constant_only_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", CREATE_NO_WINDOW, raising=False)
+    assert git_timeout.no_window_flag(windows=True) == CREATE_NO_WINDOW
+    assert git_timeout.no_window_flag(windows=False) == 0
