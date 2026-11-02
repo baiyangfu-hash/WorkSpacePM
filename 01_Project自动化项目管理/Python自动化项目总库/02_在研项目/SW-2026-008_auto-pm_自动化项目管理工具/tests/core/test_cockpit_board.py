@@ -218,7 +218,7 @@ def _order_dir(root: Path) -> Path:
     return folder
 
 
-def _changes_of(board: Any) -> list[Any]:
+def _changes_of(board: Any) -> list[vm.ChangeRow]:
     home = vm.home_vm(board, OFFSET, online=False, use_git=False)
     card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
     return vm.project_vm(board, card, OFFSET, False).changes
