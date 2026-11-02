@@ -27,6 +27,7 @@ from auto_pm.application.core.acceptance_runner import (
 from auto_pm.contracts.acceptance_command import parse_command
 from auto_pm.contracts.plan_checklist import AcceptanceCheck
 from tests.git_support import git_do
+from tests.plan_checklist_support import native_command
 
 PYTHON = sys.executable
 
@@ -237,7 +238,8 @@ def control_root(tmp_path: Path) -> Path:
     """What a control root looks like to a command: ``.venv`` with an interpreter, ``main.py``, a worktree for an agent."""
     root = tmp_path / "控制根 目录"
     (root / ".venv" / "bin").mkdir(parents=True)
-    os.symlink(PYTHON, root / ".venv" / "bin" / "python")
+    if sys.platform != "win32":  # the POSIX-spelled tests below skip on Windows; the not-found test needs no interpreter
+        os.symlink(PYTHON, root / ".venv" / "bin" / "python")
     (root / "main.py").write_text(
         "import os, sys\nprint(sys.argv[1:], os.environ.get('AUTO_PM_RUN_WORKTREE', ''))\n"
         "sys.exit(0 if sys.argv[1:] != ['boom'] else 6)\n",
@@ -301,7 +303,7 @@ def test_a_command_that_reads_standard_input_gets_end_of_input_instead_of_waitin
 
 
 def test_refusal_reason_is_empty_for_a_command_that_would_run_and_names_why_otherwise(tmp_path: Path) -> None:
-    assert refusal_reason(_quote(PYTHON, "-c", "pass"), cwd=tmp_path) == ""
+    assert refusal_reason(native_command(PYTHON, "-c", "pass"), cwd=tmp_path) == ""
     assert "shell 符号" in refusal_reason("pytest && ruff check", cwd=tmp_path)
     assert "找不到命令 no-such-tool-xyz" in refusal_reason("no-such-tool-xyz --version", cwd=tmp_path)
 

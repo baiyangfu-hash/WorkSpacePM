@@ -12,11 +12,16 @@ ORIGINAL_REQUEST = "照抄的用户原话"
 ROLLBACK = "git revert 本次提交，恢复原文件"
 
 
+def native_command(*argv: str) -> str:
+    """Command text that this platform's own quoting rules (the ones ``pm verify`` parses with) split back into ``argv``."""
+
+    return subprocess.list2cmdline(list(argv)) if sys.platform == "win32" else shlex.join(argv)
+
+
 def passing_command() -> str:
     """A real, instant command that exits 0 on any platform: ``pm verify`` now executes approved commands."""
 
-    argv = [sys.executable, "-c", "pass"]
-    return subprocess.list2cmdline(argv) if sys.platform == "win32" else shlex.join(argv)
+    return native_command(sys.executable, "-c", "pass")
 
 
 def full_checklist(acceptance: int = 1, *, original: str = ORIGINAL_REQUEST) -> PlanChecklist:

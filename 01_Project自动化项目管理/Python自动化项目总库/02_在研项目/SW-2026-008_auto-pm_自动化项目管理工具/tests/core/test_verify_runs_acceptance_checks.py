@@ -8,7 +8,6 @@ verified Checkpoint exists.
 from __future__ import annotations
 
 import json
-import shlex
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,13 +25,13 @@ from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.plan_checklist import AcceptanceCheck
 from auto_pm.domain.change.decision_service import DecisionError
 from tests.core.test_declared_dirty_consistency import _verifying
-from tests.plan_checklist_support import full_checklist, passing_command
+from tests.plan_checklist_support import full_checklist, native_command, passing_command
 
 MISSION = "MISSION-PM-001"
 
 
 def _command(code: str) -> str:
-    return shlex.join([sys.executable, "-c", code])
+    return native_command(sys.executable, "-c", code)
 
 
 def _reports(root: Path) -> list[Path]:
@@ -135,7 +134,7 @@ _PYTEST_FILE = "test_gate.py"
 
 
 def _pytest_command() -> str:
-    return shlex.join([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "{worktree}/" + _PYTEST_FILE])
+    return native_command(sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "{worktree}/" + _PYTEST_FILE)
 
 
 def _isolated_run(tmp_path: Path) -> tuple[Any, Path]:
@@ -191,7 +190,7 @@ def _cockpit_control_root(root: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     project = root / "DJ-2026-TEST_测试项目"
     project.mkdir()
     (project / ".plc.json").write_text('{"name": "DJ-2026-TEST", "version": "V1.0.0", "description": "t", "type": "standard"}', encoding="utf-8")
-    return shlex.join([sys.executable, "-B", "main.py", "project", "show", "DJ-2026-TEST"])
+    return native_command(sys.executable, "-B", "main.py", "project", "show", "DJ-2026-TEST")
 
 
 def test_a_cockpit_command_judges_the_worktrees_project_not_the_control_roots(
