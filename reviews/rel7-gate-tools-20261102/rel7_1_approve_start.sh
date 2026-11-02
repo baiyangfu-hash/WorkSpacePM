@@ -10,7 +10,7 @@ cd "$ROOT"
 PY="$ROOT/.venv/Scripts/python.exe"
 P='01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具'
 CARD="$P/02_规划/219_M3-REL7_第七次发版候选门禁实施卡_PM.md"
-CARD_SHA=fb5ca2692a87b63ad5d32fb4d0b17d505e5d0ba759fc7dc7eef9f58b3c6ecff1
+CARD_SHA=1668f66abd28889cfe5c899aeb1df4b086e0b49076e068c9dbf98f3ea77244a2
 BASE=d671611a13bc15536047769fdb0498666c414044
 BASE_BRANCH=m3-rel7-base
 TODAY="$(date +%Y%m%d)"

@@ -41,3 +41,8 @@
 - `rel7_2_close_commit.sh`：解析同一份文件，回执 DELEG 引用 GO_REF 与 NIGHT_REF。
 - 带外锚点：`rel7_launch.sh` 在起跑前取 `origin/claude/rel7-gate-tools-20261102` 上 `rel7_1_approve_start.sh` 的哈希，与笔记本上的副本比对，一致才开跑，比对结果写进 `launch_anchor.log`；本提交里该脚本的 SHA-256 已在线程里单独报出。
 - 干跑日志（状态文件、各进程日志、结束标记）放在 `launch_dryrun/`。
+
+## 2026-11-02 16:55 MST：预检逼出的一处卡措辞修改（558 第五轮之后）
+
+- 用户对 fb5ca269 说“开跑”后，起跑前的 `rel7_1_approve_start.sh --check-only` 里，卡预检报“实施批准:审批字段含占位符”：卡 §实施批准那一行写了 `user-confirmation:<该消息 id>`，尖括号被当成占位符。只改这一行的措辞（“凭据取 user-confirmation 加该消息 id 的形式作为 --approval-evidence-ref”），新卡 SHA-256 `1668f66a…44a2`（旧 fb5ca269 作废）；`rel7_1_approve_start.sh` 只有第 13 行 CARD_SHA 变化；指纹清单逐字节不变。
+- 本次提交前已全量预检：`--check-only`（precheck passed、清单 19 项匹配、对账 0/0/0）与 `--dry-run` 干跑；干跑日志已更新。
