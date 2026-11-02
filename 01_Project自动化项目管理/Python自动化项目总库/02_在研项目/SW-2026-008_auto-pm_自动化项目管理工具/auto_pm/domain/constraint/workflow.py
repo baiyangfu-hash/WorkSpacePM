@@ -26,7 +26,11 @@ _COMMAND_TIMEOUT_SECONDS = 300.0
 def _quoted_for_shell(value: str) -> str:
     """``value`` as ONE shell word: a path with a space, a Chinese name or an ``&`` must not split or inject (CHG-SCPT-2026-472)."""
 
-    return subprocess.list2cmdline([value]) if os.name == "nt" else shlex.quote(value)
+    if os.name != "nt":
+        return shlex.quote(value)
+    quoted = subprocess.list2cmdline([value])
+    # list2cmdline quotes only a value with a space or tab; cmd.exe still reads ``&`` or ``^`` in a bare word as its own syntax.
+    return quoted if quoted.startswith('"') else f'"{quoted}"'
 
 
 class WorkflowEngine:

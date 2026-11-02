@@ -1,7 +1,7 @@
 """``pm verify`` executes the acceptance commands the user approved (CHG-SCPT-2026-472).
 
 Before: ``pm plan --check`` stored the commands and the agent ran them itself, so "done" could be reported without any
-check having passed.  Now the verifier runs each one in the Run's worktree and a mismatch refuses verification before any
+check having passed.  Now the verifier runs each one (from the control root, with the Run's worktree in ``AUTO_PM_RUN_WORKTREE``) and a mismatch refuses verification before any
 verified Checkpoint exists.
 """
 
@@ -99,11 +99,25 @@ def test_the_success_note_says_how_many_commands_ran_and_where_the_record_is(
     assert not block and "1/1" in note and "与批准的退出码一致" in note and ".auto-pm" in note
 
 
-def test_the_commands_run_in_the_runs_worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, appended: list[str]) -> None:
+def test_the_commands_run_from_the_control_root_and_are_told_where_the_runs_worktree_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Approved commands are written from the workspace root (``.venv`` and ``main.py`` live there; cockpit commands
+    refuse to run inside a worktree), so that is where they run; the Run's worktree arrives as an environment variable."""
     _, facade, _ = _verifying(tmp_path)
-    _approved(monkeypatch, (_command("import pathlib, sys; sys.exit(0 if pathlib.Path('pm.py').exists() else 7)"), 0))
-    facade.verify_for_acceptance_with_reason(MISSION, lease_token="gate-lease")
-    assert appended == ["append"]
+    worktree = tmp_path / "wt-elsewhere"
+    worktree.mkdir()
+    code = "import os, pathlib; print('CWD=' + str(pathlib.Path.cwd().resolve())); print('WT=' + os.environ['AUTO_PM_RUN_WORKTREE'])"
+    _approved(monkeypatch, (_command(code), 0))
+
+    note, block = facade._run_approved_acceptance_checks(
+        facade._missions.get(MISSION), SimpleNamespace(run_id="RUN-GATE-001", worktree_path=str(worktree))
+    )
+
+    assert not block, note
+    (report,) = _reports(tmp_path)
+    tail = json.loads(report.read_text(encoding="utf-8"))["checks"][0]["output_tail"]
+    assert tail.splitlines() == [f"CWD={tmp_path.resolve()}", f"WT={worktree}"]
 
 
 def test_a_mission_approved_without_commands_is_said_so_not_silently_passed(
@@ -129,7 +143,7 @@ def test_an_evidence_file_that_cannot_be_written_refuses(tmp_path: Path, monkeyp
     note, block = facade._run_approved_acceptance_checks(
         facade._missions.get(MISSION), SimpleNamespace(run_id="R", worktree_path=str(tmp_path))
     )
-    assert block and "disk full" in note and "不能当作证据" in note
+    assert block and "disk full" in note and "不能算验收命令已执行" in note
 
 
 # ── where the approved commands come from ───────────────────────────────────
@@ -177,3 +191,79 @@ def test_a_corrupt_checklist_in_the_decision_refuses_instead_of_skipping_the_che
     approval = {"execution_grant": {"plan_checklist": {"acceptance_checks": [{"command": "x", "expected_exit_code": 999}]}}}
     with pytest.raises(PmFacadeError, match="批准的验收命令读不出来"):
         _service(_decisions({"planning_approval": approval}))._approved_acceptance_checks(_mission())
+
+
+# ── the read-only scan of what is already approved (run on the ledger machine before a release) ──────────
+
+
+def test_the_scan_lists_the_approved_commands_verify_would_refuse_and_runs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missions, facade, _ = _verifying(tmp_path)
+    marker = tmp_path / "must-not-exist.txt"
+    would_write = _command(f"open({str(marker)!r}, 'w').close()")
+    _approved(
+        monkeypatch,
+        (passing_command(), 0),
+        ("pytest -q && ruff check", 0),
+        (".venv/bin/python -B main.py plc check DJ-2026-011", 0),
+        (would_write, 0),
+    )
+
+    scan = facade.scan_approved_acceptance_commands(missions.get(MISSION).subject_project_id)
+
+    assert (scan.missions_scanned, scan.commands_scanned) == (1, 4)
+    assert [(item.mission_id, item.index) for item in scan.findings] == [(MISSION, 2), (MISSION, 3)]
+    assert "shell 符号" in scan.findings[0].reason
+    assert "找不到命令 .venv/bin/python" in scan.findings[1].reason
+    assert not marker.exists()  # a scan looks, it does not execute
+
+
+def test_the_scan_finds_nothing_to_refuse_in_a_clean_ledger_and_skips_old_approvals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missions, facade, _ = _verifying(tmp_path)
+    project = missions.get(MISSION).subject_project_id
+    _approved(monkeypatch, (passing_command(), 0))
+    clean = facade.scan_approved_acceptance_commands(project)
+    assert (clean.missions_scanned, clean.commands_scanned, clean.findings) == (1, 1, ())
+
+    monkeypatch.setattr(PmFacadeService, "_approved_acceptance_checks", lambda _self, _mission: None)
+    old = facade.scan_approved_acceptance_commands(project)
+    assert (old.missions_scanned, old.commands_scanned, old.findings) == (0, 0, ())
+
+
+def test_the_scan_names_an_approval_it_cannot_read_instead_of_skipping_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missions, facade, _ = _verifying(tmp_path)
+
+    def unreadable(_self: Any, _mission: Any) -> Any:
+        raise PmFacadeError("批准的验收命令读不出来：x")
+
+    monkeypatch.setattr(PmFacadeService, "_approved_acceptance_checks", unreadable)
+    scan = facade.scan_approved_acceptance_commands(missions.get(MISSION).subject_project_id)
+    assert [(item.mission_id, item.index) for item in scan.findings] == [(MISSION, 0)]
+    assert "读不出来" in scan.findings[0].reason
+
+
+def test_the_scan_command_exits_1_when_something_would_be_refused_and_0_when_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from click.testing import CliRunner
+
+    from auto_pm.ui.cli.__main__ import cli
+
+    missions, _facade, _ = _verifying(tmp_path)
+    project = missions.get(MISSION).subject_project_id
+    args = ["-w", str(tmp_path), "pm", "acceptance-scan", "--pid", project]
+
+    _approved(monkeypatch, (passing_command(), 0))
+    ok = CliRunner().invoke(cli, args, catch_exceptions=False)
+    assert ok.exit_code == 0 and json.loads(ok.output)["would_refuse"] == []
+
+    _approved(monkeypatch, (passing_command(), 0), ("pytest | tee out.txt", 0))
+    refused = CliRunner().invoke(cli, args, catch_exceptions=False)
+    payload = json.loads(refused.output)
+    assert refused.exit_code == 1 and payload["would_refuse"][0]["index"] == 2
+    assert payload["commands_checked"] == 2 and "shell 符号" in payload["would_refuse"][0]["reason"]

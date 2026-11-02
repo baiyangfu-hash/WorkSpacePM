@@ -1386,10 +1386,11 @@ pm_group.add_command(takeover_pm)
 pm_group.add_command(sign_risk_pm)
 
 # IDE-agent closing commands (gap 8): quality verification and one-step closure without a temporary script.
-from auto_pm.ui.cli.pm_closure import close_pm, verify_pm  # noqa: E402
+from auto_pm.ui.cli.pm_closure import acceptance_scan_pm, close_pm, verify_pm  # noqa: E402
 
 pm_group.add_command(verify_pm)
 pm_group.add_command(close_pm)
+pm_group.add_command(acceptance_scan_pm)
 
 # Park / unpark / switch commands (TD-071): the user's words, the PIN once it is committed.
 from auto_pm.ui.cli.pm_switch import missions_pm, park_pm, switch_pm, unpark_pm  # noqa: E402

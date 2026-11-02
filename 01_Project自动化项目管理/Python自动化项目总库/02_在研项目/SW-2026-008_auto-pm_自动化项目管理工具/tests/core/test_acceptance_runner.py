@@ -8,6 +8,7 @@ parsing with ``windows=True`` and executing the resulting argument list.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -18,9 +19,11 @@ import pytest
 from auto_pm.application.core.acceptance_runner import (
     execution_environment,
     mismatch_lines,
+    refusal_reason,
     run_acceptance_checks,
     write_report,
 )
+from auto_pm.contracts.acceptance_command import parse_command
 from auto_pm.contracts.plan_checklist import AcceptanceCheck
 from tests.git_support import git_do
 
@@ -212,3 +215,91 @@ def test_the_report_records_the_approved_text_the_executed_arguments_and_the_rea
     assert first["exit_code"] == 0 and first["passed"] and "good" in first["output_tail"]
     assert second["exit_code"] == 4 and second["expected_exit_code"] == 0 and not second["passed"]
     assert second["command"] == results[1].command and second["argv"][0] == PYTHON
+
+
+# ── the command forms the approved plans really use (written from the workspace root) ─────────────────────
+
+
+def test_the_windows_forms_in_real_approved_plans_split_into_the_expected_arguments() -> None:
+    """Exact strings from approved plans; backslashes stay literal under the Windows rules."""
+    assert parse_command(r".venv\Scripts\python.exe -B main.py plc check DJ-2026-011", windows=True).argv == (
+        r".venv\Scripts\python.exe", "-B", "main.py", "plc", "check", "DJ-2026-011",
+    )  # fmt: skip
+    assert parse_command(r"git -C .auto-pm\worktrees\trae status --short", windows=True).argv == (
+        "git", "-C", r".auto-pm\worktrees\trae", "status", "--short",
+    )  # fmt: skip
+    assert parse_command("git -C . status --short", windows=True).argv == ("git", "-C", ".", "status", "--short")
+
+
+@pytest.fixture
+def control_root(tmp_path: Path) -> Path:
+    """What a control root looks like to a command: ``.venv`` with an interpreter, ``main.py``, a worktree for an agent."""
+    root = tmp_path / "控制根 目录"
+    (root / ".venv" / "bin").mkdir(parents=True)
+    os.symlink(PYTHON, root / ".venv" / "bin" / "python")
+    (root / "main.py").write_text(
+        "import os, sys\nprint(sys.argv[1:], os.environ.get('AUTO_PM_RUN_WORKTREE', ''))\n"
+        "sys.exit(0 if sys.argv[1:] != ['boom'] else 6)\n",
+        encoding="utf-8",
+    )
+    worktree = root / ".auto-pm" / "worktrees" / "trae"
+    worktree.mkdir(parents=True)
+    git_do(worktree, "init", "-q")
+    git_do(root, "init", "-q")
+    return root
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX spelling of the same forms; the Windows strings are split above")
+def test_commands_written_from_the_workspace_root_run_from_the_control_root(control_root: Path) -> None:
+    worktree = control_root / ".auto-pm" / "worktrees" / "trae"
+    results = run_acceptance_checks(
+        [
+            _check(".venv/bin/python -B main.py plc check DJ-2026-011"),
+            _check("git -C .auto-pm/worktrees/trae status --short"),
+            _check("git -C . status --short"),
+            _check(".venv/bin/python -B main.py doc check --说明 中文"),
+        ],
+        cwd=control_root,
+        extra_env={"AUTO_PM_RUN_WORKTREE": str(worktree)},
+        windows=False,
+    )
+    assert [item.passed for item in results] == [True, True, True, True], mismatch_lines(results)
+    assert "['plc', 'check', 'DJ-2026-011']" in results[0].output_tail and str(worktree) in results[0].output_tail
+    assert "['doc', 'check', '--说明', '中文']" in results[3].output_tail
+
+
+def test_the_same_commands_run_from_a_worktree_would_not_be_found(control_root: Path) -> None:
+    """Why the control root is the working directory: a worktree has no ``.venv``."""
+    worktree = control_root / ".auto-pm" / "worktrees" / "trae"
+    result = run_acceptance_checks([_check(".venv/bin/python -B main.py doc check")], cwd=worktree, windows=False)[0]
+    assert not result.passed and "找不到命令" in result.error
+
+
+def test_extra_environment_reaches_the_command_without_changing_the_base(tmp_path: Path) -> None:
+    code = "import os; raise SystemExit(0 if os.environ['MY_EXTRA'] == '值' else 4)"
+    assert _run(tmp_path, _quote(PYTHON, "-c", code), extra_env={"MY_EXTRA": "值"}).passed
+    assert not _run(tmp_path, _quote(PYTHON, "-c", code)).passed
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="swaps file descriptor 0 for a pipe that never delivers data")
+def test_a_command_that_reads_standard_input_gets_end_of_input_instead_of_waiting(tmp_path: Path) -> None:
+    """stdin is closed (``DEVNULL``): a command that reads it ends at once instead of hanging an IDE terminal."""
+    reader, writer = os.pipe()  # nothing is ever written and the write end stays open: a read on it would block
+    saved = os.dup(0)
+    os.dup2(reader, 0)
+    try:
+        result = _run(tmp_path, _quote(PYTHON, "-c", "import sys; sys.exit(0 if sys.stdin.read() == '' else 3)"), timeout=20)
+    finally:
+        os.dup2(saved, 0)
+        for descriptor in (saved, reader, writer):
+            os.close(descriptor)
+    assert result.passed, result.error or result.output_tail
+
+
+# ── a read-only look at a command, without running it ──────────────────────────────────────────────────
+
+
+def test_refusal_reason_is_empty_for_a_command_that_would_run_and_names_why_otherwise(tmp_path: Path) -> None:
+    assert refusal_reason(_quote(PYTHON, "-c", "pass"), cwd=tmp_path) == ""
+    assert "shell 符号" in refusal_reason("pytest && ruff check", cwd=tmp_path)
+    assert "找不到命令 no-such-tool-xyz" in refusal_reason("no-such-tool-xyz --version", cwd=tmp_path)

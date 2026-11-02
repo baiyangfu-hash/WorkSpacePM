@@ -1111,22 +1111,26 @@ else
 fi
 
 echo "🔍 [auto-pm pre-commit] 正在执行本地增量门禁与自愈检查..."
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\\\\.py$')
+# Names travel NUL-separated through a file: a Chinese or spaced path is neither quoted/escaped by Git nor split by the shell.
+# (The earlier version escaped the dot twice, so the pattern asked for a literal backslash and matched no file at all.)
+STAGED_LIST=$(mktemp)
+trap 'rm -f "$STAGED_LIST"' EXIT
+git -c core.quotePath=false diff --cached --name-only --diff-filter=ACM -z | grep -z '\\.py$' > "$STAGED_LIST"
 
-if [ -z "$STAGED_FILES" ]; then
+if [ ! -s "$STAGED_LIST" ]; then
     echo "✅ [auto-pm pre-commit] 没有检测到 staged Python 文件，跳过检查。"
     exit 0
 fi
 
 if [ -f "$RUFF_EXE" ]; then
     echo "⚡ [auto-pm pre-commit] 运行 ruff check --fix 自愈..."
-    "$RUFF_EXE" check --fix $STAGED_FILES
+    xargs -0 "$RUFF_EXE" check --fix < "$STAGED_LIST"
     RUFF_EXIT=$?
-    git add $STAGED_FILES
+    xargs -0 git add -- < "$STAGED_LIST"
 
     echo "⚡ [auto-pm pre-commit] 运行 ruff format..."
-    "$RUFF_EXE" format $STAGED_FILES
-    git add $STAGED_FILES
+    xargs -0 "$RUFF_EXE" format < "$STAGED_LIST"
+    xargs -0 git add -- < "$STAGED_LIST"
 
     if [ $RUFF_EXIT -ne 0 ]; then
         echo "❌ [auto-pm pre-commit] 错误: Ruff 静态检查未通过，请手动修复上述报错！"
@@ -1138,7 +1142,7 @@ fi
 
 if [ -f "$MYPY_EXE" ]; then
     echo "⚡ [auto-pm pre-commit] 运行 mypy 类型检查..."
-    "$MYPY_EXE" --ignore-missing-imports $STAGED_FILES
+    xargs -0 "$MYPY_EXE" --ignore-missing-imports < "$STAGED_LIST"
     if [ $? -ne 0 ]; then
         echo "❌ [auto-pm pre-commit] 错误: Mypy 类型校验失败，拒绝提交！"
         exit 1

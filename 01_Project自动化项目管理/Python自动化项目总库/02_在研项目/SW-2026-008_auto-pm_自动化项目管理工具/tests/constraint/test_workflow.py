@@ -42,6 +42,19 @@ class TestWorkflowEngine:
         with pytest.raises(ValueError):
             engine.run("non-existent-wf")
 
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [("plain.md", '"plain.md"'), ("a&b;c.md", '"a&b;c.md"'), ("中文 名字.md", '"中文 名字.md"'), ("x^y.md", '"x^y.md"')],
+    )
+    def test_the_windows_spelling_always_quotes_a_shell_word(
+        self, monkeypatch: pytest.MonkeyPatch, name: str, expected: str
+    ) -> None:
+        """cmd.exe reads ``&`` and ``^`` in a bare word as syntax; ``list2cmdline`` alone quotes only spaces (the windows-extra failure)."""
+        from auto_pm.domain.constraint import workflow
+
+        monkeypatch.setattr(workflow.os, "name", "nt")
+        assert workflow._quoted_for_shell(name) == expected
+
     @pytest.mark.parametrize("name", ["plain.md", "has space.md", "中文 名字.md", "a&b;c.md", "it's.md"])
     def test_run_cmd_passes_the_file_as_one_argument(self, temp_workspace: Path, name: str) -> None:
         """CHG-SCPT-2026-472: ``{file}`` was pasted into a shell string unquoted; a space, ``&`` or ``;`` split or injected."""

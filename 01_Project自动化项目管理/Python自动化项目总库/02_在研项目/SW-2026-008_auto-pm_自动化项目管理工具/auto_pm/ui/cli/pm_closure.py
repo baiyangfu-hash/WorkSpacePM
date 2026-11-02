@@ -137,3 +137,34 @@ def close_pm(ctx: click.Context, mission_id: str) -> None:
     _echo(payload)
     if completion.state is not PmCockpitCompletionState.COMPLETED:
         ctx.exit(1)
+
+
+@click.command(name="acceptance-scan")
+@click.option("--pid", "project_id", required=True, help="项目编号，例如 DJ-2026-009")
+@click.pass_context
+def acceptance_scan_pm(ctx: click.Context, project_id: str) -> None:
+    """只读：列出这个项目进行中的任务里，``pm verify`` 会拒绝执行的已批准验收命令（发版前在账本所在电脑上跑）。
+
+    只检查、不执行、不写账。有任何一条会被拒就以退出码 1 结束；被点名的任务要重新 ``pm plan`` 并由用户批准。
+    """
+
+    app_ctx: AppContext = ctx.find_root().obj
+    try:
+        scan = PmFacadeService(app_ctx.control_root, execution_root=app_ctx.workspace_root).scan_approved_acceptance_commands(
+            project_id
+        )
+    except (PmFacadeError, ContinuityStoreError) as error:
+        raise click.ClickException(str(error)) from error
+    _echo(
+        {
+            "project_id": project_id,
+            "missions_with_commands": scan.missions_scanned,
+            "commands_checked": scan.commands_scanned,
+            "would_refuse": [
+                {"mission_id": item.mission_id, "index": item.index, "command": item.command, "reason": item.reason}
+                for item in scan.findings
+            ],
+        }
+    )
+    if scan.findings:
+        ctx.exit(1)

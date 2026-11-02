@@ -205,7 +205,7 @@ def _is_python(executable: str) -> bool:
 def with_git_quotepath(argv: tuple[str, ...]) -> tuple[tuple[str, ...], bool]:
     """Insert ``-c core.quotePath=false`` right after ``git`` unless the caller already set core.quotePath.
 
-    Returns the argument list to execute and whether it differs from the approved text (that is recorded as evidence).
+    Returns the argument list to execute and whether it differs from the approved text (that is recorded in the execution log).
     """
 
     if not argv or not _is_git(argv[0]):

@@ -2,8 +2,8 @@
 
 ``pm plan --check "命令 => 退出码"`` used to only *store* the commands; the agent ran them itself and reported the
 result, which is how a "done" could be claimed without the check ever passing.  :func:`run_acceptance_checks` is the
-verifier's own execution: each command is split into an argument list (never passed to a shell), run in the Run's
-worktree with a UTF-8 environment and ``core.quotePath=false`` for Git, and its real exit code and output summary are
+verifier's own execution: each command is split into an argument list (never passed to a shell), run from the given
+directory (``pm verify`` passes the control root, where ``.venv`` and ``main.py`` live) with a UTF-8 environment and ``core.quotePath=false`` for Git, and its real exit code and output summary are
 recorded.  A command that cannot start, times out, or exits with a code other than the approved one is a mismatch.
 """
 
@@ -22,6 +22,7 @@ from pathlib import Path
 
 from auto_pm.contracts.acceptance_command import (
     AcceptanceCommandError,
+    command_problem,
     parse_command,
     with_git_quotepath,
 )
@@ -29,15 +30,21 @@ from auto_pm.contracts.plan_checklist import AcceptanceCheck
 
 __all__ = [
     "REPORT_DIRECTORY",
+    "AcceptanceScan",
+    "AcceptanceScanFinding",
+    "WORKTREE_ENV",
     "CheckRun",
     "execution_environment",
     "mismatch_lines",
+    "refusal_reason",
     "run_acceptance_checks",
     "write_report",
 ]
 
 #: Under the control root; ``.auto-pm`` is not tracked by Git.
 REPORT_DIRECTORY = (".auto-pm", "reports", "acceptance")
+#: Environment variable that tells an approved command where the Run's worktree is.
+WORKTREE_ENV = "AUTO_PM_RUN_WORKTREE"
 DEFAULT_TIMEOUT_SECONDS = 900
 _TAIL_LINES = 20
 _TAIL_CHARACTERS = 2000
@@ -63,6 +70,25 @@ class CheckRun:
         data = asdict(self)
         data["argv"] = list(self.argv)
         return data
+
+
+@dataclass(frozen=True)
+class AcceptanceScanFinding:
+    """One approved command (``index`` 1-based; 0 = the approval itself is unreadable) that ``pm verify`` would refuse."""
+
+    mission_id: str
+    index: int
+    command: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class AcceptanceScan:
+    """Result of the read-only ledger scan: how much was looked at and what would be refused."""
+
+    missions_scanned: int
+    commands_scanned: int
+    findings: tuple[AcceptanceScanFinding, ...]
 
 
 def execution_environment(base: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -109,6 +135,26 @@ def _resolve_executable(name: str, cwd: Path, env: Mapping[str, str]) -> str | N
         path = candidate if candidate.is_absolute() else cwd / candidate
         return str(path) if path.exists() else None
     return shutil.which(name, path=env.get("PATH"))
+
+
+def refusal_reason(command: str, *, cwd: str | Path, env: Mapping[str, str] | None = None) -> str:
+    """Why ``pm verify`` would refuse to run ``command`` from ``cwd`` on this machine; empty when it would run.
+
+    Read-only: nothing is executed.  The command is judged under both quoting rule sets (a plan approved on one platform
+    may be verified on the other) and, with this platform's rules, its executable must exist where ``pm verify`` looks.
+    """
+
+    for windows in (os.name == "nt", os.name != "nt"):
+        problem = command_problem(command, windows=windows)
+        if problem:
+            side = "本机引号规则" if windows == (os.name == "nt") else "另一平台的引号规则"
+            return f"{side}下不能按原文执行：{problem}"
+    argv = parse_command(command).argv
+    environment = execution_environment() if env is None else dict(env)
+    executable = argv[0]
+    if _resolve_executable(executable, Path(cwd), environment) is None:
+        return f"找不到命令 {executable}（在 {cwd} 下、按 PATH 查找）"
+    return ""
 
 
 def _failed(
@@ -177,12 +223,19 @@ def run_acceptance_checks(
     cwd: str | Path,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     env: Mapping[str, str] | None = None,
+    extra_env: Mapping[str, str] | None = None,
     windows: bool | None = None,
 ) -> tuple[CheckRun, ...]:
-    """Run every approved command in ``cwd`` (all of them, so one report shows every mismatch)."""
+    """Run every approved command in ``cwd`` (all of them, so one report shows every mismatch).
+
+    ``extra_env`` is added on top of the execution environment -- ``pm verify`` uses it to tell a script where the Run's
+    worktree is (``AUTO_PM_RUN_WORKTREE``) while the command itself runs from the control root.
+    """
 
     root = Path(cwd)
     environment = execution_environment() if env is None else dict(env)
+    if extra_env:
+        environment.update(extra_env)
     if not root.is_dir():
         return tuple(_failed(check, (), False, f"执行目录不存在：{root}") for check in checks)
     return tuple(

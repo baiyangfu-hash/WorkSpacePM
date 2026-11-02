@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Any, cast
 
 from auto_pm.application.core.acceptance_runner import (
+    WORKTREE_ENV,
+    AcceptanceScan,
+    AcceptanceScanFinding,
     mismatch_lines,
+    refusal_reason,
     run_acceptance_checks,
     write_report,
 )
@@ -1254,19 +1258,55 @@ class PmFacadeService:
         except ValueError as error:
             raise PmFacadeError(f"批准的验收命令读不出来：{error}") from error
 
+    def scan_approved_acceptance_commands(self, project_id: str) -> AcceptanceScan:
+        """Read-only: which approved acceptance commands of the project's open Missions ``pm verify`` would refuse.
+
+        Run on the machine that holds the ledger before a release: an old approval whose command cannot run (or needs a
+        shell) is refused at ``pm verify`` and must be re-planned and approved again by the user.  Nothing is executed or
+        written.
+        """
+
+        findings: list[AcceptanceScanFinding] = []
+        missions = commands = 0
+        for mission in self._store.list_missions(project_id):
+            try:
+                checks = self._approved_acceptance_checks(mission)
+            except PmFacadeError as error:
+                findings.append(AcceptanceScanFinding(mission.mission_id, 0, "", str(error)))
+                continue
+            if checks is None:
+                continue
+            missions += 1
+            for index, check in enumerate(checks, start=1):
+                commands += 1
+                reason = refusal_reason(check.command, cwd=self._store.workspace_root)
+                if reason:
+                    findings.append(AcceptanceScanFinding(mission.mission_id, index, check.command, reason))
+        return AcceptanceScan(missions, commands, tuple(findings))
+
     def _run_approved_acceptance_checks(self, mission: Mission, run: Any) -> tuple[str, bool]:
-        """Execute every approved command in the Run's worktree: (note for ``pm verify``, whether it must refuse)."""
+        """Execute every approved command from the control root: (note for ``pm verify``, whether it must refuse).
+
+        Approved commands are written the way ``cockpit-entry`` teaches -- from the workspace root (``.venv\\Scripts\\python.exe
+        -B main.py plc check …``, ``git -C .auto-pm\\worktrees\\trae …``) -- and cockpit commands refuse to run inside a
+        worktree (WS-001), so the working directory is the control root and the Run's worktree is handed over as
+        ``AUTO_PM_RUN_WORKTREE`` (use ``git -C`` / ``-w`` to act on the worktree's code).
+        """
 
         checks = self._approved_acceptance_checks(mission)
         if checks is None:
             return "批准时没有登记验收命令（旧批准），验收命令未执行", False
         if not checks:
             return "", False
-        runs = run_acceptance_checks(checks, cwd=str(run.worktree_path))
+        runs = run_acceptance_checks(
+            checks,
+            cwd=self._store.workspace_root,
+            extra_env={WORKTREE_ENV: str(run.worktree_path)},
+        )
         try:
             report = write_report(self._store.workspace_root, run.run_id, runs)
         except OSError as error:
-            return f"验收命令的执行记录写不进（{error}），不能当作证据", True
+            return f"验收命令的执行记录写不进（{error}），不能算验收命令已执行", True
         problems = mismatch_lines(runs)
         if problems:
             return f"验收命令未通过（记录 {report}）：" + "；".join(problems), True
