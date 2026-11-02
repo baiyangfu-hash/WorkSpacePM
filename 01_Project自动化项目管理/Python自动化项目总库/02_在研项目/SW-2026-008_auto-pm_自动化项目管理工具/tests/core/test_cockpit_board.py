@@ -233,10 +233,10 @@ def _order_dir(root: Path) -> Path:
     return folder
 
 
-def _changes_of(board: Any) -> list[vm.ChangeRow]:
+def _changes_of(board: Any) -> list[Any]:
     home = vm.home_vm(board, OFFSET, online=False, use_git=False)
     card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
-    return vm.project_vm(board, card, OFFSET, False).changes
+    return list(vm.project_vm(board, card, OFFSET, False).changes)
 
 
 def test_change_orders_are_read_from_the_project_folder(tmp_path: Path) -> None:
