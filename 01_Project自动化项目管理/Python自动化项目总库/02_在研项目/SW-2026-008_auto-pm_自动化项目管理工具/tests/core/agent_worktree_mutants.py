@@ -51,8 +51,8 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "删前复查丢了 locked",
-        "head=info.head, locked=info.locked\n        )\n        self._require_removable(fresh)",
-        "head=info.head\n        )\n        self._require_removable(fresh)",
+        "head=info.head, locked=info.locked\n            ),\n            idle_seconds",
+        "head=info.head\n            ),\n            idle_seconds",
     ),
     (
         "删前不再核对是否并进 main",
@@ -76,7 +76,11 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "False",
     ),
     ("刚开的空工位也清", "        if station.untouched:\n", "        if False:\n"),
-    ("没并进 main 的工位也清", "        if not station.merged:\n", "        if False:\n"),
+    (
+        "没并进 main 的工位也清",
+        '        if not station.merged:\n            return SweepItem(target, "station"',
+        '        if False:\n            return SweepItem(target, "station"',
+    ),
     ("名册外的目录也清", '        if station.kind == "other":\n', "        if False:\n"),
     (
         "分支前缀不符的工位也清",
@@ -106,6 +110,65 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "if False:",
     ),
     ("没并进 main 也删本地分支", "        elif fresh.merged:\n", "        elif True:\n"),
+    (
+        "agent 会话可清名册外的目录",
+        '        if caller_agent():\n            return SweepItem(\n                target, "other", False, "不在',
+        '        if False:\n            return SweepItem(\n                target, "other", False, "不在',
+    ),
+    ("名册外的目录有未提交也清", "        refusal = self._refusal(station)\n        if refusal:\n            return SweepItem(target, \"other\", False, refusal)\n", ""),
+    ("名册外没有自己提交的新目录也清", "        if station.untouched and not station.stale:\n", "        if False:\n"),
+    ("名册外没并进 main 的目录也清", "        if not station.merged:\n            return SweepItem(target, \"other\"", "        if False:\n            return SweepItem(target, \"other\""),
+    ("时间在未来不钳成 0", "return max(0, int(time.time() - max(stamps)))", "return int(time.time() - max(stamps))"),
+    (
+        "名册外有被忽略的文件也清",
+        "        if station.ignored_paths:\n            shown",
+        "        if False:\n            shown",
+    ),
+    (
+        "缓存目录也算被忽略的文件",
+        "if entry and not _is_tool_cache(entry)",
+        "if entry",
+    ),
+    (
+        "__pycache__ 里的非 pyc 文件也当缓存",
+        'folder in CACHE_DIRS and (folder != "__pycache__" or name.endswith(".pyc"))',
+        "folder in CACHE_DIRS",
+    ),
+    (
+        "任何目录里的文件都当缓存",
+        'folder in CACHE_DIRS and (folder != "__pycache__" or name.endswith(".pyc"))',
+        "True",
+    ),
+    (
+        "删前复查不看被忽略的文件和闲置",
+        '        if fresh.kind == "other":\n            hold = self._other_hold(fresh)',
+        '        if False:\n            hold = self._other_hold(fresh)',
+    ),
+    (
+        "读不到被忽略的文件按没有处理",
+        "            if hidden.returncode != 0:\n",
+        "            if False:\n",
+    ),
+    (
+        "--only 找不到目录不报错",
+        "if only is not None and not listed_stations:",
+        "if False:",
+    ),
+    (
+        "--only 不限定目录",
+        "self.stations(only=only, progress=progress)",
+        "self.stations(progress=progress)",
+    ),
+    (
+        "--only 时仍处理孤儿分支",
+        "for branch in [] if only is not None else self._gone_branches():",
+        "for branch in self._gone_branches():",
+    ),
+    (
+        "保留名单不生效",
+        "if item.remove and station.name.lower() in RESERVED_STATIONS:",
+        "if False:",
+    ),
     ("工位满了也能开", "        if count >= MAX_STATIONS:\n", "        if False:\n"),
     ("同一 agent 可开第二个工位", "if path.exists() or self._registered(path):", "if False:"),
     (
@@ -137,17 +200,33 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def bad_anchors(original: str) -> list[str]:
+    """Mutants whose original text is not in the source exactly once (or that change nothing).
+
+    A mutant that cannot be applied would otherwise abort the whole run; ``test_agent_worktree_mutant_anchors.py``
+    runs this on every test run, so a source edit that breaks an anchor is caught long before the (slow) mutation run.
+    """
+
+    return [
+        name
+        for name, before, after in MUTANTS
+        if original.count(before) != 1 or before == after
+    ]
+
+
 def main() -> int:
     original = SOURCE.read_text(encoding="utf-8")
+    broken = bad_anchors(original)
+    if broken:
+        for name in broken:
+            print(f"[错误] 变异“{name}”的原文在源文件里不是恰好一处，脚本需要更新")
+        return 2
     signal.signal(
         signal.SIGTERM, lambda *_: sys.exit(3)
     )  # a killed run still restores the source in finally
     survivors: list[str] = []
     try:
         for name, before, after in MUTANTS:
-            if original.count(before) != 1:
-                print(f"[错误] 变异“{name}”的原文在源文件里不是恰好一处，脚本需要更新")
-                return 2
             SOURCE.write_text(original.replace(before, after), encoding="utf-8")
             result = subprocess.run(
                 [
