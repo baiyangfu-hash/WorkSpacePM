@@ -977,3 +977,17 @@ def test_cli_list_shows_idle_days_and_names_the_stale_ones(lab: Lab, frozen_now:
     assert table.exit_code == 0, table.output
     assert "闲置" in _unwrapped(table.output)
     assert _unwrapped("超过3天没动的1个：claude") in _unwrapped(table.output)
+
+
+def test_a_git_link_with_bad_bytes_does_not_break_the_listing(lab: Lab, frozen_now: float) -> None:
+    """The link file is read strictly (no silent U+FFFD); a file that is not UTF-8 only means its git dir is not used."""
+
+    left = lab.root / ".auto-pm" / "worktrees" / "m3-left"
+    left.mkdir(parents=True)
+    (left / ".git").write_bytes(b"gitdir: \xff\xfe\x9c\x9f\n")
+    for item in (left, left / ".git"):
+        os.utime(item, (NOW - 5 * DAY, NOW - 5 * DAY))
+
+    station = {s.name: s for s in lab.service().stations(deep=False)}["m3-left"]
+
+    assert station.idle_days == 5 and station.stale

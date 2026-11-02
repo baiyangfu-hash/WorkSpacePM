@@ -756,14 +756,14 @@ def _idle_seconds(path: Path) -> int | None:
     link = path / ".git"
     try:
         if link.is_file():
-            text = link.read_text(encoding="utf-8", errors="replace")
+            text = link.read_text(encoding="utf-8")
             first = text.splitlines()[0] if text else ""
             if first.startswith("gitdir:"):
                 gitdir = Path(first.removeprefix("gitdir:").strip())
                 if not gitdir.is_absolute():
                     gitdir = path / gitdir
                 candidates += [gitdir / "HEAD", gitdir / "logs" / "HEAD"]
-    except OSError:
+    except (OSError, UnicodeDecodeError):  # an unreadable link only means the git-dir times are not used
         pass
     stamps: list[float] = []
     for item in candidates:
