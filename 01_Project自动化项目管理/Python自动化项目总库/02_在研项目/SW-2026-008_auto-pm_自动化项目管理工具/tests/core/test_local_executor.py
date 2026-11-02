@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -317,7 +316,10 @@ def test_bare_command_name_is_resolved_through_path_so_windows_finds_the_cmd_shi
     # TD-SW008-185: Popen without a shell cannot find ``codex.cmd`` from the bare name ``codex``.
 
     shim = str(Path("C:/tools/npm/codex.cmd"))
-    monkeypatch.setattr(shutil, "which", lambda name: shim if name == "codex" else None)
+    monkeypatch.setattr(
+        "auto_pm.infrastructure.local_executor.find_on_path",
+        lambda name, **kwargs: shim if name == "codex" else None,
+    )
 
     assert LocalCodexExecutor()._command_prefix == (shim,)
     # A name PATH does not know, and any name that already carries a path, are left exactly as given.
