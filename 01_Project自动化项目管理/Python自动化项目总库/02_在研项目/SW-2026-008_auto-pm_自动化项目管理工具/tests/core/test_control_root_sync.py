@@ -308,6 +308,27 @@ def test_an_empty_local_commit_says_nothing_about_squashing(world: World) -> Non
     assert "先推送成 PR" in "\n".join(report.lines())
 
 
+def test_a_scope_that_names_no_file_cannot_make_a_squash_guess(world: World) -> None:
+    """Audit 543 follow-up: an empty or mistyped scope matches main trivially; it must not turn into a squash hint."""
+    _commit_file(world.control, "proj/a.txt", "v1.5\n", "local step 1")
+    _commit_file(world.control, "proj/a.txt", "v2\n", "local step 2")
+    _commit_file(world.upstream, "proj/a.txt", "v2\n", "squashed into main")
+    world.push_upstream()
+
+    named = world.service().check(SCOPE)
+    assert named.maybe_squashed  # control: with a real scope the very same history is called a probable squash
+
+    for typo in (("no-such-folder/",), ("proj/typo.txt",)):
+        report = world.service().check(typo)
+        assert not report.maybe_squashed and not report.drift_in_scope, typo
+
+
+def test_a_local_commit_outside_the_scope_does_not_make_the_scope_look_squashed(world: World) -> None:
+    _commit_file(world.control, "elsewhere/b.txt", "x\n", "work in another folder")
+    report = world.service().check(SCOPE)
+    assert report.unique_ahead and not report.maybe_squashed
+
+
 def test_a_local_commit_that_differs_from_main_in_the_scope_is_still_offered_as_work(world: World) -> None:
     _commit_file(world.control, "proj/a.txt", "only local\n", "real local work")
     report = world.service().check(SCOPE)

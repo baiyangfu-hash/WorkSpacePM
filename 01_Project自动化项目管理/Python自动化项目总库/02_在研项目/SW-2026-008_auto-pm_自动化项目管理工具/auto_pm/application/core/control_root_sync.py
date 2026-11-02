@@ -208,7 +208,9 @@ class ControlRootSyncService:
             changed = self._paths(["diff", "--name-only", "-z", "--no-renames", MAIN_REF, *specs])
             untracked = self._paths(["ls-files", "--others", "--exclude-standard", "-z", *specs])
             drift = tuple(sorted(set(changed) | set(untracked)))
-        maybe_squashed = bool(scope) and not drift and any(self._changes_files(commit) for commit in unique_full)
+        # "The scope matches main" is a hint only when a local commit really changed a file of that scope: an empty, mistyped
+        # or unrelated scope matches main trivially and would turn the hint into a guess from nothing.
+        maybe_squashed = bool(scope) and not drift and any(self._changes_files(commit, scope) for commit in unique_full)
         return SyncReport(
             verified=True,
             behind=behind,
@@ -221,10 +223,12 @@ class ControlRootSyncService:
             other_ahead=max(0, ahead - len(duplicate) - len(unique)),
         )
 
-    def _changes_files(self, commit: str) -> bool:
-        """Does the commit change any file?  (An empty commit says nothing about squashing.)"""
+    def _changes_files(self, commit: str, scope: tuple[str, ...]) -> bool:
+        """Does the commit change any file of the scope?  (An empty commit, or one elsewhere, says nothing about squashing.)"""
 
-        return bool(self._text(["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--root", commit]).strip("\0"))
+        return bool(
+            self._text(["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--root", commit, "--", *scope]).strip("\0")
+        )
 
     def _git(self, arguments: list[str], *, allow_failure: bool = False) -> bytes | None:
         result = run_git_bounded(
