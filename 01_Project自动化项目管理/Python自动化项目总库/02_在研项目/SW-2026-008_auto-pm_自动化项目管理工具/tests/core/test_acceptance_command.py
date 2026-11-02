@@ -275,25 +275,36 @@ def test_a_windows_style_cockpit_command_may_carry_chinese_arguments() -> None:
     assert shell_fragility_problem(r".venv\Scripts\python.exe -B main.py doc check --说明 中文", windows=True) == ""
 
 
-# Trae card A (SW-2026-008 / CHG-DOCU-2026-091): PowerShell one-liners pasted as --check commands.  In PowerShell the first
-# one reported success although ``$p`` was empty (the unquoted Chinese path was mangled), i.e. a green that checked nothing.
-_TRAE_CARD_A_FALSE_GREEN = (
-    "$p=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/README.md; "
-    "$l=Get-Content -Path $p -Encoding UTF8; "
-    "$n=($l | Select-String -Pattern ^##.*本文适用范围与读者 | Select-Object -Last 1).LineNumber; "
-    "if(($l[$n] -match 适用范围) -and ($l[$n] -match 读者)){exit 0}else{exit 1}"
-)
-_TRAE_CARD_A_QUOTEPATH = (
-    "$d=@(git diff --name-only); if(($d.Count -eq 1) -and ($d[0] -like *SW-2026-008*/README.md)){exit 0}else{exit 1}"
-)
+# Trae card A (SW-2026-008 / CHG-DOCU-2026-091): the four ``--check`` commands exactly as the ledger holds them (plan revision 1,
+# plan_hash a90c4143…13c8; no quotes anywhere).  They are PowerShell one-liners.  In PowerShell AC2 reported success although
+# ``$p`` was empty: ``$n`` is then empty too and ``Count - empty + 1 <= 10`` is true -- a green that checked nothing.
+_TRAE_CARD_A_PATH = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/README.md"
+_TRAE_CARD_A_CHECKS = {
+    "AC1": (
+        f"$p={_TRAE_CARD_A_PATH}; $h=(Select-String -Path $p -Pattern ^# -Encoding UTF8 | Select-Object -Last 1).Line; "
+        "if($h -match 本文适用范围与读者){exit 0}else{exit 1}"
+    ),
+    "AC2": (
+        f"$p={_TRAE_CARD_A_PATH}; $l=Get-Content -Path $p -Encoding UTF8; "
+        "$n=($l | Select-String -Pattern ^##.*本文适用范围与读者 | Select-Object -Last 1).LineNumber; "
+        "if($l.Count-$n+1 -le 10){exit 0}else{exit 1}"
+    ),
+    "AC3": (
+        f"$p={_TRAE_CARD_A_PATH}; $l=Get-Content -Path $p -Encoding UTF8; "
+        "$n=($l | Select-String -Pattern ^##.*本文适用范围与读者 | Select-Object -Last 1).LineNumber; "
+        "$s=$l[$n..($l.Count-1)] -join ([char]10); if(($s -match 适用范围) -and ($s -match 读者)){exit 0}else{exit 1}"
+    ),
+    "AC4": "$d=@(git diff --name-only); if(($d.Count -eq 1) -and ($d[0] -like *SW-2026-008*/README.md)){exit 0}else{exit 1}",
+}
 
 
-@pytest.mark.parametrize("command", [_TRAE_CARD_A_FALSE_GREEN, _TRAE_CARD_A_QUOTEPATH])
+@pytest.mark.parametrize("name", sorted(_TRAE_CARD_A_CHECKS))
 @pytest.mark.parametrize("windows", [False, True])
-def test_the_trae_false_green_one_liners_cannot_become_acceptance_commands(command: str, windows: bool) -> None:
-    """Either the parser (``;`` is a shell operator) or the fragility rule ($, Chinese, wildcards) refuses each of them."""
+def test_the_four_trae_card_a_checks_cannot_become_acceptance_commands(name: str, windows: bool) -> None:
+    """Each original is refused as a whole by the plan checklist (the parser: ``;`` is a shell operator) ..."""
+    command = _TRAE_CARD_A_CHECKS[name]
     reason = command_problem(command, windows=windows) or shell_fragility_problem(command, windows=windows)
-    assert reason, "a PowerShell one-liner was accepted as an acceptance command"
+    assert reason, f"{name} was accepted as an acceptance command"
     checklist = PlanChecklist(
         original_request="x",
         safety_circuit="否",
@@ -302,6 +313,27 @@ def test_the_trae_false_green_one_liners_cannot_become_acceptance_commands(comma
     )
     problems = plan_checklist_problems(checklist, declared=(), scope=("a/",), risks=("r",), acceptance_criteria=("一",))
     assert any(item.startswith("⑤第 1 条验收命令不能照原文执行") for item in problems), problems
+
+
+@pytest.mark.parametrize("name", sorted(_TRAE_CARD_A_CHECKS))
+@pytest.mark.parametrize("windows", [False, True])
+def test_every_ingredient_of_each_trae_card_a_check_is_refused_on_its_own(name: str, windows: bool) -> None:
+    """... and, split at the ``;`` into the statements it is made of, each statement that carries a variable, Chinese text or a
+    wildcard is refused by itself, so removing the ``;`` problem alone would not let the check through."""
+    statements = [part.strip() for part in _TRAE_CARD_A_CHECKS[name].split(";") if part.strip()]
+    dangerous = [part for part in statements if "$" in part or any(ord(ch) > 127 for ch in part) or "*" in part]
+    assert dangerous, name
+    for statement in dangerous:
+        reason = command_problem(statement, windows=windows) or shell_fragility_problem(statement, windows=windows)
+        assert reason, (name, statement)
+
+
+def test_the_ac2_false_green_is_the_empty_variable_case() -> None:
+    """The reason AC2 passed in PowerShell: with ``$p`` empty, ``$n`` is empty and ``Count-$n+1`` is ``Count+1`` <= 10 for a
+    short file.  The refusal is about the ``$``, not the length of the file."""
+    assert "$p" in _TRAE_CARD_A_CHECKS["AC2"] and "$n" in _TRAE_CARD_A_CHECKS["AC2"]
+    for fragment in ("pytest -k $n", "python -B -c \"exit(0 if $n else 1)\"", "python -B x.py $p"):
+        assert "PowerShell 会把它展开" in shell_fragility_problem(fragment, windows=True), fragment
 
 
 @pytest.mark.parametrize(
