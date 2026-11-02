@@ -189,6 +189,70 @@ def test_parked_column_without_a_park_record_or_table_still_renders(tmp_path: Pa
     assert empty["搁着"].cards == [] and empty["搁着"].note == "没有搁着的卡"
 
 
+# ---------------------------------------------------------------- 变更记录要列正式变更单
+
+CHG_ORDER = """# 变更单
+
+### 3.0 编号与项目
+| 字段 | 内容 |
+|------|------|
+| 变更编号 | CHG-PLC-2026-015 |
+| 项目编号 | DJ-2026-101 |
+
+### 3.4 其他
+| 字段 | 内容 |
+|------|------|
+| 申请日期 | 2026-10-23 |
+| 变更状态 | approved |
+
+## 4. 变更原因
+
+**变更背景**：
+修复公共报警结构体两个字段的数组声明
+"""
+
+
+def _order_dir(root: Path) -> Path:
+    folder = root / "0100_PLC自动化" / "DJ-2026-101_甲" / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-PLC"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _changes_of(board: Any) -> list[Any]:
+    home = vm.home_vm(board, OFFSET, online=False, use_git=False)
+    card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
+    return vm.project_vm(board, card, OFFSET, False).changes
+
+
+def test_change_orders_are_read_from_the_project_folder(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    (_order_dir(root) / "CHG-PLC-2026-015.md").write_text(CHG_ORDER, encoding="utf-8")
+    orders = pd.read_change_orders(root / "0100_PLC自动化" / "DJ-2026-101_甲")
+    assert [(o.change_id, o.domain, o.status, o.raised) for o in orders] == [
+        ("CHG-PLC-2026-015", "PLC", "approved", "2026-10-23")
+    ]
+    assert orders[0].what == "修复公共报警结构体两个字段的数组声明"
+    # 进了变更记录页签：变更单一行，来源写明是变更单而不是业务变更
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    rows = [c for c in _changes_of(board) if c.change_id == "CHG-PLC-2026-015"]
+    assert [(r.kind, r.status, r.date) for r in rows] == [("变更单 PLC", "approved", "2026-10-23")]
+
+
+def test_change_order_with_unknown_format_is_listed_not_dropped(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    (_order_dir(root) / "CHG-PLC-2026-099.md").write_text("# 变更单\n\n正文没有表格\n", encoding="utf-8")
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    rows = [c for c in _changes_of(board) if c.change_id == "CHG-PLC-2026-099"]
+    # 读不出状态也要列出来，状态写“未读到状态”，日期写“日期待补”——不许从列表里消失让人以为没改过
+    assert [(r.status, r.date) for r in rows] == [("未读到状态", "日期待补")]
+
+
+def test_project_without_change_order_folder_has_no_order_rows(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    assert not any(c.kind.startswith("变更单") for c in _changes_of(board))
+
+
 # ---------------------------------------------------------------- 主题令牌
 
 
