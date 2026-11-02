@@ -25,8 +25,6 @@ from auto_pm.ui.cli.change import change_group
 from tests.cli.test_agent_cannot_approve import BAD_EVIDENCE, GOOD_EVIDENCE, _obj, untouched  # noqa: F401
 from tests.infrastructure.test_git_hook_enforcer import _make_dual_root_fixture
 
-pytestmark = pytest.mark.usefixtures("identity_guard_off")
-
 APPROVING = ("approved", "conditionally_approved")
 CHG = "CHG-SCPT-2026-346"  # the number _make_dual_root_fixture gives its change order
 
@@ -119,6 +117,10 @@ def test_the_other_transitions_are_still_not_this_guards_business(
 # --- the chain: what the refusal protects ------------------------------------------------------------------------
 
 
+# ``identity_guard_off`` goes on this one test only: ``untouched`` (borrowed from test_agent_cannot_approve) switches the identity
+# check off itself, and stacking it under a second guard-off fixture restores the wrong function when the two are torn down in
+# the other order -- it left the guard off for every later test in the process (the windows-cli failure of test_change_runtime_identity).
+@pytest.mark.usefixtures("identity_guard_off")
 @pytest.mark.parametrize("status", APPROVING)
 def test_a_refused_self_approval_leaves_the_change_order_unapproved_so_work_and_commit_stay_blocked(
     status: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
