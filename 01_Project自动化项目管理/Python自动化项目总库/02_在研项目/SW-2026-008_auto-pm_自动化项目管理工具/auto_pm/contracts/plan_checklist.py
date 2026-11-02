@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from auto_pm.contracts.acceptance_command import command_problem
 from auto_pm.contracts.declared_dirty import declared_dirty_problem, retired_session_paths
 
 __all__ = [
@@ -114,6 +115,11 @@ def plan_checklist_problems(
             f"⑤每条验收标准的命令和退出码（--check \"命令 => 退出码\"；"
             f"验收 {len(criteria)} 条，命令 {len(checks)} 条）"
         )
+    for number, check in enumerate(checks, start=1):
+        # ``pm verify`` executes these itself, as an argument list and never through a shell: refuse now what cannot run so.
+        reason = command_problem(check.command) if check.command.strip() else ""
+        if reason:
+            problems.append(f"⑤第 {number} 条验收命令不能照原文执行：{reason}")
     risk_items = tuple(risks)
     if not risk_items or all(_blank(risk) for risk in risk_items):
         problems.append("⑥风险（--risk，不能只写“无”）")

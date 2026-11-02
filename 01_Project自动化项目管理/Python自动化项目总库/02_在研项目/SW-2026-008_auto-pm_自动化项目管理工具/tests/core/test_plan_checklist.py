@@ -338,3 +338,38 @@ def test_pm_plan_with_all_seven_fields_passes(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     assert '"safety_circuit": "否"' in result.output
+
+
+def test_pm_plan_refuses_a_check_that_needs_a_shell_and_says_which_one(tmp_path: Path) -> None:
+    """CHG-SCPT-2026-472: ``pm verify`` runs the command as an argument list, so ``&&`` can never work -- refuse at plan time."""
+    _setup_planning(tmp_path)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "-w", str(tmp_path), "pm",
+            *_plan_args(
+                "--original-request", "加报警汇总", "--safety-circuit", "否",
+                "--check", "pytest && ruff check => 0", "--rollback", ROLLBACK,
+            ),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "⑤第 1 条验收命令不能照原文执行" in result.output and "shell 符号" in result.output
+
+
+def test_pm_plan_warns_about_chinese_text_in_an_inline_script_but_still_plans(tmp_path: Path) -> None:
+    _setup_planning(tmp_path)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "-w", str(tmp_path), "pm",
+            *_plan_args(
+                "--original-request", "加报警汇总", "--safety-circuit", "否",
+                "--check", "python -c \"print('中文')\" => 0", "--rollback", ROLLBACK,
+            ),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "[验收命令] 第 1 条" in result.output and "\\uXXXX" in result.output and "python -B -c" in result.output

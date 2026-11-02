@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,16 @@ from auto_pm.constraint.models import Workflow, WorkflowRun, WorkflowStep
 from auto_pm.logging.audit import audit_log
 
 _COMMAND_TIMEOUT_SECONDS = 300.0
+
+
+def _quoted_for_shell(value: str) -> str:
+    """``value`` as ONE shell word: a path with a space, a Chinese name or an ``&`` must not split or inject (CHG-SCPT-2026-472)."""
+
+    if os.name != "nt":
+        return shlex.quote(value)
+    quoted = subprocess.list2cmdline([value])
+    # list2cmdline quotes only a value with a space or tab; cmd.exe still reads ``&`` or ``^`` in a bare word as its own syntax.
+    return quoted if quoted.startswith('"') else f'"{quoted}"'
 
 
 class WorkflowEngine:
@@ -157,7 +168,7 @@ class WorkflowEngine:
             cmd = step.command
             if cmd:
                 if file_path:
-                    cmd = cmd.replace("{file}", str(file_path))
+                    cmd = cmd.replace("{file}", _quoted_for_shell(str(file_path)))
                 try:
                     completed = subprocess.run(
                         cmd,

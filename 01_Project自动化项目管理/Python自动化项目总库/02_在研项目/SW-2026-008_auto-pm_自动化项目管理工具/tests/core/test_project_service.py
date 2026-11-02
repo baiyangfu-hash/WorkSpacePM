@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -341,3 +345,71 @@ class TestGitHooks:
         assert unres["success"] is True
         assert svc.is_git_hooks_installed(str(tmp_path)) is False
         assert not hook_file.is_file()
+
+
+@pytest.mark.skipif(sys.platform == "win32" or shutil.which("sh") is None, reason="runs the generated POSIX hook")
+class TestGeneratedPreCommitHookRuns:
+    """CHG-SCPT-2026-472 (audit 543): the generated hook must find staged Python files, Chinese and spaced names included.
+
+    The template used to carry ``grep '\\\\.py$'`` (a literal backslash), which matched no file, so it silently checked
+    nothing; and an unquoted ``$STAGED_FILES`` would have split a spaced name.
+    """
+
+    @staticmethod
+    def _repo(tmp_path: Path) -> Path:
+        def git(*args: str) -> None:
+            subprocess.run(
+                ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                check=True,
+                capture_output=True,
+            )
+
+        git("init", "-q")
+        bin_dir = tmp_path / ".venv" / "bin"
+        bin_dir.mkdir(parents=True)
+        for tool in ("ruff", "mypy"):
+            stub = bin_dir / tool
+            stub.write_text(
+                f'#!/bin/sh\nprintf "%s\\n" "$@" >> "{tmp_path}/{tool}.log"\nexit 0\n', encoding="utf-8"
+            )
+            stub.chmod(0o755)
+        (bin_dir / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+        svc = ProjectService(str(tmp_path))
+        assert svc.install_git_hooks(str(tmp_path))["success"] is True
+        return tmp_path
+
+    @staticmethod
+    def _commit(root: Path, *names: str) -> subprocess.CompletedProcess[str]:
+        for name in names:
+            target = root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("VALUE = 1\n", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k != "GIT_DIR"}
+        subprocess.run(["git", "-C", str(root), "add", "-A", "--", *names], check=True, capture_output=True, env=env)
+        return subprocess.run(
+            ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "x"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+
+    def test_staged_python_files_reach_ruff_and_mypy_by_their_real_names(self, tmp_path: Path) -> None:
+        root = self._repo(tmp_path)
+
+        done = self._commit(root, "项目 甲/文件 一.py", "plain.py", "notes.md")
+
+        assert done.returncode == 0, done.stdout + done.stderr
+        for tool in ("ruff", "mypy"):
+            seen = (root / f"{tool}.log").read_text(encoding="utf-8").splitlines()
+            assert "项目 甲/文件 一.py" in seen and "plain.py" in seen
+            assert "notes.md" not in seen
+
+    def test_a_commit_without_python_files_is_skipped_not_checked(self, tmp_path: Path) -> None:
+        root = self._repo(tmp_path)
+
+        done = self._commit(root, "说明.md")
+
+        assert done.returncode == 0 and "没有检测到 staged Python 文件" in done.stdout + done.stderr
+        assert not (root / "ruff.log").exists()

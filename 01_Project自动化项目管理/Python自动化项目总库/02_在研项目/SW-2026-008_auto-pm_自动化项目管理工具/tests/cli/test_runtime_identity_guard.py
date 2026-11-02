@@ -38,6 +38,7 @@ WRITE_COMMANDS = frozenset(
 # Reads, plus the user's own PIN setup, which does not touch the ledger.
 NOT_WRITE_COMMANDS = frozenset(
     {
+        "acceptance-scan",
         "approver-pin init",
         "approver-pin status",
         "context",

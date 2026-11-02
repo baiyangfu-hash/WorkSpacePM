@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,41 @@ class TestWorkflowEngine:
         engine = WorkflowEngine(temp_workspace)
         with pytest.raises(ValueError):
             engine.run("non-existent-wf")
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [("plain.md", '"plain.md"'), ("a&b;c.md", '"a&b;c.md"'), ("中文 名字.md", '"中文 名字.md"'), ("x^y.md", '"x^y.md"')],
+    )
+    def test_the_windows_spelling_always_quotes_a_shell_word(
+        self, monkeypatch: pytest.MonkeyPatch, name: str, expected: str
+    ) -> None:
+        """cmd.exe reads ``&`` and ``^`` in a bare word as syntax; ``list2cmdline`` alone quotes only spaces (the windows-extra failure)."""
+        from auto_pm.domain.constraint import workflow
+
+        monkeypatch.setattr(os, "name", "nt")
+        assert workflow._quoted_for_shell(name) == expected
+
+    @pytest.mark.parametrize("name", ["plain.md", "has space.md", "中文 名字.md", "a&b;c.md", "it's.md"])
+    def test_run_cmd_passes_the_file_as_one_argument(self, temp_workspace: Path, name: str) -> None:
+        """CHG-SCPT-2026-472: ``{file}`` was pasted into a shell string unquoted; a space, ``&`` or ``;`` split or injected."""
+        import shlex
+        import subprocess
+        import sys
+
+        from auto_pm.domain.constraint.models import WorkflowStep
+
+        target = temp_workspace / name
+        target.write_text("# t", encoding="utf-8")
+        seen = temp_workspace / "seen.txt"
+        script = temp_workspace / "show.py"
+        script.write_text(
+            "import sys, pathlib\n"
+            f"pathlib.Path({str(seen)!r}).write_text(repr(sys.argv[1:]), encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        runner = subprocess.list2cmdline([sys.executable, str(script)]) if sys.platform == "win32" else shlex.join([sys.executable, str(script)])
+        engine = WorkflowEngine(temp_workspace)
+
+        engine._execute_step(WorkflowStep(action="run_cmd", command=f"{runner} {{file}}"), target, None)
+
+        assert seen.read_text(encoding="utf-8") == repr([str(target)])

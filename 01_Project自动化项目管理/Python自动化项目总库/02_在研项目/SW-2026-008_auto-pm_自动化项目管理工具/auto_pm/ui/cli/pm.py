@@ -26,6 +26,7 @@ from auto_pm.application.core.worktree_policy_service import (
     WorktreePolicyError,
     WorktreePolicyService,
 )
+from auto_pm.contracts.acceptance_command import command_hints
 from auto_pm.contracts.continuity_query import QueriedAction
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
@@ -162,6 +163,10 @@ def _plan_checklist(
         parsed = tuple(parse_acceptance_check(raw) for raw in checks)
     except ValueError as error:
         raise click.ClickException(str(error)) from error
+    for number, check in enumerate(parsed, start=1):
+        # Advice only (the refusals are in ``plan_checklist_problems``): legal commands that are fragile on a Chinese console.
+        for hint in command_hints(check.command):
+            click.echo(f"⚠️ [验收命令] 第 {number} 条：{hint}", err=True)
     safety = safety_circuit.strip()
     return PlanChecklist(
         original_request=original_request,
@@ -1405,10 +1410,11 @@ pm_group.add_command(takeover_pm)
 pm_group.add_command(sign_risk_pm)
 
 # IDE-agent closing commands (gap 8): quality verification and one-step closure without a temporary script.
-from auto_pm.ui.cli.pm_closure import close_pm, verify_pm  # noqa: E402
+from auto_pm.ui.cli.pm_closure import acceptance_scan_pm, close_pm, verify_pm  # noqa: E402
 
 pm_group.add_command(verify_pm)
 pm_group.add_command(close_pm)
+pm_group.add_command(acceptance_scan_pm)
 
 # Park / unpark / switch commands (TD-071): the user's words, the PIN once it is committed.
 from auto_pm.ui.cli.pm_switch import missions_pm, park_pm, switch_pm, unpark_pm  # noqa: E402
