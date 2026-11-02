@@ -180,6 +180,11 @@ def acceptance_scan_pm(ctx: click.Context, project_id: str) -> None:
                 {"mission_id": item.mission_id, "index": item.index, "command": item.command, "reason": item.reason}
                 for item in scan.findings
             ],
+            # Still run by ``pm verify``, but a new plan with the same text would be refused (PowerShell changes it when pasted).
+            "would_be_refused_at_plan": [
+                {"mission_id": item.mission_id, "index": item.index, "command": item.command, "reason": item.reason}
+                for item in scan.fragile
+            ],
         }
     )
     if scan.findings:

@@ -52,6 +52,7 @@ from auto_pm.application.core.mission_admission import (
 from auto_pm.application.core.mission_service import MissionService, MissionServiceError
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
+from auto_pm.contracts.acceptance_command import shell_fragility_problem
 from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS, RunState, WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.decision_package import DecisionPackageDTO
@@ -1267,6 +1268,7 @@ class PmFacadeService:
         """
 
         findings: list[AcceptanceScanFinding] = []
+        fragile: list[AcceptanceScanFinding] = []
         missions = commands = 0
         for mission in self._store.list_missions(project_id):
             try:
@@ -1282,7 +1284,11 @@ class PmFacadeService:
                 reason = refusal_reason(check.command, cwd=self._store.workspace_root)
                 if reason:
                     findings.append(AcceptanceScanFinding(mission.mission_id, index, check.command, reason))
-        return AcceptanceScan(missions, commands, tuple(findings))
+                    continue
+                fragility = shell_fragility_problem(check.command)
+                if fragility:
+                    fragile.append(AcceptanceScanFinding(mission.mission_id, index, check.command, fragility))
+        return AcceptanceScan(missions, commands, tuple(findings), tuple(fragile))
 
     def _run_approved_acceptance_checks(self, mission: Mission, run: Any) -> tuple[str, bool]:
         """Execute every approved command from the control root: (note for ``pm verify``, whether it must refuse).

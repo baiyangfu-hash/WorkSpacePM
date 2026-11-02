@@ -96,6 +96,9 @@ class AcceptanceScan:
     missions_scanned: int
     commands_scanned: int
     findings: tuple[AcceptanceScanFinding, ...]
+    #: Commands ``pm verify`` still runs but the plan stage would now refuse (Chinese text, ``$``, bare wildcards): the same
+    #: text pasted into PowerShell is silently changed.  Listed only; they do not make the scan fail.
+    fragile: tuple[AcceptanceScanFinding, ...] = ()
 
 
 def worktree_environment(worktree: str | Path, control_root: str | Path) -> dict[str, str]:

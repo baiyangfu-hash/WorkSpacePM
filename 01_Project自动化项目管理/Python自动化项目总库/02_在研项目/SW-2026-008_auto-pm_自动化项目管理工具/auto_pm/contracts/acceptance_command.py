@@ -23,6 +23,7 @@ __all__ = [
     "command_hints",
     "command_problem",
     "parse_command",
+    "shell_fragility_problem",
     "with_git_quotepath",
 ]
 
@@ -246,20 +247,13 @@ def _non_ascii(value: str) -> bool:
 
 
 def command_hints(text: str, *, windows: bool | None = None) -> tuple[str, ...]:
-    """Advice (not refusals) for a command that is legal but fragile on a Chinese Windows console."""
+    """Advice (not refusals) for a command that is legal but easy to get wrong; the refusals are in :func:`shell_fragility_problem`."""
 
     try:
         argv = parse_command(text, windows=windows).argv
     except AcceptanceCommandError:
         return ()
     hints: list[str] = []
-    if _is_python(argv[0]) and "-c" in argv[1:]:
-        code_index = argv.index("-c") + 1
-        if code_index < len(argv) and _non_ascii(argv[code_index]):
-            hints.append(
-                "python -c 的内联脚本里有中文等非 ASCII 字符：经 PowerShell/代码页传到命令行时可能变形。"
-                "改写成 python -B -c '…'，把中文写成 \\uXXXX 转义；脚本长就放进文件再执行"
-            )
     if _is_git(argv[0]) and any(_non_ascii(item) for item in argv[1:]):
         hints.append(
             "git 命令里有中文路径：验证时本系统会自动加 -c core.quotePath=false，"
@@ -271,8 +265,71 @@ def command_hints(text: str, *, windows: bool | None = None) -> tuple[str, ...]:
             f"{WORKTREE_PLACEHOLDER}/…（验证时换成工位路径），或让脚本自己读环境变量 AUTO_PM_RUN_WORKTREE；"
             "main.py 驾驶舱命令不用管，验证时已指向工位"
         )
-    for item in argv[1:]:
-        if any(char in item for char in "*?") and not item.startswith("-"):
-            hints.append(f"参数 {item} 含通配符：这里不经过 shell，通配符不会被展开，请写具体路径")
-            break
     return tuple(hints)
+
+
+_REWRITE_ADVICE = (
+    "改写办法：把检查写进一个 Python 脚本文件，check 只写 `python -B 脚本路径`（脚本里用环境变量 AUTO_PM_RUN_WORKTREE 找工位、"
+    "自己处理中文和通配）；不要把中文、通配、变量写在命令文本里"
+)
+_WILDCARD_CHARACTERS = "*?"
+_EXPANSION_CHARACTERS = "$`"
+
+
+def _is_cockpit_command(argv: tuple[str, ...]) -> int:
+    """Index of ``main.py`` when the command is ``python … main.py …`` (a cockpit command), else -1."""
+
+    if not _is_python(argv[0]):
+        return -1
+    for index, item in enumerate(argv[1:], start=1):
+        if PurePath(item.replace("\\", "/")).name.lower() == "main.py":
+            return index
+    return -1
+
+
+def _path_like(value: str) -> bool:
+    return "/" in value or "\\" in value
+
+
+def shell_fragility_problem(text: str, *, windows: bool | None = None) -> str:
+    """Why ``text`` is dangerous to paste into a console, or an empty string.
+
+    ``pm verify`` runs the approved text as an argument list, so these commands *can* execute; but the agent or the user
+    also runs the same text by hand in PowerShell, which changes it on the way: Chinese text is mangled by the console
+    code page, ``$name`` and backticks are expanded (an unset variable becomes an empty string and the command can exit 0
+    having checked nothing), and a bare ``*`` or ``?`` is expanded by one side and not the other.  Refused at plan time:
+
+    - ``$`` or a backtick anywhere in the command;
+    - ``*`` / ``?`` in an argument (the code after ``python -c`` is exempt: it is Python source, not a file pattern);
+    - non-ASCII characters, except in the arguments of a ``main.py`` cockpit command (user-facing text such as ``--说明``)
+      and in path-like arguments (a ``/`` or ``\\`` in it: this workspace's project folders have Chinese names, and a
+      mangled path fails loudly with "file not found" instead of passing).
+
+    A command that cannot be parsed is not judged here (:func:`command_problem` reports it).
+    """
+
+    try:
+        argv = parse_command(text, windows=windows).argv
+    except AcceptanceCommandError:
+        return ""
+    cockpit = _is_cockpit_command(argv)
+    code_index = argv.index("-c") + 1 if _is_python(argv[0]) and "-c" in argv[1:] else -1
+    for index, item in enumerate(argv):
+        if any(char in item for char in _EXPANSION_CHARACTERS):
+            return (
+                f"命令里有 $ 或反引号（{item}）：PowerShell 会把它展开（没定义的变量变成空串，命令可能照样退出码 0 却什么都没检查）。"
+                + _REWRITE_ADVICE
+            )
+        if index > 0 and index != code_index and any(char in item for char in _WILDCARD_CHARACTERS) and not item.startswith("-"):
+            return (
+                f"参数 {item} 含通配符 * 或 ?：这里不经过 shell，不会展开，PowerShell 里又可能被展开成别的东西，检查对象不确定。"
+                "写具体路径，或" + _REWRITE_ADVICE
+            )
+        if _non_ascii(item):
+            if 0 <= cockpit < index or _path_like(item):
+                continue
+            return (
+                f"命令里有中文等非 ASCII 字符（{item}）：经 PowerShell 和控制台代码页可能变形。"
+                "中文只允许出现在 main.py 驾驶舱命令参数中（以及带路径分隔符的路径参数里）。" + _REWRITE_ADVICE
+            )
+    return ""
