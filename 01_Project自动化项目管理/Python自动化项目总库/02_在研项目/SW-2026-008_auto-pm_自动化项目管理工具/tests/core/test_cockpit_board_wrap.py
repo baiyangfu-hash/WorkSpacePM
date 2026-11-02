@@ -24,9 +24,10 @@ from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from cockpit_board.viewmodel import Cell, GithubVM, PrRow  # noqa: E402
+from cockpit_board.viewmodel import Cell, GithubVM, PrRow, StationVM, Step  # noqa: E402
 from cockpit_board.widgets import common as c  # noqa: E402
 from cockpit_board.widgets.delivery import github_block  # noqa: E402
+from cockpit_board.widgets.station import StationPage  # noqa: E402
 
 CI_NAMES = [
     "CI - PLC项目管理工具", "bat-guard", "ci-aggregate", "gitignore-guard", "hook-replay", "plc-ci", "pr-gate",
@@ -83,3 +84,35 @@ def test_a_pair_is_never_split_across_lines(qapp: QApplication) -> None:
             assert pair.geometry().right() <= holder.width()  # 没有伸出窗口
     finally:
         holder.close()
+
+
+def _station_vm() -> StationVM:
+    """身份条各项都很长、第 6 步四个按钮加一句说明：这两处以前各是一整行横排。"""
+    identity = [
+        ("身份", "工程工位 · 人工"), ("源码", "1.3.3-163c7a3-dirty-很长的版本说明"), ("生效版本", "1.3.3-163c7a3"),
+        ("控制根", r"C:\Users\fubai\Documents\My_Workspace\很长的中文文件夹名\再往下一层"), ("网络", "离线（git ls-remote 3 秒超时）"),
+        ("采集", "11-02 02:34"),
+    ]
+    steps = [
+        Step(1, "开分支", "从 origin/main 切人工分支", "done", "git switch -c manual/x origin/main"),
+        Step(
+            6, "有网之后", "推 manual/ 分支、开 PR", "todo", "",
+            [("推送 manual/ 分支", "push", False, "本版不做"), ("打开 GitHub 开 PR", "open_pr", False, "本版不做"),
+             ("批准范围", "approve", True, ""), ("开工", "start", True, "")],
+        ),
+    ]
+    return StationVM(identity, True, False, "", [], steps, [], [])
+
+
+def test_station_identity_bar_and_last_step_buttons_do_not_widen_the_page(qapp: QApplication) -> None:
+    page = StationPage(lambda _pid: None, lambda _text: None)
+    page.show_view(_station_vm())
+    page.resize(900, 800)
+    page.show()
+    qapp.processEvents()
+    try:
+        body = page.scroll_area.widget()
+        assert body.minimumSizeHint().width() < 800  # 身份条、按钮行改回横排时最小宽度超过 1000
+        assert page.scroll_area.horizontalScrollBar().maximum() == 0
+    finally:
+        page.close()
