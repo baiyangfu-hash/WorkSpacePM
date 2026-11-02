@@ -22,7 +22,12 @@ from auto_pm.domain.change.constants import APPROVAL_CONCLUSIONS, APPROVING_STAT
 from auto_pm.infrastructure.git_hook_enforcer import enforce_commit_msg
 from auto_pm.ui.cli import change as change_cli
 from auto_pm.ui.cli.change import change_group
-from tests.cli.test_agent_cannot_approve import BAD_EVIDENCE, GOOD_EVIDENCE, _obj, untouched  # noqa: F401
+from tests.cli.test_agent_cannot_approve import (  # noqa: F401
+    BAD_EVIDENCE,
+    GOOD_EVIDENCE,
+    _obj,
+    untouched,
+)
 from tests.infrastructure.test_git_hook_enforcer import _make_dual_root_fixture
 
 APPROVING = ("approved", "conditionally_approved")
