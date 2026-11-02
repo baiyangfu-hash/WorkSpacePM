@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ import pytest
 from click.testing import CliRunner
 
 from auto_pm.infrastructure import git_hook_enforcer
+from auto_pm.infrastructure.db.schema import DDL_APPROVAL_HISTORY
 from auto_pm.infrastructure.git_hook_enforcer import (
     enforce_commit_msg,
     enforce_pre_commit,
@@ -419,6 +421,22 @@ def _staged_snapshot_fixture(
         unknown_file.parent.mkdir()
         unknown_file.write_text("VALUE = 3\n", encoding="utf-8")
         _git(repo, "add", str(unknown_file.relative_to(repo)))
+
+    # The change order is staged as closed; its status needs the history row a real ``change transition`` would have written
+    # (TD audit 524, point 3).  The fixture is about snapshot mechanics, so it supplies the row and nothing else.
+    (repo / ".auto-pm").mkdir()
+    history = sqlite3.connect(repo / ".auto-pm" / "index.db")
+    try:
+        history.execute(DDL_APPROVAL_HISTORY)
+        for source, target in (("under_review", "approved"), ("approved", "closed")):
+            history.execute(
+                "INSERT INTO approval_history (project_id, change_number, from_status, to_status, transition_date) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (_FIXTURE_PROJECT_ID, _FIXTURE_CHG_ID, source, target, "2026-11-02"),
+            )
+        history.commit()
+    finally:
+        history.close()
 
     message_file = repo / "COMMIT_EDITMSG"
     message_file.write_text(f"feat: [{_FIXTURE_CHG_ID}] snapshot test\n", encoding="utf-8")

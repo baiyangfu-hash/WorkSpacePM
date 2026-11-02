@@ -70,6 +70,15 @@ def project_id_of(text: str) -> str:
     return next(iter(found)) if len(found) == 1 else ""
 
 
+def text_of(data: bytes) -> str:
+    """Strict UTF-8; content that is not valid UTF-8 reads as empty (no project number, no status), never as a guess."""
+
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
+
+
 def status_of_bytes(data: bytes, path: str) -> str:
     """The status the cockpit would read from this content: the §3.4 row, else the approval table (same parser).
 
@@ -172,15 +181,12 @@ def replays_history(repository: Path) -> bool:
             result = subprocess.run(
                 ["git", "-C", str(repository), "rev-parse", "--git-path", marker],
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=GIT_TIMEOUT_SECONDS,
                 check=False,
             )
-        except (OSError, subprocess.SubprocessError):
+            location = result.stdout.decode("utf-8").strip()
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
             return False
-        location = result.stdout.strip()
         if result.returncode == 0 and location:
             candidate = Path(location)
             if not candidate.is_absolute():
@@ -202,7 +208,10 @@ def _git_names(repository: Path, *args: str) -> list[str] | None:
         return None
     if result.returncode != 0:
         return None
-    return [item.decode("utf-8", errors="replace") for item in result.stdout.split(b"\0") if item]
+    try:
+        return [item.decode("utf-8") for item in result.stdout.split(b"\0") if item]
+    except UnicodeDecodeError:
+        return None
 
 
 def pending_status_problems(root: Path) -> list[str] | None:
@@ -240,7 +249,7 @@ def pending_status_problems(root: Path) -> list[str] | None:
         old_status = status_of_bytes(old_blob, path) if old_blob is not None else removed.get(number, "")
         if new_status == old_status:
             continue
-        recorded = last_recorded_status(root, number, project_id_of(data.decode("utf-8", errors="replace")))
+        recorded = last_recorded_status(root, number, project_id_of(text_of(data)))
         if recorded != new_status:
             seen = "没有记录" if recorded is None else f"最后一条是 {recorded}"
             problems.append(

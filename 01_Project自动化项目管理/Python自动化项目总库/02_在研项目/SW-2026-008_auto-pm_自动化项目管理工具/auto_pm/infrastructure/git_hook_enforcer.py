@@ -974,7 +974,7 @@ def _enforce_staged_change_status(cand_root: Path, gov_root: Path, snapshot: Sta
             )
             if new_status == old_status:
                 continue
-            project_id = change_status_guard.project_id_of(blob.decode("utf-8", errors="replace"))
+            project_id = change_status_guard.project_id_of(change_status_guard.text_of(blob))
             recorded = change_status_guard.last_recorded_status(gov_root, number, project_id)
         except Exception as exc:
             print(
