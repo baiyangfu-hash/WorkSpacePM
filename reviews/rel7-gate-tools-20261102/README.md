@@ -46,3 +46,7 @@
 
 - 用户对 fb5ca269 说“开跑”后，起跑前的 `rel7_1_approve_start.sh --check-only` 里，卡预检报“实施批准:审批字段含占位符”：卡 §实施批准那一行写了 `user-confirmation:<该消息 id>`，尖括号被当成占位符。只改这一行的措辞（“凭据取 user-confirmation 加该消息 id 的形式作为 --approval-evidence-ref”），新卡 SHA-256 `1668f66a…44a2`（旧 fb5ca269 作废）；`rel7_1_approve_start.sh` 只有第 13 行 CARD_SHA 变化；指纹清单逐字节不变。
 - 本次提交前已全量预检：`--check-only`（precheck passed、清单 19 项匹配、对账 0/0/0）与 `--dry-run` 干跑；干跑日志已更新。
+
+## 2026-11-02 16:58 MST：更正（干跑日志）
+
+前面几处写的“干跑日志已更新/已放在分支里”不属实：仓库的 `.gitignore` 忽略 `*.log`，`launch_dryrun/` 里的 `status.log`、`gates.log` 等当时根本没有被提交，分支上也没有。现在补提交，文件名加 `.txt` 后缀（`status.log.txt`、`gates.log.txt`、`keepawake.log.txt`、`mem_guard.log.txt`、`dry_stage.json`、`dummy_gates.sh`、`exit_marker.txt`），内容是 16:50~16:51 MST 那次干跑（预检改卡之后重新跑的）的原始输出：状态文件 RUNNING→PASS，结束标记 0。本次提交只改 `launch_dryrun/` 与本 README；卡、`rel7_1_approve_start.sh`、指纹清单与 99713760 逐字节相同。
