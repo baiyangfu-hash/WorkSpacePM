@@ -39,11 +39,11 @@ project_id: "SW-2026-008"
 1. 变更单序号到 1000 以上时被读成前三位。
 2. Windows 上不再先搜当前目录找可执行文件；后台 git 命令不弹黑窗。
 3. `project create` 与“项目未登记”的报错指路 `project register`；会话视图和 `constraint heal` 的提示不再引用已退役的 PM_SESSION。
-4. 服务层 `start_run` 也拒绝把控制根当 Run 的工位。
+4. 服务层 `start_run` 也拒绝把控制根当 Run 的工位（恢复类例外见第 8 条）。
 5. 进程探针：`/proc` 读不全时“进程不在”改判 UNKNOWN，不再误判已死。
 6. 残缺工位目录、工位目录被手工删掉后的处理。
 7. `doctor` 的发布指针检查：改了指针的发布 PR 按分支头自洽。
-8. **结算死锁（P1，#496，冻结后例外纳入）。** 原来 `run start` 禁止把控制根当工位，而过期 Run 的结算（`settle-expired`）、租约补偿与对账等行政恢复又必须在控制根里做，两条互相卡住，过期的 Run 永远结不掉。现在这几类恢复 Run 可以用控制根作工作树，条件很窄：Work 要绑定带恢复 `runtime_capability` 的无条件已批准 Decision，命令行用 `--recovery-change <该 Decision 的变更单号>` 声明，Decision、Work 范围和 Run 的 owned 路径都要覆盖 `continuity.db`；过期 Run 现在能从命令行结算。
+8. **结算死锁（P1，#496，冻结后例外纳入）。** 原来 `run start` 禁止把控制根当工位，而过期 Run 的结算（`settle-expired`）、租约补偿与对账等行政恢复又必须在控制根里做，两条互相卡住，过期的 Run 永远结不掉。现在这几类恢复 Run 可以用控制根作工作树，条件很窄：Work 要绑定带恢复 `runtime_capability` 的无条件已批准 Decision，命令行用 `--recovery-change <该 Decision 的变更单号>` 声明；Decision 的批准文件和 Work 范围要覆盖 `continuity.db`，而 **Run 的 owned 路径只能是 `.auto-pm/continuity.db`，多一个路径就拒**。另外：**恢复用的 Decision 和被结算的原 Decision 都必须已经入库且与 `HEAD` 一致，否则拒**；Decision 点名的目标必须仍待处理（结算：目标 Run 还没到终态；围栏或对账：目标 Run 已到终态而账里还没有对应的完成记录；裁决：目标 Work 仍是 BLOCKED），处理完了不能再开恢复 Run；同一个恢复 Work 同时只许一个未终态的 Run。撤销一个还没启动的 Run 不需要恢复 Run，不在这个例外里。过期 Run 现在能从命令行结算。
 
 ### 已知事项
 
