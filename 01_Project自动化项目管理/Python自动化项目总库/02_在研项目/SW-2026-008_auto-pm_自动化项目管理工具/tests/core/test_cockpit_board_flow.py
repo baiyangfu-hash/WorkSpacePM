@@ -23,7 +23,20 @@ pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPointF  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QAbstractSpinBox,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDial,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QRadioButton,
+    QSlider,
+    QTextEdit,
+)
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -240,6 +253,17 @@ def test_page_buttons_are_the_graph_titles_and_nothing_forbidden(qapp: QApplicat
     assert texts == {g.title for g in graphs.values()}
     for text in texts:
         assert not any(word in text for word in tool_policy.TOOL_FORBIDDEN_WORDS), text
+
+
+def test_page_has_no_input_except_the_card_chooser(qapp: QApplication) -> None:
+    """流程图页是只读的：整页能输入、能选的控件只有“看哪张卡”这一个下拉框（审计塞游离输入框，这条要红）。"""
+    page = FlowPage()
+    controls = []
+    for kind in (QLineEdit, QComboBox, QPlainTextEdit, QTextEdit, QAbstractSpinBox, QSlider, QDial, QCheckBox, QRadioButton):
+        controls += page.findChildren(kind)
+    assert controls == [page.card_box]
+    assert page.card_box.objectName() == "flow_card_box"
+    assert not page.card_box.isEditable()  # 只能选，不能打字
 
 
 def _lit(page: FlowPage) -> str | None:

@@ -63,7 +63,7 @@ gui = _load()
 sys.path.insert(0, str(PACKAGE.parent))
 import pm_dashboard as pd_module  # noqa: E402
 from cockpit_board import app as app_module  # noqa: E402
-from cockpit_board import policy
+from cockpit_board import policy, tool_policy
 
 
 def _options(root: Path, db: Path, **extra: object) -> argparse.Namespace:
@@ -102,6 +102,10 @@ def _inside(widget: QWidget, name: str) -> bool:
     return parent is not None
 
 
+def _in_flow_or_tools(window: Any, widget: QWidget) -> bool:
+    return bool(window.flow.isAncestorOf(widget) or window.tools.isAncestorOf(widget))
+
+
 def _files(root: Path) -> dict[str, int]:
     return {str(path): path.stat().st_mtime_ns for path in root.rglob("*") if path.is_file()}
 
@@ -118,9 +122,11 @@ def test_pm_board_is_read_only(qapp: QApplication, tmp_path: Path) -> None:
             lowered = (button.text() + button.toolTip()).lower()
             assert not any(word in lowered for word in policy.PM_FORBIDDEN_WORDS), button.text()
     for button in _buttons(window):
-        if button.objectName() in ("tab", "mode", "refresh"):
+        # 流程图页、工具页自己的按钮由 test_cockpit_board_flow / _tools 按各自的清单清点；这里只数顶栏和上面五页
+        if button.objectName() in ("tab", "mode", "refresh") and not _in_flow_or_tools(window, button):
             seen.add(button.text())
-    assert seen <= policy.PM_BUTTONS, seen - policy.PM_BUTTONS
+    assert seen <= policy.PM_BUTTONS | tool_policy.NAV_BUTTONS, seen - policy.PM_BUTTONS - tool_policy.NAV_BUTTONS
+    assert tool_policy.NAV_BUTTONS <= seen
     assert window.menuBar().actions() == []
     for kind in (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox):
         for page in (window.home, window.issues, window.projects, window.project):
@@ -128,9 +134,55 @@ def test_pm_board_is_read_only(qapp: QApplication, tmp_path: Path) -> None:
         # 整个窗口里能打字的地方只有两处：工程工位第 4 步的 BC 表单，和“决定”页顶上的“批准人”一栏
         # （决定页的其余输入都在点按钮后才弹出的确认对话框里，对话框不是主窗口的内容）
         for widget in window.findChildren(kind):
+            if _in_flow_or_tools(window, widget):  # 流程图页、工具页的输入框由各自的测试清点（只在 tool_form 里，或是选图选卡的下拉框）
+                continue
             assert _inside(widget, "bc_form") or (_inside(widget, "decisions_page") and widget.objectName() == "approver"), (
                 kind.__name__, widget.objectName())
     assert window.projects.table.editTriggers() == window.projects.table.EditTrigger.NoEditTriggers
+    window.close()
+
+
+def test_flow_and_tools_pages_are_wired_and_fed_from_the_ledger(qapp: QApplication, tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db)
+    assert window.tools.root == window.options.root
+    # 顶栏有两个入口，点了切到对应页；工位模式下也能进（这两页和模式无关）
+    for mode in ("pm", "ws"):
+        window.set_mode(mode)
+        for key, page in (("flow", window.flow), ("tools", window.tools), ("home", window.station if mode == "ws" else window.home)):
+            window.goto(key)
+            assert window.stack.currentWidget() is page
+            assert window.page_buttons[key].isChecked()
+    # 账本读完：工具页的项目下拉框是板上的项目，流程图页的卡下拉框是板上的任务
+    assert "DJ-2026-101" in [window.tools.project_box.itemText(i) for i in range(window.tools.project_box.count())]
+    assert any("写通讯层" in window.flow.card_box.itemText(i) for i in range(window.flow.card_box.count()))
+    # 同样的数据再画一遍不重填：用户在流程图页选的卡、工具页选的项目都保持
+    window.flow.card_box.setCurrentIndex(1)
+    chosen = window.flow.card_box.currentData()
+    window._render()
+    window._render()
+    assert chosen is not None and window.flow.card_box.currentData() == chosen
+    window.close()
+
+
+def test_unchanged_data_does_not_refill_flow_and_tools_but_changed_data_does(qapp: QApplication, tmp_path: Path) -> None:
+    """定时刷新、GitHub 或联网状态回来都会重画；数据没变就不能重填，否则用户刚点的“预览命令”会被冲掉。"""
+    root, db = base._workspace(tmp_path / "a", [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db)
+    params = {"pid": "DJ-2026-101", "number": "CHG-DJ-2026-101-001", "to": "submitted"}
+    window.tools.preview_command("change_transition", params)
+    assert window.tools.preview is not None
+    window.flow.card_box.setCurrentIndex(1)
+    chosen = window.flow.card_box.currentData()
+    for _ in range(3):  # 不变的数据重画多次
+        window._render()
+    assert window.tools.preview is not None  # 预览还在，还能点“转状态”
+    assert window.flow.card_box.currentData() == chosen
+    # 数据真变了（换了一张任务）：重填，旧预览作废（项目或任务变了，旧命令不能再点）
+    root2, db2 = base._workspace(tmp_path / "b", [("DJ-2026-101", "ACTIVE", "改了名的任务", 0.1)])
+    window.show_board(gui.load_board(_options(root2, db2), use_legacy=False))
+    assert window.tools.preview is None
+    assert any("改了名的任务" in window.flow.card_box.itemText(i) for i in range(window.flow.card_box.count()))
     window.close()
 
 
@@ -199,7 +251,9 @@ def test_window_and_screenshot_never_write_the_workspace(qapp: QApplication, tmp
     assert _files(root) == before  # 账本哈希、修改时间都不变，旁边也不多出 -shm / -wal
     assert sorted(path.name for path in shots.iterdir()) == [
         "看板_全部项目.png",
+        "看板_工具.png",
         "看板_工程工位.png",
+        "看板_流程图.png",
         "看板_问题.png",
         "看板_项目经理.png",
     ]

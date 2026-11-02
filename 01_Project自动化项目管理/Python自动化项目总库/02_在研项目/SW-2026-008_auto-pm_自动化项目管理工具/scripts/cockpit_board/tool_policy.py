@@ -13,6 +13,9 @@ TOOL_BUTTONS = frozenset({
     "打开高级工作台",
 })
 
+# 顶栏里多出来的两个页面入口（app.py 的页面按钮；policy.PM_BUTTONS 管其余顶栏按钮）。
+NAV_BUTTONS = frozenset({"流程图", "工具"})
+
 # 流程图页的按钮文字来自 flow/graphs.json 里各图的 title（任务、工作项、执行、变更单），测试按数据文件清点，不在这里写死。
 
 # 按钮文字和提示里不许出现的词：永远不加的（policy.NEVER）再加几个“做决定”的字眼——工具页不做决定。

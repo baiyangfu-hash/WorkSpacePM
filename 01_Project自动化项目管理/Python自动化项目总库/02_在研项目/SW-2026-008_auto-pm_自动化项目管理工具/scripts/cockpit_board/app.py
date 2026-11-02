@@ -34,15 +34,17 @@ from PySide6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
-from cockpit_board import actions, theme  # noqa: E402
+from cockpit_board import actions, flowgraph, theme  # noqa: E402
 from cockpit_board import viewmodel as vm
 from cockpit_board.decision_controller import DecisionController  # noqa: E402
 from cockpit_board.widgets import common as c  # noqa: E402
+from cockpit_board.widgets.flow import FlowPage  # noqa: E402
 from cockpit_board.widgets.home import HomePage  # noqa: E402
 from cockpit_board.widgets.issues import IssuesPage  # noqa: E402
 from cockpit_board.widgets.project_page import ProjectPage  # noqa: E402
 from cockpit_board.widgets.projects import ProjectsPage  # noqa: E402
 from cockpit_board.widgets.station import StationPage  # noqa: E402
+from cockpit_board.widgets.tools import ToolsPage  # noqa: E402
 
 WINDOW_TITLE = "驾驶舱总控屏"
 AUTO_REFRESH_MINUTES = 10
@@ -158,7 +160,10 @@ class CockpitWindow(QMainWindow):
         # “决定”页：每个按钮背后是同一条 main.py pm … 命令，见 decisions.py / DECISIONS.md；
         # 命令成功后让窗口重读账本，页面本身只在被打开或手动重读时才去读待批准卡和收件箱（每个项目起 2 条只读命令，较慢）。
         self.decisions = DecisionController(options.root, self.copy_text, self.reload)
-        for page in (self.home, self.issues, self.projects, self.project, self.station, self.decisions.page):
+        self.flow = FlowPage()
+        self.tools = ToolsPage(options.root)
+        self._flow_tools_key: object = None  # 上次喂给流程图页和工具页的数据；没变就不重填，免得打断正在填的表单
+        for page in (self.home, self.issues, self.projects, self.project, self.station, self.decisions.page, self.flow, self.tools):
             self.stack.addWidget(page)
         outer.addWidget(self.stack, 1)
         self.setCentralWidget(central)
@@ -176,7 +181,9 @@ class CockpitWindow(QMainWindow):
         row.addWidget(c.label("驾驶舱", "title", wrap=False))
         self.page_buttons: dict[str, object] = {}
         group = QButtonGroup(self)
-        for key, text in (("home", "今天"), ("issues", "问题"), ("projects", "全部项目"), ("decisions", "决定")):
+        # 流程图、工具两页和今天 / 问题 / 全部项目 / 决定并排；“流程图”“工具”的文字在 tool_policy.NAV_BUTTONS 里
+        for key, text in (("home", "今天"), ("issues", "问题"), ("projects", "全部项目"), ("decisions", "决定"),
+                          ("flow", "流程图"), ("tools", "工具")):
             item = c.button(text, "tab", text)
             item.setCheckable(True)
             item.clicked.connect(lambda _checked=False, k=key: self.goto(k))
@@ -216,7 +223,8 @@ class CockpitWindow(QMainWindow):
 
     def goto(self, key: str) -> None:
         page = {"home": self.station if self.mode == "ws" else self.home, "issues": self.issues,
-                "projects": self.projects, "project": self.project, "decisions": self.decisions.page}[key]
+                "projects": self.projects, "project": self.project, "decisions": self.decisions.page,
+                "flow": self.flow, "tools": self.tools}[key]
         self.stack.setCurrentWidget(page)
         for name, button in self.page_buttons.items():
             button.setChecked(name == key)  # type: ignore[attr-defined]
@@ -349,10 +357,22 @@ class CockpitWindow(QMainWindow):
                                           self.options.manual_branch, [], DECISION_BUTTONS_WIRED))
         for key, button in self.net_buttons.items():
             button.setChecked((key == "on") == bool(self.online))
+        self._feed_flow_and_tools(board)
         if self.stack.currentWidget() is self.project and self.project.vm is not None:
             self.open_project(self.project.vm.card.project_id)
         if self.stack.currentWidget() in (self.home, self.station):
             self.goto("home")
+
+    def _feed_flow_and_tools(self, board: pd.Board) -> None:
+        """账本读完把项目和任务交给“工具”“流程图”两页；数据没变就不动，正在填的表单不被打断。"""
+        projects = [(p.project_id, p.root) for p in board.projects]
+        cards = flowgraph.card_positions(board.projects)
+        key = (projects, [(c.project_id, c.mission_id, c.title, c.mission_state, c.run_state) for c in cards])
+        if key == self._flow_tools_key:
+            return
+        self._flow_tools_key = key
+        self.tools.set_projects(projects)
+        self.flow.show_cards(cards)
 
     # ------------------------------------------------ 工程工位动作
 
@@ -482,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
         window.show_board(load_board(options, use_legacy=False))
         window.resize(1360, 1600)
         target = Path(options.screenshot)
-        for key, name in (("home", "项目经理"), ("issues", "问题"), ("projects", "全部项目")):
+        for key, name in (("home", "项目经理"), ("issues", "问题"), ("projects", "全部项目"), ("flow", "流程图"), ("tools", "工具")):
             window.goto(key)
             app.processEvents()
             window.grab().save(str(target.with_name(f"{target.stem}_{name}{target.suffix}")))
