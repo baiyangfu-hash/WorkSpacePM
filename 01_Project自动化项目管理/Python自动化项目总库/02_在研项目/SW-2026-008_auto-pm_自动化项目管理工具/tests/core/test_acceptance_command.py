@@ -319,3 +319,17 @@ def test_the_trae_false_green_one_liners_cannot_become_acceptance_commands(comma
 def test_each_ingredient_of_the_false_green_is_refused_on_its_own(command: str) -> None:
     reason = command_problem(command, windows=True) or shell_fragility_problem(command, windows=True)
     assert reason
+
+
+@pytest.mark.parametrize("extra", ["$x", "`", "*.py", "?"])
+@pytest.mark.parametrize("windows", [False, True])
+def test_a_chinese_path_does_not_excuse_a_variable_a_backtick_or_a_wildcard_in_the_same_command(extra: str, windows: bool) -> None:
+    """The path exemption is only for the path argument itself (coordinator ruling for PR 490)."""
+
+    def refused(command: str) -> str:
+        # An unquoted backtick is already a parse error (command substitution); the rest is the fragility rule.
+        return command_problem(command, windows=windows) or shell_fragility_problem(command, windows=windows)
+
+    assert refused("python -B 项目甲/检查.py") == ""
+    assert refused(f"python -B 项目甲/检查.py {extra}") != ""
+    assert refused(f"python -B 项目甲/检查{extra}.py") != ""

@@ -24,7 +24,7 @@ from auto_pm.application.core.acceptance_runner import (
     worktree_environment,
     write_report,
 )
-from auto_pm.contracts.acceptance_command import parse_command
+from auto_pm.contracts.acceptance_command import parse_command, shell_fragility_problem
 from auto_pm.contracts.plan_checklist import AcceptanceCheck
 from tests.git_support import git_do
 from tests.plan_checklist_support import native_command
@@ -158,6 +158,23 @@ def test_windows_quoting_rules_split_a_chinese_path_with_spaces_and_the_command_
     result = run_acceptance_checks([_check(command)], cwd=tmp_path, windows=True)[0]
     assert result.passed
     assert result.argv[-2:] == ("参数一", "参数 二") and "['参数一', '参数 二']" in result.output_tail
+
+
+def test_a_chinese_path_is_let_through_at_plan_time_but_a_broken_path_still_fails_the_check(tmp_path: Path) -> None:
+    """Why a path argument may carry Chinese: if the console mangles it, the command fails (non-zero), it cannot pass.
+
+    The plan rule lets a path argument through; the verifier must then really fail when that path does not resolve.
+    """
+    folder = tmp_path / "项目甲"
+    folder.mkdir()
+    (folder / "检查.py").write_text("import sys; sys.exit(0)", encoding="utf-8")
+    good = f"{shlex.quote(PYTHON)} -B {shlex.quote('项目甲/检查.py')}"
+    broken = f"{shlex.quote(PYTHON)} -B {shlex.quote('项目甲/检查？.py')}".replace("？", "_坏")
+
+    assert shell_fragility_problem(good, windows=False) == "" and shell_fragility_problem(broken, windows=False) == ""
+    assert run_acceptance_checks([_check(good)], cwd=tmp_path, windows=False)[0].passed
+    result = run_acceptance_checks([_check(broken)], cwd=tmp_path, windows=False)[0]
+    assert not result.passed and result.exit_code not in (0, None)
 
 
 def test_the_output_tail_keeps_the_last_lines_and_the_hash_covers_everything(tmp_path: Path) -> None:
