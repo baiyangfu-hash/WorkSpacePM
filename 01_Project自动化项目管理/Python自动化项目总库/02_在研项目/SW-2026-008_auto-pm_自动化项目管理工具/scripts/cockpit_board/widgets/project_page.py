@@ -133,8 +133,11 @@ class ProjectPage(QWidget):
             status = c.chip(row.status, "hint") if row.status.startswith("待批") else c.label(row.status or "—", "", wrap=False)
             inner.addWidget(c.hrow(c.label(row.change_id, "mono", wrap=False), c.label(row.date, "mono", wrap=False),
                                    c.label(row.kind, "", wrap=False), c.label(row.what), 1, status))
+        if vm.changes_more:
+            inner.addWidget(c.label(vm.changes_more, "muted"))
         self.layout_.addWidget(frame)
-        self.layout_.addWidget(c.label("BC = 业务变更（客户改需求、领导砍需求、参数变化），CARD = 实施卡，CHG = 收口变更单。三种合一张表。", "small"))
+        self.layout_.addWidget(c.label("BC = 业务变更（客户改需求、领导砍需求、参数变化），CARD = 实施卡，CHG = 收口变更单。三种合一张表，"
+                                       "变更从新到旧排，实施卡没有日期、列在最后。", "small"))
 
     def _io(self, vm: ProjectVM, _now: datetime) -> None:
         frame, inner = c.card()
