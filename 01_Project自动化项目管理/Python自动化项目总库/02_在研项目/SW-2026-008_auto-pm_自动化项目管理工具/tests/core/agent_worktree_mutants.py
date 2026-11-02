@@ -125,6 +125,26 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "        if False:\n            shown",
     ),
     (
+        "close 不看保留名单",
+        "        if agent.lower() in RESERVED_STATIONS:\n            raise",
+        "        if False:\n            raise",
+    ),
+    (
+        "列表不说工位会带走忽略文件",
+        "    if not station.ignored_paths:\n        return \"\"\n    shown",
+        "    if True:\n        return \"\"\n    shown",
+    ),
+    (
+        ".mypy_cache 不算缓存",
+        'frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})',
+        'frozenset({"__pycache__", ".pytest_cache", ".ruff_cache"})',
+    ),
+    (
+        ".ruff_cache 不算缓存",
+        'frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})',
+        'frozenset({"__pycache__", ".pytest_cache", ".mypy_cache"})',
+    ),
+    (
         "缓存目录也算被忽略的文件",
         "if entry and not _is_tool_cache(entry)",
         "if entry",

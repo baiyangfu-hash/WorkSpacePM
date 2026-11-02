@@ -322,6 +322,10 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 f"你是 {caller}，不能收 {agent} 的工位；请 {agent} 自己收，或由用户决定"
             )
+        if agent.lower() in RESERVED_STATIONS:
+            raise StationRefusedError(
+                f"{agent} 在保留名单里（{'、'.join(sorted(RESERVED_STATIONS))}），close 不收；要收请用户亲手处理"
+            )
         path = self._stations_dir / agent
         registered = self._worktrees()
         if not path.exists() and path.resolve() in registered:
@@ -462,7 +466,9 @@ class AgentWorktreeService:
             return SweepItem(target, "station", False, "刚开的工位，还没有提交，保留")
         if not station.merged:
             return SweepItem(target, "station", False, "还没并进 main，在做的活，保留")
-        return SweepItem(target, "station", True, f"{station.branch} 已并进 main，工位干净")
+        return SweepItem(
+            target, "station", True, f"{station.branch} 已并进 main，工位干净{_goes_with(station)}"
+        )
 
     def _sweep_other(self, station: Station, agent: str | None) -> SweepItem:
         """A registered directory that is neither a roster station nor a run-plan (``m3-*`` leftovers and the like).
@@ -863,6 +869,16 @@ def _idle_seconds(path: Path) -> int | None:
     if not stamps:
         return None
     return max(0, int(time.time() - max(stamps)))
+
+
+def _goes_with(station: Station) -> str:
+    """For the listing: a roster station is removed together with its ignored files (``.venv`` and the like)."""
+
+    if not station.ignored_paths:
+        return ""
+    shown = "、".join(station.ignored_paths[:3])
+    more = "等" if len(station.ignored_paths) > 3 else ""
+    return f"；被 .gitignore 忽略的文件 {len(station.ignored_paths)} 项（{shown}{more}）会随目录一起删"
 
 
 def _is_tool_cache(entry: str) -> bool:

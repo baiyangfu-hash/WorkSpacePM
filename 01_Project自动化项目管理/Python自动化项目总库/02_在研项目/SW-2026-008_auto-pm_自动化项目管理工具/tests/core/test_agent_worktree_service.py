@@ -561,7 +561,7 @@ def test_locked_or_detached_stations_are_left_alone(lab: Lab) -> None:
     locked = finished_station(lab, "claude", "CARD-1")
     lab.merge_on_github("claude/CARD-1")
     git(lab.root, "worktree", "lock", str(locked))
-    detached = lab.station("trae")
+    detached = lab.station("cursor")
     git(lab.root, "worktree", "add", "-q", "--detach", str(detached), "origin/main")
 
     report = lab.service().sweep(apply=True)
@@ -571,7 +571,7 @@ def test_locked_or_detached_stations_are_left_alone(lab: Lab) -> None:
     assert "lock" in reasons[str(locked)]
     assert "detached" in reasons[str(detached)]
     with pytest.raises(StationRefusedError, match="detached"):
-        lab.service().close("trae")
+        lab.service().close("cursor")
 
 
 def test_open_refuses_a_stations_directory_that_points_outside(lab: Lab, tmp_path: Path) -> None:
@@ -1152,12 +1152,18 @@ def _make_caches(path: Path) -> None:
     (path / "pkg" / "__pycache__" / "mod.cpython-312.pyc").write_bytes(b"\0")
     (path / ".pytest_cache" / "v").mkdir(parents=True)
     (path / ".pytest_cache" / "v" / "lastfailed").write_text("{}", encoding="utf-8")
+    (path / ".mypy_cache" / "3.12").mkdir(parents=True)
+    (path / ".mypy_cache" / "3.12" / "mod.meta.json").write_text("{}", encoding="utf-8")
+    (path / ".ruff_cache").mkdir()
+    (path / ".ruff_cache" / "CACHEDIR.TAG").write_text("tag", encoding="utf-8")
 
 
 def _ignore_caches_and_logs(lab: Lab) -> None:
     exclude = lab.root / ".git" / "info" / "exclude"
     exclude.parent.mkdir(exist_ok=True)
-    exclude.write_text("__pycache__/\n.pytest_cache/\n*.log\n", encoding="utf-8")
+    exclude.write_text(
+        "__pycache__/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n*.log\n", encoding="utf-8"
+    )
 
 
 def test_an_other_directory_with_only_tool_caches_is_removable(lab: Lab) -> None:
@@ -1355,3 +1361,34 @@ def test_a_failing_ignored_files_scan_stops_the_sweep(lab: Lab, monkeypatch: pyt
 
     with pytest.raises(AgentWorktreeError, match="被忽略的文件"):
         lab.service().sweep(apply=True)
+
+
+def test_close_refuses_a_name_on_the_keep_list(lab: Lab) -> None:
+    trae = finished_station(lab, "trae", "CARD-1")
+    lab.merge_on_github("trae/CARD-1")
+
+    with pytest.raises(StationRefusedError, match="保留名单"):
+        lab.service().close("trae")
+
+    assert trae.exists()
+
+
+def test_the_sweep_listing_says_a_roster_station_takes_its_ignored_files_along(lab: Lab) -> None:
+    done = finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    _hide_a_file(done)
+
+    report = lab.service().sweep()
+
+    reason = _reasons(report)[str(done)]
+    assert any(item.remove for item in report.items if item.target == str(done))
+    assert "会随目录一起删" in reason and ".venv" in reason
+
+
+def test_the_sweep_listing_of_a_roster_station_without_ignored_files_has_no_such_note(lab: Lab) -> None:
+    done = finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+
+    reason = _reasons(lab.service().sweep())[str(done)]
+
+    assert "已并进 main" in reason and "会随目录一起删" not in reason
