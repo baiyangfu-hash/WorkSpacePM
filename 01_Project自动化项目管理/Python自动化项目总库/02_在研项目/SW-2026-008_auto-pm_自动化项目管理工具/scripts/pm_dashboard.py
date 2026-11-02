@@ -135,6 +135,17 @@ class BusinessChange:
 
 
 @dataclass
+class ChangeOrderInfo:
+    """项目文件夹里 01_变更管理/01_变更单/CHG-<领域>/CHG-*.md 的一张变更单（正式变更单，不是业务变更 BC）。"""
+
+    change_id: str
+    domain: str  # 所在文件夹 CHG-PLC → PLC
+    what: str  # 变更背景第一行（没写就空）
+    status: str  # §3.4 “变更状态”；文件里没写时是“未读到状态”，不留空
+    raised: str  # §3.4 “申请日期”（YYYY-MM-DD）；没写就空
+
+
+@dataclass
 class CardInfo:
     card_id: str
     title: str
@@ -174,6 +185,7 @@ class Project:
     missions: list[MissionInfo] = field(default_factory=list)
     changes: list[BusinessChange] = field(default_factory=list)
     cards: list[CardInfo] = field(default_factory=list)
+    change_orders: list[ChangeOrderInfo] = field(default_factory=list)
     last_commit: datetime | None = None
     attention: list[Attention] = field(default_factory=list)
     legacy: LegacyCard | None = None
@@ -536,6 +548,34 @@ def read_business_changes(project_root: Path) -> list[BusinessChange]:
     return changes
 
 
+def _table_value(cells: list[str], name: str) -> str | None:
+    return cells[1] if len(cells) >= 2 and cells[0] == name else None
+
+
+def read_change_orders(project_root: Path) -> list[ChangeOrderInfo]:
+    """读项目里的正式变更单（01_变更管理/01_变更单/CHG-*/CHG-*.md）。
+
+    只看每张单的头部：§3.0 变更编号、§3.4 变更状态和申请日期、“变更背景”第一行。读不出状态的单也要列出来，状态写
+    “未读到状态”——不能因为格式不认识就让这张单从列表里消失（那样“变更记录”显示“无”，用户以为从没改过）。
+    """
+
+    orders: list[ChangeOrderInfo] = []
+    for folder in _change_dirs(project_root):
+        for path in sorted((folder / "01_变更单").glob("CHG-*/CHG-*.md")):
+            number, status, raised, what = path.stem, "", "", ""
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[:140]
+            for index, line in enumerate(lines):
+                cells = [cell.strip() for cell in line.strip().strip("|").split("|")] if line.lstrip().startswith("|") else []
+                number = _table_value(cells, "变更编号") or number
+                status = _table_value(cells, "变更状态") or status
+                raised = _table_value(cells, "申请日期") or raised
+                if not what and line.strip().startswith("**变更背景**"):
+                    after = line.split("：", 1)[-1].strip() if "：" in line else ""
+                    what = after or next((nxt.strip() for nxt in lines[index + 1:] if nxt.strip()), "")
+            orders.append(ChangeOrderInfo(number, path.parent.name.removeprefix("CHG-"), _short(what, 60), status or "未读到状态", raised))
+    return orders
+
+
 def read_cards(project_root: Path) -> list[CardInfo]:
     cards: list[CardInfo] = []
     for folder in _change_dirs(project_root):
@@ -743,6 +783,7 @@ def build_board(
             project_root = root / project.root
             project.changes = read_business_changes(project_root)
             project.cards = read_cards(project_root)
+            project.change_orders = read_change_orders(project_root)
             if use_git:
                 project.last_commit = git_last_commit(root, project.root)
     pending: list[Decision] = []
