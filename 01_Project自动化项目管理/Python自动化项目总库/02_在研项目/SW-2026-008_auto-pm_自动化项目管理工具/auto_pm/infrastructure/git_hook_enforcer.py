@@ -367,7 +367,9 @@ def get_staged_files(workspace_root: Path) -> list[str]:
     """获取 Git 当前暂存区的改动路径列表（含删除；重命名的旧路径也在内）"""
     try:
         result = run_git_bounded_text(
-            ["git", "diff", "--cached", "--name-only", "--no-renames"],
+            # -z: names come back as they are.  Without it Git prints a Chinese or space-bearing path as a quoted, octal-escaped
+            # string ("\344\270\255…"), which no scope or protected-path comparison can match (CHG-SCPT-2026-472).
+            ["git", "-c", "core.quotePath=false", "diff", "--cached", "--name-only", "--no-renames", "-z"],
             default_timeout=120.0,
             error_cls=StagedSnapshotError,
             where=workspace_root,
@@ -375,7 +377,7 @@ def get_staged_files(workspace_root: Path) -> list[str]:
             capture_output=True,
             check=True,
         )
-        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        return [name for name in result.stdout.split("\0") if name]
     except Exception as exc:
         log.error("获取暂存区文件失败: %s", exc)
         raise RuntimeError(f"获取暂存区文件失败: {exc}") from exc

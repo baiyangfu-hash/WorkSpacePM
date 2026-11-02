@@ -847,6 +847,21 @@ def test_td100_get_staged_files_lists_deletions_and_the_old_path_of_a_rename(tmp
     assert get_staged_files(cand) == [SERVICE]
 
 
+def test_get_staged_files_returns_chinese_and_spaced_names_as_they_are(tmp_path: Path) -> None:
+    """CHG-SCPT-2026-472: without -z/quotePath Git prints '"\\344\\270\\255…"' and no path comparison can match it."""
+    from auto_pm.infrastructure.git_hook_enforcer import get_staged_files
+
+    cand, _ctrl, _msg = _delete_scene(tmp_path)
+    names = ["项目 甲/文件 一.md", "plain dir/a b.txt", "0100_PLC自动化/DJ-2026-005/说明.md"]
+    for name in names:
+        target = cand / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x\n", encoding="utf-8")
+        _git(cand, "add", name)
+
+    assert sorted(get_staged_files(cand)) == sorted(names)
+
+
 def test_td100_a_file_type_change_is_a_staged_change_with_status_t(tmp_path: Path) -> None:
     """普通文件换成符号链接（git 状态 T）也必须进快照，不能因为状态白名单漏掉。"""
     cand, _ctrl, _msg = _delete_scene(tmp_path)
