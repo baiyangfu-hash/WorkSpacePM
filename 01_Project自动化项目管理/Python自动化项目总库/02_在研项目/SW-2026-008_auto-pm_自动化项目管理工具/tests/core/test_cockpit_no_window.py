@@ -7,6 +7,7 @@ Windows 上界面从没有控制台的 pythonw 启动时，每条后台命令（
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -93,3 +94,14 @@ def test_the_dashboard_git_probe_hides_its_window() -> None:
            if isinstance(c.func, ast.Attribute) and c.func.attr in {"run", "Popen"} and getattr(c.func.value, "id", "") == "subprocess"
            and not _is_quiet(c)]
     assert bad == []
+
+
+def test_online_probe_never_waits_for_a_password_or_pops_a_login_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """后台联网探测（每次刷新都跑）没登录时不能停下来问密码，也不能让凭据管理器弹窗。"""
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "1")  # 用户环境里即使开着，探测也要关掉
+    monkeypatch.setenv("GCM_INTERACTIVE", "always")
+    spy = Spy()
+    actions.probe_online(tmp_path, runner=spy)
+    assert spy.kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0" and spy.kwargs["env"]["GCM_INTERACTIVE"] == "never"
+    assert spy.kwargs["env"]["PATH"] == os.environ["PATH"]  # 其余环境照旧，git 找得到自己
+    assert os.environ["GIT_TERMINAL_PROMPT"] == "1"  # 不改本进程的环境
