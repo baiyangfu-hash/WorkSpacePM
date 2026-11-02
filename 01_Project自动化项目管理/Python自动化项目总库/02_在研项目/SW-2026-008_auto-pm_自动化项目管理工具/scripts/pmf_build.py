@@ -13,6 +13,11 @@
     python scripts/pmf_build.py build  --repo <仓库根> --commit <提交> --project-root <仓库内的相对路径> --output <新目录> [--release-id ID]
     python scripts/pmf_build.py verify --output <目录> [--manifest <deployment_manifest.json> --release-id ID]
 
+``build`` 一开头先在 ``--repo``（控制根）里用子进程跑 ``main.py doctor --pre-release``：工位目录超过 7 个就判失败，不构建（H-06）。
+子进程退出码非 0、找不到 ``main.py``、超时、起不来，一律中止，不放行；本脚本自己不数目录，只有 doctor 一套检查逻辑。
+已部署的发布版还没有 ``--pre-release`` 选项时（第七版切换前）doctor 会报“No such option”并中止：先手工数 ``git worktree list`` 不超过 7 个，
+再显式加 ``--skip-worktree-check`` 绕过（默认关；绕过时标准错误和结果 JSON 的 ``warnings`` 都有大字警告）。
+
 退出码：0 成功；2 被拒绝（原因写在标准输出的 JSON 里）；3 输入错误。
 """
 
@@ -35,6 +40,9 @@ PAYLOAD_DIRS = ("auto_pm", "templates")
 REQUIRED_FILES = ("auto_pm/__init__.py", "auto_pm/__main__.py")
 #: ``auto_pm/__init__.py`` 把这些分层目录加进包搜索路径（PEP 420），``auto_pm.core`` 因此解析到 ``auto_pm/application/core``
 IMPORT_ROOTS = ("auto_pm", "auto_pm/domain", "auto_pm/infrastructure", "auto_pm/application", "auto_pm/ui")
+#: ``main.py doctor --pre-release`` 最长等多久；超时按“检查不可用”中止
+WORKTREE_CHECK_TIMEOUT_SECONDS = 180
+SKIP_WARNING = "!!! 已跳过发版前置检查（工位目录数）：这是显式绕过，发版前必须已手工确认 `git worktree list` 不超过 7 个 !!!"
 META_SCHEMA = "release_metadata.v1"
 META_NAME = "release_meta.json"
 #: ``release_meta.json`` 里允许因机器而异的键：判可复现与 ``verify`` 时不比较
@@ -68,6 +76,26 @@ class BuildResult:
     def manifest_entry(self) -> dict[str, object]:
         """与 ``deployment_manifest.v1`` 里一个发布条目同形（键排序、路径排序）。"""
         return {"source_commit": self.source_commit, "version": self.version, "built_at": self.built_at, "files": dict(sorted(self.files.items()))}
+
+
+def worktree_floor_check(repo: Path) -> None:
+    """发版前置检查（H-06）：在控制根 ``repo`` 里跑 ``main.py doctor --pre-release``，退出码非 0 就拒绝构建。
+
+    只信 doctor 的退出码，不在这里重数目录（只有一套数法）。找不到 ``main.py``、起不来、超时都按“检查不可用”拒绝，不放行。
+    """
+    main_py = repo / "main.py"
+    if not main_py.is_file():
+        raise BuildError("worktree-floor-unavailable", f"找不到 {main_py}：--repo 必须是控制根；手工确认工位目录不超过 7 个后可用 --skip-worktree-check")
+    command = [sys.executable, "-B", str(main_py), "--workspace", str(repo), "doctor", "--pre-release"]
+    try:
+        done = subprocess.run(command, cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=WORKTREE_CHECK_TIMEOUT_SECONDS, check=False)
+    except subprocess.TimeoutExpired:
+        raise BuildError("worktree-floor-unavailable", f"doctor --pre-release 超过 {WORKTREE_CHECK_TIMEOUT_SECONDS} 秒没有结果") from None
+    except OSError as exc:
+        raise BuildError("worktree-floor-unavailable", f"起不来 doctor --pre-release：{type(exc).__name__}: {exc}") from None
+    if done.returncode != 0:
+        tail = " | ".join(line.strip() for line in (done.stdout + done.stderr).splitlines() if line.strip())[-600:]
+        raise BuildError("worktree-floor", f"doctor --pre-release 退出码 {done.returncode}（工位目录太多或体检未过；先回收再发版，删除只认用户亲口说“收”）：{tail}")
 
 
 def _git(repo: Path, *args: str) -> bytes:
@@ -304,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--project-root", required=True)
     b.add_argument("--output", required=True)
     b.add_argument("--release-id")
+    b.add_argument("--skip-worktree-check", action="store_true", help="显式绕过发版前置检查（工位目录数）；默认关，绕过时大字警告")
     v = sub.add_parser("verify")
     v.add_argument("--output", required=True)
     v.add_argument("--manifest")
@@ -311,9 +340,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "build":
+            warnings: list[str] = []
+            if args.skip_worktree_check:
+                print(SKIP_WARNING, file=sys.stderr)
+                warnings.append(SKIP_WARNING)
+            else:
+                worktree_floor_check(Path(args.repo).resolve())
             result = build(Path(args.repo), args.commit, args.project_root, Path(args.output), args.release_id)
-            print(json.dumps({"ok": True, "release_id": result.release_id, "source_commit": result.source_commit, "version": result.version, "built_at": result.built_at,
-                              "files": len(result.files), "output": str(result.output)}, ensure_ascii=False))
+            payload: dict[str, object] = {"ok": True, "release_id": result.release_id, "source_commit": result.source_commit, "version": result.version, "built_at": result.built_at,
+                                          "files": len(result.files), "output": str(result.output)}
+            if warnings:
+                payload["warnings"] = warnings
+            print(json.dumps(payload, ensure_ascii=False))
             return 0
         entry_files: dict[str, str] | None = None
         recorded: dict[str, object] | None = None

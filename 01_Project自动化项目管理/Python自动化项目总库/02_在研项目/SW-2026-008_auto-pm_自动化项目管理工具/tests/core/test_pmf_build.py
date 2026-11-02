@@ -184,8 +184,116 @@ def test_pb10_a_project_root_with_non_ascii_characters_builds(tmp_path: Path) ->
     assert result.version == "9.9.9" and "auto_pm/__init__.py" in result.files
 
 
+def _doctor_stub(repo: Path, *, exit_code: int, sleep: float = 0.0) -> Path:
+    """A stand-in for the control root's ``main.py``: records its arguments, then exits with ``exit_code``."""
+    log = repo / "doctor_args.json"
+    (repo / "main.py").write_text(
+        "import json, os, sys, time\n"
+        f"open({str(log)!r}, 'w', encoding='utf-8').write(json.dumps({{'argv': sys.argv[1:], 'cwd': os.getcwd()}}))\n"
+        f"time.sleep({sleep})\n"
+        f"print('doctor says {exit_code}')\n"
+        f"raise SystemExit({exit_code})\n",
+        encoding="utf-8",
+    )
+    return log
+
+
+def _build_args(repo: Path, commit: str, out: Path, *extra: str) -> list[str]:
+    return ["build", "--repo", str(repo), "--commit", commit, "--project-root", "proj", "--output", str(out), *extra]
+
+
+def _last_json(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
+    loaded: dict[str, object] = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    return loaded
+
+
+def test_pb30_a_doctor_that_fails_stops_the_build_before_anything_is_written(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=1)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["ok"] is False and refused["code"] == "worktree-floor"
+    assert "退出码 1" in str(refused["details"]) and "doctor says 1" in str(refused["details"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_pb31_a_passing_doctor_lets_the_build_run_and_is_asked_for_the_pre_release_check_in_the_repo(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    log = _doctor_stub(repo, exit_code=0)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    ok = _last_json(capsys)
+    assert code == 0 and ok["ok"] is True and "warnings" not in ok
+    asked = json.loads(log.read_text(encoding="utf-8"))
+    argv = asked["argv"]
+    assert argv[-2:] == ["doctor", "--pre-release"] and argv[:2] == ["--workspace", str(repo.resolve())]
+    assert Path(asked["cwd"]).resolve() == repo.resolve(), "要在控制根里问，不是在调用者的当前目录"
+
+
+def test_pb32_a_repo_without_main_py_stops_the_build(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "worktree-floor-unavailable" and "main.py" in str(refused["details"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_pb33_a_doctor_that_hangs_stops_the_build(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=0, sleep=30)
+    monkeypatch.setattr(pb, "WORKTREE_CHECK_TIMEOUT_SECONDS", 1)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "worktree-floor-unavailable" and "没有结果" in str(refused["details"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_pb34_a_doctor_that_cannot_be_started_stops_the_build(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=0)
+
+    def cannot_start(*_args: object, **_kwargs: object) -> None:
+        raise FileNotFoundError("no interpreter")
+
+    monkeypatch.setattr(pb.subprocess, "run", cannot_start)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "worktree-floor-unavailable" and "FileNotFoundError" in str(refused["details"])
+
+
+def test_pb35_the_explicit_skip_flag_builds_anyway_and_shouts_about_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    log = _doctor_stub(repo, exit_code=1)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out", "--skip-worktree-check"))
+
+    captured = capsys.readouterr()
+    ok = json.loads(captured.out.strip().splitlines()[-1])
+    assert code == 0 and ok["ok"] is True and ok["warnings"] == [pb.SKIP_WARNING]
+    assert "!!!" in captured.err and "显式绕过" in captured.err
+    assert not log.exists(), "绕过时不该再去问 doctor"
+
+
+def test_pb36_without_the_flag_the_check_is_on_by_default(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=2)
+
+    assert pb.main(_build_args(repo, commit, tmp_path / "out")) == 2
+    assert _last_json(capsys)["code"] == "worktree-floor"
+
+
 def test_pb11_the_command_line_returns_0_on_success_and_2_on_a_refusal(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=0)
     assert pb.main(["build", "--repo", str(repo), "--commit", commit, "--project-root", "proj", "--output", str(tmp_path / "out")]) == 0
     ok = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert ok["ok"] is True and ok["files"] == 6 + 1 + 1  # 7 payload files of the demo project + release_meta.json
