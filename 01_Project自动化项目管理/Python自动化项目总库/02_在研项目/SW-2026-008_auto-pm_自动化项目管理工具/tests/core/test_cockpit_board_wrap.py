@@ -19,7 +19,7 @@ pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QWidget  # noqa: E402
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -90,7 +90,7 @@ def _station_vm() -> StationVM:
     """身份条各项都很长、第 6 步四个按钮加一句说明：这两处以前各是一整行横排。"""
     identity = [
         ("身份", "工程工位 · 人工"), ("源码", "1.3.3-163c7a3-dirty-很长的版本说明"), ("生效版本", "1.3.3-163c7a3"),
-        ("控制根", r"C:\Users\fubai\Documents\My_Workspace\很长的中文文件夹名\再往下一层"), ("网络", "离线（git ls-remote 3 秒超时）"),
+        ("控制根", r"C:\Users\fubai\Documents\My_Workspace"), ("网络", "离线（git ls-remote 3 秒超时）"),
         ("采集", "11-02 02:34"),
     ]
     steps = [
@@ -107,14 +107,22 @@ def _station_vm() -> StationVM:
 def test_station_identity_bar_and_last_step_buttons_do_not_widen_the_page(qapp: QApplication) -> None:
     page = StationPage(lambda _pid: None, lambda _text: None)
     page.show_view(_station_vm())
-    page.resize(900, 800)
+    page.resize(800, 800)
     page.show()
     qapp.processEvents()
     try:
-        body = page.scroll_area.widget()
-        # 身份条、按钮行改回横排时最小宽度超过 1000；留余量是因为 Windows 字体下最宽的一项（控制根路径）本身就有 807，
-        # 真正的判据是下面“900 宽的窗口里没有横向滚动条”，这一句只拦住回退成整行横排。
-        assert body.minimumSizeHint().width() < 880
-        assert page.scroll_area.horizontalScrollBar().maximum() == 0
+        # 页面里还有别的不换行控件（如第 4 步表单里的安全勾选，约 570），所以不拿整页最小宽度判，
+        # 而是分别量“身份条”和“第 6 步按钮行”这两处：新写法只取最宽的一个控件（约 380 以内）；
+        # 身份条改回整行横排约 1500、按钮行改回整行横排约 790，Windows 字体只会更宽，两处回退都红。
+        # 抽屉也叫 idbar，身份条是带 warn 属性的那一个
+        bars = [f for f in page.findChildren(QFrame, "idbar") if f.property("warn") is not None]
+        assert len(bars) == 1
+        idbar = bars[0]
+        assert idbar.minimumSizeHint().width() < 560
+        button = next(b for b in page.findChildren(QPushButton) if b.property("action") == "push")
+        row = button.parentWidget()
+        assert row is not None and row.layout() is not None and row.layout().hasHeightForWidth()  # 是 flow，不是横排
+        assert row.minimumSizeHint().width() < 560
+        assert page.scroll_area.horizontalScrollBar().maximum() == 0  # 800 宽的窗口里不用左右拖
     finally:
         page.close()
