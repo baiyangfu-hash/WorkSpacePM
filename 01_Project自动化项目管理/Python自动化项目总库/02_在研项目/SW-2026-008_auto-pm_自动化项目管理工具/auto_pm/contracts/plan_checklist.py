@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from auto_pm.contracts.acceptance_command import command_problem
+from auto_pm.contracts.acceptance_command import command_problem, shell_fragility_problem
 from auto_pm.contracts.declared_dirty import declared_dirty_problem, retired_session_paths
 
 __all__ = [
@@ -118,6 +118,8 @@ def plan_checklist_problems(
     for number, check in enumerate(checks, start=1):
         # ``pm verify`` executes these itself, as an argument list and never through a shell: refuse now what cannot run so.
         reason = command_problem(check.command) if check.command.strip() else ""
+        # The same text is also pasted into PowerShell by hand: refuse what that console would silently change.
+        reason = reason or (shell_fragility_problem(check.command) if check.command.strip() else "")
         if reason:
             problems.append(f"⑤第 {number} 条验收命令不能照原文执行：{reason}")
     risk_items = tuple(risks)

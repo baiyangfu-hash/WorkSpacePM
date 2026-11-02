@@ -358,7 +358,8 @@ def test_pm_plan_refuses_a_check_that_needs_a_shell_and_says_which_one(tmp_path:
     assert "⑤第 1 条验收命令不能照原文执行" in result.output and "shell 符号" in result.output
 
 
-def test_pm_plan_warns_about_chinese_text_in_an_inline_script_but_still_plans(tmp_path: Path) -> None:
+def test_pm_plan_refuses_chinese_text_in_an_inline_script_and_names_the_rewrite(tmp_path: Path) -> None:
+    """PowerShell mangles Chinese on the way, so the plan is refused (it was only a warning before)."""
     _setup_planning(tmp_path)
     result = CliRunner().invoke(
         cli,
@@ -371,5 +372,6 @@ def test_pm_plan_warns_about_chinese_text_in_an_inline_script_but_still_plans(tm
         ],
     )
 
-    assert result.exit_code == 0, result.output
-    assert "[验收命令] 第 1 条" in result.output and "\\uXXXX" in result.output and "python -B -c" in result.output
+    assert result.exit_code == 1
+    assert "⑤第 1 条验收命令不能照原文执行" in result.output
+    assert "中文只允许出现在 main.py 驾驶舱命令参数中" in result.output and "python -B 脚本路径" in result.output

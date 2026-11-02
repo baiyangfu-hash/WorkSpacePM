@@ -357,3 +357,34 @@ def test_the_scan_command_exits_1_when_something_would_be_refused_and_0_when_not
     payload = json.loads(refused.output)
     assert refused.exit_code == 1 and payload["would_refuse"][0]["index"] == 2
     assert payload["commands_checked"] == 2 and "shell 符号" in payload["would_refuse"][0]["reason"]
+
+
+def test_the_scan_lists_commands_a_new_plan_would_refuse_for_powershell_without_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Old approvals that run fine under ``pm verify`` but hold Chinese text, ``$`` or a bare wildcard are named, not failed."""
+    from click.testing import CliRunner
+
+    from auto_pm.ui.cli.__main__ import cli
+
+    missions, facade, _ = _verifying(tmp_path)
+    project = missions.get(MISSION).subject_project_id
+    # An ASCII script that exists in the control root, plus the command shapes the plan stage now refuses.
+    _approved(
+        monkeypatch,
+        (passing_command(), 0),
+        (f"{sys.executable} -B -c pass 中文", 0),
+        (f"{sys.executable} -B -c pass $x", 0),
+        (f"{sys.executable} -B tests/test_*.py", 0),
+    )
+
+    scan = facade.scan_approved_acceptance_commands(project)
+
+    assert scan.findings == ()  # verify can still run all of them
+    assert [item.index for item in scan.fragile] == [2, 3, 4]
+    assert all("python -B 脚本路径" in item.reason for item in scan.fragile)
+
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "pm", "acceptance-scan", "--pid", project], catch_exceptions=False)
+    payload = json.loads(result.output)
+    assert result.exit_code == 0 and payload["would_refuse"] == []
+    assert [item["index"] for item in payload["would_be_refused_at_plan"]] == [2, 3, 4]
