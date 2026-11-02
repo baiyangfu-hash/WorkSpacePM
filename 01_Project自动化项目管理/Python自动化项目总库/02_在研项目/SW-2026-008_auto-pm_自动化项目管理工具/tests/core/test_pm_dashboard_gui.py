@@ -526,6 +526,37 @@ def test_github_block_shows_as_of_and_never_green_when_stale(qapp: QApplication,
     window.close()
 
 
+def test_issues_page_in_the_real_window_says_not_checked_when_github_was_not_read(qapp: QApplication, tmp_path: Path) -> None:
+    """端到端：真窗口 → 真 _render → 问题页。把 app.py 里往问题页传说明的那一行删掉，这条必须红（#475 审计 535）。"""
+    import github_collector as gh
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db)
+    red = gh.PullInfo(9, "改 IO 表", "u", "baiyangfu-hash", "b" * 40, "claude/x", False, "2026-10-22T09:00:00Z",
+                      projects=["DJ-2026-101"], ci=[gh.CiState("gate", "fail", "红")])
+    stale = gh.Snapshot("o/r", "offline", NOW, NOW - timedelta(hours=3), from_cache=True, pulls=[red],
+                        errors=["断网：timed out"])
+    fresh_ok = gh.Snapshot("o/r", "ok", NOW, NOW, pulls=[gh.PullInfo(
+        10, "好的", "u", "baiyangfu-hash", "c" * 40, "claude/y", False, "2026-10-22T09:00:00Z",
+        projects=["DJ-2026-101"], ci=[gh.CiState("gate", "pass", "过")])])
+    fresh_red = gh.Snapshot("o/r", "ok", NOW, NOW, pulls=[red])
+    cases = (
+        (None, True, False),  # 没开采集：写“没检查”，不报警
+        (stale, True, False),  # 只有旧缓存：写“没检查”，不凭旧数据报警（缓存里那条红 PR 不许出现）
+        (fresh_ok, False, False),  # 读到了、全绿：什么说明都不加
+        (fresh_red, False, True),  # 读到了、有红：问题页出现这条红 PR
+    )
+    for snapshot, expect_note, expect_red in cases:
+        window.github = snapshot
+        window._render()
+        window.goto("issues")
+        qapp.processEvents()
+        texts = _texts(window.issues)
+        assert any(t.startswith("没检查：") for t in texts) is expect_note, (snapshot and snapshot.state, texts)
+        assert any("PR #9 门禁红" in t for t in texts) is expect_red, (snapshot and snapshot.state, texts)
+    window.close()
+
+
 def test_decisions_tab_reads_only_read_commands_and_lists_buttons_by_state(qapp: QApplication, tmp_path: Path) -> None:
     """“决定”页签：打开时用只读命令读口令状态、待批准卡、收件箱；每个状态出现对应按钮；点按钮才会运行写命令。"""
     import subprocess
