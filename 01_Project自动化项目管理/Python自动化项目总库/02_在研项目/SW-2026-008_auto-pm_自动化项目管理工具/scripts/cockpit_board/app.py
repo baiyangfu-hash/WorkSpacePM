@@ -78,7 +78,7 @@ class ActionRunner(QThread):
     """工程工位的本机动作在后台跑，界面不卡；回执发回主线程。"""
 
     done = Signal(object)
-    probed = Signal(bool)
+    probed = Signal(object)
 
     def __init__(self, job: Callable[[], Any], parent: QObject | None) -> None:
         super().__init__(parent)
@@ -86,7 +86,7 @@ class ActionRunner(QThread):
 
     def run(self) -> None:
         result = self.job()
-        if isinstance(result, bool):
+        if isinstance(result, actions.OriginProbe):
             self.probed.emit(result)
         else:
             self.done.emit(result)
@@ -138,6 +138,7 @@ class CockpitWindow(QMainWindow):
         self.github: gh.Snapshot | None = None
         self.home_vm: vm.HomeVM | None = None
         self.online: bool | None = None if not options.no_net else False
+        self.net_note: str = "" if not options.no_net else "按 --no-net 启动，没探测网络"
         self.mode = "pm"
         self.bc_digest: str | None = None  # 预览那一刻 02_业务变更记录.md 的指纹
         self._threads: list[QThread] = []
@@ -205,7 +206,7 @@ class CockpitWindow(QMainWindow):
         net_group = QButtonGroup(self)
         self.net_buttons = {}
         for key, text in (("on", "在线"), ("off", "离线")):
-            item = c.button(text, "mode", "真实判定：后台对 origin 跑 git ls-remote，3 秒超时算离线；点“离线”可手动切")
+            item = c.button(text, "mode", "真实判定：后台对 origin 跑 git ls-remote，3 秒超时算离线；认证失败、地址不对、没有 origin 会分别写明；点“离线”可手动切")
             item.setCheckable(True)
             item.clicked.connect(lambda _checked=False, k=key: self.set_net(k))
             net_group.addButton(item)
@@ -262,6 +263,7 @@ class CockpitWindow(QMainWindow):
     def set_net(self, key: str) -> None:
         if key == "off":
             self.online = False
+            self.net_note = "手动切到离线，没探测网络"
             self._render()
         else:
             self.probe()
@@ -324,12 +326,13 @@ class CockpitWindow(QMainWindow):
         self._render()
 
     def probe(self) -> None:
-        runner = ActionRunner(lambda: actions.probe_online(self.options.root), self)
+        runner = ActionRunner(lambda: actions.probe_origin(self.options.root), self)
         runner.probed.connect(self._on_probed)
         self._track(runner)
 
-    def _on_probed(self, online: bool) -> None:
-        self.online = online
+    def _on_probed(self, probe: actions.OriginProbe) -> None:
+        self.online = probe.online
+        self.net_note = probe.text
         self._render()
 
     # ------------------------------------------------ 画
@@ -354,7 +357,7 @@ class CockpitWindow(QMainWindow):
         }
         self.station.set_bc_time((self.options.now or datetime.now(UTC)).astimezone(self.offset).strftime("%Y-%m-%d %H:%M"))
         self.station.show_view(vm.station_vm(board, self.home_vm.hot + self.home_vm.rest, self.online, identity,
-                                          self.options.manual_branch, [], DECISION_BUTTONS_WIRED))
+                                          self.options.manual_branch, [], DECISION_BUTTONS_WIRED, self.net_note))
         for key, button in self.net_buttons.items():
             button.setChecked((key == "on") == bool(self.online))
         self._feed_flow_and_tools(board)

@@ -1,6 +1,7 @@
 """工程工位的本机动作。整个包里只有这个文件允许起子进程和写文件。
 
-    probe_online()     后台对 origin 跑 git ls-remote，3 秒超时，失败算离线；不访问别的外网。
+    probe_origin()     后台对 origin 跑 git ls-remote，3 秒超时；超时、网络不通、认证失败、地址错误、没有 origin 分别写明；不访问别的外网。
+    probe_online()     同上，只给“在线与否”（非 0 退出码、超时都算 False）。
     run_check()        跑 plc check / plc docs check / docs sync --dry-run，返回回执（命令 + 退出码）。
     bc_next_id()       按 02_业务变更记录.md 里同年月用过的最大序号给下一个 BC 编号（每月从 000 起）。
     bc_preview()       按目标表头（11 栏）和用户填的表单生成整行，不写；没填好就拒绝。
@@ -71,16 +72,94 @@ def no_prompt_env() -> dict[str, str]:
     return {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
 
 
-def probe_online(root: Path, runner: Callable[..., Any] = subprocess.run) -> bool:
+@dataclass(frozen=True)
+class OriginProbe:
+    """对 origin 跑一次 ``git ls-remote`` 的结论：只有 ``online`` 算在线，其余各写明是哪一种读不到。
+
+    kind：online 在线；timeout 超时；network 网络不通（域名解析、连接被拒、证书等）；auth 认证失败；
+    bad_url origin 地址不对、仓库不存在或没有访问权限；no_origin 这个仓库没配 origin；empty 连上了但没有 HEAD；
+    no_git 本机找不到 git；other 其他失败（detail 带 git 的第一行报错，已抹掉网址里的账号口令）。
+    """
+
+    kind: str
+    detail: str = ""
+
+    @property
+    def online(self) -> bool:
+        return self.kind == "online"
+
+    @property
+    def text(self) -> str:
+        """一句话给人看。"""
+        base = PROBE_TEXT.get(self.kind, "读 origin 失败")
+        return f"{base}：{self.detail}" if self.detail and self.kind == "other" else base
+
+
+PROBE_TEXT = {
+    "online": "在线",
+    "timeout": f"离线：连 origin 超过 {PROBE_TIMEOUT} 秒没回应（超时）",
+    "network": "离线：连不上 origin（网络不通、域名解析失败或连接被拒）",
+    "auth": "连上了，但 origin 拒绝登录（认证失败）：运行 gh auth login，或检查凭据后点“重新读取”",
+    "bad_url": "origin 地址不对、仓库不存在或没有访问权限：用 git remote -v 核对（私有库没登录时 GitHub 也这么回）",
+    "no_origin": "这个仓库没有配置 origin：用 git remote -v 核对",
+    "empty": "连上了 origin，但读不到 HEAD（空仓库？）",
+    "no_git": "本机找不到 git 程序",
+    "other": "读 origin 失败",
+}
+
+# 按顺序匹配（小写）；git 的报错文字固定用英文（探测时设了 LC_ALL=C）。
+_PROBE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("no_origin", ("'origin' does not appear to be a git repository",)),
+    ("auth", ("authentication failed", "could not read username", "could not read password", "terminal prompts disabled",
+              "permission denied", "access denied", "error: 401", "error: 403", "invalid username or password", "bad credentials")),
+    ("bad_url", ("repository not found", "error: 404", "does not appear to be a git repository", "not a git repository",
+                 "is not supported", "invalid port", "unable to find remote helper", "no such file or directory",
+                 "url rejected", "malformed")),
+    ("network", ("could not resolve host", "failed to connect", "connection timed out", "connection refused", "timed out",
+                 "network is unreachable", "connection reset", "ssl certificate", "ssl connect", "ssl_error", "schannel", "gnutls",
+                 "openssl", "tlsv1", "tls handshake", "proxy", "no route to host", "unable to access")),
+)
+_URL_CREDENTIALS = re.compile(r"(://)[^/\s]*@")  # 吃到第一个 / 之前的最后一个 @：口令里有原样的 @ 也整段抹掉
+
+
+def _scrub(text: str) -> str:
+    """git 的报错里常带网址，网址里可能有 user:token@：抹掉再给人看。"""
+    return _URL_CREDENTIALS.sub(r"\1***@", text)
+
+
+def classify_probe(returncode: int, stderr: str) -> OriginProbe:
+    """把 ``git ls-remote --exit-code origin HEAD`` 的非 0 退出和报错文字归到一种。"""
+    text = (stderr or "").lower()
+    for kind, needles in _PROBE_RULES:
+        if any(needle in text for needle in needles):
+            return OriginProbe(kind)
+    if returncode == 2 and not text.strip():  # --exit-code：连上了，但没有匹配的引用
+        return OriginProbe("empty")
+    first = next((line.strip() for line in (stderr or "").splitlines() if line.strip()), "")
+    detail = _scrub(first)[:80]
+    return OriginProbe("other", f"rc {returncode}" + (f"，{detail}" if detail else ""))
+
+
+def probe_origin(root: Path, runner: Callable[..., Any] = subprocess.run) -> OriginProbe:
     try:
         result = runner(
             ["git", "ls-remote", "--exit-code", "origin", "HEAD"],
             cwd=str(root), capture_output=True, encoding="utf-8", timeout=PROBE_TIMEOUT, check=False,
-            env=no_prompt_env(), **quiet(),
+            env={**no_prompt_env(), "LC_ALL": "C", "LANGUAGE": "C"}, **quiet(),
         )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return bool(result.returncode == 0)
+    except subprocess.TimeoutExpired:
+        return OriginProbe("timeout")
+    except FileNotFoundError:
+        return OriginProbe("no_git")
+    except (OSError, subprocess.SubprocessError) as error:
+        return OriginProbe("other", _scrub(str(error))[:80])
+    if result.returncode == 0:
+        return OriginProbe("online")
+    return classify_probe(int(result.returncode), str(result.stderr or ""))
+
+
+def probe_online(root: Path, runner: Callable[..., Any] = subprocess.run) -> bool:
+    return probe_origin(root, runner).online
 
 
 CHECKS = {
