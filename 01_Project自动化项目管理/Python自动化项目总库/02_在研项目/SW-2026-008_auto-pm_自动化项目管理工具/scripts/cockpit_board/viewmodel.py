@@ -833,6 +833,7 @@ def project_vm(
     ]
     changes = [ChangeRow(c.change_id, c.raised or "日期待补", c.kind, c.what, c.status) for c in project.changes]
     changes += [ChangeRow(c.card_id, "", "实施卡", c.title, c.status) for c in project.cards]
+    changes += [ChangeRow(o.change_id, o.raised or "日期待补", f"变更单 {o.domain}", o.what, o.status) for o in project.change_orders]
     changes += [
         ChangeRow(m.change_id, fmt(m.updated_at, offset), "收口", pd._short(m.title, 50), m.closure_state)
         for m in project.missions
