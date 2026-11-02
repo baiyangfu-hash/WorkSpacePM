@@ -300,6 +300,12 @@ def _json(text: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _has_list(text: str, key: str) -> bool:
+    """输出是不是一份有 ``key`` 列表的 JSON（空列表也算读成功）；不是就说明没读懂，不能当成“没有”。"""
+
+    return isinstance(_json(text).get(key), list)
+
+
 def parse_pending(text: str, project_id: str) -> list[Target]:
     """``pm pending --project-id P`` 的 JSON → 待批准范围卡。被新版本取代的（superseded）不列。"""
 
@@ -324,6 +330,24 @@ def parse_inbox(text: str, project_id: str) -> list[Target]:
     return [t for t in found if t.item_id and t.ticket_hash]
 
 
+def _last_line(text: str, limit: int = 200) -> str:
+    lines = [line.strip() for line in (text or "").strip().splitlines() if line.strip()]
+    return lines[-1][:limit] if lines else ""
+
+
+def read_failure(what: str, command: str, rc: int | None, output: str, *, key: str | None = None) -> ReadFailure | None:
+    """一条只读命令读成功了没有；没读成返回 ReadFailure，读成功返回 None。
+
+    ``key`` 为 ``"cards"`` / ``"items"`` 时，退出码 0 但输出不是带这个列表的 JSON 也算没读成（空列表才是“没有”）；
+    ``key`` 为 None 时按口令状态判：第一行认不出也算没读成。
+    """
+
+    if rc != 0:
+        return ReadFailure(what, command, "未验证" if rc is None else f"rc {rc}", _last_line(output))
+    unreadable = parse_pin_status(output) == "unknown" if key is None else not _has_list(output, key)
+    return ReadFailure(what, command, "输出读不懂", _last_line(output)) if unreadable else None
+
+
 # ---------------------------------------------------------------- 决定页的版面数据（纯函数，可单测）
 
 
@@ -340,11 +364,22 @@ class CardVM:
 
 
 @dataclass(frozen=True)
+class ReadFailure:
+    """一次只读命令没读成：页面照实写“没读到”，不能把它当成“没有”。"""
+
+    what: str  # 读什么：口令状态 / 读待批准范围卡 / 读收件箱
+    command: str
+    rc_text: str  # rc 1 / 未验证 / 输出读不懂
+    detail: str = ""
+
+
+@dataclass(frozen=True)
 class DecisionsVM:
     cards: tuple[CardVM, ...] = ()
     pin_mode: str = "unknown"
     pin_text: str = ""
     notes: tuple[str, ...] = field(default_factory=tuple)
+    failures: tuple[ReadFailure, ...] = ()
 
 
 PIN_TEXT = {
@@ -371,6 +406,7 @@ def build_vm(
     pin_mode: str,
     *,
     stale_ids: frozenset[str] = frozenset(),
+    failures: Sequence[ReadFailure] = (),
 ) -> DecisionsVM:
     """把看板的 Mission（需有 mission_id / project_id / title / state / column）和只读命令读到的对象排成卡。
 
@@ -395,4 +431,4 @@ def build_vm(
         cards.append(CardVM(m.column, m.title or m.mission_id, f"{m.mission_id} · {m.project_id} · {pd.STATE_LABEL.get(m.state, m.state)}", target, buttons,
                             "risk" if m.mission_id in stale_ids else ""))
     cards.sort(key=lambda c: (_COLUMN_ORDER.index(c.column) if c.column in _COLUMN_ORDER else 99, c.heading))
-    return DecisionsVM(tuple(cards), pin_mode, PIN_TEXT.get(pin_mode, PIN_TEXT["unknown"]))
+    return DecisionsVM(tuple(cards), pin_mode, PIN_TEXT.get(pin_mode, PIN_TEXT["unknown"]), failures=tuple(failures))

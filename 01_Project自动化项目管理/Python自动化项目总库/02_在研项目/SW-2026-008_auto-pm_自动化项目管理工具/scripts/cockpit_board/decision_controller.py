@@ -66,17 +66,29 @@ class DecisionController(QObject):
         self._reading = True
         self._spawn(self._read_all, self._read_done)
 
-    def _read_all(self) -> tuple[str, dict[str, list[decisions.Target]], dict[str, list[decisions.Target]]]:
+    def _read_all(self) -> tuple[
+        str, dict[str, list[decisions.Target]], dict[str, list[decisions.Target]], list[decisions.ReadFailure]
+    ]:
         extra: dict[str, Any] = {"runner": self.runner} if self.runner else {}
-        pin = decisions.parse_pin_status(actions.run_cli(self.root, "口令状态", ("pm", "approver-pin", "status"), **extra).output)
+        failures: list[decisions.ReadFailure] = []
+
+        def read(label: str, args: Sequence[str], key: str | None) -> actions.Receipt:
+            got = actions.run_cli(self.root, label, args, **extra)
+            bad = decisions.read_failure(label, got.command, got.rc, got.output, key=key)
+            if bad is not None:  # 没读成就记下来，页面写“没读到”；不能当成“没有”
+                failures.append(bad)
+            return got
+
+        got = read("口令状态", ("pm", "approver-pin", "status"), None)
+        pin = decisions.parse_pin_status(got.output) if got.rc == 0 else "unknown"
         pending: dict[str, list[decisions.Target]] = {}
         inbox: dict[str, list[decisions.Target]] = {}
         for pid in self.project_ids:
-            got = actions.run_cli(self.root, "读待批准范围卡", (*decisions.READ_ONLY_COMMANDS["pending"], pid), **extra)
+            got = read(f"读待批准范围卡 {pid}", (*decisions.READ_ONLY_COMMANDS["pending"], pid), "cards")
             pending[pid] = decisions.parse_pending(got.output, pid) if got.rc == 0 else []
-            got = actions.run_cli(self.root, "读收件箱", (*decisions.READ_ONLY_COMMANDS["inbox"], pid), **extra)
+            got = read(f"读收件箱 {pid}", (*decisions.READ_ONLY_COMMANDS["inbox"], pid), "items")
             inbox[pid] = decisions.parse_inbox(got.output, pid) if got.rc == 0 else []
-        return pin, pending, inbox
+        return pin, pending, inbox, failures
 
     def _failed(self, label: str, error: Exception) -> None:
         self.page.add_receipt(actions.Receipt(self.now().strftime("%H:%M"), label, "(未运行)", 1, False, f"{type(error).__name__}: {error}"))
@@ -86,9 +98,9 @@ class DecisionController(QObject):
         if isinstance(result, Exception):
             self._failed("读决定页数据", result)
             return
-        pin, pending, inbox = result
+        pin, pending, inbox, failures = result
         self.pin_mode = pin
-        vm = decisions.build_vm(self.missions, pending, inbox, pin)
+        vm = decisions.build_vm(self.missions, pending, inbox, pin, failures=failures)
         self.page.show_view(vm)
 
     # ------------------------------------------------ 运行

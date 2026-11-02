@@ -249,3 +249,80 @@ def test_controller_does_not_stack_reads_and_survives_a_job_that_raises(qapp: QA
     controller.refresh(["DJ-1"], [])  # 出错后能再读
     _wait(controller, qapp)
     assert len(calls) > before
+
+
+# ---------------------------------------------------------------- 读失败不能显示成“没有”（试用 11-01 决定页空白）
+
+
+class BrokenReads(FakeCli):
+    """只读命令按要求失败：``pending_rc`` / ``pending_out`` 管“读待批准范围卡”，``pin_rc`` 管口令状态。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.pending_rc, self.pending_out = 0, json.dumps({"cards": []})
+        self.inbox_rc, self.inbox_out = 0, json.dumps({"items": []})
+        self.pin_rc = 0
+
+    def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        args = command[3:]
+        if args[:2] == ["pm", "approver-pin"] and self.pin_rc:
+            self.calls.append(args)
+            return subprocess.CompletedProcess(command, self.pin_rc, "", "No such command 'approver-pin'")
+        if args[:2] == ["pm", "pending"]:
+            self.calls.append(args)
+            return subprocess.CompletedProcess(command, self.pending_rc, self.pending_out, "")
+        if args[:3] == ["pm", "inbox", "list"]:
+            self.calls.append(args)
+            return subprocess.CompletedProcess(command, self.inbox_rc, self.inbox_out, "")
+        return super().__call__(command, **kwargs)
+
+
+EMPTY_TEXT = "现在没有要你决定的事。"
+
+
+def _read(qapp: QApplication, tmp_path: Path, fake: FakeCli) -> DecisionController:
+    controller = DecisionController(tmp_path, lambda _t: None, lambda: None, runner=fake, now=lambda: NOW)
+    controller.refresh(["DJ-1"], [])
+    _wait(controller, qapp)
+    return controller
+
+
+def _failure_bars(controller: DecisionController) -> list[QFrame]:
+    return [f for f in controller.page.findChildren(QFrame) if f.property("role") == "read_failure"]
+
+
+def test_a_real_empty_read_still_says_nothing_to_decide(qapp: QApplication, tmp_path: Path) -> None:
+    controller = _read(qapp, tmp_path, BrokenReads())
+    assert controller.page.vm.failures == ()
+    assert EMPTY_TEXT in _texts(controller.page, QLabel)
+    assert not _failure_bars(controller)
+
+
+def test_a_failed_pending_read_says_not_read_and_never_says_nothing(qapp: QApplication, tmp_path: Path) -> None:
+    fake = BrokenReads()
+    fake.pending_rc, fake.pending_out = 1, "Error: 未找到命令"
+    controller = _read(qapp, tmp_path, fake)
+    assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("读待批准范围卡 DJ-1", "rc 1")]
+    texts = _texts(controller.page, QLabel)
+    assert EMPTY_TEXT not in texts  # 读失败时不能说“没有”
+    assert any("没读到：读待批准范围卡 DJ-1（rc 1）" in t for t in texts)
+    assert any("pm pending" in t for t in texts)  # 带上命令名
+    assert len(_failure_bars(controller)) == 1
+
+
+def test_an_unreadable_inbox_output_with_exit_code_zero_is_also_not_read(qapp: QApplication, tmp_path: Path) -> None:
+    fake = BrokenReads()
+    fake.inbox_out = "这是旧版的纯文字输出，不是 JSON"
+    controller = _read(qapp, tmp_path, fake)
+    assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("读收件箱 DJ-1", "输出读不懂")]
+    assert EMPTY_TEXT not in _texts(controller.page, QLabel)
+
+
+def test_a_failed_pin_status_read_shows_the_command_and_exit_code(qapp: QApplication, tmp_path: Path) -> None:
+    fake = BrokenReads()
+    fake.pin_rc = 2
+    controller = _read(qapp, tmp_path, fake)
+    assert controller.pin_mode == "unknown"
+    assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("口令状态", "rc 2")]
+    texts = _texts(controller.page, QLabel)
+    assert any("approver-pin" in t for t in texts) and any("No such command" in t for t in texts)
