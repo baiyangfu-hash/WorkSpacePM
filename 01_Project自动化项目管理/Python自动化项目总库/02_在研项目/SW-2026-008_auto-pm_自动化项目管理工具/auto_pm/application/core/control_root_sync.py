@@ -43,6 +43,10 @@ class SyncReport:
     unique_ahead: tuple[str, ...] = ()
     dirty_in_scope: tuple[str, ...] = ()
     drift_in_scope: tuple[str, ...] = ()
+    # Local commits that change files, yet the scope holds exactly what ``origin/main`` holds: most likely squashed into main.
+    maybe_squashed: bool = False
+    # Commits ahead of main that ``git cherry`` does not list (merge commits).
+    other_ahead: int = 0
     note: str = ""
     # No remote called origin at all: there is nothing to be out of step with.  Reported as "not verified" by the data, but the
     # commands print nothing for it (a lone local repository would otherwise get a useless line on every command).
@@ -80,12 +84,21 @@ class SyncReport:
                 + _shown(self.duplicate_ahead)
                 + "。这些重复提交让控制根无法快进。需要用户决定如何对齐 main（不要自行 reset 或删除）。"
             )
-        if self.unique_ahead:
+        if self.unique_ahead and self.maybe_squashed:
+            out.append(
+                f"控制根有 {len(self.unique_ahead)} 个 origin/main 里没有的本地提交："
+                + _shown(self.unique_ahead)
+                + "，但本项目范围内的文件和 origin/main 完全一致：内容可能已被 squash 合并进 main。"
+                "请用户确认后再对齐 main（不要自行 reset 或删除，也不要为它们再推一个 PR）。"
+            )
+        elif self.unique_ahead:
             out.append(
                 f"控制根有 {len(self.unique_ahead)} 个 origin/main 里没有的本地提交："
                 + _shown(self.unique_ahead)
                 + "。先推送成 PR 或交用户处理，再对齐 main。"
             )
+        if self.other_ahead:
+            out.append(f"控制根还有 {self.other_ahead} 个 origin/main 里没有的本地合并提交。需要用户决定如何对齐 main（不要自行 reset 或删除）。")
         if self.dirty_in_scope:
             out.append(
                 f"控制根里归属范围内有 {len(self.dirty_in_scope)} 个未提交的文件：" + _shown(self.dirty_in_scope)
@@ -106,6 +119,8 @@ class SyncReport:
             "unique_ahead": list(self.unique_ahead),
             "dirty_in_scope": list(self.dirty_in_scope),
             "drift_in_scope": list(self.drift_in_scope),
+            "maybe_squashed": self.maybe_squashed,
+            "other_ahead": self.other_ahead,
             "blocks_run_start": self.blocks_run_start,
             "note": self.note,
             "no_origin": self.no_origin,
@@ -172,18 +187,28 @@ class ControlRootSyncService:
         ahead, behind = int(counts[0]), int(counts[1])
         duplicate: list[str] = []
         unique: list[str] = []
+        unique_full: list[str] = []
         if ahead:
             for line in self._text(["cherry", MAIN_REF, "HEAD"]).splitlines():
                 mark, _, commit = line.partition(" ")
-                (duplicate if mark == "-" else unique).append(commit[:10])
+                if mark == "-":
+                    duplicate.append(commit[:10])
+                else:
+                    unique.append(commit[:10])
+                    unique_full.append(commit)
         dirty: tuple[str, ...] = ()
         drift: tuple[str, ...] = ()
         if scope:
             specs = ["--", *scope]
-            dirty = self._paths(["status", "--porcelain", "-z", "--untracked-files=all", *specs], status_lines=True)
+            # --no-renames: a staged rename would add a second, status-less field that a directory name with a space as its
+            # third character ("项目 甲/…") makes look like a status line.
+            dirty = self._paths(
+                ["status", "--porcelain", "-z", "--no-renames", "--untracked-files=all", *specs], status_lines=True
+            )
             changed = self._paths(["diff", "--name-only", "-z", "--no-renames", MAIN_REF, *specs])
             untracked = self._paths(["ls-files", "--others", "--exclude-standard", "-z", *specs])
             drift = tuple(sorted(set(changed) | set(untracked)))
+        maybe_squashed = bool(scope) and not drift and any(self._changes_files(commit) for commit in unique_full)
         return SyncReport(
             verified=True,
             behind=behind,
@@ -192,7 +217,14 @@ class ControlRootSyncService:
             unique_ahead=tuple(unique),
             dirty_in_scope=dirty,
             drift_in_scope=drift,
+            maybe_squashed=maybe_squashed,
+            other_ahead=max(0, ahead - len(duplicate) - len(unique)),
         )
+
+    def _changes_files(self, commit: str) -> bool:
+        """Does the commit change any file?  (An empty commit says nothing about squashing.)"""
+
+        return bool(self._text(["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--root", commit]).strip("\0"))
 
     def _git(self, arguments: list[str], *, allow_failure: bool = False) -> bytes | None:
         result = run_git_bounded(

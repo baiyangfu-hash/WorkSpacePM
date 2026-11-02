@@ -110,6 +110,7 @@ def test_one_duplicate_commit_ahead_is_named_as_a_duplicate_not_as_new_work(worl
     assert report.behind == 2
     text = "\n".join(report.lines())
     assert "重复" in text and "需要用户决定" in text and "不要自行 reset" in text
+    assert "这些重复提交让控制根无法快进" in text  # the reason the user is asked, not only the instruction
 
 
 def test_a_local_commit_main_does_not_have_is_reported_as_unique(world: World) -> None:
@@ -269,3 +270,91 @@ def test_verify_hint_survives_a_run_without_owned_paths(capsys: pytest.CaptureFi
     pm_closure_cli._echo_run_drift_hint(ctx, types.SimpleNamespace())  # type: ignore[arg-type]
     # Nothing raised; stderr may be empty (no origin) or carry an "unverified" line.
     assert "Traceback" not in capsys.readouterr().err
+
+
+def test_a_staged_rename_in_a_folder_whose_third_character_is_a_space_keeps_both_real_names(world: World) -> None:
+    """Audit 539: the rename's old path has no status prefix; "项目 甲/…" has a space as its third character."""
+    _commit_file(world.control, "项目 甲/a.txt", "x\n", "folder with a space")
+    _git(world.control, "push", "-q", "origin", "HEAD:main")
+    _git(world.control, "fetch", "-q", "origin")
+    _git(world.control, "mv", "项目 甲/a.txt", "项目 甲/b.txt")
+
+    report = world.service().check(("项目 甲",))
+
+    assert report.dirty_in_scope == ("项目 甲/a.txt", "项目 甲/b.txt")
+    assert all(not name.startswith("甲/") for name in report.dirty_in_scope)
+
+
+def test_local_commits_whose_content_is_already_in_main_are_not_offered_for_another_pr(world: World) -> None:
+    """Audit 539: main squashed two local commits into one (different patch); the scope already matches main."""
+    _commit_file(world.control, "proj/a.txt", "v1.5\n", "local step 1")
+    _commit_file(world.control, "proj/a.txt", "v2\n", "local step 2")
+    _commit_file(world.upstream, "proj/a.txt", "v2\n", "squashed into main")
+    world.push_upstream()
+
+    report = world.service().check(SCOPE)
+
+    assert report.ahead == 2 and len(report.unique_ahead) == 2 and not report.drift_in_scope
+    assert report.maybe_squashed
+    text = "\n".join(report.lines())
+    assert "内容可能已被 squash 合并进 main" in text and "请用户确认后再对齐 main" in text
+    assert "先推送成 PR" not in text
+
+
+def test_an_empty_local_commit_says_nothing_about_squashing(world: World) -> None:
+    _git(world.control, "commit", "-q", "--allow-empty", "-m", "empty")
+    report = world.service().check(SCOPE)
+    assert len(report.unique_ahead) == 1 and not report.maybe_squashed
+    assert "先推送成 PR" in "\n".join(report.lines())
+
+
+def test_a_local_commit_that_differs_from_main_in_the_scope_is_still_offered_as_work(world: World) -> None:
+    _commit_file(world.control, "proj/a.txt", "only local\n", "real local work")
+    report = world.service().check(SCOPE)
+    assert not report.maybe_squashed and "先推送成 PR" in "\n".join(report.lines())
+
+
+def test_a_local_merge_commit_ahead_of_main_is_not_silent(world: World) -> None:
+    _git(world.control, "switch", "-q", "-c", "side")
+    _commit_file(world.control, "other/side.txt", "s\n", "side work")
+    _git(world.control, "switch", "-q", "main")
+    _git(world.control, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+
+    report = world.service().check(SCOPE)
+
+    assert report.ahead == 2 and len(report.unique_ahead) == 1 and report.other_ahead == 1
+    assert "本地合并提交" in "\n".join(report.lines())
+
+
+def test_the_notice_uses_the_cards_own_scope_paths_when_given(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Audit 539 (surviving mutant): approval must judge the card's paths, the project folder only when none are given."""
+    asked: list[tuple[str, ...]] = []
+
+    class Recorder:
+        def __init__(self, _root: object) -> None:
+            pass
+
+        def project_scope(self, _project_id: str) -> tuple[str, ...]:
+            return ("the-project-folder",)
+
+        def check(self, scope: tuple[str, ...]) -> Any:
+            asked.append(tuple(scope))
+            return SimpleNamespace(lines=lambda: ())
+
+    monkeypatch.setattr(pm_cli, "ControlRootSyncService", Recorder)
+    pm_cli._control_root_sync_notice(_ctx(tmp_path), project_id="SW-2026-777", scope_paths=("a/x.py", "a/y.py"))
+    pm_cli._control_root_sync_notice(_ctx(tmp_path), project_id="SW-2026-777")
+
+    assert asked == [("a/x.py", "a/y.py"), ("the-project-folder",)]
+
+
+def test_approve_hands_the_cards_scope_paths_to_the_notice() -> None:
+    """Structure: the call in ``approve_pm`` names ``scope_paths`` (dropping it falls back to the whole project folder)."""
+    tree = ast.parse(Path(pm_cli.__file__).read_text(encoding="utf-8"))
+    function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "approve_pm")
+    calls = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_control_root_sync_notice"
+    ]
+    assert calls and all("scope_paths" in {keyword.arg for keyword in call.keywords} for call in calls)
