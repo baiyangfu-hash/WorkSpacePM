@@ -32,6 +32,48 @@ def git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
 
+def check_core_shards() -> None:
+    """The Windows core shards must cover every test file exactly once, and the check must be able to fail."""
+    sys.path.insert(0, str(HERE))
+    import core_shards  # imported here: only this check needs it
+
+    def expect(name: str, got: object, want: object) -> None:
+        ok = got == want
+        print(f"{'ok  ' if ok else 'FAIL'} {name}: got {got!r}, expected {want!r}")
+        if not ok:
+            FAILS.append(name)
+
+    real = core_shards.problems()
+    expect("the real core shard split is consistent", real, [])
+    real_files = set(core_shards.core_test_files())
+    covered = {n for files in core_shards.EXPLICIT.values() for n in files if n.startswith("tests/core/")}
+    ignored = {a.removeprefix("--ignore=") for a in core_shards.arguments(core_shards.REST) if a.startswith("--ignore=")}
+    expect("rest ignores exactly the explicitly listed core files", ignored == covered, True)
+    expect("every listed core file is a real test file", covered <= real_files, True)
+
+    saved = dict(core_shards.EXPLICIT)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests" / "core").mkdir(parents=True)
+            for name in ("test_a.py", "test_b.py"):
+                (root / "tests" / "core" / name).write_text("", encoding="utf-8")
+            core_shards.EXPLICIT.clear()
+            core_shards.EXPLICIT["one"] = ("tests/core/test_a.py",)
+            expect("a clean split has no problems", core_shards.problems(root), [])
+            core_shards.EXPLICIT["one"] = ("tests/core/test_gone.py",)
+            expect("a listed file that does not exist -> problem", len(core_shards.problems(root)), 1)
+            core_shards.EXPLICIT["one"] = ("tests/core/test_a.py",)
+            core_shards.EXPLICIT["two"] = ("tests/core/test_a.py",)
+            expect("a file listed in two shards -> problem", len(core_shards.problems(root)), 1)
+            core_shards.EXPLICIT.clear()
+            core_shards.EXPLICIT["one"] = ("tests/core/test_a.py", "tests/core/test_b.py")
+            expect("every core file listed, nothing left for rest -> problem", len(core_shards.problems(root)), 1)
+    finally:
+        core_shards.EXPLICIT.clear()
+        core_shards.EXPLICIT.update(saved)
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
@@ -78,6 +120,8 @@ def main() -> int:
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "remove the leak again")
         check("added then removed inside the range -> scan still fails", run(str(SCAN), "main", cwd=repo), 1)
+
+    check_core_shards()
 
     print("self-test:", "FAILED " + ", ".join(FAILS) if FAILS else "all checks behaved as expected")
     return 1 if FAILS else 0
