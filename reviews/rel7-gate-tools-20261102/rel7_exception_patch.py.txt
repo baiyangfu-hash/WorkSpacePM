@@ -1,0 +1,75 @@
+"""Option A (named narrow exception, approved by the coordinator 2026-11-02, audit 558 criteria) for the release 7 gate G3 'orient has no conflict'.
+The exception list is hard-coded in the gates script (the card's data cannot extend it); counter-examples are checked inside G8."""
+import io
+
+p = "m3-rel6/derive_rel7.py"
+s = io.open(p, encoding="utf-8", newline="").read()
+if "orient_ok" in s:
+    raise SystemExit("already patched")
+anchor = 'io.open(EV / "rel7_gates.py", "w", encoding="utf-8", newline="").write(g)'
+assert s.count(anchor) == 1
+patch = r'''
+# --- release 7: the declared narrow exception for the known stuck B2 Run (hard-coded; audit 558) ---
+FUNC = """
+KNOWN_STUCK_RUN = "RUN-SW-2026-008-CHG-SCPT-2026-471-01"  # hard-coded exception object (release 7 card, section 1)
+
+
+def orient_ok(conflicts: object, orient_run: object, work_state: object) -> bool:
+    \"\"\"No conflict at all passes; otherwise ONLY the exact list ['LEASE_EXPIRED'] whose single object is the known stuck B2 Run (Work still IN_PROGRESS).\"\"\"
+    if conflicts == []:
+        return True
+    return (type(conflicts) is list and conflicts == ["LEASE_EXPIRED"] and type(orient_run) is str and orient_run == KNOWN_STUCK_RUN
+            and work_state == "IN_PROGRESS")
+
+
+def orient_cases() -> list[dict]:
+    K = KNOWN_STUCK_RUN
+    table = [
+        ("no-conflict-is-a-normal-pass", [], None, None, True),
+        ("exactly-the-known-run", ["LEASE_EXPIRED"], K, "IN_PROGRESS", True),
+        ("another-expired-running-run-in-the-ledger-that-orient-does-not-report", ["LEASE_EXPIRED"], K, "IN_PROGRESS", True),
+        ("one-extra-conflict", ["LEASE_EXPIRED", "RUN_BLOCKED"], K, "IN_PROGRESS", False),
+        ("other-conflict-only", ["RUN_BLOCKED"], K, "IN_PROGRESS", False),
+        ("a-different-object", ["LEASE_EXPIRED"], "RUN-SW-2026-008-OTHER-01", "IN_PROGRESS", False),
+        ("the-old-codex-run-is-not-the-exception-object", ["LEASE_EXPIRED"], "RUN-SW008-A2-201-03", "IN_PROGRESS", False),
+        ("no-object-reported", ["LEASE_EXPIRED"], None, "IN_PROGRESS", False),
+        ("work-not-in-progress", ["LEASE_EXPIRED"], K, "CANCELLED", False),
+        ("malformed-conflicts-string", "LEASE_EXPIRED", K, "IN_PROGRESS", False),
+        ("malformed-conflicts-lowercase", ["lease_expired"], K, "IN_PROGRESS", False),
+        ("malformed-conflicts-none", None, K, "IN_PROGRESS", False),
+        ("malformed-object-list", ["LEASE_EXPIRED"], [K], "IN_PROGRESS", False),
+        ("malformed-conflicts-unreadable", ["UNREADABLE"], K, "IN_PROGRESS", False),
+    ]
+    return [{"id": i, "expected": e, "got": orient_ok(c, r, w)} for i, c, r, w, e in table]
+"""
+g = sw(g, "def sha(b: bytes) -> str:", FUNC.lstrip(chr(10)) + chr(10) + chr(10) + "def sha(b: bytes) -> str:")
+old_c = 'f3.get("orient_conflicts") == []'
+new_c = 'orient_ok(f3.get("orient_conflicts"), f3.get("orient_exception_object"), f3.get("orient_exception_work_state"))'
+g = sw(g, old_c, new_c)
+old_o = '    audit_ruff = sh([PY, "-B", "-m", "ruff", "check", "--no-cache", "--statistics", "."], cwd=PROJ)\n'
+new_o = (
+    '    # read-only facts for the declared exception: the run orient itself reports, the state of its Work, and (informational) every expired RUNNING Run of the ledger\n'
+    '    try:\n'
+    '        facts["orient_exception_object"] = (json.JSONDecoder().raw_decode(orient.stdout[orient.stdout.index("{"):])[0].get("run") or {}).get("run_id")\n'
+    '    except ValueError:\n'
+    '        facts["orient_exception_object"] = None\n'
+    '    import sqlite3\n'
+    '    con_ = sqlite3.connect("file:" + str(ROOT / ".auto-pm" / "continuity.db").replace(chr(92), "/") + "?mode=ro", uri=True)\n'
+    '    now_ = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()\n'
+    '    facts["ledger_expired_running_runs_informational"] = sorted(r[0] for r in con_.execute("select r.run_id from run_items r join execution_leases l on l.run_id=r.run_id where r.state=? and l.expires_at<?", ("RUNNING", now_)))\n'
+    '    wst_ = con_.execute("select state from work_items where work_id=?", ("WORK-MSN-415BA3D417866398",)).fetchone()\n'
+    '    facts["orient_exception_work_state"] = wst_[0] if wst_ else None\n'
+    '    con_.close()\n'
+) + old_o
+g = sw(g, old_o, new_o)
+old_w = '    write("G8_mutations.json", json.dumps(mutations, ensure_ascii=False, indent=1) + NL)\n'
+new_w = old_w + '    write("G8_orient_exception.json", json.dumps(orient_cases(), ensure_ascii=False, indent=1) + NL)\n'
+g = sw(g, old_w, new_w)
+old_g8 = 'done("G8", len(muts) == 3 and all(m["killed"] and m["restored_bytes_equal"] for m in muts) and same,'
+new_g8 = ('oc_ = json.load(open(G + "/G8_orient_exception.json", encoding="utf-8"))\n'
+          '    done("G8", len(muts) == 3 and all(m["killed"] and m["restored_bytes_equal"] for m in muts) and same and len(oc_) == 14 and all(c["got"] == c["expected"] for c in oc_),')
+g = sw(g, old_g8, new_g8)
+'''
+s = s.replace(anchor, patch + anchor)
+io.open(p, "w", encoding="utf-8", newline="").write(s)
+print("patched")

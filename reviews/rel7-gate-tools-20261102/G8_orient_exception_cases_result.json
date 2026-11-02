@@ -1,0 +1,72 @@
+[
+ {
+  "id": "no-conflict-is-a-normal-pass",
+  "expected": true,
+  "got": true
+ },
+ {
+  "id": "exactly-the-known-run",
+  "expected": true,
+  "got": true
+ },
+ {
+  "id": "another-expired-running-run-in-the-ledger-that-orient-does-not-report",
+  "expected": true,
+  "got": true
+ },
+ {
+  "id": "one-extra-conflict",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "other-conflict-only",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "a-different-object",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "the-old-codex-run-is-not-the-exception-object",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "no-object-reported",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "work-not-in-progress",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "malformed-conflicts-string",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "malformed-conflicts-lowercase",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "malformed-conflicts-none",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "malformed-object-list",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "malformed-conflicts-unreadable",
+  "expected": false,
+  "got": false
+ }
+]
