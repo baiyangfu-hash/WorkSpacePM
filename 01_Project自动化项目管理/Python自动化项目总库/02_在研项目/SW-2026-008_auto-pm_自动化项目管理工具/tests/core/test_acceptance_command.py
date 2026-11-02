@@ -137,12 +137,12 @@ def test_git_with_a_chinese_path_mentions_quotepath() -> None:
     assert len(hints) == 1 and "core.quotePath=false" in hints[0]
 
 
-def test_a_chinese_path_for_pytest_needs_no_hint() -> None:
-    assert command_hints("python -m pytest 目录/测试.py", windows=False) == ()
+def test_a_chinese_path_for_pytest_needs_no_encoding_hint() -> None:
+    assert command_hints("python -m pytest {worktree}/目录/测试.py", windows=False) == ()
 
 
 def test_a_wildcard_argument_is_called_out() -> None:
-    hints = command_hints("python -m pytest tests/test_*.py", windows=False)
+    hints = command_hints("python -m pytest {worktree}/tests/test_*.py", windows=False)
     assert len(hints) == 1 and "通配符" in hints[0]
 
 
@@ -182,3 +182,37 @@ def test_a_plan_with_plain_commands_has_no_problem() -> None:
 def test_a_blank_command_is_reported_once_by_the_count_rule_only() -> None:
     problems = _problems("python -m pytest", "  ")
     assert len(problems) == 1 and "每条验收标准的命令和退出码" in problems[0]
+
+
+# ── a command run from the control root must be pointed at the Run's worktree ───────────────────────────
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python -m pytest tests/test_alarm.py -q",
+        "pytest tests -q",
+        "python scripts/check_io.py",
+        r".venv\Scripts\python.exe -m pytest tests",
+    ],
+)
+def test_pytest_and_scripts_that_do_not_name_the_worktree_get_the_hint(command: str) -> None:
+    hints = command_hints(command, windows=True)
+    assert len(hints) == 1 and "控制根" in hints[0] and "{worktree}" in hints[0] and "AUTO_PM_RUN_WORKTREE" in hints[0]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python -m pytest {worktree}/tests/test_alarm.py -q",
+        "python {worktree}/scripts/check_io.py",
+        "python -m pytest .auto-pm/worktrees/trae/tests -q",
+        "python -B main.py plc check DJ-2026-011",  # cockpit commands are pointed at the worktree by environment
+        r".venv\Scripts\python.exe -B main.py doc check",
+        r".venv\Scripts\python.exe -B C:\work\main.py doc check",
+        "python -c pass",
+        "git -C {worktree} status --short",
+    ],
+)
+def test_commands_that_name_the_worktree_or_are_cockpit_commands_get_no_worktree_hint(command: str) -> None:
+    assert command_hints(command, windows=True) == ()

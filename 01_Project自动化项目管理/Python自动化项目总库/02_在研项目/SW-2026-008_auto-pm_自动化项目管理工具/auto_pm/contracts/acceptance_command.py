@@ -18,6 +18,7 @@ from pathlib import PurePath
 __all__ = [
     "GIT_QUOTEPATH_OPTION",
     "AcceptanceCommandError",
+    "WORKTREE_PLACEHOLDER",
     "ParsedCommand",
     "command_hints",
     "command_problem",
@@ -215,6 +216,31 @@ def with_git_quotepath(argv: tuple[str, ...]) -> tuple[tuple[str, ...], bool]:
     return (argv[0], *GIT_QUOTEPATH_OPTION, *argv[1:]), True
 
 
+#: Spelled in an approved command; ``pm verify`` replaces it with the Run's worktree path before executing.
+WORKTREE_PLACEHOLDER = "{worktree}"
+
+
+def _targets_worktree(argv: tuple[str, ...]) -> bool:
+    """Does a pytest or script command point at the Run's worktree (placeholder or an explicit ``git -C`` style path)?"""
+
+    return any(WORKTREE_PLACEHOLDER in item or "worktrees" in item.replace("\\", "/") for item in argv[1:])
+
+
+def _runs_pytest_or_script(argv: tuple[str, ...]) -> bool:
+    """pytest, or a Python script other than ``main.py`` (cockpit commands are pointed at the worktree by environment)."""
+
+    name = PurePath(argv[0].replace("\\", "/")).name.lower()
+    if name.startswith(("pytest", "py.test")):
+        return True
+    if not _is_python(argv[0]):
+        return False
+    rest = argv[1:]
+    if "-m" in rest and rest.index("-m") + 1 < len(rest) and rest[rest.index("-m") + 1] == "pytest":
+        return True
+    scripts = [item for item in rest if item.lower().endswith(".py")]
+    return bool(scripts) and PurePath(scripts[0].replace("\\", "/")).name.lower() != "main.py"
+
+
 def _non_ascii(value: str) -> bool:
     return any(ord(char) > 127 for char in value)
 
@@ -238,6 +264,12 @@ def command_hints(text: str, *, windows: bool | None = None) -> tuple[str, ...]:
         hints.append(
             "git 命令里有中文路径：验证时本系统会自动加 -c core.quotePath=false，"
             "你在终端手跑同一条命令也要加，否则路径会显示成 \\344\\270… 这样的八进制转义"
+        )
+    if _runs_pytest_or_script(argv) and not _targets_worktree(argv):
+        hints.append(
+            "pytest 或脚本命令在控制根里运行，默认检查的是控制根的文件，不是本任务工位里改的文件：路径写成 "
+            f"{WORKTREE_PLACEHOLDER}/…（验证时换成工位路径），或让脚本自己读环境变量 AUTO_PM_RUN_WORKTREE；"
+            "main.py 驾驶舱命令不用管，验证时已指向工位"
         )
     for item in argv[1:]:
         if any(char in item for char in "*?") and not item.startswith("-"):

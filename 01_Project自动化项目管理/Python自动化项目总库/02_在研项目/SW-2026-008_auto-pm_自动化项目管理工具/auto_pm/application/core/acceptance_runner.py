@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from auto_pm.contracts.acceptance_command import (
+    WORKTREE_PLACEHOLDER,
     AcceptanceCommandError,
     command_problem,
     parse_command,
@@ -29,7 +30,9 @@ from auto_pm.contracts.acceptance_command import (
 from auto_pm.contracts.plan_checklist import AcceptanceCheck
 
 __all__ = [
+    "CONTROL_ROOT_ENV",
     "REPORT_DIRECTORY",
+    "WORKSPACE_ENV",
     "AcceptanceScan",
     "AcceptanceScanFinding",
     "WORKTREE_ENV",
@@ -37,6 +40,7 @@ __all__ = [
     "execution_environment",
     "mismatch_lines",
     "refusal_reason",
+    "worktree_environment",
     "run_acceptance_checks",
     "write_report",
 ]
@@ -45,6 +49,9 @@ __all__ = [
 REPORT_DIRECTORY = (".auto-pm", "reports", "acceptance")
 #: Environment variable that tells an approved command where the Run's worktree is.
 WORKTREE_ENV = "AUTO_PM_RUN_WORKTREE"
+#: The cockpit's own switches: the project data to check (the worktree) and the ledger it reports to (the control root).
+WORKSPACE_ENV = "AUTO_PM_WORKSPACE"
+CONTROL_ROOT_ENV = "AUTO_PM_CONTROL_ROOT"
 DEFAULT_TIMEOUT_SECONDS = 900
 _TAIL_LINES = 20
 _TAIL_CHARACTERS = 2000
@@ -89,6 +96,21 @@ class AcceptanceScan:
     missions_scanned: int
     commands_scanned: int
     findings: tuple[AcceptanceScanFinding, ...]
+
+
+def worktree_environment(worktree: str | Path, control_root: str | Path) -> dict[str, str]:
+    """What ties a command run from the control root to the Run's worktree.
+
+    The command runs where ``.venv`` and ``main.py`` live, but it must judge the files the Run changed: cockpit commands
+    (``main.py plc check <PID>``) read ``AUTO_PM_WORKSPACE`` as the project data and ``AUTO_PM_CONTROL_ROOT`` as the ledger,
+    and scripts can read ``AUTO_PM_RUN_WORKTREE`` or take the path through the ``{worktree}`` placeholder.
+    """
+
+    return {
+        WORKTREE_ENV: str(worktree),
+        WORKSPACE_ENV: str(worktree),
+        CONTROL_ROOT_ENV: str(control_root),
+    }
 
 
 def execution_environment(base: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -183,6 +205,12 @@ def _run_one(
     except AcceptanceCommandError as error:
         return _failed(check, (), False, f"命令不能按原文执行：{error}")
     argv, differs = with_git_quotepath(parsed.argv)
+    if any(WORKTREE_PLACEHOLDER in item for item in argv):
+        worktree = env.get(WORKTREE_ENV, "")
+        if not worktree:
+            return _failed(check, argv, differs, f"命令里写了 {WORKTREE_PLACEHOLDER}，但这次验证没有工位路径可换")
+        argv = tuple(item.replace(WORKTREE_PLACEHOLDER, worktree) for item in argv)
+        differs = True
     executable = _resolve_executable(argv[0], cwd, env)
     if executable is None:
         return _failed(check, argv, differs, f"找不到命令 {argv[0]}（在 {cwd} 下、按 PATH 查找）")

@@ -21,6 +21,7 @@ from auto_pm.application.core.acceptance_runner import (
     mismatch_lines,
     refusal_reason,
     run_acceptance_checks,
+    worktree_environment,
     write_report,
 )
 from auto_pm.contracts.acceptance_command import parse_command
@@ -303,3 +304,32 @@ def test_refusal_reason_is_empty_for_a_command_that_would_run_and_names_why_othe
     assert refusal_reason(_quote(PYTHON, "-c", "pass"), cwd=tmp_path) == ""
     assert "shell 符号" in refusal_reason("pytest && ruff check", cwd=tmp_path)
     assert "找不到命令 no-such-tool-xyz" in refusal_reason("no-such-tool-xyz --version", cwd=tmp_path)
+
+
+# ── pointing a command that runs in the control root at the Run's worktree ──────────────────────────────
+
+
+def test_the_worktree_environment_names_the_data_the_ledger_and_the_run_worktree() -> None:
+    assert worktree_environment("/w/trae", "/root") == {
+        "AUTO_PM_RUN_WORKTREE": "/w/trae",
+        "AUTO_PM_WORKSPACE": "/w/trae",
+        "AUTO_PM_CONTROL_ROOT": "/root",
+    }
+
+
+def test_the_worktree_placeholder_is_replaced_with_the_worktree_path_and_recorded_as_a_difference(tmp_path: Path) -> None:
+    worktree = tmp_path / "工位 一"
+    worktree.mkdir()
+    (worktree / "ok.txt").write_text("x", encoding="utf-8")
+    code = "import sys, pathlib; sys.exit(0 if pathlib.Path(sys.argv[1]).exists() else 8)"
+    command = f"{_quote(PYTHON, '-c', code)} '{{worktree}}/ok.txt'"
+    result = run_acceptance_checks(
+        [_check(command)], cwd=tmp_path, extra_env=worktree_environment(worktree, tmp_path), windows=False
+    )[0]
+    assert result.passed and result.argv_differs and result.argv[-1] == f"{worktree}/ok.txt"
+    assert result.command == command  # the approved text is kept verbatim
+
+
+def test_a_placeholder_without_a_worktree_to_put_in_is_a_failure_not_a_literal_path(tmp_path: Path) -> None:
+    result = _run(tmp_path, _quote(PYTHON, "-c", "pass", "{worktree}/x"))
+    assert not result.passed and result.exit_code is None and "{worktree}" in result.error

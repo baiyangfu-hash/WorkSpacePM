@@ -99,15 +99,19 @@ def test_the_success_note_says_how_many_commands_ran_and_where_the_record_is(
     assert not block and "1/1" in note and "与批准的退出码一致" in note and ".auto-pm" in note
 
 
-def test_the_commands_run_from_the_control_root_and_are_told_where_the_runs_worktree_is(
+def test_the_commands_run_from_the_control_root_and_are_pointed_at_the_runs_worktree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Approved commands are written from the workspace root (``.venv`` and ``main.py`` live there; cockpit commands
-    refuse to run inside a worktree), so that is where they run; the Run's worktree arrives as an environment variable."""
+    refuse to run inside a worktree), so that is where they run; the Run's worktree arrives through the environment."""
     _, facade, _ = _verifying(tmp_path)
     worktree = tmp_path / "wt-elsewhere"
     worktree.mkdir()
-    code = "import os, pathlib; print('CWD=' + str(pathlib.Path.cwd().resolve())); print('WT=' + os.environ['AUTO_PM_RUN_WORKTREE'])"
+    code = (
+        "import os, pathlib; print('CWD=' + str(pathlib.Path.cwd().resolve())); "
+        "print('RUN=' + os.environ['AUTO_PM_RUN_WORKTREE']); print('DATA=' + os.environ['AUTO_PM_WORKSPACE']); "
+        "print('LEDGER=' + os.environ['AUTO_PM_CONTROL_ROOT'])"
+    )
     _approved(monkeypatch, (_command(code), 0))
 
     note, block = facade._run_approved_acceptance_checks(
@@ -117,7 +121,94 @@ def test_the_commands_run_from_the_control_root_and_are_told_where_the_runs_work
     assert not block, note
     (report,) = _reports(tmp_path)
     tail = json.loads(report.read_text(encoding="utf-8"))["checks"][0]["output_tail"]
-    assert tail.splitlines() == [f"CWD={tmp_path.resolve()}", f"WT={worktree}"]
+    assert tail.splitlines() == [
+        f"CWD={tmp_path.resolve()}",
+        f"RUN={worktree}",
+        f"DATA={worktree}",
+        f"LEDGER={tmp_path.resolve()}",
+    ]
+
+
+# ── the worktree is what gets judged, never the control root's copy of the same file ────────────────────
+
+_PYTEST_FILE = "test_gate.py"
+
+
+def _pytest_command() -> str:
+    return shlex.join([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "{worktree}/" + _PYTEST_FILE])
+
+
+def _isolated_run(tmp_path: Path) -> tuple[Any, Path]:
+    """A VERIFYING Run whose worktree is a folder of its own, apart from the control root (tmp_path)."""
+    _, facade, _ = _verifying(tmp_path)
+    worktree = tmp_path / "isolated-worktree"
+    worktree.mkdir()
+    return facade, worktree
+
+
+def _judge(facade: Any, worktree: Path, command: str, expected: int, monkeypatch: pytest.MonkeyPatch) -> tuple[bool, str]:
+    _approved(monkeypatch, (command, expected))
+    note, block = facade._run_approved_acceptance_checks(
+        facade._missions.get(MISSION), SimpleNamespace(run_id="RUN-GATE-001", worktree_path=str(worktree))
+    )
+    return block, note
+
+
+def test_a_broken_file_in_the_worktree_fails_pytest_even_though_the_control_roots_copy_is_good(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facade, worktree = _isolated_run(tmp_path)
+    (tmp_path / _PYTEST_FILE).write_text("def test_it():\n    assert True\n", encoding="utf-8")  # the control root's copy: good
+    (worktree / _PYTEST_FILE).write_text("def test_it():\n    assert False\n", encoding="utf-8")  # what the Run produced: broken
+
+    blocked, note = _judge(facade, worktree, _pytest_command(), 0, monkeypatch)
+
+    assert blocked and "期望退出码 0，实际 1" in note
+    (report,) = _reports(tmp_path)
+    check = json.loads(report.read_text(encoding="utf-8"))["checks"][0]
+    assert check["passed"] is False and check["argv"][-1] == f"{worktree}/{_PYTEST_FILE}"
+
+
+def test_the_same_pytest_command_passes_when_the_worktree_is_good_and_the_control_roots_copy_is_broken(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other direction: proof the verdict follows the worktree, not whatever happens to sit in the control root."""
+    facade, worktree = _isolated_run(tmp_path)
+    (tmp_path / _PYTEST_FILE).write_text("def test_it():\n    assert False\n", encoding="utf-8")
+    (worktree / _PYTEST_FILE).write_text("def test_it():\n    assert True\n", encoding="utf-8")
+
+    blocked, note = _judge(facade, worktree, _pytest_command(), 0, monkeypatch)
+
+    assert not blocked, note
+
+
+def _cockpit_control_root(root: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A control root with the cockpit's own ``main.py`` (it imports the real CLI) and a project present only there."""
+    import auto_pm
+
+    (root / "main.py").write_text("from auto_pm.ui.cli.__main__ import cli\ncli()\n", encoding="utf-8")
+    monkeypatch.setenv("PYTHONPATH", str(Path(auto_pm.__file__).resolve().parent.parent))
+    project = root / "DJ-2026-TEST_测试项目"
+    project.mkdir()
+    (project / ".plc.json").write_text('{"name": "DJ-2026-TEST", "version": "V1.0.0", "description": "t", "type": "standard"}', encoding="utf-8")
+    return shlex.join([sys.executable, "-B", "main.py", "project", "show", "DJ-2026-TEST"])
+
+
+def test_a_cockpit_command_judges_the_worktrees_project_not_the_control_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``main.py <cockpit command> <PID>``: the project exists in the control root but not in the Run's worktree."""
+    facade, worktree = _isolated_run(tmp_path)
+    command = _cockpit_control_root(tmp_path, monkeypatch)
+
+    blocked, note = _judge(facade, worktree, command, 0, monkeypatch)
+    assert blocked and "期望退出码 0，实际 1" in note  # control root good, worktree without the project: must fail
+
+    good = worktree / "DJ-2026-TEST_测试项目"
+    good.mkdir()
+    (good / ".plc.json").write_text('{"name": "DJ-2026-TEST", "version": "V1.0.0", "description": "t", "type": "standard"}', encoding="utf-8")
+    blocked, note = _judge(facade, worktree, command, 0, monkeypatch)
+    assert not blocked, note  # and it passes once the worktree has it
 
 
 def test_a_mission_approved_without_commands_is_said_so_not_silently_passed(

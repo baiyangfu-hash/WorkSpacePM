@@ -13,12 +13,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from auto_pm.application.core.acceptance_runner import (
-    WORKTREE_ENV,
     AcceptanceScan,
     AcceptanceScanFinding,
     mismatch_lines,
     refusal_reason,
     run_acceptance_checks,
+    worktree_environment,
     write_report,
 )
 from auto_pm.application.core.approval_proof_service import ApprovalProofError, ApprovalProofService
@@ -1289,8 +1289,9 @@ class PmFacadeService:
 
         Approved commands are written the way ``cockpit-entry`` teaches -- from the workspace root (``.venv\\Scripts\\python.exe
         -B main.py plc check …``, ``git -C .auto-pm\\worktrees\\trae …``) -- and cockpit commands refuse to run inside a
-        worktree (WS-001), so the working directory is the control root and the Run's worktree is handed over as
-        ``AUTO_PM_RUN_WORKTREE`` (use ``git -C`` / ``-w`` to act on the worktree's code).
+        worktree (WS-001), so the working directory is the control root.  What the commands must judge is the Run's worktree:
+        ``AUTO_PM_WORKSPACE`` / ``AUTO_PM_CONTROL_ROOT`` point the cockpit's own commands at it (data = worktree, ledger =
+        control root), ``AUTO_PM_RUN_WORKTREE`` and the ``{worktree}`` placeholder serve pytest and scripts.
         """
 
         checks = self._approved_acceptance_checks(mission)
@@ -1301,7 +1302,7 @@ class PmFacadeService:
         runs = run_acceptance_checks(
             checks,
             cwd=self._store.workspace_root,
-            extra_env={WORKTREE_ENV: str(run.worktree_path)},
+            extra_env=worktree_environment(run.worktree_path, self._store.workspace_root),
         )
         try:
             report = write_report(self._store.workspace_root, run.run_id, runs)
