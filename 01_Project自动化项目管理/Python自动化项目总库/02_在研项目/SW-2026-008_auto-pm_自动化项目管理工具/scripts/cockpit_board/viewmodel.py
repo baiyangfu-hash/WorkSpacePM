@@ -874,6 +874,7 @@ def station_vm(
     manual_branch: str,
     safety_hits: list[str],
     decisions_wired: bool = False,
+    net_note: str = "",
 ) -> StationVM:
     off = online is False
     projects = []
@@ -889,7 +890,9 @@ def station_vm(
         left = card.now_step or card.now_card
         nxt = "照实施卡的未勾项接着做" if project.cards else "没有实施卡：先在第 4 步记一行业务变更（BC），再开卡"
         projects.append((card, left, nxt, files, f"manual/{card.project_id.lower()}", safety))
-    dis_off = (not off, "离线：读不到 origin")
+    # net_note 是探测给出的具体原因（超时 / 认证失败 / 地址错误 / 没有 origin …）；按钮灰着时把它写在按钮旁边
+    reason = net_note if net_note.startswith("离线") else "离线：读不到 origin" + (f"（{net_note}）" if net_note else "")
+    dis_off = (not off, reason)
     steps = [
         # 开分支、改程序都是人在本机做的事，界面没有去核对，所以写“没核对”，不冒充“已完成 / 进行中”
         Step(1, *STEP_TITLES[0], "unk", f"git switch -c {manual_branch} origin/main"),
@@ -921,7 +924,7 @@ def station_vm(
         ("源码", identity.get("source") or "—"),
         ("生效版本", identity.get("effective") or "—"),
         ("控制根", identity.get("control_root") or "—"),
-        ("网络", "离线（git ls-remote 3 秒超时）" if off else ("在线" if online else "未探测")),
+        ("网络", (net_note or "离线（git ls-remote 读不到 origin）") if off else ("在线" if online else "未探测")),
         ("采集", identity.get("collected", "—")),
     ]
     warn = off or identity.get("source", "") != identity.get("configured", identity.get("source", ""))
