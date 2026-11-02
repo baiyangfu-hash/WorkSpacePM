@@ -11,6 +11,7 @@ app.py 接这个页面只需要三件事（S0 合并后再动 app.py）：
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,13 +22,18 @@ from cockpit_board import actions, decisions
 from cockpit_board.widgets.decisions import DecisionsPage
 
 
-def _readable(got: actions.Receipt) -> str:
-    """交给 read_failure 判读的文字：读成功时只看 stdout（stderr 里有启动器横幅，不是数据）；
-    失败时给 stdout 接 stderr，好让页面引到错误原文的末行；stdout 是空的就退回 stderr，免得“没读到”的原因是空白。"""
+def _judged(got: actions.Receipt) -> str:
+    """交给 read_failure 判读的文字，和下面取数用的是同一份：读成功（rc 0）只看 stdout，stderr 里有启动器横幅，不是数据，
+    就算 stderr 恰好有一段像数据的 JSON 也不算；失败时给 stdout 接 stderr，好让红条引到错误原文的末行。"""
 
-    if got.rc == 0:
-        return got.stdout if got.stdout.strip() else got.stderr
-    return got.output
+    return got.stdout if got.rc == 0 else got.output
+
+
+def _read_failure(label: str, got: actions.Receipt, key: str | None) -> decisions.ReadFailure | None:
+    bad = decisions.read_failure(label, got.command, got.rc, _judged(got), key=key)
+    if bad is not None and not bad.detail:  # 例如 stdout 空、原因只在 stderr：别让红条的原文是空白
+        bad = replace(bad, detail=decisions.last_line(got.stderr))
+    return bad
 
 
 class _Job(QThread):
@@ -83,7 +89,7 @@ class DecisionController(QObject):
 
         def read(label: str, args: Sequence[str], key: str | None) -> actions.Receipt:
             got = actions.run_cli(self.root, label, args, **extra)
-            bad = decisions.read_failure(label, got.command, got.rc, _readable(got), key=key)
+            bad = _read_failure(label, got, key)
             if bad is not None:  # 没读成就记下来，页面写“没读到”；不能当成“没有”
                 failures.append(bad)
             return got

@@ -372,3 +372,70 @@ def test_failed_read_shows_stderr_not_the_banner_only(qapp: QApplication, tmp_pa
     fake.pending_rc, fake.pending_out = 1, ""
     controller = _read(qapp, tmp_path, fake)
     assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("读待批准范围卡 DJ-1", "rc 1")]
+
+
+# ---------------------------------------------------------------- 审计 534 存活变异：读不懂也要说“没读到”
+
+
+def test_unreadable_pin_status_shows_a_read_failure_bar(qapp: QApplication, tmp_path: Path) -> None:
+    """口令状态命令退出码 0、第一行却认不出：页面除了写“口令状态未知”，还要有“没读到”红条（原先没有）。"""
+    controller = _read(qapp, tmp_path, FakeCli(pin_text="完全认不出的一行输出\n第二行"))
+    assert controller.pin_mode == "unknown"
+    assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("口令状态", "输出读不懂")]
+    assert "第二行" in controller.page.vm.failures[0].detail  # 红条引输出的末行
+    assert len(_failure_bars(controller)) == 1
+
+
+@pytest.mark.parametrize("body", [{"cards": {"x": 1}}, {"cards": "none"}, {"cards": None}, {"cards": 3}, {"other": []}])
+def test_a_cards_value_that_is_not_a_list_is_not_a_successful_read(qapp: QApplication, tmp_path: Path, body: dict[str, object]) -> None:
+    fake = BrokenReads()
+    fake.pending_out = json.dumps(body)
+    controller = _read(qapp, tmp_path, fake)
+    assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("读待批准范围卡 DJ-1", "输出读不懂")]
+    assert EMPTY_TEXT not in _texts(controller.page, QLabel)  # 没读懂不能说“没有要你决定的事”
+
+
+@pytest.mark.parametrize("body", [{"items": {"x": 1}}, {"items": "none"}, {"items": None}])
+def test_an_items_value_that_is_not_a_list_is_not_a_successful_read(qapp: QApplication, tmp_path: Path, body: dict[str, object]) -> None:
+    fake = BrokenReads()
+    fake.inbox_out = json.dumps(body)
+    controller = _read(qapp, tmp_path, fake)
+    assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("读收件箱 DJ-1", "输出读不懂")]
+
+
+class StderrOnlyJson(BrokenReads):
+    """退出码 0、stdout 是空的，数据样子的 JSON 只出现在 stderr：真实命令不会这样，出现了就是没读对。"""
+
+    def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        done = super().__call__(command, **kwargs)
+        if command[3:5] == ["pm", "pending"]:
+            stray = json.dumps({"cards": [{"card": {"request_id": "X9", "plan_hash": "z" * 64}, "objective": "杂音"}]})
+            return subprocess.CompletedProcess(command, 0, "", stray)
+        return done
+
+
+def test_json_shaped_text_on_stderr_is_neither_data_nor_a_successful_read(qapp: QApplication, tmp_path: Path) -> None:
+    """判读和取数必须用同一份文字：stdout 空、stderr 有像数据的 JSON → 不当数据，也不能判“读成功”再显示“没有”。"""
+    controller = _read(qapp, tmp_path, StderrOnlyJson())
+    texts = _texts(controller.page, QLabel)
+    assert not any("杂音" in t for t in texts)
+    assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("读待批准范围卡 DJ-1", "输出读不懂")]
+    assert "X9" in controller.page.vm.failures[0].detail  # 红条的原文用 stderr 末行，不是空白
+    assert EMPTY_TEXT not in texts
+
+
+def test_stdout_data_wins_over_a_different_json_on_stderr(qapp: QApplication, tmp_path: Path) -> None:
+    class Both(BrokenReads):
+        def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            done = super().__call__(command, **kwargs)
+            if command[3:5] == ["pm", "pending"]:
+                stray = json.dumps({"cards": [{"card": {"request_id": "X9", "plan_hash": "z" * 64}, "objective": "杂音"}]})
+                return subprocess.CompletedProcess(command, 0, done.stdout, stray)
+            return done
+
+    fake = Both()
+    fake.pending_out = json.dumps({"cards": [{"card": {"request_id": "R1", "plan_hash": "h" * 64}, "objective": "真数据"}]})
+    controller = _read(qapp, tmp_path, fake)
+    texts = _texts(controller.page, QLabel)
+    assert any("真数据" in t for t in texts) and not any("杂音" in t for t in texts)
+    assert controller.page.vm.failures == ()
