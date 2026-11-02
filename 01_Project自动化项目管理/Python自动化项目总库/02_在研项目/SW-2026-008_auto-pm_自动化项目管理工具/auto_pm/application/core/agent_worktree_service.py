@@ -54,6 +54,8 @@ RELEASE_FREE_PLACES = 1
 STALE_DAYS = 3
 # Directories ``sweep`` never lists as removable, whatever Git says (the user's call, 11-02): the open PR #470 station,
 # the 1.2 GB trial copy and the Trae station.  Removing one is a manual ``git worktree remove`` by the user.
+# Only ``sweep`` honors it.  ``close`` and ``open`` do not: an agent finishing its own card must be able to close its
+# station and open the next one (audit 546 -- a keep-list check in ``close`` would have locked Trae out).
 RESERVED_STATIONS = frozenset({"m3-pr-chg470", "gui-trial", "trae"})
 # Ignored entries that are only regenerable tool caches do not hold a directory back (coordinator ruling 11-02);
 # any other ignored file still does.  ``__pycache__`` counts only for its ``*.pyc`` files.
@@ -462,7 +464,9 @@ class AgentWorktreeService:
             return SweepItem(target, "station", False, "刚开的工位，还没有提交，保留")
         if not station.merged:
             return SweepItem(target, "station", False, "还没并进 main，在做的活，保留")
-        return SweepItem(target, "station", True, f"{station.branch} 已并进 main，工位干净")
+        return SweepItem(
+            target, "station", True, f"{station.branch} 已并进 main，工位干净{_goes_with(station)}"
+        )
 
     def _sweep_other(self, station: Station, agent: str | None) -> SweepItem:
         """A registered directory that is neither a roster station nor a run-plan (``m3-*`` leftovers and the like).
@@ -863,6 +867,16 @@ def _idle_seconds(path: Path) -> int | None:
     if not stamps:
         return None
     return max(0, int(time.time() - max(stamps)))
+
+
+def _goes_with(station: Station) -> str:
+    """For the listing: a roster station is removed together with its ignored files (``.venv`` and the like)."""
+
+    if not station.ignored_paths:
+        return ""
+    shown = "、".join(station.ignored_paths[:3])
+    more = "等" if len(station.ignored_paths) > 3 else ""
+    return f"；被 .gitignore 忽略的文件 {len(station.ignored_paths)} 项（{shown}{more}）会随目录一起删"
 
 
 def _is_tool_cache(entry: str) -> bool:

@@ -1152,12 +1152,18 @@ def _make_caches(path: Path) -> None:
     (path / "pkg" / "__pycache__" / "mod.cpython-312.pyc").write_bytes(b"\0")
     (path / ".pytest_cache" / "v").mkdir(parents=True)
     (path / ".pytest_cache" / "v" / "lastfailed").write_text("{}", encoding="utf-8")
+    (path / ".mypy_cache" / "3.12").mkdir(parents=True)
+    (path / ".mypy_cache" / "3.12" / "mod.meta.json").write_text("{}", encoding="utf-8")
+    (path / ".ruff_cache").mkdir()
+    (path / ".ruff_cache" / "CACHEDIR.TAG").write_text("tag", encoding="utf-8")
 
 
 def _ignore_caches_and_logs(lab: Lab) -> None:
     exclude = lab.root / ".git" / "info" / "exclude"
     exclude.parent.mkdir(exist_ok=True)
-    exclude.write_text("__pycache__/\n.pytest_cache/\n*.log\n", encoding="utf-8")
+    exclude.write_text(
+        "__pycache__/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n*.log\n", encoding="utf-8"
+    )
 
 
 def test_an_other_directory_with_only_tool_caches_is_removable(lab: Lab) -> None:
@@ -1355,3 +1361,38 @@ def test_a_failing_ignored_files_scan_stops_the_sweep(lab: Lab, monkeypatch: pyt
 
     with pytest.raises(AgentWorktreeError, match="被忽略的文件"):
         lab.service().sweep(apply=True)
+
+
+def test_a_keep_list_agent_can_still_close_its_own_finished_station_and_open_the_next_card(lab: Lab) -> None:
+    """The keep list is only for ``sweep``: ``close`` is the agent's own way to finish a card (audit 546)."""
+
+    trae = finished_station(lab, "trae", "CARD-1")
+    lab.merge_on_github("trae/CARD-1")
+
+    closed = lab.service().close("trae")
+    assert not trae.exists() and closed.branch_deleted
+
+    reopened = lab.service().open("trae", "CARD-2")
+    assert reopened.path == trae and git(trae, "branch", "--show-current") == "trae/CARD-2"
+
+
+def test_the_sweep_listing_says_a_roster_station_takes_its_ignored_files_along(lab: Lab) -> None:
+    done = finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    _hide_a_file(done)
+
+    report = lab.service().sweep()
+
+    reason = _reasons(report)[str(done)]
+    assert any(item.remove for item in report.items if item.target == str(done))
+    assert "会随目录一起删" in reason and ".venv" in reason
+    assert "忽略的文件 1 项" in reason, "项数要写对"
+
+
+def test_the_sweep_listing_of_a_roster_station_without_ignored_files_has_no_such_note(lab: Lab) -> None:
+    done = finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+
+    reason = _reasons(lab.service().sweep())[str(done)]
+
+    assert "已并进 main" in reason and "会随目录一起删" not in reason
