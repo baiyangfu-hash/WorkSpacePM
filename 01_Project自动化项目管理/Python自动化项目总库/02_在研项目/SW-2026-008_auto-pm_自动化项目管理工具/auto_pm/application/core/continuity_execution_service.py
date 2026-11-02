@@ -37,6 +37,7 @@ from auto_pm.contracts.decision_package import (
     RuntimeDecisionAction,
     RuntimeDecisionOutcome,
     is_canonical_decision_id,
+    is_canonical_runtime_change_id,
 )
 from auto_pm.contracts.execution_adapter import (
     ExecutionDispatchReceipt,
@@ -114,6 +115,27 @@ def _worktree_is_the_control_root(worktree: Path, root: Path) -> bool:
     """
 
     return worktree.resolve() == root.resolve()
+
+
+# The administrative recoveries whose recovery Run the store binds to the control-root main worktree (``continuity_store``:
+# ``settle_expired_run``, the terminal-lease fence/compensation and reconcile, the legacy fence, the blocked-Work adjudication).
+# Only a Run authorised for one of these may use the control root itself as its worktree (see ``start_run``).
+RECOVERY_RUN_ACTIONS = frozenset(
+    {
+        RuntimeDecisionAction.SETTLE_EXPIRED_RUN,
+        RuntimeDecisionAction.FENCE_TERMINAL_LEASE,
+        RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE,
+        RuntimeDecisionAction.FENCE_LEGACY_TERMINAL_LEASE,
+        RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK,
+    }
+)
+
+CONTROL_ROOT_RUN_REFUSAL = (
+    "Run 的工作树不能是控制根本身（AGENTS.md WS-001：控制根只跑驾驶舱命令、不写业务代码）。"
+    "请用 git worktree add 在 .auto-pm/worktrees/<agent> 下开隔离工位，再用 --worktree 指向它。"
+    "唯一例外：恢复/行政结算类 Run（过期 Run 结算、租约补偿与对账），其 Work 须绑定带 runtime_capability 的恢复 Decision，"
+    "并用 --recovery-change <该 Decision 的恢复 CHG 编号> 声明"
+)
 
 
 class ContinuityExecutionService:
@@ -225,6 +247,7 @@ class ContinuityExecutionService:
         lease_seconds: int,
         idempotency_key: str,
         one_holder_per_project: bool = False,
+        recovery_change_id: str = "",
     ) -> RunItem:
         if not all(
             isinstance(value, str) and value and value == value.strip()
@@ -282,10 +305,7 @@ class ContinuityExecutionService:
                 allow_external_linked=True,
             )
             if _worktree_is_the_control_root(governed_worktree, self._root):
-                raise ContinuityExecutionError(
-                    "Run 的工作树不能是控制根本身（AGENTS.md WS-001：控制根只跑驾驶舱命令、不写业务代码）。"
-                    "请用 git worktree add 在 .auto-pm/worktrees/<agent> 下开隔离工位，再用 --worktree 指向它"
-                )
+                self._require_recovery_run(work_id, owned, recovery_change_id)
             if actual_head != git_head:
                 raise ContinuityExecutionError(
                     f"Run git_head 与受管 worktree 当前 HEAD 不一致：--git-head 给的是 {git_head}，工位现在是 {actual_head}。"
@@ -1536,6 +1556,57 @@ class ContinuityExecutionService:
             except ContinuityStoreError:
                 holder = f"：Run {candidate.run_id}"
             raise ContinuityExecutionError("Work 已有非终态 Run" + holder)
+
+    def _require_recovery_run(self, work_id: str, owned: tuple[str, ...], recovery_change_id: str) -> None:
+        """Let a Run use the control root as its worktree only when it is a recovery Run under a recovery Decision.
+
+        The store binds the recovery Run of every administrative settlement to the control-root main worktree, so a recovery Run
+        that could only live on an isolated station would deadlock the ledger (an expired Run could never be settled).  The
+        exception is narrow and checked here, not trusted from the caller: the Work is a write Work bound to an unconditionally
+        approved Decision that carries a recovery ``runtime_capability``, that Decision's CHG is the one the caller names, and
+        the Decision, the Work scope and the Run's owned paths all cover the canonical ``continuity.db`` it exists to repair.
+        """
+
+        if not recovery_change_id:
+            raise ContinuityExecutionError(CONTROL_ROOT_RUN_REFUSAL)
+        problem = self._control_root_recovery_problem(work_id, owned, recovery_change_id)
+        if problem:
+            raise ContinuityExecutionError(f"{CONTROL_ROOT_RUN_REFUSAL}。本次恢复 Run 不符合例外条件：{problem}")
+
+    def _control_root_recovery_problem(self, work_id: str, owned: tuple[str, ...], recovery_change_id: str) -> str:
+        if not is_canonical_runtime_change_id(recovery_change_id):
+            return f"恢复变更单编号 {recovery_change_id!r} 不是规范的 CHG 编号"
+        try:
+            work = self._store.get_work(work_id)
+            target = self._store.runtime_target_path()
+        except ContinuityStoreError as error:
+            return str(error)
+        if work.read_only:
+            return "恢复 Work 必须是写入型 Work"
+        if not is_canonical_decision_id(work.authorization_ref):
+            return "恢复 Work 必须绑定 canonical immutable Decision"
+        try:
+            decision = DecisionService(self._root).get_decision(work.authorization_ref)
+        except DecisionError as error:
+            return str(error)
+        capability = decision.runtime_capability
+        if decision.decision_conclusion != "approved" or decision.conditions:
+            return "恢复 Decision 必须是无条件 approved"
+        if capability is None or not RECOVERY_RUN_ACTIONS.intersection(capability.allowed_runtime_actions):
+            return "恢复 Decision 未声明任何恢复类 runtime_capability"
+        if decision.change_id != recovery_change_id:
+            return f"恢复 Decision 的 CHG 是 {decision.change_id}，与 --recovery-change {recovery_change_id} 不一致"
+        if decision.project_id != work.subject_project_id:
+            return "恢复 Decision 与恢复 Work 不属于同一项目"
+        try:
+            approved = self._normalize_paths(decision.approved_files)
+            scope = self._normalize_paths(list(work.scope_paths))
+        except ContinuityExecutionError as error:
+            return str(error)
+        for label, paths in (("Decision approved_files", approved), ("Work scope", scope), ("Run owned_paths", owned)):
+            if not authority_paths_covered((target,), paths):
+                return f"{label} 未覆盖 canonical {target}"
+        return ""
 
     @staticmethod
     def _normalize_paths(paths: list[str], *, allow_empty: bool = False) -> tuple[str, ...]:

@@ -19,6 +19,7 @@ from auto_pm import __version__
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.bounded_command import run_until_done_or_stopped
 from auto_pm.application.core.continuity_execution_service import (
+    CONTROL_ROOT_RUN_REFUSAL,
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
@@ -706,6 +707,14 @@ def run_group() -> None:
     help="与 --lease-wallet 一起：记录持有者的长驻进程（auto=调用本命令的 shell 或 IDE；none=不记录；或给出 pid），供日后回收判定",
 )
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
+@click.option(
+    "--recovery-change",
+    "recovery_change_id",
+    default="",
+    metavar="CHG",
+    help="仅恢复/行政结算类 Run：声明恢复变更单编号后，才允许把控制根本身当作 Run 工作树；"
+    "该 Run 的 Work 必须绑定带恢复类 runtime_capability 的 Decision，且 Decision 的 CHG 与此一致。普通 Run 不得使用",
+)
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def start_run(
@@ -722,6 +731,7 @@ def start_run(
     lease_wallet: bool,
     holder_pid: str,
     lease_seconds: int,
+    recovery_change_id: str,
     idempotency_key: str,
 ) -> None:
     """Start a Run after independently observing Git HEAD and owned-path dirtiness."""
@@ -764,11 +774,10 @@ def start_run(
     if problem:
         raise click.ClickException(problem)
     root = _governed_worktree(ctx, requested_worktree)
-    if root.resolve() == _workspace(ctx).resolve():
-        raise click.ClickException(
-            "Run 的工作树不能是控制根本身（AGENTS.md WS-001：控制根只跑驾驶舱命令、不写业务代码）。"
-            "请用 git worktree add 在 .auto-pm/worktrees/<agent> 下开隔离工位，再用 --worktree 指向它"
-        )
+    if root.resolve() == _workspace(ctx).resolve() and not recovery_change_id:
+        # Only a recovery Run under a recovery Decision may use the control root; the service checks every condition of that
+        # exception (continuity_execution_service.CONTROL_ROOT_RUN_REFUSAL says which).
+        raise click.ClickException(CONTROL_ROOT_RUN_REFUSAL)
     git_head, all_dirty = _git_snapshot(root)
     observed = _within(all_dirty, owned)
     try:
@@ -785,6 +794,7 @@ def start_run(
             lease_token=lease_token,
             lease_seconds=lease_seconds,
             idempotency_key=idempotency_key,
+            recovery_change_id=recovery_change_id.strip(),
         )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
