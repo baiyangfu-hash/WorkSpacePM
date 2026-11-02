@@ -105,6 +105,27 @@ def _git_show(root: str, ref: str, relative: str) -> str | None:
         return None
 
 
+def _pointers_changed_by_head(root: str, base_ref: str) -> bool:
+    """Does the checked-out commit change a pointer file relative to where it branched off ``base_ref``?
+
+    Three dots, so only what THIS branch did counts: a branch that is merely behind a main that moved the pointers on has not
+    changed them.  Any Git failure (no common ancestor, a shallow clone) answers False, which leaves the strict comparison
+    against ``base_ref`` in force -- the check never gets laxer because Git could not answer.
+    """
+
+    paths = [f"{POINTER_DIR}/{name}" for name in POINTER_FILES]
+    try:
+        result = subprocess.run(
+            ["git", "-C", root, "diff", "--name-only", f"{base_ref}...HEAD", "--", *paths],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
 def _json_object(text: str | None) -> dict[str, Any] | None:
     if text is None:
         return None
@@ -121,6 +142,10 @@ def check_release_pointers(root: str, ref: str | None = None) -> dict[str, Any]:
     After a release switch the pointers change on this machine, and nothing carries them into Git until someone commits
     them.  Fresh clones then read an old release.  Read-only.  ``status`` is ok / fail / info; a release id that contains
     ``.test.`` is a test build and never counts as the deployed release.
+
+    When the checked-out branch itself changes a pointer file (the release PR), the comparison is against that branch's own
+    commit (``ref`` is ``HEAD``, ``pr_head`` is True) instead of ``origin/main``; with no pointer change in the branch the
+    comparison is against ``origin/main`` exactly as before.  An explicit ``ref`` is always honoured.
     """
 
     base = Path(root) / POINTER_DIR
@@ -136,8 +161,15 @@ def check_release_pointers(root: str, ref: str | None = None) -> dict[str, Any]:
             or ["本机 active_release.json 读不出来"],
             "ref": "",
         }
+    pr_head = False
+    base_ref = ""
     if ref is None:
         ref = "origin/main" if _git_show(root, "origin/main", f"{POINTER_DIR}/active_release.json") is not None else "HEAD"
+        if ref != "HEAD" and _pointers_changed_by_head(root, ref):
+            # A branch that itself moves the pointers (the release PR) can never equal main before it merges, so comparing it
+            # with main would be red by construction.  Compare with the branch's own commit instead: the machine must still match
+            # what is committed, and the committed manifest must still list the deployed release.
+            base_ref, ref, pr_head = ref, "HEAD", True
     reasons: list[str] = []
     deployed = active.get("release_id")
     if not isinstance(deployed, str) or not deployed:
@@ -153,6 +185,19 @@ def check_release_pointers(root: str, ref: str | None = None) -> dict[str, Any]:
             reasons.append(f"{ref} 上读不到 {name}")
         elif theirs.get("release_id") != mine.get("release_id"):
             reasons.append(f"{name}：{ref} 上是 {theirs.get('release_id')}，本机是 {mine.get('release_id')}；发版后的指针还没入库")
+    if pr_head:
+        # Self-consistency is not exemption: a release PR must also say which release it replaced.  If it switches the active
+        # pointer, previous_release.json has to name the release main had as active.
+        before = _json_object(_git_show(root, base_ref, f"{POINTER_DIR}/active_release.json"))
+        now_active, now_previous = committed["active_release.json"], committed["previous_release.json"]
+        if before is not None and now_active is not None and now_active.get("release_id") != before.get("release_id"):
+            replaced = before.get("release_id")
+            recorded = now_previous.get("release_id") if now_previous is not None else None
+            if recorded != replaced:
+                reasons.append(
+                    f"previous_release.json：本分支把 active_release.json 从 {replaced} 换成 {now_active.get('release_id')}，"
+                    f"previous 应指向被替换的上一版 {replaced}，现在是 {recorded}"
+                )
     manifest = committed["deployment_manifest.json"]
     if manifest is None:
         reasons.append(f"{ref} 上读不到 deployment_manifest.json")
@@ -160,7 +205,7 @@ def check_release_pointers(root: str, ref: str | None = None) -> dict[str, Any]:
         releases = manifest.get("releases")
         if not isinstance(releases, dict) or deployed not in releases:
             reasons.append(f"deployment_manifest.json：{ref} 上没有本机已部署的版本 {deployed}")
-    return {"status": "fail" if reasons else "ok", "reasons": reasons, "ref": ref}
+    return {"status": "fail" if reasons else "ok", "reasons": reasons, "ref": ref, "pr_head": pr_head}
 
 
 def check_change_status_history(root: str) -> dict[str, Any]:
@@ -319,7 +364,7 @@ def doctor_command(workspace: str | None) -> None:
     if pointers["status"] == "fail":
         table.add_row("发布指针与本机部署", "[bold red]❌ FAIL[/bold red]", "；".join(pointers["reasons"]))
     elif pointers["status"] == "ok":
-        table.add_row("发布指针与本机部署", "[green]✅ PASS[/green]", f"{pointers['ref']} 上的三个指针与本机一致")
+        table.add_row("发布指针与本机部署", "[green]✅ PASS[/green]", f"{pointers['ref']} 上的三个指针与本机一致" + ("（本分支改了发布指针，按分支头比）" if pointers.get("pr_head") else ""))
 
     consistency = res["release_consistency"]
     if consistency["status"] == "fail":
