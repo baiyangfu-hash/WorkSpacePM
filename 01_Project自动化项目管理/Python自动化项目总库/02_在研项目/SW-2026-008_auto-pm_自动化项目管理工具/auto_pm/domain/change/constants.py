@@ -111,6 +111,11 @@ APPROVAL_CONCLUSIONS: set[str] = {
     "refused",
 }
 
+# 给变更单“批准”的两个目标状态：批准与有条件批准是同一件事的两种结论，后面的开工、提交都以它为前提，
+# 所以谁能把单子推到这两个状态，守卫（agent 须带用户原话凭据、已启用口令须用户本人输入）必须一视同仁。
+# TD-SW008-217（审计 511）：守卫原来只认 approved，agent 改成 conditionally_approved 就绕过了。
+APPROVING_STATUSES: frozenset[str] = frozenset({"approved", "conditionally_approved"})
+
 # 变更单状态流转（合法状态及允许的下一状态）
 # 对齐 PM-042 V2.3.0 §5.2 状态机：
 #   draft → submitted → under_review → approved → implementing → pending_acceptance → accepting

@@ -28,6 +28,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.change.change_service import ChangeService
 from auto_pm.change.constants import (
     ALL_STATUSES,
+    APPROVING_STATUSES,
     BUSINESS_NATURES,
     DOMAINS,
     IMPACT_SCOPES,
@@ -563,7 +564,7 @@ def cmd_verify(
     "--approval-evidence-ref",
     "approval_evidence_ref",
     default="",
-    help="agent 会话批准（--to approved）时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
+    help="agent 会话批准（--to approved 或 --to conditionally_approved）时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
 )
 @click.pass_context
 def cmd_transition(
@@ -577,11 +578,13 @@ def cmd_transition(
     pid: str | None,
     approval_evidence_ref: str,
 ) -> None:
-    """状态流转（更新变更单章节并持久化状态）；批准（approved）在已启用批准口令时须用户本人在终端输入口令。"""
+    """状态流转（更新变更单章节并持久化状态）；批准（approved）和有条件批准（conditionally_approved）在已启用批准口令时须用户本人在终端输入口令。"""
     app_ctx: AppContext = ctx.obj
-    if new_status == "approved":
+    if new_status in APPROVING_STATUSES:
         # Before anything else, and whether or not a PIN is committed: an agent session approves only with the user's
-        # own words as evidence (F16; the user chose "A" on 2026-10-31).
+        # own words as evidence (F16; the user chose "A" on 2026-10-31).  A conditional approval is an approval: the
+        # guard used to name only "approved", so an agent could reach the same gates through "conditionally_approved"
+        # (TD-SW008-217, audit 511; the user agreed to the fix on 2026-11-02).
         refuse_agent_approval(f"批准变更单 {change_number}", approval_evidence_ref)
         # The PIN is looked up in the very root ChangeService writes to (audit 72, high-2).
         proof = require_approval_pin(
