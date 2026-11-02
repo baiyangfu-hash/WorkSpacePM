@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cockpit_board.actions import Receipt, _now_text
+from cockpit_board.actions import Receipt, _now_text, quiet
 
 TOOL_TIMEOUT = 120  # 秒；这几个命令都是读文件或写一个变更单，超过两分钟一定是卡住了
 OUTPUT_LIMIT = 20000  # 回执里最多留这么多字，其余丢掉并写明
@@ -207,7 +207,7 @@ def run_tool(root: Path, key: str, params: dict[str, Any], runner: Callable[...,
     try:
         result = runner(
             full_command(root, args), cwd=str(root), capture_output=True, encoding="utf-8", errors="replace",
-            timeout=TOOL_TIMEOUT, check=False, env=_environment(),
+            timeout=TOOL_TIMEOUT, check=False, env=_environment(), **quiet(),
         )
     except (OSError, subprocess.SubprocessError) as error:
         return ToolResult(Receipt(_now_text(), label, shown, None, False, f"{type(error).__name__}: {error}"))

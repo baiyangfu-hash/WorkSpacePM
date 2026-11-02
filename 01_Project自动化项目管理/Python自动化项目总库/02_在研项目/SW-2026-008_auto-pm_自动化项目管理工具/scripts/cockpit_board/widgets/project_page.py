@@ -45,7 +45,7 @@ class ProjectPage(QWidget):
         lay.addWidget(c.hrow(c.label(card.milestone, "muted", wrap=False), c.label("到期 " + card.due_text, "muted", wrap=False),
                              c.label("数据覆盖 " + card.coverage.text(), "muted", wrap=False),
                              c.label("最后动静 " + card.last_text, "muted", wrap=False), 1))
-        lay.addWidget(c.label("阶段：" + " › ".join(PHASES) + "（按 PM_SESSION 里人填的字段显示，v1 不自动推算）", "small"))
+        lay.addWidget(c.label("阶段：" + " › ".join(PHASES) + "（只列阶段名；当前在哪个阶段没有从任何文件读，也不自动推算）", "small"))
         group = QButtonGroup(self)
         buttons = []
         for key, text in TABS:

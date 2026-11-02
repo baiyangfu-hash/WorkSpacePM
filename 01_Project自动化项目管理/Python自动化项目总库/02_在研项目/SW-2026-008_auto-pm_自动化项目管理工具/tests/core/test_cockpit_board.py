@@ -127,6 +127,21 @@ def test_station_gating(tmp_path: Path) -> None:
     assert [p[0].project_id for p in station.projects] == ["DJ-2026-101"]
 
 
+def test_station_does_not_pretend_to_know_steps_it_never_checked_or_send_the_user_to_pm_session(tmp_path: Path) -> None:
+    """试用 11-01：工程工位把“开分支”标成已完成、“改程序”标成进行中（界面根本没核对），
+    还叫用户“先在 PM_SESSION 写明要做什么”——PM_SESSION 已于 2026-10-10 退役。"""
+    board = _board(tmp_path, [])
+    for project in board.projects:
+        project.cards = []  # 没有实施卡：走“先在 PM_SESSION 写明要做什么”那一支
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    station = vm.station_vm(board, home.hot + home.rest, None, {"source": "a", "effective": "a"}, "manual/x", [], False)
+    assert [s.state for s in station.steps[:2]] == ["unk", "unk"]  # 没核对，不冒充 done / cur
+    assert station.projects, "测试数据里应有一个已登记的客户项目"
+    for _card, _left, nxt, files, _branch, _safety in station.projects:
+        assert "PM_SESSION" not in nxt and not any("PM_SESSION" in f for f in files)
+        assert "业务变更" in nxt  # 改指向现行的第 4 步
+
+
 # ---------------------------------------------------------------- 搁着栏读账本里的断点（TD-071）
 
 PARKS_DDL = (
