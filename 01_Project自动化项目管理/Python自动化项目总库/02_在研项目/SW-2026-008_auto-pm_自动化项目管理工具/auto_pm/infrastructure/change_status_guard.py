@@ -148,6 +148,10 @@ def judge(*, recorded: str | None, file_status: str, committed_status: str | Non
     )
 
 
+def _lf(data: bytes) -> bytes:
+    return data.replace(b"\r\n", b"\n")
+
+
 def renumbered_status(removed: dict[str, tuple[str, bytes]], new_path: str, new_number: str, new_data: bytes) -> str | None:
     """The status a renumbered change order carried before the rename, or None when this is not a renumbering.
 
@@ -160,7 +164,8 @@ def renumbered_status(removed: dict[str, tuple[str, bytes]], new_path: str, new_
     for old_path, (old_number, old_data) in removed.items():
         if old_path.replace("\\", "/").rsplit("/CHG-", 1)[0] != folder or old_number == new_number:
             continue
-        if old_data.replace(old_number.encode(), new_number.encode()) == new_data:
+        # Line endings are not content: the working-tree file may be CRLF (Windows, autocrlf) while the blob in Git is LF.
+        if _lf(old_data).replace(old_number.encode(), new_number.encode()) == _lf(new_data):
             return status_of_bytes(old_data, old_path)
     return None
 

@@ -305,3 +305,13 @@ def test_change_order_paths_are_recognised(path: str) -> None:
 )
 def test_other_paths_are_not_change_orders(path: str) -> None:
     assert not guard.is_change_order_path(path)
+
+
+def test_renumbering_is_recognised_across_line_endings() -> None:
+    """Windows: the file in the working tree is CRLF, the blob Git holds is LF -- the same text for the renumbering check."""
+
+    old = _fixture_chg_content(CHG, PID, "approved").encode("utf-8")
+    new = old.replace(CHG.encode(), NEW_CHG.encode()).replace(b"\n", b"\r\n")
+    removed = {CHG_REL: (CHG, old)}
+    assert guard.renumbered_status(removed, NEW_REL, NEW_CHG, new) == "approved"
+    assert guard.renumbered_status(removed, NEW_REL, NEW_CHG, new + b"extra\r\n") is None
