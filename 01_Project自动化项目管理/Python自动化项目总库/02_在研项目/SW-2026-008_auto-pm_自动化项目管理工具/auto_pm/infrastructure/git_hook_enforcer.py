@@ -14,6 +14,7 @@ from pathlib import Path
 
 from auto_pm.change.parser import ChgParser
 from auto_pm.domain.secret_patterns import SecretFinding, scan_unified_diff
+from auto_pm.infrastructure import change_status_guard
 from auto_pm.infrastructure.git_timeout import run_git_bounded, run_git_bounded_text
 
 log = logging.getLogger(__name__)
@@ -29,15 +30,7 @@ _PROJECT_ID_ROW_PATTERN = re.compile(
     r"^\|\s*(?:\*\*)?项目编号(?:\*\*)?\s*\|\s*([^|]+?)\s*\|",
     re.MULTILINE,
 )
-_VALID_CHANGE_STATUSES = (
-    "approved",
-    "conditionally_approved",
-    "implementing",
-    "pending_acceptance",
-    "accepting",
-    "completed",
-    "closed",
-)
+_VALID_CHANGE_STATUSES = change_status_guard.APPROVED_OR_LATER
 CONTROL_ROOT_FILE_BINDINGS = {"main.py": "SW-2026-008"}
 # 控制根下不属于任何注册项目目录、但随 SW-2026-008 发版的目录树：发布树（发版同步指针时会暂存其中的 .py）。
 # 归到 SW-2026-008 而不是豁免：这些文件仍要跟着 SW-2026-008 的变更单走，钩子的判定没有放松。
@@ -946,6 +939,59 @@ def enforce_release_ledger_gate(workspace_root: Path) -> int:
     return 0
 
 
+def _enforce_staged_change_status(cand_root: Path, gov_root: Path, snapshot: StagedSnapshot) -> int:
+    """A staged change order may reach an approved-or-later status only through ``change transition`` (audit 524, point 3).
+
+    For every change order this commit adds or modifies, whose status becomes a state production code may rely on and differs
+    from the status in ``HEAD``: the control root's transition journal must end with exactly that status.  No journal, or no
+    row for the order, is a refusal -- a cloud single-root clone that edits §3.4 by hand has no record to show.  A moved file
+    (deleted in one folder, added in another) and a renumbered one (deleted ``CHG-X-n``, added ``CHG-X-m`` with the same text
+    but for the number) are not new statuses.  Merges, cherry-picks, reverts and rebase steps replay committed history and are
+    not judged here.
+    """
+
+    if change_status_guard.replays_history(cand_root):
+        return 0
+    changed = [entry for entry in snapshot.entries if change_status_guard.is_change_order_path(entry.path)]
+    if not changed:
+        return 0
+    removed: dict[str, tuple[str, bytes]] = {}
+    for entry in changed:
+        if entry.deleted:
+            removed[entry.path] = (change_status_guard.change_number_of(entry.path), _read_staged_blob(cand_root, entry))
+    for entry in changed:
+        if entry.deleted:
+            continue
+        try:
+            blob = _read_staged_blob(cand_root, entry)
+            new_status = change_status_guard.status_of_bytes(blob, entry.path)
+            if new_status not in _VALID_CHANGE_STATUSES:
+                continue
+            number = change_status_guard.change_number_of(entry.path)
+            old_status = change_status_guard.status_before(
+                removed, entry.path, blob, change_status_guard.git_blob(cand_root, "HEAD", entry.path)
+            )
+            if new_status == old_status:
+                continue
+            project_id = change_status_guard.project_id_of(change_status_guard.text_of(blob))
+            recorded = change_status_guard.last_recorded_status(gov_root, number, project_id)
+        except Exception as exc:
+            print(
+                "❌ [auto-pm commit-msg] 物理拦截：核对暂存变更单的状态与流转记录时出错，"
+                f"为防止绕过门禁已拒绝提交: {entry.path}: {exc}"
+            )
+            return 1
+        if recorded != new_status:
+            seen = "没有任何记录（没有流转记录库，或这张单没有流转记录）" if recorded is None else f"最后一条是 {recorded}"
+            print(
+                f"❌ [auto-pm commit-msg] 物理拦截：暂存的变更单 {entry.path} 把状态改成了 {new_status}"
+                f"（已提交版本是 {old_status or '无'}），但本机流转记录{seen}：状态行被手改过。"
+                "请用 `main.py change transition` 走流转，由流转命令同时写文件和流转记录。"
+            )
+            return 1
+    return 0
+
+
 def enforce_commit_msg(
     workspace_root: Path,
     commit_msg_file: Path,
@@ -974,8 +1020,8 @@ def enforce_commit_msg(
     prod_files = filter_production_files(staged)
 
     if not prod_files:
-        # 纯文档/治理/会话提交，豁免变更单号要求
-        return 0
+        # 纯文档/治理/会话提交，豁免变更单号要求；但暂存的变更单状态仍要有流转依据
+        return _enforce_staged_change_status(cand_root, gov_root, snapshot)
 
     try:
         if not commit_msg_file.is_file():
@@ -1066,11 +1112,31 @@ def enforce_commit_msg(
                 "尚未获得审批批准，严禁提交代码！"
             )
             return 1
+        try:
+            relative = change_path.resolve().relative_to(gov_root.resolve()).as_posix()
+        except ValueError:
+            relative = ""
+        committed_blob = change_status_guard.git_blob(gov_root, "HEAD", relative) if relative else None
+        verdict = change_status_guard.judge(
+            recorded=change_status_guard.last_recorded_status(gov_root, chg_id, binding.project_id),
+            file_status=str(cr.status),
+            committed_status=(
+                change_status_guard.status_of_bytes(committed_blob, relative) if committed_blob is not None else None
+            ),
+        )
+        if not verdict.ok:
+            print(f"❌ [auto-pm commit-msg] 物理拦截：关联变更单 {chg_id} 的状态没有流转依据，严禁提交代码！{verdict.note}")
+            return 1
+        if verdict.note:
+            print(f"⚠️ [auto-pm commit-msg] {chg_id}：{verdict.note}")
     except Exception as exc:
         print(
             "❌ [auto-pm commit-msg] 物理拦截：解析关联变更单状态失败，"
             f"为防止绕过门禁已拒绝提交: {exc}"
         )
+        return 1
+
+    if _enforce_staged_change_status(cand_root, gov_root, snapshot) != 0:
         return 1
 
     print(f"✅ [auto-pm commit-msg] 生产代码与变更单 {chg_id} 强校验绑定通过！")
