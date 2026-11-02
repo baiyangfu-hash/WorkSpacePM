@@ -22,9 +22,14 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QW
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+import pm_dashboard as pd  # noqa: E402
+from cockpit_board import viewmodel as vm  # noqa: E402
 from cockpit_board.widgets import common as c  # noqa: E402
 from cockpit_board.widgets.issues import IssuesPage  # noqa: E402
 from cockpit_board.widgets.project_page import ProjectPage  # noqa: E402
+
+from tests.core import test_cockpit_board as board_tests  # noqa: E402
+from tests.core import test_pm_dashboard as base  # noqa: E402
 
 
 def _order(holder: QWidget) -> list[str]:
@@ -100,3 +105,18 @@ def test_issues_page_says_which_kinds_were_not_checked_before_the_counts(qapp: Q
     assert any(str(label.text()).startswith("没检查：GitHub") for label in page.findChildren(QLabel))
     page.show_view([], datetime(2026, 11, 1, 12, 0))
     assert not any(str(label.text()).startswith("没检查：") for label in page.findChildren(QLabel))
+
+
+def test_the_project_page_shows_the_more_line_and_newest_first(qapp: QApplication, tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    board_tests._many_orders(root, [f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(33)])
+    board = pd.build_board(root, db, board_tests.NOW, use_git=False, use_legacy=False)
+    home = vm.home_vm(board, board_tests.OFFSET, online=False, use_git=False)
+    card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
+    page = ProjectPage(lambda: None, lambda _text: None)
+    page.show_view(vm.project_vm(board, card, board_tests.OFFSET, False), board_tests.NOW, False)
+    page.set_tab("changes")
+    texts = [label.text() for label in page.findChildren(QLabel)]
+    assert any(t.startswith("还有 3 条") for t in texts)  # 33 张已收口的单，列最近 30，余 3；没收口的业务变更另外列
+    ids = [t for t in texts if t.startswith("CHG-PLC-2026-")]
+    assert ids[0] == "CHG-PLC-2026-033" and len(ids) == 30

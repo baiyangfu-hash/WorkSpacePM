@@ -327,9 +327,10 @@ def parse_pending(text: str, project_id: str) -> list[Target]:
     """``pm pending --project-id P`` 的 JSON → 待批准范围卡。被新版本取代的（superseded）不列。"""
 
     found = []
-    for item in _json(text).get("cards", []):
+    cards = _json(text).get("cards")
+    for item in cards if isinstance(cards, list) else []:  # 不是列表（读不懂）就当一条都没取到；红条由 read_failure 给
         card = item.get("card", {}) if isinstance(item, dict) else {}
-        if not isinstance(card, dict) or item.get("superseded"):
+        if not isinstance(item, dict) or not isinstance(card, dict) or item.get("superseded"):
             continue
         found.append(Target(project_id=project_id, request_id=str(card.get("request_id", "")),
                             plan_hash=str(card.get("plan_hash", "")), title=str(item.get("objective", ""))))
@@ -340,7 +341,8 @@ def parse_inbox(text: str, project_id: str) -> list[Target]:
     """``pm inbox list --project-id P`` 的 JSON → 等你确认的条目（状态 PROPOSED）。"""
 
     found = []
-    for item in _json(text).get("items", []):
+    items = _json(text).get("items")
+    for item in items if isinstance(items, list) else []:
         if isinstance(item, dict) and str(item.get("status", "")).upper() == "PROPOSED":
             found.append(Target(project_id=project_id, item_id=str(item.get("item_id", "")),
                                 ticket_hash=str(item.get("ticket_hash", "")), title=str(item.get("title", ""))))
@@ -350,6 +352,9 @@ def parse_inbox(text: str, project_id: str) -> list[Target]:
 def _last_line(text: str, limit: int = 200) -> str:
     lines = [line.strip() for line in (text or "").strip().splitlines() if line.strip()]
     return lines[-1][:limit] if lines else ""
+
+
+last_line = _last_line  # 控制器给空原文的红条补 stderr 末行时用
 
 
 def read_failure(what: str, command: str, rc: int | None, output: str, *, key: str | None = None) -> ReadFailure | None:

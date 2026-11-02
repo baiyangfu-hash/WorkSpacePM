@@ -6,7 +6,7 @@ import re
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -266,6 +266,213 @@ def test_project_without_change_order_folder_has_no_order_rows(tmp_path: Path) -
     root, db = base._workspace(tmp_path, [])
     board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
     assert not any(c.kind.startswith("变更单") for c in _changes_of(board))
+
+
+# 审计 536 的三个存活变异：状态口径、“变更背景”同行写法、表格行要整格相等
+
+
+def _order_text(**fields: str) -> str:
+    return (
+        "# 变更单\n\n| 字段 | 内容 |\n|------|------|\n"
+        + "".join(f"| {name} | {value} |\n" for name, value in fields.items())
+        + "\n**变更背景**：" + "同行写的背景正文\n"
+    )
+
+
+def _read_one(tmp_path: Path, text: str) -> Any:
+    root, _db = base._workspace(tmp_path, [])
+    (_order_dir(root) / "CHG-PLC-2026-050.md").write_text(text, encoding="utf-8")
+    orders = pd.read_change_orders(root / "0100_PLC自动化" / "DJ-2026-101_甲")
+    assert len(orders) == 1
+    return orders[0]
+
+
+def test_when_a_sheet_has_two_status_rows_the_later_one_counts(tmp_path: Path) -> None:
+    """状态口径：一张单里“变更状态”出现两处（例如头部是草稿、后面流转到已批准），以后出现的为准。"""
+    text = "| 变更状态 | draft |\n| 申请日期 | 2026-10-01 |\n\n正文\n\n| 变更状态 | approved |\n"
+    order = _read_one(tmp_path, "| 字段 | 内容 |\n|---|---|\n" + text)
+    assert order.status == "approved" and order.raised == "2026-10-01"
+    # 后面一处是空格子时不覆盖前面读到的状态
+    order = _read_one(tmp_path / "b", "| 字段 | 内容 |\n|---|---|\n| 变更状态 | approved |\n| 变更状态 |  |\n")
+    assert order.status == "approved"
+
+
+def test_background_on_the_same_line_as_the_label_is_read(tmp_path: Path) -> None:
+    order = _read_one(tmp_path, _order_text(变更编号="CHG-PLC-2026-050", 变更状态="approved", 申请日期="2026-10-23"))
+    assert order.what == "同行写的背景正文"
+
+
+def test_background_on_the_next_line_still_works_and_same_line_wins(tmp_path: Path) -> None:
+    next_line = "| 变更状态 | approved |\n\n**变更背景**：\n\n下一行的正文\n"
+    assert _read_one(tmp_path, "| 字段 | 内容 |\n|---|---|\n" + next_line).what == "下一行的正文"
+    both = "| 变更状态 | approved |\n\n**变更背景**：同行\n下一行\n"
+    assert _read_one(tmp_path / "b", "| 字段 | 内容 |\n|---|---|\n" + both).what == "同行"
+
+
+def test_table_cells_must_equal_the_field_name_not_just_contain_it(tmp_path: Path) -> None:
+    """“旧变更状态”“备注：变更状态说明”这类格子不能被当成“变更状态”。"""
+    text = (
+        "| 字段 | 内容 |\n|---|---|\n| 旧变更状态 | rejected |\n| 备注变更状态 | on_hold |\n"
+        "| 变更状态说明 | 没有用 |\n| 原申请日期 | 2020-01-01 |\n"
+    )
+    order = _read_one(tmp_path, text)
+    assert order.status == "未读到状态" and order.raised == ""
+    ok = _read_one(tmp_path / "b", text + "| 变更状态 | approved |\n| 申请日期 | 2026-10-23 |\n")
+    assert (ok.status, ok.raised) == ("approved", "2026-10-23")
+
+
+# ---------------------------------------------------------------- 变更记录：从新到旧，只列最近 30 条
+
+
+def _many_orders(root: Path, dates: list[str], status: str = "completed", start: int = 1) -> None:
+    """按日期各放一张变更单；默认都是已收口（completed），要测没收口的另给 status。编号从 start 起。"""
+    folder = _order_dir(root)
+    for index, day in enumerate(dates, start=start):
+        number = f"CHG-PLC-2026-{index:03d}"
+        text = CHG_ORDER.replace("CHG-PLC-2026-015", number).replace("2026-10-23", day).replace("| 变更状态 | approved |", f"| 变更状态 | {status} |")
+        (folder / f"{number}.md").write_text(text, encoding="utf-8")
+
+
+def _order_rows(board: Any) -> list[Any]:
+    return [c for c in _changes_of(board) if c.kind.startswith("变更单")]
+
+
+def test_change_records_are_newest_first(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    _many_orders(root, ["2026-09-01", "2026-10-20", "2026-08-15", "2026-10-02"])
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    assert [r.date for r in _order_rows(board)] == ["2026-10-20", "2026-10-02", "2026-09-01", "2026-08-15"]
+
+
+def test_same_day_orders_put_the_larger_number_first(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    _many_orders(root, ["2026-10-20"] * 3)
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    assert [r.change_id for r in _order_rows(board)] == ["CHG-PLC-2026-003", "CHG-PLC-2026-002", "CHG-PLC-2026-001"]
+
+
+def _project_of(board: Any) -> Any:
+    home = vm.home_vm(board, OFFSET, online=False, use_git=False)
+    card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
+    return vm.project_vm(board, card, OFFSET, False)
+
+
+# 假工作空间里已有 1 条业务变更（BC，2026-10-01，状态“待批”＝没收口）和 1 张实施卡；下面的数量都把它们算进去
+
+
+def test_only_the_latest_30_closed_are_listed_and_the_rest_are_counted(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    days = [f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(45)]  # 45 张已收口的变更单，日期各不相同
+    _many_orders(root, days)
+    project = _project_of(pd.build_board(root, db, NOW, use_git=False, use_legacy=False))
+    rows = [c for c in project.changes if c.kind != "实施卡"]
+    assert [r.change_id for r in rows[:1]] == ["BC-DJ-2026-101-001"]  # 没收口的在最上面，不占名额
+    closed = rows[1:]
+    assert len(closed) == vm.CHANGES_SHOWN == 30
+    assert [r.date for r in closed] == sorted(days, reverse=True)[:30]  # 已收口的留下最新的 30 条
+    assert "还有 15 条" in project.changes_more and "最近 30 条" in project.changes_more and "01_变更管理" in project.changes_more
+
+
+def test_exactly_30_closed_or_fewer_shows_no_more_line(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    _many_orders(root, [f"2026-09-{1 + i:02d}" for i in range(30)])
+    project = _project_of(pd.build_board(root, db, NOW, use_git=False, use_legacy=False))
+    assert len([c for c in project.changes if c.kind.startswith("变更单")]) == 30 and project.changes_more == ""
+    root2, db2 = base._workspace(tmp_path / "b", [])
+    _many_orders(root2, [f"2026-09-{1 + i:02d}" for i in range(31)])  # 再多一张已收口的才有“还有 1 条”
+    assert "还有 1 条" in _project_of(pd.build_board(root2, db2, NOW, use_git=False, use_legacy=False)).changes_more
+
+
+@pytest.mark.parametrize("status", ["draft", "approved", "implementing", "pending_acceptance", "Approved", " draft "])
+def test_an_old_unclosed_change_is_listed_next_to_30_newer_closed_ones(tmp_path: Path, status: str) -> None:
+    """协调者裁决：没收口的变更再旧也不能被“最近 30 条”藏起来，也不占那 30 个名额。"""
+    root, db = base._workspace(tmp_path, [])
+    _many_orders(root, ["2020-01-01"], status=status, start=1)  # 最老的一张，还没收口
+    _many_orders(root, [f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(35)], start=2)  # 35 张更新的，已收口
+    project = _project_of(pd.build_board(root, db, NOW, use_git=False, use_legacy=False))
+    orders = [c for c in project.changes if c.kind.startswith("变更单")]
+    assert "CHG-PLC-2026-001" in [c.change_id for c in orders]  # 老的没收口的在
+    assert len(orders) == 31  # 1 张没收口的 + 30 张已收口的最新
+    assert orders[0].change_id == "CHG-PLC-2026-001"  # 没收口的排在已收口的上面
+    assert "还有 5 条" in project.changes_more  # 只数没列出的已收口的，那张老单不算
+
+
+@pytest.mark.parametrize("status", ["completed", "closed", "rejected", "cancelled"])
+def test_closed_statuses_are_subject_to_the_limit(tmp_path: Path, status: str) -> None:
+    root, db = base._workspace(tmp_path, [])
+    _many_orders(root, ["2020-01-01"], status=status, start=1)
+    _many_orders(root, [f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(30)], start=2)
+    project = _project_of(pd.build_board(root, db, NOW, use_git=False, use_legacy=False))
+    assert "CHG-PLC-2026-001" not in [c.change_id for c in project.changes] and "还有 1 条" in project.changes_more
+
+
+def test_unclosed_rows_are_sorted_newest_first_among_themselves_and_unknown_status_counts_as_unclosed(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    _many_orders(root, ["2021-05-01"], status="draft", start=1)
+    _many_orders(root, ["2023-05-01"], status="implementing", start=2)
+    (_order_dir(root) / "CHG-PLC-2026-099.md").write_text("# 变更单\n\n正文没有表格\n", encoding="utf-8")  # 读不出状态
+    _many_orders(root, [f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(31)], start=10)
+    project = _project_of(pd.build_board(root, db, NOW, use_git=False, use_legacy=False))
+    top = [c.change_id for c in project.changes if c.kind != "实施卡"][:4]
+    assert top == ["BC-DJ-2026-101-001", "CHG-PLC-2026-002", "CHG-PLC-2026-001", "CHG-PLC-2026-099"]  # 新→旧，没日期的最后
+
+
+def test_closure_rows_are_sorted_by_the_mission_update_time(tmp_path: Path) -> None:
+    """收口记录按任务更新时间参与排序，不是被丢到最后（审计 544 的存活变异）。"""
+    import sqlite3 as sql  # noqa: PLC0415
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "CLOSED", "旧任务", 400), ("DJ-2026-101", "CLOSED", "新任务", 1)])
+    with sql.connect(db) as connection:
+        connection.execute("INSERT INTO closure_items VALUES ('CL-0', 'MISSION-0', 'CHG-OLD-1', 'COMPLETED', ?)", (base._iso(400),))
+        connection.execute("INSERT INTO closure_items VALUES ('CL-1', 'MISSION-1', 'CHG-NEW-1', 'COMPLETED', ?)", (base._iso(1),))
+    _many_orders(root, [f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(40)])
+    project = _project_of(pd.build_board(root, db, NOW, use_git=False, use_legacy=False))
+    closures = [c for c in project.changes if c.kind == "收口"]
+    assert [c.change_id for c in closures] == ["CHG-NEW-1"]  # 新的在前列里；400 天前的那条被挤出 30 条之外
+    assert "还有" in project.changes_more
+
+
+def test_what_counts_as_unclosed() -> None:
+    """变更单看状态；业务变更看“待批”；收口记录和实施卡的状态不是变更的收口状态，不算。"""
+    def row(kind: str, status: str) -> Any:
+        return vm.ChangeRow("X", "2026-01-01", kind, "x", status)
+
+    assert all(vm.is_unclosed(row("变更单 PLC", s)) for s in ("draft", "approved", "implementing", "pending_acceptance", "未读到状态"))
+    assert not any(vm.is_unclosed(row("变更单 PLC", s)) for s in ("completed", "closed", "rejected", "cancelled", ""))
+    assert vm.is_unclosed(row("参数", "待批")) and vm.is_unclosed(row("参数", "待批准"))
+    assert not vm.is_unclosed(row("参数", "已批"))
+    assert not vm.is_unclosed(row("收口", "draft")) and not vm.is_unclosed(row("实施卡", "approved"))
+
+
+def test_dates_must_start_with_yyyy_mm_dd_otherwise_the_row_counts_as_undated() -> None:
+    """把当前行为钉住：只认 2026-10-21 这种开头；2026-1-5、2026/10/21、日期待补都按“没写日期”，排在有日期的后面。"""
+    for text in ("2026-1-5", "2026/10/21", "日期待补", "", "10-21"):
+        assert vm._day(text) is None, text
+    assert vm._day("2026-10-21") == datetime(2026, 10, 21, tzinfo=UTC)
+    assert vm._day("2026-10-21 14:30") == datetime(2026, 10, 21, tzinfo=UTC)
+
+
+def test_undated_rows_go_last_and_do_not_pose_as_newest() -> None:
+    dated = [vm.ChangeRow(f"X-{i}", "2026-10-01", "BC", "x", "ok", datetime(2026, 10, 1 + i, tzinfo=UTC)) for i in range(3)]
+    undated = [vm.ChangeRow("U-1", "日期待补", "BC", "x", "ok"), vm.ChangeRow("U-2", "日期待补", "BC", "x", "ok")]
+    shown, more = vm.recent_changes(undated + dated, "proj", limit=3)
+    assert [r.change_id for r in shown] == ["X-2", "X-1", "X-0"]  # 有日期的先占满名额
+    assert "还有 2 条" in more and "2 条没写日期" in more
+    shown, more = vm.recent_changes(undated + dated, "proj", limit=4)
+    assert [r.change_id for r in shown] == ["X-2", "X-1", "X-0", "U-1"] and "还有 1 条" in more
+
+
+def test_cards_are_always_listed_after_the_changes_and_do_not_use_up_the_30(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    _many_orders(root, [f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(40)])
+    cards = root / "0100_PLC自动化" / "DJ-2026-101_甲" / "11_监控" / "01_变更管理" / "03_实施卡"
+    cards.mkdir(parents=True, exist_ok=True)
+    for number in ("CARD-001", "CARD-002"):
+        (cards / f"{number}_做点事.md").write_text(f"# {number} 做点事\n\n> 状态：进行中\n", encoding="utf-8")
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    kinds = [c.kind for c in _changes_of(board)]
+    assert kinds.count("实施卡") == 3 and kinds[-3:] == ["实施卡"] * 3  # 原有 1 张 + 新放的 2 张
+    assert sum(1 for k in kinds if k != "实施卡") == 31  # 1 条没收口的业务变更 + 最近 30 条已收口
 
 
 # ---------------------------------------------------------------- 主题令牌

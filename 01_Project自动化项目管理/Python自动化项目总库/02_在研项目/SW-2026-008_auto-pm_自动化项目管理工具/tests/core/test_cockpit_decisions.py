@@ -387,3 +387,14 @@ def test_run_cli_never_uses_a_shell(tmp_path: Path) -> None:
 
     actions.run_cli(tmp_path, "搁着", ("pm", "park", "--reason", 'x" & calc'), runner=runner)
     assert isinstance(seen["command"], list) and not seen.get("shell") and seen["command"][-1] == 'x" & calc'
+
+
+@pytest.mark.parametrize("text", ['{"cards": {"x": 1}}', '{"cards": "abc"}', '{"cards": null}', '{"cards": 3}', '{"cards": ["x", 1, null, {"card": 5}]}', "", "not json"])
+def test_parse_pending_never_crashes_on_unexpected_shapes(text: str) -> None:
+    """命令输出的形状不对时返回空列表，不抛异常（读没读懂由 read_failure 另外判）。"""
+    assert decisions.parse_pending(text, "DJ-1") == []
+
+
+@pytest.mark.parametrize("text", ['{"items": {"x": 1}}', '{"items": "abc"}', '{"items": null}', '{"items": 3}', '{"items": ["x", 1, null]}', "", "not json"])
+def test_parse_inbox_never_crashes_on_unexpected_shapes(text: str) -> None:
+    assert decisions.parse_inbox(text, "DJ-1") == []

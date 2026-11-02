@@ -141,6 +141,7 @@ class ChangeRow:
     kind: str
     what: str
     status: str
+    when: datetime | None = None  # 排序用；没有日期（实施卡、“日期待补”）就是 None
 
 
 @dataclass(frozen=True)
@@ -185,6 +186,7 @@ class ProjectVM:
     recipe: list[tuple[str, str]]
     github: GithubVM | None = None
     prs: list[PrRow] = field(default_factory=list)
+    changes_more: str = ""  # “还有 M 条……”：变更记录只列最近 CHANGES_SHOWN 条，没列的在这里交代；全列了就是空
 
 
 @dataclass
@@ -787,6 +789,51 @@ def all_issues(home: HomeVM) -> list[Issue]:
     )
 
 
+CHANGES_SHOWN = 30  # 变更记录页只列最近这么多条（SW-2026-008 有 400 多张变更单，全列一页要翻很久，最新的还在最底下）
+
+
+def _day(text: str) -> datetime | None:
+    """“2026-10-21” 或 “2026-10-21 14:00” 这类开头是日期的文字 → 当天零点（UTC）；其他写法（含“日期待补”）→ None。"""
+    return pd.parse_time(text[:10]) if text[:4].isdigit() else None
+
+
+# 还没收口的变更：不论多旧都列出来，不占“最近 N 条”的名额（协调者 2026-11-02 裁决：未收口的变更绝不藏起来）
+UNCLOSED_STATUS = frozenset({"draft", "approved", "implementing", "pending_acceptance", "未读到状态"})
+
+
+def is_unclosed(row: ChangeRow) -> bool:
+    """变更单状态在 UNCLOSED_STATUS 里，或业务变更还是“待批…”；收口记录、实施卡不算。"""
+    if row.kind == "收口" or row.kind == "实施卡":
+        return False
+    return row.status.strip().lower() in UNCLOSED_STATUS or row.status.startswith("待批")
+
+
+def _newest_first(rows: list[ChangeRow]) -> list[ChangeRow]:
+    """有日期的从新到旧（同一天编号大的在前），没有日期的排在后面，不会冒充最新。"""
+    dated = sorted((r for r in rows if r.when is not None),
+                   key=lambda r: (r.when or datetime.min.replace(tzinfo=UTC), r.change_id), reverse=True)
+    return dated + [r for r in rows if r.when is None]
+
+
+def recent_changes(rows: list[ChangeRow], root: str, limit: int = CHANGES_SHOWN) -> tuple[list[ChangeRow], str]:
+    """没收口的变更全列在最上面（不占名额）；已收口的从新到旧，只留最近 ``limit`` 条。
+
+    返回（要显示的行, “还有 M 条……”那一句）。M 只数没列出的已收口变更；全列了就是空串。
+    """
+
+    open_rows = _newest_first([r for r in rows if is_unclosed(r)])
+    closed = _newest_first([r for r in rows if not is_unclosed(r)])
+    shown_closed, hidden = closed[:limit], closed[limit:]
+    shown = open_rows + shown_closed
+    if not hidden:
+        return shown, ""
+    undated = sum(1 for r in hidden if r.when is None)
+    where = f"{root}/…/01_变更管理/" if root else "项目文件夹的 01_变更管理/"
+    note = (f"还有 {len(hidden)} 条更早的已收口变更没在这里列出（没收口的都在上面，不占名额；已收口的列了最近 {limit} 条，从新到旧"
+            + (f"；没列出的里有 {undated} 条没写日期" if undated else "") + f"）。完整清单在 {where}")
+    return shown, note
+
+
 def project_vm(
     board: pd.Board, card: ProjectCard, offset: timezone, online: bool | None, github: GithubVM | None = None
 ) -> ProjectVM:
@@ -831,14 +878,22 @@ def project_vm(
         EvidenceRow("na", "越界检查", "没检查：pr-scope-check 未合"),
         EvidenceRow("na", "仿真实跑", "无记录：现场回传设计稿 D09 后落地"),
     ]
-    changes = [ChangeRow(c.change_id, c.raised or "日期待补", c.kind, c.what, c.status) for c in project.changes]
-    changes += [ChangeRow(c.card_id, "", "实施卡", c.title, c.status) for c in project.cards]
-    changes += [ChangeRow(o.change_id, o.raised or "日期待补", f"变更单 {o.domain}", o.what, o.status) for o in project.change_orders]
-    changes += [
-        ChangeRow(m.change_id, fmt(m.updated_at, offset), "收口", pd._short(m.title, 50), m.closure_state)
+    dated = [
+        ChangeRow(c.change_id, c.raised or "日期待补", c.kind, c.what, c.status, _day(c.raised))
+        for c in project.changes
+    ]
+    dated += [
+        ChangeRow(o.change_id, o.raised or "日期待补", f"变更单 {o.domain}", o.what, o.status, _day(o.raised))
+        for o in project.change_orders
+    ]
+    dated += [
+        ChangeRow(m.change_id, fmt(m.updated_at, offset), "收口", pd._short(m.title, 50), m.closure_state, m.updated_at)
         for m in project.missions
         if m.change_id
     ]
+    cards = [ChangeRow(c.card_id, "", "实施卡", c.title, c.status) for c in project.cards]
+    changes, more = recent_changes(dated, project.root)
+    changes += cards  # 实施卡没有日期、数量也少：全列，放在最后，不占“最近 N 条”的名额
     activity = [
         (fmt(m.updated_at, offset), f"{pd.STATE_LABEL.get(m.state, m.state)}：{pd._short(m.title, 50)}",
          m.run.executor if m.run else "", m.example)
@@ -850,7 +905,7 @@ def project_vm(
         ("共享库", "01_SharedLibraries（LSP-903 文件头 VERSION）"),
         ("所在文件夹", project.root or "—"),
     ]
-    return ProjectVM(card, columns, evidence, changes, activity, recipe, github, rows)
+    return ProjectVM(card, columns, evidence, changes, activity, recipe, github, rows, more)
 
 
 # ---------------------------------------------------------------- 工程工位
