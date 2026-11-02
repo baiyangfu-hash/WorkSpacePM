@@ -1,5 +1,5 @@
 """Memory guard for a detached gate run: when the system commit charge reaches the limit it writes ALERT_<time>.txt and SUSPENDS the process tree whose root PID is in <pidfile>;
-it resumes the tree when the charge falls below the resume level or a RESUME file appears. Exits when DONE or FAILED appears in <statusdir> or its parent (or after 8 h).
+it resumes the tree when the charge falls below the resume level or a RESUME file appears. Exits when DONE or FAILED appears in <statusdir> or in its parent DIRECTORY (or after 8 h); it does not watch the gates process itself, and if the gates process dies without writing either file it keeps watching until the 8 h limit.
 usage: python -B mem_guard.py <statusdir> <pidfile> [limit_gb=40] [resume_gb=36]"""
 import csv
 import ctypes

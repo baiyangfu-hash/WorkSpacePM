@@ -5,6 +5,25 @@ set -euo pipefail
 ROOT=/c/Users/fubai/Documents/My_Workspace; EV="$ROOT/.auto-pm/reports/m3-rel7"; G="$EV/gates"
 PY="$ROOT/.venv/Scripts/python.exe"; BASHW='C:\Program Files\Git\usr\bin\bash.exe'
 cd "$ROOT"
+unset PG_G PG_WT GATE_GROUPS  # leftovers of a rehearsal or a test must not steer the real run
+rm -f "$EV/gates_all.exit" "$G/DONE" "$G/FAILED"
+if [ "${1:-}" = "--dry-run" ]; then
+  D="$EV/dryrun"; mkdir -p "$D/gates/status"; rm -f "$D/gates_all.exit" "$D/gates/DONE" "$D/gates/FAILED"
+  det() { "$PY" -B "$EV/detach_run.py" "$@"; }
+  cat > "$D/dummy_gates.sh" <<'DUMMY'
+#!/usr/bin/env bash
+EV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7
+D="$EV/dryrun"; PY=/c/Users/fubai/Documents/My_Workspace/.venv/Scripts/python.exe
+"$PY" -B "$EV/gate_status.py" "$D/gates/status" dry_stage RUNNING
+sleep 45
+"$PY" -B "$EV/gate_status.py" "$D/gates/status" dry_stage PASS 0
+echo done > "$D/gates/DONE"; echo 0 > "$D/gates_all.exit"
+DUMMY
+  det "$D/keepawake.log" "$PY" -B "$EV/keepawake.py" "$D/gates_all.exit"
+  det "$D/gates.log" "$BASHW" "$D/dummy_gates.sh"
+  det "$D/mem_guard.log" "$PY" -B "$EV/mem_guard.py" "$D/gates/status" "$D/gates/status/current_pid" 40 36
+  echo "DRYRUN LAUNCHED DETACHED (no Run, no real gates)"; exit 0
+fi
 bash "$EV/rel7_1_approve_start.sh" > "$EV/start2.out" 2>&1 || { echo "START FAILED"; tail -5 "$EV/start2.out"; exit 1; }
 bash "$ROOT/.auto-pm/reports/m2_lease_renew.sh" "$EV/close.env" > "$EV/renew_first.log" 2>&1 || { echo "FIRST RENEW FAILED"; cat "$EV/renew_first.log"; exit 1; }
 echo "first renewal ok"
