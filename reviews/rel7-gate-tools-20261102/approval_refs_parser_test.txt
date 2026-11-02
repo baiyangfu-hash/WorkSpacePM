@@ -1,0 +1,10 @@
+load_refs (extracted from rel7_1_approve_start.sh) tested 2026-11-02 16:43 MST:
+valid file ........................ ACCEPTED
+GO_SHA not 64 hex ................. rejected (GO_SHA format)
+GO_REF not user-confirmation:cmsg_ rejected (GO_REF format)
+GO_TEXT with a double quote ....... rejected (rejected character)
+GO_TEXT with $( ) ................. rejected (rejected character)
+GO_TEXT with a backtick ........... rejected (rejected character)
+unknown key ....................... rejected
+GO_TEXT missing ................... rejected (incomplete)
+file missing ...................... rejected (missing)

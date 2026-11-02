@@ -10,7 +10,7 @@ cd "$ROOT"
 PY="$ROOT/.venv/Scripts/python.exe"
 P='01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具'
 CARD="$P/02_规划/219_M3-REL7_第七次发版候选门禁实施卡_PM.md"
-CARD_SHA=a0c6bfe6757189b1cc26c7f5b25fb75d1f7a6f23001f1639506dc78a96dfd33a
+CARD_SHA=fb5ca2692a87b63ad5d32fb4d0b17d505e5d0ba759fc7dc7eef9f58b3c6ecff1
 BASE=d671611a13bc15536047769fdb0498666c414044
 BASE_BRANCH=m3-rel7-base
 TODAY="$(date +%Y%m%d)"
@@ -24,9 +24,32 @@ EV="$ROOT/.auto-pm/reports/m3-rel7"
 STATE="$EV/rel7_chg.txt"
 FULL=("01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md")
 NEW_PATHS=("01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md")
-[[ -f "$EV/approval_refs.env" ]] || die "approval_refs.env is missing: it records the user's own go-ahead for THIS card SHA and is written only after the user said it"
-source "$EV/approval_refs.env"   # GO_SHA, GO_REF (user-confirmation:<message id> of the user's go-ahead), GO_TEXT (the words), NIGHT_REF / NIGHT_TEXT (the 21:00 permission)
-[[ "${GO_SHA:-}" == "$CARD_SHA" && "${GO_REF:-}" == user-confirmation:cmsg_* && -n "${GO_TEXT:-}" ]] || die "approval_refs.env does not carry the user's go-ahead for this card SHA"
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+# approval_refs.env is PARSED line by line (never sourced, never eval'd); the refs and the SHA are checked by regular expressions, the text fields reject quotes, backticks, $ and backslashes
+load_refs() {
+  local f="$1" line key val
+  GO_SHA=""; GO_REF=""; GO_TEXT=""; NIGHT_REF=""; NIGHT_TEXT=""
+  [[ -f "$f" ]] || die "approval_refs.env is missing: it records the user's own go-ahead for THIS card SHA and is written only after the user said it"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || die "approval_refs.env: a line without '='"
+    key="${line%%=*}"; val="${line#*=}"
+    case "$key" in
+      GO_SHA)  [[ "$val" =~ ^[0-9a-f]{64}$ ]] || die "approval_refs.env: GO_SHA format"; GO_SHA="$val" ;;
+      GO_REF)  [[ "$val" =~ ^user-confirmation:cmsg_[A-Za-z0-9]{20,80}$ ]] || die "approval_refs.env: GO_REF format"; GO_REF="$val" ;;
+      NIGHT_REF) [[ "$val" =~ ^user-confirmation:cmsg_[A-Za-z0-9]{20,80}$ ]] || die "approval_refs.env: NIGHT_REF format"; NIGHT_REF="$val" ;;
+      GO_TEXT|NIGHT_TEXT)
+        [[ ${#val} -ge 1 && ${#val} -le 200 && "$val" != *\"* && "$val" != *\'* && "$val" != *\`* && "$val" != *'$'* && "$val" != *\\* ]] || die "approval_refs.env: $key has a rejected character or length"
+        printf -v "$key" '%s' "$val" ;;
+      *) die "approval_refs.env: unknown key" ;;
+    esac
+  done < "$f"
+  [[ -n "$GO_SHA" && -n "$GO_REF" && -n "$GO_TEXT" ]] || die "approval_refs.env is incomplete"
+}
+
+load_refs "$EV/approval_refs.env"
+[[ "$GO_SHA" == "$CARD_SHA" ]] || die "approval_refs.env: GO_SHA is not this card SHA"
 DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT:-}”（${NIGHT_REF:-}）并对本卡 SHA ${CARD_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行"
 BACKGROUND="M3-REL7（第七次发版候选）：用 main 上的合并提交 d671611a 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；再跑全量门禁：十组回归（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值由 GitHub release-pregate 对两个提交各实跑一次相减得出）、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。自现行有效版本 1.3.3-6a9f127 以来合入 53 个合并提交，产品子树 83 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。"
 mkdir -p "$EV"

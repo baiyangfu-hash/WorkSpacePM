@@ -314,6 +314,12 @@ DUMMY
   det "$D/mem_guard.log" "$PY" -B "$EV/mem_guard.py" "$D/gates/status" "$D/gates/status/current_pid" 40 36
   echo "DRYRUN LAUNCHED DETACHED (no Run, no real gates)"; exit 0
 fi
+# out-of-band anchor: approve_start in this folder must equal the copy on the reviewed branch (its hash is also reported in the thread); the comparison goes to launch_anchor.log
+git fetch -q origin claude/rel7-gate-tools-20261102 || { echo "ANCHOR: cannot fetch the reviewed branch"; exit 1; }
+BRANCH_SHA="$(git show origin/claude/rel7-gate-tools-20261102:reviews/rel7-gate-tools-20261102/rel7_1_approve_start.sh | sha256sum | cut -d' ' -f1)"
+LOCAL_SHA="$(sha256sum < "$EV/rel7_1_approve_start.sh" | cut -d' ' -f1)"
+echo "$(date -u +%FT%TZ) approve_start anchor: branch=$BRANCH_SHA local=$LOCAL_SHA" | tee -a "$EV/launch_anchor.log"
+[ "$BRANCH_SHA" = "$LOCAL_SHA" ] || { echo "ANCHOR MISMATCH: refusing to start"; exit 1; }
 bash "$EV/rel7_1_approve_start.sh" > "$EV/start2.out" 2>&1 || { echo "START FAILED"; tail -5 "$EV/start2.out"; exit 1; }
 bash "$ROOT/.auto-pm/reports/m2_lease_renew.sh" "$EV/close.env" > "$EV/renew_first.log" 2>&1 || { echo "FIRST RENEW FAILED"; cat "$EV/renew_first.log"; exit 1; }
 echo "first renewal ok"
@@ -380,13 +386,37 @@ for name in ("rel7_1_approve_start.sh", "rel7_2_close_commit.sh"):
     io.open(EV / name, "w", encoding="utf-8", newline="").write(t.replace("claude-sonnet-5-5", "claude"))
 tpl = io.open(EV / "commit_msg.template.txt", encoding="utf-8", newline="").read().replace("Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>", "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>")
 io.open(EV / "commit_msg.template.txt", "w", encoding="utf-8", newline="").write(tpl)
+PARSER_TEXT = r"""die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+# approval_refs.env is PARSED line by line (never sourced, never eval'd); the refs and the SHA are checked by regular expressions, the text fields reject quotes, backticks, $ and backslashes
+load_refs() {
+  local f="$1" line key val
+  GO_SHA=""; GO_REF=""; GO_TEXT=""; NIGHT_REF=""; NIGHT_TEXT=""
+  [[ -f "$f" ]] || die "approval_refs.env is missing: it records the user's own go-ahead for THIS card SHA and is written only after the user said it"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || die "approval_refs.env: a line without '='"
+    key="${line%%=*}"; val="${line#*=}"
+    case "$key" in
+      GO_SHA)  [[ "$val" =~ ^[0-9a-f]{64}$ ]] || die "approval_refs.env: GO_SHA format"; GO_SHA="$val" ;;
+      GO_REF)  [[ "$val" =~ ^user-confirmation:cmsg_[A-Za-z0-9]{20,80}$ ]] || die "approval_refs.env: GO_REF format"; GO_REF="$val" ;;
+      NIGHT_REF) [[ "$val" =~ ^user-confirmation:cmsg_[A-Za-z0-9]{20,80}$ ]] || die "approval_refs.env: NIGHT_REF format"; NIGHT_REF="$val" ;;
+      GO_TEXT|NIGHT_TEXT)
+        [[ ${#val} -ge 1 && ${#val} -le 200 && "$val" != *\"* && "$val" != *\'* && "$val" != *\`* && "$val" != *'$'* && "$val" != *\\* ]] || die "approval_refs.env: $key has a rejected character or length"
+        printf -v "$key" '%s' "$val" ;;
+      *) die "approval_refs.env: unknown key" ;;
+    esac
+  done < "$f"
+  [[ -n "$GO_SHA" && -n "$GO_REF" && -n "$GO_TEXT" ]] || die "approval_refs.env is incomplete"
+}
+"""
 _st = io.open(EV / "rel7_1_approve_start.sh", encoding="utf-8", newline="").read()
 _a = _st.index('DELEG="委托执行')
 _b = _st.index(NL, _a)
 _deleg = (
-    '[[ -f "$EV/approval_refs.env" ]] || die "approval_refs.env is missing: it records the user\'s own go-ahead for THIS card SHA and is written only after the user said it"' + NL
-    + 'source "$EV/approval_refs.env"   # GO_SHA, GO_REF (user-confirmation:<message id> of the user\'s go-ahead), GO_TEXT (the words), NIGHT_REF / NIGHT_TEXT (the 21:00 permission)' + NL
-    + '[[ "${GO_SHA:-}" == "$CARD_SHA" && "${GO_REF:-}" == user-confirmation:cmsg_* && -n "${GO_TEXT:-}" ]] || die "approval_refs.env does not carry the user\'s go-ahead for this card SHA"' + NL
+    PARSER_TEXT + NL
+    + 'load_refs "$EV/approval_refs.env"' + NL
+    + '[[ "$GO_SHA" == "$CARD_SHA" ]] || die "approval_refs.env: GO_SHA is not this card SHA"' + NL
     + 'DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT:-}”（${NIGHT_REF:-}）并对本卡 SHA ${CARD_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；'
     '只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行"')
 _st = _st[:_a] + _deleg + _st[_b:]
@@ -407,6 +437,11 @@ _st = _st.replace(_old_br, _new_br)
 io.open(EV / "rel7_1_approve_start.sh", "w", encoding="utf-8", newline="").write(_st)
 _cl = io.open(EV / "rel7_2_close_commit.sh", encoding="utf-8", newline="").read()
 assert _cl.count('cd "$ROOT"' + NL) >= 1
+_ca = _cl.index('DELEG="委托执行')
+_cb = _cl.index(NL, _ca)
+_cl = (_cl[:_ca] + PARSER_TEXT + NL + 'load_refs /c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7/approval_refs.env' + NL
+       + 'DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT}”（${NIGHT_REF}）并对卡 SHA ${GO_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在用户阅读结果并确认验收之后"'
+       + _cl[_cb:])
 _cl = _cl.replace('cd "$ROOT"' + NL, 'cd "$ROOT"' + NL + 'touch /c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7/STOP_RENEW  # the gates are done: stop the renewal loop (the lease keeps >= 40 min, the closure takes about 10)' + NL, 1)
 io.open(EV / "rel7_2_close_commit.sh", "w", encoding="utf-8", newline="").write(_cl)
 io.open(EV / "approval_refs.env.template", "w", encoding="utf-8", newline="").write(

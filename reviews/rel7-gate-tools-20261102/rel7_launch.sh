@@ -25,6 +25,12 @@ DUMMY
   det "$D/mem_guard.log" "$PY" -B "$EV/mem_guard.py" "$D/gates/status" "$D/gates/status/current_pid" 40 36
   echo "DRYRUN LAUNCHED DETACHED (no Run, no real gates)"; exit 0
 fi
+# out-of-band anchor: approve_start in this folder must equal the copy on the reviewed branch (its hash is also reported in the thread); the comparison goes to launch_anchor.log
+git fetch -q origin claude/rel7-gate-tools-20261102 || { echo "ANCHOR: cannot fetch the reviewed branch"; exit 1; }
+BRANCH_SHA="$(git show origin/claude/rel7-gate-tools-20261102:reviews/rel7-gate-tools-20261102/rel7_1_approve_start.sh | sha256sum | cut -d' ' -f1)"
+LOCAL_SHA="$(sha256sum < "$EV/rel7_1_approve_start.sh" | cut -d' ' -f1)"
+echo "$(date -u +%FT%TZ) approve_start anchor: branch=$BRANCH_SHA local=$LOCAL_SHA" | tee -a "$EV/launch_anchor.log"
+[ "$BRANCH_SHA" = "$LOCAL_SHA" ] || { echo "ANCHOR MISMATCH: refusing to start"; exit 1; }
 bash "$EV/rel7_1_approve_start.sh" > "$EV/start2.out" 2>&1 || { echo "START FAILED"; tail -5 "$EV/start2.out"; exit 1; }
 bash "$ROOT/.auto-pm/reports/m2_lease_renew.sh" "$EV/close.env" > "$EV/renew_first.log" 2>&1 || { echo "FIRST RENEW FAILED"; cat "$EV/renew_first.log"; exit 1; }
 echo "first renewal ok"

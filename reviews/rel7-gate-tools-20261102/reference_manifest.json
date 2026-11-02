@@ -10,12 +10,12 @@
   "tools/m2_lease_renew.sh": "b92ab2083f3219796af8b469e66242013925fa1d83feb2e8035a0fad57c737ea",
   "tools/m2_renew_loop.sh": "0472a2c1dd40bd685bb5825cd85928701da42eec8a18bc13ccdb16e27e3eace1",
   "tools/mem_guard.py": "f878aa6bce8c6b310d14c884de895182c735be6c2b11aefd75d73f9552b29619",
-  "tools/rel7_2_close_commit.sh": "825c0b322b7ee634f7862f551dc3a2c501e7a049d423d18da1de9e647902cd24",
+  "tools/rel7_2_close_commit.sh": "c9e14ca07f73c2fe6bd396915ac86e4ab6af5c4dda39888fdb39d5294392bea7",
   "tools/rel7_3_chg_close.sh": "5f134f3fddd1286a4fb31c6b68f9520cd03934ca485287d85b6213bf76574562",
   "tools/rel7_4_close_worktree.sh": "0cc597773151c247f21d653a4ced5b8a81b94fa9342105fac0064bd42fbe0811",
   "tools/rel7_config.json": "7546ba0ee435066d9abd07006d4b33b24d23acebd9c0d4257ffb719a0d362876",
   "tools/rel7_gates.py": "2e1594b6b65b9fc65952f1d35f9b493eed2eccd7e7481b2e6adcebbd5ec089df",
   "tools/rel7_gates_all.sh": "f57b50b11415b378ca2e29c49640f66e272825a064941a22edc9c527f984b078",
-  "tools/rel7_launch.sh": "f02ba2038b80afd46f7a544dd33b94c07c45e5b7c4159375776b288d10f872cc",
+  "tools/rel7_launch.sh": "254862c3b4a1d571fe7ba243b4d755dafa1d2e4557f7f5064d0446a0ec43db2c",
   "tools/run_g2.sh": "a32cd648a0a4f1037345e77dd4a24c126c8296a2c3d44daa18e81983984b21f4"
 }

@@ -20,7 +20,32 @@ CONCLUSION_EXTRA="${CONCLUSION_EXTRA:-}"; MERGE_PARENTS="${MERGE_PARENTS:-}"; ST
 PY="$ROOT/.venv/Scripts/python.exe"
 P='01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具'
 CHG_FILE="01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/$CHG.md"
-DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 12:04（当地时间）说“今天电脑给你用，允许白天跑门禁下午5点之前尽量结束”（协调者转述原话，用户消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7tDgoX2UY8rPK5n7nMxruFa2）；只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行"
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+# approval_refs.env is PARSED line by line (never sourced, never eval'd); the refs and the SHA are checked by regular expressions, the text fields reject quotes, backticks, $ and backslashes
+load_refs() {
+  local f="$1" line key val
+  GO_SHA=""; GO_REF=""; GO_TEXT=""; NIGHT_REF=""; NIGHT_TEXT=""
+  [[ -f "$f" ]] || die "approval_refs.env is missing: it records the user's own go-ahead for THIS card SHA and is written only after the user said it"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || die "approval_refs.env: a line without '='"
+    key="${line%%=*}"; val="${line#*=}"
+    case "$key" in
+      GO_SHA)  [[ "$val" =~ ^[0-9a-f]{64}$ ]] || die "approval_refs.env: GO_SHA format"; GO_SHA="$val" ;;
+      GO_REF)  [[ "$val" =~ ^user-confirmation:cmsg_[A-Za-z0-9]{20,80}$ ]] || die "approval_refs.env: GO_REF format"; GO_REF="$val" ;;
+      NIGHT_REF) [[ "$val" =~ ^user-confirmation:cmsg_[A-Za-z0-9]{20,80}$ ]] || die "approval_refs.env: NIGHT_REF format"; NIGHT_REF="$val" ;;
+      GO_TEXT|NIGHT_TEXT)
+        [[ ${#val} -ge 1 && ${#val} -le 200 && "$val" != *\"* && "$val" != *\'* && "$val" != *\`* && "$val" != *'$'* && "$val" != *\\* ]] || die "approval_refs.env: $key has a rejected character or length"
+        printf -v "$key" '%s' "$val" ;;
+      *) die "approval_refs.env: unknown key" ;;
+    esac
+  done < "$f"
+  [[ -n "$GO_SHA" && -n "$GO_REF" && -n "$GO_TEXT" ]] || die "approval_refs.env is incomplete"
+}
+
+load_refs /c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7/approval_refs.env
+DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT}”（${NIGHT_REF}）并对卡 SHA ${GO_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在用户阅读结果并确认验收之后"
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 cli() { "$PY" -B main.py "$@"; }
 q() { "$PY" -B -c 'import sqlite3,sys;c=sqlite3.connect("file:.auto-pm/continuity.db?mode=ro",uri=True);r=c.execute(sys.argv[1],tuple(sys.argv[2:])).fetchone();print(r[0] if r else "NONE")' "$@"; }

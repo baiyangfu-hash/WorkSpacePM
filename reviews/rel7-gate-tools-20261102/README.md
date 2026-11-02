@@ -33,3 +33,11 @@
 - 启动前：`FAILED` 改名留证（`FAILED.previous.<时间>`），不删；清 `DONE`、`gates_all.exit`、`RESUME`、`PAUSED`、`current_pid`。
 - 指纹清单：除 `rel7_launch.sh` 外，又加入 `rel7_2_close_commit.sh`、`rel7_3_chg_close.sh`、`rel7_4_close_worktree.sh`、`m2_lease_renew.sh`、`m2_renew_loop.sh`；启动脚本的清单核对已适配并实测通过（19 项）。`rel7_1_approve_start.sh` 不进清单：它含卡 SHA，而卡里写着清单的 SHA，会循环依赖；它的字节由卡 SHA 检查间接约束。
 - 卡 §1 第 12 条：工作树建好后失败不能原地重跑（前置检查会拒绝），以及这种情况怎么处理（保留现场、另出 V1.1）。
+
+## 2026-11-02 16:45 MST：558 第四轮复核的修改
+
+- 卡里所有“17:00 前跑完”的说法（卡头部、§1 实施批准、§1 第 1/7 条、§3 第 3 条、步骤 0）改为“用户 16:11 MST 改为晚上 9:00 起跑，不再受 17:00 限制，预计 2 小时 40 分至 3 小时”，步骤 0 里的时间比较已删。
+- `approval_refs.env` 不再 `source`：`load_refs` 逐行解析，GO_SHA 必须 64 位十六进制、GO_REF/NIGHT_REF 必须匹配 `user-confirmation:cmsg_…`，文本字段拒绝引号、反引号、`$`、反斜杠与超长；未知键、缺项一律拒绝。`approval_refs_parser_test.txt` 是 9 个用例的结果。文件由我在读取消息核对作者与正文之后才写。
+- `rel7_2_close_commit.sh`：解析同一份文件，回执 DELEG 引用 GO_REF 与 NIGHT_REF。
+- 带外锚点：`rel7_launch.sh` 在起跑前取 `origin/claude/rel7-gate-tools-20261102` 上 `rel7_1_approve_start.sh` 的哈希，与笔记本上的副本比对，一致才开跑，比对结果写进 `launch_anchor.log`；本提交里该脚本的 SHA-256 已在线程里单独报出。
+- 干跑日志（状态文件、各进程日志、结束标记）放在 `launch_dryrun/`。
