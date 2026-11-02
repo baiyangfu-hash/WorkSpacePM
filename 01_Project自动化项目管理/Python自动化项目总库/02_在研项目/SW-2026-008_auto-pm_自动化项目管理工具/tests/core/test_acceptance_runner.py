@@ -88,6 +88,33 @@ def test_a_missing_executable_is_a_failure_with_the_name_not_a_crash(tmp_path: P
     assert "没有跑成" in mismatch_lines([result])[0]
 
 
+def _planted_tool(folder: Path, name: str = "tool-xyz") -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    script = folder / name
+    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    script.chmod(0o755)
+    return script
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the planted file is a POSIX shell script")
+def test_a_tool_is_found_only_through_an_absolute_path_entry(tmp_path: Path) -> None:
+    """The lookup is the shared ``find_on_path``: an absolute ``PATH`` entry answers, the working directory and a relative or empty
+    entry never do (``shutil.which`` trusted the empty entry as the working directory on POSIX and the directory itself on Windows)."""
+    bin_dir = tmp_path / "bin"
+    work = tmp_path / "work"
+    _planted_tool(bin_dir)
+    work.mkdir()
+    base = {"PATH": str(bin_dir)}
+    assert refusal_reason("tool-xyz", cwd=work, env=base) == ""
+
+    planted = tmp_path / "planted"
+    _planted_tool(work, "tool-xyz")  # in the working directory, which is where an untrusted repository would put it
+    _planted_tool(planted, "other-xyz")
+    for hostile in ("", ".", "planted", f":{planted}", str(work)):
+        reason = refusal_reason("tool-xyz", cwd=work, env={"PATH": hostile})
+        assert "tool-xyz" in reason, hostile
+
+
 def test_a_command_that_needs_a_shell_is_not_run_at_all(tmp_path: Path) -> None:
     marker = tmp_path / "marker.txt"
     result = _run(tmp_path, f"{_quote(PYTHON, '-c', 'pass')} && {_quote(PYTHON, '-c', f'open({str(marker)!r}, chr(119)).close()')}")

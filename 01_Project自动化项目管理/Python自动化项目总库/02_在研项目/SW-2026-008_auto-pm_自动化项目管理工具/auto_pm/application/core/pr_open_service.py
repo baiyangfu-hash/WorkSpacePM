@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,6 +42,7 @@ from auto_pm.application.core.pr_body_builder import (
 )
 from auto_pm.domain.change.path_resolver import LEGACY_MONITORING_DIR
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from auto_pm.infrastructure.executable_lookup import find_on_path
 from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 UNKNOWN_CALLER = "?"  # what caller_agent() returns when the markers name nobody on the roster
@@ -100,7 +100,7 @@ class PrOpened:
 
 
 def default_gh(args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
-    gh = shutil.which("gh")
+    gh = find_on_path("gh")
     if gh is None:
         raise PrOpenRefusedError(
             "本机没有装 GitHub 命令行 `gh`；先装好并 `gh auth login`，或把分支交给用户在网页上开 PR"
@@ -127,7 +127,7 @@ def default_gh(args: Sequence[str], stdin: str | None) -> subprocess.CompletedPr
 def gh_status() -> tuple[bool, bool]:
     """(installed, logged in) for ``doctor``; read-only."""
 
-    if shutil.which("gh") is None:
+    if find_on_path("gh") is None:
         return False, False
     try:
         return True, default_gh(["auth", "status"], None).returncode == 0
