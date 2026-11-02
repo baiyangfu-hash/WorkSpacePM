@@ -6,6 +6,7 @@ The Windows rules are exercised on every platform by injecting ``windows=True``;
 
 from __future__ import annotations
 
+import ast
 import os
 import sys
 from pathlib import Path
@@ -38,6 +39,19 @@ def test_windows_skips_the_current_directory_relative_entries_and_empty_entries(
     chosen = _touch(real / "gh.exe")
     found = find_on_path("gh", path=";".join([*entries, str(real)]), windows=True, cwd=str(cwd))
     assert found == chosen and os.path.isabs(found)
+
+
+def test_windows_takes_a_quoted_path_directory_that_holds_spaces(tmp_path: Path) -> None:
+    """Windows writes ``PATH`` entries with spaces in double quotes (``"C:\\Program Files\\Git\\cmd"``); the quotes are not part of the name."""
+    folder = tmp_path / "Program Files" / "Git cmd"
+    chosen = _touch(folder / "git.exe")
+    cwd = str(tmp_path / "elsewhere")
+    assert find_on_path("git", path=f'"{folder}"', windows=True, cwd=cwd) == chosen
+    assert find_on_path("git", path=f'{tmp_path / "nothing"};  "{folder}"  ', windows=True, cwd=cwd) == chosen
+    # A quoted entry that is the working directory is still the working directory.
+    assert find_on_path("git", path=f'"{folder}"', windows=True, cwd=str(folder)) is None
+    # A quoted relative entry is still relative.
+    assert find_on_path("git", path='"Program Files"', windows=True, cwd=str(tmp_path)) is None
 
 
 def test_windows_accepts_only_exe_unless_the_caller_asks_for_more(tmp_path: Path) -> None:
@@ -86,18 +100,25 @@ def test_the_copy_the_scripts_keep_answers_the_same_as_this_one(tmp_path: Path, 
     _touch(cwd / "gh.exe")
     _touch(cwd / "gh")
     good = tmp_path / "tools"
-    _touch(good / "gh.exe")
-    _touch(good / "gh")
-    for windows, separator in ((True, ";"), (False, ":")):
-        for entries in (
-            ["", ".", "rel", str(cwd)],
-            [str(cwd), str(good)],
-            [str(tmp_path / "nothing"), str(good)],
-        ):
-            joined = separator.join(entries)
-            ours = find_on_path("gh", path=joined, windows=windows, cwd=str(cwd))
-            theirs = actions.find_on_path("gh", path=joined, windows=windows, cwd=str(cwd))
-            assert ours == theirs, (windows, entries)
+    spaced = tmp_path / "Program Files" / "Git"
+    for folder in (good, spaced):
+        _touch(folder / "gh.exe")
+        _touch(folder / "gh")
+        _touch(folder / "git.cmd")
+    # Plain, ``.exe``-suffixed (any case), a ``.cmd`` shim name, and a name without a match.
+    for name in ("gh", "gh.exe", "GH.EXE", "git.cmd", "git", "nothing"):
+        for windows, separator in ((True, ";"), (False, ":")):
+            for entries in (
+                ["", ".", "rel", str(cwd)],
+                [str(cwd), str(good)],
+                [str(tmp_path / "nothing"), str(good)],
+                [f'"{spaced}"', str(good)],
+                [f'  "{cwd}"  ', f'"{spaced}"'],
+            ):
+                joined = separator.join(entries)
+                ours = find_on_path(name, path=joined, windows=windows, cwd=str(cwd))
+                theirs = actions.find_on_path(name, path=joined, windows=windows, cwd=str(cwd))
+                assert ours == theirs, (name, windows, entries)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="plants an executable named gh and relies on POSIX PATH rules")
@@ -116,3 +137,40 @@ def test_the_pr_opener_never_runs_a_gh_planted_in_the_current_directory(
     assert pr_open_service.gh_status() == (False, False)
     assert not marker.exists()
     assert sys.platform != "win32"
+
+
+def which_call_lines(source: str | bytes) -> list[int]:
+    """Lines that use ``shutil.which`` in any spelling: ``shutil.which``, ``import shutil as s`` + ``s.which`` and ``from shutil import which [as w]``."""
+    tree = ast.parse(source)
+    shutil_names: set[str] = set()
+    which_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            shutil_names.update(alias.asname or alias.name for alias in node.names if alias.name == "shutil")
+        elif isinstance(node, ast.ImportFrom) and node.module == "shutil":
+            which_names.update(alias.asname or alias.name for alias in node.names if alias.name == "which")
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "which":
+            if isinstance(node.value, ast.Name) and node.value.id in shutil_names:
+                lines.append(node.lineno)
+        elif isinstance(node, ast.Name) and node.id in which_names and isinstance(node.ctx, ast.Load):
+            lines.append(node.lineno)
+    return sorted(lines)
+
+
+def test_the_guard_recognises_every_spelling_and_ignores_other_which_names() -> None:
+    assert which_call_lines("import shutil\nshutil.which('x')\n") == [2]
+    assert which_call_lines("import shutil as s\ns.which('x')\n") == [2]
+    assert which_call_lines("from shutil import which as w\nw('x')\n") == [2]
+    assert which_call_lines("import shutil\nshutil.copy('a', 'b')\n") == []
+    assert which_call_lines("class A:\n    def which(self): ...\nA().which()\n") == []
+
+
+def test_the_cockpit_package_never_looks_a_program_up_with_shutil_which() -> None:
+    """``shutil.which`` searches the working directory first on Windows and trusts an empty entry on POSIX: a new call site turns this red."""
+    package = Path(__file__).resolve().parents[2] / "auto_pm"
+    offenders = [
+        f"{source.relative_to(package)}:{line}" for source in sorted(package.rglob("*.py")) for line in which_call_lines(source.read_bytes())
+    ]
+    assert offenders == [], f"use auto_pm.infrastructure.executable_lookup.find_on_path instead: {offenders}"

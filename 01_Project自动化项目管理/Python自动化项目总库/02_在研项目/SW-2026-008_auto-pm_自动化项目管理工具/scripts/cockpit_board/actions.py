@@ -93,7 +93,8 @@ def find_on_path(
     raw_path = os.environ.get("PATH", "") if path is None else path
     here = os.path.normcase(os.path.realpath(os.getcwd() if cwd is None else cwd))
     exists = is_file or (lambda p: os.path.isfile(p) and (is_windows or os.access(p, os.X_OK)))
-    file_name = f"{name}.exe" if is_windows else name
+    # A name that already says ``.exe`` is used as written (``find_on_path("git.exe")``), not turned into ``git.exe.exe``.
+    file_name = name if not is_windows or name.lower().endswith(".exe") else f"{name}.exe"
     for entry in raw_path.split(";" if is_windows else ":"):
         entry = entry.strip().strip('"')
         if not entry or not os.path.isabs(entry):
