@@ -326,3 +326,49 @@ def test_a_failed_pin_status_read_shows_the_command_and_exit_code(qapp: QApplica
     assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("口令状态", "rc 2")]
     texts = _texts(controller.page, QLabel)
     assert any("approver-pin" in t for t in texts) and any("No such command" in t for t in texts)
+
+
+# ---------------------------------------------------------------- 启动器横幅在 stderr：只解析 stdout（试用 11-01 决定页“都是空的”）
+
+LAUNCHER_BANNER = "launcher: release verified via active_release.json: C:/ws/00_Infrastructure/auto_pm/releases/1.3.3-6a9f127\n"
+
+
+class BannerCli(BrokenReads):
+    """真实形状：数据在 stdout，每条命令的 stderr 都带一行启动器横幅。"""
+
+    def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        done = super().__call__(command, **kwargs)
+        return subprocess.CompletedProcess(command, done.returncode, done.stdout, (done.stderr or "") + LAUNCHER_BANNER)
+
+
+def test_banner_on_stderr_does_not_blank_the_page(qapp: QApplication, tmp_path: Path) -> None:
+    fake = BannerCli()
+    fake.pending_out = json.dumps(
+        {"cards": [{"card": {"request_id": "R1", "plan_hash": "h" * 64}, "objective": "改 IO 表", "superseded": False}]}, indent=2
+    )
+    controller = _read(qapp, tmp_path, fake)
+    assert controller.page.vm.failures == ()
+    assert controller.pin_mode == "off"
+    assert any("改 IO 表" in t for t in _texts(controller.page, QLabel))
+    assert EMPTY_TEXT not in _texts(controller.page, QLabel)
+
+
+def test_only_stdout_is_parsed_never_stderr(qapp: QApplication, tmp_path: Path) -> None:
+    """stdout 是真正的“没有”，stderr 里恰好有一段像数据的 JSON：不许当数据读。"""
+
+    class Noisy(BrokenReads):
+        def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            done = super().__call__(command, **kwargs)
+            stray = json.dumps({"cards": [{"card": {"request_id": "X9", "plan_hash": "z" * 64}, "objective": "杂音"}]})
+            return subprocess.CompletedProcess(command, done.returncode, done.stdout, stray)
+
+    controller = _read(qapp, tmp_path, Noisy())
+    assert not any("杂音" in t for t in _texts(controller.page, QLabel))
+    assert EMPTY_TEXT in _texts(controller.page, QLabel)
+
+
+def test_failed_read_shows_stderr_not_the_banner_only(qapp: QApplication, tmp_path: Path) -> None:
+    fake = BannerCli()
+    fake.pending_rc, fake.pending_out = 1, ""
+    controller = _read(qapp, tmp_path, fake)
+    assert [(f.what, f.rc_text) for f in controller.page.vm.failures] == [("读待批准范围卡 DJ-1", "rc 1")]

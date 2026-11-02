@@ -38,7 +38,9 @@ class Receipt:
     command: str
     rc: int | None
     preview: bool = False
-    output: str = ""
+    output: str = ""  # 显示用：stdout 接 stderr
+    stdout: str = ""  # 要解析的只用这个；stderr 里有启动器横幅等杂行，只用来在出错时给人看
+    stderr: str = ""
 
     @property
     def rc_text(self) -> str:
@@ -273,7 +275,8 @@ def run_cli(root: Path, label: str, args: Sequence[str], runner: Callable[..., A
                         timeout=timeout, check=False, stdin=subprocess.DEVNULL, env=env, **quiet())
     except (OSError, subprocess.SubprocessError) as error:
         return Receipt(_now_text(), label, shown, None, False, f"{type(error).__name__}: {error}")
-    return Receipt(_now_text(), label, shown, result.returncode, False, (result.stdout or "") + (result.stderr or ""))
+    out, err = result.stdout or "", result.stderr or ""
+    return Receipt(_now_text(), label, shown, result.returncode, False, out + err, out, err)
 
 
 def console_flag() -> int:
