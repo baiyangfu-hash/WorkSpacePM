@@ -12,6 +12,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
+from auto_pm.application.core.acceptance_runner import (
+    mismatch_lines,
+    run_acceptance_checks,
+    write_report,
+)
 from auto_pm.application.core.approval_proof_service import ApprovalProofError, ApprovalProofService
 from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
@@ -50,7 +55,12 @@ from auto_pm.contracts.declared_dirty import declared_dirty_mismatch
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.intake import IntakeClassification, IntakeKind
 from auto_pm.contracts.mission import Mission, MissionState
-from auto_pm.contracts.plan_checklist import plan_checklist_problems, plan_checklist_refusal
+from auto_pm.contracts.plan_checklist import (
+    AcceptanceCheck,
+    PlanChecklist,
+    plan_checklist_problems,
+    plan_checklist_refusal,
+)
 from auto_pm.contracts.pm_facade import (
     PlanningApprovalResult,
     PlanningDraft,
@@ -1176,6 +1186,11 @@ class PmFacadeService:
             protected_note, protected_block = self._protected_file_note(run)
             if protected_block:
                 return self._not_verified(mission, run, protected_note)
+            # The verifier runs the approved acceptance commands itself; a "done" the agent reports is not evidence.
+            acceptance_note, acceptance_block = self._run_approved_acceptance_checks(mission, run)
+            if acceptance_block:
+                return self._not_verified(mission, run, acceptance_note)
+            protected_note = "；".join(note for note in (protected_note, acceptance_note) if note)
             profile = collector.checkpoint_profile_for_run(run)
             ContinuityExecutionService(
                 self._workspace_root, store=self._store
@@ -1219,6 +1234,43 @@ class PmFacadeService:
             mission_state=mission.state,
             message=_VERIFIED_MESSAGE,
         ), protected_note
+
+    def _approved_acceptance_checks(self, mission: Mission) -> tuple[AcceptanceCheck, ...] | None:
+        """The acceptance commands the user approved with the plan; None for a mission approved without any."""
+
+        decision_id = getattr(getattr(mission, "authority", None), "decision_id", "")
+        if not decision_id:
+            return None
+        try:
+            approval = self._decisions.get_decision(decision_id).metadata.get("planning_approval")
+        except DecisionError:
+            return None
+        grant = approval.get("execution_grant") if isinstance(approval, dict) else None
+        raw = grant.get("plan_checklist") if isinstance(grant, dict) else None
+        if raw is None:
+            return None
+        try:
+            return PlanChecklist.model_validate(raw).acceptance_checks
+        except ValueError as error:
+            raise PmFacadeError(f"批准的验收命令读不出来：{error}") from error
+
+    def _run_approved_acceptance_checks(self, mission: Mission, run: Any) -> tuple[str, bool]:
+        """Execute every approved command in the Run's worktree: (note for ``pm verify``, whether it must refuse)."""
+
+        checks = self._approved_acceptance_checks(mission)
+        if checks is None:
+            return "批准时没有登记验收命令（旧批准），验收命令未执行", False
+        if not checks:
+            return "", False
+        runs = run_acceptance_checks(checks, cwd=str(run.worktree_path))
+        try:
+            report = write_report(self._store.workspace_root, run.run_id, runs)
+        except OSError as error:
+            return f"验收命令的执行记录写不进（{error}），不能当作证据", True
+        problems = mismatch_lines(runs)
+        if problems:
+            return f"验收命令未通过（记录 {report}）：" + "；".join(problems), True
+        return f"验收命令已逐条执行，{len(runs)}/{len(runs)} 条与批准的退出码一致（记录 {report}）", False
 
     @staticmethod
     def _protected_file_changes(run: Any) -> tuple[str, ...] | None:

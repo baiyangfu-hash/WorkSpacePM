@@ -36,6 +36,7 @@ from tests.e2e.test_pmf_plc import (
     git,
     requirement_files,
 )
+from tests.plan_checklist_support import passing_command
 
 APPROVER = "fubai"
 SECOND_ID = "DJ-2026-905"
@@ -49,7 +50,7 @@ MAIN_DOMAIN = "ELEC"
 ORIGINAL_WORDS = "样件联调：走完整条收口流程"
 PLAN_CHECKLIST = (
     "--original-request", ORIGINAL_WORDS, "--safety-circuit", "否",
-    "--check", f"python main.py plc check {PROJECT_ID} => 0", "--rollback", "git revert 本次提交，恢复原块",
+    "--check", f"{passing_command()} => 0", "--rollback", "git revert 本次提交，恢复原块",
 )
 
 LAUNCHER = """from auto_pm.cli.__main__ import cli
@@ -436,6 +437,12 @@ def test_d01_main_line_sorted_three_files_closes_in_one_step_and_ledger_is_clean
     result = drive_mission(drill, project_id=PROJECT_ID, request_id="REQ-DRILL-D01", files=files, declared=declared)
 
     assert_closed_and_clean(drill, result, PROJECT_ID)
+    # CHG-SCPT-2026-472: ``verify`` ran the approved command itself (read back from the real Decision) and left the evidence.
+    reports = sorted((drill.root / ".auto-pm" / "reports" / "acceptance").glob("*.json"))
+    assert len(reports) == 1
+    evidence = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert evidence["all_passed"] is True and [item["exit_code"] for item in evidence["checks"]] == [0]
+    assert evidence["checks"][0]["command"] == passing_command()
 
 
 def test_d00_a_project_on_the_old_11_layout_can_be_approved_and_closed(tmp_path: Path, benchmark_tar: bytes) -> None:  # noqa: F811

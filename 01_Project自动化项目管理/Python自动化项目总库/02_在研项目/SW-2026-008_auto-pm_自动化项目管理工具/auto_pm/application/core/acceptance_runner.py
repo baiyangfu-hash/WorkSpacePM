@@ -1,0 +1,226 @@
+"""Execute the approved acceptance commands, one by one, exactly as approved.
+
+``pm plan --check "命令 => 退出码"`` used to only *store* the commands; the agent ran them itself and reported the
+result, which is how a "done" could be claimed without the check ever passing.  :func:`run_acceptance_checks` is the
+verifier's own execution: each command is split into an argument list (never passed to a shell), run in the Run's
+worktree with a UTF-8 environment and ``core.quotePath=false`` for Git, and its real exit code and output summary are
+recorded.  A command that cannot start, times out, or exits with a code other than the approved one is a mismatch.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import time
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+from auto_pm.contracts.acceptance_command import (
+    AcceptanceCommandError,
+    parse_command,
+    with_git_quotepath,
+)
+from auto_pm.contracts.plan_checklist import AcceptanceCheck
+
+__all__ = [
+    "REPORT_DIRECTORY",
+    "CheckRun",
+    "execution_environment",
+    "mismatch_lines",
+    "run_acceptance_checks",
+    "write_report",
+]
+
+#: Under the control root; ``.auto-pm`` is not tracked by Git.
+REPORT_DIRECTORY = (".auto-pm", "reports", "acceptance")
+DEFAULT_TIMEOUT_SECONDS = 900
+_TAIL_LINES = 20
+_TAIL_CHARACTERS = 2000
+
+
+@dataclass(frozen=True)
+class CheckRun:
+    """What really happened when one approved command was executed."""
+
+    command: str
+    argv: tuple[str, ...]
+    argv_differs: bool
+    expected_exit_code: int
+    exit_code: int | None
+    passed: bool
+    seconds: float
+    output_tail: str
+    output_sha256: str
+    output_bytes: int
+    error: str = ""
+
+    def as_dict(self) -> dict[str, object]:
+        data = asdict(self)
+        data["argv"] = list(self.argv)
+        return data
+
+
+def execution_environment(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """A UTF-8 environment for the checks: Python in UTF-8 mode, Git told not to quote non-ASCII paths.
+
+    Lease credentials are not handed to the checks.  Git is configured through ``GIT_CONFIG_*`` as well, so a Git call
+    made *inside* a script (not only a top-level ``git`` command) also prints Chinese paths as they are.
+    """
+
+    env = {key: value for key, value in (os.environ if base is None else base).items() if "LEASE" not in key.upper()}
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["NO_COLOR"] = "1"
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        count = 0
+    env[f"GIT_CONFIG_KEY_{count}"] = "core.quotePath"
+    env[f"GIT_CONFIG_VALUE_{count}"] = "false"
+    env["GIT_CONFIG_COUNT"] = str(count + 1)
+    return env
+
+
+def _decode(data: bytes) -> str:
+    """UTF-8 first (the environment asks for it), then the Chinese Windows code page, then bytes as Latin-1."""
+
+    for encoding in ("utf-8", "gb18030"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1")
+
+
+def _tail(text: str) -> str:
+    lines = text.strip().splitlines()[-_TAIL_LINES:]
+    joined = "\n".join(lines)
+    return joined[-_TAIL_CHARACTERS:]
+
+
+def _resolve_executable(name: str, cwd: Path, env: Mapping[str, str]) -> str | None:
+    if os.sep in name or (os.altsep and os.altsep in name):
+        candidate = Path(name)
+        path = candidate if candidate.is_absolute() else cwd / candidate
+        return str(path) if path.exists() else None
+    return shutil.which(name, path=env.get("PATH"))
+
+
+def _failed(
+    check: AcceptanceCheck, argv: tuple[str, ...], differs: bool, error: str, seconds: float = 0.0
+) -> CheckRun:
+    return CheckRun(
+        command=check.command,
+        argv=argv,
+        argv_differs=differs,
+        expected_exit_code=check.expected_exit_code,
+        exit_code=None,
+        passed=False,
+        seconds=seconds,
+        output_tail="",
+        output_sha256="",
+        output_bytes=0,
+        error=error,
+    )
+
+
+def _run_one(
+    check: AcceptanceCheck, *, cwd: Path, env: Mapping[str, str], timeout: int, windows: bool | None
+) -> CheckRun:
+    try:
+        parsed = parse_command(check.command, windows=windows)
+    except AcceptanceCommandError as error:
+        return _failed(check, (), False, f"命令不能按原文执行：{error}")
+    argv, differs = with_git_quotepath(parsed.argv)
+    executable = _resolve_executable(argv[0], cwd, env)
+    if executable is None:
+        return _failed(check, argv, differs, f"找不到命令 {argv[0]}（在 {cwd} 下、按 PATH 查找）")
+    started = time.monotonic()
+    try:
+        done = subprocess.run(  # noqa: S603 - argument list, never a shell string
+            [executable, *argv[1:]],
+            cwd=cwd,
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return _failed(check, argv, differs, f"超过 {timeout} 秒没有结束，已终止", time.monotonic() - started)
+    except OSError as error:
+        return _failed(check, argv, differs, f"无法启动：{error}", time.monotonic() - started)
+    seconds = time.monotonic() - started
+    return CheckRun(
+        command=check.command,
+        argv=argv,
+        argv_differs=differs,
+        expected_exit_code=check.expected_exit_code,
+        exit_code=done.returncode,
+        passed=done.returncode == check.expected_exit_code,
+        seconds=round(seconds, 3),
+        output_tail=_tail(_decode(done.stdout)),
+        output_sha256=hashlib.sha256(done.stdout).hexdigest(),
+        output_bytes=len(done.stdout),
+    )
+
+
+def run_acceptance_checks(
+    checks: Sequence[AcceptanceCheck],
+    *,
+    cwd: str | Path,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    env: Mapping[str, str] | None = None,
+    windows: bool | None = None,
+) -> tuple[CheckRun, ...]:
+    """Run every approved command in ``cwd`` (all of them, so one report shows every mismatch)."""
+
+    root = Path(cwd)
+    environment = execution_environment() if env is None else dict(env)
+    if not root.is_dir():
+        return tuple(_failed(check, (), False, f"执行目录不存在：{root}") for check in checks)
+    return tuple(
+        _run_one(check, cwd=root, env=environment, timeout=timeout, windows=windows) for check in checks
+    )
+
+
+def mismatch_lines(runs: Sequence[CheckRun]) -> tuple[str, ...]:
+    """One readable line per failed command, for the refusal message."""
+
+    lines: list[str] = []
+    for index, run in enumerate(runs, start=1):
+        if run.passed:
+            continue
+        if run.exit_code is None:
+            lines.append(f"第 {index} 条验收命令 `{run.command}` 没有跑成：{run.error}")
+            continue
+        tail = " / ".join(run.output_tail.splitlines()[-3:])
+        lines.append(
+            f"第 {index} 条验收命令 `{run.command}` 期望退出码 {run.expected_exit_code}，实际 {run.exit_code}"
+            + (f"：{tail}" if tail else "")
+        )
+    return tuple(lines)
+
+
+def write_report(control_root: str | Path, run_id: str, runs: Sequence[CheckRun]) -> Path:
+    """Persist what was executed; the file name carries the Run and the UTC second."""
+
+    directory = Path(control_root).joinpath(*REPORT_DIRECTORY)
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    path = directory / f"{run_id}-{stamp}.json"
+    payload = {
+        "schema_version": "acceptance-run.v1",
+        "run_id": run_id,
+        "executed_at": stamp,
+        "all_passed": all(run.passed for run in runs),
+        "checks": [run.as_dict() for run in runs],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
