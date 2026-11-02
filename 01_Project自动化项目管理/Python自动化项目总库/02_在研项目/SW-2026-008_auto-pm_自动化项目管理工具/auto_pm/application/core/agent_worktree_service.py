@@ -17,8 +17,9 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from auto_pm.infrastructure.control_root_guard import (
@@ -48,6 +49,8 @@ MAX_STATIONS = 8
 # A release (switching the deployed version) opens one more work tree of its own, so before a release at most
 # ``MAX_STATIONS - RELEASE_FREE_PLACES`` directories may be left: ``doctor --pre-release`` fails above that.
 RELEASE_FREE_PLACES = 1
+# WS-001 / problem pool item 33 rule 5: a station untouched for more than this many days is reported as stale.
+STALE_DAYS = 3
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 RunStateLookup = Callable[[str], str | None]
@@ -107,10 +110,21 @@ class Station:
         True  # False: only name, branch and path were read (no status, rev-list or reflog)
     )
     broken: str = ""  # why this directory is no longer a usable work tree (empty: it is one)
+    idle_seconds: int | None = None  # since the last commit / branch switch / opening; None: could not be read
 
     @property
     def agent(self) -> str:
         return self.name if self.kind == "agent" else ""
+
+    @property
+    def idle_days(self) -> int | None:
+        return None if self.idle_seconds is None else self.idle_seconds // 86400
+
+    @property
+    def stale(self) -> bool:
+        """Untouched for MORE than ``STALE_DAYS`` days (exactly 3 days is not yet stale)."""
+
+        return self.idle_seconds is not None and self.idle_seconds > STALE_DAYS * 86400
 
 
 @dataclass(frozen=True)
@@ -261,16 +275,15 @@ class AgentWorktreeService:
                 continue
             if progress is not None:
                 progress(path.name)
-            stations.append(
-                self._inspect(
-                    path,
-                    registered=True,
-                    branch=info.branch,
-                    head=info.head,
-                    locked=info.locked,
-                    deep=deep,
-                )
+            inspected = self._inspect(
+                path,
+                registered=True,
+                branch=info.branch,
+                head=info.head,
+                locked=info.locked,
+                deep=deep,
             )
+            stations.append(replace(inspected, idle_seconds=_idle_seconds(path)))
         if self._stations_dir.is_dir():
             for child in sorted(self._stations_dir.iterdir()):
                 if only is not None and child.name != only:
@@ -283,6 +296,7 @@ class AgentWorktreeService:
                             kind=_kind(child.name),
                             registered=False,
                             broken=_broken_reason(child),
+                            idle_seconds=_idle_seconds(child),
                         )
                     )
         return sorted(stations, key=lambda s: s.name)
@@ -729,6 +743,37 @@ def _broken_reason(path: Path) -> str:
             "命令会落到上层的控制根；人工查看后再处理"
         )
     return ""
+
+
+def _idle_seconds(path: Path) -> int | None:
+    """Seconds since the station was last touched: the newest of its directory, its ``.git`` link and the Git files that
+    a commit, a checkout or ``worktree add`` rewrite (``HEAD`` and its reflog).  File stats only -- no Git call, no work
+    tree scan.  ``git status`` rewrites the index, so the index is deliberately not read: looking at a station must not
+    make it look busy.  Edits that were never committed do not count (``list --deep`` shows those as unstaged changes).
+    """
+
+    candidates = [path, path / ".git"]
+    link = path / ".git"
+    try:
+        if link.is_file():
+            text = link.read_text(encoding="utf-8")
+            first = text.splitlines()[0] if text else ""
+            if first.startswith("gitdir:"):
+                gitdir = Path(first.removeprefix("gitdir:").strip())
+                if not gitdir.is_absolute():
+                    gitdir = path / gitdir
+                candidates += [gitdir / "HEAD", gitdir / "logs" / "HEAD"]
+    except (OSError, UnicodeDecodeError):  # an unreadable link only means the git-dir times are not used
+        pass
+    stamps: list[float] = []
+    for item in candidates:
+        try:
+            stamps.append(item.stat().st_mtime)
+        except OSError:
+            continue
+    if not stamps:
+        return None
+    return max(0, int(time.time() - max(stamps)))
 
 
 def _kind(name: str) -> str:

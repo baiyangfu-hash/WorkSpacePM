@@ -6,8 +6,10 @@ helper clone that plays "the PR got merged on GitHub".
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -865,3 +867,127 @@ def test_ctrl_c_during_a_listing_prints_one_line_not_a_traceback(
     assert result.exit_code == 130
     assert "已中断" in result.output and "Traceback" not in result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+# ── idle time (WS-001 rule 5: a station untouched for more than 3 days is reported) ──────────────────────
+
+NOW = 1_800_000_000.0
+DAY = 86400
+
+
+def _station_files(lab: Lab, agent: str) -> list[Path]:
+    """What `_idle_seconds` reads: the directory, its .git link and the reflog files of its git dir."""
+
+    station = lab.station(agent)
+    link = (station / ".git").read_text(encoding="utf-8").strip().removeprefix("gitdir:").strip()
+    gitdir = Path(link)
+    return [station, station / ".git", gitdir / "HEAD", gitdir / "logs" / "HEAD"]
+
+
+def _age(lab: Lab, agent: str, seconds: float, *, now: float = NOW) -> None:
+    for item in _station_files(lab, agent):
+        os.utime(item, (now - seconds, now - seconds))
+
+
+@pytest.fixture
+def frozen_now(monkeypatch: pytest.MonkeyPatch) -> float:
+    monkeypatch.setattr("auto_pm.application.core.agent_worktree_service.time.time", lambda: NOW)
+    return NOW
+
+
+def test_a_station_just_opened_is_not_stale(lab: Lab) -> None:
+    lab.service().open("claude", "CARD-1")
+
+    station = {s.name: s for s in lab.service().stations(deep=False)}["claude"]
+
+    assert station.idle_days == 0 and not station.stale
+
+
+def test_four_days_untouched_is_stale_and_three_is_not(lab: Lab, frozen_now: float) -> None:
+    lab.service().open("claude", "CARD-1")
+    lab.service().open("trae", "CARD-2")
+    _age(lab, "claude", 4 * DAY)
+    _age(lab, "trae", 3 * DAY)
+
+    by_name = {s.name: s for s in lab.service().stations(deep=False)}
+
+    assert by_name["claude"].idle_days == 4 and by_name["claude"].stale
+    assert by_name["trae"].idle_days == 3 and not by_name["trae"].stale, "恰好 3 天还不算“超过 3 天”"
+
+
+def test_one_second_past_three_days_is_stale(lab: Lab, frozen_now: float) -> None:
+    lab.service().open("claude", "CARD-1")
+    _age(lab, "claude", 3 * DAY + 1)
+
+    station = {s.name: s for s in lab.service().stations(deep=False)}["claude"]
+
+    assert station.idle_days == 3 and station.stale
+
+
+def test_a_new_commit_makes_an_old_station_fresh_again(lab: Lab) -> None:
+    lab.service().open("claude", "CARD-1")
+    _age(lab, "claude", 5 * DAY, now=time.time())
+    assert {s.name: s for s in lab.service().stations(deep=False)}["claude"].stale
+
+    # An empty commit: it rewrites HEAD and its reflog but leaves the directory and the .git link untouched, so only
+    # the Git files can make the station fresh again.
+    git(lab.station("claude"), "commit", "-q", "--allow-empty", "-m", "work")
+
+    assert not {s.name: s for s in lab.service().stations(deep=False)}["claude"].stale
+
+
+def test_looking_at_a_station_does_not_make_it_look_busy(lab: Lab) -> None:
+    """`git status` (the deep listing) rewrites the index; the idle time must not read the index."""
+
+    lab.service().open("claude", "CARD-1")
+    (lab.station("claude") / "draft.txt").write_text("not committed\n", encoding="utf-8")
+    _age(lab, "claude", 5 * DAY, now=time.time())
+
+    deep = {s.name: s for s in lab.service().stations(deep=True)}["claude"]
+
+    assert deep.dirty_paths == ("draft.txt",) and deep.stale and deep.idle_days == 5
+
+
+def test_an_unregistered_leftover_directory_is_judged_by_its_own_age(lab: Lab, frozen_now: float) -> None:
+    left = lab.root / ".auto-pm" / "worktrees" / "m3-left"
+    left.mkdir(parents=True)
+    os.utime(left, (NOW - 9 * DAY, NOW - 9 * DAY))
+
+    station = {s.name: s for s in lab.service().stations(deep=False)}["m3-left"]
+
+    assert not station.registered and station.idle_days == 9 and station.stale
+
+
+@pytest.mark.usefixtures("identity_guard_off")
+def test_cli_list_shows_idle_days_and_names_the_stale_ones(lab: Lab, frozen_now: float) -> None:
+    lab.service().open("claude", "CARD-1")
+    lab.service().open("trae", "CARD-2")
+    _age(lab, "claude", 6 * DAY)
+    _age(lab, "trae", 0)  # the clock is frozen at NOW, so the other station must be dated by it too
+    runner = CliRunner(env={"AUTO_PM_AGENT": ""})
+    base = ["--workspace", str(lab.root)]
+
+    as_json = runner.invoke(cli, [*base, "worktree", "list", "--json"])
+    assert as_json.exit_code == 0, as_json.output
+    rows = {row["name"]: row for row in json.loads(as_json.output)}
+    assert rows["claude"]["idle_days"] == 6 and rows["claude"]["stale"] is True
+    assert rows["trae"]["stale"] is False
+
+    table = runner.invoke(cli, [*base, "worktree", "list"])
+    assert table.exit_code == 0, table.output
+    assert "闲置" in _unwrapped(table.output)
+    assert _unwrapped("超过3天没动的1个：claude") in _unwrapped(table.output)
+
+
+def test_a_git_link_with_bad_bytes_does_not_break_the_listing(lab: Lab, frozen_now: float) -> None:
+    """The link file is read strictly (no silent U+FFFD); a file that is not UTF-8 only means its git dir is not used."""
+
+    left = lab.root / ".auto-pm" / "worktrees" / "m3-left"
+    left.mkdir(parents=True)
+    (left / ".git").write_bytes(b"gitdir: \xff\xfe\x9c\x9f\n")
+    for item in (left, left / ".git"):
+        os.utime(item, (NOW - 5 * DAY, NOW - 5 * DAY))
+
+    station = {s.name: s for s in lab.service().stations(deep=False)}["m3-left"]
+
+    assert station.idle_days == 5 and station.stale
