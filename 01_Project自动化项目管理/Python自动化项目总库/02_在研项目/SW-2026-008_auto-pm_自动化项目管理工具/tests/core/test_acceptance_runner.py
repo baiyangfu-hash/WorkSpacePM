@@ -160,21 +160,37 @@ def test_windows_quoting_rules_split_a_chinese_path_with_spaces_and_the_command_
     assert result.argv[-2:] == ("参数一", "参数 二") and "['参数一', '参数 二']" in result.output_tail
 
 
-def test_a_chinese_path_is_let_through_at_plan_time_but_a_broken_path_still_fails_the_check(tmp_path: Path) -> None:
-    """Why a path argument may carry Chinese: if the console mangles it, the command fails (non-zero), it cannot pass.
+def test_a_chinese_path_is_let_through_only_where_a_broken_path_fails_the_check(tmp_path: Path) -> None:
+    """Why the plan rule exempts a script / pytest path (it must open it) and nothing else (audit 550).
 
-    The plan rule lets a path argument through; the verifier must then really fail when that path does not resolve.
+    ``python 路径.py`` and ``pytest 路径`` exit non-zero when the path does not resolve; ``git diff --exit-code -- 路径``
+    compares nothing and exits 0, so ``git`` with a Chinese path is refused at plan time instead.
     """
     folder = tmp_path / "项目甲"
     folder.mkdir()
     (folder / "检查.py").write_text("import sys; sys.exit(0)", encoding="utf-8")
-    good = f"{shlex.quote(PYTHON)} -B {shlex.quote('项目甲/检查.py')}"
-    broken = f"{shlex.quote(PYTHON)} -B {shlex.quote('项目甲/检查？.py')}".replace("？", "_坏")
+    (folder / "test_甲.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    git_do(tmp_path, "init", "-q")
+    py = shlex.quote(PYTHON)
+    good_script = f"{py} -B {shlex.quote('项目甲/检查.py')}"
+    broken_script = f"{py} -B {shlex.quote('项目甲/检查_坏.py')}"
+    good_pytest = f"{py} -m pytest -q -p no:cacheprovider {shlex.quote('项目甲/test_甲.py')}"
+    broken_pytest = f"{py} -m pytest -q -p no:cacheprovider {shlex.quote('项目甲/test_坏.py')}"
+    git_wrong_path = "git diff --exit-code -- 项目甲/坏.md"
 
-    assert shell_fragility_problem(good, windows=False) == "" and shell_fragility_problem(broken, windows=False) == ""
-    assert run_acceptance_checks([_check(good)], cwd=tmp_path, windows=False)[0].passed
-    result = run_acceptance_checks([_check(broken)], cwd=tmp_path, windows=False)[0]
-    assert not result.passed and result.exit_code not in (0, None)
+    for command in (good_script, broken_script, good_pytest, broken_pytest):
+        assert shell_fragility_problem(command, windows=False) == "", command
+    assert shell_fragility_problem(git_wrong_path, windows=False) != ""
+
+    assert run_acceptance_checks([_check(good_script)], cwd=tmp_path, windows=False)[0].passed
+    broken = run_acceptance_checks([_check(broken_script)], cwd=tmp_path, windows=False)[0]
+    assert not broken.passed and broken.exit_code not in (0, None)
+    assert run_acceptance_checks([_check(good_pytest)], cwd=tmp_path, windows=False)[0].passed
+    broken = run_acceptance_checks([_check(broken_pytest)], cwd=tmp_path, windows=False)[0]
+    assert not broken.passed and broken.exit_code not in (0, None)
+    # The reason git is not exempt: a path that does not exist is not an error for it.
+    silent = run_acceptance_checks([_check(git_wrong_path)], cwd=tmp_path, windows=False)[0]
+    assert silent.passed and silent.exit_code == 0
 
 
 def test_the_output_tail_keeps_the_last_lines_and_the_hash_covers_everything(tmp_path: Path) -> None:

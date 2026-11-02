@@ -124,11 +124,6 @@ def test_git_always_gets_quotepath_off_unless_the_caller_set_it(argv: tuple[str,
 # ── hints (legal but fragile on a Chinese Windows console) ──────────────────
 
 
-def test_git_with_a_chinese_path_mentions_quotepath() -> None:
-    hints = command_hints("git ls-files 项目甲/文件.txt", windows=False)
-    assert len(hints) == 1 and "core.quotePath=false" in hints[0]
-
-
 def test_a_chinese_path_for_pytest_needs_no_encoding_hint() -> None:
     assert command_hints("python -m pytest {worktree}/目录/测试.py", windows=False) == ()
 
@@ -241,8 +236,9 @@ def test_a_command_that_powershell_would_change_is_refused_with_the_rewrite_advi
     [
         "python -B main.py doc check --说明 中文",  # user-facing text of a cockpit command
         "python -B main.py plc check DJ-2026-011",
-        "python -m pytest {worktree}/目录/测试.py",  # a path: a mangled one fails loudly, it cannot pass
-        "git ls-files 项目甲/文件.txt",
+        "python -m pytest {worktree}/目录/测试.py",  # a test path: a mangled one is "file not found" (exit 4), it cannot pass
+        "python -B 项目甲/检查.py",  # the script itself: a mangled path is "no such file" (exit 2)
+        "pytest {worktree}/目录/测试.py::test_报警 -q",
         "python -B -c \"print(2 * 3)\"",  # the code after -c is Python source, not a file pattern
         "python -B -c \"import sys; sys.exit(0)\"",
         "python -B {worktree}/scripts/check_io.py",
@@ -333,3 +329,49 @@ def test_a_chinese_path_does_not_excuse_a_variable_a_backtick_or_a_wildcard_in_t
     assert refused("python -B 项目甲/检查.py") == ""
     assert refused(f"python -B 项目甲/检查.py {extra}") != ""
     assert refused(f"python -B 项目甲/检查{extra}.py") != ""
+
+
+# ── audit 550 (PR 490): the Chinese-path exemption is only for a path the program must open ──────────
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # a slash in a Chinese argument must not turn it into a "path": python -c code, script options
+        "python -c \"assert '买/卖' not in open('a').read()\"",
+        "python -c \"print('中文/x')\"",
+        "python -B scripts/check.py --note 通过/失败",
+        "python -B scripts/check.py 通过/失败",
+        # git matches pathspecs: a wrong path still exits 0, so no exemption for it
+        "git diff --exit-code -- 中文/x.md",
+        "git ls-files 项目甲/文件.txt",
+        "git status --porcelain -- 中文/坏.md",
+        "git log -1 -- 中文/坏.md",
+        # main.py only counts as the cockpit when it is the script python runs, not any later argument
+        "python -B foo.py main.py 中文参数",
+        "python -m json.tool main.py 中文",
+        # not a single plain path: whitespace in it, or a value of a pytest option
+        "python -B 项目 甲/检查.py",
+        "pytest -k 报警/汇总",
+        "pytest -m 慢/快",
+        # an option argument is never a path
+        "python -B 项目甲/检查.py --out=结果/a.txt",
+    ],
+)
+@pytest.mark.parametrize("windows", [False, True])
+def test_chinese_outside_a_real_path_argument_is_refused(command: str, windows: bool) -> None:
+    reason = shell_fragility_problem(command, windows=windows)
+    assert "中文" in reason, (command, reason)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python -B main.py doc check --说明 中文",
+        "python -B -u main.py plc check DJ-2026-011 --说明 技术/说明",  # still the cockpit: user-facing text may carry a slash
+        "python 其他项目/main.py --说明 中文",  # position rule: the first script is main.py
+    ],
+)
+@pytest.mark.parametrize("windows", [False, True])
+def test_the_cockpit_exemption_is_the_first_script_being_main_py(command: str, windows: bool) -> None:
+    assert shell_fragility_problem(command, windows=windows) == ""
