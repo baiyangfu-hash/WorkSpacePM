@@ -205,7 +205,7 @@ class Step:
     number: int
     title: str
     detail: str
-    state: str  # done / cur / todo
+    state: str  # done / cur / todo / unk（没核对：界面不知道，不冒充）
     command: str = ""
     buttons: list[tuple[str, str, bool, str]] = field(default_factory=list)  # (文字, 动作键, 可用, 原因)
 
@@ -826,18 +826,19 @@ def station_vm(
         if card.tool or not card.registered:
             continue
         project = next(p for p in board.projects if p.project_id == card.project_id)
-        files = [project.root + "/", f"PM_SESSION_{card.project_id}.md"]
+        files = [project.root + "/"]  # PM_SESSION 已于 2026-10-10 退役，不再引导去打开它
         files += [f"{project.root}/…/03_实施卡/{c.card_id}.md" for c in project.cards[:2]]
         safety = any("安全" in c.what or "安全" in c.status for c in project.changes) or bool(
             safety_hits and card.project_id in safety_hits[0]
         )
         left = card.now_step or card.now_card
-        nxt = "照实施卡的未勾项接着做" if project.cards else "先在 PM_SESSION 写明要做什么"
+        nxt = "照实施卡的未勾项接着做" if project.cards else "没有实施卡：先在第 4 步记一行业务变更（BC），再开卡"
         projects.append((card, left, nxt, files, f"manual/{card.project_id.lower()}", safety))
     dis_off = (not off, "离线：读不到 origin")
     steps = [
-        Step(1, *STEP_TITLES[0], "done", f"git switch -c {manual_branch} origin/main"),
-        Step(2, *STEP_TITLES[1], "cur"),
+        # 开分支、改程序都是人在本机做的事，界面没有去核对，所以写“没核对”，不冒充“已完成 / 进行中”
+        Step(1, *STEP_TITLES[0], "unk", f"git switch -c {manual_branch} origin/main"),
+        Step(2, *STEP_TITLES[1], "unk"),
         Step(
             3, *STEP_TITLES[2], "todo", "",
             [("重新跑 plc check", "plc_check", True, ""), ("plc docs check", "docs_check", True, ""),
