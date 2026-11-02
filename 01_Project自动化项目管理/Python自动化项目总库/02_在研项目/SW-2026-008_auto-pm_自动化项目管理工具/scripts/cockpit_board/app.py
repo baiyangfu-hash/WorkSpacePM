@@ -358,7 +358,7 @@ class CockpitWindow(QMainWindow):
         self.home_vm = vm.home_vm(board, self.offset, self.online, not self.options.no_git, self.github)
         now = board.generated_at
         self.home.show_board(self.home_vm, now)
-        self.issues.show_view(vm.all_issues(self.home_vm), now)
+        self.issues.show_view(vm.all_issues(self.home_vm), now, self.home_vm.issue_notes)
         self.projects.show_view(self.home_vm.hot + self.home_vm.rest)
         identity = {
             "source": self.options.source_version, "configured": self.options.source_version,

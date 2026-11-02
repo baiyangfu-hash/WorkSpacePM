@@ -198,6 +198,8 @@ class HomeVM:
     activity: list[tuple[str, str, str, bool]]  # (时间, 项目, 说明, 示例)
     notes: list[str]
     github: GithubVM | None = None
+    extra_issues: list[Issue] = field(default_factory=list)  # 归不到任何一张项目卡的问题（PR 只改了仓库公共文件等）
+    issue_notes: list[str] = field(default_factory=list)  # 问题页顶上要说的：哪些没检查、条数不含它们
 
 
 @dataclass
@@ -572,6 +574,49 @@ def github_decisions(snapshot: gh.Snapshot | None) -> list[Decision]:
     return out
 
 
+def _red_checks(pull: gh.PullInfo) -> str:
+    names = [c.workflow for c in pull.ci if c.state == "fail"]
+    return "、".join(names) if names else "合起来看是红"
+
+
+def github_issues(snapshot: gh.Snapshot | None) -> list[Issue]:
+    """开着的 PR 门禁红 → 问题页“风险”档（门禁红不是用户要定的事，是作者线程要修的事）。
+
+    只在这次真读到时给；没读到（断网、限流、只有缓存）不凭旧数据报警，也不给 0——这一点由 ``github_issue_notes`` 在问题页上说明。
+    """
+
+    if snapshot is None or not snapshot.fresh:
+        return []
+    out = []
+    for pull in snapshot.pulls:
+        if pull.gate != "fail":
+            continue
+        pid = next((p for p in pull.projects if p != gh.SHARED), gh.SHARED)
+        draft = "（草稿）" if pull.draft else ""
+        out.append(
+            Issue(
+                "risk", pid, f"PR #{pull.number} 门禁红{draft}", f"红的检查：{_red_checks(pull)}；{pd._short(pull.title, 50)}",
+                f"PR 作者线程修（{pull.author}）", "GitHub 检查结果（check-runs）；按 PR 改到的项目归属",
+                pd.parse_time(pull.updated_at),
+            )
+        )
+    return out
+
+
+def github_issue_notes(snapshot: gh.Snapshot | None) -> list[str]:
+    """问题页顶上的说明：GitHub 这一类没读到或没读全时，必须告诉用户“这页的条数不含它”，不能让空白当成没有。"""
+    if snapshot is None or snapshot.state == "disabled":
+        return ["GitHub 没开采集：PR 门禁红、安全区待签这类问题没检查，这页的条数不含它们。"]
+    if not snapshot.fresh:
+        why = GITHUB_HEADLINE.get(snapshot.state, "没读成").split("：")[0]
+        return [f"GitHub 这次没读到（{why}）：PR 门禁红、安全区待签这类问题没检查，这页的条数不含它们。"]
+    unknown = [p.number for p in snapshot.pulls if p.gate == "unknown"]
+    if unknown:
+        shown = "、".join(f"#{n}" for n in unknown[:6]) + ("…" if len(unknown) > 6 else "")
+        return [f"{len(unknown)} 个 PR 的检查没读全（{shown}）：它们红不红不知道，没算进这页的条数。"]
+    return []
+
+
 def _gh_checks(snapshot: gh.Snapshot | None) -> tuple[Check, Check]:
     """门禁红的分支、安全区待签：没真读到就是没检查 / 断网未知；读到一部分且遇到未知，0 不许出现。"""
     if snapshot is None or not snapshot.fresh:
@@ -696,6 +741,13 @@ def home_vm(
     pr_decisions = github_decisions(github)
     for card in cards:
         card.decisions += [d for d in pr_decisions if d.project_id == card.project_id]
+    by_card = {c.project_id: c for c in cards}
+    extra_issues: list[Issue] = []
+    for issue in github_issues(github):
+        if issue.project_id in by_card:
+            by_card[issue.project_id].issues.append(issue)
+        else:
+            extra_issues.append(issue)
     known = {c.project_id for c in cards}
     decisions = sorted(
         [*(d for c in cards for d in c.decisions), *(d for d in pr_decisions if d.project_id not in known)],
@@ -729,13 +781,15 @@ def home_vm(
         activity=activity,
         notes=notes,
         github=github_vm(github, now, offset),
+        extra_issues=extra_issues,
+        issue_notes=github_issue_notes(github),
     )
 
 
 def all_issues(home: HomeVM) -> list[Issue]:
     far = datetime.max.replace(tzinfo=UTC)
     return sorted(
-        (i for c in home.hot + home.rest for i in c.issues),
+        (*(i for c in home.hot + home.rest for i in c.issues), *home.extra_issues),
         key=lambda i: (-SEV_RANK[i.sev], i.since or far),
     )
 
@@ -786,6 +840,7 @@ def project_vm(
     ]
     changes = [ChangeRow(c.change_id, c.raised or "日期待补", c.kind, c.what, c.status) for c in project.changes]
     changes += [ChangeRow(c.card_id, "", "实施卡", c.title, c.status) for c in project.cards]
+    changes += [ChangeRow(o.change_id, o.raised or "日期待补", f"变更单 {o.domain}", o.what, o.status) for o in project.change_orders]
     changes += [
         ChangeRow(m.change_id, fmt(m.updated_at, offset), "收口", pd._short(m.title, 50), m.closure_state)
         for m in project.missions

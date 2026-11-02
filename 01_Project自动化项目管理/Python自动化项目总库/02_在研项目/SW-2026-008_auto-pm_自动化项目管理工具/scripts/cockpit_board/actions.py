@@ -172,11 +172,17 @@ class GithubTokenCache:
             self._rejections = 0
 
 
+def no_prompt_env() -> dict[str, str]:
+    """后台联网 git 的环境：不许停下来问密码，也不许凭据管理器弹登录窗口（没登录就直接失败，按离线算）。"""
+    return {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+
+
 def probe_online(root: Path, runner: Callable[..., Any] = subprocess.run) -> bool:
     try:
         result = runner(
             ["git", "ls-remote", "--exit-code", "origin", "HEAD"],
-            cwd=str(root), capture_output=True, encoding="utf-8", timeout=PROBE_TIMEOUT, check=False, **quiet(),
+            cwd=str(root), capture_output=True, encoding="utf-8", timeout=PROBE_TIMEOUT, check=False,
+            env=no_prompt_env(), **quiet(),
         )
     except (OSError, subprocess.SubprocessError):
         return False

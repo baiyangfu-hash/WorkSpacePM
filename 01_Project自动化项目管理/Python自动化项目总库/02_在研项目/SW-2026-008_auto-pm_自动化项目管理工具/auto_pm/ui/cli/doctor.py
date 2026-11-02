@@ -214,6 +214,21 @@ def check_release_pointers(root: str, ref: str | None = None) -> dict[str, Any]:
     return {"status": "fail" if reasons else "ok", "reasons": reasons, "ref": ref, "pr_head": pr_head}
 
 
+def check_change_status_history(root: str) -> dict[str, Any]:
+    """Is every change-order status edit in the working tree backed by the approval history?  Read-only.
+
+    ``status`` is ok / fail / info (info: Git could not answer, so nothing was checked).  The same rule the commit hook applies
+    to a staged edit, applied before the commit: a hand-written approved state shows up here at once.
+    """
+
+    from auto_pm.application.core.change_status_check import pending_change_status_problems
+
+    problems = pending_change_status_problems(root)
+    if problems is None:
+        return {"status": "info", "reasons": ["Git 读不出改动（不是仓库或还没有提交），没有核对变更单状态"]}
+    return {"status": "fail" if problems else "ok", "reasons": problems}
+
+
 def check_worktree_floor(root: str, *, pre_release: bool = False) -> dict[str, Any]:
     """Before a release: at most ``MAX_STATIONS - RELEASE_FREE_PLACES`` directories under ``.auto-pm/worktrees``.
 
@@ -302,6 +317,7 @@ def run_doctor_check(workspace_root: str | None = None, *, pre_release: bool = F
     venv_base = check_venv_base()
     release_pointers = check_release_pointers(root)
     release_consistency = check_release_consistency(root)
+    change_status = check_change_status_history(root)
     worktree_floor = check_worktree_floor(root, pre_release=pre_release)
 
     all_passed = (
@@ -311,6 +327,7 @@ def run_doctor_check(workspace_root: str | None = None, *, pre_release: bool = F
         and all(dep_results.values())
         and release_pointers["status"] != "fail"
         and release_consistency["status"] != "fail"
+        and change_status["status"] != "fail"
         and worktree_floor["status"] != "fail"
     )
 
@@ -328,6 +345,7 @@ def run_doctor_check(workspace_root: str | None = None, *, pre_release: bool = F
         "venv_base": venv_base,
         "release_pointers": release_pointers,
         "release_consistency": release_consistency,
+        "change_status": change_status,
         "worktree_floor": worktree_floor,
         "all_passed": all_passed,
     }
@@ -397,6 +415,13 @@ def doctor_command(workspace: str | None, pre_release: bool) -> None:
     elif consistency["status"] == "ok":
         table.add_row("发布记录互相核对", "[green]✅ PASS[/green]", "manifest、载荷目录、release_meta、标注记录、Git 提交互相一致")
 
+    chg_status = res["change_status"]
+    if chg_status["status"] == "fail":
+        table.add_row("变更单状态与流转记录", "[bold red]❌ FAIL[/bold red]", "；".join(chg_status["reasons"]))
+    elif chg_status["status"] == "ok":
+        table.add_row("变更单状态与流转记录", "[green]✅ PASS[/green]", "工作区里新改的变更单批准态都有对应的流转记录")
+    else:
+        table.add_row("变更单状态与流转记录", "[yellow]⚠️ 未核对[/yellow]", "；".join(chg_status["reasons"]))
     floor = res["worktree_floor"]
     if floor["status"] == "fail":
         table.add_row("工位目录数（发版前置）", "[bold red]❌ FAIL[/bold red]", "；".join(floor["reasons"]))
@@ -406,6 +431,10 @@ def doctor_command(workspace: str | None, pre_release: bool) -> None:
         table.add_row("工位目录数（发版前置）", "[green]✅ PASS[/green]", f"{floor['count']} 个，发版前最多 {floor['limit']} 个")
 
     console.print(table)
+
+    if chg_status["status"] == "fail":
+        console.print("\n[bold red]变更单状态被手改过，没有流转记录作依据：把状态改回去，再用 `main.py change transition` 走流转。[/bold red]\n")
+        raise SystemExit(1)
 
     if pointers["status"] == "fail":
         console.print("\n[bold red]发布指针落后于本机部署：把三个指针文件走变更单提交进 main，再重跑 doctor。[/bold red]\n")

@@ -204,6 +204,70 @@ def test_parked_column_without_a_park_record_or_table_still_renders(tmp_path: Pa
     assert empty["搁着"].cards == [] and empty["搁着"].note == "没有搁着的卡"
 
 
+# ---------------------------------------------------------------- 变更记录要列正式变更单
+
+CHG_ORDER = """# 变更单
+
+### 3.0 编号与项目
+| 字段 | 内容 |
+|------|------|
+| 变更编号 | CHG-PLC-2026-015 |
+| 项目编号 | DJ-2026-101 |
+
+### 3.4 其他
+| 字段 | 内容 |
+|------|------|
+| 申请日期 | 2026-10-23 |
+| 变更状态 | approved |
+
+## 4. 变更原因
+
+**变更背景**：
+修复公共报警结构体两个字段的数组声明
+"""
+
+
+def _order_dir(root: Path) -> Path:
+    folder = root / "0100_PLC自动化" / "DJ-2026-101_甲" / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-PLC"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _changes_of(board: Any) -> list[Any]:
+    home = vm.home_vm(board, OFFSET, online=False, use_git=False)
+    card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
+    return list(vm.project_vm(board, card, OFFSET, False).changes)
+
+
+def test_change_orders_are_read_from_the_project_folder(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    (_order_dir(root) / "CHG-PLC-2026-015.md").write_text(CHG_ORDER, encoding="utf-8")
+    orders = pd.read_change_orders(root / "0100_PLC自动化" / "DJ-2026-101_甲")
+    assert [(o.change_id, o.domain, o.status, o.raised) for o in orders] == [
+        ("CHG-PLC-2026-015", "PLC", "approved", "2026-10-23")
+    ]
+    assert orders[0].what == "修复公共报警结构体两个字段的数组声明"
+    # 进了变更记录页签：变更单一行，来源写明是变更单而不是业务变更
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    rows = [c for c in _changes_of(board) if c.change_id == "CHG-PLC-2026-015"]
+    assert [(r.kind, r.status, r.date) for r in rows] == [("变更单 PLC", "approved", "2026-10-23")]
+
+
+def test_change_order_with_unknown_format_is_listed_not_dropped(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    (_order_dir(root) / "CHG-PLC-2026-099.md").write_text("# 变更单\n\n正文没有表格\n", encoding="utf-8")
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    rows = [c for c in _changes_of(board) if c.change_id == "CHG-PLC-2026-099"]
+    # 读不出状态也要列出来，状态写“未读到状态”，日期写“日期待补”——不许从列表里消失让人以为没改过
+    assert [(r.status, r.date) for r in rows] == [("未读到状态", "日期待补")]
+
+
+def test_project_without_change_order_folder_has_no_order_rows(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    assert not any(c.kind.startswith("变更单") for c in _changes_of(board))
+
+
 # ---------------------------------------------------------------- 主题令牌
 
 
@@ -380,3 +444,66 @@ def test_policy_never_list_is_not_in_station_buttons() -> None:
         assert not any(word in text for text in lowered), word
     assert policy.GATED_UNTIL_WIRED <= policy.STATION_BUTTONS
     assert policy.PM_BUTTONS <= policy.STATION_BUTTONS
+
+
+# ---------------------------------------------------------------- GitHub 门禁红进问题页“风险”档（试用 11-01：问题页全 0）
+
+
+def _pull(number: int, projects: list[str], states: list[tuple[str, str]], *, draft: bool = False) -> Any:
+    import github_collector as gh
+
+    return gh.PullInfo(number, f"改 {number}", f"https://example.invalid/pull/{number}", "baiyangfu-hash", "a" * 40, "claude/x", draft,
+                       "2026-10-31T09:00:00Z", projects=projects, ci=[gh.CiState(name, state, "") for name, state in states])
+
+
+def _snapshot(pulls: list[Any], state: str = "ok", *, from_cache: bool = False) -> Any:
+    import github_collector as gh
+
+    return gh.Snapshot("o/r", state, NOW, NOW, from_cache=from_cache, pulls=pulls)
+
+
+def _issue_board(tmp_path: Path) -> Any:
+    return _board(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+
+
+def test_a_red_pr_becomes_a_risk_issue_on_its_project_and_on_the_issues_page(tmp_path: Path) -> None:
+    board = _issue_board(tmp_path)
+    snapshot = _snapshot([
+        _pull(470, ["DJ-2026-101"], [("sw008-ci", "fail"), ("plc-ci", "pass"), ("windows-cli", "fail")]),
+        _pull(471, ["DJ-2026-101"], [("sw008-ci", "pass")]),
+        _pull(472, ["DJ-2026-101"], [("sw008-ci", "running")]),
+    ])
+    home = vm.home_vm(board, OFFSET, online=True, use_git=False, github=snapshot)
+    card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
+    red = [i for i in card.issues if "门禁红" in i.title]
+    assert [(i.sev, i.title) for i in red] == [("risk", "PR #470 门禁红")]  # 绿的、跑着的不报
+    assert "sw008-ci" in red[0].detail and "windows-cli" in red[0].detail and "plc-ci" not in red[0].detail
+    assert red[0].who and red[0].basis and red[0].since is not None
+    assert red[0] in vm.all_issues(home)
+    assert home.issue_notes == []  # 全读到了，没有“没检查”要说
+
+
+def test_a_red_pr_that_touches_no_registered_project_still_reaches_the_issues_page(tmp_path: Path) -> None:
+    board = _issue_board(tmp_path)
+    snapshot = _snapshot([_pull(473, [], [("sw008-ci", "fail")], draft=True)])
+    home = vm.home_vm(board, OFFSET, online=True, use_git=False, github=snapshot)
+    assert [i.title for i in home.extra_issues] == ["PR #473 门禁红（草稿）"]
+    assert home.extra_issues[0] in vm.all_issues(home)
+
+
+def test_unread_github_never_looks_like_zero_red_prs(tmp_path: Path) -> None:
+    """没读到（断网、限流、只有缓存、没开采集）不凭旧数据报警，但问题页必须说“没检查，条数不含它”。"""
+    board = _issue_board(tmp_path)
+    red = _pull(474, ["DJ-2026-101"], [("sw008-ci", "fail")])
+    for snapshot in (_snapshot([red], "offline", from_cache=True), _snapshot([red], "rate_limited"), None):
+        home = vm.home_vm(board, OFFSET, online=None, use_git=False, github=snapshot)
+        assert not any("门禁红" in i.title for i in vm.all_issues(home))
+        assert len(home.issue_notes) == 1 and "没检查" in home.issue_notes[0] and "不含" in home.issue_notes[0]
+
+
+def test_a_pr_whose_checks_could_not_be_read_is_named_not_counted_as_green(tmp_path: Path) -> None:
+    board = _issue_board(tmp_path)
+    snapshot = _snapshot([_pull(475, ["DJ-2026-101"], [("sw008-ci", "unknown")]), _pull(476, ["DJ-2026-101"], [("sw008-ci", "pass")])], "partial")
+    home = vm.home_vm(board, OFFSET, online=True, use_git=False, github=snapshot)
+    assert not any("门禁红" in i.title for i in vm.all_issues(home))
+    assert len(home.issue_notes) == 1 and "#475" in home.issue_notes[0] and "#476" not in home.issue_notes[0]
