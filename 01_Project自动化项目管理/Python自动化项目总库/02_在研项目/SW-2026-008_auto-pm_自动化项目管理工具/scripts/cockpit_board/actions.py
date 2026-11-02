@@ -6,6 +6,7 @@
     bc_preview()       按目标表头（11 栏）和用户填的表单生成整行，不写；没填好就拒绝。
     bc_append()        只往表末追加一行；写前读一遍、写后校验除最后一行外字节不变。
     run_cli()          “决定”页的按钮：在控制根跑同一条 `main.py pm …` 命令，回执带命令和退出码（见 decisions.py）。
+    resolve_github_token()  向本机已登录的 gh 要 GitHub 令牌（只在内存里用，不落盘、不进回执、不打印）。
     open_console()     批准口令已生效时，同一条命令在新的终端窗口里跑，口令由用户在那个窗口里输入。
 
 永远没有：合并、删除、切换发布、代签、绕过提交钩子、启动任何 agent。
@@ -16,14 +17,18 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+import github_collector as gh
 
 PROBE_TIMEOUT = 3
 CHECK_TIMEOUT = 600
@@ -64,6 +69,72 @@ def quiet() -> dict[str, Any]:
     """后台子进程的附加参数：不弹窗口。非 Windows 返回空，不传 creationflags。"""
     flag = no_window_flag()
     return {"creationflags": flag} if flag else {}
+
+
+# ---------------------------------------------------------------- 本机 GitHub 登录 → 令牌（只读 GitHub 用，不落盘）
+
+GH_TOKEN_TIMEOUT = 5
+
+
+def resolve_github_token(runner: Callable[..., Any] = subprocess.run, which: Callable[[str], str | None] = shutil.which) -> str:
+    """向本机已登录的 GitHub CLI 要令牌；要不到返回空串（按游客读），绝不抛、绝不弹登录框。
+
+    - 只用 ``gh``：用 ``shutil.which`` 解析出绝对路径再执行（不让当前目录里的同名程序顶替）；命令固定
+      ``gh auth token --hostname github.com``；工作目录固定为主目录（没有就用临时目录），不是仓库里。
+    - 不走 ``run_cli``：令牌不能进回执。输出只在这个函数里取出、校验形状（``github_collector.valid_token``），
+      不符合形状（报错文字、空白、带换行的东西）一律当没有。令牌不写日志，异常文字里也不带。
+    - ``stdin`` 关闭、5 秒超时、GH_PROMPT_DISABLED=1：没登录时 gh 直接失败，不会停下来等人输入。
+    """
+
+    found = which("gh")
+    if not found or not Path(found).is_absolute():
+        return ""
+    home = Path.home()
+    cwd = str(home) if home.is_dir() else tempfile.gettempdir()
+    env = {**os.environ, "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1", "NO_COLOR": "1"}
+    try:
+        result = runner([found, "auth", "token", "--hostname", "github.com"], cwd=cwd, capture_output=True,
+                        encoding="utf-8", errors="replace",  # lenient-decode: 令牌只认固定形状，乱码就是不合格
+                        timeout=GH_TOKEN_TIMEOUT, check=False, stdin=subprocess.DEVNULL, env=env, **quiet())
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    out = (result.stdout or "").strip()
+    return out if gh.valid_token(out) else ""
+
+
+class GithubTokenCache:
+    """窗口进程内的令牌小仓库：第一次要用时才去问 gh，放在内存里；被 GitHub 拒了就丢掉，最多再问一次。
+
+    线程安全（采集在后台线程跑）。令牌只存在 ``_token`` 里，``repr`` 不显示它。
+    """
+
+    MAX_REJECTIONS = 2  # 连续被拒这么多次就不再问 gh，按游客读，直到有一次成功或重启
+
+    def __init__(self, resolver: Callable[[], str] = resolve_github_token) -> None:
+        self._resolver = resolver
+        self._lock = threading.Lock()
+        self._token: str | None = None  # None＝还没问过；""＝问过没有
+        self._rejections = 0
+
+    def __repr__(self) -> str:
+        return f"GithubTokenCache(resolved={self._token is not None}, rejections={self._rejections})"
+
+    def get(self) -> str:
+        with self._lock:
+            if self._token is None:
+                self._token = "" if self._rejections >= self.MAX_REJECTIONS else self._resolver()
+            return self._token
+
+    def rejected(self) -> None:
+        with self._lock:
+            self._rejections += 1
+            self._token = None if self._rejections < self.MAX_REJECTIONS else ""
+
+    def accepted(self) -> None:
+        with self._lock:
+            self._rejections = 0
 
 
 def probe_online(root: Path, runner: Callable[..., Any] = subprocess.run) -> bool:
