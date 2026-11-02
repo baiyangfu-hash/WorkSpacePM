@@ -106,6 +106,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "if False:",
     ),
     ("没并进 main 也删本地分支", "        elif fresh.merged:\n", "        elif True:\n"),
+    ("工位满了也能开", "        if count >= MAX_STATIONS:\n", "        if False:\n"),
     ("同一 agent 可开第二个工位", "if path.exists() or self._registered(path):", "if False:"),
     (
         "远程已有同名分支也开",

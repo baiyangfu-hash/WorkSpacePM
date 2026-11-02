@@ -19,6 +19,7 @@ from rich.table import Table
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.agent_worktree_service import (
     AGENT_ROSTER,
+    MAX_STATIONS,
     AgentWorktreeError,
     AgentWorktreeService,
     Station,
@@ -81,6 +82,17 @@ def _kind_label(station: Any) -> str:
     if station.broken:
         return "残缺目录"
     return station.kind if station.registered else "未登记目录"
+
+
+def _print_count(stations: list[Any]) -> None:
+    """One line under the table: how many directories, against the limit that ``open`` enforces."""
+
+    if len(stations) >= MAX_STATIONS:
+        console.print(
+            f"[red]共 {len(stations)} 个目录，已到上限 {MAX_STATIONS}：再 open 会被拒；先 close 做完的，或 sweep 看哪些可清[/red]"
+        )
+    else:
+        console.print(f"共 {len(stations)} 个目录（上限 {MAX_STATIONS}）")
 
 
 def _print_broken_hint(stations: list[Any]) -> None:
@@ -150,6 +162,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
         for s in stations:
             table.add_row(s.name, _kind_label(s), s.branch or "-", str(s.path))
         console.print(table)
+        _print_count(stations)
         _print_broken_hint(stations)
         console.print(
             "只列了名字、分支、路径；要看未提交、未推送、是否并进 main，加 --deep（会慢）"
@@ -170,6 +183,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
             _size(s.size_bytes),
         )
     console.print(table)
+    _print_count(stations)
     _print_broken_hint(stations)
 
 

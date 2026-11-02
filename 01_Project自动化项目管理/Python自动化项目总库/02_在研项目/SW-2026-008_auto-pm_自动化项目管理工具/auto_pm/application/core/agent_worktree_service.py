@@ -42,6 +42,9 @@ RESERVED_CARD_PREFIXES = ("control-root", "run-plan")
 RUN_PLAN_NAME = re.compile(r"^run-plan-[0-9a-f]{16}$")
 TERMINAL_RUN_STATES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED"})
 MAIN_REF = "refs/remotes/origin/main"
+# WS-001 / problem pool item 33 rule 4: at most this many directories under ``.auto-pm/worktrees`` at one time.
+# Counted by directory, not by roster: the unregistered shells and ``m3-*`` leftovers are exactly what piles up.
+MAX_STATIONS = 8
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 RunStateLookup = Callable[[str], str | None]
@@ -191,6 +194,7 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 f"{agent} 已有没收工的工位 {path}；先 `worktree close {agent}`，或回到那个工位继续做"
             )
+        self._require_room_for_a_station()
         if fetch:
             fetched = self._git("fetch", "origin", "main")
             if fetched.returncode != 0:
@@ -214,6 +218,22 @@ class AgentWorktreeService:
         return self._inspect(
             path, registered=True, branch=branch, head=self._out("rev-parse", MAIN_REF)
         )
+
+    def count(self) -> int:
+        """How many directories sit under ``.auto-pm/worktrees`` (registered or not, a missing one still registered counts)."""
+
+        names = {path.name for path in self._worktrees()}
+        if self._stations_dir.is_dir():
+            names |= {child.name for child in self._stations_dir.iterdir() if child.is_dir()}
+        return len(names)
+
+    def _require_room_for_a_station(self) -> None:
+        count = self.count()
+        if count >= MAX_STATIONS:
+            raise StationRefusedError(
+                f".auto-pm/worktrees 下已有 {count} 个目录，上限 {MAX_STATIONS}（WS-001）；"
+                "先 `worktree list` 看哪些已经做完，再 `worktree close <agent>` 或 `worktree sweep`（默认只列，加 --apply 才删）"
+            )
 
     # ── list ─────────────────────────────────────────────────────────
 
