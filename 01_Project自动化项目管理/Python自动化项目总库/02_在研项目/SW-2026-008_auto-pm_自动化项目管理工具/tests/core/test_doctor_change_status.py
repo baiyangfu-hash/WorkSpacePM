@@ -9,7 +9,8 @@ import pytest
 from click.testing import CliRunner
 
 from auto_pm.domain.change.status_journal import record_transition
-from auto_pm.ui.cli.doctor import check_change_status_history, doctor_command
+from auto_pm.ui.cli.doctor import check_change_status_history, doctor_command, run_doctor_check
+from tests.core.test_doctor_worktree_floor import _healthy
 
 PID = "SW-2026-008"
 CHG = "CHG-SCPT-2026-346"
@@ -124,3 +125,22 @@ def test_renumbering_is_not_a_new_status_but_a_forged_replacement_is_red(repo: P
     assert check_change_status_history(str(repo))["status"] == "ok"
     (repo / other).write_text(_order("approved").replace("346", "347") + "\n另加一行\n", encoding="utf-8")
     assert check_change_status_history(str(repo))["status"] == "fail"
+
+
+def test_the_change_status_check_moves_all_passed(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit 530: ``run_doctor_check`` must fold the check into ``all_passed``.  Everything else is made healthy first, so
+    only this check can move the answer (the way #472 pins the worktree floor)."""
+
+    _healthy(monkeypatch)
+    healthy = run_doctor_check(str(repo))
+    assert healthy["change_status"]["status"] == "ok"
+    assert healthy["all_passed"] is True, "对照：其余都健康、变更单状态也对时 all_passed 必须是 True"
+
+    (repo / REL).write_text(_order("approved"), encoding="utf-8")  # a hand-written state with no transition record
+    broken = run_doctor_check(str(repo))
+
+    assert broken["change_status"]["status"] == "fail"
+    assert broken["all_passed"] is False
+
+    _record(repo, "under_review", "approved")  # the same file after a real transition: green again
+    assert run_doctor_check(str(repo))["all_passed"] is True

@@ -13,6 +13,7 @@ from click.core import ParameterSource
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.control_root_sync import ControlRootSyncService
 from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.application.core.pm_resume_service import PmResumeError, PmResumeService
@@ -78,6 +79,23 @@ def _control_root_path(ctx: click.Context) -> str:
 
     app_ctx: AppContext = ctx.find_root().obj
     return str(app_ctx.control_root)
+
+
+def _control_root_sync_notice(ctx: click.Context, *, project_id: str = "", scope_paths: tuple[str, ...] = ()) -> None:
+    """Tell the user now, in plain words, if the control root does not match ``origin/main`` -- not only at ``run start``.
+
+    Read-only and never fatal: hints go to stderr (stdout stays the command's own output), a Git that cannot answer
+    (offline, no origin) becomes one 'not verified' line, and nothing is fetched, synced or changed.
+    """
+
+    try:
+        service = ControlRootSyncService(_control_root_path(ctx))
+        report = service.check(scope_paths or service.project_scope(project_id))
+    except Exception as error:  # a hint must never stop the command it decorates
+        click.echo(f"⚠️ [控制根同步] 未能核对控制根与 origin/main：{error}", err=True)
+        return
+    for line in report.lines():
+        click.echo(f"⚠️ [控制根同步] {line}", err=True)
 
 
 def _require_control_root(ctx: click.Context) -> None:
@@ -662,6 +680,7 @@ def inbox_add(
         missing = [flag for flag, values in (("--evidence", evidence), ("--alternative", alternatives)) if not values]
         if missing:  # said in plain words before anything is created, instead of a raw validation dump
             raise click.ClickException(f"入箱必须带 {'、'.join(missing)}（各至少一个）；--evidence 的写法见 --help")
+        _control_root_sync_notice(ctx, project_id=project_id)
         _ensure_continuity_store(ctx)  # first use of a fresh clone (D6); only after the identity check
         classification = service.classify(
             project_id,
@@ -938,7 +957,10 @@ def approve_pm(
             _require_control_root(ctx)
         except WorktreePolicyError as error:
             raise click.ClickException(str(error)) from error
-    require_runtime_identity(ctx, project_of_planning_request(ctx, request_id) if by_hash else project_id)
+    approving_project = project_of_planning_request(ctx, request_id) if by_hash else project_id
+    require_runtime_identity(ctx, approving_project)
+    # Before the user types the PIN: a control root out of step with main makes `run start` refuse later (scope = the card's own paths).
+    _control_root_sync_notice(ctx, project_id=approving_project, scope_paths=scope_paths)
     if by_hash and pin_required:
         # The user should not type the PIN only to learn the saved card cannot be approved anyway.
         try:
@@ -1216,6 +1238,7 @@ def resume_pm(
         )
     except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
+    _control_root_sync_notice(ctx, project_id=project_id)
     _emit_query(payload, as_json)
 
 
@@ -1322,6 +1345,7 @@ def orient_pm(
         )
     except PmFacadeError as error:
         raise click.ClickException(str(error)) from error
+    _control_root_sync_notice(ctx, project_id=project_id)
     _emit_query(payload, as_json)
 
 

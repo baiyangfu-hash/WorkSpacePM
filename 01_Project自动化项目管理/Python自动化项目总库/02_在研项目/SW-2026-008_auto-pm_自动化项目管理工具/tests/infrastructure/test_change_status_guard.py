@@ -315,3 +315,15 @@ def test_renumbering_is_recognised_across_line_endings() -> None:
     removed = {CHG_REL: (CHG, old)}
     assert guard.renumbered_status(removed, NEW_REL, NEW_CHG, new) == "approved"
     assert guard.renumbered_status(removed, NEW_REL, NEW_CHG, new + b"extra\r\n") is None
+
+
+def test_renumbering_is_recognised_when_the_old_side_is_crlf_and_the_new_side_is_lf() -> None:
+    """Audit 532 (the reverse direction): the removed blob carries CRLF, the renumbered file is written with LF."""
+
+    old_lf = _fixture_chg_content(CHG, PID, "approved").encode("utf-8")
+    old = old_lf.replace(b"\n", b"\r\n")
+    new = old_lf.replace(CHG.encode(), NEW_CHG.encode())
+    removed = {CHG_REL: (CHG, old)}
+    assert guard.renumbered_status(removed, NEW_REL, NEW_CHG, new) == "approved"
+    assert guard.renumbered_status(removed, NEW_REL, NEW_CHG, new + b"extra\n") is None
+    assert guard.renumbered_status(removed, NEW_REL, NEW_CHG, new.replace(b"approved", b"closed")) is None

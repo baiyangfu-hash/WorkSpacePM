@@ -19,6 +19,7 @@ import click
 
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+from auto_pm.application.core.control_root_sync import ControlRootSyncService
 from auto_pm.application.core.lease_keepalive import LeaseKeepAlive
 from auto_pm.application.core.pm_closure_service import PmClosureError
 from auto_pm.application.core.pm_cockpit_service import PmCockpitError, PmCockpitService
@@ -50,6 +51,19 @@ def _guarded_mission(ctx: click.Context, mission_id: str) -> Mission:
         raise click.ClickException(str(error)) from error
     require_runtime_identity(ctx, mission.subject_project_id)
     return mission
+
+def _echo_run_drift_hint(app_ctx: AppContext, run: object) -> None:
+    """Print the control-root drift preview to stderr; a hint must never stop verification."""
+    try:
+        owned = tuple(getattr(run, "owned_paths", ()) or ())
+        git_head = str(getattr(run, "git_head", "") or "")
+        lines = ControlRootSyncService(app_ctx.control_root).run_drift_lines(owned, git_head)
+    except Exception as error:  # noqa: BLE001 - a preview that cannot be computed is "unverified", not a failure
+        click.echo(f"⚠️ [控制根同步] 未核实：{type(error).__name__}", err=True)
+        return
+    for line in lines:
+        click.echo(f"⚠️ [控制根同步] {line}", err=True)
+
 
 
 @click.command(name="verify")
@@ -84,6 +98,8 @@ def verify_pm(
         owner_id = store.get_lease(run_id).owner_id
     except ContinuityStoreError as error:
         raise click.ClickException(str(error)) from error
+    # Say it before the ~15 minute verification: a control root changed since the Run started makes the closure refuse.
+    _echo_run_drift_hint(app_ctx, runs[0])
     if lease_token_env is not None:
         token = _secret_from_environment(lease_token_env)
     else:
