@@ -60,7 +60,7 @@ class FakeRun:
 
 
 def _resolve(run: FakeRun, which: str | None = GH_EXE) -> str:
-    return actions.resolve_github_token(runner=run, which=lambda _name: which)
+    return str(actions.resolve_github_token(runner=run, which=lambda _name: which))
 
 
 def test_good_token_comes_back_and_the_command_is_pinned() -> None:
