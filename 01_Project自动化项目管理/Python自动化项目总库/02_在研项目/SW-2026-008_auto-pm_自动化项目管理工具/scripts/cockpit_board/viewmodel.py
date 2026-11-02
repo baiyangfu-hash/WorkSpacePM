@@ -797,24 +797,41 @@ def _day(text: str) -> datetime | None:
     return pd.parse_time(text[:10]) if text[:4].isdigit() else None
 
 
-def recent_changes(rows: list[ChangeRow], root: str, limit: int = CHANGES_SHOWN) -> tuple[list[ChangeRow], str]:
-    """从新到旧排，只留最近 ``limit`` 条；没留的数量和去哪看写在第二项里（全留了就是空串）。
+# 还没收口的变更：不论多旧都列出来，不占“最近 N 条”的名额（协调者 2026-11-02 裁决：未收口的变更绝不藏起来）
+UNCLOSED_STATUS = frozenset({"draft", "approved", "implementing", "pending_acceptance", "未读到状态"})
 
-    有日期的在前（同一天编号大的在前），没有日期的排在后面，不会因为“日期待补”被排到最新。
+
+def is_unclosed(row: ChangeRow) -> bool:
+    """变更单状态在 UNCLOSED_STATUS 里，或业务变更还是“待批…”；收口记录、实施卡不算。"""
+    if row.kind == "收口" or row.kind == "实施卡":
+        return False
+    return row.status.strip().lower() in UNCLOSED_STATUS or row.status.startswith("待批")
+
+
+def _newest_first(rows: list[ChangeRow]) -> list[ChangeRow]:
+    """有日期的从新到旧（同一天编号大的在前），没有日期的排在后面，不会冒充最新。"""
+    dated = sorted((r for r in rows if r.when is not None),
+                   key=lambda r: (r.when or datetime.min.replace(tzinfo=UTC), r.change_id), reverse=True)
+    return dated + [r for r in rows if r.when is None]
+
+
+def recent_changes(rows: list[ChangeRow], root: str, limit: int = CHANGES_SHOWN) -> tuple[list[ChangeRow], str]:
+    """没收口的变更全列在最上面（不占名额）；已收口的从新到旧，只留最近 ``limit`` 条。
+
+    返回（要显示的行, “还有 M 条……”那一句）。M 只数没列出的已收口变更；全列了就是空串。
     """
 
-    with_date = sorted((r for r in rows if r.when is not None), key=lambda r: (r.when or datetime.min.replace(tzinfo=UTC), r.change_id), reverse=True)
-    without = [r for r in rows if r.when is None]
-    ordered = with_date + without
-    shown = ordered[:limit]
-    hidden = ordered[limit:]
+    open_rows = _newest_first([r for r in rows if is_unclosed(r)])
+    closed = _newest_first([r for r in rows if not is_unclosed(r)])
+    shown_closed, hidden = closed[:limit], closed[limit:]
+    shown = open_rows + shown_closed
     if not hidden:
         return shown, ""
     undated = sum(1 for r in hidden if r.when is None)
-    note = f"还有 {len(hidden)} 条更早的没在这里列出（上面是最近 {limit} 条，从新到旧"
-    note += f"；没列出的里有 {undated} 条没写日期" if undated else ""
     where = f"{root}/…/01_变更管理/" if root else "项目文件夹的 01_变更管理/"
-    return shown, note + f"）。完整清单在 {where}"
+    note = (f"还有 {len(hidden)} 条更早的已收口变更没在这里列出（没收口的都在上面，不占名额；已收口的列了最近 {limit} 条，从新到旧"
+            + (f"；没列出的里有 {undated} 条没写日期" if undated else "") + f"）。完整清单在 {where}")
+    return shown, note
 
 
 def project_vm(

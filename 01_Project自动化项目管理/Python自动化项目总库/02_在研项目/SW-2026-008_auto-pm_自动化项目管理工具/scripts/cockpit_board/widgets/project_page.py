@@ -136,8 +136,8 @@ class ProjectPage(QWidget):
         if vm.changes_more:
             inner.addWidget(c.label(vm.changes_more, "muted"))
         self.layout_.addWidget(frame)
-        self.layout_.addWidget(c.label("BC = 业务变更（客户改需求、领导砍需求、参数变化），CARD = 实施卡，CHG = 收口变更单。三种合一张表，"
-                                       "变更从新到旧排，实施卡没有日期、列在最后。", "small"))
+        self.layout_.addWidget(c.label("BC = 业务变更（客户改需求、领导砍需求、参数变化），CARD = 实施卡，CHG = 收口变更单。三种合一张表。"
+                                       "还没收口的变更都在最上面；已收口的从新到旧只列最近 30 条；实施卡没有日期，列在最后。", "small"))
 
     def _io(self, vm: ProjectVM, _now: datetime) -> None:
         frame, inner = c.card()

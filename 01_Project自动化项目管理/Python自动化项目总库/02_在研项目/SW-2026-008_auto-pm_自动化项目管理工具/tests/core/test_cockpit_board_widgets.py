@@ -117,6 +117,6 @@ def test_the_project_page_shows_the_more_line_and_newest_first(qapp: QApplicatio
     page.show_view(vm.project_vm(board, card, board_tests.OFFSET, False), board_tests.NOW, False)
     page.set_tab("changes")
     texts = [label.text() for label in page.findChildren(QLabel)]
-    assert any(t.startswith("还有 4 条") for t in texts)  # 33 张单 + 1 条业务变更 = 34，列 30，余 4
+    assert any(t.startswith("还有 3 条") for t in texts)  # 33 张已收口的单，列最近 30，余 3；没收口的业务变更另外列
     ids = [t for t in texts if t.startswith("CHG-PLC-2026-")]
-    assert ids[0] == "CHG-PLC-2026-033" and len(ids) == 29  # 另一条是业务变更（日期最新，排在最前）
+    assert ids[0] == "CHG-PLC-2026-033" and len(ids) == 30
