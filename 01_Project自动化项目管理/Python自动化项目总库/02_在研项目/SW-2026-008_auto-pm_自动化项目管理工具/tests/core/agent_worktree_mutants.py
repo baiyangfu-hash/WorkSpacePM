@@ -106,6 +106,15 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "if False:",
     ),
     ("没并进 main 也删本地分支", "        elif fresh.merged:\n", "        elif True:\n"),
+    (
+        "agent 会话可清名册外的目录",
+        '        if caller_agent():\n            return SweepItem(\n                target, "other", False, "不在',
+        '        if False:\n            return SweepItem(\n                target, "other", False, "不在',
+    ),
+    ("名册外的目录有未提交也清", "        refusal = self._refusal(station)\n        if refusal:\n            return SweepItem(target, \"other\", False, refusal)\n", ""),
+    ("名册外没有自己提交的新目录也清", "        if station.untouched and not station.stale:\n", "        if False:\n"),
+    ("名册外没并进 main 的目录也清", "        if not station.merged:\n            return SweepItem(target, \"other\"", "        if False:\n            return SweepItem(target, \"other\""),
+    ("时间在未来不钳成 0", "return max(0, int(time.time() - max(stamps)))", "return int(time.time() - max(stamps))"),
     ("工位满了也能开", "        if count >= MAX_STATIONS:\n", "        if False:\n"),
     ("同一 agent 可开第二个工位", "if path.exists() or self._registered(path):", "if False:"),
     (

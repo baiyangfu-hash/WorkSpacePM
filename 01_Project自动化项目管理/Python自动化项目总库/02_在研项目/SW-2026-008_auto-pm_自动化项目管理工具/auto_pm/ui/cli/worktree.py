@@ -229,7 +229,7 @@ def close_cmd(ctx: click.Context, agent: str, no_fetch: bool) -> None:
 def sweep_cmd(
     ctx: click.Context, apply: bool, dry_run: bool, agent: str | None, no_fetch: bool, as_json: bool
 ) -> None:
-    """清理已并进 main 的工位、远程已删的本地分支、已结束 Run 的 run-plan-* 残留；默认只列"""
+    """清理已并进 main 的工位、名册外已并进 main 且干净的目录、远程已删的本地分支、已结束 Run 的 run-plan-* 残留；默认只列"""
     if apply and dry_run:
         _fail(AgentWorktreeError("--apply 和 --dry-run 只能选一个"))
     if apply:  # the default is a listing: it deletes nothing, so it asks the guard nothing

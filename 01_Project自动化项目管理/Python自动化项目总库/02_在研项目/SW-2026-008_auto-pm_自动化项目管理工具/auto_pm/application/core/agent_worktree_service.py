@@ -383,7 +383,7 @@ class AgentWorktreeService:
                 continue
             try:
                 if station is not None:
-                    self._remove_station(station, require_merged=station.kind == "agent")
+                    self._remove_station(station, require_merged=station.kind in ("agent", "other"))
                 else:
                     self._delete_local_branch(item.target, require_merged=True)
                 report.done.append(item.target)
@@ -403,9 +403,7 @@ class AgentWorktreeService:
         if not station.checked:
             return SweepItem(target, station.kind, False, "没做过深检，不能据此判断删除；保留")
         if station.kind == "other":
-            return SweepItem(
-                target, "other", False, "不在 agent 名册里、也不是 run-plan，不归本命令管"
-            )
+            return self._sweep_other(station, agent)
         if station.kind == "run-plan" and caller_agent():
             return SweepItem(
                 target, "run-plan", False, "run-plan 不属于任何 agent，只由用户在自己的终端清"
@@ -440,6 +438,33 @@ class AgentWorktreeService:
         if not station.merged:
             return SweepItem(target, "station", False, "还没并进 main，在做的活，保留")
         return SweepItem(target, "station", True, f"{station.branch} 已并进 main，工位干净")
+
+    def _sweep_other(self, station: Station, agent: str | None) -> SweepItem:
+        """A registered directory that is neither a roster station nor a run-plan (``m3-*`` leftovers and the like).
+
+        These belong to no agent, so only the user's own terminal may clean them, and only when everything is safe to
+        lose: no uncommitted change, nothing unpushed, not locked, on a branch (not detached), that branch already in
+        ``origin/main``.  A directory with no commit of its own is kept unless it has also been idle for more than
+        ``STALE_DAYS`` days -- it may have just been created by hand.  Always listed, removed only with ``--apply``.
+        """
+
+        target = str(station.path)
+        if caller_agent():
+            return SweepItem(
+                target, "other", False, "不在 agent 名册里的目录不属于任何 agent，只由用户在自己的终端清"
+            )
+        if agent is not None:
+            return SweepItem(target, "other", False, f"本次只清 {agent} 的工位")
+        refusal = self._refusal(station)
+        if refusal:
+            return SweepItem(target, "other", False, refusal)
+        if station.untouched and not station.stale:
+            return SweepItem(
+                target, "other", False, "还没有自己的提交，也不到 3 天，可能是刚手工建的；保留"
+            )
+        if not station.merged:
+            return SweepItem(target, "other", False, "分支还没并进 main，在做的活，保留")
+        return SweepItem(target, "other", True, f"{station.branch} 已并进 main，目录干净")
 
     def _sweep_gone(self, branch: str) -> SweepItem:
         if branch == "main" or branch.startswith("codex/control-root"):

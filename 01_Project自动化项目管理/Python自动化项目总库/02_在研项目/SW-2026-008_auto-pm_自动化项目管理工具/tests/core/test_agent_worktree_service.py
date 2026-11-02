@@ -364,7 +364,7 @@ def test_sweep_apply_removes_only_the_merged_clean_station(lab: Lab) -> None:
     assert "未提交的改动" in reasons[str(floor["dirty"])]
     assert "刚开的工位" in reasons[str(floor["fresh"])]
     assert "还没并进 main" in reasons[str(floor["in_review"])]
-    assert "不归本命令管" in reasons[str(floor["foreign"])]
+    assert "刚手工建" in reasons[str(floor["foreign"])]
     assert str(floor["outside"]) not in reasons, "控制根外的工作树根本不在清单里"
 
 
@@ -991,3 +991,154 @@ def test_a_git_link_with_bad_bytes_does_not_break_the_listing(lab: Lab, frozen_n
     station = {s.name: s for s in lab.service().stations(deep=False)}["m3-left"]
 
     assert station.idle_days == 5 and station.stale
+
+
+# ── H-01: directories outside the roster (m3-*) are listed for cleaning, removed only when safe ─────────
+
+
+def other_station(lab: Lab, name: str, *, merged: bool = True, pushed: bool = True) -> Path:
+    """A registered directory that is neither a roster station nor a run-plan, with a commit of its own."""
+
+    path = lab.root / ".auto-pm" / "worktrees" / name
+    branch = f"claude/pr-{name}"
+    git(lab.root, "worktree", "add", "-q", "-b", branch, str(path), "origin/main")
+    commit(path, f"{name}.txt")
+    if pushed:
+        git(path, "push", "-q", "-u", "origin", branch)
+    if merged:
+        lab.merge_on_github(branch)
+    git(lab.root, "fetch", "-q", "--prune", "origin")
+    return path
+
+
+def _reasons(report: Any) -> dict[str, str]:
+    return {item.target: item.reason for item in report.items}
+
+
+def test_sweep_lists_a_merged_clean_other_directory_but_removes_it_only_with_apply(lab: Lab) -> None:
+    done = other_station(lab, "m3-pr-a")
+    remote_before = lab.remote_refs()
+
+    preview = lab.service().sweep()
+
+    assert done.exists() and not preview.applied
+    assert {item.target for item in preview.items if item.remove} == {str(done)}
+    assert "已并进 main" in _reasons(preview)[str(done)]
+
+    applied = lab.service().sweep(apply=True)
+
+    assert applied.done == [str(done)] and not done.exists()
+    assert "claude/pr-m3-pr-a" not in lab.local_branches(), "合并过的本地分支一起删"
+    assert lab.remote_refs() == remote_before, "远程分支一律不删"
+
+
+@pytest.mark.parametrize(
+    ("problem", "why"),
+    [
+        ("dirty", "未提交"),
+        ("unpushed", "还没推"),
+        ("unmerged", "还没并进 main"),
+        ("locked", "lock"),
+        ("detached", "detached"),
+    ],
+)
+def test_sweep_keeps_an_other_directory_that_is_not_safe_to_lose(
+    lab: Lab, problem: str, why: str
+) -> None:
+    if problem == "unpushed":
+        path = other_station(lab, "m3-pr-b", merged=False, pushed=False)
+    elif problem == "unmerged":
+        path = other_station(lab, "m3-pr-b", merged=False)
+    else:
+        path = other_station(lab, "m3-pr-b")
+    if problem == "dirty":
+        (path / "draft.txt").write_text("x\n", encoding="utf-8")
+    if problem == "locked":
+        git(lab.root, "worktree", "lock", str(path))
+    if problem == "detached":
+        path = lab.root / ".auto-pm" / "worktrees" / "m3-detached"
+        git(lab.root, "worktree", "add", "-q", "--detach", str(path), "origin/main")
+        commit(path, "d.txt")
+
+    report = lab.service().sweep(apply=True)
+
+    assert path.exists(), problem
+    assert str(path) not in report.done
+    assert why in _reasons(report)[str(path)]
+
+
+def test_an_other_directory_with_no_commit_of_its_own_is_kept_until_it_is_stale(lab: Lab) -> None:
+    fresh = lab.root / ".auto-pm" / "worktrees" / "m3-hand-made"
+    git(lab.root, "worktree", "add", "-q", "-b", "claude/hand", str(fresh), "origin/main")
+
+    kept = lab.service().sweep()
+    assert not any(item.remove for item in kept.items if item.target == str(fresh))
+    assert "刚手工建" in _reasons(kept)[str(fresh)]
+
+    old = time.time() - 5 * DAY
+    for item in (fresh, fresh / ".git", *_station_git_files(fresh)):
+        os.utime(item, (old, old))
+    stale = lab.service().sweep()
+    assert {item.target for item in stale.items if item.remove} == {str(fresh)}
+
+
+def _station_git_files(path: Path) -> list[Path]:
+    link = (path / ".git").read_text(encoding="utf-8").strip().removeprefix("gitdir:").strip()
+    return [Path(link) / "HEAD", Path(link) / "logs" / "HEAD"]
+
+
+def test_an_agent_session_never_cleans_an_other_directory(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    done = other_station(lab, "m3-pr-c")
+    monkeypatch.setenv("CLAUDECODE", "1")
+
+    report = lab.service().sweep(apply=True)
+
+    assert done.exists() and str(done) not in report.done
+    assert "只由用户" in _reasons(report)[str(done)]
+
+
+def test_sweep_limited_to_one_agent_leaves_other_directories_alone(lab: Lab) -> None:
+    done = other_station(lab, "m3-pr-d")
+
+    report = lab.service().sweep(apply=True, agent="claude")
+
+    assert done.exists() and str(done) not in report.done
+    assert "本次只清 claude" in _reasons(report)[str(done)]
+
+
+def test_an_other_directory_that_gained_a_commit_after_listing_is_not_removed(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    done = other_station(lab, "m3-pr-e")
+    original = AgentWorktreeService._sweep_other
+
+    def list_then_work(self: AgentWorktreeService, station: Station, agent: str | None) -> Any:
+        item = original(self, station, agent)
+        commit(done, "late.txt")  # the user (or an agent) kept working after the listing ...
+        git(done, "push", "-q", "-u", "origin", "claude/pr-m3-pr-e")  # ... and pushed it: clean, but not in main
+        return item
+
+    monkeypatch.setattr(AgentWorktreeService, "_sweep_other", list_then_work)
+
+    report = lab.service().sweep(apply=True)
+
+    assert done.exists() and report.failed, "删前复查必须拦住"
+
+
+# ── idle time: unknown and future timestamps (audit 533) ──────────────────────────────────────────────
+
+
+def test_an_unknown_idle_time_is_never_stale() -> None:
+    station = Station(name="x", path=Path("x"), kind="other", registered=False)
+
+    assert station.idle_seconds is None and station.idle_days is None and station.stale is False
+
+
+def test_a_timestamp_in_the_future_counts_as_zero_idle(lab: Lab, frozen_now: float) -> None:
+    left = lab.root / ".auto-pm" / "worktrees" / "m3-left"
+    left.mkdir(parents=True)
+    os.utime(left, (NOW + 10 * DAY, NOW + 10 * DAY))
+
+    station = {s.name: s for s in lab.service().stations(deep=False)}["m3-left"]
+
+    assert station.idle_seconds == 0 and station.idle_days == 0 and not station.stale
