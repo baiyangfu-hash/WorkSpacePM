@@ -223,11 +223,18 @@ def close_cmd(ctx: click.Context, agent: str, no_fetch: bool) -> None:
 @click.option("--apply", "apply", is_flag=True, help="真的删除；不加时只列出（等于 --dry-run）")
 @click.option("--dry-run", "dry_run", is_flag=True, help="只列出，不删（默认）")
 @click.option("--agent", type=AGENTS, default=None, help="只清这个 agent 的工位")
+@click.option("--only", "only", metavar="NAME", default=None, help="只处理这一个目录（目录名，见 worktree list）；远程已删的分支不看")
 @click.option("--no-fetch", is_flag=True, help="断网时按本机已知的远程分支判断")
 @click.option("--json", "as_json", is_flag=True, help="机器可读输出")
 @click.pass_context
 def sweep_cmd(
-    ctx: click.Context, apply: bool, dry_run: bool, agent: str | None, no_fetch: bool, as_json: bool
+    ctx: click.Context,
+    apply: bool,
+    dry_run: bool,
+    agent: str | None,
+    only: str | None,
+    no_fetch: bool,
+    as_json: bool,
 ) -> None:
     """清理已并进 main 的工位、名册外已并进 main 且干净的目录、远程已删的本地分支、已结束 Run 的 run-plan-* 残留；默认只列"""
     if apply and dry_run:
@@ -236,7 +243,9 @@ def sweep_cmd(
         require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
     try:
-        report = service.sweep(apply=apply, agent=agent, fetch=not no_fetch, progress=_progress)
+        report = service.sweep(
+            apply=apply, agent=agent, only=only, fetch=not no_fetch, progress=_progress
+        )
     except AgentWorktreeError as error:
         _fail(error)
     except KeyboardInterrupt:

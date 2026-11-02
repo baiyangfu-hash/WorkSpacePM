@@ -5,7 +5,8 @@ Each agent works in its own station ``<control root>/.auto-pm/worktrees/<agent>`
 checks so that nothing unrecoverable is ever removed:
 
 * a worktree is removed only when it has no uncommitted change (ignored files such as ``.venv``
-  do not count and go with the directory);
+  do not count and go with the directory) -- except a directory outside the roster, which ``sweep`` never lists
+  while it still holds ignored files;
 * a commit that exists on no remote-tracking branch is never discarded;
 * remote branches are never deleted (GitHub deletes them after the merge);
 * only directories under ``.auto-pm/worktrees`` are touched; the control root, ``.codex`` worktrees
@@ -51,6 +52,9 @@ MAX_STATIONS = 8
 RELEASE_FREE_PLACES = 1
 # WS-001 / problem pool item 33 rule 5: a station untouched for more than this many days is reported as stale.
 STALE_DAYS = 3
+# Directories ``sweep`` never lists as removable, whatever Git says (the user's call, 11-02): the open PR #470 station,
+# the 1.2 GB trial copy and the Trae station.  Removing one is a manual ``git worktree remove`` by the user.
+RESERVED_STATIONS = frozenset({"m3-pr-chg470", "gui-trial", "trae"})
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 RunStateLookup = Callable[[str], str | None]
@@ -102,6 +106,7 @@ class Station:
     head: str = ""
     locked: bool = False
     dirty_paths: tuple[str, ...] = ()
+    ignored_paths: tuple[str, ...] = ()  # untracked files .gitignore hides (collapsed to directories)
     unpushed: int = 0
     merged: bool = False
     untouched: bool = False
@@ -343,9 +348,11 @@ class AgentWorktreeService:
         *,
         apply: bool = False,
         agent: str | None = None,
+        only: str | None = None,
         fetch: bool = True,
         progress: Callable[[str], None] | None = None,
     ) -> SweepReport:
+        """List (and with ``apply`` remove) what is safe to lose; ``only`` limits it to the one directory named."""
         if agent is not None:
             self._prefix(agent)
         caller = caller_agent()
@@ -362,12 +369,15 @@ class AgentWorktreeService:
         )
         items: list[SweepItem] = []
         plans: list[tuple[SweepItem, Station | None]] = []
-        for listed in self.stations(progress=progress):
+        listed_stations = self.stations(only=only, progress=progress)
+        if only is not None and not listed_stations:
+            raise AgentWorktreeError(f"{self.stations_dir} 下没有叫 {only} 的目录；先 `worktree list` 看名字")
+        for listed in listed_stations:
             item = self._sweep_station(listed, agent)
             items.append(item)
             plans.append((item, listed))
         checked_out = self._checked_out_branches()
-        for branch in self._gone_branches():
+        for branch in [] if only is not None else self._gone_branches():
             if branch in checked_out:
                 continue  # the station that holds it decides; deleting under a worktree is never right
             if agent is not None and not branch.startswith(AGENT_ROSTER[agent]):
@@ -393,6 +403,18 @@ class AgentWorktreeService:
         return report
 
     def _sweep_station(self, station: Station, agent: str | None) -> SweepItem:
+        item = self._sweep_verdict(station, agent)
+        if item.remove and station.name.lower() in RESERVED_STATIONS:
+            # Whatever else keeps it is more informative to show; the keep list only has the last word on "remove".
+            return SweepItem(
+                item.target,
+                item.category,
+                False,
+                "在保留名单里（m3-pr-chg470、gui-trial、trae），sweep 永远不删；要删请用户亲手处理",
+            )
+        return item
+
+    def _sweep_verdict(self, station: Station, agent: str | None) -> SweepItem:
         target = str(station.path)
         if station.broken:
             return SweepItem(target, station.kind, False, station.broken)
@@ -458,13 +480,29 @@ class AgentWorktreeService:
         refusal = self._refusal(station)
         if refusal:
             return SweepItem(target, "other", False, refusal)
-        if station.untouched and not station.stale:
-            return SweepItem(
-                target, "other", False, "还没有自己的提交，也不到 3 天，可能是刚手工建的；保留"
-            )
+        hold = self._other_hold(station)
+        if hold:
+            return SweepItem(target, "other", False, hold)
         if not station.merged:
             return SweepItem(target, "other", False, "分支还没并进 main，在做的活，保留")
         return SweepItem(target, "other", True, f"{station.branch} 已并进 main，目录干净")
+
+    @staticmethod
+    def _other_hold(station: Station) -> str:
+        """Why a directory outside the roster must be kept even though Git sees it clean ("" when nothing holds it).
+
+        Files ``.gitignore`` hides are in no commit and no ``git status``: deleting the work tree would lose them for
+        good, the same principle as "never delete what is untracked".  A directory with no commit of its own is kept
+        unless it has also been idle for more than ``STALE_DAYS`` days -- it may have just been created by hand.
+        """
+
+        if station.ignored_paths:
+            shown = "、".join(station.ignored_paths[:3])
+            more = "等" if len(station.ignored_paths) > 3 else ""
+            return f"有被 .gitignore 忽略的文件 {len(station.ignored_paths)} 项（{shown}{more}），删了就丢；人工看过再处理"
+        if station.untouched and not station.stale:
+            return "还没有自己的提交，也不到 3 天，可能是刚手工建的；保留"
+        return ""
 
     def _sweep_gone(self, branch: str) -> SweepItem:
         if branch == "main" or branch.startswith("codex/control-root"):
@@ -517,10 +555,17 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 f"工位 {station.path} 已从 {station.branch} 换到 {info.branch or '(detached)'}，有人在用，不删"
             )
-        fresh = self._inspect(
-            station.path, registered=True, branch=info.branch, head=info.head, locked=info.locked
+        fresh = replace(
+            self._inspect(
+                station.path, registered=True, branch=info.branch, head=info.head, locked=info.locked
+            ),
+            idle_seconds=_idle_seconds(station.path),
         )
         self._require_removable(fresh)
+        if fresh.kind == "other":
+            hold = self._other_hold(fresh)
+            if hold:
+                raise StationRefusedError(f"不删 {station.path}：{hold}")
         if require_merged and not fresh.merged:
             raise StationRefusedError(f"工位 {station.path} 上又有了没并进 main 的提交，不删")
         removed = self._git("worktree", "remove", str(station.path))
@@ -615,6 +660,7 @@ class AgentWorktreeService:
                 checked=False,
             )
         dirty: tuple[str, ...] = ()
+        ignored: tuple[str, ...] = ()
         unpushed = 0
         merged = False
         untouched = False
@@ -625,6 +671,13 @@ class AgentWorktreeService:
             dirty = tuple(
                 sorted(entry[3:] for entry in status.stdout.split("\0") if len(entry) > 3)
             )
+            hidden = self._git(
+                "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory", "-z",
+                cwd=path,
+            )
+            if hidden.returncode != 0:
+                raise AgentWorktreeError(f"读不到工位里被忽略的文件 {path}：{_detail(hidden)}")
+            ignored = tuple(sorted(name for name in hidden.stdout.split("\0") if name))
             unpushed = int(self._out("rev-list", "--count", head, "--not", "--remotes") or "0")
             merged = self._is_ancestor(head, MAIN_REF)
             untouched = bool(branch) and self._created_at(branch) == head
@@ -638,6 +691,7 @@ class AgentWorktreeService:
             head=head,
             locked=locked,
             dirty_paths=dirty,
+            ignored_paths=ignored,
             unpushed=unpushed,
             merged=merged,
             untouched=untouched,

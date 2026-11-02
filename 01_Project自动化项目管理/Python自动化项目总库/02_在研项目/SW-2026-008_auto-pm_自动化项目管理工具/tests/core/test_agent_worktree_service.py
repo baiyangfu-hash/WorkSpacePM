@@ -1125,6 +1125,133 @@ def test_an_other_directory_that_gained_a_commit_after_listing_is_not_removed(
     assert done.exists() and report.failed, "删前复查必须拦住"
 
 
+# ── audit 540: ignored files, --only, the keep list, the stale re-check at --apply ───────────────────────
+
+
+def _hide_a_file(path: Path) -> None:
+    (path / ".venv").mkdir()
+    (path / ".venv" / "notes.txt").write_text("not in any commit\n", encoding="utf-8")
+
+
+def test_an_other_directory_holding_ignored_files_is_kept_and_says_how_many(lab: Lab) -> None:
+    held = other_station(lab, "m3-pr-f")
+    clean = other_station(lab, "m3-pr-g")
+    _hide_a_file(held)
+
+    report = lab.service().sweep(apply=True)
+
+    assert held.exists() and not clean.exists()
+    assert (held / ".venv" / "notes.txt").read_text(encoding="utf-8") == "not in any commit\n"
+    reason = _reasons(report)[str(held)]
+    assert "被 .gitignore 忽略的文件 1 项" in reason and ".venv" in reason
+    assert "目录干净" not in reason
+
+
+def test_an_ignored_file_that_appears_after_listing_stops_the_removal(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    done = other_station(lab, "m3-pr-h")
+    original = AgentWorktreeService._sweep_other
+
+    def list_then_hide(self: AgentWorktreeService, station: Station, agent: str | None) -> Any:
+        item = original(self, station, agent)
+        _hide_a_file(done)
+        return item
+
+    monkeypatch.setattr(AgentWorktreeService, "_sweep_other", list_then_hide)
+
+    report = lab.service().sweep(apply=True)
+
+    assert done.exists() and report.failed and "忽略" in report.failed[0]
+
+
+def test_only_limits_the_listing_and_the_removal_to_the_named_directory(lab: Lab) -> None:
+    wanted = other_station(lab, "m3-pr-i")
+    spared = other_station(lab, "m3-pr-j")
+
+    preview = lab.service().sweep(only="m3-pr-i")
+    assert [item.target for item in preview.items] == [str(wanted)]
+
+    applied = lab.service().sweep(apply=True, only="m3-pr-i")
+
+    assert applied.done == [str(wanted)] and not wanted.exists() and spared.exists()
+    with pytest.raises(AgentWorktreeError, match="没有叫 nope 的目录"):
+        lab.service().sweep(apply=True, only="nope")
+
+
+def test_only_leaves_branches_whose_remote_is_gone_alone(lab: Lab) -> None:
+    other_station(lab, "m3-pr-k")
+    git(lab.root, "branch", "claude/orphan", "origin/main")
+    git(lab.root, "push", "-q", "-u", "origin", "claude/orphan")
+    lab.merge_on_github("claude/orphan")
+    git(lab.root, "fetch", "-q", "--prune", "origin")
+
+    everything = lab.service().sweep()
+    only = lab.service().sweep(only="m3-pr-k")
+
+    assert any(item.category == "gone-branch" for item in everything.items), "前提：孤儿分支本来会被列出"
+    assert [item.category for item in only.items] == ["other"]
+
+
+@pytest.mark.parametrize("name", ["m3-pr-chg470", "gui-trial"])
+def test_the_keep_list_is_never_removed_even_when_named(lab: Lab, name: str) -> None:
+    kept = other_station(lab, name)
+
+    for report in (
+        lab.service().sweep(apply=True),
+        lab.service().sweep(apply=True, only=name),
+    ):
+        assert kept.exists() and str(kept) not in report.done
+        assert "保留名单" in _reasons(report)[str(kept)]
+
+
+def test_the_trae_station_is_on_the_keep_list(lab: Lab) -> None:
+    trae = finished_station(lab, "trae", "CARD-1")
+    lab.merge_on_github("trae/CARD-1")
+
+    report = lab.service().sweep(apply=True)
+
+    assert trae.exists() and "保留名单" in _reasons(report)[str(trae)]
+
+
+def test_a_directory_that_stopped_being_stale_after_listing_is_not_removed(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fresh = lab.root / ".auto-pm" / "worktrees" / "m3-hand-made"
+    git(lab.root, "worktree", "add", "-q", "-b", "claude/hand", str(fresh), "origin/main")
+    old = time.time() - 5 * DAY
+    for item in (fresh, fresh / ".git", *_station_git_files(fresh)):
+        os.utime(item, (old, old))
+    original = AgentWorktreeService._sweep_other
+
+    def list_then_touch(self: AgentWorktreeService, station: Station, agent: str | None) -> Any:
+        item = original(self, station, agent)
+        assert item.remove, "前提：列出时它已闲置超过 3 天"
+        os.utime(fresh, None)  # somebody is working in it again
+        return item
+
+    monkeypatch.setattr(AgentWorktreeService, "_sweep_other", list_then_touch)
+
+    report = lab.service().sweep(apply=True)
+
+    assert fresh.exists() and report.failed and "3 天" in report.failed[0]
+
+
+@pytest.mark.usefixtures("identity_guard_off")
+def test_cli_sweep_accepts_only(lab: Lab) -> None:
+    wanted = other_station(lab, "m3-pr-l")
+    spared = other_station(lab, "m3-pr-m")
+    runner = CliRunner(env={"AUTO_PM_AGENT": ""})
+    base = ["--workspace", str(lab.root)]
+
+    result = runner.invoke(cli, [*base, "worktree", "sweep", "--apply", "--only", "m3-pr-l", "--no-fetch"])
+
+    assert result.exit_code == 0, result.output
+    assert not wanted.exists() and spared.exists()
+    missing = runner.invoke(cli, [*base, "worktree", "sweep", "--only", "nope", "--no-fetch"])
+    assert missing.exit_code == 2 and "nope" in missing.output
+
+
 # ── idle time: unknown and future timestamps (audit 533) ──────────────────────────────────────────────
 
 
@@ -1142,3 +1269,20 @@ def test_a_timestamp_in_the_future_counts_as_zero_idle(lab: Lab, frozen_now: flo
     station = {s.name: s for s in lab.service().stations(deep=False)}["m3-left"]
 
     assert station.idle_seconds == 0 and station.idle_days == 0 and not station.stale
+
+
+def test_a_failing_ignored_files_scan_stops_the_sweep(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    other_station(lab, "m3-pr-n")
+    original = AgentWorktreeService._git
+
+    def failing(self: AgentWorktreeService, *args: str, **kwargs: Any) -> Any:
+        result = original(self, *args, **kwargs)
+        if args and args[0] == "ls-files":
+            result.returncode = 128  # type: ignore[misc]
+            result.stdout = ""
+        return result
+
+    monkeypatch.setattr(AgentWorktreeService, "_git", failing)
+
+    with pytest.raises(AgentWorktreeError, match="被忽略的文件"):
+        lab.service().sweep(apply=True)
