@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -52,7 +53,7 @@ class TestWorkflowEngine:
         """cmd.exe reads ``&`` and ``^`` in a bare word as syntax; ``list2cmdline`` alone quotes only spaces (the windows-extra failure)."""
         from auto_pm.domain.constraint import workflow
 
-        monkeypatch.setattr(workflow.os, "name", "nt")
+        monkeypatch.setattr(os, "name", "nt")
         assert workflow._quoted_for_shell(name) == expected
 
     @pytest.mark.parametrize("name", ["plain.md", "has space.md", "中文 名字.md", "a&b;c.md", "it's.md"])
