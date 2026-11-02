@@ -293,11 +293,28 @@ def parse_pin_status(text: str) -> str:
 
 
 def _json(text: str) -> dict[str, Any]:
-    try:
-        data = json.loads(text)
-    except (TypeError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    """命令输出里的 JSON 对象。
+
+    控制根的启动器会在 stderr 打一行 ``launcher: release verified via …``，界面拿到的输出是 stdout 接 stderr，
+    JSON 后面（有时前面）跟着这行横幅，整段交给 ``json.loads`` 一定失败、被当成“什么都没有”。所以从每个 ``{`` 起试着
+    读出第一个完整的 JSON 对象，横幅和别的杂行不管。
+    """
+
+    text = text if isinstance(text, str) else ""
+    decoder = json.JSONDecoder()
+    start = text.find("{")
+    for _ in range(20):  # 横幅里不会有几个 “{”；封顶，免得一大段乱码时反复试
+        if start < 0:
+            return {}
+        try:
+            data, _end = decoder.raw_decode(text, start)
+        except ValueError:
+            start = text.find("{", start + 1)
+            continue
+        if isinstance(data, dict):
+            return data
+        start = text.find("{", start + 1)
+    return {}
 
 
 def _has_list(text: str, key: str) -> bool:
