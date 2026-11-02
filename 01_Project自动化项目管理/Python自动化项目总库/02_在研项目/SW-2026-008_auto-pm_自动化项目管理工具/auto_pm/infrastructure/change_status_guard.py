@@ -1,23 +1,23 @@
-"""auto_pm.infrastructure.change_status_guard - a change order's status line must agree with the approval history.
+"""auto_pm.infrastructure.change_status_guard - a change order's status line must agree with the recorded transitions.
 
 The status of a change order lives in two places: the ``变更状态`` row of §3.4 in the Markdown file, and the append-only
-``approval_history`` table of the control root's ``.auto-pm/index.db`` (one row per ``change transition``).  The commit hook
-used to read only the file, so anyone able to edit a text file could write ``approved`` into §3.4 and have production code
-accepted.  This module compares the two (audit 524, point 3):
+transition journal (``auto_pm.domain.change.status_journal``, ``<control root>/.auto-pm/status_journal.db``) that
+``ChangeService`` writes on every status change, before it writes the file.  The commit hook used to read only the file, so
+anyone able to edit a text file could write ``approved`` into §3.4 and have production code accepted.  This module compares the
+two (audit 524, point 3):
 
-* a status that is new relative to ``HEAD`` (an edit not committed yet) needs a history row whose last ``to_status`` is
-  exactly that status -- no database, no table and no row for the order all mean "no history" and are refused;
-* a status that ``HEAD`` already carries is let through: the history on this machine only holds the transitions made on this
+* a status that is new relative to ``HEAD`` (an edit not committed yet) needs a journal row whose last ``to_status`` is
+  exactly that status -- no journal file, no table and no row for the order all mean "no record" and are refused;
+* a status that ``HEAD`` already carries is let through: the journal on this machine only holds the transitions made on this
   machine, and an order made or finished in a cloud session and merged by pull request has no row, or an older one.
 
-Nothing here writes: the database is opened read-only and is never created, so "the database is missing" is the same answer
-as "the order has no history", never a pass by itself.  Git is called only to read.
+Reading never writes: the journal is opened read-only and is never created, so "the file is missing" is the same answer as
+"the order has no record", never a pass by itself.  Git is called only to read.
 """
 
 from __future__ import annotations
 
 import re
-import sqlite3
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -25,6 +25,9 @@ from pathlib import Path
 
 from auto_pm.domain.change.constants import ALL_STATUSES
 from auto_pm.domain.change.parser import ChgParser
+from auto_pm.domain.change.status_journal import (
+    last_recorded_status as last_recorded_status,  # re-exported: the hook and doctor read the journal through this module
+)
 
 # Approved or later: the states in which the commit hook lets production code through.
 APPROVED_OR_LATER = (
@@ -36,7 +39,6 @@ APPROVED_OR_LATER = (
     "completed",
     "closed",
 )
-DB_RELATIVE = (".auto-pm", "index.db")
 GIT_TIMEOUT_SECONDS = 60
 _CHG_FILE = re.compile(r"^CHG-[A-Z0-9]+-\d{4}-\d+\.md$")
 _CHANGE_DIR_MARKER = "/01_变更管理/01_变更单/"
@@ -103,33 +105,6 @@ def explicit_status(text: str) -> str:
     return status if status in ALL_STATUSES else ""
 
 
-def last_recorded_status(control_root: Path, change_number: str, project_id: str = "") -> str | None:
-    """The ``to_status`` of the newest approval-history row of this order, or None when there is none.
-
-    None covers: no database file, no ``approval_history`` table, a database that cannot be read, and an order without rows.
-    The caller must treat all of them alike -- an unreadable record never counts as approval.
-    """
-
-    database = control_root.joinpath(*DB_RELATIVE)
-    if not database.is_file():
-        return None
-    try:
-        connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
-    except (sqlite3.Error, OSError, ValueError):
-        return None
-    try:
-        row = connection.execute(
-            "SELECT to_status FROM approval_history WHERE change_number = ? "
-            "AND (? = '' OR project_id = ? OR project_id = '') ORDER BY id DESC LIMIT 1",
-            (change_number, project_id, project_id),
-        ).fetchone()
-    except sqlite3.Error:
-        return None
-    finally:
-        connection.close()
-    return str(row[0]) if row else None
-
-
 def git_blob(repo: Path, revision: str, relative: str) -> bytes | None:
     """File content at a revision (``HEAD``), None when the revision or the file is not there."""
 
@@ -148,29 +123,46 @@ def git_blob(repo: Path, revision: str, relative: str) -> bytes | None:
 def judge(*, recorded: str | None, file_status: str, committed_status: str | None) -> Verdict:
     """The rule for a change order that is already in a state production code may rely on.
 
-    ``recorded`` is the newest history row (None = none); ``committed_status`` the status in ``HEAD`` (None = not committed yet).
+    ``recorded`` is the newest journal row (None = none); ``committed_status`` the status in ``HEAD`` (None = not committed yet).
 
     What this judges is a status that is NOT in ``HEAD`` yet -- an edit in the working tree or the index -- because that is the
-    only status nothing else has looked at.  It needs a history row whose last ``to_status`` is exactly that status.  A status
+    only status nothing else has looked at.  It needs a journal row whose last ``to_status`` is exactly that status.  A status
     that ``HEAD`` already carries is let through: it came in with a commit (and a pull request, with its audit), and this
-    machine's history only knows the transitions made on this machine -- an order approved here and finished in a cloud session
+    machine's journal only knows the transitions made on this machine -- an order approved here and finished in a cloud session
     legitimately ends with a row that is older than the file.  A hand edit that was already committed is the first case's
     business at the time it was committed (the staged-edit rule), not this one's.
     """
 
     if committed_status == file_status:
         if recorded is None:
-            return Verdict(True, f"本机审批历史里没有这张单的记录，按已提交的状态 {committed_status} 放行")
+            return Verdict(True, f"本机流转记录里没有这张单，按已提交的状态 {committed_status} 放行")
         return Verdict(True)
     if recorded == file_status:
         return Verdict(True)
-    seen = "没有这张单的任何记录（没有审批历史库，或这张单没在本机流转过）" if recorded is None else f"最后一条记录是 {recorded}"
+    seen = "没有这张单的任何记录（没有流转记录库，或这张单没在本机流转过）" if recorded is None else f"最后一条记录是 {recorded}"
     was = "还没有提交过" if committed_status is None else f"已提交的版本里是 {committed_status}"
     return Verdict(
         False,
-        f"变更单状态现在是 {file_status}（{was}），但本机审批历史{seen}：状态行被手改过，没有流转依据；"
+        f"变更单状态现在是 {file_status}（{was}），但本机流转记录{seen}：状态行被手改过，没有流转依据；"
         "请用 `main.py change transition` 走流转，不要直接改变更单 §3.4",
     )
+
+
+def renumbered_status(removed: dict[str, tuple[str, bytes]], new_path: str, new_number: str, new_data: bytes) -> str | None:
+    """The status a renumbered change order carried before the rename, or None when this is not a renumbering.
+
+    Renumbering after a number clash ("the later merge takes a new number") deletes ``CHG-X-n`` and adds ``CHG-X-m``.  It is
+    the same order under a new name when the added content equals a deleted one's content with the old number replaced by the
+    new one, byte for byte, in the same project folder.  Anything else -- another status, another text -- is a new order.
+    """
+
+    folder = new_path.replace("\\", "/").rsplit("/CHG-", 1)[0]
+    for old_path, (old_number, old_data) in removed.items():
+        if old_path.replace("\\", "/").rsplit("/CHG-", 1)[0] != folder or old_number == new_number:
+            continue
+        if old_data.replace(old_number.encode(), new_number.encode()) == new_data:
+            return status_of_bytes(old_data, old_path)
+    return None
 
 
 def replays_history(repository: Path) -> bool:
@@ -214,8 +206,22 @@ def _git_names(repository: Path, *args: str) -> list[str] | None:
         return None
 
 
+def status_before(
+    removed: dict[str, tuple[str, bytes]], path: str, data: bytes, head_blob: bytes | None
+) -> str:
+    """The status this change order had before the edit: in ``HEAD`` at the same path; else moved or renumbered; else ''."""
+
+    if head_blob is not None:
+        return status_of_bytes(head_blob, path)
+    number = change_number_of(path)
+    for old_path, (old_number, old_data) in removed.items():
+        if old_number == number:  # the same order moved to another folder
+            return status_of_bytes(old_data, old_path)
+    return renumbered_status(removed, path, number, data) or ""
+
+
 def pending_status_problems(root: Path) -> list[str] | None:
-    """Change orders whose working-tree status is new relative to ``HEAD`` and not backed by the approval history.
+    """Change orders whose working-tree status is new relative to ``HEAD`` and not backed by the transition journal.
 
     The read-only counterpart of the commit hook, for ``doctor``: it sees the hand edit before anyone tries to commit it.
     Returns None when Git cannot answer (not a repository, no commit yet) -- the caller reports "not checked", not "fine".
@@ -226,12 +232,12 @@ def pending_status_problems(root: Path) -> list[str] | None:
     deleted = _git_names(root, "diff", "--name-only", "--diff-filter=D", "-z", "HEAD")
     if changed is None or untracked is None or deleted is None:
         return None
-    removed: dict[str, str] = {}
+    removed: dict[str, tuple[str, bytes]] = {}
     for path in deleted:
         if is_change_order_path(path):
             blob = git_blob(root, "HEAD", path)
             if blob is not None:
-                removed[change_number_of(path)] = status_of_bytes(blob, path)
+                removed[path] = (change_number_of(path), blob)
     problems: list[str] = []
     for path in sorted({*changed, *untracked}):
         target = root / path
@@ -244,15 +250,13 @@ def pending_status_problems(root: Path) -> list[str] | None:
         new_status = status_of_bytes(data, path)
         if new_status not in APPROVED_OR_LATER:
             continue
-        number = change_number_of(path)
-        old_blob = git_blob(root, "HEAD", path)
-        old_status = status_of_bytes(old_blob, path) if old_blob is not None else removed.get(number, "")
+        old_status = status_before(removed, path, data, git_blob(root, "HEAD", path))
         if new_status == old_status:
             continue
-        recorded = last_recorded_status(root, number, project_id_of(text_of(data)))
+        recorded = last_recorded_status(root, change_number_of(path), project_id_of(text_of(data)))
         if recorded != new_status:
             seen = "没有记录" if recorded is None else f"最后一条是 {recorded}"
             problems.append(
-                f"{path}：状态改成了 {new_status}（已提交的是 {old_status or '无'}），审批历史{seen}；请用 `main.py change transition` 走流转"
+                f"{path}：状态改成了 {new_status}（已提交的是 {old_status or '无'}），流转记录{seen}；请用 `main.py change transition` 走流转"
             )
     return problems

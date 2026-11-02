@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import sqlite3
 import subprocess
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
-from auto_pm.infrastructure.db.schema import DDL_APPROVAL_HISTORY
+from auto_pm.domain.change.status_journal import record_transition
 from auto_pm.ui.cli.doctor import check_change_status_history, doctor_command
 
 PID = "SW-2026-008"
@@ -33,19 +32,13 @@ def _order(status: str) -> str:
 
 
 def _record(root: Path, *to_statuses: str) -> None:
-    (root / ".auto-pm").mkdir(exist_ok=True)
-    with sqlite3.connect(root / ".auto-pm" / "index.db") as connection:
-        connection.execute(DDL_APPROVAL_HISTORY)
-        for previous, current in zip(("", *to_statuses), to_statuses, strict=False):
-            connection.execute(
-                "INSERT INTO approval_history (project_id, change_number, from_status, to_status, transition_date) VALUES (?, ?, ?, ?, ?)",
-                (PID, CHG, previous, current, "2026-11-02"),
-            )
+    for previous, current in zip(("", *to_statuses), to_statuses, strict=False):
+        record_transition(root, change_number=CHG, project_id=PID, from_status=previous, to_status=current)
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """A cloud-style clone: one root, the order committed under review, no ``.auto-pm`` database."""
+    """A cloud-style clone: one root, the order committed under review, no transition journal."""
 
     (tmp_path / REL).parent.mkdir(parents=True)
     (tmp_path / REL).write_text(_order("under_review"), encoding="utf-8")
@@ -106,7 +99,7 @@ def test_the_doctor_command_exits_nonzero_on_a_hand_written_state(repo: Path, mo
     (repo / REL).write_text(_order("approved"), encoding="utf-8")
     result = CliRunner().invoke(doctor_command, ["-w", str(repo)])
     assert result.exit_code == 1, result.output
-    assert "变更单状态与审批历史" in result.output and "FAIL" in result.output
+    assert "变更单状态与流转记录" in result.output and "FAIL" in result.output
 
 
 def test_a_text_edit_of_an_approved_order_that_keeps_its_status_needs_no_history(repo: Path) -> None:
@@ -117,3 +110,17 @@ def test_a_text_edit_of_an_approved_order_that_keeps_its_status_needs_no_history
     _git(repo, "commit", "-q", "-m", "arrived by pull request")
     (repo / REL).write_text(_order("approved") + "\n补充说明\n", encoding="utf-8")
     assert check_change_status_history(str(repo)) == {"status": "ok", "reasons": []}
+
+
+def test_renumbering_is_not_a_new_status_but_a_forged_replacement_is_red(repo: Path) -> None:
+    """Doctor sees the same renumbering rule as the commit hook: same text but the number is fine, anything else is not."""
+
+    (repo / REL).write_text(_order("approved"), encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "approved")
+    other = REL.replace("346", "347")
+    (repo / REL).unlink()
+    (repo / other).write_text(_order("approved").replace("346", "347"), encoding="utf-8")
+    assert check_change_status_history(str(repo))["status"] == "ok"
+    (repo / other).write_text(_order("approved").replace("346", "347") + "\n另加一行\n", encoding="utf-8")
+    assert check_change_status_history(str(repo))["status"] == "fail"

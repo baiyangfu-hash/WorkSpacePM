@@ -941,10 +941,11 @@ def _enforce_staged_change_status(cand_root: Path, gov_root: Path, snapshot: Sta
     """A staged change order may reach an approved-or-later status only through ``change transition`` (audit 524, point 3).
 
     For every change order this commit adds or modifies, whose status becomes a state production code may rely on and differs
-    from the status in ``HEAD``: the control root's approval history must end with exactly that status.  No database, or no
-    row for the order, is a refusal -- a cloud single-root clone that edits §3.4 by hand has no history to show.  A moved
-    file (deleted in one folder, added in another with the same status) is not a new status.  Merges, cherry-picks, reverts and
-    rebase steps replay committed history and are not judged here.
+    from the status in ``HEAD``: the control root's transition journal must end with exactly that status.  No journal, or no
+    row for the order, is a refusal -- a cloud single-root clone that edits §3.4 by hand has no record to show.  A moved file
+    (deleted in one folder, added in another) and a renumbered one (deleted ``CHG-X-n``, added ``CHG-X-m`` with the same text
+    but for the number) are not new statuses.  Merges, cherry-picks, reverts and rebase steps replay committed history and are
+    not judged here.
     """
 
     if change_status_guard.replays_history(cand_root):
@@ -952,11 +953,10 @@ def _enforce_staged_change_status(cand_root: Path, gov_root: Path, snapshot: Sta
     changed = [entry for entry in snapshot.entries if change_status_guard.is_change_order_path(entry.path)]
     if not changed:
         return 0
-    removed: dict[str, str] = {}
+    removed: dict[str, tuple[str, bytes]] = {}
     for entry in changed:
         if entry.deleted:
-            blob = _read_staged_blob(cand_root, entry)
-            removed[change_status_guard.change_number_of(entry.path)] = change_status_guard.status_of_bytes(blob, entry.path)
+            removed[entry.path] = (change_status_guard.change_number_of(entry.path), _read_staged_blob(cand_root, entry))
     for entry in changed:
         if entry.deleted:
             continue
@@ -966,11 +966,8 @@ def _enforce_staged_change_status(cand_root: Path, gov_root: Path, snapshot: Sta
             if new_status not in _VALID_CHANGE_STATUSES:
                 continue
             number = change_status_guard.change_number_of(entry.path)
-            old_blob = change_status_guard.git_blob(cand_root, "HEAD", entry.path)
-            old_status = (
-                change_status_guard.status_of_bytes(old_blob, entry.path)
-                if old_blob is not None
-                else removed.get(number, "")
+            old_status = change_status_guard.status_before(
+                removed, entry.path, blob, change_status_guard.git_blob(cand_root, "HEAD", entry.path)
             )
             if new_status == old_status:
                 continue
@@ -978,16 +975,16 @@ def _enforce_staged_change_status(cand_root: Path, gov_root: Path, snapshot: Sta
             recorded = change_status_guard.last_recorded_status(gov_root, number, project_id)
         except Exception as exc:
             print(
-                "❌ [auto-pm commit-msg] 物理拦截：核对暂存变更单的状态与审批历史时出错，"
+                "❌ [auto-pm commit-msg] 物理拦截：核对暂存变更单的状态与流转记录时出错，"
                 f"为防止绕过门禁已拒绝提交: {entry.path}: {exc}"
             )
             return 1
         if recorded != new_status:
-            seen = "没有任何记录（没有审批历史库，或这张单没有流转记录）" if recorded is None else f"最后一条是 {recorded}"
+            seen = "没有任何记录（没有流转记录库，或这张单没有流转记录）" if recorded is None else f"最后一条是 {recorded}"
             print(
                 f"❌ [auto-pm commit-msg] 物理拦截：暂存的变更单 {entry.path} 把状态改成了 {new_status}"
-                f"（已提交版本是 {old_status or '无'}），但本机审批历史{seen}：状态行被手改过。"
-                "请用 `main.py change transition` 走流转，由流转命令同时写文件和审批历史。"
+                f"（已提交版本是 {old_status or '无'}），但本机流转记录{seen}：状态行被手改过。"
+                "请用 `main.py change transition` 走流转，由流转命令同时写文件和流转记录。"
             )
             return 1
     return 0

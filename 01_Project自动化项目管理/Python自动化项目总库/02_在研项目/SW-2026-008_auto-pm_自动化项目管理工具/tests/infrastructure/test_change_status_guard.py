@@ -1,20 +1,19 @@
 """TD (audit 524, point 3): a change order's status line must agree with the approval history, or the commit is refused.
 
-Real Git repositories and the real ``enforce_commit_msg``; the approval history is a real SQLite file with the real table.
-The case that carries the risk is the cloud single-root clone: there is no ``.auto-pm/index.db``, §3.4 is edited by hand to an
+Real Git repositories and the real ``enforce_commit_msg``; the transition journal is a real SQLite file with the real table.
+The case that carries the risk is the cloud single-root clone: there is no transition journal (``.auto-pm/status_journal.db``), §3.4 is edited by hand to an
 approved state, and the edit is staged.  A missing database and a database without a row for the order are the same answer
 ("no history"), never a pass.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
 
+from auto_pm.domain.change.status_journal import record_transition
 from auto_pm.infrastructure import change_status_guard as guard
-from auto_pm.infrastructure.db.schema import DDL_APPROVAL_HISTORY
 from auto_pm.infrastructure.git_hook_enforcer import enforce_commit_msg
 from tests.infrastructure.test_git_hook_enforcer import (
     _fixture_chg_content,
@@ -32,16 +31,10 @@ GATED = ("approved", "conditionally_approved", "implementing", "completed")
 
 
 def _record(root: Path, *to_statuses: str, number: str = CHG, pid: str = PID) -> None:
-    """Write approval-history rows the way ``change transition`` does (one per transition, oldest first)."""
+    """Write journal rows the way ``ChangeService.transition_status`` does (one per transition, oldest first)."""
 
-    (root / ".auto-pm").mkdir(exist_ok=True)
-    with sqlite3.connect(root / ".auto-pm" / "index.db") as connection:
-        connection.execute(DDL_APPROVAL_HISTORY)
-        for previous, current in zip(("", *to_statuses), to_statuses, strict=False):
-            connection.execute(
-                "INSERT INTO approval_history (project_id, change_number, from_status, to_status, transition_date) VALUES (?, ?, ?, ?, ?)",
-                (pid, number, previous, current, "2026-11-02"),
-            )
+    for previous, current in zip(("", *to_statuses), to_statuses, strict=False):
+        record_transition(root, change_number=number, project_id=pid, from_status=previous, to_status=current)
 
 
 def _hand_edit(root: Path, status: str) -> None:
@@ -83,7 +76,7 @@ def test_a_database_without_a_row_for_this_order_is_the_same_answer_as_no_databa
 def test_a_database_that_cannot_be_read_never_counts_as_approval(tmp_path: Path) -> None:
     ctrl, message = _single_root(tmp_path, committed="under_review")
     (ctrl / ".auto-pm").mkdir()
-    (ctrl / ".auto-pm" / "index.db").write_bytes(b"this is not a database")
+    (ctrl / ".auto-pm" / "status_journal.db").write_bytes(b"this is not a database")
     _hand_edit(ctrl, "approved")
     assert enforce_commit_msg(ctrl, message) == 1
 
@@ -133,6 +126,50 @@ def test_moving_a_change_order_is_not_a_new_status(tmp_path: Path) -> None:
     moved.parent.mkdir(parents=True)
     _git(ctrl, "mv", CHG_REL, str(moved.relative_to(ctrl)))
     assert enforce_commit_msg(ctrl, message) == 0
+
+
+NEW_CHG = "CHG-SCPT-2026-347"
+NEW_REL = CHG_REL.replace(CHG, NEW_CHG)
+
+
+def _renumber(ctrl: Path, *, extra: str = "", status: str = "approved") -> None:
+    """The project's rule for a number clash: the later merge takes a new number -- the old file goes, the new one comes."""
+
+    _git(ctrl, "rm", "-q", CHG_REL)
+    text = _fixture_chg_content(CHG, PID, status).replace(CHG, NEW_CHG) + extra
+    (ctrl / NEW_REL).parent.mkdir(parents=True, exist_ok=True)
+    (ctrl / NEW_REL).write_text(text, encoding="utf-8")
+    _git(ctrl, "add", NEW_REL)
+
+
+def test_renumbering_after_a_number_clash_is_not_a_new_status(tmp_path: Path) -> None:
+    ctrl, message = _single_root(tmp_path, committed="approved")
+    _renumber(ctrl)
+    assert enforce_commit_msg(ctrl, message) == 0
+
+
+def test_a_renumbered_order_with_any_other_text_is_a_new_order_and_is_refused(tmp_path: Path) -> None:
+    ctrl, message = _single_root(tmp_path, committed="approved")
+    _renumber(ctrl, extra="\n批准人另加了一行\n")
+    assert enforce_commit_msg(ctrl, message) == 1
+
+
+def test_a_renumbered_order_that_also_changes_the_status_is_refused(tmp_path: Path) -> None:
+    ctrl, message = _single_root(tmp_path, committed="under_review")
+    _renumber(ctrl, status="approved")
+    assert enforce_commit_msg(ctrl, message) == 1
+
+
+def test_renumbering_a_real_transition_still_needs_nothing_but_adding_a_forged_order_is_refused(tmp_path: Path) -> None:
+    """Deleting an approved order does not hand its approval to a different order made up on the spot."""
+
+    ctrl, message = _single_root(tmp_path, committed="approved")
+    _git(ctrl, "rm", "-q", CHG_REL)
+    forged = _fixture_chg_content("CHG-SCPT-2026-999", PID, "approved")
+    (ctrl / NEW_REL).parent.mkdir(parents=True, exist_ok=True)
+    (ctrl / NEW_REL).write_text(forged, encoding="utf-8")
+    _git(ctrl, "add", NEW_REL)
+    assert enforce_commit_msg(ctrl, message) == 1
 
 
 def test_removing_the_status_row_and_leaving_only_the_approval_table_is_judged_by_the_status_it_reads_as(tmp_path: Path) -> None:
@@ -217,7 +254,7 @@ def test_an_old_committed_order_without_any_history_still_passes_with_a_warning(
     cand, ctrl, msg = _make_dual_root_fixture(tmp_path, chg_status="approved")
     assert not (ctrl / ".auto-pm").exists()
     assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0
-    assert "审批历史里没有这张单的记录" in capsys.readouterr().out
+    assert "流转记录里没有这张单" in capsys.readouterr().out
 
 
 def test_a_bound_order_staged_in_a_single_root_with_a_hand_written_status_is_refused(tmp_path: Path) -> None:
@@ -239,10 +276,10 @@ def test_the_database_is_opened_read_only_and_never_created(tmp_path: Path) -> N
     assert guard.last_recorded_status(tmp_path, CHG) is None
     assert not (tmp_path / ".auto-pm").exists()
     _record(tmp_path, "approved")
-    before = (tmp_path / ".auto-pm" / "index.db").read_bytes()
+    before = (tmp_path / ".auto-pm" / "status_journal.db").read_bytes()
     assert guard.last_recorded_status(tmp_path, CHG, PID) == "approved"
     assert guard.last_recorded_status(tmp_path, CHG, "SW-OTHER") is None  # another project's order of the same number
-    assert (tmp_path / ".auto-pm" / "index.db").read_bytes() == before
+    assert (tmp_path / ".auto-pm" / "status_journal.db").read_bytes() == before
 
 
 def test_the_newest_row_wins(tmp_path: Path) -> None:

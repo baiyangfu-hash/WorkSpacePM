@@ -215,9 +215,9 @@ def check_change_status_history(root: str) -> dict[str, Any]:
     to a staged edit, applied before the commit: a hand-written approved state shows up here at once.
     """
 
-    from auto_pm.infrastructure.change_status_guard import pending_status_problems
+    from auto_pm.application.core.change_status_check import pending_change_status_problems
 
-    problems = pending_status_problems(Path(root))
+    problems = pending_change_status_problems(root)
     if problems is None:
         return {"status": "info", "reasons": ["Git 读不出改动（不是仓库或还没有提交），没有核对变更单状态"]}
     return {"status": "fail" if problems else "ok", "reasons": problems}
@@ -376,16 +376,16 @@ def doctor_command(workspace: str | None) -> None:
 
     chg_status = res["change_status"]
     if chg_status["status"] == "fail":
-        table.add_row("变更单状态与审批历史", "[bold red]❌ FAIL[/bold red]", "；".join(chg_status["reasons"]))
+        table.add_row("变更单状态与流转记录", "[bold red]❌ FAIL[/bold red]", "；".join(chg_status["reasons"]))
     elif chg_status["status"] == "ok":
-        table.add_row("变更单状态与审批历史", "[green]✅ PASS[/green]", "工作区里新改的变更单批准态都有对应的流转记录")
+        table.add_row("变更单状态与流转记录", "[green]✅ PASS[/green]", "工作区里新改的变更单批准态都有对应的流转记录")
     else:
-        table.add_row("变更单状态与审批历史", "[yellow]⚠️ 未核对[/yellow]", "；".join(chg_status["reasons"]))
+        table.add_row("变更单状态与流转记录", "[yellow]⚠️ 未核对[/yellow]", "；".join(chg_status["reasons"]))
 
     console.print(table)
 
     if chg_status["status"] == "fail":
-        console.print("\n[bold red]变更单状态被手改过，没有审批历史作依据：把状态改回去，再用 `main.py change transition` 走流转。[/bold red]\n")
+        console.print("\n[bold red]变更单状态被手改过，没有流转记录作依据：把状态改回去，再用 `main.py change transition` 走流转。[/bold red]\n")
         raise SystemExit(1)
 
     if pointers["status"] == "fail":
