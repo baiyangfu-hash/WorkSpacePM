@@ -391,3 +391,9 @@ auto-pm 自身使用 CHG-*.md 变更单流程管理迭代（M4 Dogfooding 持续
 本项目遵循 [语义化版本](https://semver.org/)，使用 [Conventional Commits](https://www.conventionalcommits.org/) 自动生成变更日志。
 
 提交信息规范见工作空间 `.trae/rules/git-commit-message.md`。
+
+## 本文适用范围与读者
+
+- **适用范围**：本文档适用于本工作空间内 auto-pm 驾驶舱工具（项目 SW-2026-008）的源码仓库与本机部署运行，覆盖安装、CLI、GUI 驾驶舱与变更单治理流程。
+- **读者**：使用本驾驶舱管理 PLC/Python 项目的开发者与执行代理；读者应先经工作空间根 `main.py` 与 `cockpit-entry` 技能进门，具备 Python 命令行基础。
+- **不适用范围**：PLC 项目具体工艺逻辑与电气设计不在本文范围，见对应项目文档与 `00_Obsidian_Base全局规范文件仓库` 规范库。
