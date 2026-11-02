@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
@@ -28,6 +27,7 @@ from auto_pm.contracts.acceptance_command import (
     with_git_quotepath,
 )
 from auto_pm.contracts.plan_checklist import AcceptanceCheck
+from auto_pm.infrastructure.executable_lookup import find_on_path
 
 __all__ = [
     "CONTROL_ROOT_ENV",
@@ -156,7 +156,9 @@ def _resolve_executable(name: str, cwd: Path, env: Mapping[str, str]) -> str | N
         candidate = Path(name)
         path = candidate if candidate.is_absolute() else cwd / candidate
         return str(path) if path.exists() else None
-    return shutil.which(name, path=env.get("PATH"))
+    # Not shutil.which: on Windows it searches the working directory first (here the control root) and trusts relative PATH
+    # entries, so a file planted in the repository could answer for ``git`` or ``python``.
+    return find_on_path(name, path=env.get("PATH"), cwd=str(cwd))
 
 
 def refusal_reason(command: str, *, cwd: str | Path, env: Mapping[str, str] | None = None) -> str:
