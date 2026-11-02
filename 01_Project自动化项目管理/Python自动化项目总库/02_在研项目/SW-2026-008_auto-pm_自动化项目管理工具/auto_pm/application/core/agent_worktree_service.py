@@ -55,6 +55,9 @@ STALE_DAYS = 3
 # Directories ``sweep`` never lists as removable, whatever Git says (the user's call, 11-02): the open PR #470 station,
 # the 1.2 GB trial copy and the Trae station.  Removing one is a manual ``git worktree remove`` by the user.
 RESERVED_STATIONS = frozenset({"m3-pr-chg470", "gui-trial", "trae"})
+# Ignored entries that are only regenerable tool caches do not hold a directory back (coordinator ruling 11-02);
+# any other ignored file still does.  ``__pycache__`` counts only for its ``*.pyc`` files.
+CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 RunStateLookup = Callable[[str], str | None]
@@ -106,7 +109,7 @@ class Station:
     head: str = ""
     locked: bool = False
     dirty_paths: tuple[str, ...] = ()
-    ignored_paths: tuple[str, ...] = ()  # untracked files .gitignore hides (collapsed to directories)
+    ignored_paths: tuple[str, ...] = ()  # ignored untracked files other than tool caches, collapsed to top-level names
     unpushed: int = 0
     merged: bool = False
     untouched: bool = False
@@ -499,7 +502,7 @@ class AgentWorktreeService:
         if station.ignored_paths:
             shown = "、".join(station.ignored_paths[:3])
             more = "等" if len(station.ignored_paths) > 3 else ""
-            return f"有被 .gitignore 忽略的文件 {len(station.ignored_paths)} 项（{shown}{more}），删了就丢；人工看过再处理"
+            return f"有被 .gitignore 忽略的文件 {len(station.ignored_paths)} 项（{shown}{more}；纯缓存不算），删了就丢；人工看过再处理"
         if station.untouched and not station.stale:
             return "还没有自己的提交，也不到 3 天，可能是刚手工建的；保留"
         return ""
@@ -672,12 +675,19 @@ class AgentWorktreeService:
                 sorted(entry[3:] for entry in status.stdout.split("\0") if len(entry) > 3)
             )
             hidden = self._git(
-                "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory", "-z",
-                cwd=path,
+                "ls-files", "--others", "--ignored", "--exclude-standard", "-z", cwd=path
             )
             if hidden.returncode != 0:
                 raise AgentWorktreeError(f"读不到工位里被忽略的文件 {path}：{_detail(hidden)}")
-            ignored = tuple(sorted(name for name in hidden.stdout.split("\0") if name))
+            ignored = tuple(
+                sorted(
+                    {
+                        entry.split("/", 1)[0] + ("/" if "/" in entry else "")
+                        for entry in hidden.stdout.split("\0")
+                        if entry and not _is_tool_cache(entry)
+                    }
+                )
+            )
             unpushed = int(self._out("rev-list", "--count", head, "--not", "--remotes") or "0")
             merged = self._is_ancestor(head, MAIN_REF)
             untouched = bool(branch) and self._created_at(branch) == head
@@ -853,6 +863,16 @@ def _idle_seconds(path: Path) -> int | None:
     if not stamps:
         return None
     return max(0, int(time.time() - max(stamps)))
+
+
+def _is_tool_cache(entry: str) -> bool:
+    """Whether an ignored file (path relative to the work tree, ``/``-separated) is only a regenerable tool cache."""
+
+    *folders, name = entry.split("/")
+    return any(
+        folder in CACHE_DIRS and (folder != "__pycache__" or name.endswith(".pyc"))
+        for folder in folders
+    )
 
 
 def _kind(name: str) -> str:

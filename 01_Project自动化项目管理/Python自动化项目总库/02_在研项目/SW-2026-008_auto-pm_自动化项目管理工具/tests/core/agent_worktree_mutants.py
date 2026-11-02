@@ -125,6 +125,21 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "        if False:\n            shown",
     ),
     (
+        "缓存目录也算被忽略的文件",
+        "if entry and not _is_tool_cache(entry)",
+        "if entry",
+    ),
+    (
+        "__pycache__ 里的非 pyc 文件也当缓存",
+        'folder in CACHE_DIRS and (folder != "__pycache__" or name.endswith(".pyc"))',
+        "folder in CACHE_DIRS",
+    ),
+    (
+        "任何目录里的文件都当缓存",
+        'folder in CACHE_DIRS and (folder != "__pycache__" or name.endswith(".pyc"))',
+        "True",
+    ),
+    (
         "删前复查不看被忽略的文件和闲置",
         '        if fresh.kind == "other":\n            hold = self._other_hold(fresh)',
         '        if False:\n            hold = self._other_hold(fresh)',

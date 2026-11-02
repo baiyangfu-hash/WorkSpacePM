@@ -1147,6 +1147,75 @@ def test_an_other_directory_holding_ignored_files_is_kept_and_says_how_many(lab:
     assert "目录干净" not in reason
 
 
+def _make_caches(path: Path) -> None:
+    (path / "pkg" / "__pycache__").mkdir(parents=True)
+    (path / "pkg" / "__pycache__" / "mod.cpython-312.pyc").write_bytes(b"\0")
+    (path / ".pytest_cache" / "v").mkdir(parents=True)
+    (path / ".pytest_cache" / "v" / "lastfailed").write_text("{}", encoding="utf-8")
+
+
+def _ignore_caches_and_logs(lab: Lab) -> None:
+    exclude = lab.root / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(exist_ok=True)
+    exclude.write_text("__pycache__/\n.pytest_cache/\n*.log\n", encoding="utf-8")
+
+
+def test_an_other_directory_with_only_tool_caches_is_removable(lab: Lab) -> None:
+    _ignore_caches_and_logs(lab)
+    cached = other_station(lab, "m3-pr-o")
+    _make_caches(cached)
+
+    preview = lab.service().sweep()
+    applied = lab.service().sweep(apply=True)
+
+    assert {item.target for item in preview.items if item.remove} == {str(cached)}
+    assert applied.done == [str(cached)] and not cached.exists()
+
+
+def test_tool_caches_next_to_another_ignored_file_still_hold_the_directory(lab: Lab) -> None:
+    _ignore_caches_and_logs(lab)
+    held = other_station(lab, "m3-pr-p")
+    _make_caches(held)
+    (held / "run.log").write_text("keep me\n", encoding="utf-8")
+
+    report = lab.service().sweep(apply=True)
+
+    reason = _reasons(report)[str(held)]
+    assert held.exists() and (held / "run.log").exists()
+    assert "忽略的文件 1 项" in reason and "run.log" in reason
+    assert "__pycache__" not in reason and ".pytest_cache" not in reason
+
+
+def test_a_non_pyc_file_inside_pycache_is_not_a_cache(lab: Lab) -> None:
+    _ignore_caches_and_logs(lab)
+    held = other_station(lab, "m3-pr-q")
+    (held / "__pycache__").mkdir()
+    (held / "__pycache__" / "notes.txt").write_text("mine\n", encoding="utf-8")
+
+    report = lab.service().sweep(apply=True)
+
+    assert held.exists() and "__pycache__/" in _reasons(report)[str(held)]
+
+
+def test_a_cache_that_appears_after_listing_does_not_stop_the_removal(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _ignore_caches_and_logs(lab)
+    done = other_station(lab, "m3-pr-r")
+    original = AgentWorktreeService._sweep_other
+
+    def list_then_run_tests(self: AgentWorktreeService, station: Station, agent: str | None) -> Any:
+        item = original(self, station, agent)
+        _make_caches(done)
+        return item
+
+    monkeypatch.setattr(AgentWorktreeService, "_sweep_other", list_then_run_tests)
+
+    report = lab.service().sweep(apply=True)
+
+    assert report.done == [str(done)] and not done.exists()
+
+
 def test_an_ignored_file_that_appears_after_listing_stops_the_removal(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1278,7 +1347,7 @@ def test_a_failing_ignored_files_scan_stops_the_sweep(lab: Lab, monkeypatch: pyt
     def failing(self: AgentWorktreeService, *args: str, **kwargs: Any) -> Any:
         result = original(self, *args, **kwargs)
         if args and args[0] == "ls-files":
-            result.returncode = 128  # type: ignore[misc]
+            result.returncode = 128
             result.stdout = ""
         return result
 
