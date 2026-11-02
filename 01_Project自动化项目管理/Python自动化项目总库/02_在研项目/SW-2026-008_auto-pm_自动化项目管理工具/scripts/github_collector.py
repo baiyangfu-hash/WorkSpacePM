@@ -170,6 +170,8 @@ class Snapshot:
     reset_at: datetime | None = None
     authenticated: bool = False
     token_rejected: bool = False  # 这一轮带的令牌被 GitHub 拒了（401），已改用游客读；调用方该丢掉这个令牌
+    login_refused: bool = False  # 本机登录连续被拒到上限，已不再问 gh、按游客读（由窗口设置，重启后重试）
+    env_token_problem: str = ""  # 环境变量里的令牌形状不对，已忽略；这里写原因（不含令牌本身）
 
     @property
     def fresh(self) -> bool:
@@ -583,6 +585,17 @@ def read_token(env: Mapping[str, str]) -> str:
     return next((env[name].strip() for name in TOKEN_ENV if env.get(name, "").strip()), "")
 
 
+def env_token(env: Mapping[str, str]) -> tuple[str, str]:
+    """环境变量里的令牌：（可用的令牌，被忽略的原因）。形状不对就忽略并写明原因，原因里不带令牌本身。"""
+    name = next((n for n in TOKEN_ENV if env.get(n, "").strip()), "")
+    if not name:
+        return "", ""
+    value = env[name].strip()
+    if valid_token(value):
+        return value, ""
+    return "", f"环境变量 {name} 里的令牌格式不对（不像 GitHub 令牌），已忽略；检查是否多复制了空格、引号或换行"
+
+
 # ---------------------------------------------------------------- 缓存
 
 
@@ -648,15 +661,17 @@ def save_cache(path: Path, etags: dict[str, list[Any]], snapshot: Snapshot) -> N
 def _fallback(
     repo: str, state: str, now: datetime, cached: Snapshot | None, audits: list[Audit], error: str,
     reset_at: datetime | None = None, authenticated: bool = False, token_rejected: bool = False,
+    env_problem: str = "",
 ) -> Snapshot:
     """读不到：带上缓存里的旧数据（标 from_cache），没有缓存就空着。画面按未知显示。"""
     if cached is None:
-        return Snapshot(repo, state, now, None, False, [], [], audits, [error], reset_at, authenticated, token_rejected)
+        return Snapshot(repo, state, now, None, False, [], [], audits, [error], reset_at, authenticated, token_rejected,
+                        env_token_problem=env_problem)
     for pull in cached.pulls:
         pull.audit = audit_for(pull, audits)
         pull.audit_stale = bool(pull.audit and pull.audit.head and not pull.head_sha.startswith(pull.audit.head))
     return Snapshot(repo, state, now, cached.fetched_at, True, cached.pulls, cached.main_ci, audits, [error],
-                    reset_at, authenticated, token_rejected)
+                    reset_at, authenticated, token_rejected, env_token_problem=env_problem)
 
 
 def _describe(error: Exception) -> tuple[str, str, datetime | None]:
@@ -697,10 +712,11 @@ def collect(
     etags, cached = load_cache(cache_path) if cache_path else ({}, None)
     if cached is not None and cached.repo != repo:
         etags, cached = {}, None
+    env_value, env_problem = env_token(env)  # 环境变量里的令牌先验形状：不合格就当没有，并把原因带到页面上
     if offline:
         return _fallback(repo, "offline", now, cached, audits, "按离线处理，没去读 GitHub",
-                         authenticated=bool(token if token is not None else read_token(env)))
-    token = token if token is not None else read_token(env)
+                         authenticated=bool(token if token is not None else env_value), env_problem=env_problem)
+    token = token if token is not None else env_value
     api = Api(fetch or urllib_fetch, token, etags)
     workflows = read_workflows(repo_root)
     rejected = False
@@ -715,7 +731,7 @@ def collect(
             raw_pulls = _read_pulls(api, repo)
     except (OfflineError, RateLimitedError, AuthFailedError, ApiError) as error:
         state, text, reset = _describe(error)
-        return _fallback(repo, state, now, cached, audits, text, reset, bool(token), rejected)
+        return _fallback(repo, state, now, cached, audits, text, reset, bool(token), rejected, env_problem)
 
     errors: list[str] = ["登录凭据被 GitHub 拒绝，这一轮改用游客读（每小时 60 次）"] if rejected else []
     stopped: str = ""  # 半路限流后不再发请求
@@ -782,7 +798,7 @@ def collect(
 
     state = "partial" if errors else "ok"
     snapshot = Snapshot(repo, state, now, now, False, sorted(pulls, key=lambda p: p.number), main_ci, audits,
-                        errors, None, bool(token), rejected)
+                        errors, None, bool(token), rejected, env_token_problem=env_problem)
     if cache_path is not None:
         try:
             save_cache(cache_path, api.etags, snapshot)

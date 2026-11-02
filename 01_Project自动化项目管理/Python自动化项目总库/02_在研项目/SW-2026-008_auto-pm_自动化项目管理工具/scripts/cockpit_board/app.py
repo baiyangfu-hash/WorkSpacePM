@@ -113,7 +113,7 @@ def load_github(options: argparse.Namespace) -> gh.Snapshot | None:
     # 离线（--no-net）不去问 gh；令牌不放进 options 里（options 的 repr 会被打进崩溃报告）。
     cache = getattr(options, "github_token_cache", None)
     token: str | None = None
-    if cache is not None and not options.no_net and not gh.read_token(os.environ):
+    if cache is not None and not options.no_net and not gh.env_token(os.environ)[0]:
         token = cache.get()
     snapshot = gh.collect(
         options.github_repo, options.root, options.reviews_dirs, options.github_cache,
@@ -122,6 +122,8 @@ def load_github(options: argparse.Namespace) -> gh.Snapshot | None:
     )
     if cache is not None and token:
         cache.rejected() if snapshot.token_rejected else cache.accepted()
+    if cache is not None and token is not None and cache.refused:
+        snapshot.login_refused = True  # 页面上写“登录被拒，暂用游客读取，重启后重试”
     return snapshot
 
 

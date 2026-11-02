@@ -17,7 +17,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -76,10 +75,40 @@ def quiet() -> dict[str, Any]:
 GH_TOKEN_TIMEOUT = 5
 
 
-def resolve_github_token(runner: Callable[..., Any] = subprocess.run, which: Callable[[str], str | None] = shutil.which) -> str:
+def find_on_path(
+    name: str, *, path: str | None = None, windows: bool | None = None, cwd: str | None = None,
+    is_file: Callable[[str], bool] | None = None,
+) -> str | None:
+    """在 PATH 里找可执行文件，只认 PATH 里写成绝对路径的目录；当前目录和相对目录一律跳过。
+
+    不用 ``shutil.which``：它在 Windows 上默认先搜当前目录（Linux 上遇到 PATH 里的空项也当当前目录），
+    仓库根里有人放了 ``gh.exe`` 就会被当成 gh 执行。这里自己逐项查：
+    - PATH 里的空项、``.``、任何相对路径、以及恰好等于当前目录的项，都跳过；
+    - Windows 只认 ``<name>.exe``（不认 .bat/.cmd/.com，那些会被命令解释器再解释一遍）；别的系统认带执行权限的 ``<name>``。
+    参数只给测试替换：``windows`` / ``cwd`` / ``path`` / ``is_file``。
+    """
+
+    is_windows = os.name == "nt" if windows is None else windows
+    raw_path = os.environ.get("PATH", "") if path is None else path
+    here = os.path.normcase(os.path.realpath(os.getcwd() if cwd is None else cwd))
+    exists = is_file or (lambda p: os.path.isfile(p) and (is_windows or os.access(p, os.X_OK)))
+    file_name = f"{name}.exe" if is_windows else name
+    for entry in raw_path.split(";" if is_windows else ":"):
+        entry = entry.strip().strip('"')
+        if not entry or not os.path.isabs(entry):
+            continue
+        if os.path.normcase(os.path.realpath(entry)) == here:
+            continue
+        candidate = os.path.join(entry, file_name)
+        if exists(candidate):
+            return candidate
+    return None
+
+
+def resolve_github_token(runner: Callable[..., Any] = subprocess.run, which: Callable[[str], str | None] = find_on_path) -> str:
     """向本机已登录的 GitHub CLI 要令牌；要不到返回空串（按游客读），绝不抛、绝不弹登录框。
 
-    - 只用 ``gh``：用 ``shutil.which`` 解析出绝对路径再执行（不让当前目录里的同名程序顶替）；命令固定
+    - 只用 ``gh``：用 ``find_on_path`` 在 PATH 的绝对目录里找出绝对路径再执行（跳过当前目录，不让仓库里的同名程序顶替）；命令固定
       ``gh auth token --hostname github.com``；工作目录固定为主目录（没有就用临时目录），不是仓库里。
     - 不走 ``run_cli``：令牌不能进回执。输出只在这个函数里取出、校验形状（``github_collector.valid_token``），
       不符合形状（报错文字、空白、带换行的东西）一律当没有。令牌不写日志，异常文字里也不带。
@@ -120,6 +149,12 @@ class GithubTokenCache:
 
     def __repr__(self) -> str:
         return f"GithubTokenCache(resolved={self._token is not None}, rejections={self._rejections})"
+
+    @property
+    def refused(self) -> bool:
+        """连续被拒已到上限：不再问 gh，按游客读，重启后重试。"""
+        with self._lock:
+            return self._rejections >= self.MAX_REJECTIONS
 
     def get(self) -> str:
         with self._lock:
