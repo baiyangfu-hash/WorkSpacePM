@@ -185,6 +185,20 @@ def test_uncaptured_git_keeps_its_terminal_output(tmp_path: Path, monkeypatch: p
     assert "creationflags" not in seen[0]
 
 
+@pytest.mark.parametrize("redirect", [{"stdin": subprocess.DEVNULL}, {"stderr": subprocess.PIPE}, {"stderr": subprocess.DEVNULL}])
+def test_only_stdin_or_stderr_redirected_still_keeps_stdout_on_the_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, redirect: dict[str, int]
+) -> None:
+    """只重定向 stdin 或 stderr 的 git 不加标志：标志会让没接走的 stdout 掉进隐藏控制台，输出丢了。
+
+    （全库 35 处调用点都带 capture_output/stdout，所以现在没人走到这一支；这条钉住判断依据，不让谁顺手放宽。）
+    """
+    monkeypatch.setattr(git_timeout, "no_window_flag", lambda: CREATE_NO_WINDOW)
+    seen = _spy_run(monkeypatch)
+    run_git_bounded(["git", "gc"], default_timeout=30.0, error_cls=_BoomError, where=tmp_path, **redirect)
+    assert "creationflags" not in seen[0]
+
+
 def test_other_systems_pass_kwargs_through_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(git_timeout, "no_window_flag", lambda: 0)
     seen = _spy_run(monkeypatch)
