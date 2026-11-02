@@ -1,0 +1,25 @@
+# FB_1001_Station1 接口设计说明书
+
+> **项目编号**: {{ project_id }}  
+> **功能块**: `FB_1001_Station1`  
+> **模块名称**: 工位1 动作机构控制  
+> **版本号**: {{ version }}  
+> **编制人**: {{ author }}  
+> **更新日期**: {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }}  
+> **规范依据**: DEV-001 / LSP-905 / LSP-907  
+
+---
+
+## 1. 功能块概述
+
+`FB_1001_Station1` 负责 {{ project_name }} 工位1 进料、定位、夹紧顶升、加工延时与出料输送控制。
+
+---
+
+## 2. 接口参数定义 (VAR_IN_OUT)
+
+| 参数名 | 数据类型 | 描述 |
+| :--- | :--- | :--- |
+| `io_stStation` | ST_Station1 | 工位1 全局交互结构体 (整块传递) |
+
+结构体 `ST_Station1` 的字段不在本文档展开，统一在 `PLC变量定义文档_VAR.md` 的“ST_Station1”小节维护（接口字段只在一处维护，`plc docs check` 会核对）。

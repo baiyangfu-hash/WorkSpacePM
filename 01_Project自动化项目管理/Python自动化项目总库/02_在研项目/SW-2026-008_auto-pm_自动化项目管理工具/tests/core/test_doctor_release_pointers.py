@@ -118,3 +118,148 @@ def test_the_doctor_command_exits_nonzero_when_the_pointers_lag(repo: Path, monk
     lagging = CliRunner().invoke(doctor_command, ["-w", str(repo)])
     assert lagging.exit_code == 1, lagging.output
     assert "发布指针落后" in lagging.output
+
+
+# --- the release PR: a branch that itself moves the pointers is compared with its own commit, not with main -------------------
+
+NEW = "1.3.5-ccccccc"
+
+
+def _commit(root: Path, message: str) -> None:
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", message)
+
+
+def _mark_main(root: Path) -> None:
+    """Pretend the commit now checked out is origin/main (a bare remote is not needed: only the ref is read)."""
+
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+
+@pytest.fixture
+def pr_repo(repo: Path) -> Path:
+    """``repo`` is main; the checkout moves to a PR branch off it."""
+
+    _mark_main(repo)
+    _git(repo, "checkout", "-q", "-b", "pr")
+    return repo
+
+
+def test_a_release_pr_that_moves_the_pointers_is_compared_with_its_own_head(pr_repo: Path) -> None:
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])
+    _commit(pr_repo, "release pointers + manifest entry")
+    result = check_release_pointers(str(pr_repo))
+    assert result["status"] == "ok" and result["reasons"] == [], result
+    assert result["ref"] == "HEAD" and result["pr_head"] is True
+
+
+def test_the_same_release_is_red_against_main_when_the_branch_changes_no_pointer(pr_repo: Path) -> None:
+    """Without the pointer change in the branch the old rule stands: a machine ahead of main stays red."""
+
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])  # not committed: the machine is ahead, the branch did nothing
+    result = check_release_pointers(str(pr_repo))
+    assert result["status"] == "fail" and result["ref"] == "origin/main" and result["pr_head"] is False
+    assert "发版后的指针还没入库" in "；".join(result["reasons"])
+
+
+def test_pointers_moved_by_the_pr_but_not_listed_in_the_manifest_stay_red(pr_repo: Path) -> None:
+    """The mutation: tamper with the pointers and leave the manifest alone -- the PR rule must not wave it through."""
+
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE])  # NEW is deployed and committed, but the manifest does not list it
+    _commit(pr_repo, "pointers without a manifest entry")
+    result = check_release_pointers(str(pr_repo))
+    assert result["status"] == "fail" and result["pr_head"] is True
+    assert any("deployment_manifest.json" in reason and NEW in reason for reason in result["reasons"]), result
+
+
+def test_a_machine_ahead_of_the_pr_head_stays_red(pr_repo: Path) -> None:
+    """The PR moved the pointers, but this machine deploys something newer that no commit carries."""
+
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])
+    _commit(pr_repo, "release pointers + manifest entry")
+    _write(pr_repo, "1.3.6-ddddddd", NEW, [PREVIOUS, ACTIVE, NEW])
+    result = check_release_pointers(str(pr_repo))
+    assert result["status"] == "fail" and result["pr_head"] is True
+    assert "发版后的指针还没入库" in "；".join(result["reasons"])
+
+
+def test_a_branch_that_is_only_behind_a_main_that_moved_the_pointers_is_not_a_release_pr(pr_repo: Path) -> None:
+    """Three dots: main moved the pointers after this branch left it; the branch itself changed none, so the old rule applies."""
+
+    (pr_repo / "other.txt").write_text("work", encoding="utf-8")
+    _commit(pr_repo, "unrelated work on the branch")
+    _git(pr_repo, "checkout", "-q", "-b", "main-moves-on", "HEAD~1")
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])
+    _commit(pr_repo, "main ships a release")
+    _mark_main(pr_repo)
+    _git(pr_repo, "checkout", "-q", "pr")
+    result = check_release_pointers(str(pr_repo))
+    assert result["status"] == "fail" and result["ref"] == "origin/main" and result["pr_head"] is False, result
+
+
+def test_an_explicit_ref_is_never_overridden_by_the_pr_rule(pr_repo: Path) -> None:
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])
+    _commit(pr_repo, "release pointers + manifest entry")
+    result = check_release_pointers(str(pr_repo), ref="origin/main")
+    assert result["status"] == "fail" and result["ref"] == "origin/main" and result["pr_head"] is False
+
+
+def test_when_git_cannot_say_what_the_branch_changed_the_strict_rule_stays(pr_repo: Path) -> None:
+    """A real repository where ``git diff origin/main...HEAD`` fails: an orphan branch with no common ancestor.
+
+    The orphan moves the pointers and lists the release, so if a Git failure were read as "the branch changed the pointers" the
+    check would go green.  It must stay on the strict comparison with main instead.
+    """
+
+    _git(pr_repo, "checkout", "-q", "--orphan", "orphan")
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])
+    _commit(pr_repo, "unrelated history that moves the pointers")
+    result = check_release_pointers(str(pr_repo))
+    assert result["status"] == "fail" and result["ref"] == "origin/main" and result["pr_head"] is False, result
+
+
+def test_a_release_pr_must_name_the_release_it_replaced_as_previous(pr_repo: Path) -> None:
+    """Self-consistency is not exemption: the active pointer moved from ACTIVE to NEW, so previous has to say ACTIVE."""
+
+    _write(pr_repo, NEW, PREVIOUS, [PREVIOUS, ACTIVE, NEW])  # previous left at the version before ACTIVE
+    _commit(pr_repo, "pointers where previous skips a release")
+    result = check_release_pointers(str(pr_repo))
+    assert result["status"] == "fail" and result["pr_head"] is True
+    assert any("previous_release.json" in reason and ACTIVE in reason for reason in result["reasons"]), result
+
+
+def test_a_pr_that_only_adds_a_manifest_entry_does_not_need_a_previous_change(pr_repo: Path) -> None:
+    """The active pointer did not move, so the previous rule has nothing to say; the machine still matches its own head."""
+
+    _write(pr_repo, ACTIVE, PREVIOUS, [PREVIOUS, ACTIVE, NEW])
+    _commit(pr_repo, "manifest entry only")
+    result = check_release_pointers(str(pr_repo))
+    assert result["status"] == "ok" and result["pr_head"] is True, result
+
+
+def _tree(root: Path, release: str) -> None:
+    folder = root / POINTER_DIR / "releases" / release
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "release_meta.json").write_text(json.dumps({"release_id": release}), encoding="utf-8")
+
+
+def test_the_payload_tree_check_still_runs_for_a_release_pr(pr_repo: Path) -> None:
+    """The other half of 'not exempt': the cross-check of manifest and payload folders is not touched by the PR rule.
+
+    The new release is in the manifest but its folder is missing -> the consistency check is red; with the folder it is not.
+    """
+
+    from auto_pm.application.core.release_consistency import check_release_consistency
+
+    for release in (PREVIOUS, ACTIVE):
+        _tree(pr_repo, release)
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])
+    _commit(pr_repo, "release pointers + manifest entry, payload folder forgotten")
+    assert check_release_pointers(str(pr_repo))["status"] == "ok"  # the pointer check alone cannot see the folder
+    missing = check_release_consistency(str(pr_repo))
+    assert missing["status"] == "fail"
+    assert any(NEW in failure and "目录" in failure for failure in missing["failures"]), missing
+
+    _tree(pr_repo, NEW)
+    # (the bare fixture manifest has no source_commit, so other lines stay red; only the folder lines must be gone)
+    assert not any("目录" in failure for failure in check_release_consistency(str(pr_repo))["failures"])
