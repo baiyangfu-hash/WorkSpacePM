@@ -178,3 +178,54 @@ def test_station_vm_greys_push_buttons_with_the_specific_reason(tmp_path: Path) 
     assert all(r == "离线：读不到 origin" for r in reasons(plain))
     online = vm.station_vm(board, cards, True, identity, "manual/x", [], False, "在线")
     assert all("离线" not in r for r in reasons(online))
+
+
+# ---------------------------------------------------------------- 抹掉网址里的账号口令（审计 545）
+
+
+def _leaks(text: str, secret: str, size: int = 8) -> bool:
+    return any(secret[i:i + size] in text for i in range(len(secret) - size + 1))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:ghp_ABCDEFGH12345678@host.example/x.git",
+        "https://user:p@ss@host.example/x.git",  # 口令里有原样的 @
+        "https://user:p@ss:w@rd@host.example/x.git",
+        "https://TOKENONLY12345678@host.example/x.git",
+        "ssh://git:tok1234567@host.example:22/x.git",
+    ],
+)
+def test_credentials_in_urls_are_masked_up_to_the_last_at_sign(url: str) -> None:
+    masked = actions._scrub(f"fatal: unable to access '{url}': boom")
+    assert "***@host.example" in masked
+    for secret in ("ghp_ABCDEFGH12345678", "ss@host", "p@ss", "ss:w", "rd@", "TOKENONLY12345678", "tok1234567"):
+        assert secret not in masked, (url, masked)
+
+
+def test_urls_without_credentials_and_plain_at_signs_are_left_alone() -> None:
+    text = "fatal: unable to access 'https://github.com/x/y.git/': mail me at a@b.example about https://host/path@x"
+    assert actions._scrub(text) == text  # 没有 :// 后紧跟 user@ 的，原样不动
+    assert actions._scrub("https://github.com/x/y.git") == "https://github.com/x/y.git"
+
+
+def test_masking_happens_before_truncating_to_80_characters(tmp_path: Path) -> None:
+    """令牌正好跨在第 80 个字之前：先截再抹会把令牌前半截留在页面上；必须先抹再截。"""
+    secret = "ghp_" + "Zq8WxVn3Lk5Tm9RbHd2Fs7Yc4Jp6Ga1E"
+    head = "fatal: odd failure at '" + "https://bob:"  # 用不会被归进已知类别的措辞，才会走到“其他”
+    prefix = head.replace("fatal: ", "fatal: " + "z" * (70 - len(head)), 1)  # 补字，让网址头正好占满前 70 个字
+    assert len(prefix) == 70
+    line = prefix + secret + "@example.com/some/long/path/x.git/': boom"
+    assert len(prefix) < 80 < len(prefix + secret)  # 第 80 个字落在令牌中间：先截后抹就会漏出令牌前半截
+    probe = actions.probe_origin(tmp_path, runner=Runner(128, line + "\nsecond line\n"))
+    assert probe.kind == "other" and not _leaks(probe.text, secret) and not _leaks(probe.detail, secret)
+    assert "***@" in probe.text or "***" in probe.detail
+    err = actions.probe_origin(tmp_path, runner=Runner(error=OSError(line)))
+    assert not _leaks(err.text, secret) and not _leaks(err.detail, secret)
+
+
+def test_repository_not_found_text_also_says_it_may_be_a_permission_problem() -> None:
+    """GitHub 对没有访问权限的私有库也回 Repository not found，所以不能只说“地址不对”。"""
+    text = actions.PROBE_TEXT["bad_url"]
+    assert "地址不对" in text and "仓库不存在" in text and "没有访问权限" in text

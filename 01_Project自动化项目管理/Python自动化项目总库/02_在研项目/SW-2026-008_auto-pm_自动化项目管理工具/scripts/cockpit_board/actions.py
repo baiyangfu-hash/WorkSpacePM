@@ -77,7 +77,7 @@ class OriginProbe:
     """对 origin 跑一次 ``git ls-remote`` 的结论：只有 ``online`` 算在线，其余各写明是哪一种读不到。
 
     kind：online 在线；timeout 超时；network 网络不通（域名解析、连接被拒、证书等）；auth 认证失败；
-    bad_url origin 地址不对或仓库不存在；no_origin 这个仓库没配 origin；empty 连上了但没有 HEAD；
+    bad_url origin 地址不对、仓库不存在或没有访问权限；no_origin 这个仓库没配 origin；empty 连上了但没有 HEAD；
     no_git 本机找不到 git；other 其他失败（detail 带 git 的第一行报错，已抹掉网址里的账号口令）。
     """
 
@@ -100,7 +100,7 @@ PROBE_TEXT = {
     "timeout": f"离线：连 origin 超过 {PROBE_TIMEOUT} 秒没回应（超时）",
     "network": "离线：连不上 origin（网络不通、域名解析失败或连接被拒）",
     "auth": "连上了，但 origin 拒绝登录（认证失败）：运行 gh auth login，或检查凭据后点“重新读取”",
-    "bad_url": "origin 的地址不对，或仓库不存在：用 git remote -v 核对",
+    "bad_url": "origin 地址不对、仓库不存在或没有访问权限：用 git remote -v 核对（私有库没登录时 GitHub 也这么回）",
     "no_origin": "这个仓库没有配置 origin：用 git remote -v 核对",
     "empty": "连上了 origin，但读不到 HEAD（空仓库？）",
     "no_git": "本机找不到 git 程序",
@@ -119,7 +119,7 @@ _PROBE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
                  "network is unreachable", "connection reset", "ssl certificate", "ssl connect", "ssl_error", "schannel", "gnutls",
                  "openssl", "tlsv1", "tls handshake", "proxy", "no route to host", "unable to access")),
 )
-_URL_CREDENTIALS = re.compile(r"(://)[^/@\s]+@")
+_URL_CREDENTIALS = re.compile(r"(://)[^/\s]*@")  # 吃到第一个 / 之前的最后一个 @：口令里有原样的 @ 也整段抹掉
 
 
 def _scrub(text: str) -> str:
