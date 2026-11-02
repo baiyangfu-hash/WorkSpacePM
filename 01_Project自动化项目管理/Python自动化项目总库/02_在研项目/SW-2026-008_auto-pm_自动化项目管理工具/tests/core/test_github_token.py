@@ -39,7 +39,7 @@ from cockpit_board import viewmodel as vm  # noqa: E402
 
 SENTINEL = "gho_" + "SentinelTokenDoNotLeak0123456789abcdef"[:36]
 OTHER = "gho_" + "AnotherSentinelToken0123456789abcdef"[:36]
-GH_EXE = "/usr/local/bin/gh"
+GH_EXE = str(Path(tempfile.gettempdir()) / "bin" / "gh")  # 任何系统上都是绝对路径（Windows 上 /usr/... 不算绝对）
 API = base.API
 REPO = base.REPO
 
