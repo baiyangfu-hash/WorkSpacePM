@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -42,7 +43,7 @@ def test_windows_skips_the_current_directory_relative_entries_and_empty_entries(
 def test_windows_accepts_only_exe_unless_the_caller_asks_for_more(tmp_path: Path) -> None:
     for suffix in (".bat", ".cmd", ".com", ".ps1", ""):
         _touch(tmp_path / "bin" / f"gh{suffix}")
-    where = {"path": str(tmp_path / "bin"), "windows": True, "cwd": str(tmp_path / "elsewhere")}
+    where: dict[str, Any] = {"path": str(tmp_path / "bin"), "windows": True, "cwd": str(tmp_path / "elsewhere")}
     assert find_on_path("gh", **where) is None
     assert find_on_path("gh", extensions=(".exe", ".cmd"), **where) == str(tmp_path / "bin" / "gh.cmd")
     _touch(tmp_path / "bin" / "gh.exe")
@@ -51,7 +52,7 @@ def test_windows_accepts_only_exe_unless_the_caller_asks_for_more(tmp_path: Path
 
 def test_windows_takes_a_name_that_already_carries_an_allowed_extension_as_it_is(tmp_path: Path) -> None:
     _touch(tmp_path / "bin" / "git.exe")
-    where = {"path": str(tmp_path / "bin"), "windows": True, "cwd": str(tmp_path / "elsewhere")}
+    where: dict[str, Any] = {"path": str(tmp_path / "bin"), "windows": True, "cwd": str(tmp_path / "elsewhere")}
     assert find_on_path("git.exe", **where) == str(tmp_path / "bin" / "git.exe")
     assert find_on_path("git.cmd", **where) is None
 
