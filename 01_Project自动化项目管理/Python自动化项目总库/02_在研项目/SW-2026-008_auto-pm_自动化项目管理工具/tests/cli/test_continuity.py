@@ -411,7 +411,14 @@ def _dispatch_ready(root: Path) -> None:
     )
 
 
-def _settlement_ready(root: Path) -> None:
+def _settlement_ready(
+    root: Path,
+    *,
+    start_recovery_run: bool = True,
+    action: RuntimeDecisionAction = RuntimeDecisionAction.SETTLE_EXPIRED_RUN,
+    target: str = "expired",
+) -> None:
+    """``target``: the historical target is an \"expired\" RUNNING Run, a \"terminal\" (FAILED) Run, or a Work that is \"blocked\"."""
     current = datetime.now(UTC)
     historical = current - timedelta(minutes=2)
     change_path = (
@@ -495,6 +502,10 @@ def _settlement_ready(root: Path) -> None:
         ),
         idempotency_key="cli-target-start-evidence",
     )
+    if target == "terminal":
+        target_service.transition_run("RUN-CLI-TARGET", RunState.FAILED, "legacy-agent", "target-cli-secret", "cli-target-failed")
+    elif target == "blocked":
+        works.transition("WORK-CLI-TARGET", WorkState.BLOCKED, "cli-target-blocked")
     decision_id = "DEC-20260911-5C37A985"
     decision = DecisionPackageDTO(
         decision_id=decision_id,
@@ -506,9 +517,11 @@ def _settlement_ready(root: Path) -> None:
         approved_at=current.isoformat(),
         metadata={
             RUNTIME_CAPABILITY_KEY: RuntimeDecisionCapability(
-                allowed_runtime_actions=(RuntimeDecisionAction.SETTLE_EXPIRED_RUN,),
-                target_run_ids=("RUN-CLI-TARGET",),
+                allowed_runtime_actions=(action,),
+                # a Work adjudication names Works, every other action names Runs
+                target_run_ids=() if action is RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK else ("RUN-CLI-TARGET",),
                 allowed_outcomes=(RuntimeDecisionOutcome.CANCELLED,),
+                target_work_ids=("WORK-CLI-TARGET",) if action is RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK else (),
             )
         },
     )
@@ -547,6 +560,8 @@ def _settlement_ready(root: Path) -> None:
     )
     works.authorize("WORK-CLI-RECOVERY", decision_id, "cli-authorize-recovery")
     works.transition("WORK-CLI-RECOVERY", WorkState.IN_PROGRESS, "cli-start-recovery")
+    if not start_recovery_run:
+        return
     recovery_service = ContinuityExecutionService(
         root,
         store=ContinuityStore(root, _clock=lambda: current),
