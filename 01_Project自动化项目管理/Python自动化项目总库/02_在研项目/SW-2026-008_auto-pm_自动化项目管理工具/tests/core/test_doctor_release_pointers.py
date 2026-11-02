@@ -204,14 +204,18 @@ def test_an_explicit_ref_is_never_overridden_by_the_pr_rule(pr_repo: Path) -> No
     assert result["status"] == "fail" and result["ref"] == "origin/main" and result["pr_head"] is False
 
 
-def test_when_git_cannot_say_what_the_branch_changed_the_strict_rule_stays(pr_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failing ``git diff`` must make the check stricter or equal, never laxer."""
+def test_when_git_cannot_say_what_the_branch_changed_the_strict_rule_stays(pr_repo: Path) -> None:
+    """A real repository where ``git diff origin/main...HEAD`` fails: an orphan branch with no common ancestor.
 
+    The orphan moves the pointers and lists the release, so if a Git failure were read as "the branch changed the pointers" the
+    check would go green.  It must stay on the strict comparison with main instead.
+    """
+
+    _git(pr_repo, "checkout", "-q", "--orphan", "orphan")
     _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])
-    _commit(pr_repo, "release pointers + manifest entry")
-    monkeypatch.setattr("auto_pm.ui.cli.doctor._pointers_changed_by_head", lambda *_a, **_k: False)
+    _commit(pr_repo, "unrelated history that moves the pointers")
     result = check_release_pointers(str(pr_repo))
-    assert result["status"] == "fail" and result["ref"] == "origin/main"
+    assert result["status"] == "fail" and result["ref"] == "origin/main" and result["pr_head"] is False, result
 
 
 def test_a_release_pr_must_name_the_release_it_replaced_as_previous(pr_repo: Path) -> None:
