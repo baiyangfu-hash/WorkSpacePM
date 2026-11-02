@@ -89,6 +89,9 @@ fi
 bash "$EV/rel7_1_approve_start.sh" > "$EV/start2.out" 2>&1 || { echo "START FAILED"; tail -5 "$EV/start2.out"; exit 1; }
 bash "$ROOT/.auto-pm/reports/m2_lease_renew.sh" "$EV/close.env" > "$EV/renew_first.log" 2>&1 || { echo "FIRST RENEW FAILED"; cat "$EV/renew_first.log"; exit 1; }
 echo "first renewal ok"
+# the user's own words (typed in the main-executor thread, message cmsg_01AfNxhPWkgwWYuL1EVfYC7tJPaJZwt3hvXGtUMyCqBguG; first typed 2026-11-02 16:32 MST in another thread as cmsg_01AfNxhPWkgwWYuL1EVfYC7tDZkqRnAohX7d2d2DtjbBJB: "同意发版 7 门禁租约延长 1 小时") authorize one extension of this Run's 3 h hold cap by 3600 s
+"$PY" -B main.py continuity lease extend-hold --run-id RUN-SW008-M3-REL7-001 --extra-seconds 3600 --approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7tJPaJZwt3hvXGtUMyCqBguG --idempotency-key RUN-SW008-M3-REL7-001-hold-1 > "$EV/extend_hold.out" 2>&1 || { echo "EXTEND-HOLD FAILED"; tail -5 "$EV/extend_hold.out"; exit 1; }
+echo "hold cap extended by 3600 s"
 rm -f "$EV/STOP_RENEW"
 mkdir -p "$G/status"
 det() { "$PY" -B "$EV/detach_run.py" "$@"; }

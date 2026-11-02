@@ -11,6 +11,6 @@
   "tools/rel7_config.json": "7546ba0ee435066d9abd07006d4b33b24d23acebd9c0d4257ffb719a0d362876",
   "tools/rel7_gates.py": "2e1594b6b65b9fc65952f1d35f9b493eed2eccd7e7481b2e6adcebbd5ec089df",
   "tools/rel7_gates_all.sh": "f57b50b11415b378ca2e29c49640f66e272825a064941a22edc9c527f984b078",
-  "tools/rel7_launch.sh": "5aa27a5c40724f89f5e15437c8cf70512a2db4e4360901790c2a0fd3e8451bfc",
+  "tools/rel7_launch.sh": "15d9f2a30c51692b8d4b4f3ee7a269117866e887723d6a92f02bf834b200bd43",
   "tools/run_g2.sh": "a32cd648a0a4f1037345e77dd4a24c126c8296a2c3d44daa18e81983984b21f4"
 }

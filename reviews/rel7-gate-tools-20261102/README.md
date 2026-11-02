@@ -20,3 +20,7 @@
 - 一并放上分支：`rel7_1_approve_start.sh`、`rel7_2_close_commit.sh`、`rel7_3_chg_close.sh`、`rel7_4_close_worktree.sh`、`m2_lease_renew.sh`、`m2_renew_loop.sh`，方便核对续租循环怎么结束（`STOP_RENEW` 文件 / 门禁结束标记）。
 - `mem_guard` 不监视门禁进程本身，只在 `DONE`/`FAILED` 出现（状态目录或其上一级目录）或 8 小时到点时退出，注释已写明。
 - 租约总时长余量：卡 §1 第 11 条（实测第六版 168.5 分钟对 180 分钟上限，余量 11.5 分钟，需用户本人延长）。
+
+## 2026-11-02 16:40 MST：租约延长的授权凭据
+
+用户本人在主执行线程写了“同意发版 7 门禁租约延长 1 小时”（消息 `cmsg_01AfNxhPWkgwWYuL1EVfYC7tJPaJZwt3hvXGtUMyCqBguG`，已用消息读取核实作者是用户）；`rel7_launch.sh` 在创建 Run 并首次续租成功后、起门禁之前，凭它执行一次 `continuity lease extend-hold --extra-seconds 3600`（幂等键 `RUN-SW008-M3-REL7-001-hold-1`），失败则不开跑。卡 §1 第 11 条同步。
