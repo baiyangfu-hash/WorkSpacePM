@@ -112,7 +112,9 @@ def test_station_identity_bar_and_last_step_buttons_do_not_widen_the_page(qapp: 
     qapp.processEvents()
     try:
         body = page.scroll_area.widget()
-        assert body.minimumSizeHint().width() < 800  # 身份条、按钮行改回横排时最小宽度超过 1000
+        # 身份条、按钮行改回横排时最小宽度超过 1000；留余量是因为 Windows 字体下最宽的一项（控制根路径）本身就有 807，
+        # 真正的判据是下面“900 宽的窗口里没有横向滚动条”，这一句只拦住回退成整行横排。
+        assert body.minimumSizeHint().width() < 880
         assert page.scroll_area.horizontalScrollBar().maximum() == 0
     finally:
         page.close()
