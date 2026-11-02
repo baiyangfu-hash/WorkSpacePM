@@ -38,7 +38,9 @@ class Receipt:
     command: str
     rc: int | None
     preview: bool = False
-    output: str = ""
+    output: str = ""  # 显示用：stdout 接 stderr
+    stdout: str = ""  # 要解析的只用这个；stderr 里有启动器横幅等杂行，只用来在出错时给人看
+    stderr: str = ""
 
     @property
     def rc_text(self) -> str:
@@ -49,11 +51,26 @@ def _now_text() -> str:
     return datetime.now().strftime("%H:%M")
 
 
+def no_window_flag() -> int:
+    """Windows 的 CREATE_NO_WINDOW；别的系统返回 0。测试替换这一处，不去改全局 os.name。
+
+    后台读数据、跑检查的命令都用它：界面从没有控制台的 pythonw 启动时，每条子命令不加这个标志就会各弹一个黑窗口，
+    点“重新读取”时一连弹好几个（用户 2026-11-01 S3 试用看到）。要给用户看的新终端窗口（open_console）不走这里。
+    """
+    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
+
+
+def quiet() -> dict[str, Any]:
+    """后台子进程的附加参数：不弹窗口。非 Windows 返回空，不传 creationflags。"""
+    flag = no_window_flag()
+    return {"creationflags": flag} if flag else {}
+
+
 def probe_online(root: Path, runner: Callable[..., Any] = subprocess.run) -> bool:
     try:
         result = runner(
             ["git", "ls-remote", "--exit-code", "origin", "HEAD"],
-            cwd=str(root), capture_output=True, encoding="utf-8", timeout=PROBE_TIMEOUT, check=False,
+            cwd=str(root), capture_output=True, encoding="utf-8", timeout=PROBE_TIMEOUT, check=False, **quiet(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -72,7 +89,7 @@ def run_check(root: Path, worktree: Path, project_id: str, key: str, runner: Cal
     command = ["python", "-B", str(root / "main.py"), "-w", str(worktree), *args, project_id]
     shown = " ".join(command)
     try:
-        result = runner(command, cwd=str(root), capture_output=True, encoding="utf-8", timeout=CHECK_TIMEOUT, check=False)
+        result = runner(command, cwd=str(root), capture_output=True, encoding="utf-8", timeout=CHECK_TIMEOUT, check=False, **quiet())
     except (OSError, subprocess.SubprocessError) as error:
         return Receipt(_now_text(), label, shown, None, key.endswith("preview"), f"{type(error).__name__}: {error}")
     return Receipt(_now_text(), label, shown, result.returncode, key.endswith("preview"), (result.stdout or "") + (result.stderr or ""))
@@ -255,10 +272,11 @@ def run_cli(root: Path, label: str, args: Sequence[str], runner: Callable[..., A
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     try:
         result = runner(command, cwd=str(root), capture_output=True, encoding="utf-8", errors="replace",  # lenient-decode: 命令输出只用于显示
-                        timeout=timeout, check=False, stdin=subprocess.DEVNULL, env=env)
+                        timeout=timeout, check=False, stdin=subprocess.DEVNULL, env=env, **quiet())
     except (OSError, subprocess.SubprocessError) as error:
         return Receipt(_now_text(), label, shown, None, False, f"{type(error).__name__}: {error}")
-    return Receipt(_now_text(), label, shown, result.returncode, False, (result.stdout or "") + (result.stderr or ""))
+    out, err = result.stdout or "", result.stderr or ""
+    return Receipt(_now_text(), label, shown, result.returncode, False, out + err, out, err)
 
 
 def console_flag() -> int:

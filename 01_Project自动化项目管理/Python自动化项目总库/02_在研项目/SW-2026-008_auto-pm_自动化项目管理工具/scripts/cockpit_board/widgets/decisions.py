@@ -18,6 +18,7 @@ from cockpit_board.decisions import (
     Decision,
     DecisionError,
     DecisionsVM,
+    ReadFailure,
     Target,
 )
 from cockpit_board.widgets import common as c
@@ -148,10 +149,15 @@ class DecisionsPage(QWidget):
                               "命令自己判门禁、租约和口令，这里不替它放行。", "muted"))
         if self.failure is not None:
             lay.addWidget(self._failure_bar(self.failure))
+        for bad in vm.failures:
+            lay.addWidget(self._read_failure_bar(bad))
         lay.addWidget(c.label(vm.pin_text or PIN_TEXT["unknown"], "small"))
         lay.addWidget(c.hrow(c.label("批准人", "muted", wrap=False), self.approver_input, spacing=theme.SPACE))
         if not vm.cards:
-            lay.addWidget(c.label("现在没有要你决定的事。", "muted"))
+            if vm.failures:  # 有读取没成功：空不代表没有
+                lay.addWidget(c.label("没读到全部数据，不能说“没有要你决定的事”；原因见上面的红条。", "muted"))
+            else:
+                lay.addWidget(c.label("现在没有要你决定的事。", "muted"))
         column = ""
         for card in vm.cards:
             if card.column != column:
@@ -176,6 +182,18 @@ class DecisionsPage(QWidget):
             item.clicked.connect(lambda _checked=False, d=decision, t=card.target: self.open_dialog(d, t))
             buttons.append(item)
         inner.addWidget(c.hrow(*buttons, 1))
+        return frame
+
+    def _read_failure_bar(self, bad: ReadFailure) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("bar")
+        frame.setProperty("sev", "block")
+        frame.setProperty("role", "read_failure")
+        box = QVBoxLayout(frame)
+        box.addWidget(c.label(f"没读到：{bad.what}（{bad.rc_text}）", "section"))
+        if bad.detail:
+            box.addWidget(c.label(bad.detail))
+        box.addWidget(c.label(bad.command, "mono"))
         return frame
 
     def _failure_bar(self, receipt: Receipt) -> QFrame:

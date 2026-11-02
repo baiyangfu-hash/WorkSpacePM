@@ -163,8 +163,9 @@ class StationPage(QWidget):
         frame.setProperty("step", str(step.number))
         frame.setProperty("state", step.state)
         number = c.label(str(step.number), "mark", wrap=False)
-        number.setProperty("sev", {"done": "ok", "cur": "hint", "todo": "na"}[step.state])
-        state_chip = {"done": c.chip("已完成", "ok"), "cur": c.chip("进行中", "hint"), "todo": c.chip("待做")}[step.state]
+        number.setProperty("sev", {"done": "ok", "cur": "hint", "todo": "na", "unk": "na"}[step.state])
+        state_chip = {"done": c.chip("已完成", "ok"), "cur": c.chip("进行中", "hint"), "todo": c.chip("待做"),
+                      "unk": c.chip("没核对", "na")}[step.state]
         inner.addWidget(c.hrow(number, c.label(step.title, "section"), state_chip, 1))
         inner.addWidget(c.label(step.detail, "muted"))
         if step.command:

@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -599,6 +600,8 @@ def git_last_commit(root: Path, project_root: str) -> datetime | None:
             encoding="utf-8",
             timeout=20,
             check=False,
+            # Windows 上界面没有控制台时，不加这个标志每次 git 都会弹一个黑窗口
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
         )
     except (OSError, subprocess.SubprocessError):
         return None
