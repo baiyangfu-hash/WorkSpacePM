@@ -208,6 +208,7 @@ def cmd_check(
             project_name=proj.name,
             stack=proj.stack,
             phase=proj.phase or "",
+            project_path=proj.path,
         )
 
     # 门禁必须能靠退出码判卷：有失败项即退出码 1（此前无论结果如何都是 0）

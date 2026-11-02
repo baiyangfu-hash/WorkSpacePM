@@ -8,6 +8,9 @@ from typing import Any
 
 from auto_pm.application.core.pm_session_service import ARCHIVE_DIR_NAME, ARCHIVE_DIR_PARENT
 
+# PM_SESSION 已退役（AGENTS.md，用户 2026-10-10 裁决）：新项目没有这个文件，界面应说清楚，而不是像出了故障。
+_NO_PM_SESSION_MESSAGE = "本项目没有 PM_SESSION_*.md（该文件已退役，只有较早建立的项目还保留）"
+
 
 def make_spec_check_service(workspace_root: str) -> Any | None:
     """工厂函数：构造 SpecCheckService（避免硬依赖，方便测试 mock）
@@ -170,7 +173,7 @@ def make_pm_session_service(workspace_root: str) -> Any | None:
                 """生成 PM_SESSION 只读视图"""
                 file_path = self._find_pm_session()
                 if file_path is None:
-                    return {"error": "未找到 PM_SESSION_*.md 文件"}
+                    return {"error": _NO_PM_SESSION_MESSAGE}
                 parser = PmSessionParser()
                 parse_result = parser.parse_file(file_path)
                 view_str = generate_view(parse_result)
@@ -183,7 +186,7 @@ def make_pm_session_service(workspace_root: str) -> Any | None:
                 """运行 PM_SESSION 健康检查"""
                 file_path = self._find_pm_session()
                 if file_path is None:
-                    return {"error": "未找到 PM_SESSION_*.md 文件"}
+                    return {"error": _NO_PM_SESSION_MESSAGE}
                 checker = PmSessionCheckService()
                 result = checker.check(file_path)
                 return {
@@ -209,7 +212,7 @@ def make_pm_session_service(workspace_root: str) -> Any | None:
                 """
                 file_path = self._find_pm_session()
                 if file_path is None:
-                    return {"error": "未找到 PM_SESSION_*.md 文件"}
+                    return {"error": _NO_PM_SESSION_MESSAGE}
 
                 parser = PmSessionParser()
                 parse_result = parser.parse_file(file_path)

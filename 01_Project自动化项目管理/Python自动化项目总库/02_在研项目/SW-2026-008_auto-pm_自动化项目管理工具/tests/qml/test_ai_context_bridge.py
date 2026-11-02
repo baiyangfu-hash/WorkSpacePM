@@ -40,7 +40,9 @@ def test_ai_context_bridge_updates_workspace_root(tmp_path) -> None:  # type: ig
     assert content["entry_mode"] == "cockpit"
     assert content["intent"] == "implement_change"
     assert content["target_skill"] == "fullstack-engineer"
-    assert content["product_context"]["goal_ref"] == "PM_SESSION_SW-2026-008.md#product-goal"
+    # TD-SW008-266 S4: the workspace has no PM_SESSION_SW-2026-008.md, so no reference to one is invented.
+    assert content["product_context"]["goal_ref"] == ""
+    assert content["product_context"]["hypothesis_ref"] == ""
 
 
 def test_ai_context_bridge_feedback_missing_falls_back_to_empty_state(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -193,3 +195,23 @@ def test_ai_context_bridge_unknown_stack_falls_back_to_cockpit_entry(tmp_path) -
     assert result["success"] is True
     content = json.loads((workspace / ".auto-pm" / "ai_context.json").read_text(encoding="utf-8"))
     assert content["target_skill"] == "cockpit-entry"
+
+
+def test_ai_context_bridge_refs_the_pm_session_file_only_when_it_exists(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """较早建立的项目仍有 PM_SESSION：引用其文件名；没有就留空（TD-SW008-266 S4）。"""
+    workspace = tmp_path / "workspace"
+    older = workspace / "older"
+    older.mkdir(parents=True)
+    (older / "PM_SESSION_DJ-2026-009.md").write_text("# PM_SESSION_DJ-2026-009\n", encoding="utf-8")
+    bridge = AiContextBridge(str(workspace))
+    args = ("长边框堆垛机", "plc", "developing", "", "", "", "", "implementing", "changeCenter")
+    context_file = workspace / ".auto-pm" / "ai_context.json"
+
+    assert bridge.writeAiContext("DJ-2026-009", *args)["success"] is True
+    refs = json.loads(context_file.read_text(encoding="utf-8"))["product_context"]
+    assert refs["goal_ref"] == "PM_SESSION_DJ-2026-009.md#product-goal"
+    assert refs["hypothesis_ref"] == "PM_SESSION_DJ-2026-009.md#hypothesis-ledger"
+
+    assert bridge.writeAiContext("DJ-2026-010", *args)["success"] is True
+    refs = json.loads(context_file.read_text(encoding="utf-8"))["product_context"]
+    assert refs["goal_ref"] == "" and refs["hypothesis_ref"] == ""

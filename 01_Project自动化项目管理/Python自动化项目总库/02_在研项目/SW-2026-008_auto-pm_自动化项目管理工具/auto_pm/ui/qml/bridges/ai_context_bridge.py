@@ -64,19 +64,25 @@ class AiContextBridge(QObject):
             return "plc_review"
         return "project_followup"
 
-    def _extract_active_hypothesis(self, project_id: str, change_number: str = "") -> dict[str, str]:
+    def _find_session_file(self, project_id: str) -> Path | None:
+        """The project's PM_SESSION file, or None (retired per AGENTS.md; only older projects still have one)."""
+
+        if not project_id:
+            return None
+        direct = self._workspace_root / f"PM_SESSION_{project_id}.md"
+        if direct.exists():
+            return direct
+        for found in self._workspace_root.glob(f"**/PM_SESSION_{project_id}.md"):
+            return found
+        return None
+
+    def _extract_active_hypothesis(self, project_id: str, session_file: Path | None) -> dict[str, str]:
         hyp_id = ""
         statement = ""
         expected_signal = ""
         success_metric = ""
 
-        session_file = self._workspace_root / f"PM_SESSION_{project_id}.md"
-        if not session_file.exists():
-            for p in self._workspace_root.glob(f"**/PM_SESSION_{project_id}.md"):
-                session_file = p
-                break
-
-        if session_file.exists():
+        if session_file is not None:
             try:
                 text = session_file.read_text(encoding="utf-8")
                 for line in text.splitlines():
@@ -106,11 +112,13 @@ class AiContextBridge(QObject):
 
     def _build_product_context(self, project_id: str, change_number: str = "") -> dict[str, Any]:
         if project_id:
-            session_ref = f"PM_SESSION_{project_id}.md"
-            active_hyp = self._extract_active_hypothesis(project_id, change_number)
+            # TD-SW008-266 S4: name the file only when it exists; a retired PM_SESSION must not be invented as a reference.
+            found = self._find_session_file(project_id)
+            session_ref = found.name if found is not None else ""
+            active_hyp = self._extract_active_hypothesis(project_id, found)
             return {
-                "goal_ref": f"{session_ref}#product-goal",
-                "hypothesis_ref": f"{session_ref}#hypothesis-ledger" if active_hyp.get("id") else "",
+                "goal_ref": f"{session_ref}#product-goal" if session_ref else "",
+                "hypothesis_ref": f"{session_ref}#hypothesis-ledger" if session_ref and active_hyp.get("id") else "",
                 "success_metric_ref": active_hyp.get("success_metric", ""),
                 "active_hypothesis": active_hyp,
             }

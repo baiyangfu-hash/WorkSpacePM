@@ -507,6 +507,7 @@ def cmd_show(ctx: click.Context, project_id: str, output_json: bool) -> None:
         project_name=proj.name,
         stack=proj.stack,
         phase=proj.phase or "",
+        project_path=proj.path,
     )
 
 
