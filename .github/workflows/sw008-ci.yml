@@ -133,9 +133,18 @@ jobs:
   # The product runs on Windows; the Linux job cannot see Windows-only faults (CRLF from write_text, share-deny
   # file handles, a fake agent that is a /bin/sh script). This job runs the cli and core groups and the sample
   # drill on a real Windows runner. Same rule as above: early warning, not acceptance evidence.
+  #
+  # Split into shards that run in parallel (the single job took 36 to 58 minutes against its 60-minute limit; a late run
+  # was cancelled by the timeout and held ci-aggregate red).  The file lists live in one place,
+  # tests/tools/sw008_ci/core_shards.py: the "rest" shard is computed there as every other tests/core file, so a new test
+  # file is picked up automatically, and the CI self-test fails if the split stops covering every file exactly once.
   windows-cli-core:
     runs-on: windows-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [drill, heavy, mid, rest]
     defaults:
       run:
         shell: bash
@@ -163,6 +172,7 @@ jobs:
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
 
       - name: Minimal start (doctor must report all_passed)
+        if: matrix.shard == 'drill'
         working-directory: ${{ env.PROJ }}
         env:
           PYTHONUTF8: "1"
@@ -170,17 +180,20 @@ jobs:
           "$RUNNER_TEMP/venv/Scripts/python.exe" main.py doctor
           "$RUNNER_TEMP/venv/Scripts/python.exe" -c 'import sys; from auto_pm.ui.cli.doctor import run_doctor_check; r = run_doctor_check(); print("doctor all_passed =", r["all_passed"]); sys.exit(0 if r["all_passed"] else 1)'
 
-      - name: Pytest (core, sample drill)
+      # The arguments come from core_shards.py, which refuses (exit 1) when the split no longer covers every core test
+      # exactly once, so a shard cannot quietly run less than it should.
+      - name: Pytest (core shard ${{ matrix.shard }})
         working-directory: ${{ env.PROJ }}
-        run: >-
-          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -p no:cacheprovider -o addopts= -n 4
-          tests/core tests/e2e/test_closure_drill.py tests/e2e/test_closure_drill_agent_misconduct.py
-          tests/e2e/test_long_gate.py
+        run: |
+          args="$("$RUNNER_TEMP/venv/Scripts/python.exe" -I tests/tools/sw008_ci/core_shards.py "${{ matrix.shard }}")"
+          echo "pytest arguments: $args"
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -p no:cacheprovider -o addopts= -n 4 $args
 
       # The long gate must survive the session that started it (10-23: a session teardown killed card 184's gate twice).
       # This launches the runner through a real scheduled task, kills the launching process tree, kills the runner
       # mid-group and resumes it. Fake groups and a fake renewal only; no ledger.
       - name: Long gate drill (kill the session mid-gate, then resume)
+        if: matrix.shard == 'drill'
         working-directory: ${{ env.PROJ }}
         run: '"$RUNNER_TEMP/venv/Scripts/python.exe" -B scripts/long_gate_drill.py'
 
