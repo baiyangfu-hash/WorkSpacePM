@@ -6,7 +6,8 @@ ROOT=/c/Users/fubai/Documents/My_Workspace; EV="$ROOT/.auto-pm/reports/m3-rel7";
 PY="$ROOT/.venv/Scripts/python.exe"; BASHW='C:\Program Files\Git\usr\bin\bash.exe'
 cd "$ROOT"
 unset PG_G PG_WT GATE_GROUPS  # leftovers of a rehearsal or a test must not steer the real run
-rm -f "$EV/gates_all.exit" "$G/DONE" "$G/FAILED"
+if [ -f "$G/FAILED" ]; then mv "$G/FAILED" "$G/FAILED.previous.$(date +%s)"; fi  # a previous failure is kept as evidence, never deleted
+rm -f "$EV/gates_all.exit" "$G/DONE" "$G/status/RESUME" "$G/status/PAUSED" "$G/status/current_pid"
 if [ "${1:-}" = "--dry-run" ]; then
   D="$EV/dryrun"; mkdir -p "$D/gates/status"; rm -f "$D/gates_all.exit" "$D/gates/DONE" "$D/gates/FAILED"
   det() { "$PY" -B "$EV/detach_run.py" "$@"; }
@@ -39,7 +40,9 @@ cat > "$EV/rel7_gates_wrap.sh" <<'WRAP'
 #!/usr/bin/env bash
 EV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7
 bash "$EV/rel7_gates_all.sh" > "$EV/gates_all.log" 2>&1
-echo $? > "$EV/gates_all.exit"
+rc=$?
+echo $rc > "$EV/gates_all.exit"
+if [ "$rc" -ne 0 ]; then touch "$EV/STOP_RENEW"; fi  # failed gates: no reason to keep the lease alive (the close script stops it on success)
 WRAP
 det "$EV/gates_all.launch.log" "$BASHW" "$EV/rel7_gates_wrap.sh"
 det "$EV/mem_guard.log" "$PY" -B "$EV/mem_guard.py" "$G/status" "$G/status/current_pid" 40 36

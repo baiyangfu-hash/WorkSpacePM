@@ -25,6 +25,7 @@
 8. **演练事实（非治理，临时工作树，不是正式证据）**：2026-11-02 13:07、13:21 与 16:20 MST 在发版点 `d671611a` 的临时工作树里跑了彩排。快速门禁（两次构建比对载荷逐字节一致、静态检查、真实 pre-commit 钩子干跑、豁免记录等）全部通过；前两次彩排 G3 判不过（第一次因 orient 报 `LEASE_EXPIRED`，第二次因例外的对象查得过宽），已按审计 558 的意见改为只认 orient 自己返回的 `run.run_id`、同一份 orient JSON 里的 work_id 与状态、卡号，并删掉旧的宽分支；**带最终例外的第三次彩排（16:20 MST 起，用脱离会话的后台进程启动）判卷 G1～G9 全 PASS**：orient 实测 `conflicts=["LEASE_EXPIRED"]`、`run.run_id=RUN-SW-2026-008-CHG-SCPT-2026-471-01`、`work_id=WORK-MSN-415BA3D417866398`、`work_state=IN_PROGRESS`，账本里另有一条老 Codex Run `RUN-SW008-A2-201-03`（orient 不报告，只作信息记录）；G8 的 26 个例外反例逐条与预期相等；反例（core 计数少 1、rest 一个失败、r09 重跑失败）均被拒，r09 单失败且 3/3 重跑通过的容忍情形被放行。十组输出用上一张发版卡（RUN-SW008-M3-REL6-002）的受治理输出加声明差值合成。真实回归不在彩排里跑；正式 Run 完整重跑。
 10. **脱离会话的启动与状态文件**：用户 2026-11-02 裁定任何超过 30 分钟的任务不得挂在会话里（会话空闲一小时会被应用停掉）。正式门禁由启动脚本通过 `detach_run.py` 以独立进程组、无控制台的方式启动续租循环、防休眠进程、内存保护进程和门禁，输出写日志文件；每个阶段与每个回归组写一个状态文件 `gates/status/<阶段>.json`（阶段名、PASS/FAIL、退出码、MST 时间、提交内存 GB）并追加 `status.log`；内存保护进程在系统提交内存到 40 GB 时写 `ALERT_*.txt` 并挂起被监护进程树，降到 36 GB 以下或出现 `RESUME` 文件时恢复。会话只负责启动、读状态文件、汇报；会话被停后重新连上就读状态文件续报，不重跑。
 11. **租约总时长余量（3 小时上限）**：已实测——第六次发版 V1.0 的治理 Run `RUN-SW008-M3-REL6-001` 创建于 2026-11-01 19:44:23Z（12:44 MST），门禁结束标记 `gates_all.exit` 写于 22:32:54Z（15:32:54 MST），共 168.5 分钟，对 180 分钟的上限余量只有 11.5 分钟；第五次发版 V1.0 为 159 分钟。第七版自第六版以来合入的测试更多，预计更长，余量约为零甚至为负。处理：治理 Run 贴着门禁开跑的时刻才创建（启动脚本在创建 Run 之后立刻起门禁，不提前）；余量小于 30 分钟，所以由**用户本人**对该 Run 做 `continuity lease extend-hold --run-id RUN-SW008-M3-REL7-001 --extra-seconds 3600 --approval-evidence-ref <用户原话位置> --idempotency-key <…>`（只有用户能延长，agent 只在用户当场给出原话时代为执行）；用户本人已给出许可：2026-11-02 16:32 MST 在“梳理驾驶舱技术文件与总体规划”线程写“同意发版 7 门禁租约延长 1 小时”，并在主执行线程里又亲口打了一遍（消息 `cmsg_01AfNxhPWkgwWYuL1EVfYC7tJPaJZwt3hvXGtUMyCqBguG`，已用消息读取核实作者是用户本人；作为 `--approval-evidence-ref user-confirmation:<该消息 id>`；原先那条 `cmsg_01AfNxhPWkgwWYuL1EVfYC7tDZkqRnAohX7d2d2DtjbBJB` 为旁证）；启动脚本在创建 Run 并首次续租成功之后、起门禁之前，凭这句话执行一次 `continuity lease extend-hold --extra-seconds 3600`（幂等键 `RUN-SW008-M3-REL7-001-hold-1`），失败则不开跑。
+12. **工作树建好后失败，不能原地重跑**：启动脚本一旦创建了候选工作树 `.auto-pm/worktrees/m3-rel7`、变更单、Decision、Work 与治理 Run，再次运行启动脚本会被它的前置检查拒绝（分支与工作树已存在、Run 已登记），这是有意的：不允许在失败的现场上悄悄重来。任一门禁失败时：脚本停下并保留现场（`FAILED` 文件保留，下次启动时只改名留证，不删除；续租循环随之停止），状态文件记下失败的阶段与退出码，报给协调者；处理办法按前几版先例另出 V1.1 卡（新的 Work 与 Run，必要时复用本轮已完成且有效的组输出再重判），不在原 Run 上重跑。
 9. **事先声明的窄例外（G3 的“控制根 pm orient 无冲突”这一项）**：笔记本上有一个已知的卡住的 Run——Trae 的卡 B2 的 `RUN-SW-2026-008-CHG-SCPT-2026-471-01`（租约已过期、3 小时总上限已过，Work `WORK-MSN-415BA3D417866398` 仍进行中）。结算它需要的修复是 #496（合并提交 `d671611a`，即本卡的冻结头；已部署的 `1.3.3-6a9f127` 里命令行的两条规则互相矛盾，过期 Run 无法结算），而这个修复要发版 7 切换后才生效，所以 orient 在切换前必然报 `LEASE_EXPIRED`。因此本卡事先声明：orient 的冲突**恰等于** `["LEASE_EXPIRED"]`、且 orient 自己返回的对象（`run.run_id`）恰为上述这个 Run、同一份 orient JSON 里的 Work 恰为 `WORK-MSN-415BA3D417866398` 且仍为进行中、并且仅对本卡（`CARD-SW008-M3-REL7`）时，该项放行并如实记入报告（例外信息单独占报告一行）；例外名单、对象、Work 与卡号写死在判卷脚本里，卡的数据不能扩充；orient 返回的 run 不是字典时按不通过处理，不让脚本崩溃；任何其他冲突、这个 Run 与别的冲突同时出现、对象不是它，该项照旧判不过。已知事项：账本里另有一条 2026-09-10 的老 Codex Run `RUN-SW008-A2-201-03`（RUNNING、租约早已过期、其 Work 已验收），orient 一直不报告它，本卡不处理、不触碰，只在报告里记录。不改账本，不用候选构建写真账本。后续：发版 7 切换后用修好的命令结算这个 Run，再重跑 G3 的 orient，确认无冲突。
 
 ## 2. 单一目标与完成定义
@@ -59,7 +60,7 @@
 
 ### 5.2 冻结工具
 
-工具与脚本在 `.auto-pm/reports/m3-rel7/`；清单文件 `reference_manifest.json` 的 SHA-256 为 `afc34342104f29cc3aa482c633562ee294764ade30920f81b8307401b29bd866`。
+工具与脚本在 `.auto-pm/reports/m3-rel7/`；清单文件 `reference_manifest.json` 的 SHA-256 为 `2fb09b61d6ba9bebe12ce1cba4d1cef97024eb5e4134c977bf3a67a4d49eb359`。
 
 | 工具 | SHA-256 |
 |---|---|
@@ -70,11 +71,16 @@
 | `gen_project.py` | `eac50737f52b35b23b3c9b23583ac819940a042f71109f9cc96ceaa435e06565` |
 | `install_files.py` | `1ea7b5f5425040152db88104009779791ee8a0c6c476f77437e9e8c59b30f753` |
 | `keepawake.py` | `184ae36800863b2ee14f9fbde1977af521e757dd4ffab9bb8867e7a419c4237f` |
+| `m2_lease_renew.sh` | `b92ab2083f3219796af8b469e66242013925fa1d83feb2e8035a0fad57c737ea` |
+| `m2_renew_loop.sh` | `0472a2c1dd40bd685bb5825cd85928701da42eec8a18bc13ccdb16e27e3eace1` |
 | `mem_guard.py` | `f878aa6bce8c6b310d14c884de895182c735be6c2b11aefd75d73f9552b29619` |
+| `rel7_2_close_commit.sh` | `825c0b322b7ee634f7862f551dc3a2c501e7a049d423d18da1de9e647902cd24` |
+| `rel7_3_chg_close.sh` | `5f134f3fddd1286a4fb31c6b68f9520cd03934ca485287d85b6213bf76574562` |
+| `rel7_4_close_worktree.sh` | `0cc597773151c247f21d653a4ced5b8a81b94fa9342105fac0064bd42fbe0811` |
 | `rel7_config.json` | `7546ba0ee435066d9abd07006d4b33b24d23acebd9c0d4257ffb719a0d362876` |
 | `rel7_gates.py` | `2e1594b6b65b9fc65952f1d35f9b493eed2eccd7e7481b2e6adcebbd5ec089df` |
 | `rel7_gates_all.sh` | `f57b50b11415b378ca2e29c49640f66e272825a064941a22edc9c527f984b078` |
-| `rel7_launch.sh` | `15d9f2a30c51692b8d4b4f3ee7a269117866e887723d6a92f02bf834b200bd43` |
+| `rel7_launch.sh` | `f02ba2038b80afd46f7a544dd33b94c07c45e5b7c4159375776b288d10f872cc` |
 | `run_g2.sh` | `a32cd648a0a4f1037345e77dd4a24c126c8296a2c3d44daa18e81983984b21f4` |
 
 ## 6. 门禁矩阵
@@ -99,7 +105,7 @@
 
 | 字段 | 当前值 |
 |---|---|
-| 实施批准 | 用户 2026-10-18 在项目聊天里预授权“自行收口推送，其他按照你的经验来…你现在负责全局”；用户 2026-11-02 12:04 MST 在项目聊天里回复“今天电脑给你用，允许白天跑门禁下午5点之前尽量结束”（user-confirmation:2026-11-02T12:04-0700，写入 Run 的 dispatch_approval_ref；目标：门禁尽量在 17:00 MST 前跑完）；只构建与门禁，不切换（切换要用户回“切换”）；**本卡 SHA 在线程里报出后**启动（本版必须在 17:00 MST 前跑完）。条件：卡 SHA 先在聊天报出、卡字节等于该 SHA、机器预检通过、范围不超出本卡路径、任一门禁失败即停下保留现场、不开第二轮；止损照旧 |
+| 实施批准 | 用户 2026-10-18 在项目聊天里预授权“自行收口推送，其他按照你的经验来…你现在负责全局”；用户 2026-11-02 当地时间 16:11 在项目聊天里说“晚上9:00可以跑”，并由协调者安排用户对本卡最终 SHA 亲口说“开跑”——该消息 id 与原话在起跑时写入 approval_refs.env 与批准回执（`--approval-evidence-ref user-confirmation:<该消息 id>`、写入 Run 的 dispatch_approval_ref），不写进卡本身，所以卡字节不随它变化；只构建与门禁，不切换（切换要用户回“切换”）；**本卡 SHA 在线程里报出后**启动（本版必须在 17:00 MST 前跑完）。条件：卡 SHA 先在聊天报出、卡字节等于该 SHA、机器预检通过、范围不超出本卡路径、任一门禁失败即停下保留现场、不开第二轮；止损照旧 |
 | **内容验收** | 按用户 2026-10-18 的预授权委托：G1～G9 全 PASS 且提交字节等于冻结清单后由 Claude 收口；独立审计通过且 CI 全绿后由用户或用户授权的合并方合并 |
 | 审批人 | fubai |
 | 执行模型 | Claude |

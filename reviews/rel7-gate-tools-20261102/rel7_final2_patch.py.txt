@@ -1,0 +1,22 @@
+"""Release 7 audit 558 round 3, part 2: the manifest check inside the start script must find the renewal scripts (tools/m2_*.sh live in .auto-pm/reports, not in the m3-rel7 folder).
+Applied ONCE to derive_rel7.py."""
+import io
+
+p = "m3-rel6/derive_rel7.py"
+s = io.open(p, encoding="utf-8", newline="").read()
+if "tools/m2_" in s and "_old_br" in s:
+    raise SystemExit("already applied")
+anchor = 'io.open(EV / "rel7_1_approve_start.sh", "w", encoding="utf-8", newline="").write(_st)\n'
+assert s.count(anchor) == 1
+code = r'''
+_old_br = """    elif rel.startswith("tools/"):
+        path = f".auto-pm/reports/m3-rel7/{rel[len('tools/'):]}\""""
+assert _st.count(_old_br) == 1, _st.count(_old_br)
+_new_br = """    elif rel.startswith("tools/m2_"):
+        path = f".auto-pm/reports/{rel[len('tools/'):]}"
+""" + _old_br
+_st = _st.replace(_old_br, _new_br)
+'''
+s = s.replace(anchor, code.lstrip("\n") + anchor)
+io.open(p, "w", encoding="utf-8", newline="").write(s)
+print("part 2 applied")

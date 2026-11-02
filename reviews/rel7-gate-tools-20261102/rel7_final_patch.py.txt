@@ -1,0 +1,71 @@
+"""Release 7, audit 558 round 3: the approval evidence is the user's own go-ahead for THIS card SHA (read at start from approval_refs.env, not baked into the card), the lease extension is
+done automatically by the launcher, the renewal loop is stopped, FAILED is kept as evidence, more tools are fingerprinted.  Applied ONCE to derive_rel7.py."""
+import io
+
+p = "m3-rel6/derive_rel7.py"
+s = io.open(p, encoding="utf-8", newline="").read()
+if "approval_refs.env" in s:
+    raise SystemExit("final patch already applied: refusing")
+NL = chr(10)
+
+# 1) launcher: keep FAILED as evidence (rename), clear the pause leftovers; the wrapper stops the renewal loop when the gates fail
+old = 'rm -f "$EV/gates_all.exit" "$G/DONE" "$G/FAILED"' + NL + 'if [ "${1:-}" = "--dry-run" ]; then'
+assert s.count(old) == 1
+new = ('if [ -f "$G/FAILED" ]; then mv "$G/FAILED" "$G/FAILED.previous.$(date +%s)"; fi  # a previous failure is kept as evidence, never deleted' + NL
+       + 'rm -f "$EV/gates_all.exit" "$G/DONE" "$G/status/RESUME" "$G/status/PAUSED" "$G/status/current_pid"' + NL
+       + 'if [ "${1:-}" = "--dry-run" ]; then')
+s = s.replace(old, new)
+old = 'bash "$EV/rel7_gates_all.sh" > "$EV/gates_all.log" 2>&1' + NL + 'echo $? > "$EV/gates_all.exit"'
+assert s.count(old) == 1
+new = ('bash "$EV/rel7_gates_all.sh" > "$EV/gates_all.log" 2>&1' + NL
+       + 'rc=$?' + NL
+       + 'echo $rc > "$EV/gates_all.exit"' + NL
+       + 'if [ "$rc" -ne 0 ]; then touch "$EV/STOP_RENEW"; fi  # failed gates: no reason to keep the lease alive (the close script stops it on success)')
+s = s.replace(old, new)
+
+# 2) tail: patch approve_start (evidence from approval_refs.env), the close script (STOP_RENEW), and fingerprint more tools
+anchor = 'man = json.load(open(EV / "reference_manifest.json", encoding="utf-8"))' + NL
+assert s.count(anchor) == 1
+block = r'''
+_st = io.open(EV / "rel7_1_approve_start.sh", encoding="utf-8", newline="").read()
+_a = _st.index('DELEG="委托执行')
+_b = _st.index(NL, _a)
+_deleg = (
+    '[[ -f "$EV/approval_refs.env" ]] || die "approval_refs.env is missing: it records the user\'s own go-ahead for THIS card SHA and is written only after the user said it"' + NL
+    + 'source "$EV/approval_refs.env"   # GO_SHA, GO_REF (user-confirmation:<message id> of the user\'s go-ahead), GO_TEXT (the words), NIGHT_REF / NIGHT_TEXT (the 21:00 permission)' + NL
+    + '[[ "${GO_SHA:-}" == "$CARD_SHA" && "${GO_REF:-}" == user-confirmation:cmsg_* && -n "${GO_TEXT:-}" ]] || die "approval_refs.env does not carry the user\'s go-ahead for this card SHA"' + NL
+    + 'DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT:-}”（${NIGHT_REF:-}）并对本卡 SHA ${CARD_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；'
+    '只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行"')
+_st = _st[:_a] + _deleg + _st[_b:]
+_lit = "--approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7tDgoX2UY8rPK5n7nMxruFa2"
+assert _st.count(_lit) == 2, _st.count(_lit)
+_st = _st.replace(_lit, '--approval-evidence-ref "$GO_REF"')
+_old = "the card bytes equal that SHA-256 and did not change afterwards"
+assert _st.count(_old) == 1
+_st = _st.replace(_old, "the card bytes equal that SHA-256 (checked by this script at start); the approval evidence is the user's own go-ahead for this card SHA (GO_REF) together with the 21:00 permission (NIGHT_REF), both read from approval_refs.env")
+_st = _st.replace('echo "APPROVAL_ORDER=', 'echo "GO_REF=$GO_REF"; echo "NIGHT_REF=${NIGHT_REF:-}"; echo "APPROVAL_ORDER=', 1)
+io.open(EV / "rel7_1_approve_start.sh", "w", encoding="utf-8", newline="").write(_st)
+_cl = io.open(EV / "rel7_2_close_commit.sh", encoding="utf-8", newline="").read()
+assert _cl.count('cd "$ROOT"' + NL) >= 1
+_cl = _cl.replace('cd "$ROOT"' + NL, 'cd "$ROOT"' + NL + 'touch /c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7/STOP_RENEW  # the gates are done: stop the renewal loop (the lease keeps >= 40 min, the closure takes about 10)' + NL, 1)
+io.open(EV / "rel7_2_close_commit.sh", "w", encoding="utf-8", newline="").write(_cl)
+io.open(EV / "approval_refs.env.template", "w", encoding="utf-8", newline="").write(
+    "# written by Claude ONLY after the user typed the go-ahead for this card SHA (message id from the thread); never edited by hand later\n"
+    "GO_SHA=<the card SHA-256 the user said go to>\nGO_REF=user-confirmation:<message id of the user's go-ahead>\nGO_TEXT=<the user's words>\n"
+    "NIGHT_REF=user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7t82L7FcQCjseQtJAUdZLZ55\nNIGHT_TEXT=晚上9:00可以跑\n")
+'''
+s = s.replace(anchor, block.lstrip(NL) + anchor)
+
+# 3) fingerprint the close/chg-close/cleanup scripts and the renewal scripts (rel7_1 is not fingerprinted: it carries the card SHA, which the card's manifest SHA depends on)
+anchor2 = 'io.open(EV / "reference_manifest.json", "w", encoding="utf-8", newline="").write(json.dumps(dict(sorted(man.items())), ensure_ascii=False, indent=2) + "\\n")'
+assert s.count(anchor2) == 1, s.count(anchor2)
+block2 = r'''
+man = json.load(open(EV / "reference_manifest.json", encoding="utf-8"))
+for _n in ("rel7_2_close_commit.sh", "rel7_3_chg_close.sh", "rel7_4_close_worktree.sh"):
+    man["tools/" + _n] = sha((EV / _n).read_bytes())
+for _n in ("m2_lease_renew.sh", "m2_renew_loop.sh"):
+    man["tools/" + _n] = sha((R / _n).read_bytes())
+'''
+s = s.replace(anchor2, anchor2 + NL + block2.lstrip(NL) + anchor2)
+io.open(p, "w", encoding="utf-8", newline="").write(s)
+print("final patch applied")

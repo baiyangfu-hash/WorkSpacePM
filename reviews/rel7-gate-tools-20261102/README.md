@@ -24,3 +24,12 @@
 ## 2026-11-02 16:40 MST：租约延长的授权凭据
 
 用户本人在主执行线程写了“同意发版 7 门禁租约延长 1 小时”（消息 `cmsg_01AfNxhPWkgwWYuL1EVfYC7tJPaJZwt3hvXGtUMyCqBguG`，已用消息读取核实作者是用户）；`rel7_launch.sh` 在创建 Run 并首次续租成功后、起门禁之前，凭它执行一次 `continuity lease extend-hold --extra-seconds 3600`（幂等键 `RUN-SW008-M3-REL7-001-hold-1`），失败则不开跑。卡 §1 第 11 条同步。
+
+## 2026-11-02 16:50 MST：558 第三轮复核的修改
+
+- 批准凭据：`rel7_1_approve_start.sh` 不再把旧消息 id 写死；起跑时从 `approval_refs.env` 读取用户对**本卡最终 SHA** 的“开跑”（GO_REF/GO_TEXT/GO_SHA，且 GO_SHA 必须等于卡 SHA）和“晚上9:00可以跑”（NIGHT_REF），变更单批准、Decision、DELEG 与回执都引用它们；该文件只在用户亲口说“开跑”之后才写（模板见 `approval_refs.env.template`），所以卡字节不随它变化。回执里“卡字节此后没变”改成“起跑时脚本核对卡字节等于 SHA”。
+- 租约延长：`rel7_launch.sh` 在创建 Run 并首次续租成功后、起门禁前自动执行 `lease extend-hold 3600`（凭用户本人在主执行线程的原话 `cmsg_01AfNxhPWkgwWYuL1EVfYC7tJPaJZwt3hvXGtUMyCqBguG`），失败则不开跑，不靠人手动。
+- 续租循环：收口脚本开头 `touch STOP_RENEW`；门禁失败时包装脚本也 `touch STOP_RENEW`。
+- 启动前：`FAILED` 改名留证（`FAILED.previous.<时间>`），不删；清 `DONE`、`gates_all.exit`、`RESUME`、`PAUSED`、`current_pid`。
+- 指纹清单：除 `rel7_launch.sh` 外，又加入 `rel7_2_close_commit.sh`、`rel7_3_chg_close.sh`、`rel7_4_close_worktree.sh`、`m2_lease_renew.sh`、`m2_renew_loop.sh`；启动脚本的清单核对已适配并实测通过（19 项）。`rel7_1_approve_start.sh` 不进清单：它含卡 SHA，而卡里写着清单的 SHA，会循环依赖；它的字节由卡 SHA 检查间接约束。
+- 卡 §1 第 12 条：工作树建好后失败不能原地重跑（前置检查会拒绝），以及这种情况怎么处理（保留现场、另出 V1.1）。

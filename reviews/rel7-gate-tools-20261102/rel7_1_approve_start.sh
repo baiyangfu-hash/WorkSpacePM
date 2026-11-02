@@ -10,7 +10,7 @@ cd "$ROOT"
 PY="$ROOT/.venv/Scripts/python.exe"
 P='01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具'
 CARD="$P/02_规划/219_M3-REL7_第七次发版候选门禁实施卡_PM.md"
-CARD_SHA=f22bbf6b1da79a1810bdb66bbda4d1e343f1dcdb1ce3ee6ff11ad83f58012f8d
+CARD_SHA=a0c6bfe6757189b1cc26c7f5b25fb75d1f7a6f23001f1639506dc78a96dfd33a
 BASE=d671611a13bc15536047769fdb0498666c414044
 BASE_BRANCH=m3-rel7-base
 TODAY="$(date +%Y%m%d)"
@@ -24,7 +24,10 @@ EV="$ROOT/.auto-pm/reports/m3-rel7"
 STATE="$EV/rel7_chg.txt"
 FULL=("01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md")
 NEW_PATHS=("01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md")
-DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 12:04（当地时间）说“今天电脑给你用，允许白天跑门禁下午5点之前尽量结束”（协调者转述原话，用户消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7tDgoX2UY8rPK5n7nMxruFa2）；只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行"
+[[ -f "$EV/approval_refs.env" ]] || die "approval_refs.env is missing: it records the user's own go-ahead for THIS card SHA and is written only after the user said it"
+source "$EV/approval_refs.env"   # GO_SHA, GO_REF (user-confirmation:<message id> of the user's go-ahead), GO_TEXT (the words), NIGHT_REF / NIGHT_TEXT (the 21:00 permission)
+[[ "${GO_SHA:-}" == "$CARD_SHA" && "${GO_REF:-}" == user-confirmation:cmsg_* && -n "${GO_TEXT:-}" ]] || die "approval_refs.env does not carry the user's go-ahead for this card SHA"
+DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT:-}”（${NIGHT_REF:-}）并对本卡 SHA ${CARD_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行"
 BACKGROUND="M3-REL7（第七次发版候选）：用 main 上的合并提交 d671611a 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；再跑全量门禁：十组回归（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值由 GitHub release-pregate 对两个提交各实跑一次相减得出）、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。自现行有效版本 1.3.3-6a9f127 以来合入 53 个合并提交，产品子树 83 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。"
 mkdir -p "$EV"
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -65,6 +68,8 @@ m = json.load(open(sys.argv[1], encoding="utf-8"))
 for rel, sha in m.items():
     if rel.startswith("tools/m2-tools/"):
         path = f".auto-pm/reports/{rel[len('tools/'):]}"
+    elif rel.startswith("tools/m2_"):
+        path = f".auto-pm/reports/{rel[len('tools/'):]}"
     elif rel.startswith("tools/"):
         path = f".auto-pm/reports/m3-rel7/{rel[len('tools/'):]}"
     else:
@@ -93,7 +98,7 @@ while true; do
   case "$(chg_status "$CHG_FILE")" in
     draft)        cli change transition "$chg" --pid SW-2026-008 --to submitted    --approver fubai --comment "[$DELEG] 提交卡 219 V1.0" >/dev/null ;;
     submitted)    cli change transition "$chg" --pid SW-2026-008 --to under_review --approver fubai --comment "[$DELEG] 基线与 1 路径已核验，卡 §4 路径表与 §5.1 指纹表等于冻结的参考字节，前置卡已达技术终态，卡机器预检通过" >/dev/null ;;
-    under_review) cli change transition "$chg" --pid SW-2026-008 --to approved     --approver fubai --approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7tDgoX2UY8rPK5n7nMxruFa2 --comment "[$DELEG] 批准卡 219 V1.0：只允许卡 §4 列出的 1 个路径、字节等于 §5.1；禁止其他任何文件、手改冻结字节、产品文件、既有 CHG 原文、台账（除非本卡 §4 列出）、规则、Hook、release、直接 SQL、推送、合并进 main、打 tag、部署" >/dev/null ;;
+    under_review) cli change transition "$chg" --pid SW-2026-008 --to approved     --approver fubai --approval-evidence-ref "$GO_REF" --comment "[$DELEG] 批准卡 219 V1.0：只允许卡 §4 列出的 1 个路径、字节等于 §5.1；禁止其他任何文件、手改冻结字节、产品文件、既有 CHG 原文、台账（除非本卡 §4 列出）、规则、Hook、release、直接 SQL、推送、合并进 main、打 tag、部署" >/dev/null ;;
     approved)     cli change transition "$chg" --pid SW-2026-008 --to implementing --approver fubai --comment "[$DELEG] 开始实施（隔离候选）" >/dev/null ;;
     implementing) break ;;
     *) die "CHG state not resumable: $(chg_status "$CHG_FILE")" ;;
@@ -104,7 +109,7 @@ echo "CHG $chg implementing"
 echo "== 2. Decision $DEC (1 paths)"
 if [[ ! -f ".auto-pm/decisions/$DEC.json" ]]; then
   A=(); for p in "${FULL[@]}"; do A+=(--file "$p"); done
-  cli decision create --change-id "$chg" --pid SW-2026-008 --approver fubai --approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7tDgoX2UY8rPK5n7nMxruFa2 --decision-id "$DEC" "${A[@]}" \
+  cli decision create --change-id "$chg" --pid SW-2026-008 --approver fubai --approval-evidence-ref "$GO_REF" --decision-id "$DEC" "${A[@]}" \
     --condition "严格限定卡 219 V1.0 的 1 个 owned path；文件字节必须等于卡 §5.1 的 SHA-256" \
     --condition "不得改 §4 之外的任何文件（产品文件、其他测试、既有 CHG 原文、台账、规则、AGENTS.md、.trae、.cursor、.agent、Hook 脚本、release）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并进 main、不推送、不打 tag、不部署、不切换 release、不处置任何债务或历史失败记录" \
     --json-output | grep -E '"decision_id"|"change_id"'
@@ -141,7 +146,7 @@ sed "s/__CHG__/$chg/" "$EV/commit_msg.template.txt" > "$EV/commit_msg.txt"
   echo "CARD=CARD-SW008-M3-REL7 V1.0"; echo "CARD_SHA256=$CARD_SHA"; echo "BASELINE=$BASE"; true
   echo "CHG_ID=$chg"; echo "DECISION_ID=$DEC"; echo "WORK_ID=$WORK"; echo "RUN_ID=$RUN"; echo "WORKTREE=$WT"; echo "BRANCH=$BRANCH"
   echo "OWNED_PATHS=1 (card section 4)"; echo "EXECUTOR=claude"
-  echo "APPROVAL_ORDER=user chat approval given after the card SHA-256 was reported in chat (PREAUTH_M2_20261008.txt, last block); the card bytes equal that SHA-256 and did not change afterwards"
+  echo "GO_REF=$GO_REF"; echo "NIGHT_REF=${NIGHT_REF:-}"; echo "APPROVAL_ORDER=user chat approval given after the card SHA-256 was reported in chat (PREAUTH_M2_20261008.txt, last block); the card bytes equal that SHA-256 (checked by this script at start); the approval evidence is the user's own go-ahead for this card SHA (GO_REF) together with the 21:00 permission (NIGHT_REF), both read from approval_refs.env"
   echo "FORBIDDEN=any path outside the card; hand edit of frozen bytes; existing CHG text; product files; direct SQL on the real DB; history rewrite; merge into main; push; tag; deploy; disposing of any debt or failure record"
   echo "APPROVED_BY=fubai (same user as baiyang)"; echo "SIGNATURE_MODE=DELEGATED; $DELEG"; echo "APPROVED_AT=$(date -u +%FT%TZ)"
   echo "NOT_DELEGATED=merge into main, push, tag, deploy, release switch; the content acceptance and the closure of the change request are the user's (not delegated)"

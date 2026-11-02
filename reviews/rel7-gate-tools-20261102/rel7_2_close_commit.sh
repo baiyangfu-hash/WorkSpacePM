@@ -9,6 +9,7 @@ set -euo pipefail
 export PATH="/usr/bin:/mingw64/bin:$PATH" PYTHONIOENCODING=utf-8 PYTHONUTF8=1
 ROOT=/c/Users/fubai/Documents/My_Workspace
 cd "$ROOT"
+touch /c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7/STOP_RENEW  # the gates are done: stop the renewal loop (the lease keeps >= 40 min, the closure takes about 10)
 CONFIG="$1"; [[ -f "$CONFIG" ]] || { echo "config missing: $CONFIG"; exit 1; }
 # shellcheck disable=SC1090
 source "$CONFIG"   # LABEL CHG WORK RUN OWNER BASE WT TOKEN_FILE VERDICT CKPT COMMIT_MSG_FILE OWNED(array) EV
