@@ -21,8 +21,12 @@ TESTS = ROOT / "tests"
 THIS_FILE = Path(__file__).resolve()
 GUARD = "_worktree_is_the_control_root"
 OPT_IN_FIXTURE = "control_root_guard_on"
+# The same opt-in in its apply-later form (a scene is built with the rule off, then the test calls the switch).
+OPT_IN_FIXTURES = frozenset({OPT_IN_FIXTURE, "control_root_guard_switch"})
 # Test files (relative to tests/) allowed to run with the real guard on.  Add a file here only on purpose, in review.
-FILES_THAT_MAY_USE_THE_REAL_GUARD = frozenset({"core/test_run_start_control_root_guard.py"})
+FILES_THAT_MAY_USE_THE_REAL_GUARD = frozenset(
+    {"core/test_run_start_control_root_guard.py", "cli/test_continuity_recovery_run.py"}
+)
 # The one module that implements ``create_run`` itself (it is the storage layer; the service in front of it owns the rule).
 STORE_MODULE = PACKAGE / "infrastructure" / "continuity_store.py"
 PATCHING_CALLS = frozenset({"setattr", "setitem", "delattr", "patch", "object", "multiple", "dict"})
@@ -72,9 +76,9 @@ def asks_for_the_real_guard(tree: ast.AST) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             all_args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
-            if any(arg.arg == OPT_IN_FIXTURE for arg in all_args):
+            if any(arg.arg in OPT_IN_FIXTURES for arg in all_args):
                 return True
-        if isinstance(node, ast.Constant) and node.value == OPT_IN_FIXTURE:
+        if isinstance(node, ast.Constant) and node.value in OPT_IN_FIXTURES:
             return True
     return False
 
@@ -168,6 +172,7 @@ def test_the_ratchet_sees_a_patched_guard_and_an_unlisted_opt_in() -> None:
     assert asks_for_the_real_guard(
         ast.parse(f'pytestmark = pytest.mark.usefixtures("{OPT_IN_FIXTURE}")\n')
     )
+    assert asks_for_the_real_guard(ast.parse("def test_x(control_root_guard_switch):\n    pass\n"))
     assert not asks_for_the_real_guard(ast.parse("def test_x(tmp_path):\n    pass\n"))
 
 

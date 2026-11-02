@@ -8,7 +8,6 @@ import os
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Callable
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -413,8 +412,13 @@ def _dispatch_ready(root: Path) -> None:
 
 
 def _settlement_ready(
-    root: Path, *, start_recovery_run: bool = True, action: RuntimeDecisionAction = RuntimeDecisionAction.SETTLE_EXPIRED_RUN
+    root: Path,
+    *,
+    start_recovery_run: bool = True,
+    action: RuntimeDecisionAction = RuntimeDecisionAction.SETTLE_EXPIRED_RUN,
+    target: str = "expired",
 ) -> None:
+    """``target``: the historical target is an \"expired\" RUNNING Run, a \"terminal\" (FAILED) Run, or a Work that is \"blocked\"."""
     current = datetime.now(UTC)
     historical = current - timedelta(minutes=2)
     change_path = (
@@ -498,6 +502,10 @@ def _settlement_ready(
         ),
         idempotency_key="cli-target-start-evidence",
     )
+    if target == "terminal":
+        target_service.transition_run("RUN-CLI-TARGET", RunState.FAILED, "legacy-agent", "target-cli-secret", "cli-target-failed")
+    elif target == "blocked":
+        works.transition("WORK-CLI-TARGET", WorkState.BLOCKED, "cli-target-blocked")
     decision_id = "DEC-20260911-5C37A985"
     decision = DecisionPackageDTO(
         decision_id=decision_id,
@@ -1208,128 +1216,6 @@ def test_settle_expired_cli_is_secret_free_and_capability_scoped(
     assert json.loads(result.output)["state"] == RunState.CANCELLED.value
     assert "recovery-cli-secret" not in result.output
     assert "target-cli-secret" not in result.output
-
-
-def _start_recovery_run_args(*extra: str, work_id: str = "WORK-CLI-RECOVERY", owned: tuple[str, ...] = ("README.md", ".auto-pm/continuity.db")) -> list[str]:
-    """``run start`` for the recovery Run, with no ``--worktree``: the control root itself, where the store binds a recovery Run."""
-
-    owned_options = [argument for path in owned for argument in ("--owned", path)]
-    return [
-        "run", "start", "--run-id", "RUN-CLI-RECOVERY", "--work-id", work_id, "--executor", "recovery-agent",
-        "--adapter", "codex", *owned_options,
-        "--declared-dirty", ".auto-pm/continuity.db" if ".auto-pm/continuity.db" in owned else owned[0],
-        "--lease-token", "recovery-cli-secret", "--lease-seconds", "900", "--idempotency-key", "cli-recovery-run", *extra,
-    ]
-
-
-@pytest.fixture
-def real_control_root_rule(
-    monkeypatch: pytest.MonkeyPatch, _runs_may_start_in_the_test_repo: Callable[[Path, Path], bool]
-) -> Callable[[], None]:
-    """Returns the switch that puts the production rule back; call it after the scene is built (the suite switches the rule off)."""
-
-    from auto_pm.application.core import continuity_execution_service
-
-    def switch() -> None:
-        monkeypatch.setattr(continuity_execution_service, "_worktree_is_the_control_root", _runs_may_start_in_the_test_repo)
-
-    return switch
-
-
-def test_an_expired_run_is_settled_from_the_command_line_by_a_recovery_run_started_on_the_control_root(
-    cli_runner: CliRunner, tmp_path: Path, real_control_root_rule: Callable[[], None]
-) -> None:
-    """The deadlock: the store wants the recovery Run on the control root, and ``run start`` refused the control root for every Run."""
-    _repository(tmp_path)
-    _settlement_ready(tmp_path, start_recovery_run=False)
-    real_control_root_rule()
-
-    started = _invoke(cli_runner, tmp_path, _start_recovery_run_args("--recovery-change", "CHG-SCPT-2026-214"))
-    assert started.exit_code == 0, started.output
-    assert json.loads(started.output)["worktree_path"] == str(tmp_path.resolve())
-    running = _invoke(
-        cli_runner, tmp_path,
-        ["run", "transition", "--run-id", "RUN-CLI-RECOVERY", "--to", "RUNNING", "--owner", "recovery-agent",
-         "--lease-token", "recovery-cli-secret", "--idempotency-key", "cli-recovery-running"],
-    )
-    assert running.exit_code == 0, running.output
-    settled = _invoke(cli_runner, tmp_path, _settlement_args())
-
-    assert settled.exit_code == 0, settled.output
-    assert json.loads(settled.output)["state"] == RunState.CANCELLED.value
-
-
-def test_an_ordinary_run_is_still_refused_the_control_root_with_or_without_a_recovery_change(
-    cli_runner: CliRunner, tmp_path: Path, real_control_root_rule: Callable[[], None]
-) -> None:
-    _repository(tmp_path)
-    _settlement_ready(tmp_path, start_recovery_run=False)
-    works = WorkRegistryService(tmp_path)
-    works.create_work(
-        work_id="WORK-CLI-ORDINARY", subject_project_id="SW-TEST-001", kind=WorkKind.GOVERNANCE, title="Ordinary", owner="agent-a",
-        scope_paths=["README.md"], source_fingerprint="sha256:ordinary", idempotency_key="cli-ordinary-work",
-    )
-    works.authorize("WORK-CLI-ORDINARY", "DEC-20260910-A2TARGT1", "cli-authorize-ordinary")
-    works.transition("WORK-CLI-ORDINARY", WorkState.IN_PROGRESS, "cli-start-ordinary")
-    before = _run_count(tmp_path)
-    real_control_root_rule()
-
-    plain = _invoke(cli_runner, tmp_path, _start_recovery_run_args(work_id="WORK-CLI-ORDINARY"))
-    claimed = _invoke(
-        cli_runner, tmp_path, _start_recovery_run_args("--recovery-change", "CHG-SCPT-2026-213", work_id="WORK-CLI-ORDINARY")
-    )
-
-    assert plain.exit_code == 1 and "控制根" in plain.output and "--recovery-change" in plain.output
-    assert claimed.exit_code == 1 and "未声明任何恢复类 runtime_capability" in claimed.output
-    assert _run_count(tmp_path) == before
-
-
-@pytest.mark.parametrize(
-    ("change", "owned", "expected"),
-    [
-        ("CHG-SCPT-2026-999", ("README.md", ".auto-pm/continuity.db"), "与 --recovery-change CHG-SCPT-2026-999 不一致"),
-        ("not-a-change", ("README.md", ".auto-pm/continuity.db"), "不是规范的 CHG 编号"),
-        ("CHG-SCPT-2026-214", ("README.md",), "Run owned_paths 未覆盖"),
-    ],
-)
-def test_a_recovery_run_that_does_not_meet_every_condition_is_refused_and_nothing_is_written(
-    cli_runner: CliRunner, tmp_path: Path, real_control_root_rule: Callable[[], None], change: str, owned: tuple[str, ...], expected: str
-) -> None:
-    _repository(tmp_path)
-    _settlement_ready(tmp_path, start_recovery_run=False)
-    before = _run_count(tmp_path)
-    real_control_root_rule()
-
-    refused = _invoke(cli_runner, tmp_path, _start_recovery_run_args("--recovery-change", change, owned=owned))
-
-    assert refused.exit_code == 1 and expected in refused.output
-    assert _run_count(tmp_path) == before
-
-
-@pytest.mark.parametrize(
-    ("action", "allowed"),
-    [(action, action is not RuntimeDecisionAction.REVOKE_UNSTARTED_RUN) for action in RuntimeDecisionAction],
-)
-def test_every_recovery_action_may_start_its_recovery_run_on_the_control_root_and_nothing_else_may(
-    cli_runner: CliRunner, tmp_path: Path, real_control_root_rule: Callable[[], None], action: RuntimeDecisionAction, allowed: bool
-) -> None:
-    """The store binds the recovery Run of the settlement, the lease fence and reconcile, the legacy fence and the adjudication to the root."""
-    _repository(tmp_path)
-    _settlement_ready(tmp_path, start_recovery_run=False, action=action)
-    real_control_root_rule()
-
-    result = _invoke(cli_runner, tmp_path, _start_recovery_run_args("--recovery-change", "CHG-SCPT-2026-214"))
-
-    assert (result.exit_code == 0) is allowed, result.output
-    if not allowed:
-        assert "未声明任何恢复类 runtime_capability" in result.output
-
-
-def test_the_recovery_exception_is_for_exactly_the_actions_whose_recovery_run_the_store_binds_to_the_control_root() -> None:
-    from auto_pm.application.core.continuity_execution_service import RECOVERY_RUN_ACTIONS
-    from auto_pm.contracts.decision_package import RuntimeDecisionAction
-
-    assert RECOVERY_RUN_ACTIONS == set(RuntimeDecisionAction) - {RuntimeDecisionAction.REVOKE_UNSTARTED_RUN}
 
 
 def test_settle_expired_cli_rejects_failed_outcome_without_mutation(

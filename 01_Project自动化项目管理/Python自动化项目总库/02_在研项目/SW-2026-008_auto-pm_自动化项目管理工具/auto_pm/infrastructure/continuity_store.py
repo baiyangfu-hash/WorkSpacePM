@@ -997,6 +997,16 @@ class ContinuityStore:
             "decision_blob": head_blob(decision_id),
         }
 
+    def aggregate_has_event(self, aggregate_type: str, aggregate_id: str, event_type: str) -> bool:
+        """Read-only: has the ledger already recorded this event for this Run/Work (e.g. its settlement or fence)?"""
+
+        with self._read_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM events WHERE aggregate_type=? AND aggregate_id=? AND event_type=? LIMIT 1",
+                (aggregate_type, aggregate_id, event_type),
+            ).fetchone()
+        return row is not None
+
     def decision_git_binding_issues(self, decision_id: str) -> tuple[str, ...]:
         """Read-only diagnostic: is one Decision file tracked and clean at the control-root HEAD?"""
 

@@ -143,6 +143,24 @@ def control_root_guard_on(
     monkeypatch.setattr(continuity_execution_service, "_worktree_is_the_control_root", _runs_may_start_in_the_test_repo)
 
 
+@pytest.fixture
+def control_root_guard_switch(
+    monkeypatch: pytest.MonkeyPatch, _runs_may_start_in_the_test_repo: Callable[[Path, Path], bool]
+) -> Callable[[], None]:
+    """The switch that puts the production rule back, for a test that builds its scene with the rule off first.
+
+    Same rule as ``control_root_guard_on`` (and listed in the same ratchet), but applied when the test calls the returned function:
+    a scene that starts its historical Runs in the throw-away repository root must be built before the rule is on.
+    """
+
+    from auto_pm.application.core import continuity_execution_service
+
+    def switch() -> None:
+        monkeypatch.setattr(continuity_execution_service, "_worktree_is_the_control_root", _runs_may_start_in_the_test_repo)
+
+    return switch
+
+
 # Qt tests whose leftovers must not be freed by the cyclic garbage collector at a random later moment (the cockpit Modbus tool that this was written for has been removed; the same rule keeps protecting the other Qt tests).
 _QT_TEST_PREFIXES = ("tests/qml/", "tests/ui/", "tests/e2e/test_pmf_gui.py")
 

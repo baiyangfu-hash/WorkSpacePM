@@ -31,10 +31,13 @@ from auto_pm.contracts.continuity import (
     LeaseRenewalReceipt,
     RunItem,
     RunState,
+    WorkItem,
     WorkState,
 )
 from auto_pm.contracts.decision_package import (
+    DecisionPackageDTO,
     RuntimeDecisionAction,
+    RuntimeDecisionCapability,
     RuntimeDecisionOutcome,
     is_canonical_decision_id,
     is_canonical_runtime_change_id,
@@ -129,6 +132,14 @@ RECOVERY_RUN_ACTIONS = frozenset(
         RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK,
     }
 )
+
+# The ledger event that records an action as done on its target; a target that has it is not open any more.
+_RECOVERY_DONE_EVENT = {
+    RuntimeDecisionAction.FENCE_TERMINAL_LEASE: "RUN_TERMINAL_LEASE_FENCED",
+    RuntimeDecisionAction.RECONCILE_TERMINAL_LEASE: "RUN_TERMINAL_LEASE_RECONCILED",
+    RuntimeDecisionAction.FENCE_LEGACY_TERMINAL_LEASE: "RUN_LEGACY_LEASE_FENCED",
+}
+_TERMINAL_RUN_STATES = frozenset({RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED})
 
 CONTROL_ROOT_RUN_REFUSAL = (
     "Run 的工作树不能是控制根本身（AGENTS.md WS-001：控制根只跑驾驶舱命令、不写业务代码）。"
@@ -305,7 +316,9 @@ class ContinuityExecutionService:
                 allow_external_linked=True,
             )
             if _worktree_is_the_control_root(governed_worktree, self._root):
-                self._require_recovery_run(work_id, owned, recovery_change_id)
+                refusal = self._control_root_run_refusal(work_id, owned, recovery_change_id)
+                if refusal:
+                    raise ContinuityExecutionError(refusal)
             if actual_head != git_head:
                 raise ContinuityExecutionError(
                     f"Run git_head 与受管 worktree 当前 HEAD 不一致：--git-head 给的是 {git_head}，工位现在是 {actual_head}。"
@@ -1557,8 +1570,8 @@ class ContinuityExecutionService:
                 holder = f"：Run {candidate.run_id}"
             raise ContinuityExecutionError("Work 已有非终态 Run" + holder)
 
-    def _require_recovery_run(self, work_id: str, owned: tuple[str, ...], recovery_change_id: str) -> None:
-        """Let a Run use the control root as its worktree only when it is a recovery Run under a recovery Decision.
+    def _control_root_run_refusal(self, work_id: str, owned: tuple[str, ...], recovery_change_id: str) -> str:
+        """Why a Run may not use the control root as its worktree; empty only for a recovery Run under a recovery Decision.
 
         The store binds the recovery Run of every administrative settlement to the control-root main worktree, so a recovery Run
         that could only live on an isolated station would deadlock the ledger (an expired Run could never be settled).  The
@@ -1568,10 +1581,9 @@ class ContinuityExecutionService:
         """
 
         if not recovery_change_id:
-            raise ContinuityExecutionError(CONTROL_ROOT_RUN_REFUSAL)
+            return CONTROL_ROOT_RUN_REFUSAL
         problem = self._control_root_recovery_problem(work_id, owned, recovery_change_id)
-        if problem:
-            raise ContinuityExecutionError(f"{CONTROL_ROOT_RUN_REFUSAL}。本次恢复 Run 不符合例外条件：{problem}")
+        return f"{CONTROL_ROOT_RUN_REFUSAL}。本次恢复 Run 不符合例外条件：{problem}" if problem else ""
 
     def _control_root_recovery_problem(self, work_id: str, owned: tuple[str, ...], recovery_change_id: str) -> str:
         if not is_canonical_runtime_change_id(recovery_change_id):
@@ -1603,9 +1615,54 @@ class ContinuityExecutionService:
             scope = self._normalize_paths(list(work.scope_paths))
         except ContinuityExecutionError as error:
             return str(error)
-        for label, paths in (("Decision approved_files", approved), ("Work scope", scope), ("Run owned_paths", owned)):
+        for label, paths in (("Decision approved_files", approved), ("Work scope", scope)):
             if not authority_paths_covered((target,), paths):
                 return f"{label} 未覆盖 canonical {target}"
+        if set(owned) != {target}:
+            return f"控制根上的恢复 Run 的 owned_paths 只能是 {target}（现在是 {', '.join(owned)}）"
+        return self._recovery_authority_problem(work, decision, capability)
+
+    def _recovery_authority_problem(
+        self, work: WorkItem, decision: DecisionPackageDTO, capability: RuntimeDecisionCapability
+    ) -> str:
+        """The recovery Decision and every Decision it settles are committed and clean, a named target is still open, and no recovery Run is live.
+
+        An approval is for one recovery, not a standing permission to open Runs in the control root: once every named target has been
+        settled (or fenced, or adjudicated) no further recovery Run may start, and one recovery Work has one live Run at a time.
+        """
+
+        originals: set[str] = set()
+        still_open = False
+        try:
+            for action in sorted(RECOVERY_RUN_ACTIONS.intersection(capability.allowed_runtime_actions), key=str):
+                if action is RuntimeDecisionAction.ADJUDICATE_BLOCKED_WORK:
+                    for work_id in capability.target_work_ids:
+                        target_work = self._store.get_work(work_id)
+                        originals.add(target_work.authorization_ref)
+                        still_open = still_open or target_work.state is WorkState.BLOCKED
+                    continue
+                for run_id in capability.target_run_ids:
+                    target_run = self._store.get_run(run_id)
+                    originals.add(self._store.get_work(target_run.work_id).authorization_ref)
+                    terminal = target_run.state in _TERMINAL_RUN_STATES
+                    if action is RuntimeDecisionAction.SETTLE_EXPIRED_RUN:
+                        still_open = still_open or not terminal
+                    else:
+                        done = self._store.aggregate_has_event("run", run_id, _RECOVERY_DONE_EVENT[action])
+                        still_open = still_open or (terminal and not done)
+            for decision_id in (decision.decision_id, *sorted(originals)):
+                if not is_canonical_decision_id(decision_id):
+                    return f"Decision {decision_id!r} 不是 canonical Decision"
+                issues = self._store.decision_git_binding_issues(decision_id)
+                if issues:
+                    return issues[0]
+            live = self._store.list_runs(work.work_id)
+        except ContinuityStoreError as error:
+            return str(error)
+        if not still_open:
+            return "Decision 点名的目标已处理完毕或不处于可恢复状态，不能再为它开恢复 Run"
+        if live:
+            return f"该恢复 Work 已有未终态 Run {live[0].run_id}；同一恢复 Work 同时只许一个"
         return ""
 
     @staticmethod
