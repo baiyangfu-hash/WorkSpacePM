@@ -20,6 +20,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.application.core.agent_worktree_service import (
     AGENT_ROSTER,
     MAX_STATIONS,
+    STALE_DAYS,
     AgentWorktreeError,
     AgentWorktreeService,
     Station,
@@ -75,6 +76,8 @@ def _station_json(station: Station) -> dict[str, Any]:
         "untouched": station.untouched if station.checked else None,
         "locked": station.locked,
         "size_bytes": station.size_bytes,
+        "idle_days": station.idle_days,  # whole days since the last commit / branch switch / opening; null: unknown
+        "stale": station.stale,  # untouched for more than 3 days (WS-001 rule 5)
     }
 
 
@@ -82,6 +85,12 @@ def _kind_label(station: Any) -> str:
     if station.broken:
         return "残缺目录"
     return station.kind if station.registered else "未登记目录"
+
+
+def _idle_cell(station: Any) -> str:
+    if station.idle_days is None:
+        return "-"
+    return f"[yellow]{station.idle_days}[/yellow]" if station.stale else str(station.idle_days)
 
 
 def _print_count(stations: list[Any]) -> None:
@@ -93,6 +102,13 @@ def _print_count(stations: list[Any]) -> None:
         )
     else:
         console.print(f"共 {len(stations)} 个目录（上限 {MAX_STATIONS}）")
+    stale = [s for s in stations if s.stale]
+    if stale:
+        names = "、".join(s.name for s in stale)
+        console.print(
+            f"[yellow]超过 {STALE_DAYS} 天没动的 {len(stale)} 个：{names}；做完了就 close / sweep，没做完就在日报里写明[/yellow]",
+            highlight=False,
+        )
 
 
 def _print_broken_hint(stations: list[Any]) -> None:
@@ -157,10 +173,10 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
         return
     table = Table(title="工位", show_header=True, header_style="bold cyan")
     if not deep:
-        for column in ("工位", "类型", "分支", "路径"):
+        for column in ("工位", "类型", "分支", "闲置（天）", "路径"):
             table.add_column(column)
         for s in stations:
-            table.add_row(s.name, _kind_label(s), s.branch or "-", str(s.path))
+            table.add_row(s.name, _kind_label(s), s.branch or "-", _idle_cell(s), str(s.path))
         console.print(table)
         _print_count(stations)
         _print_broken_hint(stations)
@@ -168,7 +184,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
             "只列了名字、分支、路径；要看未提交、未推送、是否并进 main，加 --deep（会慢）"
         )
         return
-    for column in ("工位", "类型", "分支", "未提交", "未推送", "并进 main", "占用（含 .venv）"):
+    for column in ("工位", "类型", "分支", "闲置（天）", "未提交", "未推送", "并进 main", "占用（含 .venv）"):
         table.add_column(column)
     for s in stations:
         kind = _kind_label(s)
@@ -177,6 +193,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
             s.name,
             kind,
             s.branch or "-",
+            _idle_cell(s),
             str(len(s.dirty_paths)),
             str(s.unpushed),
             merged,
