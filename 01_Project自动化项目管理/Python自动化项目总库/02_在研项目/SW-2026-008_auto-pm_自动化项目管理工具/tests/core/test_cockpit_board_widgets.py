@@ -87,3 +87,16 @@ def test_project_tab_before_first_render_does_nothing_and_does_not_raise(qapp: Q
     page.set_tab("board")
     assert page.tab == "board"
     assert page.layout_.count() == 0
+
+
+def test_issues_page_says_which_kinds_were_not_checked_before_the_counts(qapp: QApplication) -> None:
+    from datetime import datetime
+
+    page = IssuesPage(lambda _pid: None)
+    page.show_view([], datetime(2026, 11, 1, 12, 0), ["GitHub 这次没读到（断网）：PR 门禁红这类问题没检查，这页的条数不含它们。"])
+    texts = [str(label.text()) for label in page.findChildren(QLabel)]
+    assert any(text.startswith("没检查：GitHub 这次没读到") for text in texts)
+    page.set_filter("risk")  # 换档重画时说明不能丢
+    assert any(str(label.text()).startswith("没检查：GitHub") for label in page.findChildren(QLabel))
+    page.show_view([], datetime(2026, 11, 1, 12, 0))
+    assert not any(str(label.text()).startswith("没检查：") for label in page.findChildren(QLabel))
