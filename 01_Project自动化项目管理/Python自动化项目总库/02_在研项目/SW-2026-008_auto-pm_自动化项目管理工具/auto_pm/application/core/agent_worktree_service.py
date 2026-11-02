@@ -54,6 +54,8 @@ RELEASE_FREE_PLACES = 1
 STALE_DAYS = 3
 # Directories ``sweep`` never lists as removable, whatever Git says (the user's call, 11-02): the open PR #470 station,
 # the 1.2 GB trial copy and the Trae station.  Removing one is a manual ``git worktree remove`` by the user.
+# Only ``sweep`` honors it.  ``close`` and ``open`` do not: an agent finishing its own card must be able to close its
+# station and open the next one (audit 546 -- a keep-list check in ``close`` would have locked Trae out).
 RESERVED_STATIONS = frozenset({"m3-pr-chg470", "gui-trial", "trae"})
 # Ignored entries that are only regenerable tool caches do not hold a directory back (coordinator ruling 11-02);
 # any other ignored file still does.  ``__pycache__`` counts only for its ``*.pyc`` files.
@@ -321,10 +323,6 @@ class AgentWorktreeService:
         if caller and caller != agent:
             raise StationRefusedError(
                 f"你是 {caller}，不能收 {agent} 的工位；请 {agent} 自己收，或由用户决定"
-            )
-        if agent.lower() in RESERVED_STATIONS:
-            raise StationRefusedError(
-                f"{agent} 在保留名单里（{'、'.join(sorted(RESERVED_STATIONS))}），close 不收；要收请用户亲手处理"
             )
         path = self._stations_dir / agent
         registered = self._worktrees()

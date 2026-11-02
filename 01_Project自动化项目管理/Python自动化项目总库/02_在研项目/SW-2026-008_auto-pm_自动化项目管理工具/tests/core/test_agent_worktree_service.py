@@ -561,7 +561,7 @@ def test_locked_or_detached_stations_are_left_alone(lab: Lab) -> None:
     locked = finished_station(lab, "claude", "CARD-1")
     lab.merge_on_github("claude/CARD-1")
     git(lab.root, "worktree", "lock", str(locked))
-    detached = lab.station("cursor")
+    detached = lab.station("trae")
     git(lab.root, "worktree", "add", "-q", "--detach", str(detached), "origin/main")
 
     report = lab.service().sweep(apply=True)
@@ -571,7 +571,7 @@ def test_locked_or_detached_stations_are_left_alone(lab: Lab) -> None:
     assert "lock" in reasons[str(locked)]
     assert "detached" in reasons[str(detached)]
     with pytest.raises(StationRefusedError, match="detached"):
-        lab.service().close("cursor")
+        lab.service().close("trae")
 
 
 def test_open_refuses_a_stations_directory_that_points_outside(lab: Lab, tmp_path: Path) -> None:
@@ -1363,14 +1363,17 @@ def test_a_failing_ignored_files_scan_stops_the_sweep(lab: Lab, monkeypatch: pyt
         lab.service().sweep(apply=True)
 
 
-def test_close_refuses_a_name_on_the_keep_list(lab: Lab) -> None:
+def test_a_keep_list_agent_can_still_close_its_own_finished_station_and_open_the_next_card(lab: Lab) -> None:
+    """The keep list is only for ``sweep``: ``close`` is the agent's own way to finish a card (audit 546)."""
+
     trae = finished_station(lab, "trae", "CARD-1")
     lab.merge_on_github("trae/CARD-1")
 
-    with pytest.raises(StationRefusedError, match="保留名单"):
-        lab.service().close("trae")
+    closed = lab.service().close("trae")
+    assert not trae.exists() and closed.branch_deleted
 
-    assert trae.exists()
+    reopened = lab.service().open("trae", "CARD-2")
+    assert reopened.path == trae and git(trae, "branch", "--show-current") == "trae/CARD-2"
 
 
 def test_the_sweep_listing_says_a_roster_station_takes_its_ignored_files_along(lab: Lab) -> None:
@@ -1383,6 +1386,7 @@ def test_the_sweep_listing_says_a_roster_station_takes_its_ignored_files_along(l
     reason = _reasons(report)[str(done)]
     assert any(item.remove for item in report.items if item.target == str(done))
     assert "会随目录一起删" in reason and ".venv" in reason
+    assert "忽略的文件 1 项" in reason, "项数要写对"
 
 
 def test_the_sweep_listing_of_a_roster_station_without_ignored_files_has_no_such_note(lab: Lab) -> None:

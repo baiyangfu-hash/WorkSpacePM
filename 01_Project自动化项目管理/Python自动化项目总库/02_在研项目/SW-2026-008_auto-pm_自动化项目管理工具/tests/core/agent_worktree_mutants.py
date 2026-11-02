@@ -125,11 +125,6 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "        if False:\n            shown",
     ),
     (
-        "close 不看保留名单",
-        "        if agent.lower() in RESERVED_STATIONS:\n            raise",
-        "        if False:\n            raise",
-    ),
-    (
         "列表不说工位会带走忽略文件",
         "    if not station.ignored_paths:\n        return \"\"\n    shown",
         "    if True:\n        return \"\"\n    shown",
