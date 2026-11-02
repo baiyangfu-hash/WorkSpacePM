@@ -184,8 +184,246 @@ def test_pb10_a_project_root_with_non_ascii_characters_builds(tmp_path: Path) ->
     assert result.version == "9.9.9" and "auto_pm/__init__.py" in result.files
 
 
+def _doctor_stub(repo: Path, *, exit_code: int, sleep: float = 0.0, supports: bool = True) -> Path:
+    """A stand-in for the control root's ``main.py``.
+
+    ``doctor --help`` lists ``--pre-release`` only when ``supports``; ``doctor --pre-release`` records its arguments and
+    working directory, then exits with ``exit_code`` (an old doctor, ``supports=False``, rejects the option with exit code 2).
+    """
+    log = repo / "doctor_args.json"
+    (repo / "main.py").write_text(
+        "import json, os, sys, time\n"
+        "args = sys.argv[1:]\n"
+        "if '--help' in args:\n"
+        f"    print('Usage: main.py doctor [OPTIONS]' + (' --pre-release' if {supports!r} else ''))\n"
+        "    raise SystemExit(0)\n"
+        f"if '--pre-release' in args and not {supports!r}:\n"
+        "    print(\"Error: No such option '--pre-release'.\")\n"
+        "    raise SystemExit(2)\n"
+        f"open({str(log)!r}, 'w', encoding='utf-8').write(json.dumps({{'argv': args, 'cwd': os.getcwd(), 'python': sys.executable}}))\n"
+        f"time.sleep({sleep})\n"
+        f"print('doctor says {exit_code}: missing dependency rich')\n"
+        f"raise SystemExit({exit_code})\n",
+        encoding="utf-8",
+    )
+    return log
+
+
+def _build_args(repo: Path, commit: str, out: Path, *extra: str) -> list[str]:
+    return ["build", "--repo", str(repo), "--commit", commit, "--project-root", "proj", "--output", str(out), *extra]
+
+
+def _last_json(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
+    loaded: dict[str, object] = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    return loaded
+
+
+def _records(repo: Path) -> list[Path]:
+    return sorted((repo / ".auto-pm" / "reports").glob("pmf_build_bypass_*.json")) if (repo / ".auto-pm" / "reports").is_dir() else []
+
+
+def test_pb30_a_doctor_that_fails_stops_the_build_and_its_own_words_are_in_the_refusal(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=1)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    refused = _last_json(capsys)
+    details = str(refused["details"])
+    assert code == 2 and refused["ok"] is False and refused["code"] == "pre-release-check-failed"
+    assert "退出码 1" in details and "doctor says 1: missing dependency rich" in details, "doctor 原文要原样附上，缺依赖不能被说成工位太多"
+    assert "也可能是缺依赖" in details
+    assert not (tmp_path / "out").exists()
+
+
+def test_pb31_a_passing_doctor_lets_the_build_run_and_is_asked_for_the_pre_release_check_in_the_repo(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    log = _doctor_stub(repo, exit_code=0)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    ok = _last_json(capsys)
+    assert code == 0 and ok["ok"] is True and "warnings" not in ok
+    asked = json.loads(log.read_text(encoding="utf-8"))
+    argv = asked["argv"]
+    assert argv[-2:] == ["doctor", "--pre-release"] and argv[:2] == ["--workspace", str(repo.resolve())]
+    assert Path(asked["cwd"]).resolve() == repo.resolve(), "要在控制根里问，不是在调用者的当前目录"
+    assert _records(repo) == [], "没绕过就没有旁路记录"
+
+
+def test_pb32_a_repo_without_main_py_stops_the_build(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "pre-release-check-unavailable" and "main.py" in str(refused["details"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_pb33_a_doctor_that_hangs_stops_the_build(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=0, sleep=30)
+    monkeypatch.setattr(pb, "WORKTREE_CHECK_TIMEOUT_SECONDS", 1)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "pre-release-check-unavailable" and "没有结果" in str(refused["details"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_pb33b_the_timeout_constant_is_what_reaches_subprocess_run_and_is_a_sane_value(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=0)
+    seen: list[object] = []
+    real_run = pb.subprocess.run
+
+    def spy(*args: object, **kwargs: object) -> object:
+        if kwargs.get("cwd") is not None:
+            seen.append(kwargs.get("timeout"))
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(pb.subprocess, "run", spy)
+    monkeypatch.setattr(pb, "WORKTREE_CHECK_TIMEOUT_SECONDS", 77)
+
+    assert pb.main(_build_args(repo, commit, tmp_path / "out")) == 0
+
+    assert seen == [77], "超时常量要真的传给子进程"
+    monkeypatch.undo()
+    assert 30 <= pb.WORKTREE_CHECK_TIMEOUT_SECONDS <= 600, "太短会误杀正常体检，太长会让发版卡死"
+
+
+def test_pb34_a_doctor_that_cannot_be_started_stops_the_build(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=0)
+
+    def cannot_start(*_args: object, **_kwargs: object) -> None:
+        raise FileNotFoundError("no interpreter")
+
+    monkeypatch.setattr(pb.subprocess, "run", cannot_start)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "pre-release-check-unavailable" and "FileNotFoundError" in str(refused["details"])
+
+
+@pytest.mark.parametrize("returncode", [-9, -15, 3221225477, 127, 1])
+def test_pb34b_a_doctor_killed_by_a_signal_or_crashing_is_a_failure_not_a_pass(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, returncode: int) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=0)
+    real_run = pb.subprocess.run
+
+    def killed(*args: object, **kwargs: object) -> object:
+        if kwargs.get("cwd") is not None:
+            return subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr="Killed")
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(pb.subprocess, "run", killed)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "pre-release-check-failed" and f"退出码 {returncode}" in str(refused["details"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_pb34c_the_control_roots_venv_python_is_preferred_and_the_running_one_is_the_fallback(tmp_path: Path) -> None:
+    repo, _commit = _make_repo(tmp_path)
+    assert pb.control_root_python(repo) == sys.executable
+    venv_python = repo / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("", encoding="utf-8")
+    assert pb.control_root_python(repo) == str(venv_python)
+    unix_python = repo / ".venv" / "bin" / "python"
+    unix_python.parent.mkdir(parents=True)
+    unix_python.write_text("", encoding="utf-8")
+    assert pb.control_root_python(repo) in {str(venv_python), str(unix_python)}
+
+
+def test_pb34d_the_doctor_is_started_with_the_control_roots_python(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=0)
+    venv_python = repo / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("", encoding="utf-8")
+    started: list[str] = []
+
+    def record(command: list[str], *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        started.append(command[0])
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(pb.subprocess, "run", record)
+    pb.pre_release_check(repo)
+
+    assert started == [str(venv_python)]
+
+
+def test_pb35_the_bypass_is_allowed_only_for_a_doctor_without_pre_release_and_leaves_a_record(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    log = _doctor_stub(repo, exit_code=1, supports=False)
+
+    code = pb.main(_build_args(repo, "HEAD", tmp_path / "out", "--skip-worktree-check"))
+
+    captured = capsys.readouterr()
+    ok = json.loads(captured.out.strip().splitlines()[-1])
+    records = _records(repo)
+    assert code == 0 and ok["ok"] is True and len(records) == 1
+    assert ok["warnings"][0] == pb.SKIP_WARNING and str(records[0]) in ok["warnings"][1] and "发版 PR 必须引用" in ok["warnings"][1]
+    assert "!!!" in captured.err and "显式绕过" in captured.err and str(records[0]) in captured.err
+    recorded = json.loads(records[0].read_text(encoding="utf-8"))
+    assert recorded["schema_version"] == "pmf_build_bypass.v1" and recorded["source_commit"] == commit
+    assert "不支持 --pre-release" in recorded["reason"] and recorded["at"].endswith("+00:00")
+    assert not log.exists(), "绕过时不再去问 --pre-release"
+    assert not any("bypass" in path.relative_to(tmp_path / "out").as_posix() for path in (tmp_path / "out").rglob("*")), "旁路记录不进发布目录"
+
+
+def test_pb35b_the_bypass_is_refused_once_doctor_supports_pre_release(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=1, supports=True)
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out", "--skip-worktree-check"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "pre-release-bypass-refused" and "已经支持" in str(refused["details"])
+    assert not (tmp_path / "out").exists() and _records(repo) == []
+
+
+def test_pb35c_the_bypass_is_refused_when_support_cannot_be_determined(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    (repo / "main.py").write_text("import sys\nprint('Traceback: No module named rich')\nsys.exit(1)\n", encoding="utf-8")
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out", "--skip-worktree-check"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "pre-release-bypass-refused" and "No module named rich" in str(refused["details"])
+    assert not (tmp_path / "out").exists() and _records(repo) == []
+
+
+def test_pb35d_no_record_no_bypass(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=1, supports=False)
+    (repo / ".auto-pm").write_text("a file where the reports folder should be\n", encoding="utf-8")
+
+    code = pb.main(_build_args(repo, commit, tmp_path / "out", "--skip-worktree-check"))
+
+    refused = _last_json(capsys)
+    assert code == 2 and refused["code"] == "pre-release-bypass-refused" and "没有留痕不许绕过" in str(refused["details"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_pb36_without_the_flag_the_check_is_on_by_default(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=2)
+
+    assert pb.main(_build_args(repo, commit, tmp_path / "out")) == 2
+    assert _last_json(capsys)["code"] == "pre-release-check-failed"
+
+
 def test_pb11_the_command_line_returns_0_on_success_and_2_on_a_refusal(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo, commit = _make_repo(tmp_path)
+    _doctor_stub(repo, exit_code=0)
     assert pb.main(["build", "--repo", str(repo), "--commit", commit, "--project-root", "proj", "--output", str(tmp_path / "out")]) == 0
     ok = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert ok["ok"] is True and ok["files"] == 6 + 1 + 1  # 7 payload files of the demo project + release_meta.json

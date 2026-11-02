@@ -13,6 +13,15 @@
     python scripts/pmf_build.py build  --repo <仓库根> --commit <提交> --project-root <仓库内的相对路径> --output <新目录> [--release-id ID]
     python scripts/pmf_build.py verify --output <目录> [--manifest <deployment_manifest.json> --release-id ID]
 
+``build`` 一开头先在 ``--repo``（控制根）里用子进程跑 ``main.py doctor --pre-release``（优先用控制根 ``.venv`` 的 Python）：
+发版前体检（工位目录超过 7 个等）不过就不构建（H-06）。子进程退出码非 0（含被信号杀掉）、找不到 ``main.py``、超时、起不来，一律中止，不放行；
+拒绝信息附 doctor 的输出原文（缺依赖不会被说成“工位太多”）。本脚本自己不数目录，只有 doctor 一套检查逻辑。
+
+唯一的绕过口 ``--skip-worktree-check`` 自带日落：只有控制根里的 doctor **不支持** ``--pre-release``（第七版自举：已部署的发布版还没有这个选项）时才放行；
+doctor 支持了就拒绝绕过，查不出支不支持也拒绝。放行时先在控制根 ``.auto-pm/reports/`` 写旁路记录（时间、构建的提交、原因），
+写不成就不构建；记录路径在标准错误和结果 JSON 的 ``warnings`` 里大字报出，发版 PR 必须引用它（不写进发布目录）。
+绕过前请先手工数 ``git worktree list`` 不超过 7 个。
+
 退出码：0 成功；2 被拒绝（原因写在标准输出的 JSON 里）；3 输入错误。
 """
 
@@ -35,6 +44,16 @@ PAYLOAD_DIRS = ("auto_pm", "templates")
 REQUIRED_FILES = ("auto_pm/__init__.py", "auto_pm/__main__.py")
 #: ``auto_pm/__init__.py`` 把这些分层目录加进包搜索路径（PEP 420），``auto_pm.core`` 因此解析到 ``auto_pm/application/core``
 IMPORT_ROOTS = ("auto_pm", "auto_pm/domain", "auto_pm/infrastructure", "auto_pm/application", "auto_pm/ui")
+#: ``main.py doctor --pre-release`` 最长等多久；超时按“检查不可用”中止
+WORKTREE_CHECK_TIMEOUT_SECONDS = 180
+SKIP_WARNING = "!!! 已跳过发版前置检查（工位目录数）：这是显式绕过，发版前必须已手工确认 `git worktree list` 不超过 7 个 !!!"
+#: 发版前体检未过 / 体检没法做 / 不许绕过：稳定的机器可读原因
+CODE_FAILED = "pre-release-check-failed"
+CODE_UNAVAILABLE = "pre-release-check-unavailable"
+CODE_BYPASS_REFUSED = "pre-release-bypass-refused"
+#: 拒绝信息里附 doctor 原文的最大字符数（取末尾）
+RAW_OUTPUT_LIMIT = 4000
+BYPASS_SCHEMA = "pmf_build_bypass.v1"
 META_SCHEMA = "release_metadata.v1"
 META_NAME = "release_meta.json"
 #: ``release_meta.json`` 里允许因机器而异的键：判可复现与 ``verify`` 时不比较
@@ -68,6 +87,71 @@ class BuildResult:
     def manifest_entry(self) -> dict[str, object]:
         """与 ``deployment_manifest.v1`` 里一个发布条目同形（键排序、路径排序）。"""
         return {"source_commit": self.source_commit, "version": self.version, "built_at": self.built_at, "files": dict(sorted(self.files.items()))}
+
+
+def control_root_python(repo: Path) -> str:
+    """控制根自己的 ``.venv`` 里的 Python（有就用，依赖装在那里）；没有再退回运行本脚本的解释器。"""
+    for relative in (".venv/Scripts/python.exe", ".venv/bin/python"):
+        candidate = repo / relative
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
+
+
+def _doctor(repo: Path, *doctor_args: str) -> subprocess.CompletedProcess[str]:
+    """在控制根里跑 ``main.py doctor ...``；找不到 ``main.py``、起不来、超时都按“检查不可用”拒绝。"""
+    main_py = repo / "main.py"
+    if not main_py.is_file():
+        raise BuildError(CODE_UNAVAILABLE, f"找不到 {main_py}：--repo 必须是控制根")
+    command = [control_root_python(repo), "-B", str(main_py), "--workspace", str(repo), "doctor", *doctor_args]
+    try:
+        return subprocess.run(command, cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=WORKTREE_CHECK_TIMEOUT_SECONDS, check=False)
+    except subprocess.TimeoutExpired:
+        raise BuildError(CODE_UNAVAILABLE, f"doctor {' '.join(doctor_args)} 超过 {WORKTREE_CHECK_TIMEOUT_SECONDS} 秒没有结果") from None
+    except OSError as exc:
+        raise BuildError(CODE_UNAVAILABLE, f"起不来 doctor {' '.join(doctor_args)}：{type(exc).__name__}: {exc}") from None
+
+
+def _raw_output(done: subprocess.CompletedProcess[str]) -> str:
+    return (done.stdout + done.stderr).strip()[-RAW_OUTPUT_LIMIT:]
+
+
+def pre_release_check(repo: Path) -> None:
+    """发版前置检查（H-06）：在控制根 ``repo`` 里跑 ``main.py doctor --pre-release``，退出码非 0（含被信号杀掉的负数）就拒绝构建。
+
+    只信 doctor 的退出码，不在这里重数目录（只有一套数法）。拒绝信息附 doctor 的输出原文：体检不过可能是工位目录太多，
+    也可能是缺依赖或别的体检项，不要替它下结论。
+    """
+    done = _doctor(repo, "--pre-release")
+    if done.returncode != 0:
+        raise BuildError(
+            CODE_FAILED,
+            f"发版前体检（doctor --pre-release）未通过，退出码 {done.returncode}。可能是工位目录超过 7 个（先回收再发版，删除只认用户亲口说“收”），"
+            f"也可能是缺依赖或别的体检项；doctor 原文如下：\n{_raw_output(done)}",
+        )
+
+
+def allow_bypass(repo: Path) -> str:
+    """``--skip-worktree-check`` 的日落条件：只有 doctor 不支持 ``--pre-release`` 时才放行，返回放行的原因；否则拒绝。"""
+    helped = _doctor(repo, "--help")
+    if helped.returncode != 0:
+        raise BuildError(CODE_BYPASS_REFUSED, f"查不出 doctor 支不支持 --pre-release（doctor --help 退出码 {helped.returncode}），不能绕过；doctor 原文：\n{_raw_output(helped)}")
+    if "--pre-release" in helped.stdout + helped.stderr:
+        raise BuildError(CODE_BYPASS_REFUSED, "控制根里的 doctor 已经支持 --pre-release，不能再绕过：去掉 --skip-worktree-check，让体检自己判")
+    return "控制根里的 doctor 还不支持 --pre-release（第七版自举场景）"
+
+
+def write_bypass_record(repo: Path, commit: str, reason: str, now: datetime | None = None) -> Path:
+    """在控制根 ``.auto-pm/reports/`` 写旁路记录；写不成就抛 ``BuildError``（没有留痕就不许绕过）。"""
+    moment = (now or datetime.now(UTC)).replace(microsecond=0)
+    record = {"schema_version": BYPASS_SCHEMA, "at": moment.isoformat(), "source_commit": commit, "flag": "--skip-worktree-check", "reason": reason}
+    target = repo / ".auto-pm" / "reports" / f"pmf_build_bypass_{moment.strftime('%Y%m%dT%H%M%SZ')}.json"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise BuildError(CODE_BYPASS_REFUSED, f"写不了旁路记录 {target}（{type(exc).__name__}: {exc}），没有留痕不许绕过") from None
+    return target
 
 
 def _git(repo: Path, *args: str) -> bytes:
@@ -304,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--project-root", required=True)
     b.add_argument("--output", required=True)
     b.add_argument("--release-id")
+    b.add_argument("--skip-worktree-check", action="store_true", help="显式绕过发版前置检查；默认关，只有控制根里的 doctor 还不支持 --pre-release 时才放行，并写旁路记录、大字警告")
     v = sub.add_parser("verify")
     v.add_argument("--output", required=True)
     v.add_argument("--manifest")
@@ -311,9 +396,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "build":
+            warnings: list[str] = []
+            control_root = Path(args.repo).resolve()
+            if args.skip_worktree_check:
+                reason = allow_bypass(control_root)
+                record = write_bypass_record(control_root, resolve_commit(control_root, args.commit), reason)
+                notice = f"旁路记录：{record}（发版 PR 必须引用它）"
+                print(SKIP_WARNING, file=sys.stderr)
+                print(notice, file=sys.stderr)
+                warnings.extend([SKIP_WARNING, notice])
+            else:
+                pre_release_check(control_root)
             result = build(Path(args.repo), args.commit, args.project_root, Path(args.output), args.release_id)
-            print(json.dumps({"ok": True, "release_id": result.release_id, "source_commit": result.source_commit, "version": result.version, "built_at": result.built_at,
-                              "files": len(result.files), "output": str(result.output)}, ensure_ascii=False))
+            payload: dict[str, object] = {"ok": True, "release_id": result.release_id, "source_commit": result.source_commit, "version": result.version, "built_at": result.built_at,
+                                          "files": len(result.files), "output": str(result.output)}
+            if warnings:
+                payload["warnings"] = warnings
+            print(json.dumps(payload, ensure_ascii=False))
             return 0
         entry_files: dict[str, str] | None = None
         recorded: dict[str, object] | None = None
