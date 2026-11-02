@@ -543,8 +543,15 @@ def github_vm(snapshot: gh.Snapshot | None, now: datetime, offset: timezone) -> 
         for c in snapshot.main_ci
     ]
     notes = list(snapshot.errors)
-    if not snapshot.authenticated and snapshot.state != "disabled":
-        notes.append("没给令牌（环境变量 GITHUB_TOKEN），按游客读：每小时 60 次，仓库改私有后就读不到")
+    if snapshot.env_token_problem:
+        notes.append(snapshot.env_token_problem)
+    if snapshot.login_refused and not snapshot.authenticated:
+        notes.append("登录被拒，暂用游客读取，重启后重试（每小时 60 次；也可以在终端重新运行 gh auth login）")
+    elif not snapshot.authenticated and snapshot.state != "disabled":
+        notes.append("没给令牌（本机没找到 GitHub 登录，也没有环境变量 GITHUB_TOKEN），按游客读：每小时 60 次，仓库改私有后就读不到；"
+                     "在终端运行 gh auth login 登录后点“重新读取”")
+    if snapshot.authenticated:
+        notes.append("已用 GitHub 登录凭据（本机 gh 登录或环境变量里的令牌）读取：以你的身份只读，不写 GitHub")
     notes.append(f"审计结论读自本机 reviews/ 目录，共 {len(snapshot.audits)} 份")
     rows = [pr_row(p, fresh, as_of) for p in snapshot.pulls]
     return GithubVM(snapshot.state, fresh, headline, as_of, main_ci, rows, notes)

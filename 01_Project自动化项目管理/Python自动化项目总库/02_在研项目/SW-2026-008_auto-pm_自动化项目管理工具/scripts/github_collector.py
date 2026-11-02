@@ -41,6 +41,9 @@ TIMEOUT = 8
 PER_PAGE = 100
 CACHE_VERSION = 1
 TOKEN_ENV = ("GITHUB_TOKEN", "GH_TOKEN")
+# gh auth token 吐出的令牌长什么样：gho_/ghp_/ghu_/ghs_/ghr_ 开头、github_pat_ 开头、或老式 40 位十六进制。
+# 只有符合这个形状的输出才当令牌用（防止把报错文字、带换行的东西塞进请求头）。环境变量里的令牌沿用旧行为，不查形状。
+TOKEN_SHAPE = re.compile(r"^(?:gh[pousr]_[A-Za-z0-9_]{20,255}|github_pat_[A-Za-z0-9_]{20,255}|[0-9a-f]{40})$")
 
 PROJECT_SEGMENT = re.compile(r"^((?:DJ|SW|SYS)-\d{4}-\d{3})(?:_|$)")
 SHARED = "仓库公共"
@@ -166,6 +169,9 @@ class Snapshot:
     errors: list[str] = field(default_factory=list)
     reset_at: datetime | None = None
     authenticated: bool = False
+    token_rejected: bool = False  # 这一轮带的令牌被 GitHub 拒了（401），已改用游客读；调用方该丢掉这个令牌
+    login_refused: bool = False  # 本机登录连续被拒到上限，已不再问 gh、按游客读（由窗口设置，重启后重试）
+    env_token_problem: str = ""  # 环境变量里的令牌形状不对，已忽略；这里写原因（不含令牌本身）
 
     @property
     def fresh(self) -> bool:
@@ -489,10 +495,32 @@ def ci_states(runs: list[dict[str, Any]] | None, expected: set[str], known: Iter
 Fetch = Callable[[str, dict[str, str]], tuple[int, Mapping[str, str], bytes]]
 
 
+def valid_token(text: str) -> bool:
+    """这段文字是不是 GitHub 令牌的形状（见 TOKEN_SHAPE）。"""
+    return bool(TOKEN_SHAPE.fullmatch(text))
+
+
+def is_api_url(url: str) -> bool:
+    """只有 https://api.github.com/ 下面的地址才发请求（令牌只会发给它）。"""
+    return url.startswith(API + "/")
+
+
+class _ApiOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """重定向的目标不是 api.github.com 就一律不跟：带着令牌的请求不许被带到别的主机去。"""
+
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+        return super().redirect_request(req, fp, code, msg, headers, newurl) if is_api_url(newurl) else None
+
+
+_OPENER = urllib.request.build_opener(_ApiOnlyRedirects)
+
+
 def urllib_fetch(url: str, headers: dict[str, str]) -> tuple[int, Mapping[str, str], bytes]:
+    if not is_api_url(url):
+        raise ApiError("不是 api.github.com 的地址，不发请求")
     request = urllib.request.Request(url, headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310 - 只连 api.github.com
+        with _OPENER.open(request, timeout=TIMEOUT) as response:  # 只连 api.github.com；重定向见 _ApiOnlyRedirects
             return response.status, dict(response.headers), response.read()
     except urllib.error.HTTPError as error:
         return error.code, dict(error.headers or {}), error.read() or b""
@@ -512,8 +540,13 @@ class Api:
         self.etags = etags  # {url: [etag, 正文 JSON]}；不含令牌
         self.calls = 0
 
+    def __repr__(self) -> str:  # 不让令牌出现在日志、崩溃报告、调试输出里
+        return f"Api(calls={self.calls}, authenticated={bool(self.token)})"
+
     def get(self, path: str) -> object:
-        url = path if path.startswith("http") else API + path
+        url = API + path if path.startswith("/") else path
+        if not is_api_url(url):  # 绝对地址只收 https://api.github.com/ 开头的；别的主机一个字都不发
+            raise ApiError("不是 api.github.com 的地址，不发请求")
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
@@ -550,6 +583,17 @@ class Api:
 
 def read_token(env: Mapping[str, str]) -> str:
     return next((env[name].strip() for name in TOKEN_ENV if env.get(name, "").strip()), "")
+
+
+def env_token(env: Mapping[str, str]) -> tuple[str, str]:
+    """环境变量里的令牌：（可用的令牌，被忽略的原因）。形状不对就忽略并写明原因，原因里不带令牌本身。"""
+    name = next((n for n in TOKEN_ENV if env.get(n, "").strip()), "")
+    if not name:
+        return "", ""
+    value = env[name].strip()
+    if valid_token(value):
+        return value, ""
+    return "", f"环境变量 {name} 里的令牌格式不对（不像 GitHub 令牌），已忽略；检查是否多复制了空格、引号或换行"
 
 
 # ---------------------------------------------------------------- 缓存
@@ -616,16 +660,18 @@ def save_cache(path: Path, etags: dict[str, list[Any]], snapshot: Snapshot) -> N
 
 def _fallback(
     repo: str, state: str, now: datetime, cached: Snapshot | None, audits: list[Audit], error: str,
-    reset_at: datetime | None = None, authenticated: bool = False,
+    reset_at: datetime | None = None, authenticated: bool = False, token_rejected: bool = False,
+    env_problem: str = "",
 ) -> Snapshot:
     """读不到：带上缓存里的旧数据（标 from_cache），没有缓存就空着。画面按未知显示。"""
     if cached is None:
-        return Snapshot(repo, state, now, None, False, [], [], audits, [error], reset_at, authenticated)
+        return Snapshot(repo, state, now, None, False, [], [], audits, [error], reset_at, authenticated, token_rejected,
+                        env_token_problem=env_problem)
     for pull in cached.pulls:
         pull.audit = audit_for(pull, audits)
         pull.audit_stale = bool(pull.audit and pull.audit.head and not pull.head_sha.startswith(pull.audit.head))
     return Snapshot(repo, state, now, cached.fetched_at, True, cached.pulls, cached.main_ci, audits, [error],
-                    reset_at, authenticated)
+                    reset_at, authenticated, token_rejected, env_token_problem=env_problem)
 
 
 def _describe(error: Exception) -> tuple[str, str, datetime | None]:
@@ -639,6 +685,13 @@ def _describe(error: Exception) -> tuple[str, str, datetime | None]:
     return "error", f"读失败：{error}", None
 
 
+def _read_pulls(api: Api, repo: str) -> list[Any]:
+    raw_pulls = api.get(f"/repos/{repo}/pulls?state=open&per_page={PER_PAGE}")
+    if not isinstance(raw_pulls, list):
+        raise ApiError("PR 列表格式不对")
+    return raw_pulls
+
+
 def collect(
     repo: str,
     repo_root: Path,
@@ -648,27 +701,39 @@ def collect(
     fetch: Fetch | None = None,
     env: Mapping[str, str] = os.environ,
     offline: bool = False,
+    token: str | None = None,
 ) -> Snapshot:
-    """读一轮。任何异常都不往外抛（画面不挂），一律变成 Snapshot.state + errors。"""
+    """读一轮。任何异常都不往外抛（画面不挂），一律变成 Snapshot.state + errors。
+
+    ``token`` 显式给了就用它（本机 gh 登录取来的，只在内存里）；不给才从 ``env`` 里找 GITHUB_TOKEN / GH_TOKEN。
+    令牌被 GitHub 拒（401）时，同一轮里改用游客读一次（只此一次，不循环），快照上标 token_rejected。
+    """
     audits = read_audits(reviews_dirs)
     etags, cached = load_cache(cache_path) if cache_path else ({}, None)
     if cached is not None and cached.repo != repo:
         etags, cached = {}, None
+    env_value, env_problem = env_token(env)  # 环境变量里的令牌先验形状：不合格就当没有，并把原因带到页面上
     if offline:
         return _fallback(repo, "offline", now, cached, audits, "按离线处理，没去读 GitHub",
-                         authenticated=bool(read_token(env)))
-    token = read_token(env)
+                         authenticated=bool(token if token is not None else env_value), env_problem=env_problem)
+    token = token if token is not None else env_value
     api = Api(fetch or urllib_fetch, token, etags)
     workflows = read_workflows(repo_root)
+    rejected = False
     try:
-        raw_pulls = api.get(f"/repos/{repo}/pulls?state=open&per_page={PER_PAGE}")
-        if not isinstance(raw_pulls, list):
-            raise ApiError("PR 列表格式不对")
+        try:
+            raw_pulls = _read_pulls(api, repo)
+        except AuthFailedError:
+            if not token:
+                raise
+            rejected, token = True, ""  # 令牌被拒：本轮改用游客读一次，不再循环
+            api = Api(fetch or urllib_fetch, "", etags)
+            raw_pulls = _read_pulls(api, repo)
     except (OfflineError, RateLimitedError, AuthFailedError, ApiError) as error:
         state, text, reset = _describe(error)
-        return _fallback(repo, state, now, cached, audits, text, reset, bool(token))
+        return _fallback(repo, state, now, cached, audits, text, reset, bool(token), rejected, env_problem)
 
-    errors: list[str] = []
+    errors: list[str] = ["登录凭据被 GitHub 拒绝，这一轮改用游客读（每小时 60 次）"] if rejected else []
     stopped: str = ""  # 半路限流后不再发请求
 
     def guarded(what: str, path: str) -> object | None:
@@ -733,7 +798,7 @@ def collect(
 
     state = "partial" if errors else "ok"
     snapshot = Snapshot(repo, state, now, now, False, sorted(pulls, key=lambda p: p.number), main_ci, audits,
-                        errors, None, bool(token))
+                        errors, None, bool(token), rejected, env_token_problem=env_problem)
     if cache_path is not None:
         try:
             save_cache(cache_path, api.etags, snapshot)

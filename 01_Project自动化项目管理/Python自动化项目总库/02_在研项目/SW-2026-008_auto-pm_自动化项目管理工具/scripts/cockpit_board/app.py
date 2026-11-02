@@ -8,6 +8,7 @@ GitHub（PR、门禁、安全签字、审计）走 scripts/github_collector.py�
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 import traceback
@@ -108,10 +109,22 @@ class GithubLoader(QThread):
 def load_github(options: argparse.Namespace) -> gh.Snapshot | None:
     if options.no_github:
         return None
-    return gh.collect(
+    # 令牌：环境变量优先（旧行为）；没有就向本机已登录的 gh 要，放内存里（见 actions.GithubTokenCache）。
+    # 离线（--no-net）不去问 gh；令牌不放进 options 里（options 的 repr 会被打进崩溃报告）。
+    cache = getattr(options, "github_token_cache", None)
+    token: str | None = None
+    if cache is not None and not options.no_net and not gh.env_token(os.environ)[0]:
+        token = cache.get()
+    snapshot = gh.collect(
         options.github_repo, options.root, options.reviews_dirs, options.github_cache,
         options.now or datetime.now(UTC), fetch=getattr(options, "github_fetch", None), offline=options.no_net,
+        token=token,
     )
+    if cache is not None and token:
+        cache.rejected() if snapshot.token_rejected else cache.accepted()
+    if cache is not None and token is not None and cache.refused:
+        snapshot.login_refused = True  # 页面上写“登录被拒，暂用游客读取，重启后重试”
+    return snapshot
 
 
 def load_board(options: argparse.Namespace, use_legacy: bool) -> pd.Board:
@@ -480,6 +493,7 @@ def parse_options(argv: list[str] | None) -> argparse.Namespace:
     else:
         options.offset = timezone(timedelta(hours=options.utc_offset))
     options.manual_worktree = options.root / ".auto-pm" / "worktrees" / "manual"
+    options.github_token_cache = actions.GithubTokenCache()  # 只放一个小仓库对象；令牌本身不挂在 options 上
     options.github_repo = options.github_repo or gh.repo_from_git_config(options.root)
     options.github_cache = Path(options.github_cache) if options.github_cache else gh.default_cache_path(options.github_repo)
     options.reviews_dirs = [options.root / "reviews", *(Path(d) for d in options.reviews_dir)]
