@@ -12,7 +12,6 @@ import json
 import os
 import queue
 import re
-import shutil
 import subprocess
 import threading
 import time
@@ -24,6 +23,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import IO, Any
 
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
+from auto_pm.infrastructure.executable_lookup import find_on_path, windows_path_extensions
 from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
 ISOLATION_MARKER = ".codex-microtask.json"
@@ -205,12 +205,14 @@ class LocalCodexExecutor:
 
         ``subprocess`` without a shell only tries the literal name plus ``.exe``, so ``codex`` never matches
         the npm shim ``codex.cmd``.  A name that carries a path, or that PATH does not know, is left as given
-        and fails at launch with the same truthful ``NOT_STARTED`` result as before.
+        and fails at launch with the same truthful ``NOT_STARTED`` result as before.  The lookup never takes
+        the current directory or a relative ``PATH`` entry (``shutil.which`` does on Windows), so a ``codex.cmd``
+        dropped into the repository is not run in place of the real one.
         """
 
         if os.sep in command or (os.altsep and os.altsep in command):
             return command
-        return shutil.which(command) or command
+        return find_on_path(command, extensions=windows_path_extensions()) or command
 
     def execute(self, request: LocalExecutionRequest) -> LocalExecutionResult:
         """Compatibility wrapper for the explicit ``start/handshake/wait`` lifecycle."""

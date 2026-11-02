@@ -379,3 +379,48 @@ def test_approve_hands_the_cards_scope_paths_to_the_notice() -> None:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_control_root_sync_notice"
     ]
     assert calls and all("scope_paths" in {keyword.arg for keyword in call.keywords} for call in calls)
+
+
+def test_an_empty_scope_tuple_cannot_make_a_squash_guess(world: World) -> None:
+    """#478 deferred test: ``()`` (no scope at all) matches main trivially, so it must never read as "probably squashed"."""
+    _commit_file(world.control, "proj/a.txt", "v1.5\n", "local step 1")
+    _commit_file(world.control, "proj/a.txt", "v2\n", "local step 2")
+    _commit_file(world.upstream, "proj/a.txt", "v2\n", "squashed into main")
+    world.push_upstream()
+
+    report = world.service().check(())
+
+    assert len(report.unique_ahead) == 2
+    assert not report.maybe_squashed and not report.drift_in_scope
+
+
+def _rename(root: Path, old: str, new: str, message: str) -> None:
+    (root / new).parent.mkdir(parents=True, exist_ok=True)
+    _git(root, "mv", old, new)
+    _git(root, "commit", "-q", "-m", message)
+
+
+def test_a_local_rename_inside_the_scope_counts_as_changing_the_scope(world: World) -> None:
+    """#478 deferred test: a rename is a delete plus an add for ``diff-tree``; both paths are in scope, the squash hint stays."""
+    _commit_file(world.control, "proj/a.txt", "v2\n", "local edit")
+    _rename(world.control, "proj/a.txt", "proj/renamed.txt", "local rename")
+    (world.upstream / "proj/a.txt").write_text("v2\n", encoding="utf-8")
+    _git(world.upstream, "add", "proj/a.txt")
+    _rename(world.upstream, "proj/a.txt", "proj/renamed.txt", "edit and rename squashed into main")
+    world.push_upstream()
+
+    report = world.service().check(SCOPE)
+
+    assert len(report.unique_ahead) == 2 and not report.drift_in_scope
+    assert report.maybe_squashed
+
+
+def test_a_local_rename_that_moves_a_file_out_of_the_scope_still_counts_as_scope_work(world: World) -> None:
+    """The deleted old path is inside the scope even though the new path is not; the commit must not be treated as unrelated."""
+    _rename(world.control, "proj/a.txt", "elsewhere/a.txt", "move out of the project")
+
+    report = world.service().check(SCOPE)
+
+    assert report.unique_ahead and report.drift_in_scope == ("proj/a.txt",)
+    assert not report.maybe_squashed  # main still has the file, so this is real work, not a squash
+    assert "先推送成 PR" in "\n".join(report.lines())
