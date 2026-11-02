@@ -16,6 +16,12 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from auto_pm.application.core.agent_worktree_service import (
+    MAX_STATIONS,
+    RELEASE_FREE_PLACES,
+    AgentWorktreeError,
+    AgentWorktreeService,
+)
 from auto_pm.application.core.governance_service import GovernanceService
 from auto_pm.application.core.release_consistency import check_release_consistency
 from auto_pm.ui.cli.caller_path import CallerPath
@@ -223,6 +229,34 @@ def check_change_status_history(root: str) -> dict[str, Any]:
     return {"status": "fail" if problems else "ok", "reasons": problems}
 
 
+def check_worktree_floor(root: str, *, pre_release: bool = False) -> dict[str, Any]:
+    """Before a release: at most ``MAX_STATIONS - RELEASE_FREE_PLACES`` directories under ``.auto-pm/worktrees``.
+
+    The count is ``AgentWorktreeService.count()`` -- the number ``worktree open`` refuses on -- so the two can never
+    disagree.  Read-only.  ``status``: ok; warn (too many, but this is the everyday check); fail (too many and
+    ``pre_release``, i.e. ``doctor --pre-release``); info (not a control root or Git cannot be asked, nothing to judge).
+    A day-to-day ``doctor`` and the settings page must not turn red for this, only the release pre-check may.
+    """
+
+    limit = MAX_STATIONS - RELEASE_FREE_PLACES
+    try:
+        count = AgentWorktreeService(root, measure_size=False).count()
+    except (AgentWorktreeError, OSError) as error:
+        return {"status": "info", "count": 0, "limit": limit, "reasons": [f"不是控制根或读不了工位目录：{error}"]}
+    if count <= limit:
+        return {"status": "ok", "count": count, "limit": limit, "reasons": []}
+    return {
+        "status": "fail" if pre_release else "warn",
+        "count": count,
+        "limit": limit,
+        "reasons": [
+            f".auto-pm/worktrees 下有 {count} 个目录，发版前最多 {limit} 个"
+            f"（上限 {MAX_STATIONS}，发版自己要占 {RELEASE_FREE_PLACES} 个）；先 `worktree list --deep` 看哪些做完了，"
+            "再 `worktree close` / `worktree sweep`"
+        ],
+    }
+
+
 def _read_local(path: Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
@@ -230,8 +264,11 @@ def _read_local(path: Path) -> str | None:
         return None
 
 
-def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
+def run_doctor_check(workspace_root: str | None = None, *, pre_release: bool = False) -> dict[str, Any]:
     """执行综合环境健康诊断
+
+    Args:
+        pre_release: 发版前置检查（``doctor --pre-release``）；只有它才把“工位目录太多”判为失败，日常体检只提示。
 
     Returns:
         包含诊断结果的字典
@@ -281,6 +318,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
     release_pointers = check_release_pointers(root)
     release_consistency = check_release_consistency(root)
     change_status = check_change_status_history(root)
+    worktree_floor = check_worktree_floor(root, pre_release=pre_release)
 
     all_passed = (
         py_ok
@@ -290,6 +328,7 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
         and release_pointers["status"] != "fail"
         and release_consistency["status"] != "fail"
         and change_status["status"] != "fail"
+        and worktree_floor["status"] != "fail"
     )
 
     return {
@@ -307,17 +346,19 @@ def run_doctor_check(workspace_root: str | None = None) -> dict[str, Any]:
         "release_pointers": release_pointers,
         "release_consistency": release_consistency,
         "change_status": change_status,
+        "worktree_floor": worktree_floor,
         "all_passed": all_passed,
     }
 
 
 @click.command("doctor")
 @click.option("-w", "--workspace", type=CallerPath(exists=True), help="工作空间根目录")
-def doctor_command(workspace: str | None) -> None:
+@click.option("--pre-release", "pre_release", is_flag=True, help="发版前置检查：工位目录超过 7 个判为失败（默认只提示）")
+def doctor_command(workspace: str | None, pre_release: bool) -> None:
     """执行 auto-pm 环境与依赖健康诊断"""
     console.print(Panel.fit("[bold blue]auto-pm 环境与依赖健康诊断[/bold blue]", border_style="blue"))
 
-    res = run_doctor_check(workspace)
+    res = run_doctor_check(workspace, pre_release=pre_release)
 
     table = Table(title="诊断明细", show_header=True, header_style="bold magenta")
     table.add_column("检查项", style="cyan")
@@ -381,6 +422,13 @@ def doctor_command(workspace: str | None) -> None:
         table.add_row("变更单状态与流转记录", "[green]✅ PASS[/green]", "工作区里新改的变更单批准态都有对应的流转记录")
     else:
         table.add_row("变更单状态与流转记录", "[yellow]⚠️ 未核对[/yellow]", "；".join(chg_status["reasons"]))
+    floor = res["worktree_floor"]
+    if floor["status"] == "fail":
+        table.add_row("工位目录数（发版前置）", "[bold red]❌ FAIL[/bold red]", "；".join(floor["reasons"]))
+    elif floor["status"] == "warn":
+        table.add_row("工位目录数（发版前置）", "[yellow]⚠️ 注意[/yellow]", "；".join(floor["reasons"]) + "（发版前用 --pre-release 复查）")
+    elif floor["status"] == "ok":
+        table.add_row("工位目录数（发版前置）", "[green]✅ PASS[/green]", f"{floor['count']} 个，发版前最多 {floor['limit']} 个")
 
     console.print(table)
 
@@ -394,6 +442,10 @@ def doctor_command(workspace: str | None) -> None:
 
     if consistency["status"] == "fail":
         console.print("\n[bold red]发布记录自相矛盾：不要靠改 manifest 或载荷字节消除，走变更单在 release_annotations.json 里更正。[/bold red]\n")
+        raise SystemExit(1)
+
+    if floor["status"] == "fail":
+        console.print("\n[bold red]工位目录太多，先回收再发版（删除只认用户亲口说“收”）。[/bold red]\n")
         raise SystemExit(1)
 
     if res["all_passed"]:

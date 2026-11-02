@@ -95,12 +95,13 @@ class StationPage(QWidget):
         bar = QFrame()
         bar.setObjectName("idbar")
         bar.setProperty("warn", "true" if vm.warn else "false")
-        row = QHBoxLayout(bar)
+        row = QVBoxLayout(bar)
         row.setContentsMargins(theme.SPACE * 2, theme.SPACE, theme.SPACE * 2, theme.SPACE)
-        for key, value in vm.identity:
-            row.addWidget(c.label(f"{key} {value}", "", wrap=False))
-        row.addStretch(1)
-        row.addWidget(c.label("两版本不一致或 RUNTIME_IDENTITY_DIVERGENCE 时整条变橙", "small", wrap=False))
+        # 身份各项和右边的说明一行放不下就换行，不把整页撑出窗口
+        row.addWidget(c.flow(
+            *[c.label(f"{key} {value}", "", wrap=False) for key, value in vm.identity],
+            c.label("两版本不一致或 RUNTIME_IDENTITY_DIVERGENCE 时整条变橙", "small", wrap=False),
+        ))
         lay.addWidget(bar)
         if vm.banner and not self.banner_dismissed:
             frame = QFrame()
@@ -179,7 +180,7 @@ class StationPage(QWidget):
         if step.number == 5 and self.commit_text:
             inner.addWidget(pre(self.commit_text))
         if step.buttons:
-            widgets: list[QWidget | int] = []
+            widgets: list[QWidget] = []
             for text, key, enabled, reason in step.buttons:
                 enabled = enabled and not (key == "bc_write" and not self.bc_preview_text)
                 reason = reason if not enabled else ""
@@ -194,7 +195,7 @@ class StationPage(QWidget):
                 widgets.append(item)
             if step.number == 6:
                 widgets.append(c.label("永远不会有：合并、删除、切换发布、替你签字、跑全量门禁", "small", wrap=False))
-            inner.addWidget(c.hrow(*widgets, 1))
+            inner.addWidget(c.flow(*widgets))  # 按钮加说明放不下就换行
         return frame
 
     def _render_drawer(self) -> None:

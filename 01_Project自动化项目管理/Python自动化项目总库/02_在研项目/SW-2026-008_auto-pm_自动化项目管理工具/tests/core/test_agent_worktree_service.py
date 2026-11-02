@@ -16,6 +16,7 @@ import pytest
 from click.testing import CliRunner
 
 from auto_pm.application.core.agent_worktree_service import (
+    MAX_STATIONS,
     AgentWorktreeError,
     AgentWorktreeService,
     Station,
@@ -141,6 +142,74 @@ def test_open_refuses_existing_branch_unknown_agent_and_reserved_names(lab: Lab)
         lab.service().open("codex", "control-root-20261023")
     with pytest.raises(AgentWorktreeError, match="不能用"):
         lab.service().open("claude", "../escape")
+
+
+def _leftover_dirs(lab: Lab, count: int) -> None:
+    """Plain directories nobody registered: the m3-* leftovers that pile up under ``.auto-pm/worktrees``."""
+
+    for index in range(count):
+        (lab.root / ".auto-pm" / "worktrees" / f"m3-left-{index}").mkdir(parents=True)
+
+
+def test_open_refuses_when_the_floor_is_full_even_of_unregistered_directories(lab: Lab) -> None:
+    assert MAX_STATIONS == 8
+    _leftover_dirs(lab, MAX_STATIONS)
+
+    with pytest.raises(StationRefusedError, match=r"已有 8 个目录，上限 8"):
+        lab.service().open("claude", "CARD-1")
+
+    assert not lab.station("claude").exists(), "拒绝时不能留下半个工位"
+    assert "claude/CARD-1" not in lab.local_branches()
+
+
+def test_open_allows_the_last_free_place_and_counts_a_station_once(lab: Lab) -> None:
+    _leftover_dirs(lab, MAX_STATIONS - 2)
+
+    lab.service().open("claude", "CARD-1")  # 6 + 0 -> 7: room left
+    assert lab.service().count() == MAX_STATIONS - 1, "登记过的工位和目录是同一个，只数一次"
+    lab.service().open("trae", "CARD-2")  # the 8th
+
+    assert lab.service().count() == MAX_STATIONS
+    with pytest.raises(StationRefusedError, match="上限"):
+        lab.service().open("cursor", "CARD-3")
+
+
+def test_closing_a_station_makes_room_again(lab: Lab) -> None:
+    _leftover_dirs(lab, MAX_STATIONS - 1)
+    finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    with pytest.raises(StationRefusedError, match="上限"):
+        lab.service().open("trae", "CARD-2")
+
+    lab.service().close("claude")
+
+    lab.service().open("trae", "CARD-2")
+    assert lab.service().count() == MAX_STATIONS
+
+
+def test_the_limit_message_tells_what_to_do_next(lab: Lab) -> None:
+    _leftover_dirs(lab, MAX_STATIONS)
+
+    with pytest.raises(StationRefusedError) as refused:
+        lab.service().open("codex", "CARD-1")
+
+    for hint in ("worktree list", "worktree close", "worktree sweep"):
+        assert hint in str(refused.value)
+
+
+@pytest.mark.usefixtures("identity_guard_off")
+def test_cli_open_exits_1_when_full_and_list_shows_the_count(lab: Lab) -> None:
+    _leftover_dirs(lab, MAX_STATIONS)
+    runner = CliRunner(env={"AUTO_PM_AGENT": ""})
+    base = ["--workspace", str(lab.root)]
+
+    refused = runner.invoke(cli, [*base, "worktree", "open", "claude", "CARD-1", "--no-fetch"])
+    assert refused.exit_code == 1, refused.output
+    assert _unwrapped("上限8") in _unwrapped(refused.output)
+
+    listed = runner.invoke(cli, [*base, "worktree", "list"])
+    assert listed.exit_code == 0, listed.output
+    assert _unwrapped("共8个目录，已到上限8") in _unwrapped(listed.output)
 
 
 def test_commands_refuse_to_run_inside_a_station(lab: Lab) -> None:
