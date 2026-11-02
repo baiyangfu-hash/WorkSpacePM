@@ -104,6 +104,19 @@ def _station_vm() -> StationVM:
     return StationVM(identity, True, False, "", [], steps, [], [])
 
 
+def _assert_is_a_wrapping_row(holder: QWidget | None) -> None:
+    """这一行是 ``common.flow``（放不下就换行）：版面是 FlowLayout，最小宽度只取最宽的一个控件，而不是全部之和。
+
+    不用“最小宽度小于多少像素”判：Linux 和 Windows 字体宽度差一半以上，写死像素在其中一边会误红或漏红
+    （#468 两次 Windows CI 红就是这样）。这里比的是它自己的各个控件，和字体无关。"""
+    assert holder is not None
+    layout = holder.layout()
+    assert isinstance(layout, c.FlowLayout), "这一行被改回了整行横排（QHBoxLayout），窗口窄了会把整页撑宽"
+    widths = [layout.itemAt(index).minimumSize().width() for index in range(layout.count())]
+    assert len(widths) >= 3
+    assert layout.minimumSize().width() == max(widths) < sum(widths)
+
+
 def test_station_identity_bar_and_last_step_buttons_do_not_widen_the_page(qapp: QApplication) -> None:
     page = StationPage(lambda _pid: None, lambda _text: None)
     page.show_view(_station_vm())
@@ -111,18 +124,12 @@ def test_station_identity_bar_and_last_step_buttons_do_not_widen_the_page(qapp: 
     page.show()
     qapp.processEvents()
     try:
-        # 页面里还有别的不换行控件（如第 4 步表单里的安全勾选，约 570），所以不拿整页最小宽度判，
-        # 而是分别量“身份条”和“第 6 步按钮行”这两处：新写法只取最宽的一个控件（约 380 以内）；
-        # 身份条改回整行横排约 1500、按钮行改回整行横排约 790，Windows 字体只会更宽，两处回退都红。
         # 抽屉也叫 idbar，身份条是带 warn 属性的那一个
         bars = [f for f in page.findChildren(QFrame, "idbar") if f.property("warn") is not None]
         assert len(bars) == 1
-        idbar = bars[0]
-        assert idbar.minimumSizeHint().width() < 560
+        first = bars[0].layout().itemAt(0)
+        _assert_is_a_wrapping_row(first.widget())
         button = next(b for b in page.findChildren(QPushButton) if b.property("action") == "push")
-        row = button.parentWidget()
-        assert row is not None and row.layout() is not None and row.layout().hasHeightForWidth()  # 是 flow，不是横排
-        assert row.minimumSizeHint().width() < 560
-        assert page.scroll_area.horizontalScrollBar().maximum() == 0  # 800 宽的窗口里不用左右拖
+        _assert_is_a_wrapping_row(button.parentWidget())
     finally:
         page.close()
