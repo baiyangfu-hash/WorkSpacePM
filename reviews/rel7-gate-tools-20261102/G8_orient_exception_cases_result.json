@@ -10,7 +10,7 @@
   "got": true
  },
  {
-  "id": "another-expired-running-run-in-the-ledger-that-orient-does-not-report",
+  "id": "another-expired-run-in-the-ledger-that-orient-does-not-report",
   "expected": true,
   "got": true
  },
@@ -45,6 +45,26 @@
   "got": false
  },
  {
+  "id": "a-different-work-id",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "work-id-missing",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "another-card",
+  "expected": false,
+  "got": false
+ },
+ {
+  "id": "no-card-id",
+  "expected": false,
+  "got": false
+ },
+ {
   "id": "malformed-conflicts-string",
   "expected": false,
   "got": false
@@ -60,12 +80,108 @@
   "got": false
  },
  {
+  "id": "malformed-conflicts-unreadable",
+  "expected": false,
+  "got": false
+ },
+ {
   "id": "malformed-object-list",
   "expected": false,
   "got": false
  },
  {
-  "id": "malformed-conflicts-unreadable",
+  "id": "extract-valid",
+  "expected": {
+   "run_id": "RUN-SW-2026-008-CHG-SCPT-2026-471-01",
+   "work_id": "WORK-MSN-415BA3D417866398",
+   "work_state": "IN_PROGRESS"
+  },
+  "got": {
+   "run_id": "RUN-SW-2026-008-CHG-SCPT-2026-471-01",
+   "work_id": "WORK-MSN-415BA3D417866398",
+   "work_state": "IN_PROGRESS"
+  }
+ },
+ {
+  "id": "extract-run-is-a-list",
+  "expected": {
+   "run_id": null,
+   "work_id": "WORK-MSN-415BA3D417866398",
+   "work_state": "IN_PROGRESS"
+  },
+  "got": {
+   "run_id": null,
+   "work_id": "WORK-MSN-415BA3D417866398",
+   "work_state": "IN_PROGRESS"
+  }
+ },
+ {
+  "id": "extract-run-is-a-string",
+  "expected": {
+   "run_id": null,
+   "work_id": "WORK-MSN-415BA3D417866398",
+   "work_state": "IN_PROGRESS"
+  },
+  "got": {
+   "run_id": null,
+   "work_id": "WORK-MSN-415BA3D417866398",
+   "work_state": "IN_PROGRESS"
+  }
+ },
+ {
+  "id": "extract-run-without-run-id",
+  "expected": {
+   "run_id": null,
+   "work_id": "WORK-MSN-415BA3D417866398",
+   "work_state": "IN_PROGRESS"
+  },
+  "got": {
+   "run_id": null,
+   "work_id": "WORK-MSN-415BA3D417866398",
+   "work_state": "IN_PROGRESS"
+  }
+ },
+ {
+  "id": "extract-work-is-not-a-dict",
+  "expected": {
+   "run_id": "RUN-SW-2026-008-CHG-SCPT-2026-471-01",
+   "work_id": null,
+   "work_state": null
+  },
+  "got": {
+   "run_id": "RUN-SW-2026-008-CHG-SCPT-2026-471-01",
+   "work_id": null,
+   "work_state": null
+  }
+ },
+ {
+  "id": "extract-parsed-is-a-list",
+  "expected": {
+   "run_id": null,
+   "work_id": null,
+   "work_state": null
+  },
+  "got": {
+   "run_id": null,
+   "work_id": null,
+   "work_state": null
+  }
+ },
+ {
+  "id": "extract-parsed-is-none",
+  "expected": {
+   "run_id": null,
+   "work_id": null,
+   "work_state": null
+  },
+  "got": {
+   "run_id": null,
+   "work_id": null,
+   "work_state": null
+  }
+ },
+ {
+  "id": "a-run-that-is-not-a-dict-ends-as-fail",
   "expected": false,
   "got": false
  }

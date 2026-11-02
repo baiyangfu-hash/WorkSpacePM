@@ -1,0 +1,100 @@
+"""Release 7: the formal gate run is started DETACHED from the session (user ruling 2026-11-02: a session that idles for an hour is stopped by the app, so no task over 30 minutes may hang in a session).
+Patches derive_rel7.py ONCE: per-stage / per-group status files (stage, PASS/FAIL, exit code, MST time, committed GB), a memory guard that suspends the run at 40 GB, a keep-awake process
+without PowerShell, and a launcher that starts renewal loop, keep-awake, guard and gates through detach_run.py (own process group, no console, output to log files)."""
+import io
+
+p = "m3-rel6/derive_rel7.py"
+s = io.open(p, encoding="utf-8", newline="").read()
+if "rel7_tools_src" in s:
+    raise SystemExit("derive_rel7.py already carries the detach patch: refusing")
+
+NL = chr(10)
+
+# 1) run_g2.sh: per-group status + pid file for the guard + an optional GATE_GROUPS filter (test only; empty = all groups)
+a1 = 'io.open(EV / "run_g2.sh", "w", encoding="utf-8", newline="").write(rg)' + NL
+assert s.count(a1) == 1
+block1 = r'''
+OLD_RUN = 'run() { n="$1"; shift; date +%FT%T > "$OUT/$n.started"; "$PY" -B -m pytest -o addopts= --no-cov -p no:cacheprovider --color=no "$@" > "$OUT/$n.txt" 2>&1; echo $? > "$OUT/$n.exit"; date +%FT%T > "$OUT/$n.finished"; }'
+NEW_RUN = """run() { n="$1"; shift
+  if [ -n "${GATE_GROUPS:-}" ] && ! echo " $GATE_GROUPS " | grep -q " $n "; then return; fi
+  ST_DIR="$(dirname "$OUT")/status"; mkdir -p "$ST_DIR"
+  if [ -n "${GATE_STATUS_PY:-}" ]; then "$PY" -B "$GATE_STATUS_PY" "$ST_DIR" "group_$n" RUNNING || true; fi
+  date +%FT%T > "$OUT/$n.started"
+  "$PY" -B -m pytest -o addopts= --no-cov -p no:cacheprovider --color=no "$@" > "$OUT/$n.txt" 2>&1 &
+  wp="$(cat /proc/$!/winpid 2>/dev/null)"; if [ -n "$wp" ]; then echo "$wp" > "$ST_DIR/current_pid"; fi
+  wait $!; rc=$?
+  echo $rc > "$OUT/$n.exit"; date +%FT%T > "$OUT/$n.finished"; rm -f "$ST_DIR/current_pid"
+  if [ -n "${GATE_STATUS_PY:-}" ]; then
+    if [ "$rc" -eq 0 ]; then "$PY" -B "$GATE_STATUS_PY" "$ST_DIR" "group_$n" PASS 0 || true; else "$PY" -B "$GATE_STATUS_PY" "$ST_DIR" "group_$n" FAIL "$rc" || true; fi
+  fi; }"""
+assert rg.count(OLD_RUN) == 1
+rg = rg.replace(OLD_RUN, NEW_RUN)
+'''
+s = s.replace(a1, block1.lstrip(NL) + a1)
+
+# 2) gates_all.sh (already written by the loop above): stage markers, status function, failure status
+a2 = 'lt = (R / "m3-decl" / "decl_launch.sh")'
+assert s.count(a2) == 1
+block2 = r'''
+ga = (EV / "rel7_gates_all.sh").read_text(encoding="utf-8")
+OLD_FAIL = 'fail() { echo "FAILED: $*" | tee "$G/FAILED"; exit 1; }'
+NEW_FAIL = """export GATE_STATUS_PY="$EV/gate_status.py"
+ST() { "$PY" -B "$GATE_STATUS_PY" "$G/status" "$1" "$2" "${3:-}" || true; }
+CUR=""
+stage() { if [ -n "$CUR" ]; then ST "$CUR" PASS 0; fi; CUR="$1"; ST "$CUR" RUNNING; }
+fail() { echo "FAILED: $*" | tee "$G/FAILED"; ST "${CUR:-unknown}" FAIL 1; exit 1; }"""
+assert ga.count(OLD_FAIL) == 1
+ga = ga.replace(OLD_FAIL, NEW_FAIL)
+for needle, name in (('echo "== baseline measurements', "baseline"), ('echo "== install the frozen files"', "install"), ('echo "== fast gates"', "fast"),
+                     ('echo "== nine regression groups (G2)"', "groups"), ('echo "== the named transient-race test', "transient"), ('echo "== judge"', "judge")):
+    assert ga.count(needle) == 1, needle
+    ga = ga.replace(needle, "stage " + name + "; " + needle)
+OLD_DONE = 'echo done > "$G/DONE"'
+assert ga.count(OLD_DONE) == 1
+ga = ga.replace(OLD_DONE, 'ST judge PASS 0; ST ALL DONE 0; ' + OLD_DONE)
+io.open(EV / "rel7_gates_all.sh", "w", encoding="utf-8", newline="").write(ga)
+'''
+s = s.replace(a2, block2.lstrip(NL) + a2)
+
+# 3) the launcher: everything detached
+a3 = 'assert "decl" not in lt.lower()' + NL
+assert s.count(a3) == 1
+block3 = r'''
+lt = r"""#!/usr/bin/env bash
+# Card 219 V1.0 launcher (DETACHED): start the governed Run, renew once (must succeed), then start the renewal loop, a keep-awake process, the memory guard (40 GB) and the gates
+# through detach_run.py (own process group, no console, output to log files) so that nothing depends on the session that started them. Status: gates/status/*.json and status.log.
+set -euo pipefail
+ROOT=/c/Users/fubai/Documents/My_Workspace; EV="$ROOT/.auto-pm/reports/m3-rel7"; G="$EV/gates"
+PY="$ROOT/.venv/Scripts/python.exe"; BASHW='C:\Program Files\Git\usr\bin\bash.exe'
+cd "$ROOT"
+bash "$EV/rel7_1_approve_start.sh" > "$EV/start2.out" 2>&1 || { echo "START FAILED"; tail -5 "$EV/start2.out"; exit 1; }
+bash "$ROOT/.auto-pm/reports/m2_lease_renew.sh" "$EV/close.env" > "$EV/renew_first.log" 2>&1 || { echo "FIRST RENEW FAILED"; cat "$EV/renew_first.log"; exit 1; }
+echo "first renewal ok"
+rm -f "$EV/STOP_RENEW"
+mkdir -p "$G/status"
+det() { "$PY" -B "$EV/detach_run.py" "$@"; }
+det "$EV/renew_loop.stdout" "$BASHW" "$ROOT/.auto-pm/reports/m2_renew_loop.sh" "$EV/close.env" 1200
+det "$EV/keepawake.log" "$PY" -B "$EV/keepawake.py" "$EV/gates_all.exit"
+cat > "$EV/rel7_gates_wrap.sh" <<'WRAP'
+#!/usr/bin/env bash
+EV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7
+bash "$EV/rel7_gates_all.sh" > "$EV/gates_all.log" 2>&1
+echo $? > "$EV/gates_all.exit"
+WRAP
+det "$EV/gates_all.launch.log" "$BASHW" "$EV/rel7_gates_wrap.sh"
+det "$EV/mem_guard.log" "$PY" -B "$EV/mem_guard.py" "$G/status" "$G/status/current_pid" 40 36
+echo "LAUNCHED DETACHED $(date +%H:%M)"
+"""
+'''
+s = s.replace(a3, a3 + block3.lstrip(NL))
+
+# 4) the tool files are copied before write_all and listed in its tool list (so they are hashed into the manifest)
+a4 = 'cardkit.write_all(spec, files, {REPORT: None}, ["rel7_gates.py", "gen_project.py", "run_g2.sh", "rel7_gates_all.sh", "adjust_counts.py"])'
+assert s.count(a4) == 1
+block4 = r'''
+for _t in ("detach_run.py", "gate_status.py", "mem_guard.py", "keepawake.py"):
+    shutil.copy(R / "m3-rel6" / "rel7_tools_src" / _t, EV / _t)
+'''
+s = s.replace(a4, block4.lstrip(NL) + a4.replace('"adjust_counts.py"]', '"adjust_counts.py", "detach_run.py", "gate_status.py", "mem_guard.py", "keepawake.py"]'))
+io.open(p, "w", encoding="utf-8", newline="").write(s)
+print("detach patch applied")

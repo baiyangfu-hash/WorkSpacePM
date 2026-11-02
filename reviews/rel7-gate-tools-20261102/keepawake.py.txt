@@ -1,0 +1,13 @@
+"""Keep the machine awake (system required, no display) until <donefile> exists (or 8 h).  usage: python -B keepawake.py <donefile>"""
+import ctypes
+import sys
+import time
+from pathlib import Path
+
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+f = ctypes.windll.kernel32.SetThreadExecutionState
+t0 = time.time()
+while not Path(sys.argv[1]).exists() and time.time() - t0 < 8 * 3600:
+    f(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+    time.sleep(30)
+f(ES_CONTINUOUS)

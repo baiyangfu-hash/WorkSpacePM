@@ -1,0 +1,9 @@
+# rehearsal 4 (final exception), judge output and variants
+{'G1': 'PASS', 'G2': 'PASS', 'G3': 'PASS', 'G4': 'PASS', 'G5': 'PASS', 'G6': 'PASS', 'G7': 'PASS', 'G8': 'PASS', 'G9': 'PASS'}
+
+core_count_changed judge exit=1
+rest_one_failure judge exit=1
+rest_transient_ok judge exit=0
+rest_transient_rerun_failed judge exit=1
+
+orient exception: conflicts=["LEASE_EXPIRED"] orient_run_id=RUN-SW-2026-008-CHG-SCPT-2026-471-01 work_id=WORK-MSN-415BA3D417866398 work_state=IN_PROGRESS ledger_expired_running_runs(informational)=["RUN-SW-2026-008-CHG-SCPT-2026-471-01", "RUN-SW008-A2-201-03"] verdict=True

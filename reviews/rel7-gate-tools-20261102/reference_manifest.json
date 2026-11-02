@@ -2,10 +2,14 @@
   "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md": "f59fbbd156f153ed6c306b3ede569e4497a425fbce6dc066805aa00cd0009214",
   "tools/adjust_counts.py": "b0662948d52b927db2ba88232b20550616efeb572bdbd129472bb79cbee3ca1d",
   "tools/commit_msg.template.txt": "82953b219db933228533199ce0dc89140de8ce3ba66237ecba116969dbc7cdf4",
+  "tools/detach_run.py": "0ed697972131237c2b64292f5f2bb19d9688cd85d233ad93f0aa8e18cfb7c864",
+  "tools/gate_status.py": "77db738b74b220fc858732865bf417ad0d7e9ae338330d0244cc0d22b03a36f1",
   "tools/gen_project.py": "eac50737f52b35b23b3c9b23583ac819940a042f71109f9cc96ceaa435e06565",
   "tools/install_files.py": "1ea7b5f5425040152db88104009779791ee8a0c6c476f77437e9e8c59b30f753",
+  "tools/keepawake.py": "184ae36800863b2ee14f9fbde1977af521e757dd4ffab9bb8867e7a419c4237f",
+  "tools/mem_guard.py": "c17a74db485b4a7c5bdd370a279a479469b77413edc27572da94e657dfb3926a",
   "tools/rel7_config.json": "7546ba0ee435066d9abd07006d4b33b24d23acebd9c0d4257ffb719a0d362876",
-  "tools/rel7_gates.py": "d7685eea5eb8ed275bcfea12e5c0e8bc0d0c822fc3ef91800b6a7cbd1fdc2f6c",
-  "tools/rel7_gates_all.sh": "4f56b43032c9a76857e2e0d8d748740f6072a7b7e04ff811d9cd7c0f20f88263",
-  "tools/run_g2.sh": "99ebb0e49c97941c4b02361de0293339328f2505416cbb86096f2db4d63cfc41"
+  "tools/rel7_gates.py": "2e1594b6b65b9fc65952f1d35f9b493eed2eccd7e7481b2e6adcebbd5ec089df",
+  "tools/rel7_gates_all.sh": "f57b50b11415b378ca2e29c49640f66e272825a064941a22edc9c527f984b078",
+  "tools/run_g2.sh": "a32cd648a0a4f1037345e77dd4a24c126c8296a2c3d44daa18e81983984b21f4"
 }

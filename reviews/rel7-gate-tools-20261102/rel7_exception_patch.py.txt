@@ -1,75 +1,120 @@
-"""Option A (named narrow exception, approved by the coordinator 2026-11-02, audit 558 criteria) for the release 7 gate G3 'orient has no conflict'.
-The exception list is hard-coded in the gates script (the card's data cannot extend it); counter-examples are checked inside G8."""
+"""Release 7 gate G3 'orient has no conflict': the declared narrow exception for the known stuck B2 Run (approved by the coordinator 2026-11-02; audit 558 findings applied).
+Hard-coded in the gates script (the card's data cannot extend it). Applied ONCE to derive_rel7.py; refuses to apply twice."""
 import io
 
 p = "m3-rel6/derive_rel7.py"
 s = io.open(p, encoding="utf-8", newline="").read()
-if "orient_ok" in s:
-    raise SystemExit("already patched")
+if "orient_ok" in s or "old_c" in s:
+    raise SystemExit("derive_rel7.py already carries an exception block: refusing")
 anchor = 'io.open(EV / "rel7_gates.py", "w", encoding="utf-8", newline="").write(g)'
 assert s.count(anchor) == 1
-patch = r'''
+patch = r"""
 # --- release 7: the declared narrow exception for the known stuck B2 Run (hard-coded; audit 558) ---
-FUNC = """
+FUNC = '''
 KNOWN_STUCK_RUN = "RUN-SW-2026-008-CHG-SCPT-2026-471-01"  # hard-coded exception object (release 7 card, section 1)
+KNOWN_STUCK_WORK = "WORK-MSN-415BA3D417866398"
+KNOWN_CARD = "CARD-SW008-M3-REL7"
 
 
-def orient_ok(conflicts: object, orient_run: object, work_state: object) -> bool:
-    \"\"\"No conflict at all passes; otherwise ONLY the exact list ['LEASE_EXPIRED'] whose single object is the known stuck B2 Run (Work still IN_PROGRESS).\"\"\"
+def orient_extract(parsed: object) -> dict:
+    # the run, work id and work state that orient itself reports; anything that is not exactly a dict with string fields is None (never raises)
+    out: dict = {"run_id": None, "work_id": None, "work_state": None}
+    if not isinstance(parsed, dict):
+        return out
+    run, work = parsed.get("run"), parsed.get("work")
+    if isinstance(run, dict) and isinstance(run.get("run_id"), str):
+        out["run_id"] = run["run_id"]
+    if isinstance(work, dict):
+        out["work_id"] = work["work_id"] if isinstance(work.get("work_id"), str) else None
+        out["work_state"] = work["state"] if isinstance(work.get("state"), str) else None
+    return out
+
+
+def orient_ok(conflicts: object, orient_run: object, work_id: object, work_state: object, card_id: object = None, ledger_expired: object = None) -> bool:
+    # no conflict at all passes; otherwise ONLY the exact list ['LEASE_EXPIRED'] whose object is the run orient itself reports (exactly the known stuck B2 Run), whose Work
+    # (from the same orient JSON) is the known Work and still IN_PROGRESS, and only for this card; `ledger_expired` (other expired Runs in the ledger) is informational and ignored
     if conflicts == []:
         return True
     return (type(conflicts) is list and conflicts == ["LEASE_EXPIRED"] and type(orient_run) is str and orient_run == KNOWN_STUCK_RUN
-            and work_state == "IN_PROGRESS")
+            and type(work_id) is str and work_id == KNOWN_STUCK_WORK and work_state == "IN_PROGRESS" and card_id == KNOWN_CARD)
 
 
 def orient_cases() -> list[dict]:
-    K = KNOWN_STUCK_RUN
+    K, W, C = KNOWN_STUCK_RUN, KNOWN_STUCK_WORK, KNOWN_CARD
+    OLD = "RUN-SW008-A2-201-03"
     table = [
-        ("no-conflict-is-a-normal-pass", [], None, None, True),
-        ("exactly-the-known-run", ["LEASE_EXPIRED"], K, "IN_PROGRESS", True),
-        ("another-expired-running-run-in-the-ledger-that-orient-does-not-report", ["LEASE_EXPIRED"], K, "IN_PROGRESS", True),
-        ("one-extra-conflict", ["LEASE_EXPIRED", "RUN_BLOCKED"], K, "IN_PROGRESS", False),
-        ("other-conflict-only", ["RUN_BLOCKED"], K, "IN_PROGRESS", False),
-        ("a-different-object", ["LEASE_EXPIRED"], "RUN-SW-2026-008-OTHER-01", "IN_PROGRESS", False),
-        ("the-old-codex-run-is-not-the-exception-object", ["LEASE_EXPIRED"], "RUN-SW008-A2-201-03", "IN_PROGRESS", False),
-        ("no-object-reported", ["LEASE_EXPIRED"], None, "IN_PROGRESS", False),
-        ("work-not-in-progress", ["LEASE_EXPIRED"], K, "CANCELLED", False),
-        ("malformed-conflicts-string", "LEASE_EXPIRED", K, "IN_PROGRESS", False),
-        ("malformed-conflicts-lowercase", ["lease_expired"], K, "IN_PROGRESS", False),
-        ("malformed-conflicts-none", None, K, "IN_PROGRESS", False),
-        ("malformed-object-list", ["LEASE_EXPIRED"], [K], "IN_PROGRESS", False),
-        ("malformed-conflicts-unreadable", ["UNREADABLE"], K, "IN_PROGRESS", False),
+        ("no-conflict-is-a-normal-pass", [], None, None, None, None, None, True),
+        ("exactly-the-known-run", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, None, True),
+        ("another-expired-run-in-the-ledger-that-orient-does-not-report", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, [K, OLD], True),
+        ("one-extra-conflict", ["LEASE_EXPIRED", "RUN_BLOCKED"], K, W, "IN_PROGRESS", C, None, False),
+        ("other-conflict-only", ["RUN_BLOCKED"], K, W, "IN_PROGRESS", C, None, False),
+        ("a-different-object", ["LEASE_EXPIRED"], "RUN-SW-2026-008-OTHER-01", W, "IN_PROGRESS", C, None, False),
+        ("the-old-codex-run-is-not-the-exception-object", ["LEASE_EXPIRED"], OLD, W, "IN_PROGRESS", C, None, False),
+        ("no-object-reported", ["LEASE_EXPIRED"], None, W, "IN_PROGRESS", C, None, False),
+        ("work-not-in-progress", ["LEASE_EXPIRED"], K, W, "CANCELLED", C, None, False),
+        ("a-different-work-id", ["LEASE_EXPIRED"], K, "WORK-OTHER-1", "IN_PROGRESS", C, None, False),
+        ("work-id-missing", ["LEASE_EXPIRED"], K, None, "IN_PROGRESS", C, None, False),
+        ("another-card", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", "CARD-SW008-M3-REL8", None, False),
+        ("no-card-id", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", None, None, False),
+        ("malformed-conflicts-string", "LEASE_EXPIRED", K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-conflicts-lowercase", ["lease_expired"], K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-conflicts-none", None, K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-conflicts-unreadable", ["UNREADABLE"], K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-object-list", ["LEASE_EXPIRED"], [K], W, "IN_PROGRESS", C, None, False),
     ]
-    return [{"id": i, "expected": e, "got": orient_ok(c, r, w)} for i, c, r, w, e in table]
-"""
+    out = [{"id": i, "expected": e, "got": orient_ok(c, r, w, ws, card, led)} for i, c, r, w, ws, card, led, e in table]
+    ok_run = {"run_id": K}
+    ok_work = {"work_id": W, "state": "IN_PROGRESS"}
+    ex = [
+        ("extract-valid", {"run": ok_run, "work": ok_work}, {"run_id": K, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-run-is-a-list", {"run": [], "work": ok_work}, {"run_id": None, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-run-is-a-string", {"run": "x", "work": ok_work}, {"run_id": None, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-run-without-run-id", {"run": {}, "work": ok_work}, {"run_id": None, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-work-is-not-a-dict", {"run": ok_run, "work": []}, {"run_id": K, "work_id": None, "work_state": None}),
+        ("extract-parsed-is-a-list", [], {"run_id": None, "work_id": None, "work_state": None}),
+        ("extract-parsed-is-none", None, {"run_id": None, "work_id": None, "work_state": None}),
+    ]
+    out += [{"id": i, "expected": e, "got": orient_extract(v)} for i, v, e in ex]
+    # a run that is not a dict must end as FAIL, not as a crash
+    bad = orient_extract({"run": [], "work": ok_work})
+    out.append({"id": "a-run-that-is-not-a-dict-ends-as-fail", "expected": False, "got": orient_ok(["LEASE_EXPIRED"], bad["run_id"], bad["work_id"], bad["work_state"], C)})
+    return out
+'''
 g = sw(g, "def sha(b: bytes) -> str:", FUNC.lstrip(chr(10)) + chr(10) + chr(10) + "def sha(b: bytes) -> str:")
 old_c = 'f3.get("orient_conflicts") == []'
-new_c = 'orient_ok(f3.get("orient_conflicts"), f3.get("orient_exception_object"), f3.get("orient_exception_work_state"))'
+new_c = ('orient_ok(f3.get("orient_conflicts"), (f3.get("orient_extract") or {}).get("run_id"), (f3.get("orient_extract") or {}).get("work_id"), '
+         '(f3.get("orient_extract") or {}).get("work_state"), CFG.get("card_id"), f3.get("ledger_expired_running_runs_informational"))')
 g = sw(g, old_c, new_c)
-old_o = '    audit_ruff = sh([PY, "-B", "-m", "ruff", "check", "--no-cache", "--statistics", "."], cwd=PROJ)\n'
+old_o = '    audit_ruff = sh([PY, "-B", "-m", "ruff", "check", "--no-cache", "--statistics", "."], cwd=PROJ)' + chr(10)
 new_o = (
-    '    # read-only facts for the declared exception: the run orient itself reports, the state of its Work, and (informational) every expired RUNNING Run of the ledger\n'
-    '    try:\n'
-    '        facts["orient_exception_object"] = (json.JSONDecoder().raw_decode(orient.stdout[orient.stdout.index("{"):])[0].get("run") or {}).get("run_id")\n'
-    '    except ValueError:\n'
-    '        facts["orient_exception_object"] = None\n'
-    '    import sqlite3\n'
-    '    con_ = sqlite3.connect("file:" + str(ROOT / ".auto-pm" / "continuity.db").replace(chr(92), "/") + "?mode=ro", uri=True)\n'
-    '    now_ = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()\n'
-    '    facts["ledger_expired_running_runs_informational"] = sorted(r[0] for r in con_.execute("select r.run_id from run_items r join execution_leases l on l.run_id=r.run_id where r.state=? and l.expires_at<?", ("RUNNING", now_)))\n'
-    '    wst_ = con_.execute("select state from work_items where work_id=?", ("WORK-MSN-415BA3D417866398",)).fetchone()\n'
-    '    facts["orient_exception_work_state"] = wst_[0] if wst_ else None\n'
-    '    con_.close()\n'
+    '    # the object the exception is judged on comes from the SAME orient JSON; other expired RUNNING Runs of the ledger are recorded (informational) only' + chr(10)
+    + '    try:' + chr(10)
+    + '        facts["orient_extract"] = orient_extract(json.JSONDecoder().raw_decode(orient.stdout[orient.stdout.index("{"):])[0])' + chr(10)
+    + '    except ValueError:' + chr(10)
+    + '        facts["orient_extract"] = orient_extract(None)' + chr(10)
+    + '    import sqlite3' + chr(10)
+    + '    con_ = sqlite3.connect("file:" + str(ROOT / ".auto-pm" / "continuity.db").replace(chr(92), "/") + "?mode=ro", uri=True)' + chr(10)
+    + '    now_ = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()' + chr(10)
+    + '    facts["ledger_expired_running_runs_informational"] = sorted(r[0] for r in con_.execute("select r.run_id from run_items r join execution_leases l on l.run_id=r.run_id where r.state=? and l.expires_at<?", ("RUNNING", now_)))' + chr(10)
+    + '    con_.close()' + chr(10)
 ) + old_o
 g = sw(g, old_o, new_o)
-old_w = '    write("G8_mutations.json", json.dumps(mutations, ensure_ascii=False, indent=1) + NL)\n'
-new_w = old_w + '    write("G8_orient_exception.json", json.dumps(orient_cases(), ensure_ascii=False, indent=1) + NL)\n'
-g = sw(g, old_w, new_w)
+old_w = '    write("G8_mutations.json", json.dumps(mutations, ensure_ascii=False, indent=1) + NL)' + chr(10)
+g = sw(g, old_w, old_w + '    write("G8_orient_exception.json", json.dumps(orient_cases(), ensure_ascii=False, indent=1) + NL)' + chr(10))
 old_g8 = 'done("G8", len(muts) == 3 and all(m["killed"] and m["restored_bytes_equal"] for m in muts) and same,'
-new_g8 = ('oc_ = json.load(open(G + "/G8_orient_exception.json", encoding="utf-8"))\n'
-          '    done("G8", len(muts) == 3 and all(m["killed"] and m["restored_bytes_equal"] for m in muts) and same and len(oc_) == 14 and all(c["got"] == c["expected"] for c in oc_),')
+new_g8 = ('oc_ = json.load(open(G + "/G8_orient_exception.json", encoding="utf-8"))' + chr(10)
+          + '    done("G8", len(muts) == 3 and all(m["killed"] and m["restored_bytes_equal"] for m in muts) and same and len(oc_) == len(orient_cases()) and len(oc_) >= 26 and all(c["got"] == c["expected"] for c in oc_),')
 g = sw(g, old_g8, new_g8)
-'''
+# the exception facts on their own line of the G3 report (not cut by the 600-character facts line)
+old_d3 = '    done("G3", real["passed"] > 0'
+new_d3 = ('    ex_ = f3.get("orient_extract") or {}' + chr(10)
+          + '    orient_line = ("orient exception: conflicts=" + json.dumps(f3.get("orient_conflicts"), ensure_ascii=False) + " orient_run_id=" + str(ex_.get("run_id")) + " work_id=" + str(ex_.get("work_id"))' + chr(10)
+          + '                   + " work_state=" + str(ex_.get("work_state")) + " ledger_expired_running_runs(informational)=" + json.dumps(f3.get("ledger_expired_running_runs_informational"), ensure_ascii=False)' + chr(10)
+          + '                   + " verdict=" + str(orient_ok(f3.get("orient_conflicts"), ex_.get("run_id"), ex_.get("work_id"), ex_.get("work_state"), CFG.get("card_id"))))' + chr(10)) + old_d3
+g = sw(g, old_d3, new_d3)
+old_f = '          f"d04/d05 facts: {json.dumps('
+g = sw(g, old_f, '          orient_line, ' + old_f.lstrip())
+"""
 s = s.replace(anchor, patch + anchor)
 io.open(p, "w", encoding="utf-8", newline="").write(s)
-print("patched")
+print("patched (v3)")
