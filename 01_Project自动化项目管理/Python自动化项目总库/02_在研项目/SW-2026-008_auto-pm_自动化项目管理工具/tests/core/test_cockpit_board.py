@@ -365,3 +365,66 @@ def test_policy_never_list_is_not_in_station_buttons() -> None:
         assert not any(word in text for text in lowered), word
     assert policy.GATED_UNTIL_WIRED <= policy.STATION_BUTTONS
     assert policy.PM_BUTTONS <= policy.STATION_BUTTONS
+
+
+# ---------------------------------------------------------------- GitHub 门禁红进问题页“风险”档（试用 11-01：问题页全 0）
+
+
+def _pull(number: int, projects: list[str], states: list[tuple[str, str]], *, draft: bool = False) -> Any:
+    import github_collector as gh
+
+    return gh.PullInfo(number, f"改 {number}", f"https://example.invalid/pull/{number}", "baiyangfu-hash", "a" * 40, "claude/x", draft,
+                       "2026-10-31T09:00:00Z", projects=projects, ci=[gh.CiState(name, state, "") for name, state in states])
+
+
+def _snapshot(pulls: list[Any], state: str = "ok", *, from_cache: bool = False) -> Any:
+    import github_collector as gh
+
+    return gh.Snapshot("o/r", state, NOW, NOW, from_cache=from_cache, pulls=pulls)
+
+
+def _issue_board(tmp_path: Path) -> Any:
+    return _board(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+
+
+def test_a_red_pr_becomes_a_risk_issue_on_its_project_and_on_the_issues_page(tmp_path: Path) -> None:
+    board = _issue_board(tmp_path)
+    snapshot = _snapshot([
+        _pull(470, ["DJ-2026-101"], [("sw008-ci", "fail"), ("plc-ci", "pass"), ("windows-cli", "fail")]),
+        _pull(471, ["DJ-2026-101"], [("sw008-ci", "pass")]),
+        _pull(472, ["DJ-2026-101"], [("sw008-ci", "running")]),
+    ])
+    home = vm.home_vm(board, OFFSET, online=True, use_git=False, github=snapshot)
+    card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
+    red = [i for i in card.issues if "门禁红" in i.title]
+    assert [(i.sev, i.title) for i in red] == [("risk", "PR #470 门禁红")]  # 绿的、跑着的不报
+    assert "sw008-ci" in red[0].detail and "windows-cli" in red[0].detail and "plc-ci" not in red[0].detail
+    assert red[0].who and red[0].basis and red[0].since is not None
+    assert red[0] in vm.all_issues(home)
+    assert home.issue_notes == []  # 全读到了，没有“没检查”要说
+
+
+def test_a_red_pr_that_touches_no_registered_project_still_reaches_the_issues_page(tmp_path: Path) -> None:
+    board = _issue_board(tmp_path)
+    snapshot = _snapshot([_pull(473, [], [("sw008-ci", "fail")], draft=True)])
+    home = vm.home_vm(board, OFFSET, online=True, use_git=False, github=snapshot)
+    assert [i.title for i in home.extra_issues] == ["PR #473 门禁红（草稿）"]
+    assert home.extra_issues[0] in vm.all_issues(home)
+
+
+def test_unread_github_never_looks_like_zero_red_prs(tmp_path: Path) -> None:
+    """没读到（断网、限流、只有缓存、没开采集）不凭旧数据报警，但问题页必须说“没检查，条数不含它”。"""
+    board = _issue_board(tmp_path)
+    red = _pull(474, ["DJ-2026-101"], [("sw008-ci", "fail")])
+    for snapshot in (_snapshot([red], "offline", from_cache=True), _snapshot([red], "rate_limited"), None):
+        home = vm.home_vm(board, OFFSET, online=None, use_git=False, github=snapshot)
+        assert not any("门禁红" in i.title for i in vm.all_issues(home))
+        assert len(home.issue_notes) == 1 and "没检查" in home.issue_notes[0] and "不含" in home.issue_notes[0]
+
+
+def test_a_pr_whose_checks_could_not_be_read_is_named_not_counted_as_green(tmp_path: Path) -> None:
+    board = _issue_board(tmp_path)
+    snapshot = _snapshot([_pull(475, ["DJ-2026-101"], [("sw008-ci", "unknown")]), _pull(476, ["DJ-2026-101"], [("sw008-ci", "pass")])], "partial")
+    home = vm.home_vm(board, OFFSET, online=True, use_git=False, github=snapshot)
+    assert not any("门禁红" in i.title for i in vm.all_issues(home))
+    assert len(home.issue_notes) == 1 and "#475" in home.issue_notes[0] and "#476" not in home.issue_notes[0]
