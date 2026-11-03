@@ -1,0 +1,32 @@
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-d671611
+{
+  "schema_version": "implementation-card-precheck.v1",
+  "card": "C:\\Users\\fubai\\Documents\\My_Workspace\\.auto-pm\\reports\\m3-d07m\\D07m_card.md",
+  "card_sha256": "12c4e3c2c25e37df82cbde0b272d5e6a75b0ec99059a4247085240bd395b8ec7",
+  "baseline": "d671611a13bc15536047769fdb0498666c414044",
+  "path_root": ".",
+  "passed": true,
+  "paths": [
+    {
+      "path": "00_Infrastructure/auto_pm/releases/1.3.3-d671611",
+      "state": "计划新增"
+    },
+    {
+      "path": "00_Infrastructure/auto_pm/deployment_manifest.json",
+      "state": "存在"
+    },
+    {
+      "path": "00_Infrastructure/auto_pm/active_release.json",
+      "state": "存在"
+    },
+    {
+      "path": "00_Infrastructure/auto_pm/previous_release.json",
+      "state": "存在"
+    }
+  ],
+  "commands": [],
+  "card_format": "legacy",
+  "basis": [],
+  "change": "",
+  "findings": []
+}

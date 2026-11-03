@@ -1,0 +1,86 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261102-5BACA58A",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-471",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_conflict_error_current_version.py"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-11-02T14:46:00.268282+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: AC1 新增单测全绿：钉住每处修复文案含当前版本号、含下一步指引、不含token值",
+    "acceptance: AC2 既有冲突文案相关回归测试全绿（新文案保留旧子串兼容精确断言）",
+    "acceptance: AC3 mypy对两个声明源文件零报错",
+    "acceptance: AC4 ruff对三个声明文件零报错",
+    "acceptance: AC5 变异验证变红：把修复处文案临时改回旧写法后新增单测必须失败",
+    "acceptance: AC6 变异恢复：改回新写法后新增单测重新全绿",
+    "acceptance: AC7 工位git diff恰好改动3个声明文件",
+    "risk: 改动集中在8000+行核心store约35处raise文案（逻辑零变化），回归由新增单测+既有断言测试+mypy/ruff+pm verify全量门禁覆盖",
+    "risk: AC7用PowerShell计数形式而非python -B：本工具传递层会吃掉参数内双引号，python -c所需双引号无法存入范围卡；该命令无中文无裸通配且退出码可判",
+    "risk: 既有测试精确断言（test_continuity_execution_service.py L3457-3461等）要求新文案保留旧子串，实现必须遵守",
+    "risk: 个别raise点若实体不存在则文案分叉为不存在提示，不硬造版本号",
+    "non-goal: 不改CAS逻辑、事务边界与状态机，仅改报错文案",
+    "non-goal: 不改已合规的lease renew文案（L6222模板）",
+    "non-goal: 不改既有测试文件（新文案向后兼容旧子串）",
+    "non-goal: 不改continuity域之外的业务校验文案（清单见计划不修理由）",
+    "safety-circuit: 否"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "880db828eb3586cf2da007a056f391db6920e0f774eeb9b45be5311be0ff6b62",
+      "approval_evidence_ref": "user-confirmation:2026-11-02T07-44MST-baiyang-confirm-start-card-B2",
+      "request_id": "REQ-SW008-CONFLICT-MSG-20261102",
+      "execution_grant": {
+        "adapter": "trae",
+        "approved_model": "Qwen3.8-Flash",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_conflict_error_current_version.py"
+        ],
+        "plan_checklist": {
+          "original_request": "项目 SW-2026-008：continuity_store 里“lease owner、token 或版本冲突”“目标 Run lease 版本冲突”“lease 回收 owner 或版本冲突”这几处报错，也要像 lease renew 那样告诉我当前的版本号和下一步怎么填；报错里不要打印 token 的值。并把全库同族“报冲突却不给当前值”的报错查一遍，逐条修或写明不修的理由。",
+          "safety_circuit": "否",
+          "acceptance_checks": [
+            {
+              "command": "C:/Users/fubai/Documents/My_Workspace/.venv/Scripts/python.exe -B -m pytest tests/core/test_conflict_error_current_version.py -q",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "C:/Users/fubai/Documents/My_Workspace/.venv/Scripts/python.exe -B -m pytest tests/core/test_continuity_execution_service.py tests/core/test_mission_park_store.py tests/core/test_mission_service.py tests/core/test_lease_handover_service.py -q",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "C:/Users/fubai/Documents/My_Workspace/.venv/Scripts/python.exe -B -m mypy auto_pm/infrastructure/continuity_store.py auto_pm/application/core/continuity_execution_service.py",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "C:/Users/fubai/Documents/My_Workspace/.venv/Scripts/python.exe -B -m ruff check auto_pm/infrastructure/continuity_store.py auto_pm/application/core/continuity_execution_service.py tests/core/test_conflict_error_current_version.py",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "C:/Users/fubai/Documents/My_Workspace/.venv/Scripts/python.exe -B -m pytest tests/core/test_conflict_error_current_version.py -q",
+              "expected_exit_code": 1
+            },
+            {
+              "command": "C:/Users/fubai/Documents/My_Workspace/.venv/Scripts/python.exe -B -m pytest tests/core/test_conflict_error_current_version.py -q",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "$d=@(git -c core.quotePath=false diff --name-only); if($d.Count -eq 3){exit 0}else{exit 1}",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "未提交前在工位git checkout --两个源文件并删除新增测试文件；已并回控制根未提交时由用户在控制根git checkout --恢复；已提交则revert该提交"
+        }
+      }
+    }
+  }
+}

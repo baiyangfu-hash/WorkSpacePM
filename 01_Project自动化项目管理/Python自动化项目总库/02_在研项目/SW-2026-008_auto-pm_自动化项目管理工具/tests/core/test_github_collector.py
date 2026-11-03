@@ -185,7 +185,7 @@ def test_full_read_pulls_ci_safety_audit(tmp_path: Path) -> None:
     checks = {c.key: c for c in home.checks}
     assert checks["gate_red"].state == "number" and checks["gate_red"].value == 1
     assert checks["safety_unsigned"].state == "number" and checks["safety_unsigned"].value == 1
-    assert any(d.ask == "PR #1 等你安全签字" and d.reply.endswith(SHA1[:12]) for d in home.decisions)
+    assert any(d.ask == "PR #1 等你安全签字" and d.reply == f"安全签字 {SHA1[:12]}" for d in home.decisions)
     assert home.github is not None and home.github.as_of.startswith("数据截至 ")
     gates = {r.number: r.gate for r in home.github.rows}
     assert gates[2].text == "红" and gates[2].sev == "block" and gates[1].sev == "ok"
@@ -461,3 +461,22 @@ def test_a_signature_shorter_than_12_digits_does_not_count_on_the_board_either()
     for length in (12, 20, 40):
         comment = {"body": f"安全签字 {head[:length]}", "user": signer, "performed_via_github_app": None}
         assert gh.find_signature([comment], head) == (head[:8], ""), length
+
+
+def test_the_safety_signature_line_is_exactly_what_the_judge_accepts(tmp_path: Path) -> None:
+    """卡片上“复制”的那一行当成用户评论，交给真的判卷函数：当前头通过；少一位、换头都不过。
+
+    原来给的是“仿真过了再在 PR #1 上评论：安全签字 <前 8 位>”：整句复制过去不是单独一行，而且 8 位不够 12 位，safety-zone 不认。
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[6] / "reviews" / "tools"))
+    import safety_zone_check as judge  # noqa: PLC0415
+
+    snap = _collect(tmp_path, FakeGitHub(routes()))
+    decision = next(d for d in vm.github_decisions(snap) if d.ask == "PR #1 等你安全签字")
+    comment = {"body": decision.reply, "user": {"login": "baiyangfu-hash", "id": 246858089}, "html_url": "c",
+               "created_at": "2026-10-22T10:00:00Z", "updated_at": "2026-10-22T10:00:00Z"}
+    assert decision.reply.split() == ["安全签字", SHA1[: gh.MIN_SIGN_LEN]] and gh.MIN_SIGN_LEN == judge.MIN_SIGN_LEN == 12
+    assert judge.find_signature([comment], SHA1, judge.Result()) is not None
+    assert gh.find_signature([comment], SHA1)[0] is not None  # 总控屏自己的同口径判断也认
+    assert judge.find_signature([{**comment, "body": decision.reply[:-1]}], SHA1, judge.Result()) is None  # 少一位不认
+    assert judge.find_signature([comment], SHA2, judge.Result()) is None  # 换头（又推了提交）作废

@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, caller_agent
 from auto_pm.application.core.bounded_command import run_until_done_or_stopped
 from auto_pm.application.core.continuity_execution_service import (
     CONTROL_ROOT_RUN_REFUSAL,
@@ -200,6 +201,33 @@ def _lease_token(
     if sys.stderr.isatty():  # only an interactive user sees it; scripts and tests parse unchanged output
         click.echo(_ARGV_TOKEN_WARNING.format(option=option, env_option=env_option), err=True)
     return argv_value
+
+
+def _starts_for_other_executor(executor_id: str) -> bool:
+    """True when a roster agent's Run is started by somebody else (another agent, the user's terminal, or an unrecognised caller)."""
+
+    target = executor_id.split(":", 1)[0].strip().lower()
+    return target in AGENT_ROSTER and caller_agent() != target
+
+
+def _require_wallet_for_other_executor(executor_id: str, *, use_wallet: bool) -> None:
+    """A Run started for another agent must land its token in the wallet, or only the starter can ever renew it (wallet isolation, 11-03).
+
+    ``--executor trae`` started by Codex with ``--lease-token`` leaves no wallet file, so Trae's ``--lease-wallet`` finds nothing.
+    Only roster agents are judged (WS-001); other executor ids (tests, legacy tools) keep the old freedom.
+    """
+
+    if use_wallet or not _starts_for_other_executor(executor_id):
+        return
+    caller = caller_agent()
+    who = {"": "用户终端", "?": "无法识别的调用方"}.get(caller, caller)
+    raise click.ClickException(
+        f"为别的执行者（{executor_id}）建 Run 必须带 --lease-wallet（当前调用方：{who}）："
+        f"口令会写进 {executor_id} 的本机钱包，接手方用 --lease-wallet 才读得到、才能自己续租；"
+        "用 --lease-token / --lease-token-env 只有建 Run 的人手里有口令，接手方续不了。"
+        "请去掉口令选项，改用 --lease-wallet，并同时加 --holder-pid none"
+        "（默认会把你这个 shell 记成持有进程，你的会话一结束，这个 Run 在回收判定里就像持有者已死）。"
+    )
 
 
 def _holder_pid(value: str) -> int | None:
@@ -704,7 +732,8 @@ def run_group() -> None:
     "--holder-pid",
     default="auto",
     show_default=True,
-    help="与 --lease-wallet 一起：记录持有者的长驻进程（auto=调用本命令的 shell 或 IDE；none=不记录；或给出 pid），供日后回收判定",
+    help="与 --lease-wallet 一起：记录持有者的长驻进程（auto=调用本命令的 shell 或 IDE；none=不记录；或给出 pid），供日后回收判定。"
+    "为别的执行者建 Run 时 auto 按 none 处理，不会把你的 shell 记成对方的持有进程",
 )
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option(
@@ -737,6 +766,11 @@ def start_run(
     """Start a Run after independently observing Git HEAD and owned-path dirtiness."""
     require_runtime_identity(ctx, project_of_work(ctx, work_id))
     _require_mutation_root(ctx)
+    _require_wallet_for_other_executor(executor_id, use_wallet=lease_wallet)
+    if lease_wallet and holder_pid == "auto" and _starts_for_other_executor(executor_id):
+        # "auto" means the shell that runs this command; for somebody else's Run that would make the starter's session the
+        # holder process, so the Run looks orphaned to a reclaim as soon as the starter closes (audit 573 P2-1).
+        holder_pid = "none"
     if lease_wallet:
         if lease_token is not None or lease_token_env is not None:
             raise click.UsageError("--lease-wallet 不能与 --lease-token 或 --lease-token-env 同用")

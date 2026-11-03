@@ -588,8 +588,9 @@ def github_decisions(snapshot: gh.Snapshot | None) -> list[Decision]:
         if pull.safety.state == "waiting":
             out.append(
                 Decision(
-                    "block", pid, f"PR #{pull.number} 等你安全签字", "仿真过了再签 · " + pd._short(pull.title, 60),
-                    f"安全签字 {pull.head_sha[:gh.MIN_SIGN_LEN]}",  # 签字至少 12 位，短了 safety-zone 不认
+                    "block", pid, f"PR #{pull.number} 等你安全签字", "仿真过了再在 PR 页面评论这一行 · " + pd._short(pull.title, 60),
+                    # 只给那一行本身（“复制”复制的就是它，多一个字判卷都不认）；签字至少 12 位，短了 safety-zone 不认
+                    f"安全签字 {pull.head_sha[:gh.MIN_SIGN_LEN]}",
                     "PR 描述“安全回路: 是”+ 评论里没有你签当前头提交", pd.parse_time(pull.updated_at), link=pull.url,
                 )
             )

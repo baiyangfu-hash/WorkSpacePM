@@ -28,6 +28,7 @@ import argparse
 import ctypes
 import datetime as dt
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -1006,6 +1007,34 @@ def _launch_posix(cfg: dict[str, Any], config_path: Path) -> None:
     )
 
 
+def _memory_preflight_refusal() -> str:
+    """The refusal text when this machine is too close to its commit limit to start a long job, else "" (11-03 laptop memory P1).
+
+    Loads ``auto_pm/infrastructure/memory_preflight.py`` by path (standard library only, so this script stays standalone).  A missing or
+    broken module counts as a refusal: a gate must not start on a machine whose headroom nobody could check.
+    """
+
+    path = Path(__file__).resolve().parent.parent / "auto_pm" / "infrastructure" / "memory_preflight.py"
+    name = "long_gate_memory_preflight"
+    try:
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError("no loader")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module  # dataclasses look the module up by name while it executes
+        spec.loader.exec_module(module)
+        result = module.run_preflight()
+    except Exception as error:  # noqa: BLE001 - any failure to check is a refusal, never a silent pass
+        return f"拒绝启动：内存预检模块无法运行（{type(error).__name__}: {error}），不能确认这台电脑有余量。"
+    finally:
+        sys.modules.pop(name, None)
+    if not result.ok:
+        return str(module.refusal_text(result))
+    if result.unverified:
+        _say(f"[内存预检] {result.unverified}")
+    return ""
+
+
 def cmd_launch(config_path: Path, wait_s: int) -> int:
     cfg, _ = load_config(config_path)
     out = Path(cfg["out_dir"])
@@ -1017,6 +1046,10 @@ def cmd_launch(config_path: Path, wait_s: int) -> int:
     if sp.exists() and json.loads(sp.read_text(encoding="utf-8")).get("result") in FINAL:
         print("ALREADY FINISHED; see `status`. A new round needs a new out_dir.")
         return 0
+    refusal = _memory_preflight_refusal()
+    if refusal:
+        print(refusal)
+        return EXIT_CODES["REFUSED"]
     before = time.time()
     (_launch_windows if IS_WINDOWS else _launch_posix)(cfg, config_path.resolve())
     deadline = time.time() + wait_s

@@ -31,7 +31,7 @@
 - **PM 治理角色**：负责事实核验、CHG、Decision、Work 授权与验收；不得使用 `pm-workflow`，不得把 PM_SESSION、handoff.v1 或聊天文字视为执行真源。
 - **plc-electrical-engineer**：PLC 工程执行主力，全面遵循 Siemens LSP 扩展生态及 LSP-905~908 规范（语法白名单、DINT 定时器三段式、CASE 防死锁 ELSE、.plc.json 依赖）与汽车制造级标准（STD-830 OMAC 状态机、STD-840 典型设备块、STD-850 步进链、STD-860 首出诊断）
 - **fullstack-engineer**：Python/高级语言全栈执行主力，全面遵循 DEV-300（Google SRE 零崩溃/白盒日志/黄金信号）与 DEV-210/DEV-216/DEV-218（PySide6+QML 5 层整洁架构、Bridge/DTO、QRunnable 线程模型、Ruff+Mypy）
-- **基础设施**：`.trae/` 由 Trae 生态维护；其他 AI 只读，除非用户明确要求修改
+- **基础设施**：`.trae/` 由 Trae 生态维护；其他 AI 只读，除非用户明确要求修改。Trae 里的 AI 想改 `.trae/` 也要先有用户原话，不得自改自合
 
 ## 强制协同铁律（澄清-报批-执行-验收 四阶段）
 
@@ -43,7 +43,7 @@
      - **全新建仓 (Greenfield)**：审查 CAD/轴系/动作时序 3 要素。若缺失，先检索 Obsidian 规范库与模板库；仍缺失物理硬件事实时方可向用户提问；
      - **在研迭代/缺陷变更 (Brownfield)**：先按 `cockpit-entry` 从工作区根执行只读定位 `main.py pm orient <PID> --json`（需要恢复细节时再用 `main.py pm resume <PID> --json`；仓库记录的发布版本 1.3.3-d8f7c8b 还没有 `pm orient`，新克隆的工作区在发布指针更新前改用 `pm resume`），再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
    - **有效提问门槛**：只有当代码库探路完毕，且发现涉及无法推导的真实业务决策抉择（Trade-off）、新增未接线硬件定义或客户冲突诉求时，方可发起《高质量澄清提问清单》；
-2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）；
+2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）。一档小卡（只改测试、文档或单个文件的小修，且不碰受保护路径、安全区、PLC 项目、发布载荷）可不报批直接做，做完告知；其余仍先报批；
 3. **阶段 2【执行】**：仅在用户明确回复“同意/批准”后，方可派发给对应执行技能（PLC / 全栈）编写代码与自动化测试。严禁在对话框要求或输出长篇说明书草稿，文档骨架由 Copier 脚手架生成并填空；
 4. **阶段 3【验收】**：执行端创建 Checkpoint 并回执后，主 Agent 核验 Git/门禁证据，报用户验收；IDE 里的 agent 用 `main.py pm verify --mission-id <ID> --lease-wallet` 做质量验证（不写临时脚本）；用户验收后由用户在驾驶舱界面点“确认验收”（已启用批准口令时改为用户本人在终端运行 `main.py pm accept --mission-id <ID>` 并输入口令；批准范围同样由用户在 `pm approve` 的提示里输入口令，agent 绝不索要、代填或绕过口令），它记下验收并走 `close_accepted` 一步收口（隔离工作树里验收过的文件按字节并回控制根、不替用户提交，推进 Run、Work 和 Mission，把证据写进变更单；已验收未收口的用 `main.py pm close --mission-id <ID>` 重试（终端里 `main.py pm accept` 只记下验收、停在 ACCEPTED，之后要再跑 `main.py pm close` 才收口；一步收口只发生在驾驶舱界面的“确认验收”按钮）；变更单再用 `change transition … --pid <PID>` 推到 completed），**不得单独用 `continuity run/work/mission transition` 推 Run、Work 或 Mission 的状态**，收口后执行 `main.py ledger reconcile <PID>`。PM_SESSION 已退役（用户 2026-10-10 裁决），不再刷新，仅作历史证据。闭环未完成前不得宣布结项。
 
