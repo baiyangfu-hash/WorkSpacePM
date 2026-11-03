@@ -14,6 +14,8 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "memory_gate.py"
 
@@ -754,3 +756,201 @@ def test_the_install_script_asks_the_user_to_check_its_own_hash_first() -> None:
     script = _install_script()
 
     assert "certutil -hashfile install_memory_gate.ps1 SHA256" in script[: script.index("[CmdletBinding")]
+
+
+# ---------------------------------------------------------------- an unreadable state file is not an empty one (the #518 lesson, applied to the gate)
+class _SharingViolationError(OSError):
+    """Windows' "file in use" (``winerror`` 32); a class attribute so it also exists on Linux."""
+
+    winerror = 32
+
+
+def _fail_reads_of(monkeypatch: pytest.MonkeyPatch, name: str, error: OSError, times: int | None) -> dict[str, int]:
+    """``Path.read_text`` of files called ``name`` raises ``error`` ``times`` times (None: always), then works.  Returns the call counter."""
+
+    calls = {"n": 0}
+    real = Path.read_text
+
+    def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.name == name:
+            calls["n"] += 1
+            if times is None or calls["n"] <= times:
+                raise error
+        return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(mg, "READ_RETRY_SECONDS", 0.0)
+    return calls
+
+
+def _gate_with_a_frozen_tree(folder: Path) -> tuple[World, Any]:
+    w = _trae_world()
+    gate = w.gate(folder)
+    _warm(w, gate)
+    _leak(w, gate, 41.0)
+    assert gate.load()["frozen"], "setup: the leak must have been frozen"
+    return w, gate
+
+
+def test_a_missing_state_file_is_the_empty_state(tmp_path: Path) -> None:
+    state = World().gate(tmp_path).load()
+
+    assert state["frozen"] == [] and state["next_id"] == 1
+
+
+@pytest.mark.parametrize("failures", [1, 3, mg.READ_RETRIES])
+@pytest.mark.parametrize("error", [PermissionError(13, "denied"), _SharingViolationError("in use")], ids=["permission-or-winerror5", "winerror32"])
+def test_a_state_read_that_meets_the_atomic_replace_is_retried_and_returns_the_real_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failures: int, error: OSError
+) -> None:
+    _w, gate = _gate_with_a_frozen_tree(tmp_path)
+    frozen = [entry["root"] for entry in gate.load()["frozen"]]
+    calls = _fail_reads_of(monkeypatch, mg.STATE_FILE, error, failures)
+
+    state = gate.load()
+
+    assert [entry["root"] for entry in state["frozen"]] == frozen  # the real state, not an empty one
+    assert calls["n"] == failures + 1
+
+
+def test_a_state_read_that_keeps_failing_raises_with_the_path_and_the_retries_and_never_returns_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _w, gate = _gate_with_a_frozen_tree(tmp_path)
+    calls = _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), None)
+
+    with pytest.raises(mg.StateUnreadableError) as caught:
+        gate.load()
+
+    assert str(tmp_path / mg.STATE_FILE) in str(caught.value) and f"已重试 {mg.READ_RETRIES} 次" in str(caught.value)
+    assert calls["n"] == mg.READ_RETRIES + 1 and mg.READ_RETRIES == 8
+
+
+def test_other_read_errors_and_a_corrupt_file_are_not_retried_and_not_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _w, gate = _gate_with_a_frozen_tree(tmp_path)
+    calls = _fail_reads_of(monkeypatch, mg.STATE_FILE, OSError(5, "input/output error"), None)
+    with pytest.raises(mg.StateUnreadableError, match="未重试"):
+        gate.load()
+    assert calls["n"] == 1
+    monkeypatch.undo()
+
+    (tmp_path / mg.STATE_FILE).write_text("{ not json", encoding="utf-8")
+    with pytest.raises(mg.StateUnreadableError, match="不是合法的 JSON"):
+        gate.load()
+    (tmp_path / mg.STATE_FILE).write_text("[1]", encoding="utf-8")
+    with pytest.raises(mg.StateUnreadableError, match="不是 JSON 对象"):
+        gate.load()
+
+
+def test_a_step_that_cannot_read_the_state_does_nothing_and_leaves_the_file_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    w, gate = _gate_with_a_frozen_tree(tmp_path)
+    before = (tmp_path / mg.STATE_FILE).read_bytes()
+    frozen_before = dict(w.suspended)
+    _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), None)
+    w.committed = 20.0  # would resume everything if the gate believed the (empty) state
+
+    with pytest.raises(mg.StateUnreadableError):
+        gate.step()
+
+    monkeypatch.undo()
+    assert (tmp_path / mg.STATE_FILE).read_bytes() == before and w.suspended == frozen_before
+
+
+def test_the_loop_survives_an_unreadable_state_logs_it_and_does_not_flood_the_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _w, gate = _gate_with_a_frozen_tree(tmp_path)
+    _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), None)
+
+    mg.run_forever(gate, sleep=lambda _s: None, max_steps=30)
+
+    log = (tmp_path / "gate.log").read_text(encoding="utf-8")
+    assert log.count("读不了状态，本轮不动作") == 1  # 30 rounds, one line (same message, under a minute)
+
+
+def test_a_stop_that_cannot_read_the_state_raises_a_loud_alert_instead_of_claiming_it_resumed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _w, gate = _gate_with_a_frozen_tree(tmp_path)
+    _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), None)
+
+    def stop_now(_seconds: float) -> None:
+        (tmp_path / mg.STOP_FILE).write_text("stop", encoding="utf-8")
+
+    mg.run_forever(gate, sleep=stop_now)
+
+    alerts = list(tmp_path.glob("ALERT-*.txt"))
+    assert alerts and "没有解冻任何进程" in alerts[-1].read_text(encoding="utf-8") and "resume-all" in alerts[-1].read_text(encoding="utf-8")
+    assert "已解冻" not in (tmp_path / "gate.log").read_text(encoding="utf-8").split("【锁定】")[-1]
+
+
+def test_resume_all_with_an_unreadable_state_stops_with_a_nonzero_exit_code_the_path_and_how_to_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / mg.STATE_FILE).write_text(json.dumps({"frozen": []}), encoding="utf-8")
+    _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), None)
+
+    code = mg.main(["resume-all", "--state-dir", str(tmp_path)])
+
+    err = capsys.readouterr().err
+    assert code != 0 and str(tmp_path / mg.STATE_FILE) in err and "没有解冻任何进程" in err and "重新运行" in err and "resume-all" in err
+
+
+def test_status_with_an_unreadable_state_says_it_cannot_read_the_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    (tmp_path / mg.STATE_FILE).write_text(json.dumps({"frozen": []}), encoding="utf-8")
+    _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), None)
+
+    code = mg.main(["status", "--state-dir", str(tmp_path)])
+
+    shown = json.loads(capsys.readouterr().out)
+    assert code == 1 and "读不了状态" in shown["state_error"] and shown["running"] is None
+
+
+def test_the_manifest_read_is_retried_too_and_an_unreadable_one_is_a_problem_not_a_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for relative in mg.MANIFEST_FILES:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {relative}\n", encoding="utf-8")
+    files = {relative: hashlib.sha256((tmp_path / relative).read_bytes()).hexdigest() for relative in mg.MANIFEST_FILES}
+    (tmp_path / mg.MANIFEST_FILE).write_text(json.dumps({"files": files}), encoding="utf-8")
+
+    _fail_reads_of(monkeypatch, mg.MANIFEST_FILE, PermissionError(13, "denied"), 3)
+    assert mg.verify_install(tmp_path) == ""
+    monkeypatch.undo()
+
+    _fail_reads_of(monkeypatch, mg.MANIFEST_FILE, PermissionError(13, "denied"), None)
+    assert "读不出" in mg.verify_install(tmp_path) and "已重试" in mg.verify_install(tmp_path)
+
+
+def test_the_uninstall_does_not_delete_anything_when_resume_all_did_not_succeed() -> None:
+    script = _install_script()
+    code = script[script.index("# -Uninstall:") :]
+
+    resume = code.index("resume-all")
+    guard = code.index("$LASTEXITCODE -ne 0", resume)
+    assert resume < guard < code.index("Unregister-ScheduledTask") < code.index("Remove-Item -LiteralPath $Dest")
+    assert "throw" in code[guard : guard + 400] and "没有删除计划任务和安装目录" in code[guard : guard + 400]
+
+
+def test_an_installed_file_held_for_a_moment_is_hashed_after_a_retry_and_a_file_that_stays_unreadable_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for relative in mg.MANIFEST_FILES:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {relative}\n", encoding="utf-8")
+    files = {relative: hashlib.sha256((tmp_path / relative).read_bytes()).hexdigest() for relative in mg.MANIFEST_FILES}
+    (tmp_path / mg.MANIFEST_FILE).write_text(json.dumps({"files": files}), encoding="utf-8")
+    real, calls = Path.read_bytes, {"n": 0}
+
+    def busy(path: Path) -> bytes:
+        if path.name == "memory_gate.py":
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise PermissionError(13, "held by the virus scanner")
+        return real(path)
+
+    monkeypatch.setattr(Path, "read_bytes", busy)
+    monkeypatch.setattr(mg, "READ_RETRY_SECONDS", 0.0)
+    assert mg.verify_install(tmp_path) == "" and calls["n"] == 3
+
+    def always(path: Path) -> bytes:
+        if path.name == "memory_gate.py":
+            raise PermissionError(13, "held")
+        return real(path)
+
+    monkeypatch.setattr(Path, "read_bytes", always)
+    problem = mg.verify_install(tmp_path)
+    assert "memory_gate.py" in problem and "读不出" in problem and "缺失" not in problem  # present but unreadable is not "missing"

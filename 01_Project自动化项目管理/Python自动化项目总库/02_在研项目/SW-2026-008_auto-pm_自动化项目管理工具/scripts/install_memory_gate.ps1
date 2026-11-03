@@ -12,7 +12,8 @@
                  下载失败（TLS 不通、被代理拦）时改用 -PythonZip 指向事先核对过的本地包；
               3) 复制三个源文件，复制后再核对一遍哈希，记入 manifest.json；
               4) 用 python -I -S -B 先自检（冻结、解冻都要真生效），通过后注册开机自启的计划任务（SYSTEM、最高权限）并启动。
-  -Uninstall  先让看门狗解冻全部进程并退出，再确认解冻，最后删除计划任务和安装目录。只装了一半（没有 Python、没有状态目录、没有计划任务）也能卸干净。
+  -Uninstall  先让看门狗解冻全部进程并退出，再确认解冻，最后删除计划任务和安装目录。解冻没有确认（resume-all 退出码非 0，例如状态文件读不了）就停下，
+              什么都不删，提示重跑。只装了一半（没有 Python、没有状态目录、没有计划任务）也能卸干净。
   -Status     只读：计划任务状态 + 看门狗自报的状态（含安装文件的 SHA-256 核对）。
 
   -ExpectedSha256 怎么得到：在仓库根的“控制根”里运行 python -B scripts\memory_gate.py bundle-hash，它列出四个文件各自的哈希和合并哈希；
@@ -190,7 +191,9 @@ if (Test-Path -LiteralPath $StateDir) {
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ((Test-Path -LiteralPath $InstalledPython) -and (Test-Path -LiteralPath $InstalledGate)) {
     & $InstalledPython -I -S -B $InstalledGate resume-all
-    if ($LASTEXITCODE -ne 0) { Write-Warning "resume-all 返回 $LASTEXITCODE；请看 $StateDir\gate.log，确认被冻结的进程已恢复。" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "resume-all 返回 $LASTEXITCODE：没有确认被冻结的进程已全部解冻（状态文件读不了？），所以没有删除计划任务和安装目录。请稍后重新运行 -Uninstall，或先手动运行：`"$InstalledPython`" -I -S -B `"$InstalledGate`" resume-all"
+    }
 } else {
     Write-Host "没有找到已安装的 Python 或看门狗脚本（可能只装了一半），跳过解冻步骤。"
 }

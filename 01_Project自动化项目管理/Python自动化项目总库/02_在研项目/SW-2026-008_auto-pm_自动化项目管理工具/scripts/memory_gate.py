@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, TypeVar
 
 GIB = 2**30
 LIMIT_GIB = 40.0
@@ -71,6 +71,11 @@ MAX_FROZEN_UNITS = 4
 HEARTBEAT_STALE_SECONDS = 30.0
 LOG_LIMIT_BYTES = 1024 * 1024
 RENOTIFY_SECONDS = 15 * 60.0  # a locked tree nobody has dealt with is announced again this often
+#: On Windows a reader that opens a file in the instant ``os.replace`` swaps it gets PermissionError (winerror 5) or a sharing violation (winerror 32):
+#: read it again a few times before calling the file unreadable.  Same numbers as the long-run state files (PR #518).
+READ_RETRIES = 8
+READ_RETRY_SECONDS = 0.05
+_SHARING_ERRORS = (5, 32)
 MANIFEST_FILE = "manifest.json"
 MANIFEST_FILES = ("scripts/memory_gate.py", "auto_pm/infrastructure/memory_preflight.py", "auto_pm/infrastructure/long_run_core.py")
 STATE_FILE = "state.json"
@@ -98,6 +103,49 @@ BUNDLE_FILES = (
     "scripts/memory_gate.py",
 )
 SHELL_NAMES = frozenset({"powershell.exe", "pwsh.exe", "cmd.exe", "bash.exe", "wsl.exe", "bash", "sh", "zsh", "fish", "dash"})
+
+
+class StateUnreadableError(RuntimeError):
+    """A file the gate depends on exists but cannot be read (after retries): never to be mistaken for "nothing recorded"."""
+
+
+def _read_text_retrying(path: Path) -> str:
+    """The text of ``path`` (see ``_read_retrying``)."""
+
+    return _read_retrying(path, lambda: path.read_text(encoding="utf-8"))
+
+
+def _read_bytes_retrying(path: Path) -> bytes:
+    """The bytes of ``path`` (see ``_read_retrying``); a virus scanner holding an installed file for a moment is the same kind of race."""
+
+    return _read_retrying(path, path.read_bytes)
+
+
+_T = TypeVar("_T")
+
+
+def _read_retrying(path: Path, read: Callable[[], _T]) -> _T:
+    """``read()`` of ``path``.  A permission / sharing error is retried ``READ_RETRIES`` times; every other error is raised at once.
+
+    ``FileNotFoundError`` passes through (the one case that means "nothing there"); anything else that stops the read is a
+    ``StateUnreadableError`` naming the file and how often it retried.
+    """
+
+    retries = 0
+    while True:
+        try:
+            return read()
+        except FileNotFoundError:
+            raise
+        except UnicodeDecodeError as error:
+            raise StateUnreadableError(f"读不了 {path}：{type(error).__name__}（未重试）") from error
+        except OSError as error:
+            if not (isinstance(error, PermissionError) or getattr(error, "winerror", None) in _SHARING_ERRORS):
+                raise StateUnreadableError(f"读不了 {path}：{type(error).__name__}（未重试）") from error
+            if retries >= READ_RETRIES:
+                raise StateUnreadableError(f"读不了 {path}：{type(error).__name__}（已重试 {retries} 次）") from error
+            retries += 1
+            time.sleep(READ_RETRY_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -360,16 +408,27 @@ class Gate:
                 handle.write(f"{_now_text()} {text}\n")
 
     def load(self) -> dict[str, Any]:
+        """The saved state.  No file at all is the empty state; a file that exists but cannot be read (or is not a JSON object) is an error.
+
+        Returning the empty state for an unreadable file would make the gate (or ``resume-all``) believe nothing is frozen and leave
+        processes suspended for good, so it raises ``StateUnreadableError`` instead.
+        """
+
+        path = self.dir / STATE_FILE
         try:
-            state = json.loads((self.dir / STATE_FILE).read_text(encoding="utf-8"))
-            if isinstance(state, dict):
-                state.setdefault("frozen", [])
-                state.setdefault("recent_resumed", {})
-                state.setdefault("next_id", 1)
-                return state
-        except (OSError, ValueError):
-            pass
-        return {"frozen": [], "recent_resumed": {}, "next_id": 1, "watch": None, "below_since": None, "last_resume_at": 0.0}
+            text = _read_text_retrying(path)
+        except FileNotFoundError:
+            return {"frozen": [], "recent_resumed": {}, "next_id": 1, "watch": None, "below_since": None, "last_resume_at": 0.0}
+        try:
+            state = json.loads(text)
+        except ValueError as error:
+            raise StateUnreadableError(f"读不了 {path}：内容不是合法的 JSON（未重试）") from error
+        if not isinstance(state, dict):
+            raise StateUnreadableError(f"读不了 {path}：内容不是 JSON 对象（未重试）")
+        state.setdefault("frozen", [])
+        state.setdefault("recent_resumed", {})
+        state.setdefault("next_id", 1)
+        return state
 
     def save(self, state: dict[str, Any]) -> None:
         text = json.dumps(state, ensure_ascii=False, indent=1)
@@ -667,16 +726,29 @@ class Gate:
 def run_forever(gate: Gate, *, sleep: Callable[[float], None] = time.sleep, poll: float = POLL_SECONDS, max_steps: int | None = None) -> None:
     (gate.dir / STOP_FILE).unlink(missing_ok=True)
     steps = 0
+    last_state_error = ("", 0.0)  # (message, monotonic time) - an unreadable state file is logged when it changes or once a minute, not every 5 seconds
     while not (gate.dir / STOP_FILE).exists():
         try:
             gate.step()
+        except StateUnreadableError as error:
+            if str(error) != last_state_error[0] or time.monotonic() - last_state_error[1] >= 60:
+                gate.log(f"读不了状态，本轮不动作（不会当成空状态）：{error}")
+                last_state_error = (str(error), time.monotonic())
         except Exception as error:  # noqa: BLE001 - the watchdog must outlive any single failure
             gate.log(f"本轮异常 {type(error).__name__}: {error}")
         steps += 1
         if max_steps is not None and steps >= max_steps:
             return
         sleep(poll)
-    resumed = gate.resume_all()  # never leave anything frozen behind
+    try:
+        resumed = gate.resume_all()  # never leave anything frozen behind
+    except StateUnreadableError as error:
+        gate.alert(
+            "内存总闸收到 STOP，但读不了状态文件，没有解冻任何进程",
+            f"{error}\n请稍后手动运行：python -B scripts\\memory_gate.py resume-all（读得了时才会解冻）。",
+            loud=True,
+        )
+        return
     gate.log(f"收到 STOP，已解冻 {resumed} 个进程，看门狗退出")
 
 
@@ -698,7 +770,7 @@ def default_state_dir() -> Path:
 def _normalized_sha256(path: Path) -> str:
     """SHA-256 of the file with CRLF read as LF, so a Windows checkout (autocrlf) and a Linux one hash the same."""
 
-    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+    return hashlib.sha256(_read_bytes_retrying(path).replace(b"\r\n", b"\n")).hexdigest()
 
 
 def bundle_hash(project_root: Path | None = None) -> tuple[str, list[tuple[str, str]]]:
@@ -725,17 +797,23 @@ def verify_install(root: Path) -> str:
     """Why the installed files cannot be trusted (empty when they match the SHA-256 the installer recorded)."""
 
     try:
-        recorded = json.loads((root / MANIFEST_FILE).read_text(encoding="utf-8"))["files"]
-    except (OSError, ValueError, KeyError, TypeError):
+        recorded = json.loads(_read_text_retrying(root / MANIFEST_FILE))["files"]
+    except FileNotFoundError:
+        return f"{MANIFEST_FILE} 缺失"
+    except StateUnreadableError as error:
+        return f"{MANIFEST_FILE} 读不出：{error}"
+    except (ValueError, KeyError, TypeError):
         return f"{MANIFEST_FILE} 缺失或读不出"
     if not isinstance(recorded, dict):
         return f"{MANIFEST_FILE} 格式不对"
     for relative in MANIFEST_FILES:
         want = recorded.get(relative)
         try:
-            have = hashlib.sha256((root / relative).read_bytes()).hexdigest()
-        except OSError:
+            have = hashlib.sha256(_read_bytes_retrying(root / relative)).hexdigest()
+        except FileNotFoundError:
             return f"{relative} 缺失"
+        except StateUnreadableError as error:
+            return f"{relative} 读不出：{error}"
         if not isinstance(want, str) or have != want.lower():
             return f"{relative} 的 SHA-256 与安装时记录的不一致（文件被改过）"
     return ""
@@ -839,7 +917,11 @@ def selftest(state_dir: Path, *, strict: bool = False) -> list[str]:
 
 def cmd_status(state_dir: Path, integrity: str = "") -> int:
     gate = Gate(state_dir, committed_gib=lambda: None, processes=list, created_of=created_of, suspend=lambda p: 0, resume=lambda p: 0, alive=lambda p: False)
-    state = gate.load()
+    try:
+        state = gate.load()
+    except StateUnreadableError as error:
+        print(json.dumps({"running": None, "state_error": f"读不了状态：{error}", "install_check": integrity or "ok", "state_dir": str(state_dir)}, ensure_ascii=False, indent=1))
+        return 1
     age = time.time() - float(state.get("heartbeat", 0.0))
     running = age <= HEARTBEAT_STALE_SECONDS
     host = Host()
@@ -889,7 +971,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "status":
         return cmd_status(state_dir, integrity)
     if args.command == "resume-all":
-        count = real_gate(state_dir).resume_all()
+        try:
+            count = real_gate(state_dir).resume_all()
+        except StateUnreadableError as error:
+            print(f"没有解冻任何进程：读不了状态文件 {state_dir / STATE_FILE}\n{error}\n稍后重新运行：python -B scripts\\memory_gate.py resume-all", file=sys.stderr)  # noqa: T201
+            return 2
         print(f"已解冻 {count} 个进程")
         return 0
     if args.command == "bundle-hash":
