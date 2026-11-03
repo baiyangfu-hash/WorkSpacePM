@@ -196,3 +196,14 @@ def test_the_unowned_line_is_left_out_when_no_process_list_is_available_and_neve
 
     assert "未归属" not in without_list
     assert "未归属进程的提交量：0.0 GiB" in over
+
+
+def test_a_test_gets_the_healthy_stand_in_reading_unless_it_asks_for_the_real_machine() -> None:
+    """The autouse stand-in (conftest) answers a healthy 4 GiB; only ``real_machine`` tests may see the real reader."""
+
+    assert mp.read_commit().committed == 4 * mp.GIB  # type: ignore[union-attr]
+
+
+@pytest.mark.real_machine
+def test_a_real_machine_test_gets_the_real_reader_not_the_stand_in() -> None:
+    assert mp.read_commit.__name__ == "read_commit"  # the stand-in is a lambda

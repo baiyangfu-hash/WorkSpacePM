@@ -144,6 +144,7 @@ markers = [
     "unit: 单元测试",
     "integration: 集成测试",
     "slow: 慢速测试（运行时间 > 5s）",
+    "real_machine: 要读真实系统读数的用例（如 Windows 已提交内存计数器）；conftest 不替换内存读数。只在对应系统上跑，别的系统自行 skip",
     "needs_quality_tools: 真实跑 ruff/mypy 子进程的质量门测试；解释器缺这两个依赖时默认失败，只有设 AUTO_PM_ALLOW_SKIP_QUALITY_TOOLS=1 才跳过",
 ]
 addopts = [

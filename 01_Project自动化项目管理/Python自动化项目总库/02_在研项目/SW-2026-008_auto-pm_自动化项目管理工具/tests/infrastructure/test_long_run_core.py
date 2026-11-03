@@ -560,6 +560,7 @@ def test_a_task_directory_that_cannot_be_created_is_reported_in_plain_words(tmp_
         core.start(tmp_path, "reserved", [PY, "-c", "pass"], cwd=tmp_path)
 
 
+@pytest.mark.real_machine
 @pytest.mark.skipif(sys.platform != "win32", reason="compares the reading with the Windows performance counter")
 def test_the_committed_reading_matches_the_windows_system_counter() -> None:
     """Real-machine step 2 of the long-run check: the guard's number is the system's ``\\Memory\\Committed Bytes``, within half a GiB."""
