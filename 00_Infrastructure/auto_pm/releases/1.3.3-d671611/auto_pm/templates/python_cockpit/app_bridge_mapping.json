@@ -1,0 +1,85 @@
+{
+  "project_id": "SW-2026-008",
+  "project_name": "auto-pm 自动化项目管理工具",
+  "version": "1.0.0",
+  "standard": "STD-911",
+  "bridges": {
+    "workbenchBridge": {
+      "signals": [
+        "projectsChanged",
+        "projectSelected"
+      ],
+      "slots": [
+        "listProjects",
+        "getProjectById",
+        "refreshProjects",
+        "hasHmiPrototype",
+        "openHmiPrototype",
+        "getDeliverySummary"
+      ]
+    },
+    "changeBridge": {
+      "signals": [
+        "statusChanged"
+      ],
+      "slots": [
+        "getChangeRequest",
+        "transitionChange",
+        "listChanges",
+        "getAvailableTransitions"
+      ]
+    },
+    "deliveryBridge": {
+      "signals": [
+        "assetSummaryChanged"
+      ],
+      "slots": [
+        "getAssetSummary",
+        "refreshAssetSummary"
+      ]
+    },
+    "modbusBridge": {
+      "signals": [
+        "dataReceived",
+        "connectionStatusChanged"
+      ],
+      "slots": [
+        "connectDevice",
+        "readHoldingRegisters",
+        "writeRegister"
+      ]
+    }
+  },
+  "views": [
+    {
+      "id": "workspace",
+      "name": "项目工作区",
+      "icon": "ph-folder",
+      "description": "项目基本信息、状态卡片与交付物看板"
+    },
+    {
+      "id": "dashboard",
+      "name": "状态机看板",
+      "icon": "ph-chart-pie-slice",
+      "description": "变更单 9 步状态流转与全景状态机可视化"
+    },
+    {
+      "id": "changes",
+      "name": "变更中心",
+      "icon": "ph-git-commit",
+      "description": "变更单新建、审批、实施与闭环台账"
+    },
+    {
+      "id": "modbus",
+      "name": "Modbus 工具",
+      "icon": "ph-cpu",
+      "description": "PLC 通信数据流与寄存器监控调试"
+    },
+    {
+      "id": "specs",
+      "name": "规范与质检",
+      "icon": "ph-book-open",
+      "description": "STD-909/910/911 全局规范对齐与静态合规检测"
+    }
+  ]
+}
