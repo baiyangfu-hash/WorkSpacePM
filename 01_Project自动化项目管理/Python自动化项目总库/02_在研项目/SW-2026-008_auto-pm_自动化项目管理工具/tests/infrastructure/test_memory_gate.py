@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -40,6 +42,7 @@ class World:
         self.created: dict[int, int] = {}
         self.notices: list[tuple[str, str]] = []
         self.next_pid = 40_000
+        self.system_pids: set[int] = set()  # SYSTEM / service processes: not a logged-in user's, never eligible
 
     def add(self, pid: int, ppid: int, name: str, gib: float = 0.1) -> int:
         self.procs[pid] = mg.Proc(pid, ppid, name, int(gib * GIB))
@@ -88,6 +91,7 @@ class World:
             now=lambda: self.t,
             notify=lambda title, text: self.notices.append((title, text)),
             self_pids=[SELF],
+            eligible=lambda pid: pid not in self.system_pids,
         )
 
     def tick(self, gate: Any, seconds: float = 5.0, steps: int = 1) -> None:
@@ -209,14 +213,15 @@ def test_the_shell_subtree_is_frozen_first_and_a_flat_reading_afterwards_does_no
     assert len(gate.load()["frozen"]) == 1
 
 
-def test_when_the_shell_freeze_does_not_stop_the_growth_it_escalates_to_the_terminal_owner_but_never_to_the_main_process(tmp_path: Path) -> None:
+def test_when_the_growth_hangs_on_the_terminal_layer_it_climbs_to_the_terminal_owner_but_never_to_the_main_process(tmp_path: Path) -> None:
     w = _trae_world()
     gate = w.gate(tmp_path)
     _warm(w, gate)
     _leak(w, gate, 40.5)
     seen: set[int] = set()
 
-    for _ in range(40):  # it keeps climbing 0.5 GiB every 5 seconds for ever: the gate may use every step it has, and no more
+    for _ in range(40):  # it keeps climbing 0.5 GiB every 5 seconds and the new processes now hang on the terminal owner: the gate may use every step it has, and no more
+        w.spawn(TERMINAL_OWNER, "node.exe", 2)
         w.committed += 0.5
         w.tick(gate)
         seen |= w.frozen()
@@ -228,6 +233,72 @@ def test_when_the_shell_freeze_does_not_stop_the_growth_it_escalates_to_the_term
     assert 2 <= len(state) <= mg.MAX_FROZEN_UNITS
     assert [entry["level"] for entry in state][:2] == [1, 2]
     assert max(w.suspended.values()) == 1  # nothing was suspended twice: one resume undoes one freeze
+
+
+def test_audit_579_a_steam_that_grows_after_the_shell_freeze_gets_frozen_not_the_terminal_owner(tmp_path: Path) -> None:
+    """The probe: the shell tree is frozen, memory keeps rising because another application's helpers grow; the next rung must not be taken for the cause."""
+
+    w = _trae_world()
+    steam = w.add(5_000, EXPLORER, "steam.exe", 0.5)
+    helpers = [w.add(5_001 + index, steam, "steamwebhelper.exe", 0.3) for index in range(3)]
+    gate = w.gate(tmp_path)
+    _warm(w, gate)
+    _leak(w, gate, 40.5)
+    assert SHELL in w.frozen()
+
+    for _ in range(12):
+        for pid in helpers:
+            w.grow(pid, 1.0)
+        w.spawn(helpers[0], "steamwebhelper.exe", 2)
+        w.committed += 0.6
+        w.tick(gate)
+
+    assert TERMINAL_OWNER not in w.frozen() and TRAE_MAIN not in w.frozen() and steam not in w.frozen()
+    assert w.frozen() & {*helpers}  # the unit that really grows was frozen instead
+    assert any(entry["level"] == 1 and entry["root"] in helpers for entry in gate.load()["frozen"])
+
+
+def test_a_rise_that_no_freezable_process_explains_freezes_nothing_more(tmp_path: Path) -> None:
+    w = _trae_world()
+    gate = w.gate(tmp_path)
+    _warm(w, gate)
+    _leak(w, gate, 40.5)
+    before = w.frozen()
+
+    for _ in range(30):  # memory rises, but no process anywhere grows or appears
+        w.committed += 0.5
+        w.tick(gate)
+
+    assert w.frozen() == before and len(gate.load()["frozen"]) == 1
+    assert "没有一个在涨" in (tmp_path / "gate.log").read_text(encoding="utf-8")
+
+
+def test_at_the_limit_with_nothing_growing_the_gate_does_not_freeze_a_bystander(tmp_path: Path) -> None:
+    w = _trae_world()
+    gate = w.gate(tmp_path)
+    w.committed = 42.0
+    w.tick(gate, steps=6)  # high, but flat and nothing new: the largest process is not "the cause"
+
+    assert w.frozen() == set() and not w.notices
+
+
+def test_system_and_service_processes_are_never_frozen_even_when_they_grow(tmp_path: Path) -> None:
+    """TiWorker (TrustedInstaller) is SYSTEM: not a logged-in user's process."""
+
+    w = _trae_world()
+    w.add(700, 1, "services.exe")
+    tiworker = w.add(701, 700, "TiWorker.exe", 0.5)
+    w.system_pids.add(tiworker)
+    gate = w.gate(tmp_path)
+    _warm(w, gate)
+    w.grow(tiworker, 9.0)
+    w.spawn(tiworker, "TiWorker.exe", 4)
+    w.system_pids.update(w.procs)  # the spawned children are SYSTEM's as well
+    w.system_pids -= {pid for pid in w.procs if pid in {EXPLORER, TRAE_MAIN, TERMINAL_OWNER, SHELL, LAUNCHER, PYTEST}}
+    w.committed = 41.0
+    w.tick(gate)
+
+    assert w.frozen() == set() and not w.notices
 
 
 def test_a_terminal_owner_that_is_the_growth_source_itself_can_be_frozen(tmp_path: Path) -> None:
@@ -325,6 +396,26 @@ def test_the_same_tree_triggering_again_soon_after_resume_is_frozen_and_locked_w
     assert gate.resume_all() > 0 and w.frozen() == set() and gate.load()["frozen"] == []
 
 
+def test_a_locked_tree_nobody_handles_is_announced_again_every_15_minutes_and_stays_frozen(tmp_path: Path) -> None:
+    w = _trae_world()
+    gate = w.gate(tmp_path)
+    _warm(w, gate)
+    _leak(w, gate, 41.0)
+    w.committed = 30.0
+    w.tick(gate, seconds=5, steps=10)
+    _leak(w, gate, 41.5)
+    assert gate.load()["frozen"][0]["locked"] is True
+    first = len(w.notices)
+
+    w.committed = 20.0
+    w.tick(gate, seconds=60, steps=14)  # 14 minutes
+    assert len(w.notices) == first
+    w.tick(gate, seconds=60, steps=2)  # past 15 minutes
+    assert len(w.notices) == first + 1 and "没有人处理" in w.notices[-1][1]
+    w.tick(gate, seconds=60, steps=16)
+    assert len(w.notices) == first + 2 and w.frozen()
+
+
 def test_a_tree_that_triggers_again_after_the_relock_window_is_not_locked(tmp_path: Path) -> None:
     w = _trae_world()
     gate = w.gate(tmp_path)
@@ -383,6 +474,76 @@ def test_an_unreadable_commit_reading_does_nothing_and_the_gate_survives_a_faili
     assert "本轮异常 OSError: boom" in (tmp_path / "gate.log").read_text(encoding="utf-8")
 
 
+def test_stop_unfreezes_everything_before_the_gate_exits(tmp_path: Path) -> None:
+    w = _trae_world()
+    gate = w.gate(tmp_path)
+    _warm(w, gate)
+    _leak(w, gate, 41.0)
+    assert w.frozen()
+    calls = {"n": 0}
+
+    def sleep(_seconds: float) -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            (tmp_path / mg.STOP_FILE).write_text("x", encoding="utf-8")
+
+    mg.run_forever(gate, sleep=sleep, max_steps=50)
+
+    assert w.frozen() == set() and gate.load()["frozen"] == []
+    assert "收到 STOP，已解冻" in (tmp_path / "gate.log").read_text(encoding="utf-8")
+
+
+def _install(root: Path) -> None:
+    for relative in mg.MANIFEST_FILES:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {relative}\n", encoding="utf-8")
+    files = {relative: hashlib.sha256((root / relative).read_bytes()).hexdigest() for relative in mg.MANIFEST_FILES}
+    (root / mg.MANIFEST_FILE).write_text(json.dumps({"files": files}), encoding="utf-8")
+
+
+def test_the_installed_files_must_match_the_hashes_the_installer_recorded(tmp_path: Path) -> None:
+    _install(tmp_path)
+    assert mg.verify_install(tmp_path) == ""
+
+    (tmp_path / "scripts" / "memory_gate.py").write_text("# changed\n", encoding="utf-8")
+    assert "scripts/memory_gate.py 的 SHA-256 与安装时记录的不一致" in mg.verify_install(tmp_path)
+
+    _install(tmp_path)
+    (tmp_path / "auto_pm" / "infrastructure" / "long_run_core.py").unlink()
+    assert "long_run_core.py 缺失" in mg.verify_install(tmp_path)
+
+    _install(tmp_path)
+    manifest = json.loads((tmp_path / mg.MANIFEST_FILE).read_text(encoding="utf-8"))
+    del manifest["files"]["auto_pm/infrastructure/memory_preflight.py"]
+    (tmp_path / mg.MANIFEST_FILE).write_text(json.dumps(manifest), encoding="utf-8")
+    assert "memory_preflight.py" in mg.verify_install(tmp_path)
+
+    (tmp_path / mg.MANIFEST_FILE).write_text("{not json", encoding="utf-8")
+    assert "读不出" in mg.verify_install(tmp_path)
+
+
+def test_the_scheduled_task_form_refuses_to_run_without_an_install_and_says_so(tmp_path: Path) -> None:
+    code = mg.main(["run", "--require-manifest", "--state-dir", str(tmp_path)])
+
+    assert code == 3
+    alerts = list(tmp_path.glob("ALERT-*.txt"))
+    assert alerts and "拒绝运行" in alerts[0].read_text(encoding="utf-8")
+
+
+def test_the_state_and_alerts_live_in_the_install_folder_and_nothing_is_written_to_a_public_place() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "Desktop" not in source and "ProgramData" not in source and "PUBLIC" not in source
+    assert mg.install_root() is None  # a development checkout has no manifest beside it
+
+
+def test_the_user_process_test_is_false_for_what_cannot_be_identified() -> None:
+    assert mg.user_process(2_000_000_000) is False and mg.user_process(0) is False and mg.user_process(4) is False
+    if sys.platform != "win32":
+        assert mg.user_process(os.getpid()) is True
+
+
 def test_nothing_is_ever_killed_the_gate_has_no_kill_path() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
 
@@ -424,9 +585,12 @@ def test_the_selftest_freezes_and_resumes_a_real_process(tmp_path: Path) -> None
     assert mg.selftest(tmp_path) == []
 
 
-def test_the_install_script_checks_first_runs_as_system_and_unfreezes_before_it_removes_the_task() -> None:
+def test_the_install_script_copies_to_a_protected_folder_checks_before_it_registers_and_unfreezes_before_it_removes_the_task() -> None:
     script = (ROOT / "scripts" / "install_memory_gate.ps1").read_text(encoding="utf-8-sig")
 
+    assert "ProgramFiles" in script and "icacls" in script and "*S-1-5-18" in script and "*S-1-5-32-544" in script and "*S-1-5-32-545:(OI)(CI)RX" in script
+    assert script.index("icacls") < script.index("manifest.json") or script.index("manifest.json") < script.index("icacls")
     assert script.index("selftest") < script.index("Register-ScheduledTask")
-    assert "-UserId \"SYSTEM\"" in script and "AtStartup" in script and "RestartCount 3" in script
+    assert "-I -B" in script and "--require-manifest" in script and "-UserId \"SYSTEM\"" in script and "AtStartup" in script and "RestartCount 3" in script
+    assert ".venv" not in script.split("Register-ScheduledTask")[1]  # the task never runs the checkout's interpreter
     assert script.index("STOP") < script.index("resume-all") < script.index("Unregister-ScheduledTask")
