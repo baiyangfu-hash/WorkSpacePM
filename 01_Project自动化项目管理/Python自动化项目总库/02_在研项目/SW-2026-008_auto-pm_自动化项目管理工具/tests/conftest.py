@@ -101,6 +101,21 @@ def _no_ambient_agent_markers(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _memory_headroom_is_fine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``pm verify`` and ``long_gate launch`` refuse to start on a machine near its commit limit (11-03 laptop memory P1).
+
+    A developer's laptop under load must not turn every test that calls them red, so the reading is a healthy one for every test.
+    The rule and the readers have their own tests (``test_memory_preflight.py``), which pass their own readings.
+    """
+
+    from auto_pm.infrastructure import memory_preflight
+
+    monkeypatch.setattr(
+        memory_preflight, "read_commit", lambda: memory_preflight.CommitSnapshot(committed=4 * 2**30, limit=64 * 2**30, physical=32 * 2**30)
+    )
+
+
+@pytest.fixture(autouse=True)
 def _process_table_of_this_host_is_complete(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests that kill a child and expect "dead" must not depend on how the machine that runs them mounts /proc.
 
