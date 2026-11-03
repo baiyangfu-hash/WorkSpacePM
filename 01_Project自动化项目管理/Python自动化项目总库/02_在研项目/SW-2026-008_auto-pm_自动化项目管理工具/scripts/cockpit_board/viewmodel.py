@@ -56,6 +56,7 @@ class Decision:
     basis: str
     since: datetime | None
     example: bool = False
+    link: str = ""  # 要去哪个网页回：PR 页面。有它时首页写“在 PR 页面评论这一行”，并给“复制链接”
 
 
 @dataclass(frozen=True)
@@ -163,6 +164,7 @@ class PrRow:
     safety: Cell
     audit: Cell
     note: str = ""
+    rules: Cell = field(default_factory=lambda: Cell("未知", "na", "这次没从 GitHub 读到"))
 
 
 @dataclass
@@ -479,6 +481,8 @@ GATE_SEV = {"pass": "ok", "fail": "block", "running": "hint", "notrun": "na", "u
 SAFETY_TEXT = {"signed": "已签", "waiting": "等你签", "declared_no": "填了否", "undeclared": "没声明",
                "na": "不涉及", "unknown": "未知"}
 SAFETY_SEV = {"signed": "ok", "waiting": "block", "declared_no": "na", "undeclared": "risk", "na": "na", "unknown": "na"}
+RULES_TEXT = {"na": "不涉及", "waiting": "等你批准", "running": "检查在跑", "approved": "已批准", "unknown": "未知"}
+RULES_SEV = {"na": "na", "waiting": "block", "running": "hint", "approved": "ok", "unknown": "na"}
 AUDIT_TEXT = {"pass": "通过", "fail": "不通过", "conditional": "有条件通过", "unknown": "结论看不出"}
 AUDIT_SEV = {"pass": "ok", "fail": "block", "conditional": "risk", "unknown": "na"}
 GITHUB_HEADLINE = {
@@ -510,17 +514,18 @@ def pr_row(pull: gh.PullInfo, fresh: bool, as_of: str) -> PrRow:
     gate = Cell(GATE_TEXT[pull.gate], GATE_SEV[pull.gate], "合起来看：有红就红，有未知就未知，应跑没跑算没跑")
     safety = Cell(SAFETY_TEXT[pull.safety.state], SAFETY_SEV[pull.safety.state], pull.safety.detail)
     audit = _audit_cell(pull)
+    rules = Cell(RULES_TEXT[pull.rules.state], RULES_SEV[pull.rules.state], pull.rules.detail)
     note = "；".join(pull.errors)
     if not fresh:
         note = (f"上次读到 · {as_of}：门禁 {gate.text} · 安全签字 {safety.text}"
                 + (f" · {note}" if note else ""))
         unknown = Cell("未知", "na", "这次没从 GitHub 读到")
         ci = [(name, unknown) for name, _cell in ci]
-        gate, safety = unknown, unknown
+        gate, safety, rules = unknown, unknown, unknown
         audit = Cell(audit.text, "na", audit.tip + "（PR 头提交是旧数据，审的是不是当前头不确定）")
     projects = list(pull.projects) or ["未知"]
     title = ("【草稿】" if pull.draft else "") + pull.title
-    return PrRow(pull.number, pd._short(title, 70), pull.url, pull.author, projects, gate, ci, safety, audit, note)
+    return PrRow(pull.number, pd._short(title, 70), pull.url, pull.author, projects, gate, ci, safety, audit, note, rules)
 
 
 def github_vm(snapshot: gh.Snapshot | None, now: datetime, offset: timezone) -> GithubVM:
@@ -552,32 +557,60 @@ def github_vm(snapshot: gh.Snapshot | None, now: datetime, offset: timezone) -> 
                      "在终端运行 gh auth login 登录后点“重新读取”")
     if snapshot.authenticated:
         notes.append("已用 GitHub 登录凭据（本机 gh 登录或环境变量里的令牌）读取：以你的身份只读，不写 GitHub")
+    drafts = [p.number for p in snapshot.pulls if p.draft and p.rules.state in ("waiting", "running")]
+    if fresh and drafts:
+        notes.append("草稿 PR " + "、".join(f"#{n}" for n in drafts)
+                     + " 也改了规则文件：转成可审（ready）后才会出现在“要你出手”里，现在批了，再推提交也要重批")
     notes.append(f"审计结论读自本机 reviews/ 目录，共 {len(snapshot.audits)} 份")
     rows = [pr_row(p, fresh, as_of) for p in snapshot.pulls]
     return GithubVM(snapshot.state, fresh, headline, as_of, main_ci, rows, notes)
 
 
+RULE_FILES_SHOWN = 2
+
+
+def _rule_files_text(files: tuple[str, ...]) -> str:
+    shown = "、".join(pd._short(f, 40) for f in files[:RULE_FILES_SHOWN])
+    return f"{shown} 等 {len(files)} 个" if len(files) > RULE_FILES_SHOWN else shown
+
+
 def github_decisions(snapshot: gh.Snapshot | None) -> list[Decision]:
-    """PR 上等你安全签字的。只在这次真读到时给；旧数据不催你签。"""
+    """PR 上等你出手的：安全签字、规则批准。只在这次真读到时给；旧数据不催你。
+
+    规则批准只列已转 ready 的 PR：草稿还会继续推提交，批准按头提交算，推一次就作废，现在批没有用（草稿数量写在 GitHub 区块的小字里）。
+    回复那一行永远用这次读到的头提交前 12 位：PR 推了新提交，下一次读取（自动每 10 分钟，或点“重新读取”）这句话就跟着换。
+    """
     if snapshot is None or not snapshot.fresh:
         return []
     out = []
     for pull in snapshot.pulls:
-        if pull.safety.state != "waiting":
-            continue
         pid = next((p for p in pull.projects if p != gh.SHARED), gh.SHARED)
-        out.append(
-            Decision(
-                "block", pid, f"PR #{pull.number} 等你安全签字", pd._short(pull.title, 60),
-                f"仿真过了再在 PR #{pull.number} 上评论：安全签字 {pull.head_sha[:8]}",
-                "PR 描述“安全回路: 是”+ 评论里没有你签当前头提交", pd.parse_time(pull.updated_at),
+        if pull.safety.state == "waiting":
+            out.append(
+                Decision(
+                    "block", pid, f"PR #{pull.number} 等你安全签字", "仿真过了再签 · " + pd._short(pull.title, 60),
+                    f"安全签字 {pull.head_sha[:gh.MIN_SIGN_LEN]}",  # 签字至少 12 位，短了 safety-zone 不认
+                    "PR 描述“安全回路: 是”+ 评论里没有你签当前头提交", pd.parse_time(pull.updated_at), link=pull.url,
+                )
             )
-        )
+        if pull.rules.state in ("waiting", "running") and not pull.draft:
+            check = "红（评论里还没有你对当前头提交的批准）" if pull.rules.state == "waiting" else "在跑（评论后约 1～2 分钟出结果）"
+            out.append(
+                Decision(
+                    "block", pid, f"PR #{pull.number} 等你规则批准",
+                    f"{pd._short(pull.title, 50)} · 改了规则文件 {_rule_files_text(pull.rules.files)} · "
+                    f"审计：{_audit_cell(pull).text} · rules-approval 检查：{check} · 批准只对这个头提交有效，推了新提交要重批",
+                    f"{gh.RULES_APPROVE_WORD} {pull.head_sha[:gh.RULES_SIGN_LEN]}",
+                    "改了规则文件 + rules-gate 没绿",
+                    pd.parse_time(pull.updated_at), link=pull.url,
+                )
+            )
     return out
 
 
 def _red_checks(pull: gh.PullInfo) -> str:
-    names = [c.workflow for c in pull.ci if c.state == "fail"]
+    waiting = pull.rules.state == "waiting"  # 等你规则批准时 rules-gate 红是你的事，不算作者要修的
+    names = [c.workflow for c in pull.ci if c.state == "fail" and not (waiting and c.workflow == gh.RULES_WORKFLOW)]
     return "、".join(names) if names else "合起来看是红"
 
 

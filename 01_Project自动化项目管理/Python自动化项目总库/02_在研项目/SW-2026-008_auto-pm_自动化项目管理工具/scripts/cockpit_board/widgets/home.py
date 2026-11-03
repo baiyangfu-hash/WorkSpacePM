@@ -23,15 +23,23 @@ def decision_card(item: Decision, now: datetime, on_project: Callable[[str], Non
     layout.addWidget(head)
     layout.addWidget(c.label(item.why, "muted"))
     reply = c.label(item.reply, "mono", wrap=False)
-    copy = c.button("复制", "ghost", "把这句话放进剪贴板；真正的回复在线程里发")
+    copy = c.button("复制", "ghost", "把这句话放进剪贴板；真正的回复要你自己发出去")
     copy.clicked.connect(lambda: on_copy(item.reply))
     see = c.button("看项目", "", "打开这个项目的详情")
     see.clicked.connect(lambda: on_project(item.project_id))
+    where = "在 PR 页面评论这一行：" if item.link else "在线程里回一句："
     layout.addWidget(
-        c.hrow(c.label("在线程里回一句：", "small", wrap=False), reply, copy,
+        c.hrow(c.label(where, "small", wrap=False), reply, copy,
                c.label("依据 " + item.basis, "small", wrap=False), 1,
                c.label(waited(now, item.since), "mono", wrap=False), see)
     )
+    if item.link:
+        # 链接只显示文字（总控屏不起浏览器）：可以选中，或点“复制链接”再贴进浏览器
+        link = c.label(item.link, "mono", wrap=False)
+        link.setProperty("pr_link", item.link)
+        copy_link = c.button("复制链接", "ghost", "把 PR 网址放进剪贴板，贴进浏览器打开")
+        copy_link.clicked.connect(lambda: on_copy(item.link))
+        layout.addWidget(c.hrow(c.label("PR 页面：", "small", wrap=False), link, 1, copy_link))
     return frame
 
 

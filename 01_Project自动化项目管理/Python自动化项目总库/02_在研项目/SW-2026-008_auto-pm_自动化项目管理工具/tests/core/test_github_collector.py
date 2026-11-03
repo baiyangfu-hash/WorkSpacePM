@@ -185,7 +185,7 @@ def test_full_read_pulls_ci_safety_audit(tmp_path: Path) -> None:
     checks = {c.key: c for c in home.checks}
     assert checks["gate_red"].state == "number" and checks["gate_red"].value == 1
     assert checks["safety_unsigned"].state == "number" and checks["safety_unsigned"].value == 1
-    assert any(d.ask == "PR #1 等你安全签字" and d.reply.endswith(SHA1[:8]) for d in home.decisions)
+    assert any(d.ask == "PR #1 等你安全签字" and d.reply.endswith(SHA1[:12]) for d in home.decisions)
     assert home.github is not None and home.github.as_of.startswith("数据截至 ")
     gates = {r.number: r.gate for r in home.github.rows}
     assert gates[2].text == "红" and gates[2].sev == "block" and gates[1].sev == "ok"

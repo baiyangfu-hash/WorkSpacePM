@@ -36,6 +36,7 @@ def pr_line(row: PrRow) -> QFrame:
             c.pair(c.label("门禁", "q", wrap=False), cell_chip(row.gate)),
             *ci_pairs(row.ci),
             c.pair(c.label("安全签字", "q", wrap=False), cell_chip(row.safety)),
+            c.pair(c.label("规则批准", "q", wrap=False), cell_chip(row.rules)),
             c.pair(c.label("审计", "q", wrap=False), cell_chip(row.audit)),
         )
     )

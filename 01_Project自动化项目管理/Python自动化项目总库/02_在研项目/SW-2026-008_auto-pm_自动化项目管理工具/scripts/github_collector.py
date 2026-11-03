@@ -72,6 +72,26 @@ PLAN_CHOICES = ("是", "否")
 MIN_SIGN_LEN = 12
 SIGN_LINE = re.compile(r"^\s*安全签字\s*[:：]?\s*`?([0-9a-fA-F]{7,40})`?(?:\s.*|[，。；：！、）】」』,;.!)\]].*)?$")
 
+# 规则批准（用户评论“规则批准 <头提交前 12 位>”）：判卷由 GitHub 上的 rules-gate 工作流做，总控屏不重判，只读它的结果。
+# 这里只需要知道“这个 PR 改没改规则文件”，清单照抄 reviews/tools/rules_approval_check.py 的 RULE_PATTERNS（测试里有一致性断言）。
+RULES_WORKFLOW = "rules-gate"
+RULES_APPROVE_WORD = "规则批准"
+RULES_SIGN_LEN = 12
+RULE_PATTERNS = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".trae/*",
+    ".cursor/rules/*",
+    ".agent/rules/*",
+    ".claude/*",
+    ".agents/skills.json",
+    "SYS-2026-001_WorkspaceGovernance/approvers.json",
+    "00_Obsidian_Base*",
+    "roles/*",
+    ".github/*",
+    "reviews/tools/*",
+)
+
 AUDIT_FILE = re.compile(r"^(\d+)_.*\.md$")
 AUDIT_PR_LINE = re.compile(r"^\s*(?:#\s.*?|-\s*(?:PR|对象)\s*[：:]\s*)PR\s*#?\s*(\d+)|^\s*-\s*PR\s*[：:]\s*#?\s*(\d+)")
 AUDIT_HEAD = re.compile(r"头(?:部)?\s*[：:]?\s*`?([0-9a-f]{7,40})`?")
@@ -126,6 +146,16 @@ class Audit:
     head: str = ""
 
 
+@dataclass(frozen=True)
+class RulesApproval:
+    """这个 PR 要不要、有没有用户的“规则批准”。状态读自 rules-gate 工作流在当前头提交上的结果，不是自己判的。"""
+
+    state: str  # na（没改规则文件）/ waiting（等你批准）/ running（检查在跑）/ approved（检查绿）/ unknown
+    files: tuple[str, ...] = ()  # 改到的规则文件（新旧路径都算）
+    detail: str = ""
+    url: str = ""  # rules-gate 那次运行的页面
+
+
 @dataclass
 class PullInfo:
     number: int
@@ -142,12 +172,15 @@ class PullInfo:
     safety: Safety = field(default_factory=lambda: Safety("unknown"))
     audit: Audit | None = None
     audit_stale: bool = False  # 审计时的头提交和现在的头不是同一个
+    rules: RulesApproval = field(default_factory=lambda: RulesApproval("unknown"))
     errors: list[str] = field(default_factory=list)
 
     @property
     def gate(self) -> str:
         """这个 PR 的门禁合起来看：fail / unknown / running / pass / notrun。"""
-        states = [c.state for c in self.ci if c.state != "na"]
+        # 等你规则批准时 rules-gate 本来就是红的：那是你要出手的事（单独显示在“规则批准”格），不算作者线程要修的门禁红
+        waiting = self.rules.state == "waiting"
+        states = [c.state for c in self.ci if c.state != "na" and not (waiting and c.workflow == RULES_WORKFLOW)]
         if not states:
             return "unknown" if any(c.state == "unknown" for c in self.ci) else "notrun"
         for verdict in ("fail", "unknown", "running", "notrun"):
@@ -443,6 +476,40 @@ def safety_of(body: str | None, comments: list[dict[str, Any]] | None, head_sha:
     return Safety("na", None, "不涉及 PLC")
 
 
+# ---------------------------------------------------------------- 规则批准
+
+
+def is_rule_file(path: str) -> bool:
+    return any(path_matches(path, pattern) for pattern in RULE_PATTERNS)
+
+
+def rules_of(paths: list[str] | None, truncated: bool, runs_read: bool, ci: Iterable[CiState]) -> RulesApproval:
+    """要不要规则批准、批了没有。
+
+    ``paths`` 是 PR 改到的全部路径（改名的新旧两端都在里面）；None = 没读到。``truncated`` = 文件列表读满一页，后面可能还有。
+    有没有批准不在这里判：读 rules-gate 工作流在当前头提交上的结果（绿 = 批了），判卷的是 GitHub 上那份，不是总控屏。
+    """
+    if paths is None:
+        return RulesApproval("unknown", detail="改动文件没读到，判断不了要不要规则批准")
+    files = tuple(sorted({p for p in paths if is_rule_file(p)}))
+    if not files:
+        if truncated:
+            return RulesApproval("unknown", detail=f"改动文件多于 {PER_PAGE} 个，只读了前 {PER_PAGE} 个，判断不了要不要规则批准")
+        return RulesApproval("na", detail="没改规则文件，不需要你批准")
+    if not runs_read:
+        return RulesApproval("unknown", files, "改了规则文件，但 rules-gate 的运行结果没读到")
+    check = next((c for c in ci if c.workflow == RULES_WORKFLOW), None)
+    if check is None:
+        return RulesApproval("waiting", files, "rules-gate 还没在当前头提交上跑出结果（刚推送时常见）")
+    if check.state == "pass":
+        return RulesApproval("approved", files, "rules-gate 绿：有你对当前头提交的批准", check.url)
+    if check.state == "running":
+        return RulesApproval("running", files, "rules-gate 在跑（评论后约 1～2 分钟出结果）", check.url)
+    if check.state == "unknown":
+        return RulesApproval("unknown", files, "改了规则文件，但 rules-gate 的结果没读到", check.url)
+    return RulesApproval("waiting", files, f"rules-gate {check.detail or '红'}：评论里还没有你对当前头提交的批准", check.url)
+
+
 # ---------------------------------------------------------------- CI
 
 
@@ -613,6 +680,10 @@ def _pull_from(raw: dict[str, Any]) -> PullInfo:
     raw["ci"] = [CiState(**c) for c in raw.get("ci", [])]
     raw["safety"] = Safety(**raw["safety"])
     raw["audit"] = _audit_from(raw["audit"]) if raw.get("audit") else None
+    rules = raw.get("rules")
+    raw["rules"] = (
+        RulesApproval(**{**rules, "files": tuple(rules.get("files") or ())}) if isinstance(rules, dict) else RulesApproval("unknown")
+    )
     return PullInfo(**raw)
 
 
@@ -774,6 +845,11 @@ def collect(
         before = len(errors)
         files = guarded(f"PR #{number} 改动文件", f"/repos/{repo}/pulls/{number}/files?per_page={PER_PAGE}")
         paths = [str(f.get("filename") or "") for f in files] if isinstance(files, list) else None
+        # 规则文件改名搬走也算改它：认旧路径；文件列表读满一页时后面可能还有，看不全就不下“没改规则文件”的结论
+        rule_paths = (
+            [*paths, *(str(f["previous_filename"]) for f in files if f.get("previous_filename"))]
+            if paths is not None and isinstance(files, list) else None
+        )
         if paths is not None:
             pull.projects = projects_of(paths)
             pull.plc = any(p.startswith(PLC_ROOT) for p in paths)
@@ -784,6 +860,7 @@ def collect(
             pull.ci = [CiState(n, "unknown", "改动文件没读到") for n in sorted(workflows)]
         else:
             pull.ci = ci_states(runs, expected_workflows(paths, workflows), workflows)
+        pull.rules = rules_of(rule_paths, isinstance(files, list) and len(files) >= PER_PAGE, runs is not None, pull.ci)
         comments = guarded(f"PR #{number} 评论", f"/repos/{repo}/issues/{number}/comments?per_page={PER_PAGE}")
         pull.safety = safety_of(
             str(raw.get("body") or ""), comments if isinstance(comments, list) else None, pull.head_sha,
