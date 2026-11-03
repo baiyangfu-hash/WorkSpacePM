@@ -634,6 +634,14 @@ def find_signature(comments: list[dict[str, Any]], head_sha: str, result: Result
             app = (comment["performed_via_github_app"] or {}).get("slug", "某个 App")
             result.notes.append(f"{where}：经由 GitHub App `{app}` 发出，不是本人手写，不算")
             continue
+        created, updated = comment.get("created_at"), comment.get("updated_at")
+        if not created or not updated or created != updated:
+            # 有写权限的账号能编辑别人在 PR 上的评论而作者不变：把用户的旧评论改成“安全签字 <新头>”就能冒充签字。
+            # 编辑过（或看不出是否编辑过：缺时间戳）的评论一律不认，宁可挡住；与 rules_approval_check 同款。
+            result.notes.append(
+                f"{where}：评论被编辑过（或缺少时间戳），不算；请删掉后重新发一条 `安全签字 {head_sha[:MIN_SIGN_LEN]}`"
+            )
+            continue
         if not any(head_sha.startswith(sha) for sha in shas):
             result.notes.append(f"{where}：签的是 {', '.join(shas)}，不是当前头提交 {head_sha[:8]}（签完又推过提交），要重签")
             continue

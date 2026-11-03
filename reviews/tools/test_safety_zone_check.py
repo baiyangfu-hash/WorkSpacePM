@@ -105,13 +105,28 @@ def commit(repo: Path, files: dict[str, str | None]) -> tuple[str, str]:
     return git(repo, "rev-parse", "main"), git(repo, "rev-parse", "HEAD")
 
 
-def sign(head: str, user: dict | None = None, app: dict | None = None, body: str | None = None) -> dict:
-    return {
+POSTED_AT = "2026-11-03T01:00:00Z"
+
+
+def sign(
+    head: str,
+    user: dict | None = None,
+    app: dict | None = None,
+    body: str | None = None,
+    updated_at: str | None = POSTED_AT,
+) -> dict:
+    """默认是没被编辑过的评论（创建时间等于更新时间）；``updated_at=None`` 模拟缺时间戳。"""
+
+    comment = {
         "id": 1,
         "body": body if body is not None else f"安全签字 {head[:12]}\n已看仿真记录：急停全过",
         "user": user or USER,
         "performed_via_github_app": app,
+        "created_at": POSTED_AT,
     }
+    if updated_at is not None:
+        comment["updated_at"] = updated_at
+    return comment
 
 
 def edit_feed(old: str, new: str) -> str:
@@ -322,6 +337,36 @@ def test_s05_comment_posted_through_an_app_does_not_count(repo: Path) -> None:
     result = gate.check(repo, base, head, [sign(head, app={"slug": "claude"})])
     assert not result.passed
     assert any("App" in n for n in result.notes)
+
+
+def test_s05b_a_comment_edited_after_it_was_posted_does_not_count(repo: Path) -> None:
+    """第二账号（有写权限）能把用户的旧评论改成“安全签字 <新头>”，作者字段不变：编辑过的评论不算。"""
+    base, head = touch(repo)
+    result = gate.check(repo, base, head, [sign(head, updated_at="2026-11-03T02:30:00Z")])
+    assert not result.passed
+    assert any("被编辑过" in n and "删掉后重新发" in n and head[:12] in n for n in result.notes)
+
+
+def test_s05c_a_comment_without_timestamps_does_not_count(repo: Path) -> None:
+    """看不出是否编辑过（缺 updated_at 或 created_at）就不认。"""
+    base, head = touch(repo)
+    assert not gate.check(repo, base, head, [sign(head, updated_at=None)]).passed
+    no_created = sign(head)
+    del no_created["created_at"]
+    assert not gate.check(repo, base, head, [no_created]).passed
+
+
+def test_s05d_an_unedited_signature_still_counts_next_to_an_edited_one(repo: Path) -> None:
+    base, head = touch(repo)
+    edited = sign(head, updated_at="2026-11-03T02:30:00Z")
+    assert gate.check(repo, base, head, [edited, sign(head)]).passed
+
+
+def test_s05e_an_edited_comment_of_another_user_is_still_not_a_signature(repo: Path) -> None:
+    base, head = touch(repo)
+    other = sign(head, user={"login": "someone", "id": 1}, updated_at="2026-11-03T02:30:00Z")
+    result = gate.check(repo, base, head, [other])
+    assert not result.passed and any("不是指定签字人" in n for n in result.notes)
 
 
 @pytest.mark.parametrize("body", ["> 安全签字 {sha}", "请用户写 安全签字 {sha}", "安全签字"])
