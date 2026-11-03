@@ -8,7 +8,7 @@
 
 * 取 PR 相对合并基点改到的全部路径（新增、修改、删除、改名的两端都算）；
 * 命中 ``RULE_PATTERNS`` 的路径叫“规则文件”（含工作流和判卷脚本）。一个也没改到 → 通过，不要求任何批准（Trae 的普通 PR 不受影响）；
-* 改到了 → PR 评论里必须有一条用户本人写的评论，某一行是 ``规则批准 <PR 当前头提交号，至少 12 位>``。
+* 改到了 → PR 评论里必须有一条用户本人写的、**没被编辑过**的评论，某一行是 ``规则批准 <PR 当前头提交号，至少 12 位>``。
   只认 ``SIGNERS`` 里的账号（登录名和数字用户 ID 都要对上）；经由 GitHub App 发出的评论不算；提交号不是当前头提交前缀的不算
   （批准完又推新提交，批准自动作废，要重批）；以 ``>`` 开头的引用行、句子中间提到的“规则批准”不算。
 * 取不到评论（网络、限流）→ 退出码 2，检查报红，宁可挡住也不假绿。
@@ -55,7 +55,7 @@ RULE_PATTERNS = (
     "00_Obsidian_Base*",
     "roles/*",
     # 判卷本身：改工作流或判卷脚本就能把本检查（和其他门禁）关掉，所以同样要用户本人批准
-    ".github/workflows/*",
+    ".github/*",
     "reviews/tools/*",
 )
 # 能批准的人：GitHub 登录名 → 数字用户 ID（ID 不随改名变化，两个都要对上；与 safety_zone_check.SIGNERS 同一人）
@@ -140,6 +140,11 @@ def find_approval(comments: list[dict[str, Any]], head_sha: str, result: Result)
         user = comment.get("user") or {}
         login, uid = user.get("login"), user.get("id")
         where = f"{where}（{login}）"
+        created, updated = comment.get("created_at"), comment.get("updated_at")
+        if not created or not updated or created != updated:
+            # 有写权限的账号能编辑别人的评论而作者不变：编辑过（或看不出是否编辑过）的评论一律不认，宁可挡住
+            result.notes.append(f"{where}：评论被编辑过（或缺少时间戳），不算；请删掉后重新发一条 `{APPROVE_WORD} {head_sha[:MIN_SIGN_LEN]}`")
+            continue
         if login not in SIGNERS or SIGNERS[login] != uid:
             result.notes.append(f"{where}：不是指定批准人，不算")
             continue

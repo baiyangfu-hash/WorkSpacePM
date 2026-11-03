@@ -22,15 +22,27 @@ SECOND = {"login": "BaiyangfuExpect", "id": 999999999}
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "rules-gate.yml"
 
 
-def comment(body: str, user: dict | None = None, app: dict | None = None) -> dict:
-    return {"id": 1, "html_url": "https://example.invalid/c/1", "body": body, "user": user or USER, "performed_via_github_app": app}
+def comment(
+    body: str, user: dict | None = None, app: dict | None = None, created: str | None = "2026-11-03T01:00:00Z", updated: str | None = "2026-11-03T01:00:00Z"
+) -> dict:
+    return {
+        "id": 1,
+        "html_url": "https://example.invalid/c/1",
+        "body": body,
+        "user": user or USER,
+        "performed_via_github_app": app,
+        "created_at": created,
+        "updated_at": updated,
+    }
 
 
 def test_rule_patterns_are_locked_paths_already() -> None:
     import pr_scope_check
 
-    # reviews/tools/* is the judge scripts' directory; every other pattern comes straight from the protected list
-    assert set(rules.RULE_PATTERNS) - set(audit_pr.PROTECTED_PATTERNS) == {"reviews/tools/*"}
+    # reviews/tools/* (judge scripts) and .github/* (workflows and anything else the CI reads) are wider than the protected list;
+    # every other pattern comes straight from it
+    assert set(rules.RULE_PATTERNS) - set(audit_pr.PROTECTED_PATTERNS) == {"reviews/tools/*", ".github/*"}
+    assert rules.is_rule_file(".github/workflows/sw008-ci.yml")
     for judge_file in pr_scope_check.JUDGE_PATTERNS:
         if judge_file.startswith("reviews/tools/"):
             assert rules.is_rule_file(judge_file), f"{judge_file} is a judge file but rules-gate would not ask the user"
@@ -58,6 +70,8 @@ def test_the_approver_is_the_same_person_as_the_safety_signer() -> None:
         "00_Obsidian_Base全局规范文件仓库/spec_registry.json",
         "roles/shared/refs/skill_coordination.md",
         ".github/workflows/rules-gate.yml",
+        ".github/CODEOWNERS",
+        ".github/pull_request_template.md",
         "reviews/tools/pr_scope_check.py",
         "reviews/tools/safety_zone_check.py",
     ],
@@ -117,6 +131,23 @@ def test_a_comment_sent_through_a_github_app_does_not_count() -> None:
 def test_an_approval_of_an_older_commit_does_not_count() -> None:
     result = rules.judge(["AGENTS.md"], [comment("规则批准 0123456789abcdef")], HEAD)
     assert not result.passed and any("要重批" in n for n in result.notes)
+
+
+def test_a_comment_edited_after_it_was_posted_does_not_count() -> None:
+    # write access is enough to edit someone else's comment; the author field stays the user's
+    edited = comment(f"规则批准 {HEAD[:12]}", updated="2026-11-03T02:30:00Z")
+    result = rules.judge(["AGENTS.md"], [edited], HEAD)
+    assert not result.passed and any("被编辑过" in n and "删掉后重新发" in n for n in result.notes)
+
+
+@pytest.mark.parametrize("missing", [{"created": None}, {"updated": None}, {"created": None, "updated": None}])
+def test_a_comment_without_timestamps_does_not_count(missing: dict) -> None:
+    assert not rules.judge(["AGENTS.md"], [comment(f"规则批准 {HEAD[:12]}", **missing)], HEAD).passed
+
+
+def test_an_unedited_approval_still_counts_next_to_an_edited_one() -> None:
+    edited = comment(f"规则批准 {HEAD[:12]}", updated="2026-11-03T02:30:00Z")
+    assert rules.judge(["AGENTS.md"], [edited, comment(f"规则批准 {HEAD[:12]}")], HEAD).passed
 
 
 def test_a_short_sha_does_not_count() -> None:
