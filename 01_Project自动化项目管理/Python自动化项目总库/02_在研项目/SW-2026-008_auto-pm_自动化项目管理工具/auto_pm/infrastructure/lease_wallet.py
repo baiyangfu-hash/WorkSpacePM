@@ -78,12 +78,51 @@ def find(control_root: str | Path, run_id: str) -> dict[str, object] | None:
     return record
 
 
+_LISTED_ENTRIES = 8
+
+
+def entries(control_root: str | Path) -> list[tuple[str, str]]:
+    """(run_id, owner_id) of every readable wallet file under the control root, never the token; broken files are skipped (diagnostics only)."""
+
+    directory = Path(control_root).resolve() / WALLET_DIR
+    if not directory.is_dir():
+        return []
+    found: list[tuple[str, str]] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            record = find(control_root, path.stem)
+        except LeaseWalletError:
+            continue
+        if record is not None:
+            found.append((path.stem, str(record["owner_id"])))
+    return found
+
+
+def missing_hint(control_root: str | Path, run_id: str) -> str:
+    """Why a Run may have no entry here: the wallet is local to one control root and is written only by the command that started or took over the Run."""
+
+    root = Path(control_root).resolve()
+    present = entries(root)
+    if present:
+        listed = "、".join(f"{run}（属主 {owner}）" for run, owner in present[:_LISTED_ENTRIES])
+        more = f" 等共 {len(present)} 个" if len(present) > _LISTED_ENTRIES else ""
+        content = f"现有：{listed}{more}"
+    else:
+        content = "目前没有任何条目"
+    return (
+        f"（查的控制根：{root}；钱包{content}）"
+        f"口令只存在建 Run 的那个控制根里，且只有 `run start --lease-wallet`、`pm takeover`、`run reclaim` 会写。"
+        f"若 {run_id} 是别的执行者建的：让持有者先 `pm handoff`，你再 `pm takeover` 拿自己的口令；"
+        f"或让建 Run 的人以 `run start --executor-id <你的身份> --lease-wallet` 建；若你们的控制根不是同一个目录，要先对齐。"
+    )
+
+
 def load(control_root: str | Path, *, run_id: str, owner_id: str) -> str:
     """The token kept for ``owner_id`` on ``run_id``; refused when the wallet belongs to another holder."""
 
     record = find(control_root, run_id)
     if record is None:
-        raise LeaseWalletError(f"本机钱包里没有 {run_id} 的口令")
+        raise LeaseWalletError(f"本机钱包里没有 {run_id} 的口令{missing_hint(control_root, run_id)}")
     if record["owner_id"] != owner_id:
         raise LeaseWalletError(f"{run_id} 的钱包属于 {record['owner_id']}，不属于 {owner_id}")
     return str(record["lease_token"])

@@ -45,3 +45,41 @@ def test_a_missing_entry_and_a_broken_file_are_errors(tmp_path: Path) -> None:
 def test_a_run_id_that_is_not_a_plain_file_name_is_refused(tmp_path: Path, run_id: str) -> None:
     with pytest.raises(lease_wallet.LeaseWalletError):
         lease_wallet.wallet_path(tmp_path, run_id)
+
+
+def test_a_missing_entry_names_the_control_root_and_the_existing_entries_but_never_a_token(tmp_path: Path) -> None:
+    """Wallet isolation (11-03): "本机钱包里没有" alone left Trae guessing which directory was searched and who owned the other files."""
+
+    lease_wallet.save(tmp_path, run_id="RUN-1", owner_id="codex", lease_token="very-secret-token", epoch=1)
+
+    with pytest.raises(lease_wallet.LeaseWalletError) as raised:
+        lease_wallet.load(tmp_path, run_id="RUN-2", owner_id="trae:cn")
+
+    text = str(raised.value)
+    assert text.startswith("本机钱包里没有 RUN-2 的口令")
+    assert str(tmp_path.resolve()) in text
+    assert "RUN-1（属主 codex）" in text
+    assert "pm handoff" in text and "pm takeover" in text and "--lease-wallet" in text
+    assert "very-secret-token" not in text
+
+
+def test_an_empty_wallet_directory_says_so_and_a_broken_file_is_skipped_in_the_listing(tmp_path: Path) -> None:
+    assert lease_wallet.entries(tmp_path) == []
+    with pytest.raises(lease_wallet.LeaseWalletError, match="目前没有任何条目"):
+        lease_wallet.load(tmp_path, run_id="RUN-2", owner_id="trae:cn")
+    broken = lease_wallet.wallet_path(tmp_path, "RUN-8")
+    broken.parent.mkdir(parents=True)
+    broken.write_text("{not json", encoding="utf-8")
+    lease_wallet.save(tmp_path, run_id="RUN-1", owner_id="codex", lease_token="t", epoch=1)
+
+    assert lease_wallet.entries(tmp_path) == [("RUN-1", "codex")]
+
+
+def test_the_listing_is_capped_so_a_long_wallet_does_not_flood_the_error(tmp_path: Path) -> None:
+    for number in range(12):
+        lease_wallet.save(tmp_path, run_id=f"RUN-{number:02d}", owner_id="codex", lease_token="t", epoch=1)
+
+    with pytest.raises(lease_wallet.LeaseWalletError) as raised:
+        lease_wallet.load(tmp_path, run_id="RUN-99", owner_id="trae:cn")
+
+    assert "等共 12 个" in str(raised.value) and "RUN-11" not in str(raised.value)
