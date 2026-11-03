@@ -23,3 +23,14 @@ V1.0（`RUN-SW008-M3-REL7-001`，审计 558 放行的 `claude/rel7-gate-tools-20
 ## 预检（推送前，离线）
 
 `rel7_1_approve_start.sh --check-only` 通过（合成凭据，跑完删除；清单 19 项匹配、卡预检 passed、对账 0/0/0）；`rel7_launch.sh --dry-run` 通过（`launch_dryrun/`）；V1.1 彩排判卷 G1～G9 全 PASS（`rehearsal_evidence.txt`）。
+
+## 2026-11-03 06:35 MST：563 放行后改卡（协调者裁 B）的修改
+
+审计 563 放行的是 ca721483（卡 SHA 3d555ac5…）。其后发现并改掉“明知不实”的说法，卡与工具重新生成：
+
+- REP（合同报告）§2 表：把“差值是 GitHub release-pregate 在 Windows 上对现行版本的冻结提交与本候选各实跑一次、逐组相减得出，记录 `x`”改成“差值取自 V1.0 的正式 Run `RUN-SW008-M3-REL7-001` 实跑的各组计数相对基线的差，十组输出逐字节复用；它只证明各组零失败、其余计数不变，不证明没有丢测试”；占位的 `x`（派生参数 MEASURED_FROM/DRILL_CI）已删。
+- 卡 §1 第 4 条（原来写着 release-pregate 与 163c7a3b/6a9f1275 的运行）对齐 §1 第 7 条；§1 第 5 条（原来引用第六版的冻结分支与运行）改为 `sample-drill` 对 `d671611a` 的推送运行 41516806516（success，已核实）。
+- 卡里其余 V1.0 旧说法：实施批准行残留的“晚上 9:00 起跑”、§6 的执行顺序与 G2 行（改为复用并核对 V1.0 输出）、§8 第 2 步（原写“创建变更单”，改为沿用 CHG-SCPT-2026-472）、第 4 步（原写“完整重跑门禁”）。
+- 判卷脚本 G2 说明、收口提交信息模板、规格背景里“release-pregate 相减”的说法同步改为“V1.0 正式 Run 实测”。判卷逻辑（含 G3 窄例外与 26 个反例）不变。
+- 新卡 SHA-256 与新批准脚本 SHA-256 见线程；与上一次放行版本（ca721483）的差异见 `git diff ca721483 HEAD`。
+- 预检：`--check-only` 通过（合成凭据）、`--dry-run` 通过、彩排（最终工具）判卷 G1～G9 全 PASS，`rehearsal_evidence.txt` 末尾说明了“G2 VERDICT: FAIL”末行的来源（最后一个反例变体残留）。
