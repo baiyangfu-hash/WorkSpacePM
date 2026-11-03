@@ -66,6 +66,7 @@ from auto_pm.ui.cli.gui import gui_command  # noqa: E402
 from auto_pm.ui.cli.handoff import handoff_group  # noqa: E402
 from auto_pm.ui.cli.implementation_card import implementation_card_group  # noqa: E402
 from auto_pm.ui.cli.ledger import ledger_group  # noqa: E402
+from auto_pm.ui.cli.long_run import long_run_group  # noqa: E402
 from auto_pm.ui.cli.plc import plc_group  # noqa: E402
 from auto_pm.ui.cli.pm import context_group, pm_group  # noqa: E402
 from auto_pm.ui.cli.pr import pr_group  # noqa: E402
@@ -172,6 +173,7 @@ cli.add_command(doctor_command)
 cli.add_command(dogfood_group)
 cli.add_command(clean_cmd)
 cli.add_command(worktree_group)
+cli.add_command(long_run_group)
 cli.add_command(pr_group)
 cli.add_command(role_group)
 

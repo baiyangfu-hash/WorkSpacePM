@@ -31,6 +31,9 @@ GIB = 2**30
 ABSOLUTE_GIB = 35.0
 RATIO = 0.85
 TOP_COUNT = 5
+#: Committed memory that no readable process owns (committed minus the sum of readable per-process private commit).  The laptop's normal
+#: baseline is about 17.5 GiB (unreadable system processes, kernel pools, shared sections); the 11-03 incident was estimated at 45-55 GiB.
+UNOWNED_ALERT_GIB = 25.0
 LONG_RUN_USAGE = "python main.py long-run start --name <任务名> -- <命令…>"
 
 
@@ -296,6 +299,22 @@ def run_preflight(
     )
 
 
+def unowned_commit(committed: int, attributed: int) -> int:
+    """Committed memory that no readable process owns, floored at zero."""
+
+    return max(committed - attributed, 0)
+
+
+def read_unowned_gib() -> float | None:
+    """The unowned commit now, in GiB; ``None`` when the commit charge or the process list cannot be read.  Used by the long-run guard."""
+
+    snapshot = read_commit()
+    processes = all_processes()
+    if snapshot is None or not processes:
+        return None
+    return unowned_commit(snapshot.committed, sum(use.committed for use in processes)) / GIB
+
+
 def refusal_text(result: Preflight) -> str:
     """The plain-words refusal: what was read, which rule fired, the five biggest processes, and what to do."""
 
@@ -311,12 +330,15 @@ def refusal_text(result: Preflight) -> str:
         lines.append(f"占用最大的 {len(result.top)} 个进程（私有已提交内存）：")
         lines.extend(f"  {number}. {use.name}（PID {use.pid}）{_gib(use.committed)} GiB" for number, use in enumerate(result.top, 1))
     if snapshot is not None and result.attributed is not None:
-        unowned = max(snapshot.committed - result.attributed, 0)
-        lines.append(
-            f"未归属进程的提交量：{_gib(unowned)} GiB（= 已提交 {_gib(snapshot.committed)} − 能读到的进程私有合计 {_gib(result.attributed)}；"
-            "含读不到的系统进程和内核）。若这个数很大，说明提交量不在任何进程里，上面的前几名指不出元凶："
-            "先关闭 Trae、浏览器再试，并保留 fast_watch 日志。"
-        )
+        unowned = unowned_commit(snapshot.committed, result.attributed)
+        detail = f"（= 已提交 {_gib(snapshot.committed)} − 能读到的进程私有合计 {_gib(result.attributed)}；含读不到的系统进程和内核）"
+        if unowned > UNOWNED_ALERT_GIB * GIB:
+            lines.append(
+                f"**未归属进程的提交量 {_gib(unowned)} GiB，超过 {UNOWNED_ALERT_GIB:g} GiB：提交量不在任何进程里，上面的前几名指不出元凶。"
+                f"先关闭 Trae、浏览器，并保留 fast_watch 日志。**{detail}"
+            )
+        else:
+            lines.append(f"未归属进程的提交量：{_gib(unowned)} GiB，未超过 {UNOWNED_ALERT_GIB:g} GiB，上面的前几名就是主要占用。{detail}")
     lines.append(
         f"怎么办：关掉上面没用的程序（尤其是还在跑的 pytest、浏览器、后台终端），等已提交回落到 {ABSOLUTE_GIB:g} GiB 以下再启动；"
         f"要跑的长任务（超过 10 分钟或超过 100 个用例的回归）请用 {LONG_RUN_USAGE}，它会脱离终端、带内存保护地跑。"

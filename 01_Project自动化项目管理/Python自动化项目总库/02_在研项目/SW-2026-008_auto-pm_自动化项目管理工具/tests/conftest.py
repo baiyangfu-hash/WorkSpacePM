@@ -101,13 +101,17 @@ def _no_ambient_agent_markers(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _memory_headroom_is_fine(monkeypatch: pytest.MonkeyPatch) -> None:
+def _memory_headroom_is_fine(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """``pm verify`` and ``long_gate launch`` refuse to start on a machine near its commit limit (11-03 laptop memory P1).
 
     A developer's laptop under load must not turn every test that calls them red, so the reading is a healthy one for every test.
-    The rule and the readers have their own tests (``test_memory_preflight.py``), which pass their own readings.
+    The rule and the readers have their own tests (``test_memory_preflight.py``), which pass their own readings.  A test marked
+    ``real_machine`` compares the real reader with the operating system's own counter (11-03 real-machine check of ``long-run``);
+    it gets the real function, or the comparison would be a fake number against a real one.
     """
 
+    if request.node.get_closest_marker("real_machine") is not None:
+        return
     from auto_pm.infrastructure import memory_preflight
 
     monkeypatch.setattr(
@@ -258,7 +262,7 @@ def identity_guard_off() -> Generator[None, None, None]:
     with pytest.MonkeyPatch.context() as patcher:
         # The command line is importable under two names (``auto_pm.cli`` and ``auto_pm.ui.cli``); patch whichever is loaded.
         for package in ("auto_pm.ui.cli", "auto_pm.cli"):
-            for module in ("pm", "pm_closure", "pm_handoff", "pm_recover", "pm_switch", "continuity", "change", "decision", "implementation_card", "ledger", "project", "handoff", "pr", "worktree", "spec", "delivery", "clean", "constraint", "vartable", "session", "dogfood", "git_hook", "workflow"):
+            for module in ("pm", "pm_closure", "pm_handoff", "pm_recover", "pm_switch", "continuity", "change", "decision", "implementation_card", "ledger", "project", "handoff", "pr", "worktree", "spec", "delivery", "clean", "constraint", "vartable", "session", "dogfood", "git_hook", "workflow", "long_run"):
                 target = sys.modules.get(f"{package}.{module}")
                 if target is not None:
                     for name in ("require_runtime_identity", "warn_runtime_identity", "require_runtime_identity_for_change", "require_runtime_identity_for_card", "require_runtime_identity_for_workspace"):
