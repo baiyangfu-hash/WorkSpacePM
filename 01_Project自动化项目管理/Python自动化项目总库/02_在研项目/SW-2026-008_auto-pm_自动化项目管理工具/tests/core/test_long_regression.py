@@ -348,7 +348,7 @@ def test_a_long_check_without_a_record_is_refused_with_the_exact_command_and_a_s
     assert refused.exit_code is None
     assert "长回归" in refused.error and "收集到 101 个用例" in refused.error and "没有找到同一条命令的 long-run 记录" in refused.error
     assert "long-run start --name verify-RUN-1-2-" in refused.error and f"--worktree {tree}" in refused.error and f"--cwd {tmp_path}" in refused.error
-    assert f"{tree / 'test_big.py'}" in refused.error  # {worktree} already replaced: copy and run
+    assert f"{tree}/test_big.py" in refused.error  # {worktree} already replaced (the template's own "/" stays, also on Windows): copy and run
 
 
 def test_the_printed_command_really_produces_evidence_that_the_next_verify_accepts(tmp_path: Path) -> None:
@@ -360,7 +360,7 @@ def test_the_printed_command_really_produces_evidence_that_the_next_verify_accep
     assert not first.passed
 
     # what the agent does: start the job with the very arguments the message printed
-    argv = (PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", str(tree / "test_big.py"))
+    argv = (PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", f"{tree}/test_big.py")
     core.start(tmp_path, "evidence", list(argv), cwd=tmp_path, worktree=tree, poll_seconds=0.2, env={"AUTO_PM_RUN_WORKTREE": str(tree)})
     end = time.monotonic() + 120
     while time.monotonic() < end and core.read_status(core.run_directory(tmp_path, "evidence"))["state"] not in {"DONE", "FAILED"}:
