@@ -1,0 +1,17 @@
+LABEL=CARD-SW008-M3-D07M V1.0
+RELEASE=1.3.3-d671611
+FROZEN_COMMIT=d671611a13bc15536047769fdb0498666c414044
+MANIFEST_ENTRY_SHA256=df6afe89a918f39bfac70e1cd79ebfae3c2aa69191146e4f9eefdf3b036ef86f
+ACTIVE=1.3.3-d671611
+PREVIOUS=1.3.3-6a9f127
+POINTER_BACKUP=.auto-pm/reports/m3-d07m/pointer_backup_20261103T135231Z
+CHECKPOINT=CKPT-SW008-M3-D07M-001
+RUN=RUN-SW008-M3-D07M-001 SUCCEEDED
+WORK=WORK-SW008-M3-D07M-001 CLOSED
+CHG=CHG-SCPT-2026-473 completed (acceptance step run by hand with the user's pre-authorization ref, because the script did not pass --approval-evidence-ref there)
+DECISION=DEC-20261103-M3D07M01
+STATION=.auto-pm/worktrees/m3-d07m branch claude/d07m-station commit 0f3de3b3 (manifest bytes; needed because 6a9f127 refuses the control root as Run worktree and requires the control-root bytes to equal the station start)
+POST_CHECKS_SHA256=c95499c991308e48df470b9f7106208b828122c8c37809d7fb225936652d406d
+ROLLBACK_COMMAND=bash .auto-pm/reports/m3-d06/pmf_release_ops.sh rollback /c/Users/fubai/Documents/My_Workspace .auto-pm/reports/m3-d07m/pointer_backup_20261103T135231Z
+CLOSED_AT=2026-11-03T13:56:44Z
+NOT_AUTHORIZED=merge to main, database rollback

@@ -1,0 +1,4 @@
+User baiyang pre-authorized the release 7 switch in the M3 thread itself: "同意审计核过的发版 7 重判卡（V1.1）直接开跑；G1~G9 全 PASS 后切换发版 7；有任何一项不通过就不切换。" (2026-11-03T13:05:19Z, message cmsg_01AfNxhPWkgwWYuL1EVfYC7t5zPFVx9hSbijaekjfXg5kz, verified with fetch_messages); same condition earlier: cmsg_01AfNxhPWkgwWYuL1EVfYC7t8gqx5F6jLZzGJL21Xeoztr (2026-11-03T04:52:49Z). Condition met: card 219 V1.1 judge G1-G9 all PASS (.auto-pm/reports/m3-rel7b/gates/gate_verdict.json), commit 45900806 on d671611a. Card SHA reported in the thread before the switch.
+CONFIRMED_BY_USER_IN_THREAD=cmsg_01AfNxhPWkgwWYuL1EVfYC7t5zPFVx9hSbijaekjfXg5kz 2026-11-03T13:05:19Z
+CARD_SHA256=12c4e3c2c25e37df82cbde0b272d5e6a75b0ec99059a4247085240bd395b8ec7
+CONTEXT: card 219 V1.1 gates G1-G9 PASS, release 1.3.3-d671611
