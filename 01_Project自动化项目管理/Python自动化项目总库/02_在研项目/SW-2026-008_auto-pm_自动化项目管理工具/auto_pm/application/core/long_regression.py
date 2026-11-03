@@ -62,8 +62,10 @@ _SUMMARY_TOKEN = re.compile(r"(\d+) (passed|failed|skipped|deselected|xfailed|xp
 _SUMMARY_TIMING = re.compile(r"\bin \d+(?:\.\d+)?s\b")
 _RAN_KINDS = ("passed", "failed", "skipped", "xfailed", "xpassed", "error")
 LOG_TAIL_BYTES = 64 * 1024
-#: The guard samples every 20 seconds; a record whose sample count is far from duration / 20 did not watch this job.
+#: The guard samples every 20 seconds by default; ``spec.json`` records the interval a run was started with.  It is self-reported, so a value below
+#: ``MIN_POLL_SECONDS`` (or a missing / unreadable one) counts as the default: a forger cannot widen the allowed sample count by writing a tiny interval.
 SAMPLE_SECONDS = 20
+MIN_POLL_SECONDS = 0.1
 MIN_SAMPLE_SECONDS = 120  # at least one sample per two minutes of the job
 CLOCK_SLACK_SECONDS = 30
 AFTER_END_SLACK_SECONDS = 120  # a job that ended before the guard even started is still sampled once, a little after the end
@@ -209,8 +211,22 @@ def _log_problem(log_path: Path, cases: int | None) -> str:
     return ""
 
 
-def _guard_problem(guard: dict[str, object] | None, status: dict[str, object]) -> str:
-    """The guard's sample count and times must fit the job's start and end."""
+def _poll_seconds(task_dir: Path) -> float:
+    """The guard interval the run was started with (``spec.json``); anything below the floor or unreadable is the default."""
+
+    spec = _read(task_dir / "spec.json")
+    value = spec.get("guard_poll_seconds") if spec else None
+    if isinstance(value, bool) or not isinstance(value, int | float) or not value >= MIN_POLL_SECONDS:
+        return float(SAMPLE_SECONDS)
+    return float(value)
+
+
+def _guard_problem(guard: dict[str, object] | None, status: dict[str, object], poll_seconds: float = float(SAMPLE_SECONDS)) -> str:
+    """The guard's sample count and times must fit the job's start and end.
+
+    ``guard.json`` keeps only the first and the last sample time, no per-sample times, so the median of neighbouring intervals cannot be checked;
+    the count is bounded above by ``duration / poll`` and below by one sample per ``MIN_SAMPLE_SECONDS``.
+    """
 
     samples = guard.get("samples") if guard else None
     if guard is None or not isinstance(samples, int) or samples < 1:
@@ -228,8 +244,8 @@ def _guard_problem(guard: dict[str, object] | None, status: dict[str, object]) -
         or guard_last.timestamp() > ended.timestamp() + AFTER_END_SLACK_SECONDS
     ):
         return "守卫的时间不在任务的启动和结束之间，它看的不是这次运行"
-    if samples < max(1, int(seconds // MIN_SAMPLE_SECONDS)) or samples > int(seconds // SAMPLE_SECONDS) + 6:
-        return f"守卫采样 {samples} 次，与任务时长 {seconds:.0f} 秒对不上（每 {SAMPLE_SECONDS} 秒一次）"
+    if samples < max(1, int(seconds // MIN_SAMPLE_SECONDS)) or samples > int(seconds // poll_seconds) + 6:
+        return f"守卫采样 {samples} 次，与任务时长 {seconds:.0f} 秒对不上（每 {poll_seconds:g} 秒一次）"
     return ""
 
 
@@ -268,7 +284,7 @@ def _problem(
     ended = _parse_time(status.get("ended_at"))
     if run_started is None or ended is None or ended <= run_started:
         return "结束时间不在本 Run 创建之后（或时间读不出）"
-    guard_problem = _guard_problem(_read(task_dir / "guard.json"), status)
+    guard_problem = _guard_problem(_read(task_dir / "guard.json"), status, _poll_seconds(task_dir))
     if guard_problem:
         return guard_problem
     if not isinstance(status.get("env_stripped"), list):

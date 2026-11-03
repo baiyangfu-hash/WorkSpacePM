@@ -288,6 +288,54 @@ def test_a_long_job_needs_about_one_guard_sample_per_two_minutes(tmp_path: Path)
     assert _find(tmp_path, tree)[1] == ""
 
 
+def _long_job_record(tmp_path: Path, poll: object, *, samples: int) -> tuple[Path, Path]:
+    """A one-hour record whose ``spec.json`` says the guard polled every ``poll`` seconds (None: no spec.json at all)."""
+
+    tree = _repo(tmp_path, 3)
+    began = datetime.now(UTC)
+    task = _record(tmp_path, tree, _argv(tree), changes={"started_at": began.isoformat(), "ended_at": (began + timedelta(hours=1)).isoformat()})
+    _rewrite_guard(task, started_at=began.isoformat(), last_sample_at=(began + timedelta(minutes=59)).isoformat(), samples=samples)
+    if poll is not None:
+        (task / "spec.json").write_text(json.dumps({"guard_poll_seconds": poll}), encoding="utf-8")
+    return tree, task
+
+
+def test_a_guard_started_with_a_short_poll_interval_is_judged_by_that_interval(tmp_path: Path) -> None:
+    """The CI failure of the first 578 version: a 2-second job polled every 0.2 s wrote 7 samples and was refused as "one every 20 s"."""
+
+    tree, task = _long_job_record(tmp_path, 0.2, samples=7)
+    began = datetime.now(UTC)
+    status = json.loads((task / "status.json").read_text(encoding="utf-8"))
+    status.update({"started_at": began.isoformat(), "ended_at": (began + timedelta(seconds=2)).isoformat()})
+    (task / "status.json").write_text(json.dumps(status), encoding="utf-8")
+    _rewrite_guard(task, started_at=began.isoformat(), last_sample_at=(began + timedelta(seconds=1.9)).isoformat(), samples=7)
+
+    assert _find(tmp_path, tree)[1] == ""
+
+    _rewrite_guard(task, samples=40)  # far more than 2 s / 0.2 s + slack: still refused
+    assert "与任务时长" in _find(tmp_path, tree)[1]
+
+
+@pytest.mark.parametrize("poll", [0.01, 0.0, -5, "0.2", None, True, float("nan")])
+def test_a_self_reported_poll_interval_below_the_floor_or_unreadable_counts_as_twenty_seconds(tmp_path: Path, poll: object) -> None:
+    """A forged tiny interval must not widen the allowed sample count: one hour at 0.01 s would allow 360000 samples."""
+
+    tree, task = _long_job_record(tmp_path, poll, samples=500)
+
+    why = _find(tmp_path, tree)[1]
+
+    assert "与任务时长 3600 秒对不上（每 20 秒一次）" in why
+
+
+def test_the_poll_floor_is_the_only_thing_that_changes_the_upper_bound(tmp_path: Path) -> None:
+    tree, task = _long_job_record(tmp_path, 60, samples=60)  # a slower guard: one a minute for an hour
+
+    assert _find(tmp_path, tree)[1] == ""
+
+    _rewrite_guard(task, samples=3)  # still under one per two minutes
+    assert "与任务时长" in _find(tmp_path, tree)[1]
+
+
 def test_the_refusal_and_the_accepted_note_both_say_the_record_is_a_plain_file_not_a_proof(tmp_path: Path) -> None:
     tree = _repo(tmp_path, 101)
     check = AcceptanceCheck(command=_pytest_command(), expected_exit_code=0)
