@@ -30,7 +30,7 @@ from auto_pm.application.core.worktree_policy_service import (
 )
 from auto_pm.contracts.mission import Mission
 from auto_pm.contracts.pm_cockpit import PmCockpitCompletionState
-from auto_pm.infrastructure import lease_wallet
+from auto_pm.infrastructure import lease_wallet, memory_preflight
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.continuity import _secret_from_environment
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
@@ -85,6 +85,14 @@ def verify_pm(
 
     if use_wallet == (lease_token_env is not None):
         raise click.UsageError("必须且只能给出一个口令来源：--lease-wallet 或 --lease-token-env")
+    # Before anything is read or written: a verification runs ~15 min of real tests, and a machine near its commit limit must not
+    # start one (11-03 laptop memory P1).  There is no option to continue anyway.
+    try:
+        unverified = memory_preflight.require_headroom()
+    except memory_preflight.MemoryPreflightRefusedError as error:
+        raise click.ClickException(str(error)) from error
+    if unverified:
+        click.echo(f"⚠️ [内存预检] {unverified}", err=True)
     app_ctx: AppContext = ctx.find_root().obj
     mission = _guarded_mission(ctx, mission_id)
     if not mission.root_work_id:

@@ -950,3 +950,37 @@ def test_an_old_closing_marker_is_moved_aside_not_deleted_and_the_hold_still_wai
         if proc.poll() is None:
             proc.kill()
     assert "old hold_until_marker moved aside" in _log(lab)
+
+
+def test_launch_is_refused_by_the_memory_preflight_before_anything_is_started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """11-03 laptop memory P1: a hot machine gets no gate; no lock, state or status file appears and no process is launched."""
+
+    mod = _module()
+    out = tmp_path / "out"
+    monkeypatch.setattr(mod, "load_config", lambda _path: ({"out_dir": str(out)}, ""))
+    monkeypatch.setattr(mod, "_memory_preflight_refusal", lambda: "拒绝启动：已提交内存 40.0 GiB ≥ 35 GiB")
+    for name in ("_launch_windows", "_launch_posix"):
+        monkeypatch.setattr(mod, name, lambda *_a, **_k: pytest.fail("a gate was launched on a hot machine"))
+
+    code = mod.cmd_launch(tmp_path / "gate.json", 1)
+
+    assert code == mod.EXIT_CODES["REFUSED"]
+    assert "拒绝启动" in capsys.readouterr().out
+    assert not (out / mod.STATE_FILE).exists() and not (out / mod.STATUS_FILE).exists()
+
+
+def test_the_launch_preflight_refuses_when_the_check_cannot_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stripped deployment without the module must not start gates unchecked."""
+
+    mod = _module()
+    monkeypatch.setattr(mod, "__file__", str(tmp_path / "scripts" / "long_gate.py"))
+
+    assert "内存预检模块无法运行" in mod._memory_preflight_refusal()
+
+
+def test_the_launch_preflight_loads_the_real_module_by_path_and_passes_on_a_healthy_reading() -> None:
+    mod = _module()
+
+    refusal = mod._memory_preflight_refusal()  # the real reading of the machine that runs the test
+
+    assert refusal == "" or refusal.startswith("拒绝启动")
