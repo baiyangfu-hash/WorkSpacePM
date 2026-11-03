@@ -1,0 +1,76 @@
+"""Write derive_rel7b.py (card 219 V1.1) from m3-rel6/derive_rel7.py (V1.0): new Work/Run/Decision/worktree, same frozen commit, same gate contract, SAME change request CHG-SCPT-2026-472;
+ALL ten regression-group outputs (and the three r09 reruns) of RUN-SW008-M3-REL7-001 are reused byte for byte, only baseline / install / fast gates and the judge are run again, and the declared
+deltas are the measured ones.  The V1.0 Run stays as it is (its lease expired at the 3 h + 1 h cap; it can only be settled after the release 7 switch with the fixed command).
+usage: python -B make_derive7b.py"""
+import io
+import pathlib
+
+R = pathlib.Path(__file__).resolve().parent.parent
+s = (R / "m3-rel6" / "derive_rel7.py").read_text(encoding="utf-8")
+NL = chr(10)
+
+
+def rep(t, a, b, n=1):
+    assert t.count(a) == n, (a[:80], t.count(a))
+    return t.replace(a, b)
+
+
+# 1) the delegation sentence of the spec
+old = "用户 2026-11-02 12:04（当地时间）说“今天电脑给你用，允许白天跑门禁下午5点之前尽量结束”（协调者转述原话，用户消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7tDgoX2UY8rPK5n7nMxruFa2）；"
+new = "用户 2026-11-03 对本卡 V1.1 的 SHA 亲口说“开跑”（凭据见 approval_refs.env）；协调者 2026-11-03 裁决：V1.0 的 G2 只因声明差值为空判不过，走 V1.1 重判；"
+s = rep(s, old, new)
+
+# 2) names: everything lives in m3-rel7b (the V1.0 evidence in m3-rel7 stays untouched); m3-rel6 (tools source) is not touched
+s = s.replace("m3-rel7", "m3-rel7b")
+assert "m3-rel7bb" not in s
+s = rep(s, "实施卡 `CARD-SW008-M3-REL7 V1.0`", "实施卡 `CARD-SW008-M3-REL7 V1.1`")
+s = rep(s, '("M3-D045 V1.1", "M3-REL7 V1.0"), ("M3-D045 (card 171 V1.1)", "M3-REL7 (card 219 V1.0)"), ("card 171 V1.1", "card 219 V1.0")',
+        '("M3-D045 V1.1", "M3-REL7 V1.1"), ("M3-D045 (card 171 V1.1)", "M3-REL7 (card 219 V1.1)"), ("card 171 V1.1", "card 219 V1.1")')
+s = rep(s, '.replace("Card 182 V1.0", "Card 218 V1.0")', '.replace("Card 182 V1.0", "Card 219 V1.1")')
+s = rep(s, "# Card 219 V1.0 launcher (DETACHED)", "# Card 219 V1.1 launcher (DETACHED)")
+s = rep(s, '"card_no": "219", "card_id": "CARD-SW008-M3-REL7", "version": "V1.0",', '"card_no": "219", "card_id": "CARD-SW008-M3-REL7", "version": "V1.1",')
+s = rep(s, '"card_file": "219_M3-REL7_第七次发版候选门禁实施卡_PM.md"', '"card_file": "219_M3-REL7_第七次发版候选门禁实施卡_V1.1_PM.md"')
+s = rep(s, '"dec_suffix": "M3REL701"', '"dec_suffix": "M3REL702"')
+s = rep(s, '"work": "WORK-SW008-M3-REL7-001", "run": "RUN-SW008-M3-REL7-001", "ckpt": "CKPT-SW008-M3-REL7-001", "owner": "claude:m3rel7", "branch": "claude/m3-rel7b",',
+        '"work": "WORK-SW008-M3-REL7-002", "run": "RUN-SW008-M3-REL7-002", "ckpt": "CKPT-SW008-M3-REL7-002", "owner": "claude:m3rel7b", "branch": "claude/m3-rel7b",')
+
+# 2b) the out-of-band anchor of V1.1 points at its own branch and folder (the V1.0 branch holds the V1.0 approve_start)
+s = s.replace("claude/rel7-gate-tools-20261102", "claude/rel7b-gate-tools-20261103")
+s = s.replace("reviews/rel7-gate-tools-20261102/", "reviews/rel7b-gate-tools-20261103/")
+assert "rel7-gate-tools-20261102" not in s
+
+# 3) the launcher: V1.1 reuses the outputs, it runs about 15 minutes, no lease extension (and no extension authorization exists for it)
+a = s.index("# the user's own words (")
+b = s.index('echo "hold cap extended by 3600 s"' + NL) + len('echo "hold cap extended by 3600 s"' + NL)
+s = s[:a] + s[b:]
+assert "extend-hold" not in s
+
+# 4) the V1.0 change request is kept and continued (precedent: card 214 V1.1 continued CHG-SCPT-2026-465)
+anchor = "EV.mkdir(parents=True, exist_ok=True)" + NL
+assert s.count(anchor) == 1, s.count(anchor)
+s = s.replace(anchor, anchor + 'shutil.copy(R / "m3-rel7" / "rel7_chg.txt", EV / "rel7_chg.txt")  # V1.1 continues the change request of V1.0' + NL)
+
+# 5) the gates script: reuse the ten groups and the three r09 reruns of RUN-SW008-M3-REL7-001 (byte for byte, checked by sha256)
+a5 = 'lt = (R / "m3-decl" / "decl_launch.sh")'
+assert s.count(a5) == 1
+block = r'''
+_ga = (EV / "rel7_gates_all.sh").read_text(encoding="utf-8")
+_x = _ga.index('stage groups; echo "== nine regression groups (G2)"')
+_y = _ga.index('cd "$ROOT" || fail "no workspace root"' + chr(10) + 'stage judge')
+_reuse = (
+    'stage reuse; echo "== V1.1: reuse the ten group outputs and the three r09 reruns of RUN-SW008-M3-REL7-001 (same frozen commit and contract; the declared deltas are the measured ones)"' + chr(10)
+    + 'SRC_G2="$ROOT/.auto-pm/reports/m3-rel7/gates/g2_candidate"' + chr(10)
+    + '[[ -f "$SRC_G2/ALL_DONE" && "$(cat "$SRC_G2/transient_3.exit")" == "0" ]] || fail "the reused group outputs are incomplete"' + chr(10)
+    + 'for n in rest application plc change contracts infrastructure qml_debounce_alone cli qml core; do [[ "$(cat "$SRC_G2/$n.exit")" == "0" ]] || fail "reused group $n did not exit 0"; done' + chr(10)
+    + 'mkdir -p "$G/g2_candidate"' + chr(10)
+    + '( cd "$SRC_G2" && sha256sum -- *.txt *.exit ) > "$G/reuse_manifest.sha256"' + chr(10)
+    + 'cp -p "$SRC_G2"/*.txt "$SRC_G2"/*.exit "$G/g2_candidate/"' + chr(10)
+    + '( cd "$G/g2_candidate" && sha256sum -c --quiet "$G/reuse_manifest.sha256" ) || fail "the copied group outputs differ from the source"' + chr(10)
+    + 'echo "reused $(wc -l < "$G/reuse_manifest.sha256") files from RUN-SW008-M3-REL7-001"' + chr(10)
+    + "printf 'done" + chr(92) + "n' > " + '"$G/g2_candidate/ALL_DONE"' + chr(10))
+_ga = _ga[:_x] + _reuse + _ga[_y:]
+io.open(EV / "rel7_gates_all.sh", "w", encoding="utf-8", newline="").write(_ga)
+'''
+s = s.replace(a5, block.lstrip(NL) + a5)
+io.open(R / "m3-rel7b" / "derive_rel7b.py", "w", encoding="utf-8", newline="\n").write(s)
+print("derive_rel7b.py written")

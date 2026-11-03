@@ -1,0 +1,32 @@
+"""Install the frozen bytes of card 219 (CARD-SW008-M3-REL7) into the isolated candidate, byte-verified.
+
+Usage (workspace root): python -B .auto-pm/reports/m3-rel7b/install_files.py <candidate worktree>
+Refuses unless every planned-new path is absent from the candidate and every modified path currently has its frozen base bytes. HEAD is not judged here (the gates judge it).
+"""
+
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+EV = Path(r"C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel7b")
+WT = Path(sys.argv[1])
+cfg = json.load(open(EV / "rel7_config.json", encoding="utf-8"))
+installed = {}
+for rel, meta in sorted(cfg["files"].items()):
+    target = WT / rel
+    payload = (EV / "proto" / rel).read_bytes()
+    if hashlib.sha256(payload).hexdigest() != meta["sha256"]:
+        sys.exit(f"frozen payload differs from the config: {rel}")
+    if meta["base_sha256"] is None:
+        if target.exists():
+            sys.exit(f"planned-new path already exists in the candidate: {rel}")
+    else:
+        if not target.exists() or hashlib.sha256(target.read_bytes().replace(b"\r\n", b"\n")).hexdigest() != meta["base_sha256"]:
+            sys.exit(f"candidate file is not the frozen base bytes: {rel}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+    if hashlib.sha256(target.read_bytes()).hexdigest() != meta["sha256"]:
+        sys.exit(f"installed bytes differ: {rel}")
+    installed[rel] = meta["sha256"]
+print(json.dumps(installed, ensure_ascii=False, indent=1))

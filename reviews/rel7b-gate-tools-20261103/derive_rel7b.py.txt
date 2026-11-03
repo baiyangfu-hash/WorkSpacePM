@@ -1,0 +1,474 @@
+"""Derive the toolkit of card 219 (CARD-SW008-M3-REL7, from card 218 V1.0; earlier card 214 V1.0, card 205 V1.1, card 188 V1.2; originally card 184 CARD-SW008-M3-REL1: the merge-day-1 release candidate - build the frozen merge commit twice with its own scripts/pmf_build.py and compare,
+then the full gate set (nine groups, static checks, raw full-repository audit, doc check, real hooks, every registered project's ledger, control-root orient) on that commit;
+the only committed file is the contract report, created only when every gate passes, so the commit is itself the proof).  From card 171's generated gate tools (m3-d045).
+usage: python -B derive_rel1.py <frozen merge commit> <prev_chg> <prev_run> <baseline_g2_from_dir> <expected_deltas json> <expected_skips json> <measured_from> <drill CI run text>
+The worktree base IS the frozen commit; the report is the only new path.  Expected deltas/skips are measured beforehand on the frozen bytes (non-governed run) and declared here.
+"""
+
+import datetime
+import hashlib
+import io
+import json
+import shutil
+import subprocess
+import sys
+
+sys.path.insert(0, "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m2-batch1")
+import cardkit  # noqa: E402
+
+R = cardkit.R
+P = cardkit.P
+ROOT = R.parent.parent
+SRC, EV = R / "m3-d045", R / "m3-rel7b"
+EV.mkdir(parents=True, exist_ok=True)
+shutil.copy(R / "m3-rel7" / "rel7_chg.txt", EV / "rel7_chg.txt")  # V1.1 continues the change request of V1.0
+NL = chr(10)
+TODAY = datetime.date.today().isoformat()
+FROZEN_REV, PREV_CHG, PREV_RUN, BASE_G2_FROM, DELTAS_JSON, SKIPS_JSON, MEASURED_FROM, DRILL_CI = sys.argv[1:9]
+PREV_WORK = PREV_RUN.replace("RUN-", "WORK-")
+DELTAS, SKIPS = json.loads(DELTAS_JSON), json.loads(SKIPS_JSON)
+GROUPS = ["rest", "application", "plc", "change", "contracts", "infrastructure", "qml_debounce_alone", "cli", "qml", "core"]
+assert set(DELTAS) <= set(GROUPS) and set(SKIPS) <= set(GROUPS)
+
+
+def git(*a: str) -> str:
+    return subprocess.run(["git", "-C", str(ROOT), "-c", "core.quotePath=false", *a], capture_output=True, check=True).stdout.decode("utf-8")
+
+
+def sha(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def sw(t: str, a: str, b: str, n: int = 1) -> str:
+    assert t.count(a) == n, (a[:90], t.count(a))
+    return t.replace(a, b)
+
+
+S8 = lambda x: x[:8]  # noqa: E731
+FROZEN = git("rev-parse", FROZEN_REV).strip()
+BASE = FROZEN
+BASE_BRANCH = "m3-rel7b-base"
+subprocess.run(["git", "-C", str(ROOT), "branch", "-f", BASE_BRANCH, FROZEN], check=True, capture_output=True)
+subj = git("log", "-1", "--format=%s", FROZEN).strip()
+assert subj.startswith("Merge pull request #"), subj
+# the PRs merged into main since the active release's frozen commit (1.3.3-6a9f127)
+ACTIVE_FROZEN = "6a9f1275e8d696000ba3e2c80863389a085d356c"
+assert subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", ACTIVE_FROZEN, FROZEN]).returncode == 0
+merged = [x for x in git("log", "--first-parent", "--merges", "--format=%h %s", f"{ACTIVE_FROZEN}..{FROZEN}").split(NL) if x]
+prod_changed = [x for x in git("diff", "--name-only", ACTIVE_FROZEN, FROZEN, "--", f"{P}/auto_pm", f"{P}/templates", f"{P}/scripts").split(NL) if x]
+assert prod_changed, "no product change since the active release"
+REPORT = f"{P}/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md"
+assert subprocess.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{FROZEN}:{REPORT}"], capture_output=True).returncode != 0
+PROJECTS = [p["project_id"] for p in json.load(open(ROOT / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json", encoding="utf-8"))["projects"]]
+pr_lines = NL.join(f"| `{x.split()[0]}` | {x.split(' ', 1)[1].replace('|', '/')} |" for x in merged)
+delta_text = "、".join(f"{g} {'+' if DELTAS.get(g, 0) >= 0 else ''}{DELTAS.get(g, 0)}" for g in GROUPS if DELTAS.get(g, 0)) or "全部为 0"
+skip_text = "、".join(f"{g} {'+' if SKIPS[g] >= 0 else ''}{SKIPS[g]}" for g in GROUPS if SKIPS.get(g, 0)) or "全部为 0"
+
+report = f"""# M3 第七次发版｜发版候选构建与全量门禁（合同与结论）
+
+> 报告日期：{TODAY}；实施卡 `CARD-SW008-M3-REL7 V1.1`；门禁合同与卡 171（D04+D05）相同。
+> **本报告的结论由提交本身证明**：本文件只在下表每一项都通过之后才被提交；任何一项不过，卡停在原地、不提交，本文件不会出现在 `main` 上。原始证据在控制根 `.auto-pm/reports/m3-rel7b/gates/`。
+
+## 1. 冻结的合并提交
+
+`{FROZEN}`（`main` 上的 {subj.split(':')[0].split(' from ')[0]}）。现行有效版本 `1.3.3-6a9f127` 的冻结提交是 `{S8(ACTIVE_FROZEN)}`；两者之间合进 `main` 的提交如下（第一父链上的合并）：
+
+| 合并提交 | 说明 |
+|---|---|
+{pr_lines}
+
+产品子树（`auto_pm`、`templates`、`scripts`）共有 {len(prod_changed)} 个文件不同。样件联调的 4 个测试文件（`tests/e2e/test_*drill*.py`）的假代理是 Linux 脚本，只能在 Linux 上跑：本机九组的 rest 组不跑它们，改以 GitHub 上 `sample-drill` 工作流对同一冻结提交的运行为证（{DRILL_CI}）。本卡只调用这个提交里已有的 `scripts/pmf_build.py`，不改任何源码。
+
+## 2. 门禁合同与对应检查
+
+| 门禁 | 本卡怎么检查 | 通过标准 |
+|---|---|---|
+| 构建入口自身的测试 | `tests/core/test_pmf_build.py` | 退出码 0，无跳过 |
+| 母体全量 pytest | 九组回归，在冻结提交的隔离工作树里跑 | 每组无失败、无 ERROR，退出码与上一张发版卡（卡 218 V1.1 的受治理输出，RUN-SW008-M3-REL6-002，产品等于现行有效版本 1.3.3-6a9f127）相同；通过数与跳过数等于基线加事先声明的差值：通过 {delta_text}；跳过 {skip_text}（差值是 GitHub `release-pregate` 在 Windows 上对现行版本的冻结提交与本候选各实跑一次、逐组相减得出，记录 `{MEASURED_FROM}`） |
+| Ruff/Mypy | `ruff check auto_pm tests`、`mypy --platform win32 auto_pm` | 退出码 0 |
+| 全库 Ruff/Mypy 审计 | `ruff check .`、`mypy auto_pm tests` | 原始结果如实记录，不写“全绿” |
+| 文档检查与本报告 | `doc check`；本报告的逐行合同 | 退出码与基线相同；合同满足 |
+| Git 双 Hook | 真实 pre-commit 钩子对本卡暂存的文件干跑；提交时正常经过钩子 | 退出码 0，无绕过 |
+| Run 执行就绪 | 控制根 `pm orient SW-2026-008 --json` | 没有冲突 |
+| 台账 | 全部注册项目（{"、".join(PROJECTS)}）的 `ledger reconcile` | 每个项目 0/0/0 |
+| 可复现构建与加载身份 | 同一提交构建两次，两份载荷逐字节相同、`release_meta.json` 除构建机信息外相同，两份都通过 `verify`；从载荷导入 `auto_pm` 并运行命令行帮助，加载路径落在载荷里 | 全部满足 |
+
+## 3. 不做什么
+
+不切换有效发布版本、不改发布指针（切换由 D07 同款脚本在用户当场确认后做）；WBS 与台账的回写不在本卡，由切换后的文档卡做。
+"""
+files = {REPORT: report.encode("utf-8")}
+toks = [FROZEN, "本报告的结论由提交本身证明", "0/0/0"]
+for t in toks:
+    assert t in report
+docs = {REPORT: {"deleted_sha256": [], "required_tokens": toks}}
+
+g = (SRC / "d045_gates.py").read_text(encoding="utf-8")
+head_end = g.index('"""', 3) + 3
+g = ('"""Gates G1-G9 of card 219 (CARD-SW008-M3-REL7: build the frozen merge commit twice and compare; the full gate set on that commit;' + NL
+     + 'the committed file is the contract report) on the UNCOMMITTED candidate.' + NL + NL
+     + 'Usage:  python -B rel7_gates.py --stage baseline | fast | judge' + NL + 'Environment: PG_WT (candidate worktree), PG_G (gates folder).' + NL + '"""' + g[head_end:])
+for a, b in (('EV = ".auto-pm/reports/m3-d045"', 'EV = ".auto-pm/reports/m3-rel7b"'), ('".auto-pm/worktrees/m3-d045")', '".auto-pm/worktrees/m3-rel7b")'),
+             ('{EV}/d045_config.json', '{EV}/rel7_config.json'), ('"d045_scratch"', '"rel7_scratch"')):
+    g = sw(g, a, b)
+g = sw(g, '''    wbs = [p for p in CFG["docs"] if p.endswith("_WBS_PM.md")][0]
+''', "")
+g = sw(g, '''        ("D2-the-projection-loses-an-unrelated-line", wbs, lambda t: NL.join(ln for ln in t.split(NL) if not ln.startswith("6. **删除与卫生**"))),''',
+       '''        ("D2-the-report-loses-the-frozen-commit", report, lambda t: t.replace(CFG["frozen_commit"], CFG["frozen_commit"][:7])),''')
+g = sw(g, "two in-memory document controls (the report losing its proof sentence, the projection losing an unrelated line)",
+       "two in-memory document controls (the report losing its proof sentence, the report losing the full frozen commit)")
+g = sw(g, "(RUN-SW008-M3-STALE-001) on the same product bytes (the frozen D03 commit): every group has no failure and exactly the same counts",
+       "(RUN-SW008-M3-REL6-002, card 218 V1.1, whose product equals the active release 1.3.3-6a9f127): every group has no failure; the counts equal the baseline plus the deltas declared in the card (measured by release-pregate on both commits)")
+g = sw(g, "the three committed documents meet their frozen line contract", "the committed report meets its frozen line contract")
+g = sw(g, "the 2 modified documents at their base bytes and the new report absent", "the new report absent")
+old_b = '"--project-root", P, "--output", str(d04 / f"build_{tag}")], cwd=PROJ)'
+new_b = '"--project-root", P, "--output", str(d04 / f"build_{tag}"), "--skip-worktree-check"], cwd=PROJ)'
+g = sw(g, old_b, new_b)  # release 7 self-bootstrap: the deployed doctor has no --pre-release, the build tool allows the bypass once and writes a record
+
+
+
+# --- release 7: the declared narrow exception for the known stuck B2 Run (hard-coded; audit 558) ---
+FUNC = '''
+KNOWN_STUCK_RUN = "RUN-SW-2026-008-CHG-SCPT-2026-471-01"  # hard-coded exception object (release 7 card, section 1)
+KNOWN_STUCK_WORK = "WORK-MSN-415BA3D417866398"
+KNOWN_CARD = "CARD-SW008-M3-REL7"
+
+
+def orient_extract(parsed: object) -> dict:
+    # the run, work id and work state that orient itself reports; anything that is not exactly a dict with string fields is None (never raises)
+    out: dict = {"run_id": None, "work_id": None, "work_state": None}
+    if not isinstance(parsed, dict):
+        return out
+    run, work = parsed.get("run"), parsed.get("work")
+    if isinstance(run, dict) and isinstance(run.get("run_id"), str):
+        out["run_id"] = run["run_id"]
+    if isinstance(work, dict):
+        out["work_id"] = work["work_id"] if isinstance(work.get("work_id"), str) else None
+        out["work_state"] = work["state"] if isinstance(work.get("state"), str) else None
+    return out
+
+
+def orient_ok(conflicts: object, orient_run: object, work_id: object, work_state: object, card_id: object = None, ledger_expired: object = None) -> bool:
+    # no conflict at all passes; otherwise ONLY the exact list ['LEASE_EXPIRED'] whose object is the run orient itself reports (exactly the known stuck B2 Run), whose Work
+    # (from the same orient JSON) is the known Work and still IN_PROGRESS, and only for this card; `ledger_expired` (other expired Runs in the ledger) is informational and ignored
+    if conflicts == []:
+        return True
+    return (type(conflicts) is list and conflicts == ["LEASE_EXPIRED"] and type(orient_run) is str and orient_run == KNOWN_STUCK_RUN
+            and type(work_id) is str and work_id == KNOWN_STUCK_WORK and work_state == "IN_PROGRESS" and card_id == KNOWN_CARD)
+
+
+def orient_cases() -> list[dict]:
+    K, W, C = KNOWN_STUCK_RUN, KNOWN_STUCK_WORK, KNOWN_CARD
+    OLD = "RUN-SW008-A2-201-03"
+    table = [
+        ("no-conflict-is-a-normal-pass", [], None, None, None, None, None, True),
+        ("exactly-the-known-run", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, None, True),
+        ("another-expired-run-in-the-ledger-that-orient-does-not-report", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, [K, OLD], True),
+        ("one-extra-conflict", ["LEASE_EXPIRED", "RUN_BLOCKED"], K, W, "IN_PROGRESS", C, None, False),
+        ("other-conflict-only", ["RUN_BLOCKED"], K, W, "IN_PROGRESS", C, None, False),
+        ("a-different-object", ["LEASE_EXPIRED"], "RUN-SW-2026-008-OTHER-01", W, "IN_PROGRESS", C, None, False),
+        ("the-old-codex-run-is-not-the-exception-object", ["LEASE_EXPIRED"], OLD, W, "IN_PROGRESS", C, None, False),
+        ("no-object-reported", ["LEASE_EXPIRED"], None, W, "IN_PROGRESS", C, None, False),
+        ("work-not-in-progress", ["LEASE_EXPIRED"], K, W, "CANCELLED", C, None, False),
+        ("a-different-work-id", ["LEASE_EXPIRED"], K, "WORK-OTHER-1", "IN_PROGRESS", C, None, False),
+        ("work-id-missing", ["LEASE_EXPIRED"], K, None, "IN_PROGRESS", C, None, False),
+        ("another-card", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", "CARD-SW008-M3-REL8", None, False),
+        ("no-card-id", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", None, None, False),
+        ("malformed-conflicts-string", "LEASE_EXPIRED", K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-conflicts-lowercase", ["lease_expired"], K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-conflicts-none", None, K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-conflicts-unreadable", ["UNREADABLE"], K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-object-list", ["LEASE_EXPIRED"], [K], W, "IN_PROGRESS", C, None, False),
+    ]
+    out = [{"id": i, "expected": e, "got": orient_ok(c, r, w, ws, card, led)} for i, c, r, w, ws, card, led, e in table]
+    ok_run = {"run_id": K}
+    ok_work = {"work_id": W, "state": "IN_PROGRESS"}
+    ex = [
+        ("extract-valid", {"run": ok_run, "work": ok_work}, {"run_id": K, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-run-is-a-list", {"run": [], "work": ok_work}, {"run_id": None, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-run-is-a-string", {"run": "x", "work": ok_work}, {"run_id": None, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-run-without-run-id", {"run": {}, "work": ok_work}, {"run_id": None, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-work-is-not-a-dict", {"run": ok_run, "work": []}, {"run_id": K, "work_id": None, "work_state": None}),
+        ("extract-parsed-is-a-list", [], {"run_id": None, "work_id": None, "work_state": None}),
+        ("extract-parsed-is-none", None, {"run_id": None, "work_id": None, "work_state": None}),
+    ]
+    out += [{"id": i, "expected": e, "got": orient_extract(v)} for i, v, e in ex]
+    # a run that is not a dict must end as FAIL, not as a crash
+    bad = orient_extract({"run": [], "work": ok_work})
+    out.append({"id": "a-run-that-is-not-a-dict-ends-as-fail", "expected": False, "got": orient_ok(["LEASE_EXPIRED"], bad["run_id"], bad["work_id"], bad["work_state"], C)})
+    return out
+'''
+g = sw(g, "def sha(b: bytes) -> str:", FUNC.lstrip(chr(10)) + chr(10) + chr(10) + "def sha(b: bytes) -> str:")
+old_c = 'f3.get("orient_conflicts") == []'
+new_c = ('orient_ok(f3.get("orient_conflicts"), (f3.get("orient_extract") or {}).get("run_id"), (f3.get("orient_extract") or {}).get("work_id"), '
+         '(f3.get("orient_extract") or {}).get("work_state"), CFG.get("card_id"), f3.get("ledger_expired_running_runs_informational"))')
+g = sw(g, old_c, new_c)
+old_o = '    audit_ruff = sh([PY, "-B", "-m", "ruff", "check", "--no-cache", "--statistics", "."], cwd=PROJ)' + chr(10)
+new_o = (
+    '    # the object the exception is judged on comes from the SAME orient JSON; other expired RUNNING Runs of the ledger are recorded (informational) only' + chr(10)
+    + '    try:' + chr(10)
+    + '        facts["orient_extract"] = orient_extract(json.JSONDecoder().raw_decode(orient.stdout[orient.stdout.index("{"):])[0])' + chr(10)
+    + '    except ValueError:' + chr(10)
+    + '        facts["orient_extract"] = orient_extract(None)' + chr(10)
+    + '    import sqlite3' + chr(10)
+    + '    con_ = sqlite3.connect("file:" + str(ROOT / ".auto-pm" / "continuity.db").replace(chr(92), "/") + "?mode=ro", uri=True)' + chr(10)
+    + '    now_ = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()' + chr(10)
+    + '    facts["ledger_expired_running_runs_informational"] = sorted(r[0] for r in con_.execute("select r.run_id from run_items r join execution_leases l on l.run_id=r.run_id where r.state=? and l.expires_at<?", ("RUNNING", now_)))' + chr(10)
+    + '    con_.close()' + chr(10)
+) + old_o
+g = sw(g, old_o, new_o)
+old_w = '    write("G8_mutations.json", json.dumps(mutations, ensure_ascii=False, indent=1) + NL)' + chr(10)
+g = sw(g, old_w, old_w + '    write("G8_orient_exception.json", json.dumps(orient_cases(), ensure_ascii=False, indent=1) + NL)' + chr(10))
+old_g8 = 'done("G8", len(muts) == 3 and all(m["killed"] and m["restored_bytes_equal"] for m in muts) and same,'
+new_g8 = ('oc_ = json.load(open(G + "/G8_orient_exception.json", encoding="utf-8"))' + chr(10)
+          + '    done("G8", len(muts) == 3 and all(m["killed"] and m["restored_bytes_equal"] for m in muts) and same and len(oc_) == len(orient_cases()) and len(oc_) >= 26 and all(c["got"] == c["expected"] for c in oc_),')
+g = sw(g, old_g8, new_g8)
+# the exception facts on their own line of the G3 report (not cut by the 600-character facts line)
+old_d3 = '    done("G3", real["passed"] > 0'
+new_d3 = ('    ex_ = f3.get("orient_extract") or {}' + chr(10)
+          + '    orient_line = ("orient exception: conflicts=" + json.dumps(f3.get("orient_conflicts"), ensure_ascii=False) + " orient_run_id=" + str(ex_.get("run_id")) + " work_id=" + str(ex_.get("work_id"))' + chr(10)
+          + '                   + " work_state=" + str(ex_.get("work_state")) + " ledger_expired_running_runs(informational)=" + json.dumps(f3.get("ledger_expired_running_runs_informational"), ensure_ascii=False)' + chr(10)
+          + '                   + " verdict=" + str(orient_ok(f3.get("orient_conflicts"), ex_.get("run_id"), ex_.get("work_id"), ex_.get("work_state"), CFG.get("card_id"))))' + chr(10)) + old_d3
+g = sw(g, old_d3, new_d3)
+old_f = '          f"d04/d05 facts: {json.dumps('
+g = sw(g, old_f, '          orient_line, ' + old_f.lstrip())
+io.open(EV / "rel7_gates.py", "w", encoding="utf-8", newline="").write(g)
+for src_name, dst_name in (("d045_gates_all.sh", "rel7_gates_all.sh"), ("d045_rehearse.sh", "rel7_rehearse.sh")):
+    s = (SRC / src_name).read_text(encoding="utf-8")
+    for a, b in (("m3-d045", "m3-rel7b"), ("d045_", "rel7_"), ("M3-D045 V1.1", "M3-REL7 V1.1"), ("M3-D045 (card 171 V1.1)", "M3-REL7 (card 219 V1.1)"), ("card 171 V1.1", "card 219 V1.1")):
+        s = s.replace(a, b)
+    assert "d045" not in s.lower(), [x for x in s.split(NL) if "d045" in x.lower()][:3]
+    io.open(EV / dst_name, "w", encoding="utf-8", newline="").write(s)
+for name in ("adjust_counts.py", "gen_project.py", "run_g2.sh"):
+    shutil.copy(SRC / name, EV / name)
+# the sample drill (PR #46) drives a fake coding agent that is a /bin/sh script, so it only runs on Linux; it has its own CI workflow (sample-drill).
+# The rest group therefore ignores its four files on this Windows machine; the card cites the CI run on the frozen bytes instead (declared, not relaxed after the fact).
+DRILL = ["tests/e2e/test_closure_drill.py", "tests/e2e/test_closure_drill_agent_misconduct.py", "tests/e2e/test_release_pycache_drill.py", "tests/e2e/test_trial_run_drill.py"]
+# V1.2: the approval-PIN drill runs again (#121 makes its 7 os.openpty cases skip themselves on Windows), and tests/modbus is gone (#117), as in main's release-pregate.yml.
+for d in DRILL:
+    assert subprocess.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{FROZEN}:{P}/{d}"], capture_output=True).returncode == 0, d
+rg = (EV / "run_g2.sh").read_text(encoding="utf-8")
+assert rg.count(" tests/modbus ") == 1
+rg = rg.replace(" tests/modbus ", " ")
+anchor = "tests/test_pm_session_size.py tests/test_smoke.py"
+assert rg.count(anchor) == 1
+rg = rg.replace(anchor, anchor + " tests/test_layer_import_direction.py " + " ".join(f"--ignore={d}" for d in DRILL))  # REL3: #126 added the layer test to the rest group of release-pregate.yml
+OLD_RUN = 'run() { n="$1"; shift; date +%FT%T > "$OUT/$n.started"; "$PY" -B -m pytest -o addopts= --no-cov -p no:cacheprovider --color=no "$@" > "$OUT/$n.txt" 2>&1; echo $? > "$OUT/$n.exit"; date +%FT%T > "$OUT/$n.finished"; }'
+NEW_RUN = """run() { n="$1"; shift
+  if [ -n "${GATE_GROUPS:-}" ] && ! echo " $GATE_GROUPS " | grep -q " $n "; then return; fi
+  ST_DIR="$(dirname "$OUT")/status"; mkdir -p "$ST_DIR"
+  if [ -n "${GATE_STATUS_PY:-}" ]; then "$PY" -B "$GATE_STATUS_PY" "$ST_DIR" "group_$n" RUNNING || true; fi
+  date +%FT%T > "$OUT/$n.started"
+  "$PY" -B -m pytest -o addopts= --no-cov -p no:cacheprovider --color=no "$@" > "$OUT/$n.txt" 2>&1 &
+  wp="$(cat /proc/$!/winpid 2>/dev/null)"; if [ -n "$wp" ]; then echo "$wp" > "$ST_DIR/current_pid"; fi
+  wait $!; rc=$?
+  echo $rc > "$OUT/$n.exit"; date +%FT%T > "$OUT/$n.finished"; rm -f "$ST_DIR/current_pid"
+  if [ -n "${GATE_STATUS_PY:-}" ]; then
+    if [ "$rc" -eq 0 ]; then "$PY" -B "$GATE_STATUS_PY" "$ST_DIR" "group_$n" PASS 0 || true; else "$PY" -B "$GATE_STATUS_PY" "$ST_DIR" "group_$n" FAIL "$rc" || true; fi
+  fi; }"""
+assert rg.count(OLD_RUN) == 1
+rg = rg.replace(OLD_RUN, NEW_RUN)
+io.open(EV / "run_g2.sh", "w", encoding="utf-8", newline="").write(rg)
+ga = (EV / "rel7_gates_all.sh").read_text(encoding="utf-8")
+OLD_FAIL = 'fail() { echo "FAILED: $*" | tee "$G/FAILED"; exit 1; }'
+NEW_FAIL = """export GATE_STATUS_PY="$EV/gate_status.py"
+ST() { "$PY" -B "$GATE_STATUS_PY" "$G/status" "$1" "$2" "${3:-}" || true; }
+CUR=""
+stage() { if [ -n "$CUR" ]; then ST "$CUR" PASS 0; fi; CUR="$1"; ST "$CUR" RUNNING; }
+fail() { echo "FAILED: $*" | tee "$G/FAILED"; ST "${CUR:-unknown}" FAIL 1; exit 1; }"""
+assert ga.count(OLD_FAIL) == 1
+ga = ga.replace(OLD_FAIL, NEW_FAIL)
+for needle, name in (('echo "== baseline measurements', "baseline"), ('echo "== install the frozen files"', "install"), ('echo "== fast gates"', "fast"),
+                     ('echo "== nine regression groups (G2)"', "groups"), ('echo "== the named transient-race test', "transient"), ('echo "== judge"', "judge")):
+    assert ga.count(needle) == 1, needle
+    ga = ga.replace(needle, "stage " + name + "; " + needle)
+OLD_DONE = 'echo done > "$G/DONE"'
+assert ga.count(OLD_DONE) == 1
+ga = ga.replace(OLD_DONE, 'ST judge PASS 0; ST ALL DONE 0; ' + OLD_DONE)
+io.open(EV / "rel7_gates_all.sh", "w", encoding="utf-8", newline="").write(ga)
+_ga = (EV / "rel7_gates_all.sh").read_text(encoding="utf-8")
+_x = _ga.index('stage groups; echo "== nine regression groups (G2)"')
+_y = _ga.index('cd "$ROOT" || fail "no workspace root"' + chr(10) + 'stage judge')
+_reuse = (
+    'stage reuse; echo "== V1.1: reuse the ten group outputs and the three r09 reruns of RUN-SW008-M3-REL7-001 (same frozen commit and contract; the declared deltas are the measured ones)"' + chr(10)
+    + 'SRC_G2="$ROOT/.auto-pm/reports/m3-rel7/gates/g2_candidate"' + chr(10)
+    + '[[ -f "$SRC_G2/ALL_DONE" && "$(cat "$SRC_G2/transient_3.exit")" == "0" ]] || fail "the reused group outputs are incomplete"' + chr(10)
+    + 'for n in rest application plc change contracts infrastructure qml_debounce_alone cli qml core; do [[ "$(cat "$SRC_G2/$n.exit")" == "0" ]] || fail "reused group $n did not exit 0"; done' + chr(10)
+    + 'mkdir -p "$G/g2_candidate"' + chr(10)
+    + '( cd "$SRC_G2" && sha256sum -- *.txt *.exit ) > "$G/reuse_manifest.sha256"' + chr(10)
+    + 'cp -p "$SRC_G2"/*.txt "$SRC_G2"/*.exit "$G/g2_candidate/"' + chr(10)
+    + '( cd "$G/g2_candidate" && sha256sum -c --quiet "$G/reuse_manifest.sha256" ) || fail "the copied group outputs differ from the source"' + chr(10)
+    + 'echo "reused $(wc -l < "$G/reuse_manifest.sha256") files from RUN-SW008-M3-REL7-001"' + chr(10)
+    + "printf 'done" + chr(92) + "n' > " + '"$G/g2_candidate/ALL_DONE"' + chr(10))
+_ga = _ga[:_x] + _reuse + _ga[_y:]
+io.open(EV / "rel7_gates_all.sh", "w", encoding="utf-8", newline="").write(_ga)
+lt = (R / "m3-decl" / "decl_launch.sh").read_text(encoding="utf-8").replace("m3-decl", "m3-rel7b").replace("decl_", "rel7_").replace("Card 182 V1.0", "Card 219 V1.1")
+assert "decl" not in lt.lower()
+lt = r"""#!/usr/bin/env bash
+# Card 219 V1.1 launcher (DETACHED): start the governed Run, renew once (must succeed), then start the renewal loop, a keep-awake process, the memory guard (40 GB) and the gates
+# through detach_run.py (own process group, no console, output to log files) so that nothing depends on the session that started them. Status: gates/status/*.json and status.log.
+set -euo pipefail
+ROOT=/c/Users/fubai/Documents/My_Workspace; EV="$ROOT/.auto-pm/reports/m3-rel7b"; G="$EV/gates"
+PY="$ROOT/.venv/Scripts/python.exe"; BASHW='C:\Program Files\Git\usr\bin\bash.exe'
+cd "$ROOT"
+unset PG_G PG_WT GATE_GROUPS  # leftovers of a rehearsal or a test must not steer the real run
+if [ -f "$G/FAILED" ]; then mv "$G/FAILED" "$G/FAILED.previous.$(date +%s)"; fi  # a previous failure is kept as evidence, never deleted
+rm -f "$EV/gates_all.exit" "$G/DONE" "$G/status/RESUME" "$G/status/PAUSED" "$G/status/current_pid"
+if [ "${1:-}" = "--dry-run" ]; then
+  D="$EV/dryrun"; mkdir -p "$D/gates/status"; rm -f "$D/gates_all.exit" "$D/gates/DONE" "$D/gates/FAILED"
+  det() { "$PY" -B "$EV/detach_run.py" "$@"; }
+  cat > "$D/dummy_gates.sh" <<'DUMMY'
+#!/usr/bin/env bash
+EV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b
+D="$EV/dryrun"; PY=/c/Users/fubai/Documents/My_Workspace/.venv/Scripts/python.exe
+"$PY" -B "$EV/gate_status.py" "$D/gates/status" dry_stage RUNNING
+sleep 45
+"$PY" -B "$EV/gate_status.py" "$D/gates/status" dry_stage PASS 0
+echo done > "$D/gates/DONE"; echo 0 > "$D/gates_all.exit"
+DUMMY
+  det "$D/keepawake.log" "$PY" -B "$EV/keepawake.py" "$D/gates_all.exit"
+  det "$D/gates.log" "$BASHW" "$D/dummy_gates.sh"
+  det "$D/mem_guard.log" "$PY" -B "$EV/mem_guard.py" "$D/gates/status" "$D/gates/status/current_pid" 40 36
+  echo "DRYRUN LAUNCHED DETACHED (no Run, no real gates)"; exit 0
+fi
+# out-of-band anchor: approve_start in this folder must equal the copy on the reviewed branch (its hash is also reported in the thread); the comparison goes to launch_anchor.log
+git fetch -q origin claude/rel7b-gate-tools-20261103 || { echo "ANCHOR: cannot fetch the reviewed branch"; exit 1; }
+BRANCH_SHA="$(git show origin/claude/rel7b-gate-tools-20261103:reviews/rel7b-gate-tools-20261103/rel7_1_approve_start.sh | sha256sum | cut -d' ' -f1)"
+LOCAL_SHA="$(sha256sum < "$EV/rel7_1_approve_start.sh" | cut -d' ' -f1)"
+echo "$(date -u +%FT%TZ) approve_start anchor: branch=$BRANCH_SHA local=$LOCAL_SHA" | tee -a "$EV/launch_anchor.log"
+[ "$BRANCH_SHA" = "$LOCAL_SHA" ] || { echo "ANCHOR MISMATCH: refusing to start"; exit 1; }
+bash "$EV/rel7_1_approve_start.sh" > "$EV/start2.out" 2>&1 || { echo "START FAILED"; tail -5 "$EV/start2.out"; exit 1; }
+bash "$ROOT/.auto-pm/reports/m2_lease_renew.sh" "$EV/close.env" > "$EV/renew_first.log" 2>&1 || { echo "FIRST RENEW FAILED"; cat "$EV/renew_first.log"; exit 1; }
+echo "first renewal ok"
+rm -f "$EV/STOP_RENEW"
+mkdir -p "$G/status"
+det() { "$PY" -B "$EV/detach_run.py" "$@"; }
+det "$EV/renew_loop.stdout" "$BASHW" "$ROOT/.auto-pm/reports/m2_renew_loop.sh" "$EV/close.env" 1200
+det "$EV/keepawake.log" "$PY" -B "$EV/keepawake.py" "$EV/gates_all.exit"
+cat > "$EV/rel7_gates_wrap.sh" <<'WRAP'
+#!/usr/bin/env bash
+EV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b
+bash "$EV/rel7_gates_all.sh" > "$EV/gates_all.log" 2>&1
+rc=$?
+echo $rc > "$EV/gates_all.exit"
+if [ "$rc" -ne 0 ]; then touch "$EV/STOP_RENEW"; fi  # failed gates: no reason to keep the lease alive (the close script stops it on success)
+WRAP
+det "$EV/gates_all.launch.log" "$BASHW" "$EV/rel7_gates_wrap.sh"
+det "$EV/mem_guard.log" "$PY" -B "$EV/mem_guard.py" "$G/status" "$G/status/current_pid" 40 36
+echo "LAUNCHED DETACHED $(date +%H:%M)"
+"""
+io.open(EV / "rel7_launch.sh", "w", encoding="utf-8", newline="").write(lt)
+BG2 = EV / "baseline_g2"
+shutil.rmtree(BG2, ignore_errors=True)
+shutil.copytree(R / BASE_G2_FROM / "gates" / "g2_candidate", BG2, ignore=shutil.ignore_patterns("transient_*", "ALL_DONE", "*.started", "*.finished"))
+FULL = [REPORT]
+DELEG = ("委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-03 对本卡 V1.1 的 SHA 亲口说“开跑”（凭据见 approval_refs.env）；协调者 2026-11-03 裁决：V1.0 的 G2 只因声明差值为空判不过，走 V1.1 重判；"
+         "只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；"
+         "批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行")
+spec = {
+    "pfx": "rel7", "card_no": "219", "card_id": "CARD-SW008-M3-REL7", "version": "V1.1", "label_short": "M3-REL7", "tier_text": "core pipeline (full gate set), ONE NEW report",
+    "card_file": "219_M3-REL7_第七次发版候选门禁实施卡_V1.1_PM.md", "ev_name": "m3-rel7b", "base": BASE, "base_branch": BASE_BRANCH, "dec_suffix": "M3REL702",
+    "work": "WORK-SW008-M3-REL7-002", "run": "RUN-SW008-M3-REL7-002", "ckpt": "CKPT-SW008-M3-REL7-002", "owner": "claude:m3rel7b", "branch": "claude/m3-rel7b",
+    "full_paths": FULL, "new_paths": [REPORT], "modified": {}, "deleg": DELEG, "chg_domain": "SCPT", "chg_nature": "OPT", "approval_tag": "M3-REL7", "heavy": True,
+    "prev_chg": PREV_CHG, "prev_chg_dir": "CHG-" + PREV_CHG.split("-")[1], "prev_cards": [(PREV_RUN, PREV_WORK)],
+    "background": (f"M3-REL7（第七次发版候选）：用 main 上的合并提交 {S8(FROZEN)} 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；"
+                   f"再跑全量门禁：十组回归（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值由 GitHub release-pregate 对两个提交各实跑一次相减得出）、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。"
+                   f"自现行有效版本 1.3.3-6a9f127 以来合入 {len(merged)} 个合并提交，产品子树 {len(prod_changed)} 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。"),
+    "necessity": "10-26 至 10-27 合进 main 的修复只有经过全量门禁的候选才能切换为有效版本",
+    "title": "M3-REL7 第七次发版候选构建与全量门禁（核心流程，一个报告）",
+    "commit_msg": (f"docs(release): [__CHG__] seventh release candidate {S8(FROZEN)} builds reproducibly and passes the full gate set (M3-REL7)" + chr(10) + chr(10)
+                   + "Card CARD-SW008-M3-REL7. The frozen merge commit was built twice with its own scripts/pmf_build.py; the payloads are byte-identical, release_meta matches apart "
+                   "from the builder, both pass verify, and the payload imports from itself with a working CLI. The full gate set passed on that commit: the ten regression groups "
+                   "(against card 218 V1.1's governed outputs plus the deltas measured by release-pregate), static checks, the raw full-repository audit, the doc check, the real hooks, every registered "
+                   "project's ledger and the control-root orient. This commit adds only the contract report; it exists only because every gate passed. Nothing is switched."),
+    "config_extra": {"baseline_g2": ".auto-pm/reports/m3-rel7b/baseline_g2", "plugin": {"version": "2.17.2", "binary": "out/go/windows-amd64/siemens-lsp.exe"},
+                     "expected_deltas": DELTAS, "expected_skips": SKIPS, "docs": docs, "frozen_commit": FROZEN, "projects": PROJECTS},
+}
+for key in ("background", "necessity", "title", "deleg"):
+    spec[key] = spec[key].replace("`", "").replace('"', "").replace("$", "")
+for _t in ("detach_run.py", "gate_status.py", "mem_guard.py", "keepawake.py"):
+    shutil.copy(R / "m3-rel6" / "rel7_tools_src" / _t, EV / _t)
+cardkit.write_all(spec, files, {REPORT: None}, ["rel7_gates.py", "gen_project.py", "run_g2.sh", "rel7_gates_all.sh", "adjust_counts.py", "detach_run.py", "gate_status.py", "mem_guard.py", "keepawake.py", "rel7_launch.sh"])
+json.dump({k: v for k, v in spec.items() if k != "config_extra"}, open(EV / "spec.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+REF = "--approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7tDgoX2UY8rPK5n7nMxruFa2"  # the user's 2026-11-02 12:04 MST message (F16: an agent session needs the user's words as the approval evidence)
+t_ = io.open(EV / "rel7_1_approve_start.sh", encoding="utf-8", newline="").read()
+assert t_.count("--to approved     --approver fubai --comment") == 1 and t_.count('--approver fubai --decision-id "$DEC"') == 1
+t_ = t_.replace("--to approved     --approver fubai --comment", "--to approved     --approver fubai " + REF + " --comment").replace('--approver fubai --decision-id "$DEC"', '--approver fubai ' + REF + ' --decision-id "$DEC"')
+io.open(EV / "rel7_1_approve_start.sh", "w", encoding="utf-8", newline="").write(t_)
+for name in ("rel7_1_approve_start.sh", "rel7_2_close_commit.sh"):
+    t = io.open(EV / name, encoding="utf-8", newline="").read()
+    io.open(EV / name, "w", encoding="utf-8", newline="").write(t.replace("claude-sonnet-5-5", "claude"))
+tpl = io.open(EV / "commit_msg.template.txt", encoding="utf-8", newline="").read().replace("Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>", "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>")
+io.open(EV / "commit_msg.template.txt", "w", encoding="utf-8", newline="").write(tpl)
+PARSER_TEXT = r"""die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+# approval_refs.env is PARSED line by line (never sourced, never eval'd); the refs and the SHA are checked by regular expressions, the text fields reject quotes, backticks, $ and backslashes
+load_refs() {
+  local f="$1" line key val
+  GO_SHA=""; GO_REF=""; GO_TEXT=""; NIGHT_REF=""; NIGHT_TEXT=""
+  [[ -f "$f" ]] || die "approval_refs.env is missing: it records the user's own go-ahead for THIS card SHA and is written only after the user said it"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || die "approval_refs.env: a line without '='"
+    key="${line%%=*}"; val="${line#*=}"
+    case "$key" in
+      GO_SHA)  [[ "$val" =~ ^[0-9a-f]{64}$ ]] || die "approval_refs.env: GO_SHA format"; GO_SHA="$val" ;;
+      GO_REF)  [[ "$val" =~ ^user-confirmation:cmsg_[A-Za-z0-9]{20,80}$ ]] || die "approval_refs.env: GO_REF format"; GO_REF="$val" ;;
+      NIGHT_REF) [[ "$val" =~ ^user-confirmation:cmsg_[A-Za-z0-9]{20,80}$ ]] || die "approval_refs.env: NIGHT_REF format"; NIGHT_REF="$val" ;;
+      GO_TEXT|NIGHT_TEXT)
+        [[ ${#val} -ge 1 && ${#val} -le 200 && "$val" != *\"* && "$val" != *\'* && "$val" != *\`* && "$val" != *'$'* && "$val" != *\\* ]] || die "approval_refs.env: $key has a rejected character or length"
+        printf -v "$key" '%s' "$val" ;;
+      *) die "approval_refs.env: unknown key" ;;
+    esac
+  done < "$f"
+  [[ -n "$GO_SHA" && -n "$GO_REF" && -n "$GO_TEXT" ]] || die "approval_refs.env is incomplete"
+}
+"""
+_st = io.open(EV / "rel7_1_approve_start.sh", encoding="utf-8", newline="").read()
+_a = _st.index('DELEG="委托执行')
+_b = _st.index(NL, _a)
+_deleg = (
+    PARSER_TEXT + NL
+    + 'load_refs "$EV/approval_refs.env"' + NL
+    + '[[ "$GO_SHA" == "$CARD_SHA" ]] || die "approval_refs.env: GO_SHA is not this card SHA"' + NL
+    + 'DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT:-}”（${NIGHT_REF:-}）并对本卡 SHA ${CARD_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；'
+    '只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行"')
+_st = _st[:_a] + _deleg + _st[_b:]
+_lit = "--approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7tDgoX2UY8rPK5n7nMxruFa2"
+assert _st.count(_lit) == 2, _st.count(_lit)
+_st = _st.replace(_lit, '--approval-evidence-ref "$GO_REF"')
+_old = "the card bytes equal that SHA-256 and did not change afterwards"
+assert _st.count(_old) == 1
+_st = _st.replace(_old, "the card bytes equal that SHA-256 (checked by this script at start); the approval evidence is the user's own go-ahead for this card SHA (GO_REF) together with the 21:00 permission (NIGHT_REF), both read from approval_refs.env")
+_st = _st.replace('echo "APPROVAL_ORDER=', 'echo "GO_REF=$GO_REF"; echo "NIGHT_REF=${NIGHT_REF:-}"; echo "APPROVAL_ORDER=', 1)
+_old_br = """    elif rel.startswith("tools/"):
+        path = f".auto-pm/reports/m3-rel7b/{rel[len('tools/'):]}\""""
+assert _st.count(_old_br) == 1, _st.count(_old_br)
+_new_br = """    elif rel.startswith("tools/m2_"):
+        path = f".auto-pm/reports/{rel[len('tools/'):]}"
+""" + _old_br
+_st = _st.replace(_old_br, _new_br)
+io.open(EV / "rel7_1_approve_start.sh", "w", encoding="utf-8", newline="").write(_st)
+_cl = io.open(EV / "rel7_2_close_commit.sh", encoding="utf-8", newline="").read()
+assert _cl.count('cd "$ROOT"' + NL) >= 1
+_ca = _cl.index('DELEG="委托执行')
+_cb = _cl.index(NL, _ca)
+_cl = (_cl[:_ca] + PARSER_TEXT + NL + 'load_refs /c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/approval_refs.env' + NL
+       + 'DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT}”（${NIGHT_REF}）并对卡 SHA ${GO_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在用户阅读结果并确认验收之后"'
+       + _cl[_cb:])
+_cl = _cl.replace('cd "$ROOT"' + NL, 'cd "$ROOT"' + NL + 'touch /c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/STOP_RENEW  # the gates are done: stop the renewal loop (the lease keeps >= 40 min, the closure takes about 10)' + NL, 1)
+io.open(EV / "rel7_2_close_commit.sh", "w", encoding="utf-8", newline="").write(_cl)
+io.open(EV / "approval_refs.env.template", "w", encoding="utf-8", newline="").write(
+    "# written by Claude ONLY after the user typed the go-ahead for this card SHA (message id from the thread); never edited by hand later\n"
+    "GO_SHA=<the card SHA-256 the user said go to>\nGO_REF=user-confirmation:<message id of the user's go-ahead>\nGO_TEXT=<the user's words>\n"
+    "NIGHT_REF=user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7t82L7FcQCjseQtJAUdZLZ55\nNIGHT_TEXT=晚上9:00可以跑\n")
+man = json.load(open(EV / "reference_manifest.json", encoding="utf-8"))
+man["tools/commit_msg.template.txt"] = sha((EV / "commit_msg.template.txt").read_bytes())
+io.open(EV / "reference_manifest.json", "w", encoding="utf-8", newline="").write(json.dumps(dict(sorted(man.items())), ensure_ascii=False, indent=2) + "\n")
+man = json.load(open(EV / "reference_manifest.json", encoding="utf-8"))
+for _n in ("rel7_2_close_commit.sh", "rel7_3_chg_close.sh", "rel7_4_close_worktree.sh"):
+    man["tools/" + _n] = sha((EV / _n).read_bytes())
+for _n in ("m2_lease_renew.sh", "m2_renew_loop.sh"):
+    man["tools/" + _n] = sha((R / _n).read_bytes())
+io.open(EV / "reference_manifest.json", "w", encoding="utf-8", newline="").write(json.dumps(dict(sorted(man.items())), ensure_ascii=False, indent=2) + "\n")
+print("REL7 toolkit derived; frozen", S8(FROZEN), "merges", len(merged), "product files", len(prod_changed))

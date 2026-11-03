@@ -1,0 +1,301 @@
+######## rel7_launch.sh  (V1.0 -> V1.1)
+--- .auto-pm/reports/m3-rel7/rel7_launch.sh	2026-11-02 16:49:00.542271900 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_launch.sh	2026-11-03 06:10:15.088869200 -0700
+@@ -1,8 +1,8 @@
+ #!/usr/bin/env bash
+-# Card 219 V1.0 launcher (DETACHED): start the governed Run, renew once (must succeed), then start the renewal loop, a keep-awake process, the memory guard (40 GB) and the gates
++# Card 219 V1.1 launcher (DETACHED): start the governed Run, renew once (must succeed), then start the renewal loop, a keep-awake process, the memory guard (40 GB) and the gates
+ # through detach_run.py (own process group, no console, output to log files) so that nothing depends on the session that started them. Status: gates/status/*.json and status.log.
+ set -euo pipefail
+-ROOT=/c/Users/fubai/Documents/My_Workspace; EV="$ROOT/.auto-pm/reports/m3-rel7"; G="$EV/gates"
++ROOT=/c/Users/fubai/Documents/My_Workspace; EV="$ROOT/.auto-pm/reports/m3-rel7b"; G="$EV/gates"
+ PY="$ROOT/.venv/Scripts/python.exe"; BASHW='C:\Program Files\Git\usr\bin\bash.exe'
+ cd "$ROOT"
+ unset PG_G PG_WT GATE_GROUPS  # leftovers of a rehearsal or a test must not steer the real run
+@@ -13,7 +13,7 @@
+   det() { "$PY" -B "$EV/detach_run.py" "$@"; }
+   cat > "$D/dummy_gates.sh" <<'DUMMY'
+ #!/usr/bin/env bash
+-EV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7
++EV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b
+ D="$EV/dryrun"; PY=/c/Users/fubai/Documents/My_Workspace/.venv/Scripts/python.exe
+ "$PY" -B "$EV/gate_status.py" "$D/gates/status" dry_stage RUNNING
+ sleep 45
+@@ -26,17 +26,14 @@
+   echo "DRYRUN LAUNCHED DETACHED (no Run, no real gates)"; exit 0
+ fi
+ # out-of-band anchor: approve_start in this folder must equal the copy on the reviewed branch (its hash is also reported in the thread); the comparison goes to launch_anchor.log
+-git fetch -q origin claude/rel7-gate-tools-20261102 || { echo "ANCHOR: cannot fetch the reviewed branch"; exit 1; }
+-BRANCH_SHA="$(git show origin/claude/rel7-gate-tools-20261102:reviews/rel7-gate-tools-20261102/rel7_1_approve_start.sh | sha256sum | cut -d' ' -f1)"
++git fetch -q origin claude/rel7b-gate-tools-20261103 || { echo "ANCHOR: cannot fetch the reviewed branch"; exit 1; }
++BRANCH_SHA="$(git show origin/claude/rel7b-gate-tools-20261103:reviews/rel7b-gate-tools-20261103/rel7_1_approve_start.sh | sha256sum | cut -d' ' -f1)"
+ LOCAL_SHA="$(sha256sum < "$EV/rel7_1_approve_start.sh" | cut -d' ' -f1)"
+ echo "$(date -u +%FT%TZ) approve_start anchor: branch=$BRANCH_SHA local=$LOCAL_SHA" | tee -a "$EV/launch_anchor.log"
+ [ "$BRANCH_SHA" = "$LOCAL_SHA" ] || { echo "ANCHOR MISMATCH: refusing to start"; exit 1; }
+ bash "$EV/rel7_1_approve_start.sh" > "$EV/start2.out" 2>&1 || { echo "START FAILED"; tail -5 "$EV/start2.out"; exit 1; }
+ bash "$ROOT/.auto-pm/reports/m2_lease_renew.sh" "$EV/close.env" > "$EV/renew_first.log" 2>&1 || { echo "FIRST RENEW FAILED"; cat "$EV/renew_first.log"; exit 1; }
+ echo "first renewal ok"
+-# the user's own words (typed in the main-executor thread, message cmsg_01AfNxhPWkgwWYuL1EVfYC7tJPaJZwt3hvXGtUMyCqBguG; first typed 2026-11-02 16:32 MST in another thread as cmsg_01AfNxhPWkgwWYuL1EVfYC7tDZkqRnAohX7d2d2DtjbBJB: "同意发版 7 门禁租约延长 1 小时") authorize one extension of this Run's 3 h hold cap by 3600 s
+-"$PY" -B main.py continuity lease extend-hold --run-id RUN-SW008-M3-REL7-001 --extra-seconds 3600 --approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7tJPaJZwt3hvXGtUMyCqBguG --idempotency-key RUN-SW008-M3-REL7-001-hold-1 > "$EV/extend_hold.out" 2>&1 || { echo "EXTEND-HOLD FAILED"; tail -5 "$EV/extend_hold.out"; exit 1; }
+-echo "hold cap extended by 3600 s"
+ rm -f "$EV/STOP_RENEW"
+ mkdir -p "$G/status"
+ det() { "$PY" -B "$EV/detach_run.py" "$@"; }
+@@ -44,7 +41,7 @@
+ det "$EV/keepawake.log" "$PY" -B "$EV/keepawake.py" "$EV/gates_all.exit"
+ cat > "$EV/rel7_gates_wrap.sh" <<'WRAP'
+ #!/usr/bin/env bash
+-EV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7
++EV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b
+ bash "$EV/rel7_gates_all.sh" > "$EV/gates_all.log" 2>&1
+ rc=$?
+ echo $rc > "$EV/gates_all.exit"
+######## rel7_gates_all.sh  (V1.0 -> V1.1)
+--- .auto-pm/reports/m3-rel7/rel7_gates_all.sh	2026-11-02 16:49:00.540273300 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_gates_all.sh	2026-11-03 06:10:15.088869200 -0700
+@@ -1,14 +1,14 @@
+ #!/usr/bin/env bash
+-# M3-REL7 (card 219 V1.0) - every gate on the real isolated candidate, strictly sequential:
++# M3-REL7 (card 219 V1.1) - every gate on the real isolated candidate, strictly sequential:
+ # baseline measurements in the fresh candidate (identity, health tests, plugin identity) -> install the frozen files -> fast gates (health tests, the real plugin tests, the real CLI and stage gate end to end,
+ # static, eight real mutations, trees, real pre-commit hook dry run) -> the nine regression groups (G2) -> three isolated reruns of the one named transient-race test -> judge (G1-G9).
+ # It stops at the first non-zero step and writes DONE or FAILED into the gates folder; it never corrects anything.
+ set -uo pipefail
+ export PATH="/usr/bin:/mingw64/bin:$PATH" PYTHONIOENCODING=utf-8 PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 QT_QPA_PLATFORM=offscreen
+ ROOT=/c/Users/fubai/Documents/My_Workspace
+-EV="$ROOT/.auto-pm/reports/m3-rel7"; G="${PG_G:-$EV/gates}"
++EV="$ROOT/.auto-pm/reports/m3-rel7b"; G="${PG_G:-$EV/gates}"
+ P='01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具'
+-WT="${PG_WT:-$ROOT/.auto-pm/worktrees/m3-rel7}"; PROJ="$WT/$P"
++WT="${PG_WT:-$ROOT/.auto-pm/worktrees/m3-rel7b}"; PROJ="$WT/$P"
+ PY="$ROOT/.venv/Scripts/python.exe"
+ mkdir -p "$G"
+ export GATE_STATUS_PY="$EV/gate_status.py"
+@@ -23,13 +23,16 @@
+ "$PY" -B "$EV/install_files.py" "$(cygpath -w "$WT")" > "$G/install_output.json" 2> "$G/install_output.err" || fail "install_files.py exit non-zero: $(head -c 300 "$G/install_output.err")"
+ stage fast; echo "== fast gates"
+ PG_WT="$(cygpath -m "$WT")" PG_G="$(cygpath -m "$G")" "$PY" -B "$EV/rel7_gates.py" --stage fast || fail "rel7_gates.py --stage fast"
+-stage groups; echo "== nine regression groups (G2)"
+-bash "$EV/run_g2.sh" "$PROJ" "$G/g2_candidate" || fail "run_g2.sh"
+-stage transient; echo "== the named transient-race test, three isolated runs in the same candidate bytes (judged only when it failed in the group run)"
+-cd "$PROJ" || fail "no candidate worktree"
+-for i in 1 2 3; do
+-  "$PY" -B -m pytest -o addopts= --no-cov -p no:cacheprovider --color=no -q "tests/e2e/test_pmf_recovery.py::test_r09_a_reader_never_fails_because_another_process_has_a_transaction_open" > "$G/g2_candidate/transient_$i.txt" 2>&1; echo $? > "$G/g2_candidate/transient_$i.exit"
+-done
++stage reuse; echo "== V1.1: reuse the ten group outputs and the three r09 reruns of RUN-SW008-M3-REL7-001 (same frozen commit and contract; the declared deltas are the measured ones)"
++SRC_G2="$ROOT/.auto-pm/reports/m3-rel7/gates/g2_candidate"
++[[ -f "$SRC_G2/ALL_DONE" && "$(cat "$SRC_G2/transient_3.exit")" == "0" ]] || fail "the reused group outputs are incomplete"
++for n in rest application plc change contracts infrastructure qml_debounce_alone cli qml core; do [[ "$(cat "$SRC_G2/$n.exit")" == "0" ]] || fail "reused group $n did not exit 0"; done
++mkdir -p "$G/g2_candidate"
++( cd "$SRC_G2" && sha256sum -- *.txt *.exit ) > "$G/reuse_manifest.sha256"
++cp -p "$SRC_G2"/*.txt "$SRC_G2"/*.exit "$G/g2_candidate/"
++( cd "$G/g2_candidate" && sha256sum -c --quiet "$G/reuse_manifest.sha256" ) || fail "the copied group outputs differ from the source"
++echo "reused $(wc -l < "$G/reuse_manifest.sha256") files from RUN-SW008-M3-REL7-001"
++printf 'done\n' > "$G/g2_candidate/ALL_DONE"
+ cd "$ROOT" || fail "no workspace root"
+ stage judge; echo "== judge"
+ PG_WT="$(cygpath -m "$WT")" PG_G="$(cygpath -m "$G")" "$PY" -B "$EV/rel7_gates.py" --stage judge > "$G/judge_output.txt" 2>&1 || fail "judge exit non-zero: $(tail -c 400 "$G/judge_output.txt")"
+######## rel7_1_approve_start.sh  (V1.0 -> V1.1)
+--- .auto-pm/reports/m3-rel7/rel7_1_approve_start.sh	2026-11-02 16:49:00.945917400 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_1_approve_start.sh	2026-11-03 06:10:15.714124600 -0700
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env bash
+-# M3-REL7 (card 219 V1.0, core pipeline (full gate set), ONE NEW report) - start of the governed run under the user's chat approval (the card SHA was reported in chat first).
++# M3-REL7 (card 219 V1.1, core pipeline (full gate set), ONE NEW report) - start of the governed run under the user's chat approval (the card SHA was reported in chat first).
+ # Creates/approves the SW-2026-008 CHG, the 1-path Decision, the isolated worktree, the Work and the Run, and writes close.env and the approval receipt. Resumable.
+ # `--check-only` stops after the preconditions without writing anything. It REFUSES to start unless: the card bytes equal the SHA-256 below; the card section 4 lists exactly the owned paths
+ # and section 5.1 equals the reference manifest; the reference and tool bytes equal the manifest; the baseline (and, for a stacked card, the previous card's tip) is as frozen.
+@@ -9,18 +9,18 @@
+ cd "$ROOT"
+ PY="$ROOT/.venv/Scripts/python.exe"
+ P='01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具'
+-CARD="$P/02_规划/219_M3-REL7_第七次发版候选门禁实施卡_PM.md"
+-CARD_SHA=1668f66abd28889cfe5c899aeb1df4b086e0b49076e068c9dbf98f3ea77244a2
++CARD="$P/02_规划/219_M3-REL7_第七次发版候选门禁实施卡_V1.1_PM.md"
++CARD_SHA=3d555ac58356a0d783632b7ab12f57dee795fd8da52d07028696c48d645bfa2b
+ BASE=d671611a13bc15536047769fdb0498666c414044
+-BASE_BRANCH=m3-rel7-base
++BASE_BRANCH=m3-rel7b-base
+ TODAY="$(date +%Y%m%d)"
+-DEC="DEC-$TODAY-M3REL701"
+-WORK=WORK-SW008-M3-REL7-001
+-RUN=RUN-SW008-M3-REL7-001
+-OWNER=claude:m3rel7
+-WT=.auto-pm/worktrees/m3-rel7
+-BRANCH=claude/m3-rel7
+-EV="$ROOT/.auto-pm/reports/m3-rel7"
++DEC="DEC-$TODAY-M3REL702"
++WORK=WORK-SW008-M3-REL7-002
++RUN=RUN-SW008-M3-REL7-002
++OWNER=claude:m3rel7b
++WT=.auto-pm/worktrees/m3-rel7b
++BRANCH=claude/m3-rel7b
++EV="$ROOT/.auto-pm/reports/m3-rel7b"
+ STATE="$EV/rel7_chg.txt"
+ FULL=("01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md")
+ NEW_PATHS=("01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md")
+@@ -60,7 +60,7 @@
+ 
+ echo "== 0. Preconditions"
+ [[ "$CARD_SHA" != __CARD_SHA__ ]] || die "card SHA not filled in"
+-[[ "$(sha256sum < "$CARD" | cut -d' ' -f1)" == "$CARD_SHA" ]] || die "card 219 bytes differ from the reviewed final V1.0"
++[[ "$(sha256sum < "$CARD" | cut -d' ' -f1)" == "$CARD_SHA" ]] || die "card 219 bytes differ from the reviewed final V1.1"
+ grep -qE '^> 安全回路: (是|否)$' "$CARD" || die "card 219 has no line '> 安全回路: 是' or '> 安全回路: 否' in its header (TD-SW008-211; pr open needs it)"
+ [[ "$(git rev-parse "$BASE^{commit}")" == "$BASE" ]] || die "baseline missing"
+ [[ "$(git rev-parse "$BASE_BRANCH")" == "$BASE" ]] || die "the baseline branch is no longer at the baseline"
+@@ -94,13 +94,13 @@
+     elif rel.startswith("tools/m2_"):
+         path = f".auto-pm/reports/{rel[len('tools/'):]}"
+     elif rel.startswith("tools/"):
+-        path = f".auto-pm/reports/m3-rel7/{rel[len('tools/'):]}"
++        path = f".auto-pm/reports/m3-rel7b/{rel[len('tools/'):]}"
+     else:
+-        path = f".auto-pm/reports/m3-rel7/proto/{rel}"
++        path = f".auto-pm/reports/m3-rel7b/proto/{rel}"
+     assert hashlib.sha256(open(path, "rb").read()).hexdigest() == sha, rel
+ print("reference and tool bytes match the manifest:", len(m))
+ EOF
+-cli implementation-card precheck --card-file "$(pwd -W)/$CARD" > "$EV/precheck_V1.0.json" 2>/dev/null || die "card precheck failed"
++cli implementation-card precheck --card-file "$(pwd -W)/$CARD" > "$EV/precheck_V1.1.json" 2>/dev/null || die "card precheck failed"
+ cli ledger reconcile SW-2026-008 | grep 摘要
+ [[ "${1:-}" != "--check-only" ]] || { echo "CHECK_ONLY_OK: the preconditions hold; nothing was written"; exit 0; }
+ 
+@@ -110,7 +110,7 @@
+   out="$(cli change create --pid SW-2026-008 --domain SCPT --nature OPT --scope MODULE --applicant fubai \
+     --background "$BACKGROUND" \
+     --necessity "10-26 至 10-27 合进 main 的修复只有经过全量门禁的候选才能切换为有效版本" \
+-    --references "CARD-SW008-M3-REL7 V1.0；CARD_SHA256=$CARD_SHA；BASE=$BASE；$DELEG" --urgency normal)"
++    --references "CARD-SW008-M3-REL7 V1.1；CARD_SHA256=$CARD_SHA；BASE=$BASE；$DELEG" --urgency normal)"
+   printf '%s\n' "$out" | grep -E "CHG-|状态" || true
+   chg="$(printf '%s\n' "$out" | grep -oE 'CHG-SCPT-2026-[0-9]+' | tail -n 1)"
+   [[ -n "$chg" ]] || die "cannot parse CHG id"
+@@ -119,9 +119,9 @@
+ CHG_FILE="01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/01_变更管理/01_变更单/CHG-SCPT/$chg.md"
+ while true; do
+   case "$(chg_status "$CHG_FILE")" in
+-    draft)        cli change transition "$chg" --pid SW-2026-008 --to submitted    --approver fubai --comment "[$DELEG] 提交卡 219 V1.0" >/dev/null ;;
++    draft)        cli change transition "$chg" --pid SW-2026-008 --to submitted    --approver fubai --comment "[$DELEG] 提交卡 219 V1.1" >/dev/null ;;
+     submitted)    cli change transition "$chg" --pid SW-2026-008 --to under_review --approver fubai --comment "[$DELEG] 基线与 1 路径已核验，卡 §4 路径表与 §5.1 指纹表等于冻结的参考字节，前置卡已达技术终态，卡机器预检通过" >/dev/null ;;
+-    under_review) cli change transition "$chg" --pid SW-2026-008 --to approved     --approver fubai --approval-evidence-ref "$GO_REF" --comment "[$DELEG] 批准卡 219 V1.0：只允许卡 §4 列出的 1 个路径、字节等于 §5.1；禁止其他任何文件、手改冻结字节、产品文件、既有 CHG 原文、台账（除非本卡 §4 列出）、规则、Hook、release、直接 SQL、推送、合并进 main、打 tag、部署" >/dev/null ;;
++    under_review) cli change transition "$chg" --pid SW-2026-008 --to approved     --approver fubai --approval-evidence-ref "$GO_REF" --comment "[$DELEG] 批准卡 219 V1.1：只允许卡 §4 列出的 1 个路径、字节等于 §5.1；禁止其他任何文件、手改冻结字节、产品文件、既有 CHG 原文、台账（除非本卡 §4 列出）、规则、Hook、release、直接 SQL、推送、合并进 main、打 tag、部署" >/dev/null ;;
+     approved)     cli change transition "$chg" --pid SW-2026-008 --to implementing --approver fubai --comment "[$DELEG] 开始实施（隔离候选）" >/dev/null ;;
+     implementing) break ;;
+     *) die "CHG state not resumable: $(chg_status "$CHG_FILE")" ;;
+@@ -133,7 +133,7 @@
+ if [[ ! -f ".auto-pm/decisions/$DEC.json" ]]; then
+   A=(); for p in "${FULL[@]}"; do A+=(--file "$p"); done
+   cli decision create --change-id "$chg" --pid SW-2026-008 --approver fubai --approval-evidence-ref "$GO_REF" --decision-id "$DEC" "${A[@]}" \
+-    --condition "严格限定卡 219 V1.0 的 1 个 owned path；文件字节必须等于卡 §5.1 的 SHA-256" \
++    --condition "严格限定卡 219 V1.1 的 1 个 owned path；文件字节必须等于卡 §5.1 的 SHA-256" \
+     --condition "不得改 §4 之外的任何文件（产品文件、其他测试、既有 CHG 原文、台账、规则、AGENTS.md、.trae、.cursor、.agent、Hook 脚本、release）；不得直接 SQL 改真实库 .auto-pm/continuity.db；不合并进 main、不推送、不打 tag、不部署、不切换 release、不处置任何债务或历史失败记录" \
+     --json-output | grep -E '"decision_id"|"change_id"'
+ fi
+@@ -146,27 +146,27 @@
+ echo "== 4. Work and Run"
+ S=(); O=(); for p in "${FULL[@]}"; do S+=(--scope "$p"); O+=(--owned "$p" --declared-dirty "$p"); done
+ [[ "$(q "select state from work_items where work_id=?" "$WORK")" != NONE ]] || cli continuity work create --work-id "$WORK" --pid SW-2026-008 --kind WBS \
+-  --title "M3-REL7 第七次发版候选构建与全量门禁（核心流程，一个报告）" --owner "$OWNER" "${S[@]}" --card-file "$(pwd -W)/$CARD" --idempotency-key work-sw008-m3-rel7-001-work-create-1 | grep '"state"'
+-[[ "$(q "select state from work_items where work_id=?" "$WORK")" != PLANNED ]] || cli continuity work authorize --work-id "$WORK" --decision-id "$DEC" --idempotency-key work-sw008-m3-rel7-001-work-auth-1 | grep '"state"'
++  --title "M3-REL7 第七次发版候选构建与全量门禁（核心流程，一个报告）" --owner "$OWNER" "${S[@]}" --card-file "$(pwd -W)/$CARD" --idempotency-key work-sw008-m3-rel7-002-work-create-1 | grep '"state"'
++[[ "$(q "select state from work_items where work_id=?" "$WORK")" != PLANNED ]] || cli continuity work authorize --work-id "$WORK" --decision-id "$DEC" --idempotency-key work-sw008-m3-rel7-002-work-auth-1 | grep '"state"'
+ TOKEN_FILE="$EV/lease_token.txt"; [[ -f "$TOKEN_FILE" ]] || openssl rand -hex 16 > "$TOKEN_FILE"; TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
+ [[ "$(q "select state from run_items where run_id=?" "$RUN")" != NONE ]] || cli continuity run start --run-id "$RUN" --work-id "$WORK" --executor "$OWNER" --adapter claude-code "${O[@]}" \
+-  --worktree "$(cygpath -w "$ROOT/$WT")" --lease-token "$TOKEN" --lease-seconds 3600 --idempotency-key work-sw008-m3-rel7-001-run-start-1 | grep -E '"state"|"git_head"'
+-[[ "$(q "select state from run_items where run_id=?" "$RUN")" != READY ]] || cli continuity run transition --run-id "$RUN" --to RUNNING --owner "$OWNER" --lease-token "$TOKEN" --idempotency-key work-sw008-m3-rel7-001-run-running-1 | grep '"state"'
+-[[ "$(q "select state from work_items where work_id=?" "$WORK")" != READY ]] || cli continuity work transition --work-id "$WORK" --to IN_PROGRESS --idempotency-key work-sw008-m3-rel7-001-work-inprogress-1 | grep '"state"'
++  --worktree "$(cygpath -w "$ROOT/$WT")" --lease-token "$TOKEN" --lease-seconds 3600 --idempotency-key work-sw008-m3-rel7-002-run-start-1 | grep -E '"state"|"git_head"'
++[[ "$(q "select state from run_items where run_id=?" "$RUN")" != READY ]] || cli continuity run transition --run-id "$RUN" --to RUNNING --owner "$OWNER" --lease-token "$TOKEN" --idempotency-key work-sw008-m3-rel7-002-run-running-1 | grep '"state"'
++[[ "$(q "select state from work_items where work_id=?" "$WORK")" != READY ]] || cli continuity work transition --work-id "$WORK" --to IN_PROGRESS --idempotency-key work-sw008-m3-rel7-002-work-inprogress-1 | grep '"state"'
+ 
+ sed "s/__CHG__/$chg/" "$EV/commit_msg.template.txt" > "$EV/commit_msg.txt"
+ {
+-  echo 'LABEL="CARD-SW008-M3-REL7 V1.0"'; echo "CHG=$chg"; echo "WORK=$WORK"; echo "RUN=$RUN"; echo "OWNER=$OWNER"; echo "BASE=$BASE"
++  echo 'LABEL="CARD-SW008-M3-REL7 V1.1"'; echo "CHG=$chg"; echo "WORK=$WORK"; echo "RUN=$RUN"; echo "OWNER=$OWNER"; echo "BASE=$BASE"
+   
+   echo "BYTE_BASE=$BASE"
+-  echo "WT=$ROOT/$WT"; echo "TOKEN_FILE=$EV/lease_token.txt"; echo "VERDICT=$EV/gates/gate_verdict.json"; echo "CKPT=CKPT-SW008-M3-REL7-001"
++  echo "WT=$ROOT/$WT"; echo "TOKEN_FILE=$EV/lease_token.txt"; echo "VERDICT=$EV/gates/gate_verdict.json"; echo "CKPT=CKPT-SW008-M3-REL7-002"
+   echo "COMMIT_MSG_FILE=$EV/commit_msg.txt"; echo "EV=$EV"; echo "STOP_AFTER_COMMIT=0"; echo 'EXPECT_GATES="G1 G2 G3 G4 G5 G6 G7 G8 G9"'
+######## rel7_gates.py  (V1.0 -> V1.1)
+--- .auto-pm/reports/m3-rel7/rel7_gates.py	2026-11-02 16:49:00.396032800 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_gates.py	2026-11-03 06:10:14.917559100 -0700
+@@ -20,8 +20,8 @@
+ ROOT = Path(r"C:\Users\fubai\Documents\My_Workspace")
+ os.chdir(ROOT)
+ P = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+-EV = ".auto-pm/reports/m3-rel7"
+-WT = os.environ.get("PG_WT", ".auto-pm/worktrees/m3-rel7")
++EV = ".auto-pm/reports/m3-rel7b"
++WT = os.environ.get("PG_WT", ".auto-pm/worktrees/m3-rel7b")
+ G = os.environ.get("PG_G", EV + "/gates")
+ PROJ = f"{WT}/{P}"
+ CFG = json.load(open(f"{EV}/rel7_config.json", encoding="utf-8"))
+######## install_files.py  (V1.0 -> V1.1)
+--- .auto-pm/reports/m3-rel7/install_files.py	2026-11-02 16:49:00.569458300 -0700
++++ .auto-pm/reports/m3-rel7b/install_files.py	2026-11-03 06:10:15.113253000 -0700
+@@ -1,6 +1,6 @@
+ """Install the frozen bytes of card 219 (CARD-SW008-M3-REL7) into the isolated candidate, byte-verified.
+ 
+-Usage (workspace root): python -B .auto-pm/reports/m3-rel7/install_files.py <candidate worktree>
++Usage (workspace root): python -B .auto-pm/reports/m3-rel7b/install_files.py <candidate worktree>
+ Refuses unless every planned-new path is absent from the candidate and every modified path currently has its frozen base bytes. HEAD is not judged here (the gates judge it).
+ """
+ 
+@@ -9,7 +9,7 @@
+ import sys
+ from pathlib import Path
+ 
+-EV = Path(r"C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel7")
++EV = Path(r"C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel7b")
+ WT = Path(sys.argv[1])
+ cfg = json.load(open(EV / "rel7_config.json", encoding="utf-8"))
+ installed = {}
+######## rel7_config.json  (V1.0 -> V1.1)
+--- .auto-pm/reports/m3-rel7/rel7_config.json	2026-11-02 16:49:00.567453900 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_config.json	2026-11-03 06:10:15.111251700 -0700
+@@ -1,11 +1,22 @@
+ {
+-  "baseline_g2": ".auto-pm/reports/m3-rel7/baseline_g2",
++  "baseline_g2": ".auto-pm/reports/m3-rel7b/baseline_g2",
+   "plugin": {
+     "version": "2.17.2",
+     "binary": "out/go/windows-amd64/siemens-lsp.exe"
+   },
+-  "expected_deltas": {},
+-  "expected_skips": {},
++  "expected_deltas": {
++    "rest": 9,
++    "change": 10,
++    "infrastructure": 87,
++    "cli": 126,
++    "core": 760,
++    "qml": 1
++  },
++  "expected_skips": {
++    "infrastructure": 6,
++    "cli": 1,
++    "core": 8
++  },
+   "docs": {
+     "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md": {
+       "deleted_sha256": [],
+@@ -26,14 +37,14 @@
+     "DJ-2026-011"
+   ],
+   "card_id": "CARD-SW008-M3-REL7",
+-  "card_version": "V1.0",
+-  "label": "CARD-SW008-M3-REL7 V1.0",
+-  "run_id": "RUN-SW008-M3-REL7-001",
++  "card_version": "V1.1",
++  "label": "CARD-SW008-M3-REL7 V1.1",
++  "run_id": "RUN-SW008-M3-REL7-002",
+   "base": "d671611a13bc15536047769fdb0498666c414044",
+   "files": {
+     "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md": {
+-      "sha256": "f59fbbd156f153ed6c306b3ede569e4497a425fbce6dc066805aa00cd0009214",
+-      "bytes": 7747,
++      "sha256": "f3ad11b6dde8ed594aa221cf054a6e2f19c438899b53da87657cc187c1b7ae46",
++      "bytes": 7835,
+       "base_sha256": null
+     }
+   }

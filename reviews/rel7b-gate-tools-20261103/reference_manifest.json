@@ -1,0 +1,21 @@
+{
+  "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md": "f3ad11b6dde8ed594aa221cf054a6e2f19c438899b53da87657cc187c1b7ae46",
+  "tools/adjust_counts.py": "b0662948d52b927db2ba88232b20550616efeb572bdbd129472bb79cbee3ca1d",
+  "tools/commit_msg.template.txt": "82953b219db933228533199ce0dc89140de8ce3ba66237ecba116969dbc7cdf4",
+  "tools/detach_run.py": "0ed697972131237c2b64292f5f2bb19d9688cd85d233ad93f0aa8e18cfb7c864",
+  "tools/gate_status.py": "77db738b74b220fc858732865bf417ad0d7e9ae338330d0244cc0d22b03a36f1",
+  "tools/gen_project.py": "eac50737f52b35b23b3c9b23583ac819940a042f71109f9cc96ceaa435e06565",
+  "tools/install_files.py": "15d4f885698cc4d262d2f3dafcdc7db87e205372991085f7ec6c54691c9da86a",
+  "tools/keepawake.py": "184ae36800863b2ee14f9fbde1977af521e757dd4ffab9bb8867e7a419c4237f",
+  "tools/m2_lease_renew.sh": "b92ab2083f3219796af8b469e66242013925fa1d83feb2e8035a0fad57c737ea",
+  "tools/m2_renew_loop.sh": "0472a2c1dd40bd685bb5825cd85928701da42eec8a18bc13ccdb16e27e3eace1",
+  "tools/mem_guard.py": "f878aa6bce8c6b310d14c884de895182c735be6c2b11aefd75d73f9552b29619",
+  "tools/rel7_2_close_commit.sh": "bbde2ab61b866df447f4f33795f3c62225ee7f7ed6735acf08746eb4352bd2f3",
+  "tools/rel7_3_chg_close.sh": "120d210e57b84a68a11fc7a6d1dc74cfb7c2c6ca799af15e65b988d540ab8d12",
+  "tools/rel7_4_close_worktree.sh": "afcd2791b3dcb3327c4a25822df4ab117e43e063d42801041b576c50b63dea1d",
+  "tools/rel7_config.json": "53fd629be76f70de5af65d7bf29e9e5c8081483296b91078c28094f5d59f26ed",
+  "tools/rel7_gates.py": "3c5b61d71b5f3b2aa9ef34083f23c6c4c529e8d3407c4dc37e2125a52a59ffa0",
+  "tools/rel7_gates_all.sh": "dfc311463147a547284b8109bae3f3f713f508920029aee6102c3f0f2a64ed57",
+  "tools/rel7_launch.sh": "4e45a6682f760a38719a7f8c2c8f9e6a75883e90d123504151367217fbe7fd9c",
+  "tools/run_g2.sh": "a32cd648a0a4f1037345e77dd4a24c126c8296a2c3d44daa18e81983984b21f4"
+}
