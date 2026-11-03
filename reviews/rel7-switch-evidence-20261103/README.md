@@ -23,7 +23,7 @@
    .venv/Scripts/python.exe -B main.py change transition CHG-SCPT-2026-473 --pid SW-2026-008 --to completed --approver fubai --approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7t5zPFVx9hSbijaekjfXg5kz --verification-conclusion "<见 CHG-SCPT-2026-473.md 的“验证结论”>"
    ```
    凭据是用户 2026-11-03T13:05:19Z 在本线程的预授权消息（已用 fetch_messages 核对原话）。顺序（UTC）：预授权 13:05:19 → V1.1 判卷 PASS 13:38:42 → V1.1 收口提交 13:41:44 → 切换卡生成与只读预检（13:4x）→ 切换（指针备份目录时间戳）13:52:31 → 后核验与 Checkpoint/Run/Work 关闭（同一次脚本，13:5x）→ 手动补凭据完成 CHG-473（约 13:56）→ 回执 13:56:44。脚本前两次在批准处因缺凭据被拒，之后脚本里加上了批准与决策的凭据参数（卡 SHA 不变）。
-5. **工位提交的文件清单**：本 PR 的第一个提交 fd4851b8（原工位提交 0f3de3b3 已对齐控制根现状后重做）只含 `00_Infrastructure/auto_pm/deployment_manifest.json`，相对 `origin/main` 只新增 17 个发布条目（D07 到 D07m 装出来的，含 `1.3.3-d671611`），旧的 11 个条目逐条没变（已用脚本逐条比对）。工位里没有写台账（`.auto-pm/continuity.db`）或发布指针（`active_release.json`、`previous_release.json`，那两个属于另一个指针 PR）。B2 与 V1.0 的结算决策提交已拆出去，见 PR #506。
+5. **工位提交的文件清单**：原工位提交 0f3de3b3 只含 `00_Infrastructure/auto_pm/deployment_manifest.json`（把控制根未提交的清单字节记入，为了让旧运行时肯起 Run），工位里没有写台账（`.auto-pm/continuity.db`）或发布指针。本 PR 最初带了对齐后的清单提交，但清单里记着目录还没入库的发布，CI 的发布一致性检查（`test_the_real_release_records_of_this_repository_have_no_contradiction`）因此变红，所以已撤出：清单、两个指针和 `releases/` 下新目录要放在同一个指针 PR 里一起入库，不在本 PR。相对 origin/main，控制根清单只新增 17 个发布条目，旧 11 条逐条没变。B2 与 V1.0 的结算决策提交见 PR #506。
 6. **账本备份与切换后 resume**：`d07m_db_backup.txt`（切换前 SQLite 备份 sha256=cc35c121d3340d26a4a214c83707c6eb8e0992a30d9afff23e9ce2ff46dbdfc8，不用于恢复，库文件本身未入 PR）；切换后核验 `d07m_post_checks.txt`（含 4 项目对账 0/0/0、事件链 6301 条无断点）；切换后 B2 结算完成后的 `pm resume`：`pm_resume_after_settle_B2_*.json`（冲突为空）。
 
 ## 审计 567 要求的更正与补跑
