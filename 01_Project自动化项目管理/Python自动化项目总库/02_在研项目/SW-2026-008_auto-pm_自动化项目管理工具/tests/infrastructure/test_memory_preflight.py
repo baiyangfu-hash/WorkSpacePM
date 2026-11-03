@@ -45,18 +45,20 @@ def test_a_limit_of_zero_cannot_trip_the_ratio_rule() -> None:
 
 
 def test_the_five_biggest_processes_are_listed_only_on_a_refusal() -> None:
-    asked: list[int] = []
-    use = tuple(mp.ProcessUse(pid=100 + n, name=f"p{n}.exe", committed=(9 - n) * GIB) for n in range(5))
+    asked: list[str] = []
+    everyone = tuple(mp.ProcessUse(pid=100 + n, name=f"p{n}.exe", committed=(9 - n) * GIB) for n in range(8))  # p0..p7: 9..2 GiB
 
-    def lister(count: int) -> tuple[mp.ProcessUse, ...]:
-        asked.append(count)
-        return use
+    def lister() -> tuple[mp.ProcessUse, ...]:
+        asked.append("list")
+        return tuple(reversed(everyone))  # deliberately unsorted: the module sorts
 
-    healthy = mp.run_preflight(read=lambda: _snap(5.0), list_top=lister)
-    hot = mp.run_preflight(read=lambda: _snap(40.0), list_top=lister)
+    healthy = mp.run_preflight(read=lambda: _snap(5.0), list_all=lister)
+    hot = mp.run_preflight(read=lambda: _snap(40.0), list_all=lister)
 
-    assert healthy.ok and healthy.top == () and asked == [5]  # asked once: the refusal, not the healthy reading
-    assert not hot.ok and hot.top == use
+    assert healthy.ok and healthy.top == () and healthy.attributed is None
+    assert asked == ["list"]  # asked once: the refusal, not the healthy reading
+    assert not hot.ok and hot.top == everyone[:5]
+    assert hot.attributed == sum(use.committed for use in everyone)
 
 
 def test_the_refusal_says_what_was_read_which_rule_fired_the_top_five_and_what_to_do() -> None:
@@ -81,7 +83,7 @@ def test_nothing_can_be_read_is_refused_on_windows_and_unverified_elsewhere() ->
 
 def test_require_headroom_raises_with_the_refusal_text_and_returns_the_unverified_note() -> None:
     with pytest.raises(mp.MemoryPreflightRefusedError, match="拒绝启动"):
-        mp.require_headroom(run=lambda: mp.run_preflight(read=lambda: _snap(60.0), list_top=lambda _n: ()))
+        mp.require_headroom(run=lambda: mp.run_preflight(read=lambda: _snap(60.0), list_all=lambda: ()))
 
     assert mp.require_headroom(run=lambda: mp.run_preflight(read=lambda: None, platform="linux")) != ""
     assert mp.require_headroom(run=lambda: mp.run_preflight(read=lambda: _snap(1.0))) == ""
@@ -108,7 +110,7 @@ def test_the_linux_readers_use_proc(tmp_path: Path) -> None:
     (proc / "99").mkdir()  # a process that vanished: no status file
 
     snapshot = mp._read_commit_linux(meminfo)
-    top = mp._top_linux(2, proc)
+    top = mp._all_linux(proc)[:2]
 
     assert snapshot == mp.CommitSnapshot(40_000_000 * 1024, 66_387_968 * 1024, 32_768_000 * 1024)
     assert [use.name for use in top] == ["big", "mid"] and top[0].committed == 9_000_000 * 1024
@@ -149,4 +151,26 @@ def test_undecodable_bytes_in_proc_make_a_reading_unreadable_not_silently_replac
     (proc / "5" / "status").write_bytes(b"Name:\t\xff\nVmData:\t10 kB\n")
 
     assert mp._read_commit_linux(meminfo) is None
-    assert mp._top_linux(5, proc) == ()
+    assert mp._all_linux(proc) == ()
+
+
+def test_the_refusal_names_the_commit_that_no_process_owns() -> None:
+    """11-03 live reading: the five biggest held 2.7 GiB, all processes about 14 GiB, committed 28 GiB; the top five cannot point at the culprit."""
+
+    everyone = tuple(mp.ProcessUse(pid=n, name=f"p{n}.exe", committed=2 * GIB) for n in range(1, 8))  # 14 GiB in total
+    verdict = mp.run_preflight(read=lambda: _snap(36.0), list_all=lambda: everyone)
+
+    text = mp.refusal_text(verdict)
+
+    assert "未归属进程的提交量：22.0 GiB" in text
+    assert "已提交 36.0 − 能读到的进程私有合计 14.0" in text
+    assert "先关闭 Trae、浏览器再试，并保留 fast_watch 日志" in text
+
+
+def test_the_unowned_line_is_left_out_when_no_process_list_is_available_and_never_goes_negative() -> None:
+    hot = _snap(40.0)
+    without_list = mp.refusal_text(mp.Preflight(False, mp.check(hot).reasons, hot, (), attributed=None))
+    over = mp.refusal_text(mp.Preflight(False, mp.check(hot).reasons, hot, (), attributed=50 * GIB))  # shared pages can make the sum exceed it
+
+    assert "未归属" not in without_list
+    assert "未归属进程的提交量：0.0 GiB" in over

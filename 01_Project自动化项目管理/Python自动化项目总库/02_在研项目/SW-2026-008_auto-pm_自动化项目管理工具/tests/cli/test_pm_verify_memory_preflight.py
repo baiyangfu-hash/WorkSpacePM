@@ -18,7 +18,7 @@ def _invoke(*args: str) -> object:
 
 def test_verify_is_refused_on_a_hot_machine_before_anything_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mp, "read_commit", lambda: mp.CommitSnapshot(40 * GIB, 64 * GIB, 32 * GIB))
-    monkeypatch.setattr(mp, "top_processes", lambda _n=5: (mp.ProcessUse(7, "pytest.exe", 12 * GIB),))
+    monkeypatch.setattr(mp, "all_processes", lambda: (mp.ProcessUse(7, "pytest.exe", 12 * GIB),))
 
     result = _invoke()
 

@@ -65,6 +65,9 @@ class Preflight:
     snapshot: CommitSnapshot | None
     top: tuple[ProcessUse, ...]
     unverified: str = ""
+    #: Sum of the private commit of every process that could be read; None when no process list was available.
+    #: The part of the committed memory that no process owns (``committed - attributed``) is what the top five cannot point at.
+    attributed: int | None = None
 
 
 def _gib(value: int) -> str:
@@ -125,7 +128,7 @@ if sys.platform == "win32":
         )
 
 
-    def _top_windows(count: int) -> tuple[ProcessUse, ...]:
+    def _all_windows() -> tuple[ProcessUse, ...]:
         psapi = ctypes.WinDLL("psapi", use_last_error=True)
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -155,14 +158,14 @@ if sys.platform == "win32":
                 found.append(ProcessUse(pid=pid, name=name or "?", committed=int(counters.PrivateUsage)))
             finally:
                 kernel.CloseHandle(handle)
-        return tuple(sorted(found, key=lambda item: item.committed, reverse=True)[:count])
+        return tuple(sorted(found, key=lambda item: item.committed, reverse=True))
 
 else:
 
     def _read_commit_windows() -> CommitSnapshot | None:
         return None
 
-    def _top_windows(count: int) -> tuple[ProcessUse, ...]:
+    def _all_windows() -> tuple[ProcessUse, ...]:
         return ()
 
 
@@ -204,7 +207,7 @@ else:
         return _read_commit_linux() if sys.platform.startswith("linux") else None
 
 
-def _top_linux(count: int, proc: Path = Path("/proc")) -> tuple[ProcessUse, ...]:
+def _all_linux(proc: Path = Path("/proc")) -> tuple[ProcessUse, ...]:
     found: list[ProcessUse] = []
     try:
         entries = list(proc.iterdir())
@@ -225,25 +228,25 @@ def _top_linux(count: int, proc: Path = Path("/proc")) -> tuple[ProcessUse, ...]
             found.append(ProcessUse(pid=int(entry.name), name=name, committed=values.get("VmData", 0)))
         except (OSError, ValueError, IndexError):
             continue
-    return tuple(sorted(found, key=lambda item: item.committed, reverse=True)[:count])
+    return tuple(sorted(found, key=lambda item: item.committed, reverse=True))
 
 
 if sys.platform == "win32":
 
-    def top_processes(count: int = TOP_COUNT) -> tuple[ProcessUse, ...]:
-        """The ``count`` processes with the most private (committed) memory; processes that cannot be read are skipped."""
+    def all_processes() -> tuple[ProcessUse, ...]:
+        """Every process whose private (committed) memory can be read, biggest first; the others (protected, vanished) are skipped."""
 
         try:
-            return _top_windows(count)
+            return _all_windows()
         except OSError:
             return ()
 
 else:
 
-    def top_processes(count: int = TOP_COUNT) -> tuple[ProcessUse, ...]:
-        """The ``count`` processes with the most private (committed) memory; processes that cannot be read are skipped."""
+    def all_processes() -> tuple[ProcessUse, ...]:
+        """Every process whose private (committed) memory can be read, biggest first; the others (protected, vanished) are skipped."""
 
-        return _top_linux(count) if sys.platform.startswith("linux") else ()
+        return _all_linux() if sys.platform.startswith("linux") else ()
 
 
 # ---------------------------------------------------------------- the rule
@@ -267,12 +270,12 @@ def check(
 def run_preflight(
     *,
     read: Callable[[], CommitSnapshot | None] | None = None,
-    list_top: Callable[[int], tuple[ProcessUse, ...]] | None = None,
+    list_all: Callable[[], tuple[ProcessUse, ...]] | None = None,
     platform: str | None = None,
 ) -> Preflight:
-    """Read the machine and judge.  The five biggest processes are listed only when the verdict is a refusal.
+    """Read the machine and judge.  The processes are listed (five biggest, plus the total) only when the verdict is a refusal.
 
-    The readers are looked up when called, not bound as defaults, so a test can replace ``read_commit`` / ``top_processes`` on the module.
+    The readers are looked up when called, not bound as defaults, so a test can replace ``read_commit`` / ``all_processes`` on the module.
     """
 
     snapshot = (read or read_commit)()
@@ -283,7 +286,14 @@ def run_preflight(
     verdict = check(snapshot)
     if verdict.ok:
         return verdict
-    return Preflight(ok=False, reasons=verdict.reasons, snapshot=snapshot, top=tuple((list_top or top_processes)(TOP_COUNT)))
+    processes = tuple(sorted((list_all or all_processes)(), key=lambda item: item.committed, reverse=True))
+    return Preflight(
+        ok=False,
+        reasons=verdict.reasons,
+        snapshot=snapshot,
+        top=processes[:TOP_COUNT],
+        attributed=sum(use.committed for use in processes) if processes else None,
+    )
 
 
 def refusal_text(result: Preflight) -> str:
@@ -300,6 +310,13 @@ def refusal_text(result: Preflight) -> str:
     if result.top:
         lines.append(f"占用最大的 {len(result.top)} 个进程（私有已提交内存）：")
         lines.extend(f"  {number}. {use.name}（PID {use.pid}）{_gib(use.committed)} GiB" for number, use in enumerate(result.top, 1))
+    if snapshot is not None and result.attributed is not None:
+        unowned = max(snapshot.committed - result.attributed, 0)
+        lines.append(
+            f"未归属进程的提交量：{_gib(unowned)} GiB（= 已提交 {_gib(snapshot.committed)} − 能读到的进程私有合计 {_gib(result.attributed)}；"
+            "含读不到的系统进程和内核）。若这个数很大，说明提交量不在任何进程里，上面的前几名指不出元凶："
+            "先关闭 Trae、浏览器再试，并保留 fast_watch 日志。"
+        )
     lines.append(
         f"怎么办：关掉上面没用的程序（尤其是还在跑的 pytest、浏览器、后台终端），等已提交回落到 {ABSOLUTE_GIB:g} GiB 以下再启动；"
         f"要跑的长任务（超过 10 分钟或超过 100 个用例的回归）请用 {LONG_RUN_USAGE}，它会脱离终端、带内存保护地跑。"
