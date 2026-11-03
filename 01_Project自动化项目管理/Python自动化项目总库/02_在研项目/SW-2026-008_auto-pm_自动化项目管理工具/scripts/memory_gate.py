@@ -16,7 +16,7 @@ SHA-256（``manifest.json``）；解释器是系统安装的（或复制进该�
   冻结得分最高的单元的整棵子树。单元 = 涨得最快的进程所属的 shell 层（powershell/pwsh/cmd/bash…）。
 - 冻结梯子：冻后每个检查点（至少隔 10 秒，看最近 30 秒），已提交涨速仍 >= 0.3 GiB/分钟且涨幅 >= 0.15 GiB（止不住）就升一层，冻“终端属主”（应用主进程的直接子进程）；
   梯子用完仍涨，才换下一个得分最高的单元；最多同时冻 4 个单元。涨速已低于 0.3 GiB/分钟就不再多冻（冻结只止涨，不降内存）。
-- 只冻交互会话里属于登录用户的进程（Windows：会话号 > 0 且令牌用户 SID 以 S-1-5-21- 开头）；TiWorker 这类 SYSTEM 和服务进程一律不冻。
+- 只冻交互会话里属于登录用户的进程（Windows：会话号 > 0 且令牌用户 SID 以 S-1-5-21-（本地/域账户）或 S-1-12-1-（Azure AD 账户）开头）；TiWorker 这类 SYSTEM 和服务进程一律不冻。
 - 绝不冻：保护名单（看门狗自己及其祖先、系统关键进程、explorer、终端宿主、杀毒、svchost）；应用主进程（父进程是保护进程或不存在、
   且下面还有非保护的后代，如 Trae CN 主进程）。孤零零涨的单个进程（上无非保护祖先、下无非保护后代）则冻它自己。
 - 冻后仍在涨时重新打分：只有得分最高的单元落在梯子下一层的子树里才升层，否则换成那个得分最高的单元；没有任何可冻结的进程在涨就不再动手。
@@ -29,6 +29,7 @@ SHA-256（``manifest.json``）；解释器是系统安装的（或复制进该�
     python -B scripts/memory_gate.py run         # 看门狗本体（计划任务调用）
     python -B scripts/memory_gate.py status      # 只读：是否在跑、现在多少、冻了谁
     python -B scripts/memory_gate.py resume-all  # 手动解冻全部（含已锁定的）
+    python -B scripts/memory_gate.py bundle-hash # 四个文件的哈希，安装时作为 -ExpectedSha256
     python -B scripts/memory_gate.py selftest    # 用无害的假进程走一遍 冻结 -> 解冻（不需要内存压力）
 """
 
@@ -87,6 +88,15 @@ PROTECTED_NAMES = frozenset(
         "systemd", "init", "kthreadd", "sshd", "login", "dbus-daemon",
     }
 )  # fmt: skip
+#: Token user SIDs of people: local and domain accounts (S-1-5-21-*) and Azure AD / Microsoft accounts (S-1-12-1-*).
+USER_SID_PREFIXES = ("S-1-5-21-", "S-1-12-1-")
+#: The files whose bytes the installer was told to trust (relative to the project root); ``bundle-hash`` hashes them in this order.
+BUNDLE_FILES = (
+    "auto_pm/infrastructure/long_run_core.py",
+    "auto_pm/infrastructure/memory_preflight.py",
+    "scripts/install_memory_gate.ps1",
+    "scripts/memory_gate.py",
+)
 SHELL_NAMES = frozenset({"powershell.exe", "pwsh.exe", "cmd.exe", "bash.exe", "wsl.exe", "bash", "sh", "zsh", "fish", "dash"})
 
 
@@ -197,7 +207,7 @@ if sys.platform == "win32":
                 if not sid or not advapi.ConvertSidToStringSidW(sid, ctypes.byref(text)):
                     return False
                 try:
-                    return bool((text.value or "").startswith("S-1-5-21-"))
+                    return bool((text.value or "").startswith(USER_SID_PREFIXES))
                 finally:
                     kernel.LocalFree(text)
             finally:
@@ -464,8 +474,13 @@ class Gate:
         below_top = chain[:-1]  # chain[-1] is the application's main process
         terminal_owner = below_top[-1]
         shell = next((item for item in below_top if item.name.lower() in SHELL_NAMES), None)
-        roots = [terminal_owner.pid] if shell is None else [shell.pid, terminal_owner.pid]
-        return list(dict.fromkeys(roots))
+        if shell is not None:
+            first = shell
+        elif len(below_top) >= 2:
+            first = below_top[-2]  # no shell on the path: the terminal owner's own branch that holds the culprit, not the terminal owner itself
+        else:
+            first = terminal_owner
+        return list(dict.fromkeys([first.pid, terminal_owner.pid]))
 
     def _subtree(self, root: int, procs: dict[int, Proc]) -> list[int]:
         children: dict[int, list[int]] = {}
@@ -680,6 +695,32 @@ def default_state_dir() -> Path:
     return root / "state" if root is not None else Path.home() / ".auto-pm" / "memory-gate"
 
 
+def _normalized_sha256(path: Path) -> str:
+    """SHA-256 of the file with CRLF read as LF, so a Windows checkout (autocrlf) and a Linux one hash the same."""
+
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def bundle_hash(project_root: Path | None = None) -> tuple[str, list[tuple[str, str]]]:
+    """(the combined SHA-256, the per-file lines): the value ``install_memory_gate.ps1 -Install -ExpectedSha256`` must be given.
+
+    Combined = SHA-256 of ``"<sha256>  <relative path>\n"`` for every file in ``BUNDLE_FILES`` (UTF-8, LF).  The installer computes the same
+    thing from the files it is about to copy plus itself, and refuses on any difference, so the user installs exactly what was audited.
+    """
+
+    root = project_root or Path(__file__).resolve().parent.parent
+    lines = [(relative, _normalized_sha256(root / relative)) for relative in BUNDLE_FILES]
+    text = "".join(f"{digest}  {relative}\n" for relative, digest in lines)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest(), lines
+
+
+def interpreter_problem(flags: Any = sys.flags) -> str:
+    """The scheduled task must run ``python -I -S -B``: isolated (no PYTHON* variables, no user site, no script directory on the path), no ``site``."""
+
+    missing = [name for name, ok in (("-I", flags.isolated), ("-S", flags.no_site), ("-B", flags.dont_write_bytecode)) if not ok]
+    return f"解释器没有用 {' '.join(missing)} 运行" if missing else ""
+
+
 def verify_install(root: Path) -> str:
     """Why the installed files cannot be trusted (empty when they match the SHA-256 the installer recorded)."""
 
@@ -776,8 +817,8 @@ def selftest(state_dir: Path, *, strict: bool = False) -> list[str]:
         clock["t"] += 5.0
         gate.step()
         state = gate.load()
-        if not any(entry["root"] == child.pid for entry in state["frozen"]):
-            problems.append(f"没有冻结假进程（状态：{[e['root'] for e in state['frozen']]}；严格模式下它还必须是登录用户的交互进程）")
+        if not state["frozen"]:  # the root may be the child's own child: a venv's python.exe is a launcher whose child is the real interpreter
+            problems.append("没有冻结假进程（严格模式下它还必须是登录用户的交互进程）")
         elif moves(1.5):
             problems.append("状态里记了冻结，但假进程仍在动：系统没有接受暂停")
         reading["value"] = 1.0
@@ -824,7 +865,7 @@ def cmd_status(state_dir: Path, integrity: str = "") -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="内存总闸看门狗")
-    parser.add_argument("command", choices=["run", "status", "resume-all", "selftest"])
+    parser.add_argument("command", choices=["run", "status", "resume-all", "selftest", "bundle-hash"])
     parser.add_argument("--state-dir", type=Path, default=None, help="状态与告警目录（默认：已安装时为安装目录下的 state，否则 ~/.auto-pm/memory-gate）")
     parser.add_argument("--require-manifest", action="store_true", help="计划任务用：必须是已安装形态，文件 SHA-256 与 manifest.json 一致才运行")
     args = parser.parse_args(argv)
@@ -833,6 +874,8 @@ def main(argv: list[str] | None = None) -> int:
     integrity = ""
     if args.require_manifest or root is not None:
         integrity = verify_install(root) if root is not None else f"{MANIFEST_FILE} 缺失：不是安装形态，--require-manifest 拒绝运行"
+    if args.require_manifest and not integrity:
+        integrity = interpreter_problem()
     if args.command == "run":
         if integrity:
             Gate(state_dir, committed_gib=lambda: None, processes=list, created_of=created_of, suspend=lambda p: 0, resume=lambda p: 0, alive=lambda p: False).alert(
@@ -848,6 +891,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "resume-all":
         count = real_gate(state_dir).resume_all()
         print(f"已解冻 {count} 个进程")
+        return 0
+    if args.command == "bundle-hash":
+        combined, lines = bundle_hash()
+        for relative, digest in lines:
+            print(f"{digest}  {relative}")
+        print(f"\n-ExpectedSha256 {combined}")
         return 0
     with tempfile.TemporaryDirectory() as folder:
         problems = selftest(Path(folder), strict=True)

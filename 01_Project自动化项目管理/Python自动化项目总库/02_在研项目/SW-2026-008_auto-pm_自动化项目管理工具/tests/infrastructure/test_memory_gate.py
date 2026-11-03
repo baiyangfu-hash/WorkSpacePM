@@ -6,11 +6,12 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -585,12 +586,134 @@ def test_the_selftest_freezes_and_resumes_a_real_process(tmp_path: Path) -> None
     assert mg.selftest(tmp_path) == []
 
 
-def test_the_install_script_copies_to_a_protected_folder_checks_before_it_registers_and_unfreezes_before_it_removes_the_task() -> None:
-    script = (ROOT / "scripts" / "install_memory_gate.ps1").read_text(encoding="utf-8-sig")
+def _install_script() -> str:
+    return (ROOT / "scripts" / "install_memory_gate.ps1").read_text(encoding="utf-8-sig")
 
-    assert "ProgramFiles" in script and "icacls" in script and "*S-1-5-18" in script and "*S-1-5-32-544" in script and "*S-1-5-32-545:(OI)(CI)RX" in script
-    assert script.index("icacls") < script.index("manifest.json") or script.index("manifest.json") < script.index("icacls")
-    assert script.index("selftest") < script.index("Register-ScheduledTask")
-    assert "-I -B" in script and "--require-manifest" in script and "-UserId \"SYSTEM\"" in script and "AtStartup" in script and "RestartCount 3" in script
-    assert ".venv" not in script.split("Register-ScheduledTask")[1]  # the task never runs the checkout's interpreter
-    assert script.index("STOP") < script.index("resume-all") < script.index("Unregister-ScheduledTask")
+
+def test_a_venv_launcher_is_never_the_root_the_real_interpreter_below_it_is(tmp_path: Path) -> None:
+    """M3 real-machine finding: a venv's python.exe is a launcher whose child is the real interpreter; the growing process is the child."""
+
+    w = World()
+    w.add(SELF, 700_000, "python.exe")
+    launcher = w.add(23_308, SELF, "python.exe", 0.01)  # started by the (protected) gate's own process, like the selftest's child
+    real = w.add(23_309, launcher, "python.exe", 0.3)
+    gate = w.gate(tmp_path)
+    _warm(w, gate)
+    w.grow(real, 8.0)
+    w.spawn(real, "python.exe", 2)
+    w.committed = 41.0
+    w.tick(gate)
+
+    entry = gate.load()["frozen"][0]
+    assert entry["root"] == real and launcher not in w.frozen() and real in w.frozen()
+
+
+def test_the_embedded_python_hash_is_pinned_in_the_installer_as_a_real_sha256() -> None:
+    """Audit 579 R1: the installer fetches the official embeddable Python of a fixed version and checks a hash written in the code."""
+
+    script = _install_script()
+    match = re.search(r'\$EmbedSha256 = "([^"]*)"', script)
+
+    assert match is not None and re.fullmatch(r"[0-9a-f]{64}", match.group(1)), "嵌入式 Python 的 SHA-256 还没有写死（PIN-REQUIRED）"
+    assert '$EmbedVersion = "3.12.10"' in script and "python-3.12.10-embed-amd64.zip" in script
+    assert "-notmatch '^[0-9a-f]{64}$'" in script  # an unpinned installer refuses to run
+
+
+def test_the_install_script_never_uses_a_python_found_on_the_machine_or_a_venv() -> None:
+    script = _install_script()
+    code = "\n".join(line for line in script[script.index("#>") :].splitlines() if not line.lstrip().startswith("#"))  # after the help block
+
+    for forbidden in ("-CopyPython", "Test-UserWritable", "Get-Command py", "Get-Command python", ".venv", "Find-SystemPython"):
+        assert forbidden not in code
+    assert "Expand-Archive" in code and "InstalledPython" in code
+
+
+def test_the_install_script_checks_the_sources_before_it_touches_anything_and_locks_the_folder_before_it_copies_into_it() -> None:
+    script = _install_script()
+    code = script[script.index("if ($Install) {") :]
+
+    order = [
+        "$EmbedSha256 -notmatch",
+        "merge-base --is-ancestor HEAD origin/main",
+        "$bundle.Combined -ne $ExpectedSha256",
+        "New-Item -ItemType Directory -Force -Path $Dest, $StateDir",
+        "icacls $Dest /inheritance:r",
+        "(Get-FileHash -Algorithm SHA256 -LiteralPath $zip)",
+        "Expand-Archive",
+        "Copy-Item -LiteralPath (Join-Path $Repo",
+        "WriteAllText((Join-Path $Dest \"manifest.json\")",
+        "selftest",
+        "Register-ScheduledTask",
+    ]
+    positions = [code.index(marker) for marker in order]
+
+    assert positions == sorted(positions), dict(zip(order, positions, strict=True))
+    assert "status --porcelain --untracked-files=no" in code and "fetch origin main" in code
+    assert "*S-1-5-18" in code and "*S-1-5-32-544" in code and "*S-1-5-32-545:(OI)(CI)RX" in code
+
+
+def test_expected_sha256_is_mandatory_for_install_and_covers_the_three_sources_and_the_installer_itself() -> None:
+    script = _install_script()
+
+    assert 'ParameterSetName = "Install", Mandatory = $true)][ValidatePattern' in script
+    assert list(mg.BUNDLE_FILES) == sorted(mg.BUNDLE_FILES)
+    assert set(mg.BUNDLE_FILES) == {
+        "auto_pm/infrastructure/long_run_core.py", "auto_pm/infrastructure/memory_preflight.py", "scripts/install_memory_gate.ps1", "scripts/memory_gate.py",
+    }  # fmt: skip
+    listed = re.search(r"\$BundleFiles = @\((.*?)\n\)", script, re.S)
+    assert listed is not None
+    assert re.findall(r'"([^"]+)"', listed.group(1)) == list(mg.BUNDLE_FILES)  # the PowerShell side hashes the very same list in the same order
+
+
+def test_the_task_and_the_selftest_run_isolated_without_site_and_without_bytecode() -> None:
+    script = _install_script()
+
+    assert script.count("-I -S -B") >= 5 and "run --require-manifest" in script
+    assert mg.interpreter_problem(SimpleNamespace(isolated=1, no_site=1, dont_write_bytecode=1)) == ""
+    assert "-S" in mg.interpreter_problem(SimpleNamespace(isolated=1, no_site=0, dont_write_bytecode=1))
+    assert "-I" in mg.interpreter_problem(SimpleNamespace(isolated=0, no_site=1, dont_write_bytecode=1))
+    assert mg.interpreter_problem(sys.flags) != "" or sys.flags.isolated  # pytest itself is not isolated
+
+
+def test_the_bundle_hash_is_stable_across_line_endings_and_changes_with_any_file(tmp_path: Path) -> None:
+    for relative in mg.BUNDLE_FILES:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(f"# {relative}\nline\n".encode())
+    first, lines = mg.bundle_hash(tmp_path)
+    assert len(first) == 64 and [relative for relative, _digest in lines] == list(mg.BUNDLE_FILES)
+
+    (tmp_path / "scripts" / "install_memory_gate.ps1").write_bytes(b"# scripts/install_memory_gate.ps1\r\nline\r\n")  # a Windows checkout of the same text
+    assert mg.bundle_hash(tmp_path)[0] == first
+
+    for relative in mg.BUNDLE_FILES:
+        original = (tmp_path / relative).read_bytes()
+        (tmp_path / relative).write_bytes(original + b"x")
+        assert mg.bundle_hash(tmp_path)[0] != first, relative
+        (tmp_path / relative).write_bytes(original)
+
+
+def test_the_bundle_hash_command_prints_the_value_to_give_the_installer() -> None:
+    done = subprocess.run([sys.executable, "-B", str(SCRIPT), "bundle-hash"], capture_output=True, check=True, timeout=60)  # noqa: S603
+    text = done.stdout.decode("utf-8")
+
+    assert f"-ExpectedSha256 {mg.bundle_hash()[0]}" in text and "scripts/memory_gate.py" in text
+
+
+def test_a_logged_in_users_sid_includes_azure_ad_accounts() -> None:
+    assert mg.USER_SID_PREFIXES == ("S-1-5-21-", "S-1-12-1-")
+    assert "S-1-5-18".startswith(mg.USER_SID_PREFIXES) is False and "S-1-5-80-1".startswith(mg.USER_SID_PREFIXES) is False
+
+
+def test_without_a_shell_on_the_path_the_first_rung_is_the_branch_that_holds_the_culprit_not_the_terminal_owner(tmp_path: Path) -> None:
+    w = World()
+    w.add(SELF, 700_000, "python.exe")
+    w.add(EXPLORER, 1, "explorer.exe")
+    w.add(TRAE_MAIN, EXPLORER, "app.exe")
+    w.add(TERMINAL_OWNER, TRAE_MAIN, "host.exe")
+    branch = w.add(500, TERMINAL_OWNER, "worker.exe")
+    leaf = w.add(501, branch, "task.exe")
+    gate = w.gate(tmp_path)
+    procs = {proc.pid: proc for proc in w.procs.values()}
+
+    assert gate.ladder(procs[leaf], procs, gate._protected_pids(procs)) == [branch, TERMINAL_OWNER]
