@@ -10,7 +10,7 @@ cd "$ROOT"
 PY="$ROOT/.venv/Scripts/python.exe"
 P='01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具'
 CARD="$P/02_规划/219_M3-REL7_第七次发版候选门禁实施卡_V1.1_PM.md"
-CARD_SHA=3d555ac58356a0d783632b7ab12f57dee795fd8da52d07028696c48d645bfa2b
+CARD_SHA=f3d636eb9cdce4e2eb597e6631e8e3567d514a28ef987ce3c34cf0c63a46b227
 BASE=d671611a13bc15536047769fdb0498666c414044
 BASE_BRANCH=m3-rel7b-base
 TODAY="$(date +%Y%m%d)"
@@ -51,7 +51,7 @@ load_refs() {
 load_refs "$EV/approval_refs.env"
 [[ "$GO_SHA" == "$CARD_SHA" ]] || die "approval_refs.env: GO_SHA is not this card SHA"
 DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT:-}”（${NIGHT_REF:-}）并对本卡 SHA ${CARD_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行"
-BACKGROUND="M3-REL7（第七次发版候选）：用 main 上的合并提交 d671611a 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；再跑全量门禁：十组回归（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值由 GitHub release-pregate 对两个提交各实跑一次相减得出）、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。自现行有效版本 1.3.3-6a9f127 以来合入 53 个合并提交，产品子树 83 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。"
+BACKGROUND="M3-REL7（第七次发版候选）：用 main 上的合并提交 d671611a 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；再跑全量门禁：十组回归（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值取自 V1.0 的正式 Run 实跑的各组计数相对基线的差（只证明零失败与其余计数不变））、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。自现行有效版本 1.3.3-6a9f127 以来合入 53 个合并提交，产品子树 83 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。"
 mkdir -p "$EV"
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 cli() { "$PY" -B main.py "$@"; }

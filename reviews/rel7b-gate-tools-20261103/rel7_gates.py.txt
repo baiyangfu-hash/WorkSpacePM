@@ -469,7 +469,7 @@ def stage_judge() -> int:
                   and base["deselected"] == cand["deselected"] and cand["passed"] > 0)
             g2_lines.append(f"{name}: baseline {base['passed']}p/{base['failed']}f/{base['skipped']}s | candidate {cand['passed']}p/{cand['failed']}f/{cand['skipped']}s | expected +{delta} -> {'OK' if ok else 'FAIL'}")
         g2_ok = g2_ok and ok
-    done("G2", g2_ok, ["# G2 - the nine regression groups (ten outputs) against the governed outputs of the previous card (RUN-SW008-M3-REL6-002, card 218 V1.1, whose product equals the active release 1.3.3-6a9f127): every group has no failure; the counts equal the baseline plus the deltas declared in the card (measured by release-pregate on both commits)", *g2_lines])
+    done("G2", g2_ok, ["# G2 - the nine regression groups (ten outputs) against the governed outputs of the previous card (RUN-SW008-M3-REL6-002, card 218 V1.1, whose product equals the active release 1.3.3-6a9f127): every group has no failure; the counts equal the baseline plus the deltas declared in the card (measured in the V1.0 formal run RUN-SW008-M3-REL7-001, whose ten outputs are reused byte for byte; this proves zero failures and unchanged other counts, not that no test was lost)", *g2_lines])
 
     real = summary(G + "/G3_real_plugin_tests.txt")
     docs = json.load(open(G + "/G3_docs.json", encoding="utf-8"))

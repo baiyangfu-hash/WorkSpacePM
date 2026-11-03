@@ -84,7 +84,7 @@ report = f"""# M3 第七次发版｜发版候选构建与全量门禁（合同�
 | 门禁 | 本卡怎么检查 | 通过标准 |
 |---|---|---|
 | 构建入口自身的测试 | `tests/core/test_pmf_build.py` | 退出码 0，无跳过 |
-| 母体全量 pytest | 九组回归，在冻结提交的隔离工作树里跑 | 每组无失败、无 ERROR，退出码与上一张发版卡（卡 218 V1.1 的受治理输出，RUN-SW008-M3-REL6-002，产品等于现行有效版本 1.3.3-6a9f127）相同；通过数与跳过数等于基线加事先声明的差值：通过 {delta_text}；跳过 {skip_text}（差值是 GitHub `release-pregate` 在 Windows 上对现行版本的冻结提交与本候选各实跑一次、逐组相减得出，记录 `{MEASURED_FROM}`） |
+| 母体全量 pytest | 九组回归，在冻结提交的隔离工作树里跑 | 每组无失败、无 ERROR，退出码与上一张发版卡（卡 218 V1.1 的受治理输出，RUN-SW008-M3-REL6-002，产品等于现行有效版本 1.3.3-6a9f127）相同；通过数与跳过数等于基线加事先声明的差值：通过 {delta_text}；跳过 {skip_text}（差值取自 V1.0 的正式 Run `RUN-SW008-M3-REL7-001` 实跑的各组计数相对基线的差，十组输出逐字节复用；它只证明各组零失败、其余计数不变，不证明没有丢测试） |
 | Ruff/Mypy | `ruff check auto_pm tests`、`mypy --platform win32 auto_pm` | 退出码 0 |
 | 全库 Ruff/Mypy 审计 | `ruff check .`、`mypy auto_pm tests` | 原始结果如实记录，不写“全绿” |
 | 文档检查与本报告 | `doc check`；本报告的逐行合同 | 退出码与基线相同；合同满足 |
@@ -118,7 +118,7 @@ g = sw(g, '''        ("D2-the-projection-loses-an-unrelated-line", wbs, lambda t
 g = sw(g, "two in-memory document controls (the report losing its proof sentence, the projection losing an unrelated line)",
        "two in-memory document controls (the report losing its proof sentence, the report losing the full frozen commit)")
 g = sw(g, "(RUN-SW008-M3-STALE-001) on the same product bytes (the frozen D03 commit): every group has no failure and exactly the same counts",
-       "(RUN-SW008-M3-REL6-002, card 218 V1.1, whose product equals the active release 1.3.3-6a9f127): every group has no failure; the counts equal the baseline plus the deltas declared in the card (measured by release-pregate on both commits)")
+       "(RUN-SW008-M3-REL6-002, card 218 V1.1, whose product equals the active release 1.3.3-6a9f127): every group has no failure; the counts equal the baseline plus the deltas declared in the card (measured in the V1.0 formal run RUN-SW008-M3-REL7-001, whose ten outputs are reused byte for byte; this proves zero failures and unchanged other counts, not that no test was lost)")
 g = sw(g, "the three committed documents meet their frozen line contract", "the committed report meets its frozen line contract")
 g = sw(g, "the 2 modified documents at their base bytes and the new report absent", "the new report absent")
 old_b = '"--project-root", P, "--output", str(d04 / f"build_{tag}")], cwd=PROJ)'
@@ -372,14 +372,14 @@ spec = {
     "full_paths": FULL, "new_paths": [REPORT], "modified": {}, "deleg": DELEG, "chg_domain": "SCPT", "chg_nature": "OPT", "approval_tag": "M3-REL7", "heavy": True,
     "prev_chg": PREV_CHG, "prev_chg_dir": "CHG-" + PREV_CHG.split("-")[1], "prev_cards": [(PREV_RUN, PREV_WORK)],
     "background": (f"M3-REL7（第七次发版候选）：用 main 上的合并提交 {S8(FROZEN)} 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；"
-                   f"再跑全量门禁：十组回归（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值由 GitHub release-pregate 对两个提交各实跑一次相减得出）、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。"
+                   f"再跑全量门禁：十组回归（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值取自 V1.0 的正式 Run 实跑的各组计数相对基线的差（只证明零失败与其余计数不变））、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。"
                    f"自现行有效版本 1.3.3-6a9f127 以来合入 {len(merged)} 个合并提交，产品子树 {len(prod_changed)} 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。"),
     "necessity": "10-26 至 10-27 合进 main 的修复只有经过全量门禁的候选才能切换为有效版本",
     "title": "M3-REL7 第七次发版候选构建与全量门禁（核心流程，一个报告）",
     "commit_msg": (f"docs(release): [__CHG__] seventh release candidate {S8(FROZEN)} builds reproducibly and passes the full gate set (M3-REL7)" + chr(10) + chr(10)
                    + "Card CARD-SW008-M3-REL7. The frozen merge commit was built twice with its own scripts/pmf_build.py; the payloads are byte-identical, release_meta matches apart "
                    "from the builder, both pass verify, and the payload imports from itself with a working CLI. The full gate set passed on that commit: the ten regression groups "
-                   "(against card 218 V1.1's governed outputs plus the deltas measured by release-pregate), static checks, the raw full-repository audit, the doc check, the real hooks, every registered "
+                   "(against card 218 V1.1's governed outputs plus the deltas measured in the V1.0 formal run RUN-SW008-M3-REL7-001), static checks, the raw full-repository audit, the doc check, the real hooks, every registered "
                    "project's ledger and the control-root orient. This commit adds only the contract report; it exists only because every gate passed. Nothing is switched."),
     "config_extra": {"baseline_g2": ".auto-pm/reports/m3-rel7b/baseline_g2", "plugin": {"version": "2.17.2", "binary": "out/go/windows-amd64/siemens-lsp.exe"},
                      "expected_deltas": DELTAS, "expected_skips": SKIPS, "docs": docs, "frozen_commit": FROZEN, "projects": PROJECTS},

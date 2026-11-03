@@ -72,5 +72,11 @@ _ga = _ga[:_x] + _reuse + _ga[_y:]
 io.open(EV / "rel7_gates_all.sh", "w", encoding="utf-8", newline="").write(_ga)
 '''
 s = s.replace(a5, block.lstrip(NL) + a5)
+# 6) V1.1 truthfulness: the deltas are the counts measured in the formal V1.0 run, NOT release-pregate numbers; no placeholder is left in the report
+s = rep(s, "（差值是 GitHub `release-pregate` 在 Windows 上对现行版本的冻结提交与本候选各实跑一次、逐组相减得出，记录 `{MEASURED_FROM}`）",
+        "（差值取自 V1.0 的正式 Run `RUN-SW008-M3-REL7-001` 实跑的各组计数相对基线的差，十组输出逐字节复用；它只证明各组零失败、其余计数不变，不证明没有丢测试）")
+s = rep(s, "(measured by release-pregate on both commits)", "(measured in the V1.0 formal run RUN-SW008-M3-REL7-001, whose ten outputs are reused byte for byte; this proves zero failures and unchanged other counts, not that no test was lost)")
+s = rep(s, "差值由 GitHub release-pregate 对两个提交各实跑一次相减得出", "差值取自 V1.0 的正式 Run 实跑的各组计数相对基线的差（只证明零失败与其余计数不变）")
+s = rep(s, "plus the deltas measured by release-pregate)", "plus the deltas measured in the V1.0 formal run RUN-SW008-M3-REL7-001)")
 io.open(R / "m3-rel7b" / "derive_rel7b.py", "w", encoding="utf-8", newline="\n").write(s)
 print("derive_rel7b.py written")

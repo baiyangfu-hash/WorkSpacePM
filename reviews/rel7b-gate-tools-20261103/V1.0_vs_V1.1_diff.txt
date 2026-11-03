@@ -1,6 +1,6 @@
 ######## rel7_launch.sh  (V1.0 -> V1.1)
 --- .auto-pm/reports/m3-rel7/rel7_launch.sh	2026-11-02 16:49:00.542271900 -0700
-+++ .auto-pm/reports/m3-rel7b/rel7_launch.sh	2026-11-03 06:10:15.088869200 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_launch.sh	2026-11-03 06:24:20.793646900 -0700
 @@ -1,8 +1,8 @@
  #!/usr/bin/env bash
 -# Card 219 V1.0 launcher (DETACHED): start the governed Run, renew once (must succeed), then start the renewal loop, a keep-awake process, the memory guard (40 GB) and the gates
@@ -52,7 +52,7 @@
  echo $rc > "$EV/gates_all.exit"
 ######## rel7_gates_all.sh  (V1.0 -> V1.1)
 --- .auto-pm/reports/m3-rel7/rel7_gates_all.sh	2026-11-02 16:49:00.540273300 -0700
-+++ .auto-pm/reports/m3-rel7b/rel7_gates_all.sh	2026-11-03 06:10:15.088869200 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_gates_all.sh	2026-11-03 06:24:20.793646900 -0700
 @@ -1,14 +1,14 @@
  #!/usr/bin/env bash
 -# M3-REL7 (card 219 V1.0) - every gate on the real isolated candidate, strictly sequential:
@@ -97,7 +97,7 @@
  PG_WT="$(cygpath -m "$WT")" PG_G="$(cygpath -m "$G")" "$PY" -B "$EV/rel7_gates.py" --stage judge > "$G/judge_output.txt" 2>&1 || fail "judge exit non-zero: $(tail -c 400 "$G/judge_output.txt")"
 ######## rel7_1_approve_start.sh  (V1.0 -> V1.1)
 --- .auto-pm/reports/m3-rel7/rel7_1_approve_start.sh	2026-11-02 16:49:00.945917400 -0700
-+++ .auto-pm/reports/m3-rel7b/rel7_1_approve_start.sh	2026-11-03 06:10:15.714124600 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_1_approve_start.sh	2026-11-03 06:25:15.070288300 -0700
 @@ -1,5 +1,5 @@
  #!/usr/bin/env bash
 -# M3-REL7 (card 219 V1.0, core pipeline (full gate set), ONE NEW report) - start of the governed run under the user's chat approval (the card SHA was reported in chat first).
@@ -112,7 +112,7 @@
 -CARD="$P/02_规划/219_M3-REL7_第七次发版候选门禁实施卡_PM.md"
 -CARD_SHA=1668f66abd28889cfe5c899aeb1df4b086e0b49076e068c9dbf98f3ea77244a2
 +CARD="$P/02_规划/219_M3-REL7_第七次发版候选门禁实施卡_V1.1_PM.md"
-+CARD_SHA=3d555ac58356a0d783632b7ab12f57dee795fd8da52d07028696c48d645bfa2b
++CARD_SHA=f3d636eb9cdce4e2eb597e6631e8e3567d514a28ef987ce3c34cf0c63a46b227
  BASE=d671611a13bc15536047769fdb0498666c414044
 -BASE_BRANCH=m3-rel7-base
 +BASE_BRANCH=m3-rel7b-base
@@ -134,6 +134,15 @@
  STATE="$EV/rel7_chg.txt"
  FULL=("01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md")
  NEW_PATHS=("01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md")
+@@ -51,7 +51,7 @@
+ load_refs "$EV/approval_refs.env"
+ [[ "$GO_SHA" == "$CARD_SHA" ]] || die "approval_refs.env: GO_SHA is not this card SHA"
+ DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-02 当地时间“${NIGHT_TEXT:-}”（${NIGHT_REF:-}）并对本卡 SHA ${CARD_SHA} 亲口说“${GO_TEXT}”（${GO_REF}）；只构建与门禁，不切换有效发布版本（切换要用户另回“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行"
+-BACKGROUND="M3-REL7（第七次发版候选）：用 main 上的合并提交 d671611a 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；再跑全量门禁：十组回归（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值由 GitHub release-pregate 对两个提交各实跑一次相减得出）、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。自现行有效版本 1.3.3-6a9f127 以来合入 53 个合并提交，产品子树 83 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。"
++BACKGROUND="M3-REL7（第七次发版候选）：用 main 上的合并提交 d671611a 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；再跑全量门禁：十组回归（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值取自 V1.0 的正式 Run 实跑的各组计数相对基线的差（只证明零失败与其余计数不变））、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。自现行有效版本 1.3.3-6a9f127 以来合入 53 个合并提交，产品子树 83 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。"
+ mkdir -p "$EV"
+ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+ cli() { "$PY" -B main.py "$@"; }
 @@ -60,7 +60,7 @@
  
  echo "== 0. Preconditions"
@@ -216,9 +225,19 @@
 -  echo "WT=$ROOT/$WT"; echo "TOKEN_FILE=$EV/lease_token.txt"; echo "VERDICT=$EV/gates/gate_verdict.json"; echo "CKPT=CKPT-SW008-M3-REL7-001"
 +  echo "WT=$ROOT/$WT"; echo "TOKEN_FILE=$EV/lease_token.txt"; echo "VERDICT=$EV/gates/gate_verdict.json"; echo "CKPT=CKPT-SW008-M3-REL7-002"
    echo "COMMIT_MSG_FILE=$EV/commit_msg.txt"; echo "EV=$EV"; echo "STOP_AFTER_COMMIT=0"; echo 'EXPECT_GATES="G1 G2 G3 G4 G5 G6 G7 G8 G9"'
+   echo "MERGE_PARENTS="
+   printf 'OWNED=('; for p in "${FULL[@]}"; do printf '"%s" ' "$p"; done; printf ')\n'
+ } > "$EV/close.env"
+ {
+   echo "APPROVAL_EVIDENCE_ID=APPROVAL-$TODAY-M3-REL7"
+-  echo "CARD=CARD-SW008-M3-REL7 V1.0"; echo "CARD_SHA256=$CARD_SHA"; echo "BASELINE=$BASE"; true
++  echo "CARD=CARD-SW008-M3-REL7 V1.1"; echo "CARD_SHA256=$CARD_SHA"; echo "BASELINE=$BASE"; true
+   echo "CHG_ID=$chg"; echo "DECISION_ID=$DEC"; echo "WORK_ID=$WORK"; echo "RUN_ID=$RUN"; echo "WORKTREE=$WT"; echo "BRANCH=$BRANCH"
+   echo "OWNED_PATHS=1 (card section 4)"; echo "EXECUTOR=claude"
+   echo "GO_REF=$GO_REF"; echo "NIGHT_REF=${NIGHT_REF:-}"; echo "APPROVAL_ORDER=user chat approval given after the card SHA-256 was reported in chat (PREAUTH_M2_20261008.txt, last block); the card bytes equal that SHA-256 (checked by this script at start); the approval evidence is the user's own go-ahead for this card SHA (GO_REF) together with the 21:00 permission (NIGHT_REF), both read from approval_refs.env"
 ######## rel7_gates.py  (V1.0 -> V1.1)
 --- .auto-pm/reports/m3-rel7/rel7_gates.py	2026-11-02 16:49:00.396032800 -0700
-+++ .auto-pm/reports/m3-rel7b/rel7_gates.py	2026-11-03 06:10:14.917559100 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_gates.py	2026-11-03 06:24:20.634484500 -0700
 @@ -20,8 +20,8 @@
  ROOT = Path(r"C:\Users\fubai\Documents\My_Workspace")
  os.chdir(ROOT)
@@ -230,9 +249,18 @@
  G = os.environ.get("PG_G", EV + "/gates")
  PROJ = f"{WT}/{P}"
  CFG = json.load(open(f"{EV}/rel7_config.json", encoding="utf-8"))
+@@ -469,7 +469,7 @@
+                   and base["deselected"] == cand["deselected"] and cand["passed"] > 0)
+             g2_lines.append(f"{name}: baseline {base['passed']}p/{base['failed']}f/{base['skipped']}s | candidate {cand['passed']}p/{cand['failed']}f/{cand['skipped']}s | expected +{delta} -> {'OK' if ok else 'FAIL'}")
+         g2_ok = g2_ok and ok
+-    done("G2", g2_ok, ["# G2 - the nine regression groups (ten outputs) against the governed outputs of the previous card (RUN-SW008-M3-REL6-002, card 218 V1.1, whose product equals the active release 1.3.3-6a9f127): every group has no failure; the counts equal the baseline plus the deltas declared in the card (measured by release-pregate on both commits)", *g2_lines])
++    done("G2", g2_ok, ["# G2 - the nine regression groups (ten outputs) against the governed outputs of the previous card (RUN-SW008-M3-REL6-002, card 218 V1.1, whose product equals the active release 1.3.3-6a9f127): every group has no failure; the counts equal the baseline plus the deltas declared in the card (measured in the V1.0 formal run RUN-SW008-M3-REL7-001, whose ten outputs are reused byte for byte; this proves zero failures and unchanged other counts, not that no test was lost)", *g2_lines])
+ 
+     real = summary(G + "/G3_real_plugin_tests.txt")
+     docs = json.load(open(G + "/G3_docs.json", encoding="utf-8"))
 ######## install_files.py  (V1.0 -> V1.1)
 --- .auto-pm/reports/m3-rel7/install_files.py	2026-11-02 16:49:00.569458300 -0700
-+++ .auto-pm/reports/m3-rel7b/install_files.py	2026-11-03 06:10:15.113253000 -0700
++++ .auto-pm/reports/m3-rel7b/install_files.py	2026-11-03 06:24:20.816128700 -0700
 @@ -1,6 +1,6 @@
  """Install the frozen bytes of card 219 (CARD-SW008-M3-REL7) into the isolated candidate, byte-verified.
  
@@ -252,7 +280,7 @@
  installed = {}
 ######## rel7_config.json  (V1.0 -> V1.1)
 --- .auto-pm/reports/m3-rel7/rel7_config.json	2026-11-02 16:49:00.567453900 -0700
-+++ .auto-pm/reports/m3-rel7b/rel7_config.json	2026-11-03 06:10:15.111251700 -0700
++++ .auto-pm/reports/m3-rel7b/rel7_config.json	2026-11-03 06:24:20.816128700 -0700
 @@ -1,11 +1,22 @@
  {
 -  "baseline_g2": ".auto-pm/reports/m3-rel7/baseline_g2",
@@ -294,8 +322,8 @@
      "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md": {
 -      "sha256": "f59fbbd156f153ed6c306b3ede569e4497a425fbce6dc066805aa00cd0009214",
 -      "bytes": 7747,
-+      "sha256": "f3ad11b6dde8ed594aa221cf054a6e2f19c438899b53da87657cc187c1b7ae46",
-+      "bytes": 7835,
++      "sha256": "696ef3de674cf4cbcc11ea218dc9a6a13db006d7c207853cf4711e64bb2182cb",
++      "bytes": 7998,
        "base_sha256": null
      }
    }

@@ -1,10 +1,10 @@
-# rehearsal (V1.1 declared deltas): judge output, variants, G3 orient line
+# second rehearsal (final tools, 06:25-06:28 MST): judge output, variants, G3 orient line
 {'G1': 'PASS', 'G2': 'PASS', 'G3': 'PASS', 'G4': 'PASS', 'G5': 'PASS', 'G6': 'PASS', 'G7': 'PASS', 'G8': 'PASS', 'G9': 'PASS'}
 
 core_count_changed judge exit=1
 rest_one_failure judge exit=1
 rest_transient_ok judge exit=0
 rest_transient_rerun_failed judge exit=1
-
+judge_positive.exit=0
 orient exception: conflicts=["LEASE_EXPIRED"] orient_run_id=RUN-SW-2026-008-CHG-SCPT-2026-471-01 work_id=WORK-MSN-415BA3D417866398 work_state=IN_PROGRESS ledger_expired_running_runs(informational)=["RUN-SW-2026-008-CHG-SCPT-2026-471-01", "RUN-SW008-A2-201-03", "RUN-SW008-M3-REL7-001"] verdict=True
-G2 VERDICT: FAIL
+NOTE: G2_report.txt is overwritten by every judge call; the last variant (rest_transient_rerun_failed: rest 985p/1f) leaves 'G2 VERDICT: FAIL' as its last line. The positive judge is judge_positive.exit=0 and judge_output.txt (all nine PASS).

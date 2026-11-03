@@ -1,0 +1,38 @@
+"""V1.1 truthfulness patch (audit 563 / coordinator ruling B, 2026-11-03): remove every statement that says the declared deltas came from release-pregate, the placeholder 'x',
+and the stale V1.0/V1.x text about the freeze branch.  Edits make_derive7b.py and build_card219b.py ONCE; re-run both afterwards."""
+import io
+import pathlib
+
+R = pathlib.Path(__file__).resolve().parent.parent
+NL = chr(10)
+
+# ---- make_derive7b.py: step 6 (applied to the derived text before it is written)
+p1 = R / "m3-rel7b" / "make_derive7b.py"
+s = p1.read_text(encoding="utf-8")
+if "V1.1 truthfulness" in s:
+    raise SystemExit("already applied")
+anchor = 'io.open(R / "m3-rel7b" / "derive_rel7b.py", "w", encoding="utf-8", newline="\\n").write(s)'
+assert s.count(anchor) == 1
+step6 = r'''
+# 6) V1.1 truthfulness: the deltas are the counts measured in the formal V1.0 run, NOT release-pregate numbers; no placeholder is left in the report
+s = rep(s, "（差值是 GitHub `release-pregate` 在 Windows 上对现行版本的冻结提交与本候选各实跑一次、逐组相减得出，记录 `{MEASURED_FROM}`）",
+        "（差值取自 V1.0 的正式 Run `RUN-SW008-M3-REL7-001` 实跑的各组计数相对基线的差，十组输出逐字节复用；它只证明各组零失败、其余计数不变，不证明没有丢测试）")
+s = rep(s, "(measured by release-pregate on both commits)", "(measured in the V1.0 formal run RUN-SW008-M3-REL7-001, whose ten outputs are reused byte for byte; this proves zero failures and unchanged other counts, not that no test was lost)")
+s = rep(s, "差值由 GitHub release-pregate 对两个提交各实跑一次相减得出", "差值取自 V1.0 的正式 Run 实跑的各组计数相对基线的差（只证明零失败与其余计数不变）")
+s = rep(s, "plus the deltas measured by release-pregate)", "plus the deltas measured in the V1.0 formal run RUN-SW008-M3-REL7-001)")
+'''
+s = s.replace(anchor, step6.lstrip(NL) + anchor)
+p1.write_text(s, encoding="utf-8", newline="\n")
+
+# ---- build_card219b.py: section 1 items 4 and 5 and the V1.1 truth markers
+p2 = R / "m2-batch1" / "build_card219b.py"
+c = p2.read_text(encoding="utf-8")
+marker = 'c = rep(c, "# M3-REL7｜'
+assert c.count(marker) == 1
+new_items = r'''
+c = replace_line(c, "4. **事先声明的差值**", "4. **事先声明的差值**（相对卡 218 V1.1 的受治理输出，RUN-SW008-M3-REL6-002）：通过 `{json.dumps(cfg['expected_deltas'], ensure_ascii=False)}`，跳过 `{json.dumps(cfg['expected_skips'], ensure_ascii=False)}`。来源：V1.0 的正式 Run `RUN-SW008-M3-REL7-001`（2026-11-02 22:01 MST 起、11-03 02:12 MST 判卷）实跑的各组计数相对基线的差，见第 13 条；没有用 GitHub `release-pregate`（V1.0 当时按批准的“先跑后补”声明为空）。本版的差值只证明：各组失败数为 0、其余各组计数不变；它**不证明没有丢失测试**（同一次实跑既产出这些差值又是被比较的对象）。对不上就如实判不过，不改判据。")
+c = replace_line(c, "5. **只能在 Linux 跑的文件**", "5. **只能在 Linux 跑的文件**：rest 组照旧不跑 4 个样件联调文件，以 GitHub 上 `sample-drill` 工作流为证（运行 41516806516，`main` 上对冻结提交 `d671611a` 的推送运行，结论 success，已核实）。")
+'''
+c = c.replace(marker, new_items.lstrip(NL) + marker)
+p2.write_text(c, encoding="utf-8", newline="\n")
+print("truth patch applied to make_derive7b.py and build_card219b.py")

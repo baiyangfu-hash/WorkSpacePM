@@ -43,8 +43,8 @@
   "base": "d671611a13bc15536047769fdb0498666c414044",
   "files": {
     "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md": {
-      "sha256": "f3ad11b6dde8ed594aa221cf054a6e2f19c438899b53da87657cc187c1b7ae46",
-      "bytes": 7835,
+      "sha256": "696ef3de674cf4cbcc11ea218dc9a6a13db006d7c207853cf4711e64bb2182cb",
+      "bytes": 7998,
       "base_sha256": null
     }
   }
