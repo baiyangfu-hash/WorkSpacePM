@@ -346,3 +346,34 @@ def test_git_head_and_dirty_describe_the_working_tree_the_job_ran_in(tmp_path: P
     assert core._git_dirty(repo) is True and core._git_head(repo) == head  # same HEAD, different code: the flag is what tells them apart
 
     assert core._git_head(tmp_path) == "" and core._git_dirty(tmp_path) is None  # not a repository
+
+
+def test_the_job_gets_the_requested_environment_but_never_a_lease_credential(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTO_PM_LEASE_TOKEN", "very-secret-token")
+    code = "import os; print('X=' + os.environ.get('LR_X', '-')); print('L=' + os.environ.get('AUTO_PM_LEASE_TOKEN', '-'))"
+    core.start(tmp_path, "envjob", [PY, "-c", code], cwd=tmp_path, poll_seconds=0.2, env={"LR_X": "from-spec"})
+    run_dir = core.run_directory(tmp_path, "envjob")
+
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE")
+    log = (run_dir / "run.log").read_text(encoding="utf-8")
+    assert "X=from-spec" in log and "L=-" in log and "very-secret-token" not in log
+    assert "very-secret-token" not in (run_dir / "spec.json").read_text(encoding="utf-8")
+
+
+def test_a_governed_worktree_is_recorded_instead_of_the_directory_the_job_runs_in(tmp_path: Path) -> None:
+    import subprocess
+
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    subprocess.run(["git", "-C", str(tree), "init", "-q"], check=True, env=env)
+    subprocess.run(["git", "-C", str(tree), "config", "commit.gpgsign", "false"], check=True, env=env)
+    subprocess.run(["git", "-C", str(tree), "commit", "-q", "--allow-empty", "-m", "x"], check=True, env=env)
+    head = core._git_head(tree)
+
+    status = core.start(tmp_path, "wt", [PY, "-c", "pass"], cwd=tmp_path, worktree=tree, poll_seconds=0.2)
+
+    assert status["worktree"] == str(tree.resolve()) and status["git_head"] == head and status["cwd"] == str(tmp_path.resolve())
+    with pytest.raises(core.LongRunError, match="工作树不存在"):
+        core.start(tmp_path, "wt2", [PY, "-c", "pass"], cwd=tmp_path, worktree=tmp_path / "nope")
+    assert not core.run_directory(tmp_path, "wt2").exists()

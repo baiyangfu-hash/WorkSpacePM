@@ -41,7 +41,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
@@ -322,10 +322,13 @@ def worker_main(run_dir: Path) -> int:
     log = run_dir / "run.log"
     argv = [str(item) for item in spec["argv"]]
     flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+    # No lease credential reaches the job (the same rule as the acceptance runner); the spec adds the variables the caller asked for.
+    environment = {key: value for key, value in os.environ.items() if "LEASE" not in key.upper()}
+    environment.update({str(key): str(value) for key, value in dict(spec.get("env") or {}).items()})
     try:
         with log.open("ab", buffering=0) as out:
             child = subprocess.Popen(  # noqa: S603
-                argv, cwd=spec["cwd"], stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, creationflags=flags
+                argv, cwd=spec["cwd"], env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, creationflags=flags
             )
             _update_status(run_dir, state="RUNNING", child_pid=child.pid, worker_pid=os.getpid(), running_at=_now())
             try:
@@ -490,10 +493,15 @@ def start(
     timeout_minutes: int = DEFAULT_TIMEOUT_MINUTES,
     python: str | None = None,
     poll_seconds: float = GUARD_POLL_SECONDS,
+    worktree: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run the memory preflight, then start ``argv`` under a detached worker and a guard.  Returns the initial status.
 
     A name that was used before is refused (the old run is evidence and is never overwritten).
+
+    ``worktree`` is the tree whose code the job judges (a governed Run's worktree) when it is not the directory the job runs in: the status
+    file records that tree's ``git_head`` / ``git_dirty`` instead, which is what ``pm verify`` compares.  ``env`` is added to the job's environment.
     """
 
     if not argv:
@@ -506,6 +514,9 @@ def start(
         preflight.require_headroom()
     except preflight.MemoryPreflightRefusedError as error:
         raise LongRunError(str(error)) from error
+    judged = Path(worktree).resolve() if worktree is not None else working
+    if not judged.is_dir():
+        raise LongRunError(f"工作树不存在：{judged}")
     run_dir = run_directory(control_root, name)
     if run_dir.exists():
         raise LongRunError(f"任务名 {name} 已经用过（{run_dir}）；旧记录是证据，不覆盖，请换一个名字")
@@ -518,8 +529,9 @@ def start(
         "command": list(argv),
         "command_text": subprocess.list2cmdline(list(argv)),
         "cwd": str(working),
-        "git_head": _git_head(working),
-        "git_dirty": _git_dirty(working),
+        "worktree": str(judged),
+        "git_head": _git_head(judged),
+        "git_dirty": _git_dirty(judged),
         "mem_guard": True,
         "state": "STARTING",
         "detached": True,
@@ -528,7 +540,7 @@ def start(
         "timeout_minutes": timeout_minutes,
         "log": str(run_dir / "run.log"),
     }
-    spec = {"argv": list(argv), "cwd": str(working), "timeout_seconds": timeout_minutes * 60, "guard_poll_seconds": poll_seconds}
+    spec = {"argv": list(argv), "cwd": str(working), "timeout_seconds": timeout_minutes * 60, "guard_poll_seconds": poll_seconds, "env": dict(env or {})}
     _write_json(run_dir / "spec.json", spec)
     _write_json(run_dir / "status.json", status)
     worker = launch_detached([interpreter, "-B", script, "worker", str(run_dir)], run_dir / "worker.out", working)

@@ -125,3 +125,20 @@ def test_every_subcommand_checks_the_runtime_identity(monkeypatch: pytest.Monkey
     CliRunner().invoke(cli, ["-w", str(tmp_path), "long-run", "start", "--name", "idc", "--cwd", str(tmp_path), "--", PY, "-c", "pass"])
 
     assert len(seen) == 3
+
+
+def test_worktree_option_runs_the_job_like_an_acceptance_check_and_replaces_the_placeholder(tmp_path: Path) -> None:
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    code = "import os, sys; print('W=' + os.environ['AUTO_PM_RUN_WORKTREE']); print('C=' + os.environ['AUTO_PM_CONTROL_ROOT']); print('A=' + sys.argv[1]); print('U=' + os.environ['PYTHONUTF8'])"
+
+    result = _run(tmp_path, "start", "--name", "wtjob", "--cwd", str(tmp_path), "--worktree", str(tree), "--", PY, "-c", code, "{worktree}")
+
+    assert result.exit_code == 0, result.output
+    started = json.loads(result.output)
+    assert started["worktree"] == str(tree.resolve()) and started["command"][-1] == str(tree.resolve())
+    _wait_state(tmp_path, "wtjob", {"DONE"})
+    log = (core.run_directory(tmp_path, "wtjob") / "run.log").read_text(encoding="utf-8")
+    assert f"W={tree.resolve()}" in log and f"C={tmp_path.resolve()}" in log and f"A={tree.resolve()}" in log and "U=1" in log
+    spec = (core.run_directory(tmp_path, "wtjob") / "spec.json").read_text(encoding="utf-8")
+    assert "PATH" not in json.loads(spec)["env"]  # only what was added, never a dump of our environment
