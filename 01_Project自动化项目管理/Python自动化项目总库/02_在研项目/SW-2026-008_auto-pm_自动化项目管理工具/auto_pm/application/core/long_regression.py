@@ -11,11 +11,15 @@ is the rule.  For such a command ``pm verify`` looks for a ``long-run.v1`` statu
 - the very same command (argument list), finished (DONE/FAILED, not STOPPED) with the approved exit code;
 - run detached, with the memory guard, and the guard really sampled (``guard.json``);
 - it ran in the control root (where the acceptance commands run) and judged this Run's worktree, which was committed (``git_dirty`` false) and is at the same ``git_head`` as the worktree is now, still clean;
-- it ended after the Run was created, and the log file still has the recorded SHA-256.
+- it ended after the Run was created, and the log file still has the recorded SHA-256;
+- the log ends with a pytest summary line that ran every collected case and deselected none (a ``-k`` or ``PYTEST_ADDOPTS`` that picks a
+  few cases is not the regression);
+- the guard's number of samples and its times fit the job's duration, and the worker recorded which ``PYTEST_*`` variables it removed.
 
 Anything else is refused, and the refusal prints the exact ``long-run start`` command to type.  What this cannot do: a status file is plain
-JSON, so someone determined can still write one by hand; it raises the price of "I ran it, trust me" from nothing to a forgery, and the user's
-own acceptance remains the last gate.
+JSON, **not a cryptographic proof**; whoever can write the control root can still write one by hand.  It raises the price of "I ran it, trust
+me" from nothing to a forgery, and the user's own acceptance remains the last gate.  A root of trust (the ledger's hash chain, or evidence
+issued by CI) is recorded as a P2 debt.
 """
 
 from __future__ import annotations
@@ -53,6 +57,17 @@ _PER_FILE = re.compile(r"^\S.*: (\d+)$")
 _TAIL_LINES = 20
 _VERBOSITY = frozenset({"-q", "-qq", "-qqq", "--quiet", "-v", "-vv", "-vvv", "--verbose"})
 _NAME_SAFE = re.compile(r"[^A-Za-z0-9_.-]")
+#: "1843 passed, 4 skipped, 2 deselected in 93.28s (0:01:33)": the line pytest prints last.
+_SUMMARY_TOKEN = re.compile(r"(\d+) (passed|failed|skipped|deselected|xfailed|xpassed|errors?|warnings?|rerun)\b")
+_SUMMARY_TIMING = re.compile(r"\bin \d+(?:\.\d+)?s\b")
+_RAN_KINDS = ("passed", "failed", "skipped", "xfailed", "xpassed", "error")
+LOG_TAIL_BYTES = 64 * 1024
+#: The guard samples every 20 seconds; a record whose sample count is far from duration / 20 did not watch this job.
+SAMPLE_SECONDS = 20
+MIN_SAMPLE_SECONDS = 120  # at least one sample per two minutes of the job
+CLOCK_SLACK_SECONDS = 30
+AFTER_END_SLACK_SECONDS = 120  # a job that ended before the guard even started is still sampled once, a little after the end
+NOT_PROOF = "（long-run 记录是纯文件，不是密码学证明；能写控制根的人就能伪造，用户验收是最后一道）"
 
 
 @dataclass(frozen=True)
@@ -161,6 +176,63 @@ def _read(path: Path) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
+def _pytest_summary(log_path: Path) -> dict[str, int] | None:
+    """Counts of the last pytest summary line in the log (``error``/``warning`` singular), or None when the log has no such line."""
+
+    try:
+        with log_path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(handle.tell() - LOG_TAIL_BYTES, 0))
+            tail = handle.read()
+    except OSError:
+        return None
+    for line in reversed(tail.decode("latin-1").splitlines()):  # latin-1 never fails; the summary line is ASCII
+        tokens = _SUMMARY_TOKEN.findall(line)
+        if tokens and _SUMMARY_TIMING.search(line):
+            counts: dict[str, int] = {}
+            for number, kind in tokens:
+                key = kind.rstrip("s") if kind in {"errors", "warnings"} else kind
+                counts[key] = counts.get(key, 0) + int(number)
+            return counts
+    return None
+
+
+def _log_problem(log_path: Path, cases: int | None) -> str:
+    counts = _pytest_summary(log_path)
+    if counts is None:
+        return "日志里找不到 pytest 收尾行（形如 '1843 passed, 4 skipped in 93.28s'），这不是一次跑完的 pytest 输出"
+    if counts.get("deselected", 0):
+        return f"pytest 收尾行显示 {counts['deselected']} 个用例被 deselect（-k、-m 或 PYTEST_ADDOPTS 只选了一部分），这不是整套回归"
+    ran = sum(counts.get(kind, 0) for kind in _RAN_KINDS)
+    if cases is not None and ran != cases:
+        return f"pytest 收尾行共 {ran} 个用例，而收集阶段数出 {cases} 个；没有跑全或跑的不是同一批"
+    return ""
+
+
+def _guard_problem(guard: dict[str, object] | None, status: dict[str, object]) -> str:
+    """The guard's sample count and times must fit the job's start and end."""
+
+    samples = guard.get("samples") if guard else None
+    if guard is None or not isinstance(samples, int) or samples < 1:
+        return "内存守卫没有采样记录（guard.json 缺失或为空）"
+    started, ended = _parse_time(status.get("started_at")), _parse_time(status.get("ended_at"))
+    guard_start, guard_last = _parse_time(guard.get("started_at")), _parse_time(guard.get("last_sample_at"))
+    if started is None or ended is None or guard_start is None or guard_last is None:
+        return "守卫或任务的起止时间读不出，无法核对守卫是否真的看着这个任务"
+    seconds = max((ended - started).total_seconds(), 0.0)
+    if (
+        guard_start.timestamp() < started.timestamp() - CLOCK_SLACK_SECONDS
+        or guard_last < guard_start
+        or guard_last.timestamp() < started.timestamp() - CLOCK_SLACK_SECONDS
+        or guard_start.timestamp() > ended.timestamp() + AFTER_END_SLACK_SECONDS
+        or guard_last.timestamp() > ended.timestamp() + AFTER_END_SLACK_SECONDS
+    ):
+        return "守卫的时间不在任务的启动和结束之间，它看的不是这次运行"
+    if samples < max(1, int(seconds // MIN_SAMPLE_SECONDS)) or samples > int(seconds // SAMPLE_SECONDS) + 6:
+        return f"守卫采样 {samples} 次，与任务时长 {seconds:.0f} 秒对不上（每 {SAMPLE_SECONDS} 秒一次）"
+    return ""
+
+
 def _problem(
     status: dict[str, object],
     task_dir: Path,
@@ -171,6 +243,7 @@ def _problem(
     head: str | None,
     dirty: bool | None,
     run_started: datetime | None,
+    cases: int | None,
 ) -> str:
     """Why this record (same command) is not acceptable evidence; empty when it is."""
 
@@ -180,10 +253,6 @@ def _problem(
         return f"退出码是 {status.get('exit_code')}，批准的是 {expected_exit_code}"
     if status.get("detached") is not True or status.get("mem_guard") is not True:
         return "不是脱离终端并带内存守卫跑的"
-    guard = _read(task_dir / "guard.json")
-    samples = guard.get("samples") if guard else None
-    if not isinstance(samples, int) or samples < 1:
-        return "内存守卫没有采样记录（guard.json 缺失或为空）"
     ran_in = status.get("cwd")
     if not isinstance(ran_in, str) or not _same_path(ran_in, cwd):
         return f"它在 {ran_in} 下运行，验收命令是在控制根 {cwd} 下运行的（相对路径和 .venv 的含义不同）"
@@ -199,11 +268,16 @@ def _problem(
     ended = _parse_time(status.get("ended_at"))
     if run_started is None or ended is None or ended <= run_started:
         return "结束时间不在本 Run 创建之后（或时间读不出）"
+    guard_problem = _guard_problem(_read(task_dir / "guard.json"), status)
+    if guard_problem:
+        return guard_problem
+    if not isinstance(status.get("env_stripped"), list):
+        return "记录里没有 env_stripped（工作进程是否剔除了 PYTEST_ADDOPTS 等变量无法确认；用当前版本的 long-run 重跑）"
     log = status.get("log")
     log_path = Path(log) if isinstance(log, str) else task_dir / "run.log"
     if _sha256(log_path) != status.get("log_sha256"):
         return "日志文件与记录的 SHA-256 对不上（被改过或丢了）"
-    return ""
+    return _log_problem(log_path, cases)
 
 
 def find_evidence(
@@ -213,6 +287,7 @@ def find_evidence(
     *,
     worktree: str | Path,
     run_started: str,
+    cases: int | None = None,
 ) -> tuple[dict[str, object] | None, str]:
     """(the acceptable ``long-run`` status for this command, "") or (None, why the closest record was refused / that there is none)."""
 
@@ -227,7 +302,7 @@ def find_evidence(
         if not status or status.get("schema_version") != SCHEMA or status.get("command") != list(argv):
             continue
         problem = _problem(
-            status, task_dir, expected_exit_code=expected_exit_code, cwd=control_root, worktree=worktree, head=head, dirty=dirty, run_started=started
+            status, task_dir, expected_exit_code=expected_exit_code, cwd=control_root, worktree=worktree, head=head, dirty=dirty, run_started=started, cases=cases
         )
         if not problem:
             return status, ""
@@ -252,7 +327,7 @@ def _evidence_run(check: AcceptanceCheck, argv: tuple[str, ...], status: dict[st
     peak = status.get("peak_committed_gib")
     note = (
         f"long-run 记录 {status.get('name')}：HEAD {str(status.get('git_head'))[:12]}，退出码 {exit_code}，"
-        f"峰值已提交 {peak if peak is not None else '未知'} GiB，日志 SHA-256 {str(status.get('log_sha256'))[:16]}"
+        f"峰值已提交 {peak if peak is not None else '未知'} GiB，日志 SHA-256 {str(status.get('log_sha256'))[:16]}{NOT_PROOF}"
     )
     log_bytes = status.get("log_bytes")
     return CheckRun(
@@ -304,7 +379,7 @@ def run_checks(
             results.extend(run_one((check,), cwd=cwd, extra_env=extra_env))
             continue
         argv = tuple(item.replace(WORKTREE_PLACEHOLDER, str(worktree)) for item in parse_command(check.command).argv)
-        status, why = find_evidence(cwd, argv, check.expected_exit_code, worktree=worktree, run_started=run_started)
+        status, why = find_evidence(cwd, argv, check.expected_exit_code, worktree=worktree, run_started=run_started, cases=verdict.cases)
         if status is not None:
             results.append(_evidence_run(check, argv, status))
             continue
@@ -314,7 +389,7 @@ def run_checks(
                 check,
                 argv,
                 f"这是长回归（{verdict.reason}），pm verify 不在前台跑它，也不认你在终端里自己跑的结果；"
-                f"{why}。请在控制根执行下面这条（脱离终端、带内存守卫，跑完留下记录），结束后再 pm verify：{start_command(argv, control_root=cwd, worktree=worktree, name=name)}",
+                f"{why}。{NOT_PROOF}请在控制根执行下面这条（脱离终端、带内存守卫，跑完留下记录），结束后再 pm verify：{start_command(argv, control_root=cwd, worktree=worktree, name=name)}",
             )
         )
     return tuple(results)

@@ -54,6 +54,9 @@ GUARD_LIMIT_GIB = 40.0  # pause the tree at this much committed memory (the froz
 GUARD_RESUME_GIB = 36.0  # resume below this
 UNOWNED_RISE_GIB = 8.0
 GIT_TIMEOUT_SECONDS = 60
+#: pytest reads these from the environment and they can select part of a suite (``-k``) or change which plugins run; a long-run record is
+#: evidence of the whole command, so the worker removes them (even if the caller's ``env`` adds them) and records what it removed.
+STRIPPED_ENV = ("PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD")
 GUARD_POLL_SECONDS = 20
 MAX_SECONDS = 8 * 3600  # the guard and keep-awake never outlive this
 DEFAULT_TIMEOUT_MINUTES = 240
@@ -378,12 +381,17 @@ def worker_main(run_dir: Path) -> int:
     # No lease credential reaches the job (the same rule as the acceptance runner); the spec adds the variables the caller asked for.
     environment = {key: value for key, value in os.environ.items() if "LEASE" not in key.upper()}
     environment.update({str(key): str(value) for key, value in dict(spec.get("env") or {}).items()})
+    stripped = sorted(name for name in environment if name.upper() in STRIPPED_ENV)
+    for name in stripped:
+        del environment[name]
     try:
         with log.open("ab", buffering=0) as out:
             child = subprocess.Popen(  # noqa: S603
                 argv, cwd=spec["cwd"], env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, creationflags=flags
             )
-            _update_status(run_dir, state="RUNNING", detached=True, child_pid=child.pid, worker_pid=os.getpid(), running_at=_now())
+            _update_status(
+                run_dir, state="RUNNING", detached=True, child_pid=child.pid, worker_pid=os.getpid(), running_at=_now(), env_stripped=stripped
+            )
             try:
                 code = child.wait(timeout=spec["timeout_seconds"])
             except subprocess.TimeoutExpired:

@@ -560,6 +560,29 @@ def test_a_task_directory_that_cannot_be_created_is_reported_in_plain_words(tmp_
         core.start(tmp_path, "reserved", [PY, "-c", "pass"], cwd=tmp_path)
 
 
+def test_the_worker_removes_the_pytest_variables_that_select_or_change_a_suite_and_records_what_it_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit 578: ``PYTEST_ADDOPTS="-k test_1"`` made a long-run run a few cases; the record must not be able to carry it."""
+
+    monkeypatch.setenv("PYTEST_PLUGINS", "from_the_caller")
+    code = "import os; print('SEEN=' + ','.join(sorted(k for k in os.environ if k.upper() in ('PYTEST_ADDOPTS', 'PYTEST_PLUGINS', 'PYTEST_DISABLE_PLUGIN_AUTOLOAD'))) + '|KEPT=' + os.environ.get('KEEP_ME', ''))"
+    started = core.start(
+        tmp_path, "stripped", [PY, "-c", code], cwd=tmp_path, poll_seconds=0.2,
+        env={"PYTEST_ADDOPTS": "-k test_1", "pytest_disable_plugin_autoload": "1", "KEEP_ME": "yes"},
+    )  # fmt: skip
+    assert started["name"] == "stripped"
+    end = time.monotonic() + 60
+    while time.monotonic() < end and core.read_status(core.run_directory(tmp_path, "stripped"))["state"] not in {"DONE", "FAILED"}:
+        time.sleep(0.1)
+
+    status = core.read_status(core.run_directory(tmp_path, "stripped"))
+    log = (core.run_directory(tmp_path, "stripped") / "run.log").read_text(encoding="utf-8")
+
+    assert status["state"] == "DONE" and "SEEN=|KEPT=yes" in log
+    assert sorted(status["env_stripped"], key=str.upper) == ["PYTEST_ADDOPTS", "pytest_disable_plugin_autoload", "PYTEST_PLUGINS"]
+
+
 @pytest.mark.real_machine
 @pytest.mark.skipif(sys.platform != "win32", reason="compares the reading with the Windows performance counter")
 def test_the_committed_reading_matches_the_windows_system_counter() -> None:
