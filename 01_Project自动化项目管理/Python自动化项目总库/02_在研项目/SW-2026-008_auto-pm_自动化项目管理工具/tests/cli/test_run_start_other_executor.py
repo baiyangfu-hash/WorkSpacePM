@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner, Result
 
+import auto_pm.ui.cli.continuity as continuity_cli
 from auto_pm.infrastructure import lease_wallet
 from tests.cli.test_continuity import _declaration_work, _invoke
 from tests.git_support import run_worktree
@@ -111,3 +112,76 @@ def test_an_executor_outside_the_roster_keeps_the_old_freedom(cli_runner: CliRun
     started = _start(cli_runner, tmp_path, "agent-a", "--lease-token", "legacy-secret")
 
     assert started.exit_code == 0, started.output
+
+
+@pytest.mark.parametrize(
+    ("markers", "label"),
+    [
+        ({"AUTO_PM_AGENT": "foo:x"}, "无法识别的调用方"),  # a marker that names nobody on the roster
+        ({"AUTO_PM_AGENT": "trae:cn", "CLAUDECODE": "1"}, "无法识别的调用方"),  # two agents' markers disagree
+    ],
+)
+def test_an_unrecognised_caller_is_refused_even_when_a_marker_looks_like_the_target(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, markers: dict[str, str], label: str
+) -> None:
+    """Audit 573 P3: the "?" branch of the caller check had no test (making it let everything through turned no test red)."""
+
+    _declaration_work(cli_runner, tmp_path, "README.md")
+    for key, value in markers.items():
+        monkeypatch.setenv(key, value)
+
+    refused = _start(cli_runner, tmp_path, "trae:cn", "--lease-token", "file-value")
+
+    assert refused.exit_code == 1 and "--lease-wallet" in refused.output and label in refused.output
+    assert lease_wallet.find(tmp_path, RUN) is None
+
+
+@pytest.mark.parametrize(
+    ("caller", "executor", "extra", "expected"),
+    [
+        ("codex:m3", "trae:cn", [], "none"),  # somebody else's Run: the starter's shell must not become the holder process
+        ("trae:cn", "trae:cn", [], "auto"),  # one's own Run keeps the old default
+        ("codex:m3", "trae:cn", ["--holder-pid", "4242"], "4242"),  # an explicit pid is the caller's call
+    ],
+)
+def test_the_holder_process_is_not_the_starters_shell_for_another_agents_run(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caller: str,
+    executor: str,
+    extra: list[str],
+    expected: str,
+) -> None:
+    """Audit 573 P2-1: with the default ``auto`` the starter's shell was recorded as the other agent's holder, so a reclaim misjudged the Run."""
+
+    _declaration_work(cli_runner, tmp_path, "README.md")
+    monkeypatch.setenv("AUTO_PM_AGENT", caller)
+    seen: list[str] = []
+
+    def spy(ctx: object, run_id: str, owner_id: str, lease_token: str, holder_pid: str, idempotency_key: str) -> None:
+        seen.append(holder_pid)
+
+    monkeypatch.setattr(continuity_cli, "_remember_started", spy)
+
+    started = _start(cli_runner, tmp_path, executor, "--lease-wallet", *extra)
+
+    assert started.exit_code == 0, started.output
+    assert seen == [expected]
+
+
+def test_the_refusal_names_the_holder_pid_option_and_the_wallet_hint_uses_the_real_option_name(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit 573 P2-1/P2-2: the advice must be safe to copy (``--holder-pid none``) and spell the option as it exists (``--executor``)."""
+
+    _declaration_work(cli_runner, tmp_path, "README.md")
+    monkeypatch.setenv("AUTO_PM_AGENT", "codex:m3")
+
+    refused = _start(cli_runner, tmp_path, "trae", "--lease-token", "file-value")
+    hint = lease_wallet.missing_hint(tmp_path, RUN)
+
+    assert "--holder-pid none" in refused.output
+    assert "--holder-pid none" in hint and "--executor <你的身份>" in hint and "--executor-id" not in hint
+    start_options = {param.opts[0] for param in continuity_cli.start_run.params if param.opts}
+    assert "--executor" in start_options and "--holder-pid" in start_options  # the advice names options that really exist

@@ -113,7 +113,7 @@ def missing_hint(control_root: str | Path, run_id: str) -> str:
         f"（查的控制根：{root}；钱包{content}）"
         f"口令只存在建 Run 的那个控制根里，且只有 `run start --lease-wallet`、`pm takeover`、`run reclaim` 会写。"
         f"若 {run_id} 是别的执行者建的：让持有者先 `pm handoff`，你再 `pm takeover` 拿自己的口令；"
-        f"或让建 Run 的人以 `run start --executor-id <你的身份> --lease-wallet` 建；若你们的控制根不是同一个目录，要先对齐。"
+        f"或让建 Run 的人以 `run start --executor <你的身份> --lease-wallet --holder-pid none` 建（别漏 --holder-pid none，否则会把他的 shell 记成你的持有进程）；若你们的控制根不是同一个目录，要先对齐。"
     )
 
 
