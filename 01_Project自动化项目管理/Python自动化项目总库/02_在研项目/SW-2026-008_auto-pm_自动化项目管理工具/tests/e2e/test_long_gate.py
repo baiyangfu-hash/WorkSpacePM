@@ -984,3 +984,16 @@ def test_the_launch_preflight_loads_the_real_module_by_path_and_passes_on_a_heal
     refusal = mod._memory_preflight_refusal()  # the real reading of the machine that runs the test
 
     assert refusal == "" or refusal.startswith("拒绝启动")
+
+
+def test_run_started_by_hand_is_refused_by_the_memory_preflight_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Audit 574 P3: ``run`` is what ``launch`` starts, but it can be started directly; no way of starting a gate skips the check."""
+
+    mod = _module()
+    monkeypatch.setattr(mod, "_memory_preflight_refusal", lambda: "拒绝启动：已提交内存 40.0 GiB ≥ 35 GiB")
+    monkeypatch.setattr(mod, "load_config", lambda _path: pytest.fail("the config was read on a hot machine"))
+    monkeypatch.setattr(mod, "Runner", lambda *_a, **_k: pytest.fail("a runner was built on a hot machine"))
+
+    code = mod.main(["run", "--config", str(tmp_path / "gate.json")])
+
+    assert code == mod.EXIT_CODES["REFUSED"] and "拒绝启动" in capsys.readouterr().out
