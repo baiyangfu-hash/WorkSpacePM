@@ -164,7 +164,29 @@ def test_the_refusal_names_the_commit_that_no_process_owns() -> None:
 
     assert "未归属进程的提交量：22.0 GiB" in text
     assert "已提交 36.0 − 能读到的进程私有合计 14.0" in text
-    assert "先关闭 Trae、浏览器再试，并保留 fast_watch 日志" in text
+    assert "未超过 25 GiB" in text and "**" not in text and "fast_watch" not in text  # 22 GiB is under the 25 GiB line: no alarm
+
+
+def test_the_refusal_is_bold_and_names_the_next_step_only_above_25_gib_unowned() -> None:
+    everyone = tuple(mp.ProcessUse(pid=n, name=f"p{n}.exe", committed=1 * GIB) for n in range(1, 11))  # 10 GiB in total
+    over = mp.refusal_text(mp.run_preflight(read=lambda: _snap(36.0), list_all=lambda: everyone))  # 26 GiB unowned
+    edge = mp.refusal_text(mp.run_preflight(read=lambda: _snap(35.0), list_all=lambda: everyone))  # exactly 25 GiB unowned
+
+    assert "**未归属进程的提交量 26.0 GiB，超过 25 GiB" in over and "先关闭 Trae、浏览器，并保留 fast_watch 日志" in over
+    assert "**" not in edge and "未超过 25 GiB" in edge  # the line is "more than 25", so 25.0 does not trigger it
+    assert "很大" not in over and "很大" not in edge
+
+
+def test_read_unowned_gib_is_committed_minus_the_readable_processes_and_unknown_without_either(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mp, "read_commit", lambda: _snap(30.0))
+    monkeypatch.setattr(mp, "all_processes", lambda: (mp.ProcessUse(1, "a.exe", 4 * GIB), mp.ProcessUse(2, "b.exe", 6 * GIB)))
+    assert mp.read_unowned_gib() == 20.0
+
+    monkeypatch.setattr(mp, "all_processes", lambda: ())
+    assert mp.read_unowned_gib() is None
+    monkeypatch.setattr(mp, "read_commit", lambda: None)
+    monkeypatch.setattr(mp, "all_processes", lambda: (mp.ProcessUse(1, "a.exe", 4 * GIB),))
+    assert mp.read_unowned_gib() is None
 
 
 def test_the_unowned_line_is_left_out_when_no_process_list_is_available_and_never_goes_negative() -> None:
