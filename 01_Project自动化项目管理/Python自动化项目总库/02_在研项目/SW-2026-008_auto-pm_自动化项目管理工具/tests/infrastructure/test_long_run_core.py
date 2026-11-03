@@ -194,6 +194,50 @@ def test_the_guard_does_nothing_without_a_worker_pid_and_survives_unreadable_mem
     assert world.paused_calls == [] and guard["samples"] >= 1 and guard["peak_committed_gib"] == 99.0 and guard["alerts"] == []
 
 
+def test_the_guard_survives_an_unreadable_worker_pid_when_memory_is_hot_and_pauses_on_a_later_round(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard is most needed when the commit is over the limit: a worker.pid that cannot be read for a moment must not end the loop."""
+
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [45.0], end_after=8)
+    real = Path.read_text
+
+    def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.name == "worker.pid" and world.polls < 2:
+            raise PermissionError(13, "denied")  # held by someone else for the first rounds (every retry fails)
+        return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)  # must not raise
+
+    guard = json.loads(real(run_dir / "guard.json", encoding="utf-8"))
+    assert world.polls >= 8  # it kept looping to the end instead of dying on the first hot round
+    assert world.paused_calls and world.paused_calls[0] == [4242, 4243]  # a later round found the tree and paused it
+    assert world.resumed_calls  # and never leaves it frozen
+    errors = [alert for alert in guard["alerts"] if "worker.pid" in alert]
+    assert len(errors) == 1 and "下一轮重试" in errors[0]  # noted once, not once per round
+    assert guard["worker_pid_error"]
+
+
+def test_the_guard_keeps_noting_nothing_new_while_worker_pid_stays_unreadable_and_does_not_pause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [45.0], end_after=5)
+    real = Path.read_text
+
+    def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.name == "worker.pid":
+            raise PermissionError(13, "denied")
+        return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)
+
+    guard = json.loads(real(run_dir / "guard.json", encoding="utf-8"))
+    assert world.paused_calls == [] and world.polls >= 5 and guard["samples"] >= 5
+    assert len([alert for alert in guard["alerts"] if "worker.pid" in alert]) == 1
+
+
 def test_the_guard_looks_once_even_when_the_job_has_already_ended_but_never_pauses_it(tmp_path: Path) -> None:
     run_dir = _guard_dir(tmp_path)
     (run_dir / "FAILED").write_text("x", encoding="utf-8")

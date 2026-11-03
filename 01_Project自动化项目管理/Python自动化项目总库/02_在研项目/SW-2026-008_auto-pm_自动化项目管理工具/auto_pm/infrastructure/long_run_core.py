@@ -522,7 +522,16 @@ def guard_loop(
                 if ended:
                     pass  # nothing left to protect: no pause, no resume
                 elif not paused and committed >= limit_gib:
-                    root = _worker_pid(run_dir)
+                    try:
+                        root = _worker_pid(run_dir)
+                    except LongRunError as problem:
+                        # worker.pid is there but unreadable right now: the guard is at its most needed here, so it must not die.  Note it once
+                        # per distinct message (guard.json), treat this round as "no process tree found", and look again after the next sleep.
+                        root = 0
+                        note = f"{_now()} 内存已到 {committed:.1f} GiB，但读不了 worker.pid，本轮没有挂起，下一轮重试：{problem}"
+                        if state.get("worker_pid_error") != str(problem):
+                            state["worker_pid_error"] = str(problem)
+                            state["alerts"].append(note)
                     members = tree(root) if root else []  # an empty tree: the worker is gone, there is nothing to pause (and nothing to alert about)
                     if members:
                         paused = members
