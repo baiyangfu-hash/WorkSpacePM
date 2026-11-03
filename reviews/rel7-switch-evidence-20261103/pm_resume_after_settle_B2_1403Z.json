@@ -1,0 +1,256 @@
+{
+  "schema_version": "continuity-resume.v2",
+  "context": {
+    "schema_version": "workspace-context.v2",
+    "workspace_root": "C:\\Users\\fubai\\Documents\\My_Workspace",
+    "control_root": "C:\\Users\\fubai\\Documents\\My_Workspace",
+    "execution_root": "C:\\Users\\fubai\\Documents\\My_Workspace",
+    "candidate_commit": "",
+    "resolution_source": "explicit",
+    "subject_project_id": "SW-2026-008",
+    "subject": {
+      "project_id": "SW-2026-008",
+      "name": "auto-pm",
+      "path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "stack": "python",
+      "phase": "developing",
+      "source": "copier"
+    },
+    "control_project_id": "SYS-2026-001",
+    "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
+    "development_root": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+    "runtime_root": "00_Infrastructure/auto_pm",
+    "release_id": "1.3.3-d671611",
+    "configured_release_id": "1.3.3-d671611",
+    "effective_release_id": "1.3.3-d671611",
+    "runtime_load_path": "00_Infrastructure/auto_pm/releases/1.3.3-d671611/auto_pm/__init__.py",
+    "runtime_fallback_reason": "",
+    "read_set": [
+      {
+        "path": "SYS-2026-001_WorkspaceGovernance/workspace_registry.json",
+        "sha256": "7ef408e419799e9c097ea5428427c30e2cbd0470a6ebb1266557250a68d3b25c"
+      },
+      {
+        "path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/.copier-answers.yml",
+        "sha256": "da8b189a70ff543bd272eec9e0d47a3c56dbe3c7e4cae83aa115ab6361826402"
+      },
+      {
+        "path": "00_Infrastructure/auto_pm/active_release.json",
+        "sha256": "c408423f4cf520e15c7470b32e4ced997a4653fe746e4d00328df81526d935b6"
+      },
+      {
+        "path": "00_Infrastructure/auto_pm/releases/1.3.3-d671611/auto_pm/__init__.py",
+        "sha256": "5053c4b6b40d38c7b21c55036a744a59136b488688b0a9c82adb66801296162d"
+      }
+    ],
+    "evidence_id": "CTX-4D28D2F58A90C230",
+    "conflicts": []
+  },
+  "mission": {
+    "schema_version": "mission.v1",
+    "mission_id": "MISSION-14DB0163295901EF",
+    "subject_project_id": "SW-2026-008",
+    "title": "continuity_store与execution_service同族CAS/版本冲突报错补齐当前版本号与下一步指引（仿lease renew），不打印token值，并附全库同类排查清单",
+    "objective": "continuity_store与execution_service同族CAS/版本冲突报错补齐当前版本号与下一步指引（仿lease renew），不打印token值，并附全库同类排查清单",
+    "state": "ACTIVE",
+    "root_work_id": "WORK-MSN-415BA3D417866398",
+    "acceptance_criteria": [
+      "AC1 新增单测全绿：钉住每处修复文案含当前版本号、含下一步指引、不含token值",
+      "AC2 既有冲突文案相关回归测试全绿（新文案保留旧子串兼容精确断言）",
+      "AC3 mypy对两个声明源文件零报错",
+      "AC4 ruff对三个声明文件零报错",
+      "AC5 变异验证变红：把修复处文案临时改回旧写法后新增单测必须失败",
+      "AC6 变异恢复：改回新写法后新增单测重新全绿",
+      "AC7 工位git diff恰好改动3个声明文件"
+    ],
+    "authority": {
+      "schema_version": "authority-envelope.v1",
+      "envelope_id": "AUTH-AA265796C769FFBD",
+      "subject_project_id": "SW-2026-008",
+      "change_id": "CHG-SCPT-2026-471",
+      "decision_id": "DEC-20261102-5BACA58A",
+      "authorization_source": "CHG_DECISION",
+      "scope_paths": [
+        "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+        "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+        "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_conflict_error_current_version.py"
+      ],
+      "allowed_child_work_kinds": [
+        "WBS"
+      ],
+      "routing": {
+        "allow_reschedule": false,
+        "allow_execution_branch_changes": true,
+        "allow_business_line_reroute": false,
+        "allowed_execution_adapters": [
+          "trae"
+        ],
+        "approved_model": "Qwen3.8-Flash",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_conflict_error_current_version.py"
+        ],
+        "max_parallel_runs": 1,
+        "max_auto_repair_attempts": 0,
+        "max_auto_repair_seconds": 0,
+        "same_subject_project_only": true,
+        "within_scope_paths_only": true
+      },
+      "forbidden_actions": [
+        "EXTERNAL_COMMUNICATION",
+        "HARDWARE_OR_CONTROLLER_WRITE",
+        "HISTORY_REWRITE",
+        "PRODUCTION_DEPLOYMENT",
+        "CREDENTIAL_OR_PERMISSION_CHANGE",
+        "PURCHASE_OR_FINANCIAL_COMMITMENT",
+        "DATA_DELETION"
+      ],
+      "escalation_triggers": [
+        "EXTERNAL_ACTION",
+        "SCOPE_EXIT",
+        "AUTHORITY_EXPIRED",
+        "AUTHORIZATION_CONFLICT",
+        "ACCEPTANCE_CRITERIA_CHANGE",
+        "IRREVERSIBLE_ACTION",
+        "PHYSICAL_OR_SAFETY_DECISION"
+      ],
+      "valid_from": "2026-11-02T14:46:00.268282Z",
+      "expires_at": "2026-12-02T14:46:01.971172Z",
+      "version": 1,
+      "audit": {
+        "created_by": "PM Facade",
+        "created_at": "2026-11-02T14:46:01.971172Z",
+        "approved_by": "baiyang",
+        "approved_at": "2026-11-02T14:46:00.268282Z",
+        "source_fingerprint": "sha256:40a565498faa62d529e18e7058cc8bbc133439e9d3e784af52405d1a34691135"
+      }
+    },
+    "version": 3,
+    "created_by": "PM Facade",
+    "created_at": "2026-11-02T14:46:01.974173Z",
+    "updated_at": "2026-11-02T14:46:55.363372Z"
+  },
+  "work": {
+    "schema_version": "work.v1",
+    "work_id": "WORK-MSN-415BA3D417866398",
+    "subject_project_id": "SW-2026-008",
+    "kind": "WBS",
+    "title": "continuity_store与execution_service同族CAS/版本冲突报错补齐当前版本号与下一步指引（仿lease renew），不打印token值，并附全库同类排查清单",
+    "state": "IN_PROGRESS",
+    "owner": "PM Facade",
+    "read_only": false,
+    "authorization_ref": "DEC-20261102-5BACA58A",
+    "scope_paths": [
+      "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+      "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+      "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_conflict_error_current_version.py"
+    ],
+    "scope_hash": "209305817bfdbad81db9ec96a4e1df093f76208af59d733db95087c554646cd2",
+    "source_fingerprint": "sha256:40a565498faa62d529e18e7058cc8bbc133439e9d3e784af52405d1a34691135",
+    "version": 3,
+    "created_at": "2026-11-02T14:46:02.874072+00:00",
+    "updated_at": "2026-11-02T14:46:56.275600+00:00"
+  },
+  "work_candidates": [
+    {
+      "schema_version": "work.v1",
+      "work_id": "WORK-MSN-415BA3D417866398",
+      "subject_project_id": "SW-2026-008",
+      "kind": "WBS",
+      "title": "continuity_store与execution_service同族CAS/版本冲突报错补齐当前版本号与下一步指引（仿lease renew），不打印token值，并附全库同类排查清单",
+      "state": "IN_PROGRESS",
+      "owner": "PM Facade",
+      "read_only": false,
+      "authorization_ref": "DEC-20261102-5BACA58A",
+      "scope_paths": [
+        "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/infrastructure/continuity_store.py",
+        "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_execution_service.py",
+        "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_conflict_error_current_version.py"
+      ],
+      "scope_hash": "209305817bfdbad81db9ec96a4e1df093f76208af59d733db95087c554646cd2",
+      "source_fingerprint": "sha256:40a565498faa62d529e18e7058cc8bbc133439e9d3e784af52405d1a34691135",
+      "version": 3,
+      "created_at": "2026-11-02T14:46:02.874072+00:00",
+      "updated_at": "2026-11-02T14:46:56.275600+00:00"
+    },
+    {
+      "schema_version": "work.v1",
+      "work_id": "WORK-SW008-M3-REL7-001",
+      "subject_project_id": "SW-2026-008",
+      "kind": "WBS",
+      "title": "M3-REL7 第七次发版候选构建与全量门禁（核心流程，一个报告）",
+      "state": "IN_PROGRESS",
+      "owner": "claude:m3rel7",
+      "read_only": false,
+      "authorization_ref": "DEC-20261102-M3REL701",
+      "scope_paths": [
+        "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/015_M3_第七次发版候选构建与全量门禁_REP.md"
+      ],
+      "scope_hash": "8c447ab03aebba1170defa06514d8d1ad23e5f7bcc7ce5976ddf995ecd7b24a5",
+      "source_fingerprint": "card:1668f66abd28889cfe5c899aeb1df4b086e0b49076e068c9dbf98f3ea77244a2",
+      "version": 3,
+      "created_at": "2026-11-03T05:01:03.884055+00:00",
+      "updated_at": "2026-11-03T05:01:21.021715+00:00"
+    }
+  ],
+  "mission_candidates": [],
+  "run": null,
+  "run_candidates": [],
+  "checkpoint": null,
+  "lease": null,
+  "conflicts": [],
+  "hold_warnings": [],
+  "next_legal_action": "CREATE_RUN",
+  "read_set": [
+    "SYS-2026-001_WorkspaceGovernance/workspace_registry.json",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/.copier-answers.yml",
+    "00_Infrastructure/auto_pm/active_release.json",
+    "00_Infrastructure/auto_pm/releases/1.3.3-d671611/auto_pm/__init__.py",
+    "C:\\Users\\fubai\\Documents\\My_Workspace\\.auto-pm\\continuity.db"
+  ],
+  "intake": {
+    "schema_version": "intake-summary.v1",
+    "awaiting_confirmation": 0,
+    "confirmed_waiting": 0,
+    "queue": []
+  },
+  "evidence_id": "RESUME-1303DFA961B8EE91",
+  "query": {
+    "schema_version": "continuity-query.v1",
+    "control_root": "C:\\Users\\fubai\\Documents\\My_Workspace",
+    "execution_root": "C:\\Users\\fubai\\Documents\\My_Workspace",
+    "candidate_commit": "",
+    "configured_release_id": "1.3.3-d671611",
+    "effective_release_id": "1.3.3-d671611",
+    "runtime_load_path": "00_Infrastructure/auto_pm/releases/1.3.3-d671611/auto_pm/__init__.py",
+    "runtime_fallback_reason": "",
+    "producer_load_path": "C:\\Users\\fubai\\Documents\\My_Workspace\\00_Infrastructure\\auto_pm\\releases\\1.3.3-d671611\\auto_pm\\application\\core\\continuity_query_service.py",
+    "producer_sha256": "28e6907d99b9c70356d034637ac5bdd66448af3de177fd77dcfc325ab6939903",
+    "capabilities": {
+      "contract_version": "runtime-capabilities.v2",
+      "parking_supported": true,
+      "preemption_supported": false,
+      "actions": [
+        {
+          "action": "PARK",
+          "status": "SUPPORTED",
+          "reason": "pm park 记断点放下手上的卡；放进“搁着”须带用户原话位置（--approval-evidence-ref），不带只能放进“等你”"
+        },
+        {
+          "action": "RESUME_PARKED",
+          "status": "SUPPORTED",
+          "reason": "pm unpark / pm switch 凭断点拿回搁着的卡；拿回哪张只听用户的（--approval-evidence-ref）"
+        },
+        {
+          "action": "PREEMPT",
+          "status": "UNSUPPORTED",
+          "reason": "运行中插队不支持：不抢正在写的钥匙；插急活请先 pm park 记断点放下手上的卡，再 pm switch；查询本身不是执行授权"
+        }
+      ]
+    },
+    "requested_action": null,
+    "evidence_id": "QUERY-833E18EF0EA227AD"
+  }
+}

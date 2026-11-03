@@ -1,0 +1,119 @@
+{
+ "schema": "m2-card-gate-verdict.v1",
+ "card": "CARD-SW008-M3-REL7 V1.1",
+ "base": "d671611a13bc15536047769fdb0498666c414044",
+ "run_id": "RUN-SW008-M3-REL7-002",
+ "gates": {
+  "G1": {
+   "verdict": "PASS",
+   "report": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G1_report.txt"
+  },
+  "G2": {
+   "verdict": "PASS",
+   "report": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G2_report.txt"
+  },
+  "G3": {
+   "verdict": "PASS",
+   "report": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_report.txt"
+  },
+  "G4": {
+   "verdict": "PASS",
+   "report": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G4_report.txt"
+  },
+  "G5": {
+   "verdict": "PASS",
+   "report": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G5_report.txt"
+  },
+  "G6": {
+   "verdict": "PASS",
+   "report": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G6_report.txt"
+  },
+  "G7": {
+   "verdict": "PASS",
+   "report": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G7_report.txt"
+  },
+  "G8": {
+   "verdict": "PASS",
+   "report": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G8_report.txt"
+  },
+  "G9": {
+   "verdict": "PASS",
+   "report": "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G9_report.txt"
+  }
+ },
+ "exceptions": [],
+ "reports": {
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/baseline_identity.json": "7de7ae792b236f6ed9bd40f82fc673046884af29f104fc3f049a6157afd47c7c",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/plugin_identity.json": "2e1be20706d93d9a007362fb71ffe4a4de5421e6c3bcccf7fc811e1c24f5fc9f",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/plugin_identity_after.json": "9587c06af695eeeddf359785e5650e0dc02dcd3297dcf248cd0cd0238f33fc86",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/bytes_at_gates.txt": "020e7c4d62438b01523d64f4cf195b01e30c10569e5f1d039d0c2949b211b96b",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/bytes_after_gates.txt": "020e7c4d62438b01523d64f4cf195b01e30c10569e5f1d039d0c2949b211b96b",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/real_hooks_before.txt": "7a3a6918d6b7b130033a250d43d3ca068b068aa07f45b4104a9b57a085909299",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/real_hooks_after.txt": "7a3a6918d6b7b130033a250d43d3ca068b068aa07f45b4104a9b57a085909299",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/python_procs_before.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/python_procs_after.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/final_head.txt": "4e4009355efb888c03738ee7504fc229b69a2143df20903ea19fdf5c48d02a96",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/final_status_before.txt": "644b226d6f0f8b50d5f657c12a4e1ca471237d23229f615ac76de6c5380e5e83",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/final_status_after.txt": "644b226d6f0f8b50d5f657c12a4e1ca471237d23229f615ac76de6c5380e5e83",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/status_baseline.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G1_baseline_candidate.txt": "d92612109946faf1e53042b72cec30b0e4bb0b3d4feff09c9d8091a7d5ba6380",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G1_baseline_candidate.exit": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G1_candidate.txt": "723d52d975fda7424b0d2ea7ed709ed5ae5d433db48eb32d42796ad64f3d139c",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G1_candidate.exit": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_real_plugin_tests.txt": "b802eb98d69c1de6d371f70e17406def1676b054ef449b88787c7a074f187d84",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_real_plugin_tests.exit": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_import_probe.txt": "fbb87eea2cb73df95f8efde58d6d6642454a8b779ad4ba8fde1f8e5cad81859c",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_import_probe.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_docs.json": "28375a6e60080ec5478b5a581000e935efca53e7f9968a3034fe2e86dd82bc90",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_doc_check_baseline.txt": "cb6731c8b06ade159aa0454bfc268ae44b34d5fee8d5018b7cd549a065019769",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_doc_check_baseline.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_doc_check_candidate.txt": "cb6731c8b06ade159aa0454bfc268ae44b34d5fee8d5018b7cd549a065019769",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_doc_check_candidate.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G4_ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G4_ruff.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G4_mypy.txt": "0eb462efc9ff953b553e5f81948d861ba00ba984f797ceab31f35ab7846e441f",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G4_mypy.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G4_diffcheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G4_diffcheck.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G6_tree_diff.json": "f099d8f3394b5787f7a23c366955f21d45b90e41df0a22e904e1788f89a4512e",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G7_hook_dry_run.json": "e76d5c7225f628014f9d25cc1f3ed623f85639f2980e03616c19ed285ab21959",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G8_mutations.json": "c3c6ca1511efa6705096bcbb850c17c6ffb5e9fd18479325d4a442481ff12c51",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/install_output.json": "bc14f91bdfbffcb9e1ae7e09830a6395c6fd7d5b7f653c1eb025e6ffdfb5cc7c",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/contracts.txt": "522259fc375608a1a247f515cef566fcbc1c710385613e30c6cb1fd06d1f1eea",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/contracts.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/infrastructure.txt": "9966c21e33f193b69d4d4459d299650a9fb66fae9e47fbb377699a9b684ac9ce",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/infrastructure.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/cli.txt": "2c05d56ef124e769724b1ffc06886ba592850b3ef1f12bb422f2a460a167789d",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/cli.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/change.txt": "c99f73cb9982dea9fcd9fb90840901de3f48deb43ec4d10149c32a8f07927b8e",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/change.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/core.txt": "62fb3cb739ab85d134399e8d9c65a4e4772e72b6d7a971e12007d06b77ec821d",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/core.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/qml.txt": "7d70d20b21e2cd821954c1d9e82ce4229d8e9b8d57cd4a0e8cb3c5426e7a02f1",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/qml.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/qml_debounce_alone.txt": "a8baa9ec9ccc8e731f8151bdb6e15f17415694431c2e44db47eb791017b4d41b",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/qml_debounce_alone.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/application.txt": "1cab7eccb3944e5bf7ac1aa0b24330d406faa9f2693f2cd28370d36737bdb116",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/application.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/plc.txt": "102653c52a698caebd84d93e084577faaaed26c3de0f5d20617e8e5ac9950985",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/plc.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/rest.txt": "d8e56ab8df22144bbe38f957def38dbd0ae036e03665fb12903515b1de6fdf21",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/rest.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/transient_1.txt": "da20ad65f546983dbc9621f8dfb4d864ae5ea799648cd43c6ff5dc727f19d181",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/transient_1.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/transient_2.txt": "c3865545e354cf092156836378c6958da87b889b7d1363b6e1901e68303375ca",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/transient_2.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/transient_3.txt": "24ed097b4f511f4851297073a73ef51a0161eb358331722771c0cc93c7649d45",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/g2_candidate/transient_3.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G1_report.txt": "c15e7b1c56168c0e3720d603a74152a2f50af750caa718d342e280dd23cd801d",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G2_report.txt": "eb56f937c35e7f925a2f368808d1f82dc82d141aeca1d9afe0ecb05b384a93cb",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G3_report.txt": "bb189d1e748fbae80bb432de05a6fa026ced57dcb29c4ed74b68b2ec64076a3e",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G4_report.txt": "ea6036dc21129b5679e8f76847f87cbafdc5eaa353c2e3afc8685cdc0868c199",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G5_report.txt": "63405b972c9ade7b6595c1df61cb1674f58acd8f83d6e0866717f57e34d8e0b8",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G6_report.txt": "b6e29c1e8fe404a34c7e3e0f1d2e7b487f3fb7c9541c4d1aa515423331615119",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G7_report.txt": "e27b1f24692745f0fc2d2ecb08d6c11e114522444cfa240d7835e58ab5a5d31f",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G8_report.txt": "727e1cbcf6ac83ed7d56c10e19c9d0268a67596f13c68bc685f78b1543a5972b",
+  "C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel7b/gates/G9_report.txt": "c560fdceea34d397e511d6fb688261fd7c529865c091060a446a48dd80c95579"
+ },
+ "deviations": []
+}

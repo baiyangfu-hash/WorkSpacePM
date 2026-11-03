@@ -1,0 +1,114 @@
+"""Derive the D07m toolkit (switch to the release built from main at d671611a, PR #496 merge commit, card 219 V1.1 M3-REL7 gated) from the D07l toolkit.
+usage: python -B gen_d07m.py <merge commit sha> <card 219 V1.1 commit sha>"""
+import hashlib
+import io
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+R = Path("C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports")
+ROOT = R.parent.parent
+SRC, EV = R / "m3-d07l", R / "m3-d07m"
+MERGE, CARD219 = sys.argv[1], sys.argv[2]  # CARD219 holds the card 219 V1.1 commit here
+USER_TS, USER_MSG = sys.argv[3], sys.argv[4]  # the user's own confirmation in the thread: time (UTC, ISO) and message id
+assert len(MERGE) == 40 and len(CARD219) == 40
+RID, OLD, OLDER = "1.3.3-" + MERGE[:7], "1.3.3-6a9f127", "1.3.3-163c7a3"
+subj = subprocess.run(["git", "-C", str(ROOT), "log", "-1", "--format=%s", MERGE], capture_output=True, check=True).stdout.decode("utf-8").strip()
+assert subj.startswith("Merge pull request #"), subj
+PRN = re.match(r"Merge pull request (#\d+)", subj).group(1)
+parent = subprocess.run(["git", "-C", str(ROOT), "rev-parse", CARD219 + "^"], capture_output=True, check=True).stdout.decode().strip()
+assert parent == MERGE, (parent, MERGE)
+
+card = f"""# D07m｜切换到第七次发版候选（M3-D07M）
+
+> 卡片编号：`CARD-SW008-M3-D07M V1.0`
+> 隔离基线：`{MERGE}`（`main` 上 PR {PRN} 的合并提交，第七次发版点）
+> 路径根：`.`
+> 档次：核心档
+
+本卡把 D07 的切换再做一次，让 `1.3.3-6a9f127` 之后合进 `main` 的 69 个合并提交（其中进入 `main` 的 PR 53 个，#441～#496 之间）在本机生效；其中最要紧的是 #496：控制根里结算过期 Run 的命令（`continuity run settle-expired`）现在能用，B2 和 V1.0 两个过期 Run 要靠它收拾。候选 `{RID}` 由合并提交 `{MERGE[:8]}` 用它自己的 `scripts/pmf_build.py` 安装；它的 `auto_pm`、`templates`、`scripts` 三棵子树与卡 219 V1.1（M3-REL7）门禁全过的提交 `{CARD219[:8]}` 逐字节相同（卡 219 的提交就是在这个合并提交上只加了一份报告）。#496 以后合并的不在本次候选里。切换与回退用 D06 演练过、D07～D07l 用过的同一份 `.auto-pm/reports/m3-d06/pmf_release_ops.sh`（SHA-256 `fe331979d463d4de32209bfb32c7eca8db1e17ee60a39622a92cd8c7be53e8de`）。切换后 `previous` 为现行的 `{OLD}`。
+
+| 路径 | 基线状态 | 用途 |
+|---|---|---|
+| `00_Infrastructure/auto_pm/releases/{RID}` | 计划新增 | 候选发布的载荷 |
+| `00_Infrastructure/auto_pm/deployment_manifest.json` | 存在 | 追加候选的清单条目 |
+| `00_Infrastructure/auto_pm/active_release.json` | 存在 | 有效版本改为 `{RID}` |
+| `00_Infrastructure/auto_pm/previous_release.json` | 存在 | 上一版改为 `{OLD}` |
+
+授权：用户 {USER_TS[:10]} {USER_TS[11:16]} UTC 在本线程里亲口预授权“同意审计核过的发版 7 重判卡（V1.1）直接开跑；G1~G9 全 PASS 后切换发版 7；有任何一项不通过就不切换。”（消息 {USER_MSG}），另见同线程 2026-11-03T04:52:49Z 的同类预授权；V1.1 门禁已 G1～G9 全 PASS（`.auto-pm/reports/m3-rel7b/gates/gate_verdict.json`）；原话与消息编号记入 `user_switch_confirmation.txt`；没有这份记录脚本不会切换。本卡 SHA 先在线程里报出。切换前脚本用 SQLite 备份接口把账本原样复制一份留作证据（不用于恢复）。
+
+切换后核验（任一失败立即用同一脚本回退指针并停下）：配置版本 = 实际加载版本 = `{RID}`、从发布目录加载、无回落、无冲突（唯一例外：身份报告里的冲突列表恰好是 `["LEASE_EXPIRED"]`——那是 B2 的旧 Run 和卡 219 V1.0 的 Run 两个已过期租约，卡 219 §1 第 9 条已审定为已知项，等切换后用 #496 修好的命令结算；列表里多出任何别的冲突都算失败）；`pm handoff`、`pm takeover`、`pm orient`、`continuity run reclaim`、`continuity lease record-holder` 与 `gui` 入口能应答；本卡在新运行时下通过机器预检；全部注册项目对账 0/0/0；真实 pre-commit 钩子经新运行时退出 0；新版本读真实数据库副本时事件链无断点、Run 活动全部可读；新、现行、上一版三个发布逐文件校验通过。切换后另跑一次 `continuity backup` 与 `verify-backup`（0 条链断裂）。
+禁止：回滚或覆盖数据库（切换前的数据库副本只作证据）、改历史发布/事件/Checkpoint、改源码、合并 main、推送。脚本：`.auto-pm/reports/m3-d07m/d07m_deploy.sh`（`--check-only` 只读预检，可在任何时候运行）。
+"""
+EV.mkdir(exist_ok=True)
+io.open(EV / "D07m_card.md", "w", encoding="utf-8", newline="").write(card)
+csha = hashlib.sha256(card.encode("utf-8")).hexdigest()
+s = io.open(SRC / "d07l_deploy.sh", encoding="utf-8", newline="").read()
+
+
+def sw(a: str, b: str, n: int = 1) -> None:
+    global s
+    assert s.count(a) == n, (a[:70], s.count(a))
+    s = s.replace(a, b)
+
+
+def setvar(name: str, value: str) -> None:
+    global s
+    s, k = re.subn(rf"^{name}=\S+$", f"{name}={value}", s, count=1, flags=re.M)
+    assert k == 1, name
+
+
+root = ROOT / "00_Infrastructure/auto_pm"
+sha = {f: hashlib.sha256((root / f).read_bytes()).hexdigest() for f in ("active_release.json", "previous_release.json", "deployment_manifest.json")}
+first = s.split("\n")[1]
+assert first.startswith("# M3-D07L (card D07l_card.md V1.0)"), first
+s = s.replace(first, f"# M3-D07M (card D07m_card.md V1.0): switch the real active release to the build of main at {MERGE[:8]} (PR {PRN} merge commit, card 219 V1.1 gated), same steps as D07.", 1)
+sw('EV="$ROOT/.auto-pm/reports/m3-d07l"', 'EV="$ROOT/.auto-pm/reports/m3-d07m"')
+sw('CARD="$EV/D07l_card.md"', 'CARD="$EV/D07m_card.md"')
+setvar("CARD_SHA", csha)
+sw('D176_VERDICT="$REAL/.auto-pm/reports/m3-rel6b/gates/gate_verdict.json"', 'D176_VERDICT="$REAL/.auto-pm/reports/m3-rel7b/gates/gate_verdict.json"')
+setvar("CARD176", CARD219)
+setvar("FROZEN", MERGE)
+setvar("RID", RID)
+setvar("OLD", OLD)
+setvar("OLDER", OLDER)
+setvar("OLD_ACTIVE_SHA", sha["active_release.json"])
+setvar("OLD_PREV_SHA", sha["previous_release.json"])
+setvar("OLD_MANIFEST_SHA", sha["deployment_manifest.json"])
+sw('DEC="DEC-$TODAY-M3D07L01"', 'DEC="DEC-$TODAY-M3D07M01"')
+for a, b in (("WORK=WORK-SW008-M3-D07L-001", "WORK=WORK-SW008-M3-D07M-001"), ("RUN=RUN-SW008-M3-D07L-001", "RUN=RUN-SW008-M3-D07M-001"),
+             ("OWNER=claude:m3d07l", "OWNER=claude:m3d07m"), ("CKPT=CKPT-SW008-M3-D07L-001", "CKPT=CKPT-SW008-M3-D07M-001"), ('STATE="$EV/d07l_chg.txt"', 'STATE="$EV/d07m_chg.txt"')):
+    sw(a, b)
+lines = s.split("\n")
+i = next(k for k, ln in enumerate(lines) if ln.startswith('DELEG="'))
+lines[i] = ('DELEG="委托执行：用户 2026-10-18 预授权 Claude 自行收口推送；切换有效版本这一步由用户在本线程里预授权（' + USER_TS + ' “同意审计核过的发版 7 重判卡（V1.1）直接开跑；G1~G9 全 PASS 后切换发版 7；有任何一项不通过就不切换。”，消息 ' + USER_MSG + '，原话与消息编号记在 .auto-pm/reports/m3-d07m/user_switch_confirmation.txt）；'
+            '条件：卡 SHA 先在线程报出、候选产品子树等于卡 219 V1.1 门禁全过的提交、任一切换后核验失败即自动回退指针、不回滚数据库"')
+s = "\n".join(lines)
+sw('die "card 218 gates are not all PASS"', 'die "card 219 gates are not all PASS"')
+sw('die "$sub of $FROZEN differs from the gated card 218 commit"', 'die "$sub of $FROZEN differs from the gated card 219 commit"')
+s = re.sub(r"M3-D07L：把 PR #\d+ 的合并提交 \$\{FROZEN:0:8\}（第六次发版点，卡 218 V1\.1 门禁）", f"M3-D07M：把 PR {PRN} 的合并提交 ${{FROZEN:0:8}}（第七次发版点，卡 219 V1.1 门禁）", s)
+sw('"1.3.3-163c7a3 之后合进 main 的 61 个合并提交（#377～#440 之间）只有切换为有效版本后才生效"',
+   '"1.3.3-6a9f127 之后合进 main 的 69 个合并提交（#441～#496 之间）只有切换为有效版本后才生效"')
+s = s.replace("CARD-SW008-M3-D07L V1.0", "CARD-SW008-M3-D07M V1.0").replace("CARD218=$CARD176", "CARD219=$CARD176")
+s = s.replace("卡 218 门禁全过且候选产品子树与之相同", "卡 219 门禁全过且候选产品子树与之相同")
+s = s.replace('--title "M3-D07L 有效版本切换到 $RID"', '--title "M3-D07M 有效版本切换到 $RID"').replace(".auto-pm/reports/m3-d07l/D07l_card.md", ".auto-pm/reports/m3-d07m/D07m_card.md")
+s = s.replace("--idempotency-key d07l-", "--idempotency-key d07m-")
+s = re.sub(r"（PR #\d+ 合并提交 \$\{FROZEN:0:8\}", f"（PR {PRN} 合并提交 ${{FROZEN:0:8}}", s)
+s = s.replace('echo "D07L_DONE $RID"', 'echo "D07M_DONE $RID"')
+left = [ln for ln in s.split("\n") if re.search(r"d07l|D07L|D07l|卡 218|m3-rel6b", ln)]
+assert not left, left[:5]
+sw('and not d["conflicts"] and r in', 'and d["conflicts"] in ([], ["LEASE_EXPIRED"]) and r in')
+sw("identity OK: configured == effective == $RID, loaded from the release, no fallback, no conflicts", "identity OK: configured == effective == $RID, loaded from the release, no fallback, conflicts empty or exactly the known LEASE_EXPIRED")
+GO_LINE = "GO_REF=\"$(grep '^CONFIRMED_BY_USER_IN_THREAD=' \"$EV/user_switch_confirmation.txt\" 2>/dev/null | head -n 1 | cut -d= -f2- | cut -d' ' -f1)\"\n"
+sw('DELEG="委托执行', GO_LINE + 'DELEG="委托执行')
+sw('--to approved     --approver fubai --comment', '--to approved     --approver fubai --approval-evidence-ref "user-confirmation:$GO_REF" --comment')
+sw('cli decision create --change-id "$chg" --pid SW-2026-008 --approver fubai --decision-id', 'cli decision create --change-id "$chg" --pid SW-2026-008 --approver fubai --approval-evidence-ref "user-confirmation:$GO_REF" --decision-id')
+WT_OLD = 'TOKEN_FILE="$EV/lease_token.txt";'
+WT_NEW = '''WTD="$ROOT/.auto-pm/worktrees/m3-d07m"
+[[ -d "$WTD" ]] || git worktree add --detach "$WTD" HEAD > "$EV/worktree_add.txt" 2>&1 || die "cannot create the managed station for the Run"
+TOKEN_FILE="$EV/lease_token.txt";'''
+sw(WT_OLD, WT_NEW)
+sw('--worktree "$(cygpath -w "$ROOT")"', '--worktree "$(cygpath -w "$WTD")"')
+io.open(EV / "d07m_deploy.sh", "w", encoding="utf-8", newline="").write(s)
+print("card", csha, "release", RID)

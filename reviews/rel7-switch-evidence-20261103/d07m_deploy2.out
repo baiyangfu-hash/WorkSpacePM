@@ -1,0 +1,17 @@
+== 0. Bindings and read-only preflight
+pointers, manifest and the two installed releases as frozen; active=1.3.3-6a9f127
+identity before: {"configured_release_id": "1.3.3-6a9f127", "effective_release_id": "1.3.3-6a9f127", "runtime_load_path": "00_Infrastructure/auto_pm/releases/1.3.3-6a9f127/auto_pm/__init__.py", "runtime_fallback_reason": "", "conflicts": ["LEASE_EXPIRED"]}
+== 0b. The user's confirmation
+== 1. Deploy CHG
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-6a9f127
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-6a9f127
+== 2. Decision DEC-20261103-M3D07M01 (4 paths)
+  "decision_id": "DEC-20261103-M3D07M01",
+  "change_id": "CHG-SCPT-2026-473",
+== 3. Work and Run on the control root
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-6a9f127
+  "state": "PLANNED",
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-6a9f127
+  "state": "READY",
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-6a9f127
+Error: Run 的工作树不能是控制根本身（AGENTS.md WS-001：控制根只跑驾驶舱命令、不写业务代码）。请用 git worktree add 在 .auto-pm/worktrees/<agent> 下开隔离工位，再用 --worktree 指向它
