@@ -118,6 +118,14 @@ class _World:
         if self.end_after is not None and self.polls >= self.end_after:
             (self.run_dir / "DONE").write_text("x", encoding="utf-8")
 
+    def _pause(self, pids: list[int]) -> int:
+        self.paused_calls.append(list(pids))
+        return len(pids)
+
+    def _unpause(self, pids: list[int]) -> int:
+        self.resumed_calls.append(list(pids))
+        return len(pids)
+
     def run(self, **kwargs: float) -> None:
         core.guard_loop(
             self.run_dir,
@@ -125,8 +133,8 @@ class _World:
             sleep=self.sleep,
             clock=lambda: self.now,
             tree=lambda root: [root, root + 1],
-            pause=lambda pids: (self.paused_calls.append(list(pids)), len(pids))[1],
-            unpause=lambda pids: (self.resumed_calls.append(list(pids)), len(pids))[1],
+            pause=self._pause,
+            unpause=self._unpause,
             awake=self.awake.append,
             **kwargs,  # type: ignore[arg-type]
         )

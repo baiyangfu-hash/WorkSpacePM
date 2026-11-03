@@ -53,6 +53,7 @@ NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 GUARD_LIMIT_GIB = 40.0  # pause the tree at this much committed memory (the frozen mem_guard's default)
 GUARD_RESUME_GIB = 36.0  # resume below this
 UNOWNED_RISE_GIB = 8.0
+GIT_TIMEOUT_SECONDS = 60
 GUARD_POLL_SECONDS = 20
 MAX_SECONDS = 8 * 3600  # the guard and keep-awake never outlive this
 DEFAULT_TIMEOUT_MINUTES = 240
@@ -245,7 +246,8 @@ if sys.platform == "win32":
         return _act(pids, "NtResumeProcess", _PROCESS_SUSPEND_RESUME)
 
     def kill_tree(root: int) -> None:
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(root)], capture_output=True, check=False)  # noqa: S603, S607
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(root)], capture_output=True, check=False, timeout=30)  # noqa: S603, S607
 
     def keep_awake(on: bool) -> None:
         """Ask Windows not to sleep (the call is per thread: the guard repeats it from its own loop)."""
@@ -526,7 +528,10 @@ def _git_head(cwd: Path) -> str:
     git = _find_git()
     if git is None:
         return ""
-    done = subprocess.run([git, "-C", str(cwd), "rev-parse", "HEAD"], capture_output=True, check=False)  # noqa: S603
+    try:
+        done = subprocess.run([git, "-C", str(cwd), "rev-parse", "HEAD"], capture_output=True, check=False, timeout=GIT_TIMEOUT_SECONDS)  # noqa: S603
+    except subprocess.TimeoutExpired:
+        return ""
     if done.returncode != 0:
         return ""
     try:
@@ -541,7 +546,12 @@ def _git_dirty(cwd: Path) -> bool | None:
     git = _find_git()
     if git is None:
         return None
-    done = subprocess.run([git, "-C", str(cwd), "status", "--porcelain", "--untracked-files=no"], capture_output=True, check=False)  # noqa: S603
+    try:
+        done = subprocess.run(  # noqa: S603
+            [git, "-C", str(cwd), "status", "--porcelain", "--untracked-files=no"], capture_output=True, check=False, timeout=GIT_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        return None
     return bool(done.stdout.strip()) if done.returncode == 0 else None
 
 

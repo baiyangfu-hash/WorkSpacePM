@@ -19,9 +19,8 @@ from typing import Any
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.application.core import acceptance_runner
+from auto_pm.application.core import acceptance_runner, long_run_service
 from auto_pm.contracts.acceptance_command import WORKTREE_PLACEHOLDER
-from auto_pm.infrastructure import long_run_core
 from auto_pm.ui.cli.caller_path import CallerPath, caller_cwd_default
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
@@ -44,7 +43,7 @@ def _added_environment(extra: dict[str, str]) -> dict[str, str]:
     return {key: value for key, value in wanted.items() if base.get(key) != value}
 
 
-def _fail(error: long_run_core.LongRunError) -> click.ClickException:
+def _fail(error: long_run_service.LongRunError) -> click.ClickException:
     return click.ClickException(str(error))
 
 
@@ -68,7 +67,7 @@ def long_run_group() -> None:
     help="这次回归要判的受治理工作树（Run 的工作树）：状态文件记它的 git_head/git_dirty，命令按验收命令的同样环境运行"
     "（AUTO_PM_WORKSPACE、AUTO_PM_CONTROL_ROOT、AUTO_PM_RUN_WORKTREE，命令里的 {worktree} 换成它的路径）；pm verify 凭这个认长回归",
 )
-@click.option("--timeout-min", type=click.IntRange(1, 480), default=long_run_core.DEFAULT_TIMEOUT_MINUTES, show_default=True, help="超时分钟数，到点杀掉整棵进程树")
+@click.option("--timeout-min", type=click.IntRange(1, 480), default=long_run_service.DEFAULT_TIMEOUT_MINUTES, show_default=True, help="超时分钟数，到点杀掉整棵进程树")
 @click.argument("command", nargs=-1, type=click.UNPROCESSED, required=True)
 @click.pass_context
 def start_command(
@@ -84,10 +83,10 @@ def start_command(
         argv = [item.replace(WORKTREE_PLACEHOLDER, str(worktree.resolve())) for item in argv]
         env = _added_environment(acceptance_runner.worktree_environment(worktree.resolve(), root))
     try:
-        status = long_run_core.start(
+        status = long_run_service.start(
             root, name, argv, cwd=cwd or Path.cwd(), timeout_minutes=timeout_min, worktree=worktree, env=env
         )
-    except long_run_core.LongRunError as error:
+    except long_run_service.LongRunError as error:
         raise _fail(error) from error
     status["next"] = f"python main.py long-run status --name {name}"
     _echo(status)
@@ -103,19 +102,10 @@ def status_command(ctx: click.Context, name: str | None) -> None:
     root = _root(ctx)
     try:
         if name is not None:
-            _echo(long_run_core.read_status(long_run_core.run_directory(root, name)))
+            _echo(long_run_service.read_status(long_run_service.run_directory(root, name)))
             return
-        base = root / long_run_core.RUN_ROOT
-        names = sorted(path.name for path in base.iterdir() if path.is_dir()) if base.is_dir() else []
-        rows = []
-        for task in names:
-            try:
-                state = long_run_core.read_status(base / task)
-                rows.append({"name": task, "state": state.get("state"), "exit_code": state.get("exit_code"), "started_at": state.get("started_at")})
-            except long_run_core.LongRunError as error:
-                rows.append({"name": task, "state": "UNREADABLE", "error": str(error)})
-        _echo({"tasks": rows})
-    except long_run_core.LongRunError as error:
+        _echo({"tasks": long_run_service.list_tasks(root)})
+    except long_run_service.LongRunError as error:
         raise _fail(error) from error
 
 
@@ -127,6 +117,6 @@ def stop_command(ctx: click.Context, name: str) -> None:
 
     require_runtime_identity_for_workspace(ctx)
     try:
-        _echo(long_run_core.stop(long_run_core.run_directory(_root(ctx), name)))
-    except long_run_core.LongRunError as error:
+        _echo(long_run_service.stop(long_run_service.run_directory(_root(ctx), name)))
+    except long_run_service.LongRunError as error:
         raise _fail(error) from error
