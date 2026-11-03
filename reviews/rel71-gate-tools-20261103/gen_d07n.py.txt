@@ -1,0 +1,131 @@
+"""Derive the D07n toolkit (switch to the release 7.1 build of main at d5632931, gated by card 220) from the D07m toolkit (m3-d07m/d07m_deploy.sh, as it ran for release 7).
+usage: python -B gen_d07n.py <frozen merge commit sha> <card 220 gate commit sha | DRAFT>
+DRAFT writes the card and script with a placeholder for the gate commit (for the audit of the logic before the gates have run); the real run regenerates with the real commit.
+Changes against D07m: station for the Run created from origin/main with the control root's manifest bytes committed through the hook; strict identity (conflicts must be []);
+smoke checks (long-run --help, pm orient --json conflicts []); the acceptance step carries the approval evidence ref; all names and facts of release 7.1."""
+import hashlib
+import io
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+R = Path(__file__).resolve().parent.parent
+ROOT = R.parent.parent
+SRC, EV = R / "m3-d07m", R / "m3-d07n"
+MERGE, GATE = sys.argv[1], sys.argv[2]
+DRAFT = GATE == "DRAFT"
+assert len(MERGE) == 40 and (DRAFT or len(GATE) == 40)
+PLACE = "0" * 40
+GATE_SHA = PLACE if DRAFT else GATE
+RID, OLD, OLDER = "1.3.3-" + MERGE[:7], "1.3.3-d671611", "1.3.3-6a9f127"
+GO712 = "cmsg_01AfNxhPWkgwWYuL1EVfYC7tKDxhSnLfp7mWBPVGmAc3TB"
+GO_TS = "2026-11-03T19:33:23Z"
+GO_TEXT = ("今天 #514 合并后，以 main 最新提交打发版 7.1，全量门禁和审计都过就切换；任一不过则不切、保持 1.3.3-d671611。切换后如果驾驶舱启动或冒烟检查失败，自动回切到 1.3.3-d671611。")
+subj = subprocess.run(["git", "-C", str(ROOT), "log", "-1", "--format=%s", MERGE], capture_output=True, check=True).stdout.decode("utf-8").strip()
+assert subj.startswith("Merge pull request #"), subj
+PRN = re.match(r"Merge pull request (#\d+)", subj).group(1)
+if not DRAFT:
+    parent = subprocess.run(["git", "-C", str(ROOT), "rev-parse", GATE + "^"], capture_output=True, check=True).stdout.decode().strip()
+    assert parent == MERGE, (parent, MERGE)
+nmerge = len([x for x in subprocess.run(["git", "-C", str(ROOT), "log", "--first-parent", "--merges", "--format=%h", "d671611a13bc15536047769fdb0498666c414044.." + MERGE],
+                                        capture_output=True, check=True).stdout.decode().split("\n") if x])
+
+card = f"""# D07n｜切换到发版 7.1 候选（M3-D07N）
+
+> 卡片编号：`CARD-SW008-M3-D07N V1.0`
+> 隔离基线：`{MERGE}`（`main` 上 PR {PRN} 的合并提交，发版 7.1 的发版点）
+> 路径根：`.`
+> 档次：核心档
+
+本卡把 D07 的切换再做一次，让 `{OLD}` 之后合进 `main` 的 {nmerge} 个合并提交在本机生效（长任务守卫 `long-run` #514、内存预检 #513、租约口令钱包与 `run start --executor` 修复，及发版 7 切换的证据入库 #506/#507/#517 等）。候选 `{RID}` 由合并提交 `{MERGE[:8]}` 用它自己的 `scripts/pmf_build.py` 安装；它的 `auto_pm`、`templates`、`scripts` 三棵子树与卡 220（M3-REL71）门禁全过的提交 `{GATE_SHA[:8]}` 逐字节相同（卡 220 的提交就是在这个合并提交上只加了一份报告）。切换与回退用 D06 演练过、D07～D07m 用过的同一份 `.auto-pm/reports/m3-d06/pmf_release_ops.sh`（SHA-256 `fe331979d463d4de32209bfb32c7eca8db1e17ee60a39622a92cd8c7be53e8de`）。切换后 `previous` 为现行的 `{OLD}`。
+
+| 路径 | 基线状态 | 用途 |
+|---|---|---|
+| `00_Infrastructure/auto_pm/releases/{RID}` | 计划新增 | 候选发布的载荷 |
+| `00_Infrastructure/auto_pm/deployment_manifest.json` | 存在 | 追加候选的清单条目 |
+| `00_Infrastructure/auto_pm/active_release.json` | 存在 | 有效版本改为 `{RID}` |
+| `00_Infrastructure/auto_pm/previous_release.json` | 存在 | 上一版改为 `{OLD}` |
+
+授权：用户 {GO_TS[:10]} {GO_TS[11:16]} UTC 在本线程里亲口预授权“{GO_TEXT}”（消息 {GO712}）；条件：卡 220 的 G1～G9 全 PASS 且独立审计放行本卡与卡 220，任一不过不切换、保持 `{OLD}`；原话与消息编号记入 `user_switch_confirmation.txt`，没有这份记录脚本不会切换。本卡 SHA 先在线程里报出，并经独立审计放行后才执行（2026-11-03 的流程缺口：D07m 当时没有先送审）。切换前脚本用 SQLite 备份接口把账本原样复制一份留作证据（不用于恢复）。
+
+起点：Run 的工位 `.auto-pm/worktrees/m3-d07n` 从最新 `origin/main` 建；控制根里的 `deployment_manifest.json` 比 `main` 多 16 条本机独有的中间发布条目（已记债），旧运行时要求“控制根里范围内的文件等于 Run 的工位起点”，所以脚本把控制根这份清单的字节在工位里经正常 Hook 提交一次（只此一个文件，不动 `main`），随后再开 Run；这个提交本身可审计，提交说明写明来由。
+
+切换后核验（任一失败立即用同一脚本自动回退指针并停下，回切后写回执）：配置版本 = 实际加载版本 = `{RID}`、从发布目录加载、无回落、**冲突列表必须为空（没有例外）**；`pm handoff`、`pm takeover`、`pm orient`、`continuity run reclaim`、`continuity lease record-holder`、`gui` 与新增的 `long-run` 入口能应答（冒烟）；`pm orient SW-2026-008 --json` 的冲突列表为空；本卡在新运行时下通过机器预检；全部注册项目对账 0/0/0；真实 pre-commit 钩子经新运行时退出 0；新版本读真实数据库副本时事件链无断点、Run 活动全部可读；新、现行、上一版三个发布逐文件校验通过。切换后另跑一次 `continuity backup` 与 `verify-backup`（0 条链断裂）。批准、决策、验收三处命令都带用户消息 id 作为 `--approval-evidence-ref`。
+禁止：回滚或覆盖数据库（切换前的数据库副本只作证据）、改历史发布/事件/Checkpoint、改源码、合并 main、推送。脚本：`.auto-pm/reports/m3-d07n/d07n_deploy.sh`（`--check-only` 只读预检，可在任何时候运行）。
+"""
+EV.mkdir(exist_ok=True)
+io.open(EV / "D07n_card.md", "w", encoding="utf-8", newline="").write(card)
+csha = hashlib.sha256(card.encode("utf-8")).hexdigest()
+
+s = io.open(SRC / "d07m_deploy.sh", encoding="utf-8", newline="").read()
+
+
+def sw(a, b, n=1):
+    global s
+    assert s.count(a) == n, (a[:80], s.count(a))
+    s = s.replace(a, b)
+
+
+def setvar(name, value):
+    global s
+    s, k = re.subn(rf"^{name}=\S+$", f"{name}={value}", s, count=1, flags=re.M)
+    assert k == 1, name
+
+
+def line(prefix, new):
+    global s
+    L = s.split("\n")
+    idx = [i for i, x in enumerate(L) if x.startswith(prefix)]
+    assert len(idx) == 1, (prefix[:50], len(idx))
+    L[idx[0]] = new
+    s = "\n".join(L)
+
+
+for a, b in (("D07M", "D07N"), ("d07m", "d07n"), ("D07m", "D07n")):
+    s = s.replace(a, b)
+root = ROOT / "00_Infrastructure/auto_pm"
+sha = {f: hashlib.sha256((root / f).read_bytes()).hexdigest() for f in ("active_release.json", "previous_release.json", "deployment_manifest.json")}
+line("# M3-D07N (card D07n_card.md V1.0)", f"# M3-D07N (card D07n_card.md V1.0): switch the real active release to the build of main at {MERGE[:8]} ({PRN} merge commit, release 7.1, card 220 gated), same steps as D07m; changes: station from origin/main + manifest bytes committed through the hook, strict identity, smoke checks.")
+sw('D176_VERDICT="$REAL/.auto-pm/reports/m3-rel7b/gates/gate_verdict.json"', 'D176_VERDICT="$REAL/.auto-pm/reports/m3-rel71/gates/gate_verdict.json"')
+setvar("CARD_SHA", csha)
+setvar("CARD176", GATE_SHA)
+setvar("FROZEN", MERGE)
+setvar("RID", RID)
+setvar("OLD", OLD)
+setvar("OLDER", OLDER)
+setvar("OLD_ACTIVE_SHA", sha["active_release.json"])
+setvar("OLD_PREV_SHA", sha["previous_release.json"])
+setvar("OLD_MANIFEST_SHA", sha["deployment_manifest.json"])
+line('DELEG="', f'DELEG="委托执行：用户 2026-10-18 预授权 Claude 自行收口推送；切换有效版本这一步由用户在本线程里预授权（{GO_TS} “{GO_TEXT}”，消息 {GO712}，原话与消息编号记在 .auto-pm/reports/m3-d07n/user_switch_confirmation.txt）；条件：卡 220 的 G1～G9 全 PASS、独立审计放行本卡与卡 220、候选产品子树等于卡 220 门禁全过的提交、任一切换后核验失败即自动回退指针、不回滚数据库"')
+for a, b in (("card 219 gates are not all PASS", "card 220 gates are not all PASS"), ("the gated card 219 commit", "the gated card 220 commit"), ("卡 219 门禁全过", "卡 220 门禁全过"),
+             ("CARD219=", "CARD220="), ("CARD-SW008-M3-D07N V1.0", "CARD-SW008-M3-D07N V1.0")):
+    s = s.replace(a, b)
+s = re.sub(r'--background "M3-D07N：[^"]*"', f'--background "M3-D07N：把 PR {PRN[1:]} 的合并提交 ${{FROZEN:0:8}}（发版 7.1 的发版点，卡 220 门禁）用它自己的 pmf_build.py 安装为 $RID 并切换为有效版本（active=$RID，previous=$OLD），用 D06/D07 同一份操作脚本；切换后核验（含冒烟）任一失败即自动回退指针"', s, count=1)
+s = re.sub(r'--necessity "[^"]*"', f'--necessity "{OLD} 之后合进 main 的 {nmerge} 个合并提交（长任务守卫 long-run、内存预检等）只有切换为有效版本后才生效"', s, count=1)
+sw('WTD="$ROOT/.auto-pm/worktrees/m3-d07n"\n[[ -d "$WTD" ]] || git worktree add --detach "$WTD" HEAD > "$EV/worktree_add.txt" 2>&1 || die "cannot create the managed station for the Run"',
+   '''WTD="$ROOT/.auto-pm/worktrees/m3-d07n"
+if [[ ! -d "$WTD" ]]; then
+  git fetch -q origin main || die "cannot fetch origin/main"
+  git worktree add --detach "$WTD" origin/main > "$EV/worktree_add.txt" 2>&1 || die "cannot create the managed station for the Run"
+fi
+# the control root's scope files must equal the station start: record the manifest bytes of the control root (it carries 16 local-only intermediate entries) through the normal hook, once
+for f in deployment_manifest.json active_release.json previous_release.json; do
+  if ! diff -q <(tr -d '\\r' < "$ROOT/$C/$f") <(git -C "$WTD" show "HEAD:$C/$f" | tr -d '\\r') > /dev/null; then
+    cp "$ROOT/$C/$f" "$WTD/$C/$f"; git -C "$WTD" add -- "$C/$f"; echo "station: control-root bytes of $f staged" >> "$EV/worktree_add.txt"
+  fi
+done
+if [[ -n "$(git -C "$WTD" diff --cached --name-only)" ]]; then
+  git -C "$WTD" commit -q -m "chore(release): [$chg] record the control root's release files in the D07n station so the Run starts from them" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" >> "$EV/worktree_add.txt" 2>&1 || die "station commit refused by the hook"
+fi''')
+sw('d["conflicts"] in ([], ["LEASE_EXPIRED"])', 'd["conflicts"] == []')
+sw("conflicts empty or exactly the known LEASE_EXPIRED", "conflicts empty (no exception)")
+sw('for c in "pm handoff" "pm takeover" "pm orient" "continuity run reclaim" "continuity lease record-holder" "gui"; do',
+   'for c in "pm handoff" "pm takeover" "pm orient" "continuity run reclaim" "continuity lease record-holder" "gui" "long-run"; do')
+sw('  cli implementation-card precheck --card-file "$(pwd -W)/.auto-pm/reports/m3-d07n/D07n_card.md" > "$EV/precheck_after.json"',
+   '''  oc="$(cli pm orient SW-2026-008 --json 2>/dev/null | "$PY" -B -c 'import sys,json;t=sys.stdin.read();d=json.JSONDecoder().raw_decode(t[t.index("{"):])[0];print(json.dumps(d.get("conflicts")))' 2>/dev/null)"; echo "smoke: pm orient conflicts=$oc"; [[ "$oc" == "[]" ]] || { echo "FAIL smoke orient conflicts"; fail=1; }
+  cli implementation-card precheck --card-file "$(pwd -W)/.auto-pm/reports/m3-d07n/D07n_card.md" > "$EV/precheck_after.json"''')
+s = re.sub(r'(accepting\)\s+cli change transition "\$chg" --pid SW-2026-008 --to completed --approver fubai) (--verification-conclusion)', r'\1 --approval-evidence-ref "user-confirmation:$GO_REF" \2', s, count=1)
+s = s.replace("（委托验收，切换按用户 2026-11-03T13:05:19Z（06:05 MST）的预授权）", f"（委托验收，切换按用户 {GO_TS}（12:33 MST）的预授权）")
+io.open(EV / "d07n_deploy.sh", "w", encoding="utf-8", newline="").write(s)
+print("D07n draft" if DRAFT else "D07n final", "card", csha, "release", RID, "merges", nmerge)

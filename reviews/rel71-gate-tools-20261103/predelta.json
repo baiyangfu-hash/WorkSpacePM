@@ -1,0 +1,26 @@
+{
+ "baseline": "d671611a13bc15536047769fdb0498666c414044",
+ "candidate": "d563293171847124e609469b5371c5d8b9688443",
+ "collect_delta": {
+  "rest": 3,
+  "application": 0,
+  "plc": 0,
+  "change": 0,
+  "contracts": 0,
+  "infrastructure": 63,
+  "qml_debounce_alone": 0,
+  "cli": 25,
+  "qml": 0,
+  "core": 1
+ },
+ "expected_deltas_passed": {
+  "rest": 3,
+  "infrastructure": 62,
+  "cli": 25,
+  "core": 1
+ },
+ "expected_skip_deltas": {
+  "infrastructure": 1
+ },
+ "basis": "collect-only count delta per group (git archive of both commits), skip delta from running the changed/added test files on both trees; cli +25 = 24 (3 new files) + 1 parametrized case in tests/cli/test_caller_path_string_options.py; core +1 = test_github_collector.py. Proves: no group lost a collected test; it does NOT prove the new tests pass (the gate does that)."
+}

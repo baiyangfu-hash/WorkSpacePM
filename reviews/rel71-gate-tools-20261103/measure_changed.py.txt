@@ -1,0 +1,67 @@
+"""Release 7.1 pre-gate measurement, part 2: pass/skip counts of the test files that differ between the release 7 frozen commit and the 7.1 frozen commit, per regression group,
+run on both trees (the files that do not exist in the baseline are run on the candidate only).  The delta of a group = candidate - baseline of these files.
+Read-only (git archive into a temp folder outside the stations).  usage: python -B measure_changed.py <baseline_sha> <candidate_sha> <out.json>"""
+import io
+import json
+import os
+import re
+import subprocess
+import sys
+import tarfile
+import tempfile
+
+R = r"C:\Users\fubai\Documents\My_Workspace"
+P = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+PY = os.path.join(R, ".venv", "Scripts", "python.exe")
+base, cand, out = sys.argv[1:4]
+GROUP = {"tests/cli/": "cli", "tests/core/": "core", "tests/infrastructure/": "infrastructure", "tests/e2e/": "rest", "tests/test_": "rest"}
+
+
+def git(*a):
+    return subprocess.run(["git", "-C", R, "-c", "core.quotepath=false", *a], capture_output=True, check=True).stdout
+
+
+def extract(sha, folder):
+    arc = git("archive", sha, "--", P)
+    with tarfile.open(fileobj=io.BytesIO(arc)) as tf:
+        tf.extractall(folder, filter="data")
+    return os.path.join(folder, *P.split("/"))
+
+
+changed = []
+for ln in git("diff", "--name-status", base, cand, "--", P + "/tests").decode("utf-8").splitlines():
+    st, path = ln.split("\t")[0], ln.split("\t")[-1]
+    rel = path[len(P) + 1:]
+    if st[0] in "AM" and rel.endswith(".py") and "/conftest" not in rel and rel != "tests/conftest.py":
+        g = next((v for k, v in GROUP.items() if rel.startswith(k)), None)
+        changed.append((rel, g, st[0]))
+
+
+def run(proj, files):
+    if not files:
+        return {"passed": 0, "skipped": 0, "failed": 0, "error": 0, "exit": 0, "line": ""}
+    p = subprocess.run([PY, "-B", "-m", "pytest", "-o", "addopts=", "--no-cov", "-p", "no:cacheprovider", "--color=no", "-q", "-rs", *files], cwd=proj, capture_output=True, timeout=3000)
+    text = p.stdout.decode("utf-8", errors="replace")
+    line = [x for x in text.splitlines() if re.search(r"\d+ (passed|failed|skipped|error)", x)][-1:]
+    line = line[0] if line else ""
+    num = lambda w: int(m.group(1)) if (m := re.search(r"(\d+) " + w, line)) else 0  # noqa: E731
+    return {"passed": num("passed"), "skipped": num("skipped"), "failed": num("failed"), "error": num("error"), "exit": p.returncode, "line": line}
+
+
+res = {"changed": changed, "groups": {}}
+with tempfile.TemporaryDirectory(prefix="rel71_measure_") as tmp:
+    trees = {}
+    for label, sha in (("baseline", base), ("candidate", cand)):
+        folder = os.path.join(tmp, label)
+        os.makedirs(folder)
+        trees[label] = extract(sha, folder)
+    for g in sorted({c[1] for c in changed if c[1]}):
+        files = [c[0] for c in changed if c[1] == g]
+        base_files = [c[0] for c in changed if c[1] == g and c[2] == "M"]
+        b = run(trees["baseline"], base_files)
+        c = run(trees["candidate"], files)
+        res["groups"][g] = {"files": files, "baseline": b, "candidate": c,
+                            "delta_passed": c["passed"] - b["passed"], "delta_skipped": c["skipped"] - b["skipped"]}
+        print(g, json.dumps(res["groups"][g], ensure_ascii=False)[:600], flush=True)
+json.dump(res, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+print("DONE")

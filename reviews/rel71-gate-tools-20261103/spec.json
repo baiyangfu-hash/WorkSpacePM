@@ -1,0 +1,42 @@
+{
+ "pfx": "rel71",
+ "card_no": "220",
+ "card_id": "CARD-SW008-M3-REL71",
+ "version": "V1.0",
+ "label_short": "M3-REL71",
+ "tier_text": "core pipeline (full gate set), ONE NEW report",
+ "card_file": "220_M3-REL71_发版7.1候选门禁实施卡_PM.md",
+ "ev_name": "m3-rel71",
+ "base": "d563293171847124e609469b5371c5d8b9688443",
+ "base_branch": "m3-rel711-base",
+ "dec_suffix": "M3R71A01",
+ "work": "WORK-SW008-M3-REL71-001",
+ "run": "RUN-SW008-M3-REL71-001",
+ "ckpt": "CKPT-SW008-M3-REL71-001",
+ "owner": "claude:m3rel71",
+ "branch": "claude/m3-rel71",
+ "full_paths": [
+  "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/016_M3_发版7.1候选构建与全量门禁_REP.md"
+ ],
+ "new_paths": [
+  "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/016_M3_发版7.1候选构建与全量门禁_REP.md"
+ ],
+ "modified": {},
+ "deleg": "委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-03T19:33:23Z（当地 12:33）在本线程亲口预授权“今天 #514 合并后，以 main 最新提交打发版 7.1，全量门禁和审计都过就切换；任一不过则不切、保持 1.3.3-d671611。切换后如果驾驶舱启动或冒烟检查失败，自动回切到 1.3.3-d671611。”（消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7tKDxhSnLfp7mWBPVGmAc3TB）；用户 2026-11-03T19:34:01Z 另预授权门禁期间 extend-hold 一次、最多再加 2 小时（消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7tWQhf6disCfHBfB4NS8zWEF）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场、门禁与独立审计全部通过才切换；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行",
+ "chg_domain": "SCPT",
+ "chg_nature": "OPT",
+ "approval_tag": "M3-REL71",
+ "heavy": true,
+ "prev_chg": "CHG-SCPT-2026-472",
+ "prev_chg_dir": "CHG-SCPT",
+ "prev_cards": [
+  [
+   "RUN-SW008-M3-REL7-002",
+   "WORK-SW008-M3-REL7-002"
+  ]
+ ],
+ "background": "M3-REL71（发版 7.1 候选）：用 main 上的合并提交 d5632931 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；再跑全量门禁：十组回归（基线为卡 219 V1.0 的受治理输出 RUN-SW008-M3-REL7-001；差值取自开跑前的逐组收集数和变化测试文件在两棵树上的跑数，只证明没有分组丢收集用例）、静态检查、全库审计如实记录、文档检查、真实钩子、全部注册项目对账、控制根定位无冲突。自现行有效版本 1.3.3-d671611 以来合入 12 个合并提交，产品子树 10 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。",
+ "necessity": "11-03 合进 main 的长任务守卫、内存预检与相关修复只有经过全量门禁的候选才能切换为有效版本",
+ "title": "M3-REL71 发版 7.1 候选构建与全量门禁（核心流程，一个报告）",
+ "commit_msg": "docs(release): [__CHG__] release 7.1 candidate d5632931 builds reproducibly and passes the full gate set (M3-REL71)\n\nCard CARD-SW008-M3-REL71. The frozen merge commit was built twice with its own scripts/pmf_build.py; the payloads are byte-identical, release_meta matches apart from the builder, both pass verify, and the payload imports from itself with a working CLI. The full gate set passed on that commit: the ten regression groups (against card 219 V1.0's governed outputs plus the deltas counted before the run), static checks, the raw full-repository audit, the doc check, the real hooks, every registered project's ledger and the control-root orient. This commit adds only the contract report; it exists only because every gate passed. Nothing is switched."
+}

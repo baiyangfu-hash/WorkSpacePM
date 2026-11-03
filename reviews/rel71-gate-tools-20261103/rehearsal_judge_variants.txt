@@ -1,0 +1,4 @@
+core_count_changed judge exit=1
+rest_one_failure judge exit=1
+rest_transient_ok judge exit=0
+rest_transient_rerun_failed judge exit=1

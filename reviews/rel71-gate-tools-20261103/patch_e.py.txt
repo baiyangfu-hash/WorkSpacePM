@@ -1,0 +1,65 @@
+"""patch E: make_card220.py (card 220 renderer) from make_card219.py: names, base commit, gates table, authorization, every release-7-specific paragraph.  Applied ONCE."""
+import io
+
+p = "make_card220.py"
+s = io.open(p, encoding="utf-8", newline="").read()
+if "patchE applied" in s:
+    raise SystemExit("already applied")
+for a, b in (("m3-rel7", "m3-rel71"), ("rel7_", "rel71_"), ('"rel7"', '"rel71"')):
+    s = s.replace(a, b)
+GO712 = "cmsg_01AfNxhPWkgwWYuL1EVfYC7tKDxhSnLfp7mWBPVGmAc3TB"
+HOLD712 = "cmsg_01AfNxhPWkgwWYuL1EVfYC7tWQhf6disCfHBfB4NS8zWEF"
+
+
+def sw(a, b, n=1):
+    global s
+    assert s.count(a) == n, (a[:70], s.count(a))
+    s = s.replace(a, b)
+
+
+def line(prefix, new):
+    """replace the whole line that starts with prefix"""
+    global s
+    L = s.split("\n")
+    idx = [i for i, x in enumerate(L) if x.startswith(prefix)]
+    assert len(idx) == 1, (prefix[:40], len(idx))
+    L[idx[0]] = new
+    s = "\n".join(L)
+
+
+sw('"""Render card 219 (M3-REL7: seventh release candidate - build twice + full gate set; core pipeline; one report)."""',
+   '"""Render card 220 (M3-REL71: release 7.1 candidate - build twice + full gate set; core pipeline; one report).  # patchE applied"""')
+sw("6a9f1275e8d696000ba3e2c80863389a085d356c..", "d671611a13bc15536047769fdb0498666c414044..")
+sw('"6a9f1275e8d696000ba3e2c80863389a085d356c", _FR', '"d671611a13bc15536047769fdb0498666c414044", _FR')
+sw("新文件：第七次发版候选的合同与结论报告", "新文件：发版 7.1 候选的合同与结论报告")
+line('    ("G2", "十组回归', '    ("G2", "十组回归（D05 的母体全量 pytest）", "在冻结提交的隔离工作树里，与卡 219 V1.0 的受治理输出（RUN-SW008-M3-REL7-001，产品等于现行有效版本 1.3.3-d671611；该输出已由卡 219 V1.1 逐字节复用并判过）相比：每组无失败、无 ERROR，通过数与跳过数等于基线加 §1 第 4 条事先声明的差值；rest 组不跑样件联调的 4 个文件（只能在 Linux 跑，见 §1 第 5 条）。唯一容忍规则见 §1 第 6 条"),')
+sw("控制根定位无冲突（§1 第 9 条的事先声明的窄例外除外）", "控制根定位冲突列表必须为空（没有例外，§1 第 9 条）")
+line('    ("G8", "反例"', '    ("G8", "反例", "篡改过的构建副本被两次构建比对抓出；2 个文档反例（报告丢掉“提交本身即证明”、报告丢掉完整冻结提交号）被逐行合同拒绝；§1 第 9 条的 orient 判定有 26 个用例（18 个判定与 8 个对象提取）：只有空冲突列表通过；发版 7 的旧例外（恰为 LEASE_EXPIRED 且对象为 B2 旧 Run）现在也被拒绝；多一个冲突、别的对象、旧 Codex Run 当对象、不报对象、Work 状态不对、畸形格式各被拒绝"),')
+SIGN = ("用户 2026-10-18 在项目聊天里预授权“自行收口推送，其他按照你的经验来…你现在负责全局”；用户 2026-11-03T19:33:23Z（当地 12:33）在本线程亲口预授权“今天 #514 合并后，以 main 最新提交打发版 7.1，全量门禁和审计都过就切换；"
+        "任一不过则不切、保持 1.3.3-d671611。切换后如果驾驶舱启动或冒烟检查失败，自动回切到 1.3.3-d671611。”（消息 " + GO712 + "）；用户 2026-11-03T19:34:01Z 另预授权门禁期间 extend-hold 一次、最多再加 2 小时（消息 " + HOLD712 + "）；"
+        "这两条消息 id 与原话在起跑时写入 approval_refs.env 与批准回执（凭据取 user-confirmation 加该消息 id 的形式作为 `--approval-evidence-ref`，并写入 Run 的 dispatch_approval_ref）；"
+        "本卡只构建与门禁，不切换（切换另走切换卡 D07n，须本卡 G1～G9 全 PASS 且独立审计通过）；")
+line("sign = mc.sign_off(", "sign = mc.sign_off(" + repr(SIGN) + ")")
+line("sign = sign.replace(", 'sign = sign.replace("**本卡 SHA 报给用户后，由用户在聊天中回复批准**才启动", "**本卡 SHA 在线程里报出、独立审计放行后**启动（用户 2026-11-03T19:33:23Z 预授权，没有时间限制；预计 4 小时左右，条件见 §7）").replace(')
+sw('"| **内容验收** | 按用户 2026-10-18 的预授权委托：G1～G9 全 PASS 且提交字节等于冻结清单后由 Claude 收口；独立审计通过且 CI 全绿后由用户或用户授权的合并方合并 |"',
+   '"| **内容验收** | 提交与 Run/Work 技术终态由 Claude 在 G1～G9 全 PASS 且提交字节等于冻结清单后收口；变更单收口等用户验收原话；独立审计通过且 CI 全绿后由用户或用户授权的合并方合并 |"')
+sw('body = f"""# M3-REL7｜第七次发版候选构建与全量门禁实施卡（核心流程，一个报告）', 'body = f"""# M3-REL71｜发版 7.1 候选构建与全量门禁实施卡（核心流程，一个报告）')
+line("> 版本：`V1.0`（2026-11-02；", "> 版本：`V1.0`（2026-11-03；最终字节报 SHA 后冻结，执行期间不得修改）")
+line("> 状态：`PLANNED / PRE-AUTHORIZED`", "> 状态：`PLANNED / PRE-AUTHORIZED`（用户 2026-11-03 预授权，无时间限制；本卡 SHA 先在线程里报出并经独立审计放行；门禁由 Claude 以脱离会话的后台进程启动，带续租循环、防休眠和内存保护；条件见 §7）")
+line("> 隔离基线：", "> 隔离基线：`{spec['base']}`（`main` 在 2026-11-03 的头，即发版 7.1 的发版点，#514 的合并提交；本地分支 `{spec['base_branch']}`）")
+sw("## 1. 背景与已核实事实（2026-11-02）", "## 1. 背景与已核实事实（2026-11-03）")
+line("1. **为什么**：", "1. **为什么**：现行有效版本 `1.3.3-d671611`（发版 7）之后合进 `main` 的 {NM} 个合并提交（发布载荷 `auto_pm`、`templates`、`scripts` 共 {NP} 个文件不同）：长任务守卫 `long-run`（#514：脱离终端、带内存保护地跑长任务）、内存预检（#513：已提交内存超阈值时 `pm verify` 与 `long_gate` 拒绝启动）、租约口令钱包与 `run start --executor` 修复，以及发版 7 切换的证据与记录入库（#506、#507、#517）。要切换为有效版本才生效。用户 2026-11-03T19:33:23Z 预授权：#514 合并后以 `main` 最新提交打发版 7.1，全量门禁和审计都过就切换；任一不过则不切、保持 `1.3.3-d671611`；切换后驾驶舱启动或冒烟失败自动回切。冻结点为 `{cfg['frozen_commit'][:8]}`（#514 合并后的 `main` 头）。")
+line("3. **不做什么**：", "3. **不做什么**：不改源码；不切换有效发布版本（切换另走切换卡 D07n，须本卡 G1～G9 全 PASS 且独立审计通过，按用户预授权做，切换前备份账本）；WBS 与台账不在本卡。")
+line("4. **事先声明的差值**", "4. **事先声明的差值**（相对卡 219 V1.0 的受治理输出，RUN-SW008-M3-REL7-001，产品等于现行有效版本 1.3.3-d671611；该输出已由卡 219 V1.1 逐字节复用并判过）：通过 `{json.dumps(cfg['expected_deltas'], ensure_ascii=False)}`，跳过 `{json.dumps(cfg['expected_skips'], ensure_ascii=False)}`（未列出的组差值为 0）。来源：开跑前（2026-11-03）对基线提交 `d671611a` 与冻结提交 `d5632931` 各做一次逐组 `pytest --collect-only` 数用例（`git archive` 解出，不占工位），再把两个提交之间新增或改动的测试文件在两棵树上各跑一次数通过与跳过；记录在 `.auto-pm/reports/m3-rel71/predelta.json`、`collect_counts.json`、`measure_changed.json`。cli 的 +25 = 三个新文件的 24 个用例 + `tests/cli/test_caller_path_string_options.py` 里多出的 1 个参数化用例；core 的 +1 是 `tests/core/test_github_collector.py`（解出的目录没有 .git，该文件在那种环境里本来就有失败，所以 core 用收集数）；infrastructure +62 通过 +1 跳过（读 `/proc` 的 Linux 用例）。**这个差值只证明没有分组丢了收集到的用例，不证明新增用例通过**——通过与否由本次实跑判；对不上就如实判不过，不改判据。")
+line("5. **只能在 Linux 跑的文件**", "5. **只能在 Linux 跑的文件**：rest 组照旧不跑 4 个样件联调文件，以 GitHub 上 `sample-drill` 工作流为证（运行 41719191411，`main` 上对冻结提交 `d5632931` 的推送运行，结论 success，已核实）。十组的目标与忽略项和发版点 `release-pregate.yml` 逐字一致。")
+line("7. **不复用**", "7. **不复用**：本卡十组回归全部在笔记本上重跑，基线取自 `RUN-SW008-M3-REL7-001` 的受治理输出（`.auto-pm/reports/m3-rel7/gates/g2_candidate/`，在 `d671611a` 上实测，卡 219 V1.1 逐字节复用并判过）。本次若有失败或跳过数与声明不符，先隔离定位，不放宽判据；没有起跑时间限制，但门禁期间 Trae CN 必须关闭（2026-11-03 的内存事件：Trae 终端里跑大回归会让系统提交内存线性上涨），启动前由 §3 第 6 条核对。")
+line("10. **脱离会话的启动与状态文件**", "10. **脱离会话的启动与状态文件**：任何超过 30 分钟的任务不得挂在会话里（会话空闲一小时会被应用停掉）。正式门禁由启动脚本通过 `detach_run.py` 以独立进程组、无控制台的方式启动续租循环、防休眠进程、内存保护进程、延长看护和门禁，输出写日志文件；每个阶段与每个回归组写一个状态文件 `gates/status/<阶段>.json`（阶段名、PASS/FAIL、退出码、MST 时间、提交内存 GB）并追加 `status.log`；内存保护进程在系统提交内存到 40 GB 时写 `ALERT_*.txt` 并挂起被监护进程树，降到 36 GB 以下或出现 `RESUME` 文件时恢复。会话只负责启动、读状态文件、汇报；会话被停后重新连上就读状态文件续报，不重跑。")
+line("11. **租约总时长余量", "11. **租约总时长（3 小时上限）**：发版 7 的 V1.0 实测——核心组 2 小时 53 分，整个 Run 4 小时 10 分，超过 3 小时加批 1 小时的上限而租约过期。本版比发版 7 又多 cli +25、infrastructure +62，预计总时长 3.5～4.5 小时。用户 2026-11-03T19:34:01Z 预授权（消息 `" + HOLD712 + "`，已用消息读取核实作者是用户本人）：门禁期间如果某组因为接近总持有上限需要 extend-hold，同意延长一次，最多再加 2 小时；门禁结果不过就不切换。做法：启动脚本**不**在起跑时延长，而是起一个脱离的看护 `rel71_hold_watch.sh`——起跑后 150 分钟（总上限还剩 30 分钟）时，如果门禁仍在跑（`gates_all.exit` 与 `gates/DONE` 都不存在），执行一次 `continuity lease extend-hold --run-id RUN-SW008-M3-REL71-001 --extra-seconds 7200 --approval-evidence-ref user-confirmation:<该消息 id> --idempotency-key RUN-SW008-M3-REL71-001-hold-1`，成功写 `EXTENDED_ONCE`；只延这一次。总上限 = 3 小时 + 2 小时 = 5 小时，预计 4 小时左右，余量约 1 小时；仍不够就按硬停止处理、出 V1.1 卡。")
+line("12. **工作树建好后失败", "12. **工作树建好后失败，不能原地重跑**：启动脚本一旦创建了候选工作树 `.auto-pm/worktrees/m3-rel71`、变更单、Decision、Work 与治理 Run，再次运行启动脚本会被它的前置检查拒绝（分支与工作树已存在、Run 已登记），这是有意的：不允许在失败的现场上悄悄重来。任一门禁失败时：脚本停下并保留现场（`FAILED` 文件保留，下次启动时只改名留证，不删除；续租循环随之停止），状态文件记下失败的阶段与退出码，报给协调者；处理办法按前几版先例另出 V1.1 卡（新的 Work 与 Run，必要时复用本轮已完成且有效的组输出再重判），不在原 Run 上重跑。")
+line("9. **事先声明的窄例外", "9. **没有例外**：发版 7 的卡里为 B2 旧 Run 事先声明的 orient 窄例外，在本卡里**取消**——B2 旧 Run 与发版 7 V1.0 的门禁 Run 都已用发版 7 里修好的 `continuity run settle-expired` 结算为 CANCELLED（恢复链 CHG-DOCU-2026-092、-093）。所以 G3 的“控制根 `pm orient` 无冲突”恢复为：冲突列表必须恰为空；`LEASE_EXPIRED` 等任何冲突一律判不过（判卷脚本里 26 条用例，含“发版 7 的旧例外现在也不通过”）。**启动前置条件**：Trae 卡 B 的 Run `RUN-SW-2026-008-CHG-SCPT-2026-471-02` 已到总持有上限、租约过期（2026-11-03 10:05 MST），在它被结算（或回收后收口）之前 `pm orient` 会报 `LEASE_EXPIRED`，所以必须先处理它，见 §3 第 6 条。已知事项：账本里另有 2026-09-10 的老 Codex Run `RUN-SW008-A2-201-03`（RUNNING、租约早已过期、其 Work 已验收），orient 一直不报告它，本卡不处理、不触碰，只在报告里记录。不改账本，不用候选构建写真账本。")
+sw("切换由 D07 同款脚本在用户回“切换”后做。", "切换另走切换卡 D07n，在门禁与独立审计全部通过后按用户预授权做。")
+line("3. **机器负载与时间**", "3. **机器负载与时间**：启动前核对前台无游戏/启动器、**Trae CN 已关闭**、近 10 秒 CPU 低；跑前申请系统防休眠；提交内存超过 35 GiB 不启动（预检）、超过 40 GB 由内存保护进程挂起并报协调者。没有起跑时间限制；预计 4 小时左右（见 §1 第 11 条）。")
+line("4. **续租与防休眠**", "4. **续租与防休眠**：由启动脚本 `rel71_launch.sh` 启动续租循环（首次续租必须成功才开跑，续租失败按硬停止处理）、防休眠进程和延长看护，门禁在后台跑并写入 `gates_all.exit`；启动方式与发版 7 的 V1.0 相同。G1～G9 全 PASS 后由 Claude 依次收口提交；变更单收口等用户验收原话。")
+line("5. **正式门禁期间不并发其他重任务**", "5. **正式门禁期间不并发其他重任务**（TD-SW008-095）；整次运行预计 4 小时左右。\n6. **启动前置条件（任一不满足不启动）**：(a) `pm orient SW-2026-008` 冲突为空（Trae 卡 B 的 `RUN-SW-2026-008-CHG-SCPT-2026-471-02` 已处理）；(b) `.auto-pm/worktrees` 下的目录数不超过 5（发版前上限 7，本卡候选工位占 1、切换卡工位占 1）；(c) Trae CN 已关闭；(d) 已提交内存低于 35 GiB；(e) 本卡与切换卡 D07n 都已独立审计放行；(f) `approval_refs.env` 已写入并核对用户两条消息的作者与正文。")
+io.open(p, "w", encoding="utf-8", newline="").write(s)
+print("patch E ok")

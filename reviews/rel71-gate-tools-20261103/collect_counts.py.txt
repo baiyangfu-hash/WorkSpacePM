@@ -1,0 +1,56 @@
+"""Pre-gate test-count measurement for release 7.1: per regression group, `pytest --collect-only -q` on the baseline commit (release 7 frozen commit) and on the candidate (frozen commit of 7.1).
+Read-only: both trees are extracted with git archive into a temp folder OUTSIDE .auto-pm/worktrees (no station is used).  usage: python -B collect_counts.py <baseline_sha> <candidate_sha> <out.json>"""
+import io
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+
+R = r"C:\Users\fubai\Documents\My_Workspace"
+P = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+PY = os.path.join(R, ".venv", "Scripts", "python.exe")
+base, cand, out = sys.argv[1:4]
+groups = []
+for ln in open(os.path.join(R, ".auto-pm", "reports", "m3-rel7", "run_g2.sh"), encoding="utf-8"):
+    if ln.startswith("run ") and not ln.startswith("run()"):
+        parts = shlex.split(ln.strip())
+        groups.append((parts[1], parts[2:]))
+
+
+def extract(sha, folder):
+    arc = subprocess.run(["git", "-C", R, "-c", "core.quotepath=false", "archive", sha, "--", P], capture_output=True, check=True).stdout
+    import tarfile
+    with tarfile.open(fileobj=io.BytesIO(arc)) as tf:
+        tf.extractall(folder)  # noqa: S202 - our own git archive
+    return os.path.join(folder, *P.split("/"))
+
+
+def collect(proj, args):
+    p = subprocess.run([PY, "-B", "-m", "pytest", "-o", "addopts=", "--no-cov", "-p", "no:cacheprovider", "--color=no", "--collect-only", "-q", *args],
+                       cwd=proj, capture_output=True, timeout=1800)
+    text = p.stdout.decode("utf-8", errors="replace")
+    m = re.findall(r"(\d+) tests? collected|(\d+)/(\d+) tests collected \((\d+) deselected\)", text)
+    last = [ln for ln in text.splitlines() if "collected" in ln or "error" in ln.lower()][-3:]
+    n = None
+    for ln in reversed(text.splitlines()):
+        mm = re.search(r"(\d+) tests? collected", ln) or re.search(r"(\d+)/(\d+) tests collected", ln)
+        if mm:
+            n = int(mm.group(1))
+            break
+    return {"count": n, "exit": p.returncode, "tail": last}
+
+
+res = {}
+with tempfile.TemporaryDirectory(prefix="rel71_collect_") as tmp:
+    for label, sha in (("baseline", base), ("candidate", cand)):
+        folder = os.path.join(tmp, label)
+        os.makedirs(folder)
+        proj = extract(sha, folder)
+        res[label] = {"sha": sha, "groups": {name: collect(proj, args) for name, args in groups}}
+        print(label, {k: v["count"] for k, v in res[label]["groups"].items()}, flush=True)
+res["delta"] = {k: (res["candidate"]["groups"][k]["count"] or 0) - (res["baseline"]["groups"][k]["count"] or 0) for k in res["baseline"]["groups"]}
+print("delta", res["delta"])
+json.dump(res, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)

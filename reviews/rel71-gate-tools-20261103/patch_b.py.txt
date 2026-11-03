@@ -1,0 +1,37 @@
+"""patch B of derive_rel71.py: gates text for the previous card, and the strict orient rule (no exception any more).  Applied ONCE."""
+import io
+p = "derive_rel71.py"
+s = io.open(p, encoding="utf-8", newline="").read()
+if "patchB applied" in s:
+    raise SystemExit("already applied")
+
+
+def sw(a, b, n=1):
+    global s
+    assert s.count(a) == n, (a[:70], s.count(a))
+    s = s.replace(a, b)
+
+
+sw("Gates G1-G9 of card 219 (CARD-SW008-M3-REL71:", "Gates G1-G9 of card 220 (CARD-SW008-M3-REL71:")
+sw("(RUN-SW008-M3-REL6-002, card 218 V1.1, whose product equals the active release 1.3.3-6a9f127): every group has no failure; the counts equal the baseline plus the deltas declared in the card (measured by release-pregate on both commits)",
+   "(RUN-SW008-M3-REL7-001, card 219 V1.0, whose product equals the active release 1.3.3-d671611): every group has no failure; the counts equal the baseline plus the deltas declared in the card (counted before the run: collect-only counts on both commits plus the changed test files run on both trees; this proves no collected test was lost, not that the new tests pass)")
+sw("# --- release 7: the declared narrow exception for the known stuck B2 Run (hard-coded; audit 558) ---  ", "") if False else None
+sw("# --- release 7: the declared narrow exception for the known stuck B2 Run (hard-coded; audit 558) ---",
+   "# --- release 7.1: NO exception any more (the stuck B2 Run and the release 7 V1.0 Run were settled with the fixed command): orient must report no conflict at all ---  # patchB applied")
+sw('KNOWN_STUCK_RUN = "RUN-SW-2026-008-CHG-SCPT-2026-471-01"  # hard-coded exception object (release 7 card, section 1)',
+   'KNOWN_STUCK_RUN = "RUN-SW-2026-008-CHG-SCPT-2026-471-01"  # the FORMER exception object of release 7 (settled, CANCELLED); kept only to prove it no longer passes')
+sw('''    # no conflict at all passes; otherwise ONLY the exact list ['LEASE_EXPIRED'] whose object is the run orient itself reports (exactly the known stuck B2 Run), whose Work
+    # (from the same orient JSON) is the known Work and still IN_PROGRESS, and only for this card; `ledger_expired` (other expired Runs in the ledger) is informational and ignored
+    if conflicts == []:
+        return True
+    return (type(conflicts) is list and conflicts == ["LEASE_EXPIRED"] and type(orient_run) is str and orient_run == KNOWN_STUCK_RUN
+            and type(work_id) is str and work_id == KNOWN_STUCK_WORK and work_state == "IN_PROGRESS" and card_id == KNOWN_CARD)''',
+   '''    # release 7.1: only an empty conflict list passes; the release 7 exception (the exact list ['LEASE_EXPIRED'] for the known stuck B2 Run) is gone, because that Run is settled.
+    # The other arguments are kept so the call sites and the case table are unchanged; they cannot make a non-empty list pass.
+    return type(conflicts) is list and conflicts == []''')
+sw('("exactly-the-known-run", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, None, True),',
+   '("the-former-release-7-exception-no-longer-passes", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, None, False),')
+sw('("another-expired-run-in-the-ledger-that-orient-does-not-report", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, [K, OLD], True),',
+   '("former-exception-with-other-expired-runs-in-the-ledger", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, [K, OLD], False),')
+io.open(p, "w", encoding="utf-8", newline="").write(s)
+print("patch B ok")

@@ -1,0 +1,50 @@
+"""patch C of derive_rel71.py: tools source folder name, launcher (card number, hold watcher instead of an unconditional extension), DELEG/REF, spec fields.  Applied ONCE."""
+import io
+p = "derive_rel71.py"
+s = io.open(p, encoding="utf-8", newline="").read()
+if "patchC applied" in s:
+    raise SystemExit("already applied")
+
+
+def sw(a, b, n=1):
+    global s
+    assert s.count(a) == n, (a[:70], s.count(a))
+    s = s.replace(a, b)
+
+
+GO712 = "cmsg_01AfNxhPWkgwWYuL1EVfYC7tKDxhSnLfp7mWBPVGmAc3TB"   # 2026-11-03T19:33:23Z release 7.1 pre-authorization
+HOLD712 = "cmsg_01AfNxhPWkgwWYuL1EVfYC7tWQhf6disCfHBfB4NS8zWEF"  # 2026-11-03T19:34:01Z one extend-hold, at most +2 h
+sw('shutil.copy(R / "m3-rel6" / "rel71_tools_src" / _t, EV / _t)  ', 'shutil.copy(R / "m3-rel6" / "rel7_tools_src" / _t, EV / _t)  # patchC applied\n#', 1) if False else None
+sw('R / "m3-rel6" / "rel71_tools_src" / _t', 'R / "m3-rel6" / "rel7_tools_src" / _t')
+sw("# Card 219 V1.0 launcher (DETACHED)", "# Card 220 V1.0 launcher (DETACHED)")
+sw('.replace("Card 182 V1.0", "Card 218 V1.0")', '.replace("Card 182 V1.0", "Card 220 V1.0")')
+old_ext = s[s.index("# the user's own words (typed in the main-executor thread, message cmsg_01AfNxhPWkgwWYuL1EVfYC7tJPaJZwt3hvXGtUMyCqBguG;"):s.index('echo "hold cap extended by 3600 s"\n') + len('echo "hold cap extended by 3600 s"\n')]
+new_ext = (f"# the user's own words (typed in the main-executor thread, message {HOLD712}, 2026-11-03T19:34:01Z): \"发版 7.1 门禁期间，如果某组因为接近总持有上限需要 extend-hold，同意延长一次，最多再加 2 小时；门禁结果不过就不切换。\"\n"
+           "# So the extension is NOT done at the start: a detached hold watcher waits 150 minutes (the 3 h hold cap is then 30 minutes away) and, only if the gates are still running, extends ONCE by 7200 s.\n"
+           "cat > \"$EV/rel71_hold_watch.sh\" <<'HOLD'\n#!/usr/bin/env bash\nEV=/c/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-rel71; ROOT=/c/Users/fubai/Documents/My_Workspace; PY=\"$ROOT/.venv/Scripts/python.exe\"\ncd \"$ROOT\"\nsleep 9000\n"
+           "if [ -f \"$EV/gates_all.exit\" ] || [ -f \"$EV/gates/DONE\" ] || [ -f \"$EV/EXTENDED_ONCE\" ]; then echo \"$(date -u +%FT%TZ) no extension needed or already done\" >> \"$EV/extend_hold.out\"; exit 0; fi\n"
+           f"\"$PY\" -B main.py continuity lease extend-hold --run-id RUN-SW008-M3-REL71-001 --extra-seconds 7200 --approval-evidence-ref user-confirmation:{HOLD712} --idempotency-key RUN-SW008-M3-REL71-001-hold-1 >> \"$EV/extend_hold.out\" 2>&1 && touch \"$EV/EXTENDED_ONCE\"\nHOLD\n")
+s = s.replace(old_ext, new_ext)
+sw('det "$EV/mem_guard.log" "$PY" -B "$EV/mem_guard.py" "$G/status" "$G/status/current_pid" 40 36\necho "LAUNCHED DETACHED $(date +%H:%M)"',
+   'det "$EV/mem_guard.log" "$PY" -B "$EV/mem_guard.py" "$G/status" "$G/status/current_pid" 40 36\ndet "$EV/hold_watch.log" "$BASHW" "$EV/rel71_hold_watch.sh"\necho "LAUNCHED DETACHED $(date +%H:%M)"')
+a = s.index('DELEG = ("委托执行：用户 2026-10-18')
+b = s.index("spec = {")
+s = s[:a] + ('DELEG = ("委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-03T19:33:23Z（当地 12:33）在本线程亲口预授权“今天 #514 合并后，以 main 最新提交打发版 7.1，全量门禁和审计都过就切换；任一不过则不切、保持 1.3.3-d671611。切换后如果驾驶舱启动或冒烟检查失败，自动回切到 1.3.3-d671611。”'
+             f'（消息 {GO712}）；用户 2026-11-03T19:34:01Z 另预授权门禁期间 extend-hold 一次、最多再加 2 小时（消息 {HOLD712}）；"\n'
+             '         "批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场、门禁与独立审计全部通过才切换；由 Claude 代为运行脚本；变更单收口在 G1～G9 全 PASS 且提交字节等于冻结清单后代为执行")\n') + s[b:]
+sw('"pfx": "rel7", "card_no": "219"', '"pfx": "rel71", "card_no": "220"')
+sw('"label_short": "M3-REL7", "tier_text"', '"label_short": "M3-REL71", "tier_text"')
+sw('"card_file": "219_M3-REL7_第七次发版候选门禁实施卡_PM.md"', '"card_file": "220_M3-REL71_发版7.1候选门禁实施卡_PM.md"')
+sw('"approval_tag": "M3-REL7", "heavy"', '"approval_tag": "M3-REL71", "heavy"')
+sw('f"M3-REL7（第七次发版候选）：用 main 上的合并提交', 'f"M3-REL71（发版 7.1 候选）：用 main 上的合并提交')
+sw("（基线为卡 218 V1.1 的受治理输出 RUN-SW008-M3-REL6-002，差值由 GitHub release-pregate 对两个提交各实跑一次相减得出）",
+   "（基线为卡 219 V1.0 的受治理输出 RUN-SW008-M3-REL7-001；差值取自开跑前的逐组收集数和变化测试文件在两棵树上的跑数，只证明没有分组丢收集用例）")
+sw("自现行有效版本 1.3.3-6a9f127 以来合入", "自现行有效版本 1.3.3-d671611 以来合入")
+sw('"necessity": "10-26 至 10-27 合进 main 的修复只有经过全量门禁的候选才能切换为有效版本"', '"necessity": "11-03 合进 main 的长任务守卫、内存预检与相关修复只有经过全量门禁的候选才能切换为有效版本"')
+sw('"title": "M3-REL7 第七次发版候选构建与全量门禁（核心流程，一个报告）"', '"title": "M3-REL71 发版 7.1 候选构建与全量门禁（核心流程，一个报告）"')
+sw("seventh release candidate {S8(FROZEN)} builds reproducibly and passes the full gate set (M3-REL7)", "release 7.1 candidate {S8(FROZEN)} builds reproducibly and passes the full gate set (M3-REL71)")
+sw("(against card 218 V1.1's governed outputs plus the deltas measured by release-pregate)", "(against card 219 V1.0's governed outputs plus the deltas counted before the run)")
+sw('REF = "--approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7tDgoX2UY8rPK5n7nMxruFa2"  # the user\'s 2026-11-02 12:04 MST message',
+   f'REF = "--approval-evidence-ref user-confirmation:{GO712}"  # patchC applied: the user\'s 2026-11-03 12:33 MST release 7.1 pre-authorization; was: the user\'s 2026-11-02 12:04 MST message')
+io.open(p, "w", encoding="utf-8", newline="").write(s)
+print("patch C ok")

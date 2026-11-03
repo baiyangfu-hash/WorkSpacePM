@@ -1,0 +1,19 @@
+"""Generate the PLC standard project from the templates of a given project tree into a scratch workspace that has a sibling 01_SharedLibraries (the layout .plc.json expects).
+
+usage: python -B gen_project.py <project dir that holds auto_pm/ and templates/> <repo root of the same tree> <scratch workspace dir>
+The tracked 0100_PLC自动化/01_SharedLibraries of that tree is copied next to the generated project; the generated project is <scratch>/DJ-2026-901.
+"""
+
+import shutil
+import sys
+from pathlib import Path
+
+proj, repo, scratch = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+sys.path.insert(0, str(proj))
+from auto_pm.application.core.template_service import TemplateService  # noqa: E402
+
+shutil.rmtree(scratch, ignore_errors=True)
+scratch.mkdir(parents=True)
+shutil.copytree(repo / "0100_PLC自动化" / "01_SharedLibraries", scratch / "01_SharedLibraries")
+TemplateService(str(proj / "templates")).copy_template("plc-standard-project", str(scratch / "DJ-2026-901"), {"project_id": "DJ-2026-901", "project_name": "TESTMACHINE"})
+print(str(scratch / "DJ-2026-901" / "02_PLC程序" / "PLC_ST"))

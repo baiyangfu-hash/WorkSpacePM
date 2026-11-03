@@ -1,0 +1,194 @@
+{
+ "baseline": {
+  "sha": "d671611a13bc15536047769fdb0498666c414044",
+  "groups": {
+   "rest": {
+    "count": 1001,
+    "exit": 0,
+    "tail": [
+     "tests/e2e/test_pmf_template_plc.py::test_v06_a_field_or_file_error_is_rejected_by_the_static_check[plc-json-missing]",
+     "tests/e2e/test_pmf_template_plc.py::test_v06_a_field_or_file_error_is_rejected_by_the_static_check[pm-session-missing]",
+     "1001 tests collected in 7.62s"
+    ]
+   },
+   "application": {
+    "count": 209,
+    "exit": 0,
+    "tail": [
+     "tests/application/test_spec_facade.py::test_generate_spec_index_with_errors",
+     "tests/application/test_system_facade.py::test_archive_pm_session_error_response",
+     "209 tests collected in 1.50s"
+    ]
+   },
+   "plc": {
+    "count": 322,
+    "exit": 0,
+    "tail": [
+     "tests/plc/test_scl_linter.py::test_new_or_changed_declarations_stay_errors",
+     "tests/plc/test_language_service_adapter.py::test_ls09_test_command_parses_cases_and_semantic_errors",
+     "322 tests collected in 2.38s"
+    ]
+   },
+   "change": {
+    "count": 309,
+    "exit": 0,
+    "tail": [
+     "309 tests collected in 1.56s"
+    ]
+   },
+   "contracts": {
+    "count": 250,
+    "exit": 0,
+    "tail": [
+     "tests/contracts/test_lease_reclaim.py::test_naive_datetimes_are_rejected_with_a_contract_error",
+     "250 tests collected in 0.87s"
+    ]
+   },
+   "infrastructure": {
+    "count": 430,
+    "exit": 0,
+    "tail": [
+     "tests/infrastructure/test_error_mapper.py::test_format_struct_error",
+     "tests/infrastructure/test_error_mapper.py::test_format_timeout",
+     "430 tests collected in 2.66s"
+    ]
+   },
+   "qml_debounce_alone": {
+    "count": 1,
+    "exit": 0,
+    "tail": [
+     "1 test collected in 0.12s"
+    ]
+   },
+   "cli": {
+    "count": 974,
+    "exit": 0,
+    "tail": [
+     "tests/cli/test_plc_docs.py::test_k08_project_path_option_works_without_a_workspace_project_and_usage_errors_exit_two",
+     "tests/cli/test_decision.py::test_decision_list_reports_corrupt_canonical_file_as_controlled_error",
+     "974 tests collected in 5.48s"
+    ]
+   },
+   "qml": {
+    "count": 335,
+    "exit": 0,
+    "tail": [
+     "tests/qml/test_file_watcher_bridge.py::test_real_sync_background_gc_and_native_events_in_an_isolated_process[real-io-error]",
+     "tests/qml/test_ai_context_bridge.py::test_ai_context_bridge_feedback_invalid_json_falls_back_to_error_state",
+     "334/335 tests collected (1 deselected) in 4.86s"
+    ]
+   },
+   "core": {
+    "count": 3050,
+    "exit": 2,
+    "tail": [
+     "ERROR tests/core/test_pr_body_builder.py",
+     "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+     "3050 tests collected, 1 error in 16.13s"
+    ]
+   }
+  }
+ },
+ "candidate": {
+  "sha": "d563293171847124e609469b5371c5d8b9688443",
+  "groups": {
+   "rest": {
+    "count": 1004,
+    "exit": 0,
+    "tail": [
+     "tests/e2e/test_pmf_template_plc.py::test_v06_a_field_or_file_error_is_rejected_by_the_static_check[interface-document-missing]",
+     "tests/e2e/test_pmf_template_plc.py::test_v06_a_field_or_file_error_is_rejected_by_the_static_check[plc-json-missing]",
+     "1004 tests collected in 7.33s"
+    ]
+   },
+   "application": {
+    "count": 209,
+    "exit": 0,
+    "tail": [
+     "tests/application/test_spec_facade.py::test_generate_spec_index_with_errors",
+     "tests/application/test_system_facade.py::test_archive_pm_session_error_response",
+     "209 tests collected in 1.19s"
+    ]
+   },
+   "plc": {
+    "count": 322,
+    "exit": 0,
+    "tail": [
+     "tests/plc/test_scl_linter.py::test_new_or_changed_declarations_stay_errors",
+     "tests/plc/test_language_service_adapter.py::test_ls09_test_command_parses_cases_and_semantic_errors",
+     "322 tests collected in 2.41s"
+    ]
+   },
+   "change": {
+    "count": 309,
+    "exit": 0,
+    "tail": [
+     "309 tests collected in 1.55s"
+    ]
+   },
+   "contracts": {
+    "count": 250,
+    "exit": 0,
+    "tail": [
+     "tests/contracts/test_lease_reclaim.py::test_naive_datetimes_are_rejected_with_a_contract_error",
+     "250 tests collected in 0.80s"
+    ]
+   },
+   "infrastructure": {
+    "count": 493,
+    "exit": 0,
+    "tail": [
+     "tests/infrastructure/test_error_mapper.py::test_format_struct_error",
+     "tests/infrastructure/test_error_mapper.py::test_format_timeout",
+     "493 tests collected in 2.84s"
+    ]
+   },
+   "qml_debounce_alone": {
+    "count": 1,
+    "exit": 0,
+    "tail": [
+     "1 test collected in 0.13s"
+    ]
+   },
+   "cli": {
+    "count": 999,
+    "exit": 0,
+    "tail": [
+     "tests/cli/test_git_hook.py::test_enforce_commit_msg_rejects_chg_parser_error",
+     "tests/cli/test_plc_docs.py::test_k08_project_path_option_works_without_a_workspace_project_and_usage_errors_exit_two",
+     "999 tests collected in 4.34s"
+    ]
+   },
+   "qml": {
+    "count": 335,
+    "exit": 0,
+    "tail": [
+     "tests/qml/test_file_watcher_bridge.py::test_real_sync_background_gc_and_native_events_in_an_isolated_process[real-io-error]",
+     "tests/qml/test_ai_context_bridge.py::test_ai_context_bridge_feedback_invalid_json_falls_back_to_error_state",
+     "334/335 tests collected (1 deselected) in 2.81s"
+    ]
+   },
+   "core": {
+    "count": 3051,
+    "exit": 2,
+    "tail": [
+     "ERROR tests/core/test_pr_body_builder.py",
+     "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+     "3051 tests collected, 1 error in 9.54s"
+    ]
+   }
+  }
+ },
+ "delta": {
+  "rest": 3,
+  "application": 0,
+  "plc": 0,
+  "change": 0,
+  "contracts": 0,
+  "infrastructure": 63,
+  "qml_debounce_alone": 0,
+  "cli": 25,
+  "qml": 0,
+  "core": 1
+ }
+}
