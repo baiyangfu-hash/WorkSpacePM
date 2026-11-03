@@ -366,11 +366,14 @@ def test_the_printed_command_really_produces_evidence_that_the_next_verify_accep
     while time.monotonic() < end and core.read_status(core.run_directory(tmp_path, "evidence"))["state"] not in {"DONE", "FAILED"}:
         time.sleep(0.2)
     assert core.read_status(core.run_directory(tmp_path, "evidence"))["state"] == "DONE"
-    time.sleep(0.5)  # let the guard take its first sample
+    guard_file = core.run_directory(tmp_path, "evidence") / "guard.json"
+    end = time.monotonic() + 60
+    while time.monotonic() < end and not (guard_file.is_file() and json.loads(guard_file.read_text(encoding="utf-8")).get("samples", 0) >= 1):
+        time.sleep(0.2)  # a Windows guard process starts slowly: wait for its first sample instead of guessing a delay
 
     second = lr.run_checks((check,), cwd=tmp_path, extra_env=env, worktree=str(tree), run_id="RUN-2", run_started=started)[0]
 
-    assert second.passed and second.exit_code == 0 and "long-run 记录 evidence" in second.output_tail
+    assert second.passed and second.exit_code == 0 and "long-run 记录 evidence" in second.output_tail, (second.error, second.output_tail)
     assert second.output_sha256 and second.output_bytes > 0
     # a terminal run of the same command leaves no such record, so it would not have counted
     assert not lr.run_checks((check,), cwd=tmp_path / "other-root", extra_env=env, worktree=str(tree), run_id="RUN-2", run_started=started)[0].passed
