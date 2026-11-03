@@ -70,6 +70,7 @@ JUDGE_PATTERNS = (
     "reviews/tools/audit_pr.py",
     "reviews/tools/ci_aggregate.py",
     "reviews/tools/safety_zone_check.py",
+    "reviews/tools/rules_approval_check.py",
     "requirements.txt",
     f"{_SW008}/pyproject.toml",
     f"{_SW008}/auto_pm/**",
