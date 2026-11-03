@@ -336,6 +336,50 @@ def test_the_poll_floor_is_the_only_thing_that_changes_the_upper_bound(tmp_path:
     assert "与任务时长" in _find(tmp_path, tree)[1]
 
 
+def _unreadable(monkeypatch: pytest.MonkeyPatch, name: str, *, times: int | None) -> None:
+    """``Path.read_text`` of ``name`` raises PermissionError ``times`` times (None: always)."""
+
+    real, calls = Path.read_text, {"n": 0}
+
+    def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.name == name:
+            calls["n"] += 1
+            if times is None or calls["n"] <= times:
+                raise PermissionError(13, "denied")
+        return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(core, "READ_RETRY_SECONDS", 0.0)
+
+
+@pytest.mark.parametrize("name", ["status.json", "guard.json", "spec.json"])
+def test_a_record_file_that_is_busy_for_a_moment_is_still_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    tree = _repo(tmp_path, 3)
+    task = _record(tmp_path, tree, _argv(tree))
+    (task / "spec.json").write_text(json.dumps({"guard_poll_seconds": 20}), encoding="utf-8")
+    _unreadable(monkeypatch, name, times=3)
+
+    assert _find(tmp_path, tree)[1] == ""
+
+
+@pytest.mark.parametrize(
+    ("name", "needle"),
+    [("status.json", "status.json 在，但读不了"), ("guard.json", "guard.json 在，但读不了"), ("spec.json", "spec.json 在，但读不了")],
+)
+def test_a_record_file_that_exists_but_cannot_be_read_is_named_not_taken_for_no_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, needle: str
+) -> None:
+    tree = _repo(tmp_path, 3)
+    task = _record(tmp_path, tree, _argv(tree))
+    (task / "spec.json").write_text(json.dumps({"guard_poll_seconds": 20}), encoding="utf-8")
+    _unreadable(monkeypatch, name, times=None)
+
+    status, why = _find(tmp_path, tree)
+
+    assert status is None and needle in why and "读失败不等于没有记录" in why and "已重试 8 次" in why
+    assert "没有找到同一条命令" not in why and "没有采样记录" not in why
+
+
 def test_the_refusal_and_the_accepted_note_both_say_the_record_is_a_plain_file_not_a_proof(tmp_path: Path) -> None:
     tree = _repo(tmp_path, 101)
     check = AcceptanceCheck(command=_pytest_command(), expected_exit_code=0)

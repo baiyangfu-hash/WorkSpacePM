@@ -25,7 +25,6 @@ issued by CI) is recorded as a P2 debt.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import shlex
@@ -43,6 +42,7 @@ from auto_pm.contracts.acceptance_command import (
 )
 from auto_pm.contracts.plan_checklist import AcceptanceCheck
 from auto_pm.infrastructure.executable_lookup import find_on_path
+from auto_pm.infrastructure.long_run_core import LongRunError, LongRunMissingError, read_json_file
 
 __all__ = ["LONG_CASES", "LongVerdict", "classify", "find_evidence", "run_checks", "start_command"]
 
@@ -170,12 +170,18 @@ def _sha256(path: Path) -> str | None:
     return digest.hexdigest()
 
 
-def _read(path: Path) -> dict[str, object] | None:
+def _read(path: Path) -> tuple[dict[str, object] | None, str]:
+    """(the file's JSON object, "") — (None, "") when the file does not exist — (None, why) when it exists but cannot be read (after retries).
+
+    "Absent" and "unreadable" are different findings: only the first may be treated as "no record"; the second is named in the refusal.
+    """
+
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return value if isinstance(value, dict) else None
+        return read_json_file(path), ""
+    except LongRunMissingError:
+        return None, ""
+    except LongRunError as error:
+        return None, str(error)
 
 
 def _pytest_summary(log_path: Path) -> dict[str, int] | None:
@@ -211,14 +217,17 @@ def _log_problem(log_path: Path, cases: int | None) -> str:
     return ""
 
 
-def _poll_seconds(task_dir: Path) -> float:
-    """The guard interval the run was started with (``spec.json``); anything below the floor or unreadable is the default."""
+def _poll_seconds(task_dir: Path) -> tuple[float, str]:
+    """(the guard interval the run was started with (``spec.json``), "") — a missing file, a value below the floor or a non-number is the
+    default; a ``spec.json`` that exists but cannot be read is a refusal reason, not a silent default."""
 
-    spec = _read(task_dir / "spec.json")
+    spec, unreadable = _read(task_dir / "spec.json")
+    if unreadable:
+        return float(SAMPLE_SECONDS), unreadable
     value = spec.get("guard_poll_seconds") if spec else None
     if isinstance(value, bool) or not isinstance(value, int | float) or not value >= MIN_POLL_SECONDS:
-        return float(SAMPLE_SECONDS)
-    return float(value)
+        return float(SAMPLE_SECONDS), ""
+    return float(value), ""
 
 
 def _guard_problem(guard: dict[str, object] | None, status: dict[str, object], poll_seconds: float = float(SAMPLE_SECONDS)) -> str:
@@ -284,7 +293,13 @@ def _problem(
     ended = _parse_time(status.get("ended_at"))
     if run_started is None or ended is None or ended <= run_started:
         return "结束时间不在本 Run 创建之后（或时间读不出）"
-    guard_problem = _guard_problem(_read(task_dir / "guard.json"), status, _poll_seconds(task_dir))
+    guard, guard_unreadable = _read(task_dir / "guard.json")
+    if guard_unreadable:
+        return f"内存守卫的 guard.json 在，但读不了（读失败不等于没有记录）：{guard_unreadable}"
+    poll, spec_unreadable = _poll_seconds(task_dir)
+    if spec_unreadable:
+        return f"spec.json 在，但读不了（读失败不等于没有记录）：{spec_unreadable}"
+    guard_problem = _guard_problem(guard, status, poll)
     if guard_problem:
         return guard_problem
     if not isinstance(status.get("env_stripped"), list):
@@ -314,7 +329,10 @@ def find_evidence(
     started = _parse_time(run_started)
     closest = ""
     for task_dir in sorted(base.iterdir(), reverse=True) if base.is_dir() else []:
-        status = _read(task_dir / "status.json")
+        status, unreadable = _read(task_dir / "status.json")
+        if unreadable:  # cannot tell whether it is this command's record: name it instead of passing it over as "no record"
+            closest = closest or f"记录 {task_dir.name} 的 status.json 在，但读不了（读失败不等于没有记录）：{unreadable}"
+            continue
         if not status or status.get("schema_version") != SCHEMA or status.get("command") != list(argv):
             continue
         problem = _problem(

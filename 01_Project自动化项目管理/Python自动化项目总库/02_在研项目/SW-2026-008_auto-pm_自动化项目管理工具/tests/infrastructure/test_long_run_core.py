@@ -384,6 +384,83 @@ def test_the_status_of_an_unreadable_or_foreign_file_is_an_error_not_a_guess(tmp
         core.read_status(run_dir)
 
 
+class _Flaky:
+    """Make ``Path.read_text`` of files with a given name fail ``times`` times with ``error`` (None: for ever), then work again."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, name: str, error: OSError, times: int | None) -> None:
+        self.calls = 0
+        real = Path.read_text
+
+        def read_text(path: Path, *args: object, **kwargs: object) -> str:
+            if path.name == name:
+                self.calls += 1
+                if times is None or self.calls <= times:
+                    raise error
+            return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", read_text)
+        monkeypatch.setattr(core, "READ_RETRY_SECONDS", 0.0)
+
+
+class _SharingViolationError(OSError):
+    """What Windows raises for a file another process holds open without sharing (``winerror`` 32); Linux has no such attribute, so it is a class attribute."""
+
+    winerror = 32
+
+
+def _sharing_violation() -> OSError:
+    return _SharingViolationError("being used by another process")
+
+
+@pytest.mark.parametrize("failures", [1, 3, core.READ_RETRIES])
+@pytest.mark.parametrize("error", [PermissionError(13, "denied"), _sharing_violation()], ids=["winerror5-or-permission", "winerror32"])
+def test_a_read_that_hits_the_instant_of_an_atomic_replace_is_retried_and_then_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failures: int, error: OSError
+) -> None:
+    (tmp_path / "status.json").write_text(json.dumps({"state": "RUNNING"}), encoding="utf-8")
+    flaky = _Flaky(monkeypatch, "status.json", error, failures)
+
+    assert core.read_json_file(tmp_path / "status.json") == {"state": "RUNNING"}
+    assert flaky.calls == failures + 1
+
+
+def test_a_read_that_keeps_failing_raises_and_says_how_often_it_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "status.json").write_text("{}", encoding="utf-8")
+    flaky = _Flaky(monkeypatch, "status.json", PermissionError(13, "denied"), None)
+
+    with pytest.raises(core.LongRunError, match=f"已重试 {core.READ_RETRIES} 次") as caught:
+        core.read_json_file(tmp_path / "status.json")
+
+    assert not isinstance(caught.value, core.LongRunMissingError)  # present but unreadable is not "absent"
+    assert flaky.calls == core.READ_RETRIES + 1 and core.READ_RETRIES == 8
+
+
+def test_other_read_errors_are_not_retried_and_a_missing_file_is_told_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "status.json").write_text("{}", encoding="utf-8")
+    flaky = _Flaky(monkeypatch, "status.json", OSError(5, "input/output error"), None)
+
+    with pytest.raises(core.LongRunError, match="未重试"):
+        core.read_json_file(tmp_path / "status.json")
+    assert flaky.calls == 1
+
+    with pytest.raises(core.LongRunMissingError, match="没有 nothing.json"):
+        core.read_json_file(tmp_path / "nothing.json")
+
+
+def test_the_status_report_names_an_unreadable_guard_file_instead_of_showing_zero_samples(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = tmp_path / "job"
+    _spec(run_dir, [PY, "-c", "pass"])
+    (run_dir / "guard.json").write_text(json.dumps({"samples": 4}), encoding="utf-8")
+    _Flaky(monkeypatch, "guard.json", PermissionError(13, "denied"), None)
+
+    guard = core.read_status(run_dir)["guard"]
+
+    assert "已重试 8 次" in guard["error"]
+    monkeypatch.undo()
+    (run_dir / "guard.json").unlink()
+    assert "error" not in core.read_status(run_dir)["guard"]  # absent: simply no guard file yet
+
+
 def test_the_module_is_standard_library_only_so_the_worker_runs_as_a_plain_script() -> None:
     source = Path(core.__file__).read_text(encoding="utf-8")
 
