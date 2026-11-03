@@ -48,7 +48,10 @@ try {
 # 官方嵌入式 Python：版本固定（与 CI 相同的 3.12.10），哈希写死。取不到匹配的包就不安装。
 $EmbedVersion = "3.12.10"
 $EmbedUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
-$EmbedSha256 = "PIN-REQUIRED"
+# SHA-256 of python-3.12.10-embed-amd64.zip: computed 2026-11-03 (MST) on the laptop by M3 from the official python.org URL above;
+# the python.org page lists MD5 fe8ef205f2e9c3ba44d0cf9954e1abd3 and the download is 11133606 bytes (both matched). Second, independent check at install time:
+# python.exe must carry a valid Authenticode signature of Python Software Foundation (Windows certificate chain, not the web site).
+$EmbedSha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
 
 $TaskName = "AutoPM-MemoryGate"
 $Dest = Join-Path $env:ProgramFiles "AutoPM\MemoryGate"
