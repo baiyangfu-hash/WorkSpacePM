@@ -149,12 +149,37 @@ if sys.platform == "win32":
     _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
     _CREATE_NO_WINDOW = 0x08000000
 
-    def process_tree(root: int) -> list[int]:
-        """``root`` and all its descendants (Toolhelp snapshot)."""
+    _STILL_ACTIVE = 259
+    _ERROR_ACCESS_DENIED = 5
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+    def _kernel() -> Any:
+        """kernel32 with explicit argument and result types (a 64-bit handle must not be squeezed into a 32-bit int)."""
 
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
         kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ProcessEntry)]
+        kernel.Process32FirstW.restype = wintypes.BOOL
+        kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ProcessEntry)]
+        kernel.Process32NextW.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel.SetThreadExecutionState.argtypes = [wintypes.DWORD]
+        kernel.SetThreadExecutionState.restype = wintypes.DWORD
+        return kernel
+
+    def _children() -> dict[int, list[int]] | None:
+        """parent pid -> child pids from a Toolhelp snapshot; ``None`` when no snapshot could be taken."""
+
+        kernel = _kernel()
         snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
+        if not snapshot or snapshot == ctypes.c_void_p(-1).value:  # NULL or INVALID_HANDLE_VALUE
+            return None
         entry = _ProcessEntry()
         entry.dwSize = ctypes.sizeof(_ProcessEntry)
         children: dict[int, list[int]] = {}
@@ -163,6 +188,31 @@ if sys.platform == "win32":
             children.setdefault(int(entry.th32ParentProcessID), []).append(int(entry.th32ProcessID))
             more = kernel.Process32NextW(snapshot, ctypes.byref(entry))
         kernel.CloseHandle(snapshot)
+        return children
+
+    def pid_alive(pid: int) -> bool:
+        """Whether ``pid`` is a process that has not exited (``GetExitCodeProcess`` says ``STILL_ACTIVE``)."""
+
+        if pid <= 0:
+            return False
+        kernel = _kernel()
+        handle = kernel.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return bool(ctypes.get_last_error() == _ERROR_ACCESS_DENIED)  # it exists, we are only not allowed to look
+        try:
+            code = wintypes.DWORD()
+            return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == _STILL_ACTIVE
+        finally:
+            kernel.CloseHandle(handle)
+
+    def process_tree(root: int) -> list[int]:
+        """``root`` and all its descendants; empty when ``root`` does not exist (a dead pid has no tree)."""
+
+        if not pid_alive(root):
+            return []
+        children = _children()
+        if children is None:
+            return [root]  # no snapshot: at least the process we know about
         found: list[int] = []
         todo = [root]
         while todo:
@@ -174,14 +224,16 @@ if sys.platform == "win32":
         return found
 
     def _act(pids: list[int], function: str, access: int) -> int:
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel = _kernel()
         ntdll = ctypes.WinDLL("ntdll")
-        kernel.OpenProcess.restype = wintypes.HANDLE
+        routine = getattr(ntdll, function)
+        routine.argtypes = [wintypes.HANDLE]
+        routine.restype = ctypes.c_long
         done = 0
         for pid in pids:
             handle = kernel.OpenProcess(access, False, pid)
             if handle:
-                getattr(ntdll, function)(handle)
+                routine(handle)
                 kernel.CloseHandle(handle)
                 done += 1
         return done
@@ -198,10 +250,7 @@ if sys.platform == "win32":
     def keep_awake(on: bool) -> None:
         """Ask Windows not to sleep (the call is per thread: the guard repeats it from its own loop)."""
 
-        ctypes.windll.kernel32.SetThreadExecutionState(_ES_CONTINUOUS | _ES_SYSTEM_REQUIRED if on else _ES_CONTINUOUS)
-
-    def pid_alive(pid: int) -> bool:
-        return pid > 0 and pid in process_tree(pid)  # the snapshot lists the pid only while it exists
+        _kernel().SetThreadExecutionState(_ES_CONTINUOUS | _ES_SYSTEM_REQUIRED if on else _ES_CONTINUOUS)
 
     def detach_flags() -> tuple[int, ...]:
         """Strongest first: leave the caller's job object when allowed, else only the process group and console."""
@@ -212,8 +261,10 @@ if sys.platform == "win32":
 else:
 
     def process_tree(root: int) -> list[int]:
-        """``root`` and all its descendants (/proc parent links)."""
+        """``root`` and all its descendants (/proc parent links); empty when ``root`` does not exist."""
 
+        if not (Path("/proc") / str(root)).exists():
+            return []
         children: dict[int, list[int]] = {}
         for entry in Path("/proc").iterdir():
             if not entry.name.isdigit():
@@ -330,7 +381,7 @@ def worker_main(run_dir: Path) -> int:
             child = subprocess.Popen(  # noqa: S603
                 argv, cwd=spec["cwd"], env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, creationflags=flags
             )
-            _update_status(run_dir, state="RUNNING", child_pid=child.pid, worker_pid=os.getpid(), running_at=_now())
+            _update_status(run_dir, state="RUNNING", detached=True, child_pid=child.pid, worker_pid=os.getpid(), running_at=_now())
             try:
                 code = child.wait(timeout=spec["timeout_seconds"])
             except subprocess.TimeoutExpired:
@@ -396,7 +447,7 @@ def guard_loop(
     _write_json(run_dir / "guard.json", state)
     try:
         while clock() - started < max_seconds:
-            if any((run_dir / marker).exists() for marker in (*END_MARKERS, "STOPPED")):
+            if any((run_dir / marker).exists() for marker in (*END_MARKERS, "STOPPED", "STOP")):  # STOP: ``stop`` was asked; it unfreezes and kills
                 break
             awake(True)
             committed = read_committed_gib()
@@ -455,6 +506,16 @@ def _worker_pid(run_dir: Path) -> int:
 
 
 # ---------------------------------------------------------------- start / status / stop
+def _abandon(run_dir: Path, reason: str, pids: list[int]) -> None:
+    """A start that cannot complete: take down what was already started and leave a FAILED record (no exit code: it never ran)."""
+
+    for pid in pids:
+        kill_tree(pid)
+    (run_dir / "STOP").write_text(f"{_now()}\n", encoding="utf-8")
+    _update_status(run_dir, state="FAILED", exit_code=None, ended_at=_now(), error=reason)
+    (run_dir / "FAILED").write_text(f"{_now()} {reason}\n", encoding="utf-8")
+
+
 def run_directory(control_root: str | Path, name: str) -> Path:
     if NAME_RE.fullmatch(name) is None:
         raise LongRunError("任务名只能用字母、数字、点、下划线、连字符，且不超过 64 个字符")
@@ -520,7 +581,13 @@ def start(
     run_dir = run_directory(control_root, name)
     if run_dir.exists():
         raise LongRunError(f"任务名 {name} 已经用过（{run_dir}）；旧记录是证据，不覆盖，请换一个名字")
-    run_dir.mkdir(parents=True)
+    try:
+        run_dir.parent.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir()  # exist_ok stays False: of two starts with the same name at the same moment exactly one wins
+    except FileExistsError as error:
+        raise LongRunError(f"任务名 {name} 刚被另一个启动占用了；旧记录是证据，不覆盖，请换一个名字") from error
+    except OSError as error:
+        raise LongRunError(f"建不了任务目录 {run_dir}：{error}（任务名不能是系统保留名）") from error
     interpreter = python or sys.executable
     script = str(Path(__file__).resolve())
     status: dict[str, Any] = {
@@ -532,9 +599,9 @@ def start(
         "worktree": str(judged),
         "git_head": _git_head(judged),
         "git_dirty": _git_dirty(judged),
-        "mem_guard": True,
+        "mem_guard": False,  # becomes true only once the guard process has really been started
         "state": "STARTING",
-        "detached": True,
+        "detached": False,  # likewise for the worker
         "guard_file": "guard.json",
         "started_at": _now(),
         "timeout_minutes": timeout_minutes,
@@ -543,8 +610,19 @@ def start(
     spec = {"argv": list(argv), "cwd": str(working), "timeout_seconds": timeout_minutes * 60, "guard_poll_seconds": poll_seconds, "env": dict(env or {})}
     _write_json(run_dir / "spec.json", spec)
     _write_json(run_dir / "status.json", status)
-    worker = launch_detached([interpreter, "-B", script, "worker", str(run_dir)], run_dir / "worker.out", working)
-    guard = launch_detached([interpreter, "-B", script, "guard", str(run_dir)], run_dir / "guard.out", working)
+    # The guard first: a job must never run unprotected.  If the worker cannot start afterwards, the guard is taken down with it.
+    try:
+        guard = launch_detached([interpreter, "-B", script, "guard", str(run_dir)], run_dir / "guard.out", working)
+    except (OSError, LongRunError) as error:
+        _abandon(run_dir, f"内存守卫起不来（{error}），任务没有启动", [])
+        raise LongRunError(f"内存守卫起不来（{error}）；任务没有启动，没有无保护地跑") from error
+    _update_status(run_dir, mem_guard=True, guard_launcher_pid=guard)
+    try:
+        worker = launch_detached([interpreter, "-B", script, "worker", str(run_dir)], run_dir / "worker.out", working)
+    except (OSError, LongRunError) as error:
+        _abandon(run_dir, f"工作进程起不来（{error}）", [guard])
+        raise LongRunError(f"工作进程起不来（{error}）；已收掉守卫") from error
+    status.update(mem_guard=True, detached=True)  # the file says so too, once the worker has started and written its first update
     status["launcher_pids"] = {"worker": worker, "guard": guard}
     return status
 
@@ -581,8 +659,12 @@ def stop(run_dir: Path) -> dict[str, Any]:
     (run_dir / "STOP").write_text(f"{_now()}\n", encoding="utf-8")
     pid = _worker_pid(run_dir)
     child = int(status.get("child_pid") or 0)
+    # The guard freezes the worker together with the job; a frozen worker cannot write STOPPED, so unfreeze the whole tree first.
+    resume(process_tree(pid) if pid else [])
     if child:
+        resume(process_tree(child))
         kill_tree(child)
+    (run_dir / "PAUSED").unlink(missing_ok=True)
     if pid:
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline and pid_alive(pid):

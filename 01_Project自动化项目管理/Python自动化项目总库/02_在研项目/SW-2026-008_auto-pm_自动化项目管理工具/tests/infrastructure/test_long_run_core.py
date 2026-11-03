@@ -69,7 +69,7 @@ def test_the_worker_kills_a_command_that_runs_past_its_timeout(tmp_path: Path) -
     code = core.worker_main(run_dir)
 
     status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
-    assert code == core.TIMEOUT_EXIT and status["state"] == "FAILED"
+    assert code == 124 and core.TIMEOUT_EXIT == 124 and status["state"] == "FAILED"  # 124 is what timeout(1) uses; the number is part of the record's meaning
     assert not core.pid_alive(status["child_pid"])
 
 
@@ -226,6 +226,38 @@ def test_the_guard_keeps_quiet_when_the_unowned_commit_stays_within_8_gib_or_can
     assert guard["alerts"] == [] and guard["unowned_baseline_gib"] == 17.5  # the unreadable first reading is not taken as the baseline
 
 
+def test_the_guard_pauses_at_exactly_the_limit_and_resumes_only_below_the_resume_level(tmp_path: Path) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [39.99, 40.0, 36.0, 36.0, 35.99], end_after=6)
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)
+
+    assert len(world.paused_calls) == 1  # 39.99 does not pause, exactly 40.0 does
+    # exactly 36.0 (polls 3 and 4) does not resume; 35.99 (poll 5) does, and that is a resume by reading, so it leaves a RESUMED file
+    assert len(world.resumed_calls) == 1 and list(run_dir.glob("RESUMED_*.txt"))
+
+
+def test_the_guard_stays_frozen_at_exactly_the_resume_level(tmp_path: Path) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [40.0, 36.0], end_after=4)  # 36.0 forever after the pause
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)
+
+    assert len(world.paused_calls) == 1
+    assert len(world.resumed_calls) == 1  # only the final "never leave it frozen" unfreeze, not a resume by reading
+    assert not list(run_dir.glob("RESUMED_*.txt"))
+
+
+def test_the_guard_stops_watching_once_a_stop_was_asked_and_lets_the_job_go(tmp_path: Path) -> None:
+    run_dir = _guard_dir(tmp_path)
+    (run_dir / "STOP").write_text("x", encoding="utf-8")
+    world = _World(run_dir, [99.0])
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)
+
+    assert world.paused_calls == [] and world.polls == 0
+
+
 # ------------------------------------------------------------------ start / status / stop with real processes
 def test_start_runs_the_command_detached_under_a_worker_and_a_guard_and_leaves_the_evidence(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
@@ -377,3 +409,103 @@ def test_a_governed_worktree_is_recorded_instead_of_the_directory_the_job_runs_i
     with pytest.raises(core.LongRunError, match="工作树不存在"):
         core.start(tmp_path, "wt2", [PY, "-c", "pass"], cwd=tmp_path, worktree=tmp_path / "nope")
     assert not core.run_directory(tmp_path, "wt2").exists()
+
+
+def test_a_pid_that_does_not_exist_has_no_tree_and_is_not_alive() -> None:
+    import subprocess
+
+    child = subprocess.Popen([PY, "-c", "pass"])
+    child.wait()  # reaped: the pid is gone
+
+    assert core.process_tree(child.pid) == [] and core.pid_alive(child.pid) is False
+    assert core.process_tree(0) == [] and core.pid_alive(0) is False
+    assert core.process_tree(os.getpid())[0] == os.getpid() and core.pid_alive(os.getpid()) is True
+
+
+def test_stop_unfreezes_a_job_the_guard_has_paused_and_ends_it_at_once(tmp_path: Path) -> None:
+    core.start(tmp_path, "frozen", [PY, "-c", "import time; time.sleep(120)"], cwd=tmp_path, poll_seconds=0.2)
+    run_dir = core.run_directory(tmp_path, "frozen")
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "RUNNING")
+    worker = core._worker_pid(run_dir)
+    core.suspend(core.process_tree(worker))  # what the guard does when the machine is full: freeze the worker with the job
+    (run_dir / "PAUSED").write_text("x", encoding="utf-8")
+
+    started = time.monotonic()
+    final = core.stop(run_dir)
+
+    assert final["state"] == "STOPPED" and final["worker_alive"] is False
+    assert time.monotonic() - started < 10 and not (run_dir / "PAUSED").exists()
+
+
+def test_a_guard_that_cannot_start_means_no_job_and_a_failed_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    launched: list[str] = []
+
+    def launch(argv: list[str], log: Path, cwd: Path) -> int:
+        launched.append(argv[3])
+        raise core.LongRunError("no process for you")
+
+    monkeypatch.setattr(core, "launch_detached", launch)
+
+    with pytest.raises(core.LongRunError, match="内存守卫起不来"):
+        core.start(tmp_path, "noguard", [PY, "-c", "pass"], cwd=tmp_path)
+
+    assert launched == ["guard"]  # the worker was never started
+    status = json.loads((core.run_directory(tmp_path, "noguard") / "status.json").read_text(encoding="utf-8"))
+    assert status["state"] == "FAILED" and status["mem_guard"] is False and status["detached"] is False and status["exit_code"] is None
+    assert (core.run_directory(tmp_path, "noguard") / "FAILED").exists()
+
+
+def test_a_worker_that_cannot_start_takes_the_guard_down_with_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    killed: list[int] = []
+
+    def launch(argv: list[str], log: Path, cwd: Path) -> int:
+        if argv[3] == "worker":
+            raise core.LongRunError("no process for you")
+        return 4242
+
+    monkeypatch.setattr(core, "launch_detached", launch)
+    monkeypatch.setattr(core, "kill_tree", killed.append)
+
+    with pytest.raises(core.LongRunError, match="工作进程起不来"):
+        core.start(tmp_path, "noworker", [PY, "-c", "pass"], cwd=tmp_path)
+
+    assert killed == [4242]
+    status = json.loads((core.run_directory(tmp_path, "noworker") / "status.json").read_text(encoding="utf-8"))
+    assert status["state"] == "FAILED" and status["mem_guard"] is True and status["detached"] is False
+
+
+def test_the_status_file_only_claims_what_was_started(tmp_path: Path) -> None:
+    core.start(tmp_path, "claims", [PY, "-c", "pass"], cwd=tmp_path, poll_seconds=0.2)
+    run_dir = core.run_directory(tmp_path, "claims")
+
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE")
+    final = core.read_status(run_dir)
+    assert final["mem_guard"] is True and final["detached"] is True  # both really started
+
+
+def test_two_starts_with_the_same_name_at_once_give_one_clear_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    taken = core.run_directory(tmp_path, "race")
+    taken.mkdir(parents=True)
+
+    class Hidden(type(Path())):  # type: ignore[misc]
+        def exists(self, *args: object, **kwargs: object) -> bool:
+            return False  # the loser looked a moment before the winner created it
+
+    monkeypatch.setattr(core, "run_directory", lambda root, name: Hidden(taken))
+
+    with pytest.raises(core.LongRunError, match="刚被另一个启动占用"):
+        core.start(tmp_path, "race", [PY, "-c", "pass"], cwd=tmp_path)
+
+
+def test_a_task_directory_that_cannot_be_created_is_reported_in_plain_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_mkdir = Path.mkdir
+
+    def refuse(self: Path, *args: object, **kwargs: object) -> None:
+        if self.name == "reserved":
+            raise PermissionError("reserved name")
+        real_mkdir(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "mkdir", refuse)
+
+    with pytest.raises(core.LongRunError, match="建不了任务目录"):
+        core.start(tmp_path, "reserved", [PY, "-c", "pass"], cwd=tmp_path)
