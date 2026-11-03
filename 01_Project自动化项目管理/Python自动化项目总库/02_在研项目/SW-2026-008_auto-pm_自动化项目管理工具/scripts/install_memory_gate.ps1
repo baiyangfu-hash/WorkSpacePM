@@ -4,17 +4,23 @@
 
 .DESCRIPTION
   计划任务以 SYSTEM 运行，所以它执行的一切都必须放在只有管理员能写的地方，并且是被核对过的那一份：
-  -Install    必须给 -ExpectedSha256（审计过的四个文件的合并哈希，见下）。先检查：四个文件在 git 里没有未提交改动、HEAD 已在 origin/main 上、
-              四个文件（三个要安装的源文件 + 本脚本自己）的合并 SHA-256 等于 -ExpectedSha256。通过后：
+  -Install    必须给 -ExpectedSha256（审计过的四个文件的合并哈希，见下）。提权路径里不跑 git（不 fetch、不 status、不 merge-base）：
+              只核对四个文件（三个要安装的源文件 + 本脚本自己）的合并 SHA-256 等于 -ExpectedSha256。通过后：
               1) 在 %ProgramFiles%\AutoPM\MemoryGate 建目录并先锁权限（icacls：SYSTEM、Administrators 完全控制，Users 只读；用 SID，不受系统语言影响）；
-              2) 取官方嵌入式 Python（固定版本，下载或用 -PythonZip 指定本地包），核对写死在本脚本里的 SHA-256 后解压进该目录；不用机器上装的 Python，也不用 .venv；
+              2) 取官方嵌入式 Python（固定版本，下载或用 -PythonZip 指定本地包），核对写死在本脚本里的 SHA-256 后解压进该目录，
+                 再核对 python.exe 的 Authenticode 签名者是 Python Software Foundation；不用机器上装的 Python，也不用 .venv；
+                 下载失败（TLS 不通、被代理拦）时改用 -PythonZip 指向事先核对过的本地包；
               3) 复制三个源文件，复制后再核对一遍哈希，记入 manifest.json；
               4) 用 python -I -S -B 先自检（冻结、解冻都要真生效），通过后注册开机自启的计划任务（SYSTEM、最高权限）并启动。
-  -Uninstall  先让看门狗解冻全部进程并退出，再确认解冻，最后删除计划任务和安装目录。
+  -Uninstall  先让看门狗解冻全部进程并退出，再确认解冻，最后删除计划任务和安装目录。只装了一半（没有 Python、没有状态目录、没有计划任务）也能卸干净。
   -Status     只读：计划任务状态 + 看门狗自报的状态（含安装文件的 SHA-256 核对）。
 
   -ExpectedSha256 怎么得到：在仓库根的“控制根”里运行 python -B scripts\memory_gate.py bundle-hash，它列出四个文件各自的哈希和合并哈希；
   用户只应使用审计报告里写明的那个合并哈希。合并哈希把 CRLF 当作 LF 计算，Windows 和 Linux 检出的结果相同。
+
+  运行前先核对本脚本自己（审计 579 R6）：在资源管理器里按住 Shift 右键仓库的 scripts 文件夹，选“在此处打开 PowerShell 窗口”，运行
+    certutil -hashfile install_memory_gate.ps1 SHA256
+  输出必须等于 PR 描述里写的“脚本工作区哈希”（Windows 检出的 CRLF 字节），一致才继续。
 
   用法（管理员 PowerShell，当前目录是仓库里任意位置）：
     powershell -ExecutionPolicy Bypass -File scripts\install_memory_gate.ps1 -Install -ExpectedSha256 <64 位十六进制>
@@ -29,6 +35,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Windows PowerShell 5.1 may default to old TLS; the download needs 1.2. If this fails, use -PythonZip with a package checked beforehand.
+$TlsReady = $true
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {
+    $TlsReady = $false
+    Write-Warning "无法启用 TLS 1.2（$($_.Exception.Message)）：不能联网下载，请改用 -PythonZip 指向事先核对过的 python-3.12.10-embed-amd64.zip。"
+}
 
 # 官方嵌入式 Python：版本固定（与 CI 相同的 3.12.10），哈希写死。取不到匹配的包就不安装。
 $EmbedVersion = "3.12.10"
@@ -89,13 +104,6 @@ if ($Install) {
     Write-Host "1/6 核对要安装的文件 ..."
     if ($EmbedSha256 -notmatch '^[0-9a-f]{64}$') { throw "本脚本里嵌入式 Python 的 SHA-256 还没有填写（PIN-REQUIRED），拒绝安装。" }
     if ($PSCommandPath -ne (Join-Path $PSScriptRoot "install_memory_gate.ps1")) { throw "请直接运行仓库里的 scripts\install_memory_gate.ps1。" }
-    $git = (Get-Command git.exe -ErrorAction Stop).Source
-    & $git -C $Repo fetch origin main 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "git fetch origin main 失败：无法确认 HEAD 在 origin/main 上，拒绝安装。" }
-    $dirty = & $git -C $Repo status --porcelain --untracked-files=no -- $BundleFiles
-    if ($dirty) { throw "这四个文件在 git 里有未提交的改动，拒绝安装：`n$dirty" }
-    & $git -C $Repo merge-base --is-ancestor HEAD origin/main
-    if ($LASTEXITCODE -ne 0) { throw "当前 HEAD 不在 origin/main 上，拒绝安装；请先 git pull。" }
     $bundle = Get-BundleHash $Repo
     if ($bundle.Combined -ne $ExpectedSha256.ToLower()) {
         throw "四个文件的合并 SHA-256 是 $($bundle.Combined)，与 -ExpectedSha256 不符，拒绝安装。"
@@ -116,7 +124,12 @@ if ($Install) {
     if ($PythonZip) {
         Copy-Item -LiteralPath $PythonZip -Destination $zip -Force
     } else {
-        Invoke-WebRequest -Uri $EmbedUrl -OutFile $zip -UseBasicParsing
+        if (-not $TlsReady) { throw "没能启用 TLS 1.2，不能下载；请改用 -PythonZip 指向事先核对过的包。" }
+        try {
+            Invoke-WebRequest -Uri $EmbedUrl -OutFile $zip -UseBasicParsing
+        } catch {
+            throw "下载嵌入式 Python 失败（$($_.Exception.Message)）；请在能上网的电脑下载并核对后，用 -PythonZip 指定本地包重跑。"
+        }
     }
     $have = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower()
     if ($have -ne $EmbedSha256) {
@@ -125,6 +138,10 @@ if ($Install) {
     }
     Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $Dest "python") -Force
     Remove-Item -LiteralPath $zip -Force
+    $signature = Get-AuthenticodeSignature -LiteralPath $InstalledPython
+    if ($signature.Status -ne "Valid" -or $null -eq $signature.SignerCertificate -or $signature.SignerCertificate.Subject -notmatch '(^|, )O=Python Software Foundation(,|$)') {
+        throw "python.exe 的 Authenticode 签名无效或签名者不是 Python Software Foundation（状态 $($signature.Status)），拒绝安装。"
+    }
     foreach ($pth in Get-ChildItem -LiteralPath (Join-Path $Dest "python") -Filter "*._pth") {
         if (Select-String -LiteralPath $pth.FullName -Pattern '^\s*import\s+site' -Quiet) { throw "$($pth.Name) 打开了 import site，拒绝安装。" }
     }
@@ -162,10 +179,23 @@ if ($Install) {
 }
 
 # -Uninstall: ask the watchdog to stop (it unfreezes everything before it exits), check again, then remove the task and the folder.
-New-Item -ItemType File -Force -Path (Join-Path $StateDir "STOP") | Out-Null
-Start-Sleep -Seconds 10
+# Works on a half-finished install too: every step checks that what it touches exists.
+if (Test-Path -LiteralPath $StateDir) {
+    New-Item -ItemType File -Force -Path (Join-Path $StateDir "STOP") | Out-Null
+    Start-Sleep -Seconds 10
+}
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-& $InstalledPython -I -S -B $InstalledGate resume-all
+if ((Test-Path -LiteralPath $InstalledPython) -and (Test-Path -LiteralPath $InstalledGate)) {
+    & $InstalledPython -I -S -B $InstalledGate resume-all
+    if ($LASTEXITCODE -ne 0) { Write-Warning "resume-all 返回 $LASTEXITCODE；请看 $StateDir\gate.log，确认被冻结的进程已恢复。" }
+} else {
+    Write-Host "没有找到已安装的 Python 或看门狗脚本（可能只装了一半），跳过解冻步骤。"
+}
 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $Dest -Recurse -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $Dest) {
+    icacls $Dest /setowner "*S-1-5-32-544" /T /C | Out-Null
+    icacls $Dest /grant "*S-1-5-32-544:(OI)(CI)F" /T /C | Out-Null
+    Remove-Item -LiteralPath $Dest -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $Dest) { throw "安装目录 $Dest 没能删除干净（可能有文件被占用）；重启后再运行 -Uninstall。" }
+}
 Write-Host "已卸载；被冻结的进程已全部解冻。"

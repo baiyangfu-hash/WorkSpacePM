@@ -634,7 +634,6 @@ def test_the_install_script_checks_the_sources_before_it_touches_anything_and_lo
 
     order = [
         "$EmbedSha256 -notmatch",
-        "merge-base --is-ancestor HEAD origin/main",
         "$bundle.Combined -ne $ExpectedSha256",
         "New-Item -ItemType Directory -Force -Path $Dest, $StateDir",
         "icacls $Dest /inheritance:r",
@@ -648,7 +647,8 @@ def test_the_install_script_checks_the_sources_before_it_touches_anything_and_lo
     positions = [code.index(marker) for marker in order]
 
     assert positions == sorted(positions), dict(zip(order, positions, strict=True))
-    assert "status --porcelain --untracked-files=no" in code and "fetch origin main" in code
+    for git_word in ("git.exe", "fetch", "merge-base", "status --porcelain", "$git "):
+        assert git_word not in code, git_word  # audit 579 R5: no git in the elevated path; the combined hash is the only gate
     assert "*S-1-5-18" in code and "*S-1-5-32-544" in code and "*S-1-5-32-545:(OI)(CI)RX" in code
 
 
@@ -717,3 +717,40 @@ def test_without_a_shell_on_the_path_the_first_rung_is_the_branch_that_holds_the
     procs = {proc.pid: proc for proc in w.procs.values()}
 
     assert gate.ladder(procs[leaf], procs, gate._protected_pids(procs)) == [branch, TERMINAL_OWNER]
+
+
+def test_the_install_script_forces_tls12_and_points_to_the_local_zip_when_it_cannot() -> None:
+    """Audit 579 P3: Windows PowerShell 5.1 may default to old TLS; a download failure must name the -PythonZip way out."""
+
+    script = _install_script()
+
+    assert script.index("Tls12") < script.index("if ($Install) {")
+    assert "-PythonZip" in script[script.index("Tls12") : script.index("if ($Install) {")]
+    download = script[script.index("Invoke-WebRequest") - 200 : script.index("Invoke-WebRequest") + 400]
+    assert "catch" in download and "-PythonZip" in download
+
+
+def test_the_install_script_checks_the_python_exe_is_signed_by_the_python_software_foundation_before_using_it() -> None:
+    script = _install_script()
+    code = script[script.index("if ($Install) {") :]
+
+    assert code.index("Expand-Archive") < code.index("Get-AuthenticodeSignature") < code.index("Copy-Item -LiteralPath (Join-Path $Repo") < code.index("selftest")
+    assert "Python Software Foundation" in code and '-ne "Valid"' in code
+
+
+def test_the_uninstall_path_copes_with_a_half_finished_install() -> None:
+    """Audit 579 P3: no Python, no state folder or no task must not abort the removal."""
+
+    script = _install_script()
+    code = script[script.index("# -Uninstall:") :]
+
+    assert "Test-Path -LiteralPath $StateDir" in code and "Test-Path -LiteralPath $InstalledPython" in code
+    assert code.index("resume-all") < code.index("Unregister-ScheduledTask") < code.index("Remove-Item -LiteralPath $Dest")
+    assert "-ErrorAction SilentlyContinue" in code
+    assert "Test-Path -LiteralPath $Dest" in code[code.index("Remove-Item -LiteralPath $Dest") :]  # reports a folder that could not be removed
+
+
+def test_the_install_script_asks_the_user_to_check_its_own_hash_first() -> None:
+    script = _install_script()
+
+    assert "certutil -hashfile install_memory_gate.ps1 SHA256" in script[: script.index("[CmdletBinding")]
