@@ -1,0 +1,1 @@
+{"file": "C:\\Users\\fubai\\Documents\\My_Workspace\\.auto-pm\\reports\\m3-rel7b\\gates\\d04\\build_a\\auto_pm\\__init__.py", "version": "1.3.3"}

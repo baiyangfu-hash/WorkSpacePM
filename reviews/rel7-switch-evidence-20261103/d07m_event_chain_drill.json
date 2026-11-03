@@ -1,0 +1,272 @@
+{
+  "events_total": 6301,
+  "chain_breaks": 0,
+  "census": {
+    "CHECKPOINT_CREATED": {
+      "count": 412,
+      "schemas": [
+        "None"
+      ]
+    },
+    "CLOSURE_COMPLETED": {
+      "count": 8,
+      "schemas": [
+        "closure-completed.v1"
+      ]
+    },
+    "CLOSURE_LINEAGE_ADOPTED": {
+      "count": 1,
+      "schemas": [
+        "closure-lineage-adopted.v1"
+      ]
+    },
+    "CLOSURE_PREPARED": {
+      "count": 9,
+      "schemas": [
+        "closure-prepared.v1"
+      ]
+    },
+    "EXECUTION_INTENT_PREPARED": {
+      "count": 8,
+      "schemas": [
+        "execution-intent.v1"
+      ]
+    },
+    "EXECUTION_MICROTASK_PLANNED": {
+      "count": 5,
+      "schemas": [
+        "execution-microtask-plan.v1"
+      ]
+    },
+    "EXECUTION_PROJECTED": {
+      "count": 1,
+      "schemas": [
+        "execution-projection-receipt.v1"
+      ]
+    },
+    "EXECUTION_START_CLAIMED": {
+      "count": 4,
+      "schemas": [
+        "execution-start-claim.v1"
+      ]
+    },
+    "HANDOFF_CREATED": {
+      "count": 5,
+      "schemas": [
+        "None",
+        "handoff-created.v2"
+      ]
+    },
+    "HOLDER_PROCESS_RECORDED": {
+      "count": 19,
+      "schemas": [
+        "holder-process.v1"
+      ]
+    },
+    "INCIDENT_ADJUDICATED": {
+      "count": 1,
+      "schemas": [
+        "incident-adjudication.v1"
+      ]
+    },
+    "INTAKE_ITEM_CONFIRMED": {
+      "count": 9,
+      "schemas": [
+        "None"
+      ]
+    },
+    "INTAKE_ITEM_PLANNED": {
+      "count": 9,
+      "schemas": [
+        "None"
+      ]
+    },
+    "INTAKE_ITEM_RECORDED": {
+      "count": 9,
+      "schemas": [
+        "None"
+      ]
+    },
+    "LEASE_HOLD_EXTENDED": {
+      "count": 1,
+      "schemas": [
+        "lease-hold-extended.v1"
+      ]
+    },
+    "LEASE_RECLAIMED": {
+      "count": 3,
+      "schemas": [
+        "lease-reclaimed.v1"
+      ]
+    },
+    "LEASE_RENEWED": {
+      "count": 803,
+      "schemas": [
+        "None",
+        "lease-renewed.v2",
+        "lease-renewed.v3"
+      ]
+    },
+    "LEASE_TRANSFERRED": {
+      "count": 4,
+      "schemas": [
+        "None",
+        "lease-transferred.v2"
+      ]
+    },
+    "MISSION_CREATED": {
+      "count": 31,
+      "schemas": [
+        "None"
+      ]
+    },
+    "MISSION_TRANSITIONED": {
+      "count": 125,
+      "schemas": [
+        "None"
+      ]
+    },
+    "PLANNING_DECISION_RESERVED": {
+      "count": 19,
+      "schemas": [
+        "None"
+      ]
+    },
+    "PLANNING_DRAFT_CHG_RESERVED": {
+      "count": 19,
+      "schemas": [
+        "None"
+      ]
+    },
+    "PLANNING_DRAFT_CREATED": {
+      "count": 21,
+      "schemas": [
+        "planning-draft.v1"
+      ]
+    },
+    "PLANNING_DRAFT_INTAKE_BOUND": {
+      "count": 10,
+      "schemas": [
+        "None"
+      ]
+    },
+    "PLANNING_DRAFT_SPECS_BOUND": {
+      "count": 19,
+      "schemas": [
+        "None"
+      ]
+    },
+    "PLANNING_SCOPE_CARD_SUBMITTED": {
+      "count": 10,
+      "schemas": [
+        "None"
+      ]
+    },
+    "RECLAIM_RISK_ACCEPTED": {
+      "count": 1,
+      "schemas": [
+        "reclaim-risk-accepted.v1"
+      ]
+    },
+    "RUN_CREATED": {
+      "count": 569,
+      "schemas": [
+        "None",
+        "run-created.v2"
+      ]
+    },
+    "RUN_EXPIRED_SETTLED": {
+      "count": 39,
+      "schemas": [
+        "expired-run-settlement.v2",
+        "expired-run-settlement.v3"
+      ]
+    },
+    "RUN_LEASE_REVOKED": {
+      "count": 7,
+      "schemas": [
+        "unstarted-run-revoked.v1"
+      ]
+    },
+    "RUN_LEGACY_LEASE_FENCED": {
+      "count": 5,
+      "schemas": [
+        "legacy-terminal-lease-fence.v1"
+      ]
+    },
+    "RUN_STARTED": {
+      "count": 5,
+      "schemas": [
+        "run-started.v1"
+      ]
+    },
+    "RUN_TERMINAL_LEASE_FENCED": {
+      "count": 1,
+      "schemas": [
+        "terminal-lease-fence.v1"
+      ]
+    },
+    "RUN_TERMINAL_LEASE_RECONCILED": {
+      "count": 1,
+      "schemas": [
+        "terminal-lease-reconciliation.v1"
+      ]
+    },
+    "RUN_TRANSITIONED": {
+      "count": 1335,
+      "schemas": [
+        "None",
+        "run-transition.v2",
+        "run-transition.v3"
+      ]
+    },
+    "VERIFICATION_LEASE_RECOVERED": {
+      "count": 1,
+      "schemas": [
+        "expired-verification-lease-recovered.v1"
+      ]
+    },
+    "VERIFICATION_LEASE_REISSUED": {
+      "count": 1,
+      "schemas": [
+        "verification-lease-reissued.v1"
+      ]
+    },
+    "WORK_ADJUDICATED": {
+      "count": 21,
+      "schemas": [
+        "work-adjudication.v1"
+      ]
+    },
+    "WORK_CREATED": {
+      "count": 508,
+      "schemas": [
+        "None"
+      ]
+    },
+    "WORK_RELATION_ADDED": {
+      "count": 12,
+      "schemas": [
+        "None"
+      ]
+    },
+    "WORK_TRANSITIONED": {
+      "count": 2230,
+      "schemas": [
+        "None"
+      ]
+    }
+  },
+  "runs_total": 570,
+  "run_activity_ok": 570,
+  "run_activity_fail": [],
+  "works_read": 432,
+  "works_by_state": {
+    "IN_PROGRESS": 3,
+    "CLOSED": 238,
+    "CANCELLED": 107,
+    "ACCEPTED": 84
+  },
+  "runs_read_via_works": 483,
+  "missions_read": 16
+}
