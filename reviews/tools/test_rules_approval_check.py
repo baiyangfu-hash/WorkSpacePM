@@ -26,8 +26,14 @@ def comment(body: str, user: dict | None = None, app: dict | None = None) -> dic
     return {"id": 1, "html_url": "https://example.invalid/c/1", "body": body, "user": user or USER, "performed_via_github_app": app}
 
 
-def test_rule_patterns_are_a_subset_of_the_protected_list() -> None:
-    assert set(rules.RULE_PATTERNS) <= set(audit_pr.PROTECTED_PATTERNS)
+def test_rule_patterns_are_locked_paths_already() -> None:
+    import pr_scope_check
+
+    # reviews/tools/* is the judge scripts' directory; every other pattern comes straight from the protected list
+    assert set(rules.RULE_PATTERNS) - set(audit_pr.PROTECTED_PATTERNS) == {"reviews/tools/*"}
+    for judge_file in pr_scope_check.JUDGE_PATTERNS:
+        if judge_file.startswith("reviews/tools/"):
+            assert rules.is_rule_file(judge_file), f"{judge_file} is a judge file but rules-gate would not ask the user"
 
 
 def test_the_approver_is_the_same_person_as_the_safety_signer() -> None:
@@ -51,6 +57,9 @@ def test_the_approver_is_the_same_person_as_the_safety_signer() -> None:
         "SYS-2026-001_WorkspaceGovernance/approvers.json",
         "00_Obsidian_Base全局规范文件仓库/spec_registry.json",
         "roles/shared/refs/skill_coordination.md",
+        ".github/workflows/rules-gate.yml",
+        "reviews/tools/pr_scope_check.py",
+        "reviews/tools/safety_zone_check.py",
     ],
 )
 def test_rule_files_are_recognised(path: str) -> None:
@@ -64,7 +73,7 @@ def test_rule_files_are_recognised(path: str) -> None:
         "docs/AGENTS.md.bak",
         "notes/AGENTS.md",
         "0100_PLC自动化/DJ-2026-009/02_PLC程序/PLC_ST/FB_Feed.scl",
-        "reviews/tools/audit_pr.py",
+        "reviews/21_audit_checklist.md",
         ".agents/progress.md",
     ],
 )
@@ -73,7 +82,7 @@ def test_ordinary_files_are_not_rule_files(path: str) -> None:
 
 
 def test_a_pr_without_rule_files_needs_no_approval() -> None:
-    result = rules.judge(["reviews/tools/x.py", "README.md"], [], HEAD)
+    result = rules.judge(["reviews/21_audit_checklist.md", "README.md"], [], HEAD)
     assert result.passed and result.rule_files == []
 
 

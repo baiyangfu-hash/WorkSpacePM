@@ -7,7 +7,7 @@
 判定：
 
 * 取 PR 相对合并基点改到的全部路径（新增、修改、删除、改名的两端都算）；
-* 命中 ``RULE_PATTERNS`` 的路径叫“规则文件”。一个也没改到 → 通过，不要求任何批准（Trae 的普通 PR 不受影响）；
+* 命中 ``RULE_PATTERNS`` 的路径叫“规则文件”（含工作流和判卷脚本）。一个也没改到 → 通过，不要求任何批准（Trae 的普通 PR 不受影响）；
 * 改到了 → PR 评论里必须有一条用户本人写的评论，某一行是 ``规则批准 <PR 当前头提交号，至少 12 位>``。
   只认 ``SIGNERS`` 里的账号（登录名和数字用户 ID 都要对上）；经由 GitHub App 发出的评论不算；提交号不是当前头提交前缀的不算
   （批准完又推新提交，批准自动作废，要重批）；以 ``>`` 开头的引用行、句子中间提到的“规则批准”不算。
@@ -41,8 +41,8 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit_pr import path_matches
 
-# 规则文件：改它们必须有用户本人的批准。必须是 ``audit_pr.PROTECTED_PATTERNS`` 的子集（test_rules_approval_check 钉死），
-# 这样受保护清单一份真源，这里只是“其中哪些要用户原话”。
+# 规则文件和判卷文件：改它们必须有用户本人的批准。必须是 ``audit_pr.PROTECTED_PATTERNS`` 加 ``pr_scope_check.JUDGE_PATTERNS``
+# 里已锁定路径的子集（test_rules_approval_check 钉死），这样锁定清单一份真源，这里只是“其中哪些要用户原话”。
 RULE_PATTERNS = (
     "AGENTS.md",
     "CLAUDE.md",
@@ -54,6 +54,9 @@ RULE_PATTERNS = (
     "SYS-2026-001_WorkspaceGovernance/approvers.json",
     "00_Obsidian_Base*",
     "roles/*",
+    # 判卷本身：改工作流或判卷脚本就能把本检查（和其他门禁）关掉，所以同样要用户本人批准
+    ".github/workflows/*",
+    "reviews/tools/*",
 )
 # 能批准的人：GitHub 登录名 → 数字用户 ID（ID 不随改名变化，两个都要对上；与 safety_zone_check.SIGNERS 同一人）
 SIGNERS = {"baiyangfu-hash": 246858089}
