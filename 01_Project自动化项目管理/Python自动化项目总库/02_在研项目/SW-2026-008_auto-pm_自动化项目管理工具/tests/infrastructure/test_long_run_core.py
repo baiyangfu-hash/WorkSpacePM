@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -105,6 +106,7 @@ class _World:
         self.paused_calls: list[list[int]] = []
         self.resumed_calls: list[list[int]] = []
         self.awake: list[bool] = []
+        self.tree_of: Callable[[int], list[int]] = lambda root: [root, root + 1]
 
     def read(self) -> float | None:
         value = self.readings[min(self.polls, len(self.readings) - 1)]
@@ -132,7 +134,7 @@ class _World:
             read_committed_gib=self.read,
             sleep=self.sleep,
             clock=lambda: self.now,
-            tree=lambda root: [root, root + 1],
+            tree=lambda root: self.tree_of(root),
             pause=self._pause,
             unpause=self._unpause,
             awake=self.awake.append,
@@ -192,14 +194,53 @@ def test_the_guard_does_nothing_without_a_worker_pid_and_survives_unreadable_mem
     assert world.paused_calls == [] and guard["samples"] >= 1 and guard["peak_committed_gib"] == 99.0 and guard["alerts"] == []
 
 
-def test_the_guard_stops_at_once_when_the_job_has_already_ended(tmp_path: Path) -> None:
+def test_the_guard_looks_once_even_when_the_job_has_already_ended_but_never_pauses_it(tmp_path: Path) -> None:
     run_dir = _guard_dir(tmp_path)
     (run_dir / "FAILED").write_text("x", encoding="utf-8")
     world = _World(run_dir, [99.0])
 
     world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)
 
-    assert world.paused_calls == [] and world.polls == 0
+    guard = json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))
+    assert world.paused_calls == [] and world.polls == 0  # no pause on a finished job, no waiting
+    assert guard["samples"] == 1 and guard["peak_committed_gib"] == 99.0  # but the record shows that the guard looked
+
+
+def test_a_short_job_that_ends_before_the_guard_starts_still_leaves_a_sample(tmp_path: Path) -> None:
+    """11-03 Windows run: a 1.5 s job ended before the guard process was up; the guard saw DONE first and left samples=0 (evidence refused)."""
+
+    run_dir = _guard_dir(tmp_path)
+    (run_dir / "DONE").write_text("x", encoding="utf-8")
+    world = _World(run_dir, [12.5])
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)
+
+    guard = json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))
+    assert guard["samples"] == 1 and guard["last_committed_gib"] == 12.5 and world.awake[-1] is False
+
+
+def test_the_first_sample_is_written_before_the_slow_process_listing_runs(tmp_path: Path) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [10.0], end_after=2)
+    seen: list[int] = []
+
+    def slow_unowned() -> float:
+        seen.append(json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))["samples"])
+        return 17.5
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000, read_unowned_gib=slow_unowned)  # type: ignore[arg-type]
+
+    assert seen and seen[0] == 1  # guard.json already said "1 sample" when the listing started
+
+
+def test_a_dead_worker_is_neither_paused_nor_alerted_about_again_and_again(tmp_path: Path) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [99.0], end_after=4)
+    world.tree_of = lambda _root: []  # the worker pid no longer exists: no tree
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)
+
+    assert world.paused_calls == [] and not list(run_dir.glob("ALERT_*.txt"))
 
 
 def test_the_guard_alerts_each_time_the_unowned_commit_grows_8_gib_over_the_start_and_does_not_pause(tmp_path: Path) -> None:
@@ -281,7 +322,7 @@ def test_start_runs_the_command_detached_under_a_worker_and_a_guard_and_leaves_t
     assert _wait(lambda: core.read_status(run_dir)["worker_alive"] is False)  # DONE is written a moment before the worker exits
     final = core.read_status(run_dir)
     assert final["exit_code"] == 0 and final["detached"] is True and final["mem_guard"] is True and final["git_dirty"] in (False, None)
-    assert _wait(lambda: core.read_status(run_dir)["guard"]["samples"] >= 1)
+    assert _wait(lambda: core.read_status(run_dir)["guard"]["samples"] >= 1, 90)  # a loaded Windows machine takes seconds to start the guard process
     guard_pid = json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))["guard_pid"]
     assert _wait(lambda: not core.pid_alive(guard_pid), 20)  # the guard ends after the job
     assert b"done" in (run_dir / "run.log").read_bytes()
@@ -517,3 +558,22 @@ def test_a_task_directory_that_cannot_be_created_is_reported_in_plain_words(tmp_
 
     with pytest.raises(core.LongRunError, match="建不了任务目录"):
         core.start(tmp_path, "reserved", [PY, "-c", "pass"], cwd=tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="compares the reading with the Windows performance counter")
+def test_the_committed_reading_matches_the_windows_system_counter() -> None:
+    """Real-machine step 2 of the long-run check: the guard's number is the system's ``\\Memory\\Committed Bytes``, within half a GiB."""
+
+    import re
+    import subprocess
+
+    from auto_pm.infrastructure import memory_preflight as mp
+
+    counter = subprocess.run(["typeperf", r"\Memory\Committed Bytes", "-sc", "1"], capture_output=True, check=True, timeout=120).stdout
+    values = re.findall(rb'"([0-9]+(?:\.[0-9]+)?)"', counter)
+    assert values, counter  # the sample row: "date time","bytes"
+    counter_gib = float(values[-1]) / mp.GIB
+
+    snapshot = mp.read_commit()
+
+    assert snapshot is not None and abs(snapshot.committed / mp.GIB - counter_gib) <= 0.5

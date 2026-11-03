@@ -449,7 +449,10 @@ def guard_loop(
     _write_json(run_dir / "guard.json", state)
     try:
         while clock() - started < max_seconds:
-            if any((run_dir / marker).exists() for marker in (*END_MARKERS, "STOPPED", "STOP")):  # STOP: ``stop`` was asked; it unfreezes and kills
+            # STOP: ``stop`` was asked, it unfreezes and kills.  A job that has already ended is still sampled once (below), so a short job
+            # that finishes before this process has even started leaves evidence that the guard looked, instead of an empty record.
+            ended = any((run_dir / marker).exists() for marker in (*END_MARKERS, "STOPPED", "STOP"))
+            if ended and state["samples"] > 0:
                 break
             awake(True)
             committed = read_committed_gib()
@@ -458,10 +461,14 @@ def guard_loop(
                 state["peak_committed_gib"] = max(float(state["peak_committed_gib"]), round(committed, 2))
                 state["last_committed_gib"] = round(committed, 2)
                 state["last_sample_at"] = _now()
-                if not paused and committed >= limit_gib:
+                _write_json(run_dir / "guard.json", state)  # at once: the first sample must be visible long before the (slower) process listing below
+                if ended:
+                    pass  # nothing left to protect: no pause, no resume
+                elif not paused and committed >= limit_gib:
                     root = _worker_pid(run_dir)
-                    if root:
-                        paused = tree(root)
+                    members = tree(root) if root else []  # an empty tree: the worker is gone, there is nothing to pause (and nothing to alert about)
+                    if members:
+                        paused = members
                         count = pause(paused)
                         text = f"{_now()} committed {committed:.1f} GiB >= {limit_gib:g} GiB: paused {count} processes of the tree of pid {root}\n"
                         (run_dir / f"ALERT_{int(time.time())}.txt").write_text(text, encoding="utf-8")
@@ -492,6 +499,8 @@ def guard_loop(
                     state["alerts"].append(text.strip())
                 unowned_steps = max(unowned_steps, steps)
             _write_json(run_dir / "guard.json", state)
+            if ended:
+                break
             sleep(poll_seconds)
     finally:
         if paused:
