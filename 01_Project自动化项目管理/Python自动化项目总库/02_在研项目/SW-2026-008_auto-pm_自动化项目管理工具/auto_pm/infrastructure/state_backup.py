@@ -13,7 +13,7 @@ What leaves the computer, and what does not:
   one) and no known secret format (``auto_pm.domain.secret_patterns``) may match.  Any hit refuses the push; only labels are reported.
 * Nothing about the computer goes into the manifest (no host name, no paths).
 
-Credentials are never handled here: Git uses the user's own credential manager.  The remote is read from ``scripts/state_backup.json``
+Credentials are never handled here: Git uses the user's own credential manager.  The remote is read from ``scripts/state_backup.json`` of the project directory
 and must be a plain ``https://host/owner/repo`` address without user information.  Old backups are never deleted and nothing is forced.
 
 ``pull`` only brings a backup home, verified, into ``.auto-pm/backups/continuity/``; it prints the ``restore-backup`` command and never
@@ -51,6 +51,10 @@ from auto_pm.infrastructure.git_timeout import run_git_bounded
 STATE_MANIFEST_SCHEMA = "state-backup.v1"
 MARKER_SCHEMA = "state-backup-marker.v1"
 CONFIG_RELATIVE = Path("scripts") / "state_backup.json"
+#: The repository root (``workspace_root``) is not the project directory: ``scripts/`` lives in the project directory, like the memory gate's pin file.
+PROJECT_RELATIVE = Path("01_Project自动化项目管理") / "Python自动化项目总库" / "02_在研项目" / "SW-2026-008_auto-pm_自动化项目管理工具"
+#: Project directory of the checkout this module runs from (a source checkout); a deployed release has no ``scripts/`` next to it.
+_MODULE_PROJECT_DIR = Path(__file__).resolve().parents[2]
 CACHE_RELATIVE = Path(".auto-pm") / "cache"
 STAGE_RELATIVE = CACHE_RELATIVE / "state-stage"
 REPO_RELATIVE = CACHE_RELATIVE / "state-repo"
@@ -134,15 +138,28 @@ def parse_config(raw: object) -> StateBackupConfig:
     return StateBackupConfig(remote_url=url, branch=branch, stale_after_hours=hours)
 
 
+def config_candidates(workspace_root: str | Path) -> list[Path]:
+    """Where ``state_backup.json`` may be: the project directory under the repository root, then next to this module (source checkout)."""
+
+    candidates = [Path(workspace_root) / PROJECT_RELATIVE / CONFIG_RELATIVE, _MODULE_PROJECT_DIR / CONFIG_RELATIVE]
+    unique: list[Path] = []
+    for candidate in candidates:
+        if candidate not in unique:
+            unique.append(candidate)
+    return unique
+
+
 def load_config(workspace_root: str | Path) -> StateBackupConfig:
-    path = Path(workspace_root) / CONFIG_RELATIVE
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as error:
-        raise StateBackupError(f"缺少配置文件 {CONFIG_RELATIVE.as_posix()}（写明私有仓库的 https 地址）") from error
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise StateBackupError(f"配置文件 {CONFIG_RELATIVE.as_posix()} 读不了或不是合法 JSON：{error}") from error
-    return parse_config(raw)
+    shown = (PROJECT_RELATIVE / CONFIG_RELATIVE).as_posix()
+    for path in config_candidates(workspace_root):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise StateBackupError(f"配置文件 {shown} 读不了或不是合法 JSON：{error}") from error
+        return parse_config(raw)
+    raise StateBackupError(f"缺少配置文件 {shown}（写明私有仓库的 https 地址）")
 
 
 # ---------------------------------------------------------------- the sanitised copy
