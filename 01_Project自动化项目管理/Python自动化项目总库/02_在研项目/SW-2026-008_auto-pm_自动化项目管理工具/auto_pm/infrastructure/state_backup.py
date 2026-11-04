@@ -39,7 +39,6 @@ from auto_pm.domain.secret_patterns import secret_labels
 from auto_pm.infrastructure.continuity_backup import (
     BACKUP_RELATIVE_DIR,
     MANIFEST_SCHEMA,
-    ContinuityBackupError,
     ContinuityBackupService,
     LedgerReport,
     manifest_path,
@@ -240,7 +239,10 @@ def _build_snapshot(workspace: Path, taken_at: datetime) -> _Snapshot:
         manifest_file = stage / f"{base}.json"
         manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return _Snapshot(stage, gz, manifest_file, manifest, base)
-    except ContinuityBackupError as error:
+    except StateBackupError:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    except ContinuityStoreError as error:  # the online backup and its verification report through the store's error types
         shutil.rmtree(stage, ignore_errors=True)
         raise StateBackupError(str(error)) from error
     except BaseException:

@@ -7,8 +7,11 @@ from pathlib import Path
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.infrastructure.continuity_store import ContinuityStoreError
-from auto_pm.infrastructure.state_backup import StateBackupService, read_state_backup_status
+from auto_pm.application.state_backup_facade import (
+    StateBackupError,
+    StateBackupService,
+    read_state_backup_status,
+)
 
 
 def _service(ctx: click.Context) -> StateBackupService:
@@ -29,7 +32,7 @@ def push_command(ctx: click.Context, dry_run: bool) -> None:
 
     try:
         result = _service(ctx).push(dry_run=dry_run)
-    except ContinuityStoreError as error:
+    except StateBackupError as error:
         raise click.ClickException(str(error)) from error
     size = f"{result.gz_size / 1024:.0f} KiB"
     if result.dry_run:
@@ -47,7 +50,7 @@ def pull_command(ctx: click.Context, name: str | None) -> None:
 
     try:
         result = _service(ctx).pull(name)
-    except ContinuityStoreError as error:
+    except StateBackupError as error:
         raise click.ClickException(str(error)) from error
     app_ctx: AppContext = ctx.find_root().obj
     try:
