@@ -295,9 +295,8 @@ def test_a_shell_whose_parent_shows_as_pid_1_outside_a_session_root_records_noth
     assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "systemd"))) == 8
 
 
+@pytest.mark.skipif(not (sys.platform.startswith("linux") and Path("/bin/bash").exists()), reason="drives a real shell chain on Linux")
 def test_on_a_real_process_chain_auto_records_the_agent_host_and_not_its_per_command_shell(tmp_path: Path) -> None:
-    if not sys.platform.startswith("linux") or not Path("/bin/bash").exists():
-        pytest.skip("drives a real shell chain on Linux")
     # a stand-in agent host: a copy of bash under another name, so its image is neither a shell nor an interpreter
     host = tmp_path / "agent-host"
     host.write_bytes(Path("/bin/bash").read_bytes())
@@ -314,6 +313,7 @@ def test_on_a_real_process_chain_auto_records_the_agent_host_and_not_its_per_com
     assert lines["holder"] == lines["host"] != lines["shell"]
 
 
+@pytest.mark.skipif(not (sys.platform.startswith("linux") and Path("/bin/bash").exists()), reason="drives a real shell chain on Linux")
 def test_the_recorded_holder_is_still_alive_after_the_command_that_recorded_it_has_ended(tmp_path: Path) -> None:
     """The failure of 2026-10-19 / 2026-10-23: a single run looked right, but the recorded process died with its command.
 
@@ -321,8 +321,6 @@ def test_the_recorded_holder_is_still_alive_after_the_command_that_recorded_it_h
     still judge ALIVE after command 1's shell is gone, and command 2 must find the same host again: that is what a later reclaim sees.
     """
 
-    if not sys.platform.startswith("linux") or not Path("/bin/bash").exists():
-        pytest.skip("drives a real shell chain on Linux")
     host_image = tmp_path / "agent-host"  # a copy of bash under another name, so its image is neither a shell nor an interpreter
     host_image.write_bytes(Path("/bin/bash").read_bytes())
     host_image.chmod(0o755)
@@ -334,20 +332,21 @@ def test_the_recorded_holder_is_still_alive_after_the_command_that_recorded_it_h
         [str(host_image), "-c", f"echo host=$$; while read -r go; do {per_command}; done"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", cwd=root, env={**os.environ, "PYTHONPATH": str(root)},
     )
-    assert host.stdin is not None and host.stdout is not None
+    stdin, stdout = host.stdin, host.stdout
+    assert stdin is not None and stdout is not None
 
     def run_command() -> list[str]:
-        host.stdin.write("go\n")  # type: ignore[union-attr]
-        host.stdin.flush()  # type: ignore[union-attr]
+        stdin.write("go\n")
+        stdin.flush()
         lines: list[str] = []
-        while (line := host.stdout.readline().strip()) != "done":  # type: ignore[union-attr]
+        while (line := stdout.readline().strip()) != "done":
             if not line:
                 raise AssertionError(f"the stand-in host ended early; output so far: {lines}")
             lines.append(line)
         return lines
 
     try:
-        first_pid_line = host.stdout.readline().strip()
+        first_pid_line = stdout.readline().strip()
         host_pid = int(first_pid_line.split("=", 1)[1])
         assert host_pid == host.pid
 
@@ -358,7 +357,8 @@ def test_the_recorded_holder_is_still_alive_after_the_command_that_recorded_it_h
         local_host = process_probe.local_host_id()
         if fingerprint is None or not local_host:
             pytest.skip("the process table of this host cannot be read")
-        assert process_probe.observe(shell_1) is not None and process_probe.observe(shell_1).pid_exists is False  # type: ignore[union-attr]  # command 1's shell is gone
+        gone = process_probe.observe(shell_1)  # command 1's shell is gone
+        assert gone is not None and gone.pid_exists is False
 
         # between the two commands: what a reclaim would judge right now
         assert judge_process(fingerprint, process_probe.observe(holder_1), local_host_id=local_host) is ProcessVerdict.ALIVE
