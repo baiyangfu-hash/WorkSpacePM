@@ -217,6 +217,8 @@ def test_the_guard_survives_an_unreadable_worker_pid_when_memory_is_hot_and_paus
     errors = [alert for alert in guard["alerts"] if "worker.pid" in alert]
     assert len(errors) == 1 and "下一轮重试" in errors[0]  # noted once, not once per round
     assert guard["worker_pid_error"]
+    alert_files = list(run_dir.glob("ALERT_*.txt"))
+    assert any("worker.pid" in path.read_text(encoding="utf-8") for path in alert_files)  # an ALERT file somebody can see, like for a pause
 
 
 def test_the_guard_keeps_noting_nothing_new_while_worker_pid_stays_unreadable_and_does_not_pause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -236,6 +238,8 @@ def test_the_guard_keeps_noting_nothing_new_while_worker_pid_stays_unreadable_an
     guard = json.loads(real(run_dir / "guard.json", encoding="utf-8"))
     assert world.paused_calls == [] and world.polls >= 5 and guard["samples"] >= 5
     assert len([alert for alert in guard["alerts"] if "worker.pid" in alert]) == 1
+    worker_pid_alerts = [path for path in run_dir.glob("ALERT_*.txt") if "worker.pid" in path.read_text(encoding="utf-8")]
+    assert len(worker_pid_alerts) == 1 and "没有挂起" in worker_pid_alerts[0].read_text(encoding="utf-8")  # one file for one message, not one per round
 
 
 def test_the_guard_looks_once_even_when_the_job_has_already_ended_but_never_pauses_it(tmp_path: Path) -> None:

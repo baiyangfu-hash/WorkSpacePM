@@ -532,6 +532,9 @@ def guard_loop(
                         if state.get("worker_pid_error") != str(problem):
                             state["worker_pid_error"] = str(problem)
                             state["alerts"].append(note)
+                            # like a pause: an ALERT file somebody can see, not only a line inside guard.json (the job is NOT paused this round)
+                            with contextlib.suppress(OSError):
+                                (run_dir / f"ALERT_{int(time.time())}.txt").write_text(note + "\n", encoding="utf-8")
                     members = tree(root) if root else []  # an empty tree: the worker is gone, there is nothing to pause (and nothing to alert about)
                     if members:
                         paused = members
