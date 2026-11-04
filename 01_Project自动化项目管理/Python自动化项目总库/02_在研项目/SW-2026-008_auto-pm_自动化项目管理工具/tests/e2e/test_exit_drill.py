@@ -230,7 +230,7 @@ def test_settlement_chain_runs_end_to_end_with_the_production_guards_on(
 
 @pytest.mark.xfail(
     strict=True,
-    reason="TD-PENDING-476: under RUNTIME_IDENTITY_DIVERGENCE the chain is refused at its first step by G-IDENTITY-WRITE; the recovery order (P2) clears it",
+    reason="TD-SW008-273: under RUNTIME_IDENTITY_DIVERGENCE the chain is refused at its first step by G-IDENTITY-WRITE; the recovery order (P2) clears it",
 )
 def test_settlement_chain_runs_end_to_end_under_a_runtime_identity_conflict(
     tmp_path: Path, control_root_guard_switch: Callable[[], None], monkeypatch: pytest.MonkeyPatch

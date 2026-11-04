@@ -50,12 +50,12 @@ GUARD_REFUSALS = frozenset({"GuardClickRefusal", "GuardStoreRefusal", "GuardRefu
 
 # Deadlocks that exist today (found by ``find_deadlocks`` over the tables), each with the TD that closes it and the date by which
 # it must be flipped.  The list can only get shorter: add nothing here to make a new deadlock pass, fix the guard.
-# TD-PENDING-476: the coordinator assigns the number; the recovery order (P2) clears them.
+# TD-SW008-273: main-ledger TD (assigned by the main executor); the recovery order (P2) clears them.
 KNOWN_DEADLOCKS: dict[tuple[str, str, str], tuple[str, date]] = {
-    ("LEASE_EXPIRED", "RUNTIME_IDENTITY_DIVERGENCE", "G-IDENTITY-WRITE"): ("TD-PENDING-476", date(2026, 12, 15)),
-    ("LEASE_EXPIRED", "RUNTIME_IDENTITY_UNVERIFIED", "G-IDENTITY-WRITE"): ("TD-PENDING-476", date(2026, 12, 15)),
-    ("LIVE_RUN_UNDER_FINISHED_WORK", "RUNTIME_IDENTITY_DIVERGENCE", "G-IDENTITY-WRITE"): ("TD-PENDING-476", date(2026, 12, 15)),
-    ("LIVE_RUN_UNDER_FINISHED_WORK", "RUNTIME_IDENTITY_UNVERIFIED", "G-IDENTITY-WRITE"): ("TD-PENDING-476", date(2026, 12, 15)),
+    ("LEASE_EXPIRED", "RUNTIME_IDENTITY_DIVERGENCE", "G-IDENTITY-WRITE"): ("TD-SW008-273", date(2026, 12, 15)),
+    ("LEASE_EXPIRED", "RUNTIME_IDENTITY_UNVERIFIED", "G-IDENTITY-WRITE"): ("TD-SW008-273", date(2026, 12, 15)),
+    ("LIVE_RUN_UNDER_FINISHED_WORK", "RUNTIME_IDENTITY_DIVERGENCE", "G-IDENTITY-WRITE"): ("TD-SW008-273", date(2026, 12, 15)),
+    ("LIVE_RUN_UNDER_FINISHED_WORK", "RUNTIME_IDENTITY_UNVERIFIED", "G-IDENTITY-WRITE"): ("TD-SW008-273", date(2026, 12, 15)),
 }
 MAX_KNOWN_DEADLOCKS = 4
 
@@ -304,7 +304,7 @@ def test_known_deadlocks_carry_a_td_number_and_have_not_passed_their_date() -> N
 
 @pytest.mark.xfail(
     strict=True,
-    reason="TD-PENDING-476: 身份不一致时恢复链的前置步骤被 G-IDENTITY-WRITE 挡住，P2 的恢复令清除；清除后本用例变绿，必须翻转",
+    reason="TD-SW008-273: 身份不一致时恢复链的前置步骤被 G-IDENTITY-WRITE 挡住，P2 的恢复令清除；清除后本用例变绿，必须翻转",
 )
 def test_known_deadlock_identity_divergence_blocks_the_recovery_chain() -> None:
     assert not [d for d in find_deadlocks() if d.held_by.startswith("RUNTIME_IDENTITY")]
