@@ -205,3 +205,44 @@ def test_a_failing_gate_reader_never_stops_orient(tmp_path: Path, monkeypatch: p
     result = _run(tmp_path, "orient", PROJECT)
 
     assert result.exit_code == 0 and "未能读取总闸状态" in result.output
+
+
+def test_orient_adds_one_read_only_state_backup_line_from_the_local_marker_only(tmp_path: Path) -> None:
+    """Ledger off-site backup: no marker -> a warning with the command; a fresh marker -> the age.  Text on stdout, JSON mode on stderr; resume prints nothing."""
+
+    from datetime import UTC, datetime, timedelta
+
+    _workspace(tmp_path)
+    before = _snapshot(tmp_path)
+
+    none = _run(tmp_path, "orient", PROJECT)
+    none_json = _run(tmp_path, "orient", PROJECT, "--json")
+    resumed = _run(tmp_path, "resume", PROJECT)
+
+    assert none.exit_code == 0 and "还没有做过异地备份" in none.stdout and "pm state-backup push" in none.stdout
+    assert none_json.exit_code == 0 and "异地备份" not in none_json.stdout and "还没有做过异地备份" in none_json.stderr
+    json.loads(none_json.stdout)  # stdout is still one JSON document
+    assert "异地备份" not in resumed.output
+    assert _snapshot(tmp_path) == before and not (tmp_path / ".auto-pm").exists()  # looking writes nothing
+
+    marker = tmp_path / ".auto-pm" / "cache" / "state-backup-last.json"
+    marker.parent.mkdir(parents=True)
+    pushed = datetime.now(UTC) - timedelta(hours=2)
+    marker.write_text(
+        json.dumps({"schema_version": "state-backup-marker.v1", "pushed_at": pushed.isoformat(), "events": 202}), encoding="utf-8"
+    )
+    fresh = _run(tmp_path, "orient", PROJECT)
+    assert fresh.exit_code == 0 and "[账本异地备份] 最近一次 2 小时前" in fresh.stdout and "202 条事件" in fresh.stdout
+
+
+def test_a_failing_state_backup_reader_never_stops_orient(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import auto_pm.ui.cli.pm as pm_module
+
+    def broken(_root: object) -> None:
+        raise PermissionError("denied")
+
+    _workspace(tmp_path)
+    monkeypatch.setattr(pm_module, "read_state_backup_status", broken)
+    result = _run(tmp_path, "orient", PROJECT)
+
+    assert result.exit_code == 0 and "未能读取备份记录" in result.output

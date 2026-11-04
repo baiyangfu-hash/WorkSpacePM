@@ -50,6 +50,9 @@ NOT_WRITE_COMMANDS = frozenset(
         "pending",
         "recover-status",
         "resume",
+        "state-backup pull",  # brings a sanitised copy into .auto-pm/backups/; never touches the live ledger
+        "state-backup push",  # sends a sanitised copy of the ledger to the private repository; the live ledger is only read
+        "state-backup status",
         "triage",
         "workflow",
     }
