@@ -20,6 +20,8 @@ author: "Product PM & Lead Industrial Engineer"
 
 结合 `main.qml` 真实的 StackLayout 与 11 大核心 View 组件，GUI 原型划分为 **三轨道导航 Group**：
 
+> **2026-11-04 提示**：下图是早期 GUI 原型示意，不是现状。图中的 `ModbusDebuggerView` / `ModbusLab`（Modbus 联调工坊）已于 2026-10-25 整个删除；“PM_SESSION 单一真源”已退役（2026-10-10）；“1477 Passed”等数字是当时的快照。现行界面以源码 `main.qml` 为准。
+
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │ Header (72px): Brand Logo + Context Badge [SW-2026-008] + Search Box + WatcherToolbar   │
