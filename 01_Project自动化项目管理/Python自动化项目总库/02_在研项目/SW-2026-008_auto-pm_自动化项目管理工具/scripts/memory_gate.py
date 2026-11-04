@@ -70,6 +70,7 @@ RELOCK_SECONDS = 120.0
 MAX_FROZEN_UNITS = 4
 HEARTBEAT_STALE_SECONDS = 30.0
 LOG_LIMIT_BYTES = 1024 * 1024
+STOP_RETRY_SECONDS = 180.0  # STOP with an unreadable state file: keep trying this long (every POLL_SECONDS) before giving up
 RENOTIFY_SECONDS = 15 * 60.0  # a locked tree nobody has dealt with is announced again this often
 #: On Windows a reader that opens a file in the instant ``os.replace`` swaps it gets PermissionError (winerror 5) or a sharing violation (winerror 32):
 #: read it again a few times before calling the file unreadable.  Same numbers as the long-run state files (PR #518).
@@ -396,6 +397,7 @@ class Gate:
         self.resume_limit = resume_gib
         self.history: list[tuple[float, float, dict[int, int]]] = []
         self.first_seen: dict[int, float] = {}
+        self.last_known_frozen: list[int] = []  # root pids of the last state that could be read: what may still be frozen if the file cannot be read later
         self.dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------ files
@@ -428,6 +430,7 @@ class Gate:
         state.setdefault("frozen", [])
         state.setdefault("recent_resumed", {})
         state.setdefault("next_id", 1)
+        self.last_known_frozen = [int(entry["root"]) for entry in state["frozen"] if isinstance(entry, dict) and "root" in entry]
         return state
 
     def save(self, state: dict[str, Any]) -> None:
@@ -447,6 +450,26 @@ class Gate:
             (self.dir / f"ALERT-{stamp}.txt").write_text(text, encoding="utf-8")
         self.log(("【锁定】" if loud else "【冻结】") + headline)
         self.notify("内存总闸", f"{headline}\n{body}"[:800])
+
+    def alert_unreadable_while_hot(self, error: StateUnreadableError) -> bool:
+        """The state file cannot be read and the machine is over the limit: nothing can be frozen this round, so say so loudly (ALERT file + notice).
+
+        Returns whether the commit was over the limit (and an alert written).
+        """
+
+        try:
+            committed = self.committed_gib()
+        except Exception:  # noqa: BLE001 - a failing reading must not stop the watchdog
+            return False
+        if committed is None or committed < self.limit:
+            return False
+        known = ", ".join(str(pid) for pid in self.last_known_frozen) or "无"
+        self.alert(
+            f"整机已提交 {committed:.1f} GiB 已超过 {self.limit:g} GiB，但读不了状态文件，总闸这一轮不能冻结任何进程",
+            f"{error}\n上次读得到状态时已冻结的进程树根 PID：{known}。\n请立刻手动处理：关掉最占内存的任务；状态文件恢复可读后总闸会自动继续。",
+            loud=True,
+        )
+        return True
 
     # ------------------------------------------------ one step
     def step(self) -> None:
@@ -723,32 +746,56 @@ class Gate:
         return total
 
 
-def run_forever(gate: Gate, *, sleep: Callable[[float], None] = time.sleep, poll: float = POLL_SECONDS, max_steps: int | None = None) -> None:
+def run_forever(
+    gate: Gate,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    poll: float = POLL_SECONDS,
+    max_steps: int | None = None,
+    stop_retry_seconds: float = STOP_RETRY_SECONDS,
+) -> None:
     (gate.dir / STOP_FILE).unlink(missing_ok=True)
     steps = 0
     last_state_error = ("", 0.0)  # (message, monotonic time) - an unreadable state file is logged when it changes or once a minute, not every 5 seconds
+    hot_alert_at: float | None = None  # when the "unreadable state while over the limit" alert was last raised (once, then every RENOTIFY_SECONDS)
     while not (gate.dir / STOP_FILE).exists():
         try:
             gate.step()
+            hot_alert_at = None
         except StateUnreadableError as error:
             if str(error) != last_state_error[0] or time.monotonic() - last_state_error[1] >= 60:
                 gate.log(f"读不了状态，本轮不动作（不会当成空状态）：{error}")
                 last_state_error = (str(error), time.monotonic())
+            if hot_alert_at is None or time.monotonic() - hot_alert_at >= RENOTIFY_SECONDS:
+                try:
+                    if gate.alert_unreadable_while_hot(error):
+                        hot_alert_at = time.monotonic()
+                except Exception as problem:  # noqa: BLE001 - raising the alarm must not stop the watchdog either
+                    gate.log(f"告警失败 {type(problem).__name__}: {problem}")
         except Exception as error:  # noqa: BLE001 - the watchdog must outlive any single failure
             gate.log(f"本轮异常 {type(error).__name__}: {error}")
         steps += 1
         if max_steps is not None and steps >= max_steps:
             return
         sleep(poll)
-    try:
-        resumed = gate.resume_all()  # never leave anything frozen behind
-    except StateUnreadableError as error:
-        gate.alert(
-            "内存总闸收到 STOP，但读不了状态文件，没有解冻任何进程",
-            f"{error}\n请稍后手动运行：python -B scripts\\memory_gate.py resume-all（读得了时才会解冻）。",
-            loud=True,
-        )
-        return
+    waited = 0.0
+    while True:
+        try:
+            resumed = gate.resume_all()  # never leave anything frozen behind
+            break
+        except StateUnreadableError as error:
+            if waited >= stop_retry_seconds:  # a few minutes of trying every POLL_SECONDS: the file is not coming back, say so and leave
+                known = ", ".join(str(pid) for pid in gate.last_known_frozen) or "无"
+                gate.alert(
+                    "内存总闸收到 STOP，但读不了状态文件，没有解冻任何进程",
+                    f"{error}\n已每 {poll:g} 秒重试 {waited:g} 秒仍读不了。上次读得到状态时已冻结的进程树根 PID（可能仍在冻结）：{known}。\n"
+                    "请稍后手动运行：python -B scripts\\memory_gate.py resume-all（读得了时才会解冻）。",
+                    loud=True,
+                )
+                return
+            gate.log(f"收到 STOP，但读不了状态，{poll:g} 秒后重试（已等 {waited:g} 秒）：{error}")
+            sleep(poll)
+            waited += poll
     gate.log(f"收到 STOP，已解冻 {resumed} 个进程，看门狗退出")
 
 
@@ -907,9 +954,16 @@ def selftest(state_dir: Path, *, strict: bool = False) -> list[str]:
             problems.append("内存回落后没有解冻")
         elif not moves(1.5):
             problems.append("已记为解冻，但假进程没有恢复运行")
+    except StateUnreadableError as error:
+        problems.append(f"自检中读不了状态文件，无法下结论：{error}")
     finally:
-        with contextlib.suppress(OSError):
+        try:
             gate.resume_all()
+        except (OSError, StateUnreadableError) as error:  # must not hide the verdict above, and must not skip killing the child below
+            problems.append(f"自检结束时没能解冻假进程（读不了状态）：{error}")
+            with contextlib.suppress(OSError):
+                host.resume([child.pid, *gate.last_known_frozen])
+        with contextlib.suppress(OSError):
             child.kill()
         child.wait(timeout=30)
     return problems

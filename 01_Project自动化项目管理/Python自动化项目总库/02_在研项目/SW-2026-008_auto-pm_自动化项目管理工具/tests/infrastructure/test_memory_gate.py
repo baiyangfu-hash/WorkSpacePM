@@ -878,6 +878,121 @@ def test_a_stop_that_cannot_read_the_state_raises_a_loud_alert_instead_of_claimi
     assert "已解冻" not in (tmp_path / "gate.log").read_text(encoding="utf-8").split("【锁定】")[-1]
 
 
+def test_a_stop_whose_state_comes_back_within_the_retry_window_still_unfreezes_everything(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    w, gate = _gate_with_a_frozen_tree(tmp_path)
+    assert w.frozen()
+    _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), 3 * (mg.READ_RETRIES + 1))  # three whole loads fail (the first round's step, two STOP retries), the fourth works
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        (tmp_path / mg.STOP_FILE).write_text("stop", encoding="utf-8")
+
+    mg.run_forever(gate, sleep=sleep)
+
+    assert w.frozen() == set()  # everything was resumed
+    assert sleeps == [mg.POLL_SECONDS] * 3  # the loop's own sleep, then two retries every 5 s
+    assert not any("没有解冻任何进程" in path.read_text(encoding="utf-8") for path in tmp_path.glob("ALERT-*.txt"))
+
+
+def test_a_stop_that_never_gets_the_state_back_retries_three_minutes_then_alerts_with_the_possibly_frozen_pids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    w, gate = _gate_with_a_frozen_tree(tmp_path)
+    roots = [entry["root"] for entry in gate.load()["frozen"]]
+    _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), None)
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        (tmp_path / mg.STOP_FILE).write_text("stop", encoding="utf-8")
+
+    mg.run_forever(gate, sleep=sleep)
+
+    assert len(sleeps) == 1 + int(mg.STOP_RETRY_SECONDS / mg.POLL_SECONDS) == 37  # the loop's own sleep + 36 retries = 180 s
+    text = list(tmp_path.glob("ALERT-*.txt"))[-1].read_text(encoding="utf-8")
+    assert "没有解冻任何进程" in text and "resume-all" in text and "180" in text
+    assert all(str(root) in text for root in roots) and roots
+    assert w.frozen()  # (and the alert says so, instead of the log claiming "已解冻")
+
+
+def test_an_unreadable_state_while_over_the_limit_raises_one_loud_alert_not_one_per_round(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    w, gate = _gate_with_a_frozen_tree(tmp_path)
+    roots = [entry["root"] for entry in gate.load()["frozen"]]
+    _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), None)
+    w.committed = 45.0
+    clock = {"t": 0.0}
+    monkeypatch.setattr(mg.time, "monotonic", lambda: clock["t"])
+
+    def sleep(seconds: float) -> None:
+        clock["t"] += seconds
+
+    mg.run_forever(gate, sleep=sleep, max_steps=20)  # 100 s of rounds
+
+    alerts = [path for path in tmp_path.glob("ALERT-*.txt") if "读不了状态文件" in path.read_text(encoding="utf-8")]
+    assert len(alerts) == 1  # 20 rounds, one alert
+    text = alerts[0].read_text(encoding="utf-8")
+    assert "已超过" in text and "读不了状态文件" in text and all(str(root) in text for root in roots)
+    assert any("读不了状态文件" in notice[1] for notice in w.notices)  # a Windows notice too, like a freeze
+    assert "【锁定】" in (tmp_path / "gate.log").read_text(encoding="utf-8")
+
+    clock["t"] += mg.RENOTIFY_SECONDS  # nobody did anything for a quarter of an hour: say it again
+    mg.run_forever(gate, sleep=sleep, max_steps=1)
+    assert sum("读不了状态文件" in notice[1] for notice in w.notices) == 2
+
+
+def test_an_unreadable_state_below_the_limit_stays_quiet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    w, gate = _gate_with_a_frozen_tree(tmp_path)
+    _fail_reads_of(monkeypatch, mg.STATE_FILE, PermissionError(13, "denied"), None)
+    w.committed = 30.0
+    notices_before, alerts_before = len(w.notices), len(list(tmp_path.glob("ALERT-*.txt")))  # (the freeze itself already wrote one)
+
+    mg.run_forever(gate, sleep=lambda _s: None, max_steps=10)
+
+    assert len(list(tmp_path.glob("ALERT-*.txt"))) == alerts_before and len(w.notices) == notices_before
+
+
+def test_the_alert_for_an_unreadable_state_is_raised_again_after_the_state_was_read_and_failed_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    w, gate = _gate_with_a_frozen_tree(tmp_path)
+    w.committed = 45.0
+    real = Path.read_text
+    broken = {"on": True}
+
+    def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.name == mg.STATE_FILE and broken["on"]:
+            raise PermissionError(13, "denied")
+        return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(mg, "READ_RETRY_SECONDS", 0.0)
+
+    rounds = {"n": 0}
+
+    def sleep(_seconds: float) -> None:
+        rounds["n"] += 1
+        broken["on"] = rounds["n"] not in (2,)  # broken, broken, one readable round, broken, broken ...
+
+    mg.run_forever(gate, sleep=sleep, max_steps=5)
+
+    # a readable round resets the "already told you" memory, so the second outage is announced again (the first one only once)
+    assert sum("读不了状态文件" in notice[1] for notice in w.notices) == 2
+
+
+def test_the_selftest_reports_its_verdict_even_when_the_state_cannot_be_read_at_the_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ``finally`` of the selftest used to let a ``StateUnreadableError`` replace the verdict (and skip killing the child)."""
+
+    real = mg.Gate.resume_all
+
+    def resume_all(self: Any) -> int:
+        raise mg.StateUnreadableError("读不了 state.json（已重试 8 次）")
+
+    monkeypatch.setattr(mg.Gate, "resume_all", resume_all)
+
+    problems = mg.selftest(tmp_path)  # must return, not raise
+
+    monkeypatch.setattr(mg.Gate, "resume_all", real)
+    assert any("没能解冻假进程" in problem for problem in problems)
+    assert not any("没有冻结假进程" in problem or "回落后没有解冻" in problem for problem in problems)  # the real verdict is still the verdict
+
+
 def test_resume_all_with_an_unreadable_state_stops_with_a_nonzero_exit_code_the_path_and_how_to_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
