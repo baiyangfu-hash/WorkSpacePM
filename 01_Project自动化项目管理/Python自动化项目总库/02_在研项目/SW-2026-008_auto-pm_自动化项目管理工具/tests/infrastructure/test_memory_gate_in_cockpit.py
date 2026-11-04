@@ -32,6 +32,13 @@ def _load(path: Path, name: str) -> ModuleType:
 
 
 mg = _load(SCRIPT, "memory_gate_in_cockpit")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_message_box(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R-16: no test may put a real warning box on the user's desktop (``WTSSendMessageW`` does not wait for a click, so the boxes piled up)."""
+
+    monkeypatch.setattr(mg, "message_box", lambda title, text: True, raising=False)
 status_module = _load(ROOT / "auto_pm" / "infrastructure" / "memory_gate_status.py", "memory_gate_status_under_test")
 LAPTOP = 63.3  # the 31.3 GiB laptop's commit limit
 
@@ -412,6 +419,8 @@ def _is_admin() -> bool:
 
 def _powershell(command: str, timeout: int = 300) -> subprocess.CompletedProcess[bytes]:
     exe = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    # a piped Windows PowerShell writes the OEM code page (GBK on a Chinese Windows); the tests decode UTF-8, which is what the installer sets before it reads the text
+    command = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; " + command
     return subprocess.run([str(exe), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], capture_output=True, timeout=timeout, check=False)  # noqa: S603
 
 
