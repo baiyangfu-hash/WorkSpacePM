@@ -16,12 +16,12 @@
               什么都不删，提示重跑。只装了一半（没有 Python、没有状态目录、没有计划任务）也能卸干净。
   -Status     只读：计划任务状态 + 看门狗自报的状态（含安装文件的 SHA-256 核对）。
 
-  -ExpectedSha256 怎么得到：在仓库根的“控制根”里运行 python -B scripts\memory_gate.py bundle-hash，它列出四个文件各自的哈希和合并哈希；
+  -ExpectedSha256 怎么得到：在仓库根的「控制根」里运行 python -B scripts\memory_gate.py bundle-hash，它列出四个文件各自的哈希和合并哈希；
   用户只应使用审计报告里写明的那个合并哈希。合并哈希把 CRLF 当作 LF 计算，Windows 和 Linux 检出的结果相同。
 
-  运行前先核对本脚本自己（审计 579 R6）：在资源管理器里按住 Shift 右键仓库的 scripts 文件夹，选“在此处打开 PowerShell 窗口”，运行
+  运行前先核对本脚本自己（审计 579 R6）：在资源管理器里按住 Shift 右键仓库的 scripts 文件夹，选「在此处打开 PowerShell 窗口」，运行
     certutil -hashfile install_memory_gate.ps1 SHA256
-  输出必须等于 PR 描述里写的“脚本工作区哈希”（Windows 检出的 CRLF 字节），一致才继续。
+  输出必须等于 PR 描述里写的「脚本工作区哈希」（Windows 检出的 CRLF 字节），一致才继续。
 
   用法（管理员 PowerShell，当前目录是仓库里任意位置）：
     powershell -ExecutionPolicy Bypass -File scripts\install_memory_gate.ps1 -Install -ExpectedSha256 <64 位十六进制>
@@ -71,7 +71,7 @@ $CopiedFiles = @("auto_pm/infrastructure/memory_preflight.py", "auto_pm/infrastr
 function Assert-Admin {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw "请用管理员 PowerShell 运行本脚本（开始菜单里右键 Windows PowerShell，选“以管理员身份运行”）。"
+        throw "请用管理员 PowerShell 运行本脚本（开始菜单里右键 Windows PowerShell，选「以管理员身份运行」）。"
     }
 }
 
@@ -138,7 +138,7 @@ if ($Install) {
     $have = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower()
     if ($have -ne $EmbedSha256) {
         Remove-Item -LiteralPath $zip -Force
-        throw "嵌入式 Python 包的 SHA-256 是 $have，不是写死的 $EmbedSha256，拒绝安装。"
+        throw "嵌入式 Python 包的 SHA-256 是 ${have}，不是写死的 ${EmbedSha256}，拒绝安装。"
     }
     Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $Dest "python") -Force
     Remove-Item -LiteralPath $zip -Force
@@ -167,7 +167,7 @@ if ($Install) {
     & $InstalledPython -I -S -B $InstalledGate selftest
     if ($LASTEXITCODE -ne 0) { throw "自检没有通过，没有注册计划任务。请把上面的输出原样发给 Claude。" }
 
-    Write-Host "6/6 注册计划任务 $TaskName（开机自启，SYSTEM，最高权限）并启动 ..."
+    Write-Host "6/6 注册计划任务 ${TaskName}（开机自启，SYSTEM，最高权限）并启动 ..."
     $action = New-ScheduledTaskAction -Execute $InstalledPython -Argument ('-I -S -B "{0}" run --require-manifest' -f $InstalledGate) -WorkingDirectory $Dest
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -192,7 +192,7 @@ Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ((Test-Path -LiteralPath $InstalledPython) -and (Test-Path -LiteralPath $InstalledGate)) {
     & $InstalledPython -I -S -B $InstalledGate resume-all
     if ($LASTEXITCODE -ne 0) {
-        throw "resume-all 返回 $LASTEXITCODE：没有确认被冻结的进程已全部解冻（状态文件读不了？），所以没有删除计划任务和安装目录。请稍后重新运行 -Uninstall，或先手动运行：`"$InstalledPython`" -I -S -B `"$InstalledGate`" resume-all"
+        throw "resume-all 返回 ${LASTEXITCODE}：没有确认被冻结的进程已全部解冻（状态文件读不了？），所以没有删除计划任务和安装目录。请稍后重新运行 -Uninstall，或先手动运行：`"$InstalledPython`" -I -S -B `"$InstalledGate`" resume-all"
     }
 } else {
     Write-Host "没有找到已安装的 Python 或看门狗脚本（可能只装了一半），跳过解冻步骤。"
