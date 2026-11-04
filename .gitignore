@@ -138,6 +138,15 @@ gittoken.txt
 # 守护测试：tests/test_gitignore_plc_db.py（CI gitignore-guard 每个 PR 都跑）
 !0100_PLC自动化/**/*.db
 !**/templates/plc-*/**/*.db
+# 2026-11-04: 旧发布（已入库）模板里生成的 0 字节 GlobalVars.db 占位文件，逐条写明路径、不用通配符，不影响新发布目录和守护测试的探针路径
+/00_Infrastructure/auto_pm/releases/1.2.3-813105c/templates/plc-standard-project/template/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db
+/00_Infrastructure/auto_pm/releases/1.2.3-813105c/templates/plc-test-suite/template/DB1/GlobalVars.db
+/00_Infrastructure/auto_pm/releases/1.2.3-d41eb38/templates/plc-standard-project/template/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db
+/00_Infrastructure/auto_pm/releases/1.2.3-d41eb38/templates/plc-test-suite/template/DB1/GlobalVars.db
+/00_Infrastructure/auto_pm/releases/1.2.3-f950525/templates/plc-standard-project/template/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db
+/00_Infrastructure/auto_pm/releases/1.2.3-f950525/templates/plc-test-suite/template/DB1/GlobalVars.db
+/00_Infrastructure/auto_pm/releases/1.2.4-6699a5b/templates/plc-standard-project/template/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db
+/00_Infrastructure/auto_pm/releases/1.2.4-6699a5b/templates/plc-test-suite/template/DB1/GlobalVars.db
 # 放行范围内仍要挡住的：系统缩略图缓存、项目内的运行时库
 **/Thumbs.db
 0100_PLC自动化/**/.auto-pm/**/*.db
@@ -182,3 +191,7 @@ PLC源程序样例/
 *.tar.gz
 *.bak
 *.hmiproj.bak
+
+# --- 2026-11-04: keep editor files out of git; rules only keep NEW files out, already tracked files and history are not affected ---
+# 编辑器工作区配置，每台电脑自己的
+*.code-workspace
