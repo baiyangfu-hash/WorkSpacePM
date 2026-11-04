@@ -31,6 +31,14 @@ def _load() -> ModuleType:
 
 mg = _load()
 GIB = mg.GIB
+
+
+@pytest.fixture(autouse=True)
+def _no_real_message_box(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R-16: no test may put a real warning box on the user's desktop (``mg.main(["run", "--require-manifest", ...])`` used to; ``WTSSendMessageW`` does not wait for a click, so the boxes piled up)."""
+
+    monkeypatch.setattr(mg, "message_box", lambda title, text: True, raising=False)
+
 SELF = 900_001  # the "gate's own pid" in the fake world
 
 
