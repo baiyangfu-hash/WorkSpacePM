@@ -144,6 +144,17 @@ if EXC is not None:
     s = s.replace("CARD220=$CARD176；$DELEG", "CARD220=$CARD176；G2_EXCEPTION=" + EXC_USER + "；EXCEPTION_COMMIT=$EXC_COMMIT；$DELEG")
     s = s.replace("条件：卡 220 的 G1～G9 全 PASS、独立审计放行本卡与卡 220", "条件：卡 220 的 G1～G9 全 PASS，唯一例外是 G2（用户 " + EXC_TS + " 例外放行，消息 " + EXC_USER + "，证据提交 " + EXC[:8] + "）、独立审计放行本卡与卡 220")
     assert "G2_EXCEPTION=" in s and "唯一例外是 G2" in s
+    _ex = "G2 FAIL 经用户 2026-11-04T03:35:09Z 例外放行，其余 PASS"
+    for _a, _b in (("候选产品子树等于卡 220 门禁全过的提交", "候选产品子树等于卡 220 门禁时测过的冻结提交（" + _ex + "）"),
+                   ("卡 220 门禁全过且候选产品子树与之相同", "卡 220 门禁 " + _ex + "，且候选产品子树与之相同")):
+        assert s.count(_a) >= 1, _a
+        s = s.replace(_a, _b)
+    assert "PR #496" in s
+    s = s.replace("PR #496", "PR " + PRN)
+    _g = 'grep -q "2 passed" "$EXC_DIR/rerun.txt"'
+    assert s.count(_g) == 1
+    s = s.replace(_g, _g + ' && grep -q "test_a_keep_list_agent_can_still_close_its_own_finished_station_and_open_the_next_card PASSED" "$EXC_DIR/rerun.txt" && grep -q "test_a_dispatch_run_is_held_to_one_lease_per_project_inside_the_transaction PASSED" "$EXC_DIR/rerun.txt"')
+    assert "门禁全过" not in s.replace("以全量门禁和审计都过就切换", "").replace("全量门禁和审计都过就切换", ""), [l[:80] for l in s.split(chr(10)) if "门禁全过" in l]
     _v = 'bash "$OPS" verify "$ROOT" "$RID"' + chr(10)
     assert s.count(chr(10) + _v) == 1, s.count(chr(10) + _v)
     s = s.replace(chr(10) + _v, chr(10) + _v + '# the 016 report commit does not exist (G2 exception): the installed payload must equal, byte for byte, the payload the gates built and tested at the frozen commit' + chr(10)

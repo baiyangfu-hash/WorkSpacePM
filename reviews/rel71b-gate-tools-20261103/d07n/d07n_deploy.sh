@@ -42,7 +42,7 @@ C=00_Infrastructure/auto_pm
 PATHS=("$C/deployment_manifest.json" "$C/active_release.json" "$C/previous_release.json" "$C/releases/$RID")
 PROJECTS=(SW-2026-008 SYS-2026-001 SW-2026-009 DJ-2026-005)
 GO_REF="$( { grep '^CONFIRMED_BY_USER_IN_THREAD=' "$EV/user_switch_confirmation.txt" 2>/dev/null || true; } | head -n 1 | cut -d= -f2- | cut -d' ' -f1)"
-DELEG="委托执行：用户 2026-10-18 预授权 Claude 自行收口推送；切换有效版本这一步由用户在本线程里预授权（2026-11-03T19:33:23Z “今天 #514 合并后，以 main 最新提交打发版 7.1，全量门禁和审计都过就切换；任一不过则不切、保持 1.3.3-d671611。切换后如果驾驶舱启动或冒烟检查失败，自动回切到 1.3.3-d671611。”，消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7tKDxhSnLfp7mWBPVGmAc3TB，原话与消息编号记在 .auto-pm/reports/m3-d07n/user_switch_confirmation.txt）；条件：卡 220 的 G1～G9 全 PASS，唯一例外是 G2（用户 2026-11-04T03:35:09Z 例外放行，消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu，证据提交 c31934b9）、独立审计放行本卡与卡 220、候选产品子树等于卡 220 门禁全过的提交、任一切换后核验失败即自动回退指针、不回滚数据库"
+DELEG="委托执行：用户 2026-10-18 预授权 Claude 自行收口推送；切换有效版本这一步由用户在本线程里预授权（2026-11-03T19:33:23Z “今天 #514 合并后，以 main 最新提交打发版 7.1，全量门禁和审计都过就切换；任一不过则不切、保持 1.3.3-d671611。切换后如果驾驶舱启动或冒烟检查失败，自动回切到 1.3.3-d671611。”，消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7tKDxhSnLfp7mWBPVGmAc3TB，原话与消息编号记在 .auto-pm/reports/m3-d07n/user_switch_confirmation.txt）；条件：卡 220 的 G1～G9 全 PASS，唯一例外是 G2（用户 2026-11-04T03:35:09Z 例外放行，消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu，证据提交 c31934b9）、独立审计放行本卡与卡 220、候选产品子树等于卡 220 门禁时测过的冻结提交（G2 FAIL 经用户 2026-11-04T03:35:09Z 例外放行，其余 PASS）、任一切换后核验失败即自动回退指针、不回滚数据库"
 mkdir -p "$EV"
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 cli() { "$PY" -B main.py "$@"; }
@@ -60,7 +60,7 @@ echo "== 0. Bindings and read-only preflight"
 [[ "$(sha256sum < "$OPS" | cut -d' ' -f1)" == "$OPS_SHA" ]] || die "pmf_release_ops.sh differs from the bytes D06 drilled"
 EXC_DIR="$REAL/.auto-pm/reports/m3-rel71b/exception"; EXC_COMMIT=c31934b9074b79452bfe3279d17bc68e8526140b
 "$PY" -B -c 'import json,sys;v=json.load(open(sys.argv[1],encoding="utf-8"))["gates"];bad=sorted(k for k,g in v.items() if g["verdict"]!="PASS");sys.exit(0 if len(v)==9 and bad==["G2"] else 1)' "$(cygpath -w "$D176_VERDICT")" || die "card 220: anything other than exactly the G2 exception is not allowed"
-[[ "$(cat "$EXC_DIR/rerun.exit")" == "0" ]] && grep -q "2 passed" "$EXC_DIR/rerun.txt" && grep -q "cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu" "$EXC_DIR/EXCEPTION.md" || die "the G2 exception evidence (rerun of the two cases, user message id) is not intact"
+[[ "$(cat "$EXC_DIR/rerun.exit")" == "0" ]] && grep -q "2 passed" "$EXC_DIR/rerun.txt" && grep -q "test_a_keep_list_agent_can_still_close_its_own_finished_station_and_open_the_next_card PASSED" "$EXC_DIR/rerun.txt" && grep -q "test_a_dispatch_run_is_held_to_one_lease_per_project_inside_the_transaction PASSED" "$EXC_DIR/rerun.txt" && grep -q "cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu" "$EXC_DIR/EXCEPTION.md" || die "the G2 exception evidence (rerun of the two cases, user message id) is not intact"
 git -C "$REAL" cat-file -e "$EXC_COMMIT:reviews/rel71b-gate-tools-20261103/README.md" 2>/dev/null || die "the exception evidence commit is not in the repository"
 for sub in auto_pm templates scripts; do [[ "$(git -C "$REAL" rev-parse "$FROZEN:$P/$sub")" == "$(git -C "$REAL" rev-parse "$CARD176:$P/$sub")" ]] || die "$sub of $FROZEN differs from the gated card 220 commit"; done
 [[ "$(git -C "$REAL" rev-parse "$FROZEN^{commit}")" == "$FROZEN" ]] || die "the frozen commit is missing"
@@ -111,7 +111,7 @@ st() { awk -F'|' '/^\|[[:space:]]*变更状态[[:space:]]*\|/{gsub(/^[[:space:]]
 while true; do
   case "$(st)" in
     draft)        cli change transition "$chg" --pid SW-2026-008 --to submitted    --approver fubai --comment "[$DELEG] 提交 D07B" >/dev/null ;;
-    submitted)    cli change transition "$chg" --pid SW-2026-008 --to under_review --approver fubai --comment "[$DELEG] 卡 220 门禁全过且候选产品子树与之相同；指针与清单字节等于冻结值；操作脚本字节等于 D06/D07 所用" >/dev/null ;;
+    submitted)    cli change transition "$chg" --pid SW-2026-008 --to under_review --approver fubai --comment "[$DELEG] 卡 220 门禁 G2 FAIL 经用户 2026-11-04T03:35:09Z 例外放行，其余 PASS，且候选产品子树与之相同；指针与清单字节等于冻结值；操作脚本字节等于 D06/D07 所用" >/dev/null ;;
     under_review) cli change transition "$chg" --pid SW-2026-008 --to approved     --approver fubai --approval-evidence-ref "user-confirmation:$GO_REF" --comment "[$DELEG] 批准：仅写入 releases/$RID、deployment_manifest.json、active_release.json、previous_release.json；切换后任一核验失败即回退指针；不回滚数据库、不合并 main" >/dev/null ;;
     approved)     cli change transition "$chg" --pid SW-2026-008 --to implementing --approver fubai --comment "[$DELEG] 开始部署" >/dev/null ;;
     implementing|completed) break ;;
@@ -227,7 +227,7 @@ while true; do
   case "$(st)" in
     implementing)       cli change transition "$chg" --pid SW-2026-008 --to pending_acceptance --approver fubai --comment "[$DELEG] 已切换并通过切换后核验" >/dev/null ;;
     pending_acceptance) cli change transition "$chg" --pid SW-2026-008 --to accepting --approver fubai --comment "[$DELEG] 开始验收" >/dev/null ;;
-    accepting)          cli change transition "$chg" --pid SW-2026-008 --to completed --approver fubai --approval-evidence-ref "user-confirmation:$GO_REF" --verification-conclusion "[$DELEG] 验收通过（委托验收，切换按用户 2026-11-03T19:33:23Z（12:33 MST）的预授权）。有效版本 active=$RID（PR #496 合并提交 ${FROZEN:0:8}，清单条目 $ENTRY_SHA），previous=$OLD；无回落、无冲突；新命令可用；真实钩子经新运行时退出 0；全部注册项目对账 0/0/0；事件链无断点；三个发布逐文件校验通过；回退命令记在回执里；数据库未回滚" >/dev/null ;;
+    accepting)          cli change transition "$chg" --pid SW-2026-008 --to completed --approver fubai --approval-evidence-ref "user-confirmation:$GO_REF" --verification-conclusion "[$DELEG] 验收通过（委托验收，切换按用户 2026-11-03T19:33:23Z（12:33 MST）的预授权）。有效版本 active=$RID（PR #514 合并提交 ${FROZEN:0:8}，清单条目 $ENTRY_SHA），previous=$OLD；无回落、无冲突；新命令可用；真实钩子经新运行时退出 0；全部注册项目对账 0/0/0；事件链无断点；三个发布逐文件校验通过；回退命令记在回执里；数据库未回滚" >/dev/null ;;
     completed)          break ;;
     *) die "CHG in non-resumable state" ;;
   esac

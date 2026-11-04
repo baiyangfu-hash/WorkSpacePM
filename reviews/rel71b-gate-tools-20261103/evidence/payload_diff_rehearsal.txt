@@ -1,0 +1,1 @@
+# diff -rq -x release_meta.json gates/d04/build_a <fresh pmf_release_ops build of d5632931 into a temporary root>: no output, exit 0 (2026-11-04). The in-script verify after the build then failed only because the temporary root has no launcher (ModuleNotFoundError bootstrap), unrelated to the diff.
