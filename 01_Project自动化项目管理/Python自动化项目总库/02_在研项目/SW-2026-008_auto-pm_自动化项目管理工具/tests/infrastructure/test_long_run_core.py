@@ -207,6 +207,16 @@ def test_the_guard_survives_an_unreadable_worker_pid_when_memory_is_hot_and_paus
         return real(path, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(Path, "read_text", read_text)
+    fake_sleep = world.sleep
+
+    def sleep_over_a_second_boundary(seconds: float) -> None:
+        # ALERT_<epoch seconds>.txt: the alert of the unreadable round and the alert of the pause (a later round) are 20 s apart in real life;
+        # the fake clock makes the rounds instant, so on a fast machine both landed in the same second and the pause alert replaced the other.
+        if world.polls < 2:
+            time.sleep(1.05)
+        fake_sleep(seconds)
+
+    world.sleep = sleep_over_a_second_boundary  # type: ignore[method-assign]
 
     world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)  # must not raise
 
