@@ -732,7 +732,7 @@ def run_group() -> None:
     "--holder-pid",
     default="auto",
     show_default=True,
-    help="与 --lease-wallet 一起：记录持有者的长驻进程（auto=调用本命令的 shell 或 IDE；none=不记录；或给出 pid），供日后回收判定。"
+    help="与 --lease-wallet 一起：记录持有者的长驻进程（auto=agent 宿主进程（IDE 或 agent 本身，跳过每条命令新开的 shell），人在终端里手敲时是那个终端的 shell；none=不记录；或给出 pid），供日后回收判定。"
     "为别的执行者建 Run 时 auto 按 none 处理，不会把你的 shell 记成对方的持有进程",
 )
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
@@ -1455,7 +1455,7 @@ def extend_lease_hold(
 @click.option("--run-id", required=True)
 @click.option("--owner", "owner_id", required=True)
 @_token_options
-@click.option("--holder-pid", default="auto", show_default=True, help="持有者的长驻进程：auto（调用本命令的 shell 或 IDE）或 pid")
+@click.option("--holder-pid", default="auto", show_default=True, help="持有者的长驻进程：auto（agent 宿主进程，跳过每条命令新开的 shell；人手敲时是终端的 shell）或 pid")
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def record_holder(
