@@ -51,6 +51,7 @@ from auto_pm.domain.change.constants import TransitionGuardError
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
 from auto_pm.infrastructure import memory_gate_status
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.state_backup import read_state_backup_status
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
 from auto_pm.ui.cli.caller_path import CallerPath, caller_cwd_default
 from auto_pm.ui.cli.runtime_identity_guard import (
@@ -1356,6 +1357,7 @@ def orient_pm(
     _control_root_sync_notice(ctx, project_id=project_id)
     _emit_query(payload, as_json)
     _memory_gate_line(ctx, as_json)
+    _state_backup_line(ctx, as_json)
 
 
 def _memory_gate_line(ctx: click.Context, as_json: bool) -> None:
@@ -1372,6 +1374,21 @@ def _memory_gate_line(ctx: click.Context, as_json: bool) -> None:
         return
     if status is not None:
         click.echo(status.line(), err=as_json)
+
+
+def _state_backup_line(ctx: click.Context, as_json: bool) -> None:
+    """One read-only line about the ledger's off-site backup: when it was last pushed from this computer (a local marker file, no network).
+
+    Same placement rule as the memory gate line (stdout in text mode, stderr in JSON mode); it never pushes anything and never fails the command.
+    """
+
+    try:
+        app_ctx: AppContext = ctx.find_root().obj
+        status = read_state_backup_status(Path(app_ctx.control_root))
+    except Exception as error:  # a hint must never stop the command it decorates
+        click.echo(f"⚠️ [账本异地备份] 未能读取备份记录：{type(error).__name__}", err=True)
+        return
+    click.echo(status.line(), err=as_json)
 
 
 def _emit_context(ctx: click.Context, project_id: str, start_path: str | None) -> None:
