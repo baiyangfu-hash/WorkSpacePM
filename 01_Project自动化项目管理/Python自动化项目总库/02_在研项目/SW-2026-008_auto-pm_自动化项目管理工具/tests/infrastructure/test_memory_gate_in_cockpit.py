@@ -299,10 +299,32 @@ def test_a_failed_install_rolls_back_and_says_when_the_rollback_itself_failed() 
 def test_repair_does_not_need_the_installed_python_and_asks_the_user_when_it_cannot_decide() -> None:
     clean = _body("Remove-GateInstallation")
 
-    assert "takeown.exe" in clean and clean.index("takeown.exe") < clean.index("state.json") < clean.index("Unregister-ScheduledTask")
+    assert "Reset-FolderAccess" in clean and clean.index("Reset-FolderAccess") < clean.index("state.json") < clean.index("Unregister-ScheduledTask")
     assert "Test-Path -LiteralPath $statePath" in clean  # the state file says whether the watchdog ever ran
     assert "$unknown" in clean and "-ForceDelete" in clean and "状态文件读不了" in clean
     assert clean.index("Test-Path -LiteralPath $python") < clean.index("if (-not $thawed)")  # a missing or broken python only matters when something is frozen
+
+
+def test_a_leftover_with_an_unusable_acl_is_taken_over_reset_and_every_step_is_reported() -> None:
+    """The 2026-11-04 laptop failure: the old half install could not be deleted ("access denied") even after takeown + a grant."""
+
+    access = _body("Reset-FolderAccess")
+
+    # whole tree, in this order: ownership first, then the old ACL is thrown away, then Administrators get full control
+    order = [access.index(needle) for needle in ('"takeown.exe"', '"/setowner"', '"/reset"', '"/grant"')]
+    assert order == sorted(order)
+    assert '"/A", "/R", "/D", "Y"' in access  # takeown: to the Administrators group, recursive, no prompt on unreadable folders
+    assert access.count('"/T", "/C"') >= 3  # the three icacls steps walk the whole tree and carry on past one unreadable item ...
+    assert "退出码" in access and "$trace" in access and "return ($trace" in access  # ... but each exit code is kept and handed back
+    assert "SilentlyContinue" not in access
+
+    clean = _body("Remove-GateInstallation")
+    assert "$access = Reset-FolderAccess $Folder" in clean  # -Install (step 2 and the roll-back), -Repair and -Uninstall all pass through here
+    deletion = clean[clean.index("Remove-Item -LiteralPath $Folder") :]
+    assert deletion.index("Clear-FolderWithBackupRights") < deletion.index("throw")  # a second way of deleting is tried before giving up
+    assert "$access" in deletion[deletion.index("throw") :] and "Get-OwnerAndAcl" in deletion  # the failure names every step and the folder's real state
+    backup = _body("Clear-FolderWithBackupRights")
+    assert '"/MIR", "/B"' in backup and backup.index("robocopy.exe") < backup.index("Remove-Item -LiteralPath $Folder")
 
 
 def test_one_uac_prompt_and_the_prepare_phase_comes_first() -> None:
@@ -347,6 +369,59 @@ def test_the_clean_up_removes_a_half_installed_folder_and_refuses_when_something
     (frozen / "state" / "state.json").write_text('{"frozen": [{"root": 1}]}', encoding="utf-8")
     refused = run(frozen)
     assert refused.returncode == 7 and frozen.exists()  # no python to thaw with: nothing is deleted, the user decides
+
+
+def _is_admin() -> bool:
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined,unused-ignore]
+    except (AttributeError, OSError):
+        return False
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not os.environ.get("SystemRoot"), reason="Windows PowerShell only")
+def test_the_clean_up_removes_a_leftover_whose_acl_names_nobody(tmp_path: Path) -> None:
+    """Rebuild the laptop's leftover (owner SYSTEM, inheritance cut, every entry removed) and show the clean-up gets rid of it."""
+
+    if not _is_admin():
+        pytest.skip("needs an elevated token to hand the folder to SYSTEM")
+    exe = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    system32 = Path(os.environ["SystemRoot"]) / "System32"
+
+    def native(program: str, *arguments: str) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run([str(system32 / program), *arguments], capture_output=True, timeout=120, check=False)  # noqa: S603
+
+    leftover = tmp_path / "MemoryGate"
+    (leftover / "python").mkdir(parents=True)
+    (leftover / "auto_pm" / "infrastructure").mkdir(parents=True)
+    (leftover / "manifest.json").write_text("{}", encoding="utf-8")
+    (leftover / "python" / "python.exe").write_text("x", encoding="utf-8")
+    (leftover / "auto_pm" / "infrastructure" / "a.py").write_text("x", encoding="utf-8")
+
+    owner = native("icacls.exe", str(leftover), "/setowner", "*S-1-5-18", "/T", "/C")
+    cut = native("icacls.exe", str(leftover), "/inheritance:r", "/T", "/C")
+    emptied = native("icacls.exe", str(leftover), "/remove", "*S-1-5-32-544", "*S-1-5-18", "*S-1-5-32-545", "*S-1-5-11", "/T", "/C")
+    # the current user's own entry is named by the whoami SID
+    me = subprocess.run([str(system32 / "whoami.exe"), "/user", "/fo", "csv", "/nh"], capture_output=True, timeout=60, check=False).stdout.decode("utf-8", "replace").strip().split(",")[-1].strip('" \r\n')
+    native("icacls.exe", str(leftover), "/remove", f"*{me}", "/T", "/C")
+    if 0 not in (owner.returncode, cut.returncode, emptied.returncode):
+        pytest.skip("could not build the damaged leftover on this runner")
+    try:
+        plain = subprocess.run([str(exe), "-NoProfile", "-NonInteractive", "-Command", f"Remove-Item -LiteralPath '{leftover}' -Recurse -Force -ErrorAction Stop"], capture_output=True, timeout=120, check=False)  # noqa: S603
+    except subprocess.TimeoutExpired:  # pragma: no cover - a stuck runner is not a result
+        pytest.skip("plain delete timed out")
+    if not leftover.exists():
+        pytest.skip("this runner's tokens still delete the damaged leftover, so the situation is not reproduced here")
+    assert plain.returncode != 0
+
+    command = (
+        f". '{INSTALLER}'; try {{ Remove-GateInstallation '{leftover}' 'AutoPM-MemoryGate-NoSuchTask' $false; exit 0 }} "
+        "catch { Write-Host $_.Exception.Message; exit 7 }"
+    )
+    done = subprocess.run([str(exe), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], capture_output=True, timeout=300, check=False)  # noqa: S603
+    assert done.returncode == 0, done.stdout.decode("utf-8", "replace")
+    assert not leftover.exists()
 
 
 # ---------------------------------------------------------------- setup_env.bat step 5
