@@ -1,0 +1,54 @@
+// ============================================================================
+// FB_2001_AlarmSummary_DJ2026011: 报警汇总与锁存报警灯
+// 描述: 汇总 16 路报警输入, 任意一路为 TRUE 即点亮报警灯并保持;
+//       报警消失后按复位按钮熄灭; 报警仍在时按复位无效。
+// 遵守规范: Siemens LSP (LSP-904 注释 / LSP-905 命名与结构 / LSP-906 边沿检测)
+// ============================================================================
+
+FUNCTION_BLOCK FB_2001_AlarmSummary_DJ2026011
+VAR_INPUT
+    i_arrAlarms : ARRAY[1..16] OF BOOL; // 16 路报警输入, 任意一路 TRUE 表示有报警
+    i_bReset    : BOOL;                 // 复位按钮 (上升沿有效, 按下=TRUE)
+END_VAR
+VAR_OUTPUT
+    o_bAlarmLamp : BOOL; // 报警灯输出, 报警锁存后保持点亮
+    o_bAnyAlarm  : BOOL; // 报警汇总结果, 当前任一路报警为 TRUE
+END_VAR
+VAR
+    fb_rTrigReset : FB_R_TRIG; // 复位按钮上升沿检测
+    s_bResetPulse : BOOL;      // 复位按钮单周期脉冲
+    s_bAlarmLatch : BOOL;      // 报警锁存状态
+END_VAR
+VAR_TEMP
+    temp_iIndex : INT; // 报警输入遍历索引
+END_VAR
+
+BEGIN
+    // ------------------------------------------------------------------
+    // 复位按钮上升沿: 只在按下瞬间产生一个扫描周期脉冲
+    // ------------------------------------------------------------------
+    fb_rTrigReset(IN := i_bReset, Q => s_bResetPulse);
+
+    // ------------------------------------------------------------------
+    // 报警汇总: 遍历 16 路输入, 任意一路为 TRUE 即置汇总标志
+    // ------------------------------------------------------------------
+    o_bAnyAlarm := FALSE;
+    FOR temp_iIndex := 1 TO 16 DO
+        IF i_arrAlarms[temp_iIndex] THEN
+            o_bAnyAlarm := TRUE;
+        END_IF;
+    END_FOR;
+
+    // ------------------------------------------------------------------
+    // 报警锁存: 报警优先置位; 仅当无报警且复位脉冲到来时清零。
+    // 因此报警仍在时按复位无效, 报警消失后仍需按复位才熄灭。
+    // ------------------------------------------------------------------
+    IF o_bAnyAlarm THEN
+        s_bAlarmLatch := TRUE;
+    ELSIF s_bResetPulse THEN
+        s_bAlarmLatch := FALSE;
+    END_IF;
+
+    o_bAlarmLamp := s_bAlarmLatch;
+
+END_FUNCTION_BLOCK

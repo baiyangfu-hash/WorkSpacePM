@@ -1,0 +1,21 @@
+// ============================================================================
+// DB_AlarmSummaryTest: 报警汇总功能块测试实例数据块
+// 描述: 持有 FB_2001_AlarmSummary_DJ2026011 单实例与测试激励/结果变量,
+//       激励由 OB1/.scltest 写入, 结果供 .scltest 断言与上位机读取。
+// 说明: 第 1 路报警由 OB1 接双手启动同步故障, 第 2..16 路由测试激励注入。
+// ============================================================================
+
+DATA_BLOCK DB_AlarmSummaryTest
+{ S7_Optimized_Block := 'TRUE' }
+VERSION : 1.0
+
+VAR
+    fb_AlarmSummary : FB_2001_AlarmSummary_DJ2026011; // 被测报警汇总功能块实例
+    s_arrAlarms     : ARRAY[1..16] OF BOOL;           // 测试激励: 16 路报警输入, 第 1 路由 OB1 接同步故障
+    s_bReset        : BOOL := FALSE;                  // 测试激励: 复位按钮
+    s_bAlarmLamp    : BOOL;                           // 结果: 报警灯
+    s_bAnyAlarm     : BOOL;                           // 结果: 报警汇总
+END_VAR
+
+BEGIN
+END_DATA_BLOCK
