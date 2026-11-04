@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>驾驶舱 · 单个项目</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F3F4F1}
+a{color:#1F5FBF}a:hover{color:#174A96}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="position: relative; min-height: 100vh; background: #F3F4F1; color: #1C2024; font-family: 'Noto Sans SC', system-ui, sans-serif; font-size: 14px; display: flex; flex-wrap: wrap; align-items: stretch">
+
+  <nav aria-label="项目" style="flex: 1 1 232px; background: #FFFFFF; border-right: 1px solid #DCDFD8; padding: 20px 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 6px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1C2024; display: flex; align-items: center; justify-content: center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 12l4-3"></path></svg>
+      </div>
+      <div style="font-weight: 700; font-size: 16px">我的驾驶舱</div>
+    </div>
+    <a href="项目总览.dc.html" style="display: flex; align-items: center; gap: 8px; padding: 10px 8px; border-radius: 8px; text-decoration: none; color: #1C2024; font-size: 14px; border: 1px solid #DCDFD8">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1C2024" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
+      全部项目总览
+    </a>
+    <div style="display: flex; flex-direction: column; gap: 4px">
+      <div style="font-size: 12px; color: #5B636B; padding: 0 8px 4px">项目</div>
+      <sc-for list="{{projects}}" as="p" hint-placeholder-count="3">
+        <button onClick="{{p.pick}}" style="{{p.rowStyle}}">
+          <span style="{{p.dotStyle}}"></span>
+          <span style="flex: 1; min-width: 0; text-align: left">
+            <span style="display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{p.name}}</span>
+            <span style="display: block; font-size: 12px; color: #5B636B">{{p.hint}}</span>
+          </span>
+          <sc-if value="{{p.hasCount}}" hint-placeholder-val="{{true}}">
+            <span style="min-width: 22px; height: 22px; border-radius: 11px; background: #FFF4DC; color: #7A4F00; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{p.count}}</span>
+          </sc-if>
+        </button>
+      </sc-for>
+    </div>
+    <div style="margin-top: auto; padding: 12px 8px 0; border-top: 1px solid #E6E8E3; font-size: 12px; color: #5B636B; display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 4px; background: #1E7A46"></span>账本正常 · 5 秒自动刷新</div>
+      <div>最近刷新 [时间]</div>
+      <a href="#" style="font-size: 12px">设置：批准人与口令</a>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 640px; min-width: 0; padding: 24px 28px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px">
+
+    <sc-if value="{{alertOn}}" hint-placeholder-val="{{true}}">
+      <div role="alert" style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 16px; border: 2px solid #B42318; border-radius: 12px; background: #FFFFFF">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B42318" stroke-width="2" aria-hidden="true"><path d="M12 3l10 18H2z"></path><path d="M12 10v5M12 18v.5"></path></svg>
+        <div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+          <div style="font-weight: 700; color: #8E1B12">“工位清理命令”启动失败：执行租约已过期</div>
+          <div style="font-size: 12px; color: #6B2A23">这条会一直留着，直到你点“知道了”或同一操作重做成功。不要重复点击，关闭窗口后交主执行处理。</div>
+        </div>
+        <button onClick="{{dismissAlert}}" style="height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid #C9CDC5; background: #FFFFFF; font-size: 14px; cursor: pointer; color: #1C2024">知道了</button>
+      </div>
+    </sc-if>
+
+    <header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5B636B">SW-2026-008</div>
+        <h1 style="margin: 0; font-size: 24px; font-weight: 700">auto-pm 自动化项目管理工具</h1>
+        <div style="font-size: 13px; color: #5B636B">你只做三件事：批准范围、确认开始、确认验收。其余由驾驶舱和执行 AI 完成。</div>
+      </div>
+      <button onClick="{{openGoal}}" style="height: 44px; padding: 0 20px; border-radius: 10px; border: none; background: #1F5FBF; color: #FFFFFF; font-size: 15px; font-weight: 500; display: flex; align-items: center; gap: 8px; cursor: pointer">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+        提出新目标
+      </button>
+    </header>
+
+    <section aria-label="概况" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+      <sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+        <div style="{{t.style}}">
+          <div style="font-size: 13px; color: #3D444B">{{t.label}}</div>
+          <div style="font-size: 30px; font-weight: 700; line-height: 1.1">{{t.value}}</div>
+          <div style="font-size: 12px; color: #5B636B">{{t.note}}</div>
+        </div>
+      </sc-for>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start">
+
+      <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+
+        <section aria-labelledby="decide-h" style="background: #FFFFFF; border: 1px solid #DCDFD8; border-radius: 14px; overflow: hidden">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #E6E8E3">
+            <h2 id="decide-h" style="margin: 0; font-size: 17px; font-weight: 700">需要你决定</h2>
+            <span style="font-size: 12px; color: #5B636B">按等待时间排序</span>
+          </div>
+          <sc-for list="{{decisions}}" as="d" hint-placeholder-count="3">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid #EEF0EC">
+              <span style="{{d.chipStyle}}">{{d.action}}</span>
+              <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+                <div style="font-size: 15px; font-weight: 500">{{d.title}}</div>
+                <div style="font-size: 12px; color: #5B636B">{{d.meta}}</div>
+                <sc-if value="{{d.blocked}}" hint-placeholder-val="{{false}}">
+                  <div style="font-size: 12px; color: #8A5A00">不能批准：{{d.blockedReason}}</div>
+                </sc-if>
+              </div>
+              <div style="display: flex; gap: 8px">
+                <button onClick="{{d.detail}}" style="height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #C9CDC5; background: #FFFFFF; color: #1C2024; font-size: 14px; cursor: pointer">{{d.detailLabel}}</button>
+                <button onClick="{{d.confirm}}" disabled="{{d.disabled}}" style="{{d.confirmStyle}}">{{d.confirmLabel}}</button>
+              </div>
+            </div>
+          </sc-for>
+          <sc-if value="{{toast}}" hint-placeholder-val="{{false}}">
+            <div role="status" style="padding: 12px 20px; background: #E6F4EC; color: #1E5E38; font-size: 13px">{{toast}}</div>
+          </sc-if>
+        </section>
+
+        <section aria-labelledby="now-h" style="background: #FFFFFF; border: 1px solid #DCDFD8; border-radius: 14px; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+            <h2 id="now-h" style="margin: 0; font-size: 17px; font-weight: 700">正在干：历史任务读不出来时看板不挂</h2>
+            <div style="display: flex; gap: 8px; align-items: center">
+              <span style="font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 6px; background: #EAF0FA; color: #174A96">没被卡住</span>
+              <button onClick="{{openEvidence}}" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #C9CDC5; background: #FFFFFF; font-size: 13px; cursor: pointer; color: #1C2024">看证据</button>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 20px">
+            <sc-for list="{{facts}}" as="f" hint-placeholder-count="6">
+              <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0">
+                <div style="font-size: 12px; color: #5B636B">{{f.label}}</div>
+                <div style="font-size: 14px; line-height: 1.5">{{f.value}}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="height: 8px; border-radius: 4px; background: #EEF0EC; overflow: hidden"><div style="width: 60%; height: 8px; background: #1F5FBF"></div></div>
+        </section>
+
+        <section aria-labelledby="board-h" style="display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px">
+            <h2 id="board-h" style="margin: 0; font-size: 17px; font-weight: 700">任务看板</h2>
+            <span style="font-size: 12px; color: #5B636B">同一时刻只有一张“在干” · 开着 4 / 8 张 · 点卡片看证据</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+            <sc-for list="{{columns}}" as="col" hint-placeholder-count="4">
+              <div style="background: #EAECE7; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 220px">
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 4px">
+                  <span style="display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px"><span style="{{col.dotStyle}}"></span>{{col.name}}</span>
+                  <span style="font-size: 12px; color: #5B636B">{{col.count}}</span>
+                </div>
+                <sc-for list="{{col.cards}}" as="c" hint-placeholder-count="2">
+                  <button onClick="{{c.open}}" style="text-align: left; background: #FFFFFF; border: 1px solid #DCDFD8; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; color: #1C2024">
+                    <span style="font-size: 14px; font-weight: 500; line-height: 1.4">{{c.title}}</span>
+                    <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+                      <span style="font-size: 11px; padding: 2px 7px; border-radius: 5px; background: #EEF0EC; color: #3D444B">{{c.kind}}</span>
+                      <span style="font-size: 12px; color: #5B636B">{{c.who}}</span>
+                    </span>
+                    <span style="font-size: 12px; color: #3D444B">{{c.status}}</span>
+                  </button>
+                </sc-for>
+                <div style="font-size: 12px; color: #5B636B; padding: 0 4px">{{col.foot}}</div>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+      </div>
+
+      <aside style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+        <section aria-labelledby="issue-h" style="background: #FFFFFF; border: 1px solid #F0C4BF; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px">
+          <h2 id="issue-h" style="margin: 0; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B42318" stroke-width="2" aria-hidden="true"><path d="M12 3l10 18H2z"></path><path d="M12 10v5M12 18v.5"></path></svg>
+            出问题的
+          </h2>
+          <div style="background: #FDECEA; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px">
+            <div style="font-size: 14px; font-weight: 500; color: #8E1B12">验收已记录，台账同步没完成</div>
+            <div style="font-size: 12px; color: #6B2A23">“plc check 退出码”· 不用重新验收，点重试即可。</div>
+            <button onClick="{{retrySync}}" disabled="{{syncing}}" style="{{retryStyle}}">{{retryLabel}}</button>
+          </div>
+          <div style="font-size: 13px; color: #3D444B; line-height: 1.6">提示：规范 PM-042 的状态图还没有“已废弃”，需要你提一张规范变更单。</div>
+        </section>
+
+        <section aria-labelledby="feed-h" style="background: #FFFFFF; border: 1px solid #DCDFD8; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px">
+          <h2 id="feed-h" style="margin: 0; font-size: 17px; font-weight: 700">最近动态</h2>
+          <sc-for list="{{feed}}" as="f" hint-placeholder-count="4">
+            <div style="display: flex; gap: 10px">
+              <span style="{{f.dotStyle}}"></span>
+              <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+                <div style="font-size: 13px; line-height: 1.5">{{f.text}}</div>
+                <div style="font-size: 12px; color: #5B636B">{{f.when}}</div>
+              </div>
+            </div>
+          </sc-for>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <sc-if value="{{drawerOpen}}" hint-placeholder-val="{{false}}">
+    <div style="position: absolute; inset: 0; background: rgba(28, 32, 36, 0.35); display: flex; justify-content: flex-end">
+      <div role="dialog" aria-modal="true" aria-labelledby="drawer-h" style="{{drawerStyle}}">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
+          <h2 id="drawer-h" style="margin: 0; font-size: 19px; font-weight: 700">{{drawerTitle}}</h2>
+          <button onClick="{{closeDrawer}}" aria-label="关闭" style="flex: none; width: 40px; height: 40px; border-radius: 8px; border: 1px solid #DCDFD8; background: #FFFFFF; cursor: pointer; display: flex; align-items: center; justify-content: center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1C2024" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+          </button>
+        </div>
+
+        <sc-if value="{{isGoal}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-direction: column; gap: 18px">
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <label for="goal-project" style="font-size: 13px; font-weight: 500">项目</label>
+              <select id="goal-project" style="height: 44px; border-radius: 8px; border: 1px solid #C9CDC5; padding: 0 12px; font-size: 14px; background: #FFFFFF; color: #1C2024; font-family: inherit">
+                <option>SW-2026-008 auto-pm 自动化项目管理工具</option>
+                <option>SYS-2026-001 工作空间治理</option>
+                <option>DJ-2026-000 [PLC 项目]</option>
+              </select>
+            </div>
+            <fieldset style="border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+              <legend style="font-size: 13px; font-weight: 500; padding: 0; margin-bottom: 8px">这是哪一类事？（必选）</legend>
+              <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+                <sc-for list="{{kinds}}" as="k" hint-placeholder-count="4">
+                  <button onClick="{{k.pick}}" aria-pressed="{{k.pressed}}" style="{{k.style}}">
+                    <span style="display: block; font-weight: 700; font-size: 14px">{{k.label}}</span>
+                    <span style="display: block; font-size: 12px; color: #5B636B">{{k.hint}}</span>
+                  </button>
+                </sc-for>
+              </div>
+            </fieldset>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <label for="goal-text" style="font-size: 13px; font-weight: 500">要达成什么？</label>
+              <input id="goal-text" placeholder="一句话说清楚，例如：IO 监控页能看到急停回路状态" style="height: 44px; border-radius: 8px; border: 1px solid #C9CDC5; padding: 0 12px; font-size: 14px; font-family: inherit; color: #1C2024">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <label for="goal-accept" style="font-size: 13px; font-weight: 500">怎样算做完？（每行一条，可以留空让 PM 起草）</label>
+              <textarea id="goal-accept" rows="4" placeholder="例如：断开急停，页面 1 秒内变红" style="border-radius: 8px; border: 1px solid #C9CDC5; padding: 10px 12px; font-size: 14px; font-family: inherit; color: #1C2024; resize: vertical"></textarea>
+            </div>
+            <div style="background: #F3F4F1; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #3D444B; line-height: 1.6">保存后 PM 会补全改动范围、风险和验收条件，起草好的范围会出现在“需要你决定”里，由你批准。</div>
+            <button onClick="{{saveGoal}}" disabled="{{goalDisabled}}" style="{{saveStyle}}">保存草稿</button>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{isScope}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-direction: column; gap: 16px">
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #5B636B">
+              <span>第 1 版</span><span>·</span><span>起草：PM</span><span>·</span><span>执行：Claude（独立工位）</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <div style="font-size: 12px; color: #5B636B">目标</div>
+              <div style="font-size: 15px; font-weight: 500">{{scopeTitle}}</div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <div style="font-size: 12px; color: #5B636B">会改哪些地方（12 个文件）</div>
+              <div style="background: #F3F4F1; border-radius: 8px; padding: 10px 12px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.8; color: #1C2024">
+                domain/change/constants.py<br>domain/change/guard_checker.py<br>domain/change/change_service.py<br>ui/qml/components/Badge.qml<br>… 另 8 个
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+              <div style="display: flex; flex-direction: column; gap: 4px">
+                <div style="font-size: 12px; color: #5B636B">不做什么</div>
+                <div style="font-size: 13px; line-height: 1.6">不改规范库；不加新命令</div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px">
+                <div style="font-size: 12px; color: #5B636B">风险</div>
+                <div style="font-size: 13px; line-height: 1.6; color: #8A5A00">规范图与代码暂时不一致</div>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <div style="font-size: 12px; color: #5B636B">验收条件</div>
+              <div style="font-size: 13px; line-height: 1.7">1. 实施前的变更单可废弃，必须写原因<br>2. 已废弃的变更单不能再批准任何决策<br>3. 台账显示“已废弃”并写日期</div>
+            </div>
+            <sc-if value="{{scopeBlocked}}" hint-placeholder-val="{{false}}">
+              <div style="background: #FFF4DC; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #6B4600; line-height: 1.6">不能批准：还没设置批准人。到左下角“设置：批准人与口令”里设好再回来，这张范围卡会保留。</div>
+            </sc-if>
+            <div style="display: flex; gap: 10px; padding-top: 4px">
+              <button onClick="{{closeDrawer}}" style="flex: 1; height: 44px; border-radius: 10px; border: 1px solid #C9CDC5; background: #FFFFFF; font-size: 14px; cursor: pointer; color: #1C2024">退回修改</button>
+              <button onClick="{{approveScope}}" disabled="{{scopeBlocked}}" style="{{approveStyle}}">批准并开工（需口令）</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{isEvidence}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-direction: column; gap: 16px">
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+              <span style="font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 6px; background: #E6F4EC; color: #1E5E38">证据与当前内容一致</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5B636B">变更单 [CHG 编号] · 决策 [DEC 编号]</span>
+            </div>
+            <div role="tablist" aria-label="证据分类" style="display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid #E6E8E3; padding-bottom: 10px">
+              <sc-for list="{{tabs}}" as="tb" hint-placeholder-count="6">
+                <button role="tab" aria-selected="{{tb.selected}}" onClick="{{tb.pick}}" style="{{tb.style}}">{{tb.label}}</button>
+              </sc-for>
+            </div>
+
+            <sc-if value="{{tabVerify}}" hint-placeholder-val="{{true}}">
+              <div style="display: flex; flex-direction: column; gap: 8px">
+                <sc-for list="{{gates}}" as="g" hint-placeholder-count="5">
+                  <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #E6E8E3; border-radius: 8px">
+                    <span style="{{g.dotStyle}}"></span>
+                    <span style="flex: 1; font-size: 14px">{{g.name}}</span>
+                    <span style="font-size: 12px; color: #3D444B">{{g.result}}</span>
+                  </div>
+                </sc-for>
+                <div style="font-size: 12px; color: #5B636B">没跑过的检查不会显示“通过”。</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{tabGraph}}" hint-placeholder-val="{{false}}">
+              <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.6">
+                <div style="padding: 10px 12px; border: 1px solid #E6E8E3; border-radius: 8px"><b>根工作</b> · 历史任务读不出来时看板不挂 · 已授权</div>
+                <div style="padding: 10px 12px 10px 28px; border: 1px solid #E6E8E3; border-radius: 8px">运行 1 · Claude · 工位 claude/[卡号] · 租约有效</div>
+                <div style="padding: 10px 12px 10px 28px; border: 1px solid #E6E8E3; border-radius: 8px">检查点 3 个 · 最近一个 [时间]</div>
+                <div style="padding: 10px 12px; background: #F3F4F1; border-radius: 8px"><b>下一步</b>：补完列表接口的测试，然后跑全量门禁。</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{tabRead}}" hint-placeholder-val="{{false}}">
+              <div style="display: flex; flex-direction: column; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.8">
+                <div>AGENTS.md</div>
+                <div>roles/engineer-python/SKILL.md</div>
+                <div>SYS-2026-001…/39_PM-Flow_…_WBS_PM.md</div>
+                <div>活动技术债台账.md · TD-SW008-022</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{tabChange}}" hint-placeholder-val="{{false}}">
+              <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px">
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border: 1px solid #E6E8E3; border-radius: 8px">
+                  <span>[CHG 编号] · 历史任务读不出来时看板不挂</span>
+                  <span style="font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 5px; background: #EAF0FA; color: #174A96">实施中</span>
+                </div>
+                <div style="color: #3D444B; line-height: 1.6">审批记录：你在 [日期] 批准 · 第 1 版范围。台账行会在收尾时自动同步。</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{tabSpec}}" hint-placeholder-val="{{false}}">
+              <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+                <div style="display: flex; justify-content: space-between; padding: 10px 12px; border: 1px solid #E6E8E3; border-radius: 8px"><span>文档与注释检查（doc check）</span><span style="color: #1E5E38">通过</span></div>
+                <div style="display: flex; justify-content: space-between; padding: 10px 12px; border: 1px solid #E6E8E3; border-radius: 8px"><span>PLC 检查（plc check）</span><span style="color: #5B636B">本卡不涉及</span></div>
+                <div style="display: flex; justify-content: space-between; padding: 10px 12px; border: 1px solid #E6E8E3; border-radius: 8px"><span>改动范围（越界检查）</span><span style="color: #1E5E38">没越界</span></div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{tabIo}}" hint-placeholder-val="{{false}}">
+              <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+                <div style="color: #3D444B; line-height: 1.6">只在 PLC 项目出现。显示本卡碰到的变量与 IO 点，以及接线极性、失效安全、断线处置三列有没有填。</div>
+                <div style="overflow-x: auto; border: 1px solid #E6E8E3; border-radius: 8px">
+                  <table style="border-collapse: collapse; width: 100%; font-size: 12px">
+                    <thead><tr style="background: #F3F4F1"><th style="text-align: left; padding: 8px">点位</th><th style="text-align: left; padding: 8px">名称</th><th style="text-align: left; padding: 8px">接线</th><th style="text-align: left; padding: 8px">失效安全</th></tr></thead>
+                    <tbody>
+                      <tr><td style="padding: 8px; font-family: 'IBM Plex Mono', monospace">[地址]</td><td style="padding: 8px">急停回路</td><td style="padding: 8px">NC 常闭</td><td style="padding: 8px">断电停机</td></tr>
+                      <tr><td style="padding: 8px; font-family: 'IBM Plex Mono', monospace">[地址]</td><td style="padding: 8px">安全门</td><td style="padding: 8px">NC 常闭</td><td style="padding: 8px; color: #8A5A00">未填</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1250}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { drawer: null, kind: null, project: 'sw008', toast: '', alert: true, draft: false, scope: 'ok', tab: 'verify', syncing: false };
+  }
+  renderVals() {
+    const s = this.state;
+    const dot = (c) => 'width:8px;height:8px;border-radius:4px;flex:none;background:' + c;
+    const projectData = [
+      { id: 'sw008', name: 'auto-pm 自动化项目管理', hint: '1 张在干', count: 4, tone: '#C98A00' },
+      { id: 'sys001', name: '工作空间治理', hint: '规划中', count: 1, tone: '#C98A00' },
+      { id: 'dj000', name: '[PLC 项目]', hint: '挂起', count: 0, tone: '#9AA1A8' }
+    ];
+    const projects = projectData.map((p) => ({
+      ...p,
+      hasCount: p.count > 0,
+      pick: () => this.setState({ project: p.id }),
+      rowStyle: 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 8px;border-radius:8px;border:none;cursor:pointer;font-size:14px;color:#1C2024;background:' + (s.project === p.id ? '#EAF0FA' : 'transparent'),
+      dotStyle: dot(p.tone)
+    }));
+    const tile = (label, value, note, bg, border) => ({ label, value, note, style: 'background:' + bg + ';border:1px solid ' + border + ';border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:4px' });
+    const tiles = [
+      tile('需要你决定', s.draft ? '5' : '4', '最早一件等了 [时长]', '#FFF4DC', '#F0D9A6'),
+      tile('正在进行', '1', 'Claude 在做', '#FFFFFF', '#DCDFD8'),
+      tile('已完成', '4', '本周', '#E6F4EC', '#BFDFCB'),
+      tile('出问题的', s.alert ? '2' : '1', s.alert ? '启动失败、同步未完成' : '同步未完成', '#FDECEA', '#F0C4BF')
+    ];
+    const chip = (bg, fg) => 'flex:none;font-size:12px;font-weight:700;padding:5px 10px;border-radius:6px;background:' + bg + ';color:' + fg;
+    const btn = (disabled) => 'height:40px;padding:0 16px;border-radius:8px;border:none;font-size:14px;font-weight:500;' + (disabled ? 'background:#DCDFD8;color:#5B636B;cursor:not-allowed' : 'background:#1C2024;color:#FFFFFF;cursor:pointer');
+    const decisions = [];
+    if (s.draft) {
+      decisions.push({ action: '草稿', title: '[你刚写的目标]', meta: 'PM 正在起草改动范围和风险 · 预授权，还不能批准', detailLabel: '看草稿', confirmLabel: '等 PM 起草', chipStyle: chip('#EEF0EC', '#3D444B'), disabled: true, blocked: false, blockedReason: '', confirmStyle: btn(true), detail: () => {}, confirm: () => {} });
+    }
+    decisions.push(
+      { action: '批准范围', title: '变更单增加“已废弃”状态', meta: 'PM 起草 · 12 个文件 · 1 条风险', detailLabel: '看范围', confirmLabel: '批准并开工', chipStyle: chip('#EAF0FA', '#174A96'), disabled: false, blocked: false, blockedReason: '', confirmStyle: btn(false),
+        detail: () => this.setState({ drawer: 'scope', scope: 'ok' }), confirm: () => this.setState({ drawer: 'scope', scope: 'ok' }) },
+      { action: '批准范围', title: '工作空间治理：角色包底座', meta: 'PM 起草 · 9 个文件', detailLabel: '看范围', confirmLabel: '批准并开工', chipStyle: chip('#EAF0FA', '#174A96'), disabled: true, blocked: true, blockedReason: '还没设置批准人', confirmStyle: btn(true),
+        detail: () => this.setState({ drawer: 'scope', scope: 'blocked' }), confirm: () => {} },
+      { action: '确认验收', title: '建草稿必须选分类', meta: '门禁全绿 · 测试 4562 通过 · 独立审计通过', detailLabel: '看证据', confirmLabel: '确认验收', chipStyle: chip('#E6F4EC', '#1E5E38'), disabled: false, blocked: false, blockedReason: '', confirmStyle: btn(false),
+        detail: () => this.setState({ drawer: 'evidence', tab: 'verify' }), confirm: () => this.setState({ toast: '已记录验收，正在收尾同步台账。' }) },
+      { action: '确认开始', title: 'PLC 检查：缺文件按失败处理', meta: '范围已批准 · 等你按开始', detailLabel: '看范围', confirmLabel: '确认开始', chipStyle: chip('#FFF4DC', '#7A4F00'), disabled: false, blocked: false, blockedReason: '', confirmStyle: btn(false),
+        detail: () => this.setState({ drawer: 'scope', scope: 'ok' }), confirm: () => this.setState({ toast: '已开始，执行 AI 会在独立工位里干活。' }) }
+    );
+    const facts = [
+      { label: '里程碑', value: '看板与列表稳定' },
+      { label: '当前负责人', value: 'Claude（云端会话）' },
+      { label: '进展', value: '门禁 3 / 5 通过' },
+      { label: '风险', value: '无新增' },
+      { label: '验证', value: '列表接口测试 6 条已绿' },
+      { label: '下一步', value: '跑全量门禁，然后交你验收' }
+    ];
+    const openEv = () => this.setState({ drawer: 'evidence', tab: 'verify' });
+    const card = (title, kind, who, status) => ({ title, kind, who, status, open: openEv });
+    const columns = [
+      { name: '在干', count: '1', dotStyle: dot('#1F5FBF'), foot: '', cards: [card('历史任务读不出来时看板不挂', '技术债', 'Claude', '门禁 3/5 · 已干 [时长]')] },
+      { name: '等你', count: '2', dotStyle: dot('#C98A00'), foot: '', cards: [card('建草稿必须选分类', '缺陷', 'Claude', '待验收'), card('PLC 检查：缺文件按失败处理', '技术债', '未分配', '待开始')] },
+      { name: '搁着', count: '1', dotStyle: dot('#9AA1A8'), foot: '搁着超过 7 天会标黄', cards: [card('工位清理命令', '迭代', 'Trae', '断点：差 Windows 实测')] },
+      { name: '已关', count: '3', dotStyle: dot('#1E7A46'), foot: '另有 12 张更早的', cards: [card('plc check 退出码', '缺陷', 'Claude', '已完成并同步台账')] }
+    ];
+    const feed = [
+      { text: 'Claude 提交了“历史任务读不出来时看板不挂”的检查点', when: '[时间]', dotStyle: dot('#1F5FBF') + ';margin-top:7px' },
+      { text: 'PM 起草了范围“变更单增加已废弃状态”，等你批准', when: '[时间]', dotStyle: dot('#C98A00') + ';margin-top:7px' },
+      { text: '“plc check 退出码”验收完成', when: '[时间]', dotStyle: dot('#1E7A46') + ';margin-top:7px' },
+      { text: '收尾同步失败，已保留现场等你重试', when: '[时间]', dotStyle: dot('#B42318') + ';margin-top:7px' }
+    ];
+    const kindData = [
+      { id: 'iteration', label: '迭代', hint: '新功能或改进' },
+      { id: 'bug', label: '缺陷', hint: '修一个错' },
+      { id: 'urgent', label: '紧急', hint: '现场急活，插队' },
+      { id: 'debt', label: '技术债', hint: '还一笔旧账' }
+    ];
+    const kinds = kindData.map((k) => ({
+      ...k,
+      pressed: s.kind === k.id ? 'true' : 'false',
+      pick: () => this.setState({ kind: k.id }),
+      style: 'text-align:left;padding:12px 14px;border-radius:10px;cursor:pointer;color:#1C2024;font-family:inherit;' + (s.kind === k.id ? 'border:2px solid #1F5FBF;background:#EAF0FA' : 'border:1px solid #C9CDC5;background:#FFFFFF')
+    }));
+    const tabData = [
+      { id: 'verify', label: '验证证据' }, { id: 'graph', label: '工作图与下一步' }, { id: 'read', label: '读取来源' },
+      { id: 'change', label: '变更单' }, { id: 'spec', label: '规范检查' }, { id: 'io', label: '变量与 IO' }
+    ];
+    const tabs = tabData.map((t) => ({
+      ...t,
+      selected: s.tab === t.id ? 'true' : 'false',
+      pick: () => this.setState({ tab: t.id }),
+      style: 'height:36px;padding:0 12px;border-radius:8px;font-size:13px;cursor:pointer;' + (s.tab === t.id ? 'border:none;background:#1C2024;color:#FFFFFF' : 'border:1px solid #DCDFD8;background:#FFFFFF;color:#1C2024')
+    }));
+    const gate = (name, result, c) => ({ name, result, dotStyle: dot(c) });
+    const gates = [
+      gate('全量测试（pytest）', '4562 通过 · 12 跳过', '#1E7A46'),
+      gate('代码风格（ruff）', '通过', '#1E7A46'),
+      gate('类型检查（mypy）', '通过', '#1E7A46'),
+      gate('CI（GitHub）', '全部通过', '#1E7A46'),
+      gate('独立审计（另一个会话）', '通过 · 报告在 reviews/', '#1E7A46')
+    ];
+    const goalDisabled = !s.kind;
+    const scopeBlocked = s.scope === 'blocked';
+    const titles = { goal: '提出新目标', scope: '待你批准的范围', evidence: '证据：历史任务读不出来时看板不挂' };
+    return {
+      projects, tiles, decisions, facts, columns, feed, kinds, tabs, gates,
+      toast: s.toast,
+      alertOn: s.alert,
+      dismissAlert: () => this.setState({ alert: false }),
+      drawerOpen: s.drawer !== null,
+      drawerStyle: 'width:' + (s.drawer === 'evidence' ? '640px' : '520px') + ';max-width:100%;background:#FFFFFF;box-sizing:border-box;padding:24px 26px;display:flex;flex-direction:column;gap:18px;overflow-y:auto;box-shadow:-8px 0 24px rgba(0,0,0,0.12)',
+      isGoal: s.drawer === 'goal',
+      isScope: s.drawer === 'scope',
+      isEvidence: s.drawer === 'evidence',
+      drawerTitle: titles[s.drawer] || '',
+      scopeTitle: scopeBlocked ? '工作空间治理：角色包底座' : '变更单增加“已废弃”状态',
+      scopeBlocked,
+      approveStyle: 'flex:2;height:44px;border-radius:10px;border:none;font-size:15px;font-weight:500;' + (scopeBlocked ? 'background:#DCDFD8;color:#5B636B;cursor:not-allowed' : 'background:#1F5FBF;color:#FFFFFF;cursor:pointer'),
+      tabVerify: s.tab === 'verify', tabGraph: s.tab === 'graph', tabRead: s.tab === 'read',
+      tabChange: s.tab === 'change', tabSpec: s.tab === 'spec', tabIo: s.tab === 'io',
+      goalDisabled,
+      saveStyle: 'height:48px;border-radius:10px;border:none;font-size:15px;font-weight:500;' + (goalDisabled ? 'background:#DCDFD8;color:#5B636B;cursor:not-allowed' : 'background:#1F5FBF;color:#FFFFFF;cursor:pointer'),
+      syncing: s.syncing,
+      retryLabel: s.syncing ? '正在同步…' : '重试同步',
+      retryStyle: 'align-self:flex-start;height:36px;padding:0 14px;border-radius:8px;font-size:13px;' + (s.syncing ? 'border:1px solid #C9CDC5;background:#F3F4F1;color:#5B636B;cursor:wait' : 'border:1px solid #B42318;background:#FFFFFF;color:#B42318;cursor:pointer'),
+      retrySync: () => this.setState({ syncing: true }),
+      openGoal: () => this.setState({ drawer: 'goal', kind: null }),
+      openEvidence: openEv,
+      closeDrawer: () => this.setState({ drawer: null }),
+      saveGoal: () => this.setState({ drawer: null, draft: true, toast: '草稿已保存，PM 起草好范围后就能批准。' }),
+      approveScope: () => this.setState({ drawer: null, toast: '已批准并开工（真实版本这里会弹出口令框）。' })
+    };
+  }
+}
+</script>
+</body>
+</html>
