@@ -100,13 +100,17 @@ function Assert-Admin {
 function Invoke-Native([string]$File, [string[]]$Arguments) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
+    $oldEncoding = $null
     try {
+        # memory_gate.py prints UTF-8 (Chinese messages); read it as UTF-8. A host without a console cannot change this, which is harmless.
+        try { $oldEncoding = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { $oldEncoding = $null }
         $text = (& $File @Arguments 2>&1 | Out-String)
         return @{ Code = $LASTEXITCODE; Output = $text.Trim() }
     } catch {
         return @{ Code = -1; Output = $_.Exception.Message }
     } finally {
         $ErrorActionPreference = $previous
+        if ($null -ne $oldEncoding) { try { [Console]::OutputEncoding = $oldEncoding } catch { Write-Verbose "console encoding not restored" } }
     }
 }
 

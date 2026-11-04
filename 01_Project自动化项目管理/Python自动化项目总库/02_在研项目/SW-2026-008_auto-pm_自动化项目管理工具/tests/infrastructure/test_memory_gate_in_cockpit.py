@@ -422,3 +422,15 @@ def test_orient_without_a_pin_says_it_could_not_compare(tmp_path: Path) -> None:
 
 def test_the_status_module_can_find_the_committed_pin_next_to_the_sources() -> None:
     assert status_module._pinned_bundle(None, None) == mg.read_pin()[0]  # noqa: SLF001
+
+
+def test_the_commands_print_their_chinese_text_through_a_pipe_whose_default_encoding_cannot_hold_it() -> None:
+    """11-04 CI: on Windows a pipe defaults to cp1252 and ``pin-check`` / ``bundle-hash`` died with UnicodeEncodeError."""
+
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}  # what a Windows pipe does by default
+    for command in ("bundle-hash", "pin-check"):
+        done = subprocess.run([sys.executable, "-B", str(SCRIPT), command], capture_output=True, timeout=60, check=False, env=env)  # noqa: S603
+
+        assert done.returncode == 0, done.stderr.decode("utf-8", errors="replace")
+        assert "UnicodeEncodeError" not in done.stderr.decode("utf-8", errors="replace")
+        done.stdout.decode("utf-8")  # the text is UTF-8, which is what the installer reads

@@ -1221,6 +1221,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-dir", type=Path, default=None, help="状态与告警目录（默认：已安装时为安装目录下的 state，否则 ~/.auto-pm/memory-gate）")
     parser.add_argument("--require-manifest", action="store_true", help="计划任务用：必须是已安装形态，文件 SHA-256 与 manifest.json 一致才运行")
     args = parser.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):  # a Windows pipe defaults to the ANSI code page (cp1252 cannot print the Chinese messages); the installer reads UTF-8
+        reconfigure = getattr(stream, "reconfigure", None)  # absent on a captured stream (tests)
+        if reconfigure is not None:
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
     state_dir: Path = args.state_dir or default_state_dir()
     root = install_root()
     integrity = ""
