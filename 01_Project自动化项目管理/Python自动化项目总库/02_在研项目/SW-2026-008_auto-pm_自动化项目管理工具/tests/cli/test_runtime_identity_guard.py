@@ -50,6 +50,7 @@ NOT_WRITE_COMMANDS = frozenset(
         "pending",
         "recover-status",
         "resume",
+        "triage",
         "workflow",
     }
 )

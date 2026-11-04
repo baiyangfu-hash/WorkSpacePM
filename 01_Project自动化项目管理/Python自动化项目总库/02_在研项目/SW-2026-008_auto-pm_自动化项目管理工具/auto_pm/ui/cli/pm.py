@@ -1292,6 +1292,7 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
                 f"  {brief.item_id} [{brief.kind.value}] {brief.title}"
                 f"（{brief.status.value}，建议 {brief.disposition.value}）"
             )
+        click.echo("建议顺序和每条的下一步: python main.py pm triage <项目编号>（只读）")
     for path in payload.read_set:
         click.echo(f"证据: {path}")
     query = payload.query
@@ -1429,3 +1430,8 @@ from auto_pm.ui.cli.pm_recover import recover_pm, recover_status_pm  # noqa: E40
 
 pm_group.add_command(recover_status_pm)
 pm_group.add_command(recover_pm)
+
+# Read-only triage desk: open cards and inbox items in suggested order (TD-SW008-066, full version).
+from auto_pm.ui.cli.pm_triage import triage_pm  # noqa: E402
+
+pm_group.add_command(triage_pm)
