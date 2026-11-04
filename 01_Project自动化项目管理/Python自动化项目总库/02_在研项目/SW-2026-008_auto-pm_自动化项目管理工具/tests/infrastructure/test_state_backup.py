@@ -177,7 +177,9 @@ def test_the_manifest_says_what_the_file_is_and_nothing_about_this_computer(work
 
 # ---------------------------------------------------------------- configuration
 def test_the_repository_config_is_valid_and_strictly_parsed() -> None:
-    config = sb.load_config(Path(__file__).resolve().parents[2])
+    project_dir = Path(__file__).resolve().parents[2]
+    assert project_dir.parents[3] / sb.PROJECT_RELATIVE == project_dir  # the real layout: repository root -> 01_Project... -> project directory
+    config = sb.load_config(project_dir.parents[3])
     assert config.remote_url == "https://github.com/baiyangfu-hash/WorkSpacePM-state" and config.branch == "main"
 
     userinfo = "name" + ":" + "word"  # built at run time: a literal user:password@ address in the source would (rightly) trip the repository's secret scan
@@ -193,6 +195,43 @@ def test_the_repository_config_is_valid_and_strictly_parsed() -> None:
     ):
         with pytest.raises(StateBackupError):
             sb.parse_config(bad)
+
+
+def _real_layout(tmp_path: Path, config: dict[str, object]) -> Path:
+    """A repository root whose project directory (not the root) holds ``scripts/state_backup.json``, as on the real machine."""
+
+    root = tmp_path / "My_Workspace"
+    scripts = root / sb.PROJECT_RELATIVE / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "state_backup.json").write_text(json.dumps(config), encoding="utf-8")
+    return root
+
+
+def test_the_config_is_found_in_the_project_directory_below_the_repository_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sb, "_MODULE_PROJECT_DIR", tmp_path / "somewhere-else")  # a deployed release has no scripts/ next to the code
+    root = _real_layout(tmp_path, {"remote_url": "https://example.com/owner/state", "branch": "backups", "stale_after_hours": 6})
+    config = sb.load_config(root)
+    assert (config.remote_url, config.branch, config.stale_after_hours) == ("https://example.com/owner/state", "backups", 6)
+    assert StateBackupService(root)._config().remote_url == "https://example.com/owner/state"
+
+
+def test_a_config_at_the_repository_root_is_not_where_it_lives(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sb, "_MODULE_PROJECT_DIR", tmp_path / "somewhere-else")
+    root = tmp_path / "My_Workspace"
+    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "state_backup.json").write_text('{"remote_url": "https://example.com/o/r"}', encoding="utf-8")
+    with pytest.raises(StateBackupError, match="缺少配置文件"):
+        sb.load_config(root)
+
+
+def test_the_orient_status_reads_the_threshold_from_the_project_directory_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sb, "_MODULE_PROJECT_DIR", tmp_path / "somewhere-else")
+    root = _real_layout(tmp_path, {"remote_url": "https://example.com/o/r", "stale_after_hours": 2})
+    marker = root / sb.MARKER_RELATIVE
+    marker.parent.mkdir(parents=True)
+    marker.write_text(json.dumps({"schema_version": sb.MARKER_SCHEMA, "pushed_at": T0.isoformat(), "events": 5}), encoding="utf-8")
+    assert sb.read_state_backup_status(root, now=T0 + timedelta(hours=3)).state == "stale"
+    assert sb.read_state_backup_status(root, now=T0 + timedelta(hours=1)).state == "fresh"
 
 
 # ---------------------------------------------------------------- push -> pull round trip against a local bare repository
