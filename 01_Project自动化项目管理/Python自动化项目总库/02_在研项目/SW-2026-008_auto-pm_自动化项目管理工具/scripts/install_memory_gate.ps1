@@ -8,7 +8,7 @@
   -Install    （在普通窗口运行，setup_env.bat 第 5 步调用它）
               预备阶段（不需要管理员，不碰 Program Files）：
                 a) git 核对：四个文件加钉哈希文件没有未提交改动，HEAD 已经在 origin/main 里（-AllowUnmerged 可跳过，只给开发者）；
-                b) 四个文件的合并 SHA-256 等于仓库里钉住的 config\memory_gate.pin.json；
+                b) 四个文件的合并 SHA-256 等于仓库里钉住的 scripts\memory_gate.pin.json；
                 c) 官方嵌入式 Python 3.12.10 下载到当前用户缓存目录并核对写死的 SHA-256（-PythonZip 可指向事先核对过的本地包）；
                 d) 试运行：解压到临时目录，核对 python.exe 的 Authenticode 签名、_pth 没打开 import site、真跑一遍 selftest（杀毒拦截在这里就暴露）。
               预备全过后，只弹一次 UAC，由提权窗口做「应用」：
@@ -73,8 +73,8 @@ $BundleFiles = @(
     "scripts/memory_gate.py"
 )
 $CopiedFiles = @("auto_pm/infrastructure/memory_preflight.py", "auto_pm/infrastructure/long_run_core.py", "scripts/memory_gate.py")
-$PinRelative = "config/memory_gate.pin.json"
-$ConfigRelative = "config/memory_gate.json"
+$PinRelative = "scripts/memory_gate.pin.json"
+$ConfigRelative = "scripts/memory_gate.json"
 $script:LogFile = ""
 
 # ---------------------------------------------------------------- small helpers

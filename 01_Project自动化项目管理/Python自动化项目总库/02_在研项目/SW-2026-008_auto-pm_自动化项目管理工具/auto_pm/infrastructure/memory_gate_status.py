@@ -2,7 +2,7 @@
 
 The gate is installed once by ``setup_env.bat`` (step 5, one UAC prompt) under ``%ProgramFiles%\\AutoPM\\MemoryGate``.  This module only *reads*
 what the installer and the watchdog wrote there (``manifest.json`` and ``state\\state.json``, readable by ordinary users) and the hash pinned in the
-repository (``config/memory_gate.pin.json``).  It never installs, repairs, starts or stops anything and never runs the installed Python.
+repository (``scripts/memory_gate.pin.json``).  It never installs, repairs, starts or stops anything and never runs the installed Python.
 
 Standard library only; every location can be replaced by the caller (tests).  Nothing is read at import time.
 """
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HEARTBEAT_STALE_SECONDS = 30.0  # the same limit memory_gate.py status uses
-_PIN_RELATIVE = Path("config") / "memory_gate.pin.json"
+_PIN_RELATIVE = Path("scripts") / "memory_gate.pin.json"
 _PROJECT_RELATIVE = Path("01_Project自动化项目管理") / "Python自动化项目总库" / "02_在研项目" / "SW-2026-008_auto-pm_自动化项目管理工具"
 _MAX_BYTES = 64 * 1024
 
@@ -48,7 +48,7 @@ class GateStatus:
 
     def _version_note(self) -> str:
         if not self.pinned_bundle:
-            return "未能核对已装版本是否等于仓库钉住的版本（没找到 config/memory_gate.pin.json）。"
+            return "未能核对已装版本是否等于仓库钉住的版本（没找到 scripts/memory_gate.pin.json）。"
         if not self.installed_bundle:
             return "已装版本记录读不出，无法核对。"
         if self.update_available:

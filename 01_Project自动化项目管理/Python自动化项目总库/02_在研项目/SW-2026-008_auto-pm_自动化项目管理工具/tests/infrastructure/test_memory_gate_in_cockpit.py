@@ -139,7 +139,7 @@ def test_read_config_handles_missing_bom_oversize_garbage_and_links(tmp_path: Pa
 
 
 def test_the_committed_config_is_valid_and_gives_the_default_lines() -> None:
-    values, note = mg.read_config(ROOT / "config" / mg.CONFIG_FILE)
+    values, note = mg.read_config(ROOT / "scripts" / mg.CONFIG_FILE)
 
     assert note == "" and set(values) <= mg.CONFIG_KEYS
     assert mg.compute_thresholds(LAPTOP, values).limit_gib == pytest.approx(mg.compute_thresholds(LAPTOP).limit_gib)
@@ -241,14 +241,14 @@ def test_pin_check_names_the_file_that_changed_and_pin_write_repairs_it(tmp_path
 
 
 def test_pin_check_command_is_read_only_and_reports_through_its_exit_code() -> None:
-    before = (ROOT / "config" / mg.PIN_FILE).read_bytes()
+    before = (ROOT / "scripts" / mg.PIN_FILE).read_bytes()
     done = subprocess.run([sys.executable, "-B", str(SCRIPT), "pin-check"], capture_output=True, timeout=60, check=False)  # noqa: S603
 
-    assert done.returncode == 0 and (ROOT / "config" / mg.PIN_FILE).read_bytes() == before
+    assert done.returncode == 0 and (ROOT / "scripts" / mg.PIN_FILE).read_bytes() == before
 
 
 def test_the_pin_file_holds_no_secret_or_local_path() -> None:
-    text = (ROOT / "config" / mg.PIN_FILE).read_text(encoding="utf-8")
+    text = (ROOT / "scripts" / mg.PIN_FILE).read_text(encoding="utf-8")
 
     assert not re.search(r"[A-Za-z]:\\|/home/|/Users/|@", text)
     assert json.loads(text)["bundle_sha256"] == mg.bundle_hash()[0]

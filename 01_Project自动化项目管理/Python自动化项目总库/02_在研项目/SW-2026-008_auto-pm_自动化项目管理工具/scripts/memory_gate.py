@@ -23,7 +23,7 @@ SHA-256（``manifest.json``）；解释器是系统安装的（或复制进该�
 - 已提交 < 解冻线持续 30 秒：按冻结的反序逐棵解冻，每棵间隔 5 秒。解冻后 120 秒内同一棵再触发 -> 冻住并锁定，不再自动解冻，
   写醒目日志 + 告警文件 + Windows 通知（哪棵树、涨了多少），等人用 ``resume-all``；没人处理就每 15 分钟再通知一次，不自动解冻。
 - 阈值（本节是 2026-11-04 并入驾驶舱时加的）：冻结线 = 提交上限 x ``LIMIT_RATIO``，解冻线 = min(提交上限 x ``RESUME_RATIO``, 冻结线 - 3 GiB)。
-  可由 ``config/memory_gate.json`` 覆盖（只认 limit_ratio / resume_ratio / limit_gib / resume_gib 四个数值字段，文件大小上限 4 KiB，按纯数据严格解析，
+  可由 ``scripts/memory_gate.json`` 覆盖（只认 limit_ratio / resume_ratio / limit_gib / resume_gib 四个数值字段，文件大小上限 4 KiB，按纯数据严格解析，
   不是普通文件或是符号链接就不读）。写死的上下限：冻结线在提交上限的 40%~90% 之间、不低于 8 GiB，解冻线至少比冻结线低 3 GiB；
   越界、坏 JSON、未知字段一律整份忽略并用默认值，原因写进日志和 status。每 60 秒重读一次，改配置不用重装。提交上限读不到时退回 40/36 GiB。
 - STOP 文件（只认受保护状态目录里的）：看门狗先解冻全部已冻进程再退出。
@@ -34,7 +34,7 @@ SHA-256（``manifest.json``）；解释器是系统安装的（或复制进该�
     python -B scripts/memory_gate.py status      # 只读：是否在跑、现在多少、冻了谁
     python -B scripts/memory_gate.py resume-all  # 手动解冻全部（含已锁定的）
     python -B scripts/memory_gate.py bundle-hash # 四个文件的哈希（pin-check 比对仓库里钉住的那份）
-    python -B scripts/memory_gate.py pin-check   # 只读：四个文件的合并哈希是否等于 config/memory_gate.pin.json
+    python -B scripts/memory_gate.py pin-check   # 只读：四个文件的合并哈希是否等于 scripts/memory_gate.pin.json
     python -B scripts/memory_gate.py pin-write   # 开发者改完四个文件后重写钉哈希文件（改动要走 PR 和独立审计）
     python -B scripts/memory_gate.py selftest    # 用无害的假进程走一遍 冻结 -> 解冻（不需要内存压力）
 """
@@ -491,12 +491,12 @@ def _manifest_config_path(root: Path) -> Path | None:
 
 
 def config_path() -> Path | None:
-    """Installed: the path in ``manifest.json``.  A development checkout: ``<project>/config/memory_gate.json``."""
+    """Installed: the path in ``manifest.json``.  A development checkout: ``<project>/scripts/memory_gate.json``."""
 
     root = install_root()
     if root is not None:
         return _manifest_config_path(root)
-    return Path(__file__).resolve().parent.parent / "config" / CONFIG_FILE
+    return Path(__file__).resolve().parent / CONFIG_FILE
 
 
 def resolve_thresholds(commit_limit_gib: float | None, path: Path | None = None) -> Thresholds:
@@ -987,7 +987,7 @@ def _normalized_sha256(path: Path) -> str:
 
 
 def bundle_hash(project_root: Path | None = None) -> tuple[str, list[tuple[str, str]]]:
-    """(the combined SHA-256, the per-file lines): the value that ``config/memory_gate.pin.json`` pins and ``install_memory_gate.ps1`` checks before installing.
+    """(the combined SHA-256, the per-file lines): the value that ``scripts/memory_gate.pin.json`` pins and ``install_memory_gate.ps1`` checks before installing.
 
     Combined = SHA-256 of ``"<sha256>  <relative path>\n"`` for every file in ``BUNDLE_FILES`` (UTF-8, LF).  The installer computes the same
     thing from the files it is about to copy plus itself, and refuses on any difference from the pin committed in the repository, so the user installs exactly what was merged.
@@ -1000,11 +1000,11 @@ def bundle_hash(project_root: Path | None = None) -> tuple[str, list[tuple[str, 
 
 
 def pin_path(project_root: Path | None = None) -> Path:
-    return (project_root or Path(__file__).resolve().parent.parent) / "config" / PIN_FILE
+    return (project_root or Path(__file__).resolve().parent.parent) / "scripts" / PIN_FILE
 
 
 def read_pin(project_root: Path | None = None) -> tuple[str, dict[str, str]]:
-    """(the pinned combined hash, the pinned per-file hashes) from ``config/memory_gate.pin.json``; raises ValueError when it is missing or malformed."""
+    """(the pinned combined hash, the pinned per-file hashes) from ``scripts/memory_gate.pin.json``; raises ValueError when it is missing or malformed."""
 
     try:
         data = json.loads(_read_text_retrying(pin_path(project_root)))
@@ -1261,7 +1261,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if problem else 0
     if args.command == "pin-write":
         write_pin()
-        print(f"已写 config/{PIN_FILE}；这份改动要走 PR、独立审计和手动 sw008-ci")
+        print(f"已写 scripts/{PIN_FILE}；这份改动要走 PR、独立审计和手动 sw008-ci")
         return 0
     with tempfile.TemporaryDirectory() as folder:
         problems = selftest(Path(folder), strict=True)
