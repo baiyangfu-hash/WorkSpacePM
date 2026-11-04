@@ -183,9 +183,6 @@ PLC源程序样例/
 *.bak
 *.hmiproj.bak
 
-# --- 2026-11-04: keep local deploy leftovers and editor files out of git; rules only keep NEW files out, already tracked files and history are not affected ---
-# 本机部署留下的发布目录：新增的发布目录不再显示为未跟踪（已入库的 13 个发布不受影响；要登记新发布时用 git add -f）。
-# 这条同时覆盖旧发布模板里生成的 0 字节 GlobalVars.db 占位文件。
-00_Infrastructure/auto_pm/releases/*/
+# --- 2026-11-04: keep editor files out of git; rules only keep NEW files out, already tracked files and history are not affected ---
 # 编辑器工作区配置，每台电脑自己的
 *.code-workspace
