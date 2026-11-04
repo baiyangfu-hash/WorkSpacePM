@@ -254,6 +254,87 @@ function Invoke-Prepare([string]$Root, [string]$LocalZip, [bool]$SkipGit) {
 # ---------------------------------------------------------------- clean-up: used by rollback, -Repair and -Uninstall
 # Stops the task and any watchdog process, takes ownership, thaws if anything is frozen, unregisters the task and deletes the folder.
 # Throws with a plain-words reason when it cannot finish; the caller says what to do next.
+# SIDs that hold an Allow entry on one item; throws when the ACL cannot be read.
+function Get-AllowedSids([string]$Path) {
+    $sids = @()
+    foreach ($rule in (Get-Acl -LiteralPath $Path -ErrorAction Stop).Access) {
+        if ($rule.AccessControlType -ne "Allow") { continue }
+        try { $sids += $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { $sids += [string]$rule.IdentityReference }
+    }
+    return $sids
+}
+
+# Every item under (and including) the folder whose ACL cannot be read or has no entry at all.  The folder is listed, never changed.
+function Get-TreeAccessProblems([string]$Folder) {
+    $problems = @()
+    $items = @(Get-Item -LiteralPath $Folder -Force)
+    $listErrors = $null
+    $items += @(Get-ChildItem -LiteralPath $Folder -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable listErrors)
+    foreach ($item in $items) {
+        try {
+            if (@((Get-Acl -LiteralPath $item.FullName -ErrorAction Stop).Access).Count -eq 0) { $problems += "$($item.FullName)（权限列表是空的）" }
+        } catch {
+            $problems += "$($item.FullName)（读不了权限：$($_.Exception.Message)）"
+        }
+    }
+    foreach ($listError in @($listErrors)) { $problems += "列目录出错：$($listError.Exception.Message)" }
+    return $problems
+}
+
+# One item: owner becomes Administrators first (the take-ownership and restore privileges are switched on by .NET for this), then the ACL is
+# replaced by exactly SYSTEM and Administrators, full control.  Two calls, because the second needs the ownership the first gives.
+function Set-ItemAdminAccess([IO.FileSystemInfo]$Item) {
+    $admins = New-Object Security.Principal.SecurityIdentifier("S-1-5-32-544")
+    $system = New-Object Security.Principal.SecurityIdentifier("S-1-5-18")
+    $isDir = $Item -is [IO.DirectoryInfo]
+    $inherit = [Security.AccessControl.InheritanceFlags]::None
+    if ($isDir) { $inherit = [Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit" }
+    if ($isDir) { $ownerOnly = New-Object Security.AccessControl.DirectorySecurity } else { $ownerOnly = New-Object Security.AccessControl.FileSecurity }
+    $ownerOnly.SetOwner($admins)
+    if ($isDir) { [IO.Directory]::SetAccessControl($Item.FullName, $ownerOnly) } else { [IO.File]::SetAccessControl($Item.FullName, $ownerOnly) }
+    if ($isDir) { $rights = New-Object Security.AccessControl.DirectorySecurity } else { $rights = New-Object Security.AccessControl.FileSecurity }
+    $rights.SetAccessRuleProtection($true, $false)
+    foreach ($sid in @($admins, $system)) {
+        $rights.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inherit, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)))
+    }
+    if ($isDir) { [IO.Directory]::SetAccessControl($Item.FullName, $rights) } else { [IO.File]::SetAccessControl($Item.FullName, $rights) }
+}
+
+# The whole tree, folder by folder from the top (a folder is made listable before its children are read).  Returns one line of what was done.
+function Set-TreeAdminAccess([string]$Folder) {
+    $done = 0
+    $failed = @()
+    $queue = New-Object 'System.Collections.Generic.Queue[System.IO.FileSystemInfo]'
+    $queue.Enqueue((Get-Item -LiteralPath $Folder -Force))
+    while ($queue.Count -gt 0) {
+        $item = $queue.Dequeue()
+        $isLink = (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+        if ($isLink) { $failed += "$($item.FullName)（是符号链接/联接点，不跟进）"; continue }
+        try { Set-ItemAdminAccess $item; $done++ } catch { $failed += "$($item.FullName)（$($_.Exception.Message)）" }
+        if ($item -is [IO.DirectoryInfo]) {
+            $listErrors = $null
+            foreach ($child in @(Get-ChildItem -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue -ErrorVariable listErrors)) { $queue.Enqueue($child) }
+            foreach ($listError in @($listErrors)) { $failed += "列目录出错：$($listError.Exception.Message)" }
+        }
+    }
+    return ("逐个设置：成功 {0} 个，失败 {1} 个{2}" -f $done, $failed.Count, $(if ($failed.Count -gt 0) { "（" + (($failed | Select-Object -First 3) -join " ｜ ") + "）" } else { "" }))
+}
+
+# After the install: nothing under the install folder may have an empty or unreadable ACL, and the three files the task runs must be
+# open to SYSTEM and Administrators.  An empty ACL makes the folder impossible to clean up later, so it fails the install (which rolls back).
+function Assert-InstalledAcls([string]$Folder) {
+    $problems = @(Get-TreeAccessProblems $Folder)
+    if ($problems.Count -gt 0) { throw "安装后 $($problems.Count) 个条目的权限是空的或读不了，拒绝继续（例如 $($problems[0])）。" }
+    foreach ($relative in @("python\python.exe", "scripts\memory_gate.py", "manifest.json")) {
+        $path = Join-Path $Folder $relative
+        if (-not (Test-Path -LiteralPath $path)) { throw "安装后 $path 不存在。" }
+        $sids = @(Get-AllowedSids $path)
+        foreach ($need in @("S-1-5-18", "S-1-5-32-544")) {
+            if ($sids -notcontains $need) { throw "安装后 $path 的权限里没有 $need 的允许项（现有：$($sids -join ', ')），拒绝继续。" }
+        }
+    }
+}
+
 # Gives Administrators ownership of, and full control over, everything under a leftover folder, whatever its ACLs look like
 # (an empty ACL, an owner that no longer exists, a deny entry).  Every step's exit code is kept and returned as one text line:
 # a failing step does not stop the next one (a later step can succeed where an earlier one failed), but the caller reports
@@ -279,6 +360,16 @@ function Reset-FolderAccess([string]$Folder) {
         $result = Invoke-Native $step.File $step.Arguments
         $trace += ("{0} 退出码 {1}" -f $step.Name, $result.Code)
         if ($result.Code -ne 0) { Write-Log ("  {0} 退出码 {1}：{2}" -f $step.Name, $result.Code, $result.Output) }
+    }
+    # An exit code of 0 proved nothing on the laptop (11-04): icacls with the carry-on switch reported success while the files kept an empty ACL.
+    # So the result is judged by looking at every item's ACL, and what is still wrong is fixed item by item through .NET.
+    $problems = @(Get-TreeAccessProblems $Folder)
+    $trace += "命令执行后仍有问题的条目 $($problems.Count) 个"
+    if ($problems.Count -gt 0) {
+        Write-Log "  命令退出码正常，但还有 $($problems.Count) 个条目的权限不对（例如 $($problems[0])），改为逐个条目设置 ..."
+        $trace += (Set-TreeAdminAccess $Folder)
+        $problems = @(Get-TreeAccessProblems $Folder)
+        $trace += "逐个设置后仍有问题的条目 $($problems.Count) 个" + $(if ($problems.Count -gt 0) { "（" + (($problems | Select-Object -First 3) -join " ｜ ") + "）" } else { "" })
     }
     return ($trace -join "；")
 }
@@ -452,6 +543,7 @@ function Invoke-Apply([string]$Root, [string]$Expected, [string]$Zip) {
         } | ConvertTo-Json -Depth 4
         [IO.File]::WriteAllText((Join-Path $Dest "manifest.json"), $manifest, (New-Object Text.UTF8Encoding($false)))
         Assert-DestLocked $Dest
+        Assert-InstalledAcls $Dest
 
         Write-Log "6/6 自检、注册计划任务 ${TaskName}（开机自启，SYSTEM，最高权限）并启动 ..."
         $self = Invoke-Native $installedPython @("-I", "-S", "-B", $installedGate, "selftest")
