@@ -1,6 +1,6 @@
 # 事故记录：收 gui-trial 工位时控制根 `.venv` 被清空（2026-11-03 MST，UTC 2026-11-04）
 
-状态：**进行中**（等用户同意重建 .venv；重建和核对结果追加在文末）。时间均为 MST（UTC-7）。
+状态：**已重建待结案**（用户 03:54:19Z 原话批准重建：cmsg_01AfNxhPWkgwWYuL1EVfYC7tNGSfT86w6AGx63R2BAssv8；重建与核对结果见文末，审计 586 已放行）。时间均为 MST（UTC-7）。
 
 ## 时间线
 
@@ -39,7 +39,7 @@
 
 ## 追加（重建与核对结果）
 
-（待补）
+见下面“重建与核对结果”。
 
 ### 补充（审计 03:54Z 清单）
 
@@ -71,3 +71,7 @@ Error: Invalid value for '{claude|codex|cursor|trae|vscode}': 'gui-trial' is not
 - 发布 1.3.3-d671611 `pmf_release_ops.sh verify`：exact-tree OK。
 - `d07n_deploy.sh --check-only`：退出码 0，输出 `CHECK_ONLY_OK`；HEAVY_GATES_RUNNING 这行已通过；前置核验打印了“G2 FAIL 由用户原话覆盖”的话。身份：配置版本=实际加载版本=1.3.3-d671611，conflicts=[]。
 - 结论：与门禁环境相比所有版本一致，未发现差异。D07n 未真跑，等审计与协调者的指示。
+
+### 未决的技术债（不阻断）
+- 联接扫描只做到深度 4，需无深度限制重扫整个工作区。
+- 重建时没有用 `pip install --require-hashes`（锁定清单只有版本，没有哈希）。
