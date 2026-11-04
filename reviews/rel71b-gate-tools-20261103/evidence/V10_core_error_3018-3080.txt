@@ -1,0 +1,63 @@
+____________________________________________________ ERROR at setup of test_a_dispatch_run_is_held_to_one_lease_per_project_inside_the_transaction ____________________________________________________
+
+command = ['git', '-C', 'C:\\Users\\fubai\\AppData\\Local\\Temp\\pytest-of-fubai\\pytest-8222\\test_a_dispatch_run_is_held_to0\\ws', 'rev-parse', '--verify', 'HEAD'], default_timeout = 60.0
+error_cls = <class 'auto_pm.infrastructure.control_root_guard.ControlRootGuardError'>
+where = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8222/test_a_dispatch_run_is_held_to0/ws')
+kwargs = {'capture_output': True, 'check': False, 'env': {'AI_AGENT': 'claude-code_2-1-309_agent', 'ALLUSERSPROFILE': 'C:\\ProgramData', 'ANTHROPIC_BASE_URL': 'https://api.anthropic.com', 'API_TIMEOUT_MS': '900000', ...}, 'text': True, ...}
+
+    def _run_bounded(
+        command: Sequence[str],
+        *,
+        default_timeout: float,
+        error_cls: type[Exception],
+        where: Path | str,
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[Any]:
+        """Run Git with a bounded limit; a hang or bad override fails closed as ``error_cls``.
+    
+        The timeout receipt names the command, directory, limit and the time actually waited,
+        so a long tail is visible instead of being re-run until it turns green.
+        KeyboardInterrupt and OSError propagate untouched.
+        """
+        try:
+            limit = resolve_git_timeout(default_timeout)
+        except ValueError as error:
+            raise error_cls(str(error)) from error
+        started = time.monotonic()
+        try:
+>           return subprocess.run(list(command), timeout=limit, **_hidden_window(kwargs))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+auto_pm\infrastructure\git_timeout.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\subprocess.py:550: in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\subprocess.py:1228: in communicate
+    sts = self.wait(timeout=self._remaining_time(endtime))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\subprocess.py:1264: in wait
+    return self._wait(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Popen: returncode: 0 args: ['git', '-C', 'C:\\Users\\fubai\\AppData\\Local\...>, timeout = -725.3289999999979
+
+    def _wait(self, timeout):
+        """Internal implementation of wait() on Windows."""
+        if timeout is None:
+            timeout_millis = _winapi.INFINITE
+        elif timeout <= 0:
+            timeout_millis = 0
+        else:
+            timeout_millis = int(timeout * 1000)
+        if self.returncode is None:
+            # API note: Returns immediately if timeout_millis == 0.
+            result = _winapi.WaitForSingleObject(self._handle,
+                                                 timeout_millis)
+            if result == _winapi.WAIT_TIMEOUT:
+>               raise TimeoutExpired(self.args, timeout)
+E               subprocess.TimeoutExpired: Command '['git', '-C', 'C:\\Users\\fubai\\AppData\\Local\\Temp\\pytest-of-fubai\\pytest-8222\\test_a_dispatch_run_is_held_to0\\ws', 'rev-parse', '--verify', 'HEAD']' timed out after -725.3289999999979 seconds
+
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\subprocess.py:1593: TimeoutExpired
+

@@ -1,0 +1,12 @@
+# G2 - the nine regression groups (ten outputs) against the governed outputs of the previous card (RUN-SW008-M3-REL7-001, card 219 V1.0, whose product equals the active release 1.3.3-d671611): every group has no failure; the counts equal the baseline plus the deltas declared in the card (counted before the run: collect-only counts on both commits plus the changed test files run on both trees; this proves no collected test was lost, not that the new tests pass)
+contracts: baseline 249p/0f/1s | candidate 249p/0f/1s | expected +0 -> OK
+infrastructure: baseline 423p/0f/7s | candidate 485p/0f/8s | expected +62 -> OK
+cli: baseline 971p/0f/3s | candidate 996p/0f/3s | expected +25 -> OK
+change: baseline 309p/0f/0s | candidate 309p/0f/0s | expected +0 -> OK
+core: baseline 3048p/0f/15s | candidate 3047p/1f/15s | expected +1 -> FAIL
+qml: baseline 334p/0f/0s | candidate 334p/0f/0s | expected +0 -> OK
+qml_debounce_alone: baseline 1p/0f/0s | candidate 1p/0f/0s | expected +0 -> OK
+application: baseline 209p/0f/0s | candidate 209p/0f/0s | expected +0 -> OK
+plc: baseline 322p/0f/0s | candidate 322p/0f/0s | expected +0 -> OK
+rest: baseline 986p/0f/15s | candidate 989p/0f/15s | expected +3 | strict True | named transient rule False -> OK
+G2 VERDICT: FAIL

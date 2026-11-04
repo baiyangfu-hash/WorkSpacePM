@@ -1,0 +1,6 @@
+== powercfg /a
+参数无效 -- 键入 "/?" 得到帮助
+== powercfg /requests
+参数无效 -- 键入 "/?" 得到帮助
+== lid close action
+参数无效 -- 键入 "/?" 得到帮助

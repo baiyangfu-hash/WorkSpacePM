@@ -1,0 +1,77 @@
+"""Write derive_rel71b.py (release 7.1 gate card V1.1) from derive_rel71.py (V1.0).  V1.1 = the re-judge after the V1.0 core group failed only because the laptop went into connected standby twice (lid closed):
+the nine passing group outputs of RUN-SW008-M3-REL71-001 are reused byte for byte (sha256-checked), ONLY the core group is run again, no new tolerance rule.  Same frozen commit, same gate contract,
+same change request CHG-SCPT-2026-475; new Work/Run/Decision/worktree (-002).  usage: python -B make_derive71b.py"""
+import io
+from pathlib import Path
+
+R = Path(__file__).resolve().parent.parent
+s = io.open(R / "m3-rel71" / "derive_rel71.py", encoding="utf-8", newline="").read()
+SRC71 = "@@SRC71@@"
+
+
+def sw(a, b, n=1):
+    global s
+    assert s.count(a) == n, (a[:80], s.count(a))
+    s = s.replace(a, b)
+
+
+# 1) the V1.0 inserted-text placeholders first (they must keep pointing at the V1.0 folder)
+# 1a) the reuse block of the gates script (inserted before the file is written)
+anchor = 'io.open(EV / "rel71_gates_all.sh", "w", encoding="utf-8", newline="").write(ga)'
+assert s.count(anchor) == 1
+reuse = (
+    "_gx = ga.index('stage groups; echo \"== nine regression groups (G2)\"')\n"
+    "_gy = ga.index('stage transient;')\n"
+    "_reuse = (\n"
+    "    'stage groups; echo \"== V1.1: reuse the nine passing group outputs of RUN-SW008-M3-REL71-001 (byte for byte, sha256-checked) and run ONLY the core group\"' + NL\n"
+    "    + 'SRC_G2=\"$ROOT/.auto-pm/reports/" + SRC71 + "/gates/g2_candidate\"' + NL\n"
+    "    + '[[ -f \"$SRC_G2/ALL_DONE\" ]] || fail \"the reused group outputs are incomplete\"' + NL\n"
+    "    + 'NINE=\"rest application plc change contracts infrastructure qml_debounce_alone cli qml\"' + NL\n"
+    "    + 'for n in $NINE; do [[ \"$(cat \"$SRC_G2/$n.exit\")\" == \"0\" ]] || fail \"reused group $n did not exit 0\"; done' + NL\n"
+    "    + 'mkdir -p \"$G/g2_candidate\"' + NL\n"
+    "    + '( cd \"$SRC_G2\" && for n in $NINE; do sha256sum -- \"$n.txt\" \"$n.exit\"; done ) > \"$G/reuse_manifest.sha256\"' + NL\n"
+    "    + 'for n in $NINE; do cp -p \"$SRC_G2/$n.txt\" \"$SRC_G2/$n.exit\" \"$G/g2_candidate/\"; done' + NL\n"
+    "    + '( cd \"$G/g2_candidate\" && sha256sum -c --quiet \"$G/reuse_manifest.sha256\" ) || fail \"the copied group outputs differ from the source\"' + NL\n"
+    "    + 'echo \"reused $(wc -l < \"$G/reuse_manifest.sha256\") files from RUN-SW008-M3-REL71-001\"' + NL\n"
+    "    + 'GATE_GROUPS=core bash \"$EV/run_g2.sh\" \"$PROJ\" \"$G/g2_candidate\" || fail \"run_g2.sh (core only)\"' + NL)\n"
+    "ga = ga[:_gx] + _reuse + ga[_gy:]\n"
+)
+s = s.replace(anchor, reuse + anchor)
+# 1b) continue the change request of V1.0
+a2 = "EV.mkdir(parents=True, exist_ok=True)"
+assert s.count(a2) == 1
+s = s.replace(a2, a2 + "\nshutil.copy(R / \"" + SRC71 + "\" / \"rel71_chg.txt\", EV / \"rel71_chg.txt\")  # V1.1 continues the change request of V1.0 (CHG-SCPT-2026-475)")
+# 1c) hold watcher: the 11-03 extension authorization was consumed by RUN-...-001; V1.1 extends only when the user has typed a NEW authorization (message id in HOLD_REF.txt)
+old_ref = "--approval-evidence-ref user-confirmation:cmsg_01AfNxhPWkgwWYuL1EVfYC7tWQhf6disCfHBfB4NS8zWEF"
+assert s.count(old_ref) == 1
+s = s.replace(old_ref, "--approval-evidence-ref user-confirmation:$HREF")
+anch = 'no extension needed or already done" >> "$EV/extend_hold.out"; exit 0; fi' + chr(10)
+assert s.count(anch) == 1
+add = ('HREF="$(tr -d ' + chr(39) + chr(92) + 'r' + chr(92) + 'n' + chr(39) + ' < "$EV/HOLD_REF.txt" 2>/dev/null)"' + chr(10)
+       + 'if [ -z "$HREF" ]; then echo "$(date -u +%FT%TZ) no extension authorization (HOLD_REF.txt absent): no extension" >> "$EV/extend_hold.out"; exit 0; fi' + chr(10))
+s = s.replace(anch, anch + add)
+
+# 2) names
+s = s.replace("rel71-gate-tools-20261103", "rel71b-gate-tools-20261103")
+assert "rel71bb" not in s
+s = s.replace("m3-rel71", "m3-rel71b")
+assert "m3-rel71bb" not in s
+s = s.replace("m3-rel71b-001", "m3-rel71b-002")
+s = s.replace("REL71-001", "REL71-002")
+s = s.replace("claude:m3rel71", "claude:m3rel71b")
+s = s.replace("M3R71A01", "M3R71B01")
+s = s.replace(SRC71, "m3-rel71")
+sw('"version": "V1.0",', '"version": "V1.1",')
+sw("220_M3-REL71_发版7.1候选门禁实施卡_PM.md", "220_M3-REL71_发版7.1候选门禁实施卡_V1.1_PM.md")
+sw("实施卡 `CARD-SW008-M3-REL71 V1.0`", "实施卡 `CARD-SW008-M3-REL71 V1.1`")
+sw("# Card 220 V1.0 launcher (DETACHED)", "# Card 220 V1.1 launcher (DETACHED)")
+sw('.replace("Card 182 V1.0", "Card 220 V1.0")', '.replace("Card 182 V1.0", "Card 220 V1.1")')
+sw('("M3-D045 V1.1", "M3-REL71 V1.0"), ("M3-D045 (card 171 V1.1)", "M3-REL71 (card 220 V1.0)"), ("card 171 V1.1", "card 220 V1.0")',
+   '("M3-D045 V1.1", "M3-REL71 V1.1"), ("M3-D045 (card 171 V1.1)", "M3-REL71 (card 220 V1.1)"), ("card 171 V1.1", "card 220 V1.1")')
+# 3) authorization sentence
+sw("委托执行：用户 2026-10-18 预授权自行收口推送；用户 2026-11-03T19:33:23Z（当地 12:33）在本线程亲口预授权",
+   "委托执行：用户 2026-10-18 预授权自行收口推送；协调者 2026-11-04T03:23Z 裁决：V1.0 的 G2 因笔记本两次合盖进入待机而失败，走 V1.1 重判（复用九个输出，core 整组重跑，不加新的容忍规则）；用户 2026-11-03T19:33:23Z（当地 12:33）在本线程亲口预授权")
+# 4) report row
+sw("；通过数与跳过数等于基线加事先声明的差值：通过 {delta_text}", "；V1.1：九组输出逐字节复用 RUN-SW008-M3-REL71-001（sha256 清单核对），只重跑 core 组；通过数与跳过数等于基线加事先声明的差值：通过 {delta_text}")
+io.open(R / "m3-rel71" / "derive_rel71b.py", "w", encoding="utf-8", newline="\n").write(s)
+print("derive_rel71b.py written")

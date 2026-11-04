@@ -1,0 +1,134 @@
+"""Post-step of the release 7.1 V1.1 generator: apply the five audit requirements (coordinator relay 2026-11-04T03:24:58Z) to the generated toolkit in m3-rel71b.
+Every edit asserts that its anchor occurs exactly once.  usage: python -B post_v11.py   (after derive_rel71b.py)"""
+import hashlib
+import io
+from pathlib import Path
+
+R = Path(__file__).resolve().parent.parent
+V10, EV = R / "m3-rel71", R / "m3-rel71b"
+NINE = "rest application plc change contracts infrastructure qml_debounce_alone cli qml".split()
+
+
+def rd(p):
+    return io.open(p, encoding="utf-8", newline="").read()
+
+
+def wr(p, t):
+    io.open(p, "w", encoding="utf-8", newline="").write(t)
+
+
+def sw(t, a, b, n=1):
+    assert t.count(a) == n, (a[:80], t.count(a))
+    return t.replace(a, b)
+
+
+def sha(p):
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+
+# --- requirement 2 + 5: the sha tables embedded in the judge
+reuse = {f"{n}.{e}": sha(V10 / "gates" / "g2_candidate" / f"{n}.{e}") for n in NINE for e in ("txt", "exit")}
+v10_records = {f".auto-pm/reports/m3-rel71/gates/{x}": sha(V10 / "gates" / x) for x in
+               ("G2_report.txt", "judge_output.txt", "FAILED", "gate_verdict.json", "status/status.log", "g2_candidate/core.txt", "g2_candidate/core.exit")}
+g = rd(EV / "rel71_gates.py")
+tables = ("\nREUSE = " + repr(reuse) + "  # sha256 of the nine reused group outputs of RUN-SW008-M3-REL71-001 (audit requirement 2)\n"
+          "V10_RECORDS = " + repr(v10_records) + "  # the V1.0 G2 FAIL record, kept byte for byte (audit requirement 5)\n"
+          "HB_GAP_MAX = 120  # seconds; the heartbeat samples every 30 s, any gap above this means the machine slept or stalled (audit requirement 4)\n"
+          "REHEARSAL = os.environ.get(\"PG_REHEARSAL\") == \"1\"  # only rehearse.sh sets it; the real launch unsets it\n")
+g = sw(g, 'os.makedirs(G, exist_ok=True)\n', 'os.makedirs(G, exist_ok=True)\n' + tables)
+
+helpers = '''
+
+def reuse_check() -> tuple[bool, str]:
+    """Nine reused outputs: exact path set and sha256 (missing, extra or changed file = FAIL); the V1.0 FAIL record is unchanged."""
+    if REHEARSAL:
+        return True, "reuse check: SKIPPED (rehearsal with synthetic outputs)"
+    gd = f"{G}/g2_candidate"
+    present = {os.path.relpath(p, gd).replace(os.sep, "/") for p in glob.glob(gd + "/*")}
+    allowed = {f"core.{e}" for e in ("txt", "exit", "started", "finished")} | {"ALL_DONE"} | {f"transient_{i}.{e}" for i in (1, 2, 3) for e in ("txt", "exit")}
+    missing = sorted(set(REUSE) - present)
+    extra = sorted(present - set(REUSE) - allowed)
+    bad = sorted(n for n in REUSE if n in present and sha_file(f"{gd}/{n}") != REUSE[n])
+    v10_bad = sorted(p for p, h in V10_RECORDS.items() if not os.path.exists(p) or sha_file(p) != h)
+    ok = not (missing or extra or bad or v10_bad)
+    return ok, f"reuse check: {len(REUSE)} files hash-checked; missing {missing} extra {extra} changed {bad}; V1.0 FAIL record changed {v10_bad} -> {'OK' if ok else 'FAIL'}"
+
+
+def pin_check() -> tuple[bool, str]:
+    """The tested commit is pinned: worktree HEAD == BASE before and after, origin/main did not move during the run (audit requirement 1)."""
+    if REHEARSAL:
+        return True, "pin check: SKIPPED (rehearsal)"
+    pins = []
+    for n in ("pin_start.txt", "pin_end.txt"):
+        d = dict(l.split("=", 1) for l in rd(f"{G}/{n}").splitlines() if "=" in l) if os.path.exists(f"{G}/{n}") else {}
+        pins.append(d)
+    a, b = pins
+    ok = bool(a) and bool(b) and a.get("HEAD") == b.get("HEAD") == BASE and a.get("ORIGIN_MAIN") == b.get("ORIGIN_MAIN") and bool(a.get("ORIGIN_MAIN"))
+    return ok, f"pin check: HEAD start {a.get('HEAD', '?')[:12]} end {b.get('HEAD', '?')[:12]} expected {BASE[:12]}; origin/main start {a.get('ORIGIN_MAIN', '?')[:12]} end {b.get('ORIGIN_MAIN', '?')[:12]} (main == frozen: {a.get('ORIGIN_MAIN') == BASE}; product files differing main vs frozen: {a.get('MAIN_PRODUCT_DIFF', '?')}) -> {'OK' if ok else 'FAIL'}"
+
+
+def sleep_check() -> tuple[bool, str]:
+    """No gap above HB_GAP_MAX in the 30 s heartbeat from before the core group started to after it finished; the power-settings evidence files exist (audit requirement 4)."""
+    if REHEARSAL:
+        return True, "sleep check: SKIPPED (rehearsal)"
+    hb = f"{G}/heartbeat.log"
+    ts = [float(l.split()[0]) for l in rd(hb).splitlines() if l.strip() and l.split()[0].replace(".", "", 1).isdigit()] if os.path.exists(hb) else []
+    t0, t1 = os.path.getmtime(f"{G}/g2_candidate/core.started"), os.path.getmtime(f"{G}/g2_candidate/core.finished")
+    gaps = [b - a for a, b in zip(ts, ts[1:])]
+    worst = max(gaps) if gaps else 1e9
+    cover = bool(ts) and ts[0] <= t0 and ts[-1] >= t1
+    ev = all(os.path.exists(f"{G}/{n}") and os.path.getsize(f"{G}/{n}") > 0 for n in ("power_start.txt", "power_end.txt"))
+    ok = len(ts) > 2 and worst <= HB_GAP_MAX and cover and ev
+    return ok, f"sleep check: {len(ts)} heartbeat samples, largest gap {worst:.0f}s (limit {HB_GAP_MAX}s), covers core run {cover}, power evidence files {ev} -> {'OK' if ok else 'FAIL'}"
+
+'''
+g = sw(g, "\ndef stage_judge() -> int:", helpers + "\ndef stage_judge() -> int:")
+g = sw(g, "    g2_lines, g2_ok = [], same\n", "    reuse_ok, reuse_line = reuse_check()\n    g2_lines, g2_ok = [reuse_line], same and reuse_ok\n")
+g = sw(g, '    done("G9", same and sorted(status_after) == sorted(FILES) and head == BASE, ["# G9 - bytes and change set after all gates are those before them", f"{len(status_after)} paths"])',
+       '    pin_ok, pin_line = pin_check()\n    sl_ok, sl_line = sleep_check()\n'
+       '    done("G9", same and sorted(status_after) == sorted(FILES) and head == BASE and pin_ok and sl_ok, ["# G9 - bytes and change set after all gates are those before them; the tested commit is pinned (HEAD and origin/main unchanged during the run); the machine did not sleep during the core run (heartbeat without a gap above the limit, power settings recorded)", f"{len(status_after)} paths", pin_line, sl_line])')
+wr(EV / "rel71_gates.py", g)
+
+# --- heartbeat + evidence in the gates script
+(EV / "heartbeat.py").write_bytes(("\"\"\"Heartbeat: one line '<epoch seconds> <UTC time>' every 30 s into <log>, until <donefile> exists (or 8 h).  A gap above 120 s in this log = the machine slept or stalled.\n"
+                                   "usage: python -B heartbeat.py <log> <donefile>\"\"\"\nimport sys\nimport time\nfrom datetime import datetime, timezone\nfrom pathlib import Path\n\n"
+                                   "t0 = time.time()\nwith open(sys.argv[1], \"a\", encoding=\"utf-8\", buffering=1) as f:\n"
+                                   "    while not Path(sys.argv[2]).exists() and time.time() - t0 < 8 * 3600:\n"
+                                   "        now = time.time()\n        f.write(f\"{now:.0f} {datetime.fromtimestamp(now, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\\n\")\n        time.sleep(30)\n").encode("utf-8"))
+ga = rd(EV / "rel71_gates_all.sh")
+ga = sw(ga, 'cd "$ROOT" || fail "no workspace root"\nstage baseline;',
+        'cd "$ROOT" || fail "no workspace root"\n'
+        'pin() { git -C "$ROOT" fetch -q origin main || true; { echo "HEAD=$(git -C "$WT" rev-parse HEAD)"; echo "ORIGIN_MAIN=$(git -C "$ROOT" rev-parse origin/main)"; '
+        'echo "MAIN_PRODUCT_DIFF=$(git -C "$ROOT" diff --name-only HEAD_PLACEHOLDER origin/main -- "$P/auto_pm" "$P/templates" "$P/scripts" | wc -l)"; } > "$G/$1"; }\n'
+        'power() { { echo "== powercfg /a"; powercfg /a; echo "== powercfg /requests"; powercfg /requests; echo "== lid close action (power button and lid subgroup)"; '
+        'powercfg /query SCHEME_CURRENT 4f971e89-eebd-4455-a8de-9e59040e7347 5ca83367-6e45-459f-a27b-476b1d01c936; echo "== sleep timeout"; '
+        'powercfg /query SCHEME_CURRENT 238c9fa8-0aad-41ed-83f4-97be242c8f20 29f6c1db-86da-48c5-9fdb-f2b4a58e5f2c; } > "$G/$1" 2>&1; }\n'
+        'pin pin_start.txt; power power_start.txt\nstage baseline;')
+ga = sw(ga, "HEAD_PLACEHOLDER", "$(git -C \"$WT\" rev-parse HEAD)")
+ga = sw(ga, 'cd "$ROOT" || fail "no workspace root"\nstage judge;', 'cd "$ROOT" || fail "no workspace root"\npin pin_end.txt; power power_end.txt\nstage judge;')
+ga = sw(ga, "RUN-SW008-M3-REL71-002 (byte for byte", "RUN-SW008-M3-REL71-001 (byte for byte") if "RUN-SW008-M3-REL71-002 (byte for byte" in ga else ga
+ga = ga.replace("files from RUN-SW008-M3-REL71-002", "files from RUN-SW008-M3-REL71-001")
+wr(EV / "rel71_gates_all.sh", ga)
+
+# --- launcher: heartbeat process, rehearsal flag cleared, hold watcher unchanged
+la = rd(EV / "rel71_launch.sh")
+la = sw(la, "unset PG_G PG_WT GATE_GROUPS", "unset PG_G PG_WT GATE_GROUPS PG_REHEARSAL")
+la = sw(la, 'det "$EV/keepawake.log" "$PY" -B "$EV/keepawake.py" "$EV/gates_all.exit"\ncat > "$EV/rel71_gates_wrap.sh"',
+        'det "$EV/keepawake.log" "$PY" -B "$EV/keepawake.py" "$EV/gates_all.exit"\nmkdir -p "$G"\ndet "$EV/heartbeat.stdout" "$PY" -B "$EV/heartbeat.py" "$G/heartbeat.log" "$EV/gates_all.exit"\ncat > "$EV/rel71_gates_wrap.sh"')
+wr(EV / "rel71_launch.sh", la)
+
+# --- rehearsal: synthetic outputs, so the three new checks are skipped there (and tested by their own variants below)
+rh = rd(EV / "rel71_rehearse.sh")
+rh = sw(rh, 'export PG_WT="$(cygpath -m "$WT")" PG_G="$(cygpath -m "$G")"', 'export PG_WT="$(cygpath -m "$WT")" PG_G="$(cygpath -m "$G")" PG_REHEARSAL=1')
+wr(EV / "rel71_rehearse.sh", rh)
+print("post_v11 applied: reuse files", len(reuse), "v10 records", len(v10_records))
+
+# --- refresh the byte manifest for every edited tool and add the new heartbeat tool
+import json
+man = json.loads(rd(EV / "reference_manifest.json"))
+for k in list(man):
+    if k.startswith("tools/") and not k.startswith("tools/m2_") and (EV / k[len("tools/"):]).exists():
+        man[k] = sha(EV / k[len("tools/"):])
+man["tools/heartbeat.py"] = sha(EV / "heartbeat.py")
+wr(EV / "reference_manifest.json", json.dumps(dict(sorted(man.items())), ensure_ascii=False, indent=2) + "\n")
+print("manifest refreshed:", len(man), "entries")

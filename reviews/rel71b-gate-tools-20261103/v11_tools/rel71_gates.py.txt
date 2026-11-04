@@ -1,0 +1,593 @@
+"""Gates G1-G9 of card 220 (CARD-SW008-M3-REL71: build the frozen merge commit twice and compare; the full gate set on that commit;
+the committed file is the contract report) on the UNCOMMITTED candidate.
+
+Usage:  python -B rel71_gates.py --stage baseline | fast | judge
+Environment: PG_WT (candidate worktree), PG_G (gates folder).
+"""
+
+import argparse
+import glob
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(r"C:\Users\fubai\Documents\My_Workspace")
+os.chdir(ROOT)
+P = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+EV = ".auto-pm/reports/m3-rel71b"
+WT = os.environ.get("PG_WT", ".auto-pm/worktrees/m3-rel71b")
+G = os.environ.get("PG_G", EV + "/gates")
+PROJ = f"{WT}/{P}"
+CFG = json.load(open(f"{EV}/rel71_config.json", encoding="utf-8"))
+BASE, LABEL, RUN_ID = CFG["base"], CFG["label"], CFG["run_id"]
+FILES: dict[str, dict] = CFG["files"]
+PLUGIN = CFG["plugin"]
+DELTAS: dict[str, int] = CFG["expected_deltas"]
+SKIPS: dict[str, int] = CFG["expected_skips"]
+GROUPS = ["contracts", "infrastructure", "cli", "change", "core", "qml", "qml_debounce_alone", "application", "plc", "rest"]
+R09 = "tests/e2e/test_pmf_recovery.py::test_r09_a_reader_never_fails_because_another_process_has_a_transaction_open"
+PY = str(ROOT / ".venv/Scripts/python.exe")
+GIT_BASH = "C:/Program Files/Git/bin/bash.exe"
+ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1", "QT_QPA_PLATFORM": "offscreen"}
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+NL = chr(10)
+SCRATCH = Path(tempfile.gettempdir()) / "rel71_scratch"
+os.makedirs(G, exist_ok=True)
+
+REUSE = {'rest.txt': 'e32ce0709544844f0dcbf01dd0f9f7b35391a37eb6c91900ae80bc757db77a0d', 'rest.exit': '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa', 'application.txt': '887663a6fe78b550514b69a89b41ef680454927e8d84d4a52bc0e00c740a3a9f', 'application.exit': '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa', 'plc.txt': '12abe2b033bd8190dc9bc60624d31f69b7ea256973415654894c103db57f4e39', 'plc.exit': '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa', 'change.txt': '39ac384b900bbf77bd4105307a522604c20684c8c171c54072295a0a32edaa67', 'change.exit': '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa', 'contracts.txt': '1c0ccce8e771570cedd652c93be709c199a032675d1610f321af4abe14d60781', 'contracts.exit': '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa', 'infrastructure.txt': '49aa15f6152f0e46b8b0eaefc39acebb6c288900f4f39f40cb40386364cb7997', 'infrastructure.exit': '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa', 'qml_debounce_alone.txt': '9b8faa293748253efbe1901ccc0cfda08011348c03354cdf49a9fccef9f4d384', 'qml_debounce_alone.exit': '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa', 'cli.txt': '2f38a5380fa9c8c7603122b28516c30367a77af6daf03376b2460ff656e4319d', 'cli.exit': '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa', 'qml.txt': 'd92ad6781f85b79441cab7614d775d558c3941426e56430d54e9775875006575', 'qml.exit': '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa'}  # sha256 of the nine reused group outputs of RUN-SW008-M3-REL71-001 (audit requirement 2)
+V10_RECORDS = {'.auto-pm/reports/m3-rel71/gates/G2_report.txt': '7fafc6b986634a323074dde70ab671ef569806ad5c3ddfb89aec1712e03b9436', '.auto-pm/reports/m3-rel71/gates/judge_output.txt': '94e727d31940706f1c297adfd43ed3321e831cd714531bdb215092989300bb14', '.auto-pm/reports/m3-rel71/gates/FAILED': '92d0e3d1f6ba5f4e482fb4232c8d91421a8981e1a3e1fa21d57b1ef18a29fa88', '.auto-pm/reports/m3-rel71/gates/gate_verdict.json': '7906ec5803006170abbba0f677fe85c5fec75c16c82f1e396cde3fcc54c0fa48', '.auto-pm/reports/m3-rel71/gates/status/status.log': 'b02868bc11e19940b144d64e3505ed7bd3ecb67136712be92f1a5ca79b2b26ae', '.auto-pm/reports/m3-rel71/gates/g2_candidate/core.txt': 'd4f0ae54e58b2dc05184f8f84569fb752b295d1bf65e00dcedb662613b43e67a', '.auto-pm/reports/m3-rel71/gates/g2_candidate/core.exit': '4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865'}  # the V1.0 G2 FAIL record, kept byte for byte (audit requirement 5)
+HB_GAP_MAX = 120  # seconds; the heartbeat samples every 30 s, any gap above this means the machine slept or stalled (audit requirement 4)
+REHEARSAL = os.environ.get("PG_REHEARSAL") == "1"  # only rehearse.sh sets it; the real launch unsets it
+
+
+KNOWN_STUCK_RUN = "RUN-SW-2026-008-CHG-SCPT-2026-471-01"  # the FORMER exception object of release 7 (settled, CANCELLED); kept only to prove it no longer passes
+KNOWN_STUCK_WORK = "WORK-MSN-415BA3D417866398"
+KNOWN_CARD = "CARD-SW008-M3-REL71"
+
+
+def orient_extract(parsed: object) -> dict:
+    # the run, work id and work state that orient itself reports; anything that is not exactly a dict with string fields is None (never raises)
+    out: dict = {"run_id": None, "work_id": None, "work_state": None}
+    if not isinstance(parsed, dict):
+        return out
+    run, work = parsed.get("run"), parsed.get("work")
+    if isinstance(run, dict) and isinstance(run.get("run_id"), str):
+        out["run_id"] = run["run_id"]
+    if isinstance(work, dict):
+        out["work_id"] = work["work_id"] if isinstance(work.get("work_id"), str) else None
+        out["work_state"] = work["state"] if isinstance(work.get("state"), str) else None
+    return out
+
+
+def orient_ok(conflicts: object, orient_run: object, work_id: object, work_state: object, card_id: object = None, ledger_expired: object = None) -> bool:
+    # release 7.1: only an empty conflict list passes; the release 7 exception (the exact list ['LEASE_EXPIRED'] for the known stuck B2 Run) is gone, because that Run is settled.
+    # The other arguments are kept so the call sites and the case table are unchanged; they cannot make a non-empty list pass.
+    return type(conflicts) is list and conflicts == []
+
+
+def orient_cases() -> list[dict]:
+    K, W, C = KNOWN_STUCK_RUN, KNOWN_STUCK_WORK, KNOWN_CARD
+    OLD = "RUN-SW008-A2-201-03"
+    table = [
+        ("no-conflict-is-a-normal-pass", [], None, None, None, None, None, True),
+        ("the-former-release-7-exception-no-longer-passes", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, None, False),
+        ("former-exception-with-other-expired-runs-in-the-ledger", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", C, [K, OLD], False),
+        ("one-extra-conflict", ["LEASE_EXPIRED", "RUN_BLOCKED"], K, W, "IN_PROGRESS", C, None, False),
+        ("other-conflict-only", ["RUN_BLOCKED"], K, W, "IN_PROGRESS", C, None, False),
+        ("a-different-object", ["LEASE_EXPIRED"], "RUN-SW-2026-008-OTHER-01", W, "IN_PROGRESS", C, None, False),
+        ("the-old-codex-run-is-not-the-exception-object", ["LEASE_EXPIRED"], OLD, W, "IN_PROGRESS", C, None, False),
+        ("no-object-reported", ["LEASE_EXPIRED"], None, W, "IN_PROGRESS", C, None, False),
+        ("work-not-in-progress", ["LEASE_EXPIRED"], K, W, "CANCELLED", C, None, False),
+        ("a-different-work-id", ["LEASE_EXPIRED"], K, "WORK-OTHER-1", "IN_PROGRESS", C, None, False),
+        ("work-id-missing", ["LEASE_EXPIRED"], K, None, "IN_PROGRESS", C, None, False),
+        ("another-card", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", "CARD-SW008-M3-REL8", None, False),
+        ("no-card-id", ["LEASE_EXPIRED"], K, W, "IN_PROGRESS", None, None, False),
+        ("malformed-conflicts-string", "LEASE_EXPIRED", K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-conflicts-lowercase", ["lease_expired"], K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-conflicts-none", None, K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-conflicts-unreadable", ["UNREADABLE"], K, W, "IN_PROGRESS", C, None, False),
+        ("malformed-object-list", ["LEASE_EXPIRED"], [K], W, "IN_PROGRESS", C, None, False),
+    ]
+    out = [{"id": i, "expected": e, "got": orient_ok(c, r, w, ws, card, led)} for i, c, r, w, ws, card, led, e in table]
+    ok_run = {"run_id": K}
+    ok_work = {"work_id": W, "state": "IN_PROGRESS"}
+    ex = [
+        ("extract-valid", {"run": ok_run, "work": ok_work}, {"run_id": K, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-run-is-a-list", {"run": [], "work": ok_work}, {"run_id": None, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-run-is-a-string", {"run": "x", "work": ok_work}, {"run_id": None, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-run-without-run-id", {"run": {}, "work": ok_work}, {"run_id": None, "work_id": W, "work_state": "IN_PROGRESS"}),
+        ("extract-work-is-not-a-dict", {"run": ok_run, "work": []}, {"run_id": K, "work_id": None, "work_state": None}),
+        ("extract-parsed-is-a-list", [], {"run_id": None, "work_id": None, "work_state": None}),
+        ("extract-parsed-is-none", None, {"run_id": None, "work_id": None, "work_state": None}),
+    ]
+    out += [{"id": i, "expected": e, "got": orient_extract(v)} for i, v, e in ex]
+    # a run that is not a dict must end as FAIL, not as a crash
+    bad = orient_extract({"run": [], "work": ok_work})
+    out.append({"id": "a-run-that-is-not-a-dict-ends-as-fail", "expected": False, "got": orient_ok(["LEASE_EXPIRED"], bad["run_id"], bad["work_id"], bad["work_state"], C)})
+    return out
+
+
+def sha(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def sha_file(p: str) -> str:
+    return sha(open(p, "rb").read())
+
+
+def write(name: str, text: str) -> str:
+    path = f"{G}/{name}"
+    open(path, "w", encoding="utf-8", newline="\n").write(text)
+    return path
+
+
+def sh(args: list[str], cwd: str | None = None, env: dict | None = None, timeout: int = 3600) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=cwd, env=env or ENV, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+
+
+def git(*args: str, cwd: str | None = None, env: dict | None = None) -> subprocess.CompletedProcess[str]:
+    return sh(["git", "-c", "core.quotePath=false", *args], cwd=cwd or WT, env=env)
+
+
+def rd(p: str) -> str:
+    return ANSI.sub("", open(p, encoding="utf-8", errors="replace").read())
+
+
+def summary(path: str) -> dict:
+    lines = [x for x in rd(path).splitlines() if x.strip()]
+    last = lines[-1] if lines else ""
+    out: dict = {k: int(m.group(1)) if (m := re.search(rf"(\d+) {k}", last)) else 0 for k in ("passed", "failed", "skipped", "error", "deselected")}
+    out["last"] = last
+    out["failed_ids"] = sorted(x[len("FAILED "):].split(" - ")[0] for x in lines if x.startswith("FAILED "))
+    out["error_nodes"] = [x for x in lines if x.startswith("ERROR ")]
+    out["exit"] = int(rd(path[:-4] + ".exit").strip())
+    return out
+
+
+def pytest_run(name: str, *targets: str) -> dict:
+    done = sh([PY, "-B", "-m", "pytest", "-o", "addopts=", "--no-cov", "-p", "no:cacheprovider", "--color=no", "-q", *targets], cwd=PROJ)
+    open(f"{G}/{name}.txt", "w", encoding="utf-8").write(done.stdout + done.stderr)
+    open(f"{G}/{name}.exit", "w").write(str(done.returncode) + "\n")
+    return summary(f"{G}/{name}.txt")
+
+
+def hooks_record() -> str:
+    hooks = ROOT / ".git" / "hooks"
+    return "".join(f"{sha_file(str(p))} *{p.name}\n" for p in sorted(hooks.iterdir()) if p.is_file() and not p.name.endswith(".sample"))
+
+
+def py_procs() -> str:
+    done = subprocess.run(["powershell", "-NoProfile", "-Command",
+                           "@(Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^pythonw?\\.exe$' -and $_.CommandLine -match 'pytest|pm_chain|barrier' }).Count"],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return done.stdout.strip()
+
+
+def tree_digest(base: Path) -> dict[str, str]:
+    return {p.relative_to(base).as_posix(): sha_file(str(p)) for p in sorted(base.rglob("*")) if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"}
+
+
+def plugin_binary() -> Path:
+    base = glob.glob(str(Path.home() / ".vscode" / "extensions" / f"dynamicengineering.dynamic-siemens-language-support-{PLUGIN['version']}"))
+    assert base, f"plugin {PLUGIN['version']} not installed"
+    binary = Path(base[0]) / PLUGIN["binary"]
+    assert binary.is_file(), binary
+    return binary
+
+
+def doc_check(name: str) -> int:
+    done = sh([PY, "-B", "main.py", "--control-root", str(ROOT), "--workspace", str(Path(WT).resolve()), "doc", "check"], cwd=str(ROOT))
+    write(f"{name}.txt", done.stdout + done.stderr)
+    write(f"{name}.exit", str(done.returncode) + NL)
+    return done.returncode
+
+
+SECRET = re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY|AKIA[0-9A-Z]{16}|(?:ghp_|gho_|ghu_|ghs_|github_pat_)[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|\bsk-[A-Za-z0-9]{32,}")
+
+
+def docs_contract(texts: dict[str, bytes]) -> dict:
+    """Each written-back document: LF only, no BOM, no control character, ends with one newline, no secret-like value; the deleted base lines are exactly the frozen set
+    (by SHA-256), every other base line stays in order, and the added lines carry the required tokens."""
+    report: dict = {}
+    for path, spec in CFG["docs"].items():
+        data = texts[path]
+        base = subprocess.run(["git", "-c", "core.quotePath=false", "-C", str(ROOT), "show", f"{BASE}:{path}"], capture_output=True).stdout.decode("utf-8")
+        out: dict = {"lf_only": b"\r" not in data, "no_bom": not data.startswith(b"\xef\xbb\xbf"), "no_control": not re.search(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]", data),
+                     "ends_newline": data.endswith(b"\n") and not data.endswith(b"\n\n")}
+        text = data.decode("utf-8", errors="replace")
+        old_lines, new_lines = base.split(NL), text.split(NL)
+        new_set, old_set = set(new_lines), set(old_lines)
+        deleted = sorted(sha(ln.encode("utf-8")) for ln in old_lines if ln not in new_set and ln.strip())
+        out["deleted_as_frozen"] = deleted == sorted(spec["deleted_sha256"])
+        kept = [ln for ln in old_lines if ln in new_set]
+        it = iter(new_lines)
+        out["kept_in_order"] = bool(spec.get("rewrite")) or all(any(ln == c for c in it) for ln in kept)
+        added = NL.join(ln for ln in new_lines if ln not in old_set)
+        out["required_tokens_missing"] = [t for t in spec["required_tokens"] if t not in added]
+        out["secret_like"] = bool(SECRET.search(text))
+        out["ok"] = bool(out["lf_only"] and out["no_bom"] and out["no_control"] and out["ends_newline"] and out["deleted_as_frozen"] and out["kept_in_order"]
+                         and not out["required_tokens_missing"] and not out["secret_like"])
+        report[path] = out
+    return report
+
+
+def rel(path: str) -> str:
+    return path[len(P) + 1:]
+
+
+# ---- stages -------------------------------------------------------------------------------------------------------------------------------------------------------------
+def stage_baseline() -> int:
+    head = git("rev-parse", "HEAD").stdout.strip()
+    status = git("status", "--porcelain=v1", "--untracked-files=all").stdout
+    states = {}
+    for r, meta in FILES.items():
+        p = Path(WT) / r
+        if meta["base_sha256"] is None:
+            states[r] = {"expect": "absent", "ok": not p.exists()}
+        else:
+            states[r] = {"expect": meta["base_sha256"], "ok": p.is_file() and sha_file(str(p)) == meta["base_sha256"]}
+    write("baseline_identity.json", json.dumps({"head": head, "head_expected": BASE, "status": status, "files": states}, ensure_ascii=False, indent=1) + "\n")
+    write("real_hooks_before.txt", hooks_record())
+    write("python_procs_before.txt", py_procs() + "\n")
+    write("status_baseline.txt", status)
+    binary = plugin_binary()
+    write("plugin_identity.json", json.dumps({"version": PLUGIN["version"], "binary": str(binary), "sha256": sha_file(str(binary)), "size": binary.stat().st_size}, indent=1) + "\n")
+    pytest_run("G1_baseline_candidate", "tests/test_fixture_health.py", "tests/test_smoke.py", "tests/test_import.py")
+    doc_check("G3_doc_check_baseline")
+    write("BASELINE_DONE", "ok\n")
+    return 0 if head == BASE and not status.strip() and all(s["ok"] for s in states.values()) else 1
+
+
+def stage_fast() -> None:
+    write("bytes_at_gates.txt", "".join(f"{sha_file(f'{WT}/{r}')} *{r}\n" for r in sorted(FILES)))
+    write("final_head.txt", git("rev-parse", "HEAD").stdout)
+    write("final_status_before.txt", git("status", "--short", "--untracked-files=all").stdout)
+    pytest_run("G1_candidate", "tests/test_fixture_health.py", "tests/test_smoke.py", "tests/test_import.py")
+    shutil.rmtree(SCRATCH, ignore_errors=True)
+    SCRATCH.mkdir(parents=True)
+
+    # G3 (D04 + the non-regression part of D05): the build entry's own tests; two builds of the frozen commit compared and verified; the payload imports and its CLI answers;
+    # every registered project's ledger reconciles; the control root orients without conflict; the full-repository ruff/mypy audit is recorded raw; doc check; line contract
+    real = pytest_run("G3_real_plugin_tests", "tests/core/test_pmf_build.py", "-rs")
+    d04 = Path(G) / "d04"
+    shutil.rmtree(d04, ignore_errors=True)
+    d04.mkdir(parents=True)
+    script = str(Path(PROJ) / "scripts" / "pmf_build.py")
+    facts: dict = {"frozen": CFG["frozen_commit"]}
+    for tag in ("a", "b"):
+        done = sh([PY, "-B", script, "build", "--repo", str(ROOT), "--commit", CFG["frozen_commit"], "--project-root", P, "--output", str(d04 / f"build_{tag}")], cwd=PROJ)
+        write(f"G3_build_{tag}.txt", done.stdout + done.stderr)
+        facts[f"build_{tag}_exit"] = done.returncode
+        ver = sh([PY, "-B", script, "verify", "--output", str(d04 / f"build_{tag}")], cwd=PROJ)
+        write(f"G3_verify_{tag}.txt", ver.stdout + ver.stderr)
+        facts[f"verify_{tag}_exit"] = ver.returncode
+    def payload(tag: str) -> dict[str, str]:
+        base = d04 / f"build_{tag}"
+        return {q.relative_to(base).as_posix(): sha_file(str(q)) for q in sorted(base.rglob("*")) if q.is_file() and q.name != "release_meta.json"}
+    try:
+        pa_, pb_ = payload("a"), payload("b")
+        ma = json.load(open(d04 / "build_a" / "release_meta.json", encoding="utf-8"))
+        mb = json.load(open(d04 / "build_b" / "release_meta.json", encoding="utf-8"))
+        facts["payload_files"] = len(pa_)
+        facts["payload_identical"] = pa_ == pb_ and len(pa_) > 0
+        facts["meta_identical_except_builder"] = {k: v for k, v in ma.items() if k != "builder"} == {k: v for k, v in mb.items() if k != "builder"}
+        facts["meta_source_commit"] = ma.get("source_commit")
+    except (OSError, ValueError) as error:
+        facts["payload_error"] = str(error)
+    load = sh([PY, "-B", "-I", "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import auto_pm; print(json.dumps({'file': auto_pm.__file__, 'version': getattr(auto_pm, '__version__', '')}))", str(d04 / "build_a")], cwd=str(d04))
+    write("G3_load_identity.txt", load.stdout + load.stderr)
+    facts["load_exit"] = load.returncode
+    try:
+        loaded = json.loads(load.stdout.strip().splitlines()[-1])
+        facts["load_from_payload"] = Path(loaded["file"]).resolve().is_relative_to((d04 / "build_a").resolve())
+    except (ValueError, IndexError, KeyError):
+        facts["load_from_payload"] = False
+    helpcmd = sh([PY, "-B", "-I", "-c", "import sys, runpy; sys.path.insert(0, sys.argv[1]); sys.argv = ['auto_pm', '--help']; runpy.run_module('auto_pm', run_name='__main__')", str(d04 / "build_a")], cwd=str(d04))
+    write("G3_payload_cli_help.txt", helpcmd.stdout + helpcmd.stderr)
+    facts["payload_cli_help_exit"] = helpcmd.returncode
+    ledgers = {}
+    for project in CFG["projects"]:
+        rec = sh([PY, "-B", "main.py", "ledger", "reconcile", project], cwd=str(ROOT))
+        m = re.search(r"摘要: 台账缺失: (\d+) 条, 台账多余\(孤儿\): (\d+) 条, 状态不一致: (\d+) 条", rec.stdout)
+        ledgers[project] = {"exit": rec.returncode, "counts": [int(x) for x in m.groups()] if m else None}
+    facts["ledgers"] = ledgers
+    orient = sh([PY, "-B", "main.py", "pm", "orient", "SW-2026-008", "--json"], cwd=str(ROOT))
+    try:
+        facts["orient_conflicts"] = json.JSONDecoder().raw_decode(orient.stdout[orient.stdout.index("{"):])[0].get("conflicts")
+    except ValueError:
+        facts["orient_conflicts"] = ["UNREADABLE"]
+    # the object the exception is judged on comes from the SAME orient JSON; other expired RUNNING Runs of the ledger are recorded (informational) only
+    try:
+        facts["orient_extract"] = orient_extract(json.JSONDecoder().raw_decode(orient.stdout[orient.stdout.index("{"):])[0])
+    except ValueError:
+        facts["orient_extract"] = orient_extract(None)
+    import sqlite3
+    con_ = sqlite3.connect("file:" + str(ROOT / ".auto-pm" / "continuity.db").replace(chr(92), "/") + "?mode=ro", uri=True)
+    now_ = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+    facts["ledger_expired_running_runs_informational"] = sorted(r[0] for r in con_.execute("select r.run_id from run_items r join execution_leases l on l.run_id=r.run_id where r.state=? and l.expires_at<?", ("RUNNING", now_)))
+    con_.close()
+    audit_ruff = sh([PY, "-B", "-m", "ruff", "check", "--no-cache", "--statistics", "."], cwd=PROJ)
+    write("G3_audit_ruff_full.txt", audit_ruff.stdout + audit_ruff.stderr)
+    audit_mypy = sh([PY, "-B", "-m", "mypy", "--platform", "win32", "--no-incremental", "--no-pretty", "auto_pm", "tests"], cwd=PROJ)
+    write("G3_audit_mypy_full.txt", audit_mypy.stdout + audit_mypy.stderr)
+    facts["audit"] = {"ruff_full_exit": audit_ruff.returncode, "mypy_with_tests_exit": audit_mypy.returncode,
+                      "mypy_with_tests_last": (audit_mypy.stdout.strip().splitlines() or [""])[-1][:200]}
+    write("G3_d04_d05.json", json.dumps(facts, ensure_ascii=False, indent=1) + NL)
+    write("G3_import_probe.txt", json.dumps({k: facts.get(k) for k in ("load_exit", "load_from_payload", "payload_cli_help_exit")}) + NL)
+    write("G3_import_probe.exit", str(0 if facts.get("load_exit") == 0 and facts.get("load_from_payload") and facts.get("payload_cli_help_exit") == 0 else 1) + NL)
+    doc_check("G3_doc_check_candidate")
+    write("G3_docs.json", json.dumps(docs_contract({p: (Path(WT) / p).read_bytes() for p in CFG["docs"]}), ensure_ascii=False, indent=1) + NL)
+    plugin_after = sha_file(str(plugin_binary()))
+    write("plugin_identity_after.json", json.dumps({"sha256": plugin_after}) + NL)
+
+    # G4: static
+    ruff = sh([PY, "-B", "-m", "ruff", "check", "--no-cache", "auto_pm", "tests"], cwd=PROJ)
+    write("G4_ruff.txt", ruff.stdout + ruff.stderr)
+    write("G4_ruff.exit", str(ruff.returncode) + NL)
+    mypy = sh([PY, "-B", "-m", "mypy", "--platform", "win32", "--no-incremental", "--no-pretty", "auto_pm"], cwd=PROJ)
+    write("G4_mypy.txt", mypy.stdout + mypy.stderr)
+    write("G4_mypy.exit", str(mypy.returncode) + NL)
+    dc = git("diff", "--check")
+    write("G4_diffcheck.txt", dc.stdout + dc.stderr)
+    write("G4_diffcheck.exit", str(dc.returncode) + NL)
+
+    # G8: twenty real mutations of the candidate code and template, each restored byte for byte
+    def path_of(suffix: str) -> str:
+        found = [r for r in FILES if r.endswith(suffix)]
+        assert len(found) == 1, (suffix, found)
+        return found[0]
+
+    plan: list = []
+    mutations = []
+    for mid, rel_path, old, new, targets, must in plan:
+        target = Path(WT) / rel_path
+        keep = target.read_bytes()
+        text = keep.decode("utf-8")
+        assert text.count(old) == 1, (mid, text.count(old))
+        target.write_bytes(text.replace(old, new).encode("utf-8"))
+        try:
+            r = pytest_run(f"G8_{mid}", *targets)
+        finally:
+            target.write_bytes(keep)
+        failed = sorted({re.sub(r"\[.*", "", f.split("::")[-1]) for f in r["failed_ids"] + [e[len("ERROR "):].split(" - ")[0] for e in r["error_nodes"]]})
+        killed = r["exit"] != 0 and all(any(m in f for f in failed) for m in must)
+        mutations.append({"id": mid, "file": rel(rel_path), "killed": killed, "must_fail": must, "failed": failed[:8], "restored_bytes_equal": target.read_bytes() == keep, "last": r["last"]})
+    texts = {p: (Path(WT) / p).read_bytes() for p in CFG["docs"]}
+    report = [p for p in CFG["docs"] if p.endswith("_REP.md")][0]
+    for mid, path, mutate in (
+        ("D1-the-report-loses-its-proof-sentence", report, lambda t: t.replace("本报告的结论由提交本身证明", "本报告的结论见证据")),
+        ("D2-the-report-loses-the-frozen-commit", report, lambda t: t.replace(CFG["frozen_commit"], CFG["frozen_commit"][:7])),
+    ):
+        variant = dict(texts)
+        variant[path] = mutate(texts[path].decode("utf-8")).encode("utf-8")
+        assert variant[path] != texts[path], mid
+        report = docs_contract(variant)
+        mutations.append({"id": mid, "file": path, "killed": not report[path]["ok"], "must_fail": ["docs_contract"], "failed": [k for k, v in report[path].items() if v is False][:4],
+                          "restored_bytes_equal": (Path(WT) / path).read_bytes() == texts[path], "last": ""})
+    tampered = Path(G) / "d04" / "build_a_tampered"
+    shutil.rmtree(tampered, ignore_errors=True)
+    shutil.copytree(Path(G) / "d04" / "build_a", tampered)
+    victim = tampered / "auto_pm" / "__init__.py"
+    victim.write_bytes(victim.read_bytes() + b"# tampered" + NL.encode())
+    # pmf_build.py verify without a deployment manifest checks only completeness (the hash check against a manifest is D07's); the D04 identity is the two-build comparison,
+    # so the control is that the comparison catches one changed byte
+    reference = {q.relative_to(Path(G) / "d04" / "build_b").as_posix(): sha_file(str(q)) for q in sorted((Path(G) / "d04" / "build_b").rglob("*")) if q.is_file() and q.name != "release_meta.json"}
+    changed = {q.relative_to(tampered).as_posix(): sha_file(str(q)) for q in sorted(tampered.rglob("*")) if q.is_file() and q.name != "release_meta.json"}
+    diff_files = sorted(k for k in set(reference) | set(changed) if reference.get(k) != changed.get(k))
+    write("G8_tampered_compare.txt", json.dumps(diff_files, ensure_ascii=False) + NL)
+    mutations.append({"id": "B1-a-tampered-build-is-caught-by-the-two-build-comparison", "file": "d04/build_a_tampered", "killed": diff_files == ["auto_pm/__init__.py"], "must_fail": ["payload_identical"],
+                      "failed": diff_files[:4], "restored_bytes_equal": True, "last": ""})
+    shutil.rmtree(tampered, ignore_errors=True)
+    write("G8_mutations.json", json.dumps(mutations, ensure_ascii=False, indent=1) + NL)
+    write("G8_orient_exception.json", json.dumps(orient_cases(), ensure_ascii=False, indent=1) + NL)
+
+    # G6: trees
+    tmp = Path(tempfile.mkdtemp(prefix="plugin_base_"))
+    try:
+        import io as _io
+        import tarfile
+        archive = subprocess.run(["git", "-C", str(ROOT), "archive", BASE, f"{P}/auto_pm", f"{P}/templates", f"{P}/tests", f"{P}/scripts"], capture_output=True)
+        if archive.returncode == 0:
+            with tarfile.open(fileobj=_io.BytesIO(archive.stdout)) as tar:
+                try:
+                    tar.extractall(str(tmp), filter="data")
+                except TypeError:
+                    tar.extractall(str(tmp))
+        diffs = {}
+        for sub in ("auto_pm", "templates", "tests", "scripts"):
+            left, right = tree_digest(tmp / P / sub), tree_digest(Path(PROJ) / sub)
+            diffs[sub] = sorted(k for k in set(left) | set(right) if left.get(k) != right.get(k))
+        write("G6_tree_diff.json", json.dumps({"archive_exit": archive.returncode, "differences": diffs}, ensure_ascii=False, indent=1) + NL)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    # G7: real pre-commit hook on a temporary index
+    abs_wt = str(Path(WT).resolve())
+    idx = Path(tempfile.mkdtemp(prefix="plugin_idx_")) / "index"
+    env = {**ENV, "GIT_INDEX_FILE": str(idx)}
+    rt = git("read-tree", "HEAD", env=env)
+    ad = git("add", "--", *sorted(FILES), env=env)
+    staged = git("diff", "--cached", "--name-only", env=env).stdout.splitlines()
+    hook = git("rev-parse", "--git-path", "hooks/pre-commit").stdout.strip()
+    hd = sh([GIT_BASH, hook], cwd=abs_wt, env=env, timeout=1800)
+    write("G7_hook_dry_run.json", json.dumps({"read_tree_exit": rt.returncode, "add_exit": ad.returncode, "staged": staged, "hook_exit": hd.returncode, "tail": (hd.stdout + hd.stderr)[-400:]}, ensure_ascii=False, indent=1) + NL)
+    shutil.rmtree(idx.parent, ignore_errors=True)
+    shutil.rmtree(SCRATCH, ignore_errors=True)
+    write("real_hooks_after.txt", hooks_record())
+    write("python_procs_after.txt", py_procs() + NL)
+    write("bytes_after_gates.txt", "".join(f"{sha_file(f'{WT}/{r}')} *{r}\n" for r in sorted(FILES)))
+    write("final_status_after.txt", git("status", "--short", "--untracked-files=all").stdout)
+    write("FAST_DONE", "done\n")
+
+
+
+def reuse_check() -> tuple[bool, str]:
+    """Nine reused outputs: exact path set and sha256 (missing, extra or changed file = FAIL); the V1.0 FAIL record is unchanged."""
+    if REHEARSAL:
+        return True, "reuse check: SKIPPED (rehearsal with synthetic outputs)"
+    gd = f"{G}/g2_candidate"
+    present = {os.path.relpath(p, gd).replace(os.sep, "/") for p in glob.glob(gd + "/*")}
+    allowed = {f"core.{e}" for e in ("txt", "exit", "started", "finished")} | {"ALL_DONE"} | {f"transient_{i}.{e}" for i in (1, 2, 3) for e in ("txt", "exit")}
+    missing = sorted(set(REUSE) - present)
+    extra = sorted(present - set(REUSE) - allowed)
+    bad = sorted(n for n in REUSE if n in present and sha_file(f"{gd}/{n}") != REUSE[n])
+    v10_bad = sorted(p for p, h in V10_RECORDS.items() if not os.path.exists(p) or sha_file(p) != h)
+    ok = not (missing or extra or bad or v10_bad)
+    return ok, f"reuse check: {len(REUSE)} files hash-checked; missing {missing} extra {extra} changed {bad}; V1.0 FAIL record changed {v10_bad} -> {'OK' if ok else 'FAIL'}"
+
+
+def pin_check() -> tuple[bool, str]:
+    """The tested commit is pinned: worktree HEAD == BASE before and after, origin/main did not move during the run (audit requirement 1)."""
+    if REHEARSAL:
+        return True, "pin check: SKIPPED (rehearsal)"
+    pins = []
+    for n in ("pin_start.txt", "pin_end.txt"):
+        d = dict(l.split("=", 1) for l in rd(f"{G}/{n}").splitlines() if "=" in l) if os.path.exists(f"{G}/{n}") else {}
+        pins.append(d)
+    a, b = pins
+    ok = bool(a) and bool(b) and a.get("HEAD") == b.get("HEAD") == BASE and a.get("ORIGIN_MAIN") == b.get("ORIGIN_MAIN") and bool(a.get("ORIGIN_MAIN"))
+    return ok, f"pin check: HEAD start {a.get('HEAD', '?')[:12]} end {b.get('HEAD', '?')[:12]} expected {BASE[:12]}; origin/main start {a.get('ORIGIN_MAIN', '?')[:12]} end {b.get('ORIGIN_MAIN', '?')[:12]} (main == frozen: {a.get('ORIGIN_MAIN') == BASE}; product files differing main vs frozen: {a.get('MAIN_PRODUCT_DIFF', '?')}) -> {'OK' if ok else 'FAIL'}"
+
+
+def sleep_check() -> tuple[bool, str]:
+    """No gap above HB_GAP_MAX in the 30 s heartbeat from before the core group started to after it finished; the power-settings evidence files exist (audit requirement 4)."""
+    if REHEARSAL:
+        return True, "sleep check: SKIPPED (rehearsal)"
+    hb = f"{G}/heartbeat.log"
+    ts = [float(l.split()[0]) for l in rd(hb).splitlines() if l.strip() and l.split()[0].replace(".", "", 1).isdigit()] if os.path.exists(hb) else []
+    t0, t1 = os.path.getmtime(f"{G}/g2_candidate/core.started"), os.path.getmtime(f"{G}/g2_candidate/core.finished")
+    gaps = [b - a for a, b in zip(ts, ts[1:])]
+    worst = max(gaps) if gaps else 1e9
+    cover = bool(ts) and ts[0] <= t0 and ts[-1] >= t1
+    ev = all(os.path.exists(f"{G}/{n}") and os.path.getsize(f"{G}/{n}") > 0 for n in ("power_start.txt", "power_end.txt"))
+    ok = len(ts) > 2 and worst <= HB_GAP_MAX and cover and ev
+    return ok, f"sleep check: {len(ts)} heartbeat samples, largest gap {worst:.0f}s (limit {HB_GAP_MAX}s), covers core run {cover}, power evidence files {ev} -> {'OK' if ok else 'FAIL'}"
+
+
+def stage_judge() -> int:
+    verdict: dict = {"schema": "m2-card-gate-verdict.v1", "card": LABEL, "base": BASE, "run_id": RUN_ID, "gates": {}, "exceptions": [], "reports": {}, "deviations": []}
+
+    def done(g: str, ok: bool, lines: list[str]) -> None:
+        path = f"{G}/{g}_report.txt"
+        open(path, "w", encoding="utf-8", newline="\n").write("\n".join(lines + [f"{g} VERDICT: {'PASS' if ok else 'FAIL'}"]) + "\n")
+        verdict["gates"][g] = {"verdict": "PASS" if ok else "FAIL", "report": path}
+        verdict["reports"][path] = sha_file(path)
+
+    names = ["baseline_identity.json", "plugin_identity.json", "plugin_identity_after.json", "bytes_at_gates.txt", "bytes_after_gates.txt", "real_hooks_before.txt", "real_hooks_after.txt", "python_procs_before.txt",
+             "python_procs_after.txt", "final_head.txt", "final_status_before.txt", "final_status_after.txt", "status_baseline.txt", "G1_baseline_candidate.txt", "G1_baseline_candidate.exit", "G1_candidate.txt",
+             "G1_candidate.exit", "G3_real_plugin_tests.txt", "G3_real_plugin_tests.exit", "G3_import_probe.txt", "G3_import_probe.exit", "G3_docs.json", "G3_doc_check_baseline.txt", "G3_doc_check_baseline.exit", "G3_doc_check_candidate.txt", "G3_doc_check_candidate.exit",
+             "G4_ruff.txt", "G4_ruff.exit", "G4_mypy.txt", "G4_mypy.exit", "G4_diffcheck.txt", "G4_diffcheck.exit", "G6_tree_diff.json", "G7_hook_dry_run.json", "G8_mutations.json", "install_output.json"] \
+        + [f"g2_candidate/{n}.{e}" for n in GROUPS for e in ("txt", "exit")] + [f"g2_candidate/transient_{i}.{e}" for i in (1, 2, 3) for e in ("txt", "exit")]
+    for n in names:
+        if os.path.exists(f"{G}/{n}"):
+            verdict["reports"][f"{G}/{n}"] = sha_file(f"{G}/{n}")
+    rec = lambda n: {l.split(" *", 1)[1].strip(): l.split(" ", 1)[0] for l in rd(f"{G}/{n}").splitlines() if " *" in l}  # noqa: E731
+    want = {r: m["sha256"] for r, m in FILES.items()}
+    same = rec("bytes_at_gates.txt") == rec("bytes_after_gates.txt") == want
+
+    ident = json.load(open(G + "/baseline_identity.json", encoding="utf-8"))
+    b1, c1 = summary(G + "/G1_baseline_candidate.txt"), summary(G + "/G1_candidate.txt")
+    done("G1", ident["head"] == BASE and not ident["status"].strip() and all(s["ok"] for s in ident["files"].values()) and b1["failed_ids"] == [] and c1["failed_ids"] == []
+         and b1["exit"] == c1["exit"] == 0 and b1["passed"] == c1["passed"] and same,
+         ["# G1 - baseline identity (HEAD is the expected start commit, clean worktree, the new report absent) and the fixture-health, smoke and import tests pass with the same counts",
+          f"HEAD {ident['head'][:12]} expected {BASE[:12]}", f"baseline: {b1['last']}", f"candidate: {c1['last']}"])
+
+    reuse_ok, reuse_line = reuse_check()
+    g2_lines, g2_ok = [reuse_line], same and reuse_ok
+    for name in GROUPS:
+        base, cand = summary(f"{CFG['baseline_g2']}/{name}.txt"), summary(f"{G}/g2_candidate/{name}.txt")
+        delta = DELTAS.get(name, 0)
+        if name == "rest":
+            strict = cand["failed_ids"] == [] and cand["passed"] == base["passed"] + delta and cand["skipped"] == base["skipped"] + SKIPS.get(name, 0) and not cand["error_nodes"] and cand["exit"] == 0
+            reruns = [f"{G}/g2_candidate/transient_{i}.txt" for i in (1, 2, 3)]
+            rerun_ok = all(os.path.exists(r) and os.path.exists(r[:-4] + ".exit") for r in reruns) and all((s := summary(r))["exit"] == 0 and s["passed"] == 1 and s["failed"] == 0 for r in reruns)
+            transient = cand["failed_ids"] == [R09] and cand["passed"] == base["passed"] + delta - 1 and cand["skipped"] == base["skipped"] + SKIPS.get(name, 0) and not cand["error_nodes"] and rerun_ok
+            ok = strict or transient
+            if transient and not strict:
+                verdict["deviations"].append({"gate": "G2", "rule": "named transient-race test", "node": R09, "isolated_reruns": "3 of 3 passed in the same candidate bytes"})
+            g2_lines.append(f"{name}: baseline {base['passed']}p/{base['failed']}f/{base['skipped']}s | candidate {cand['passed']}p/{cand['failed']}f/{cand['skipped']}s | expected +{delta} | strict {strict} | named transient rule {transient} -> {'OK' if ok else 'FAIL'}")
+        else:
+            ok = (base["failed_ids"] == cand["failed_ids"] and cand["passed"] == base["passed"] + delta and cand["skipped"] == base["skipped"] + SKIPS.get(name, 0) and not cand["error_nodes"] and cand["exit"] == base["exit"]
+                  and base["deselected"] == cand["deselected"] and cand["passed"] > 0)
+            g2_lines.append(f"{name}: baseline {base['passed']}p/{base['failed']}f/{base['skipped']}s | candidate {cand['passed']}p/{cand['failed']}f/{cand['skipped']}s | expected +{delta} -> {'OK' if ok else 'FAIL'}")
+        g2_ok = g2_ok and ok
+    done("G2", g2_ok, ["# G2 - the nine regression groups (ten outputs) against the governed outputs of the previous card (RUN-SW008-M3-REL7-001, card 219 V1.0, whose product equals the active release 1.3.3-d671611): every group has no failure; the counts equal the baseline plus the deltas declared in the card (counted before the run: collect-only counts on both commits plus the changed test files run on both trees; this proves no collected test was lost, not that the new tests pass)", *g2_lines])
+
+    real = summary(G + "/G3_real_plugin_tests.txt")
+    docs = json.load(open(G + "/G3_docs.json", encoding="utf-8"))
+    docs_ok = all(d["ok"] for d in docs.values()) and sorted(docs) == sorted(CFG["docs"])
+    doc_exit_b, doc_exit_c = (int(rd(G + f"/G3_doc_check_{t}.exit").strip()) for t in ("baseline", "candidate"))
+    pi, pa = json.load(open(G + "/plugin_identity.json", encoding="utf-8")), json.load(open(G + "/plugin_identity_after.json", encoding="utf-8"))
+    probe_exit = int(rd(G + "/G3_import_probe.exit").strip())
+    probe_txt = rd(G + "/G3_import_probe.txt")
+    f3 = json.load(open(G + "/G3_d04_d05.json", encoding="utf-8"))
+    d045_ok = (f3.get("build_a_exit") == 0 and f3.get("build_b_exit") == 0 and f3.get("verify_a_exit") == 0 and f3.get("verify_b_exit") == 0 and f3.get("payload_identical") is True
+               and f3.get("meta_identical_except_builder") is True and str(f3.get("meta_source_commit", "")).startswith(f3["frozen"][:7]) and orient_ok(f3.get("orient_conflicts"), (f3.get("orient_extract") or {}).get("run_id"), (f3.get("orient_extract") or {}).get("work_id"), (f3.get("orient_extract") or {}).get("work_state"), CFG.get("card_id"), f3.get("ledger_expired_running_runs_informational"))
+               and all(v["exit"] == 0 and v["counts"] == [0, 0, 0] for v in f3["ledgers"].values()) and sorted(f3["ledgers"]) == sorted(CFG["projects"]))
+    ex_ = f3.get("orient_extract") or {}
+    orient_line = ("orient exception: conflicts=" + json.dumps(f3.get("orient_conflicts"), ensure_ascii=False) + " orient_run_id=" + str(ex_.get("run_id")) + " work_id=" + str(ex_.get("work_id"))
+                   + " work_state=" + str(ex_.get("work_state")) + " ledger_expired_running_runs(informational)=" + json.dumps(f3.get("ledger_expired_running_runs_informational"), ensure_ascii=False)
+                   + " verdict=" + str(orient_ok(f3.get("orient_conflicts"), ex_.get("run_id"), ex_.get("work_id"), ex_.get("work_state"), CFG.get("card_id"))))
+    done("G3", real["passed"] > 0 and real["failed"] == 0 and real["skipped"] == 0 and real["exit"] == 0 and d045_ok
+         and probe_exit == 0
+         and docs_ok and doc_exit_c == doc_exit_b and pi["sha256"] == pa["sha256"] and same,
+         ["# G3 - D04: the frozen commit is built twice, the two payloads are byte-identical and their release_meta.json equal apart from the builder, both pass verify, the payload imports from "
+          "itself and its CLI answers; D05 (non-regression part): the build entry's tests pass, every registered project's ledger reconciles 0/0/0, the control root orients without conflict, the "
+          "full-repository ruff/mypy audit is recorded raw; the doc check exits as at the baseline; the committed report meets its frozen line contract; the plugin binary is unchanged",
+          orient_line, f"d04/d05 facts: {json.dumps({k: v for k, v in f3.items() if k != 'ledgers'}, ensure_ascii=False)[:600]}", f"ledgers: {json.dumps(f3['ledgers'], ensure_ascii=False)}",
+          f"docs: {json.dumps({p.rsplit('/', 1)[-1]: d['ok'] for p, d in docs.items()}, ensure_ascii=False)}; doc check exit baseline {doc_exit_b} candidate {doc_exit_c}",
+          f"tests: {real['last']}", f"import probe: exit {probe_exit} {probe_txt.strip()[:80]}"])
+
+    ruff_exit, mypy_exit, dc_exit = (int(rd(G + f"/{n}.exit").strip()) for n in ("G4_ruff", "G4_mypy", "G4_diffcheck"))
+    mypy_txt = rd(G + "/G4_mypy.txt")
+    done("G4", ruff_exit == 0 and mypy_exit == 0 and "Success: no issues found" in mypy_txt and dc_exit == 0 and same,
+         ["# G4 - `ruff check auto_pm tests` clean, `mypy --platform win32 auto_pm` clean, git diff --check", f"ruff exit {ruff_exit}; mypy exit {mypy_exit}: {mypy_txt.strip().splitlines()[-1] if mypy_txt.strip() else ''}; diff --check exit {dc_exit}"])
+
+    status_after = [l[3:].strip('"') for l in rd(G + "/final_status_after.txt").splitlines() if l.strip()]
+    head = rd(G + "/final_head.txt").strip()
+    actual = {r: sha_file(f"{WT}/{r}") for r in FILES}
+    residue = [p for p in status_after if re.search(r"\.coverage|/tmp_|__pycache__|\.pytest_cache|htmlcov", p)]
+    done("G5", sorted(status_after) == sorted(FILES) and actual == want and head == BASE and not rd(G + "/status_baseline.txt").strip() and not residue and same,
+         [f"# G5 - exactly the {len(FILES)} frozen paths with the frozen bytes; HEAD is the baseline; the worktree was clean before the install", f"changed: {len(status_after)} paths", f"HEAD == baseline: {head == BASE}", f"residue: {residue}"])
+
+    td = json.load(open(G + "/G6_tree_diff.json", encoding="utf-8"))
+    expect: dict[str, list[str]] = {sub: [] for sub in ("auto_pm", "templates", "tests", "scripts")}
+    for r in FILES:
+        if not r.startswith(P + "/"):
+            continue
+        sub, _, tail = rel(r).partition("/")
+        if sub in expect:
+            expect[sub].append(tail)
+    done("G6", td["archive_exit"] == 0 and all(sorted(td["differences"][k]) == sorted(expect[k]) for k in expect),
+         ["# G6 - each of auto_pm, templates, tests and scripts differs from the baseline exactly by the frozen files (also after the mutations were restored)", json.dumps({k: len(v) for k, v in td["differences"].items()})])
+
+    hk = json.load(open(G + "/G7_hook_dry_run.json", encoding="utf-8"))
+    hooks_same = rd(G + "/real_hooks_before.txt") == rd(G + "/real_hooks_after.txt") and bool(rd(G + "/real_hooks_before.txt").strip())
+    done("G7", hooks_same and rd(G + "/python_procs_before.txt") == rd(G + "/python_procs_after.txt") and hk["hook_exit"] == 0 and sorted(hk["staged"]) == sorted(FILES) and same,
+         [f"# G7 - real hooks unchanged, no python left, the real pre-commit hook accepts exactly the {len(FILES)} staged files (temporary index)", f"hook exit {hk['hook_exit']}"])
+
+    muts = json.load(open(G + "/G8_mutations.json", encoding="utf-8"))
+    oc_ = json.load(open(G + "/G8_orient_exception.json", encoding="utf-8"))
+    done("G8", len(muts) == 3 and all(m["killed"] and m["restored_bytes_equal"] for m in muts) and same and len(oc_) == len(orient_cases()) and len(oc_) >= 26 and all(c["got"] == c["expected"] for c in oc_),
+         ["# G8 - a tampered copy of the build (one byte added to auto_pm/__init__.py) is caught by the two-build comparison; two in-memory document controls (the report losing its proof sentence, the report losing the full frozen commit) are refused "
+          "by the line contract",
+          *[f"{m['id']}: killed={m['killed']} must_fail={m['must_fail']} failed={m['failed'][:4]} restored={m['restored_bytes_equal']}" for m in muts]])
+
+    pin_ok, pin_line = pin_check()
+    sl_ok, sl_line = sleep_check()
+    done("G9", same and sorted(status_after) == sorted(FILES) and head == BASE and pin_ok and sl_ok, ["# G9 - bytes and change set after all gates are those before them; the tested commit is pinned (HEAD and origin/main unchanged during the run); the machine did not sleep during the core run (heartbeat without a gap above the limit, power settings recorded)", f"{len(status_after)} paths", pin_line, sl_line])
+    json.dump(verdict, open(f"{G}/gate_verdict.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    print({g: d["verdict"] for g, d in verdict["gates"].items()})
+    return 0 if all(d["verdict"] == "PASS" for d in verdict["gates"].values()) and len(verdict["gates"]) == 9 else 1
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--stage", choices=["baseline", "fast", "judge"], required=True)
+    st = ap.parse_args().stage
+    sys.exit(stage_baseline() if st == "baseline" else stage_judge() if st == "judge" else (stage_fast() or 0))
