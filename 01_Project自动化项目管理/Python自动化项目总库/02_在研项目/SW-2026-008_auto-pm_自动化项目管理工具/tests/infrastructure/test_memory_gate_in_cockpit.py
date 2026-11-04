@@ -299,10 +299,62 @@ def test_a_failed_install_rolls_back_and_says_when_the_rollback_itself_failed() 
 def test_repair_does_not_need_the_installed_python_and_asks_the_user_when_it_cannot_decide() -> None:
     clean = _body("Remove-GateInstallation")
 
-    assert "takeown.exe" in clean and clean.index("takeown.exe") < clean.index("state.json") < clean.index("Unregister-ScheduledTask")
+    assert "Reset-FolderAccess" in clean and clean.index("Reset-FolderAccess") < clean.index("state.json") < clean.index("Unregister-ScheduledTask")
     assert "Test-Path -LiteralPath $statePath" in clean  # the state file says whether the watchdog ever ran
     assert "$unknown" in clean and "-ForceDelete" in clean and "状态文件读不了" in clean
     assert clean.index("Test-Path -LiteralPath $python") < clean.index("if (-not $thawed)")  # a missing or broken python only matters when something is frozen
+
+
+def test_a_leftover_with_an_unusable_acl_is_taken_over_reset_and_every_step_is_reported() -> None:
+    """The 2026-11-04 laptop failure: the old half install could not be deleted ("access denied") even after takeown + a grant."""
+
+    access = _body("Reset-FolderAccess")
+
+    # whole tree, in this order: ownership first, then the old ACL is thrown away, then Administrators get full control
+    order = [access.index(needle) for needle in ('"takeown.exe"', '"/setowner"', '"/reset"', '"/grant"')]
+    assert order == sorted(order)
+    assert '"/A", "/R", "/D", "Y"' in access  # takeown: to the Administrators group, recursive, no prompt on unreadable folders
+    assert access.count('"/T", "/C"') >= 3  # the three icacls steps walk the whole tree and carry on past one unreadable item ...
+    assert "退出码" in access and "$trace" in access and "return ($trace" in access  # ... but each exit code is kept and handed back
+    assert "SilentlyContinue" not in access
+
+    clean = _body("Remove-GateInstallation")
+    assert "$access = Reset-FolderAccess $Folder" in clean  # -Install (step 2 and the roll-back), -Repair and -Uninstall all pass through here
+    deletion = clean[clean.index("Remove-Item -LiteralPath $Folder") :]
+    assert deletion.index("Clear-FolderWithBackupRights") < deletion.index("throw")  # a second way of deleting is tried before giving up
+    assert "$access" in deletion[deletion.index("throw") :] and "Get-OwnerAndAcl" in deletion  # the failure names every step and the folder's real state
+    backup = _body("Clear-FolderWithBackupRights")
+    assert '"/MIR", "/B"' in backup and backup.index("robocopy.exe") < backup.index("Remove-Item -LiteralPath $Folder")
+
+
+def test_the_install_never_strips_the_inherited_rights_from_files_that_already_exist_and_checks_the_result() -> None:
+    """Root cause of the empty ACLs (11-04): the first script ran ``icacls <dir> /inheritance:r /grant:r (OI)(CI)... /T /C`` over a tree that
+    already held files; removing the inherited entries from every file left them with none.  The lock is now set once on the empty folder and the
+    files inherit it; the install ends by looking at every ACL."""
+
+    script = _installer()
+
+    for line in script.splitlines():
+        if "/inheritance:r" in line:
+            assert "/T" not in line, line  # only ever the (empty) folder itself
+    apply_body = _body("Invoke-Apply")
+    assert apply_body.index("Expand-CheckedPython") < apply_body.index("Assert-InstalledAcls $Dest") < apply_body.index("selftest")
+    assert apply_body.index("Assert-InstalledAcls $Dest") < apply_body.index("} catch {")  # a failure there rolls the install back
+    check = _body("Assert-InstalledAcls")
+    assert "Get-TreeAccessProblems" in check and "python\\python.exe" in check and "S-1-5-18" in check and "S-1-5-32-544" in check
+    assert "throw" in check
+
+
+def test_the_clean_up_is_judged_by_the_acls_it_leaves_not_by_exit_codes() -> None:
+    access = _body("Reset-FolderAccess")
+
+    assert access.index("Get-TreeAccessProblems") < access.index("Set-TreeAdminAccess") < access.rindex("Get-TreeAccessProblems")  # look, repair item by item, look again
+    item = _body("Set-ItemAdminAccess")
+    assert item.index("SetOwner") < item.index("SetAccessRuleProtection")  # ownership first: the ACL can only be rewritten by its owner
+    assert "SystemRoot" not in item and "S-1-5-32-544" in item and "S-1-5-18" in item
+    tree = _body("Set-TreeAdminAccess")
+    assert tree.index("Set-ItemAdminAccess $item") < tree.index("Get-ChildItem")  # a folder is opened up before its children are listed
+    assert "ReparsePoint" in tree  # a link inside the tree is not followed
 
 
 def test_one_uac_prompt_and_the_prepare_phase_comes_first() -> None:
@@ -347,6 +399,93 @@ def test_the_clean_up_removes_a_half_installed_folder_and_refuses_when_something
     (frozen / "state" / "state.json").write_text('{"frozen": [{"root": 1}]}', encoding="utf-8")
     refused = run(frozen)
     assert refused.returncode == 7 and frozen.exists()  # no python to thaw with: nothing is deleted, the user decides
+
+
+def _is_admin() -> bool:
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined,unused-ignore]
+    except (AttributeError, OSError):
+        return False
+
+
+def _powershell(command: str, timeout: int = 300) -> subprocess.CompletedProcess[bytes]:
+    exe = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    return subprocess.run([str(exe), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], capture_output=True, timeout=timeout, check=False)  # noqa: S603
+
+
+def _empty_the_acl(path: Path, *, owner_system: bool) -> bool:
+    """The state RC found on the laptop: no entry at all (and, for the stricter variant, an owner that is not an administrator)."""
+
+    system32 = Path(os.environ["SystemRoot"]) / "System32"
+    me = subprocess.run([str(system32 / "whoami.exe"), "/user", "/fo", "csv", "/nh"], capture_output=True, timeout=60, check=False).stdout.decode("utf-8", "replace").strip().split(",")[-1].strip('" \r\n')
+
+    def icacls(*arguments: str) -> int:
+        return subprocess.run([str(system32 / "icacls.exe"), str(path), *arguments], capture_output=True, timeout=120, check=False).returncode  # noqa: S603
+
+    codes = []
+    if owner_system:
+        codes.append(icacls("/setowner", "*S-1-5-18"))
+    codes.append(icacls("/inheritance:r"))
+    codes.append(icacls("/remove", "*S-1-5-32-544", "*S-1-5-18", "*S-1-5-32-545", "*S-1-5-11", f"*{me}"))
+    return codes[-1] == 0
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not os.environ.get("SystemRoot"), reason="Windows PowerShell only")
+def test_a_file_with_an_empty_acl_is_found_and_an_installed_tree_with_one_is_refused(tmp_path: Path) -> None:
+    """The install ends with a look at every ACL: an empty one makes the folder impossible to clean up later (11-04), so it fails the install."""
+
+    tree = tmp_path / "MemoryGate"
+    for relative in ("python/python.exe", "scripts/memory_gate.py", "manifest.json"):
+        (tree / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tree / relative).write_text("x", encoding="utf-8")
+    system32 = Path(os.environ["SystemRoot"]) / "System32"
+    grant = subprocess.run([str(system32 / "icacls.exe"), str(tree), "/grant", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/C"], capture_output=True, timeout=120, check=False)  # noqa: S603
+    assert grant.returncode == 0
+    call = f". '{INSTALLER}'; try {{ Assert-InstalledAcls '{tree}'; exit 0 }} catch {{ Write-Host $_.Exception.Message; exit 7 }}"
+
+    healthy = _powershell(call)
+    assert healthy.returncode == 0, healthy.stdout.decode("utf-8", "replace")
+
+    if not _empty_the_acl(tree / "python" / "python.exe", owner_system=False):
+        pytest.skip("could not empty an ACL on this runner")
+    broken = _powershell(call)
+    assert broken.returncode == 7 and "权限是空的" in broken.stdout.decode("utf-8", "replace")
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not os.environ.get("SystemRoot"), reason="Windows PowerShell only")
+def test_the_clean_up_repairs_and_removes_files_whose_acl_names_nobody(tmp_path: Path) -> None:
+    """RC's finding on the laptop: the folder and python\\ were normal, the files inside (python.exe, memory_gate.py) had an empty ACL, and the old
+    takeown + icacls grant exited 0 without changing that.  Rebuild it, show the repair is judged by the ACLs and not by an exit code, then clean up."""
+
+    if not _is_admin():
+        pytest.skip("needs an elevated token to hand the files to SYSTEM")
+    leftover = tmp_path / "MemoryGate"
+    files = [leftover / "python" / "python.exe", leftover / "scripts" / "memory_gate.py", leftover / "manifest.json", leftover / "auto_pm" / "infrastructure" / "a.py"]
+    for file in files:
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text("x", encoding="utf-8")
+    emptied = [_empty_the_acl(file, owner_system=True) for file in files]
+    if not all(emptied):
+        pytest.skip("could not build the damaged leftover on this runner")
+
+    count = f". '{INSTALLER}'; $n = @(Get-TreeAccessProblems '{leftover}').Count; Write-Host \"problems=$n\"; exit 0"
+    seen = _powershell(count)
+    assert "problems=0" not in seen.stdout.decode("utf-8", "replace"), seen.stdout.decode("utf-8", "replace")  # the check itself notices the damage
+
+    repair = _powershell(
+        f". '{INSTALLER}'; Write-Host (Reset-FolderAccess '{leftover}'); $n = @(Get-TreeAccessProblems '{leftover}').Count; Write-Host \"after=$n\"; exit 0"
+    )
+    assert "after=0" in repair.stdout.decode("utf-8", "replace"), repair.stdout.decode("utf-8", "replace")
+
+    command = (
+        f". '{INSTALLER}'; try {{ Remove-GateInstallation '{leftover}' 'AutoPM-MemoryGate-NoSuchTask' $false; exit 0 }} "
+        "catch { Write-Host $_.Exception.Message; exit 7 }"
+    )
+    done = _powershell(command)
+    assert done.returncode == 0, done.stdout.decode("utf-8", "replace")
+    assert not leftover.exists()
 
 
 # ---------------------------------------------------------------- setup_env.bat step 5
