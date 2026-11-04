@@ -125,6 +125,12 @@ COMMANDS: dict[str, CommandSpec] = {
     "pm orient": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm resume": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm recover": CommandSpec(CommandKind.READ_ONLY, (), (), "--apply writes EXECUTOR_LOST (release 7 and later)"),
+    "pm triage": CommandSpec(CommandKind.READ_ONLY, (), (), "open cards plus inbox in suggested order; confirms nothing"),
+    "pm state-backup status": CommandSpec(CommandKind.READ_ONLY, (), (), "reads one local file only"),
+    # push and pull never write the live ledger (pull prints the restore command and replaces nothing), and neither calls the
+    # runtime-identity guard, so a diverged or unverified runtime cannot lock them out.
+    "pm state-backup push": CommandSpec(CommandKind.NORMAL, (), (), "writes a sanitised ledger copy to the private repository, not the ledger"),
+    "pm state-backup pull": CommandSpec(CommandKind.NORMAL, (), (), "fetches and verifies a backup; never replaces the live ledger"),
     # The guards of the two commands below are not inventoried yet (their checks sit in services, not in the command body):
     # P1 fills them in; until then the deadlock check cannot see them, which the contract test lists as unmodelled.
     "pm close": CommandSpec(CommandKind.NORMAL, (), (), "guards not inventoried yet (P1)"),
