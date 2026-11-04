@@ -24,6 +24,7 @@ from auto_pm.contracts.continuity_resume import (
     ResumeRunCandidate,
 )
 from auto_pm.contracts.intake import IntakeSummary
+from auto_pm.contracts.interlock_matrix import exit_hint
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.infrastructure.continuity_store import (
     LEASE_RENEWAL_RED_COUNT,
@@ -73,6 +74,7 @@ class ContinuityResumeService:
 
         conflicts = list(context.conflicts)
         hold_warnings: list[str] = []
+        orphan_run_ids: tuple[str, ...] = ()
         mission: Mission | None = None
         work = None
         run = None
@@ -185,6 +187,12 @@ class ContinuityResumeService:
                             f"续租 {renewals} 次（≥{LEASE_RENEWAL_RED_COUNT}）：这个 Run 卡住了或开得太久，"
                             f"持有上限 {hold['hold_end']}；请先查原因，别无限续"
                         )
+                # Interlock matrix state LIVE_RUN_UNDER_FINISHED_WORK: the walk above never reaches a live Run whose Work is
+                # already accepted, closed or cancelled, so look at the whole ledger once, not through the Mission tree.
+                orphans = self._store.list_live_runs_under_finished_work(context.subject_project_id)
+                if orphans:
+                    conflicts.append("LIVE_RUN_UNDER_FINISHED_WORK")
+                    orphan_run_ids = tuple(item.run_id for item in orphans)
             except (ContinuityStoreError, sqlite3.Error) as error:
                 raise ContinuityResumeError(f"Continuity Store 无法读取: {error}") from error
 
@@ -249,6 +257,10 @@ class ContinuityResumeService:
             lease=lease_view,
             conflicts=tuple(conflicts),
             hold_warnings=tuple(hold_warnings),
+            exit_hints=tuple(
+                exit_hint(code, detail=", ".join(orphan_run_ids) if code == "LIVE_RUN_UNDER_FINISHED_WORK" else "")
+                for code in conflicts
+            ),
             next_legal_action=next_action,
             read_set=read_set,
             intake=intake,

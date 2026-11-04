@@ -24,6 +24,10 @@ from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
 )
+from auto_pm.application.core.continuity_resume_service import (
+    ContinuityResumeError,
+    ContinuityResumeService,
+)
 from auto_pm.application.core.execution_adapter_service import (
     ExecutionDispatchError,
     ExecutionDispatchService,
@@ -39,6 +43,7 @@ from auto_pm.application.core.mission_orchestrator import (
     MissionOrchestratorError,
 )
 from auto_pm.application.core.mission_service import MissionService, MissionServiceError
+from auto_pm.application.core.recovery_plan_service import RecoveryPlanError, RecoveryPlanService
 from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
 from auto_pm.application.core.worktree_policy_service import (
     WorktreePolicyError,
@@ -60,6 +65,7 @@ from auto_pm.infrastructure.control_root_guard import (
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.guard_refusal import GuardClickRefusal
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
 from auto_pm.ui.cli.runtime_identity_guard import (
     WARNINGS_FIELD,
@@ -811,7 +817,7 @@ def start_run(
     if root.resolve() == _workspace(ctx).resolve() and not recovery_change_id:
         # Only a recovery Run under a recovery Decision may use the control root; the service checks every condition of that
         # exception (continuity_execution_service.CONTROL_ROOT_RUN_REFUSAL says which).
-        raise click.ClickException(CONTROL_ROOT_RUN_REFUSAL)
+        raise GuardClickRefusal("G-CONTROL-ROOT-RUN", CONTROL_ROOT_RUN_REFUSAL)
     git_head, all_dirty = _git_snapshot(root)
     observed = _within(all_dirty, owned)
     try:
@@ -1623,3 +1629,35 @@ def accept_handoff(
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
     _emit(item)
+
+
+@continuity_group.group(name="recovery")
+def recovery_group() -> None:
+    """Exit chains for abnormal ledger states (read-only in this release)."""
+
+
+@recovery_group.command(name="plan")
+@click.option("--pid", "project_id", required=True, help="项目编号")
+@click.option("--state", "state_id", default="", help="interlock_matrix 里登记的异常状态编号，如 LEASE_EXPIRED")
+@click.option("--run-id", default="", help="要处理的 Run；不给 --state 时按这个 Run 在账本里的实际状态判断")
+@click.option("--work-id", default="", help="要处理的 Work（WORK_BLOCKED 用）")
+@click.option("--from-orient", is_flag=True, help="按 pm orient 当前报告的全部冲突，逐个打印出口")
+@click.pass_context
+def recovery_plan(
+    ctx: click.Context, project_id: str, state_id: str, run_id: str, work_id: str, from_orient: bool
+) -> None:
+    """Print the exit chain of an abnormal state as a full command list. It only prints: nothing is run, nothing is written."""
+    service = RecoveryPlanService(_workspace(ctx))
+    try:
+        if from_orient:
+            resume = ContinuityResumeService(_workspace(ctx)).collect(project_id=project_id)
+            if not resume.conflicts:
+                click.echo("pm orient 当前没有冲突，没有要打印的出口。")
+                return
+            lines = service.plan_for_conflicts(project_id=project_id, conflicts=resume.conflicts)
+        else:
+            lines = service.plan(project_id=project_id, state_id=state_id, run_id=run_id, work_id=work_id)
+    except (RecoveryPlanError, ContinuityResumeError) as error:
+        raise click.ClickException(str(error)) from error
+    for line in lines:
+        click.echo(line)

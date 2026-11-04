@@ -1274,6 +1274,8 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
     click.echo(f"下一合法动作: {payload.next_legal_action or '-'}")
     for conflict in payload.conflicts:
         click.echo(f"冲突: {conflict}")
+    for hint in payload.exit_hints:
+        click.echo(f"出口: {hint}")
     for warning in payload.hold_warnings:
         click.echo(f"🔴 {warning}")
     if payload.run is not None and payload.run.state.value == "RUNNING":

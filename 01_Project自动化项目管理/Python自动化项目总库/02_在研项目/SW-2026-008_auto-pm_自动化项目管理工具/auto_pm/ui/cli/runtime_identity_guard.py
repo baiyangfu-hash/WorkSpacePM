@@ -18,6 +18,7 @@ from auto_pm.application.core.workspace_context_service import (
     WorkspaceContextService,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.ui.cli.guard_refusal import GuardClickRefusal
 
 
 def require_runtime_identity(ctx: click.Context, project_id: str, start_path: Path | None = None) -> None:
@@ -34,7 +35,7 @@ def require_runtime_identity(ctx: click.Context, project_id: str, start_path: Pa
     except WorkspaceContextError as error:
         raise click.ClickException(str(error)) from error
     if context.conflicts:
-        raise click.ClickException("运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
+        raise GuardClickRefusal("G-IDENTITY-WRITE", "运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
 
 
 # The runtime (release pointer and loaded package) is one folder shared by every registered project, so a command that

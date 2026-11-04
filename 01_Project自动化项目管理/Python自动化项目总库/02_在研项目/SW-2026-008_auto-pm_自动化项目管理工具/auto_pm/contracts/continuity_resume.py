@@ -54,6 +54,8 @@ class ContinuityResume(BaseModel):
     conflicts: tuple[str, ...] = ()
     # Red flags that do not block any action (for example a lease renewed over and over); shown by pm orient / pm resume.
     hold_warnings: tuple[str, ...] = ()
+    # One line per conflict code: the way out, read from the interlock matrix (CHG-SCPT-2026-476); never empty for a conflict.
+    exit_hints: tuple[str, ...] = ()
     next_legal_action: str = ""
     read_set: tuple[str, ...] = ()
     intake: IntakeSummary = Field(default_factory=IntakeSummary)

@@ -60,6 +60,7 @@ EXEMPT = frozenset(
         "restore-backup",
         "verify-backup",
         "mission show",
+        "recovery plan",  # prints an exit chain from the interlock matrix; reads, never writes
         "work adjudication-evidence",
         "run legacy-terminal-evidence",
     }

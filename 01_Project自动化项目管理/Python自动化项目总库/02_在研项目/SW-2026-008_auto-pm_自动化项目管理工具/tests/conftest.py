@@ -51,6 +51,22 @@ def pytest_configure(config: pytest.Config) -> None:
     _TEST_QAPPLICATION = app
 
 
+def identity_guard_use_is_refused(item: object) -> bool:
+    """A test marked ``production_guards`` (exit drills, CHG-SCPT-2026-476) must not switch the runtime-identity guard off.
+
+    The drills exist to show that the way out works with every guard the cockpit ships with; the old recovery tests switched
+    the identity guard off while building the scene, which is why they could never see two guards block each other.
+    """
+
+    marker = getattr(item, "get_closest_marker")("production_guards")  # noqa: B009 - ``item`` is a pytest Item or a test double
+    return marker is not None and "identity_guard_off" in getattr(item, "fixturenames", ())
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if identity_guard_use_is_refused(item):
+        pytest.fail("production_guards 演练不许用 identity_guard_off：演练要在全部生产护栏打开时走出口", pytrace=False)
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Randomise the order of tests to avoid flakiness.
 
