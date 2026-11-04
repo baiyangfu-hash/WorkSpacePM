@@ -1,0 +1,69 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261029-38E743C7",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-464",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pr_open_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_intake_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pr_open_service.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_intake_service.py"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-10-29T20:50:21.261265+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: pr open 在只有 11_监控 的项目里能读出变更单关联 TD，且既有 04_监控 用例不回归",
+    "acceptance: 取证台账行在 11_监控 布局下能被找到，且既有 04_监控 用例不回归",
+    "acceptance: 改动的生产与测试文件通过 ruff",
+    "acceptance: 两个改动的生产文件通过 mypy",
+    "risk: 改错会让 04_监控 项目回归（原本能读的关联 TD 变空）；一个项目同时存在 04_监控 与 11_监控 时可能选错目录；_chg_tds 出错不阻断开 PR，会静默少列 TD",
+    "non-goal: 不改 change_dual_track.yaml 约束规则数据",
+    "non-goal: 不改 paths.get_change_records_paths（无生产调用方）",
+    "non-goal: 不改 scripts/verify_m7_gui.py 与 releases 快照",
+    "safety-circuit: 否"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "5b54305cc57d217c74fcd63ea91bb653128edf3e0ac6b04f787e74712765abee",
+      "approval_evidence_ref": "user-confirmation:2026-10-29T13:48",
+      "request_id": "SW-2026-008-pr-open-monitor-dir-20261030",
+      "execution_grant": {
+        "adapter": "trae",
+        "approved_model": "DeepSeek-V4.1-Flash",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pr_open_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/pm_intake_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pr_open_service.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/core/test_pm_intake_service.py"
+        ],
+        "plan_checklist": {
+          "original_request": "项目 SW-2026-008：pr open 找变更单目录写死了 04_监控（auto_pm/application/core/pr_open_service.py 约第 395 行），只有 11_监控 的项目读不到；请修好，并把全库同类写死的地方查一遍，逐条修或写明不修的理由。",
+          "safety_circuit": "否",
+          "acceptance_checks": [
+            {
+              "command": "..\\..\\..\\..\\.venv\\Scripts\\python.exe -B -m pytest tests/core/test_pr_open_service.py",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "..\\..\\..\\..\\.venv\\Scripts\\python.exe -B -m pytest tests/core/test_pm_intake_service.py",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "..\\..\\..\\..\\.venv\\Scripts\\python.exe -B -m ruff check auto_pm/application/core/pr_open_service.py auto_pm/application/core/pm_intake_service.py tests/core/test_pr_open_service.py tests/core/test_pm_intake_service.py",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "..\\..\\..\\..\\.venv\\Scripts\\python.exe -B -m mypy auto_pm/application/core/pr_open_service.py auto_pm/application/core/pm_intake_service.py",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "只改 4 个文件：git checkout -- 这 4 个路径或 revert 本次提交即可回到原状；无数据库、无治理 JSON、无发布目录改动"
+        }
+      }
+    }
+  }
+}

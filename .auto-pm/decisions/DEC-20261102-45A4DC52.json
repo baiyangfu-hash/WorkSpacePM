@@ -1,0 +1,63 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261102-45A4DC52",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-091",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/README.md"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-11-02T04:57:41.464208+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: AC1 README.md最后一个标题行是## 本文适用范围与读者（其后无其他标题）",
+    "acceptance: AC2 该小节从标题行到文件末尾不超过10行",
+    "acceptance: AC3 小节正文同时包含适用范围与读者两个要素",
+    "acceptance: AC4 工位内git diff仅改动README.md这一个文件",
+    "risk: 检查命令对文件编码与行尾敏感，统一用-Encoding UTF8读取，以自检阶段实测退出码为准",
+    "risk: 小节文案为AI新写，若与用户预期不符在验收阶段修改或回退重做",
+    "non-goal: 不改README其他小节内容",
+    "non-goal: 不改其他任何文件、不新增测试文件",
+    "safety-circuit: 否"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "a90c414312531e001269964fcf6be9c6ea60a073ecf95e1248af1e35583c13c8",
+      "approval_evidence_ref": "user-confirmation:2026-11-01T21:56MST-baiyang-confirm-start-card-A",
+      "request_id": "REQ-SW008-README-SCOPE-20261101",
+      "execution_grant": {
+        "adapter": "trae",
+        "approved_model": "Qwen3.8-Flash",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/README.md"
+        ],
+        "plan_checklist": {
+          "original_request": "项目 SW-2026-008：在项目目录下的 README.md 末尾补一小节“本文适用范围与读者”（不超过 10 行），只改这一个文件。",
+          "safety_circuit": "否",
+          "acceptance_checks": [
+            {
+              "command": "$p=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/README.md; $h=(Select-String -Path $p -Pattern ^# -Encoding UTF8 | Select-Object -Last 1).Line; if($h -match 本文适用范围与读者){exit 0}else{exit 1}",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "$p=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/README.md; $l=Get-Content -Path $p -Encoding UTF8; $n=($l | Select-String -Pattern ^##.*本文适用范围与读者 | Select-Object -Last 1).LineNumber; if($l.Count-$n+1 -le 10){exit 0}else{exit 1}",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "$p=01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/README.md; $l=Get-Content -Path $p -Encoding UTF8; $n=($l | Select-String -Pattern ^##.*本文适用范围与读者 | Select-Object -Last 1).LineNumber; $s=$l[$n..($l.Count-1)] -join ([char]10); if(($s -match 适用范围) -and ($s -match 读者)){exit 0}else{exit 1}",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "$d=@(git diff --name-only); if(($d.Count -eq 1) -and ($d[0] -like *SW-2026-008*/README.md)){exit 0}else{exit 1}",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "未提交前在工位git checkout --该文件丢弃改动；已并回控制根未提交时由用户在控制根git checkout --恢复；已提交则revert该提交"
+        }
+      }
+    }
+  }
+}
