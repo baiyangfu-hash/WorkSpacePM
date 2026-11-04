@@ -67,6 +67,7 @@
 | 看今天要我定什么 | `pm orient <项目号> --json`（旧发布版没有就用 `pm resume <项目号> --json`） | JSON | 只读 |
 | 看一个项目的四栏卡（在干/等你/搁着/已关） | `pm missions --pid <项目号>` | JSON `pm-missions.v1` | 只读；搁着的卡带 `reason`、`checkpoint_summary`、`stale`（超 7 天） |
 | 看等批准的范围卡 / 规划草稿 | `pm pending --project-id <项目号>`、`pm drafts --project-id <项目号>` | JSON | 只读（注意：这两条用 `--project-id`，`missions` 用 `--pid`） |
+| 看收件箱怎么排、每条下一步做什么 | `pm triage <项目号>`（加 `--json` 出 `pm-triage.v1`） | 文字 / JSON | 只读；开着的卡 + 等你决定的条目 + 已确认条目按建议顺序排好，每条写明下一步和命令骨架；不确认、不转计划、不切焦点 |
 | 收件箱：入箱、看、确认、驳回 | `pm inbox add / list / show / confirm / reject` | JSON | 入箱不授权任何工作；确认/驳回要 `--approver`、`--ticket-hash`、`--approval-evidence-ref` |
 | 批准范围 | `pm approve --request-id <请求号> --plan-hash <哈希>`（带全参数时七栏都要带） | JSON 范围卡 | **已启用批准口令时由用户本人在终端输入口令**，agent 不得代填；开着的卡满 8 张或撞文件要另带 `--admission-release-ref` |
 | 确认开工（不启动任何 agent） | `pm confirm-start --mission-id <编号>` | JSON 范围卡 | 控制根；不启动 Codex |
