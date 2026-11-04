@@ -6912,6 +6912,23 @@ class ContinuityStore:
             rows = conn.execute(query, (work_id,)).fetchall()
             return tuple(self._get_run(conn, str(row["run_id"])) for row in rows)
 
+    def list_live_runs_under_finished_work(self, subject_project_id: str) -> tuple[RunItem, ...]:
+        """Read-only ledger-wide scan: Runs that are not terminal although their Work is accepted, closed or cancelled.
+
+        ``pm orient`` finds Runs by walking Mission, Work, Run, and that walk never reaches a Run whose Work is already
+        finished (the interlock-matrix state LIVE_RUN_UNDER_FINISHED_WORK).  This query does not walk the tree.
+        """
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                """SELECT r.run_id FROM run_items r JOIN work_items w ON w.work_id=r.work_id
+                WHERE w.subject_project_id=?
+                AND r.state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+                AND w.state IN ('ACCEPTED', 'CLOSED', 'CANCELLED')
+                ORDER BY r.run_id""",
+                (subject_project_id,),
+            ).fetchall()
+            return tuple(self._get_run(conn, str(row["run_id"])) for row in rows)
+
     def latest_checkpoint(self, run_id: str) -> CheckpointItem | None:
         with self._read_connection() as conn:
             row = conn.execute(
