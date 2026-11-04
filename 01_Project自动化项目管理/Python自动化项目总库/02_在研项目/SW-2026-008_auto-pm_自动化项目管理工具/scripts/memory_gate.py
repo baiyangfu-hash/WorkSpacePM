@@ -1,4 +1,4 @@
-r"""内存总闸看门狗：整机已提交内存到 40 GiB 就冻结涨得最快的一棵进程树（只暂停，绝不杀），回落到 36 GiB 以下再解冻。
+r"""内存总闸看门狗：整机已提交内存到冻结线（默认 = 本机提交上限 x 0.62，31.3 GiB 内存的笔记本约 39 GiB）就冻结涨得最快的一棵进程树（只暂停，绝不杀），回落到解冻线（默认 x 0.57）以下再解冻。
 
 为什么（2026-11-02/03 笔记本内存事件）：agent 在自己终端里直接跑回归，已提交内存线性涨到 72 GB。``main.py long-run`` 的守卫只管
 经它起的任务，相当于每台电机自己的热继电器；这里是总进线断路器：不管谁在跑（Claude、Trae、反重力、手敲命令），都由它兜底。
@@ -9,10 +9,10 @@ r"""内存总闸看门狗：整机已提交内存到 40 GiB 就冻结涨得最�
 SHA-256（``manifest.json``）；解释器是系统安装的（或复制进该目录的）Python，不用 .venv；运行加 ``-I -B``。状态、告警、STOP 文件都在该目录的
 ``state`` 下，普通用户写不进去。每次启动和 ``status`` 都核对 SHA-256，不符就拒绝运行并告警；更新只能由管理员重跑 ``-Install``。
 
-规则（判据写死在本文件，不读配置、不读环境变量）：
+规则（判据写死在本文件；阈值只读一个纯数据配置文件，见下“阈值”；不读环境变量）：
 
 - 每 5 秒采样整机已提交内存和每个进程的私有已提交量，保留最近 60 秒。
-- 已提交 >= 40 GiB：在“可冻结”的进程里，按 60 秒窗内（私有已提交涨幅 + 新进程数 * 0.02 GiB）给每个“单元”打分，
+- 已提交 >= 冻结线：在“可冻结”的进程里，按 60 秒窗内（私有已提交涨幅 + 新进程数 * 0.02 GiB）给每个“单元”打分，
   冻结得分最高的单元的整棵子树。单元 = 涨得最快的进程所属的 shell 层（powershell/pwsh/cmd/bash…）。
 - 冻结梯子：冻后每个检查点（至少隔 10 秒，看最近 30 秒），已提交涨速仍 >= 0.3 GiB/分钟且涨幅 >= 0.15 GiB（止不住）就升一层，冻“终端属主”（应用主进程的直接子进程）；
   梯子用完仍涨，才换下一个得分最高的单元；最多同时冻 4 个单元。涨速已低于 0.3 GiB/分钟就不再多冻（冻结只止涨，不降内存）。
@@ -20,8 +20,12 @@ SHA-256（``manifest.json``）；解释器是系统安装的（或复制进该�
 - 绝不冻：保护名单（看门狗自己及其祖先、系统关键进程、explorer、终端宿主、杀毒、svchost）；应用主进程（父进程是保护进程或不存在、
   且下面还有非保护的后代，如 Trae CN 主进程）。孤零零涨的单个进程（上无非保护祖先、下无非保护后代）则冻它自己。
 - 冻后仍在涨时重新打分：只有得分最高的单元落在梯子下一层的子树里才升层，否则换成那个得分最高的单元；没有任何可冻结的进程在涨就不再动手。
-- 已提交 < 36 GiB 持续 30 秒：按冻结的反序逐棵解冻，每棵间隔 5 秒。解冻后 120 秒内同一棵再触发 -> 冻住并锁定，不再自动解冻，
+- 已提交 < 解冻线持续 30 秒：按冻结的反序逐棵解冻，每棵间隔 5 秒。解冻后 120 秒内同一棵再触发 -> 冻住并锁定，不再自动解冻，
   写醒目日志 + 告警文件 + Windows 通知（哪棵树、涨了多少），等人用 ``resume-all``；没人处理就每 15 分钟再通知一次，不自动解冻。
+- 阈值（本节是 2026-11-04 并入驾驶舱时加的）：冻结线 = 提交上限 x ``LIMIT_RATIO``，解冻线 = min(提交上限 x ``RESUME_RATIO``, 冻结线 - 3 GiB)。
+  可由 ``scripts/memory_gate.json`` 覆盖（只认 limit_ratio / resume_ratio / limit_gib / resume_gib 四个数值字段，文件大小上限 4 KiB，按纯数据严格解析，
+  不是普通文件或是符号链接就不读）。写死的上下限：冻结线在提交上限的 40%~90% 之间、不低于 8 GiB，解冻线至少比冻结线低 3 GiB；
+  越界、坏 JSON、未知字段一律整份忽略并用默认值，原因写进日志和 status。每 60 秒重读一次，改配置不用重装。提交上限读不到时退回 40/36 GiB。
 - STOP 文件（只认受保护状态目录里的）：看门狗先解冻全部已冻进程再退出。
 - PID 复用：冻结与解冻都核对进程创建时间。
 
@@ -29,7 +33,9 @@ SHA-256（``manifest.json``）；解释器是系统安装的（或复制进该�
     python -B scripts/memory_gate.py run         # 看门狗本体（计划任务调用）
     python -B scripts/memory_gate.py status      # 只读：是否在跑、现在多少、冻了谁
     python -B scripts/memory_gate.py resume-all  # 手动解冻全部（含已锁定的）
-    python -B scripts/memory_gate.py bundle-hash # 四个文件的哈希，安装时作为 -ExpectedSha256
+    python -B scripts/memory_gate.py bundle-hash # 四个文件的哈希（pin-check 比对仓库里钉住的那份）
+    python -B scripts/memory_gate.py pin-check   # 只读：四个文件的合并哈希是否等于 scripts/memory_gate.pin.json
+    python -B scripts/memory_gate.py pin-write   # 开发者改完四个文件后重写钉哈希文件（改动要走 PR 和独立审计）
     python -B scripts/memory_gate.py selftest    # 用无害的假进程走一遍 冻结 -> 解冻（不需要内存压力）
 """
 
@@ -55,8 +61,19 @@ from types import ModuleType
 from typing import Any, TypeVar
 
 GIB = 2**30
-LIMIT_GIB = 40.0
+LIMIT_GIB = 40.0  # the fallback when the commit limit cannot be read (the ratios below are the normal case)
 RESUME_GIB = 36.0
+LIMIT_RATIO = 0.62
+RESUME_RATIO = 0.57
+MIN_LIMIT_RATIO = 0.40
+MAX_LIMIT_RATIO = 0.90
+MIN_LIMIT_FLOOR_GIB = 8.0
+MIN_GAP_GIB = 3.0
+CONFIG_FILE = "memory_gate.json"
+PIN_FILE = "memory_gate.pin.json"
+CONFIG_MAX_BYTES = 4096
+CONFIG_RELOAD_SECONDS = 60.0
+CONFIG_KEYS = frozenset({"limit_ratio", "resume_ratio", "limit_gib", "resume_gib"})
 POLL_SECONDS = 5.0
 WINDOW_SECONDS = 60.0
 RECHECK_SECONDS = 10.0
@@ -327,6 +344,10 @@ class Host:
         snapshot = self.preflight.read_commit()
         return None if snapshot is None else float(snapshot.committed) / GIB
 
+    def commit_limit_gib(self) -> float | None:
+        snapshot = self.preflight.read_commit()
+        return None if snapshot is None or int(snapshot.limit) <= 0 else float(snapshot.limit) / GIB
+
     def processes(self) -> list[Proc]:
         parents = _parent_map(self.core)
         return [Proc(use.pid, parents.get(use.pid, 0), str(use.name), int(use.committed)) for use in self.preflight.all_processes()]
@@ -360,6 +381,129 @@ def notify_user(title: str, text: str) -> None:
             subprocess.run(["msg", "*", "/TIME:0", f"{title}\n{text}"[:900]], capture_output=True, check=False, timeout=15)  # noqa: S603, S607
 
 
+# ---------------------------------------------------------------- thresholds: per machine, from the commit limit
+@dataclass(frozen=True)
+class Thresholds:
+    """The freeze line and the resume line in GiB, and where they came from (shown by ``status`` and written to the log when they change)."""
+
+    limit_gib: float
+    resume_gib: float
+    source: str
+    commit_limit_gib: float | None = None
+
+    def same_lines(self, other: Thresholds) -> bool:
+        return abs(self.limit_gib - other.limit_gib) < 0.005 and abs(self.resume_gib - other.resume_gib) < 0.005
+
+
+def parse_config(text: str) -> tuple[dict[str, float], str]:
+    """(values, problem).  Strict pure-data parse: a JSON object holding only the four known numeric keys; anything else is a problem."""
+
+    try:
+        data = json.loads(text)
+    except ValueError as error:
+        return {}, f"不是合法的 JSON：{type(error).__name__}"
+    if not isinstance(data, dict):
+        return {}, "顶层不是 JSON 对象"
+    unknown = sorted(str(key) for key in data if key not in CONFIG_KEYS)
+    if unknown:
+        return {}, f"含未知字段 {', '.join(unknown)[:80]}（只认 {', '.join(sorted(CONFIG_KEYS))}）"
+    values: dict[str, float] = {}
+    for key, value in data.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value in (float("inf"), float("-inf")) or value <= 0:
+            return {}, f"字段 {key} 必须是大于 0 的有限数值"
+        values[key] = float(value)
+    return values, ""
+
+
+def read_config(path: Path | None) -> tuple[dict[str, float], str]:
+    """(values, note) for ``path``; ``note`` is empty when there is simply no file.  Never raises: a bad file is ignored with the reason in ``note``."""
+
+    if path is None:
+        return {}, ""
+    try:
+        if not os.path.lexists(path):
+            return {}, ""
+        if path.is_symlink() or getattr(path, "is_junction", lambda: False)() or not path.is_file():
+            return {}, f"配置路径 {path.name} 不是普通文件（符号链接、联接点或目录），已忽略"
+        raw = _read_bytes_retrying(path)
+    except FileNotFoundError:
+        return {}, ""
+    except (OSError, StateUnreadableError) as error:
+        return {}, f"配置文件读不出（{type(error).__name__}），已忽略"
+    if len(raw) > CONFIG_MAX_BYTES:
+        return {}, f"配置文件超过 {CONFIG_MAX_BYTES} 字节，已忽略"
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return {}, "配置文件不是 UTF-8，已忽略"
+    values, problem = parse_config(text)
+    return (values, "") if not problem else ({}, f"配置文件{problem}，已忽略")
+
+
+def default_thresholds(commit_limit_gib: float | None) -> Thresholds:
+    """Ratio defaults of the commit limit; 40/36 when the limit is unknown or too small to be sensible."""
+
+    if commit_limit_gib is None or commit_limit_gib < MIN_LIMIT_FLOOR_GIB / MIN_LIMIT_RATIO:
+        return Thresholds(LIMIT_GIB, RESUME_GIB, "默认 40/36 GiB（读不到提交上限）", commit_limit_gib)
+    limit = commit_limit_gib * LIMIT_RATIO
+    resume = min(commit_limit_gib * RESUME_RATIO, limit - MIN_GAP_GIB)
+    return Thresholds(limit, resume, f"默认：提交上限 x {LIMIT_RATIO:g} / x {RESUME_RATIO:g}", commit_limit_gib)
+
+
+def compute_thresholds(commit_limit_gib: float | None, config: dict[str, float] | None = None, config_note: str = "") -> Thresholds:
+    """The effective lines: the ratio defaults, or the (validated) config.  Out of bounds -> the whole config is ignored, never half-applied."""
+
+    base = default_thresholds(commit_limit_gib)
+    if not config:
+        return base if not config_note else Thresholds(base.limit_gib, base.resume_gib, f"{base.source}；{config_note}", base.commit_limit_gib)
+    if commit_limit_gib is None or base.source.startswith("默认 40/36"):
+        return Thresholds(base.limit_gib, base.resume_gib, f"{base.source}；提交上限未知，无法核对配置边界，配置已忽略", base.commit_limit_gib)
+    limit = config["limit_gib"] if "limit_gib" in config else commit_limit_gib * config["limit_ratio"] if "limit_ratio" in config else base.limit_gib
+    if "resume_gib" in config:
+        resume = config["resume_gib"]
+    elif "resume_ratio" in config:
+        resume = commit_limit_gib * config["resume_ratio"]
+    else:
+        resume = min(limit * RESUME_RATIO / LIMIT_RATIO, limit - MIN_GAP_GIB)
+    problem = ""
+    if limit < max(MIN_LIMIT_RATIO * commit_limit_gib, MIN_LIMIT_FLOOR_GIB) - 1e-9:
+        problem = f"冻结线 {limit:.1f} GiB 低于下限（提交上限的 {MIN_LIMIT_RATIO:.0%} 且不低于 {MIN_LIMIT_FLOOR_GIB:g} GiB）"
+    elif limit > MAX_LIMIT_RATIO * commit_limit_gib + 1e-9:
+        problem = f"冻结线 {limit:.1f} GiB 高于上限（提交上限的 {MAX_LIMIT_RATIO:.0%}）"
+    elif resume > limit - MIN_GAP_GIB + 1e-9:
+        problem = f"解冻线 {resume:.1f} GiB 没有比冻结线 {limit:.1f} GiB 至少低 {MIN_GAP_GIB:g} GiB"
+    if problem:
+        return Thresholds(base.limit_gib, base.resume_gib, f"{base.source}；配置越界已整份忽略：{problem}", commit_limit_gib)
+    return Thresholds(limit, resume, f"配置文件（提交上限 {commit_limit_gib:.1f} GiB）", commit_limit_gib)
+
+
+def _manifest_config_path(root: Path) -> Path | None:
+    """The config file the installer recorded (written by an administrator): only the fixed file name is accepted."""
+
+    try:
+        recorded = json.loads(_read_text_retrying(root / MANIFEST_FILE)).get("config_path")
+    except (OSError, ValueError, StateUnreadableError, AttributeError):
+        return None
+    if not isinstance(recorded, str) or not recorded:
+        return None
+    path = Path(recorded)
+    return path if path.name == CONFIG_FILE and path.is_absolute() else None
+
+
+def config_path() -> Path | None:
+    """Installed: the path in ``manifest.json``.  A development checkout: ``<project>/scripts/memory_gate.json``."""
+
+    root = install_root()
+    if root is not None:
+        return _manifest_config_path(root)
+    return Path(__file__).resolve().parent / CONFIG_FILE
+
+
+def resolve_thresholds(commit_limit_gib: float | None, path: Path | None = None) -> Thresholds:
+    values, note = read_config(path if path is not None else config_path())
+    return compute_thresholds(commit_limit_gib, values, note)
+
+
 # ---------------------------------------------------------------- the gate
 class Gate:
     """One decision step per ``step()``; all machine access is injected so every rule can be tested with a fake machine."""
@@ -380,6 +524,7 @@ class Gate:
         eligible: Callable[[int], bool] = lambda pid: True,
         limit_gib: float = LIMIT_GIB,
         resume_gib: float = RESUME_GIB,
+        thresholds: Callable[[], Thresholds] | None = None,
     ) -> None:
         self.dir = state_dir
         self.committed_gib = committed_gib
@@ -395,6 +540,9 @@ class Gate:
         self._eligible_cache: dict[int, bool] = {}
         self.limit = limit_gib
         self.resume_limit = resume_gib
+        self.thresholds = thresholds  # re-read every CONFIG_RELOAD_SECONDS: a changed config file takes effect without a reinstall
+        self._thresholds_at: float | None = None
+        self.threshold_source = "构造参数"
         self.history: list[tuple[float, float, dict[int, int]]] = []
         self.first_seen: dict[int, float] = {}
         self.last_known_frozen: list[int] = []  # root pids of the last state that could be read: what may still be frozen if the file cannot be read later
@@ -472,9 +620,27 @@ class Gate:
         return True
 
     # ------------------------------------------------ one step
+    def refresh_thresholds(self, now: float) -> None:
+        """Re-read the freeze/resume lines at most once per ``CONFIG_RELOAD_SECONDS``; a failure keeps the lines in force."""
+
+        if self.thresholds is None or (self._thresholds_at is not None and now - self._thresholds_at < CONFIG_RELOAD_SECONDS):
+            return
+        self._thresholds_at = now
+        try:
+            fresh = self.thresholds()
+        except Exception as error:  # noqa: BLE001 - a config problem must never stop the watchdog; the lines in force stay
+            self.log(f"重读阈值失败，沿用 {self.limit:g}/{self.resume_limit:g} GiB：{type(error).__name__}: {error}")
+            return
+        changed = abs(fresh.limit_gib - self.limit) >= 0.005 or abs(fresh.resume_gib - self.resume_limit) >= 0.005
+        first = self.threshold_source == "构造参数"
+        self.limit, self.resume_limit, self.threshold_source = fresh.limit_gib, fresh.resume_gib, fresh.source
+        if changed or first:
+            self.log(f"阈值：冻结线 {self.limit:.2f} GiB，解冻线 {self.resume_limit:.2f} GiB（{fresh.source}）")
+
     def step(self) -> None:
         state = self.load()
         now = self.now()
+        self.refresh_thresholds(now)
         committed = self.committed_gib()
         state["heartbeat"] = now
         if committed is None:
@@ -821,16 +987,56 @@ def _normalized_sha256(path: Path) -> str:
 
 
 def bundle_hash(project_root: Path | None = None) -> tuple[str, list[tuple[str, str]]]:
-    """(the combined SHA-256, the per-file lines): the value ``install_memory_gate.ps1 -Install -ExpectedSha256`` must be given.
+    """(the combined SHA-256, the per-file lines): the value that ``scripts/memory_gate.pin.json`` pins and ``install_memory_gate.ps1`` checks before installing.
 
     Combined = SHA-256 of ``"<sha256>  <relative path>\n"`` for every file in ``BUNDLE_FILES`` (UTF-8, LF).  The installer computes the same
-    thing from the files it is about to copy plus itself, and refuses on any difference, so the user installs exactly what was audited.
+    thing from the files it is about to copy plus itself, and refuses on any difference from the pin committed in the repository, so the user installs exactly what was merged.
     """
 
     root = project_root or Path(__file__).resolve().parent.parent
     lines = [(relative, _normalized_sha256(root / relative)) for relative in BUNDLE_FILES]
     text = "".join(f"{digest}  {relative}\n" for relative, digest in lines)
     return hashlib.sha256(text.encode("utf-8")).hexdigest(), lines
+
+
+def pin_path(project_root: Path | None = None) -> Path:
+    return (project_root or Path(__file__).resolve().parent.parent) / "scripts" / PIN_FILE
+
+
+def read_pin(project_root: Path | None = None) -> tuple[str, dict[str, str]]:
+    """(the pinned combined hash, the pinned per-file hashes) from ``scripts/memory_gate.pin.json``; raises ValueError when it is missing or malformed."""
+
+    try:
+        data = json.loads(_read_text_retrying(pin_path(project_root)))
+        combined = data["bundle_sha256"]
+        files = data["files"]
+    except (OSError, StateUnreadableError, ValueError, KeyError, TypeError) as error:
+        raise ValueError(f"{PIN_FILE} 缺失或读不出：{type(error).__name__}") from error
+    if not (isinstance(combined, str) and len(combined) == 64 and isinstance(files, dict) and all(isinstance(v, str) for v in files.values())):
+        raise ValueError(f"{PIN_FILE} 格式不对")
+    return combined.lower(), {str(k): v.lower() for k, v in files.items()}
+
+
+def pin_problem(project_root: Path | None = None) -> str:
+    """Why the four bundle files differ from the pin committed in the repository (empty when they match).  Read-only."""
+
+    try:
+        pinned, pinned_files = read_pin(project_root)
+    except ValueError as error:
+        return str(error)
+    combined, lines = bundle_hash(project_root)
+    if combined == pinned:
+        return ""
+    changed = [relative for relative, digest in lines if pinned_files.get(relative) != digest]
+    return f"四个文件的合并哈希 {combined} 不等于 {PIN_FILE} 钉住的 {pinned}；变了的文件：{', '.join(changed) or '（文件清单不同）'}。改了总闸文件后要重写钉哈希文件并走 PR。"
+
+
+def write_pin(project_root: Path | None = None) -> None:
+    combined, lines = bundle_hash(project_root)
+    target = pin_path(project_root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    body = {"bundle_sha256": combined, "files": dict(lines), "note": "合并哈希覆盖 BUNDLE_FILES 四个文件；改总闸文件必须同时更新本文件，经 PR、独立审计、手动 sw008-ci，由用户合并"}
+    target.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def interpreter_problem(flags: Any = sys.flags) -> str:
@@ -877,6 +1083,7 @@ def real_gate(state_dir: Path) -> Gate:
         resume=host.resume,
         alive=host.alive,
         eligible=host.eligible,
+        thresholds=lambda: resolve_thresholds(host.commit_limit_gib()),
     )
 
 
@@ -980,14 +1187,23 @@ def cmd_status(state_dir: Path, integrity: str = "") -> int:
     running = age <= HEARTBEAT_STALE_SECONDS
     host = Host()
     now_gib = host.committed_gib()
+    thresholds = resolve_thresholds(host.commit_limit_gib())
+    root = install_root()
+    installed_bundle = ""
+    if root is not None:
+        with contextlib.suppress(OSError, ValueError, StateUnreadableError, AttributeError):
+            installed_bundle = str(json.loads(_read_text_retrying(root / MANIFEST_FILE)).get("bundle_sha256", ""))
     print(
         json.dumps(
             {
                 "running": running,
                 "heartbeat_age_seconds": round(age, 1) if state.get("heartbeat") else None,
                 "committed_gib_now": None if now_gib is None else round(now_gib, 2),
-                "limit_gib": LIMIT_GIB,
-                "resume_gib": RESUME_GIB,
+                "limit_gib": round(thresholds.limit_gib, 2),
+                "resume_gib": round(thresholds.resume_gib, 2),
+                "threshold_source": thresholds.source,
+                "commit_limit_gib": None if thresholds.commit_limit_gib is None else round(thresholds.commit_limit_gib, 2),
+                "installed_bundle_sha256": installed_bundle,
                 "install_check": integrity or "ok",
                 "frozen": [{k: e[k] for k in ("root", "root_name", "level", "locked", "reason")} for e in state["frozen"]],
                 "state_dir": str(state_dir),
@@ -1001,10 +1217,15 @@ def cmd_status(state_dir: Path, integrity: str = "") -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="内存总闸看门狗")
-    parser.add_argument("command", choices=["run", "status", "resume-all", "selftest", "bundle-hash"])
+    parser.add_argument("command", choices=["run", "status", "resume-all", "selftest", "bundle-hash", "pin-check", "pin-write"])
     parser.add_argument("--state-dir", type=Path, default=None, help="状态与告警目录（默认：已安装时为安装目录下的 state，否则 ~/.auto-pm/memory-gate）")
     parser.add_argument("--require-manifest", action="store_true", help="计划任务用：必须是已安装形态，文件 SHA-256 与 manifest.json 一致才运行")
     args = parser.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):  # a Windows pipe defaults to the ANSI code page (cp1252 cannot print the Chinese messages); the installer reads UTF-8
+        reconfigure = getattr(stream, "reconfigure", None)  # absent on a captured stream (tests)
+        if reconfigure is not None:
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
     state_dir: Path = args.state_dir or default_state_dir()
     root = install_root()
     integrity = ""
@@ -1019,7 +1240,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 3
         gate = real_gate(state_dir)
-        gate.log(f"看门狗启动，上限 {LIMIT_GIB} GiB，解冻线 {RESUME_GIB} GiB")
+        gate.refresh_thresholds(gate.now())
+        gate.log(f"看门狗启动，冻结线 {gate.limit:.2f} GiB，解冻线 {gate.resume_limit:.2f} GiB（{gate.threshold_source}）")
         run_forever(gate)
         return 0
     if args.command == "status":
@@ -1036,7 +1258,15 @@ def main(argv: list[str] | None = None) -> int:
         combined, lines = bundle_hash()
         for relative, digest in lines:
             print(f"{digest}  {relative}")
-        print(f"\n-ExpectedSha256 {combined}")
+        print(f"\n合并哈希 {combined}")
+        return 0
+    if args.command == "pin-check":
+        problem = pin_problem()
+        print(problem or "钉住的哈希与四个文件一致")
+        return 1 if problem else 0
+    if args.command == "pin-write":
+        write_pin()
+        print(f"已写 scripts/{PIN_FILE}；这份改动要走 PR、独立审计和手动 sw008-ci")
         return 0
     with tempfile.TemporaryDirectory() as folder:
         problems = selftest(Path(folder), strict=True)
