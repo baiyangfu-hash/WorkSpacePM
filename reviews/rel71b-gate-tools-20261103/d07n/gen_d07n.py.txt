@@ -92,6 +92,11 @@ for a, b in (("D07M", "D07N"), ("d07m", "d07n"), ("D07m", "D07n")):
     s = s.replace(a, b)
 root = ROOT / "00_Infrastructure/auto_pm"
 sha = {f: hashlib.sha256((root / f).read_bytes()).hexdigest() for f in ("active_release.json", "previous_release.json", "deployment_manifest.json")}
+import os, re as _re
+if os.environ.get("D07N_KEEP_OLD_SHAS"):  # re-generation after the switch: the pre-switch pointer/manifest bytes bound in the audited script must not change
+    _prev = io.open(EV / "d07n_deploy.sh", encoding="utf-8", newline="").read()
+    _g = lambda n: _re.search(rf"^{n}=(\S+)$", _prev, _re.M).group(1)  # noqa: E731
+    sha = {"active_release.json": _g("OLD_ACTIVE_SHA"), "previous_release.json": _g("OLD_PREV_SHA"), "deployment_manifest.json": _g("OLD_MANIFEST_SHA")}
 line("# M3-D07N (card D07n_card.md V1.0)", f"# M3-D07N (card D07n_card.md V1.0): switch the real active release to the build of main at {MERGE[:8]} ({PRN} merge commit, release 7.1, card 220 gated), same steps as D07m; changes: station from origin/main + manifest bytes committed through the hook, strict identity, smoke checks.")
 sw('D176_VERDICT="$REAL/.auto-pm/reports/m3-rel7b/gates/gate_verdict.json"', 'D176_VERDICT="$REAL/.auto-pm/reports/m3-rel71/gates/gate_verdict.json"')
 setvar("CARD_SHA", csha)
@@ -167,5 +172,11 @@ if EXC is not None:
 _go = "| cut -d' ' -f1)\""
 assert s.count("GO_REF=\"$(grep '^CONFIRMED_BY_USER_IN_THREAD=' \"$EV/user_switch_confirmation.txt\" 2>/dev/null | head -n 1 | cut -d= -f2- | cut -d' ' -f1)\"") == 1
 s = s.replace("GO_REF=\"$(grep '^CONFIRMED_BY_USER_IN_THREAD=' \"$EV/user_switch_confirmation.txt\" 2>/dev/null | head -n 1 | cut -d= -f2- | cut -d' ' -f1)\"", "GO_REF=\"$( { grep '^CONFIRMED_BY_USER_IN_THREAD=' \"$EV/user_switch_confirmation.txt\" 2>/dev/null || true; } | head -n 1 | cut -d= -f2- | cut -d' ' -f1)\"")  # --check-only must work before the confirmation exists (pipefail)
+_f = "for f in deployment_manifest.json active_release.json previous_release.json; do"
+_t = 'TOKEN_FILE="$EV/lease_token.txt"'
+assert s.count(_f) == 1 and s.count(_t) == 1
+# retry fix (coordinator ruling 2026-11-04T04:11Z, option A): once the Run exists its git_head is fixed, so the station must not get another commit
+s = s.replace(_f, 'RS="$(q "select state from run_items where run_id=?" "$RUN")"; WS="$(q "select state from work_items where work_id=?" "$WORK")"' + chr(10) + 'if ! { [[ "$RS" == READY || "$RS" == RUNNING ]] && [[ "$WS" == READY || "$WS" == AUTHORIZED || "$WS" == IN_PROGRESS ]]; }; then  # no further station commit while the Run is live (its git_head is fixed)' + chr(10) + _f)
+s = s.replace(_t, 'fi' + chr(10) + _t)
 io.open(EV / "d07n_deploy.sh", "w", encoding="utf-8", newline="").write(s)
 print("D07n draft" if DRAFT else "D07n final", "card", csha, "release", RID, "merges", nmerge)

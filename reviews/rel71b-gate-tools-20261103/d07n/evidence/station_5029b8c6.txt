@@ -1,0 +1,13 @@
+# git show --stat 5029b8c6
+5029b8c660f4fac437225b32e660db7ff3f14dd8 baiyang Tue Nov 3 21:08:08 2026 -0700
+chore(release): [CHG-SCPT-2026-477] record the control root's release files in the D07n station so the Run starts from them
+
+ 00_Infrastructure/auto_pm/deployment_manifest.json | 588 +++++++++++++++++++++
+ 1 file changed, 588 insertions(+)
+
+# git diff --stat 377efbcb 5029b8c6
+ 00_Infrastructure/auto_pm/deployment_manifest.json | 588 +++++++++++++++++++++
+ 1 file changed, 588 insertions(+)
+
+# git diff 377efbcb 5029b8c6 (summary of lines)
+599

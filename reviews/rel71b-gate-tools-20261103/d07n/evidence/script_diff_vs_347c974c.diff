@@ -1,0 +1,5 @@
+142a143,144
+> RS="$(q "select state from run_items where run_id=?" "$RUN")"; WS="$(q "select state from work_items where work_id=?" "$WORK")"
+> if ! { [[ "$RS" == READY || "$RS" == RUNNING ]] && [[ "$WS" == READY || "$WS" == AUTHORIZED || "$WS" == IN_PROGRESS ]]; }; then  # no further station commit while the Run is live (its git_head is fixed)
+149a152
+> fi

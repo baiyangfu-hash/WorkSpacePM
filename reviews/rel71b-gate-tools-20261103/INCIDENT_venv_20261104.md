@@ -75,3 +75,11 @@ Error: Invalid value for '{claude|codex|cursor|trae|vscode}': 'gui-trial' is not
 ### 未决的技术债（不阻断）
 - 联接扫描只做到深度 4，需无深度限制重扫整个工作区。
 - 重建时没有用 `pip install --require-hashes`（锁定清单只有版本，没有哈希）。
+
+## 附录：D07n 两次真跑、自动回切和收口缺陷（审计 586 之后）
+
+- 第 1 次真跑（04:03Z）：安装 1.3.3-d563293、切换、切换后检查里一项失败“控制根暂存区非空”→ 按设计自动回切到 1.3.3-d671611（`ROLLED_BACK active=1.3.3-d671611`）。日志：`deploy_run_attempt1_rolled_back.log`。工位 m3-d07n 此时已建，提交了 377efbcb，Run RUN-SW008-M3-D07N-001 以 git_head=377efbcb 登记。
+- 暂存区的东西：`CHG-DOCU-2026-092.md`（新增 223 行）。我无法证明是谁何时暂存的；它和 11-02/03 为 B2 结算恢复链建的变更单（092）及其 pending_acceptance 流转、当时提交被钩子拒绝的那一轮是同一个文件，最可能是那一轮遗留的暂存。处理：`git restore --staged -- <该文件>`，文件保留为未跟踪；之后控制根暂存区为空（`git diff --cached --name-only` = 0 行）。
+- 第 2 次真跑（04:08Z）：切换与切换后检查全过（POST_CHECKS_RESULT=OK，active=1.3.3-d563293，previous=1.3.3-d671611，指针备份 `pointer_backup_20261104T040817Z`）。步骤 7 创建 Checkpoint 报 `Git baseline drift`，脚本退出 1：Run 仍 RUNNING、Work 仍 IN_PROGRESS、CHG-SCPT-2026-477 未收口。日志：`deploy_run.log`。
+- 原因：我脚本里“把控制根清单/指针字节提交进工位”那段在重试时再次运行——第 1 次回切后控制根的清单已含 1.3.3-d563293 条目，与工位不同，于是在工位里又提交了一次（5029b8c6，+588 行 deployment_manifest.json），工位 HEAD≠Run 登记的 git_head(377efbcb)，`checkpoint` 比较 `run.git_head != git_head` 就拒绝。这是我设计（审计 585/586 过的脚本）的重试缺陷。
+- 处理（协调者裁决选项 A，04:11Z）：先给 5029b8c6 打本地标签 `evidence/d07n-station-5029b8c6`（未推送；`station_5029b8c6.txt/.diff` 存了 git show --stat 与 diff），再在临时工位（脱离 HEAD）`git reset --keep 377efbcb`，工位干净，HEAD=377efbcb=Run 的 git_head。脚本只加一个条件：Run 为 READY/RUNNING 且 Work 为 READY/AUTHORIZED/IN_PROGRESS 时不再在工位提交（差异见 `evidence_pre/script_diff_vs_347c974c.diff`，新脚本 SHA 见线程）。等审计放行后才续跑；租约 05:08Z 过期，我不自行续租。

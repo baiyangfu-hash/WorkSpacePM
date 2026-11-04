@@ -140,6 +140,8 @@ if [[ ! -d "$WTD" ]]; then
   git worktree add --detach "$WTD" origin/main > "$EV/worktree_add.txt" 2>&1 || die "cannot create the managed station for the Run"
 fi
 # the control root's scope files must equal the station start: record the manifest bytes of the control root (it carries 16 local-only intermediate entries) through the normal hook, once
+RS="$(q "select state from run_items where run_id=?" "$RUN")"; WS="$(q "select state from work_items where work_id=?" "$WORK")"
+if ! { [[ "$RS" == READY || "$RS" == RUNNING ]] && [[ "$WS" == READY || "$WS" == AUTHORIZED || "$WS" == IN_PROGRESS ]]; }; then  # no further station commit while the Run is live (its git_head is fixed)
 for f in deployment_manifest.json active_release.json previous_release.json; do
   if ! diff -q <(tr -d '\r' < "$ROOT/$C/$f") <(git -C "$WTD" show "HEAD:$C/$f" | tr -d '\r') > /dev/null; then
     cp "$ROOT/$C/$f" "$WTD/$C/$f"; git -C "$WTD" add -- "$C/$f"; echo "station: control-root bytes of $f staged" >> "$EV/worktree_add.txt"
@@ -147,6 +149,7 @@ for f in deployment_manifest.json active_release.json previous_release.json; do
 done
 if [[ -n "$(git -C "$WTD" diff --cached --name-only)" ]]; then
   git -C "$WTD" commit -q -m "chore(release): [$chg] record the control root's release files in the D07n station so the Run starts from them" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" >> "$EV/worktree_add.txt" 2>&1 || die "station commit refused by the hook"
+fi
 fi
 TOKEN_FILE="$EV/lease_token.txt"; [[ -f "$TOKEN_FILE" ]] || openssl rand -hex 16 > "$TOKEN_FILE"; TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
 [[ "$(q "select state from run_items where run_id=?" "$RUN")" != NONE ]] || cli continuity run start --run-id "$RUN" --work-id "$WORK" --executor "$OWNER" --adapter claude-code "${O[@]}" \
