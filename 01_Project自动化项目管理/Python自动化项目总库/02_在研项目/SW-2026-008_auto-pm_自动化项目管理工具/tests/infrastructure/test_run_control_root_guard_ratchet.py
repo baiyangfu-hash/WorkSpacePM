@@ -25,7 +25,12 @@ OPT_IN_FIXTURE = "control_root_guard_on"
 OPT_IN_FIXTURES = frozenset({OPT_IN_FIXTURE, "control_root_guard_switch"})
 # Test files (relative to tests/) allowed to run with the real guard on.  Add a file here only on purpose, in review.
 FILES_THAT_MAY_USE_THE_REAL_GUARD = frozenset(
-    {"core/test_run_start_control_root_guard.py", "cli/test_continuity_recovery_run.py"}
+    {
+        "core/test_run_start_control_root_guard.py",
+        "cli/test_continuity_recovery_run.py",
+        # CHG-SCPT-2026-476: the exit drills walk the recovery chain with the production control-root rule on.
+        "e2e/test_exit_drill.py",
+    }
 )
 # The one module that implements ``create_run`` itself (it is the storage layer; the service in front of it owns the rule).
 STORE_MODULE = PACKAGE / "infrastructure" / "continuity_store.py"

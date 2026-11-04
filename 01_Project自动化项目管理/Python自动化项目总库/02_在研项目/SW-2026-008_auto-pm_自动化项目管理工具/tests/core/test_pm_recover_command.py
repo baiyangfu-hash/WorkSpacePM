@@ -232,6 +232,7 @@ def _resume_stub(run_state: str | None) -> Any:
         next_legal_action="",
         conflicts=(),
         hold_warnings=(),
+        exit_hints=(),
         intake=SimpleNamespace(is_empty=True),
         read_set=(),
         query=None,
