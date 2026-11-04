@@ -99,6 +99,41 @@ def test_there_is_no_switch_to_continue_anyway() -> None:
     assert "os.environ" not in source and "getenv" not in source
 
 
+def test_the_linux_commit_limit_is_only_a_limit_in_strict_overcommit_mode(tmp_path: Path) -> None:
+    """Default overcommit makes CommitLimit advisory (a 16 GiB sandbox reports 8 GiB): the 85% rule must not fire on it."""
+
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text("MemTotal: 16000000 kB\nCommitLimit: 8000000 kB\nCommitted_AS: 7500000 kB\n", encoding="utf-8")
+    heuristic = tmp_path / "heuristic"
+    heuristic.write_text("0\n", encoding="ascii")
+    strict = tmp_path / "strict"
+    strict.write_text("2\n", encoding="ascii")
+
+    advisory = mp._read_commit_linux(meminfo, heuristic)
+    hard = mp._read_commit_linux(meminfo, strict)
+    unknown = mp._read_commit_linux(meminfo, tmp_path / "missing")
+
+    assert advisory is not None and advisory.limit == 0 and mp.check(advisory).ok  # 7.15 GiB committed, no limit to compare with
+    assert hard is not None and hard.limit == 8_000_000 * 1024 and not mp.check(hard).ok  # 94% of a real limit
+    assert unknown is not None and unknown.limit == 0
+
+
+def test_any_failure_of_a_windows_reading_is_unreadable_not_a_stack_trace() -> None:
+    import ctypes
+
+    def broken_arguments() -> mp.CommitSnapshot:
+        raise ctypes.ArgumentError("argument 1: wrong type")
+
+    def missing_symbol() -> mp.CommitSnapshot:
+        raise AttributeError("function 'GetPerformanceInfo' not found")
+
+    assert mp._guarded(broken_arguments, None) is None
+    assert mp._guarded(missing_symbol, None) is None
+    assert mp._guarded(lambda: 3, 0) == 3
+    assert mp._guarded(lambda: int("x"), 7) == 7  # ValueError
+    assert mp._guarded(lambda: [][0], 8) == 8  # IndexError
+
+
 def test_the_linux_readers_use_proc(tmp_path: Path) -> None:
     meminfo = tmp_path / "meminfo"
     meminfo.write_text("MemTotal:       32768000 kB\nCommitLimit:    66387968 kB\nCommitted_AS:   40000000 kB\nOther: x\n", encoding="utf-8")
@@ -109,7 +144,9 @@ def test_the_linux_readers_use_proc(tmp_path: Path) -> None:
     (proc / "self").mkdir()  # not a pid
     (proc / "99").mkdir()  # a process that vanished: no status file
 
-    snapshot = mp._read_commit_linux(meminfo)
+    strict = tmp_path / "overcommit_strict"
+    strict.write_text("2\n", encoding="ascii")
+    snapshot = mp._read_commit_linux(meminfo, strict)
     top = mp._all_linux(proc)[:2]
 
     assert snapshot == mp.CommitSnapshot(40_000_000 * 1024, 66_387_968 * 1024, 32_768_000 * 1024)
@@ -207,3 +244,21 @@ def test_a_test_gets_the_healthy_stand_in_reading_unless_it_asks_for_the_real_ma
 @pytest.mark.real_machine
 def test_a_real_machine_test_gets_the_real_reader_not_the_stand_in() -> None:
     assert mp.read_commit.__name__ == "read_commit"  # the stand-in is a lambda
+
+
+_REAL_MACHINE_FILES = {"infrastructure/test_long_run_core.py", "infrastructure/test_memory_preflight.py"}
+
+
+def test_the_real_machine_marker_is_used_only_by_the_files_that_compare_with_the_system() -> None:
+    """The marker switches the stand-in reading off (conftest); a new user of it is a decision, so it is listed here (audit 575 P3)."""
+
+    import re
+
+    tests_root = Path(__file__).resolve().parents[1]
+    users = {
+        path.relative_to(tests_root).as_posix()
+        for path in tests_root.rglob("*.py")
+        if re.search(r"mark\.real_machine", path.read_text(encoding="utf-8", errors="strict"))
+    }
+
+    assert users <= _REAL_MACHINE_FILES, f"real_machine 标记出现在名单之外：{sorted(users - _REAL_MACHINE_FILES)}"

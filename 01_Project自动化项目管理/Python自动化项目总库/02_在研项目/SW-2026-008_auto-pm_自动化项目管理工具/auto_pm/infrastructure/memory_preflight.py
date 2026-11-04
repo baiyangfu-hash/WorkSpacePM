@@ -26,7 +26,9 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
+T = TypeVar("T")
 GIB = 2**30
 ABSOLUTE_GIB = 35.0
 RATIO = 0.85
@@ -172,6 +174,15 @@ else:
         return ()
 
 
+def _guarded(read: Callable[[], T], fallback: T) -> T:
+    """``read()``, or ``fallback`` when it fails in any way: a reading that cannot be taken is "unreadable" (refused on Windows), never a stack trace."""
+
+    try:
+        return read()
+    except Exception:  # noqa: BLE001 - ctypes raises ArgumentError/AttributeError/TypeError as well as OSError
+        return fallback
+
+
 def _meminfo_kib(text: str) -> dict[str, int]:
     values: dict[str, int] = {}
     for line in text.splitlines():
@@ -182,11 +193,18 @@ def _meminfo_kib(text: str) -> dict[str, int]:
     return values
 
 
-def _read_commit_linux(meminfo: Path = Path("/proc/meminfo")) -> CommitSnapshot | None:
+def _read_commit_linux(meminfo: Path = Path("/proc/meminfo"), overcommit: Path = Path("/proc/sys/vm/overcommit_memory")) -> CommitSnapshot | None:
+    """``/proc/meminfo`` read as a commit charge.  ``CommitLimit`` is only a limit in strict mode (``overcommit_memory`` = 2); otherwise it is
+    advisory (a 16 GiB sandbox reports 8 GiB), so the limit is reported as unknown (0) and the percentage rule does not fire on it."""
+
     try:
         values = _meminfo_kib(meminfo.read_text(encoding="utf-8"))
+        try:
+            strict = overcommit.read_text(encoding="ascii").strip() == "2"
+        except (OSError, ValueError):
+            strict = False
         return CommitSnapshot(
-            committed=values["Committed_AS"] * 1024, limit=values["CommitLimit"] * 1024, physical=values["MemTotal"] * 1024
+            committed=values["Committed_AS"] * 1024, limit=values["CommitLimit"] * 1024 if strict else 0, physical=values["MemTotal"] * 1024
         )
     except (OSError, KeyError, ValueError):  # ValueError: undecodable bytes are "unreadable", never silently replaced
         return None
@@ -197,10 +215,7 @@ if sys.platform == "win32":
     def read_commit() -> CommitSnapshot | None:
         """The system commit charge now, or ``None`` when it cannot be read."""
 
-        try:
-            return _read_commit_windows()
-        except OSError:
-            return None
+        return _guarded(_read_commit_windows, None)
 
 else:
 
@@ -239,10 +254,7 @@ if sys.platform == "win32":
     def all_processes() -> tuple[ProcessUse, ...]:
         """Every process whose private (committed) memory can be read, biggest first; the others (protected, vanished) are skipped."""
 
-        try:
-            return _all_windows()
-        except OSError:
-            return ()
+        return _guarded(_all_windows, ())
 
 else:
 

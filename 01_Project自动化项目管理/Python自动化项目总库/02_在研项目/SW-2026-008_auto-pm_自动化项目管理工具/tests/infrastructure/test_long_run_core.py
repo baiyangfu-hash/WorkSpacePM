@@ -194,6 +194,50 @@ def test_the_guard_does_nothing_without_a_worker_pid_and_survives_unreadable_mem
     assert world.paused_calls == [] and guard["samples"] >= 1 and guard["peak_committed_gib"] == 99.0 and guard["alerts"] == []
 
 
+def test_the_guard_survives_an_unreadable_worker_pid_when_memory_is_hot_and_pauses_on_a_later_round(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard is most needed when the commit is over the limit: a worker.pid that cannot be read for a moment must not end the loop."""
+
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [45.0], end_after=8)
+    real = Path.read_text
+
+    def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.name == "worker.pid" and world.polls < 2:
+            raise PermissionError(13, "denied")  # held by someone else for the first rounds (every retry fails)
+        return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)  # must not raise
+
+    guard = json.loads(real(run_dir / "guard.json", encoding="utf-8"))
+    assert world.polls >= 8  # it kept looping to the end instead of dying on the first hot round
+    assert world.paused_calls and world.paused_calls[0] == [4242, 4243]  # a later round found the tree and paused it
+    assert world.resumed_calls  # and never leaves it frozen
+    errors = [alert for alert in guard["alerts"] if "worker.pid" in alert]
+    assert len(errors) == 1 and "下一轮重试" in errors[0]  # noted once, not once per round
+    assert guard["worker_pid_error"]
+
+
+def test_the_guard_keeps_noting_nothing_new_while_worker_pid_stays_unreadable_and_does_not_pause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [45.0], end_after=5)
+    real = Path.read_text
+
+    def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.name == "worker.pid":
+            raise PermissionError(13, "denied")
+        return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    world.run(limit_gib=40.0, resume_gib=36.0, poll_seconds=20, max_seconds=10_000)
+
+    guard = json.loads(real(run_dir / "guard.json", encoding="utf-8"))
+    assert world.paused_calls == [] and world.polls >= 5 and guard["samples"] >= 5
+    assert len([alert for alert in guard["alerts"] if "worker.pid" in alert]) == 1
+
+
 def test_the_guard_looks_once_even_when_the_job_has_already_ended_but_never_pauses_it(tmp_path: Path) -> None:
     run_dir = _guard_dir(tmp_path)
     (run_dir / "FAILED").write_text("x", encoding="utf-8")
@@ -384,6 +428,83 @@ def test_the_status_of_an_unreadable_or_foreign_file_is_an_error_not_a_guess(tmp
         core.read_status(run_dir)
 
 
+class _Flaky:
+    """Make ``Path.read_text`` of files with a given name fail ``times`` times with ``error`` (None: for ever), then work again."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, name: str, error: OSError, times: int | None) -> None:
+        self.calls = 0
+        real = Path.read_text
+
+        def read_text(path: Path, *args: object, **kwargs: object) -> str:
+            if path.name == name:
+                self.calls += 1
+                if times is None or self.calls <= times:
+                    raise error
+            return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", read_text)
+        monkeypatch.setattr(core, "READ_RETRY_SECONDS", 0.0)
+
+
+class _SharingViolationError(OSError):
+    """What Windows raises for a file another process holds open without sharing (``winerror`` 32); Linux has no such attribute, so it is a class attribute."""
+
+    winerror = 32
+
+
+def _sharing_violation() -> OSError:
+    return _SharingViolationError("being used by another process")
+
+
+@pytest.mark.parametrize("failures", [1, 3, core.READ_RETRIES])
+@pytest.mark.parametrize("error", [PermissionError(13, "denied"), _sharing_violation()], ids=["winerror5-or-permission", "winerror32"])
+def test_a_read_that_hits_the_instant_of_an_atomic_replace_is_retried_and_then_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failures: int, error: OSError
+) -> None:
+    (tmp_path / "status.json").write_text(json.dumps({"state": "RUNNING"}), encoding="utf-8")
+    flaky = _Flaky(monkeypatch, "status.json", error, failures)
+
+    assert core.read_json_file(tmp_path / "status.json") == {"state": "RUNNING"}
+    assert flaky.calls == failures + 1
+
+
+def test_a_read_that_keeps_failing_raises_and_says_how_often_it_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "status.json").write_text("{}", encoding="utf-8")
+    flaky = _Flaky(monkeypatch, "status.json", PermissionError(13, "denied"), None)
+
+    with pytest.raises(core.LongRunError, match=f"已重试 {core.READ_RETRIES} 次") as caught:
+        core.read_json_file(tmp_path / "status.json")
+
+    assert not isinstance(caught.value, core.LongRunMissingError)  # present but unreadable is not "absent"
+    assert flaky.calls == core.READ_RETRIES + 1 and core.READ_RETRIES == 8
+
+
+def test_other_read_errors_are_not_retried_and_a_missing_file_is_told_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "status.json").write_text("{}", encoding="utf-8")
+    flaky = _Flaky(monkeypatch, "status.json", OSError(5, "input/output error"), None)
+
+    with pytest.raises(core.LongRunError, match="未重试"):
+        core.read_json_file(tmp_path / "status.json")
+    assert flaky.calls == 1
+
+    with pytest.raises(core.LongRunMissingError, match="没有 nothing.json"):
+        core.read_json_file(tmp_path / "nothing.json")
+
+
+def test_the_status_report_names_an_unreadable_guard_file_instead_of_showing_zero_samples(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = tmp_path / "job"
+    _spec(run_dir, [PY, "-c", "pass"])
+    (run_dir / "guard.json").write_text(json.dumps({"samples": 4}), encoding="utf-8")
+    _Flaky(monkeypatch, "guard.json", PermissionError(13, "denied"), None)
+
+    guard = core.read_status(run_dir)["guard"]
+
+    assert "已重试 8 次" in guard["error"]
+    monkeypatch.undo()
+    (run_dir / "guard.json").unlink()
+    assert "error" not in core.read_status(run_dir)["guard"]  # absent: simply no guard file yet
+
+
 def test_the_module_is_standard_library_only_so_the_worker_runs_as_a_plain_script() -> None:
     source = Path(core.__file__).read_text(encoding="utf-8")
 
@@ -558,6 +679,29 @@ def test_a_task_directory_that_cannot_be_created_is_reported_in_plain_words(tmp_
 
     with pytest.raises(core.LongRunError, match="建不了任务目录"):
         core.start(tmp_path, "reserved", [PY, "-c", "pass"], cwd=tmp_path)
+
+
+def test_the_worker_removes_the_pytest_variables_that_select_or_change_a_suite_and_records_what_it_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit 578: ``PYTEST_ADDOPTS="-k test_1"`` made a long-run run a few cases; the record must not be able to carry it."""
+
+    monkeypatch.setenv("PYTEST_PLUGINS", "from_the_caller")
+    code = "import os; print('SEEN=' + ','.join(sorted(k for k in os.environ if k.upper() in ('PYTEST_ADDOPTS', 'PYTEST_PLUGINS', 'PYTEST_DISABLE_PLUGIN_AUTOLOAD'))) + '|KEPT=' + os.environ.get('KEEP_ME', ''))"
+    started = core.start(
+        tmp_path, "stripped", [PY, "-c", code], cwd=tmp_path, poll_seconds=0.2,
+        env={"PYTEST_ADDOPTS": "-k test_1", "pytest_disable_plugin_autoload": "1", "KEEP_ME": "yes"},
+    )  # fmt: skip
+    assert started["name"] == "stripped"
+    end = time.monotonic() + 60
+    while time.monotonic() < end and core.read_status(core.run_directory(tmp_path, "stripped"))["state"] not in {"DONE", "FAILED"}:
+        time.sleep(0.1)
+
+    status = core.read_status(core.run_directory(tmp_path, "stripped"))
+    log = (core.run_directory(tmp_path, "stripped") / "run.log").read_text(encoding="utf-8")
+
+    assert status["state"] == "DONE" and "SEEN=|KEPT=yes" in log
+    assert sorted(status["env_stripped"], key=str.upper) == ["PYTEST_ADDOPTS", "pytest_disable_plugin_autoload", "PYTEST_PLUGINS"]
 
 
 @pytest.mark.real_machine

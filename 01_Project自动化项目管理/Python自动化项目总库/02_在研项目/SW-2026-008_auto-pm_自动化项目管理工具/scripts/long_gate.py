@@ -1099,6 +1099,12 @@ def main(argv: list[str] | None = None) -> int:
     config_path = a.config.resolve()
     try:
         if a.command == "run":
+            # ``run`` is what ``launch`` starts, but it can also be started by hand or by a scheduled task: the same check, at the same
+            # point (before anything is created or taken), so no way of starting a gate skips it.
+            refusal = _memory_preflight_refusal()
+            if refusal:
+                print(refusal)
+                return EXIT_CODES["REFUSED"]
             cfg, sha = load_config(config_path)
             runner = Runner(cfg, sha)
             runner.task_name = a.task_name

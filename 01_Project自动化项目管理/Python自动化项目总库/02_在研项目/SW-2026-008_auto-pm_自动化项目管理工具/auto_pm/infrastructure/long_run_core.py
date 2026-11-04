@@ -54,7 +54,15 @@ GUARD_LIMIT_GIB = 40.0  # pause the tree at this much committed memory (the froz
 GUARD_RESUME_GIB = 36.0  # resume below this
 UNOWNED_RISE_GIB = 8.0
 GIT_TIMEOUT_SECONDS = 60
+#: pytest reads these from the environment and they can select part of a suite (``-k``) or change which plugins run; a long-run record is
+#: evidence of the whole command, so the worker removes them (even if the caller's ``env`` adds them) and records what it removed.
+STRIPPED_ENV = ("PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD")
 GUARD_POLL_SECONDS = 20
+#: On Windows a reader that opens a file in the instant ``os.replace`` swaps it gets ``PermissionError`` (winerror 5) or a sharing violation
+#: (winerror 32).  The writer keeps the file for microseconds, so a read retries a few times before it calls the file unreadable.
+READ_RETRIES = 8
+READ_RETRY_SECONDS = 0.05
+_SHARING_ERRORS = (5, 32)
 MAX_SECONDS = 8 * 3600  # the guard and keep-awake never outlive this
 DEFAULT_TIMEOUT_MINUTES = 240
 TIMEOUT_EXIT = 124  # what `timeout` returns
@@ -63,6 +71,10 @@ END_MARKERS = ("DONE", "FAILED")
 
 class LongRunError(RuntimeError):
     """The job cannot be started, found or stopped; nothing was changed."""
+
+
+class LongRunMissingError(LongRunError):
+    """The file does not exist (as opposed to: it exists but could not be read)."""
 
 
 def _now() -> str:
@@ -82,14 +94,48 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         raise
 
 
+def _is_sharing_error(error: OSError) -> bool:
+    return isinstance(error, PermissionError) or getattr(error, "winerror", None) in _SHARING_ERRORS
+
+
+def read_text_retrying(path: Path, *, encoding: str = "utf-8") -> str:
+    """The text of ``path``; a permission / sharing error is retried ``READ_RETRIES`` times, every other error at once.
+
+    ``LongRunMissingError`` when the file does not exist; ``LongRunError`` (naming how often it retried) when it exists but cannot be read.
+    """
+
+    retries = 0
+    while True:
+        try:
+            return path.read_text(encoding=encoding)
+        except FileNotFoundError as error:
+            raise LongRunMissingError(f"没有 {path.name}") from error
+        except UnicodeDecodeError as error:  # a ValueError, not an OSError: undecodable bytes are not a race either
+            raise LongRunError(f"读不了 {path.name}：{type(error).__name__}（未重试）") from error
+        except OSError as error:
+            if not _is_sharing_error(error):
+                raise LongRunError(f"读不了 {path.name}：{type(error).__name__}（未重试）") from error
+            if retries >= READ_RETRIES:
+                raise LongRunError(f"读不了 {path.name}：{type(error).__name__}（已重试 {retries} 次）") from error
+            retries += 1
+            time.sleep(READ_RETRY_SECONDS)
+
+
 def _read_json(path: Path) -> dict[str, Any]:
+    text = read_text_retrying(path)
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:  # ValueError covers undecodable bytes and broken JSON
-        raise LongRunError(f"读不了 {path.name}：{type(error).__name__}") from error
+        value = json.loads(text)
+    except ValueError as error:  # ValueError covers broken JSON; the writer replaces the file atomically, so this is not a race
+        raise LongRunError(f"读不了 {path.name}：{type(error).__name__}（未重试）") from error
     if not isinstance(value, dict):
         raise LongRunError(f"{path.name} 格式不对")
     return value
+
+
+def read_json_file(path: Path) -> dict[str, Any]:
+    """Public reader for the files of a run directory: ``LongRunMissingError`` when absent, ``LongRunError`` when present but unreadable or not an object."""
+
+    return _read_json(path)
 
 
 def _sibling(module_name: str, loaded_as: str) -> ModuleType:
@@ -378,12 +424,17 @@ def worker_main(run_dir: Path) -> int:
     # No lease credential reaches the job (the same rule as the acceptance runner); the spec adds the variables the caller asked for.
     environment = {key: value for key, value in os.environ.items() if "LEASE" not in key.upper()}
     environment.update({str(key): str(value) for key, value in dict(spec.get("env") or {}).items()})
+    stripped = sorted(name for name in environment if name.upper() in STRIPPED_ENV)
+    for name in stripped:
+        del environment[name]
     try:
         with log.open("ab", buffering=0) as out:
             child = subprocess.Popen(  # noqa: S603
                 argv, cwd=spec["cwd"], env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, creationflags=flags
             )
-            _update_status(run_dir, state="RUNNING", detached=True, child_pid=child.pid, worker_pid=os.getpid(), running_at=_now())
+            _update_status(
+                run_dir, state="RUNNING", detached=True, child_pid=child.pid, worker_pid=os.getpid(), running_at=_now(), env_stripped=stripped
+            )
             try:
                 code = child.wait(timeout=spec["timeout_seconds"])
             except subprocess.TimeoutExpired:
@@ -398,9 +449,15 @@ def worker_main(run_dir: Path) -> int:
     stopped = (run_dir / "STOP").exists()
     final = "STOPPED" if stopped else ("DONE" if code == 0 else "FAILED")
     peak: float | None = None
-    with contextlib.suppress(LongRunError):
+    guard_error: str | None = None
+    try:
         peak = _read_json(run_dir / "guard.json").get("peak_committed_gib")
-    _update_status(run_dir, state=final, exit_code=code, ended_at=_now(), log_sha256=digest, log_bytes=size, peak_committed_gib=peak)
+    except LongRunMissingError:
+        pass  # the guard never wrote its file: no peak, which the verifier sees as "the guard did not sample"
+    except LongRunError as error:
+        guard_error = str(error)  # present but unreadable is not the same as absent: say so in the record
+    changes: dict[str, Any] = {"guard_read_error": guard_error} if guard_error else {}
+    _update_status(run_dir, state=final, exit_code=code, ended_at=_now(), log_sha256=digest, log_bytes=size, peak_committed_gib=peak, **changes)
     (run_dir / ("DONE" if final == "DONE" else "FAILED")).write_text(f"{_now()} exit {code}\n", encoding="utf-8")
     return code
 
@@ -465,7 +522,16 @@ def guard_loop(
                 if ended:
                     pass  # nothing left to protect: no pause, no resume
                 elif not paused and committed >= limit_gib:
-                    root = _worker_pid(run_dir)
+                    try:
+                        root = _worker_pid(run_dir)
+                    except LongRunError as problem:
+                        # worker.pid is there but unreadable right now: the guard is at its most needed here, so it must not die.  Note it once
+                        # per distinct message (guard.json), treat this round as "no process tree found", and look again after the next sleep.
+                        root = 0
+                        note = f"{_now()} 内存已到 {committed:.1f} GiB，但读不了 worker.pid，本轮没有挂起，下一轮重试：{problem}"
+                        if state.get("worker_pid_error") != str(problem):
+                            state["worker_pid_error"] = str(problem)
+                            state["alerts"].append(note)
                     members = tree(root) if root else []  # an empty tree: the worker is gone, there is nothing to pause (and nothing to alert about)
                     if members:
                         paused = members
@@ -511,9 +577,11 @@ def guard_loop(
 
 def _worker_pid(run_dir: Path) -> int:
     try:
-        return int((run_dir / "worker.pid").read_text(encoding="ascii").strip())
-    except (OSError, ValueError):
-        return 0
+        return int(read_text_retrying(run_dir / "worker.pid", encoding="ascii").strip())
+    except LongRunMissingError:
+        return 0  # not written yet (or already cleaned up)
+    except ValueError:
+        return 0  # written half a second ago: an empty or partial pid
 
 
 # ---------------------------------------------------------------- start / status / stop
@@ -653,14 +721,20 @@ def read_status(run_dir: Path) -> dict[str, Any]:
         raise LongRunError(f"没有这个任务：{run_dir.name}")
     status = _read_json(run_dir / "status.json")
     guard: dict[str, Any] = {}
-    with contextlib.suppress(LongRunError):
+    guard_error: str | None = None
+    try:
         guard = _read_json(run_dir / "guard.json")
+    except LongRunMissingError:
+        pass  # no guard file yet
+    except LongRunError as error:
+        guard_error = str(error)
     status["guard"] = {
         "samples": guard.get("samples", 0),
         "peak_committed_gib": guard.get("peak_committed_gib"),
         "last_committed_gib": guard.get("last_committed_gib"),
         "alerts": guard.get("alerts", []),
         "paused": (run_dir / "PAUSED").exists(),
+        **({"error": guard_error} if guard_error else {}),
     }
     pid = _worker_pid(run_dir)
     status["worker_alive"] = pid_alive(pid) if pid else False
