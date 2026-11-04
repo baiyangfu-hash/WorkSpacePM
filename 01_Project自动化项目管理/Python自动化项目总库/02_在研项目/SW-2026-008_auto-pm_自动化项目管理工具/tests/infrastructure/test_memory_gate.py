@@ -592,6 +592,19 @@ def _install_script() -> str:
     return (ROOT / "scripts" / "install_memory_gate.ps1").read_text(encoding="utf-8-sig")
 
 
+def _function_body(script: str, name: str) -> str:
+    """The text of ``function <name>`` up to the next top-level ``function`` (or the dot-source guard)."""
+
+    start = script.index(f"function {name}")
+    rest = script[start + 1 :]
+    ends = [rest.index(marker) for marker in ("\nfunction ", "\n# Tests dot-source") if marker in rest]
+    return script[start : start + 1 + min(ends)] if ends else script[start:]
+
+
+def _code_after_help(script: str) -> str:
+    return "\n".join(line for line in script[script.index("#>") :].splitlines() if not line.lstrip().startswith("#"))
+
+
 def test_a_venv_launcher_is_never_the_root_the_real_interpreter_below_it_is(tmp_path: Path) -> None:
     """M3 real-machine finding: a venv's python.exe is a launcher whose child is the real interpreter; the growing process is the child."""
 
@@ -623,41 +636,46 @@ def test_the_embedded_python_hash_is_pinned_in_the_installer_as_a_real_sha256() 
 
 def test_the_install_script_never_uses_a_python_found_on_the_machine_or_a_venv() -> None:
     script = _install_script()
-    code = "\n".join(line for line in script[script.index("#>") :].splitlines() if not line.lstrip().startswith("#"))  # after the help block
+    code = _code_after_help(script)
 
     for forbidden in ("-CopyPython", "Test-UserWritable", "Get-Command py", "Get-Command python", ".venv", "Find-SystemPython"):
         assert forbidden not in code
-    assert "Expand-Archive" in code and "InstalledPython" in code
+    assert "Expand-Archive" in code and "installedPython" in code
 
 
 def test_the_install_script_checks_the_sources_before_it_touches_anything_and_locks_the_folder_before_it_copies_into_it() -> None:
     script = _install_script()
-    code = script[script.index("if ($Install) {") :]
+    apply_body = _function_body(script, "Invoke-Apply")
 
     order = [
-        "$EmbedSha256 -notmatch",
-        "$bundle.Combined -ne $ExpectedSha256",
-        "New-Item -ItemType Directory -Force -Path $Dest, $StateDir",
-        "icacls $Dest /inheritance:r",
-        "(Get-FileHash -Algorithm SHA256 -LiteralPath $zip)",
-        "Expand-Archive",
-        "Copy-Item -LiteralPath (Join-Path $Repo",
-        "WriteAllText((Join-Path $Dest \"manifest.json\")",
+        "Get-BundleHash $Root",
+        "$bundle.Combined -ne $Expected.ToLower()",
+        "Remove-GateInstallation $Dest $TaskName $false",
+        "New-Item -ItemType Directory -Force -Path $Dest | Out-Null",
+        '"/inheritance:r"',
+        "Assert-DestLocked $Dest",
+        "Copy-Item -LiteralPath $Zip",
+        "(Get-FileHash -Algorithm SHA256 -LiteralPath $zipInDest)",
+        "Expand-CheckedPython $zipInDest",
+        "Copy-Item -LiteralPath (Join-Path $Root",
+        'WriteAllText((Join-Path $Dest "manifest.json")',
         "selftest",
         "Register-ScheduledTask",
     ]
-    positions = [code.index(marker) for marker in order]
+    positions = [apply_body.index(marker) for marker in order]
 
     assert positions == sorted(positions), dict(zip(order, positions, strict=True))
-    for git_word in ("git.exe", "fetch", "merge-base", "status --porcelain", "$git "):
-        assert git_word not in code, git_word  # audit 579 R5: no git in the elevated path; the combined hash is the only gate
-    assert "*S-1-5-18" in code and "*S-1-5-32-544" in code and "*S-1-5-32-545:(OI)(CI)RX" in code
+    for git_word in ("git.exe", "fetch", "merge-base", "status --porcelain", "Invoke-Native \"git\""):
+        assert git_word not in apply_body, git_word  # audit 579 R5: no git in the elevated path; the combined hash is the only gate
+    assert "*S-1-5-18" in apply_body and "*S-1-5-32-544" in apply_body and "*S-1-5-32-545:(OI)(CI)RX" in apply_body
+    assert "Assert-Admin" in apply_body[:200]
 
 
-def test_expected_sha256_is_mandatory_for_install_and_covers_the_three_sources_and_the_installer_itself() -> None:
+def test_the_elevated_phase_requires_the_hash_and_the_bundle_covers_the_three_sources_and_the_installer_itself() -> None:
     script = _install_script()
+    apply_body = _function_body(script, "Invoke-Apply")
 
-    assert 'ParameterSetName = "Install", Mandatory = $true)][ValidatePattern' in script
+    assert "-notmatch '^[0-9a-fA-F]{64}$'" in apply_body and "Read-PinnedHash $Root" in apply_body  # the hash handed over AND the pin in the repo must both match
     assert list(mg.BUNDLE_FILES) == sorted(mg.BUNDLE_FILES)
     assert set(mg.BUNDLE_FILES) == {
         "auto_pm/infrastructure/long_run_core.py", "auto_pm/infrastructure/memory_preflight.py", "scripts/install_memory_gate.ps1", "scripts/memory_gate.py",
@@ -670,7 +688,7 @@ def test_expected_sha256_is_mandatory_for_install_and_covers_the_three_sources_a
 def test_the_task_and_the_selftest_run_isolated_without_site_and_without_bytecode() -> None:
     script = _install_script()
 
-    assert script.count("-I -S -B") >= 5 and "run --require-manifest" in script
+    assert script.count('"-I", "-S", "-B"') >= 6 and "-I -S -B" in script and "run --require-manifest" in script  # every Python run (task, selftest, status, resume-all) is isolated
     assert mg.interpreter_problem(SimpleNamespace(isolated=1, no_site=1, dont_write_bytecode=1)) == ""
     assert "-S" in mg.interpreter_problem(SimpleNamespace(isolated=1, no_site=0, dont_write_bytecode=1))
     assert "-I" in mg.interpreter_problem(SimpleNamespace(isolated=0, no_site=1, dont_write_bytecode=1))
@@ -695,11 +713,11 @@ def test_the_bundle_hash_is_stable_across_line_endings_and_changes_with_any_file
         (tmp_path / relative).write_bytes(original)
 
 
-def test_the_bundle_hash_command_prints_the_value_to_give_the_installer() -> None:
+def test_the_bundle_hash_command_prints_the_combined_hash_that_pin_check_compares() -> None:
     done = subprocess.run([sys.executable, "-B", str(SCRIPT), "bundle-hash"], capture_output=True, check=True, timeout=60)  # noqa: S603
     text = done.stdout.decode("utf-8")
 
-    assert f"-ExpectedSha256 {mg.bundle_hash()[0]}" in text and "scripts/memory_gate.py" in text
+    assert f"合并哈希 {mg.bundle_hash()[0]}" in text and "scripts/memory_gate.py" in text
 
 
 def test_a_logged_in_users_sid_includes_azure_ad_accounts() -> None:
@@ -726,36 +744,45 @@ def test_the_install_script_forces_tls12_and_points_to_the_local_zip_when_it_can
 
     script = _install_script()
 
-    assert script.index("Tls12") < script.index("if ($Install) {")
-    assert "-PythonZip" in script[script.index("Tls12") : script.index("if ($Install) {")]
+    assert script.index("Tls12") < script.index("function Get-EmbeddedPythonZip")
+    assert "-PythonZip" in script[script.index("Tls12") : script.index("function Get-EmbeddedPythonZip")]
     download = script[script.index("Invoke-WebRequest") - 200 : script.index("Invoke-WebRequest") + 400]
     assert "catch" in download and "-PythonZip" in download
 
 
 def test_the_install_script_checks_the_python_exe_is_signed_by_the_python_software_foundation_before_using_it() -> None:
     script = _install_script()
-    code = script[script.index("if ($Install) {") :]
+    expand = _function_body(script, "Expand-CheckedPython")
+    apply_body = _function_body(script, "Invoke-Apply")
+    prepare = _function_body(script, "Invoke-Prepare")
 
-    assert code.index("Expand-Archive") < code.index("Get-AuthenticodeSignature") < code.index("Copy-Item -LiteralPath (Join-Path $Repo") < code.index("selftest")
-    assert "Python Software Foundation" in code and '-ne "Valid"' in code
+    assert expand.index("Expand-Archive") < expand.index("Get-AuthenticodeSignature")
+    assert "Python Software Foundation" in expand and '-ne "Valid"' in expand
+    assert apply_body.index("Expand-CheckedPython") < apply_body.index("Copy-Item -LiteralPath (Join-Path $Root") < apply_body.index("selftest")
+    assert prepare.index("Expand-CheckedPython") < prepare.index("selftest")  # tried in a temp folder first
 
 
 def test_the_uninstall_path_copes_with_a_half_finished_install() -> None:
-    """Audit 579 P3: no Python, no state folder or no task must not abort the removal."""
+    """Audit 579 P3: no Python, no state folder or no task must not abort the removal (and a broken python.exe falls back to the clean-up path)."""
 
     script = _install_script()
-    code = script[script.index("# -Uninstall:") :]
+    code = _function_body(script, "Remove-GateInstallation")
 
-    assert "Test-Path -LiteralPath $StateDir" in code and "Test-Path -LiteralPath $InstalledPython" in code
-    assert code.index("resume-all") < code.index("Unregister-ScheduledTask") < code.index("Remove-Item -LiteralPath $Dest")
-    assert "-ErrorAction SilentlyContinue" in code
-    assert "Test-Path -LiteralPath $Dest" in code[code.index("Remove-Item -LiteralPath $Dest") :]  # reports a folder that could not be removed
+    assert "Test-Path -LiteralPath $stateDir" in code and "Test-Path -LiteralPath $python" in code
+    assert code.index("resume-all") < code.index("Unregister-ScheduledTask") < code.index("Remove-Item -LiteralPath $Folder")
+    assert "Test-Path -LiteralPath $Folder" in code[code.index("Remove-Item -LiteralPath $Folder") :]  # reports a folder that could not be removed
+    assert "-Uninstall" in script and "-Repair" in script
+    entry = script[script.index("# ---------------------------------------------------------------- entry") :]
+    assert "Remove-GateInstallation $Dest $TaskName $ForceDelete.IsPresent" in entry  # -Repair and -Uninstall share one clean-up path
 
 
-def test_the_install_script_asks_the_user_to_check_its_own_hash_first() -> None:
+def test_the_installer_is_itself_covered_by_the_pinned_hash_and_checked_before_anything_is_touched() -> None:
     script = _install_script()
+    prepare = _function_body(script, "Invoke-Prepare")
 
-    assert "certutil -hashfile install_memory_gate.ps1 SHA256" in script[: script.index("[CmdletBinding")]
+    assert "scripts/install_memory_gate.ps1" in mg.BUNDLE_FILES
+    assert prepare.index("Read-PinnedHash") < prepare.index("Get-EmbeddedPythonZip") < prepare.index("Expand-CheckedPython")
+    assert re.search(r"\$Dest\b|ProgramFiles", prepare) is None  # the unprivileged phase never touches the install folder
 
 
 # ---------------------------------------------------------------- an unreadable state file is not an empty one (the #518 lesson, applied to the gate)
@@ -1031,14 +1058,15 @@ def test_the_manifest_read_is_retried_too_and_an_unreadable_one_is_a_problem_not
     assert "读不出" in mg.verify_install(tmp_path) and "已重试" in mg.verify_install(tmp_path)
 
 
-def test_the_uninstall_does_not_delete_anything_when_resume_all_did_not_succeed() -> None:
+def test_the_clean_up_does_not_delete_anything_when_a_frozen_process_cannot_be_thawed() -> None:
     script = _install_script()
-    code = script[script.index("# -Uninstall:") :]
+    code = _function_body(script, "Remove-GateInstallation")
 
     resume = code.index("resume-all")
-    guard = code.index("$LASTEXITCODE -ne 0", resume)
-    assert resume < guard < code.index("Unregister-ScheduledTask") < code.index("Remove-Item -LiteralPath $Dest")
-    assert "throw" in code[guard : guard + 400] and "没有删除计划任务和安装目录" in code[guard : guard + 400]
+    guard = code.index("if (-not $thawed)", resume)
+    assert resume < guard < code.index("Unregister-ScheduledTask") < code.index("Remove-Item -LiteralPath $Folder")
+    assert "throw" in code[guard : guard + 500] and "没有删除任何东西" in code[guard : guard + 500]
+    assert "-ForceDelete" in code[guard : guard + 500]  # the user decides, never the script
 
 
 def test_an_installed_file_held_for_a_moment_is_hashed_after_a_retry_and_a_file_that_stays_unreadable_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

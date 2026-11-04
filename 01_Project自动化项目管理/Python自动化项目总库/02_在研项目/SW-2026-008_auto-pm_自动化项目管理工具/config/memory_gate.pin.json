@@ -1,0 +1,10 @@
+{
+  "bundle_sha256": "4da432c433ca6d6481fdbdffafd925b4e9f672d688e75f448e6ea789fbb1bfd7",
+  "files": {
+    "auto_pm/infrastructure/long_run_core.py": "46ae1308b77bef46242e1687292b43f169f28b1163b91a92db1d3374468eb481",
+    "auto_pm/infrastructure/memory_preflight.py": "1f545517cf4f7d27820baca9fb7ec7aefe94e4510395a7a29dc75d3764d76913",
+    "scripts/install_memory_gate.ps1": "641e69849a25182c6a5b6389ba1468c71e8421039d094edde49f1b27ded47c7f",
+    "scripts/memory_gate.py": "7d76a68cffb4df5d6faf93866497bdd7437e2dd93491ffb9080ee98e2c567520"
+  },
+  "note": "合并哈希覆盖 BUNDLE_FILES 四个文件；改总闸文件必须同时更新本文件，经 PR、独立审计、手动 sw008-ci，由用户合并"
+}

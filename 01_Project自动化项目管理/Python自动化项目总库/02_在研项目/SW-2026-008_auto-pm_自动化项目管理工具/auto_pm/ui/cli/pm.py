@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TypeVar, cast
 
 import click
@@ -48,6 +49,7 @@ from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PlanningScopeCar
 from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.domain.change.constants import TransitionGuardError
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
+from auto_pm.infrastructure import memory_gate_status
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
 from auto_pm.ui.cli.caller_path import CallerPath, caller_cwd_default
@@ -1353,6 +1355,23 @@ def orient_pm(
         raise click.ClickException(str(error)) from error
     _control_root_sync_notice(ctx, project_id=project_id)
     _emit_query(payload, as_json)
+    _memory_gate_line(ctx, as_json)
+
+
+def _memory_gate_line(ctx: click.Context, as_json: bool) -> None:
+    """One read-only line about the memory gate (Windows only): running or not, and whether the installed version is the pinned one.
+
+    stdout in text mode, stderr next to the other hints in JSON mode (stdout stays pure JSON).  It never installs anything and never fails the command.
+    """
+
+    try:
+        app_ctx: AppContext = ctx.find_root().obj
+        status = memory_gate_status.read_gate_status(workspace_root=Path(app_ctx.workspace_root))
+    except Exception as error:  # a hint must never stop the command it decorates
+        click.echo(f"⚠️ [总闸] 未能读取总闸状态：{type(error).__name__}", err=True)
+        return
+    if status is not None:
+        click.echo(status.line(), err=as_json)
 
 
 def _emit_context(ctx: click.Context, project_id: str, start_path: str | None) -> None:
