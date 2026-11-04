@@ -1,0 +1,3 @@
+taken 2026-11-04T03:43:30Z after the rerun (candidate worktree m3-rel71)
+01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/016_M3_发版7.1候选构建与全量门禁_REP.md: OK
+exit=0

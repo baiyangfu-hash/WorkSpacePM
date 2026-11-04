@@ -1,0 +1,40 @@
+"""Add the G2-exception mode to gen_d07n.py (coordinator ruling 2026-11-04T03:40Z, option A): third optional arg = full sha of the exception-evidence commit; <gate commit> may equal the frozen commit."""
+import io
+
+p = "gen_d07n.py"
+t = io.open(p, encoding="utf-8", newline="").read()
+
+
+def sw(a, b, n=1):
+    global t
+    assert t.count(a) == n, (a[:70], t.count(a))
+    t = t.replace(a, b)
+
+
+sw("MERGE, GATE = sys.argv[1], sys.argv[2]\n", "MERGE, GATE = sys.argv[1], sys.argv[2]\nEXC = sys.argv[3] if len(sys.argv) > 3 else None  # full sha of the G2-exception evidence commit (option A: GATE == MERGE)\n")
+sw("if not DRAFT:\n    parent =", "if not DRAFT and GATE != MERGE:\n    parent =")
+sw("assert len(MERGE) == 40 and (DRAFT or len(GATE) == 40)\n", "assert len(MERGE) == 40 and (DRAFT or len(GATE) == 40) and (EXC is None or len(EXC) == 40)\nEXC_USER = \"cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu\"\nEXC_TS = \"2026-11-04T03:35:09Z\"\n")
+old = "它的 `auto_pm`、`templates`、`scripts` 三棵子树与卡 220（M3-REL71）门禁全过的提交 `{GATE_SHA[:8]}` 逐字节相同（卡 220 的提交就是在这个合并提交上只加了一份报告）。"
+new = "{GATE_PHRASE}"
+sw(old, new)
+sw('card = f"""# D07n｜', '''GATE_PHRASE = ("它的 `auto_pm`、`templates`、`scripts` 三棵子树与卡 220（M3-REL71）门禁全过的提交 `{GATE_SHA[:8]}` 逐字节相同（卡 220 的提交就是在这个合并提交上只加了一份报告）。".replace("{GATE_SHA[:8]}", GATE_SHA[:8]) if EXC is None else
+               f"就是发版点本身（卡 220 门禁提交一栏填冻结提交 `{GATE_SHA[:8]}`，切换基线就是它）。卡 220 的 016 报告提交不存在：门禁 G2 FAIL（V1.0 的 core 组因笔记本两次合盖待机而 git 子进程超时），经用户 {EXC_TS} 例外放行（消息 `{EXC_USER}`：两条失败用例单独重跑 2 passed 即放行）；原来引用 016 报告提交的地方改为引用例外证据提交 `{EXC[:8]}`（路径 `reviews/rel71b-gate-tools-20261103/`）。")
+card = f"""# D07n｜''')
+# the script: the all-PASS check accepts exactly the user-approved G2 exception (and nothing else)
+import re
+
+a = t.index("setvar(\"CARD_SHA\", csha)")
+t = t[:a] + '''_L61 = [l for l in s.split("\n") if "card 220 gates are not all PASS" in l]
+assert len(_L61) == 1
+if EXC is not None:
+    _new61 = ('EXC_DIR="$REAL/.auto-pm/reports/m3-rel71b/exception"; EXC_COMMIT=' + EXC + chr(10)
+              + '"$PY" -B -c \'import json,sys;v=json.load(open(sys.argv[1],encoding="utf-8"))["gates"];bad=sorted(k for k,g in v.items() if g["verdict"]!="PASS");sys.exit(0 if len(v)==9 and bad==["G2"] else 1)\' "$(cygpath -w "$D176_VERDICT")" || die "card 220: anything other than exactly the G2 exception is not allowed"' + chr(10)
+              + '[[ "$(cat "$EXC_DIR/rerun.exit")" == "0" ]] && grep -q "2 passed" "$EXC_DIR/rerun.txt" && grep -q "' + EXC_USER + '" "$EXC_DIR/EXCEPTION.md" || die "the G2 exception evidence (rerun of the two cases, user message id) is not intact"' + chr(10)
+              + 'git -C "$REAL" cat-file -e "$EXC_COMMIT:reviews/rel71b-gate-tools-20261103/README.md" 2>/dev/null || die "the exception evidence commit is not in the repository"')
+    s = s.replace(_L61[0], _new61)
+    s = s.replace("CARD220=$CARD176；$DELEG", "CARD220=$CARD176；G2_EXCEPTION=" + EXC_USER + "；EXCEPTION_COMMIT=$EXC_COMMIT；$DELEG")
+    s = s.replace("条件：卡 220 的 G1～G9 全 PASS、独立审计放行本卡与卡 220", "条件：卡 220 的 G1～G9 全 PASS，唯一例外是 G2（用户 " + EXC_TS + " 例外放行，消息 " + EXC_USER + "，证据提交 " + EXC[:8] + "）、独立审计放行本卡与卡 220")
+    assert "G2_EXCEPTION=" in s and "唯一例外是 G2" in s
+''' + t[a:]
+io.open(p, "w", encoding="utf-8", newline="").write(t)
+print("patched")

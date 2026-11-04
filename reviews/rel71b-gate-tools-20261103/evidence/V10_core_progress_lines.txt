@@ -1,0 +1,9 @@
+# V1.0 core run was started WITHOUT -v (run_g2.sh: pytest -o addopts= --no-cov -p no:cacheprovider --color=no), so there are no per-test -v lines; the progress lines of the two cases are:
+# (the E and the F symbols; order of execution: the ERROR (test_mission_switch_service, setup) came first at ~23%, the FAILED (test_agent_worktree_service) second at ~27%; they match the two standby windows 00:57:15Z-01:10:18Z (785 s wait) and 01:19:24Z-01:30:23Z (662 s wait))
+tests\core\test_mission_switch_service.py E                                                                                                                                                      [ 23%]
+tests\core\test_agent_worktree_service.py F                                                                                                                                                      [ 27%]
+# neighbours:
+tests\core\test_agent_worktree_service.py s                                                                                                                                                      [ 23%]
+tests\core\test_cockpit_decisions.py .                                                                                                                                                           [ 23%]
+tests\core\test_mission_switch_service.py .                                                                                                                                                      [ 27%]
+tests\core\test_acceptance_command.py .                                                                                                                                                          [ 27%]
