@@ -76,6 +76,7 @@ from auto_pm.ui.cli.python import python_group  # noqa: E402
 from auto_pm.ui.cli.role import role_group  # noqa: E402
 from auto_pm.ui.cli.session import pm_session_group  # noqa: E402
 from auto_pm.ui.cli.spec import spec_group  # noqa: E402
+from auto_pm.ui.cli.state_backup import state_backup_group  # noqa: E402
 from auto_pm.ui.cli.template import template_group  # noqa: E402
 from auto_pm.ui.cli.vartable import vartable_group  # noqa: E402
 from auto_pm.ui.cli.workflow import workflow_group  # noqa: E402
@@ -160,6 +161,7 @@ cli.add_command(implementation_card_group)
 cli.add_command(decision_group)
 cli.add_command(git_hook_group)
 cli.add_command(pm_group)
+pm_group.add_command(state_backup_group)
 cli.add_command(context_group)
 cli.add_command(pm_session_group)
 cli.add_command(ledger_group)
